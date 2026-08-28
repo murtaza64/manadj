@@ -333,6 +333,49 @@ def test_soulseek_auto_endpoint_409_when_nothing_pickable(db_session: Session) -
         assert "pick manually" in resp.json()["detail"]
 
 
+def test_soulseek_global_search_and_adhoc_download_smoke(db_session: Session) -> None:
+    """Standalone search + download (gh#217): no Source Item anywhere."""
+    with make_soulseek_app(db_session, [CANNED_RESULT]) as c:
+        resp = c.post("/api/acquisition/soulseek/search", json={"query": "hoax wake up"})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["query"] == "hoax wake up"
+        assert len(body["results"]) == 1
+        # no item -> no duration to compare against
+        assert body["results"][0]["duration_delta_ms"] is None
+
+        resp = c.post(
+            "/api/acquisition/soulseek/download",
+            json={"result": body["results"][0], "artist": "Hoax", "title": "Wake Up"},
+        )
+        assert resp.status_code == 200
+        dl = resp.json()
+        assert dl["task_state"] == "pending"
+        assert dl["artist"] == "Hoax" and dl["title"] == "Wake Up"
+
+        # visible in the downloads list; double-request is a conflict
+        listed = c.get("/api/acquisition/soulseek/downloads").json()
+        assert [d["task_id"] for d in listed] == [dl["task_id"]]
+        resp = c.post(
+            "/api/acquisition/soulseek/download", json={"result": body["results"][0]}
+        )
+        assert resp.status_code == 409
+
+
+def test_soulseek_global_routes_404_when_unconfigured(client: TestClient) -> None:
+    assert (
+        client.post("/api/acquisition/soulseek/search", json={"query": "x"}).status_code
+        == 404
+    )
+    assert (
+        client.post(
+            "/api/acquisition/soulseek/download",
+            json={"result": CANNED_RESULT.__dict__},
+        ).status_code
+        == 404
+    )
+
+
 def test_set_provenance_endpoint_smoke(client: TestClient, db_session: Session) -> None:
     from backend.models import Track
 

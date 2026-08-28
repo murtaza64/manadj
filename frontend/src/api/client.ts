@@ -31,6 +31,7 @@ import type {
   Classification,
   SupplierInfo,
   SoulseekResult,
+  AdhocSoulseekDownload,
   SoulseekSearchResponse,
   AnalysisPendingItem,
   AnalysisTaskStatus,
@@ -1146,6 +1147,43 @@ export const api = {
         const error = await res.json().catch(() => ({}));
         throw new Error(detailToMessage(error.detail, 'Soulseek search failed'));
       }
+      return res.json();
+    },
+
+    // Standalone search (gh#217): no Source Item, no deltas, not remembered.
+    soulseekGlobalSearch: async (query: string): Promise<SoulseekSearchResponse> => {
+      const res = await fetch(`${API_BASE}/acquisition/soulseek/search`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query }),
+      });
+      if (!res.ok) {
+        const error = await res.json().catch(() => ({}));
+        throw new Error(detailToMessage(error.detail, 'Soulseek search failed'));
+      }
+      return res.json();
+    },
+
+    soulseekAdhocDownload: async (
+      result: SoulseekResult,
+      artist?: string,
+      title?: string,
+    ): Promise<AdhocSoulseekDownload> => {
+      const res = await fetch(`${API_BASE}/acquisition/soulseek/download`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ result, artist: artist || null, title: title || null }),
+      });
+      if (!res.ok) {
+        const error = await res.json().catch(() => ({}));
+        throw new Error(detailToMessage(error.detail, 'Soulseek download failed'));
+      }
+      return res.json();
+    },
+
+    soulseekAdhocDownloads: async (): Promise<AdhocSoulseekDownload[]> => {
+      const res = await fetch(`${API_BASE}/acquisition/soulseek/downloads`);
+      if (!res.ok) throw new Error('Failed to fetch soulseek downloads');
       return res.json();
     },
 

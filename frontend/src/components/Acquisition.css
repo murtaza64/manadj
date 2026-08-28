@@ -352,6 +352,48 @@
   margin-top: var(--space-md);
 }
 
+/* Standalone soulseek search (gh#217) */
+
+.acquisition-global-soulseek {
+  border-bottom: 1px solid var(--surface1);
+  padding: var(--space-xs) var(--space-sm);
+}
+
+.acquisition-global-soulseek .acquisition-soulseek {
+  margin-top: var(--space-xs);
+}
+
+.acquisition-global-soulseek-toggle {
+  background: none;
+  border: none;
+  color: var(--overlay1);
+  cursor: pointer;
+  font-size: var(--font-xs);
+  padding: var(--space-xs) 0;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.acquisition-global-soulseek-toggle:hover {
+  color: var(--text);
+}
+
+.acquisition-global-soulseek .acquisition-soulseek-search + .acquisition-soulseek-search {
+  margin-top: var(--space-xs);
+}
+
+.acquisition-adhoc-downloads {
+  margin-top: var(--space-sm);
+}
+
+.acquisition-adhoc-download {
+  display: flex;
+  gap: var(--space-sm);
+  align-items: baseline;
+  padding: var(--space-xs) var(--space-sm);
+  font-size: var(--font-xs);
+}
+
 .acquisition-soulseek-searched-at {
   color: var(--overlay1);
   font-weight: normal;

@@ -1,6 +1,7 @@
 """Acquisition API endpoints."""
 
 from datetime import timezone
+from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -25,7 +26,12 @@ from .manager import (
     restore_item,
     set_classification,
 )
-from .download import pick_supplier_result, start_supplier_download
+from .download import (
+    ADHOC_REF,
+    pick_supplier_result,
+    start_adhoc_download,
+    start_supplier_download,
+)
 from .picker import shape_results
 from .searches import (
     default_search_query,
@@ -36,6 +42,9 @@ from .searches import (
 from .models import AudioProvenance, SourceCorrespondence, SourceItem
 from .source import SoundCloudSource, Source
 from .supplier import SearchSupplier, SupplierSearchResult
+
+if TYPE_CHECKING:
+    from ..tasks.models import Task
 
 router = APIRouter()
 
@@ -497,6 +506,92 @@ def soulseek_remembered_search(
             else None
         ),
     )
+
+
+# --- Standalone soulseek search + download (gh#217) -------------------------
+
+
+class SoulseekGlobalSearchRequest(BaseModel):
+    query: str
+
+
+class AdhocDownloadRequest(BaseModel):
+    result: SoulseekResult
+    # optional naming; else derived from the remote filename via Cleanup
+    artist: str | None = None
+    title: str | None = None
+
+
+class AdhocDownloadInfo(BaseModel):
+    task_id: int
+    filename: str
+    artist: str | None
+    title: str
+    task_state: str
+    error: str | None
+    created_at: str | None
+
+
+def _adhoc_info(task: "Task") -> AdhocDownloadInfo:
+    payload = task.payload
+    return AdhocDownloadInfo(
+        task_id=task.id,
+        filename=payload.get("filename", ""),
+        artist=payload.get("artist"),
+        title=payload.get("title", ""),
+        task_state=task.state,
+        error=task.error,
+        created_at=(
+            task.created_at.replace(tzinfo=timezone.utc).isoformat()
+            if task.created_at
+            else None
+        ),
+    )
+
+
+@router.post("/soulseek/search", response_model=SoulseekSearchResponse)
+def soulseek_global_search(
+    body: SoulseekGlobalSearchRequest,
+    supplier: "SearchSupplier | None" = Depends(get_soulseek_supplier),
+) -> SoulseekSearchResponse:
+    """Search Soulseek with no Source Item attached (gh#217): no duration to
+    compare against (deltas null), nothing remembered."""
+    sup = _require_soulseek(supplier)
+    query = body.query.strip()
+    if not query:
+        raise HTTPException(status_code=422, detail="empty query")
+    shaped = shape_results(sup.search(query), None)
+    return SoulseekSearchResponse(
+        query=query,
+        results=[
+            SoulseekResult(**vars(s.result), duration_delta_ms=s.duration_delta_ms)
+            for s in shaped
+        ],
+    )
+
+
+@router.post("/soulseek/download", response_model=AdhocDownloadInfo)
+def soulseek_adhoc_download(
+    body: AdhocDownloadRequest,
+    db: Session = Depends(get_db),
+    supplier: "SearchSupplier | None" = Depends(get_soulseek_supplier),
+) -> AdhocDownloadInfo:
+    """Download a picked result with no Source Item (gh#217)."""
+    sup = _require_soulseek(supplier)
+    result = SupplierSearchResult(**body.result.model_dump(exclude={"duration_delta_ms"}))
+    try:
+        task = start_adhoc_download(
+            db, sup, result, body.artist, body.title, get_config().acquisition.cleanup
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    return _adhoc_info(task)
+
+
+@router.get("/soulseek/downloads", response_model=list[AdhocDownloadInfo])
+def soulseek_adhoc_downloads(db: Session = Depends(get_db)) -> list[AdhocDownloadInfo]:
+    """Recent standalone downloads, newest first."""
+    return [_adhoc_info(t) for t in list_tasks(db, ref=ADHOC_REF, limit=20)]
 
 
 @router.post("/items/{item_id}/soulseek/auto", response_model=SourceItemResponse)

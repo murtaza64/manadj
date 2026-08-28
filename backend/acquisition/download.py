@@ -81,19 +81,18 @@ def _adoptable_orphan(db: Session, tracks_dir: Path, basename: str) -> Path | No
     return collisions[0]
 
 
-def _finish_acquisition(
+def _import_downloaded_file(
     db: Session,
-    item: SourceItem,
     path: Path,
     meta: CleanedMetadata,
     tracks_dir: Path,
     provenance: AudioProvenance,
-) -> None:
-    """The shared tail of every acquisition: file on disk -> fulfilled item.
+) -> Track:
+    """File on disk -> Track: the Source-Item-agnostic tail of a download.
 
     Embeds cleaned tags (best-effort), runs the normal Disk Import path,
-    asserts Cleanup output on the Track, records Correspondence + the given
-    Provenance row, and marks the item fulfilled.
+    asserts Cleanup output on the Track and attaches the given Provenance
+    row. Does not commit — callers finish their own bookkeeping.
     """
     # Export the cleaned metadata to Disk before the import scan: the
     # file carries what the Library will assert, and Disk Import + file
@@ -122,11 +121,28 @@ def _finish_acquisition(
     track.artist = meta.artist  # type: ignore[assignment]
     refresh_file_facts(db)
 
+    provenance.track_id = track.id
+    db.add(provenance)
+    return track
+
+
+def _finish_acquisition(
+    db: Session,
+    item: SourceItem,
+    path: Path,
+    meta: CleanedMetadata,
+    tracks_dir: Path,
+    provenance: AudioProvenance,
+) -> None:
+    """The shared tail of every item acquisition: file on disk -> fulfilled item.
+
+    The Track chain plus the Source Item bookkeeping: Correspondence recorded,
+    item marked fulfilled.
+    """
+    track = _import_downloaded_file(db, path, meta, tracks_dir, provenance)
     # repoints any existing proposal — INSERTing here crashed on the
     # unique source_item_id when the operator downloaded despite a match
     upsert_confirmed_correspondence(db, item.id, track.id)
-    provenance.track_id = track.id
-    db.add(provenance)
     item.state = "fulfilled"
     db.commit()
     logger.info("acquired %s - %s (track %d)", meta.artist, meta.title, track.id)
@@ -285,6 +301,71 @@ def start_supplier_download(
     return task
 
 
+# ref for standalone (Source-Item-less) downloads, gh#217. The worker runs
+# one task at a time, so (state=running, type, ref) stays a unique address
+# for _advance_to_next_source even with several ad-hoc downloads queued.
+ADHOC_REF = "soulseek-adhoc"
+
+
+def start_adhoc_download(
+    db: Session,
+    supplier: SearchSupplier,
+    result: SupplierSearchResult,
+    artist: str | None = None,
+    title: str | None = None,
+    cleanup_config: CleanupConfig | None = None,
+    ttl: timedelta = SOULSEEK_TTL,
+) -> "Task":
+    """Standalone download (gh#217): a picked search result, no Source Item.
+
+    The file lands through the same chain minus the item bookkeeping: Disk
+    Import, Cleanup-derived tags/filename, label-only soulseek provenance —
+    no Correspondence, no fulfillment. Naming: explicit artist/title when
+    given, else Cleanup over the remote filename's stem (peer rips are
+    usually `Artist - Title.mp3`).
+    """
+    from ..tasks.manager import create_task, list_tasks
+
+    if title and title.strip():
+        meta = CleanedMetadata(artist=(artist or "").strip() or None, title=title.strip())
+    else:
+        stem = Path(result.filename.replace("\\", "/")).stem
+        meta = clean_metadata(stem, (artist or "").strip(), cleanup_config or CleanupConfig())
+
+    # double-click guard: the same remote file already downloading ad hoc
+    for task in list_tasks(db, ref=ADHOC_REF):
+        if task.state in ("pending", "running") and any(
+            c.get("download_token") == result.download_token
+            for c in task.payload.get("candidates", [])
+        ):
+            raise ValueError("this file is already downloading")
+
+    transfer_id = supplier.request(result)
+    logger.info(
+        "adhoc soulseek download: %s -> transfer %s (as %s - %s)",
+        result.filename,
+        transfer_id,
+        meta.artist,
+        meta.title,
+    )
+    now = _utcnow()
+    return create_task(
+        db,
+        SOULSEEK_TASK_TYPE,
+        {
+            "candidates": [vars(result)],
+            "attempt": 0,
+            "transfer_id": transfer_id,
+            "filename": result.filename,
+            "artist": meta.artist,
+            "title": meta.title,
+            "attempt_started": now.isoformat(),
+            "deadline": (now + ttl).isoformat(),
+        },
+        ref=ADHOC_REF,
+    )
+
+
 def _advance_to_next_source(
     db: Session,
     supplier: SearchSupplier,
@@ -313,9 +394,10 @@ def _advance_to_next_source(
     candidates = [result_from_dict(d) for d in payload["candidates"]]
     old = payload["attempt"]
     attempt, transfer_id = _request_next(supplier, candidates, old + 1)
+    item_id = payload.get("source_item_id")
     logger.info(
-        "soulseek download for item %d: %s (%s) — advancing to source %d/%d: %s",
-        payload["source_item_id"],
+        "soulseek download (%s): %s (%s) — advancing to source %d/%d: %s",
+        f"item {item_id}" if item_id is not None else "adhoc",
         payload["filename"],
         reason,
         attempt + 1,
@@ -328,14 +410,15 @@ def _advance_to_next_source(
         filename=candidates[attempt].filename,
         attempt_started=_utcnow().isoformat(),
     )
-    # the handler only sees its payload; locate the task row (unique: the
-    # in-flight guard allows one running soulseek-download per item)
+    # the handler only sees its payload; locate the task row (unique: one
+    # running task per worker, and one in-flight soulseek-download per item)
+    ref = f"source_item:{item_id}" if item_id is not None else ADHOC_REF
     task = (
         db.query(Task)
         .filter(
             Task.state == "running",
             Task.type == SOULSEEK_TASK_TYPE,
-            Task.ref == f"source_item:{payload['source_item_id']}",
+            Task.ref == ref,
         )
         .one()
     )
@@ -361,22 +444,38 @@ def soulseek_download_handler(
     cleanup = cleanup_config or CleanupConfig()
 
     def handle(db: Session, payload: dict[str, Any]) -> None:
-        item = db.query(SourceItem).filter(SourceItem.id == payload["source_item_id"]).one()
+        # label-only recorded rows: Soulseek has no stable addresses
+        # (no URL, no external ID) — glossary-sanctioned.
+        if "source_item_id" in payload:
+            item = db.query(SourceItem).filter(SourceItem.id == payload["source_item_id"]).one()
+            meta = clean_metadata(item.title, item.uploader, cleanup)
 
-        meta = clean_metadata(item.title, item.uploader, cleanup)
+            def finish(path: Path) -> None:
+                _finish_acquisition(
+                    db,
+                    item,
+                    path,
+                    meta,
+                    tracks_dir,
+                    AudioProvenance(source="soulseek", asserted=False),
+                )
+        else:
+            # standalone download (gh#217): no Source Item, no Correspondence
+            # — naming was settled at pick time and rides in the payload
+            meta = CleanedMetadata(artist=payload.get("artist"), title=payload["title"])
+
+            def finish(path: Path) -> None:
+                track = _import_downloaded_file(
+                    db,
+                    path,
+                    meta,
+                    tracks_dir,
+                    AudioProvenance(source="soulseek", asserted=False),
+                )
+                db.commit()
+                logger.info("acquired %s - %s (track %d, adhoc)", meta.artist, meta.title, track.id)
+
         basename = safe_basename(meta.artist, meta.title)
-
-        def finish(path: Path) -> None:
-            # label-only recorded row: Soulseek has no stable addresses
-            # (no URL, no external ID) — glossary-sanctioned.
-            _finish_acquisition(
-                db,
-                item,
-                path,
-                meta,
-                tracks_dir,
-                AudioProvenance(source="soulseek", asserted=False),
-            )
 
         # crashed-attempt recovery: the file was already moved into the
         # tracks directory but the Track never landed — adopt it

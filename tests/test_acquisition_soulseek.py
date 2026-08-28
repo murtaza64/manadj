@@ -14,9 +14,11 @@ import pytest
 from sqlalchemy.orm import Session
 
 from backend.acquisition.download import (
+    ADHOC_REF,
     SOULSEEK_TASK_TYPE,
     pick_supplier_result,
     soulseek_download_handler,
+    start_adhoc_download,
     start_supplier_download,
 )
 from backend.acquisition.manager import get_correspondence, list_source_items, refresh
@@ -436,6 +438,110 @@ class TestMultiSourceRetry:
         # nothing queued: the item is still pickable
         db_session.rollback()
         assert list_tasks(db_session, ref=f"source_item:{item.id}") == []
+
+
+class TestAdhocDownload:
+    """Standalone downloads (gh#217): no Source Item — the file lands through
+    the normal import chain, with soulseek provenance and no correspondence."""
+
+    def make_supplier(self, tmp_path: Path, fixture: Path) -> FakeSource:
+        staging = tmp_path / "slskd-staging"
+        staging.mkdir(exist_ok=True)
+        return FakeSource(
+            [],
+            download_file=fixture,
+            transfer_states=[TransferState.COMPLETED],
+            staging_dir=staging,
+        )
+
+    def test_adhoc_chain_with_explicit_naming(
+        self,
+        db_session: Session,
+        tmp_path: Path,
+        audio_file: Callable[..., Path],
+    ) -> None:
+        from backend.acquisition.models import SourceCorrespondence
+
+        tracks_dir = tmp_path / "tracks"
+        tracks_dir.mkdir()
+        supplier = self.make_supplier(tmp_path, audio_file("mp3"))
+
+        task = start_adhoc_download(
+            db_session, supplier, RESULT, artist="Hoax", title="Wake Up (VIP)"
+        )
+        assert task.ref == ADHOC_REF
+        assert "source_item_id" not in task.payload
+        assert task.payload["artist"] == "Hoax"
+        assert task.payload["title"] == "Wake Up (VIP)"
+
+        run_pending(db_session, make_handlers(supplier, tracks_dir))
+
+        task = list_tasks(db_session, ref=ADHOC_REF)[0]
+        assert task.state == "done", task.error
+        landed = list(tracks_dir.glob("Hoax - Wake Up (VIP).*"))
+        assert len(landed) == 1
+        track = db_session.query(Track).filter(Track.filename == str(landed[0])).one()
+        assert track.artist == "Hoax"
+        assert track.title == "Wake Up (VIP)"
+        prov = db_session.query(AudioProvenance).filter_by(track_id=track.id).one()
+        assert prov.source == "soulseek"
+        assert prov.asserted is False
+        # no Source Item involvement whatsoever
+        assert db_session.query(SourceItem).count() == 0
+        assert db_session.query(SourceCorrespondence).count() == 0
+
+    def test_adhoc_naming_derived_from_filename(
+        self,
+        db_session: Session,
+        tmp_path: Path,
+        audio_file: Callable[..., Path],
+    ) -> None:
+        """No artist/title given: Cleanup parses the remote filename's stem."""
+        tracks_dir = tmp_path / "tracks"
+        tracks_dir.mkdir()
+        supplier = self.make_supplier(tmp_path, audio_file("mp3"))
+
+        task = start_adhoc_download(db_session, supplier, RESULT)
+        # RESULT's remote file is "Hoax - Wake Up (soulseek rip).mp3"
+        assert task.payload["artist"] == "Hoax"
+        assert task.payload["title"] == "Wake Up (soulseek rip)"
+
+        run_pending(db_session, make_handlers(supplier, tracks_dir))
+
+        task = list_tasks(db_session, ref=ADHOC_REF)[0]
+        assert task.state == "done", task.error
+        assert len(list(tracks_dir.glob("Hoax - Wake Up (soulseek rip).*"))) == 1
+
+    def test_same_file_twice_is_rejected_while_in_flight(
+        self,
+        db_session: Session,
+        tmp_path: Path,
+        audio_file: Callable[..., Path],
+    ) -> None:
+        supplier = self.make_supplier(tmp_path, audio_file("mp3"))
+        start_adhoc_download(db_session, supplier, RESULT)
+
+        with pytest.raises(ValueError, match="already downloading"):
+            start_adhoc_download(db_session, supplier, RESULT)
+
+    def test_concurrent_adhoc_downloads_of_different_files(
+        self,
+        db_session: Session,
+        tmp_path: Path,
+        audio_file: Callable[..., Path],
+    ) -> None:
+        tracks_dir = tmp_path / "tracks"
+        tracks_dir.mkdir()
+        supplier = self.make_supplier(tmp_path, audio_file("mp3"))
+        other = candidate("tok-other", "peer-b")
+
+        start_adhoc_download(db_session, supplier, RESULT)
+        start_adhoc_download(db_session, supplier, other)
+
+        run_pending(db_session, make_handlers(supplier, tracks_dir))
+
+        tasks = list_tasks(db_session, ref=ADHOC_REF)
+        assert [t.state for t in tasks] == ["done", "done"], [t.error for t in tasks]
 
 
 class TestRetryAfterCrashedAttempt:

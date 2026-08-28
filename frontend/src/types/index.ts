@@ -530,6 +530,17 @@ export interface SoulseekResult {
   duration_delta_ms: number | null;
 }
 
+// A standalone (Source-Item-less) soulseek download (gh#217)
+export interface AdhocSoulseekDownload {
+  task_id: number;
+  filename: string;
+  artist: string | null;
+  title: string;
+  task_state: 'pending' | 'running' | 'done' | 'failed';
+  error: string | null;
+  created_at: string | null;
+}
+
 export interface SoulseekSearchResponse {
   query: string;
   results: SoulseekResult[];
