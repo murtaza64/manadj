@@ -78,6 +78,7 @@ import {
   slotAccent,
   slotDownbeatMarks,
   slotLadderMarks,
+  stepLaneAverage,
   type SlotLadderMarks,
   type TrackMeter,
   slotLaneColors,
@@ -98,6 +99,10 @@ const STRIP_H = 22;
 const STRIP_H_AUTHORED = 56;
 const RULER_H = 24;
 const PAD_BEATS = 4;
+/** The tinted slot-panel column overlays the timeline's left edge — fit
+ * and the scroll clamp treat ITS right edge as the x-origin so beat 0 is
+ * never hidden behind it (gh#206 item 2). Mirrors .rt-panelcol width. */
+const PANEL_W = 208;
 const MIN_PX_PER_BEAT = 0.05;
 const MAX_PX_PER_BEAT = 64;
 
@@ -251,8 +256,12 @@ export function RoutineTimeline({
   const fit = useCallback(() => {
     const w = containerRef.current?.clientWidth ?? 0;
     if (w <= 0 || duration <= 0) return;
-    setPxPerBeat(Math.max(MIN_PX_PER_BEAT, w / (duration + PAD_BEATS * 2)));
-    setScrollBeat(-PAD_BEATS);
+    // Fit into the width RIGHT of the panel column, with beat -PAD landing
+    // at the panel's edge (gh#206 item 2) — the routine head stays visible.
+    const usable = Math.max(40, w - PANEL_W);
+    const px = Math.max(MIN_PX_PER_BEAT, usable / (duration + PAD_BEATS * 2));
+    setPxPerBeat(px);
+    setScrollBeat(-PAD_BEATS - PANEL_W / px);
   }, [duration]);
   useEffect(fit, [fit, width === 0]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -261,8 +270,9 @@ export function RoutineTimeline({
       const w = containerRef.current?.clientWidth ?? 0;
       const viewBeats = px > 0 ? w / px : 0;
       // ±TRIM_WIDEN_CAP_BEATS of slack so outward trim handles stay
-      // reachable/visible past the routine boundaries.
-      const lo = -PAD_BEATS - TRIM_WIDEN_CAP_BEATS;
+      // reachable/visible past the routine boundaries; the panel-width
+      // term lets fit place beat -PAD at the panel's edge (gh#206).
+      const lo = -PAD_BEATS - TRIM_WIDEN_CAP_BEATS - (px > 0 ? PANEL_W / px : 0);
       const max = Math.max(duration + PAD_BEATS + TRIM_WIDEN_CAP_BEATS - viewBeats, lo);
       return Math.max(lo, Math.min(s, max));
     },
@@ -1052,6 +1062,18 @@ export function RoutineTimeline({
           scrollBeat,
           pxPerBeat,
           duration,
+          trimCenter:
+            control === 'trim'
+              ? Math.max(
+                  0,
+                  Math.min(
+                    1,
+                    stepLaneAverage(slot.lanes.trim, duration, slot.lanes.defaults.trim) +
+                      slot.trim -
+                      0.5
+                  )
+                )
+              : undefined,
         });
       }
     }
@@ -1269,27 +1291,49 @@ export function RoutineTimeline({
                   )}
                 </div>
                 {/* Channel trim (gh#190): the mixer's own knob idiom, PINNED
-                    bottom-right of the panel (out of the text rows). */}
-                <span
-                  className={`rt-sp-trim${slot.trim !== 0.5 ? ' on' : ''}`}
-                  title="Channel trim (replayed through the real gain curve; double-click resets)"
-                  onPointerUp={() => draftStore.endGesture()}
-                >
-                  <Knob
-                    label={
-                      Math.abs(slot.trim - 0.5) < 1e-6
-                        ? 'TRIM'
-                        : `${slot.trim > 0.5 ? '+' : ''}${(
-                            20 * Math.log10(trimToGain(slot.trim) / trimToGain(0.5))
-                          ).toFixed(1)}dB`
-                    }
-                    min={0}
-                    max={1}
-                    defaultValue={0.5}
-                    value={slot.trim}
-                    onChange={(v) => draftStore.setTrim(slot.slot, v)}
-                  />
-                </span>
+                    bottom-right of the panel (out of the text rows).
+                    AVERAGE semantics (gh#206): the knob reads the slot's
+                    time-weighted average trim (recorded avg + drag offset);
+                    dragging still shifts the whole lane; double-click
+                    resets to the recorded average. */}
+                {(() => {
+                  const recordedTrimAvg = stepLaneAverage(
+                    slot.lanes.trim,
+                    duration,
+                    slot.lanes.defaults.trim
+                  );
+                  const avgTrim = Math.max(
+                    0,
+                    Math.min(1, recordedTrimAvg + slot.trim - 0.5)
+                  );
+                  return (
+                    <span
+                      className={`rt-sp-trim${slot.trim !== 0.5 ? ' on' : ''}`}
+                      title="Channel trim — the slot's AVERAGE (recorded average + your offset; the strip shows deviations around it). Replayed through the real gain curve; double-click resets to the recorded average."
+                      onPointerUp={() => draftStore.endGesture()}
+                    >
+                      <Knob
+                        label={
+                          Math.abs(avgTrim - 0.5) < 1e-3
+                            ? 'TRIM'
+                            : `${avgTrim > 0.5 ? '+' : ''}${(
+                                20 * Math.log10(trimToGain(avgTrim) / trimToGain(0.5))
+                              ).toFixed(1)}dB`
+                        }
+                        min={0}
+                        max={1}
+                        defaultValue={Math.max(0, Math.min(1, recordedTrimAvg))}
+                        value={avgTrim}
+                        onChange={(v) =>
+                          draftStore.setTrim(
+                            slot.slot,
+                            Math.max(0, Math.min(1, 0.5 + v - recordedTrimAvg))
+                          )
+                        }
+                      />
+                    </span>
+                  );
+                })()}
               </div>
               <div
                 className={`rt-wave-row${selectedSlots.includes(slot.slot) ? ' rt-selected' : ''}`}
@@ -2041,6 +2085,10 @@ function drawLaneSteps(
     scrollBeat: number;
     pxPerBeat: number;
     duration: number;
+    /** gh#206: TRIM renders DEVIATIONS around the slot's average — this is
+     * that average (recorded avg + knob offset); the wiggle centers on the
+     * strip's middle guide. */
+    trimCenter?: number;
   }
 ): void {
   const points = control === 'filter' ? slot.lanes.filter : slot.lanes[control];
@@ -2070,7 +2118,7 @@ function drawLaneSteps(
       control === 'fader'
         ? lanes.fader
         : control === 'trim'
-          ? lanes.trim
+          ? Math.max(0, Math.min(1, 0.5 + (lanes.trim - (geo.trimCenter ?? 0.5))))
           : control === 'filter'
             ? (lanes.filter + 1) / 2
             : lanes.eq[control === 'eqLow' ? 'low' : control === 'eqMid' ? 'mid' : 'high'];
