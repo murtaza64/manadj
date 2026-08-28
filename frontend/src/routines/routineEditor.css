@@ -679,6 +679,11 @@
   cursor: pointer;
   z-index: 3;
 }
+/* Collapse/expand toggle for edited lanes (gh#208): sits just left of the
+   author/discard button. */
+.rt-laneauthor.rt-lanecollapse {
+  left: 156px;
+}
 .rt-laneauthor:hover {
   color: var(--text);
   background: var(--surface0);

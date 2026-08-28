@@ -227,6 +227,14 @@ export function RoutineTimeline({
   // slot:control).
   const [laneSel, setLaneSel] = useState<{ key: string; indices: number[] } | null>(null);
 
+  // Collapsed edited lanes (gh#208): pure view state — a collapsed
+  // authored lane renders at recorded-strip height (envelope still drawn,
+  // read-only) and re-expands next to the edit button.
+  const [collapsedLanes, setCollapsedLanes] = useState<Record<string, boolean>>({});
+  const toggleLaneCollapsed = useCallback((key: string) => {
+    setCollapsedLanes((prev) => ({ ...prev, [key]: !prev[key] }));
+  }, []);
+
   // Jump popover (one at a time).
   const [popover, setPopover] = useState<PopoverState>(null);
 
@@ -1021,7 +1029,11 @@ export function RoutineTimeline({
     for (const slot of planned.slots) {
       const colors = slotLaneColors(slot.deck);
       for (const control of lanesFor(slot.slot)) {
-        if (slot.lanes.authored?.[control]) continue; // LaneCanvas owns it
+        // LaneCanvas owns EXPANDED authored strips; a COLLAPSED authored
+        // strip draws here — slotLanesAt samples the effective (edited)
+        // lane state, so the envelope shape shows at compact height (#208).
+        if (slot.lanes.authored?.[control] && !collapsedLanes[`${slot.slot}:${control}`])
+          continue;
         const strip = laneCanvasRefs.current.get(`${slot.slot}:${control}`);
         if (!strip) continue;
         strip.width = width * dpr;
@@ -1043,7 +1055,17 @@ export function RoutineTimeline({
         });
       }
     }
-  }, [width, pxPerBeat, scrollBeat, planned, gridLines, slotLadders, duration, lanesFor]);
+  }, [
+    width,
+    pxPerBeat,
+    scrollBeat,
+    planned,
+    gridLines,
+    slotLadders,
+    duration,
+    lanesFor,
+    collapsedLanes,
+  ]);
 
   // ── DOM ──────────────────────────────────────────────────────────────
   // The SAME snapped view origin the canvases use (gh#190 scroll-lock
@@ -1419,17 +1441,20 @@ export function RoutineTimeline({
                 )}
               </div>
               {lanesFor(slot.slot).map((control) => {
+                const key = `${slot.slot}:${control}`;
                 const authored = !!slot.lanes.authored?.[control];
-                const h = authored ? STRIP_H_AUTHORED : STRIP_H;
+                // Collapsed edited lane (gh#208): compact strip, envelope
+                // read-only; expand re-opens the breakpoint editor.
+                const collapsed = authored && !!collapsedLanes[key];
+                const h = authored && !collapsed ? STRIP_H_AUTHORED : STRIP_H;
                 // TRIM is recorded-only: the panel knob offsets the whole
                 // slot; no envelope authoring (gh#190).
                 const editable = control !== 'trim';
                 return (
                   <div className="rt-lanestrip" key={control} style={{ height: h }}>
-                    {!authored && (
+                    {(!authored || collapsed) && (
                       <canvas
                         ref={(el) => {
-                          const key = `${slot.slot}:${control}`;
                           if (el) laneCanvasRefs.current.set(key, el);
                           else laneCanvasRefs.current.delete(key);
                         }}
@@ -1437,6 +1462,7 @@ export function RoutineTimeline({
                       />
                     )}
                     {authored &&
+                      !collapsed &&
                       editable &&
                       laneCanvasFor(slot, control as AuthorableLaneControl, colors[control])}
                     <span className="rt-laneedge" style={{ background: colors[control] }} />
@@ -1444,7 +1470,27 @@ export function RoutineTimeline({
                       {SLOT_LANE_LABELS[control]}
                       {authored ? ' ✎' : ''}
                     </span>
-                    {editable && (
+                    {authored && (
+                      <button
+                        className="rt-laneauthor rt-lanecollapse"
+                        title={
+                          collapsed
+                            ? 'Expand — re-open the breakpoint editor for this edited lane'
+                            : 'Collapse this edited lane to strip height (envelope keeps playing; expand next to the ↺)'
+                        }
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          toggleLaneCollapsed(key);
+                        }}
+                      >
+                        {collapsed ? '✎' : '⊟'}
+                      </button>
+                    )}
+                    {/* Restore (↺) hides while EXPANDED (gh#208 review
+                        feedback) — mid-editing it reads as a footgun next
+                        to the collapse button; it lives on the collapsed
+                        strip instead. */}
+                    {editable && (!authored || collapsed) && (
                       <button
                         className="rt-laneauthor"
                         title={
@@ -1454,8 +1500,12 @@ export function RoutineTimeline({
                         }
                         onClick={(e) => {
                           e.stopPropagation();
-                          if (authored) draftStore.clearLane(slot.slot, control);
-                          else authorLane(slot, control as AuthorableLaneControl);
+                          if (authored) {
+                            draftStore.clearLane(slot.slot, control);
+                            // Don't let a stale collapsed flag greet the
+                            // next authoring session at strip height.
+                            setCollapsedLanes((p) => ({ ...p, [key]: false }));
+                          } else authorLane(slot, control as AuthorableLaneControl);
                         }}
                       >
                         {authored ? '↺' : '✎'}
