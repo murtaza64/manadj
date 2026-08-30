@@ -113,6 +113,47 @@ export function snapshotPairStore(): PairStore {
 }
 
 /**
+ * Reconcile ONE pair's snapshot entry from a server response WITHOUT
+ * pushing (#205 bugfix: the Mix editor writes pairs through the raw
+ * replacePair API — awaited, server-authoritative — and the snapshot's
+ * boot-once load never saw those writes, so the Set pane, suggestions and
+ * Linked index went stale until a reload). Call with the PUT's returned
+ * rows; an empty list deletes the pair. Listeners fire synchronously —
+ * the transition index and every pairStore consumer rebuild.
+ */
+export function reconcilePairFromServer(
+  pairKey: string,
+  rows: {
+    uuid: string;
+    name: string;
+    favorite: boolean;
+    position: number;
+    data: Record<string, unknown>;
+    updated_at?: string | null;
+  }[]
+): void {
+  const next = { ...snapshot };
+  if (rows.length === 0) {
+    delete next[pairKey];
+  } else {
+    const items = rows
+      .slice()
+      .sort((a, b) => a.position - b.position)
+      .map((row) => ({
+        uuid: row.uuid,
+        name: row.name,
+        favorite: row.favorite || undefined,
+        transition: row.data as unknown as EditorMix['transition'],
+        updatedAtMs: parseServerInstant(row.updated_at),
+      }));
+    const prevActive = next[pairKey]?.active ?? 0;
+    next[pairKey] = { items, active: Math.max(0, Math.min(prevActive, items.length - 1)) };
+  }
+  snapshot = next;
+  notify();
+}
+
+/**
  * Replace one pair's entry (null deletes the pair): snapshot updates and
  * listeners fire synchronously (optimistic — flush-before-repoint relies
  * on this); the PUT runs in the background, reconciled by uuid. Write
@@ -174,7 +215,7 @@ async function pushPair(pairKey: string, items: SavedTransition[]): Promise<bool
 /** Server datetimes are naive UTC (SQLite func.now()); JS would parse
  * a bare "YYYY-MM-DDTHH:mm:ss" as LOCAL time, skewing recency against
  * client-side stamps by the timezone offset — pin the zone instead. */
-function parseServerInstant(value: string | null): number | undefined {
+function parseServerInstant(value: string | null | undefined): number | undefined {
   if (!value) return undefined;
   const pinned = /[zZ]$|[+-]\d\d:?\d\d$/.test(value) ? value : `${value}Z`;
   const ms = Date.parse(pinned);

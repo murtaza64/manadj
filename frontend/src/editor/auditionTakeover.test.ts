@@ -254,3 +254,129 @@ describe('watchAuditionTakeover', () => {
     unregisterSurface('editor');
   });
 });
+
+// ── Deck-engine takeover (#205: manual movements on driven decks) ────────
+import { watchDeckAuditionTakeover, type WatchedDeckEngine } from './auditionTakeover';
+
+class FakeDeckEngine implements WatchedDeckEngine {
+  private listeners = new Set<() => void>();
+  snap = {
+    trackId: 1 as number | null,
+    loadState: 'ready',
+    playing: true,
+    pitchPercent: 0,
+    bendPercent: 0,
+    keyLock: false,
+    duration: 300,
+  };
+  playhead = 60;
+  getSnapshot() {
+    return { ...this.snap };
+  }
+  getPlayhead() {
+    return this.playhead;
+  }
+  subscribe(fn: () => void) {
+    this.listeners.add(fn);
+    return () => this.listeners.delete(fn);
+  }
+  emit(mut: Partial<typeof this.snap>) {
+    Object.assign(this.snap, mut);
+    for (const l of [...this.listeners]) l();
+  }
+}
+
+function deckSetup(opts: { selfOp?: boolean } = {}) {
+  _resetAudibleSurfacesForTests();
+  const mixer = new Mixer();
+  registerSurface('routine-editor', { transport: { togglePlay: () => {} }, silence: vi.fn() });
+  claimAudible('routine-editor');
+  const token = mixer.engageAutomation();
+  const tokenRef = { current: token as symbol | null };
+  const standDown = vi.fn();
+  const engine = new FakeDeckEngine();
+  const unsub = watchDeckAuditionTakeover({
+    mixer,
+    surface: 'routine-editor',
+    standDown,
+    cancelArm: vi.fn(),
+    takeToken: vi.fn(() => {
+      const t = tokenRef.current;
+      tokenRef.current = null;
+      return t;
+    }),
+    engines: { A: engine },
+    isSelfOp: () => opts.selfOp ?? false,
+    drivenDecks: () => ['A'],
+  });
+  return { engine, standDown, unsub };
+}
+
+describe('watchDeckAuditionTakeover (#205)', () => {
+  beforeEach(() => {
+    vi.stubGlobal('localStorage', fakeStorage());
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('a foreign play-flip on a driven deck fires the takeover (stand down + release)', () => {
+    const { engine, standDown, unsub } = deckSetup();
+    engine.emit({ playing: false });
+    expect(standDown).toHaveBeenCalledTimes(1);
+    expect(isAudible('routine-editor')).toBe(false);
+    unsub();
+    unregisterSurface('routine-editor');
+  });
+
+  it("the player's own writes (self-op) never read as gestures", () => {
+    const { engine, standDown, unsub } = deckSetup({ selfOp: true });
+    engine.emit({ playing: false });
+    engine.emit({ pitchPercent: 3 });
+    expect(standDown).not.toHaveBeenCalled();
+    expect(isAudible('routine-editor')).toBe(true);
+    unsub();
+    unregisterSurface('routine-editor');
+  });
+
+  it('load-flow emits are not gestures', () => {
+    const { engine, standDown, unsub } = deckSetup();
+    engine.emit({ loadState: 'fetching', trackId: 9, playing: false });
+    expect(standDown).not.toHaveBeenCalled();
+    unsub();
+    unregisterSurface('routine-editor');
+  });
+
+  it("natural end-of-track is the deck's own doing (no takeover)", () => {
+    const { engine, standDown, unsub } = deckSetup();
+    engine.playhead = 299.99; // at the decoded end
+    engine.emit({ playing: false });
+    expect(standDown).not.toHaveBeenCalled();
+    unsub();
+    unregisterSurface('routine-editor');
+  });
+
+  it('gestures on undriven decks stay the user’s business', () => {
+    _resetAudibleSurfacesForTests();
+    const mixer = new Mixer();
+    registerSurface('routine-editor', { transport: { togglePlay: () => {} }, silence: vi.fn() });
+    claimAudible('routine-editor');
+    const engine = new FakeDeckEngine();
+    const standDown = vi.fn();
+    const unsub = watchDeckAuditionTakeover({
+      mixer,
+      surface: 'routine-editor',
+      standDown,
+      cancelArm: vi.fn(),
+      takeToken: () => null,
+      engines: { C: engine },
+      isSelfOp: () => false,
+      drivenDecks: () => ['A', 'B'], // C is not driven
+    });
+    engine.emit({ playing: false });
+    expect(standDown).not.toHaveBeenCalled();
+    expect(isAudible('routine-editor')).toBe(true);
+    unsub();
+    unregisterSurface('routine-editor');
+  });
+});

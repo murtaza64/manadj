@@ -33,7 +33,14 @@ describe('resolveChipFace', () => {
   });
 
   it('shows AUDITION while the editor holds the decks', () => {
-    expect(resolveChipFace('editor', idle)).toEqual<ChipFace>({ kind: 'audition' });
+    expect(resolveChipFace('editor', idle)).toEqual<ChipFace>({ kind: 'audition', editor: 'editor' });
+  });
+
+  it("shows AUDITION for the Mix editor's own surface too (#205 bug: routine-editor rendered as muted DECKS)", () => {
+    expect(resolveChipFace('routine-editor', idle)).toEqual<ChipFace>({
+      kind: 'audition',
+      editor: 'routine-editor',
+    });
   });
 
   it('AUDITION wins even while a displaced Conductor still reports a set (stand-down without release)', () => {
@@ -41,6 +48,7 @@ describe('resolveChipFace', () => {
     // Conductor releasing — holder is the truth, not conductor state.
     expect(resolveChipFace('editor', { setId: 7, status: 'paused' })).toEqual<ChipFace>({
       kind: 'audition',
+      editor: 'editor',
     });
   });
 
@@ -89,7 +97,7 @@ describe('chipTooltip', () => {
 
   it('audition face: space toggles the audition', () => {
     const tip = chipTooltip(
-      { kind: 'audition' },
+      { kind: 'audition', editor: 'routine-editor' },
       { setName: null, editorMounted: true, setSelected: false }
     );
     expect(tip).toContain('Space toggles the audition');

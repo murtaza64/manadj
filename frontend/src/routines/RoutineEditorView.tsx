@@ -33,6 +33,7 @@ import {
   type PairSlotProjection,
 } from '../editor/pairSlotTranslation';
 import { requestTakeReview } from '../capture/takeReview';
+import { reconcilePairFromServer } from '../editor/pairStore';
 import { MixPicker } from './MixPicker';
 import { siblingCycle, type MixArtifactRef, type TransitionRowLike } from './mixPickerModel';
 
@@ -49,7 +50,7 @@ import {
   subscribeAudible,
   unregisterSurface,
 } from '../playback/audibleSurface';
-import { watchAuditionTakeover } from '../editor/auditionTakeover';
+import { watchAuditionTakeover, watchDeckAuditionTakeover } from '../editor/auditionTakeover';
 import { armAudition } from '../editor/auditionArm';
 import { isGuardedKeyEvent } from '../components/performance/performanceKeys';
 import { useViewActive } from '../contexts/viewActive';
@@ -558,7 +559,10 @@ export default function RoutineEditorView() {
           }
           void api.transitions
             .replacePair(o.aTrackId, o.bTrackId, items)
-            .then(() => {
+            .then((rows: TransitionRowFull[]) => {
+              // Sync the pairStore SNAPSHOT (Set pane / suggestions /
+              // Linked read it, not react-query — stale-until-reload bug).
+              reconcilePairFromServer(`${o.aTrackId}:${o.bTrackId}`, rows);
               // First save of a seeded draft: the artifact now exists —
               // drop the seed so last-mix restore points at a real row.
               if (!exists) {
@@ -575,7 +579,13 @@ export default function RoutineEditorView() {
         }
         void api.routines
           .saveEdits(uuid, editsForSave(edits) as Record<string, unknown> | null)
-          .then((d) => queryClient.setQueryData(['routine-detail', uuid], d))
+          .then((d) => {
+            queryClient.setQueryData(['routine-detail', uuid], d);
+            // The Set plan fetches the same artifact under ['routine',
+            // uuid] (useSetPlan) — update it too or the Set timeline
+            // plays stale edits until a full reload (#205 bug report).
+            queryClient.setQueryData(['routine', uuid], d);
+          })
           .catch((err) => console.error('routine edits autosave failed', err));
       }, 700);
     });
@@ -807,22 +817,40 @@ export default function RoutineEditorView() {
   // a mixer gesture during audition stands the replay down — decks keep
   // sounding, sounding values land in base, the borrow unwinds. Pitch
   // checkpoint dropped (the user keeps the running decks).
-  useEffect(
-    () =>
-      watchAuditionTakeover({
-        mixer,
-        surface: 'routine-editor',
-        standDown: () => player.standDown(),
-        cancelArm,
-        takeToken: () => {
-          const token = automationTokenRef.current;
-          automationTokenRef.current = null;
-          pitchCheckpointRef.current = null;
-          return token;
-        },
-      }),
-    [player, mixer, cancelArm]
-  );
+  useEffect(() => {
+    const takeoverOpts = {
+      mixer,
+      surface: 'routine-editor' as const,
+      standDown: () => player.standDown(),
+      cancelArm,
+      takeToken: () => {
+        const token = automationTokenRef.current;
+        automationTokenRef.current = null;
+        pitchCheckpointRef.current = null;
+        return token;
+      },
+    };
+    const unMixer = watchAuditionTakeover(takeoverOpts);
+    // Deck-engine gestures too (#205 bug report): play/pause, pitch, jog
+    // bend or keylock on a DRIVEN deck while the audition holds = the
+    // human taking the decks — the Conductor's rule, now that the
+    // player's own writes are self-op guarded.
+    const unDecks = watchDeckAuditionTakeover({
+      ...takeoverOpts,
+      engines: {
+        A: decksRef.current.A.engine,
+        B: decksRef.current.B.engine,
+        C: decksRef.current.C.engine,
+        D: decksRef.current.D.engine,
+      },
+      isSelfOp: () => player.isSelfOp(),
+      drivenDecks: () => player.drivenDecks(),
+    });
+    return () => {
+      unMixer();
+      unDecks();
+    };
+  }, [player, mixer, cancelArm]);
 
   // Space = play/pause; ⌘Z/⌘⇧Z = the draft's undo/redo (the undo story
   // the pair editor never grew) — while this view is visible.
@@ -900,6 +928,7 @@ export default function RoutineEditorView() {
       // (the server shifted the edits layer with the trim).
       draftStore.load(d.uuid, parseEdits(d.edits));
       queryClient.setQueryData(['routine-detail', detail.uuid], d);
+      queryClient.setQueryData(['routine', detail.uuid], d);
       await queryClient.invalidateQueries({ queryKey: ['routines'] });
       toast(`Re-promoted ${detail.name || 'routine'} with trimmed boundaries`);
     } catch (err) {
@@ -956,7 +985,10 @@ export default function RoutineEditorView() {
       }));
       void api.transitions
         .replacePair(aTrackId, bTrackId, fn(items))
-        .then(() => queryClient.invalidateQueries({ queryKey: ['transitions'] }))
+        .then((rows: TransitionRowFull[]) => {
+          reconcilePairFromServer(`${aTrackId}:${bTrackId}`, rows);
+          return queryClient.invalidateQueries({ queryKey: ['transitions'] });
+        })
         .catch((err) => toast(`Save failed: ${err instanceof Error ? err.message : String(err)}`));
     },
     [queryClient, toast]

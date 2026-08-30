@@ -210,13 +210,31 @@ export class RoutinePlayer {
     return this.playing;
   }
 
+  // ── Self-op guard (#205: deck-gesture takeover parity) ───────────────
+  // Engine emits land synchronously inside the player's own writes; a
+  // deck-engine watcher (auditionTakeover.watchDeckAuditionTakeover)
+  // reads isSelfOp() to tell the audition's own driving from a human
+  // hand on a deck — the Conductor's exact idiom.
+  private selfOps = 0;
+  private selfOp<T>(fn: () => T): T {
+    this.selfOps++;
+    try {
+      return fn();
+    } finally {
+      this.selfOps--;
+    }
+  }
+  isSelfOp(): boolean {
+    return this.selfOps > 0;
+  }
+
   play(): void {
     if (!this.audible() || !this.ready() || this.playing || !this.routine) return;
     this.playing = true;
     this.anchorAudioTime = this.mixer.now();
     this.lastTickT = this.getMixTime();
     this.lastPitch = {};
-    this.syncDecks(this.getMixTime(), true);
+    this.selfOp(() => this.syncDecks(this.getMixTime(), true));
     this.applyLanes(this.getMixTime());
     this.raf = requestAnimationFrame(this.tick);
     this.emit();
@@ -229,7 +247,9 @@ export class RoutinePlayer {
     this.mixTimeAtAnchor = this.getMixTime();
     this.playing = false;
     cancelAnimationFrame(this.raf);
-    for (const deck of this.drivenDecks()) this.engine(deck)?.pause();
+    this.selfOp(() => {
+      for (const deck of this.drivenDecks()) this.engine(deck)?.pause();
+    });
     this.emit();
   }
 
@@ -253,21 +273,23 @@ export class RoutinePlayer {
     this.lastTickT = t;
     this.anchorAudioTime = this.mixer.now();
     if (this.playing) {
-      this.syncDecks(t, true);
+      this.selfOp(() => this.syncDecks(t, true));
       this.applyLanes(t);
     } else if (this.audible() && this.routine) {
       // Park deck playheads on the recorded positions — only while the
       // editor owns the Decks (a silent editor's scrub must not yank
       // Decks another surface is sounding).
       this.applyLanes(t);
-      for (const deck of this.drivenDecks()) {
-        const engine = this.engine(deck);
-        const occupant = this.occupantAt(deck, t);
-        if (!engine || !occupant) continue;
-        if (!this.deckHoldsOccupant(engine, deck, occupant)) continue;
-        const state = this.slotStateAt(occupant, t);
-        engine.seek(Math.max(0, state.trackTime));
-      }
+      this.selfOp(() => {
+        for (const deck of this.drivenDecks()) {
+          const engine = this.engine(deck);
+          const occupant = this.occupantAt(deck, t);
+          if (!engine || !occupant) continue;
+          if (!this.deckHoldsOccupant(engine, deck, occupant)) continue;
+          const state = this.slotStateAt(occupant, t);
+          engine.seek(Math.max(0, state.trackTime));
+        }
+      });
     }
     for (const l of this.seekListeners) l();
     this.emit();
@@ -304,7 +326,7 @@ export class RoutinePlayer {
       this.pause();
       return;
     }
-    this.syncDecks(t, false);
+    this.selfOp(() => this.syncDecks(t, false));
     this.applyLanes(t);
     this.lastTickT = t;
     this.raf = requestAnimationFrame(this.tick);

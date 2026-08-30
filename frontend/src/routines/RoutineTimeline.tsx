@@ -637,7 +637,12 @@ export function RoutineTimeline({
           setPopover(null);
           return;
         }
-        if (slotId !== null && e.shiftKey) {
+        // Shift is two gestures (#205 bug report: fine drag was dead on
+        // arrival — range-extend swallowed every shift+down): on an
+        // UNSELECTED slot it extends the range from the anchor; on an
+        // already-selected slot it starts the slide with FINE (unsnapped)
+        // movement from the first pixel.
+        if (slotId !== null && e.shiftKey && !selectedSlots.includes(slotId)) {
           // Range extension runs on the DERIVED index (entry order).
           const slots = plannedRef.current.slots;
           const idxOf = (id: string) => slots.findIndex((x) => x.slotId === id);

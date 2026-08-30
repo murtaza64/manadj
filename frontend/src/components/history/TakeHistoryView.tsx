@@ -136,16 +136,19 @@ export function TakeHistoryView() {
     invalidate();
   };
 
-  const promote = async (uuid: string) => {
+  const promote = async (uuid: string): Promise<string | null> => {
     try {
       const routine = await api.routineTakes.promote(uuid);
       toast(
         `Promoted — Routine saved: ${routine.cast.length} slots · ${Math.round(routine.duration_beats)} beats.`
       );
+      invalidate();
+      return routine.uuid;
     } catch (err) {
       toast(String(err));
+      invalidate();
+      return null;
     }
-    invalidate();
   };
 
   const label = (id: number) => labels?.[id] ?? `track ${id}`;
@@ -302,14 +305,23 @@ export function TakeHistoryView() {
                     <tr
                       key={e.take.uuid}
                       className="take-row routine"
-                      title="A hand-confirmed Routine Take — view it on its Session's timeline"
-                      onClick={() =>
-                        requestSessionMoment({
-                          sessionUuid: e.take.session_uuid,
-                          atS: e.take.window_start_s,
-                          spanS: (e.take.window_end_s - e.take.window_start_s) * 2,
-                        })
+                      title={
+                        e.take.promoted_routine_uuid
+                          ? 'Open its Routine in the Mix editor'
+                          : 'Open in the Mix editor (promotes on open — mechanical deck→slot re-addressing)'
                       }
+                      onClick={() => {
+                        // #205 bug report: the row opens the EDITOR (like
+                        // every other history row) — the Session deep-link
+                        // keeps its own ▦ button.
+                        if (e.take.promoted_routine_uuid) {
+                          requestRoutineEdit({ routineUuid: e.take.promoted_routine_uuid });
+                        } else {
+                          void promote(e.take.uuid).then((uuid) => {
+                            if (uuid) requestRoutineEdit({ routineUuid: uuid });
+                          });
+                        }
+                      }}
                     >
                       <td className="take-when">{fmtWhen(e.take.confirmed_at)}</td>
                       <td className="take-pair">

@@ -41,7 +41,7 @@ export function AudioOwnershipChip({
   const set = face.kind === 'set' ? sets.find((s) => s.id === face.setId) : undefined;
   const tooltip = chipTooltip(face, {
     setName: set?.name ?? null,
-    editorMounted: mode === 'transition',
+    editorMounted: mode === 'transition' || mode === 'routine',
     setSelected: selectedSetId !== null,
   });
 
@@ -50,7 +50,9 @@ export function AudioOwnershipChip({
       requestSetNavigate(face.setId);
       onModeChange('library');
     } else if (face.kind === 'audition') {
-      onModeChange('transition');
+      // Navigate to WHICHEVER editor holds (the Mix editor claims
+      // 'routine-editor'; the pair editor 'editor' until phase 5's cut).
+      onModeChange(face.editor === 'routine-editor' ? 'routine' : 'transition');
     } else if (face.kind === 'replay') {
       // Jump INTO the replay (sessions 16): the replayed Session's
       // timeline, centered on the live playhead, at most 15 minutes
