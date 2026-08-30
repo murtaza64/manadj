@@ -89,6 +89,27 @@ export class DeckSourceNode {
     );
   }
 
+  /** Hand a track's decoded stems over (stems #209): STEM_NAMES order,
+   * same copy-then-transfer contract as loadTrack, ×N stems. */
+  loadStems(buffers: AudioBuffer[]): void {
+    const stems: Float32Array[][] = buffers.map((buffer) => {
+      const channels: Float32Array[] = [];
+      for (let c = 0; c < buffer.numberOfChannels; c++) {
+        channels.push(buffer.getChannelData(c).slice());
+      }
+      return channels;
+    });
+    this.post(
+      { type: 'load-stems', stems, sampleRate: buffers[0]?.sampleRate ?? this.ctx.sampleRate },
+      stems.flatMap((channels) => channels.map((channel) => channel.buffer))
+    );
+  }
+
+  /** Target per-stem gains (STEM_NAMES order); worklet declick-ramps them. */
+  setStemGains(gains: number[]): void {
+    this.post({ type: 'stem-gains', gains });
+  }
+
   start(positionFrames: number, startId: number): void {
     this.post({ type: 'start', positionFrames, startId });
   }

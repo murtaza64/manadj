@@ -118,7 +118,7 @@ export default function TrackList({
       (deck) => linkedFor(deckIds?.[deck], id)
     );
   const { widths, setWidth, resetWidth, cssVars } = useColumnWidths(playOrder !== undefined);
-  const colSpan = playOrder !== undefined ? 12 : 11;
+  const colSpan = playOrder !== undefined ? 13 : 12;
 
   // ── One indexed stream: tier headers + ordinary rows ──────────────────
   // Follow groups arrive pre-ordered; a header row opens each run of equal
@@ -312,6 +312,24 @@ export default function TrackList({
               <ColumnResizeHandle
                 columnId="tags"
                 currentWidth={widths.tags}
+                onResize={setWidth}
+                onReset={resetWidth}
+              />
+            </th>
+            <th
+              className="stems-header"
+              title="Stems ready (split on disk)"
+              style={{
+                width: 'var(--colw-stems)',
+                minWidth: 'var(--colw-stems)',
+                maxWidth: 'var(--colw-stems)',
+                position: 'relative',
+              }}
+            >
+              st
+              <ColumnResizeHandle
+                columnId="stems"
+                currentWidth={widths.stems}
                 onResize={setWidth}
                 onReset={resetWidth}
               />

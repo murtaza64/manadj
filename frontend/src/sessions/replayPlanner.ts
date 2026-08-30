@@ -31,6 +31,8 @@ export interface ReplaySeedDeck {
   eq: { low: number; mid: number; high: number };
   filter: number;
   assignment: CrossfaderAssignment;
+  /** Per-stem enables at the start moment (stems #212). */
+  stems: { vocals: boolean; drums: boolean; bass: boolean; other: boolean };
 }
 
 export interface ReplaySeed {
@@ -95,6 +97,7 @@ export function planReplay(events: CaptureEvent[], startT: number): PlanReplayRe
             eq: d.eq,
             filter: d.filter,
             assignment: d.assignment,
+            stems: { ...d.stems },
           },
         ];
       })

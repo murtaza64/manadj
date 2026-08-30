@@ -296,6 +296,13 @@ const TrackRow = memo(function TrackRow({
             })}
           </div>
         </td>
+        <td className="track-cell stems-cell" style={getCellStyle('stems')}>
+          {track.has_stems ? (
+            <span className="stems-check" title="Stems ready">
+              ✓
+            </span>
+          ) : null}
+        </td>
         <td className="track-cell" style={getCellStyle('quality')}>
           <span className={`quality-display ${isLowQuality(track) ? 'quality-low' : ''}`}>
             {formatQuality(track.codec, track.bitrate_kbps)}

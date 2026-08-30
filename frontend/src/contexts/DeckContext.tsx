@@ -2,7 +2,7 @@ import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'r
 import type { ReactNode } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { DeckEngine } from '../playback/DeckEngine';
-import { CHANNEL_IDS, Mixer } from '../playback/mixer';
+import { CHANNEL_IDS, Mixer, STEM_NAMES } from '../playback/mixer';
 import { CaptureRecorder } from '../capture/recorder';
 import { persistTake } from '../capture/takeSink';
 import { SessionSink } from '../capture/sessionSink';
@@ -83,6 +83,19 @@ export function DeckProvider({ children }: { children: ReactNode }) {
       for (const deck of CHANNEL_IDS) engines[deck].dispose();
       mixer.dispose();
     },
+    [engines, mixer]
+  );
+
+  // Stem kill switches (stems #210/#212): mixer owns the state (MIDI,
+  // capture, automation all route through it), the deck worklet applies it
+  // — this registered applier is the bridge. The mixer sends EFFECTIVE
+  // stems (an automation lane that holds stems wins, ADR 0022); the engine
+  // dedupes, so repeated asserts don't reach the audio thread.
+  useEffect(
+    () =>
+      mixer.registerStemApplier((deck, stems) => {
+        engines[deck].setStemGains(STEM_NAMES.map((stem) => (stems[stem] ? 1 : 0)));
+      }),
     [engines, mixer]
   );
 
@@ -202,15 +215,25 @@ export function DeckProvider({ children }: { children: ReactNode }) {
           () => null
         );
 
+      // Kill state is per-Track (stems #210): a new Load starts all-on.
+      mixer.resetStems(deck);
       void engines[deck].load({
         trackId: track.id,
         audioUrl: api.tracks.audioUrl(track.id),
+        // Current stems on disk (stems #209): the deck plays the 4 stems
+        // instead of the single file, mixed in the worklet (kill switches
+        // ride on this); stem-less tracks take the unchanged single path.
+        stemUrls: track.has_stems
+          ? (['vocals', 'drums', 'bass', 'other'] as const).map((stem) =>
+              api.tracks.stemUrl(track.id, stem)
+            )
+          : null,
         bpm: track.bpm ?? null,
         savedCuePoint: track.cue_point_time ?? null,
         beatTimes,
       });
     },
-    [engines, queryClient]
+    [engines, mixer, queryClient]
   );
 
   // Keep each Deck's Quantize grid live (cue-quantize-bpm 01): the engine

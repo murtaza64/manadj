@@ -26,7 +26,7 @@ import { foldLoopPlayhead, projectLoopBeats } from './loop';
 import type { LoopRegion, LoopResize } from './loop';
 import type { DeckAudioPort } from './mixer';
 import { DeckSourceNode } from './worklet/deckSourceNode';
-import { getCachedBuffer, putCachedBuffer } from './bufferCache';
+import { getCachedBuffer, getCachedStems, putCachedBuffer, putCachedStems } from './bufferCache';
 import { firstNonSilentTime, resolveInitialCue } from './cueDefaults';
 import { MAX_PITCH_RANGE_PERCENT, composeRate } from './tempo';
 
@@ -63,6 +63,11 @@ export interface DeckTrackInfo {
    * land later arrive via setBeatTimes (the deck's beatgrid sync observer).
    */
   beatTimes?: Promise<number[] | null>;
+  /** Stem audio URLs (STEM_NAMES order) when the Track has current stems
+   * (stems #209). Present → the deck loads the 4 stems INSTEAD of the
+   * single file (replace policy, provisional until the #193 spike) and
+   * mixes them in the worklet; absent → the single-buffer path untouched. */
+  stemUrls?: string[] | null;
 }
 
 export interface DeckSnapshot {
@@ -95,6 +100,8 @@ export interface DeckSnapshot {
   pendingLoopBeats: number;
   /** The loaded Track has a usable Beatgrid (auto-loop is inert without). */
   hasBeatgrid: boolean;
+  /** Playing from stems (stems #209): stem gains are live controls. */
+  stemsLoaded: boolean;
 }
 
 export class DeckEngine {
@@ -102,6 +109,12 @@ export class DeckEngine {
   private audio: { ctx: AudioContext; input: AudioNode } | null = null;
 
   private buffer: AudioBuffer | null = null;
+  /** Decoded stems (STEM_NAMES order) when this Load took the stems path;
+   * `buffer` then aliases stems[0] for duration/sampleRate/clamp math. */
+  private stemBuffers: AudioBuffer[] | null = null;
+  /** Last stem gains asserted (STEM_NAMES order), or null = all unity.
+   * Reset on load (kill state is per-Track, #210). */
+  private stemGains: number[] | null = null;
   private trackInfo: DeckTrackInfo | null = null;
   private loadState: LoadState = 'empty';
   private loadError: string | null = null;
@@ -126,8 +139,8 @@ export class DeckEngine {
   private sourceNode: DeckSourceNode | null = null;
   /** In-flight DeckSourceNode.create (addModule is the one async step). */
   private sourceNodeCreating = false;
-  /** Buffer whose samples were last handed to the worklet. */
-  private loadedIntoWorklet: AudioBuffer | null = null;
+  /** Payload (buffer or stems array) last handed to the worklet. */
+  private loadedIntoWorklet: unknown = null;
   /** startId of the running voice; null while audio is stopped. Ended
    * messages carrying any other id are stale and ignored. */
   private runningStartId: number | null = null;
@@ -269,6 +282,8 @@ export class DeckEngine {
       pendingLoopBeats: this.transport.pendingLoopBeats,
     };
     this.buffer = null;
+    this.stemBuffers = null;
+    this.stemGains = null;
     this.beatTimes = null;
     this.cueIsLoadDefault = false;
     this.loadFirstNonSilence = null;
@@ -282,10 +297,33 @@ export class DeckEngine {
     this.emit();
 
     try {
-      // Decoded-buffer cache (mix-editor 28): another surface (or a
-      // previous Load) may already hold this track's decode — reuse it and
-      // skip fetch+decode entirely (mode-switch into the editor path).
-      let buffer = getCachedBuffer(info.trackId);
+      let buffer: AudioBuffer | null = null;
+      let stems: AudioBuffer[] | null = null;
+      if (info.stemUrls && info.stemUrls.length > 0) {
+        // Stems path (stems #209, replace policy): cached decodes (a set
+        // prefetch or a previous Load, #211) or fetch + decode all stems;
+        // the worklet mixes them. Any failure falls back to the
+        // single-file path below — a deck must always be able to play.
+        stems = getCachedStems(info.trackId) ?? null;
+        if (!stems) {
+          try {
+            stems = await this.fetchStems(info.stemUrls, abort.signal);
+            putCachedStems(info.trackId, stems);
+          } catch (err) {
+            if (abort.signal.aborted) return;
+            console.warn('[DeckEngine] stems load failed, falling back to single file:', err);
+            stems = null;
+          }
+        }
+        if (abort.signal.aborted) return;
+        if (stems) buffer = stems[0];
+      }
+      if (!buffer) {
+        // Decoded-buffer cache (mix-editor 28): another surface (or a
+        // previous Load) may already hold this track's decode — reuse it and
+        // skip fetch+decode entirely (mode-switch into the editor path).
+        buffer = getCachedBuffer(info.trackId) ?? null;
+      }
       if (!buffer) {
         const res = await fetch(info.audioUrl, { signal: abort.signal });
         if (!res.ok) throw new Error(`audio fetch failed: ${res.status}`);
@@ -310,16 +348,20 @@ export class DeckEngine {
       if (abort.signal.aborted) return;
 
       this.buffer = buffer;
+      this.stemBuffers = stems;
       this.beatTimes = beatTimes && beatTimes.length > 0 ? beatTimes : null;
 
       // Resolve the initial Main cue (saved → first beat → first
       // non-silence → 0) and park the deck at it, CDJ-style. Non-silence
       // considers every channel (earliest sound in any).
       let firstNonSilence: number | null = null;
-      for (let c = 0; c < buffer.numberOfChannels; c++) {
-        const t = firstNonSilentTime(buffer.getChannelData(c), buffer.sampleRate);
-        if (t !== null && (firstNonSilence === null || t < firstNonSilence)) {
-          firstNonSilence = t;
+      // With stems, the mix's first sound is the earliest sound in ANY stem.
+      for (const b of stems ?? [buffer]) {
+        for (let c = 0; c < b.numberOfChannels; c++) {
+          const t = firstNonSilentTime(b.getChannelData(c), b.sampleRate);
+          if (t !== null && (firstNonSilence === null || t < firstNonSilence)) {
+            firstNonSilence = t;
+          }
         }
       }
       const cue = resolveInitialCue({
@@ -1075,12 +1117,49 @@ export class DeckEngine {
     });
   }
 
-  /** Hand the loaded buffer's samples to the worklet unless it already has
-   * them. Sole writer of `loadedIntoWorklet`. */
+  /** Hand the loaded samples (stems or single buffer) to the worklet
+   * unless it already has them. Sole writer of `loadedIntoWorklet`. */
   private handOverIfStale(node: DeckSourceNode): void {
+    if (this.stemBuffers) {
+      if (this.loadedIntoWorklet === this.stemBuffers) return;
+      node.loadStems(this.stemBuffers);
+      // Kernel resets gains to unity on load; re-assert any live kills.
+      if (this.stemGains) node.setStemGains(this.stemGains);
+      this.loadedIntoWorklet = this.stemBuffers;
+      return;
+    }
     if (!this.buffer || this.loadedIntoWorklet === this.buffer) return;
     node.loadTrack(this.buffer);
     this.loadedIntoWorklet = this.buffer;
+  }
+
+  /** Fetch + decode all stems in parallel (stems #209). */
+  private async fetchStems(urls: string[], signal: AbortSignal): Promise<AudioBuffer[]> {
+    const ctx = this.ensureAudio().ctx;
+    return Promise.all(
+      urls.map(async (url) => {
+        const res = await fetch(url, { signal });
+        if (!res.ok) throw new Error(`stem fetch failed: ${res.status}`);
+        const bytes = await res.arrayBuffer();
+        return ctx.decodeAudioData(bytes);
+      })
+    );
+  }
+
+  /** Target per-stem gains (STEM_NAMES order, 0..1) — the kill-switch seam
+   * (#210). No-op unless this Load took the stems path; the worklet
+   * declick-ramps every change. */
+  setStemGains(gains: number[]): void {
+    if (!this.stemBuffers) return;
+    // Dedupe: mixer subscribers forward on every channel change (any knob
+    // move) — only actual stem changes reach the audio thread.
+    if (this.stemGains && this.stemGains.length === gains.length
+        && this.stemGains.every((g, i) => g === gains[i])) {
+      return;
+    }
+    if (!this.stemGains && gains.every((g) => g === 1)) return; // unity is the load state
+    this.stemGains = gains.slice();
+    this.sourceNode?.setStemGains(this.stemGains);
   }
 
   /** The live voice ran off the end of the track (worklet message). */
@@ -1139,6 +1218,7 @@ export class DeckEngine {
         : null,
       pendingLoopBeats: this.transport.pendingLoopBeats,
       hasBeatgrid: (this.beatTimes?.length ?? 0) >= 2,
+      stemsLoaded: this.stemBuffers !== null,
     };
   }
 

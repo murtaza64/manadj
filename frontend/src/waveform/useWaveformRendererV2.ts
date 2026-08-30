@@ -62,6 +62,15 @@ interface Options {
    * poll cadence. Returns an unsubscribe; must be referentially stable
    * (useCallback) or the effect churns. Ignored in `driven` mode. */
   subscribeWake?: (cb: () => void) => () => void;
+  /** Per-stem waveforms for GPU-side mask compositing (stems #213);
+   * null clears stem masking. */
+  stemWaveforms?: DecodedWaveform[] | null;
+  /** Per-column mask source (track time → 4 gains, history-aware). Must be
+   * referentially stable. */
+  stemMaskAt?: ((t: number) => readonly number[]) | null;
+  /** Strip behavior (default): ahead of the playhead the bottom lobe shows
+   * the raw mix. False (minimap): mask everywhere. */
+  stemLobeSplit?: boolean;
 }
 
 export function useWaveformRendererV2({
@@ -81,17 +90,26 @@ export function useWaveformRendererV2({
   playing = false,
   wakeKey,
   subscribeWake,
+  stemWaveforms = null,
+  stemMaskAt = null,
+  stemLobeSplit = true,
 }: Options) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rendererRef = useRef<WaveformRendererV2 | null>(null);
   const [initError, setInitError] = useState<string | null>(null);
   const slotState = useStyleSlot(slot);
 
+  // Latest decoded data for the create effect; updates flow through the
+  // light path below.
+  const dataRef = useRef(waveformData);
+  dataRef.current = waveformData;
+  const hasData = Boolean(waveformData);
+
   useEffect(() => {
-    if (!canvasRef.current || !waveformData) return;
+    if (!canvasRef.current || !hasData) return;
     try {
       const renderer = new WaveformRendererV2(canvasRef.current, config);
-      renderer.setWaveformData(waveformData);
+      if (dataRef.current) renderer.setWaveformData(dataRef.current);
       if (!driven) renderer.startRenderLoop(clock);
       rendererRef.current = renderer;
       setInitError(null);
@@ -104,7 +122,18 @@ export function useWaveformRendererV2({
       setInitError('Failed to initialize waveform renderer');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [waveformData, clock]);
+  }, [hasData, clock]);
+
+  // Light path (stems #213): swapping decoded data on a LIVE renderer is a
+  // texture re-upload + repaint, not a dispose/rebuild — a stem-mask
+  // recomposite (or a cache-hit track switch) must not hitch the playhead.
+  // The renderer is only built/torn down when data appears/disappears or
+  // the clock changes (the effect above).
+  useEffect(() => {
+    if (waveformData && rendererRef.current) {
+      rendererRef.current.setWaveformData(waveformData);
+    }
+  }, [waveformData]);
 
   const draw = useCallback(() => {
     rendererRef.current?.renderFrame(clock);
@@ -124,6 +153,15 @@ export function useWaveformRendererV2({
   useEffect(() => {
     if (!driven) rendererRef.current?.setPlaying(playing);
   }, [playing, driven, waveformData]);
+
+  // Stem masking (stems #213): per-stem textures upload once per Load;
+  // the mask callback is sampled per frame (no per-toggle work here).
+  useEffect(() => {
+    rendererRef.current?.setStemWaveforms(stemWaveforms);
+  }, [stemWaveforms, hasData]);
+  useEffect(() => {
+    rendererRef.current?.setStemMask(stemMaskAt, stemLobeSplit);
+  }, [stemMaskAt, stemLobeSplit, hasData]);
 
   // External wake (performance-hardening 01): repaint on wakeKey change.
   useEffect(() => {

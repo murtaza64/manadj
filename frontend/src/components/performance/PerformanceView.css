@@ -107,10 +107,21 @@
 .perf-wave-fader-fill {
   position: absolute;
   inset: 0 4px;
-  z-index: 3;
+  /* UNDERLAY (performance-mode 09 review): below the transparent-bg GL
+     canvas — deck-color fill without tinting the waveform body. */
+  z-index: 0;
   width: calc(100% - 8px);
   height: 100%;
   pointer-events: none;
+}
+/* The GL strip paints alpha-0 background pixels; the row supplies the BG
+   color the shader used to paint (vec3(0.03,0.03,0.05)). */
+.perf-wave-row {
+  background: rgb(8, 8, 13);
+}
+.perf-wave-row canvas:not(.perf-wave-fader-fill) {
+  position: relative;
+  z-index: 1;
 }
 
 /* De-emphasis is OPACITY ONLY — never `filter` (or `backdrop-filter`) over
@@ -567,8 +578,32 @@
 .perf-padcol {
   display: grid;
   grid-template-columns: repeat(4, 36px);
-  grid-template-rows: repeat(4, 1fr);
+  /* Fixed band height (stems #210): 4 rows at the measured 21.75px +
+     3 gaps — pinned so the stem row can join WITHOUT growing the deck.
+     minmax(0) lets rows compress below button min-content. */
+  height: 99px;
+  grid-template-rows: repeat(4, minmax(0, 1fr));
   gap: var(--space-4);
+}
+
+/* Stems loaded: a 5th row (the stem kill switches) squashes all rows
+   above into the same 99px band — deck height never changes. */
+.perf-padcol.has-stems {
+  grid-template-rows: repeat(5, minmax(0, 1fr));
+}
+.perf-padcol.has-stems .player-button,
+.perf-padcol.has-stems .hot-cue {
+  min-height: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+.perf-padcol .perf-stemrow {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--space-4);
+  min-height: 0;
 }
 
 .perf-padcol .deck-jumprow { grid-column: 1 / -1; }
@@ -1036,6 +1071,67 @@
   background: var(--success);
   color: var(--base);
   border-color: var(--success);
+}
+
+/* Stem kill switches (stems #210) — the hot-cue set/unset idiom: audible
+   stem = colored outline + tinted fill + colored text (like a set pad);
+   killed = grey outline, dim text (like an unset pad). Colors are the
+   --stem-* tokens (theme/tokens.ts). */
+.perf-stem-vocals { --stem-color: var(--stem-vocals); }
+.perf-stem-drums { --stem-color: var(--stem-drums); }
+.perf-stem-bass { --stem-color: var(--stem-bass); }
+.perf-stem-other { --stem-color: var(--stem-other); }
+
+.perf-stemrow .player-button.perf-stem {
+  min-width: 0;
+  font-size: 9px;
+  letter-spacing: 0.05em;
+  border: 1px solid var(--surface0);
+  color: var(--overlay0);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+.perf-stemrow .player-button.perf-stem.on {
+  border-color: var(--stem-color);
+  background: color-mix(in srgb, var(--stem-color) 12%, transparent);
+  color: var(--stem-color);
+}
+.perf-stemrow .player-button.perf-stem.on:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--stem-color) 25%, transparent);
+  border-color: var(--stem-color);
+  color: var(--stem-color);
+}
+.perf-stemrow .player-button.perf-stem:not(.on):hover:not(:disabled) {
+  background: var(--surface0);
+  border-color: var(--stem-color);
+  color: var(--overlay0);
+}
+
+/* Extract-stems affordance (stems review): the row swaps to one spanning
+   action button for stem-less tracks — offer on hover, progress while the
+   split task runs, reload when done. */
+.perf-stemrow .player-button.perf-stem-action {
+  grid-column: 1 / -1; /* the row is a 4-column grid; the action spans it */
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  font-size: 9px;
+  letter-spacing: 0.05em;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  padding: 0;
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+.perf-stemrow .player-button.perf-stem-action:disabled {
+  border-color: var(--surface1);
+  color: var(--overlay0);
+  background: none;
 }
 
 /* Key Lock toggle (key-lock 03) — padlock glyph leading the foot row,

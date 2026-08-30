@@ -171,6 +171,14 @@ export const api = {
     stemUrl: (id: number, stem: 'vocals' | 'drums' | 'bass' | 'other') =>
       `${API_BASE}/tracks/${id}/stems/${stem}`,
 
+    /** Enqueue a stem-split task ("extract stems" button). Dedup rides the
+     * task queue; returns { queued, has_stems }. */
+    extractStems: async (id: number): Promise<{ queued: boolean; has_stems: boolean }> => {
+      const res = await fetch(`${API_BASE}/tracks/${id}/stems/split`, { method: 'POST' });
+      if (!res.ok) throw new Error('Failed to request stem split');
+      return res.json();
+    },
+
     list: async (
       page: number = 1,
       perPage: number = 1000,

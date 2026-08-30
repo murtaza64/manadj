@@ -237,6 +237,7 @@ function openEngagement(
     filter: d.filter,
     pitch: d.pitch,
     assignment: d.assignment,
+    stems: { ...d.stems },
   });
   // ROLE-shaped init (ADR 0032 via 4dp 10/12): 'A' is the outgoing role,
   // 'B' the incoming, whatever the physical decks — which are stamped.
@@ -416,10 +417,10 @@ function cloneCaptureState(state: CaptureState): CaptureState {
   return {
     ...state,
     decks: {
-      A: { ...state.decks.A, eq: { ...state.decks.A.eq } },
-      B: { ...state.decks.B, eq: { ...state.decks.B.eq } },
-      C: { ...state.decks.C, eq: { ...state.decks.C.eq } },
-      D: { ...state.decks.D, eq: { ...state.decks.D.eq } },
+      A: { ...state.decks.A, eq: { ...state.decks.A.eq }, stems: { ...state.decks.A.stems } },
+      B: { ...state.decks.B, eq: { ...state.decks.B.eq }, stems: { ...state.decks.B.stems } },
+      C: { ...state.decks.C, eq: { ...state.decks.C.eq }, stems: { ...state.decks.C.stems } },
+      D: { ...state.decks.D, eq: { ...state.decks.D.eq }, stems: { ...state.decks.D.stems } },
     },
     pairs: Object.fromEntries(
       PAIR_KEYS.map((k) => [k, { ...state.pairs[k] }])

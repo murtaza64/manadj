@@ -527,6 +527,8 @@ export interface DeckStateAtT {
   eq: { low: number; mid: number; high: number };
   filter: number;
   assignment: CrossfaderAssignment;
+  /** Per-stem enables (stems #212); all-on before any stem event. */
+  stems: { vocals: boolean; drums: boolean; bass: boolean; other: boolean };
   pitch: number;
 }
 
@@ -590,6 +592,7 @@ function snapshotState(
           filter: d.filter,
           assignment: d.assignment,
           pitch: d.pitch,
+          stems: { ...d.stems },
         },
       ];
     })
