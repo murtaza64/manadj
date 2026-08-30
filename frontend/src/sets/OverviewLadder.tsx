@@ -996,10 +996,9 @@ const LadderClip = memo(function LadderClip({
   /** Bumps when the canvas backing store should re-render (zoom settle). */
   redrawKey: number;
 }) {
-  // Lane geometry keys off the deck (four-deck aware, sets #161): up
-  // lanes (A/C) carry the title on the top edge, down lanes (B/D) on the
-  // bottom — the outer edge of each mirrored braid.
-  const up = LANE_UP[entry.deck];
+  // Chrome is NOT mirrored (sneak fix, 2026-08-30): titles and cue flags
+  // sit on the TOP edge on every deck — mirroring belongs to the lane
+  // STACKING geometry only, and mirrored chrome on B/D read as inverted.
   const title = track ? (track.title ?? track.filename) : `Track ${entry.trackId}`;
   const cues = hotCues.map((c) => ({
     t: c.time_seconds,
@@ -1024,7 +1023,7 @@ const LadderClip = memo(function LadderClip({
         zIndex: 2,
       }}
     >
-      {up && <ClipTitle position={position} title={title} color={DECK_COLORS[entry.deck]} />}
+      <ClipTitle position={position} title={title} color={DECK_COLORS[entry.deck]} />
       <div style={{ position: 'relative', flex: 1, minHeight: 0 }}>
         {segments.map((seg, k) => (
           <div
@@ -1044,7 +1043,6 @@ const LadderClip = memo(function LadderClip({
               height={LANE_H - TITLE_H - 2}
               range={[seg.trackStart, seg.trackEnd]}
               cues={cues}
-              dir={up ? 'up' : 'down'}
               redrawKey={redrawKey}
               plan={plan}
               deck={entry.deck}
@@ -1053,7 +1051,6 @@ const LadderClip = memo(function LadderClip({
           </div>
         ))}
       </div>
-      {!up && <ClipTitle position={position} title={title} color={DECK_COLORS[entry.deck]} />}
     </div>
   );
 });
@@ -1099,8 +1096,8 @@ function ClipTitle({
  * baseline at the bottom edge, 'down' hangs them from the top — the
  * mirrored-lane layout wins over the style's own anchor); hot cues use the
  * deck minimaps' zoned mark — a 2px full-height pole flying a 5×5 square
- * flag — with the flag on the OUTER (title-side) edge, keeping the center
- * line clean. Cue marks are DOM overlays, NOT canvas pixels (issue 172):
+ * flag — flag at the TOP edge on every deck (chrome is never mirrored;
+ * sneak fix 2026-08-30). Cue marks are DOM overlays, NOT canvas pixels (issue 172):
  * during a zoom gesture the stale bitmap is CSS-stretched until the
  * settle redraw, so anything in it stretches too — DOM marks ride the
  * width change by % position while keeping fixed pixel geometry. */
@@ -1109,7 +1106,6 @@ function LadderWave({
   height,
   range,
   cues,
-  dir,
   redrawKey,
   plan,
   deck,
@@ -1124,7 +1120,6 @@ function LadderWave({
   /** Track-time span this clip plays. */
   range: [number, number];
   cues: { t: number; color: string }[];
-  dir: 'up' | 'down';
   redrawKey: number;
   /** Plan + deck + mix-time span drive per-column fader/EQ modulation
    * (sets #171): the columns dim/shrink with the planned fader and drop
@@ -1171,8 +1166,7 @@ function LadderWave({
 
       // Bipolar on every lane (#161): the classic symmetric read —
       // mirroring belongs to the lane STACKING (C/A/B/D geometry), never
-      // to how a lane's own content is drawn. `dir` still places the cue
-      // flags on the title side below.
+      // to how a lane's own content is drawn.
       drawStyledWave(ctx, wave, slot.styleId, slot.params, {
         width: wDraw,
         height: h,
@@ -1183,14 +1177,14 @@ function LadderWave({
       });
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [wave, height, dir, range[0], range[1], redrawKey, slot, plan, deck, mixRange[0], mixRange[1]]);
+  }, [wave, height, range[0], range[1], redrawKey, slot, plan, deck, mixRange[0], mixRange[1]]);
 
   return (
     <div style={{ position: 'relative', height, flex: 'none' }}>
       <canvas ref={ref} style={{ width: '100%', height, display: 'block' }} />
       {/* The minimap's zoned cue mark (WaveformRendererV2.pushHotCues,
           minimap branch): 2px full-height pole + 5×5 square flag off its
-          right, flag on the title side: top for 'up', bottom for 'down'.
+          right, flag at the TOP on every deck (chrome never mirrors).
           %-positioned DOM so the mark tracks zoom continuously at fixed
           pixel size (the clip's overflow:hidden trims edge marks). */}
       {cues.map((c, i) => {
@@ -1223,8 +1217,7 @@ function LadderWave({
                 left: CUE_FLAG_POLE_W / 2,
                 width: CUE_FLAG_MINI_SIZE,
                 height: CUE_FLAG_MINI_SIZE,
-                top: dir === 'up' ? 0 : undefined,
-                bottom: dir === 'up' ? undefined : 0,
+                top: 0,
                 background: c.color,
               }}
             />
