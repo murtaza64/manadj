@@ -165,6 +165,27 @@
   color: var(--routine-accent);
   flex-shrink: 0;
 }
+/* Two-line row body (redirect 2026-08-31): label + meta on top, the
+   involved tracks underneath. */
+.mp-rowmain {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.mp-rowtop {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  min-width: 0;
+}
+.mp-rowtracks {
+  color: var(--subtext0);
+  font-size: var(--font-small);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .mp-label {
   overflow: hidden;
   text-overflow: ellipsis;

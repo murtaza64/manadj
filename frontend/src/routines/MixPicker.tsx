@@ -67,6 +67,9 @@ interface Row {
   glyph: string;
   label: string;
   meta?: string;
+  /** Second line: the involved tracks (redirect 2026-08-31) — transitions
+   * "A → B", routines/candidates the whole cast, cameos "host ⟡ guest". */
+  tracks?: string;
   favorite?: boolean;
   /** Inline affordances (transitions only in v1). */
   editable?: boolean;
@@ -124,7 +127,7 @@ export function MixPicker(props: MixPickerProps) {
         ref: { kind: 'transition', aTrackId: r.a_track_id, bTrackId: r.b_track_id, uuid: r.uuid },
         glyph: '⇄',
         label: r.name || 'Transition',
-        meta: `${short(t(r.a_track_id), r.a_track_id)} → ${short(t(r.b_track_id), r.b_track_id)}`,
+        tracks: `${short(t(r.a_track_id), r.a_track_id)} → ${short(t(r.b_track_id), r.b_track_id)}`,
         favorite: r.favorite,
         editable: true,
         group,
@@ -134,7 +137,8 @@ export function MixPicker(props: MixPickerProps) {
         ref: { kind: 'routine', uuid: r.uuid },
         glyph: '◆',
         label: r.name || `${r.cast.length}-track routine`,
-        meta: `${r.cast.length} tracks · ${Math.round(r.duration_beats)}b`,
+        meta: `${Math.round(r.duration_beats)}b`,
+        tracks: r.cast.map((id) => short(t(id), id)).join(' / '),
         group,
       });
 
@@ -164,6 +168,7 @@ export function MixPicker(props: MixPickerProps) {
           ref: { kind: 'cameo', hostTrackId: c.host_track_id, guestTrackId: c.guest_track_id, uuid: c.uuid },
           glyph: '⟡',
           label: c.name || 'Cameo',
+          tracks: `${short(t(c.host_track_id), c.host_track_id)} ⟡ ${short(t(c.guest_track_id), c.guest_track_id)}`,
           favorite: c.favorite,
           group: 'Cameos',
         });
@@ -191,7 +196,7 @@ export function MixPicker(props: MixPickerProps) {
           ref: { kind: 'cameo', hostTrackId: c.host_track_id, guestTrackId: c.guest_track_id, uuid: c.uuid },
           glyph: '⟡',
           label: c.name || 'Cameo',
-          meta: `guest ${short(t(c.guest_track_id), c.guest_track_id)}`,
+          tracks: `${short(t(c.host_track_id), c.host_track_id)} ⟡ ${short(t(c.guest_track_id), c.guest_track_id)}`,
           favorite: c.favorite,
           group: 'Cameos over',
         });
@@ -212,6 +217,7 @@ export function MixPicker(props: MixPickerProps) {
         glyph: '◇',
         label: `${tk.cast.length}-track Routine Take`,
         meta: `promote on open · confirmed ${tk.confirmed_at?.slice(0, 10) ?? ''}`,
+        tracks: tk.cast.map((id) => short(t(id), id)).join(' / '),
         group: 'Routine Takes',
       });
     }
@@ -221,11 +227,27 @@ export function MixPicker(props: MixPickerProps) {
         glyph: '⧉',
         label: `${c.cast.length}-track candidate`,
         meta: `confirm + promote on open · returns ${c.evidence?.returns ?? 0}`,
+        tracks: c.cast.map((id) => short(t(id), id)).join(' / '),
         group: 'Miner candidates',
       });
     }
     return out;
   }, [chipA, chipB, props]);
+
+  // Contiguous group runs (#205 bug: a row can legitimately appear in TWO
+  // groups — 'On the decks' AND the inventory — so React keys must be
+  // group-qualified and headers must live OUTSIDE the keyed row wrappers;
+  // duplicate keys made reconciliation interleave headers and break
+  // hover).
+  const grouped = useMemo(() => {
+    const out: { group: string; rows: { row: Row; flat: number }[] }[] = [];
+    rows.forEach((row, flat) => {
+      const last = out[out.length - 1];
+      if (last && last.group === row.group) last.rows.push({ row, flat });
+      else out.push({ group: row.group, rows: [{ row, flat }] });
+    });
+    return out;
+  }, [rows]);
 
   // Track matches present → they own ↑/↓/Enter; otherwise rows do.
   const pickingTracks = query.trim().length > 0;
@@ -301,7 +323,6 @@ export function MixPicker(props: MixPickerProps) {
       <span className="mp-chip empty">{placeholder}</span>
     );
 
-  let groupSeen = '';
   return (
     <div className="mp-panel" onKeyDown={onKeyDown}>
       <div className="mp-chips">
@@ -355,17 +376,19 @@ export function MixPicker(props: MixPickerProps) {
       )}
       {!pickingTracks && (
         <div className="mp-list">
-          {rows.map((row, i) => {
-            const key = refKey(row.ref);
-            const header = row.group !== groupSeen ? ((groupSeen = row.group), row.group) : null;
-            const isRenaming = renaming === key;
-            const isOpen = props.openRefKey !== null && key === props.openRefKey;
-            return (
-              <div key={key}>
-                {header && <div className="mp-group">{header}</div>}
-                <div
-                  className={`mp-row${i === highlight ? ' hl' : ''}${isOpen ? ' open' : ''}`}
-                  onMouseEnter={() => setHighlight(i)}
+          {grouped.map((g) => (
+            <div key={g.group}>
+              <div className="mp-group">{g.group}</div>
+              {g.rows.map(({ row, flat }) => {
+                const key = `${g.group}:${refKey(row.ref)}`;
+                const isRenaming = renaming === key;
+                const isOpen =
+                  props.openRefKey !== null && refKey(row.ref) === props.openRefKey;
+                return (
+                  <div
+                    key={key}
+                    className={`mp-row${flat === highlight ? ' hl' : ''}${isOpen ? ' open' : ''}`}
+                    onMouseEnter={() => setHighlight(flat)}
                   onMouseDown={(e) => {
                     if (isRenaming) return;
                     e.preventDefault();
@@ -373,29 +396,34 @@ export function MixPicker(props: MixPickerProps) {
                   }}
                 >
                   <span className="mp-glyph">{row.glyph}</span>
-                  {isRenaming && row.ref.kind === 'transition' ? (
-                    <input
-                      className="input mp-rename"
-                      autoFocus
-                      value={renameDraft}
-                      onChange={(e) => setRenameDraft(e.target.value)}
-                      onMouseDown={(e) => e.stopPropagation()}
-                      onKeyDown={(e) => {
-                        e.stopPropagation();
-                        if (e.key === 'Enter') {
-                          props.onRenameTransition(row.ref as never, renameDraft);
-                          setRenaming(null);
-                        } else if (e.key === 'Escape') setRenaming(null);
-                      }}
-                      onBlur={() => setRenaming(null)}
-                    />
-                  ) : (
-                    <span className="mp-label">
-                      {row.favorite ? '★ ' : ''}
-                      {row.label}
+                  <span className="mp-rowmain">
+                    <span className="mp-rowtop">
+                      {isRenaming && row.ref.kind === 'transition' ? (
+                        <input
+                          className="input mp-rename"
+                          autoFocus
+                          value={renameDraft}
+                          onChange={(e) => setRenameDraft(e.target.value)}
+                          onMouseDown={(e) => e.stopPropagation()}
+                          onKeyDown={(e) => {
+                            e.stopPropagation();
+                            if (e.key === 'Enter') {
+                              props.onRenameTransition(row.ref as never, renameDraft);
+                              setRenaming(null);
+                            } else if (e.key === 'Escape') setRenaming(null);
+                          }}
+                          onBlur={() => setRenaming(null)}
+                        />
+                      ) : (
+                        <span className="mp-label">
+                          {row.favorite ? '★ ' : ''}
+                          {row.label}
+                        </span>
+                      )}
+                      {row.meta && <span className="mp-meta">{row.meta}</span>}
                     </span>
-                  )}
-                  {row.meta && <span className="mp-meta">{row.meta}</span>}
+                    {row.tracks && <span className="mp-rowtracks">{row.tracks}</span>}
+                  </span>
                   {row.editable && row.ref.kind === 'transition' && !isRenaming && (
                     <span className="mp-tools" onMouseDown={(e) => e.stopPropagation()}>
                       <button
@@ -429,10 +457,11 @@ export function MixPicker(props: MixPickerProps) {
                       </button>
                     </span>
                   )}
-                </div>
-              </div>
-            );
-          })}
+                  </div>
+                );
+              })}
+            </div>
+          ))}
           {rows.length === 0 && (
             <div className="mp-none">
               {chipA !== null ? 'nothing recorded here yet' : 'type to search tracks'}
