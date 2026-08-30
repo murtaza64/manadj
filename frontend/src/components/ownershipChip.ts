@@ -35,6 +35,10 @@ export function resolveChipFace(
   holder: AudibleSurfaceId,
   conductor: ConductorSnapshot
 ): ChipFace {
+  // Both editor surfaces audition: the pair editor ('editor') and the Mix
+  // editor ('routine-editor' — missed when the routine editor grew its own
+  // surface; the chip showed DECKS during its auditions). The face carries
+  // WHICH surface so the chip click navigates to the right editor.
   if (holder === 'editor' || holder === 'routine-editor') {
     return { kind: 'audition', editor: holder };
   }
