@@ -173,10 +173,13 @@ export class StemTrackSource implements TrackSource {
       const stem = this.stems[s];
       const data = stem[Math.min(channel, stem.length - 1)];
       if (!data) continue;
-      // Constant gain over the run unless the ramp intersects it.
+      // Constant gain over the run unless the ramp intersects it. No ramp
+      // in flight = the SETTLED gain (gh#219: reading unity here instead
+      // resurrected killed stems on the stretch path once the declick ramp
+      // was retired — Key Lock made every kill switch a ~5 ms dip).
       const ramp = this.ramps[s];
       let constGain: number | null;
-      if (!ramp) constGain = 1;
+      if (!ramp) constGain = this.gains[s];
       else if (from >= ramp.startFrame + ramp.lengthFrames) constGain = ramp.g1;
       else if (to <= ramp.startFrame) constGain = ramp.g0;
       else constGain = null;

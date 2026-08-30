@@ -68,6 +68,32 @@ describe('StemTrackSource', () => {
     }
   });
 
+  it('fillWindow honors settled gains after the ramp is retired (gh#219)', () => {
+    // The live sequence: kill a stem, then the render loop settles the
+    // completed ramp (settleCompletedRamps). The stretch path's bulk fill
+    // must keep reading the settled gain — not resurrect the stem at unity.
+    const source = stems();
+    source.setGain(1, 0, 0, 2); // kill stem 1 over frames 0..2
+    source.settleCompletedRamps(10); // live voice is well past the ramp
+    const dest = new Float32Array(6);
+    source.fillWindow(dest, 0, 1);
+    for (let i = 0; i < 6; i++) {
+      expect(dest[i]).toBeCloseTo(source.sampleAt(0, 1 + i), 5);
+    }
+  });
+
+  it('fillWindow honors settled gains after a voice restart settles ramps (gh#219)', () => {
+    const source = stems();
+    source.setGain(0, 0, 0, 2);
+    source.setGain(1, 0.25, 0, 2);
+    source.settleGains(); // seek/restart collapses ramps to targets
+    const dest = new Float32Array(6);
+    source.fillWindow(dest, 0, 0);
+    for (let i = 0; i < 6; i++) {
+      expect(dest[i]).toBeCloseTo(source.sampleAt(0, i), 5);
+    }
+  });
+
   it('fillWindow matches per-sample reads while a ramp intersects', () => {
     const source = stems();
     source.setGain(0, 0, 3, 4); // ramp inside the window
