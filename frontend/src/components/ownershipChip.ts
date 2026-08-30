@@ -32,7 +32,10 @@ export function resolveChipFace(
   holder: AudibleSurfaceId,
   conductor: ConductorSnapshot
 ): ChipFace {
-  if (holder === 'editor') return { kind: 'audition' };
+  // Both editor surfaces audition: the pair editor ('editor') and the Mix
+  // editor ('routine-editor' — missed when the routine editor grew its own
+  // surface; the chip showed DECKS during its auditions, sneak 2026-08-30).
+  if (holder === 'editor' || holder === 'routine-editor') return { kind: 'audition' };
   if (holder === 'replay') return { kind: 'replay' };
   if (holder === 'conductor' && conductor.setId !== null && conductor.status !== 'idle') {
     return { kind: 'set', setId: conductor.setId, playing: conductor.status === 'playing' };

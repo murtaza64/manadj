@@ -34,6 +34,9 @@ describe('resolveChipFace', () => {
 
   it('shows AUDITION while the editor holds the decks', () => {
     expect(resolveChipFace('editor', idle)).toEqual<ChipFace>({ kind: 'audition' });
+    // The Mix editor's own surface auditions too (sneak 2026-08-30: it
+    // fell through to the DECKS face).
+    expect(resolveChipFace('routine-editor', idle)).toEqual<ChipFace>({ kind: 'audition' });
   });
 
   it('AUDITION wins even while a displaced Conductor still reports a set (stand-down without release)', () => {
