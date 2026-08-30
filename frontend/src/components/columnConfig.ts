@@ -23,6 +23,8 @@ export const COLUMN_CONFIG: ColumnConfig[] = [
   { id: 'artist', width: 180 },
   { id: 'created_at', width: 75, align: 'right' },
   { id: 'tags', width: 700 },
+  // Stems presence (stems map #118): a checkmark when current stems exist.
+  { id: 'stems', width: 30 },
   { id: 'quality', width: 80, align: 'right' },
   { id: 'size', width: 60, align: 'right' },
   { id: 'provenance', width: 90 },

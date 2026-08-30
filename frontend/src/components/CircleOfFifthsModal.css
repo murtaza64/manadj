@@ -4,7 +4,7 @@
   left: 0;
   right: 0;
   bottom: 0;
-  z-index: 1000;
+  z-index: var(--z-modal);
   background: rgba(0, 0, 0, 0.2);
 }
 
@@ -42,12 +42,11 @@
 
 .cof-key-segment {
   cursor: pointer;
-  transition: all 0.2s ease;
 }
 
 .cof-key-segment.selected {
-  fill: var(--mauve);
-  stroke: var(--mauve);
+  fill: var(--accent);
+  stroke: var(--accent);
   stroke-width: 2;
 }
 
@@ -67,8 +66,7 @@
 
 .cof-key-label {
   fill: var(--text);
-  font-family: 'UbuntuMono Nerd Font', monospace;
-  font-size: 12px;
+  font-size: var(--font-body);
   text-anchor: middle;
   dominant-baseline: middle;
   pointer-events: none;
@@ -76,22 +74,22 @@
 }
 
 .cof-modal-footer {
-  margin-top: 12px;
+  margin-top: var(--space-12);
   display: flex;
-  gap: 12px;
+  gap: var(--space-12);
   align-items: center;
   background: var(--mantle);
   border: 1px solid var(--surface0);
-  padding: 8px 16px;
+  padding: var(--space-8) var(--space-16);
 }
 
 .cof-clear-btn {
-  padding: 6px 12px;
+  padding: var(--space-6) var(--space-12);
   background: transparent;
   color: var(--text);
   border: 1px solid var(--surface1);
   cursor: pointer;
-  font-size: 13px;
+  font-size: var(--font-body);
 }
 
 .cof-clear-btn:hover {

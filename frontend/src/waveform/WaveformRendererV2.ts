@@ -20,7 +20,26 @@ import type { PlaybackClock } from '../playback/clock';
 import { addBeats } from '../playback/quantize';
 import { MAX_LEAD_IN_SECONDS } from '../playback/DeckEngine';
 import { barCountLabel } from '../meter/ladder';
-import { HOT_CUE_CSS_COLORS } from '../hotcues/palette';
+import { cueCssColor } from '../hotcues/palette';
+import {
+  cueGlColor,
+  CUE_FLAG_FULL_SIZE,
+  CUE_FLAG_MINI_SIZE,
+  CUE_FLAG_POLE_W,
+  CUE_FLAG_INK,
+  BEAT_TIER_FULL,
+  TIER_MIN_SPACING_PX,
+  LADDER_GOLD_GL,
+  MAIN_CUE_COLOR_GL,
+  MAIN_CUE_LINE_W,
+  MAIN_CUE_TRI_MINI_HALF,
+  MAIN_CUE_TRI_MINI_DEPTH,
+  PLAYHEAD_TRANSPORT_GL,
+  PLAY_MARKER_FRACTION,
+  WAVE_BG_GL,
+  MINIMAP_BRIGHTNESS,
+} from '../theme/markers';
+import { FONT_MONO, TEXT } from '../theme/tokens';
 import { STEP_RATIO } from '../utils/waveformZoom';
 import { playedDimBoundary } from './loopOverlay';
 import { MAX_LEVELS, TEX_WIDTH } from './blob';
@@ -30,6 +49,11 @@ import type { StyleParams } from './styles';
 
 export interface WaveformRendererConfig {
   isMinimapMode?: boolean;
+  /** Transparent background (performance-mode 09 review): background
+   * pixels get alpha 0 so an UNDERLAY (the fader area fill) shows through
+   * without tinting the waveform body. The container must paint the BG
+   * color itself. */
+  transparentBackground?: boolean;
   /** Position of the fixed playhead in follow mode (0.0-1.0, default 0.25). */
   playMarkerPosition?: number;
   /** Draw a time/bar readout on the overlay canvas (main waveform only). */
@@ -76,19 +100,6 @@ function formatReadoutTime(seconds: number): string {
   return `${m}:${rest.toFixed(1).padStart(4, '0')}`;
 }
 
-/** Hot-cue slot FALLBACK palette (hotcue-colors 01): bright, fully
- * saturated — the pastel Catppuccin set was rejected. A cue's STORED
- * color (Engine import) takes precedence at every render site; these are
- * what colorless (in-app-created) cues get. Values live in theme/tokens.ts
- * (which also installs --hc-1..--hc-8; the GL pass can't read CSS vars, so
- * the floats below derive from the imported constants).
- * Also reused by the Set overview ladder (sets 04 review). */
-const CUE_COLOR_RE = /^#[0-9a-f]{6}$/i;
-
-/** CSS-side cue color resolution (hotcue-colors 01): the stored per-cue
- * color wins when it's a trustworthy hex; otherwise the slot palette.
- * Shared by every 2D canvas/DOM render site (editor lane guides, editor
- * minimap) so no surface grows its own fallback. */
 /**
  * Which beat indices are downbeats — epsilon matching, not exact floats
  * (ADR 0027 §8). Both arrays are sorted; a two-pointer sweep. The backend
@@ -144,40 +155,20 @@ export interface LadderGridInput {
   topBars: readonly number[];
 }
 
-/** Metric-ladder gridline styling: width (dpr multiples) and alpha per
- * tier, index 0 = bar … 4 = 16-bar boundary. Tier 0 keeps the legacy
- * downbeat look; higher tiers escalate so phrase structure reads at a
- * glance at any zoom. Tunable heuristics, not part of the model. */
-export const TIER_WIDTH: readonly number[] = [2, 2, 2.5, 3, 3.5];
-export const TIER_ALPHA: readonly number[] = [0.3, 0.38, 0.48, 0.6, 0.75];
-/** A tier's lines draw only when that tier's own spacing is at least this
- * many px (dpr-scaled): zoomed out, low tiers cull and only phrase-level
- * lines survive — the generalization of the legacy 2.5px/bar cutoff. */
-export const TIER_MIN_SPACING_PX = 2.5;
+/** Metric-ladder gridline styling — the waveform-body tier table (widths,
+ * alphas, weak-beat style, min spacing). Data lives in theme/markers.ts
+ * (BEAT_TIER_FULL); re-exported here for the surfaces that still import the
+ * raw arrays from the renderer (routine timeline). */
+export const TIER_WIDTH = BEAT_TIER_FULL.width;
+export const TIER_ALPHA = BEAT_TIER_FULL.alpha;
 
-/** '#RRGGBB' → 0-1 floats; null for anything else (falls back to the
- * slot palette — stored colors are Engine-import hex, but don't trust). */
-function parseCueColor(color: string | null | undefined): [number, number, number] | null {
-  if (!color || !CUE_COLOR_RE.test(color)) return null;
-  return [
-    parseInt(color.slice(1, 3), 16) / 255,
-    parseInt(color.slice(3, 5), 16) / 255,
-    parseInt(color.slice(5, 7), 16) / 255,
-  ];
-}
+/** Reset-mark / parenthetical authoring gold (metric-ladder 02): outside the
+ * hot cue palette, warmer than the grey gridlines. */
+const RESET_MARK_COLOR = LADDER_GOLD_GL;
 
-/** Reset-mark indicator color (metric-ladder 02): gold — outside the hot
- * cue palette, warmer than the grey gridlines. */
-const RESET_MARK_COLOR: [number, number, number] = [1.0, 0.82, 0.4];
-
-/** Playhead pink (var(--pink)) — shared by the playhead bar and the
- * beatjump target guides, which are playhead-relative by meaning. */
-const PLAYHEAD_COLOR: [number, number, number] = [0.96, 0.76, 0.91];
-
-/** GL-side palette: the CSS palette as 0-1 floats. */
-const HOT_CUE_COLORS: Record<number, [number, number, number]> = Object.fromEntries(
-  Object.entries(HOT_CUE_CSS_COLORS).map(([slot, hex]) => [slot, parseCueColor(hex)!]),
-);
+/** Transport playhead (--playhead) as GL floats — shared by the playhead bar
+ * and the beatjump target guides, which are playhead-relative by meaning. */
+const PLAYHEAD_COLOR = PLAYHEAD_TRANSPORT_GL;
 
 const BODY_VERTEX_SHADER = `#version 300 es
 const vec2 pos[4] = vec2[4](vec2(-1,-1), vec2(1,-1), vec2(-1,1), vec2(1,1));
@@ -226,16 +217,68 @@ uniform float u_modSplit;  // 1 = split lobes (see BODY_MAIN split comment)
 uniform float u_modPlayheadT; // split mode: track-sec boundary of the played past
 uniform float u_modStart;  // track-seconds range covered by u_modTex
 uniform float u_modSpan;
+// Stem masking (stems #213): per-stem texture sets, LOD-identical to the
+// mix (padded upstream), combined per texel with a per-COLUMN mask
+// sampled from u_stemMaskTex — the EQ modulation idiom, so the mask
+// carries history: behind the playhead it is what was actually heard,
+// ahead it is the live kill state. Lobe split (u_stemLobeSplit=1, the
+// deck strip): ahead of the playhead the BOTTOM lobe shows the raw mix
+// (ground truth); everything else shows the masked composite.
+uniform sampler2D u_stemPeaks; // RGBA = the 4 stems' broadband peaks
+uniform sampler2D u_stemLo0; uniform sampler2D u_stemLo1;
+uniform sampler2D u_stemLo2; uniform sampler2D u_stemLo3;
+uniform sampler2D u_stemHi0; uniform sampler2D u_stemHi1;
+uniform sampler2D u_stemHi2; uniform sampler2D u_stemHi3;
+uniform sampler2D u_stemMaskTex;
+uniform float u_stemMaskStart;
+uniform float u_stemMaskSpan;
+uniform float u_stemOn;
+uniform float u_stemLobeSplit;
+uniform float u_opaqueBg; // 0 = transparent background (underlay fill)
 in vec2 v_uv;
 out vec4 fragColor;
 
-const vec3 BG = vec3(0.03, 0.03, 0.05);
+const vec3 BG = vec3(${WAVE_BG_GL[0]}, ${WAVE_BG_GL[1]}, ${WAVE_BG_GL[2]});
 
 float fetch1(sampler2D tex, int texel) {
   return texelFetch(tex, ivec2(texel % ${TEX_WIDTH}, texel / ${TEX_WIDTH}), 0).r;
 }
 vec4 fetch4(sampler2D tex, int texel) {
   return texelFetch(tex, ivec2(texel % ${TEX_WIDTH}, texel / ${TEX_WIDTH}), 0);
+}
+
+// Set once per fragment in main (stems #213): whether to combine stems,
+// and with which per-stem gains (the column's mask).
+bool g_stems = false;
+vec4 g_mask = vec4(1.0);
+// Combination math mirrors blob.ts compositeStemWaveforms (the executable
+// spec): values are raw (gamma-quantized); combine in the linear domain —
+// peaks as a clamped weighted sum, bands as a weighted power sum — and
+// return to the raw domain so the callers' amp() applies as usual.
+float fetchPeakV(int texel) {
+  if (!g_stems) return fetch1(u_peakTex, texel);
+  float a = dot(g_mask, pow(fetch4(u_stemPeaks, texel), vec4(u_invGamma)));
+  return pow(min(a, 1.0), 1.0 / u_invGamma);
+}
+vec4 fetchLoV(int texel) {
+  if (!g_stems) return fetch4(u_bandLoTex, texel);
+  vec4 e = vec4(0.0);
+  vec4 a;
+  a = pow(fetch4(u_stemLo0, texel), vec4(u_invGamma)); e += g_mask.r * a * a;
+  a = pow(fetch4(u_stemLo1, texel), vec4(u_invGamma)); e += g_mask.g * a * a;
+  a = pow(fetch4(u_stemLo2, texel), vec4(u_invGamma)); e += g_mask.b * a * a;
+  a = pow(fetch4(u_stemLo3, texel), vec4(u_invGamma)); e += g_mask.a * a * a;
+  return pow(min(sqrt(e), vec4(1.0)), vec4(1.0 / u_invGamma));
+}
+vec4 fetchHiV(int texel) {
+  if (!g_stems) return fetch4(u_bandHiTex, texel);
+  vec4 e = vec4(0.0);
+  vec4 a;
+  a = pow(fetch4(u_stemHi0, texel), vec4(u_invGamma)); e += g_mask.r * a * a;
+  a = pow(fetch4(u_stemHi1, texel), vec4(u_invGamma)); e += g_mask.g * a * a;
+  a = pow(fetch4(u_stemHi2, texel), vec4(u_invGamma)); e += g_mask.b * a * a;
+  a = pow(fetch4(u_stemHi3, texel), vec4(u_invGamma)); e += g_mask.a * a * a;
+  return pow(min(sqrt(e), vec4(1.0)), vec4(1.0 / u_invGamma));
 }
 
 // Pick the pyramid level so a pixel column covers <= 8 elements.
@@ -261,7 +304,7 @@ float peakColumn(float t0, float t1) {
   int i0 = clamp(int(floor(t0 * pps / scale)), 0, count - 1);
   int i1 = clamp(int(floor(t1 * pps / scale)), i0, min(i0 + 8, count - 1));
   float m = 0.0;
-  for (int i = i0; i <= i1; i++) m = max(m, fetch1(u_peakTex, u_peakOffsets[level] + i));
+  for (int i = i0; i <= i1; i++) m = max(m, fetchPeakV(u_peakOffsets[level] + i));
   return amp(m);
 }
 
@@ -275,10 +318,10 @@ void bands8At(float t, out float b[8]) {
   int i0 = clamp(int(floor(fIdx)), 0, count - 1);
   int i1 = min(i0 + 1, count - 1);
   float fr = clamp(fIdx - float(i0), 0.0, 1.0) * u_smooth;
-  vec4 lo = mix(fetch4(u_bandLoTex, u_bandOffsets[level] + i0),
-                fetch4(u_bandLoTex, u_bandOffsets[level] + i1), fr);
-  vec4 hi = mix(fetch4(u_bandHiTex, u_bandOffsets[level] + i0),
-                fetch4(u_bandHiTex, u_bandOffsets[level] + i1), fr);
+  vec4 lo = mix(fetchLoV(u_bandOffsets[level] + i0),
+                fetchLoV(u_bandOffsets[level] + i1), fr);
+  vec4 hi = mix(fetchHiV(u_bandOffsets[level] + i0),
+                fetchHiV(u_bandOffsets[level] + i1), fr);
   b[0] = amp(lo.r); b[1] = amp(lo.g); b[2] = amp(lo.b); b[3] = amp(lo.a);
   b[4] = amp(hi.r); b[5] = amp(hi.g); b[6] = amp(hi.b); b[7] = amp(hi.a);
 }
@@ -300,8 +343,8 @@ void bands8Column(float t0, float t1, out float b[8]) {
   vec4 lo = vec4(0.0);
   vec4 hi = vec4(0.0);
   for (int i = i0; i <= i1; i++) {
-    lo += fetch4(u_bandLoTex, u_bandOffsets[level] + i);
-    hi += fetch4(u_bandHiTex, u_bandOffsets[level] + i);
+    lo += fetchLoV(u_bandOffsets[level] + i);
+    hi += fetchHiV(u_bandOffsets[level] + i);
   }
   float inv = 1.0 / float(i1 - i0 + 1);
   lo *= inv;
@@ -362,7 +405,17 @@ const BODY_MAIN = `
 void main() {
   float px = u_visibleSeconds / u_canvasWidth;
   float t0 = u_startTime + v_uv.x * u_visibleSeconds;
-  if (t0 < 0.0 || t0 > u_duration) { fragColor = vec4(BG * 0.6, 1.0); return; }
+  if (t0 < 0.0 || t0 > u_duration) {
+    fragColor = u_opaqueBg > 0.5 ? vec4(BG * 0.6, 1.0) : vec4(0.0);
+    return;
+  }
+  // Stem masking (stems #213): same lobes/playhead rule as the EQ split —
+  // ahead of the playhead the bottom lobe stays the raw mix (strip only).
+  g_stems = u_stemOn > 0.5 &&
+    (t0 < u_modPlayheadT || v_uv.y > 0.5 || u_stemLobeSplit < 0.5);
+  if (g_stems) {
+    g_mask = texture(u_stemMaskTex, vec2((t0 - u_stemMaskStart) / u_stemMaskSpan, 0.5));
+  }
   // Amplitude coordinate: mirrored (center) or edge-anchored half-waveforms.
   float yA = u_anchor == 0 ? abs(v_uv.y - 0.5) * 2.0
            : u_anchor == 1 ? 1.0 - v_uv.y
@@ -381,7 +434,14 @@ void main() {
   }
   g = clamp(g, 0.0, 1.0);
   vec3 c = styleColor(yA, p, g, b);
-  fragColor = vec4(BG + (c - BG) * u_brightness, 1.0);
+  vec3 col = BG + (c - BG) * u_brightness;
+  // Transparent-background mode: background pixels (style output ≈ BG)
+  // drop out so the underlay (fader area fill) shows below the body
+  // without tinting it. Coverage from the style's own deviation from BG;
+  // premultiplied output.
+  float aDev = max(max(abs(c.r - BG.r), abs(c.g - BG.g)), abs(c.b - BG.b));
+  float a = u_opaqueBg > 0.5 ? 1.0 : clamp(aDev * 24.0, 0.0, 1.0);
+  fragColor = vec4(col * a, a);
 }`;
 
 // Overlay pass: plain position+color triangles in pixel space (ported from
@@ -509,6 +569,17 @@ export class WaveformRendererV2 {
   // Modulation (transition-editor rows).
   private modulation: WaveformModulation | null = null;
   private modSplit = false;
+  /** Per-stem textures (stems #213): one RGBA peaks texture (4 stems in
+   * the channels) + per-stem lo/hi band textures. Null = no masking. */
+  private stemTex: { peaks: TexBinding; lo: TexBinding[]; hi: TexBinding[] } | null = null;
+  /** Per-column stem mask (u_stemMaskTex): the column's track time in,
+   * per-stem gains out — history behind the playhead, live ahead (the
+   * caller's callback owns that, like the modulation closure). */
+  private stemMaskAt: ((t: number) => readonly number[]) | null = null;
+  private stemLobeSplit = true;
+  private stemMaskTex: WebGLTexture | null = null;
+  private transparentBg = false;
+  private stemMaskScratch = new Uint8Array(MOD_TEX_WIDTH * 4);
   private modTex: WebGLTexture | null = null;
   private modScratch = new Uint8Array(MOD_TEX_WIDTH * 4);
 
@@ -549,12 +620,14 @@ export class WaveformRendererV2 {
     this.config = config;
     this.isMinimap = config.isMinimapMode ?? false;
     this.anchor = this.isMinimap ? 'bottom' : (config.amplitudeAnchor ?? 'center');
-    // Minimap dims the body (legacy parity) so markers pop; markers stay
-    // full. 0.55 → 0.65 (performance-mode 09 review): the unplayed body
-    // reads brighter while the played wash below carries the contrast.
+    // Minimap dims the body (MINIMAP_BRIGHTNESS, markers.ts) so markers pop;
+    // markers stay full. The unplayed body reads brighter while the played
+    // wash below carries the contrast (performance-mode 09 review).
     this.brightness =
-      Math.max(0, Math.min(1, config.waveformBrightness ?? 1)) * (this.isMinimap ? 0.65 : 1);
-    const gl = canvas.getContext('webgl2');
+      Math.max(0, Math.min(1, config.waveformBrightness ?? 1)) *
+      (this.isMinimap ? MINIMAP_BRIGHTNESS : 1);
+    this.transparentBg = config.transparentBackground ?? false;
+    const gl = canvas.getContext('webgl2', { alpha: this.transparentBg });
     if (!gl) throw new Error('WebGL 2 not supported');
     this.gl = gl;
     gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
@@ -591,6 +664,46 @@ export class WaveformRendererV2 {
       data.duration,
     );
     this.beatgridCache = null; // beat x-positions depend on track duration
+    this.markDirty();
+  }
+
+  /** Per-stem waveforms (stems #213): 4 decoded blobs, LOD-identical to
+   * the mix blob (padded upstream). Uploaded once per Load — stem toggles
+   * touch only the per-frame mask texture. Null clears stem masking. */
+  public setStemWaveforms(stems: DecodedWaveform[] | null): void {
+    const { gl } = this;
+    if (this.stemTex) {
+      gl.deleteTexture(this.stemTex.peaks.tex);
+      for (const b of [...this.stemTex.lo, ...this.stemTex.hi]) gl.deleteTexture(b.tex);
+      this.stemTex = null;
+    }
+    if (stems && stems.length === 4) {
+      // Interleave the 4 stems' peak packs into one RGBA pack (texture-unit
+      // budget: 16 total; this keeps the whole stem apparatus at 10 units).
+      const base = stems[0].peaks;
+      const interleaved = new Uint8Array(base.data.length * 4);
+      for (let s = 0; s < 4; s++) {
+        const d = stems[s].peaks.data;
+        for (let i = 0; i < d.length; i++) interleaved[i * 4 + s] = d[i];
+      }
+      const peaksPack: LodPack = { ...base, data: interleaved };
+      this.stemTex = {
+        peaks: this.uploadPack(null, peaksPack, 4),
+        lo: stems.map((d) => this.uploadPack(null, d.bandsLo, 4)),
+        hi: stems.map((d) => this.uploadPack(null, d.bandsHi, 4)),
+      };
+    }
+    this.markDirty();
+  }
+
+  /** The per-column mask source + lobe behavior (strip splits lobes ahead
+   * of the playhead; the minimap masks everywhere). */
+  public setStemMask(
+    maskAt: ((t: number) => readonly number[]) | null,
+    lobeSplit = true
+  ): void {
+    this.stemMaskAt = maskAt;
+    this.stemLobeSplit = lobeSplit;
     this.markDirty();
   }
 
@@ -738,7 +851,8 @@ export class WaveformRendererV2 {
     const duration = this.data!.duration;
 
     gl.disable(gl.SCISSOR_TEST);
-    gl.clearColor(0.03 * 0.6, 0.03 * 0.6, 0.05 * 0.6, 1); // BG * 0.6 (shader constant)
+    // BG (--void) * 0.6 — the shader's out-of-track dim.
+    gl.clearColor(WAVE_BG_GL[0] * 0.6, WAVE_BG_GL[1] * 0.6, WAVE_BG_GL[2] * 0.6, 1);
     gl.clear(gl.COLOR_BUFFER_BIT);
     const ctx = this.ensureOverlayContext();
     ctx?.clearRect(0, 0, w, h);
@@ -897,7 +1011,7 @@ export class WaveformRendererV2 {
       visibleSeconds = Math.max((this.windowEnd - this.windowStart) * duration, 1e-6);
     } else {
       visibleSeconds = this.visibleSeconds;
-      const marker = this.config.playMarkerPosition ?? 0.25;
+      const marker = this.config.playMarkerPosition ?? PLAY_MARKER_FRACTION;
       startTime = this.lastPlayhead - marker * visibleSeconds;
     }
     return { startTime, visibleSeconds, playhead: this.lastPlayhead, w, h, dpr };
@@ -921,6 +1035,32 @@ export class WaveformRendererV2 {
     gl.uniform1i(u('u_bandHiTex'), 2);
     this.uploadLod(prog, 'u_peak', this.peakTex!.pack);
     this.uploadLod(prog, 'u_band', this.bandLoTex!.pack);
+
+    // Stem masking (stems #213): per-stem sets on units 4-15, the mask on
+    // unit 3's neighbor (unit 3 is the modTex; mask rides the LAST unit).
+    const stemOn = this.stemTex !== null && this.stemMaskAt !== null;
+    gl.uniform1f(u('u_stemOn'), stemOn ? 1 : 0);
+    gl.uniform1f(u('u_stemLobeSplit'), this.stemLobeSplit ? 1 : 0);
+    if (stemOn) {
+      const sets = this.stemTex!;
+      gl.activeTexture(gl.TEXTURE4);
+      gl.bindTexture(gl.TEXTURE_2D, sets.peaks.tex);
+      gl.uniform1i(u('u_stemPeaks'), 4);
+      for (let i = 0; i < 4; i++) {
+        gl.activeTexture(gl.TEXTURE5 + i);
+        gl.bindTexture(gl.TEXTURE_2D, sets.lo[i].tex);
+        gl.activeTexture(gl.TEXTURE9 + i);
+        gl.bindTexture(gl.TEXTURE_2D, sets.hi[i].tex);
+        gl.uniform1i(u(`u_stemLo${i}`), 5 + i);
+        gl.uniform1i(u(`u_stemHi${i}`), 9 + i);
+      }
+      this.uploadStemMask(view);
+      gl.activeTexture(gl.TEXTURE13);
+      gl.bindTexture(gl.TEXTURE_2D, this.stemMaskTex);
+      gl.uniform1i(u('u_stemMaskTex'), 13);
+      gl.uniform1f(u('u_stemMaskStart'), view.startTime);
+      gl.uniform1f(u('u_stemMaskSpan'), view.visibleSeconds);
+    }
 
     // Modulation texture (sampled fresh each frame: window and automation
     // both move; 1024 callback samples is well within frame budget).
@@ -964,6 +1104,7 @@ export class WaveformRendererV2 {
     gl.uniform3f(u('u_colorMid'), ...colors[1]);
     gl.uniform3f(u('u_colorHigh'), ...colors[2]);
     gl.uniform1i(u('u_anchor'), this.anchor === 'center' ? 0 : this.anchor === 'top' ? 1 : 2);
+    gl.uniform1f(u('u_opaqueBg'), this.transparentBg ? 0 : 1);
     gl.uniform1f(u('u_brightness'), this.brightness);
 
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
@@ -1001,6 +1142,35 @@ export class WaveformRendererV2 {
       s[i * 4 + 3] = Math.max(0, Math.min(255, (m.gain / MOD_RANGE) * 255));
     }
     gl.bindTexture(gl.TEXTURE_2D, this.modTex);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, MOD_TEX_WIDTH, 1, gl.RGBA, gl.UNSIGNED_BYTE, s);
+  }
+
+  /** Per-frame stem mask (stems #213): one texel per column, sampled from
+   * the caller's mask callback — history behind the playhead, live ahead
+   * (the callback owns that boundary, exactly like the modulation fn). */
+  private uploadStemMask(view: FrameView): void {
+    const { gl } = this;
+    gl.activeTexture(gl.TEXTURE13);
+    if (!this.stemMaskTex) {
+      this.stemMaskTex = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, this.stemMaskTex);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, MOD_TEX_WIDTH, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    }
+    const fn = this.stemMaskAt!;
+    const s = this.stemMaskScratch;
+    for (let i = 0; i < MOD_TEX_WIDTH; i++) {
+      const t = view.startTime + ((i + 0.5) / MOD_TEX_WIDTH) * view.visibleSeconds;
+      const m = fn(t);
+      s[i * 4] = m[0] ? 255 : 0;
+      s[i * 4 + 1] = m[1] ? 255 : 0;
+      s[i * 4 + 2] = m[2] ? 255 : 0;
+      s[i * 4 + 3] = m[3] ? 255 : 0;
+    }
+    gl.bindTexture(gl.TEXTURE_2D, this.stemMaskTex);
     gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, MOD_TEX_WIDTH, 1, gl.RGBA, gl.UNSIGNED_BYTE, s);
   }
 
@@ -1265,16 +1435,16 @@ export class WaveformRendererV2 {
   private pushCuePoint(view: FrameView, verts: number[]): void {
     const cueX = this.timeToX(this.cuePoint!, view);
     if (cueX < 0 || cueX >= view.w) return;
-    // The CUE button's accent (--energy-3 #ff9933) — marker and button
-    // read as one control.
-    const [r, g, b] = [1.0, 0.6, 0.2];
-    pushRect(verts, cueX, 0, 2, view.h, r, g, b);
-    const cx = cueX + 1;
+    // Main cue: --orange 2px line + bottom identity triangle (D11). Same
+    // orange family as the Machine playhead — geometry disambiguates.
+    const [r, g, b] = MAIN_CUE_COLOR_GL;
+    pushRect(verts, cueX, 0, MAIN_CUE_LINE_W, view.h, r, g, b);
+    const cx = cueX + MAIN_CUE_LINE_W / 2;
     if (this.isMinimap) {
       // Zoned marks: the main cue's identity glyph is a BOTTOM triangle
       // (the top zone belongs to hotcue flags, mid to guide arrows).
-      const halfW = 5 * view.dpr;
-      const depth = 8 * view.dpr;
+      const halfW = MAIN_CUE_TRI_MINI_HALF * view.dpr;
+      const depth = MAIN_CUE_TRI_MINI_DEPTH * view.dpr;
       verts.push(
         cx - halfW, view.h, r, g, b,
         cx + halfW, view.h, r, g, b,
@@ -1283,7 +1453,7 @@ export class WaveformRendererV2 {
     } else {
       // Bottom identity triangle, sized to read at a glance (12% of the
       // wave height, never smaller than the minimap glyph).
-      const triH = Math.max(view.h * 0.12, 8 * view.dpr);
+      const triH = Math.max(view.h * 0.12, MAIN_CUE_TRI_MINI_DEPTH * view.dpr);
       verts.push(
         cx - triH / 2, view.h, r, g, b,
         cx + triH / 2, view.h, r, g, b,
@@ -1383,19 +1553,22 @@ export class WaveformRendererV2 {
       if (x < 0 || x >= view.w) continue;
       // Stored per-cue color first (pad/ladder precedence — hotcue-colors
       // 01); saturated slot palette for colorless cues.
-      const [r, g, b] = parseCueColor(hc.color) ?? HOT_CUE_COLORS[slot] ?? [1, 1, 1];
+      const [r, g, b] = cueGlColor(slot, hc.color);
       if (this.isMinimap) {
-        // Zoned marks: 2px full-height pole flying a 5×5 square flag off
-        // its top RIGHT — the hotcues' identity zone is the top edge.
-        pushRect(verts, x - 1 * view.dpr, 0, 2 * view.dpr, view.h, r, g, b);
-        pushRect(verts, x + 1 * view.dpr, 0, 5 * view.dpr, 5 * view.dpr, r, g, b);
+        // Zoned marks: the 'mini' cue flag (markers.ts) — a 2px full-height
+        // pole flying a 5×5 square flag off its top RIGHT (the hotcues'
+        // identity zone is the top edge).
+        const poleW = CUE_FLAG_POLE_W * view.dpr;
+        const flag = CUE_FLAG_MINI_SIZE * view.dpr;
+        pushRect(verts, x - poleW / 2, 0, poleW, view.h, r, g, b);
+        pushRect(verts, x + poleW / 2, 0, flag, flag, r, g, b);
         continue;
       }
       // Zoomed surfaces (main waveform + editor timeline rows): 2px pole
       // only — the numbered FLAG (2D overlay, renderHotCueNumbers) flies
       // off the pole at the identity-zone edge, scaling the minimap's
       // pole+flag idiom up.
-      const poleW = 2 * view.dpr;
+      const poleW = CUE_FLAG_POLE_W * view.dpr;
       pushRect(verts, x - poleW / 2, 0, poleW, view.h, r, g, b);
     }
   }
@@ -1408,7 +1581,7 @@ export class WaveformRendererV2 {
       x = this.timeToX(view.playhead, view);
       if (x < 0 || x >= view.w) return;
     } else {
-      x = view.w * (this.config.playMarkerPosition ?? 0.25);
+      x = view.w * (this.config.playMarkerPosition ?? PLAY_MARKER_FRACTION);
     }
     pushRect(verts, x, 0, 3, view.h, ...PLAYHEAD_COLOR);
   }
@@ -1504,9 +1677,12 @@ export class WaveformRendererV2 {
    * scaled up, solid cue color with the slot number knocked out dark. */
   private renderHotCueNumbers(ctx: CanvasRenderingContext2D, view: FrameView): void {
     if (this.hotCues.size === 0) return;
-    const squareSize = 16 * view.dpr;
+    // The 'full' cue-flag square (markers.ts): the pole is already drawn in
+    // the GL batch (pushHotCues), so here we knock the numbered square out
+    // with the shared geometry/ink/font instead of a whole drawCueFlag.
+    const squareSize = CUE_FLAG_FULL_SIZE * view.dpr;
     const squareY = this.anchor === 'bottom' ? view.h - squareSize : 0;
-    ctx.font = `bold ${12 * view.dpr}px monospace`;
+    ctx.font = `bold ${CUE_FLAG_FULL_SIZE * 0.75 * view.dpr}px ${FONT_MONO}`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     for (const [slot, hc] of this.hotCues.entries()) {
@@ -1514,14 +1690,9 @@ export class WaveformRendererV2 {
       if (x < 0 || x >= view.w) continue;
       // Attached to the 2px pole's right edge (pole is centered on x).
       const squareX = x + view.dpr;
-      // Stored per-cue color first, like the marks (hotcue-colors 01).
-      const color =
-        hc.color && CUE_COLOR_RE.test(hc.color)
-          ? hc.color
-          : (HOT_CUE_CSS_COLORS[slot] ?? '#ffffff');
-      ctx.fillStyle = color;
+      ctx.fillStyle = cueCssColor(slot, hc.color);
       ctx.fillRect(squareX, squareY, squareSize, squareSize);
-      ctx.fillStyle = 'rgb(17, 17, 17)';
+      ctx.fillStyle = CUE_FLAG_INK;
       ctx.fillText(String(slot), squareX + squareSize / 2, squareY + squareSize / 2);
     }
   }
@@ -1537,7 +1708,7 @@ export class WaveformRendererV2 {
       `${formatReadoutTime(view.playhead)} / ${formatReadoutTime(duration)}` +
       (bar !== null ? `  bar ${bar}${count}` : '');
     const pad = 6 * view.dpr;
-    ctx.font = `bold ${12 * view.dpr}px monospace`;
+    ctx.font = `bold ${12 * view.dpr}px ${FONT_MONO}`;
     const metrics = ctx.measureText(text);
     const textHeight = 14 * view.dpr;
     if (this.config.timeReadoutAnchor === 'top-left') {
@@ -1548,7 +1719,7 @@ export class WaveformRendererV2 {
       ctx.textBaseline = 'top';
       ctx.fillStyle = 'rgba(17, 17, 17, 0.7)';
       ctx.fillRect(x - pad, y - pad / 2, metrics.width + pad * 2, textHeight + pad);
-      ctx.fillStyle = 'rgb(205, 214, 244)'; // var(--text)
+      ctx.fillStyle = TEXT;
       ctx.fillText(text, x, y);
       return;
     }
@@ -1561,7 +1732,7 @@ export class WaveformRendererV2 {
       metrics.width + pad * 2,
       textHeight + pad,
     );
-    ctx.fillStyle = 'rgb(205, 214, 244)'; // var(--text)
+    ctx.fillStyle = TEXT;
     ctx.fillText(text, view.w - pad, view.h - pad);
   }
 
@@ -1635,6 +1806,12 @@ export class WaveformRendererV2 {
     for (const b of [this.peakTex, this.bandLoTex, this.bandHiTex]) {
       if (b) gl.deleteTexture(b.tex);
     }
+    if (this.stemTex) {
+      gl.deleteTexture(this.stemTex.peaks.tex);
+      for (const b of [...this.stemTex.lo, ...this.stemTex.hi]) gl.deleteTexture(b.tex);
+      this.stemTex = null;
+    }
+    if (this.stemMaskTex) gl.deleteTexture(this.stemMaskTex);
     this.peakTex = this.bandLoTex = this.bandHiTex = null;
     if (this.modTex) gl.deleteTexture(this.modTex);
     if (this.overlayProgram) gl.deleteProgram(this.overlayProgram);

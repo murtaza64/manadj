@@ -6,39 +6,38 @@
   flex-direction: column;
   height: 100%;
   min-height: 0;
-  background: var(--crust, #111);
+  background: var(--crust);
   color: var(--text);
-  padding: var(--space-md);
+  padding: var(--space-12);
   overflow: hidden;
 }
 
 /* Slim secondary tab row (Tracks / Playlists / Acquisition) */
 .sync-view-tabs {
   display: flex;
-  gap: 6px;
-  margin-bottom: var(--space-md);
+  gap: var(--space-6);
+  margin-bottom: var(--space-12);
   flex-shrink: 0;
 }
 
 .sync-view-tab {
-  padding: 3px 14px;
+  padding: var(--space-4) var(--space-12);
   background: transparent;
   border: 1px solid var(--overlay0);
   color: var(--subtext0);
-  font-size: 12px;
+  font-size: var(--font-body);
   font-weight: 700;
   line-height: 1.4;
   cursor: pointer;
-  transition: background 0.15s, color 0.15s, border-color 0.15s;
 }
 
 .sync-view-tab:hover {
-  border-color: var(--blue);
-  color: var(--blue);
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
 .sync-view-tab.active {
-  background: var(--blue);
-  border-color: var(--blue);
+  background: var(--accent);
+  border-color: var(--accent);
   color: var(--base);
 }

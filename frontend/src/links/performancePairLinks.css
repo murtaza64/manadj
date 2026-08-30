@@ -11,8 +11,8 @@
   position: absolute;
   transform: translate(-50%, -50%);
   z-index: 2;
-  background: var(--crust, #11111b);
-  padding: 1px 2px;
+  background: var(--crust);
+  padding: 1px var(--space-2);
 }
 
 .pairlink-edge.edge-ab { left: 50%; top: 38%; }
@@ -24,18 +24,18 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 3px;
+  padding: var(--space-4);
   background: transparent;
-  border: 1px solid var(--surface1, #45475a);
-  border-radius: 4px;
+  border: 1px solid var(--surface1);
+  border-radius: var(--radius);
   cursor: pointer;
-  color: var(--subtext0, #a6adc8);
+  color: var(--subtext0);
   opacity: 0.8;
 }
 
 .pairlink-chip:hover:not(:disabled) {
   opacity: 1;
-  border-color: var(--overlay0, #6c7086);
+  border-color: var(--overlay0);
 }
 
 .pairlink-chip:disabled {
@@ -44,8 +44,8 @@
 }
 
 .pairlink-chip.linked {
-  border-color: #00e676;
-  color: #00e676;
+  border-color: var(--success);
+  color: var(--success);
   opacity: 1;
 }
 
@@ -66,20 +66,20 @@
   transform: translateY(-50%);
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-4);
 }
 
 .pairlink-diag {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
+  gap: var(--space-4);
   height: 24px;
-  padding: 2px 5px;
+  padding: var(--space-2) var(--space-4);
   background: transparent;
-  border: 1px solid var(--surface1, #45475a);
-  border-radius: 4px;
+  border: 1px solid var(--surface1);
+  border-radius: var(--radius);
   cursor: pointer;
-  color: var(--subtext0, #a6adc8);
+  color: var(--subtext0);
   opacity: 0.85;
 }
 
@@ -99,7 +99,7 @@
 .pairlink-diag-letters.ascending .second { grid-area: 2 / 1; }
 
 .pairlink-diag-letter {
-  font-size: 8px;
+  font-size: var(--font-micro);
   font-weight: 700;
   line-height: 1;
 }
@@ -111,7 +111,7 @@
 
 .pairlink-diag:hover:not(:disabled) {
   opacity: 1;
-  border-color: var(--overlay0, #6c7086);
+  border-color: var(--overlay0);
 }
 
 .pairlink-diag:disabled {
@@ -120,12 +120,12 @@
 }
 
 .pairlink-diag:disabled .pairlink-diag-letter {
-  color: var(--subtext0, #a6adc8);
+  color: var(--subtext0);
 }
 
 .pairlink-diag.linked {
-  border-color: #00e676;
-  color: #00e676;
+  border-color: var(--success);
+  color: var(--success);
   opacity: 1;
 }
 
@@ -136,11 +136,11 @@
 @keyframes pairlink-pulse {
   0%,
   100% {
-    color: var(--subtext0, #a6adc8);
-    border-color: var(--surface1, #45475a);
+    color: var(--subtext0);
+    border-color: var(--surface1);
   }
   50% {
-    color: #00e676;
-    border-color: #00e676;
+    color: var(--success);
+    border-color: var(--success);
   }
 }

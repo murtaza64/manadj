@@ -667,6 +667,31 @@ export function rulerTicks(
   return ticks;
 }
 
+/** Time-weighted average of a recorded STEP lane over [0, durationBeats]
+ * (gh#206: the trim knob represents the slot's AVERAGE trim). Step
+ * semantics match laneValueAt: fallback before the first point, each
+ * point's value holds until the next. */
+export function stepLaneAverage(
+  points: { beat: number; value: number }[],
+  durationBeats: number,
+  fallback: number
+): number {
+  if (durationBeats <= 0) return fallback;
+  let acc = 0;
+  let t = 0; // integrated up to this beat
+  let v = fallback;
+  for (const p of points) {
+    const beat = Math.max(0, Math.min(p.beat, durationBeats));
+    if (beat > t) {
+      acc += v * (beat - t);
+      t = beat;
+    }
+    if (p.beat <= durationBeats) v = p.value;
+  }
+  if (t < durationBeats) acc += v * (durationBeats - t);
+  return acc / durationBeats;
+}
+
 /** "12.3" — beats with one decimal, for transport readouts. */
 export function beatLabel(beat: number): string {
   return beat.toFixed(1);

@@ -201,6 +201,7 @@ export function Acquisition() {
         ))}
       </div>
       <div className="acquisition-main">
+        <GlobalSoulseekSearch />
         {isLoading && <div className="acquisition-empty">Loading…</div>}
         {error != null && <div className="acquisition-error">{(error as Error).message}</div>}
         {!isLoading && !error && visible.length === 0 && (
@@ -252,7 +253,12 @@ export function Acquisition() {
             </div>
           ))}
         </div>
-        {selected && <ItemDetail item={selected} onClose={() => setSelectedId(null)} />}
+        {/* keyed by item so selecting another track remounts the detail panel —
+            otherwise useState in ItemDetail/SoulseekPicker keeps the previous
+            item's search terms and results (gh#215) */}
+        {selected && (
+          <ItemDetail key={selected.id} item={selected} onClose={() => setSelectedId(null)} />
+        )}
         <div className="acquisition-bottom-bar">
           <label className="acquisition-check">
             <input type="checkbox" checked={allVisibleChecked} onChange={toggleAllVisible} />
@@ -444,6 +450,11 @@ function ItemDetail({ item, onClose }: { item: SourceItem; onClose: () => void }
         (item.download.task_state === 'pending' || item.download.task_state === 'running') && (
           <div className="acquisition-soulseek-downloading">
             ⇣ downloading via Soulseek…
+            {item.download.attempt != null &&
+              item.download.attempts_total != null &&
+              item.download.attempts_total > 1 && (
+                <> (source {item.download.attempt}/{item.download.attempts_total})</>
+              )}
           </div>
         )}
 
@@ -558,28 +569,63 @@ function remoteBasename(filename: string): string {
   return parts[parts.length - 1];
 }
 
+function timeAgo(iso: string): string {
+  const secs = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000));
+  if (secs < 60) return `${secs}s ago`;
+  if (secs < 3600) return `${Math.round(secs / 60)}m ago`;
+  if (secs < 86400) return `${Math.round(secs / 3600)}h ago`;
+  return `${Math.round(secs / 86400)}d ago`;
+}
+
 function SoulseekPicker({ item }: { item: SourceItem }) {
   const queryClient = useQueryClient();
-  const [query, setQuery] = useState(item.search_query ?? item.title);
+  // null = untouched; the input shows the remembered query (gh#216), falling
+  // back to the Cleanup-derived default, until the operator types
+  const [typed, setTyped] = useState<string | null>(null);
+
+  // the remembered search hydrates the picker instantly on selection (gh#216)
+  const { data: remembered } = useQuery({
+    queryKey: ['soulseekSearch', item.id],
+    queryFn: () => api.acquisition.soulseekRemembered(item.id),
+  });
+  const query = typed ?? remembered?.query ?? item.search_query ?? item.title;
 
   const searchMutation = useMutation({
     mutationFn: () => api.acquisition.soulseekSearch(item.id, query.trim()),
+    // a fresh search is the new remembered search — render from one place
+    onSuccess: data => queryClient.setQueryData(['soulseekSearch', item.id], data),
   });
   const pickMutation = useMutation({
     mutationFn: (result: SoulseekResult) => api.acquisition.soulseekPick(item.id, result),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['acquisitionItems'] }),
   });
+  // hands-off: server auto-picks a high-quality mp3 and retries across peers
+  const autoMutation = useMutation({
+    mutationFn: () => api.acquisition.soulseekAuto(item.id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['acquisitionItems'] });
+      // the auto endpoint may have run (and remembered) a fresh search
+      queryClient.invalidateQueries({ queryKey: ['soulseekSearch', item.id] });
+    },
+  });
 
-  const results = searchMutation.data?.results;
+  const results = remembered?.results;
   return (
     <div className="acquisition-soulseek">
-      <div className="acquisition-sidebar-heading">soulseek</div>
+      <div className="acquisition-sidebar-heading">
+        soulseek
+        {remembered?.searched_at && (
+          <span className="acquisition-soulseek-searched-at">
+            {' '}· searched {timeAgo(remembered.searched_at)}
+          </span>
+        )}
+      </div>
       <div className="acquisition-soulseek-search">
         <input
           className="acquisition-link-input"
           placeholder="search soulseek…"
           value={query}
-          onChange={e => setQuery(e.target.value)}
+          onChange={e => setTyped(e.target.value)}
           onKeyDown={e => {
             if (e.key === 'Enter' && query.trim()) searchMutation.mutate();
           }}
@@ -591,6 +637,14 @@ function SoulseekPicker({ item }: { item: SourceItem }) {
         >
           {searchMutation.isPending ? 'searching…' : 'search'}
         </button>
+        <button
+          className="acquisition-action-button acquisition-action-queue"
+          title="hands-off: auto-pick a high-quality mp3 (duration within ±5s, ≥192 kbps) and retry up to 5 peers on failure"
+          disabled={autoMutation.isPending}
+          onClick={() => autoMutation.mutate()}
+        >
+          {autoMutation.isPending ? 'picking…' : '⚡ auto mp3'}
+        </button>
       </div>
       {searchMutation.isError && (
         <div className="acquisition-error">{(searchMutation.error as Error).message}</div>
@@ -598,48 +652,192 @@ function SoulseekPicker({ item }: { item: SourceItem }) {
       {pickMutation.isError && (
         <div className="acquisition-error">{(pickMutation.error as Error).message}</div>
       )}
+      {autoMutation.isError && (
+        <div className="acquisition-error">{(autoMutation.error as Error).message}</div>
+      )}
       {results && results.length === 0 && (
         <div className="acquisition-item-sub">no peers offered a match</div>
       )}
       {results && results.length > 0 && (
-        <div className="acquisition-soulseek-results">
-          {/* results arrive server-sorted: exact-duration-lossless first */}
-          <div className="acquisition-soulseek-row acquisition-soulseek-head">
-            <span>filename</span>
-            <span>fmt</span>
-            <span>kbps</span>
-            <span>size</span>
-            <span>length</span>
-            <span>queue</span>
+        <SoulseekResultsTable
+          results={results}
+          disabled={pickMutation.isPending}
+          onPick={r => pickMutation.mutate(r)}
+        />
+      )}
+    </div>
+  );
+}
+
+function SoulseekResultsTable({
+  results,
+  disabled,
+  onPick,
+  withDelta = true,
+}: {
+  results: SoulseekResult[];
+  disabled: boolean;
+  onPick: (r: SoulseekResult) => void;
+  // standalone searches (gh#217) have no item duration: no deltas, and an
+  // absent delta is not a wrong-recording alarm
+  withDelta?: boolean;
+}) {
+  return (
+    <div className="acquisition-soulseek-results">
+      {/* results arrive server-sorted: exact-duration hq mp3s first */}
+      <div className="acquisition-soulseek-row acquisition-soulseek-head">
+        <span>filename</span>
+        <span>fmt</span>
+        <span>kbps</span>
+        <span>size</span>
+        <span>length</span>
+        <span>queue</span>
+      </div>
+      {results.map(r => {
+        const deltaSecs =
+          r.duration_delta_ms != null ? Math.round(r.duration_delta_ms / 1000) : null;
+        const loud =
+          withDelta && (deltaSecs === null || Math.abs(deltaSecs) > DURATION_DELTA_LOUD_SECS);
+        return (
+          <button
+            key={r.download_token}
+            className="acquisition-link-result acquisition-soulseek-row"
+            title={`${r.filename}\nclick to download via Soulseek`}
+            disabled={disabled}
+            onClick={() => onPick(r)}
+          >
+            <span className="acquisition-soulseek-filename">{remoteBasename(r.filename)}</span>
+            <span>{r.format || '?'}</span>
+            <span>{r.bitrate_kbps ?? '·'}</span>
+            <span>{formatSize(r.size_bytes)}</span>
+            <span className={loud ? 'acquisition-duration-loud' : undefined}>
+              {r.duration_ms != null ? formatDuration(r.duration_ms) : '?:??'}
+              {deltaSecs !== null && deltaSecs !== 0 && (
+                <> ({deltaSecs > 0 ? '+' : ''}{deltaSecs}s)</>
+              )}
+            </span>
+            <span className={r.has_free_slot ? 'acquisition-queue-free' : undefined}>
+              {r.has_free_slot ? 'free' : r.queue_length != null ? `${r.queue_length}` : '?'}
+            </span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+// Standalone soulseek search (gh#217): find and download a specific track
+// with no Source Item involved — no correspondence, no fulfillment; the file
+// lands in the library through the normal import chain.
+function GlobalSoulseekSearch() {
+  const queryClient = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const [artist, setArtist] = useState('');
+  const [title, setTitle] = useState('');
+
+  const { data: suppliers } = useQuery({
+    queryKey: ['acquisitionSuppliers'],
+    queryFn: api.acquisition.getSuppliers,
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const searchMutation = useMutation({
+    mutationFn: () => api.acquisition.soulseekGlobalSearch(query.trim()),
+  });
+  const downloadMutation = useMutation({
+    mutationFn: (result: SoulseekResult) =>
+      api.acquisition.soulseekAdhocDownload(result, artist.trim() || undefined, title.trim() || undefined),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['soulseekAdhocDownloads'] }),
+  });
+  const { data: downloads } = useQuery({
+    queryKey: ['soulseekAdhocDownloads'],
+    queryFn: api.acquisition.soulseekAdhocDownloads,
+    enabled: open,
+    refetchInterval: q =>
+      (q.state.data ?? []).some(d => d.task_state === 'pending' || d.task_state === 'running')
+        ? 3000
+        : false,
+  });
+
+  if (!(suppliers ?? []).some(s => s.id === 'soulseek')) return null;
+
+  const results = searchMutation.data?.results;
+  return (
+    <div className="acquisition-global-soulseek">
+      <button
+        className="acquisition-global-soulseek-toggle"
+        onClick={() => setOpen(!open)}
+      >
+        {open ? '▾' : '▸'} soulseek search
+      </button>
+      {open && (
+        <div className="acquisition-soulseek">
+          <div className="acquisition-soulseek-search">
+            <input
+              className="acquisition-link-input"
+              placeholder="search soulseek for any track…"
+              value={query}
+              onChange={e => setQuery(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter' && query.trim()) searchMutation.mutate();
+              }}
+            />
+            <button
+              className="acquisition-action-button"
+              disabled={!query.trim() || searchMutation.isPending}
+              onClick={() => searchMutation.mutate()}
+            >
+              {searchMutation.isPending ? 'searching…' : 'search'}
+            </button>
           </div>
-          {results.map(r => {
-            const deltaSecs =
-              r.duration_delta_ms != null ? Math.round(r.duration_delta_ms / 1000) : null;
-            const loud = deltaSecs === null || Math.abs(deltaSecs) > DURATION_DELTA_LOUD_SECS;
-            return (
-              <button
-                key={r.download_token}
-                className="acquisition-link-result acquisition-soulseek-row"
-                title={`${r.filename}\nclick to download via Soulseek`}
-                disabled={pickMutation.isPending}
-                onClick={() => pickMutation.mutate(r)}
-              >
-                <span className="acquisition-soulseek-filename">{remoteBasename(r.filename)}</span>
-                <span>{r.format || '?'}</span>
-                <span>{r.bitrate_kbps ?? '·'}</span>
-                <span>{formatSize(r.size_bytes)}</span>
-                <span className={loud ? 'acquisition-duration-loud' : undefined}>
-                  {r.duration_ms != null ? formatDuration(r.duration_ms) : '?:??'}
-                  {deltaSecs !== null && deltaSecs !== 0 && (
-                    <> ({deltaSecs > 0 ? '+' : ''}{deltaSecs}s)</>
-                  )}
-                </span>
-                <span className={r.has_free_slot ? 'acquisition-queue-free' : undefined}>
-                  {r.has_free_slot ? 'free' : r.queue_length != null ? `${r.queue_length}` : '?'}
-                </span>
-              </button>
-            );
-          })}
+          <div className="acquisition-soulseek-search">
+            <input
+              className="acquisition-link-input"
+              placeholder="artist (optional — else parsed from the filename)"
+              value={artist}
+              onChange={e => setArtist(e.target.value)}
+            />
+            <input
+              className="acquisition-link-input"
+              placeholder="title (optional)"
+              value={title}
+              onChange={e => setTitle(e.target.value)}
+            />
+          </div>
+          {searchMutation.isError && (
+            <div className="acquisition-error">{(searchMutation.error as Error).message}</div>
+          )}
+          {downloadMutation.isError && (
+            <div className="acquisition-error">{(downloadMutation.error as Error).message}</div>
+          )}
+          {results && results.length === 0 && (
+            <div className="acquisition-item-sub">no peers offered a match</div>
+          )}
+          {results && results.length > 0 && (
+            <SoulseekResultsTable
+              results={results}
+              disabled={downloadMutation.isPending}
+              onPick={r => downloadMutation.mutate(r)}
+              withDelta={false}
+            />
+          )}
+          {(downloads ?? []).length > 0 && (
+            <div className="acquisition-adhoc-downloads">
+              <div className="acquisition-sidebar-heading">downloads</div>
+              {(downloads ?? []).map(d => (
+                <div key={d.task_id} className="acquisition-adhoc-download">
+                  <span className="acquisition-soulseek-filename" title={d.filename}>
+                    {d.artist ? `${d.artist} - ` : ''}{d.title || remoteBasename(d.filename)}
+                  </span>
+                  <span className={`acquisition-state acquisition-task-${d.task_state}`}>
+                    {d.task_state}
+                  </span>
+                  {d.error && <span className="acquisition-error">{d.error}</span>}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>

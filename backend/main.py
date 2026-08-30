@@ -133,14 +133,30 @@ def _build_task_worker() -> "TaskWorker | None":
 
     config = get_config()
     delays: dict[str, float] = {}
+
+    # Soulseek Supplier first: the SoundCloud download handler wants its
+    # failure hook (auto soulseek search, gh#216) when slskd is configured.
+    slskd = None
+    if config.soulseek.configured and config.library.tracks_directory:
+        from .acquisition.slskd import SlskdSupplier
+
+        assert config.soulseek.slskd_url is not None and config.soulseek.api_key is not None
+        slskd = SlskdSupplier(config.soulseek.slskd_url, config.soulseek.api_key)
+
     if config.soundcloud.oauth_token and config.library.tracks_directory:
         from .acquisition.download import download_handler
+        from .acquisition.searches import enqueue_soulseek_search
         from .acquisition.source import SoundCloudSource
         from .acquisition.supplier import SoundCloudSupplier
 
         supplier = SoundCloudSupplier(SoundCloudSource(config.soundcloud.oauth_token))
         handlers["download"] = download_handler(
-            supplier, Path(config.library.tracks_directory), config.acquisition.cleanup
+            supplier,
+            Path(config.library.tracks_directory),
+            config.acquisition.cleanup,
+            # a failed SoundCloud download queues an automatic soulseek
+            # search so alternatives are ready when the operator looks
+            on_failure=enqueue_soulseek_search if slskd is not None else None,
         )
         # Pace downloads under SoundCloud's request budget (issue 08).
         delays["download"] = config.acquisition.download_delay_secs
@@ -149,14 +165,15 @@ def _build_task_worker() -> "TaskWorker | None":
             "download handler not registered: soundcloud oauth_token or tracks_directory missing"
         )
 
-    if config.soulseek.configured and config.library.tracks_directory:
+    if slskd is not None:
         from .acquisition.download import SOULSEEK_TASK_TYPE, soulseek_download_handler
-        from .acquisition.slskd import SlskdSupplier
+        from .acquisition.searches import SOULSEEK_SEARCH_TASK_TYPE, soulseek_search_handler
 
-        assert config.soulseek.slskd_url is not None and config.soulseek.api_key is not None
-        slskd = SlskdSupplier(config.soulseek.slskd_url, config.soulseek.api_key)
         handlers[SOULSEEK_TASK_TYPE] = soulseek_download_handler(
             slskd, Path(config.library.tracks_directory), config.acquisition.cleanup
+        )
+        handlers[SOULSEEK_SEARCH_TASK_TYPE] = soulseek_search_handler(
+            slskd, config.acquisition.cleanup
         )
     else:
         logging.getLogger("backend.main").info(

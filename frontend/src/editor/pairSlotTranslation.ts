@@ -92,25 +92,28 @@ export interface PairSlotInput {
 
 // ── Load: Transition → slot projection ──────────────────────────────────
 
-/** Map a pair role to the slot the surface addresses it as. */
-export const OUTGOING_SLOT = 0;
-export const INCOMING_SLOT = 1;
+/** Map a pair role to the slot the surface addresses it as. Slot ids are
+ * the migration-identity strings (ADR 0039: slotId = String(index) for
+ * non-authored casts) — the projection is a synthetic recording, so the
+ * index identity is exact. */
+export const OUTGOING_SLOT = '0';
+export const INCOMING_SLOT = '1';
 
 /** The routine control key each pair lane maps to (per slot). Pair lane
  * ids are role-suffixed (`faderA`/`faderB`); the routine keys them
  * `${slot}:${control}`. Filter is the one value-space shift — see
  * pairFilterToRoutine. */
-const LANE_ROLE: Record<LaneId, { slot: number; control: string }> = {
-  faderA: { slot: OUTGOING_SLOT, control: 'fader' },
-  faderB: { slot: INCOMING_SLOT, control: 'fader' },
-  eqLowA: { slot: OUTGOING_SLOT, control: 'eqLow' },
-  eqLowB: { slot: INCOMING_SLOT, control: 'eqLow' },
-  eqMidA: { slot: OUTGOING_SLOT, control: 'eqMid' },
-  eqMidB: { slot: INCOMING_SLOT, control: 'eqMid' },
-  eqHighA: { slot: OUTGOING_SLOT, control: 'eqHigh' },
-  eqHighB: { slot: INCOMING_SLOT, control: 'eqHigh' },
-  filterA: { slot: OUTGOING_SLOT, control: 'filter' },
-  filterB: { slot: INCOMING_SLOT, control: 'filter' },
+const LANE_ROLE: Record<LaneId, { slotId: string; control: string }> = {
+  faderA: { slotId: OUTGOING_SLOT, control: 'fader' },
+  faderB: { slotId: INCOMING_SLOT, control: 'fader' },
+  eqLowA: { slotId: OUTGOING_SLOT, control: 'eqLow' },
+  eqLowB: { slotId: INCOMING_SLOT, control: 'eqLow' },
+  eqMidA: { slotId: OUTGOING_SLOT, control: 'eqMid' },
+  eqMidB: { slotId: INCOMING_SLOT, control: 'eqMid' },
+  eqHighA: { slotId: OUTGOING_SLOT, control: 'eqHigh' },
+  eqHighB: { slotId: INCOMING_SLOT, control: 'eqHigh' },
+  filterA: { slotId: OUTGOING_SLOT, control: 'filter' },
+  filterB: { slotId: INCOMING_SLOT, control: 'filter' },
 };
 
 /** The incoming's playback rate under tempo match (varispeed): the
@@ -210,12 +213,12 @@ function syntheticEvents(
     {
       kind: 'tick',
       beat: 0,
-      playheads: { [String(OUTGOING_SLOT)]: aStart, [String(INCOMING_SLOT)]: bStart },
+      playheads: { [OUTGOING_SLOT]: aStart, [INCOMING_SLOT]: bStart },
     },
     {
       kind: 'tick',
       beat: durationBeats,
-      playheads: { [String(OUTGOING_SLOT)]: aEnd, [String(INCOMING_SLOT)]: bEnd },
+      playheads: { [OUTGOING_SLOT]: aEnd, [INCOMING_SLOT]: bEnd },
     },
   ];
 }
@@ -232,7 +235,7 @@ export function pairToEdits(tr: Transition, durationBeats: number): RoutineEdits
     if (!pts || pts.length === 0 || hidden.has(id)) continue;
     const role = LANE_ROLE[id];
     const isFilter = role.control === 'filter';
-    lanes[laneKey(role.slot, role.control)] = pts.map((p) => ({
+    lanes[laneKey(role.slotId, role.control)] = pts.map((p) => ({
       beat: p.x * durationBeats,
       value: isFilter ? pairFilterToRoutine(p.y) : p.y,
     }));
@@ -254,19 +257,20 @@ export function pairToEdits(tr: Transition, durationBeats: number): RoutineEdits
     removedRecordedPauses: [],
     nudges: {},
     trims: {},
+    entryOffsets: {},
   };
 }
 
 function pairJumpToAuthored(
   j: { x: number; deltaSec: number; count?: number },
-  slot: number,
+  slotId: string,
   durationBeats: number
 ): AuthoredJump {
   const beat = j.x * durationBeats;
   const repeat = jumpRepeatCount({ x: j.x, deltaSec: j.deltaSec, count: j.count });
   return {
-    id: `${slot}:${beat}`,
-    slot,
+    id: `${slotId}:${beat}`,
+    slotId,
     beat,
     deltaSec: j.deltaSec,
     repeat: repeat > 1 ? repeat : undefined,
@@ -315,7 +319,7 @@ export function editsToTransition(edits: RoutineEdits, ctx: PairSaveContext): Tr
   for (const [key, pts] of Object.entries(edits.lanes)) {
     const role = parseLaneKey(key);
     if (!role) continue;
-    const laneId = laneIdFor(role.slot, role.control);
+    const laneId = laneIdFor(role.slotId, role.control);
     if (!laneId) continue;
     const isFilter = role.control === 'filter';
     out.lanes[laneId] = pts.map((p) => ({
@@ -325,8 +329,8 @@ export function editsToTransition(edits: RoutineEdits, ctx: PairSaveContext): Tr
   }
 
   // Jumps: re-derive per role only when the draft carries jumps for it.
-  const outgoingJumps = edits.jumps.filter((j) => j.slot === OUTGOING_SLOT);
-  const incomingJumps = edits.jumps.filter((j) => j.slot === INCOMING_SLOT);
+  const outgoingJumps = edits.jumps.filter((j) => j.slotId === OUTGOING_SLOT);
+  const incomingJumps = edits.jumps.filter((j) => j.slotId === INCOMING_SLOT);
   if (outgoingJumps.length > 0) {
     out.jumpsA = outgoingJumps.map((j) => authoredJumpToPair(j, durationBeats));
   }
@@ -335,13 +339,13 @@ export function editsToTransition(edits: RoutineEdits, ctx: PairSaveContext): Tr
   }
 
   // Incoming alignment nudge → bInSec (a rigid track-seconds slide).
-  const nudgeB = edits.nudges[String(INCOMING_SLOT)];
+  const nudgeB = edits.nudges[INCOMING_SLOT];
   if (typeof nudgeB === 'number' && nudgeB !== 0) {
     out.bInSec = original.bInSec + nudgeB;
   }
   // An outgoing nudge slides the window start in the outgoing's own
   // seconds (startSec is the outgoing's entry position).
-  const nudgeA = edits.nudges[String(OUTGOING_SLOT)];
+  const nudgeA = edits.nudges[OUTGOING_SLOT];
   if (typeof nudgeA === 'number' && nudgeA !== 0) {
     out.startSec = Math.max(0, original.startSec + nudgeA);
   }
@@ -377,10 +381,10 @@ export function changedPairEdits(draft: RoutineEdits, baseline: RoutineEdits): R
   // the module header's scope notes.
 
   const jumps: AuthoredJump[] = [];
-  const slots = new Set([...draft.jumps, ...baseline.jumps].map((j) => j.slot));
-  for (const slot of slots) {
-    const d = draft.jumps.filter((j) => j.slot === slot);
-    const b = baseline.jumps.filter((j) => j.slot === slot);
+  const slotIds = new Set([...draft.jumps, ...baseline.jumps].map((j) => j.slotId));
+  for (const slotId of slotIds) {
+    const d = draft.jumps.filter((j) => j.slotId === slotId);
+    const b = baseline.jumps.filter((j) => j.slotId === slotId);
     if (!jumpListsEqual(d, b)) jumps.push(...d);
   }
 
@@ -406,6 +410,11 @@ export function changedPairEdits(draft: RoutineEdits, baseline: RoutineEdits): R
     removedRecordedPauses: [],
     nudges,
     trims,
+    // Entry-offset overrides (ADR 0039 / #207 slice 2) are NOT
+    // pair-persistable: on a 2-slot artifact a reorder is an A/B swap —
+    // a DIFFERENT pair row (kind-conversion territory, #198). Gated like
+    // pauses; audition-only until that lands.
+    entryOffsets: {},
   };
 }
 
@@ -441,19 +450,17 @@ function authoredJumpToPair(
   return out;
 }
 
-function parseLaneKey(key: string): { slot: number; control: string } | null {
+function parseLaneKey(key: string): { slotId: string; control: string } | null {
   const idx = key.indexOf(':');
   if (idx < 0) return null;
-  const slot = Number(key.slice(0, idx));
-  if (!Number.isInteger(slot)) return null;
-  return { slot, control: key.slice(idx + 1) };
+  return { slotId: key.slice(0, idx), control: key.slice(idx + 1) };
 }
 
-/** Inverse of LANE_ROLE: (slot, control) → pair lane id. */
-function laneIdFor(slot: number, control: string): LaneId | null {
+/** Inverse of LANE_ROLE: (slotId, control) → pair lane id. */
+function laneIdFor(slotId: string, control: string): LaneId | null {
   for (const id of LANE_IDS) {
     const role = LANE_ROLE[id];
-    if (role.slot === slot && role.control === control) return id;
+    if (role.slotId === slotId && role.control === control) return id;
   }
   return null;
 }
@@ -590,13 +597,14 @@ export function cameoToProjection(input: PairCameoInput): PairSlotProjection {
   ].sort((a, b) => a.beat - b.beat);
 
   const edits: RoutineEdits = {
-    lanes: { [laneKey(1, 'fader')]: guestFader },
+    lanes: { [laneKey(INCOMING_SLOT, 'fader')]: guestFader },
     jumps: [],
     removedRecordedJumps: [],
     pauses: [],
     removedRecordedPauses: [],
     nudges: {},
     trims: {},
+    entryOffsets: {},
   };
 
   const detail: RoutineDetailWire = {

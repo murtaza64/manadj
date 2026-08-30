@@ -10,6 +10,7 @@ import { insertChop, nearestTime } from './mixModel';
 import { indicesInRect, moveGroup, toggleIndex } from './laneSelection';
 import type { SelectRect } from './laneSelection';
 import { LANE_COLORS } from './laneColors';
+import { BEAT_TIER_DIM, LADDER_GOLD_RGB } from '../theme/markers';
 import {
   emptyLaneShade,
   laneDeviation,
@@ -36,10 +37,10 @@ export interface LaneGuide {
 }
 
 /** Lane-guide styling per Metric-ladder tier (bar … 16-bar). Dimmer than
- * the waveform gridlines — guides sit under automation breakpoints.
- * Exported (gh#190): the routine editor's recorded lane strips share it. */
-export const GUIDE_TIER_ALPHA: readonly number[] = [0.22, 0.28, 0.36, 0.45, 0.55];
-export const GUIDE_TIER_WIDTH: readonly number[] = [1.5, 1.5, 2, 2.5, 3];
+ * the waveform gridlines — guides sit under automation breakpoints. Data
+ * lives in theme/markers.ts (BEAT_TIER_DIM, gh#201). */
+export const GUIDE_TIER_ALPHA = BEAT_TIER_DIM.alpha;
+export const GUIDE_TIER_WIDTH = BEAT_TIER_DIM.width;
 
 /** Breakpoint circle radius (uniform for all points). */
 const LANE_POINT_R = 5;
@@ -249,7 +250,7 @@ export function LaneCanvas({
         // Parenthetical bars tint gold (metric-ladder 03), matching the
         // waveform rows' band treatment.
         ctx.fillStyle = g.parenthetical
-          ? `rgba(255,209,102,${GUIDE_TIER_ALPHA[t] + 0.12})`
+          ? `rgba(${LADDER_GOLD_RGB},${GUIDE_TIER_ALPHA[t] + 0.12})`
           : `rgba(255,255,255,${GUIDE_TIER_ALPHA[t]})`;
         ctx.fillRect(gx, LANE_PAD, GUIDE_TIER_WIDTH[t], lh);
       } else {

@@ -5,7 +5,7 @@
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.55);
-  z-index: 1000;
+  z-index: var(--z-modal);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -18,17 +18,17 @@
   max-height: 72vh;
   display: flex;
   flex-direction: column;
-  padding: 14px 16px;
-  gap: 10px;
+  padding: var(--space-12) var(--space-16);
+  gap: var(--space-12);
 }
 
 .rfe-title {
-  font-size: 14px;
+  font-size: var(--font-large);
   font-weight: 700;
 }
 
 .rfe-summary {
-  font-size: 12px;
+  font-size: var(--font-body);
   color: var(--subtext0);
 }
 
@@ -37,15 +37,15 @@
 }
 
 .rfe-count-pin {
-  color: var(--mauve);
+  color: var(--accent);
 }
 
 .rfe-count-chop {
-  color: var(--yellow);
+  color: var(--warning);
 }
 
 .rfe-count-cut {
-  color: var(--red);
+  color: var(--danger);
 }
 
 .rfe-list {
@@ -58,9 +58,9 @@
 .rfe-row {
   display: flex;
   align-items: baseline;
-  gap: 8px;
-  padding: 3px 2px;
-  font-size: 12px;
+  gap: var(--space-8);
+  padding: var(--space-4) var(--space-2);
+  font-size: var(--font-body);
   border-bottom: 1px solid var(--surface0);
 }
 
@@ -81,12 +81,12 @@
 }
 
 .rfe-take {
-  color: var(--mauve);
+  color: var(--accent);
   white-space: nowrap;
 }
 
 .rfe-row-cut .rfe-take {
-  color: var(--red);
+  color: var(--danger);
 }
 
 .rfe-row-cut .rfe-pair {
@@ -94,7 +94,7 @@
 }
 
 .rfe-chop-flag {
-  color: var(--yellow);
+  color: var(--warning);
   font-weight: 700;
   white-space: nowrap;
 }
@@ -102,5 +102,5 @@
 .rfe-footer {
   display: flex;
   justify-content: flex-end;
-  gap: 8px;
+  gap: var(--space-8);
 }

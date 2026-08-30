@@ -1,5 +1,5 @@
 import type { EqBand } from '../playback/graph';
-import type { ChannelId } from '../playback/mixer';
+import type { ChannelId, StemName } from '../playback/mixer';
 import type { Track } from '../types';
 import type { JogProfile } from './jogCalibration';
 
@@ -137,6 +137,8 @@ export interface MidiMixerControls {
   setMaster(value: number): void;
   /** PFL this channel into the Cue bus (headphone-cue 02). */
   togglePfl(channel: ChannelId): void;
+  /** Stem kill toggle (stems #210); inert for stem-less tracks. */
+  toggleStem(channel: ChannelId, stem: StemName): void;
   /** Cue bus volume, 0..1 (headphone-cue 03). */
   setCueLevel(value: number): void;
   /** Cue/mix blend, 0 (cue only) .. 1 (master only) (headphone-cue 03). */

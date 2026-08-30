@@ -151,6 +151,7 @@ function registerFakeMixerControls(): void {
       calls.push(`mixer:master:${value}`);
     },
     togglePfl: (channel) => calls.push(`mixer:pfl:${channel}`),
+    toggleStem: (channel, stem) => calls.push(`mixer:stem:${channel}:${stem}`),
     setCueLevel: (value) => {
       fakeMixer.cueLevel = value;
       calls.push(`mixer:cueLevel:${value}`);
@@ -1426,5 +1427,25 @@ describe('browse cluster (four-deck-performance 25)', () => {
     dispatchMidiAction({ kind: 'button', edge: 'up', target: { control: 'follow-known-only' } });
     expect(getFollowParams().knownOnly).toBe(!before);
     setFollowParams({ knownOnly: before });
+  });
+});
+
+describe('stem kill switches (stems #210)', () => {
+  const stem = (
+    channel: ChannelId,
+    name: 'vocals' | 'drums' | 'bass' | 'other',
+    edge: 'down' | 'up'
+  ): MidiAction => ({
+    kind: 'button',
+    edge,
+    target: { control: 'stem', channel, stem: name },
+  });
+
+  it('stem buttons toggle the mixer surface on the down edge only', () => {
+    registerFakeMixerControls();
+    dispatchMidiAction(stem('A', 'drums', 'down'));
+    dispatchMidiAction(stem('A', 'drums', 'up'));
+    dispatchMidiAction(stem('B', 'vocals', 'down'));
+    expect(calls).toEqual(['mixer:stem:A:drums', 'mixer:stem:B:vocals']);
   });
 });

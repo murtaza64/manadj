@@ -210,7 +210,27 @@ def retrim_routine(
 def _shift_edits(
     edits: dict, shift_beats: float, new_duration: float, kept_slots: int
 ) -> dict | None:
-    """Rebase an edits layer onto a retrimmed Routine's clock."""
+    """Rebase an edits layer onto a retrimmed Routine's clock.
+
+    Slot addressing is by stable slot id (ADR 0039): `slotId` strings on
+    events, slotId-keyed maps/lane keys. On promoted routines (the only
+    retrimmable kind) slot ids are index strings from the lossless
+    migration, so the kept-slots check parses them as ints; legacy
+    `slot` int fields still read (pre-migration rows).
+    """
+
+    def slot_index(item: dict) -> int | None:
+        """The slot's baked index, from slotId (index-string on promoted
+        routines) or the legacy `slot` int. None = unaddressable."""
+        sid = item.get("slotId")
+        if isinstance(sid, str):
+            try:
+                return int(sid)
+            except ValueError:
+                return None
+        slot = item.get("slot")
+        return slot if isinstance(slot, int) else None
+
     lanes: dict = {}
     for key, pts in (edits.get("lanes") or {}).items():
         try:
@@ -232,9 +252,9 @@ def _shift_edits(
         for j in items or []:
             if not isinstance(j, dict):
                 continue
-            slot = j.get("slot")
+            slot = slot_index(j)
             beat = j.get("beat")
-            if not isinstance(slot, int) or slot >= kept_slots:
+            if slot is None or slot >= kept_slots:
                 continue
             if not isinstance(beat, (int, float)):
                 continue
@@ -264,7 +284,22 @@ def _shift_edits(
 
     nudges = slot_map("nudges", lambda v: bool(v))
     trims = slot_map("trims", lambda v: v != 0.5)
-    if not any([lanes, jumps, removed, nudges, trims, pauses, removed_pauses]):
+    # Entry-offset overrides (ADR 0039, #207 slice 2) are routine beats —
+    # they rebase like beats and drop when they fall off the new span.
+    entry_offsets = {}
+    for key, val in (edits.get("entryOffsets") or {}).items():
+        try:
+            slot = int(str(key))
+        except ValueError:
+            continue
+        if slot >= kept_slots or not isinstance(val, (int, float)):
+            continue
+        nb = val - shift_beats
+        if 0 <= nb <= new_duration:
+            entry_offsets[str(slot)] = nb
+    if not any(
+        [lanes, jumps, removed, nudges, trims, pauses, removed_pauses, entry_offsets]
+    ):
         return None
     return {
         "lanes": lanes,
@@ -274,6 +309,7 @@ def _shift_edits(
         "removedRecordedPauses": removed_pauses,
         "nudges": nudges,
         "trims": trims,
+        "entryOffsets": entry_offsets,
     }
 
 

@@ -1,6 +1,6 @@
 /**
  * Routine draft model (gh#170 pass 2, directive 2): authored EDITS over a
- * promoted Routine's mechanical recording — slot-indexed lanes on the
+ * promoted Routine's mechanical recording — slot-addressed lanes on the
  * relative beat axis and Jump events on ANY slot. THE SEAM the pair
  * editor eventually migrates onto: a pair is the 2-slot special case.
  *
@@ -9,6 +9,12 @@
  *   a separate, re-openable layer (`Routine.edits_json`) applied at
  *   build time (buildPlannedRoutine) — so the editor's audition and the
  *   set Conductor's replay hear the same result by construction.
+ * - Slot addressing is by STABLE SLOT ID (ADR 0039, #198): a client-
+ *   minted string identity, never the positional index. The entry-
+ *   ordered index is a derived view recomputed from entry offsets, so
+ *   reordering a cast never re-keys its edits. Migration is lossless:
+ *   legacy index-keyed edits parse to slotId = String(index) — promoted
+ *   routines never reordered, so index ≡ a stable id there.
  * - Authored lanes REPLACE the recorded step lane for their (slot,
  *   control): breakpoint envelopes in routine beats, linearly
  *   interpolated (the pair editor's lane semantic), mixer-domain values.
@@ -23,10 +29,19 @@ import type { RoutineLanePoint, RoutineTracePoint } from '../sets/routinePlan';
 
 // ── Model ────────────────────────────────────────────────────────────────
 
+/** Mint a stable slot id (the transition_templates client-uuid pattern —
+ * no server round-trip; ADR 0039). Promoted routines' existing slots
+ * keep their index-string ids from migration; minted ids only appear on
+ * newly authored slots (drag-to-add, later #198 slices). */
+export function mintSlotId(): string {
+  return crypto.randomUUID().slice(0, 8);
+}
+
 export interface AuthoredJump {
   /** Stable identity for editing gestures. */
   id: string;
-  slot: number;
+  /** Stable slot id (ADR 0039) — never the positional index. */
+  slotId: string;
   /** Routine beat of the (first) jump instant. */
   beat: number;
   /** Track-seconds displacement (negative = backward). */
@@ -38,7 +53,7 @@ export interface AuthoredJump {
 }
 
 export interface RemovedRecordedJump {
-  slot: number;
+  slotId: string;
   /** The recorded landing's beat (matched within a small tolerance —
    * trace beats are floats from promotion). */
   beat: number;
@@ -51,7 +66,7 @@ export interface RemovedRecordedJump {
  * hold (the jump doctrine's mirror; displacement is rigid). */
 export interface AuthoredPause {
   id: string;
-  slot: number;
+  slotId: string;
   /** Routine beat the hold starts. */
   beat: number;
   /** Hold length in routine beats. */
@@ -59,7 +74,7 @@ export interface AuthoredPause {
 }
 
 export interface RemovedRecordedPause {
-  slot: number;
+  slotId: string;
   /** The recorded hold's START beat (matched within a small tolerance).
    * Removal plays THROUGH the hold: motion continues at the surrounding
    * rate and the tail displaces forward by the held span. */
@@ -67,7 +82,7 @@ export interface RemovedRecordedPause {
 }
 
 export interface RoutineEdits {
-  /** Authored lane envelopes, keyed `${slot}:${control}` — absent key =
+  /** Authored lane envelopes, keyed `${slotId}:${control}` — absent key =
    * the recorded step lane plays. Points in routine beats, sorted. */
   lanes: Record<string, RoutineLanePoint[]>;
   jumps: AuthoredJump[];
@@ -77,12 +92,20 @@ export interface RoutineEdits {
   /** Per-slot alignment NUDGE (gh#190 item 6): a rigid track-seconds
    * offset sliding the whole track under the routine clock — the slot
    * plays material shifted by deltaSec at the same routine beats. Keyed
-   * by slot (JSON string keys); absent/0 = no slide. */
+   * by slotId; absent/0 = no slide. */
   nudges: Record<string, number>;
   /** Per-slot channel TRIM (gh#190 iteration): 0..1, 0.5 nominal —
    * replayed through the automation overlay's own trim (real gain
-   * curves). Keyed by slot; absent = nominal. */
+   * curves). Keyed by slotId; absent = nominal. */
   trims: Record<string, number>;
+  /** Per-slot ENTRY-OFFSET OVERRIDE (ADR 0039, #207 slice 2): the slot's
+   * entry beat on the routine clock, overriding the baked promotion
+   * output — reorder IS editing entry offsets (slot index = entry order,
+   * ADR 0035; the cast re-sorts as a consequence). The slot's recorded
+   * timeline (trace + recorded lanes) shifts rigidly to the new entry (a
+   * phrase shift). Keyed by slotId; absent = the recorded entry plays.
+   * Undoable, revert-to-recorded, badged '✎' — the authored-lane idiom. */
+  entryOffsets: Record<string, number>;
 }
 
 export const EMPTY_EDITS: RoutineEdits = {
@@ -93,6 +116,7 @@ export const EMPTY_EDITS: RoutineEdits = {
   removedRecordedPauses: [],
   nudges: {},
   trims: {},
+  entryOffsets: {},
 };
 
 export function emptyEdits(): RoutineEdits {
@@ -104,11 +128,12 @@ export function emptyEdits(): RoutineEdits {
     removedRecordedPauses: [],
     nudges: {},
     trims: {},
+    entryOffsets: {},
   };
 }
 
-export function laneKey(slot: number, control: string): string {
-  return `${slot}:${control}`;
+export function laneKey(slotId: string, control: string): string {
+  return `${slotId}:${control}`;
 }
 
 export function editsAreEmpty(e: RoutineEdits): boolean {
@@ -119,17 +144,31 @@ export function editsAreEmpty(e: RoutineEdits): boolean {
     e.pauses.length === 0 &&
     e.removedRecordedPauses.length === 0 &&
     Object.keys(e.nudges).length === 0 &&
-    Object.keys(e.trims).length === 0
+    Object.keys(e.trims).length === 0 &&
+    Object.keys(e.entryOffsets).length === 0
   );
 }
 
+/** The slot identity of a persisted slot-addressed edit: `slotId`
+ * (string) preferred; legacy `slot` (number, the pre-ADR-0039 index key)
+ * migrates to String(index) — lossless, promoted routines never
+ * reordered. Null = unaddressable (dropped). */
+function readSlotId(o: Record<string, unknown>): string | null {
+  if (typeof o.slotId === 'string' && o.slotId.length > 0) return o.slotId;
+  if (typeof o.slot === 'number' && Number.isFinite(o.slot)) return String(o.slot);
+  return null;
+}
+
 /** Tolerantly parse persisted edits (the events_json posture: stored
- * opaque, validated on read). */
+ * opaque, validated on read). Legacy index-keyed edits re-key on slotId
+ * here (persisted edits_json re-keys on the first save after parse). */
 export function parseEdits(raw: unknown): RoutineEdits {
   if (raw === null || raw === undefined || typeof raw !== 'object') return emptyEdits();
   const o = raw as Record<string, unknown>;
   const lanes: Record<string, RoutineLanePoint[]> = {};
   if (o.lanes && typeof o.lanes === 'object') {
+    // Lane keys are `${slotId}:${control}`; legacy `${index}:${control}`
+    // keys ARE the migrated form (slotId = String(index)) — kept as-is.
     for (const [k, v] of Object.entries(o.lanes as Record<string, unknown>)) {
       if (!Array.isArray(v)) continue;
       const pts = v
@@ -146,58 +185,65 @@ export function parseEdits(raw: unknown): RoutineEdits {
     }
   }
   const jumps: AuthoredJump[] = Array.isArray(o.jumps)
-    ? (o.jumps as unknown[])
-        .filter(
-          (j): j is AuthoredJump =>
-            typeof j === 'object' &&
-            j !== null &&
-            typeof (j as AuthoredJump).slot === 'number' &&
-            typeof (j as AuthoredJump).beat === 'number' &&
-            typeof (j as AuthoredJump).deltaSec === 'number'
-        )
-        .map((j) => ({
-          id: typeof j.id === 'string' ? j.id : `${j.slot}:${j.beat}`,
-          slot: j.slot,
-          beat: j.beat,
-          deltaSec: j.deltaSec,
-          repeat: typeof j.repeat === 'number' && j.repeat > 1 ? Math.floor(j.repeat) : undefined,
-        }))
+    ? (o.jumps as unknown[]).flatMap((j): AuthoredJump[] => {
+        if (typeof j !== 'object' || j === null) return [];
+        const r = j as Record<string, unknown>;
+        const slotId = readSlotId(r);
+        if (slotId === null || typeof r.beat !== 'number' || typeof r.deltaSec !== 'number') {
+          return [];
+        }
+        return [
+          {
+            id: typeof r.id === 'string' ? r.id : `${slotId}:${r.beat}`,
+            slotId,
+            beat: r.beat,
+            deltaSec: r.deltaSec,
+            repeat:
+              typeof r.repeat === 'number' && r.repeat > 1 ? Math.floor(r.repeat) : undefined,
+          },
+        ];
+      })
     : [];
   const removedRecordedJumps: RemovedRecordedJump[] = Array.isArray(o.removedRecordedJumps)
-    ? (o.removedRecordedJumps as unknown[]).filter(
-        (r): r is RemovedRecordedJump =>
-          typeof r === 'object' &&
-          r !== null &&
-          typeof (r as RemovedRecordedJump).slot === 'number' &&
-          typeof (r as RemovedRecordedJump).beat === 'number'
-      )
+    ? (o.removedRecordedJumps as unknown[]).flatMap((r): RemovedRecordedJump[] => {
+        if (typeof r !== 'object' || r === null) return [];
+        const q = r as Record<string, unknown>;
+        const slotId = readSlotId(q);
+        if (slotId === null || typeof q.beat !== 'number') return [];
+        return [{ slotId, beat: q.beat }];
+      })
     : [];
   const pauses: AuthoredPause[] = Array.isArray(o.pauses)
-    ? (o.pauses as unknown[])
-        .filter(
-          (p): p is AuthoredPause =>
-            typeof p === 'object' &&
-            p !== null &&
-            typeof (p as AuthoredPause).slot === 'number' &&
-            typeof (p as AuthoredPause).beat === 'number' &&
-            typeof (p as AuthoredPause).durBeats === 'number' &&
-            (p as AuthoredPause).durBeats > 0
-        )
-        .map((p) => ({
-          id: typeof p.id === 'string' ? p.id : `p-${p.slot}:${p.beat}`,
-          slot: p.slot,
-          beat: p.beat,
-          durBeats: p.durBeats,
-        }))
+    ? (o.pauses as unknown[]).flatMap((p): AuthoredPause[] => {
+        if (typeof p !== 'object' || p === null) return [];
+        const r = p as Record<string, unknown>;
+        const slotId = readSlotId(r);
+        if (
+          slotId === null ||
+          typeof r.beat !== 'number' ||
+          typeof r.durBeats !== 'number' ||
+          r.durBeats <= 0
+        ) {
+          return [];
+        }
+        return [
+          {
+            id: typeof r.id === 'string' ? r.id : `p-${slotId}:${r.beat}`,
+            slotId,
+            beat: r.beat,
+            durBeats: r.durBeats,
+          },
+        ];
+      })
     : [];
   const removedRecordedPauses: RemovedRecordedPause[] = Array.isArray(o.removedRecordedPauses)
-    ? (o.removedRecordedPauses as unknown[]).filter(
-        (r): r is RemovedRecordedPause =>
-          typeof r === 'object' &&
-          r !== null &&
-          typeof (r as RemovedRecordedPause).slot === 'number' &&
-          typeof (r as RemovedRecordedPause).beat === 'number'
-      )
+    ? (o.removedRecordedPauses as unknown[]).flatMap((r): RemovedRecordedPause[] => {
+        if (typeof r !== 'object' || r === null) return [];
+        const q = r as Record<string, unknown>;
+        const slotId = readSlotId(q);
+        if (slotId === null || typeof q.beat !== 'number') return [];
+        return [{ slotId, beat: q.beat }];
+      })
     : [];
   const nudges: Record<string, number> = {};
   if (o.nudges && typeof o.nudges === 'object') {
@@ -213,7 +259,22 @@ export function parseEdits(raw: unknown): RoutineEdits {
       }
     }
   }
-  return { lanes, jumps, removedRecordedJumps, pauses, removedRecordedPauses, nudges, trims };
+  const entryOffsets: Record<string, number> = {};
+  if (o.entryOffsets && typeof o.entryOffsets === 'object') {
+    for (const [k, v] of Object.entries(o.entryOffsets as Record<string, unknown>)) {
+      if (typeof v === 'number' && Number.isFinite(v)) entryOffsets[k] = v;
+    }
+  }
+  return {
+    lanes,
+    jumps,
+    removedRecordedJumps,
+    pauses,
+    removedRecordedPauses,
+    nudges,
+    trims,
+    entryOffsets,
+  };
 }
 
 // ── Trace transform ──────────────────────────────────────────────────────

@@ -15,7 +15,7 @@ export function NeverAudibleBadge({ planned }: { planned: PlannedEntry | undefin
       title={`planned entry ${fmtSec(planned.entrySec)} is after the exit ${fmtSec(planned.exitSec)} — this track never plays`}
       style={{
         padding: '1px 6px',
-        background: 'var(--red)',
+        background: 'var(--danger)',
         color: 'var(--base)',
         fontSize: '11px',
         fontWeight: 700,

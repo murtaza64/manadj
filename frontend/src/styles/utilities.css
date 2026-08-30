@@ -9,37 +9,37 @@
 .flex-shrink-0 { flex-shrink: 0; }
 
 /* Gap utilities */
-.gap-xs { gap: var(--space-xs); }
-.gap-sm { gap: var(--space-sm); }
-.gap-md { gap: var(--space-md); }
+.gap-xs { gap: var(--space-4); }
+.gap-sm { gap: var(--space-8); }
+.gap-md { gap: var(--space-12); }
 
 /* Spacing utilities - Padding */
 .p-0 { padding: 0; }
-.p-xs { padding: var(--space-xs); }
-.p-sm { padding: var(--space-sm); }
-.p-md { padding: var(--space-md); }
-.p-lg { padding: var(--space-lg); }
-.p-xl { padding: var(--space-xl); }
+.p-xs { padding: var(--space-4); }
+.p-sm { padding: var(--space-8); }
+.p-md { padding: var(--space-12); }
+.p-lg { padding: var(--space-16); }
+.p-xl { padding: var(--space-24); }
 
 /* Spacing utilities - Margin Bottom */
-.mb-xs { margin-bottom: var(--space-xs); }
-.mb-sm { margin-bottom: var(--space-sm); }
-.mb-md { margin-bottom: var(--space-md); }
-.mb-lg { margin-bottom: var(--space-lg); }
-.mb-xl { margin-bottom: var(--space-xl); }
+.mb-xs { margin-bottom: var(--space-4); }
+.mb-sm { margin-bottom: var(--space-8); }
+.mb-md { margin-bottom: var(--space-12); }
+.mb-lg { margin-bottom: var(--space-16); }
+.mb-xl { margin-bottom: var(--space-24); }
 
 /* Margin Top */
-.mt-lg { margin-top: var(--space-lg); }
+.mt-lg { margin-top: var(--space-16); }
 
 /* Padding Top */
-.pt-md { padding-top: var(--space-md); }
+.pt-md { padding-top: var(--space-12); }
 
 /* Text utilities */
-.text-xs { font-size: var(--font-xs); }
-.text-sm { font-size: var(--font-sm); }
-.text-md { font-size: var(--font-md); }
-.text-lg { font-size: var(--font-lg); }
-.text-xl { font-size: var(--font-xl); }
+.text-xs { font-size: var(--font-body); }
+.text-sm { font-size: var(--font-large); }
+.text-md { font-size: var(--font-title); }
+.text-lg { font-size: var(--font-title); }
+.text-xl { font-size: var(--font-display); }
 
 .font-bold { font-weight: bold; }
 .font-mono { font-family: monospace; }
@@ -58,12 +58,12 @@
    (accent borders hold — the tint carries the feedback); press =
    surface1 fill. No glows, scale effects, or hue-shifts. */
 .btn {
-  padding: var(--space-sm) var(--space-md);
+  padding: var(--space-8) var(--space-12);
   background: transparent;
   border: 1px solid var(--surface1);
   color: var(--text);
   cursor: pointer;
-  font-size: var(--font-xs);
+  font-size: var(--font-body);
   font-family: inherit;
 }
 
@@ -82,33 +82,33 @@
 }
 
 .btn-primary {
-  border-color: var(--blue);
-  color: var(--blue);
+  border-color: var(--accent);
+  color: var(--accent);
   font-weight: bold;
 }
 
 .btn-primary:hover:not(:disabled) {
-  border-color: var(--blue);
+  border-color: var(--accent);
 }
 
 .btn-success {
-  border-color: var(--green);
-  color: var(--green);
+  border-color: var(--success);
+  color: var(--success);
   font-weight: bold;
 }
 
 .btn-success:hover:not(:disabled) {
-  border-color: var(--green);
+  border-color: var(--success);
 }
 
 .btn-danger {
-  border-color: var(--red);
-  color: var(--red);
+  border-color: var(--danger);
+  color: var(--danger);
   font-weight: bold;
 }
 
 .btn-danger:hover:not(:disabled) {
-  border-color: var(--red);
+  border-color: var(--danger);
 }
 
 /* The quiet base .btn IS the secondary look; the class carries intent. */
@@ -127,11 +127,11 @@
 
 /* Input utilities */
 .input {
-  padding: var(--space-sm) var(--space-md);
+  padding: var(--space-8) var(--space-12);
   background: var(--base);
   border: 1px solid var(--surface0);
   color: var(--text);
-  font-size: var(--font-sm);
+  font-size: var(--font-large);
 }
 
 .input::placeholder {

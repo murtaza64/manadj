@@ -14,11 +14,11 @@
 }
 
 .track-row-selected {
-  background: #242438 !important;
+  background: var(--surface0) !important;
 }
 
 .track-row-selected:hover {
-  background: #2a2a3e !important;
+  background: var(--surface1) !important;
 }
 
 /* Sticky cell backgrounds that match row state */
@@ -27,11 +27,11 @@
 }
 
 .track-row-selected .sticky-col-cell {
-  background: #242438 !important;
+  background: var(--surface0) !important;
 }
 
 .track-row-selected:hover .sticky-col-cell {
-  background: #2a2a3e !important;
+  background: var(--surface1) !important;
 }
 
 /* Loaded mark: NO background wash here — a low-alpha tint is ambiguous
@@ -46,7 +46,7 @@
 }
 
 .track-cell {
-  padding: 2px 8px;
+  padding: var(--space-2) var(--space-8);
   vertical-align: middle;
   overflow: hidden;
 }
@@ -99,7 +99,7 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  font-size: 13px;
+  font-size: var(--font-body);
 }
 
 /* Single line cells */
@@ -107,19 +107,19 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  font-size: 13px;
+  font-size: var(--font-body);
 }
 
 /* Tags cell with horizontal scroll */
 .track-tags-cell {
-  padding: 2px 12px;
+  padding: var(--space-2) var(--space-12);
   vertical-align: middle;
   /* width comes from columnConfig via inline style */
 }
 
 .track-tags-container {
   display: flex;
-  gap: 8px;
+  gap: var(--space-8);
   flex-wrap: nowrap;
   overflow-x: auto;
   overflow-y: hidden;
@@ -147,7 +147,7 @@
 
 /* Energy cell */
 .track-energy-cell {
-  padding: 2px 4px;
+  padding: var(--space-2) var(--space-4);
   vertical-align: middle;
   width: 25px;
   text-align: center;
@@ -207,17 +207,17 @@
 /* Quality / size / provenance columns */
 .quality-display,
 .size-display {
-  font-size: 12px;
+  font-size: var(--font-body);
   color: var(--subtext1);
   white-space: nowrap;
 }
 
 .quality-low {
-  color: var(--red);
+  color: var(--danger);
 }
 
 .provenance-chip {
-  font-size: 12px;
+  font-size: var(--font-body);
   color: var(--subtext1);
   text-decoration: none;
   white-space: nowrap;
@@ -235,7 +235,7 @@ a.provenance-chip:hover {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 2px;
+  gap: var(--space-2);
 }
 
 .track-mark-slot {
@@ -243,7 +243,7 @@ a.provenance-chip:hover {
   align-items: center;
   justify-content: center;
   width: 13px;
-  font-size: 13px;
+  font-size: var(--font-body);
   line-height: 1;
 }
 
@@ -271,7 +271,7 @@ a.provenance-chip:hover {
 
 .track-marks:has(> :nth-child(3)) .track-mark-slot {
   width: 8px;
-  font-size: 9px;
+  font-size: var(--font-micro);
 }
 
 /* Load-to-deck hover buttons (Performance view's embedded library). The
@@ -282,7 +282,7 @@ a.provenance-chip:hover {
   top: 50%;
   transform: translateY(-50%);
   display: none;
-  gap: 3px;
+  gap: var(--space-4);
 }
 
 .track-row:hover .track-load-buttons { display: inline-flex; }
@@ -293,7 +293,7 @@ a.provenance-chip:hover {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 11px;
+  font-size: var(--font-small);
   font-weight: 800;
   background: var(--surface0);
   color: var(--text);
@@ -334,7 +334,7 @@ a.provenance-chip:hover {
 /* Play order (#) cell — playlist tables only (playlist-editing 04) */
 .track-order-cell {
   color: var(--subtext0);
-  font-size: 12px;
+  font-size: var(--font-body);
   font-variant-numeric: tabular-nums;
   justify-content: flex-end;
 }
@@ -356,12 +356,17 @@ a.provenance-chip:hover {
    track has no saved grid yet. Bright, fully saturated red per repo style. */
 .needs-attention-badge {
   display: inline-block;
-  margin-right: 6px;
-  padding: 0 5px;
-  border-radius: 3px;
-  background: #ff0033;
-  color: #ffffff;
-  font-size: 10px;
+  margin-right: var(--space-6);
+  padding: 0 var(--space-4);
+  border-radius: var(--radius);
+  background: var(--danger);
+  color: var(--text);
+  font-size: var(--font-micro);
   font-weight: 700;
   line-height: 14px;
 }
+
+/* Stems presence (stems map #118): plain white check when current stems
+   exist on disk; empty cell otherwise. */
+.stems-cell { text-align: center; }
+.stems-check { color: var(--text); }

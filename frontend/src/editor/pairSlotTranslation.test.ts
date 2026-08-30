@@ -169,7 +169,7 @@ describe('pairSlotTranslation — single-field re-derivation', () => {
 
     // Author a faderB envelope (a single-lane edit).
     const edits = emptyEdits();
-    edits.lanes[laneKey(1, 'fader')] = [
+    edits.lanes[laneKey('1', 'fader')] = [
       { beat: 0, value: 0 },
       { beat: durationBeats, value: 1 },
     ];
@@ -197,7 +197,7 @@ describe('pairSlotTranslation — single-field re-derivation', () => {
     const input = baseInput();
     const proj = transitionToProjection(input);
     const edits = emptyEdits();
-    edits.lanes[laneKey(0, 'filter')] = [{ beat: 0, value: 0 }];
+    edits.lanes[laneKey('0', 'filter')] = [{ beat: 0, value: 0 }];
     const saved = editsToTransition(edits, {
       original: input.transition,
       durationBeats: proj.detail.duration_beats,
@@ -229,8 +229,8 @@ describe('pairSlotTranslation — single-field re-derivation', () => {
     const durationBeats = proj.detail.duration_beats;
     const edits = emptyEdits();
     edits.jumps = [
-      { id: 'a', slot: 0, beat: durationBeats * 0.25, deltaSec: 1 },
-      { id: 'b', slot: 1, beat: durationBeats * 0.5, deltaSec: -2, repeat: 3 },
+      { id: 'a', slotId: '0', beat: durationBeats * 0.25, deltaSec: 1 },
+      { id: 'b', slotId: '1', beat: durationBeats * 0.5, deltaSec: -2, repeat: 3 },
     ];
     const saved = editsToTransition(edits, {
       original: input.transition,
@@ -260,7 +260,7 @@ describe('pairSlotTranslation — pairToEdits (projection of drawn fields)', () 
       },
       durationBeats
     );
-    expect(edits.lanes[laneKey(1, 'fader')]).toEqual([
+    expect(edits.lanes[laneKey('1', 'fader')]).toEqual([
       { beat: 0, value: 0 },
       { beat: 20, value: 1 },
     ]);
@@ -339,12 +339,12 @@ describe('pairSlotTranslation — changedPairEdits (the live-draft diff, #205)',
     });
     const proj = transitionToProjection(input);
     const draft = clone(proj.edits);
-    draft.lanes[laneKey(1, 'fader')] = [
+    draft.lanes[laneKey('1', 'fader')] = [
       { beat: 0, value: 0 },
       { beat: 4, value: 0.8 },
     ];
     const diff = changedPairEdits(draft, proj.edits);
-    expect(Object.keys(diff.lanes)).toEqual([laneKey(1, 'fader')]);
+    expect(Object.keys(diff.lanes)).toEqual([laneKey('1', 'fader')]);
     expect(diff.jumps).toHaveLength(0);
     // Untouched faderA and the incoming jump pass through VERBATIM.
     const saved = editsToTransition(diff, {
@@ -367,10 +367,10 @@ describe('pairSlotTranslation — changedPairEdits (the live-draft diff, #205)',
     });
     const proj = transitionToProjection(input);
     const draft = clone(proj.edits);
-    const j1 = draft.jumps.find((j) => j.slot === 1)!;
+    const j1 = draft.jumps.find((j) => j.slotId === '1')!;
     j1.deltaSec = -4; // edit the incoming's jump
     const diff = changedPairEdits(draft, proj.edits);
-    expect(diff.jumps.every((j) => j.slot === 1)).toBe(true);
+    expect(diff.jumps.every((j) => j.slotId === '1')).toBe(true);
     const saved = editsToTransition(diff, {
       original: input.transition,
       durationBeats: proj.detail.duration_beats,
@@ -440,14 +440,14 @@ describe('pairSlotTranslation — Cameo host/guest 2-slot parity', () => {
 
   it('the guest fader envelope fades in at entry and out by exit; host has none', () => {
     const proj = cameoToProjection(cameoInput());
-    const guestFader = proj.edits.lanes[laneKey(1, 'fader')];
+    const guestFader = proj.edits.lanes[laneKey('1', 'fader')];
     expect(guestFader).toBeDefined();
     // Closed before entry, open at peak, closed by exit.
     expect(guestFader[0].value).toBe(0);
     expect(guestFader[guestFader.length - 1].value).toBe(0);
     expect(guestFader.some((p) => p.value === 1)).toBe(true);
     // Host (slot 0) rides its default open fader — no authored lane.
-    expect(proj.edits.lanes[laneKey(0, 'fader')]).toBeUndefined();
+    expect(proj.edits.lanes[laneKey('0', 'fader')]).toBeUndefined();
   });
 
   it('builds a playable 2-slot routine where the host stays current', () => {

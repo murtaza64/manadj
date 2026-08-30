@@ -9,7 +9,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { useWaveformBlob } from '../waveform/useWaveformBlob';
 import { useWaveformRendererV2 } from '../waveform/useWaveformRendererV2';
-import { toThreeBands } from '../waveform/blob';
 import { useHotCues } from '../hooks/useHotCues';
 import { MixPlayer } from './MixPlayer';
 import { ConductorLanePlayhead } from './ConductorLanePlayhead';
@@ -17,6 +16,8 @@ import { GlobalMinimap } from './GlobalMinimap';
 import { LaneCanvas } from './LaneCanvas';
 import { DECK_LANE_ORDER, LANE_COLORS, LANE_LABELS } from './laneColors';
 import { cueCssColor } from '../hotcues/palette';
+import { AUDIBILITY_FILL_ALPHA } from '../theme/markers';
+import { hexToRgbTriplet } from '../theme/deckColors';
 import type { LaneGuide } from './LaneCanvas';
 import {
   LANE_IDS,
@@ -95,9 +96,7 @@ function GainFill({
     if (!ctx) return;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
-    const cH = color.replace('#', '');
-    const rgb = `${parseInt(cH.slice(0, 2), 16)},${parseInt(cH.slice(2, 4), 16)},${parseInt(cH.slice(4, 6), 16)}`;
-    ctx.fillStyle = `rgba(${rgb},0.16)`;
+    ctx.fillStyle = `rgba(${hexToRgbTriplet(color)},${AUDIBILITY_FILL_ALPHA})`;
     ctx.beginPath();
     for (let x = 0; x < w; x += 1) {
       const gain = channelFaderToGain(evalLane(points, x / w));
@@ -244,11 +243,6 @@ export function DawTimeline({
   // decodes — see the duration fallback below.
   const { data: waveA } = useWaveformBlob(trackAId);
   const { data: waveB } = useWaveformBlob(trackBId);
-  // 3-band arrays for the global minimap's own 2D drawing (memoized: new
-  // identities would re-fire its redraw effect every render).
-  const waveA3 = useMemo(() => (waveA ? toThreeBands(waveA) : null), [waveA]);
-  const waveB3 = useMemo(() => (waveB ? toThreeBands(waveB) : null), [waveB]);
-
   // Draw before decode (mix-editor 28): engine durations are 0 until
   // decodeAudioData finishes (seconds for two full tracks), but the
   // waveform response's duration arrives in milliseconds — geometry and
@@ -377,6 +371,9 @@ export function DawTimeline({
   // halves): both rows mirror around their own center baseline, at full
   // band brightness like the library/performance waveforms (the issue-05
   // 0.6 dim is retired; out-of-window dimming stays — .editor-inaudible).
+  // playMarkerPosition 0: documented override of PLAY_MARKER_FRACTION
+  // (theme/markers) — the editor rows use an external window (the DOM
+  // playhead scrolls; the renderer's fixed marker is unused).
   const rowConfigA = {
     isMinimapMode: false,
     playMarkerPosition: 0,
@@ -1518,8 +1515,8 @@ export function DawTimeline({
       <GlobalMinimap
         player={player}
         mix={mix}
-        waveA={waveA3}
-        waveB={waveB3}
+        waveA={waveA ?? null}
+        waveB={waveB ?? null}
         rateB={rateB}
         contentEnd={contentEnd}
         pxPerSec={pxPerSec}

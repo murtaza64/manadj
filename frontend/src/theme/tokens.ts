@@ -65,18 +65,6 @@ export const ORANGE = '#ff9500';
  * saturated waveform content without impersonating a hotcue. */
 export const PLAYHEAD = '#f5c2e7';
 
-// ── Legacy named accents (deprecated; migrate to semantic tokens, gh#200) ─
-export const LEGACY_ACCENTS = {
-  blue: '#4a9eff',
-  sapphire: '#00b8d4',
-  green: '#5ed75e',
-  teal: '#26c6b8',
-  yellow: '#f9e2af',
-  red: '#ff4466',
-  mauve: '#b366ff',
-  lavender: '#7a7aff',
-} as const;
-
 // ── Hotcue slot palette (hotcue-colors 01; pastel rejected) ──────────────
 // Fallback when a cue has no stored color. Consumed via
 // hotcues/palette.cueCssColor (CSS/DOM) and as GL floats in
@@ -91,6 +79,16 @@ export const HOT_CUE_CSS_COLORS: Record<number, string> = {
   7: '#a855f7',
   8: '#00cec9',
 };
+
+// ── Stem kill-switch palette (stems #210) — bright, fully saturated,
+// one identity per stem across every surface that will ever paint them
+// (deck buttons now; lanes/viz later). Consumed as --stem-<name>.
+export const STEM_COLORS = {
+  vocals: '#ffd400',
+  drums: '#ff4455',
+  bass: '#a855f7',
+  other: '#00cec9',
+} as const;
 
 // ── Energy gradient ──────────────────────────────────────────────────────
 export const ENERGY_COLORS: Record<number, string> = {
@@ -119,28 +117,8 @@ export const FONT_SIZES = {
   display: '24px', // big readouts (BPM displays etc.)
 } as const;
 
-/** Deprecated (pre-D1 scale, kept verbatim so step 1 changes nothing on
- * screen). Consumers migrate to FONT_SIZES in gh#200, then these die. */
-export const LEGACY_FONT_SIZES = {
-  xs: '13px',
-  sm: '14px',
-  md: '16px',
-  lg: '20px',
-  xl: '24px',
-} as const;
-
 // ── Spacing (D8: 2px grid) ───────────────────────────────────────────────
 export const SPACE_STEPS = [2, 4, 6, 8, 12, 16, 24] as const;
-
-/** Deprecated 4px-multiple names (kept verbatim; migrate to --space-<n>,
- * gh#200). */
-export const LEGACY_SPACE = {
-  xs: '4px',
-  sm: '8px',
-  md: '12px',
-  lg: '16px',
-  xl: '24px',
-} as const;
 
 // ── Geometry (D5) ────────────────────────────────────────────────────────
 /** 0 — flat geometric design. 50% stays legal for genuine circles (knob
@@ -158,11 +136,10 @@ export const Z_TIERS = {
 
 // ── Motion (D9: instant by default) ──────────────────────────────────────
 // Transitions are named exceptions only (DESIGN.md); these tokens are the
-// only legal durations. Values are pre-D9 verbatim until the gh#200 sweep
-// deletes the existing transition sites.
+// only legal durations.
 export const TRANSITIONS = {
-  fast: '0.15s ease',
-  normal: '0.2s ease',
+  fast: '0.1s ease',
+  normal: '0.15s ease',
 } as const;
 
 // ── Derived forms ────────────────────────────────────────────────────────
@@ -214,12 +191,12 @@ export const CSS_VARS: Record<string, string> = {
   '--playhead': PLAYHEAD,
   '--playhead-rgb': hexToRgbTriplet(PLAYHEAD),
 
-  // Legacy named accents (deprecated)
-  ...Object.fromEntries(Object.entries(LEGACY_ACCENTS).map(([name, hex]) => [`--${name}`, hex])),
-
   // Hotcue slots
   ...Object.fromEntries(
     Object.entries(HOT_CUE_CSS_COLORS).map(([slot, hex]) => [`--hc-${slot}`, hex]),
+  ),
+  ...Object.fromEntries(
+    Object.entries(STEM_COLORS).map(([stem, hex]) => [`--stem-${stem}`, hex]),
   ),
 
   // Energy gradient
@@ -244,13 +221,9 @@ export const CSS_VARS: Record<string, string> = {
   ...Object.fromEntries(
     Object.entries(FONT_SIZES).map(([step, size]) => [`--font-${step}`, size]),
   ),
-  ...Object.fromEntries(
-    Object.entries(LEGACY_FONT_SIZES).map(([step, size]) => [`--font-${step}`, size]),
-  ),
 
   // Spacing
   ...Object.fromEntries(SPACE_STEPS.map((n) => [`--space-${n}`, `${n}px`])),
-  ...Object.fromEntries(Object.entries(LEGACY_SPACE).map(([step, v]) => [`--space-${step}`, v])),
 
   // Geometry
   '--radius': RADIUS,

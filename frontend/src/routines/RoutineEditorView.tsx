@@ -66,7 +66,7 @@ import { RoutineTimeline, type TrimRange } from './RoutineTimeline';
 import { consumeRoutineEdit, OPEN_ROUTINE_EVENT } from './openRoutine';
 import { openCandidateInEditor, openRoutineTakeInEditor } from './openFlow';
 import { openRoutineSource } from './provenance';
-import { editsAreEmpty, parseEdits } from './routineDraft';
+import { editsAreEmpty, emptyEdits, parseEdits } from './routineDraft';
 import { RoutineDraftStore, useRoutineDraft, editsForSave } from './routineDraftStore';
 import {
   beatLabel,
@@ -81,6 +81,13 @@ import {
 } from './routineEditorModel';
 import { beatgridQueryOptions } from '../hooks/useBeatgridData';
 import { metricLadderQueryOptions } from '../hooks/useMetricLadderData';
+import {
+  MODE_KEY_HINTS,
+  MODE_LABELS,
+  MODE_TITLES,
+  useEditorMode,
+  type EditorMode,
+} from './editorMode';
 import './routineEditor.css';
 
 const LAST_ROUTINE_KEY = 'manadj-last-routine';
@@ -114,6 +121,10 @@ export default function RoutineEditorView() {
   const queryClient = useQueryClient();
   const toast = useToast();
   const viewActive = useViewActive();
+
+  // Modal editing (ADR 0038, gh#207): mode is a working posture — it lives
+  // here in the shell so it persists across artifact switches.
+  const [editorMode, setEditorMode] = useEditorMode(viewActive);
 
   // Track rows for the load hook (deck reuse loads tracks mid-play):
   // usually already fetched; falls back to the API for a cold id.
@@ -588,25 +599,49 @@ export default function RoutineEditorView() {
     ? false
     : trackBpms.some((b) => b === null || b === undefined || b <= 0);
   const buildable = !!detail && !missingBpm && !!effectiveBpm && effectiveBpm > 0;
-  // RAW build (no edits): recorded-jump marker provenance (ghosts keep
-  // their place after removal).
+  // RAW build (no jump/pause/lane edits): recorded-jump marker
+  // provenance (ghosts keep their place after removal). Entry-offset
+  // OVERRIDES apply even here (ADR 0039/#207): they move the slot's
+  // whole recorded timeline, so provenance markers must ride the same
+  // shifted/reordered view the edited build shows.
+  const entryOffsetsKey = useMemo(
+    () => JSON.stringify(draft.edits.entryOffsets),
+    [draft.edits.entryOffsets]
+  );
   const rawEditor = useMemo(() => {
     if (!buildable) return null;
-    return buildEditorRoutine(detail!, trackBpms as number[], effectiveBpm!, null);
-  }, [detail, trackBpms, buildable, effectiveBpm]);
+    const eo = draft.edits.entryOffsets;
+    const rawEdits =
+      Object.keys(eo).length > 0 ? { ...emptyEdits(), entryOffsets: { ...eo } } : null;
+    return buildEditorRoutine(detail!, trackBpms as number[], effectiveBpm!, rawEdits);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [detail, trackBpms, buildable, effectiveBpm, entryOffsetsKey]);
+  // Keyed by SLOT ID (ADR 0039): provenance survives any derived-index
+  // reshuffle between the raw and edited builds.
   const recordedJumpsBySlot = useMemo(
-    () => (rawEditor ? rawEditor.planned.slots.map((s) => recordedJumps(s.trace)) : []),
+    () =>
+      rawEditor
+        ? Object.fromEntries(
+            rawEditor.planned.slots.map((s) => [s.slotId, recordedJumps(s.trace)])
+          )
+        : {},
     [rawEditor]
   );
   const recordedPausesBySlot = useMemo(
-    () => (rawEditor ? rawEditor.planned.slots.map((s) => recordedPauses(s.trace)) : []),
+    () =>
+      rawEditor
+        ? Object.fromEntries(
+            rawEditor.planned.slots.map((s) => [s.slotId, recordedPauses(s.trace)])
+          )
+        : {},
     [rawEditor]
   );
   // Jump-edited base: traces carry authored/removed jumps. Lane edits
   // apply as a cheap re-skin below — trace identities survive lane drags
   // (the ~60 Hz hot path never rebuilds traces).
   // Nudges rebuild traces too (gh#190 item 6 — a rigid track-time slide
-  // is a trace transform, not a lane re-skin).
+  // is a trace transform, not a lane re-skin), and so do entry-offset
+  // overrides (ADR 0039/#207 — they reorder and shift the build).
   const jumpEditsKey = useMemo(
     () =>
       JSON.stringify({
@@ -615,6 +650,7 @@ export default function RoutineEditorView() {
         p: draft.edits.pauses,
         rp: draft.edits.removedRecordedPauses,
         n: draft.edits.nudges,
+        eo: draft.edits.entryOffsets,
       }),
     [
       draft.edits.jumps,
@@ -622,6 +658,7 @@ export default function RoutineEditorView() {
       draft.edits.pauses,
       draft.edits.removedRecordedPauses,
       draft.edits.nudges,
+      draft.edits.entryOffsets,
     ]
   );
   const baseEditor: EditorRoutine | null = useMemo(() => {
@@ -1055,6 +1092,19 @@ export default function RoutineEditorView() {
           >
             {playing ? '❚❚' : armPending ? '…' : '▶'}
           </button>
+          <span className="re-modebar" role="group" aria-label="Editor mode">
+            {(['select', 'pan', 'jump'] as EditorMode[]).map((m) => (
+              <button
+                key={m}
+                className={`re-modebtn${editorMode === m ? ' on' : ''}`}
+                title={MODE_TITLES[m]}
+                onClick={() => setEditorMode(m)}
+              >
+                {MODE_LABELS[m]}
+                <kbd>{MODE_KEY_HINTS[m]}</kbd>
+              </button>
+            ))}
+          </span>
           <span className="re-beat" ref={beatReadoutRef} />
           <span className="re-history">
             <button
@@ -1199,6 +1249,8 @@ export default function RoutineEditorView() {
               trim={trimEnabled ? trim : null}
               onTrimChange={trimEnabled ? setTrim : null}
               onSeekBeat={onSeekBeat}
+              mode={editorMode}
+              onModeHome={() => setEditorMode('select')}
             />
           )}
         </div>

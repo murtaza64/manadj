@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { useWaveformBlob } from '../waveform/useWaveformBlob';
+import type { DecodedWaveform } from '../waveform/blob';
 import { useWaveformRendererV2 } from '../waveform/useWaveformRendererV2';
 import { useViewActive } from '../contexts/viewActive';
 import { loopOverlayRegions } from '../waveform/loopOverlay';
@@ -10,6 +11,13 @@ import type { BeatgridData } from '../types';
 import './Waveform.css';
 
 interface WaveformMinimapProps {
+  /** Per-stem waveforms (stems #213): masked everywhere on the minimap
+   * (history behind the playhead, live mask ahead). */
+  stemWaveforms?: DecodedWaveform[] | null;
+  /** Per-column mask source; stable identity. */
+  stemMaskAt?: ((t: number) => readonly number[]) | null;
+  /** Any-value wake: repaint paused decks on stem toggles. */
+  wakeKey?: unknown;
   trackId: number | null;
   clock: PlaybackClock;
   cuePoint: number | null;
@@ -31,6 +39,9 @@ interface WaveformMinimapProps {
 }
 
 export default function WaveformMinimap({
+  stemWaveforms = null,
+  stemMaskAt = null,
+  wakeKey,
   trackId,
   clock,
   cuePoint,
@@ -50,6 +61,10 @@ export default function WaveformMinimap({
   const { canvasRef, rendererRef, initError } = useWaveformRendererV2({
     clock,
     waveformData,
+    stemWaveforms,
+    stemMaskAt,
+    stemLobeSplit: false,
+    wakeKey,
     config: {
       isMinimapMode: true,
     },

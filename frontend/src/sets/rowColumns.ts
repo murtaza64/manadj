@@ -130,10 +130,10 @@ export function bpmDeltaPercent(
 export function bpmDeltaColor(deltaPercent: number | null): string | null {
   if (deltaPercent === null) return null;
   const mag = Math.abs(deltaPercent);
-  if (mag <= 2) return 'var(--green)';
-  if (mag <= 4) return 'var(--yellow)';
+  if (mag <= 2) return 'var(--success)';
+  if (mag <= 4) return 'var(--warning)';
   if (mag <= 8) return '#ff9500'; // --peach is scoped to .set-header; same value
-  return 'var(--red)';
+  return 'var(--danger)';
 }
 
 /** The BPM cell's tooltip: absolute text stays in the cell, the delta

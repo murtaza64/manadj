@@ -5,7 +5,7 @@
    these rules — that is how accent controls keep their accent on hover. */
 
 .filter-bar-label {
-  font-size: 14px;
+  font-size: var(--font-large);
   color: var(--subtext1);
 }
 
@@ -25,7 +25,7 @@
 }
 
 .filter-bar-tag-toggle.open {
-  color: var(--green);
+  color: var(--success);
 }
 
 /* Search field (text input: opaque bg is intentional). "Cut out" of the
@@ -36,7 +36,7 @@
   flex: 1;
   align-self: stretch;
   margin: -4px 0;
-  padding: 0 10px;
+  padding: 0 var(--space-8);
   background: var(--base);
   /* Top/bottom borders exist but are transparent at rest (they sit on the
      bar's own edge lines, so coloring them frames the cut-out without any
@@ -45,7 +45,7 @@
   border-left-color: var(--surface1);
   border-right-color: var(--surface1);
   color: var(--text);
-  font-size: 14px;
+  font-size: var(--font-large);
 }
 
 .filter-bar-search:focus {
@@ -61,7 +61,7 @@
 
 .filter-bar-energy-squares {
   display: flex;
-  gap: 4px;
+  gap: var(--space-4);
 }
 
 .filter-bar-energy-squares .energy-square:hover {
@@ -79,10 +79,10 @@
 .filter-bar-x-btn {
   background: transparent;
   border: none;
-  color: var(--red);
+  color: var(--danger);
   cursor: pointer;
-  padding: 2px 6px;
-  font-size: 18px;
+  padding: var(--space-2) var(--space-6);
+  font-size: var(--font-title);
   line-height: 1;
 }
 
@@ -98,16 +98,16 @@
    inline, which pins it on hover) */
 .filter-bar-key-btn,
 .filter-bar-bpm-btn {
-  padding: 4px 12px;
+  padding: var(--space-4) var(--space-12);
   background: transparent;
   border: 1px solid var(--surface1);
   color: var(--text);
   cursor: pointer;
-  font-size: 13px;
+  font-size: var(--font-body);
 }
 
 .filter-bar-bpm-btn {
-  padding: 4px 8px;
+  padding: var(--space-4) var(--space-8);
 }
 
 .filter-bar-key-btn:hover,
@@ -127,7 +127,7 @@
   border: 1px solid var(--surface1);
   color: var(--text);
   cursor: pointer;
-  font-size: 12px;
+  font-size: var(--font-body);
   font-weight: bold;
 }
 
@@ -196,12 +196,12 @@
 
 /* Clear All */
 .filter-bar-clear-all-btn {
-  padding: 4px 8px;
+  padding: var(--space-4) var(--space-8);
   background: transparent;
   border: 1px solid var(--surface1);
   color: var(--text);
   cursor: pointer;
-  font-size: 12px;
+  font-size: var(--font-body);
   font-weight: bold;
 }
 
@@ -221,12 +221,12 @@
 
 /* ANY/ALL match mode — engaged = inverted blue fill */
 .filter-bar-match-mode-btn {
-  padding: 4px 12px;
+  padding: var(--space-4) var(--space-12);
   background: transparent;
   border: 1px solid var(--surface1);
   color: var(--text);
   cursor: pointer;
-  font-size: 13px;
+  font-size: var(--font-body);
   font-weight: bold;
 }
 
@@ -242,20 +242,20 @@
 .filter-bar-match-mode-btn.on,
 .filter-bar-match-mode-btn.on:hover,
 .filter-bar-match-mode-btn.on:active {
-  background: var(--blue);
-  border-color: var(--blue);
+  background: var(--accent);
+  border-color: var(--accent);
   color: var(--base);
 }
 
 /* Tag filter pills — selected = inverted fill in the tag's color
    (inline, dynamic) */
 .filter-bar-tag-pill {
-  padding: 4px 8px;
+  padding: var(--space-4) var(--space-8);
   background: transparent;
   border: 1px solid var(--surface1);
   color: var(--text);
   cursor: pointer;
-  font-size: 13px;
+  font-size: var(--font-body);
 }
 
 .filter-bar-tag-pill:hover {
@@ -268,7 +268,7 @@
 }
 
 .filter-bar-counts {
-  margin-top: 8px;
-  font-size: 12px;
+  margin-top: var(--space-8);
+  font-size: var(--font-body);
   color: var(--overlay0);
 }

@@ -11,6 +11,7 @@ import {
   rulerTicks,
   slotAccent,
   slotLadderMarks,
+  stepLaneAverage,
   wireRoutineToPlanInput,
   type ProjectedDownbeat,
 } from './routineEditorModel';
@@ -212,6 +213,47 @@ describe('rulerTicks', () => {
     expect(major?.label).toBe(String(major?.beat));
     // Beat 0 still ticks exactly (the window boundary stays on the grid).
     expect(ticks.some((t) => t.beat === 0)).toBe(true);
+  });
+});
+
+describe('stepLaneAverage (gh#206 — the trim knob is the slot AVERAGE)', () => {
+  it('empty lane = fallback', () => {
+    expect(stepLaneAverage([], 32, 0.5)).toBe(0.5);
+    expect(stepLaneAverage([{ beat: 0, value: 0.7 }], 0, 0.5)).toBe(0.5);
+  });
+
+  it('single step from beat 0 = its value', () => {
+    expect(stepLaneAverage([{ beat: 0, value: 0.7 }], 32, 0.5)).toBeCloseTo(0.7);
+  });
+
+  it('time-weights steps (fallback before the first point)', () => {
+    // fallback 0.5 for 16 beats, then 0.7 for 16 = 0.6.
+    expect(stepLaneAverage([{ beat: 16, value: 0.7 }], 32, 0.5)).toBeCloseTo(0.6);
+    // 0.4 for 8 beats, 0.8 for 24 = 0.7.
+    expect(
+      stepLaneAverage(
+        [
+          { beat: 0, value: 0.4 },
+          { beat: 8, value: 0.8 },
+        ],
+        32,
+        0.5
+      )
+    ).toBeCloseTo(0.7);
+  });
+
+  it('clips points outside [0, duration]', () => {
+    // A pre-window point acts from beat 0; a post-window point never acts.
+    expect(
+      stepLaneAverage(
+        [
+          { beat: -4, value: 0.8 },
+          { beat: 40, value: 0.1 },
+        ],
+        32,
+        0.5
+      )
+    ).toBeCloseTo(0.8);
   });
 });
 
