@@ -500,11 +500,12 @@ function TransitionEditorInner() {
     ensureEditorAudible();
     if (!isAudible('editor')) return; // claim refused — arm nothing
     const cancel = armAudition({
-      engines: { A: player.engineA, B: player.engineB },
-      targets: { A: a.id, B: b.id },
       // Deck loads through the provider's one load path (ADR 0022) —
       // issued only for decks that don't already hold their target.
-      load: (deck) => sharedDecksRef.current[deck].loadTrack(deck === 'A' ? a : b),
+      targets: [
+        { engine: player.engineA, trackId: a.id, load: () => sharedDecksRef.current.A.loadTrack(a) },
+        { engine: player.engineB, trackId: b.id, load: () => sharedDecksRef.current.B.loadTrack(b) },
+      ],
       onReady: () => {
         // Clear the arm BEFORE the park's seek below — the seek tap
         // cancels pending arms (subscribeSeek), not this fulfilment.

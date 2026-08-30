@@ -266,15 +266,21 @@ export function RoutineTimeline({
   }, [duration]);
   useEffect(fit, [fit, width === 0]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Scroll slack: outward trim handles must stay reachable past the
+  // boundaries, and the out-of-span CONTEXT (#205 — the slots' track
+  // material around the window) must be reachable too. `scrollExtents`
+  // is set below once the context is computed (a ref so clampScroll
+  // never re-binds the wheel listener on context changes).
+  const scrollExtentsRef = useRef({ before: TRIM_WIDEN_CAP_BEATS, after: TRIM_WIDEN_CAP_BEATS });
   const clampScroll = useCallback(
     (s: number, px: number): number => {
       const w = containerRef.current?.clientWidth ?? 0;
       const viewBeats = px > 0 ? w / px : 0;
-      // ±TRIM_WIDEN_CAP_BEATS of slack so outward trim handles stay
-      // reachable/visible past the routine boundaries; the panel-width
-      // term lets fit place beat -PAD at the panel's edge (gh#206).
-      const lo = -PAD_BEATS - TRIM_WIDEN_CAP_BEATS - (px > 0 ? PANEL_W / px : 0);
-      const max = Math.max(duration + PAD_BEATS + TRIM_WIDEN_CAP_BEATS - viewBeats, lo);
+      // Context extents (#205) + the panel-width term that lets fit
+      // place beat -PAD at the panel's edge (gh#206).
+      const ext = scrollExtentsRef.current;
+      const lo = -PAD_BEATS - ext.before - (px > 0 ? PANEL_W / px : 0);
+      const max = Math.max(duration + PAD_BEATS + ext.after - viewBeats, lo);
       return Math.max(lo, Math.min(s, max));
     },
     [duration]
@@ -810,10 +816,58 @@ export function RoutineTimeline({
     [scrollBeat, pxPerBeat, width]
   );
 
+  // Out-of-span CONTEXT (#205 design round): how far past the window each
+  // side must render so every slot's full track is visible through its
+  // trace — the pair editor showed both whole tracks, and aligning an
+  // incoming needs the structure outside the window. Capped for sanity;
+  // slots that were parked at the boundary contribute nothing.
+  const context = useMemo(() => {
+    let before = 0;
+    let after = 0;
+    for (const slot of plannedForRuns.slots) {
+      const t = slot.trace;
+      if (t.length === 0) continue;
+      const first = t[0];
+      if (first.moving && first.ratePerBeat > 0 && first.beat <= 0.5) {
+        // Beats of material before the window start (back to track 0).
+        before = Math.max(before, first.pos / first.ratePerBeat + first.beat);
+      }
+      const last = t[t.length - 1];
+      if (last.moving && last.ratePerBeat > 0) {
+        const durSec = tracks.get(slot.trackId)?.duration_secs ?? null;
+        if (durSec !== null) {
+          // Track position at the window end, then beats of material left.
+          const posAtEnd = last.pos + last.ratePerBeat * (duration - last.beat);
+          after = Math.max(after, (durSec - posAtEnd) / last.ratePerBeat);
+        }
+      }
+    }
+    const cap = 4096;
+    return {
+      beforeBeats: Math.min(cap, Math.max(0, Math.ceil(before))),
+      afterBeats: Math.min(cap, Math.max(0, Math.ceil(after))),
+    };
+  }, [plannedForRuns, tracks, duration]);
+
+  scrollExtentsRef.current = {
+    before: Math.max(TRIM_WIDEN_CAP_BEATS, context.beforeBeats),
+    after: Math.max(TRIM_WIDEN_CAP_BEATS, context.afterBeats),
+  };
+
+  // Fit including the surrounding context (the pair editor's whole-tracks
+  // view); `fit` alone stays the window.
+  const fitAll = useCallback(() => {
+    const w = containerRef.current?.clientWidth ?? 0;
+    const span = context.beforeBeats + duration + context.afterBeats;
+    if (w <= 0 || span <= 0) return;
+    setPxPerBeat(Math.max(MIN_PX_PER_BEAT, w / (span + PAD_BEATS * 2)));
+    setScrollBeat(-context.beforeBeats - PAD_BEATS);
+  }, [duration, context]);
+
   // Keyed on the jump-edited base: trace identities survive lane drags.
   const slotRuns = useMemo<BeatRun[][]>(
-    () => plannedForRuns.slots.map((slot) => traceDrawRuns(slot.trace, duration)),
-    [plannedForRuns, duration]
+    () => plannedForRuns.slots.map((slot) => traceDrawRuns(slot.trace, duration, context)),
+    [plannedForRuns, duration, context]
   );
   // Per-slot REAL ladders (gh#190 iteration): the track's beat/downbeat
   // lattice + tiers + Reset marks, projected through the slot's draw runs
@@ -1287,9 +1341,18 @@ export function RoutineTimeline({
   return (
     <div className="rt-timeline" ref={containerRef} data-mode={mode}>
       <div className="rt-toolbar-float">
-        <button className="rt-fit" title="Fit the whole Routine" onClick={fit}>
+        <button className="rt-fit" title="Fit the window" onClick={fit}>
           fit
         </button>
+        {(context.beforeBeats > 0 || context.afterBeats > 0) && (
+          <button
+            className="rt-fit"
+            title="Fit the whole tracks — the window plus the surrounding material (context renders dimmed)"
+            onClick={fitAll}
+          >
+            fit⤢
+          </button>
+        )}
       </div>
       {/* The ruler is a modeless seek surface in every mode (ADR 0038). */}
       <canvas
@@ -1841,7 +1904,7 @@ function JumpPopover({
           className="rt-jump-delete"
           title="Remove this recorded discontinuity — replay restores continuity through it"
           onClick={() => {
-            draftStore.removeRecordedJump(m.slot, m.beat);
+            draftStore.removeRecordedJump(m.slotId, m.beat);
             onClose();
           }}
         >

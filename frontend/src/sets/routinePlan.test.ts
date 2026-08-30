@@ -233,6 +233,7 @@ describe('buildSlotLanes / slotLanesAt', () => {
     expect(lanes.defaults.fader).toBe(0);
     const slot = {
       slot: 1,
+      slotId: '1',
       trackId: 2,
       deck: 'B' as const,
       entryMixSec: 0,
@@ -255,6 +256,7 @@ describe('buildSlotLanes / slotLanesAt', () => {
     expect(lanes.defaults.fader).toBe(1);
     const slot = {
       slot: 0,
+      slotId: '0',
       trackId: 1,
       deck: 'A' as const,
       entryMixSec: 0,
@@ -282,6 +284,7 @@ describe('buildSlotLanes / slotLanesAt', () => {
     const lanes = buildSlotLanes(events, 1, false);
     const slot = {
       slot: 1,
+      slotId: '1',
       trackId: 2,
       deck: 'B' as const,
       entryMixSec: 0,

@@ -206,9 +206,13 @@ describe('rulerTicks', () => {
     expect(majors).toEqual([0, 128, 256, 384, 512]);
   });
 
-  it('never starts below beat 0', () => {
+  it('renders negative beats (#205: out-of-span context shows around the window)', () => {
     const ticks = rulerTicks(-10, 20, 8);
-    expect(ticks[0].beat).toBeGreaterThanOrEqual(0);
+    expect(ticks[0].beat).toBeLessThan(0);
+    const major = ticks.find((t) => t.major && t.beat < 0);
+    expect(major?.label).toBe(String(major?.beat));
+    // Beat 0 still ticks exactly (the window boundary stays on the grid).
+    expect(ticks.some((t) => t.beat === 0)).toBe(true);
   });
 });
 

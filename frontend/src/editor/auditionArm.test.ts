@@ -46,9 +46,10 @@ function harness(a: FakeEngine, b: FakeEngine) {
   const loads: ('A' | 'B')[] = [];
   let readyCount = 0;
   const cancel = armAudition({
-    engines: { A: a, B: b },
-    targets: { A: 1, B: 2 },
-    load: (deck) => loads.push(deck),
+    targets: [
+      { engine: a, trackId: 1, load: () => loads.push('A') },
+      { engine: b, trackId: 2, load: () => loads.push('B') },
+    ],
     onReady: () => readyCount++,
   });
   return { loads, ready: () => readyCount, cancel };
@@ -140,5 +141,39 @@ describe('armAudition', () => {
     expect(ready()).toBe(0);
     a.set(1, 'ready');
     expect(ready()).toBe(1);
+  });
+
+  // #204: generalized beyond the pair's A/B to an arbitrary driven-deck
+  // list — the Mix editor's slot→deck projection shares this one arm.
+  it('n decks: fires once when the LAST of an arbitrary target list turns ready', () => {
+    const a = new FakeEngine(7, 'ready');
+    const b = new FakeEngine(8, 'ready');
+    const c = new FakeEngine(9, 'ready');
+    const loads: number[] = [];
+    let ready = 0;
+    const cancel = armAudition({
+      targets: [
+        { engine: a, trackId: 1, load: () => loads.push(1) },
+        { engine: b, trackId: 2, load: () => loads.push(2) },
+        { engine: c, trackId: 3, load: () => loads.push(3) },
+      ],
+      onReady: () => ready++,
+    });
+    expect(cancel).not.toBeNull();
+    expect(loads).toEqual([1, 2, 3]);
+    a.set(1, 'ready');
+    b.set(2, 'ready');
+    expect(ready).toBe(0); // c still foreign
+    c.set(3, 'ready');
+    expect(ready).toBe(1);
+    expect(a.listenerCount()).toBe(0);
+    expect(c.listenerCount()).toBe(0);
+  });
+
+  it('empty target list fires onReady synchronously (nothing to wait on)', () => {
+    let ready = 0;
+    const cancel = armAudition({ targets: [], onReady: () => ready++ });
+    expect(cancel).toBeNull();
+    expect(ready).toBe(1);
   });
 });

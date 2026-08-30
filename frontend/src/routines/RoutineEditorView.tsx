@@ -17,8 +17,28 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueries, useQueryClient } from '@tanstack/react-query';
-import { api, type RoutineDetailWire } from '../api/client';
+import {
+  api,
+  type CameoRowWire,
+  type RoutineDetailWire,
+  type TakeRowWire,
+} from '../api/client';
 import type { HotCue, Track } from '../types';
+import type { Transition } from '../editor/mixModel';
+import {
+  changedPairEdits,
+  editsToTransition,
+  seedNewTransition,
+  transitionToProjection,
+  type PairSlotProjection,
+} from '../editor/pairSlotTranslation';
+import { requestTakeReview } from '../capture/takeReview';
+import { MixPicker } from './MixPicker';
+import { siblingCycle, type MixArtifactRef, type TransitionRowLike } from './mixPickerModel';
+
+/** The wire row with its opaque payload — the picker model only needs the
+ * metadata slice, but the projection/save paths need `data`. */
+type TransitionRowFull = TransitionRowLike & { data: Record<string, unknown> };
 import { useDecks } from '../hooks/useDeck';
 import { useMixer } from '../hooks/useMixer';
 import {
@@ -30,6 +50,7 @@ import {
   unregisterSurface,
 } from '../playback/audibleSurface';
 import { watchAuditionTakeover } from '../editor/auditionTakeover';
+import { armAudition } from '../editor/auditionArm';
 import { isGuardedKeyEvent } from '../components/performance/performanceKeys';
 import { useViewActive } from '../contexts/viewActive';
 import { decodeWaveformBlob, type DecodedWaveform } from '../waveform/blob';
@@ -70,6 +91,29 @@ import {
 import './routineEditor.css';
 
 const LAST_ROUTINE_KEY = 'manadj-last-routine';
+const LAST_MIX_KEY = 'manadj-last-mix';
+
+/** What the Mix editor has open (#205, ADR 0037 phase 2): a Routine by
+ * uuid, or a pair artifact projected through the phase-1 translation
+ * layer. `seed` = a new unsaved pair draft (persists nothing until the
+ * first edit — the draft posture). */
+type OpenedMix =
+  | { kind: 'routine'; uuid: string }
+  | { kind: 'transition'; aTrackId: number; bTrackId: number; uuid: string; seed?: Transition };
+
+function restoreLastMix(): OpenedMix | null {
+  try {
+    const raw = localStorage.getItem(LAST_MIX_KEY);
+    if (raw) {
+      const v = JSON.parse(raw) as OpenedMix;
+      if (v && (v.kind === 'routine' || v.kind === 'transition')) return v;
+    }
+  } catch {
+    // fall through to the legacy key
+  }
+  const legacy = localStorage.getItem(LAST_ROUTINE_KEY);
+  return legacy ? { kind: 'routine', uuid: legacy } : null;
+}
 
 export default function RoutineEditorView() {
   const mixer = useMixer();
@@ -112,60 +156,103 @@ export default function RoutineEditorView() {
   );
   useEffect(() => () => player.dispose(), [player]);
 
-  // ── Which Routine ────────────────────────────────────────────────────
-  const [routineUuid, setRoutineUuid] = useState<string | null>(() => {
+  // ── Which mix (#205: routine OR a projected pair artifact) ───────────
+  const [opened, setOpened] = useState<OpenedMix | null>(() => {
     const req = consumeRoutineEdit();
-    return req?.routineUuid ?? localStorage.getItem(LAST_ROUTINE_KEY);
+    return req ? { kind: 'routine', uuid: req.routineUuid } : restoreLastMix();
   });
+  const routineUuid = opened?.kind === 'routine' ? opened.uuid : null;
   useEffect(() => {
     const onOpen = () => {
       const req = consumeRoutineEdit();
-      if (req) setRoutineUuid(req.routineUuid);
+      if (req) setOpened({ kind: 'routine', uuid: req.routineUuid });
     };
     window.addEventListener(OPEN_ROUTINE_EVENT, onOpen);
     return () => window.removeEventListener(OPEN_ROUTINE_EVENT, onOpen);
   }, []);
   useEffect(() => {
-    if (routineUuid) localStorage.setItem(LAST_ROUTINE_KEY, routineUuid);
-  }, [routineUuid]);
+    // Unsaved seeds never persist as the last mix (their uuid points at
+    // nothing until the first edit saves them).
+    if (!opened || (opened.kind === 'transition' && opened.seed)) return;
+    localStorage.setItem(LAST_MIX_KEY, JSON.stringify(opened));
+    if (opened.kind === 'routine') localStorage.setItem(LAST_ROUTINE_KEY, opened.uuid);
+  }, [opened]);
 
   // Picker trust tiers (pass 2 directive 3): `r:` opens directly; `t:`
   // promotes-then-opens; `c:` confirms-then-promotes-then-opens (the
   // deliberate human act the suggestion-first doctrine requires).
   const [openFlowBusy, setOpenFlowBusy] = useState(false);
-  const openPickerValue = useCallback(
-    async (value: string) => {
-      if (!value) {
-        setRoutineUuid(null);
-        return;
-      }
-      const [tier, uuid] = [value.slice(0, 1), value.slice(2)];
-      if (tier === 'r') {
-        setRoutineUuid(uuid);
-        return;
-      }
-      setOpenFlowBusy(true);
-      try {
-        let routineUuidOut: string;
-        if (tier === 't') {
-          const take = routineTakeRowsRef.current.find((t) => t.uuid === uuid);
-          if (!take) return;
-          routineUuidOut = await openRoutineTakeInEditor(take);
-        } else {
-          const cand = candidateRowsRef.current.find((c) => c.uuid === uuid);
-          if (!cand) return;
-          routineUuidOut = await openCandidateInEditor(cand);
+  const openMixRef = useCallback(
+    async (ref: MixArtifactRef) => {
+      switch (ref.kind) {
+        case 'routine':
+          setOpened({ kind: 'routine', uuid: ref.uuid });
+          return;
+        case 'transition':
+          setOpened({
+            kind: 'transition',
+            aTrackId: ref.aTrackId,
+            bTrackId: ref.bTrackId,
+            uuid: ref.uuid,
+          });
+          return;
+        case 'new-transition': {
+          // Seeded at the outgoing's outro (ADR 0037 pair synthesis);
+          // draft posture — persists nothing until the first edit.
+          setOpenFlowBusy(true);
+          try {
+            const a = await api.tracks.getById(ref.aTrackId);
+            setOpened({
+              kind: 'transition',
+              aTrackId: ref.aTrackId,
+              bTrackId: ref.bTrackId,
+              uuid: crypto.randomUUID(),
+              seed: seedNewTransition(a.duration_secs ?? 300, a.bpm ?? null),
+            });
+          } finally {
+            setOpenFlowBusy(false);
+          }
+          return;
         }
-        await Promise.all([
-          queryClient.invalidateQueries({ queryKey: ['routines'] }),
-          queryClient.invalidateQueries({ queryKey: ['routine-takes'] }),
-          queryClient.invalidateQueries({ queryKey: ['routine-candidates'] }),
-        ]);
-        setRoutineUuid(routineUuidOut);
-      } catch (err) {
-        toast(`Open failed: ${err instanceof Error ? err.message : String(err)}`);
-      } finally {
-        setOpenFlowBusy(false);
+        case 'pair-take':
+          // Pair Takes review in the pair editor until phase 3's rewire
+          // (draft-everywhere on the slot surface is the next round).
+          requestTakeReview(ref.uuid);
+          return;
+        case 'cameo':
+          toast('Cameo editing on the slot surface lands in a later phase-2 round');
+          return;
+        case 'new-blank':
+          toast('Blank kind-fluid drafts (ADR 0039) land with #198');
+          return;
+        case 'routine-take':
+        case 'candidate': {
+          // Trust-tier flows (promote / confirm-then-promote on open) —
+          // draft-everywhere review (ADR 0037) is a flagged next round.
+          setOpenFlowBusy(true);
+          try {
+            let routineUuidOut: string;
+            if (ref.kind === 'routine-take') {
+              const take = routineTakeRowsRef.current.find((t) => t.uuid === ref.uuid);
+              if (!take) return;
+              routineUuidOut = await openRoutineTakeInEditor(take);
+            } else {
+              const cand = candidateRowsRef.current.find((c) => c.uuid === ref.uuid);
+              if (!cand) return;
+              routineUuidOut = await openCandidateInEditor(cand);
+            }
+            await Promise.all([
+              queryClient.invalidateQueries({ queryKey: ['routines'] }),
+              queryClient.invalidateQueries({ queryKey: ['routine-takes'] }),
+              queryClient.invalidateQueries({ queryKey: ['routine-candidates'] }),
+            ]);
+            setOpened({ kind: 'routine', uuid: routineUuidOut });
+          } catch (err) {
+            toast(`Open failed: ${err instanceof Error ? err.message : String(err)}`);
+          } finally {
+            setOpenFlowBusy(false);
+          }
+        }
       }
     },
     [queryClient, toast]
@@ -201,11 +288,82 @@ export default function RoutineEditorView() {
     );
     return candidateRows.filter((c) => !confirmed.has(c.uuid) && c.cast.length >= 3);
   }, [candidateRows, routineTakeRows]);
-  const { data: detail } = useQuery<RoutineDetailWire>({
+  const { data: routineDetail } = useQuery<RoutineDetailWire>({
     queryKey: ['routine-detail', routineUuid],
     queryFn: () => api.routines.get(routineUuid!),
     enabled: routineUuid !== null,
   });
+
+  // ── Picker inventory (#205) ──────────────────────────────────────────
+  const { data: transitionRows = [] } = useQuery<TransitionRowFull[]>({
+    queryKey: ['transitions'],
+    queryFn: () => api.transitions.list() as Promise<TransitionRowFull[]>,
+  });
+  const transitionRowsRef = useRef(transitionRows);
+  transitionRowsRef.current = transitionRows;
+  const { data: cameoRows = [] } = useQuery<CameoRowWire[]>({
+    queryKey: ['cameos'],
+    queryFn: () => api.cameos.list(),
+  });
+  const { data: takeRows = [] } = useQuery<TakeRowWire[]>({
+    queryKey: ['takes'],
+    queryFn: () => api.takes.list(),
+  });
+  const { data: allTracksPage } = useQuery<{ items: Track[] }>({
+    queryKey: ['tracks-picker'],
+    queryFn: () => api.tracks.list(1, 10000) as Promise<{ items: Track[] }>,
+    staleTime: 60_000,
+  });
+  const allTracks = useMemo(() => allTracksPage?.items ?? [], [allTracksPage]);
+  const trackByIdMap = useMemo(() => {
+    const m = new Map<number, Track>();
+    for (const t of allTracks) m.set(t.id, t);
+    return m;
+  }, [allTracks]);
+  const trackById = useCallback((id: number) => trackByIdMap.get(id), [trackByIdMap]);
+
+  // ── Pair projection (#205: the phase-1 translation layer as the load
+  // path — a Transition opens as a synthetic 2-slot routine) ────────────
+  const openedTransition = opened?.kind === 'transition' ? opened : null;
+  const pairRow = useMemo(
+    () =>
+      openedTransition
+        ? transitionRows.find((r) => r.uuid === openedTransition.uuid) ?? null
+        : null,
+    [transitionRows, openedTransition]
+  );
+  const pairTrackQueries = useQueries({
+    queries: openedTransition
+      ? [openedTransition.aTrackId, openedTransition.bTrackId].map((id) => ({
+          queryKey: ['track', id],
+          queryFn: () => api.tracks.getById(id),
+          staleTime: 60_000,
+        }))
+      : [],
+  });
+  const pairTrackA = pairTrackQueries[0]?.data;
+  const pairTrackB = pairTrackQueries[1]?.data;
+  const proj: PairSlotProjection | null = useMemo(() => {
+    if (!openedTransition) return null;
+    const data = (pairRow?.data as Transition | undefined) ?? openedTransition.seed;
+    if (!data || !pairTrackA || !pairTrackB) return null;
+    return transitionToProjection({
+      uuid: openedTransition.uuid,
+      name: pairRow?.name ?? 'New Transition',
+      transition: data,
+      trackAId: openedTransition.aTrackId,
+      trackBId: openedTransition.bTrackId,
+      bpmA: pairTrackA.bpm ?? null,
+      bpmB: pairTrackB.bpm ?? null,
+    });
+  }, [openedTransition, pairRow, pairTrackA, pairTrackB]);
+  const projRef = useRef(proj);
+  projRef.current = proj;
+  const openedRef = useRef(opened);
+  openedRef.current = opened;
+
+  const detail: RoutineDetailWire | undefined =
+    opened?.kind === 'transition' ? proj?.detail : routineDetail;
 
   // ── Cast tracks + waveforms ──────────────────────────────────────────
   const cast = useMemo(() => detail?.cast ?? [], [detail]);
@@ -289,7 +447,13 @@ export default function RoutineEditorView() {
   // ── Target tempo (beat-domain doctrine: replay at any rate) ──────────
   const [targetBpm, setTargetBpm] = useState<number | null>(null);
   const bpmTouchedFor = useRef<string | null>(null);
-  const nativeBpm = detail && cast.length > 0 ? tracks.get(cast[0])?.bpm ?? null : null;
+  // A pair projection carries its own clock (bpmA, or the degraded
+  // 1-beat/sec clock for gridless outgoing — never locked out).
+  const nativeBpm = proj
+    ? proj.targetBpm
+    : detail && cast.length > 0
+      ? tracks.get(cast[0])?.bpm ?? null
+      : null;
   useEffect(() => {
     // Default to slot 0's native BPM per Routine until the user touches it.
     if (!detail) return;
@@ -311,12 +475,32 @@ export default function RoutineEditorView() {
   // applyTrim.
   const detailRef = useRef(detail);
   detailRef.current = detail;
+  // One load per opened artifact (#205): routines load their persisted
+  // edits layer; pair projections load the PROJECTION's edits (drawn
+  // lanes/jumps as authored edits) — the diff baseline for lossless save.
+  // versionAtLoad gates the pair autosave: an artifact only auditioned
+  // must leave no trace, not even a byte-identical rewrite (updated_at).
+  const loadedForRef = useRef<string | null>(null);
+  const versionAtLoadRef = useRef(0);
   useEffect(() => {
-    const d = detailRef.current;
-    if (d && d.uuid === routineUuid) draftStore.load(d.uuid, parseEdits(d.edits));
-    else if (!routineUuid) draftStore.reset();
+    if (!opened) {
+      loadedForRef.current = null;
+      draftStore.reset();
+      return;
+    }
+    if (loadedForRef.current === opened.uuid) return;
+    if (opened.kind === 'transition') {
+      if (!proj) return; // projection still assembling (row/tracks in flight)
+      draftStore.load(opened.uuid, proj.edits);
+    } else {
+      const d = detailRef.current;
+      if (!d || d.uuid !== opened.uuid) return; // detail still in flight
+      draftStore.load(d.uuid, parseEdits(d.edits));
+    }
+    loadedForRef.current = opened.uuid;
+    versionAtLoadRef.current = draftStore.getSnapshot().version;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [detail?.uuid, draftStore]);
+  }, [opened, proj, detail?.uuid, draftStore]);
 
   // Debounced autosave (the pairStore idiom): every draft change PUTs the
   // edits layer after a quiet moment. The response updates the query
@@ -330,7 +514,65 @@ export default function RoutineEditorView() {
       if (saveTimer.current) clearTimeout(saveTimer.current);
       const uuid = snap.routineUuid;
       const edits = snap.edits;
+      const version = snap.version;
       saveTimer.current = setTimeout(() => {
+        const o = openedRef.current;
+        if (o?.kind === 'transition' && o.uuid === uuid) {
+          // Pair save (#205): project the CHANGED edits back onto the
+          // seconds-anchored artifact (phase 1's lossless re-derivation)
+          // and replace the pair. Never fires for a merely-auditioned
+          // artifact (version gate), so untouched artifacts keep their
+          // bytes AND their updated_at.
+          if (version === versionAtLoadRef.current) return;
+          const p = projRef.current;
+          if (!p) return;
+          const rows = transitionRowsRef.current
+            .filter((r) => r.a_track_id === o.aTrackId && r.b_track_id === o.bTrackId)
+            .sort((x, y) => x.position - y.position);
+          const exists = rows.some((r) => r.uuid === uuid);
+          const diff = changedPairEdits(edits, p.edits);
+          // Draft posture: an unsaved seed with no real change persists
+          // nothing (auditioning a blank draft leaves no trace).
+          if (!exists && editsAreEmpty(diff)) return;
+          const original =
+            (rows.find((r) => r.uuid === uuid)?.data as Transition | undefined) ?? o.seed;
+          if (!original) return;
+          const data = editsToTransition(diff, {
+            original,
+            durationBeats: p.detail.duration_beats,
+            secPerBeat: p.secPerBeat,
+          });
+          const items = rows.map((r) => ({
+            uuid: r.uuid,
+            name: r.name,
+            favorite: r.favorite,
+            data: r.uuid === uuid ? (data as unknown as Record<string, unknown>) : r.data,
+          })) as { uuid: string; name: string; favorite: boolean; data: Record<string, unknown> }[];
+          if (!exists) {
+            items.push({
+              uuid,
+              name: `Transition ${rows.length + 1}`,
+              favorite: false,
+              data: data as unknown as Record<string, unknown>,
+            });
+          }
+          void api.transitions
+            .replacePair(o.aTrackId, o.bTrackId, items)
+            .then(() => {
+              // First save of a seeded draft: the artifact now exists —
+              // drop the seed so last-mix restore points at a real row.
+              if (!exists) {
+                setOpened((prev) =>
+                  prev && prev.kind === 'transition' && prev.uuid === uuid && prev.seed
+                    ? { kind: 'transition', aTrackId: prev.aTrackId, bTrackId: prev.bTrackId, uuid }
+                    : prev
+                );
+              }
+              return queryClient.invalidateQueries({ queryKey: ['transitions'] });
+            })
+            .catch((err) => console.error('transition autosave failed', err));
+          return;
+        }
         void api.routines
           .saveEdits(uuid, editsForSave(edits) as Record<string, unknown> | null)
           .then((d) => queryClient.setQueryData(['routine-detail', uuid], d))
@@ -346,8 +588,16 @@ export default function RoutineEditorView() {
   );
 
   // ── Build (the replay engine's own artifact) ─────────────────────────
-  const trackBpms = useMemo(() => cast.map((id) => tracks.get(id)?.bpm ?? null), [cast, tracks]);
-  const missingBpm = trackBpms.some((b) => b === null || b === undefined || b <= 0);
+  // A pair projection supplies its own slot BPMs (gridless slots ride the
+  // degraded clock — the build is never blocked, ADR 0037).
+  const routineTrackBpms = useMemo(
+    () => cast.map((id) => tracks.get(id)?.bpm ?? null),
+    [cast, tracks]
+  );
+  const trackBpms = proj ? proj.trackBpms : routineTrackBpms;
+  const missingBpm = proj
+    ? false
+    : trackBpms.some((b) => b === null || b === undefined || b <= 0);
   const buildable = !!detail && !missingBpm && !!effectiveBpm && effectiveBpm > 0;
   // RAW build (no jump/pause/lane edits): recorded-jump marker
   // provenance (ghosts keep their place after removal). Entry-offset
@@ -463,8 +713,9 @@ export default function RoutineEditorView() {
     automationTokenRef.current = mixer.engageAutomation();
   }, [mixer]);
 
-  // One-press arm (auditionArm generalized to the slot→deck projection —
-  // the A/B-typed arm module is pair-scoped; resistance list, gh#170).
+  // One-press arm via the shared module (#204: the inline slot→deck
+  // reimplementation is retired — armAudition now takes an arbitrary
+  // target list, so the slot editor and the pair editor share one arm).
   const pendingArmRef = useRef<(() => void) | null>(null);
   const [armPending, setArmPending] = useState(false);
   const cancelArm = useCallback(() => {
@@ -485,39 +736,29 @@ export default function RoutineEditorView() {
     if (!routine) return;
     ensureAudible();
     if (!isAudible('routine-editor')) return;
-    // Issue missing loads (claim-before-load), then play when every
-    // driven deck holds its CURRENT occupant's track ready (deck reuse
-    // loads later occupants on the fly through the player's hook).
-    const targets = player.currentTargets();
-    const unsubs: (() => void)[] = [];
-    const check = () => {
+    // Every driven deck must hold its CURRENT occupant's track ready
+    // (deck reuse loads later occupants on the fly through the player's
+    // hook). The player's ready() is the authority, so onReady re-checks
+    // it before playing.
+    const onReady = () => {
       if (!player.ready()) return;
-      for (const u of unsubs) u();
       pendingArmRef.current = null;
       setArmPending(false);
       player.play();
     };
-    for (const { deck, trackId } of targets) {
-      const engine = decksRef.current[deck].engine;
-      const snap = engine.getSnapshot();
-      const inFlight =
-        snap.trackId === trackId &&
-        (snap.loadState === 'ready' || snap.loadState === 'fetching' || snap.loadState === 'decoding');
-      if (!inFlight) {
-        const track = tracks.get(trackId);
-        if (track) decksRef.current[deck].loadTrack(track);
-      }
-    }
-    if (player.ready()) {
-      player.play();
-      return;
-    }
-    for (const { deck } of targets) {
-      unsubs.push(decksRef.current[deck].engine.subscribe(check));
-    }
-    pendingArmRef.current = () => {
-      for (const u of unsubs) u();
-    };
+    const cancel = armAudition({
+      targets: player.currentTargets().map(({ deck, trackId }) => ({
+        engine: decksRef.current[deck].engine,
+        trackId,
+        load: () => {
+          const track = tracks.get(trackId);
+          if (track) decksRef.current[deck].loadTrack(track);
+        },
+      })),
+      onReady,
+    });
+    if (cancel === null) return; // fired synchronously
+    pendingArmRef.current = cancel;
     setArmPending(true);
   }, [player, ensureAudible, cancelArm, tracks]);
 
@@ -693,6 +934,57 @@ export default function RoutineEditorView() {
     [player]
   );
 
+  // ── Picker plumbing (#205) ───────────────────────────────────────────
+  // Inline mutations on Transitions (★/rename/delete): client-authoritative
+  // pair replace, the pair editor's own write path.
+  const mutatePairItems = useCallback(
+    (
+      aTrackId: number,
+      bTrackId: number,
+      fn: (
+        items: { uuid: string; name: string; favorite: boolean; data: Record<string, unknown> }[]
+      ) => { uuid: string; name: string; favorite: boolean; data: Record<string, unknown> }[]
+    ) => {
+      const rows = transitionRowsRef.current
+        .filter((r) => r.a_track_id === aTrackId && r.b_track_id === bTrackId)
+        .sort((x, y) => x.position - y.position);
+      const items = rows.map((r) => ({
+        uuid: r.uuid,
+        name: r.name,
+        favorite: r.favorite,
+        data: r.data,
+      }));
+      void api.transitions
+        .replacePair(aTrackId, bTrackId, fn(items))
+        .then(() => queryClient.invalidateQueries({ queryKey: ['transitions'] }))
+        .catch((err) => toast(`Save failed: ${err instanceof Error ? err.message : String(err)}`));
+    },
+    [queryClient, toast]
+  );
+  const deckTrackIds = useMemo(
+    () =>
+      ROUTINE_DECK_ORDER.map((d) => decks[d].loadedTrack?.id).filter(
+        (id): id is number => typeof id === 'number'
+      ),
+    [decks]
+  );
+  // Scoped sibling cycling: within the current artifact's move.
+  const cycle = useMemo(() => {
+    if (!opened) return null;
+    if (opened.kind === 'transition') {
+      if (opened.seed) return null; // unsaved drafts have no siblings yet
+      return siblingCycle(
+        { kind: 'transition', aTrackId: opened.aTrackId, bTrackId: opened.bTrackId, uuid: opened.uuid },
+        transitionRows,
+        routineRows
+      );
+    }
+    return siblingCycle({ kind: 'routine', uuid: opened.uuid }, transitionRows, routineRows);
+  }, [opened, transitionRows, routineRows]);
+  // The pair "✎ edited" badge compares against the projection baseline —
+  // a projected pair's draft holds every drawn lane, which is not an edit.
+  const pairDirty = proj ? !editsAreEmpty(changedPairEdits(draft.edits, proj.edits)) : false;
+
   // ── Render ───────────────────────────────────────────────────────────
   // Provenance (gh#170 deep-link): the origin Routine Take carries the
   // source Session reference.
@@ -702,48 +994,51 @@ export default function RoutineEditorView() {
   const entryTrack = detail ? tracks.get(detail.cast[0]) : undefined;
   const exitTrack = detail ? tracks.get(detail.cast[detail.cast.length - 1]) : undefined;
   const playing = player.isPlaying();
+  const currentLabel = !opened
+    ? null
+    : opened.kind === 'transition'
+      ? `${pairRow?.name ?? 'New Transition'} · ${entryTrack?.title || entryTrack?.filename || `#${opened.aTrackId}`} → ${exitTrack?.title || exitTrack?.filename || `#${opened.bTrackId}`}`
+      : `${routineDetail?.name || (routineDetail ? `${routineDetail.cast.length}-track routine` : 'Routine')}`;
+  // The panel's chip sync target (stable identity per pair).
+  const openPairForPicker = useMemo(
+    () =>
+      opened?.kind === 'transition'
+        ? { aTrackId: opened.aTrackId, bTrackId: opened.bTrackId }
+        : null,
+    [opened]
+  );
+  const openRefKey = !opened
+    ? null
+    : opened.kind === 'transition'
+      ? `transition:${opened.uuid}`
+      : `routine:${opened.uuid}`;
 
   return (
     <div className="routine-editor">
       <div className="re-header">
-        <span className="re-kind">◆ ROUTINE</span>
-        <select
-          className="re-picker"
-          value={routineUuid ? `r:${routineUuid}` : ''}
-          disabled={openFlowBusy}
-          onChange={(e) => void openPickerValue(e.target.value)}
-          title="Every detected tier opens here: saved Routines, unpromoted Routine Takes (promoted on open), unconfirmed miner candidates (confirmed + promoted on open — choosing one IS the confirming act)"
-        >
-          <option value="">— open a Routine —</option>
-          <optgroup label="◆ saved Routines">
-            {routineRows.map((r) => (
-              <option key={r.uuid} value={`r:${r.uuid}`}>
-                {r.name || `${r.cast.length}-track routine`} · {r.cast.length} tracks ·{' '}
-                {Math.round(r.duration_beats)}b
-              </option>
-            ))}
-          </optgroup>
-          {unpromotedTakes.length > 0 && (
-            <optgroup label="◇ Routine Takes (promote on open)">
-              {unpromotedTakes.map((t) => (
-                <option key={t.uuid} value={`t:${t.uuid}`}>
-                  {t.cast.length} tracks · {secondsLabel(t.window_end_s - t.window_start_s)} ·
-                  confirmed {t.confirmed_at?.slice(0, 10) ?? ''}
-                </option>
-              ))}
-            </optgroup>
-          )}
-          {unconfirmedCandidates.length > 0 && (
-            <optgroup label="⧉ miner candidates (confirm + promote on open)">
-              {unconfirmedCandidates.map((c) => (
-                <option key={c.uuid} value={`c:${c.uuid}`}>
-                  {c.cast.length} tracks · {secondsLabel(c.window_end_s - c.window_start_s)} ·
-                  returns {c.evidence?.returns ?? 0}
-                </option>
-              ))}
-            </optgroup>
-          )}
-        </select>
+        <span className="re-kind">
+          {opened?.kind === 'transition' ? '⇄ TRANSITION' : '◆ ROUTINE'}
+        </span>
+        {currentLabel && <span className="mp-current">{currentLabel}</span>}
+        {cycle && cycle.refs.length > 1 && cycle.index >= 0 && (
+          <span className="mp-cycle" title="Cycle siblings within this move (the ordered pair / the cast)">
+            <button
+              className="btn btn-mini"
+              disabled={cycle.index <= 0}
+              onClick={() => void openMixRef(cycle.refs[cycle.index - 1])}
+            >
+              ◀
+            </button>
+            {cycle.index + 1}/{cycle.refs.length}
+            <button
+              className="btn btn-mini"
+              disabled={cycle.index >= cycle.refs.length - 1}
+              onClick={() => void openMixRef(cycle.refs[cycle.index + 1])}
+            >
+              ▶
+            </button>
+          </span>
+        )}
         {detail && (
           <>
             <span className="re-contract">
@@ -828,10 +1123,14 @@ export default function RoutineEditorView() {
             >
               ↪
             </button>
-            {!editsAreEmpty(draft.edits) && (
+            {(opened?.kind === 'transition' ? pairDirty : !editsAreEmpty(draft.edits)) && (
               <span
                 className="re-edited"
-                title="Authored edits over the recording (lanes/jumps) — autosaved; the set Conductor replays them too. The recording itself never changes."
+                title={
+                  opened?.kind === 'transition'
+                    ? 'Edits over the pair artifact — autosaved through the pair↔slot translation (only changed fields re-derive; ADR 0037).'
+                    : 'Authored edits over the recording (lanes/jumps) — autosaved; the set Conductor replays them too. The recording itself never changes.'
+                }
               >
                 ✎ edited
               </span>
@@ -901,7 +1200,7 @@ export default function RoutineEditorView() {
               )}
             </span>
           )}
-          {!trimEnabled && detail && (
+          {!trimEnabled && detail && opened?.kind !== 'transition' && (
             <span className="re-trim re-trimoff" title="No origin Routine Take — boundaries are baked">
               trim unavailable (no origin take)
             </span>
@@ -918,37 +1217,75 @@ export default function RoutineEditorView() {
         </div>
       )}
 
-      {!detail && (
-        <div className="re-empty">
-          Open a Routine — from a Set's routine pin, the Transition history's ◆ rows, or the
-          picker above.
+      <div className="re-body">
+        <div className="re-main">
+          {!detail && (
+            <div className="re-empty">
+              Open a mix with the picker at the right — name two tracks to land on their
+              Transitions, Cameos and Routines (⇄ Transitions open here through the pair↔slot
+              translation, ADR 0037), or come in from a Set pin / the Transition history's ◆
+              rows.
+            </div>
+          )}
+          {detail && missingBpm && (
+            <div className="re-empty">
+              Cast tracks are missing BPM — the beat-domain build needs every cast member's
+              tempo.
+            </div>
+          )}
+          {editor && (
+            <RoutineTimeline
+              editor={editor}
+              plannedForRuns={baseEditor!.planned}
+              recordedJumpsBySlot={recordedJumpsBySlot}
+              recordedPausesBySlot={recordedPausesBySlot}
+              tracks={tracks}
+              waves={waves}
+              meters={meters}
+              hotcues={hotcuesMap}
+              player={player}
+              draftStore={draftStore}
+              edits={draft.edits}
+              trim={trimEnabled ? trim : null}
+              onTrimChange={trimEnabled ? setTrim : null}
+              onSeekBeat={onSeekBeat}
+              mode={editorMode}
+              onModeHome={() => setEditorMode('select')}
+            />
+          )}
         </div>
-      )}
-      {detail && missingBpm && (
-        <div className="re-empty">
-          Cast tracks are missing BPM — the beat-domain build needs every cast member's tempo.
-        </div>
-      )}
-      {editor && (
-        <RoutineTimeline
-          editor={editor}
-          plannedForRuns={baseEditor!.planned}
-          recordedJumpsBySlot={recordedJumpsBySlot}
-          recordedPausesBySlot={recordedPausesBySlot}
-          tracks={tracks}
-          waves={waves}
-          meters={meters}
-          hotcues={hotcuesMap}
-          player={player}
-          draftStore={draftStore}
-          edits={draft.edits}
-          trim={trimEnabled ? trim : null}
-          onTrimChange={trimEnabled ? setTrim : null}
-          onSeekBeat={onSeekBeat}
-          mode={editorMode}
-          onModeHome={() => setEditorMode('select')}
+        <MixPicker
+          openPair={openPairForPicker}
+          openRefKey={openRefKey}
+          tracks={allTracks}
+          transitions={transitionRows}
+          cameos={cameoRows}
+          routines={routineRows}
+          routineTakes={unpromotedTakes}
+          candidates={unconfirmedCandidates}
+          takes={takeRows}
+          deckTrackIds={deckTrackIds}
+          busy={openFlowBusy}
+          onOpen={(ref) => void openMixRef(ref)}
+          onRenameTransition={(ref, name) =>
+            mutatePairItems(ref.aTrackId, ref.bTrackId, (items) =>
+              items.map((it) => (it.uuid === ref.uuid ? { ...it, name } : it))
+            )
+          }
+          onToggleFavoriteTransition={(ref) =>
+            mutatePairItems(ref.aTrackId, ref.bTrackId, (items) =>
+              items.map((it) => (it.uuid === ref.uuid ? { ...it, favorite: !it.favorite } : it))
+            )
+          }
+          onDeleteTransition={(ref) => {
+            mutatePairItems(ref.aTrackId, ref.bTrackId, (items) =>
+              items.filter((it) => it.uuid !== ref.uuid)
+            );
+            if (opened?.kind === 'transition' && opened.uuid === ref.uuid) setOpened(null);
+          }}
+          trackById={trackById}
         />
-      )}
+      </div>
     </div>
   );
 }
