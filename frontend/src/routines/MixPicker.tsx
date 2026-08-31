@@ -219,7 +219,7 @@ export function MixPicker(props: MixPickerProps) {
         ref: { kind: 'routine-take', uuid: tk.uuid },
         glyph: '◇',
         label: `${tk.cast.length}-track Routine Take`,
-        meta: `promote on open · confirmed ${tk.confirmed_at?.slice(0, 10) ?? ''}`,
+        meta: `review draft · confirmed ${tk.confirmed_at?.slice(0, 10) ?? ''}`,
         tracks: tk.cast.map((id) => short(t(id), id)).join(' / '),
         group: 'Routine Takes',
       });
@@ -229,7 +229,7 @@ export function MixPicker(props: MixPickerProps) {
         ref: { kind: 'candidate', uuid: c.uuid },
         glyph: '⧉',
         label: `${c.cast.length}-track candidate`,
-        meta: `confirm + promote on open · returns ${c.evidence?.returns ?? 0}`,
+        meta: `review draft · returns ${c.evidence?.returns ?? 0}`,
         tracks: c.cast.map((id) => short(t(id), id)).join(' / '),
         group: 'Miner candidates',
       });

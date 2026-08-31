@@ -20,9 +20,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from backend import models, schemas
-from backend.beatgrid_utils import constant_tempo_changes
 from backend.database import get_db
-from backend.routine_promotion import PromotionError, promote
+from backend.routine_preview import PreviewError, build_promotion_preview
 
 router = APIRouter()
 
@@ -107,43 +106,16 @@ def promote_routine_take(uuid: str, db: Session = Depends(get_db)) -> schemas.Ro
         raise HTTPException(status_code=404, detail="routine take not found")
     if rt.promoted_routine_uuid is not None:
         raise HTTPException(status_code=400, detail="already promoted")
-    s = db.query(models.Session).filter(models.Session.uuid == rt.session_uuid).first()
-    if s is None:
-        raise HTTPException(
-            status_code=422,
-            detail="the take's Session is gone — its event slice reference cannot be read",
-        )
-    events: list[dict] = []
-    for chunk in s.chunks:
-        events.extend(json.loads(chunk.events_json))
-
-    cast = json.loads(rt.cast_json)
-    grids: dict[int, list[dict]] = {}
-    for tid in cast:
-        bg = db.query(models.Beatgrid).filter(models.Beatgrid.track_id == tid).first()
-        if bg is not None:
-            grids[tid] = json.loads(bg.tempo_changes_json)
-            continue
-        # Gridless track: constant grid from the served BPM (ADR 0027 —
-        # the same placeholder posture as GET /api/beatgrids/{id}).
-        track = db.query(models.Track).filter(models.Track.id == tid).first()
-        bpm = track.bpm_projected if track is not None else None
-        if bpm is None or bpm <= 0:
-            raise HTTPException(
-                status_code=422, detail=f"cast track {tid} has no beatgrid or BPM"
-            )
-        grids[tid] = constant_tempo_changes(bpm)
-
     try:
-        result = promote(
-            events,
-            cast,
+        result = build_promotion_preview(
+            db,
+            rt.session_uuid,
+            json.loads(rt.cast_json),
             rt.window_start_s,
             rt.window_end_s,
             json.loads(rt.entry_offsets_json),
-            grids,
         )
-    except PromotionError as e:
+    except PreviewError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
     routine = models.Routine(
@@ -173,6 +145,41 @@ def promote_routine_take(uuid: str, db: Session = Depends(get_db)) -> schemas.Ro
         duration_beats=result.duration_beats,
         origin_take_uuid=routine.origin_take_uuid,
         created_at=routine.created_at,
+    )
+
+
+@router.get("/{uuid}/preview", response_model=schemas.RoutineDetail)
+def preview_routine_take(uuid: str, db: Session = Depends(get_db)) -> schemas.RoutineDetail:
+    """Promotion PREVIEW (#205 draft-everywhere): the exact geometry
+    `POST /{uuid}/promote` would mint, persisted NOWHERE — the Mix editor
+    opens the take as an editable, auditionable, discardable review draft;
+    Promote stays the explicit persisting act. The synthetic uuid namespaces
+    the client's draft store; it never lands in the routines table."""
+    rt = db.query(models.RoutineTake).filter(models.RoutineTake.uuid == uuid).first()
+    if rt is None:
+        raise HTTPException(status_code=404, detail="routine take not found")
+    try:
+        result = build_promotion_preview(
+            db,
+            rt.session_uuid,
+            json.loads(rt.cast_json),
+            rt.window_start_s,
+            rt.window_end_s,
+            json.loads(rt.entry_offsets_json),
+        )
+    except PreviewError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    return schemas.RoutineDetail(
+        uuid=f"preview-take-{rt.uuid}",
+        name=None,
+        cast=result.cast,
+        entry_offsets_beats=result.entry_offsets_beats,
+        entry_positions=result.entry_positions,
+        duration_beats=result.duration_beats,
+        origin_take_uuid=None,
+        created_at=None,
+        events=result.events,
+        edits=None,
     )
 
 

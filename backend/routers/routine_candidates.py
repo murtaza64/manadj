@@ -85,3 +85,46 @@ def query_by_cast_prefix(
         key=lambda c: (-sum(json.loads(c.evidence_json).values()), c.session_uuid)
     )
     return [_row(c) for c in matches]
+
+
+@router.get("/{uuid}/preview", response_model=schemas.RoutineDetail)
+def preview_candidate(uuid: str, db: Session = Depends(get_db)) -> schemas.RoutineDetail:
+    """Promotion PREVIEW for a miner candidate (#205 draft-everywhere):
+    the geometry a confirm→promote would mint, persisted nowhere — the Mix
+    editor opens candidates as review drafts (browsing one must not mint a
+    ◆ Routine, ADR 0037); confirming into a Routine Take stays the
+    explicit human act (suggestion-first doctrine)."""
+    from fastapi import HTTPException
+
+    from backend.routine_preview import PreviewError, build_promotion_preview
+
+    c = (
+        db.query(models.RoutineCandidate)
+        .filter(models.RoutineCandidate.uuid == uuid)
+        .first()
+    )
+    if c is None:
+        raise HTTPException(status_code=404, detail="candidate not found")
+    try:
+        result = build_promotion_preview(
+            db,
+            c.session_uuid,
+            json.loads(c.cast_json),
+            c.window_start_s,
+            c.window_end_s,
+            json.loads(c.entry_offsets_json),
+        )
+    except PreviewError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    return schemas.RoutineDetail(
+        uuid=f"preview-cand-{c.uuid}",
+        name=None,
+        cast=result.cast,
+        entry_offsets_beats=result.entry_offsets_beats,
+        entry_positions=result.entry_positions,
+        duration_beats=result.duration_beats,
+        origin_take_uuid=None,
+        created_at=None,
+        events=result.events,
+        edits=None,
+    )

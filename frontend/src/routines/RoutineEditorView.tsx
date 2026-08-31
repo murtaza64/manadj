@@ -101,7 +101,12 @@ const LAST_MIX_KEY = 'manadj-last-mix';
  * first edit — the draft posture). */
 type OpenedMix =
   | { kind: 'routine'; uuid: string }
-  | { kind: 'transition'; aTrackId: number; bTrackId: number; uuid: string; seed?: Transition };
+  | { kind: 'transition'; aTrackId: number; bTrackId: number; uuid: string; seed?: Transition }
+  /** A REVIEW DRAFT (#205 draft-everywhere, ADR 0037): an unpromoted
+   * Routine Take or miner candidate opened through the promotion PREVIEW
+   * — editable, auditionable, discardable; NOTHING persists until the
+   * explicit Promote (reverses #170's promote-on-open). */
+  | { kind: 'review'; source: 'routine-take' | 'candidate'; uuid: string };
 
 function restoreLastMix(): OpenedMix | null {
   try {
@@ -173,9 +178,10 @@ export default function RoutineEditorView() {
     return () => window.removeEventListener(OPEN_ROUTINE_EVENT, onOpen);
   }, []);
   useEffect(() => {
-    // Unsaved seeds never persist as the last mix (their uuid points at
-    // nothing until the first edit saves them).
-    if (!opened || (opened.kind === 'transition' && opened.seed)) return;
+    // Unsaved seeds and review drafts never persist as the last mix
+    // (nothing durable to restore to).
+    if (!opened || opened.kind === 'review' || (opened.kind === 'transition' && opened.seed))
+      return;
     localStorage.setItem(LAST_MIX_KEY, JSON.stringify(opened));
     if (opened.kind === 'routine') localStorage.setItem(LAST_ROUTINE_KEY, opened.uuid);
   }, [opened]);
@@ -228,33 +234,13 @@ export default function RoutineEditorView() {
           toast('Blank kind-fluid drafts (ADR 0039) land with #198');
           return;
         case 'routine-take':
-        case 'candidate': {
-          // Trust-tier flows (promote / confirm-then-promote on open) —
-          // draft-everywhere review (ADR 0037) is a flagged next round.
-          setOpenFlowBusy(true);
-          try {
-            let routineUuidOut: string;
-            if (ref.kind === 'routine-take') {
-              const take = routineTakeRowsRef.current.find((t) => t.uuid === ref.uuid);
-              if (!take) return;
-              routineUuidOut = await openRoutineTakeInEditor(take);
-            } else {
-              const cand = candidateRowsRef.current.find((c) => c.uuid === ref.uuid);
-              if (!cand) return;
-              routineUuidOut = await openCandidateInEditor(cand);
-            }
-            await Promise.all([
-              queryClient.invalidateQueries({ queryKey: ['routines'] }),
-              queryClient.invalidateQueries({ queryKey: ['routine-takes'] }),
-              queryClient.invalidateQueries({ queryKey: ['routine-candidates'] }),
-            ]);
-            setOpened({ kind: 'routine', uuid: routineUuidOut });
-          } catch (err) {
-            toast(`Open failed: ${err instanceof Error ? err.message : String(err)}`);
-          } finally {
-            setOpenFlowBusy(false);
-          }
-        }
+          // Draft-everywhere (#205): open as a REVIEW DRAFT via the
+          // promotion preview — no minting on open.
+          setOpened({ kind: 'review', source: 'routine-take', uuid: ref.uuid });
+          return;
+        case 'candidate':
+          setOpened({ kind: 'review', source: 'candidate', uuid: ref.uuid });
+          return;
       }
     },
     [queryClient, toast]
@@ -364,8 +350,25 @@ export default function RoutineEditorView() {
   const openedRef = useRef(opened);
   openedRef.current = opened;
 
+  // Review drafts (#205): the promotion PREVIEW is the detail — same
+  // geometry a Promote would mint, persisted nowhere.
+  const openedReview = opened?.kind === 'review' ? opened : null;
+  const { data: previewDetail } = useQuery<RoutineDetailWire>({
+    queryKey: ['routine-preview', openedReview?.source, openedReview?.uuid],
+    queryFn: () =>
+      openedReview!.source === 'routine-take'
+        ? api.routineTakes.preview(openedReview!.uuid)
+        : api.routineCandidates.preview(openedReview!.uuid),
+    enabled: openedReview !== null,
+    staleTime: Infinity,
+  });
+
   const detail: RoutineDetailWire | undefined =
-    opened?.kind === 'transition' ? proj?.detail : routineDetail;
+    opened?.kind === 'transition'
+      ? proj?.detail
+      : opened?.kind === 'review'
+        ? previewDetail
+        : routineDetail;
 
   // ── Cast tracks + waveforms ──────────────────────────────────────────
   const cast = useMemo(() => detail?.cast ?? [], [detail]);
@@ -494,6 +497,10 @@ export default function RoutineEditorView() {
     if (opened.kind === 'transition') {
       if (!proj) return; // projection still assembling (row/tracks in flight)
       draftStore.load(opened.uuid, proj.edits);
+    } else if (opened.kind === 'review') {
+      const d = detailRef.current;
+      if (!d || !d.uuid.startsWith('preview-')) return; // preview in flight
+      draftStore.load(d.uuid, emptyEdits());
     } else {
       const d = detailRef.current;
       if (!d || d.uuid !== opened.uuid) return; // detail still in flight
@@ -515,6 +522,9 @@ export default function RoutineEditorView() {
       if (!snap.routineUuid) return;
       if (saveTimer.current) clearTimeout(saveTimer.current);
       const uuid = snap.routineUuid;
+      // Review drafts persist nothing until Promote (#205 doctrine) —
+      // and the preview uuid is no routine row anyway.
+      if (uuid.startsWith('preview-')) return;
       const edits = snap.edits;
       const version = snap.version;
       saveTimer.current = setTimeout(() => {
@@ -901,7 +911,7 @@ export default function RoutineEditorView() {
   useEffect(() => {
     setTrim(detail ? { startBeat: 0, endBeat: detail.duration_beats } : null);
   }, [detail]);
-  const trimEnabled = !!detail?.origin_take_uuid;
+  const trimEnabled = !!detail?.origin_take_uuid && opened?.kind === 'routine';
   const trimDirty =
     !!trim &&
     !!detail &&
@@ -994,6 +1004,44 @@ export default function RoutineEditorView() {
     },
     [queryClient, toast]
   );
+  const promoteReview = useCallback(async () => {
+    const o = openedRef.current;
+    if (o?.kind !== 'review') return;
+    setOpenFlowBusy(true);
+    try {
+      let routineUuidOut: string;
+      if (o.source === 'routine-take') {
+        const take = routineTakeRowsRef.current.find((t) => t.uuid === o.uuid);
+        if (!take) return;
+        routineUuidOut = await openRoutineTakeInEditor(take);
+      } else {
+        const cand = candidateRowsRef.current.find((c) => c.uuid === o.uuid);
+        if (!cand) return;
+        routineUuidOut = await openCandidateInEditor(cand);
+      }
+      // The preview and the promote run the same pipeline over the same
+      // inputs — geometry is identical, so review edits transfer 1:1.
+      const edits = draftStore.getSnapshot().edits;
+      if (!editsAreEmpty(edits)) {
+        await api.routines.saveEdits(
+          routineUuidOut,
+          editsForSave(edits) as Record<string, unknown> | null
+        );
+      }
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['routines'] }),
+        queryClient.invalidateQueries({ queryKey: ['routine-takes'] }),
+        queryClient.invalidateQueries({ queryKey: ['routine-candidates'] }),
+      ]);
+      toast('Promoted — the review draft is now a saved Routine (edits carried over)');
+      setOpened({ kind: 'routine', uuid: routineUuidOut });
+    } catch (err) {
+      toast(`Promote failed: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setOpenFlowBusy(false);
+    }
+  }, [draftStore, queryClient, toast]);
+
   const deckTrackIds = useMemo(
     () =>
       ROUTINE_DECK_ORDER.map((d) => decks[d].loadedTrack?.id).filter(
@@ -1003,7 +1051,7 @@ export default function RoutineEditorView() {
   );
   // Scoped sibling cycling: within the current artifact's move.
   const cycle = useMemo(() => {
-    if (!opened) return null;
+    if (!opened || opened.kind === 'review') return null;
     if (opened.kind === 'transition') {
       if (opened.seed) return null; // unsaved drafts have no siblings yet
       return siblingCycle(
@@ -1031,6 +1079,10 @@ export default function RoutineEditorView() {
   // track-title idiom) — renames persist to the open artifact by kind.
   const currentName =
     opened?.kind === 'transition' ? pairRow?.name ?? '' : routineDetail?.name ?? '';
+  const reviewLabel =
+    opened?.kind === 'review'
+      ? `${detail ? `${detail.cast.length}-track ` : ''}${opened.source === 'routine-take' ? 'Routine Take' : 'candidate'} — review draft`
+      : null;
   const namePlaceholder =
     opened?.kind === 'transition'
       ? 'Transition'
@@ -1038,7 +1090,8 @@ export default function RoutineEditorView() {
         ? `${routineDetail.cast.length}-track routine`
         : 'Routine';
   // Persisted artifacts rename; an unsaved seed has no row to rename yet.
-  const canRename = opened?.kind === 'transition' ? !!pairRow : !!routineDetail;
+  const canRename =
+    opened?.kind === 'review' ? false : opened?.kind === 'transition' ? !!pairRow : !!routineDetail;
   const currentTracks =
     opened?.kind === 'transition'
       ? `${entryTrack?.title || entryTrack?.filename || `#${opened.aTrackId}`} → ${exitTrack?.title || exitTrack?.filename || `#${opened.bTrackId}`}`
@@ -1079,13 +1132,21 @@ export default function RoutineEditorView() {
     ? null
     : opened.kind === 'transition'
       ? `transition:${opened.uuid}`
-      : `routine:${opened.uuid}`;
+      : opened.kind === 'review'
+        ? `${opened.source}:${opened.uuid}`
+        : `routine:${opened.uuid}`;
 
   return (
     <div className="routine-editor">
       <div className="re-header">
         <span className="re-kind">
-          {opened?.kind === 'transition' ? '⇄ TRANSITION' : '◆ ROUTINE'}
+          {opened?.kind === 'transition'
+            ? '⇄ TRANSITION'
+            : opened?.kind === 'review'
+              ? opened.source === 'routine-take'
+                ? '◇ REVIEW'
+                : '⧉ REVIEW'
+              : '◆ ROUTINE'}
         </span>
         {opened && (
           <span className="mp-current">
@@ -1096,7 +1157,23 @@ export default function RoutineEditorView() {
                 placeholder={namePlaceholder}
               />
             ) : (
-              <span>{opened.kind === 'transition' ? 'New Transition' : namePlaceholder}</span>
+              <span>
+                {reviewLabel ?? (opened.kind === 'transition' ? 'New Transition' : namePlaceholder)}
+              </span>
+            )}
+            {opened.kind === 'review' && (
+              <button
+                className="btn btn-mini re-promote"
+                disabled={openFlowBusy || !detail}
+                onClick={() => void promoteReview()}
+                title={
+                  opened.source === 'routine-take'
+                    ? 'Promote to a saved Routine — the explicit persisting act; your review edits carry over'
+                    : 'Confirm into a Routine Take and promote — the explicit persisting act; your review edits carry over'
+                }
+              >
+                ↑ Promote
+              </button>
             )}
             {currentTracks && <span className="mp-current-tracks">· {currentTracks}</span>}
           </span>

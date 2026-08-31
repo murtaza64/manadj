@@ -1353,6 +1353,12 @@ export const api = {
   },
 
   routineCandidates: {
+    /** Promotion PREVIEW for a candidate (#205): browsing must not mint. */
+    preview: async (uuid: string): Promise<RoutineDetailWire> => {
+      const res = await fetch(`${API_BASE}/routine-candidates/${uuid}/preview`);
+      if (!res.ok) throw new Error(`Failed to preview candidate (${res.status})`);
+      return res.json();
+    },
     /** ALL miner-suggested candidate spans (sets #161): the Set pane
      * matches casts against adjacencies client-side for the row-level
      * "routines detected" highlight (the picker still queries per head). */
@@ -1410,6 +1416,14 @@ export const api = {
 
     /** Mechanical promotion: deck→slot re-addressing + beat-domain rebase
      * via the cast Beatgrids → a saved Routine. */
+    /** Promotion PREVIEW (#205 draft-everywhere): the geometry promote
+     * would mint, persisted nowhere — review drafts open through this. */
+    preview: async (uuid: string): Promise<RoutineDetailWire> => {
+      const res = await fetch(`${API_BASE}/routine-takes/${uuid}/preview`);
+      if (!res.ok) throw new Error(`Failed to preview routine take (${res.status})`);
+      return res.json();
+    },
+
     promote: async (uuid: string): Promise<RoutineRowWire> => {
       const res = await fetch(`${API_BASE}/routine-takes/${uuid}/promote`, { method: 'POST' });
       if (!res.ok) {

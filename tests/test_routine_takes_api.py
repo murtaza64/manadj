@@ -205,3 +205,27 @@ def test_delete_routine_degrades_set_pins(client, db, weave_session):
     entry = db.query(models.SetEntry).filter(models.SetEntry.set_id == s.id).one()
     assert entry.pin_kind is None and entry.pin_uuid is None
     assert db.query(models.SetDormantPin).filter(models.SetDormantPin.set_id == s.id).count() == 0
+
+
+def test_preview_persists_nothing_and_matches_promote(client, db, weave_session):
+    """#205 draft-everywhere: GET /preview returns the exact geometry a
+    promote would mint, with NO routine row and NO take mutation — a
+    review draft's edits transfer 1:1 onto the later Promote."""
+    _, cast = weave_session
+    take = client.post("/api/routine-takes", json=confirm_payload(cast)).json()
+
+    res = client.get(f"/api/routine-takes/{take['uuid']}/preview")
+    assert res.status_code == 200, res.text
+    preview = res.json()
+    assert preview["uuid"] == f"preview-take-{take['uuid']}"
+    assert preview["cast"] == cast
+    assert all("beat" in e for e in preview["events"])
+
+    # Nothing persisted: no routines, take unmarked.
+    assert client.get("/api/routines").json() == []
+    assert client.get("/api/routine-takes").json()[0]["promoted_routine_uuid"] is None
+
+    # A later promote mints the SAME geometry (edits transfer 1:1).
+    routine = client.post(f"/api/routine-takes/{take['uuid']}/promote").json()
+    for key in ("cast", "entry_offsets_beats", "entry_positions", "duration_beats"):
+        assert routine[key] == preview[key]

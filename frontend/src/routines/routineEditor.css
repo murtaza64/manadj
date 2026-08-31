@@ -240,6 +240,13 @@
   text-align: center;
 }
 
+/* Promote — the explicit persisting act on a review draft (#205). */
+.re-promote {
+  border-color: var(--success);
+  color: var(--success);
+  font-weight: 700;
+}
+
 /* Sibling cycling (◀ n/m ▶) beside the picker readout. */
 .mp-cycle {
   display: inline-flex;
