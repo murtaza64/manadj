@@ -69,7 +69,13 @@ export function createMonotonicTToPx(axis: TimeAxis): (t: number) => number {
     while (i > 0 && t < segs[i].start) i--;
     while (i < segs.length - 1 && t > segs[i].end) i++;
     const seg = segs[i];
-    if (t <= segs[0].start && i === 0) return 0;
+    // At/before the first segment start, the canonical tToPx answers the
+    // segment's own px0 — NOT 0. The hardcoded 0 was invisible on the
+    // session timeline (whose first segment starts at px 0) but pinned the
+    // routine editor's earliest run to the viewport edge: its content
+    // stretched against a fixed right edge, re-proportioned every scroll
+    // step (gh#220's real repro — slot-dependent wave shear).
+    if (t <= segs[0].start && i === 0) return segs[0].px0;
     if (t > seg.end) return axis.totalPx; // past the last segment
     if (seg.collapsed) return (seg.px0 + seg.px1) / 2;
     const dur = seg.end - seg.start;
