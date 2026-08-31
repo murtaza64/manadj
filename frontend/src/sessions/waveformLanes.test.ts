@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest';
 import { channelFaderToGain, trimToGain } from '../playback/mixerMath';
 import { eqValueToGain } from '../playback/graph';
 import type { CaptureEvent } from '../capture/events';
-import type { DeckControlSteps } from './timelineModel';
+import type { DeckControlSteps, TimeAxis } from './timelineModel';
 import { buildTimeAxis, deriveTimeline } from './timelineModel';
 import {
   columnModulation,
@@ -130,6 +130,28 @@ describe('createMonotonicPxToT / createMonotonicTToPx', () => {
     const cursor = createMonotonicPxToT(axis);
     cursor(axis.totalPx - 1);
     expect(cursor(1)).toBeCloseTo(axis.pxToT(1), 9);
+  });
+
+  it('tToPx answers px0 at the first segment start when px0 ≠ 0 (gh#220)', () => {
+    // The routine editor's drawSlotWave axis starts wherever the earliest
+    // run sits on screen — including NEGATIVE px when scrolled. The old
+    // hardcoded `return 0` pinned that run's left edge to the viewport,
+    // stretching its content against a fixed right edge, re-proportioned
+    // every scroll step.
+    const axis: TimeAxis = {
+      segments: [{ start: -16, end: 1280, px0: -300, px1: 900, collapsed: false }],
+      tToPx: (t) => -300 + ((t + 16) / 1296) * 1200,
+      pxToT: (x) => -16 + ((x + 300) / 1200) * 1296,
+      totalPx: 900,
+      visibleDurationS: 1296,
+      pxPerSec: 1200 / 1296,
+    };
+    const cursor = createMonotonicTToPx(axis);
+    expect(cursor(-16)).toBeCloseTo(-300, 9); // was 0 — the shear
+    expect(cursor(-20)).toBeCloseTo(-300, 9); // before-start clamps to px0
+    for (let t = -16; t <= 1280; t += 37) {
+      expect(cursor(t)).toBeCloseTo(axis.tToPx(t), 9);
+    }
   });
 });
 
