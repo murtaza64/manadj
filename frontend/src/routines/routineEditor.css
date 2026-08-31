@@ -240,6 +240,12 @@
   text-align: center;
 }
 
+/* Pin-follow armed chip (#221 set context — sticky to the move). */
+.re-setctx {
+  border-color: var(--orange);
+  color: var(--orange);
+}
+
 /* Promote — the explicit persisting act on a review draft (#205). */
 .re-promote {
   border-color: var(--success);

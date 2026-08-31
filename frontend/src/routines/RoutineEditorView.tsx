@@ -67,6 +67,9 @@ import { useToast } from '../components/Toast';
 import { RoutinePlayer } from './RoutinePlayer';
 import { RoutineTimeline, type TrimRange } from './RoutineTimeline';
 import { consumeRoutineEdit, OPEN_ROUTINE_EVENT } from './openRoutine';
+import { consumeMixEdit, OPEN_MIX_EVENT } from './openMix';
+import { setAdjacencyPin } from '../sets/setStore';
+import type { AdjacencyPin } from '../sets/adjacency';
 import { openCandidateInEditor, openRoutineTakeInEditor } from './openFlow';
 import { openRoutineSource } from './provenance';
 import { editsAreEmpty, emptyEdits, parseEdits } from './routineDraft';
@@ -188,6 +191,41 @@ export default function RoutineEditorView() {
     window.addEventListener(OPEN_ROUTINE_EVENT, onOpen);
     return () => window.removeEventListener(OPEN_ROUTINE_EVENT, onOpen);
   }, []);
+
+  // ── Set context (#221 phase 3): pin-follow, sticky to the MOVE ───────
+  // Armed by a Set-pane open request; cycling within the move re-points
+  // the Set pin (the switch IS the deliberate act, gh#167); navigating to
+  // a different pair/cast DISARMS (visible — the header chip vanishes).
+  const [setCtx, setSetCtx] = useState<{
+    setId: number;
+    headTrackId: number;
+    moveKey: string;
+  } | null>(null);
+  const setCtxRef = useRef(setCtx);
+  setCtxRef.current = setCtx;
+  const routineRowsRef = useRef<{ uuid: string; cast: number[] }[]>([]);
+  // The MOVE a mix belongs to: the ordered pair for pair artifacts, the
+  // cast for routines (siblings share it — siblingCycle's own scoping).
+  const moveKeyOf = useCallback((o: OpenedMix | null): string | null => {
+    if (!o) return null;
+    if (o.kind === 'transition') return `p:${o.aTrackId}:${o.bTrackId}`;
+    if (o.kind === 'routine') {
+      const cast = routineRowsRef.current.find((r) => r.uuid === o.uuid)?.cast;
+      return cast && cast.length > 0 ? `r:${cast.join(',')}` : `ru:${o.uuid}`;
+    }
+    return null; // review drafts: no pinnable move (yet)
+  }, []);
+  /** Re-point the armed Set pin — only for opens INSIDE the armed move. */
+  /** Request-initiated opens must not re-point the pin — only SWITCHES
+   * within the move are deliberate acts (gh#167). */
+  const suppressFollowRef = useRef(false);
+  const followPin = useCallback((moveKey: string | null, pin: AdjacencyPin) => {
+    if (suppressFollowRef.current) return;
+    const ctx = setCtxRef.current;
+    if (ctx && moveKey !== null && moveKey === ctx.moveKey) {
+      setAdjacencyPin(ctx.setId, ctx.headTrackId, pin);
+    }
+  }, []);
   useEffect(() => {
     // Unsaved seeds and review drafts never persist as the last mix
     // (nothing durable to restore to).
@@ -210,6 +248,10 @@ export default function RoutineEditorView() {
       switch (ref.kind) {
         case 'routine':
           setOpened({ kind: 'routine', uuid: ref.uuid });
+          followPin(moveKeyOf({ kind: 'routine', uuid: ref.uuid }), {
+            kind: 'routine',
+            uuid: ref.uuid,
+          });
           return;
         case 'transition':
           setOpened({
@@ -218,6 +260,8 @@ export default function RoutineEditorView() {
             bTrackId: ref.bTrackId,
             uuid: ref.uuid,
           });
+          // In set context the switch IS the deliberate act (gh#167).
+          followPin(`p:${ref.aTrackId}:${ref.bTrackId}`, { kind: 'transition', uuid: ref.uuid });
           return;
         case 'new-transition': {
           // Seeded at the outgoing's outro (ADR 0037 pair synthesis);
@@ -251,6 +295,10 @@ export default function RoutineEditorView() {
                 bTrackId: detail.b_track_id,
                 uuid: detail.promoted_transition_uuid,
               });
+              followPin(`p:${detail.a_track_id}:${detail.b_track_id}`, {
+                kind: 'transition',
+                uuid: detail.promoted_transition_uuid,
+              });
               return;
             }
             const [a, b] = await Promise.all([
@@ -278,6 +326,10 @@ export default function RoutineEditorView() {
               seed: vectorized.transition,
               reviewTakeUuid: ref.uuid,
             });
+            followPin(`p:${detail.a_track_id}:${detail.b_track_id}`, {
+              kind: 'take',
+              uuid: ref.uuid,
+            });
           } catch (err) {
             toast(`Take review failed: ${err instanceof Error ? err.message : String(err)}`);
           } finally {
@@ -301,13 +353,68 @@ export default function RoutineEditorView() {
           return;
       }
     },
-    [queryClient, toast]
+    [queryClient, toast, followPin, moveKeyOf]
   );
+
+  // Consume Mix-editor open requests (#221): map onto the picker's own
+  // open path; arm set context WITHOUT letting the initial open re-point
+  // the pin (only SWITCHES within the move are deliberate acts, gh#167 —
+  // suppressFollow covers the request-initiated open).
+  const consumeMix = useCallback(async () => {
+    const req = consumeMixEdit();
+    if (!req) return;
+    const o = req.open;
+    const moveKey =
+      o.kind === 'routine'
+        ? moveKeyOf({ kind: 'routine', uuid: o.uuid })
+        : `p:${o.aTrackId}:${o.bTrackId}`;
+    // Arm AFTER the open lands (below) — arming first lets the sticky-to-
+    // move disarm effect see the PREVIOUS artifact and kill the context.
+    setSetCtx(null);
+    suppressFollowRef.current = true;
+    try {
+      if (o.kind === 'routine') {
+        await openMixRef({ kind: 'routine', uuid: o.uuid });
+      } else if (o.takeUuid) {
+        await openMixRef({
+          kind: 'pair-take',
+          aTrackId: o.aTrackId,
+          bTrackId: o.bTrackId,
+          uuid: o.takeUuid,
+        });
+      } else if (o.uuid) {
+        await openMixRef({
+          kind: 'transition',
+          aTrackId: o.aTrackId,
+          bTrackId: o.bTrackId,
+          uuid: o.uuid,
+        });
+      } else {
+        await openMixRef({ kind: 'new-transition', aTrackId: o.aTrackId, bTrackId: o.bTrackId });
+      }
+      if (req.setContext && moveKey !== null) {
+        setSetCtx({
+          setId: req.setContext.setId,
+          headTrackId: req.setContext.headTrackId,
+          moveKey,
+        });
+      }
+    } finally {
+      suppressFollowRef.current = false;
+    }
+  }, [openMixRef, moveKeyOf]);
+  useEffect(() => {
+    const onOpen = () => void consumeMix();
+    window.addEventListener(OPEN_MIX_EVENT, onOpen);
+    void consumeMix(); // a request may predate the mount (App flips first)
+    return () => window.removeEventListener(OPEN_MIX_EVENT, onOpen);
+  }, [consumeMix]);
 
   const { data: routineRows = [] } = useQuery({
     queryKey: ['routines'],
     queryFn: api.routines.list,
   });
+  routineRowsRef.current = routineRows;
   // Trust tiers below saved Routines (gh#170 pass 2, directive 3 — the
   // pin picker's ladder): unpromoted Routine Takes, then unconfirmed
   // miner candidates. Opening a lower tier runs its flow (promote /
@@ -407,6 +514,11 @@ export default function RoutineEditorView() {
   projRef.current = proj;
   const openedRef = useRef(opened);
   openedRef.current = opened;
+
+  // Sticky to the move: any open OUTSIDE the armed move disarms.
+  useEffect(() => {
+    setSetCtx((ctx) => (ctx && moveKeyOf(openedRef.current) !== ctx.moveKey ? null : ctx));
+  }, [opened, moveKeyOf]);
 
   // Review drafts (#205): the promotion PREVIEW is the detail — same
   // geometry a Promote would mint, persisted nowhere.
@@ -1292,6 +1404,15 @@ export default function RoutineEditorView() {
             )}
             {currentTracks && <span className="mp-current-tracks">· {currentTracks}</span>}
           </span>
+        )}
+        {setCtx && (
+          <button
+            className="btn btn-mini re-setctx"
+            title="Pin-follow armed (set context): switching artifacts within this move re-points the Set pin. Navigating to a different pair/cast disarms. Click to disarm now."
+            onClick={() => setSetCtx(null)}
+          >
+            ⚑ pin-follow
+          </button>
         )}
         {cycle && cycle.refs.length > 1 && cycle.index >= 0 && (
           <span className="mp-cycle" title="Cycle siblings within this move (the ordered pair / the cast)">

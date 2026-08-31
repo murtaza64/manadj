@@ -60,6 +60,7 @@ import {
 } from '../editor/pairStore';
 import { requestPairEdit } from '../editor/openPair';
 import { requestRoutineEdit } from '../routines/openRoutine';
+import { pairEditorFallback, requestMixEdit } from '../routines/openMix';
 import { openRoutineSource, routineSourceFromTakes } from '../routines/provenance';
 import {
   clearFreshTake,
@@ -298,6 +299,31 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
         bTrackId
       );
       const view = adjacencyView(pin, transitions, pairTakes);
+      // #221 phase 3: adjacency click-through opens the MIX EDITOR (the
+      // unified surface) with set context armed — the pair editor stays
+      // reachable behind the dev fallback flag until phase 5's cut.
+      if (!pairEditorFallback()) {
+        if (view.status === 'routine') {
+          if (pin?.kind === 'routine') {
+            requestMixEdit({
+              open: { kind: 'routine', uuid: pin.uuid },
+              setContext: { setId, headTrackId: aTrackId },
+            });
+          }
+          return;
+        }
+        requestMixEdit({
+          open: {
+            kind: 'transition',
+            aTrackId,
+            bTrackId,
+            uuid: view.status === 'transition' ? view.transition!.uuid : null,
+            takeUuid: view.status === 'take' ? view.take!.uuid : null,
+          },
+          setContext: { setId, headTrackId: aTrackId },
+        });
+        return;
+      }
       if (view.status === 'routine') {
         // A routine pin opens the Routine editor (gh#170) — the covered
         // span is one artifact, not a pair; the pin's uuid IS the Routine.

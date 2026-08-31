@@ -26,6 +26,7 @@ import { SetSpaceTransport } from './sets/SetSpaceTransport';
 import TransitionEditor from './editor/TransitionEditor';
 import RoutineEditorView from './routines/RoutineEditorView';
 import { OPEN_ROUTINE_EVENT } from './routines/openRoutine';
+import { OPEN_MIX_EVENT } from './routines/openMix';
 import { TakeHistoryView } from './components/history/TakeHistoryView';
 import { OPEN_SESSION_EVENT } from './sessions/openSession';
 import { KeepAliveView } from './contexts/KeepAliveView';
@@ -123,6 +124,14 @@ function App() {
     const onOpenRoutine = () => setView('routine');
     window.addEventListener(OPEN_ROUTINE_EVENT, onOpenRoutine);
     return () => window.removeEventListener(OPEN_ROUTINE_EVENT, onOpenRoutine);
+  }, []);
+
+  // A Mix-editor request (#221 phase 3): any artifact kind on the unified
+  // surface — rewired entry points ride this one event.
+  useEffect(() => {
+    const onOpenMix = () => setView('routine');
+    window.addEventListener(OPEN_MIX_EVENT, onOpenMix);
+    return () => window.removeEventListener(OPEN_MIX_EVENT, onOpenMix);
   }, []);
 
   // A Session-moment request (history's "view in Session", sessions 04)
