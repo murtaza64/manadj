@@ -11,6 +11,7 @@
  *   quantize · MIDI).
  */
 import { useEffect, useState, useSyncExternalStore } from 'react';
+import { pairEditorFallback } from '../routines/openMix';
 import { connectedControllers, subscribeControllers } from '../midi/connectionStore';
 import { isQuantizeOn, setQuantize, subscribeQuantize } from '../playback/quantizeStore';
 import { AudioRoutingPicker } from './AudioRoutingPicker';
@@ -31,19 +32,30 @@ type ModeMeta = { id: AppMode; icon: string; label: string; title: string };
 const PRIMARY_MODES: ModeMeta[] = [
   { id: 'library', icon: '≡', label: 'EXPORT', title: 'Export' },
   { id: 'performance', icon: '▸', label: 'PERFORM', title: 'Performance' },
-  { id: 'transition', icon: '⋈', label: 'EDIT', title: 'Transition editor' },
+  // #221 phase 3 (ADR 0037): the MIX EDITOR is THE editor — the primary
+  // EDIT slot routes to the unified surface (mode id 'routine'); the pair
+  // editor demotes to the overflow behind the dev fallback flag until
+  // phase 5 deletes it.
+  { id: 'routine', icon: '⋈', label: 'EDIT', title: 'Mix editor' },
   { id: 'sync', icon: '⇄', label: 'SYNC', title: 'Sync' },
 ];
 
 /** Rarer modes, relegated to the overflow menu (walkthrough verdict on
- * gh#66; ROUTINE joins them — it postdates the prototype and has its own
- * entry points from Sets and History). */
+ * gh#66). */
 const OVERFLOW_MODES: ModeMeta[] = [
-  { id: 'routine', icon: '◆', label: 'ROUTINE', title: 'Routine editor' },
   { id: 'history', icon: '↻', label: 'HISTORY', title: 'Transition history' },
   { id: 'styles', icon: '◔', label: 'WAVE', title: 'Waveform styles' },
   { id: 'jog-tune', icon: '◎', label: 'JOG', title: 'Jog calibration' },
 ];
+
+/** The retired pair editor — overflow-reachable only under the dev
+ * fallback flag (openMix.pairEditorFallback), or while already active. */
+const PAIR_EDITOR_MODE: ModeMeta = {
+  id: 'transition',
+  icon: '⧉',
+  label: 'PAIR',
+  title: 'Transition editor (legacy — dies in phase 5)',
+};
 
 /** App-wide Quantize toggle: lit while beat-relative gestures snap. */
 function QuantizeToggle() {
@@ -120,7 +132,13 @@ function ModeControl({
   onModeChange: (mode: AppMode) => void;
 }) {
   const [menu, setMenu] = useState(false);
-  const activeOverflow = OVERFLOW_MODES.find((m) => m.id === mode);
+  // The legacy pair editor rides the overflow only under the dev fallback
+  // flag (or while it IS the active view — never strand the user).
+  const overflowModes =
+    pairEditorFallback() || mode === 'transition'
+      ? [...OVERFLOW_MODES, PAIR_EDITOR_MODE]
+      : OVERFLOW_MODES;
+  const activeOverflow = overflowModes.find((m) => m.id === mode);
 
   useEffect(() => {
     if (!menu) return;
@@ -149,7 +167,7 @@ function ModeControl({
         title={
           activeOverflow
             ? `${activeOverflow.title} — more modes`
-            : 'More modes (Routine editor, Transition history, Waveform styles, Jog calibration)'
+            : 'More modes (Transition history, Waveform styles, Jog calibration)'
         }
         onClick={() => setMenu((v) => !v)}
       >
@@ -166,7 +184,7 @@ function ModeControl({
         <>
           <div className="topbar-mode-menu-scrim" onMouseDown={() => setMenu(false)} />
           <div className="topbar-mode-menu" role="menu">
-            {OVERFLOW_MODES.map((m) => (
+            {overflowModes.map((m) => (
               <button
                 key={m.id}
                 role="menuitem"

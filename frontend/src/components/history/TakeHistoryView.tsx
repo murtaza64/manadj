@@ -16,6 +16,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../api/client';
 import type { RoutineTakeRowWire, TakeRowWire } from '../../api/client';
 import { requestTakeReview } from '../../capture/takeReview';
+import { pairEditorFallback, requestPairTakeEdit } from '../../routines/openMix';
 import { requestRoutineEdit } from '../../routines/openRoutine';
 import { requestSessionMoment } from '../../sessions/openSession';
 import { degradeDeletedPinsLocal } from '../../sets/setStore';
@@ -223,7 +224,10 @@ export function TakeHistoryView() {
                           }
                           return;
                         }
-                        requestTakeReview(e.take.uuid);
+                        // #221: pair takes review on the Mix editor
+                        // (legacy pair editor behind the fallback flag).
+                        if (pairEditorFallback()) requestTakeReview(e.take.uuid);
+                        else requestPairTakeEdit(e.take);
                       }}
                     >
                       <td className="take-when">{fmtWhen(e.take.detected_at)}</td>

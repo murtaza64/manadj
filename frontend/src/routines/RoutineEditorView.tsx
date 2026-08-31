@@ -57,7 +57,7 @@ import { armAudition } from '../editor/auditionArm';
 import { isGuardedKeyEvent } from '../components/performance/performanceKeys';
 import { useViewActive } from '../contexts/viewActive';
 import { decodeWaveformBlob, type DecodedWaveform } from '../waveform/blob';
-import { registerBrowseHost } from '../components/browseHost';
+import { registerBrowseHost, sharedBrowseHandle } from '../components/browseHost';
 import {
   plannedWithLaneEdits,
   ROUTINE_DECK_ORDER,
@@ -1034,6 +1034,29 @@ export default function RoutineEditorView() {
     };
   }, [player, mixer, cancelArm]);
 
+  // One-sided role assignment stash (#221): ← or → with only one side
+  // known waits for the other (the pair editor's assemble-a-pair flow);
+  // the open pair artifact supplies the missing side when there is one.
+  const pendingSidesRef = useRef<{ a?: number; b?: number }>({});
+  const assignPairSide = useCallback(
+    (side: 'a' | 'b') => {
+      const track = sharedBrowseHandle.current?.getSelectedTrack();
+      if (!track) return;
+      const stash = pendingSidesRef.current;
+      if (side === 'a') stash.a = track.id;
+      else stash.b = track.id;
+      const o = openedRef.current;
+      const cur =
+        o?.kind === 'transition' ? { a: o.aTrackId, b: o.bTrackId } : ({} as { a?: number; b?: number });
+      const a = stash.a ?? cur.a;
+      const b = stash.b ?? cur.b;
+      if (a === undefined || b === undefined || a === b) return;
+      pendingSidesRef.current = {};
+      void openMixRef({ kind: 'new-transition', aTrackId: a, bTrackId: b });
+    },
+    [openMixRef]
+  );
+
   // Space = play/pause; ⌘Z/⌘⇧Z = the draft's undo/redo (the undo story
   // the pair editor never grew) — while this view is visible.
   useEffect(() => {
@@ -1054,11 +1077,29 @@ export default function RoutineEditorView() {
         e.preventDefault();
         e.stopPropagation();
         auditionTogglePlay();
+        return;
+      }
+      // Browse-table keys (#221 entry 6 — the pair editor's role-assign,
+      // kept for pair drafts): ↑/↓ walk the shared browse panel; ← assigns
+      // the selected track as the OUTGOING, → as the INCOMING (Enter =
+      // outgoing). Assignment replaces that side of the open pair (the
+      // other side carries over; both sides fresh = nothing until the
+      // second key) and opens a seeded draft on the new pair's move.
+      if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+        e.preventDefault();
+        e.stopPropagation();
+        sharedBrowseHandle.current?.navigate(e.key === 'ArrowDown' ? 1 : -1);
+        return;
+      }
+      if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'Enter') {
+        e.preventDefault();
+        e.stopPropagation();
+        assignPairSide(e.key === 'ArrowRight' ? 'b' : 'a');
       }
     };
     document.addEventListener('keydown', onKey, { capture: true });
     return () => document.removeEventListener('keydown', onKey, { capture: true });
-  }, [viewActive, auditionTogglePlay, draftStore]);
+  }, [viewActive, auditionTogglePlay, draftStore, assignPairSide]);
 
   // Re-render on player state changes (play/pause/seek).
   const [, bump] = useState(0);

@@ -43,6 +43,25 @@ export function consumeMixEdit(): MixEditRequest | null {
   return req;
 }
 
+/** Open a pair Take on the Mix editor (#221 rewire): promoted → its
+ * Transition; unpromoted → a ⇄ REVIEW draft (vectorized; Promote mints). */
+export function requestPairTakeEdit(take: {
+  uuid: string;
+  a_track_id: number;
+  b_track_id: number;
+  promoted_transition_uuid: string | null;
+}): void {
+  requestMixEdit({
+    open: {
+      kind: 'transition',
+      aTrackId: take.a_track_id,
+      bTrackId: take.b_track_id,
+      uuid: take.promoted_transition_uuid,
+      takeUuid: take.promoted_transition_uuid ? null : take.uuid,
+    },
+  });
+}
+
 /**
  * Dev fallback (#221): route the rewired entry points back to the pair
  * editor. Dies with the pair editor in phase 5.

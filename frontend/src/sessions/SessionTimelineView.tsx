@@ -26,6 +26,7 @@ import type {
 import { DEFAULT_DETECTOR_PARAMS, DETECTOR_VERSION } from '../capture/events';
 import { DECK_COLORS } from '../theme/deckColors';
 import { requestTakeReview } from '../capture/takeReview';
+import { pairEditorFallback, requestPairTakeEdit } from '../routines/openMix';
 import { useDecks } from '../hooks/useDeck';
 import { useMixer } from '../hooks/useMixer';
 import { useToast } from '../components/Toast';
@@ -1195,7 +1196,16 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusFlash, f
           <span className="stl-cluster">
             <button
               className="stl-open-editor"
-              onClick={() => requestTakeReview(selection.take.uuid)}
+              onClick={() => {
+                // #221: handover takes review on the Mix editor; Cameo
+                // (guest) takes keep the legacy path until the kind-aware
+                // Cameo editor lands.
+                if (selection.take.kind === 'guest' || pairEditorFallback()) {
+                  requestTakeReview(selection.take.uuid);
+                } else {
+                  requestPairTakeEdit(selection.take);
+                }
+              }}
             >
               {selection.take.kind === 'guest' ? (
                 <>
