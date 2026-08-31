@@ -61,11 +61,20 @@
   flex-direction: column;
   min-height: 0;
 }
-/* The open artifact readout in the header (the panel is the picker now). */
+/* The open artifact readout in the header (the panel is the picker now).
+   The NAME is an EditableCell (the deck track-title idiom); the tracks
+   suffix stays static. */
 .mp-current {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-4);
   font-size: var(--font-body);
   color: var(--text);
-  max-width: 380px;
+  max-width: 440px;
+  min-width: 0;
+}
+.mp-current-tracks {
+  color: var(--subtext0);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

@@ -34,6 +34,7 @@ import {
 } from '../editor/pairSlotTranslation';
 import { requestTakeReview } from '../capture/takeReview';
 import { reconcilePairFromServer } from '../editor/pairStore';
+import EditableCell from '../components/EditableCell';
 import { MixPicker } from './MixPicker';
 import { siblingCycle, type MixArtifactRef, type TransitionRowLike } from './mixPickerModel';
 
@@ -1026,11 +1027,46 @@ export default function RoutineEditorView() {
   const entryTrack = detail ? tracks.get(detail.cast[0]) : undefined;
   const exitTrack = detail ? tracks.get(detail.cast[detail.cast.length - 1]) : undefined;
   const playing = player.isPlaying();
-  const currentLabel = !opened
-    ? null
-    : opened.kind === 'transition'
-      ? `${pairRow?.name ?? 'New Transition'} · ${entryTrack?.title || entryTrack?.filename || `#${opened.aTrackId}`} → ${exitTrack?.title || exitTrack?.filename || `#${opened.bTrackId}`}`
-      : `${routineDetail?.name || (routineDetail ? `${routineDetail.cast.length}-track routine` : 'Routine')}`;
+  // The header name is an EDITABLE field (redirect 2026-08-31: the deck
+  // track-title idiom) — renames persist to the open artifact by kind.
+  const currentName =
+    opened?.kind === 'transition' ? pairRow?.name ?? '' : routineDetail?.name ?? '';
+  const namePlaceholder =
+    opened?.kind === 'transition'
+      ? 'Transition'
+      : routineDetail
+        ? `${routineDetail.cast.length}-track routine`
+        : 'Routine';
+  // Persisted artifacts rename; an unsaved seed has no row to rename yet.
+  const canRename = opened?.kind === 'transition' ? !!pairRow : !!routineDetail;
+  const currentTracks =
+    opened?.kind === 'transition'
+      ? `${entryTrack?.title || entryTrack?.filename || `#${opened.aTrackId}`} → ${exitTrack?.title || exitTrack?.filename || `#${opened.bTrackId}`}`
+      : null;
+  const renameCurrent = useCallback(
+    (name: string) => {
+      const o = openedRef.current;
+      if (!o) return;
+      const trimmed = name.trim();
+      if (o.kind === 'transition') {
+        mutatePairItems(o.aTrackId, o.bTrackId, (items) =>
+          items.map((it) => (it.uuid === o.uuid ? { ...it, name: trimmed } : it))
+        );
+        return;
+      }
+      void api.routines
+        .rename(o.uuid, trimmed || null)
+        .then(() =>
+          Promise.all([
+            queryClient.invalidateQueries({ queryKey: ['routines'] }),
+            queryClient.invalidateQueries({ queryKey: ['routine-detail', o.uuid] }),
+            queryClient.invalidateQueries({ queryKey: ['routine', o.uuid] }),
+          ])
+        )
+        .catch((err) => toast(`Rename failed: ${err instanceof Error ? err.message : String(err)}`));
+    },
+    [mutatePairItems, queryClient, toast]
+  );
   // The panel's chip sync target (stable identity per pair).
   const openPairForPicker = useMemo(
     () =>
@@ -1051,7 +1087,20 @@ export default function RoutineEditorView() {
         <span className="re-kind">
           {opened?.kind === 'transition' ? '⇄ TRANSITION' : '◆ ROUTINE'}
         </span>
-        {currentLabel && <span className="mp-current">{currentLabel}</span>}
+        {opened && (
+          <span className="mp-current">
+            {canRename ? (
+              <EditableCell
+                value={currentName}
+                onSave={renameCurrent}
+                placeholder={namePlaceholder}
+              />
+            ) : (
+              <span>{opened.kind === 'transition' ? 'New Transition' : namePlaceholder}</span>
+            )}
+            {currentTracks && <span className="mp-current-tracks">· {currentTracks}</span>}
+          </span>
+        )}
         {cycle && cycle.refs.length > 1 && cycle.index >= 0 && (
           <span className="mp-cycle" title="Cycle siblings within this move (the ordered pair / the cast)">
             <button
