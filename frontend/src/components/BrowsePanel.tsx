@@ -88,6 +88,8 @@ export function BrowsePanel({ mode }: { mode: AppMode }) {
             browseOnly={browseMode !== 'library'}
             onLoadToDeck={host?.onLoadToDeck}
             doubleClickDeck={host?.doubleClickDeck ?? 'A'}
+            rowActions={host?.rowActions}
+            onRowDoubleClick={host?.onDoubleClick}
             browseRef={sharedBrowseHandle}
           />
         </DeckScope>

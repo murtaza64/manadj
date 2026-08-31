@@ -28,6 +28,14 @@ export function isBrowseMode(mode: AppMode): mode is BrowseMode {
  */
 export const sharedBrowseHandle = createRef<LibraryBrowseHandle>();
 
+/** A custom row action replacing the ABCD deck buttons (#221: the Mix
+ * editor's picker-chip fill — rows navigate the picker, not the decks). */
+export interface BrowseRowAction {
+  icon: string;
+  title: string;
+  run(track: Track): void;
+}
+
 /** A mode's load routing for the browse surface's row buttons/double-click. */
 export interface BrowseHostConfig {
   /** Row hover buttons + double-click route here (the mode's load policy —
@@ -35,6 +43,10 @@ export interface BrowseHostConfig {
   onLoadToDeck: (deck: ChannelId, track: Track) => void;
   /** Which Deck a double-click targets (defaults to A). */
   doubleClickDeck?: ChannelId;
+  /** When set, rows render THESE instead of the ABCD load buttons. */
+  rowActions?: BrowseRowAction[];
+  /** When set, double-click routes here instead of a deck load. */
+  onDoubleClick?: (track: Track) => void;
 }
 
 // ── Host registry ─────────────────────────────────────────────────────────

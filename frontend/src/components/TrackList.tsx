@@ -43,6 +43,7 @@ interface TrackListProps {
   onLoadTrack: (track: Track) => void;
   /** When set (Performance view), rows get hover load-to-A–D buttons. */
   onLoadToDeck?: (deck: ChannelId, track: Track) => void;
+  rowActions?: import('./browseHost').BrowseRowAction[];
   /** Saved-Transition marks (transition-library 02; A–D per
    * four-deck-performance 21): per Deck, targets with a Transition FROM
    * that Deck's loaded track. */
@@ -84,6 +85,7 @@ export default function TrackList({
   playOrder,
   onLoadTrack,
   onLoadToDeck,
+  rowActions,
   transitionMarks,
   links,
   deckIds,
@@ -388,6 +390,7 @@ export default function TrackList({
                     onSelect={onSelectTrack}
                     onLoad={onLoadTrack}
                     onLoadToDeck={onLoadToDeck}
+                    rowActions={rowActions}
                     getDragIds={getDragIds}
                     dragSource={dragSource}
                     onContextMenu={onRowContextMenu}

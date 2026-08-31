@@ -58,6 +58,7 @@ import { isGuardedKeyEvent } from '../components/performance/performanceKeys';
 import { useViewActive } from '../contexts/viewActive';
 import { decodeWaveformBlob, type DecodedWaveform } from '../waveform/blob';
 import { registerBrowseHost, sharedBrowseHandle } from '../components/browseHost';
+import { fillPickerChip } from './pickerChips';
 import {
   plannedWithLaneEdits,
   ROUTINE_DECK_ORDER,
@@ -1114,6 +1115,24 @@ export default function RoutineEditorView() {
       registerBrowseHost('routine', {
         onLoadToDeck: (deck, track) => decksRef.current[deck].loadTrack(track),
         doubleClickDeck: 'A',
+        // #221 quick fix: browse rows navigate the PICKER, not the decks —
+        // ⋈ fills a chip and opens the seeded draft when the pair
+        // completes; ⌕ fills only; double-click = ⌕.
+        rowActions: [
+          {
+            icon: '⋈',
+            title:
+              'Edit with this track — fills the picker (first empty chip, else the incoming) and opens a draft when the pair completes',
+            run: (track) => fillPickerChip({ trackId: track.id, intent: 'edit' }),
+          },
+          {
+            icon: '⌕',
+            title:
+              'Find this track in the picker — everything out of / into / over it (fills the first empty chip, else the incoming)',
+            run: (track) => fillPickerChip({ trackId: track.id, intent: 'search' }),
+          },
+        ],
+        onDoubleClick: (track) => fillPickerChip({ trackId: track.id, intent: 'search' }),
       }),
     []
   );

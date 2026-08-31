@@ -127,6 +127,10 @@ interface LibraryProps {
    * also routes through this, so the view's load policy (and load lock)
    * applies to it too. */
   onLoadToDeck?: (deck: ChannelId, track: Track) => void;
+  /** Replace ABCD row buttons with custom actions (#221 Mix editor). */
+  rowActions?: import('./browseHost').BrowseRowAction[];
+  /** Override row double-click (defaults to a deck load). */
+  onRowDoubleClick?: (track: Track) => void;
   /** Which Deck an embedded double-click targets (issue 22). The
    * Performance view passes its focused left Deck so double-click follows
    * A↔C; absent, double-click uses Deck A (the standalone Library keeps its
@@ -139,6 +143,8 @@ interface LibraryProps {
 export default function Library({
   browseOnly = false,
   onLoadToDeck,
+  rowActions,
+  onRowDoubleClick,
   doubleClickDeck = 'A',
   browseRef,
 }: LibraryProps) {
@@ -971,10 +977,9 @@ export default function Library({
   // Memoized — the rows are.
   const loadForTable = useMemo(
     () =>
-      browseOnly && onLoadToDeck
-        ? (t: Track) => onLoadToDeck(doubleClickDeck, t)
-        : loadTrack,
-    [browseOnly, onLoadToDeck, doubleClickDeck, loadTrack]
+      onRowDoubleClick ??
+      (browseOnly && onLoadToDeck ? (t: Track) => onLoadToDeck(doubleClickDeck, t) : loadTrack),
+    [browseOnly, onLoadToDeck, doubleClickDeck, loadTrack, onRowDoubleClick]
   );
 
   // Selection access for an embedding view's own keyboard hub (issue 04).
@@ -1378,6 +1383,7 @@ export default function Library({
                   dragSource="playlist-pane"
                   onLoadTrack={loadForTable}
                   onLoadToDeck={onLoadToDeck}
+                  rowActions={rowActions}
                   transitionMarks={transitionMarks}
                   links={links}
                   deckIds={deckIds}
@@ -1418,6 +1424,7 @@ export default function Library({
                   onRowContextMenu={handleRowContextMenuEditLib}
                   onLoadTrack={loadForTable}
                   onLoadToDeck={onLoadToDeck}
+                  rowActions={rowActions}
                   transitionMarks={transitionMarks}
                   links={links}
                   deckIds={deckIds}
@@ -1495,6 +1502,7 @@ export default function Library({
                   dragSource={selectedView === 'playlist' ? 'playlist-pane' : 'library'}
                   onLoadTrack={loadForTable}
                   onLoadToDeck={onLoadToDeck}
+                  rowActions={rowActions}
                   transitionMarks={transitionMarks}
                   links={links}
                   deckIds={deckIds}

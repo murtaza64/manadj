@@ -46,6 +46,9 @@ interface Props {
   onLoad: (track: Track) => void;
   /** When set (Performance view), show hover load-to-A–D buttons. */
   onLoadToDeck?: (deck: ChannelId, track: Track) => void;
+  /** When set, replaces the ABCD deck buttons (#221 Mix editor: rows
+   * navigate the picker, not the decks). */
+  rowActions?: import('./browseHost').BrowseRowAction[];
   /**
    * The ids a drag from this row carries: the whole selection when the row
    * is part of it, else just this row. Identity-stable (reads via ref) so
@@ -113,6 +116,7 @@ const TrackRow = memo(function TrackRow({
   onSelect,
   onLoad,
   onLoadToDeck,
+  rowActions,
   getDragIds,
   dragSource,
   onContextMenu,
@@ -250,7 +254,24 @@ const TrackRow = memo(function TrackRow({
             )}
             {track.title || filename}
           </div>
-          {onLoadToDeck && (
+          {rowActions ? (
+            <span className="track-load-buttons">
+              {rowActions.map((a) => (
+                <button
+                  key={a.title}
+                  className="track-load-button track-row-action"
+                  title={a.title}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    a.run(track);
+                  }}
+                  onDoubleClick={(e) => e.stopPropagation()}
+                >
+                  {a.icon}
+                </button>
+              ))}
+            </span>
+          ) : onLoadToDeck ? (
             <span className="track-load-buttons">
               {CHANNEL_IDS.map((deck) => (
                 <button
@@ -267,7 +288,7 @@ const TrackRow = memo(function TrackRow({
                 </button>
               ))}
             </span>
-          )}
+          ) : null}
         </td>
         <td className="track-cell">
           <div className="track-cell-text">

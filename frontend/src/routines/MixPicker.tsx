@@ -24,6 +24,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CameoRowWire, RoutineCandidateWire, RoutineRowWire, RoutineTakeRowWire, TakeRowWire } from '../api/client';
+import { subscribeChipFills } from './pickerChips';
 import {
   deckSurfacing,
   filterTracks,
@@ -101,6 +102,34 @@ export function MixPicker(props: MixPickerProps) {
     if (!props.openPair && chipA === null && chipB === null) inputRef.current?.focus();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Browse-row chip fills (#221 quick fix): first empty chip, else the
+  // SECOND chip churns; ⋈ ('edit') opens a seeded pair draft the moment
+  // the fill completes a pair.
+  const chipsRef = useRef({ a: chipA, b: chipB });
+  chipsRef.current = { a: chipA, b: chipB };
+  const onOpenRef = useRef(props.onOpen);
+  onOpenRef.current = props.onOpen;
+  useEffect(
+    () =>
+      subscribeChipFills(({ trackId, intent }) => {
+        const { a, b } = chipsRef.current;
+        let nextA = a;
+        let nextB = b;
+        if (a === null) nextA = trackId;
+        else if (b === null) nextB = trackId;
+        else nextB = trackId;
+        if (nextA === nextB) return; // same track twice: no self-pairs
+        setChipA(nextA);
+        setChipB(nextB);
+        setQuery('');
+        setHighlight(0);
+        if (intent === 'edit' && nextA !== null && nextB !== null) {
+          onOpenRef.current({ kind: 'new-transition', aTrackId: nextA, bTrackId: nextB });
+        }
+      }),
+    []
+  );
 
   // Chips follow the open pair (the panel shows the current move). One
   // sync per pair — the user can still clear/retarget the chips freely.
