@@ -32,7 +32,8 @@ import {
   transitionToProjection,
   type PairSlotProjection,
 } from '../editor/pairSlotTranslation';
-import { requestTakeReview } from '../capture/takeReview';
+import { vectorizeTake } from '../capture/vectorize';
+import { trackEffectiveBpm } from '../sets/planner';
 import { reconcilePairFromServer } from '../editor/pairStore';
 import EditableCell from '../components/EditableCell';
 import { MixPicker } from './MixPicker';
@@ -101,7 +102,17 @@ const LAST_MIX_KEY = 'manadj-last-mix';
  * first edit — the draft posture). */
 type OpenedMix =
   | { kind: 'routine'; uuid: string }
-  | { kind: 'transition'; aTrackId: number; bTrackId: number; uuid: string; seed?: Transition }
+  | {
+      kind: 'transition';
+      aTrackId: number;
+      bTrackId: number;
+      uuid: string;
+      seed?: Transition;
+      /** Set = a PAIR-TAKE REVIEW draft (#205 slice 2): the seed came from
+       * vectorizing this take — persists NOTHING until ↑ Promote (which
+       * mints the Transition and marks the take promoted). */
+      reviewTakeUuid?: string;
+    }
   /** A REVIEW DRAFT (#205 draft-everywhere, ADR 0037): an unpromoted
    * Routine Take or miner candidate opened through the promotion PREVIEW
    * — editable, auditionable, discardable; NOTHING persists until the
@@ -180,7 +191,11 @@ export default function RoutineEditorView() {
   useEffect(() => {
     // Unsaved seeds and review drafts never persist as the last mix
     // (nothing durable to restore to).
-    if (!opened || opened.kind === 'review' || (opened.kind === 'transition' && opened.seed))
+    if (
+      !opened ||
+      opened.kind === 'review' ||
+      (opened.kind === 'transition' && (opened.seed || opened.reviewTakeUuid))
+    )
       return;
     localStorage.setItem(LAST_MIX_KEY, JSON.stringify(opened));
     if (opened.kind === 'routine') localStorage.setItem(LAST_ROUTINE_KEY, opened.uuid);
@@ -222,11 +237,54 @@ export default function RoutineEditorView() {
           }
           return;
         }
-        case 'pair-take':
-          // Pair Takes review in the pair editor until phase 3's rewire
-          // (draft-everywhere on the slot surface is the next round).
-          requestTakeReview(ref.uuid);
+        case 'pair-take': {
+          // Pair-take review ON the slot surface (#205 slice 2): vectorize
+          // the take into a Transition draft and open it as a review seed —
+          // nothing persists until ↑ Promote.
+          setOpenFlowBusy(true);
+          try {
+            const detail = await api.takes.get(ref.uuid);
+            if (detail.promoted_transition_uuid) {
+              setOpened({
+                kind: 'transition',
+                aTrackId: detail.a_track_id,
+                bTrackId: detail.b_track_id,
+                uuid: detail.promoted_transition_uuid,
+              });
+              return;
+            }
+            const [a, b] = await Promise.all([
+              api.tracks.getById(detail.a_track_id),
+              api.tracks.getById(detail.b_track_id),
+            ]);
+            const vectorized = vectorizeTake(
+              {
+                events: detail.events,
+                windowStartS: detail.window_start_s,
+                windowEndS: detail.window_end_s,
+              },
+              // Grid-first (ADR 0016), the pair editor's own authority.
+              { bpmA: trackEffectiveBpm(a), bpmB: trackEffectiveBpm(b) }
+            );
+            if (!vectorized) {
+              toast('This take cannot be vectorized (slice has no init head)');
+              return;
+            }
+            setOpened({
+              kind: 'transition',
+              aTrackId: detail.a_track_id,
+              bTrackId: detail.b_track_id,
+              uuid: crypto.randomUUID(),
+              seed: vectorized.transition,
+              reviewTakeUuid: ref.uuid,
+            });
+          } catch (err) {
+            toast(`Take review failed: ${err instanceof Error ? err.message : String(err)}`);
+          } finally {
+            setOpenFlowBusy(false);
+          }
           return;
+        }
         case 'cameo':
           toast('Cameo editing on the slot surface lands in a later phase-2 round');
           return;
@@ -529,6 +587,7 @@ export default function RoutineEditorView() {
       const version = snap.version;
       saveTimer.current = setTimeout(() => {
         const o = openedRef.current;
+        if (o?.kind === 'transition' && o.reviewTakeUuid) return; // review: Promote only
         if (o?.kind === 'transition' && o.uuid === uuid) {
           // Pair save (#205): project the CHANGED edits back onto the
           // seconds-anchored artifact (phase 1's lossless re-derivation)
@@ -1006,6 +1065,55 @@ export default function RoutineEditorView() {
   );
   const promoteReview = useCallback(async () => {
     const o = openedRef.current;
+    if (o?.kind === 'transition' && o.reviewTakeUuid) {
+      // Pair-take review (#205 slice 2): mint the Transition from the
+      // reviewed draft (seed + your edits through the lossless save) and
+      // mark the take promoted — the pair editor's promote semantics on
+      // the slot surface.
+      const p = projRef.current;
+      if (!p) return;
+      setOpenFlowBusy(true);
+      try {
+        const snap = draftStore.getSnapshot();
+        const diff = changedPairEdits(snap.edits, p.edits);
+        const original = o.seed;
+        if (!original) return;
+        const data = editsToTransition(diff, {
+          original,
+          durationBeats: p.detail.duration_beats,
+          secPerBeat: p.secPerBeat,
+        });
+        const rows = transitionRowsRef.current
+          .filter((r) => r.a_track_id === o.aTrackId && r.b_track_id === o.bTrackId)
+          .sort((x, y) => x.position - y.position);
+        const items = rows.map((r) => ({
+          uuid: r.uuid,
+          name: r.name,
+          favorite: r.favorite,
+          data: r.data,
+        }));
+        items.push({
+          uuid: o.uuid,
+          name: `Transition ${rows.length + 1}`,
+          favorite: false,
+          data: data as unknown as Record<string, unknown>,
+        });
+        const saved = await api.transitions.replacePair(o.aTrackId, o.bTrackId, items);
+        reconcilePairFromServer(`${o.aTrackId}:${o.bTrackId}`, saved as never);
+        await api.takes.setPromoted(o.reviewTakeUuid, o.uuid);
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: ['transitions'] }),
+          queryClient.invalidateQueries({ queryKey: ['takes'] }),
+        ]);
+        toast('Promoted — the take is now a saved Transition (edits carried over)');
+        setOpened({ kind: 'transition', aTrackId: o.aTrackId, bTrackId: o.bTrackId, uuid: o.uuid });
+      } catch (err) {
+        toast(`Promote failed: ${err instanceof Error ? err.message : String(err)}`);
+      } finally {
+        setOpenFlowBusy(false);
+      }
+      return;
+    }
     if (o?.kind !== 'review') return;
     setOpenFlowBusy(true);
     try {
@@ -1082,7 +1190,9 @@ export default function RoutineEditorView() {
   const reviewLabel =
     opened?.kind === 'review'
       ? `${detail ? `${detail.cast.length}-track ` : ''}${opened.source === 'routine-take' ? 'Routine Take' : 'candidate'} — review draft`
-      : null;
+      : opened?.kind === 'transition' && opened.reviewTakeUuid
+        ? 'Take — review draft'
+        : null;
   const namePlaceholder =
     opened?.kind === 'transition'
       ? 'Transition'
@@ -1141,7 +1251,9 @@ export default function RoutineEditorView() {
       <div className="re-header">
         <span className="re-kind">
           {opened?.kind === 'transition'
-            ? '⇄ TRANSITION'
+            ? opened.reviewTakeUuid
+              ? '⇄ REVIEW'
+              : '⇄ TRANSITION'
             : opened?.kind === 'review'
               ? opened.source === 'routine-take'
                 ? '◇ REVIEW'
@@ -1161,15 +1273,18 @@ export default function RoutineEditorView() {
                 {reviewLabel ?? (opened.kind === 'transition' ? 'New Transition' : namePlaceholder)}
               </span>
             )}
-            {opened.kind === 'review' && (
+            {(opened.kind === 'review' ||
+              (opened.kind === 'transition' && opened.reviewTakeUuid)) && (
               <button
                 className="btn btn-mini re-promote"
                 disabled={openFlowBusy || !detail}
                 onClick={() => void promoteReview()}
                 title={
-                  opened.source === 'routine-take'
-                    ? 'Promote to a saved Routine — the explicit persisting act; your review edits carry over'
-                    : 'Confirm into a Routine Take and promote — the explicit persisting act; your review edits carry over'
+                  opened.kind === 'transition'
+                    ? 'Promote to a saved Transition and mark the take — the explicit persisting act; your review edits carry over'
+                    : opened.source === 'routine-take'
+                      ? 'Promote to a saved Routine — the explicit persisting act; your review edits carry over'
+                      : 'Confirm into a Routine Take and promote — the explicit persisting act; your review edits carry over'
                 }
               >
                 ↑ Promote
