@@ -34,6 +34,7 @@ import {
   routinesThroughPair,
   trackLabel,
   trackPage,
+  trackTitleShort,
   type MixArtifactRef,
   type TrackLike,
   type TransitionRowLike,
@@ -76,8 +77,10 @@ interface Row {
   group: string;
 }
 
+/** Dense chrome names tracks by TITLE only, 15 chars max (redirect
+ * 2026-08-31) — the typeahead results keep the full artist – title. */
 const short = (t: TrackLike | undefined, id: number): string =>
-  t ? trackLabel(t) : `#${id}`;
+  t ? trackTitleShort(t) : `#${id}`;
 
 export function MixPicker(props: MixPickerProps) {
   const [chipA, setChipA] = useState<number | null>(null);

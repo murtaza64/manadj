@@ -14,6 +14,7 @@ import {
   siblingCycle,
   trackLabel,
   trackPage,
+  trackTitleShort,
   type TransitionRowLike,
 } from './mixPickerModel';
 import type { CameoRowWire, RoutineRowWire, TakeRowWire } from '../api/client';
@@ -170,5 +171,12 @@ describe('mixPickerModel — chip typeahead', () => {
     expect(trackLabel(tracks[0])).toBe('Nero – Innocence');
     expect(trackLabel(tracks[2])).toBe('nero_-_the_thrill.mp3');
     expect(trackLabel({ id: 9 })).toBe('#9');
+  });
+  it('trackTitleShort: title only, 15 chars max with ellipsis', () => {
+    expect(trackTitleShort(tracks[0])).toBe('Innocence');
+    expect(trackTitleShort({ id: 1, artist: 'X', title: 'A Very Long Track Title Indeed' })).toBe(
+      'A Very Long Tra…'
+    );
+    expect(trackTitleShort({ id: 9 })).toBe('#9');
   });
 });

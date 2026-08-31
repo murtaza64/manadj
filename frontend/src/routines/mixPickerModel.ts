@@ -213,6 +213,13 @@ export function trackLabel(t: TrackLike): string {
   return t.artist ? `${t.artist} – ${title}` : title;
 }
 
+/** Compact track name for dense picker chrome (redirect 2026-08-31):
+ * TITLE only (no artist), truncated to 15 chars with an ellipsis. */
+export function trackTitleShort(t: TrackLike): string {
+  const title = t.title || t.filename || `#${t.id}`;
+  return title.length > 15 ? `${title.slice(0, 15)}…` : title;
+}
+
 /** Case-insensitive substring match over artist/title/filename (the
  * library search's ILIKE semantic, client-side over the cached rows). */
 export function filterTracks(tracks: readonly TrackLike[], query: string, limit = 12): TrackLike[] {
