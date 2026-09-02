@@ -919,28 +919,27 @@
      (gh#190 iteration). 208px panel − button − margin. */
   left: 182px;
   z-index: 3; /* above the slot panel */
-  top: 50%;
-  transform: translateY(-50%);
+  /* Fixed 22px (= STRIP_H) TOP-anchored height for every lane button
+     (#221 redirect follow-up): identical size across edit/reset/collapse
+     in all states (the expanded strip is taller, but its TOP edge is
+     stable — so expand/collapse still toggles under a stationary mouse
+     without the button growing). */
+  top: 0;
+  height: 22px;
+  box-sizing: border-box;
   background: rgba(11, 11, 11, 0.8);
   color: var(--subtext0);
   border: 1px solid var(--surface1);
-  border-radius: var(--radius);
+  border-radius: 0;
   padding: var(--space-2) var(--space-6);
   font-size: var(--font-micro);
   cursor: pointer;
   z-index: 3;
 }
 /* Collapse/expand toggle for edited lanes (gh#208; #221 redirect): PINNED
-   at the right edge — the same x as the edit button — and FULL HEIGHT, so
-   expand/collapse toggles under a stationary mouse (the strip's top edge
-   is stable; only its bottom moves). */
+   at the right edge — the same x as the edit button. */
 .rt-laneauthor.rt-lanecollapse {
   left: 182px;
-  top: 0;
-  bottom: 0;
-  height: 100%;
-  transform: none;
-  border-radius: 0;
 }
 /* Restore (↺) on a collapsed lane yields the right-edge slot to the
    expand (✎) button — edit always lives in the same place. */
