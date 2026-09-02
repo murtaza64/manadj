@@ -40,7 +40,7 @@ import { ROUTINE_ACCENT } from '../theme/routineColor';
 import { hexToRgbTriplet } from '../theme/deckColors';
 import { LaneCanvas, type LaneGuide } from '../editor/LaneCanvas';
 import { deleteSelected } from '../editor/laneSelection';
-import { fillColorAt, laneDeviation, strokeColorAt } from '../editor/laneShade';
+import { fillColorAt, strokeColorAt } from '../editor/laneShade';
 import { engineIdToOpenKey } from '../utils/keyUtils';
 import { getBpmColor, getKeyColor } from '../utils/displayColors';
 import { Knob } from '../components/performance/MixerStrip';
@@ -2575,46 +2575,44 @@ function drawLaneSteps(
   // Recorded fader/EQ/filter strips wear the SAME deviation ramp as the
   // editing lanes (#221 redirect: greyer near neutral, deck color with
   // deviation, filter hue-split by side) — the collapsed strip and the
-  // breakpoint editor read as one vocabulary. Recorded knob data is
-  // steppy, so constant-value RUNS get one color each (no gradients).
+  // breakpoint editor read as one vocabulary. Color rides a horizontal
+  // gradient sampled along the curve (a first cut flat-filled
+  // constant-value runs, which BANDED on slow continuous rides — the
+  // smoothness feedback); one fill + one stroke per span.
   if (recorded && control !== 'trim') {
     const laneId: LaneId =
       control === 'fader' ? 'faderA' : control === 'filter' ? 'filterA' : 'eqLowA';
     const baseY = bipolar ? centerY + 0.5 : geo.stripH - 1;
+    const SAMPLE_PX = 4;
     ctx.lineWidth = 1.4;
     for (const span of spans) {
-      let i = 0;
-      while (i < span.ys.length) {
-        let j = i + 1;
-        while (j < span.ys.length && Math.abs(span.ys[j] - span.ys[i]) < 0.5) j++;
-        const v = span.vs[i];
-        const y = span.ys[i];
-        const x0 = span.x0 + i;
-        const x1 = span.x0 + j;
-        const hgt = Math.abs(baseY - y);
-        if (hgt > 0.5) {
-          ctx.fillStyle = fillColorAt(laneId, color, v);
-          ctx.fillRect(x0, Math.min(y, baseY), x1 - x0, hgt);
+      const n = span.ys.length;
+      if (n === 0) continue;
+      const x0 = span.x0;
+      const x1 = span.x0 + n - 1;
+      const gradFor = (colorAt: (id: LaneId, c: string, v: number) => string) => {
+        if (n < 2) return colorAt(laneId, color, span.vs[0]);
+        const g = ctx.createLinearGradient(x0, 0, x1, 0);
+        for (let i = 0; i < n; i += SAMPLE_PX) {
+          g.addColorStop(i / (n - 1), colorAt(laneId, color, span.vs[i]));
         }
-        ctx.strokeStyle = strokeColorAt(laneId, color, v);
-        ctx.beginPath();
-        ctx.moveTo(x0, y);
-        ctx.lineTo(x1, y);
-        ctx.stroke();
-        if (j < span.ys.length) {
-          // Vertical step edge: the deeper endpoint's color, so a slam
-          // reads at full strength (the LaneCanvas degenerate-span rule).
-          const v2 = span.vs[j];
-          const deeper =
-            laneDeviation(laneId, v2) >= laneDeviation(laneId, v) ? v2 : v;
-          ctx.strokeStyle = strokeColorAt(laneId, color, deeper);
-          ctx.beginPath();
-          ctx.moveTo(x1, y);
-          ctx.lineTo(x1, span.ys[j]);
-          ctx.stroke();
-        }
-        i = j;
-      }
+        g.addColorStop(1, colorAt(laneId, color, span.vs[n - 1]));
+        return g;
+      };
+      ctx.fillStyle = gradFor(fillColorAt);
+      ctx.beginPath();
+      ctx.moveTo(x0, baseY);
+      span.ys.forEach((y, i) => ctx.lineTo(x0 + i, y));
+      ctx.lineTo(x1, baseY);
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = gradFor(strokeColorAt);
+      ctx.beginPath();
+      span.ys.forEach((y, i) => {
+        if (i === 0) ctx.moveTo(x0, y);
+        else ctx.lineTo(x0 + i, y);
+      });
+      ctx.stroke();
     }
     return;
   }
