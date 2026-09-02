@@ -26,6 +26,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CameoRowWire, RoutineCandidateWire, RoutineRowWire, RoutineTakeRowWire, TakeRowWire } from '../api/client';
 import { subscribeChipFills } from './pickerChips';
 import {
+  castIncluding,
+  castThroughPair,
   deckSurfacing,
   filterTracks,
   pairCameos,
@@ -164,6 +166,24 @@ export function MixPicker(props: MixPickerProps) {
         editable: true,
         group,
       });
+    const pushRoutineTake = (tk: RoutineTakeRowWire, group: string) =>
+      out.push({
+        ref: { kind: 'routine-take', uuid: tk.uuid },
+        glyph: '◇',
+        label: `${tk.cast.length}-track Routine Take`,
+        meta: `review draft · confirmed ${tk.confirmed_at?.slice(0, 10) ?? ''}`,
+        tracks: tk.cast.map((id) => short(t(id), id)).join(' / '),
+        group,
+      });
+    const pushCandidate = (c: RoutineCandidateWire, group: string) =>
+      out.push({
+        ref: { kind: 'candidate', uuid: c.uuid },
+        glyph: '⧉',
+        label: `${c.cast.length}-track candidate`,
+        meta: `review draft · returns ${c.evidence?.returns ?? 0}`,
+        tracks: c.cast.map((id) => short(t(id), id)).join(' / '),
+        group,
+      });
     const pushRoutine = (r: RoutineRowWire, group: string) =>
       out.push({
         ref: { kind: 'routine', uuid: r.uuid },
@@ -208,6 +228,12 @@ export function MixPicker(props: MixPickerProps) {
       for (const r of routinesThroughPair(props.routines, chipA, chipB)) {
         pushRoutine(r, 'Routines through the pair');
       }
+      for (const tk of castThroughPair(props.routineTakes, chipA, chipB)) {
+        pushRoutineTake(tk, 'Routine Takes through the pair');
+      }
+      for (const c of castThroughPair(props.candidates, chipA, chipB)) {
+        pushCandidate(c, 'Miner candidates through the pair');
+      }
       out.push({
         ref: { kind: 'new-blank' },
         glyph: '+',
@@ -234,6 +260,12 @@ export function MixPicker(props: MixPickerProps) {
         });
       }
       for (const r of page.through) pushRoutine(r, 'Routines through');
+      for (const tk of castIncluding(props.routineTakes, chipA)) {
+        pushRoutineTake(tk, 'Routine Takes through');
+      }
+      for (const c of castIncluding(props.candidates, chipA)) {
+        pushCandidate(c, 'Miner candidates through');
+      }
       return out;
     }
 
@@ -244,25 +276,9 @@ export function MixPicker(props: MixPickerProps) {
     for (const r of props.routines) pushRoutine(r, 'Saved Routines');
     for (const tk of props.routineTakes) {
       if (tk.promoted_routine_uuid) continue;
-      out.push({
-        ref: { kind: 'routine-take', uuid: tk.uuid },
-        glyph: '◇',
-        label: `${tk.cast.length}-track Routine Take`,
-        meta: `review draft · confirmed ${tk.confirmed_at?.slice(0, 10) ?? ''}`,
-        tracks: tk.cast.map((id) => short(t(id), id)).join(' / '),
-        group: 'Routine Takes',
-      });
+      pushRoutineTake(tk, 'Routine Takes');
     }
-    for (const c of props.candidates) {
-      out.push({
-        ref: { kind: 'candidate', uuid: c.uuid },
-        glyph: '⧉',
-        label: `${c.cast.length}-track candidate`,
-        meta: `review draft · returns ${c.evidence?.returns ?? 0}`,
-        tracks: c.cast.map((id) => short(t(id), id)).join(' / '),
-        group: 'Miner candidates',
-      });
-    }
+    for (const c of props.candidates) pushCandidate(c, 'Miner candidates');
     return out;
   }, [chipA, chipB, props]);
 

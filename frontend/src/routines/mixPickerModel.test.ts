@@ -4,6 +4,8 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
+  castIncluding,
+  castThroughPair,
   deckSurfacing,
   filterTracks,
   pairCameos,
@@ -108,6 +110,16 @@ describe('mixPickerModel — move page groups', () => {
       routine('reversed', [2, 1, 5]),
     ];
     expect(routinesThroughPair(rs, 1, 2).map((r) => r.uuid)).toEqual(['adjacent']);
+  });
+
+  it('castThroughPair/castIncluding: cast-generic (takes + candidates surface too)', () => {
+    const rows = [
+      { uuid: 'x', cast: [3, 1, 2] },
+      { uuid: 'y', cast: [2, 1] },
+      { uuid: 'z', cast: [4, 5] },
+    ];
+    expect(castThroughPair(rows, 1, 2).map((r) => r.uuid)).toEqual(['x']);
+    expect(castIncluding(rows, 1).map((r) => r.uuid)).toEqual(['x', 'y']);
   });
 });
 

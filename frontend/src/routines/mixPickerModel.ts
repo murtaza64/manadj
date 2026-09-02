@@ -99,16 +99,32 @@ export function pairCameos(
     .sort((x, y) => Number(y.favorite) - Number(x.favorite) || x.position - y.position);
 }
 
-/** Routines through the pair: cast contains a immediately followed by b
- * (the ordered pair as an adjacency inside the cast). */
+/** Cast-carrying rows through the pair: cast contains a immediately
+ * followed by b (the ordered pair as an adjacency inside the cast) —
+ * routines, Routine Takes and miner candidates alike (redirect
+ * 2026-09-02: chip selections surface the WHOLE evidence ladder). */
+export function castThroughPair<T extends { cast: number[] }>(
+  rows: readonly T[],
+  aTrackId: number,
+  bTrackId: number
+): T[] {
+  return rows.filter((r) => r.cast.some((id, i) => id === aTrackId && r.cast[i + 1] === bTrackId));
+}
+
 export function routinesThroughPair(
   routines: readonly RoutineRowWire[],
   aTrackId: number,
   bTrackId: number
 ): RoutineRowWire[] {
-  return routines.filter((r) =>
-    r.cast.some((id, i) => id === aTrackId && r.cast[i + 1] === bTrackId)
-  );
+  return castThroughPair(routines, aTrackId, bTrackId);
+}
+
+/** Cast-carrying rows involving one track (the scouting page's ladder). */
+export function castIncluding<T extends { cast: number[] }>(
+  rows: readonly T[],
+  trackId: number
+): T[] {
+  return rows.filter((r) => r.cast.includes(trackId));
 }
 
 // ── Track page (1 chip) ──────────────────────────────────────────────────
