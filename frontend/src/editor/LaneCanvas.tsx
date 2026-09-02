@@ -424,8 +424,10 @@ export function LaneCanvas({
   }, [points, id, colorProp, guides, widthPx, hoverIndex, chopPreview, resizeTick, selected, marquee]);
 
   // Scroll-triggered redraws: reposition only when the view leaves the
-  // drawn span (or the zoom it was drawn at changed).
-  useEffect(() => {
+  // drawn span (or the zoom it was drawn at changed). LAYOUT effect: the
+  // owner feeds the current view synchronously at registration (#221
+  // blank-on-open bug) — that first feed must land before paint.
+  useLayoutEffect(() => {
     registerScrollDraw(id, (viewL, viewR) => {
       const { widthPx: lw, windowLeftPx: left } = geomRef.current;
       const l = Math.max(0, viewL - left);

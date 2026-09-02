@@ -40,7 +40,7 @@ import { ROUTINE_ACCENT } from '../theme/routineColor';
 import { hexToRgbTriplet } from '../theme/deckColors';
 import { LaneCanvas, type LaneGuide } from '../editor/LaneCanvas';
 import { deleteSelected } from '../editor/laneSelection';
-import { fillColorAt, strokeColorAt } from '../editor/laneShade';
+import { fillColorAt, NEUTRAL_EPS, strokeColorAt } from '../editor/laneShade';
 import { engineIdToOpenKey } from '../utils/keyUtils';
 import { getBpmColor, getKeyColor } from '../utils/displayColors';
 import { Knob } from '../components/performance/MixerStrip';
@@ -364,12 +364,19 @@ export function RoutineTimeline({
   const registerFns = useRef<Map<string, (id: LaneId, fn: ((l: number, r: number) => void) | null) => void>>(
     new Map()
   );
+  const lastFeedRef = useRef<{ l: number; r: number } | null>(null);
   const scrollDrawFor = useCallback((key: string) => {
     let fn = registerFns.current.get(key);
     if (!fn) {
       fn = (_id, cb) => {
-        if (cb) scrollFns.current.set(key, cb);
-        else scrollFns.current.delete(key);
+        if (cb) {
+          scrollFns.current.set(key, cb);
+          // First feed at registration (#221 bug: a lane opened via ✎
+          // while scrolled/zoomed drew its default span and stayed
+          // blank until the next view change).
+          const v = lastFeedRef.current;
+          if (v) cb(v.l, v.r);
+        } else scrollFns.current.delete(key);
       };
       registerFns.current.set(key, fn);
     }
@@ -384,6 +391,7 @@ export function RoutineTimeline({
     if (pxPerBeat <= 0) return;
     // Snapped origin — the canvases' own geometry (scroll-lock fix).
     const l = Math.round(scrollBeat * pxPerBeat);
+    lastFeedRef.current = { l, r: l + width };
     for (const fn of scrollFns.current.values()) fn(l, l + width);
   }, [scrollBeat, pxPerBeat, width]);
 
@@ -1224,7 +1232,13 @@ export function RoutineTimeline({
       // not the derived order.
       const entryBeat =
         (slot.entryMixSec - plannedForRuns.mixStartSec) / plannedForRuns.secPerBeat;
-      const ex = xAt(entryBeat);
+      // The flag marks first AUDIBILITY under the EFFECTIVE lanes (#221
+      // redirect: authoring a fader that opens earlier/later must move
+      // it) — the baked entry offset stays the structural anchor (slot
+      // order, MOVE, "enters with"); the flag and the pre-entry dim
+      // re-derive from the envelope.
+      const audBeat = firstAudibleBeat(slot, slotRuns[i], entryBeat, duration);
+      const ex = xAt(audBeat);
       if (ex >= -4 && ex <= width + 4) {
         ctx.strokeStyle = slotAccent(slot.deck);
         ctx.lineWidth = 2;
@@ -2506,6 +2520,30 @@ function drawHotCues(
       });
     }
   }
+}
+
+/** First beat at which the slot is AUDIBLE under its EFFECTIVE lanes
+ * (authored envelopes included via the cursor): the earliest moving-run
+ * beat where the fader sits above the vectorizer's off-epsilon. Held
+ * spans emit nothing (gh#190 doctrine) and don't count. Falls back to
+ * the structural entry when the fader never opens. */
+function firstAudibleBeat(
+  slot: PlannedRoutineSlot,
+  runs: BeatRun[],
+  fallback: number,
+  duration: number
+): number {
+  const lanesAt = createSlotLanesCursor(slot);
+  const STEP = 0.125;
+  for (const run of runs) {
+    if (run.held) continue;
+    const b0 = Math.max(Math.min(run.b0, run.b1), 0);
+    const b1 = Math.min(Math.max(run.b0, run.b1), duration);
+    for (let b = b0; b <= b1 + 1e-9; b += STEP) {
+      if (lanesAt(b).fader > NEUTRAL_EPS) return b;
+    }
+  }
+  return fallback;
 }
 
 /** Recorded lane steps in the editor's strip geometry (gh#190 items 1-3):
