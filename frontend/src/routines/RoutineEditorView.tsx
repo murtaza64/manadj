@@ -1705,6 +1705,7 @@ export default function RoutineEditorView() {
               onSeekBeat={onSeekBeat}
               mode={editorMode}
               onModeHome={() => setEditorMode('select')}
+              pairMode={opened?.kind === 'transition'}
             />
           )}
         </div>

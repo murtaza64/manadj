@@ -163,8 +163,13 @@ export function RoutineTimeline({
   onSeekBeat,
   mode,
   onModeHome,
+  pairMode = false,
 }: {
   editor: EditorRoutine;
+  /** A PAIR artifact is open (#205/#221 authoring gates): edits with no
+   * Transition-side field — pauses, the trim knob, entry-offset reorder —
+   * are disabled rather than audition-only-then-silently-dropped. */
+  pairMode?: boolean;
   /** The jump-edited build WITHOUT lane edits: its trace identities are
    * shared with editor.planned, so run/waveform memos survive lane drags
    * (the ~60 Hz hot path). */
@@ -364,6 +369,8 @@ export function RoutineTimeline({
   const selAnchor = useRef<string | null>(null);
   const editsRef = useRef(edits);
   editsRef.current = edits;
+  const pairModeRef = useRef(pairMode);
+  pairModeRef.current = pairMode;
   // Two-tier Escape (ADR 0038): clear transient state first — popover,
   // then lane-node selection, then slot selection — and only with nothing
   // transient left, snap the mode home to select.
@@ -438,7 +445,10 @@ export function RoutineTimeline({
           const dx = Math.abs(ev.clientX - startX);
           const dy = Math.abs(ev.clientY - startY);
           if (dx < AXIS_THRESHOLD_PX && dy < AXIS_THRESHOLD_PX) return;
-          axis = dx >= dy ? 'x' : 'y';
+          // Pair artifacts have no entry-offset field to persist (#221
+          // gate): a 2-slot reorder is an A/B swap = a different pair row
+          // (ADR 0039 kind-conversion territory) — horizontal only.
+          axis = pairModeRef.current ? 'x' : dx >= dy ? 'x' : 'y';
           if (axis === 'y') document.body.style.cursor = 'ns-resize';
         }
         if (axis === 'x') {
@@ -1475,6 +1485,16 @@ export function RoutineTimeline({
                     0,
                     Math.min(1, recordedTrimAvg + slot.trim - 0.5)
                   );
+                  if (pairMode) {
+                    // #221 gate: a Transition has no trim field — an
+                    // audible-but-unsaved knob would lie on save.
+                    return (
+                      <span
+                        className="rt-sp-trim rt-sp-trim-off"
+                        title="Trim is not part of the Transition artifact (yet) — ride the fader lane instead"
+                      />
+                    );
+                  }
                   return (
                     <span
                       className={`rt-sp-trim${slot.trim !== 0.5 ? ' on' : ''}`}
@@ -1644,6 +1664,7 @@ export function RoutineTimeline({
                 {popover && popover.marker.slotId === slot.slotId && (
                   <JumpPopover
                     popover={popover}
+                    pairMode={pairMode}
                     x={xOf(popover.x)}
                     trackBpm={trackBpm}
                     secPerBeat={planned.secPerBeat}
@@ -1817,7 +1838,10 @@ function JumpPopover({
   draftStore,
   onSwap,
   onClose,
+  pairMode = false,
 }: {
+  /** Pauses have no Transition-side field (#221 gate). */
+  pairMode?: boolean;
   popover: NonNullable<PopoverState>;
   x: number;
   trackBpm: number | null;
@@ -1982,7 +2006,12 @@ function JumpPopover({
           <button
             key={d}
             className={dir === d ? 'on' : ''}
-            title={title}
+            disabled={d === 'pause' && pairMode}
+            title={
+              d === 'pause' && pairMode
+                ? 'Pauses are not part of the Transition artifact (yet) — use a jump'
+                : title
+            }
             onClick={() => setDir(d)}
           >
             {glyph}

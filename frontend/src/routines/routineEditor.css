@@ -1015,3 +1015,10 @@
   pointer-events: none;
   z-index: 1;
 }
+
+/* Pair-mode authoring gate (#221): the trim knob slot stays laid out but
+   empty — a Transition has no trim field to persist. */
+.rt-sp-trim-off {
+  display: inline-block;
+  width: 34px;
+}
