@@ -180,9 +180,12 @@ export function LaneCanvas({
   // Scrolling inside the margin just translates (with the content layer);
   // leaving it repositions + redraws imperatively via the rAF tick.
   const geomRef = useRef({ widthPx, windowLeftPx });
-  useEffect(() => {
-    geomRef.current = { widthPx, windowLeftPx };
-  });
+  // Mirror during RENDER (#221 zoom-jump report): the redraw is a LAYOUT
+  // effect (same-frame with the window's resize), but this ref updated in
+  // a PASSIVE effect — every zoom commit drew the envelope at the
+  // PREVIOUS zoom's x-scale, then settled a frame later (nodes/lines
+  // "jumping all over while zooming").
+  geomRef.current = { widthPx, windowLeftPx };
   /** Last visible range in window-local CSS px (fed by the tick). */
   const lastViewRef = useRef<{ l: number; r: number } | null>(null);
   /** The span currently drawn (window-local), and the window width it was

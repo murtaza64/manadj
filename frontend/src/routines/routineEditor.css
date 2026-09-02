@@ -833,13 +833,29 @@
 .rt-jump-chip {
   position: absolute;
   bottom: 1px;
-  left: 3px;
+  /* FLUSH on the bar (#221 redirect: labels attached to their bars) —
+     the chip's accent border continues the pole. */
+  left: -1px;
   padding: var(--space-2) var(--space-4);
   font-size: var(--font-micro);
   white-space: nowrap;
   color: var(--crust);
-  border-radius: var(--radius);
+  border-radius: 0 var(--radius) var(--radius) 0;
   user-select: none;
+  /* glass: blur what shows through so the label stays legible */
+  backdrop-filter: blur(2px);
+}
+
+/* pause ▶ play connector (#221 redirect): a dashed rail at the shared
+   stagger row ties the hold to its resume. */
+.rt-pause-link {
+  position: absolute;
+  left: 0;
+  height: 0;
+  border-top: 1px dashed;
+  opacity: 0.7;
+  z-index: 1;
+  pointer-events: none;
 }
 
 /* Jump popover — the pair editor's .editor-jump-popover look. */
@@ -914,9 +930,21 @@
   cursor: pointer;
   z-index: 3;
 }
-/* Collapse/expand toggle for edited lanes (gh#208): sits just left of the
-   author/discard button. */
+/* Collapse/expand toggle for edited lanes (gh#208; #221 redirect): PINNED
+   at the right edge — the same x as the edit button — and FULL HEIGHT, so
+   expand/collapse toggles under a stationary mouse (the strip's top edge
+   is stable; only its bottom moves). */
 .rt-laneauthor.rt-lanecollapse {
+  left: 182px;
+  top: 0;
+  bottom: 0;
+  height: 100%;
+  transform: none;
+  border-radius: 0;
+}
+/* Restore (↺) on a collapsed lane yields the right-edge slot to the
+   expand (✎) button — edit always lives in the same place. */
+.rt-laneauthor.rt-lanereset {
   left: 156px;
 }
 .rt-laneauthor:hover {

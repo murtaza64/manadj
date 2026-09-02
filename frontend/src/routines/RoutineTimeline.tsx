@@ -486,10 +486,11 @@ export function RoutineTimeline({
       // shifts the recorded timeline). Bar-snapped — entries are
       // structural (ADR 0039); +shift = fine. Gated on pair artifacts
       // (no Transition-side entry field).
-      // Redirect 2026-09-02: MOVE is the DEFAULT (entry + automation
-      // travel); ALT slides the material only. Pairs (no entry field)
-      // always slide material.
-      const moveMode = !e.altKey && !pairModeRef.current;
+      // Redirect 2026-09-02: MOVE is the DEFAULT (track + automation
+      // travel); ALT slides the material only. Pairs have no entry field,
+      // so their move is nudge + edits riding along (slideWithEditsLive);
+      // routines phrase-shift the entry.
+      const moveMode = !e.altKey;
       const edits0 = editsRef.current;
       const shiftBases = moveMode
         ? Object.fromEntries(
@@ -504,6 +505,7 @@ export function RoutineTimeline({
                 {
                   entryBeat: ps ? effectiveEntryBeat(ps) : 0,
                   bakedEntryBeat: bakedEntryRef.current[sid] ?? 0,
+                  nudgeSec: edits0.nudges[sid] ?? 0,
                   lanes,
                   jumps: edits0.jumps.filter((j) => j.slotId === sid).map((j) => ({ ...j })),
                   pauses: edits0.pauses.filter((pz) => pz.slotId === sid).map((pz) => ({ ...pz })),
@@ -542,7 +544,29 @@ export function RoutineTimeline({
         if (axis === 'x') {
           const dxBeats = (ev.clientX - startX) / px;
           if (shiftBases) {
-            // MOVE: entries snap to BARS (+shift = fine).
+            if (pairModeRef.current) {
+              // Pair MOVE: nudge the material AND rebase the slot's edits
+              // by the same beats — B and its treatment slide together
+              // against A. Fine material snap (this is still alignment,
+              // not structure); +shift = free.
+              let d = dxBeats;
+              if (!ev.shiftKey) {
+                const step = snapStepBeats(px);
+                d = Math.round(dxBeats / step) * step;
+              }
+              for (const sid of slotIds) {
+                const b = shiftBases[sid];
+                const ps = plannedRef.current.slots.find((x) => x.slotId === sid);
+                const bpm = tracks.get(ps?.trackId ?? -1)?.bpm ?? null;
+                const rate = bpm && bpm > 0 ? 60 / bpm : 0.5;
+                // Content dragged RIGHT plays earlier material at a given
+                // beat: the nudge moves OPPOSITE the drag; the edits move
+                // WITH it.
+                if (b) draftStore.slideWithEditsLive(key, sid, b, d, -d * rate);
+              }
+              return;
+            }
+            // Routine MOVE: entries snap to BARS (+shift = fine).
             const d = ev.shiftKey ? dxBeats : Math.round(dxBeats / 4) * 4;
             for (const sid of slotIds) {
               const b = shiftBases[sid];
@@ -1649,6 +1673,10 @@ export function RoutineTimeline({
                   interface Laid {
                     marker: (typeof jumpMarkers)[number][number];
                     x: number;
+                    /** Paired resume (▶) x for pauses — the pause and its
+                     * play chip share a ROW (the stagger reserves the
+                     * whole span) so the connector reads horizontal. */
+                    resumeX: number | null;
                     label: string;
                     title: string;
                     row: number;
@@ -1708,7 +1736,16 @@ export function RoutineTimeline({
                             : 'Authored jump (drag to move, click to edit)';
                       }
                     }
-                    items.push({ marker, x, label, title, row: 0, faded: false });
+                    const resumeBeat =
+                      marker.kind === 'recorded-pause' || marker.kind === 'ghost-pause'
+                        ? marker.endBeat
+                        : marker.kind === 'authored-pause'
+                          ? marker.pause.beat + marker.pause.durBeats
+                          : null;
+                    const rxRaw = resumeBeat !== null ? xOf(resumeBeat) : null;
+                    const resumeX =
+                      rxRaw !== null && rxRaw >= -4 && rxRaw <= width + 4 ? rxRaw : null;
+                    items.push({ marker, x, resumeX, label, title, row: 0, faded: false });
                   }
                   // Greedy stagger over 3 label rows; overflow fades the
                   // previous occupant of the reused row.
@@ -1717,7 +1754,14 @@ export function RoutineTimeline({
                   const rowEnd = new Array<number>(ROWS).fill(-Infinity);
                   const rowLast = new Array<Laid | null>(ROWS).fill(null);
                   for (const it of items) {
-                    const w = 14 + it.label.length * 6.5;
+                    // A pause reserves through its resume chip (#221
+                    // redirect): the ▶ shares the row, the connector
+                    // stays clean.
+                    const labelW = 14 + it.label.length * 6.5;
+                    const w =
+                      it.resumeX !== null
+                        ? Math.max(labelW, it.resumeX - it.x + 18)
+                        : labelW;
                     let placed = false;
                     for (let r = 0; r < ROWS; r++) {
                       if (it.x >= rowEnd[r]) {
@@ -1738,56 +1782,60 @@ export function RoutineTimeline({
                     }
                   }
                   return items.map((it, mi) => {
-                  const { marker, x, label, title } = it;
-                  // Pauses show their RESUME (play) point too (gh#190
-                  // iteration): a paired ▶ marker at the hold's end.
-                  const resumeBeat =
-                    marker.kind === 'recorded-pause'
-                      ? marker.endBeat
-                      : marker.kind === 'authored-pause'
-                        ? marker.pause.beat + marker.pause.durBeats
-                        : null;
-                  const rx = resumeBeat !== null ? xOf(resumeBeat) : null;
+                  const { marker, x, resumeX: rx, label, title } = it;
+                  const accent = slotAccent(slot.deck);
+                  // Translucent chips (#221 redirect): DARK tinted glass
+                  // over the waveform (accent-on-accent was unreadable),
+                  // accent border carries the identity; the chip sits
+                  // FLUSH on its bar. Row step 17px = chip height + 1
+                  // (9px micro font + padding + border — 13 overlapped).
+                  const chipStyle = {
+                    background: `color-mix(in srgb, ${accent} 28%, rgba(6, 8, 12, 0.55))`,
+                    border: `1px solid ${accent}`,
+                    color: 'var(--text)',
+                    bottom: 1 + it.row * 17,
+                  };
                   return (
                     <Fragment key={`${marker.kind}-${mi}`}>
                       <div
                         className={`rt-jump ${marker.kind}${it.faded ? ' rt-jump-overlapped' : ''}`}
                         style={{
                           transform: `translateX(${x}px)`,
-                          borderLeftColor: slotAccent(slot.deck),
+                          borderLeftColor: accent,
                         }}
                         title={title}
                         onPointerDown={onJumpPointerDown(marker)}
                       >
-                        <span
-                          className="rt-jump-chip"
-                          style={{
-                            background: slotAccent(slot.deck),
-                            // Chips are BOTTOM-anchored — marginTop never
-                            // moved them (the stagger-not-working report).
-                            bottom: 1 + it.row * 13,
-                          }}
-                        >
+                        <span className="rt-jump-chip" style={chipStyle}>
                           {label}
                         </span>
                       </div>
-                      {rx !== null && rx >= -4 && rx <= width + 4 && (
-                        <div
-                          className={`rt-jump rt-pause-resume ${marker.kind}`}
-                          style={{
-                            transform: `translateX(${rx}px)`,
-                            borderLeftColor: slotAccent(slot.deck),
-                          }}
-                          title="Playback resumes here"
-                          onPointerDown={onJumpPointerDown(marker)}
-                        >
-                          <span
-                            className="rt-jump-chip"
-                            style={{ background: slotAccent(slot.deck) }}
+                      {rx !== null && (
+                        <>
+                          {/* pause ↔ play connector, at the shared row */}
+                          <div
+                            className="rt-pause-link"
+                            style={{
+                              transform: `translateX(${x}px)`,
+                              width: Math.max(rx - x, 0),
+                              bottom: 9 + it.row * 17,
+                              borderTopColor: accent,
+                            }}
+                          />
+                          <div
+                            className={`rt-jump rt-pause-resume ${marker.kind}`}
+                            style={{
+                              transform: `translateX(${rx}px)`,
+                              borderLeftColor: accent,
+                            }}
+                            title="Playback resumes here"
+                            onPointerDown={onJumpPointerDown(marker)}
                           >
-                            ▶
-                          </span>
-                        </div>
+                            <span className="rt-jump-chip" style={chipStyle}>
+                              ▶
+                            </span>
+                          </div>
+                        </>
                       )}
                     </Fragment>
                   );
@@ -1883,7 +1931,7 @@ export function RoutineTimeline({
                         strip instead. */}
                     {editable && (!authored || collapsed) && (
                       <button
-                        className="rt-laneauthor"
+                        className={`rt-laneauthor${authored ? ' rt-lanereset' : ''}`}
                         title={
                           authored
                             ? 'Discard the edited envelope — the recorded lane plays again'
