@@ -311,6 +311,15 @@ export function drawStyledRuns(
 ): void {
   const midY = geo.yOffset + geo.height / 2;
   const halfH = geo.height / 2 - 2;
+  // Rasterize columns in DEVICE pixels (#221 bug report: at fractional
+  // devicePixelRatio — 150% displays — 1-CSS-px columns straddle device
+  // pixels on alternating x, and the antialiasing reads as a fixed-pitch
+  // vertical comb through the wave, zoom-invariant). Assumes the caller's
+  // uniform dpr transform (setTransform(dpr,0,0,dpr,tx,ty)); per-device
+  // columns also match the GL renderer's sampling density on hidpi.
+  const m = ctx.getTransform();
+  const sx = m.a || 1;
+  const sy = m.d || 1;
   // One interpreter for ALL runs (sessions 22): per-run sampler setup
   // dominated low-zoom redraws (thousands of visible runs), and the
   // modulation's px→t lookups ride a monotonic segment cursor (runs and
@@ -333,27 +342,35 @@ export function drawStyledRuns(
     if (cx1 <= cx0) continue;
     const phA = run.ph0 + ((cx0 - rx0) / (rx1 - rx0)) * (run.ph1 - run.ph0);
     const phB = run.ph0 + ((cx1 - rx0) / (rx1 - rx0)) * (run.ph1 - run.ph0);
-    const xStart = Math.round(cx0);
-    const cols = Math.round(cx1) - xStart;
+    // Device-space column geometry; modulation still speaks CSS px.
+    const xStartDev = Math.round(cx0 * sx + m.e);
+    const cols = Math.round(cx1 * sx + m.e) - xStartDev;
     if (cols <= 0) continue;
+    const cssX = (x: number) => (xStartDev + x + 0.5 - m.e) / sx;
     const modulate = modFn
-      ? (x: number) => modFn(xStart + x + 0.5)
+      ? (x: number) => modFn(cssX(x))
       : modAt && pxToT
-        ? (x: number) => modAt(pxToT(xStart + x + 0.5))
+        ? (x: number) => modAt(pxToT(cssX(x)))
         : undefined;
     const columns = renderer.render(phA, phB, cols, 1, modulate);
+    const midYDev = midY * sy + m.f;
+    const halfHDev = halfH * sy;
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
     for (let x = 0; x < cols; x++) {
       const col = columns[x];
       if (col.outOfTrack) continue;
       for (const seg of col.segments) {
         ctx.fillStyle = seg.css;
-        const y0 = seg.y0 * halfH;
-        const y1 = seg.y1 * halfH;
-        // Mirrored body: one rect per half per segment.
-        ctx.fillRect(xStart + x, midY - y1, 1, y1 - y0);
-        ctx.fillRect(xStart + x, midY + y0, 1, y1 - y0);
+        const y0 = seg.y0 * halfHDev;
+        const y1 = seg.y1 * halfHDev;
+        // Mirrored body: one rect per half per segment, on whole device
+        // pixels — never antialiased, at any dpr.
+        ctx.fillRect(xStartDev + x, Math.round(midYDev - y1), 1, Math.max(1, Math.round(y1 - y0)));
+        ctx.fillRect(xStartDev + x, Math.round(midYDev + y0), 1, Math.max(1, Math.round(y1 - y0)));
       }
     }
+    ctx.restore();
   }
 }
 
