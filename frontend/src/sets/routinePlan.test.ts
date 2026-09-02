@@ -5,6 +5,7 @@
  * shape (slot-addressed, beat-stamped) exactly as backend promotion
  * emits them.
  */
+import type { RoutineSlotLanes } from './routinePlan';
 import { describe, expect, it } from 'vitest';
 import {
   allocateRoutineDecks,
@@ -15,6 +16,7 @@ import {
   slotLanesAt,
   slotOccupyingDeckAt,
   traceStateAt,
+  createSlotLanesCursor,
   type RoutineEventInput,
   type RoutinePlanInput,
 } from './routinePlan';
@@ -495,5 +497,45 @@ describe('routineSlotStateAt (re-anchored pitch)', () => {
     const after = routineSlotStateAt(routine, routine.slots[0], 100 + 6.1 * 0.5);
     expect(before.trackTime).toBeLessThan(70);
     expect(after.trackTime).toBeGreaterThan(89);
+  });
+});
+
+describe('createSlotLanesCursor (#221 perf)', () => {
+  it('matches slotLanesAt verdicts over ascending beats (authored + recorded)', () => {
+    const lanes: RoutineSlotLanes = {
+      fader: [
+        { beat: 4, value: 0.2 },
+        { beat: 8, value: 0.9 },
+      ],
+      trim: [{ beat: 6, value: 0.7 }],
+      eqLow: [
+        { beat: 2, value: 0.1 },
+        { beat: 10, value: 0.8 },
+      ],
+      eqMid: [],
+      eqHigh: [],
+      filter: [],
+      defaults: { fader: 1, trim: 0.5, eq: 0.5, filter: 0 },
+      authored: { eqLow: true },
+    };
+    const slot = {
+      slot: 0,
+      slotId: '0',
+      trackId: 1,
+      deck: 'A' as const,
+      entryMixSec: 0,
+      entryTrackSec: 0,
+      basePitchPercent: 0,
+      occupyFromMixSec: -Infinity,
+      releaseMixSec: 1e9,
+      trace: [],
+      lanes,
+      trim: 0.62,
+      jumpMixSecs: [],
+    };
+    const cursor = createSlotLanesCursor(slot);
+    for (let b = 0; b <= 12; b += 0.37) {
+      expect(cursor(b)).toEqual(slotLanesAt(slot, b));
+    }
   });
 });

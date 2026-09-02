@@ -5,7 +5,7 @@
  * repositioned/redrawn imperatively when scrolling exhausts the margin
  * (full-window canvases were giant compositor surfaces).
  */
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { insertChop, nearestTime } from './mixModel';
 import { indicesInRect, moveGroup, toggleIndex } from './laneSelection';
 import type { SelectRect } from './laneSelection';
@@ -408,8 +408,11 @@ export function LaneCanvas({
     drawRef.current = draw;
   });
 
-  // React-triggered redraws (model/hover/zoom/height changes).
-  useEffect(() => {
+  // React-triggered redraws (model/hover/zoom/height changes). LAYOUT
+  // effect (#221 desync): on zoom the lane window rescales during the
+  // commit — a post-paint redraw showed the OLD envelope at the NEW
+  // geometry for a frame (the "automation jumping around while zooming").
+  useLayoutEffect(() => {
     drawRef.current();
   }, [points, id, colorProp, guides, widthPx, hoverIndex, chopPreview, resizeTick, selected, marquee]);
 

@@ -520,6 +520,49 @@ export function slotLanesAt(
   };
 }
 
+/** Monotonic slotLanesAt (#221 perf pass 2): the wave renderer samples
+ * lanes once per pixel column, beats strictly ascending — per-column
+ * binary searches dominated 6-slot redraws. Same verdicts as slotLanesAt,
+ * O(1) amortized via forward-only cursors. */
+export function createSlotLanesCursor(
+  slot: PlannedRoutineSlot
+): (beat: number) => {
+  fader: number;
+  trim: number;
+  eq: { low: number; mid: number; high: number };
+  filter: number;
+} {
+  const l = slot.lanes;
+  const mk = (control: 'fader' | 'trim' | 'eqLow' | 'eqMid' | 'eqHigh' | 'filter', fallback: number) => {
+    const pts = l[control];
+    const authored = !!l.authored?.[control];
+    let i = -1; // last point at or before the cursor beat
+    return (beat: number): number => {
+      if (pts.length === 0) return fallback;
+      while (i + 1 < pts.length && pts[i + 1].beat <= beat) i++;
+      if (i < 0) return authored ? pts[0].value : fallback;
+      if (!authored) return pts[i].value;
+      const a = pts[i];
+      const b = pts[i + 1];
+      if (!b || b.beat <= a.beat) return a.value;
+      const f = (beat - a.beat) / (b.beat - a.beat);
+      return a.value + (b.value - a.value) * f;
+    };
+  };
+  const fader = mk('fader', l.defaults.fader);
+  const trim = mk('trim', l.defaults.trim);
+  const eqLow = mk('eqLow', l.defaults.eq);
+  const eqMid = mk('eqMid', l.defaults.eq);
+  const eqHigh = mk('eqHigh', l.defaults.eq);
+  const filter = mk('filter', l.defaults.filter);
+  return (beat: number) => ({
+    fader: fader(beat),
+    trim: Math.max(0, Math.min(1, trim(beat) + (slot.trim - 0.5))),
+    eq: { low: eqLow(beat), mid: eqMid(beat), high: eqHigh(beat) },
+    filter: filter(beat),
+  });
+}
+
 // ── Deck allocation ──────────────────────────────────────────────────────
 
 /** Reuse breathing room (gh#170 pass 2): a freed deck is offered to a

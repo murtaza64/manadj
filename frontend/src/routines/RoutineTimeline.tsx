@@ -26,7 +26,7 @@
  * added (double-click), dragged, retimed, deleted, and — backward only —
  * given a repeat count (the loop doctrine, CONTEXT.md Jump event).
  */
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { Track, HotCue } from '../types';
 import type { DecodedWaveform } from '../waveform/blob';
 import type { ColumnModulation } from '../sets/ladderWaveStyle';
@@ -57,7 +57,7 @@ const TIER_WIDTH = BEAT_TIER_FULL.width;
 const TIER_ALPHA = BEAT_TIER_FULL.alpha;
 import type { LaneId, LanePoint } from '../editor/mixModel';
 import {
-  slotLanesAt,
+  createSlotLanesCursor,
   traceStateAt,
   type PlannedRoutine,
   type PlannedRoutineSlot,
@@ -373,7 +373,12 @@ export function RoutineTimeline({
     }
     return fn;
   }, []);
-  useEffect(() => {
+  // LAYOUT effect (#221 desync report): the lane windows and DOM markers
+  // move during the React commit; feeding the lane canvases post-paint
+  // (useEffect) left their content one frame behind — visible as lanes
+  // scrolling "at a different rate" and jumping on zoom until the
+  // deferred redraw landed.
+  useLayoutEffect(() => {
     if (pxPerBeat <= 0) return;
     // Snapped origin — the canvases' own geometry (scroll-lock fix).
     const l = Math.round(scrollBeat * pxPerBeat);
@@ -955,13 +960,21 @@ export function RoutineTimeline({
   // onto the routine clock. Keyed on the jump-edited base like the runs
   // (identities survive lane drags); view-independent (beats, not px), so
   // scroll doesn't rebuild — only zoom (density decisions) does.
+  // Ladder density decisions only need COARSE zoom — quantize to half-
+  // octaves so pinch-zoom doesn't rebuild whole-track mark lattices every
+  // step (#221 perf pass 2; the context feature made runs span full
+  // tracks).
+  const ladderZoom = useMemo(
+    () => (pxPerBeat > 0 ? Math.pow(2, Math.round(Math.log2(pxPerBeat) * 2) / 2) : 0),
+    [pxPerBeat]
+  );
   const slotLadders = useMemo<(SlotLadderMarks | null)[]>(
     () =>
       plannedForRuns.slots.map((slot, i) => {
         const meter = meters.get(slot.trackId) ?? null;
-        return meter ? slotLadderMarks(meter, slotRuns[i], pxPerBeat) : null;
+        return meter ? slotLadderMarks(meter, slotRuns[i], ladderZoom) : null;
       }),
-    [plannedForRuns, slotRuns, meters, pxPerBeat]
+    [plannedForRuns, slotRuns, meters, ladderZoom]
   );
   // The GLOBAL ladder (gh#190 iteration): the mix's own hypermeter on the
   // ruler — anchored on slot 0, governed by the audible slot (ties by
@@ -1035,7 +1048,7 @@ export function RoutineTimeline({
   }, [planned, edits, recordedJumpsBySlot, recordedPausesBySlot]);
 
   // ── Canvas drawing (waveform rows + ruler) ───────────────────────────
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (width <= 0 || pxPerBeat <= 0) return;
     const dpr = window.devicePixelRatio || 1;
     const viewPx = Math.round(scrollBeat * pxPerBeat);
@@ -1245,7 +1258,7 @@ export function RoutineTimeline({
   ]);
 
   // ── Recorded-lane strip drawing (non-authored strips only) ───────────
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (width <= 0 || pxPerBeat <= 0) return;
     const dpr = window.devicePixelRatio || 1;
     const viewPx = Math.round(scrollBeat * pxPerBeat);
@@ -2315,8 +2328,11 @@ function drawSlotWave(
     pxPerSec: (px1 - px0) / (b1 - b0),
   };
   const laneGeo = { width: geo.width, yOffset: 0, height: geo.waveH, x0: 0, x1: geo.width };
+  // Columns advance left→right: the monotonic cursor replaces per-column
+  // binary searches (#221 perf pass 2).
+  const lanesAt = createSlotLanesCursor(modSlot);
   const modulate = (pxX: number): ColumnModulation => {
-    const lanes = slotLanesAt(modSlot, geo.beatAt(pxX));
+    const lanes = lanesAt(geo.beatAt(pxX));
     return {
       eq: [
         eqValueToGain(lanes.eq.low),
@@ -2421,13 +2437,14 @@ function drawLaneSteps(
   // the routine window).
   const spans: { x0: number; ys: number[] }[] = [];
   let cur: { x0: number; ys: number[] } | null = null;
+  const lanesAt = createSlotLanesCursor(slot); // monotonic x (#221 perf)
   for (let x = 0; x < geo.width; x++) {
     const beat = geo.scrollBeat + (x + 0.5) / geo.pxPerBeat;
     if (beat < 0 || beat > geo.duration) {
       cur = null;
       continue;
     }
-    const lanes = slotLanesAt(slot, beat);
+    const lanes = lanesAt(beat);
     const v =
       control === 'fader'
         ? lanes.fader
