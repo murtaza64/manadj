@@ -39,6 +39,7 @@ import { cueCssColor } from '../hotcues/palette';
 import { ROUTINE_ACCENT } from '../theme/routineColor';
 import { hexToRgbTriplet } from '../theme/deckColors';
 import { LaneCanvas, type LaneGuide } from '../editor/LaneCanvas';
+import { deleteSelected } from '../editor/laneSelection';
 import { engineIdToOpenKey } from '../utils/keyUtils';
 import { getBpmColor, getKeyColor } from '../utils/displayColors';
 import { Knob } from '../components/performance/MixerStrip';
@@ -396,6 +397,8 @@ export function RoutineTimeline({
   const selAnchor = useRef<string | null>(null);
   const editsRef = useRef(edits);
   editsRef.current = edits;
+  const draftStoreRef = useRef(draftStore);
+  draftStoreRef.current = draftStore;
   const pairModeRef = useRef(pairMode);
   pairModeRef.current = pairMode;
   // Two-tier Escape (ADR 0038): clear transient state first — popover,
@@ -407,6 +410,26 @@ export function RoutineTimeline({
   onModeHomeRef.current = onModeHome;
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // Backspace/Delete removes the selected lane nodes (redirect
+      // 2026-09-02); a lane never empties (deleteSelected's rule).
+      if ((e.key === 'Backspace' || e.key === 'Delete') && transientRef.current.laneSel) {
+        const target = e.target as HTMLElement | null;
+        if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) return;
+        const sel = transientRef.current.laneSel;
+        const pts = editsRef.current.lanes[sel.key];
+        if (pts && sel.indices.length > 0) {
+          e.preventDefault();
+          const ci = sel.key.indexOf(':');
+          const next = deleteSelected(
+            pts.map((pt) => ({ x: pt.beat, y: pt.value })),
+            sel.indices
+          ).map((pt) => ({ beat: pt.x, value: pt.y }));
+          draftStoreRef.current.setLane(sel.key.slice(0, ci), sel.key.slice(ci + 1), next);
+          draftStoreRef.current.endGesture();
+          setLaneSel(null);
+        }
+        return;
+      }
       if (e.key !== 'Escape') return;
       const t = transientRef.current;
       if (t.popover) setPopover(null);
@@ -463,7 +486,10 @@ export function RoutineTimeline({
       // shifts the recorded timeline). Bar-snapped — entries are
       // structural (ADR 0039); +shift = fine. Gated on pair artifacts
       // (no Transition-side entry field).
-      const moveMode = e.altKey && !pairModeRef.current;
+      // Redirect 2026-09-02: MOVE is the DEFAULT (entry + automation
+      // travel); ALT slides the material only. Pairs (no entry field)
+      // always slide material.
+      const moveMode = !e.altKey && !pairModeRef.current;
       const edits0 = editsRef.current;
       const shiftBases = moveMode
         ? Object.fromEntries(
@@ -1605,7 +1631,7 @@ export function RoutineTimeline({
                 }}
                 title={
                   selectedSlots.includes(slot.slotId)
-                    ? 'Selected — drag horizontally to slide the MATERIAL under the clock (snaps to the smallest visible beat line; shift = fine); ALT-drag to MOVE the slot — entry + automation travel together (bar-snapped; alt+shift = fine); drag vertically to reorder. Cmd-click to deselect, Esc clears.'
+                    ? 'Selected — drag horizontally to MOVE the slot (entry + automation travel; bar-snapped, shift = fine); ALT-drag to slide only the MATERIAL under the clock; drag vertically to reorder. Cmd-click to deselect, Esc clears.'
                     : undefined
                 }
               >
@@ -1737,7 +1763,9 @@ export function RoutineTimeline({
                           className="rt-jump-chip"
                           style={{
                             background: slotAccent(slot.deck),
-                            marginTop: it.row * 13,
+                            // Chips are BOTTOM-anchored — marginTop never
+                            // moved them (the stagger-not-working report).
+                            bottom: 1 + it.row * 13,
                           }}
                         >
                           {label}

@@ -18,15 +18,15 @@ export interface SelectRect {
 
 const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
 
-/** Indices of the nodes inside the rect (border-inclusive), ascending. */
+/** Indices of the nodes inside the marquee's TIME RANGE (x-only,
+ * border-inclusive), ascending — redirect 2026-09-02: cmd-drag selects
+ * every node in the swept span regardless of value. */
 export function indicesInRect(points: LanePoint[], rect: SelectRect): number[] {
   const xLo = Math.min(rect.x0, rect.x1);
   const xHi = Math.max(rect.x0, rect.x1);
-  const yLo = Math.min(rect.y0, rect.y1);
-  const yHi = Math.max(rect.y0, rect.y1);
   const out: number[] = [];
   points.forEach((p, i) => {
-    if (p.x >= xLo && p.x <= xHi && p.y >= yLo && p.y <= yHi) out.push(i);
+    if (p.x >= xLo && p.x <= xHi) out.push(i);
   });
   return out;
 }

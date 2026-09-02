@@ -126,9 +126,7 @@ export function MixPicker(props: MixPickerProps) {
         setChipB(nextB);
         setQuery('');
         setHighlight(0);
-        if (intent === 'edit' && nextA !== null && nextB !== null) {
-          onOpenRef.current({ kind: 'new-transition', aTrackId: nextA, bTrackId: nextB });
-        }
+        void intent; // fills only navigate (redirect 2026-09-02)
       }),
     []
   );

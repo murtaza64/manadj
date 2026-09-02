@@ -108,6 +108,8 @@ export function LaneCanvas({
     pointsRef.current = points;
   });
   const dragIndex = useRef<number | null>(null);
+  /** Alt-drag lane translation (redirect 2026-09-02). */
+  const laneShift = useRef<{ orig: LanePoint[]; startX: number } | null>(null);
   /** Hovered breakpoint index (shows its value readout). */
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
   /** Redraw on HEIGHT changes only: strips flex-share the timeline height,
@@ -372,10 +374,12 @@ export function LaneCanvas({
 
     // Rubber-band rect (cmd/ctrl+drag in flight).
     if (marquee) {
+      // TIME-RANGE band (redirect 2026-09-02): full lane height — the
+      // selection sweeps a span, not a rectangle.
       const mx0 = lx(Math.min(marquee.x0, marquee.x1));
       const mx1 = lx(Math.max(marquee.x0, marquee.x1));
-      const my0 = ly(Math.max(marquee.y0, marquee.y1)); // ly inverts
-      const my1 = ly(Math.min(marquee.y0, marquee.y1));
+      const my0 = 0;
+      const my1 = canvas.clientHeight;
       ctx.fillStyle = 'rgba(255, 255, 255, 0.12)';
       ctx.fillRect(mx0, my0, mx1 - mx0, my1 - my0);
       ctx.setLineDash([4, 3]);
@@ -499,7 +503,11 @@ export function LaneCanvas({
         e.stopPropagation();
         e.currentTarget.setPointerCapture(e.pointerId);
         const hit = pointAt(e);
-        if (e.metaKey || e.ctrlKey) {
+        if (e.altKey) {
+          // Redirect 2026-09-02: alt-drag TRANSLATES the whole envelope
+          // horizontally (move an automation lane on its own).
+          laneShift.current = { orig: pointsRef.current, startX: hit.rawX };
+        } else if (e.metaKey || e.ctrlKey) {
           // Selection gesture (mix-editor 16): stays a click (toggle the
           // node under the pointer) until it travels — then rubber-band.
           marqueeStart.current = { x: hit.rawX, y: hit.y, cx: e.clientX, cy: e.clientY, armed: false };
@@ -530,6 +538,11 @@ export function LaneCanvas({
       }}
       onPointerMove={(e) => {
         const hit = pointAt(e);
+        if (laneShift.current) {
+          const dx = hit.rawX - laneShift.current.startX;
+          onChange(laneShift.current.orig.map((p) => ({ ...p, x: p.x + dx })));
+          return;
+        }
         if (marqueeStart.current) {
           const m = marqueeStart.current;
           if (!m.armed && Math.hypot(e.clientX - m.cx, e.clientY - m.cy) >= MARQUEE_CLICK_PX) {
@@ -563,6 +576,10 @@ export function LaneCanvas({
         onChange(pts);
       }}
       onPointerUp={(e) => {
+        if (laneShift.current) {
+          laneShift.current = null;
+          return;
+        }
         if (marqueeStart.current) {
           const m = marqueeStart.current;
           marqueeStart.current = null;
@@ -602,6 +619,7 @@ export function LaneCanvas({
         }
       }}
       onPointerCancel={() => {
+        laneShift.current = null;
         dragIndex.current = null;
         chopStart.current = null;
         setChopPreview(null);

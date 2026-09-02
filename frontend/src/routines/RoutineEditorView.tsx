@@ -1115,20 +1115,13 @@ export default function RoutineEditorView() {
       registerBrowseHost('routine', {
         onLoadToDeck: (deck, track) => decksRef.current[deck].loadTrack(track),
         doubleClickDeck: 'A',
-        // #221 quick fix: browse rows navigate the PICKER, not the decks —
-        // ⋈ fills a chip and opens the seeded draft when the pair
-        // completes; ⌕ fills only; double-click = ⌕.
+        // Redirect 2026-09-02: ONE button — fill the picker (first empty
+        // chip, else the incoming churns); double-click does the same.
         rowActions: [
-          {
-            icon: '⋈',
-            title:
-              'Edit with this track — fills the picker (first empty chip, else the incoming) and opens a draft when the pair completes',
-            run: (track) => fillPickerChip({ trackId: track.id, intent: 'edit' }),
-          },
           {
             icon: '⌕',
             title:
-              'Find this track in the picker — everything out of / into / over it (fills the first empty chip, else the incoming)',
+              'Find this track in the picker — fills the first empty chip (the incoming churns when both are set)',
             run: (track) => fillPickerChip({ trackId: track.id, intent: 'search' }),
           },
         ],
