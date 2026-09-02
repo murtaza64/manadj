@@ -378,6 +378,45 @@ def _readdress_event(
     return out
 
 
+# ── control-state seeding ───────────────────────────────────────────────
+
+_LANE_CONTROLS = ("fader", "trim", "eqLow", "eqMid", "eqHigh", "filter")
+
+
+def _deck_state_at(
+    events: Sequence[dict[str, Any]], deck: str, t_seed: float
+) -> dict[str, float]:
+    """The deck's mixer-control values at `t_seed` (#221 bug report:
+    lanes showed DEFAULTS until the first in-window movement — a bass
+    killed since before the window read as flat 0.5 and then "jumped").
+    The capture knows the truth: the init event's per-deck snapshot,
+    overridden by every control event up to the seed instant."""
+    state: dict[str, Any] = {}
+    for e in events:  # caller pre-sorts by t
+        if float(e.get("t", 0)) > t_seed:
+            break
+        kind = e.get("kind")
+        if kind == "init":
+            d = (e.get("decks") or {}).get(deck)
+            if d:
+                eq = d.get("eq") or {}
+                state = {
+                    "fader": d.get("fader"),
+                    "trim": d.get("trim"),
+                    "eqLow": eq.get("low"),
+                    "eqMid": eq.get("mid"),
+                    "eqHigh": eq.get("high"),
+                    "filter": d.get("filter"),
+                }
+        elif kind == "control" and e.get("channel") == deck:
+            c = e.get("control")
+            if c in _LANE_CONTROLS:
+                state[c] = e.get("value")
+    return {
+        c: float(v) for c, v in state.items() if isinstance(v, (int, float)) and c in _LANE_CONTROLS
+    }
+
+
 # ── the whole promotion ─────────────────────────────────────────────────
 
 
@@ -416,6 +455,24 @@ def promote(
         entry_positions.append(round(playhead_at(samples.get(r.deck, []), entry_t), 6))
 
     out_events: list[dict[str, Any]] = []
+    # Seed each slot's control state at its RESIDENCY START (the values
+    # actually set when the track was loaded / at window open for the
+    # adopted slot) — pre-window knob positions are choreography, not
+    # bookkeeping. Real same-beat events sort after the seed and win.
+    for r in residencies:
+        t_seed = max(window_start_s, r.start)
+        b_seed = round(beat_at(t_seed), 6)
+        for control, value in _deck_state_at(events, r.deck, t_seed).items():
+            out_events.append(
+                {
+                    "kind": "control",
+                    "slot": r.slot,
+                    "control": control,
+                    "value": round(value, 6),
+                    "beat": b_seed,
+                    "seeded": True,
+                }
+            )
     dropped = 0
     for e in events:
         t = float(e.get("t", 0))

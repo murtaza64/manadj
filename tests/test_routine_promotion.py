@@ -183,3 +183,42 @@ def test_promote_rejects_two_cast():
 def test_promote_requires_grids():
     with pytest.raises(PromotionError, match="missing beatgrid"):
         promote(weave_events(), CAST, *WINDOW, OFFSETS, {1: GRIDS[1]})
+
+
+def test_promote_seeds_control_state_at_residency_start():
+    """#221 bug report: lanes showed DEFAULTS until the first in-window
+    movement — a bass killed since before the window read as 0.5 then
+    "jumped". The seed carries each deck's real state (init snapshot +
+    pre-seed control events) onto its slot at residency start."""
+    events = weave_events() + [
+        {
+            "t": -5.0,
+            "kind": "init",
+            "outgoingChannel": "A",
+            "crossfader": 0,
+            "crossfaderEnabled": False,
+            "decks": {
+                "A": {
+                    "trackId": 1,
+                    "playing": False,
+                    "fader": 1.0,
+                    "trim": 0.5,
+                    "eq": {"low": 0.0, "mid": 0.5, "high": 0.5},
+                    "filter": 0.5,
+                    "pitch": 0.0,
+                }
+            },
+        },
+        {"t": -1.0, "kind": "control", "channel": "C", "control": "eqLow", "value": 0.25},
+    ]
+    result = promote(sorted(events, key=lambda e: e["t"]), CAST, *WINDOW, OFFSETS, GRIDS)
+    seeds = [e for e in result.events if e.get("seeded")]
+    # Slot 0 (deck A): the killed bass seeds at beat 0 — not the default.
+    a_low = next(e for e in seeds if e["slot"] == 0 and e["control"] == "eqLow")
+    assert a_low["beat"] == pytest.approx(0.0)
+    assert a_low["value"] == pytest.approx(0.0)
+    # Slot 2 (deck C, loads mid-window): seeded at ITS residency start
+    # with the deck's value as of the load — pre-window tweaks count.
+    c_low = next(e for e in seeds if e["slot"] == 2 and e["control"] == "eqLow")
+    assert c_low["value"] == pytest.approx(0.25)
+    assert c_low["beat"] > 0.0
