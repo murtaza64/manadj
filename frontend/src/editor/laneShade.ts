@@ -36,10 +36,15 @@ export const NEUTRAL_EPS = OFF_DEFAULT_EPS;
  * a real move rendered at max strength (walkthrough feedback). */
 const RAMP_FULL = 0.6;
 
-/** Fader fills are ENERGY PRESENT, not move size: constant alpha — the
- * fill's height already encodes the level, and riding the deviation ramp
- * read inverted (full fader = faintest area). The stroke keeps the ramp. */
-const FADER_FILL_ALPHA = 0.15;
+/** Fader fill alpha at level y (#221 redirect — the constant-alpha
+ * doctrine "height encodes the level" left 80% and 100% faders looking
+ * identical in short strips): a cubic ramp, deliberately STEEP near
+ * FULL, so the top of the throw — where mixing actually happens — reads
+ * at a glance. Still anchored well above zero: energy present must not
+ * vanish. */
+function faderFillAlpha(y: number): number {
+  return 0.06 + 0.32 * Math.pow(y, 3);
+}
 
 /** Greys for at-neutral rendering. */
 const NEUTRAL_STROKE = { r: 140, g: 140, b: 150 };
@@ -173,9 +178,9 @@ function rampT(id: LaneId, y: number): number {
  * ramp. Faders: constant (see FADER_FILL_ALPHA). EQ: the COLOR grades
  * too — grey at min through partial at neutral to the full band color at
  * max (RGB experiment). */
-function fillColorAt(id: LaneId, color: string, y: number): string {
+export function fillColorAt(id: LaneId, color: string, y: number): string {
   const c = hueAt(id, color, y);
-  if (id.startsWith('fader')) return rgba(c, FADER_FILL_ALPHA);
+  if (id.startsWith('fader')) return rgba(c, faderFillAlpha(y));
   const t = rampT(id, y);
   if (id.startsWith('eq')) return rgba(mix(NEUTRAL_STROKE, c, t), 0.05 + 0.35 * t);
   return rgba(c, 0.1 + 0.3 * t);
@@ -183,7 +188,7 @@ function fillColorAt(id: LaneId, color: string, y: number): string {
 
 /** Stroke color of lane `id` at value y: the same grey→deck-color ramp
  * as pointStroke, hue per side for filters. */
-function strokeColorAt(id: LaneId, color: string, y: number): string {
+export function strokeColorAt(id: LaneId, color: string, y: number): string {
   const t = rampT(id, y);
   return rgba(mix(NEUTRAL_STROKE, hueAt(id, color, y), t), 0.6 + 0.4 * t);
 }
@@ -206,7 +211,14 @@ function segmentStops(
   const range = id.startsWith('fader') ? 1 : 0.5;
   const stops: FillStop[] = [{ offset: 0, color: colorAt(id, color, y0) }];
   if (y1 !== y0) {
-    const crossings = [n, n + RAMP_FULL * range, n - RAMP_FULL * range]
+    const crossings = [
+      n,
+      n + RAMP_FULL * range,
+      n - RAMP_FULL * range,
+      // Fader fill alpha is cubic in y — interior stops keep the
+      // piecewise-linear gradient honest on long ramps.
+      ...(id.startsWith('fader') ? [0.25, 0.5, 0.75] : []),
+    ]
       .map((yc) => (yc - y0) / (y1 - y0))
       .filter((o) => o > 0 && o < 1)
       .sort((a, b) => a - b);

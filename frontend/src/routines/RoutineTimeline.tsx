@@ -40,6 +40,7 @@ import { ROUTINE_ACCENT } from '../theme/routineColor';
 import { hexToRgbTriplet } from '../theme/deckColors';
 import { LaneCanvas, type LaneGuide } from '../editor/LaneCanvas';
 import { deleteSelected } from '../editor/laneSelection';
+import { fillColorAt, laneDeviation, strokeColorAt } from '../editor/laneShade';
 import { engineIdToOpenKey } from '../utils/keyUtils';
 import { getBpmColor, getKeyColor } from '../utils/displayColors';
 import { Knob } from '../components/performance/MixerStrip';
@@ -1781,6 +1782,38 @@ export function RoutineTimeline({
                       rowLast[r] = it;
                     }
                   }
+                  // Poles get NOTCHED where any chip overlaps them
+                  // (#221 redirect: labels obscure the poles behind them
+                  // — translucent glass can't hide what's between it and
+                  // the waveform, so the pole itself goes transparent
+                  // under the chip). Bridge sliver at x<-4 keeps the
+                  // polygon connected inside the invisible grab pad.
+                  const CHIP_H = 16;
+                  const chipRects = items.flatMap((it) => {
+                    const w = 14 + it.label.length * 6.5;
+                    const r = [{ x0: it.x - 1, x1: it.x - 1 + w, row: it.row }];
+                    if (it.resumeX !== null)
+                      r.push({ x0: it.resumeX - 1, x1: it.resumeX + 17, row: it.row });
+                    return r;
+                  });
+                  const poleClip = (px: number): string | undefined => {
+                    const rows = [
+                      ...new Set(
+                        chipRects
+                          .filter((rc) => rc.x0 < px + 2.5 && rc.x1 > px - 0.5)
+                          .map((rc) => rc.row)
+                      ),
+                    ].sort((a, b) => b - a); // visual top first
+                    if (rows.length === 0) return undefined;
+                    const pts = ['-5px 0', '8px 0'];
+                    for (const r of rows) {
+                      const top = `calc(100% - ${1 + r * 17 + CHIP_H}px)`;
+                      const bot = `calc(100% - ${1 + r * 17}px)`;
+                      pts.push(`8px ${top}`, `-4px ${top}`, `-4px ${bot}`, `8px ${bot}`);
+                    }
+                    pts.push('8px 100%', '-5px 100%');
+                    return `polygon(${pts.join(', ')})`;
+                  };
                   return items.map((it, mi) => {
                   const { marker, x, resumeX: rx, label, title } = it;
                   const accent = slotAccent(slot.deck);
@@ -1799,13 +1832,14 @@ export function RoutineTimeline({
                     <Fragment key={`${marker.kind}-${mi}`}>
                       <div
                         className={`rt-jump ${marker.kind}${it.faded ? ' rt-jump-overlapped' : ''}`}
-                        style={{
-                          transform: `translateX(${x}px)`,
-                          borderLeftColor: accent,
-                        }}
+                        style={{ transform: `translateX(${x}px)` }}
                         title={title}
                         onPointerDown={onJumpPointerDown(marker)}
                       >
+                        <span
+                          className="rt-jump-pole"
+                          style={{ borderLeftColor: accent, clipPath: poleClip(x) }}
+                        />
                         <span className="rt-jump-chip" style={chipStyle}>
                           {label}
                         </span>
@@ -1824,13 +1858,14 @@ export function RoutineTimeline({
                           />
                           <div
                             className={`rt-jump rt-pause-resume ${marker.kind}`}
-                            style={{
-                              transform: `translateX(${rx}px)`,
-                              borderLeftColor: accent,
-                            }}
+                            style={{ transform: `translateX(${rx}px)` }}
                             title="Playback resumes here"
                             onPointerDown={onJumpPointerDown(marker)}
                           >
+                            <span
+                              className="rt-jump-pole"
+                              style={{ borderLeftColor: accent, clipPath: poleClip(rx) }}
+                            />
                             <span className="rt-jump-chip" style={chipStyle}>
                               ▶
                             </span>
@@ -2511,8 +2546,8 @@ function drawLaneSteps(
 
   // Sample the lane per pixel into contiguous spans (pen breaks outside
   // the routine window).
-  const spans: { x0: number; ys: number[] }[] = [];
-  let cur: { x0: number; ys: number[] } | null = null;
+  const spans: { x0: number; ys: number[]; vs: number[] }[] = [];
+  let cur: { x0: number; ys: number[]; vs: number[] } | null = null;
   const lanesAt = createSlotLanesCursor(slot); // monotonic x (#221 perf)
   for (let x = 0; x < geo.width; x++) {
     const beat = geo.scrollBeat + (x + 0.5) / geo.pxPerBeat;
@@ -2530,10 +2565,58 @@ function drawLaneSteps(
             ? (lanes.filter + 1) / 2
             : lanes.eq[control === 'eqLow' ? 'low' : control === 'eqMid' ? 'mid' : 'high'];
     if (!cur) {
-      cur = { x0: x, ys: [] };
+      cur = { x0: x, ys: [], vs: [] };
       spans.push(cur);
     }
     cur.ys.push(yOf(v));
+    cur.vs.push(v);
+  }
+
+  // Recorded fader/EQ/filter strips wear the SAME deviation ramp as the
+  // editing lanes (#221 redirect: greyer near neutral, deck color with
+  // deviation, filter hue-split by side) — the collapsed strip and the
+  // breakpoint editor read as one vocabulary. Recorded knob data is
+  // steppy, so constant-value RUNS get one color each (no gradients).
+  if (recorded && control !== 'trim') {
+    const laneId: LaneId =
+      control === 'fader' ? 'faderA' : control === 'filter' ? 'filterA' : 'eqLowA';
+    const baseY = bipolar ? centerY + 0.5 : geo.stripH - 1;
+    ctx.lineWidth = 1.4;
+    for (const span of spans) {
+      let i = 0;
+      while (i < span.ys.length) {
+        let j = i + 1;
+        while (j < span.ys.length && Math.abs(span.ys[j] - span.ys[i]) < 0.5) j++;
+        const v = span.vs[i];
+        const y = span.ys[i];
+        const x0 = span.x0 + i;
+        const x1 = span.x0 + j;
+        const hgt = Math.abs(baseY - y);
+        if (hgt > 0.5) {
+          ctx.fillStyle = fillColorAt(laneId, color, v);
+          ctx.fillRect(x0, Math.min(y, baseY), x1 - x0, hgt);
+        }
+        ctx.strokeStyle = strokeColorAt(laneId, color, v);
+        ctx.beginPath();
+        ctx.moveTo(x0, y);
+        ctx.lineTo(x1, y);
+        ctx.stroke();
+        if (j < span.ys.length) {
+          // Vertical step edge: the deeper endpoint's color, so a slam
+          // reads at full strength (the LaneCanvas degenerate-span rule).
+          const v2 = span.vs[j];
+          const deeper =
+            laneDeviation(laneId, v2) >= laneDeviation(laneId, v) ? v2 : v;
+          ctx.strokeStyle = strokeColorAt(laneId, color, deeper);
+          ctx.beginPath();
+          ctx.moveTo(x1, y);
+          ctx.lineTo(x1, span.ys[j]);
+          ctx.stroke();
+        }
+        i = j;
+      }
+    }
+    return;
   }
 
   const fillAlpha = recorded ? 0.2 : 0.07;

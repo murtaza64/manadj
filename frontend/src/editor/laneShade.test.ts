@@ -60,18 +60,23 @@ describe('grey-at-neutral, color-when-away', () => {
     expect(s.fill).toBeNull();
   });
 
-  it('a FULL fader segment is colored with the constant-alpha energy fill', () => {
+  it('a FULL fader segment is colored with the energy fill at max alpha', () => {
     const s = segmentShade('faderA', '#00e5ff', 1, 1);
     for (const stop of s.stroke) expect(rgb(stop.color).slice(0, 3)).toEqual([0, 229, 255]);
     for (const stop of s.fill!) {
       expect(rgb(stop.color).slice(0, 3)).toEqual([0, 229, 255]);
-      expect(rgb(stop.color)[3]).toBeCloseTo(0.15);
+      expect(rgb(stop.color)[3]).toBeCloseTo(0.38);
     }
   });
 
-  it('fader fill alpha is CONSTANT — height encodes the level, not opacity', () => {
+  it('fader fill alpha RAMPS with the level, steep near FULL (#221: 80% vs 100% must read)', () => {
     const s = segmentShade('faderA', '#00e5ff', 1, 0.1); // long pull-down
-    for (const stop of s.fill!) expect(rgb(stop.color)[3]).toBeCloseTo(0.15);
+    const alphas = s.fill!.map((stop) => rgb(stop.color)[3]);
+    // Monotone down the pull, and the top of the throw moves fastest.
+    for (let i = 1; i < alphas.length; i++) expect(alphas[i]).toBeLessThan(alphas[i - 1]);
+    const at = (y: number) => 0.06 + 0.32 * y ** 3;
+    expect(alphas[0]).toBeCloseTo(at(1));
+    expect(at(1) - at(0.8)).toBeGreaterThan(3 * (at(0.5) - at(0.3)));
   });
 
   it('a SILENT fader segment greys out with no fill', () => {
