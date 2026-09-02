@@ -431,10 +431,45 @@ export function RoutineTimeline({
       const key = `slot-drag:${Date.now()}`;
       const base: Record<string, number> = {};
       for (const s of slotIds) base[s] = editsRef.current.nudges[s] ?? 0;
+      // Alt at grab = MOVE (#221): phrase-shift the slot's ENTRY with its
+      // whole treatment (authored lanes/jumps/pauses travel; the build
+      // shifts the recorded timeline). Bar-snapped — entries are
+      // structural (ADR 0039); +shift = fine. Gated on pair artifacts
+      // (no Transition-side entry field).
+      const moveMode = e.altKey && !pairModeRef.current;
+      const edits0 = editsRef.current;
+      const shiftBases = moveMode
+        ? Object.fromEntries(
+            slotIds.map((sid) => {
+              const ps = plannedRef.current.slots.find((x) => x.slotId === sid);
+              const lanes: Record<string, (typeof edits0.lanes)[string]> = {};
+              for (const [k, v] of Object.entries(edits0.lanes)) {
+                if (k.startsWith(`${sid}:`)) lanes[k] = v.map((pt) => ({ ...pt }));
+              }
+              return [
+                sid,
+                {
+                  entryBeat: ps ? effectiveEntryBeat(ps) : 0,
+                  bakedEntryBeat: bakedEntryRef.current[sid] ?? 0,
+                  lanes,
+                  jumps: edits0.jumps.filter((j) => j.slotId === sid).map((j) => ({ ...j })),
+                  pauses: edits0.pauses.filter((pz) => pz.slotId === sid).map((pz) => ({ ...pz })),
+                  removedRecordedJumps: edits0.removedRecordedJumps
+                    .filter((r) => r.slotId === sid)
+                    .map((r) => ({ ...r })),
+                  removedRecordedPauses: edits0.removedRecordedPauses
+                    .filter((r) => r.slotId === sid)
+                    .map((r) => ({ ...r })),
+                },
+              ];
+            })
+          )
+        : null;
       const prevUserSelect = document.body.style.userSelect;
       const prevCursor = document.body.style.cursor;
       document.body.style.userSelect = 'none';
       let axis: 'x' | 'y' | null = null;
+      if (moveMode) document.body.style.cursor = 'grab';
       // After a swap, hold further swaps until the rebuild reflects it
       // (draft mutation → rebuild → render lag would double-swap).
       let expectedOrder: string | null = null;
@@ -453,6 +488,15 @@ export function RoutineTimeline({
         }
         if (axis === 'x') {
           const dxBeats = (ev.clientX - startX) / px;
+          if (shiftBases) {
+            // MOVE: entries snap to BARS (+shift = fine).
+            const d = ev.shiftKey ? dxBeats : Math.round(dxBeats / 4) * 4;
+            for (const sid of slotIds) {
+              const b = shiftBases[sid];
+              if (b) draftStore.phraseShiftLive(key, sid, b, d);
+            }
+            return;
+          }
           let d = dxBeats;
           if (!ev.shiftKey) {
             const step = snapStepBeats(px);
@@ -1535,7 +1579,7 @@ export function RoutineTimeline({
                 }}
                 title={
                   selectedSlots.includes(slot.slotId)
-                    ? 'Selected — drag horizontally to slide the track (snaps to the smallest visible beat line; shift = fine); drag vertically to reorder (swaps entry offsets — the cast re-sorts by entry). Cmd-click to deselect, Esc clears.'
+                    ? 'Selected — drag horizontally to slide the MATERIAL under the clock (snaps to the smallest visible beat line; shift = fine); ALT-drag to MOVE the slot — entry + automation travel together (bar-snapped; alt+shift = fine); drag vertically to reorder. Cmd-click to deselect, Esc clears.'
                     : undefined
                 }
               >

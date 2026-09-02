@@ -9,14 +9,7 @@
  */
 import { useSyncExternalStore } from 'react';
 import type { RoutineLanePoint } from '../sets/routinePlan';
-import {
-  editsAreEmpty,
-  emptyEdits,
-  laneKey,
-  type AuthoredJump,
-  type AuthoredPause,
-  type RoutineEdits,
-} from './routineDraft';
+import { editsAreEmpty, emptyEdits, laneKey, type AuthoredJump, type AuthoredPause, type RoutineEdits, type RemovedRecordedJump, type RemovedRecordedPause } from './routineDraft';
 
 const UNDO_DEPTH = 100;
 
@@ -187,6 +180,58 @@ export class RoutineDraftStore {
         if (v === null) delete e.entryOffsets[slotId];
         else e.entryOffsets[slotId] = v;
       }
+    });
+  }
+
+  /** Drag-flavored PHRASE SHIFT (#221: "move the track WITH its
+   * automation"): one gesture moves a slot's ENTRY on the routine clock
+   * and rebases every authored edit addressed to it — lanes, jumps,
+   * pauses, and removed-recorded markers — by the same beats, all from
+   * the drag-start base (absolute rewrites per move; mutate() coalesces
+   * the gesture into one undo entry). The build already shifts the
+   * recorded timeline (trace + recorded lanes) with the entry override,
+   * and authored/removed edit beats live in the SHIFTED frame — so the
+   * whole treatment travels together. */
+  phraseShiftLive(
+    gestureKey: string,
+    slotId: string,
+    base: {
+      entryBeat: number;
+      /** The recorded entry — landing back on it deletes the override. */
+      bakedEntryBeat: number;
+      lanes: Record<string, RoutineLanePoint[]>;
+      jumps: AuthoredJump[];
+      pauses: AuthoredPause[];
+      removedRecordedJumps: RemovedRecordedJump[];
+      removedRecordedPauses: RemovedRecordedPause[];
+    },
+    deltaBeats: number
+  ): void {
+    this.mutate(gestureKey, (e) => {
+      const entry = base.entryBeat + deltaBeats;
+      if (Math.abs(entry - base.bakedEntryBeat) < 1e-6) delete e.entryOffsets[slotId];
+      else e.entryOffsets[slotId] = entry;
+      for (const [key, pts] of Object.entries(base.lanes)) {
+        e.lanes[key] = pts.map((pt) => ({ beat: pt.beat + deltaBeats, value: pt.value }));
+      }
+      const jumpBase = new Map(base.jumps.map((j) => [j.id, j]));
+      e.jumps = e.jumps.map((j) => {
+        const b = j.slotId === slotId ? jumpBase.get(j.id) : undefined;
+        return b ? { ...b, beat: b.beat + deltaBeats } : j;
+      });
+      const pauseBase = new Map(base.pauses.map((pz) => [pz.id, pz]));
+      e.pauses = e.pauses.map((pz) => {
+        const b = pz.slotId === slotId ? pauseBase.get(pz.id) : undefined;
+        return b ? { ...b, beat: b.beat + deltaBeats } : pz;
+      });
+      e.removedRecordedJumps = [
+        ...e.removedRecordedJumps.filter((r) => r.slotId !== slotId),
+        ...base.removedRecordedJumps.map((r) => ({ ...r, beat: r.beat + deltaBeats })),
+      ];
+      e.removedRecordedPauses = [
+        ...e.removedRecordedPauses.filter((r) => r.slotId !== slotId),
+        ...base.removedRecordedPauses.map((r) => ({ ...r, beat: r.beat + deltaBeats })),
+      ];
     });
   }
 
