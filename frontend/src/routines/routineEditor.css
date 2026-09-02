@@ -1022,3 +1022,9 @@
   display: inline-block;
   width: 34px;
 }
+
+/* Jump-label overlap fade (#221 redirect): when even 3 stagger rows can't
+   fit, the OLDER label dims — superimposition reads as "zoom in". */
+.rt-jump-overlapped .rt-jump-chip {
+  opacity: 0.35;
+}

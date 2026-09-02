@@ -1602,49 +1602,104 @@ export function RoutineTimeline({
                   }}
                   style={{ height: WAVE_H }}
                 />
-                {jumpMarkers[i].map((marker, mi) => {
-                  const beat = markerBeat(marker);
-                  const x = xOf(beat);
-                  if (x < -4 || x > width + 4) return null;
-                  let label: string;
-                  let title: string;
-                  switch (marker.kind) {
-                    case 'ghost':
-                      label = '↷ removed';
-                      title = 'Removed recorded jump (click to restore)';
-                      break;
-                    case 'ghost-pause':
-                      label = '⏸ removed';
-                      title = 'Removed recorded pause (click to restore — the hold plays again)';
-                      break;
-                    case 'recorded-pause':
-                      label = `⏸ ${(marker.endBeat - marker.beat).toFixed(1)}b`;
-                      title = 'Recorded pause (click: inspect/remove — removal plays through)';
-                      break;
-                    case 'authored-pause':
-                      label = `✎⏸ ${marker.pause.durBeats.toFixed(1)}b`;
-                      title = 'Authored pause (drag to move, click to edit)';
-                      break;
-                    default: {
-                      const deltaSec =
-                        marker.kind === 'authored' ? marker.jump.deltaSec : marker.deltaSec;
-                      const beats =
-                        trackBpm && trackBpm > 0 ? deltaSec / (60 / trackBpm) : null;
-                      const repeat =
-                        marker.kind === 'authored' && marker.jump.repeat && marker.jump.repeat > 1
-                          ? marker.jump.repeat
-                          : null;
-                      label = `${marker.kind === 'authored' ? '✎ ' : '↷ '}${
-                        beats !== null
-                          ? `${beats >= 0 ? '+' : ''}${beats.toFixed(1)}b`
-                          : `${deltaSec >= 0 ? '+' : ''}${deltaSec.toFixed(1)}s`
-                      }${repeat ? ` ×${repeat}` : ''}`;
-                      title =
-                        marker.kind === 'recorded'
-                          ? 'Recorded jump (click: inspect/remove)'
-                          : 'Authored jump (drag to move, click to edit)';
+                {(() => {
+                  // Marker LABEL layout (#221 redirect): build first, then
+                  // STAGGER into 3 rows at low zoom; when even staggering
+                  // can't fit, the OLDER (leftward) label fades — the
+                  // superimposition reads as "zoom in to disentangle".
+                  interface Laid {
+                    marker: (typeof jumpMarkers)[number][number];
+                    x: number;
+                    label: string;
+                    title: string;
+                    row: number;
+                    faded: boolean;
+                  }
+                  const fmtB = (b: number): string => {
+                    const r = Math.round(b * 10) / 10;
+                    return Number.isInteger(r) ? String(r) : r.toFixed(1);
+                  };
+                  const items: Laid[] = [];
+                  for (const marker of jumpMarkers[i]) {
+                    const beat = markerBeat(marker);
+                    const x = xOf(beat);
+                    if (x < -4 || x > width + 4) continue;
+                    let label: string;
+                    let title: string;
+                    switch (marker.kind) {
+                      case 'ghost':
+                        label = '⊘ removed';
+                        title = 'Removed recorded jump (click to restore)';
+                        break;
+                      case 'ghost-pause':
+                        label = '⊘⏸ removed';
+                        title =
+                          'Removed recorded pause (click to restore — the hold plays again)';
+                        break;
+                      case 'recorded-pause':
+                        label = `⏸ ${fmtB(marker.endBeat - marker.beat)}b`;
+                        title = 'Recorded pause (click: inspect/remove — removal plays through)';
+                        break;
+                      case 'authored-pause':
+                        label = `✎⏸ ${fmtB(marker.pause.durBeats)}b`;
+                        title = 'Authored pause (drag to move, click to edit)';
+                        break;
+                      default: {
+                        const deltaSec =
+                          marker.kind === 'authored' ? marker.jump.deltaSec : marker.deltaSec;
+                        const beats =
+                          trackBpm && trackBpm > 0 ? deltaSec / (60 / trackBpm) : null;
+                        const repeat =
+                          marker.kind === 'authored' &&
+                          marker.jump.repeat &&
+                          marker.jump.repeat > 1
+                            ? marker.jump.repeat
+                            : null;
+                        // The arrow carries polarity (redirect): ← replays
+                        // earlier material, → skips ahead — no sign.
+                        const arrow = deltaSec < 0 ? '←' : '→';
+                        label = `${marker.kind === 'authored' ? '✎' : ''}${arrow} ${
+                          beats !== null
+                            ? `${fmtB(Math.abs(beats))}b`
+                            : `${fmtB(Math.abs(deltaSec))}s`
+                        }${repeat ? ` ×${repeat}` : ''}`;
+                        title =
+                          marker.kind === 'recorded'
+                            ? 'Recorded jump (click: inspect/remove)'
+                            : 'Authored jump (drag to move, click to edit)';
+                      }
+                    }
+                    items.push({ marker, x, label, title, row: 0, faded: false });
+                  }
+                  // Greedy stagger over 3 label rows; overflow fades the
+                  // previous occupant of the reused row.
+                  items.sort((a, b) => a.x - b.x);
+                  const ROWS = 3;
+                  const rowEnd = new Array<number>(ROWS).fill(-Infinity);
+                  const rowLast = new Array<Laid | null>(ROWS).fill(null);
+                  for (const it of items) {
+                    const w = 14 + it.label.length * 6.5;
+                    let placed = false;
+                    for (let r = 0; r < ROWS; r++) {
+                      if (it.x >= rowEnd[r]) {
+                        it.row = r;
+                        rowEnd[r] = it.x + w;
+                        rowLast[r] = it;
+                        placed = true;
+                        break;
+                      }
+                    }
+                    if (!placed) {
+                      let r = 0;
+                      for (let k = 1; k < ROWS; k++) if (rowEnd[k] < rowEnd[r]) r = k;
+                      if (rowLast[r]) rowLast[r]!.faded = true;
+                      it.row = r;
+                      rowEnd[r] = it.x + w;
+                      rowLast[r] = it;
                     }
                   }
+                  return items.map((it, mi) => {
+                  const { marker, x, label, title } = it;
                   // Pauses show their RESUME (play) point too (gh#190
                   // iteration): a paired ▶ marker at the hold's end.
                   const resumeBeat =
@@ -1657,7 +1712,7 @@ export function RoutineTimeline({
                   return (
                     <Fragment key={`${marker.kind}-${mi}`}>
                       <div
-                        className={`rt-jump ${marker.kind}`}
+                        className={`rt-jump ${marker.kind}${it.faded ? ' rt-jump-overlapped' : ''}`}
                         style={{
                           transform: `translateX(${x}px)`,
                           borderLeftColor: slotAccent(slot.deck),
@@ -1667,7 +1722,10 @@ export function RoutineTimeline({
                       >
                         <span
                           className="rt-jump-chip"
-                          style={{ background: slotAccent(slot.deck) }}
+                          style={{
+                            background: slotAccent(slot.deck),
+                            marginTop: it.row * 13,
+                          }}
                         >
                           {label}
                         </span>
@@ -1692,7 +1750,8 @@ export function RoutineTimeline({
                       )}
                     </Fragment>
                   );
-                })}
+                  });
+                })()}
 
                 <div className="rt-lanetoggles">
                   {SLOT_LANE_ORDER.map((control) => {
