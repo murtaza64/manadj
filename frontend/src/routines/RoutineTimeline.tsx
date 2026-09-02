@@ -146,6 +146,28 @@ function markerBeat(m: JumpMarker): number {
 
 type PopoverState = { marker: JumpMarker; x: number } | null;
 
+/** Size a canvas's backing store WITHOUT the per-frame realloc (#221
+ * perf pass): assigning .width/.height every draw frees + reallocates the
+ * GPU-backed store for every canvas on every scroll step (ruler + N waves
+ * + N strips). Only assign on real size changes; otherwise clear. Returns
+ * the 2d context, dpr-transformed. */
+function sizedCtx(
+  canvas: HTMLCanvasElement,
+  cssW: number,
+  cssH: number,
+  dpr: number
+): CanvasRenderingContext2D | null {
+  const w = Math.round(cssW * dpr);
+  const h = Math.round(cssH * dpr);
+  if (canvas.width !== w) canvas.width = w;
+  if (canvas.height !== h) canvas.height = h;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return null;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, cssW, cssH);
+  return ctx;
+}
+
 export function RoutineTimeline({
   editor,
   plannedForRuns,
@@ -1021,11 +1043,8 @@ export function RoutineTimeline({
 
     const ruler = rulerRef.current;
     if (ruler) {
-      ruler.width = width * dpr;
-      ruler.height = RULER_H * dpr;
-      const ctx = ruler.getContext('2d');
+      const ctx = sizedCtx(ruler, width, RULER_H, dpr);
       if (ctx) {
-        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         ctx.fillStyle = WAVE_BG_COLOR;
         ctx.fillRect(0, 0, width, RULER_H);
         ctx.font = 'bold 10px monospace';
@@ -1116,11 +1135,8 @@ export function RoutineTimeline({
     plannedForRuns.slots.forEach((slot, i) => {
       const canvas = waveCanvasRefs.current[i];
       if (!canvas) return;
-      canvas.width = width * dpr;
-      canvas.height = WAVE_H * dpr;
-      const ctx = canvas.getContext('2d');
+      const ctx = sizedCtx(canvas, width, WAVE_H, dpr);
       if (!ctx) return;
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.fillStyle = WAVE_BG_COLOR;
       ctx.fillRect(0, 0, width, WAVE_H);
       const ladder = slotLadders[i];
@@ -1244,11 +1260,8 @@ export function RoutineTimeline({
           continue;
         const strip = laneCanvasRefs.current.get(`${slot.slotId}:${control}`);
         if (!strip) continue;
-        strip.width = width * dpr;
-        strip.height = STRIP_H * dpr;
-        const ctx = strip.getContext('2d');
+        const ctx = sizedCtx(strip, width, STRIP_H, dpr);
         if (!ctx) continue;
-        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         ctx.fillStyle = WAVE_BG_COLOR;
         ctx.fillRect(0, 0, width, STRIP_H);
         const ladder = slotLadders[slot.slot];

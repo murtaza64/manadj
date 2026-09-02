@@ -342,33 +342,45 @@ export function drawStyledRuns(
     if (cx1 <= cx0) continue;
     const phA = run.ph0 + ((cx0 - rx0) / (rx1 - rx0)) * (run.ph1 - run.ph0);
     const phB = run.ph0 + ((cx1 - rx0) / (rx1 - rx0)) * (run.ph1 - run.ph0);
-    // Device-space column geometry; modulation still speaks CSS px.
-    const xStartDev = Math.round(cx0 * sx + m.e);
-    const cols = Math.round(cx1 * sx + m.e) - xStartDev;
+    // Sample per CSS column (the sampler cost — perf pass #221: device-
+    // density sampling doubled work on hidpi for no visible gain at 1px
+    // columns), but DRAW device-aligned: each CSS column paints the
+    // device-pixel span [round(x·sx), round((x+1)·sx)) — whole pixels,
+    // never antialiased, at any dpr including fractional (the 150%
+    // comb fix).
+    const xStart = Math.round(cx0);
+    const cols = Math.round(cx1) - xStart;
     if (cols <= 0) continue;
-    const cssX = (x: number) => (xStartDev + x + 0.5 - m.e) / sx;
     const modulate = modFn
-      ? (x: number) => modFn(cssX(x))
+      ? (x: number) => modFn(xStart + x + 0.5)
       : modAt && pxToT
-        ? (x: number) => modAt(pxToT(cssX(x)))
+        ? (x: number) => modAt(pxToT(xStart + x + 0.5))
         : undefined;
     const columns = renderer.render(phA, phB, cols, 1, modulate);
     const midYDev = midY * sy + m.f;
     const halfHDev = halfH * sy;
     ctx.save();
     ctx.setTransform(1, 0, 0, 1, 0, 0);
+    let xd0 = Math.round((xStart * sx + m.e));
     for (let x = 0; x < cols; x++) {
+      const xd1 = Math.round((xStart + x + 1) * sx + m.e);
       const col = columns[x];
-      if (col.outOfTrack) continue;
-      for (const seg of col.segments) {
-        ctx.fillStyle = seg.css;
-        const y0 = seg.y0 * halfHDev;
-        const y1 = seg.y1 * halfHDev;
-        // Mirrored body: one rect per half per segment, on whole device
-        // pixels — never antialiased, at any dpr.
-        ctx.fillRect(xStartDev + x, Math.round(midYDev - y1), 1, Math.max(1, Math.round(y1 - y0)));
-        ctx.fillRect(xStartDev + x, Math.round(midYDev + y0), 1, Math.max(1, Math.round(y1 - y0)));
+      if (col.outOfTrack) {
+        xd0 = xd1;
+        continue;
       }
+      const w = xd1 - xd0;
+      if (w > 0) {
+        for (const seg of col.segments) {
+          ctx.fillStyle = seg.css;
+          const y0 = seg.y0 * halfHDev;
+          const y1 = seg.y1 * halfHDev;
+          // Mirrored body: one rect per half per segment.
+          ctx.fillRect(xd0, Math.round(midYDev - y1), w, Math.max(1, Math.round(y1 - y0)));
+          ctx.fillRect(xd0, Math.round(midYDev + y0), w, Math.max(1, Math.round(y1 - y0)));
+        }
+      }
+      xd0 = xd1;
     }
     ctx.restore();
   }
