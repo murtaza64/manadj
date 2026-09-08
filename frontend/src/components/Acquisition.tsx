@@ -587,6 +587,10 @@ function SoulseekPicker({ item }: { item: SourceItem }) {
   const { data: remembered } = useQuery({
     queryKey: ['soulseekSearch', item.id],
     queryFn: () => api.acquisition.soulseekRemembered(item.id),
+    // a failed download enqueues an automatic search; poll lightly until it
+    // lands so results appear without reselecting the item (gh#223)
+    refetchInterval: q =>
+      q.state.data == null && item.download?.task_state === 'failed' ? 10_000 : false,
   });
   const query = typed ?? remembered?.query ?? item.search_query ?? item.title;
 

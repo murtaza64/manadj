@@ -14,6 +14,7 @@ from backend.acquisition.manager import list_source_items, queue_item, refresh
 from backend.acquisition.models import SourceItem
 from backend.acquisition.searches import (
     SOULSEEK_SEARCH_TASK_TYPE,
+    backfill_soulseek_searches,
     enqueue_soulseek_search,
     remember_search,
     remembered_results,
@@ -137,6 +138,57 @@ class TestSearchTask:
         assert enqueue_soulseek_search(db_session, item) is not None
 
         pick_supplier_result(db_session, item.id, supplier, RESULT)  # does not raise
+
+
+class TestBackfill:
+    """The startup sweep (gh#223): failures that never got an auto search."""
+
+    def fail_download(self, db: Session, item: SourceItem) -> None:
+        from backend.tasks.manager import create_task
+
+        task = create_task(db, "download", {"source_item_id": item.id}, ref=f"source_item:{item.id}")
+        task.state = "failed"
+        task.error = "DRM protected"
+        item.state = "queued"
+        db.commit()
+
+    def test_backfills_failed_items_without_searches(self, db_session: Session) -> None:
+        item = setup_item(db_session)
+        self.fail_download(db_session, item)
+
+        assert backfill_soulseek_searches(db_session) == 1
+        tasks = list_tasks(db_session, type_=SOULSEEK_SEARCH_TASK_TYPE)
+        assert len(tasks) == 1 and tasks[0].payload["source_item_id"] == item.id
+
+        # idempotent: the enqueue guards see the in-flight task
+        assert backfill_soulseek_searches(db_session) == 0
+
+    def test_skips_items_with_remembered_search(self, db_session: Session) -> None:
+        item = setup_item(db_session)
+        self.fail_download(db_session, item)
+        remember_search(db_session, item.id, "operator query", [])
+
+        assert backfill_soulseek_searches(db_session) == 0
+
+    def test_skips_items_whose_latest_download_succeeded_or_pends(
+        self, db_session: Session
+    ) -> None:
+        from backend.tasks.manager import create_task
+
+        item = setup_item(db_session)
+        self.fail_download(db_session, item)
+        # a newer retry is pending: not a failure worklist item anymore
+        create_task(db_session, "download", {"source_item_id": item.id}, ref=f"source_item:{item.id}")
+
+        assert backfill_soulseek_searches(db_session) == 0
+
+    def test_skips_fulfilled_items(self, db_session: Session) -> None:
+        item = setup_item(db_session)
+        self.fail_download(db_session, item)
+        item.state = "fulfilled"
+        db_session.commit()
+
+        assert backfill_soulseek_searches(db_session) == 0
 
 
 class TestFailureHook:

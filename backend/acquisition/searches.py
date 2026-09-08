@@ -95,6 +95,37 @@ def enqueue_soulseek_search(db: Session, item: SourceItem) -> "Task | None":
     return create_task(db, SOULSEEK_SEARCH_TASK_TYPE, {"source_item_id": item.id}, ref=ref)
 
 
+def backfill_soulseek_searches(db: Session) -> int:
+    """Startup sweep (gh#223): searches for failed downloads that never got one.
+
+    The failure-time hook only covers failures that happen while the new code
+    is running; failures from before #216 landed (or before a restart picked
+    it up) have no remembered search. Enqueue for every unfulfilled item whose
+    latest download task is failed — the enqueue guards (existing remembered
+    search, in-flight task) make this idempotent across restarts.
+    """
+    from ..tasks.models import Task
+
+    latest: dict[int, str] = {}
+    for task in (
+        db.query(Task)
+        .filter(Task.type.in_(("download", "soulseek-download")))
+        .order_by(Task.id)
+        .all()
+    ):
+        if task.ref and task.ref.startswith("source_item:"):
+            latest[int(task.ref.split(":", 1)[1])] = task.state
+    count = 0
+    for item in db.query(SourceItem).filter(SourceItem.state == "queued").all():
+        if latest.get(item.id) != "failed":
+            continue
+        if enqueue_soulseek_search(db, item) is not None:
+            count += 1
+    if count:
+        logger.info("backfilled %d automatic soulseek searches", count)
+    return count
+
+
 def soulseek_search_handler(
     supplier: SearchSupplier, cleanup_config: CleanupConfig | None = None
 ) -> Callable[[Session, dict[str, Any]], None]:

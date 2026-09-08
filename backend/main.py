@@ -248,6 +248,19 @@ async def startup_event():
         finally:
             db.close()
 
+        # Sweep: failed downloads that never got an automatic soulseek
+        # search (failures predating #216 or a restart) get one (gh#223).
+        from .config import get_config
+
+        if get_config().soulseek.configured:
+            from .acquisition.searches import backfill_soulseek_searches
+
+            db = SessionLocal()
+            try:
+                backfill_soulseek_searches(db)
+            finally:
+                db.close()
+
 
 @app.on_event("shutdown")
 async def shutdown_event():
