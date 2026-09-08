@@ -426,7 +426,15 @@
   color: var(--text);
 }
 
-/* Tag popover (perf-layout 02): anchored under the tag row */
+/* Tag popover (perf-layout 02): anchored under the tag row.
+   The popover extends past the content-sized top panel's bottom edge into
+   the shared browse panel below — .perf-root's overflow:hidden was clipping
+   it at that boundary (bottom-row decks lost most of the editor; it read as
+   "obscured by the library"). Lift the clip only while a popover is open;
+   its z-index (above the library's sticky headers, z 100) handles paint
+   order once unclipped — no ancestor creates a stacking context. */
+.perf-root:has(.perf-tagpop) { overflow: visible; }
+
 .perf-tagpop {
   position: absolute;
   top: calc(100% + 4px);
