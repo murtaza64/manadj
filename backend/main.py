@@ -93,8 +93,14 @@ def _stems_enabled() -> bool:
     return os.getenv("DISABLE_STEMS_WORKER", "").lower() not in ("true", "1", "yes")
 
 
-def _build_task_worker() -> "TaskWorker | None":
-    """The task worker (ADR-0003): waveform generation always, downloads if configured."""
+def _build_task_workers() -> "list[TaskWorker]":
+    """The task workers (ADR-0003, gh#224): one per concurrency lane.
+
+    Handlers are registered as before (waveform generation always, downloads
+    if configured), then split into lanes (backend.tasks.lanes) so downloads,
+    soulseek traffic, and compute work proceed in parallel while each task
+    type stays serialized within its lane.
+    """
     import logging
 
     from .config import get_config
@@ -180,26 +186,34 @@ def _build_task_worker() -> "TaskWorker | None":
             "soulseek download handler not registered: [soulseek]/SLSKD_API_KEY unset"
         )
 
-    if not handlers:
-        return None
-    return TaskWorker(SessionLocal, handlers, delays=delays)
+    from .tasks.lanes import split_handlers
+
+    return [
+        TaskWorker(
+            SessionLocal,
+            lane_handlers,
+            delays={t: delays[t] for t in lane_handlers if t in delays},
+            name=f"task-worker-{lane}",
+        )
+        for lane, lane_handlers in split_handlers(handlers).items()
+    ]
 
 
-_task_worker: "TaskWorker | None" = None
+_task_workers: "list[TaskWorker]" = []
 
 
 @app.on_event("startup")
 async def startup_event():
     """Start background workers on server startup."""
-    global _task_worker
+    global _task_workers
 
     # Waveform data generation (ADR 0014) requires ffmpeg; fail loudly at startup.
     from .waveform_data import ensure_ffmpeg
     ensure_ffmpeg()
     if os.getenv("DISABLE_TASK_WORKER", "").lower() not in ("true", "1", "yes"):
-        _task_worker = _build_task_worker()
-        if _task_worker is not None:
-            _task_worker.start()
+        _task_workers = _build_task_workers()
+        for worker in _task_workers:
+            worker.start()
 
         # Sweep: any Track still lacking Waveform data gets a task.
         if _waveform_generation_enabled():
@@ -252,8 +266,8 @@ async def startup_event():
 @app.on_event("shutdown")
 async def shutdown_event():
     """Stop background workers on server shutdown."""
-    if _task_worker is not None:
-        _task_worker.stop()
+    for worker in _task_workers:
+        worker.stop()
 
 
 @app.get("/")
