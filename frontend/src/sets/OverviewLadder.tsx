@@ -169,6 +169,7 @@ export const OverviewLadder = memo(function OverviewLadder({
    * this viewport x through the width change. */
   const zoomAnchor = useRef<{ mixTime: number; viewportX: number } | null>(null);
   const lastAutoScrollAt = useRef(0);
+  const autoScrollTarget = useRef<number | null>(null);
   const lastMixTime = useRef<number | null>(null);
   const total = Math.max(plan.totalSec, 0.001);
 
@@ -256,6 +257,7 @@ export const OverviewLadder = memo(function OverviewLadder({
     const anchor = zoomAnchor.current;
     if (!outer || !inner || !anchor) return;
     zoomAnchor.current = null;
+    autoScrollTarget.current = null;
     lastAutoScrollAt.current = performance.now(); // not a user pan
     outer.scrollLeft = (anchor.mixTime / total) * inner.clientWidth - anchor.viewportX;
     setLadderView(setId, { zoom, scrollLeft: outer.scrollLeft });
@@ -267,12 +269,28 @@ export const OverviewLadder = memo(function OverviewLadder({
     if (!outer) return;
     const onScroll = () => {
       setLadderView(setId, { zoom, scrollLeft: outer.scrollLeft });
+      if (autoScrollTarget.current !== null) {
+        lastAutoScrollAt.current = performance.now();
+        return;
+      }
       if (performance.now() - lastAutoScrollAt.current > AUTO_SCROLL_WINDOW_MS) {
         if (conducting && follow) setFollowPlayback(false);
       }
     };
+    const onScrollEnd = () => {
+      const target = autoScrollTarget.current;
+      autoScrollTarget.current = null;
+      // Native user input can interrupt a smooth pan before its destination.
+      if (target !== null && Math.abs(outer.scrollLeft - target) > 1 && conducting && follow) {
+        setFollowPlayback(false);
+      }
+    };
     outer.addEventListener('scroll', onScroll);
-    return () => outer.removeEventListener('scroll', onScroll);
+    outer.addEventListener('scrollend', onScrollEnd);
+    return () => {
+      outer.removeEventListener('scroll', onScroll);
+      outer.removeEventListener('scrollend', onScrollEnd);
+    };
   }, [setId, zoom, conducting, follow]);
 
   // ── Playhead + follow auto-scroll (rAF, no React state per frame) ─────
@@ -298,15 +316,32 @@ export const OverviewLadder = memo(function OverviewLadder({
           const viewX = px - outer.scrollLeft;
           const outerW = outer.clientWidth;
           const seeked =
-            lastMixTime.current !== null && Math.abs(t - lastMixTime.current) > SEEK_JUMP_S;
+            lastMixTime.current === null || Math.abs(t - lastMixTime.current) > SEEK_JUMP_S;
+          let target: number | null = null;
+          if (seeked && autoScrollTarget.current !== null && viewX >= 0 && viewX <= outerW) {
+            autoScrollTarget.current = null;
+            lastAutoScrollAt.current = performance.now();
+            outer.scrollTo({ left: outer.scrollLeft, behavior: 'instant' });
+          }
           if (seeked && (viewX < 0 || viewX > outerW)) {
             // Seek landed off-viewport: animated pan to CENTER it.
-            lastAutoScrollAt.current = performance.now();
-            outer.scrollTo({ left: px - outerW / 2, behavior: 'smooth' });
-          } else if (viewX > outerW * PAGE_TRIGGER || viewX < 0) {
+            target = px - outerW / 2;
+          } else if (
+            !seeked &&
+            autoScrollTarget.current === null &&
+            (viewX > outerW * PAGE_TRIGGER || viewX < 0)
+          ) {
             // DAW-style page: re-enter at the leading edge.
-            lastAutoScrollAt.current = performance.now();
-            outer.scrollTo({ left: px - outerW * PAGE_REENTRY, behavior: 'smooth' });
+            target = px - outerW * PAGE_REENTRY;
+          }
+          if (target !== null) {
+            target = Math.max(0, Math.min(outer.scrollWidth - outerW, target));
+            // Let native smooth scrolling finish instead of restarting it every frame.
+            if (Math.abs(outer.scrollLeft - target) > 1) {
+              autoScrollTarget.current = target;
+              lastAutoScrollAt.current = performance.now();
+              outer.scrollTo({ left: target, behavior: 'smooth' });
+            }
           }
         }
         lastMixTime.current = t;
