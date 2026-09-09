@@ -112,7 +112,8 @@ export default function FilterBar({ totalTracks, filteredCount, loadedByDeck }: 
     filters.energyMin !== 1 ||
     filters.energyMax !== 5 ||
     filters.bpmCenter !== null ||
-    filters.selectedKeyCamelotIds.length > 0;
+    filters.selectedKeyCamelotIds.length > 0 ||
+    CHANNEL_IDS.some((deck) => followFlags[deck]);
 
   return (
     <div style={{
@@ -366,6 +367,9 @@ export default function FilterBar({ totalTracks, filteredCount, loadedByDeck }: 
           onClick={() => {
             setSearchInput('');
             setFilters({ ...DEFAULT_FILTERS });
+            for (const deck of CHANNEL_IDS) {
+              if (followFlags[deck]) dispatchFollow({ type: 'toggle', deck, loaded: false });
+            }
           }}
           disabled={!hasActiveFilters}
           className="filter-bar-clear-all-btn"
