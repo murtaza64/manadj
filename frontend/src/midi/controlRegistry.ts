@@ -41,7 +41,11 @@ export interface MidiDeckControls {
   /** Stateless one-shot BPM match against the other deck (on-screen MATCH). */
   match(): void;
   /** Jog rim ticks (signed): bend when playing, seek when paused. */
-  jogTicks(ticks: number, jogProfile?: JogProfile): void;
+  jogTicks(ticks: number, jogProfile?: JogProfile, vinylOff?: boolean): void;
+  jogTouch(held: boolean): void;
+  cancelJog(): void;
+  toggleSlipMode(): void;
+  toggleVinylMode(): void;
   /** Jog touch-surface ticks (signed): fine seek when paused only. */
   jogTouchTicks(ticks: number, jogProfile?: JogProfile): void;
   /** SHIFT+jog ticks (signed): deliberate fast seek, playing or paused. */

@@ -54,10 +54,36 @@ function DeckControlsRegistrar() {
         getPlayhead: () => engine.getPlayhead(),
         seek: (seconds) => engine.seek(seconds),
         setBend: (percent) => engine.setBend(percent),
+        scratch: {
+          isActive: () => engine.getSnapshot().scratching,
+          vinylMode: () => engine.getSnapshot().vinylMode,
+          begin: () => engine.beginScratch(),
+          move: (delta, duration) => engine.scratchMove(delta, duration),
+          rate: () => engine.getScratchState()?.rate ?? 0,
+          end: () => engine.endScratch(),
+        },
       }),
     [engine]
   );
-  useEffect(() => () => jog.dispose(), [jog]);
+  useEffect(() => {
+    let previous = engine.getSnapshot();
+    const unsubscribe = engine.subscribe(() => {
+      const next = engine.getSnapshot();
+      const reset = next.trackId !== previous.trackId || next.loadState !== previous.loadState
+        || next.playing !== previous.playing;
+      previous = next;
+      if (reset) jog.cancel();
+      else jog.syncState();
+    });
+    const unsubscribeTransport = engine.addTransportEventListener(event => {
+      if (event.action === 'seek' || event.action === 'jumpBeats' || event.action === 'hotCue') jog.cancel();
+    });
+    return () => {
+      unsubscribe();
+      unsubscribeTransport();
+      jog.dispose();
+    };
+  }, [engine, jog]);
 
   const latest = useRef({
     engine,
@@ -118,15 +144,28 @@ function DeckControlsRegistrar() {
           // Out-of-reach/unavailable are silent: no hardware feedback channel.
           latest.current.matchAction();
         },
-        jogTicks: (ticks, profile) => {
+        jogTouch: (held) => {
+          const { jog: j, ready: r } = latest.current;
+          if (!held || r) j.onTouch(held);
+        },
+        cancelJog: () => latest.current.jog.cancel(),
+        toggleSlipMode: () => {
+          const { engine: e } = latest.current;
+          e.setSlipMode(!e.getSnapshot().slipMode);
+        },
+        toggleVinylMode: () => {
+          const { engine: e } = latest.current;
+          e.setVinylMode(!e.getSnapshot().vinylMode);
+        },
+        jogTicks: (ticks, profile, vinylOff) => {
           const { jog: j, ready: r } = latest.current;
           if (!r) return; // no track/decoding: nothing to bend or seek
-          j.onTicks(ticks, undefined, getJogCalibration(profile));
+          j.onTicks(ticks, undefined, getJogCalibration(profile), profile, vinylOff);
         },
         jogTouchTicks: (ticks, profile) => {
           const { jog: j, ready: r } = latest.current;
           if (!r) return;
-          j.onTouchTicks(ticks, undefined, getJogCalibration(profile));
+          j.onTouchTicks(ticks, undefined, getJogCalibration(profile), profile);
         },
         jogSeekTicks: (ticks, profile) => {
           const { jog: j, ready: r } = latest.current;

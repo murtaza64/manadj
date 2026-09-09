@@ -302,18 +302,30 @@ The four-Deck view for practicing and performing mixes: four stacked full-width 
 Placing a Track on a Deck for playback — an explicit act, as in DJ hardware. Selecting a track in the library browses without loading; the Deck keeps its Track until another Load replaces it. In the Performance view, Loading onto a playing Deck is blocked (protecting the mix); in the library it simply replaces what's playing.
 
 **Nudge**:
-A momentary tempo bend on a Deck used to ride phase alignment against the other Deck — held (a key or button) or impulse-driven (jog wheel rotation); when the input stops, the Deck's pitch is restored exactly. Distinct from a *grid nudge*, which shifts a Track's Beatgrid and changes stored data — a Nudge changes only what is playing right now. Jog rotation on a paused Deck is a seek, not a Nudge. The Transition editor's counterpart of the same intent is the Alignment nudge.
+A momentary tempo bend on a Deck used to ride phase alignment against the other Deck — held (a key or button) or impulse-driven (jog wheel rotation); when the input stops, the Deck's pitch is restored exactly. Distinct from a *grid nudge*, which shifts a Track's Beatgrid and changes stored data — a Nudge changes only what is playing right now. Bare-rim rotation on a paused Deck is a seek, not a Nudge; a touched Vinyl platter scratches instead. The Transition editor's counterpart of the same intent is the Alignment nudge.
 
 **Play guide**:
 A derived, view-only marker in the Performance view: one per saved Transition from a playing outgoing-candidate Track to a paused Track, marking the instant to press play on the paused Deck so the pair rides that Transition's alignment. Every applicable playing→paused pair gets its own guide; a guide identifies both Decks and spans only their waveform rows. When all applicable Decks are paused, both directions may show; starting a Deck prunes guides to live directions. Computed from the Transition's alignment and tempo-match ratio and the paused Deck's current playhead (works wherever the incoming Track is cued), projected on the trajectory before the Transition's first Jump event. A missed guide (already behind the playhead) stays visible rather than disappearing. Labeled with the Transition's name and carrying the incoming (to-be-pressed) Deck's color. Purely visual — never stored, never editable, never enforcing pitch (a pitch mismatch against the Transition's tempo-match is surfaced, not corrected).
 _Avoid_: transition guide (collides with Transition template), entry/cue marker ("cue" is overloaded)
+
+**Vinyl mode**:
+A per-Deck setting enabling platter touch to hold the Track and platter movement to scratch it forward or backward, including while paused. With Vinyl off, jog movement nudges or seeks without scratching. Scratching temporarily bypasses Key Lock; release restores the prior play/pause intent.
+
+**Spinback**:
+A backward platter spin that continues after the hand releases, ending when the jog stops rotating. Part of the same Scratch gesture, not a button-triggered effect.
+
+**Scratch**:
+A platter-controlled gesture that holds or moves the audible Track position forward and backward, with speed and musical pitch coupled. Includes any released Spinback continuation.
+
+**Slip mode**:
+A per-Deck setting that keeps the normal playback timeline advancing behind a Scratch or Spinback and returns to it when the gesture ends. With Slip off, release keeps the manipulated position. A paused Deck stays paused. The setting is latched at touch-down; toggles during a gesture apply to the next one. Slip-based loop rolls are separate and not implemented.
 
 **Quantize**:
 An app-wide sticky toggle (default on) making beat-relative performance gestures grid-aligned: cue and Hot Cue placement snap to the nearest beat, auto-loop regions snap to the nearest beat, and Hot Cue jumps while playing are phase-preserving — a whole-beat displacement landing at the cue plus the playhead's intra-beat phase, so the groove never stumbles. Evaluated at gesture time; imports are not gestures and never snap. Gridless Tracks behave as if it were off. Beat jump (inherently whole-beat), cue return, paused-cue seeks, loop halve/double, and Transition-editor snapping are outside its authority.
 _Avoid_: snap (the Transition editor's separate affordance), quantization (the Analysis sense — see Quantized track)
 
 **Key Lock**:
-A sticky per-Deck setting (default on): playback-rate changes on that Deck (pitch fader, Nudge) do not shift the loaded Track's Key. Belongs to the Deck — not to the Track, not to the Mixer. Named tension: DJ-jargon *pitch* (the fader, the Deck's ±% rate) changes tempo; Key Lock keeps the *musical* pitch — the Key — constant while it does. Also known as master tempo (Pioneer).
+A sticky per-Deck setting (default on): playback-rate changes on that Deck (pitch fader, Nudge) do not shift the loaded Track's Key. Scratching bypasses it until release. Belongs to the Deck — not to the Track, not to the Mixer. Named tension: DJ-jargon *pitch* (the fader, the Deck's ±% rate) changes tempo; Key Lock keeps the *musical* pitch — the Key — constant while it does. Also known as master tempo (Pioneer).
 _Avoid_: "pitch-preserving", "pitch shift" — "pitch" already means the rate control.
 
 **Alignment nudge**:
