@@ -37,6 +37,7 @@ import { useStyleSlot } from '../waveform/styleSlots';
 import { useWaveformBlob } from '../waveform/useWaveformBlob';
 import { cueCssColor } from '../hotcues/palette';
 import { traceDrawRuns } from '../routines/routineWaveRuns';
+import { routineSlotStateAt } from './routinePlan';
 import { getConductor, setFollowPlayback } from './conductorStore';
 import { WILL_RESTORE_COLOR, type AdjacencyFuture } from './dormancy';
 import { drawStyledWave, MINIMAP_BRIGHTNESS } from './ladderWaveStyle';
@@ -738,29 +739,28 @@ export function clipContentSegments(
       const spb = routine.secPerBeat;
       // Head plays from its own entry up to the span open (linear).
       if (entry.entryMixSec < routine.mixStartSec) {
-        const first = slot.trace[0];
         pushRun(out, {
           mixStart: entry.entryMixSec,
           mixEnd: routine.mixStartSec,
           trackStart: entry.entrySec,
-          trackEnd: Math.max(0, first?.pos ?? entry.entrySec),
+          trackEnd: routineSlotStateAt(routine, slot, routine.mixStartSec).trackTime,
         });
       }
-      const durationBeats = (routine.mixEndSec - routine.mixStartSec) / spb;
+      const durationBeats = routine.playbackBounds.endBeat;
       // Replay extrapolates until another slot claims the deck, not merely
       // until this slot's last recorded motion sample (releaseMixSec).
       const nextOccupant = routine.slots.find((s) => s.slot > slot.slot && s.deck === slot.deck);
       for (const run of traceDrawRuns(slot.trace, durationBeats)) {
         if (run.held || run.ph1 <= run.ph0) continue;
         const rate = (run.ph1 - run.ph0) / ((run.b1 - run.b0) * spb);
-        const start = routine.mixStartSec + run.b0 * spb;
+        const start = routine.beatOriginMixSec + run.b0 * spb;
         const mixStart = Math.max(
-          entry.entryMixSec, slot.occupyFromMixSec, start,
+          entry.entryMixSec, routine.mixStartSec, slot.occupyFromMixSec, start,
           start - run.ph0 / rate // silent lead ends when track time reaches zero
         );
         const mixEnd = Math.min(
           entry.exitMixSec, nextOccupant?.occupyFromMixSec ?? routine.mixEndSec, routine.mixEndSec,
-          routine.mixStartSec + run.b1 * spb
+          routine.beatOriginMixSec + run.b1 * spb
         );
         // Clip both axes together, including traces that started before
         // this slot's entry. The last trace point extrapolates to the end.

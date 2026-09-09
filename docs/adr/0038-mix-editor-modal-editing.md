@@ -37,7 +37,24 @@ same modes apply at every cast size.
   a **jump pair**; clicking an existing marker selects it (move / retarget /
   delete); deleting a *recorded* discontinuity marker is remove-recorded-jump
   (continuity restored). Single-click replaces the old double-click-to-jump —
-  the collision that motivated the whole effort.
+  the collision that motivated the whole effort, subject to the narrow #229
+  exception below.
+
+### Select waveform shortcut (#229, approved 2026-09-09)
+
+- Double-clicking the waveform in **Select** inserts exactly one jump and
+  opens the existing jump/pause popup. Jump-mode single-click insertion stays;
+  its double-click sequence inserts only once. Pan remains navigation-only.
+- Only the waveform surface accepts this shortcut, not chrome, panels,
+  markers, popovers, or automation controls. Pair artifacts still prohibit pauses.
+- Events use the original beat coordinates, including visible context outside
+  the saved duration and expanded playback bounds.
+- Deleting a recorded jump/pause removes its marker, poles, connector, and
+  popup. Restoration is **Undo only**, not a ghost restore affordance.
+  Suppression metadata remains for persistence/evidence; session records are
+  unchanged. Moving or deleting an authored replacement never reveals a ghost.
+- This is a narrow exception to the modal decision; other mode and lane-tool
+  semantics remain unchanged.
 
 ### Lane-tool tier (lane-scoped)
 
@@ -109,7 +126,7 @@ canvases unambiguous.
 - The top-level palette is intentionally small (3) — `select` carries slot
   focus + selection + both drag axes + trims; the lane-tool tier absorbs
   envelope shaping so `select` does not re-accrete into an overloaded catch-all.
-- Waveform rows have exactly one structural editor (**jump** mode);
+- Waveform rows use **jump** mode, plus the Select insertion shortcut above;
   automation lanes have their own tool tier (**chop**/pencil/node-select).
   "Cut" is never one verb spanning both row types — a temporal excision on a
   waveform is a jump pair, an envelope wall is a chop; conflating them is the

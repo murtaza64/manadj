@@ -53,6 +53,8 @@ export interface RoutinePlayerAudio {
   engines: Partial<Record<RoutineDeck, DeckEngine>>;
   /** May this conductor touch the shared engines/mixer right now? */
   audible?: () => boolean;
+  /** Saved Routines obey playback bounds; pair/review auditions retain context. */
+  constrainToBounds?: () => boolean;
   /** Issue a shared-deck Load (the provider's one load path, ADR 0022).
    * Called when a deck's occupant needs a track the deck doesn't hold —
    * at most once per (deck, track) until the target changes. */
@@ -63,6 +65,7 @@ export class RoutinePlayer {
   readonly mixer: Mixer;
   private readonly engines: Partial<Record<RoutineDeck, DeckEngine>>;
   private readonly audible: () => boolean;
+  private readonly constrainToBounds: () => boolean;
   private readonly loadTrack: ((deck: RoutineDeck, trackId: number) => void) | null;
 
   private routine: PlannedRoutine | null = null;
@@ -84,6 +87,7 @@ export class RoutinePlayer {
     this.mixer = audio.mixer;
     this.engines = audio.engines;
     this.audible = audio.audible ?? (() => true);
+    this.constrainToBounds = audio.constrainToBounds ?? (() => false);
     this.loadTrack = audio.loadTrack ?? null;
   }
 
@@ -92,8 +96,8 @@ export class RoutinePlayer {
   setRoutine(routine: PlannedRoutine | null): void {
     this.pause();
     this.routine = routine;
-    this.mixTimeAtAnchor = 0;
-    this.lastTickT = 0;
+    this.mixTimeAtAnchor = routine?.mixStartSec ?? 0;
+    this.lastTickT = this.mixTimeAtAnchor;
     this.lastPitch = {};
     this.loadRequested = {};
     this.emit();
@@ -110,8 +114,12 @@ export class RoutinePlayer {
    * the drift check / jump scoping. */
   updateRoutine(routine: PlannedRoutine): void {
     this.routine = routine;
-    const dur = this.getMixDuration();
-    if (!this.playing && this.mixTimeAtAnchor > dur) this.mixTimeAtAnchor = dur;
+    const t = this.getMixTime();
+    if (this.constrainToBounds() && t >= routine.mixEndSec) this.pause();
+    const range = routine.auditionRange;
+    const clamped = Math.max(range?.startSec ?? routine.mixStartSec - this.getMarginSec(),
+      Math.min(t, range?.endSec ?? routine.mixEndSec + this.getMarginSec()));
+    if (clamped !== t) this.seek(clamped);
     this.emit();
   }
 
@@ -146,13 +154,15 @@ export class RoutinePlayer {
    * slot's trailing motion is forced by the build). */
   private slotStateAt(slot: PlannedRoutineSlot, t: number) {
     const r = this.routine!;
-    if (slot.transportBounds || t >= r.mixStartSec) return routineSlotStateAt(r, slot, t);
+    const firstTime = r.beatOriginMixSec + (slot.trace[0]?.beat ?? 0) * r.secPerBeat;
+    if (slot.transportBounds || t >= firstTime) return routineSlotStateAt(r, slot, t);
     // Sample just inside the window: AT the boundary the trace's first
     // point reads as parked (traceStateAt's beat <= first-point rule).
-    const s0 = routineSlotStateAt(r, slot, r.mixStartSec + 1e-3);
+    const s0 = routineSlotStateAt(r, slot, firstTime + 1e-3);
+    if (slot.entryMixSec > r.mixStartSec) return { ...s0, playing: false };
     if (!s0.playing) return s0;
     const rate = 1 + s0.pitchPercent / 100;
-    const pos = s0.trackTime + (t - r.mixStartSec) * rate;
+    const pos = s0.trackTime + (t - firstTime) * rate;
     if (pos < 0) return { trackTime: 0, playing: false, pitchPercent: s0.pitchPercent };
     return { trackTime: pos, playing: true, pitchPercent: s0.pitchPercent };
   }
@@ -197,13 +207,13 @@ export class RoutinePlayer {
 
   /** The audition margin in mix seconds (gh#190 item 5). */
   getMarginSec(): number {
-    return this.routine ? AUDITION_MARGIN_BEATS * this.routine.secPerBeat : 0;
+    return this.routine && !this.constrainToBounds() ? AUDITION_MARGIN_BEATS * this.routine.secPerBeat : 0;
   }
 
   /** Current position on the Routine clock, in beats. */
   getBeat(): number {
     if (!this.routine) return 0;
-    return (this.getMixTime() - this.routine.mixStartSec) / this.routine.secPerBeat;
+    return (this.getMixTime() - this.routine.beatOriginMixSec) / this.routine.secPerBeat;
   }
 
   isPlaying(): boolean {
@@ -230,6 +240,9 @@ export class RoutinePlayer {
 
   play(): void {
     if (!this.audible() || !this.ready() || this.playing || !this.routine) return;
+    if (this.constrainToBounds() && this.getMixTime() >= this.routine.mixEndSec) {
+      this.seek(this.routine.mixStartSec);
+    }
     this.playing = true;
     this.anchorAudioTime = this.mixer.now();
     this.lastTickT = this.getMixTime();
@@ -269,7 +282,8 @@ export class RoutinePlayer {
     // (gh#190 item 5 — audition context around the window).
     const margin = this.getMarginSec();
     const range = this.routine?.auditionRange;
-    const t = Math.max(range?.startSec ?? -margin, Math.min(mixTime, range?.endSec ?? this.getMixDuration() + margin));
+    const t = Math.max(range?.startSec ?? (this.routine?.mixStartSec ?? 0) - margin,
+      Math.min(mixTime, range?.endSec ?? (this.routine?.mixEndSec ?? 0) + margin));
     this.mixTimeAtAnchor = t;
     this.lastTickT = t;
     this.anchorAudioTime = this.mixer.now();
@@ -323,8 +337,9 @@ export class RoutinePlayer {
       return;
     }
     const t = this.getMixTime();
-    if (t >= (this.routine?.auditionRange?.endSec ?? this.getMixDuration() + this.getMarginSec())) {
+    if (t >= (this.routine?.auditionRange?.endSec ?? (this.routine?.mixEndSec ?? 0) + this.getMarginSec())) {
       this.pause();
+      if (this.constrainToBounds() && this.routine) this.mixTimeAtAnchor = this.routine.mixEndSec;
       return;
     }
     this.selfOp(() => this.syncDecks(t, false));
@@ -412,7 +427,7 @@ export class RoutinePlayer {
    * Occupancy-aware: the deck's lanes are its occupant's. */
   private applyLanes(t: number): void {
     if (!this.audible() || !this.routine) return;
-    const beat = (t - this.routine.mixStartSec) / this.routine.secPerBeat;
+    const beat = (t - this.routine.beatOriginMixSec) / this.routine.secPerBeat;
     for (const deck of this.drivenDecks()) {
       const occupant = this.occupantAt(deck, t);
       if (!occupant) continue;

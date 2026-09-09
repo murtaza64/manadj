@@ -222,8 +222,8 @@ export function mixTimeForTrackTime(plan: SetPlan, idx: number, tau: number): nu
       if (!point.moving || point.ratePerBeat <= 0) continue;
       const beat = point.beat + (tau - point.pos) / point.ratePerBeat;
       if (beat < point.beat || beat >= (slot.trace[i + 1]?.beat ?? Infinity)) continue;
-      const t = routine.mixStartSec + beat * routine.secPerBeat;
-      if (t < Math.max(slot.entryMixSec, slot.occupyFromMixSec, entry.entryMixSec)) continue;
+      const t = routine.beatOriginMixSec + beat * routine.secPerBeat;
+      if (t < Math.max(routine.mixStartSec, slot.entryMixSec, slot.occupyFromMixSec, entry.entryMixSec)) continue;
       if (t >= Math.min(routine.mixEndSec, slot.releaseMixSec, entry.exitMixSec)) continue;
       return clampSpan(t);
     }

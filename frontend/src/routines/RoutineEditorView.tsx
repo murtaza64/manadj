@@ -9,7 +9,7 @@
  * holder).
  *
  * Pass 2: the full review+EDIT surface — slot-aware view, replay
- * audition, boundary trim + re-promotion, and the routine DRAFT layer
+ * audition, non-destructive playback bounds, and the routine DRAFT layer
  * (routineDraft/routineDraftStore): authored slot lanes (the pair
  * editor's own LaneCanvas, structurally reused) and Jumps on any slot,
  * with undo/redo and debounced autosave to `Routine.edits_json`. Edits
@@ -163,6 +163,7 @@ export default function RoutineEditorView() {
           D: decks.D.engine,
         },
         audible: () => isAudible('routine-editor'),
+        constrainToBounds: () => openedRef.current?.kind === 'routine',
         // The provider's one Load path (ADR 0022). Deck reuse (gh#170
         // pass 2) flips a deck's occupant mid-span — the player asks for
         // the incoming track the moment the occupancy opens.
@@ -662,8 +663,6 @@ export default function RoutineEditorView() {
   // uuid, never the detail object: the autosave response updates the
   // query cache (new detail identity, same artifact), and reloading then
   // would reset undo history mid-session and clobber in-flight edits.
-  // Re-promotion (same uuid, rebased edits) reloads explicitly in
-  // applyTrim.
   const detailRef = useRef(detail);
   detailRef.current = detail;
   // One load per opened artifact (#205): routines load their persisted
@@ -885,6 +884,8 @@ export default function RoutineEditorView() {
         rp: draft.edits.removedRecordedPauses,
         n: draft.edits.nudges,
         eo: draft.edits.entryOffsets,
+        bounds: draft.edits.playbackBounds,
+        starts: draft.edits.startTrims,
       }),
     [
       draft.edits.jumps,
@@ -893,6 +894,8 @@ export default function RoutineEditorView() {
       draft.edits.removedRecordedPauses,
       draft.edits.nudges,
       draft.edits.entryOffsets,
+      draft.edits.playbackBounds,
+      draft.edits.startTrims,
     ]
   );
   const baseEditor: EditorRoutine | null = useMemo(() => {
@@ -910,6 +913,20 @@ export default function RoutineEditorView() {
     const toBeat = (t: number) => (t - livePair.originSec) / proj.secPerBeat;
     const planned = plannedWithLaneEdits(baseEditor.planned, livePair.projection.edits);
     const bEnd = bEndMixTime(transition, durations.b, rateB);
+    const slots = planned.slots.map((slot) => {
+      const transportBounds = {
+        startBeat: slot.slot === 0 ? toBeat(0) : toBeat(transition.startSec),
+        endBeat: toBeat(slot.slot === 0 ? bounds.outgoingEnd : bEnd),
+        trackDurationSec: slot.slot === 0 ? durations.a : durations.b,
+      };
+      return {
+        ...slot, transportBounds,
+        // Routine playback bounds do not clip pair setup jumps before beat zero.
+        jumpMixSecs: slot.trace
+          .filter((p) => p.jump && p.beat >= transportBounds.startBeat && p.beat <= transportBounds.endBeat)
+          .map((p) => planned.beatOriginMixSec + p.beat * planned.secPerBeat),
+      };
+    });
     return {
       ...baseEditor,
       pairBounds: { handover: bounds.handover ? {
@@ -917,12 +934,12 @@ export default function RoutineEditorView() {
       } : null },
       planned: {
         ...planned,
-        auditionRange: { startSec: toBeat(0) * planned.secPerBeat, endSec: toBeat(bounds.authoringEnd) * planned.secPerBeat },
-        slots: planned.slots.map((slot) => ({ ...slot, transportBounds: {
-          startBeat: slot.slot === 0 ? toBeat(0) : toBeat(transition.startSec),
-          endBeat: toBeat(slot.slot === 0 ? bounds.outgoingEnd : bEnd),
-          trackDurationSec: slot.slot === 0 ? durations.a : durations.b,
-        } })),
+        auditionRange: {
+          startSec: planned.beatOriginMixSec + toBeat(0) * planned.secPerBeat,
+          endSec: planned.beatOriginMixSec + toBeat(bounds.authoringEnd) * planned.secPerBeat,
+        },
+        slots,
+        jumpMixSecs: slots.flatMap((slot) => slot.jumpMixSecs).sort((a, b) => a - b),
       },
     };
   }, [baseEditor, draft.edits, livePair, proj]);
@@ -1190,48 +1207,25 @@ export default function RoutineEditorView() {
     []
   );
 
-  // ── Boundary trim (tier 3) ───────────────────────────────────────────
-  const [trim, setTrim] = useState<TrimRange | null>(null);
-  useEffect(() => {
-    setTrim(detail ? { startBeat: 0, endBeat: detail.duration_beats } : null);
-  }, [detail]);
-  const trimEnabled = !!detail?.origin_take_uuid && opened?.kind === 'routine';
-  const trimDirty =
-    !!trim &&
-    !!detail &&
-    (Math.abs(trim.startBeat) > 0.05 || Math.abs(trim.endBeat - detail.duration_beats) > 0.05);
-  const droppedSlots = useMemo(() => {
-    if (!detail || !trim) return [];
-    return detail.entry_offsets_beats
-      .map((b, slot) => ({ slot, b }))
-      .filter(({ b }) => b >= trim.endBeat)
-      .map(({ slot }) => slot);
-  }, [detail, trim]);
-  const [retrimBusy, setRetrimBusy] = useState(false);
-  const applyTrim = useCallback(async () => {
-    if (!detail || !trim || !trimDirty || retrimBusy) return;
-    setRetrimBusy(true);
-    try {
-      const d = await api.routines.retrim(detail.uuid, {
-        trim_start_beats: trim.startBeat,
-        // NEGATIVE widens (endBeat dragged past duration) — do not clamp
-        // (gh#190 item 8: the old Math.max(0, …) silently no-oped every
-        // outward end trim).
-        trim_end_beats: detail.duration_beats - trim.endBeat,
-      });
-      // Same uuid, rebased clock: reload the draft from the response
-      // (the server shifted the edits layer with the trim).
-      draftStore.load(d.uuid, parseEdits(d.edits));
-      queryClient.setQueryData(['routine-detail', detail.uuid], d);
-      queryClient.setQueryData(['routine', detail.uuid], d);
-      await queryClient.invalidateQueries({ queryKey: ['routines'] });
-      toast(`Re-promoted ${detail.name || 'routine'} with trimmed boundaries`);
-    } catch (err) {
-      toast(`Re-promotion failed: ${err instanceof Error ? err.message : String(err)}`);
-    } finally {
-      setRetrimBusy(false);
-    }
-  }, [detail, trim, trimDirty, retrimBusy, queryClient, toast]);
+  // Playback bounds share the draft's autosave and gesture undo history.
+  const trimEnabled = opened?.kind === 'routine';
+  const trim = editor?.planned.playbackBounds ?? null;
+  const playbackDurationBeats = trimEnabled && trim
+    ? trim.endBeat - trim.startBeat
+    : detail?.duration_beats ?? 0;
+  const [trimBlocked, setTrimBlocked] = useState(false);
+  useEffect(() => setTrimBlocked(false), [opened?.uuid]);
+  const onTrimChange = useCallback((proposal: TrimRange) => {
+    if (!trimEnabled || !editor) return;
+    const { maxStartBeat, minEndBeat } = editor.planned.boundsLimits;
+    setTrimBlocked(proposal.startBeat > maxStartBeat || proposal.endBeat < minEndBeat);
+    const movingStart = proposal.startBeat !== editor.planned.playbackBounds.startBeat;
+    let startBeat = Math.min(proposal.startBeat, maxStartBeat);
+    let endBeat = Math.max(proposal.endBeat, minEndBeat);
+    if (movingStart) startBeat = Math.min(startBeat, endBeat - 8);
+    else endBeat = Math.max(endBeat, startBeat + 8);
+    draftStore.setPlaybackBounds({ startBeat, endBeat });
+  }, [trimEnabled, editor, draftStore]);
 
   // ── Transport readout (rAF text — beats advance continuously) ────────
   const beatReadoutRef = useRef<HTMLSpanElement>(null);
@@ -1253,7 +1247,7 @@ export default function RoutineEditorView() {
     (beat: number) => {
       const r = player.getRoutine();
       if (!r) return;
-      player.seek(beat * r.secPerBeat);
+      player.seek(r.beatOriginMixSec + beat * r.secPerBeat);
     },
     [player]
   );
@@ -1568,9 +1562,9 @@ export default function RoutineEditorView() {
               </b>
             </span>
             <span className="re-meta">
-              {detail.cast.length} slots · {Math.round(detail.duration_beats)} beats
+              {detail.cast.length} slots · {Math.round(playbackDurationBeats)} beats
               {editor
-                ? ` · ${secondsLabel(detail.duration_beats * editor.planned.secPerBeat)}`
+                ? ` · ${secondsLabel(playbackDurationBeats * editor.planned.secPerBeat)}`
                 : ''}
             </span>
             {sourceTake && (
@@ -1684,41 +1678,27 @@ export default function RoutineEditorView() {
           </label>
           {trimEnabled && trim && (
             <span className="re-trim">
-              <span className={`re-trimlabel${trimDirty ? ' dirty' : ''}`}>
-                window {beatLabel(trim.startBeat)} → {beatLabel(trim.endBeat)} b
-                {trim.startBeat < -0.05 || trim.endBeat > detail.duration_beats + 0.05
-                  ? ' (widens — clamped to the session slice)'
-                  : ''}
+              <span className={`re-trimlabel${draft.edits.playbackBounds ? ' dirty' : ''}`}>
+                playback {beatLabel(trim.startBeat)} → {beatLabel(trim.endBeat)} b
               </span>
-              {droppedSlots.length > 0 && (
-                <span className="re-trimdrop">
-                  drops slot{droppedSlots.length > 1 ? 's' : ''} {droppedSlots.join(', ')}
-                  {detail.cast.length - droppedSlots.length < 3 ? ' — below n=3!' : ''}
+              {trimBlocked && (
+                <span className="re-trimdrop" role="status">
+                  Delete this slot to trim further
                 </span>
               )}
-              {trimDirty && (
-                <>
-                  <button
-                    className="re-trimapply"
-                    disabled={retrimBusy || detail.cast.length - droppedSlots.length < 3}
-                    onClick={applyTrim}
-                    title="Re-promote the origin Routine Take with these boundaries (mechanical — the raw Take is untouched)"
-                  >
-                    {retrimBusy ? 'Re-promoting…' : '✓ Apply trim (re-promote)'}
-                  </button>
-                  <button
-                    className="re-trimreset"
-                    onClick={() => setTrim({ startBeat: 0, endBeat: detail.duration_beats })}
-                  >
-                    ↺
-                  </button>
-                </>
+              {draft.edits.playbackBounds && (
+                <button
+                  className="re-trimreset"
+                  title="Reset playback bounds to source range"
+                  onClick={() => {
+                    draftStore.setPlaybackBounds(null);
+                    draftStore.endGesture();
+                    setTrimBlocked(false);
+                  }}
+                >
+                  ↺
+                </button>
               )}
-            </span>
-          )}
-          {!trimEnabled && detail && opened?.kind !== 'transition' && (
-            <span className="re-trim re-trimoff" title="No origin Routine Take — boundaries are baked">
-              trim unavailable (no origin take)
             </span>
           )}
           {editor && editor.warnings.length > 0 && (
@@ -1763,7 +1743,7 @@ export default function RoutineEditorView() {
               draftStore={draftStore}
               edits={draft.edits}
               trim={trimEnabled ? trim : null}
-              onTrimChange={trimEnabled ? setTrim : null}
+              onTrimChange={trimEnabled ? onTrimChange : null}
               onSeekBeat={onSeekBeat}
               mode={editorMode}
               onModeHome={() => setEditorMode('select')}

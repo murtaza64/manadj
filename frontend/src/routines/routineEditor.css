@@ -523,7 +523,7 @@
   position: absolute;
   top: 2px;
   right: 8px;
-  z-index: 5;
+  z-index: calc(var(--z-sticky) + 1);
 }
 /* The editor's fit-button look. */
 .rt-fit {
@@ -555,6 +555,40 @@
      pan/jump set their own below. */
   cursor: default;
   touch-action: none;
+}
+.rt-start-control {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  margin-top: var(--space-4);
+  font-size: var(--font-small);
+  color: var(--subtext0);
+}
+.rt-start-control input {
+  width: 52px;
+  min-width: 0;
+  color: var(--text);
+  background: var(--void);
+  border: 1px solid var(--surface1);
+}
+.rt-start-control button {
+  color: var(--text);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+.rt-track-start {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 9px;
+  border-left: 3px solid;
+  cursor: ew-resize;
+  z-index: 3;
+  touch-action: none;
+}
+.rt-track-start:hover {
+  background: rgba(255, 255, 255, 0.18);
 }
 .rt-slotblock {
   position: relative;
@@ -741,8 +775,7 @@
 
 /* Jumps — the editor's .editor-jump idiom (2px pole, chip riding the
    waveform's bottom edge, popover editor), slot-colored. Recorded =
-   solid; authored = draggable (grab cursor); ghost (removed recorded) =
-   dashed + dim. */
+   solid; authored = draggable (grab cursor). Deleted events do not render. */
 .rt-jump {
   position: absolute;
   top: 0;
@@ -803,32 +836,15 @@
 }
 
 /* Pause markers (gh#190 play/pause events) — the jump idiom's look;
-   authored/ghost variants mirror the jump classes. */
+   authored variants mirror the jump classes. */
 .rt-jump.authored-pause {
   border-left-style: dashed;
-}
-.rt-jump.ghost-pause {
-  opacity: 0.45;
-}
-.rt-jump.ghost-pause .rt-jump-chip {
-  background: transparent !important;
-  color: var(--subtext0);
-  border: 1px dashed var(--subtext0);
 }
 
 .rt-jump.authored {
   cursor: grab;
   border-left-style: double;
   border-left-width: 3px;
-}
-.rt-jump.ghost {
-  border-left-style: dashed;
-  opacity: 0.45;
-}
-.rt-jump.ghost .rt-jump-chip {
-  background: transparent !important;
-  color: var(--overlay1);
-  border: 1px dashed var(--overlay0);
 }
 .rt-jump-chip {
   position: absolute;

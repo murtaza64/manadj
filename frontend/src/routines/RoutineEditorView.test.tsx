@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 import { act, type ComponentProps } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { notifyManager, QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { api, type TakeDetailWire } from '../api/client';
+import { api, type RoutineDetailWire, type TakeDetailWire } from '../api/client';
 import type { Track } from '../types';
 import { DEFAULT_DETECTOR_PARAMS, DETECTOR_VERSION } from '../capture/events';
 import { _resetTransitionStoreForTests } from '../editor/pairStore';
@@ -18,16 +18,17 @@ import { requestMixEdit } from './openMix';
 import RoutineEditorView from './RoutineEditorView';
 import type { RoutineTimeline } from './RoutineTimeline';
 import { routineSlotStateAt, slotLanesAt } from '../sets/routinePlan';
+import { emptyEdits } from './routineDraft';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
 const { toast, decks, mixer, timeline } = vi.hoisted(() => ({
-  timeline: vi.fn(),
   toast: vi.fn(),
+  timeline: vi.fn(),
   decks: Object.fromEntries(['A', 'B', 'C', 'D'].map((id) => [
     id, { engine: {}, loadedTrack: null, loadTrack: vi.fn() },
   ])),
-  mixer: {},
+  mixer: { now: () => performance.now() / 1000 },
 }));
 
 vi.mock('../hooks/useDeck', () => ({ useDecks: () => decks }));
@@ -73,6 +74,7 @@ let client: QueryClient;
 
 beforeEach(() => {
   vi.clearAllMocks();
+  notifyManager.setNotifyFunction((notify) => act(notify));
   const storage = new Map<string, string>();
   vi.stubGlobal('localStorage', {
     getItem: (key: string) => storage.get(key) ?? null,
@@ -100,7 +102,7 @@ beforeEach(() => {
     transitions.mockResolvedValue(rows);
     return rows;
   });
-  const tracks = [1, 2].map((id) => ({
+  const tracks = [1, 2, 3].map((id) => ({
     id, title: `Track ${id}`, bpm: 120, duration_secs: 180,
   } as Track));
   vi.spyOn(api.tracks, 'getById').mockImplementation(async (id) => tracks.find((t) => t.id === id)!);
@@ -128,7 +130,7 @@ beforeEach(() => {
   document.body.append(host);
   root = createRoot(host);
   client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  for (const id of [1, 2]) {
+  for (const id of [1, 2, 3]) {
     // These assets are irrelevant to promotion; no audio or analysis fetches.
     for (const key of ['waveform-blob', 'beatgrid', 'metric-ladder']) {
       client.setQueryData([key, id], null);
@@ -139,6 +141,7 @@ beforeEach(() => {
 afterEach(() => {
   act(() => root.unmount());
   client.clear();
+  notifyManager.setNotifyFunction((notify) => notify());
   host.remove();
   localStorage.clear();
   _resetSetStoreForTests();
@@ -245,6 +248,8 @@ async function openReview(pinFollow: boolean) {
   expect(api.transitions.replacePair).not.toHaveBeenCalled();
   expect(api.takes.setPromoted).not.toHaveBeenCalled();
   expect(api.sets.replaceEntries).not.toHaveBeenCalled();
+  expect(timelineProps().trim).toBeNull();
+  expect(timelineProps().onTrimChange).toBeNull();
 }
 
 it('auditions a pre-window outgoing jump only at its actual instant', async () => {
@@ -252,6 +257,8 @@ it('auditions a pre-window outgoing jump only at its actual instant', async () =
   const props = () => timeline.mock.lastCall![0] as ComponentProps<typeof RoutineTimeline>;
   act(() => props().draftStore.addJump({ id: 'pre-enter', slotId: '0', beat: -20, deltaSec: -4 }));
   const r = props().editor.planned;
+  expect(r.slots[0].jumpMixSecs).toContain(-10);
+  expect(r.jumpMixSecs).toContain(-10);
   for (const [globalTime, expected] of [[40, 40], [49.9, 49.9], [50, 46], [61, 57]]) {
     const state = routineSlotStateAt(r, r.slots[0], globalTime - 60);
     expect(state.trackTime).toBeCloseTo(expected);
@@ -301,12 +308,15 @@ it('derives pair EXIT live beyond the old window without saving on open', async 
   const props = () => timeline.mock.lastCall![0] as ComponentProps<typeof RoutineTimeline>;
   expect(props().editor.pairBounds?.handover).toEqual({ enter: 0, exit: 240 });
   expect(props().editor.input.durationBeats).toBeGreaterThan(240);
+  act(() => props().player.seek(-40));
+  expect(props().player.getMixTime()).toBe(-40);
   vi.useFakeTimers();
   act(() => props().draftStore.setLane('0', 'fader', [
     { beat: 0, value: 1 }, { beat: 260, value: 0 },
   ]));
   // EOF still wins over an envelope extending beyond the available audio.
   expect(props().editor.pairBounds?.handover?.exit).toBe(240);
+  expect(props().player.getMixTime()).toBe(-40);
   await act(async () => { await vi.advanceTimersByTimeAsync(800); });
   expect(api.transitions.replacePair).not.toHaveBeenCalled();
 });
@@ -419,4 +429,105 @@ it.each(['replacePair', 'setPromoted'] as const)('keeps Take pins when %s fails'
   expect(api.sets.replaceEntries).not.toHaveBeenCalled();
   expect(host.querySelector<HTMLButtonElement>('.re-promote')?.disabled).toBe(false);
   if (step === 'replacePair') expect(api.takes.setPromoted).not.toHaveBeenCalled();
+});
+
+function timelineProps(): ComponentProps<typeof RoutineTimeline> {
+  return timeline.mock.lastCall![0];
+}
+
+async function openRoutine(originTakeUuid: string | null = null) {
+  const edits = {
+    ...emptyEdits(),
+    lanes: { '0:fader': [{ beat: 0, value: 0.8 }, { beat: 64, value: 1 }] },
+    jumps: [{ id: 'jump-1', slotId: '0', beat: 4, deltaSec: -1 }],
+  };
+  const detail: RoutineDetailWire = {
+    uuid: 'routine-1', name: 'Routine', cast: [1, 2, 3],
+    entry_offsets_beats: [0, 16, 32], entry_positions: [60, 0, 10],
+    duration_beats: 64, origin_take_uuid: originTakeUuid, created_at: null,
+    events: [
+      { kind: 'tick', beat: 0, playheads: { '0': 60 } },
+      { kind: 'tick', beat: 64, playheads: { '0': 92, '1': 24, '2': 26 } },
+    ],
+    edits,
+  };
+  vi.spyOn(api.routines, 'get').mockResolvedValue(detail);
+  vi.spyOn(api.routines, 'saveEdits').mockImplementation(async (_, saved) => ({
+    ...detail, edits: saved,
+  }));
+  vi.spyOn(api.routines, 'retrim').mockRejectedValue(new Error('Must not retrim'));
+  localStorage.setItem('manadj-last-routine', detail.uuid);
+  act(() => root.render(
+    <QueryClientProvider client={client}><RoutineEditorView /></QueryClientProvider>,
+  ));
+  await vi.waitFor(async () => {
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    expect(timelineProps().trim).toEqual({ startBeat: 0, endBeat: 64 });
+  });
+  return detail;
+}
+
+async function waitForBoundsSave(bounds: { startBeat: number; endBeat: number } | undefined) {
+  await vi.waitFor(async () => {
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    expect(vi.mocked(api.routines.saveEdits).mock.lastCall?.[1]?.playbackBounds).toEqual(bounds);
+    expect(api.routines.saveEdits).toHaveBeenCalled();
+  }, { timeout: 2000 });
+}
+
+it.each(['origin-take', null])('autosaves playback bounds without retrim (origin: %s)', async (origin) => {
+  const detail = await openRoutine(origin);
+  expect(timelineProps().onTrimChange).toBeTypeOf('function');
+  expect(host.textContent).not.toContain('trim unavailable');
+  expect(host.querySelector('.re-trimapply')).toBeNull();
+
+  act(() => timelineProps().onTrimChange!({ startBeat: 8, endBeat: 64 }));
+  act(() => timelineProps().onTrimChange!({ startBeat: 12, endBeat: 64 }));
+  act(() => timelineProps().draftStore.endGesture());
+  await waitForBoundsSave({ startBeat: 12, endBeat: 64 });
+  expect(api.routines.saveEdits).toHaveBeenLastCalledWith(detail.uuid, {
+    ...detail.edits, playbackBounds: { startBeat: 12, endBeat: 64 },
+  });
+  expect(timelineProps().trim).toEqual({ startBeat: 12, endBeat: 64 });
+  expect(timelineProps().editor.input.durationBeats).toBe(64);
+  expect(timelineProps().editor.planned.mixStartSec).toBe(6);
+  expect(timelineProps().editor.planned.beatOriginMixSec).toBe(0);
+  expect(timelineProps().player.getMixTime()).toBe(6);
+  expect(client.getQueryData(['routine', detail.uuid])).toEqual({
+    ...detail, edits: { ...detail.edits, playbackBounds: { startBeat: 12, endBeat: 64 } },
+  });
+
+  // Autosave responses must not reset the drag's single undo entry.
+  act(() => host.querySelector<HTMLButtonElement>('.re-histbtn')!.click());
+  expect(timelineProps().trim).toEqual({ startBeat: 0, endBeat: 64 });
+  expect(timelineProps().edits).toEqual(detail.edits);
+  expect(host.querySelector<HTMLButtonElement>('.re-histbtn')!.disabled).toBe(true);
+  await waitForBoundsSave(undefined);
+  expect(api.routines.retrim).not.toHaveBeenCalled();
+});
+
+it('clamps slot exclusion and the eight-beat minimum without moving the other handle', async () => {
+  const detail = await openRoutine();
+  const { maxStartBeat, minEndBeat } = timelineProps().editor.planned.boundsLimits;
+  act(() => timelineProps().onTrimChange!({ startBeat: 100, endBeat: 64 }));
+  expect(timelineProps().trim).toEqual({ startBeat: Math.min(maxStartBeat, 56), endBeat: 64 });
+  expect(host.querySelector('[role="status"]')?.textContent).toBe('Delete this slot to trim further');
+  const startBeat = timelineProps().trim!.startBeat;
+  act(() => timelineProps().onTrimChange!({ startBeat, endBeat: startBeat + 2 }));
+  expect(timelineProps().trim).toEqual({ startBeat, endBeat: Math.max(minEndBeat, startBeat + 8) });
+  act(() => timelineProps().draftStore.endGesture());
+  act(() => timelineProps().draftStore.undo());
+
+  act(() => timelineProps().onTrimChange!({ startBeat: 0, endBeat: -100 }));
+  expect(timelineProps().trim).toEqual({ startBeat: 0, endBeat: Math.max(minEndBeat, 8) });
+  expect(host.querySelector('[role="status"]')?.textContent).toBe('Delete this slot to trim further');
+  expect(timelineProps().edits.lanes).toEqual(detail.edits!.lanes);
+  expect(timelineProps().edits.jumps).toEqual(detail.edits!.jumps);
+  act(() => timelineProps().draftStore.endGesture());
+
+  act(() => host.querySelector<HTMLButtonElement>('.re-trimreset')!.click());
+  expect(timelineProps().trim).toEqual({ startBeat: 0, endBeat: 64 });
+  expect(timelineProps().edits).toEqual(detail.edits);
+  expect(host.querySelector('[role="status"]')).toBeNull();
+  expect(api.routines.retrim).not.toHaveBeenCalled();
 });
