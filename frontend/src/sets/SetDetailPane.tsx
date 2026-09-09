@@ -918,6 +918,7 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
   // eats Escape on capture, so closing a menu never clears the rows.
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || !(e.target instanceof Node) || !paneRef.current?.contains(e.target)) return;
       const sel = getSetSelection(setId);
       if (sel.ids.length === 0) return;
       const target = e.target as HTMLElement | null;
@@ -1379,6 +1380,13 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
 
       <div
         ref={paneRef}
+        tabIndex={-1}
+        onPointerDownCapture={(e) => {
+          const target = e.target as HTMLElement;
+          if (!target.closest('input, textarea, select, button, [contenteditable]')) {
+            e.currentTarget.focus({ preventScroll: true });
+          }
+        }}
         onScroll={(e) => {
           setSetScroll(setId, e.currentTarget.scrollTop);
           // Manual list scroll disengages follow (sets 05); programmatic

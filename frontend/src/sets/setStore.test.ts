@@ -42,10 +42,11 @@ import {
   setAdjacencyPins,
   setEntryTrim,
   setSetSelection,
+  subscribeSetStore,
   toggleCameoPin,
   unpinRoutine,
 } from './setStore';
-import { _resetRoutineCastsForTests } from './routineCasts';
+import { _resetRoutineCastsForTests, primeRoutineCasts } from './routineCasts';
 
 const mocked = api as unknown as {
   sets: { get: ReturnType<typeof vi.fn>; replaceEntries: ReturnType<typeof vi.fn> };
@@ -515,6 +516,96 @@ describe('per-entry trim (sets #164)', () => {
 });
 
 describe('pinRoutine / unpinRoutine (sets 160)', () => {
+  it('auto-restores a seven-track Routine after removing and reinserting an internal track', () => {
+    const cast = [1, 2, 3, 4, 5, 6, 7];
+    const shadow = { kind: 'transition', uuid: 'head-pair' } as const;
+    replaceSetEntries(1, cast.map((trackId) => ({ trackId, pin: trackId === 1 ? shadow : null })));
+    pinRoutine(1, 1, 'seven', cast);
+
+    // Track 4 stands in for Fatso: removing it leaves the head pair intact.
+    removeTracksFromSet(1, [4]);
+    expect(getSetEntries(1)![0].pin).toEqual(shadow);
+    expect(getSetDormantPins(1)).toContainEqual({
+      aTrackId: 1, bTrackId: 7, pin: { kind: 'routine', uuid: 'seven' },
+    });
+    insertTrackIntoSet(1, 4, 3);
+
+    expect(getSetEntries(1)!.map((e) => e.trackId)).toEqual(cast);
+    expect(getSetEntries(1)![0].pin).toEqual({ kind: 'routine', uuid: 'seven' });
+    expect(getSetDormantPins(1)).toEqual([{ aTrackId: 1, bTrackId: 2, pin: shadow }]);
+    unpinRoutine(1, 1);
+    expect(getSetEntries(1)![0].pin).toEqual(shadow);
+    expect(getSetDormantPins(1)).toEqual([]);
+  });
+
+  it('auto-restores a loaded dormant Routine when its metadata arrives', async () => {
+    const cast = [1, 2, 3, 4, 5, 6, 7];
+    mocked.sets.get.mockResolvedValue({
+      entries: cast.map((track_id) => ({ track_id, pin_kind: null, pin_uuid: null })),
+      dormant: [{ a_track_id: 1, b_track_id: 7, pin_kind: 'routine', pin_uuid: 'seven' }],
+    });
+    await ensureSetEntriesLoaded(1);
+    expect(getSetEntries(1)![0].pin).toBeNull();
+    primeRoutineCasts([{ uuid: 'seven', cast }]);
+    expect(getSetEntries(1)![0].pin).toEqual({ kind: 'routine', uuid: 'seven' });
+    expect(getSetDormantPins(1)).toEqual([]);
+    expect(mocked.sets.replaceEntries).not.toHaveBeenCalled();
+    const changed = vi.fn();
+    const unsubscribe = subscribeSetStore(changed);
+    primeRoutineCasts([{ uuid: 'seven', cast: [...cast] }]);
+    expect(changed).not.toHaveBeenCalled();
+    unsubscribe();
+  });
+
+  it.each(['single', 'bulk'] as const)('preserves an explicitly re-chosen shadow via %s pinning', (mode) => {
+    const cast = [1, 2, 3, 4, 5, 6, 7];
+    const shadow = { kind: 'transition', uuid: 'head-pair' } as const;
+    replaceSetEntries(1, cast.map((trackId) => ({ trackId, pin: trackId === 1 ? shadow : null })));
+    pinRoutine(1, 1, 'seven', cast);
+    removeTracksFromSet(1, [4]);
+    // Same UUID, but this is now an explicit choice rather than a restore.
+    if (mode === 'single') setAdjacencyPin(1, 1, shadow);
+    else setAdjacencyPins(1, new Map([[1, shadow]]));
+    insertTrackIntoSet(1, 4, 3);
+    expect(getSetEntries(1)![0].pin).toEqual(shadow);
+    expect(getSetDormantPins(1)).toEqual([
+      { aTrackId: 1, bTrackId: 7, pin: { kind: 'routine', uuid: 'seven' } },
+    ]);
+  });
+
+  it('explicitly clearing a restored shadow does not resurrect it on the next reconcile', () => {
+    const cast = [1, 2, 3, 4, 5, 6, 7];
+    replaceSetEntries(1, cast.map((trackId) => ({
+      trackId, pin: trackId === 1 ? { kind: 'hardcut' as const } : null,
+    })));
+    pinRoutine(1, 1, 'seven', cast);
+    removeTracksFromSet(1, [4]);
+    setAdjacencyPin(1, 1, null);
+    reorderSetEntries(1, [1, 2, 3, 5, 6, 7]);
+    expect(getSetEntries(1)![0].pin).toBeNull();
+    expect(getSetDormantPins(1)).toEqual([
+      { aTrackId: 1, bTrackId: 7, pin: { kind: 'routine', uuid: 'seven' } },
+    ]);
+  });
+
+  it('retains a restored shadow across a store reload before metadata arrives', async () => {
+    const cast = [1, 2, 3, 4, 5, 6, 7];
+    const shadow = { kind: 'take', uuid: 'head-pair' } as const;
+    replaceSetEntries(1, cast.map((trackId) => ({ trackId, pin: trackId === 1 ? shadow : null })));
+    pinRoutine(1, 1, 'seven', cast);
+    removeTracksFromSet(1, [4]);
+    const [, entries, dormant] = mocked.sets.replaceEntries.mock.lastCall!;
+    mocked.sets.get.mockResolvedValue(JSON.parse(JSON.stringify({ entries, dormant })));
+    _resetSetStoreForTests();
+    _resetRoutineCastsForTests();
+    await ensureSetEntriesLoaded(1);
+    insertTrackIntoSet(1, 4, 3);
+    expect(getSetEntries(1)![0].pin).toEqual(shadow);
+    primeRoutineCasts([{ uuid: 'seven', cast }]);
+    expect(getSetEntries(1)![0].pin).toEqual({ kind: 'routine', uuid: 'seven' });
+    expect(getSetDormantPins(1)).toEqual([{ aTrackId: 1, bTrackId: 2, pin: shadow }]);
+  });
+
   it('pinRoutine shadows the displaced pin as the head pair Dormant memory', () => {
     replaceSetEntries(1, [
       { trackId: 1, pin: { kind: 'transition', uuid: 'tr-old' } },
@@ -542,6 +633,19 @@ describe('pinRoutine / unpinRoutine (sets 160)', () => {
     ]);
     pinRoutine(1, 1, 'r1', [1, 2, 3]);
     expect(getSetEntries(1)![0].pin).toEqual({ kind: 'routine', uuid: 'r1' });
+    expect(getSetDormantPins(1)).toEqual([]);
+  });
+
+  it('replacing a Routine preserves its existing head-pair shadow', () => {
+    replaceSetEntries(1, [
+      { trackId: 1, pin: { kind: 'transition', uuid: 'tr-old' } },
+      { trackId: 2, pin: null },
+      { trackId: 3, pin: null },
+    ]);
+    pinRoutine(1, 1, 'r1', [1, 2, 3]);
+    pinRoutine(1, 1, 'r2', [1, 2, 3]);
+    unpinRoutine(1, 1);
+    expect(getSetEntries(1)![0].pin).toEqual({ kind: 'transition', uuid: 'tr-old' });
     expect(getSetDormantPins(1)).toEqual([]);
   });
 

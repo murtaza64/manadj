@@ -9,9 +9,18 @@
  */
 
 const castByUuid = new Map<string, number[]>();
+const listeners = new Set<(uuid: string) => void>();
+
+export function subscribeRoutineCasts(fn: (uuid: string) => void): () => void {
+  listeners.add(fn);
+  return () => listeners.delete(fn);
+}
 
 export function setRoutineCast(uuid: string, cast: readonly number[]): void {
+  const previous = castByUuid.get(uuid);
+  if (previous?.length === cast.length && previous.every((id, i) => id === cast[i])) return;
   castByUuid.set(uuid, [...cast]);
+  for (const fn of listeners) fn(uuid);
 }
 
 export function primeRoutineCasts(rows: readonly { uuid: string; cast: readonly number[] }[]): void {
