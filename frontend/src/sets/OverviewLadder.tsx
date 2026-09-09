@@ -28,7 +28,8 @@
  */
 import { ROUTINE_ACCENT } from '../theme/routineColor';
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { aContentSegments, bContentSegments } from '../editor/mixModel';
+import { aContentSegments } from '../editor/mixModel';
+import { outgoingAutomationStart } from '../editor/pairBounds';
 import { DECK_COLORS } from '../theme/deckColors';
 import type { HotCue, Track } from '../types';
 import type { DecodedWaveform } from '../waveform/blob';
@@ -48,6 +49,7 @@ import {
 import { planColumnModulator } from './ladderPlanModulation';
 import {
   planStateAt,
+  incomingMotionSpans,
   type PlanDeck,
   type PlannedAdjacency,
   type PlannedEntry,
@@ -776,35 +778,28 @@ export function clipContentSegments(
       return out;
     }
 
-    // Windowed incoming: the transition model's own audible walk (lead
-    // gaps deferred, jumps expanded — loops render repeated).
+    // Incoming trajectory through handover, return, and retained jumps.
     const entryAdj = i > 0 ? plan.adjacencies[i - 1] : undefined;
     if (entryAdj && (entryAdj.kind === 'transition' || entryAdj.kind === 'take')) {
-      const tr = entryAdj.transition;
-      const authoredEnd = tr.startSec + tr.durationSec;
-      const segs = bContentSegments(tr, durOf(entry.trackId), entryAdj.rateIncoming);
-      for (const s of segs) {
-        // The walk runs to B's track end; the window owns only its own
-        // span — the post-window solo strip is appended below.
-        const a0 = s.mixStartSec;
-        const a1 = Math.min(s.mixEndSec, authoredEnd);
-        if (a1 <= a0) continue;
-        // Authored window axis → global mix axis via the outgoing's rate.
-        const g0 = entryAdj.mixStartSec + (a0 - tr.startSec) / entryAdj.rateOutgoing;
-        const g1 = entryAdj.mixStartSec + (a1 - tr.startSec) / entryAdj.rateOutgoing;
+      const until = Math.min(entry.exitMixSec,
+        exitAdj && (exitAdj.kind === 'transition' || exitAdj.kind === 'take')
+          ? exitAdj.mixStartSec + (outgoingAutomationStart(exitAdj.transition) - exitAdj.transition.startSec) / exitAdj.rateOutgoing
+          : Infinity);
+      for (const s of incomingMotionSpans(entryAdj, entry.rate, until)) {
+        const position = (t: number) => s.trackTime + s.rate * (t - s.start) + s.acceleration * (t - s.start) ** 2 / 2;
+        if (position(s.end) <= 0) continue;
+        const zeroOffset = s.trackTime < 0
+          ? -2 * s.trackTime / (s.rate + Math.sqrt(s.rate * s.rate - 2 * s.acceleration * s.trackTime)) : 0;
+        const start = Math.max(entry.entryMixSec, s.start + zeroOffset);
+        // Tempo-return curvature remains an endpoint-exact minimap chord.
         pushRun(out, {
-          mixStart: Math.max(entry.entryMixSec, g0),
-          mixEnd: Math.min(entry.exitMixSec, g1),
-          trackStart: s.bStartSec,
-          trackEnd: s.bStartSec + (a1 - a0) * entryAdj.rateIncoming,
+          mixStart: start, mixEnd: s.end,
+          trackStart: position(start), trackEnd: position(s.end),
         });
       }
-      // Past the window: solo to the exit (Tempo return curvature is
-      // sub-pixel at minimap scale — endpoints exact).
-      const windowEndGlobal = entryAdj.mixEndSec;
-      if (entry.exitMixSec > windowEndGlobal) {
+      if (entry.exitMixSec > until) {
         const last = out[out.length - 1];
-        appendTail(Math.max(entry.entryMixSec, windowEndGlobal), last ? last.trackEnd : entry.entrySec);
+        appendTail(until, last ? last.trackEnd : entry.entrySec);
       }
       if (out.length > 0) return out;
     }

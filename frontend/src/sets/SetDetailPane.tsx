@@ -1823,6 +1823,7 @@ const WARNING_LABELS: Record<PlanWarning['kind'], string> = {
   'insufficient-runway': 'tempo runway',
   'window-overlap': 'windows overlap',
   'window-past-end': 'window past end',
+  'unreachable-transition-anchor': 'unreachable anchor: hard cut',
   'incoming-ends-inside-window': 'incoming ends early',
   'no-bpm': 'no BPM',
   'pitch-clamped': 'pitch clamped',

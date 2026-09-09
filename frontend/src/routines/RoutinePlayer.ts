@@ -146,7 +146,7 @@ export class RoutinePlayer {
    * slot's trailing motion is forced by the build). */
   private slotStateAt(slot: PlannedRoutineSlot, t: number) {
     const r = this.routine!;
-    if (t >= r.mixStartSec) return routineSlotStateAt(r, slot, t);
+    if (slot.transportBounds || t >= r.mixStartSec) return routineSlotStateAt(r, slot, t);
     // Sample just inside the window: AT the boundary the trace's first
     // point reads as parked (traceStateAt's beat <= first-point rule).
     const s0 = routineSlotStateAt(r, slot, r.mixStartSec + 1e-3);
@@ -268,7 +268,8 @@ export class RoutinePlayer {
     // The seekable range extends one margin beyond either boundary
     // (gh#190 item 5 — audition context around the window).
     const margin = this.getMarginSec();
-    const t = Math.max(-margin, Math.min(mixTime, this.getMixDuration() + margin));
+    const range = this.routine?.auditionRange;
+    const t = Math.max(range?.startSec ?? -margin, Math.min(mixTime, range?.endSec ?? this.getMixDuration() + margin));
     this.mixTimeAtAnchor = t;
     this.lastTickT = t;
     this.anchorAudioTime = this.mixer.now();
@@ -322,7 +323,7 @@ export class RoutinePlayer {
       return;
     }
     const t = this.getMixTime();
-    if (t >= this.getMixDuration() + this.getMarginSec()) {
+    if (t >= (this.routine?.auditionRange?.endSec ?? this.getMixDuration() + this.getMarginSec())) {
       this.pause();
       return;
     }
@@ -415,7 +416,9 @@ export class RoutinePlayer {
     for (const deck of this.drivenDecks()) {
       const occupant = this.occupantAt(deck, t);
       if (!occupant) continue;
-      const lanes = slotLanesAt(occupant, beat);
+      const lanes = occupant.transportBounds && t < occupant.entryMixSec
+        ? { fader: occupant.slot === 0 ? 1 : 0, eq: { low: 0.5, mid: 0.5, high: 0.5 }, filter: 0, trim: 0.5 }
+        : slotLanesAt(occupant, beat);
       this.mixer.setAutomation(deck, {
         fader: lanes.fader,
         eq: lanes.eq,

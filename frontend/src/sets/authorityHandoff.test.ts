@@ -71,14 +71,12 @@ describe('window-boundary handoffs', () => {
       )
     );
 
-  it('smooths the step at window CLOSE: incoming deck lerps from the authored last value to solo', () => {
+  it('holds the incoming last value past the handover instead of reopening the fader', () => {
     const plan = discontinuous();
     // At the boundary the ramp starts on the outgoing authority's value.
     expect(planStateAt(plan, 80).lanes.B.fader).toBeCloseTo(0.5, 3);
-    // Mid-ramp: halfway between the residual and the solo verdict.
-    expect(planStateAt(plan, 80 + RAMP / 2).lanes.B.fader).toBeCloseTo(0.75, 6);
-    // Ramp end: exactly the raw verdict.
-    expect(planStateAt(plan, 80 + RAMP).lanes.B.fader).toBe(1);
+    expect(planStateAt(plan, 80 + RAMP / 2).lanes.B.fader).toBe(0.5);
+    expect(planStateAt(plan, 100 + RAMP).lanes.B.fader).toBe(0.5);
   });
 
   it('smooths the step at window OPEN: outgoing deck lerps from solo to the authored first value', () => {

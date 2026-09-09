@@ -419,7 +419,7 @@ describe('planSet with a pinned Routine', () => {
       durationSec: 20,
       bInSec: 0,
       tempoMatch: false,
-      lanes: {},
+      lanes: { faderA: [{ x: 0, y: 1 }, { x: 1, y: 1 }, { x: 1, y: 0 }] },
     };
     const input: PlanInput = {
       entries: [
