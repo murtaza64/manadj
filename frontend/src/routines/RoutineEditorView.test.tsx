@@ -147,6 +147,87 @@ afterEach(() => {
   _resetTransitionStoreForTests();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
+  vi.useRealTimers();
+});
+
+it.each(['0', '1'])('keeps slot %s dragged material in place after pair autosave, undo and reopen', async (slotId) => {
+  const original = {
+    startSec: 60, durationSec: 20, bInSec: 8, tempoMatch: true,
+    lanes: { faderA: [{ x: 0.1, y: 1 }, { x: 0.8, y: 0 }] },
+    jumpsA: [{ x: 0.5, deltaSec: -1 }],
+  };
+  vi.mocked(api.transitions.list).mockResolvedValue([{
+    uuid: 'pair-drag', name: 'Pair', favorite: false, position: 0,
+    a_track_id: 1, b_track_id: 2, updated_at: null,
+    data: original,
+  }]);
+  act(() => root.render(
+    <QueryClientProvider client={client}><RoutineEditorView /></QueryClientProvider>,
+  ));
+  await act(async () => requestMixEdit({
+    open: { kind: 'transition', aTrackId: 1, bTrackId: 2, uuid: 'pair-drag' },
+  }));
+  const props = () => timeline.mock.lastCall![0] as ComponentProps<typeof RoutineTimeline>;
+  await vi.waitFor(async () => {
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    expect(timeline).toHaveBeenCalled();
+  });
+  const slot = Number(slotId);
+  const entry = slot === 0 ? 60 : 8;
+  const anchor = slot === 0 ? 'startSec' : 'bInSec';
+  expect(props().editor.planned.slots[slot].trace[0].pos).toBe(entry);
+  vi.useFakeTimers();
+  // RoutineTimeline's default pair drag: four beats right, material two seconds earlier.
+  act(() => {
+    const edits = props().edits;
+    props().draftStore.slideWithEditsLive('drag', slotId, {
+      nudgeSec: 0,
+      lanes: Object.fromEntries(Object.entries(edits.lanes).filter(([k]) => k.startsWith(`${slotId}:`))),
+      jumps: edits.jumps.filter((j) => j.slotId === slotId), pauses: [],
+      removedRecordedJumps: [], removedRecordedPauses: [],
+    }, 4, -2);
+    props().draftStore.endGesture();
+  });
+  expect(props().editor.planned.slots[slot].trace[0].pos).toBe(entry - 2);
+  const dragged = props().editor.planned;
+  await act(async () => { await vi.advanceTimersByTimeAsync(699); });
+  expect(api.transitions.replacePair).not.toHaveBeenCalled();
+  await act(async () => { await vi.advanceTimersByTimeAsync(101); });
+  expect(api.transitions.replacePair).toHaveBeenCalledExactlyOnceWith(1, 2, [
+    expect.objectContaining({ data: expect.objectContaining({ [anchor]: entry - 2 }) }),
+  ]);
+  expect(api.transitions.list).toHaveBeenCalledTimes(2);
+  expect(props().edits.nudges).toEqual({ [slotId]: -2 });
+  expect(props().draftStore.getSnapshot().canUndo).toBe(true);
+  expect(props().editor.planned).toEqual(dragged);
+
+  // An unrelated later edit must not bake the same nudge into the anchor again.
+  act(() => props().draftStore.setLane('1', 'eqLow', [{ beat: 0, value: 0.25 }]));
+  await act(async () => { await vi.advanceTimersByTimeAsync(800); });
+  expect(vi.mocked(api.transitions.replacePair).mock.lastCall![2][0].data[anchor]).toBe(entry - 2);
+  expect(props().editor.planned.slots[slot].trace).toEqual(dragged.slots[slot].trace);
+  act(() => {
+    props().draftStore.undo(); // lane
+    props().draftStore.undo(); // drag
+  });
+  await act(async () => { await vi.advanceTimersByTimeAsync(800); });
+  expect(vi.mocked(api.transitions.replacePair).mock.lastCall![2][0].data).toEqual(original);
+  expect(props().editor.planned.slots[slot].trace[0].pos).toBe(entry);
+
+  act(() => props().draftStore.redo());
+  await act(async () => { await vi.advanceTimersByTimeAsync(800); });
+  expect(props().editor.planned).toEqual(dragged);
+  // A fresh editor loads the saved anchor with no residual nudge. Slot 0
+  // remains at the window entry; its nudge changed startSec, not an offset.
+  act(() => root.unmount());
+  root = createRoot(host);
+  await act(async () => root.render(
+    <QueryClientProvider client={client}><RoutineEditorView /></QueryClientProvider>,
+  ));
+  await act(async () => { await vi.advanceTimersByTimeAsync(20); });
+  expect(props().edits.nudges).toEqual({});
+  expect(props().editor.planned).toEqual(dragged);
+  expect(props().editor.planned.slots[0].entryMixSec).toBe(0);
 });
 
 async function openReview(pinFollow: boolean) {

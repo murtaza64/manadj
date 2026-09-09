@@ -28,7 +28,7 @@
  */
 import { ROUTINE_ACCENT } from '../theme/routineColor';
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { bContentSegments } from '../editor/mixModel';
+import { aContentSegments, bContentSegments } from '../editor/mixModel';
 import { DECK_COLORS } from '../theme/deckColors';
 import type { HotCue, Track } from '../types';
 import type { DecodedWaveform } from '../waveform/blob';
@@ -170,6 +170,7 @@ export const OverviewLadder = memo(function OverviewLadder({
    * this viewport x through the width change. */
   const zoomAnchor = useRef<{ mixTime: number; viewportX: number } | null>(null);
   const lastAutoScrollAt = useRef(0);
+  const autoScrollTarget = useRef<number | null>(null);
   const lastMixTime = useRef<number | null>(null);
   const total = Math.max(plan.totalSec, 0.001);
 
@@ -226,8 +227,9 @@ export const OverviewLadder = memo(function OverviewLadder({
       if (!inner) return;
       const outerW = outer.clientWidth;
       const maxZoom = Math.max(1, (total * MAX_PX_PER_SEC) / outerW);
+      const sensitivity = e.ctrlKey || e.metaKey ? 0.01 : 0.002;
       setZoom((z) => {
-        const next = Math.min(maxZoom, Math.max(1, z * Math.exp(-e.deltaY * 0.002)));
+        const next = Math.min(maxZoom, Math.max(1, z * Math.exp(-e.deltaY * sensitivity)));
         if (next === z) return z;
         const rect = outer.getBoundingClientRect();
         const conductor = getConductor();
@@ -257,6 +259,7 @@ export const OverviewLadder = memo(function OverviewLadder({
     const anchor = zoomAnchor.current;
     if (!outer || !inner || !anchor) return;
     zoomAnchor.current = null;
+    autoScrollTarget.current = null;
     lastAutoScrollAt.current = performance.now(); // not a user pan
     outer.scrollLeft = (anchor.mixTime / total) * inner.clientWidth - anchor.viewportX;
     setLadderView(setId, { zoom, scrollLeft: outer.scrollLeft });
@@ -268,12 +271,28 @@ export const OverviewLadder = memo(function OverviewLadder({
     if (!outer) return;
     const onScroll = () => {
       setLadderView(setId, { zoom, scrollLeft: outer.scrollLeft });
+      if (autoScrollTarget.current !== null) {
+        lastAutoScrollAt.current = performance.now();
+        return;
+      }
       if (performance.now() - lastAutoScrollAt.current > AUTO_SCROLL_WINDOW_MS) {
         if (conducting && follow) setFollowPlayback(false);
       }
     };
+    const onScrollEnd = () => {
+      const target = autoScrollTarget.current;
+      autoScrollTarget.current = null;
+      // Native user input can interrupt a smooth pan before its destination.
+      if (target !== null && Math.abs(outer.scrollLeft - target) > 1 && conducting && follow) {
+        setFollowPlayback(false);
+      }
+    };
     outer.addEventListener('scroll', onScroll);
-    return () => outer.removeEventListener('scroll', onScroll);
+    outer.addEventListener('scrollend', onScrollEnd);
+    return () => {
+      outer.removeEventListener('scroll', onScroll);
+      outer.removeEventListener('scrollend', onScrollEnd);
+    };
   }, [setId, zoom, conducting, follow]);
 
   // ── Playhead + follow auto-scroll (rAF, no React state per frame) ─────
@@ -299,15 +318,32 @@ export const OverviewLadder = memo(function OverviewLadder({
           const viewX = px - outer.scrollLeft;
           const outerW = outer.clientWidth;
           const seeked =
-            lastMixTime.current !== null && Math.abs(t - lastMixTime.current) > SEEK_JUMP_S;
+            lastMixTime.current === null || Math.abs(t - lastMixTime.current) > SEEK_JUMP_S;
+          let target: number | null = null;
+          if (seeked && autoScrollTarget.current !== null && viewX >= 0 && viewX <= outerW) {
+            autoScrollTarget.current = null;
+            lastAutoScrollAt.current = performance.now();
+            outer.scrollTo({ left: outer.scrollLeft, behavior: 'instant' });
+          }
           if (seeked && (viewX < 0 || viewX > outerW)) {
             // Seek landed off-viewport: animated pan to CENTER it.
-            lastAutoScrollAt.current = performance.now();
-            outer.scrollTo({ left: px - outerW / 2, behavior: 'smooth' });
-          } else if (viewX > outerW * PAGE_TRIGGER || viewX < 0) {
+            target = px - outerW / 2;
+          } else if (
+            !seeked &&
+            autoScrollTarget.current === null &&
+            (viewX > outerW * PAGE_TRIGGER || viewX < 0)
+          ) {
             // DAW-style page: re-enter at the leading edge.
-            lastAutoScrollAt.current = performance.now();
-            outer.scrollTo({ left: px - outerW * PAGE_REENTRY, behavior: 'smooth' });
+            target = px - outerW * PAGE_REENTRY;
+          }
+          if (target !== null) {
+            target = Math.max(0, Math.min(outer.scrollWidth - outerW, target));
+            // Let native smooth scrolling finish instead of restarting it every frame.
+            if (Math.abs(outer.scrollLeft - target) > 1) {
+              autoScrollTarget.current = target;
+              lastAutoScrollAt.current = performance.now();
+              outer.scrollTo({ left: target, behavior: 'smooth' });
+            }
           }
         }
         lastMixTime.current = t;
@@ -649,7 +685,7 @@ function pushRun(out: ClipContentSegment[], seg: ClipContentSegment): void {
  * Per-entry audible content runs (#161): the ladder renders the audio AS
  * IT WILL PLAY — repeated sections drawn repeated, skipped audio skipped,
  * silent leads/pauses blank. Windowed entries take the transition model's
- * own piecewise walk (bContentSegments, jump-expanded); Routine entries
+ * own piecewise walks (incoming and outgoing, jump-expanded); Routine entries
  * take their slot trace's moving runs; everything else is one linear
  * strip.
  */
@@ -661,6 +697,36 @@ export function clipContentSegments(
     const out: ClipContentSegment[] = [];
     const span = entry.exitMixSec - entry.entryMixSec;
     if (span <= 0) return out;
+
+    const exitAdj = plan.adjacencies[i];
+    const exitWindow = exitAdj && (exitAdj.kind === 'transition' || exitAdj.kind === 'take') &&
+      exitAdj.transition.jumpsA?.length ? exitAdj : null;
+    const appendTail = (mixStart: number, trackStart: number) => {
+      const soloEnd = Math.min(entry.exitMixSec, exitWindow?.mixStartSec ?? entry.exitMixSec);
+      pushRun(out, {
+        mixStart,
+        mixEnd: soloEnd,
+        trackStart,
+        trackEnd: exitWindow && soloEnd === exitWindow.mixStartSec
+          ? exitWindow.transition.startSec : entry.exitSec,
+      });
+      if (!exitWindow) return;
+      // The outgoing walk uses authored elapsed time, not its jumped exit position.
+      const tr = exitWindow.transition;
+      const rate = exitWindow.rateOutgoing;
+      for (const s of aContentSegments(tr, durOf(entry.trackId))) {
+        const g0 = exitWindow.mixStartSec + (s.mixStartSec - tr.startSec) / rate;
+        const g1 = exitWindow.mixStartSec + (s.mixEndSec - tr.startSec) / rate;
+        const start = Math.max(mixStart, exitWindow.mixStartSec, g0);
+        const end = Math.min(entry.exitMixSec, g1);
+        pushRun(out, {
+          mixStart: start,
+          mixEnd: end,
+          trackStart: s.bStartSec + (start - g0) * rate,
+          trackEnd: s.bStartSec + (end - g0) * rate,
+        });
+      }
+    };
 
     // Routine slot? Its trace IS the playback (runs between jumps/pauses).
     const routine = plan.routines.find(
@@ -703,14 +769,9 @@ export function clipContentSegments(
           trackEnd: run.ph0 + (mixEnd - start) * rate,
         });
       }
-      // The exit slot keeps sounding past the span end (linear to exit).
+      // The exit slot keeps sounding past the span end, including its outgoing jumps.
       if (entry.exitMixSec > routine.mixEndSec) {
-        pushRun(out, {
-          mixStart: routine.mixEndSec,
-          mixEnd: entry.exitMixSec,
-          trackStart: routine.exit.trackSecAtEnd,
-          trackEnd: entry.exitSec,
-        });
+        appendTail(routine.mixEndSec, routine.exit.trackSecAtEnd);
       }
       return out;
     }
@@ -743,23 +804,12 @@ export function clipContentSegments(
       const windowEndGlobal = entryAdj.mixEndSec;
       if (entry.exitMixSec > windowEndGlobal) {
         const last = out[out.length - 1];
-        pushRun(out, {
-          mixStart: Math.max(entry.entryMixSec, windowEndGlobal),
-          mixEnd: entry.exitMixSec,
-          trackStart: last ? last.trackEnd : entry.entrySec,
-          trackEnd: entry.exitSec,
-        });
+        appendTail(Math.max(entry.entryMixSec, windowEndGlobal), last ? last.trackEnd : entry.entrySec);
       }
       if (out.length > 0) return out;
     }
 
-    // Plain entry: one linear strip (the pre-#161 render).
-    pushRun(out, {
-      mixStart: entry.entryMixSec,
-      mixEnd: entry.exitMixSec,
-      trackStart: entry.entrySec,
-      trackEnd: entry.exitSec,
-    });
+    appendTail(entry.entryMixSec, entry.entrySec);
     return out;
   });
 }

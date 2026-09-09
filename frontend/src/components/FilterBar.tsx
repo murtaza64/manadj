@@ -16,6 +16,7 @@ import { useFollowParams } from '../follow/paramsStore';
 import { followedReferences, followSummary } from '../follow/model';
 import type { ChannelId } from '../playback/mixer';
 import { CHANNEL_IDS } from '../playback/mixer';
+import { clearPlayed, usePlayedTracks } from '../sessions/playedStore';
 import './FilterBar.css';
 
 interface FilterBarProps {
@@ -28,6 +29,7 @@ interface FilterBarProps {
 
 export default function FilterBar({ totalTracks, filteredCount, loadedByDeck }: FilterBarProps) {
   const { filters, setFilters } = useFilters();
+  const played = usePlayedTracks();
   const [searchInput, setSearchInput] = useState(filters.search);
   const searchRef = useRef<HTMLInputElement>(null);
 
@@ -369,6 +371,15 @@ export default function FilterBar({ totalTracks, filteredCount, loadedByDeck }: 
           className="filter-bar-clear-all-btn"
         >
           Clear All
+        </button>
+
+        <button
+          onClick={() => clearPlayed()}
+          disabled={played.size === 0}
+          className="filter-bar-clear-played-btn"
+          title="Clear played track history without changing playback or filters"
+        >
+          Clear played
         </button>
 
         {/* Result Count */}

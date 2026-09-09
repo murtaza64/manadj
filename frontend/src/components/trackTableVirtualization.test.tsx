@@ -28,12 +28,16 @@ import type { Track } from '../types';
 // orthogonal to this virtualization seam, so keep the standalone harness
 // focused with a stable empty occupancy snapshot.
 vi.mock('../hooks/useDeck', () => ({ useDecks: () => ({}) }));
+const playback = vi.hoisted(() => ({ trackId: null as number | null, playing: false, otherDecks: false, audible: '' }));
+vi.mock('../hooks/useDeckPlaybackLevels', () => ({
+  useDeckPlaybackLevels: () => Object.fromEntries(['A', 'B', 'C', 'D'].map((ch) => [ch, playback.audible.includes(ch) ? 100 : 0])),
+}));
 vi.mock('../hooks/useDeckOccupancy', () => ({
   useDeckOccupancy: () => ({
-    A: { trackId: null, playing: false },
-    B: { trackId: null, playing: false },
-    C: { trackId: null, playing: false },
-    D: { trackId: null, playing: false },
+    A: { trackId: playback.trackId, playing: playback.playing },
+    B: { trackId: playback.trackId, playing: playback.otherDecks },
+    C: { trackId: playback.trackId, playing: playback.otherDecks },
+    D: { trackId: playback.trackId, playing: playback.otherDecks },
   }),
 }));
 
@@ -62,6 +66,7 @@ const VIEWPORT_HEIGHT = 600;
 
 let cleanup: (() => void)[] = [];
 afterEach(() => {
+  Object.assign(playback, { trackId: null, playing: false, otherDecks: false, audible: '' });
   cleanup.forEach((fn) => fn());
   cleanup = [];
   setVirtualViewportMeasurer(null);
@@ -115,6 +120,35 @@ function mountedRowCount(container: HTMLElement): number {
 }
 
 describe('TrackTable virtualization — bounded mounted rows', () => {
+  it('shows animated-bar markup only for playing tracks, with separate audibility', () => {
+    Object.assign(playback, { trackId: 1, playing: true, audible: 'A' });
+    const { container, root, rerender } = renderList({
+      tracks: makeTracks(3),
+      transitionMarks: { B: new Map([[1, { count: 1, preferred: true }]]) },
+    });
+    cleanup.push(() => act(() => root.unmount()));
+    expect(container.querySelectorAll('.track-playing i')).toHaveLength(3);
+    expect(container.querySelector('.track-marks-cell .mark-a [aria-label="Deck A: Playing - 100% level"]')).not.toBeNull();
+    expect(container.querySelector('.track-cell-text .track-playing')).toBeNull();
+    expect(container.querySelector('.mark-star')).toBeNull();
+    playback.audible = '';
+    rerender({});
+    expect(container.querySelectorAll('.track-playing i')).toHaveLength(3);
+    expect(container.querySelector('[aria-label="Deck A: Playing - 0% level"]')).not.toBeNull();
+    playback.otherDecks = true;
+    playback.audible = 'BD';
+    rerender({});
+    expect(container.querySelectorAll('.track-marks-cell .track-playing')).toHaveLength(4);
+    expect(container.querySelector('.mark-b [aria-label="Deck B: Playing - 100% level"]')).not.toBeNull();
+    expect(container.querySelector('.mark-c [aria-label="Deck C: Playing - 0% level"]')).not.toBeNull();
+    expect(container.querySelector('.mark-d [aria-label="Deck D: Playing - 100% level"]')).not.toBeNull();
+    playback.otherDecks = false;
+    playback.playing = false;
+    rerender({});
+    expect(container.querySelector('.track-playing')).toBeNull();
+    expect(container.querySelector('.mark-star')).not.toBeNull();
+  });
+
   it('mounts only the visible window (+overscan), not every Track, at 1,000 rows', () => {
     const { container, root } = renderList({ tracks: makeTracks(1000) });
     cleanup.push(() => act(() => root.unmount()));

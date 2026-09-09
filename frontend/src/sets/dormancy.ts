@@ -30,7 +30,9 @@
  * routine pin rides its head adjacency, that pair's Dormant memory is
  * KEPT (the shadow of the pin the routine displaced — restored on
  * unpin/Dormant); covered interior pins stay in the entries, shadowed
- * at read time.
+ * at read time. A woken pair memory is retained while a Routine at the
+ * same head is Dormant: it identifies an automatic restore, not a newer
+ * explicit pin, and lets the Routine re-shadow it when its cast returns.
  */
 import type { AdjacencyPin, RoutineCastLookup } from './adjacency';
 import { routineOfferable } from './adjacency';
@@ -142,10 +144,15 @@ export function reconcileOrderChange(
     }
   }
 
+  const dormantRoutineHeads = new Set(
+    [...dormantByPair.values()].filter((d) => d.pin.kind === 'routine').map((d) => d.aTrackId)
+  );
+  const restoredShadows = new Set<number>();
+
   // Pass 2 — surviving ordered-pair pins ride along. A stale Dormant
-  // memory for a ridden pair is dropped (a pair never carries two pins)
-  // — UNLESS a routine claimed the adjacency: its head-pair memory is
-  // the shadow, kept above.
+  // memory for a ridden pair is dropped unless it identifies a restored
+  // shadow at a Dormant Routine's head. Explicit pin acts clear that
+  // memory in the store, even when choosing the same pin again.
   for (let i = 0; i < entries.length - 1; i++) {
     if (claimed.has(i)) continue;
     const k = key(entries[i].trackId, entries[i + 1].trackId);
@@ -153,7 +160,16 @@ export function reconcileOrderChange(
     if (kept) {
       entries[i].pin = kept;
       oldPairPins.delete(k);
-      dormantByPair.delete(k);
+      const memory = dormantByPair.get(k);
+      if (
+        dormantRoutineHeads.has(entries[i].trackId) &&
+        memory?.pin.kind === kept.kind &&
+        memory.pin.uuid === kept.uuid
+      ) {
+        restoredShadows.add(i);
+      } else {
+        dormantByPair.delete(k);
+      }
     }
   }
 
@@ -166,7 +182,8 @@ export function reconcileOrderChange(
   // Pass 3 — Dormant routine memories wake when the cast is the next n
   // entries again and no explicit pin rode onto the head adjacency.
   // They outrank pair-memory restores (the routine displaced that pin;
-  // waking re-shadows it) but never displace a riding pin. Routine
+  // waking re-shadows it), including a shadow restored in an earlier
+  // pass, but never displace a newer explicit pin. Routine
   // memories NEVER wake on plain pair adjacency of (entry, exit) — that
   // means the interior is gone, the opposite of their condition.
   for (const [k, d] of dormantByPair) {
@@ -174,7 +191,12 @@ export function reconcileOrderChange(
     const cast = castOf?.(d.pin.uuid) ?? null;
     if (!cast) continue;
     const j = routineLiveAt(cast);
-    if (j >= 0 && j < entries.length - 1 && entries[j].pin === null && !claimed.has(j)) {
+    if (
+      j >= 0 &&
+      j < entries.length - 1 &&
+      !claimed.has(j) &&
+      (entries[j].pin === null || restoredShadows.has(j))
+    ) {
       entries[j].pin = d.pin;
       claimed.add(j);
       dormantByPair.delete(k);
@@ -190,7 +212,7 @@ export function reconcileOrderChange(
     const dormant = dormantByPair.get(k);
     if (dormant && dormant.pin.kind !== 'routine') {
       entries[i].pin = dormant.pin;
-      dormantByPair.delete(k);
+      if (!dormantRoutineHeads.has(entries[i].trackId)) dormantByPair.delete(k);
     }
   }
 

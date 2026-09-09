@@ -23,7 +23,7 @@ import { EMPTY_SELECTION, prune, type Selection } from '../selection/selectionMo
 import type { AdjacencyPin } from './adjacency';
 import { reconcileCameoOrderChange, type CameoPin, type DormantCameoPin } from './cameoPins';
 import { reconcileOrderChange, type DormantPin } from './dormancy';
-import { getRoutineCast, setRoutineCast } from './routineCasts';
+import { getRoutineCast, setRoutineCast, subscribeRoutineCasts } from './routineCasts';
 
 export interface SetEntryLocal {
   trackId: number;
@@ -180,9 +180,8 @@ async function doLoad(setId: number): Promise<void> {
     }));
     // Normalize through the reconcile rule (sets 07): server state where
     // a Dormant memory covers a currently-adjacent pair (writable via
-    // the API) restores/retires on read — the invariant "a pair never
-    // carries two pins, and an adjacent pair's memory is awake" holds
-    // from the first render. Consistent state passes through unchanged;
+    // the API) restores/retires on read. Routine shadows remain as
+    // restore provenance. Consistent state passes through unchanged;
     // local-only (the next mutation pushes wholesale anyway).
     const normalized = reconcileOrderChange(
       entries,
@@ -274,6 +273,28 @@ function currentDormant(setId: number): DormantPin[] {
 function currentDormantCameos(setId: number): DormantCameoPin[] {
   return snapshot.dormantCameosBySet[setId] ?? [];
 }
+
+// Metadata can arrive after entries. Normalize locally, just as doLoad
+// does, without waiting for another order edit or pushing a load-time PUT.
+subscribeRoutineCasts((uuid) => {
+  for (const [id, entries] of Object.entries(snapshot.entriesBySet)) {
+    const setId = Number(id);
+    const dormant = currentDormant(setId);
+    if (
+      !entries.some((e) => e.pin?.kind === 'routine' && e.pin.uuid === uuid) &&
+      !dormant.some((d) => d.pin.kind === 'routine' && d.pin.uuid === uuid)
+    ) continue;
+    const next = reconcileOrderChange(
+      entries, dormant, entries.map((e) => e.trackId), getRoutineCast
+    );
+    if (
+      next.entries.every((e, i) => e.pin === entries[i].pin) &&
+      next.dormant.length === dormant.length &&
+      next.dormant.every((d, i) => d === dormant[i])
+    ) continue;
+    setSetStateLocal(setId, next.entries, next.dormant);
+  }
+});
 
 /** Replace a Set's entries (and, optionally, its Dormant pins): the
  * snapshot updates synchronously (optimistic), the wholesale PUT runs in
@@ -381,9 +402,11 @@ export function setAdjacencyPin(
   const headIndex = entries.findIndex((e) => e.trackId === headTrackId);
   const nextTrackId = headIndex >= 0 ? entries[headIndex + 1]?.trackId : undefined;
   const dormant =
-    pin !== null && nextTrackId !== undefined
+    nextTrackId !== undefined
       ? currentDormant(setId).filter(
-          (d) => !(d.aTrackId === headTrackId && d.bTrackId === nextTrackId)
+          (d) =>
+            !(d.aTrackId === headTrackId && d.bTrackId === nextTrackId &&
+              (pin !== null || d.pin.kind !== 'routine'))
         )
       : currentDormant(setId);
   replaceSetEntries(setId, next, dormant);
@@ -445,15 +468,16 @@ export function pinRoutine(
   routineUuid: string,
   cast: readonly number[]
 ): void {
+  setRoutineCast(routineUuid, cast);
   const entries = snapshot.entriesBySet[setId];
   if (!entries) return;
-  setRoutineCast(routineUuid, cast);
   const headIndex = entries.findIndex((e) => e.trackId === headTrackId);
   const nextTrackId = headIndex >= 0 ? entries[headIndex + 1]?.trackId : undefined;
   if (headIndex < 0 || nextTrackId === undefined) return;
   const displaced = entries[headIndex].pin;
   const dormant = currentDormant(setId).filter(
-    (d) => !(d.aTrackId === headTrackId && d.bTrackId === nextTrackId)
+    (d) =>
+      displaced?.kind === 'routine' || !(d.aTrackId === headTrackId && d.bTrackId === nextTrackId)
   );
   if (displaced !== null && displaced.kind !== 'routine') {
     // The shadow: a fresh displacement overwrites an older memory.

@@ -498,20 +498,33 @@ export default function RoutineEditorView() {
   });
   const pairTrackA = pairTrackQueries[0]?.data;
   const pairTrackB = pairTrackQueries[1]?.data;
-  const proj: PairSlotProjection | null = useMemo(() => {
-    if (!openedTransition) return null;
+  // Pair saves bake nudges into anchors. Keep the source on the same
+  // load-time baseline as the draft, or a refetch applies those nudges twice.
+  const [pairSource, setPairSource] = useState<{ uuid: string; data: Transition } | null>(null);
+  useEffect(() => {
+    if (!openedTransition) {
+      setPairSource(null);
+      return;
+    }
+    if (pairSource?.uuid === openedTransition.uuid) return;
     const data = (pairRow?.data as Transition | undefined) ?? openedTransition.seed;
-    if (!data || !pairTrackA || !pairTrackB) return null;
+    if (data) setPairSource({ uuid: openedTransition.uuid, data });
+  }, [openedTransition, pairRow, pairSource]);
+  const pairSourceRef = useRef(pairSource);
+  pairSourceRef.current = pairSource;
+  const proj: PairSlotProjection | null = useMemo(() => {
+    if (!openedTransition || pairSource?.uuid !== openedTransition.uuid) return null;
+    if (!pairTrackA || !pairTrackB) return null;
     return transitionToProjection({
       uuid: openedTransition.uuid,
       name: pairRow?.name ?? 'New Transition',
-      transition: data,
+      transition: pairSource.data,
       trackAId: openedTransition.aTrackId,
       trackBId: openedTransition.bTrackId,
       bpmA: pairTrackA.bpm ?? null,
       bpmB: pairTrackB.bpm ?? null,
     });
-  }, [openedTransition, pairRow, pairTrackA, pairTrackB]);
+  }, [openedTransition, pairSource, pairRow, pairTrackA, pairTrackB]);
   const projRef = useRef(proj);
   projRef.current = proj;
   const openedRef = useRef(opened);
@@ -717,8 +730,7 @@ export default function RoutineEditorView() {
           // Draft posture: an unsaved seed with no real change persists
           // nothing (auditioning a blank draft leaves no trace).
           if (!exists && editsAreEmpty(diff)) return;
-          const original =
-            (rows.find((r) => r.uuid === uuid)?.data as Transition | undefined) ?? o.seed;
+          const original = pairSourceRef.current?.uuid === uuid ? pairSourceRef.current.data : null;
           if (!original) return;
           const data = editsToTransition(diff, {
             original,
