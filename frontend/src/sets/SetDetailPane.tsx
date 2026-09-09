@@ -234,6 +234,31 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
     void initTransitionStore();
   }, []);
   const { data: takes = [] } = useQuery({ queryKey: ['takes'], queryFn: api.takes.list });
+  // Pair identities survive reordering; unchanged adjacency rows can stay memoized.
+  const evidenceByPair = useMemo(() => {
+    const byPair = new Map<string, typeof EMPTY_EVIDENCE>();
+    for (const [key, pair] of Object.entries(pairStore)) {
+      byPair.set(key, {
+        transitions: pair.items.map((it) => ({
+          uuid: it.uuid, name: it.name, favorite: it.favorite ?? false, updatedAtMs: it.updatedAtMs,
+        })),
+        takes: [],
+      });
+    }
+    for (const take of takes) {
+      const key = `${take.a_track_id}:${take.b_track_id}`;
+      let evidence = byPair.get(key);
+      if (!evidence) {
+        evidence = { transitions: [], takes: [] };
+        byPair.set(key, evidence);
+      }
+      evidence.takes.push({
+        uuid: take.uuid, detectedAt: take.detected_at,
+        windowS: take.window_end_s - take.window_start_s,
+      });
+    }
+    return byPair;
+  }, [pairStore, takes]);
   // Fresh-Take offers (sets 13): the capture sink records the latest Take
   // per ordered pair; matching adjacencies grow a "new take — pin?" chip.
   const freshTakes = useSyncExternalStore(subscribeFreshTakes, snapshotFreshTakes);
@@ -358,18 +383,13 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
     if (entries) {
       for (let i = 0; i < entries.length - 1; i++) {
         if (entries[i].pin !== null || entryCoverage[i]) continue;
-        const { transitions } = buildPairEvidence(
-          pairStore,
-          takes,
-          entries[i].trackId,
-          entries[i + 1].trackId
-        );
+        const { transitions } = evidenceByPair.get(`${entries[i].trackId}:${entries[i + 1].trackId}`) ?? EMPTY_EVIDENCE;
         const resolved = resolveTransition(transitions);
         if (resolved) fillable.set(entries[i].trackId, { kind: 'transition', uuid: resolved.uuid });
       }
     }
     return fillable;
-  }, [entries, entryCoverage, pairStore, takes]);
+  }, [entries, entryCoverage, evidenceByPair]);
 
   // Resolve from evidence (sets #163): the bulk best-Take proposal for
   // every Unresolved adjacency — previewed in a modal, applied by ONE
@@ -383,10 +403,10 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
     () =>
       resolveFromEvidence(
         entries ?? [],
-        (a, b) => buildPairEvidence(pairStore, takes, a, b),
+        (a, b) => evidenceByPair.get(`${a}:${b}`) ?? EMPTY_EVIDENCE,
         castOf
       ),
-    [entries, pairStore, takes, castOf]
+    [entries, evidenceByPair, castOf]
   );
 
   // Track metadata for the entry rows (batch-by-Promise.all pattern, as in
@@ -394,7 +414,7 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
   // every track mutation's invalidation (archive/unarchive/update) reaches
   // it — as ['set-tracks', …] the rows kept a stale archived_at until
   // remount (the drift class sets 12 patched).
-  const trackIds = (entries ?? []).map((e) => e.trackId);
+  const trackIds = (entries ?? []).map((e) => e.trackId).sort((a, b) => a - b);
   const { data: trackMap } = useQuery({
     queryKey: ['tracks', 'set-rows', setId, trackIds.join(',')],
     enabled: trackIds.length > 0,
@@ -413,7 +433,7 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
     set ? { policy: set.tempo_policy, setTempoBpm: set.set_tempo_bpm } : undefined
   );
   // Stale-while-replanning (#161): the last computed plan, held across
-  // the momentary undefined a reorder's fresh evidence query causes —
+  // the momentary undefined a fresh evidence query causes —
   // the ladder keeps its frame (and the layout its height) instead of
   // unmounting. Cleared on Set switch (the ref is per mount; the pane
   // remounts per set via the browse host).
@@ -442,11 +462,6 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
         : null,
     [previewOrder, entries, dormant]
   );
-  const previewPlan = useSetPlan(
-    previewState?.entries,
-    trackMap,
-    set ? { policy: set.tempo_policy, setTempoBpm: set.set_tempo_bpm } : undefined
-  );
   const previewFutures = useMemo(
     () =>
       previewOrder && entries
@@ -459,15 +474,46 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
         : undefined,
     [previewOrder, entries, dormant, pairStore]
   );
+  // Row movement is immediate; Take vectorization and whole-timeline
+  // sampling wait until the target settles. Drop still commits previewOrder.
+  const [settledPreview, setSettledPreview] = useState<{
+    state: NonNullable<typeof previewState>;
+    futures: typeof previewFutures;
+  } | null>(null);
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setSettledPreview(previewState ? { state: previewState, futures: previewFutures } : null);
+    }, previewState ? 180 : 0);
+    return () => window.clearTimeout(timer);
+  }, [previewState, previewFutures]);
+  const previewPlan = useSetPlan(
+    previewState ? settledPreview?.state.entries : undefined,
+    trackMap,
+    set ? { policy: set.tempo_policy, setTempoBpm: set.set_tempo_bpm } : undefined
+  );
+  const [readyPreview, setReadyPreview] = useState<{
+    plan: SetPlan;
+    futures: typeof previewFutures;
+  } | null>(null);
+  if (!previewState && readyPreview) {
+    setReadyPreview(null);
+  } else if (previewState && previewPlan && settledPreview && (
+    readyPreview?.plan !== previewPlan || readyPreview?.futures !== settledPreview.futures
+  )) {
+    // Retain plan and markers together while a newly restored pin loads.
+    setReadyPreview({ plan: previewPlan, futures: settledPreview.futures });
+  }
 
   // What the row stack renders (sets 23): the hypothetical state while a
   // preview is live, the committed state otherwise. Everything the rows
-  // read (entries, plan, futures) switches together, so the list is
-  // internally consistent mid-drag. Row affordances stay mounted (layout
+  // read switches to that order; timing cells wait for its matching plan
+  // rather than showing another order's times. Row affordances stay mounted (layout
   // stability for the dragover math) but are inert mid-drag — no click
   // can happen during an HTML5 drag.
   const displayEntries = previewState?.entries ?? entries;
-  const displayPlan = previewState ? previewPlan : plan;
+  const displayPlan = previewState
+    ? (settledPreview?.state === previewState ? previewPlan : undefined)
+    : plan;
   // Displayed order for the stable suggest-insert handler (issue 42).
   const displayEntriesRef = useRef(displayEntries);
   displayEntriesRef.current = displayEntries;
@@ -557,10 +603,10 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
     return displayEntries.map((e, i) => {
       const next = displayEntries[i + 1];
       return next
-        ? buildPairEvidence(pairStore, takes, e.trackId, next.trackId)
-        : { transitions: [], takes: [] };
+        ? (evidenceByPair.get(`${e.trackId}:${next.trackId}`) ?? EMPTY_EVIDENCE)
+        : EMPTY_EVIDENCE;
     });
-  }, [displayEntries, pairStore, takes]);
+  }, [displayEntries, evidenceByPair]);
   const warningsByAdj = useMemo(() => {
     if (!displayPlan) return undefined;
     return displayPlan.adjacencies.map((_, i) =>
@@ -585,26 +631,31 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
   // preview colors the hypothetical neighbors. Memoized per-row objects
   // (issue 42): fresh {kind, bpm} literals per render would defeat the
   // row memo.
+  const predecessorBpmRefs = useMemo(() => new Map(
+    [...(trackMap?.values() ?? [])].map((track) => {
+      const bpm = trackEffectiveBpm(track);
+      return [track.id, bpm ? { kind: 'predecessor', bpm } as BpmDeltaRef : null];
+    })
+  ), [trackMap]);
+  const firstBpm = displayEntries?.[0]
+    ? predecessorBpmRefs.get(displayEntries[0].trackId)?.bpm
+    : null;
+  const fixedBpm = set?.set_tempo_bpm ?? firstBpm;
+  const fixedBpmRef = useMemo<BpmDeltaRef | null>(
+    () => fixedBpm ? { kind: 'set-tempo', bpm: fixedBpm } : null,
+    [fixedBpm]
+  );
   const bpmRefs = useMemo<(BpmDeltaRef | null)[] | undefined>(() => {
     if (!displayEntries) return undefined;
-    const effectiveBpmOf = (trackId: number): number | null => {
-      const t = trackMap?.get(trackId);
-      return t ? trackEffectiveBpm(t) : null;
-    };
     if (set?.tempo_policy === 'fixed') {
-      const bpm =
-        set.set_tempo_bpm ??
-        (displayEntries.length > 0 ? effectiveBpmOf(displayEntries[0].trackId) : null);
-      const fixedRef: BpmDeltaRef | null = bpm ? { kind: 'set-tempo', bpm } : null;
-      return displayEntries.map(() => fixedRef);
+      return displayEntries.map(() => fixedBpmRef);
     }
     return displayEntries.map((_, i) => {
       const prev = displayEntries[i - 1];
       if (!prev) return null; // first row under Riding: no reference
-      const bpm = effectiveBpmOf(prev.trackId);
-      return bpm ? { kind: 'predecessor', bpm } : null;
+      return predecessorBpmRefs.get(prev.trackId) ?? null;
     });
-  }, [displayEntries, trackMap, set?.tempo_policy, set?.set_tempo_bpm]);
+  }, [displayEntries, predecessorBpmRefs, set?.tempo_policy, fixedBpmRef]);
 
   // Real hot cues for the ladder clips — the same bulk query useSetPlan
   // rides (issue 43: one GET + one resolution for the whole set, and a
@@ -1368,8 +1419,8 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
         <OverviewLadder
           key={setId}
           setId={setId}
-          plan={previewOrder && previewPlan ? previewPlan : ladderPlan}
-          previewFutures={previewOrder && previewPlan ? previewFutures : undefined}
+          plan={readyPreview?.plan ?? ladderPlan}
+          previewFutures={readyPreview?.futures}
           tracks={trackMap}
           hotCuesByTrack={hotCuesByTrack}
           conducting={conductingThis}
