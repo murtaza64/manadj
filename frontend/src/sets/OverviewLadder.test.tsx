@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { setFollowPlayback } from './conductorStore';
 import { OverviewLadder } from './OverviewLadder';
 import { planSet } from './planner';
-import { setLadderView } from './setStore';
+import { getLadderView, setLadderView } from './setStore';
 
 const conductor = vi.hoisted(() => ({ getMixTime: vi.fn<() => number>() }));
 vi.mock('./conductorStore', () => ({
@@ -124,6 +124,26 @@ function mountLadder() {
   }
   return { outer, scrollTo, frame, interruptScroll };
 }
+
+describe('OverviewLadder zoom', () => {
+  it.each([
+    { ctrlKey: true, metaKey: false, sensitivity: 0.01 },
+    { ctrlKey: false, metaKey: true, sensitivity: 0.01 },
+    { ctrlKey: false, metaKey: false, sensitivity: 0.002 },
+  ])('uses $sensitivity sensitivity for ctrl=$ctrlKey meta=$metaKey', (modifiers) => {
+    const { outer } = mountLadder();
+    conductor.getMixTime.mockReturnValue(100);
+    for (const deltaY of [-10, 10]) {
+      const before = getLadderView(1)!.zoom;
+      const event = new WheelEvent('wheel', { deltaY, ...modifiers, cancelable: true });
+      act(() => outer.dispatchEvent(event));
+      expect(event.defaultPrevented).toBe(true);
+      expect(getLadderView(1)!.zoom).toBeCloseTo(before * Math.exp(-deltaY * modifiers.sensitivity));
+    }
+    expect(getLadderView(1)!.zoom).toBeCloseTo(6);
+    expect(setFollowPlayback).not.toHaveBeenCalled();
+  });
+});
 
 describe('OverviewLadder follow playback', () => {
   it.each(['initial play', 'seek'] as const)(

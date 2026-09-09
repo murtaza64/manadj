@@ -36,7 +36,122 @@ const baseTr = (over: Partial<Transition> = {}): Transition => ({
   ...over,
 });
 
+function expectDrawnPlayback(
+  plan: ReturnType<typeof planSet>,
+  entryIndex: number,
+  samples: [number, number][]
+) {
+  const segments = clipContentSegments(plan, durOf)[entryIndex];
+  const playback = samples.map(([time, trackTime]) => {
+    const actual = planStateAt(plan, time).decks[plan.entries[entryIndex].deck];
+    expect(actual.entryIndex).toBe(entryIndex);
+    expect(actual.playing).toBe(true);
+    expect(actual.trackTime).toBeCloseTo(trackTime, 6);
+    return [time, actual.trackTime] as const;
+  });
+  for (const [time, trackTime] of playback) {
+    const segment = segments.find((s) => time >= s.mixStart && time < s.mixEnd);
+    expect(segment, `audible content at mix ${time}`).toBeDefined();
+    const drawn = segment!.trackStart + (time - segment!.mixStart) *
+      (segment!.trackEnd - segment!.trackStart) / (segment!.mixEnd - segment!.mixStart);
+    expect(drawn, `drawn track position at mix ${time}`).toBeCloseTo(trackTime, 6);
+  }
+  return segments;
+}
+
 describe('clipContentSegments', () => {
+  describe.each([
+    { policy: 'riding', rate: 1 },
+    { policy: 'fixed', rate: 1.1 },
+  ] as const)('outgoing jumps under $policy tempo', ({ policy, rate }) => {
+    it.each([
+      { name: 'backward jump', jump: { x: 0.5, deltaSec: -5 }, positions: [65, 67, 69, 74.9], runs: 2 },
+      { name: 'forward jump', jump: { x: 0.5, deltaSec: 5 }, positions: [75, 77, 79, 84.9], runs: 2 },
+      { name: 'counted repeats', jump: { x: 0.5, deltaSec: -2, count: 3 }, positions: [68, 68, 68, 73.9], runs: 4 },
+    ])('$name splices the outgoing waveform without stretching its solo lead', ({ jump, positions, runs }) => {
+      const plan = planSet({
+        ...twoTracks(baseTr({ jumpsA: [jump] })),
+        tempo: { policy, setTempoBpm: 132 },
+      });
+      expect(plan.entries[0].rate).toBeCloseTo(rate, 6);
+      const samples: [number, number][] = [
+        [30, 30], [69.9, 69.9],
+        [70, positions[0]], [72, positions[1]], [74, positions[2]], [79.9, positions[3]],
+      ];
+      const segments = expectDrawnPlayback(plan, 0, samples.map(([time, pos]) => [time / rate, pos]));
+      expect(segments).toHaveLength(runs);
+      for (let k = 1; k < segments.length; k++) {
+        expect(segments[k].mixStart).toBeCloseTo((70 + (k - 1) * 2) / rate, 6);
+        expect(segments[k].mixStart).toBeCloseTo(segments[k - 1].mixEnd, 6);
+        expect(segments[k].trackStart).toBeCloseTo(segments[k - 1].trackEnd + jump.deltaSec, 6);
+      }
+      expect(segments[segments.length - 1].mixEnd).toBeCloseTo(plan.entries[0].exitMixSec, 6);
+      expect(segments[segments.length - 1].trackEnd).toBeCloseTo(plan.entries[0].exitSec, 6);
+    });
+  });
+
+  it('preserves a middle entry\'s incoming jump, solo, and outgoing jump', () => {
+    const plan = planSet({
+      entries: [
+        { trackId: 1, pin: { kind: 'transition', uuid: 't1' } },
+        { trackId: 2, pin: { kind: 'transition', uuid: 't2' } },
+        { trackId: 3, pin: null },
+      ],
+      tracks: { 1: facts(90), 2: facts(300), 3: facts(300) },
+      transitionsByUuid: {
+        t1: baseTr({ jumps: [{ x: 0.5, deltaSec: -5 }] }),
+        t2: baseTr({ jumpsA: [{ x: 0.5, deltaSec: -5 }] }),
+      },
+      takesByUuid: {},
+    });
+    const segments = expectDrawnPlayback(plan, 1, [
+      [65, 13], [69.9, 17.9], [70, 13], [75, 18], [80, 23],
+      [100, 43], [126.9, 69.9], [127, 65], [132, 70], [136.9, 74.9],
+    ]);
+    expect(segments).toHaveLength(3);
+    expect(segments.map((s) => s.mixStart)).toEqual([60, 70, 127]);
+  });
+
+  it('preserves a Routine exit slot\'s trace and solo before its outgoing pair jump', () => {
+    const plan = planSet({
+      entries: [
+        { trackId: 1, pin: null },
+        { trackId: 2, pin: null },
+        { trackId: 3, pin: { kind: 'transition', uuid: 't1' } },
+        { trackId: 4, pin: null },
+      ],
+      tracks: { 1: facts(300), 2: facts(300), 3: facts(300), 4: facts(300) },
+      transitionsByUuid: { t1: baseTr({ jumpsA: [{ x: 0.5, deltaSec: -5 }] }) },
+      takesByUuid: {},
+      routines: [{
+        startEntryIndex: 0,
+        routine: {
+          cast: [1, 2, 3],
+          entryOffsetsBeats: [0, 16, 32],
+          entryPositions: [60, 0, 10],
+          durationBeats: 64,
+          events: Array.from({ length: 17 }, (_, i) => {
+            const beat = i * 4;
+            return {
+              kind: 'tick', beat,
+              playheads: {
+                0: 60 + beat * 0.5,
+                ...(beat >= 16 ? { 1: (beat - 16) * 0.5 } : {}),
+                ...(beat >= 32 ? { 2: 10 + (beat - 32) * 0.5 } : {}),
+              },
+            };
+          }),
+        },
+      }],
+    });
+    const segments = expectDrawnPlayback(plan, 2, [
+      [80, 14], [90, 24], [92, 26], [110, 44],
+      [135.9, 69.9], [136, 65], [140, 69], [145.9, 74.9],
+    ]);
+    expect(segments).toHaveLength(2);
+    expect(segments.map((s) => s.mixStart)).toEqual([76, 136]);
+  });
+
   it.each<TempoPolicyInput>([
     { policy: 'riding' },
     { policy: 'fixed', setTempoBpm: 132 },
