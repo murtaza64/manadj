@@ -69,7 +69,7 @@ import { RoutinePlayer } from './RoutinePlayer';
 import { RoutineTimeline, type TrimRange } from './RoutineTimeline';
 import { consumeRoutineEdit, OPEN_ROUTINE_EVENT } from './openRoutine';
 import { consumeMixEdit, OPEN_MIX_EVENT } from './openMix';
-import { setAdjacencyPin } from '../sets/setStore';
+import { repointTakePinsLocal, setAdjacencyPin } from '../sets/setStore';
 import type { AdjacencyPin } from '../sets/adjacency';
 import { openCandidateInEditor, openRoutineTakeInEditor } from './openFlow';
 import { openRoutineSource } from './provenance';
@@ -1266,6 +1266,8 @@ export default function RoutineEditorView() {
         const saved = await api.transitions.replacePair(o.aTrackId, o.bTrackId, items);
         reconcilePairFromServer(`${o.aTrackId}:${o.bTrackId}`, saved as never);
         await api.takes.setPromoted(o.reviewTakeUuid, o.uuid);
+        // Mirror the server rewrite before a later Set edit can push stale Take pins.
+        repointTakePinsLocal(o.reviewTakeUuid, o.uuid);
         await Promise.all([
           queryClient.invalidateQueries({ queryKey: ['transitions'] }),
           queryClient.invalidateQueries({ queryKey: ['takes'] }),

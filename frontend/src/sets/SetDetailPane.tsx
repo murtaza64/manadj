@@ -2372,16 +2372,15 @@ const RoutinePinRow = memo(function RoutinePinRow({
         ▾ ◆ ROUTINE {label}
       </button>
       <button
-        className="set-chip-btn"
+        className="set-chip-btn set-icon-btn"
         data-routine-edit
         onClick={(e) => {
           e.stopPropagation();
           requestRoutineEdit({ routineUuid });
         }}
-        title="Open this Routine in the Routine editor (gh#170) — slot view, replay audition, boundary trim"
-        style={{ color: ROUTINE_COLOR }}
+        title="Open this Routine in the Mix editor"
       >
-        ⧉ edit
+        ⋈
       </button>
       {onOpenSource && (
         <button
