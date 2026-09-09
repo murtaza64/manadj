@@ -163,6 +163,9 @@ The stable identity of a cast slot (client-minted at drag-in), which lanes, Jump
 **Routine playback bounds**:
 The start and end of a saved Routine's playback, independent of its source Session. Resizing retains material and edits outside the bounds; expanding restores that material or continues the artifact's boundary motion and control values. Bounds must retain playable material from every cast slot: delete the slot explicitly before trimming further. Muting a slot does not remove its membership or change these limits. Candidate trimming instead changes the Session excerpt being considered for promotion.
 
+**Track-start trim**:
+Revealing more intro or shortening the initial passage of an incoming Routine slot without shifting its later material, jumps, or automation. Extending uses the track's own continuation, not more Session evidence. Limited to the initial continuous passage and the neighboring entries; never reorders or removes slots. The Routine's entry slot uses the Routine playback start instead. Distinct from moving the whole slot or sliding its material. Undoable; trimmed source material remains retained.
+
 **Practice rep**:
 A detected return or alternation attributable to rehearsal rather than performance: backward transport motion on the returning Deck during the away-gap (re-seeking to replay a junction), or a pair-isolated alternation (only the two Tracks audible while they trade repeatedly — fader-drill reps). Excluded from style mining, Move candidate suggestion, and any evidence tier; retained in Sessions as ordinary events (the log is impartial — practice classification is a read-time verdict, and its thresholds are tunable heuristics).
 

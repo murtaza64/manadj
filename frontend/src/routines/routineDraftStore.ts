@@ -33,6 +33,7 @@ const clone = (e: RoutineEdits): RoutineEdits => ({
   trims: { ...e.trims },
   entryOffsets: { ...e.entryOffsets },
   ...(e.playbackBounds ? { playbackBounds: { ...e.playbackBounds } } : {}),
+  ...(e.startTrims ? { startTrims: { ...e.startTrims } } : {}),
 });
 
 /** Rebase one slot's authored edits from a drag-start BASE by deltaBeats
@@ -126,6 +127,18 @@ export class RoutineDraftStore {
     this.mutate('playback-bounds', (e) => {
       if (bounds) e.playbackBounds = { ...bounds };
       else delete e.playbackBounds;
+    });
+  }
+
+  setStartTrim(slotId: string, beats: number): void {
+    if (!Number.isFinite(beats)) return;
+    this.mutate(`start-trim:${slotId}`, (e) => {
+      if (Math.abs(beats) < 1e-6) {
+        delete e.startTrims?.[slotId];
+        if (Object.keys(e.startTrims ?? {}).length === 0) delete e.startTrims;
+      } else {
+        (e.startTrims ??= {})[slotId] = beats;
+      }
     });
   }
 

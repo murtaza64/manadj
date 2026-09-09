@@ -155,6 +155,16 @@ def test_edits_unknown_routine_404(client):
     assert res.status_code == 404
 
 
+def test_start_trim_and_recorded_deletion_persist_without_changing_source(client, promoted_routine):
+    uuid = promoted_routine["uuid"]
+    before = client.get(f"/api/routines/{uuid}").json()
+    edits = {**EDITS, "startTrims": {"1": -16.0}}
+    res = client.put(f"/api/routines/{uuid}/edits", json={"edits": edits})
+    assert res.status_code == 200, res.text
+    after = client.get(f"/api/routines/{uuid}").json()
+    assert after == {**before, "edits": edits}
+
+
 def test_retrim_rebases_edits(client, promoted_routine):
     uuid = promoted_routine["uuid"]
     client.put(f"/api/routines/{uuid}/edits", json={"edits": EDITS})

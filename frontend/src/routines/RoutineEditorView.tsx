@@ -856,6 +856,7 @@ export default function RoutineEditorView() {
         n: draft.edits.nudges,
         eo: draft.edits.entryOffsets,
         bounds: draft.edits.playbackBounds,
+        starts: draft.edits.startTrims,
       }),
     [
       draft.edits.jumps,
@@ -865,6 +866,7 @@ export default function RoutineEditorView() {
       draft.edits.nudges,
       draft.edits.entryOffsets,
       draft.edits.playbackBounds,
+      draft.edits.startTrims,
     ]
   );
   const baseEditor: EditorRoutine | null = useMemo(() => {

@@ -134,11 +134,9 @@ export interface TrimRange {
 type JumpMarker =
   | { kind: 'authored'; slotId: string; jump: AuthoredJump }
   | { kind: 'recorded'; slotId: string; beat: number; deltaSec: number }
-  | { kind: 'ghost'; slotId: string; beat: number }
   // Play/pause events (gh#190): first-class like jumps.
   | { kind: 'authored-pause'; slotId: string; pause: AuthoredPause }
-  | { kind: 'recorded-pause'; slotId: string; beat: number; endBeat: number }
-  | { kind: 'ghost-pause'; slotId: string; beat: number; endBeat: number };
+  | { kind: 'recorded-pause'; slotId: string; beat: number; endBeat: number };
 
 function markerBeat(m: JumpMarker): number {
   return m.kind === 'authored' ? m.jump.beat : m.kind === 'authored-pause' ? m.pause.beat : m.beat;
@@ -196,9 +194,8 @@ export function RoutineTimeline({
    * shared with editor.planned, so run/waveform memos survive lane drags
    * (the ~60 Hz hot path). */
   plannedForRuns: PlannedRoutine;
-  /** Recorded discontinuities from the RAW build (no edits), keyed by
-   * slotId — marker provenance stays visible even once removed
-   * (ghosts). */
+   /** Recorded discontinuities from the RAW build (no edits), keyed by
+    * slotId. Suppressed events stay in the draft metadata, not the UI. */
   recordedJumpsBySlot: Record<string, RecordedJump[]>;
   /** Recorded interior HOLDS from the RAW build (gh#190 play/pause). */
   recordedPausesBySlot: Record<string, RecordedPause[]>;
@@ -469,10 +466,10 @@ export function RoutineTimeline({
   const bakedEntryRef = useRef(bakedEntryBySlotId);
   bakedEntryRef.current = bakedEntryBySlotId;
 
-  /** A slot's EFFECTIVE entry beat (override included) off the live build. */
-  const effectiveEntryBeat = (s: PlannedRoutineSlot): number => {
+  /** Whole-track moves shift the anchor, not the independently trimmed intro. */
+  const entryAnchorBeat = (s: PlannedRoutineSlot): number => {
     const p = plannedRef.current;
-    return (s.entryMixSec - p.beatOriginMixSec) / p.secPerBeat;
+    return s.startTrim?.anchorBeat ?? (s.entryMixSec - p.beatOriginMixSec) / p.secPerBeat;
   };
 
   // ── The select-mode slot drag: TWO AXES (ADR 0038, #207 slice 2).
@@ -511,7 +508,7 @@ export function RoutineTimeline({
               return [
                 sid,
                 {
-                  entryBeat: ps ? effectiveEntryBeat(ps) : 0,
+                  entryBeat: ps ? entryAnchorBeat(ps) : 0,
                   bakedEntryBeat: bakedEntryRef.current[sid] ?? 0,
                   nudgeSec: edits0.nudges[sid] ?? 0,
                   lanes,
@@ -620,8 +617,8 @@ export function RoutineTimeline({
           above && ev.clientY < above.midY ? above : below && ev.clientY > below.midY ? below : null;
         if (!target) return;
         const grabbed = slots[gi];
-        const eG = effectiveEntryBeat(grabbed);
-        const eT = effectiveEntryBeat(target.slot);
+        const eG = entryAnchorBeat(grabbed);
+        const eT = entryAnchorBeat(target.slot);
         const baked = bakedEntryRef.current;
         const override = (slotId: string, beat: number): number | null =>
           Math.abs(beat - (baked[slotId] ?? NaN)) < 1e-9 ? null : beat;
@@ -711,8 +708,7 @@ export function RoutineTimeline({
   const plannedRef = useRef(planned);
   plannedRef.current = planned;
 
-  // ── Jump insertion (jump mode: SINGLE click — ADR 0038; replaces the
-  // dblclick/alt+dblclick overloads that kept colliding with UI clicks).
+  // Jump mode: single click; Select: waveform-only double-click (ADR 0038).
   // The popup carries jump⇄pause and displacement, so a plain insert +
   // popover covers pause authoring too.
   const insertJumpAt = useCallback(
@@ -726,7 +722,8 @@ export function RoutineTimeline({
       if (px <= 0) return;
       let beat = s + (clientX - rect.left) / px;
       if (!shiftKey) beat = Math.round(beat); // beat magnet; shift = free
-      beat = Math.max(0, Math.min(beat, duration));
+      // Visible context and expanded bounds keep the original beat axis.
+      if (pairModeRef.current) beat = Math.max(0, Math.min(beat, duration));
       const track = tracks.get(slot.trackId);
       const trackBpm = track?.bpm ?? null;
       // Default: a 4-track-beat BACKWARD jump — loopable (the pair
@@ -741,7 +738,20 @@ export function RoutineTimeline({
       draftStore.addJump(jump);
       setPopover({ marker: { kind: 'authored', slotId: slot.slotId, jump }, x: beat });
     },
-    [draftStore, duration, tracks]
+    [draftStore, tracks, duration]
+  );
+
+  const onRowsInsertClick = useCallback(
+    (e: React.MouseEvent) => {
+      if (mode === 'pan') return;
+      if (mode === 'select' ? e.type !== 'dblclick' : e.type !== 'click' || e.detail > 1) return;
+      const target = e.target as HTMLElement;
+      // Only the waveform surface, never its marker/popover/control children.
+      if (!target.matches('.rt-wave-row, .rt-wave-row > canvas')) return;
+      const slotId = target.closest('.rt-wave-row')?.getAttribute('data-slot');
+      if (slotId != null) insertJumpAt(e.clientX, e.shiftKey, slotId);
+    },
+    [mode, insertJumpAt]
   );
 
   // ── Mode-dispatched canvas gestures (ADR 0038) ───────────────────────
@@ -751,7 +761,7 @@ export function RoutineTimeline({
     (e: React.PointerEvent) => {
       if (
         (e.target as HTMLElement).closest(
-          '.rt-trimhandle, .rt-jump, .rt-lanetoggles, .rt-lanestrip, .rt-jump-popover, .rt-laneauthor, .rt-slotpanel, .rt-panelcol'
+          '.rt-trimhandle, .rt-track-start, .rt-jump, .rt-lanetoggles, .rt-lanestrip, .rt-jump-popover, .rt-laneauthor, .rt-slotpanel, .rt-panelcol'
         )
       )
         return;
@@ -759,8 +769,7 @@ export function RoutineTimeline({
       const slotId = slotEl ? slotEl.getAttribute('data-slot') : null;
       if (mode === 'jump') {
         if (slotId !== null) {
-          setPopover(null);
-          insertJumpAt(e.clientX, e.shiftKey, slotId);
+          // Insert on click: pointerdown.detail is not a reliable click count.
           return;
         }
         // Background falls through to the modeless seek below.
@@ -812,7 +821,7 @@ export function RoutineTimeline({
       seekAtClientX(e.clientX);
       setPopover(null);
     },
-    [mode, seekAtClientX, selectedSlots, beginSlide, insertJumpAt]
+    [mode, seekAtClientX, selectedSlots, beginSlide]
   );
 
   // Pan mode grabs EVERYTHING at the capture phase (gh#207 review
@@ -838,6 +847,41 @@ export function RoutineTimeline({
   const onRowsPointerUp = useCallback(() => {
     scrubbing.current = false;
   }, []);
+
+  const onTrackStartDown = (slot: PlannedRoutineSlot) => (e: React.PointerEvent) => {
+    const limits = slot.startTrim;
+    if (!limits || pairMode || mode !== 'select') return;
+    e.preventDefault();
+    e.stopPropagation();
+    setPopover(null);
+    const grabbedX = e.clientX;
+    const grabbedBeat = (slot.entryMixSec - planned.beatOriginMixSec) / planned.secPerBeat;
+    const grabbedScroll = viewRef.current.scrollBeat;
+    const previous = document.body.style.userSelect;
+    document.body.style.userSelect = 'none';
+    const move = (event: PointerEvent) => {
+      const el = rowsRef.current;
+      const { pxPerBeat: px, scrollBeat: scroll } = viewRef.current;
+      if (!el || px <= 0) return;
+      let beat = grabbedBeat + (event.clientX - grabbedX) / px + scroll - grabbedScroll;
+      if (!event.shiftKey) {
+        const step = snapStepBeats(px);
+        beat = Math.round(beat / step) * step;
+      }
+      beat = Math.max(limits.minBeat, Math.min(beat, limits.maxBeat));
+      draftStore.setStartTrim(slot.slotId, beat - limits.anchorBeat);
+    };
+    const finish = () => {
+      document.body.style.userSelect = previous;
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', finish);
+      window.removeEventListener('pointercancel', finish);
+      draftStore.endGesture();
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', finish);
+    window.addEventListener('pointercancel', finish);
+  };
 
   // ── Trim handle drag (tier 3) ────────────────────────────────────────
   const trimDrag = useRef<'start' | 'end' | null>(null);
@@ -905,7 +949,7 @@ export function RoutineTimeline({
         if (px <= 0) return;
         let beat = s + (ev.clientX - rect.left) / px;
         if (!ev.shiftKey) beat = Math.round(beat); // beat magnet; shift = free
-        beat = Math.max(0, Math.min(beat, duration));
+        if (pairModeRef.current) beat = Math.max(0, Math.min(beat, duration));
         if (marker.kind === 'authored') draftStore.updateJump(drag.id, { beat });
         else draftStore.updatePause(drag.id, { beat });
       };
@@ -1064,17 +1108,8 @@ export function RoutineTimeline({
       const authoredJ = edits.jumps.filter((j) => j.slotId === slot.slotId);
       for (const rj of recordedJumpsBySlot[slot.slotId] ?? []) {
         const isRemoved = removed.some((r) => Math.abs(r.beat - rj.beat) < 0.01);
-        // A CONVERSION (removed + authored at the same beat) shows only
-        // the authored marker; the ghost reappears if the edited jump is
-        // dragged away (still restorable).
-        const converted =
-          isRemoved && authoredJ.some((j) => Math.abs(j.beat - rj.beat) < 0.01);
-        if (converted) continue;
-        out.push(
-          isRemoved
-            ? { kind: 'ghost', slotId: slot.slotId, beat: rj.beat }
-            : { kind: 'recorded', slotId: slot.slotId, beat: rj.beat, deltaSec: rj.deltaSec }
-        );
+        if (isRemoved) continue;
+        out.push({ kind: 'recorded', slotId: slot.slotId, beat: rj.beat, deltaSec: rj.deltaSec });
       }
       for (const j of authoredJ) {
         out.push({ kind: 'authored', slotId: slot.slotId, jump: j });
@@ -1084,16 +1119,8 @@ export function RoutineTimeline({
       const authoredP = edits.pauses.filter((p) => p.slotId === slot.slotId);
       for (const rp of recordedPausesBySlot[slot.slotId] ?? []) {
         const isRemoved = removedP.some((r) => Math.abs(r.beat - rp.beat) < 0.01);
-        // A conversion (removed + authored at the same beat) shows only
-        // the authored marker — no ghost under it.
-        const converted =
-          isRemoved && authoredP.some((p) => Math.abs(p.beat - rp.beat) < 0.01);
-        if (converted) continue;
-        out.push(
-          isRemoved
-            ? { kind: 'ghost-pause', slotId: slot.slotId, beat: rp.beat, endBeat: rp.endBeat }
-            : { kind: 'recorded-pause', slotId: slot.slotId, beat: rp.beat, endBeat: rp.endBeat }
-        );
+        if (isRemoved) continue;
+        out.push({ kind: 'recorded-pause', slotId: slot.slotId, beat: rp.beat, endBeat: rp.endBeat });
       }
       for (const p of authoredP) {
         out.push({ kind: 'authored-pause', slotId: slot.slotId, pause: p });
@@ -1101,6 +1128,19 @@ export function RoutineTimeline({
       return out;
     });
   }, [planned, edits, recordedJumpsBySlot, recordedPausesBySlot]);
+
+  // Undo/redo or another draft edit can invalidate the open marker.
+  const livePopoverMarker = popover && jumpMarkers.flat().find((m) =>
+    m.slotId === popover.marker.slotId && m.kind === popover.marker.kind &&
+    (m.kind === 'authored' && popover.marker.kind === 'authored'
+      ? m.jump.id === popover.marker.jump.id
+      : m.kind === 'authored-pause' && popover.marker.kind === 'authored-pause'
+        ? m.pause.id === popover.marker.pause.id
+        : markerBeat(m) === markerBeat(popover.marker))
+  );
+  useEffect(() => {
+    if (popover && !livePopoverMarker) setPopover(null);
+  }, [popover, livePopoverMarker]);
 
   // ── Canvas drawing (waveform rows + ruler) ───────────────────────────
   useLayoutEffect(() => {
@@ -1481,6 +1521,8 @@ export function RoutineTimeline({
         ref={rowsRef}
         onPointerDownCapture={onRowsPointerDownCapture}
         onPointerDown={onRowsPointerDown}
+        onClick={onRowsInsertClick}
+        onDoubleClick={onRowsInsertClick}
         onPointerMove={onRowsPointerMove}
         onPointerUp={onRowsPointerUp}
         onPointerCancel={onRowsPointerUp}
@@ -1501,8 +1543,7 @@ export function RoutineTimeline({
               {/* Fixed-width DIM PANEL (gh#190 iteration): spans the whole
                   slot block behind the left-side controls — track data in
                   three rows (title / artist / deck·bpm·key·extra), titles
-                  truncating. No temporal-offset controls: dragging owns
-                  that. */}
+                   truncating. */}
               <div className="rt-slotpanel">
                 <div className="rt-sp-title">
                   <span className="rt-slotnum" style={{ background: slotAccent(slot.deck) }}>
@@ -1562,6 +1603,33 @@ export function RoutineTimeline({
                     </button>
                   )}
                 </div>
+                {!pairMode && slot.slot > 0 && slot.startTrim && (
+                  <label className="rt-start-control" title="Trim the intro; later audio, jumps and alignment stay fixed. You can also drag the track's left edge.">
+                    Start
+                    <input
+                      aria-label={`Track ${slot.slot + 1} start beat`}
+                      type="number" step={1}
+                      min={slot.startTrim.minBeat} max={slot.startTrim.maxBeat}
+                      value={Number(((slot.entryMixSec - planned.beatOriginMixSec) / planned.secPerBeat).toFixed(2))}
+                      onChange={(e) => {
+                        if (e.target.value === '') return;
+                        const beat = Number(e.target.value);
+                        if (!Number.isFinite(beat)) return;
+                        const { minBeat, maxBeat, anchorBeat } = slot.startTrim!;
+                        draftStore.setStartTrim(slot.slotId, Math.max(minBeat, Math.min(beat, maxBeat)) - anchorBeat);
+                      }}
+                      onBlur={() => draftStore.endGesture()}
+                      onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+                    />
+                    b <span>{slot.entryTrackSec.toFixed(1)}s</span>
+                    {edits.startTrims?.[slot.slotId] !== undefined && (
+                      <button type="button" title="Restore original track start" onClick={() => {
+                        draftStore.setStartTrim(slot.slotId, 0);
+                        draftStore.endGesture();
+                      }}>↺</button>
+                    )}
+                  </label>
+                )}
                 {/* Channel trim (gh#190): the mixer's own knob idiom, PINNED
                     bottom-right of the panel (out of the text rows).
                     AVERAGE semantics (gh#206): the knob reads the slot's
@@ -1638,6 +1706,15 @@ export function RoutineTimeline({
                   }}
                   style={{ height: WAVE_H }}
                 />
+                {!pairMode && mode === 'select' && slot.slot > 0 && slot.startTrim && (
+                  <div
+                    className="rt-track-start"
+                    style={{ left: xOf((slot.entryMixSec - planned.beatOriginMixSec) / planned.secPerBeat),
+                      borderColor: slotAccent(slot.deck) }}
+                    onPointerDown={onTrackStartDown(slot)}
+                    title={`Track start: ${slot.entryTrackSec.toFixed(2)}s. Drag to reveal or trim intro; later alignment stays fixed. Shift = fine.`}
+                  />
+                )}
                 {(() => {
                   // Marker LABEL layout (#221 redirect): build first, then
                   // STAGGER into 3 rows at low zoom; when even staggering
@@ -1667,15 +1744,6 @@ export function RoutineTimeline({
                     let label: string;
                     let title: string;
                     switch (marker.kind) {
-                      case 'ghost':
-                        label = '⊘ removed';
-                        title = 'Removed recorded jump (click to restore)';
-                        break;
-                      case 'ghost-pause':
-                        label = '⊘⏸ removed';
-                        title =
-                          'Removed recorded pause (click to restore — the hold plays again)';
-                        break;
                       case 'recorded-pause':
                         label = `⏸ ${fmtB(marker.endBeat - marker.beat)}b`;
                         title = 'Recorded pause (click: inspect/remove — removal plays through)';
@@ -1710,7 +1778,7 @@ export function RoutineTimeline({
                       }
                     }
                     const resumeBeat =
-                      marker.kind === 'recorded-pause' || marker.kind === 'ghost-pause'
+                      marker.kind === 'recorded-pause'
                         ? marker.endBeat
                         : marker.kind === 'authored-pause'
                           ? marker.pause.beat + marker.pause.durBeats
@@ -1873,11 +1941,11 @@ export function RoutineTimeline({
                   })}
                 </div>
                 {/* Jump popover (the pair editor's idiom). */}
-                {popover && popover.marker.slotId === slot.slotId && (
+                {popover && livePopoverMarker && livePopoverMarker.slotId === slot.slotId && (
                   <JumpPopover
-                    popover={popover}
+                    popover={{ ...popover, marker: livePopoverMarker }}
                     pairMode={pairMode}
-                    x={xOf(popover.x)}
+                    x={xOf(markerBeat(livePopoverMarker))}
                     trackBpm={trackBpm}
                     secPerBeat={planned.secPerBeat}
                     draftStore={draftStore}
@@ -2064,22 +2132,6 @@ function JumpPopover({
 }) {
   const m = popover.marker;
   const beatLen = trackBpm && trackBpm > 0 ? 60 / trackBpm : null;
-  if (m.kind === 'ghost-pause') {
-    return (
-      <div className="rt-jump-popover" style={{ left: Math.max(0, x - 40) }}>
-        <span>removed recorded pause</span>
-        <button
-          onClick={() => {
-            draftStore.restoreRecordedPause(m.slotId, m.beat);
-            onClose();
-          }}
-        >
-          restore
-        </button>
-        <button onClick={onClose}>✕</button>
-      </div>
-    );
-  }
   if (m.kind === 'recorded-pause') {
     return (
       <div className="rt-jump-popover" style={{ left: Math.max(0, x - 40) }}>
@@ -2095,29 +2147,13 @@ function JumpPopover({
         </button>
         <button
           className="rt-jump-delete"
-          title="Remove this recorded hold — replay plays through it"
+          title="Delete this recorded hold; replay plays through it. Restore only with Undo."
           onClick={() => {
             draftStore.removeRecordedPause(m.slotId, m.beat);
             onClose();
           }}
         >
           remove
-        </button>
-        <button onClick={onClose}>✕</button>
-      </div>
-    );
-  }
-  if (m.kind === 'ghost') {
-    return (
-      <div className="rt-jump-popover" style={{ left: Math.max(0, x - 40) }}>
-        <span>removed recorded jump</span>
-        <button
-          onClick={() => {
-            draftStore.restoreRecordedJump(m.slotId, m.beat);
-            onClose();
-          }}
-        >
-          restore
         </button>
         <button onClick={onClose}>✕</button>
       </div>
@@ -2131,7 +2167,7 @@ function JumpPopover({
           recorded Δ {beats !== null ? `${beats.toFixed(1)}b` : `${m.deltaSec.toFixed(2)}s`}
         </span>
         <button
-          title="Convert to an edited jump — movable/resizable; the recorded one stays restorable (one undo)"
+          title="Convert to an edited jump; the recorded one is suppressed. Undo restores it."
           onClick={() => {
             const jump = draftStore.convertRecordedJump(m.slotId, m.beat, m.deltaSec);
             onSwap({ kind: 'authored', slotId: m.slotId, jump });
@@ -2141,7 +2177,7 @@ function JumpPopover({
         </button>
         <button
           className="rt-jump-delete"
-          title="Remove this recorded discontinuity — replay restores continuity through it"
+          title="Delete this recorded discontinuity; replay restores continuity. Restore only with Undo."
           onClick={() => {
             draftStore.removeRecordedJump(m.slotId, m.beat);
             onClose();
@@ -2276,6 +2312,7 @@ function JumpPopover({
       )}
       <button
         className="rt-jump-delete"
+        title="Delete this event. Restore only with Undo."
         onClick={() => {
           if (p) draftStore.removePause(p.id);
           else draftStore.removeJump(j!.id);

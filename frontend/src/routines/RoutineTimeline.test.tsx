@@ -5,9 +5,10 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { RoutineDetailWire } from '../api/client';
 import { RoutineTimeline } from './RoutineTimeline';
 import type { RoutinePlayer } from './RoutinePlayer';
-import { buildEditorRoutine } from './routineEditorModel';
+import { buildEditorRoutine, recordedJumps, recordedPauses } from './routineEditorModel';
 import { RoutineDraftStore, useRoutineDraft } from './routineDraftStore';
 import { emptyEdits } from './routineDraft';
+import type { EditorMode } from './editorMode';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -25,17 +26,23 @@ let host: HTMLDivElement;
 let root: Root;
 let store: RoutineDraftStore;
 
-function Timeline() {
+function Timeline({ source = detail, mode = 'select', pairMode = false }: {
+  source?: RoutineDetailWire;
+  mode?: EditorMode;
+  pairMode?: boolean;
+}) {
   const { edits } = useRoutineDraft(store);
-  const editor = buildEditorRoutine(detail, [120, 120, 120], 120, edits)!;
+  const editor = buildEditorRoutine(source, [120, 120, 120], 120, edits)!;
+  const raw = buildEditorRoutine(source, [120, 120, 120], 120, emptyEdits()).planned;
   return <RoutineTimeline
     editor={editor} plannedForRuns={editor.planned}
-    recordedJumpsBySlot={{}} recordedPausesBySlot={{}}
+    recordedJumpsBySlot={Object.fromEntries(raw.slots.map((s) => [s.slotId, recordedJumps(s.trace)]))}
+    recordedPausesBySlot={Object.fromEntries(raw.slots.map((s) => [s.slotId, recordedPauses(s.trace)]))}
     tracks={new Map()} waves={new Map()} meters={new Map()} hotcues={new Map()}
     player={{ getBeat: () => 0 } as RoutinePlayer}
     draftStore={store} edits={edits} trim={editor.planned.playbackBounds}
     onTrimChange={(bounds) => store.setPlaybackBounds(bounds)}
-    onSeekBeat={() => {}} mode="select" onModeHome={() => {}}
+    onSeekBeat={() => {}} mode={mode} onModeHome={() => {}} pairMode={pairMode}
   />;
 }
 
@@ -71,9 +78,71 @@ function handles(): HTMLElement[] {
   return Array.from(host.querySelectorAll<HTMLElement>('.rt-trimhandle'));
 }
 
-function pointer(target: EventTarget, type: string, clientX = 0) {
-  act(() => target.dispatchEvent(new PointerEvent(type, { bubbles: true, clientX })));
+function pointer(target: EventTarget, type: string, clientX = 0, init: PointerEventInit = {}) {
+  act(() => target.dispatchEvent(new PointerEvent(type, { bubbles: true, clientX, ...init })));
 }
+
+function doubleClick(target: EventTarget, clientX = 0, shiftKey = false) {
+  for (const detail of [1, 2]) {
+    // Browsers need not populate pointerdown.detail; click carries the count.
+    pointer(target, 'pointerdown', clientX, { shiftKey });
+    pointer(target, 'pointerup', clientX, { shiftKey });
+    act(() => target.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX, detail, shiftKey })));
+  }
+  act(() => target.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, clientX, detail: 2, shiftKey })));
+}
+
+function wave(): HTMLCanvasElement {
+  return host.querySelector('.rt-wave-row > canvas')!;
+}
+
+function button(selector: string) {
+  const el = host.querySelector<HTMLButtonElement>(selector)!;
+  expect(el).not.toBeNull();
+  act(() => el.click());
+}
+
+function expectNoEvents() {
+  expect(host.querySelectorAll('.rt-jump, .rt-jump-pole, .rt-pause-link, .rt-jump-popover')).toHaveLength(0);
+  expect(host.textContent).not.toContain('removed');
+}
+
+it('trims an incoming track start without adding or moving jumps, with drag undo', () => {
+  const source = { ...detail, entry_positions: [60, 20, 10], events: [
+    { kind: 'tick', beat: 0, playheads: { '0': 60 } },
+    { kind: 'tick', beat: 64, playheads: { '0': 92, '1': 44, '2': 26 } },
+  ] };
+  act(() => root.render(<Timeline source={source} />));
+  const px = (1024 - 208) / (64 + 8);
+  const originX = 208 + 4 * px;
+  const handle = host.querySelector<HTMLElement>('.rt-track-start')!;
+  expect(handle).not.toBeNull();
+  expect(host.querySelectorAll('.rt-track-start')).toHaveLength(2);
+  pointer(handle, 'pointerdown', originX + 16 * px);
+  pointer(window, 'pointermove', originX + 8 * px, { shiftKey: true });
+  pointer(window, 'pointerup');
+  expect(store.getSnapshot().edits.startTrims?.['1']).toBeCloseTo(-8);
+  expect(store.getSnapshot().edits.jumps).toEqual([]);
+  expect(host.querySelector<HTMLInputElement>('[aria-label="Track 2 start beat"]')!.value).toBe('8');
+  act(() => store.undo());
+  expect(store.getSnapshot().edits.startTrims).toBeUndefined();
+  act(() => store.redo());
+  expect(store.getSnapshot().edits.startTrims?.['1']).toBeCloseTo(-8);
+  act(() => host.querySelector<HTMLButtonElement>('[title="Restore original track start"]')!.click());
+  expect(store.getSnapshot().edits.startTrims).toBeUndefined();
+});
+
+it('does not expose unpersistable start trims for pair artifacts', () => {
+  act(() => root.render(<Timeline pairMode />));
+  expect(host.querySelector('.rt-track-start')).toBeNull();
+  expect(host.querySelector('.rt-start-control')).toBeNull();
+});
+
+it('keeps track-start dragging Select-only while numeric controls stay modeless', () => {
+  act(() => root.render(<Timeline mode="jump" />));
+  expect(host.querySelector('.rt-track-start')).toBeNull();
+  expect(host.querySelector('.rt-start-control')).not.toBeNull();
+});
 
 it.each(['pointerup', 'pointercancel'])('seals one undo entry per handle drag on %s', (finish) => {
   const seal = vi.spyOn(store, 'endGesture');
@@ -124,4 +193,170 @@ it('fits widened bounds and keeps crop shading on the saved beat axis', () => {
   expect(Number.parseFloat(shades[0].style.width)).toBeCloseTo(8 * px);
   expect(Number.parseFloat(shades[1].style.width)).toBeCloseTo(8 * px);
   expect(host.querySelectorAll('.rt-slotblock')).toHaveLength(3);
+});
+
+it.each(['select', 'jump'] as const)('%s waveform double-click inserts once and opens pause conversion', (mode) => {
+  act(() => root.render(<Timeline mode={mode} />));
+  const add = vi.spyOn(store, 'addJump');
+  doubleClick(wave(), 208 + 20 * (816 / 72)); // beat 16 on the original fit
+  expect(add).toHaveBeenCalledTimes(1);
+  expect(store.getSnapshot().edits.jumps).toHaveLength(1);
+  expect(store.getSnapshot().edits.jumps[0].beat).toBe(16);
+  expect(host.querySelectorAll('.rt-jump.authored')).toHaveLength(1);
+  expect(host.querySelectorAll('.rt-jump-popover')).toHaveLength(1);
+  button('[title^="Pause: hold"]');
+  expect(store.getSnapshot().edits.jumps).toHaveLength(0);
+  expect(store.getSnapshot().edits.pauses).toMatchObject([{ slotId: '0', beat: 16, durBeats: 4 }]);
+  expect(host.querySelectorAll('.rt-jump.authored-pause')).toHaveLength(2);
+  expect(host.querySelectorAll('.rt-pause-link')).toHaveLength(1);
+});
+
+it('Select single-click selects without insertion; Jump single-click inserts', () => {
+  const target = wave();
+  pointer(target, 'pointerdown', 480);
+  pointer(target, 'pointerup', 480);
+  act(() => target.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: 480, detail: 1 })));
+  expect(host.querySelectorAll('.rt-selected')).toHaveLength(1);
+  expect(store.getSnapshot().edits.jumps).toHaveLength(0);
+  act(() => root.render(<Timeline mode="jump" />));
+  pointer(target, 'pointerdown', 480);
+  pointer(target, 'pointerup', 480);
+  act(() => target.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: 480, detail: 1 })));
+  expect(store.getSnapshot().edits.jumps).toHaveLength(1);
+});
+
+it('Pan double-click remains navigation and pairs still prohibit pause insertion', () => {
+  act(() => root.render(<Timeline mode="pan" />));
+  doubleClick(wave(), 480);
+  expectNoEvents();
+  expect(store.getSnapshot().canUndo).toBe(false);
+  act(() => root.render(<Timeline pairMode />));
+  doubleClick(wave(), 480);
+  const pause = host.querySelector<HTMLButtonElement>('[title^="Pauses are not part"]')!;
+  expect(pause.disabled).toBe(true);
+  act(() => pause.click());
+  expect(store.getSnapshot().edits.pauses).toHaveLength(0);
+  expect(store.getSnapshot().edits.jumps).toHaveLength(1);
+});
+
+it('double-click excludes chrome, panels, markers, popovers and automation', () => {
+  doubleClick(wave(), 480);
+  act(() => {
+    store.setLane('0', 'fader', [{ beat: 0, value: 1 }, { beat: 64, value: 1 }]);
+    store.endGesture();
+  });
+  const before = store.getSnapshot().edits;
+  for (const selector of [
+    '.rt-toolbar-float button', '.rt-ruler', '.rt-rows', '.rt-panelcol',
+    '.rt-slotpanel', '.rt-sp-trim', '.rt-lanetoggle', '.rt-jump', '.rt-jump-chip',
+    '.rt-jump-pole', '.rt-jump-popover', '.rt-jump-popover input',
+    '.rt-jump-popover button', '.rt-laneauthor', '.rt-lanestrip canvas',
+    '.rt-lanewindow canvas', '.rt-trimhandle', '.rt-trimgrip',
+  ]) {
+    const target = host.querySelector(selector);
+    expect(target, selector).not.toBeNull();
+    act(() => target!.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, clientX: 480, detail: 2 })));
+    expect(store.getSnapshot().edits.jumps, selector).toEqual(before.jumps);
+    expect(store.getSnapshot().edits.pauses, selector).toEqual(before.pauses);
+  }
+});
+
+it.each([-16.25, 96.25])('inserts and drags events at original beat %s in expanded bounds', (beat) => {
+  act(() => store.setPlaybackBounds({ startBeat: -32, endBeat: 128 }));
+  button('[title="Fit the window"]');
+  const px = 816 / 168;
+  const clientX = 208 + (beat + 36) * px;
+  doubleClick(wave(), clientX, true);
+  expect(store.getSnapshot().edits.jumps[0].beat).toBeCloseTo(beat);
+  pointer(host.querySelector('.rt-jump.authored')!, 'pointerdown', clientX);
+  pointer(window, 'pointermove', clientX + 4 * px, { shiftKey: true });
+  pointer(window, 'pointerup');
+  expect(store.getSnapshot().edits.jumps[0].beat).toBeCloseTo(beat + 4);
+  button('[title^="Pause: hold"]');
+  const marker = host.querySelector<HTMLElement>('.rt-jump.authored-pause')!;
+  pointer(marker, 'pointerdown', clientX + 4 * px);
+  pointer(window, 'pointermove', clientX + 8 * px, { shiftKey: true });
+  pointer(window, 'pointerup');
+  expect(store.getSnapshot().edits.pauses[0].beat).toBeCloseTo(beat + 8);
+});
+
+it('inserts in visible track context without rebasing or expanding playback bounds', () => {
+  button('[title^="Fit the whole tracks"]');
+  const px = 1024 / (120 + 64 + 8);
+  doubleClick(wave(), (124 - 32) * px);
+  expect(store.getSnapshot().edits.jumps[0].beat).toBe(-32);
+  expect(store.getSnapshot().edits.playbackBounds).toBeUndefined();
+});
+
+function recordedSource(kind: 'jump' | 'pause'): RoutineDetailWire {
+  return {
+    ...detail,
+    events: [
+      detail.events[0],
+      { kind: 'tick', beat: 12, playheads: { '0': 66 } },
+      ...(kind === 'jump' ? [
+        { kind: 'transport', beat: 16, slot: 0, action: 'seek', playhead: 64 },
+      ] : [
+        { kind: 'transport', beat: 16, slot: 0, action: 'pause', playhead: 68 },
+        { kind: 'transport', beat: 24, slot: 0, action: 'play', playhead: 68 },
+      ]),
+      { kind: 'tick', beat: 64, playheads: { '0': 88, '1': 24, '2': 26 } },
+    ],
+  };
+}
+
+it.each(['jump', 'pause'] as const)('recorded %s deletion removes every visual; undo/redo restores/removes the real event', (kind) => {
+  const source = recordedSource(kind);
+  const original = structuredClone(source);
+  act(() => root.render(<Timeline source={source} />));
+  const selector = kind === 'jump' ? '.rt-jump.recorded' : '.rt-jump.recorded-pause';
+  const count = kind === 'jump' ? 1 : 2;
+  expect(host.querySelectorAll(selector)).toHaveLength(count);
+  pointer(host.querySelector(selector)!, 'pointerdown');
+  button('.rt-jump-delete');
+  expectNoEvents();
+  const removed = kind === 'jump' ? 'removedRecordedJumps' : 'removedRecordedPauses';
+  expect(store.getSnapshot().edits[removed]).toEqual([{ slotId: '0', beat: 16 }]);
+  act(() => store.undo());
+  expect(host.querySelectorAll(selector)).toHaveLength(count);
+  expect(host.querySelectorAll('.rt-jump-pole')).toHaveLength(count);
+  expect(host.querySelectorAll('.rt-pause-link')).toHaveLength(kind === 'pause' ? 1 : 0);
+  expect(store.getSnapshot().edits[removed]).toHaveLength(0);
+  // Redo must also dismiss a recorded popup reopened after Undo.
+  pointer(host.querySelector(selector)!, 'pointerdown');
+  act(() => store.redo());
+  expectNoEvents();
+  expect(source).toEqual(original);
+});
+
+it.each(['jump', 'pause'] as const)('converting, moving, changing type and deleting a recorded %s never reveals a ghost', (kind) => {
+  act(() => root.render(<Timeline source={recordedSource(kind)} />));
+  pointer(host.querySelector('.rt-jump')!, 'pointerdown');
+  button('[title^="Convert to an edited"]');
+  expect(host.querySelectorAll('.rt-jump.recorded, .rt-jump.recorded-pause, .ghost, .ghost-pause')).toHaveLength(0);
+  const marker = host.querySelector<HTMLElement>('.rt-jump')!;
+  pointer(marker, 'pointerdown', x(marker));
+  pointer(window, 'pointermove', 208 + 36 * (816 / 72)); // beat 32
+  pointer(window, 'pointerup');
+  const authored = kind === 'jump' ? 'jumps' : 'pauses';
+  expect(store.getSnapshot().edits[authored][0].beat).toBe(32);
+  expect(host.querySelectorAll('.ghost, .ghost-pause')).toHaveLength(0);
+  button('.rt-jump-delete');
+  expectNoEvents();
+  act(() => store.undo());
+  expect(host.querySelectorAll('.ghost, .ghost-pause, .recorded, .recorded-pause')).toHaveLength(0);
+  const restored = host.querySelector('.rt-jump')!;
+  pointer(restored, 'pointerdown');
+  pointer(window, 'pointerup');
+  button(kind === 'jump' ? '[title^="Pause: hold"]' : '[title^="Forward jump"]');
+  expect(host.querySelectorAll('.ghost, .ghost-pause')).toHaveLength(0);
+  button('.rt-jump-delete');
+  expectNoEvents();
+  const removed = kind === 'jump' ? 'removedRecordedJumps' : 'removedRecordedPauses';
+  expect(store.getSnapshot().edits[removed]).toEqual([{ slotId: '0', beat: 16 }]);
+  act(() => store.undo());
+  expect(host.querySelectorAll('.rt-jump')).toHaveLength(kind === 'jump' ? 2 : 1);
+  expect(host.querySelectorAll('.ghost, .ghost-pause, .recorded, .recorded-pause')).toHaveLength(0);
+  act(() => store.redo());
+  expectNoEvents();
 });
