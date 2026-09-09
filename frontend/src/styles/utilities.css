@@ -125,6 +125,16 @@
   line-height: 16px;
 }
 
+/* Persistent selection: the design system's engaged accent-fill state. */
+.btn.btn-selected,
+.btn.btn-selected:hover:not(:disabled),
+.btn.btn-selected:active:not(:disabled) {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--base);
+}
+.btn.btn-selected > span { color: inherit; }
+
 /* Input utilities */
 .input {
   padding: var(--space-8) var(--space-12);

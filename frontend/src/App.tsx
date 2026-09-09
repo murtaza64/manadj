@@ -2,10 +2,8 @@ import { lazy, Suspense, useEffect, useState } from 'react';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { queryClient } from './api/queryClient';
 
-// Waveform style panel (edits the persisted style slots live).
-const StyleTuningPage = lazy(() => import('./waveform/StyleTuningPage'));
+const SettingsPage = lazy(() => import('./settings/SettingsPage'));
 const MidiInspectorPage = lazy(() => import('./midi/MidiInspectorPage'));
-const JogTuningPage = lazy(() => import('./midi/JogTuningPage'));
 const VisualizerApp = lazy(() => import('./visualizer/VisualizerApp'));
 const ArenaApp = lazy(() => import('./visualizer/ArenaApp'));
 import { BrowsePanel } from './components/BrowsePanel';
@@ -46,7 +44,7 @@ function AnalysisPendingBridge() {
   return null;
 }
 
-const MODE_IDS: AppMode[] = ['library', 'performance', 'transition', 'routine', 'history', 'sync', 'styles', 'jog-tune'];
+const MODE_IDS: AppMode[] = ['library', 'performance', 'transition', 'routine', 'history', 'sync', 'settings'];
 
 /** Session-state persistence of the top-panel mode: reopen where you were. */
 const MODE_KEY = 'manadj-app-mode';
@@ -65,6 +63,9 @@ function App() {
   const [view, setViewState] = useState<AppMode>(initialView);
   const setView = (mode: AppMode) => {
     setViewState(mode);
+    const url = new URL(window.location.href);
+    url.searchParams.set('view', mode);
+    window.history.replaceState(null, '', url);
     try {
       localStorage.setItem(MODE_KEY, mode);
     } catch {
@@ -83,6 +84,9 @@ function App() {
   const toggleView = () =>
     setViewState((current) => {
       const next = current === 'performance' ? 'library' : 'performance';
+      const url = new URL(window.location.href);
+      url.searchParams.set('view', next);
+      window.history.replaceState(null, '', url);
       try {
         localStorage.setItem(MODE_KEY, next);
       } catch {
@@ -208,13 +212,9 @@ function App() {
                 <TakeHistoryView />
               ) : view === 'sync' ? (
                 <SyncView />
-              ) : view === 'styles' ? (
-                <Suspense fallback={null}>
-                  <StyleTuningPage />
-                </Suspense>
-              ) : view === 'jog-tune' ? (
-                <Suspense fallback={null}>
-                  <JogTuningPage />
+               ) : view === 'settings' ? (
+                 <Suspense fallback={null}>
+                   <SettingsPage />
                 </Suspense>
               ) : null}
               {/* Bottom panel: the ONE shared Library instance (gh#165) —

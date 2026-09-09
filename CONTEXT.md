@@ -299,6 +299,12 @@ The single shared output stage: one channel strip per Deck (trim, 3-band EQ, swe
 **Audible surface**:
 A playback mode's claim on the shared Decks+Mixer — the plain deck-transport semantics of the Performance and library views, or the Transition editor's mix-timeline semantics. Exactly one surface is audible at a time; an arbiter owns which, and a displaced surface's playback pauses rather than coexist. Playback gestures from app-wide inputs (a Controller) route by gesture class — transport, cue, pads, jumps, loops, jog — to the audible surface; a class the surface doesn't register is dropped, mirroring what the keyboard does there. Mixer-state controls and Load are not gesture classes: they belong to the shared Mixer and to the mounted browse view respectively. (Redefined 2026-07-05: formerly a group of playback machinery that could produce sound as a unit — the editor had a private player; every surface now plays through the shared Decks+Mixer.)
 
+**Settings**:
+The permanent preference surface for sweep-filter sound, Waveform styles and Controller jog calibration. Preferences persist with the library; preview playback uses an explicitly selected shared Deck, not a separate player. Filter tuning is global across channel strips and applies to current automation without changing Deck filter positions or taking over playback.
+
+**Sweep filter**:
+The Mixer's per-channel low/high-pass effect, post-EQ and pre-fader/PFL. Its position is a live Deck control; model, resonance and response shape are global Settings. Default: resonant 24 dB/octave, 17 dB added resonance, 15% resonance trim. Existing Transitions and Session replays use current filter preferences, not historical filter configurations.
+
 **Performance view**:
 The four-Deck view for practicing and performing mixes: four stacked full-width waveforms with linked zoom, a 2×2 grid of Deck controls, the Mixer, and the Library's browse surface embedded below. All four Decks remain visible regardless of Controller focus. Replaces the Practice view. Curation beyond quick edits (tags, provenance) stays in the library view.
 
