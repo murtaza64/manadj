@@ -265,7 +265,19 @@ describe('reconcileOrderChange — routine pins (sets 160)', () => {
     // still-adjacent (1, 2) pair wakes its shadowed pin.
     const broken = reconcileOrderChange(riding.entries, riding.dormant, [1, 2, 4], castOf);
     expect(broken.entries[0].pin).toEqual(tr('tr-old'));
-    expect(broken.dormant).toEqual([dp(1, 3, rt('r1'))]);
+    expect(broken.dormant).toEqual([shadow, dp(1, 3, rt('r1'))]);
+
+    // An intervening reconcile must not mistake the restored shadow for
+    // an explicit pin. Its retained memory survives serialization too.
+    const again = reconcileOrderChange(
+      JSON.parse(JSON.stringify(broken.entries)),
+      JSON.parse(JSON.stringify(broken.dormant)),
+      [1, 2, 4],
+      castOf
+    );
+    const restored = reconcileOrderChange(again.entries, again.dormant, [1, 2, 3, 4], castOf);
+    expect(restored.entries[0].pin).toEqual(rt('r1'));
+    expect(restored.dormant).toEqual([shadow]);
   });
 
   it('a waking routine outranks a pair-memory restore in the same pass and re-shadows it', () => {
@@ -282,11 +294,9 @@ describe('reconcileOrderChange — routine pins (sets 160)', () => {
     expect(dormant).toEqual([dp(1, 2, tr('tr-old'))]);
   });
 
-  it('a riding pin — including a woken shadow — blocks the routine wake (never displaced)', () => {
-    // The routine went Dormant earlier and its shadow woke onto (1, 2).
-    // The cast re-forming does NOT displace the now-riding pin: reconcile
-    // cannot tell a woken shadow from a fresh explicit act, and explicit
-    // acts are never overwritten.
+  it('a riding pin without shadow memory blocks the routine wake (ambiguous provenance)', () => {
+    // Existing state without a retained memory cannot distinguish a
+    // restored shadow from a fresh explicit act. Do not guess.
     const { entries, dormant } = reconcileOrderChange(
       [en(1, tr('tr-old')), en(2), en(4), en(3)],
       [dp(1, 3, rt('r1'))],
