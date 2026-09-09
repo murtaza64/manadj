@@ -163,6 +163,10 @@ export interface PlannedRoutine {
   startEntryIndex: number;
   mixStartSec: number;
   mixEndSec: number;
+  /** Global mix instant of artifact beat zero, independent of the playback crop. */
+  beatOriginMixSec: number;
+  playbackBounds: { startBeat: number; endBeat: number };
+  boundsLimits: { maxStartBeat: number; minEndBeat: number };
   targetBpm: number;
   /** Mix seconds per Routine beat (60 / targetBpm). */
   secPerBeat: number;
@@ -191,6 +195,9 @@ export interface RoutineBuildWarning {
 export interface BuildRoutineContext {
   startEntryIndex: number;
   mixStartSec: number;
+  /** Set adoption: the outgoing track position/rate at the uncropped
+   * anchor. A crop starts where that track reaches the edited trace. */
+  entryAnchor?: { trackSec: number; rate: number };
   targetBpm: number;
   /** Slot 0's deck — the sounding deck at the window start (adopted). */
   adoptedDeck: RoutineDeck;
@@ -715,9 +722,8 @@ export function buildPlannedRoutine(
   const warnings: RoutineBuildWarning[] = [];
   const n = input.cast.length;
   const secPerBeat = 60 / ctx.targetBpm;
-  const mixEndSec = ctx.mixStartSec + input.durationBeats * secPerBeat;
-
   const edits = input.edits ?? null;
+  const editHorizon = Math.max(input.durationBeats, edits?.playbackBounds?.endBeat ?? input.durationBeats);
   // Stable slot ids (ADR 0039): the edit-addressing handle. Absent input
   // ids default to the migration identity slotId = String(index).
   const slotIdsIn = input.cast.map((_, slot) => input.slotIds?.[slot] ?? String(slot));
@@ -742,7 +748,6 @@ export function buildPlannedRoutine(
   const entryPositions = order.map((i) => input.entryPositions[i]);
   const trackBpms = order.map((i) => ctx.trackBpms[i]);
   const castOrdered = order.map((i) => input.cast[i]);
-  const entryMixSecs = entryBeats.map((b) => ctx.mixStartSec + b * secPerBeat);
 
   // Traces first (gh#170 pass 2): allocation needs each slot's RELEASE —
   // the end of its recorded motion — so freed decks can serve later
@@ -768,14 +773,14 @@ export function buildPlannedRoutine(
     let trace =
       authored.length === 0 && removed.length === 0
         ? raw
-        : applyJumpEditsToTrace(raw, authored, removed, input.durationBeats);
+        : applyJumpEditsToTrace(raw, authored, removed, editHorizon);
     // Pause edits (gh#190: play/pause events, the jump idiom's sibling) —
     // authored holds + removed recorded holds, after jump edits (both
     // keep beats fixed; displacement composes).
     const pauses = (edits.pauses ?? []).filter((p) => p.slotId === slotId);
     const removedPauses = (edits.removedRecordedPauses ?? []).filter((r) => r.slotId === slotId);
     if (pauses.length > 0 || removedPauses.length > 0) {
-      trace = applyPauseEditsToTrace(trace, pauses, removedPauses, input.durationBeats);
+      trace = applyPauseEditsToTrace(trace, pauses, removedPauses, editHorizon);
     }
     // Alignment nudge (gh#190 item 6): a RIGID track-time slide — the
     // slot plays material offset by deltaSec at the same routine beats.
@@ -785,15 +790,54 @@ export function buildPlannedRoutine(
     if (nudge !== 0) trace = trace.map((p) => ({ ...p, pos: p.pos + nudge }));
     return trace;
   });
+  // A parked interval or negative lead is not a slot's contribution.
+  // Derive limits against the other boundary so a crop cannot contain
+  // only a pause while that slot's actual motion sits outside it.
+  const motionSpans = traces.map((trace, slot) => trace.flatMap((p, i) => {
+    if (!p.moving || p.ratePerBeat <= 0) return [];
+    const from = Math.max(entryBeats[slot], p.beat, p.beat - p.pos / p.ratePerBeat);
+    const to = trace[i + 1]?.beat ?? (slot === n - 1 ? Infinity : lastMotionEndBeat(trace, editHorizon));
+    return to > from ? [{ from, to }] : [];
+  }));
+  const requested = edits?.playbackBounds;
+  const lastMotion = Math.min(...motionSpans.map((spans) => spans.at(-1)?.to ?? input.durationBeats)) - 1e-3;
+  let startBeat = requested ? Math.min(requested.startBeat, lastMotion) : 0;
+  const minEndBeat = Math.max(...motionSpans.map((spans, slot) => {
+    const first = spans.find((span) => span.to > startBeat);
+    return first ? Math.max(startBeat, first.from) : entryBeats[slot];
+  })) + 1e-3;
+  const endBeat = requested ? Math.max(requested.endBeat, minEndBeat, startBeat + 8) : input.durationBeats;
+  const maxStartBeat = Math.min(...motionSpans.map((spans) => {
+    const last = spans.filter((span) => span.from < endBeat).at(-1);
+    return last ? Math.min(endBeat, last.to) : 0;
+  })) - 1e-3;
+  if (requested) startBeat = Math.min(startBeat, maxStartBeat);
+  const boundsLimits = { maxStartBeat, minEndBeat };
+  const playbackBounds = { startBeat, endBeat };
+  // Extend only slots already rolling at artifact zero. Later slots keep
+  // their original entry; no source Session is consulted.
+  for (const [slot, trace] of traces.entries()) {
+    const first = trace[0];
+    if (startBeat < 0 && entryBeats[slot] <= 0 && first?.moving && first.beat > startBeat) {
+      trace.unshift({ ...first, beat: startBeat,
+        pos: first.pos + (startBeat - first.beat) * first.ratePerBeat, jump: false });
+    }
+  }
+  const mixStartSec = startBeat !== 0 && ctx.entryAnchor
+    ? ctx.mixStartSec + (Math.max(0, traceStateAt(traces[0], startBeat).pos) - ctx.entryAnchor.trackSec) / ctx.entryAnchor.rate
+    : ctx.mixStartSec + startBeat * secPerBeat;
+  const beatOriginMixSec = mixStartSec - startBeat * secPerBeat;
+  const mixEndSec = beatOriginMixSec + endBeat * secPerBeat;
+  const entryMixSecs = entryBeats.map((b) => beatOriginMixSec + b * secPerBeat);
   const releaseMixSecs = traces.map((trace, slot) =>
     slot === n - 1
       ? mixEndSec // the exit slot holds its deck to the boundary contract
-      : ctx.mixStartSec + lastMotionEndBeat(trace, input.durationBeats) * secPerBeat
+      : Math.min(mixEndSec, beatOriginMixSec + lastMotionEndBeat(trace, editHorizon) * secPerBeat)
   );
 
   const assignments = allocateRoutineDecks(
     entryMixSecs.map((entryMixSec, slot) => ({
-      entryMixSec,
+      entryMixSec: Math.max(mixStartSec, entryMixSec),
       releaseMixSec: releaseMixSecs[slot],
     })),
     ctx.adoptedDeck,
@@ -831,6 +875,14 @@ export function buildPlannedRoutine(
         filter: recordedLanes.filter.map((p) => ({ ...p, beat: p.beat + delta })),
       };
     }
+    if (startBeat < 0) {
+      for (const control of LANE_CONTROLS) {
+        const points = recordedLanes[control];
+        if (points[0] && points[0].beat <= 0 && points[0].beat > startBeat) {
+          recordedLanes[control] = [{ beat: startBeat, value: points[0].value }, ...points];
+        }
+      }
+    }
     return {
       slot,
       slotId,
@@ -846,8 +898,8 @@ export function buildPlannedRoutine(
       // Per-slot channel trim (gh#190): draft-authored, 0.5 nominal.
       trim: edits?.trims?.[slotId] ?? 0.5,
       jumpMixSecs: trace
-        .filter((p) => p.jump)
-        .map((p) => ctx.mixStartSec + p.beat * secPerBeat)
+        .filter((p) => p.jump && p.beat >= startBeat && p.beat <= endBeat)
+        .map((p) => beatOriginMixSec + p.beat * secPerBeat)
         .sort((a, b) => a - b),
     };
   });
@@ -881,7 +933,7 @@ export function buildPlannedRoutine(
       last.ratePerBeat = 60 / trackBpms[n - 1];
     }
   }
-  const trackSecAtEnd = Math.max(0, traceStateAt(exitTrace, input.durationBeats).pos);
+  const trackSecAtEnd = Math.max(0, traceStateAt(exitTrace, endBeat).pos);
 
   // Routine-wide list kept for whole-plan queries (per-deck hard-sync
   // scoping reads the slots' own lists — #161).
@@ -890,8 +942,11 @@ export function buildPlannedRoutine(
   return {
     routine: {
       startEntryIndex: ctx.startEntryIndex,
-      mixStartSec: ctx.mixStartSec,
+      mixStartSec,
       mixEndSec,
+      beatOriginMixSec,
+      playbackBounds,
+      boundsLimits,
       targetBpm: ctx.targetBpm,
       secPerBeat,
       slots,
@@ -922,7 +977,7 @@ export function routineSlotStateAt(
   slot: PlannedRoutineSlot,
   mixTime: number
 ): RoutineSlotState {
-  const beat = (mixTime - routine.mixStartSec) / routine.secPerBeat;
+  const beat = (mixTime - routine.beatOriginMixSec) / routine.secPerBeat;
   const t = traceStateAt(slot.trace, beat);
   if (!t.moving) {
     return {

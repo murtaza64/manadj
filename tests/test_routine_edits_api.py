@@ -98,6 +98,58 @@ def test_edits_roundtrip(client, promoted_routine):
     assert client.get(f"/api/routines/{uuid}").json()["edits"] is None
 
 
+def test_playback_bounds_without_origin_are_nondestructive(client, db, promoted_routine):
+    uuid = promoted_routine["uuid"]
+    routine = db.query(models.Routine).filter_by(uuid=uuid).one()
+    db.delete(db.query(models.RoutineTake).filter_by(uuid=routine.origin_take_uuid).one())
+    db.delete(db.query(models.Session).filter_by(uuid="weave-session").one())
+    routine.origin_take_uuid = None
+    db.commit()
+
+    before = client.get(f"/api/routines/{uuid}").json()
+    assert before["origin_take_uuid"] is None
+    assert db.query(models.RoutineTake).count() == 0
+    assert db.query(models.Session).count() == 0
+    assert any(e["beat"] < 30.0 for e in before["events"])
+    assert any(e["beat"] > 60.0 for e in before["events"])
+    recording = {
+        field: getattr(routine, field)
+        for field in (
+            "events_json",
+            "cast_json",
+            "entry_offsets_beats_json",
+            "entry_positions_json",
+            "duration_beats",
+            "entry_track_id",
+            "exit_track_id",
+            "window_start_s",
+            "window_end_s",
+        )
+    }
+    edits = EDITS
+    for start, end in (
+        (0.0, before["duration_beats"]),
+        (30.0, 60.0),
+        (0.0, before["duration_beats"]),
+    ):
+        bounds = {"startBeat": start, "endBeat": end}
+        res = client.put(
+            f"/api/routines/{uuid}/edits",
+            json={"edits": {**edits, "playbackBounds": bounds}},
+        )
+        assert res.status_code == 200, res.text
+        expected = {**before, "edits": {**EDITS, "playbackBounds": bounds}}
+        assert res.json() == expected
+        res = client.get(f"/api/routines/{uuid}")
+        assert res.status_code == 200, res.text
+        assert res.json() == expected
+        # Expand from persisted edits, not a fresh copy that could hide data loss.
+        edits = res.json()["edits"]
+        db.refresh(routine)
+        assert json.loads(routine.edits_json) == expected["edits"]
+        assert {field: getattr(routine, field) for field in recording} == recording
+
+
 def test_edits_unknown_routine_404(client):
     res = client.put("/api/routines/nope/edits", json={"edits": EDITS})
     assert res.status_code == 404

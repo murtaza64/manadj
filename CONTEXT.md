@@ -160,6 +160,9 @@ _Avoid_: non-session routine, synthetic routine, blank routine (the draft has no
 **Slot id**:
 The stable identity of a cast slot (client-minted at drag-in), which lanes, Jumps, and other slot-addressed edits key on. The entry-ordered slot *index* (slot 0 … n−1) is a derived view recomputed from entry offsets — reordering a cast never re-keys its edits (ADR 0039). On promoted Routines, entry offsets are additionally editable as per-slot **offset overrides** in the edits layer (nudges, phrase shifts) — the baked promotion outputs stay immutable testimony, like a recorded lane under an authored one.
 
+**Routine playback bounds**:
+The start and end of a saved Routine's playback, independent of its source Session. Resizing retains material and edits outside the bounds; expanding restores that material or continues the artifact's boundary motion and control values. Bounds must retain playable material from every cast slot: delete the slot explicitly before trimming further. Muting a slot does not remove its membership or change these limits. Candidate trimming instead changes the Session excerpt being considered for promotion.
+
 **Practice rep**:
 A detected return or alternation attributable to rehearsal rather than performance: backward transport motion on the returning Deck during the away-gap (re-seeking to replay a junction), or a pair-isolated alternation (only the two Tracks audible while they trade repeatedly — fader-drill reps). Excluded from style mining, Move candidate suggestion, and any evidence tier; retained in Sessions as ordinary events (the log is impartial — practice classification is a read-time verdict, and its thresholds are tunable heuristics).
 

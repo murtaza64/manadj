@@ -32,6 +32,7 @@ const clone = (e: RoutineEdits): RoutineEdits => ({
   nudges: { ...e.nudges },
   trims: { ...e.trims },
   entryOffsets: { ...e.entryOffsets },
+  ...(e.playbackBounds ? { playbackBounds: { ...e.playbackBounds } } : {}),
 });
 
 /** Rebase one slot's authored edits from a drag-start BASE by deltaBeats
@@ -118,6 +119,15 @@ export class RoutineDraftStore {
   }
 
   // ── Mutations (all coalesce by gesture key) ──────────────────────────
+
+  setPlaybackBounds(bounds: RoutineEdits['playbackBounds'] | null): void {
+    if (bounds && (!Number.isFinite(bounds.startBeat) || !Number.isFinite(bounds.endBeat) ||
+      bounds.endBeat <= bounds.startBeat)) return;
+    this.mutate('playback-bounds', (e) => {
+      if (bounds) e.playbackBounds = { ...bounds };
+      else delete e.playbackBounds;
+    });
+  }
 
   setLane(slotId: string, control: string, points: RoutineLanePoint[]): void {
     this.mutate(`lane:${slotId}:${control}`, (e) => {

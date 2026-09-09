@@ -81,7 +81,14 @@ export interface RemovedRecordedPause {
   beat: number;
 }
 
+export interface RoutinePlaybackBounds {
+  startBeat: number;
+  endBeat: number;
+}
+
 export interface RoutineEdits {
+  /** Playback crop on the unchanged artifact clock; outside material is retained. */
+  playbackBounds?: RoutinePlaybackBounds;
   /** Authored lane envelopes, keyed `${slotId}:${control}` — absent key =
    * the recorded step lane plays. Points in routine beats, sorted. */
   lanes: Record<string, RoutineLanePoint[]>;
@@ -145,7 +152,8 @@ export function editsAreEmpty(e: RoutineEdits): boolean {
     e.removedRecordedPauses.length === 0 &&
     Object.keys(e.nudges).length === 0 &&
     Object.keys(e.trims).length === 0 &&
-    Object.keys(e.entryOffsets).length === 0
+    Object.keys(e.entryOffsets).length === 0 &&
+    e.playbackBounds === undefined
   );
 }
 
@@ -274,6 +282,13 @@ export function parseEdits(raw: unknown): RoutineEdits {
     nudges,
     trims,
     entryOffsets,
+    ...(o.playbackBounds && typeof o.playbackBounds === 'object' &&
+      'startBeat' in o.playbackBounds && 'endBeat' in o.playbackBounds &&
+      typeof o.playbackBounds.startBeat === 'number' && Number.isFinite(o.playbackBounds.startBeat) &&
+      typeof o.playbackBounds.endBeat === 'number' && Number.isFinite(o.playbackBounds.endBeat) &&
+      o.playbackBounds.endBeat > o.playbackBounds.startBeat
+      ? { playbackBounds: { startBeat: o.playbackBounds.startBeat, endBeat: o.playbackBounds.endBeat } }
+      : {}),
   };
 }
 

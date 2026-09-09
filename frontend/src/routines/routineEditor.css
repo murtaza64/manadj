@@ -523,7 +523,7 @@
   position: absolute;
   top: 2px;
   right: 8px;
-  z-index: 5;
+  z-index: calc(var(--z-sticky) + 1);
 }
 /* The editor's fit-button look. */
 .rt-fit {
