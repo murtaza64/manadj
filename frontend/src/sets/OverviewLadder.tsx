@@ -35,6 +35,7 @@ import type { DecodedWaveform } from '../waveform/blob';
 import { useStyleSlot } from '../waveform/styleSlots';
 import { useWaveformBlob } from '../waveform/useWaveformBlob';
 import { cueCssColor } from '../hotcues/palette';
+import { traceDrawRuns } from '../routines/routineWaveRuns';
 import { getConductor, setFollowPlayback } from './conductorStore';
 import { WILL_RESTORE_COLOR, type AdjacencyFuture } from './dormancy';
 import { drawStyledWave, MINIMAP_BRIGHTNESS } from './ladderWaveStyle';
@@ -620,17 +621,21 @@ export interface ClipContentSegment {
   trackEnd: number;
 }
 
-/** Merge tolerance: consecutive runs whose positions meet within this
- * are one continuous strip (no splice mark for numeric dust). */
-const SEGMENT_MERGE_EPS_S = 0.5;
+const SEGMENT_MERGE_EPS_S = 1e-6;
 
 function pushRun(out: ClipContentSegment[], seg: ClipContentSegment): void {
   if (seg.mixEnd - seg.mixStart <= 1e-6) return;
   const prev = out[out.length - 1];
+  // A continuous position is not enough: merging unequal rates moves
+  // waveform features and cues away from their playback instants.
   if (
     prev &&
     Math.abs(prev.mixEnd - seg.mixStart) < 1e-6 &&
-    Math.abs(prev.trackEnd - seg.trackStart) < SEGMENT_MERGE_EPS_S
+    Math.abs(prev.trackEnd - seg.trackStart) < SEGMENT_MERGE_EPS_S &&
+    Math.abs(
+      (prev.trackEnd - prev.trackStart) / (prev.mixEnd - prev.mixStart) -
+      (seg.trackEnd - seg.trackStart) / (seg.mixEnd - seg.mixStart)
+    ) < 1e-6
   ) {
     prev.mixEnd = seg.mixEnd;
     prev.trackEnd = seg.trackEnd;
@@ -673,27 +678,29 @@ export function clipContentSegments(
           trackEnd: Math.max(0, first?.pos ?? entry.entrySec),
         });
       }
-      for (let k = 0; k < slot.trace.length - 1; k++) {
-        const a = slot.trace[k];
-        const b = slot.trace[k + 1];
-        if (!a.moving || a.ratePerBeat <= 0) continue;
-        // Run to the next point (jump landings cut runs; traceStateAt
-        // rides a's rate up to the landing).
-        let beat0 = a.beat;
-        let pos0 = a.pos;
-        const beat1 = b.beat;
-        const pos1 = b.jump ? a.pos + a.ratePerBeat * (beat1 - a.beat) : b.pos;
-        if (pos1 <= 0) continue; // wholly inside the silent lead
-        if (pos0 < 0) {
-          // Clip the run at its 0-crossing (park-until-positive rule).
-          beat0 = a.beat + -a.pos / a.ratePerBeat;
-          pos0 = 0;
-        }
+      const durationBeats = (routine.mixEndSec - routine.mixStartSec) / spb;
+      // Replay extrapolates until another slot claims the deck, not merely
+      // until this slot's last recorded motion sample (releaseMixSec).
+      const nextOccupant = routine.slots.find((s) => s.slot > slot.slot && s.deck === slot.deck);
+      for (const run of traceDrawRuns(slot.trace, durationBeats)) {
+        if (run.held || run.ph1 <= run.ph0) continue;
+        const rate = (run.ph1 - run.ph0) / ((run.b1 - run.b0) * spb);
+        const start = routine.mixStartSec + run.b0 * spb;
+        const mixStart = Math.max(
+          entry.entryMixSec, slot.occupyFromMixSec, start,
+          start - run.ph0 / rate // silent lead ends when track time reaches zero
+        );
+        const mixEnd = Math.min(
+          entry.exitMixSec, nextOccupant?.occupyFromMixSec ?? routine.mixEndSec, routine.mixEndSec,
+          routine.mixStartSec + run.b1 * spb
+        );
+        // Clip both axes together, including traces that started before
+        // this slot's entry. The last trace point extrapolates to the end.
         pushRun(out, {
-          mixStart: Math.max(entry.entryMixSec, routine.mixStartSec + beat0 * spb),
-          mixEnd: Math.min(entry.exitMixSec, routine.mixStartSec + beat1 * spb),
-          trackStart: pos0,
-          trackEnd: pos1,
+          mixStart,
+          mixEnd,
+          trackStart: run.ph0 + (mixStart - start) * rate,
+          trackEnd: run.ph0 + (mixEnd - start) * rate,
         });
       }
       // The exit slot keeps sounding past the span end (linear to exit).
@@ -1034,8 +1041,10 @@ const LadderClip = memo(function LadderClip({
               width: `${((seg.mixEnd - seg.mixStart) / span) * 100}%`,
               top: 0,
               bottom: 0,
-              // Splice mark: a run boundary is a real playback jump.
-              borderLeft: k > 0 ? '1px solid rgba(255,255,255,0.45)' : undefined,
+              // Rate changes split draw runs without splicing the audio.
+              borderLeft: k > 0 &&
+                Math.abs(segments[k - 1].trackEnd - seg.trackStart) > SEGMENT_MERGE_EPS_S
+                ? '1px solid rgba(255,255,255,0.45)' : undefined,
             }}
           >
             <LadderWave
