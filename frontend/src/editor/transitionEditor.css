@@ -495,14 +495,24 @@
   inset: 0 -7px;
   touch-action: none;
 }
+.editor-lane-insert-preview {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  transform: translate(-50%, -50%);
+  border: 1px solid rgba(255, 255, 255, 0.85);
+  border-radius: 50%;
+  opacity: 0.55;
+  z-index: 2;
+  pointer-events: none;
+}
 
 .editor-lanehit canvas {
   /* Viewport-windowed: the draw code positions/sizes the canvas (inline
      left/width) to cover only the visible slice of the window + margin —
      full-window canvases were giant compositor surfaces (scroll jitter).
-     Vertically it overhangs LANE_PAD px so breakpoint circles at the
-     extremes draw complete. Visual only: pointer events land on the hit
-     div, never on the canvas. */
+      Render padding is visual only; value-axis gutters keep boundary
+      nodes inside the hit div. Pointer events never land on the canvas. */
   position: absolute;
   left: 0;
   top: -7px;

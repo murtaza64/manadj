@@ -2010,7 +2010,7 @@ export function RoutineTimeline({
                         title={
                           authored
                             ? 'Discard the edited envelope — the recorded lane plays again'
-                            : 'Edit this lane (seeded from the recording; drag breakpoints, click to add, double-click to delete)'
+                            : 'Edit this lane: drag nodes; click the line at the preview to add; drag blank space to rectangle-select; double-click a node to delete'
                         }
                         onClick={(e) => {
                           e.stopPropagation();
