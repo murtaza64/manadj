@@ -861,7 +861,7 @@ const LEVEL_VIEW_W = 4000;
 /** One deck's fader-level curve (variant E): a filled polyline on the
  * deck's lane, anchored at the braid's center line (up lanes fill upward,
  * down lanes downward) in the deck's identity color. */
-function FaderLevelLane({
+const FaderLevelLane = memo(function FaderLevelLane({
   deck,
   top,
   points,
@@ -910,9 +910,9 @@ function FaderLevelLane({
       />
     </svg>
   );
-}
+});
 
-function AdjacencyBand({
+const AdjacencyBand = memo(function AdjacencyBand({
   adj,
   total,
   future,
@@ -1016,7 +1016,7 @@ function AdjacencyBand({
       )}
     </div>
   );
-}
+});
 
 /** Memoized (issue 43): a big set mounts ~90 of these; without the memo
  * every ladder render re-ran them all (528 clip renders per 88-track
