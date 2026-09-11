@@ -722,7 +722,7 @@ function TransitionEditorInner() {
           { bpmA: trackEffectiveBpm(a), bpmB: trackEffectiveBpm(b) }
         );
         if (!vectorized) {
-          console.error('take review: slice has no init head — cannot vectorize', uuid);
+          console.error('take review: unsupported transport or missing init head', uuid);
           return false;
         }
         store.stampTakeDraft(uuid, vectorized.transition);

@@ -117,6 +117,13 @@ function numberInput(label: string) {
   return container.querySelector<HTMLInputElement>(`[aria-label="${label} value"]`)!;
 }
 
+function press(slider: HTMLElement, key: string) {
+  act(() => {
+    slider.focus();
+    slider.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
+  });
+}
+
 function readout(label: string) {
   return container.querySelector(`output[aria-label="${label}"]`)?.textContent;
 }
@@ -128,18 +135,49 @@ it('deep-links to Mouse jog with live ranges, stored values and derived targets'
   expect(container.querySelector('.settings-nav [aria-current="page"]')?.textContent).toBe('Mouse jogKeyboard and mouse response');
   expect(container.querySelectorAll('.settings-nav button')).toHaveLength(4);
   expect(container.textContent).not.toContain('MOUSE / JOG TUNE');
-  const ranges = [...container.querySelectorAll<HTMLInputElement>('.settings-fields input[type="range"]')];
-  expect(ranges.map((input) => [input.min, input.max, input.step, input.value])).toEqual([
-    ['0.25', '12', '0.25', '2'], ['1', '3', '0.1', '1.8'], ['0', '200', '5', '50'],
+  const ranges = [...container.querySelectorAll<HTMLElement>('.settings-fields [role="slider"]')];
+  expect(container.querySelector('input[type="range"]')).toBeNull();
+  expect(ranges.map((slider) => ['aria-valuemin', 'aria-valuemax', 'aria-valuenow'].map((attr) => slider.getAttribute(attr)))).toEqual([
+    ['0.25', '12', '2'], ['1', '3', '1.8'], ['0', '200', '50'],
   ]);
+  for (const slider of ranges) {
+    expect(slider.classList.contains('perf-fader')).toBe(true);
+    expect(slider.querySelector('.perf-fader-handle')?.textContent).toBe(slider.getAttribute('aria-valuenow'));
+  }
   expect(container.textContent).toContain('3000 px/s');
-  for (const [i, value] of ['12', '2.5', '200'].entries()) inputValue(ranges[i], value);
+  press(ranges[0], 'ArrowRight');
+  press(ranges[1], 'ArrowRight');
+  press(ranges[2], 'ArrowRight');
+  expect(getMouseJogSettings()).toEqual({ sensitivity: 2.25, acceleration: 1.9, smoothingMs: 55 });
+  press(ranges[0], 'End');
+  press(ranges[1], 'End');
+  for (let i = 0; i < 5; i++) press(ranges[1], 'ArrowLeft');
+  press(ranges[2], 'End');
   expect(getMouseJogSettings()).toEqual({ sensitivity: 12, acceleration: 2.5, smoothingMs: 200 });
   expect(numberInput('Sensitivity').value).toBe('12');
   expect(container.textContent).toContain('500 px/s');
   expect(container.textContent).toContain('600 px/s: 8.00%');
   act(() => setMouseJogSettings({ sensitivity: 6 }));
-  expect(ranges[0].value).toBe('6');
+  expect(ranges[0].getAttribute('aria-valuenow')).toBe('6');
+  ranges.forEach((slider) => press(slider, 'Home'));
+  expect(getMouseJogSettings()).toEqual({ sensitivity: 0.25, acceleration: 1, smoothingMs: 0 });
+});
+
+it('drags the shared sensitivity fader and resets it to the mouse default', async () => {
+  await render();
+  const slider = container.querySelector<HTMLElement>('[role="slider"][aria-label="Sensitivity"]')!;
+  slider.setPointerCapture = vi.fn();
+  slider.releasePointerCapture = vi.fn();
+  vi.spyOn(slider, 'getBoundingClientRect').mockReturnValue({ left: 0, width: 470 } as DOMRect);
+  act(() => slider.dispatchEvent(new MouseEvent('pointerdown', { clientX: 0, bubbles: true })));
+  expect(getMouseJogSettings().sensitivity).toBe(0.25);
+  expect(document.activeElement).toBe(slider);
+  act(() => slider.dispatchEvent(new MouseEvent('pointermove', { clientX: 230, bubbles: true })));
+  expect(getMouseJogSettings().sensitivity).toBe(6);
+  act(() => slider.dispatchEvent(new MouseEvent('pointerup', { bubbles: true })));
+  expect(document.activeElement).not.toBe(slider);
+  act(() => slider.dispatchEvent(new MouseEvent('dblclick', { bubbles: true })));
+  expect(getMouseJogSettings().sensitivity).toBe(DEFAULT_MOUSE_JOG_SETTINGS.sensitivity);
 });
 
 it('commits numbers on Enter/blur, cancels on Escape and discards drafts on every reset', async () => {
@@ -207,10 +245,10 @@ it('keeps preferences editable during automation without taking over deck contro
   mixer.engageAutomation();
   await render();
   expect(container.textContent).not.toContain('Pause');
-  const range = container.querySelector<HTMLInputElement>('#mouse-jog-sensitivity')!;
-  expect(range.disabled).toBe(false);
-  inputValue(range, '5');
-  expect(getMouseJogSettings().sensitivity).toBe(5);
+  const range = container.querySelector<HTMLElement>('[role="slider"][aria-label="Sensitivity"]')!;
+  expect(range.getAttribute('aria-disabled')).not.toBe('true');
+  press(range, 'ArrowRight');
+  expect(getMouseJogSettings().sensitivity).toBe(2.25);
 });
 
 it('shows a Performance hint outside Performance without subscribing to decks', async () => {

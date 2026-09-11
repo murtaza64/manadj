@@ -9,6 +9,7 @@ import {
 import { FilterResponse } from './FilterResponse';
 import './settings.css';
 import { CommittedNumberInput } from '../components/CommittedNumberInput';
+import { HFader } from '../components/performance/MixerStrip';
 
 const WaveformSettings = lazy(() => import('../waveform/StyleTuningPage'));
 const JogSettings = lazy(() => import('../midi/JogTuningPage'));
@@ -156,7 +157,7 @@ function FilterSettingsPanel() {
                   ((key === 'compensation' && shown[key] > 0) || (key === 'trim' && shown[key] < 0)) ? 'trim' : undefined}
               >
                 <div>
-                  <label htmlFor={`filter-${key}`}>{label}</label>
+                  <span className="settings-field-label">{label}</span>
                   <p>
                     {settings.model === 'current' && key === 'resonance'
                       ? 'Original mode uses fixed +3 dB Q outside center.'
@@ -164,15 +165,21 @@ function FilterSettingsPanel() {
                   </p>
                 </div>
                 <div className="settings-field-inputs">
-                  <input
+                  <HFader
                     id={`filter-${key}`}
-                    type="range"
+                    ariaLabel={label}
+                    label={Number(value.toPrecision(6)).toString()}
+                    accent
+                    fill
+                    fillColor="var(--accent)"
+                    detent={min === -max}
                     min={min * scale}
                     max={max * scale}
                     step={step * scale}
                     value={value}
+                    defaultValue={DEFAULT_FILTER_SETTINGS[key] * scale}
                     disabled={disabled}
-                    onChange={(e) => set(Number(e.target.value))}
+                    onChange={set}
                   />
                   <CommittedNumberInput
                     key={`${settings.model}:${resetKey}`}

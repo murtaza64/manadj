@@ -309,8 +309,8 @@ export function deriveTimeline(
     // is common and must not emit thousands of markers).
     let jogRef: number | null = null;
     if (
-      e.kind === 'transport' &&
-      (e.action === 'seek' || e.action === 'jumpBeats' || e.action === 'hotCue')
+      e.kind === 'loop' || (e.kind === 'transport' &&
+      (e.action === 'seek' || e.action === 'jumpBeats' || e.action === 'hotCue'))
     ) {
       const d = s.decks[e.channel];
       if (d.playing || d.previewing || d.scratch) {
@@ -362,6 +362,14 @@ export function deriveTimeline(
           sampleTrace(ch, e.t, s.decks[ch].scratch ? deckPlayheadAt(s.decks[ch], e.t) : p,
             false, s.decks[ch].scratch !== null);
         }
+      }
+    } else if (e.kind === 'loop') {
+      if (preJump !== null && Math.abs(e.playhead - preJump) > 1e-6) {
+        sampleTrace(e.channel, e.t, preJump);
+        breakTrace(e.channel);
+      }
+      if (s.decks[e.channel].playing || s.decks[e.channel].previewing) {
+        sampleTrace(e.channel, e.t, e.playhead);
       }
     } else if (e.kind === 'transport') {
       if (e.action === 'scratchBegin' || e.action === 'scratchMove') {

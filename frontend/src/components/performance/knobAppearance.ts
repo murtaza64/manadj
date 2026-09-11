@@ -21,7 +21,12 @@ export function knobAppearance(control: KnobControl, value: number, ghost: numbe
   const start = Math.min(anchor, position) * 270;
   const end = Math.max(anchor, position) * 270;
   // EQ reaches full color at unity; only boost adds glow, not more saturation.
-  const strength = kind === 'eq' ? Math.min(1, position * 2) : position;
+  let strength = kind === 'eq' ? Math.min(1, position * 2) : position;
+  if (kind === 'filter') {
+    // Make tiny departures visible; only color is eased, never the arc/angle.
+    const offset = position - 0.5;
+    strength = 0.5 + Math.sign(offset) * Math.pow(Math.abs(offset) * 2, 0.2) / 2;
+  }
   const boost = kind === 'eq' ? Math.max(0, position * 2 - 1) : 0;
   return {
     angle: -135 + clamp(value) * 270,

@@ -78,6 +78,8 @@ interface WebGLWaveformProps {
   /** Split mode (performance-mode 10): modulation reshapes only the top
    * lobe of the mirrored body; bottom lobe stays ground truth. */
   modulationSplit?: boolean;
+  /** Active Slip return timeline for the lower lobe; null rejoins the top. */
+  getSlipReturnPlayhead?: (() => number | null) | null;
 }
 
 export default function WebGLWaveform({
@@ -102,6 +104,7 @@ export default function WebGLWaveform({
   subscribeWake,
   modulation = null,
   modulationSplit = false,
+  getSlipReturnPlayhead = null,
 }: WebGLWaveformProps) {
   const { data: waveformData, isLoading, error: fetchError } = useWaveformBlob(trackId);
   const { data: beatgridData } = useBeatgridData(trackId);
@@ -149,7 +152,8 @@ export default function WebGLWaveform({
   useEffect(() => {
     rendererRef.current?.setModulation(modulation);
     rendererRef.current?.setModulationSplit(modulationSplit);
-  }, [modulation, modulationSplit, waveformData, rendererRef]);
+    rendererRef.current?.setSlipReturnPlayhead(getSlipReturnPlayhead);
+  }, [modulation, modulationSplit, getSlipReturnPlayhead, waveformData, rendererRef]);
 
   // Drag-to-scrub: REAL seeks per pointer move (silent — the deck pauses
   // for the drag's duration). The playhead is then always where the view

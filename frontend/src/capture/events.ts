@@ -111,6 +111,8 @@ export type CaptureEvent =
       playhead: number;
       /** The region after the change (track seconds), or null. */
       region: { start: number; end: number } | null;
+      /** Entry-latched Slip, distinct from the current Slip preference. */
+      slip?: boolean;
     }
   | { t: number; kind: 'load'; channel: CaptureDeck; trackId: number | null; bpm: number | null }
   /** Coarse periodic sample (~1 Hz): keeps alignment reconstructible and
@@ -144,6 +146,7 @@ export interface InitDeckState {
   trackId: number | null;
   playing: boolean;
   scratching?: boolean;
+  slipLoopActive?: boolean;
   fader: number;
   trim: number;
   eq: { low: number; mid: number; high: number };

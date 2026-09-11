@@ -88,13 +88,32 @@ it('fills filter from center with warm LPF and cool HPF shading', () => {
   expect(render({ ...props, value: 0 }).fill!.style.background).toBe('none');
   const low = render({ ...props, value: -0.5 });
   expect(low.knob.style.getPropertyValue('--knob-value-color'))
-    .toBe(strokeColorAt('filter', FILTER_LPF_COLOR, 0.25));
+    .toBe(strokeColorAt('filter', FILTER_LPF_COLOR, 0));
   expect(low.fill!.style.background).toContain('67.5deg');
   const high = render({ ...props, value: 0.5 });
   expect(high.knob.style.getPropertyValue('--knob-value-color'))
-    .toBe(strokeColorAt('filter', AUTOMATION_COLORS.filter, 0.75));
+    .toBe(strokeColorAt('filter', AUTOMATION_COLORS.filter, 1));
   expect(high.fill!.style.background).toContain('202.5deg');
   expect(high.knob.style.getPropertyValue('--knob-glow')).toBe('none');
+});
+
+it.each([-1, 1])('quickly colors a filter just off neutral on side %s without exaggerating position', (side) => {
+  const props = { control: 'filter' as const, min: -1, max: 1, defaultValue: 0 };
+  const shade = (value: number, ghost: number | null = null) =>
+    render({ ...props, value, ghost }).knob.style.getPropertyValue('--knob-value-color');
+  const alpha = (color: string) => Number(color.slice(color.lastIndexOf(',') + 1, -1));
+  const neutral = shade(0);
+  expect(neutral).toBe('rgba(140,140,150,0.6)');
+  const near = shade(side * 0.001);
+  expect(alpha(near)).toBeGreaterThan(0.75);
+  expect(alpha(near)).toBeLessThan(1);
+  const pointer = container.querySelector<HTMLElement>('.perf-knob-pointer')!;
+  expect(parseFloat(pointer.style.transform.slice(7))).toBeCloseTo(side * 0.135, 10);
+  expect(alpha(shade(side * 0.01))).toBeGreaterThan(alpha(near));
+  expect(shade(side * 0.08)).toBe(shade(side));
+  expect(shade(0, side * 0.001)).toBe(near);
+  expect(shade(side, 0)).toBe(neutral);
+  expect(render({ ...props, value: 0 }).fill!.style.background).toBe('none');
 });
 
 it('uses center-anchored silver trim and clamps values to physical stops', () => {

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { JogCalibration } from './jogCalibration';
+import { GRV6_JOG_CALIBRATION } from './jogCalibration';
 import {
   grv6CalibrationCode,
   resetGrv6JogCalibration,
@@ -16,6 +17,7 @@ import type { Grv6JogMessage, Grv6JogStream, JogStreamStats } from './jogTelemet
 import './JogTuningPage.css';
 import { AutoBlurSelect } from '../components/AutoBlurSelect';
 import { CommittedNumberInput } from '../components/CommittedNumberInput';
+import { HFader } from '../components/performance/MixerStrip';
 
 const STREAMS: readonly Grv6JogStream[] = [
   'side',
@@ -145,15 +147,21 @@ export default function JogTuningPage() {
     step: number,
     unit: string
   ) => (
-    <label className="jog-tune__slider" key={key}>
+    <div className="jog-tune__slider" key={key}>
       <span>{label}</span>
-      <input
-        type="range"
+      <HFader
+        id={`jog-tune-${key}`}
+        ariaLabel={label}
+        label={Number(calibration[key].toPrecision(6)).toString()}
+        accent
+        fill
+        fillColor="var(--accent)"
         min={min}
         max={max}
         step={step}
         value={calibration[key]}
-        onChange={(event) => patch(key, Number(event.target.value))}
+        defaultValue={GRV6_JOG_CALIBRATION[key]}
+        onChange={(value) => patch(key, value)}
       />
       <CommittedNumberInput
         key={resetKey}
@@ -165,7 +173,7 @@ export default function JogTuningPage() {
         onCommit={(value) => patch(key, value)}
       />
       <small>{unit}</small>
-    </label>
+    </div>
   );
 
   const captureRate = jogStatsRate(capture.stats);

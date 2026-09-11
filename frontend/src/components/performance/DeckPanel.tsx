@@ -308,6 +308,7 @@ export function DeckWaveform({
     (t: number) => historyRef.current.at(t, liveStrip()),
     [liveStrip]
   );
+  const getSlipReturnPlayhead = useCallback(() => engine.getSlipReturnPlayhead(), [engine]);
 
   // Effective-BPM zoom (performance-mode 06): the renderer consumes TRACK
   // seconds, so scale the shared wall-clock window by this deck's rate —
@@ -355,6 +356,7 @@ export function DeckWaveform({
     const loop = () => {
       const snap = engine.getSnapshot();
       const playhead = engine.getPlayhead();
+      const slip = engine.getSlipReturnPlayhead();
       const live = liveStrip();
       const advancing = snap.playing || snap.previewing;
       historyRef.current.record(playhead, advancing, live);
@@ -367,7 +369,7 @@ export function DeckWaveform({
         const h = canvas.clientHeight;
         const { span, hasTrack } = fillViewRef.current;
         const drawKey =
-          `${playhead}:${span}:${hasTrack}:${w}x${h}:` +
+          `${playhead}:${slip}:${span}:${hasTrack}:${w}x${h}:` +
           `${live.gain}:${live.low}:${live.mid}:${live.high}:${live.fader}`;
         didDraw = drawKey !== lastDrawKey;
         if (didDraw) {
@@ -384,20 +386,24 @@ export function DeckWaveform({
               const bar = channelFaderToGain(live.fader) * h;
               ctx.fillRect(0, h - bar, w, bar);
             } else {
-              const start = playhead - span * PLAY_MARKER_FRACTION;
               const step = 2; // px per column — a translucent wash, not a plot
-              for (let x = 0; x < w; x += step) {
-                const t = start + ((x + step / 2) / w) * span;
-                if (t < 0 || t > snap.duration) continue;
-                const v = historyRef.current.at(t, live);
-                const bar = channelFaderToGain(v.fader) * h;
-                if (bar > 0) ctx.fillRect(x, h - bar, step, bar);
+              const views = slip === null ? [[playhead, 0, h]] : [[playhead, 0, h / 2], [slip, h / 2, h]];
+              for (const [position, y0, y1] of views) {
+                const start = position - span * PLAY_MARKER_FRACTION;
+                for (let x = 0; x < w; x += step) {
+                  const t = start + ((x + step / 2) / w) * span;
+                  if (t < 0 || t > snap.duration) continue;
+                  const v = historyRef.current.at(t, live);
+                  const bar = channelFaderToGain(v.fader) * h;
+                  const top = Math.max(y0, h - bar);
+                  if (top < y1) ctx.fillRect(x, top, step, y1 - top);
+                }
               }
             }
           }
         }
       }
-      schedule(advancing || didDraw);
+      schedule(advancing || snap.scratching || didDraw);
     };
     raf = requestAnimationFrame(loop);
     return () => {
@@ -441,6 +447,7 @@ export function DeckWaveform({
         onVisibleSecondsChange={(seconds) => onVisibleSecondsChange(seconds / rate)}
         modulation={modulation}
         modulationSplit
+        getSlipReturnPlayhead={getSlipReturnPlayhead}
       />
       {showFocus ? <div className="perf-wave-focus-frame" /> : null}
     </div>
@@ -956,7 +963,7 @@ function MixZone({ track }: { track: Track | null }) {
           onClick={() => engine.setSlipMode(!slipMode)}
           aria-pressed={slipMode}
           aria-label="Slip mode"
-          title="Slip: return to the continuing timeline after scratching or a spinback. Changes during a gesture apply to the next one."
+          title="Slip: return to the continuing timeline after a scratch, spinback, or loop. Off cancels the pending return; on applies to the next gesture."
         >
           SLIP
         </button>

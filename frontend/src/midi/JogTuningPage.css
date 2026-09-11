@@ -58,6 +58,9 @@
   color: var(--subtext0);
   font-size: var(--font-small);
 }
+.jog-tune__slider > .perf-fader {
+  width: 100%;
+}
 .jog-tune__diagnostics {
   margin-top: var(--space-24);
 }

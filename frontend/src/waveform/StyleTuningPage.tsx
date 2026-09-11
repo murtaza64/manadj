@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { CSSProperties } from 'react';
 import { AutoBlurSelect } from '../components/AutoBlurSelect';
+import { HFader } from '../components/performance/MixerStrip';
 import { STYLE_REGISTRY, getStyle } from './styles';
 import type { RGB, StyleParams } from './styles';
 
@@ -32,20 +33,24 @@ export default function StyleTuningPage() {
     set: (v: number) => void,
     bandColor?: RGB,
   ) => (
-    <label className={`tune-slider${bandColor ? ' tune-band-gain' : ''}`} key={label}
+    <div className={`tune-slider${bandColor ? ' tune-band-gain' : ''}`} key={label}
       style={bandColor ? { '--waveform-band': rgbToHex(bandColor) } as CSSProperties : undefined}>
-      <span>
-        {label}: <span className="val">{value.toFixed(2)}</span>
-      </span>
-      <input
-        type="range"
+      <span>{label}</span>
+      <HFader
+        id={`waveform-${editedSlot}-${label.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`}
+        ariaLabel={label}
+        label={Number(value.toPrecision(6)).toString()}
+        accent
+        fill
+        fillColor="var(--accent)"
         min={min}
         max={max}
         step={step}
         value={value}
-        onChange={(e) => set(Number(e.target.value))}
+        defaultValue={value}
+        onChange={set}
       />
-    </label>
+    </div>
   );
 
   return (

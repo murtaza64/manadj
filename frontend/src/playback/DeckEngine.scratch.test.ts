@@ -53,6 +53,317 @@ async function setup() {
   return { deck, ctx };
 }
 
+describe('DeckEngine Slip loops', () => {
+  it('captures the resolved loop exit and carries it into a mid-loop replay plan', async () => {
+    vi.useFakeTimers({ toFake: ['performance', 'setInterval', 'clearInterval'] });
+    let recorder: CaptureRecorder | null = null;
+    try {
+      const { deck, ctx } = await setup();
+      const events: CaptureEvent[] = [];
+      const empty = () => new DeckEngine({ ensureAudio() { throw new Error('empty deck'); } });
+      recorder = new CaptureRecorder({
+        getChannelState: () => ({ fader: 1, trim: 0.5, eq: { low: 0.5, mid: 0.5, high: 0.5 },
+          filter: 0, pfl: false, stems: { vocals: true, drums: true, bass: true, other: true } }),
+        getCrossfader: () => 0, getCrossfaderAssignment: () => 'thru', getCrossfaderEnabled: () => false,
+        getMaster: () => 1, subscribe: () => () => {},
+      }, { A: deck, B: empty(), C: empty(), D: empty() }, () => {}, event => events.push(event));
+      recorder.start();
+      deck.setSlipMode(true);
+      deck.play();
+      await Promise.resolve();
+      deck.toggleLoop();
+      for (let i = 1; i <= 5; i++) {
+        ctx.currentTime = i;
+        vi.advanceTimersByTime(1000);
+      }
+      deck.toggleLoop();
+      const exit = events.filter(e => e.kind === 'loop').at(-1)!;
+      expect(exit).toMatchObject({ kind: 'loop', region: null, playhead: 15 });
+      const result = planReplay([...events, { t: exit.t + 2, kind: 'tick', playheads: { A: 17 } }], exit.t - 2);
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.plan.seed.decks.A.loop).toEqual({ start: 10, end: 12 });
+        expect(result.plan.cues.find(c => c.kind === 'loop')).toMatchObject({ region: null, playhead: 15 });
+      }
+    } finally { recorder?.dispose(); vi.useRealTimers(); }
+  });
+
+  it.each([false, true])('returns to the unlooped clock after wraps (Key Lock=%s)', async keyLock => {
+    const { deck, ctx } = await setup();
+    deck.setKeyLock(keyLock);
+    deck.setSlipMode(true);
+    deck.play();
+    await Promise.resolve();
+    deck.toggleLoop();
+    const kernel = nodes[0].kernel;
+    kernel.render([new Float32Array(5000)], new Float32Array([1]), 0, 1000);
+    ctx.currentTime = 5;
+    expect(deck.getPlayhead()).toBe(11);
+    expect(kernel.livePositionFrames).toBeCloseTo(11000);
+    expect(deck.getSlipReturnPlayhead()).toBe(15);
+    deck.toggleLoop();
+    expect(deck.getSnapshot()).toMatchObject({ loop: null, playing: true });
+    expect(deck.getSlipReturnPlayhead()).toBeNull();
+    expect(deck.getPlayhead()).toBe(15);
+    kernel.render([new Float32Array(100)], new Float32Array([1]), 5, 1000);
+    ctx.currentTime = 5.1;
+    expect(kernel.livePositionFrames).toBeCloseTo(deck.getPlayhead() * 1000);
+  });
+
+  it('keeps a normal loop normal when Slip is enabled after entry', async () => {
+    const { deck, ctx } = await setup();
+    deck.play();
+    await Promise.resolve();
+    deck.toggleLoop();
+    deck.setSlipMode(true);
+    ctx.currentTime = 5;
+    expect(deck.getSlipReturnPlayhead()).toBeNull();
+    deck.toggleLoop();
+    expect(deck.getPlayhead()).toBe(11); // no phantom Slip from the raw audio anchor
+  });
+
+  it('preserves entry phase and integrates pitch/bend through resize and loop translation', async () => {
+    const { deck, ctx } = await setup();
+    deck.seek(10.1);
+    deck.setSlipMode(true);
+    deck.play();
+    await Promise.resolve();
+    deck.loopPreset(4);
+    expect(deck.getSlipReturnPlayhead()).toBeCloseTo(10.1);
+    ctx.currentTime = 1.5;
+    deck.resizeLoop('halve'); // phase-mod restart from 11.6 to 10.6
+    expect(deck.getPlayhead()).toBeCloseTo(10.6);
+    expect(deck.getSlipReturnPlayhead()).toBeCloseTo(11.6);
+    deck.setPitch(20);
+    deck.setBend(2);
+    deck.resizeActiveLoop('double');
+    deck.loopPreset(8);
+    deck.jumpBeats(16); // audible region translates, outer clock does not
+    ctx.currentTime = 3.5;
+    expect(deck.getSlipReturnPlayhead()).toBeCloseTo(14.048);
+    deck.setBend(0);
+    ctx.currentTime = 4.5;
+    deck.loopPreset(8); // lit preset releases
+    expect(deck.getPlayhead()).toBeCloseTo(15.248);
+    expect(deck.getSnapshot().loop).toBeNull();
+  });
+
+  it('arms while paused and starts the hidden clock only at actual audio launch', async () => {
+    const { deck, ctx } = await setup();
+    deck.setSlipMode(true);
+    deck.toggleLoop();
+    ctx.currentTime = 5;
+    expect(deck.getSlipReturnPlayhead()).toBe(10);
+    deck.play();
+    await Promise.resolve();
+    ctx.currentTime = 8;
+    expect(deck.getSlipReturnPlayhead()).toBe(13);
+    deck.toggleLoop();
+    expect(deck.getPlayhead()).toBe(13);
+  });
+
+  it('preserves an armed return through a paused loop translation before Play', async () => {
+    const { deck, ctx } = await setup();
+    deck.setSlipMode(true);
+    deck.toggleLoop();
+    deck.jumpBeats(16);
+    expect(deck.getPlayhead()).toBe(18);
+    expect(deck.getSlipReturnPlayhead()).toBe(10);
+    deck.play();
+    await Promise.resolve();
+    ctx.currentTime = 3;
+    expect(deck.getSlipReturnPlayhead()).toBe(13);
+    deck.toggleLoop();
+    expect(deck.getPlayhead()).toBe(13);
+  });
+
+  it.each([false, true])('release preserves a pending quantized launch (late timer=%s)', async late => {
+    vi.useFakeTimers();
+    try {
+      const { deck, ctx } = await setup();
+      deck.setSlipMode(true);
+      deck.toggleLoop();
+      deck.jumpBeats(16);
+      deck.setLaunchReferenceProvider(() => ({ beatTimes: [0, 0.5, 1, 1.5, 2], playhead: 0.4 + ctx.currentTime }));
+      deck.play(); // waits 100ms for peer beat
+      deck.toggleLoop();
+      expect(deck.getPlayhead()).toBe(10);
+      ctx.currentTime = 0.05;
+      vi.advanceTimersByTime(50);
+      expect(deck.getPlayhead()).toBe(10);
+      ctx.currentTime = late ? 0.55 : 0.1;
+      vi.advanceTimersByTime(50);
+      if (late) {
+        expect(deck.getPlayhead()).toBe(10);
+        ctx.currentTime = 0.6;
+        vi.advanceTimersByTime(50);
+      }
+      await Promise.resolve();
+      ctx.currentTime = late ? 0.7 : 0.2;
+      expect(deck.getPlayhead()).toBeCloseTo(10.1);
+      expect(deck.getSlipReturnPlayhead()).toBeNull();
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('keeps the outer return through a nested Slip scratch', async () => {
+    const { deck, ctx } = await setup();
+    deck.setSlipMode(true);
+    deck.play();
+    await Promise.resolve();
+    deck.toggleLoop();
+    ctx.currentTime = 1;
+    deck.beginScratch();
+    deck.scratchMove(-0.1, 0.01);
+    ctx.currentTime = 3;
+    deck.setPitch(20);
+    ctx.currentTime = 4;
+    expect(deck.getSlipReturnPlayhead()).toBeCloseTo(14.2);
+    deck.endScratch();
+    expect(deck.getSnapshot().loop).toMatchObject({ start: 10, end: 12 });
+    expect(deck.getPlayhead()).toBeGreaterThanOrEqual(10);
+    expect(deck.getPlayhead()).toBeLessThan(12);
+    expect(deck.getSlipReturnPlayhead()).toBeCloseTo(14.2);
+    ctx.currentTime = 5;
+    deck.toggleLoop();
+    expect(deck.getPlayhead()).toBeCloseTo(15.4);
+  });
+
+  it('can resize and release while scratching without losing the outer return', async () => {
+    const { deck, ctx } = await setup();
+    deck.setSlipMode(true);
+    deck.play();
+    await Promise.resolve();
+    deck.toggleLoop();
+    deck.beginScratch();
+    ctx.currentTime = 3;
+    deck.resizeLoop('halve');
+    expect(deck.getSnapshot().scratching).toBe(false);
+    expect(deck.getSlipReturnPlayhead()).toBe(13);
+    deck.beginScratch();
+    ctx.currentTime = 5;
+    deck.toggleLoop();
+    expect(deck.getSnapshot()).toMatchObject({ scratching: false, loop: null, playing: true });
+    expect(deck.getPlayhead()).toBe(15);
+  });
+
+  describe.each([false, true])('Slip cancellation while playing=%s', playing => {
+    it.each(['loop', 'scratch', 'nested'] as const)('discards the %s return without moving or ending the gesture', async gesture => {
+      const { deck, ctx } = await setup();
+      deck.setSlipMode(true);
+      if (playing) deck.play();
+      await Promise.resolve();
+      if (gesture !== 'scratch') deck.toggleLoop();
+      if (gesture !== 'loop') {
+        deck.beginScratch();
+        deck.scratchMove(-0.1, 0.01);
+      }
+      ctx.currentTime = gesture === 'loop' ? 3 : 0.005;
+      expect(deck.getSlipReturnPlayhead()).not.toBeNull();
+      const position = deck.getPlayhead();
+      const motion = deck.getScratchState();
+      const loop = deck.getSnapshot().loop;
+      deck.setSlipMode(false);
+      expect(deck.getSlipReturnPlayhead()).toBeNull();
+      expect(deck.getPlayhead()).toBe(position);
+      expect(deck.getScratchState()).toEqual(motion);
+      expect(deck.getSnapshot()).toMatchObject({ playing, slipMode: false, slipLoopActive: false,
+        scratching: gesture !== 'loop' });
+      expect(deck.getSnapshot().loop).toBe(loop);
+
+      deck.setSlipMode(true); // no resurrection of either pending return
+      deck.setPitch(20);
+      ctx.currentTime = 4;
+      expect(deck.getSlipReturnPlayhead()).toBeNull();
+      const release = deck.getPlayhead();
+      if (gesture !== 'loop') deck.endScratch();
+      if (gesture !== 'scratch') deck.toggleLoop();
+      expect(deck.getPlayhead()).toBeCloseTo(release);
+      expect(deck.getSnapshot()).toMatchObject({ playing, scratching: false, loop: null });
+
+      // The next gesture can use the now-enabled preference normally.
+      if (gesture === 'scratch') deck.beginScratch();
+      else deck.toggleLoop();
+      expect(deck.getSlipReturnPlayhead()).not.toBeNull();
+    });
+  });
+
+  it.each(['pause', 'togglePlay', 'seek', 'cue', 'hotCue', 'dispose', 'load', 'machine'] as const)(
+    '%s cancels a pending return without later resurrecting it', async action => {
+      const { deck, ctx } = await setup();
+      deck.setSlipMode(true);
+      deck.play();
+      await Promise.resolve();
+      deck.toggleLoop();
+      ctx.currentTime = 5;
+      if (action === 'pause') deck.pause();
+      if (action === 'togglePlay') deck.togglePlay();
+      if (action === 'seek') deck.seek(40);
+      if (action === 'cue') deck.cueDown();
+      if (action === 'hotCue') deck.hotCueDown(1, 40);
+      if (action === 'dispose') deck.dispose();
+      if (action === 'load') await deck.load({ trackId: 225, audioUrl: '', bpm: 120 });
+      if (action === 'machine') deck.setLoopRegion(null, 40);
+      expect(deck.getSlipReturnPlayhead()).toBeNull();
+      if (['seek', 'hotCue', 'machine'].includes(action)) expect(deck.getPlayhead()).toBe(40);
+      if (action === 'pause' || action === 'togglePlay') {
+        expect(deck.getPlayhead()).toBe(11);
+        deck.toggleLoop();
+        expect(deck.getPlayhead()).toBe(11);
+      }
+    });
+
+  it('keeps no-op cue releases and grid edits from canceling a Slip loop', async () => {
+    const { deck, ctx } = await setup();
+    deck.setSlipMode(true);
+    deck.play();
+    await Promise.resolve();
+    deck.toggleLoop();
+    deck.hotCueDown(1, null);
+    deck.hotCueUp(2, 20);
+    deck.cueUp();
+    deck.setBeatTimes(225, null);
+    ctx.currentTime = 5;
+    expect(deck.getSlipReturnPlayhead()).toBe(15);
+    deck.toggleLoop();
+    expect(deck.getPlayhead()).toBe(15);
+    deck.toggleLoop(); // gridless entry remains inert
+    expect(deck.getSlipReturnPlayhead()).toBeNull();
+  });
+
+  it('holds at hidden EOF while the loop sounds, then stops on release', async () => {
+    const { deck, ctx } = await setup();
+    deck.seek(99);
+    deck.setSlipMode(true);
+    deck.play();
+    await Promise.resolve();
+    deck.toggleLoop();
+    ctx.currentTime = 5;
+    expect(deck.getSlipReturnPlayhead()).toBe(100);
+    expect(deck.getSnapshot().playing).toBe(true);
+    deck.toggleLoop();
+    expect(deck.getPlayhead()).toBe(100);
+    expect(deck.getSnapshot()).toMatchObject({ playing: false, previewing: false, loop: null });
+    ctx.currentTime = 10;
+    expect(deck.getSlipReturnPlayhead()).toBeNull();
+    expect(deck.getPlayhead()).toBe(100);
+  });
+
+  it('machine loop placement preserves recorded positions without latching live Slip', async () => {
+    const { deck, ctx } = await setup();
+    deck.setSlipMode(true);
+    deck.play();
+    await Promise.resolve();
+    deck.setLoopRegion({ start: 10, end: 12 }, 11.5);
+    ctx.currentTime = 1;
+    expect(deck.getPlayhead()).toBe(10.5);
+    expect(deck.getSlipReturnPlayhead()).toBeNull();
+    deck.setLoopRegion(null, 35);
+    expect(deck.getPlayhead()).toBe(35);
+    nodes[0].kernel.render([new Float32Array(100)], new Float32Array([1]), 1, 1000);
+    expect(nodes[0].kernel.livePositionFrames).toBeCloseTo(35100);
+  });
+});
+
 describe('DeckEngine platter', () => {
   it.each([false, true])('capture clock reproduces live same-quantum motion (seeded=%s)', async seeded => {
     vi.useFakeTimers({ toFake: ['performance', 'setInterval', 'clearInterval'] });
@@ -262,18 +573,21 @@ describe('DeckEngine platter', () => {
     deck.play();
     await Promise.resolve();
     deck.setSlipMode(true);
+    expect(deck.getSlipReturnPlayhead()).toBeNull();
     deck.beginScratch();
-    deck.setSlipMode(false); // applies to the NEXT gesture
     expect(deck.asLaunchReference()).toBeNull();
     deck.scratchMove(-0.5, 0.05);
     ctx.currentTime = 1;
     expect(deck.getPlayhead()).toBeCloseTo(11.872);
+    expect(deck.getSlipReturnPlayhead()).toBeCloseTo(11);
     deck.setPitch(20);
     deck.setBend(2); // 1.224x from this instant
     ctx.currentTime = 3;
+    expect(deck.getSlipReturnPlayhead()).toBeCloseTo(11.448);
     deck.endScratch(); // hidden = 10 + 1 + 2*1.224, folded
+    expect(deck.getSlipReturnPlayhead()).toBeNull();
     expect(deck.getPlayhead()).toBeCloseTo(11.448);
-    expect(deck.getSnapshot()).toMatchObject({ playing: true, scratching: false, slipMode: false });
+    expect(deck.getSnapshot()).toMatchObject({ playing: true, scratching: false, slipMode: true });
     ctx.currentTime = 4;
     expect(deck.getPlayhead()).toBeCloseTo(10.672);
   });
@@ -284,6 +598,7 @@ describe('DeckEngine platter', () => {
     deck.beginScratch();
     deck.scratchMove(0.1, 0.01);
     ctx.currentTime = 3;
+    expect(deck.getSlipReturnPlayhead()).toBe(10);
     deck.endScratch();
     expect(deck.getPlayhead()).toBe(10);
     expect(deck.getSnapshot().playing).toBe(false);
@@ -295,6 +610,7 @@ describe('DeckEngine platter', () => {
     deck.setSlipMode(true);
     deck.scratchMove(-0.1, 0.01);
     ctx.currentTime = 1;
+    expect(deck.getSlipReturnPlayhead()).toBeNull();
     deck.endScratch();
     expect(deck.getPlayhead()).toBeCloseTo(9.9);
     deck.beginScratch();
@@ -313,6 +629,7 @@ describe('DeckEngine platter', () => {
     deck.beginScratch();
     deck.scratchMove(-0.1, 0.01);
     ctx.currentTime = 1;
+    expect(deck.getSlipReturnPlayhead()).toBe(100);
     deck.endScratch();
     expect(deck.getPlayhead()).toBe(100);
     expect(deck.getSnapshot()).toMatchObject({ playing: false, scratching: false });

@@ -41,6 +41,7 @@ export interface ReducerDeckState {
   trackDuration: number;
   playing: boolean;
   slipMode: boolean;
+  slipLoopActive: boolean;
   vinylMode: boolean;
   /** Filter state at playheadAt; null = not scratching, zero = hold. */
   scratch: ScratchFilter | null;
@@ -82,6 +83,7 @@ export function freshDeck(assignment: CrossfaderAssignment): ReducerDeckState {
     trackDuration: Infinity,
     playing: false,
     slipMode: false,
+    slipLoopActive: false,
     vinylMode: true,
     scratch: null,
     loop: null,
@@ -198,6 +200,7 @@ export function applyEvent(s: AudibilityState, e: CaptureEvent): void {
       d.previewing = false;
       d.scratch = null;
       d.loop = null;
+      d.slipLoopActive = false;
       d.playhead = 0;
       d.playheadAt = e.t;
       break;
@@ -205,6 +208,7 @@ export function applyEvent(s: AudibilityState, e: CaptureEvent): void {
     case 'loop': {
       const d = s.decks[e.channel];
       d.loop = e.region ? { ...e.region } : null;
+      d.slipLoopActive = Boolean(e.region && e.slip);
       d.playhead = e.playhead;
       d.playheadAt = e.t;
       break;
