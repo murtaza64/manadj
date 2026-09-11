@@ -41,6 +41,13 @@ interface Props {
   isSelected: boolean;
   /** The Deck(s) this track is loaded on (live occupancy across A–D). */
   loadedOn: LoadedMark;
+  /** Played this Session (sessions 09, gh#106): Master-audible past the
+   * threshold. Recolors the title/artist text (rekordbox parity: played
+   * rows read green). Cue/PFL/load-only never set this. */
+  played?: boolean;
+  /** Playing Deck IDs and corresponding comma-separated level percentages. */
+  playingOn?: string;
+  playingLevels?: string;
   onSelect: (track: Track, mods: SelectMods) => void;
   /** Load this track onto the Deck (double-click). */
   onLoad: (track: Track) => void;
@@ -113,6 +120,9 @@ const TrackRow = memo(function TrackRow({
   track,
   isSelected,
   loadedOn,
+  played = false,
+  playingOn = '',
+  playingLevels = '',
   onSelect,
   onLoad,
   onLoadToDeck,
@@ -168,7 +178,7 @@ const TrackRow = memo(function TrackRow({
 
   return (
     <tr
-      className={`track-row ${isSelected ? 'track-row-selected' : ''} ${track.archived_at ? 'track-row-archived' : ''}`}
+      className={`track-row ${isSelected ? 'track-row-selected' : ''} ${track.archived_at ? 'track-row-archived' : ''} ${played ? 'track-row-played' : ''}`}
       onClick={(e) => onSelect(track, { shift: e.shiftKey, toggle: e.metaKey || e.ctrlKey })}
       onDoubleClick={() => onLoad(track)}
       data-track-id={track.id}
@@ -228,7 +238,27 @@ const TrackRow = memo(function TrackRow({
           {/* While Follow filters, Compatible rows carry their Match
               score here instead of (absent) evidence marks — one column,
               two vocabularies. Any real mark wins the slot. */}
-          {score != null && deckEvidence.length === 0 ? (
+          {playingOn !== '' ? (
+            <div className="track-marks">
+              {[...playingOn].map((deck, index) => {
+                const level = Number(playingLevels.split(',')[index]) || 0;
+                const label = `Deck ${deck}: Playing - ${level}% level`;
+                return (
+                  <span key={deck} className={`track-mark-slot mark-${deck.toLowerCase()}`}>
+                    <span
+                      className="track-playing"
+                      style={{ '--playing-color': `color-mix(in srgb, var(--deck-${deck.toLowerCase()}) ${level}%, var(--overlay1))` } as CSSProperties}
+                      role="img"
+                      aria-label={label}
+                      title={label}
+                    >
+                      <i /><i /><i />
+                    </span>
+                  </span>
+                );
+              })}
+            </div>
+          ) : score != null && deckEvidence.length === 0 ? (
             <div className="track-match-score">{Math.round(score)}</div>
           ) : (
             <div className="track-marks">

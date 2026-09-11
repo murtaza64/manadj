@@ -1347,7 +1347,10 @@ export const api = {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ promoted_transition_uuid: transitionUuid }),
       });
-      if (!res.ok) throw new Error(`Failed to set take promotion (${res.status})`);
+      if (!res.ok) {
+        const detail = (await res.json().catch(() => null))?.detail;
+        throw new Error(detailToMessage(detail, `Failed to set take promotion (${res.status})`));
+      }
       return res.json();
     },
   },

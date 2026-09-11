@@ -60,7 +60,6 @@ const TIER_ALPHA = BEAT_TIER_FULL.alpha;
 import type { LaneId, LanePoint } from '../editor/mixModel';
 import {
   createSlotLanesCursor,
-  traceStateAt,
   type PlannedRoutine,
   type PlannedRoutineSlot,
   type RoutineLanePoint,
@@ -93,9 +92,8 @@ import {
 } from './routineEditorModel';
 
 const WAVE_H = 64;
-/** Outward-trim drag allowance (beats past either boundary); the server
- * clamps the applied widen to the session slice's extent. */
-const TRIM_WIDEN_CAP_BEATS = 128;
+/** Minimum scroll room outside the saved artifact. */
+const SCROLL_SLACK_BEATS = 128;
 const STRIP_H = 22;
 /** Editing wants room for breakpoints (gh#190 iteration: taller). */
 const STRIP_H_AUTHORED = 56;
@@ -136,11 +134,9 @@ export interface TrimRange {
 type JumpMarker =
   | { kind: 'authored'; slotId: string; jump: AuthoredJump }
   | { kind: 'recorded'; slotId: string; beat: number; deltaSec: number }
-  | { kind: 'ghost'; slotId: string; beat: number }
   // Play/pause events (gh#190): first-class like jumps.
   | { kind: 'authored-pause'; slotId: string; pause: AuthoredPause }
-  | { kind: 'recorded-pause'; slotId: string; beat: number; endBeat: number }
-  | { kind: 'ghost-pause'; slotId: string; beat: number; endBeat: number };
+  | { kind: 'recorded-pause'; slotId: string; beat: number; endBeat: number };
 
 function markerBeat(m: JumpMarker): number {
   return m.kind === 'authored' ? m.jump.beat : m.kind === 'authored-pause' ? m.pause.beat : m.beat;
@@ -198,9 +194,8 @@ export function RoutineTimeline({
    * shared with editor.planned, so run/waveform memos survive lane drags
    * (the ~60 Hz hot path). */
   plannedForRuns: PlannedRoutine;
-  /** Recorded discontinuities from the RAW build (no edits), keyed by
-   * slotId — marker provenance stays visible even once removed
-   * (ghosts). */
+   /** Recorded discontinuities from the RAW build (no edits), keyed by
+    * slotId. Suppressed events stay in the draft metadata, not the UI. */
   recordedJumpsBySlot: Record<string, RecordedJump[]>;
   /** Recorded interior HOLDS from the RAW build (gh#190 play/pause). */
   recordedPausesBySlot: Record<string, RecordedPause[]>;
@@ -214,7 +209,7 @@ export function RoutineTimeline({
   player: RoutinePlayer;
   draftStore: RoutineDraftStore;
   edits: RoutineEdits;
-  /** Boundary trim (tier 3) — null hides the handles (no origin take). */
+  /** Effective playback bounds; null hides handles for pairs/review drafts. */
   trim: TrimRange | null;
   onTrimChange: ((trim: TrimRange) => void) | null;
   onSeekBeat: (beat: number) => void;
@@ -226,6 +221,11 @@ export function RoutineTimeline({
 }) {
   const { planned, input } = editor;
   const duration = input.durationBeats;
+  const { startBeat, endBeat } = planned.playbackBounds;
+  const authoringStart = pairMode && planned.auditionRange
+    ? (planned.auditionRange.startSec - planned.beatOriginMixSec) / planned.secPerBeat
+    : Math.min(0, startBeat);
+  const authoringEnd = Math.max(duration, endBeat);
   const styleSlot = useStyleSlot('full');
   const containerRef = useRef<HTMLDivElement>(null);
   const rowsRef = useRef<HTMLDivElement>(null);
@@ -285,22 +285,28 @@ export function RoutineTimeline({
 
   const fit = useCallback(() => {
     const w = containerRef.current?.clientWidth ?? 0;
-    if (w <= 0 || duration <= 0) return;
-    // Fit into the width RIGHT of the panel column, with beat -PAD landing
-    // at the panel's edge (gh#206 item 2) — the routine head stays visible.
+    if (w <= 0 || endBeat <= startBeat) return;
+    // Keep both playback handles to the right of the panel column.
     const usable = Math.max(40, w - PANEL_W);
-    const px = Math.max(MIN_PX_PER_BEAT, usable / (duration + PAD_BEATS * 2));
+    const px = Math.max(MIN_PX_PER_BEAT, usable / (endBeat - startBeat + PAD_BEATS * 2));
     setPxPerBeat(px);
-    setScrollBeat(-PAD_BEATS - PANEL_W / px);
-  }, [duration]);
-  useEffect(fit, [fit, width === 0]); // eslint-disable-line react-hooks/exhaustive-deps
+    setScrollBeat(startBeat - PAD_BEATS - PANEL_W / px);
+  }, [startBeat, endBeat]);
+  const fittedPairRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (pairMode) {
+      if (width <= 0 || fittedPairRef.current === editor.detail.uuid) return;
+      fittedPairRef.current = editor.detail.uuid;
+    } else fittedPairRef.current = null;
+    fit();
+  }, [editor.detail.uuid, duration, width === 0, pairMode]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Scroll slack: outward trim handles must stay reachable past the
   // boundaries, and the out-of-span CONTEXT (#205 — the slots' track
   // material around the window) must be reachable too. `scrollExtents`
   // is set below once the context is computed (a ref so clampScroll
   // never re-binds the wheel listener on context changes).
-  const scrollExtentsRef = useRef({ before: TRIM_WIDEN_CAP_BEATS, after: TRIM_WIDEN_CAP_BEATS });
+  const scrollExtentsRef = useRef({ before: SCROLL_SLACK_BEATS, after: SCROLL_SLACK_BEATS });
   const clampScroll = useCallback(
     (s: number, px: number): number => {
       const w = containerRef.current?.clientWidth ?? 0;
@@ -470,10 +476,10 @@ export function RoutineTimeline({
   const bakedEntryRef = useRef(bakedEntryBySlotId);
   bakedEntryRef.current = bakedEntryBySlotId;
 
-  /** A slot's EFFECTIVE entry beat (override included) off the live build. */
-  const effectiveEntryBeat = (s: PlannedRoutineSlot): number => {
+  /** Whole-track moves shift the anchor, not the independently trimmed intro. */
+  const entryAnchorBeat = (s: PlannedRoutineSlot): number => {
     const p = plannedRef.current;
-    return (s.entryMixSec - p.mixStartSec) / p.secPerBeat;
+    return s.startTrim?.anchorBeat ?? (s.entryMixSec - p.beatOriginMixSec) / p.secPerBeat;
   };
 
   // ── The select-mode slot drag: TWO AXES (ADR 0038, #207 slice 2).
@@ -512,7 +518,7 @@ export function RoutineTimeline({
               return [
                 sid,
                 {
-                  entryBeat: ps ? effectiveEntryBeat(ps) : 0,
+                  entryBeat: ps ? entryAnchorBeat(ps) : 0,
                   bakedEntryBeat: bakedEntryRef.current[sid] ?? 0,
                   nudgeSec: edits0.nudges[sid] ?? 0,
                   lanes,
@@ -621,8 +627,8 @@ export function RoutineTimeline({
           above && ev.clientY < above.midY ? above : below && ev.clientY > below.midY ? below : null;
         if (!target) return;
         const grabbed = slots[gi];
-        const eG = effectiveEntryBeat(grabbed);
-        const eT = effectiveEntryBeat(target.slot);
+        const eG = entryAnchorBeat(grabbed);
+        const eT = entryAnchorBeat(target.slot);
         const baked = bakedEntryRef.current;
         const override = (slotId: string, beat: number): number | null =>
           Math.abs(beat - (baked[slotId] ?? NaN)) < 1e-9 ? null : beat;
@@ -702,18 +708,20 @@ export function RoutineTimeline({
       // Seeks roam one audition margin beyond either boundary (gh#190
       // item 5) — the player clamps to the same range.
       onSeekBeat(
-        Math.max(-AUDITION_MARGIN_BEATS, Math.min(beat, duration + AUDITION_MARGIN_BEATS))
+        Math.max(planned.auditionRange
+          ? (planned.auditionRange.startSec - planned.beatOriginMixSec) / planned.secPerBeat : startBeat - AUDITION_MARGIN_BEATS,
+          Math.min(beat, planned.auditionRange
+            ? (planned.auditionRange.endSec - planned.beatOriginMixSec) / planned.secPerBeat : endBeat + AUDITION_MARGIN_BEATS))
       );
     },
-    [onSeekBeat, duration]
+    [onSeekBeat, startBeat, endBeat, planned.auditionRange, planned.beatOriginMixSec, planned.secPerBeat]
   );
   seekAtClientXRef.current = seekAtClientX;
 
   const plannedRef = useRef(planned);
   plannedRef.current = planned;
 
-  // ── Jump insertion (jump mode: SINGLE click — ADR 0038; replaces the
-  // dblclick/alt+dblclick overloads that kept colliding with UI clicks).
+  // Jump mode: single click; Select: waveform-only double-click (ADR 0038).
   // The popup carries jump⇄pause and displacement, so a plain insert +
   // popover covers pause authoring too.
   const insertJumpAt = useCallback(
@@ -727,7 +735,8 @@ export function RoutineTimeline({
       if (px <= 0) return;
       let beat = s + (clientX - rect.left) / px;
       if (!shiftKey) beat = Math.round(beat); // beat magnet; shift = free
-      beat = Math.max(0, Math.min(beat, duration));
+      // Visible context and expanded bounds keep the original beat axis.
+      if (pairModeRef.current) beat = Math.max(authoringStart, Math.min(beat, duration));
       const track = tracks.get(slot.trackId);
       const trackBpm = track?.bpm ?? null;
       // Default: a 4-track-beat BACKWARD jump — loopable (the pair
@@ -742,7 +751,20 @@ export function RoutineTimeline({
       draftStore.addJump(jump);
       setPopover({ marker: { kind: 'authored', slotId: slot.slotId, jump }, x: beat });
     },
-    [draftStore, duration, tracks]
+    [draftStore, tracks, duration, authoringStart]
+  );
+
+  const onRowsInsertClick = useCallback(
+    (e: React.MouseEvent) => {
+      if (mode === 'pan') return;
+      if (mode === 'select' ? e.type !== 'dblclick' : e.type !== 'click' || e.detail > 1) return;
+      const target = e.target as HTMLElement;
+      // Only the waveform surface, never its marker/popover/control children.
+      if (!target.matches('.rt-wave-row, .rt-wave-row > canvas')) return;
+      const slotId = target.closest('.rt-wave-row')?.getAttribute('data-slot');
+      if (slotId != null) insertJumpAt(e.clientX, e.shiftKey, slotId);
+    },
+    [mode, insertJumpAt]
   );
 
   // ── Mode-dispatched canvas gestures (ADR 0038) ───────────────────────
@@ -752,7 +774,7 @@ export function RoutineTimeline({
     (e: React.PointerEvent) => {
       if (
         (e.target as HTMLElement).closest(
-          '.rt-trimhandle, .rt-jump, .rt-lanetoggles, .rt-lanestrip, .rt-jump-popover, .rt-laneauthor, .rt-slotpanel, .rt-panelcol'
+          '.rt-trimhandle, .rt-track-start, .rt-jump, .rt-lanetoggles, .rt-lanestrip, .rt-jump-popover, .rt-laneauthor, .rt-slotpanel, .rt-panelcol'
         )
       )
         return;
@@ -760,8 +782,7 @@ export function RoutineTimeline({
       const slotId = slotEl ? slotEl.getAttribute('data-slot') : null;
       if (mode === 'jump') {
         if (slotId !== null) {
-          setPopover(null);
-          insertJumpAt(e.clientX, e.shiftKey, slotId);
+          // Insert on click: pointerdown.detail is not a reliable click count.
           return;
         }
         // Background falls through to the modeless seek below.
@@ -813,7 +834,7 @@ export function RoutineTimeline({
       seekAtClientX(e.clientX);
       setPopover(null);
     },
-    [mode, seekAtClientX, selectedSlots, beginSlide, insertJumpAt]
+    [mode, seekAtClientX, selectedSlots, beginSlide]
   );
 
   // Pan mode grabs EVERYTHING at the capture phase (gh#207 review
@@ -840,6 +861,41 @@ export function RoutineTimeline({
     scrubbing.current = false;
   }, []);
 
+  const onTrackStartDown = (slot: PlannedRoutineSlot) => (e: React.PointerEvent) => {
+    const limits = slot.startTrim;
+    if (!limits || pairMode || mode !== 'select') return;
+    e.preventDefault();
+    e.stopPropagation();
+    setPopover(null);
+    const grabbedX = e.clientX;
+    const grabbedBeat = (slot.entryMixSec - planned.beatOriginMixSec) / planned.secPerBeat;
+    const grabbedScroll = viewRef.current.scrollBeat;
+    const previous = document.body.style.userSelect;
+    document.body.style.userSelect = 'none';
+    const move = (event: PointerEvent) => {
+      const el = rowsRef.current;
+      const { pxPerBeat: px, scrollBeat: scroll } = viewRef.current;
+      if (!el || px <= 0) return;
+      let beat = grabbedBeat + (event.clientX - grabbedX) / px + scroll - grabbedScroll;
+      if (!event.shiftKey) {
+        const step = snapStepBeats(px);
+        beat = Math.round(beat / step) * step;
+      }
+      beat = Math.max(limits.minBeat, Math.min(beat, limits.maxBeat));
+      draftStore.setStartTrim(slot.slotId, beat - limits.anchorBeat);
+    };
+    const finish = () => {
+      document.body.style.userSelect = previous;
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', finish);
+      window.removeEventListener('pointercancel', finish);
+      draftStore.endGesture();
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', finish);
+    window.addEventListener('pointercancel', finish);
+  };
+
   // ── Trim handle drag (tier 3) ────────────────────────────────────────
   const trimDrag = useRef<'start' | 'end' | null>(null);
   const trimRef = useRef(trim);
@@ -861,17 +917,11 @@ export function RoutineTimeline({
         const { pxPerBeat: px, scrollBeat: s } = viewRef.current;
         if (px <= 0) return;
         const beat = s + (ev.clientX - rect.left) / px;
-        // Inward AND outward (gh#170 follow-up — the miner under-sizes
-        // dwell-shaped windows): boundaries drag past 0/duration to
-        // WIDEN, up to a generous margin; the server clamps the applied
-        // widen to the origin session slice's real extent. Keep ≥ 8
-        // beats between the edges.
+        // The shell clamps against slot coverage and the minimum span.
         if (trimDrag.current === 'start') {
-          const v = Math.max(-TRIM_WIDEN_CAP_BEATS, Math.min(beat, t.endBeat - 8));
-          onTrimChange({ ...t, startBeat: v });
+          onTrimChange({ ...t, startBeat: beat });
         } else {
-          const v = Math.min(duration + TRIM_WIDEN_CAP_BEATS, Math.max(beat, t.startBeat + 8));
-          onTrimChange({ ...t, endBeat: v });
+          onTrimChange({ ...t, endBeat: beat });
         }
       };
       const onUp = () => {
@@ -879,11 +929,14 @@ export function RoutineTimeline({
         document.body.style.userSelect = prevUserSelect;
         window.removeEventListener('pointermove', onMove);
         window.removeEventListener('pointerup', onUp);
+        window.removeEventListener('pointercancel', onUp);
+        draftStore.endGesture();
       };
       window.addEventListener('pointermove', onMove);
       window.addEventListener('pointerup', onUp);
+      window.addEventListener('pointercancel', onUp);
     },
-    [onTrimChange, duration]
+    [onTrimChange, draftStore]
   );
 
   // ── Jump gestures ────────────────────────────────────────────────────
@@ -909,7 +962,7 @@ export function RoutineTimeline({
         if (px <= 0) return;
         let beat = s + (ev.clientX - rect.left) / px;
         if (!ev.shiftKey) beat = Math.round(beat); // beat magnet; shift = free
-        beat = Math.max(0, Math.min(beat, duration));
+        if (pairModeRef.current) beat = Math.max(authoringStart, Math.min(beat, duration));
         if (marker.kind === 'authored') draftStore.updateJump(drag.id, { beat });
         else draftStore.updatePause(drag.id, { beat });
       };
@@ -924,7 +977,7 @@ export function RoutineTimeline({
       window.addEventListener('pointermove', onMove);
       window.addEventListener('pointerup', onUp);
     },
-    [draftStore, duration]
+    [draftStore, duration, authoringStart]
   );
 
   // ── Playhead (rAF-driven; div transform only — the editor's pink) ────
@@ -989,14 +1042,15 @@ export function RoutineTimeline({
     }
     const cap = 4096;
     return {
-      beforeBeats: Math.min(cap, Math.max(0, Math.ceil(before))),
-      afterBeats: Math.min(cap, Math.max(0, Math.ceil(after))),
+      beforeBeats: pairMode ? Math.max(0, -authoringStart, Math.ceil(before))
+        : Math.max(-startBeat, Math.min(cap, Math.max(0, Math.ceil(before)))),
+      afterBeats: Math.max(endBeat - duration, Math.min(cap, Math.max(0, Math.ceil(after)))),
     };
-  }, [plannedForRuns, tracks, duration]);
+  }, [plannedForRuns, tracks, duration, pairMode, authoringStart, startBeat, endBeat]);
 
   scrollExtentsRef.current = {
-    before: Math.max(TRIM_WIDEN_CAP_BEATS, context.beforeBeats),
-    after: Math.max(TRIM_WIDEN_CAP_BEATS, context.afterBeats),
+    before: Math.max(SCROLL_SLACK_BEATS, context.beforeBeats),
+    after: Math.max(SCROLL_SLACK_BEATS, context.afterBeats),
   };
 
   // Fit including the surrounding context (the pair editor's whole-tracks
@@ -1040,8 +1094,8 @@ export function RoutineTimeline({
   // first entry), with DERIVED reset guides where a handoff breaks the
   // running phrase count. Zoom-independent; culling happens at draw.
   const globalLadder = useMemo(() => {
-    const { mixStartSec, secPerBeat } = plannedForRuns;
-    const toBeat = (sec: number) => (sec - mixStartSec) / secPerBeat;
+    const { beatOriginMixSec, secPerBeat } = plannedForRuns;
+    const toBeat = (sec: number) => (sec - beatOriginMixSec) / secPerBeat;
     const downsBySlot: (ReturnType<typeof slotDownbeatMarks> | null)[] =
       plannedForRuns.slots.map((slot, i) => {
         const meter = meters.get(slot.trackId) ?? null;
@@ -1068,17 +1122,8 @@ export function RoutineTimeline({
       const authoredJ = edits.jumps.filter((j) => j.slotId === slot.slotId);
       for (const rj of recordedJumpsBySlot[slot.slotId] ?? []) {
         const isRemoved = removed.some((r) => Math.abs(r.beat - rj.beat) < 0.01);
-        // A CONVERSION (removed + authored at the same beat) shows only
-        // the authored marker; the ghost reappears if the edited jump is
-        // dragged away (still restorable).
-        const converted =
-          isRemoved && authoredJ.some((j) => Math.abs(j.beat - rj.beat) < 0.01);
-        if (converted) continue;
-        out.push(
-          isRemoved
-            ? { kind: 'ghost', slotId: slot.slotId, beat: rj.beat }
-            : { kind: 'recorded', slotId: slot.slotId, beat: rj.beat, deltaSec: rj.deltaSec }
-        );
+        if (isRemoved) continue;
+        out.push({ kind: 'recorded', slotId: slot.slotId, beat: rj.beat, deltaSec: rj.deltaSec });
       }
       for (const j of authoredJ) {
         out.push({ kind: 'authored', slotId: slot.slotId, jump: j });
@@ -1088,16 +1133,8 @@ export function RoutineTimeline({
       const authoredP = edits.pauses.filter((p) => p.slotId === slot.slotId);
       for (const rp of recordedPausesBySlot[slot.slotId] ?? []) {
         const isRemoved = removedP.some((r) => Math.abs(r.beat - rp.beat) < 0.01);
-        // A conversion (removed + authored at the same beat) shows only
-        // the authored marker — no ghost under it.
-        const converted =
-          isRemoved && authoredP.some((p) => Math.abs(p.beat - rp.beat) < 0.01);
-        if (converted) continue;
-        out.push(
-          isRemoved
-            ? { kind: 'ghost-pause', slotId: slot.slotId, beat: rp.beat, endBeat: rp.endBeat }
-            : { kind: 'recorded-pause', slotId: slot.slotId, beat: rp.beat, endBeat: rp.endBeat }
-        );
+        if (isRemoved) continue;
+        out.push({ kind: 'recorded-pause', slotId: slot.slotId, beat: rp.beat, endBeat: rp.endBeat });
       }
       for (const p of authoredP) {
         out.push({ kind: 'authored-pause', slotId: slot.slotId, pause: p });
@@ -1105,6 +1142,19 @@ export function RoutineTimeline({
       return out;
     });
   }, [planned, edits, recordedJumpsBySlot, recordedPausesBySlot]);
+
+  // Undo/redo or another draft edit can invalidate the open marker.
+  const livePopoverMarker = popover && jumpMarkers.flat().find((m) =>
+    m.slotId === popover.marker.slotId && m.kind === popover.marker.kind &&
+    (m.kind === 'authored' && popover.marker.kind === 'authored'
+      ? m.jump.id === popover.marker.jump.id
+      : m.kind === 'authored-pause' && popover.marker.kind === 'authored-pause'
+        ? m.pause.id === popover.marker.pause.id
+        : markerBeat(m) === markerBeat(popover.marker))
+  );
+  useEffect(() => {
+    if (popover && !livePopoverMarker) setPopover(null);
+  }, [popover, livePopoverMarker]);
 
   // ── Canvas drawing (waveform rows + ruler) ───────────────────────────
   useLayoutEffect(() => {
@@ -1190,7 +1240,7 @@ export function RoutineTimeline({
             ctx.fill();
           }
         }
-        for (const b of [0, duration]) {
+        for (const b of [startBeat, endBeat]) {
           const x = xAt(b);
           if (x < -2 || x > width + 2) continue;
           ctx.strokeStyle = ROUTINE_ACCENT;
@@ -1231,7 +1281,7 @@ export function RoutineTimeline({
       // baked input array is indexed by the recording's slot address,
       // not the derived order.
       const entryBeat =
-        (slot.entryMixSec - plannedForRuns.mixStartSec) / plannedForRuns.secPerBeat;
+        (slot.entryMixSec - plannedForRuns.beatOriginMixSec) / plannedForRuns.secPerBeat;
       // The flag marks first AUDIBILITY under the EFFECTIVE lanes (#221
       // redirect: authoring a fader that opens earlier/later must move
       // it) — the baked entry offset stays the structural anchor (slot
@@ -1257,50 +1307,11 @@ export function RoutineTimeline({
       }
       ctx.fillStyle = `rgba(${hexToRgbTriplet(WAVE_BG_COLOR)},0.6)`;
       const preX = Math.min(width, Math.max(0, ex));
-      const zeroX = Math.max(0, xAt(0));
+      const zeroX = Math.max(0, xAt(startBeat));
       if (preX > zeroX) ctx.fillRect(zeroX, 0, preX - zeroX, WAVE_H);
-      if (xAt(0) > 0) ctx.fillRect(0, 0, Math.min(width, xAt(0)), WAVE_H);
-      if (xAt(duration) < width) {
-        ctx.fillRect(Math.max(0, xAt(duration)), 0, width - Math.max(0, xAt(duration)), WAVE_H);
-      }
-      // Expansion preview (gh#190 item 10): an outward-dragged trim
-      // handle projects the boundary slot's material into the extension
-      // region — the same extrapolation the re-promotion will pull in
-      // (approximate: the true retrim replays the session slice; this
-      // shows the boundary track's own continuation).
-      if (wave && trim) {
-        const ext: BeatRun[] = [];
-        if (slot.slot === 0 && trim.startBeat < 0) {
-          const s = traceStateAt(slot.trace, 1e-3);
-          const rate = s.moving ? s.ratePerBeat : 0;
-          ext.push({
-            b0: trim.startBeat,
-            b1: 0,
-            ph0: s.pos + trim.startBeat * rate,
-            ph1: s.pos,
-          });
-        }
-        if (slot.slot === plannedForRuns.slots.length - 1 && trim.endBeat > duration) {
-          const s = traceStateAt(slot.trace, duration);
-          const rate = s.moving ? s.ratePerBeat : 0;
-          ext.push({
-            b0: duration,
-            b1: trim.endBeat,
-            ph0: s.pos,
-            ph1: s.pos + (trim.endBeat - duration) * rate,
-          });
-        }
-        if (ext.length > 0) {
-          ctx.globalAlpha = 0.7;
-          const liveSlot = planned.slots[i] ?? slot;
-          drawSlotWave(ctx, wave, styleSlot.styleId, styleSlot.params, ext, liveSlot, {
-            xAt,
-            beatAt: (px: number) => (px + viewPx) / pxPerBeat,
-            width,
-            waveH: WAVE_H,
-          });
-          ctx.globalAlpha = 1;
-        }
+      if (xAt(startBeat) > 0) ctx.fillRect(0, 0, Math.min(width, xAt(startBeat)), WAVE_H);
+      if (xAt(endBeat) < width) {
+        ctx.fillRect(Math.max(0, xAt(endBeat)), 0, width - Math.max(0, xAt(endBeat)), WAVE_H);
       }
     });
   }, [
@@ -1319,7 +1330,8 @@ export function RoutineTimeline({
     duration,
     slotRuns,
     styleSlot,
-    trim,
+    startBeat,
+    endBeat,
   ]);
 
   // ── Recorded-lane strip drawing (non-authored strips only) ───────────
@@ -1350,7 +1362,8 @@ export function RoutineTimeline({
           stripH: STRIP_H,
           scrollBeat,
           pxPerBeat,
-          duration,
+          startBeat: authoringStart,
+          endBeat: authoringEnd,
           trimCenter:
             control === 'trim'
               ? Math.max(
@@ -1374,6 +1387,8 @@ export function RoutineTimeline({
     gridLines,
     slotLadders,
     duration,
+    authoringStart,
+    authoringEnd,
     lanesFor,
     collapsedLanes,
   ]);
@@ -1385,8 +1400,6 @@ export function RoutineTimeline({
   // locked to the rest of the UI.
   const viewOriginPx = Math.round(scrollBeat * pxPerBeat);
   const xOf = (beat: number) => beat * pxPerBeat - viewOriginPx;
-  const windowLeft = xOf(0);
-  const windowWidth = duration * pxPerBeat;
 
   // LaneCanvas guides, PER SLOT (gh#190 iteration): the slot's real track
   // ladder normalized into the routine window, tiers RELATIVE to the
@@ -1396,7 +1409,7 @@ export function RoutineTimeline({
   const laneGuidesBySlot = useMemo(() => {
     const norm = (beat: number) => (duration > 0 ? beat / duration : 0);
     const fallback = gridLines.ticks
-      .filter((t) => t.beat >= 0 && t.beat <= duration)
+      .filter((t) => t.beat >= authoringStart && t.beat <= authoringEnd)
       .map((t) => {
         const pos = t.tier - gridLines.baseTier;
         return {
@@ -1409,7 +1422,7 @@ export function RoutineTimeline({
       const ladder = slotLadders[slot.slot];
       if (!ladder) return fallback;
       return ladder.marks
-        .filter((m) => m.beatR >= 0 && m.beatR <= duration)
+        .filter((m) => m.beatR >= authoringStart && m.beatR <= authoringEnd)
         .map((m) => {
           const pos = m.tier - ladder.baseTier;
           return {
@@ -1420,7 +1433,7 @@ export function RoutineTimeline({
           };
         });
     });
-  }, [gridLines, slotLadders, planned, duration]);
+  }, [gridLines, slotLadders, planned, duration, authoringStart, authoringEnd]);
 
   const authorLane = useCallback(
     (slot: PlannedRoutineSlot, control: AuthorableLaneControl) => {
@@ -1454,29 +1467,32 @@ export function RoutineTimeline({
   const laneCanvasFor = (slot: PlannedRoutineSlot, control: AuthorableLaneControl, color: string) => {
     const key = `${slot.slotId}:${control}`;
     const pts = slot.lanes[control];
+    const laneStart = authoringStart;
+    const laneDuration = authoringEnd - laneStart;
+    const laneWidth = laneDuration * pxPerBeat;
     const toLanePoint = (p: RoutineLanePoint): LanePoint => ({
-      x: duration > 0 ? p.beat / duration : 0,
+      x: laneDuration > 0 ? (p.beat - laneStart) / laneDuration : 0,
       y: control === 'filter' ? (p.value + 1) / 2 : p.value,
     });
     const fromLanePoint = (p: LanePoint): RoutineLanePoint => ({
-      beat: p.x * duration,
+      beat: p.x * laneDuration + laneStart,
       value: control === 'filter' ? p.y * 2 - 1 : p.y,
     });
     return (
       <div
         className="rt-lanewindow"
-        style={{ left: windowLeft, width: Math.max(windowWidth, 4) }}
+        style={{ left: xOf(laneStart), width: Math.max(laneWidth, 4) }}
         onPointerUpCapture={() => draftStore.endGesture()}
         onPointerCancelCapture={() => draftStore.endGesture()}
       >
         <LaneCanvas
           id={CONTROL_LANE_ID[control]}
           color={color}
-          widthPx={Math.max(windowWidth, 4)}
+          widthPx={Math.max(laneWidth, 4)}
           points={pts.map(toLanePoint)}
-          guides={laneGuidesBySlot[slot.slot] ?? EMPTY_GUIDES}
-          chopWall={duration > 0 ? 0.1 / duration : 0.01}
-          windowLeftPx={0}
+          guides={(laneGuidesBySlot[slot.slot] ?? EMPTY_GUIDES).map((g) => ({ ...g, x: (g.x * duration - laneStart) / laneDuration }))}
+          chopWall={laneDuration > 0 ? 0.1 / laneDuration : 0.01}
+          windowLeftPx={laneStart * pxPerBeat}
           registerScrollDraw={scrollDrawFor(key)}
           onChange={(next) => draftStore.setLane(slot.slotId, control, next.map(fromLanePoint))}
           selected={laneSel?.key === key ? laneSel.indices : NO_SELECTION}
@@ -1523,6 +1539,8 @@ export function RoutineTimeline({
         ref={rowsRef}
         onPointerDownCapture={onRowsPointerDownCapture}
         onPointerDown={onRowsPointerDown}
+        onClick={onRowsInsertClick}
+        onDoubleClick={onRowsInsertClick}
         onPointerMove={onRowsPointerMove}
         onPointerUp={onRowsPointerUp}
         onPointerCancel={onRowsPointerUp}
@@ -1543,8 +1561,7 @@ export function RoutineTimeline({
               {/* Fixed-width DIM PANEL (gh#190 iteration): spans the whole
                   slot block behind the left-side controls — track data in
                   three rows (title / artist / deck·bpm·key·extra), titles
-                  truncating. No temporal-offset controls: dragging owns
-                  that. */}
+                   truncating. */}
               <div className="rt-slotpanel">
                 <div className="rt-sp-title">
                   <span className="rt-slotnum" style={{ background: slotAccent(slot.deck) }}>
@@ -1604,6 +1621,33 @@ export function RoutineTimeline({
                     </button>
                   )}
                 </div>
+                {!pairMode && slot.slot > 0 && slot.startTrim && (
+                  <label className="rt-start-control" title="Trim the intro; later audio, jumps and alignment stay fixed. You can also drag the track's left edge.">
+                    Start
+                    <input
+                      aria-label={`Track ${slot.slot + 1} start beat`}
+                      type="number" step={1}
+                      min={slot.startTrim.minBeat} max={slot.startTrim.maxBeat}
+                      value={Number(((slot.entryMixSec - planned.beatOriginMixSec) / planned.secPerBeat).toFixed(2))}
+                      onChange={(e) => {
+                        if (e.target.value === '') return;
+                        const beat = Number(e.target.value);
+                        if (!Number.isFinite(beat)) return;
+                        const { minBeat, maxBeat, anchorBeat } = slot.startTrim!;
+                        draftStore.setStartTrim(slot.slotId, Math.max(minBeat, Math.min(beat, maxBeat)) - anchorBeat);
+                      }}
+                      onBlur={() => draftStore.endGesture()}
+                      onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+                    />
+                    b <span>{slot.entryTrackSec.toFixed(1)}s</span>
+                    {edits.startTrims?.[slot.slotId] !== undefined && (
+                      <button type="button" title="Restore original track start" onClick={() => {
+                        draftStore.setStartTrim(slot.slotId, 0);
+                        draftStore.endGesture();
+                      }}>↺</button>
+                    )}
+                  </label>
+                )}
                 {/* Channel trim (gh#190): the mixer's own knob idiom, PINNED
                     bottom-right of the panel (out of the text rows).
                     AVERAGE semantics (gh#206): the knob reads the slot's
@@ -1680,6 +1724,15 @@ export function RoutineTimeline({
                   }}
                   style={{ height: WAVE_H }}
                 />
+                {!pairMode && mode === 'select' && slot.slot > 0 && slot.startTrim && (
+                  <div
+                    className="rt-track-start"
+                    style={{ left: xOf((slot.entryMixSec - planned.beatOriginMixSec) / planned.secPerBeat),
+                      borderColor: slotAccent(slot.deck) }}
+                    onPointerDown={onTrackStartDown(slot)}
+                    title={`Track start: ${slot.entryTrackSec.toFixed(2)}s. Drag to reveal or trim intro; later alignment stays fixed. Shift = fine.`}
+                  />
+                )}
                 {(() => {
                   // Marker LABEL layout (#221 redirect): build first, then
                   // STAGGER into 3 rows at low zoom; when even staggering
@@ -1709,15 +1762,6 @@ export function RoutineTimeline({
                     let label: string;
                     let title: string;
                     switch (marker.kind) {
-                      case 'ghost':
-                        label = '⊘ removed';
-                        title = 'Removed recorded jump (click to restore)';
-                        break;
-                      case 'ghost-pause':
-                        label = '⊘⏸ removed';
-                        title =
-                          'Removed recorded pause (click to restore — the hold plays again)';
-                        break;
                       case 'recorded-pause':
                         label = `⏸ ${fmtB(marker.endBeat - marker.beat)}b`;
                         title = 'Recorded pause (click: inspect/remove — removal plays through)';
@@ -1752,7 +1796,7 @@ export function RoutineTimeline({
                       }
                     }
                     const resumeBeat =
-                      marker.kind === 'recorded-pause' || marker.kind === 'ghost-pause'
+                      marker.kind === 'recorded-pause'
                         ? marker.endBeat
                         : marker.kind === 'authored-pause'
                           ? marker.pause.beat + marker.pause.durBeats
@@ -1915,11 +1959,11 @@ export function RoutineTimeline({
                   })}
                 </div>
                 {/* Jump popover (the pair editor's idiom). */}
-                {popover && popover.marker.slotId === slot.slotId && (
+                {popover && livePopoverMarker && livePopoverMarker.slotId === slot.slotId && (
                   <JumpPopover
-                    popover={popover}
+                    popover={{ ...popover, marker: livePopoverMarker }}
                     pairMode={pairMode}
-                    x={xOf(popover.x)}
+                    x={xOf(markerBeat(livePopoverMarker))}
                     trackBpm={trackBpm}
                     secPerBeat={planned.secPerBeat}
                     draftStore={draftStore}
@@ -2005,7 +2049,9 @@ export function RoutineTimeline({
             </div>
           );
         })}
-        {[0, duration].map((b, i) => {
+        {(editor.pairBounds
+          ? editor.pairBounds.handover ? [editor.pairBounds.handover.enter, editor.pairBounds.handover.exit] : []
+          : [startBeat, endBeat]).map((b, i) => {
           const x = xOf(b);
           if (x < -2 || x > width + 2) return null;
           return (
@@ -2014,8 +2060,12 @@ export function RoutineTimeline({
             </div>
           );
         })}
-        {/* Trim handles are select-mode canvas edits (ADR 0038) — the
-            shaded trim REGIONS below stay visible in every mode. */}
+        {editor.pairBounds && !editor.pairBounds.handover && (
+          <div className="rt-boundarylabel" role="status" style={{ position: 'absolute', left: PANEL_W + 12, top: 4, bottom: 'auto', pointerEvents: 'none' }}>
+            No incoming handover: incoming must survive outgoing
+          </div>
+        )}
+        {/* Current playback bounds are select-mode canvas edits (ADR 0038). */}
         {mode === 'select' &&
           trim &&
           onTrimChange &&
@@ -2029,50 +2079,12 @@ export function RoutineTimeline({
                 className="rt-trimhandle"
                 style={{ transform: `translateX(${x}px)` }}
                 onPointerDown={onTrimHandleDown(edge)}
-                title={`Trim ${edge === 'start' ? 'entry' : 'exit'} boundary (drag)`}
+                title={`Playback ${edge === 'start' ? 'start' : 'end'} (drag)`}
               >
                 <div className="rt-trimgrip" />
               </div>
             );
           })}
-        {trim && (
-          <>
-            {/* Inward cuts: hatched CUT regions. */}
-            {trim.startBeat > 0 && (
-              <div
-                className="rt-trimshade"
-                style={{ left: xOf(0), width: Math.max(0, xOf(trim.startBeat) - xOf(0)) }}
-              />
-            )}
-            {trim.endBeat < duration && (
-              <div
-                className="rt-trimshade"
-                style={{
-                  left: xOf(trim.endBeat),
-                  width: Math.max(0, xOf(duration) - xOf(trim.endBeat)),
-                }}
-              />
-            )}
-            {/* Outward widens (gh#170 follow-up): EXTENSION regions — the
-                re-promotion will pull this span in from the session slice
-                (server-clamped to its real extent). */}
-            {trim.startBeat < 0 && (
-              <div
-                className="rt-trimextend"
-                style={{ left: xOf(trim.startBeat), width: Math.max(0, xOf(0) - xOf(trim.startBeat)) }}
-              />
-            )}
-            {trim.endBeat > duration && (
-              <div
-                className="rt-trimextend"
-                style={{
-                  left: xOf(duration),
-                  width: Math.max(0, xOf(trim.endBeat) - xOf(duration)),
-                }}
-              />
-            )}
-          </>
-        )}
         <div className="rt-playhead" ref={playheadRef} />
       </div>
     </div>
@@ -2108,22 +2120,6 @@ function JumpPopover({
 }) {
   const m = popover.marker;
   const beatLen = trackBpm && trackBpm > 0 ? 60 / trackBpm : null;
-  if (m.kind === 'ghost-pause') {
-    return (
-      <div className="rt-jump-popover" style={{ left: Math.max(0, x - 40) }}>
-        <span>removed recorded pause</span>
-        <button
-          onClick={() => {
-            draftStore.restoreRecordedPause(m.slotId, m.beat);
-            onClose();
-          }}
-        >
-          restore
-        </button>
-        <button onClick={onClose}>✕</button>
-      </div>
-    );
-  }
   if (m.kind === 'recorded-pause') {
     return (
       <div className="rt-jump-popover" style={{ left: Math.max(0, x - 40) }}>
@@ -2139,29 +2135,13 @@ function JumpPopover({
         </button>
         <button
           className="rt-jump-delete"
-          title="Remove this recorded hold — replay plays through it"
+          title="Delete this recorded hold; replay plays through it. Restore only with Undo."
           onClick={() => {
             draftStore.removeRecordedPause(m.slotId, m.beat);
             onClose();
           }}
         >
           remove
-        </button>
-        <button onClick={onClose}>✕</button>
-      </div>
-    );
-  }
-  if (m.kind === 'ghost') {
-    return (
-      <div className="rt-jump-popover" style={{ left: Math.max(0, x - 40) }}>
-        <span>removed recorded jump</span>
-        <button
-          onClick={() => {
-            draftStore.restoreRecordedJump(m.slotId, m.beat);
-            onClose();
-          }}
-        >
-          restore
         </button>
         <button onClick={onClose}>✕</button>
       </div>
@@ -2175,7 +2155,7 @@ function JumpPopover({
           recorded Δ {beats !== null ? `${beats.toFixed(1)}b` : `${m.deltaSec.toFixed(2)}s`}
         </span>
         <button
-          title="Convert to an edited jump — movable/resizable; the recorded one stays restorable (one undo)"
+          title="Convert to an edited jump; the recorded one is suppressed. Undo restores it."
           onClick={() => {
             const jump = draftStore.convertRecordedJump(m.slotId, m.beat, m.deltaSec);
             onSwap({ kind: 'authored', slotId: m.slotId, jump });
@@ -2185,7 +2165,7 @@ function JumpPopover({
         </button>
         <button
           className="rt-jump-delete"
-          title="Remove this recorded discontinuity — replay restores continuity through it"
+          title="Delete this recorded discontinuity; replay restores continuity. Restore only with Undo."
           onClick={() => {
             draftStore.removeRecordedJump(m.slotId, m.beat);
             onClose();
@@ -2320,6 +2300,7 @@ function JumpPopover({
       )}
       <button
         className="rt-jump-delete"
+        title="Delete this event. Restore only with Undo."
         onClick={() => {
           if (p) draftStore.removePause(p.id);
           else draftStore.removeJump(j!.id);
@@ -2563,7 +2544,8 @@ function drawLaneSteps(
     stripH: number;
     scrollBeat: number;
     pxPerBeat: number;
-    duration: number;
+    startBeat: number;
+    endBeat: number;
     /** gh#206: TRIM renders DEVIATIONS around the slot's average — this is
      * that average (recorded avg + knob offset); the wiggle centers on the
      * strip's middle guide. */
@@ -2583,13 +2565,13 @@ function drawLaneSteps(
   }
 
   // Sample the lane per pixel into contiguous spans (pen breaks outside
-  // the routine window).
+  // the authoring extent).
   const spans: { x0: number; ys: number[]; vs: number[] }[] = [];
   let cur: { x0: number; ys: number[]; vs: number[] } | null = null;
   const lanesAt = createSlotLanesCursor(slot); // monotonic x (#221 perf)
   for (let x = 0; x < geo.width; x++) {
     const beat = geo.scrollBeat + (x + 0.5) / geo.pxPerBeat;
-    if (beat < 0 || beat > geo.duration) {
+    if (beat < geo.startBeat || beat > geo.endBeat) {
       cur = null;
       continue;
     }

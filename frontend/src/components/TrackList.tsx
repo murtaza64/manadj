@@ -3,6 +3,8 @@ import TrackRow, { type LoadedMark, type SelectMods, type TransitionMark } from 
 import { packRowEvidence } from './rowEvidence';
 import { useDecks } from '../hooks/useDeck';
 import { useDeckOccupancy } from '../hooks/useDeckOccupancy';
+import { usePlayedTracks } from '../sessions/playedStore';
+import { useDeckPlaybackLevels } from '../hooks/useDeckPlaybackLevels';
 import { loadedDecks } from '../sets/rowMarks';
 import { MusicIcon, PersonIcon, KeyIcon, SpeedIcon, EnergyIcon, TagIcon, CalendarIcon, CrosshairIcon } from './icons';
 import type { Track } from '../types';
@@ -102,6 +104,11 @@ export default function TrackList({
   // mirroring the Set view's wash (sets 35). Memoized on engine slices,
   // so rows re-render only on load/play changes.
   const occupancy = useDeckOccupancy(useDecks());
+  const playbackLevels = useDeckPlaybackLevels();
+  // Played Tracks this Session (sessions 09, gh#106): read here, like
+  // occupancy, so every TrackList instance marks rows with no caller
+  // plumbing. The set's identity changes only when membership does.
+  const played = usePlayedTracks();
   /** Memo-friendly loaded mark: which deck(s) hold this row's track. */
   const loadedFor = (id: number): LoadedMark =>
     (loadedDecks(id, occupancy).join('').toLowerCase() || 'none') as LoadedMark;
@@ -381,12 +388,17 @@ export default function TrackList({
                 }
                 const track = row.track;
                 const signals = matchSignalsFor?.(track);
+                const playingDecks = loadedDecks(track.id, occupancy)
+                  .filter((ch) => occupancy[ch].playing);
                 return (
                   <TrackRow
                     key={track.id}
                     track={track}
                     isSelected={selectedIds.has(track.id)}
                     loadedOn={loadedFor(track.id)}
+                    played={played.has(track.id)}
+                    playingOn={playingDecks.join('')}
+                    playingLevels={playingDecks.map((ch) => playbackLevels[ch]).join(',')}
                     onSelect={onSelectTrack}
                     onLoad={onLoadTrack}
                     onLoadToDeck={onLoadToDeck}

@@ -1124,15 +1124,17 @@ function EditorCenterPanel({
   // Take review (transition-takes 03): the banner lives in the center
   // panel's spare bottom row — the top of the editor is timeline space.
   const takeDraft = useEditorSelector(store, (s) => s.takeDraft);
-  const promoteTake = useCallback(() => {
-    const ref = store.promoteTakeDraft();
-    if (!ref) return;
-    void api.takes
-      .setPromoted(ref.takeUuid, ref.transitionUuid)
+  const promoteTake = useCallback(async () => {
+    try {
+      const ref = await store.promoteTakeDraft();
+      if (!ref) return;
+      await api.takes.setPromoted(ref.takeUuid, ref.transitionUuid);
       // The endpoint re-pointed Set pins server-side (sets 08); mirror it
       // in loaded Sets so client-authoritative entries stay in sync.
-      .then(() => repointTakePinsLocal(ref.takeUuid, ref.transitionUuid))
-      .catch((err) => console.error('take review: promoted-reference write failed', err));
+      repointTakePinsLocal(ref.takeUuid, ref.transitionUuid);
+    } catch (err) {
+      console.error('take review: promotion failed', err);
+    }
   }, [store]);
   const tr = mix.transition;
 

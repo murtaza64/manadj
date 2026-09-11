@@ -81,7 +81,17 @@ export interface RemovedRecordedPause {
   beat: number;
 }
 
+export interface RoutinePlaybackBounds {
+  startBeat: number;
+  endBeat: number;
+}
+
 export interface RoutineEdits {
+  /** Playback crop on the unchanged artifact clock; outside material is retained. */
+  playbackBounds?: RoutinePlaybackBounds;
+  /** Incoming-slot intro trim in beats relative to its entry anchor.
+   * Negative reveals earlier material; later trajectory stays fixed. */
+  startTrims?: Record<string, number>;
   /** Authored lane envelopes, keyed `${slotId}:${control}` — absent key =
    * the recorded step lane plays. Points in routine beats, sorted. */
   lanes: Record<string, RoutineLanePoint[]>;
@@ -145,7 +155,9 @@ export function editsAreEmpty(e: RoutineEdits): boolean {
     e.removedRecordedPauses.length === 0 &&
     Object.keys(e.nudges).length === 0 &&
     Object.keys(e.trims).length === 0 &&
-    Object.keys(e.entryOffsets).length === 0
+    Object.keys(e.entryOffsets).length === 0 &&
+    e.playbackBounds === undefined &&
+    Object.keys(e.startTrims ?? {}).length === 0
   );
 }
 
@@ -265,6 +277,12 @@ export function parseEdits(raw: unknown): RoutineEdits {
       if (typeof v === 'number' && Number.isFinite(v)) entryOffsets[k] = v;
     }
   }
+  const startTrims: Record<string, number> = {};
+  if (o.startTrims && typeof o.startTrims === 'object') {
+    for (const [id, value] of Object.entries(o.startTrims)) {
+      if (typeof value === 'number' && Number.isFinite(value) && value !== 0) startTrims[id] = value;
+    }
+  }
   return {
     lanes,
     jumps,
@@ -274,6 +292,14 @@ export function parseEdits(raw: unknown): RoutineEdits {
     nudges,
     trims,
     entryOffsets,
+    ...(Object.keys(startTrims).length > 0 ? { startTrims } : {}),
+    ...(o.playbackBounds && typeof o.playbackBounds === 'object' &&
+      'startBeat' in o.playbackBounds && 'endBeat' in o.playbackBounds &&
+      typeof o.playbackBounds.startBeat === 'number' && Number.isFinite(o.playbackBounds.startBeat) &&
+      typeof o.playbackBounds.endBeat === 'number' && Number.isFinite(o.playbackBounds.endBeat) &&
+      o.playbackBounds.endBeat > o.playbackBounds.startBeat
+      ? { playbackBounds: { startBeat: o.playbackBounds.startBeat, endBeat: o.playbackBounds.endBeat } }
+      : {}),
   };
 }
 

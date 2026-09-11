@@ -195,7 +195,8 @@
 }
 
 /* Clear All */
-.filter-bar-clear-all-btn {
+.filter-bar-clear-all-btn,
+.filter-bar-clear-played-btn {
   padding: var(--space-4) var(--space-8);
   background: transparent;
   border: 1px solid var(--surface1);
@@ -203,18 +204,22 @@
   cursor: pointer;
   font-size: var(--font-body);
   font-weight: bold;
+  white-space: nowrap;
 }
 
-.filter-bar-clear-all-btn:hover:not(:disabled) {
+.filter-bar-clear-all-btn:hover:not(:disabled),
+.filter-bar-clear-played-btn:hover:not(:disabled) {
   background: var(--surface0);
   border-color: var(--text);
 }
 
-.filter-bar-clear-all-btn:active:not(:disabled) {
+.filter-bar-clear-all-btn:active:not(:disabled),
+.filter-bar-clear-played-btn:active:not(:disabled) {
   background: var(--surface1);
 }
 
-.filter-bar-clear-all-btn:disabled {
+.filter-bar-clear-all-btn:disabled,
+.filter-bar-clear-played-btn:disabled {
   color: var(--overlay0);
   cursor: not-allowed;
 }

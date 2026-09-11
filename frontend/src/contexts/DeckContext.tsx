@@ -6,6 +6,7 @@ import { CHANNEL_IDS, Mixer, STEM_NAMES } from '../playback/mixer';
 import { CaptureRecorder } from '../capture/recorder';
 import { persistTake } from '../capture/takeSink';
 import { SessionSink } from '../capture/sessionSink';
+import { notePlayedEvent, resetPlayed } from '../sessions/playedStore';
 import type { ChannelId } from '../playback/mixer';
 import { registerSurface, unregisterSurface } from '../playback/audibleSurface';
 import { deckControlsFor } from '../midi/controlRegistry';
@@ -149,12 +150,21 @@ export function DeckProvider({ children }: { children: ReactNode }) {
     // bug.
     const sink = new SessionSink();
     sink.start();
+    // Played state is live-only; a recorder restart starts fresh.
+    resetPlayed();
     const recorder = new CaptureRecorder(
       mixer,
       engines,
       (take) => persistTake(take, sink.currentSessionUuid),
-      (event, activatesSession) => sink.record(event, activatesSession),
-      () => sink.split()
+      (event, activatesSession) => {
+        sink.record(event, activatesSession);
+        notePlayedEvent(event);
+      },
+      () => {
+        const split = sink.split();
+        if (split) resetPlayed();
+        return split;
+      }
     );
     recorder.start();
     const onHide = () => {
