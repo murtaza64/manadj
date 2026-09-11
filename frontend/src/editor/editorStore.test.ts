@@ -158,13 +158,13 @@ describe('take drafts (transition-takes 03)', () => {
     expect(items.map((i) => i.uuid)).toEqual(['u1']); // draft filtered out
   });
 
-  it('promotion persists the draft (with edits) and reports the reference pair', () => {
+  it('promotion persists the draft (with edits) and reports the reference pair', async () => {
     const p = fakePersistence();
     const store = new EditorStore(p);
     store.loadPair('1:2');
     store.stampTakeDraft('take-1', draftTransition);
     store.updateMix((m) => ({ ...m, transition: { ...m.transition, durationSec: 30 } }));
-    const ref = store.promoteTakeDraft()!;
+    const ref = (await store.promoteTakeDraft())!;
     expect(ref.takeUuid).toBe('take-1');
     expect(p.saves.length).toBeGreaterThan(0);
     const items = p.saves[p.saves.length - 1].entry!.items;
@@ -173,6 +173,71 @@ describe('take drafts (transition-takes 03)', () => {
     expect(items[0].transition.durationSec).toBe(30); // tweak-then-promote kept
     expect(store.getSnapshot().takeDraft).toBeNull();
   });
+
+  it('promotion waits for the deferred save before reporting reference ids', async () => {
+    let finish!: (success: boolean) => void;
+    const save = vi.fn(() => new Promise<boolean>((resolve) => { finish = resolve; }));
+    const store = new EditorStore({ ...fakePersistence(), save });
+    store.loadPair('1:2');
+    store.stampTakeDraft('take-1', draftTransition);
+    const draft = store.getSnapshot().takeDraft!;
+    const completed = vi.fn();
+    const promotion = store.promoteTakeDraft().then(completed);
+    await Promise.resolve();
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(completed).not.toHaveBeenCalled();
+    finish(true);
+    await promotion;
+    expect(completed).toHaveBeenCalledWith({ takeUuid: 'take-1', transitionUuid: draft.itemUuid });
+  });
+
+  it.each(['false', 'rejection'])('restores the edited draft for retry after save %s', async (failure) => {
+    let finish!: (success: boolean) => void;
+    let reject!: (error: Error) => void;
+    const save = vi.fn(() => new Promise<boolean>((resolve, fail) => { finish = resolve; reject = fail; }));
+    const store = new EditorStore({ ...fakePersistence(), save });
+    store.loadPair('1:2');
+    store.stampTakeDraft('take-1', draftTransition);
+    store.updateMix((m) => ({ ...m, transition: { ...m.transition, durationSec: 30 } }));
+    const draft = store.getSnapshot().takeDraft;
+    const promotion = store.promoteTakeDraft();
+    const failed = expect(promotion).rejects.toThrow();
+    if (failure === 'false') finish(false);
+    else reject(new Error('offline'));
+    await failed;
+    expect(store.getSnapshot().takeDraft).toEqual(draft);
+    expect(store.getSnapshot().mix.transition.durationSec).toBe(30);
+    save.mockResolvedValue(true);
+    await expect(store.promoteTakeDraft()).resolves.toEqual({
+      takeUuid: 'take-1', transitionUuid: draft!.itemUuid,
+    });
+    expect(save).toHaveBeenCalledTimes(2);
+    expect(store.getSnapshot().takeDraft).toBeNull();
+  });
+
+  it.each(['pair', 'deleted item', 'new review', 'discarded new review'])(
+    'does not restore a failed promotion after switching to %s', async (change) => {
+      let finish!: (success: boolean) => void;
+      const store = new EditorStore({
+        ...fakePersistence(),
+        save: () => new Promise<boolean>((resolve) => { finish = resolve; }),
+      });
+      store.loadPair('1:2');
+      store.stampTakeDraft('take-1', draftTransition);
+      const promotion = store.promoteTakeDraft();
+      const failed = expect(promotion).rejects.toThrow('Transition save failed');
+      if (change === 'pair') store.loadPair('3:4');
+      else if (change === 'deleted item') store.deleteActive();
+      else {
+        store.stampTakeDraft('take-2', draftTransition);
+        if (change === 'discarded new review') store.discardTakeDraft();
+      }
+      const current = store.getSnapshot();
+      finish(false);
+      await failed;
+      expect(store.getSnapshot()).toBe(current);
+    },
+  );
 
   it('stamping on a fresh pair replaces the pristine "Transition 1" instead of siblinging it', () => {
     const p = fakePersistence();
@@ -206,14 +271,14 @@ describe('take drafts (transition-takes 03)', () => {
     expect(store.getSnapshot().session.items.filter((i) => i.name === 'Take')).toHaveLength(1);
   });
 
-  it('deleting the draft item drops the review reference (no dangling promotion)', () => {
+  it('deleting the draft item drops the review reference (no dangling promotion)', async () => {
     const p = fakePersistence();
     const store = new EditorStore(p);
     store.loadPair('1:2');
     store.stampTakeDraft('take-1', draftTransition);
     store.deleteActive(); // the draft is the active item
     expect(store.getSnapshot().takeDraft).toBeNull();
-    expect(store.promoteTakeDraft()).toBeNull();
+    expect(await store.promoteTakeDraft()).toBeNull();
   });
 
   it('leaving the pair evaporates an unpromoted draft', () => {

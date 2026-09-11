@@ -220,9 +220,11 @@ export function RoutineTimeline({
 }) {
   const { planned, input } = editor;
   const duration = input.durationBeats;
-  const authoringStart = pairMode && planned.auditionRange
-    ? (planned.auditionRange.startSec - planned.beatOriginMixSec) / planned.secPerBeat : 0;
   const { startBeat, endBeat } = planned.playbackBounds;
+  const authoringStart = pairMode && planned.auditionRange
+    ? (planned.auditionRange.startSec - planned.beatOriginMixSec) / planned.secPerBeat
+    : Math.min(0, startBeat);
+  const authoringEnd = Math.max(duration, endBeat);
   const styleSlot = useStyleSlot('full');
   const containerRef = useRef<HTMLDivElement>(null);
   const rowsRef = useRef<HTMLDivElement>(null);
@@ -1386,7 +1388,8 @@ export function RoutineTimeline({
           stripH: STRIP_H,
           scrollBeat,
           pxPerBeat,
-          duration,
+          startBeat: authoringStart,
+          endBeat: authoringEnd,
           trimCenter:
             control === 'trim'
               ? trimLaneAverage(slot.lanes.trim, duration, slot.lanes.defaults.trim, {
@@ -1405,6 +1408,8 @@ export function RoutineTimeline({
     gridLines,
     slotLadders,
     duration,
+    authoringStart,
+    authoringEnd,
     lanesFor,
     collapsedLanes,
   ]);
@@ -1425,7 +1430,7 @@ export function RoutineTimeline({
   const laneGuidesBySlot = useMemo(() => {
     const norm = (beat: number) => (duration > 0 ? beat / duration : 0);
     const fallback = gridLines.ticks
-      .filter((t) => t.beat >= authoringStart && t.beat <= duration)
+      .filter((t) => t.beat >= authoringStart && t.beat <= authoringEnd)
       .map((t) => {
         const pos = t.tier - gridLines.baseTier;
         return {
@@ -1438,7 +1443,7 @@ export function RoutineTimeline({
       const ladder = slotLadders[slot.slot];
       if (!ladder) return fallback;
       return ladder.marks
-        .filter((m) => m.beatR >= authoringStart && m.beatR <= duration)
+        .filter((m) => m.beatR >= authoringStart && m.beatR <= authoringEnd)
         .map((m) => {
           const pos = m.tier - ladder.baseTier;
           return {
@@ -1449,7 +1454,7 @@ export function RoutineTimeline({
           };
         });
     });
-  }, [gridLines, slotLadders, planned, duration, authoringStart]);
+  }, [gridLines, slotLadders, planned, duration, authoringStart, authoringEnd]);
 
   const authorLane = useCallback(
     (slot: PlannedRoutineSlot, control: AuthorableLaneControl) => {
@@ -1492,7 +1497,7 @@ export function RoutineTimeline({
     const key = `${slot.slotId}:${control}`;
     const pts = slot.lanes[control];
     const laneStart = authoringStart;
-    const laneDuration = duration - laneStart;
+    const laneDuration = authoringEnd - laneStart;
     const laneWidth = laneDuration * pxPerBeat;
     const toLanePoint = (p: RoutineLanePoint): LanePoint => ({
       x: laneDuration > 0 ? (p.beat - laneStart) / laneDuration : 0,
@@ -2091,8 +2096,7 @@ export function RoutineTimeline({
             No incoming handover: incoming must survive outgoing
           </div>
         )}
-        {/* Trim handles are select-mode canvas edits (ADR 0038) — the
-            shaded trim REGIONS below stay visible in every mode. */}
+        {/* Current playback bounds are select-mode canvas edits (ADR 0038). */}
         {mode === 'select' &&
           trim &&
           onTrimChange &&
@@ -2112,42 +2116,6 @@ export function RoutineTimeline({
               </div>
             );
           })}
-        {trim && (
-          <>
-            {/* Inward cuts: hatched CUT regions. */}
-            {trim.startBeat > 0 && (
-              <div
-                className="rt-trimshade"
-                style={{ left: xOf(0), width: Math.max(0, xOf(trim.startBeat) - xOf(0)) }}
-              />
-            )}
-            {trim.endBeat < duration && (
-              <div
-                className="rt-trimshade"
-                style={{
-                  left: xOf(trim.endBeat),
-                  width: Math.max(0, xOf(duration) - xOf(trim.endBeat)),
-                }}
-              />
-            )}
-            {/* Playback beyond the saved extent; source coordinates stay fixed. */}
-            {trim.startBeat < 0 && (
-              <div
-                className="rt-trimextend"
-                style={{ left: xOf(trim.startBeat), width: Math.max(0, xOf(0) - xOf(trim.startBeat)) }}
-              />
-            )}
-            {trim.endBeat > duration && (
-              <div
-                className="rt-trimextend"
-                style={{
-                  left: xOf(duration),
-                  width: Math.max(0, xOf(trim.endBeat) - xOf(duration)),
-                }}
-              />
-            )}
-          </>
-        )}
         <div className="rt-playhead" ref={playheadRef} />
       </div>
     </div>
@@ -2607,7 +2575,8 @@ function drawLaneSteps(
     stripH: number;
     scrollBeat: number;
     pxPerBeat: number;
-    duration: number;
+    startBeat: number;
+    endBeat: number;
     /** gh#206: TRIM renders DEVIATIONS around the slot's average — this is
      * that average (recorded avg + knob offset); the wiggle centers on the
      * strip's middle guide. */
@@ -2627,13 +2596,13 @@ function drawLaneSteps(
   }
 
   // Sample the lane per pixel into contiguous spans (pen breaks outside
-  // the routine window).
+  // the authoring extent).
   const spans: { x0: number; ys: number[]; vs: number[] }[] = [];
   let cur: { x0: number; ys: number[]; vs: number[] } | null = null;
   const lanesAt = createSlotLanesCursor(slot); // monotonic x (#221 perf)
   for (let x = 0; x < geo.width; x++) {
     const beat = geo.scrollBeat + (x + 0.5) / geo.pxPerBeat;
-    if (beat < 0 || beat > geo.duration) {
+    if (beat < geo.startBeat || beat > geo.endBeat) {
       cur = null;
       continue;
     }
