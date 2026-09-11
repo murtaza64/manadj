@@ -213,12 +213,13 @@ it.each(['pointerup', 'pointercancel'])('seals one undo entry per handle drag on
   expect(document.body.style.userSelect).toBe('');
 });
 
-it('fits widened bounds and keeps crop shading on the saved beat axis', () => {
+it('shows current bounds without marking extensions or crops against the source length', () => {
   act(() => store.setPlaybackBounds({ startBeat: -32, endBeat: 128 }));
   act(() => host.querySelector<HTMLButtonElement>('[title="Fit the window"]')!.click());
   expect(handles()).toHaveLength(2);
   expect(x(handles()[0])).toBeGreaterThan(208);
   expect(x(handles()[1])).toBeLessThan(1024);
+  expect.soft(host.querySelector('.rt-trimextend')).toBeNull();
   const px = (x(handles()[1]) - x(handles()[0])) / 160;
   const originX = x(handles()[0]) + 32 * px;
 
@@ -226,11 +227,8 @@ it('fits widened bounds and keeps crop shading on the saved beat axis', () => {
   const bounds = Array.from(host.querySelectorAll<HTMLElement>('.rt-boundaryline'));
   expect(x(bounds[0])).toBeCloseTo(originX + 8 * px);
   expect(x(bounds[1])).toBeCloseTo(originX + 56 * px);
-  const shades = host.querySelectorAll<HTMLElement>('.rt-trimshade');
-  expect(shades).toHaveLength(2);
-  expect(Number.parseFloat(shades[0].style.left)).toBeCloseTo(originX);
-  expect(Number.parseFloat(shades[0].style.width)).toBeCloseTo(8 * px);
-  expect(Number.parseFloat(shades[1].style.width)).toBeCloseTo(8 * px);
+  expect(host.querySelector('.rt-trimshade')).toBeNull();
+  expect(detail.duration_beats).toBe(64);
   expect(host.querySelectorAll('.rt-slotblock')).toHaveLength(3);
 });
 

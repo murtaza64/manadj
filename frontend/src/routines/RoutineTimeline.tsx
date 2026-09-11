@@ -2065,8 +2065,7 @@ export function RoutineTimeline({
             No incoming handover: incoming must survive outgoing
           </div>
         )}
-        {/* Trim handles are select-mode canvas edits (ADR 0038) — the
-            shaded trim REGIONS below stay visible in every mode. */}
+        {/* Current playback bounds are select-mode canvas edits (ADR 0038). */}
         {mode === 'select' &&
           trim &&
           onTrimChange &&
@@ -2086,42 +2085,6 @@ export function RoutineTimeline({
               </div>
             );
           })}
-        {trim && (
-          <>
-            {/* Inward cuts: hatched CUT regions. */}
-            {trim.startBeat > 0 && (
-              <div
-                className="rt-trimshade"
-                style={{ left: xOf(0), width: Math.max(0, xOf(trim.startBeat) - xOf(0)) }}
-              />
-            )}
-            {trim.endBeat < duration && (
-              <div
-                className="rt-trimshade"
-                style={{
-                  left: xOf(trim.endBeat),
-                  width: Math.max(0, xOf(duration) - xOf(trim.endBeat)),
-                }}
-              />
-            )}
-            {/* Playback beyond the saved extent; source coordinates stay fixed. */}
-            {trim.startBeat < 0 && (
-              <div
-                className="rt-trimextend"
-                style={{ left: xOf(trim.startBeat), width: Math.max(0, xOf(0) - xOf(trim.startBeat)) }}
-              />
-            )}
-            {trim.endBeat > duration && (
-              <div
-                className="rt-trimextend"
-                style={{
-                  left: xOf(duration),
-                  width: Math.max(0, xOf(trim.endBeat) - xOf(duration)),
-                }}
-              />
-            )}
-          </>
-        )}
         <div className="rt-playhead" ref={playheadRef} />
       </div>
     </div>
