@@ -25,7 +25,7 @@ const fixture = vi.hoisted(() => ({
 }));
 const hotCues = vi.hoisted(() => ({ enabled: true, down: vi.fn(), up: vi.fn(), walk: vi.fn() }));
 const mixer = vi.hoisted(() => ({
-  getChannelState: vi.fn(), setEq: vi.fn(), setFilter: vi.fn(), setFader: vi.fn(),
+  getChannelState: vi.fn(), getAutomation: vi.fn(), setEq: vi.fn(), setFilter: vi.fn(), setFader: vi.fn(),
 }));
 vi.mock('../../hooks/useMixer', () => ({ useMixer: () => mixer }));
 vi.mock('../../settings/persistedSettings', () => ({ writeSetting: vi.fn(), removeSetting: vi.fn() }));
@@ -68,6 +68,7 @@ beforeEach(() => {
     fixture.listener();
   });
   mixer.getChannelState.mockImplementation(() => fixture.channel);
+  mixer.getAutomation.mockReturnValue(null);
   mixer.setFilter.mockImplementation((_deck, value) => { fixture.channel.filter = value; });
   mixer.setFader.mockImplementation((_deck, value) => { fixture.channel.fader = value; });
   mixer.setEq.mockImplementation((_deck, band: 'high' | 'mid' | 'low', value) => {
@@ -144,6 +145,23 @@ describe('mouse-key gestures and cue walking', () => {
   afterEach(() => {
     act(() => root.unmount());
     vi.useRealTimers();
+  });
+
+  it('shows parameter-colored keyboard knobs with audible automation feedback', () => {
+    mixer.getAutomation.mockReturnValue({ eq: { high: 0.75, mid: 0.5, low: 0.5 }, filter: -0.5 });
+    render();
+    key(DECK_KEYS.A.knobs.high);
+    const knob = document.querySelector<HTMLElement>('.keyboard-pointer-knob')!;
+    expect(knob.style.getPropertyValue('--knob-color')).toBe('#3373ff');
+    expect(knob.style.getPropertyValue('--knob-glow')).toBe('drop-shadow(0 0 2px #3373ff)');
+    expect(document.querySelector('.keyboard-pointer-row')!.textContent).toContain('75%');
+    expect(knob.querySelector<HTMLElement>('.perf-knob-ghost')!.style.transform).toBe('rotate(67.5deg)');
+    key(DECK_KEYS.A.knobs.high, {}, 'keyup');
+    key(DECK_KEYS.A.knobs.filter);
+    const filter = document.querySelector<HTMLElement>('.keyboard-pointer-knob')!;
+    expect(filter.classList.contains('perf-knob-filter')).toBe(true);
+    expect(filter.querySelector<HTMLElement>('.perf-knob-ghost')!.style.transform).toBe('rotate(-67.5deg)');
+    expect(document.querySelector('.keyboard-pointer-row')!.textContent).toContain('25%');
   });
 
   it('releases owned cue, pad and pointer gestures when library takes focus', () => {
