@@ -663,7 +663,7 @@ function PlayZone() {
             backKbd={<Kbd k={keys.jumpBack} />}
             forwardKbd={<Kbd k={keys.jumpForward} />}
           />
-          <LoopRow kbd={<Kbd k={keys.loop} />} />
+          <LoopRow />
           <div className="perf-pads">
             <HotCuePads
               padKbd={(slot) => (slot <= 4 ? <Kbd k={keys.pads[slot - 1]} /> : null)}
@@ -713,27 +713,30 @@ function PlayZone() {
             <button
               className={`player-button${bend < 0 ? ' perf-nudge-held' : ''}`}
               disabled={!ready}
-              title="Nudge slower (hold)"
+              title={`Nudge slower (hold); hold ${keys.jog.toUpperCase()} and move mouse left to bend/seek`}
               onPointerDown={bendStart(-1)}
               onPointerUp={bendEnd}
               onPointerCancel={bendEnd}
             >
               ◀◀
-              <Kbd k={keys.nudgeBack} />
+              <Kbd k={`${keys.jog} \u2190`} />
             </button>
             <button
               className={`player-button${bend > 0 ? ' perf-nudge-held' : ''}`}
               disabled={!ready}
-              title="Nudge faster (hold)"
+              title={`Nudge faster (hold); hold ${keys.jog.toUpperCase()} and move mouse right to bend/seek`}
               onPointerDown={bendStart(1)}
               onPointerUp={bendEnd}
               onPointerCancel={bendEnd}
             >
               ▶▶
-              <Kbd k={keys.nudgeForward} />
+              <Kbd k={`${keys.jog} \u2192`} />
             </button>
           </div>
-          <CueWalkButtons />
+          <CueWalkButtons
+            prevKbd={<Kbd k={`\u2318${keys.jumpBack}`} />}
+            nextKbd={<Kbd k={`\u2318${keys.jumpForward}`} />}
+          />
           <TransportPair cueKbd={<Kbd k={keys.cue} />} playKbd={<Kbd k={keys.play} />} />
         </div>
       </div>
@@ -745,6 +748,8 @@ function PlayZone() {
 
 function MixZone({ track }: { track: Track | null }) {
   const { deck, engine } = useDeck();
+  const left = deck === 'A' || deck === 'C';
+  const keys = DECK_KEYS[left ? 'A' : 'B'];
   const decks = useDecks();
   const ready = useDeckReady();
 
@@ -822,7 +827,10 @@ function MixZone({ track }: { track: Track | null }) {
 
   const eqKnob = (band: EqBand, label: string) => (
     <Knob
+      key={band}
       label={label}
+      kbd={keys.knobs[band].toUpperCase()}
+      title={`Hold ${keys.knobs[band].toUpperCase()} and move mouse right/up to increase, left/down to decrease; double-tap key: cut/neutral (double-click to reset)`}
       min={0}
       max={1}
       defaultValue={0.5}
@@ -830,6 +838,22 @@ function MixZone({ track }: { track: Track | null }) {
       onChange={(v) => mixer.setEq(deck, band, v)}
       ghost={auto ? auto.eq[band] : null}
       takeover={eqTakeover[band]}
+    />
+  );
+
+  const filterKnob = (
+    <Knob
+      label="FLT"
+      kbd={keys.knobs.filter.toUpperCase()}
+      title={`Hold ${keys.knobs.filter.toUpperCase()} and move mouse horizontally/vertically; double-tap key: reset to center (double-click to center)`}
+      min={-1}
+      max={1}
+      defaultValue={0}
+      value={channel.filter}
+      onChange={(v) => mixer.setFilter(deck, v)}
+      ghost={auto ? auto.filter : null}
+      takeover={filterTakeover}
+      className="perf-knob-filter"
     />
   );
 
@@ -852,20 +876,10 @@ function MixZone({ track }: { track: Track | null }) {
           ghost={auto && auto.trim !== undefined ? auto.trim : null}
           className="perf-knob-small"
         />
-        {eqKnob('low', 'LOW')}
-        {eqKnob('mid', 'MID')}
-        {eqKnob('high', 'HI')}
-        <Knob
-          label="FLT"
-          min={-1}
-          max={1}
-          defaultValue={0}
-          value={channel.filter}
-          onChange={(v) => mixer.setFilter(deck, v)}
-          ghost={auto ? auto.filter : null}
-          takeover={filterTakeover}
-          className="perf-knob-filter"
-        />
+        {left && filterKnob}
+        {(left ? ['high', 'mid', 'low'] as const : ['low', 'mid', 'high'] as const)
+          .map((band) => eqKnob(band, band === 'high' ? 'HI' : band.toUpperCase()))}
+        {!left && filterKnob}
         {/* PFL (headphone-cue 02): mixer state, so it works with no track
             loaded and repaints from hardware toggles (note 0x0C). Headphone
             glyph like the hardware button; "PFL" stays in the tooltip. */}
@@ -894,6 +908,7 @@ function MixZone({ track }: { track: Track | null }) {
       </div>
       <HFader
         label="VOL"
+        kbd={keys.fader.toUpperCase()}
         fill
         fillColor={`var(--deck-${deck.toLowerCase()})`}
         min={0}
@@ -901,7 +916,7 @@ function MixZone({ track }: { track: Track | null }) {
         value={channel.fader}
         defaultValue={1}
         onChange={(v) => mixer.setFader(deck, v)}
-        title="Channel volume (double-click = full)"
+        title={`Channel volume: hold ${keys.fader.toUpperCase()} and move mouse right/up to increase, left/down to decrease; double-tap key: cut/full (double-click = full)`}
         ghost={auto ? auto.fader : null}
         takeover={faderTakeover}
       />

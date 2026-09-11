@@ -82,9 +82,9 @@ Follow-ups:
 
 ## Implementation Decisions
 
-- Four fixed Deck identities: A, B, C, and D. Configurable deck count is rejected; alternate labels are presentation only.
+- Four fixed Deck identities: A, B, C, and D. Engine count stays fixed; alternate labels are presentation only. Issue #238 adds a persisted 2/4-Deck display toggle.
 - The application owns all four Decks and four Mixer strips eagerly. Existing per-Deck state and persistence become exhaustive A–D records rather than dynamic collections.
-- Performance shows four stacked, linked-zoom waveforms and a 2×2 Deck-control grid. All four remain visible regardless of Control focus.
+- Performance shows four stacked, linked-zoom waveforms and a 2×2 Deck-control grid, or just A/B in two-Deck mode (#238). Hiding C/D preserves playback and loaded state; keyboard and browse focus stay on A/B while this mode is active.
 - Control focus is one left-side Deck (A/C) and one right-side Deck (B/D), shared by GRV6, keyboard, and pointer. It affects deck-surface actions and Feedback, never dedicated Mixer strips or sound state.
 - Layered absolute controls use existing soft-takeover semantics and directional hints. Dedicated GRV6 channel controls remain fixed to their Mixer channels.
 - The Mixer has one channel strip and PFL tap per Deck. Its crossfader model supports left/thru/right assignment; phase 1 may ship fixed A+C left and B+D right before assignment controls.
@@ -114,7 +114,7 @@ Follow-ups:
 
 ## Out of Scope
 
-- Configurable or unbounded Deck count
+- Configurable or unbounded engine count (display count is configurable via #238)
 - N-ary Transitions, Cameos, automation lanes, or editor timelines
 - Automatic composition of pairwise Transitions into a multi-Deck authored move
 - Continuous beat sync or a Tempo Master in phase 1

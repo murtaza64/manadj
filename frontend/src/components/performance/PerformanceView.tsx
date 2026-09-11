@@ -19,7 +19,7 @@
  * deck is refused with a hint — in this view a deck is replaced only
  * deliberately. The library view keeps replace-freely.
  */
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { registerBrowseHost, sharedBrowseHandle } from '../browseHost';
 import { DeckScope } from '../../contexts/DeckContext';
 import { useViewActive } from '../../contexts/viewActive';
@@ -35,10 +35,10 @@ import { PlayGuideOverlay } from '../../performance/PlayGuideOverlay';
 import { dispatchSetSpace } from '../../sets/spaceTransport';
 import { CONTROL_FOCUS_KEYS, browseLoadTarget, isGuardedKeyEvent } from './performanceKeys';
 import { DEFAULT_VISIBLE_SECONDS } from '../../utils/waveformZoom';
-import { PERFORMANCE_WAVEFORM_ORDER } from './waveformOrder';
+import { PERFORMANCE_WAVEFORM_ORDER, performanceWaveformOrder, type DeckCount } from './waveformOrder';
 import { useMidiCursorSuppression } from '../../performance/useMidiCursorSuppression';
 import { writeSetting } from '../../settings/persistedSettings';
-import { toggleControlFocus, useControlFocus } from '../../performance/controlFocus';
+import { focusDeck, toggleControlFocus, useControlFocus } from '../../performance/controlFocus';
 import { isPerfSectionShown, subscribePerfSections } from '../../performance/perfSectionsStore';
 import './PerformanceView.css';
 
@@ -47,6 +47,7 @@ const LOCK_HINT_MS = 1500;
 /** Keyboard-hint visibility, persisted; read once (same idiom as ?view=). */
 const HINTS_STORAGE_KEY = 'perf-kbd-hints';
 const initialHintsOn = localStorage.getItem(HINTS_STORAGE_KEY) !== 'off';
+const DECK_COUNT_STORAGE_KEY = 'manadj-perf-deck-count';
 
 /** Stable snapshots for the section-visibility subscriptions (gh#68). */
 const wavesShownSnapshot = () => isPerfSectionShown('waveforms');
@@ -61,12 +62,33 @@ export function PerformanceView() {
   const rootRef = useRef<HTMLDivElement>(null);
   useMidiCursorSuppression(rootRef, viewActive);
   const controlFocus = useControlFocus();
+  const [deckCount, setDeckCount] = useState<DeckCount>(() =>
+    localStorage.getItem(DECK_COUNT_STORAGE_KEY) === '2' ? 2 : 4
+  );
+  const leftFocus = deckCount === 2 ? 'A' : controlFocus.left;
+  const rightFocus = deckCount === 2 ? 'B' : controlFocus.right;
+  // MIDI can focus a hidden layer. Keep the indicators on the same decks
+  // as the keyboard/load targets without touching hidden engine state.
+  useLayoutEffect(() => {
+    if (viewActive && deckCount === 2) {
+      focusDeck('A');
+      focusDeck('B');
+    }
+  }, [deckCount, controlFocus, viewActive]);
+  const changeDeckCount = (next: DeckCount) => {
+    if (next === 2) {
+      focusDeck('A');
+      focusDeck('B');
+    }
+    writeSetting(DECK_COUNT_STORAGE_KEY, String(next));
+    setDeckCount(next);
+  };
   // Live focus for the once-bound keydown listener: ← / → / Enter must
   // target the CURRENT focused Decks, but re-binding on every focus change
   // would churn the document listener. A ref keeps the handler stable.
-  const controlFocusRef = useRef(controlFocus);
+  const controlFocusRef = useRef({ left: leftFocus, right: rightFocus });
   useEffect(() => {
-    controlFocusRef.current = controlFocus;
+    controlFocusRef.current = { left: leftFocus, right: rightFocus };
   });
 
   // ── Load lock ──────────────────────────────────────────────────────────
@@ -77,10 +99,11 @@ export function PerformanceView() {
   }, []);
 
   // All load paths in this view (row buttons, double-click, ←/→/Enter) go
-  // through here. Engines and per-deck loadTrack are identity-stable, so
-  // this callback is too (memoized rows depend on it).
+  // through here. The callback stays stable between deck-count changes
+  // (memoized rows depend on it).
   const tryLoad = useCallback(
     (deck: ChannelId, track: Track) => {
+      if (deckCount === 2) deck = deck === 'C' ? 'A' : deck === 'D' ? 'B' : deck;
       const target = decks[deck];
       const engine = target.engine;
       if (isDeckLocked(engine)) {
@@ -91,7 +114,7 @@ export function PerformanceView() {
       }
       target.loadTrack(track);
     },
-    [decks]
+    [decks, deckCount]
   );
 
   // This view's load policy for the shared browse panel (gh#165): row
@@ -100,8 +123,8 @@ export function PerformanceView() {
   // hidden (the panel reads only the active mode's entry) and refreshes
   // when focus flips.
   useEffect(
-    () => registerBrowseHost('performance', { onLoadToDeck: tryLoad, doubleClickDeck: controlFocus.left }),
-    [tryLoad, controlFocus.left]
+    () => registerBrowseHost('performance', { onLoadToDeck: tryLoad, doubleClickDeck: leftFocus }),
+    [tryLoad, leftFocus]
   );
 
   // ── Table keys: ↑/↓ navigate; ←/→ load focused left/right; Enter = left ─
@@ -125,7 +148,7 @@ export function PerformanceView() {
 
       if (event.key === CONTROL_FOCUS_KEYS.left || event.key === CONTROL_FOCUS_KEYS.right) {
         event.preventDefault();
-        if (!event.repeat) {
+        if (deckCount === 4 && !event.repeat) {
           toggleControlFocus(event.key === CONTROL_FOCUS_KEYS.left ? 'left' : 'right');
         }
         return;
@@ -156,7 +179,7 @@ export function PerformanceView() {
 
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
-  }, [tryLoad, viewActive]);
+  }, [tryLoad, viewActive, deckCount]);
 
   // Section visibility (perf-layout 12 / gh#68): hide-don't-unmount —
   // display:none only, so engines, zoom state and canvases stay alive
@@ -175,17 +198,27 @@ export function PerformanceView() {
   };
 
   return (
-    <div ref={rootRef} className={`perf-root${hintsOn ? '' : ' kbd-hints-off'}`}>
+    <div
+      ref={rootRef}
+      className={`perf-root${hintsOn ? '' : ' kbd-hints-off'}`}
+      data-deck-count={deckCount}
+      data-view-active={viewActive}
+    >
       {/* Performance surface — content-sized; the shared browse panel
           below (App-level BrowsePanel, gh#165) gets every remaining pixel. */}
       <div className="perf-surface">
-        <PerfWaves hidden={!wavesShown} />
-        <MixerStrip hintsOn={hintsOn} onToggleHints={toggleHints} />
+        <PerfWaves hidden={!wavesShown} deckCount={deckCount} />
+        <MixerStrip
+          hintsOn={hintsOn}
+          onToggleHints={toggleHints}
+          deckCount={deckCount}
+          onDeckCountChange={changeDeckCount}
+        />
         <div className="perf-decks" style={decksShown ? undefined : { display: 'none' }}>
           {/* Six-pair Linking (four-deck-performance 19): the four
               adjacent pairs ride the grid's shared edges; the diagonals
               live on the mixer strip (DiagonalPairLinks). */}
-          <EdgePairLinks />
+          <EdgePairLinks deckCount={deckCount} />
           <DeckScope deck="A">
             <DeckPanel lockHint={lockHint === 'A'} />
           </DeckScope>
@@ -198,10 +231,10 @@ export function PerformanceView() {
           <DeckScope deck="D">
             <DeckPanel mirrored lockHint={lockHint === 'D'} />
           </DeckScope>
-          <DeckScope deck={controlFocus.left}>
+          <DeckScope deck={leftFocus}>
             <DeckKeys />
           </DeckScope>
-          <DeckScope deck={controlFocus.right}>
+          <DeckScope deck={rightFocus}>
             <DeckKeys />
           </DeckScope>
         </div>
@@ -221,7 +254,7 @@ export function PerformanceView() {
  * the zoom stutter the library view never had (its zoom is
  * renderer-local and touches no React state at all).
  */
-function PerfWaves({ hidden }: { hidden?: boolean }) {
+function PerfWaves({ hidden, deckCount }: { hidden?: boolean; deckCount: DeckCount }) {
   const [visibleSeconds, setVisibleSeconds] = useState(DEFAULT_VISIBLE_SECONDS);
   return (
     // Hidden = display:none (mixer-strip WAVE toggle, gh#68); stays mounted
@@ -238,7 +271,7 @@ function PerfWaves({ hidden }: { hidden?: boolean }) {
       {/* Play guides (play-guides PRD): saved playing→paused Transitions
           projected as pair-labeled press-play markers on only their two
           waveform rows. Derived, view-only, non-interactive. */}
-      <PlayGuideOverlay visibleSeconds={visibleSeconds} />
+      <PlayGuideOverlay visibleSeconds={visibleSeconds} order={performanceWaveformOrder(deckCount)} />
     </div>
   );
 }
