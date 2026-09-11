@@ -155,6 +155,18 @@ def test_edits_unknown_routine_404(client):
     assert res.status_code == 404
 
 
+def test_authored_trim_envelope_and_knob_offset_roundtrip(client, promoted_routine):
+    uuid = promoted_routine["uuid"]
+    before = client.get(f"/api/routines/{uuid}").json()
+    edits = {
+        "lanes": {"1:trim": [{"beat": 0, "value": 0.25}, {"beat": 64, "value": 0.75}]},
+        "trims": {"1": 0.6},
+    }
+    response = client.put(f"/api/routines/{uuid}/edits", json={"edits": edits})
+    assert response.status_code == 200, response.text
+    assert client.get(f"/api/routines/{uuid}").json() == {**before, "edits": edits}
+
+
 def test_start_trim_and_recorded_deletion_persist_without_changing_source(client, promoted_routine):
     uuid = promoted_routine["uuid"]
     before = client.get(f"/api/routines/{uuid}").json()

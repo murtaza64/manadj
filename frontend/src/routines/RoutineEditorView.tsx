@@ -186,10 +186,17 @@ export default function RoutineEditorView() {
     return req ? { kind: 'routine', uuid: req.routineUuid } : restoreLastMix();
   });
   const routineUuid = opened?.kind === 'routine' ? opened.uuid : null;
+  const openRequestRef = useRef(0);
+  const [openFlowBusy, setOpenFlowBusy] = useState(false);
   useEffect(() => {
     const onOpen = () => {
       const req = consumeRoutineEdit();
-      if (req) setOpened({ kind: 'routine', uuid: req.routineUuid });
+      if (req) {
+        openRequestRef.current++;
+        setOpenFlowBusy(false);
+        suppressFollowRef.current = null;
+        setOpened({ kind: 'routine', uuid: req.routineUuid });
+      }
     };
     window.addEventListener(OPEN_ROUTINE_EVENT, onOpen);
     return () => window.removeEventListener(OPEN_ROUTINE_EVENT, onOpen);
@@ -221,9 +228,9 @@ export default function RoutineEditorView() {
   /** Re-point the armed Set pin — only for opens INSIDE the armed move. */
   /** Request-initiated opens must not re-point the pin — only SWITCHES
    * within the move are deliberate acts (gh#167). */
-  const suppressFollowRef = useRef(false);
+  const suppressFollowRef = useRef<number | null>(null);
   const followPin = useCallback((moveKey: string | null, pin: AdjacencyPin) => {
-    if (suppressFollowRef.current) return;
+    if (suppressFollowRef.current === openRequestRef.current) return;
     const ctx = setCtxRef.current;
     if (ctx && moveKey !== null && moveKey === ctx.moveKey) {
       setAdjacencyPin(ctx.setId, ctx.headTrackId, pin);
@@ -245,9 +252,10 @@ export default function RoutineEditorView() {
   // Picker trust tiers (pass 2 directive 3): `r:` opens directly; `t:`
   // promotes-then-opens; `c:` confirms-then-promotes-then-opens (the
   // deliberate human act the suggestion-first doctrine requires).
-  const [openFlowBusy, setOpenFlowBusy] = useState(false);
   const openMixRef = useCallback(
     async (ref: MixArtifactRef) => {
+      const request = ++openRequestRef.current;
+      setOpenFlowBusy(false);
       switch (ref.kind) {
         case 'routine':
           setOpened({ kind: 'routine', uuid: ref.uuid });
@@ -267,20 +275,47 @@ export default function RoutineEditorView() {
           followPin(`p:${ref.aTrackId}:${ref.bTrackId}`, { kind: 'transition', uuid: ref.uuid });
           return;
         case 'new-transition': {
-          // Seeded at the outgoing's outro (ADR 0037 pair synthesis);
-          // draft posture — persists nothing until the first edit.
+          // Resolve creation facts once; later display queries never re-anchor
+          // this unsaved draft. Nothing persists until the first real edit.
           setOpenFlowBusy(true);
           try {
-            const a = await api.tracks.getById(ref.aTrackId);
+            const [a, b, cues, aGrid, bGrid] = await Promise.all([
+              api.tracks.getById(ref.aTrackId),
+              api.tracks.getById(ref.bTrackId),
+              // Fetch fresh for every creation, even if the display cache is warm.
+              api.hotcues.getBulk([ref.aTrackId, ref.bTrackId]),
+              queryClient.fetchQuery({
+                ...beatgridQueryOptions(ref.aTrackId), retry: false,
+              }).catch(() => null),
+              queryClient.fetchQuery({
+                ...beatgridQueryOptions(ref.bTrackId), retry: false,
+              }).catch(() => null),
+            ]);
+            if (request !== openRequestRef.current) return false;
             setOpened({
               kind: 'transition',
               aTrackId: ref.aTrackId,
               bTrackId: ref.bTrackId,
               uuid: crypto.randomUUID(),
-              seed: seedNewTransition(a.duration_secs ?? 300, a.bpm ?? null),
+              seed: seedNewTransition({
+                durationSec: a.duration_secs ?? null,
+                bpm: a.bpm ?? null,
+                hotCues: cues[ref.aTrackId] ?? [],
+                beatTimes: aGrid?.data.beat_times,
+              }, {
+                durationSec: b.duration_secs ?? null,
+                bpm: b.bpm ?? null,
+                hotCues: cues[ref.bTrackId] ?? [],
+                beatTimes: bGrid?.data.beat_times,
+              }),
             });
+          } catch (err) {
+            if (request === openRequestRef.current) {
+              toast(`Transition creation failed: ${err instanceof Error ? err.message : String(err)}`);
+            }
+            return false;
           } finally {
-            setOpenFlowBusy(false);
+            if (request === openRequestRef.current) setOpenFlowBusy(false);
           }
           return;
         }
@@ -374,27 +409,30 @@ export default function RoutineEditorView() {
     // Arm AFTER the open lands (below) — arming first lets the sticky-to-
     // move disarm effect see the PREVIOUS artifact and kill the context.
     setSetCtx(null);
-    suppressFollowRef.current = true;
+    const request = openRequestRef.current + 1;
+    suppressFollowRef.current = request;
     try {
+      let result: boolean | void;
       if (o.kind === 'routine') {
-        await openMixRef({ kind: 'routine', uuid: o.uuid });
+        result = await openMixRef({ kind: 'routine', uuid: o.uuid });
       } else if (o.takeUuid) {
-        await openMixRef({
+        result = await openMixRef({
           kind: 'pair-take',
           aTrackId: o.aTrackId,
           bTrackId: o.bTrackId,
           uuid: o.takeUuid,
         });
       } else if (o.uuid) {
-        await openMixRef({
+        result = await openMixRef({
           kind: 'transition',
           aTrackId: o.aTrackId,
           bTrackId: o.bTrackId,
           uuid: o.uuid,
         });
       } else {
-        await openMixRef({ kind: 'new-transition', aTrackId: o.aTrackId, bTrackId: o.bTrackId });
+        result = await openMixRef({ kind: 'new-transition', aTrackId: o.aTrackId, bTrackId: o.bTrackId });
       }
+      if (request !== openRequestRef.current || result === false) return;
       if (req.setContext && moveKey !== null) {
         setSetCtx({
           setId: req.setContext.setId,
@@ -403,7 +441,7 @@ export default function RoutineEditorView() {
         });
       }
     } finally {
-      suppressFollowRef.current = false;
+      if (request === openRequestRef.current) suppressFollowRef.current = null;
     }
   }, [openMixRef, moveKeyOf]);
   useEffect(() => {
@@ -903,6 +941,7 @@ export default function RoutineEditorView() {
     return buildEditorRoutine(livePair?.projection.detail ?? detail!, trackBpms as number[], effectiveBpm!, {
       ...(livePair?.projection.edits ?? draft.edits),
       lanes: {},
+      trims: {}, // Lane-only updates own knob offsets, including clearing them.
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [detail, trackBpms, buildable, effectiveBpm, jumpEditsKey, authoringDurationBeats, pairStartBeat]);

@@ -307,6 +307,9 @@ _Avoid_: theme (implies switchable; manadj is dark-only)
 **Mixer**:
 The single shared output stage: one channel strip per Deck (trim, 3-band EQ, sweep filter, channel fader), plus crossfader, master volume, and an always-on final sample ceiling. Neutral trim is -6 dB, supplying expected two-channel summing headroom; Master has explicit unity at 50% and +6 dB at maximum; the -2 dBFS Master/Cue ceiling guards overload without changing ordinary program loudness. Each channel may be assigned to the crossfader's left side, right side, or neither; Deck identity does not determine that assignment. Mirrors a hardware DJ mixer.
 
+**Trim automation**:
+A Routine slot's channel-trim envelope, recorded or authored. Its knob offsets the envelope and displays the resulting average; resetting the knob removes the offset without deleting authored nodes. Distinct from playback-bound resizing or Track-start trim.
+
 **Audible surface**:
 A playback mode's claim on the shared Decks+Mixer — the plain deck-transport semantics of the Performance and library views, or the Transition editor's mix-timeline semantics. Exactly one surface is audible at a time; an arbiter owns which, and a displaced surface's playback pauses rather than coexist. Playback gestures from app-wide inputs (a Controller) route by gesture class — transport, cue, pads, jumps, loops, jog — to the audible surface; a class the surface doesn't register is dropped, mirroring what the keyboard does there. Mixer-state controls and Load are not gesture classes: they belong to the shared Mixer and to the mounted browse view respectively. (Redefined 2026-07-05: formerly a group of playback machinery that could produce sound as a unit — the editor had a private player; every surface now plays through the shared Decks+Mixer.)
 

@@ -17,6 +17,8 @@ import {
 import { laneKey, type AuthoredJump, type RoutineEdits } from '../routines/routineDraft';
 import type { RoutineDetailWire } from '../api/client';
 import type { RoutineLanePoint } from '../sets/routinePlan';
+import type { HotCue } from '../types';
+import { addBeats } from '../playback/quantize';
 import { outgoingAutomationStart, pairBounds } from './pairBounds';
 
 /** Degraded-mode fallback: with no grid, one beat = one second, so the
@@ -466,20 +468,48 @@ function laneIdFor(slotId: string, control: string): LaneId | null {
 
 // ── New pair drafts (#205, ADR 0037 pair synthesis) ─────────────────────
 
-/** New blank pair drafts seed the window at the outgoing's OUTRO — the
- * last ~32 beats on the outgoing's clock (degraded 1-beat/sec without a
- * grid). The incoming enters at its start (bInSec 0; grid-aligned entry
- * refinement is a picker-round design item). Draft posture (ADR 0037/
- * 0039): the seeded Transition persists NOTHING until the first edit. */
+/** New pair drafts remain unpersisted until their first real edit. */
 export const NEW_PAIR_SEED_BEATS = 32;
 
-export function seedNewTransition(outgoingDurationSec: number, bpmA: number | null): Transition {
-  const secPerBeat = bpmA && bpmA > 0 ? 60 / bpmA : DEGRADED_SEC_PER_BEAT;
-  const windowSec = NEW_PAIR_SEED_BEATS * secPerBeat;
+export interface NewPairTrackFacts {
+  durationSec: number | null;
+  bpm: number | null;
+  hotCues: readonly Pick<HotCue, 'slot_number' | 'time_seconds'>[];
+  beatTimes?: readonly number[];
+}
+
+export function seedNewTransition(outgoing: NewPairTrackFacts, incoming: NewPairTrackFacts): Transition {
+  const advance = (side: NewPairTrackFacts, position: number, beats: number): number => {
+    if (beats === 0) return position;
+    if (side.beatTimes && side.beatTimes.length >= 2) {
+      const result = addBeats(position, beats, side.beatTimes);
+      if (Number.isFinite(result)) return result;
+    }
+    const period = side.bpm && Number.isFinite(side.bpm) && side.bpm > 0
+      ? 60 / side.bpm : DEGRADED_SEC_PER_BEAT;
+    return position + beats * period;
+  };
+  const cueAt = (side: NewPairTrackFacts, slot: number) => side.hotCues.find(c =>
+    c.slot_number === slot && Number.isFinite(c.time_seconds) && c.time_seconds >= 0 &&
+    (!(side.durationSec && side.durationSec > 0) || c.time_seconds <= side.durationSec)
+  )?.time_seconds;
+  const duration = outgoing.durationSec && Number.isFinite(outgoing.durationSec) && outgoing.durationSec > 0
+    ? outgoing.durationSec : 300;
+  const cue4 = cueAt(outgoing, 4);
+  const alignedStart = cue4 === undefined ? null : advance(outgoing, cue4, 64);
+  const startSec = alignedStart !== null && alignedStart >= 0 && alignedStart < duration
+    ? alignedStart : Math.max(0, advance(outgoing, duration, -NEW_PAIR_SEED_BEATS));
+  let bInSec = 0;
+  for (const [slot, offset] of [[1, 0], [2, -64], [4, -128]]) {
+    const cue = cueAt(incoming, slot);
+    if (cue === undefined) continue;
+    bInSec = advance(incoming, cue, offset);
+    break;
+  }
   return {
-    startSec: Math.max(0, outgoingDurationSec - windowSec),
-    durationSec: windowSec,
-    bInSec: 0,
+    startSec,
+    durationSec: Math.min(duration, advance(outgoing, startSec, NEW_PAIR_SEED_BEATS)) - startSec,
+    bInSec,
     tempoMatch: true,
     lanes: {},
   };

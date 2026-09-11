@@ -11,7 +11,8 @@ import {
   rulerTicks,
   slotAccent,
   slotLadderMarks,
-  stepLaneAverage,
+  trimLaneAverage,
+  trimForAverage,
   wireRoutineToPlanInput,
   type ProjectedDownbeat,
 } from './routineEditorModel';
@@ -216,22 +217,22 @@ describe('rulerTicks', () => {
   });
 });
 
-describe('stepLaneAverage (gh#206 — the trim knob is the slot AVERAGE)', () => {
+describe('trimLaneAverage (the trim knob is the slot average)', () => {
   it('empty lane = fallback', () => {
-    expect(stepLaneAverage([], 32, 0.5)).toBe(0.5);
-    expect(stepLaneAverage([{ beat: 0, value: 0.7 }], 0, 0.5)).toBe(0.5);
+    expect(trimLaneAverage([], 32, 0.5)).toBe(0.5);
+    expect(trimLaneAverage([{ beat: 0, value: 0.7 }], 0, 0.5)).toBe(0.5);
   });
 
   it('single step from beat 0 = its value', () => {
-    expect(stepLaneAverage([{ beat: 0, value: 0.7 }], 32, 0.5)).toBeCloseTo(0.7);
+    expect(trimLaneAverage([{ beat: 0, value: 0.7 }], 32, 0.5)).toBeCloseTo(0.7);
   });
 
   it('time-weights steps (fallback before the first point)', () => {
     // fallback 0.5 for 16 beats, then 0.7 for 16 = 0.6.
-    expect(stepLaneAverage([{ beat: 16, value: 0.7 }], 32, 0.5)).toBeCloseTo(0.6);
+    expect(trimLaneAverage([{ beat: 16, value: 0.7 }], 32, 0.5)).toBeCloseTo(0.6);
     // 0.4 for 8 beats, 0.8 for 24 = 0.7.
     expect(
-      stepLaneAverage(
+      trimLaneAverage(
         [
           { beat: 0, value: 0.4 },
           { beat: 8, value: 0.8 },
@@ -245,7 +246,7 @@ describe('stepLaneAverage (gh#206 — the trim knob is the slot AVERAGE)', () =>
   it('clips points outside [0, duration]', () => {
     // A pre-window point acts from beat 0; a post-window point never acts.
     expect(
-      stepLaneAverage(
+      trimLaneAverage(
         [
           { beat: -4, value: 0.8 },
           { beat: 40, value: 0.1 },
@@ -254,6 +255,30 @@ describe('stepLaneAverage (gh#206 — the trim knob is the slot AVERAGE)', () =>
         0.5
       )
     ).toBeCloseTo(0.8);
+  });
+
+  it('integrates authored slopes, edge holds, and negative-time segments', () => {
+    expect(trimLaneAverage([{ beat: 5, value: 0.2 }, { beat: 10, value: 0.8 }], 20, 0.99, { linear: true })).toBeCloseTo(0.575);
+    expect(trimLaneAverage([{ beat: -10, value: 0 }, { beat: 10, value: 1 }], 10, 0.5, { linear: true })).toBeCloseTo(0.75);
+  });
+
+  it('keeps duplicate-time steps instantaneous in an authored envelope', () => {
+    const pts = [{ beat: 0, value: 0.2 }, { beat: 5, value: 0.2 },
+      { beat: 5, value: 0.8 }, { beat: 10, value: 0.8 }];
+    expect(trimLaneAverage(pts, 10, 0.5, { linear: true })).toBeCloseTo(0.5);
+  });
+
+  it('integrates clamping before averaging and inverts the resulting readout', () => {
+    const pts = [{ beat: 0, value: 0 }, { beat: 10, value: 1 }];
+    expect(trimLaneAverage(pts, 10, 0.5, { linear: true, offset: 0.2 })).toBeCloseTo(0.68);
+    expect(trimLaneAverage(pts, 10, 0.5, { linear: true, offset: -0.2 })).toBeCloseTo(0.32);
+    expect(trimForAverage(pts, 10, 0.5, true, 0.68)).toBeCloseTo(0.7, 6);
+    expect(trimForAverage(pts, 10, 0.5, true, 0.32)).toBeCloseTo(0.3, 6);
+    expect(trimForAverage(pts, 10, 0.5, true, 0.5)).toBe(0.5);
+  });
+
+  it.each([0, 1])('resets a flat saturated envelope at %s to zero offset', (value) => {
+    expect(trimForAverage([{ beat: 0, value }], 64, 0.5, true, value)).toBe(0.5);
   });
 });
 

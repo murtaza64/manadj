@@ -710,7 +710,7 @@ function withLaneEdits(
   slotId: string
 ): RoutineSlotLanes {
   if (!edits) return lanes;
-  const controls = ['fader', 'eqLow', 'eqMid', 'eqHigh', 'filter'] as const;
+  const controls = ['fader', 'trim', 'eqLow', 'eqMid', 'eqHigh', 'filter'] as const;
   let out = lanes;
   for (const control of controls) {
     const pts = edits.lanes[`${slotId}:${control}`];
