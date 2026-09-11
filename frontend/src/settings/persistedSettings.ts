@@ -43,6 +43,7 @@ export const PERSISTED_SETTING_KEYS: readonly string[] = [
   'manadj-perf-sections',
   'perf-kbd-hints',
   'manadj-perf-deck-count',
+  'manadj-mouse-jog',
   // Sets
   'manadj-set-settings',
   // Library browsing

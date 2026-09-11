@@ -16,6 +16,7 @@ import { useDeck, useDeckReady, useDeckSnapshot } from '../../hooks/useDeck';
 import { useHotCueActions } from '../../hooks/useHotCueActions';
 import { useMixer } from '../../hooks/useMixer';
 import { MouseJogController } from './mouseJog';
+import { getMouseJogSettings, setMouseJogSpeed } from './mouseJogSettings';
 import { DECK_KEYS, isGuardedKeyEvent, isTextEntryTarget, isTypingTarget } from './performanceKeys';
 import { registerKeyboardPointer, type KeyboardPointerFeedback } from './keyboardPointer';
 import { invertControl, MIXER_DRAG_RANGE_PX, moveKnob, type KnobGesture } from './mouseControl';
@@ -46,7 +47,7 @@ export function DeckKeys() {
     }>();
     const lastTap = new Map<string, number>();
     let jogRotation = 0;
-    const jog = new MouseJogController(engine);
+    const jog = new MouseJogController(engine, getMouseJogSettings, speed => setMouseJogSpeed(deck, speed));
     const release = () => {
       held.clear();
       lastTap.clear();
@@ -86,8 +87,9 @@ export function DeckKeys() {
         for (const key of held.keys()) {
           if (key === keys.jog) {
             const snapshot = engine.getSnapshot();
-            feedback.push({ id: key, kind: 'jog', label: `${deck} ${jog.isTouching ? 'SCRATCH' : snapshot.playing ? 'BEND' : 'SEEK'}`,
-              value: jogRotation, color, detail: snapshot.playing && !jog.isTouching
+            const label = jog.isPlatterMode ? (jog.isTouching ? 'SCRATCH' : 'SCRATCH READY') : snapshot.playing ? 'BEND' : 'SEEK';
+            feedback.push({ id: key, kind: 'jog', label: `${deck} ${label}`,
+              value: jogRotation, color, detail: snapshot.playing && !jog.isPlatterMode
                 ? `${snapshot.bendPercent.toFixed(2)}%` : `${engine.getPlayhead().toFixed(2)}s` });
           } else if (key === keys.fader) {
             feedback.push({ id: key, kind: 'fader', label: `${deck} VOL`, value: channel.fader,

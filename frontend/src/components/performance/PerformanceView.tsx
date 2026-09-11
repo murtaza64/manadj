@@ -29,6 +29,7 @@ import type { ChannelId } from '../../playback/mixer';
 import type { Track } from '../../types';
 import { DeckPanel, DeckWaveform } from './DeckPanel';
 import { MixerStrip } from './MixerStrip';
+import { MouseJogTuner } from './MouseJogTuner';
 import { EdgePairLinks } from '../../links/PerformancePairLinks';
 import { DeckKeys } from './DeckKeys';
 import { PlayGuideOverlay } from '../../performance/PlayGuideOverlay';
@@ -214,6 +215,7 @@ export function PerformanceView() {
           deckCount={deckCount}
           onDeckCountChange={changeDeckCount}
         />
+        <MouseJogTuner leftFocus={leftFocus} rightFocus={rightFocus} />
         <div className="perf-decks" style={decksShown ? undefined : { display: 'none' }}>
           {/* Six-pair Linking (four-deck-performance 19): the four
               adjacent pairs ride the grid's shared edges; the diagonals

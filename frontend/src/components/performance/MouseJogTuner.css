@@ -1,0 +1,75 @@
+.mouse-jog-tuner {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100vw;
+  padding: var(--space-6) var(--space-8);
+  border-bottom: 1px solid var(--surface1);
+  background: var(--mantle);
+  color: var(--text);
+  font-size: var(--font-body);
+}
+
+.mouse-jog-panel {
+  display: grid;
+  gap: var(--space-12);
+  padding-top: var(--space-8);
+}
+
+.mouse-jog-panel p {
+  margin: 0;
+  color: var(--subtext1);
+}
+
+.mouse-jog-controls {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+  gap: var(--space-16);
+}
+
+.mouse-jog-controls label {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.mouse-jog-controls label > span {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-8);
+}
+
+.mouse-jog-controls input {
+  width: 100%;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.mouse-jog-controls small {
+  color: var(--subtext0);
+  font-size: var(--font-small);
+}
+
+.mouse-jog-preview,
+.mouse-jog-readouts,
+.mouse-jog-readout {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-8) var(--space-16);
+}
+
+.mouse-jog-preview {
+  color: var(--subtext1);
+}
+
+.mouse-jog-readout {
+  padding: var(--space-6) var(--space-8);
+  border: 1px solid var(--surface2);
+}
+
+.mouse-jog-readout output {
+  display: inline-block;
+  min-width: 9ch;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
