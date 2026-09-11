@@ -27,6 +27,8 @@
  * given a repeat count (the loop doctrine, CONTEXT.md Jump event).
  */
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { registerDiagnostics } from '../feedback/diagnostics';
+import { useViewActive } from '../contexts/viewActive';
 import type { Track, HotCue } from '../types';
 import type { DecodedWaveform } from '../waveform/blob';
 import type { ColumnModulation } from '../sets/ladderWaveStyle';
@@ -433,6 +435,11 @@ export function RoutineTimeline({
   // The slide writes the same draft nudges as the chip control (one undo
   // entry per drag).
   const [selectedSlots, setSelectedSlots] = useState<string[]>([]);
+  const viewActive = useViewActive();
+  useEffect(() => {
+    if (!viewActive) return;
+    return registerDiagnostics('editor', () => ({ selected_slots: selectedSlots.slice(0, 32) }));
+  }, [viewActive, selectedSlots]);
   const selAnchor = useRef<string | null>(null);
   const editsRef = useRef(edits);
   editsRef.current = edits;

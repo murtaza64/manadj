@@ -83,6 +83,11 @@
   gap: var(--space-8);
 }
 
+@media (max-width: 1400px) {
+  .topbar { height: auto; min-height: 40px; flex-wrap: wrap; padding-block: var(--space-6); }
+  .topbar-status { flex-wrap: wrap; min-width: 0; }
+}
+
 .topbar-group {
   display: inline-flex;
   align-items: center;

@@ -5,6 +5,9 @@ import { installPerfHook } from './perfHook.ts'
 import { installTheme } from './theme/tokens.ts'
 import { hydratePersistedSettings } from './settings/persistedSettings.ts'
 import RootErrorBoundary from './components/RootErrorBoundary.tsx'
+import { installFeedbackErrors } from './feedback/diagnostics.ts'
+
+installFeedbackErrors()
 
 // Design tokens (DESIGN.md, gh#199): every CSS custom property — neutrals,
 // accents, deck colors, hotcue palette, scales — comes from the TS source
