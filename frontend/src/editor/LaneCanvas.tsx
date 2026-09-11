@@ -484,10 +484,9 @@ export function LaneCanvas({
 
   const commit = (pts: LanePoint[]) => onChange([...pts].sort((a, b) => a.x - b.x));
 
-  /** Filter lanes magnet to 0.5 (= filter off) so a curve can return to
-   * exactly neutral. Shift suspends it, like every other snap. */
+  /** Non-fader controls magnet to their neutral 0.5. Shift suspends snapping. */
   const snapValue = (y: number, e: { shiftKey: boolean }) =>
-    id.startsWith('filter') && !e.shiftKey && Math.abs(y - 0.5) < 0.08 ? 0.5 : y;
+    !id.startsWith('fader') && !e.shiftKey && Math.abs(y - 0.5) < 0.08 ? 0.5 : y;
 
   // Vertical gutters belong to this lane; neighboring hit areas never overlap.
   return (
@@ -561,7 +560,7 @@ export function LaneCanvas({
         }
         if (groupDrag.current) {
           const { orig, grab } = groupDrag.current;
-          onChange(moveGroup(orig, selectedRef.current, hit.x - grab.x, hit.y - grab.y));
+          onChange(moveGroup(orig, selectedRef.current, hit.x - grab.x, snapValue(hit.y, e) - grab.y));
           return;
         }
         if (chopStart.current !== null) {

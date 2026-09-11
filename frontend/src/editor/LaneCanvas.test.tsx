@@ -4,7 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { LaneCanvas, type LaneGuide } from './LaneCanvas';
 import { laneValueY } from './laneHit';
-import type { LaneId, LanePoint } from './mixModel';
+import { LANE_IDS, type LaneId, type LanePoint } from './mixModel';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 const WIDTH = 300;
@@ -188,13 +188,39 @@ it('clears a stale insertion preview when the timeline scrolls', () => {
   expect(ghost()).toBeNull();
 });
 
-it('previews the same filter-center magnet that insertion commits', () => {
-  render([{ x: 0, y: 0.55 }, { x: 1, y: 0.55 }], [], 'filterA');
+it.each(LANE_IDS.filter(id => !id.startsWith('fader')))('previews the same center magnet that %s insertion commits', (id) => {
+  render([{ x: 0, y: 0.55 }, { x: 1, y: 0.55 }], [], id);
   pointer('pointermove', 0.5, 0.55);
   expect(parseFloat(ghost()!.style.top)).toBeCloseTo(laneValueY(0.5, HEIGHT));
   pointer('pointerdown', 0.5, 0.55);
   pointer('pointerup', 0.5, 0.55);
   expect(current[1]).toEqual({ x: 0.5, y: 0.5 });
+});
+
+it.each(LANE_IDS)('snaps %s drags to neutral except faders, with Shift bypass', (id) => {
+  render([{ x: 0.5, y: 0.9 }], [], id);
+  pointer('pointerdown', 0.5, 0.9);
+  pointer('pointermove', 0.5, 0.55);
+  pointer('pointerup', 0.5, 0.55);
+  const expected = id.startsWith('fader') ? 0.55 : 0.5;
+  expect(current[0].y).toBeCloseTo(expected);
+  pointer('pointerdown', 0.5, expected, { shiftKey: true });
+  pointer('pointermove', 0.5, 0.54, { shiftKey: true });
+  pointer('pointerup', 0.5, 0.54, { shiftKey: true });
+  expect(current[0].y).toBeCloseTo(0.54);
+});
+
+it.each(['eqLowA', 'filterA', 'faderA'] as const)('uses the %s neutral rule for selected-group dragging', (id) => {
+  render([{ x: 0.25, y: 0.2 }, { x: 0.75, y: 0.4 }], [], id);
+  for (const [x, y] of [[0.25, 0.2], [0.75, 0.4]]) {
+    pointer('pointerdown', x, y, { ctrlKey: true });
+    pointer('pointerup', x, y, { ctrlKey: true });
+  }
+  pointer('pointerdown', 0.25, 0.2);
+  pointer('pointermove', 0.25, 0.55);
+  pointer('pointerup', 0.25, 0.55);
+  expect(current[0].y).toBeCloseTo(id.startsWith('fader') ? 0.55 : 0.5);
+  expect(current[1].y - current[0].y).toBeCloseTo(0.2);
 });
 
 it('does not edit on a secondary-button click', () => {
