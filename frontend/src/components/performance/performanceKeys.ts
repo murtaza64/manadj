@@ -9,7 +9,7 @@
  *
  * Space is deliberately absent (unbound in the Performance view —
  * single-deck muscle-memory hazard, confirmed decision). Pads 5-8 are
- * mouse-only. No curation keys; beatgrid/mixer stay mouse-only.
+ * mouse-only. Mixer and jog gestures combine held keys with mouse movement.
  */
 export interface DeckKeyMap {
   /** Hold-cue (CDJ style). */
@@ -17,11 +17,11 @@ export interface DeckKeyMap {
   play: string;
   jumpBack: string;
   jumpForward: string;
-  /** Hold-to-nudge (momentary bend). */
-  nudgeBack: string;
-  nudgeForward: string;
-  /** Auto-loop engage/release toggle (looping 03). */
-  loop: string;
+  /** Hold and move vertically; mirrored from pinky (filter) to index (low). */
+  knobs: Record<'filter' | 'high' | 'mid' | 'low', string>;
+  fader: string;
+  /** Hold and move horizontally: bend playing decks, seek paused decks. */
+  jog: string;
   /** Hot cue pads 1-4, in slot order. */
   pads: [string, string, string, string];
 }
@@ -83,9 +83,9 @@ export const DECK_KEYS: Record<'A' | 'B', DeckKeyMap> = {
     play: 'd',
     jumpBack: 'a',
     jumpForward: 's',
-    nudgeBack: 'w',
-    nudgeForward: 'e',
-    loop: 'r',
+    knobs: { filter: 'q', high: 'w', mid: 'e', low: 'r' },
+    fader: 'g',
+    jog: 't',
     pads: ['z', 'x', 'c', 'v'],
   },
   B: {
@@ -93,9 +93,9 @@ export const DECK_KEYS: Record<'A' | 'B', DeckKeyMap> = {
     play: 'k',
     jumpBack: 'l',
     jumpForward: ';',
-    nudgeBack: 'i',
-    nudgeForward: 'o',
-    loop: 'u',
+    knobs: { filter: 'p', high: 'o', mid: 'i', low: 'u' },
+    fader: 'h',
+    jog: 'y',
     pads: ['m', ',', '.', '/'],
   },
 };

@@ -158,6 +158,7 @@ export class JogController {
     this.syncState();
     if (held) {
       if (this.touching || !this.port.scratch?.vinylMode()) return;
+      if (!this.scratching && this.port.scratch.isActive()) return;
       this.releaseBend();
       this.clearScratchTimer();
       this.suppressRimUntil = -Infinity;
@@ -187,6 +188,7 @@ export class JogController {
   /** Engine overrides (load/pause/seek/mode changes) invalidate controller holds. */
   syncState(): void {
     if (this.scratching && !this.port.scratch?.isActive()) this.cancel();
+    if (!this.scratching && this.port.scratch?.isActive()) this.releaseBend();
   }
 
   cancel(): void {
@@ -246,8 +248,9 @@ export class JogController {
     calibration: JogCalibration = DEFAULT_JOG_CALIBRATION,
     profile?: JogProfile
   ): void {
+    this.syncState();
+    if (!this.scratching && this.port.scratch?.isActive()) return;
     if (profile === 'grv6') {
-      this.syncState();
       if (!this.port.scratch?.vinylMode()) this.onTicks(ticks, nowMs, calibration, profile);
       else if (this.scratching) this.moveScratch(ticks, nowMs, calibration);
       return;
@@ -268,6 +271,7 @@ export class JogController {
     vinylOff = false
   ): void {
     this.syncState();
+    if (!this.scratching && this.port.scratch?.isActive()) return;
     if (vinylOff && (this.scratching || this.suppressRimUntil > nowMs)) this.cancel();
     if (profile === 'grv6' && !vinylOff && !this.scratching && nowMs < this.suppressRimUntil) return;
     if (profile === 'grv6' && this.scratching) {

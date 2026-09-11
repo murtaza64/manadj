@@ -23,6 +23,7 @@ import { useTransitionIndex } from '../editor/transitionIndex';
 import { useDecks } from '../hooks/useDeck';
 import type { ChannelId } from '../playback/mixer';
 import type { Track } from '../types';
+import type { DeckCount } from '../components/performance/waveformOrder';
 import { LinkIcon } from './LinkIcon';
 import { pairHasFavoritedTransition } from './linkable';
 import { isLinked, setLinked, useLinks } from './linkStore';
@@ -114,23 +115,27 @@ export function PairDiagonalChip({
  * The four adjacent-pair chips. Mount inside `.perf-decks` (position:
  * relative) — each chip is absolutely placed on its shared edge.
  */
-export function EdgePairLinks() {
+export function EdgePairLinks({ deckCount = 4 }: { deckCount?: DeckCount }) {
   const decks = useDecks();
   const t = (d: ChannelId) => decks[d].loadedTrack ?? null;
   return (
     <>
-      <div className="pairlink-edge edge-ab">
+      <div className="pairlink-edge edge-ab" style={deckCount === 2 ? { top: '50%' } : undefined}>
         <PairEdgeChip a="A" b="B" ta={t('A')} tb={t('B')} />
       </div>
-      <div className="pairlink-edge edge-cd">
-        <PairEdgeChip a="C" b="D" ta={t('C')} tb={t('D')} />
-      </div>
-      <div className="pairlink-edge edge-ac">
-        <PairEdgeChip a="A" b="C" ta={t('A')} tb={t('C')} />
-      </div>
-      <div className="pairlink-edge edge-bd">
-        <PairEdgeChip a="B" b="D" ta={t('B')} tb={t('D')} />
-      </div>
+      {deckCount === 4 && (
+        <>
+          <div className="pairlink-edge edge-cd">
+            <PairEdgeChip a="C" b="D" ta={t('C')} tb={t('D')} />
+          </div>
+          <div className="pairlink-edge edge-ac">
+            <PairEdgeChip a="A" b="C" ta={t('A')} tb={t('C')} />
+          </div>
+          <div className="pairlink-edge edge-bd">
+            <PairEdgeChip a="B" b="D" ta={t('B')} tb={t('D')} />
+          </div>
+        </>
+      )}
     </>
   );
 }

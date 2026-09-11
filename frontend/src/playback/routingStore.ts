@@ -113,9 +113,9 @@ async function applyMasterSink(
 }
 
 /** Enumerate (may unlock labels — see audioDevices.ts) and re-apply. */
-export async function refreshRouting(): Promise<void> {
+export async function refreshRouting(allowPrompt = true): Promise<void> {
   const revision = ++refreshRevision;
-  const nextDevices = await listAudioOutputs();
+  const nextDevices = await listAudioOutputs(false, allowPrompt);
   if (revision !== refreshRevision) return;
   devices = nextDevices;
   await recompute();
@@ -145,17 +145,16 @@ export function setCueDevice(device: SavedDevice | null): void {
 
 /**
  * Boot wiring (mounted once by AudioRoutingBridge). Skips enumeration when
- * nothing is saved — never hit the permission path for users who haven't
- * touched routing; the picker refreshes on open instead. Returns a dispose.
+ * nothing is saved; otherwise refresh without opening permission prompts.
+ * The picker may request permission when opened. Returns a dispose.
  */
 export function initAudioRouting(target: Mixer): () => void {
   mixer = target;
   const saved = () => prefs.master !== null || prefs.cue !== null;
-  if (saved()) void refreshRouting();
-  // Same guard on plug/unplug: only re-enumerate (and possibly walk the
-  // permission path) for setups that actually route somewhere.
+  if (saved()) void refreshRouting(false);
+  // Device changes must not interrupt mixing with permission UI either.
   const unsubscribe = onAudioDevicesChanged(() => {
-    if (saved()) void refreshRouting();
+    if (saved()) void refreshRouting(false);
   });
   return () => {
     unsubscribe();

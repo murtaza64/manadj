@@ -10,13 +10,20 @@ import { DeckKeys } from '../components/performance/DeckKeys';
 
 const engine = vi.hoisted(() => ({
   jumpBeats: vi.fn(), setBend: vi.fn(), cueUp: vi.fn(), cueDown: vi.fn(), togglePlay: vi.fn(), toggleLoop: vi.fn(),
+  getSnapshot: vi.fn(() => ({ playing: false, loadState: 'ready', bendPercent: 0, scratching: false, vinylMode: true })),
+  subscribe: vi.fn(() => () => {}), addTransportEventListener: vi.fn(() => () => {}),
+  endScratch: vi.fn(),
 }));
+const hotCues = vi.hoisted(() => ({ enabled: true, down: vi.fn(), up: vi.fn() }));
+vi.mock('../hooks/useMixer', () => ({ useMixer: () => ({
+  getChannelState: () => ({ filter: 0, eq: { high: 0.5, mid: 0.5, low: 0.5 }, fader: 0.5 }),
+}) }));
 vi.mock('../hooks/useDeck', () => ({
   useDeck: () => ({ deck: 'A', engine, loadedTrack: { id: 7 }, beatjumpBeats: 32 }),
   useDeckReady: () => true, useDeckSnapshot: () => true,
 }));
 vi.mock('../hooks/useHotCueActions', () => ({
-  useHotCueActions: () => ({ enabled: true, down: vi.fn(), up: vi.fn() }),
+  useHotCueActions: () => hotCues,
 }));
 
 vi.mock('./capture', async (original) => ({ ...await original<typeof import('./capture')>(), captureFeedback: vi.fn() }));
@@ -218,23 +225,23 @@ it('offers crash reporting without DeckProvider or QueryClient', async () => {
   expect(document.body.textContent).toContain('File a report');
 });
 
-it.each(['form', 'queue'])('releases pre-held cue/nudge through the %s without accepting newly typed controls', async (page) => {
+it.each(['form', 'queue'])('releases pre-held cue/pad through the %s without accepting newly typed controls', async (page) => {
   await act(async () => root.render(<><DeckKeys /><FeedbackEntry /></>));
   const key = (type: string, value: string, target: EventTarget = document) => act(() => {
     target.dispatchEvent(new KeyboardEvent(type, { key: value, bubbles: true, cancelable: true }));
   });
-  key('keydown', 'w'); key('keydown', 'f');
-  expect(engine.setBend).toHaveBeenCalledTimes(1);
+  key('keydown', 'z'); key('keydown', 'f');
+  expect(hotCues.down).toHaveBeenCalledTimes(1);
   expect(engine.cueDown).toHaveBeenCalledTimes(1);
   if (page === 'form') await click('Feedback'); else await queue();
   expect(engine.cueUp).not.toHaveBeenCalled();
   const target = document.querySelector('textarea') ?? button('Close');
-  key('keyup', 'w', target); key('keyup', 'f', target);
-  expect(engine.setBend).toHaveBeenLastCalledWith(0);
-  expect(engine.setBend).toHaveBeenCalledTimes(2);
+  key('keyup', 'z', target); key('keyup', 'f', target);
+  expect(hotCues.up).toHaveBeenCalledTimes(1);
   expect(engine.cueUp).toHaveBeenCalledTimes(1);
-  for (const value of ['w', 'f', 'd']) { key('keydown', value, target); key('keyup', value, target); }
-  expect(engine.setBend).toHaveBeenCalledTimes(2);
+  for (const value of ['z', 'f', 'd']) { key('keydown', value, target); key('keyup', value, target); }
+  expect(hotCues.down).toHaveBeenCalledTimes(1);
+  expect(hotCues.up).toHaveBeenCalledTimes(1);
   expect(engine.cueDown).toHaveBeenCalledTimes(1);
   expect(engine.cueUp).toHaveBeenCalledTimes(1);
   expect(engine.togglePlay).not.toHaveBeenCalled();
