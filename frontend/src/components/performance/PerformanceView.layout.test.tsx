@@ -6,6 +6,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DeckContext, DeckRegistryContext, useDeck, useDecks, type DeckContextValue } from '../../hooks/useDeck';
 import { MixerContext } from '../../hooks/useMixer';
 import { ViewActiveContext } from '../../contexts/viewActive';
+import { BrowseActiveContext } from '../../contexts/browseActive';
+import { useMidiCursorSuppression } from '../../performance/useMidiCursorSuppression';
+import { dispatchSetSpace } from '../../sets/spaceTransport';
 import { CHANNEL_IDS, type Mixer, type ChannelId } from '../../playback/mixer';
 import { _resetControlFocusForTests, focusDeck, getControlFocus, useControlFocus } from '../../performance/controlFocus';
 import { setPerfSectionShown } from '../../performance/perfSectionsStore';
@@ -15,6 +18,8 @@ import type { PlayGuideFrame } from '../../performance/playGuideModel';
 import type { Track } from '../../types';
 import { PerformanceView } from './PerformanceView';
 import { HFader, Knob } from './MixerStrip';
+import { dispatchFollow } from '../../follow/followStore';
+import { getFollowParams } from '../../follow/paramsStore';
 
 const css = readFileSync('src/components/performance/PerformanceView.css', 'utf8');
 
@@ -55,9 +60,10 @@ vi.mock('./DeckPanel', () => ({
   },
 }));
 vi.mock('./DeckKeys', () => ({
-  DeckKeys: () => <span data-key-deck={useDeck().deck} />,
+  DeckKeys: ({ enabled }: { enabled: boolean }) => <span data-key-deck={useDeck().deck} data-enabled={enabled} />,
 }));
-vi.mock('../../performance/useMidiCursorSuppression', () => ({ useMidiCursorSuppression: () => {} }));
+vi.mock('../../follow/followStore', () => ({ dispatchFollow: vi.fn() }));
+vi.mock('../../performance/useMidiCursorSuppression', () => ({ useMidiCursorSuppression: vi.fn() }));
 vi.mock('../../hooks/useTakeoverHint', () => ({ useTakeoverHint: () => null }));
 vi.mock('../../editor/transitionIndex', () => ({
   useTransitionIndex: () => ({ from: new Map(), into: new Map() }),
@@ -86,6 +92,7 @@ let decks: Record<ChannelId, DeckContextValue>;
 let mixer: Mixer;
 
 beforeEach(() => {
+  vi.clearAllMocks();
   vi.stubGlobal('localStorage', storage);
   vi.stubGlobal('fetch', vi.fn(async () => new Response('{}')));
   vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1));
@@ -148,11 +155,193 @@ function visibleDecks(selector: string) {
     .map((node) => node.dataset.deck);
 }
 
-function press(key: string) {
-  act(() => document.body.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })));
+function press(key: string, options: KeyboardEventInit = {}, target: EventTarget = document.body) {
+  const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...options });
+  act(() => { target.dispatchEvent(event); });
+  act(() => { target.dispatchEvent(new KeyboardEvent('keyup', { key, bubbles: true, ...options })); });
+  return event;
 }
 
+describe('Performance library keyboard focus', () => {
+  function browse() {
+    const handle = {
+      getSelectedTrack: vi.fn(() => ({ id: 20 } as Track)), navigate: vi.fn(),
+      navigatePage: vi.fn(), navigateEnd: vi.fn(), areaMove: vi.fn(), activate: vi.fn(),
+      selectAll: vi.fn(), focusSearch: vi.fn(), openFollowParams: vi.fn(),
+    };
+    sharedBrowseHandle.current = handle;
+    return handle;
+  }
+  const isLibrary = () => container.querySelector('.perf-keyboard-scope')?.getAttribute('data-library-focus') === 'true';
+
+  it('temporarily restores deck keys while Settings covers a library-focused browse pane', () => {
+    const handle = browse();
+    const view = (active: boolean) => <BrowseActiveContext value={active}><PerformanceView /></BrowseActiveContext>;
+    render(view(true)); press('Tab');
+    expect(isLibrary()).toBe(true);
+    render(view(false));
+    expect(isLibrary()).toBe(false);
+    expect([...container.querySelectorAll('[data-enabled]')].every(node => node.getAttribute('data-enabled') === 'true')).toBe(true);
+    expect(press('Tab').defaultPrevented).toBe(false);
+    press('j'); press('a'); press('/');
+    expect(handle.navigate).not.toHaveBeenCalled();
+    expect(handle.getSelectedTrack).not.toHaveBeenCalled();
+    expect(handle.focusSearch).not.toHaveBeenCalled();
+    render(view(true));
+    expect(isLibrary()).toBe(true);
+    press('j');
+    expect(handle.navigate).toHaveBeenCalledWith(1, false);
+  });
+
+  it('routes navigation and selection only in library focus, disabling both deck hubs', () => {
+    const handle = browse(); render();
+    expect(container.querySelector('.perf-keyboard-focus')).toBeNull();
+    expect(getComputedStyle(container.querySelector('.perf-keyboard-scope')!).display).toBe('contents');
+    press('j'); expect(handle.navigate).not.toHaveBeenCalled();
+    press('Tab'); expect(isLibrary()).toBe(true);
+    expect([...container.querySelectorAll('[data-enabled]')].every(node => node.getAttribute('data-enabled') === 'false')).toBe(true);
+    press('j'); press('K', { shiftKey: true }); press('ArrowDown');
+    expect(handle.navigate.mock.calls).toEqual([[1, false], [-1, true], [1, false]]);
+    press('d', { ctrlKey: true }); press('u', { ctrlKey: true }); press('PageDown');
+    expect(handle.navigatePage.mock.calls).toEqual([[1, true], [-1, true], [1]]);
+    press('Home'); press('End'); expect(handle.navigateEnd.mock.calls).toEqual([[-1], [1]]);
+    press('h'); press('l'); expect(handle.areaMove.mock.calls).toEqual([[-1], [1]]);
+    press('Enter'); expect(handle.activate).toHaveBeenCalledOnce();
+    expect(decks.A.loadTrack).not.toHaveBeenCalled();
+    press('a', { metaKey: true }); press('a', { ctrlKey: true }); expect(handle.selectAll).toHaveBeenCalledTimes(2);
+    press('Escape'); expect(isLibrary()).toBe(false);
+    press('k'); expect(handle.navigate).toHaveBeenCalledTimes(3);
+  });
+
+  it('loads physical decks, keeps focus, respects the lock, and disables C/D in two-deck layout', () => {
+    browse(); render(); press('Tab');
+    for (const key of ['a', 'b', 'c', 'd']) press(key);
+    expect(decks.A.loadTrack).toHaveBeenCalledOnce();
+    expect(decks.B.loadTrack).toHaveBeenCalledOnce();
+    expect(decks.C.loadTrack).not.toHaveBeenCalled(); // playing
+    expect(decks.D.loadTrack).toHaveBeenCalledOnce();
+    expect(isLibrary()).toBe(true);
+    press('a', { repeat: true }); expect(decks.A.loadTrack).toHaveBeenCalledOnce();
+    click('2 DECKS'); press('c'); press('d');
+    expect(decks.A.loadTrack).toHaveBeenCalledOnce();
+    expect(decks.B.loadTrack).toHaveBeenCalledOnce();
+    expect(decks.D.loadTrack).toHaveBeenCalledOnce();
+  });
+
+  it('toggles Follow using loaded-track availability, not the browse selection', () => {
+    browse(); decks.B.loadedTrack = null; render(); press('Tab');
+    vi.mocked(dispatchFollow).mockClear();
+    press('A', { shiftKey: true }); press('B', { shiftKey: true });
+    press('D', { shiftKey: true, repeat: true });
+    expect(dispatchFollow).toHaveBeenNthCalledWith(1, { type: 'toggle', deck: 'A', loaded: true });
+    expect(dispatchFollow).toHaveBeenNthCalledWith(2, { type: 'toggle', deck: 'B', loaded: false });
+    expect(dispatchFollow).toHaveBeenCalledTimes(2);
+    click('2 DECKS'); press('C', { shiftKey: true });
+    expect(dispatchFollow).toHaveBeenLastCalledWith({ type: 'toggle', deck: 'C', loaded: true });
+    const before = getFollowParams().knownOnly;
+    press('n'); expect(getFollowParams().knownOnly).toBe(!before);
+    press('n'); expect(getFollowParams().knownOnly).toBe(before);
+    expect(decks.A.loadTrack).not.toHaveBeenCalled();
+  });
+
+  it('leaves typing alone, focuses search, and allows Tab out of search but not other editors', () => {
+    const handle = browse(); render(); press('Tab');
+    press('/'); expect(handle.focusSearch).toHaveBeenCalledOnce();
+    press('f'); expect(handle.openFollowParams).toHaveBeenCalledOnce();
+    const input = document.createElement('input'); container.append(input); input.focus();
+    expect(press('Tab', {}, input).defaultPrevented).toBe(false);
+    press('j', {}, input); press('a', {}, input); press('/', {}, input);
+    expect(handle.navigate).not.toHaveBeenCalled();
+    expect(decks.A.loadTrack).not.toHaveBeenCalled();
+    input.className = 'filter-bar-search';
+    press('Tab', {}, input); expect(isLibrary()).toBe(false);
+    expect(document.activeElement).not.toBe(input);
+  });
+
+  it('lets dialogs dismiss before focus exits, and help is contextual', () => {
+    const handle = browse(); render(); press('Tab');
+    const dialog = document.createElement('div'); dialog.className = 'follow-modal-overlay'; container.append(dialog);
+    press('Escape'); press('Tab'); press('j'); press('a');
+    expect(isLibrary()).toBe(true);
+    expect(handle.navigate).not.toHaveBeenCalled();
+    expect(decks.A.loadTrack).not.toHaveBeenCalled();
+    dialog.remove(); press('?');
+    expect(container.querySelector('[role="dialog"]')?.textContent).toContain('LIBRARY KEYBOARD');
+    press('j'); expect(handle.navigate).not.toHaveBeenCalled();
+    press('Escape'); expect(container.querySelector('[role="dialog"]')).toBeNull();
+    expect(isLibrary()).toBe(true);
+    press('Escape'); press('?');
+    expect(container.querySelector('[role="dialog"]')?.textContent).toContain('DECKS KEYBOARD');
+  });
+
+  it('blocks held keys across focus changes until release, and stays inert while inactive', () => {
+    const handle = browse(); render();
+    act(() => document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'j', code: 'KeyJ', bubbles: true })));
+    press('Tab');
+    press('j', { code: 'KeyJ', repeat: true }); expect(handle.navigate).not.toHaveBeenCalled();
+    press('j', { code: 'KeyJ' }); expect(handle.navigate).toHaveBeenCalledOnce();
+    render(<ViewActiveContext value={false}><PerformanceView /></ViewActiveContext>);
+    press('j'); press('a'); press('Tab');
+    expect(handle.navigate).toHaveBeenCalledOnce(); expect(decks.A.loadTrack).not.toHaveBeenCalled();
+  });
+
+  it('does not let a press originating in help leak into deck transport on close', () => {
+    browse(); render(); press('?');
+    act(() => document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'd', bubbles: true })));
+    press('Escape');
+    expect(press('d', { repeat: true }).defaultPrevented).toBe(true);
+    expect(press('d').defaultPrevented).toBe(false);
+  });
+});
+
 describe('Performance deck-count layout', () => {
+  it('suspends browse keys and cursor suppression in Settings without changing deck focus keys or mounted panels', () => {
+    const navigate = vi.fn();
+    const selected = vi.fn(() => ({ id: 20 } as Track));
+    sharedBrowseHandle.current = { navigate, getSelectedTrack: selected,
+      navigatePage: vi.fn(), navigateEnd: vi.fn(), areaMove: vi.fn(), activate: vi.fn(),
+      selectAll: vi.fn(), focusSearch: vi.fn(), openFollowParams: vi.fn() };
+    const view = (active: boolean) => <BrowseActiveContext value={active}>
+      <PerformanceView />
+      {!active && <div className="settings-page"><input type="range" /><input type="checkbox" /><select /></div>}
+    </BrowseActiveContext>;
+    render(view(true));
+    const panels = [...container.querySelectorAll('.perf-deckpanel')];
+    const waves = [...container.querySelectorAll('.perf-wave-row')];
+    expect(vi.mocked(useMidiCursorSuppression).mock.lastCall?.[1]).toBe(true);
+    render(view(false));
+    expect(vi.mocked(useMidiCursorSuppression).mock.lastCall?.[1]).toBe(false);
+    for (const key of ['ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight', 'Enter', ' ']) press(key);
+    expect(navigate).not.toHaveBeenCalled();
+    expect(selected).not.toHaveBeenCalled();
+    expect(dispatchSetSpace).not.toHaveBeenCalled();
+    press('[');
+    press(']');
+    expect(getControlFocus()).toEqual({ left: 'C', right: 'D' });
+    for (const target of container.querySelectorAll('.settings-page input, .settings-page select')) {
+      for (const key of [' ', 'Enter', 'ArrowLeft', 'ArrowDown']) {
+        const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true });
+        act(() => { target.dispatchEvent(event); });
+        expect(event.defaultPrevented).toBe(false);
+      }
+    }
+    container.querySelectorAll('.perf-deckpanel').forEach((node, i) => expect(node).toBe(panels[i]));
+    container.querySelectorAll('.perf-wave-row').forEach((node, i) => expect(node).toBe(waves[i]));
+    render(view(true));
+    press('ArrowDown');
+    expect(navigate).toHaveBeenCalledWith(1);
+    press(' ');
+    expect(dispatchSetSpace).toHaveBeenCalledOnce();
+    expect(vi.mocked(useMidiCursorSuppression).mock.lastCall?.[1]).toBe(true);
+  });
+
+  it('has no mouse jog tuner or disclosure', () => {
+    render();
+    expect(container.textContent).not.toContain('MOUSE / JOG TUNE');
+    expect(container.querySelector('.mouse-jog-tuner')).toBeNull();
+    expect(container.querySelector('[aria-label="Sensitivity"]')).toBeNull();
+  });
+
   it('defaults to four, switches display without unmounting decks or mutating transport, and persists', () => {
     render();
     const panels = [...container.querySelectorAll('.perf-deckpanel')];

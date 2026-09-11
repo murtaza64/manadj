@@ -19,6 +19,7 @@ import { getJogCalibration } from '../midi/jogCalibrationStore';
 import { registerBrowseHost, sharedBrowseHandle } from '../components/browseHost';
 import { isGuardedKeyEvent } from '../components/performance/performanceKeys';
 import { useViewActive } from '../contexts/viewActive';
+import { useBrowseActive } from '../contexts/browseActive';
 import { useDecks } from '../hooks/useDeck';
 import {
   claimAudible,
@@ -859,6 +860,7 @@ function TransitionEditorInner() {
   // drive the SHARED browse panel (gh#165), so they bind only while this
   // view is the visible one.
   const viewActive = useViewActive();
+  const browseActive = useBrowseActive();
 
   // This editor's load policy for the shared browse panel: row buttons /
   // double-click assign onto the editor's A/B session sides only.
@@ -884,6 +886,8 @@ function TransitionEditorInner() {
     if (!viewActive) return;
     const onKey = (e: KeyboardEvent) => {
       if (isGuardedKeyEvent(e)) return;
+      if (e.target instanceof Element && e.target.closest('.settings-page')) return;
+      if (!browseActive && e.key !== ' ') return;
       // The editor's selects (saved-Transition dropdown) keep their
       // native arrow/space behavior.
       if ((e.target as HTMLElement | null)?.tagName === 'SELECT') return;
@@ -916,7 +920,7 @@ function TransitionEditorInner() {
     document.addEventListener('keydown', onKey, { capture: true });
     return () => document.removeEventListener('keydown', onKey, { capture: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [player, auditionTogglePlay, viewActive]);
+  }, [player, auditionTogglePlay, viewActive, browseActive]);
 
   const snapA = player.engineA.getSnapshot();
   const snapB = player.engineB.getSnapshot();

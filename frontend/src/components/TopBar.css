@@ -133,6 +133,12 @@
   line-height: 1;
 }
 
+@media (max-width: 600px) {
+  .topbar-mode-control [aria-label='Settings'] .topbar-segment-label {
+    display: none;
+  }
+}
+
 .topbar-segment:hover {
   color: var(--accent);
 }

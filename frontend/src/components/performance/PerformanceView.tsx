@@ -23,6 +23,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExter
 import { registerBrowseHost, sharedBrowseHandle } from '../browseHost';
 import { DeckScope } from '../../contexts/DeckContext';
 import { useViewActive } from '../../contexts/viewActive';
+import { useBrowseActive } from '../../contexts/browseActive';
 import { useDecks } from '../../hooks/useDeck';
 import { isDeckLocked } from './deckLock';
 import type { ChannelId } from '../../playback/mixer';
@@ -30,7 +31,7 @@ import type { Track } from '../../types';
 import { DeckPanel, DeckWaveform } from './DeckPanel';
 import { MixerStrip } from './MixerStrip';
 import { EdgePairLinks } from '../../links/PerformancePairLinks';
-import { DeckKeys } from './DeckKeys';
+import { PerformanceKeyboard } from './PerformanceKeyboard';
 import { PlayGuideOverlay } from '../../performance/PlayGuideOverlay';
 import { dispatchSetSpace } from '../../sets/spaceTransport';
 import { CONTROL_FOCUS_KEYS, browseLoadTarget, isGuardedKeyEvent } from './performanceKeys';
@@ -59,8 +60,9 @@ export function PerformanceView() {
   // drives the SHARED browse panel (document keys, host registration is
   // fine, cursor policy) gates on activity so hidden copies stay inert.
   const viewActive = useViewActive();
+  const browseActive = useBrowseActive();
   const rootRef = useRef<HTMLDivElement>(null);
-  useMidiCursorSuppression(rootRef, viewActive);
+  useMidiCursorSuppression(rootRef, viewActive && browseActive);
   const controlFocus = useControlFocus();
   const [deckCount, setDeckCount] = useState<DeckCount>(() =>
     localStorage.getItem(DECK_COUNT_STORAGE_KEY) === '2' ? 2 : 4
@@ -134,13 +136,14 @@ export function PerformanceView() {
     if (!viewActive) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (isGuardedKeyEvent(event)) return;
+      if (event.target instanceof Element && event.target.closest('.settings-page')) return;
 
       // Space (sets 34): with a Set selected in the embedded browse view,
       // space drives the Conductor's mix-level transport — the set wins
       // over the decks (d/k keep the per-deck toggles). With no Set
       // selected it stays deliberately unbound (confirmed decision),
       // claimed so it neither scrolls nor re-activates a focused control.
-      if (event.key === ' ') {
+      if (browseActive && event.key === ' ') {
         event.preventDefault();
         dispatchSetSpace();
         return;
@@ -153,6 +156,8 @@ export function PerformanceView() {
         }
         return;
       }
+
+      if (!browseActive) return;
 
       if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
         event.preventDefault();
@@ -179,7 +184,7 @@ export function PerformanceView() {
 
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
-  }, [tryLoad, viewActive, deckCount]);
+  }, [tryLoad, viewActive, browseActive, deckCount]);
 
   // Section visibility (perf-layout 12 / gh#68): hide-don't-unmount —
   // display:none only, so engines, zoom state and canvases stay alive
@@ -231,13 +236,8 @@ export function PerformanceView() {
           <DeckScope deck="D">
             <DeckPanel mirrored lockHint={lockHint === 'D'} />
           </DeckScope>
-          <DeckScope deck={leftFocus}>
-            <DeckKeys />
-          </DeckScope>
-          <DeckScope deck={rightFocus}>
-            <DeckKeys />
-          </DeckScope>
         </div>
+        <PerformanceKeyboard deckCount={deckCount} left={leftFocus} right={rightFocus} onLoad={tryLoad} />
       </div>
     </div>
   );

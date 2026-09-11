@@ -82,7 +82,7 @@ All terms are already in the glossary (captured 2026-07-08): Observed, Unplaced,
 - Cameo Takes contributing to Observed, and Cameo edges in chains (Cameos are unimplemented; their PRD stands alone).
 - A persisted pool, saved chains, or any "remember this run" artifact — evidence is the only persistence, by decision.
 - Practice mode, per-shelf tuning UI, and Wildcard forms beyond the two decided.
-- Ranking jitter anywhere (explicitly rejected).
+- Ranking jitter in Dig shelves. Follow's opt-in Temperature (#251) is separate from Wildcard and supersedes the earlier blanket rejection.
 
 ## Further Notes
 

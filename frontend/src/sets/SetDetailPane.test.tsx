@@ -14,6 +14,9 @@ import { planSet } from './planner';
 import { SetSpaceTransport } from './SetSpaceTransport';
 import { selectSet, setAdjacencyPin } from './setStore';
 import type { MenuItem } from '../components/ContextMenu';
+import { BrowseActiveContext } from '../contexts/browseActive';
+import { ViewActiveContext } from '../contexts/viewActive';
+import { browseSurface } from '../midi/controlRegistry';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -356,15 +359,21 @@ it('disables Set-wide pin actions while choosing a move destination', async () =
   expect(api.sets.replaceEntries).not.toHaveBeenCalled();
 });
 
-async function selectSetTrack() {
-  selectSet(1);
+async function renderSetPane(viewActive = true, browseActive = true) {
   await act(async () => root.render(
     <QueryClientProvider client={client}>
       <SetSpaceTransport />
-      <SetDetailPane setId={1} onLoadToDeck={() => {}} />
+      <ViewActiveContext value={viewActive}><BrowseActiveContext value={browseActive}>
+        <SetDetailPane setId={1} onLoadToDeck={() => {}} />
+      </BrowseActiveContext></ViewActiveContext>
       <div data-editor tabIndex={0}>Routine editor timeline</div>
     </QueryClientProvider>,
   ));
+}
+
+async function selectSetTrack() {
+  selectSet(1);
+  await renderSetPane();
   await vi.waitFor(async () => {
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
     expect(host.querySelector('[data-set-track-row="2"]')?.textContent).toContain('Track 2');
@@ -377,6 +386,23 @@ async function selectSetTrack() {
   expect(api.sets.replaceEntries).not.toHaveBeenCalled();
   return row;
 }
+
+it.each(['browse', 'view'])('unregisters hidden Set MIDI browsing and ignores deletion without losing selection (%s)', async (boundary) => {
+  const row = await selectSetTrack();
+  expect(browseSurface()?.getSelectedTrack()?.id).toBe(2);
+  const selection = getSetSelection(1);
+  await renderSetPane(boundary !== 'view', boundary !== 'browse');
+  expect(browseSurface()).toBeNull();
+  const event = new KeyboardEvent('keydown', { key: 'Delete', bubbles: true, cancelable: true });
+  act(() => { row.querySelector('[title="Remove from set"]')!.dispatchEvent(event); });
+  expect(event.defaultPrevented).toBe(false);
+  expect(getSetSelection(1)).toBe(selection);
+  expect(api.sets.replaceEntries).not.toHaveBeenCalled();
+  await renderSetPane();
+  expect(host.querySelector('[data-set-track-row="2"]')).toBe(row);
+  expect(browseSurface()?.getSelectedTrack()?.id).toBe(2);
+  expect(getSetSelection(1)).toBe(selection);
+});
 
 it.each(['Backspace', 'Delete'])('ignores %s from an external Routine editor', async (key) => {
   await selectSetTrack();

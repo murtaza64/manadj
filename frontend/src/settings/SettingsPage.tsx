@@ -6,16 +6,18 @@ import {
   FILTER_PARAMETER_RANGES,
   type FilterSettings,
 } from '../playback/filterSettings';
-import { SettingsDeckPreview } from './SettingsDeckPreview';
+import { FilterResponse } from './FilterResponse';
 import './settings.css';
 import { CommittedNumberInput } from '../components/CommittedNumberInput';
 
 const WaveformSettings = lazy(() => import('../waveform/StyleTuningPage'));
 const JogSettings = lazy(() => import('../midi/JogTuningPage'));
+const MouseJogSettings = lazy(() => import('./MouseJogSettings'));
 const SECTIONS = [
   { id: 'filters', title: 'Filters', detail: 'Sound and sweep response' },
   { id: 'waveforms', title: 'Waveforms', detail: 'Color and rendering' },
   { id: 'jog', title: 'Jog calibration', detail: 'DDJ-GRV6 response' },
+  { id: 'mouse-jog', title: 'Mouse jog', detail: 'Keyboard and mouse response' },
 ] as const;
 type Section = (typeof SECTIONS)[number]['id'];
 const PARAMS = [
@@ -189,7 +191,7 @@ function FilterSettingsPanel() {
           })}
         </div>
         <div>
-          <SettingsDeckPreview filter />
+          <FilterResponse />
           <p className="settings-hint">
             Settings apply live and persist across launches. Changing them also
             changes the sound of existing transitions and session replays. The
@@ -201,7 +203,7 @@ function FilterSettingsPanel() {
   );
 }
 
-export default function SettingsPage() {
+export default function SettingsPage({ performance = false }: { performance?: boolean }) {
   const [section, setSection] = useState<Section>(() => {
     const requested = new URLSearchParams(location.search).get('section');
     return SECTIONS.some((s) => s.id === requested)
@@ -247,8 +249,10 @@ export default function SettingsPage() {
               <FilterSettingsPanel />
             ) : section === 'waveforms' ? (
               <WaveformSettings />
-            ) : (
+            ) : section === 'jog' ? (
               <JogSettings />
+            ) : (
+              <MouseJogSettings performance={performance} />
             )}
           </Suspense>
         </section>

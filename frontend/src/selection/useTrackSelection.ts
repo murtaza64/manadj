@@ -27,6 +27,7 @@ import {
   EMPTY_SELECTION,
   navigate as navigateSelection,
   prune,
+  rangeClick,
   reanchorId,
   selectAll,
   selectGesture,
@@ -41,7 +42,8 @@ export interface TrackSelection {
   /** The anchor's Track object (load/edit target); null when off-list. */
   selectedTrack: Track | null;
   handleRowSelect: (track: Track, mods: SelectMods) => void;
-  handleNavigate: (delta: 1 | -1) => void;
+  handleNavigate: (delta: 1 | -1, extend?: boolean) => void;
+  handleNavigateHalfPage: (direction: 1 | -1) => void;
   /** Coarse navigation (four-deck-performance 24): jump a page of rows /
    * to the list's first or last row, collapsing to a single selection. */
   handleNavigatePage: (direction: 1 | -1) => void;
@@ -71,6 +73,7 @@ export function useTrackSelection(
   // session selection (four-deck-performance 27). Rows invisible while
   // empty behave as unselected anyway (selectedTrack is null).
   useEffect(() => {
+    rangeRoot.current = null;
     if (displayedIds.length === 0) return;
     setSelection((prev) => prune(prev, displayedIds));
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -83,13 +86,27 @@ export function useTrackSelection(
   selectionRef.current = selection;
   const displayedIdsRef = useRef(displayedIds);
   displayedIdsRef.current = displayedIds;
+  const rangeRoot = useRef<number | null>(null);
 
   const handleRowSelect = useCallback((track: Track, mods: SelectMods) => {
+    rangeRoot.current = null;
     setSelection((prev) => selectGesture(prev, track.id, mods, displayedIdsRef.current));
   }, []);
 
-  const handleNavigate = useCallback((delta: 1 | -1) => {
+  const handleNavigate = useCallback((delta: 1 | -1, extend = false) => {
     const sel = selectionRef.current;
+    if (extend) {
+      rangeRoot.current ??= sel.anchorId;
+      const next = navigateSelection(sel, delta, displayedIdsRef.current);
+      if (next.anchorId !== null) {
+        scrollTrackIntoView(next.anchorId);
+        const range = rangeClick({ ...sel, anchorId: rangeRoot.current }, next.anchorId, displayedIdsRef.current);
+        selectionRef.current = range;
+        setSelection(range);
+      }
+      return;
+    }
+    rangeRoot.current = null;
     // Re-anchor when the anchor row isn't on screen (a filter changed the
     // rows underneath, or the user scrolled away): the first tick selects
     // the row at the viewport edge in the direction of travel instead of
@@ -108,6 +125,7 @@ export function useTrackSelection(
   }, []);
 
   const handleNavigatePage = useCallback((direction: 1 | -1) => {
+    rangeRoot.current = null;
     const sel = selectionRef.current;
     const id = pageTargetId(displayedIdsRef.current, sel.anchorId, direction);
     if (id === null) return;
@@ -115,7 +133,19 @@ export function useTrackSelection(
     setSelection(click(sel, id));
   }, []);
 
+  const handleNavigateHalfPage = useCallback((direction: 1 | -1) => {
+    rangeRoot.current = null;
+    const ids = displayedIdsRef.current;
+    if (!ids.length) return;
+    const current = ids.indexOf(selectionRef.current.anchorId ?? -1);
+    const rows = Math.max(1, Math.floor(visibleTrackIds().size / 2));
+    const index = current < 0 ? 0 : Math.max(0, Math.min(ids.length - 1, current + direction * rows));
+    scrollTrackIntoView(ids[index]);
+    setSelection(click(selectionRef.current, ids[index]));
+  }, []);
+
   const handleNavigateEnd = useCallback((direction: 1 | -1) => {
+    rangeRoot.current = null;
     const id = endTargetId(displayedIdsRef.current, direction);
     if (id === null) return;
     scrollTrackIntoView(id);
@@ -123,6 +153,7 @@ export function useTrackSelection(
   }, []);
 
   const handleSelectAll = useCallback(() => {
+    rangeRoot.current = null;
     setSelection((prev) => selectAll(prev, displayedIdsRef.current));
   }, []);
 
@@ -141,6 +172,7 @@ export function useTrackSelection(
     handleRowSelect,
     handleNavigate,
     handleNavigatePage,
+    handleNavigateHalfPage,
     handleNavigateEnd,
     handleSelectAll,
     getDragIds,

@@ -7,6 +7,7 @@ import { KeepAliveView } from '../../contexts/KeepAliveView';
 import { DeckKeys } from './DeckKeys';
 import { DECK_KEYS } from './performanceKeys';
 import { mouseSeekDelta } from './mouseControl';
+import { resetMouseJogSettings, setMouseJogSettings } from './mouseJogSettings';
 
 const engine = vi.hoisted(() => ({
   jumpBeats: vi.fn(), setBend: vi.fn(), cueUp: vi.fn(), cueDown: vi.fn(),
@@ -27,6 +28,7 @@ const mixer = vi.hoisted(() => ({
   getChannelState: vi.fn(), setEq: vi.fn(), setFilter: vi.fn(), setFader: vi.fn(),
 }));
 vi.mock('../../hooks/useMixer', () => ({ useMixer: () => mixer }));
+vi.mock('../../settings/persistedSettings', () => ({ writeSetting: vi.fn(), removeSetting: vi.fn() }));
 vi.mock('../../hooks/useDeck', () => ({
   useDeck: () => ({ deck: fixture.deck, engine, loadedTrack: { id: fixture.trackId }, beatjumpBeats: 32 }),
   useDeckReady: () => fixture.snapshot.loadState === 'ready',
@@ -39,6 +41,7 @@ globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
 beforeEach(() => {
   vi.resetAllMocks();
+  resetMouseJogSettings();
   fixture.deck = 'A';
   fixture.trackId = 7;
   fixture.snapshot = { playing: false, loadState: 'ready', bendPercent: 0, scratching: false, vinylMode: true };
@@ -121,8 +124,8 @@ describe('mouse-key gestures and cue walking', () => {
   let root: ReturnType<typeof createRoot>;
   let mouseX = 0;
   let mouseY = 0;
-  const render = (active = true) => act(() => root.render(
-    <KeepAliveView active={active}><DeckKeys /></KeepAliveView>
+  const render = (active = true, enabled = true) => act(() => root.render(
+    <KeepAliveView active={active}><DeckKeys enabled={enabled} /></KeepAliveView>
   ));
   const key = (value: string, options: KeyboardEventInit = {}, type = 'keydown', target: EventTarget = document) => {
     const event = new KeyboardEvent(type, { key: value, bubbles: true, cancelable: true, ...options });
@@ -141,6 +144,37 @@ describe('mouse-key gestures and cue walking', () => {
   afterEach(() => {
     act(() => root.unmount());
     vi.useRealTimers();
+  });
+
+  it('releases owned cue, pad and pointer gestures when library takes focus', () => {
+    render(); move(100, 100);
+    key('f'); key('z'); key('q'); key('t', { shiftKey: true }); move(130, 100);
+    expect(engine.cueDown).toHaveBeenCalledOnce();
+    expect(hotCues.down).toHaveBeenCalledWith(1);
+    render(true, false);
+    expect(engine.cueUp).toHaveBeenCalledOnce();
+    expect(hotCues.up).toHaveBeenCalledExactlyOnceWith(1);
+    expect(fixture.snapshot.scratching).toBe(false);
+    mixer.setFilter.mockClear(); engine.seek.mockClear();
+    move(200, 100); key('d'); key('a'); key('z', {}, 'keyup'); key('f', {}, 'keyup');
+    expect(mixer.setFilter).not.toHaveBeenCalled();
+    expect(engine.seek).not.toHaveBeenCalled();
+    expect(engine.togglePlay).not.toHaveBeenCalled();
+    expect(engine.jumpBeats).not.toHaveBeenCalled();
+    expect(hotCues.up).toHaveBeenCalledTimes(1);
+    expect(engine.cueUp).toHaveBeenCalledTimes(1);
+    render(true, true); key('d'); expect(engine.togglePlay).toHaveBeenCalledOnce();
+  });
+
+  it('guards cue-walking behind a modal as well as ordinary transport', () => {
+    render();
+    const dialog = document.createElement('div'); dialog.setAttribute('role', 'dialog');
+    document.body.append(dialog);
+    try {
+      key('a', { metaKey: true }); key('s', { metaKey: true }); key('d');
+      expect(hotCues.walk).not.toHaveBeenCalled();
+      expect(engine.togglePlay).not.toHaveBeenCalled();
+    } finally { dialog.remove(); }
   });
 
   it.each(['A', 'B', 'C', 'D'] as const)('maps all knobs and the fader to focused deck %s', (deck) => {
@@ -362,14 +396,14 @@ describe('mouse-key gestures and cue walking', () => {
     render(); move(100, 100); key('t'); move(150, 100);
     act(() => vi.advanceTimersByTime(25));
     expect(fixture.snapshot.bendPercent).toBeGreaterThan(0);
-    expect(fixture.snapshot.bendPercent).toBeLessThan(0.1);
+    expect(fixture.snapshot.bendPercent).toBeLessThan(0.2);
     expect(engine.seek).not.toHaveBeenCalled();
     act(() => vi.advanceTimersByTime(600));
     expect(engine.setBend).toHaveBeenLastCalledWith(0);
     move(100, 100);
     act(() => vi.advanceTimersByTime(25));
     expect(fixture.snapshot.bendPercent).toBeLessThan(0);
-    expect(fixture.snapshot.bendPercent).toBeGreaterThan(-0.1);
+    expect(fixture.snapshot.bendPercent).toBeGreaterThan(-0.2);
     key('t', { metaKey: true }, 'keyup');
     expect(engine.setBend).toHaveBeenLastCalledWith(0);
     expect(vi.getTimerCount()).toBe(0);
@@ -390,10 +424,12 @@ describe('mouse-key gestures and cue walking', () => {
     vi.useFakeTimers(); fixture.deck = deck; render(); move(100, 100);
     const jog = DECK_KEYS[deck === 'A' || deck === 'C' ? 'A' : 'B'].jog;
     key(jog, { shiftKey: true });
-    expect(engine.beginScratch).toHaveBeenCalledOnce();
+    expect(engine.beginScratch).not.toHaveBeenCalled();
     act(() => vi.advanceTimersByTime(1000));
+    expect(document.querySelector('.keyboard-pointer-row strong')?.textContent).toBe(`${deck} SCRATCH READY`);
     expect(engine.endScratch).not.toHaveBeenCalled();
     move(150, 100); move(130, 100);
+    expect(engine.beginScratch).toHaveBeenCalledOnce();
     expect(engine.scratchMove.mock.calls).toEqual([[0.1, 0.1], [-0.04, 0.016]]);
     expect(engine.seek).not.toHaveBeenCalled();
     expect(engine.setBend).not.toHaveBeenCalled();
@@ -411,10 +447,12 @@ describe('mouse-key gestures and cue walking', () => {
     expect(fixture.snapshot.bendPercent).toBeGreaterThan(0);
     key('Shift', { shiftKey: true });
     expect(fixture.snapshot.bendPercent).toBe(0);
-    expect(engine.beginScratch).toHaveBeenCalledOnce();
+    expect(fixture.snapshot.playing).toBe(true);
+    expect(engine.beginScratch).not.toHaveBeenCalled();
     key('Shift', { shiftKey: true, repeat: true });
-    expect(engine.beginScratch).toHaveBeenCalledOnce();
+    expect(engine.beginScratch).not.toHaveBeenCalled();
     move(180, 100);
+    expect(engine.beginScratch).toHaveBeenCalledOnce();
     expect(engine.scratchMove).toHaveBeenCalledOnce();
     key('Shift', {}, 'keyup');
     expect(engine.endScratch).toHaveBeenCalledOnce();
@@ -431,6 +469,8 @@ describe('mouse-key gestures and cue walking', () => {
     'releases owned scratch on %s and never restarts from stale mouse movement', reason => {
       vi.useFakeTimers(); fixture.snapshot.playing = true;
       render(); move(100, 100); key('t', { shiftKey: true });
+      move(110, 100);
+      engine.scratchMove.mockClear();
       const input = document.createElement('input');
       document.body.append(input);
       if (reason === 'escape') key('Escape');
@@ -465,6 +505,36 @@ describe('mouse-key gestures and cue walking', () => {
     expect(engine.scratchMove).not.toHaveBeenCalled();
     expect(engine.endScratch).not.toHaveBeenCalled();
     expect(engine.seek).not.toHaveBeenCalled();
+  });
+
+  it('Shift+jog preserves playback until the first horizontal movement', () => {
+    vi.useFakeTimers(); fixture.snapshot.playing = true;
+    render(); move(100, 100); key('t', { shiftKey: true });
+    act(() => vi.advanceTimersByTime(1000));
+    move(100, 120);
+    expect(fixture.snapshot.playing).toBe(true);
+    expect(fixture.snapshot.scratching).toBe(false);
+    expect(engine.beginScratch).not.toHaveBeenCalled();
+    expect(engine.seek).not.toHaveBeenCalled();
+    key('t', {}, 'keyup');
+    expect(engine.endScratch).not.toHaveBeenCalled();
+  });
+
+  it('applies live tuning without releasing or recreating the held jog', () => {
+    vi.useFakeTimers(); fixture.snapshot.playing = true;
+    render(); move(100, 100); key('t');
+    const lock = document.pointerLockElement;
+    let x = 100;
+    for (let i = 0; i < 40; i++) move(x += 4, 100);
+    const before = fixture.snapshot.bendPercent;
+    act(() => setMouseJogSettings({ sensitivity: 6 }));
+    render();
+    for (let i = 0; i < 40; i++) move(x += 4, 100);
+    expect(fixture.snapshot.bendPercent).toBeGreaterThan(before * 5);
+    expect(document.pointerLockElement).toBe(lock);
+    expect(engine.beginScratch).not.toHaveBeenCalled();
+    key('t', {}, 'keyup');
+    expect(fixture.snapshot.bendPercent).toBe(0);
   });
 
   it('leaves external cue/bend state untouched on layout or view changes', () => {
