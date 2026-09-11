@@ -831,6 +831,7 @@ function MixZone({ track }: { track: Track | null }) {
   const eqKnob = (band: EqBand, label: string) => (
     <Knob
       key={band}
+      control={band === 'low' ? 'eqLow' : band === 'mid' ? 'eqMid' : 'eqHigh'}
       label={label}
       kbd={keys.knobs[band].toUpperCase()}
       title={`Hold ${keys.knobs[band].toUpperCase()} and move mouse right/up to increase, left/down to decrease; double-tap key: cut/neutral (double-click to reset)`}
@@ -847,6 +848,7 @@ function MixZone({ track }: { track: Track | null }) {
   const filterKnob = (
     <Knob
       label="FLT"
+      control="filter"
       kbd={keys.knobs.filter.toUpperCase()}
       title={`Hold ${keys.knobs.filter.toUpperCase()} and move mouse horizontally/vertically; double-tap key: reset to center (double-click to center)`}
       min={-1}
@@ -870,6 +872,7 @@ function MixZone({ track }: { track: Track | null }) {
             knob whose sweep is bipolar LPF↔HPF. */}
         <Knob
           label="TRIM"
+          control="trim"
           min={0}
           max={1}
           defaultValue={0.5}

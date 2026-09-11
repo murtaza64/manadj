@@ -37,6 +37,7 @@ import { eqValueToGain } from '../playback/graph';
 import { useStyleSlot } from '../waveform/styleSlots';
 import { cueCssColor } from '../hotcues/palette';
 import { ROUTINE_ACCENT } from '../theme/routineColor';
+import { FILTER_LPF_COLOR } from '../theme/automationColors';
 import { hexToRgbTriplet } from '../theme/deckColors';
 import { LaneCanvas, type LaneGuide } from '../editor/LaneCanvas';
 import { deleteSelected } from '../editor/laneSelection';
@@ -71,7 +72,6 @@ import { traceDrawRuns, type BeatRun } from './routineWaveRuns';
 import type { EditorMode } from './editorMode';
 import {
   buildGlobalLadder,
-  FILTER_LPF_COLOR,
   gridTicks,
   ladderBaseTier,
   ROUTINE_TIER_BARS,

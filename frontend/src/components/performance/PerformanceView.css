@@ -767,8 +767,8 @@
   height: 6px;
 }
 
-/* Ring variant: FLT wears a detached double outer ring (the bipolar
-   LPF↔HPF sweep). The dial shrinks so the OUTER ring lands on the EQ
+/* Ring variant: FLT wears a full inner ring and an outer value arc (the
+   LPF↔HPF sweep). The dial shrinks so the OUTER arc lands on the EQ
    knobs' 22px footprint; margins keep the under-label on the row
    baseline. Display only — never intercepts the drag. */
 .perf-knob-filter .perf-knob-dial {
@@ -784,7 +784,7 @@
 .perf-knob-filter .perf-knob-dial::before {
   content: '';
   position: absolute;
-  inset: -3px;
+  inset: -1px;
   border: 1px solid var(--overlay1);
   border-radius: 50%;
   pointer-events: none;
@@ -801,12 +801,50 @@
   transform: translateX(-50%);
 }
 
+.perf-knob-colored { color: var(--knob-value-color); }
+
+.perf-knob-colored .perf-knob-dial {
+  border-color: transparent;
+  background: transparent;
+  filter: var(--knob-glow, none);
+}
+
+.perf-knob-colored .perf-knob-pointer::after {
+  background: var(--knob-value-color);
+}
+
+/* A fixed 270-degree track; the audible portion uses one value-dependent color. */
+.perf-knob-ring {
+  position: absolute;
+  inset: -1px;
+  border-radius: 50%;
+  mask-image: radial-gradient(closest-side, transparent calc(100% - 2.5px), #000 calc(100% - 2px));
+  pointer-events: none;
+}
+
+.perf-knob-ring-track {
+  background: conic-gradient(from 225deg, var(--surface2) 0deg 270deg, transparent 270deg);
+}
+
+.perf-knob-filter .perf-knob-ring { inset: -3px; }
+
+.perf-knob-detent {
+  position: absolute;
+  top: -2px;
+  left: calc(50% - 0.5px);
+  width: 1px;
+  height: 3px;
+  background: var(--subtext0);
+  pointer-events: none;
+}
+
+.perf-knob-filter .perf-knob-detent { top: -4px; }
+
 /* Automation ghost (sets 15): second, translucent DAW-style pointer at the
    live automation value while an overlay is engaged (Conductor / editor
    audition). The real pointer stays at base state — the takeover target.
-   Shared ghost color: saturated orange, distinct from every deck/level
-   color in the strip. */
-.perf-knob-ghost::after,
+   The orange ghost stays separate from the parameter-colored position ring. */
+.perf-knob .perf-knob-ghost::after,
 .perf-fader-ghost {
   background: var(--orange);
   opacity: 0.65;

@@ -82,6 +82,7 @@ export function DeckKeys() {
       feedback: () => {
         const feedback: KeyboardPointerFeedback[] = [];
         const channel = mixer.getChannelState(deck);
+        const automation = mixer.getAutomation(deck);
         const color = `var(--deck-${deck.toLowerCase()})`;
         for (const key of held.keys()) {
           if (key === keys.jog) {
@@ -95,8 +96,12 @@ export function DeckKeys() {
           } else {
             const band = (['filter', 'high', 'mid', 'low'] as const).find(band => keys.knobs[band] === key)!;
             const value = band === 'filter' ? (channel.filter + 1) / 2 : channel.eq[band];
+            const ghost = automation
+              ? band === 'filter' ? (automation.filter + 1) / 2 : automation.eq[band]
+              : null;
             feedback.push({ id: key, kind: 'knob', label: `${deck} ${band.toUpperCase()}`, value,
-              color, detail: `${Math.round(value * 100)}%` });
+              control: band === 'filter' ? 'filter' : band === 'high' ? 'eqHigh' : band === 'mid' ? 'eqMid' : 'eqLow',
+              ghost, color, detail: `${Math.round((ghost ?? value) * 100)}%` });
           }
         }
         return feedback;
