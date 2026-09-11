@@ -68,6 +68,15 @@ function baseInput(events: CaptureEvent[] = []) {
 const facts = { bpmA: 174, bpmB: 174 };
 
 describe('anchors', () => {
+  it('refuses Slip-loop Takes rather than dropping the return jump', () => {
+    expect(vectorizeTake(baseInput([
+      { t: 105, kind: 'loop', channel: 'A', playhead: 65, region: { start: 65, end: 67 }, slip: true },
+      { t: 110, kind: 'loop', channel: 'A', playhead: 70, region: null },
+    ]), facts)).toBeNull();
+    const input = baseInput();
+    input.events[0] = init('A', 100, { decks: { A: deck({ slipLoopActive: true }), B: deck({ trackId: 2 }) } });
+    expect(vectorizeTake(input, facts)).toBeNull();
+  });
   it('refuses scratch events and a slice opening inside a held scratch', () => {
     expect(vectorizeTake(baseInput(), facts)).not.toBeNull();
     expect(vectorizeTake(baseInput([

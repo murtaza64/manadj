@@ -342,7 +342,14 @@ A backward platter spin that continues after the hand releases, ending when the 
 A platter-controlled gesture that holds or moves the audible Track position forward and backward, with speed and musical pitch coupled. Includes any released Spinback continuation.
 
 **Slip mode**:
-A per-Deck setting that keeps the normal playback timeline advancing behind a Scratch or Spinback and returns to it when the gesture ends. With Slip off, release keeps the manipulated position. A paused Deck stays paused. The setting is latched at touch-down; toggles during a gesture apply to the next one. Slip-based loop rolls are separate and not implemented.
+A per-Deck setting that keeps the normal playback timeline advancing behind a Scratch, Spinback, or Slip loop and returns to it on release. With Slip off, release keeps the manipulated position. A paused Deck stays paused. Slip arms at scratch touch-down or loop entry. Switching it off immediately cancels all pending returns without moving playback or ending the gesture; switching it on applies only to the next gesture.
+
+During an active Slip gesture, the lower performance waveform and its beat/cue marks follow the return timeline; the upper half follows audible playback. A scratch inside an ordinary loop has a looped return; inside a Slip loop the lower half follows the outer, unlooped return.
+
+**Slip loop**:
+A loop entered with Slip enabled. Its background timeline advances unlooped at composed pitch/bend, surviving resize, relative loop translation, and nested scratches. Loop toggle or the lit preset releases to that timeline; pause, absolute seek/cue, Load, or machine replacement cancels the return. Paused entry arms a stationary return until audio starts. The audible loop can continue after the hidden timeline reaches track end; release then stops at EOF. Dedicated momentary Roll pads are not implemented.
+
+Sessions replay the recorded loop-exit landing, including from a mid-loop start. The hidden return waveform is live-only; replay does not reconstruct its clock. Take/Routine promotion refuses Slip-loop evidence until it can preserve the return jump.
 
 **Quantize**:
 An app-wide sticky toggle (default on) making beat-relative performance gestures grid-aligned: cue and Hot Cue placement snap to the nearest beat, auto-loop regions snap to the nearest beat, and Hot Cue jumps while playing are phase-preserving — a whole-beat displacement landing at the cue plus the playhead's intra-beat phase, so the groove never stumbles. Evaluated at gesture time; imports are not gestures and never snap. Gridless Tracks behave as if it were off. Beat jump (inherently whole-beat), cue return, paused-cue seeks, loop halve/double, and Transition-editor snapping are outside its authority.

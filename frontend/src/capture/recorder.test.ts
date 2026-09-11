@@ -109,6 +109,7 @@ function emptySnapshot(): DeckSnapshot {
     duration: 300,
     playing: false,
     scratching: false,
+    slipLoopActive: false,
     slipMode: false,
     vinylMode: true,
     pendingPlay: false,
