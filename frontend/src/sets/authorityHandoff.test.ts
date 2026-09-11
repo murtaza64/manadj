@@ -136,6 +136,33 @@ describe('window-boundary handoffs', () => {
     }
   });
 
+  it('recursively carries an unfinished opening ramp through a nearby closing boundary', () => {
+    const plan = planSet(windowInput(tr({
+      durationSec: 0.05,
+      lanes: { faderB: [{ x: 0, y: 0.5 }, { x: 1, y: 0.5 }] },
+    })));
+    const close = plan.adjacencies[0].mixEndSec;
+    const before = planStateAt(plan, close - 1e-6).lanes.B.fader;
+    expect(before).toBeCloseTo(0.5 * (0.05 - 1e-6) / RAMP, 10);
+    expect(planStateAt(plan, close).lanes.B.fader).toBeCloseTo(before, 10);
+    expect(planStateAt(plan, close + RAMP / 2).lanes.B.fader).toBeCloseTo((1 + before) / 2, 10);
+    expect(planStateAt(plan, close + RAMP + 1e-6)).toEqual(planStateAtRaw(plan, close + RAMP + 1e-6));
+  });
+
+  it('reads mutated boundaries afresh and excludes a boundary at zero', () => {
+    const plan = discontinuous();
+    expect(planStateAt(plan, 80)).not.toEqual(planStateAtRaw(plan, 80));
+    plan.adjacencies[0].mixEndSec = 81;
+    expect(planStateAt(plan, 80)).toEqual(planStateAtRaw(plan, 80));
+
+    const atZero = planSet(windowInput(tr({
+      startSec: 0,
+      lanes: { faderA: [{ x: 0, y: 0.5 }, { x: 1, y: 0.5 }] },
+    })));
+    expect(planStateAt(atZero, 0)).toEqual(planStateAtRaw(atZero, 0));
+    expect(planStateAt(atZero, RAMP / 2)).toEqual(planStateAtRaw(atZero, RAMP / 2));
+  });
+
   it('never smooths a hard cut (a deliberate cut, not a handoff)', () => {
     const plan = planSet({
       entries: [
