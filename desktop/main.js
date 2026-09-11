@@ -440,7 +440,7 @@ app.whenReady().then(() => {
   // the ADR 0017 cue bridge need both), and screen-wake-lock so the display
   // never dims mid-set (screen-wake 01; denied permissions here surface as
   // NotAllowedError from navigator.wakeLock.request).
-  const GRANTED = new Set(["midi", "midiSysex", "media", "speaker-selection", "screen-wake-lock"]);
+  const GRANTED = new Set(["midi", "midiSysex", "media", "speaker-selection", "screen-wake-lock", "pointerLock"]);
   session.defaultSession.setPermissionRequestHandler((_wc, permission, cb) =>
     cb(GRANTED.has(permission)),
   );
