@@ -147,6 +147,27 @@ describe('mouse-key gestures and cue walking', () => {
     vi.useRealTimers();
   });
 
+  it.each(['q', 'Q'])('reserves Shift+%s without TopBar, but plain Q still owns and releases filter', value => {
+    render(); move(100, 100);
+    key(value, { shiftKey: true });
+    key(value, { shiftKey: true, repeat: true });
+    move(136, 100);
+    key(value, { shiftKey: true }, 'keyup');
+    expect(HTMLElement.prototype.requestPointerLock).not.toHaveBeenCalled();
+    expect(mixer.setFilter).not.toHaveBeenCalled();
+    expect(mixer.setEq).not.toHaveBeenCalled();
+    key('q'); move(172, 100);
+    expect(mixer.setFilter).toHaveBeenLastCalledWith('A', 0.2);
+    expect(document.pointerLockElement).not.toBeNull();
+    key('Shift', { shiftKey: true });
+    key('Q', { shiftKey: true, repeat: true });
+    key('Q', { shiftKey: true }, 'keyup');
+    expect(document.pointerLockElement).toBeNull();
+    mixer.setFilter.mockClear(); move(208, 100);
+    expect(mixer.setFilter).not.toHaveBeenCalled();
+    expect(mixer.setEq).not.toHaveBeenCalled();
+  });
+
   it('shows parameter-colored keyboard knobs with audible automation feedback', () => {
     mixer.getAutomation.mockReturnValue({ eq: { high: 0.75, mid: 0.5, low: 0.5 }, filter: -0.5 });
     render();
@@ -411,7 +432,7 @@ describe('mouse-key gestures and cue walking', () => {
 
   it('bends playing audio, springs back when motion stops, and releases on keyup', () => {
     vi.useFakeTimers(); fixture.snapshot.playing = true;
-    render(); move(100, 100); key('t'); move(150, 100);
+    render(); move(100, 100); key('t'); move(120, 100);
     act(() => vi.advanceTimersByTime(25));
     expect(fixture.snapshot.bendPercent).toBeGreaterThan(0);
     expect(fixture.snapshot.bendPercent).toBeLessThan(0.2);

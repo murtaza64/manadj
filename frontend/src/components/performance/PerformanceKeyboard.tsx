@@ -9,7 +9,7 @@ import type { ChannelId } from '../../playback/mixer';
 import type { Track } from '../../types';
 import { sharedBrowseHandle } from '../browseHost';
 import { DeckKeys } from './DeckKeys';
-import { hasKeyboardOverlay, isTypingTarget } from './performanceKeys';
+import { hasKeyboardOverlay, isQuantizeShortcut, isTypingTarget } from './performanceKeys';
 
 const shortcuts = [
   ['Tab / Esc', 'Return to decks'],
@@ -60,6 +60,8 @@ export function PerformanceKeyboard({ deckCount, left, right, onLoad }: {
     if (!active) return;
     const claim = (event: KeyboardEvent) => { event.preventDefault(); event.stopImmediatePropagation(); };
     const down = (event: KeyboardEvent) => {
+      // TopBar owns this chord, regardless of capture-listener registration order.
+      if (isQuantizeShortcut(event)) return;
       const key = event.key.toLowerCase();
       const physical = event.code || key;
       if (blocked.current.has(physical)) { claim(event); return; }

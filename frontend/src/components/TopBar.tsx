@@ -20,6 +20,7 @@ import { TasksWidget } from './TasksWidget';
 import { MasterRecorderControl } from './MasterRecorderControl';
 import { isVisualizerOpen, toggleVisualizer } from '../visualizer/windowControl';
 import { VisualizerControlModal } from './VisualizerControlModal';
+import { hasKeyboardOverlay, isQuantizeShortcut, isTypingTarget } from './performance/performanceKeys';
 import './TopBar.css';
 
 export type AppMode = 'library' | 'performance' | 'transition' | 'routine' | 'history' | 'sync';
@@ -58,13 +59,28 @@ const PAIR_EDITOR_MODE: ModeMeta = {
 /** App-wide Quantize toggle: lit while beat-relative gestures snap. */
 function QuantizeToggle() {
   const on = useSyncExternalStore(subscribeQuantize, isQuantizeOn);
+  useEffect(() => {
+    const down = (event: KeyboardEvent) => {
+      if (!isQuantizeShortcut(event) || event.defaultPrevented || event.isComposing
+        || isTypingTarget(event) || hasKeyboardOverlay()) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      if (!event.repeat) setQuantize(!isQuantizeOn());
+    };
+    document.addEventListener('keydown', down, true);
+    return () => document.removeEventListener('keydown', down, true);
+  }, []);
   return (
     <button
       className={`topbar-quantize${on ? ' on' : ''}`}
-      title={on ? 'Quantize on: gestures snap to the beat' : 'Quantize off: exact placement'}
-      onClick={() => setQuantize(!on)}
+      aria-label="Quantize"
+      aria-pressed={on}
+      aria-keyshortcuts="Shift+Q"
+      title={`${on ? 'Quantize on: gestures snap to the beat' : 'Quantize off: exact placement'} (Shift+Q)`}
+      onClick={() => setQuantize(!isQuantizeOn())}
     >
       Q
+      <kbd className="topbar-quantize-hint" aria-hidden="true">Shift+Q</kbd>
     </button>
   );
 }

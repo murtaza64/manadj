@@ -6,9 +6,10 @@ export interface MouseJogSettings {
   sensitivity: number;
   acceleration: number;
   smoothingMs: number;
+  maxBendPercent: number;
 }
 
-export const DEFAULT_MOUSE_JOG_SETTINGS = { sensitivity: 2, acceleration: 1.8, smoothingMs: 50 };
+export const DEFAULT_MOUSE_JOG_SETTINGS = { sensitivity: 2, acceleration: 1.8, smoothingMs: 50, maxBendPercent: 25 };
 const STORAGE_KEY = 'manadj-mouse-jog';
 
 function bounded(value: unknown, fallback: number, min: number, max: number): number {
@@ -23,13 +24,15 @@ function sanitize(raw: unknown): MouseJogSettings {
     sensitivity: bounded(value.sensitivity, DEFAULT_MOUSE_JOG_SETTINGS.sensitivity, 0.25, 12),
     acceleration: bounded(value.acceleration, DEFAULT_MOUSE_JOG_SETTINGS.acceleration, 1, 3),
     smoothingMs: bounded(value.smoothingMs, DEFAULT_MOUSE_JOG_SETTINGS.smoothingMs, 0, 200),
+    maxBendPercent: bounded(value.maxBendPercent, DEFAULT_MOUSE_JOG_SETTINGS.maxBendPercent, 8, 50),
   };
 }
 
 export function mouseJogBendTarget(velocity: number, settings: MouseJogSettings): number {
   if (!Number.isFinite(velocity) || velocity === 0) return 0;
-  const { sensitivity, acceleration } = sanitize(settings);
-  return Math.sign(velocity) * Math.min(8, 8 * (Math.abs(velocity) * sensitivity / 6000) ** acceleration);
+  const { sensitivity, acceleration, maxBendPercent } = sanitize(settings);
+  // Lift only the ceiling; retain the original curve gain for fine adjustments.
+  return Math.sign(velocity) * Math.min(maxBendPercent, 8 * (Math.abs(velocity) * sensitivity / 6000) ** acceleration);
 }
 
 function load(): MouseJogSettings {
@@ -51,7 +54,7 @@ export function getMouseJogSettings(): MouseJogSettings {
 
 function publish(next: MouseJogSettings): void {
   if (next.sensitivity === settings.sensitivity && next.acceleration === settings.acceleration &&
-      next.smoothingMs === settings.smoothingMs) return;
+      next.smoothingMs === settings.smoothingMs && next.maxBendPercent === settings.maxBendPercent) return;
   settings = next;
   for (const listener of listeners) listener();
 }

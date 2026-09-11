@@ -55,11 +55,21 @@ export function isTypingTarget(event: KeyboardEvent): boolean {
   return isTextEntryTarget(event.target);
 }
 
+/** Raw chord reservation; the global owner applies typing/overlay guards. */
+export function isQuantizeShortcut(event: KeyboardEvent): boolean {
+  return event.key.toLowerCase() === 'q' && event.shiftKey
+    && !event.ctrlKey && !event.metaKey && !event.altKey;
+}
+
 /** The predicate behind isTypingTarget, on the target itself (testable). */
 export function isTextEntryTarget(target: EventTarget | null): boolean {
   if (!(target instanceof Element)) return false;
   if (target.tagName === 'TEXTAREA') return true;
-  if ((target as HTMLElement).contentEditable === 'true') return true;
+  for (let node: Element | null = target; node; node = node.parentElement) {
+    const editable = (node as HTMLElement).contentEditable ?? node.getAttribute('contenteditable');
+    if (editable === 'false') break;
+    if (editable === 'true' || editable === '' || editable === 'plaintext-only') return true;
+  }
   return target.tagName === 'INPUT' && TEXT_INPUT_TYPES.has((target as HTMLInputElement).type);
 }
 

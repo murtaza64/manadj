@@ -174,6 +174,16 @@ describe('Performance library keyboard focus', () => {
   }
   const isLibrary = () => container.querySelector('.perf-keyboard-scope')?.getAttribute('data-library-focus') === 'true';
 
+  it('reserves Shift+Q before claiming library letters or blocking held physical keys', () => {
+    browse(); render();
+    act(() => document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'q', code: 'KeyQ', bubbles: true })));
+    press('Tab');
+    expect(isLibrary()).toBe(true);
+    expect(press('Q', { code: 'KeyQ', shiftKey: true, repeat: true }).defaultPrevented).toBe(false);
+    expect(press('Q', { code: 'KeyQ', shiftKey: true }).defaultPrevented).toBe(false);
+    expect(press('q', { code: 'KeyQ' }).defaultPrevented).toBe(true);
+  });
+
   it('temporarily restores deck keys while Settings covers a library-focused browse pane', () => {
     const handle = browse();
     const view = (active: boolean) => <BrowseActiveContext value={active}><PerformanceView /></BrowseActiveContext>;

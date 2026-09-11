@@ -17,7 +17,7 @@ import { useHotCueActions } from '../../hooks/useHotCueActions';
 import { useMixer } from '../../hooks/useMixer';
 import { MouseJogController } from './mouseJog';
 import { getMouseJogSettings, setMouseJogSpeed } from './mouseJogSettings';
-import { DECK_KEYS, hasKeyboardOverlay, isGuardedKeyEvent, isTextEntryTarget, isTypingTarget } from './performanceKeys';
+import { DECK_KEYS, hasKeyboardOverlay, isGuardedKeyEvent, isQuantizeShortcut, isTextEntryTarget, isTypingTarget } from './performanceKeys';
 import { registerKeyboardPointer, type KeyboardPointerFeedback } from './keyboardPointer';
 import { invertControl, MIXER_DRAG_RANGE_PX, moveKnob, type KnobGesture } from './mouseControl';
 
@@ -111,6 +111,7 @@ export function DeckKeys({ enabled = true }: { enabled?: boolean }) {
       },
     });
     const onKeyDown = (event: KeyboardEvent) => {
+      if (isQuantizeShortcut(event)) return;
       if (isGuardedKeyEvent(event)) {
         release();
         return;

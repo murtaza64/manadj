@@ -129,7 +129,7 @@ function readout(label: string) {
 }
 
 it('deep-links to Mouse jog with live ranges, stored values and derived targets', async () => {
-  setMouseJogSettings({ sensitivity: 2, acceleration: 1.8, smoothingMs: 50 });
+  setMouseJogSettings({ sensitivity: 2, acceleration: 1.8, smoothingMs: 50, maxBendPercent: 25 });
   await render();
   expect(container.querySelector('.settings-content')?.getAttribute('aria-label')).toBe('Mouse jog');
   expect(container.querySelector('.settings-nav [aria-current="page"]')?.textContent).toBe('Mouse jogKeyboard and mouse response');
@@ -138,29 +138,34 @@ it('deep-links to Mouse jog with live ranges, stored values and derived targets'
   const ranges = [...container.querySelectorAll<HTMLElement>('.settings-fields [role="slider"]')];
   expect(container.querySelector('input[type="range"]')).toBeNull();
   expect(ranges.map((slider) => ['aria-valuemin', 'aria-valuemax', 'aria-valuenow'].map((attr) => slider.getAttribute(attr)))).toEqual([
-    ['0.25', '12', '2'], ['1', '3', '1.8'], ['0', '200', '50'],
+    ['0.25', '12', '2'], ['1', '3', '1.8'], ['0', '200', '50'], ['8', '50', '25'],
   ]);
   for (const slider of ranges) {
     expect(slider.classList.contains('perf-fader')).toBe(true);
     expect(slider.querySelector('.perf-fader-handle')?.textContent).toBe(slider.getAttribute('aria-valuenow'));
   }
-  expect(container.textContent).toContain('3000 px/s');
+  expect(ranges[3].getAttribute('aria-label')).toBe('Maximum bend');
+  expect(numberInput('Maximum bend').value).toBe('25');
+  expect(container.textContent).toContain(`Full bend (+/-25%) at ${(3000 * (25 / 8) ** (1 / 1.8)).toFixed(0)} px/s`);
   press(ranges[0], 'ArrowRight');
   press(ranges[1], 'ArrowRight');
   press(ranges[2], 'ArrowRight');
-  expect(getMouseJogSettings()).toEqual({ sensitivity: 2.25, acceleration: 1.9, smoothingMs: 55 });
+  press(ranges[3], 'ArrowRight');
+  expect(getMouseJogSettings()).toEqual({ sensitivity: 2.25, acceleration: 1.9, smoothingMs: 55, maxBendPercent: 26 });
   press(ranges[0], 'End');
   press(ranges[1], 'End');
   for (let i = 0; i < 5; i++) press(ranges[1], 'ArrowLeft');
   press(ranges[2], 'End');
-  expect(getMouseJogSettings()).toEqual({ sensitivity: 12, acceleration: 2.5, smoothingMs: 200 });
+  press(ranges[3], 'End');
+  expect(getMouseJogSettings()).toEqual({ sensitivity: 12, acceleration: 2.5, smoothingMs: 200, maxBendPercent: 50 });
   expect(numberInput('Sensitivity').value).toBe('12');
-  expect(container.textContent).toContain('500 px/s');
-  expect(container.textContent).toContain('600 px/s: 8.00%');
+  expect(container.textContent).toContain(`Full bend (+/-50%) at ${(500 * (50 / 8) ** (1 / 2.5)).toFixed(0)} px/s`);
+  expect(container.textContent).toContain(`600 px/s: ${(8 * 1.2 ** 2.5).toFixed(2)}%`);
   act(() => setMouseJogSettings({ sensitivity: 6 }));
   expect(ranges[0].getAttribute('aria-valuenow')).toBe('6');
   ranges.forEach((slider) => press(slider, 'Home'));
-  expect(getMouseJogSettings()).toEqual({ sensitivity: 0.25, acceleration: 1, smoothingMs: 0 });
+  expect(getMouseJogSettings()).toEqual({ sensitivity: 0.25, acceleration: 1, smoothingMs: 0, maxBendPercent: 8 });
+  expect(container.textContent).toContain('Full bend (+/-8%) at 24000 px/s');
 });
 
 it('drags the shared sensitivity fader and resets it to the mouse default', async () => {
@@ -180,10 +185,15 @@ it('drags the shared sensitivity fader and resets it to the mouse default', asyn
   expect(getMouseJogSettings().sensitivity).toBe(DEFAULT_MOUSE_JOG_SETTINGS.sensitivity);
 });
 
-it('commits numbers on Enter/blur, cancels on Escape and discards drafts on every reset', async () => {
+it.each([
+  ['Sensitivity', 'sensitivity', 8, 10, 6, 9],
+  ['Acceleration', 'acceleration', 2, 2.5, 1.5, 3],
+  ['Smoothing', 'smoothingMs', 100, 150, 75, 200],
+  ['Maximum bend', 'maxBendPercent', 40, 50, 8, 45],
+] as const)('%s commits on Enter/blur, cancels on Escape and discards drafts on every reset', async (label, setting, entered, escaped, blurred, draft) => {
   await render();
   const type = (value: string) => {
-    const input = numberInput('Sensitivity');
+    const input = numberInput(label);
     act(() => input.focus());
     inputValue(input, value);
     return input;
@@ -191,26 +201,49 @@ it('commits numbers on Enter/blur, cancels on Escape and discards drafts on ever
   const press = (input: HTMLInputElement, key: string) => act(() =>
     input.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true })),
   );
-  let input = type('8');
+  let input = type(String(entered));
   expect(getMouseJogSettings()).toEqual(DEFAULT_MOUSE_JOG_SETTINGS);
   press(input, 'Enter');
-  expect(getMouseJogSettings().sensitivity).toBe(8);
-  input = type('10');
+  expect(getMouseJogSettings()[setting]).toBe(entered);
+  input = type(String(escaped));
   press(input, 'Escape');
-  expect(input.value).toBe('8');
-  expect(getMouseJogSettings().sensitivity).toBe(8);
-  input = type('6');
+  expect(input.value).toBe(String(entered));
+  expect(getMouseJogSettings()[setting]).toBe(entered);
+  input = type(String(blurred));
   act(() => input.blur());
-  expect(getMouseJogSettings().sensitivity).toBe(6);
+  expect(getMouseJogSettings()[setting]).toBe(blurred);
   const reset = [...container.querySelectorAll('button')].find((b) => b.textContent === 'Reset mouse defaults')!;
   for (let i = 0; i < 2; i++) {
-    type('9');
+    type(String(draft));
     act(() => reset.click());
-    input = numberInput('Sensitivity');
-    expect(input.value).toBe(String(DEFAULT_MOUSE_JOG_SETTINGS.sensitivity));
+    input = numberInput(label);
+    expect(input.value).toBe(String(DEFAULT_MOUSE_JOG_SETTINGS[setting]));
     act(() => { input.focus(); input.blur(); });
     expect(getMouseJogSettings()).toEqual(DEFAULT_MOUSE_JOG_SETTINGS);
   }
+});
+
+it('clamps maximum bend numeric entry and updates the fader and full-bend speed on cap-only changes', async () => {
+  await render();
+  const slider = container.querySelector<HTMLElement>('[role="slider"][aria-label="Maximum bend"]')!;
+  const input = numberInput('Maximum bend');
+  expect(input.min).toBe('8');
+  expect(input.max).toBe('50');
+  expect(input.step).toBe('1');
+  for (const [value, expected] of [['100', 50], ['-1', 8], ['42', 42]] as const) {
+    act(() => input.focus());
+    inputValue(input, value);
+    act(() => input.blur());
+    expect(getMouseJogSettings()).toEqual({ ...DEFAULT_MOUSE_JOG_SETTINGS, maxBendPercent: expected });
+    expect(slider.getAttribute('aria-valuenow')).toBe(String(expected));
+    expect(input.value).toBe(String(expected));
+    expect(container.textContent).toContain(`Full bend (+/-${expected}%) at ${(3000 * (expected / 8) ** (1 / 1.8)).toFixed(0)} px/s`);
+    expect(container.textContent).toContain('600 px/s: 0.44%');
+  }
+  act(() => slider.dispatchEvent(new MouseEvent('dblclick', { bubbles: true })));
+  expect(getMouseJogSettings().maxBendPercent).toBe(25);
+  expect(input.value).toBe('25');
+  expect(slider.getAttribute('aria-valuenow')).toBe('25');
 });
 
 it('shows read-only telemetry for both control-focus decks without preview controls or bindings', async () => {

@@ -35,7 +35,7 @@ describe('mouse jog', () => {
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'performance'] });
     port = recordingPort();
     // Keep the timing fixtures fixed; product defaults are covered by settings tests.
-    jog = new MouseJogController(port, () => ({ sensitivity: 1, acceleration: 1.5, smoothingMs: 50 }));
+    jog = new MouseJogController(port, () => ({ sensitivity: 1, acceleration: 1.5, smoothingMs: 50, maxBendPercent: 8 }));
   });
 
   afterEach(() => {
@@ -58,6 +58,55 @@ describe('mouse jog', () => {
     sustain(velocity, 600);
     expect(lastBend()).toBeGreaterThan(7.99);
     expect(Math.max(...bends())).toBeLessThanOrEqual(8);
+  });
+
+  it('distinguishes a short fast swipe from fine motion at the same settings', () => {
+    jog = new MouseJogController(port, () => ({ ...DEFAULT_MOUSE_JOG_SETTINGS, maxBendPercent: 8 }));
+    sustain(200, 500);
+    const finePeak = Math.max(...bends());
+    expect(finePeak).toBeGreaterThan(0.04);
+    expect(finePeak).toBeLessThan(0.08);
+    jog.cancel(); port.setBend.mockClear();
+    for (let i = 0; i < 5; i++) {
+      jog.move(20, 4);
+      vi.advanceTimersByTime(4);
+    }
+    vi.advanceTimersByTime(150);
+    expect(Math.max(...bends())).toBeGreaterThan(6);
+    expect(Math.max(...bends())).toBeLessThanOrEqual(8);
+  });
+
+  it('recognizes a large coalesced swipe after a pause without amplifying a small first packet', () => {
+    jog = new MouseJogController(port);
+    jog.move(20, 0);
+    vi.advanceTimersByTime(500);
+    expect(Math.max(...bends())).toBeLessThan(0.08);
+    port.setBend.mockClear();
+    jog.move(100, 100);
+    vi.advanceTimersByTime(150);
+    expect(Math.max(...bends())).toBeGreaterThan(6);
+  });
+
+  it('does not average a fast reverse stroke together with the previous forward stroke', () => {
+    jog = new MouseJogController(port);
+    sustain(6000, 100, 5);
+    expect(lastBend()).toBeGreaterThan(5);
+    sustain(-6000, 50, 5);
+    expect(lastBend()).toBeLessThan(0);
+  });
+
+  it('keeps repeated fast swipes strong without building past the bend limit', () => {
+    jog = new MouseJogController(port, () => ({ ...DEFAULT_MOUSE_JOG_SETTINGS, maxBendPercent: 8 }));
+    for (let burst = 0; burst < 8; burst++) {
+      for (let i = 0; i < 5; i++) { jog.move(20, 4); vi.advanceTimersByTime(4); }
+      vi.advanceTimersByTime(40);
+    }
+    expect(lastBend()).toBeGreaterThan(6);
+    expect(Math.max(...bends())).toBeLessThanOrEqual(8);
+    jog.cancel(); port.setBend.mockClear();
+    jog.move(1, 0);
+    vi.advanceTimersByTime(100);
+    expect(Math.max(...bends())).toBeLessThan(0.001);
   });
 
   it.each([0, 0.00001, 1000, NaN])('an isolated 20px event is gentle even with elapsed=%s', elapsed => {
@@ -458,7 +507,7 @@ describe('mouse jog', () => {
   });
 
   it('changes smoothing on the next tick using elapsed tick time and the existing bend', () => {
-    let settings = { ...DEFAULT_MOUSE_JOG_SETTINGS };
+    let settings = { ...DEFAULT_MOUSE_JOG_SETTINGS, maxBendPercent: 8 };
     jog = new MouseJogController(port, () => settings);
     jog.move(600, 1);
     vi.advanceTimersByTime(25);
@@ -481,11 +530,11 @@ describe('mouse jog', () => {
     expect(lastBend()).toBeCloseTo(mouseJogBendTarget(-1200, settings), 4);
     sustain(1e6, 3000);
     sustain(-1e6, 3000);
-    expect(bends().every(bend => Number.isFinite(bend) && Math.abs(bend) <= 8)).toBe(true);
+    expect(bends().every(bend => Number.isFinite(bend) && Math.abs(bend) <= settings.maxBendPercent)).toBe(true);
   });
 
   it('lets maximum smoothing decay past 500ms and stops exactly at 1700ms idle', () => {
-    jog = new MouseJogController(port, () => ({ ...DEFAULT_MOUSE_JOG_SETTINGS, smoothingMs: 200 }));
+    jog = new MouseJogController(port, () => ({ ...DEFAULT_MOUSE_JOG_SETTINGS, smoothingMs: 200, maxBendPercent: 8 }));
     jog.move(600, 1);
     vi.advanceTimersByTime(500);
     expect(lastBend()).toBeGreaterThan(0.1);
@@ -499,7 +548,7 @@ describe('mouse jog', () => {
   });
 
   it('zero smoothing applies immediately and stops at 100ms idle', () => {
-    jog = new MouseJogController(port, () => ({ ...DEFAULT_MOUSE_JOG_SETTINGS, smoothingMs: 0 }));
+    jog = new MouseJogController(port, () => ({ ...DEFAULT_MOUSE_JOG_SETTINGS, smoothingMs: 0, maxBendPercent: 8 }));
     jog.move(-600, 1);
     vi.advanceTimersByTime(25);
     expect(lastBend()).toBe(-8);
@@ -508,7 +557,7 @@ describe('mouse jog', () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
-  it('publishes signed window velocity and reads settings only on filter ticks', () => {
+  it('publishes direction-aware velocity estimates and reads settings only on filter ticks', () => {
     const tuning = vi.fn(() => DEFAULT_MOUSE_JOG_SETTINGS);
     const onSpeed = vi.fn();
     jog = new MouseJogController(port, tuning, onSpeed);
@@ -518,13 +567,13 @@ describe('mouse jog', () => {
     expect(tuning).not.toHaveBeenCalled();
     expect(onSpeed).not.toHaveBeenCalled();
     vi.advanceTimersByTime(25);
-    expect(onSpeed.mock.calls).toEqual([[400]]);
-    expect(lastBend()).toBeCloseTo(mouseJogBendTarget(400, DEFAULT_MOUSE_JOG_SETTINGS) * (1 - Math.exp(-0.5)), 10);
+    expect(onSpeed.mock.calls).toEqual([[-200]]);
+    expect(lastBend()).toBeCloseTo(mouseJogBendTarget(-200, DEFAULT_MOUSE_JOG_SETTINGS) * (1 - Math.exp(-0.5)), 10);
     jog.move(-80, 0);
     vi.advanceTimersByTime(25);
-    expect(onSpeed.mock.calls).toEqual([[400], [-400]]);
+    expect(onSpeed.mock.calls).toEqual([[-200], [-3200]]);
     vi.advanceTimersByTime(75);
-    expect(onSpeed).toHaveBeenLastCalledWith(-800);
+    expect(onSpeed).toHaveBeenLastCalledWith(-3200);
     vi.advanceTimersByTime(25);
     expect(onSpeed).toHaveBeenLastCalledWith(0);
     vi.advanceTimersByTime(375);
@@ -534,6 +583,65 @@ describe('mouse jog', () => {
     vi.advanceTimersByTime(5000);
     expect(tuning).toHaveBeenCalledTimes(21);
     expect(onSpeed).toHaveBeenCalledTimes(publishes);
+  });
+
+  it.each([25, 50])('reaches a %s percent cap, mirrors coarse bends and releases exactly to zero', maxBendPercent => {
+    jog = maxBendPercent === 25
+      ? new MouseJogController(port)
+      : new MouseJogController(port, () => ({ ...DEFAULT_MOUSE_JOG_SETTINGS, maxBendPercent }));
+    sustain(12000, 1000);
+    expect(lastBend()).toBeGreaterThan(8);
+    expect(lastBend()).toBeCloseTo(maxBendPercent, 5);
+    expect(bends().every(bend => bend >= 0 && bend <= maxBendPercent)).toBe(true);
+    vi.advanceTimersByTime(500);
+    expect(lastBend()).toBe(0);
+    expect(vi.getTimerCount()).toBe(0);
+    const forward = bends();
+    port.setBend.mockClear();
+    sustain(-12000, 1000);
+    expect(lastBend()).toBeCloseTo(-maxBendPercent, 5);
+    vi.advanceTimersByTime(500);
+    expect(lastBend()).toBe(0);
+    expect(bends()).toEqual(forward.map(bend => bend === 0 ? 0 : -bend));
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('reads a cap-only increase on the next active tick without resetting the filter', () => {
+    let settings = { ...DEFAULT_MOUSE_JOG_SETTINGS, maxBendPercent: 8 };
+    jog = new MouseJogController(port, () => settings);
+    sustain(12000, 1000, 5);
+    expect(lastBend()).toBeCloseTo(8, 5);
+    for (const maxBendPercent of [25, 50]) {
+      const before = lastBend();
+      settings = { ...settings, maxBendPercent };
+      sustain(12000, 25, 5);
+      expect(lastBend()).toBeCloseTo(before + (1 - Math.exp(-0.5)) * (maxBendPercent - before), 10);
+      sustain(12000, 1000, 5);
+      expect(lastBend()).toBeCloseTo(maxBendPercent, 5);
+      expect(Math.max(...bends())).toBeLessThanOrEqual(maxBendPercent);
+    }
+    expect(bends()).not.toContain(0);
+    expect(vi.getTimerCount()).toBe(1);
+    jog.cancel();
+    expect(lastBend()).toBe(0);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it.each([12000, -12000])('never applies more than 8 percent after lowering a live 50 percent cap at %s px/s', velocity => {
+    let settings = { ...DEFAULT_MOUSE_JOG_SETTINGS, maxBendPercent: 50 };
+    jog = new MouseJogController(port, () => settings);
+    sustain(velocity, 1000, 5);
+    expect(lastBend()).toBeCloseTo(Math.sign(velocity) * 50, 5);
+    settings = { ...settings, maxBendPercent: 8 };
+    port.setBend.mockClear();
+    sustain(velocity, 25, 5);
+    expect(Math.abs(lastBend())).toBeLessThanOrEqual(8);
+    sustain(velocity, 1000, 5);
+    expect(lastBend()).toBeCloseTo(Math.sign(velocity) * 8, 5);
+    vi.advanceTimersByTime(500);
+    expect(bends().every(bend => Math.abs(bend) <= 8)).toBe(true);
+    expect(lastBend()).toBe(0);
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it.each(['cancel', 'pause', 'scratch', 'touch', 'dispose'] as const)('%s clears telemetry with no timer or publication leaks', action => {
@@ -581,7 +689,7 @@ describe('mouse jog', () => {
     jog = new MouseJogController(port, undefined, onSpeed);
     jog.move(600, 1);
     vi.advanceTimersByTime(25);
-    expect(onSpeed.mock.calls).toEqual([[6000], [0]]);
+    expect(onSpeed.mock.calls).toEqual([[75000], [0]]);
     expect(port.setBend).not.toHaveBeenCalled();
     expect(vi.getTimerCount()).toBe(0);
     vi.advanceTimersByTime(1000);

@@ -44,7 +44,8 @@
 | Smoothing | 50 ms |
 
 - Open `?view=performance&settings=1&section=mouse-jog`. Mouse tuning is in the Settings lower panel.
-- Full bend is +/-8%, reached at 3000 px/s with the defaults. Target readouts show bend before smoothing.
+- Full bend is +/-8%, reached at 3000 px/s with the defaults. Target readouts describe steady motion before smoothing. Larger fast swipes use stroke speed rather than being diluted over the 100 ms fine-motion window; reversing starts a new motion history.
+- Paused seek keeps 1.25 ms/pixel at low speed and ramps to 50 ms/pixel for fast movement. This curve is separate from pitch-bend tuning and does not affect scratching.
 - In Performance, hold T for the left control-focus Deck (A/C) or Y for the right (B/D). Bindings remain owned by the decks above, not Settings.
 - With Vinyl on, Shift plus the Deck's hand key arms scratch; playback continues until mouse motion.
 - Read-only telemetry shows live mouse speed and actual bend for both focused Decks. Outside Performance, Settings shows a hint instead and installs no T/Y bindings.
