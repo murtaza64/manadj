@@ -13,6 +13,8 @@ from .acquisition.router import router as acquisition_router
 from .tasks import models as task_models  # noqa: F401  (registers tables on Base)
 from .tasks.worker import TaskWorker
 from .logging_config import setup_logging
+from .feedback import FeedbackService, Workspace
+from .routers.feedback import router as feedback_router
 
 # Configure logging with colors and override uvicorn handlers
 setup_logging()
@@ -78,6 +80,7 @@ app.include_router(routines.router, prefix="/api/routines", tags=["routines"])
 app.include_router(cameos.router, prefix="/api/cameos", tags=["cameos"])
 app.include_router(visualizer_ga.router, prefix="/api/ga", tags=["visualizer-ga"])
 app.include_router(settings.router, prefix="/api/settings", tags=["settings"])
+app.include_router(feedback_router)
 
 
 
@@ -261,12 +264,16 @@ async def startup_event():
             finally:
                 db.close()
 
+    app.state.feedback_service = FeedbackService(Workspace(_repo_root))
+    app.state.feedback_service.start()
+
 
 @app.on_event("shutdown")
 async def shutdown_event():
     """Stop background workers on server shutdown."""
     if _task_worker is not None:
         _task_worker.stop()
+    app.state.feedback_service.stop()
 
 
 @app.get("/")
