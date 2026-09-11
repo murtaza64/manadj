@@ -1,5 +1,10 @@
 # Spawning implementation sessions
 
+For area follow-ups, first consult
+[`parallel-work.md#standing-area-lanes`](parallel-work.md#standing-area-lanes).
+Prefer the existing owner; a busy owner calls for queued work or an overflow
+lane, not a second session in the same workspace.
+
 Retired 2026-07-08 (ADR 0028): `scripts/agent/spawn_session.py` is replaced by
 `es agent spawn` (fresh lane + session, owner stamped, `--handoff`, `--lane`
 handover, `--sneak`, `--agent lane`, `--model`; opus by default). Revive idle
