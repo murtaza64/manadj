@@ -321,3 +321,29 @@ it('keeps text editable after a definite attachment rejection, but never unlocks
   expect(document.querySelector('fieldset')?.disabled).toBe(true);
   expect(button('Recapture').disabled).toBe(true);
 });
+
+it('uses the toolbar recipe only for entry controls and shows their open state', async () => {
+  await act(async () => root.render(<FeedbackEntry toolbar />));
+  expect(button('Feedback').classList.contains('btn-toolbar')).toBe(true);
+  await click('Feedback');
+  expect(button('Feedback').getAttribute('aria-expanded')).toBe('true');
+  expect(button('Feedback').classList.contains('btn-selected')).toBe(true);
+  expect(button('File report on GitHub').classList.contains('btn-toolbar')).toBe(false);
+  expect(button('File report on GitHub').closest('.feedback-footer')).not.toBeNull();
+  expect(document.querySelector('.feedback-body .feedback-footer')).toBeNull();
+  await click('Close');
+  expect(button('Feedback').getAttribute('aria-expanded')).toBe('false');
+});
+
+it('dismisses only backdrop clicks and preserves the draft without dispatch', async () => {
+  await click('Feedback'); await fill();
+  const dialog = document.querySelector('dialog')!;
+  vi.spyOn(dialog, 'getBoundingClientRect').mockReturnValue({ left: 100, top: 100, right: 700, bottom: 600 } as DOMRect);
+  act(() => dialog.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: 200, clientY: 200 })));
+  expect(document.querySelector('dialog')).not.toBeNull();
+  act(() => dialog.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: 20, clientY: 20 })));
+  expect(document.querySelector('dialog')).toBeNull();
+  await click('Feedback');
+  expect(document.querySelector('textarea')?.value).toContain('Details');
+  expect(feedbackApi.dispatch).not.toHaveBeenCalled();
+});

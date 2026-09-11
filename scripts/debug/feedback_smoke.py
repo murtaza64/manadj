@@ -123,10 +123,18 @@ def main():
             context.route("**/api/feedback/**", feedback)
             page = context.new_page()
             page.goto(args.url)
+            expect(page.get_by_role("button", name="Feedback", exact=True)).to_be_visible()
+            toolbar = page.get_by_role("button", name="Feedback", exact=True)
+            assert toolbar.evaluate("el => getComputedStyle(el).height") == "24px"
+            assert toolbar.evaluate("el => getComputedStyle(el).fontSize") == "9px"
+            assert toolbar.evaluate("el => getComputedStyle(el).textTransform") == "uppercase"
+            page.locator(".topbar").screenshot(path=str(artifacts / "topbar.png"))
             page.get_by_role("button", name="Feedback", exact=True).click()
             expect(page.get_by_role("dialog")).to_be_visible(timeout=15000)
             expect(page.get_by_text("Browser capture is best-effort", exact=False)).to_be_visible()
             assert posts == []
+            assert page.get_by_role("dialog").evaluate("el => getComputedStyle(el).fontSize") == "12px"
+            expect(page.get_by_role("button", name="File report on GitHub")).to_be_in_viewport()
             page.get_by_label("Title", exact=True).fill("Feedback smoke report")
             page.get_by_label("Detailed description").fill(
                 "The queue should wait for an explicit dispatch."
@@ -166,6 +174,9 @@ def main():
             box = page.get_by_role("dialog").bounding_box()
             assert box and box["x"] >= 0 and box["x"] + box["width"] <= 390
             assert page.get_by_role("dialog").evaluate("el => el.scrollWidth <= el.clientWidth")
+            expect(page.get_by_role("button", name="File report on GitHub")).to_be_in_viewport()
+            page.locator(".feedback-body").evaluate("el => el.scrollTop = el.scrollHeight")
+            expect(page.get_by_role("button", name="File report on GitHub")).to_be_in_viewport()
             page.screenshot(path=str(artifacts / "mobile-form.png"))
             assert len(gh.issues) == 1 and len(daemon.sent) == 1
 

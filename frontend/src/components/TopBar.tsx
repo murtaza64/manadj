@@ -3,7 +3,7 @@
  *
  * - The bar's spine is a prominent labeled segmented mode control
  *   (EXPORT / PERFORM / EDIT / SYNC); rarer modes (ROUTINE / HISTORY /
- *   WAVE / JOG) live behind an overflow trigger at the control's right
+ *   SETTINGS) live behind an overflow trigger at the control's right
  *   end, which wears the active overflow mode's segment when one is
  *   selected. No title — segments carry their own labels.
  * - Global status docks right, stable across modes, grouped by concern:
@@ -23,7 +23,7 @@ import { VisualizerControlModal } from './VisualizerControlModal';
 import { AppFeedbackEntry } from '../feedback/AppFeedbackEntry';
 import './TopBar.css';
 
-export type AppMode = 'library' | 'performance' | 'transition' | 'routine' | 'history' | 'sync' | 'styles' | 'jog-tune';
+export type AppMode = 'library' | 'performance' | 'transition' | 'routine' | 'history' | 'sync' | 'settings';
 
 type ModeMeta = { id: AppMode; icon: string; label: string; title: string };
 
@@ -45,8 +45,7 @@ const PRIMARY_MODES: ModeMeta[] = [
  * gh#66). */
 const OVERFLOW_MODES: ModeMeta[] = [
   { id: 'history', icon: '↻', label: 'HISTORY', title: 'Transition history' },
-  { id: 'styles', icon: '◔', label: 'WAVE', title: 'Waveform styles' },
-  { id: 'jog-tune', icon: '◎', label: 'JOG', title: 'Jog calibration' },
+  { id: 'settings', icon: '⚙', label: 'SETTINGS', title: 'Settings' },
 ];
 
 /** The retired pair editor — overflow-reachable only under the dev
@@ -168,7 +167,7 @@ function ModeControl({
         title={
           activeOverflow
             ? `${activeOverflow.title} — more modes`
-            : 'More modes (Transition history, Waveform styles, Jog calibration)'
+            : 'More modes (Transition history, Settings)'
         }
         onClick={() => setMenu((v) => !v)}
       >
@@ -220,6 +219,7 @@ export function TopBar({
       <ModeControl mode={mode} onModeChange={onModeChange} />
       <div className="topbar-status">
         <AppFeedbackEntry view={mode} />
+        <span className="topbar-divider" />
         <VisualizerCluster />
         <span className="topbar-divider" />
         <TasksWidget />

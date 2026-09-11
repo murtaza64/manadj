@@ -16,7 +16,7 @@ const batchStatus = {
   delivered: 'Delivered', 'needs-routing': 'Needs routing; no delivery confirmed',
 };
 
-export function FeedbackEntry({ readers = {} }: { readers?: Readers }) {
+export function FeedbackEntry({ readers = {}, toolbar = false }: { readers?: Readers; toolbar?: boolean }) {
   const [page, setPage] = useState<'form' | 'review' | null>(null);
   const [capture, setCapture] = useState<Capture | null>(null);
   const [capturing, setCapturing] = useState(false);
@@ -148,35 +148,42 @@ export function FeedbackEntry({ readers = {} }: { readers?: Readers }) {
   }
   const pendingCount = listing && !listError ? listing.reports.filter((r) => r.batch_id === null).length : '?';
   const savedPayload = payload && listing?.reports.find((r) => r.id === payload.id);
+  const entryClass = toolbar ? 'btn btn-toolbar' : 'btn btn-secondary';
 
   return <>
     <span className="feedback-entry" ref={entry} data-focusable>
-      <button className="btn btn-secondary" title="Report bug / Request feature" disabled={capturing || busy} onClick={() => void begin()}>
+      <button className={`${entryClass}${page === 'form' ? ' btn-selected' : ''}`} aria-haspopup="dialog" aria-expanded={page === 'form'} title="Report bug / Request feature" disabled={capturing || busy} onClick={() => void begin()}>
         {capturing ? 'Capturing...' : 'Feedback'}
       </button>
-      <button className="btn btn-secondary" title={listError || 'Reports awaiting dispatch, including pending or failed filing'} disabled={capturing} onClick={() => { setError(''); setPage('review'); }}>Queue ({pendingCount})</button>
+      <button className={`${entryClass}${page === 'review' ? ' btn-selected' : ''}`} aria-haspopup="dialog" aria-expanded={page === 'review'} title={listError || 'Reports awaiting dispatch, including pending or failed filing'} disabled={capturing} onClick={() => { setError(''); setPage('review'); }}>Queue ({pendingCount})</button>
     </span>
     {page && createPortal(<dialog ref={dialog} className="feedback-dialog" aria-labelledby={`${id}-heading`} data-focusable
-      onCancel={(e) => { e.preventDefault(); setPage(null); }}>
-      <header>
+      onCancel={(e) => { e.preventDefault(); setPage(null); }}
+      onClick={(event) => {
+        if (event.target !== event.currentTarget) return;
+        const bounds = event.currentTarget.getBoundingClientRect();
+        if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) setPage(null);
+      }}>
+      <header className="feedback-header">
         <h2 id={`${id}-heading`}>{page === 'form' ? 'File a report' : 'Review feedback batches'}</h2>
-        <button className="btn btn-secondary" onClick={() => setPage(null)}>Close</button>
+        <button className="btn btn-secondary btn-mini" onClick={() => setPage(null)}>Close</button>
       </header>
-      <p>Filing creates a GitHub issue, not agent work. Only Send feedback authorizes a batch. Closing never sends.</p>
       {error && <p role="alert" className="feedback-error">{error}</p>}
-      {page === 'form' && capture && <form onSubmit={(event) => { event.preventDefault(); file(); }}>
+      {page === 'form' && capture && <form className="feedback-form" onSubmit={(event) => { event.preventDefault(); file(); }}>
+        <div className="feedback-body">
         <fieldset disabled={busy || payload !== null}>
+          <div className="feedback-fields">
           <label>Kind<select value={kind} onChange={(e) => setKind(e.target.value as Kind)}>
             <option value="bug">Report bug</option><option value="feature">Request feature</option>
           </select></label>
           <label>Title<input autoFocus value={title} maxLength={200} onChange={(e) => setTitle(e.target.value)} /></label>
-          <label>Detailed description<textarea rows={6} value={description} maxLength={10000} onChange={(e) => setDescription(e.target.value)} /></label>
-          <p>Attachments stay on the local server. Only the redacted summary goes to GitHub. Review images for private information before filing.</p>
-          {capture.warnings.map((warning, i) => <p className="feedback-warning" key={i}>{warning}</p>)}
-          {capture.screenshot ? <section>
+          </div>
+          <label>Detailed description<textarea rows={4} value={description} maxLength={10000} onChange={(e) => setDescription(e.target.value)} /></label>
+          <section className="feedback-attachments" aria-label="Local attachments">
+          {capture.screenshot ? <div>
             <img className="feedback-screenshot" src={capture.screenshot} alt="App screenshot captured before this form opened" />
-            <button type="button" className="btn btn-secondary" onClick={() => setCapture({ ...capture, screenshot: null })}>Remove screenshot</button>
-          </section> : <label>Optional PNG screenshot<input type="file" accept="image/png" onChange={(e) => {
+            <button type="button" className="btn btn-secondary btn-mini" onClick={() => setCapture({ ...capture, screenshot: null })}>Remove screenshot</button>
+          </div> : <label>Optional PNG screenshot<input type="file" accept="image/png" onChange={(e) => {
             const file = e.target.files?.[0];
             e.target.value = '';
             if (!file) return;
@@ -191,17 +198,29 @@ export function FeedbackEntry({ readers = {} }: { readers?: Readers }) {
               setCapture({ ...capture, screenshot: data });
             });
           }} /></label>}
-          {Object.keys(capture.snapshot).length > 0 && <section>
+          <div className="feedback-evidence-info">
+          <p className="text-secondary">Attachments stay local. Check the screenshot for private information.</p>
+          {capture.warnings.map((warning, i) => <p className="feedback-warning" key={i}>{warning}</p>)}
+          {Object.keys(capture.snapshot).length > 0 && <div>
             <details><summary>Diagnostics JSON (redacted)</summary><pre>{JSON.stringify(capture.snapshot, null, 2)}</pre></details>
-            <button type="button" className="btn btn-secondary" onClick={() => setCapture({ ...capture, snapshot: {} })}>Remove diagnostics</button>
-          </section>}
+            <button type="button" className="btn btn-secondary btn-mini" onClick={() => setCapture({ ...capture, snapshot: {} })}>Remove diagnostics</button>
+          </div>}
+          </div>
+          </section>
         </fieldset>
-        <section aria-label="GitHub summary preview"><h3>GitHub summary preview</h3>
+        <div className="feedback-context">
+          <span className="text-tertiary">Captured from {capture.context?.origin.lane ?? (capture.context ? 'main' : 'unknown origin')}</span>
+          <button type="button" className="btn btn-secondary btn-mini" disabled={busy || (payload !== null && filingIssue !== 'conflict')}
+            onClick={() => void begin(true)}>Recapture</button>
+        </div>
+        <details aria-label="GitHub summary preview"><summary>GitHub summary preview</summary>
           <strong>{redact(title.trim(), 200)}</strong><pre>{redact(description.trim(), 10000)}</pre>
-        </section>
-        <p>Captured origin: {capture.context ? `${capture.context.origin.lane ?? 'main'} / ${capture.context.origin.owner ?? 'no owner'} / ${capture.context.origin.revision ?? 'revision unavailable'}` : 'unavailable'}</p>
-        {capture.context ? <p>Destination: {capture.context.destination}</p>
-          : <button type="button" className="btn btn-secondary" disabled={busy} onClick={() => void action(async () => {
+        </details>
+        {capture.context ? <details className="feedback-metadata"><summary>Routing details</summary>
+          <p>Destination: {capture.context.destination}</p>
+          <p>Revision: {capture.context.origin.revision ?? 'unavailable'}</p>
+        </details>
+          : <button type="button" className="btn btn-secondary btn-mini" disabled={busy} onClick={() => void action(async () => {
             const context = await feedbackApi.context();
             setCapture({ ...capture, context, warnings: [...capture.warnings, 'Origin resolved after initial capture because context was unavailable.'] });
           })}>Retry context</button>}
@@ -211,40 +230,57 @@ export function FeedbackEntry({ readers = {} }: { readers?: Readers }) {
             : `Submission locked to report ${payload.id}. Retry the same report to resolve an uncertain outcome; fields cannot change.`}</p>
           {filingIssue === 'unknown' && <p>Outcome unknown. Resolve this report in the queue or retry the same ID before recapturing.</p>}
         </>}
-        <button type="button" className="btn btn-secondary" disabled={busy || (payload !== null && filingIssue !== 'conflict')}
-          onClick={() => void begin(true)}>Recapture</button>
-        <footer>
-          <button className="btn btn-primary" type="submit" disabled={busy || !capture.context}>{busy ? 'Working...' : payload ? 'Retry same report' : 'File report on GitHub'}</button>
-          <button className="btn btn-secondary" type="button" onClick={() => { setError(''); setPage('review'); }}>Review batches</button>
-          {!payload && <button className="btn btn-danger" type="button" disabled={busy} onClick={() => {
+        </div>
+        <footer className="feedback-footer">
+          <p className="text-tertiary">Files an issue. Agent work starts only when you send the batch.</p>
+          <div className="feedback-actions">
+          {!payload && <button className="btn btn-danger btn-mini" type="button" disabled={busy} onClick={() => {
             setCapture(null); setTitle(''); setDescription(''); setPage(null);
           }}>Discard draft</button>}
+          <button className="btn btn-secondary" type="button" onClick={() => { setError(''); setPage('review'); }}>Review batches</button>
+          <button className="btn btn-primary" type="submit" disabled={busy || !capture.context}>{busy ? 'Working...' : payload ? 'Retry same report' : 'File report on GitHub'}</button>
+          </div>
         </footer>
       </form>}
       {page === 'review' && <>
-        {capture && <button className="btn btn-secondary" onClick={() => { setError(''); setPage('form'); }}>Resume report</button>}
+        <div className="feedback-body">
+        <div className="feedback-context">
+          <span className="text-secondary">{listing?.destination ?? 'Destination unavailable'}</span>
+          <button className="btn btn-secondary btn-mini" disabled={busy} onClick={() => void action(refresh)}>Refresh status</button>
+        </div>
+        {capture && <button className="btn btn-secondary btn-mini" onClick={() => { setError(''); setPage('form'); }}>Resume report</button>}
         {payload && <section>
           <p>Locked report: {payload.id}. {savedPayload ? 'Saved on the server; use this record instead of creating another ID.' : 'No saved record confirmed. Absence from this list does not resolve an in-flight request; retry the same ID.'}</p>
           {savedPayload && <button className="btn btn-secondary" disabled={busy || Boolean(listError)} onClick={() => {
             setPayload(null); setFilingIssue(null); setCapture(null); setTitle(''); setDescription(''); setError('');
           }}>Use saved report</button>}
         </section>}
-        <p>Destination: {listing?.destination ?? 'unavailable'}</p>
         {listError && <p role="alert" className="feedback-error">{listError}</p>}
-        <button className="btn btn-secondary" disabled={busy} onClick={() => void action(refresh)}>Refresh status</button>
         {!listing && !listError && <p role="status">Loading saved feedback...</p>}
         {listing?.reports.length === 0 && <p>No saved reports.</p>}
         {listing?.reports.map((report) => <article key={report.id}>
-          <h3>{redact(report.title, 200)}</h3>
-          <p>{report.batch_id ? `Assigned to batch ${report.batch_id}` : reportStatus[report.status]}</p>
-          <p>Destination: {report.destination}</p>
+          <div className="feedback-context"><h3>{redact(report.title, 200)}</h3><span className="text-tertiary">{report.kind}</span></div>
+          <p className="text-secondary">{report.batch_id ? 'Included in a dispatched batch' : reportStatus[report.status]}</p>
+          {report.destination !== listing.destination && <p className="feedback-metadata">Destination: {report.destination}</p>}
           {report.issue_url && /^https:\/\/github\.com\/[^/]+\/[^/]+\/issues\/\d+$/.test(report.issue_url) && <a href={report.issue_url} target="_blank" rel="noreferrer">Open GitHub issue</a>}
           {report.error && <p className="feedback-error">{redact(report.error)}</p>}
-          {['filing_failed', 'filing_uncertain'].includes(report.status) && <button className="btn btn-secondary" disabled={busy}
+          {['filing_failed', 'filing_uncertain'].includes(report.status) && <button className="btn btn-secondary btn-mini" disabled={busy}
             onClick={() => void action(async () => { await feedbackApi.retryReport(report.id); await refresh(); })}>Retry GitHub filing</button>}
         </article>)}
-        {[...groups].map(([destination, ids]) => <section key={destination}>
-          <p>{ids.length} filed reports ready for {destination}. This authorizes agent work on these reports only.</p>
+        {listing?.batches.map((batch) => <article key={batch.id}>
+          <h3>Batch of {batch.report_ids.length} reports</h3>
+          <p className="feedback-metadata">{batch.destination}</p>
+          <p>{batchStatus[batch.status]}</p>
+          {batch.error && <p className="feedback-error">{redact(batch.error)}</p>}
+          {batch.status !== 'delivered' && <button className="btn btn-secondary btn-mini" disabled={busy} onClick={() => void action(async () => {
+            await feedbackApi.retryBatch(batch.id); await refresh();
+          })}>Retry authorized batch</button>}
+        </article>)}
+        </div>
+        <footer className="feedback-footer">
+          <p className="text-tertiary">Send feedback authorizes agent work on that batch. Closing never sends.</p>
+        {[...groups].map(([destination, ids]) => <div className="feedback-dispatch" key={destination}>
+          <span className="feedback-metadata">{destination}</span>
           <button className="btn btn-primary" disabled={busy || Boolean(listError)} onClick={() => void action(async () => {
             const batch = await feedbackApi.dispatch([...ids]);
             setListing((current) => current && ({ ...current,
@@ -253,15 +289,8 @@ export function FeedbackEntry({ readers = {} }: { readers?: Readers }) {
             }));
             await refresh();
           })}>Send feedback ({ids.length})</button>
-        </section>)}
-        {listing?.batches.map((batch) => <article key={batch.id}>
-          <h3>Batch {batch.id}</h3><p>{batch.report_ids.length} reports / {batch.destination}</p>
-          <p>{batchStatus[batch.status]}</p>
-          {batch.error && <p className="feedback-error">{redact(batch.error)}</p>}
-          {batch.status !== 'delivered' && <button className="btn btn-secondary" disabled={busy} onClick={() => void action(async () => {
-            await feedbackApi.retryBatch(batch.id); await refresh();
-          })}>Retry authorized batch</button>}
-        </article>)}
+        </div>)}
+        </footer>
       </>}
     </dialog>, document.body)}
   </>;

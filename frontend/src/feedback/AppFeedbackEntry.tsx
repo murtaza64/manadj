@@ -8,5 +8,5 @@ export function AppFeedbackEntry({ view }: { view: string }) {
   const decks = useDecks();
   const mixer = useMixer();
   const { filters } = useFilters();
-  return <FeedbackEntry readers={appReaders(view, decks, mixer, filters)} />;
+  return <FeedbackEntry toolbar readers={appReaders(view, decks, mixer, filters)} />;
 }
