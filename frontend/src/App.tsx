@@ -7,6 +7,7 @@ const MidiInspectorPage = lazy(() => import('./midi/MidiInspectorPage'));
 const VisualizerApp = lazy(() => import('./visualizer/VisualizerApp'));
 const ArenaApp = lazy(() => import('./visualizer/ArenaApp'));
 import { BrowsePanel } from './components/BrowsePanel';
+import { isBrowseMode } from './components/browseHost';
 import { SyncView } from './components/SyncView';
 import { PerformanceView } from './components/performance/PerformanceView';
 import { TopBar } from './components/TopBar';
@@ -28,6 +29,7 @@ import { OPEN_MIX_EVENT } from './routines/openMix';
 import { TakeHistoryView } from './components/history/TakeHistoryView';
 import { OPEN_SESSION_EVENT } from './sessions/openSession';
 import { KeepAliveView } from './contexts/KeepAliveView';
+import { BrowseActiveContext } from './contexts/browseActive';
 import { OPEN_TAKE_EVENT } from './capture/takeReview';
 import { OPEN_PAIR_EVENT } from './editor/openPair';
 import { ToastProvider } from './components/Toast';
@@ -44,33 +46,53 @@ function AnalysisPendingBridge() {
   return null;
 }
 
-const MODE_IDS: AppMode[] = ['library', 'performance', 'transition', 'routine', 'history', 'sync', 'settings'];
+const MODE_IDS: AppMode[] = ['library', 'performance', 'transition', 'routine', 'history', 'sync'];
 
 /** Session-state persistence of the top-panel mode: reopen where you were. */
 const MODE_KEY = 'manadj-app-mode';
 
 // Deep link: ?view=<mode> opens straight into that mode (beats the
 // remembered one); otherwise restore the last mode, defaulting to library.
-const requestedView = new URLSearchParams(window.location.search).get('view');
-const storedView = localStorage.getItem(MODE_KEY);
-const initialView: AppMode = MODE_IDS.includes(requestedView as AppMode)
-  ? (requestedView as AppMode)
-  : MODE_IDS.includes(storedView as AppMode)
-    ? (storedView as AppMode)
-    : 'library';
+function initialMode(): AppMode | 'settings' {
+  const requestedView = new URLSearchParams(window.location.search).get('view');
+  const storedView = localStorage.getItem(MODE_KEY);
+  for (const mode of [requestedView, storedView]) {
+    // Published Settings links and the former persisted mode remain usable.
+    if (mode === 'settings') return mode;
+    if (MODE_IDS.includes(mode as AppMode)) return mode as AppMode;
+  }
+  return 'library';
+}
+
+function persistMode(mode: AppMode, settingsOpen = false) {
+  const url = new URL(window.location.href);
+  url.searchParams.set('view', mode);
+  if (settingsOpen) url.searchParams.set('settings', '1');
+  else url.searchParams.delete('settings');
+  window.history.replaceState(null, '', url);
+  try {
+    localStorage.setItem(MODE_KEY, mode);
+  } catch {
+    // persistence is best-effort
+  }
+}
 
 function App() {
-  const [view, setViewState] = useState<AppMode>(initialView);
+  const [view, setViewState] = useState<AppMode>(() => {
+    const mode = initialMode();
+    return mode === 'settings' ? 'performance' : mode;
+  });
+  const [settingsOpen, setSettingsOpen] = useState(() =>
+    new URLSearchParams(window.location.search).get('settings') === '1' || initialMode() === 'settings'
+  );
   const setView = (mode: AppMode) => {
+    setSettingsOpen(false);
     setViewState(mode);
-    const url = new URL(window.location.href);
-    url.searchParams.set('view', mode);
-    window.history.replaceState(null, '', url);
-    try {
-      localStorage.setItem(MODE_KEY, mode);
-    } catch {
-      // persistence is best-effort
-    }
+    persistMode(mode);
+  };
+  const toggleSettings = () => {
+    setSettingsOpen(!settingsOpen);
+    persistMode(view, !settingsOpen);
   };
 
   // Keyboard-focus hygiene: buttons/checkboxes never take click-focus
@@ -81,19 +103,14 @@ function App() {
   // action, two handles — ` (backtick) app-wide, and the hardware VIEW
   // button through the registry. Other modes are pointer-only
   // destinations; the toggle serves the hardware/keys performance loop.
-  const toggleView = () =>
+  const toggleView = () => {
+    setSettingsOpen(false);
     setViewState((current) => {
       const next = current === 'performance' ? 'library' : 'performance';
-      const url = new URL(window.location.href);
-      url.searchParams.set('view', next);
-      window.history.replaceState(null, '', url);
-      try {
-        localStorage.setItem(MODE_KEY, next);
-      } catch {
-        // persistence is best-effort
-      }
+      persistMode(next);
       return next;
     });
+  };
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== '`' || isTypingTarget(event)) return;
@@ -191,14 +208,20 @@ function App() {
         <SetSpaceTransport />
         <FilterProvider>
           <div className="app-shell">
-            <TopBar mode={view} onModeChange={setView} />
+            <TopBar
+              mode={view}
+              onModeChange={setView}
+              settingsOpen={settingsOpen}
+              onSettingsToggle={toggleSettings}
+            />
             <main className="app-main">
+              <BrowseActiveContext.Provider value={!settingsOpen}>
               {/* Top panels: the deck modes keep alive (perf-layout 09) —
                   mount on first visit, then hide instead of unmounting, so
                   zoom/panel state survives mode switches. Library mode has
                   no top panel of its own (its Player/TagEditor block lives
-                  inside the shared panel's Library). Config-ish pages stay
-                  conditional — remounting them is cheap and honest. */}
+                   inside the shared panel's Library). Settings replaces only
+                   the lower panel, leaving visible deck modes active. */}
               <KeepAliveView active={view === 'performance'}>
                 <PerformanceView />
               </KeepAliveView>
@@ -208,19 +231,29 @@ function App() {
               <KeepAliveView active={view === 'routine'}>
                 <RoutineEditorView />
               </KeepAliveView>
-              {view === 'history' ? (
+              <KeepAliveView active={view === 'history' && !settingsOpen}>
                 <TakeHistoryView />
-              ) : view === 'sync' ? (
+              </KeepAliveView>
+              <KeepAliveView active={view === 'sync' && !settingsOpen}>
                 <SyncView />
-               ) : view === 'settings' ? (
-                 <Suspense fallback={null}>
-                   <SettingsPage />
+              </KeepAliveView>
+              {!isBrowseMode(view) && settingsOpen ? (
+                <Suspense fallback={null}>
+                  <SettingsPage />
                 </Suspense>
               ) : null}
               {/* Bottom panel: the ONE shared Library instance (gh#165) —
                   always mounted, never remounts on mode switches; hides
                   under the config pages. */}
-              <BrowsePanel mode={view} />
+              <BrowsePanel
+                mode={view}
+                replacement={isBrowseMode(view) && settingsOpen ? (
+                  <Suspense fallback={null}>
+                    <SettingsPage performance={view === 'performance'} />
+                  </Suspense>
+                ) : undefined}
+              />
+              </BrowseActiveContext.Provider>
             </main>
           </div>
         </FilterProvider>

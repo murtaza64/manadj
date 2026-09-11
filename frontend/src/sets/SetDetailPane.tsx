@@ -46,6 +46,8 @@ import {
   selectGesture,
 } from '../selection/selectionModel';
 import { registerBrowseSurface } from '../midi/controlRegistry';
+import { useBrowseActive } from '../contexts/browseActive';
+import { useViewActive } from '../contexts/viewActive';
 import type { SelectMods } from '../components/TrackRow';
 import { useToast } from '../components/Toast';
 import ContextMenu, { useContextMenuState } from '../components/ContextMenu';
@@ -215,6 +217,8 @@ interface SetDetailPaneProps {
 }
 
 export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProps) {
+  const browseActive = useBrowseActive();
+  const viewActive = useViewActive();
   const showToast = useToast();
   const paneRef = useRef<HTMLDivElement>(null);
   const entries = useSetEntries(setId);
@@ -993,6 +997,7 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
   // the single-row ✕). Bubble-phase on purpose: an open ContextMenu
   // eats Escape on capture, so closing a menu never clears the rows.
   useEffect(() => {
+    if (!viewActive || !browseActive) return;
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.defaultPrevented) return;
       if (moveIds) {
@@ -1023,7 +1028,7 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [setId, moveIds]);
+  }, [setId, moveIds, viewActive, browseActive]);
   /** Group drag (sets 18): a selected row drags the whole selection —
    * in SET order, so a non-contiguous selection compacts at the drop
    * point as one contiguous run (playlist-editor convention). An
@@ -1115,8 +1120,9 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
     onLoadToDeckRef.current = onLoadToDeck;
   });
   useEffect(
-    () =>
-      registerBrowseSurface({
+    () => {
+      if (!viewActive || !browseActive) return;
+      return registerBrowseSurface({
         navigate: (delta) => {
           const order = (entriesRef.current ?? []).map((e) => e.trackId);
           if (order.length === 0) return;
@@ -1141,8 +1147,9 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
           return anchorId !== null ? (trackMapRef.current?.get(anchorId) ?? null) : null;
         },
         load: (deck, track) => onLoadToDeckRef.current(deck, track),
-      }),
-    [setId]
+      });
+    },
+    [setId, viewActive, browseActive]
   );
 
   // ── Track-row context menu (sets 17): the universal track menu plus

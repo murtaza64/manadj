@@ -377,6 +377,9 @@ A hardware MIDI control surface (e.g. the DJControl Inpulse 300 MK2) driving Dec
 **Control focus**:
 The pair of application Decks currently addressed by the left and right layered control surfaces, shared by Controller and keyboard input. On a two-surface, four-Deck Controller, one Deck is focused on each side; changing either side from hardware or keyboard, or interacting with an on-screen Deck panel, updates the same focus. Focus changes input routing and its UI emphasis only; it says nothing about which Decks are loaded, playing, audible, or followed.
 
+**Browse focus**:
+PERFORM's library keyboard mode, toggled with Tab without changing the app view or Control focus. Deck keyboard gestures are released and disabled while browsing; MIDI and pointer controls are unchanged. Letter loads address physical Decks and retain Browse focus. Escape returns to decks; search and dialogs consume their own Escape first. Press `?` for bindings. The active browse area has an accent frame; sidebar focus, cursor, and track selection are shared with MIDI browsing.
+
 **Mapping**:
 The device-specific translation from a Controller's physical controls to manadj actions, and of manadj state to the Controller's Feedback addresses. One Mapping per device model; controls with no manadj counterpart are simply absent from it and do nothing. A counterpart is assigned, not read off the silkscreen: a Mapping may repurpose a control away from its printed label for any existing action whose gesture shape (momentary, toggle, continuous) and scope (Deck-surface, channel-fixed, global) match the physical control — label affinity is a preference for choosing among candidates, never a requirement (resolved 2026-07-13; the GRV6 runs only manadj, so foreign-software muscle memory is not protected).
 

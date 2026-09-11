@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { MixerContext } from '../hooks/useMixer';
 import { Mixer } from '../playback/mixer';
 import SettingsPage from './SettingsPage';
+import { describeSweepFilter } from '../playback/sweepFilter';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 vi.hoisted(() => {
@@ -24,10 +25,14 @@ vi.hoisted(() => {
     },
   };
 });
-// The shared audio/GL preview is verified in browser, not replaced by a fake audio graph here.
-vi.mock('./SettingsDeckPreview', () => ({
-  SettingsDeckPreview: () => <div>Live deck preview</div>,
-}));
+beforeEach(() => {
+  vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1));
+  vi.stubGlobal('cancelAnimationFrame', vi.fn());
+  vi.stubGlobal('AudioContext', class {
+    constructor() { throw new Error('Settings must not construct audio'); }
+  });
+  vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true })));
+});
 
 let root: Root | undefined;
 afterEach(() => {
@@ -40,18 +45,6 @@ afterEach(() => {
 });
 
 it('edits typed values only on commit, supports cancel/reset and does not create audio', async () => {
-  vi.stubGlobal(
-    'AudioContext',
-    class {
-      constructor() {
-        throw new Error('Settings must not construct audio');
-      }
-    },
-  );
-  vi.stubGlobal(
-    'fetch',
-    vi.fn(async () => ({ ok: true })),
-  );
   const mixer = new Mixer();
   const host = document.createElement('div');
   document.body.append(host);
@@ -110,5 +103,66 @@ it('edits typed values only on commit, supports cancel/reset and does not create
   expect(input.value).toBe('16000');
   act(() => { input.focus(); input.blur(); });
   expect(mixer.getFilterSettings().hpMax).toBe(16000);
-  expect(host.querySelectorAll('.settings-nav button')).toHaveLength(3);
+  expect(host.querySelectorAll('.settings-nav button')).toHaveLength(4);
+  expect(host.querySelector('[aria-label="Filter frequency response"] polyline')?.getAttribute('points')?.split(' ')).toHaveLength(180);
+  expect(host.querySelector('input[type="search"], canvas')).toBeNull();
+  expect(host.textContent).toContain('Target response at 48 kHz');
+});
+
+it('selects filter diagnostics without loading decks and follows automation with live write guards', async () => {
+  const mixer = new Mixer();
+  const setFilter = vi.spyOn(mixer, 'setFilter').mockImplementation(() => {});
+  const host = document.createElement('div');
+  document.body.append(host);
+  root = createRoot(host);
+  await act(async () => root!.render(<MixerContext value={mixer}><SettingsPage /></MixerContext>));
+  const select = host.querySelector<HTMLSelectElement>('[aria-label="Filter response deck"]')!;
+  act(() => {
+    select.value = 'C';
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  expect(setFilter).not.toHaveBeenCalled();
+  const sweep = host.querySelector<HTMLInputElement>('#settings-sweep')!;
+  const change = (value: string) => act(() => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(sweep, value);
+    sweep.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  change('-0.4');
+  expect(setFilter).toHaveBeenLastCalledWith('C', -0.4);
+  const center = [...host.querySelectorAll('button')].find((button) => button.textContent === 'Center')!;
+  act(() => center.click());
+  expect(setFilter).toHaveBeenLastCalledWith('C', 0);
+  setFilter.mockClear();
+  // Automation can engage between render and the next pointer event.
+  mixer.engageAutomation();
+  change('0.3');
+  act(() => center.click());
+  expect(setFilter).not.toHaveBeenCalled();
+  mixer.setAutomation('C', { filter: 0.6, fader: 1, eq: { low: 0.5, mid: 0.5, high: 0.5 } });
+  const frame = vi.mocked(requestAnimationFrame).mock.calls.at(-1)![0];
+  act(() => frame(0));
+  expect(sweep.value).toBe('0.6');
+  expect(sweep.disabled).toBe(true);
+  expect(center.disabled).toBe(true);
+  const target = describeSweepFilter(mixer.getFilterSettings(), 0.6, 48000);
+  expect(host.querySelector('.settings-filter-sweep output')?.textContent).toBe(`HP ${Math.round(target.frequency)} Hz`);
+  expect(host.querySelector<HTMLInputElement>('[aria-label="Resonance value"]')!.disabled).toBe(false);
+  act(() => root!.render(null));
+  expect(mixer.isAutomationEngaged()).toBe(true);
+  expect(mixer.getAutomation('C')?.filter).toBe(0.6);
+  expect(setFilter).not.toHaveBeenCalled();
+});
+
+it('shows waveform style controls without a player, track queries or deck provider', async () => {
+  history.replaceState(null, '', '/?view=performance&settings=1&section=waveforms');
+  const host = document.createElement('div');
+  document.body.append(host);
+  root = createRoot(host);
+  await act(async () => root!.render(<SettingsPage />));
+  await act(async () => { await vi.dynamicImportSettled(); });
+  expect(host.querySelector('.settings-content')?.getAttribute('aria-label')).toBe('Waveforms');
+  expect(host.querySelector('[aria-label="Waveform color style"]')).not.toBeNull();
+  expect(host.textContent).toContain('The waveforms above are the live preview');
+  expect(host.querySelector('canvas, input[type="search"]')).toBeNull();
+  expect(host.textContent).not.toContain('Load on');
 });

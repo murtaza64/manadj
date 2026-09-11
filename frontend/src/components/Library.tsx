@@ -7,12 +7,14 @@ import {
   useCallback,
   useSyncExternalStore,
 } from 'react';
-import type { Ref } from 'react';
+import type { ReactNode, Ref } from 'react';
+import { BrowseActiveContext, useBrowseActive } from '../contexts/browseActive';
+import { useViewActive } from '../contexts/viewActive';
 import { DRAG_POINTER_STALE_MS, dragEdgeScrollDelta } from './dragScroll';
 import { useQueries, useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import TrackList from './TrackList';
-import FilterBar from './FilterBar';
+import FilterBar, { type FilterBarHandle } from './FilterBar';
 import TagEditor, { type TagEditorHandle } from './TagEditor';
 import Player from './Player';
 import PlaylistSidebar, { type ViewType } from './PlaylistSidebar';
@@ -112,11 +114,20 @@ const EMPTY_TRACKS: Track[] = [];
  */
 export interface LibraryBrowseHandle {
   /** Move the selection up (-1) / down (+1), scrolling it into view. */
-  navigate: (delta: 1 | -1) => void;
+  navigate: (delta: 1 | -1, extend?: boolean) => void;
   getSelectedTrack: () => Track | null;
+  navigatePage: (direction: 1 | -1, half?: boolean) => void;
+  navigateEnd: (direction: 1 | -1) => void;
+  areaMove: (delta: 1 | -1) => void;
+  activate: () => void;
+  selectAll: () => void;
+  focusSearch: () => void;
+  openFollowParams: () => void;
 }
 
 interface LibraryProps {
+  /** Replace only the lower browse body, retaining its mounted state. */
+  replacement?: ReactNode;
   /** Render only the browse surface (sidebar/filter/table) without the
    * Player/TagEditor block — used when a deck surface is shown elsewhere
    * (performance/transition modes of the shared BrowsePanel). Implies: the
@@ -148,7 +159,12 @@ export default function Library({
   onRowDoubleClick,
   doubleClickDeck = 'A',
   browseRef,
+  replacement,
 }: LibraryProps) {
+  const viewActive = useViewActive();
+  const parentBrowseActive = useBrowseActive();
+  const hasReplacement = replacement != null;
+  const browseActive = parentBrowseActive && !hasReplacement;
   // Set-view state lives in the set store (sets 01) and view/playlist
   // selection seeds from the browse-session store (issue 27). Since gh#165
   // there is ONE Library instance (BrowsePanel) that never remounts on
@@ -987,16 +1003,6 @@ export default function Library({
     [browseOnly, onLoadToDeck, doubleClickDeck, loadTrack, onRowDoubleClick]
   );
 
-  // Selection access for an embedding view's own keyboard hub (issue 04).
-  useImperativeHandle(
-    browseRef,
-    () => ({
-      navigate: mainSel.handleNavigate,
-      getSelectedTrack: () => mainSel.selectedTrack,
-    }),
-    [mainSel]
-  );
-
   // The same handle, registered module-level as the active browse surface
   // for the hardware Controller (midi-controller 05): encoder moves this
   // selection, the LOAD controls read it and load with the view's policy
@@ -1021,6 +1027,7 @@ export default function Library({
   // focused area owns navigation. Sidebar focused, motion walks the
   // cursor; otherwise it drives the focused pane's selection.
   const openSidebarEntry = (entry: SidebarEntry) => {
+    setFocusedArea('main');
     if (entry.kind === 'view') {
       setSelectedView(entry.view);
       selectSet(null);
@@ -1082,10 +1089,42 @@ export default function Library({
     const entry = sidebarNavEntries.find((e) => entryKey(e) === sidebarCursor);
     if (!entry) return;
     openSidebarEntry(entry);
-    // Opening pushes focus into the (single) track pane, rekordbox-style.
-    setFocusedArea('main');
   };
   const splitViewAvailable = !browseOnly && selectedView === 'playlist' && selectedPlaylistId !== null;
+
+  const filterBarRef = useRef<FilterBarHandle>(null);
+  const tableVisible = !viewingSet && !viewingSessionPane;
+  useImperativeHandle(browseRef, () => ({
+    navigate: (delta, extend) => {
+      if (!viewActive || !browseActive) return;
+      if (sidebarFocused) moveSidebarCursor(delta);
+      else if (tableVisible) activeSel.handleNavigate(delta, extend);
+    },
+    getSelectedTrack: () => viewActive && browseActive && tableVisible && !sidebarFocused ? activeSel.selectedTrack : null,
+    navigatePage: (direction, half) => {
+      if (!viewActive || !browseActive) return;
+      if (sidebarFocused) moveSidebarCursor(direction * (half ? Math.ceil(BROWSE_PAGE_ROWS / 2) : BROWSE_PAGE_ROWS));
+      else if (tableVisible) {
+        if (half) activeSel.handleNavigateHalfPage(direction);
+        else activeSel.handleNavigatePage(direction);
+      }
+    },
+    navigateEnd: (direction) => { if (viewActive && browseActive && (sidebarFocused || tableVisible)) handleNavigateEndArea(direction); },
+    areaMove: (direction) => { if (viewActive && browseActive) handleAreaMove(direction); },
+    activate: () => { if (viewActive && browseActive && sidebarFocused) activateSidebarCursor(); },
+    selectAll: () => { if (viewActive && browseActive && tableVisible && !sidebarFocused) activeSel.handleSelectAll(); },
+    focusSearch: () => {
+      if (!viewActive || !browseActive) return;
+      if (!filterBarRef.current) { showToast('Search requires a filtered track list'); return; }
+      setFocusedArea(splitView ? 'library' : 'main');
+      filterBarRef.current.focusSearch();
+    },
+    openFollowParams: () => {
+      if (!viewActive || !browseActive) return;
+      if (!filterBarRef.current) { showToast('Follow parameters require a filtered track list'); return; }
+      filterBarRef.current.openFollowParams();
+    },
+  }));
 
   // ── Session write-back (issue 27) ───────────────────────────────────────
   // The next Library mount (any mode's instance) seeds from the store.
@@ -1139,6 +1178,7 @@ export default function Library({
   });
 
   useEffect(() => {
+    if (!viewActive || !browseActive) return;
     if (viewingSet) return; // the Set pane owns the browse surface
     if (viewingSessionPane) return; // sessions own the main area; no hidden list grabs
     return registerBrowseSurface({
@@ -1152,10 +1192,10 @@ export default function Library({
       focusSidebar: () => browseNavRef.current.focusSidebar(),
       toggleSplitView: () => browseNavRef.current.toggleSplitView(),
     });
-  }, [viewingSet, viewingSessionPane]);
+  }, [viewingSet, viewingSessionPane, viewActive, browseActive]);
 
   return (
-    <>
+    <BrowseActiveContext.Provider value={browseActive}>
     {/* The library keyboard hub — only when this view owns the keyboard.
         Embedded (browseOnly), the Performance hub drives everything. */}
     {!browseOnly && (
@@ -1181,6 +1221,7 @@ export default function Library({
     )}
     <div style={{
       height: '100%',
+      minHeight: 0,
       display: 'flex',
       flexDirection: 'column',
       background: 'var(--crust)'
@@ -1212,9 +1253,10 @@ export default function Library({
       )}
 
       {/* Library section with sidebar */}
-      <div style={{
+      <div className="Library" style={{
         flex: 1,
-        display: 'flex',
+        minHeight: 0,
+        display: hasReplacement ? 'none' : 'flex',
         overflow: 'hidden'
       }}>
         {/* Sidebar */}
@@ -1236,7 +1278,7 @@ export default function Library({
         />
 
         {/* Main library area (filter + table; split panes when editing) */}
-        <div style={{
+        <div data-browse-area="tracks" data-browse-focused={!sidebarFocused} onMouseDownCapture={() => { if (!splitView) setFocusedArea('main'); }} style={{
           flex: 1,
           display: 'flex',
           flexDirection: 'column',
@@ -1400,6 +1442,7 @@ export default function Library({
 
               {/* Library pane (full FilterBar + table) */}
               <FilterBar
+                ref={filterBarRef}
                 totalTracks={allTracksData?.library_total || 0}
                 filteredCount={libraryTracks.length}
                 loadedByDeck={{
@@ -1452,6 +1495,7 @@ export default function Library({
                   is off there. Other views always filter. */}
               {(selectedView !== 'playlist' || playlistFilterOn) && (
                 <FilterBar
+                  ref={filterBarRef}
                   totalTracks={totalTracks}
                   filteredCount={currentTracks.length}
                   loadedByDeck={{
@@ -1528,6 +1572,12 @@ export default function Library({
         </div>
       </div>
 
+      {hasReplacement && (
+        <div className="Library-replacement" style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
+          {replacement}
+        </div>
+      )}
+
       {rowMenu && (
         <ContextMenu x={rowMenu.x} y={rowMenu.y} items={rowMenuItems} onClose={closeRowMenu} />
       )}
@@ -1538,7 +1588,7 @@ export default function Library({
         />
       )}
     </div>
-    </>
+    </BrowseActiveContext.Provider>
   );
 }
 
