@@ -57,7 +57,8 @@ import {
   rankLabel,
 } from '../follow/matchScore';
 import { useFollowFlags } from '../follow/followStore';
-import { useFollowParams } from '../follow/paramsStore';
+import { useFollowParams, useFollowSeed } from '../follow/paramsStore';
+import { FollowTemperatureControls } from '../follow/FollowTemperatureControls';
 import { EMPTY_SELECTION, click, menuTargets } from '../selection/selectionModel';
 import { useTrackSelection } from '../selection/useTrackSelection';
 import {
@@ -232,6 +233,8 @@ export default function Library({
   // playback rules 02; tiered ordering 04; own parameters modal 05.)
   const followFlags = useFollowFlags();
   const followParams = useFollowParams();
+  const followSeed = useFollowSeed();
+  const followDiscovery = { temperature: followParams.temperature, seed: followSeed };
   const followRefs = followedReferences(
     followFlags,
     {
@@ -609,7 +612,7 @@ export default function Library({
       : rest;
     const ordered = followCandidateIds
       ? followScoreSort
-        ? orderByRank(candidates, followReferences, followParams.bpmThresholdPercent)
+        ? orderByRank(candidates, followReferences, followParams.bpmThresholdPercent, followDiscovery)
         : pinKnownStrata(candidates, followReferences, followParams.bpmThresholdPercent)
       : candidates;
     libraryTracks = [...followed, ...ordered];
@@ -636,7 +639,7 @@ export default function Library({
       : rest;
     const ordered = followCandidateIds
       ? followScoreSort
-        ? orderByRank(candidates, followReferences, followParams.bpmThresholdPercent)
+        ? orderByRank(candidates, followReferences, followParams.bpmThresholdPercent, followDiscovery)
         : pinKnownStrata(candidates, followReferences, followParams.bpmThresholdPercent)
       : candidates;
     playlistTracks = [...followed, ...ordered];
@@ -644,16 +647,18 @@ export default function Library({
 
   /** Section headers (follow-mode 08, match-score PRD): the Known strata
    * keep their headers and marks; the heuristic stratum is one
-   * 'Compatible' section, score-ordered within. Only while Follow
+   * 'Compatible' section, temperature-ordered when enabled. Only while Follow
    * filters — manual browsing stays a flat table. */
   const followGroupLabel = followRefs.length > 0
-    ? (t: Track) =>
-        followedTrackIdSet.has(t.id)
-          ? 'Following'
-          : followCandidateIds
-            ? rankLabel(rankAgainst(t, followReferences, followParams.bpmThresholdPercent))
-            : 'Library'
+    ? (t: Track) => {
+        if (followedTrackIdSet.has(t.id)) return 'Following';
+        if (!followCandidateIds) return 'Library';
+        return rankLabel(rankAgainst(t, followReferences, followParams.bpmThresholdPercent));
+      }
     : undefined;
+  const followGroupControls = (label: string) => label === 'Compatible' ? (
+    <FollowTemperatureControls active={followScoreSort} />
+  ) : null;
   /** Why-did-this-match dimming: rows grey the key/tags that earned
    * nothing toward the score. */
   const followMatchSignals = followCandidateIds
@@ -1429,6 +1434,7 @@ export default function Library({
                   links={links}
                   deckIds={deckIds}
                   groupLabelFor={followGroupLabel}
+                  groupControlsFor={followGroupControls}
                   scoreFor={followScoreFor}
                   scoreSorted={followScoreSort}
                   onScoreSort={() => setFollowScoreSort(true)}
@@ -1507,6 +1513,7 @@ export default function Library({
                   links={links}
                   deckIds={deckIds}
                   groupLabelFor={followInMain ? followGroupLabel : undefined}
+                  groupControlsFor={followInMain ? followGroupControls : undefined}
                   scoreFor={followInMain ? followScoreFor : undefined}
                   scoreSorted={followScoreSort}
                   onScoreSort={() => setFollowScoreSort(true)}

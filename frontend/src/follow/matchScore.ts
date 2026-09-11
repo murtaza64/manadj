@@ -266,14 +266,15 @@ export function compareKnownStrata(a: CandidateRank, b: CandidateRank): number {
   return a.known - b.known;
 }
 
-/** Order tracks by the full rank (Known strata, then score) — Follow's
- * default order. Stable: the incoming (server) order breaks exact ties. */
+/** Follow's order: Known strata, then score with optional temperature.
+ * At zero, the incoming (server) order still breaks exact score ties. */
 export function orderByRank(
   tracks: Track[],
   references: FollowReference[],
-  bpmThresholdPercent?: number
+  bpmThresholdPercent?: number,
+  discovery?: { temperature: number; seed: number }
 ): Track[] {
-  return rankSort(tracks, references, compareRanks, bpmThresholdPercent);
+  return rankSort(tracks, references, compareRanks, bpmThresholdPercent, discovery);
 }
 
 /** Pin the Known strata but leave the heuristic stratum in the incoming
@@ -290,10 +291,31 @@ function rankSort(
   tracks: Track[],
   references: FollowReference[],
   compare: (a: CandidateRank, b: CandidateRank) => number,
-  bpmThresholdPercent?: number
+  bpmThresholdPercent?: number,
+  discovery?: { temperature: number; seed: number }
 ): Track[] {
+  const salt = `${discovery?.seed}:${[...new Set(references.map((r) => r.track.id))].sort((a, b) => a - b).join(',')}`;
   const ranks = new Map(
-    tracks.map((t) => [t.id, rankAgainst(t, references, bpmThresholdPercent)])
+    tracks.map((t) => {
+      const rank = rankAgainst(t, references, bpmThresholdPercent);
+      if (rank.known === null && discovery && discovery.temperature > 0) {
+        // Gumbel sorting samples without replacement with weights exp(score / (30*T)).
+        // T=1 spans 30 score points. Hash by identity, not list position, so
+        // filtering, refetching, and rerendering never redraw the remaining rows.
+        const key = `${salt}:${t.id}`;
+        let hash = 2166136261;
+        for (let i = 0; i < key.length; i++) {
+          hash = Math.imul(hash ^ key.charCodeAt(i), 16777619);
+        }
+        hash = Math.imul(hash ^ (hash >>> 16), 0x85ebca6b);
+        hash = Math.imul(hash ^ (hash >>> 13), 0xc2b2ae35);
+        hash ^= hash >>> 16;
+        const uniform = ((hash >>> 0) + 0.5) / 0x100000000;
+        // This rank is a sort-only copy; displayed scores/admission stay factual.
+        rank.score -= 30 * discovery.temperature * Math.log(-Math.log(uniform));
+      }
+      return [t.id, rank] as const;
+    })
   );
   return [...tracks].sort((a, b) => compare(ranks.get(a.id)!, ranks.get(b.id)!));
 }
