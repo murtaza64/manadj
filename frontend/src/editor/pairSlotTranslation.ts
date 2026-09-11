@@ -1,53 +1,16 @@
 /**
- * Pair↔slot translation (ADR 0037, PRD mix-editor-supersession phase 1).
- *
- * The Mix editor is the Routine editor's slot surface. A Transition (or
- * Cameo) is a PAIR artifact — seconds-anchored, context-free (ADR 0010) —
- * that projects onto the slot surface as the 2-slot special case the
- * routine draft model was built to absorb ("a pair IS the 2-slot special
- * case", routineDraft.ts). This module is the boundary translator: it does
- * NOT give pairs their own algebra inside the editor.
- *
- * ## Projection (load): Transition → RoutineDetailWire
- *
- * - The routine clock runs at the OUTGOING's tempo (targetBpm = bpmA), so
- *   `secPerBeat = 60/bpmA` and beat 0 = the window start.
- * - Slot 0 = outgoing (A), anchored at the window start: entry offset 0,
- *   entry position = A's track-time there (the Sketch origin invariant
- *   makes that `startSec` without outgoing jumps).
- * - Slot 1 = incoming (B): entry offset 0, entry position = `bInSec` (the
- *   incoming's entry alignment; negative = a silent lead gap — the routine
- *   trace parks a below-zero position, matching arrangementAt's deferral).
- * - Both tracks play LINEARLY across the window in the synthetic
- *   recording: two tick samples per slot (window start + end). The
- *   incoming's per-beat rate carries its tempo-match varispeed (rateB), so
- *   the routine's trace-slope pitch re-anchoring reproduces the pair's
- *   playback rate exactly. Lanes and jumps become authored EDITS, not
- *   recording, so an unedited pair yields an empty-edits routine and every
- *   authored field is a re-derivable edit.
- *
- * ## Re-derivation (save): RoutineEdits → Transition
- *
- * The pair artifact stays the source of truth. Save re-derives ONLY the
- * fields whose edits are present, on a clone of the ORIGINAL Transition —
- * so untouched fields round-trip byte-identically (no seconds↔beats
- * quantization drift on an unedited window; ADR 0037's first invariant).
- * The exit test: open a Transition, audition, save without edits →
- * byte-identical artifact; edit one lane point → only that field
- * re-derived.
- *
- * ## Gridless degrade
- *
- * A track without a Beatgrid has no BPM; the pair still edits in a
- * DEGRADED SECONDS mode — `secPerBeat` falls back to a 1-beat-per-second
- * synthetic clock so the surface is never locked out (ADR 0037's second
- * invariant). Slot ↔ seconds math stays exact; only the beat READOUTS lose
- * meaning, which the surface renders as seconds.
+ * Pair/slot boundary (ADR 0037). The load-time source and beat clock stay
+ * fixed throughout editing. Effective controls, including pair defaults,
+ * become the draft baseline; tracks without a grid use one beat per second.
+ * Projection duration is authoring context, not a transport stop or the
+ * normalization divisor. Save applies changed edits on sourceDurationBeats,
+ * then pairBounds normalizes the frame without cropping retained content.
  */
 import {
   LANE_IDS,
+  defaultLanePoints,
   jumpRepeatCount,
-  tempoMatchRatio,
+  tempoMatchPitch,
   type LaneId,
   type Transition,
 } from './mixModel';
@@ -56,6 +19,7 @@ import type { RoutineDetailWire } from '../api/client';
 import type { RoutineLanePoint } from '../sets/routinePlan';
 import type { HotCue } from '../types';
 import { addBeats } from '../playback/quantize';
+import { outgoingAutomationStart, pairBounds } from './pairBounds';
 
 /** Degraded-mode fallback: with no grid, one beat = one second, so the
  * slot surface still has a clock and the seconds math is untouched. */
@@ -65,6 +29,7 @@ const DEGRADED_SEC_PER_BEAT = 1;
  * the routine build consumes, the live authored edits, and the geometry
  * needed to re-derive the artifact on save. */
 export interface PairSlotProjection {
+  sourceDurationBeats: number;
   detail: RoutineDetailWire;
   edits: RoutineEdits;
   /** Track BPMs per slot ([bpmA, bpmB]) for buildEditorRoutine; null in a
@@ -81,6 +46,9 @@ export interface PairSlotProjection {
 }
 
 export interface PairSlotInput {
+  /** Live projection keeps its load-time clock while the stored frame widens. */
+  originSec?: number;
+  durations?: { a: number; b: number };
   /** Stable artifact identity (the SavedTransition uuid). */
   uuid: string;
   name: string;
@@ -123,8 +91,7 @@ const LANE_ROLE: Record<LaneId, { slotId: string; control: string }> = {
  * missing. This is `rateB` in mixModel's arrangement math. */
 export function incomingRate(tr: Transition, bpmA: number | null, bpmB: number | null): number {
   if (!tr.tempoMatch) return 1;
-  const ratio = tempoMatchRatio(bpmA, bpmB);
-  return ratio ?? 1;
+  return 1 + tempoMatchPitch(bpmA, bpmB) / 100;
 }
 
 /** Pair filter value (0.5 = off) → routine filter value (0 = off,
@@ -146,8 +113,12 @@ export function transitionToProjection(input: PairSlotInput): PairSlotProjection
   const degraded = bpmA === null || bpmA <= 0;
   const clockBpm = degraded ? 60 / DEGRADED_SEC_PER_BEAT : bpmA;
   const secPerBeat = 60 / clockBpm;
-  const durationBeats = tr.durationSec / secPerBeat;
   const rateB = incomingRate(tr, bpmA, bpmB);
+  const sourceDurationBeats = tr.durationSec / secPerBeat;
+  const offsetBeats = (tr.startSec - (input.originSec ?? tr.startSec)) / secPerBeat;
+  const durationBeats = input.durations
+    ? (pairBounds(tr, input.durations, rateB).authoringEnd - tr.startSec) / secPerBeat
+    : sourceDurationBeats;
 
   // Slot BPMs: A rides the clock (native); B rides its own so the
   // trace-slope pitch re-anchoring reproduces rateB. A gridless track
@@ -159,18 +130,20 @@ export function transitionToProjection(input: PairSlotInput): PairSlotProjection
     uuid: input.uuid,
     name: input.name,
     cast: [input.trackAId, input.trackBId],
-    entry_offsets_beats: [0, 0],
-    entry_positions: [aEntryPosition(tr), tr.bInSec],
-    duration_beats: durationBeats,
+    entry_offsets_beats: [offsetBeats + (outgoingAutomationStart(tr) - tr.startSec) / secPerBeat, offsetBeats],
+    entry_positions: [outgoingAutomationStart(tr), tr.bInSec],
+    duration_beats: durationBeats + offsetBeats,
     origin_take_uuid: null,
     created_at: null,
-    events: syntheticEvents(tr, durationBeats, secPerBeat, rateB, bpmASlot, bpmBSlot),
+    events: syntheticEvents(tr, durationBeats, secPerBeat, rateB)
+      .map((event) => ({ ...event, beat: (event.beat as number) + offsetBeats })),
     edits: null,
   };
 
   return {
+    sourceDurationBeats,
     detail,
-    edits: pairToEdits(tr, durationBeats),
+    edits: pairToEdits(tr, sourceDurationBeats, offsetBeats),
     trackBpms: [bpmASlot, bpmBSlot],
     targetBpm: clockBpm,
     secPerBeat,
@@ -203,15 +176,13 @@ function syntheticEvents(
   tr: Transition,
   durationBeats: number,
   secPerBeat: number,
-  rateB: number,
-  _bpmASlot: number,
-  _bpmBSlot: number
+  rateB: number
 ): Record<string, unknown>[] {
   const aStart = aEntryPosition(tr);
   const aEnd = aStart + 1 * durationBeats * secPerBeat;
   const bStart = tr.bInSec;
   const bEnd = bStart + rateB * durationBeats * secPerBeat;
-  return [
+  const events: Record<string, unknown>[] = [
     {
       kind: 'tick',
       beat: 0,
@@ -223,22 +194,30 @@ function syntheticEvents(
       playheads: { [OUTGOING_SLOT]: aEnd, [INCOMING_SLOT]: bEnd },
     },
   ];
+  const firstJumpSec = Math.min(...[...tr.jumpsA ?? [], ...tr.jumps ?? []]
+    .map((j) => tr.startSec + j.x * tr.durationSec));
+  if (firstJumpSec <= tr.startSec) {
+    // Seed motion BEFORE the first landing. A post-jump head cannot be
+    // extrapolated backward and is not a valid baseline for applying a jump.
+    const headSec = Math.min(0, firstJumpSec - secPerBeat);
+    events.unshift({ kind: 'tick', beat: (headSec - tr.startSec) / secPerBeat,
+      playheads: { [OUTGOING_SLOT]: headSec, [INCOMING_SLOT]: tr.bInSec + (headSec - tr.startSec) * rateB } });
+  }
+  return events;
 }
 
-/** Project the pair's lanes + jumps into authored edits on the beat clock.
- * Lanes with no drawn points stay absent (the surface renders the routine
- * default) — only DRAWN pair lanes become authored envelopes, so an
- * unedited pair yields empty edits. */
-export function pairToEdits(tr: Transition, durationBeats: number): RoutineEdits {
+/** Project effective pair controls, including defaults, onto the beat clock.
+ * This is also the load baseline: projected defaults are not user edits. */
+export function pairToEdits(tr: Transition, durationBeats: number, offsetBeats = 0): RoutineEdits {
   const lanes: Record<string, RoutineLanePoint[]> = {};
   const hidden = new Set(tr.hiddenLanes ?? []);
   for (const id of LANE_IDS) {
-    const pts = tr.lanes[id];
-    if (!pts || pts.length === 0 || hidden.has(id)) continue;
+    const pts = hidden.has(id) ? defaultLanePoints(id, tr.durationSec)
+      : tr.lanes[id]?.length ? tr.lanes[id] : defaultLanePoints(id, tr.durationSec);
     const role = LANE_ROLE[id];
     const isFilter = role.control === 'filter';
     lanes[laneKey(role.slotId, role.control)] = pts.map((p) => ({
-      beat: p.x * durationBeats,
+      beat: p.x * durationBeats + offsetBeats,
       value: isFilter ? pairFilterToRoutine(p.y) : p.y,
     }));
   }
@@ -250,6 +229,7 @@ export function pairToEdits(tr: Transition, durationBeats: number): RoutineEdits
   for (const j of tr.jumps ?? []) {
     jumps.push(pairJumpToAuthored(j, INCOMING_SLOT, durationBeats));
   }
+  for (const jump of jumps) jump.beat += offsetBeats;
 
   return {
     lanes,
@@ -355,6 +335,24 @@ export function editsToTransition(edits: RoutineEdits, ctx: PairSaveContext): Tr
   return out;
 }
 
+/** Apply a complete live draft against its fixed load baseline, including deletions. */
+export function editedPairTransition(draft: RoutineEdits, baseline: RoutineEdits, ctx: PairSaveContext): Transition {
+  const out = editsToTransition(changedPairEdits(draft, baseline), ctx);
+  for (const id of LANE_IDS) {
+    const role = LANE_ROLE[id];
+    const key = laneKey(role.slotId, role.control);
+    if (baseline.lanes[key] && !draft.lanes[key]) delete out.lanes[id];
+    if (draft.lanes[key] && !lanePointsEqual(draft.lanes[key], baseline.lanes[key] ?? []))
+      out.hiddenLanes = out.hiddenLanes?.filter((hidden) => hidden !== id);
+  }
+  for (const [slot, field] of [[OUTGOING_SLOT, 'jumpsA'], [INCOMING_SLOT, 'jumps']] as const) {
+    const jumps = draft.jumps.filter((j) => j.slotId === slot);
+    if (!jumpListsEqual(jumps, baseline.jumps.filter((j) => j.slotId === slot)))
+      out[field] = jumps.map((j) => authoredJumpToPair(j, ctx.durationBeats));
+  }
+  return out;
+}
+
 /**
  * The CHANGED subset of a live draft's edits against the projection's
  * baseline (#205): the editor's draft holds the WHOLE projection (every
@@ -378,9 +376,10 @@ export function changedPairEdits(draft: RoutineEdits, baseline: RoutineEdits): R
     const base = baseline.lanes[key];
     if (!base || !lanePointsEqual(pts, base)) lanes[key] = pts;
   }
-  // A lane cleared back to "recorded plays" (key deleted from the draft)
-  // has no pair-side meaning yet — the original lane persists. Flagged in
-  // the module header's scope notes.
+  for (const key of Object.keys(baseline.lanes)) {
+    if (!(key in draft.lanes)) lanes[key] = [];
+  }
+  // editedPairTransition handles deleted lanes and emptied jump roles.
 
   const jumps: AuthoredJump[] = [];
   const slotIds = new Set([...draft.jumps, ...baseline.jumps].map((j) => j.slotId));
@@ -651,6 +650,7 @@ export function cameoToProjection(input: PairCameoInput): PairSlotProjection {
   };
 
   return {
+    sourceDurationBeats: durationBeats,
     detail,
     edits,
     trackBpms: [bpmHostSlot, bpmGuestSlot],

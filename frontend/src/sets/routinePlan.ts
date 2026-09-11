@@ -119,6 +119,8 @@ export interface RoutineSlotLanes {
 }
 
 export interface PlannedRoutineSlot {
+  /** Explicit pair transport extent, independent of the authoring window. */
+  transportBounds?: { startBeat: number; endBeat: number; trackDurationSec: number };
   /** Entry-ordered index — the RENDER handle (derived view, ADR 0039). */
   slot: number;
   /** Stable slot id — the EDIT handle (draft mutations key on this). */
@@ -162,6 +164,8 @@ export interface PlannedRoutineSlot {
 }
 
 export interface PlannedRoutine {
+  /** Pair audition covers available material, not an arbitrary beat margin. */
+  auditionRange?: { startSec: number; endSec: number };
   /** Entry index of slot 0 (the adopted, already-sounding track). */
   startEntryIndex: number;
   mixStartSec: number;
@@ -783,7 +787,9 @@ export function buildPlannedRoutine(
       entryBeats[slot] <= 0 ? edits?.playbackBounds?.startBeat ?? 0 : entryBeats[slot],
       ...authored.map(j => j.beat - 1), ...pauses.map(p => p.beat - 1)
     );
-    const extending = sourceStart < entryBeats[slot];
+    // Pair projections already supply their pre-jump transport context.
+    // Routine intro reconstruction must not replace that earlier trace.
+    const extending = n > 2 && sourceStart < entryBeats[slot];
     sourceExtended[slot] = extending;
     const removed = (edits?.removedRecordedJumps ?? []).filter(r => r.slotId === slotId);
     const removedPauses = (edits?.removedRecordedPauses ?? []).filter(r => r.slotId === slotId);
@@ -1062,6 +1068,19 @@ export function routineSlotStateAt(
   mixTime: number
 ): RoutineSlotState {
   const beat = (mixTime - routine.beatOriginMixSec) / routine.secPerBeat;
+  if (slot.transportBounds) {
+    const { startBeat, endBeat } = slot.transportBounds;
+    const at = Math.max(startBeat, Math.min(beat, endBeat));
+    const first = slot.trace[0];
+    const t = at < first.beat
+      ? { ...first, pos: first.pos + (at - first.beat) * first.ratePerBeat }
+      : traceStateAt(slot.trace, at);
+    return {
+      trackTime: Math.max(0, Math.min(t.pos, slot.transportBounds.trackDurationSec)),
+      playing: beat >= startBeat && beat < endBeat && t.pos >= 0 && t.moving,
+      pitchPercent: (t.ratePerBeat / routine.secPerBeat - 1) * 100,
+    };
+  }
   const t = traceStateAt(slot.trace, beat);
   if (!t.moving) {
     return {

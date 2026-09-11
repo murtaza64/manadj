@@ -134,7 +134,7 @@ export function defaultLanePoints(id: LaneId, durationSec: number): LanePoint[] 
     case 'faderB':
       return [
         { x: 0, y: 0 },
-        { x: durationSec > 2 ? 2 / durationSec : 1, y: 1 },
+        { x: durationSec > 0 ? 2 / durationSec : 1, y: 1 },
       ];
     default:
       // EQ flat / filter centered.
@@ -215,9 +215,7 @@ export function arrangementAt(
   const bTrackTime = bTrackTimeAt(tr, mixTime, rateB);
   const bEnd = bEndMixTime(tr, durations.b, rateB);
   return {
-    // aTrackTime ≥ 0 defers A past a below-zero outgoing jump, mirroring
-    // B's deferral; aEnd is jump-aware (first durA crossing on the jumped
-    // path, capped at the window end — issue 177).
+    // Transport availability only; pairBounds derives mixer engagement.
     aActive: mixTime >= 0 && aTrackTime >= 0 && mixTime < aEnd,
     aTrackTime,
     // bTrackTime ≥ 0 defers B past a negative entry anchor's silent lead
@@ -339,9 +337,8 @@ export interface BContentSegment {
  * deferred while track time < 0 (lead gaps and below-zero jumps), exit at
  * the FIRST `dur` crossing (first end is the end; a jump firing exactly
  * at the crossing wins — deltas apply AT their instants) or at
- * `capMixSec`, whichever is first. B's walk is uncapped (keep-last
- * semantics past the window); A's caps at the window end (the transition
- * over, the outgoing is out).
+ * `capMixSec`, whichever is first. Pair transports run to natural EOF;
+ * automation-window edges do not stop them.
  */
 function walkDeck(
   originMixSec: number,
@@ -352,6 +349,7 @@ function walkDeck(
   capMixSec = Infinity
 ): { segments: BContentSegment[]; endMixSec: number } {
   const segments: BContentSegment[] = [];
+  if (originTrackSec >= dur) return { segments, endMixSec: originMixSec };
   let t0 = originMixSec;
   let b0 = originTrackSec;
 
@@ -395,13 +393,12 @@ function walkB(
   return walkDeck(tr.startSec, tr.bInSec, rateB, expandedJumps(tr, rateB), durB);
 }
 
-/** A's walk (issue 177): from mix 0 at track 0 (Sketch origin), native
- * rate, jumps window-scoped, capped at the window end. */
+/** A's walk: from mix 0 at track 0, native rate, to jump-aware EOF. */
 function walkA(
   tr: Pick<Transition, 'startSec' | 'durationSec' | 'jumpsA'>,
   durA: number
 ): { segments: BContentSegment[]; endMixSec: number } {
-  return walkDeck(0, 0, 1, expandedJumpsA(tr), durA, tr.startSec + tr.durationSec);
+  return walkDeck(0, 0, 1, expandedJumpsA(tr), durA);
 }
 
 /** A's audible content as mix-axis segments (issue 177): one linear span
@@ -414,9 +411,7 @@ export function aContentSegments(
   return walkA(tr, durA).segments;
 }
 
-/** Mix-time when A's audio ends: the window end, or the FIRST instant its
- * jumped track time reaches durA if that comes sooner. Without jumpsA
- * this is the old `min(startSec + durationSec, durA)`. */
+/** A's first natural EOF crossing, independent of the automation window. */
 export function aEndMixTime(
   tr: Pick<Transition, 'startSec' | 'durationSec' | 'jumpsA'>,
   durA: number

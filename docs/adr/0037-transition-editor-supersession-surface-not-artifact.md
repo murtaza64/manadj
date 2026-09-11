@@ -77,7 +77,8 @@ Takes, Cameos, Routines-through-the-pair, and an always-present
 over this Track" page (track scouting). New blank pair drafts align outgoing
 cue 4 +64 beats with incoming cue 1, else cue 2 -64 beats, else cue 4 -128
 beats (#235). Offsets use each Track's own grid, with BPM/seconds fallback.
-The blend spans up to 32 outgoing beats. Missing or unusable outgoing cue 4
+The initial frame spans up to 32 outgoing beats; audible bounds follow the
+controls (ADR 0040). Missing or unusable outgoing cue 4
 falls back to an outro blend; missing incoming cues fall back to track start.
 This seeds new editor drafts only, not Set hard-cut fallbacks. Persistence doctrine:
 artifact exists → edits autosave; blank/review drafts persist nothing until

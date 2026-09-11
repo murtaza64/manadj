@@ -5,6 +5,7 @@ import { buildEditorRoutine } from '../routines/routineEditorModel';
 import { buildPlannedRoutine, routineSlotStateAt, slotLanesAt, type RoutinePlanInput } from './routinePlan';
 import { planSet, planStateAt, type TempoPolicyInput } from './planner';
 import { clipContentSegments } from './OverviewLadder';
+import { mixTimeForTrackTime } from './pickup';
 
 function recording(): RoutinePlanInput {
   return {
@@ -25,6 +26,21 @@ const ctx = { startEntryIndex: 0, mixStartSec: 100, targetBpm: 120,
   adoptedDeck: 'A' as const, busy: [], trackBpms: [120, 120, 120] };
 
 describe('standalone Routine playback bounds', () => {
+  it('does not map Pickup through retained Routine material before the playback start', () => {
+    const input = recording();
+    input.edits = { ...emptyEdits(), playbackBounds: { startBeat: 16, endBeat: 64 },
+      jumps: [{ id: 'cropped-jump', slotId: '0', beat: 8, deltaSec: 10 }] };
+    const plan = planSet({
+      entries: [1, 2, 3].map(trackId => ({ trackId, pin: null })),
+      tracks: Object.fromEntries([1, 2, 3].map(id => [id, { durationSec: 300, bpm: 120, hotCue1Sec: null }])),
+      transitionsByUuid: {}, takesByUuid: {}, routines: [{ startEntryIndex: 0, routine: input }],
+    });
+    expect(plan.routines[0].mixStartSec).toBe(78);
+    expect(plan.routines[0].beatOriginMixSec).toBe(70);
+    expect(planStateAt(plan, 62).decks.A.trackTime).toBe(62);
+    expect(mixTimeForTrackTime(plan, 0, 62)).toBe(62);
+  });
+
   it('crops playback without rebasing or deleting retained edits and source material', () => {
     const input = recording();
     input.edits = { ...emptyEdits(), playbackBounds: { startBeat: 16, endBeat: 48 },

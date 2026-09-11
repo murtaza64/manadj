@@ -134,7 +134,7 @@ const tr = (over: Partial<Transition> = {}): Transition => ({
   durationSec: 20,
   bInSec: 8,
   tempoMatch: false,
-  lanes: {},
+  lanes: { faderA: [{ x: 0, y: 1 }, { x: 1, y: 1 }, { x: 1, y: 0 }] },
   ...over,
 });
 
@@ -212,7 +212,7 @@ describe('live re-plan store flow (sets 24)', () => {
     tickAt(0);
     tickAt(0.05);
     tickAt(65); // inside the window (60..80)
-    const newLanes = { faderA: [{ x: 0, y: 0.25 }] };
+    const newLanes = { faderA: [{ x: 0, y: 0.25 }, { x: 1, y: 0.25 }, { x: 1, y: 0 }] };
     replanSetPlayback(
       1,
       makeInput({

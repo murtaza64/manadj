@@ -116,8 +116,9 @@ export class RoutinePlayer {
     this.routine = routine;
     const t = this.getMixTime();
     if (this.constrainToBounds() && t >= routine.mixEndSec) this.pause();
-    const clamped = Math.max(routine.mixStartSec - this.getMarginSec(),
-      Math.min(t, routine.mixEndSec + this.getMarginSec()));
+    const range = routine.auditionRange;
+    const clamped = Math.max(range?.startSec ?? routine.mixStartSec - this.getMarginSec(),
+      Math.min(t, range?.endSec ?? routine.mixEndSec + this.getMarginSec()));
     if (clamped !== t) this.seek(clamped);
     this.emit();
   }
@@ -154,7 +155,7 @@ export class RoutinePlayer {
   private slotStateAt(slot: PlannedRoutineSlot, t: number) {
     const r = this.routine!;
     const firstTime = r.beatOriginMixSec + (slot.trace[0]?.beat ?? 0) * r.secPerBeat;
-    if (t >= firstTime) return routineSlotStateAt(r, slot, t);
+    if (slot.transportBounds || t >= firstTime) return routineSlotStateAt(r, slot, t);
     // Sample just inside the window: AT the boundary the trace's first
     // point reads as parked (traceStateAt's beat <= first-point rule).
     const s0 = routineSlotStateAt(r, slot, firstTime + 1e-3);
@@ -280,8 +281,9 @@ export class RoutinePlayer {
     // The seekable range extends one margin beyond either boundary
     // (gh#190 item 5 — audition context around the window).
     const margin = this.getMarginSec();
-    const t = Math.max((this.routine?.mixStartSec ?? 0) - margin,
-      Math.min(mixTime, (this.routine?.mixEndSec ?? 0) + margin));
+    const range = this.routine?.auditionRange;
+    const t = Math.max(range?.startSec ?? (this.routine?.mixStartSec ?? 0) - margin,
+      Math.min(mixTime, range?.endSec ?? (this.routine?.mixEndSec ?? 0) + margin));
     this.mixTimeAtAnchor = t;
     this.lastTickT = t;
     this.anchorAudioTime = this.mixer.now();
@@ -335,7 +337,7 @@ export class RoutinePlayer {
       return;
     }
     const t = this.getMixTime();
-    if (t >= (this.routine?.mixEndSec ?? 0) + this.getMarginSec()) {
+    if (t >= (this.routine?.auditionRange?.endSec ?? (this.routine?.mixEndSec ?? 0) + this.getMarginSec())) {
       this.pause();
       if (this.constrainToBounds() && this.routine) this.mixTimeAtAnchor = this.routine.mixEndSec;
       return;
@@ -429,7 +431,9 @@ export class RoutinePlayer {
     for (const deck of this.drivenDecks()) {
       const occupant = this.occupantAt(deck, t);
       if (!occupant) continue;
-      const lanes = slotLanesAt(occupant, beat);
+      const lanes = occupant.transportBounds && t < occupant.entryMixSec
+        ? { fader: occupant.slot === 0 ? 1 : 0, eq: { low: 0.5, mid: 0.5, high: 0.5 }, filter: 0, trim: 0.5 }
+        : slotLanesAt(occupant, beat);
       this.mixer.setAutomation(deck, {
         fader: lanes.fader,
         eq: lanes.eq,

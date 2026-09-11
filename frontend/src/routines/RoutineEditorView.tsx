@@ -24,10 +24,11 @@ import {
   type TakeRowWire,
 } from '../api/client';
 import type { HotCue, Track } from '../types';
-import type { Transition } from '../editor/mixModel';
+import { bEndMixTime, type Transition } from '../editor/mixModel';
+import { normalizePairWindow, pairAuthoringTransition, pairBounds } from '../editor/pairBounds';
 import {
-  changedPairEdits,
-  editsToTransition,
+  editedPairTransition,
+  incomingRate,
   seedNewTransition,
   transitionToProjection,
   type PairSlotProjection,
@@ -561,6 +562,7 @@ export default function RoutineEditorView() {
       trackBId: openedTransition.bTrackId,
       bpmA: pairTrackA.bpm ?? null,
       bpmB: pairTrackB.bpm ?? null,
+      durations: { a: pairTrackA.duration_secs ?? 0, b: pairTrackB.duration_secs ?? 0 },
     });
   }, [openedTransition, pairSource, pairRow, pairTrackA, pairTrackB]);
   const projRef = useRef(proj);
@@ -764,17 +766,24 @@ export default function RoutineEditorView() {
             .filter((r) => r.a_track_id === o.aTrackId && r.b_track_id === o.bTrackId)
             .sort((x, y) => x.position - y.position);
           const exists = rows.some((r) => r.uuid === uuid);
-          const diff = changedPairEdits(edits, p.edits);
+          const dirty = JSON.stringify(edits) !== JSON.stringify(p.edits);
           // Draft posture: an unsaved seed with no real change persists
           // nothing (auditioning a blank draft leaves no trace).
-          if (!exists && editsAreEmpty(diff)) return;
+          if (!exists && !dirty) return;
           const original = pairSourceRef.current?.uuid === uuid ? pairSourceRef.current.data : null;
           if (!original) return;
-          const data = editsToTransition(diff, {
+          const edited = editedPairTransition(edits, p.edits, {
             original,
-            durationBeats: p.detail.duration_beats,
+            durationBeats: p.sourceDurationBeats,
             secPerBeat: p.secPerBeat,
           });
+          const a = trackLookupRef.current.get(o.aTrackId);
+          const b = trackLookupRef.current.get(o.bTrackId);
+          if (!a || !b) return;
+          const rateB = incomingRate(edited, a.bpm ?? null, b.bpm ?? null);
+          const authored = pairAuthoringTransition(edited, rateB);
+          const data = dirty ? normalizePairWindow(authored, pairBounds(authored,
+            { a: a.duration_secs ?? 0, b: b.duration_secs ?? 0 }, rateB), rateB) : original;
           const items = rows.map((r) => ({
             uuid: r.uuid,
             name: r.name,
@@ -841,6 +850,26 @@ export default function RoutineEditorView() {
     ? false
     : trackBpms.some((b) => b === null || b === undefined || b <= 0);
   const buildable = !!detail && !missingBpm && !!effectiveBpm && effectiveBpm > 0;
+  const livePair = useMemo(() => {
+    if (!proj || !pairSource || !pairTrackA || !pairTrackB) return null;
+    const edited = editedPairTransition(draft.edits, proj.edits, {
+      original: pairSource.data, durationBeats: proj.sourceDurationBeats, secPerBeat: proj.secPerBeat,
+    });
+    const durations = { a: pairTrackA.duration_secs ?? 0, b: pairTrackB.duration_secs ?? 0 };
+    const rateB = incomingRate(edited, pairTrackA.bpm ?? null, pairTrackB.bpm ?? null);
+    const transition = pairAuthoringTransition(edited, rateB);
+    const liveProjection = transitionToProjection({
+      uuid: proj.detail.uuid, name: proj.detail.name ?? 'Transition', transition, durations,
+      trackAId: pairTrackA.id, trackBId: pairTrackB.id,
+      bpmA: pairTrackA.bpm ?? null, bpmB: pairTrackB.bpm ?? null,
+      originSec: edited.startSec,
+    });
+    return { transition, originSec: edited.startSec, durations, rateB, projection: liveProjection,
+      bounds: pairBounds(transition, durations, rateB) };
+  }, [proj, pairSource, pairTrackA, pairTrackB, draft.edits]);
+  const authoringDurationBeats = livePair && proj
+    ? (livePair.bounds.authoringEnd - livePair.originSec) / proj.secPerBeat : null;
+  const pairStartBeat = livePair?.projection.detail.entry_offsets_beats[0] ?? 0;
   // RAW build (no jump/pause/lane edits): recorded-jump marker
   // provenance (ghosts keep their place after removal). Entry-offset
   // OVERRIDES apply even here (ADR 0039/#207): they move the slot's
@@ -909,16 +938,49 @@ export default function RoutineEditorView() {
   );
   const baseEditor: EditorRoutine | null = useMemo(() => {
     if (!buildable) return null;
-    return buildEditorRoutine(detail!, trackBpms as number[], effectiveBpm!, {
-      ...draft.edits,
+    return buildEditorRoutine(livePair?.projection.detail ?? detail!, trackBpms as number[], effectiveBpm!, {
+      ...(livePair?.projection.edits ?? draft.edits),
       lanes: {},
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [detail, trackBpms, buildable, effectiveBpm, jumpEditsKey]);
+  }, [detail, trackBpms, buildable, effectiveBpm, jumpEditsKey, authoringDurationBeats, pairStartBeat]);
   const editor: EditorRoutine | null = useMemo(() => {
     if (!baseEditor) return null;
-    return { ...baseEditor, planned: plannedWithLaneEdits(baseEditor.planned, draft.edits) };
-  }, [baseEditor, draft.edits]);
+    if (!livePair || !proj) return { ...baseEditor, planned: plannedWithLaneEdits(baseEditor.planned, draft.edits) };
+    const { transition, durations, rateB, bounds } = livePair;
+    const toBeat = (t: number) => (t - livePair.originSec) / proj.secPerBeat;
+    const planned = plannedWithLaneEdits(baseEditor.planned, livePair.projection.edits);
+    const bEnd = bEndMixTime(transition, durations.b, rateB);
+    const slots = planned.slots.map((slot) => {
+      const transportBounds = {
+        startBeat: slot.slot === 0 ? toBeat(0) : toBeat(transition.startSec),
+        endBeat: toBeat(slot.slot === 0 ? bounds.outgoingEnd : bEnd),
+        trackDurationSec: slot.slot === 0 ? durations.a : durations.b,
+      };
+      return {
+        ...slot, transportBounds,
+        // Routine playback bounds do not clip pair setup jumps before beat zero.
+        jumpMixSecs: slot.trace
+          .filter((p) => p.jump && p.beat >= transportBounds.startBeat && p.beat <= transportBounds.endBeat)
+          .map((p) => planned.beatOriginMixSec + p.beat * planned.secPerBeat),
+      };
+    });
+    return {
+      ...baseEditor,
+      pairBounds: { handover: bounds.handover ? {
+        enter: toBeat(bounds.handover.enter), exit: toBeat(bounds.handover.exit),
+      } : null },
+      planned: {
+        ...planned,
+        auditionRange: {
+          startSec: planned.beatOriginMixSec + toBeat(0) * planned.secPerBeat,
+          endSec: planned.beatOriginMixSec + toBeat(bounds.authoringEnd) * planned.secPerBeat,
+        },
+        slots,
+        jumpMixSecs: slots.flatMap((slot) => slot.jumpMixSecs).sort((a, b) => a - b),
+      },
+    };
+  }, [baseEditor, draft.edits, livePair, proj]);
 
   // Feed the player (occupancy-aware — the build's allocation carries
   // deck reuse; the player resolves deck→slot per instant itself). Same
@@ -1270,14 +1332,21 @@ export default function RoutineEditorView() {
       setOpenFlowBusy(true);
       try {
         const snap = draftStore.getSnapshot();
-        const diff = changedPairEdits(snap.edits, p.edits);
         const original = o.seed;
         if (!original) return;
-        const data = editsToTransition(diff, {
+        const edited = editedPairTransition(snap.edits, p.edits, {
           original,
-          durationBeats: p.detail.duration_beats,
+          durationBeats: p.sourceDurationBeats,
           secPerBeat: p.secPerBeat,
         });
+        const a = trackLookupRef.current.get(o.aTrackId);
+        const b = trackLookupRef.current.get(o.bTrackId);
+        if (!a || !b) return;
+        const rateB = incomingRate(edited, a.bpm ?? null, b.bpm ?? null);
+        const authored = pairAuthoringTransition(edited, rateB);
+        const bounds = pairBounds(authored, { a: a.duration_secs ?? 0, b: b.duration_secs ?? 0 }, rateB);
+        if (!bounds.handover) throw new Error('No incoming handover: incoming must survive the outgoing');
+        const data = normalizePairWindow(authored, bounds, rateB);
         const rows = transitionRowsRef.current
           .filter((r) => r.a_track_id === o.aTrackId && r.b_track_id === o.bTrackId)
           .sort((x, y) => x.position - y.position);
@@ -1369,7 +1438,7 @@ export default function RoutineEditorView() {
   }, [opened, transitionRows, routineRows]);
   // The pair "✎ edited" badge compares against the projection baseline —
   // a projected pair's draft holds every drawn lane, which is not an edit.
-  const pairDirty = proj ? !editsAreEmpty(changedPairEdits(draft.edits, proj.edits)) : false;
+  const pairDirty = proj ? JSON.stringify(draft.edits) !== JSON.stringify(proj.edits) : false;
 
   // ── Render ───────────────────────────────────────────────────────────
   // Provenance (gh#170 deep-link): the origin Routine Take carries the

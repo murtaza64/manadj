@@ -26,13 +26,17 @@ let host: HTMLDivElement;
 let root: Root;
 let store: RoutineDraftStore;
 
-function Timeline({ source = detail, mode = 'select', pairMode = false }: {
+function Timeline({ source = detail, mode = 'select', pairMode = false, pairBounds, auditionRange }: {
   source?: RoutineDetailWire;
   mode?: EditorMode;
   pairMode?: boolean;
+  pairBounds?: { handover: { enter: number; exit: number } | null };
+  auditionRange?: { startSec: number; endSec: number };
 }) {
   const { edits } = useRoutineDraft(store);
   const editor = buildEditorRoutine(source, [120, 120, 120], 120, edits)!;
+  editor.pairBounds = pairBounds;
+  editor.planned.auditionRange = auditionRange;
   const raw = buildEditorRoutine(source, [120, 120, 120], 120, emptyEdits()).planned;
   return <RoutineTimeline
     editor={editor} plannedForRuns={editor.planned}
@@ -40,8 +44,8 @@ function Timeline({ source = detail, mode = 'select', pairMode = false }: {
     recordedPausesBySlot={Object.fromEntries(raw.slots.map((s) => [s.slotId, recordedPauses(s.trace)]))}
     tracks={new Map()} waves={new Map()} meters={new Map()} hotcues={new Map()}
     player={{ getBeat: () => 0 } as RoutinePlayer}
-    draftStore={store} edits={edits} trim={editor.planned.playbackBounds}
-    onTrimChange={(bounds) => store.setPlaybackBounds(bounds)}
+    draftStore={store} edits={edits} trim={pairMode ? null : editor.planned.playbackBounds}
+    onTrimChange={pairMode ? null : (bounds) => store.setPlaybackBounds(bounds)}
     onSeekBeat={() => {}} mode={mode} onModeHome={() => {}} pairMode={pairMode}
   />;
 }
@@ -136,6 +140,41 @@ it('does not expose unpersistable start trims for pair artifacts', () => {
   act(() => root.render(<Timeline pairMode />));
   expect(host.querySelector('.rt-track-start')).toBeNull();
   expect(host.querySelector('.rt-start-control')).toBeNull();
+});
+
+it('renders pair handover bounds and edits pre-window jumps without Routine trims', () => {
+  const source = { ...detail, cast: [1, 2], entry_offsets_beats: [0, 0], entry_positions: [60, 8], events: [
+    { kind: 'tick', beat: 0, playheads: { '0': 60, '1': 8 } },
+    { kind: 'tick', beat: 64, playheads: { '0': 92, '1': 40 } },
+  ] };
+  const range = { startSec: -60, endSec: 32 };
+  act(() => root.render(<Timeline source={source} pairMode
+    pairBounds={{ handover: { enter: 8, exit: 24 } }} auditionRange={range} />));
+  expect(handles()).toHaveLength(0);
+  expect(host.querySelector('.rt-start-control')).toBeNull();
+  const markers = Array.from(host.querySelectorAll<HTMLElement>('.rt-boundaryline'));
+  expect(markers).toHaveLength(2);
+  expect(x(markers[1]) - x(markers[0])).toBeCloseTo(16 * (816 / 72));
+
+  button('[title^="Fit the whole tracks"]');
+  const px = 1024 / (120 + 64 + 8);
+  const clientX = (124 - 16) * px;
+  doubleClick(wave(), clientX);
+  expect(store.getSnapshot().edits.jumps[0].beat).toBe(-16);
+  expect(host.querySelector<HTMLButtonElement>('[title^="Pauses are not part"]')!.disabled).toBe(true);
+  pointer(host.querySelector('.rt-jump.authored')!, 'pointerdown', clientX);
+  pointer(window, 'pointermove', clientX + 4 * px, { shiftKey: true });
+  pointer(window, 'pointerup');
+  expect(store.getSnapshot().edits.jumps[0].beat).toBeCloseTo(-12);
+  expect(store.getSnapshot().edits.playbackBounds).toBeUndefined();
+
+  act(() => root.render(<Timeline source={source} pairMode
+    pairBounds={{ handover: null }} auditionRange={range} />));
+  expect(host.querySelectorAll('.rt-boundaryline')).toHaveLength(0);
+  expect(host.textContent).toContain('No incoming handover');
+  const warning = host.querySelector<HTMLElement>('[role="status"]')!;
+  expect(warning.style.bottom).toBe('auto');
+  expect(warning.style.pointerEvents).toBe('none');
 });
 
 it('keeps track-start dragging Select-only while numeric controls stay modeless', () => {
