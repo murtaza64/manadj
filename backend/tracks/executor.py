@@ -177,6 +177,7 @@ def import_tracks_from_rekordbox(
         return 0
 
     imported = 0
+    imported_tracks = []
     for rb_track in rb_tracks:
         if not rb_track.FolderPath:
             continue
@@ -205,10 +206,14 @@ def import_tracks_from_rekordbox(
         )
 
         manadj_session.add(manadj_track)
+        imported_tracks.append(manadj_track)
         imported += 1
 
     if imported > 0:
         manadj_session.commit()
+        from ..stems_tasks import enqueue_stem_split
+        for track in imported_tracks:
+            enqueue_stem_split(manadj_session, track.id)
 
     return imported
 
