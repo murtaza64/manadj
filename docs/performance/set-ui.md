@@ -83,3 +83,24 @@ npm run build
 - Build and Ruff pass; Alembic has one head. UI ESLint findings were compared
   against the parent revision: existing ref/memoization/refresh diagnostics,
   no added rule violations.
+
+## Edge Dragging And Placement (#236)
+
+- The Set list lacked frame-driven edge scrolling. Adding it alone exposed
+  competing Chromium native auto-scroll and a 700 ms timeout that cancelled
+  still-held internal drags.
+- In-Set drags now use programmatic scrolling only, retain fractional pixels,
+  and end on drop/dragend/blur rather than a stationary-pointer timeout.
+  Vertical overshoot scrolls faster; leaving horizontally stops scrolling.
+  Timeline planning waits while edge scrolling is active.
+- Native Chromium, 93 tracks: about 205 px/s at either inside edge and
+  344 px/s at 28 px top overshoot. All 25 observed intervals progressed;
+  Escape restored the order with zero subsequent scroll drift and no save.
+- Right-click **Move track** (or **Move N tracks**) to choose a transition
+  gap without dragging. Start/end and Routine-interior gaps are available.
+  Cancel/Escape makes no change; Tab/Enter also select a destination.
+- Browser coverage: `uv run scripts/debug/set_move_smoke.py --url
+  http://localhost:<port> --set-id <id>`; requires more than 50 tracks and
+  intercepts every backend write. Screenshots go to `.lane-app/`.
+- 574 targeted tests pass, including 240 Hz fractional scrolling, end-event
+  cleanup, external-drag timeout, move groups, cancellation and pin guards.
