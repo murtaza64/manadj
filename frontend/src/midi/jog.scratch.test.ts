@@ -57,6 +57,35 @@ describe('GRV6 scratch controller', () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
+  it.each([true, false])('does not adopt or disturb another input scratch while playing=%s', running => {
+    playing = running;
+    active = true;
+    jog.onTouch(true);
+    touchTicks(30);
+    rimTicks(30);
+    jog.onTouchTicks(30); // Legacy touch streams must not seek through it either.
+    jog.onTouch(false);
+    jog.dispose();
+    vi.advanceTimersByTime(1000);
+    expect(begin).not.toHaveBeenCalled();
+    expect(move).not.toHaveBeenCalled();
+    expect(end).not.toHaveBeenCalled();
+    expect(seek).not.toHaveBeenCalled();
+    expect(bend).not.toHaveBeenCalled();
+    expect(active).toBe(true);
+  });
+
+  it('clears its old bend when another input takes the platter', () => {
+    rimTicks(30);
+    vi.advanceTimersByTime(25);
+    expect(bend.mock.lastCall?.[0]).toBeGreaterThan(0);
+    active = true;
+    jog.syncState();
+    expect(bend).toHaveBeenLastCalledWith(0);
+    expect(vi.getTimerCount()).toBe(0);
+    expect(end).not.toHaveBeenCalled();
+  });
+
   it.each([true, false])('sends signed calibrated displacement while playing=%s', (running) => {
     playing = running;
     jog.onTouch(true);

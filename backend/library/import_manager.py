@@ -155,6 +155,7 @@ class LibraryImportManager:
             LibraryImportExecutionResult with import statistics
         """
         result = LibraryImportExecutionResult()
+        imported_tracks = []
 
         # If no candidates provided, get fresh list
         if candidates is None:
@@ -177,6 +178,7 @@ class LibraryImportManager:
                 )
 
                 self.manadj_session.add(track)
+                imported_tracks.append(track)
                 result.imported += 1
 
             except Exception as e:
@@ -196,6 +198,10 @@ class LibraryImportManager:
                 # ... and native grid+key Analysis (ADR 0024).
                 from ..analysis_tasks import enqueue_missing_analysis
                 enqueue_missing_analysis(self.manadj_session)
+                # Queue only this import, never the guarded full-library sweep.
+                from ..stems_tasks import enqueue_stem_split
+                for track in imported_tracks:
+                    enqueue_stem_split(self.manadj_session, track.id)
                 if derive_provenance:
                     from ..acquisition.provenance import derive_and_write_provenance
                     imported_paths = [c.filepath for c in candidates]

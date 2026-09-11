@@ -11,7 +11,7 @@
  *   MULTISET of all AudioParam values (engage→write→disengage must be a
  *   round trip) and equivalence between mixers (crossfader pin).
  */
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Mixer } from './mixer';
 import { channelFaderToGain } from './mixerMath';
 import type { AutomationChannelValues } from './mixer';
@@ -31,6 +31,9 @@ class FakeParam {
     this.value = v;
   }
   linearRampToValueAtTime(v: number): void {
+    this.value = v;
+  }
+  exponentialRampToValueAtTime(v: number): void {
     this.value = v;
   }
   setTargetAtTime(v: number): void {
@@ -60,9 +63,11 @@ class FakeNode {
 class FakeAudioContext {
   static instances: FakeAudioContext[] = [];
   params: FakeParam[] = [];
+  filterParamOwners = new Map<FakeParam, FakeNode>();
   waveShapers: Array<FakeNode & { curve: Float32Array<ArrayBuffer> | null; oversample: string }> = [];
   analyserData: readonly number[] = [0];
   currentTime = 0;
+  sampleRate = 48000;
   state = 'running';
   destination = new FakeNode();
 
@@ -81,11 +86,14 @@ class FakeAudioContext {
     return Object.assign(new FakeNode(), { gain: this.param(1) });
   }
   createBiquadFilter() {
-    return Object.assign(new FakeNode(), {
+    const node = Object.assign(new FakeNode(), {
       type: 'lowpass',
       frequency: this.param(350),
       Q: this.param(1),
     });
+    this.filterParamOwners.set(node.frequency, node);
+    this.filterParamOwners.set(node.Q, node);
+    return node;
   }
   createWaveShaper() {
     const node = Object.assign(new FakeNode(), {
@@ -148,8 +156,19 @@ function forbidAudio(): void {
 
 /** Sorted param values of a fake context — the multiset fingerprint. */
 function fingerprint(ctx: FakeAudioContext): number[] {
-  return ctx.params.map((p) => p.value).sort((x, y) => x - y);
+  const audible = (node: FakeNode): boolean => {
+    if ('gain' in node && (node.gain as FakeParam).value === 0) return false;
+    return node.outputs.size === 0 || [...node.outputs].some(audible);
+  };
+  // Muted sweep branches retain their last cutoff for a click-free fade-out.
+  return ctx.params.filter(p => !ctx.filterParamOwners.has(p) || audible(ctx.filterParamOwners.get(p)!))
+    .map((p) => p.value).sort((x, y) => x - y);
 }
+
+beforeEach(() => {
+  // Mixer preference writes must never reach a running app's settings API.
+  vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true })));
+});
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -172,6 +191,42 @@ describe('channel level meter tap', () => {
       meanAbsolute: (1 + 0.5 + 0.25) / 4,
       clipped: true,
     });
+  });
+});
+
+describe('global filter preferences', () => {
+  it('reconfigures effective automated positions, restores base on release, and survives graph revival', () => {
+    const Fake = withFakeAudio();
+    const mixer = new Mixer();
+    mixer.setFilter('A', -0.4);
+    const owner = mixer.engageAutomation();
+    mixer.setAutomation('A', values(1, 0.5, 0.7));
+    mixer.setFilterSettings({ model: 'dual', resonance: 19, drive: 6 });
+    expect(mixer.getChannelState('A').filter).toBe(-0.4);
+    expect(mixer.getAutomation('A')?.filter).toBe(0.7);
+    const reference = new Mixer();
+    reference.setFilterSettings({ model: 'dual', resonance: 19, drive: 6 });
+    reference.setFilter('A', 0.7);
+    expect(fingerprint(Fake.instances[0])).toEqual(fingerprint(Fake.instances[1]));
+    mixer.dispose();
+    mixer.now();
+    expect(fingerprint(Fake.instances[2])).toEqual(fingerprint(Fake.instances[1]));
+    mixer.disengageAutomation(owner);
+    reference.setFilter('A', -0.4);
+    expect(fingerprint(Fake.instances[2])).toEqual(fingerprint(Fake.instances[1]));
+  });
+
+  it('defaults to the approved sound and changes preferences without creating audio or moving decks', () => {
+    forbidAudio();
+    const mixer = new Mixer();
+    expect(mixer.getFilterSettings()).toMatchObject({ model: 'res24', resonance: 17, compensation: 0.15 });
+    const before = mixer.getChannelState('A');
+    const notify = vi.fn();
+    mixer.subscribe(notify);
+    mixer.setFilterSettings({ model: 'dual', resonance: 20 });
+    expect(mixer.getFilterSettings()).toMatchObject({ model: 'dual', resonance: 20, compensation: 0.15 });
+    expect(mixer.getChannelState('A')).toBe(before);
+    expect(notify).toHaveBeenCalledWith('filterSettings');
   });
 });
 
@@ -417,7 +472,7 @@ describe('master recording tap', () => {
     const Fake = withFakeAudio();
     const mixer = new Mixer();
     mixer.portFor('A').ensureAudio();
-    const { waveShapers } = Fake.instances[0];
+    const waveShapers = Fake.instances[0].waveShapers.filter(node => node.oversample === 'none');
     expect(waveShapers).toHaveLength(3);
     for (const ceiling of waveShapers) {
       expect(ceiling.curve?.[0]).toBeCloseTo(-Math.pow(10, -2 / 20), 6);
@@ -432,7 +487,7 @@ describe('master recording tap', () => {
     const tap = mixer.createMasterRecordingTap();
     const input = tap.input as unknown as FakeNode;
     expect(input.inputs.size).toBe(1);
-    const [masterCeiling, recordingCeiling] = Fake.instances[0].waveShapers;
+    const [masterCeiling, recordingCeiling] = Fake.instances[0].waveShapers.filter(node => node.oversample === 'none');
     expect(input.inputs.has(recordingCeiling)).toBe(true);
     expect(input.inputs.has(masterCeiling)).toBe(false);
     expect(recordingCeiling.inputs).not.toEqual(masterCeiling.inputs);

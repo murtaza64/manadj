@@ -112,6 +112,34 @@ describe('hydratePersistedSettings', () => {
 });
 
 describe('writeSetting / removeSetting', () => {
+  it('recovers unsent preferences after restart instead of overwriting them with stale DB values', async () => {
+    const failed = vi.fn().mockRejectedValue(new Error('offline'));
+    vi.stubGlobal('fetch', failed);
+    writeSetting('manadj-filter-settings', 'latest');
+    await vi.waitFor(() => expect(failed).toHaveBeenCalled());
+    await vi.resetModules();
+    const restarted = await import('./persistedSettings');
+    const fetchMock = mockFetch(() => ({ settings: { 'manadj-filter-settings': 'old' } }));
+    await restarted.hydratePersistedSettings();
+    expect(localStorage.getItem('manadj-filter-settings')).toBe('latest');
+    await vi.waitFor(() => expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'PUT' && init.body === JSON.stringify({ value: 'latest' }))).toBe(true));
+  });
+
+  it('serializes and coalesces rapid changes so an older slider write cannot win', async () => {
+    let finish!: (response: Response) => void;
+    const fetchMock = vi.fn().mockImplementationOnce(() => new Promise<Response>(resolve => { finish = resolve; }))
+      .mockResolvedValue({ ok: true });
+    vi.stubGlobal('fetch', fetchMock);
+    writeSetting('manadj-filter-settings', 'first');
+    writeSetting('manadj-filter-settings', 'middle');
+    writeSetting('manadj-filter-settings', 'last');
+    expect(localStorage.getItem('manadj-filter-settings')).toBe('last');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    finish({ ok: true } as Response);
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({ value: 'last' });
+  });
+
   it('writes the cache synchronously and PUTs through', async () => {
     const fetchMock = mockFetch(() => ({}));
 
