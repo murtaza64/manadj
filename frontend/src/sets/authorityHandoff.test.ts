@@ -50,9 +50,8 @@ function windowInput(transition: Transition): PlanInput {
 }
 
 describe('window-boundary handoffs', () => {
-  // Hand-edited discontinuities on both boundaries: the outgoing fader
-  // opens at 0.7 (solo authority left it at 1) and the incoming fader
-  // closes at 0.5 (solo authority resumes at 1).
+  // The outgoing opens at 0.7 (solo authority left it at 1); the incoming
+  // reaches 0.5 and holds it through solo playback.
   const discontinuous = () =>
     planSet(
       windowInput(
@@ -132,6 +131,37 @@ describe('window-boundary handoffs', () => {
     for (let t = 59.5; t <= 81; t += 0.025) {
       expect(planStateAt(plan, t)).toEqual(planStateAtRaw(plan, t));
     }
+  });
+
+  it('recursively carries an unfinished opening ramp through a nearby closing boundary', () => {
+    const plan = planSet(windowInput(tr({
+      durationSec: 0.05,
+      lanes: {
+        faderA: [{ x: 0, y: 1 }, { x: 1, y: 0 }],
+        faderB: [{ x: 0, y: 0.5 }, { x: 1, y: 0.5 }],
+      },
+    })));
+    const close = plan.adjacencies[0].mixEndSec;
+    const before = planStateAt(plan, close - 1e-6).lanes.B.fader;
+    expect(before).toBeCloseTo(0.5 * (0.05 - 1e-6) / RAMP, 10);
+    expect(planStateAt(plan, close).lanes.B.fader).toBeCloseTo(before, 10);
+    expect(planStateAt(plan, close + RAMP / 2).lanes.B.fader).toBeCloseTo((0.5 + before) / 2, 10);
+    expect(planStateAt(plan, close + RAMP + 1e-6)).toEqual(planStateAtRaw(plan, close + RAMP + 1e-6));
+  });
+
+  it('reads mutated boundaries afresh and excludes a boundary at zero', () => {
+    const plan = discontinuous();
+    expect(planStateAt(plan, 60)).not.toEqual(planStateAtRaw(plan, 60));
+    plan.adjacencies[0].mixStartSec = 61;
+    expect(planStateAt(plan, 60)).toEqual(planStateAtRaw(plan, 60));
+    expect(planStateAt(plan, 61)).not.toEqual(planStateAtRaw(plan, 61));
+
+    const atZero = planSet(windowInput(tr({
+      startSec: 0,
+      lanes: { faderA: [{ x: 0, y: 0.5 }, { x: 1, y: 0.5 }] },
+    })));
+    expect(planStateAt(atZero, 0)).toEqual(planStateAtRaw(atZero, 0));
+    expect(planStateAt(atZero, RAMP / 2)).toEqual(planStateAtRaw(atZero, RAMP / 2));
   });
 
   it('never smooths a hard cut (a deliberate cut, not a handoff)', () => {

@@ -41,7 +41,7 @@ function Adapter({ setId }: { setId: number }): null {
   // Same query keys as SetDetailPane/ConductorPlanFeed (shared caches).
   const { data: sets = [] } = useQuery({ queryKey: ['sets'], queryFn: api.sets.list });
   const set = sets.find((s) => s.id === setId);
-  const trackIds = (entries ?? []).map((e) => e.trackId);
+  const trackIds = (entries ?? []).map((e) => e.trackId).sort((a, b) => a - b);
   const { data: trackMap } = useQuery({
     queryKey: ['tracks', 'set-rows', setId, trackIds.join(',')],
     enabled: trackIds.length > 0,

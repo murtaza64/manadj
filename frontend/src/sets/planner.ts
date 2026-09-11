@@ -1373,18 +1373,28 @@ export function planStateAtRaw(plan: SetPlan, mixTime: number): PlanState {
   };
   if (plan.entries.length === 0) return state;
 
+  const occupants: Record<PlanDeck, {
+    active: number | null; upcoming: number | null; past: number | null;
+  }> = {
+    A: { active: null, upcoming: null, past: null },
+    B: { active: null, upcoming: null, past: null },
+    C: { active: null, upcoming: null, past: null },
+    D: { active: null, upcoming: null, past: null },
+  };
+  // Array precedence, not chronological order: last active/past, first upcoming.
+  for (let i = 0; i < plan.entries.length; i++) {
+    const e = plan.entries[i];
+    const occupant = occupants[e.deck];
+    if (mixTime >= e.entryMixSec && mixTime < e.exitMixSec) occupant.active = i;
+    else if (e.entryMixSec > mixTime) occupant.upcoming = occupant.upcoming ?? i;
+    else occupant.past = i;
+    if (e.entryMixSec <= mixTime) state.activeEntryIndex = i;
+  }
+
   for (const deck of PLAN_DECKS) {
     // Occupant: the active entry on this deck, else the next upcoming one,
     // else the last finished one.
-    let active: number | null = null;
-    let upcoming: number | null = null;
-    let past: number | null = null;
-    plan.entries.forEach((e, i) => {
-      if (e.deck !== deck) return;
-      if (mixTime >= e.entryMixSec && mixTime < e.exitMixSec) active = i;
-      else if (e.entryMixSec > mixTime) upcoming = upcoming ?? i;
-      else past = i;
-    });
+    const { active, upcoming, past } = occupants[deck];
     const idx = active ?? upcoming ?? past;
     if (idx === null) continue;
     const entry = plan.entries[idx];
@@ -1420,11 +1430,6 @@ export function planStateAtRaw(plan: SetPlan, mixTime: number): PlanState {
       playing: audible,
       pitchPercent,
     };
-  }
-
-  // activeEntryIndex: the latest entry whose audible span has begun.
-  for (let i = 0; i < plan.entries.length; i++) {
-    if (plan.entries[i].entryMixSec <= mixTime) state.activeEntryIndex = i;
   }
 
   // Lanes: every containing window's role lanes mapped onto physical
@@ -1622,21 +1627,41 @@ const HANDOFF_EPS = 1e-6;
  * byte-identical to the raw verdict. */
 const RESIDUAL_DEADBAND = 1e-3;
 
-/** Every instant lane authority changes hands, ascending: windowed
+/** Latest lane-authority boundary inside the ramp horizon: windowed
  * adjacency opens/closes and Routine span edges. Hard cuts (zero-width)
  * are deliberate cuts — excluded on purpose. */
-function authorityBoundaries(plan: SetPlan): number[] {
-  const ts = new Set<number>();
+function latestAuthorityBoundary(plan: SetPlan, mixTime: number): number | null {
+  let boundary = 0;
   for (const adj of plan.adjacencies) {
     if (!isWindowed(adj)) continue;
-    ts.add(adj.mixStartSec);
-    ts.add(adj.mixEndSec);
+    if (
+      adj.mixStartSec > boundary && adj.mixStartSec <= mixTime &&
+      mixTime - adj.mixStartSec < AUTHORITY_HANDOFF_RAMP_SEC
+    ) {
+      boundary = adj.mixStartSec;
+    }
+    if (
+      adj.mixEndSec > boundary && adj.mixEndSec <= mixTime &&
+      mixTime - adj.mixEndSec < AUTHORITY_HANDOFF_RAMP_SEC
+    ) {
+      boundary = adj.mixEndSec;
+    }
   }
   for (const r of plan.routines) {
-    ts.add(r.mixStartSec);
-    ts.add(r.mixEndSec);
+    if (
+      r.mixStartSec > boundary && r.mixStartSec <= mixTime &&
+      mixTime - r.mixStartSec < AUTHORITY_HANDOFF_RAMP_SEC
+    ) {
+      boundary = r.mixStartSec;
+    }
+    if (
+      r.mixEndSec > boundary && r.mixEndSec <= mixTime &&
+      mixTime - r.mixEndSec < AUTHORITY_HANDOFF_RAMP_SEC
+    ) {
+      boundary = r.mixEndSec;
+    }
   }
-  return [...ts].filter((t) => t > 0).sort((a, b) => a - b);
+  return boundary > 0 ? boundary : null;
 }
 
 const clampTo = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
@@ -1651,10 +1676,7 @@ const clampTo = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi,
 export function planStateAt(plan: SetPlan, mixTime: number): PlanState {
   const state = planStateAtRaw(plan, mixTime);
   if (state.done) return state;
-  let boundary: number | null = null;
-  for (const t of authorityBoundaries(plan)) {
-    if (t <= mixTime && mixTime - t < AUTHORITY_HANDOFF_RAMP_SEC) boundary = t;
-  }
+  const boundary = latestAuthorityBoundary(plan, mixTime);
   if (boundary === null) return state;
   const decay = 1 - (mixTime - boundary) / AUTHORITY_HANDOFF_RAMP_SEC;
   const before = planStateAt(plan, boundary - HANDOFF_EPS);

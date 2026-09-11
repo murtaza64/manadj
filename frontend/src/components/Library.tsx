@@ -1338,7 +1338,7 @@ export default function Library({
             )
           ) : selectedView === 'set' && selectedSetId !== null ? (
             /* Set detail view (sets 01): replaces the track table. */
-            <SetDetailPane setId={selectedSetId} onLoadToDeck={loadWithViewPolicy} />
+            <SetDetailPane key={selectedSetId} setId={selectedSetId} onLoadToDeck={loadWithViewPolicy} />
           ) : splitView ? (
             <>
               {/* Playlist pane (Play order) */}
