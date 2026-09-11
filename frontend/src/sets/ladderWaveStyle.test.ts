@@ -2,13 +2,14 @@
 // Waveform style slots must track the shader's math — grouping/RMS, soft
 // limit, master, displayGamma, and each style's color logic.
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { DecodedWaveform } from '../waveform/blob';
 import { buildLodPack } from '../waveform/blob';
 import { DEFAULT_PARAMS, STYLE_REGISTRY, type StyleParams } from '../waveform/styles';
 import {
   computeStyledColumns,
   createStyledColumnRenderer,
+  drawStyledWave,
   PAINTABLE_STYLE_IDS,
 } from './ladderWaveStyle';
 import { WAVE_BG_GL } from '../theme/markers';
@@ -62,6 +63,21 @@ const parseCss = (css: string): [number, number, number] => {
   if (!m) throw new Error(`bad css: ${css}`);
   return [Number(m[1]), Number(m[2]), Number(m[3])];
 };
+
+describe('drawStyledWave background', () => {
+  it('leaves silence and out-of-track space transparent only when requested', () => {
+    const wave = makeWaveform(200, Array(8).fill(0), 0);
+    const ctx = { fillStyle: '', fillRect: vi.fn(), clearRect: vi.fn() };
+    const opts = { width: 192, height: 20, dir: 'bipolar' as const, range: [-1, wave.duration + 1] as [number, number] };
+    drawStyledWave(ctx as unknown as CanvasRenderingContext2D, wave, 'additive-rgb', params(), { ...opts, transparent: true });
+    expect(ctx.clearRect).toHaveBeenCalledWith(0, 0, 192, 20);
+    expect(ctx.fillRect).not.toHaveBeenCalled();
+    ctx.clearRect.mockClear();
+    drawStyledWave(ctx as unknown as CanvasRenderingContext2D, wave, 'additive-rgb', params(), opts);
+    expect(ctx.clearRect).not.toHaveBeenCalled();
+    expect(ctx.fillRect).toHaveBeenCalledWith(0, 0, 192, 20);
+  });
+});
 
 describe('registry coverage', () => {
   it('paints every style in the registry', () => {

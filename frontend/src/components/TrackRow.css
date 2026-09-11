@@ -38,7 +38,7 @@
    with the selection background. The mark is a deck-color strip at the
    row's left edge: the row sets --loaded-strip inline
    (rowMarks.loadedStripShadow) and the FIRST cell renders it. The first
-   cell (order/key) is sticky, so the strip stays pinned at the left edge
+   cell is sticky, so the strip stays pinned at the left edge
    under horizontal scroll; box-shadow is untouched by the !important
    background rules above, so hover/selection can't wipe it. */
 .track-row > td:first-child {
@@ -49,6 +49,15 @@
   padding: var(--space-2) var(--space-8);
   vertical-align: middle;
   overflow: hidden;
+}
+
+.track-row > td[data-column-id="created_at"] {
+  padding: var(--space-2) var(--space-12);
+  font-size: var(--font-body);
+  color: var(--subtext1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* Sticky column cell styles */
@@ -274,8 +283,12 @@ a.provenance-chip:hover {
   font-size: var(--font-micro);
 }
 
-/* Load-to-deck hover buttons (Performance view's embedded library). The
-   title cell is position: sticky, so the absolute overlay anchors to it. */
+/* Anchor hover buttons when the title moves outside the sticky prefix. */
+.track-row > td[data-column-id="title"]:not(.sticky-col-cell) {
+  position: relative;
+}
+
+/* Load-to-deck hover buttons (Performance view's embedded library). */
 .track-load-buttons {
   position: absolute;
   right: 4px;

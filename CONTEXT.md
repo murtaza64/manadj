@@ -417,7 +417,7 @@ A Track produced against a fixed tempo grid, so a constant-tempo Beatgrid (BPM +
 The stored Analysis artifact for a Track's audio: broadband peaks plus per-band energies over time, style-agnostic — no aesthetic choices baked in. Internal to manadj — never transferred by Sync; each external library computes its own.
 
 **Waveform**:
-A rendering of a Track's Waveform data in manadj's player UI. Many render styles can be drawn from the same Waveform data; style is a display concern, not an Analysis one.
+A rendering of a Track's Waveform data in manadj's player or tracklist UI. Many render styles can be drawn from the same Waveform data; style is a display concern, not an Analysis one. Tracklist previews use a stored, bounded reduction of that data and the saved minimap style, with Hot Cue positions overlaid separately.
 
 **Waveform style**:
 A named render recipe over Waveform data: a shader variant plus its tunable display parameters (band grouping, per-group gain, gamma, smoothing). A display concern — never baked into Waveform data; switching or tweaking a style never requires re-Analysis.

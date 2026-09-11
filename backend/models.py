@@ -154,6 +154,7 @@ class Waveform(Base):
     # Waveform data v2 blob (ADR 0014). Deferred: multi-hundred-KB per row —
     # never load it via relationship traversal (see the 21s sync-status incident).
     data_blob = deferred(Column(LargeBinary, nullable=True))
+    preview_blob = deferred(Column(LargeBinary, nullable=True))
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
 

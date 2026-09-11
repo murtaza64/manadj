@@ -8,8 +8,9 @@
  *   --colleft-<id>  sticky left offset (sticky columns only)
  */
 
-import { useCallback, useMemo, useState } from 'react';
-import { COLUMN_CONFIG } from '../components/columnConfig';
+import { useCallback, useLayoutEffect, useMemo, useState, type RefObject } from 'react';
+import { COLUMN_CONFIG, type ColumnConfig } from '../components/columnConfig';
+import { scrollableAncestor } from '../components/virtualRows';
 import { writeSetting } from '../settings/persistedSettings';
 
 const STORAGE_KEY = 'manadj-column-widths-v1';
@@ -36,8 +37,33 @@ function persist(widths: Widths) {
   writeSetting(STORAGE_KEY, JSON.stringify(overrides));
 }
 
-export function useColumnWidths(showOrder = false) {
+export function useColumnWidths(configuredColumns: readonly ColumnConfig[], tableRef: RefObject<HTMLTableElement | null>) {
   const [widths, setWidths] = useState<Widths>(load);
+  const [viewportWidth, setViewportWidth] = useState(Infinity);
+  useLayoutEffect(() => {
+    const scroller = scrollableAncestor(tableRef.current);
+    if (!scroller) return;
+    const measure = () => setViewportWidth(scroller.clientWidth);
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(scroller);
+    return () => observer.disconnect();
+  }, [tableRef]);
+
+  // Keep a usable scrolling region even when a wide column is moved to the front.
+  const frozenBudget = viewportWidth - Math.min(160, viewportWidth / 2);
+  let frozenWidth = 0;
+  let frozenCount = 0;
+  for (const column of configuredColumns) {
+    const width = widths[column.id] ?? column.width;
+    if (!column.sticky || frozenWidth + width > frozenBudget) break;
+    frozenWidth += width;
+    frozenCount++;
+  }
+  const columns = useMemo(() => configuredColumns.map((column, index) => ({
+    ...column, sticky: index < frozenCount, showShadow: index === frozenCount - 1,
+  })), [configuredColumns, frozenCount]);
 
   const setWidth = useCallback((id: string, width: number) => {
     setWidths((prev) => {
@@ -62,8 +88,7 @@ export function useColumnWidths(showOrder = false) {
     const vars: Record<string, string> = {};
     let stickyLeft = 0;
     let total = 0;
-    for (const col of COLUMN_CONFIG) {
-      if (col.id === 'order' && !showOrder) continue;
+    for (const col of columns) {
       const w = widths[col.id] ?? col.width;
       vars[`--colw-${col.id}`] = `${w}px`;
       total += w;
@@ -76,7 +101,7 @@ export function useColumnWidths(showOrder = false) {
     // degrades to auto layout and columns stop honoring configured widths
     vars['--table-width'] = `${total}px`;
     return vars as React.CSSProperties;
-  }, [widths, showOrder]);
+  }, [widths, columns]);
 
-  return { widths, setWidth, resetWidth, cssVars };
+  return { columns, widths, setWidth, resetWidth, cssVars };
 }

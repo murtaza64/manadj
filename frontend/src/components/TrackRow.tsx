@@ -4,10 +4,11 @@ import EnergySquare from './EnergySquare';
 import BPMDisplay from './BPMDisplay';
 import KeyDisplay from './KeyDisplay';
 import { formatRelativeTime } from '../utils/dateUtils';
-import type { Track } from '../types';
+import type { Track, HotCue } from '../types';
+import { TrackWaveformPreview } from './TrackWaveformPreview';
 import type { ChannelId } from '../playback/mixer';
 import { CHANNEL_IDS } from '../playback/mixer';
-import { getColumnConfig } from './columnConfig';
+import { COLUMN_CONFIG, type ColumnConfig } from './columnConfig';
 import { setTrackDragPayload, type TrackDragSource } from '../selection/trackDrag';
 import { LinkIcon } from '../links/LinkIcon';
 import { loadedStripShadow } from '../sets/rowMarks';
@@ -38,6 +39,7 @@ export type LoadedMark = string;
 
 interface Props {
   track: Track;
+  previewCues?: HotCue[];
   isSelected: boolean;
   /** The Deck(s) this track is loaded on (live occupancy across A–D). */
   loadedOn: LoadedMark;
@@ -69,6 +71,7 @@ interface Props {
   /** Play order index (0-based) — renders the # cell (playlist tables).
    * undefined = no # column; null = track has no position (shouldn't happen). */
   orderIndex?: number | null;
+  columns?: readonly ColumnConfig[];
   /** Match score against the followed references (match-score PRD):
    * undefined = column absent; null = Known row (evidence, not score). */
   score?: number | null;
@@ -118,6 +121,7 @@ function markSlot(mark: TransitionMark, linked: boolean): ReactNode {
  * churn unless their own props changed. */
 const TrackRow = memo(function TrackRow({
   track,
+  previewCues,
   isSelected,
   loadedOn,
   played = false,
@@ -131,6 +135,7 @@ const TrackRow = memo(function TrackRow({
   dragSource,
   onContextMenu,
   orderIndex,
+  columns,
   score,
   keyMatched,
   sharedTagIds,
@@ -154,26 +159,181 @@ const TrackRow = memo(function TrackRow({
     ? ({ '--loaded-strip': strip } as CSSProperties)
     : {};
 
-  // Helper to get cell style from column config
-  const getCellStyle = (columnId: string) => {
-    const config = getColumnConfig(columnId)!;
-    return {
-      width: `var(--colw-${config.id})`,
-      minWidth: `var(--colw-${config.id})`,
-      maxWidth: `var(--colw-${config.id})`,
-      textAlign: config.align || ('left' as const),
-      ...(config.sticky ? { left: `var(--colleft-${config.id})` } : {})
-    };
+  const layout = columns ?? COLUMN_CONFIG.filter(config => config.id !== 'order' || orderIndex !== undefined);
+  const cellClasses: Record<string, string> = {
+    energy: 'track-energy-cell',
+    marks: 'track-marks-cell',
+    tags: 'track-tags-cell',
+    stems: 'track-cell stems-cell',
+    created_at: '',
   };
-
-  // Helper to get cell classes
-  const getCellClasses = (columnId: string, baseClass: string = 'track-cell') => {
-    const config = getColumnConfig(columnId)!;
-    return [
-      baseClass,
-      config.sticky ? 'sticky-col-cell' : '',
-      config.showShadow ? 'sticky-shadow' : ''
-    ].filter(Boolean).join(' ');
+  const cells: Record<string, ReactNode> = {
+    order: (
+      <div className="track-cell-single track-order-cell">
+        {orderIndex == null ? '-' : orderIndex + 1}
+      </div>
+    ),
+    key: (
+      <div className={`track-cell-single${keyMatched === false ? ' track-signal-dim' : ''}`}>
+        <KeyDisplay keyValue={track.key} />
+      </div>
+    ),
+    bpm: (
+      <div className="track-cell-single">
+        <BPMDisplay bpm={track.bpm} round={true} />
+      </div>
+    ),
+    energy: track.energy ? (
+      <EnergySquare
+        level={track.energy}
+        filled={true}
+        showNumber={true}
+      />
+    ) : (
+      <div className="energy-square-empty">
+        -
+      </div>
+    ),
+    // Playing levels take precedence; otherwise show evidence or a Match score.
+    marks: playingOn !== '' ? (
+      <div className="track-marks">
+        {[...playingOn].map((deck, index) => {
+          const level = Number(playingLevels.split(',')[index]) || 0;
+          const label = `Deck ${deck}: Playing - ${level}% level`;
+          return (
+            <span key={deck} className={`track-mark-slot mark-${deck.toLowerCase()}`}>
+              <span
+                className="track-playing"
+                style={{ '--playing-color': `color-mix(in srgb, var(--deck-${deck.toLowerCase()}) ${level}%, var(--overlay1))` } as CSSProperties}
+                role="img"
+                aria-label={label}
+                title={label}
+              >
+                <i /><i /><i />
+              </span>
+            </span>
+          );
+        })}
+      </div>
+    ) : score != null && deckEvidence.length === 0 ? (
+      <div className="track-match-score">{Math.round(score)}</div>
+    ) : (
+      <div className="track-marks">
+        {/* Only occupied slots render, so a lone badge centers in
+            the column instead of hugging its deck's side. */}
+        {deckEvidence.map(({ deck, mark, linked }) => (
+          <span key={deck} className={`track-mark-slot mark-${deck.toLowerCase()}`}>
+            {markSlot(mark, linked)}
+          </span>
+        ))}
+      </div>
+    ),
+    title: (
+      <>
+        <div className="track-cell-text">
+          {track.needs_attention && (
+            <span
+              className="needs-attention-badge"
+              title="Grid analysis bailed — no grid or BPM; grid it by hand or import one"
+            >
+              !
+            </span>
+          )}
+          {track.title || filename}
+        </div>
+        {rowActions ? (
+          <span className="track-load-buttons">
+            {rowActions.map((a) => (
+              <button
+                key={a.title}
+                className="track-load-button track-row-action"
+                title={a.title}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  a.run(track);
+                }}
+                onDoubleClick={(e) => e.stopPropagation()}
+              >
+                {a.icon}
+              </button>
+            ))}
+          </span>
+        ) : onLoadToDeck ? (
+          <span className="track-load-buttons">
+            {CHANNEL_IDS.map((deck) => (
+              <button
+                key={deck}
+                className={`track-load-button track-load-button-${deck}`}
+                title={`Load to Deck ${deck}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onLoadToDeck(deck, track);
+                }}
+                onDoubleClick={(e) => e.stopPropagation()}
+              >
+                {deck}
+              </button>
+            ))}
+          </span>
+        ) : null}
+      </>
+    ),
+    artist: (
+      <div className="track-cell-text">
+        {track.artist || <span style={{ color: 'var(--overlay0)' }}>-</span>}
+      </div>
+    ),
+    waveform: (
+      <TrackWaveformPreview trackId={track.id} duration={track.duration_secs} cues={previewCues} />
+    ),
+    created_at: formatRelativeTime(track.created_at),
+    tags: (
+      <div className="track-tags-container">
+        {track.tags.map(tag => {
+          const dim =
+            sharedTagIds !== undefined &&
+            !sharedTagIds.split(',').includes(String(tag.id));
+          return (
+            <span key={tag.id} className={dim ? 'track-signal-dim' : undefined}>
+              <TagPill tag={tag} />
+            </span>
+          );
+        })}
+      </div>
+    ),
+    stems: track.has_stems ? (
+      <span className="stems-check" title="Stems ready">
+        ✓
+      </span>
+    ) : null,
+    quality: (
+      <span className={`quality-display ${isLowQuality(track) ? 'quality-low' : ''}`}>
+        {formatQuality(track.codec, track.bitrate_kbps)}
+      </span>
+    ),
+    size: (
+      <span className="size-display">{formatSize(track.filesize_bytes)}</span>
+    ),
+    provenance: track.provenance ? (
+      track.provenance.url ? (
+        <a
+          className="provenance-chip"
+          href={track.provenance.url}
+          target="_blank"
+          rel="noreferrer"
+          onClick={e => e.stopPropagation()}
+          title={track.provenance.url}
+        >
+          {track.provenance.label}
+        </a>
+      ) : (
+        <span className="provenance-chip">
+          {track.provenance.label}
+        </span>
+      )
+    ) : (
+      <span style={{ color: 'var(--overlay0)' }}>-</span>
+    ),
   };
 
   return (
@@ -196,196 +356,28 @@ const TrackRow = memo(function TrackRow({
           : undefined
       }
     >
-        {orderIndex !== undefined && (
-          <td className={getCellClasses('order')} style={getCellStyle('order')}>
-            <div className="track-cell-single track-order-cell">
-              {orderIndex === null ? '-' : orderIndex + 1}
-            </div>
-          </td>
-        )}
-        <td className={getCellClasses('key')} style={getCellStyle('key')}>
-          <div className={`track-cell-single${keyMatched === false ? ' track-signal-dim' : ''}`}>
-            <KeyDisplay keyValue={track.key} />
-          </div>
-        </td>
-        <td className={getCellClasses('bpm')} style={getCellStyle('bpm')}>
-          <div className="track-cell-single">
-            <BPMDisplay bpm={track.bpm} round={true} />
-          </div>
-        </td>
-        <td className={getCellClasses('energy', 'track-energy-cell')} style={getCellStyle('energy')}>
-          {track.energy ? (
-            <EnergySquare
-              level={track.energy}
-              filled={true}
-              showNumber={true}
-            />
-          ) : (
-            <div className="energy-square-empty">
-              -
-            </div>
-          )}
-        </td>
-        {/* Marks column (follow-mode 09; A–D per four-deck-performance
-            21): one slot per Deck with evidence, strongest wins (★
-            favorited Transition > 🔗 Linked > ◆ saved Transition — the
-            Known ranking). Tooltip carries ALL evidence. */}
+      {layout.map(config => (
         <td
-          className={getCellClasses('marks', 'track-marks-cell')}
-          style={getCellStyle('marks')}
-          title={rowEvidenceTitle(deckEvidence)}
+          key={config.id}
+          data-column-id={config.id}
+          className={[
+            cellClasses[config.id] ?? 'track-cell',
+            config.sticky ? 'sticky-col-cell' : '',
+            config.showShadow ? 'sticky-shadow' : '',
+          ].filter(Boolean).join(' ')}
+          style={{
+            width: `var(--colw-${config.id})`,
+            minWidth: `var(--colw-${config.id})`,
+            maxWidth: `var(--colw-${config.id})`,
+            textAlign: config.align || 'left',
+            ...(config.sticky ? { left: `var(--colleft-${config.id})` } : {}),
+          }}
+          title={config.id === 'marks' ? rowEvidenceTitle(deckEvidence) : undefined}
         >
-          {/* While Follow filters, Compatible rows carry their Match
-              score here instead of (absent) evidence marks — one column,
-              two vocabularies. Any real mark wins the slot. */}
-          {playingOn !== '' ? (
-            <div className="track-marks">
-              {[...playingOn].map((deck, index) => {
-                const level = Number(playingLevels.split(',')[index]) || 0;
-                const label = `Deck ${deck}: Playing - ${level}% level`;
-                return (
-                  <span key={deck} className={`track-mark-slot mark-${deck.toLowerCase()}`}>
-                    <span
-                      className="track-playing"
-                      style={{ '--playing-color': `color-mix(in srgb, var(--deck-${deck.toLowerCase()}) ${level}%, var(--overlay1))` } as CSSProperties}
-                      role="img"
-                      aria-label={label}
-                      title={label}
-                    >
-                      <i /><i /><i />
-                    </span>
-                  </span>
-                );
-              })}
-            </div>
-          ) : score != null && deckEvidence.length === 0 ? (
-            <div className="track-match-score">{Math.round(score)}</div>
-          ) : (
-            <div className="track-marks">
-              {/* Only occupied slots render, so a lone badge centers in
-                  the column instead of hugging its deck's side. */}
-              {deckEvidence.map(({ deck, mark, linked }) => (
-                <span key={deck} className={`track-mark-slot mark-${deck.toLowerCase()}`}>
-                  {markSlot(mark, linked)}
-                </span>
-              ))}
-            </div>
-          )}
+          {cells[config.id]}
         </td>
-        <td className={getCellClasses('title')} style={getCellStyle('title')}>
-          <div className="track-cell-text">
-            {track.needs_attention && (
-              <span
-                className="needs-attention-badge"
-                title="Grid analysis bailed — no grid or BPM; grid it by hand or import one"
-              >
-                !
-              </span>
-            )}
-            {track.title || filename}
-          </div>
-          {rowActions ? (
-            <span className="track-load-buttons">
-              {rowActions.map((a) => (
-                <button
-                  key={a.title}
-                  className="track-load-button track-row-action"
-                  title={a.title}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    a.run(track);
-                  }}
-                  onDoubleClick={(e) => e.stopPropagation()}
-                >
-                  {a.icon}
-                </button>
-              ))}
-            </span>
-          ) : onLoadToDeck ? (
-            <span className="track-load-buttons">
-              {CHANNEL_IDS.map((deck) => (
-                <button
-                  key={deck}
-                  className={`track-load-button track-load-button-${deck}`}
-                  title={`Load to Deck ${deck}`}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onLoadToDeck(deck, track);
-                  }}
-                  onDoubleClick={(e) => e.stopPropagation()}
-                >
-                  {deck}
-                </button>
-              ))}
-            </span>
-          ) : null}
-        </td>
-        <td className="track-cell">
-          <div className="track-cell-text">
-            {track.artist || <span style={{ color: 'var(--overlay0)' }}>-</span>}
-          </div>
-        </td>
-        <td style={{
-          textAlign: 'right',
-          padding: '2px 12px',
-          fontSize: '12px',
-          color: 'var(--subtext1)'
-        }}>
-          {formatRelativeTime(track.created_at)}
-        </td>
-        <td className="track-tags-cell" style={getCellStyle('tags')}>
-          <div className="track-tags-container">
-            {track.tags.map(tag => {
-              const dim =
-                sharedTagIds !== undefined &&
-                !sharedTagIds.split(',').includes(String(tag.id));
-              return (
-                <span key={tag.id} className={dim ? 'track-signal-dim' : undefined}>
-                  <TagPill tag={tag} />
-                </span>
-              );
-            })}
-          </div>
-        </td>
-        <td className="track-cell stems-cell" style={getCellStyle('stems')}>
-          {track.has_stems ? (
-            <span className="stems-check" title="Stems ready">
-              ✓
-            </span>
-          ) : null}
-        </td>
-        <td className="track-cell" style={getCellStyle('quality')}>
-          <span className={`quality-display ${isLowQuality(track) ? 'quality-low' : ''}`}>
-            {formatQuality(track.codec, track.bitrate_kbps)}
-          </span>
-        </td>
-        <td className="track-cell" style={getCellStyle('size')}>
-          <span className="size-display">{formatSize(track.filesize_bytes)}</span>
-        </td>
-        <td className="track-cell" style={getCellStyle('provenance')}>
-          {track.provenance ? (
-            track.provenance.url ? (
-              <a
-                className="provenance-chip"
-                href={track.provenance.url}
-                target="_blank"
-                rel="noreferrer"
-                onClick={e => e.stopPropagation()}
-                title={track.provenance.url}
-              >
-                {track.provenance.label}
-              </a>
-            ) : (
-              <span className="provenance-chip">
-                {track.provenance.label}
-              </span>
-            )
-          ) : (
-            <span style={{ color: 'var(--overlay0)' }}>-</span>
-          )}
-        </td>
-
-      </tr>
+      ))}
+    </tr>
   );
 });
 
