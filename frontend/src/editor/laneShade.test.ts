@@ -23,6 +23,15 @@ const rgb = (s: string): [number, number, number, number] => {
 };
 
 describe('neutral definitions', () => {
+  it('trim has a neutral-center guide and symmetric gain shading, not filter hue changes', () => {
+    expect(laneNeutral('trim')).toBe(0.5);
+    expect(laneRestingDefault('trim')).toBe(0.5);
+    expect(laneFillAnchor('trim')).toBe(0.5);
+    expect(emptyLaneShade('trim').y).toBe(0.5);
+    expect(segmentShade('trim', '#c9c9d4', 0.5, 0.5).fill).toBeNull();
+    expect(pointStroke('trim', '#c9c9d4', 0.25)).toBe(pointStroke('trim', '#c9c9d4', 0.75));
+  });
+
   it('fader neutral is EMPTY; EQ and filter neutral is center', () => {
     expect(laneNeutral('faderA')).toBe(0);
     expect(laneNeutral('faderB')).toBe(0);

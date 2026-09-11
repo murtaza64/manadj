@@ -29,6 +29,22 @@ OFFSETS = [0.0, 10.0, 30.0]
 GRIDS = {tid: constant_tempo_changes(120.0) for tid in CAST}
 
 
+@pytest.mark.parametrize("action", ["scratchBegin", "scratchMove", "scratchEnd"])
+def test_scratch_promotion_is_explicitly_unsupported(action):
+    events = weave_events() + [{"t": 15, "kind": "transport", "channel": "A",
+                                "action": action, "playhead": 12,
+                                "deltaSeconds": -2, "durationSeconds": 0.5}]
+    with pytest.raises(PromotionError, match="unsupported scratch motion"):
+        promote(events, CAST, *WINDOW, OFFSETS, GRIDS)
+
+
+@pytest.mark.parametrize("t,channel", [(70, "A"), (15, "D")])
+def test_scratch_outside_cast_window_does_not_block_promotion(t, channel):
+    events = weave_events() + [{"t": t, "kind": "transport", "channel": channel,
+                                "action": "scratchBegin", "playhead": 12}]
+    assert promote(events, CAST, *WINDOW, OFFSETS, GRIDS).cast == CAST
+
+
 def load(t, ch, tid):
     return {"t": t, "kind": "load", "channel": ch, "trackId": tid, "bpm": 120}
 

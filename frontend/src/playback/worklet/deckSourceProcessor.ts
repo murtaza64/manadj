@@ -182,6 +182,15 @@ class DeckSourceProcessor extends AudioWorkletProcessor {
     this.port.onmessage = (event: MessageEvent<DeckSourceCommand>) => {
       const command = event.data;
       switch (command.type) {
+        case 'scratch-schedule':
+          this.kernel.scheduleScratch(command.frames);
+          break;
+        case 'scratch-cancel':
+          this.kernel.cancelScratchSchedule();
+          break;
+        case 'scratch':
+          this.kernel.setScratch(command.motion);
+          break;
         case 'load':
           this.kernel.setTrack(command.channels, command.sampleRate / sampleRate);
           break;
@@ -192,10 +201,10 @@ class DeckSourceProcessor extends AudioWorkletProcessor {
           this.kernel.setStemGains(command.gains);
           break;
         case 'start':
-          this.kernel.start(command.positionFrames, command.startId);
+          this.kernel.start(command.positionFrames, command.startId, command.when, command.preserveSchedule);
           break;
         case 'stop':
-          this.kernel.stop();
+          this.kernel.stop(command.preserveSchedule);
           break;
         case 'mode':
           this.kernel.setMode(command.mode);
@@ -212,7 +221,7 @@ class DeckSourceProcessor extends AudioWorkletProcessor {
     outputs: Float32Array[][],
     parameters: Record<string, Float32Array>
   ): boolean {
-    const endedStartId = this.kernel.render(outputs[0], parameters[RATE_PARAM]);
+    const endedStartId = this.kernel.render(outputs[0], parameters[RATE_PARAM], currentTime, sampleRate);
     if (endedStartId !== null) {
       const message: DeckSourceEvent = { type: 'ended', startId: endedStartId };
       this.port.postMessage(message);

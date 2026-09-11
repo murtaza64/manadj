@@ -76,6 +76,10 @@ function deckBindings({ deck, channel, padChannel, shiftedPadChannel }: DeckMidi
     button(channel, 12, { control: 'cue', deck }),
     button(channel, 53, { control: 'quantize' }),
     button(channel, 26, { control: 'key-lock', deck }),
+    button(channel, 54, { control: 'jog-touch-edge', deck, shifted: false }),
+    button(channel, 103, { control: 'jog-touch-edge', deck, shifted: true }),
+    button(channel, 64, { control: 'slip-mode', deck }),
+    button(channel, 23, { control: 'vinyl-mode', deck }),
     // Hardware BEAT SYNC is manadj's established one-shot MATCH gesture;
     // continuous sync remains deliberately absent.
     button(channel, 88, { control: 'match', deck }),
@@ -106,10 +110,7 @@ function deckBindings({ deck, channel, padChannel, shiftedPadChannel }: DeckMidi
       encoding: 'offset-64',
       jogProfile: 'grv6',
     },
-    // Platter ROTATION streams differ by Vinyl mode. Vinyl-on rotation uses
-    // the existing touch-stream behavior: fine seek while paused, ignored
-    // while playing because scratch remains unsupported. The separate touch
-    // note has no manadj action and stays unmapped. Vinyl-off nudges/seeks.
+    // E1 p2 D4/D5: rotation is mode-specific; touch notes are not.
     {
       match: { message: 'cc', channel, number: 34 },
       controlType: 'relative',
@@ -120,7 +121,7 @@ function deckBindings({ deck, channel, padChannel, shiftedPadChannel }: DeckMidi
     {
       match: { message: 'cc', channel, number: 35 },
       controlType: 'relative',
-      target: { control: 'jog', deck },
+      target: { control: 'jog-vinyl-off', deck },
       encoding: 'offset-64',
       jogProfile: 'grv6',
     },
@@ -204,6 +205,8 @@ function deckFeedback({ channel, padChannel, shiftedPadChannel }: DeckMidi): Dec
     gridPadMapped: Array.from({ length: 8 }, () => true),
     quantize: led(channel, 53),
     keyLock: led(channel, 26),
+    slipMode: led(channel, 64),
+    vinylMode: led(channel, 23),
     loopPads: LOOP_PRESETS.map((beats, pad) => ({
       ...led(shiftedPadChannel, PAD_BLOCK.beatLoop + pad),
       beats,

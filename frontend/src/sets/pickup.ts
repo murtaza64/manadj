@@ -22,10 +22,12 @@
  * every instant, track, and Transition stays exactly as pinned.
  */
 import { DEFAULT_DETECTOR_PARAMS } from '../capture/events';
-import { aContentSegments, aTrackTimeAt, bContentSegments, bTrackTimeAt } from '../editor/mixModel';
+import { aContentSegments, aTrackTimeAt, bTrackTimeAt } from '../editor/mixModel';
+import { outgoingAutomationStart } from '../editor/pairBounds';
 import { audibleHolder, type AudibleSurfaceId } from '../playback/audibleSurface';
 import { channelFaderToGain, crossfaderGains, trimToGain } from '../playback/mixerMath';
 import type { PlanAutomation, PlannedAdjacency, PlannedEntry, SetPlan } from './planner';
+import { incomingMixTimeAt } from './planner';
 
 /** The pair-machine decks: Pickup adopts the shared A/B pair (a Routine's
  * C/D allocations are Conductor territory — routines 159). */
@@ -220,39 +222,33 @@ export function mixTimeForTrackTime(plan: SetPlan, idx: number, tau: number): nu
       if (!point.moving || point.ratePerBeat <= 0) continue;
       const beat = point.beat + (tau - point.pos) / point.ratePerBeat;
       if (beat < point.beat || beat >= (slot.trace[i + 1]?.beat ?? Infinity)) continue;
-      const t = routine.mixStartSec + beat * routine.secPerBeat;
-      if (t < Math.max(slot.entryMixSec, slot.occupyFromMixSec, entry.entryMixSec)) continue;
+      const t = routine.beatOriginMixSec + beat * routine.secPerBeat;
+      if (t < Math.max(routine.mixStartSec, slot.entryMixSec, slot.occupyFromMixSec, entry.entryMixSec)) continue;
       if (t >= Math.min(routine.mixEndSec, slot.releaseMixSec, entry.exitMixSec)) continue;
       return clampSpan(t);
     }
   }
   const entryAdj = idx > 0 ? plan.adjacencies[idx - 1] : undefined;
+  const exitAdj = plan.adjacencies[idx];
+  const outgoingFrom = isWindowed(exitAdj)
+    ? exitAdj.mixStartSec + (outgoingAutomationStart(exitAdj.transition) - exitAdj.transition.startSec) / exitAdj.rateOutgoing
+    : entryAdj?.tempoReturnEndSec ?? entry.entryMixSec;
   const minTau = Math.min(entry.entrySec, entryAdj?.incomingTrackSecAtWindowEnd ?? entry.entrySec);
   if (tau < minTau - SPAN_EPS || tau > entry.exitSec + SPAN_EPS) return null;
 
   if (isWindowed(entryAdj)) {
-    const w = entryAdj;
-    const tr = w.transition;
-    // Inside the entry window: B advances at rateIncoming between Jump
-    // events — invert per content segment (durB unbounded: the entry's
-    // own exitSec already bounds tau).
-    for (const seg of bContentSegments(tr, Number.POSITIVE_INFINITY, w.rateIncoming)) {
-      const authored = seg.mixStartSec + (tau - seg.bStartSec) / w.rateIncoming;
-      if (authored < seg.mixStartSec - SPAN_EPS || authored >= seg.mixEndSec) continue;
-      const t = mixFromAuthored(w, authored);
-      if (t < w.mixStartSec - SPAN_EPS || t >= w.mixEndSec) continue;
-      return clampSpan(t);
-    }
+    const t = incomingMixTimeAt(entryAdj, tau, entry.rate, {
+      until: Math.min(entry.exitMixSec, isWindowed(exitAdj) ? outgoingFrom : Infinity),
+    });
+    if (t !== null) return clampSpan(t);
   }
-  if (entryAdj && entryAdj.kind !== 'hardcut') {
+  if (entryAdj?.kind === 'routine') {
     const w = entryAdj;
     // Through the Tempo return: trackTime = b + r·x + (1−r)x²/(2d).
     const d = w.tempoReturnEndSec - w.mixEndSec;
     if (d > 0) {
       const r = w.rateIncoming;
-      const b = isWindowed(w)
-        ? bTrackTimeAt(w.transition, w.transition.startSec + w.transition.durationSec, r)
-        : w.incomingTrackSecAtWindowEnd;
+      const b = w.incomingTrackSecAtWindowEnd;
       if (b === undefined) return null;
       const endTau = b + r * d + ((1 - r) * d) / 2; // trackTime at ramp end
       if (tau >= b - SPAN_EPS && tau < endTau) {
@@ -273,13 +269,12 @@ export function mixTimeForTrackTime(plan: SetPlan, idx: number, tau: number): nu
   // The outgoing's regime inside its EXIT window with outgoing jumps
   // (issue 177): invert per audible segment of A's jumped walk — replayed
   // content maps to its FIRST landing, like B's entry-window inversion.
-  const exitAdj = plan.adjacencies[idx];
   if (isWindowed(exitAdj) && exitAdj.transition.jumpsA?.length) {
     for (const seg of aContentSegments(exitAdj.transition, Number.POSITIVE_INFINITY)) {
       const authored = seg.mixStartSec + (tau - seg.bStartSec);
       if (authored < seg.mixStartSec - SPAN_EPS || authored >= seg.mixEndSec) continue;
       const t = mixFromAuthored(exitAdj, authored);
-      const soloFrom = entryAdj?.tempoReturnEndSec ?? entry.entryMixSec;
+      const soloFrom = isWindowed(entryAdj) ? outgoingFrom : entryAdj?.tempoReturnEndSec ?? entry.entryMixSec;
       if (t < soloFrom - SPAN_EPS) continue;
       return clampSpan(t);
     }
@@ -291,7 +286,7 @@ export function mixTimeForTrackTime(plan: SetPlan, idx: number, tau: number): nu
   // the outgoing has no jumps — the authored axis is its own track time
   // at its solo rate).
   const t = entry.mixOffsetSec + tau / entry.rate;
-  const soloFrom = entryAdj?.tempoReturnEndSec ?? entry.entryMixSec;
+  const soloFrom = isWindowed(entryAdj) ? outgoingFrom : entryAdj?.tempoReturnEndSec ?? entry.entryMixSec;
   if (t < soloFrom - SPAN_EPS) return null;
   const clamped = clampSpan(t);
   if (routines.some((r) => clamped >= r.mixStartSec && clamped < r.mixEndSec)) return null;

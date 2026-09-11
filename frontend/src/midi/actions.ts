@@ -22,6 +22,9 @@ export type EqBand = 'low' | 'mid' | 'high';
 
 export type ButtonTarget =
   | { control: 'transport'; deck: ChannelId }
+  | { control: 'jog-touch-edge'; deck: ChannelId; shifted: boolean }
+  | { control: 'slip-mode'; deck: ChannelId }
+  | { control: 'vinyl-mode'; deck: ChannelId }
   | { control: 'cue'; deck: ChannelId }
   | { control: 'hot-cue'; deck: ChannelId; pad: number }
   | { control: 'hot-cue-clear'; deck: ChannelId; pad: number }
@@ -112,6 +115,7 @@ export type AbsoluteTarget =
 
 export type RelativeTarget =
   | { control: 'jog'; deck: ChannelId }
+  | { control: 'jog-vinyl-off'; deck: ChannelId }
   /** The jog's touch surface: a denser tick stream for fine paused seeks. */
   | { control: 'jog-touch'; deck: ChannelId }
   /** The jog's SHIFT layer: deliberate velocity-accelerated fast seek. */

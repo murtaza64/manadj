@@ -21,7 +21,10 @@ import type { CrossfaderAssignment } from '../playback/crossfaderAssignmentStore
 import {
   ALL_DECKS,
   applyEvent,
+  advanceScratch,
   cloneAudibilityState,
+  deckPlayheadAt,
+  deckScratchMotion,
   deckGain,
   initialAudibilityState,
   maskedDeckAudible,
@@ -29,6 +32,8 @@ import {
 import type { AudibilityState } from '../capture/audibilityReducer';
 import { DEFAULT_DETECTOR_PARAMS } from '../capture/events';
 import type { CaptureDeck, CaptureEvent, DetectorParams } from '../capture/events';
+import { scratchBoundary } from '../playback/worklet/scratchMotion';
+import type { ScratchFilter } from '../playback/worklet/scratchMotion';
 
 export { ALL_DECKS };
 
@@ -237,7 +242,7 @@ export function deriveTimeline(
     if (tr && tr.length >= 2) traces[ch].push(tr);
     openTrace[ch] = null;
   };
-  const sampleTrace = (ch: CaptureDeck, t: number, playhead: number, jog = false) => {
+  const sampleTrace = (ch: CaptureDeck, t: number, playhead: number, jog = false, scratch = false) => {
     let tr = openTrace[ch];
     if (tr && tr.length > 0) {
       const last = tr[tr.length - 1];
@@ -253,7 +258,7 @@ export function deriveTimeline(
         return;
       }
       // Discontinuity: jumped (seek/hot cue) or reversed or a long silence.
-      if (dp < -0.75 || Math.abs(dp - dt) > Math.max(2, dt * 0.5) || dt > 4) {
+      if (!scratch && (dp < -0.75 || Math.abs(dp - dt) > Math.max(2, dt * 0.5) || dt > 4)) {
         breakTrace(ch);
         tr = null;
       }
@@ -265,7 +270,33 @@ export function deriveTimeline(
     tr.push({ t, playhead });
   };
 
-  for (const e of events) {
+  for (let i = 0; i < events.length;) {
+    // Resolve filter rest, reversal, and loop edges without a raw tick.
+    const next = events[i];
+    const wraps = new Map<CaptureDeck, number>();
+    let expires = Infinity;
+    for (const ch of ALL_DECKS) {
+      const d = s.decks[ch];
+      if (!d.scratch) continue;
+      const boundary = scratchBoundary(deckScratchMotion(d));
+      expires = Math.min(expires, boundary.time, boundary.time < Infinity ? d.playheadAt + 0.004 : Infinity);
+      if (boundary.wrap) wraps.set(ch, boundary.time);
+    }
+    const e: CaptureEvent = expires <= next.t
+      ? { t: expires, kind: 'tick', playheads: {} }
+      : events[i++];
+    for (const ch of ALL_DECKS) {
+      const d = s.decks[ch];
+      if (d.scratch) {
+        const loop = deckScratchMotion(d).loop;
+        if (wraps.get(ch) === e.t && loop) {
+          const forward = (d.scratch.rate || d.scratch.drive) > 0;
+          sampleTrace(ch, e.t, forward ? loop.end : loop.start, false, true);
+          breakTrace(ch);
+          sampleTrace(ch, e.t, forward ? loop.start : loop.end, false, true);
+        } else sampleTrace(ch, e.t, deckPlayheadAt(d, e.t), false, true);
+      }
+    }
     // Pre-event playhead for the affected deck: seek-class gestures must
     // CLOSE the old trace at the jump instant (extrapolated), not at the
     // last tick — otherwise every jump leaves an up-to-1s waveform gap.
@@ -282,8 +313,8 @@ export function deriveTimeline(
       (e.action === 'seek' || e.action === 'jumpBeats' || e.action === 'hotCue')
     ) {
       const d = s.decks[e.channel];
-      if (d.playing || d.previewing) {
-        preJump = d.playhead + (e.t - d.playheadAt) * (1 + d.pitch / 100);
+      if (d.playing || d.previewing || d.scratch) {
+        preJump = deckPlayheadAt(d, e.t);
         jogRef = preJump;
       } else {
         jogRef = d.playhead;
@@ -327,12 +358,19 @@ export function deriveTimeline(
     if (e.kind === 'tick') {
       for (const ch of ALL_DECKS) {
         const p = e.playheads[ch];
-        if (p !== undefined && (s.decks[ch].playing || s.decks[ch].previewing)) {
-          sampleTrace(ch, e.t, p);
+        if (p !== undefined && (s.decks[ch].playing || s.decks[ch].previewing || s.decks[ch].scratch)) {
+          sampleTrace(ch, e.t, s.decks[ch].scratch ? deckPlayheadAt(s.decks[ch], e.t) : p,
+            false, s.decks[ch].scratch !== null);
         }
       }
     } else if (e.kind === 'transport') {
-      if (e.action === 'play' || e.action === 'previewStart') {
+      if (e.action === 'scratchBegin' || e.action === 'scratchMove') {
+        sampleTrace(e.channel, e.t, e.playhead, false, true);
+      } else if (e.action === 'scratchEnd') {
+        // The resolved slip landing is a discontinuity, not forward motion.
+        breakTrace(e.channel);
+        if (s.decks[e.channel].playing) sampleTrace(e.channel, e.t, e.playhead);
+      } else if (e.action === 'play' || e.action === 'previewStart') {
         sampleTrace(e.channel, e.t, e.playhead);
         // Cue-press marker (sessions 11): a main-cue stab launch IS a CUE
         // press — mark it like return-to-cue (▲). Hot-cue stabs already get
@@ -517,6 +555,11 @@ export function deriveTimeline(
 export interface DeckStateAtT {
   trackId: number | null;
   playing: boolean;
+  scratching: boolean;
+  scratch: ScratchFilter | null;
+  slipMode: boolean;
+  vinylMode: boolean;
+  loop: { start: number; end: number } | null;
   audible: boolean;
   /** Master-bus gain right now. */
   gain: number;
@@ -569,6 +612,7 @@ function snapshotState(
   before: number,
   total: number
 ): StateAtT {
+  advanceScratch(s, t);
   const decks = Object.fromEntries(
     ALL_DECKS.map((ch) => {
       const d = s.decks[ch];
@@ -576,13 +620,17 @@ function snapshotState(
       // per wall-sec. Rate-blind extrapolation seeded replays with a
       // per-deck phase error ∝ (T − last tick) × pitch — the "blend isn't
       // beatmatched, differently every time" bug.
-      const rate = 1 + d.pitch / 100;
-      const extrapolated = d.playing ? d.playhead + (t - d.playheadAt) * rate : d.playhead;
+      const extrapolated = deckPlayheadAt(d, t);
       return [
         ch,
         {
           trackId: d.trackId,
           playing: d.playing,
+          scratching: d.scratch !== null,
+          scratch: d.scratch ? { ...d.scratch } : null,
+          slipMode: d.slipMode,
+          vinylMode: d.vinylMode,
+          loop: d.loop ? { ...d.loop } : null,
           audible: maskedDeckAudible(s, ch),
           gain: deckGain(s, ch),
           playhead: Math.max(0, extrapolated),

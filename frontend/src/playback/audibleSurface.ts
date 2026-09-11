@@ -18,6 +18,7 @@
  * dropped. Module-level on purpose: the MIDI layer lives outside React.
  */
 import type { ChannelId } from './mixer';
+import { CHANNEL_IDS } from './mixer';
 import type { JogProfile } from '../midi/jogCalibration';
 
 export type AudibleSurfaceId = 'shared' | 'editor' | 'routine-editor' | 'conductor' | 'replay';
@@ -77,11 +78,15 @@ export interface SurfaceLoops {
 export interface SurfaceJog {
   /** Bare rim (CC #9): bend when playing / gentle seek when paused on the
    * shared decks; always a scrub/Slide in the editor. */
-  rimTicks(deck: ChannelId, ticks: number, jogProfile?: JogProfile): void;
+  rimTicks(deck: ChannelId, ticks: number, jogProfile?: JogProfile, vinylOff?: boolean): void;
   /** Touch surface (CC #10): the fine tier. */
   touchTicks(deck: ChannelId, ticks: number, jogProfile?: JogProfile): void;
   /** SHIFT+rim: the deliberate velocity-accelerated fast tier. */
   shiftRimTicks(deck: ChannelId, ticks: number, jogProfile?: JogProfile): void;
+  /** True platter contact; absent on surfaces that only scrub/slide. */
+  touch?(deck: ChannelId, held: boolean): void;
+  /** End held contact, released-spin continuation, and momentary bends. */
+  cancel?(deck: ChannelId): void;
 }
 
 /** Minimal observable transport state (ADR 0019): lets LED Feedback
@@ -123,12 +128,17 @@ function notify(): void {
  * ('shared') is audible until someone claims. Re-register overwrites (the
  * handle's closures go stale on remount otherwise). */
 export function registerSurface(id: AudibleSurfaceId, surface: AudibleSurface): void {
+  const previous = surfaces.get(id);
+  if (previous && previous !== surface) {
+    for (const deck of CHANNEL_IDS) previous.jog?.cancel?.(deck);
+  }
   surfaces.set(id, surface);
 }
 
 /** Forget a surface. The holder implicitly releases first. */
 export function unregisterSurface(id: AudibleSurfaceId): void {
   if (holder === id && id !== 'shared') releaseAudible(id);
+  for (const deck of CHANNEL_IDS) surfaces.get(id)?.jog?.cancel?.(deck);
   surfaces.delete(id);
 }
 
@@ -155,6 +165,7 @@ export function claimAudible(
   if (holder !== 'shared') {
     console.warn(`[audibleSurface] '${id}' displaces '${holder}' (last claim wins)`);
   }
+  for (const deck of CHANNEL_IDS) surfaces.get(holder)?.jog?.cancel?.(deck);
   if (opts.silencePrevious !== false) surfaces.get(holder)?.silence();
   holder = id;
   notify();
@@ -167,6 +178,7 @@ export function releaseAudible(id: AudibleSurfaceId): void {
     console.warn(`[audibleSurface] release by non-holder '${id}' ignored (holder: '${holder}')`);
     return;
   }
+  for (const deck of CHANNEL_IDS) surfaces.get(id)?.jog?.cancel?.(deck);
   surfaces.get(id)?.silence();
   holder = 'shared';
   notify();

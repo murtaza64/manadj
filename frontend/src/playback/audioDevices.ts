@@ -4,8 +4,9 @@
  * Chrome gates device labels — and every non-default device id — behind a
  * media-capture permission grant: without one, enumerateDevices() returns
  * blank labels and only default entries, useless for a routing picker. When
- * the list looks locked we request a throwaway microphone stream once (the
- * documented unlock), stop it immediately, and re-enumerate.
+ * the list looks locked an explicit picker refresh can request a throwaway
+ * microphone stream (the documented unlock), stop it, and re-enumerate.
+ * Background refreshes only do this with permission already granted.
  *
  * Channel counts: enumerateDevices() says nothing about output channels,
  * but the CUE picker splits multichannel interfaces into stereo pairs
@@ -86,7 +87,7 @@ async function outputsOf(devices: MediaDeviceInfo[]): Promise<AudioOutputDevice[
   return result;
 }
 
-export async function listAudioOutputs(forceProbe = false): Promise<AudioOutputDevice[]> {
+export async function listAudioOutputs(forceProbe = false, allowPrompt = true): Promise<AudioOutputDevice[]> {
   if (forceProbe) channelCountCache.clear();
   const locked = (devices: MediaDeviceInfo[]) => {
     const outputs = devices.filter((d) => d.kind === 'audiooutput' && d.deviceId !== '');
@@ -95,6 +96,13 @@ export async function listAudioOutputs(forceProbe = false): Promise<AudioOutputD
 
   const first = await navigator.mediaDevices.enumerateDevices();
   if (!locked(first)) return outputsOf(first);
+
+  if (!allowPrompt) {
+    // Pending browser permission UI blocks pointer lock in Firefox. Restored
+    // routing must not open a prompt while the user is mixing with keys.
+    const permission = await navigator.permissions?.query({ name: 'microphone' as PermissionName }).catch(() => null);
+    if (permission?.state !== 'granted') return outputsOf(first);
+  }
 
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });

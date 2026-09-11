@@ -46,6 +46,12 @@
   border-bottom: 2px solid var(--surface1);
 }
 
+/* Keep the mixer usable on narrow screens rather than overlapping controls. */
+@media (max-width: 1279px) {
+  .perf-root { overflow-x: auto; }
+  .perf-surface { min-width: 1280px; }
+}
+
 /* Stacked flush rows; position anchors the play-guide overlay (whose
  * chips straddle the row boundary). */
 .perf-waves {
@@ -56,6 +62,11 @@
 }
 .perf-waves .waveform-container,
 .perf-waves .waveform-container canvas { height: 52px; }
+
+/* Display-only deck count: preserve panels, canvases and their local state. */
+.perf-root[data-deck-count="2"] :is(.perf-wave-row, .perf-deckpanel):is(.deck-c, .deck-d) {
+  display: none;
+}
 
 .perf-wave-row {
   position: relative;
@@ -187,6 +198,22 @@
   gap: var(--space-8);
 }
 
+.perf-deck-count { display: inline-flex; flex-shrink: 0; }
+
+@media (max-width: 1400px) {
+  .perf-strip {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-8) var(--space-12);
+  }
+  .perf-strip-left { flex-wrap: wrap; }
+  .perf-strip-slot.wide { flex-wrap: wrap; }
+  .perf-strip-slot.wide .pairlink-strip {
+    position: static;
+    transform: none;
+  }
+}
+
 .perf-strip-toggle {
   padding: 1px var(--space-6);
   font-size: var(--font-micro);
@@ -229,7 +256,7 @@
 }
 
 /* A/B on the first row, C/D on the second. */
-.perf-decks > .perf-deckpanel:nth-of-type(n + 3) {
+.perf-decks > .perf-deckpanel:is(.deck-c, .deck-d) {
   border-top: 1px solid var(--surface1);
 }
 
@@ -267,6 +294,7 @@
 
 .perf-deckpanel:is(.deck-a, .deck-c).focused::after { content: 'CONTROL  ['; }
 .perf-deckpanel:is(.deck-b, .deck-d).focused::after { content: 'CONTROL  ]'; }
+.perf-root[data-deck-count="2"] .perf-deckpanel.focused::after { content: 'CONTROL'; }
 
 /* Only the focused Deck on each side owns that hand's keyboard map. */
 .perf-deckpanel:not(.focused) .perf-kbd { display: none; }
@@ -1005,6 +1033,7 @@
 /* Foot: prominent playback readouts beside MATCH + nudge */
 .perf-mix-foot {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--space-4);
 }
@@ -1156,6 +1185,18 @@
   display: block;
 }
 
+.perf-mix-foot .perf-vinyl.on,
+.perf-mix-foot .perf-slip.on {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--base);
+}
+.perf-mix-foot .perf-vinyl.scratching {
+  background: var(--warning);
+  border-color: var(--warning);
+  color: var(--base);
+}
+
 /* Drift marker (key-lock 04): the readout dims while the sounding key has
    drifted from the Track's Key (Key Lock off, |pitch| ≥ threshold). The ~
    is always laid out, transparent until drifted, so the width never jumps. */
@@ -1192,6 +1233,12 @@
   border: 1px solid var(--overlay0);
 }
 
+.perf-kbd-inline {
+  position: static;
+  margin-left: var(--space-4);
+}
+.perf-kbd-inline .perf-kbd { position: static; border: 0; padding: 0; }
+
 /* Load-lock refusal hint on the deck panel (view policy, issue 04) */
 .perf-lock-hint {
   color: var(--danger);
@@ -1206,10 +1253,20 @@
 
 /* Row affordances dim while their deck is locked (audibly running);
    BrowsePanel applies the lock classes only in performance mode. */
+.app-main:has(.perf-root[data-view-active="true"][data-deck-count="2"])
+  .app-browse :is(.track-load-button-C, .track-load-button-D) {
+  display: none;
+}
+
 .app-browse.lock-A .track-load-button-A,
 .app-browse.lock-B .track-load-button-B,
 .app-browse.lock-C .track-load-button-C,
 .app-browse.lock-D .track-load-button-D {
   opacity: 0.35;
   cursor: not-allowed;
+}
+
+@media (max-width: 1100px) {
+  .perf-root { overflow: auto; max-height: 70dvh; }
+  .perf-surface { min-width: 1100px; }
 }

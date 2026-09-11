@@ -12,12 +12,14 @@ REAL-DB OPERATION: run in the default workspace after landing
 
 Usage:
     uv run scripts/backfill_stems.py [--dry-run] [--limit N] [--playlist NAME]
+    uv run scripts/backfill_stems.py --since YYYY-MM-DD --skip-gc
 """
 
 import argparse
 import shutil
 import sys
 import time
+from datetime import date
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -71,6 +73,11 @@ def main() -> None:
     parser.add_argument("--dry-run", action="store_true", help="report, change nothing")
     parser.add_argument("--limit", type=int, default=None, help="split at most N tracks")
     parser.add_argument(
+        "--since", type=date.fromisoformat, default=None,
+        help="only split tracks imported on or after this date (YYYY-MM-DD, UTC)",
+    )
+    parser.add_argument("--skip-gc", action="store_true", help="leave orphaned stem dirs untouched")
+    parser.add_argument(
         "--playlist", default=None,
         help="only split tracks in this playlist (case-insensitive name match); "
              "GC still considers the whole library",
@@ -87,6 +94,8 @@ def main() -> None:
         if args.playlist:
             wanted = playlist_track_ids(db, args.playlist)
             tracks = [t for t in tracks if t.id in wanted]
+        if args.since:
+            tracks = [t for t in tracks if t.created_at.date() >= args.since]
     finally:
         db.close()
 
@@ -99,7 +108,7 @@ def main() -> None:
     print(f"{len(tracks)} active tracks; {len(tracks) - len(stale)} current, "
           f"{len(todo)} to split, {len(missing_files)} missing source files")
 
-    orphans = gc_orphaned_stems(active_ids, args.dry_run)
+    orphans = [] if args.skip_gc else gc_orphaned_stems(active_ids, args.dry_run)
     if orphans:
         verb = "would remove" if args.dry_run else "removed"
         print(f"GC: {verb} {len(orphans)} orphaned stem dirs: "

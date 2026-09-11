@@ -11,7 +11,7 @@
  * midi-controller 09) and pushing changes through the setters. The shared
  * rotary Knob lives here too (used by the deck MIX zones).
  */
-import { useRef } from 'react';
+import { useRef, type ReactNode } from 'react';
 import { useMixer, useMixerValue } from '../../hooks/useMixer';
 import { useTakeoverHint } from '../../hooks/useTakeoverHint';
 import { takeoverKey, type TakeoverDirection } from '../../midi/takeoverFeedback';
@@ -20,6 +20,7 @@ import type { ChannelId } from '../../playback/mixer';
 import { CROSSFADER_ASSIGNMENTS } from '../../playback/crossfaderAssignmentStore';
 import { DiagonalPairLinks } from '../../links/PerformancePairLinks';
 import { PerfSectionToggles } from './PerfSectionToggles';
+import type { DeckCount } from './waveformOrder';
 
 /** Vertical drag distance (px) that sweeps a knob end to end. */
 const KNOB_DRAG_RANGE_PX = 150;
@@ -34,6 +35,7 @@ function wheelDelta(e: React.WheelEvent, min: number, max: number): number {
 
 export function Knob({
   label,
+  kbd,
   min,
   max,
   defaultValue,
@@ -45,6 +47,7 @@ export function Knob({
   takeover = null,
 }: {
   label: string;
+  kbd?: ReactNode;
   min: number;
   max: number;
   /** Double-click reset position. */
@@ -111,7 +114,7 @@ export function Knob({
           style={{ transform: `rotate(${angle}deg)` }}
         />
       </div>
-      <span>{label}</span>
+      <span>{label}{kbd != null && <span className="perf-kbd perf-kbd-inline">{kbd}</span>}</span>
     </div>
   );
 }
@@ -129,6 +132,7 @@ export function Knob({
  */
 export function HFader({
   label,
+  kbd,
   min,
   max,
   value,
@@ -145,6 +149,7 @@ export function HFader({
   takeover = null,
 }: {
   label: string;
+  kbd?: ReactNode;
   min: number;
   max: number;
   value: number;
@@ -252,6 +257,7 @@ export function HFader({
         }}
       >
         {label}
+        {kbd != null && <span className="perf-kbd perf-kbd-inline">{kbd}</span>}
       </div>
     </div>
   );
@@ -298,10 +304,14 @@ function XfAssign({ deck }: { deck: ChannelId }) {
 export function MixerStrip({
   hintsOn = true,
   onToggleHints,
+  deckCount = 4,
+  onDeckCountChange,
 }: {
   /** Keyboard-hint visibility (the KBD toggle in the strip's left cell). */
   hintsOn?: boolean;
   onToggleHints?: () => void;
+  deckCount?: DeckCount;
+  onDeckCountChange?: (count: DeckCount) => void;
 }) {
   const mixer = useMixer();
   const crossfader = useMixerValue((m) => m.getCrossfader());
@@ -319,6 +329,21 @@ export function MixerStrip({
   return (
     <div className="perf-strip">
       <div className="perf-strip-left">
+        {onDeckCountChange && (
+          <span className="perf-deck-count" role="group" aria-label="Displayed decks">
+            {([2, 4] as const).map((count) => (
+              <button
+                key={count}
+                className={`player-button perf-strip-toggle${deckCount === count ? ' on' : ''}`}
+                aria-pressed={deckCount === count}
+                onClick={() => onDeckCountChange(count)}
+                title={`Show ${count} decks (display only)`}
+              >
+                {count} DECKS
+              </button>
+            ))}
+          </span>
+        )}
         {onToggleHints && (
           <button
             className={`player-button perf-strip-toggle${hintsOn ? ' on' : ''}`}
@@ -349,7 +374,7 @@ export function MixerStrip({
             (A/C left, B/D right — matching the 2×2 deck grid columns);
             an assignment is free to point anywhere regardless. */}
         <XfAssign deck="A" />
-        <XfAssign deck="C" />
+        {deckCount === 4 && <XfAssign deck="C" />}
         {/* End labels flank the fader (flex flow, never over the track);
             physical orientation — only the fills are reversed. */}
         <span className="perf-xfade-end">L</span>
@@ -368,7 +393,7 @@ export function MixerStrip({
         />
         <span className="perf-xfade-end">R</span>
         <XfAssign deck="B" />
-        <XfAssign deck="D" />
+        {deckCount === 4 && <XfAssign deck="D" />}
         {/* Invisible twin of the XF toggle: keeps the fader's center on the
             deck divider axis. */}
         <span className="player-button perf-strip-toggle perf-strip-ghost" aria-hidden="true">
@@ -378,7 +403,7 @@ export function MixerStrip({
             have no shared Deck edge, so their toggles hang here beside
             the crossfader. Adjacent pairs live on the Deck grid's edges
             (EdgePairLinks). */}
-        <DiagonalPairLinks />
+        {deckCount === 4 && <DiagonalPairLinks />}
       </div>
       <div className="perf-strip-slot">
         {/* Headphone blend. MASTER and PHONES gain moved to the top bar's

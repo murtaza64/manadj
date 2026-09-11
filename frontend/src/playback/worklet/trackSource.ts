@@ -15,6 +15,8 @@
  * every block, so the change propagates without a splice or re-prime).
  * Reads before the anchor (declick tails, loop folds) see the old gain —
  * a ≤5 ms inconsistency, inaudible by the same argument as the declick.
+ * During scratching, setOutputClock instead advances ramps in output
+ * frames, so reverse reads and silent holds cannot undo or stall a kill.
  *
  * Pure module (no Web Audio, no globals): worklet-safe by contract and
  * fully under vitest (ADR 0002).
@@ -99,6 +101,7 @@ export class StemTrackSource implements TrackSource {
    * stem for reads before it (seek-back bug, stems #210 review). */
   private readonly gains: number[];
   private readonly ramps: (GainRamp | null)[];
+  private outputClock: number | null = null;
 
   constructor(stems: Float32Array[][]) {
     this.stems = stems;
@@ -113,6 +116,7 @@ export class StemTrackSource implements TrackSource {
 
   /** The gain of stem `s` at a track frame (ramp-aware while in flight). */
   gainAt(s: number, frame: number): number {
+    frame = this.outputClock ?? frame;
     const ramp = this.ramps[s];
     if (!ramp) return this.gains[s];
     if (frame <= ramp.startFrame) return ramp.g0;
@@ -138,6 +142,14 @@ export class StemTrackSource implements TrackSource {
    * a declick splice already, so the new voice needs no gain ramp. */
   settleGains(): void {
     this.ramps.fill(null);
+  }
+
+  /** Scratch reads reverse or hold. Its ramps must advance with OUTPUT,
+   * while normal stretch keeps position-keyed read-ahead interpolation. */
+  setOutputClock(frame: number | null): void {
+    if ((frame === null) !== (this.outputClock === null)) this.settleGains();
+    this.outputClock = frame;
+    if (frame !== null) this.settleCompletedRamps(frame);
   }
 
   /** Null out ramps the live voice has fully played past (once per render
@@ -179,7 +191,8 @@ export class StemTrackSource implements TrackSource {
       // was retired — Key Lock made every kill switch a ~5 ms dip).
       const ramp = this.ramps[s];
       let constGain: number | null;
-      if (!ramp) constGain = this.gains[s];
+      if (this.outputClock !== null) constGain = this.gainAt(s, this.outputClock);
+      else if (!ramp) constGain = this.gains[s];
       else if (from >= ramp.startFrame + ramp.lengthFrames) constGain = ramp.g1;
       else if (to <= ramp.startFrame) constGain = ramp.g0;
       else constGain = null;

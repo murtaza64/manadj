@@ -3,7 +3,7 @@ import { initialDecoderState, translateMidiMessage } from '../translator';
 import type { DecoderState } from '../translator';
 import type { MidiAction } from '../actions';
 import { DDJ_GRV6 } from './ddjGrv6';
-import { encodeDeckLeds } from '../feedback';
+import { allOffMessages, encodeDeckLeds, ledStates } from '../feedback';
 
 function translate(messages: number[][]): MidiAction[] {
   let state: DecoderState = initialDecoderState();
@@ -22,6 +22,58 @@ const cc = (channel: number, number: number, value: number) => [
 ];
 
 describe('DDJ-GRV6 Mapping — official E1 message table', () => {
+  it.each(['A', 'B', 'C', 'D'] as const)('maps E1 touch, mode buttons, and rotation for deck %s', (deck) => {
+    const channel = ['A', 'B', 'C', 'D'].indexOf(deck);
+    expect(translate([
+      press(channel, 54), [0x90 | channel, 54, 0],
+      press(channel, 103), [0x80 | channel, 103, 127],
+      press(channel, 64), press(channel, 23),
+    ])).toEqual([
+      { kind: 'button', target: { control: 'jog-touch-edge', deck, shifted: false }, edge: 'down' },
+      { kind: 'button', target: { control: 'jog-touch-edge', deck, shifted: false }, edge: 'up' },
+      { kind: 'button', target: { control: 'jog-touch-edge', deck, shifted: true }, edge: 'down' },
+      { kind: 'button', target: { control: 'jog-touch-edge', deck, shifted: true }, edge: 'up' },
+      { kind: 'button', target: { control: 'slip-mode', deck }, edge: 'down' },
+      { kind: 'button', target: { control: 'vinyl-mode', deck }, edge: 'down' },
+    ]);
+    expect(translate([33, 34, 35, 38, 41].flatMap((number) => [cc(channel, number, 60), cc(channel, number, 64)])))
+      .toEqual(['jog', 'jog-touch', 'jog-vinyl-off', 'jog-seek', 'jog-seek'].map((control) => ({
+        kind: 'relative', target: { control, deck }, ticks: -4, jogProfile: 'grv6',
+      })));
+  });
+
+  it.each([[54, 103], [103, 54]])('allows a release on %s/%s across SHIFT and rearms the next touch', (down, up) => {
+    const actions = translate([press(0, down), press(0, down), [0x90, up, 0], press(0, down)]);
+    expect(actions.map((a) => a.kind === 'button' && a.edge)).toEqual(['down', 'up', 'down']);
+    expect(actions[1].target).toEqual({ control: 'jog-touch-edge', deck: 'A', shifted: up === 103 });
+  });
+
+  it('preserves distinct shifted down edges and clears contact dedup on a layer release', () => {
+    expect(translate([press(0, 54), press(0, 103)]).map((a) => a.target)).toEqual([
+      { control: 'jog-touch-edge', deck: 'A', shifted: false },
+      { control: 'jog-touch-edge', deck: 'A', shifted: true },
+    ]);
+    const actions = translate([press(0, 54), [0x90, 60, 0], press(0, 54)]);
+    expect(actions).toHaveLength(3);
+  });
+
+  it.each(['A', 'B', 'C', 'D'] as const)('encodes Slip/Vinyl flags and all-off on deck %s', (deck) => {
+    const channel = ['A', 'B', 'C', 'D'].indexOf(deck);
+    for (const on of [true, false]) {
+      const states = ledStates({
+        playing: false, pendingPlay: false, previewing: false, hasCuePoint: false,
+        atCuePoint: false, assignedPads: new Set(), loaded: false, pfl: false,
+        hasBeatgrid: false, quantize: false, keyLock: true, loopBeats: null,
+        slipMode: on, vinylMode: !on,
+      });
+      const messages = encodeDeckLeds(DDJ_GRV6.feedback!, deck, states);
+      expect(messages).toContainEqual([0x90 | channel, 64, on ? 127 : 0]);
+      expect(messages).toContainEqual([0x90 | channel, 23, on ? 0 : 127]);
+    }
+    expect(allOffMessages(DDJ_GRV6.feedback!)).toContainEqual([0x90 | channel, 64, 0]);
+    expect(allOffMessages(DDJ_GRV6.feedback!)).toContainEqual([0x90 | channel, 23, 0]);
+  });
+
   it('matches the device port name', () => {
     expect('AlphaTheta DDJ-GRV6'.includes(DDJ_GRV6.portNameMatch)).toBe(true);
   });
@@ -35,8 +87,10 @@ describe('DDJ-GRV6 Mapping — official E1 message table', () => {
     ]);
   });
 
-  it('ignores the deselected layer velocity-zero state', () => {
-    expect(translate([[0x92, 60, 0]])).toEqual([]);
+  it('delivers deselected layer state even without an earlier selected message', () => {
+    expect(translate([[0x92, 60, 0]])).toEqual([
+      { kind: 'button', target: { control: 'set-control-focus', deck: 'C' }, edge: 'up' },
+    ]);
   });
 
   it('maps fixed Load 1–4 buttons and the browser encoder', () => {
@@ -91,7 +145,7 @@ describe('DDJ-GRV6 Mapping — official E1 message table', () => {
       { kind: 'relative', target: { control: 'jog', deck: 'C' }, ticks: 1, jogProfile: 'grv6' },
       { kind: 'relative', target: { control: 'jog', deck: 'C' }, ticks: -1, jogProfile: 'grv6' },
       { kind: 'relative', target: { control: 'jog-touch', deck: 'D' }, ticks: 1, jogProfile: 'grv6' },
-      { kind: 'relative', target: { control: 'jog', deck: 'D' }, ticks: -1, jogProfile: 'grv6' },
+      { kind: 'relative', target: { control: 'jog-vinyl-off', deck: 'D' }, ticks: -1, jogProfile: 'grv6' },
       { kind: 'relative', target: { control: 'jog-seek', deck: 'D' }, ticks: 2, jogProfile: 'grv6' },
       { kind: 'relative', target: { control: 'jog-seek', deck: 'D' }, ticks: -2, jogProfile: 'grv6' },
     ]);
@@ -238,6 +292,8 @@ describe('DDJ-GRV6 Mapping — official E1 message table', () => {
       gridPads: [],
       quantize: true,
       keyLock: true,
+      slipMode: false,
+      vinylMode: true,
       loopBeats: null,
     };
     const messages = encodeDeckLeds(DDJ_GRV6.feedback!, 'C', states);
@@ -270,6 +326,8 @@ describe('DDJ-GRV6 Mapping — official E1 message table', () => {
       gridPads: [true, true, false, true, true, true, true, true],
       quantize: false,
       keyLock: false,
+      slipMode: false,
+      vinylMode: true,
       loopBeats: 0.25,
     };
     const messages = encodeDeckLeds(DDJ_GRV6.feedback!, 'D', states);

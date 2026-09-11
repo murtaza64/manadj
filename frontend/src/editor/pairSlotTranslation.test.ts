@@ -25,6 +25,7 @@ import {
   transitionToProjection,
   type PairCameoInput,
   type PairSlotInput,
+  type NewPairTrackFacts,
 } from './pairSlotTranslation';
 import { emptyEdits, laneKey } from '../routines/routineDraft';
 import { buildEditorRoutine } from '../routines/routineEditorModel';
@@ -76,9 +77,12 @@ describe('pairSlotTranslation — projection geometry', () => {
     expect(proj.degraded).toBe(false);
   });
 
-  it('unedited pair yields empty edits and a bare synthetic recording', () => {
+  it('projects effective defaults, including the incoming two-second fade', () => {
     const proj = transitionToProjection(baseInput());
-    expect(proj.edits).toEqual(emptyEdits());
+    expect(proj.edits.lanes['1:fader']).toEqual([
+      { beat: 0, value: 0 }, { beat: 2 / proj.secPerBeat, value: 1 },
+    ]);
+    expect(changedPairEdits(proj.edits, proj.edits)).toEqual(emptyEdits());
     // Only tick events (window start + end), no control events.
     expect(proj.detail.events.every((e) => e.kind === 'tick')).toBe(true);
     expect(proj.detail.events).toHaveLength(2);
@@ -278,7 +282,7 @@ describe('pairSlotTranslation — pairToEdits (projection of drawn fields)', () 
       },
       40
     );
-    expect(Object.keys(edits.lanes)).toHaveLength(0);
+    expect(edits.lanes['0:fader']).toEqual([{ beat: 0, value: 1 }]);
   });
 
   it('a full projection→save round-trip preserves drawn lanes exactly', () => {
@@ -392,8 +396,13 @@ describe('pairSlotTranslation — changedPairEdits (the live-draft diff, #205)',
 });
 
 describe('pairSlotTranslation — seedNewTransition (#205 pair synthesis)', () => {
-  it('seeds the window at the outgoing outro, 32 beats on its clock', () => {
-    const seeded = seedNewTransition(300, 120); // 0.5 s/beat → 16 s window
+  const facts = (over: Partial<NewPairTrackFacts> = {}): NewPairTrackFacts => ({
+    durationSec: 300, bpm: 120, hotCues: [], ...over,
+  });
+  const cue = (slot_number: number, time_seconds: number) => ({ slot_number, time_seconds });
+
+  it('falls back to an outro blend and incoming track start without cues', () => {
+    const seeded = seedNewTransition(facts(), facts());
     expect(seeded.durationSec).toBe(NEW_PAIR_SEED_BEATS * 0.5);
     expect(seeded.startSec).toBe(300 - 16);
     expect(seeded.bInSec).toBe(0);
@@ -401,9 +410,55 @@ describe('pairSlotTranslation — seedNewTransition (#205 pair synthesis)', () =
     expect(seeded.lanes).toEqual({});
   });
   it('gridless outgoing seeds on the degraded clock; short tracks clamp to 0', () => {
-    const seeded = seedNewTransition(20, null); // 1 s/beat → 32 s window
-    expect(seeded.durationSec).toBe(32);
+    const seeded = seedNewTransition(facts({ durationSec: 20, bpm: null }), facts());
+    expect(seeded.durationSec).toBe(20);
     expect(seeded.startSec).toBe(0);
+  });
+
+  it('aligns outgoing cue 4 plus 64 beats with incoming cue 1', () => {
+    const seeded = seedNewTransition(facts({ hotCues: [cue(4, 60)] }),
+      facts({ hotCues: [cue(4, 150), cue(2, 80), cue(1, 8)] }));
+    expect(seeded).toMatchObject({ startSec: 92, bInSec: 8, durationSec: 16, tempoMatch: true });
+  });
+
+  it('falls back to cue 2 minus 64 beats using the incoming tempo', () => {
+    const seeded = seedNewTransition(facts({ hotCues: [cue(4, 60)] }),
+      facts({ bpm: 60, hotCues: [cue(3, 30), cue(4, 200), cue(2, 80)] }));
+    expect(seeded.startSec).toBe(92);
+    expect(seeded.bInSec).toBe(16);
+  });
+
+  it('falls back to incoming cue 4 minus 128 beats, never cue 3', () => {
+    const seeded = seedNewTransition(facts(), facts({ hotCues: [cue(3, 40), cue(4, 150)] }));
+    expect(seeded.bInSec).toBe(86);
+    expect(seedNewTransition(facts(), facts({ hotCues: [cue(3, 40)] })).bInSec).toBe(0);
+  });
+
+  it('counts offsets and the blend through each side own variable-tempo grid', () => {
+    const outgoing = facts({ hotCues: [cue(4, 60)],
+      beatTimes: Array.from({ length: 500 }, (_, i) => i <= 120 ? i / 2 : 60 + (i - 120) / 4) });
+    const incoming = facts({ hotCues: [cue(2, 45)],
+      beatTimes: Array.from({ length: 500 }, (_, i) => i <= 100 ? i / 4 : 25 + (i - 100) / 2) });
+    expect(seedNewTransition(outgoing, incoming)).toMatchObject({ startSec: 76, durationSec: 8, bInSec: 19 });
+  });
+
+  it('uses the outro if the outgoing cue-based entry would be after the track ends', () => {
+    expect(seedNewTransition(facts({ hotCues: [cue(4, 290)] }), facts()).startSec).toBe(284);
+  });
+
+  it('shortens the blend rather than moving a usable cue alignment near the end', () => {
+    expect(seedNewTransition(facts({ durationSec: 230, hotCues: [cue(4, 190)] }), facts()))
+      .toMatchObject({ startSec: 222, durationSec: 8 });
+  });
+
+  it('preserves an inferred negative incoming entry as a silent lead', () => {
+    expect(seedNewTransition(facts(), facts({ hotCues: [cue(2, 10)] })).bInSec).toBe(-22);
+  });
+
+  it('ignores invalid cue values and degrades missing tempo/grid facts', () => {
+    const seeded = seedNewTransition(facts({ durationSec: null, bpm: null, beatTimes: [0], hotCues: [cue(4, -1)] }),
+      facts({ bpm: null, hotCues: [cue(1, NaN), cue(2, 80)] }));
+    expect(seeded).toMatchObject({ startSec: 268, durationSec: 32, bInSec: 16 });
   });
 });
 

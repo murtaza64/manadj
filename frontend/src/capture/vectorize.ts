@@ -96,6 +96,12 @@ export function vectorizeTake(
   input: VectorizeInput,
   facts: VectorizeFacts
 ): VectorizedDraft | null {
+  // The Transition clock is forward-only. Never idealize vinyl into
+  // tempo-match or Jump evidence; null is the existing unsupported result.
+  if (input.events.some((e) =>
+    (e.kind === 'transport' && e.action.startsWith('scratch')) ||
+    (e.kind === 'init' && Object.values(e.decks).some((d) => d.scratching))
+  )) return null;
   const init = input.events.find((e) => e.kind === 'init');
   if (!init || init.kind !== 'init') return null;
   const out = init.outgoingChannel;

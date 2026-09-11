@@ -2,7 +2,8 @@
  * Mix-editor modal editing (ADR 0038, gh#207 slice 1): explicit top-level
  * MODES gate pointer gestures on the timeline canvas — select (V), pan (H),
  * jump (J) — replacing the accreted gesture overloads (dblclick=jump,
- * alt+dblclick=pause, scrub-vs-select collisions). Chrome (popovers, Linked,
+ * alt+dblclick=pause, scrub-vs-select collisions). Select retains a narrow
+ * waveform-only double-click insertion shortcut (#229). Chrome (popovers, Linked,
  * transport) and navigation (seek, wheel) stay modeless.
  *
  * Doctrine (from the grill):
@@ -47,7 +48,7 @@ export const MODE_KEY_HINTS: Record<EditorMode, string> = {
 export const MODE_TITLES: Record<EditorMode, string> = {
   select:
     'Select (V) — click a slot to select; drag horizontally to slide its track; ' +
-    'cmd-click toggles, shift-click extends; trim handles live here',
+    'cmd-click toggles, shift-click extends; double-click the waveform to add a jump/pause; trim handles live here',
   pan: 'Pan (H) — drag to pan the view; hold H from any mode for momentary pan',
   jump:
     'Jump (J) — click a slot row to insert a jump at that beat ' +

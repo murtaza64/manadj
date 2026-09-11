@@ -102,25 +102,25 @@ function useRoutinePinReplay(entries: SetEntryLocal[] | undefined): {
       ),
     [entries]
   );
-  const detailQueries = useQueries({
+  const { details, isLoading } = useQueries({
     queries: pins.map((p) => ({
       queryKey: ['routine', p.uuid],
       queryFn: () => api.routines.get(p.uuid),
       staleTime: Infinity,
       retry: false,
     })),
+    combine: (results) => ({
+      details: results.map((q) => q.data),
+      isLoading: results.some((q) => q.isLoading),
+    }),
   });
-  const isLoading = detailQueries.some((q) => q.isLoading);
   // Stable identity: recompute only when a pin moves or a fetch lands
   // (plan identity feeds useMemo chains downstream).
-  const dataKey = pins
-    .map((p, i) => `${p.uuid}@${p.startEntryIndex}:${detailQueries[i]?.data ? 1 : 0}`)
-    .join(',');
   const routines = useMemo(() => {
     if (pins.length === 0) return undefined;
     const out: NonNullable<PlanInput['routines']> = [];
     pins.forEach((p, i) => {
-      const d = detailQueries[i]?.data;
+      const d = details[i];
       if (!d) return; // failed → dangling → the head plans as a hard cut
       out.push({
         startEntryIndex: p.startEntryIndex,
@@ -137,8 +137,7 @@ function useRoutinePinReplay(entries: SetEntryLocal[] | undefined): {
       });
     });
     return out.length > 0 ? out : undefined;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dataKey]);
+  }, [pins, details]);
   return { routines, isLoading };
 }
 

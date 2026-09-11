@@ -42,6 +42,7 @@ export const PERSISTED_SETTING_KEYS: readonly string[] = [
   // Performance view
   'manadj-perf-sections',
   'perf-kbd-hints',
+  'manadj-perf-deck-count',
   // Sets
   'manadj-set-settings',
   // Library browsing

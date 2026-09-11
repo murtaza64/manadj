@@ -68,6 +68,15 @@ function baseInput(events: CaptureEvent[] = []) {
 const facts = { bpmA: 174, bpmB: 174 };
 
 describe('anchors', () => {
+  it('refuses scratch events and a slice opening inside a held scratch', () => {
+    expect(vectorizeTake(baseInput(), facts)).not.toBeNull();
+    expect(vectorizeTake(baseInput([
+      { t: 105, kind: 'transport', channel: 'A', action: 'scratchMove', playhead: 65, deltaSeconds: -2, durationSeconds: 1 },
+    ]), facts)).toBeNull();
+    const input = baseInput();
+    input.events[0] = init('A', 100, { decks: { A: deck({ scratching: true }), B: deck({ trackId: 2 }) } });
+    expect(vectorizeTake(input, facts)).toBeNull();
+  });
   it('derives startSec/bInSec from playhead samples at the window start', () => {
     const draft = vectorizeTake(baseInput(), facts)!;
     expect(draft.outgoingChannel).toBe('A');

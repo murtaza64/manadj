@@ -9,7 +9,7 @@
  * holder).
  *
  * Pass 2: the full review+EDIT surface — slot-aware view, replay
- * audition, boundary trim + re-promotion, and the routine DRAFT layer
+ * audition, non-destructive playback bounds, and the routine DRAFT layer
  * (routineDraft/routineDraftStore): authored slot lanes (the pair
  * editor's own LaneCanvas, structurally reused) and Jumps on any slot,
  * with undo/redo and debounced autosave to `Routine.edits_json`. Edits
@@ -24,10 +24,11 @@ import {
   type TakeRowWire,
 } from '../api/client';
 import type { HotCue, Track } from '../types';
-import type { Transition } from '../editor/mixModel';
+import { bEndMixTime, type Transition } from '../editor/mixModel';
+import { normalizePairWindow, pairAuthoringTransition, pairBounds } from '../editor/pairBounds';
 import {
-  changedPairEdits,
-  editsToTransition,
+  editedPairTransition,
+  incomingRate,
   seedNewTransition,
   transitionToProjection,
   type PairSlotProjection,
@@ -162,6 +163,7 @@ export default function RoutineEditorView() {
           D: decks.D.engine,
         },
         audible: () => isAudible('routine-editor'),
+        constrainToBounds: () => openedRef.current?.kind === 'routine',
         // The provider's one Load path (ADR 0022). Deck reuse (gh#170
         // pass 2) flips a deck's occupant mid-span — the player asks for
         // the incoming track the moment the occupancy opens.
@@ -184,10 +186,17 @@ export default function RoutineEditorView() {
     return req ? { kind: 'routine', uuid: req.routineUuid } : restoreLastMix();
   });
   const routineUuid = opened?.kind === 'routine' ? opened.uuid : null;
+  const openRequestRef = useRef(0);
+  const [openFlowBusy, setOpenFlowBusy] = useState(false);
   useEffect(() => {
     const onOpen = () => {
       const req = consumeRoutineEdit();
-      if (req) setOpened({ kind: 'routine', uuid: req.routineUuid });
+      if (req) {
+        openRequestRef.current++;
+        setOpenFlowBusy(false);
+        suppressFollowRef.current = null;
+        setOpened({ kind: 'routine', uuid: req.routineUuid });
+      }
     };
     window.addEventListener(OPEN_ROUTINE_EVENT, onOpen);
     return () => window.removeEventListener(OPEN_ROUTINE_EVENT, onOpen);
@@ -219,9 +228,9 @@ export default function RoutineEditorView() {
   /** Re-point the armed Set pin — only for opens INSIDE the armed move. */
   /** Request-initiated opens must not re-point the pin — only SWITCHES
    * within the move are deliberate acts (gh#167). */
-  const suppressFollowRef = useRef(false);
+  const suppressFollowRef = useRef<number | null>(null);
   const followPin = useCallback((moveKey: string | null, pin: AdjacencyPin) => {
-    if (suppressFollowRef.current) return;
+    if (suppressFollowRef.current === openRequestRef.current) return;
     const ctx = setCtxRef.current;
     if (ctx && moveKey !== null && moveKey === ctx.moveKey) {
       setAdjacencyPin(ctx.setId, ctx.headTrackId, pin);
@@ -243,9 +252,10 @@ export default function RoutineEditorView() {
   // Picker trust tiers (pass 2 directive 3): `r:` opens directly; `t:`
   // promotes-then-opens; `c:` confirms-then-promotes-then-opens (the
   // deliberate human act the suggestion-first doctrine requires).
-  const [openFlowBusy, setOpenFlowBusy] = useState(false);
   const openMixRef = useCallback(
     async (ref: MixArtifactRef) => {
+      const request = ++openRequestRef.current;
+      setOpenFlowBusy(false);
       switch (ref.kind) {
         case 'routine':
           setOpened({ kind: 'routine', uuid: ref.uuid });
@@ -265,20 +275,47 @@ export default function RoutineEditorView() {
           followPin(`p:${ref.aTrackId}:${ref.bTrackId}`, { kind: 'transition', uuid: ref.uuid });
           return;
         case 'new-transition': {
-          // Seeded at the outgoing's outro (ADR 0037 pair synthesis);
-          // draft posture — persists nothing until the first edit.
+          // Resolve creation facts once; later display queries never re-anchor
+          // this unsaved draft. Nothing persists until the first real edit.
           setOpenFlowBusy(true);
           try {
-            const a = await api.tracks.getById(ref.aTrackId);
+            const [a, b, cues, aGrid, bGrid] = await Promise.all([
+              api.tracks.getById(ref.aTrackId),
+              api.tracks.getById(ref.bTrackId),
+              // Fetch fresh for every creation, even if the display cache is warm.
+              api.hotcues.getBulk([ref.aTrackId, ref.bTrackId]),
+              queryClient.fetchQuery({
+                ...beatgridQueryOptions(ref.aTrackId), retry: false,
+              }).catch(() => null),
+              queryClient.fetchQuery({
+                ...beatgridQueryOptions(ref.bTrackId), retry: false,
+              }).catch(() => null),
+            ]);
+            if (request !== openRequestRef.current) return false;
             setOpened({
               kind: 'transition',
               aTrackId: ref.aTrackId,
               bTrackId: ref.bTrackId,
               uuid: crypto.randomUUID(),
-              seed: seedNewTransition(a.duration_secs ?? 300, a.bpm ?? null),
+              seed: seedNewTransition({
+                durationSec: a.duration_secs ?? null,
+                bpm: a.bpm ?? null,
+                hotCues: cues[ref.aTrackId] ?? [],
+                beatTimes: aGrid?.data.beat_times,
+              }, {
+                durationSec: b.duration_secs ?? null,
+                bpm: b.bpm ?? null,
+                hotCues: cues[ref.bTrackId] ?? [],
+                beatTimes: bGrid?.data.beat_times,
+              }),
             });
+          } catch (err) {
+            if (request === openRequestRef.current) {
+              toast(`Transition creation failed: ${err instanceof Error ? err.message : String(err)}`);
+            }
+            return false;
           } finally {
-            setOpenFlowBusy(false);
+            if (request === openRequestRef.current) setOpenFlowBusy(false);
           }
           return;
         }
@@ -372,27 +409,30 @@ export default function RoutineEditorView() {
     // Arm AFTER the open lands (below) — arming first lets the sticky-to-
     // move disarm effect see the PREVIOUS artifact and kill the context.
     setSetCtx(null);
-    suppressFollowRef.current = true;
+    const request = openRequestRef.current + 1;
+    suppressFollowRef.current = request;
     try {
+      let result: boolean | void;
       if (o.kind === 'routine') {
-        await openMixRef({ kind: 'routine', uuid: o.uuid });
+        result = await openMixRef({ kind: 'routine', uuid: o.uuid });
       } else if (o.takeUuid) {
-        await openMixRef({
+        result = await openMixRef({
           kind: 'pair-take',
           aTrackId: o.aTrackId,
           bTrackId: o.bTrackId,
           uuid: o.takeUuid,
         });
       } else if (o.uuid) {
-        await openMixRef({
+        result = await openMixRef({
           kind: 'transition',
           aTrackId: o.aTrackId,
           bTrackId: o.bTrackId,
           uuid: o.uuid,
         });
       } else {
-        await openMixRef({ kind: 'new-transition', aTrackId: o.aTrackId, bTrackId: o.bTrackId });
+        result = await openMixRef({ kind: 'new-transition', aTrackId: o.aTrackId, bTrackId: o.bTrackId });
       }
+      if (request !== openRequestRef.current || result === false) return;
       if (req.setContext && moveKey !== null) {
         setSetCtx({
           setId: req.setContext.setId,
@@ -401,7 +441,7 @@ export default function RoutineEditorView() {
         });
       }
     } finally {
-      suppressFollowRef.current = false;
+      if (request === openRequestRef.current) suppressFollowRef.current = null;
     }
   }, [openMixRef, moveKeyOf]);
   useEffect(() => {
@@ -522,6 +562,7 @@ export default function RoutineEditorView() {
       trackBId: openedTransition.bTrackId,
       bpmA: pairTrackA.bpm ?? null,
       bpmB: pairTrackB.bpm ?? null,
+      durations: { a: pairTrackA.duration_secs ?? 0, b: pairTrackB.duration_secs ?? 0 },
     });
   }, [openedTransition, pairSource, pairRow, pairTrackA, pairTrackB]);
   const projRef = useRef(proj);
@@ -660,8 +701,6 @@ export default function RoutineEditorView() {
   // uuid, never the detail object: the autosave response updates the
   // query cache (new detail identity, same artifact), and reloading then
   // would reset undo history mid-session and clobber in-flight edits.
-  // Re-promotion (same uuid, rebased edits) reloads explicitly in
-  // applyTrim.
   const detailRef = useRef(detail);
   detailRef.current = detail;
   // One load per opened artifact (#205): routines load their persisted
@@ -727,17 +766,24 @@ export default function RoutineEditorView() {
             .filter((r) => r.a_track_id === o.aTrackId && r.b_track_id === o.bTrackId)
             .sort((x, y) => x.position - y.position);
           const exists = rows.some((r) => r.uuid === uuid);
-          const diff = changedPairEdits(edits, p.edits);
+          const dirty = JSON.stringify(edits) !== JSON.stringify(p.edits);
           // Draft posture: an unsaved seed with no real change persists
           // nothing (auditioning a blank draft leaves no trace).
-          if (!exists && editsAreEmpty(diff)) return;
+          if (!exists && !dirty) return;
           const original = pairSourceRef.current?.uuid === uuid ? pairSourceRef.current.data : null;
           if (!original) return;
-          const data = editsToTransition(diff, {
+          const edited = editedPairTransition(edits, p.edits, {
             original,
-            durationBeats: p.detail.duration_beats,
+            durationBeats: p.sourceDurationBeats,
             secPerBeat: p.secPerBeat,
           });
+          const a = trackLookupRef.current.get(o.aTrackId);
+          const b = trackLookupRef.current.get(o.bTrackId);
+          if (!a || !b) return;
+          const rateB = incomingRate(edited, a.bpm ?? null, b.bpm ?? null);
+          const authored = pairAuthoringTransition(edited, rateB);
+          const data = dirty ? normalizePairWindow(authored, pairBounds(authored,
+            { a: a.duration_secs ?? 0, b: b.duration_secs ?? 0 }, rateB), rateB) : original;
           const items = rows.map((r) => ({
             uuid: r.uuid,
             name: r.name,
@@ -804,6 +850,26 @@ export default function RoutineEditorView() {
     ? false
     : trackBpms.some((b) => b === null || b === undefined || b <= 0);
   const buildable = !!detail && !missingBpm && !!effectiveBpm && effectiveBpm > 0;
+  const livePair = useMemo(() => {
+    if (!proj || !pairSource || !pairTrackA || !pairTrackB) return null;
+    const edited = editedPairTransition(draft.edits, proj.edits, {
+      original: pairSource.data, durationBeats: proj.sourceDurationBeats, secPerBeat: proj.secPerBeat,
+    });
+    const durations = { a: pairTrackA.duration_secs ?? 0, b: pairTrackB.duration_secs ?? 0 };
+    const rateB = incomingRate(edited, pairTrackA.bpm ?? null, pairTrackB.bpm ?? null);
+    const transition = pairAuthoringTransition(edited, rateB);
+    const liveProjection = transitionToProjection({
+      uuid: proj.detail.uuid, name: proj.detail.name ?? 'Transition', transition, durations,
+      trackAId: pairTrackA.id, trackBId: pairTrackB.id,
+      bpmA: pairTrackA.bpm ?? null, bpmB: pairTrackB.bpm ?? null,
+      originSec: edited.startSec,
+    });
+    return { transition, originSec: edited.startSec, durations, rateB, projection: liveProjection,
+      bounds: pairBounds(transition, durations, rateB) };
+  }, [proj, pairSource, pairTrackA, pairTrackB, draft.edits]);
+  const authoringDurationBeats = livePair && proj
+    ? (livePair.bounds.authoringEnd - livePair.originSec) / proj.secPerBeat : null;
+  const pairStartBeat = livePair?.projection.detail.entry_offsets_beats[0] ?? 0;
   // RAW build (no jump/pause/lane edits): recorded-jump marker
   // provenance (ghosts keep their place after removal). Entry-offset
   // OVERRIDES apply even here (ADR 0039/#207): they move the slot's
@@ -856,6 +922,8 @@ export default function RoutineEditorView() {
         rp: draft.edits.removedRecordedPauses,
         n: draft.edits.nudges,
         eo: draft.edits.entryOffsets,
+        bounds: draft.edits.playbackBounds,
+        starts: draft.edits.startTrims,
       }),
     [
       draft.edits.jumps,
@@ -864,20 +932,56 @@ export default function RoutineEditorView() {
       draft.edits.removedRecordedPauses,
       draft.edits.nudges,
       draft.edits.entryOffsets,
+      draft.edits.playbackBounds,
+      draft.edits.startTrims,
     ]
   );
   const baseEditor: EditorRoutine | null = useMemo(() => {
     if (!buildable) return null;
-    return buildEditorRoutine(detail!, trackBpms as number[], effectiveBpm!, {
-      ...draft.edits,
+    return buildEditorRoutine(livePair?.projection.detail ?? detail!, trackBpms as number[], effectiveBpm!, {
+      ...(livePair?.projection.edits ?? draft.edits),
       lanes: {},
+      trims: {}, // Lane-only updates own knob offsets, including clearing them.
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [detail, trackBpms, buildable, effectiveBpm, jumpEditsKey]);
+  }, [detail, trackBpms, buildable, effectiveBpm, jumpEditsKey, authoringDurationBeats, pairStartBeat]);
   const editor: EditorRoutine | null = useMemo(() => {
     if (!baseEditor) return null;
-    return { ...baseEditor, planned: plannedWithLaneEdits(baseEditor.planned, draft.edits) };
-  }, [baseEditor, draft.edits]);
+    if (!livePair || !proj) return { ...baseEditor, planned: plannedWithLaneEdits(baseEditor.planned, draft.edits) };
+    const { transition, durations, rateB, bounds } = livePair;
+    const toBeat = (t: number) => (t - livePair.originSec) / proj.secPerBeat;
+    const planned = plannedWithLaneEdits(baseEditor.planned, livePair.projection.edits);
+    const bEnd = bEndMixTime(transition, durations.b, rateB);
+    const slots = planned.slots.map((slot) => {
+      const transportBounds = {
+        startBeat: slot.slot === 0 ? toBeat(0) : toBeat(transition.startSec),
+        endBeat: toBeat(slot.slot === 0 ? bounds.outgoingEnd : bEnd),
+        trackDurationSec: slot.slot === 0 ? durations.a : durations.b,
+      };
+      return {
+        ...slot, transportBounds,
+        // Routine playback bounds do not clip pair setup jumps before beat zero.
+        jumpMixSecs: slot.trace
+          .filter((p) => p.jump && p.beat >= transportBounds.startBeat && p.beat <= transportBounds.endBeat)
+          .map((p) => planned.beatOriginMixSec + p.beat * planned.secPerBeat),
+      };
+    });
+    return {
+      ...baseEditor,
+      pairBounds: { handover: bounds.handover ? {
+        enter: toBeat(bounds.handover.enter), exit: toBeat(bounds.handover.exit),
+      } : null },
+      planned: {
+        ...planned,
+        auditionRange: {
+          startSec: planned.beatOriginMixSec + toBeat(0) * planned.secPerBeat,
+          endSec: planned.beatOriginMixSec + toBeat(bounds.authoringEnd) * planned.secPerBeat,
+        },
+        slots,
+        jumpMixSecs: slots.flatMap((slot) => slot.jumpMixSecs).sort((a, b) => a - b),
+      },
+    };
+  }, [baseEditor, draft.edits, livePair, proj]);
 
   // Feed the player (occupancy-aware — the build's allocation carries
   // deck reuse; the player resolves deck→slot per instant itself). Same
@@ -1142,48 +1246,25 @@ export default function RoutineEditorView() {
     []
   );
 
-  // ── Boundary trim (tier 3) ───────────────────────────────────────────
-  const [trim, setTrim] = useState<TrimRange | null>(null);
-  useEffect(() => {
-    setTrim(detail ? { startBeat: 0, endBeat: detail.duration_beats } : null);
-  }, [detail]);
-  const trimEnabled = !!detail?.origin_take_uuid && opened?.kind === 'routine';
-  const trimDirty =
-    !!trim &&
-    !!detail &&
-    (Math.abs(trim.startBeat) > 0.05 || Math.abs(trim.endBeat - detail.duration_beats) > 0.05);
-  const droppedSlots = useMemo(() => {
-    if (!detail || !trim) return [];
-    return detail.entry_offsets_beats
-      .map((b, slot) => ({ slot, b }))
-      .filter(({ b }) => b >= trim.endBeat)
-      .map(({ slot }) => slot);
-  }, [detail, trim]);
-  const [retrimBusy, setRetrimBusy] = useState(false);
-  const applyTrim = useCallback(async () => {
-    if (!detail || !trim || !trimDirty || retrimBusy) return;
-    setRetrimBusy(true);
-    try {
-      const d = await api.routines.retrim(detail.uuid, {
-        trim_start_beats: trim.startBeat,
-        // NEGATIVE widens (endBeat dragged past duration) — do not clamp
-        // (gh#190 item 8: the old Math.max(0, …) silently no-oped every
-        // outward end trim).
-        trim_end_beats: detail.duration_beats - trim.endBeat,
-      });
-      // Same uuid, rebased clock: reload the draft from the response
-      // (the server shifted the edits layer with the trim).
-      draftStore.load(d.uuid, parseEdits(d.edits));
-      queryClient.setQueryData(['routine-detail', detail.uuid], d);
-      queryClient.setQueryData(['routine', detail.uuid], d);
-      await queryClient.invalidateQueries({ queryKey: ['routines'] });
-      toast(`Re-promoted ${detail.name || 'routine'} with trimmed boundaries`);
-    } catch (err) {
-      toast(`Re-promotion failed: ${err instanceof Error ? err.message : String(err)}`);
-    } finally {
-      setRetrimBusy(false);
-    }
-  }, [detail, trim, trimDirty, retrimBusy, queryClient, toast]);
+  // Playback bounds share the draft's autosave and gesture undo history.
+  const trimEnabled = opened?.kind === 'routine';
+  const trim = editor?.planned.playbackBounds ?? null;
+  const playbackDurationBeats = trimEnabled && trim
+    ? trim.endBeat - trim.startBeat
+    : detail?.duration_beats ?? 0;
+  const [trimBlocked, setTrimBlocked] = useState(false);
+  useEffect(() => setTrimBlocked(false), [opened?.uuid]);
+  const onTrimChange = useCallback((proposal: TrimRange) => {
+    if (!trimEnabled || !editor) return;
+    const { maxStartBeat, minEndBeat } = editor.planned.boundsLimits;
+    setTrimBlocked(proposal.startBeat > maxStartBeat || proposal.endBeat < minEndBeat);
+    const movingStart = proposal.startBeat !== editor.planned.playbackBounds.startBeat;
+    let startBeat = Math.min(proposal.startBeat, maxStartBeat);
+    let endBeat = Math.max(proposal.endBeat, minEndBeat);
+    if (movingStart) startBeat = Math.min(startBeat, endBeat - 8);
+    else endBeat = Math.max(endBeat, startBeat + 8);
+    draftStore.setPlaybackBounds({ startBeat, endBeat });
+  }, [trimEnabled, editor, draftStore]);
 
   // ── Transport readout (rAF text — beats advance continuously) ────────
   const beatReadoutRef = useRef<HTMLSpanElement>(null);
@@ -1205,7 +1286,7 @@ export default function RoutineEditorView() {
     (beat: number) => {
       const r = player.getRoutine();
       if (!r) return;
-      player.seek(beat * r.secPerBeat);
+      player.seek(r.beatOriginMixSec + beat * r.secPerBeat);
     },
     [player]
   );
@@ -1252,14 +1333,21 @@ export default function RoutineEditorView() {
       setOpenFlowBusy(true);
       try {
         const snap = draftStore.getSnapshot();
-        const diff = changedPairEdits(snap.edits, p.edits);
         const original = o.seed;
         if (!original) return;
-        const data = editsToTransition(diff, {
+        const edited = editedPairTransition(snap.edits, p.edits, {
           original,
-          durationBeats: p.detail.duration_beats,
+          durationBeats: p.sourceDurationBeats,
           secPerBeat: p.secPerBeat,
         });
+        const a = trackLookupRef.current.get(o.aTrackId);
+        const b = trackLookupRef.current.get(o.bTrackId);
+        if (!a || !b) return;
+        const rateB = incomingRate(edited, a.bpm ?? null, b.bpm ?? null);
+        const authored = pairAuthoringTransition(edited, rateB);
+        const bounds = pairBounds(authored, { a: a.duration_secs ?? 0, b: b.duration_secs ?? 0 }, rateB);
+        if (!bounds.handover) throw new Error('No incoming handover: incoming must survive the outgoing');
+        const data = normalizePairWindow(authored, bounds, rateB);
         const rows = transitionRowsRef.current
           .filter((r) => r.a_track_id === o.aTrackId && r.b_track_id === o.bTrackId)
           .sort((x, y) => x.position - y.position);
@@ -1269,7 +1357,11 @@ export default function RoutineEditorView() {
           favorite: r.favorite,
           data: r.data,
         }));
-        items.push({
+        // A previous attempt may have saved the artifact but failed to link
+        // the Take. Retry that UUID instead of submitting it twice.
+        const retry = items.find((item) => item.uuid === o.uuid);
+        if (retry) retry.data = data as unknown as Record<string, unknown>;
+        else items.push({
           uuid: o.uuid,
           name: `Transition ${rows.length + 1}`,
           favorite: false,
@@ -1351,7 +1443,7 @@ export default function RoutineEditorView() {
   }, [opened, transitionRows, routineRows]);
   // The pair "✎ edited" badge compares against the projection baseline —
   // a projected pair's draft holds every drawn lane, which is not an edit.
-  const pairDirty = proj ? !editsAreEmpty(changedPairEdits(draft.edits, proj.edits)) : false;
+  const pairDirty = proj ? JSON.stringify(draft.edits) !== JSON.stringify(proj.edits) : false;
 
   // ── Render ───────────────────────────────────────────────────────────
   // Provenance (gh#170 deep-link): the origin Routine Take carries the
@@ -1513,9 +1605,9 @@ export default function RoutineEditorView() {
               </b>
             </span>
             <span className="re-meta">
-              {detail.cast.length} slots · {Math.round(detail.duration_beats)} beats
+              {detail.cast.length} slots · {Math.round(playbackDurationBeats)} beats
               {editor
-                ? ` · ${secondsLabel(detail.duration_beats * editor.planned.secPerBeat)}`
+                ? ` · ${secondsLabel(playbackDurationBeats * editor.planned.secPerBeat)}`
                 : ''}
             </span>
             {sourceTake && (
@@ -1629,41 +1721,27 @@ export default function RoutineEditorView() {
           </label>
           {trimEnabled && trim && (
             <span className="re-trim">
-              <span className={`re-trimlabel${trimDirty ? ' dirty' : ''}`}>
-                window {beatLabel(trim.startBeat)} → {beatLabel(trim.endBeat)} b
-                {trim.startBeat < -0.05 || trim.endBeat > detail.duration_beats + 0.05
-                  ? ' (widens — clamped to the session slice)'
-                  : ''}
+              <span className={`re-trimlabel${draft.edits.playbackBounds ? ' dirty' : ''}`}>
+                playback {beatLabel(trim.startBeat)} → {beatLabel(trim.endBeat)} b
               </span>
-              {droppedSlots.length > 0 && (
-                <span className="re-trimdrop">
-                  drops slot{droppedSlots.length > 1 ? 's' : ''} {droppedSlots.join(', ')}
-                  {detail.cast.length - droppedSlots.length < 3 ? ' — below n=3!' : ''}
+              {trimBlocked && (
+                <span className="re-trimdrop" role="status">
+                  Delete this slot to trim further
                 </span>
               )}
-              {trimDirty && (
-                <>
-                  <button
-                    className="re-trimapply"
-                    disabled={retrimBusy || detail.cast.length - droppedSlots.length < 3}
-                    onClick={applyTrim}
-                    title="Re-promote the origin Routine Take with these boundaries (mechanical — the raw Take is untouched)"
-                  >
-                    {retrimBusy ? 'Re-promoting…' : '✓ Apply trim (re-promote)'}
-                  </button>
-                  <button
-                    className="re-trimreset"
-                    onClick={() => setTrim({ startBeat: 0, endBeat: detail.duration_beats })}
-                  >
-                    ↺
-                  </button>
-                </>
+              {draft.edits.playbackBounds && (
+                <button
+                  className="re-trimreset"
+                  title="Reset playback bounds to source range"
+                  onClick={() => {
+                    draftStore.setPlaybackBounds(null);
+                    draftStore.endGesture();
+                    setTrimBlocked(false);
+                  }}
+                >
+                  ↺
+                </button>
               )}
-            </span>
-          )}
-          {!trimEnabled && detail && opened?.kind !== 'transition' && (
-            <span className="re-trim re-trimoff" title="No origin Routine Take — boundaries are baked">
-              trim unavailable (no origin take)
             </span>
           )}
           {editor && editor.warnings.length > 0 && (
@@ -1708,7 +1786,7 @@ export default function RoutineEditorView() {
               draftStore={draftStore}
               edits={draft.edits}
               trim={trimEnabled ? trim : null}
-              onTrimChange={trimEnabled ? setTrim : null}
+              onTrimChange={trimEnabled ? onTrimChange : null}
               onSeekBeat={onSeekBeat}
               mode={editorMode}
               onModeHome={() => setEditorMode('select')}

@@ -205,6 +205,8 @@ export function wireRoutineToPlanInput(
 // ── The editor build ─────────────────────────────────────────────────────
 
 export interface EditorRoutine {
+  /** Pair-only derived handover on the stable editor beat clock. */
+  pairBounds?: { handover: { enter: number; exit: number } | null };
   planned: PlannedRoutine;
   warnings: RoutineBuildWarning[];
   input: RoutinePlanInput;
@@ -667,29 +669,53 @@ export function rulerTicks(
   return ticks;
 }
 
-/** Time-weighted average of a recorded STEP lane over [0, durationBeats]
- * (gh#206: the trim knob represents the slot's AVERAGE trim). Step
- * semantics match laneValueAt: fallback before the first point, each
- * point's value holds until the next. */
-export function stepLaneAverage(
+/** Time-weighted trim average over [0, durationBeats]. Authored lanes interpolate
+ * and hold their endpoints; recorded lanes step from the fallback. Apply
+ * the knob offset and clamp per instant, just like playback. */
+export function trimLaneAverage(
   points: { beat: number; value: number }[],
   durationBeats: number,
-  fallback: number
+  fallback: number,
+  { linear = false, offset = 0 }: { linear?: boolean; offset?: number } = {}
 ): number {
-  if (durationBeats <= 0) return fallback;
+  const clamp = (v: number) => Math.max(0, Math.min(1, v));
+  if (durationBeats <= 0 || points.length === 0) return clamp(fallback + offset);
+  // Integral of clamp(v, 0, 1), for exact saturated linear ramps.
+  const integral = (v: number) => v <= 0 ? 0 : v >= 1 ? v - 0.5 : v * v / 2;
   let acc = 0;
-  let t = 0; // integrated up to this beat
-  let v = fallback;
-  for (const p of points) {
-    const beat = Math.max(0, Math.min(p.beat, durationBeats));
-    if (beat > t) {
-      acc += v * (beat - t);
-      t = beat;
-    }
-    if (p.beat <= durationBeats) v = p.value;
+  const add = (length: number, from: number, to = from) => {
+    const a = from + offset;
+    const b = to + offset;
+    acc += length * (Math.abs(b - a) < 1e-9
+      ? clamp((a + b) / 2) : (integral(b) - integral(a)) / (b - a));
+  };
+  add(Math.max(0, Math.min(durationBeats, points[0].beat)), linear ? points[0].value : fallback);
+  for (let i = 0; i < points.length; i++) {
+    const p = points[i];
+    const next = points[i + 1];
+    const from = Math.max(0, p.beat);
+    const to = Math.min(durationBeats, next?.beat ?? durationBeats);
+    if (to <= from) continue;
+    const slope = linear && next && next.beat > p.beat ? (next.value - p.value) / (next.beat - p.beat) : 0;
+    add(to - from, p.value + (from - p.beat) * slope, p.value + (to - p.beat) * slope);
   }
-  if (t < durationBeats) acc += v * (durationBeats - t);
   return acc / durationBeats;
+}
+
+/** Invert the average readout to the slot's normalized trim knob value. */
+export function trimForAverage(
+  points: { beat: number; value: number }[], durationBeats: number,
+  fallback: number, linear: boolean, target: number
+): number {
+  if (Math.abs(target - trimLaneAverage(points, durationBeats, fallback, { linear })) < 1e-9) return 0.5;
+  let lo = 0;
+  let hi = 1;
+  for (let i = 0; i < 24; i++) {
+    const mid = (lo + hi) / 2;
+    if (trimLaneAverage(points, durationBeats, fallback, { linear, offset: mid - 0.5 }) < target) lo = mid;
+    else hi = mid;
+  }
+  return (lo + hi) / 2;
 }
 
 /** "12.3" — beats with one decimal, for transport readouts. */

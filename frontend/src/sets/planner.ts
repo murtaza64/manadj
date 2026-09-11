@@ -40,12 +40,13 @@
 import type { VectorizeInput } from '../capture/vectorize';
 import { vectorizeTake } from '../capture/vectorize';
 import type { Transition } from '../editor/mixModel';
+import { outgoingAutomationStart, pairAuthoringTransition, pairBounds } from '../editor/pairBounds';
 import {
-  aEndMixTime,
   aTrackTimeAt,
   bContentSegments,
   bTrackTimeAt,
   laneValuesAt,
+  jumpRepeatCount,
   tempoMatchPitch,
 } from '../editor/mixModel';
 import { TRIM_NEUTRAL } from '../playback/mixerMath';
@@ -226,6 +227,7 @@ export interface PlanWarning {
   severity: 'warning' | 'error';
   kind:
     | 'window-past-end'
+    | 'unreachable-transition-anchor'
     | 'window-overlap'
     | 'incoming-ends-inside-window'
     | 'insufficient-runway'
@@ -478,13 +480,15 @@ export function planSet(input: PlanInput): SetPlan {
   for (let i = 0; i < input.entries.length; i++) {
     const { trackId } = input.entries[i];
     const facts = factsOf(trackId);
-    const rate = rates[i];
+    let rate = rates[i];
     /** Entry i's track time → global mix time (solo-rate mapping). */
     const toMix = (t: number) => mixOffset + t / rate;
     const deck: PlanDeck = forcedDeck ?? (prevDeck === 'A' ? 'B' : 'A');
     forcedDeck = null;
     prevDeck = deck;
     const next = input.entries[i + 1];
+    const entryAdj = adjacencies[i - 1];
+    const incomingWindow = entryAdj && isWindowed(entryAdj) ? entryAdj : null;
 
     // ── Routine span (routines 159) ─────────────────────────────────────
     const pinnedRoutine = routineByStart.get(i);
@@ -494,15 +498,6 @@ export function planSet(input: PlanInput): SetPlan {
       // this entry's own timeline: the sounding deck is ADOPTED there.
       const mixStartSec = toMix(Math.max(0, pinnedRoutine.entryPositions[0]));
       const prevAdj = adjacencies[adjacencies.length - 1];
-      if (mixStartSec < entryMixSec || (prevAdj && mixStartSec < prevAdj.tempoReturnEndSec)) {
-        warnings.push({
-          severity: 'warning',
-          kind: 'routine-window-collision',
-          adjacencyIndex: i,
-          message:
-            'routine window opens before the entry track settles (inside its own entry window or Tempo return) — replay timing is approximate there',
-        });
-      }
       // Replay tempo: the Set tempo under Fixed; slot 0's native BPM
       // under Riding (the entry track solos at native rate — adopting it
       // IS the pitch anchor).
@@ -510,6 +505,7 @@ export function planSet(input: PlanInput): SetPlan {
       const { routine: planned, warnings: buildWarnings } = buildPlannedRoutine(pinnedRoutine, {
         startEntryIndex: i,
         mixStartSec,
+        entryAnchor: { trackSec: Math.max(0, pinnedRoutine.entryPositions[0]), rate },
         targetBpm,
         adoptedDeck: deck,
         // Every pushed entry is a potential external occupant — a rolling
@@ -518,6 +514,12 @@ export function planSet(input: PlanInput): SetPlan {
         busy: entries.map((e) => ({ deck: e.deck, untilMixSec: e.exitMixSec })),
         trackBpms: pinnedRoutine.cast.map((tid) => factsOf(tid).bpm!),
       });
+      if (planned.mixStartSec < entryMixSec || (prevAdj && planned.mixStartSec < prevAdj.tempoReturnEndSec)) {
+        warnings.push({
+          severity: 'warning', kind: 'routine-window-collision', adjacencyIndex: i,
+          message: 'routine window opens before the entry track settles (inside its own entry window or Tempo return) — replay timing is approximate there',
+        });
+      }
       routines.push(planned);
       const routineIndex = routines.length - 1;
       for (const w of buildWarnings) {
@@ -526,7 +528,7 @@ export function planSet(input: PlanInput): SetPlan {
 
       // Slot 0 = this entry, adopted: audible until the Routine end (its
       // recorded fade lives in the replay lanes).
-      const slot0End = traceStateAt(planned.slots[0].trace, pinnedRoutine.durationBeats);
+      const slot0End = traceStateAt(planned.slots[0].trace, planned.playbackBounds.endBeat);
       entries.push({
         trackId,
         deck,
@@ -573,28 +575,32 @@ export function planSet(input: PlanInput): SetPlan {
       for (let k = 0; k < n - 1; k++) {
         const incoming = planned.slots[k + 1];
         const isLast = k === n - 2;
+        const incomingMixStart = Math.max(planned.mixStartSec, incoming.entryMixSec);
+        const incomingTrackStart = incoming.entryMixSec < planned.mixStartSec
+          ? routineSlotStateAt(planned, incoming, incomingMixStart).trackTime
+          : Math.max(0, incoming.entryTrackSec);
         adjacencies.push({
           kind: 'routine',
           routineIndex,
           rateIncoming: 1 + incoming.basePitchPercent / 100,
           pitchIncomingPercent: incoming.basePitchPercent,
           rateOutgoing: 1,
-          mixStartSec: incoming.entryMixSec,
-          mixEndSec: isLast ? planned.mixEndSec : incoming.entryMixSec,
-          tempoReturnEndSec: isLast ? exitTempoReturnEndSec : incoming.entryMixSec,
+          mixStartSec: incomingMixStart,
+          mixEndSec: isLast ? planned.mixEndSec : incomingMixStart,
+          tempoReturnEndSec: isLast ? exitTempoReturnEndSec : incomingMixStart,
           incomingTrackSecAtWindowEnd: isLast ? exit.trackSecAtEnd : undefined,
         });
         if (!isLast) {
           const slotRate = 1 + incoming.basePitchPercent / 100;
-          const interiorEnd = traceStateAt(incoming.trace, pinnedRoutine.durationBeats);
+          const interiorEnd = traceStateAt(incoming.trace, planned.playbackBounds.endBeat);
           entries.push({
             trackId: incoming.trackId,
             deck: incoming.deck ?? 'A',
-            mixOffsetSec: incoming.entryMixSec - Math.max(0, incoming.entryTrackSec) / slotRate,
+            mixOffsetSec: incomingMixStart - incomingTrackStart / slotRate,
             rate: slotRate,
-            entrySec: Math.max(0, incoming.entryTrackSec),
+            entrySec: incomingTrackStart,
             exitSec: Math.max(0, interiorEnd.pos),
-            entryMixSec: incoming.entryMixSec,
+            entryMixSec: incomingMixStart,
             exitMixSec: planned.mixEndSec,
             // The slot's track finds its own covered entry (interior Set
             // order may differ from slot order — presentational only).
@@ -610,8 +616,10 @@ export function planSet(input: PlanInput): SetPlan {
       // exit slot's deck, anchored so its track time continues seamlessly
       // from the recording's final position.
       mixOffset = exitMixOffset;
-      entrySec = Math.max(0, pinnedRoutine.entryPositions[n - 1]);
-      entryMixSec = planned.slots[n - 1].entryMixSec;
+      entryMixSec = Math.max(planned.mixStartSec, planned.slots[n - 1].entryMixSec);
+      entrySec = planned.slots[n - 1].entryMixSec < planned.mixStartSec
+        ? routineSlotStateAt(planned, planned.slots[n - 1], entryMixSec).trackTime
+        : Math.max(0, planned.slots[n - 1].entryTrackSec);
       forcedDeck = exit.deck;
       prevDeck = exit.deck;
       i = exitIdx - 1; // the for-increment lands on the exit entry
@@ -628,7 +636,9 @@ export function planSet(input: PlanInput): SetPlan {
         entrySec,
         exitSec: facts.durationSec,
         entryMixSec,
-        exitMixSec: toMix(facts.durationSec),
+        exitMixSec: incomingWindow
+          ? incomingMixTimeAt(incomingWindow, facts.durationSec, rate, { eof: true }) ?? toMix(facts.durationSec)
+          : toMix(facts.durationSec),
         trim: input.entries[i].trim ?? 0,
       });
       break;
@@ -641,7 +651,9 @@ export function planSet(input: PlanInput): SetPlan {
     if (!resolved) {
       // Hard cut: outgoing to its end, incoming from its Hot Cue 1
       // (track start when slot 1 is unset — never the Main cue).
-      const cutMix = toMix(facts.durationSec);
+      const cutMix = incomingWindow
+        ? incomingMixTimeAt(incomingWindow, facts.durationSec, rate, { eof: true }) ?? toMix(facts.durationSec)
+        : toMix(facts.durationSec);
       entries.push({
         trackId,
         deck,
@@ -669,7 +681,31 @@ export function planSet(input: PlanInput): SetPlan {
       continue;
     }
 
-    const { kind, transition } = resolved;
+    const { kind } = resolved;
+    let { transition } = resolved;
+    if (incomingWindow) {
+      const start = outgoingAutomationStart(pairAuthoringTransition(transition, 1));
+      const naturalEnd = incomingMixTimeAt(incomingWindow, facts.durationSec, rate, { eof: true }) ?? Infinity;
+      const anchor = incomingMixTimeAt(incomingWindow, start, rate, { last: true, until: naturalEnd });
+      if (anchor === null) {
+        // An inapplicable pin uses the normal hard-cut fallback, never a
+        // seek onto skipped material. Rebuild so it cannot constrain the
+        // preceding Tempo return. Each retry removes one window locally.
+        const fallback = planSet({
+          ...input,
+          entries: input.entries.map((e, index) => index === i ? { ...e, pin: { kind: 'hardcut' } } : e),
+        });
+        fallback.warnings.unshift({
+          severity: 'warning', kind: 'unreachable-transition-anchor', adjacencyIndex: i,
+          message: `transition anchor at ${start}s is not reached by the incoming trajectory; playing a hard cut at the track's natural end`,
+        });
+        return fallback;
+      }
+      // The next handover adopts the actual sounding rate and position.
+      // Its outgoing-role transport/controls supersede the entry window.
+      rate = 1 + incomingTrackTimeAt(incomingWindow, anchor, rate).pitchPercent / 100;
+      mixOffset = anchor - start / rate;
+    }
     // B's advance per AUTHORED window second, and the incoming's deck
     // pitch during the window. Riding: the tempo-match ride (rate ≡ deck
     // rate). Fixed: both decks hold their Set-tempo rates; the window
@@ -681,14 +717,20 @@ export function planSet(input: PlanInput): SetPlan {
       rateB = rateIn / rate;
       pitchIncoming = (rateIn - 1) * 100;
     } else {
-      pitchIncoming = transition.tempoMatch ? tempoMatchPitch(facts.bpm, nextFacts.bpm) : 0;
-      rateB = 1 + pitchIncoming / 100;
+      pitchIncoming = transition.tempoMatch ? tempoMatchPitch(facts.bpm === null ? null : facts.bpm * rate, nextFacts.bpm) : 0;
+      rateB = (1 + pitchIncoming / 100) / rate;
     }
 
+    transition = pairAuthoringTransition(transition, rateB);
+    const bounds = pairBounds(transition, { a: facts.durationSec, b: nextFacts.durationSec }, rateB);
+    if (!bounds.handover) warnings.push({
+      severity: 'warning', kind: 'incoming-ends-inside-window', adjacencyIndex: i,
+      message: 'No incoming handover: incoming must survive outgoing',
+    });
     // Window on the mix axis: the Transition's start/duration live in the
     // outgoing track's own time (Sketch origin), which IS this stretch of
     // the mix axis shifted by the outgoing's anchor and scaled by its rate.
-    const windowEndLocal = transition.startSec + transition.durationSec;
+    const windowEndLocal = bounds.outgoingEnd;
     const mixStartSec = toMix(transition.startSec);
     const mixEndSec = toMix(windowEndLocal);
     if (transition.startSec > facts.durationSec) {
@@ -758,7 +800,8 @@ export function planSet(input: PlanInput): SetPlan {
       const secPerPercent = tempo.returnSecPerPercent ?? DEFAULT_TEMPO_RETURN_SEC_PER_PERCENT;
       const desired = Math.abs(pitchIncoming) * secPerPercent;
       const nextBoundary = nextBoundaryTrackSec(i + 1);
-      const dMax = Math.max(0, (2 * (nextBoundary - bAtWindowEnd)) / (1 + rateB));
+      const incomingDeckRate = 1 + pitchIncoming / 100;
+      const dMax = Math.max(0, (2 * (nextBoundary - bAtWindowEnd)) / (1 + incomingDeckRate));
       const d = Math.min(desired, dMax);
       if (d < desired) {
         warnings.push({
@@ -769,17 +812,13 @@ export function planSet(input: PlanInput): SetPlan {
         });
       }
       tempoReturnEndSec = mixEndSec + d;
-      nextMixOffset = tempoReturnEndSec - (bAtWindowEnd + (d * (rateB + 1)) / 2);
+      nextMixOffset = tempoReturnEndSec - (bAtWindowEnd + (d * (incomingDeckRate + 1)) / 2);
     } else {
       nextMixOffset = mixEndSec - bAtWindowEnd / rateIn;
     }
 
-    // Outgoing exits at the window end — SIMULATED THROUGH ITS JUMPS
-    // (issue 177): the exit instant on the authored (elapsed-play) axis is
-    // the window end or A's first track-end crossing on the jumped path,
-    // whichever is first; the exit TRACK position applies the passed jump
-    // deltas. Without jumpsA this is the old min(windowEnd, durA) pair.
-    const exitLocal = aEndMixTime(transition, facts.durationSec);
+    // Final mixer cessation or natural EOF, never the saved window cap.
+    const exitLocal = bounds.outgoingEnd;
     const exitSec = Math.min(
       facts.durationSec,
       Math.max(0, aTrackTimeAt(transition, exitLocal))
@@ -821,6 +860,20 @@ export function planSet(input: PlanInput): SetPlan {
     mixOffset = nextMixOffset;
   }
 
+  // A later jump must not resurrect an incoming that already crossed EOF.
+  adjacencies.forEach((adj, i) => {
+    if (!isWindowed(adj)) return;
+    const incoming = entries[i + 1];
+    const duration = factsOf(incoming.trackId).durationSec;
+    const nextAdj = adjacencies[i + 1];
+    const until = nextAdj && isWindowed(nextAdj)
+      ? nextAdj.mixStartSec + (outgoingAutomationStart(nextAdj.transition) - nextAdj.transition.startSec) / nextAdj.rateOutgoing : Infinity;
+    const endMix = incomingMixTimeAt(adj, duration, rates[i + 1], { eof: true, until });
+    if (endMix !== null && endMix < incoming.exitMixSec) {
+      incoming.exitMixSec = endMix;
+      incoming.exitSec = duration;
+    }
+  });
   applyGraceFades(entries, adjacencies, warnings, input.grace);
   flagEntriesAfterExit(entries, adjacencies, warnings);
 
@@ -829,8 +882,7 @@ export function planSet(input: PlanInput): SetPlan {
   // are all settled by now — the adjacency always wins).
   const cameos = planCameos(input, entries, adjacencies, routines, warnings);
 
-  const last = entries[entries.length - 1];
-  return { entries, adjacencies, routines, cameos, totalSec: Math.max(0, last.exitMixSec), warnings };
+  return { entries, adjacencies, routines, cameos, totalSec: Math.max(0, ...entries.map((e) => e.exitMixSec)), warnings };
 }
 
 /** Load headroom for a Cameo's borrowed deck (#140): claimed this long
@@ -1194,6 +1246,66 @@ function authoredLocalAt(adj: WindowedAdjacency, mixTime: number): number {
   return adj.transition.startSec + (mixTime - adj.mixStartSec) * adj.rateOutgoing;
 }
 
+/** Tempo return changes motion, not the clock of retained automation/jumps. */
+export function incomingTrackTimeAt(adj: WindowedAdjacency, mixTime: number, soloRate: number): { trackTime: number; pitchPercent: number } {
+  const local = authoredLocalAt(adj, mixTime);
+  if (mixTime < adj.mixEndSec) return {
+    trackTime: bTrackTimeAt(adj.transition, local, adj.rateIncoming),
+    pitchPercent: adj.pitchIncomingPercent,
+  };
+  const endLocal = authoredLocalAt(adj, adj.mixEndSec);
+  const tau = mixTime - adj.mixEndSec;
+  const d = adj.tempoReturnEndSec - adj.mixEndSec;
+  const rate = 1 + adj.pitchIncomingPercent / 100;
+  const target = d > 0 ? 1 : soloRate;
+  const ramp = Math.min(tau, d);
+  const travel = d > 0 ? rate * ramp + (target - rate) * ramp * ramp / (2 * d) + target * (tau - ramp) : target * tau;
+  return {
+    trackTime: bTrackTimeAt(adj.transition, local, adj.rateIncoming) - (local - endLocal) * adj.rateIncoming + travel,
+    pitchPercent: d > 0 && tau < d ? adj.pitchIncomingPercent * (1 - tau / d) : (target - 1) * 100,
+  };
+}
+
+/** Exact polynomial spans, shared by inverse anchors and the overview. */
+export function incomingMotionSpans(adj: WindowedAdjacency, soloRate: number, until = Infinity) {
+  const knots = new Set([adj.mixStartSec, adj.mixEndSec, adj.tempoReturnEndSec]);
+  for (const j of adj.transition.jumps ?? []) {
+    for (let i = 0; i < jumpRepeatCount(j); i++) {
+      knots.add(adj.mixStartSec + (j.x * adj.transition.durationSec + i * Math.max(0, -j.deltaSec) / adj.rateIncoming) / adj.rateOutgoing);
+    }
+  }
+  const times = [...knots].filter((t) => t >= adj.mixStartSec && t < until).sort((a, b) => a - b);
+  return times.map((start, i) => {
+    const end = Math.min(times[i + 1] ?? Infinity, until);
+    const s = incomingTrackTimeAt(adj, start, soloRate);
+    const rate = 1 + s.pitchPercent / 100;
+    const acceleration = start >= adj.mixEndSec && start < adj.tempoReturnEndSec
+      ? -adj.pitchIncomingPercent / 100 / (adj.tempoReturnEndSec - adj.mixEndSec) : 0;
+    return { start, end, trackTime: s.trackTime, rate, acceleration };
+  });
+}
+
+/** Planner anchors use the final pass; pickup uses the first. */
+export function incomingMixTimeAt(
+  adj: WindowedAdjacency, trackTime: number, soloRate: number,
+  options: { last?: boolean; eof?: boolean; until?: number } = {},
+): number | null {
+  let found: number | null = null;
+  for (const { start, end, trackTime: pos, rate, acceleration } of incomingMotionSpans(adj, soloRate, options.until)) {
+    if (options.eof && pos >= trackTime) return start;
+    const delta = trackTime - pos;
+    if (delta < -1e-9) continue;
+    const disc = rate * rate + 2 * acceleration * Math.max(0, delta);
+    if (disc < 0) continue;
+    const offset = 2 * Math.max(0, delta) / (rate + Math.sqrt(disc));
+    const t = start + offset;
+    if (t >= end) continue; // a jump AT the crossing wins
+    if (!options.last) return t;
+    found = t;
+  }
+  return found;
+}
+
 /** Entry `idx`'s track time + deck pitch at a mix instant WHILE PLAYING:
  * riding its entry window, easing through the Tempo return, else on its
  * solo anchor. Shared by planStateAt and the grace-fade transform. */
@@ -1225,37 +1337,6 @@ function playingTrackTimeAt(
     };
   }
   const windowed = entryAdj && isWindowed(entryAdj) ? entryAdj : null;
-  if (windowed && mixTime < windowed.mixEndSec) {
-    // NOT clamped at 0: a negative position is the window's silent lead
-    // (alignment or a Jump puts the incoming before its track start) —
-    // planStateAt parks the deck on it (#161; the adjacency sibling of
-    // the Routine negative-lead rule). Clamping while "playing" made the
-    // Conductor re-seek the incoming to 0 for the whole lead.
-    return {
-      trackTime: bTrackTimeAt(
-        windowed.transition,
-        authoredLocalAt(windowed, mixTime),
-        windowed.rateIncoming
-      ),
-      pitchPercent: windowed.pitchIncomingPercent,
-    };
-  }
-  if (windowed && mixTime < windowed.tempoReturnEndSec) {
-    // Tempo return (Riding): rate eases linearly from the window rate r
-    // to 1 over the ramp, so track time advances quadratically.
-    const d = windowed.tempoReturnEndSec - windowed.mixEndSec;
-    const tau = mixTime - windowed.mixEndSec;
-    const r = windowed.rateIncoming;
-    const b = bTrackTimeAt(
-      windowed.transition,
-      windowed.transition.startSec + windowed.transition.durationSec,
-      r
-    );
-    return {
-      trackTime: b + r * tau + ((1 - r) * tau * tau) / (2 * d),
-      pitchPercent: windowed.pitchIncomingPercent * (1 - tau / d),
-    };
-  }
   // Inside the entry's own EXIT window the OUTGOING may Jump (issue 177):
   // the solo anchor stays valid for the elapsed-play axis (mix time keeps
   // advancing linearly at the entry's rate — the doctrine), and the deck's
@@ -1263,15 +1344,16 @@ function playingTrackTimeAt(
   // the window no jump has passed (window-scoped), so this is the plain
   // solo anchor there too.
   const exitAdj = adjacencies[idx];
-  if (exitAdj && isWindowed(exitAdj) && exitAdj.transition.jumpsA?.length) {
+  if (exitAdj && isWindowed(exitAdj) && mixTime >= exitAdj.mixStartSec + (outgoingAutomationStart(exitAdj.transition) - exitAdj.transition.startSec) / exitAdj.rateOutgoing) {
     return {
       trackTime: Math.max(
         0,
         aTrackTimeAt(exitAdj.transition, authoredLocalAt(exitAdj, mixTime))
       ),
-      pitchPercent: (entry.rate - 1) * 100,
+      pitchPercent: (exitAdj.rateOutgoing - 1) * 100,
     };
   }
+  if (windowed) return incomingTrackTimeAt(windowed, mixTime, entry.rate);
   return {
     trackTime: (mixTime - entry.mixOffsetSec) * entry.rate,
     pitchPercent: (entry.rate - 1) * 100,
@@ -1291,18 +1373,28 @@ export function planStateAtRaw(plan: SetPlan, mixTime: number): PlanState {
   };
   if (plan.entries.length === 0) return state;
 
+  const occupants: Record<PlanDeck, {
+    active: number | null; upcoming: number | null; past: number | null;
+  }> = {
+    A: { active: null, upcoming: null, past: null },
+    B: { active: null, upcoming: null, past: null },
+    C: { active: null, upcoming: null, past: null },
+    D: { active: null, upcoming: null, past: null },
+  };
+  // Array precedence, not chronological order: last active/past, first upcoming.
+  for (let i = 0; i < plan.entries.length; i++) {
+    const e = plan.entries[i];
+    const occupant = occupants[e.deck];
+    if (mixTime >= e.entryMixSec && mixTime < e.exitMixSec) occupant.active = i;
+    else if (e.entryMixSec > mixTime) occupant.upcoming = occupant.upcoming ?? i;
+    else occupant.past = i;
+    if (e.entryMixSec <= mixTime) state.activeEntryIndex = i;
+  }
+
   for (const deck of PLAN_DECKS) {
     // Occupant: the active entry on this deck, else the next upcoming one,
     // else the last finished one.
-    let active: number | null = null;
-    let upcoming: number | null = null;
-    let past: number | null = null;
-    plan.entries.forEach((e, i) => {
-      if (e.deck !== deck) return;
-      if (mixTime >= e.entryMixSec && mixTime < e.exitMixSec) active = i;
-      else if (e.entryMixSec > mixTime) upcoming = upcoming ?? i;
-      else past = i;
-    });
+    const { active, upcoming, past } = occupants[deck];
     const idx = active ?? upcoming ?? past;
     if (idx === null) continue;
     const entry = plan.entries[idx];
@@ -1340,32 +1432,25 @@ export function planStateAtRaw(plan: SetPlan, mixTime: number): PlanState {
     };
   }
 
-  // activeEntryIndex: the latest entry whose audible span has begun.
-  for (let i = 0; i < plan.entries.length; i++) {
-    if (plan.entries[i].entryMixSec <= mixTime) state.activeEntryIndex = i;
-  }
-
   // Lanes: every containing window's role lanes mapped onto physical
   // decks, applied in adjacency order — at a rolling junction (sets
   // #143, overlapping windows) the LATER window owns the shared track's
-  // lanes from its window start (map #114's authority rule: its writes
-  // to the shared deck land last; the earlier window keeps governing
-  // only its own outgoing). Playing decks no active window touches solo
-  // at full fader (e.g. a hard-cut tail running through someone else's
-  // junction).
+  // lanes from its window start. Incoming controls hold their last value
+  // through solo playback until a later adjacency or Routine takes over.
   const covered = new Set<PlanDeck>();
   if (!state.done) {
     plan.adjacencies.forEach((windowAdj, windowIdx) => {
-      if (!isWindowed(windowAdj) || mixTime < windowAdj.mixStartSec || mixTime >= windowAdj.mixEndSec) {
-        return;
-      }
+      if (!isWindowed(windowAdj)) return;
+      const outgoingStart = windowAdj.mixStartSec + (outgoingAutomationStart(windowAdj.transition) - windowAdj.transition.startSec) / windowAdj.rateOutgoing;
+      if (mixTime < Math.min(outgoingStart, windowAdj.mixStartSec)) return;
       const v = laneValuesAt(windowAdj.transition, authoredLocalAt(windowAdj, mixTime));
       const outDeck = plan.entries[windowIdx].deck;
       const inDeck = plan.entries[windowIdx + 1].deck;
       // A grace-truncated outgoing is gone: its authored tail is dropped —
       // the deck (now parking/loading the NEXT entry) reads silent, not the
       // authored outgoing-role fader (sets 14).
-      state.lanes[outDeck] =
+      if (mixTime >= outgoingStart && mixTime < windowAdj.mixEndSec && state.decks[outDeck].entryIndex === windowIdx) {
+        state.lanes[outDeck] =
         mixTime < plan.entries[windowIdx].exitMixSec
           ? {
               fader: v.faderA,
@@ -1373,13 +1458,16 @@ export function planStateAtRaw(plan: SetPlan, mixTime: number): PlanState {
               filter: v.filterA * 2 - 1,
             }
           : soloLanes(0);
-      state.lanes[inDeck] = {
+        covered.add(outDeck);
+      }
+      if (mixTime >= windowAdj.mixStartSec && state.decks[inDeck].entryIndex === windowIdx + 1 && state.decks[inDeck].playing) {
+        state.lanes[inDeck] = {
         fader: v.faderB,
         eq: { low: v.eqLowB, mid: v.eqMidB, high: v.eqHighB },
         filter: v.filterB * 2 - 1,
-      };
-      covered.add(outDeck);
-      covered.add(inDeck);
+        };
+        covered.add(inDeck);
+      }
     });
   }
   for (const deck of PLAN_DECKS) {
@@ -1422,7 +1510,7 @@ export function planStateAtRaw(plan: SetPlan, mixTime: number): PlanState {
   if (!state.done) {
     const routine = plan.routines.find((r) => mixTime >= r.mixStartSec && mixTime < r.mixEndSec);
     if (routine) {
-      const beat = (mixTime - routine.mixStartSec) / routine.secPerBeat;
+      const beat = (mixTime - routine.beatOriginMixSec) / routine.secPerBeat;
       for (const slot of routine.slots) {
         if (slot.deck === null) continue;
         // Deck REUSE inside the span (gh#170 pass 2): a freed deck serves
@@ -1539,21 +1627,41 @@ const HANDOFF_EPS = 1e-6;
  * byte-identical to the raw verdict. */
 const RESIDUAL_DEADBAND = 1e-3;
 
-/** Every instant lane authority changes hands, ascending: windowed
+/** Latest lane-authority boundary inside the ramp horizon: windowed
  * adjacency opens/closes and Routine span edges. Hard cuts (zero-width)
  * are deliberate cuts — excluded on purpose. */
-function authorityBoundaries(plan: SetPlan): number[] {
-  const ts = new Set<number>();
+function latestAuthorityBoundary(plan: SetPlan, mixTime: number): number | null {
+  let boundary = 0;
   for (const adj of plan.adjacencies) {
     if (!isWindowed(adj)) continue;
-    ts.add(adj.mixStartSec);
-    ts.add(adj.mixEndSec);
+    if (
+      adj.mixStartSec > boundary && adj.mixStartSec <= mixTime &&
+      mixTime - adj.mixStartSec < AUTHORITY_HANDOFF_RAMP_SEC
+    ) {
+      boundary = adj.mixStartSec;
+    }
+    if (
+      adj.mixEndSec > boundary && adj.mixEndSec <= mixTime &&
+      mixTime - adj.mixEndSec < AUTHORITY_HANDOFF_RAMP_SEC
+    ) {
+      boundary = adj.mixEndSec;
+    }
   }
   for (const r of plan.routines) {
-    ts.add(r.mixStartSec);
-    ts.add(r.mixEndSec);
+    if (
+      r.mixStartSec > boundary && r.mixStartSec <= mixTime &&
+      mixTime - r.mixStartSec < AUTHORITY_HANDOFF_RAMP_SEC
+    ) {
+      boundary = r.mixStartSec;
+    }
+    if (
+      r.mixEndSec > boundary && r.mixEndSec <= mixTime &&
+      mixTime - r.mixEndSec < AUTHORITY_HANDOFF_RAMP_SEC
+    ) {
+      boundary = r.mixEndSec;
+    }
   }
-  return [...ts].filter((t) => t > 0).sort((a, b) => a - b);
+  return boundary > 0 ? boundary : null;
 }
 
 const clampTo = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
@@ -1568,10 +1676,7 @@ const clampTo = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi,
 export function planStateAt(plan: SetPlan, mixTime: number): PlanState {
   const state = planStateAtRaw(plan, mixTime);
   if (state.done) return state;
-  let boundary: number | null = null;
-  for (const t of authorityBoundaries(plan)) {
-    if (t <= mixTime && mixTime - t < AUTHORITY_HANDOFF_RAMP_SEC) boundary = t;
-  }
+  const boundary = latestAuthorityBoundary(plan, mixTime);
   if (boundary === null) return state;
   const decay = 1 - (mixTime - boundary) / AUTHORITY_HANDOFF_RAMP_SEC;
   const before = planStateAt(plan, boundary - HANDOFF_EPS);
@@ -1619,15 +1724,20 @@ export function jumpCrossedDecks(plan: SetPlan, t0: number, t1: number): PlanDec
   plan.adjacencies.forEach((adj, i) => {
     if (!isWindowed(adj)) return;
     const roles = [
-      { jumps: adj.transition.jumps, deck: plan.entries[i + 1]?.deck },
-      { jumps: adj.transition.jumpsA, deck: plan.entries[i]?.deck },
+      { jumps: adj.transition.jumps, entryIndex: i + 1, rate: adj.rateIncoming, incoming: true },
+      { jumps: adj.transition.jumpsA, entryIndex: i, rate: 1, incoming: false },
     ];
-    for (const { jumps, deck } of roles) {
-      if (!jumps || deck === undefined) continue;
+    for (const { jumps, entryIndex, rate, incoming } of roles) {
+      const entry = plan.entries[entryIndex];
+      if (!jumps || !entry) continue;
+      const next = plan.adjacencies[i + 1];
+      const until = incoming && next && isWindowed(next)
+        ? next.mixStartSec + (outgoingAutomationStart(next.transition) - next.transition.startSec) / next.rateOutgoing : Infinity;
       for (const j of jumps) {
-        // Authored instant startSec + x·duration, mapped onto the mix axis.
-        const tj = adj.mixStartSec + (j.x * adj.transition.durationSec) / adj.rateOutgoing;
-        if (tj > t0 && tj <= t1) decks.add(deck);
+        for (let k = 0; k < jumpRepeatCount(j); k++) {
+          const tj = adj.mixStartSec + (j.x * adj.transition.durationSec + k * Math.max(0, -j.deltaSec) / rate) / adj.rateOutgoing;
+          if (tj > t0 && tj <= t1 && tj >= entry.entryMixSec && tj <= entry.exitMixSec && tj < until) decks.add(entry.deck);
+        }
       }
     }
   });

@@ -52,3 +52,21 @@ describe('detailToMessage', () => {
     ], 'Request failed')).toBe('Field required; Invalid target');
   });
 });
+
+describe('Take promotion errors', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it('surfaces the backend conflict detail', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      detail: "promoted Transition must match Take's ordered track pair",
+    }), { status: 409 }));
+    await expect(api.takes.setPromoted('take', 'transition'))
+      .rejects.toThrow("promoted Transition must match Take's ordered track pair");
+  });
+
+  it('keeps the status fallback for non-JSON failures', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('unavailable', { status: 503 }));
+    await expect(api.takes.setPromoted('take', 'transition'))
+      .rejects.toThrow('Failed to set take promotion (503)');
+  });
+});

@@ -106,6 +106,10 @@ function registerFakeDeckControls(deck: ChannelId): void {
     jogTicks: (ticks) => calls.push(`${deck}:jog:${ticks}`),
     jogTouchTicks: (ticks) => calls.push(`${deck}:jogTouch:${ticks}`),
     jogSeekTicks: (ticks) => calls.push(`${deck}:jogSeek:${ticks}`),
+    jogTouch: (held) => calls.push(`${deck}:touch:${held}`),
+    cancelJog: () => calls.push(`${deck}:cancelJog`),
+    toggleSlipMode: () => calls.push(`${deck}:toggleSlipMode`),
+    toggleVinylMode: () => calls.push(`${deck}:toggleVinylMode`),
     gridNudgeStep: (direction) => calls.push(`${deck}:gridNudge:${direction}`),
     gridSetDownbeat: () => calls.push(`${deck}:gridAnchor`),
     gridDropAnchor: () => calls.push(`${deck}:gridDropAnchor`),
@@ -162,6 +166,19 @@ function registerFakeMixerControls(): void {
     },
   });
 }
+
+describe('Slip and Vinyl mode buttons', () => {
+  it('toggle per-deck engine state only on down, independently of the audible holder', () => {
+    registerFakeDeckControls('C');
+    claimAudible('editor');
+    for (const control of ['slip-mode', 'vinyl-mode'] as const) {
+      for (const edge of ['down', 'up'] as const) {
+        dispatchMidiAction({ kind: 'button', target: { control, deck: 'C' }, edge });
+      }
+    }
+    expect(calls).toEqual(['C:toggleSlipMode', 'C:toggleVinylMode']);
+  });
+});
 
 beforeEach(() => {
   calls = [];
