@@ -391,6 +391,18 @@ export const api = {
   },
 
   waveforms: {
+    /** Bounded preview substrate; 202 means the waveform worker is preparing it. */
+    getPreview: async (trackId: number): Promise<{ blob: ArrayBuffer; etag: string } | null> => {
+      const response = await fetch(`${API_BASE}/waveforms/${trackId}/preview`);
+      if (response.status === 202) return null;
+      if (!response.ok) {
+        throw Object.assign(new Error(`Failed to fetch waveform preview (${response.status})`), { status: response.status });
+      }
+      const etag = response.headers.get('ETag');
+      if (!etag) throw new Error('Waveform preview response missing ETag');
+      return { blob: await response.arrayBuffer(), etag };
+    },
+
     /** Waveform data v2 blob (ADR 0014): binary, immutable once generated. */
     getData: async (trackId: number): Promise<ArrayBuffer> => {
       const response = await fetch(`${API_BASE}/waveforms/${trackId}/data`);

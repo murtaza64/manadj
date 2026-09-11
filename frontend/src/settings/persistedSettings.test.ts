@@ -60,6 +60,7 @@ describe('hydratePersistedSettings', () => {
 
   it('seeds an empty DB from inventoried localStorage keys only', async () => {
     localStorage.setItem('manadj.waveformStyles', '{"version":1}');
+    localStorage.setItem('manadj-column-order-v1', '["waveform","title"]');
     localStorage.setItem('manadj-visualizer-params:neon', '{"speed":2}');
     localStorage.setItem('manadj-last-pair', '12:34'); // ephemera: excluded
     const fetchMock = mockFetch((url) =>
@@ -73,6 +74,7 @@ describe('hydratePersistedSettings', () => {
     const payload = JSON.parse(seedCall![1]!.body as string);
     expect(payload.settings).toEqual({
       'manadj.waveformStyles': '{"version":1}',
+      'manadj-column-order-v1': '["waveform","title"]',
       'manadj-visualizer-params:neon': '{"speed":2}',
     });
   });

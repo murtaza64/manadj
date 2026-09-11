@@ -47,6 +47,7 @@ export const PERSISTED_SETTING_KEYS: readonly string[] = [
   // Library browsing
   'manadj-playlist-filter-enabled',
   'manadj-column-widths-v1',
+  'manadj-column-order-v1',
   'trackListSort',
   // Playback/mixer preferences
   'manadj-audio-routing',

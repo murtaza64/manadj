@@ -20,7 +20,7 @@
   position: sticky;
   top: 0;
   background: var(--mantle);
-  z-index: 10;
+  z-index: 2;
 }
 
 /* Sortable header base styles. Unified vocabulary: hover = bg tint
@@ -64,13 +64,13 @@
 }
 
 /* Generic sticky column styles. Header z-index sits ABOVE the resize
-   handles (z 12): a non-sticky header sliding under a pinned one must
+   handles (z 2): a non-sticky header sliding under a pinned one must
    take its divider handle with it (the handles otherwise paint over the
    pinned headers during horizontal scroll). */
 .sticky-col-header {
   position: sticky;
   background: var(--mantle);
-  z-index: 13;
+  z-index: 3;
 }
 
 .sticky-col-cell {
@@ -122,10 +122,27 @@
 /* Column resize handles */
 /* NOTE: sticky headers are already positioned (position: sticky) — do not
    override them to relative or they stop sticking */
-.sortable-header:not(.sticky-col-header), .tags-header { position: relative; }
+.sortable-header:not(.sticky-col-header) { position: relative; }
+.track-column-header { cursor: pointer; }
+body.column-dragging,
+body.column-dragging * { cursor: grabbing !important; }
+.track-column-header.column-drop-before::after,
+.track-column-header.column-drop-after::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--accent);
+  z-index: 4;
+  pointer-events: none;
+}
+.track-column-header.column-drop-before::after { left: 0; }
+.track-column-header.column-drop-after::after { right: 0; }
+.track-column-header.tags-header { padding: var(--space-6) var(--space-12); }
 .col-resize-handle {
   position: absolute; top: 0; right: -4px; width: 9px; height: 100%;
-  cursor: col-resize; z-index: 12;
+  cursor: col-resize; z-index: 2;
   /* visible 1px line centered in the hit area */
   background: linear-gradient(
     to right,

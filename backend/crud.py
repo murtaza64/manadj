@@ -404,15 +404,17 @@ def create_waveform(db: Session, track_id: int, filepath: str):
 
     Returns the created Waveform model instance; raises on analysis failure.
     """
-    from .waveform_data import PEAK_HOP, SAMPLE_RATE, analyze, build_blob
+    from .waveform_data import PEAK_HOP, SAMPLE_RATE, analyze, build_blob, build_preview_blob
 
     peaks, bands, duration = analyze(filepath)
+    blob = build_blob(peaks, bands, duration)
     db_waveform = models.Waveform(
         track_id=track_id,
         sample_rate=SAMPLE_RATE,
         duration=duration,
         samples_per_peak=PEAK_HOP,
-        data_blob=build_blob(peaks, bands, duration),
+        data_blob=blob,
+        preview_blob=build_preview_blob(blob),
     )
     db.add(db_waveform)
     db.commit()
