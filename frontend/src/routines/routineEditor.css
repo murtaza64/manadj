@@ -824,9 +824,18 @@
 /* Selected wave rows (gh#190 track drag): slot-colored outline; the row
    drags as a clip while selected. */
 .rt-wave-row.rt-selected {
-  outline: 1px solid;
-  outline-offset: -1px;
   cursor: grab;
+}
+.rt-wave-row.rt-selected::after {
+  /* Paint above the positioned waveform, without resizing its bitmap or hit target. */
+  content: '';
+  position: absolute;
+  inset: 0;
+  outline: 3px solid;
+  outline-color: inherit;
+  outline-offset: -3px;
+  z-index: 3;
+  pointer-events: none;
 }
 .rt-wave-row.rt-selected:active {
   cursor: grabbing;

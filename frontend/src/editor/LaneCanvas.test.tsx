@@ -5,6 +5,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { LaneCanvas, type LaneGuide } from './LaneCanvas';
 import { laneValueY } from './laneHit';
 import type { LaneControlKind } from './laneShade';
+import * as laneShade from './laneShade';
 import { LANE_IDS, type LaneId, type LanePoint } from './mixModel';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -18,13 +19,13 @@ let selection: number[];
 const changed = vi.fn();
 const registerScrollDraw = vi.fn();
 
-function TestLane({ initial, guides = [], id = 'faderA', kind }: {
-  initial: LanePoint[]; guides?: LaneGuide[]; id?: LaneId; kind?: LaneControlKind;
+function TestLane({ initial, guides = [], id = 'faderA', kind, width = WIDTH }: {
+  initial: LanePoint[]; guides?: LaneGuide[]; id?: LaneId; kind?: LaneControlKind; width?: number;
 }) {
   const [points, setPoints] = useState(initial);
   const [selected, setSelected] = useState<number[]>([]);
   useEffect(() => { current = points; selection = selected; }, [points, selected]);
-  return <LaneCanvas id={id} kind={kind} widthPx={WIDTH} windowLeftPx={0} points={points}
+  return <LaneCanvas id={id} kind={kind} widthPx={width} windowLeftPx={0} points={points}
     guides={guides} chopWall={0.001} registerScrollDraw={registerScrollDraw}
     selected={selected} onSelectedChange={setSelected}
     onChange={next => { changed(next); setPoints(next); }} />;
@@ -61,6 +62,18 @@ function pointer(type: string, x: number, y: number, keys: PointerEventInit = {}
   })));
 }
 const ghost = () => host.querySelector<HTMLElement>('.editor-lane-insert-preview');
+
+it('reuses envelope shading across zoom changes and invalidates it on lane-kind changes', () => {
+  const shade = vi.spyOn(laneShade, 'segmentShade');
+  const points = [{ x: 0, y: 0.2 }, { x: 1, y: 0.9 }];
+  act(() => root.render(<TestLane initial={points} />));
+  expect(shade).toHaveBeenCalled();
+  shade.mockClear();
+  act(() => root.render(<TestLane initial={points} width={WIDTH * 2} />));
+  expect(shade).not.toHaveBeenCalled();
+  act(() => root.render(<TestLane initial={points} width={WIDTH * 2} kind="trim" />));
+  expect(shade).toHaveBeenCalled();
+});
 
 it('plain off-line click never inserts; dragging selects a rectangle in both axes', () => {
   const initial = [{ x: 0.2, y: 0.8 }, { x: 0.5, y: 0.2 }, { x: 0.7, y: 0.7 }];

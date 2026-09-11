@@ -106,10 +106,10 @@ interface Sampler {
  * one decoded blob + one parameter set. */
 function createSampler(d: DecodedWaveform, params: StyleParams): Sampler {
   const { sampleRate, peakHop, bandHop, stftWindow, gamma } = d.header;
-  const invGamma = 1 / gamma;
+  const exponent = params.displayGamma / gamma;
   const smooth = params.smooth ? 1 : 0;
   /** De-quantize + display gamma (shader amp()). v in 0..1. */
-  const amp = (v: number) => Math.pow(Math.pow(v, invGamma), params.displayGamma);
+  const amp = (v: number) => Math.pow(v, exponent);
 
   const peakColumn = (t0: number, t1: number): number => {
     const pps = sampleRate / peakHop;
@@ -243,6 +243,9 @@ interface ColumnCtx {
 }
 
 interface StylePainter {
+  /** Color depends only on which groups/peak cover the current height. */
+  fixedPalette?: boolean;
+  wantsPeak?: boolean;
   /** Height thresholds between which the color is constant. */
   cuts(c: ColumnCtx): number[];
   /** styleColor() twin: color at amplitude coordinate yA. */
@@ -270,7 +273,7 @@ function additiveRgb(yA: number, c: ColumnCtx): RGB {
 const groupCuts = (c: ColumnCtx) => [c.g[0], c.g[1], c.g[2]];
 
 const STYLE_PAINTERS: Record<string, StylePainter> = {
-  'additive-rgb': { cuts: groupCuts, color: additiveRgb },
+  'additive-rgb': { cuts: groupCuts, color: additiveRgb, fixedPalette: true },
 
   'additive-soft': {
     cuts: groupCuts,
@@ -308,6 +311,7 @@ const STYLE_PAINTERS: Record<string, StylePainter> = {
   },
 
   'additive-screen': {
+    fixedPalette: true,
     cuts: groupCuts,
     color: (yA, c) => {
       let r = 0;
@@ -325,6 +329,8 @@ const STYLE_PAINTERS: Record<string, StylePainter> = {
   },
 
   'layered-opaque': {
+    wantsPeak: true,
+    fixedPalette: true,
     cuts: (c) => [c.p, c.g[0], c.g[1], c.g[2]],
     color: (yA, c) => {
       let out: RGB = BG;
@@ -337,6 +343,7 @@ const STYLE_PAINTERS: Record<string, StylePainter> = {
   },
 
   'dominant-band': {
+    wantsPeak: true,
     cuts: (c) => [c.p],
     color: (yA, c) => {
       if (yA >= c.p) return BG;
@@ -352,6 +359,7 @@ const STYLE_PAINTERS: Record<string, StylePainter> = {
   },
 
   'spectral-hue': {
+    wantsPeak: true,
     cuts: (c) => [c.p],
     color: (yA, c) => {
       if (yA >= c.p) return BG;
@@ -380,6 +388,7 @@ const STYLE_PAINTERS: Record<string, StylePainter> = {
   },
 
   'additive-ticks': {
+    wantsPeak: true,
     wantsPrevPeak: true,
     cuts: (c) => [c.g[0], c.g[1], c.g[2], c.p],
     color: (yA, c) => {
@@ -472,6 +481,8 @@ export function createStyledColumnRenderer(
   const sampler = createSampler(data, params);
   const b = new Float64Array(8);
   const gsScratch = new Float64Array(8);
+  let paletteBrightness: number | null = null;
+  let palette: (string | null)[] | null = null;
 
   const render = (
     t0: number,
@@ -481,6 +492,15 @@ export function createStyledColumnRenderer(
     modulate?: (x: number) => ColumnModulation,
   ): StyledColumn[] => {
     const px = Math.max(t1 - t0, 0.001) / cols;
+    // These styles have only 16 coverage combinations, independent of amplitude.
+    if (painter.fixedPalette && paletteBrightness !== brightness) {
+      paletteBrightness = brightness;
+      palette = Array.from({ length: 16 }, (_, mask) => {
+        const g: [number, number, number] = [mask & 1 ? 1 : 0, mask & 2 ? 1 : 0, mask & 4 ? 1 : 0];
+        const rgb = painter.color(0.5, { p: mask & 8 ? 1 : 0, g, b, pPrev: 0, gs: g, flux: 0, colors, params });
+        return isBg(rgb) ? null : toCss(rgb, brightness);
+      });
+    }
 
     const out: StyledColumn[] = [];
     let pPrev = painter.wantsPrevPeak
@@ -498,7 +518,8 @@ export function createStyledColumnRenderer(
         continue;
       }
       const mod = modulate ? modulate(x) : undefined;
-      const p = clamp01(sampler.peakColumn(tc, tc + px) * params.master * (mod ? mod.scale : 1));
+      const p = painter.wantsPeak
+        ? clamp01(sampler.peakColumn(tc, tc + px) * params.master * (mod ? mod.scale : 1)) : 0;
       sampler.bands8Column(tc, tc + px, b);
       if (mod) modulateBands(b, mod, params);
       const gRaw = sampler.groupAmps(b);
@@ -534,8 +555,17 @@ export function createStyledColumnRenderer(
       let y = 0;
       for (const cut of cuts) {
         if (cut - y < 1e-5) continue;
-        const rgb = painter.color((y + cut) / 2, ctx);
-        if (!isBg(rgb)) segments.push({ y0: y, y1: cut, css: toCss(rgb, brightness) });
+        const mid = (y + cut) / 2;
+        let css: string | null;
+        if (palette) {
+          const mask = (mid < g[0] ? 1 : 0) | (mid < g[1] ? 2 : 0) |
+            (mid < g[2] ? 4 : 0) | (mid < p ? 8 : 0);
+          css = palette[mask];
+        } else {
+          const rgb = painter.color(mid, ctx);
+          css = isBg(rgb) ? null : toCss(rgb, brightness);
+        }
+        if (css) segments.push({ y0: y, y1: cut, css });
         y = cut;
       }
       out.push({ outOfTrack: false, segments });
