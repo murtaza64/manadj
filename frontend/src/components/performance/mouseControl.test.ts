@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { invertControl, KNOB_STROKE_PAUSE_MS, MIXER_DRAG_RANGE_PX, mouseJogTicks, moveKnob } from './mouseControl';
+import { invertControl, KNOB_STROKE_PAUSE_MS, MIXER_DRAG_RANGE_PX, mouseSeekDelta, moveKnob } from './mouseControl';
 
 describe.each([false, true])('knob stroke (bipolar=%s)', (bipolar) => {
   const center = bipolar ? 0 : 0.5;
@@ -71,23 +71,21 @@ describe.each([false, true])('knob stroke (bipolar=%s)', (bipolar) => {
   });
 });
 
-describe('mouse jog response', () => {
+describe('paused mouse seek response', () => {
   it('keeps slow movement gentle, with bounded acceleration for fast sweeps', () => {
-    expect(mouseJogTicks(1, 20)).toBeCloseTo(0.05);
-    const medium = mouseJogTicks(5, 20) / 5;
-    expect(medium).toBeGreaterThan(0.05);
-    expect(medium).toBeLessThan(0.15);
-    expect(mouseJogTicks(20, 20)).toBeCloseTo(3);
-    expect(mouseJogTicks(200, 20)).toBeCloseTo(30);
-    // Even the accelerated response stays below the old 0.2 ticks/px.
-    expect(mouseJogTicks(200, 20)).toBeLessThan(200 / 5);
+    expect(mouseSeekDelta(1, 20)).toBeCloseTo(0.0025, 5);
+    const medium = mouseSeekDelta(5, 20) / 5;
+    expect(medium).toBeGreaterThan(0.0025);
+    expect(medium).toBeLessThan(0.0075);
+    expect(mouseSeekDelta(20, 20)).toBeCloseTo(0.15);
+    expect(mouseSeekDelta(200, 20)).toBeCloseTo(1.5);
   });
 
   it('is symmetric and independent of event batching at the same speed', () => {
-    expect(mouseJogTicks(-5, 20)).toBeCloseTo(-mouseJogTicks(5, 20));
-    expect(mouseJogTicks(10, 40)).toBeCloseTo(mouseJogTicks(5, 20) * 2);
-    expect(mouseJogTicks(0, 0)).toBe(0);
-    expect(Number.isFinite(mouseJogTicks(1, 0))).toBe(true);
+    expect(mouseSeekDelta(-5, 20)).toBeCloseTo(-mouseSeekDelta(5, 20));
+    expect(mouseSeekDelta(10, 40)).toBeCloseTo(mouseSeekDelta(5, 20) * 2);
+    expect(mouseSeekDelta(0, 0)).toBe(0);
+    expect(Number.isFinite(mouseSeekDelta(1, 0))).toBe(true);
   });
 });
 

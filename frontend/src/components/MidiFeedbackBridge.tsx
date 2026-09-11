@@ -82,6 +82,8 @@ function DeckFeedbackPublisher({
   // Key Lock lives in the engine snapshot (like the on-screen toggle) —
   // feeds the SHIFT-layer Q lamp probe only.
   const keyLock = useDeckSnapshot((s) => s.keyLock);
+  const slipMode = useDeckSnapshot((s) => s.slipMode);
+  const vinylMode = useDeckSnapshot((s) => s.vinylMode);
   // Keyed by the loaded Track: a Load re-keys the query, an empty deck
   // disables it (placeholder []) — both resolve to all pads dark until
   // real assignments arrive.
@@ -163,6 +165,8 @@ function DeckFeedbackPublisher({
       hasBeatgrid,
       quantize,
       keyLock,
+      slipMode,
+      vinylMode,
       loopBeats,
     };
     const states = ledStates(
@@ -188,6 +192,8 @@ function DeckFeedbackPublisher({
     hasBeatgrid,
     quantize,
     keyLock,
+    slipMode,
+    vinylMode,
     loopBeats,
     holderPlaying,
     pendingPhase,

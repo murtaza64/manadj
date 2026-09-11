@@ -37,11 +37,10 @@ export function invertControl(value: number, on: number): number {
   return value < on / 2 ? on : 0;
 }
 
-/** Gentle placement at low speed; bounded acceleration for deliberate sweeps.
- * Convert pixels to jog ticks without changing hardware jog calibration. */
-export function mouseJogTicks(dx: number, elapsedMs: number): number {
+/** Paused rim travel in track seconds; independent of playing bend sensitivity. */
+export function mouseSeekDelta(dx: number, elapsedMs: number): number {
   const speed = Math.abs(dx) * 1000 / Math.max(1, elapsedMs);
   const t = Math.max(0, Math.min(1, (speed - 80) / 920));
-  const gain = 0.05 + 0.1 * t * t * (3 - 2 * t);
+  const gain = 0.0025 + 0.005 * t * t * (3 - 2 * t);
   return dx * gain;
 }

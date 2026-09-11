@@ -66,7 +66,7 @@ export type GridChordState = Record<ChannelId, DeckChord | null>;
 
 /** The jog stream a tick arrived on — preserved so pass-through keeps its
  * surface-routed meaning (rim = bend/seek, touch = fine paused seek). */
-export type JogStream = 'rim' | 'touch';
+export type JogStream = 'rim' | 'touch' | 'vinyl-off';
 
 export type GridChordEvent =
   | { type: 'pad-down'; deck: ChannelId; direction: 'earlier' | 'later' }

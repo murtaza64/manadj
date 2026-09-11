@@ -2,7 +2,7 @@ import {
   DEFAULT_JOG_CALIBRATION,
   defaultJogCalibration,
 } from './jogCalibration';
-import type { JogCalibration } from './jogCalibration';
+import type { JogCalibration, JogProfile } from './jogCalibration';
 
 export { defaultJogCalibration } from './jogCalibration';
 
@@ -11,6 +11,8 @@ export { defaultJogCalibration } from './jogCalibration';
  * seek out. Pure math + a small stateful controller; no Web MIDI, no React
  * — the registrar builds one per deck over the engine, dispatch feeds it
  * ticks, tests feed it synthetic ticks and a fake port.
+ * GRV6 additionally supplies real contact edges and a continuous scratch
+ * port. Only its edge-started gestures use that path; Inpulse stays seek/bend.
  *
  * Playing (rim): Mixxx's nudge model (RateControl::getJogFactor +
  * Rotary(25), ported): ticks accumulate; every filter period the
@@ -30,6 +32,14 @@ export interface JogDeckPort {
   getPlayhead(): number;
   seek(seconds: number): void;
   setBend(percent: number): void;
+  scratch?: {
+    isActive(): boolean;
+    vinylMode(): boolean;
+    begin(): void;
+    move(deltaSeconds: number, durationSeconds: number): void;
+    rate(): number;
+    end(): void;
+  };
 }
 
 /**
@@ -77,6 +87,12 @@ export const JOG_TOUCH_SEEK_SECONDS_PER_TICK = 0.01;
  * mapping relies on the same exclusivity).
  */
 export const JOG_FINE_CONTINUATION_MS = 250;
+/** Provisional GRV6 throw thresholds: retain the gesture only for fresh,
+ * fast reverse motion. Continued real ticks, never inertia, keep it alive. */
+export const JOG_SPINBACK_RATE = -2;
+export const JOG_SPINBACK_FRESH_MS = 24;
+export const JOG_SPINBACK_IDLE_MS = 12;
+export const JOG_RELEASE_RIM_SUPPRESS_MS = 80;
 
 /** Rate smoothing (paused rim seek): how much of the instantaneous rate
  * each burst carries. */
@@ -118,6 +134,12 @@ export class JogController {
   private lastTickMs: number | null = null;
   /** Last fine-rate seek — touch tick or continuation rim tick. */
   private lastFineActivityMs: number | null = null;
+  private touching = false;
+  private scratching = false;
+  private scratchTickMs: number | null = null;
+  private scratchMotionMs: number | null = null;
+  private suppressRimUntil = -Infinity;
+  private scratchTimer: ReturnType<typeof setTimeout> | null = null;
 
   // Bend filter state (Mixxx model).
   private pendingBendTicks = 0;
@@ -131,16 +153,108 @@ export class JogController {
     this.port = port;
   }
 
+  /** True touch edges, not a tick watchdog: a stationary hand holds forever. */
+  onTouch(held: boolean, nowMs: number = performance.now()): void {
+    this.syncState();
+    if (held) {
+      if (this.touching || !this.port.scratch?.vinylMode()) return;
+      if (!this.scratching && this.port.scratch.isActive()) return;
+      this.releaseBend();
+      this.clearScratchTimer();
+      this.suppressRimUntil = -Infinity;
+      if (!this.scratching) {
+        // begin() can synchronously notify a surface displacement. Let that
+        // cancellation see the in-flight gesture before querying acceptance.
+        this.scratching = true;
+        this.touching = true;
+        this.port.scratch.begin();
+        this.scratchMotionMs = null;
+      }
+      this.scratching = this.port.scratch.isActive();
+      this.touching = this.scratching;
+      this.scratchTickMs = nowMs;
+    } else {
+      if (!this.touching) return;
+      this.touching = false;
+      const throwEligible = this.scratchMotionMs !== null
+        && nowMs - this.scratchMotionMs < JOG_SPINBACK_FRESH_MS
+        && (this.port.scratch?.rate() ?? 0) < JOG_SPINBACK_RATE;
+      if (throwEligible) this.scheduleScratchEnd();
+      else this.finishScratch();
+      this.suppressRimUntil = nowMs + JOG_RELEASE_RIM_SUPPRESS_MS;
+    }
+  }
+
+  /** Engine overrides (load/pause/seek/mode changes) invalidate controller holds. */
+  syncState(): void {
+    if (this.scratching && !this.port.scratch?.isActive()) this.cancel();
+    if (!this.scratching && this.port.scratch?.isActive()) this.releaseBend();
+  }
+
+  cancel(): void {
+    const end = this.scratching && this.port.scratch?.isActive();
+    this.scratching = false;
+    this.touching = false;
+    this.scratchTickMs = null;
+    this.scratchMotionMs = null;
+    this.suppressRimUntil = -Infinity;
+    this.clearScratchTimer();
+    this.lastFineActivityMs = null;
+    this.lastTickMs = null;
+    this.rate = 0;
+    this.releaseBend();
+    // Clear controller state before the engine's synchronous notification.
+    if (end) this.port.scratch?.end();
+  }
+
+  private moveScratch(ticks: number, nowMs: number, calibration: JogCalibration): void {
+    if (!Number.isFinite(ticks) || ticks === 0) return;
+    const dt = Math.min(30, Math.max(1, nowMs - (this.scratchTickMs ?? nowMs)));
+    this.scratchTickMs = nowMs;
+    this.scratchMotionMs = nowMs;
+    this.port.scratch?.move(ticks * calibration.touchSeekSecondsPerTick, dt / 1000);
+    if (this.scratching && !this.touching) {
+      this.suppressRimUntil = nowMs + JOG_RELEASE_RIM_SUPPRESS_MS;
+      this.scheduleScratchEnd();
+    }
+  }
+
+  private scheduleScratchEnd(): void {
+    this.clearScratchTimer();
+    this.scratchTimer = setTimeout(() => this.finishScratch(), JOG_SPINBACK_IDLE_MS);
+  }
+
+  private finishScratch(): void {
+    this.syncState();
+    if (!this.scratching || this.touching) return;
+    const suppress = this.suppressRimUntil;
+    this.cancel();
+    this.suppressRimUntil = suppress;
+  }
+
+  private clearScratchTimer(): void {
+    if (this.scratchTimer !== null) clearTimeout(this.scratchTimer);
+    this.scratchTimer = null;
+  }
+
   /**
    * Touch-surface rotation (CC #10): fine linear seek on a paused deck;
-   * ignored while playing — there is no scratch model, and the dense touch
-   * stream would swamp the rim's bend filter.
+   * ignored while playing on Inpulse. GRV6 moves only an edge-started scratch;
+   * software Vinyl-off uses ordinary rim behavior regardless of the CC stream.
    */
   onTouchTicks(
     ticks: number,
     nowMs: number = performance.now(),
-    calibration: JogCalibration = DEFAULT_JOG_CALIBRATION
+    calibration: JogCalibration = DEFAULT_JOG_CALIBRATION,
+    profile?: JogProfile
   ): void {
+    this.syncState();
+    if (!this.scratching && this.port.scratch?.isActive()) return;
+    if (profile === 'grv6') {
+      if (!this.port.scratch?.vinylMode()) this.onTicks(ticks, nowMs, calibration, profile);
+      else if (this.scratching) this.moveScratch(ticks, nowMs, calibration);
+      return;
+    }
     if (this.port.isPlaying()) return;
     this.lastFineActivityMs = nowMs;
     this.port.seek(this.port.getPlayhead() + ticks * calibration.touchSeekSecondsPerTick);
@@ -152,8 +266,18 @@ export class JogController {
   onTicks(
     ticks: number,
     nowMs: number = performance.now(),
-    calibration: JogCalibration = DEFAULT_JOG_CALIBRATION
+    calibration: JogCalibration = DEFAULT_JOG_CALIBRATION,
+    profile?: JogProfile,
+    vinylOff = false
   ): void {
+    this.syncState();
+    if (!this.scratching && this.port.scratch?.isActive()) return;
+    if (vinylOff && (this.scratching || this.suppressRimUntil > nowMs)) this.cancel();
+    if (profile === 'grv6' && !vinylOff && !this.scratching && nowMs < this.suppressRimUntil) return;
+    if (profile === 'grv6' && this.scratching) {
+      this.moveScratch(ticks, nowMs, calibration);
+      return;
+    }
     this.foldRate(ticks, nowMs);
 
     if (this.port.isPlaying()) {
@@ -187,6 +311,7 @@ export class JogController {
     nowMs: number = performance.now(),
     calibration: JogCalibration = DEFAULT_JOG_CALIBRATION
   ): void {
+    if (this.scratching || this.suppressRimUntil > -Infinity) this.cancel();
     this.foldRate(ticks, nowMs);
     this.releaseBend();
     this.port.seek(this.port.getPlayhead() + jogSeekDelta(ticks, this.rate, calibration));
@@ -203,7 +328,7 @@ export class JogController {
 
   /** Detach hook for the registrar: release any held bend immediately. */
   dispose(): void {
-    this.releaseBend();
+    this.cancel();
   }
 
   private startBendFilter(): void {

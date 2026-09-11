@@ -29,6 +29,9 @@ import { DeckSourceNode } from './worklet/deckSourceNode';
 import { getCachedBuffer, getCachedStems, putCachedBuffer, putCachedStems } from './bufferCache';
 import { firstNonSilentTime, resolveInitialCue } from './cueDefaults';
 import { MAX_PITCH_RANGE_PERCENT, composeRate } from './tempo';
+import { moveScratch, scratchPosition, scratchFilterAt, effectiveScratchLoop } from './worklet/scratchMotion';
+import type { ScratchFrame, ScheduledScratchFrame } from './worklet/scratchMotion';
+import type { ScratchMotion, ScratchFilter } from './worklet/scratchMotion';
 
 export type LoadState = 'empty' | 'fetching' | 'decoding' | 'ready' | 'error';
 
@@ -41,11 +44,16 @@ export type LoadState = 'empty' | 'fetching' | 'decoding' | 'ready' | 'error';
  */
 export const MAX_LEAD_IN_SECONDS = 30;
 
-/** A playhead discontinuity: seek, beat jump, or hot-cue jump. */
+/** Accepted transport evidence; scratch moves carry incremental displacement. */
 export interface DeckTransportGesture {
-  action: 'seek' | 'jumpBeats' | 'hotCue';
+  action: 'seek' | 'jumpBeats' | 'hotCue' | 'scratchBegin' | 'scratchMove' | 'scratchEnd';
   playhead: number;
   detail?: number;
+  deltaSeconds?: number;
+  durationSeconds?: number;
+  filter?: ScratchFilter;
+  trackDuration?: number;
+  audioTime?: number;
 }
 
 export interface DeckTrackInfo {
@@ -90,6 +98,9 @@ export interface DeckSnapshot {
   /** Key Lock (CONTEXT.md): while on, rate changes leave the Track's Key
    * unchanged (worklet stretch mode). Deck setting; survives Loads. */
   keyLock: boolean;
+  slipMode: boolean;
+  vinylMode: boolean;
+  scratching: boolean;
   /** Active loop (looping 03): the region the playhead wraps in, or null. */
   loop: LoopRegion | null;
   /** The active loop's displayed size (ADR 0027 §6): the seconds region
@@ -139,6 +150,7 @@ export class DeckEngine {
   private sourceNode: DeckSourceNode | null = null;
   /** In-flight DeckSourceNode.create (addModule is the one async step). */
   private sourceNodeCreating = false;
+  private sourceNodeReady: Promise<void> | null = null;
   /** Payload (buffer or stems array) last handed to the worklet. */
   private loadedIntoWorklet: unknown = null;
   /** startId of the running voice; null while audio is stopped. Ended
@@ -173,6 +185,18 @@ export class DeckEngine {
    * decks keep today's behavior); the shared Decks' default-ON comes from
    * the persisted store at the DeckContext layer. */
   private keyLock = false;
+  private slipMode = false;
+  private vinylMode = true;
+  private scratch: {
+    motion: ScratchMotion;
+    slip: boolean;
+    running: boolean;
+    hiddenPosition: number;
+    hiddenTime: number;
+  } | null = null;
+  private scratchSchedule: { owner: symbol; frames: ScheduledScratchFrame[]; index: number } | null = null;
+  private scratchScheduleDirty = false;
+  private preserveScratchSchedule = false;
 
   private listeners = new Set<() => void>();
   private snapshot: DeckSnapshot;
@@ -216,6 +240,7 @@ export class DeckEngine {
   }
 
   private fireTransportEvent(e: DeckTransportGesture): void {
+    e = { ...e, audioTime: e.audioTime ?? this.audio?.ctx.currentTime };
     this.onTransportEvent?.(e);
     for (const listener of this.transportEventListeners) listener(e);
   }
@@ -248,7 +273,8 @@ export class DeckEngine {
    * calls this; the reads are live, so the phase is fresh at gesture time.
    */
   asLaunchReference(): LaunchReference | null {
-    if (!isAudioRunning(this.transport)) return null;
+    this.syncScheduledScratch();
+    if (this.scratch || !isAudioRunning(this.transport)) return null;
     if (!this.beatTimes || this.beatTimes.length === 0) return null;
     return { beatTimes: this.beatTimes, playhead: this.getPlayhead() };
   }
@@ -269,6 +295,8 @@ export class DeckEngine {
   // ── Loading ────────────────────────────────────────────────────────────
 
   async load(info: DeckTrackInfo): Promise<void> {
+    this.clearScratchSchedule();
+    this.cancelScratch();
     this.loadAbort?.abort();
     const abort = new AbortController();
     this.loadAbort = abort;
@@ -446,6 +474,7 @@ export class DeckEngine {
 
   seek(seconds: number): void {
     if (!this.buffer) return;
+    this.endScratch();
     const time = this.clampPlayhead(seconds);
     this.fireTransportEvent({ action: 'seek', playhead: time });
     this.dispatch({ type: 'seek', time });
@@ -453,6 +482,7 @@ export class DeckEngine {
 
   jumpBeats(beats: number): void {
     if (!this.buffer) return;
+    this.endScratch();
     const playhead = this.getPlayhead();
     let raw: number;
     if (this.beatTimes && this.beatTimes.length >= 2) {
@@ -562,6 +592,7 @@ export class DeckEngine {
    */
   playAt(seconds: number): void {
     if (!this.buffer) return;
+    this.endScratch();
     const time = this.clampPlayhead(seconds);
     this.fireTransportEvent({ action: 'seek', playhead: time });
     // A playing deck restarts exactly at `time` via the seek effect; a
@@ -682,8 +713,227 @@ export class DeckEngine {
   setKeyLock(on: boolean): void {
     if (on === this.keyLock) return;
     this.keyLock = on;
-    this.sourceNode?.setMode(on ? 'stretch' : 'resample');
+    if (!this.scratch) this.sourceNode?.setMode(on ? 'stretch' : 'resample');
     this.emit();
+  }
+
+  setSlipMode(on: boolean): void {
+    if (this.slipMode === on) return;
+    this.slipMode = on;
+    this.emit();
+  }
+
+  setVinylMode(on: boolean): void {
+    if (this.vinylMode === on) return;
+    // Replay frames already own release timing. An overdue preference
+    // update must not release a newer trajectory rendered by the worklet.
+    if (!on && !this.preserveScratchSchedule) this.endScratch();
+    this.vinylMode = on;
+    this.emit();
+  }
+
+  beginScratch(): void {
+    if (!this.vinylMode || this.loadState !== 'ready' || !this.buffer) return;
+    if (!this.preserveScratchSchedule) this.cancelScheduledScratch();
+    if (this.scratch || !this.vinylMode || this.loadState !== 'ready' || !this.buffer) return;
+    const position = this.clampTime(this.getPlayhead());
+    const { ctx } = this.ensureAudio();
+    const running = isAudioRunning(this.transport);
+    this.stopAudio(position);
+    this.cueIsLoadDefault = false;
+    const loop = this.transport.loop;
+    this.scratch = {
+      motion: { position, time: ctx.currentTime, drive: 0, rate: 0,
+        trackDuration: this.buffer.duration,
+        loop: effectiveScratchLoop(loop, this.buffer.duration) },
+      slip: this.slipMode, running, hiddenPosition: position, hiddenTime: ctx.currentTime,
+    };
+    if (ctx.state === 'suspended') this.resumeWithGestureRetry(ctx);
+    this.syncScratchSource(true);
+    // Capture owns the first tap; takeover listeners see the accepted state.
+    this.snapshot = this.buildSnapshot();
+    this.fireTransportEvent({ action: 'scratchBegin', playhead: position, trackDuration: this.buffer.duration,
+      audioTime: this.scratch.motion.time });
+    this.emit();
+  }
+
+  scratchMove(deltaSeconds: number, durationSeconds: number): void {
+    if (!Number.isFinite(deltaSeconds) || deltaSeconds === 0 || !Number.isFinite(durationSeconds) || durationSeconds <= 0) return;
+    this.syncScheduledScratch();
+    if (!this.scratch || !this.audio) return;
+    if (!this.preserveScratchSchedule) this.clearScratchSchedule();
+    if (!this.scratch || !this.audio || !Number.isFinite(deltaSeconds) || deltaSeconds === 0
+        || !Number.isFinite(durationSeconds) || durationSeconds <= 0) return;
+    const now = this.audio.ctx.currentTime;
+    const motion = moveScratch(this.scratch.motion, now, deltaSeconds, durationSeconds);
+    this.scratch.motion = motion;
+    this.syncScratchSource();
+    this.fireTransportEvent({ action: 'scratchMove', playhead: motion.position,
+      deltaSeconds, durationSeconds, audioTime: motion.time, trackDuration: motion.trackDuration,
+      filter: { drive: motion.drive, rate: motion.rate } });
+  }
+
+  getScratchState(): ScratchMotion | null {
+    this.syncScheduledScratch();
+    if (!this.scratch || !this.audio) return null;
+    const time = this.audio.ctx.currentTime;
+    const motion = this.scratch.motion;
+    return { ...motion, ...scratchFilterAt(motion, time), position: scratchPosition(motion, time), time };
+  }
+
+  /** Read the existing shared audio clock without creating/resuming audio. */
+  getAudioClock(): Pick<AudioContext, 'currentTime' | 'state'> | null {
+    return this.audio?.ctx ?? null;
+  }
+
+  endScratch(positionSeconds?: number): void {
+    if (!this.preserveScratchSchedule) this.clearScratchSchedule();
+    if (!this.scratch) return;
+    const running = this.scratch.running;
+    const position = positionSeconds !== undefined && Number.isFinite(positionSeconds)
+      ? this.clampTime(positionSeconds)
+      : this.scratch.slip ? this.hiddenScratchPosition() : this.getPlayhead();
+    this.cancelScratch(position, false);
+    if (running && position < (this.buffer?.duration ?? 0)) this.startAudio(position);
+    else if (running) this.transport = { ...this.transport, playing: false, previewing: false, hotCuePreviewSlot: null };
+    this.snapshot = this.buildSnapshot();
+    this.fireTransportEvent({ action: 'scratchEnd', playhead: position });
+    this.emit();
+  }
+
+  private hiddenScratchPosition(): number {
+    const scratch = this.scratch!;
+    let position = scratch.hiddenPosition;
+    if (scratch.running && this.audio) {
+      position += (this.audio.ctx.currentTime - scratch.hiddenTime) * this.currentRate();
+      const loop = scratch.motion.loop;
+      if (loop) position = foldLoopPlayhead(position, loop.start, loop.end, scratch.hiddenPosition);
+    }
+    return this.clampTime(position);
+  }
+
+  /** Cancellation never launches normal audio (load/dispose/stop safety). */
+  private cancelScratch(position = this.getPlayhead(), notify = true): void {
+    if (!this.scratch) return;
+    this.scratch = null;
+    this.sourceNode?.stop();
+    this.sourceNode?.setMode(this.keyLock ? 'stretch' : 'resample');
+    this.transport = { ...this.transport, playhead: position };
+    if (notify) {
+      this.snapshot = this.buildSnapshot();
+      this.fireTransportEvent({ action: 'scratchEnd', playhead: position });
+    }
+  }
+
+  private syncScratchSource(reconnect = false): void {
+    if (!this.scratch || !this.audio) return;
+    const { ctx, input } = this.audio;
+    if (!this.sourceNode || this.sourceNode.ctx !== ctx) {
+      this.createSourceNode(ctx);
+      return;
+    }
+    this.handOverIfStale(this.sourceNode);
+    if (reconnect) {
+      this.sourceNode.disconnect();
+      this.sourceNode.connect(input);
+    }
+    this.sourceNode.setScratch(this.scratch.motion);
+  }
+
+  /** Machine loop placement, without Quantize or a inherited live region. */
+  setLoopRegion(region: { start: number; end: number } | null): void {
+    const position = this.getPlayhead();
+    const start = region ? this.clampTime(region.start) : 0;
+    const end = region ? this.clampTime(region.end) : 0;
+    this.transport = { ...this.transport, playhead: position,
+      loop: region && end > start ? { start, end, lengthBeats: (end - start) * (this.trackInfo?.bpm ?? 120) / 60 } : null };
+    this.anchorPosition = position;
+    this.anchorCtxTime = this.audio?.ctx.currentTime ?? 0;
+    this.syncLoopToSource();
+    this.emit();
+  }
+
+  async prepareScratchReplay(): Promise<void> {
+    const { ctx } = this.ensureAudio();
+    if (!this.sourceNode || this.sourceNode.ctx !== ctx) await this.createSourceNode(ctx);
+    if (!this.sourceNode || this.sourceNode.ctx !== ctx) throw new Error('scratch replay source unavailable');
+    if (ctx.state === 'suspended') await ctx.resume();
+  }
+
+  /** Already-buffered audio-clock frames. Live jog calls remain immediate. */
+  scheduleScratch(frames: ScratchFrame[]): symbol {
+    if (!this.sourceNode || !this.buffer || !this.audio) throw new Error('scratch replay source not prepared');
+    this.clearScratchSchedule();
+    const owner = Symbol('scratch replay');
+    const scheduled = frames.map((f): ScheduledScratchFrame => ({ ...f,
+      motion: f.motion ? { ...f.motion, trackDuration: this.buffer!.duration,
+        loop: effectiveScratchLoop(f.motion.loop, this.buffer!.duration) } : null,
+      loop: f.loop ? { ...f.loop } : null,
+      mode: this.keyLock ? 'stretch' : 'resample', startId: this.nextStartId++,
+    }));
+    this.scratchSchedule = { owner, frames: scheduled, index: -1 };
+    this.handOverIfStale(this.sourceNode);
+    this.sourceNode.disconnect();
+    this.sourceNode.connect(this.audio.input);
+    this.sourceNode.scheduleScratch(scheduled);
+    return owner;
+  }
+
+  /** Machine transport writes keep future frames; human writes cancel them. */
+  withScratchSchedule<T>(fn: () => T): T {
+    const previous = this.preserveScratchSchedule;
+    this.preserveScratchSchedule = true;
+    if (this.sourceNode) this.sourceNode.preserveScratchSchedule = true;
+    try { return fn(); }
+    finally {
+      this.preserveScratchSchedule = previous;
+      if (this.sourceNode) this.sourceNode.preserveScratchSchedule = previous;
+    }
+  }
+
+  /** Main-thread mirror only: the worklet has already executed these frames. */
+  syncScheduledScratch(notify = false): number | null {
+    const schedule = this.scratchSchedule;
+    if (!schedule || !this.audio) return null;
+    const now = this.audio.ctx.currentTime;
+    let changed = false;
+    while (schedule.frames[schedule.index + 1]?.time <= now) {
+      const f = schedule.frames[++schedule.index];
+      this.transport = { ...this.transport, playing: f.playing, previewing: false, hotCuePreviewSlot: null,
+        playhead: f.position, loop: f.loop ? { ...f.loop, lengthBeats: (f.loop.end - f.loop.start) * (this.trackInfo?.bpm ?? 120) / 60 } : null };
+      this.scratch = f.motion ? { motion: f.motion, slip: false, running: f.playing,
+        hiddenPosition: f.position, hiddenTime: f.time } : null;
+      this.runningStartId = !f.motion && f.playing ? f.startId : null;
+      this.anchorPosition = f.position;
+      this.anchorCtxTime = f.time;
+      this.pitchPercent = (f.rate - 1) * 100;
+      this.bendPercent = 0;
+      changed = true;
+    }
+    if (changed) {
+      this.snapshot = this.buildSnapshot();
+      this.scratchScheduleDirty = true;
+    }
+    if (notify && this.scratchScheduleDirty) {
+      this.scratchScheduleDirty = false;
+      for (const listener of this.listeners) listener();
+    }
+    return schedule.frames[schedule.index]?.time ?? null;
+  }
+
+  cancelScheduledScratch(owner?: symbol): void {
+    if (!this.scratchSchedule || (owner !== undefined && this.scratchSchedule.owner !== owner)) return;
+    this.clearScratchSchedule();
+    if (this.scratch) this.endScratch(this.getPlayhead());
+  }
+
+  private clearScratchSchedule(): void {
+    if (!this.scratchSchedule) return;
+    this.syncScheduledScratch();
+    this.scratchSchedule = null;
+    this.scratchScheduleDirty = false;
+    this.sourceNode?.cancelScratchSchedule();
+    if (this.audio) this.sourceNode?.setRateAt(this.currentRate(), this.audio.ctx.currentTime);
   }
 
   /**
@@ -708,7 +958,12 @@ export class DeckEngine {
     // (e.g. the transition editor re-applying tempo match on every model
     // change) must not trigger re-renders (issue 10).
     if (pitchPercent === this.pitchPercent && bendPercent === this.bendPercent) return;
-    if (this.runningStartId !== null && this.sourceNode && this.audio) {
+    if (this.scratch && this.audio) {
+      this.scratch.hiddenPosition = this.hiddenScratchPosition();
+      this.scratch.hiddenTime = this.audio.ctx.currentTime;
+      this.pitchPercent = pitchPercent;
+      this.bendPercent = bendPercent;
+    } else if (this.runningStartId !== null && this.sourceNode && this.audio) {
       const now = this.audio.ctx.currentTime;
       this.anchorPosition = this.getPlayhead(); // still at the old rate
       this.anchorCtxTime = now;
@@ -733,9 +988,10 @@ export class DeckEngine {
 
   // ── Reads ──────────────────────────────────────────────────────────────
 
-  /** True if the deck's audio is audibly running (playing or any preview). */
+  /** Audio is wanted: normal transport, preview, or a held platter. */
   isAudioRunning(): boolean {
-    return isAudioRunning(this.transport);
+    this.syncScheduledScratch();
+    return this.scratch !== null || isAudioRunning(this.transport);
   }
 
   /** Current playhead in seconds. Cheap; safe to poll per animation frame.
@@ -744,6 +1000,8 @@ export class DeckEngine {
    * counts up from the negative anchor through 0, driving the silent
    * scroll and the on-time entry. */
   getPlayhead(): number {
+    this.syncScheduledScratch();
+    if (this.scratch && this.audio) return scratchPosition(this.scratch.motion, this.audio.ctx.currentTime);
     if ((this.runningStartId !== null || this.leadInActive) && this.audio) {
       const elapsed =
         (this.audio.ctx.currentTime - this.anchorCtxTime) * this.currentRate();
@@ -767,6 +1025,7 @@ export class DeckEngine {
   }
 
   getSnapshot(): DeckSnapshot {
+    this.syncScheduledScratch();
     return this.snapshot;
   }
 
@@ -783,6 +1042,9 @@ export class DeckEngine {
     this.loadAbort?.abort();
     this.clearPendingLaunch();
     this.stopAudio(this.getPlayhead());
+    this.transport = { ...this.transport, playing: false, previewing: false, hotCuePreviewSlot: null };
+    this.pendingPlay = false;
+    this.emit();
     // Keep the node cached for revival; just detach it from the graph.
     this.sourceNode?.disconnect();
     this.audio = null;
@@ -825,6 +1087,7 @@ export class DeckEngine {
    * (playAt) pass an unquantized one; performer gestures use the default. */
   private dispatch(event: TransportEvent, ctx?: TransportContext): void {
     if (!this.buffer) return;
+    this.endScratch();
     if (DeckEngine.CUE_FREEZING_EVENTS.has(event.type)) {
       this.cueIsLoadDefault = false;
     }
@@ -1002,6 +1265,8 @@ export class DeckEngine {
   }
 
   private stopAudio(at: number): void {
+    if (!this.preserveScratchSchedule) this.clearScratchSchedule();
+    this.cancelScratch(at);
     this.clearPendingLaunch();
     this.pendingStartAt = null;
     // A stop during the lead-in cancels the scheduled entry: the deck rests
@@ -1035,7 +1300,7 @@ export class DeckEngine {
       this.gestureRetryInstalled = false;
       window.removeEventListener('pointerdown', retry, true);
       window.removeEventListener('keydown', retry, true);
-      if (!isAudioRunning(this.transport)) return;
+      if (!this.isAudioRunning()) return;
       if (this.audio?.ctx !== ctx || ctx.state !== 'suspended') return;
       void ctx.resume().catch(() => undefined);
     };
@@ -1057,10 +1322,10 @@ export class DeckEngine {
     node.disconnect();
     node.connect(input);
     const now = node.ctx.currentTime;
-    const offset = Math.max(0, Math.min(at, this.buffer.duration - 0.001));
+    const offset = Math.max(0, Math.min(at, this.buffer.duration));
     node.setRateAt(this.currentRate(), now);
     const startId = this.nextStartId++;
-    node.start(Math.round(offset * this.buffer.sampleRate), startId);
+    node.start(offset * this.buffer.sampleRate, startId, now);
     this.runningStartId = startId;
     this.anchorPosition = offset;
     this.anchorCtxTime = now;
@@ -1069,10 +1334,10 @@ export class DeckEngine {
   /** Build the worklet node for `ctx` (addModule + construction — the one
    * async step; every command afterwards is synchronous). Fires a latched
    * start when it lands. */
-  private createSourceNode(ctx: AudioContext): void {
-    if (this.sourceNodeCreating) return;
+  private createSourceNode(ctx: AudioContext): Promise<void> {
+    if (this.sourceNodeCreating) return this.sourceNodeReady!;
     this.sourceNodeCreating = true;
-    DeckSourceNode.create(ctx)
+    return this.sourceNodeReady = DeckSourceNode.create(ctx)
       .then((node) => {
         this.sourceNodeCreating = false;
         this.sourceNode?.disconnect();
@@ -1081,6 +1346,10 @@ export class DeckEngine {
         node.onEnded = (startId) => this.handleEnded(startId);
         // Warm handover so the first stab doesn't pay the copy.
         this.handOverIfStale(node);
+        if (this.scratch) {
+          this.syncScratchSource(true);
+          return;
+        }
         const at = this.pendingStartAt;
         if (at === null) return;
         this.pendingStartAt = null;
@@ -1164,6 +1433,7 @@ export class DeckEngine {
 
   /** The live voice ran off the end of the track (worklet message). */
   private handleEnded(startId: number): void {
+    this.syncScheduledScratch();
     if (this.runningStartId !== startId) return; // raced a seek/stop
     this.runningStartId = null;
     // The clock can no longer be read from the source; rest the playhead
@@ -1172,7 +1442,9 @@ export class DeckEngine {
       ...this.transport,
       playhead: this.buffer?.duration ?? this.transport.playhead,
     };
-    this.dispatch({ type: 'ended' });
+    // Natural EOF is not a human stop: a later queued scratch may pull
+    // backwards from the track end without loading another track.
+    this.withScratchSchedule(() => this.dispatch({ type: 'ended' }));
   }
 
   private currentRate(): number {
@@ -1212,6 +1484,9 @@ export class DeckEngine {
       pitchPercent: this.pitchPercent,
       bendPercent: this.bendPercent,
       keyLock: this.keyLock,
+      slipMode: this.slipMode,
+      vinylMode: this.vinylMode,
+      scratching: this.scratch !== null,
       loop: this.transport.loop,
       loopBeatsLabel: this.transport.loop
         ? projectLoopBeats(this.transport.loop, this.beatTimes)

@@ -67,6 +67,8 @@ export interface DeckLedInput {
   /** The Deck's Key Lock (engine snapshot state, midi-performance-ops 07)
    * — drives the SHIFT-layer Q lamp probe only. */
   keyLock: boolean;
+  slipMode: boolean;
+  vinylMode: boolean;
   /**
    * The active loop's length in beats, or null when no loop runs
    * (midi-performance-ops 02) — drives the LOOP-mode pad lamps: the pad
@@ -92,6 +94,8 @@ export interface DeckLedStates {
   quantize: boolean;
   /** SHIFT-layer Q light (the Key Lock lamp probe) — the Deck's Key Lock. */
   keyLock: boolean;
+  slipMode: boolean;
+  vinylMode: boolean;
   /** Active loop length in beats or null — encodeDeckLeds lights the
    * LOOP-mode pad whose mapped preset equals it (exact dyadic equality;
    * lengths and presets are both exact binary fractions). */
@@ -213,6 +217,8 @@ export function ledStates(input: DeckLedInput, phases: BlinkPhases = STEADY): De
     gridPads: GRID_PAD_MAPPED.map((mapped) => mapped && input.hasBeatgrid),
     quantize: input.quantize,
     keyLock: input.keyLock,
+    slipMode: input.slipMode,
+    vinylMode: input.vinylMode,
     loopBeats: input.loopBeats,
   };
 }
@@ -273,6 +279,8 @@ function deckAddresses(deck: DeckFeedback): readonly LedAddress[] {
     ...deck.gridPads,
     deck.quantize,
     ...(deck.keyLock ? [deck.keyLock] : []),
+    ...(deck.slipMode ? [deck.slipMode] : []),
+    ...(deck.vinylMode ? [deck.vinylMode] : []),
     ...(deck.keyLockShifted ? [deck.keyLockShifted] : []),
     ...deck.loopPads,
     ...deck.loopPadsShifted,
@@ -310,6 +318,8 @@ export function encodeDeckLeds(
     ),
     encodeLed(addresses.quantize, states.quantize),
     ...(addresses.keyLock ? [encodeLed(addresses.keyLock, states.keyLock)] : []),
+    ...(addresses.slipMode ? [encodeLed(addresses.slipMode, states.slipMode)] : []),
+    ...(addresses.vinylMode ? [encodeLed(addresses.vinylMode, states.vinylMode)] : []),
     // The Key Lock lamp probe (midi-performance-ops 07): written only when
     // the mapping carries the shifted-Q address; absent = probe failed and
     // Key Lock is screen-only.

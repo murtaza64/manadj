@@ -12,7 +12,8 @@ import SetDetailPane from './SetDetailPane';
 import { useSetPlan } from './useSetPlan';
 import { planSet } from './planner';
 import { SetSpaceTransport } from './SetSpaceTransport';
-import { selectSet } from './setStore';
+import { selectSet, setAdjacencyPin } from './setStore';
+import type { MenuItem } from '../components/ContextMenu';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -30,7 +31,9 @@ vi.mock('../hooks/useDeck', () => ({ useDecks: () => decks }));
 vi.mock('../hooks/useMixer', () => ({ useMixer: () => mixer }));
 vi.mock('../hooks/useDeckOccupancy', () => ({ useDeckOccupancy: () => occupancy }));
 vi.mock('../components/Toast', () => ({ useToast: () => toast }));
-vi.mock('../components/useTrackMenuItems', () => ({ useTrackMenuItems: () => [] }));
+vi.mock('../components/useTrackMenuItems', () => ({
+  useTrackMenuItems: ({ surfaceItems }: { surfaceItems?: MenuItem[] }) => surfaceItems ?? [],
+}));
 vi.mock('./pickup', async (importOriginal) => ({
   ...await importOriginal<typeof import('./pickup')>(),
   readPickupSnapshot: () => ({}),
@@ -115,8 +118,8 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-function dragEvent(target: Element, type: string, dataTransfer: DataTransfer, clientY = 0) {
-  const event = new MouseEvent(type, { bubbles: true, cancelable: true, clientY });
+function dragEvent(target: EventTarget, type: string, dataTransfer: DataTransfer, clientY = 0, clientX = 400) {
+  const event = new MouseEvent(type, { bubbles: true, cancelable: true, clientY, clientX });
   Object.defineProperty(event, 'dataTransfer', { value: dataTransfer });
   act(() => { target.dispatchEvent(event); });
 }
@@ -141,6 +144,49 @@ async function startDrag() {
   vi.mocked(useSetPlan).mockClear();
   return { source, pane, dataTransfer };
 }
+
+it('scrolls smoothly at a stationary drag edge, updates the target, and stops on cancel', async () => {
+  const { pane, source, dataTransfer } = await startDrag();
+  let now = 1000;
+  let id = 0;
+  const frames = new Map<number, FrameRequestCallback>();
+  vi.spyOn(performance, 'now').mockImplementation(() => now);
+  vi.stubGlobal('requestAnimationFrame', (fn: FrameRequestCallback) => {
+    frames.set(++id, fn);
+    return id;
+  });
+  vi.stubGlobal('cancelAnimationFrame', (id: number) => frames.delete(id));
+  let scrollTop = 0;
+  Object.defineProperties(pane, {
+    clientHeight: { value: 80 }, scrollHeight: { value: 120 },
+    scrollTop: { get: () => scrollTop, set: (value: number) => { scrollTop = Math.max(0, Math.min(40, value)); } },
+  });
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+    const index = [...host.querySelectorAll('[data-set-track-row]')].indexOf(this);
+    const top = index < 0 ? 100 : 100 + index * 40 - scrollTop;
+    return { left: 100, right: 700, top, bottom: top + (index < 0 ? 80 : 40), height: index < 0 ? 80 : 40 } as DOMRect;
+  });
+  const frame = () => act(() => {
+    now += 16;
+    const callbacks = [...frames.values()];
+    frames.clear();
+    callbacks.forEach((fn) => fn(now));
+  });
+  dragEvent(pane, 'dragover', dataTransfer, 179);
+  const positions: number[] = [];
+  for (let i = 0; i < 70; i++) { frame(); positions.push(scrollTop); }
+  expect(scrollTop).toBeGreaterThan(20);
+  expect(positions.filter((pos, i) => i > 0 && pos > positions[i - 1]).length).toBeGreaterThan(5);
+  expect([...host.querySelectorAll('[data-set-track-row]')].map((row) => row.getAttribute('data-set-track-row')))
+    .toEqual(['2', '3', '1']);
+  expect(api.sets.replaceEntries).not.toHaveBeenCalled();
+  expect(frames.size).toBe(1); // the stationary internal drag survives beyond 700 ms
+  dragEvent(source, 'dragend', dataTransfer);
+  const stoppedAt = scrollTop;
+  frame();
+  expect(scrollTop).toBe(stoppedAt);
+  expect(frames.size).toBe(0);
+});
 
 it('moves rows immediately but only plans a settled drag target', async () => {
   const { pane, dataTransfer } = await startDrag();
@@ -217,6 +263,96 @@ it.each(['dragend', 'dragleave'])('cancels a pending preview on %s', async (type
   act(() => vi.advanceTimersByTime(200));
   expect(vi.mocked(useSetPlan).mock.calls.some(([entries]) => entries?.[0].trackId === 2)).toBe(false);
   expect(getSetEntries(1)!.map((entry) => entry.trackId)).toEqual([1, 2, 3]);
+  expect(api.sets.replaceEntries).not.toHaveBeenCalled();
+});
+
+function armMove(trackId: number, label = 'Move track') {
+  const row = host.querySelector<HTMLElement>(`[data-set-track-row="${trackId}"]`)!;
+  act(() => row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true })));
+  const item = [...host.querySelectorAll<HTMLElement>('[role="menuitem"]')]
+    .find((item) => item.textContent === label);
+  expect(item).toBeDefined();
+  act(() => item!.click());
+}
+
+it('arms a move without changing the Set, then inserts at a clicked transition row', async () => {
+  await selectSetTrack();
+  armMove(1);
+  expect(host.textContent).toContain('Choose a transition row');
+  expect(getSetEntries(1)!.map((entry) => entry.trackId)).toEqual([1, 2, 3]);
+  expect(api.sets.replaceEntries).not.toHaveBeenCalled();
+  // Routine interiors are selectable destinations too, despite normally collapsing.
+  const target = host.querySelector<HTMLButtonElement>('[data-set-move-index="2"]')!;
+  expect(target).not.toBeNull();
+  act(() => target.click());
+  expect(getSetEntries(1)!.map((entry) => entry.trackId)).toEqual([2, 1, 3]);
+  expect(api.sets.replaceEntries).toHaveBeenCalledTimes(1);
+  expect(host.querySelector('[data-set-move-index]')).toBeNull();
+});
+
+it('moves a non-contiguous selection in Set order, rather than selection order', async () => {
+  await selectSetTrack();
+  act(() => host.querySelector<HTMLElement>('[data-set-track-row="3"]')!.click());
+  act(() => host.querySelector('[data-set-track-row="1"]')!.dispatchEvent(
+    new MouseEvent('click', { bubbles: true, metaKey: true }),
+  ));
+  armMove(3, 'Move 2 tracks');
+  act(() => host.querySelector<HTMLButtonElement>('[data-set-move-index="2"]')!.click());
+  expect(getSetEntries(1)!.map((entry) => entry.trackId)).toEqual([2, 1, 3]);
+  expect(api.sets.replaceEntries).toHaveBeenCalledTimes(1);
+});
+
+it.each(['Escape', 'button'])('cancels move mode with %s without clearing selection or saving', async (via) => {
+  await selectSetTrack();
+  armMove(2);
+  if (via === 'Escape') {
+    act(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+  } else {
+    act(() => host.querySelector<HTMLButtonElement>('[aria-label="Cancel move"]')!.click());
+  }
+  expect(host.querySelector('[data-set-move-index]')).toBeNull();
+  expect(getSetSelection(1).ids).toEqual([2]);
+  expect(api.sets.replaceEntries).not.toHaveBeenCalled();
+});
+
+it.each([0, 3])('offers the Set boundary destination %s', async (index) => {
+  await selectSetTrack();
+  armMove(2);
+  act(() => host.querySelector<HTMLButtonElement>(`[data-set-move-index="${index}"]`)!.click());
+  expect(getSetEntries(1)!.map((entry) => entry.trackId)).toEqual(index === 0 ? [2, 1, 3] : [1, 3, 2]);
+});
+
+it('keeps native Tab/Enter behavior out of the global browse shortcut handler', async () => {
+  const row = await selectSetTrack();
+  armMove(2);
+  const hub = vi.fn();
+  document.addEventListener('keydown', hub);
+  try {
+    for (const key of ['Tab', 'Enter', 'ArrowDown', 'Backspace', ' ']) {
+      const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true });
+      act(() => row.closest('[tabindex="-1"]')!.dispatchEvent(event));
+      expect(event.defaultPrevented).toBe(false);
+    }
+    expect(hub).not.toHaveBeenCalled();
+    expect(api.sets.replaceEntries).not.toHaveBeenCalled();
+  } finally {
+    document.removeEventListener('keydown', hub);
+  }
+});
+
+it('disables Set-wide pin actions while choosing a move destination', async () => {
+  await selectSetTrack();
+  act(() => {
+    setAdjacencyPin(1, 1, null);
+    reconcilePairFromServer('2:3', [{ uuid: 't', name: 'T', favorite: false, position: 0, data: {} }]);
+  });
+  const pinButtons = [...host.querySelectorAll<HTMLButtonElement>('button')]
+    .filter((button) => /^(Auto-fill|Resolve from evidence)/.test(button.textContent ?? ''));
+  expect(pinButtons.every((button) => !button.disabled)).toBe(true);
+  vi.mocked(api.sets.replaceEntries).mockClear();
+  armMove(2);
+  expect(pinButtons.every((button) => button.disabled)).toBe(true);
+  act(() => pinButtons.forEach((button) => button.click()));
   expect(api.sets.replaceEntries).not.toHaveBeenCalled();
 });
 

@@ -220,7 +220,7 @@ export function DeckWaveform({
   // instantly at play (performance-hardening 01) — same set usePlayGuides
   // treats as "moving".
   const advancing = useDeckSnapshot(
-    (s) => s.playing || s.pendingPlay || s.previewing || s.hotCuePreviewSlot !== null,
+    (s) => s.playing || s.pendingPlay || s.previewing || s.hotCuePreviewSlot !== null || s.scratching,
   );
 
   const transport = useScrubTransport();
@@ -713,7 +713,7 @@ function PlayZone() {
             <button
               className={`player-button${bend < 0 ? ' perf-nudge-held' : ''}`}
               disabled={!ready}
-              title={`Nudge slower (hold); hold ${keys.jog.toUpperCase()} and move mouse left to bend/seek`}
+              title={`Nudge slower (hold); hold ${keys.jog.toUpperCase()} and move mouse left to bend/seek; Shift adds platter touch when Vinyl is on`}
               onPointerDown={bendStart(-1)}
               onPointerUp={bendEnd}
               onPointerCancel={bendEnd}
@@ -724,7 +724,7 @@ function PlayZone() {
             <button
               className={`player-button${bend > 0 ? ' perf-nudge-held' : ''}`}
               disabled={!ready}
-              title={`Nudge faster (hold); hold ${keys.jog.toUpperCase()} and move mouse right to bend/seek`}
+              title={`Nudge faster (hold); hold ${keys.jog.toUpperCase()} and move mouse right to bend/seek; Shift adds platter touch when Vinyl is on`}
               onPointerDown={bendStart(1)}
               onPointerUp={bendEnd}
               onPointerCancel={bendEnd}
@@ -765,6 +765,9 @@ function MixZone({ track }: { track: Track | null }) {
 
   const pitch = useDeckSnapshot((s) => s.pitchPercent);
   const keyLock = useDeckSnapshot((s) => s.keyLock);
+  const slipMode = useDeckSnapshot((s) => s.slipMode);
+  const vinylMode = useDeckSnapshot((s) => s.vinylMode);
+  const scratching = useDeckSnapshot((s) => s.scratching);
 
   // Soft-takeover hints (midi-controller 18): pulse the control a
   // mismatched hardware fader/knob is reaching for. Read per control —
@@ -936,6 +939,24 @@ function MixZone({ track }: { track: Track | null }) {
         takeover={pitchTakeover}
       />
       <div className="perf-mix-foot">
+        <button
+          className={`player-button perf-mini perf-vinyl${vinylMode ? ' on' : ''}${scratching ? ' scratching' : ''}`}
+          onClick={() => engine.setVinylMode(!vinylMode)}
+          aria-pressed={vinylMode}
+          aria-label="Vinyl mode"
+          title="Vinyl: platter touch holds and scratches; off uses pitch bend (GRV6: Shift + Slip)"
+        >
+          VINYL
+        </button>
+        <button
+          className={`player-button perf-mini perf-slip${slipMode ? ' on' : ''}`}
+          onClick={() => engine.setSlipMode(!slipMode)}
+          aria-pressed={slipMode}
+          aria-label="Slip mode"
+          title="Slip: return to the continuing timeline after scratching or a spinback. Changes during a gesture apply to the next one."
+        >
+          SLIP
+        </button>
         {/* Key Lock (key-lock 03): Deck setting — works with no track
             loaded, sticky per Deck (engine holds live state, store
             persists). Lit while tempo changes leave the Key unchanged. */}

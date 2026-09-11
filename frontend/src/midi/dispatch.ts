@@ -6,6 +6,8 @@ import {
   audiblePads,
   audibleTransport,
 } from '../playback/audibleSurface';
+import type { SurfaceJog } from '../playback/audibleSurface';
+import type { ChannelId } from '../playback/mixer';
 import { PITCH_RANGE_PERCENT } from '../playback/tempo';
 import { isQuantizeOn, setQuantize } from '../playback/quantizeStore';
 import type { MidiAction } from './actions';
@@ -66,8 +68,27 @@ export function dispatchMidiAction(action: MidiAction): void {
  * deliberate gesture).
  */
 let gridChordState = initialGridChordState();
+// Keep the original recipient even after touch-up: rim continuation and
+// bend timers still belong to it, not to whichever surface is audible later.
+const jogRecipients = new Map<ChannelId, SurfaceJog>();
+const touchRecipients = new Map<ChannelId, SurfaceJog>();
+
+function cancelJog(deck: ChannelId): void {
+  const recipients = new Set([jogRecipients.get(deck), touchRecipients.get(deck)]);
+  jogRecipients.delete(deck);
+  touchRecipients.delete(deck);
+  for (const jog of recipients) jog?.cancel?.(deck);
+}
+
+function routedJog(deck: ChannelId): SurfaceJog | null {
+  const jog = audibleJog();
+  if (jogRecipients.get(deck) !== jog) cancelJog(deck);
+  if (jog) jogRecipients.set(deck, jog);
+  return jog;
+}
 
 export function _resetGridChordForTests(): void {
+  for (const deck of new Set([...jogRecipients.keys(), ...touchRecipients.keys()])) cancelJog(deck);
   gridChordState = initialGridChordState();
 }
 
@@ -81,8 +102,10 @@ function executeGridChordCommand(command: GridChordCommand): void {
   switch (command.type) {
     case 'pass-jog': {
       // Not armed: the tick keeps its normal surface-routed meaning.
-      const jog = audibleJog();
-      if (command.stream === 'rim') {
+      const jog = routedJog(command.deck);
+      if (command.stream === 'vinyl-off') {
+        jog?.rimTicks(command.deck, command.ticks, command.jogProfile, true);
+      } else if (command.stream === 'rim') {
         jog?.rimTicks(command.deck, command.ticks, command.jogProfile);
       } else {
         jog?.touchTicks(command.deck, command.ticks, command.jogProfile);
@@ -114,6 +137,9 @@ type RelativeAction = Extract<MidiAction, { kind: 'relative' }>;
 function dispatchRelative(action: RelativeAction): void {
   const { target, ticks, jogProfile } = action;
   switch (target.control) {
+    case 'jog-vinyl-off':
+      runGridChord({ type: 'jog-ticks', deck: target.deck, stream: 'vinyl-off', ticks, jogProfile });
+      return;
     case 'jog':
       // Rim and touch flow through the chord fold first (midi-performance-
       // ops 06): armed decks nudge the grid, unarmed decks pass through to
@@ -124,7 +150,8 @@ function dispatchRelative(action: RelativeAction): void {
       runGridChord({ type: 'jog-ticks', deck: target.deck, stream: 'touch', ticks, jogProfile });
       return;
     case 'jog-seek':
-      audibleJog()?.shiftRimTicks(target.deck, ticks, jogProfile);
+      if (touchRecipients.has(target.deck)) cancelJog(target.deck);
+      routedJog(target.deck)?.shiftRimTicks(target.deck, ticks, jogProfile);
       return;
     case 'selection-move': {
       const surface = browseSurface();
@@ -139,11 +166,36 @@ function dispatchRelative(action: RelativeAction): void {
 
 function dispatchButton(target: ButtonAction['target'], edge: 'down' | 'up'): void {
   switch (target.control) {
+    case 'jog-touch-edge': {
+      if (target.shifted) {
+        cancelJog(target.deck);
+      } else if (edge === 'up') {
+        const jog = touchRecipients.get(target.deck);
+        jog?.touch?.(target.deck, false);
+      } else if (!gridChordState[target.deck]) {
+        const jog = routedJog(target.deck);
+        if (jog?.touch) {
+          touchRecipients.set(target.deck, jog);
+          jog.touch(target.deck, true);
+        }
+      }
+      return;
+    }
+    case 'slip-mode':
+      if (edge === 'down') deckControlsFor(target.deck)?.toggleSlipMode();
+      return;
+    case 'vinyl-mode':
+      if (edge === 'down') deckControlsFor(target.deck)?.toggleVinylMode();
+      return;
     case 'control-focus':
       if (edge === 'down') toggleControlFocus(target.side);
       return;
     case 'set-control-focus':
       if (edge === 'down') focusDeck(target.deck);
+      else {
+        cancelJog(target.deck);
+        gridChordState = { ...gridChordState, [target.deck]: null };
+      }
       return;
     case 'transport': {
       if (edge !== 'down') return;
@@ -244,6 +296,7 @@ function dispatchButton(target: ButtonAction['target'], edge: 'down' | 'up'): vo
       return;
     }
     case 'grid-nudge': {
+      if (edge === 'down') cancelJog(target.deck);
       // Grid edits are stored-data operations, not playback gestures —
       // registry-direct regardless of the audible surface (ADR 0019,
       // midi-performance-ops 05). Chorded since issue 06: the down edge
@@ -282,6 +335,7 @@ function dispatchButton(target: ButtonAction['target'], edge: 'down' | 'up'): vo
       // BPM adjust, in-session decision 2026-07-06); halve/double stay
       // plain taps.
       if (target.change === 'grow' || target.change === 'shrink') {
+        if (edge === 'down') cancelJog(target.deck);
         runGridChord({
           type: edge === 'down' ? 'bpm-pad-down' : 'bpm-pad-up',
           deck: target.deck,
@@ -421,6 +475,7 @@ export function _resetSoftTakeoverForTests(): void {
  * by the adapter; LEDs resync via the output store.)
  */
 export function forgetHardwareState(): void {
+  for (const deck of new Set([...jogRecipients.keys(), ...touchRecipients.keys()])) cancelJog(deck);
   takeovers.clear();
   gridChordState = initialGridChordState();
 }

@@ -40,6 +40,8 @@ const idle = {
   hasBeatgrid: false,
   quantize: false,
   keyLock: false,
+  slipMode: false,
+  vinylMode: true,
   loopBeats: null,
 };
 
@@ -202,6 +204,8 @@ describe('audibleTransportOverride (editor-midi 05)', () => {
     hasBeatgrid: true,
     quantize: true,
     keyLock: true,
+    slipMode: true,
+    vinylMode: false,
     loopBeats: 4,
   };
 
@@ -236,6 +240,8 @@ describe('audibleTransportOverride (editor-midi 05)', () => {
     const states = ledStates(audibleTransportOverride(busy, true));
     expect(states.quantize).toBe(true);
     expect(states.keyLock).toBe(true);
+    expect(states.slipMode).toBe(true);
+    expect(states.vinylMode).toBe(false);
   });
 
   it('loop pad state passes through like the hot cue pads', () => {

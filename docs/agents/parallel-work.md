@@ -27,6 +27,50 @@ orchestration, reporting vocabulary). This doc states only what manadj does
 4. **Docs fast-path**: a change touching only docs files (`docs/`,
    `CONTEXT.md`, `AGENTS.md`) may land immediately with a reduced gate
    (sanity-read the diff). Any lane may use it for cross-lane-relevant updates.
+5. **Standing area lanes** survive individual feature/issue closure. Provision
+   on demand and retain their agent context; ordinary feature and overflow
+   lanes keep the canonical lifecycle. See below.
+
+## Standing area lanes
+
+| Area key | Scope |
+| --- | --- |
+| `library` | Library, discovery, and curation |
+| `playback` | Playback, audio, and controllers |
+| `mix-editor` | Mix editor |
+| `sets-sessions` | Sets, Sessions, and captured evidence |
+| `integrations` | Import, export, and external integrations |
+| `visualizers` | Visualizers |
+| `app-platform` | App shell, design system, and developer tooling |
+
+- Designate a standing lane with `area: <key>` in its sidecar `LANE.md`.
+  At most one standing lane per area. Missing designation means unprovisioned,
+  not permission to guess from a lane's name. Keep actual lane assignments in
+  these records, not committed docs; `owner:` remains the session authority.
+- Prefer resuming the designated lane's owner for related work. Establish a
+  designation through the orchestrator, reusing a suitable existing lane with
+  its owner's coordination or provisioning a new one. Do not rename, adopt,
+  or reassign another session's lane during setup.
+- Standing does not mean shared: exactly one owning session at a time. Idle,
+  disconnected, or old does not mean unowned. Apply canonical ownership and
+  quiescent handover rules before replacing a session; an old owner must not
+  resume writing after handover. Uncertain ownership blocks routing/writes.
+- If the owner is busy, queue work for it or use a separate overflow lane.
+  Never start a second session in the standing workspace. Area stewardship
+  does not confer exclusive ownership of code or bypass issue claims/hotspots.
+- Keep one change per issue and merge current trunk at issue boundaries.
+  Parked work retains its review gate; unrelated work must not land it as a
+  dependency. Use an overflow lane when that gate blocks independent work.
+- Retain standing lanes after landing; processes need not stay running.
+  Retirement is explicit, with unresolved work handed over before Closure.
+- Durable area knowledge belongs in a committed application map: entry
+  points, state owners, dependencies, tests, and relevant decisions. Live
+  session IDs belong only in the sidecar. The full code map is not yet built;
+  the table above is the agreed routing taxonomy, not a module-boundary claim.
+
+Planned feedback routing and explicit batch authorization:
+[`docs/prds/in-app-feedback.md`](../prds/in-app-feedback.md). This is a spec,
+not an available dispatch service.
 
 ## Verification (the landing agent owns it)
 
@@ -74,6 +118,10 @@ known audio breakage — headphone-cue 08). It attaches from anywhere:
 opening step; the browser URL is the fallback.
 
 ## Closure (extends canon's lane teardown)
+
+Standing area lanes enter Closure only on explicit retirement, not on issue
+completion. Do not classify a retained standing lane as litter solely because
+its latest issue is closed.
 
 Before removing a lane dir: `lane_app.py stop`, then **harvest** the lane's DB
 clone if newer than the newest backup

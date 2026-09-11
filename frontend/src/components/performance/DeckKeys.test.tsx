@@ -6,19 +6,21 @@ import type { ChannelId } from '../../playback/mixer';
 import { KeepAliveView } from '../../contexts/KeepAliveView';
 import { DeckKeys } from './DeckKeys';
 import { DECK_KEYS } from './performanceKeys';
-import { mouseJogTicks } from './mouseControl';
+import { mouseSeekDelta } from './mouseControl';
 
 const engine = vi.hoisted(() => ({
   jumpBeats: vi.fn(), setBend: vi.fn(), cueUp: vi.fn(), cueDown: vi.fn(),
   togglePlay: vi.fn(), toggleLoop: vi.fn(),
   getSnapshot: vi.fn(), getPlayhead: vi.fn(), seek: vi.fn(), subscribe: vi.fn(),
+  beginScratch: vi.fn(), scratchMove: vi.fn(), endScratch: vi.fn(), addTransportEventListener: vi.fn(),
 }));
 const fixture = vi.hoisted(() => ({
   deck: 'A' as ChannelId,
   trackId: 7,
-  snapshot: { playing: false, loadState: 'ready', bendPercent: 0 },
+  snapshot: { playing: false, loadState: 'ready', bendPercent: 0, scratching: false, vinylMode: true },
   channel: { filter: 0, eq: { high: 0.5, mid: 0.5, low: 0.5 }, fader: 0.5 },
   listener: () => {},
+  transportListener: vi.fn<(event: { action: string }) => void>(),
 }));
 const hotCues = vi.hoisted(() => ({ enabled: true, down: vi.fn(), up: vi.fn(), walk: vi.fn() }));
 const mixer = vi.hoisted(() => ({
@@ -39,7 +41,7 @@ beforeEach(() => {
   vi.resetAllMocks();
   fixture.deck = 'A';
   fixture.trackId = 7;
-  fixture.snapshot = { playing: false, loadState: 'ready', bendPercent: 0 };
+  fixture.snapshot = { playing: false, loadState: 'ready', bendPercent: 0, scratching: false, vinylMode: true };
   fixture.channel = { filter: 0, eq: { high: 0.5, mid: 0.5, low: 0.5 }, fader: 0.5 };
   engine.getSnapshot.mockImplementation(() => fixture.snapshot);
   engine.getPlayhead.mockReturnValue(30);
@@ -47,6 +49,20 @@ beforeEach(() => {
   engine.subscribe.mockImplementation((listener) => {
     fixture.listener = listener;
     return vi.fn();
+  });
+  engine.addTransportEventListener.mockImplementation(listener => {
+    fixture.transportListener = listener;
+    return vi.fn();
+  });
+  engine.beginScratch.mockImplementation(() => {
+    if (fixture.snapshot.loadState !== 'ready' || !fixture.snapshot.vinylMode) return;
+    fixture.snapshot.scratching = true;
+    fixture.listener();
+  });
+  engine.endScratch.mockImplementation(() => {
+    fixture.snapshot.scratching = false;
+    fixture.transportListener({ action: 'scratchEnd' });
+    fixture.listener();
   });
   mixer.getChannelState.mockImplementation(() => fixture.channel);
   mixer.setFilter.mockImplementation((_deck, value) => { fixture.channel.filter = value; });
@@ -333,9 +349,9 @@ describe('mouse-key gestures and cue walking', () => {
     render(); move(100, 100);
     const jog = DECK_KEYS[deck === 'A' || deck === 'C' ? 'A' : 'B'].jog;
     key(jog); move(200, 100);
-    expect(engine.seek).toHaveBeenLastCalledWith(30 + mouseJogTicks(100, 16) * 0.05);
+    expect(engine.seek).toHaveBeenLastCalledWith(30 + mouseSeekDelta(100, 16));
     move(150, 100);
-    expect(engine.seek).toHaveBeenLastCalledWith(30 + mouseJogTicks(-50, 16) * 0.05);
+    expect(engine.seek).toHaveBeenLastCalledWith(30 + mouseSeekDelta(-50, 16));
     key(jog, {}, 'keyup'); move(300, 100);
     expect(engine.seek).toHaveBeenCalledTimes(2);
     expect(engine.setBend).not.toHaveBeenCalled();
@@ -345,13 +361,15 @@ describe('mouse-key gestures and cue walking', () => {
     vi.useFakeTimers(); fixture.snapshot.playing = true;
     render(); move(100, 100); key('t'); move(150, 100);
     act(() => vi.advanceTimersByTime(25));
-    expect(fixture.snapshot.bendPercent).toBeCloseTo(3.75);
+    expect(fixture.snapshot.bendPercent).toBeGreaterThan(0);
+    expect(fixture.snapshot.bendPercent).toBeLessThan(0.1);
     expect(engine.seek).not.toHaveBeenCalled();
     act(() => vi.advanceTimersByTime(600));
     expect(engine.setBend).toHaveBeenLastCalledWith(0);
     move(100, 100);
     act(() => vi.advanceTimersByTime(25));
-    expect(fixture.snapshot.bendPercent).toBeCloseTo(mouseJogTicks(-50, 100) / 2);
+    expect(fixture.snapshot.bendPercent).toBeLessThan(0);
+    expect(fixture.snapshot.bendPercent).toBeGreaterThan(-0.1);
     key('t', { metaKey: true }, 'keyup');
     expect(engine.setBend).toHaveBeenLastCalledWith(0);
     expect(vi.getTimerCount()).toBe(0);
@@ -365,7 +383,88 @@ describe('mouse-key gestures and cue walking', () => {
     act(() => vi.advanceTimersByTime(100));
     expect(engine.setBend).not.toHaveBeenCalled();
     move(200, 100);
-    expect(engine.seek).toHaveBeenLastCalledWith(30 + mouseJogTicks(50, 100) * 0.05);
+    expect(engine.seek).toHaveBeenLastCalledWith(30 + mouseSeekDelta(50, 100));
+  });
+
+  it.each(['A', 'B', 'C', 'D'] as const)('Shift+jog holds and moves the platter on deck %s', deck => {
+    vi.useFakeTimers(); fixture.deck = deck; render(); move(100, 100);
+    const jog = DECK_KEYS[deck === 'A' || deck === 'C' ? 'A' : 'B'].jog;
+    key(jog, { shiftKey: true });
+    expect(engine.beginScratch).toHaveBeenCalledOnce();
+    act(() => vi.advanceTimersByTime(1000));
+    expect(engine.endScratch).not.toHaveBeenCalled();
+    move(150, 100); move(130, 100);
+    expect(engine.scratchMove.mock.calls).toEqual([[0.1, 0.1], [-0.04, 0.016]]);
+    expect(engine.seek).not.toHaveBeenCalled();
+    expect(engine.setBend).not.toHaveBeenCalled();
+    expect(document.querySelector('.keyboard-pointer-row strong')?.textContent).toBe(`${deck} SCRATCH`);
+    key(jog, { metaKey: true }, 'keyup');
+    expect(engine.endScratch).toHaveBeenCalledOnce();
+    expect(fixture.snapshot.scratching).toBe(false);
+    expect(document.pointerLockElement).toBeNull();
+  });
+
+  it('Shift switches a held jog between rim and platter without releasing the pointer', () => {
+    vi.useFakeTimers(); fixture.snapshot.playing = true;
+    render(); move(100, 100); key('t'); move(150, 100);
+    act(() => vi.advanceTimersByTime(25));
+    expect(fixture.snapshot.bendPercent).toBeGreaterThan(0);
+    key('Shift', { shiftKey: true });
+    expect(fixture.snapshot.bendPercent).toBe(0);
+    expect(engine.beginScratch).toHaveBeenCalledOnce();
+    key('Shift', { shiftKey: true, repeat: true });
+    expect(engine.beginScratch).toHaveBeenCalledOnce();
+    move(180, 100);
+    expect(engine.scratchMove).toHaveBeenCalledOnce();
+    key('Shift', {}, 'keyup');
+    expect(engine.endScratch).toHaveBeenCalledOnce();
+    expect(document.pointerLockElement).not.toBeNull();
+    move(200, 100);
+    act(() => vi.advanceTimersByTime(25));
+    expect(fixture.snapshot.bendPercent).toBeGreaterThan(0);
+    expect(engine.scratchMove).toHaveBeenCalledTimes(1);
+    key('t', {}, 'keyup');
+    expect(fixture.snapshot.bendPercent).toBe(0);
+  });
+
+  it.each(['escape', 'blur', 'focus', 'view', 'layer', 'load', 'transport', 'engine end', 'unmount'])(
+    'releases owned scratch on %s and never restarts from stale mouse movement', reason => {
+      vi.useFakeTimers(); fixture.snapshot.playing = true;
+      render(); move(100, 100); key('t', { shiftKey: true });
+      const input = document.createElement('input');
+      document.body.append(input);
+      if (reason === 'escape') key('Escape');
+      if (reason === 'blur') act(() => { window.dispatchEvent(new Event('blur')); });
+      if (reason === 'focus') act(() => input.focus());
+      if (reason === 'view') render(false);
+      if (reason === 'layer') { fixture.deck = 'C'; render(); }
+      if (reason === 'load') { fixture.snapshot.loadState = 'fetching'; act(() => fixture.listener()); }
+      if (reason === 'transport') act(() => fixture.transportListener({ action: 'jumpBeats' }));
+      if (reason === 'engine end') { fixture.snapshot.scratching = false; act(() => fixture.listener()); }
+      if (reason === 'unmount') act(() => root.render(null));
+      expect(engine.endScratch).toHaveBeenCalledTimes(reason === 'engine end' ? 0 : 1);
+      expect(fixture.snapshot.scratching).toBe(false);
+      key('t', { shiftKey: true, repeat: true }); move(150, 100);
+      act(() => vi.advanceTimersByTime(500));
+      expect(engine.scratchMove).not.toHaveBeenCalled();
+      expect(engine.seek).not.toHaveBeenCalled();
+      expect(fixture.snapshot.bendPercent).toBe(0);
+      input.remove();
+    }
+  );
+
+  it('respects Vinyl off and never releases a foreign platter hold', () => {
+    render(); move(100, 100); fixture.snapshot.vinylMode = false;
+    key('t', { shiftKey: true }); move(150, 100);
+    expect(engine.beginScratch).not.toHaveBeenCalled();
+    expect(engine.seek).toHaveBeenCalledOnce();
+    key('t', {}, 'keyup'); engine.seek.mockClear();
+    fixture.snapshot.vinylMode = true; fixture.snapshot.scratching = true;
+    key('t', { shiftKey: true }); move(200, 100); key('t', {}, 'keyup');
+    expect(engine.beginScratch).not.toHaveBeenCalled();
+    expect(engine.scratchMove).not.toHaveBeenCalled();
+    expect(engine.endScratch).not.toHaveBeenCalled();
+    expect(engine.seek).not.toHaveBeenCalled();
   });
 
   it('leaves external cue/bend state untouched on layout or view changes', () => {

@@ -20,13 +20,13 @@
  * real Mixer/DeckEngine satisfy them structurally, and tests drive the
  * gate with scripted fakes plus the real detector.
  */
-import type { DeckSnapshot } from '../playback/DeckEngine';
+import type { DeckEngine, DeckSnapshot } from '../playback/DeckEngine';
 import { CHANNEL_IDS } from '../playback/mixer';
 import type { ChannelId, ChannelState, MixerChange } from '../playback/mixer';
 import type { CrossfaderAssignment } from '../playback/crossfaderAssignmentStore';
 import { audibleHolder, subscribeAudible } from '../playback/audibleSurface';
 import type { AudibleSurfaceId } from '../playback/audibleSurface';
-import { masterAudible, surfaceDisplaced } from './audibilityReducer';
+import { masterAudible, scratchSoundedBefore, surfaceDisplaced } from './audibilityReducer';
 import { initialCaptureState, reduceCaptureInto } from './detector';
 import type { CaptureState } from './detector';
 import { SilenceSplitClock } from './sessionLifecycle';
@@ -51,11 +51,9 @@ export interface CaptureDeckSource {
   getSnapshot(): DeckSnapshot;
   getPlayhead(): number;
   subscribe(listener: () => void): () => void;
-  setTransportEventHandler(
-    handler:
-      | ((e: { action: 'seek' | 'jumpBeats' | 'hotCue'; playhead: number; detail?: number }) => void)
-      | null
-  ): void;
+  setTransportEventHandler: DeckEngine['setTransportEventHandler'];
+  getScratchState: DeckEngine['getScratchState'];
+  getAudioClock: DeckEngine['getAudioClock'];
 }
 
 export class CaptureRecorder {
@@ -93,6 +91,9 @@ export class CaptureRecorder {
    * the log then, but tenure IS inactivity). */
   private silence: SilenceSplitClock | null = null;
   private seeding = false;
+  private clockEpoch: { source: NonNullable<ReturnType<DeckEngine['getAudioClock']>>;
+    audioOrigin: number; captureOrigin: number } | null = null;
+  private lastCaptureTime = 0;
 
   constructor(
     mixer: CaptureMixerSource,
@@ -159,7 +160,7 @@ export class CaptureRecorder {
     // `ch` is a physical CaptureDeck: identity is preserved on the event.
     for (const ch of CHANNEL_IDS) {
       this.engines[ch].setTransportEventHandler((e) =>
-        this.feed({ t: this.now(), kind: 'transport', channel: ch, ...e })
+        this.feed({ t: this.now(e.audioTime), kind: 'transport', channel: ch, ...e })
       );
     }
     if (this.surfaceGated) {
@@ -180,6 +181,7 @@ export class CaptureRecorder {
   private setSurfaceHolder(holder: AudibleSurfaceId): void {
     const gated = surfaceDisplaced(holder);
     if (gated === this.surfaceGated) return;
+    this.clockEpoch = null;
     if (gated) {
       // Bracket the machine's tenure: the marker rides the log (it is not
       // the machine's performance); the machine's own events are dropped
@@ -201,7 +203,7 @@ export class CaptureRecorder {
    */
   private seed(): void {
     this.seeding = true;
-    const t = this.now();
+    let t = this.now();
     // All four decks unconditionally (ADR 0033): controls, assignments,
     // loaded tracks, running transports.
     for (const ch of CHANNEL_IDS) {
@@ -234,6 +236,22 @@ export class CaptureRecorder {
       this.lastChannel[ch] = this.mixer.getChannelState(ch);
       if (snap.trackId !== null) {
         this.feed({ t, kind: 'load', channel: ch, trackId: snap.trackId, bpm: snap.bpm });
+      }
+      this.feed({ t, kind: 'loop', channel: ch, playhead: this.engines[ch].getPlayhead(),
+        region: snap.loop ? { start: snap.loop.start, end: snap.loop.end } : null });
+      for (const control of ['slipMode', 'vinylMode'] as const) {
+        this.feed({ t, kind: 'control', control, channel: ch, value: snap[control] ? 1 : 0 });
+      }
+      if (snap.scratching) {
+        const motion = this.engines[ch].getScratchState();
+        if (motion) t = this.now(motion.time);
+        const playhead = motion?.position ?? this.engines[ch].getPlayhead();
+        this.feed({ t, kind: 'transport', channel: ch, action: 'scratchBegin', playhead,
+          audioTime: motion?.time, trackDuration: motion?.trackDuration });
+        if (motion) {
+          this.feed({ t, kind: 'transport', channel: ch, action: 'scratchMove', playhead: motion.position,
+            audioTime: motion.time, trackDuration: motion.trackDuration, filter: { drive: motion.drive, rate: motion.rate } });
+        }
       }
       if (snap.playing) {
         this.feed({ t, kind: 'transport', channel: ch, action: 'play', playhead: this.engines[ch].getPlayhead() });
@@ -274,10 +292,25 @@ export class CaptureRecorder {
     this.timer = null;
   }
 
-  /** Monotonic capture clock, seconds. NOT the audio clock — that freezes
-   * while the surface is displaced. */
-  private now(): number {
-    return performance.now() / 1000;
+  /** All shared decks use one context. Anchor each active epoch once so
+   * wall-callback jitter cannot invent travel within an audio quantum. */
+  private now(audioTime?: number): number {
+    const wall = performance.now() / 1000;
+    if (!this.surfaceGated) {
+      for (const ch of CHANNEL_IDS) {
+        const source = this.engines[ch].getAudioClock();
+        if (!source || source.state !== 'running') continue;
+        const audio = audioTime ?? source.currentTime;
+        if (!this.clockEpoch || this.clockEpoch.source !== source) {
+          this.clockEpoch = { source, audioOrigin: audio, captureOrigin: Math.max(wall, this.lastCaptureTime) };
+        }
+        this.lastCaptureTime = this.clockEpoch.captureOrigin + (audio - this.clockEpoch.audioOrigin);
+        return this.lastCaptureTime;
+      }
+    }
+    this.clockEpoch = null;
+    this.lastCaptureTime = Math.max(wall, this.lastCaptureTime);
+    return this.lastCaptureTime;
   }
 
   private feed(e: CaptureEvent): void {
@@ -293,6 +326,7 @@ export class CaptureRecorder {
    * surface gate — for tenure markers, which describe the hold itself and
    * must ride the log even while a machine holds the surface (ADR 0033). */
   private emitMarker(e: CaptureEvent): void {
+    const scratchSounded = !masterAudible(this.state) && scratchSoundedBefore(this.state, e.t);
     // The recorder owns the sole reference to the detector's capture state,
     // so it reduces IN PLACE (capture spine 02) — no per-event deep clone,
     // no O(n) log copy. Per-event side effects (Session persist, activation,
@@ -309,7 +343,7 @@ export class CaptureRecorder {
     // Persist beside the detector's rolling log (ADR 0033): the Session
     // records all four decks; the detector reads the same stream and
     // self-gates over >2-audible stretches / machine tenures.
-    this.onEvent?.(e, !this.seeding && audible);
+    this.onEvent?.(e, !this.seeding && (audible || scratchSounded));
     for (const take of takes) this.onTake(take);
     this.checkSilence(audible, e.t);
   }
@@ -349,7 +383,7 @@ export class CaptureRecorder {
       // A previewing deck (cue or hot-cue stab, ADR 0033) has a moving,
       // audible playhead just like a playing one — sample it so the stab's
       // motion rides the ~1 Hz ticks and the timeline can draw its trace.
-      if (this.lastDeck[ch].playing || CaptureRecorder.previewRunning(this.lastDeck[ch])) {
+      if (this.lastDeck[ch].playing || this.lastDeck[ch].scratching || CaptureRecorder.previewRunning(this.lastDeck[ch])) {
         playheads[ch] = this.engines[ch].getPlayhead();
       }
     }
@@ -440,6 +474,11 @@ export class CaptureRecorder {
     const cur = this.engines[ch].getSnapshot();
     if (cur === prev) return;
     this.lastDeck[ch] = cur;
+    for (const control of ['slipMode', 'vinylMode'] as const) {
+      if (cur[control] !== prev[control]) {
+        this.feed({ t, kind: 'control', control, channel: ch, value: cur[control] ? 1 : 0 });
+      }
+    }
     // All four decks log their load/transport/pitch (ADR 0033): C/D activity
     // is evidence and drives the detector's >2-audible self-gate.
     if (cur.trackId !== prev.trackId) {

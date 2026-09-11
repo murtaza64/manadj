@@ -30,6 +30,8 @@
 import type { LoopFrames, SourceMode } from './protocol';
 import { SingleTrackSource, StemTrackSource } from './trackSource';
 import type { TrackSource } from './trackSource';
+import { scratchPosition, scratchRate, scratchGain, scratchTravel } from './scratchMotion';
+import type { ScratchMotion, ScheduledScratchFrame } from './scratchMotion';
 
 /** The worklet-internal stretcher seam (ADR 0018): feed samples, set rate,
  * transpose fixed at none. `render` fills `frames` of output whose audible
@@ -79,9 +81,17 @@ interface Voice {
   attackFrames: number;
   /** Fade-out state; null while live. Gain falls linearly from g0 over
    * declickFrames of fade age. */
-  fade: { g0: number; age: number } | null;
+  fade: { g0: number; age: number; samples?: number[] } | null;
   startId: number;
   mode: SourceMode;
+}
+
+interface PreparedScratchFrame extends ScheduledScratchFrame {
+  voice: Voice;
+  tail: NonNullable<Voice['fade']>;
+  samples: number[];
+  correction: number[];
+  loopFrames: LoopFrames | null;
 }
 
 /** Tails are ≤ declick (5ms) long; more simultaneous ones than this means
@@ -105,6 +115,17 @@ export class DeckSourceKernel {
   private primedVoice: Voice | null = null;
   /** Block scratch for stretch output (gain applied per frame by the kernel). */
   private scratch: Float32Array[] = [];
+  private platter: ScratchMotion | null = null;
+  private platterGain = 0;
+  private outputFrame = 0;
+  private pendingStartTime: number | null = null;
+  private platterExpectedPosition: number | null = null;
+  private platterLastSamples: number[] = [];
+  private platterCorrection: number[] = [];
+  private platterSpliceFrames = 0;
+  private scheduled: PreparedScratchFrame[] = [];
+  private scheduledIndex = 0;
+  private outputChannels = 2;
 
   constructor(declickFrames: number, attackFrames: number = declickFrames) {
     this.declickFrames = Math.max(1, declickFrames);
@@ -115,25 +136,29 @@ export class DeckSourceKernel {
   /** Hand over a track's channel data. Future starts read the new track;
    * an in-flight declick tail keeps its captured old data. */
   setTrack(channels: Float32Array[], srRatio: number): void {
+    this.cancelScratchSchedule();
     this.track = { source: new SingleTrackSource(channels), srRatio };
+    this.outputChannels = Math.max(2, channels.length);
   }
 
   /** Hand over a track's stems (stems #209): `stems[s]` is one stem's
    * channel data. Reads mix the stems with per-stem gains (unity on load)
    * before either render path — one stretcher, sample-locked stems. */
   setStems(stems: Float32Array[][], srRatio: number): void {
+    this.cancelScratchSchedule();
     this.track = { source: new StemTrackSource(stems), srRatio };
+    this.outputChannels = Math.max(2, stems[0]?.length ?? 0);
   }
 
   /** Target per-stem gains, declick-ramped from the live voice's current
-   * position (both render paths read the same position-keyed ramp). A
+   * position (output time while scratching). A
    * single-source track ignores this. Gains live on the track source, so
    * a later start() (same Load) keeps the kill state; a new load resets. */
   setStemGains(gains: number[]): void {
     const source = this.track?.source;
     if (!(source instanceof StemTrackSource)) return;
-    const atFrame = this.live?.position ?? 0;
-    const ramp = this.live ? this.declickFrames * this.live.srRatio : 0;
+    const atFrame = this.platter ? this.outputFrame : this.live?.position ?? 0;
+    const ramp = this.live ? this.declickFrames * (this.platter ? 1 : this.live.srRatio) : 0;
     for (let s = 0; s < Math.min(gains.length, source.stemCount); s++) {
       source.setGain(s, gains[s], atFrame, ramp);
     }
@@ -160,6 +185,7 @@ export class DeckSourceKernel {
   setMode(mode: SourceMode): void {
     if (mode === this.mode) return;
     this.mode = mode;
+    if (this.platter) return;
     const live = this.live;
     if (!live) return;
     const { source, srRatio, position, startId } = live;
@@ -182,25 +208,36 @@ export class DeckSourceKernel {
    * uses the SHORT attack (stab-declick 01): stab content is uncorrelated
    * with the retiring tail, so the punchy attack wins over exact
    * equal-gain summing. */
-  start(positionFrames: number, startId: number): void {
+  start(positionFrames: number, startId: number, when?: number, preserveSchedule = false, prepared?: PreparedScratchFrame): void {
+    if (!preserveSchedule) this.cancelScratchSchedule();
     if (!this.track) return;
+    this.clearPlatter(prepared?.tail);
+    let scratchHandover = false;
+    for (const voice of this.fading) if (voice.fade?.samples !== undefined) scratchHandover = true;
+    this.pendingStartTime = when ?? null;
     // Stem gain ramps are declick devices anchored at their change
     // position — settle them on every (re)start so a seek before the kill
     // point can't resurrect a killed stem (stems #210 review). The splice
     // itself declicks the restart.
     if (this.track.source instanceof StemTrackSource) this.track.source.settleGains();
-    this.retireLive();
+    this.retireLive(prepared?.tail);
     const length = this.track.source.length;
-    this.live = {
+    this.live = prepared?.voice ?? {
       source: this.track.source,
       srRatio: this.track.srRatio,
-      position: Math.max(0, Math.min(positionFrames, Math.max(0, length - 1))),
+      position: Math.max(0, Math.min(positionFrames, length)),
       age: 0,
-      attackFrames: this.attackFrames,
+      attackFrames: scratchHandover ? this.declickFrames : this.attackFrames,
       fade: null,
       startId,
       mode: this.mode,
     };
+    if (prepared) {
+      this.live.position = Math.max(0, Math.min(positionFrames, length));
+      this.live.startId = startId;
+      this.live.mode = this.mode;
+      this.live.attackFrames = scratchHandover ? this.declickFrames : this.attackFrames;
+    }
   }
 
   /** Frames in the voice's own track. */
@@ -209,13 +246,75 @@ export class DeckSourceKernel {
   }
 
   /** Declick-fade to silence. Idempotent. */
-  stop(): void {
-    this.retireLive();
+  stop(preserveSchedule = false, tail?: NonNullable<Voice['fade']>): void {
+    if (!preserveSchedule) this.cancelScratchSchedule();
+    this.pendingStartTime = null;
+    this.clearPlatter(tail);
+    this.retireLive(tail);
+  }
+
+  /** A timestamped trajectory replaces motion without restarting the voice. */
+  setScratch(motion: ScratchMotion, preserveSchedule = false, prepared?: PreparedScratchFrame): void {
+    if (!preserveSchedule) this.cancelScratchSchedule();
+    if (!this.track) return;
+    this.pendingStartTime = null;
+    if (!this.platter) {
+      this.retireLive(prepared?.tail);
+      this.live = prepared?.voice ?? { source: this.track.source, srRatio: this.track.srRatio,
+        position: 0, age: 0, attackFrames: 0, fade: null, startId: -1, mode: 'resample' };
+      this.platterGain = 0;
+      this.platterExpectedPosition = null;
+      this.platterLastSamples = prepared?.samples ?? [];
+      this.platterCorrection = prepared?.correction ?? [];
+      this.platterSpliceFrames = 0;
+      if (this.track.source instanceof StemTrackSource) this.track.source.setOutputClock(this.outputFrame);
+    }
+    this.platter = motion;
+  }
+
+  private clearPlatter(tail?: NonNullable<Voice['fade']>): void {
+    if (!this.platter) return;
+    if (this.live) {
+      // Fade the last audible sample, including any loop-splice correction;
+      // extrapolating a reverse tail could cross an edge and click on release.
+      if (tail) {
+        tail.g0 = this.platterGain;
+        tail.age = 0;
+        for (let c = 0; c < this.outputChannels; c++) tail.samples![c] = this.platterLastSamples[c] ?? 0;
+        this.live.fade = tail;
+      } else this.live.fade = { g0: this.platterGain, age: 0, samples: this.platterLastSamples.slice() };
+      this.fading.push(this.live);
+      this.live = null;
+    }
+    if (this.track?.source instanceof StemTrackSource) this.track.source.setOutputClock(null);
+    this.platter = null;
+    this.platterGain = 0;
+    while (this.fading.length > MAX_FADING_VOICES) this.fading.shift();
   }
 
   /** Track-frame position of the live voice, or null when stopped. */
   get livePositionFrames(): number | null {
     return this.live?.position ?? null;
+  }
+
+  scheduleScratch(frames: ScheduledScratchFrame[]): void {
+    if (!this.track) return;
+    const track = this.track;
+    this.scratchFor(this.outputChannels, 128);
+    this.scheduled = frames.map(frame => ({ ...frame,
+      voice: { source: track.source, srRatio: track.srRatio, position: 0, age: 0,
+        attackFrames: 0, fade: null, startId: -1, mode: 'resample' },
+      tail: { g0: 0, age: 0, samples: new Array<number>(this.outputChannels).fill(0) },
+      samples: new Array<number>(this.outputChannels).fill(0),
+      correction: new Array<number>(this.outputChannels).fill(0),
+      loopFrames: frame.loop ? { startFrames: 0, endFrames: 0 } : null,
+    }));
+    this.scheduledIndex = 0;
+  }
+
+  cancelScratchSchedule(): void {
+    this.scheduled = [];
+    this.scheduledIndex = 0;
   }
 
   /**
@@ -224,13 +323,55 @@ export class DeckSourceKernel {
    * Returns the startId of a live voice that ran off the end of its track
    * this block, or null.
    */
-  render(out: Float32Array[], rates: Float32Array): number | null {
-    const frames = out[0]?.length ?? 0;
-    for (const channel of out) channel.fill(0);
+  render(out: Float32Array[], rates: Float32Array, now = 0, outputSampleRate = 48000): number | null {
+    if (this.scheduledIndex >= this.scheduled.length) return this.renderBlock(out, rates, now, outputSampleRate);
+    // Split at the first sample on/after each timestamp. In particular a
+    // release can prime the stretcher in the middle of a 128-frame quantum.
+    const length = out[0]?.length ?? 0;
+    let offset = 0;
+    let ended: number | null = null;
+    while (offset < length) {
+      const time = now + offset / outputSampleRate;
+      let next = this.scheduled[this.scheduledIndex];
+      while (next && next.time <= time + 1e-10) {
+        if (next.motion) this.setScratch(next.motion, true, next);
+        else {
+          this.stop(true, next.tail);
+          this.setMode(next.mode);
+          const sr = (this.track?.srRatio ?? 1) * outputSampleRate;
+          if (next.loopFrames && next.loop) {
+            next.loopFrames.startFrames = next.loop.start * sr;
+            next.loopFrames.endFrames = next.loop.end * sr;
+          }
+          this.setLoop(next.loopFrames);
+          if (next.playing) this.start(next.position * sr, next.startId, next.time, true, next);
+        }
+        next = this.scheduled[++this.scheduledIndex];
+      }
+      const end = next ? Math.min(length, Math.max(offset + 1, Math.ceil((next.time - now) * outputSampleRate - 1e-8))) : length;
+      const id = this.renderBlock(out, rates, time, outputSampleRate, offset, end - offset);
+      if (id !== null) ended = id;
+      offset = end;
+    }
+    return ended;
+  }
+
+  private renderBlock(out: Float32Array[], rates: Float32Array, now: number, outputSampleRate: number,
+    offset = 0, frames = (out[0]?.length ?? 0) - offset): number | null {
+    for (const channel of out) channel.fill(0, offset, offset + frames);
     if (!this.live && this.fading.length === 0) return null;
+    if (this.live && this.pendingStartTime !== null) {
+      const voice = this.live;
+      const loop = this.renderLoopFor(voice);
+      voice.position += Math.max(0, now - this.pendingStartTime) * rates[rates.length > 1 ? offset : 0] * voice.srRatio * outputSampleRate;
+      if (loop && voice.position >= loop.endFrames) {
+        voice.position = loop.startFrames + (voice.position - loop.endFrames) % (loop.endFrames - loop.startFrames);
+      }
+      this.pendingStartTime = null;
+    }
     // Once per block: retire fully-played stem ramps, so backwards reads
     // (loop folds, stretch pre-reads) see settled gains.
-    if (this.live && this.live.source instanceof StemTrackSource) {
+    if (!this.platter && this.live && this.live.source instanceof StemTrackSource) {
       this.live.source.settleCompletedRamps(this.live.position);
     }
 
@@ -239,14 +380,14 @@ export class DeckSourceKernel {
     // the per-frame loop below applies the envelope and the bookkeeping.
     let liveBlock: Float32Array[] | null = null;
     const liveAtStart = this.live;
-    if (liveAtStart && liveAtStart.mode === 'stretch') {
+    if (!this.platter && liveAtStart && liveAtStart.mode === 'stretch') {
       const engine = this.stretchEngine;
       if (engine?.ready && liveAtStart.srRatio === 1) {
         if (this.primedVoice !== liveAtStart) {
           engine.prime(
             liveAtStart.source,
             liveAtStart.position,
-            rates[0],
+            rates[rates.length > 1 ? offset : 0],
             this.renderLoopFor(liveAtStart)
           );
           this.primedVoice = liveAtStart;
@@ -257,7 +398,7 @@ export class DeckSourceKernel {
           frames,
           liveAtStart.source,
           liveAtStart.position,
-          rates[0],
+          rates[rates.length > 1 ? offset : 0],
           this.renderLoopFor(liveAtStart)
         );
       }
@@ -268,30 +409,70 @@ export class DeckSourceKernel {
 
     let endedStartId: number | null = null;
     for (let i = 0; i < frames; i++) {
-      const rate = rates.length > 1 ? rates[i] : rates[0];
+      const frame = offset + i;
+      const rate = rates.length > 1 ? rates[frame] : rates[0];
       // Tails first: a voice retired by a mid-block loop wrap below must
       // not also render as a tail in its retirement frame (double-mix).
       for (let f = this.fading.length - 1; f >= 0; f--) {
         const voice = this.fading[f];
         const gain = this.gainOf(voice);
-        this.mix(voice, out, i, gain);
-        voice.position += rate * voice.srRatio;
+        this.mix(voice, out, frame, gain);
+        if (!voice.fade?.samples) voice.position += rate * voice.srRatio;
         voice.age++;
         if (voice.fade) voice.fade.age++;
         const faded = voice.fade !== null && voice.fade.age >= this.declickFrames;
-        if (faded || gain <= 0 || voice.position >= DeckSourceKernel.lengthOf(voice)) {
-          this.fading.splice(f, 1);
+        if (faded || gain <= 0 || (!voice.fade?.samples
+            && (voice.position < 0 || voice.position >= DeckSourceKernel.lengthOf(voice)))) {
+          for (let j = f; j < this.fading.length - 1; j++) this.fading[j] = this.fading[j + 1];
+          this.fading.pop();
         }
       }
       if (this.live) {
         const voice = this.live;
+        if (this.platter) {
+          const motion = this.platter;
+          const time = now + i / outputSampleRate;
+          const position = scratchPosition(motion, time);
+          const nextPosition = scratchPosition(motion, time + 1 / outputSampleRate);
+          const trackSampleRate = voice.srRatio * outputSampleRate;
+          const smoothFrames = Math.max(1, Math.min(this.declickFrames, outputSampleRate * 0.001));
+          const target = position !== nextPosition ? scratchGain(scratchRate(motion, time)) : 0;
+          this.platterGain += Math.max(-1 / smoothFrames, Math.min(1 / smoothFrames, target - this.platterGain));
+          if (voice.source instanceof StemTrackSource) voice.source.setOutputClock(this.outputFrame);
+          voice.position = position * trackSampleRate;
+          // Loop wraps and late command handoffs splice the PCM, not the
+          // trajectory: the clock remains authoritative through the fade.
+          const discontinuity = this.platterExpectedPosition !== null
+            && Math.abs(voice.position - this.platterExpectedPosition) > 0.0001;
+          if (discontinuity) this.platterSpliceFrames = this.declickFrames;
+          const index = Math.floor(voice.position);
+          const fraction = voice.position - index;
+          for (let c = 0; c < out.length; c++) {
+            const s0 = voice.source.sampleAt(c, index);
+            const sample = s0 + fraction * (voice.source.sampleAt(c, index + 1) - s0);
+            if (discontinuity) this.platterCorrection[c] = (this.platterLastSamples[c] ?? sample) - sample;
+            const spliced = sample + (this.platterCorrection[c] ?? 0) * this.platterSpliceFrames / this.declickFrames;
+            out[c][frame] += spliced * this.platterGain;
+            this.platterLastSamples[c] = spliced;
+          }
+          this.platterSpliceFrames = Math.max(0, this.platterSpliceFrames - 1);
+          const step = motion.loop
+            ? scratchTravel(motion, time + 1 / outputSampleRate - motion.time) - scratchTravel(motion, time - motion.time)
+            : nextPosition - position;
+          const wraps = Math.abs(nextPosition - position - step) > 0.0000001;
+          this.platterExpectedPosition = (wraps ? position + step : nextPosition) * trackSampleRate;
+          voice.position = nextPosition * trackSampleRate;
+          voice.age++;
+          this.outputFrame++;
+          continue;
+        }
         const gain = this.gainOf(voice);
         if (liveBlock && voice === liveAtStart) {
           if (gain > 0) {
-            for (let c = 0; c < out.length; c++) out[c][i] += liveBlock[c][i] * gain;
+            for (let c = 0; c < out.length; c++) out[c][frame] += liveBlock[c][i] * gain;
           }
         } else {
-          this.mix(voice, out, i, gain);
+          this.mix(voice, out, frame, gain);
         }
         const before = voice.position;
         voice.position += rate * voice.srRatio;
@@ -339,6 +520,7 @@ export class DeckSourceKernel {
           this.live = null;
         }
       }
+      this.outputFrame++;
     }
     return endedStartId;
   }
@@ -354,9 +536,12 @@ export class DeckSourceKernel {
     return { startFrames: loop.startFrames, endFrames: effEnd };
   }
 
-  private retireLive(): void {
+  private retireLive(tail?: NonNullable<Voice['fade']>): void {
     if (!this.live) return;
-    this.live.fade = { g0: this.gainOf(this.live), age: 0 };
+    const g0 = this.gainOf(this.live);
+    this.live.fade = tail ?? { g0, age: 0 };
+    this.live.fade.g0 = g0;
+    this.live.fade.samples = undefined;
     // Tails always render via the resample path: the single stretcher
     // instance is freed for the next voice, and ≤5ms of varispeed in a
     // fade-out is masked by the incoming voice.
@@ -368,7 +553,7 @@ export class DeckSourceKernel {
 
   /** Reusable stretch-output scratch (per channel-count/frame-length). */
   private scratchFor(channelCount: number, frames: number): Float32Array[] {
-    if (this.scratch.length !== channelCount || (this.scratch[0]?.length ?? 0) < frames) {
+    if (this.scratch.length < channelCount || (this.scratch[0]?.length ?? 0) < frames) {
       this.scratch = [];
       for (let c = 0; c < channelCount; c++) this.scratch.push(new Float32Array(frames));
     }
@@ -390,6 +575,10 @@ export class DeckSourceKernel {
    * Reads go through the TrackSource seam (stems mix here, ramp-aware). */
   private mix(voice: Voice, out: Float32Array[], frame: number, gain: number): void {
     if (gain <= 0) return;
+    if (voice.fade?.samples) {
+      for (let c = 0; c < out.length; c++) out[c][frame] += (voice.fade.samples[c] ?? 0) * gain;
+      return;
+    }
     const idx = Math.floor(voice.position);
     const frac = voice.position - idx;
     for (let c = 0; c < out.length; c++) {

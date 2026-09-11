@@ -1033,6 +1033,7 @@
 /* Foot: prominent playback readouts beside MATCH + nudge */
 .perf-mix-foot {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--space-4);
 }
@@ -1184,6 +1185,18 @@
   display: block;
 }
 
+.perf-mix-foot .perf-vinyl.on,
+.perf-mix-foot .perf-slip.on {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--base);
+}
+.perf-mix-foot .perf-vinyl.scratching {
+  background: var(--warning);
+  border-color: var(--warning);
+  color: var(--base);
+}
+
 /* Drift marker (key-lock 04): the readout dims while the sounding key has
    drifted from the Track's Key (Key Lock off, |pitch| ≥ threshold). The ~
    is always laid out, transparent until drifted, so the width never jumps. */
@@ -1251,4 +1264,9 @@
 .app-browse.lock-D .track-load-button-D {
   opacity: 0.35;
   cursor: not-allowed;
+}
+
+@media (max-width: 1100px) {
+  .perf-root { overflow: auto; max-height: 70dvh; }
+  .perf-surface { min-width: 1100px; }
 }

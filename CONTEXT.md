@@ -145,6 +145,8 @@ The Cameo's detection target — the complementary verdict of the same detector 
 **Cameo Take**:
 A Guest engagement detected and captured automatically during live performance playback (or hand-cut from a Session — the classifier's verdict decides which sibling a cut becomes) — the Cameo sibling of a Take, with the same rules throughout: lives in the Transition history, never in any library; reviewed via Vectorization; promotion saves a Cameo; a Set entry may pin one (manually, never by auto-fill); counts for nothing in discovery until promoted.
 
+A reviewed Cameo Take may instead produce a Transition when its authored incoming Track survives the outgoing. The recording remains a Cameo Take; existing Cameo Take pins retain the original evidence rather than becoming adjacency pins.
+
 **Cameo library**:
 The queryable index over saved Cameos — "what guests over this Track / what hosts this Track" — directional (host→guest) and distinct from the Transition library, whose "what mixes into what" stays Transition-only. Cameo Takes are not in it: only promotion adds.
 
@@ -164,7 +166,7 @@ _Avoid_: non-session routine, synthetic routine, blank routine (the draft has no
 The stable identity of a cast slot (client-minted at drag-in), which lanes, Jumps, and other slot-addressed edits key on. The entry-ordered slot *index* (slot 0 … n−1) is a derived view recomputed from entry offsets — reordering a cast never re-keys its edits (ADR 0039). On promoted Routines, entry offsets are additionally editable as per-slot **offset overrides** in the edits layer (nudges, phrase shifts) — the baked promotion outputs stay immutable testimony, like a recorded lane under an authored one.
 
 **Routine playback bounds**:
-The start and end of a saved Routine's playback, independent of its source Session. Resizing retains material and edits outside the bounds; expanding restores that material or continues the artifact's boundary motion and control values. Bounds must retain playable material from every cast slot: delete the slot explicitly before trimming further. Muting a slot does not remove its membership or change these limits. Candidate trimming instead changes the Session excerpt being considered for promotion.
+The start and end of a saved Routine's playback, independent of its source Session. Resizing retains material and edits outside the bounds; expanding restores that material or continues the artifact's boundary motion and control values. The current bounds define the Routine's extent; its original length is provenance, not a privileged editing boundary. Bounds must retain playable material from every cast slot: delete the slot explicitly before trimming further. Muting a slot does not remove its membership or change these limits. Candidate trimming instead changes the Session excerpt being considered for promotion.
 
 **Track-start trim**:
 Revealing more intro or shortening the initial passage of an incoming Routine slot without shifting its later material, jumps, or automation. Extending uses the track's own continuation, not more Session evidence. Limited to the initial continuous passage and the neighboring entries; never reorders or removes slots. The Routine's entry slot uses the Routine playback start instead. Distinct from moving the whole slot or sliding its material. Undoable; trimmed source material remains retained.
@@ -305,6 +307,9 @@ _Avoid_: theme (implies switchable; manadj is dark-only)
 **Mixer**:
 The single shared output stage: one channel strip per Deck (trim, 3-band EQ, sweep filter, channel fader), plus crossfader, master volume, and an always-on final sample ceiling. Neutral trim is -6 dB, supplying expected two-channel summing headroom; Master has explicit unity at 50% and +6 dB at maximum; the -2 dBFS Master/Cue ceiling guards overload without changing ordinary program loudness. Each channel may be assigned to the crossfader's left side, right side, or neither; Deck identity does not determine that assignment. Mirrors a hardware DJ mixer.
 
+**Trim automation**:
+A Routine slot's channel-trim envelope, recorded or authored. Its knob offsets the envelope and displays the resulting average; resetting the knob removes the offset without deleting authored nodes. Distinct from playback-bound resizing or Track-start trim.
+
 **Audible surface**:
 A playback mode's claim on the shared Decks+Mixer — the plain deck-transport semantics of the Performance and library views, or the Transition editor's mix-timeline semantics. Exactly one surface is audible at a time; an arbiter owns which, and a displaced surface's playback pauses rather than coexist. Playback gestures from app-wide inputs (a Controller) route by gesture class — transport, cue, pads, jumps, loops, jog — to the audible surface; a class the surface doesn't register is dropped, mirroring what the keyboard does there. Mixer-state controls and Load are not gesture classes: they belong to the shared Mixer and to the mounted browse view respectively. (Redefined 2026-07-05: formerly a group of playback machinery that could produce sound as a unit — the editor had a private player; every surface now plays through the shared Decks+Mixer.)
 
@@ -315,18 +320,30 @@ The four-Deck view for practicing and performing mixes: four stacked full-width 
 Placing a Track on a Deck for playback — an explicit act, as in DJ hardware. Selecting a track in the library browses without loading; the Deck keeps its Track until another Load replaces it. In the Performance view, Loading onto a playing Deck is blocked (protecting the mix); in the library it simply replaces what's playing.
 
 **Nudge**:
-A momentary tempo bend on a Deck used to ride phase alignment against the other Deck — held (a key or button) or impulse-driven (jog wheel rotation); when the input stops, the Deck's pitch is restored exactly. Distinct from a *grid nudge*, which shifts a Track's Beatgrid and changes stored data — a Nudge changes only what is playing right now. Jog rotation on a paused Deck is a seek, not a Nudge. The Transition editor's counterpart of the same intent is the Alignment nudge.
+A momentary tempo bend on a Deck used to ride phase alignment against the other Deck — held (a key or button) or impulse-driven (jog wheel rotation); when the input stops, the Deck's pitch is restored exactly. Distinct from a *grid nudge*, which shifts a Track's Beatgrid and changes stored data — a Nudge changes only what is playing right now. Bare-rim rotation on a paused Deck is a seek, not a Nudge; a touched Vinyl platter scratches instead. The Transition editor's counterpart of the same intent is the Alignment nudge.
 
 **Play guide**:
 A derived, view-only marker in the Performance view: one per saved Transition from a playing outgoing-candidate Track to a paused Track, marking the instant to press play on the paused Deck so the pair rides that Transition's alignment. Every applicable playing→paused pair gets its own guide; a guide identifies both Decks and spans only their waveform rows. When all applicable Decks are paused, both directions may show; starting a Deck prunes guides to live directions. Computed from the Transition's alignment and tempo-match ratio and the paused Deck's current playhead (works wherever the incoming Track is cued), projected on the trajectory before the Transition's first Jump event. A missed guide (already behind the playhead) stays visible rather than disappearing. Labeled with the Transition's name and carrying the incoming (to-be-pressed) Deck's color. Purely visual — never stored, never editable, never enforcing pitch (a pitch mismatch against the Transition's tempo-match is surfaced, not corrected).
 _Avoid_: transition guide (collides with Transition template), entry/cue marker ("cue" is overloaded)
+
+**Vinyl mode**:
+A per-Deck setting enabling platter touch to hold the Track and platter movement to scratch it forward or backward, including while paused. With Vinyl off, jog movement nudges or seeks without scratching. Scratching temporarily bypasses Key Lock; release restores the prior play/pause intent.
+
+**Spinback**:
+A backward platter spin that continues after the hand releases, ending when the jog stops rotating. Part of the same Scratch gesture, not a button-triggered effect.
+
+**Scratch**:
+A platter-controlled gesture that holds or moves the audible Track position forward and backward, with speed and musical pitch coupled. Includes any released Spinback continuation.
+
+**Slip mode**:
+A per-Deck setting that keeps the normal playback timeline advancing behind a Scratch or Spinback and returns to it when the gesture ends. With Slip off, release keeps the manipulated position. A paused Deck stays paused. The setting is latched at touch-down; toggles during a gesture apply to the next one. Slip-based loop rolls are separate and not implemented.
 
 **Quantize**:
 An app-wide sticky toggle (default on) making beat-relative performance gestures grid-aligned: cue and Hot Cue placement snap to the nearest beat, auto-loop regions snap to the nearest beat, and Hot Cue jumps while playing are phase-preserving — a whole-beat displacement landing at the cue plus the playhead's intra-beat phase, so the groove never stumbles. Evaluated at gesture time; imports are not gestures and never snap. Gridless Tracks behave as if it were off. Beat jump (inherently whole-beat), cue return, paused-cue seeks, loop halve/double, and Transition-editor snapping are outside its authority.
 _Avoid_: snap (the Transition editor's separate affordance), quantization (the Analysis sense — see Quantized track)
 
 **Key Lock**:
-A sticky per-Deck setting (default on): playback-rate changes on that Deck (pitch fader, Nudge) do not shift the loaded Track's Key. Belongs to the Deck — not to the Track, not to the Mixer. Named tension: DJ-jargon *pitch* (the fader, the Deck's ±% rate) changes tempo; Key Lock keeps the *musical* pitch — the Key — constant while it does. Also known as master tempo (Pioneer).
+A sticky per-Deck setting (default on): playback-rate changes on that Deck (pitch fader, Nudge) do not shift the loaded Track's Key. Scratching bypasses it until release. Belongs to the Deck — not to the Track, not to the Mixer. Named tension: DJ-jargon *pitch* (the fader, the Deck's ±% rate) changes tempo; Key Lock keeps the *musical* pitch — the Key — constant while it does. Also known as master tempo (Pioneer).
 _Avoid_: "pitch-preserving", "pitch shift" — "pitch" already means the rate control.
 
 **Alignment nudge**:

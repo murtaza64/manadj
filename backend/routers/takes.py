@@ -95,24 +95,33 @@ def set_promoted(
     """Record (or clear) which Transition this Take was promoted into —
     the only mutable field on an otherwise immutable audit row (issue 03).
 
-    Promotion also re-points Set pins (sets 08, ADR 0023): every
-    set_entries pin referencing this Take is rewritten to the resulting
-    Transition's uuid, right here at promotion time — a one-time
-    migration, never query-time indirection. Dormant pins (sets 07)
-    referencing the Take are rewritten the same way — the memory
-    restores the Transition. Clearing (null) rewrites nothing:
+    Promotion also re-points every adjacency Take pin referencing this UUID
+    (sets 08, ADR 0023), including Dormant pins (sets 07). This is a
+    one-time migration, never query-time indirection. Cameo ornaments keep
+    referencing the original evidence. Clearing (null) rewrites nothing:
     already-migrated pins stay on the Transition.
     """
     t = db.query(models.Take).filter(models.Take.uuid == uuid).first()
     if t is None:
         raise HTTPException(status_code=404, detail="take not found")
-    # A Cameo Take promotes into a Cameo, not a Transition (#140) — that
-    # write path arrives with the kind-aware editor (deferred with it).
-    if t.kind == "guest" and payload.promoted_transition_uuid is not None:
-        raise HTTPException(
-            status_code=409,
-            detail="a guest Take (Cameo Take) promotes to a Cameo, not a Transition",
+    if payload.promoted_transition_uuid is not None:
+        # Recorded kind is evidence; the saved target expresses authored intent.
+        targets = db.query(models.Transition).filter(
+            models.Transition.uuid == payload.promoted_transition_uuid,
         )
+        if targets.filter(
+            models.Transition.a_track_id == t.a_track_id,
+            models.Transition.b_track_id == t.b_track_id,
+        ).first() is None:
+            if targets.first() is None:
+                raise HTTPException(status_code=404, detail="promoted Transition not found")
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"promoted Transition {payload.promoted_transition_uuid} must match "
+                    f"Take's ordered track pair {t.a_track_id} -> {t.b_track_id}"
+                ),
+            )
     t.promoted_transition_uuid = payload.promoted_transition_uuid
     if payload.promoted_transition_uuid is not None:
         db.query(models.SetEntry).filter(

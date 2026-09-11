@@ -54,7 +54,7 @@ export interface EditorSnapshot {
 /** Persistence seam (defaults to the transition store / pairStore). */
 export interface EditorPersistence {
   load(pairKey: string): PairEntry | undefined;
-  save(pairKey: string, entry: PairEntry | null): void;
+  save(pairKey: string, entry: PairEntry | null): void | Promise<boolean>;
 }
 
 const SAVE_DEBOUNCE_MS = 300;
@@ -75,6 +75,7 @@ export class EditorStore {
   private readonly listeners = new Set<() => void>();
   private saveTimer: ReturnType<typeof setTimeout> | null = null;
   private savePending = false;
+  private reviewGeneration = 0;
   private onTransitionLoaded: ((t: Transition) => void) | null = null;
 
   constructor(persist?: Partial<EditorPersistence>) {
@@ -128,7 +129,7 @@ export class EditorStore {
 
   /** Write the pending session to the pair store NOW (debounce cancelled).
    * No-op unless a mutation armed it. */
-  flush(): void {
+  flush(): void | Promise<boolean> {
     if (this.saveTimer) {
       clearTimeout(this.saveTimer);
       this.saveTimer = null;
@@ -142,7 +143,7 @@ export class EditorStore {
     const items = draftUuid === null ? live : live.filter((it) => it.uuid !== draftUuid);
     const activeItem = live[this.state.session.active];
     const active = Math.max(0, items.indexOf(activeItem));
-    this.persist.save(this.state.pairKey, toStoredEntry(items, active));
+    return this.persist.save(this.state.pairKey, toStoredEntry(items, active));
   }
 
   /** Unmount: don't lose the last ≤300ms of edits. */
@@ -159,6 +160,7 @@ export class EditorStore {
    * armed, so merely opening a pair can never write (or delete) it. */
   loadPair(pairKey: string): void {
     if (pairKey === this.state.pairKey) return;
+    this.reviewGeneration++;
     this.flush();
     const entry = this.persist.load(pairKey);
     const items = entry ? structuredClone(entry.items) : [freshTransition([])];
@@ -178,6 +180,7 @@ export class EditorStore {
    * EMIT ONLY — no save is armed; the draft stays out of every persist
    * until promoted (see flush). */
   stampTakeDraft(takeUuid: string, transition: Transition): void {
+    this.reviewGeneration++;
     // Re-opening a Take on the already-loaded pair: the previous draft is
     // REPLACED, never orphaned (an orphan named "Take" is non-pristine and
     // would ride the next armed save — the bug this filter closes).
@@ -202,12 +205,24 @@ export class EditorStore {
 
   /** The explicit promotion act: the draft becomes an ordinary saved
    * Transition (normal persistence path) and the caller gets the pair of
-   * identifiers to record on the Take. Null when nothing is under review. */
-  promoteTakeDraft(): { takeUuid: string; transitionUuid: string } | null {
+   * identifiers only after persistence completes. Null when nothing is under review. */
+  async promoteTakeDraft(): Promise<{ takeUuid: string; transitionUuid: string } | null> {
     const draft = this.state.takeDraft;
     if (!draft) return null;
+    const pairKey = this.state.pairKey;
+    const generation = this.reviewGeneration;
     this.touch({ takeDraft: null });
-    this.flush();
+    try {
+      if (await this.flush() === false) throw new Error('Transition save failed');
+    } catch (err) {
+      // A failed save must not resurrect a review the user has left or replaced.
+      if (this.state.pairKey === pairKey && this.reviewGeneration === generation &&
+          this.state.takeDraft === null &&
+          this.state.session.items[this.state.session.active]?.uuid === draft.itemUuid) {
+        this.emit({ takeDraft: draft });
+      }
+      throw err;
+    }
     return { takeUuid: draft.takeUuid, transitionUuid: draft.itemUuid };
   }
 

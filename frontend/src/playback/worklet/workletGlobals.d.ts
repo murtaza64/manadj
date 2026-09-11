@@ -24,3 +24,5 @@ declare function registerProcessor(
 
 /** Output sample rate of the worklet's BaseAudioContext. */
 declare const sampleRate: number;
+/** Start time of the current render quantum, on the AudioContext clock. */
+declare const currentTime: number;

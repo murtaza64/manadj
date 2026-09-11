@@ -19,8 +19,8 @@
  *
  * EDITING (pass 2, directive 2): lane strips flip between the recorded
  * step rendering and the pair editor's OWN LaneCanvas (structural reuse —
- * kind semantics via kind-matched LaneIds, slot identity via the color
- * override); authored envelopes live in the RoutineDraftStore (undo/
+ * kind semantics via LaneIds or an explicit kind, slot identity via the
+ * color override); authored envelopes live in the RoutineDraftStore (undo/
  * redo/autosave in the shell). Jumps are first-class on EVERY slot:
  * recorded ones can be removed (continuity restored), authored ones
  * added (double-click), dragged, retimed, deleted, and — backward only —
@@ -79,7 +79,8 @@ import {
   slotAccent,
   slotDownbeatMarks,
   slotLadderMarks,
-  stepLaneAverage,
+  trimLaneAverage,
+  trimForAverage,
   type SlotLadderMarks,
   type TrackMeter,
   slotLaneColors,
@@ -106,9 +107,6 @@ const PANEL_W = 208;
 const MIN_PX_PER_BEAT = 0.05;
 const MAX_PX_PER_BEAT = 64;
 
-/** Kind-matched pseudo LaneIds: LaneCanvas keys its NEUTRAL line, fill
- * anchor, shade ramps and filter snap off the id's control prefix — the
- * slot's identity rides the color override instead. */
 /** Lanes shown before any toggling (gh#190 item 4). */
 const DEFAULT_LANES: SlotLaneControl[] = ['fader', 'eqLow', 'filter'];
 
@@ -116,10 +114,11 @@ const DEFAULT_LANES: SlotLaneControl[] = ['fader', 'eqLow', 'filter'];
  * fader at nominal trim renders unmodified. */
 const NOMINAL_SLOT_GAIN = channelFaderToGain(1) * trimToGain(0.5);
 
-/** TRIM is recorded-only (the knob offsets it) — no LaneCanvas id. */
-type AuthorableLaneControl = Exclude<SlotLaneControl, 'trim'>;
+type AuthorableLaneControl = SlotLaneControl;
 const CONTROL_LANE_ID: Record<AuthorableLaneControl, LaneId> = {
   fader: 'faderA',
+  // Scroll identity only; trim semantics come from LaneCanvas's kind.
+  trim: 'eqLowA',
   eqLow: 'eqLowA',
   eqMid: 'eqMidA',
   eqHigh: 'eqHighA',
@@ -221,9 +220,11 @@ export function RoutineTimeline({
 }) {
   const { planned, input } = editor;
   const duration = input.durationBeats;
-  const authoringStart = pairMode && planned.auditionRange
-    ? (planned.auditionRange.startSec - planned.beatOriginMixSec) / planned.secPerBeat : 0;
   const { startBeat, endBeat } = planned.playbackBounds;
+  const authoringStart = pairMode && planned.auditionRange
+    ? (planned.auditionRange.startSec - planned.beatOriginMixSec) / planned.secPerBeat
+    : Math.min(0, startBeat);
+  const authoringEnd = Math.max(duration, endBeat);
   const styleSlot = useStyleSlot('full');
   const containerRef = useRef<HTMLDivElement>(null);
   const rowsRef = useRef<HTMLDivElement>(null);
@@ -233,6 +234,7 @@ export function RoutineTimeline({
   const playheadRef = useRef<HTMLDivElement>(null);
 
   const [width, setWidth] = useState(0);
+  const [waveHeightVersion, setWaveHeightVersion] = useState(0);
   const [pxPerBeat, setPxPerBeat] = useState(0);
   const [scrollBeat, setScrollBeat] = useState(-PAD_BEATS);
   const viewRef = useRef({ pxPerBeat: 0, scrollBeat: -PAD_BEATS });
@@ -280,6 +282,26 @@ export function RoutineTimeline({
     setWidth(el.clientWidth);
     return () => ro.disconnect();
   }, []);
+
+  useLayoutEffect(() => {
+    const heights = new Map<HTMLCanvasElement, number>();
+    const ro = new ResizeObserver(() => {
+      let changed = false;
+      for (const [canvas, height] of heights) {
+        if (canvas.clientHeight !== height) {
+          heights.set(canvas, canvas.clientHeight);
+          changed = true;
+        }
+      }
+      if (changed) setWaveHeightVersion((v) => v + 1);
+    });
+    for (const canvas of waveCanvasRefs.current) {
+      if (!canvas) continue;
+      heights.set(canvas, canvas.clientHeight);
+      ro.observe(canvas);
+    }
+    return () => ro.disconnect();
+  }, [editor.detail.uuid, planned.slots.length]);
 
   const fit = useCallback(() => {
     const w = containerRef.current?.clientWidth ?? 0;
@@ -330,6 +352,10 @@ export function RoutineTimeline({
     const el = containerRef.current;
     if (!el) return;
     const onWheel = (e: WheelEvent) => {
+      if ((e.target as HTMLElement).closest('.rt-sp-trim .perf-knob')) {
+        e.preventDefault();
+        return;
+      }
       const { pxPerBeat: px, scrollBeat: s } = viewRef.current;
       if (px <= 0) return;
       const panZoom =
@@ -1255,13 +1281,14 @@ export function RoutineTimeline({
     plannedForRuns.slots.forEach((slot, i) => {
       const canvas = waveCanvasRefs.current[i];
       if (!canvas) return;
-      const ctx = sizedCtx(canvas, width, WAVE_H, dpr);
+      const waveH = canvas.clientHeight || WAVE_H;
+      const ctx = sizedCtx(canvas, width, waveH, dpr);
       if (!ctx) return;
       ctx.fillStyle = WAVE_BG_COLOR;
-      ctx.fillRect(0, 0, width, WAVE_H);
+      ctx.fillRect(0, 0, width, waveH);
       const ladder = slotLadders[i];
-      if (ladder) drawLadder(ctx, ladder, xAt, width, WAVE_H, 'wave');
-      else drawGrid(ctx, gridLines, xAt, width, WAVE_H);
+      if (ladder) drawLadder(ctx, ladder, xAt, width, waveH, 'wave');
+      else drawGrid(ctx, gridLines, xAt, width, waveH);
       const wave = waves.get(slot.trackId) ?? null;
       if (wave) {
         // Modulation reads the LIVE build (lane edits included) — runs
@@ -1271,9 +1298,9 @@ export function RoutineTimeline({
           xAt,
           beatAt: (px: number) => (px + viewPx) / pxPerBeat,
           width,
-          waveH: WAVE_H,
+          waveH,
         });
-        drawHotCues(ctx, hotcues.get(slot.trackId) ?? [], slotRuns[i], xAt, width, WAVE_H);
+        drawHotCues(ctx, hotcues.get(slot.trackId) ?? [], slotRuns[i], xAt, width, waveH);
       }
       // EFFECTIVE entry (edits-layer override included, ADR 0039) — the
       // baked input array is indexed by the recording's slot address,
@@ -1292,7 +1319,7 @@ export function RoutineTimeline({
         ctx.lineWidth = 2;
         ctx.beginPath();
         ctx.moveTo(ex, 0);
-        ctx.lineTo(ex, WAVE_H);
+        ctx.lineTo(ex, waveH);
         ctx.stroke();
         ctx.lineWidth = 1;
         ctx.fillStyle = slotAccent(slot.deck);
@@ -1306,14 +1333,15 @@ export function RoutineTimeline({
       ctx.fillStyle = `rgba(${hexToRgbTriplet(WAVE_BG_COLOR)},0.6)`;
       const preX = Math.min(width, Math.max(0, ex));
       const zeroX = Math.max(0, xAt(startBeat));
-      if (preX > zeroX) ctx.fillRect(zeroX, 0, preX - zeroX, WAVE_H);
-      if (xAt(startBeat) > 0) ctx.fillRect(0, 0, Math.min(width, xAt(startBeat)), WAVE_H);
+      if (preX > zeroX) ctx.fillRect(zeroX, 0, preX - zeroX, waveH);
+      if (xAt(startBeat) > 0) ctx.fillRect(0, 0, Math.min(width, xAt(startBeat)), waveH);
       if (xAt(endBeat) < width) {
-        ctx.fillRect(Math.max(0, xAt(endBeat)), 0, width - Math.max(0, xAt(endBeat)), WAVE_H);
+        ctx.fillRect(Math.max(0, xAt(endBeat)), 0, width - Math.max(0, xAt(endBeat)), waveH);
       }
     });
   }, [
     width,
+    waveHeightVersion,
     pxPerBeat,
     scrollBeat,
     plannedForRuns,
@@ -1360,18 +1388,14 @@ export function RoutineTimeline({
           stripH: STRIP_H,
           scrollBeat,
           pxPerBeat,
-          duration,
+          startBeat: authoringStart,
+          endBeat: authoringEnd,
           trimCenter:
             control === 'trim'
-              ? Math.max(
-                  0,
-                  Math.min(
-                    1,
-                    stepLaneAverage(slot.lanes.trim, duration, slot.lanes.defaults.trim) +
-                      slot.trim -
-                      0.5
-                  )
-                )
+              ? trimLaneAverage(slot.lanes.trim, duration, slot.lanes.defaults.trim, {
+                  linear: !!slot.lanes.authored?.trim,
+                  offset: slot.trim - 0.5,
+                })
               : undefined,
         });
       }
@@ -1384,6 +1408,8 @@ export function RoutineTimeline({
     gridLines,
     slotLadders,
     duration,
+    authoringStart,
+    authoringEnd,
     lanesFor,
     collapsedLanes,
   ]);
@@ -1404,7 +1430,7 @@ export function RoutineTimeline({
   const laneGuidesBySlot = useMemo(() => {
     const norm = (beat: number) => (duration > 0 ? beat / duration : 0);
     const fallback = gridLines.ticks
-      .filter((t) => t.beat >= authoringStart && t.beat <= duration)
+      .filter((t) => t.beat >= authoringStart && t.beat <= authoringEnd)
       .map((t) => {
         const pos = t.tier - gridLines.baseTier;
         return {
@@ -1417,7 +1443,7 @@ export function RoutineTimeline({
       const ladder = slotLadders[slot.slot];
       if (!ladder) return fallback;
       return ladder.marks
-        .filter((m) => m.beatR >= authoringStart && m.beatR <= duration)
+        .filter((m) => m.beatR >= authoringStart && m.beatR <= authoringEnd)
         .map((m) => {
           const pos = m.tier - ladder.baseTier;
           return {
@@ -1428,7 +1454,7 @@ export function RoutineTimeline({
           };
         });
     });
-  }, [gridLines, slotLadders, planned, duration, authoringStart]);
+  }, [gridLines, slotLadders, planned, duration, authoringStart, authoringEnd]);
 
   const authorLane = useCallback(
     (slot: PlannedRoutineSlot, control: AuthorableLaneControl) => {
@@ -1441,12 +1467,20 @@ export function RoutineTimeline({
           ? slot.lanes.defaults.fader
           : control === 'filter'
             ? slot.lanes.defaults.filter
-            : slot.lanes.defaults.eq;
+            : control === 'trim'
+              ? slot.lanes.defaults.trim
+              : slot.lanes.defaults.eq;
       const env: RoutineLanePoint[] = [];
       if (recorded.length > 0) {
         let last = dflt;
-        env.push({ beat: 0, value: dflt });
+        const firstBeat = Math.min(0, recorded[0].beat);
+        env.push({ beat: firstBeat, value: dflt });
         for (const p of recorded) {
+          if (p.beat === firstBeat) {
+            env[0] = { beat: firstBeat, value: p.value };
+            last = p.value;
+            continue;
+          }
           if (p.value === last) continue;
           env.push({ beat: p.beat, value: last });
           env.push({ beat: p.beat, value: p.value });
@@ -1463,7 +1497,7 @@ export function RoutineTimeline({
     const key = `${slot.slotId}:${control}`;
     const pts = slot.lanes[control];
     const laneStart = authoringStart;
-    const laneDuration = duration - laneStart;
+    const laneDuration = authoringEnd - laneStart;
     const laneWidth = laneDuration * pxPerBeat;
     const toLanePoint = (p: RoutineLanePoint): LanePoint => ({
       x: laneDuration > 0 ? (p.beat - laneStart) / laneDuration : 0,
@@ -1482,6 +1516,7 @@ export function RoutineTimeline({
       >
         <LaneCanvas
           id={CONTROL_LANE_ID[control]}
+          kind={control === 'trim' ? 'trim' : undefined}
           color={color}
           widthPx={Math.max(laneWidth, 4)}
           points={pts.map(toLanePoint)}
@@ -1553,10 +1588,7 @@ export function RoutineTimeline({
             planned.slots.some((o) => o.slot < slot.slot && o.deck === slot.deck);
           return (
             <div className="rt-slotblock" key={slot.slotId}>
-              {/* Fixed-width DIM PANEL (gh#190 iteration): spans the whole
-                  slot block behind the left-side controls — track data in
-                  three rows (title / artist / deck·bpm·key·extra), titles
-                   truncating. */}
+              {/* Panel and waveform share a grid cell, preserving the beat axis. */}
               <div className="rt-slotpanel">
                 <div className="rt-sp-title">
                   <span className="rt-slotnum" style={{ background: slotAccent(slot.deck) }}>
@@ -1595,70 +1627,71 @@ export function RoutineTimeline({
                       {engineIdToOpenKey(track.key)}
                     </span>
                   ) : null}
-                  {slot.slot === 0 && <span className="rt-boundary-tag">enters with</span>}
-                  {slot.slot === planned.slots.length - 1 && (
-                    <span className="rt-boundary-tag">exits with</span>
-                  )}
-                  {edits.entryOffsets[slot.slotId] !== undefined && (
-                    <button
-                      className="rt-entrybadge"
-                      title={`Entry offset edited: recorded ${(
-                        bakedEntryBySlotId[slot.slotId] ?? 0
-                      ).toFixed(1)}b → ${edits.entryOffsets[slot.slotId].toFixed(
-                        1
-                      )}b (the edits layer — the recording never changes). Click to revert to recorded.`}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        draftStore.clearEntryOffset(slot.slotId);
-                      }}
-                    >
-                      ✎ entry {edits.entryOffsets[slot.slotId].toFixed(0)}b ↺
-                    </button>
+                </div>
+                <div className="rt-sp-controls">
+                  <div className="rt-sp-role">
+                    {slot.slot === 0 && <span className="rt-boundary-tag">enters with</span>}
+                    {slot.slot === planned.slots.length - 1 && (
+                      <span className="rt-boundary-tag">exits with</span>
+                    )}
+                    {edits.entryOffsets[slot.slotId] !== undefined && (
+                      <button
+                        className="rt-entrybadge"
+                        title={`Entry offset edited: recorded ${(
+                          bakedEntryBySlotId[slot.slotId] ?? 0
+                        ).toFixed(1)}b → ${edits.entryOffsets[slot.slotId].toFixed(
+                          1
+                        )}b (the edits layer — the recording never changes). Click to revert to recorded.`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          draftStore.clearEntryOffset(slot.slotId);
+                        }}
+                      >
+                        ✎ entry {edits.entryOffsets[slot.slotId].toFixed(0)}b ↺
+                      </button>
+                    )}
+                  </div>
+                  {!pairMode && slot.slot > 0 && slot.startTrim && (
+                    <label className="rt-start-control" title="Trim the intro; later audio, jumps and alignment stay fixed. You can also drag the track's left edge.">
+                      Start
+                      <input
+                        aria-label={`Track ${slot.slot + 1} start beat`}
+                        type="number" step={1}
+                        min={slot.startTrim.minBeat} max={slot.startTrim.maxBeat}
+                        value={Number(((slot.entryMixSec - planned.beatOriginMixSec) / planned.secPerBeat).toFixed(2))}
+                        onChange={(e) => {
+                          if (e.target.value === '') return;
+                          const beat = Number(e.target.value);
+                          if (!Number.isFinite(beat)) return;
+                          const { minBeat, maxBeat, anchorBeat } = slot.startTrim!;
+                          draftStore.setStartTrim(slot.slotId, Math.max(minBeat, Math.min(beat, maxBeat)) - anchorBeat);
+                        }}
+                        onBlur={() => draftStore.endGesture()}
+                        onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+                      />
+                      b <span>{slot.entryTrackSec.toFixed(1)}s</span>
+                      {edits.startTrims?.[slot.slotId] !== undefined && (
+                        <button type="button" title="Restore original track start" onClick={() => {
+                          draftStore.setStartTrim(slot.slotId, 0);
+                          draftStore.endGesture();
+                        }}>↺</button>
+                      )}
+                    </label>
                   )}
                 </div>
-                {!pairMode && slot.slot > 0 && slot.startTrim && (
-                  <label className="rt-start-control" title="Trim the intro; later audio, jumps and alignment stay fixed. You can also drag the track's left edge.">
-                    Start
-                    <input
-                      aria-label={`Track ${slot.slot + 1} start beat`}
-                      type="number" step={1}
-                      min={slot.startTrim.minBeat} max={slot.startTrim.maxBeat}
-                      value={Number(((slot.entryMixSec - planned.beatOriginMixSec) / planned.secPerBeat).toFixed(2))}
-                      onChange={(e) => {
-                        if (e.target.value === '') return;
-                        const beat = Number(e.target.value);
-                        if (!Number.isFinite(beat)) return;
-                        const { minBeat, maxBeat, anchorBeat } = slot.startTrim!;
-                        draftStore.setStartTrim(slot.slotId, Math.max(minBeat, Math.min(beat, maxBeat)) - anchorBeat);
-                      }}
-                      onBlur={() => draftStore.endGesture()}
-                      onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
-                    />
-                    b <span>{slot.entryTrackSec.toFixed(1)}s</span>
-                    {edits.startTrims?.[slot.slotId] !== undefined && (
-                      <button type="button" title="Restore original track start" onClick={() => {
-                        draftStore.setStartTrim(slot.slotId, 0);
-                        draftStore.endGesture();
-                      }}>↺</button>
-                    )}
-                  </label>
-                )}
-                {/* Channel trim (gh#190): the mixer's own knob idiom, PINNED
-                    bottom-right of the panel (out of the text rows).
-                    AVERAGE semantics (gh#206): the knob reads the slot's
-                    time-weighted average trim (recorded avg + drag offset);
-                    dragging still shifts the whole lane; double-click
-                    resets to the recorded average. */}
+                {/* Offset the raw envelope; resetting the knob preserves authored nodes. */}
                 {(() => {
-                  const recordedTrimAvg = stepLaneAverage(
+                  const linear = !!slot.lanes.authored?.trim;
+                  const unoffsetTrimAvg = trimLaneAverage(
                     slot.lanes.trim,
                     duration,
-                    slot.lanes.defaults.trim
+                    slot.lanes.defaults.trim,
+                    { linear }
                   );
-                  const avgTrim = Math.max(
-                    0,
-                    Math.min(1, recordedTrimAvg + slot.trim - 0.5)
-                  );
+                  const avgTrim = trimLaneAverage(slot.lanes.trim, duration, slot.lanes.defaults.trim, {
+                    linear,
+                    offset: slot.trim - 0.5,
+                  });
                   if (pairMode) {
                     // #221 gate: a Transition has no trim field — an
                     // audible-but-unsaved knob would lie on save.
@@ -1670,10 +1703,16 @@ export function RoutineTimeline({
                     );
                   }
                   return (
-                    <span
+                    <div
                       className={`rt-sp-trim${slot.trim !== 0.5 ? ' on' : ''}`}
-                      title="Channel trim — the slot's AVERAGE (recorded average + your offset; the strip shows deviations around it). Replayed through the real gain curve; double-click resets to the recorded average."
+                      title="Channel trim: the current envelope average, including your offset. Double-click removes the offset without changing the envelope."
                       onPointerUp={() => draftStore.endGesture()}
+                      onPointerCancel={() => draftStore.endGesture()}
+                      onDoubleClick={() => draftStore.endGesture()}
+                      onWheel={(e) => {
+                        e.stopPropagation();
+                        draftStore.endGesture();
+                      }}
                     >
                       <Knob
                         label={
@@ -1685,24 +1724,47 @@ export function RoutineTimeline({
                         }
                         min={0}
                         max={1}
-                        defaultValue={Math.max(0, Math.min(1, recordedTrimAvg))}
+                        defaultValue={unoffsetTrimAvg}
                         value={avgTrim}
                         onChange={(v) =>
                           draftStore.setTrim(
                             slot.slotId,
-                            Math.max(0, Math.min(1, 0.5 + v - recordedTrimAvg))
+                            trimForAverage(slot.lanes.trim, duration, slot.lanes.defaults.trim, linear, v)
                           )
                         }
                       />
-                    </span>
+                    </div>
                   );
                 })()}
+                <div className="rt-lanetoggles">
+                  {SLOT_LANE_ORDER.map((control) => {
+                    const on = lanesFor(slot.slotId).includes(control);
+                    return (
+                      <button
+                        key={control}
+                        className={`rt-lanetoggle${on ? ' on' : ''}`}
+                        style={{
+                          borderColor: colors[control],
+                          color: on ? '#0b0b0b' : colors[control],
+                          background: on ? colors[control] : 'transparent',
+                        }}
+                        title={`${on ? 'Hide' : 'Show'} ${SLOT_LANE_LABELS[control]} lane`}
+                        aria-pressed={on}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          toggleLane(slot.slotId, control);
+                        }}
+                      >
+                        {SLOT_LANE_LABELS[control][0]}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
               <div
                 className={`rt-wave-row${selectedSlots.includes(slot.slotId) ? ' rt-selected' : ''}`}
                 data-slot={slot.slotId}
                 style={{
-                  height: WAVE_H,
                   ...(selectedSlots.includes(slot.slotId)
                     ? { outlineColor: slotAccent(slot.deck) }
                     : {}),
@@ -1717,7 +1779,6 @@ export function RoutineTimeline({
                   ref={(el) => {
                     waveCanvasRefs.current[i] = el;
                   }}
-                  style={{ height: WAVE_H }}
                 />
                 {!pairMode && mode === 'select' && slot.slot > 0 && slot.startTrim && (
                   <div
@@ -1930,29 +1991,6 @@ export function RoutineTimeline({
                   });
                 })()}
 
-                <div className="rt-lanetoggles">
-                  {SLOT_LANE_ORDER.map((control) => {
-                    const on = lanesFor(slot.slotId).includes(control);
-                    return (
-                      <button
-                        key={control}
-                        className={`rt-lanetoggle${on ? ' on' : ''}`}
-                        style={{
-                          borderColor: colors[control],
-                          color: on ? '#0b0b0b' : colors[control],
-                          background: on ? colors[control] : 'transparent',
-                        }}
-                        title={`${on ? 'Hide' : 'Show'} ${SLOT_LANE_LABELS[control]} lane`}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          toggleLane(slot.slotId, control);
-                        }}
-                      >
-                        {SLOT_LANE_LABELS[control][0]}
-                      </button>
-                    );
-                  })}
-                </div>
                 {/* Jump popover (the pair editor's idiom). */}
                 {popover && livePopoverMarker && livePopoverMarker.slotId === slot.slotId && (
                   <JumpPopover
@@ -1974,9 +2012,7 @@ export function RoutineTimeline({
                 // read-only; expand re-opens the breakpoint editor.
                 const collapsed = authored && !!collapsedLanes[key];
                 const h = authored && !collapsed ? STRIP_H_AUTHORED : STRIP_H;
-                // TRIM is recorded-only: the panel knob offsets the whole
-                // slot; no envelope authoring (gh#190).
-                const editable = control !== 'trim';
+                const editable = control !== 'trim' || !pairMode;
                 return (
                   <div className="rt-lanestrip" key={control} style={{ height: h }}>
                     {(!authored || collapsed) && (
@@ -1991,13 +2027,13 @@ export function RoutineTimeline({
                     {authored &&
                       !collapsed &&
                       editable &&
-                      laneCanvasFor(slot, control as AuthorableLaneControl, colors[control])}
+                      laneCanvasFor(slot, control, colors[control])}
                     <span className="rt-laneedge" style={{ background: colors[control] }} />
                     <span className="rt-lanelabel" style={{ color: colors[control] }}>
                       {SLOT_LANE_LABELS[control]}
                       {authored ? ' ✎' : ''}
                     </span>
-                    {authored && (
+                    {authored && editable && (
                       <button
                         className="rt-laneauthor rt-lanecollapse"
                         title={
@@ -2023,7 +2059,7 @@ export function RoutineTimeline({
                         title={
                           authored
                             ? 'Discard the edited envelope — the recorded lane plays again'
-                            : 'Edit this lane (seeded from the recording; drag breakpoints, click to add, double-click to delete)'
+                            : 'Edit this lane: drag nodes; click the line at the preview to add; drag blank space to rectangle-select; double-click a node to delete'
                         }
                         onClick={(e) => {
                           e.stopPropagation();
@@ -2032,7 +2068,7 @@ export function RoutineTimeline({
                             // Don't let a stale collapsed flag greet the
                             // next authoring session at strip height.
                             setCollapsedLanes((p) => ({ ...p, [key]: false }));
-                          } else authorLane(slot, control as AuthorableLaneControl);
+                          } else authorLane(slot, control);
                         }}
                       >
                         {authored ? '↺' : '✎'}
@@ -2060,8 +2096,7 @@ export function RoutineTimeline({
             No incoming handover: incoming must survive outgoing
           </div>
         )}
-        {/* Trim handles are select-mode canvas edits (ADR 0038) — the
-            shaded trim REGIONS below stay visible in every mode. */}
+        {/* Current playback bounds are select-mode canvas edits (ADR 0038). */}
         {mode === 'select' &&
           trim &&
           onTrimChange &&
@@ -2081,42 +2116,6 @@ export function RoutineTimeline({
               </div>
             );
           })}
-        {trim && (
-          <>
-            {/* Inward cuts: hatched CUT regions. */}
-            {trim.startBeat > 0 && (
-              <div
-                className="rt-trimshade"
-                style={{ left: xOf(0), width: Math.max(0, xOf(trim.startBeat) - xOf(0)) }}
-              />
-            )}
-            {trim.endBeat < duration && (
-              <div
-                className="rt-trimshade"
-                style={{
-                  left: xOf(trim.endBeat),
-                  width: Math.max(0, xOf(duration) - xOf(trim.endBeat)),
-                }}
-              />
-            )}
-            {/* Playback beyond the saved extent; source coordinates stay fixed. */}
-            {trim.startBeat < 0 && (
-              <div
-                className="rt-trimextend"
-                style={{ left: xOf(trim.startBeat), width: Math.max(0, xOf(0) - xOf(trim.startBeat)) }}
-              />
-            )}
-            {trim.endBeat > duration && (
-              <div
-                className="rt-trimextend"
-                style={{
-                  left: xOf(duration),
-                  width: Math.max(0, xOf(trim.endBeat) - xOf(duration)),
-                }}
-              />
-            )}
-          </>
-        )}
         <div className="rt-playhead" ref={playheadRef} />
       </div>
     </div>
@@ -2576,7 +2575,8 @@ function drawLaneSteps(
     stripH: number;
     scrollBeat: number;
     pxPerBeat: number;
-    duration: number;
+    startBeat: number;
+    endBeat: number;
     /** gh#206: TRIM renders DEVIATIONS around the slot's average — this is
      * that average (recorded avg + knob offset); the wiggle centers on the
      * strip's middle guide. */
@@ -2596,13 +2596,13 @@ function drawLaneSteps(
   }
 
   // Sample the lane per pixel into contiguous spans (pen breaks outside
-  // the routine window).
+  // the authoring extent).
   const spans: { x0: number; ys: number[]; vs: number[] }[] = [];
   let cur: { x0: number; ys: number[]; vs: number[] } | null = null;
   const lanesAt = createSlotLanesCursor(slot); // monotonic x (#221 perf)
   for (let x = 0; x < geo.width; x++) {
     const beat = geo.scrollBeat + (x + 0.5) / geo.pxPerBeat;
-    if (beat < 0 || beat > geo.duration) {
+    if (beat < geo.startBeat || beat > geo.endBeat) {
       cur = null;
       continue;
     }

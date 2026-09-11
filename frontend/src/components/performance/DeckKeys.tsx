@@ -15,10 +15,10 @@ import { useViewActive } from '../../contexts/viewActive';
 import { useDeck, useDeckReady, useDeckSnapshot } from '../../hooks/useDeck';
 import { useHotCueActions } from '../../hooks/useHotCueActions';
 import { useMixer } from '../../hooks/useMixer';
-import { JogController } from '../../midi/jog';
+import { MouseJogController } from './mouseJog';
 import { DECK_KEYS, isGuardedKeyEvent, isTextEntryTarget, isTypingTarget } from './performanceKeys';
 import { registerKeyboardPointer, type KeyboardPointerFeedback } from './keyboardPointer';
-import { invertControl, MIXER_DRAG_RANGE_PX, mouseJogTicks, moveKnob, type KnobGesture } from './mouseControl';
+import { invertControl, MIXER_DRAG_RANGE_PX, moveKnob, type KnobGesture } from './mouseControl';
 
 export function DeckKeys() {
   const viewActive = useViewActive();
@@ -46,16 +46,11 @@ export function DeckKeys() {
     }>();
     const lastTap = new Map<string, number>();
     let jogRotation = 0;
-    const jog = new JogController({
-      isPlaying: () => engine.getSnapshot().playing,
-      getPlayhead: () => engine.getPlayhead(),
-      seek: (seconds) => engine.seek(seconds),
-      setBend: (percent) => engine.setBend(percent),
-    });
+    const jog = new MouseJogController(engine);
     const release = () => {
       held.clear();
       lastTap.clear();
-      jog.dispose();
+      jog.setTouch(false);
       pointer.stop();
     };
     const pointer = registerKeyboardPointer({
@@ -81,7 +76,7 @@ export function DeckKeys() {
         }
         if (dx !== 0 && held.has(keys.jog)) {
           jogRotation += dx * 2;
-          jog.onTicks(mouseJogTicks(dx, elapsedMs));
+          jog.move(dx, elapsedMs);
         }
       },
       feedback: () => {
@@ -91,8 +86,8 @@ export function DeckKeys() {
         for (const key of held.keys()) {
           if (key === keys.jog) {
             const snapshot = engine.getSnapshot();
-            feedback.push({ id: key, kind: 'jog', label: `${deck} ${snapshot.playing ? 'BEND' : 'SEEK'}`,
-              value: jogRotation, color, detail: snapshot.playing
+            feedback.push({ id: key, kind: 'jog', label: `${deck} ${jog.isTouching ? 'SCRATCH' : snapshot.playing ? 'BEND' : 'SEEK'}`,
+              value: jogRotation, color, detail: snapshot.playing && !jog.isTouching
                 ? `${snapshot.bendPercent.toFixed(2)}%` : `${engine.getPlayhead().toFixed(2)}s` });
           } else if (key === keys.fader) {
             feedback.push({ id: key, kind: 'fader', label: `${deck} VOL`, value: channel.fader,
@@ -113,6 +108,11 @@ export function DeckKeys() {
         return;
       }
       const key = event.key.toLowerCase();
+      if (key === 'shift' && held.has(keys.jog)) {
+        event.preventDefault();
+        if (!event.repeat) jog.setTouch(true);
+        return;
+      }
       if (!mouseKeys.has(key)) return;
       event.preventDefault();
       if (event.repeat || held.has(key)) return;
@@ -120,10 +120,16 @@ export function DeckKeys() {
       const now = performance.now();
       held.set(key, { started: now, travel: 0, secondTap: now - (lastTap.get(key) ?? -Infinity) <= 300 });
       lastTap.delete(key);
-      pointer.start();
+      if (key === keys.jog) jog.setTouch(event.shiftKey);
+      if (held.has(key)) pointer.start();
     };
     const onKeyUp = (event: KeyboardEvent) => {
       const key = event.key.toLowerCase();
+      if (key === 'shift' && held.has(keys.jog)) {
+        event.preventDefault();
+        jog.setTouch(false);
+        return;
+      }
       const press = held.get(key);
       if (!press) return;
       held.delete(key);
@@ -139,7 +145,7 @@ export function DeckKeys() {
           else mixer.setEq(deck, band, invertControl(channel.eq[band], 0.5));
         }
       } else if (tap && !press.secondTap) lastTap.set(key, now);
-      if (key === keys.jog) jog.dispose();
+      if (key === keys.jog) jog.setTouch(false);
       if (!held.size) pointer.stop();
     };
     const onFocus = () => {
@@ -153,11 +159,21 @@ export function DeckKeys() {
       // Also recover a missed pointer-up from the on-screen nudge buttons.
       engine.setBend(0);
     };
-    // A pause/load mid-bend must also cancel the filter's pending ticks.
+    const releaseJog = () => {
+      held.delete(keys.jog);
+      jog.setTouch(false);
+      if (!held.size) pointer.stop();
+    };
+    // Engine-ended scratches need a fresh contact, never a stale Shift hold.
     const unsubscribe = engine.subscribe(() => {
       const snapshot = engine.getSnapshot();
       if (snapshot.loadState !== 'ready') release();
-      else if (!snapshot.playing) jog.dispose();
+      else if (jog.isTouching && !snapshot.scratching) releaseJog();
+      else jog.syncState();
+    });
+    const unsubscribeTransport = engine.addTransportEventListener(event => {
+      if (jog.isTouching && (event.action === 'seek' || event.action === 'jumpBeats'
+        || event.action === 'hotCue' || event.action === 'scratchEnd')) releaseJog();
     });
     document.addEventListener('keydown', onKeyDown);
     document.addEventListener('keyup', onKeyUp);
@@ -171,7 +187,9 @@ export function DeckKeys() {
       document.removeEventListener('visibilitychange', onVisibility);
       window.removeEventListener('blur', onBlur);
       unsubscribe();
+      unsubscribeTransport();
       release();
+      jog.dispose();
       pointer.dispose();
     };
   }, [deck, engine, mixer, viewActive, loadedTrack?.id]);

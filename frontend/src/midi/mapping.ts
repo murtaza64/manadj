@@ -104,6 +104,8 @@ export interface DeckFeedback {
   quantize: LedAddress;
   /** Dedicated base-layer Key Lock / Master Tempo lamp, when present. */
   keyLock?: LedAddress;
+  slipMode?: LedAddress;
+  vinylMode?: LedAddress;
   /**
    * The SHIFT-layer Q address (channel+3, same note) — a PROBE
    * (midi-performance-ops 07): if the hardware drives a lamp there, it

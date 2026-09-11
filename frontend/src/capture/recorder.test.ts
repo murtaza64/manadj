@@ -20,7 +20,7 @@ import { DEFAULT_DETECTOR_PARAMS } from './events';
 import type { CaptureEvent, DetectedTake } from './events';
 import type { ChannelId, ChannelState } from '../playback/mixer';
 import { DEFAULT_CROSSFADER_ASSIGNMENTS } from '../playback/crossfaderAssignmentStore';
-import type { DeckSnapshot } from '../playback/DeckEngine';
+import type { DeckSnapshot, DeckTransportGesture } from '../playback/DeckEngine';
 import {
   _resetAudibleSurfacesForTests,
   claimAudible,
@@ -108,6 +108,9 @@ function emptySnapshot(): DeckSnapshot {
     bpm: null,
     duration: 300,
     playing: false,
+    scratching: false,
+    slipMode: false,
+    vinylMode: true,
     pendingPlay: false,
     previewing: false,
     hotCuePreviewSlot: null,
@@ -123,9 +126,11 @@ function emptySnapshot(): DeckSnapshot {
   };
 }
 
-type TransportGesture = { action: 'seek' | 'jumpBeats' | 'hotCue'; playhead: number; detail?: number };
+type TransportGesture = DeckTransportGesture;
 
 class FakeDeckSource implements CaptureDeckSource {
+  audioClock: Pick<AudioContext, 'currentTime' | 'state'> | null = null;
+  getAudioClock() { return this.audioClock; }
   private snapshot = emptySnapshot();
   private listeners = new Set<() => void>();
   /** The recorder-owned detailed transport handler slot (sessions 09):
@@ -138,6 +143,18 @@ class FakeDeckSource implements CaptureDeckSource {
   }
   getPlayhead(): number {
     return this.playhead;
+  }
+  scratch: { drive: number; rate: number } | null = null;
+  getScratchState() {
+    return this.scratch ? { ...this.scratch, position: this.playhead, time: this.audioClock?.currentTime ?? performance.now() / 1000,
+      trackDuration: this.snapshot.duration, loop: this.snapshot.loop } : null;
+  }
+  setScratch(scratch: { drive: number; rate: number } | null): void {
+    this.scratch = scratch;
+    this.mutate({ scratching: scratch !== null });
+  }
+  setModes(slipMode: boolean, vinylMode: boolean): void {
+    this.mutate({ slipMode, vinylMode });
   }
   subscribe(fn: () => void): () => void {
     this.listeners.add(fn);
@@ -270,6 +287,102 @@ afterEach(() => {
 });
 
 describe('capture gate (ADR 0022)', () => {
+  it.each([0.004, 0.012])('counts only an actual edge return before release after %ss', elapsed => {
+    const r = rig();
+    r.decks.A.load(1);
+    r.recorder.start();
+    r.decks.A.fireTransport({ action: 'scratchBegin', playhead: 100, trackDuration: 100 });
+    r.decks.A.fireTransport({ action: 'scratchMove', playhead: 100, trackDuration: 100, filter: { drive: -8, rate: 8 } });
+    expect(r.activated.at(-1)).toBe(false);
+    r.advance(elapsed);
+    r.decks.A.fireTransport({ action: 'scratchEnd', playhead: 100 });
+    expect(r.activated.at(-1)).toBe(elapsed > 0.008);
+    r.recorder.dispose();
+  });
+  it('timestamps same-quantum scratch snapshots on one clock despite delayed wall callbacks and other decks', () => {
+    const r = rig();
+    const clock = { currentTime: 10, state: 'running' as AudioContextState };
+    for (const deck of Object.values(r.decks)) deck.audioClock = clock;
+    r.decks.A.load(1);
+    r.decks.B.load(2);
+    r.recorder.start();
+    r.decks.A.fireTransport({ action: 'scratchBegin', playhead: 20, audioTime: 10, trackDuration: 100 });
+    r.decks.A.fireTransport({ action: 'scratchMove', playhead: 20, audioTime: 10, trackDuration: 100,
+      filter: { drive: 1, rate: 0 } });
+    r.advance(0.002);
+    r.mixer.setFader('B', 0.5);
+    r.decks.B.fireTransport({ action: 'scratchBegin', playhead: 30, audioTime: 10, trackDuration: 100 });
+    r.decks.A.fireTransport({ action: 'scratchMove', playhead: 20, audioTime: 10, trackDuration: 100,
+      filter: { drive: 2, rate: 0 } });
+    const moves = r.logged.filter(e => e.kind === 'transport' && e.action === 'scratchMove');
+    expect(moves.map(e => e.t)).toEqual([0, 0]);
+    clock.currentTime = 10.004;
+    r.advance(0.008);
+    r.decks.A.fireTransport({ action: 'scratchEnd', playhead: 20.001443264, audioTime: 10.004 });
+    expect(r.logged.at(-1)!.t).toBeCloseTo(0.004, 12);
+    expect(r.logged.every((e, i) => i === 0 || e.t >= r.logged[i - 1].t)).toBe(true);
+    r.recorder.dispose();
+  });
+
+  it('maps scratch seeds and surface-gate wall gaps without reusing a frozen audio epoch', () => {
+    const r = rig();
+    const clock = { currentTime: 20, state: 'running' as AudioContextState };
+    for (const deck of Object.values(r.decks)) deck.audioClock = clock;
+    r.decks.A.load(1);
+    r.decks.A.seek(99.999);
+    r.decks.A.setScratch({ drive: -8, rate: 8 });
+    r.recorder.start();
+    const seed = r.logged.find(e => e.kind === 'transport' && e.action === 'scratchMove')!;
+    expect(seed).toMatchObject({ t: 0, audioTime: 20, trackDuration: 300, playhead: 99.999 });
+    claimAudible('editor');
+    r.advance(5);
+    claimAudible('shared');
+    const reseed = r.logged.filter(e => e.kind === 'transport' && e.action === 'scratchMove').at(-1)!;
+    expect(reseed).toMatchObject({ t: 5, audioTime: 20 });
+    r.advance(0.002);
+    r.decks.A.fireTransport({ action: 'scratchMove', playhead: 99.999, audioTime: 20,
+      trackDuration: 300, filter: { drive: -9, rate: 8 } });
+    expect(r.logged.at(-1)!.t).toBe(5);
+    expect(r.logged.every((e, i) => i === 0 || e.t >= r.logged[i - 1].t)).toBe(true);
+    r.recorder.dispose();
+  });
+
+  it('captures paused scratching, ticks its playhead, and activates only moving filters', () => {
+    const r = rig();
+    r.recorder.start();
+    r.decks.A.load(1);
+    r.decks.A.seek(20);
+    r.decks.A.setScratch({ drive: 0, rate: 0 });
+    r.decks.A.fireTransport({ action: 'scratchBegin', playhead: 20 });
+    expect(r.activated.at(-1)).toBe(false);
+    r.decks.A.fireTransport({ action: 'scratchMove', playhead: 20, filter: { drive: -8, rate: -2 } });
+    expect(r.logged.at(-1)).toMatchObject({ action: 'scratchMove', filter: { drive: -8, rate: -2 } });
+    expect(r.activated.at(-1)).toBe(true);
+    r.advance(1);
+    expect(r.logged.at(-1)).toMatchObject({ kind: 'tick', playheads: { A: 20 } });
+    expect(r.activated.at(-1)).toBe(false);
+    r.decks.A.setModes(true, false);
+    expect(r.logged.slice(-2)).toMatchObject([
+      { control: 'slipMode', value: 1 }, { control: 'vinylMode', value: 0 },
+    ]);
+    r.recorder.dispose();
+  });
+
+  it('seeds both filter poles even when paused', () => {
+    const r = rig();
+    r.decks.D.load(4);
+    r.decks.D.seek(17);
+    r.decks.D.setModes(true, true);
+    r.decks.D.setScratch({ drive: -4, rate: -1 });
+    r.recorder.start();
+    expect(r.logged).toContainEqual(expect.objectContaining({
+      kind: 'transport', action: 'scratchMove', channel: 'D', playhead: 17,
+      filter: { drive: -4, rate: -1 },
+    }));
+    expect(r.logged).toContainEqual(expect.objectContaining({ channel: 'D', control: 'slipMode', value: 1 }));
+    r.recorder.dispose();
+  });
+
   it('a clean blend while shared is audible emits one Take', () => {
     const r = rig();
     r.recorder.start();
