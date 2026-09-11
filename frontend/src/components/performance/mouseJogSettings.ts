@@ -8,7 +8,7 @@ export interface MouseJogSettings {
   smoothingMs: number;
 }
 
-export const DEFAULT_MOUSE_JOG_SETTINGS = { sensitivity: 1, acceleration: 1.5, smoothingMs: 50 };
+export const DEFAULT_MOUSE_JOG_SETTINGS = { sensitivity: 2, acceleration: 1.8, smoothingMs: 50 };
 const STORAGE_KEY = 'manadj-mouse-jog';
 
 function bounded(value: unknown, fallback: number, min: number, max: number): number {

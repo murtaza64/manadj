@@ -57,6 +57,11 @@ hardcodes a color literal — import the token (TS/canvas) or `var(--…)`
 Deprecated, die with gh#200: `--sapphire --green --teal --yellow --red
 --mauve --lavender` (migrate to semantic roles), `--blue` (→ `--accent`).
 
+Settings uses `--crust` for its canvas and preview/input wells, matching Sync.
+Active gain-boost controls use `--warning`; active attenuation uses `--success`.
+Playback status uses the existing active/error/machine roles. Waveform band
+controls show the user's actual band colors; navigation and focus stay `--accent`.
+
 ## Scales
 
 | Scale | Tokens | Notes |
@@ -99,6 +104,8 @@ Shared draw helpers/tables: `frontend/src/theme/markers.ts` (gh#201).
   -danger/-secondary` in `styles/utilities.css`. New buttons use `.btn`;
   new variants are added to utilities.css, never hand-rolled in feature
   CSS.
+- **Persistent button selection** uses `.btn-selected`: accent fill, accent
+  border, dark ink, including secondary detail text.
 - **Modals use `<Modal>`** (gh#202): overlay, centering, escape/backdrop
   close, `--z-modal`, title bar.
 - No other primitives until a third duplication appears (D10).

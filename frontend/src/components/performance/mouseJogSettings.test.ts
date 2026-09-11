@@ -21,12 +21,12 @@ beforeEach(() => {
 });
 
 describe('mouse jog settings', () => {
-  it('starts with the landed baseline and caches a stable snapshot', async () => {
+  it('starts with the chosen defaults and caches a stable snapshot', async () => {
     const store = await import('./mouseJogSettings');
-    expect(store.getMouseJogSettings()).toEqual({ sensitivity: 1, acceleration: 1.5, smoothingMs: 50 });
+    expect(store.getMouseJogSettings()).toEqual({ sensitivity: 2, acceleration: 1.8, smoothingMs: 50 });
     const initial = store.getMouseJogSettings();
     expect(store.getMouseJogSettings()).toBe(initial);
-    store.setMouseJogSettings({ sensitivity: 1 });
+    store.setMouseJogSettings({ sensitivity: 2 });
     expect(store.getMouseJogSettings()).toBe(initial);
   });
 
@@ -54,7 +54,7 @@ describe('mouse jog settings', () => {
     store.resetMouseJogSettings();
     expect(store.getMouseJogSettings()).toEqual(store.DEFAULT_MOUSE_JOG_SETTINGS);
     expect(storage.getItem(key)).toBeNull();
-    expect(fetch).toHaveBeenCalledWith(expect.stringContaining(`/api/settings/${key}`), { method: 'DELETE' });
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledWith(expect.stringContaining(`/api/settings/${key}`), expect.objectContaining({ method: 'DELETE' })));
   });
 
   it('restores the cached preference once at boot, sanitizing partial JSON', async () => {
@@ -74,12 +74,14 @@ describe('mouse jog settings', () => {
     },
   );
 
-  it('preserves baseline response, direction, full-scale reach, and fine control', async () => {
+  it('matches the chosen response, direction, full-scale reach, and fine control', async () => {
     const { mouseJogBendTarget: target, DEFAULT_MOUSE_JOG_SETTINGS: baseline } = await import('./mouseJogSettings');
-    expect(target(600, baseline)).toBeCloseTo(8 * 0.1 ** 1.5);
+    expect(target(200, baseline).toFixed(2)).toBe('0.06');
+    expect(target(600, baseline).toFixed(2)).toBe('0.44');
+    expect(target(1200, baseline).toFixed(2)).toBe('1.54');
     expect(target(-600, baseline)).toBe(-target(600, baseline));
     expect(target(500, { ...baseline, sensitivity: 12 })).toBe(8);
-    expect(target(6000, baseline)).toBe(8);
+    expect(target(3000, baseline)).toBe(8);
     expect(target(600, { ...baseline, acceleration: 3 })).toBeLessThan(target(600, baseline));
     expect(target(6000, { ...baseline, acceleration: 3 })).toBe(8);
     expect(target(600, { ...baseline, smoothingMs: 200 })).toBe(target(600, baseline));

@@ -55,8 +55,9 @@ import {
 } from '../playback/audibleSurface';
 import { watchAuditionTakeover, watchDeckAuditionTakeover } from '../editor/auditionTakeover';
 import { armAudition } from '../editor/auditionArm';
-import { isGuardedKeyEvent } from '../components/performance/performanceKeys';
+import { isGuardedKeyEvent, isTypingTarget } from '../components/performance/performanceKeys';
 import { useViewActive } from '../contexts/viewActive';
+import { useBrowseActive } from '../contexts/browseActive';
 import { decodeWaveformBlob, type DecodedWaveform } from '../waveform/blob';
 import { registerBrowseHost, sharedBrowseHandle } from '../components/browseHost';
 import { fillPickerChip } from './pickerChips';
@@ -144,6 +145,7 @@ export default function RoutineEditorView() {
   const queryClient = useQueryClient();
   const toast = useToast();
   const viewActive = useViewActive();
+  const browseActive = useBrowseActive();
 
   // Modal editing (ADR 0038, gh#207): mode is a working posture — it lives
   // here in the shell so it persists across artifact switches.
@@ -1179,6 +1181,8 @@ export default function RoutineEditorView() {
   useEffect(() => {
     if (!viewActive) return;
     const onKey = (e: KeyboardEvent) => {
+      if (isTypingTarget(e)) return;
+      if (e.target instanceof Element && e.target.closest('.settings-page')) return;
       // ⌘Z/⌘⇧Z first: isGuardedKeyEvent drops ALL meta combos (its job is
       // guarding bare performance keys), but undo/redo ARE meta combos.
       if ((e.metaKey || e.ctrlKey) && !e.altKey && (e.key === 'z' || e.key === 'Z')) {
@@ -1202,6 +1206,7 @@ export default function RoutineEditorView() {
       // outgoing). Assignment replaces that side of the open pair (the
       // other side carries over; both sides fresh = nothing until the
       // second key) and opens a seeded draft on the new pair's move.
+      if (!browseActive) return;
       if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
         e.preventDefault();
         e.stopPropagation();
@@ -1216,7 +1221,7 @@ export default function RoutineEditorView() {
     };
     document.addEventListener('keydown', onKey, { capture: true });
     return () => document.removeEventListener('keydown', onKey, { capture: true });
-  }, [viewActive, auditionTogglePlay, draftStore, assignPairSide]);
+  }, [viewActive, browseActive, auditionTogglePlay, draftStore, assignPairSide]);
 
   // Re-render on player state changes (play/pause/seek).
   const [, bump] = useState(0);

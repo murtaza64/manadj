@@ -365,14 +365,14 @@ describe('mouse-key gestures and cue walking', () => {
     render(); move(100, 100); key('t'); move(150, 100);
     act(() => vi.advanceTimersByTime(25));
     expect(fixture.snapshot.bendPercent).toBeGreaterThan(0);
-    expect(fixture.snapshot.bendPercent).toBeLessThan(0.1);
+    expect(fixture.snapshot.bendPercent).toBeLessThan(0.2);
     expect(engine.seek).not.toHaveBeenCalled();
     act(() => vi.advanceTimersByTime(600));
     expect(engine.setBend).toHaveBeenLastCalledWith(0);
     move(100, 100);
     act(() => vi.advanceTimersByTime(25));
     expect(fixture.snapshot.bendPercent).toBeLessThan(0);
-    expect(fixture.snapshot.bendPercent).toBeGreaterThan(-0.1);
+    expect(fixture.snapshot.bendPercent).toBeGreaterThan(-0.2);
     key('t', { metaKey: true }, 'keyup');
     expect(engine.setBend).toHaveBeenLastCalledWith(0);
     expect(vi.getTimerCount()).toBe(0);

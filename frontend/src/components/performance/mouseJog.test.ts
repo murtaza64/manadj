@@ -34,7 +34,8 @@ describe('mouse jog', () => {
   beforeEach(() => {
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'performance'] });
     port = recordingPort();
-    jog = new MouseJogController(port);
+    // Keep the timing fixtures fixed; product defaults are covered by settings tests.
+    jog = new MouseJogController(port, () => ({ sensitivity: 1, acceleration: 1.5, smoothingMs: 50 }));
   });
 
   afterEach(() => {
@@ -438,7 +439,7 @@ describe('mouse jog', () => {
   });
 
   it('reads sensitivity and acceleration live during sustained motion without resetting the filter', () => {
-    let settings = { ...DEFAULT_MOUSE_JOG_SETTINGS };
+    let settings = { ...DEFAULT_MOUSE_JOG_SETTINGS, sensitivity: 1 };
     const tuning = vi.fn(() => settings);
     jog = new MouseJogController(port, tuning);
     sustain(1200, 1000, 5);

@@ -2,8 +2,8 @@
  * Persistent top bar, mode-first (gh#66 redesign, variant B):
  *
  * - The bar's spine is a prominent labeled segmented mode control
- *   (EXPORT / PERFORM / EDIT / SYNC); rarer modes (ROUTINE / HISTORY /
- *   WAVE / JOG) live behind an overflow trigger at the control's right
+ *   (EXPORT / PERFORM / EDIT / SYNC), followed by the Settings toggle;
+ *   rarer modes live behind an overflow trigger at the control's right
  *   end, which wears the active overflow mode's segment when one is
  *   selected. No title — segments carry their own labels.
  * - Global status docks right, stable across modes, grouped by concern:
@@ -22,7 +22,7 @@ import { isVisualizerOpen, toggleVisualizer } from '../visualizer/windowControl'
 import { VisualizerControlModal } from './VisualizerControlModal';
 import './TopBar.css';
 
-export type AppMode = 'library' | 'performance' | 'transition' | 'routine' | 'history' | 'sync' | 'styles' | 'jog-tune';
+export type AppMode = 'library' | 'performance' | 'transition' | 'routine' | 'history' | 'sync';
 
 type ModeMeta = { id: AppMode; icon: string; label: string; title: string };
 
@@ -44,8 +44,6 @@ const PRIMARY_MODES: ModeMeta[] = [
  * gh#66). */
 const OVERFLOW_MODES: ModeMeta[] = [
   { id: 'history', icon: '↻', label: 'HISTORY', title: 'Transition history' },
-  { id: 'styles', icon: '◔', label: 'WAVE', title: 'Waveform styles' },
-  { id: 'jog-tune', icon: '◎', label: 'JOG', title: 'Jog calibration' },
 ];
 
 /** The retired pair editor — overflow-reachable only under the dev
@@ -127,9 +125,13 @@ function MidiBadge() {
 function ModeControl({
   mode,
   onModeChange,
+  settingsOpen,
+  onSettingsToggle,
 }: {
   mode: AppMode;
   onModeChange: (mode: AppMode) => void;
+  settingsOpen: boolean;
+  onSettingsToggle: () => void;
 }) {
   const [menu, setMenu] = useState(false);
   // The legacy pair editor rides the overflow only under the dev fallback
@@ -156,6 +158,7 @@ function ModeControl({
           key={m.id}
           className={`topbar-segment${mode === m.id ? ' active' : ''}`}
           title={m.title}
+          aria-pressed={mode === m.id}
           onClick={() => onModeChange(m.id)}
         >
           <span className="topbar-segment-icon">{m.icon}</span>
@@ -163,11 +166,24 @@ function ModeControl({
         </button>
       ))}
       <button
+        className={`topbar-segment${settingsOpen ? ' active' : ''}`}
+        aria-label="Settings"
+        aria-pressed={settingsOpen}
+        title="Settings"
+        onClick={() => {
+          setMenu(false);
+          onSettingsToggle();
+        }}
+      >
+        <span className="topbar-segment-icon">⚙</span>
+        <span className="topbar-segment-label">SETTINGS</span>
+      </button>
+      <button
         className={`topbar-segment topbar-segment-overflow${activeOverflow ? ' active' : ''}${menu ? ' open' : ''}`}
         title={
           activeOverflow
             ? `${activeOverflow.title} — more modes`
-            : 'More modes (Transition history, Waveform styles, Jog calibration)'
+            : 'More modes (Transition history)'
         }
         onClick={() => setMenu((v) => !v)}
       >
@@ -209,14 +225,23 @@ function ModeControl({
 export function TopBar({
   mode,
   onModeChange,
+  settingsOpen,
+  onSettingsToggle,
 }: {
   mode: AppMode;
   onModeChange: (mode: AppMode) => void;
+  settingsOpen: boolean;
+  onSettingsToggle: () => void;
 }) {
   return (
     <header className="topbar">
       <img src="/logo.png" alt="manaDJ logo" className="topbar-logo" />
-      <ModeControl mode={mode} onModeChange={onModeChange} />
+      <ModeControl
+        mode={mode}
+        onModeChange={onModeChange}
+        settingsOpen={settingsOpen}
+        onSettingsToggle={onSettingsToggle}
+      />
       <div className="topbar-status">
         <VisualizerCluster />
         <span className="topbar-divider" />

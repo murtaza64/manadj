@@ -46,9 +46,7 @@
 
 import {
   BUTTERWORTH_Q_DB,
-  SWEEP_BYPASS_HZ,
   eqValueToGain,
-  sweepPositionToFilter,
 } from './graph';
 import type { EqBand } from './graph';
 import { CueBridge, attachSinkKeepalive } from './cueBridge';
@@ -76,6 +74,9 @@ import {
   trimToGain,
 } from './mixerMath';
 import { samplePeakCeilingCurve } from './gainStaging';
+import { loadFilterSettings, sanitizeFilterSettings, saveFilterSettings } from './filterSettings';
+import type { FilterSettings } from './filterSettings';
+import { createSweepFilter } from './sweepFilter';
 
 export const CHANNEL_IDS = ['A', 'B', 'C', 'D'] as const;
 export type ChannelId = (typeof CHANNEL_IDS)[number];
@@ -94,6 +95,7 @@ export type MixerChange =
   | 'crossfaderEnabled'
   | 'master'
   | 'cue'
+  | 'filterSettings'
   | 'routing';
 
 /** What a deck needs from the audio layer: a live context and its channel input. */
@@ -184,9 +186,6 @@ const FLAT_CHANNEL: ChannelState = {
 const CROSSOVER_LOW_MID_HZ = 250;
 const CROSSOVER_MID_HIGH_HZ = 2500;
 
-/** Time constant for filter parameter smoothing (zipper-noise avoidance). */
-const PARAM_SMOOTHING_S = 0.015;
-
 /** Linear ramp length for gain moves (reaches the target exactly). */
 const GAIN_RAMP_S = 0.05;
 
@@ -255,7 +254,7 @@ class ChannelStrip {
   readonly input: GainNode;
   readonly trimGain: GainNode;
   readonly bandGains: Record<EqBand, GainNode>;
-  readonly sweep: BiquadFilterNode;
+  readonly sweep: ReturnType<typeof createSweepFilter>;
   readonly faderGain: GainNode;
   readonly crossfadeGain: GainNode;
   readonly pflGain: GainNode;
@@ -307,10 +306,7 @@ class ChannelStrip {
       this.bandGains[band].gain.value = eqValueToGain(state.eq[band]);
     }
 
-    this.sweep = ctx.createBiquadFilter();
-    this.sweep.type = 'lowpass';
-    this.sweep.frequency.value = SWEEP_BYPASS_HZ;
-    this.sweep.Q.value = BUTTERWORTH_Q_DB;
+    this.sweep = createSweepFilter(ctx);
 
     this.faderGain = ctx.createGain();
     this.faderGain.gain.value = channelFaderToGain(state.fader);
@@ -324,10 +320,10 @@ class ChannelStrip {
     this.meterAnalyser.fftSize = 1024;
     this.meterBuffer = new Float32Array(new ArrayBuffer(this.meterAnalyser.fftSize * 4));
 
-    sum.connect(this.sweep);
-    this.sweep.connect(this.faderGain);
-    this.sweep.connect(this.pflGain);
-    this.sweep.connect(this.meterAnalyser);
+    sum.connect(this.sweep.input);
+    this.sweep.output.connect(this.faderGain);
+    this.sweep.output.connect(this.pflGain);
+    this.sweep.output.connect(this.meterAnalyser);
     this.faderGain.connect(this.crossfadeGain);
   }
 
@@ -396,6 +392,7 @@ export class Mixer {
   /** Crossfader bypass: while false the fader position is kept but both
    * channels run at unity (as if centered) — an accidental-kill guard. */
   private crossfaderEnabled = loadCrossfaderEnabled();
+  private filterSettings = loadFilterSettings();
   /**
    * Automation overlay (ADR 0022): while non-null, drawn automation owns
    * the lane-driven node params (AutomationChannelValues) with REPLACEMENT
@@ -530,7 +527,7 @@ export class Mixer {
       // automation-aware: a revival while the overlay is engaged restores
       // automation ownership (ADR 0022), not base state.
       this.applyCrossfader(false);
-      for (const channel of CHANNEL_IDS) this.applyFilter(channel);
+      for (const channel of CHANNEL_IDS) this.applyFilter(channel, true);
       if (this.automation) {
         for (const channel of CHANNEL_IDS) {
           const v = this.automation[channel];
@@ -808,6 +805,19 @@ export class Mixer {
 
   getMaster(): number {
     return this.master;
+  }
+
+  getFilterSettings(): Readonly<FilterSettings> {
+    return this.filterSettings;
+  }
+
+  setFilterSettings(patch: Partial<FilterSettings>): void {
+    const next = sanitizeFilterSettings({ ...this.filterSettings, ...patch });
+    if (Object.keys(next).every(key => next[key as keyof FilterSettings] === this.filterSettings[key as keyof FilterSettings])) return;
+    this.filterSettings = next;
+    saveFilterSettings(next);
+    if (this.liveGraph()) for (const channel of CHANNEL_IDS) this.applyFilter(channel);
+    this.notify('filterSettings');
   }
 
   setTrim(channel: ChannelId, value: number): void {
@@ -1184,6 +1194,7 @@ export class Mixer {
   /** Tear down. Safe to keep using — the graph revives on demand. */
   dispose(): void {
     this.cueBridge?.stop();
+    if (this.strips) for (const channel of CHANNEL_IDS) this.strips[channel].sweep.dispose();
     if (this.ctx && this.ctx.state !== 'closed') void this.ctx.close();
     this.ctx = null;
     this.strips = null;
@@ -1221,27 +1232,13 @@ export class Mixer {
 
   /** Apply the EFFECTIVE filter position: a written automation value while
    * the overlay is engaged, base state otherwise. */
-  private applyFilter(channel: ChannelId): void {
+  private applyFilter(channel: ChannelId, immediate = false): void {
     const auto = this.automation?.[channel];
-    this.applyFilterPosition(channel, auto ? auto.filter : this.channels[channel].filter);
+    this.applyFilterPosition(channel, auto ? auto.filter : this.channels[channel].filter, immediate);
   }
 
-  private applyFilterPosition(channel: ChannelId, position: number): void {
+  private applyFilterPosition(channel: ChannelId, position: number, immediate = false): void {
     if (!this.ctx || !this.strips) return;
-    const sweep = this.strips[channel].sweep;
-    const { type, frequency, qDb } = sweepPositionToFilter(position);
-    const now = this.ctx.currentTime;
-    if (sweep.type !== type) {
-      // `type` is not an AudioParam and flips instantaneously. Make the new
-      // filter transparent at the flip, then ramp — avoids a pop mid-sweep.
-      sweep.type = type;
-      const transparentHz = type === 'lowpass' ? SWEEP_BYPASS_HZ : 20;
-      sweep.frequency.cancelScheduledValues(now);
-      sweep.frequency.setValueAtTime(transparentHz, now);
-      sweep.Q.cancelScheduledValues(now);
-      sweep.Q.setValueAtTime(BUTTERWORTH_Q_DB, now);
-    }
-    sweep.frequency.setTargetAtTime(frequency, now, PARAM_SMOOTHING_S);
-    sweep.Q.setTargetAtTime(qDb, now, PARAM_SMOOTHING_S);
+    this.strips[channel].sweep.update(this.filterSettings, position, immediate);
   }
 }

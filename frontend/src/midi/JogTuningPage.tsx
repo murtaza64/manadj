@@ -14,6 +14,8 @@ import {
 } from './jogTelemetry';
 import type { Grv6JogMessage, Grv6JogStream, JogStreamStats } from './jogTelemetry';
 import './JogTuningPage.css';
+import { AutoBlurSelect } from '../components/AutoBlurSelect';
+import { CommittedNumberInput } from '../components/CommittedNumberInput';
 
 const STREAMS: readonly Grv6JogStream[] = [
   'side',
@@ -42,11 +44,12 @@ function number(value: number, digits = 1): string {
 
 export default function JogTuningPage() {
   const calibration = useGrv6JogCalibration();
+  const [resetKey, setResetKey] = useState(0);
   const [access, setAccess] = useState<MIDIAccess | null>(null);
   const [inputs, setInputs] = useState<MIDIInput[]>([]);
   const [selectedInputId, setSelectedInputId] = useState('');
   const [error, setError] = useState<string | null>(
-    HAS_WEB_MIDI ? null : 'Web MIDI unavailable. Open the lane through Electron.'
+    HAS_WEB_MIDI ? null : 'Web MIDI is unavailable. Use Electron or a browser with Web MIDI support.'
   );
   const [stats, setStats] = useState<Record<Grv6JogStream, JogStreamStats>>(EMPTY_STATS);
   const [capture, setCapture] = useState<RevolutionCapture>({
@@ -73,7 +76,7 @@ export default function JogTuningPage() {
         (input.name ?? '').includes('DDJ-GRV6')
       );
       setInputs(next);
-      setSelectedInputId((current) => current || next[0]?.id || '');
+      setSelectedInputId((current) => next.some(input => input.id === current) ? current : next[0]?.id || '');
     };
     navigator.requestMIDIAccess().then(
       (next) => {
@@ -152,13 +155,14 @@ export default function JogTuningPage() {
         value={calibration[key]}
         onChange={(event) => patch(key, Number(event.target.value))}
       />
-      <input
-        type="number"
+      <CommittedNumberInput
+        key={resetKey}
+        aria-label={`${label} value`}
         min={min}
         max={max}
         step={step}
         value={calibration[key]}
-        onChange={(event) => patch(key, Number(event.target.value))}
+        onCommit={(value) => patch(key, value)}
       />
       <small>{unit}</small>
     </label>
@@ -169,18 +173,36 @@ export default function JogTuningPage() {
 
   return (
     <div className="jog-tune">
-      <header className="jog-tune__header">
+      <header className="settings-section-heading">
         <div>
-          <span className="jog-tune__eyebrow">DDJ-GRV6 / issue 29</span>
-          <h1>Jog calibration bench</h1>
-          <p>Load and play a Deck in Performance, then return here. Slider changes apply to the next jog message.</p>
+          <h2>Jog calibration</h2>
+          <p>Test with the decks above in Performance. Slider changes apply to the next jog message.</p>
         </div>
         <div className={`jog-tune__connection${selectedInput ? ' online' : ''}`}>
           {selectedInput ? selectedInput.name : access ? 'GRV6 not found' : 'MIDI waiting'}
         </div>
       </header>
 
-      {error ? <div className="jog-tune__error">{error}</div> : null}
+      {error ? <div className="jog-tune__error" role="alert">{error}</div> : null}
+
+      <section className="jog-tune__panel">
+        <div className="jog-tune__calibration-head">
+          <div><span className="jog-tune__eyebrow">Live response</span><h3>DDJ-GRV6</h3></div>
+          <button className="btn btn-secondary" onClick={() => { setResetKey(key => key + 1); resetGrv6JogCalibration(); }}>Reset jog defaults</button>
+        </div>
+        <div className="jog-tune__sliders">
+          {slider('Playback bend gain', 'bendPercentPerTick', 0.1, 10, 0.1, '% per filtered tick')}
+          {slider('Playback bend clamp', 'bendMaxPercent', 0.5, 50, 0.5, '%')}
+          {slider('Playback decay window', 'bendFilterWindow', 1, 40, 1, '25 ms slots')}
+          {slider('Paused bare rim', 'rimSeekSecondsPerTick', 0.00005, 0.01, 0.00005, 'seconds / tick')}
+          {slider('Paused touch platter', 'touchSeekSecondsPerTick', 0.00005, 0.01, 0.00005, 'seconds / tick')}
+          {slider('Shift fast-seek base', 'fastSeekSecondsPerTick', 0.00005, 0.1, 0.00005, 'seconds / tick')}
+          {slider('Fast-seek acceleration threshold', 'fastSeekAccelTicksPerSecond', 10, 500, 5, 'ticks / sec')}
+          {slider('Fast-seek acceleration cap', 'fastSeekAccelMax', 1, 100, 1, 'multiplier')}
+        </div>
+      </section>
+
+      <details className="jog-tune__diagnostics"><summary>Hardware measurement and diagnostics</summary>
 
       <section className="jog-tune__panel jog-tune__capture">
         <div>
@@ -188,25 +210,26 @@ export default function JogTuningPage() {
           <h2>One exact revolution</h2>
           <p>Choose the active stream, start capture, rotate exactly 360 degrees at a steady speed, then stop.</p>
         </div>
-        <select value={selectedInputId} onChange={(event) => setSelectedInputId(event.target.value)}>
+        <AutoBlurSelect aria-label="Calibration MIDI input" value={selectedInputId} onChange={(event) => setSelectedInputId(event.target.value)}>
           {inputs.length === 0 ? <option value="">No GRV6 input</option> : null}
           {inputs.map((input) => <option key={input.id} value={input.id}>{input.name}</option>)}
-        </select>
-        <select
+        </AutoBlurSelect>
+        <AutoBlurSelect aria-label="Capture stream"
           value={capture.stream}
           onChange={(event) => changeCapture((current) => ({ ...current, stream: event.target.value as Grv6JogStream }))}
         >
           {STREAMS.map((stream) => <option key={stream}>{stream}</option>)}
-        </select>
-        <select
+        </AutoBlurSelect>
+        <AutoBlurSelect aria-label="Capture deck"
           value={capture.deck}
           onChange={(event) => changeCapture((current) => ({ ...current, deck: event.target.value as RevolutionCapture['deck'] }))}
         >
           <option value="any">any Deck</option>
           {(['A', 'B', 'C', 'D'] as const).map((deck) => <option key={deck}>{deck}</option>)}
-        </select>
+        </AutoBlurSelect>
         <button
-          className={capture.active ? 'recording' : ''}
+          className={`btn ${capture.active ? 'btn-danger recording' : 'btn-primary'}`}
+          disabled={!selectedInput}
           onClick={() => changeCapture((current) => ({
             ...current,
             active: !current.active,
@@ -243,27 +266,9 @@ export default function JogTuningPage() {
         })}
       </section>
 
-      <section className="jog-tune__panel">
-        <div className="jog-tune__calibration-head">
-          <div>
-            <span className="jog-tune__eyebrow">live response</span>
-            <h2>GRV6 calibration</h2>
-          </div>
-          <button onClick={resetGrv6JogCalibration}>Reset</button>
-          <button onClick={() => void navigator.clipboard.writeText(grv6CalibrationCode())}>Copy Mapping values</button>
-        </div>
-        <div className="jog-tune__sliders">
-          {slider('Playback bend gain', 'bendPercentPerTick', 0.1, 10, 0.1, '% per filtered tick')}
-          {slider('Playback bend clamp', 'bendMaxPercent', 0.5, 50, 0.5, '%')}
-          {slider('Playback decay window', 'bendFilterWindow', 1, 40, 1, '25 ms slots')}
-          {slider('Paused bare rim', 'rimSeekSecondsPerTick', 0.00005, 0.01, 0.00005, 'seconds / tick')}
-          {slider('Paused touch platter', 'touchSeekSecondsPerTick', 0.00005, 0.01, 0.00005, 'seconds / tick')}
-          {slider('Shift fast-seek base', 'fastSeekSecondsPerTick', 0.00005, 0.1, 0.00005, 'seconds / tick')}
-          {slider('Fast-seek acceleration threshold', 'fastSeekAccelTicksPerSecond', 10, 500, 5, 'ticks / sec')}
-          {slider('Fast-seek acceleration cap', 'fastSeekAccelMax', 1, 100, 1, 'multiplier')}
-        </div>
-        <pre>{grv6CalibrationCode(calibration)}</pre>
-      </section>
+      <button className="btn btn-secondary" onClick={() => void navigator.clipboard.writeText(grv6CalibrationCode()).catch(() => setError('Could not copy calibration values.'))}>Copy mapping values</button>
+      <pre>{grv6CalibrationCode(calibration)}</pre>
+      </details>
     </div>
   );
 }

@@ -65,7 +65,7 @@ function BrowseSurfaceFrame({
   );
 }
 
-export function BrowsePanel({ mode }: { mode: AppMode }) {
+export function BrowsePanel({ mode, replacement }: { mode: AppMode; replacement?: ReactNode }) {
   // Latch the last BROWSE mode (same derived-state idiom as KeepAliveView):
   // while a config page is up the panel hides but must stay UNTOUCHED —
   // flapping browseOnly there would churn the Player/TagEditor block.
@@ -91,6 +91,7 @@ export function BrowsePanel({ mode }: { mode: AppMode }) {
             rowActions={host?.rowActions}
             onRowDoubleClick={host?.onDoubleClick}
             browseRef={sharedBrowseHandle}
+            replacement={replacement}
           />
         </DeckScope>
       </BrowseSurfaceFrame>

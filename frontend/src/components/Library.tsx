@@ -7,7 +7,9 @@ import {
   useCallback,
   useSyncExternalStore,
 } from 'react';
-import type { Ref } from 'react';
+import type { ReactNode, Ref } from 'react';
+import { BrowseActiveContext, useBrowseActive } from '../contexts/browseActive';
+import { useViewActive } from '../contexts/viewActive';
 import { DRAG_POINTER_STALE_MS, dragEdgeScrollDelta } from './dragScroll';
 import { useQueries, useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
@@ -116,6 +118,8 @@ export interface LibraryBrowseHandle {
 }
 
 interface LibraryProps {
+  /** Replace only the lower browse body, retaining its mounted state. */
+  replacement?: ReactNode;
   /** Render only the browse surface (sidebar/filter/table) without the
    * Player/TagEditor block — used when a deck surface is shown elsewhere
    * (performance/transition modes of the shared BrowsePanel). Implies: the
@@ -147,7 +151,12 @@ export default function Library({
   onRowDoubleClick,
   doubleClickDeck = 'A',
   browseRef,
+  replacement,
 }: LibraryProps) {
+  const viewActive = useViewActive();
+  const parentBrowseActive = useBrowseActive();
+  const hasReplacement = replacement != null;
+  const browseActive = parentBrowseActive && !hasReplacement;
   // Set-view state lives in the set store (sets 01) and view/playlist
   // selection seeds from the browse-session store (issue 27). Since gh#165
   // there is ONE Library instance (BrowsePanel) that never remounts on
@@ -986,10 +995,12 @@ export default function Library({
   useImperativeHandle(
     browseRef,
     () => ({
-      navigate: mainSel.handleNavigate,
-      getSelectedTrack: () => mainSel.selectedTrack,
+      navigate: (delta) => {
+        if (viewActive && browseActive) mainSel.handleNavigate(delta);
+      },
+      getSelectedTrack: () => viewActive && browseActive ? mainSel.selectedTrack : null,
     }),
-    [mainSel]
+    [mainSel, viewActive, browseActive]
   );
 
   // The same handle, registered module-level as the active browse surface
@@ -1134,6 +1145,7 @@ export default function Library({
   });
 
   useEffect(() => {
+    if (!viewActive || !browseActive) return;
     if (viewingSet) return; // the Set pane owns the browse surface
     if (viewingSessionPane) return; // sessions own the main area; no hidden list grabs
     return registerBrowseSurface({
@@ -1147,10 +1159,10 @@ export default function Library({
       focusSidebar: () => browseNavRef.current.focusSidebar(),
       toggleSplitView: () => browseNavRef.current.toggleSplitView(),
     });
-  }, [viewingSet, viewingSessionPane]);
+  }, [viewingSet, viewingSessionPane, viewActive, browseActive]);
 
   return (
-    <>
+    <BrowseActiveContext.Provider value={browseActive}>
     {/* The library keyboard hub — only when this view owns the keyboard.
         Embedded (browseOnly), the Performance hub drives everything. */}
     {!browseOnly && (
@@ -1176,6 +1188,7 @@ export default function Library({
     )}
     <div style={{
       height: '100%',
+      minHeight: 0,
       display: 'flex',
       flexDirection: 'column',
       background: 'var(--crust)'
@@ -1207,9 +1220,10 @@ export default function Library({
       )}
 
       {/* Library section with sidebar */}
-      <div style={{
+      <div className="Library" style={{
         flex: 1,
-        display: 'flex',
+        minHeight: 0,
+        display: hasReplacement ? 'none' : 'flex',
         overflow: 'hidden'
       }}>
         {/* Sidebar */}
@@ -1521,6 +1535,12 @@ export default function Library({
         </div>
       </div>
 
+      {hasReplacement && (
+        <div className="Library-replacement" style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
+          {replacement}
+        </div>
+      )}
+
       {rowMenu && (
         <ContextMenu x={rowMenu.x} y={rowMenu.y} items={rowMenuItems} onClose={closeRowMenu} />
       )}
@@ -1531,7 +1551,7 @@ export default function Library({
         />
       )}
     </div>
-    </>
+    </BrowseActiveContext.Provider>
   );
 }
 

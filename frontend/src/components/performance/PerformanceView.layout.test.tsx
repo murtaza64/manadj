@@ -6,6 +6,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DeckContext, DeckRegistryContext, useDeck, useDecks, type DeckContextValue } from '../../hooks/useDeck';
 import { MixerContext } from '../../hooks/useMixer';
 import { ViewActiveContext } from '../../contexts/viewActive';
+import { BrowseActiveContext } from '../../contexts/browseActive';
+import { useMidiCursorSuppression } from '../../performance/useMidiCursorSuppression';
+import { dispatchSetSpace } from '../../sets/spaceTransport';
 import { CHANNEL_IDS, type Mixer, type ChannelId } from '../../playback/mixer';
 import { _resetControlFocusForTests, focusDeck, getControlFocus, useControlFocus } from '../../performance/controlFocus';
 import { setPerfSectionShown } from '../../performance/perfSectionsStore';
@@ -57,7 +60,7 @@ vi.mock('./DeckPanel', () => ({
 vi.mock('./DeckKeys', () => ({
   DeckKeys: () => <span data-key-deck={useDeck().deck} />,
 }));
-vi.mock('../../performance/useMidiCursorSuppression', () => ({ useMidiCursorSuppression: () => {} }));
+vi.mock('../../performance/useMidiCursorSuppression', () => ({ useMidiCursorSuppression: vi.fn() }));
 vi.mock('../../hooks/useTakeoverHint', () => ({ useTakeoverHint: () => null }));
 vi.mock('../../editor/transitionIndex', () => ({
   useTransitionIndex: () => ({ from: new Map(), into: new Map() }),
@@ -86,6 +89,7 @@ let decks: Record<ChannelId, DeckContextValue>;
 let mixer: Mixer;
 
 beforeEach(() => {
+  vi.clearAllMocks();
   vi.stubGlobal('localStorage', storage);
   vi.stubGlobal('fetch', vi.fn(async () => new Response('{}')));
   vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1));
@@ -153,6 +157,51 @@ function press(key: string) {
 }
 
 describe('Performance deck-count layout', () => {
+  it('suspends browse keys and cursor suppression in Settings without changing deck focus keys or mounted panels', () => {
+    const navigate = vi.fn();
+    const selected = vi.fn(() => ({ id: 20 } as Track));
+    sharedBrowseHandle.current = { navigate, getSelectedTrack: selected };
+    const view = (active: boolean) => <BrowseActiveContext value={active}>
+      <PerformanceView />
+      {!active && <div className="settings-page"><input type="range" /><input type="checkbox" /><select /></div>}
+    </BrowseActiveContext>;
+    render(view(true));
+    const panels = [...container.querySelectorAll('.perf-deckpanel')];
+    const waves = [...container.querySelectorAll('.perf-wave-row')];
+    expect(vi.mocked(useMidiCursorSuppression).mock.lastCall?.[1]).toBe(true);
+    render(view(false));
+    expect(vi.mocked(useMidiCursorSuppression).mock.lastCall?.[1]).toBe(false);
+    for (const key of ['ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight', 'Enter', ' ']) press(key);
+    expect(navigate).not.toHaveBeenCalled();
+    expect(selected).not.toHaveBeenCalled();
+    expect(dispatchSetSpace).not.toHaveBeenCalled();
+    press('[');
+    press(']');
+    expect(getControlFocus()).toEqual({ left: 'C', right: 'D' });
+    for (const target of container.querySelectorAll('.settings-page input, .settings-page select')) {
+      for (const key of [' ', 'Enter', 'ArrowLeft', 'ArrowDown']) {
+        const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true });
+        act(() => { target.dispatchEvent(event); });
+        expect(event.defaultPrevented).toBe(false);
+      }
+    }
+    container.querySelectorAll('.perf-deckpanel').forEach((node, i) => expect(node).toBe(panels[i]));
+    container.querySelectorAll('.perf-wave-row').forEach((node, i) => expect(node).toBe(waves[i]));
+    render(view(true));
+    press('ArrowDown');
+    expect(navigate).toHaveBeenCalledWith(1);
+    press(' ');
+    expect(dispatchSetSpace).toHaveBeenCalledOnce();
+    expect(vi.mocked(useMidiCursorSuppression).mock.lastCall?.[1]).toBe(true);
+  });
+
+  it('has no mouse jog tuner or disclosure', () => {
+    render();
+    expect(container.textContent).not.toContain('MOUSE / JOG TUNE');
+    expect(container.querySelector('.mouse-jog-tuner')).toBeNull();
+    expect(container.querySelector('[aria-label="Sensitivity"]')).toBeNull();
+  });
+
   it('defaults to four, switches display without unmounting decks or mutating transport, and persists', () => {
     render();
     const panels = [...container.querySelectorAll('.perf-deckpanel')];
