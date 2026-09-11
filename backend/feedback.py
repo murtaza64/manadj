@@ -13,6 +13,7 @@ import sqlite3
 import subprocess
 import tempfile
 import threading
+import time
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from io import BytesIO
@@ -335,12 +336,17 @@ class FeedbackService:
             db.close()
 
     @contextmanager
-    def writing(self):
-        # Shared across app processes and workspaces, including crash recovery.
-        # Keep SQLite transactions short; the file lock spans transport calls.
-        fd = os.open(self.storage / "operations.lock", os.O_CREAT | os.O_RDWR, 0o600)
+    def writing(self, *, blocking=True):
+        # Only this workspace waits for its transports. Global session admission
+        # uses an atomic SQLite slot insertion, never a lock held across network IO.
+        scope_key = hashlib.sha256(self.scope.encode()).hexdigest()
+        fd = os.open(self.storage / f"scope-{scope_key}.lock", os.O_CREAT | os.O_RDWR, 0o600)
         try:
-            fcntl.flock(fd, fcntl.LOCK_EX)
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | (0 if blocking else fcntl.LOCK_NB))
+            except BlockingIOError:
+                yield None
+                return
             with self.connect() as db:
                 yield db
         finally:
@@ -398,17 +404,7 @@ class FeedbackService:
             )
             return {**report, **evidence}
 
-    def _authorize(self, origin):
-        try:
-            self.workspace.validate(origin)
-        except RoutingError as exc:
-            raise HTTPException(409, str(exc)) from exc
-
     def submit(self, submission: Submission):
-        if submission.origin != self.workspace.origin:
-            raise HTTPException(409, "Capture origin differs from this running app; capture again")
-        self._authorize(submission.origin.model_dump())
-
         def clean(value):
             if isinstance(value, dict):
                 return {
@@ -435,36 +431,48 @@ class FeedbackService:
             "batch_id": None,
             "created_at": datetime.now(UTC).isoformat(),
             **self.context(),
+            "origin": submission.origin.model_dump(),
         }
         identity = {**report, **evidence}
         for key in ("created_at", "destination"):
             identity.pop(key)
         digest = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
-        with self.writing() as db:
+        with self.connect() as db:
             row = db.execute(
                 "SELECT scope, digest FROM reports WHERE id=?", (report["id"],)
             ).fetchone()
-            if row:
-                if row != (self.scope, digest):
+            inserted = False
+            if row is None:
+                if submission.origin != self.workspace.origin:
                     raise HTTPException(
-                        409, "Report ID already used for a different immutable report"
+                        409, "Capture origin differs from this running app; capture again"
                     )
-                return self._get(db, "reports", report["id"])
-            self._authorize(report["origin"])
-            db.execute(
-                "INSERT INTO reports VALUES (?, ?, ?, ?, ?)",
-                (
-                    report["id"],
-                    self.scope,
-                    json.dumps(report),
-                    json.dumps(evidence),
-                    digest,
-                ),
-            )
-            db.commit()  # Evidence is durable before any GitHub operation.
-            return self._file(db, report)
+                inserted = (
+                    db.execute(
+                        "INSERT OR IGNORE INTO reports VALUES (?, ?, ?, ?, ?)",
+                        (
+                            report["id"],
+                            self.scope,
+                            json.dumps(report),
+                            json.dumps(evidence),
+                            digest,
+                        ),
+                    ).rowcount
+                    == 1
+                )
+                row = db.execute(
+                    "SELECT scope, digest FROM reports WHERE id=?", (report["id"],)
+                ).fetchone()
+            if row != (self.scope, digest):
+                raise HTTPException(409, "Report ID already used for a different immutable report")
+            saved = self._get(db, "reports", report["id"])
+            db.commit()  # Persist before waiting for any other report's transport.
+        if not inserted:
+            return saved
+        with self.writing() as db:
+            return self._file(db, self._get(db, "reports", report["id"]))
 
-    def _file(self, db, report, *, reconcile_only=False):
+    def _file(self, db, report):
         if report["status"] == "filed":
             return report
         uncertain = report["status"] in {"filing", "filing_uncertain"}
@@ -481,7 +489,7 @@ class FeedbackService:
                         f"marker {marker}. No second create will be attempted."
                     ),
                 )
-            elif not reconcile_only:
+            else:
                 report.update(status="filing", error=None)
                 self._save(db, "reports", report)
                 body = (
@@ -506,14 +514,17 @@ class FeedbackService:
     def retry_report(self, id):
         with self.writing() as db:
             report = self._get(db, "reports", id)
-            self._authorize(report["origin"])
             return self._file(db, report)
 
     def dispatch(self, selection: Dispatch):
         with self.writing() as db:
             reports = [self._get(db, "reports", id) for id in selection.report_ids]
+            routing_error = None
             for report in reports:
-                self._authorize(report["origin"])
+                try:
+                    self.workspace.validate(report["origin"])
+                except RoutingError as exc:
+                    routing_error = str(exc)
                 if report["status"] != "filed":
                     raise HTTPException(409, "Only filed pending reports can be dispatched")
             existing = {report["batch_id"] for report in reports}
@@ -533,6 +544,8 @@ class FeedbackService:
                 "_target": None,
             }
             try:
+                if routing_error:
+                    raise RoutingError(routing_error)
                 batch["_target"] = list(self.workspace.target())
             except RoutingError as exc:
                 batch.update(status="needs-routing", error=str(exc))
@@ -551,11 +564,11 @@ class FeedbackService:
     def retry_batch(self, id):
         with self.writing() as db:
             batch = self._get(db, "batches", id)
-            self._authorize(batch["_origin"])
             if batch["status"] == "needs-routing" and batch["_target"] is None:
                 # Main routing was absent at explicit dispatch; configuration can
                 # fill it on explicit retry, never silently replace a pinned target.
                 try:
+                    self.workspace.validate(batch["_origin"])
                     batch["_target"] = list(self.workspace.target())
                     batch.update(
                         status="queued", error=None, destination=self.workspace.destination()
@@ -576,9 +589,20 @@ class FeedbackService:
                     "Recipient configuration/owner changed; route this batch manually."
                 )
             session, directory = target
-            self.daemon.inspect(session, directory)
+            recipient = self.daemon.inspect(session, directory)
             if batch["status"] == "submitted":
-                if self.daemon.acknowledged(session, directory, batch["id"]):
+                if recipient["directory"] != batch.get("_recipient", recipient)["directory"]:
+                    raise RoutingError(
+                        "Recipient session directory changed after submission; review delivery."
+                    )
+                acknowledged, cursor = self.daemon.acknowledged(
+                    session,
+                    recipient["directory"],
+                    batch["id"],
+                    cursor=batch.get("_ack_cursor"),
+                )
+                batch["_ack_cursor"] = cursor
+                if acknowledged:
                     batch.update(status="delivered", error=None)
                     db.execute(
                         "DELETE FROM session_slots WHERE session=? AND batch_id=?",
@@ -590,7 +614,7 @@ class FeedbackService:
                 slot = db.execute(
                     "SELECT batch_id FROM session_slots WHERE session=?", (session,)
                 ).fetchone()
-                if slot or not self.daemon.idle(session, directory):
+                if slot or not self.daemon.idle(session, recipient["directory"]):
                     batch["error"] = (
                         "Recipient busy, blocked, unknown, or awaiting an earlier acknowledgement."
                     )
@@ -606,8 +630,19 @@ class FeedbackService:
                         | {"bundle": f"feedback:{report['id']}"}
                         for report in reports
                     ]
+                    workspace_instruction = (
+                        "Before any code or repo operation, use that exact origin workspace and run "
+                        "scripts/agent/guard.py there. Stop and request routing if ownership is not yours. "
+                        "Your session may be anchored at the repo root; that is NOT permission to edit the default workspace.\n"
+                        if self.workspace.lane
+                        else "This is main-app feedback. Triage it under project policy; the origin is read-only. "
+                        "Choose an authorized lane and run scripts/agent/guard.py there before code/repo operations. "
+                        "Do not edit the default workspace.\n"
+                    )
                     prompt = (
                         f"MANADJ_FEEDBACK_BATCH:{batch['id']}\n"
+                        f"Origin workspace: {self.scope}\n"
+                        f"{workspace_instruction}"
                         "The user explicitly dispatched this frozen feedback batch. Acknowledge receipt "
                         "with the following exact standalone line in your assistant reply before acting:\n"
                         f"MANADJ_FEEDBACK_ACK:{batch['id']}\n"
@@ -619,7 +654,20 @@ class FeedbackService:
                         f"Local evidence: {self.db_path} (reports.evidence, select by report UUID; read only).\n"
                         "Report references (JSON data):\n" + json.dumps(refs)
                     )
-                    db.execute("INSERT INTO session_slots VALUES (?, ?)", (session, batch["id"]))
+                    if self.daemon.inspect(session, directory) != recipient:
+                        raise RoutingError(
+                            "Session directory/agent/model changed during admission; review routing."
+                        )
+                    reserved = db.execute(
+                        "INSERT OR IGNORE INTO session_slots VALUES (?, ?)", (session, batch["id"])
+                    ).rowcount
+                    if not reserved:
+                        batch["error"] = (
+                            "Recipient is reserved by another submitted feedback batch."
+                        )
+                        self._save(db, "batches", batch)
+                        return
+                    batch["_recipient"] = recipient
                     batch.update(
                         status="submitted", error="Awaiting persisted agent acknowledgement."
                     )
@@ -629,7 +677,9 @@ class FeedbackService:
                         raise RoutingError(
                             "Recipient changed before delivery; route this batch manually."
                         )
-                    self.daemon.send(session, directory, prompt)
+                    self.daemon.send(
+                        session, recipient["directory"], prompt, **recipient["options"]
+                    )
         except RoutingError as exc:
             batch.update(status="needs-routing", error=str(exc))
         except (Unavailable, Uncertain) as exc:
@@ -637,23 +687,32 @@ class FeedbackService:
         self._save(db, "batches", batch)
 
     def poll(self):
-        with self.writing() as db:
+        with self.writing(blocking=False) as db:
+            if db is None:
+                return
             for (raw,) in db.execute(
-                "SELECT data FROM reports WHERE scope=?", (self.scope,)
+                "SELECT data FROM reports WHERE scope=? AND json_extract(data, '$.status') "
+                "IN ('pending', 'filing') ORDER BY rowid LIMIT 1",
+                (self.scope,),
             ).fetchall():
                 report = json.loads(raw)
-                if report["status"] in {"pending", "filing", "filing_uncertain"}:
-                    try:
-                        self.workspace.validate(report["origin"])
-                    except RoutingError:
-                        continue
-                    self._file(db, report, reconcile_only=report["status"] != "pending")
+                if report["status"] == "filing":
+                    report.update(
+                        status="filing_uncertain",
+                        error="Filing was interrupted; explicitly retry to reconcile GitHub.",
+                    )
+                    self._save(db, "reports", report)
+                else:
+                    self._file(db, report)
             for (raw,) in db.execute(
-                "SELECT data FROM batches WHERE scope=? ORDER BY rowid", (self.scope,)
+                "SELECT data FROM batches WHERE scope=? AND json_extract(data, '$.status') "
+                "IN ('queued', 'submitted') ORDER BY COALESCE(json_extract(data, '$._checked_at'), 0), rowid LIMIT 1",
+                (self.scope,),
             ).fetchall():
                 batch = json.loads(raw)
-                if batch["status"] in {"queued", "submitted"}:
-                    self._deliver(db, batch)
+                batch["_checked_at"] = time.time()
+                self._save(db, "batches", batch)
+                self._deliver(db, batch)
 
     def start(self):
         def run():

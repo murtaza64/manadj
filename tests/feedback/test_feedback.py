@@ -5,6 +5,8 @@ import json
 import multiprocessing
 import sqlite3
 import subprocess
+import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
 from pathlib import Path
@@ -68,14 +70,15 @@ class FakeDaemon:
             raise RoutingError("Owning session missing")
         if self.offline:
             raise Unavailable("Daemon offline")
+        return {"directory": directory, "options": {"agent": "lane"}}
 
     def idle(self, session, directory):
         return self.ready
 
-    def acknowledged(self, session, directory, batch_id):
-        return batch_id in self.acks
+    def acknowledged(self, session, directory, batch_id, *, cursor=None):
+        return batch_id in self.acks, None
 
-    def send(self, session, directory, prompt):
+    def send(self, session, directory, prompt, **options):
         self.sent.append((session, directory, prompt))
         if self.outcome == "timeout":
             raise Uncertain("Daemon outcome unknown")
@@ -122,7 +125,7 @@ def app_client(service):
     app = FastAPI()
     app.state.feedback_service = service
     app.include_router(router)
-    return TestClient(app, headers={"X-Manadj-Feedback": "1"})
+    return TestClient(app, headers={"X-Manadj-Feedback": "1"}, client=("127.0.0.1", 50000))
 
 
 def data(service, **changes):
@@ -289,7 +292,7 @@ def test_concurrent_app_instances_freeze_and_submit_once(world):
     payload = Submission.model_validate(data(first))
     with ThreadPoolExecutor(max_workers=2) as pool:
         reports = list(pool.map(lambda service: service.submit(payload), [first, second]))
-    assert reports[0] == reports[1] and len(world.gh.creates) == 1
+    assert reports[0]["id"] == reports[1]["id"] and len(world.gh.creates) == 1
     selection = Dispatch(report_ids=[payload.id])
     with ThreadPoolExecutor(max_workers=2) as pool:
         batches = list(pool.map(lambda service: service.dispatch(selection), [first, second]))
@@ -347,7 +350,7 @@ def test_shared_session_slot_blocks_another_workspace_until_ack(world):
 
 
 @pytest.mark.parametrize("mutation", ["changed", "missing", "blank"])
-def test_owner_change_or_loss_blocks_capture_and_delivery(world, mutation):
+def test_owner_change_or_loss_preserves_filing_but_blocks_delivery(world, mutation):
     service = world.make()
     payload = data(service)
     report = submit(service)
@@ -359,9 +362,16 @@ def test_owner_change_or_loss_blocks_capture_and_delivery(world, mutation):
             "owner: ses_other\n" if mutation == "changed" else "owner:\n"
         )
     client = app_client(service)
-    assert client.post("/api/feedback/reports", json=payload).status_code == 409
-    assert client.post(f"/api/feedback/reports/{report['id']}/retry").status_code == 409
-    assert client.post(f"/api/feedback/batches/{frozen['id']}/retry").status_code == 409
+    submitted = client.post("/api/feedback/reports", json=payload)
+    assert submitted.status_code == 200 and submitted.json()["status"] == "filed"
+    assert submitted.json()["origin"] == payload["origin"]
+    assert client.post(f"/api/feedback/reports/{report['id']}/retry").status_code == 200
+    assert (
+        client.post(f"/api/feedback/batches/{frozen['id']}/retry").json()["status"]
+        == "needs-routing"
+    )
+    new_batch = client.post("/api/feedback/dispatch", json={"report_ids": [submitted.json()["id"]]})
+    assert new_batch.status_code == 200 and new_batch.json()["status"] == "needs-routing"
     service.poll()
     assert batch(service, frozen["id"])["status"] == "needs-routing"
     assert not world.daemon.sent
@@ -373,9 +383,9 @@ def test_missing_lane_record_at_start_is_not_main(world):
     restarted = world.make(path=service.workspace.path)
     assert restarted.context()["origin"]["lane"] == "one"
     assert restarted.context()["origin"]["owner"] is None
-    assert (
-        app_client(restarted).post("/api/feedback/reports", json=data(restarted)).status_code == 409
-    )
+    response = app_client(restarted).post("/api/feedback/reports", json=data(restarted))
+    assert response.status_code == 200 and response.json()["origin"]["owner"] is None
+    assert freeze(restarted, [response.json()])["status"] == "needs-routing"
 
 
 def test_origin_capture_revision_and_owner_are_validated(world):
@@ -434,6 +444,8 @@ def test_main_needs_explicit_triage_config_then_retry_and_never_retargets(world,
     assert not world.daemon.sent
     assert service.retry_batch(frozen["id"])["status"] == "submitted"
     assert world.daemon.sent[0][0:2] == ("ses_triage", str(world.root))
+    assert "main-app feedback" in world.daemon.sent[0][2]
+    assert "Choose an authorized lane" in world.daemon.sent[0][2]
     monkeypatch.setenv("MANADJ_FEEDBACK_TRIAGE_SESSION", "ses_replacement")
     service.poll()
     assert batch(service, frozen["id"])["status"] == "needs-routing"
@@ -596,12 +608,12 @@ def test_report_exists_before_gh_create_and_submit_state_before_daemon_post(worl
     frozen = freeze(service, [submit(service)])
     send = world.daemon.send
 
-    def observe_send(*args):
+    def observe_send(*args, **kwargs):
         with sqlite3.connect(service.db_path) as db:
             value = json.loads(db.execute("SELECT data FROM batches").fetchone()[0])
             assert value["status"] == "submitted"
             assert db.execute("SELECT batch_id FROM session_slots").fetchone()[0] == frozen["id"]
-        send(*args)
+        send(*args, **kwargs)
 
     world.daemon.send = observe_send
     service.poll()
@@ -635,9 +647,9 @@ def test_missing_sidecar_metadata_does_not_reclassify_lane_as_main(world):
     (world.sidecar / "EDITSPACE.md").unlink()
     restarted = world.make(path=service.workspace.path)
     assert restarted.workspace.lane == "one"
-    assert (
-        app_client(restarted).post("/api/feedback/reports", json=data(restarted)).status_code == 409
-    )
+    response = app_client(restarted).post("/api/feedback/reports", json=data(restarted))
+    assert response.status_code == 200
+    assert freeze(restarted, [response.json()])["status"] == "needs-routing"
 
 
 def _process_submit_and_dispatch(path, payload, results):
@@ -646,6 +658,7 @@ def _process_submit_and_dispatch(path, payload, results):
     github, daemon = FakeGitHub(), FakeDaemon()
     service = FeedbackService(workspace, github=github, daemon=daemon)
     report = service.submit(Submission.model_validate(payload))
+    service.retry_report(report["id"])
     frozen = service.dispatch(Dispatch(report_ids=[report["id"]]))
     service.poll()
     results.put((frozen["id"], len(github.creates), len(daemon.sent)))
@@ -720,3 +733,192 @@ def test_triage_owner_revalidated_after_busy_check(world, monkeypatch):
     main.poll()
     assert batch(main, frozen["id"])["status"] == "needs-routing"
     assert not world.daemon.sent
+
+
+@pytest.mark.parametrize(
+    "peer", ["192.168.1.10", "203.0.113.5", "::ffff:192.168.1.10", "testclient"]
+)
+def test_feedback_rejects_non_loopback_peer_even_without_origin(world, peer):
+    service = world.make()
+    report = submit(service)
+    frozen = freeze(service, [report])
+    client = app_client(service)
+    client = TestClient(client.app, client=(peer, 50000), headers={"X-Manadj-Feedback": "1"})
+    for url in (
+        "/api/feedback/context",
+        "/api/feedback/reports",
+        f"/api/feedback/reports/{report['id']}",
+    ):
+        assert client.get(url).status_code == 403
+        assert client.get(url, headers={"X-Forwarded-For": "127.0.0.1"}).status_code == 403
+    assert (
+        client.post("/api/feedback/dispatch", json={"report_ids": [str(uuid4())]}).status_code
+        == 403
+    )
+    assert client.post("/api/feedback/reports", json=data(service)).status_code == 403
+    assert client.post(f"/api/feedback/reports/{report['id']}/retry").status_code == 403
+    assert client.post(f"/api/feedback/batches/{frozen['id']}/retry").status_code == 403
+    assert len(world.gh.creates) == 1 and not world.daemon.sent
+
+
+@pytest.mark.parametrize("header", ["Forwarded", "X-Forwarded-For", "X-Real-IP"])
+def test_forwarding_headers_cannot_masquerade_as_local_peer(world, header):
+    client = app_client(world.make())
+    assert client.get("/api/feedback/reports", headers={header: "127.0.0.1"}).status_code == 403
+
+
+def test_ipv6_loopback_peer_is_supported(world):
+    client = TestClient(
+        app_client(world.make()).app, client=("::1", 50000), headers={"X-Manadj-Feedback": "1"}
+    )
+    assert client.get("/api/feedback/context").status_code == 200
+
+
+def test_identical_submission_retry_after_revision_restart_returns_original(world):
+    service = world.make()
+    payload = data(service)
+    original = service.submit(Submission.model_validate(payload))
+    restarted = world.make(path=service.workspace.path)
+    restarted.workspace.origin.revision = "b" * 40
+    response = app_client(restarted).post("/api/feedback/reports", json=payload)
+    assert response.status_code == 200 and response.json() == original
+    assert len(world.gh.creates) == 1
+    payload["id"] = str(uuid4())
+    assert app_client(restarted).post("/api/feedback/reports", json=payload).status_code == 409
+
+
+@pytest.mark.parametrize("same_scope", [True, False])
+def test_report_persists_while_an_unrelated_report_waits_for_github(world, same_scope):
+    first = world.make("one")
+    second = world.make(path=first.workspace.path) if same_scope else world.make("two")
+    payload = data(first)
+    waiting, release = threading.Event(), threading.Event()
+    find = world.gh.find
+
+    def blocked_find(marker):
+        if payload["id"] in marker:
+            waiting.set()
+            assert release.wait(timeout=10)
+        return find(marker)
+
+    world.gh.find = blocked_find
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        one = pool.submit(first.submit, Submission.model_validate(payload))
+        try:
+            assert waiting.wait(timeout=3)
+            two = pool.submit(submit, second)
+            deadline = time.monotonic() + 3
+            expected = 2 if same_scope else 1
+            while len(second.list()["reports"]) < expected and time.monotonic() < deadline:
+                time.sleep(0.01)
+            assert len(second.list()["reports"]) == expected
+            if not same_scope:
+                assert two.result(timeout=3)["status"] == "filed"
+        finally:
+            release.set()
+        assert one.result(timeout=3)["status"] == "filed"
+        assert two.result(timeout=3)["status"] == "filed"
+
+
+def test_concurrent_scopes_atomically_reserve_only_one_session_slot(world):
+    first, second = world.make("one"), world.make("two")
+    one, two = freeze(first, [submit(first)]), freeze(second, [submit(second)])
+    admission = threading.Barrier(2)
+
+    def idle(session, directory):
+        admission.wait(timeout=3)
+        return True
+
+    world.daemon.idle = idle
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        list(pool.map(lambda service: service.poll(), [first, second]))
+    assert sorted([batch(first, one["id"])["status"], batch(second, two["id"])["status"]]) == [
+        "queued",
+        "submitted",
+    ]
+    assert len(world.daemon.sent) == 1
+
+
+def test_uncertain_filing_is_not_rescanned_automatically(world):
+    service = world.make()
+    world.gh.outcome = "lost"
+    report = submit(service)
+    find = world.gh.find
+    calls = []
+
+    def observe(marker):
+        calls.append(marker)
+        return find(marker)
+
+    world.gh.find = observe
+    for _ in range(5):
+        service.poll()
+    assert calls == []
+    assert service.retry_report(report["id"])["status"] == "filing_uncertain"
+    assert len(calls) == 1 and len(world.gh.creates) == 1
+
+
+def test_ack_pagination_progress_survives_restart_without_resending(world):
+    service = world.make()
+    frozen = freeze(service, [submit(service)])
+    service.poll()
+    seen = []
+
+    def acknowledged(session, directory, batch_id, *, cursor=None):
+        seen.append(cursor)
+        return (False, "older-page") if cursor is None else (True, None)
+
+    world.daemon.acknowledged = acknowledged
+    service.poll()
+    assert batch(service, frozen["id"])["status"] == "submitted"
+    assert "_ack_cursor" not in batch(service, frozen["id"])
+    restarted = world.make(path=service.workspace.path)
+    restarted.poll()
+    assert batch(restarted, frozen["id"])["status"] == "delivered"
+    assert seen == [None, "older-page"] and len(world.daemon.sent) == 1
+
+
+def test_owner_missing_at_capture_never_silently_retargets_after_restoration(world):
+    service = world.make(owner="")
+    world.gh.offline = True
+    report = submit(service)
+    assert report["origin"]["owner"] is None and report["status"] == "filing_failed"
+    service.workspace.lane_record.write_text("owner: ses_newowner\n")
+    world.gh.offline = False
+    report = service.retry_report(report["id"])
+    assert report["status"] == "filed" and report["origin"]["owner"] is None
+    frozen = freeze(service, [report])
+    assert frozen["status"] == "needs-routing"
+    assert service.retry_batch(frozen["id"])["status"] == "needs-routing"
+    assert not world.daemon.sent
+
+
+def test_poll_bounds_work_and_does_not_wait_for_scope_lock(world):
+    service = world.make()
+    reports = [submit(service) for _ in range(3)]
+    with service.writing() as db:
+        for report in reports:
+            report["status"] = "pending"
+            service._save(db, "reports", report)
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            assert pool.submit(service.poll).result(timeout=1) is None
+    service.poll()
+    assert [item["status"] for item in service.list()["reports"]] == ["filed", "pending", "pending"]
+
+
+def test_root_anchored_recipient_gets_guarded_origin_and_original_agent_model(world):
+    service = world.make()
+    options = {"agent": "yolo", "model": {"modelID": "gpt-6-astra", "providerID": "openai"}}
+    world.daemon.inspect = lambda session, directory: {
+        "directory": str(world.root),
+        "options": options,
+    }
+    sent = []
+    world.daemon.send = lambda *args, **kwargs: sent.append((args, kwargs))
+    freeze(service, [submit(service)])
+    service.poll()
+    args, kwargs = sent[0]
+    assert args[:2] == ("ses_owner", str(world.root))
+    assert f"Origin workspace: {service.scope}" in args[2] and "scripts/agent/guard.py" in args[2]
+    assert "NOT permission to edit the default workspace" in args[2]
+    assert kwargs == options

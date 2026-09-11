@@ -1,6 +1,7 @@
 """Feedback HTTP boundary; standalone tests need neither main nor the app DB."""
 
 import json
+from ipaddress import ip_address
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
@@ -12,6 +13,20 @@ from ..feedback_transport import loopback_url
 
 
 def protect(request: Request, response: Response):
+    try:
+        peer = ip_address(request.client.host) if request.client else None
+    except ValueError:
+        peer = None
+    if (
+        peer is None
+        or not peer.is_loopback
+        or any(
+            header in request.headers for header in ("forwarded", "x-forwarded-for", "x-real-ip")
+        )
+    ):
+        raise HTTPException(
+            403, "Feedback requires a direct loopback connection; proxies are not supported"
+        )
     origin = request.headers.get("origin")
     if origin is not None and not loopback_url(origin):
         raise HTTPException(403, "Feedback is accessible only from loopback origins")
@@ -42,7 +57,7 @@ async def payload(request: Request, model):
         if len(data) > REQUEST_LIMIT:
             raise HTTPException(413, "Feedback request is too large")
     try:
-        return model.model_validate(json.loads(data))
+        return await run_in_threadpool(model.model_validate, json.loads(data))
     except (ValueError, ValidationError, RecursionError):
         # Validation errors echo offending values by default (possibly secrets).
         raise HTTPException(
