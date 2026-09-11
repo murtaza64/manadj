@@ -222,6 +222,10 @@ export function RoutineTimeline({
   const { planned, input } = editor;
   const duration = input.durationBeats;
   const { startBeat, endBeat } = planned.playbackBounds;
+  const authoringStart = pairMode && planned.auditionRange
+    ? (planned.auditionRange.startSec - planned.beatOriginMixSec) / planned.secPerBeat
+    : Math.min(0, startBeat);
+  const authoringEnd = Math.max(duration, endBeat);
   const styleSlot = useStyleSlot('full');
   const containerRef = useRef<HTMLDivElement>(null);
   const rowsRef = useRef<HTMLDivElement>(null);
@@ -288,8 +292,14 @@ export function RoutineTimeline({
     setPxPerBeat(px);
     setScrollBeat(startBeat - PAD_BEATS - PANEL_W / px);
   }, [startBeat, endBeat]);
-  // Fit on open, not during a bounds drag (which would move the handles).
-  useEffect(fit, [editor.detail.uuid, duration, width === 0]); // eslint-disable-line react-hooks/exhaustive-deps
+  const fittedPairRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (pairMode) {
+      if (width <= 0 || fittedPairRef.current === editor.detail.uuid) return;
+      fittedPairRef.current = editor.detail.uuid;
+    } else fittedPairRef.current = null;
+    fit();
+  }, [editor.detail.uuid, duration, width === 0, pairMode]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Scroll slack: outward trim handles must stay reachable past the
   // boundaries, and the out-of-span CONTEXT (#205 — the slots' track
@@ -698,10 +708,13 @@ export function RoutineTimeline({
       // Seeks roam one audition margin beyond either boundary (gh#190
       // item 5) — the player clamps to the same range.
       onSeekBeat(
-        Math.max(startBeat - AUDITION_MARGIN_BEATS, Math.min(beat, endBeat + AUDITION_MARGIN_BEATS))
+        Math.max(planned.auditionRange
+          ? (planned.auditionRange.startSec - planned.beatOriginMixSec) / planned.secPerBeat : startBeat - AUDITION_MARGIN_BEATS,
+          Math.min(beat, planned.auditionRange
+            ? (planned.auditionRange.endSec - planned.beatOriginMixSec) / planned.secPerBeat : endBeat + AUDITION_MARGIN_BEATS))
       );
     },
-    [onSeekBeat, startBeat, endBeat]
+    [onSeekBeat, startBeat, endBeat, planned.auditionRange, planned.beatOriginMixSec, planned.secPerBeat]
   );
   seekAtClientXRef.current = seekAtClientX;
 
@@ -723,7 +736,7 @@ export function RoutineTimeline({
       let beat = s + (clientX - rect.left) / px;
       if (!shiftKey) beat = Math.round(beat); // beat magnet; shift = free
       // Visible context and expanded bounds keep the original beat axis.
-      if (pairModeRef.current) beat = Math.max(0, Math.min(beat, duration));
+      if (pairModeRef.current) beat = Math.max(authoringStart, Math.min(beat, duration));
       const track = tracks.get(slot.trackId);
       const trackBpm = track?.bpm ?? null;
       // Default: a 4-track-beat BACKWARD jump — loopable (the pair
@@ -738,7 +751,7 @@ export function RoutineTimeline({
       draftStore.addJump(jump);
       setPopover({ marker: { kind: 'authored', slotId: slot.slotId, jump }, x: beat });
     },
-    [draftStore, tracks, duration]
+    [draftStore, tracks, duration, authoringStart]
   );
 
   const onRowsInsertClick = useCallback(
@@ -949,7 +962,7 @@ export function RoutineTimeline({
         if (px <= 0) return;
         let beat = s + (ev.clientX - rect.left) / px;
         if (!ev.shiftKey) beat = Math.round(beat); // beat magnet; shift = free
-        if (pairModeRef.current) beat = Math.max(0, Math.min(beat, duration));
+        if (pairModeRef.current) beat = Math.max(authoringStart, Math.min(beat, duration));
         if (marker.kind === 'authored') draftStore.updateJump(drag.id, { beat });
         else draftStore.updatePause(drag.id, { beat });
       };
@@ -964,7 +977,7 @@ export function RoutineTimeline({
       window.addEventListener('pointermove', onMove);
       window.addEventListener('pointerup', onUp);
     },
-    [draftStore, duration]
+    [draftStore, duration, authoringStart]
   );
 
   // ── Playhead (rAF-driven; div transform only — the editor's pink) ────
@@ -1029,10 +1042,11 @@ export function RoutineTimeline({
     }
     const cap = 4096;
     return {
-      beforeBeats: Math.max(-startBeat, Math.min(cap, Math.max(0, Math.ceil(before)))),
+      beforeBeats: pairMode ? Math.max(0, -authoringStart, Math.ceil(before))
+        : Math.max(-startBeat, Math.min(cap, Math.max(0, Math.ceil(before)))),
       afterBeats: Math.max(endBeat - duration, Math.min(cap, Math.max(0, Math.ceil(after)))),
     };
-  }, [plannedForRuns, tracks, duration, startBeat, endBeat]);
+  }, [plannedForRuns, tracks, duration, pairMode, authoringStart, startBeat, endBeat]);
 
   scrollExtentsRef.current = {
     before: Math.max(SCROLL_SLACK_BEATS, context.beforeBeats),
@@ -1348,7 +1362,8 @@ export function RoutineTimeline({
           stripH: STRIP_H,
           scrollBeat,
           pxPerBeat,
-          duration,
+          startBeat: authoringStart,
+          endBeat: authoringEnd,
           trimCenter:
             control === 'trim'
               ? Math.max(
@@ -1372,6 +1387,8 @@ export function RoutineTimeline({
     gridLines,
     slotLadders,
     duration,
+    authoringStart,
+    authoringEnd,
     lanesFor,
     collapsedLanes,
   ]);
@@ -1383,8 +1400,6 @@ export function RoutineTimeline({
   // locked to the rest of the UI.
   const viewOriginPx = Math.round(scrollBeat * pxPerBeat);
   const xOf = (beat: number) => beat * pxPerBeat - viewOriginPx;
-  const windowLeft = xOf(0);
-  const windowWidth = duration * pxPerBeat;
 
   // LaneCanvas guides, PER SLOT (gh#190 iteration): the slot's real track
   // ladder normalized into the routine window, tiers RELATIVE to the
@@ -1394,7 +1409,7 @@ export function RoutineTimeline({
   const laneGuidesBySlot = useMemo(() => {
     const norm = (beat: number) => (duration > 0 ? beat / duration : 0);
     const fallback = gridLines.ticks
-      .filter((t) => t.beat >= 0 && t.beat <= duration)
+      .filter((t) => t.beat >= authoringStart && t.beat <= authoringEnd)
       .map((t) => {
         const pos = t.tier - gridLines.baseTier;
         return {
@@ -1407,7 +1422,7 @@ export function RoutineTimeline({
       const ladder = slotLadders[slot.slot];
       if (!ladder) return fallback;
       return ladder.marks
-        .filter((m) => m.beatR >= 0 && m.beatR <= duration)
+        .filter((m) => m.beatR >= authoringStart && m.beatR <= authoringEnd)
         .map((m) => {
           const pos = m.tier - ladder.baseTier;
           return {
@@ -1418,7 +1433,7 @@ export function RoutineTimeline({
           };
         });
     });
-  }, [gridLines, slotLadders, planned, duration]);
+  }, [gridLines, slotLadders, planned, duration, authoringStart, authoringEnd]);
 
   const authorLane = useCallback(
     (slot: PlannedRoutineSlot, control: AuthorableLaneControl) => {
@@ -1452,29 +1467,32 @@ export function RoutineTimeline({
   const laneCanvasFor = (slot: PlannedRoutineSlot, control: AuthorableLaneControl, color: string) => {
     const key = `${slot.slotId}:${control}`;
     const pts = slot.lanes[control];
+    const laneStart = authoringStart;
+    const laneDuration = authoringEnd - laneStart;
+    const laneWidth = laneDuration * pxPerBeat;
     const toLanePoint = (p: RoutineLanePoint): LanePoint => ({
-      x: duration > 0 ? p.beat / duration : 0,
+      x: laneDuration > 0 ? (p.beat - laneStart) / laneDuration : 0,
       y: control === 'filter' ? (p.value + 1) / 2 : p.value,
     });
     const fromLanePoint = (p: LanePoint): RoutineLanePoint => ({
-      beat: p.x * duration,
+      beat: p.x * laneDuration + laneStart,
       value: control === 'filter' ? p.y * 2 - 1 : p.y,
     });
     return (
       <div
         className="rt-lanewindow"
-        style={{ left: windowLeft, width: Math.max(windowWidth, 4) }}
+        style={{ left: xOf(laneStart), width: Math.max(laneWidth, 4) }}
         onPointerUpCapture={() => draftStore.endGesture()}
         onPointerCancelCapture={() => draftStore.endGesture()}
       >
         <LaneCanvas
           id={CONTROL_LANE_ID[control]}
           color={color}
-          widthPx={Math.max(windowWidth, 4)}
+          widthPx={Math.max(laneWidth, 4)}
           points={pts.map(toLanePoint)}
-          guides={laneGuidesBySlot[slot.slot] ?? EMPTY_GUIDES}
-          chopWall={duration > 0 ? 0.1 / duration : 0.01}
-          windowLeftPx={0}
+          guides={(laneGuidesBySlot[slot.slot] ?? EMPTY_GUIDES).map((g) => ({ ...g, x: (g.x * duration - laneStart) / laneDuration }))}
+          chopWall={laneDuration > 0 ? 0.1 / laneDuration : 0.01}
+          windowLeftPx={laneStart * pxPerBeat}
           registerScrollDraw={scrollDrawFor(key)}
           onChange={(next) => draftStore.setLane(slot.slotId, control, next.map(fromLanePoint))}
           selected={laneSel?.key === key ? laneSel.indices : NO_SELECTION}
@@ -2031,7 +2049,9 @@ export function RoutineTimeline({
             </div>
           );
         })}
-        {[startBeat, endBeat].map((b, i) => {
+        {(editor.pairBounds
+          ? editor.pairBounds.handover ? [editor.pairBounds.handover.enter, editor.pairBounds.handover.exit] : []
+          : [startBeat, endBeat]).map((b, i) => {
           const x = xOf(b);
           if (x < -2 || x > width + 2) return null;
           return (
@@ -2040,6 +2060,11 @@ export function RoutineTimeline({
             </div>
           );
         })}
+        {editor.pairBounds && !editor.pairBounds.handover && (
+          <div className="rt-boundarylabel" role="status" style={{ position: 'absolute', left: PANEL_W + 12, top: 4, bottom: 'auto', pointerEvents: 'none' }}>
+            No incoming handover: incoming must survive outgoing
+          </div>
+        )}
         {/* Trim handles are select-mode canvas edits (ADR 0038) — the
             shaded trim REGIONS below stay visible in every mode. */}
         {mode === 'select' &&
@@ -2556,7 +2581,8 @@ function drawLaneSteps(
     stripH: number;
     scrollBeat: number;
     pxPerBeat: number;
-    duration: number;
+    startBeat: number;
+    endBeat: number;
     /** gh#206: TRIM renders DEVIATIONS around the slot's average — this is
      * that average (recorded avg + knob offset); the wiggle centers on the
      * strip's middle guide. */
@@ -2576,13 +2602,13 @@ function drawLaneSteps(
   }
 
   // Sample the lane per pixel into contiguous spans (pen breaks outside
-  // the routine window).
+  // the authoring extent).
   const spans: { x0: number; ys: number[]; vs: number[] }[] = [];
   let cur: { x0: number; ys: number[]; vs: number[] } | null = null;
   const lanesAt = createSlotLanesCursor(slot); // monotonic x (#221 perf)
   for (let x = 0; x < geo.width; x++) {
     const beat = geo.scrollBeat + (x + 0.5) / geo.pxPerBeat;
-    if (beat < 0 || beat > geo.duration) {
+    if (beat < geo.startBeat || beat > geo.endBeat) {
       cur = null;
       continue;
     }

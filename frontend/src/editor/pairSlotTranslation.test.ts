@@ -76,9 +76,12 @@ describe('pairSlotTranslation — projection geometry', () => {
     expect(proj.degraded).toBe(false);
   });
 
-  it('unedited pair yields empty edits and a bare synthetic recording', () => {
+  it('projects effective defaults, including the incoming two-second fade', () => {
     const proj = transitionToProjection(baseInput());
-    expect(proj.edits).toEqual(emptyEdits());
+    expect(proj.edits.lanes['1:fader']).toEqual([
+      { beat: 0, value: 0 }, { beat: 2 / proj.secPerBeat, value: 1 },
+    ]);
+    expect(changedPairEdits(proj.edits, proj.edits)).toEqual(emptyEdits());
     // Only tick events (window start + end), no control events.
     expect(proj.detail.events.every((e) => e.kind === 'tick')).toBe(true);
     expect(proj.detail.events).toHaveLength(2);
@@ -278,7 +281,7 @@ describe('pairSlotTranslation — pairToEdits (projection of drawn fields)', () 
       },
       40
     );
-    expect(Object.keys(edits.lanes)).toHaveLength(0);
+    expect(edits.lanes['0:fader']).toEqual([{ beat: 0, value: 1 }]);
   });
 
   it('a full projection→save round-trip preserves drawn lanes exactly', () => {

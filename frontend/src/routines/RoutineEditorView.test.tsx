@@ -17,6 +17,7 @@ import {
 import { requestMixEdit } from './openMix';
 import RoutineEditorView from './RoutineEditorView';
 import type { RoutineTimeline } from './RoutineTimeline';
+import { routineSlotStateAt, slotLanesAt } from '../sets/routinePlan';
 import { emptyEdits } from './routineDraft';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -251,6 +252,127 @@ async function openReview(pinFollow: boolean) {
   expect(timelineProps().onTrimChange).toBeNull();
 }
 
+it('auditions a pre-window outgoing jump only at its actual instant', async () => {
+  await openReview(false);
+  const props = () => timeline.mock.lastCall![0] as ComponentProps<typeof RoutineTimeline>;
+  act(() => props().draftStore.addJump({ id: 'pre-enter', slotId: '0', beat: -20, deltaSec: -4 }));
+  const r = props().editor.planned;
+  expect(r.slots[0].jumpMixSecs).toContain(-10);
+  expect(r.jumpMixSecs).toContain(-10);
+  for (const [globalTime, expected] of [[40, 40], [49.9, 49.9], [50, 46], [61, 57]]) {
+    const state = routineSlotStateAt(r, r.slots[0], globalTime - 60);
+    expect(state.trackTime).toBeCloseTo(expected);
+    expect(state.playing).toBe(true);
+  }
+});
+
+it('keeps hidden incoming defaults and stash through earlier outgoing edits, autosave and reopen', async () => {
+  vi.mocked(api.transitions.list).mockResolvedValue([{
+    uuid: 'hidden-b', name: 'Hidden B', favorite: false, position: 0,
+    a_track_id: 1, b_track_id: 2, updated_at: null,
+    data: { startSec: 60, durationSec: 20, bInSec: 8, tempoMatch: false,
+      hiddenLanes: ['faderB'], lanes: { faderB: [{ x: 0.25, y: 0.8 }, { x: 0.75, y: 0.3 }] } },
+  }]);
+  act(() => root.render(<QueryClientProvider client={client}><RoutineEditorView /></QueryClientProvider>));
+  await act(async () => requestMixEdit({ open: { kind: 'transition', aTrackId: 1, bTrackId: 2, uuid: 'hidden-b' } }));
+  const props = () => timeline.mock.lastCall![0] as ComponentProps<typeof RoutineTimeline>;
+  await vi.waitFor(async () => {
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    expect(timeline).toHaveBeenCalled();
+  });
+  vi.useFakeTimers();
+  act(() => props().draftStore.setLane('0', 'fader', [{ beat: -20, value: 1 }, { beat: 40, value: 0 }]));
+  expect(props().editor.pairBounds?.handover).toEqual({ enter: 0, exit: 40 });
+  const check = () => {
+    const b = props().editor.planned.slots[1];
+    expect(slotLanesAt(b, -16).fader).toBe(0);
+    expect(slotLanesAt(b, 0).fader).toBe(0);
+    expect(slotLanesAt(b, 2).fader).toBeCloseTo(0.5);
+    expect(slotLanesAt(b, 4).fader).toBe(1);
+  };
+  check();
+  await act(async () => { await vi.advanceTimersByTimeAsync(800); });
+  const data = vi.mocked(api.transitions.replacePair).mock.lastCall![2][0].data;
+  expect(data.startSec).toBe(60);
+  expect(data.hiddenLanes).toEqual(['faderB']);
+  expect(data.lanes).toEqual(expect.objectContaining({ faderB: [{ x: 0.25, y: 0.8 }, { x: 0.75, y: 0.3 }] }));
+  act(() => root.unmount());
+  root = createRoot(host);
+  await act(async () => root.render(<QueryClientProvider client={client}><RoutineEditorView /></QueryClientProvider>));
+  await act(async () => { await vi.advanceTimersByTimeAsync(30); });
+  check();
+});
+
+it('derives pair EXIT live beyond the old window without saving on open', async () => {
+  await openReview(false);
+  const props = () => timeline.mock.lastCall![0] as ComponentProps<typeof RoutineTimeline>;
+  expect(props().editor.pairBounds?.handover).toEqual({ enter: 0, exit: 240 });
+  expect(props().editor.input.durationBeats).toBeGreaterThan(240);
+  act(() => props().player.seek(-40));
+  expect(props().player.getMixTime()).toBe(-40);
+  vi.useFakeTimers();
+  act(() => props().draftStore.setLane('0', 'fader', [
+    { beat: 0, value: 1 }, { beat: 260, value: 0 },
+  ]));
+  // EOF still wins over an envelope extending beyond the available audio.
+  expect(props().editor.pairBounds?.handover?.exit).toBe(240);
+  expect(props().player.getMixTime()).toBe(-40);
+  await act(async () => { await vi.advanceTimersByTimeAsync(800); });
+  expect(api.transitions.replacePair).not.toHaveBeenCalled();
+});
+
+it('promotes, autosaves and reopens resized handovers without moving unchanged automation', async () => {
+  await openReview(false);
+  const props = () => timeline.mock.lastCall![0] as ComponentProps<typeof RoutineTimeline>;
+  act(() => {
+    props().draftStore.setLane('1', 'fader', [{ beat: 20, value: 0 }, { beat: 24, value: 1 }]);
+    props().draftStore.setLane('1', 'eqLow', [{ beat: 10, value: 0.2 }, { beat: 30, value: 0.5 }]);
+    props().draftStore.setLane('0', 'fader', [{ beat: 0, value: 1 }, { beat: 100, value: 0 }]);
+  });
+  expect(props().editor.pairBounds?.handover).toEqual({ enter: 20, exit: 100 });
+  const plan = props().editor.planned;
+  expect(routineSlotStateAt(plan, plan.slots[0], 49.9).playing).toBe(true);
+  expect(slotLanesAt(plan.slots[0], 99.8).fader).toBeCloseTo(0.002);
+  expect(routineSlotStateAt(plan, plan.slots[0], 50).playing).toBe(false);
+  expect(api.transitions.replacePair).not.toHaveBeenCalled();
+  await promote();
+  expect(vi.mocked(api.transitions.replacePair).mock.lastCall![2][0].data.durationSec).toBe(50);
+  vi.useFakeTimers();
+  act(() => props().draftStore.setLane('0', 'fader', [{ beat: 0, value: 1 }, { beat: 200, value: 0 }]));
+  expect(props().editor.pairBounds?.handover).toEqual({ enter: 20, exit: 200 });
+  await act(async () => { await vi.advanceTimersByTimeAsync(800); });
+  const saved = vi.mocked(api.transitions.replacePair).mock.lastCall![2][0].data;
+  expect(saved.durationSec).toBe(100);
+  expect(saved.lanes).toEqual(expect.objectContaining({
+    eqLowB: [{ x: 0.05, y: 0.2 }, { x: 0.15, y: 0.5 }],
+  }));
+  act(() => root.unmount());
+  root = createRoot(host);
+  await act(async () => root.render(<QueryClientProvider client={client}><RoutineEditorView /></QueryClientProvider>));
+  await act(async () => { await vi.advanceTimersByTimeAsync(30); });
+  expect(props().editor.pairBounds?.handover).toEqual({ enter: 20, exit: 200 });
+  expect(props().edits.lanes['1:eqLow']).toEqual([{ beat: 10, value: 0.2 }, { beat: 30, value: 0.5 }]);
+  const writes = vi.mocked(api.transitions.replacePair).mock.calls.length;
+  await act(async () => { await vi.advanceTimersByTimeAsync(800); });
+  expect(api.transitions.replacePair).toHaveBeenCalledTimes(writes);
+});
+
+it('widens before the old window live and preserves that edit on promotion', async () => {
+  await openReview(false);
+  const props = () => timeline.mock.lastCall![0] as ComponentProps<typeof RoutineTimeline>;
+  act(() => {
+    props().draftStore.setLane('1', 'fader', [{ beat: -20, value: 0 }, { beat: -16, value: 1 }]);
+    props().draftStore.setLane('0', 'fader', [{ beat: 0, value: 1 }, { beat: 100, value: 0 }]);
+  });
+  // B's entry alignment is at 8s: its audio starts two seconds into the new lead.
+  expect(props().editor.pairBounds?.handover).toEqual({ enter: -16, exit: 100 });
+  await promote();
+  const saved = vi.mocked(api.transitions.replacePair).mock.lastCall![2][0].data;
+  expect(saved.startSec).toBe(50);
+  expect(saved.bInSec).toBe(-2);
+  expect(saved.durationSec).toBe(60);
+});
+
 async function promote() {
   await act(async () => host.querySelector<HTMLButtonElement>('.re-promote')!.click());
   await vi.waitFor(async () => {
@@ -267,7 +389,7 @@ it.each([true, false])('promotes loaded and dormant Take pins (pin-follow: %s)',
   expect(api.transitions.replacePair).toHaveBeenCalledExactlyOnceWith(1, 2, [
     expect.objectContaining({
       uuid: expect.any(String),
-      data: expect.objectContaining({ startSec: 60, bInSec: 8, durationSec: 20 }),
+      data: expect.objectContaining({ startSec: 60, bInSec: 8, durationSec: 120 }),
     }),
   ]);
   const uuid = vi.mocked(api.transitions.replacePair).mock.calls[0][2][0].uuid;
@@ -370,6 +492,7 @@ it.each(['origin-take', null])('autosaves playback bounds without retrim (origin
   expect(timelineProps().editor.input.durationBeats).toBe(64);
   expect(timelineProps().editor.planned.mixStartSec).toBe(6);
   expect(timelineProps().editor.planned.beatOriginMixSec).toBe(0);
+  expect(timelineProps().player.getMixTime()).toBe(6);
   expect(client.getQueryData(['routine', detail.uuid])).toEqual({
     ...detail, edits: { ...detail.edits, playbackBounds: { startBeat: 12, endBeat: 64 } },
   });

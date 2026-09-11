@@ -76,7 +76,8 @@ it.each([140, 460])('retains fractional scrolling at 240 Hz in either direction 
 it('tracks overshoot outside the pane but stops scrolling outside its horizontal bounds', () => {
   drag(pane, 'dragstart');
   drag(pane, 'dragover');
-  drag(window, 'dragover', 80);
+  // The final pointer movement may enter a new row without another dragover.
+  drag(window, 'dragenter', 80);
   frame(16);
   expect(pane.scrollTop).toBeLessThan(1000);
   expect(onScroll).toHaveBeenLastCalledWith(100);

@@ -43,7 +43,7 @@ const tr = (over: Partial<Transition> = {}): Transition => ({
   durationSec: 20,
   bInSec: 8,
   tempoMatch: false,
-  lanes: {},
+  lanes: { faderA: [{ x: 0, y: 1 }, { x: 1, y: 1 }, { x: 1, y: 0 }] },
   ...over,
 });
 
@@ -275,8 +275,9 @@ describe('pinned Transition windows', () => {
     // Window 80..100 in track-1 time, but track 1 is 90s long.
     const plan = planSet(twoTracks(tr({ startSec: 80 })));
     expect(plan.entries[0].exitSec).toBeCloseTo(90);
-    // The window itself keeps its authored footprint on the mix axis.
-    expect(plan.adjacencies[0].mixEndSec).toBeCloseTo(100);
+    // Retained authoring coordinates do not extend the handover past EOF.
+    expect(plan.adjacencies[0].mixEndSec).toBeCloseTo(90);
+    expect(plan.adjacencies[0].transition!.durationSec).toBe(20);
   });
 
   it('defers the incoming entry past a silent lead gap (bInSec < 0)', () => {
@@ -413,7 +414,8 @@ describe('Take pins (plan-time vectorization)', () => {
     const [adj] = plan.adjacencies;
     expect(adj.kind).toBe('take');
     expect(adj.transition!.startSec).toBeCloseTo(60);
-    expect(adj.transition!.durationSec).toBeCloseTo(20);
+    expect(adj.transition!.durationSec).toBeCloseTo(20); // unchanged authoring frame
+    expect(adj.mixEndSec).toBeCloseTo(90); // full-open A reaches natural EOF
     expect(adj.transition!.bInSec).toBeCloseTo(8);
     // Same downstream math as a saved Transition.
     expect(adj.mixStartSec).toBeCloseTo(60);
@@ -470,7 +472,7 @@ describe('Take pins (plan-time vectorization)', () => {
     expect(Math.abs(atOpen.decks.B.trackTime - 8)).toBeLessThan(TOL);
     // Commit point: B lands where the performance actually left it.
     const performedEnd = 8 + 60 * RATE_B;
-    const atEnd = planStateAt(plan, adj.mixEndSec - 1e-6);
+    const atEnd = planStateAt(plan, adj.mixStartSec + 60 * RATE_A - 1e-6);
     expect(Math.abs(atEnd.decks.B.trackTime - performedEnd)).toBeLessThan(TOL);
   });
 
@@ -1064,13 +1066,13 @@ describe('rolling junctions (overlapping adjacency windows, sets #143)', () => {
             startSec: 60,
             bInSec: 0,
             tempoMatch: false,
-            lanes: { faderA: [{ x: 0, y: 0.8 }], faderB: [{ x: 0, y: 0.7 }] },
+            lanes: { faderA: [{ x: 0, y: 0.8 }, { x: 1, y: 0.8 }, { x: 1, y: 0 }], faderB: [{ x: 0, y: 0.7 }] },
           }),
           t2: tr({
             startSec: 12,
             bInSec: 0,
             tempoMatch: false,
-            lanes: { faderA: [{ x: 0, y: 0.3 }], faderB: [{ x: 0, y: 0.9 }] },
+            lanes: { faderA: [{ x: 0, y: 0.3 }, { x: 1, y: 0.3 }, { x: 1, y: 0 }], faderB: [{ x: 0, y: 0.9 }] },
           }),
         },
         ...over,
@@ -1270,7 +1272,8 @@ describe('outgoing jumps (issue 177)', () => {
     const plan = planSet(twoTracks(tr({ jumpsA: [{ x: 0.5, deltaSec: 10 }] }), 75));
     expect(plan.entries[0].exitMixSec).toBeCloseTo(70);
     expect(plan.entries[0].exitSec).toBeCloseTo(75);
-    expect(plan.adjacencies[0].mixEndSec).toBeCloseTo(80);
+    expect(plan.adjacencies[0].mixEndSec).toBeCloseTo(70);
+    expect(plan.adjacencies[0].transition!.durationSec).toBe(20);
   });
 
   it('planStateAt drives the outgoing deck through its jumps mid-window', () => {

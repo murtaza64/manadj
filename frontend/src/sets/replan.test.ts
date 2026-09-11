@@ -39,7 +39,7 @@ const tr = (over: Partial<Transition> = {}): Transition => ({
   durationSec: 20,
   bInSec: 8,
   tempoMatch: false,
-  lanes: {},
+  lanes: { faderA: [{ x: 0, y: 1 }, { x: 1, y: 1 }, { x: 1, y: 0 }] },
   ...over,
 });
 
@@ -222,7 +222,7 @@ describe('the sounding-window graft (geometry deferred, lanes live)', () => {
     expect(sounding).not.toBeNull();
     expect(sounding.pinUuid).toBe('w1');
 
-    const newLanes = { faderA: [{ x: 0, y: 0.25 }] };
+    const newLanes = { faderA: [{ x: 0, y: 0.25 }, { x: 1, y: 0.25 }, { x: 1, y: 0 }] };
     const edited = threeTrackInput({
       transitionsByUuid: {
         w1: tr({ startSec: 40, durationSec: 5, bInSec: 2, lanes: newLanes }),

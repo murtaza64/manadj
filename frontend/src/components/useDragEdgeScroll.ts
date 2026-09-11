@@ -75,6 +75,7 @@ export function useDragEdgeScroll(
         event.dataTransfer !== null && isTrackDrag(event.dataTransfer);
     };
     window.addEventListener('dragstart', start);
+    window.addEventListener('dragenter', trackPointer);
     window.addEventListener('dragover', trackPointer);
     window.addEventListener('drop', finish);
     window.addEventListener('dragend', finish);
@@ -82,6 +83,7 @@ export function useDragEdgeScroll(
     return () => {
       stop();
       window.removeEventListener('dragstart', start);
+      window.removeEventListener('dragenter', trackPointer);
       window.removeEventListener('dragover', trackPointer);
       window.removeEventListener('drop', finish);
       window.removeEventListener('dragend', finish);

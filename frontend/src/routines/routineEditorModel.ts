@@ -205,6 +205,8 @@ export function wireRoutineToPlanInput(
 // ── The editor build ─────────────────────────────────────────────────────
 
 export interface EditorRoutine {
+  /** Pair-only derived handover on the stable editor beat clock. */
+  pairBounds?: { handover: { enter: number; exit: number } | null };
   planned: PlannedRoutine;
   warnings: RoutineBuildWarning[];
   input: RoutinePlanInput;

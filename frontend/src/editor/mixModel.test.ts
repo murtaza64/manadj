@@ -228,7 +228,7 @@ describe('bTrackTimeAt with jump events', () => {
 });
 
 describe('arrangementAt with jump events', () => {
-  const durations = { a: 100, b: 60 };
+  const durations = { a: 50, b: 60 };
   const mixWith = (jumps: JumpEvent[], over: Partial<Transition> = {}): EditorMix => ({
     trackAId: 1,
     trackBId: 2,
@@ -248,7 +248,7 @@ describe('arrangementAt with jump events', () => {
     const m = mixWith([{ x: 0.5, deltaSec: 45 }]); // mix 40: B-time 20 → 65 > 60
     expect(arrangementAt(m, 39, durations, 1).bActive).toBe(true);
     expect(arrangementAt(m, 41, durations, 1).bActive).toBe(false);
-    // A still runs to the window end (aEnd 50), which now bounds the mix.
+    // A still runs to its natural EOF (50), which now bounds the mix.
     expect(arrangementAt(m, 0, durations, 1).mixDuration).toBeCloseTo(50);
   });
 
@@ -504,20 +504,20 @@ describe('aContentSegments / aEndMixTime (jump-repeat rendering)', () => {
     expect(segs[0]).toEqual({ mixStartSec: 0, mixEndSec: 30, bStartSec: 0 });
     expect(segs[1]).toEqual({ mixStartSec: 30, mixEndSec: 34, bStartSec: 26 });
     expect(segs[2]).toEqual({ mixStartSec: 34, mixEndSec: 38, bStartSec: 26 });
-    expect(segs[3]).toEqual({ mixStartSec: 38, mixEndSec: 50, bStartSec: 26 });
+    expect(segs[3]).toEqual({ mixStartSec: 38, mixEndSec: 112, bStartSec: 26 });
     // The window still runs its full mix width — the accepted asymmetry:
     // 20s of mix, 8s net of outgoing audio span.
-    expect(aEndMixTime(tr, 100)).toBeCloseTo(50);
+    expect(aEndMixTime(tr, 100)).toBeCloseTo(112);
     expect(aExitTrackTime(tr)).toBeCloseTo(38);
   });
 
-  it('without jumpsA degenerates to one segment ending at min(window end, durA)', () => {
+  it('without jumpsA ends at natural EOF, independently of the saved window', () => {
     const tr = { startSec: 30, durationSec: 20 };
     expect(aContentSegments(tr, 100)).toEqual([
-      { mixStartSec: 0, mixEndSec: 50, bStartSec: 0 },
+      { mixStartSec: 0, mixEndSec: 100, bStartSec: 0 },
     ]);
     expect(aEndMixTime(tr, 45)).toBeCloseTo(45);
-    expect(aEndMixTime(tr, 100)).toBeCloseTo(50);
+    expect(aEndMixTime(tr, 100)).toBeCloseTo(100);
   });
 
   it('a forward jump past the track end ends A at that instant', () => {
@@ -531,9 +531,9 @@ describe('aContentSegments / aEndMixTime (jump-repeat rendering)', () => {
 
   it('a backward jump can extend A past its linear end (replay inside the window)', () => {
     // durA 45 < window end 50: linearly A dies at 45, but a −8 at instant
-    // 40 rewinds to 32 — A now plays to the full window end.
+    // 40 rewinds to 32; natural EOF moves to mix time 53.
     const tr = { startSec: 30, durationSec: 20, jumpsA: [{ x: 0.5, deltaSec: -8 }] };
-    expect(aEndMixTime(tr, 45)).toBeCloseTo(50);
+    expect(aEndMixTime(tr, 45)).toBeCloseTo(53);
     expect(aExitTrackTime(tr)).toBeCloseTo(42);
   });
 });

@@ -102,5 +102,5 @@ npm run build
 - Browser coverage: `uv run scripts/debug/set_move_smoke.py --url
   http://localhost:<port> --set-id <id>`; requires more than 50 tracks and
   intercepts every backend write. Screenshots go to `.lane-app/`.
-- 572 targeted tests pass, including 240 Hz fractional scrolling, end-event
+- 574 targeted tests pass, including 240 Hz fractional scrolling, end-event
   cleanup, external-drag timeout, move groups, cancellation and pin guards.

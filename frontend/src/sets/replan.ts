@@ -249,8 +249,7 @@ export function authoredPlayheadAt(
   if (mixTime >= adj.mixStartSec && mixTime < adj.mixEndSec) {
     const authored =
       adj.transition.startSec + (mixTime - adj.mixStartSec) * adj.rateOutgoing;
-    const f = (authored - adj.transition.startSec) / adj.transition.durationSec;
-    return f >= 0 && f < 1 ? authored : null;
+    return authored;
   }
   // Outside the window: the pair's deck must actually be sounding at the
   // pair's entry (ping-pong reuses decks — a later entry on the same deck
