@@ -51,6 +51,8 @@ import { useToast } from '../components/Toast';
 import ContextMenu, { useContextMenuState } from '../components/ContextMenu';
 import EnergySquare from '../components/EnergySquare';
 import { useTrackMenuItems } from '../components/useTrackMenuItems';
+import { useDragEdgeScroll } from '../components/useDragEdgeScroll';
+import { DRAG_EDGE_ZONE_PX } from '../components/dragScroll';
 import type { ChannelId } from '../playback/mixer';
 import {
   initTransitionStore,
@@ -214,6 +216,7 @@ interface SetDetailPaneProps {
 
 export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProps) {
   const showToast = useToast();
+  const paneRef = useRef<HTMLDivElement>(null);
   const entries = useSetEntries(setId);
   // Live entries for the identity-stable handlers (issue 42; the
   // useTrackSelection ref pattern — handlers feed memoized rows).
@@ -480,12 +483,6 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
     state: NonNullable<typeof previewState>;
     futures: typeof previewFutures;
   } | null>(null);
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      setSettledPreview(previewState ? { state: previewState, futures: previewFutures } : null);
-    }, previewState ? 180 : 0);
-    return () => window.clearTimeout(timer);
-  }, [previewState, previewFutures]);
   const previewPlan = useSetPlan(
     previewState ? settledPreview?.state.entries : undefined,
     trackMap,
@@ -911,7 +908,6 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
   }, []);
 
   // ── Scroll persistence (set store — survives mode switches) ──────────
-  const paneRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const pane = paneRef.current;
     if (pane) pane.scrollTop = getSetScroll(setId);
@@ -948,6 +944,35 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
   // set store (survives mode switches; readable by the menu, keyboard,
   // and drag handlers). Entry mutations prune it store-side.
   const selection = useSetSelection(setId);
+  const [moveIds, setMoveIds] = useState<number[] | null>(null);
+  const cancelMove = () => {
+    setMoveIds(null);
+    paneRef.current?.focus({ preventScroll: true });
+  };
+  const moveOrders = useMemo(() => {
+    if (!moveIds || !entries) return [];
+    const order = entries.map((entry) => entry.trackId);
+    return Array.from({ length: order.length + 1 }, (_, index) => {
+      const next = applyReorder(order, moveIds, index);
+      return next.every((id, i) => id === order[i]) ? null : next;
+    });
+  }, [entries, moveIds]);
+  const moveTarget = (index: number, label: string) => (
+    <button
+      type="button"
+      className="set-move-target"
+      data-set-move-index={index}
+      disabled={!moveOrders[index]}
+      onClick={() => {
+        const order = moveOrders[index];
+        if (order) reorderSetEntries(setId, order);
+        cancelMove();
+      }}
+    >
+      <strong>{moveOrders[index] ? 'Move here' : 'Current position'}</strong>
+      <span>{label}</span>
+    </button>
+  );
   const selectedIds = useMemo(() => new Set(selection.ids), [selection.ids]);
   // Identity-stable (issue 42): props on ~88 memoized track rows; live
   // state comes through refs / imperative store reads.
@@ -969,6 +994,15 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
   // eats Escape on capture, so closing a menu never clears the rows.
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
+      if (e.defaultPrevented) return;
+      if (moveIds) {
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          setMoveIds(null);
+          paneRef.current?.focus({ preventScroll: true });
+        }
+        return;
+      }
       if (e.defaultPrevented || !(e.target instanceof Node) || !paneRef.current?.contains(e.target)) return;
       const sel = getSetSelection(setId);
       if (sel.ids.length === 0) return;
@@ -989,7 +1023,7 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [setId]);
+  }, [setId, moveIds]);
   /** Group drag (sets 18): a selected row drags the whole selection —
    * in SET order, so a non-contiguous selection compacts at the drop
    * point as one contiguous run (playlist-editor convention). An
@@ -1143,6 +1177,17 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
     surfaceItems: rowMenu
       ? [
           {
+            label: rowMenuTargets.length > 1 ? `Move ${rowMenuTargets.length} tracks` : 'Move track',
+            onSelect: () => {
+              const targets = new Set(rowMenuTargets.map((track) => track.id));
+              setMoveIds((entries ?? []).filter((entry) => targets.has(entry.trackId)).map((entry) => entry.trackId));
+              setPicker(null);
+              setSuggest(null);
+              setEvidenceModalOpen(false);
+              paneRef.current?.focus({ preventScroll: true });
+            },
+          },
+          {
             label:
               rowMenuTargets.length > 1
                 ? `Remove ${rowMenuTargets.length} from set`
@@ -1165,14 +1210,11 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
     });
   };
 
-  const handleDragOver = (e: React.DragEvent) => {
-    if (!isTrackDrag(e.dataTransfer)) return;
-    e.preventDefault();
-    e.dataTransfer.dropEffect = 'copy';
+  const updateDragTarget = (clientY: number) => {
     const pane = paneRef.current;
     if (!pane) return;
     const rects = rowRects(pane);
-    const pointerY = e.clientY - pane.getBoundingClientRect().top + pane.scrollTop;
+    const pointerY = clientY - pane.getBoundingClientRect().top + pane.scrollTop;
     const index = insertionIndexFromPointer(pointerY, rects);
 
     // In-pane reorder drags feed the live preview (sets 07/23): the rows
@@ -1195,14 +1237,42 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
       });
       return;
     }
-    setDropIndicator({ index, y: indicatorY(index, rects) });
+    const y = indicatorY(index, rects);
+    setDropIndicator((prev) => prev?.index === index && prev.y === y ? prev : { index, y });
   };
 
+  const handleDragOver = (e: React.DragEvent) => {
+    if (!isTrackDrag(e.dataTransfer)) return;
+    if (moveIds) setMoveIds(null);
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+    updateDragTarget(e.clientY);
+  };
+
+  const edgeScrolling = useDragEdgeScroll(
+    paneRef,
+    updateDragTarget,
+    () => { handleRowDragEnd(); setDropIndicator(null); },
+  );
+  useEffect(() => {
+    if (edgeScrolling) return;
+    const timer = window.setTimeout(() => {
+      setSettledPreview(previewState ? { state: previewState, futures: previewFutures } : null);
+    }, previewState ? 180 : 0);
+    return () => window.clearTimeout(timer);
+  }, [previewState, previewFutures, edgeScrolling]);
+
   const handleDragLeave = (e: React.DragEvent) => {
-    if (!paneRef.current?.contains(e.relatedTarget as Node)) {
-      setDropIndicator(null);
-      setPreviewOrder(null); // cancelled hypothesis — the ladder snaps back
-    }
+    const pane = paneRef.current;
+    if (!pane || pane.contains(e.relatedTarget as Node)) return;
+    const rect = pane.getBoundingClientRect();
+    // Reordering can emit dragleave without pointer movement. Vertical
+    // overshoot is also a scroll gesture, not a cancelled hypothesis.
+    if (e.clientX >= rect.left && e.clientX <= rect.right &&
+        e.clientY >= rect.top - DRAG_EDGE_ZONE_PX * 2 &&
+        e.clientY <= rect.bottom + DRAG_EDGE_ZONE_PX * 2) return;
+    setDropIndicator(null);
+    setPreviewOrder(null);
   };
 
   const handleDrop = (e: React.DragEvent) => {
@@ -1368,7 +1438,7 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
           <button
             className="btn btn-success"
             onClick={() => setAdjacencyPins(setId, autoFillable)}
-            disabled={autoFillable.size === 0}
+            disabled={moveIds !== null || autoFillable.size === 0}
             title={
               autoFillable.size === 0
                 ? 'No unpinned adjacency auto-resolves to a Transition'
@@ -1384,7 +1454,7 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
           <button
             className="btn"
             onClick={() => setEvidenceModalOpen(true)}
-            disabled={evidenceProposal.rows.length === 0 && evidenceProposal.hardCuts.length === 0}
+            disabled={moveIds !== null || (evidenceProposal.rows.length === 0 && evidenceProposal.hardCuts.length === 0)}
             title={
               evidenceProposal.rows.length === 0 && evidenceProposal.hardCuts.length === 0
                 ? 'Every adjacency is pinned or auto-resolves to a Transition'
@@ -1431,7 +1501,18 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
 
       <div
         ref={paneRef}
+        className={moveIds ? 'set-move-mode' : undefined}
         tabIndex={-1}
+        onKeyDownCapture={(e) => {
+          if (!moveIds) return;
+          // Keep native button/Tab behavior, not the browse hub's deck-load,
+          // selection and area-navigation shortcuts.
+          e.stopPropagation();
+          if (e.key === 'Escape') {
+            e.preventDefault();
+            cancelMove();
+          }
+        }}
         onPointerDownCapture={(e) => {
           const target = e.target as HTMLElement;
           if (!target.closest('input, textarea, select, button, [contenteditable]')) {
@@ -1454,6 +1535,7 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
         onClick={(e) => {
+          if (moveIds) return;
           // Empty-space click clears the selection (sets 18). Clicks on
           // rows (track or adjacency) are theirs — only the bare pane
           // beneath/between counts as empty space.
@@ -1464,8 +1546,25 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
             setSetSelection(setId, EMPTY_SELECTION);
           }
         }}
-        style={{ position: 'relative', flex: 1, overflow: 'auto' }}
+        // Programmatic scrolling still works with hidden overflow; Chromium's
+        // native drag auto-scroll must not compete with our frame-driven loop.
+        style={{ position: 'relative', flex: 1, overflow: dragIds ? 'hidden' : 'auto',
+          overflowAnchor: 'none', scrollbarGutter: 'stable' }}
       >
+        {moveIds && (
+          <div className="set-move-banner">
+            <span role="status">
+              <strong>{moveIds.length === 1
+                ? `Moving ${trackMap?.get(moveIds[0])?.title || 'track'}`
+                : `Moving ${moveIds.length} tracks`}</strong>
+              <span>Choose a transition row. Scroll freely.</span>
+            </span>
+            <button type="button" className="btn" aria-label="Cancel move" onClick={cancelMove}>
+              Cancel <kbd>Esc</kbd>
+            </button>
+          </div>
+        )}
+        {moveIds && moveTarget(0, 'Start of Set')}
         {dropIndicator && (
           <div
             style={{
@@ -1499,6 +1598,7 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
             return (
               <div
                 key={entry.trackId}
+                data-moving={moveIds?.includes(entry.trackId) || undefined}
                 // Cast bracket (sets 160, restyled at #161): covered
                 // entries keep FULL-opacity titles — the magenta bracket
                 // and the cast/exit chips carry the meaning (dimming read
@@ -1515,6 +1615,7 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
                 }
               >
                 <SetTrackRow
+                  inert={moveIds !== null}
                   index={i}
                   trackId={entry.trackId}
                   track={track}
@@ -1544,6 +1645,7 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
                 {entry.cameoPins && entry.cameoPins.length > 0 && (
                   <div
                     className="set-cameo-pin-row"
+                    inert={moveIds !== null}
                     title="Cameo pins on this entry — guests play on a free deck inside the host's span; the Set order never advances. Click to edit."
                     onClick={(e) => {
                       e.stopPropagation();
@@ -1569,7 +1671,9 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
                   </div>
                 )}
                 {next &&
-                  (cov && cov.headIndex !== i ? null : cov ? ( // covered interior: collapsed
+                  (moveIds ? moveTarget(i + 1,
+                    `${track?.title || `Track ${entry.trackId}`} / ${trackMap?.get(next.trackId)?.title || `Track ${next.trackId}`}`
+                  ) : cov && cov.headIndex !== i ? null : cov ? ( // covered interior: collapsed
                     <RoutinePinRow
                       index={i}
                       label={routineRowLabel(cov, routineRows, (id) =>
@@ -1621,7 +1725,8 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
             (append IS an insert at the terminal gap). Permanently
             visible, not hover-revealed: the primary set-building
             affordance. Empty set: disabled, teaching copy inline. */}
-        {displayEntries !== undefined && (
+        {moveIds && displayEntries && moveTarget(displayEntries.length, 'End of Set')}
+        {!moveIds && displayEntries !== undefined && (
           <button
             data-set-suggest-row
             className="set-suggest-row"
@@ -2470,6 +2575,7 @@ const RoutinePinRow = memo(function RoutinePinRow({
  * trackId/index), stable object props (trackMap/plan slices, the
  * memoized occupancy map). */
 const SetTrackRow = memo(function SetTrackRow({
+  inert,
   index,
   trackId,
   track,
@@ -2490,6 +2596,7 @@ const SetTrackRow = memo(function SetTrackRow({
   onTrimChange,
   onContextMenu,
 }: {
+  inert: boolean;
   index: number;
   trackId: number;
   track: Track | undefined;
@@ -2563,6 +2670,7 @@ const SetTrackRow = memo(function SetTrackRow({
       // scrolls the selected row into view by it); presence selectors
       // ([data-set-track-row]) keep working for row rects / convergence.
       data-set-track-row={trackId}
+      inert={inert}
       draggable
       className={`set-track-row${selected ? ' selected' : ''}`}
       onClick={(e) => onSelect(trackId, { shift: e.shiftKey, toggle: e.metaKey || e.ctrlKey })}

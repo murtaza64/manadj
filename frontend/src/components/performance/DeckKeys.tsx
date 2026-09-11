@@ -11,12 +11,14 @@
  * (cue, nudge, pads) suppress key repeat.
  */
 import { useEffect } from 'react';
+import { useViewActive } from '../../contexts/viewActive';
 import { useDeck, useDeckReady, useDeckSnapshot } from '../../hooks/useDeck';
 import { useHotCueActions } from '../../hooks/useHotCueActions';
 import { NUDGE_BEND_PERCENT } from '../../playback/tempo';
 import { DECK_KEYS, isGuardedKeyEvent, isTypingTarget } from './performanceKeys';
 
 export function DeckKeys() {
+  const viewActive = useViewActive();
   const { deck, engine, loadedTrack, beatjumpBeats } = useDeck();
   const ready = useDeckReady();
   // The play key is allowed while loading — the engine latches play intent
@@ -47,7 +49,7 @@ export function DeckKeys() {
     };
 
     const onKeyDown = (event: KeyboardEvent) => {
-      if (isGuardedKeyEvent(event)) return;
+      if (!viewActive || isGuardedKeyEvent(event)) return;
       const key = event.key.toLowerCase();
 
       // Hold keys: swallow repeats but keep the event claimed.
@@ -93,6 +95,7 @@ export function DeckKeys() {
     };
 
     const onKeyUp = (event: KeyboardEvent) => {
+      // Still release held controls if the user switched modes mid-hold.
       // Input focus only — a modifier held at release must not eat the keyup
       // (library-hub parity; a stuck held-cue otherwise).
       if (isTypingTarget(event)) return;
@@ -125,7 +128,7 @@ export function DeckKeys() {
       document.removeEventListener('keyup', onKeyUp);
       window.removeEventListener('blur', onBlur);
     };
-  }, [deck, engine, ready, canPlay, beatjumpBeats, hotCues]);
+  }, [deck, engine, ready, canPlay, beatjumpBeats, hotCues, viewActive]);
 
   return null;
 }
