@@ -30,7 +30,7 @@ import type { Track } from '../../types';
 import { DeckPanel, DeckWaveform } from './DeckPanel';
 import { MixerStrip } from './MixerStrip';
 import { EdgePairLinks } from '../../links/PerformancePairLinks';
-import { DeckKeys } from './DeckKeys';
+import { PerformanceKeyboard } from './PerformanceKeyboard';
 import { PlayGuideOverlay } from '../../performance/PlayGuideOverlay';
 import { dispatchSetSpace } from '../../sets/spaceTransport';
 import { CONTROL_FOCUS_KEYS, browseLoadTarget, isGuardedKeyEvent } from './performanceKeys';
@@ -231,13 +231,8 @@ export function PerformanceView() {
           <DeckScope deck="D">
             <DeckPanel mirrored lockHint={lockHint === 'D'} />
           </DeckScope>
-          <DeckScope deck={leftFocus}>
-            <DeckKeys />
-          </DeckScope>
-          <DeckScope deck={rightFocus}>
-            <DeckKeys />
-          </DeckScope>
         </div>
+        <PerformanceKeyboard deckCount={deckCount} left={leftFocus} right={rightFocus} onLoad={tryLoad} />
       </div>
     </div>
   );

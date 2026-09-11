@@ -16,12 +16,12 @@ import { useDeck, useDeckReady, useDeckSnapshot } from '../../hooks/useDeck';
 import { useHotCueActions } from '../../hooks/useHotCueActions';
 import { useMixer } from '../../hooks/useMixer';
 import { MouseJogController } from './mouseJog';
-import { DECK_KEYS, isGuardedKeyEvent, isTextEntryTarget, isTypingTarget } from './performanceKeys';
+import { DECK_KEYS, hasKeyboardOverlay, isGuardedKeyEvent, isTextEntryTarget, isTypingTarget } from './performanceKeys';
 import { registerKeyboardPointer, type KeyboardPointerFeedback } from './keyboardPointer';
 import { invertControl, MIXER_DRAG_RANGE_PX, moveKnob, type KnobGesture } from './mouseControl';
 
-export function DeckKeys() {
-  const viewActive = useViewActive();
+export function DeckKeys({ enabled = true }: { enabled?: boolean }) {
+  const viewActive = useViewActive() && enabled;
   const { deck, engine, loadedTrack, beatjumpBeats } = useDeck();
   const ready = useDeckReady();
   // The play key is allowed while loading — the engine latches play intent
@@ -33,6 +33,7 @@ export function DeckKeys() {
   const hotCues = useHotCueActions(loadedTrack?.id ?? null);
   const mixer = useMixer();
   const cueHeld = useRef(false);
+  const padsHeld = useRef(new Map<number, () => void>());
 
   // Keep gesture state independent of React/query repaint frequency. Mouse
   // deltas read current mixer values so reversing at a stop responds at once.
@@ -202,11 +203,14 @@ export function DeckKeys() {
         cueHeld.current = false;
         engine.cueUp();
       }
+      for (const release of padsHeld.current.values()) release();
+      padsHeld.current.clear();
     },
     [engine, viewActive]
   );
 
   useEffect(() => {
+    if (!viewActive) return;
     // Pick the hand map by side: left-side Decks (A/C) use the left-hand
     // ('A') layout, right-side (B/D) the right-hand ('B') layout.
     const keys = DECK_KEYS[deck === 'A' || deck === 'C' ? 'A' : 'B'];
@@ -216,7 +220,7 @@ export function DeckKeys() {
     };
 
     const onKeyDown = (event: KeyboardEvent) => {
-      if (!viewActive || isTypingTarget(event)) return;
+      if (!viewActive || isTypingTarget(event) || hasKeyboardOverlay()) return;
       const key = event.key.toLowerCase();
       if (event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey &&
           (key === keys.jumpBack || key === keys.jumpForward)) {
@@ -256,6 +260,7 @@ export function DeckKeys() {
           if (!hotCues.enabled) return;
           event.preventDefault();
           hotCues.down(slot);
+          padsHeld.current.set(slot, () => hotCues.up(slot));
         }
       }
     };
@@ -269,11 +274,11 @@ export function DeckKeys() {
         cueHeld.current = false;
         engine.cueUp();
       } else {
-        if (isTypingTarget(event)) return;
         const slot = padSlot(key);
-        if (slot !== null && hotCues.enabled) {
+        if (slot !== null && padsHeld.current.has(slot)) {
           event.preventDefault();
-          hotCues.up(slot);
+          padsHeld.current.get(slot)!();
+          padsHeld.current.delete(slot);
         }
       }
     };

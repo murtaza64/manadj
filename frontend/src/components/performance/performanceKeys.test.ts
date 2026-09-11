@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest';
-import { browseLoadTarget, isTextEntryTarget, isTypingTarget } from './performanceKeys';
+import { browseLoadTarget, hasKeyboardOverlay, isTextEntryTarget, isTypingTarget } from './performanceKeys';
 import type { ControlFocus } from '../../performance/controlFocus';
 
 function input(type: string): HTMLInputElement {
@@ -8,6 +8,17 @@ function input(type: string): HTMLInputElement {
   el.type = type;
   return el;
 }
+
+it('ignores overlays inside hidden keep-alive ancestors', () => {
+  const wrapper = document.createElement('div');
+  const dialog = document.createElement('div'); dialog.setAttribute('role', 'dialog');
+  wrapper.append(dialog); document.body.append(wrapper);
+  try {
+    expect(hasKeyboardOverlay()).toBe(true);
+    wrapper.style.display = 'none'; expect(hasKeyboardOverlay()).toBe(false);
+    wrapper.style.display = ''; expect(hasKeyboardOverlay()).toBe(true);
+  } finally { wrapper.remove(); }
+});
 
 describe('isTextEntryTarget (the hubs\' typing guard, keyboard-focus 01)', () => {
   it.each(['text', 'search', 'number', 'url', 'email', 'password'])(
