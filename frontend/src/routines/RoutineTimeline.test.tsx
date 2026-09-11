@@ -234,6 +234,50 @@ it('fits widened bounds and keeps crop shading on the saved beat axis', () => {
   expect(host.querySelectorAll('.rt-slotblock')).toHaveLength(3);
 });
 
+it.each([-16, 96])('adds and drags automation at original beat %s in expanded playback bounds', (beat) => {
+  const original = [{ beat: 16, value: 0.25 }, { beat: 48, value: 0.75 }];
+  act(() => {
+    store.setLane('0', 'fader', original);
+    store.endGesture();
+    store.setPlaybackBounds({ startBeat: -32, endBeat: 128 });
+    store.endGesture();
+  });
+  button('[title="Fit the window"]');
+  const px = 816 / 168;
+  const originX = x(handles()[0]) + 32 * px;
+  const lane = host.querySelector<HTMLElement>('.rt-lanewindow')!;
+  const hit = lane.querySelector<HTMLElement>('.editor-lanehit')!;
+  const left = Number.parseFloat(lane.style.left);
+  const width = Number.parseFloat(lane.style.width);
+  expect.soft(left).toBeCloseTo(originX - 32 * px);
+  expect.soft(left + width).toBeCloseTo(originX + 128 * px);
+  expect(store.getSnapshot().edits.lanes['0:fader']).toEqual(original);
+
+  // jsdom has no layout: use the rendered lane bounds and LaneCanvas's 7px hit overhang.
+  vi.spyOn(hit, 'getBoundingClientRect').mockReturnValue(new DOMRect(left - 7, 100, width + 14, 56));
+  Object.defineProperty(hit, 'setPointerCapture', { value: vi.fn(), configurable: true });
+  const clientX = originX + beat * px;
+  pointer(hit, 'pointerdown', clientX, { clientY: 128 });
+  pointer(hit, 'pointerup', clientX, { clientY: 128 });
+  const inserted = store.getSnapshot().edits.lanes['0:fader'];
+  expect(inserted).toHaveLength(3);
+  expect(inserted.find((p) => p.value === 0.5)?.beat).toBeCloseTo(beat);
+  expect(inserted.filter((p) => p.value !== 0.5)).toEqual(original);
+
+  pointer(hit, 'pointerdown', clientX, { clientY: 128 });
+  pointer(hit, 'pointermove', clientX + 4 * px, { clientY: 128, shiftKey: true });
+  pointer(hit, 'pointerup', clientX + 4 * px, { clientY: 128 });
+  const dragged = store.getSnapshot().edits.lanes['0:fader'];
+  expect(dragged.find((p) => p.value === 0.5)?.beat).toBeCloseTo(beat + 4);
+  expect(dragged.filter((p) => p.value !== 0.5)).toEqual(original);
+  act(() => store.undo());
+  expect(store.getSnapshot().edits.lanes['0:fader']).toEqual(inserted);
+  act(() => store.undo());
+  expect(store.getSnapshot().edits.lanes['0:fader']).toEqual(original);
+  act(() => { store.redo(); store.redo(); });
+  expect(store.getSnapshot().edits.lanes['0:fader']).toEqual(dragged);
+});
+
 it.each(['select', 'jump'] as const)('%s waveform double-click inserts once and opens pause conversion', (mode) => {
   act(() => root.render(<Timeline mode={mode} />));
   const add = vi.spyOn(store, 'addJump');

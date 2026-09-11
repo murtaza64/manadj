@@ -97,6 +97,45 @@ describe('standalone Routine playback bounds', () => {
     expect(parseEdits({ playbackBounds: { startBeat: 8, endBeat: 2 } }).playbackBounds).toBeUndefined();
   });
 
+  it('persists extension automation on the original beat axis through undo/redo and shrink/regrow', () => {
+    const input = recording();
+    const original = [{ beat: 0, value: 0.4 }, { beat: 64, value: 0.8 }];
+    const extended = [{ beat: -16, value: 0.2 }, ...original, { beat: 80, value: 0.6 }];
+    const bounds = { startBeat: -16, endBeat: 80 };
+    const store = new RoutineDraftStore();
+    store.load('standalone', { ...emptyEdits(), lanes: { '0:fader': original } });
+    store.setPlaybackBounds(bounds);
+    store.endGesture();
+    store.setLane('0', 'fader', extended);
+    store.endGesture();
+    store.undo();
+    expect(store.getSnapshot().edits.lanes['0:fader']).toEqual(original);
+    expect(store.getSnapshot().edits.playbackBounds).toEqual(bounds);
+    store.redo();
+    expect(store.getSnapshot().edits.lanes['0:fader']).toEqual(extended);
+
+    for (const playbackBounds of [bounds, { startBeat: 16, endBeat: 48 }, bounds]) {
+      store.setPlaybackBounds(playbackBounds);
+      store.endGesture();
+      const parsed = parseEdits(JSON.parse(JSON.stringify(editsForSave(store.getSnapshot().edits))));
+      expect(parsed).toEqual(store.getSnapshot().edits);
+      expect(parsed.playbackBounds).toEqual(playbackBounds);
+      expect(parsed.lanes['0:fader']).toEqual(extended);
+      const routine = buildPlannedRoutine({ ...input, edits: parsed }, ctx).routine;
+      expect(routine.playbackBounds).toEqual(playbackBounds);
+      expect(routine.beatOriginMixSec).toBe(100);
+      expect(routine.slots[0].lanes.fader).toEqual(extended);
+      expect(slotLanesAt(routine.slots[0], -8).fader).toBeCloseTo(0.3);
+      expect(slotLanesAt(routine.slots[0], 72).fader).toBeCloseTo(0.7);
+    }
+    store.undo();
+    expect(store.getSnapshot().edits.playbackBounds).toEqual({ startBeat: 16, endBeat: 48 });
+    expect(store.getSnapshot().edits.lanes['0:fader']).toEqual(extended);
+    store.redo();
+    expect(store.getSnapshot().edits.playbackBounds).toEqual(bounds);
+    expect(store.getSnapshot().edits.lanes['0:fader']).toEqual(extended);
+  });
+
   it('keeps slot entry coordinates fixed when the crop passes them', () => {
     const input = recording();
     input.edits = { ...emptyEdits(), playbackBounds: { startBeat: 24, endBeat: 48 } };
