@@ -4,6 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { LaneCanvas, type LaneGuide } from './LaneCanvas';
 import { laneValueY } from './laneHit';
+import type { LaneControlKind } from './laneShade';
 import { LANE_IDS, type LaneId, type LanePoint } from './mixModel';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -17,13 +18,13 @@ let selection: number[];
 const changed = vi.fn();
 const registerScrollDraw = vi.fn();
 
-function TestLane({ initial, guides = [], id = 'faderA' }: {
-  initial: LanePoint[]; guides?: LaneGuide[]; id?: LaneId;
+function TestLane({ initial, guides = [], id = 'faderA', kind }: {
+  initial: LanePoint[]; guides?: LaneGuide[]; id?: LaneId; kind?: LaneControlKind;
 }) {
   const [points, setPoints] = useState(initial);
   const [selected, setSelected] = useState<number[]>([]);
   useEffect(() => { current = points; selection = selected; }, [points, selected]);
-  return <LaneCanvas id={id} widthPx={WIDTH} windowLeftPx={0} points={points}
+  return <LaneCanvas id={id} kind={kind} widthPx={WIDTH} windowLeftPx={0} points={points}
     guides={guides} chopWall={0.001} registerScrollDraw={registerScrollDraw}
     selected={selected} onSelectedChange={setSelected}
     onChange={next => { changed(next); setPoints(next); }} />;
@@ -51,8 +52,8 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function render(initial: LanePoint[], guides?: LaneGuide[], id?: LaneId) {
-  act(() => root.render(<TestLane initial={initial} guides={guides} id={id} />));
+function render(initial: LanePoint[], guides?: LaneGuide[], id?: LaneId, kind?: LaneControlKind) {
+  act(() => root.render(<TestLane initial={initial} guides={guides} id={id} kind={kind} />));
 }
 function pointer(type: string, x: number, y: number, keys: PointerEventInit = {}) {
   act(() => host.querySelector('.editor-lanehit')!.dispatchEvent(new PointerEvent(type, {
@@ -205,6 +206,18 @@ it.each(LANE_IDS)('snaps %s drags to neutral except faders, with Shift bypass', 
   const expected = id.startsWith('fader') ? 0.55 : 0.5;
   expect(current[0].y).toBeCloseTo(expected);
   pointer('pointerdown', 0.5, expected, { shiftKey: true });
+  pointer('pointermove', 0.5, 0.54, { shiftKey: true });
+  pointer('pointerup', 0.5, 0.54, { shiftKey: true });
+  expect(current[0].y).toBeCloseTo(0.54);
+});
+
+it('uses trim semantics independently of the pair lane identity, including neutral snap and Shift bypass', () => {
+  render([{ x: 0.5, y: 0.9 }], [], 'faderA', 'trim');
+  pointer('pointerdown', 0.5, 0.9);
+  pointer('pointermove', 0.5, 0.55);
+  pointer('pointerup', 0.5, 0.55);
+  expect(current[0].y).toBe(0.5);
+  pointer('pointerdown', 0.5, 0.5, { shiftKey: true });
   pointer('pointermove', 0.5, 0.54, { shiftKey: true });
   pointer('pointerup', 0.5, 0.54, { shiftKey: true });
   expect(current[0].y).toBeCloseTo(0.54);

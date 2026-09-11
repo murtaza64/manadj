@@ -20,6 +20,7 @@
  * - Filter: bipolar around center; the LPF side blends the hue darker
  *   (cutting highs), the HPF side lighter (cutting lows) — direction is
  *   the whole point of a filter move.
+ * - Trim: symmetric deviation around the nominal center, without filter hue changes.
  *
  * "Looks neutral" shares the vectorizer's OFF_DEFAULT_EPS. For filters
  * that means grey = exactly what the vectorizer calls untouched; faders
@@ -27,6 +28,10 @@
  */
 import { OFF_DEFAULT_EPS } from '../capture/vectorize';
 import type { LaneId } from './mixModel';
+
+/** Renderer semantics are independent of a pair artifact's lane identifiers. */
+export type LaneControlKind = 'fader' | 'eq' | 'filter' | 'trim';
+type LaneStyleId = LaneId | LaneControlKind;
 
 /** Within this of neutral, a value renders as neutral (grey). */
 export const NEUTRAL_EPS = OFF_DEFAULT_EPS;
@@ -51,28 +56,28 @@ const NEUTRAL_STROKE = { r: 140, g: 140, b: 150 };
 const NEUTRAL_STROKE_ALPHA = 0.5;
 
 /** The lane's neutral value in lane domain (0..1). */
-export function laneNeutral(id: LaneId): number {
+export function laneNeutral(id: LaneStyleId): number {
   return id.startsWith('fader') ? 0 : 0.5;
 }
 
-/** Where the fill anchors, in lane domain. Filters fill from their
+/** Where the fill anchors, in lane domain. Filters and trim fill from their
  * neutral center (bipolar); faders and EQ fill from MIN — the area reads
  * as energy present. */
-export function laneFillAnchor(id: LaneId): number {
-  return id.startsWith('filter') ? 0.5 : 0;
+export function laneFillAnchor(id: LaneStyleId): number {
+  return id.startsWith('filter') || id === 'trim' ? 0.5 : 0;
 }
 
 /** Deviation from neutral, normalized to 0..1 over the lane's reachable
  * range on that side (fader can travel 1 above neutral; the rest 0.5
  * either side). */
-export function laneDeviation(id: LaneId, y: number): number {
+export function laneDeviation(id: LaneStyleId, y: number): number {
   const n = laneNeutral(id);
   const range = id.startsWith('fader') ? 1 : 0.5;
   return Math.min(1, Math.abs(y - n) / range);
 }
 
 /** Is this value effectively neutral (the vectorizer's own epsilon)? */
-export function isNeutral(id: LaneId, y: number): boolean {
+export function isNeutral(id: LaneStyleId, y: number): boolean {
   return Math.abs(y - laneNeutral(id)) <= NEUTRAL_EPS;
 }
 
@@ -102,7 +107,7 @@ const rgba = (c: { r: number; g: number; b: number }, a: number): string =>
 
 /** Resting default (untouched) value per lane — matches the vectorizer's
  * restingDefault: faders sit FULL, EQ/filter at center. */
-export function laneRestingDefault(id: LaneId): number {
+export function laneRestingDefault(id: LaneStyleId): number {
   return id.startsWith('fader') ? 1 : 0.5;
 }
 
@@ -110,7 +115,7 @@ export function laneRestingDefault(id: LaneId): number {
  * default, stroke and fill both in the neutral grey — the lane reads as
  * present-but-untouched instead of vanishing entirely (walkthrough
  * feedback). The fill spans from the lane's fill anchor to the line. */
-export function emptyLaneShade(id: LaneId): { y: number; stroke: string; fill: string } {
+export function emptyLaneShade(id: LaneStyleId): { y: number; stroke: string; fill: string } {
   return {
     y: laneRestingDefault(id),
     stroke: rgba(NEUTRAL_STROKE, NEUTRAL_STROKE_ALPHA),
@@ -120,7 +125,7 @@ export function emptyLaneShade(id: LaneId): { y: number; stroke: string; fill: s
 
 /** Stroke color for a point value: grey at the ramp's floor (neutral for
  * fader/filter, MIN for EQ), ramping to the lane color. */
-export function pointStroke(id: LaneId, color: string, y: number): string {
+export function pointStroke(id: LaneStyleId, color: string, y: number): string {
   if (!id.startsWith('eq') && isNeutral(id, y)) {
     return rgba(NEUTRAL_STROKE, NEUTRAL_STROKE_ALPHA + 0.2);
   }
@@ -156,7 +161,7 @@ export interface SegmentShade {
 
 /** Deck hue at value y: filters blend by SIDE — LPF toward black, HPF
  * toward white. */
-function hueAt(id: LaneId, color: string, y: number): { r: number; g: number; b: number } {
+function hueAt(id: LaneStyleId, color: string, y: number): { r: number; g: number; b: number } {
   const c = hexToRgb(color);
   if (!id.startsWith('filter')) return c;
   return y >= 0.5
@@ -169,8 +174,8 @@ function hueAt(id: LaneId, color: string, y: number): { r: number; g: number; b:
  * (clamping at RAMP_FULL rendered 0.6..1.0 identically — walkthrough
  * feedback). Filter: deviation from center, saturating at RAMP_FULL (its
  * reachable range is half a strip; the boost keeps small moves visible). */
-function rampT(id: LaneId, y: number): number {
-  if (id.startsWith('filter')) return Math.min(1, laneDeviation(id, y) / RAMP_FULL);
+function rampT(id: LaneStyleId, y: number): number {
+  if (id.startsWith('filter') || id === 'trim') return Math.min(1, laneDeviation(id, y) / RAMP_FULL);
   return y;
 }
 
@@ -178,7 +183,7 @@ function rampT(id: LaneId, y: number): number {
  * ramp. Faders: constant (see FADER_FILL_ALPHA). EQ: the COLOR grades
  * too — grey at min through partial at neutral to the full band color at
  * max (RGB experiment). */
-export function fillColorAt(id: LaneId, color: string, y: number): string {
+export function fillColorAt(id: LaneStyleId, color: string, y: number): string {
   const c = hueAt(id, color, y);
   if (id.startsWith('fader')) return rgba(c, faderFillAlpha(y));
   const t = rampT(id, y);
@@ -188,7 +193,7 @@ export function fillColorAt(id: LaneId, color: string, y: number): string {
 
 /** Stroke color of lane `id` at value y: the same grey→deck-color ramp
  * as pointStroke, hue per side for filters. */
-export function strokeColorAt(id: LaneId, color: string, y: number): string {
+export function strokeColorAt(id: LaneStyleId, color: string, y: number): string {
   const t = rampT(id, y);
   return rgba(mix(NEUTRAL_STROKE, hueAt(id, color, y), t), 0.6 + 0.4 * t);
 }
@@ -201,11 +206,11 @@ export function strokeColorAt(id: LaneId, color: string, y: number): string {
  * y is linear along the segment), so the gradient tracks the ramp
  * exactly. */
 function segmentStops(
-  id: LaneId,
+  id: LaneStyleId,
   color: string,
   y0: number,
   y1: number,
-  colorAt: (id: LaneId, color: string, y: number) => string
+  colorAt: (id: LaneStyleId, color: string, y: number) => string
 ): FillStop[] {
   const n = laneNeutral(id);
   const range = id.startsWith('fader') ? 1 : 0.5;
@@ -241,7 +246,7 @@ function segmentStops(
 
 /** Shade for one straight lane segment spanning values y0..y1: stroke and
  * fill are both per-value gradients (see SegmentShade). */
-export function segmentShade(id: LaneId, color: string, y0: number, y1: number): SegmentShade {
+export function segmentShade(id: LaneStyleId, color: string, y0: number, y1: number): SegmentShade {
   // EQ never takes the neutral shortcut: its ramp is absolute, so a
   // neutral segment legitimately renders a partial-strength fill from min.
   const bothNeutral = !id.startsWith('eq') && isNeutral(id, y0) && isNeutral(id, y1);

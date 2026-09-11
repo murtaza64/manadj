@@ -19,6 +19,7 @@ import {
   laneNeutral,
   pointStroke,
   segmentShade,
+  type LaneControlKind,
 } from './laneShade';
 import type { LaneId, LanePoint } from './mixModel';
 /** One automation lane: breakpoint polyline editor (canvas only; the label
@@ -59,6 +60,7 @@ const MARQUEE_CLICK_PX = 4;
 
 export function LaneCanvas({
   id,
+  kind,
   color: colorProp,
   widthPx,
   points,
@@ -76,6 +78,8 @@ export function LaneCanvas({
    * a pair is the 2-slot special case; this canvas is the shared lane
    * editor) with a `color` override carrying slot identity. */
   id: LaneId;
+  /** Override renderer semantics without expanding the pair artifact model. */
+  kind?: LaneControlKind;
   /** Stroke/fill color; defaults to the pair palette (LANE_COLORS[id]). */
   color?: string;
   /** Rendered width — a draw-effect dependency so zoom resizes redraw in
@@ -98,6 +102,7 @@ export function LaneCanvas({
   selected: number[];
   onSelectedChange: (indices: number[]) => void;
 }) {
+  const styleId = kind ?? id;
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const pointsRef = useRef(points);
   useLayoutEffect(() => { pointsRef.current = points; }, [points]);
@@ -108,10 +113,10 @@ export function LaneCanvas({
   /** Hovered breakpoint index (shows its value readout). */
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
   const [hoverInsertion, setInsertPreview] = useState<{
-    point: LanePoint; height: number; points: LanePoint[]; guides: LaneGuide[]; width: number; id: LaneId;
+    point: LanePoint; height: number; points: LanePoint[]; guides: LaneGuide[]; width: number; id: LaneId; kind?: LaneControlKind;
   } | null>(null);
   const insertPreview = hoverInsertion?.points === points && hoverInsertion.guides === guides &&
-    hoverInsertion.width === widthPx && hoverInsertion.id === id ? hoverInsertion : null;
+    hoverInsertion.width === widthPx && hoverInsertion.id === id && hoverInsertion.kind === kind ? hoverInsertion : null;
   useEffect(() => {
     const clearForModifier = (e: KeyboardEvent) => {
       if (['Alt', 'Control', 'Meta', 'Shift'].includes(e.key)) setInsertPreview(null);
@@ -230,7 +235,7 @@ export function LaneCanvas({
     // EQ/filter, EMPTY (bottom) for faders. Filters fill from this line;
     // faders and EQ fill from MIN (energy present — laneFillAnchor). The
     // fader guide coincides with the plot's bottom edge.
-    const neutralY = ly(laneNeutral(id));
+    const neutralY = ly(laneNeutral(styleId));
     const bx1 = Math.max(lx(0), 0);
     const bx2 = Math.min(lx(1), w);
     if (bx2 > bx1) {
@@ -281,12 +286,12 @@ export function LaneCanvas({
     // (off-canvas coordinates clip harmlessly). Filter segments hue-split
     // by side (LPF dark / HPF light) inside segmentShade.
     if (points.length > 0) {
-      const fillY = ly(laneFillAnchor(id));
-      const ext = lanePolyline(points, emptyLaneShade(id).y);
+      const fillY = ly(laneFillAnchor(styleId));
+      const ext = lanePolyline(points, emptyLaneShade(styleId).y);
       for (let i = 0; i < ext.length - 1; i++) {
         const a = ext[i];
         const b = ext[i + 1];
-        const shade = segmentShade(id, color, a.y, b.y);
+        const shade = segmentShade(styleId, color, a.y, b.y);
         if (shade.fill !== null) {
           const x0 = lx(a.x);
           const x1 = lx(b.x);
@@ -320,8 +325,8 @@ export function LaneCanvas({
             for (const s of shade.stroke) grad.addColorStop(s.offset, s.color);
             ctx.strokeStyle = grad;
           } else {
-            const deeper = laneDeviation(id, a.y) >= laneDeviation(id, b.y) ? a.y : b.y;
-            ctx.strokeStyle = pointStroke(id, color, deeper);
+            const deeper = laneDeviation(styleId, a.y) >= laneDeviation(styleId, b.y) ? a.y : b.y;
+            ctx.strokeStyle = pointStroke(styleId, color, deeper);
           }
           ctx.lineWidth = 2;
           ctx.stroke();
@@ -331,9 +336,9 @@ export function LaneCanvas({
       // EMPTY lane: a flat neutral-grey line at the resting default with a
       // grey fill down to the anchor — present but untouched, instead of a
       // bare background (walkthrough feedback).
-      const es = emptyLaneShade(id);
+      const es = emptyLaneShade(styleId);
       const yPx = ly(es.y);
-      const fillY = ly(laneFillAnchor(id));
+      const fillY = ly(laneFillAnchor(styleId));
       if (Math.abs(fillY - yPx) > 0.5) {
         ctx.fillStyle = es.fill;
         ctx.fillRect(bx1, Math.min(yPx, fillY), bx2 - bx1, Math.abs(fillY - yPx));
@@ -352,7 +357,7 @@ export function LaneCanvas({
     points.forEach((p) => {
       ctx.beginPath();
       ctx.arc(lx(p.x), ly(p.y), LANE_POINT_R, 0, Math.PI * 2);
-      ctx.fillStyle = pointStroke(id, color, p.y);
+      ctx.fillStyle = pointStroke(styleId, color, p.y);
       ctx.fill();
     });
 
@@ -410,7 +415,7 @@ export function LaneCanvas({
   // geometry for a frame (the "automation jumping around while zooming").
   useLayoutEffect(() => {
     drawRef.current();
-  }, [points, id, colorProp, guides, widthPx, hoverIndex, chopPreview, resizeTick, selected, marquee]);
+  }, [points, id, kind, colorProp, guides, widthPx, hoverIndex, chopPreview, resizeTick, selected, marquee]);
 
   // Scroll-triggered redraws: reposition only when the view leaves the
   // drawn span (or the zoom it was drawn at changed). LAYOUT effect: the
@@ -464,7 +469,7 @@ export function LaneCanvas({
     }
     const plain = !e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey;
     const hit = hitLane(pointsRef.current, ex - LANE_PAD, ey, lw, rect.height,
-      emptyLaneShade(id).y, plain ? beatXs : []);
+      emptyLaneShade(styleId).y, plain ? beatXs : []);
     const insertion = hit.insertion && plain
       ? { ...hit.insertion, y: snapValue(hit.insertion.y, e) } : null;
     const coincident = insertion ? pointsRef.current.findIndex(p =>
@@ -486,7 +491,7 @@ export function LaneCanvas({
 
   /** Non-fader controls magnet to their neutral 0.5. Shift suspends snapping. */
   const snapValue = (y: number, e: { shiftKey: boolean }) =>
-    !id.startsWith('fader') && !e.shiftKey && Math.abs(y - 0.5) < 0.08 ? 0.5 : y;
+    !styleId.startsWith('fader') && !e.shiftKey && Math.abs(y - 0.5) < 0.08 ? 0.5 : y;
 
   // Vertical gutters belong to this lane; neighboring hit areas never overlap.
   return (
@@ -570,7 +575,7 @@ export function LaneCanvas({
         if (dragIndex.current === null) {
           setHoverIndex(hit.nearestIndex >= 0 ? hit.nearestIndex : null);
           setInsertPreview(hit.insertion ? { point: hit.insertion, height: hit.height,
-            points: pointsRef.current, guides, width: widthPx, id } : null);
+            points: pointsRef.current, guides, width: widthPx, id, kind } : null);
           return;
         }
         const pts = [...pointsRef.current];
@@ -652,7 +657,7 @@ export function LaneCanvas({
         <span className="editor-lane-insert-preview" aria-hidden="true" style={{
           left: LANE_PAD + insertPreview.point.x * widthPx,
           top: laneValueY(insertPreview.point.y, insertPreview.height),
-          background: pointStroke(id, colorProp ?? LANE_COLORS[id], insertPreview.point.y),
+          background: pointStroke(styleId, colorProp ?? LANE_COLORS[id], insertPreview.point.y),
         }} />
       )}
     </div>

@@ -941,6 +941,7 @@ export default function RoutineEditorView() {
     return buildEditorRoutine(livePair?.projection.detail ?? detail!, trackBpms as number[], effectiveBpm!, {
       ...(livePair?.projection.edits ?? draft.edits),
       lanes: {},
+      trims: {}, // Lane-only updates own knob offsets, including clearing them.
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [detail, trackBpms, buildable, effectiveBpm, jumpEditsKey, authoringDurationBeats, pairStartBeat]);

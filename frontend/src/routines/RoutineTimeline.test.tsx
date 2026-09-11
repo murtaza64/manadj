@@ -9,6 +9,8 @@ import { buildEditorRoutine, recordedJumps, recordedPauses } from './routineEdit
 import { RoutineDraftStore, useRoutineDraft } from './routineDraftStore';
 import { emptyEdits } from './routineDraft';
 import type { EditorMode } from './editorMode';
+import type { Track } from '../types';
+import { laneValueY } from '../editor/laneHit';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -25,13 +27,15 @@ const detail: RoutineDetailWire = {
 let host: HTMLDivElement;
 let root: Root;
 let store: RoutineDraftStore;
+let resizeCallbacks: (() => void)[];
 
-function Timeline({ source = detail, mode = 'select', pairMode = false, pairBounds, auditionRange }: {
+function Timeline({ source = detail, mode = 'select', pairMode = false, pairBounds, auditionRange, tracks = new Map() }: {
   source?: RoutineDetailWire;
   mode?: EditorMode;
   pairMode?: boolean;
   pairBounds?: { handover: { enter: number; exit: number } | null };
   auditionRange?: { startSec: number; endSec: number };
+  tracks?: Map<number, Track>;
 }) {
   const { edits } = useRoutineDraft(store);
   const editor = buildEditorRoutine(source, [120, 120, 120], 120, edits)!;
@@ -42,7 +46,7 @@ function Timeline({ source = detail, mode = 'select', pairMode = false, pairBoun
     editor={editor} plannedForRuns={editor.planned}
     recordedJumpsBySlot={Object.fromEntries(raw.slots.map((s) => [s.slotId, recordedJumps(s.trace)]))}
     recordedPausesBySlot={Object.fromEntries(raw.slots.map((s) => [s.slotId, recordedPauses(s.trace)]))}
-    tracks={new Map()} waves={new Map()} meters={new Map()} hotcues={new Map()}
+    tracks={tracks} waves={new Map()} meters={new Map()} hotcues={new Map()}
     player={{ getBeat: () => 0 } as RoutinePlayer}
     draftStore={store} edits={edits} trim={pairMode ? null : editor.planned.playbackBounds}
     onTrimChange={pairMode ? null : (bounds) => store.setPlaybackBounds(bounds)}
@@ -51,7 +55,9 @@ function Timeline({ source = detail, mode = 'select', pairMode = false, pairBoun
 }
 
 beforeEach(() => {
+  resizeCallbacks = [];
   vi.stubGlobal('ResizeObserver', class {
+    constructor(callback: () => void) { resizeCallbacks.push(callback); }
     observe() {}
     disconnect() {}
   });
@@ -140,6 +146,193 @@ it('does not expose unpersistable start trims for pair artifacts', () => {
   act(() => root.render(<Timeline pairMode />));
   expect(host.querySelector('.rt-track-start')).toBeNull();
   expect(host.querySelector('.rt-start-control')).toBeNull();
+});
+
+it('authors recorded trim steps, edits with a 0.5 snap, collapses and reverts with undo/redo', () => {
+  const source = { ...detail, events: [
+    ...detail.events,
+    { kind: 'control', beat: 16, slot: 0, control: 'trim', value: 0.2 },
+    { kind: 'control', beat: 48, slot: 0, control: 'trim', value: 0.8 },
+  ] };
+  act(() => root.render(<Timeline source={source} />));
+  button('[title="Show TRIM lane"]');
+  const strip = Array.from(host.querySelectorAll<HTMLElement>('.rt-lanestrip'))
+    .find((el) => el.querySelector('.rt-lanelabel')?.textContent === 'TRIM')!;
+  act(() => strip.querySelector<HTMLButtonElement>('.rt-laneauthor')!.click());
+  const seeded = [
+    { beat: 0, value: 0.5 },
+    { beat: 16, value: 0.5 }, { beat: 16, value: 0.2 },
+    { beat: 48, value: 0.2 }, { beat: 48, value: 0.8 },
+  ];
+  expect(store.getSnapshot().edits.lanes['0:trim']).toEqual(seeded);
+  const hit = strip.querySelector<HTMLElement>('.editor-lanehit')!;
+  hit.setPointerCapture = vi.fn();
+  vi.spyOn(hit, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 654, 52));
+  pointer(hit, 'pointerdown', 487, { clientY: laneValueY(0.8, 52) });
+  pointer(hit, 'pointermove', 487, { clientY: laneValueY(0.53, 52) });
+  pointer(hit, 'pointerup', 487);
+  expect(store.getSnapshot().edits.lanes['0:trim'].at(-1)).toEqual({ beat: 48, value: 0.5 });
+  act(() => store.undo());
+  expect(store.getSnapshot().edits.lanes['0:trim']).toEqual(seeded);
+  act(() => store.redo());
+  expect(store.getSnapshot().edits.lanes['0:trim'].at(-1)?.value).toBe(0.5);
+
+  act(() => strip.querySelector<HTMLButtonElement>('.rt-lanecollapse')!.click());
+  expect(strip.querySelector('.editor-lanehit')).toBeNull();
+  expect(strip.querySelector('canvas')).not.toBeNull();
+  act(() => strip.querySelector<HTMLButtonElement>('.rt-lanecollapse')!.click());
+  expect(strip.querySelector('.editor-lanehit')).not.toBeNull();
+  act(() => strip.querySelector<HTMLButtonElement>('.rt-lanecollapse')!.click());
+  act(() => strip.querySelector<HTMLButtonElement>('.rt-lanereset')!.click());
+  expect(store.getSnapshot().edits.lanes['0:trim']).toBeUndefined();
+  act(() => store.undo());
+  expect(store.getSnapshot().edits.lanes['0:trim'].at(-1)?.value).toBe(0.5);
+  act(() => store.redo());
+  expect(store.getSnapshot().edits.lanes['0:trim']).toBeUndefined();
+});
+
+it('seeds an initial recorded trim value without an extra default node at beat zero', () => {
+  const source = { ...detail, events: [
+    ...detail.events, { kind: 'control', beat: 0, slot: 0, control: 'trim', value: 0.7 },
+  ] };
+  act(() => root.render(<Timeline source={source} />));
+  button('[title="Show TRIM lane"]');
+  const strip = Array.from(host.querySelectorAll<HTMLElement>('.rt-lanestrip'))
+    .find(el => el.querySelector('.rt-lanelabel')?.textContent === 'TRIM')!;
+  act(() => strip.querySelector<HTMLButtonElement>('.rt-laneauthor')!.click());
+  expect(store.getSnapshot().edits.lanes['0:trim']).toEqual([{ beat: 0, value: 0.7 }]);
+});
+
+function trimDial(): HTMLElement {
+  const dial = host.querySelector<HTMLElement>('.rt-sp-trim .perf-knob-dial')!;
+  dial.setPointerCapture = vi.fn();
+  return dial;
+}
+
+function knobAverage(): number {
+  const rotation = host.querySelector<HTMLElement>('.rt-sp-trim .perf-knob-pointer')!
+    .style.transform.match(/rotate\(([^)]+)deg\)/)![1];
+  return (Number(rotation) + 135) / 270;
+}
+
+it('the trim knob averages recorded steps after pointwise clipping and resets to their unoffset average', () => {
+  const source = { ...detail, events: [
+    ...detail.events,
+    { kind: 'control', beat: 16, slot: 0, control: 'trim', value: 0.2 },
+    { kind: 'control', beat: 48, slot: 0, control: 'trim', value: 0.8 },
+  ] };
+  act(() => {
+    store.setTrim('0', 0.9);
+    store.endGesture();
+    root.render(<Timeline source={source} />);
+  });
+  expect(knobAverage()).toBeCloseTo(0.775);
+  act(() => trimDial().dispatchEvent(new MouseEvent('dblclick', { bubbles: true })));
+  expect(knobAverage()).toBeCloseTo(0.425);
+  expect(store.getSnapshot().edits.trims['0']).toBeUndefined();
+  expect(store.getSnapshot().edits.lanes['0:trim']).toBeUndefined();
+});
+
+it.each(['pointerup', 'pointercancel'])('the trim knob edits the clamped linear average and seals on %s; reset preserves the envelope', (finish) => {
+  const points = [{ beat: 0, value: 0 }, { beat: 64, value: 1 }];
+  act(() => {
+    store.setLane('0', 'trim', points);
+    store.endGesture();
+    store.setTrim('0', 0.9);
+    store.endGesture();
+  });
+  expect(knobAverage()).toBeCloseTo(0.82);
+  const dial = trimDial();
+  const seal = vi.spyOn(store, 'endGesture');
+  pointer(dial, 'pointerdown', 0, { clientY: 100 });
+  pointer(dial, 'pointermove', 0, { clientY: 107.5 });
+  pointer(dial, 'pointermove', 0, { clientY: 115 });
+  pointer(dial, finish);
+  expect(seal).toHaveBeenCalledTimes(1);
+  expect(knobAverage()).toBeCloseTo(0.72);
+  expect(store.getSnapshot().edits.trims['0']).toBeCloseTo(1.5 - Math.sqrt(0.56));
+  expect(store.getSnapshot().edits.lanes['0:trim']).toEqual(points);
+  act(() => store.undo());
+  expect(knobAverage()).toBeCloseTo(0.82);
+  act(() => store.redo());
+  expect(knobAverage()).toBeCloseTo(0.72);
+  act(() => dial.dispatchEvent(new MouseEvent('dblclick', { bubbles: true })));
+  expect(knobAverage()).toBeCloseTo(0.5);
+  expect(store.getSnapshot().edits.trims['0']).toBeUndefined();
+  expect(store.getSnapshot().edits.lanes['0:trim']).toEqual(points);
+  act(() => store.undo());
+  expect(knobAverage()).toBeCloseTo(0.72);
+  act(() => store.redo());
+  expect(knobAverage()).toBeCloseTo(0.5);
+  for (const average of [0.6, 0.7]) {
+    act(() => dial.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -100 })));
+    expect(knobAverage()).toBeCloseTo(average);
+  }
+  act(() => store.undo());
+  expect(knobAverage()).toBeCloseTo(0.6);
+  act(() => store.undo());
+  expect(knobAverage()).toBeCloseTo(0.5);
+  expect(store.getSnapshot().edits.lanes['0:trim']).toEqual(points);
+});
+
+it('keeps trim read-only for pairs, including the knob and envelope editor', () => {
+  act(() => root.render(<Timeline pairMode />));
+  expect(host.querySelector('.rt-sp-trim .perf-knob')).toBeNull();
+  button('[title="Show TRIM lane"]');
+  const strip = Array.from(host.querySelectorAll('.rt-lanestrip'))
+    .find((el) => el.querySelector('.rt-lanelabel')?.textContent === 'TRIM')!;
+  expect(strip.querySelector('canvas')).not.toBeNull();
+  expect(strip.querySelector('.rt-laneauthor, .editor-lanehit')).toBeNull();
+  expect(store.getSnapshot().canUndo).toBe(false);
+});
+
+it('reserves panel cells for long metadata, role/entry, Start, trim and toggles with every lane hidden', () => {
+  const title = 'A very long track title '.repeat(8);
+  const artist = 'A very long artist name '.repeat(8);
+  const tracks = new Map(detail.cast.map((id) => [id, {
+    id, title, artist, bpm: 123.456, key: 1,
+  } as Track]));
+  act(() => {
+    store.setEntryOffsetsLive('entry', { '2': 36 });
+    store.endGesture();
+    root.render(<Timeline tracks={tracks} />);
+  });
+  const panels = Array.from(host.querySelectorAll('.rt-slotpanel'));
+  expect(panels).toHaveLength(3);
+  for (const panel of panels) {
+    expect(panel.querySelector('.rt-sp-title')?.textContent).toContain(title);
+    expect(panel.querySelector('.rt-sp-artist')?.textContent).toBe(artist);
+    expect(panel.querySelector('.rt-sp-meta')?.textContent).toContain('123.5');
+    expect(panel.querySelector('.rt-sp-trim .perf-knob')).not.toBeNull();
+    expect(panel.querySelector('.rt-lanetoggles')?.parentElement).toBe(panel);
+    for (const toggle of panel.querySelectorAll<HTMLButtonElement>('.rt-lanetoggle.on')) {
+      act(() => toggle.click());
+    }
+    expect(panel.parentElement?.querySelector('.rt-lanestrip')).toBeNull();
+    expect(panel.parentElement?.querySelector('.rt-wave-row > canvas')).not.toBeNull();
+    expect(panel.parentElement?.querySelector('.rt-wave-row .rt-lanetoggles')).toBeNull();
+  }
+  const last = panels[2];
+  expect(last.querySelector('.rt-sp-role .rt-boundary-tag')?.textContent).toBe('exits with');
+  expect(last.querySelector('.rt-sp-role .rt-entrybadge')).not.toBeNull();
+  expect(last.querySelector('.rt-sp-controls .rt-start-control')).not.toBeNull();
+  expect(last.querySelector('.rt-sp-controls .rt-sp-trim')).toBeNull();
+});
+
+it('resizes waveform bitmaps on height-only panel changes without a resize redraw loop', () => {
+  const canvas = wave();
+  expect(canvas.height).toBe(64);
+  let height = 128;
+  vi.spyOn(HTMLCanvasElement.prototype, 'clientHeight', 'get').mockImplementation(() => height);
+  act(() => resizeCallbacks.forEach((callback) => callback()));
+  expect(canvas.height).toBe(128);
+  expect(canvas.width).toBe(1024);
+  height = 156;
+  act(() => resizeCallbacks.forEach((callback) => callback()));
+  expect(canvas.height).toBe(156);
+  vi.mocked(HTMLCanvasElement.prototype.getContext).mockClear();
+  act(() => resizeCallbacks.forEach((callback) => callback()));
+  expect(HTMLCanvasElement.prototype.getContext).not.toHaveBeenCalled();
 });
 
 it('renders pair handover bounds and edits pre-window jumps without Routine trims', () => {

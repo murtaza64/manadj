@@ -20,7 +20,7 @@ import RoutineEditorView from './RoutineEditorView';
 import type { RoutineTimeline } from './RoutineTimeline';
 import type { MixPicker } from './MixPicker';
 import { routineSlotStateAt, slotLanesAt } from '../sets/routinePlan';
-import { emptyEdits } from './routineDraft';
+import { emptyEdits, type RoutineEdits } from './routineDraft';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -653,11 +653,12 @@ it.each(['saved', 'newer-first', 'older-first'])('ignores stale creation when a 
   expect(api.transitions.replacePair).not.toHaveBeenCalled();
 });
 
-async function openRoutine(originTakeUuid: string | null = null) {
+async function openRoutine(originTakeUuid: string | null = null, overrides: Partial<RoutineEdits> = {}) {
   const edits = {
     ...emptyEdits(),
     lanes: { '0:fader': [{ beat: 0, value: 0.8 }, { beat: 64, value: 1 }] },
     jumps: [{ id: 'jump-1', slotId: '0', beat: 4, deltaSec: -1 }],
+    ...overrides,
   };
   const detail: RoutineDetailWire = {
     uuid: 'routine-1', name: 'Routine', cast: [1, 2, 3],
@@ -692,6 +693,25 @@ async function waitForBoundsSave(bounds: { startBeat: number; endBeat: number } 
     expect(api.routines.saveEdits).toHaveBeenCalled();
   }, { timeout: 2000 });
 }
+
+it('does not restore a cached trim offset when resetting the knob then discarding the envelope', async () => {
+  await openRoutine(null, {
+    lanes: { '0:trim': [{ beat: 0, value: 0.25 }, { beat: 64, value: 0.75 }] },
+    trims: { '0': 0.8 },
+  });
+  vi.useFakeTimers();
+  const value = () => slotLanesAt(timelineProps().editor.planned.slots[0], 32).trim;
+  expect(value()).toBeCloseTo(0.8);
+  act(() => {
+    timelineProps().draftStore.setTrim('0', 0.5);
+    timelineProps().draftStore.endGesture();
+  });
+  expect(value()).toBeCloseTo(0.5);
+  act(() => timelineProps().draftStore.clearLane('0', 'trim'));
+  expect(timelineProps().edits.trims['0']).toBeUndefined();
+  expect(timelineProps().editor.planned.slots[0].trim).toBe(0.5);
+  expect(value()).toBeCloseTo(0.5);
+});
 
 it.each(['origin-take', null])('autosaves playback bounds without retrim (origin: %s)', async (origin) => {
   const detail = await openRoutine(origin);
