@@ -1,6 +1,10 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { registerKeyboardPointer, type KeyboardPointerFeedback } from './keyboardPointer';
+import { knobAppearance } from './knobAppearance';
+import { getSlot, resetSlots, setSlot } from '../../waveform/styleSlots';
+
+vi.mock('../../settings/persistedSettings', () => ({ writeSetting: vi.fn(), removeSetting: vi.fn() }));
 
 const request = vi.fn<(...args: unknown[]) => Promise<void> | void>();
 const exit = vi.fn();
@@ -22,7 +26,7 @@ function mouse(x: number, y: number, dx = 0, dy = 0) {
 }
 
 function client(feedback: KeyboardPointerFeedback[] = [
-  { id: 'eq', kind: 'knob', label: 'A HIGH', value: 0.5, detail: '0 dB', color: '#00ffff' },
+  { id: 'eq', kind: 'knob', control: 'eqHigh', label: 'A HIGH', value: 0.5, detail: '0 dB', color: '#00ffff' },
 ]) {
   const owner = { move: vi.fn(), cancel: vi.fn(), feedback: () => feedback };
   const registration = registerKeyboardPointer(owner);
@@ -48,6 +52,7 @@ const overlay = () => document.querySelector<HTMLElement>('.keyboard-pointer-fee
 const status = () => document.querySelector('[role="status"]')?.textContent;
 
 beforeEach(() => {
+  resetSlots();
   lock = null;
   now = 100;
   frameId = 0;
@@ -645,18 +650,18 @@ describe('shared keyboard pointer lock', () => {
   });
 });
 
-it('updates stationary SVG glyphs and plain text on movement and animation frames', () => {
+it('updates shared knobs, SVG glyphs and plain text on movement and animation frames', () => {
   const a = client([
-    { id: 'eq', kind: 'knob', label: '<b>A HIGH</b>', detail: '0 dB', value: 0.5, color: '#00ffff' },
+    { id: 'eq', kind: 'knob', control: 'eqHigh', label: '<b>A HIGH</b>', detail: '0 dB', value: 0.5, color: '#00ffff' },
     { id: 'fader', kind: 'fader', label: 'A LEVEL', detail: '50%', value: 0.5, color: '#00ffff' },
     { id: 'jog', kind: 'jog', label: 'B JOG', detail: '+2%', value: 30, color: '#ff3300' },
   ]);
   mouse(100, 200);
   a.start();
-  const knob = document.querySelector('.keyboard-pointer-knob .keyboard-pointer-indicator');
+  const knob = document.querySelector<HTMLElement>('.keyboard-pointer-knob .perf-knob-pointer:not(.perf-knob-ghost)');
   const fader = document.querySelector('.keyboard-pointer-fader .keyboard-pointer-indicator');
   const jog = document.querySelector('.keyboard-pointer-jog .keyboard-pointer-indicator');
-  expect(knob?.getAttribute('transform')).toBe('rotate(0 24 24)');
+  expect(knob?.style.transform).toBe('rotate(0deg)');
   expect(fader?.getAttribute('transform')).toBe('translate(0 24)');
   expect(jog?.getAttribute('transform')).toBe('rotate(30 24 24)');
   expect(overlay()?.querySelector('b')).toBeNull();
@@ -664,7 +669,7 @@ it('updates stationary SVG glyphs and plain text on movement and animation frame
   expect(overlay()?.querySelector('[aria-live]')).toBeNull();
   a.move.mockImplementation(() => { a.values[0].value = 1; a.values[1].value = 0; a.values[2].value = 75; });
   mouse(9999, 0, 1, 2);
-  expect(knob?.getAttribute('transform')).toBe('rotate(135 24 24)');
+  expect(knob?.style.transform).toBe('rotate(135deg)');
   expect(fader?.getAttribute('transform')).toBe('translate(0 42)');
   expect(jog?.getAttribute('transform')).toBe('rotate(75 24 24)');
   a.values[2].detail = '0%';
@@ -682,4 +687,53 @@ it('updates stationary SVG glyphs and plain text on movement and animation frame
   tick();
   expect(overlay()).toBeNull();
   expect(frames.size).toBe(0);
+});
+
+it('matches deck knob colors, boost glow, automation and the filter double ring', () => {
+  const feedback: KeyboardPointerFeedback = {
+    id: 'eq', kind: 'knob', control: 'eqLow', label: 'A LOW', value: 0.5, detail: '50%', color: '#00ffff',
+  };
+  const a = client([feedback]);
+  a.start();
+  const knob = document.querySelector<HTMLElement>('.keyboard-pointer-knob')!;
+  const fill = knob.querySelector<HTMLElement>('.perf-knob-ring-fill')!;
+  const ghost = knob.querySelector<HTMLElement>('.perf-knob-ghost')!;
+  const check = () => {
+    const appearance = knobAppearance(feedback.control, feedback.value, feedback.ghost ?? null, getSlot('full'));
+    for (const [property, value] of Object.entries(appearance.style)) expect(knob.style.getPropertyValue(property)).toBe(value);
+    expect(fill.style.background).toBe(appearance.arcBackground);
+  };
+  check();
+  expect(ghost.hidden).toBe(true);
+  feedback.ghost = 0.75;
+  tick();
+  check();
+  expect(ghost.hidden).toBe(false);
+  expect(ghost.style.transform).toBe('rotate(67.5deg)');
+  expect(knob.querySelector<HTMLElement>('.perf-base-dim')!.style.transform).toBe('rotate(0deg)');
+  feedback.control = 'filter';
+  feedback.value = 0.25;
+  feedback.ghost = null;
+  tick();
+  check();
+  expect(knob.classList.contains('perf-knob-filter')).toBe(true);
+  expect(knob.style.getPropertyValue('--knob-glow')).toBe('none');
+  expect(ghost.hidden).toBe(true);
+  expect(knob.querySelector('.perf-base-dim')).toBeNull();
+});
+
+it('recolors a stationary keyboard tooltip when waveform preferences change', () => {
+  const a = client();
+  a.start();
+  const knob = document.querySelector<HTMLElement>('.keyboard-pointer-knob')!;
+  const label = document.querySelector<HTMLElement>('.keyboard-pointer-row strong')!;
+  expect(knob.style.getPropertyValue('--knob-color')).toBe('#3373ff');
+  setSlot('full', { params: { colors: [[1, 0, 0], [0, 1, 0], [1, 0.5, 0]] } });
+  tick();
+  expect(knob.style.getPropertyValue('--knob-color')).toBe('#ff8000');
+  expect(label.style.color).toBe('rgb(255, 128, 0)');
+  expect(a.move).not.toHaveBeenCalled();
+  resetSlots();
+  tick();
+  expect(knob.style.getPropertyValue('--knob-color')).toBe('#3373ff');
 });

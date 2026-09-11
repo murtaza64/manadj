@@ -66,7 +66,7 @@ export type ReplayCue =
   | { offsetS: number; kind: 'previewStart' | 'previewEnd'; channel: CaptureDeck; playhead: number }
   | { offsetS: number; kind: 'pitch'; channel: CaptureDeck; value: number }
   | { offsetS: number; kind: 'load'; channel: CaptureDeck; trackId: number | null }
-  | { offsetS: number; kind: 'loop'; channel: CaptureDeck; region: { start: number; end: number } | null }
+  | { offsetS: number; kind: 'loop'; channel: CaptureDeck; playhead: number; region: { start: number; end: number } | null }
   | { offsetS: number; kind: 'sync'; playheads: Partial<Record<CaptureDeck, number>> };
 
 export interface ReplayPlan {
@@ -138,6 +138,7 @@ export function planReplay(events: CaptureEvent[], startT: number): PlanReplayRe
     scratchSchedules.push(entry);
   }
   const reduced = initialAudibilityState();
+  const hasScratch = events.some(e => e.kind === 'transport' && e.action.startsWith('scratch'));
   for (const e of events) {
     if (e.t > startT && e.kind === 'load' && scope[e.channel]) {
       const d = reduced.decks[e.channel];
@@ -154,7 +155,8 @@ export function planReplay(events: CaptureEvent[], startT: number): PlanReplayRe
       scope[e.channel] = entry;
       if (entry) scratchSchedules.push(entry);
     }
-    if (e.kind === 'transport' && e.action.startsWith('scratch')) {
+    if ((e.kind === 'transport' && e.action.startsWith('scratch')) || (hasScratch &&
+      (e.kind === 'loop' || (e.kind === 'transport' && ['play', 'pause', 'cue'].includes(e.action))))) {
       const d = reduced.decks[e.channel];
       const motion = d.scratch ? deckScratchMotion(d) : null;
       if (motion) motion.time = offsetS;
@@ -196,7 +198,7 @@ export function planReplay(events: CaptureEvent[], startT: number): PlanReplayRe
         cues.push({ offsetS, kind: 'sync', playheads: e.playheads });
         break;
       case 'loop':
-        cues.push({ offsetS, kind: 'loop', channel: e.channel, region: e.region });
+        cues.push({ offsetS, kind: 'loop', channel: e.channel, playhead: e.playhead, region: e.region });
         break;
       // bend is momentary by definition;
       // tenure markers and init snapshots never replay.

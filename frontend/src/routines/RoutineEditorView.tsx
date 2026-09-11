@@ -355,7 +355,7 @@ export default function RoutineEditorView() {
               { bpmA: trackEffectiveBpm(a), bpmB: trackEffectiveBpm(b) }
             );
             if (!vectorized) {
-              toast('This take cannot be vectorized (slice has no init head)');
+              toast('This take cannot be vectorized (unsupported transport or missing init head)');
               return;
             }
             setOpened({

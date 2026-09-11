@@ -11,7 +11,9 @@
  * midi-controller 09) and pushing changes through the setters. The shared
  * rotary Knob lives here too (used by the deck MIX zones).
  */
-import { useRef, type ReactNode } from 'react';
+import { useRef, type CSSProperties, type ReactNode } from 'react';
+import { knobAppearance, type KnobControl } from './knobAppearance';
+import { useStyleSlot } from '../../waveform/styleSlots';
 import { useMixer, useMixerValue } from '../../hooks/useMixer';
 import { useTakeoverHint } from '../../hooks/useTakeoverHint';
 import { takeoverKey, type TakeoverDirection } from '../../midi/takeoverFeedback';
@@ -43,6 +45,7 @@ export function Knob({
   onChange,
   title,
   className,
+  control,
   ghost = null,
   takeover = null,
 }: {
@@ -58,6 +61,8 @@ export function Knob({
   title?: string;
   /** Extra class(es) on the knob wrapper (size/ring variants). */
   className?: string;
+  /** Match editor parameter colors and value shading; other knobs stay neutral. */
+  control?: KnobControl;
   /** Automation ghost (sets 15): a second, translucent pointer at the live
    * automation value while an overlay is engaged. Display only — never
    * affects the real pointer (base state) or gesture handling. */
@@ -67,6 +72,7 @@ export function Knob({
   takeover?: TakeoverDirection | null;
 }) {
   const drag = useRef<{ startY: number; startValue: number } | null>(null);
+  const waveform = useStyleSlot('full');
 
   const set = (v: number) => {
     onChange(Math.max(min, Math.min(max, v)));
@@ -77,12 +83,15 @@ export function Knob({
     -135 + Math.max(0, Math.min(1, (v - min) / (max - min))) * 270;
   const angle = toAngle(value);
   const ghostAngle = ghost === null ? null : toAngle(ghost);
+  const appearance = control ? knobAppearance(control,
+    (value - min) / (max - min), ghost === null ? null : (ghost - min) / (max - min), waveform) : null;
 
   return (
     <div
-      className={`perf-knob${className ? ` ${className}` : ''}${
+      className={`perf-knob${control ? ' perf-knob-colored' : ''}${className ? ` ${className}` : ''}${
         takeover ? ` perf-takeover perf-takeover-${takeover}` : ''
       }`}
+      style={appearance?.style as CSSProperties | undefined}
     >
       <div
         className="perf-knob-dial"
@@ -101,6 +110,11 @@ export function Knob({
         onDoubleClick={() => set(defaultValue)}
         onWheel={(e) => set(value + wheelDelta(e, min, max))}
       >
+        {control && <>
+          <div className="perf-knob-ring perf-knob-ring-track" aria-hidden="true" />
+          <div className="perf-knob-ring perf-knob-ring-fill" style={{ background: appearance?.arcBackground }} aria-hidden="true" />
+          <div className="perf-knob-detent" aria-hidden="true" />
+        </>}
         {ghostAngle !== null && (
           <div
             className="perf-knob-pointer perf-knob-ghost"

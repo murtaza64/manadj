@@ -39,6 +39,21 @@ function seed(t: number): CaptureEvent[] {
 }
 
 describe('deriveTimeline', () => {
+  it('breaks the waveform trace at a resolved Slip loop return', () => {
+    const events: CaptureEvent[] = [
+      { t: 0, kind: 'load', channel: 'A', trackId: 7, bpm: 120 },
+      { t: 0, kind: 'transport', channel: 'A', action: 'play', playhead: 10 },
+      { t: 1, kind: 'loop', channel: 'A', playhead: 11, region: { start: 11, end: 13 } },
+      { t: 4, kind: 'tick', playheads: { A: 12 } },
+      { t: 4.5, kind: 'loop', channel: 'A', playhead: 14.5, region: null },
+      { t: 5, kind: 'tick', playheads: { A: 15 } },
+    ];
+    const model = deriveTimeline(events);
+    expect(model.decks.A.traces.some(trace => trace.some(p => p.t === 4.5 && p.playhead === 12.5))).toBe(true);
+    expect(model.decks.A.traces.some(trace => trace[0].t === 4.5 && trace[0].playhead === 14.5)).toBe(true);
+    expect(stateAt(events, 4.75).decks.A.playhead).toBe(14.75);
+  });
+
   it('audibility follows the fader, not just transport', () => {
     const events: CaptureEvent[] = [
       ...seed(0),

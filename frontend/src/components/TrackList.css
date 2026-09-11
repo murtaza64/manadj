@@ -184,13 +184,68 @@ body.col-resizing { cursor: col-resize; user-select: none; }
 .track-tier-header .track-tier-label {
   position: sticky;
   left: 12px;
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-12);
+  white-space: nowrap;
 }
 
 .track-tier-header .track-tier-count {
   color: var(--subtext0);
   font-weight: normal;
   letter-spacing: normal;
+}
+
+.follow-temperature-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-6);
+  color: var(--subtext0);
+  font-weight: normal;
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.follow-temperature-fader {
+  width: 112px;
+}
+
+.follow-temperature-fader:focus:not(:focus-visible),
+.follow-temperature-fader[data-pointer-focus="true"]:focus {
+  outline: none;
+}
+
+.follow-temperature-fader:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.follow-temperature-controls output {
+  font-variant-numeric: tabular-nums;
+}
+
+.follow-temperature-controls button {
+  height: 22px;
+  padding: 0 var(--space-6);
+  border: 1px solid var(--surface1);
+  background: var(--surface0);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.follow-temperature-controls button:hover:not(:disabled) {
+  border-color: var(--success);
+}
+
+.follow-temperature-controls :disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+@media (max-width: 600px) {
+  /* Let narrow panes scroll the entire toolbar into view. */
+  .track-tier-header .track-tier-label { position: static; }
 }
 
 /* Match score in the marks column (match-score PRD, tuning 2026-07-10):

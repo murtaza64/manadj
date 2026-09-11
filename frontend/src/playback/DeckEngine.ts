@@ -101,6 +101,7 @@ export interface DeckSnapshot {
   slipMode: boolean;
   vinylMode: boolean;
   scratching: boolean;
+  slipLoopActive: boolean;
   /** Active loop (looping 03): the region the playhead wraps in, or null. */
   loop: LoopRegion | null;
   /** The active loop's displayed size (ADR 0027 §6): the seconds region
@@ -163,6 +164,7 @@ export class DeckEngine {
    * paused-deck launch holds off until the reference deck's next beat. Any
    * stop or new start cancels it. */
   private pendingLaunchTimer: ReturnType<typeof setTimeout> | null = null;
+  private pendingLaunchAt: number | null = null;
 
   // ── Pre-start lead-in (issue 07) ──────────────────────────────────────
   /** True while the deck is running from a negative (pre-track) position:
@@ -186,6 +188,8 @@ export class DeckEngine {
    * the persisted store at the DeckContext layer. */
   private keyLock = false;
   private slipMode = false;
+  /** Outer, unlooped return clock. A null time is an armed, paused loop. */
+  private slipLoop: { position: number; time: number | null } | null = null;
   private vinylMode = true;
   private scratch: {
     motion: ScratchMotion;
@@ -296,6 +300,7 @@ export class DeckEngine {
 
   async load(info: DeckTrackInfo): Promise<void> {
     this.clearScratchSchedule();
+    this.slipLoop = null;
     this.cancelScratch();
     this.loadAbort?.abort();
     const abort = new AbortController();
@@ -720,6 +725,10 @@ export class DeckEngine {
   setSlipMode(on: boolean): void {
     if (this.slipMode === on) return;
     this.slipMode = on;
+    if (!on) {
+      this.slipLoop = null;
+      if (this.scratch) this.scratch.slip = false;
+    }
     this.emit();
   }
 
@@ -779,6 +788,19 @@ export class DeckEngine {
     const time = this.audio.ctx.currentTime;
     const motion = this.scratch.motion;
     return { ...motion, ...scratchFilterAt(motion, time), position: scratchPosition(motion, time), time };
+  }
+
+  /** The outer loop return takes precedence over a nested scratch return. */
+  getSlipReturnPlayhead(): number | null {
+    this.syncScheduledScratch();
+    if (this.slipLoop) return this.hiddenLoopPosition();
+    return this.scratch?.slip ? this.hiddenScratchPosition() : null;
+  }
+
+  private hiddenLoopPosition(): number {
+    const { position, time } = this.slipLoop!;
+    return this.clampPlayhead(position + (time !== null && this.audio
+      ? (this.audio.ctx.currentTime - time) * this.currentRate() : 0));
   }
 
   /** Read the existing shared audio clock without creating/resuming audio. */
@@ -841,14 +863,22 @@ export class DeckEngine {
   }
 
   /** Machine loop placement, without Quantize or a inherited live region. */
-  setLoopRegion(region: { start: number; end: number } | null): void {
-    const position = this.getPlayhead();
+  setLoopRegion(region: { start: number; end: number } | null, positionSeconds?: number): void {
+    const position = positionSeconds === undefined ? this.getPlayhead() : this.clampPlayhead(positionSeconds);
+    this.slipLoop = null;
+    if (positionSeconds !== undefined) this.cancelScratch(position, false);
     const start = region ? this.clampTime(region.start) : 0;
     const end = region ? this.clampTime(region.end) : 0;
     this.transport = { ...this.transport, playhead: position,
       loop: region && end > start ? { start, end, lengthBeats: (end - start) * (this.trackInfo?.bpm ?? 120) / 60 } : null };
     this.anchorPosition = position;
     this.anchorCtxTime = this.audio?.ctx.currentTime ?? 0;
+    if (positionSeconds !== undefined && isAudioRunning(this.transport)) {
+      if (position >= (this.buffer?.duration ?? 0)) {
+        this.transport = { ...this.transport, playing: false, previewing: false, hotCuePreviewSlot: null };
+        this.stopAudio(position);
+      } else this.startAudio(position);
+    }
     this.syncLoopToSource();
     this.emit();
   }
@@ -864,6 +894,7 @@ export class DeckEngine {
   scheduleScratch(frames: ScratchFrame[]): symbol {
     if (!this.sourceNode || !this.buffer || !this.audio) throw new Error('scratch replay source not prepared');
     this.clearScratchSchedule();
+    this.slipLoop = null;
     const owner = Symbol('scratch replay');
     const scheduled = frames.map((f): ScheduledScratchFrame => ({ ...f,
       motion: f.motion ? { ...f.motion, trackDuration: this.buffer!.duration,
@@ -899,6 +930,7 @@ export class DeckEngine {
     let changed = false;
     while (schedule.frames[schedule.index + 1]?.time <= now) {
       const f = schedule.frames[++schedule.index];
+      this.slipLoop = null;
       this.transport = { ...this.transport, playing: f.playing, previewing: false, hotCuePreviewSlot: null,
         playhead: f.position, loop: f.loop ? { ...f.loop, lengthBeats: (f.loop.end - f.loop.start) * (this.trackInfo?.bpm ?? 120) / 60 } : null };
       this.scratch = f.motion ? { motion: f.motion, slip: false, running: f.playing,
@@ -958,6 +990,10 @@ export class DeckEngine {
     // (e.g. the transition editor re-applying tempo match on every model
     // change) must not trigger re-renders (issue 10).
     if (pitchPercent === this.pitchPercent && bendPercent === this.bendPercent) return;
+    if (this.slipLoop && this.slipLoop.time !== null && this.audio) {
+      this.slipLoop.position = this.hiddenLoopPosition();
+      this.slipLoop.time = this.audio.ctx.currentTime;
+    }
     if (this.scratch && this.audio) {
       this.scratch.hiddenPosition = this.hiddenScratchPosition();
       this.scratch.hiddenTime = this.audio.ctx.currentTime;
@@ -1042,6 +1078,7 @@ export class DeckEngine {
     this.loadAbort?.abort();
     this.clearPendingLaunch();
     this.stopAudio(this.getPlayhead());
+    this.slipLoop = null;
     this.transport = { ...this.transport, playing: false, previewing: false, hotCuePreviewSlot: null };
     this.pendingPlay = false;
     this.emit();
@@ -1092,9 +1129,36 @@ export class DeckEngine {
       this.cueIsLoadDefault = false;
     }
     const synced = { ...this.transport, playhead: this.getPlayhead() };
-    const [next, effects] = reduceTransport(synced, event, ctx ?? this.transportContext());
+    let [next, effects] = reduceTransport(synced, event, ctx ?? this.transportContext());
     const cueChanged = next.cuePoint !== synced.cuePoint;
     const loopChanged = next.loop !== synced.loop;
+    const loopControl = event.type === 'loop-toggle' || event.type === 'loop-preset';
+    if (loopControl && synced.loop && !next.loop && this.slipLoop) {
+      const at = this.hiddenLoopPosition();
+      const running = isAudioRunning(next) && at < this.buffer.duration;
+      next = { ...next, playhead: at, ...(running ? {} : {
+        playing: false, previewing: false, hotCuePreviewSlot: null,
+      }) };
+      if (running && this.slipLoop.time === null &&
+        (this.pendingLaunchTimer !== null || this.pendingStartAt !== null)) {
+        // Keep an already-requested launch deferred; releasing a paused
+        // loop must not turn its Play intent into an early audio start.
+        if (this.pendingStartAt !== null) this.pendingStartAt = at;
+        if (this.pendingLaunchTimer !== null) this.pendingLaunchAt = at;
+        effects = [];
+      } else effects = [{ type: running ? 'start' : 'stop', at }];
+      this.slipLoop = null;
+    } else if (loopControl && !synced.loop && next.loop && this.slipMode) {
+      this.slipLoop = { position: synced.playhead,
+        time: (this.runningStartId !== null || this.leadInActive) && this.audio
+          ? this.audio.ctx.currentTime : null };
+    } else if (this.slipLoop && (!next.loop || event.type === 'pause'
+      || effects.some(e => e.type === 'stop')
+      || (event.type === 'cue-down' && next !== synced))) {
+      // Stops and absolute placements win over a pending return. Relative
+      // loop translations/resizes and nested scratches keep the outer clock.
+      this.slipLoop = null;
+    }
     this.transport = next;
     for (const effect of effects) {
       if (effect.type === 'start') {
@@ -1157,8 +1221,11 @@ export class DeckEngine {
       this.startAudio(at);
       return;
     }
+    this.pendingLaunchAt = at;
     this.pendingLaunchTimer = setTimeout(() => {
       this.pendingLaunchTimer = null;
+      const target = this.pendingLaunchAt ?? at;
+      this.pendingLaunchAt = null;
       // The gesture may have been abandoned (paused) while we waited; only
       // start if audio is still wanted.
       if (!isAudioRunning(this.transport)) return;
@@ -1169,9 +1236,9 @@ export class DeckEngine {
       // against the LIVE reference: a just-passed beat is absorbed by the
       // entry-ahead branch (phase-correct immediate start); a still-ahead
       // beat re-defers. A reference gone silent degrades to the plain cue.
-      const schedule = crossDeckLaunchTarget(at, this.currentRate(), this.launchReference());
+      const schedule = crossDeckLaunchTarget(target, this.currentRate(), this.launchReference());
       if (schedule.delaySeconds > 0) {
-        this.scheduleLaunch(at, schedule.delaySeconds);
+        this.scheduleLaunch(target, schedule.delaySeconds);
         return;
       }
       this.startAudio(schedule.at);
@@ -1179,6 +1246,7 @@ export class DeckEngine {
   }
 
   private clearPendingLaunch(): void {
+    this.pendingLaunchAt = null;
     if (this.pendingLaunchTimer !== null) {
       clearTimeout(this.pendingLaunchTimer);
       this.pendingLaunchTimer = null;
@@ -1226,6 +1294,9 @@ export class DeckEngine {
    * scroll. Idempotent re-entry (a fresh negative seek mid-lead-in) just
    * re-anchors and reschedules. */
   private beginLeadIn(ctx: AudioContext, at: number): void {
+    if (this.slipLoop && this.slipLoop.time === null) {
+      this.slipLoop = { position: this.slipLoop.position + at - this.transport.playhead, time: ctx.currentTime };
+    }
     this.anchorPosition = at;
     this.anchorCtxTime = ctx.currentTime;
     this.leadInActive = true;
@@ -1323,6 +1394,9 @@ export class DeckEngine {
     node.connect(input);
     const now = node.ctx.currentTime;
     const offset = Math.max(0, Math.min(at, this.buffer.duration));
+    if (this.slipLoop && this.slipLoop.time === null) {
+      this.slipLoop = { position: this.slipLoop.position + offset - this.transport.playhead, time: now };
+    }
     node.setRateAt(this.currentRate(), now);
     const startId = this.nextStartId++;
     node.start(offset * this.buffer.sampleRate, startId, now);
@@ -1487,6 +1561,7 @@ export class DeckEngine {
       slipMode: this.slipMode,
       vinylMode: this.vinylMode,
       scratching: this.scratch !== null,
+      slipLoopActive: this.slipLoop !== null,
       loop: this.transport.loop,
       loopBeatsLabel: this.transport.loop
         ? projectLoopBeats(this.transport.loop, this.beatTimes)

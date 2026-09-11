@@ -243,6 +243,9 @@ _Avoid_: same artist (implies exact string equality, which the library cannot su
 **Follow mode**:
 A per-Deck toggle that keeps the browse list continuously filtered to candidate next Tracks for that Deck's loaded Track, updating hands-off as Tracks change — serving "finding the next track painlessly during a set". A followed Track's candidates carry all three evidence tiers: heuristic Compatible Tracks unioned with the Observed tier and the known tier (Tracks with a saved Transition from it, Tracks with a saved Cameo hosted by it, and Linked Tracks) — a known or Observed Track surfaces even when heuristics would exclude it, and "known only" narrows to just the known tier. With multiple Decks following, their candidate sets union. The followed list is ordered by one total candidate order: the Known strata first (in Known-strength order; a pair takes its best), then Observed (by Take count and recency), then Compatible Tracks by Match score (revised 2026-07-08 from the provisional key-relation tiers); best position wins across followed Decks. The score is a sortable column, the heuristic stratum's default sort — choosing another sort deliberately reorders that stratum, while the Known and Observed strata stay pinned on top. Follow rides playback: once any Deck follows, all playing Decks become references; starting a Deck spreads Follow to it, and pausing one removes it while another plays. The last followed Deck survives full silence. Playback never enables Follow from nothing: when no Deck follows, turning it on is the user's act.
 
+**Temperature**:
+Follow's opt-in variety control within Compatible (#251). Zero preserves descending Match score; higher values sample a score-weighted order without replacement. Known ordering, admission, and displayed scores do not change; explicit column sorts override Temperature. Draws are keyed by the followed Track set, candidate identity, and a session-only reroll seed, so filtering and rerenders preserve relative order. Temperature is a persisted preference; Reroll changes only the draw. Separate from Auto DJ's planned adventurousness dial and Dig's Wildcard.
+
 **Observed**:
 Discovery's middle evidence tier: an ordered Track pair mixed repeatedly — multiple Takes — with nothing curated for the pair (no Link, no saved Transition). Behavioral evidence, accrued hands-off from normal playing: stronger than Compatible's metadata heuristics, weaker than Known's explicit acts. The Take-count floor is a tunable heuristic (nominally ≥2, because Handover detection is deliberately liberal), not part of the definition; Take count and recency order within the tier. Cameo Takes still count for nothing in discovery until promoted. A pair leaves the tier upward the moment it becomes Known.
 _Avoid_: implicit favorite, inferred pair
@@ -264,7 +267,7 @@ _Avoid_: chain (bare noun implies a stored artifact)
 
 **Wildcard**:
 The deliberate randomness slot in discovery's surfaces: alternates between a neglected Unplaced Track (sampled by anti-ranking — old, evidence-free, never auditioned) and an untried pair (Compatible, zero Takes). Reroll is its only control; it respects the active filter chips (spice within tonight's vibe, not against it) and never blends into ranked or evidence-ordered lists. The untried-pair form is an evidence generator: audition it and the loop closes — Take, Observed, Chain candidate.
-_Avoid_: shuffle, ranking jitter (rejected: noise inside a ranking makes the ranking untrustworthy)
+_Avoid_: shuffle, ranking jitter (Wildcard stays separate from ranked lists; Follow's opt-in Temperature is a distinct control)
 
 **Seed Set from Playlist**:
 A gesture creating a Set from a Playlist: the Play order becomes the Set's order, adjacencies Unresolved; the source Playlist is untouched and no link between them persists. The standing bridge from playlist-first planning (the giant playlist firms up, then one gesture hands over to the Set editor), and the one-time migration for playlist-era sets so Unplaced graduation reflects history.
@@ -342,7 +345,14 @@ A backward platter spin that continues after the hand releases, ending when the 
 A platter-controlled gesture that holds or moves the audible Track position forward and backward, with speed and musical pitch coupled. Includes any released Spinback continuation.
 
 **Slip mode**:
-A per-Deck setting that keeps the normal playback timeline advancing behind a Scratch or Spinback and returns to it when the gesture ends. With Slip off, release keeps the manipulated position. A paused Deck stays paused. The setting is latched at touch-down; toggles during a gesture apply to the next one. Slip-based loop rolls are separate and not implemented.
+A per-Deck setting that keeps the normal playback timeline advancing behind a Scratch, Spinback, or Slip loop and returns to it on release. With Slip off, release keeps the manipulated position. A paused Deck stays paused. Slip arms at scratch touch-down or loop entry. Switching it off immediately cancels all pending returns without moving playback or ending the gesture; switching it on applies only to the next gesture.
+
+During an active Slip gesture, the lower performance waveform and its beat/cue marks follow the return timeline; the upper half follows audible playback. A scratch inside an ordinary loop has a looped return; inside a Slip loop the lower half follows the outer, unlooped return.
+
+**Slip loop**:
+A loop entered with Slip enabled. Its background timeline advances unlooped at composed pitch/bend, surviving resize, relative loop translation, and nested scratches. Loop toggle or the lit preset releases to that timeline; pause, absolute seek/cue, Load, or machine replacement cancels the return. Paused entry arms a stationary return until audio starts. The audible loop can continue after the hidden timeline reaches track end; release then stops at EOF. Dedicated momentary Roll pads are not implemented.
+
+Sessions replay the recorded loop-exit landing, including from a mid-loop start. The hidden return waveform is live-only; replay does not reconstruct its clock. Take/Routine promotion refuses Slip-loop evidence until it can preserve the return jump.
 
 **Quantize**:
 An app-wide sticky toggle (default on) making beat-relative performance gestures grid-aligned: cue and Hot Cue placement snap to the nearest beat, auto-loop regions snap to the nearest beat, and Hot Cue jumps while playing are phase-preserving — a whole-beat displacement landing at the cue plus the playhead's intra-beat phase, so the groove never stumbles. Evaluated at gesture time; imports are not gestures and never snap. Gridless Tracks behave as if it were off. Beat jump (inherently whole-beat), cue return, paused-cue seeks, loop halve/double, and Transition-editor snapping are outside its authority.

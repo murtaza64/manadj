@@ -35,8 +35,10 @@
   background: var(--mantle);
   border: 1px solid var(--surface0);
   padding: var(--space-16);
-  min-width: 420px;
-  max-width: 500px;
+  box-sizing: border-box;
+  width: min(450px, calc(100vw - 40px));
+  max-height: min(680px, calc(100dvh - 40px));
+  overflow-y: auto;
 }
 
 .follow-modal-reference-section {
