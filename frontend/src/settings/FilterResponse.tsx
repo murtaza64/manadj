@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { AutoBlurSelect } from '../components/AutoBlurSelect';
+import { HFader } from '../components/performance/MixerStrip';
 import { useAutomationGhost, useMixer, useMixerValue } from '../hooks/useMixer';
 import { CHANNEL_IDS, type ChannelId } from '../playback/mixer';
 import { describeSweepFilter, sweepResponseDb } from '../playback/sweepFilter';
@@ -32,11 +33,14 @@ export function FilterResponse() {
         </label>
       </div>
       <div className="settings-filter-sweep">
-        <label htmlFor="settings-sweep">Deck filter</label>
+        <span>Deck filter</span>
         <output>{descriptor.wet === 0 ? 'Dry center' : `${descriptor.type === 'lowpass' ? 'LP' : 'HP'} ${Math.round(descriptor.frequency)} Hz`}</output>
-        <input id="settings-sweep" type="range" min="-1" max="1" step="0.001"
-          value={position} disabled={owned} onChange={(event) => {
-            if (!mixer.isAutomationEngaged()) mixer.setFilter(deckId, Number(event.target.value));
+        <HFader id="settings-sweep" ariaLabel="Deck filter"
+          label={Number(position.toPrecision(6)).toString()} accent detent
+          fill fillColor="var(--accent)"
+          min={-1} max={1} step={0.001} defaultValue={0}
+          value={position} disabled={owned} onChange={(value) => {
+            if (!mixer.isAutomationEngaged()) mixer.setFilter(deckId, value);
           }} />
         <span>Low pass</span>
         <button className="btn btn-mini" disabled={owned} onClick={() => {

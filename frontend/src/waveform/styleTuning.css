@@ -34,8 +34,9 @@
 .tune-slider input {
   accent-color: var(--accent);
 }
-.tune-slider .val {
-  color: var(--text);
+.tune-slider > .perf-fader {
+  width: 100%;
+  flex-shrink: 0;
 }
 .tune-band-gain > span::before {
   content: '';
@@ -45,8 +46,8 @@
   margin-right: var(--space-8);
   background: var(--waveform-band);
 }
-.settings-page .tune-band-gain input[type='range'] {
-  accent-color: var(--waveform-band);
+.tune-band-gain > .perf-fader {
+  --accent: var(--waveform-band);
 }
 .tune-slider input[type='color'] {
   width: 100%;

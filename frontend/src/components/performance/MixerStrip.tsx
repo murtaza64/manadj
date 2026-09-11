@@ -133,6 +133,9 @@ export function Knob({
 export function HFader({
   label,
   kbd,
+  id,
+  ariaLabel,
+  step,
   min,
   max,
   value,
@@ -150,6 +153,9 @@ export function HFader({
 }: {
   label: string;
   kbd?: ReactNode;
+  id?: string;
+  ariaLabel?: string;
+  step?: number;
   min: number;
   max: number;
   value: number;
@@ -173,11 +179,21 @@ export function HFader({
   const ref = useRef<HTMLDivElement>(null);
   const dragging = useRef(false);
 
+  const set = (raw: number) => {
+    if (!Number.isFinite(raw)) return;
+    const clamped = Math.max(min, Math.min(max, raw));
+    const snapped = step && step > 0
+      ? Number((min + Math.round((clamped - min) / step) * step).toPrecision(12))
+      : clamped;
+    onChange(Math.max(min, Math.min(max, snapped)));
+  };
+
   const setFromPointer = (clientX: number) => {
     if (!ref.current) return;
     const rect = ref.current.getBoundingClientRect();
+    if (rect.width <= 0) return;
     const f = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
-    onChange(min + f * (max - min));
+    set(min + f * (max - min));
   };
 
   const fraction = (value - min) / (max - min);
@@ -190,10 +206,19 @@ export function HFader({
   return (
     <div
       ref={ref}
+      id={id}
+      role={ariaLabel ? 'slider' : undefined}
+      aria-label={ariaLabel}
+      aria-valuemin={ariaLabel ? min : undefined}
+      aria-valuemax={ariaLabel ? max : undefined}
+      aria-valuenow={ariaLabel ? value : undefined}
+      aria-disabled={ariaLabel ? disabled : undefined}
+      tabIndex={ariaLabel ? (disabled ? -1 : 0) : undefined}
       className={`perf-fader${accent ? ' accent' : ''}${disabled ? ' disabled' : ''}${takeover ? ` perf-takeover perf-takeover-${takeover}` : ''}`}
       title={title}
       onPointerDown={(e) => {
         if (disabled) return;
+        if (ariaLabel) e.currentTarget.focus({ preventScroll: true });
         e.currentTarget.setPointerCapture(e.pointerId);
         dragging.current = true;
         setFromPointer(e.clientX);
@@ -201,12 +226,31 @@ export function HFader({
       onPointerMove={(e) => {
         if (dragging.current && !disabled) setFromPointer(e.clientX);
       }}
-      onPointerUp={() => (dragging.current = false)}
+      onPointerUp={(e) => {
+        dragging.current = false;
+        if (ariaLabel) e.currentTarget.blur();
+      }}
       onPointerCancel={() => (dragging.current = false)}
-      onDoubleClick={() => !disabled && onChange(defaultValue)}
+      onLostPointerCapture={() => (dragging.current = false)}
+      onDoubleClick={() => !disabled && set(defaultValue)}
+      onKeyDown={(e) => {
+        if (!ariaLabel || disabled || e.ctrlKey || e.metaKey || e.altKey) return;
+        const increment = step ?? (max - min) / 100;
+        let next: number;
+        if (e.key === 'ArrowRight' || e.key === 'ArrowUp') next = value + increment;
+        else if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') next = value - increment;
+        else if (e.key === 'PageUp') next = value + increment * 10;
+        else if (e.key === 'PageDown') next = value - increment * 10;
+        else if (e.key === 'Home') next = min;
+        else if (e.key === 'End') next = max;
+        else return;
+        e.preventDefault();
+        e.stopPropagation();
+        set(next);
+      }}
       onWheel={(e) => {
         if (disabled) return;
-        onChange(Math.max(min, Math.min(max, value + wheelDelta(e, min, max))));
+        set(value + wheelDelta(e, min, max));
       }}
     >
       <div className="perf-fader-track" />

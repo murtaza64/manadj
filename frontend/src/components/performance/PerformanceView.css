@@ -902,6 +902,11 @@
 
 .perf-fader.disabled { opacity: 0.4; cursor: default; }
 
+.perf-fader[role='slider']:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: var(--space-2);
+}
+
 .perf-fader-track {
   position: absolute;
   top: 50%;

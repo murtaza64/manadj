@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { CommittedNumberInput } from '../components/CommittedNumberInput';
+import { HFader } from '../components/performance/MixerStrip';
 import {
-  mouseJogBendTarget, resetMouseJogSettings, setMouseJogSettings,
+  DEFAULT_MOUSE_JOG_SETTINGS, mouseJogBendTarget, resetMouseJogSettings, setMouseJogSettings,
   useMouseJogSettings, useMouseJogSpeed,
 } from '../components/performance/mouseJogSettings';
 import { DeckScope } from '../contexts/DeckContext';
@@ -55,12 +56,15 @@ export default function MouseJogSettings({ performance = false }: { performance?
           {PARAMS.map(({ key, label, unit, min, max, step, note }) => (
             <div className="settings-field" key={key}>
               <div>
-                <label htmlFor={`mouse-jog-${key}`}>{label}</label>
+                <span className="settings-field-label">{label}</span>
                 <p>{note}</p>
               </div>
               <div className="settings-field-inputs">
-                <input id={`mouse-jog-${key}`} type="range" min={min} max={max} step={step}
-                  value={settings[key]} onChange={(event) => setMouseJogSettings({ [key]: event.currentTarget.valueAsNumber })} />
+                <HFader id={`mouse-jog-${key}`} ariaLabel={label}
+                  label={Number(settings[key].toPrecision(6)).toString()} accent
+                  fill fillColor="var(--accent)"
+                  min={min} max={max} step={step} defaultValue={DEFAULT_MOUSE_JOG_SETTINGS[key]}
+                  value={settings[key]} onChange={(value) => setMouseJogSettings({ [key]: value })} />
                 <CommittedNumberInput key={resetKey} aria-label={`${label} value`}
                   min={min} max={max} step={step} value={settings[key]}
                   onCommit={(value) => setMouseJogSettings({ [key]: value })} />
