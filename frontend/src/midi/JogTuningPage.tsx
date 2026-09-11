@@ -176,7 +176,7 @@ export default function JogTuningPage() {
       <header className="settings-section-heading">
         <div>
           <h2>Jog calibration</h2>
-          <p>Load and play a Deck in Performance, then return here. Slider changes apply to the next jog message.</p>
+          <p>Test with the decks above in Performance. Slider changes apply to the next jog message.</p>
         </div>
         <div className={`jog-tune__connection${selectedInput ? ' online' : ''}`}>
           {selectedInput ? selectedInput.name : access ? 'GRV6 not found' : 'MIDI waiting'}

@@ -70,7 +70,21 @@ export function isTextEntryTarget(target: EventTarget | null): boolean {
  * like the library hub), or a held cue would stick.
  */
 export function isGuardedKeyEvent(event: KeyboardEvent): boolean {
-  return isTypingTarget(event) || event.ctrlKey || event.metaKey || event.altKey;
+  return isTypingTarget(event) || event.ctrlKey || event.metaKey || event.altKey || hasKeyboardOverlay();
+}
+
+/** Legacy filter dialogs and current dialog/menu surfaces both own their keys. */
+export function hasKeyboardOverlay(): boolean {
+  if (typeof document === 'undefined') return false;
+  return [...document.querySelectorAll<HTMLElement>('[role="dialog"], [role="menu"], [class*="modal-overlay"]')]
+    .some(node => {
+      if (node.closest('[hidden], [inert], [aria-hidden="true"]')) return false;
+      for (let parent: HTMLElement | null = node; parent; parent = parent.parentElement) {
+        const style = getComputedStyle(parent);
+        if (style.display === 'none' || style.visibility === 'hidden') return false;
+      }
+      return true;
+    });
 }
 
 // The two keys are the left/right HAND layouts, not Deck A/B: 'A' is the

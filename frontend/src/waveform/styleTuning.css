@@ -1,19 +1,6 @@
 .tune-page {
   min-width: 0;
 }
-.tune-preview-label {
-  font-size: var(--font-small);
-  color: var(--subtext0);
-  margin: var(--space-12) 0 var(--space-4);
-}
-.tune-main-preview .waveform-container,
-.tune-main-preview .waveform-canvas {
-  height: 192px;
-}
-.tune-minimap-preview .minimap-container,
-.tune-minimap-preview .minimap-canvas {
-  height: 64px;
-}
 .tune-controls {
   margin-top: var(--space-24);
   padding-top: var(--space-16);

@@ -290,7 +290,7 @@ export default function PlaylistSidebar({
 
   return (
     <>
-      <div style={{
+      <div data-browse-area="sidebar" data-browse-focused={focused} style={{
         width: '200px',
         background: 'var(--crust)',
         borderRight: '1px solid var(--surface0)',

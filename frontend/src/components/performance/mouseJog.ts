@@ -1,4 +1,6 @@
 import { mouseSeekDelta } from './mouseControl';
+import { DEFAULT_MOUSE_JOG_SETTINGS, mouseJogBendTarget } from './mouseJogSettings';
+import type { MouseJogSettings } from './mouseJogSettings';
 
 export interface MouseJogPort {
   getSnapshot(): { playing: boolean; scratching: boolean; vinylMode: boolean };
@@ -12,33 +14,54 @@ export interface MouseJogPort {
 
 const MOTION_WINDOW_MS = 100;
 const FILTER_PERIOD_MS = 25;
-const RESPONSE_MS = 50;
-const IDLE_MS = 500;
 
 export class MouseJogController {
   private readonly port: MouseJogPort;
+  private readonly tuning: () => MouseJogSettings;
+  private readonly onSpeed?: (speed: number) => void;
   private samples: { time: number; dx: number }[] = [];
   private timer: ReturnType<typeof setInterval> | null = null;
   private lastMotion = 0;
   private lastPeriod = 0;
   private appliedBend = 0;
+  private speed = 0;
   private contactHeld = false;
+  private armed = false;
   private ownsScratch = false;
   private disposed = false;
 
-  constructor(port: MouseJogPort) {
+  constructor(
+    port: MouseJogPort,
+    tuning: () => MouseJogSettings = () => DEFAULT_MOUSE_JOG_SETTINGS,
+    onSpeed?: (speed: number) => void,
+  ) {
     this.port = port;
+    this.tuning = tuning;
+    this.onSpeed = onSpeed;
   }
 
-  /** Accepted platter contact, not merely a held modifier. */
+  /** Owned engine scratch, not armed contact. */
   get isTouching(): boolean {
     return this.ownsScratch;
+  }
+
+  get isPlatterMode(): boolean {
+    return this.armed || this.ownsScratch;
   }
 
   move(dx: number, elapsedMs: number): void {
     if (this.disposed) return;
     this.syncState();
     if (!Number.isFinite(dx) || dx === 0) return;
+    if (this.armed) {
+      this.armed = false;
+      // beginScratch emits synchronously: cancellation must see ownership,
+      // and its result must not be overwritten by the acceptance check.
+      this.ownsScratch = true;
+      this.port.beginScratch();
+      this.ownsScratch = this.ownsScratch && this.port.getSnapshot().scratching;
+      if (!this.ownsScratch) return;
+    }
     const state = this.port.getSnapshot();
     if (state.scratching) {
       if (this.ownsScratch) {
@@ -74,22 +97,19 @@ export class MouseJogController {
     this.contactHeld = true;
     this.stopBend();
     const state = this.port.getSnapshot();
-    if (!state.vinylMode || state.scratching) return;
-    // beginScratch emits synchronously: cancellation must see our ownership,
-    // and its result must not be overwritten by the acceptance check.
-    this.ownsScratch = true;
-    this.port.beginScratch();
-    this.ownsScratch = this.ownsScratch && this.port.getSnapshot().scratching;
+    this.armed = state.vinylMode && !state.scratching;
   }
 
   syncState(): void {
     const state = this.port.getSnapshot();
+    if (!state.vinylMode || (state.scratching && !this.ownsScratch)) this.armed = false;
     if (!state.scratching) this.ownsScratch = false;
     if (!state.playing || state.scratching) this.stopBend();
   }
 
   cancel(): void {
     const end = this.ownsScratch && this.port.getSnapshot().scratching;
+    this.armed = false;
     this.ownsScratch = false;
     // Keep the physical edge latched until release, even after engine override.
     this.stopBend();
@@ -105,7 +125,8 @@ export class MouseJogController {
     this.syncState();
     if (this.timer === null) return;
     const now = performance.now();
-    if (now - this.lastMotion >= IDLE_MS) {
+    const settings = this.tuning();
+    if (now - this.lastMotion >= MOTION_WINDOW_MS + 8 * settings.smoothingMs) {
       this.stopBend();
       return;
     }
@@ -113,14 +134,22 @@ export class MouseJogController {
     // Always divide by the full window, never an event's elapsed time. One
     // small packet cannot masquerade as a high-speed sweep on first contact.
     const velocity = this.samples.reduce((sum, sample) => sum + sample.dx, 0) * 1000 / MOTION_WINDOW_MS;
-    const target = Math.sign(velocity) * Math.min(8, 8 * (Math.abs(velocity) / 6000) ** 1.5);
-    const alpha = 1 - Math.exp(-(now - this.lastPeriod) / RESPONSE_MS);
+    this.publishSpeed(velocity);
+    if (this.timer === null) return;
+    const target = mouseJogBendTarget(velocity, settings);
+    const alpha = settings.smoothingMs === 0 ? 1 : 1 - Math.exp(-(now - this.lastPeriod) / settings.smoothingMs);
     this.lastPeriod = now;
     const bend = this.appliedBend + alpha * (target - this.appliedBend);
     if (bend !== this.appliedBend) {
       this.appliedBend = bend;
       this.port.setBend(bend);
     }
+  }
+
+  private publishSpeed(speed: number): void {
+    if (speed === this.speed) return;
+    this.speed = speed;
+    this.onSpeed?.(speed);
   }
 
   private stopBend(): void {
@@ -131,5 +160,6 @@ export class MouseJogController {
       this.appliedBend = 0;
       this.port.setBend(0);
     }
+    this.publishSpeed(0);
   }
 }

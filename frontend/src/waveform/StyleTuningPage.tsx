@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import type { CSSProperties } from 'react';
-import { SettingsDeckPreview } from '../settings/SettingsDeckPreview';
 import { AutoBlurSelect } from '../components/AutoBlurSelect';
 import { STYLE_REGISTRY, getStyle } from './styles';
 import type { RGB, StyleParams } from './styles';
@@ -52,13 +51,11 @@ export default function StyleTuningPage() {
   return (
     <div className="tune-page">
       <div className="settings-section-heading">
-        <div><h2>Waveforms</h2><p>Set the full waveform and minimap independently. Changes repaint every surface live.</p></div>
+        <div><h2>Waveforms</h2><p>Set the full waveform and minimap independently. The waveforms above are the live preview.</p></div>
         <button className="btn btn-secondary" onClick={() => resetSlots()}>
           Reset waveform defaults
         </button>
       </div>
-      <SettingsDeckPreview />
-
       <div className="tune-controls">
         <div className="tune-slot-row">
           <span>editing slot:</span>

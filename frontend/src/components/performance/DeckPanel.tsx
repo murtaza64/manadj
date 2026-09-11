@@ -713,7 +713,7 @@ function PlayZone() {
             <button
               className={`player-button${bend < 0 ? ' perf-nudge-held' : ''}`}
               disabled={!ready}
-              title={`Nudge slower (hold); hold ${keys.jog.toUpperCase()} and move mouse left to bend/seek; Shift adds platter touch when Vinyl is on`}
+              title={`Nudge slower (hold); hold ${keys.jog.toUpperCase()} and move mouse left to bend/seek; Shift arms scratch when Vinyl is on, movement grabs the platter`}
               onPointerDown={bendStart(-1)}
               onPointerUp={bendEnd}
               onPointerCancel={bendEnd}
@@ -724,7 +724,7 @@ function PlayZone() {
             <button
               className={`player-button${bend > 0 ? ' perf-nudge-held' : ''}`}
               disabled={!ready}
-              title={`Nudge faster (hold); hold ${keys.jog.toUpperCase()} and move mouse right to bend/seek; Shift adds platter touch when Vinyl is on`}
+              title={`Nudge faster (hold); hold ${keys.jog.toUpperCase()} and move mouse right to bend/seek; Shift arms scratch when Vinyl is on, movement grabs the platter`}
               onPointerDown={bendStart(1)}
               onPointerUp={bendEnd}
               onPointerCancel={bendEnd}

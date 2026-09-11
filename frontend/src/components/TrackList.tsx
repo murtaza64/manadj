@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef } from 'react';
+import type { ReactNode } from 'react';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
 import TrackRow, { type LoadedMark, type SelectMods, type TransitionMark } from './TrackRow';
@@ -57,6 +58,7 @@ interface TrackListProps {
    * pre-grouped tracks (Follow's tier ordering); this only renders the
    * boundaries. Absent = flat table. */
   groupLabelFor?: (track: Track) => string;
+  groupControlsFor?: (label: string) => ReactNode;
   /** Match score column (match-score PRD): when set, a score column
    * renders (Follow views). Known rows show their marks, not a score —
    * callers may return null for them. */
@@ -90,6 +92,7 @@ export default function TrackList({
   links,
   deckIds,
   groupLabelFor,
+  groupControlsFor,
   scoreFor,
   scoreSorted = false,
   onScoreSort,
@@ -270,8 +273,11 @@ export default function TrackList({
                         {/* Sticky-left so the label survives horizontal
                             scroll — the td spans the whole (wide) table. */}
                         <span className="track-tier-label">
-                          {row.label}
-                          <span className="track-tier-count"> — {row.count}</span>
+                          <span>
+                            {row.label}
+                            <span className="track-tier-count"> — {row.count}</span>
+                          </span>
+                          {groupControlsFor?.(row.label)}
                         </span>
                       </td>
                     </tr>
