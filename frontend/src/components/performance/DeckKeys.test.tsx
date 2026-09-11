@@ -124,8 +124,8 @@ describe('mouse-key gestures and cue walking', () => {
   let root: ReturnType<typeof createRoot>;
   let mouseX = 0;
   let mouseY = 0;
-  const render = (active = true) => act(() => root.render(
-    <KeepAliveView active={active}><DeckKeys /></KeepAliveView>
+  const render = (active = true, enabled = true) => act(() => root.render(
+    <KeepAliveView active={active}><DeckKeys enabled={enabled} /></KeepAliveView>
   ));
   const key = (value: string, options: KeyboardEventInit = {}, type = 'keydown', target: EventTarget = document) => {
     const event = new KeyboardEvent(type, { key: value, bubbles: true, cancelable: true, ...options });
@@ -144,6 +144,37 @@ describe('mouse-key gestures and cue walking', () => {
   afterEach(() => {
     act(() => root.unmount());
     vi.useRealTimers();
+  });
+
+  it('releases owned cue, pad and pointer gestures when library takes focus', () => {
+    render(); move(100, 100);
+    key('f'); key('z'); key('q'); key('t', { shiftKey: true }); move(130, 100);
+    expect(engine.cueDown).toHaveBeenCalledOnce();
+    expect(hotCues.down).toHaveBeenCalledWith(1);
+    render(true, false);
+    expect(engine.cueUp).toHaveBeenCalledOnce();
+    expect(hotCues.up).toHaveBeenCalledExactlyOnceWith(1);
+    expect(fixture.snapshot.scratching).toBe(false);
+    mixer.setFilter.mockClear(); engine.seek.mockClear();
+    move(200, 100); key('d'); key('a'); key('z', {}, 'keyup'); key('f', {}, 'keyup');
+    expect(mixer.setFilter).not.toHaveBeenCalled();
+    expect(engine.seek).not.toHaveBeenCalled();
+    expect(engine.togglePlay).not.toHaveBeenCalled();
+    expect(engine.jumpBeats).not.toHaveBeenCalled();
+    expect(hotCues.up).toHaveBeenCalledTimes(1);
+    expect(engine.cueUp).toHaveBeenCalledTimes(1);
+    render(true, true); key('d'); expect(engine.togglePlay).toHaveBeenCalledOnce();
+  });
+
+  it('guards cue-walking behind a modal as well as ordinary transport', () => {
+    render();
+    const dialog = document.createElement('div'); dialog.setAttribute('role', 'dialog');
+    document.body.append(dialog);
+    try {
+      key('a', { metaKey: true }); key('s', { metaKey: true }); key('d');
+      expect(hotCues.walk).not.toHaveBeenCalled();
+      expect(engine.togglePlay).not.toHaveBeenCalled();
+    } finally { dialog.remove(); }
   });
 
   it.each(['A', 'B', 'C', 'D'] as const)('maps all knobs and the fader to focused deck %s', (deck) => {

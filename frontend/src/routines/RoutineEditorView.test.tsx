@@ -274,7 +274,9 @@ it('keeps editor Space and undo with browse hidden, but leaves Settings native k
   await openReview(false, false);
   const navigate = vi.fn();
   const selected = vi.fn(() => ({ id: 3 } as Track));
-  sharedBrowseHandle.current = { navigate, getSelectedTrack: selected };
+  sharedBrowseHandle.current = { navigate, getSelectedTrack: selected,
+    navigatePage: vi.fn(), navigateEnd: vi.fn(), areaMove: vi.fn(), activate: vi.fn(),
+    selectAll: vi.fn(), focusSearch: vi.fn(), openFollowParams: vi.fn() };
   const store = timelineProps().draftStore;
   const undo = vi.spyOn(store, 'undo');
   const redo = vi.spyOn(store, 'redo');

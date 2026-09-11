@@ -1270,3 +1270,46 @@
   .perf-root { overflow: auto; max-height: 70dvh; }
   .perf-surface { min-width: 1100px; }
 }
+.perf-keyboard-scope { display: contents; }
+.app-browse [data-browse-area] { position: relative; }
+.app-main:has(.perf-root[data-view-active="true"] .perf-keyboard-scope[data-library-focus="true"]) [data-browse-focused="true"]::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  border: 3px solid var(--accent);
+  box-shadow: inset 0 0 12px color-mix(in srgb, var(--accent) 25%, transparent);
+  pointer-events: none;
+}
+.perf-root:has(.perf-keyboard-scope[data-library-focus="true"]) .perf-kbd {
+  visibility: hidden;
+}
+.perf-keyboard-help-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: grid;
+  place-items: center;
+  background: #000b;
+}
+.perf-keyboard-help {
+  width: min(540px, calc(100vw - 24px));
+  max-height: calc(100dvh - 24px);
+  overflow: auto;
+  box-sizing: border-box;
+  padding: 16px;
+  background: var(--mantle);
+  border: 1px solid var(--accent);
+  color: var(--text);
+  font-size: 12px;
+}
+.perf-keyboard-help header, .perf-keyboard-help dl > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+.perf-keyboard-help dl > div { padding: 5px 0; border-bottom: 1px solid var(--surface0); }
+.perf-keyboard-help dt { flex: 0 0 44%; color: var(--accent); font-family: monospace; }
+.perf-keyboard-help dd { margin: 0; flex: 1; }
+.perf-keyboard-help p { color: var(--subtext0); line-height: 1.5; }
+.perf-keyboard-help button { background: var(--surface0); color: var(--text); border: 1px solid var(--surface1); cursor: pointer; }
