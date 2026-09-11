@@ -1,4 +1,5 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react'
+import { FeedbackEntry } from '../feedback/FeedbackEntry'
 import './RootErrorBoundary.css'
 
 interface Props {
@@ -57,6 +58,10 @@ export default class RootErrorBoundary extends Component<Props, State> {
           >
             RELOAD
           </button>
+          <FeedbackEntry readers={{
+            view: () => 'crash',
+            crash: () => ({ name: error.name, message: error.message, stack: error.stack, component_stack: componentStack }),
+          }} />
         </div>
       </div>
     )

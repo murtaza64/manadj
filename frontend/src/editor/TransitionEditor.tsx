@@ -9,6 +9,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { registerDiagnostics } from '../feedback/diagnostics';
 import { api } from '../api/client';
 import { useBeatgridData } from '../hooks/useBeatgridData';
 import { gridFirstBpm } from '../components/deckControls/bpmCommit';
@@ -859,6 +860,15 @@ function TransitionEditorInner() {
   // drive the SHARED browse panel (gh#165), so they bind only while this
   // view is the visible one.
   const viewActive = useViewActive();
+  useEffect(() => {
+    if (!viewActive) return;
+    return registerDiagnostics('editor', () => {
+      const s = store.getSnapshot();
+      return { surface: 'pair', pair_key: s.pairKey, active_index: s.session.active,
+        uuid: s.session.items[s.session.active]?.uuid ?? null, snap: s.snap,
+        locked_window: s.lockedWindow, take_uuid: s.takeDraft?.takeUuid ?? null };
+    });
+  }, [viewActive, store]);
 
   // This editor's load policy for the shared browse panel: row buttons /
   // double-click assign onto the editor's A/B session sides only.

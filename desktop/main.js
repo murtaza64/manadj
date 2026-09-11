@@ -8,6 +8,7 @@ const { execFile } = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
 const { registerRecordingIpc } = require("./recording");
+const { registerFeedbackCapture } = require("./feedback");
 
 // The Vite dev target has no CSP, so Electron's renderer-console security
 // warning is permanent noise — especially now that renderer console is
@@ -351,6 +352,8 @@ function createWindow() {
       backgroundThrottling: false,
     },
   });
+  const disposeFeedback = registerFeedbackCapture({ ipcMain, webContents: win.webContents, targetUrl: TARGET });
+  win.once("closed", disposeFeedback);
   // Visualizer window (realtime-visualization 01): the renderer opens it
   // via window.open('/visualizer', ...). Give it a normal native title bar
   // (its page has no TopBar drag region) and never throttle it — it renders

@@ -875,7 +875,7 @@ def test_ack_pagination_progress_survives_restart_without_resending(world):
     restarted = world.make(path=service.workspace.path)
     restarted.poll()
     assert batch(restarted, frozen["id"])["status"] == "delivered"
-    assert seen == [None, "older-page"] and len(world.daemon.sent) == 1
+    assert seen == [None, None, "older-page"] and len(world.daemon.sent) == 1
 
 
 def test_owner_missing_at_capture_never_silently_retargets_after_restoration(world):
@@ -922,3 +922,35 @@ def test_root_anchored_recipient_gets_guarded_origin_and_original_agent_model(wo
     assert f"Origin workspace: {service.scope}" in args[2] and "scripts/agent/guard.py" in args[2]
     assert "NOT permission to edit the default workspace" in args[2]
     assert kwargs == options
+
+
+def test_mixed_owner_batch_cannot_reopen_routing_on_retry(world):
+    old = world.make(owner="ses_old")
+    previous = submit(old, id="00000000-0000-4000-8000-000000000002")
+    current = world.make(owner="ses_current")
+    latest = submit(current, id="00000000-0000-4000-8000-000000000001")
+    frozen = freeze(current, [latest, previous])
+    assert frozen["status"] == "needs-routing"
+    assert current.retry_batch(frozen["id"])["status"] == "needs-routing"
+    current.poll()
+    assert not world.daemon.sent
+
+
+def test_late_ack_is_checked_before_continuing_old_history_scan(world):
+    service = world.make()
+    frozen = freeze(service, [submit(service)])
+    service.poll()
+    seen = []
+    arrived = False
+
+    def acknowledged(session, directory, batch_id, *, cursor=None):
+        seen.append(cursor)
+        return (True, None) if arrived and cursor is None else (False, "older-page")
+
+    world.daemon.acknowledged = acknowledged
+    service.poll()
+    assert batch(service, frozen["id"])["status"] == "submitted"
+    arrived = True
+    service.poll()
+    assert batch(service, frozen["id"])["status"] == "delivered"
+    assert seen == [None, None] and len(world.daemon.sent) == 1

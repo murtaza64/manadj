@@ -561,6 +561,10 @@ class FeedbackService:
             db.commit()  # Freeze the whole selection atomically, before delivery.
             return self.public(batch)
 
+    def _validate_batch(self, db, batch):
+        for id in batch["report_ids"]:
+            self.workspace.validate(self._get(db, "reports", id)["origin"])
+
     def retry_batch(self, id):
         with self.writing() as db:
             batch = self._get(db, "batches", id)
@@ -568,7 +572,7 @@ class FeedbackService:
                 # Main routing was absent at explicit dispatch; configuration can
                 # fill it on explicit retry, never silently replace a pinned target.
                 try:
-                    self.workspace.validate(batch["_origin"])
+                    self._validate_batch(db, batch)
                     batch["_target"] = list(self.workspace.target())
                     batch.update(
                         status="queued", error=None, destination=self.workspace.destination()
@@ -582,7 +586,7 @@ class FeedbackService:
 
     def _deliver(self, db, batch):
         try:
-            self.workspace.validate(batch["_origin"])
+            self._validate_batch(db, batch)
             target = list(self.workspace.target())
             if target != batch["_target"]:
                 raise RoutingError(
@@ -599,8 +603,15 @@ class FeedbackService:
                     session,
                     recipient["directory"],
                     batch["id"],
-                    cursor=batch.get("_ack_cursor"),
                 )
+                # A new ACK must not wait behind a scan of the owner's old history.
+                if not acknowledged and cursor and batch.get("_ack_cursor"):
+                    acknowledged, cursor = self.daemon.acknowledged(
+                        session,
+                        recipient["directory"],
+                        batch["id"],
+                        cursor=batch["_ack_cursor"],
+                    )
                 batch["_ack_cursor"] = cursor
                 if acknowledged:
                     batch.update(status="delivered", error=None)
@@ -619,7 +630,7 @@ class FeedbackService:
                         "Recipient busy, blocked, unknown, or awaiting an earlier acknowledgement."
                     )
                 else:
-                    self.workspace.validate(batch["_origin"])
+                    self._validate_batch(db, batch)
                     if list(self.workspace.target()) != target:
                         raise RoutingError(
                             "Recipient changed during admission; route this batch manually."
@@ -672,7 +683,7 @@ class FeedbackService:
                         status="submitted", error="Awaiting persisted agent acknowledgement."
                     )
                     self._save(db, "batches", batch)  # Crash-safe BEFORE prompt_async.
-                    self.workspace.validate(batch["_origin"])
+                    self._validate_batch(db, batch)
                     if list(self.workspace.target()) != target:
                         raise RoutingError(
                             "Recipient changed before delivery; route this batch manually."

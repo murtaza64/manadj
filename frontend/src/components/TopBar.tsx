@@ -20,6 +20,7 @@ import { TasksWidget } from './TasksWidget';
 import { MasterRecorderControl } from './MasterRecorderControl';
 import { isVisualizerOpen, toggleVisualizer } from '../visualizer/windowControl';
 import { VisualizerControlModal } from './VisualizerControlModal';
+import { AppFeedbackEntry } from '../feedback/AppFeedbackEntry';
 import './TopBar.css';
 
 export type AppMode = 'library' | 'performance' | 'transition' | 'routine' | 'history' | 'sync' | 'styles' | 'jog-tune';
@@ -218,6 +219,7 @@ export function TopBar({
       <img src="/logo.png" alt="manaDJ logo" className="topbar-logo" />
       <ModeControl mode={mode} onModeChange={onModeChange} />
       <div className="topbar-status">
+        <AppFeedbackEntry view={mode} />
         <VisualizerCluster />
         <span className="topbar-divider" />
         <TasksWidget />
