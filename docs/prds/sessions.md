@@ -93,7 +93,7 @@ Decisions in ADR 0033; glossary terms Session, and the amended Take, Cameo Take,
 - ~~Session boundary heuristics (idle-split); the viewer collapses idle instead~~ (reversed by sessions 11: ten minutes of silence now split; the viewer still collapses intra-Session idle)
 - Retention/pruning policy beyond manual delete
 - Mining Played runs from Sessions directly (stays a Transition-history miner; noted as a future upgrade)
-- Cross-kind promotion ("open this Cameo Take as a Transition draft") — intent-at-promotion is the designated home, deferred until wanted
+- ~~Cross-kind promotion ("open this Cameo Take as a Transition draft")~~ — implemented for reviewed handovers in #239; the recorded kind and existing Cameo pins remain unchanged.
 - Capturing machine performances' event streams (tenure markers only)
 - Changing Take review: raw replay is the Session audition medium, not the Take review medium (the transition-takes PRD's exclusion stands)
 

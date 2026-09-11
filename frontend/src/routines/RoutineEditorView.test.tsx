@@ -431,6 +431,32 @@ it.each(['replacePair', 'setPromoted'] as const)('keeps Take pins when %s fails'
   if (step === 'replacePair') expect(api.takes.setPromoted).not.toHaveBeenCalled();
 });
 
+it('retries an edited guest Take after a reference failure without duplicating the saved Transition', async () => {
+  vi.mocked(api.takes.get).mockResolvedValue({ ...take, kind: 'guest' });
+  vi.mocked(api.takes.list).mockResolvedValue([{ ...take, kind: 'guest' }]);
+  vi.mocked(api.takes.setPromoted).mockRejectedValueOnce(new Error('promotion link failed'));
+  await openReview(true);
+  act(() => timelineProps().draftStore.setLane('0', 'fader', [
+    { beat: 0, value: 1 }, { beat: 100, value: 0 },
+  ]));
+  await promote();
+  expect(toast).toHaveBeenCalledWith('Promote failed: promotion link failed');
+  const first = vi.mocked(api.transitions.replacePair).mock.calls[0][2][0];
+  expect(first.data.durationSec).toBe(50);
+  // A focus/refetch between attempts discovers the first attempt's saved artifact.
+  await act(async () => {
+    await client.refetchQueries({ queryKey: ['transitions'] });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  expect(client.getQueryData(['transitions'])).toEqual([expect.objectContaining({ uuid: first.uuid })]);
+  toast.mockClear();
+  await promote();
+  const retried = vi.mocked(api.transitions.replacePair).mock.calls[1][2];
+  expect(retried).toEqual([first]);
+  expect(toast).toHaveBeenCalledWith(expect.stringContaining('the take is now a saved Transition'));
+  expect(getSetEntries(1)![0].pin).toEqual({ kind: 'transition', uuid: first.uuid });
+});
+
 function timelineProps(): ComponentProps<typeof RoutineTimeline> {
   return timeline.mock.lastCall![0];
 }

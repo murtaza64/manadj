@@ -145,6 +145,8 @@ The Cameo's detection target — the complementary verdict of the same detector 
 **Cameo Take**:
 A Guest engagement detected and captured automatically during live performance playback (or hand-cut from a Session — the classifier's verdict decides which sibling a cut becomes) — the Cameo sibling of a Take, with the same rules throughout: lives in the Transition history, never in any library; reviewed via Vectorization; promotion saves a Cameo; a Set entry may pin one (manually, never by auto-fill); counts for nothing in discovery until promoted.
 
+A reviewed Cameo Take may instead produce a Transition when its authored incoming Track survives the outgoing. The recording remains a Cameo Take; existing Cameo Take pins retain the original evidence rather than becoming adjacency pins.
+
 **Cameo library**:
 The queryable index over saved Cameos — "what guests over this Track / what hosts this Track" — directional (host→guest) and distinct from the Transition library, whose "what mixes into what" stays Transition-only. Cameo Takes are not in it: only promotion adds.
 
@@ -164,7 +166,7 @@ _Avoid_: non-session routine, synthetic routine, blank routine (the draft has no
 The stable identity of a cast slot (client-minted at drag-in), which lanes, Jumps, and other slot-addressed edits key on. The entry-ordered slot *index* (slot 0 … n−1) is a derived view recomputed from entry offsets — reordering a cast never re-keys its edits (ADR 0039). On promoted Routines, entry offsets are additionally editable as per-slot **offset overrides** in the edits layer (nudges, phrase shifts) — the baked promotion outputs stay immutable testimony, like a recorded lane under an authored one.
 
 **Routine playback bounds**:
-The start and end of a saved Routine's playback, independent of its source Session. Resizing retains material and edits outside the bounds; expanding restores that material or continues the artifact's boundary motion and control values. Bounds must retain playable material from every cast slot: delete the slot explicitly before trimming further. Muting a slot does not remove its membership or change these limits. Candidate trimming instead changes the Session excerpt being considered for promotion.
+The start and end of a saved Routine's playback, independent of its source Session. Resizing retains material and edits outside the bounds; expanding restores that material or continues the artifact's boundary motion and control values. The current bounds define the Routine's extent; its original length is provenance, not a privileged editing boundary. Bounds must retain playable material from every cast slot: delete the slot explicitly before trimming further. Muting a slot does not remove its membership or change these limits. Candidate trimming instead changes the Session excerpt being considered for promotion.
 
 **Track-start trim**:
 Revealing more intro or shortening the initial passage of an incoming Routine slot without shifting its later material, jumps, or automation. Extending uses the track's own continuation, not more Session evidence. Limited to the initial continuous passage and the neighboring entries; never reorders or removes slots. The Routine's entry slot uses the Routine playback start instead. Distinct from moving the whole slot or sliding its material. Undoable; trimmed source material remains retained.

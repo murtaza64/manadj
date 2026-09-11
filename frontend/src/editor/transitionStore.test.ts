@@ -5,6 +5,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { defaultMix } from './mixModel';
+import { EditorStore } from './editorStore';
 import {
   _resetTransitionStoreForTests,
   initTransitionStore,
@@ -224,9 +225,10 @@ describe('savePairEntry', () => {
     const seen: string[][] = [];
     subscribePairStore((s) => seen.push(Object.keys(s)));
 
-    savePairEntry('1:2', { items: [edited('u1')], active: 0 });
+    const saved = savePairEntry('1:2', { items: [edited('u1')], active: 0 });
     expect(snapshotPairStore()['1:2'].items[0].uuid).toBe('u1'); // sync
     expect(seen).toEqual([['1:2']]);
+    await expect(saved).resolves.toBe(true);
 
     await vi.waitFor(() => expect(calls.filter((c) => c.method === 'PUT')).toHaveLength(1));
     const put = calls.find((c) => c.method === 'PUT')!;
@@ -261,9 +263,38 @@ describe('savePairEntry', () => {
     const { fn, calls } = fakeFetch([], { failPuts: true });
     vi.stubGlobal('fetch', fn);
 
-    savePairEntry('1:2', { items: [edited('u1')], active: 0 });
+    await expect(savePairEntry('1:2', { items: [edited('u1')], active: 0 })).resolves.toBe(false);
     await vi.waitFor(() => expect(console.error).toHaveBeenCalled());
     expect(calls.filter((c) => c.method === 'PUT')).toHaveLength(1);
     expect(snapshotPairStore()['1:2']).toBeDefined();
+  });
+
+  it.each([true, false])('default EditorStore promotion awaits the real PUT (success: %s)', async (success) => {
+    let finish!: (response: Response) => void;
+    const fetch = vi.fn(() => new Promise<Response>((resolve) => { finish = resolve; }));
+    vi.stubGlobal('fetch', fetch);
+    const store = new EditorStore();
+    store.loadPair('1:2');
+    store.stampTakeDraft('take-1', edited('draft').transition);
+    const draft = store.getSnapshot().takeDraft!;
+    const completed = vi.fn();
+    const failed = vi.fn();
+    const promotion = store.promoteTakeDraft().then(completed, failed);
+    await Promise.resolve();
+    expect(fetch).toHaveBeenCalledWith(expect.stringContaining('/transitions/pair/1/2'),
+      expect.objectContaining({ method: 'PUT' }));
+    expect(snapshotPairStore()['1:2'].items[0].uuid).toBe(draft.itemUuid);
+    expect(completed).not.toHaveBeenCalled();
+    expect(failed).not.toHaveBeenCalled();
+    finish({ ok: success, status: success ? 200 : 500, json: async () => [] } as unknown as Response);
+    await promotion;
+    if (success) {
+      expect(completed).toHaveBeenCalledWith({ takeUuid: 'take-1', transitionUuid: draft.itemUuid });
+      expect(failed).not.toHaveBeenCalled();
+    } else {
+      expect(completed).not.toHaveBeenCalled();
+      expect(failed).toHaveBeenCalledWith(expect.objectContaining({ message: 'Transition save failed' }));
+      expect(store.getSnapshot().takeDraft).toEqual(draft);
+    }
   });
 });

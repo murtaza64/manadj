@@ -1318,7 +1318,11 @@ export default function RoutineEditorView() {
           favorite: r.favorite,
           data: r.data,
         }));
-        items.push({
+        // A previous attempt may have saved the artifact but failed to link
+        // the Take. Retry that UUID instead of submitting it twice.
+        const retry = items.find((item) => item.uuid === o.uuid);
+        if (retry) retry.data = data as unknown as Record<string, unknown>;
+        else items.push({
           uuid: o.uuid,
           name: `Transition ${rows.length + 1}`,
           favorite: false,
