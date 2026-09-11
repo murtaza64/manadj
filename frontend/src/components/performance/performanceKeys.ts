@@ -30,6 +30,7 @@ export const CONTROL_FOCUS_KEYS = { left: '[', right: ']' } as const;
 
 import type { ChannelId } from '../../playback/mixer';
 import type { ControlFocus } from '../../performance/controlFocus';
+import { isModalHeldRelease } from '../../focus/modalKeys';
 
 /**
  * The Performance browse surface's focus-aware Load target (issue 22): the
@@ -52,7 +53,7 @@ const TEXT_INPUT_TYPES = new Set(['text', 'search', 'number', 'url', 'email', 'p
 
 /** True while the user is typing somewhere keys must not be stolen from. */
 export function isTypingTarget(event: KeyboardEvent): boolean {
-  return isTextEntryTarget(event.target);
+  return !isModalHeldRelease(event) && isTextEntryTarget(event.target);
 }
 
 /** The predicate behind isTypingTarget, on the target itself (testable). */

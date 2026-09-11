@@ -1,8 +1,9 @@
 import { useEffect, useId, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
+import { createPortal, flushSync } from 'react-dom';
 import { captureFeedback, fitScreenshot, withTimeout, type Capture } from './capture';
-import { feedbackApi, type Kind, type Payload, type Reports } from './client';
+import { feedbackApi, FeedbackError, type Kind, type Payload, type Reports } from './client';
 import { redact, type Readers } from './diagnostics';
+import { installModalKeyGuard } from '../focus/modalKeys';
 import './feedback.css';
 
 const reportStatus = {
@@ -23,6 +24,7 @@ export function FeedbackEntry({ readers = {} }: { readers?: Readers }) {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [payload, setPayload] = useState<Payload | null>(null);
+  const [filingIssue, setFilingIssue] = useState<'conflict' | 'unknown' | null>(null);
   const [listing, setListing] = useState<Reports | null>(null);
   const [error, setError] = useState('');
   const [listError, setListError] = useState('');
@@ -34,24 +36,15 @@ export function FeedbackEntry({ readers = {} }: { readers?: Readers }) {
   const id = useId();
   const open = page !== null;
 
+  useEffect(() => installModalKeyGuard(() => Boolean(dialog.current?.open), () => setPage(null)), []);
+
   useEffect(() => {
     if (!open) return;
     const el = dialog.current!;
     const trigger = entry.current?.querySelector('button');
     const previous = document.activeElement;
     el.showModal();
-    const stopKeys = (event: KeyboardEvent) => {
-      // Window capture precedes document-level playback shortcuts, including
-      // their capture listeners. Native text editing and Tab remain intact.
-      event.stopImmediatePropagation();
-      if (event.type === 'keydown' && event.key === 'Escape') {
-        event.preventDefault();
-        setPage(null);
-      }
-    };
-    for (const type of ['keydown', 'keyup', 'keypress'] as const) window.addEventListener(type, stopKeys, true);
     return () => {
-      for (const type of ['keydown', 'keyup', 'keypress'] as const) window.removeEventListener(type, stopKeys, true);
       el.close();
       if (previous instanceof HTMLElement && previous !== document.body && previous.isConnected) previous.focus();
       else trigger?.focus();
@@ -59,7 +52,6 @@ export function FeedbackEntry({ readers = {} }: { readers?: Readers }) {
   }, [open]);
 
   useEffect(() => {
-    if (page !== 'review') return;
     let active = true;
     let timer: ReturnType<typeof setTimeout>;
     const poll = async () => {
@@ -69,21 +61,27 @@ export function FeedbackEntry({ readers = {} }: { readers?: Readers }) {
       } catch (err) {
         if (active) setListError(redact(err instanceof Error ? err.message : 'Could not load reports'));
       } finally {
-        if (active) timer = setTimeout(poll, 3000);
+        if (active) timer = setTimeout(poll, page === 'review' ? 3000 : 15000);
       }
     };
     void poll();
     return () => { active = false; clearTimeout(timer); };
   }, [page]);
 
-  async function begin(nextKind: Kind) {
+  async function begin(recapture = false) {
     if (captureLock.current || actionLock.current) return;
-    if (capture) { setPage('form'); return; }
+    if (capture && !recapture) { setPage('form'); return; }
+    if (payload && filingIssue !== 'conflict') return;
     captureLock.current = true;
     setCapturing(true);
     setError('');
-    setKind(nextKind);
     try {
+      if (recapture) {
+        flushSync(() => setPage(null));
+        // Let the closed overlay leave the compositor before Electron capture.
+        await withTimeout(new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))), 250).catch(() => {});
+        setPayload(null); setFilingIssue(null);
+      }
       setCapture(await captureFeedback(readers));
       setPage('form');
     } catch {
@@ -119,14 +117,20 @@ export function FeedbackEntry({ readers = {} }: { readers?: Readers }) {
         capture_warnings: capture.warnings,
       };
       setPayload(frozen);
-      const report = await feedbackApi.file(frozen);
+      let report;
+      try { report = await feedbackApi.file(frozen); }
+      catch (err) {
+        // A later conflict cannot disprove persistence of an earlier timeout.
+        setFilingIssue((previous) => previous === 'unknown' || !(err instanceof FeedbackError && err.status === 409) ? 'unknown' : 'conflict');
+        throw err;
+      }
       setListing((current) => ({
         origin: current?.origin ?? capture.context!.origin,
         destination: current?.destination ?? report.destination,
         reports: [...(current?.reports.filter((r) => r.id !== report.id) ?? []), report],
         batches: current?.batches ?? [],
       }));
-      setCapture(null); setPayload(null); setTitle(''); setDescription('');
+      setCapture(null); setPayload(null); setFilingIssue(null); setTitle(''); setDescription('');
       setPage('review');
     });
   }
@@ -136,14 +140,15 @@ export function FeedbackEntry({ readers = {} }: { readers?: Readers }) {
     if (report.status !== 'filed' || report.batch_id !== null) continue;
     groups.set(report.destination, [...(groups.get(report.destination) ?? []), report.id]);
   }
+  const pendingCount = listing && !listError ? listing.reports.filter((r) => r.batch_id === null).length : '?';
+  const savedPayload = payload && listing?.reports.find((r) => r.id === payload.id);
 
   return <>
     <span className="feedback-entry" ref={entry} data-focusable>
-      <button className="btn btn-secondary" disabled={capturing || busy} onClick={() => void begin('bug')}>
-        {capturing ? 'Capturing...' : capture ? 'Resume report' : 'Report bug'}
+      <button className="btn btn-secondary" title="Report bug / Request feature" disabled={capturing || busy} onClick={() => void begin()}>
+        {capturing ? 'Capturing...' : 'Feedback'}
       </button>
-      {!capture && <button className="btn btn-secondary" disabled={capturing || busy} onClick={() => void begin('feature')}>Request feature</button>}
-      <button className="btn btn-secondary" disabled={capturing} onClick={() => { setError(''); setPage('review'); }}>Feedback queue</button>
+      <button className="btn btn-secondary" title={listError || 'Reports awaiting dispatch, including pending or failed filing'} disabled={capturing} onClick={() => { setError(''); setPage('review'); }}>Queue ({pendingCount})</button>
     </span>
     {page && createPortal(<dialog ref={dialog} className="feedback-dialog" aria-labelledby={`${id}-heading`} data-focusable
       onCancel={(e) => { e.preventDefault(); setPage(null); }}>
@@ -195,13 +200,13 @@ export function FeedbackEntry({ readers = {} }: { readers?: Readers }) {
             setCapture({ ...capture, context, warnings: [...capture.warnings, 'Origin resolved after initial capture because context was unavailable.'] });
           })}>Retry context</button>}
         {payload && <>
-          <p className="feedback-warning">Submission locked to report {payload.id}. Retry the same report to resolve an uncertain outcome; fields cannot change.</p>
-          <button type="button" className="btn btn-secondary" disabled={busy} onClick={() => {
-            if (window.confirm('The previous report may already be saved. Check Feedback queue first. Editing creates a new report ID and may duplicate the old report. Continue?')) {
-              setPayload(null); setError('');
-            }
-          }}>Edit as a new report</button>
+          <p className="feedback-warning">{filingIssue === 'conflict'
+            ? `Report ${payload.id} was rejected by a conflict. Recapture refreshes the evidence and origin while keeping your text.`
+            : `Submission locked to report ${payload.id}. Retry the same report to resolve an uncertain outcome; fields cannot change.`}</p>
+          {filingIssue === 'unknown' && <p>Outcome unknown. Resolve this report in the queue or retry the same ID before recapturing.</p>}
         </>}
+        <button type="button" className="btn btn-secondary" disabled={busy || (payload !== null && filingIssue !== 'conflict')}
+          onClick={() => void begin(true)}>Recapture</button>
         <footer>
           <button className="btn btn-primary" type="submit" disabled={busy || !capture.context}>{busy ? 'Working...' : payload ? 'Retry same report' : 'File report on GitHub'}</button>
           <button className="btn btn-secondary" type="button" onClick={() => { setError(''); setPage('review'); }}>Review batches</button>
@@ -212,6 +217,12 @@ export function FeedbackEntry({ readers = {} }: { readers?: Readers }) {
       </form>}
       {page === 'review' && <>
         {capture && <button className="btn btn-secondary" onClick={() => { setError(''); setPage('form'); }}>Resume report</button>}
+        {payload && <section>
+          <p>Locked report: {payload.id}. {savedPayload ? 'Saved on the server; use this record instead of creating another ID.' : 'No saved record confirmed. Absence from this list does not resolve an in-flight request; retry the same ID.'}</p>
+          {savedPayload && <button className="btn btn-secondary" disabled={busy || Boolean(listError)} onClick={() => {
+            setPayload(null); setFilingIssue(null); setCapture(null); setTitle(''); setDescription(''); setError('');
+          }}>Use saved report</button>}
+        </section>}
         <p>Destination: {listing?.destination ?? 'unavailable'}</p>
         {listError && <p role="alert" className="feedback-error">{listError}</p>}
         <button className="btn btn-secondary" disabled={busy} onClick={() => void action(refresh)}>Refresh status</button>

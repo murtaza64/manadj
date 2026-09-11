@@ -1,4 +1,4 @@
-import { recordError, redact, type Snapshot } from './diagnostics';
+import { recordError, type Snapshot } from './diagnostics';
 
 export type Kind = 'bug' | 'feature';
 export interface Origin { lane: string | null; owner: string | null; revision: string | null }
@@ -19,6 +19,18 @@ export interface Payload {
 }
 
 const BASE = `${(import.meta.env.VITE_API_URL || 'http://localhost:8127').replace(/\/$/, '')}/api/feedback`;
+export class FeedbackError extends Error {
+  readonly status: number | null;
+  constructor(status: number | null, timedOut = false) {
+    super(status === 409
+      ? 'Feedback conflict: the captured origin may be stale or the report ID may already exist. Review the queue, then recapture if this submission was rejected.'
+      : status !== null ? `Feedback service returned HTTP ${status}. Retry when available.`
+        : `Feedback request ${timedOut ? 'timed out' : 'failed'}. The server may have saved it; retry uses the same report ID.`);
+    this.name = 'FeedbackError';
+    this.status = status;
+  }
+}
+
 async function request<T>(path: string, body?: unknown): Promise<T> {
   const controller = new AbortController();
   const timer = window.setTimeout(() => controller.abort(), 15000);
@@ -29,13 +41,12 @@ async function request<T>(path: string, body?: unknown): Promise<T> {
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       signal: controller.signal,
     });
-    if (!response.ok) throw new Error(`Feedback service returned HTTP ${response.status}. Retry when available.`);
+    // Do not echo server detail strings: they can contain paths or credentials.
+    if (!response.ok) throw new FeedbackError(response.status);
     return await response.json() as T;
   } catch (error) {
     recordError('feedback API', error);
-    throw new Error(controller.signal.aborted
-      ? 'Feedback request timed out. The server may have saved it; retry uses the same report ID.'
-      : redact(error instanceof Error ? error.message : 'Feedback service unavailable.'));
+    throw error instanceof FeedbackError ? error : new FeedbackError(null, controller.signal.aborted);
   } finally { window.clearTimeout(timer); }
 }
 

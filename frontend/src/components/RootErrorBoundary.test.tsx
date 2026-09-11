@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act, useEffect } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import RootErrorBoundary from './RootErrorBoundary';
 
 declare global {
@@ -11,9 +11,14 @@ globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
 const cleanup: Array<() => void> = [];
 
+beforeEach(() => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ reports: [], batches: [] }) }));
+});
+
 afterEach(() => {
   cleanup.splice(0).forEach((fn) => fn());
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 function render(children: React.ReactNode) {

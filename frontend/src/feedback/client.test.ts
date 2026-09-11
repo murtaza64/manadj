@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, expect, it, vi } from 'vitest';
-import { feedbackApi, type Payload } from './client';
+import { feedbackApi, FeedbackError, type Payload } from './client';
 
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
 it('uses the dedicated prefix, feedback header, and JSON posts for every endpoint', async () => {
@@ -31,4 +31,24 @@ it('aborts hung requests without pretending they failed before persistence', asy
   const pending = expect(feedbackApi.reports()).rejects.toThrow('server may have saved it');
   await vi.advanceTimersByTimeAsync(15001);
   await pending;
+});
+
+it('exposes HTTP conflict status with a safe recovery message, never raw server details', async () => {
+  const json = vi.fn(async () => ({ detail: 'private path and password=secret' }));
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 409, json }));
+  const error = await feedbackApi.context().catch((e) => e);
+  expect(error).toBeInstanceOf(FeedbackError);
+  expect(error.status).toBe(409);
+  expect(error.message).toContain('recapture');
+  expect(error.message).not.toMatch(/private|secret/);
+  expect(json).not.toHaveBeenCalled();
+});
+
+it('keeps network failures distinct from definite conflicts without exposing transport secrets', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('secret transport payload')));
+  const error = await feedbackApi.context().catch((e) => e);
+  expect(error).toBeInstanceOf(FeedbackError);
+  expect(error.status).toBeNull();
+  expect(error.message).toContain('server may have saved it');
+  expect(error.message).not.toContain('secret');
 });
