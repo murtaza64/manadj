@@ -17,6 +17,7 @@ import {
   slotOccupyingDeckAt,
   traceStateAt,
   createSlotLanesCursor,
+  createSlotLaneCursor,
   type RoutineEventInput,
   type RoutinePlanInput,
 } from './routinePlan';
@@ -534,8 +535,14 @@ describe('createSlotLanesCursor (#221 perf)', () => {
       jumpMixSecs: [],
     };
     const cursor = createSlotLanesCursor(slot);
+    const controls = ['fader', 'trim', 'eqLow', 'eqMid', 'eqHigh', 'filter'] as const;
+    const scalar = controls.map((control) => createSlotLaneCursor(slot, control));
     for (let b = 0; b <= 12; b += 0.37) {
-      expect(cursor(b)).toEqual(slotLanesAt(slot, b));
+      const expected = slotLanesAt(slot, b);
+      expect(cursor(b)).toEqual(expected);
+      expect(scalar.map((valueAt) => valueAt(b))).toEqual([
+        expected.fader, expected.trim, expected.eq.low, expected.eq.mid, expected.eq.high, expected.filter,
+      ]);
     }
   });
 });

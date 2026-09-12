@@ -38,12 +38,16 @@ function LoopIcon() {
 
 export function LoopRow({
   kbd,
+  halveKbd,
+  doubleKbd,
   halveTitleSuffix = '',
   doubleTitleSuffix = '',
   titleSuffix = '',
 }: {
   /** On-control keyboard hint slot (Performance view). */
   kbd?: ReactNode;
+  halveKbd?: ReactNode;
+  doubleKbd?: ReactNode;
   /** Title-only key hint (library view, e.g. " (R)"). */
   titleSuffix?: string;
   halveTitleSuffix?: string;
@@ -75,6 +79,7 @@ export function LoopRow({
         title={`${loop ? 'Halve the loop' : 'Halve loop size'}${halveTitleSuffix}`}
       >
         1/2
+        {halveKbd}
       </button>
       <button
         className={`player-button deck-loop-toggle${loop ? ' active' : ''}`}
@@ -93,6 +98,7 @@ export function LoopRow({
         title={`${loop ? 'Double the loop' : 'Double loop size'}${doubleTitleSuffix}`}
       >
         x2
+        {doubleKbd}
       </button>
     </div>
   );

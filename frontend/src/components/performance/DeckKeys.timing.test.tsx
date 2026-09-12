@@ -14,7 +14,6 @@ import type { CaptureEvent } from '../../capture/events';
 const starts = vi.hoisted(() => [] as { position: number; when: number }[]);
 const build = vi.hoisted(() => ({ gate: null as Promise<void> | null }));
 vi.mock('../../hooks/useHotCueActions', () => ({ useHotCueActions: () => ({ enabled: false }) }));
-vi.mock('../../hooks/useMatchAction', () => ({ useMatchAction: () => vi.fn() }));
 vi.mock('../../hooks/useMixer', () => ({ useMixer: () => ({}) }));
 vi.mock('../../settings/persistedSettings', () => ({ writeSetting: vi.fn(), removeSetting: vi.fn() }));
 vi.mock('../../playback/worklet/deckSourceNode', () => ({
@@ -61,6 +60,8 @@ it.each<{ gapMs: number; warm: boolean; quantize: boolean; running: boolean; res
   const port: DeckAudioPort = { ensureAudio: () => ({ ctx, input: {} as AudioNode }) };
   const engines = { A: new DeckEngine(port), B: new DeckEngine(port),
     C: new DeckEngine(port), D: new DeckEngine(port) };
+  const syncGroup = { match: vi.fn(), toggle: vi.fn(),
+    getSnapshot: () => ({ tempo: null, decks: { A: 'off', B: 'off', C: 'off', D: 'off' } }) };
   const mixer: CaptureMixerSource = {
     getChannelState: () => ({ trim: 0.5, eq: { low: 0.5, mid: 0.5, high: 0.5 },
       filter: 0, fader: 1, pfl: false, stems: { vocals: true, drums: true, bass: true, other: true } }),
@@ -89,8 +90,8 @@ it.each<{ gapMs: number; warm: boolean; quantize: boolean; running: boolean; res
     }
     await act(async () => root.render(<>
       {(['A', 'B'] as const).map(deck => (
-        <DeckContext.Provider key={deck} value={{ deck, engine: engines[deck],
-          loadedTrack: { id: 1 }, beatjumpBeats: 32 } as DeckContextValue}>
+        <DeckContext.Provider key={deck} value={{ deck, engine: engines[deck], syncGroup,
+          loadedTrack: { id: 1 }, beatjumpBeats: 32 } as unknown as DeckContextValue}>
           <DeckKeys />
         </DeckContext.Provider>
       ))}

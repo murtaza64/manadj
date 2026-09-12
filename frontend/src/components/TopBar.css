@@ -221,40 +221,6 @@
   color: inherit;
 }
 
-/* Quantize toggle (looping 01): app-wide, lit green while gestures snap. */
-.topbar-quantize {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-4);
-  height: 24px;
-  padding: 0 var(--space-6);
-  background: transparent;
-  border: 1px solid var(--overlay0);
-  color: var(--subtext0);
-  font-size: var(--font-body);
-  font-weight: 800;
-  line-height: 1;
-  cursor: pointer;
-}
-
-.topbar-quantize-hint {
-  font-family: inherit;
-  font-size: var(--font-micro);
-  font-weight: 700;
-  white-space: nowrap;
-}
-
-.topbar-quantize:hover {
-  border-color: var(--success);
-  color: var(--success);
-}
-
-.topbar-quantize.on {
-  background: var(--success);
-  border-color: var(--success);
-  color: var(--base);
-}
-
 /* ── Recording ─────────────────────────────────────────────────────── */
 
 /* One joined control: the format select and the REC/stop button share an

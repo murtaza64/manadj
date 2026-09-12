@@ -12,6 +12,7 @@
 | Halve/double loop size | Cmd+Shift+A / S | Cmd+Shift+L / ; |
 | Walk cues while paused | Cmd+A / S | Cmd+L / ; |
 | Match tempo | Cmd+G | Cmd+H |
+| Toggle Sync | Cmd+Shift+G | Cmd+Shift+H |
 | Filter/high/mid/low, hold + mouse | Q W E R | P O I U |
 | Channel fader, hold + mouse | G | H |
 | Jog, hold + horizontal mouse | T | Y |
@@ -20,4 +21,5 @@
 
 - `=` toggles global Quantize. `F1` opens help.
 - `Tab` switches deck/library keyboard focus; `Escape` returns from library focus. Library help also uses `?`.
-- Typing and open dialogs suppress deck shortcuts. Size changes, loop toggles, MATCH and cue deletion ignore key repeat.
+- Typing and open dialogs suppress deck shortcuts. Size changes, loop toggles, MATCH, Sync and cue deletion ignore key repeat.
+- Sync entry requires a ready track with BPM. Engaged Sync can always be switched off, including while waiting for a track.

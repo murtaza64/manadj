@@ -16,8 +16,7 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../api/client';
-import { useDeck, useDeckReady, useDecks, useDeckSnapshot } from '../../hooks/useDeck';
-import { useMatchAction } from '../../hooks/useMatchAction';
+import { useDeck, useDeckReady, useDecks, useDeckSnapshot, useDeckSyncStatus } from '../../hooks/useDeck';
 import { useAutomationGhost, useMixer, useMixerValue } from '../../hooks/useMixer';
 import { useTakeoverHint } from '../../hooks/useTakeoverHint';
 import { takeoverKey } from '../../midi/takeoverFeedback';
@@ -455,8 +454,16 @@ export function DeckWaveform({
 }
 
 /** On-control hint for this deck's key (from the shared map — can't drift). */
-function Kbd({ k }: { k: string }) {
-  return <kbd className="perf-kbd" aria-hidden="true">{k.toUpperCase()}</kbd>;
+function Kbd({ k, offset = false }: { k: string; offset?: boolean }) {
+  return <kbd className={`perf-kbd${offset ? ' perf-kbd-offset' : ''}`} aria-hidden="true">
+    {Array.from(k.toUpperCase(), (character, index) => character === '\u21e7'
+      ? <span className="perf-kbd-shift" key={index}>{character}
+          <svg viewBox="0 0 12 14" aria-hidden="true">
+            <path d="M6 1 11 6H8V13H4V6H1Z" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+          </svg>
+        </span>
+      : character)}
+  </kbd>;
 }
 
 // ── TRACK zone (persistent — curation class) ─────────────────────────────
@@ -669,11 +676,15 @@ function PlayZone() {
           <BeatjumpRow
             backKbd={<Kbd k={keys.jumpBack} />}
             forwardKbd={<Kbd k={keys.jumpForward} />}
+            halveKbd={<Kbd k={`\u21e7${keys.jumpBack}`} offset />}
+            doubleKbd={<Kbd k={`\u21e7${keys.jumpForward}`} offset />}
             halveTitleSuffix={` (Shift+${keys.jumpBack.toUpperCase()})`}
             doubleTitleSuffix={` (Shift+${keys.jumpForward.toUpperCase()})`}
           />
           <LoopRow
             kbd={<Kbd k={keys.loop} />}
+            halveKbd={<Kbd k={`\u2318\u21e7${keys.jumpBack}`} offset />}
+            doubleKbd={<Kbd k={`\u2318\u21e7${keys.jumpForward}`} offset />}
             halveTitleSuffix={` (Cmd+Shift+${keys.jumpBack.toUpperCase()})`}
             doubleTitleSuffix={` (Cmd+Shift+${keys.jumpForward.toUpperCase()})`}
           />
@@ -759,7 +770,8 @@ function PlayZone() {
 // ── MIX zone: knobs / pitch / vol / readouts + MATCH/nudge ───────────────
 
 function MixZone({ track }: { track: Track | null }) {
-  const { deck, engine } = useDeck();
+  const { deck, engine, syncGroup } = useDeck();
+  const syncStatus = useDeckSyncStatus();
   const left = deck === 'A' || deck === 'C';
   const keys = DECK_KEYS[left ? 'A' : 'B'];
   const decks = useDecks();
@@ -799,7 +811,7 @@ function MixZone({ track }: { track: Track | null }) {
   // mid-beatmatch (same reasoning as the zoom window, performance-mode 06).
   const effective = track?.bpm ? effectiveBpm(track.bpm, pitch) : null;
 
-  const [hint, setHint] = useState(false);
+  const [hint, setHint] = useState<'match' | 'sync' | null>(null);
   const hintTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => {
     if (hintTimer.current) clearTimeout(hintTimer.current);
@@ -829,15 +841,13 @@ function MixZone({ track }: { track: Track | null }) {
     getHasPlayingReference
   );
 
-  // Shared with the hardware SYNC button (useMatchAction applies the pitch);
-  // only the out-of-reach hint is on-screen-specific.
-  const matchAction = useMatchAction();
-  const onMatch = () => {
-    if (matchAction()?.kind === 'out-of-reach') {
-      setHint(true);
+  const onTempoAction = (action: 'match' | 'sync') => {
+    const result = action === 'match' ? syncGroup.match(deck) : syncGroup.toggle(deck);
+    if (result?.kind === 'out-of-reach') {
+      setHint(action);
       if (hintTimer.current) clearTimeout(hintTimer.current);
-      hintTimer.current = setTimeout(() => setHint(false), MATCH_HINT_MS);
-    }
+      hintTimer.current = setTimeout(() => setHint(null), MATCH_HINT_MS);
+    } else setHint(null);
   };
 
   const eqKnob = (band: EqBand, label: string) => (
@@ -942,36 +952,38 @@ function MixZone({ track }: { track: Track | null }) {
           fader's hardware polarity died with the vertical fader). */}
       <HFader
         label="PITCH"
-        accent
+        accent={pitch !== 0}
         detent
         min={-8}
         max={8}
         value={pitch}
         defaultValue={0}
-        onChange={(v) => engine.setPitch(Math.round(v * 10) / 10)}
+        onChange={(v) => syncGroup.setPitch(deck, Math.round(v * 10) / 10)}
         disabled={!ready}
         title="Pitch (right = faster; double-click resets)"
         takeover={pitchTakeover}
       />
       <div className="perf-mix-foot">
-        <button
-          className={`player-button perf-mini perf-vinyl${vinylMode ? ' on' : ''}${scratching ? ' scratching' : ''}`}
-          onClick={() => engine.setVinylMode(!vinylMode)}
-          aria-pressed={vinylMode}
-          aria-label="Vinyl mode"
-          title="Vinyl: platter touch holds and scratches; off uses pitch bend (GRV6: Shift + Slip)"
-        >
-          VINYL
-        </button>
-        <button
-          className={`player-button perf-mini perf-slip${slipMode ? ' on' : ''}`}
-          onClick={() => engine.setSlipMode(!slipMode)}
-          aria-pressed={slipMode}
-          aria-label="Slip mode"
-          title="Slip: return to the continuing timeline after a scratch, spinback, or loop. Off cancels the pending return; on applies to the next gesture."
-        >
-          SLIP
-        </button>
+        <div className="perf-mode-stack" role="group" aria-label="Deck modes">
+          <button
+            className={`player-button perf-mini perf-vinyl${vinylMode ? ' on' : ''}${scratching ? ' scratching' : ''}`}
+            onClick={() => engine.setVinylMode(!vinylMode)}
+            aria-pressed={vinylMode}
+            aria-label="Vinyl mode"
+            title="Vinyl: platter touch holds and scratches; off uses pitch bend (GRV6: Shift + Slip)"
+          >
+            VINYL
+          </button>
+          <button
+            className={`player-button perf-mini perf-slip${slipMode ? ' on' : ''}`}
+            onClick={() => engine.setSlipMode(!slipMode)}
+            aria-pressed={slipMode}
+            aria-label="Slip mode"
+            title="Slip: return to the continuing timeline after a scratch, spinback, or loop. Off cancels the pending return; on applies to the next gesture."
+          >
+            SLIP
+          </button>
+        </div>
         {/* Key Lock (key-lock 03): Deck setting — works with no track
             loaded, sticky per Deck (engine holds live state, store
             persists). Lit while tempo changes leave the Key unchanged. */}
@@ -1040,18 +1052,35 @@ function MixZone({ track }: { track: Track | null }) {
             {pitch.toFixed(1)}%
           </span>
         </span>
-        {/* MATCH as an equals glyph: = matches the other deck's tempo;
-            ≠ flashes red while the target is out of pitch-fader reach. */}
-        <button
-          className={`player-button perf-mini perf-match${hint ? ' perf-match-hint' : ''}`}
-          disabled={!ready || !track?.bpm || !hasPlayingReference}
-          onClick={onMatch}
-          aria-label="Match tempo"
-          title="Match the nearest playing Deck's tempo (half/double-aware)"
-        >
-          {hint ? '\u2260' : '='}
-          <Kbd k={`\u2318${keys.fader}`} />
-        </button>
+        <div className="perf-tempo-buttons" role="group" aria-label="Tempo sync">
+          <button
+            className={`player-button perf-mini perf-sync${syncStatus !== 'off' ? ' on' : ''}${hint === 'sync' || syncStatus === 'out-of-lock' || syncStatus === 'waiting' ? ' perf-match-hint' : ''}`}
+            disabled={syncStatus === 'off' && (!ready || !track?.bpm)}
+            onClick={() => onTempoAction('sync')}
+            aria-label="Sync tempo"
+            aria-pressed={syncStatus !== 'off'}
+            title={syncStatus === 'out-of-lock'
+              ? 'SYNC: out of lock at pitch limit; recovers when group tempo returns in range'
+              : syncStatus === 'waiting'
+                ? 'SYNC: waiting for a ready Track with BPM'
+                : 'SYNC: join/leave shared tempo; ride any member pitch fader. Quantize snaps beats once on entry.'}
+          >
+            <span className="perf-sync-label">{hint === 'sync' || syncStatus === 'out-of-lock' ? 'SYNC!' : 'SYNC'}</span>
+            <Kbd k={`\u2318\u21e7${keys.fader}`} />
+          </button>
+          {/* MATCH as an equals glyph: = matches the other deck's tempo;
+              ≠ flashes red while the target is out of pitch-fader reach. */}
+          <button
+            className={`player-button perf-mini perf-match${hint === 'match' ? ' perf-match-hint' : ''}`}
+            disabled={!ready || !track?.bpm || !hasPlayingReference}
+            onClick={() => onTempoAction('match')}
+            aria-label="Match tempo"
+            title="MATCH: nearest playing Deck's tempo; align beats once with Quantize on (Shift + BEAT SYNC)"
+          >
+            {hint === 'match' ? '\u2260' : '='}
+            <Kbd k={`\u2318${keys.fader}`} offset />
+          </button>
+        </div>
       </div>
     </div>
   );

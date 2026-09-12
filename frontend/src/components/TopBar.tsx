@@ -7,13 +7,12 @@
  *   end, which wears the active overflow mode's segment when one is
  *   selected. No title — segments carry their own labels.
  * - Global status docks right, stable across modes, grouped by concern:
- *   visualizer | tasks | recording | audio (routing · deck ownership ·
- *   quantize · MIDI).
+ *   visualizer | tasks | recording | audio (routing · deck ownership · MIDI).
  */
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import { pairEditorFallback } from '../routines/openMix';
 import { connectedControllers, subscribeControllers } from '../midi/connectionStore';
-import { isQuantizeOn, setQuantize, subscribeQuantize } from '../playback/quantizeStore';
+import { isQuantizeOn, setQuantize } from '../playback/quantizeStore';
 import { AudioRoutingPicker } from './AudioRoutingPicker';
 import { AudioOwnershipChip } from './AudioOwnershipChip';
 import { TasksWidget } from './TasksWidget';
@@ -55,35 +54,6 @@ const PAIR_EDITOR_MODE: ModeMeta = {
   label: 'PAIR',
   title: 'Transition editor (legacy — dies in phase 5)',
 };
-
-/** App-wide Quantize toggle: lit while beat-relative gestures snap. */
-function QuantizeToggle() {
-  const on = useSyncExternalStore(subscribeQuantize, isQuantizeOn);
-  useEffect(() => {
-    const down = (event: KeyboardEvent) => {
-      if (!isQuantizeShortcut(event) || event.defaultPrevented || event.isComposing
-        || isTypingTarget(event) || hasKeyboardOverlay()) return;
-      event.preventDefault();
-      event.stopImmediatePropagation();
-      if (!event.repeat) setQuantize(!isQuantizeOn());
-    };
-    document.addEventListener('keydown', down, true);
-    return () => document.removeEventListener('keydown', down, true);
-  }, []);
-  return (
-    <button
-      className={`topbar-quantize${on ? ' on' : ''}`}
-      aria-label="Quantize"
-      aria-pressed={on}
-      aria-keyshortcuts="="
-      title={`${on ? 'Quantize on: gestures snap to the beat' : 'Quantize off: exact placement'} (=)`}
-      onClick={() => setQuantize(!isQuantizeOn())}
-    >
-      Q
-      <kbd className="topbar-quantize-hint" aria-hidden="true">=</kbd>
-    </button>
-  );
-}
 
 /** Visualizer cluster (realtime-visualization 02): labeled window toggle
  * (opens the separate visualizer window, focuses it when buried, closes it
@@ -249,6 +219,19 @@ export function TopBar({
   settingsOpen: boolean;
   onSettingsToggle: () => void;
 }) {
+  // Quantize stays global even when the Performance mixer is unmounted.
+  useEffect(() => {
+    const down = (event: KeyboardEvent) => {
+      if (!isQuantizeShortcut(event) || event.defaultPrevented || event.isComposing
+        || isTypingTarget(event) || hasKeyboardOverlay()) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      if (!event.repeat) setQuantize(!isQuantizeOn());
+    };
+    document.addEventListener('keydown', down, true);
+    return () => document.removeEventListener('keydown', down, true);
+  }, []);
+
   return (
     <header className="topbar">
       <img src="/logo.png" alt="manaDJ logo" className="topbar-logo" />
@@ -268,7 +251,6 @@ export function TopBar({
         <div className="topbar-group">
           <AudioRoutingPicker />
           <AudioOwnershipChip mode={mode} onModeChange={onModeChange} />
-          <QuantizeToggle />
           <MidiBadge />
         </div>
       </div>

@@ -473,6 +473,30 @@ function planFor(events: CaptureEvent[], t: number): ReplayPlan {
 // ── Tests ────────────────────────────────────────────────────────────────
 
 describe('SessionReplayDriver — seed and schedule', () => {
+  it.each([false, true])('replays an unchanged-loop phase anchor (scheduled scratch: %s)', async scheduled => {
+    const region = { start: 10, end: 12 };
+    const events: CaptureEvent[] = [
+      { t: 0, kind: 'load', channel: 'A', trackId: 11, bpm: 120 },
+      { t: 0, kind: 'loop', channel: 'A', playhead: 10, region },
+      { t: 0, kind: 'transport', channel: 'A', action: 'play', playhead: 10 },
+      { t: 1, kind: 'loop', channel: 'A', playhead: 11.2, region },
+      ...(scheduled ? [
+        { t: 3, kind: 'transport', channel: 'A', action: 'scratchBegin', playhead: 11.2 },
+        { t: 4, kind: 'transport', channel: 'A', action: 'scratchEnd', playhead: 11.2 },
+      ] as CaptureEvent[] : []),
+      { t: 6, kind: 'tick', playheads: {} },
+    ];
+    const r = rig(planFor(events, 0));
+    try {
+      await r.driver.start();
+      r.advance(1.25);
+      expect(r.engines.A.loop).toMatchObject(region);
+      expect(r.engines.A.getPlayhead()).toBeGreaterThanOrEqual(11.2);
+      expect(r.engines.A.getPlayhead()).toBeLessThan(11.5);
+      expect(r.stops).toEqual([]);
+    } finally { r.driver.stop(); }
+  });
+
   it('retains equal-timestamp loop/scratch ordering on the audio clock', async () => {
     const events: CaptureEvent[] = [
       { t: 0, kind: 'load', channel: 'A', trackId: 11, bpm: 120 },

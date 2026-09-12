@@ -47,6 +47,8 @@ export type TransportEvent =
   | { type: 'toggle-play' }
   /** Absolute relocation (waveform seek, scrub): cancels an active loop. */
   | { type: 'seek'; time: number }
+  /** Beat-phase correction leaves the loop region and cue untouched. */
+  | { type: 'phase-align'; time: number }
   /** Relative displacement (beat jump, looping 04): translates an active
    * loop with the playhead — position-in-loop is preserved. */
   | { type: 'jump'; time: number }
@@ -197,6 +199,9 @@ export function reduceTransport(
       const next = { ...s, playhead: e.time, loop: null };
       return [next, isAudioRunning(s) ? [{ type: 'start', at: e.time }] : []];
     }
+
+    case 'phase-align':
+      return [{ ...s, playhead: e.time }, isAudioRunning(s) ? [{ type: 'start', at: e.time }] : []];
 
     case 'jump': {
       // Relative displacement: the region translates with the playhead —

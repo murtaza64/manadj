@@ -16,6 +16,8 @@ import './deckControls.css';
 export function BeatjumpRow({
   backKbd,
   forwardKbd,
+  halveKbd,
+  doubleKbd,
   halveTitleSuffix = '',
   doubleTitleSuffix = '',
   backTitleSuffix = '',
@@ -24,6 +26,8 @@ export function BeatjumpRow({
   /** On-control keyboard hint slots (Performance view). */
   backKbd?: ReactNode;
   forwardKbd?: ReactNode;
+  halveKbd?: ReactNode;
+  doubleKbd?: ReactNode;
   /** Title-only key hints (library view, e.g. " (A)"). */
   backTitleSuffix?: string;
   forwardTitleSuffix?: string;
@@ -51,6 +55,7 @@ export function BeatjumpRow({
         title={`Halve beatjump size${halveTitleSuffix}`}
       >
         1/2
+        {halveKbd}
       </button>
       <details className="deck-jumpsize deck-jumpwindow-menu">
         <summary title="Beatjump size and pad window">{beatjumpBeats}</summary>
@@ -83,6 +88,7 @@ export function BeatjumpRow({
         title={`Double beatjump size${doubleTitleSuffix}`}
       >
         x2
+        {doubleKbd}
       </button>
       <button
         className="player-button"

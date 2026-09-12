@@ -59,6 +59,7 @@ import { REARM_AFTER_MS, followScrollTarget } from './followScroll';
 import { useViewActive } from '../contexts/viewActive';
 import { getTimelineViewState, patchTimelineViewState } from './timelineViewState';
 import { staggerRows } from './labelStagger';
+import { layoutTrackLabels } from './trackLabelLayout';
 import {
   createMonotonicTToPx,
   decimatePlayheadTrace,
@@ -1627,14 +1628,6 @@ const TimelineScene = memo(function TimelineScene({
   return (
     <g>
       <defs>
-        {/* Track-label backing: newer titles obscure older ones, with a
-            soft fade-in so the covered title dissolves instead of
-            colliding (text-stacking illegibility fix). */}
-        <linearGradient id="stl-label-fade" x1="0" y1="0" x2="1" y2="0">
-          <stop offset="0%" stopColor="var(--mantle, #181818)" stopOpacity="0" />
-          <stop offset="12%" stopColor="var(--mantle, #181818)" stopOpacity="0.92" />
-          <stop offset="100%" stopColor="var(--mantle, #181818)" stopOpacity="0.92" />
-        </linearGradient>
         {/* Take chip gradients: outgoing deck color → incoming deck color. */}
         {gradientPairs.map((key) => {
           const [from, to] = key.split('-') as [CaptureDeck, CaptureDeck];
@@ -2044,7 +2037,6 @@ function SceneOverlay({
 }) {
   const X = (t: number) => axis.tToPx(t);
   const lanesBottom = laneYOf('D', lanesTop, laneH) + laneH;
-  const viewX1 = scrollX + viewportW;
 
   return (
     <g>
@@ -2069,55 +2061,49 @@ function SceneOverlay({
       {LANE_ORDER.map((deck) => {
         const y = laneYOf(deck, lanesTop, laneH);
         const color = DECK_COLORS[deck];
+        const labels = layoutTrackLabels(
+          model.decks[deck].trackSpans, axis, trackNames, scrollX, viewportW,
+          Math.max(1, Math.floor((laneH - 8) / 16)),
+        );
         return (
           <g key={`labels-${deck}`}>
-            {model.decks[deck].trackSpans.map((sp, i) => {
-              const label = trackNames[sp.trackId] ?? `#${sp.trackId}`;
-              const mx = X(sp.start);
-              const estW = label.length * 6.4;
-              // Loads often happen DURING idle (load, then play) — snap the
-              // label anchor out of the collapsed marker so the track's
-              // start stays readable.
-              const idleSeg = axis.segments.find(
-                (g) => g.collapsed && sp.start >= g.start && sp.start <= g.end
-              );
-              const anchor = idleSeg ? idleSeg.px1 + 4 : mx;
-              const spanEnd = X(sp.end);
-              if (spanEnd < scrollX - 50 || anchor > viewX1 + 50) return null;
-              // If THIS span covers the viewport's left edge, the label
-              // sticks to the edge — pushed out by its own span end as the
-              // next load approaches. Chronological order keeps newer
-              // labels on top; the faded backing dissolves what they cover.
-              const covering = anchor < scrollX && spanEnd > scrollX;
-              const lx = covering
-                ? Math.max(anchor, Math.min(scrollX + 6, spanEnd - estW - 8))
-                : anchor;
-              // A long label must not poke out behind the NEXT load's
-              // label (sessions 22): truncate at the next span's start.
-              const next = model.decks[deck].trackSpans[i + 1];
-              const availPx = next ? X(next.start) - 8 - (lx + 3) : Infinity;
-              let shown = label;
-              if (estW > availPx) {
-                const maxChars = Math.floor(availPx / 6.4) - 1;
-                if (maxChars < 3) return null; // no room — the load bar still marks it
-                shown = `${label.slice(0, maxChars)}…`;
-              }
-              const shownW = shown.length * 6.4;
+            {labels.filter(label => label.row > 0).map(({ index, markerX, x, row }) => (
+              <path
+                key={`loadleader-${index}`}
+                d={`M ${markerX} ${y + 2} V ${y + row * 16 + 10} H ${x + 6}`}
+                stroke={color} strokeWidth={1} fill="none" opacity={0.7}
+              />
+            ))}
+            {labels.map(({ index, start, label, shown, x: lx, width: shownW, row }) => {
+              const labelY = y + row * 16;
               return (
-                <g key={`trklabel-${i}`}>
-                  <rect
-                    x={lx - 12}
-                    y={y + 3}
-                    width={shownW + 18}
-                    height={14}
-                    fill="url(#stl-label-fade)"
-                  />
-                  <text x={lx + 3} y={y + 14} className="stl-track-label" fill={color}>
-                    {shown}
-                  </text>
+                <g key={`trklabel-${index}`} className="stl-track-load" data-load-time={start}>
+                  <title>{`${label} (loaded ${fmtClock(start)})`}</title>
+                  {shown && (
+                    <>
+                      <rect
+                        x={lx}
+                        y={labelY + 3}
+                        width={shownW + 12}
+                        height={14}
+                        fill="var(--mantle, #181818)"
+                        opacity={0.92}
+                      />
+                      <text x={lx + 8} y={labelY + 14} className="stl-track-label" fill={color}>
+                        {shown}
+                      </text>
+                    </>
+                  )}
                 </g>
               );
             })}
+            {/* Paint load flags last so no title backing can cover them. */}
+            {labels.map(({ index, start, label, markerX }) => (
+              <g key={`loadflag-${index}`} className="stl-load-flag">
+                <title>{`${label} (loaded ${fmtClock(start)})`}</title>
+                <path d={`M ${markerX} ${y + 1} v 8 l 5 -4 Z`} fill={color} />
+              </g>
+            ))}
           </g>
         );
       })}

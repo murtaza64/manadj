@@ -20,6 +20,7 @@ import { PerformanceView } from './PerformanceView';
 import { HFader, Knob } from './MixerStrip';
 import { dispatchFollow } from '../../follow/followStore';
 import { getFollowParams } from '../../follow/paramsStore';
+import { isQuantizeOn, setQuantize } from '../../playback/quantizeStore';
 
 const css = readFileSync('src/components/performance/PerformanceView.css', 'utf8');
 
@@ -161,6 +162,30 @@ function press(key: string, options: KeyboardEventInit = {}, target: EventTarget
   act(() => { target.dispatchEvent(new KeyboardEvent('keyup', { key, bubbles: true, ...options })); });
   return event;
 }
+
+it('places QUANTIZE before XF and hides only its keycap when KBD is off', () => {
+  render();
+  const button = container.querySelector<HTMLButtonElement>('button[aria-label="Quantize"]')!;
+  const hint = button.querySelector('kbd')!;
+  const label = button.querySelector('.perf-quantize-label')!;
+  expect(button.closest('.perf-strip-slot.wide')).not.toBeNull();
+  expect(button.nextElementSibling?.textContent).toBe('XF');
+  expect(label.textContent).toBe('QUANTIZE');
+  expect(hint.textContent).toBe('=');
+  expect(button.getAttribute('aria-keyshortcuts')).toBe('=');
+  const before = isQuantizeOn();
+  try {
+    act(() => button.click());
+    expect(isQuantizeOn()).toBe(!before);
+    expect(button.getAttribute('aria-pressed')).toBe(String(!before));
+    click('KBD');
+    expect(getComputedStyle(hint).visibility).toBe('hidden');
+    expect(getComputedStyle(label).gridColumn).toBe('1 / -1');
+    expect(button.disabled).toBe(false);
+    click('KBD');
+    expect(getComputedStyle(hint).visibility).not.toBe('hidden');
+  } finally { act(() => setQuantize(before)); }
+});
 
 describe('Performance library keyboard focus', () => {
   function browse() {

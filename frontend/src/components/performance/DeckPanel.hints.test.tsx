@@ -22,7 +22,6 @@ vi.mock('../../performance/PlayGuideMinimapMarks', () => ({ PlayGuideMinimapMark
 vi.mock('../deckControls/BpmControl', () => ({ BpmControl: () => null }));
 vi.mock('../../hooks/useTakeoverHint', () => ({ useTakeoverHint: () => null }));
 vi.mock('../../hooks/useAtCuePoint', () => ({ useAtCuePoint: () => true }));
-vi.mock('../../hooks/useMatchAction', () => ({ useMatchAction: () => vi.fn() }));
 vi.mock('../../hooks/useHotCueActions', () => ({
   useHotCueActions: () => ({ enabled: true, bySlot: new Map(), down: vi.fn(), up: vi.fn(), remove: vi.fn(), decorate: vi.fn() }),
 }));
@@ -45,8 +44,12 @@ beforeEach(() => {
     pendingLoopBeats: 4, hasBeatgrid: true, bpm: 120, pitchPercent: 0,
     bendPercent: 0, keyLock: true, vinylMode: true, slipMode: false, stemsLoaded: false,
   };
+  const syncGroup = {
+    match: vi.fn(), toggle: vi.fn(), setPitch: vi.fn(), subscribe: () => () => {},
+    getSnapshot: () => ({ tempo: null, decks: { A: 'off', B: 'off', C: 'off', D: 'off' } }),
+  };
   decks = Object.fromEntries(CHANNEL_IDS.map(deck => [deck, {
-    deck,
+    deck, syncGroup,
     loadedTrack: { id: 1, title: 'Track', artist: 'Artist', bpm: 120, tags: [] },
     loadTrack: vi.fn(), beatjumpBeats: 4, setBeatjumpBeats: vi.fn(),
     engine: {
@@ -105,19 +108,24 @@ describe('DeckPanel keyboard hints', () => {
       expect(node.getAttribute('aria-hidden')).toBe('true');
       expect(getComputedStyle(node).position).toBe('absolute');
       expect(getComputedStyle(node).pointerEvents).toBe('none');
+      expect(node.querySelectorAll('.perf-kbd-shift > svg')).toHaveLength(text.includes('\u21e7') ? 1 : 0);
     };
     hint('.deck-jumprow > button:first-child', back);
     hint('.deck-jumprow > button:last-child', forward);
-    for (const [label, chord] of [
-      ['Halve beatjump size', `Shift+${back}`], ['Double beatjump size', `Shift+${forward}`],
-      ['Halve loop size', `Cmd+Shift+${back}`], ['Double loop size', `Cmd+Shift+${forward}`],
+    for (const [label, chord, cap] of [
+      ['Halve beatjump size', `Shift+${back}`, `\u21e7${back}`],
+      ['Double beatjump size', `Shift+${forward}`, `\u21e7${forward}`],
+      ['Halve loop size', `Cmd+Shift+${back}`, `\u2318\u21e7${back}`],
+      ['Double loop size', `Cmd+Shift+${forward}`, `\u2318\u21e7${forward}`],
     ]) {
       const button = container.querySelector(`[title="${label} (${chord})"]`);
       expect(button).not.toBeNull();
-      expect(button!.querySelector('.perf-kbd')).toBeNull();
+      hint(`[title="${label} (${chord})"]`, cap);
+      expect(button!.querySelector('.perf-kbd')!.classList.contains('perf-kbd-offset')).toBe(true);
     }
     hint('[aria-label="Loop 4"]', loop);
     hint('[aria-label="Match tempo"]', `\u2318${fader}`);
+    hint('[aria-label="Sync tempo"]', `\u2318\u21e7${fader}`);
     hint('.deck-cuewalk > button:first-child', `\u2318${back}`);
     hint('.deck-cuewalk > button:last-child', `\u2318${forward}`);
     const cueWalkStyle = getComputedStyle(container.querySelector('.deck-cuewalk > button')!);
@@ -163,6 +171,46 @@ describe('DeckPanel keyboard hints', () => {
     expect(getComputedStyle(hint).display).toBe('none');
     container.classList.remove('kbd-hints-off');
     expect(getComputedStyle(hint).display).not.toBe('none');
+  });
+
+  it.each(['toggle', 'deck focus'])('recenters labels when hints are hidden by %s', reason => {
+    render('A');
+    const play = container.querySelector('.player-button-paused')!;
+    const cueWalk = container.querySelector('.deck-cuewalk > button')!;
+    const pad = container.querySelector('.perf-pad-wrap .hot-cue')!;
+    const sync = container.querySelector('.perf-sync-label')!;
+    expect(getComputedStyle(play).paddingRight).toBe('14px');
+    expect(getComputedStyle(cueWalk).paddingBottom).toBe('13px');
+    expect(getComputedStyle(pad).paddingRight).toBe('12px');
+    expect(getComputedStyle(sync).transform).toBe('translateY(-6px)');
+    if (reason === 'toggle') container.classList.add('kbd-hints-off');
+    if (reason === 'deck focus') act(() => focusDeck('C'));
+    expect(getComputedStyle(play).paddingRight).toBe('0px');
+    expect(getComputedStyle(cueWalk).paddingBottom).toBe('0px');
+    expect(getComputedStyle(pad).paddingRight).toBe('0px');
+    expect(getComputedStyle(sync).transform).not.toBe('translateY(-6px)');
+  });
+
+  it('greys out hints without moving labels during library focus, while KBD off still hides them', () => {
+    render('A');
+    const hint = container.querySelector('.perf-sync > .perf-kbd')!;
+    const play = container.querySelector('.player-button-paused')!;
+    const library = document.createElement('div');
+    library.className = 'perf-keyboard-scope';
+    library.dataset.libraryFocus = 'true';
+    container.append(library);
+    expect(getComputedStyle(hint).visibility).not.toBe('hidden');
+    expect(getComputedStyle(hint).display).not.toBe('none');
+    expect(getComputedStyle(hint).getPropertyValue('--perf-kbd-ink')).toBe('var(--overlay1)');
+    expect(getComputedStyle(play).paddingRight).toBe('14px');
+    expect(getComputedStyle(container.querySelector('.deck-cuewalk > button')!).paddingBottom).toBe('13px');
+    expect(getComputedStyle(container.querySelector('.perf-sync-label')!).transform).toBe('translateY(-6px)');
+    container.classList.add('kbd-hints-off');
+    expect(getComputedStyle(hint).display).toBe('none');
+    expect(getComputedStyle(play).paddingRight).toBe('0px');
+    container.classList.remove('kbd-hints-off');
+    library.remove();
+    expect(getComputedStyle(hint).getPropertyValue('--perf-kbd-ink')).toBe('var(--text)');
   });
 
   it('keeps shared rows hint-free for other callers and preserves resize actions', () => {

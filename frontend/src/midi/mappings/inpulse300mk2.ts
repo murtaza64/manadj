@@ -345,10 +345,21 @@ export const INPULSE_300_MK2: Mapping = {
     {
       match: { message: 'note', channel: 1, number: 0x05 },
       controlType: 'button',
-      target: { control: 'match', deck: 'A' },
+      target: { control: 'sync', deck: 'A' },
     },
     {
       match: { message: 'note', channel: 2, number: 0x05 },
+      controlType: 'button',
+      target: { control: 'sync', deck: 'B' },
+    },
+    // Mixxx Inpulse 300: shifted SYNC inputs (MK2 hardware check pending).
+    {
+      match: { message: 'note', channel: 4, number: 0x05 },
+      controlType: 'button',
+      target: { control: 'match', deck: 'A' },
+    },
+    {
+      match: { message: 'note', channel: 5, number: 0x05 },
       controlType: 'button',
       target: { control: 'match', deck: 'B' },
     },
@@ -591,6 +602,7 @@ export const INPULSE_300_MK2: Mapping = {
         // Q lamp mirrors app-wide Quantize; the button's own note (0x02)
         // on the transport channel. Hardware-verified 2026-07-06.
         quantize: { channel: 1, number: 0x02, onVelocity: 0x7f },
+        sync: { channel: 1, number: 0x05, onVelocity: 0x7f },
         // Key Lock lamp (midi-performance-ops 07): the shifted-Q address
         // (ch+3, same note). Probe outcome: REAL — hardware-verified
         // 2026-07-06. Mixxx drives no output here, but the device does
@@ -624,6 +636,7 @@ export const INPULSE_300_MK2: Mapping = {
         })),
         // Hardware-verified 2026-07-06.
         quantize: { channel: 2, number: 0x02, onVelocity: 0x7f },
+        sync: { channel: 2, number: 0x05, onVelocity: 0x7f },
         // Same as deck A: probe REAL, hardware-verified 2026-07-06.
         keyLockShifted: { channel: 5, number: 0x02, onVelocity: 0x7f },
         loopPads: loopPadLamps(7, LOOP_PADS_BASE_FIRST_NOTE, LOOP_LADDER_BASE),

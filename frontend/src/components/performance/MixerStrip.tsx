@@ -11,13 +11,14 @@
  * midi-controller 09) and pushing changes through the setters. The shared
  * rotary Knob lives here too (used by the deck MIX zones).
  */
-import { useRef, type CSSProperties, type ReactNode } from 'react';
+import { useRef, useSyncExternalStore, type CSSProperties, type ReactNode } from 'react';
 import { knobAppearance, type KnobControl } from './knobAppearance';
 import { useStyleSlot } from '../../waveform/styleSlots';
 import { useMixer, useMixerValue } from '../../hooks/useMixer';
 import { useTakeoverHint } from '../../hooks/useTakeoverHint';
 import { takeoverKey, type TakeoverDirection } from '../../midi/takeoverFeedback';
 import { CUE_MIX_DEFAULT } from '../../playback/mixer';
+import { isQuantizeOn, setQuantize, subscribeQuantize } from '../../playback/quantizeStore';
 import type { ChannelId } from '../../playback/mixer';
 import { CROSSFADER_ASSIGNMENTS } from '../../playback/crossfaderAssignmentStore';
 import { DiagonalPairLinks } from '../../links/PerformancePairLinks';
@@ -373,6 +374,7 @@ export function MixerStrip({
 }) {
   const mixer = useMixer();
   const crossfader = useMixerValue((m) => m.getCrossfader());
+  const quantizeOn = useSyncExternalStore(subscribeQuantize, isQuantizeOn);
   // Crossfader bypass — audio truth lives in the Mixer; UI repaints
   // through the same subscription as every other mixer control.
   const xfOn = useMixerValue((m) => m.getCrossfaderEnabled());
@@ -418,6 +420,17 @@ export function MixerStrip({
       </div>
       <div className="perf-strip-slot wide">
         <button
+          className={`player-button perf-strip-toggle perf-quantize${quantizeOn ? ' on' : ''}`}
+          aria-label="Quantize"
+          aria-pressed={quantizeOn}
+          aria-keyshortcuts="="
+          title={`${quantizeOn ? 'Quantize on: gestures snap to the beat' : 'Quantize off: exact placement'} (=)`}
+          onClick={() => setQuantize(!isQuantizeOn())}
+        >
+          <span className="perf-quantize-label">QUANTIZE</span>
+          <kbd className="perf-quantize-hint" aria-hidden="true">=</kbd>
+        </button>
+        <button
           className={`player-button perf-strip-toggle${xfOn ? ' on' : ''}`}
           onClick={() => mixer.setCrossfaderEnabled(!xfOn)}
           title={
@@ -456,6 +469,10 @@ export function MixerStrip({
             deck divider axis. */}
         <span className="player-button perf-strip-toggle perf-strip-ghost" aria-hidden="true">
           XF
+        </span>
+        <span className="player-button perf-strip-toggle perf-quantize perf-strip-ghost" aria-hidden="true">
+          <span className="perf-quantize-label">QUANTIZE</span>
+          <kbd className="perf-quantize-hint">=</kbd>
         </span>
         {/* Diagonal pair Links (four-deck-performance 19): A·D and B·C
             have no shared Deck edge, so their toggles hang here beside

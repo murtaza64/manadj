@@ -14,7 +14,6 @@ import { useEffect, useRef } from 'react';
 import { useViewActive } from '../../contexts/viewActive';
 import { useDeck, useDeckReady, useDeckSnapshot } from '../../hooks/useDeck';
 import { useHotCueActions } from '../../hooks/useHotCueActions';
-import { useMatchAction } from '../../hooks/useMatchAction';
 import { useMixer } from '../../hooks/useMixer';
 import { doubleBeatjump, halveBeatjump } from '../../playback/beatjump';
 import { MouseJogController } from './mouseJog';
@@ -25,7 +24,7 @@ import { invertControl, MIXER_DRAG_RANGE_PX, moveKnob, type KnobGesture } from '
 
 export function DeckKeys({ enabled = true }: { enabled?: boolean }) {
   const viewActive = useViewActive() && enabled;
-  const { deck, engine, loadedTrack, beatjumpBeats, setBeatjumpBeats } = useDeck();
+  const { deck, engine, syncGroup, loadedTrack, beatjumpBeats, setBeatjumpBeats } = useDeck();
   const ready = useDeckReady();
   // The play key is allowed while loading — the engine latches play intent
   // (library-hub parity for space, on this view's play key).
@@ -34,7 +33,6 @@ export function DeckKeys({ enabled = true }: { enabled?: boolean }) {
       s.loadState === 'ready' || s.loadState === 'fetching' || s.loadState === 'decoding'
   );
   const hotCues = useHotCueActions(loadedTrack?.id ?? null);
-  const match = useMatchAction();
   const mixer = useMixer();
   const cueHeld = useRef(false);
   const padsHeld = useRef(new Map<number, () => void>());
@@ -238,13 +236,17 @@ export function DeckKeys({ enabled = true }: { enabled?: boolean }) {
       const key = unshifted[event.key] ?? event.key.toLowerCase();
       const jumpKey = key === keys.jumpBack || key === keys.jumpForward;
       if (event.metaKey && !event.ctrlKey && !event.altKey &&
-          (jumpKey || (key === keys.fader && !event.shiftKey))) {
+          (jumpKey || key === keys.fader)) {
         event.preventDefault();
         if (event.repeat) return;
-        if (event.shiftKey) {
+        if (key === keys.fader) {
+          if (event.shiftKey) {
+            if (syncGroup.getSnapshot().decks[deck] !== 'off' || (ready && engine.getSnapshot().bpm)) {
+              syncGroup.toggle(deck);
+            }
+          } else if (ready && engine.getSnapshot().bpm) syncGroup.match(deck);
+        } else if (event.shiftKey) {
           engine.resizeLoop(key === keys.jumpBack ? 'halve' : 'double');
-        } else if (key === keys.fader) {
-          if (ready) match();
         } else if (ready && !engine.getSnapshot().playing) {
           hotCues.walk?.(key === keys.jumpBack ? 'prev' : 'next');
         }
@@ -325,7 +327,7 @@ export function DeckKeys({ enabled = true }: { enabled?: boolean }) {
       document.removeEventListener('keydown', onKeyDown);
       document.removeEventListener('keyup', onKeyUp);
     };
-  }, [deck, engine, ready, canPlay, beatjumpBeats, setBeatjumpBeats, hotCues, match, viewActive]);
+  }, [deck, engine, syncGroup, ready, canPlay, beatjumpBeats, setBeatjumpBeats, hotCues, viewActive]);
 
   return null;
 }

@@ -68,6 +68,14 @@ function baseInput(events: CaptureEvent[] = []) {
 const facts = { bpmA: 174, bpmB: 174 };
 
 describe('anchors', () => {
+  it('uses a loop phase-correction anchor without needing a later tick', () => {
+    const input = baseInput([
+      { t: 119.8, kind: 'loop', channel: 'B', playhead: 28, region: { start: 28, end: 30 } },
+    ]);
+    const tr = vectorizeTake(input, facts)!.transition;
+    expect(tr.bInSec).toBeCloseTo(8.2);
+    expect(tr.jumps).toBeUndefined();
+  });
   it('refuses Slip-loop Takes rather than dropping the return jump', () => {
     expect(vectorizeTake(baseInput([
       { t: 105, kind: 'loop', channel: 'A', playhead: 65, region: { start: 65, end: 67 }, slip: true },

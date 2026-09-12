@@ -80,9 +80,9 @@ function deckBindings({ deck, channel, padChannel, shiftedPadChannel }: DeckMidi
     button(channel, 103, { control: 'jog-touch-edge', deck, shifted: true }),
     button(channel, 64, { control: 'slip-mode', deck }),
     button(channel, 23, { control: 'vinyl-mode', deck }),
-    // Hardware BEAT SYNC is manadj's established one-shot MATCH gesture;
-    // continuous sync remains deliberately absent.
-    button(channel, 88, { control: 'match', deck }),
+    // E1 D19: BEAT SYNC toggles membership; shifted note 92 is one-shot MATCH.
+    button(channel, 88, { control: 'sync', deck }),
+    button(channel, 92, { control: 'match', deck }),
     button(channel, 84, { control: 'pfl', channel: deck }),
     // The controller reports selected logical Deck state on note 60:
     // velocity 0x7f for selected, 0 for the displaced layer.
@@ -204,6 +204,7 @@ function deckFeedback({ channel, padChannel, shiftedPadChannel }: DeckMidi): Dec
     gridPads: Array.from({ length: 8 }, (_, pad) => led(padChannel, PAD_BLOCK.grid + pad)),
     gridPadMapped: Array.from({ length: 8 }, () => true),
     quantize: led(channel, 53),
+    sync: led(channel, 88),
     keyLock: led(channel, 26),
     slipMode: led(channel, 64),
     vinylMode: led(channel, 23),

@@ -7,7 +7,6 @@ import type { AppMode } from './TopBar';
 import { isQuantizeOn, setQuantize } from '../playback/quantizeStore';
 import { writeSetting } from '../settings/persistedSettings';
 import { PerformanceKeyboard } from './performance/PerformanceKeyboard';
-import { stealsFocus } from '../focus/noFocusRule';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -94,6 +93,22 @@ function key(options: KeyboardEventInit = {}, target: EventTarget = document.bod
   return event;
 }
 
+it('does not render a Quantize button in TopBar', () => {
+  render(false);
+  expect(host.querySelector('button[aria-label="Quantize"]')).toBeNull();
+});
+
+it('keeps the global Quantize shortcut enabled when KBD is off', () => {
+  const performance = document.createElement('div');
+  performance.className = 'perf-root kbd-hints-off';
+  document.body.append(performance);
+  try {
+    render(false);
+    expect(key().defaultPrevented).toBe(true);
+    expect(isQuantizeOn()).toBe(true);
+  } finally { performance.remove(); }
+});
+
 it('toggles once on fresh = and claims repeats without toggling', () => {
   render(false);
   const laterCapture = vi.fn();
@@ -118,22 +133,15 @@ it('toggles once on fresh = and claims repeats without toggling', () => {
   }
 });
 
-it('reads current state before React repaints and exposes the hint, name and on state', () => {
+it('reads current Quantize state after an external store update', () => {
   render(false);
-  const button = host.querySelector<HTMLButtonElement>('[aria-label="Quantize"]')!;
-  expect(button.querySelector('kbd')?.textContent).toBe('=');
-  expect(button.title).toContain('(=)');
-  expect(button.getAttribute('aria-keyshortcuts')).toBe('=');
-  expect(stealsFocus(button.querySelector('kbd'))).toBe(true);
   act(() => {
     setQuantize(true);
     document.body.dispatchEvent(new KeyboardEvent('keydown', { key: '=', bubbles: true }));
   });
   expect(isQuantizeOn()).toBe(false);
-  act(() => button.click());
+  key();
   expect(isQuantizeOn()).toBe(true);
-  expect(button.classList.contains('on')).toBe(true);
-  expect(button.getAttribute('aria-pressed')).toBe('true');
 });
 
 it.each(['library', 'performance', 'transition', 'routine', 'history', 'sync'] as const)(
