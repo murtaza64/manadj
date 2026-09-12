@@ -415,6 +415,9 @@ void main() {
     (t0 < u_modPlayheadT || v_uv.y > 0.5 || u_stemLobeSplit < 0.5);
   if (g_stems) {
     g_mask = texture(u_stemMaskTex, vec2((t0 - u_stemMaskStart) / u_stemMaskSpan, 0.5));
+    // All-on uses the original mix: summed stem energies cannot reconstruct
+    // its envelope. Check per column so muted history still composites.
+    g_stems = !all(equal(g_mask, vec4(1.0)));
   }
   // Amplitude coordinate: mirrored (center) or edge-anchored half-waveforms.
   float yA = u_anchor == 0 ? abs(v_uv.y - 0.5) * 2.0
