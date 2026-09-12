@@ -2,23 +2,18 @@
  * The audibility reducer (architecture-deepening 01) — THE one event
  * reducer over deck/mixer/tenure state, from which both the live Handover
  * detector (capture/detector.ts) and the Session timeline
- * (sessions/timelineModel.ts) derive. "What was audible" has exactly one
- * implementation: the detector layers verdict machinery (pair machines,
- * engagement/settlement) on top; the timeline layers band/marker
- * derivation on top. Params-parameterized — the same DetectorParams the
- * detector runs under drive the audibility thresholds here, so bands and
- * verdicts agree by construction (the modules' stated invariant;
- * capture/audibility.ts holds the pure per-deck predicate).
+ * (sessions/timelineModel.ts) derive. Both use the same mixer thresholds;
+ * Sessions additionally count audible previews, which remain excluded from
+ * Take detection. capture/audibility.ts holds the pure per-deck predicate.
  *
  * Semantics notes (the union of the two former copies):
  * - `playing` is transport-owned: a `load` never flips it (the recorder
  *   diffs the engine's own stop into an explicit pause event beside every
  *   real load, and the detector's re-seed replays load+play pairs whose
  *   order must not fabricate audibility edges). A load does clear
- *   `previewing` and zero the playhead — inert to audibility.
+ *   `previewing` and zero the playhead.
  * - `previewStart`/`previewEnd` (CUE stabs, ADR 0033) flip `previewing`
- *   only — never `playing`, so preview stays invisible to audibility
- *   (deliberate, detection v1).
+ *   only — never `playing`, so preview stays invisible to Take detection.
  * - Transport events and ticks keep `playhead`/`playheadAt` current (the
  *   timeline's trace/extrapolation inputs; inert to detection).
  * - `tenure` markers track the holder: while a machine holds the shared
@@ -171,8 +166,7 @@ export function applyEvent(s: AudibilityState, e: CaptureEvent): void {
       if (e.action === 'play') d.playing = true;
       else if (e.action === 'pause' || e.action === 'cue') d.playing = false;
       // A stab (previewStart/previewEnd, ADR 0033) flips `previewing`, never
-      // `playing` — Master-audible in reality, deliberately invisible to
-      // audibility/detection v1 (revisiting that is a follow-up grill).
+       // `playing` — counted by Sessions, not Take detection.
       // seek/jumpBeats/hotCue ride the log as evidence; only the playhead
       // sample below reaches the state.
       else if (e.action === 'previewStart') d.previewing = true;
@@ -301,9 +295,17 @@ export function deckSounding(s: AudibilityState, ch: CaptureDeck): boolean {
 
 /** Master-audible under the shared surface: a machine tenure displaces the
  * whole surface, so nothing is audible beneath it regardless of mixer math.
- * The timeline's bands (and the Session lifecycle) read this. */
+ * Played-track accounting reads this; Take detection reads deckAudible. */
 export function maskedDeckAudible(s: AudibilityState, ch: CaptureDeck): boolean {
   return !tenureHeld(s) && deckAudible(s, ch);
+}
+
+/** Session evidence includes Master-audible cue stabs, unlike Take detection
+ * and Played-track accounting. Mixer kills and scratch holds still apply. */
+export function sessionDeckAudible(s: AudibilityState, ch: CaptureDeck): boolean {
+  if (tenureHeld(s)) return false;
+  const d = s.decks[ch];
+  return isDeckAudible(d.previewing ? { ...d, playing: true } : d, mixerInputs(s), s.params);
 }
 
 /** This deck's Master-bus gain right now (kills/tenure NOT applied). */
@@ -321,7 +323,7 @@ export function anyDeckAudible(s: AudibilityState): boolean {
  * place? (A tenure is non-performance, silent by definition.) The recorder
  * drives the Session lifecycle (activation + the ten-minute split) off this. */
 export function masterAudible(s: AudibilityState): boolean {
-  return !tenureHeld(s) && anyDeckAudible(s);
+  return ALL_DECKS.some((ch) => sessionDeckAudible(s, ch));
 }
 
 export function scratchSoundedBefore(s: AudibilityState, t: number): boolean {

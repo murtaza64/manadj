@@ -6,8 +6,7 @@
  *
  * - per-Deck track spans (loads), playing spans (transport), audibility
  *   spans (via the SHARED audibility reducer, capture/audibilityReducer —
- *   the very reducer the detector runs, same params, so the bands are
- *   what the detector heard by construction), playhead traces (ticks +
+ *   same mixer thresholds as the detector, including previews), playhead traces (ticks +
  *   transport, broken at discontinuities — these also map session time to
  *   track time for waveform rendering)
  * - tenure holds (a machine held the Audible surface: honest gaps;
@@ -27,7 +26,7 @@ import {
   deckScratchMotion,
   deckGain,
   initialAudibilityState,
-  maskedDeckAudible,
+  sessionDeckAudible,
 } from '../capture/audibilityReducer';
 import type { AudibilityState } from '../capture/audibilityReducer';
 import { DEFAULT_DETECTOR_PARAMS } from '../capture/events';
@@ -45,6 +44,7 @@ const JOG_SEEK_MAX_S = 2;
 /** Minimum spacing between kept jog-trace samples (~20 Hz): rim ticks can
  * fire many times per frame; decimating bounds the point count. */
 const JOG_DECIMATE_S = 0.05;
+const IDLE_GRACE_S = 5;
 
 export interface Span {
   start: number;
@@ -473,7 +473,7 @@ export function deriveTimeline(
     // suspends identically — one gate, audibilityReducer.ts).
     let audibleCount = 0;
     for (const ch of ALL_DECKS) {
-      const a = maskedDeckAudible(s, ch);
+      const a = sessionDeckAudible(s, ch);
       if (a) audibleCount += 1;
       audible[ch].set(a, e.t);
       playing[ch].set(s.decks[ch].playing, e.t);
@@ -533,7 +533,7 @@ export function deriveTimeline(
 
   // Distinct Master-audible Tracks (the Sessions-list "Tracks" count): a
   // Track counts iff its tenure on a deck overlapped that deck's
-  // audibility (which already excludes cue/PFL, loaded-silent, kills, and
+   // audibility (which already excludes PFL-only, loaded-silent, kills, and
   // tenure-masked stretches). One definition, reused — no divergence.
   const audibleTrackIds = new Set<number>();
   for (const ch of ALL_DECKS) {
@@ -550,7 +550,11 @@ export function deriveTimeline(
     end,
     decks,
     tenures,
-    idle: idle.spans,
+    // Keep the grace on the visible timeline, rather than backdating idle
+    // to the pause once the grace expires. Works for sparse logs too.
+    idle: idle.spans
+      .filter(span => span.end - span.start > IDLE_GRACE_S)
+      .map(span => ({ start: span.start + IDLE_GRACE_S, end: span.end })),
     overlaps: overlap.spans,
     trackIds: [...trackIds],
     audibleTrackIds: [...audibleTrackIds],
@@ -639,7 +643,7 @@ function snapshotState(
           slipMode: d.slipMode,
           vinylMode: d.vinylMode,
           loop: d.loop ? { ...d.loop } : null,
-          audible: maskedDeckAudible(s, ch),
+          audible: sessionDeckAudible(s, ch),
           gain: deckGain(s, ch),
           playhead: Math.max(0, extrapolated),
           fader: d.fader,
