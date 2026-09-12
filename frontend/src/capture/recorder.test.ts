@@ -157,6 +157,9 @@ class FakeDeckSource implements CaptureDeckSource {
   setModes(slipMode: boolean, vinylMode: boolean): void {
     this.mutate({ slipMode, vinylMode });
   }
+  setLoop(loop: DeckSnapshot['loop']): void {
+    this.mutate({ loop });
+  }
   subscribe(fn: () => void): () => void {
     this.listeners.add(fn);
     return () => this.listeners.delete(fn);
@@ -576,6 +579,21 @@ describe('capture gate (ADR 0022)', () => {
 
 describe('four-deck transport parity (sessions 09)', () => {
   const DECKS = ['A', 'B', 'C', 'D'] as const;
+
+  it('records phase alignment as a loop anchor while looping, otherwise a seek', () => {
+    const r = rig(); r.recorder.start();
+    r.decks.A.load(1); r.decks.A.play();
+    r.decks.A.setLoop({ start: 10, end: 12, lengthBeats: 4 });
+    const before = r.logged.length;
+    r.decks.A.fireTransport({ action: 'phaseAlign', playhead: 10.2 });
+    r.decks.B.fireTransport({ action: 'phaseAlign', playhead: 20.3 });
+    expect(r.logged.slice(before)).toEqual([
+      { t: expect.any(Number), kind: 'loop', channel: 'A', playhead: 10.2,
+        region: { start: 10, end: 12 }, slip: false },
+      { t: expect.any(Number), kind: 'transport', channel: 'B', action: 'seek', playhead: 20.3 },
+    ]);
+    r.recorder.dispose();
+  });
 
   it('installs the detailed transport handler on all four decks, and clears it on dispose', () => {
     const r = rig();

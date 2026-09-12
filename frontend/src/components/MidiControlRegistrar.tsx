@@ -5,7 +5,6 @@ import { dispatchFollow, getFollowFlags } from '../follow/followStore';
 import { useDeck, useDeckReady, useDecks } from '../hooks/useDeck';
 import { useGridEditActions } from '../hooks/useGridEditActions';
 import { useHotCueActions } from '../hooks/useHotCueActions';
-import { useMatchAction } from '../hooks/useMatchAction';
 import { useMixer } from '../hooks/useMixer';
 import {
   registerDeckControls,
@@ -24,8 +23,7 @@ import { setKeyLockFlag } from '../playback/keyLockStore';
  * hooks the on-screen controls use — hot cues via useHotCueActions
  * (set-empty / jump / hold-preview, React Query curation included),
  * beatjump via the same engine call + shared per-deck size as BeatjumpRow,
- * MATCH via the same useMatchAction as the on-screen button (out-of-reach
- * is silent: no hardware feedback channel), pitch via engine.setPitch with
+ * MATCH/SYNC/pitch via the shared SyncGroup (rejected joins stay unlit), with
  * the same ready gate as the on-screen fader. The Mixer registers itself —
  * MidiMixerControls is structurally a subset of Mixer.
  *
@@ -36,10 +34,9 @@ import { setKeyLockFlag } from '../playback/keyLockStore';
  */
 
 function DeckControlsRegistrar() {
-  const { deck, engine, loadedTrack, beatjumpBeats, setBeatjumpBeats } = useDeck();
+  const { deck, engine, syncGroup, loadedTrack, beatjumpBeats, setBeatjumpBeats } = useDeck();
   const ready = useDeckReady();
   const hotCues = useHotCueActions(loadedTrack?.id ?? null);
-  const matchAction = useMatchAction();
   // Grid-edit pad ops (midi-performance-ops 05): the same mutations and
   // commit chain the on-screen grid/BPM controls use.
   const gridEdit = useGridEditActions();
@@ -87,22 +84,22 @@ function DeckControlsRegistrar() {
 
   const latest = useRef({
     engine,
+    syncGroup,
     ready,
     hotCues,
     beatjumpBeats,
     setBeatjumpBeats,
-    matchAction,
     jog,
     gridEdit,
   });
   useEffect(() => {
     latest.current = {
       engine,
+      syncGroup,
       ready,
       hotCues,
       beatjumpBeats,
       setBeatjumpBeats,
-      matchAction,
       jog,
       gridEdit,
     };
@@ -133,17 +130,18 @@ function DeckControlsRegistrar() {
           set(change === 'halve' ? halveBeatjump(beats) : doubleBeatjump(beats));
         },
         setPitch: (percent) => {
-          const { engine: e, ready: r } = latest.current;
+          const { syncGroup: group, ready: r } = latest.current;
           if (!r) return; // same gate as the on-screen pitch fader
-          e.setPitch(percent);
+          group.setPitch(deck, percent);
         },
         // Soft takeover's read side (midi-controller 15): the live engine
         // pitch, so external changes (MATCH, reload) unlatch the fader.
         getPitch: () => latest.current.engine.getSnapshot().pitchPercent,
         match: () => {
           // Out-of-reach/unavailable are silent: no hardware feedback channel.
-          latest.current.matchAction();
+          latest.current.syncGroup.match(deck);
         },
+        toggleSync: () => { latest.current.syncGroup.toggle(deck); },
         jogTouch: (held) => {
           const { jog: j, ready: r } = latest.current;
           if (!held || r) j.onTouch(held);

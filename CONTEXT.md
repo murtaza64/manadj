@@ -362,6 +362,12 @@ _Avoid_: snap (the Transition editor's separate affordance), quantization (the A
 A sticky per-Deck setting (default on): playback-rate changes on that Deck (pitch fader, Nudge) do not shift the loaded Track's Key. Scratching bypasses it until release. Belongs to the Deck — not to the Track, not to the Mixer. Named tension: DJ-jargon *pitch* (the fader, the Deck's ±% rate) changes tempo; Key Lock keeps the *musical* pitch — the Key — constant while it does. Also known as master tempo (Pioneer).
 _Avoid_: "pitch-preserving", "pitch shift" — "pitch" already means the rate control.
 
+**Sync Group / Group Tempo**:
+The engaged Decks sharing one effective tempo, with per-Deck half/double-time relationships. Pitch input on any member changes Group Tempo; Nudge remains individual. There is no Tempo Master, no continuous chasing of unsynced Decks, and no phase lock. A member outside its pitch reach stays engaged but out-of-lock until tempo becomes reachable again.
+
+**MATCH / SYNC**:
+MATCH captures another playing Deck's tempo once without changing group membership. SYNC joins or leaves the Sync Group. With Quantize on, either successful MATCH or SYNC engagement aligns a playing Deck's beat phase once; neither edits the stored Beatgrid. Disengagement leaves pitch unchanged.
+
 **Alignment nudge**:
 Realigning the Transition editor's pair by a fixed time step — the editor's counterpart of a performance Nudge: both ride the pair's relative alignment, but a Nudge does it live and leaves nothing behind, while an Alignment nudge edits the sketch (autosaved). A Slide variant. Distinct from a grid nudge, which edits the Track's stored Beatgrid.
 

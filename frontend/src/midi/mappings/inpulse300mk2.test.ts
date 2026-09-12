@@ -30,6 +30,20 @@ function padPress(channel: number, note: number): number[][] {
 }
 
 describe('LOOP pad mode bindings', () => {
+  it.each(['A', 'B'] as const)('maps SYNC and shifted MATCH on %s', deck => {
+    const channel = deck === 'A' ? 1 : 2;
+    expect(translate(padPress(channel, 5))).toEqual([
+      { kind: 'button', target: { control: 'sync', deck }, edge: 'down' },
+      { kind: 'button', target: { control: 'sync', deck }, edge: 'up' },
+    ]);
+    expect(translate(padPress(channel + 3, 5))).toEqual([
+      { kind: 'button', target: { control: 'match', deck }, edge: 'down' },
+      { kind: 'button', target: { control: 'match', deck }, edge: 'up' },
+    ]);
+    expect(INPULSE_300_MK2.feedback!.decks[deck]!.sync).toEqual({
+      channel, number: 5, onVelocity: 127,
+    });
+  });
   it('base page walks the 1-128 ladder (deck A, notes 0x10-0x17 on ch 6)', () => {
     const ladder = [1, 2, 4, 8, 16, 32, 64, 128];
     ladder.forEach((beats, i) => {

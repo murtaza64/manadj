@@ -2,6 +2,7 @@ import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'r
 import type { ReactNode } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { DeckEngine } from '../playback/DeckEngine';
+import { SyncGroup } from '../playback/SyncGroup';
 import { CHANNEL_IDS, Mixer, STEM_NAMES } from '../playback/mixer';
 import { CaptureRecorder } from '../capture/recorder';
 import { persistTake } from '../capture/takeSink';
@@ -61,7 +62,7 @@ function readStoredLoadedIds(): Record<ChannelId, number | null> {
  * useDeckSnapshot so transport events only re-render components that care.
  */
 export function DeckProvider({ children }: { children: ReactNode }) {
-  const [{ mixer, engines }] = useState(() => {
+  const [{ mixer, engines, syncGroup }] = useState(() => {
     // THE Mixer and THE Decks (ADRs 0008/0009/0022): every surface —
     // Performance, library, and the Transition editor's conductor — plays
     // through these. There is no other Mixer instance in the app.
@@ -76,6 +77,7 @@ export function DeckProvider({ children }: { children: ReactNode }) {
     return {
       mixer: m,
       engines: created,
+      syncGroup: new SyncGroup(created),
     };
   });
   useEffect(
@@ -86,6 +88,8 @@ export function DeckProvider({ children }: { children: ReactNode }) {
     },
     [engines, mixer]
   );
+
+  useEffect(() => syncGroup.start(), [syncGroup]);
 
   // Stem kill switches (stems #210/#212): mixer owns the state (MIDI,
   // capture, automation all route through it), the deck worklet applies it
@@ -100,25 +104,15 @@ export function DeckProvider({ children }: { children: ReactNode }) {
     [engines, mixer]
   );
 
-  // Cross-deck quantized launch (cue-quantize-bpm 04): each deck's paused
-  // launch (Play, Cue-hold, Hot-cue-hold) references another live Deck's
-  // phase. Stable Deck order is the interim choice until multi-Deck MATCH
-  // and reference selection land in issue 04.
+  // Synced launches reference a locked member, never an unrelated playing Deck.
   useEffect(() => {
     for (const deck of CHANNEL_IDS) {
-      engines[deck].setLaunchReferenceProvider(() => {
-        for (const candidate of CHANNEL_IDS) {
-          if (candidate === deck) continue;
-          const reference = engines[candidate].asLaunchReference();
-          if (reference) return reference;
-        }
-        return null;
-      });
+      engines[deck].setLaunchReferenceProvider(() => syncGroup.launchReference(deck));
     }
     return () => {
       for (const deck of CHANNEL_IDS) engines[deck].setLaunchReferenceProvider(null);
     };
-  }, [engines]);
+  }, [engines, syncGroup]);
 
   // Follow rides playback (follow-mode 02): deck play/pause transitions
   // feed the Follow state machine (spread/drop/sticky rules live in the
@@ -349,13 +343,14 @@ export function DeckProvider({ children }: { children: ReactNode }) {
     ): DeckContextValue => ({
       deck,
       engine: engines[deck],
+      syncGroup,
       loadedTrack,
       loadTrack: (track) => loadTrackOnto(deck, track),
       beatjumpBeats,
       setBeatjumpBeats: (beats) =>
         setBeatjumps((prev) => ({ ...prev, [deck]: clampBeatjump(beats) })),
     }),
-    [engines, loadTrackOnto]
+    [engines, syncGroup, loadTrackOnto]
   );
   const scopeA = useMemo(
     () => makeScope('A', loadedTracks.A, beatjumps.A),
@@ -461,6 +456,7 @@ export function DeckProvider({ children }: { children: ReactNode }) {
     const handle = {
       mixer,
       engines,
+      syncGroup,
       loadTrackById: async (deck: ChannelId, id: number) => {
         loadTrackOnto(deck, await api.tracks.getById(id));
       },
@@ -470,7 +466,7 @@ export function DeckProvider({ children }: { children: ReactNode }) {
     return () => {
       delete devGlobals.__manadj;
     };
-  }, [mixer, engines, loadTrackOnto]);
+  }, [mixer, engines, syncGroup, loadTrackOnto]);
 
   return (
     <MixerContext.Provider value={mixer}>

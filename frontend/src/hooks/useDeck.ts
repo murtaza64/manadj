@@ -2,6 +2,7 @@ import { createContext, useContext, useSyncExternalStore } from 'react';
 import type { DeckEngine, DeckSnapshot } from '../playback/DeckEngine';
 import type { ChannelId } from '../playback/mixer';
 import type { Track } from '../types';
+import type { SyncGroup, SyncStatus } from '../playback/SyncGroup';
 
 /**
  * Deck addressing (performance-mode issue 02): all four Decks live app-wide
@@ -20,6 +21,7 @@ export interface DeckContextValue {
   /** Which mixer channel this scope addresses. */
   deck: ChannelId;
   engine: DeckEngine;
+  syncGroup: SyncGroup;
   /** The Track on the Deck (kept alongside the engine's trackId for display). */
   loadedTrack: Track | null;
   /** Load a Track onto the Deck: fetch + decode, replacing the current one. */
@@ -45,6 +47,11 @@ export function useDeck(): DeckContextValue {
   const ctx = useContext(DeckContext);
   if (!ctx) throw new Error('useDeck must be used within a DeckScope');
   return ctx;
+}
+
+export function useDeckSyncStatus(): SyncStatus {
+  const { deck, syncGroup } = useDeck();
+  return useSyncExternalStore(syncGroup.subscribe, () => syncGroup.getSnapshot().decks[deck]);
 }
 
 /**

@@ -20,7 +20,7 @@
 import { initialTransportState, isAudioRunning, reduceTransport } from './transport';
 import type { TransportContext, TransportEvent, TransportState } from './transport';
 import { isQuantizeOn } from './quantizeStore';
-import { addBeats, crossDeckLaunchTarget } from './quantize';
+import { addBeats, beatPhaseTarget, crossDeckLaunchTarget } from './quantize';
 import type { LaunchReference } from './quantize';
 import { foldLoopPlayhead, projectLoopBeats } from './loop';
 import type { LoopRegion, LoopResize } from './loop';
@@ -46,7 +46,7 @@ export const MAX_LEAD_IN_SECONDS = 30;
 
 /** Accepted transport evidence; scratch moves carry incremental displacement. */
 export interface DeckTransportGesture {
-  action: 'seek' | 'jumpBeats' | 'hotCue' | 'scratchBegin' | 'scratchMove' | 'scratchEnd';
+  action: 'seek' | 'phaseAlign' | 'jumpBeats' | 'hotCue' | 'scratchBegin' | 'scratchMove' | 'scratchEnd';
   playhead: number;
   detail?: number;
   deltaSeconds?: number;
@@ -280,7 +280,10 @@ export class DeckEngine {
     this.syncScheduledScratch();
     if (this.scratch || !isAudioRunning(this.transport)) return null;
     if (!this.beatTimes || this.beatTimes.length === 0) return null;
-    return { beatTimes: this.beatTimes, playhead: this.getPlayhead() };
+    return {
+      beatTimes: this.beatTimes, playhead: this.getPlayhead(),
+      playRate: composeRate(this.snapshot.pitchPercent, this.snapshot.bendPercent),
+    };
   }
 
   private readonly port: DeckAudioPort;
@@ -508,6 +511,24 @@ export class DeckEngine {
     // Relative displacement, not a seek: an active loop translates with
     // the playhead (looping 04).
     this.dispatch({ type: 'jump', time: target });
+  }
+
+  /** One-shot beat alignment; loop bounds and cue remain unchanged. */
+  alignBeatPhase(reference: LaunchReference, ratio: number): void {
+    if (!this.buffer || !this.transport.playing || this.scratch
+      || !this.beatTimes || this.beatTimes.length < 2 || reference.beatTimes.length < 2
+      || this.pendingLaunchTimer !== null || this.pendingStartAt !== null) return;
+    const playhead = this.getPlayhead();
+    let time = beatPhaseTarget(playhead, this.beatTimes, reference, ratio);
+    const loop = effectiveScratchLoop(this.transport.loop, this.buffer.duration);
+    if (loop) {
+      const length = loop.end - loop.start;
+      time = loop.start + ((time - loop.start) % length + length) % length;
+    }
+    time = this.clampPlayhead(time);
+    if (Math.abs(time - playhead) < 1e-7) return;
+    this.fireTransportEvent({ action: 'phaseAlign', playhead: time });
+    this.dispatch({ type: 'phase-align', time });
   }
 
   /** A BPM edit landed for the loaded Track: keep beat-domain math (beat

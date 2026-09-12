@@ -61,6 +61,7 @@ describe('DDJ-GRV6 Mapping — official E1 message table', () => {
     const channel = ['A', 'B', 'C', 'D'].indexOf(deck);
     for (const on of [true, false]) {
       const states = ledStates({
+        synced: on,
         playing: false, pendingPlay: false, previewing: false, hasCuePoint: false,
         atCuePoint: false, assignedPads: new Set(), loaded: false, pfl: false,
         hasBeatgrid: false, quantize: false, keyLock: true, loopBeats: null,
@@ -68,9 +69,11 @@ describe('DDJ-GRV6 Mapping — official E1 message table', () => {
       });
       const messages = encodeDeckLeds(DDJ_GRV6.feedback!, deck, states);
       expect(messages).toContainEqual([0x90 | channel, 64, on ? 127 : 0]);
+      expect(messages).toContainEqual([0x90 | channel, 88, on ? 127 : 0]);
       expect(messages).toContainEqual([0x90 | channel, 23, on ? 0 : 127]);
     }
     expect(allOffMessages(DDJ_GRV6.feedback!)).toContainEqual([0x90 | channel, 64, 0]);
+    expect(allOffMessages(DDJ_GRV6.feedback!)).toContainEqual([0x90 | channel, 88, 0]);
     expect(allOffMessages(DDJ_GRV6.feedback!)).toContainEqual([0x90 | channel, 23, 0]);
   });
 
@@ -83,7 +86,14 @@ describe('DDJ-GRV6 Mapping — official E1 message table', () => {
       { kind: 'button', target: { control: 'transport', deck: 'A' }, edge: 'down' },
       { kind: 'button', target: { control: 'cue', deck: 'B' }, edge: 'down' },
       { kind: 'button', target: { control: 'set-control-focus', deck: 'C' }, edge: 'down' },
-      { kind: 'button', target: { control: 'match', deck: 'D' }, edge: 'down' },
+      { kind: 'button', target: { control: 'sync', deck: 'D' }, edge: 'down' },
+    ]);
+  });
+
+  it.each(['A', 'B', 'C', 'D'] as const)('maps shifted BEAT SYNC to MATCH on %s', deck => {
+    const channel = ['A', 'B', 'C', 'D'].indexOf(deck);
+    expect(translate([press(channel, 92)])).toEqual([
+      { kind: 'button', target: { control: 'match', deck }, edge: 'down' },
     ]);
   });
 
@@ -285,6 +295,7 @@ describe('DDJ-GRV6 Mapping — official E1 message table', () => {
 
   it('encodes C/D logical deck Feedback on their official output channels', () => {
     const states = {
+      sync: false,
       play: true,
       cue: false,
       pfl: true,
@@ -319,6 +330,7 @@ describe('DDJ-GRV6 Mapping — official E1 message table', () => {
 
   it('addresses Beat Jump, GRID, and Beat Loop mode blocks independently', () => {
     const states = {
+      sync: false,
       play: false,
       cue: false,
       pfl: false,
