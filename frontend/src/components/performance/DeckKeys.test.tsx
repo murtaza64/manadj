@@ -30,7 +30,7 @@ const mixer = vi.hoisted(() => ({
 vi.mock('../../hooks/useMixer', () => ({ useMixer: () => mixer }));
 vi.mock('../../settings/persistedSettings', () => ({ writeSetting: vi.fn(), removeSetting: vi.fn() }));
 vi.mock('../../hooks/useDeck', () => ({
-  useDeck: () => ({ deck: fixture.deck, engine, loadedTrack: { id: fixture.trackId }, beatjumpBeats: 32 }),
+  useDeck: () => ({ deck: fixture.deck, engine, loadedTrack: { id: fixture.trackId }, beatjump: { getSnapshot: () => 32 } }),
   useDeckReady: () => fixture.snapshot.loadState === 'ready',
   useDeckSnapshot: () => true,
 }));

@@ -4,6 +4,7 @@ import { createRoot } from 'react-dom/client';
 import { afterEach, expect, it, vi } from 'vitest';
 import { DeckContext, useDeckSnapshot, type DeckContextValue } from '../../hooks/useDeck';
 import { DeckEngine } from '../../playback/DeckEngine';
+import { createBeatjumpSize } from '../../playback/beatjump';
 import { _clearBufferCacheForTests, putCachedBuffer } from '../../playback/bufferCache';
 import { setQuantize } from '../../playback/quantizeStore';
 import type { DeckAudioPort } from '../../playback/mixer';
@@ -95,7 +96,7 @@ it.each<{ gapMs: number; warm: boolean; quantize: boolean; running: boolean; res
     const render = () => act(async () => root.render(<>
       {(['A', 'B'] as const).map(deck => (
         <DeckContext.Provider key={deck} value={{ deck, engine: engines[deck],
-          loadedTrack: { id: 1 }, beatjumpBeats: 32 } as DeckContextValue}>
+          loadedTrack: { id: 1 }, beatjump: createBeatjumpSize() } as DeckContextValue}>
           <DeckKeys /><Status />
         </DeckContext.Provider>
       ))}

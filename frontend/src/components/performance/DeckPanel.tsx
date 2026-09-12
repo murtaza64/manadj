@@ -16,7 +16,7 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../api/client';
-import { useDeck, useDeckReady, useDecks, useDeckSnapshot, useDeckSyncStatus, deckReadyNow } from '../../hooks/useDeck';
+import { useDeck, useDeckReady, useDecks, useDeckSnapshot, useDeckSyncStatus, deckReadyNow, useBeatjumpBeats } from '../../hooks/useDeck';
 import { useAutomationGhost, useMixer, useMixerValue } from '../../hooks/useMixer';
 import { useTakeoverHint } from '../../hooks/useTakeoverHint';
 import { takeoverKey } from '../../midi/takeoverFeedback';
@@ -210,7 +210,8 @@ export function DeckWaveform({
   visibleSeconds: number;
   onVisibleSecondsChange: (seconds: number) => void;
 }) {
-  const { deck, engine, loadedTrack, beatjumpBeats } = useDeck();
+  const { deck, engine, loadedTrack, beatjump } = useDeck();
+  const beatjumpBeats = useBeatjumpBeats(beatjump);
   const controlFocus = useControlFocus();
   const focused = controlFocus.left === deck || controlFocus.right === deck;
   const ready = useDeckReady();

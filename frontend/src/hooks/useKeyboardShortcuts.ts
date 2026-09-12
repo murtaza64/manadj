@@ -75,7 +75,7 @@ export function useKeyboardShortcuts({
   const browseActive = useBrowseActive();
   // a/s jump by the deck's shared beatjump size (deck-controls PRD: one
   // per-deck N across modes — set it in any view, these keys use it).
-  const { engine, beatjumpBeats, loadedTrack } = useDeck();
+  const { engine, beatjump, loadedTrack } = useDeck();
   const trackId = loadedTrack?.id ?? null;
   const [scrubDirection, setScrubDirection] = useState<number>(0); // -1, 0, or 1
   // Keep each release paired with its press, even across focus/modifier
@@ -200,9 +200,9 @@ export function useKeyboardShortcuts({
         if (key === ' ') {
           engine.togglePlay();
         } else if (key === 'a') {
-          engine.jumpBeats(-beatjumpBeats);
+          engine.jumpBeats(-beatjump.getSnapshot());
         } else if (key === 's') {
-          engine.jumpBeats(beatjumpBeats);
+          engine.jumpBeats(beatjump.getSnapshot());
         } else if (key === 'f') {
           held.current.set('f', () => engine.cueUp());
           engine.cueDown();
@@ -354,7 +354,7 @@ export function useKeyboardShortcuts({
     onHotCueDelete,
     isEnergyEditMode,
     engine,
-    beatjumpBeats,
+    beatjump,
     trackId,
   ]);
 

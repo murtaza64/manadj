@@ -4,6 +4,7 @@ import type { ChannelId } from '../playback/mixer';
 import type { Track } from '../types';
 import type { SyncGroup, SyncStatus } from '../playback/SyncGroup';
 import { presentationOf } from '../utils/presentationStore';
+import type { BeatjumpSize } from '../playback/beatjump';
 
 /**
  * Deck addressing (performance-mode issue 02): all four Decks live app-wide
@@ -32,9 +33,7 @@ export interface DeckContextValue {
    * (playback/beatjump.ts). ONE per-deck value shared by every mode
    * (deck-controls PRD): buttons and jump keys in any view use the same N.
    */
-  beatjumpBeats: number;
-  /** Set the beatjump size (clamped into bounds by the provider). */
-  setBeatjumpBeats: (beats: number) => void;
+  beatjump: BeatjumpSize;
 }
 
 export const DeckContext = createContext<DeckContextValue | undefined>(undefined);
@@ -48,6 +47,10 @@ export function useDeck(): DeckContextValue {
   const ctx = useContext(DeckContext);
   if (!ctx) throw new Error('useDeck must be used within a DeckScope');
   return ctx;
+}
+
+export function useBeatjumpBeats(size: BeatjumpSize): number {
+  return useSyncExternalStore(size.subscribe, size.getSnapshot);
 }
 
 export function useDeckSyncStatus(): SyncStatus {

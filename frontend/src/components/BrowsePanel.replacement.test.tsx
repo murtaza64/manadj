@@ -21,7 +21,7 @@ globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
 const { deck, hotCues, scrub, nudge, downbeat } = vi.hoisted(() => ({
   deck: {
-    loadedTrack: { id: 7, tags: [] } as unknown as Track, beatjumpBeats: 4, loadTrack: vi.fn(),
+    loadedTrack: { id: 7, tags: [] } as unknown as Track, beatjump: { getSnapshot: () => 4 }, loadTrack: vi.fn(),
     engine: {
       subscribe: () => () => {}, isAudioRunning: () => false,
       getSnapshot: () => ({ pendingPlay: false, loadState: 'ready', trackId: 7 }),

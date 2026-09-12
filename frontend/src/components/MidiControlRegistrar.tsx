@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef } from 'react';
 import { DeckScope } from '../contexts/DeckContext';
 import { followMacroToggles } from '../follow/model';
 import { dispatchFollow, getFollowFlags } from '../follow/followStore';
-import { useDeck, deckReadyNow, useDecks } from '../hooks/useDeck';
+import { useDeck, deckReadyNow, useDecks, useBeatjumpBeats } from '../hooks/useDeck';
 import { useGridEditActions } from '../hooks/useGridEditActions';
 import { useHotCueActions } from '../hooks/useHotCueActions';
 import { useMixer } from '../hooks/useMixer';
@@ -34,7 +34,9 @@ import { setKeyLockFlag } from '../playback/keyLockStore';
  */
 
 function DeckControlsRegistrar() {
-  const { deck, engine, syncGroup, loadedTrack, beatjumpBeats, setBeatjumpBeats } = useDeck();
+  const { deck, engine, syncGroup, loadedTrack, beatjump } = useDeck();
+  const beatjumpBeats = useBeatjumpBeats(beatjump);
+  const setBeatjumpBeats = beatjump.set;
   const ready = () => deckReadyNow(engine, loadedTrack?.id ?? null);
   const hotCues = useHotCueActions(loadedTrack?.id ?? null);
   // Grid-edit pad ops (midi-performance-ops 05): the same mutations and

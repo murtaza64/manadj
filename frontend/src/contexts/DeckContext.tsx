@@ -11,7 +11,7 @@ import { notePlayedEvent, resetPlayed } from '../sessions/playedStore';
 import type { ChannelId } from '../playback/mixer';
 import { registerSurface, unregisterSurface } from '../playback/audibleSurface';
 import { deckControlsFor } from '../midi/controlRegistry';
-import { BEATJUMP_DEFAULT, clampBeatjump } from '../playback/beatjump';
+import { createBeatjumpSize } from '../playback/beatjump';
 import { DeckContext, DeckRegistryContext } from '../hooks/useDeck';
 import type { DeckContextValue } from '../hooks/useDeck';
 import { useDeckBeatgridSync } from '../hooks/useDeckBeatgridSync';
@@ -188,12 +188,12 @@ export function DeckProvider({ children }: { children: ReactNode }) {
     C: null,
     D: null,
   });
-  const [beatjumps, setBeatjumps] = useState<Record<ChannelId, number>>({
-    A: BEATJUMP_DEFAULT,
-    B: BEATJUMP_DEFAULT,
-    C: BEATJUMP_DEFAULT,
-    D: BEATJUMP_DEFAULT,
-  });
+  const [beatjumps] = useState(() => ({
+    A: createBeatjumpSize(),
+    B: createBeatjumpSize(),
+    C: createBeatjumpSize(),
+    D: createBeatjumpSize(),
+  }));
 
   const loadTrackOnto = useCallback(
     (deck: ChannelId, track: Track) => {
@@ -333,40 +333,37 @@ export function DeckProvider({ children }: { children: ReactNode }) {
 
   // Per-deck loadTrack functions stay identity-stable across state changes
   // (memoized rows key their re-renders on them).
-  // Each scope value is memoized on its own deck's slice, so a Load or
-  // beatjump change on A never re-renders B's subtree (and vice versa).
+  // Each scope value is memoized on its own deck's slice, so a Load on A
+  // never re-renders B's subtree (and vice versa).
   const makeScope = useCallback(
     (
       deck: ChannelId,
-      loadedTrack: Track | null,
-      beatjumpBeats: number
+      loadedTrack: Track | null
     ): DeckContextValue => ({
       deck,
       engine: engines[deck],
       syncGroup,
       loadedTrack,
       loadTrack: (track) => loadTrackOnto(deck, track),
-      beatjumpBeats,
-      setBeatjumpBeats: (beats) =>
-        setBeatjumps((prev) => ({ ...prev, [deck]: clampBeatjump(beats) })),
+      beatjump: beatjumps[deck],
     }),
-    [engines, syncGroup, loadTrackOnto]
+    [engines, syncGroup, loadTrackOnto, beatjumps]
   );
   const scopeA = useMemo(
-    () => makeScope('A', loadedTracks.A, beatjumps.A),
-    [makeScope, loadedTracks.A, beatjumps.A]
+    () => makeScope('A', loadedTracks.A),
+    [makeScope, loadedTracks.A]
   );
   const scopeB = useMemo(
-    () => makeScope('B', loadedTracks.B, beatjumps.B),
-    [makeScope, loadedTracks.B, beatjumps.B]
+    () => makeScope('B', loadedTracks.B),
+    [makeScope, loadedTracks.B]
   );
   const scopeC = useMemo(
-    () => makeScope('C', loadedTracks.C, beatjumps.C),
-    [makeScope, loadedTracks.C, beatjumps.C]
+    () => makeScope('C', loadedTracks.C),
+    [makeScope, loadedTracks.C]
   );
   const scopeD = useMemo(
-    () => makeScope('D', loadedTracks.D, beatjumps.D),
-    [makeScope, loadedTracks.D, beatjumps.D]
+    () => makeScope('D', loadedTracks.D),
+    [makeScope, loadedTracks.D]
   );
   const registry = useMemo<Record<ChannelId, DeckContextValue>>(
     () => ({ A: scopeA, B: scopeB, C: scopeC, D: scopeD }),

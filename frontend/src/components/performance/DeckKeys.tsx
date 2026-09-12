@@ -23,7 +23,7 @@ import { invertControl, MIXER_DRAG_RANGE_PX, moveKnob, type KnobGesture } from '
 
 export function DeckKeys({ enabled = true }: { enabled?: boolean }) {
   const viewActive = useViewActive() && enabled;
-  const { deck, engine, loadedTrack, beatjumpBeats } = useDeck();
+  const { deck, engine, loadedTrack, beatjump } = useDeck();
   const hotCues = useHotCueActions(loadedTrack?.id ?? null);
   const mixer = useMixer();
   const cueHeld = useRef(false);
@@ -256,7 +256,8 @@ export function DeckKeys({ enabled = true }: { enabled?: boolean }) {
       } else if (key === keys.jumpBack || key === keys.jumpForward) {
         if (!ready) return;
         event.preventDefault();
-        engine.jumpBeats(key === keys.jumpBack ? -beatjumpBeats : beatjumpBeats);
+        const beats = beatjump.getSnapshot();
+        engine.jumpBeats(key === keys.jumpBack ? -beats : beats);
       } else {
         const slot = padSlot(key);
         if (slot !== null) {
@@ -292,7 +293,7 @@ export function DeckKeys({ enabled = true }: { enabled?: boolean }) {
       document.removeEventListener('keydown', onKeyDown);
       document.removeEventListener('keyup', onKeyUp);
     };
-  }, [deck, engine, loadedTrack?.id, beatjumpBeats, hotCues, viewActive]);
+  }, [deck, engine, loadedTrack?.id, beatjump, hotCues, viewActive]);
 
   return null;
 }
