@@ -251,7 +251,7 @@ export function DeckKeys({ enabled = true }: { enabled?: boolean }) {
       if (key === keys.play) {
         if (!canPlay) return;
         event.preventDefault();
-        engine.togglePlay();
+        engine.togglePlay(event.timeStamp);
       } else if (key === keys.cue) {
         if (!ready) return;
         event.preventDefault();
