@@ -11,7 +11,7 @@ import type { ReactNode, Ref } from 'react';
 import { BrowseActiveContext, useBrowseActive } from '../contexts/browseActive';
 import { useViewActive } from '../contexts/viewActive';
 import { DRAG_POINTER_STALE_MS, dragEdgeScrollDelta } from './dragScroll';
-import { useQueries, useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import TrackList from './TrackList';
 import FilterBar, { type FilterBarHandle } from './FilterBar';
@@ -36,30 +36,13 @@ import { isSidebarSectionCollapsed, subscribeSidebarSections } from './sidebarSe
 import { useSetBeatgridDownbeat, useNudgeBeatgrid } from '../hooks/useBeatgridData';
 import { useHotCueActions } from '../hooks/useHotCueActions';
 import { registerBrowseSurface } from '../midi/controlRegistry';
-import type { PaginatedTracks, Track } from '../types';
+import type { Track } from '../types';
 import type { ChannelId } from '../playback/mixer';
 import { useFilters } from '../contexts/FilterContext';
-import { useDeck, useDeckReady, useDecks } from '../hooks/useDeck';
+import { useDeck, useDecks, deckReadyNow } from '../hooks/useDeck';
 import { transitionsFrom, useTransitionIndex } from '../editor/transitionIndex';
-import { linkedIdsOf, useLinks } from '../links/linkStore';
-import { knownStrengthOf } from '../links/known';
-import {
-  candidateIdSet,
-  deriveFollowQuery,
-  followedReferences,
-  partitionFollowedTracks,
-} from '../follow/model';
-import type { FollowReference } from '../follow/model';
-import {
-  matchedSignals,
-  orderByRank,
-  passesAffinityFloor,
-  pinKnownStrata,
-  rankAgainst,
-  rankLabel,
-} from '../follow/matchScore';
-import { useFollowFlags } from '../follow/followStore';
-import { useFollowParams, useFollowSeed } from '../follow/paramsStore';
+import { useLinks } from '../links/linkStore';
+import { useRankedFollow } from '../follow/useRankedFollow';
 import { FollowTemperatureControls } from '../follow/FollowTemperatureControls';
 import { EMPTY_SELECTION, click, menuTargets } from '../selection/selectionModel';
 import { useTrackSelection } from '../selection/useTrackSelection';
@@ -216,7 +199,6 @@ export default function Library({
   // selection. Narrow snapshot selector so transport events don't re-render
   // the (large) library tree.
   const { engine, loadedTrack, loadTrack } = useDeck();
-  const deckReady = useDeckReady();
   const showToast = useToast();
 
   // Transition-library discovery (transition-library 02; A–D per
@@ -239,91 +221,10 @@ export default function Library({
     D: decks.D.loadedTrack?.id ?? null,
   };
 
-  // ── Follow mode (follow-mode 01) ───────────────────────────────────────
-  // Follow composes BESIDE the manual filters: one candidates query per
-  // followed reference (full conjunction per reference), unioned by id,
-  // intersected with the manually-filtered list below. Never writes
-  // FilterState — toggling Follow off restores the manual view exactly.
-  // A Load onto a followed Deck changes the reference → new query keys →
-  // the list updates hands-off. (Proven tier folds in via issue 03;
-  // playback rules 02; tiered ordering 04; own parameters modal 05.)
-  const followFlags = useFollowFlags();
-  const followParams = useFollowParams();
-  const followSeed = useFollowSeed();
-  const followDiscovery = { temperature: followParams.temperature, seed: followSeed };
-  const followRefs = followedReferences(
-    followFlags,
-    {
-      A: decks.A.loadedTrack,
-      B: decks.B.loadedTrack,
-      C: decks.C.loadedTrack,
-      D: decks.D.loadedTrack,
-    },
-    // Facts read through the track cache (ADR 0027 §7): an edited BPM
-    // re-centers the candidate query without a re-Load.
-    (id) => queryClient.getQueryData<Track>(['track', id])
-  );
-  const followQueries = useQueries({
-    queries: followRefs.map(({ deck, reference }) => {
-      const q = deriveFollowQuery(reference, followParams);
-      return {
-        queryKey: ['tracks', 'follow', deck, reference.id, q, selectedView === 'archived'],
-        // Uncapped (match-score PRD): the loose BPM-only gate admits many
-        // more candidates; a parity truncation would silently drop them
-        // before scoring. 10000 is the API's per_page ceiling — plenty at
-        // this library size (backend scoring is the named future answer).
-        queryFn: (): Promise<PaginatedTracks> =>
-          api.tracks.list(1, 10000, {
-            bpmCenter: q.bpmCenter,
-            bpmThresholdPercent: q.bpmThresholdPercent,
-            archived: selectedView === 'archived' ? true : undefined,
-          }),
-        placeholderData: (previousData: unknown) => previousData,
-      };
-    }),
-  });
-  /** Candidate ids while following: both evidence tiers (follow-mode 03 /
-   * linked-pairs 04) — heuristic query results unioned with the known
-   * tier (saved Transitions from each followed reference, plus its Linked
-   * Tracks), or the known tier alone under knownOnly. Heuristic sets come
-   * from the reference queries that have data: a still-loading second
-   * reference doesn't un-narrow the already-followed list. Null (= no
-   * filtering) only when nothing is followed, or when heuristics are
-   * wanted but none have resolved yet — the manual list shows unfiltered
-   * rather than flashing empty. */
-  const followKnownSets = followRefs.map(({ reference }) => {
-    const ids = new Set(transitionsFrom(transitionIndex, reference.id).keys());
-    for (const id of linkedIdsOf(links, reference.id)) ids.add(id);
-    return ids;
-  });
-  // The Affinity floor is the cut (match-score PRD): each reference's
-  // gated candidates are narrowed to the admitted ones before the union —
-  // BPM+energy comfort alone never admits; Known ORs in below regardless.
-  const resolvedFollowSets = followRefs.flatMap(({ reference }, i) => {
-    const data = followQueries[i].data;
-    if (data === undefined) return [];
-    return [(data.items ?? []).filter((t: Track) => passesAffinityFloor(reference, t))];
-  });
-  const followCandidateIds = (() => {
-    if (followRefs.length === 0) return null;
-    if (!followParams.knownOnly && resolvedFollowSets.length === 0) return null;
-    return candidateIdSet(
-      resolvedFollowSets,
-      followKnownSets,
-      followParams.knownOnly,
-      // The loaded/followed tracks never list themselves.
-      followRefs.map(({ reference }) => reference.id)
-    );
-  })();
-  /** References for tier ordering (follow-mode 04), known lookups
-   * included (favorited Transition > Linked > unfavorited Transition). */
-  const followReferences: FollowReference[] = followRefs.map(({ reference }) => ({
-    track: reference,
-    knownStrength: (id: number) =>
-      knownStrengthOf(transitionsFrom(transitionIndex, reference.id), links, reference.id, id),
-  }));
-  const followedTrackIds = followRefs.map(({ reference }) => reference.id);
-  const followedTrackIdSet = new Set(followedTrackIds);
+  const follow = useRankedFollow({
+    A: decks.A.loadedTrack, B: decks.B.loadedTrack,
+    C: decks.C.loadedTrack, D: decks.D.loadedTrack,
+  }, transitionIndex, links, selectedView === 'archived');
 
   // Beatgrid mutation hooks
   const setDownbeat = useSetBeatgridDownbeat();
@@ -601,12 +502,12 @@ export default function Library({
 
   // Beatgrid edits are playhead-dependent, so they act on the loaded Track
   const handleNudgeBeatgrid = (offsetMs: number) => {
-    if (!loadedTrack || !deckReady) return;
+    if (!loadedTrack || !deckReadyNow(engine, loadedTrack.id)) return;
     nudgeGrid.mutate({ trackId: loadedTrack.id, offsetMs });
   };
 
   const handleSetDownbeat = () => {
-    if (!loadedTrack || !deckReady) return;
+    if (!loadedTrack || !deckReadyNow(engine, loadedTrack.id)) return;
     setDownbeat.mutate({
       trackId: loadedTrack.id,
       downbeatTime: engine.getPlayhead(),
@@ -616,82 +517,39 @@ export default function Library({
   // ── Track lists per pane ───────────────────────────────────────────────
   // Library list ('all'/'unprocessed' views and the edit-mode library pane),
   // with the Follow candidate set composed client-side (follow-mode 01/03).
-  let libraryTracks = allTracksData?.items || [];
-  if (followRefs.length > 0) {
-    const { followed, rest } = partitionFollowedTracks(libraryTracks, followedTrackIds);
-    // Filter to candidates, then rank-order them (match-score PRD):
-    // score is the default sort of the heuristic stratum; a user's column
-    // sort takes over within the strata (Known stays pinned regardless) —
-    // both sorts are stable, so the server order breaks ties.
-    const candidates = followCandidateIds
-      ? rest.filter((t: Track) => followCandidateIds.has(t.id))
-      : rest;
-    const ordered = followCandidateIds
-      ? followScoreSort
-        ? orderByRank(candidates, followReferences, followParams.bpmThresholdPercent, followDiscovery)
-        : pinKnownStrata(candidates, followReferences, followParams.bpmThresholdPercent)
-      : candidates;
-    libraryTracks = [...followed, ...ordered];
-  }
+  const libraryTracks = follow.project(allTracksData?.items ?? EMPTY_TRACKS, followScoreSort);
 
   // Playlist list, in the view-only playlist sort. The Follow filter
   // applies only outside edit mode — in the split, the FilterBar belongs
   // to the library pane — and only while the per-playlist filter toggle
   // shows the FilterBar (#156): Follow's controls live there, so a hidden
   // bar must not leave the list silently match-reordered.
-  let playlistTracks = sortPlaylistTracks(playlistData?.tracks || [], playlistSort);
+  const filteredPlaylistTracks = useMemo(() => {
+    const sorted = sortPlaylistTracks(playlistData?.tracks ?? EMPTY_TRACKS, playlistSort);
+    return playlistFilterOn ? sorted.filter(t => trackMatchesFilters(t, filters)) : sorted;
+  }, [playlistData?.tracks, playlistSort, playlistFilterOn, filters]);
   // The per-playlist toggle applies the global params (playlist-editing
   // 09); thinning is tracked so positional reorders can refuse — a drop
   // index against a thinned list doesn't address the full Play order.
-  if (playlistFilterOn) {
-    playlistTracks = playlistTracks.filter((t: Track) => trackMatchesFilters(t, filters));
-  }
   const playlistThinned =
-    playlistFilterOn && playlistTracks.length !== (playlistData?.tracks?.length ?? 0);
-  if (followRefs.length > 0 && !splitView && playlistFilterOn) {
-    const { followed, rest } = partitionFollowedTracks(playlistTracks, followedTrackIds);
-    const candidates = followCandidateIds
-      ? rest.filter((t: Track) => followCandidateIds.has(t.id))
-      : rest;
-    const ordered = followCandidateIds
-      ? followScoreSort
-        ? orderByRank(candidates, followReferences, followParams.bpmThresholdPercent, followDiscovery)
-        : pinKnownStrata(candidates, followReferences, followParams.bpmThresholdPercent)
-      : candidates;
-    playlistTracks = [...followed, ...ordered];
-  }
+    playlistFilterOn && filteredPlaylistTracks.length !== (playlistData?.tracks?.length ?? 0);
+  const playlistTracks = !splitView && playlistFilterOn
+    ? follow.project(filteredPlaylistTracks, followScoreSort) : filteredPlaylistTracks;
 
   /** Section headers (follow-mode 08, match-score PRD): the Known strata
    * keep their headers and marks; the heuristic stratum is one
    * 'Compatible' section, temperature-ordered when enabled. Only while Follow
    * filters — manual browsing stays a flat table. */
-  const followGroupLabel = followRefs.length > 0
-    ? (t: Track) => {
-        if (followedTrackIdSet.has(t.id)) return 'Following';
-        if (!followCandidateIds) return 'Library';
-        return rankLabel(rankAgainst(t, followReferences, followParams.bpmThresholdPercent));
-      }
-    : undefined;
+  const followGroupLabel = follow.groupLabelFor;
   const followGroupControls = (label: string) => label === 'Compatible' ? (
     <FollowTemperatureControls active={followScoreSort} />
   ) : null;
   /** Why-did-this-match dimming: rows grey the key/tags that earned
    * nothing toward the score. */
-  const followMatchSignals = followCandidateIds
-    ? (t: Track) =>
-        followedTrackIdSet.has(t.id)
-          ? { key: true, tagIds: new Set(t.tags.map((tag) => tag.id)) }
-          : matchedSignals(t, followReferences)
-    : undefined;
+  const followMatchSignals = follow.matchSignalsFor;
   /** Match-score column (match-score PRD): visible while Follow filters.
    * Known rows show their evidence marks, not a score (null = blank). */
-  const followScoreFor = followCandidateIds
-    ? (t: Track) => {
-        if (followedTrackIdSet.has(t.id)) return null;
-        const rank = rankAgainst(t, followReferences, followParams.bpmThresholdPercent);
-        return rank.known !== null ? null : rank.score;
-      }
-    : undefined;
+  const followScoreFor = follow.scoreFor;
 
   // Follow decorations ride the same gate as the ordering (#156): the main
   // table in playlist view drops them while the FilterBar (and with it the

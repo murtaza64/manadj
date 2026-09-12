@@ -5,7 +5,7 @@ import type { Track } from '../types';
 import { isTypingTarget } from '../components/performance/performanceKeys';
 import { dispatchSetSpace } from '../sets/spaceTransport';
 import { GRID_NUDGE_MS } from './useBeatgridData';
-import { useDeck, useDeckReady, useDeckSnapshot } from './useDeck';
+import { useDeck, deckReadyNow } from './useDeck';
 import { useScrubLoop } from './useScrubLoop';
 import { activeScrollers, scrollerFor } from '../components/virtualRows';
 
@@ -75,12 +75,8 @@ export function useKeyboardShortcuts({
   const browseActive = useBrowseActive();
   // a/s jump by the deck's shared beatjump size (deck-controls PRD: one
   // per-deck N across modes — set it in any view, these keys use it).
-  const { engine, beatjumpBeats } = useDeck();
-  const deckReady = useDeckReady();
-  // Space is allowed while loading — the engine latches play intent.
-  const deckCanPlay = useDeckSnapshot(
-    (s) => s.loadState === 'ready' || s.loadState === 'fetching' || s.loadState === 'decoding'
-  );
+  const { engine, beatjump, loadedTrack } = useDeck();
+  const trackId = loadedTrack?.id ?? null;
   const [scrubDirection, setScrubDirection] = useState<number>(0); // -1, 0, or 1
   // Keep each release paired with its press, even across focus/modifier
   // changes and callback refreshes. Opening Settings is not a deck reset.
@@ -127,6 +123,9 @@ export function useKeyboardShortcuts({
       }
 
       const key = event.key.toLowerCase();
+      const loadState = engine.getSnapshot().loadState;
+      const deckCanPlay = loadState === 'ready' || loadState === 'fetching' || loadState === 'decoding';
+      const deckReady = deckReadyNow(engine, trackId);
 
       // Prevent key repeat for F key (cue button)
       if (key === 'f' && event.repeat) {
@@ -201,9 +200,9 @@ export function useKeyboardShortcuts({
         if (key === ' ') {
           engine.togglePlay();
         } else if (key === 'a') {
-          engine.jumpBeats(-beatjumpBeats);
+          engine.jumpBeats(-beatjump.getSnapshot());
         } else if (key === 's') {
-          engine.jumpBeats(beatjumpBeats);
+          engine.jumpBeats(beatjump.getSnapshot());
         } else if (key === 'f') {
           held.current.set('f', () => engine.cueUp());
           engine.cueDown();
@@ -355,9 +354,8 @@ export function useKeyboardShortcuts({
     onHotCueDelete,
     isEnergyEditMode,
     engine,
-    beatjumpBeats,
-    deckReady,
-    deckCanPlay,
+    beatjump,
+    trackId,
   ]);
 
   // Continuous scrub while h/l is held

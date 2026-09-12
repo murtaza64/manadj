@@ -12,7 +12,7 @@
  */
 import { useEffect, useRef } from 'react';
 import { useViewActive } from '../../contexts/viewActive';
-import { useDeck, useDeckReady, useDeckSnapshot } from '../../hooks/useDeck';
+import { useDeck } from '../../hooks/useDeck';
 import { useHotCueActions } from '../../hooks/useHotCueActions';
 import { useMixer } from '../../hooks/useMixer';
 import { doubleBeatjump, halveBeatjump } from '../../playback/beatjump';
@@ -24,14 +24,7 @@ import { invertControl, MIXER_DRAG_RANGE_PX, moveKnob, type KnobGesture } from '
 
 export function DeckKeys({ enabled = true }: { enabled?: boolean }) {
   const viewActive = useViewActive() && enabled;
-  const { deck, engine, syncGroup, loadedTrack, beatjumpBeats, setBeatjumpBeats } = useDeck();
-  const ready = useDeckReady();
-  // The play key is allowed while loading — the engine latches play intent
-  // (library-hub parity for space, on this view's play key).
-  const canPlay = useDeckSnapshot(
-    (s) =>
-      s.loadState === 'ready' || s.loadState === 'fetching' || s.loadState === 'decoding'
-  );
+  const { deck, engine, syncGroup, loadedTrack, beatjump } = useDeck();
   const hotCues = useHotCueActions(loadedTrack?.id ?? null);
   const mixer = useMixer();
   const cueHeld = useRef(false);
@@ -233,6 +226,10 @@ export function DeckKeys({ enabled = true }: { enabled?: boolean }) {
 
     const onKeyDown = (event: KeyboardEvent) => {
       if (!viewActive || event.isComposing || isTypingTarget(event) || hasKeyboardOverlay()) return;
+      const snapshot = engine.getSnapshot();
+      const ready = snapshot.loadState === 'ready' && snapshot.trackId === loadedTrack?.id;
+      // Play may latch intent while loading; other transport requires readiness.
+      const canPlay = snapshot.loadState === 'ready' || snapshot.loadState === 'fetching' || snapshot.loadState === 'decoding';
       const key = unshifted[event.key] ?? event.key.toLowerCase();
       const jumpKey = key === keys.jumpBack || key === keys.jumpForward;
       if (event.metaKey && !event.ctrlKey && !event.altKey &&
@@ -241,13 +238,13 @@ export function DeckKeys({ enabled = true }: { enabled?: boolean }) {
         if (event.repeat) return;
         if (key === keys.fader) {
           if (event.shiftKey) {
-            if (syncGroup.getSnapshot().decks[deck] !== 'off' || (ready && engine.getSnapshot().bpm)) {
+            if (syncGroup.getSnapshot().decks[deck] !== 'off' || (ready && snapshot.bpm)) {
               syncGroup.toggle(deck);
             }
-          } else if (ready && engine.getSnapshot().bpm) syncGroup.match(deck);
+          } else if (ready && snapshot.bpm) syncGroup.match(deck);
         } else if (event.shiftKey) {
           engine.resizeLoop(key === keys.jumpBack ? 'halve' : 'double');
-        } else if (ready && !engine.getSnapshot().playing) {
+        } else if (ready && !snapshot.playing) {
           hotCues.walk?.(key === keys.jumpBack ? 'prev' : 'next');
         }
         return;
@@ -255,8 +252,8 @@ export function DeckKeys({ enabled = true }: { enabled?: boolean }) {
       if (isGuardedKeyEvent(event)) return;
       if (event.shiftKey && jumpKey) {
         event.preventDefault();
-        if (!event.repeat) setBeatjumpBeats(key === keys.jumpBack
-          ? halveBeatjump(beatjumpBeats) : doubleBeatjump(beatjumpBeats));
+        if (!event.repeat) beatjump.set(key === keys.jumpBack
+          ? halveBeatjump(beatjump.getSnapshot()) : doubleBeatjump(beatjump.getSnapshot()));
         return;
       }
 
@@ -285,11 +282,12 @@ export function DeckKeys({ enabled = true }: { enabled?: boolean }) {
       } else if (key === keys.jumpBack || key === keys.jumpForward) {
         if (!ready) return;
         event.preventDefault();
-        engine.jumpBeats(key === keys.jumpBack ? -beatjumpBeats : beatjumpBeats);
+        const beats = beatjump.getSnapshot();
+        engine.jumpBeats(key === keys.jumpBack ? -beats : beats);
       } else {
         const slot = padSlot(key);
         if (slot !== null) {
-          if (!hotCues.enabled) return;
+          if (!ready) return;
           event.preventDefault();
           if (event.shiftKey) {
             padsHeld.current.get(slot)?.();
@@ -327,7 +325,7 @@ export function DeckKeys({ enabled = true }: { enabled?: boolean }) {
       document.removeEventListener('keydown', onKeyDown);
       document.removeEventListener('keyup', onKeyUp);
     };
-  }, [deck, engine, syncGroup, ready, canPlay, beatjumpBeats, setBeatjumpBeats, hotCues, viewActive]);
+  }, [deck, engine, syncGroup, loadedTrack?.id, beatjump, hotCues, viewActive]);
 
   return null;
 }

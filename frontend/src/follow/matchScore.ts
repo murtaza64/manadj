@@ -201,8 +201,12 @@ export function matchScore(
   candidate: Track,
   bpmThresholdPercent: number = DEFAULT_FOLLOW_PARAMS.bpmThresholdPercent
 ): number {
+  return scoreFromAffinity(affinitySubtotal(reference, candidate), reference, candidate, bpmThresholdPercent);
+}
+
+function scoreFromAffinity(affinity: number, reference: Track, candidate: Track, bpmThresholdPercent: number): number {
   return (
-    affinitySubtotal(reference, candidate) +
+    affinity +
     WEIGHTS.energy * energyContribution(reference.energy, candidate.energy) +
     WEIGHTS.bpm * bpmContribution(reference.bpm, candidate.bpm, bpmThresholdPercent)
   );
@@ -225,7 +229,8 @@ export interface CandidateRank {
 export function rankAgainst(
   candidate: Track,
   references: FollowReference[],
-  bpmThresholdPercent: number = DEFAULT_FOLLOW_PARAMS.bpmThresholdPercent
+  bpmThresholdPercent: number = DEFAULT_FOLLOW_PARAMS.bpmThresholdPercent,
+  affinityFor: (reference: Track, candidate: Track) => number = affinitySubtotal,
 ): CandidateRank {
   let known: number | null = null;
   let score = -Infinity;
@@ -233,8 +238,9 @@ export function rankAgainst(
   for (const reference of references) {
     const strength = reference.knownStrength(candidate.id);
     if (strength !== null) known = known === null ? strength : Math.min(known, strength);
-    score = Math.max(score, matchScore(reference.track, candidate, bpmThresholdPercent));
-    admitted = admitted || passesAffinityFloor(reference.track, candidate);
+    const affinity = affinityFor(reference.track, candidate);
+    score = Math.max(score, scoreFromAffinity(affinity, reference.track, candidate, bpmThresholdPercent));
+    admitted ||= affinity >= AFFINITY_FLOOR;
   }
   // Known bypasses the floor, as it bypasses gates today.
   return { known, score, admitted: admitted || known !== null };
@@ -294,10 +300,22 @@ function rankSort(
   bpmThresholdPercent?: number,
   discovery?: { temperature: number; seed: number }
 ): Track[] {
-  const salt = `${discovery?.seed}:${[...new Set(references.map((r) => r.track.id))].sort((a, b) => a - b).join(',')}`;
+  const ranks = new Map(tracks.map(t => [t.id, rankAgainst(t, references, bpmThresholdPercent)]));
+  return orderRanked(tracks, ranks, references.map(r => r.track.id), compare, discovery);
+}
+
+/** Sort already-computed evidence without changing factual scores. */
+export function orderRanked(
+  tracks: Track[],
+  factualRanks: ReadonlyMap<number, CandidateRank>,
+  referenceIds: readonly number[],
+  compare: (a: CandidateRank, b: CandidateRank) => number,
+  discovery?: { temperature: number; seed: number },
+): Track[] {
+  const salt = `${discovery?.seed}:${[...new Set(referenceIds)].sort((a, b) => a - b).join(',')}`;
   const ranks = new Map(
     tracks.map((t) => {
-      const rank = rankAgainst(t, references, bpmThresholdPercent);
+      const rank = { ...factualRanks.get(t.id)! };
       if (rank.known === null && discovery && discovery.temperature > 0) {
         // Gumbel sorting samples without replacement with weights exp(score / (30*T)).
         // T=1 spans 30 score points. Hash by identity, not list position, so

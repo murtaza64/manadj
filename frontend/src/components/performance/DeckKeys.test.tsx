@@ -4,6 +4,7 @@ import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ChannelId } from '../../playback/mixer';
 import type { SyncStatus } from '../../playback/SyncGroup';
+import { createBeatjumpSize, type BeatjumpSize } from '../../playback/beatjump';
 import { KeepAliveView } from '../../contexts/KeepAliveView';
 import { DeckKeys } from './DeckKeys';
 import { DECK_KEYS } from './performanceKeys';
@@ -22,24 +23,21 @@ const fixture = vi.hoisted(() => ({
   bpm: 120 as number | null,
   loadedBpm: 120 as number | null,
   syncStatus: 'off' as SyncStatus,
-  beatjumpBeats: 32,
-  snapshot: { playing: false, loadState: 'ready', bendPercent: 0, scratching: false, vinylMode: true, hasBeatgrid: true },
+  beatjump: null as unknown as BeatjumpSize,
+  snapshot: { trackId: 7, playing: false, loadState: 'ready', bendPercent: 0, scratching: false, vinylMode: true, hasBeatgrid: true },
   channel: { filter: 0, eq: { high: 0.5, mid: 0.5, low: 0.5 }, fader: 0.5 },
   listener: () => {},
   transportListener: vi.fn<(event: { action: string }) => void>(),
 }));
 const hotCues = vi.hoisted(() => ({ enabled: true, down: vi.fn(), up: vi.fn(), walk: vi.fn(), remove: vi.fn() }));
 const syncGroup = vi.hoisted(() => ({ match: vi.fn(), toggle: vi.fn(), getSnapshot: vi.fn() }));
-const setBeatjumpBeats = vi.hoisted(() => vi.fn());
 const mixer = vi.hoisted(() => ({
   getChannelState: vi.fn(), getAutomation: vi.fn(), setEq: vi.fn(), setFilter: vi.fn(), setFader: vi.fn(),
 }));
 vi.mock('../../hooks/useMixer', () => ({ useMixer: () => mixer }));
 vi.mock('../../settings/persistedSettings', () => ({ writeSetting: vi.fn(), removeSetting: vi.fn() }));
 vi.mock('../../hooks/useDeck', () => ({
-  useDeck: () => ({ deck: fixture.deck, engine, syncGroup, loadedTrack: { id: fixture.trackId, bpm: fixture.loadedBpm }, beatjumpBeats: fixture.beatjumpBeats, setBeatjumpBeats }),
-  useDeckReady: () => fixture.snapshot.loadState === 'ready',
-  useDeckSnapshot: () => true,
+  useDeck: () => ({ deck: fixture.deck, engine, syncGroup, loadedTrack: { id: fixture.trackId, bpm: fixture.loadedBpm }, beatjump: fixture.beatjump }),
 }));
 vi.mock('../../hooks/useHotCueActions', () => ({
   useHotCueActions: () => ({ ...hotCues }),
@@ -55,9 +53,10 @@ beforeEach(() => {
   fixture.loadedBpm = 120;
   fixture.syncStatus = 'off';
   syncGroup.getSnapshot.mockImplementation(() => ({ decks: { [fixture.deck]: fixture.syncStatus } }));
-  fixture.beatjumpBeats = 32;
+  fixture.beatjump = createBeatjumpSize();
+  vi.spyOn(fixture.beatjump, 'set');
   hotCues.enabled = true;
-  fixture.snapshot = { playing: false, loadState: 'ready', bendPercent: 0, scratching: false, vinylMode: true, hasBeatgrid: true };
+  fixture.snapshot = { trackId: 7, playing: false, loadState: 'ready', bendPercent: 0, scratching: false, vinylMode: true, hasBeatgrid: true };
   fixture.channel = { filter: 0, eq: { high: 0.5, mid: 0.5, low: 0.5 }, fader: 0.5 };
   engine.getSnapshot.mockImplementation(() => ({ ...fixture.snapshot, bpm: fixture.bpm }));
   engine.getPlayhead.mockReturnValue(30);
@@ -202,7 +201,7 @@ describe('mouse-key gestures and cue walking', () => {
     key(keys.jumpBack.toUpperCase(), { shiftKey: true });
     key(forward, { shiftKey: true });
     key(forward, { shiftKey: true, repeat: true });
-    expect(setBeatjumpBeats.mock.calls).toEqual([[16], [64]]);
+    expect(vi.mocked(fixture.beatjump.set).mock.calls).toEqual([[16], [32]]);
     key(keys.jumpBack.toUpperCase(), { metaKey: true, shiftKey: true });
     key(forward, { metaKey: true, shiftKey: true });
     key(forward, { metaKey: true, shiftKey: true, repeat: true });
@@ -232,10 +231,11 @@ describe('mouse-key gestures and cue walking', () => {
   });
 
   it.each([1, 128])('clamps jump sizes at %i and permits sizing before a track is ready', beats => {
-    fixture.beatjumpBeats = beats;
+    fixture.beatjump.set(beats);
+    vi.mocked(fixture.beatjump.set).mockClear();
     fixture.snapshot.loadState = 'fetching'; render();
     key(beats === 1 ? 'A' : 'S', { shiftKey: true });
-    expect(setBeatjumpBeats).toHaveBeenCalledExactlyOnceWith(beats);
+    expect(fixture.beatjump.set).toHaveBeenCalledExactlyOnceWith(beats);
     key('S', { metaKey: true, shiftKey: true });
     expect(engine.resizeLoop).toHaveBeenCalledExactlyOnceWith('double');
     key('b'); key('g', { metaKey: true });
@@ -243,9 +243,24 @@ describe('mouse-key gestures and cue walking', () => {
     expect(syncGroup.match).not.toHaveBeenCalled();
   });
 
-  it('does not toggle gridless loops or unset unavailable cues', () => {
-    fixture.snapshot.hasBeatgrid = false; hotCues.enabled = false; render();
-    key('b'); key('Z', { shiftKey: true });
+  it('halves the live jump size twice without a React rerender', () => {
+    render();
+    expect(fixture.beatjump.getSnapshot()).toBe(32);
+    key('A', { shiftKey: true });
+    expect(fixture.beatjump.getSnapshot()).toBe(16);
+    key('A', { shiftKey: true }, 'keyup');
+    key('A', { shiftKey: true });
+    expect(fixture.beatjump.getSnapshot()).toBe(8);
+    expect(vi.mocked(fixture.beatjump.set).mock.calls).toEqual([[16], [8]]);
+    key('s');
+    expect(engine.jumpBeats).toHaveBeenCalledExactlyOnceWith(8);
+  });
+
+  it('does not toggle gridless loops or unset cues while not ready', () => {
+    fixture.snapshot.hasBeatgrid = false; render();
+    key('b');
+    fixture.snapshot.loadState = 'fetching';
+    key('Z', { shiftKey: true });
     expect(engine.toggleLoop).not.toHaveBeenCalled();
     expect(hotCues.remove).not.toHaveBeenCalled();
   });
@@ -306,7 +321,7 @@ describe('mouse-key gestures and cue walking', () => {
         expect(syncGroup.match).not.toHaveBeenCalled();
         expect(syncGroup.toggle).not.toHaveBeenCalled();
         expect(hotCues.remove).not.toHaveBeenCalled();
-        expect(setBeatjumpBeats).not.toHaveBeenCalled();
+        expect(fixture.beatjump.set).not.toHaveBeenCalled();
         expect(engine.resizeLoop).not.toHaveBeenCalled();
       } finally { target.remove(); }
     });
@@ -357,6 +372,25 @@ describe('mouse-key gestures and cue walking', () => {
       expect(hotCues.walk).not.toHaveBeenCalled();
       expect(engine.togglePlay).not.toHaveBeenCalled();
     } finally { dialog.remove(); }
+  });
+
+  it('uses live readiness between publications, including track identity', () => {
+    render();
+    fixture.snapshot.loadState = 'fetching';
+    key('a'); key('f'); key('z'); key('d');
+    expect(engine.jumpBeats).not.toHaveBeenCalled();
+    expect(engine.cueDown).not.toHaveBeenCalled();
+    expect(hotCues.down).not.toHaveBeenCalled();
+    expect(engine.togglePlay).toHaveBeenCalledOnce();
+    fixture.snapshot.loadState = 'ready';
+    fixture.snapshot.trackId = 99;
+    key('a'); key('z');
+    expect(engine.jumpBeats).not.toHaveBeenCalled();
+    expect(hotCues.down).not.toHaveBeenCalled();
+    fixture.snapshot.trackId = fixture.trackId;
+    key('a'); key('z');
+    expect(engine.jumpBeats).toHaveBeenCalledWith(-32);
+    expect(hotCues.down).toHaveBeenCalledWith(1);
   });
 
   it.each(['A', 'B', 'C', 'D'] as const)('maps all knobs and the fader to focused deck %s', (deck) => {

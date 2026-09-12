@@ -21,6 +21,7 @@ import { isGuardedKeyEvent } from '../components/performance/performanceKeys';
 import { useViewActive } from '../contexts/viewActive';
 import { useBrowseActive } from '../contexts/browseActive';
 import { useDecks } from '../hooks/useDeck';
+import { presentationOf } from '../utils/presentationStore';
 import {
   claimAudible,
   isAudible,
@@ -138,8 +139,8 @@ function TransitionEditorInner() {
     const rerender = () => bump((n) => n + 1);
     const subs = [
       player.subscribe(rerender),
-      player.engineA.subscribe(rerender),
-      player.engineB.subscribe(rerender),
+      presentationOf(player.engineA).subscribe(rerender),
+      presentationOf(player.engineB).subscribe(rerender),
     ];
     return () => subs.forEach((u) => u());
   }, [player]);
@@ -560,7 +561,7 @@ function TransitionEditorInner() {
           const { bpmA: a, bpmB: b, slideDeckB: slide } = midiGestures.current;
           const bpm = deck === 'A' ? a : b;
           if (!bpm || bpm <= 0) return; // same gate as the on-screen cluster
-          const beats = sharedDecksRef.current[deck].beatjumpBeats;
+          const beats = sharedDecksRef.current[deck].beatjump.getSnapshot();
           const n = direction === 'back' ? -beats : beats;
           if (deck === 'A') player.seek(player.getMixTime() + beatsToSeconds(n, bpm));
           // Apparent-motion polarity (mix-editor 32): ▶ slides B's drawn
@@ -922,8 +923,8 @@ function TransitionEditorInner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [player, auditionTogglePlay, viewActive, browseActive]);
 
-  const snapA = player.engineA.getSnapshot();
-  const snapB = player.engineB.getSnapshot();
+  const snapA = presentationOf(player.engineA).getSnapshot();
+  const snapB = presentationOf(player.engineB).getSnapshot();
   // Deck-card load state, track-aware (sets 37): under a deferred open the
   // engines may hold ANOTHER surface's tracks — show the session side as
   // 'deferred' (play loads it) instead of the foreign track's state.
@@ -1115,8 +1116,8 @@ function EditorCenterPanel({
     const rerender = () => bump((n) => n + 1);
     const subs = [
       player.subscribe(rerender),
-      player.engineA.subscribe(rerender),
-      player.engineB.subscribe(rerender),
+      presentationOf(player.engineA).subscribe(rerender),
+      presentationOf(player.engineB).subscribe(rerender),
     ];
     return () => subs.forEach((u) => u());
   }, [player]);

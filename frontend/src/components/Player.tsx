@@ -1,6 +1,6 @@
 import { useCallback } from 'react';
 import WebGLWaveform from './WebGLWaveform';
-import { useDeck, useDeckReady, useDeckSnapshot } from '../hooks/useDeck';
+import { useDeck, useDeckReady, useDeckSnapshot, useBeatjumpBeats } from '../hooks/useDeck';
 import { useScrubTransport } from '../hooks/useScrubTransport';
 import { TransportPair } from './deckControls/TransportPair';
 import { HotCuePads } from './deckControls/HotCuePads';
@@ -15,7 +15,8 @@ import './Player.css';
  * components the Performance DeckPanel renders, minus the key-hint slots.
  */
 export default function Player() {
-  const { engine, loadedTrack, beatjumpBeats } = useDeck();
+  const { engine, loadedTrack, beatjump } = useDeck();
+  const beatjumpBeats = useBeatjumpBeats(beatjump);
   const ready = useDeckReady();
   const loadState = useDeckSnapshot((s) => s.loadState);
   const loadError = useDeckSnapshot((s) => s.loadError);

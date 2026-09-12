@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { useDeck, useDeckReady } from '../../hooks/useDeck';
+import { useDeck, useDeckReady, deckReadyNow, useBeatjumpBeats } from '../../hooks/useDeck';
 import { doubleBeatjump, halveBeatjump, jumpWindow } from '../../playback/beatjump';
 import { JumpBackIcon, JumpForwardIcon } from '../icons/JumpIcons';
 import './deckControls.css';
@@ -34,7 +34,11 @@ export function BeatjumpRow({
   halveTitleSuffix?: string;
   doubleTitleSuffix?: string;
 }) {
-  const { engine, beatjumpBeats, setBeatjumpBeats } = useDeck();
+  const { engine, beatjump, loadedTrack } = useDeck();
+  const beatjumpBeats = useBeatjumpBeats(beatjump);
+  const jump = (beats: number) => {
+    if (deckReadyNow(engine, loadedTrack?.id ?? null)) engine.jumpBeats(beats);
+  };
   const ready = useDeckReady();
   const window = jumpWindow(beatjumpBeats);
 
@@ -43,7 +47,7 @@ export function BeatjumpRow({
       <button
         className="player-button"
         disabled={!ready}
-        onClick={() => engine.jumpBeats(-beatjumpBeats)}
+        onClick={() => jump(-beatjumpBeats)}
         title={`Jump back ${beatjumpBeats} beats${backTitleSuffix}`}
       >
         <JumpBackIcon />
@@ -51,7 +55,7 @@ export function BeatjumpRow({
       </button>
       <button
         className="player-button"
-        onClick={() => setBeatjumpBeats(halveBeatjump(beatjumpBeats))}
+        onClick={() => beatjump.set(halveBeatjump(beatjumpBeats))}
         title={`Halve beatjump size${halveTitleSuffix}`}
       >
         1/2
@@ -65,7 +69,7 @@ export function BeatjumpRow({
               key={`back-${beats}`}
               className="player-button"
               disabled={!ready}
-              onClick={() => engine.jumpBeats(-beats)}
+              onClick={() => jump(-beats)}
               title={`Jump back ${beats} beats`}
             >
               ◀ {beats}
@@ -74,7 +78,7 @@ export function BeatjumpRow({
               key={`forward-${beats}`}
               className="player-button"
               disabled={!ready}
-              onClick={() => engine.jumpBeats(beats)}
+              onClick={() => jump(beats)}
               title={`Jump forward ${beats} beats`}
             >
               {beats} ▶
@@ -84,7 +88,7 @@ export function BeatjumpRow({
       </details>
       <button
         className="player-button"
-        onClick={() => setBeatjumpBeats(doubleBeatjump(beatjumpBeats))}
+        onClick={() => beatjump.set(doubleBeatjump(beatjumpBeats))}
         title={`Double beatjump size${doubleTitleSuffix}`}
       >
         x2
@@ -93,7 +97,7 @@ export function BeatjumpRow({
       <button
         className="player-button"
         disabled={!ready}
-        onClick={() => engine.jumpBeats(beatjumpBeats)}
+        onClick={() => jump(beatjumpBeats)}
         title={`Jump forward ${beatjumpBeats} beats${forwardTitleSuffix}`}
       >
         <JumpForwardIcon />

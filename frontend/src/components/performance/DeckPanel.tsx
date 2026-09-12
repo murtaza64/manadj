@@ -16,7 +16,7 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../api/client';
-import { useDeck, useDeckReady, useDecks, useDeckSnapshot, useDeckSyncStatus } from '../../hooks/useDeck';
+import { useDeck, useDeckReady, useDecks, useDeckSnapshot, useDeckSyncStatus, deckReadyNow, useBeatjumpBeats } from '../../hooks/useDeck';
 import { useAutomationGhost, useMixer, useMixerValue } from '../../hooks/useMixer';
 import { useTakeoverHint } from '../../hooks/useTakeoverHint';
 import { takeoverKey } from '../../midi/takeoverFeedback';
@@ -54,6 +54,7 @@ import { setKeyLockFlag } from '../../playback/keyLockStore';
 import { DECK_KEYS } from './performanceKeys';
 import { CHANNEL_IDS, STEM_NAMES } from '../../playback/mixer';
 import type { ChannelId, StemName } from '../../playback/mixer';
+import { presentationOf } from '../../utils/presentationStore';
 
 /** Stem kill-switch labels (stems #210): compact, hardware-ish. */
 const STEM_LABELS: Record<StemName, string> = {
@@ -209,7 +210,8 @@ export function DeckWaveform({
   visibleSeconds: number;
   onVisibleSecondsChange: (seconds: number) => void;
 }) {
-  const { deck, engine, loadedTrack, beatjumpBeats } = useDeck();
+  const { deck, engine, loadedTrack, beatjump } = useDeck();
+  const beatjumpBeats = useBeatjumpBeats(beatjump);
   const controlFocus = useControlFocus();
   const focused = controlFocus.left === deck || controlFocus.right === deck;
   const ready = useDeckReady();
@@ -631,7 +633,8 @@ function TrackZone({ track }: { track: Track | null }) {
           disabled={!tempoEnabled}
           onSave={saveBpm}
           onCommitted={(bpm) => track && engine.setTrackBpm(track.id, bpm)}
-          grid={{ getPlayhead: () => engine.getPlayhead(), disabled: !tempoEnabled }}
+          grid={{ getPlayhead: () => deckReadyNow(engine, track?.id ?? null) ? engine.getPlayhead() : null,
+            disabled: !tempoEnabled }}
         />
       </div>
     </div>
@@ -663,7 +666,7 @@ function PlayZone() {
   const bend = useDeckSnapshot((s) => s.bendPercent);
 
   const bendStart = (sign: 1 | -1) => (e: React.PointerEvent<HTMLButtonElement>) => {
-    if (!ready) return;
+    if (!deckReadyNow(engine, loadedTrack?.id ?? null)) return;
     e.currentTarget.setPointerCapture(e.pointerId);
     engine.setBend(sign * NUDGE_BEND_PERCENT);
   };
@@ -820,7 +823,7 @@ function MixZone({ track }: { track: Track | null }) {
   const subscribeMatchTargets = useCallback(
     (listener: () => void) => {
       const unsubs = CHANNEL_IDS.filter((candidate) => candidate !== deck).map((candidate) =>
-        decks[candidate].engine.subscribe(listener)
+        presentationOf(decks[candidate].engine).subscribe(listener)
       );
       return () => unsubs.forEach((unsubscribe) => unsubscribe());
     },
@@ -831,8 +834,8 @@ function MixZone({ track }: { track: Track | null }) {
       CHANNEL_IDS.some(
         (candidate) =>
           candidate !== deck &&
-          decks[candidate].engine.getSnapshot().playing &&
-          !!decks[candidate].engine.getSnapshot().bpm
+          presentationOf(decks[candidate].engine).getSnapshot().playing &&
+          !!presentationOf(decks[candidate].engine).getSnapshot().bpm
       ),
     [deck, decks]
   );
@@ -967,7 +970,7 @@ function MixZone({ track }: { track: Track | null }) {
         <div className="perf-mode-stack" role="group" aria-label="Deck modes">
           <button
             className={`player-button perf-mini perf-vinyl${vinylMode ? ' on' : ''}${scratching ? ' scratching' : ''}`}
-            onClick={() => engine.setVinylMode(!vinylMode)}
+            onClick={() => engine.setVinylMode(!engine.getSnapshot().vinylMode)}
             aria-pressed={vinylMode}
             aria-label="Vinyl mode"
             title="Vinyl: platter touch holds and scratches; off uses pitch bend (GRV6: Shift + Slip)"
@@ -976,7 +979,7 @@ function MixZone({ track }: { track: Track | null }) {
           </button>
           <button
             className={`player-button perf-mini perf-slip${slipMode ? ' on' : ''}`}
-            onClick={() => engine.setSlipMode(!slipMode)}
+            onClick={() => engine.setSlipMode(!engine.getSnapshot().slipMode)}
             aria-pressed={slipMode}
             aria-label="Slip mode"
             title="Slip: return to the continuing timeline after a scratch, spinback, or loop. Off cancels the pending return; on applies to the next gesture."
@@ -990,8 +993,9 @@ function MixZone({ track }: { track: Track | null }) {
         <button
           className={`player-button perf-mini perf-keylock${keyLock ? ' on' : ''}`}
           onClick={() => {
-            engine.setKeyLock(!keyLock);
-            setKeyLockFlag(deck, !keyLock);
+            const next = !engine.getSnapshot().keyLock;
+            engine.setKeyLock(next);
+            setKeyLockFlag(deck, next);
           }}
           aria-pressed={keyLock}
           aria-label="Key Lock"
@@ -1142,7 +1146,7 @@ export function DeckPanel({
             clock={engine}
             cuePoint={cuePoint}
             loop={loop}
-            onSeek={(t) => ready && engine.seek(t)}
+          onSeek={(t) => { if (deckReadyNow(engine, track?.id ?? null)) engine.seek(t); }}
             dimmed={track !== null && !ready}
             playing={advancing}
             subscribeWake={subscribeWake}

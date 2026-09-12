@@ -2,14 +2,16 @@
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, expect, it, vi } from 'vitest';
-import { DeckContext, type DeckContextValue } from '../../hooks/useDeck';
+import { DeckContext, useDeckSnapshot, type DeckContextValue } from '../../hooks/useDeck';
 import { DeckEngine } from '../../playback/DeckEngine';
+import { createBeatjumpSize } from '../../playback/beatjump';
 import { _clearBufferCacheForTests, putCachedBuffer } from '../../playback/bufferCache';
 import { setQuantize } from '../../playback/quantizeStore';
 import type { DeckAudioPort } from '../../playback/mixer';
 import { DeckKeys } from './DeckKeys';
 import { CaptureRecorder, type CaptureMixerSource } from '../../capture/recorder';
 import type { CaptureEvent } from '../../capture/events';
+import { presentationOf } from '../../utils/presentationStore';
 
 const starts = vi.hoisted(() => [] as { position: number; when: number }[]);
 const build = vi.hoisted(() => ({ gate: null as Promise<void> | null }));
@@ -33,12 +35,16 @@ vi.mock('../../playback/worklet/deckSourceNode', () => ({
 }));
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+function Status() {
+  return <span>{useDeckSnapshot(s => s.playing) ? 'playing' : 'paused'}</span>;
+}
 afterEach(() => {
   _clearBufferCacheForTests();
   setQuantize(true);
   vi.restoreAllMocks();
   starts.length = 0;
   build.gate = null;
+  vi.useRealTimers();
 });
 
 it.each<{ gapMs: number; warm: boolean; quantize: boolean; running: boolean; resumeBetween?: boolean }>([
@@ -50,6 +56,7 @@ it.each<{ gapMs: number; warm: boolean; quantize: boolean; running: boolean; res
   { gapMs: 0, warm: true, quantize: false, running: false, resumeBetween: true },
   { gapMs: 0, warm: false, quantize: false, running: false, resumeBetween: true },
 ])('keyboard start timing: %j', async ({ gapMs, warm, quantize, running, resumeBetween }) => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
   setQuantize(quantize);
   let wall = 1000;
   let audio = 10;
@@ -75,7 +82,8 @@ it.each<{ gapMs: number; warm: boolean; quantize: boolean; running: boolean; res
     duration: 180, sampleRate: 44100, numberOfChannels: 1,
     getChannelData: () => new Float32Array(44100),
   } as unknown as AudioBuffer);
-  const root = createRoot(document.createElement('div'));
+  const container = document.createElement('div');
+  const root = createRoot(container);
   try {
     for (const engine of [engines.A, engines.B]) {
       await engine.load({ trackId: 1, audioUrl: '/unused', bpm: 120,
@@ -88,14 +96,15 @@ it.each<{ gapMs: number; warm: boolean; quantize: boolean; running: boolean; res
       engine.seek(30);
       engine.setPitch(10);
     }
-    await act(async () => root.render(<>
+    const render = () => act(async () => root.render(<>
       {(['A', 'B'] as const).map(deck => (
         <DeckContext.Provider key={deck} value={{ deck, engine: engines[deck], syncGroup,
-          loadedTrack: { id: 1 }, beatjumpBeats: 32 } as unknown as DeckContextValue}>
-          <DeckKeys />
+          loadedTrack: { id: 1 }, beatjump: createBeatjumpSize() } as unknown as DeckContextValue}>
+          <DeckKeys /><Status />
         </DeckContext.Provider>
       ))}
     </>));
+    await render();
     recorder = new CaptureRecorder(mixer, engines, () => {}, event => captured.push(event));
     recorder.start();
     if (!warm) build.gate = new Promise(resolve => { releaseBuild = resolve; });
@@ -123,6 +132,12 @@ it.each<{ gapMs: number; warm: boolean; quantize: boolean; running: boolean; res
       { position: 30 * 44100, when: 10 },
       { position: 30 * 44100, when: 10 + gapSeconds },
     ]);
+    // Source commands and capture precede publication. An unrelated parent
+    // render must not sneak the authoritative state into the UI early.
+    await render();
+    expect(container.textContent).toBe('pausedpaused');
+    act(() => vi.runOnlyPendingTimers());
+    expect(container.textContent).toBe('playingplaying');
     // Pausing uses the live position, not the age of its keyboard event.
     const pauseElapsed = state === 'running' ? 1 : 0;
     audio += pauseElapsed;
@@ -135,6 +150,50 @@ it.each<{ gapMs: number; warm: boolean; quantize: boolean; running: boolean; res
     releaseBuild();
     act(() => root.unmount());
     for (const engine of Object.values(engines)) engine.dispose();
+  }
+});
+
+it.each(['match', 'toggle'] as const)('uses live engine readiness and BPM for Sync %s before UI publication', async action => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  const ctx = { currentTime: 10, state: 'running' } as AudioContext;
+  const engine = new DeckEngine({ ensureAudio: () => ({ ctx, input: {} as AudioNode }) });
+  const syncGroup = { match: vi.fn(), toggle: vi.fn(),
+    getSnapshot: () => ({ decks: { A: 'off' } }) };
+  const root = createRoot(document.createElement('div'));
+  const chord = () => act(() => {
+    document.dispatchEvent(new KeyboardEvent('keydown', {
+      key: action === 'toggle' ? 'G' : 'g', metaKey: true,
+      shiftKey: action === 'toggle', bubbles: true,
+    }));
+  });
+  putCachedBuffer(1, {
+    duration: 180, sampleRate: 44100, numberOfChannels: 1,
+    getChannelData: () => new Float32Array(44100),
+  } as unknown as AudioBuffer);
+  try {
+    act(() => root.render(
+      <DeckContext.Provider value={{ deck: 'A', engine, syncGroup,
+        loadedTrack: { id: 1, bpm: null }, beatjump: createBeatjumpSize() } as unknown as DeckContextValue}>
+        <DeckKeys /><Status />
+      </DeckContext.Provider>
+    ));
+    await act(async () => {
+      await engine.load({ trackId: 1, audioUrl: '/unused', bpm: 120 });
+    });
+    expect(engine.getSnapshot()).toMatchObject({ loadState: 'ready', bpm: 120 });
+    expect(presentationOf(engine).getSnapshot().loadState).not.toBe('ready');
+    chord();
+    expect(syncGroup[action]).toHaveBeenCalledExactlyOnceWith('A');
+
+    act(() => vi.runOnlyPendingTimers());
+    act(() => engine.setTrackBpm(1, null));
+    expect(engine.getSnapshot().bpm).toBeNull();
+    expect(presentationOf(engine).getSnapshot().bpm).toBe(120);
+    chord();
+    expect(syncGroup[action]).toHaveBeenCalledTimes(1);
+  } finally {
+    act(() => root.unmount());
+    engine.dispose();
   }
 });
 

@@ -51,7 +51,7 @@ beforeEach(() => {
   decks = Object.fromEntries(CHANNEL_IDS.map(deck => [deck, {
     deck, syncGroup,
     loadedTrack: { id: 1, title: 'Track', artist: 'Artist', bpm: 120, tags: [] },
-    loadTrack: vi.fn(), beatjumpBeats: 4, setBeatjumpBeats: vi.fn(),
+    loadTrack: vi.fn(), beatjump: { getSnapshot: () => 4, set: vi.fn(), subscribe: () => () => {} },
     engine: {
       getSnapshot: () => snapshot, subscribe: () => () => {},
       jumpBeats: vi.fn(), resizeLoop: vi.fn(), toggleLoop: vi.fn(),
@@ -221,7 +221,7 @@ describe('DeckPanel keyboard hints', () => {
       expect(button.disabled).toBe(false);
       act(() => button.click());
     }
-    expect(vi.mocked(decks.A.setBeatjumpBeats).mock.calls).toEqual([[2], [8]]);
+    expect(vi.mocked(decks.A.beatjump.set).mock.calls).toEqual([[2], [8]]);
     expect(vi.mocked(decks.A.engine.resizeLoop).mock.calls).toEqual([['halve'], ['double']]);
   });
 });

@@ -17,6 +17,7 @@ import type { FollowEvent, FollowFlags } from './model';
 import { CHANNEL_IDS } from '../playback/mixer';
 import type { ChannelId } from '../playback/mixer';
 import { writeSetting } from '../settings/persistedSettings';
+import { presentationOf } from '../utils/presentationStore';
 
 export type { FollowFlags };
 
@@ -69,6 +70,8 @@ export function dispatchFollow(event: FollowEvent): void {
   notify();
 }
 
+const presentation = presentationOf({ subscribe: subscribeFollow, getSnapshot: getFollowFlags });
+
 export function useFollowFlags(): FollowFlags {
-  return useSyncExternalStore(subscribeFollow, getFollowFlags);
+  return useSyncExternalStore(presentation.subscribe, presentation.getSnapshot);
 }
