@@ -247,8 +247,13 @@ function dispatchButton(target: ButtonAction['target'], edge: 'down' | 'up'): vo
       return;
     }
     case 'match': {
-      if (edge !== 'down') return;
+      if (edge !== 'down' || audibleHolder() !== 'shared') return;
       deckControlsFor(target.deck)?.match();
+      return;
+    }
+    case 'sync': {
+      if (edge !== 'down' || audibleHolder() !== 'shared') return;
+      deckControlsFor(target.deck)?.toggleSync();
       return;
     }
     case 'pfl': {

@@ -21,6 +21,7 @@ export const PAD_COUNT = 8;
 
 /** The slice of deck state Feedback reads. */
 export interface DeckLedInput {
+  synced: boolean;
   playing: boolean;
   /** Play latched during a load (deck snapshot vocabulary). */
   pendingPlay: boolean;
@@ -80,6 +81,7 @@ export interface DeckLedInput {
 
 /** Desired on/off per light of one deck. */
 export interface DeckLedStates {
+  sync: boolean;
   play: boolean;
   cue: boolean;
   /** PFL button light — lit while the channel is cued (headphone-cue 05). */
@@ -201,6 +203,7 @@ export function ledStates(input: DeckLedInput, phases: BlinkPhases = STEADY): De
   const paused = !input.playing && !input.previewing;
   const pausedLoaded = paused && input.loaded;
   return {
+    sync: input.synced,
     play: input.playing
       ? true
       : input.pendingPlay
@@ -278,6 +281,7 @@ function deckAddresses(deck: DeckFeedback): readonly LedAddress[] {
     ...deck.jumpPads,
     ...deck.gridPads,
     deck.quantize,
+    ...(deck.sync ? [deck.sync] : []),
     ...(deck.keyLock ? [deck.keyLock] : []),
     ...(deck.slipMode ? [deck.slipMode] : []),
     ...(deck.vinylMode ? [deck.vinylMode] : []),
@@ -317,6 +321,7 @@ export function encodeDeckLeds(
       )
     ),
     encodeLed(addresses.quantize, states.quantize),
+    ...(addresses.sync ? [encodeLed(addresses.sync, states.sync)] : []),
     ...(addresses.keyLock ? [encodeLed(addresses.keyLock, states.keyLock)] : []),
     ...(addresses.slipMode ? [encodeLed(addresses.slipMode, states.slipMode)] : []),
     ...(addresses.vinylMode ? [encodeLed(addresses.vinylMode, states.vinylMode)] : []),

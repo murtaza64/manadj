@@ -87,6 +87,23 @@ export function beatsBetween(
   return coord(end) - coord(start);
 }
 
+/** Nearest phase-aligned position, with half/double grids projected into
+ * the addressed deck's beat coordinates. This never edits either grid. */
+export function beatPhaseTarget(
+  playhead: number,
+  beatTimes: readonly number[],
+  reference: LaunchReference,
+  ratio: number,
+): number {
+  if (beatTimes.length < 2 || reference.beatTimes.length < 2) return playhead;
+  const ownBeat = beatsBetween(beatTimes[0], playhead, beatTimes);
+  const peerBeat = beatsBetween(reference.beatTimes[0], reference.playhead, reference.beatTimes);
+  const delta = peerBeat * ratio - ownBeat;
+  // A slow Deck can align to either fast beat, not only a fixed even beat.
+  const period = Math.min(1, ratio);
+  return addBeats(playhead, delta - Math.floor(delta / period + 0.5) * period, beatTimes);
+}
+
 /**
  * Quantized trigger landing (looping 02): a phase-preserving jump. Executes
  * immediately; the landing is the cue's beat (nearest gridline — placement
@@ -122,6 +139,8 @@ export interface LaunchReference {
   beatTimes: readonly number[];
   /** The reference deck's playhead in seconds, read at gesture time. */
   playhead: number;
+  /** Audio seconds per wall second; omitted for a unity-rate reference. */
+  playRate?: number;
 }
 
 /**
@@ -168,7 +187,7 @@ export function crossDeckLaunchTarget(
     return { at: cue, delaySeconds: 0 };
   }
   const nearest = snapToNearestBeat(reference.playhead, reference.beatTimes);
-  const delta = nearest - reference.playhead;
+  const delta = (nearest - reference.playhead) / (reference.playRate ?? 1);
   if (delta > 0) {
     // The nearest reference beat is ahead: hold, then enter exactly on cue.
     return { at: cue, delaySeconds: delta };

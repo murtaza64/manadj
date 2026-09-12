@@ -1073,12 +1073,11 @@
   }
 }
 
-/* Foot: prominent playback readouts beside MATCH + nudge */
+/* One-row footer: infrequent modes stack; tempo actions share an edge. */
 .perf-mix-foot {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  gap: var(--space-4);
+  gap: var(--space-2);
 }
 
 .perf-mix-spacer { flex: 1; }
@@ -1122,14 +1121,47 @@
   position: relative;
 }
 
+.perf-mode-stack {
+  display: grid;
+  grid-template-rows: repeat(2, 1fr);
+  flex-shrink: 0;
+  height: 22px;
+}
+
+.perf-mode-stack .player-button.perf-mini {
+  height: 11px;
+  padding: 0 var(--space-2);
+  line-height: 9px;
+}
+
+.perf-tempo-buttons {
+  display: inline-flex;
+  flex-shrink: 0;
+}
+
+.perf-tempo-buttons .perf-sync {
+  width: calc(5ch + 2 * var(--space-4) + 2px);
+  z-index: 1;
+}
+
+.perf-tempo-buttons .perf-match {
+  margin-left: -1px;
+}
+
 /* MATCH glyph: = (match) / ≠ (out of pitch-fader reach) */
 .perf-mix-foot .player-button.perf-mini.perf-match {
   flex-shrink: 0;
   font-size: var(--font-large);
   line-height: 1;
-  padding: var(--space-2) var(--space-8);
+  padding: var(--space-2) var(--space-4);
 }
 .perf-match-hint { color: var(--danger); border-color: var(--danger); }
+
+.perf-mix-foot .perf-sync.perf-match-hint {
+  --perf-active-fill: var(--danger);
+  color: var(--danger);
+  border-color: currentColor;
+}
 
 /* PFL toggle (headphone glyph) — lit green while the channel feeds the Cue bus */
 .perf-pfl {
@@ -1228,16 +1260,8 @@
   display: block;
 }
 
-.perf-mix-foot .perf-vinyl.on,
-.perf-mix-foot .perf-slip.on {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: var(--base);
-}
 .perf-mix-foot .perf-vinyl.scratching {
-  background: var(--warning);
-  border-color: var(--warning);
-  color: var(--base);
+  --perf-active-fill: var(--warning);
 }
 
 /* Drift marker (key-lock 04): the readout dims while the sounding key has
@@ -1246,12 +1270,13 @@
 .perf-readout-val.perf-key-drift { opacity: 0.5; }
 .perf-key-tilde { opacity: 0; }
 .perf-key-drift .perf-key-tilde { opacity: 1; }
-.perf-keylock.on,
-.perf-keylock.on:hover:not(:disabled),
-.perf-keylock.on:active:not(:disabled) {
-  background: var(--success);
+/* All engaged footer toggles share Key Lock's filled state, including hover/press. */
+.perf-mix-foot .player-button.on,
+.perf-mix-foot .player-button.on:hover:not(:disabled),
+.perf-mix-foot .player-button.on:active:not(:disabled) {
+  background: var(--perf-active-fill, var(--success));
   color: var(--base);
-  border-color: var(--success);
+  border-color: var(--perf-active-fill, var(--success));
 }
 
 /* Held nudge = solid inverted fill (held IS the press) */

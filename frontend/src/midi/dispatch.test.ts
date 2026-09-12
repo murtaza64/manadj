@@ -103,6 +103,7 @@ function registerFakeDeckControls(deck: ChannelId): void {
     },
     getPitch: () => fakePitch[deck],
     match: () => calls.push(`${deck}:match`),
+    toggleSync: () => calls.push(`${deck}:sync`),
     jogTicks: (ticks) => calls.push(`${deck}:jog:${ticks}`),
     jogTouchTicks: (ticks) => calls.push(`${deck}:jogTouch:${ticks}`),
     jogSeekTicks: (ticks) => calls.push(`${deck}:jogSeek:${ticks}`),
@@ -831,6 +832,20 @@ describe('spin-to-nudge chord (midi-performance-ops 06)', () => {
 });
 
 describe('mixer/pitch/match (midi-controller 04)', () => {
+  it('SYNC fires only on down and both tempo buttons drop under machine ownership', () => {
+    registerFakeDeckControls('C');
+    for (const edge of ['down', 'up'] as const) {
+      dispatchMidiAction({ kind: 'button', edge, target: { control: 'sync', deck: 'C' } });
+    }
+    expect(calls).toEqual(['C:sync']);
+    claimAudible('editor');
+    calls.length = 0;
+    for (const control of ['match', 'sync'] as const) {
+      dispatchMidiAction({ kind: 'button', edge: 'down', target: { control, deck: 'C' } });
+    }
+    expect(calls).toEqual([]);
+  });
+
   it('MATCH fires on the down edge only', () => {
     registerFakeDeckControls('A');
     dispatchMidiAction({

@@ -42,6 +42,7 @@ export type ButtonTarget =
    * hardware binding yet (loop-section mapping is follow-up MIDI work). */
   | { control: 'loop-toggle'; deck: ChannelId }
   | { control: 'match'; deck: ChannelId }
+  | { control: 'sync'; deck: ChannelId }
   | { control: 'load'; deck: ChannelId }
   /** PFL toggle (headphone-cue 02) — mixer-facing, hence `channel`. */
   | { control: 'pfl'; channel: ChannelId }

@@ -29,6 +29,7 @@ const feedback = INPULSE_300_MK2.feedback!;
 /** A loaded, paused, untouched deck (transport states need `loaded`;
  * unloaded darkness has its own tests). */
 const idle = {
+  synced: false,
   playing: false,
   pendingPlay: false,
   previewing: false,
@@ -51,6 +52,13 @@ const lit = { pending: true, beatFlash: true };
 const dim = { pending: false, beatFlash: false };
 
 describe('ledStates', () => {
+  it('SYNC follows membership independently of playing and Quantize', () => {
+    for (const synced of [true, false]) {
+      const states = ledStates({ ...idle, synced });
+      expect(states.sync).toBe(synced);
+      expect(encodeDeckLeds(feedback, 'A', states)).toContainEqual([0x91, 5, synced ? 127 : 0]);
+    }
+  });
   it('PLAY is solid while playing', () => {
     expect(ledStates({ ...idle, playing: true }).play).toBe(true);
   });
@@ -193,6 +201,7 @@ describe('ledStates', () => {
 
 describe('audibleTransportOverride (editor-midi 05)', () => {
   const busy = {
+    synced: false,
     playing: false,
     pendingPlay: true,
     previewing: true,
