@@ -16,16 +16,14 @@ import type { StyleParams } from '../waveform/styles';
 import type { ColumnModulation } from '../sets/ladderWaveStyle';
 import { createStyledColumnRenderer } from '../sets/ladderWaveStyle';
 import { hexToRgbTriplet } from '../theme/deckColors';
-import { AUDIBILITY_FILL_ALPHA, BEAT_TIER_DIM, LADDER_GOLD_RGB } from '../theme/markers';
+import { AUDIBILITY_FILL_ALPHA, BEAT_TIER_DIM, beatTierStyle, LADDER_GOLD_RGB } from '../theme/markers';
 import { channelFaderToGain, trimToGain } from '../playback/mixerMath';
 import { eqValueToGain } from '../playback/graph';
 import type { DeckControlSteps, DeckTimeline, GainStep, TimeAxis } from './timelineModel';
 import { DECK_CONTROL_DEFAULTS, gainAt } from './timelineModel';
 
-/** Amortized px→t lookup for MONOTONICALLY increasing x (sessions 22):
- * `TimeAxis.pxToT` is a linear scan over segments, and the render pass
- * calls it per column/pixel — at low zoom that scan dominated the redraw.
- * The cursor advances a segment index instead (O(1) amortized); the
+/** Amortized px→t lookup for MONOTONICALLY increasing x: avoid a binary
+ * search per column by advancing a segment index (O(1) amortized). The
  * defensive rewind keeps it correct if a caller ever steps backward.
  * Same semantics as `pxToT`: collapsed markers map to their start,
  * out-of-range clamps to the ends. */
@@ -218,14 +216,25 @@ export function drawAudibilityArea(
   // per-pixel scan/binary search.
   const pxToT = createMonotonicPxToT(axis);
   let si = -1; // last step with steps[si].t <= t (-1 = before the first)
+  const bottom = geo.yOffset + geo.height;
+  // One outline, not thousands of touching rectangles: fractional-DPR
+  // antialiasing made the latter disproportionately expensive to rasterize.
+  ctx.moveTo(from, bottom);
+  let runH = 0;
   for (let x = from; x < to; x++) {
     const t = pxToT(x);
     while (si + 1 < steps.length && steps[si + 1].t <= t) si++;
     const gain = si >= 0 ? steps[si].gain : 0;
-    if (gain <= 0) continue;
-    const h = Math.min(1, gain / 0.5) * geo.height;
-    ctx.rect(x, geo.yOffset + geo.height - h, 1, h);
+    const h = Math.max(0, Math.min(1, gain / 0.5)) * geo.height;
+    if (h !== runH) {
+      ctx.lineTo(x, bottom - runH);
+      ctx.lineTo(x, bottom - h);
+      runH = h;
+    }
   }
+  ctx.lineTo(to, bottom - runH);
+  ctx.lineTo(to, bottom);
+  ctx.closePath();
   ctx.fill();
 }
 
@@ -247,9 +256,19 @@ function controlAt(steps: GainStep[], t: number, dflt: number): number {
  * a visible slice of every low-zoom repaint. Defensive rewind keeps it
  * correct if a caller steps backward. */
 function createControlCursor(steps: GainStep[], dflt: number): (t: number) => number {
-  let i = -1; // last step with steps[i].t <= t (-1 = before the first)
+  let i = -2; // unpositioned; -1 = before the first step
   return (t: number): number => {
-    while (i >= 0 && steps[i].t > t) i--;
+    // Visible runs can begin hours into a log. Seek once, then advance.
+    if (i === -2 || (i >= 0 && steps[i].t > t)) {
+      let lo = 0;
+      let hi = steps.length;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (steps[mid].t <= t) lo = mid + 1;
+        else hi = mid;
+      }
+      i = lo - 1;
+    }
     while (i + 1 < steps.length && steps[i + 1].t <= t) i++;
     return i >= 0 ? steps[i].gain : dflt;
   };
@@ -293,6 +312,13 @@ export function columnModulation(controls: DeckControlSteps, t: number): ColumnM
   };
 }
 
+// Retain sampler scratch space and color palettes between zoom frames.
+const columnRenderers = new WeakMap<DecodedWaveform, {
+  styleId: string;
+  params: StyleParams;
+  renderer: ReturnType<typeof createStyledColumnRenderer>;
+}>();
+
 /** Full-color styled waveform for every constant-rate run of the deck's
  * traces, mirrored around the lane center (the editor's anchor). With
  * `controls`, each column is modulated by the recorded mixer state at its
@@ -324,7 +350,12 @@ export function drawStyledRuns(
   // dominated low-zoom redraws (thousands of visible runs), and the
   // modulation's px→t lookups ride a monotonic segment cursor (runs and
   // their columns advance left→right).
-  const renderer = createStyledColumnRenderer(wave, styleId, params);
+  let cached = columnRenderers.get(wave);
+  if (!cached || cached.styleId !== styleId || cached.params !== params) {
+    cached = { styleId, params, renderer: createStyledColumnRenderer(wave, styleId, params) };
+    columnRenderers.set(wave, cached);
+  }
+  const { renderer } = cached;
   const modFn = typeof controls === 'function' ? controls : null;
   const pxToT = controls && !modFn ? createMonotonicPxToT(axis) : null;
   const modAt = controls && !modFn ? createColumnModulator(controls as DeckControlSteps) : null;
@@ -411,46 +442,47 @@ export function drawGridlines(
   geo: LaneGeometry,
   ladder?: LaneLadder | null
 ): void {
-  const downbeats = new Set(downbeatTimes);
+  const downbeats = ladder?.downs ?? new Set(downbeatTimes);
   const tToPx = createMonotonicTToPx(axis);
   const tierBars = ladder?.tierBars ?? [1];
-  const maxStyle = BEAT_TIER_DIM.width.length - 1;
   const y = geo.yOffset + 2;
   const h = geo.height - 4;
   for (const run of runs) {
     const x0 = tToPx(run.t0);
     const x1 = tToPx(run.t1);
     const phSpan = run.ph1 - run.ph0;
-    if (phSpan <= 0 || x1 <= x0) continue;
+    if (phSpan <= 0 || x1 <= x0 || x1 < geo.x0 || x0 > geo.x1) continue;
     const pxPerTrackSec = (x1 - x0) / phSpan;
     // Estimate beat spacing from the grid itself (median-ish: first gap).
     const beatGapS = beatTimes.length > 1 ? beatTimes[1] - beatTimes[0] : 0.5;
     const beatPx = beatGapS * pxPerTrackSec;
-    const drawBeats = beatPx >= 10;
+    const drawBeats = beatPx >= 12;
     // Bar spacing from the downbeat lattice itself (any time signature).
     const barGapS =
       downbeatTimes.length > 1 ? downbeatTimes[1] - downbeatTimes[0] : beatGapS * 4;
     const barPx = barGapS * pxPerTrackSec;
-    // Lowest visible tier: the legacy ~16px downbeat threshold, applied to
-    // each tier's own spacing (the GL renderer's culling rule).
+    // Match the mix editor's density and relative-thinning rule.
     let minTier = tierBars.length;
     for (let k = 0; k < tierBars.length; k++) {
-      if (barPx * tierBars[k] >= 16) {
+      if (barPx * tierBars[k] >= 24) {
         minTier = k;
         break;
       }
     }
     if (!drawBeats && minTier >= tierBars.length) continue;
+    const baseTier = drawBeats ? -1 : minTier;
+    const phStart = run.ph0 + Math.max(0, geo.x0 - x0) / pxPerTrackSec;
+    const phEnd = Math.min(run.ph1, run.ph0 + (geo.x1 - x0) / pxPerTrackSec);
 
     // Binary search the first beat ≥ ph0.
     let lo = 0;
     let hi = beatTimes.length;
     while (lo < hi) {
       const mid = (lo + hi) >> 1;
-      if (beatTimes[mid] < run.ph0) lo = mid + 1;
+      if (beatTimes[mid] < phStart) lo = mid + 1;
       else hi = mid;
     }
-    for (let i = lo; i < beatTimes.length && beatTimes[i] <= run.ph1; i++) {
+    for (let i = lo; i < beatTimes.length && beatTimes[i] <= phEnd; i++) {
       const b = beatTimes[i];
       const isDown = downbeats.has(b);
       if (!isDown && !drawBeats) continue;
@@ -464,11 +496,11 @@ export function drawGridlines(
       const info = ladder?.downs.get(b);
       const tier = info?.tier ?? 0;
       if (tier < minTier) continue; // culled at this zoom
-      const s = Math.min(tier, maxStyle);
+      const style = beatTierStyle(tier - baseTier, BEAT_TIER_DIM);
       ctx.fillStyle = info?.parenthetical
-        ? `rgba(${LADDER_GOLD_RGB},${Math.min(1, BEAT_TIER_DIM.alpha[s] + 0.12)})`
-        : `rgba(255,255,255,${BEAT_TIER_DIM.alpha[s]})`;
-      ctx.fillRect(Math.round(x), y, BEAT_TIER_DIM.width[s], h);
+        ? `rgba(${LADDER_GOLD_RGB},${Math.min(1, style.alpha + 0.12)})`
+        : `rgba(255,255,255,${style.alpha})`;
+      ctx.fillRect(Math.round(x), y, style.width, h);
     }
   }
 }

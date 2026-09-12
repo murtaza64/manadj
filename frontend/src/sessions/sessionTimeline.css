@@ -21,26 +21,22 @@
   display: flex;
   align-items: center;
   gap: var(--space-12);
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   min-height: 26px;
   padding: var(--space-4) var(--space-8);
   font-size: var(--font-body);
 }
 
-.stl-back {
-  background: transparent;
-  border: 1px solid var(--surface1);
-  color: var(--text);
-  padding: var(--space-4) var(--space-12);
-  cursor: pointer;
-  font-size: var(--font-body);
+.stl-controls .btn {
+  padding: var(--space-4) var(--space-8);
 }
-.stl-back:hover {
-  background: var(--surface0);
+.stl-controls .btn:focus-visible, .stl-controls select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .stl-title {
-  font-weight: 650;
+  font-weight: 700;
   margin-right: auto;
 }
 
@@ -64,26 +60,16 @@
   gap: var(--space-4);
   color: var(--subtext0);
 }
-.stl-zoom button {
-  background: transparent;
-  border: 1px solid var(--surface1);
-  color: var(--text);
-  padding: var(--space-2) var(--space-8);
-  cursor: pointer;
-}
-/* Engaged = green inverted fill (the app-wide active-state color). */
-.stl-zoom button.active {
-  background: var(--success);
-  border-color: var(--success);
-  color: var(--base);
-}
 
 /* ── Stage: canvas underlay + SVG overlay ── */
 
 .stl-scroll {
   overflow-x: auto;
   border-top: 1px solid var(--surface0);
-  background: var(--mantle);
+  background: var(--void);
+  flex-shrink: 0;
+  overscroll-behavior-x: contain;
+  contain: layout paint;
 }
 
 .stl-stage {
@@ -94,6 +80,7 @@
   position: absolute;
   inset: 0;
   pointer-events: none;
+  will-change: transform;
 }
 
 .stl-svg {
@@ -113,15 +100,16 @@
 }
 
 .stl-lane-bg {
-  fill: rgba(255, 255, 255, 0.025);
+  fill: var(--text);
+  fill-opacity: 0.025;
 }
 .stl-lane-letter {
   font-size: var(--font-body);
-  font-weight: 800;
+  font-weight: 700;
 }
 .stl-track-label {
   font-size: var(--font-small);
-  font-weight: 600;
+  font-weight: 700;
   opacity: 0.95;
 }
 .stl-trace {
@@ -131,7 +119,7 @@
 }
 
 .stl-tenure {
-  fill: #ffffff;
+  fill: var(--text);
   opacity: 0.06;
   stroke: var(--overlay1);
   stroke-dasharray: 5 4;
@@ -175,7 +163,7 @@
   opacity: 0.9;
 }
 .stl-take-chip.selected rect {
-  stroke: #ffffff;
+  stroke: var(--text);
   stroke-width: 2;
 }
 .stl-take-chip text {
@@ -214,19 +202,20 @@
 /* Hover spotlight (sessions 22): everything but the take's tracks dims;
    its whiskers show solid at any zoom. */
 .stl-hover-dim {
-  fill: rgba(4, 6, 10, 0.6);
+  fill: var(--void);
+  fill-opacity: 0.6;
 }
 .stl-take-whisker.hover {
   opacity: 0.9;
   stroke-dasharray: none;
 }
 .stl-take-chip:hover rect {
-  stroke: #ffffff;
+  stroke: var(--text);
   stroke-width: 1;
 }
 
 /* ── Routine candidates + Routine Takes (ADR 0035, routines 158) ──
-   Magenta = the routine family: dashed suggestion chips (candidates),
+   Chartreuse = the routine family: dashed suggestion chips (candidates),
    solid chips once confirmed (Routine Takes). Bright, fully saturated —
    the project's palette. */
 .stl-cand-chip {
@@ -280,7 +269,7 @@
   stroke: none;
 }
 .stl-region-edit text {
-  fill: var(--routine-accent-ink, #101400) !important;
+  fill: var(--routine-accent-ink) !important;
   font-size: var(--font-micro) !important;
   font-weight: 700;
 }
@@ -288,13 +277,13 @@
   fill: rgba(var(--routine-accent-rgb), 0.85);
 }
 .stl-region-edit.dark rect {
-  fill: var(--routine-accent-ink, #101400);
+  fill: var(--routine-accent-ink);
 }
 .stl-region-edit.dark text {
   fill: rgba(var(--routine-accent-rgb), 0.85) !important;
 }
 .stl-region-edit.dark:hover rect {
-  fill: #2a3305;
+  fill: var(--surface0);
 }
 
 /* Routine region tiers (gh#170 follow-up) — the pin picker's ladder:
@@ -330,13 +319,13 @@
 .stl-routine-chip:hover .stl-rtake-chip-rect,
 .stl-rtake-chip.selected .stl-rtake-chip-rect,
 .stl-rtake-chip:hover .stl-rtake-chip-rect {
-  stroke: #ffffff;
+  stroke: var(--text);
   stroke-width: 2;
   opacity: 1;
 }
 .stl-routine-chip text,
 .stl-rtake-chip text {
-  fill: var(--routine-accent-ink, #101400);
+  fill: var(--routine-accent-ink);
   font-size: var(--font-small);
   font-weight: 700;
 }
@@ -351,18 +340,6 @@
   stroke: var(--routine-accent);
   stroke-width: 2;
   pointer-events: none;
-  animation: stl-flash-fade 2.4s ease-out forwards;
-}
-@keyframes stl-flash-fade {
-  0% {
-    opacity: 1;
-  }
-  55% {
-    opacity: 0.85;
-  }
-  100% {
-    opacity: 0;
-  }
 }
 .stl-routine-chip.slim text,
 .stl-rtake-chip.slim text {
@@ -409,45 +386,27 @@
 }
 .stl-trim-handle circle {
   fill: var(--routine-accent);
-  stroke: #ffffff;
+  stroke: var(--text);
   stroke-width: 1;
 }
 .stl-trim-handle:hover line {
-  stroke: #ffffff;
+  stroke: var(--text);
 }
 
 /* Confirm-flow cluster buttons. */
 .stl-cand-cluster .stl-cand-title {
   color: rgba(var(--routine-accent-rgb), 0.85);
   font-size: var(--font-body);
-  font-weight: 650;
-  white-space: nowrap;
-}
-.stl-confirm {
-  background: var(--routine-accent);
-  border: none;
-  border-radius: var(--radius);
-  color: var(--routine-accent-ink, #101400);
-  cursor: pointer;
-  font-size: var(--font-body);
   font-weight: 700;
-  padding: var(--space-2) var(--space-8);
   white-space: nowrap;
-}
-.stl-confirm:hover {
-  background: rgba(var(--routine-accent-rgb), 0.85);
-}
-.stl-confirm.two {
-  background: var(--success);
-  color: var(--crust);
 }
 
 .stl-anchor line {
-  stroke: #ffffff;
+  stroke: var(--text);
   stroke-width: 1.5;
 }
 .stl-anchor polygon {
-  fill: #ffffff;
+  fill: var(--text);
 }
 
 .stl-scrub-line {
@@ -484,7 +443,7 @@
   border-bottom: 2px solid rgba(var(--deck-a-rgb), 0.55);
 }
 .stl-swatch-tenure {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--surface0);
   border: 1px dashed var(--overlay1);
 }
 .stl-swatch-take {
@@ -515,19 +474,8 @@
   flex: 0 0 180px;
 }
 .stl-panel-title {
-  font-weight: 650;
+  font-weight: 700;
   margin-bottom: var(--space-6);
-}
-.stl-clear {
-  background: none;
-  border: none;
-  color: var(--overlay0);
-  cursor: pointer;
-  float: right;
-  font-size: var(--font-body);
-}
-.stl-clear:hover {
-  color: var(--danger);
 }
 .stl-stub-body {
   color: var(--subtext0);
@@ -541,21 +489,6 @@
   color: var(--subtext0);
 }
 
-/* Open-in-editor CTA: cyan outline (the editor accent, as the history's
- * promoted-take affordances use). */
-.stl-open-editor {
-  background: transparent;
-  border: 1px solid var(--accent);
-  color: var(--accent);
-  padding: var(--space-2) var(--space-8);
-  height: 22px;
-  line-height: 1;
-  cursor: pointer;
-  font-size: var(--font-body);
-}
-.stl-open-editor:hover {
-  background: rgba(var(--accent-rgb), 0.12);
-}
 
 .stl-readout {
   border-collapse: collapse;
@@ -570,7 +503,7 @@
 }
 .stl-readout-head td {
   color: var(--subtext0);
-  font-weight: 650;
+  font-weight: 700;
 }
 .stl-readout tr.audible {
   color: var(--text);
@@ -582,7 +515,7 @@
   color: var(--overlay0);
 }
 .stl-readout-track {
-  font-weight: 600;
+  font-weight: 700;
 }
 
 .stl-dim {
@@ -600,27 +533,6 @@
 
 .stl-replay-row {
   margin-bottom: var(--space-8);
-}
-/* Green = the app-wide active/engage color (the editor toggle model). */
-.stl-replay {
-  background: var(--success);
-  border: 1px solid var(--success);
-  color: var(--base);
-  font-weight: 700;
-  padding: var(--space-2) var(--space-8);
-  height: 22px;
-  line-height: 1;
-  cursor: pointer;
-  font-size: var(--font-body);
-}
-.stl-replay:hover {
-  filter: brightness(1.1);
-}
-.stl-replay.stop {
-  background: transparent;
-  color: var(--danger);
-  border-color: var(--danger);
-  font-weight: 600;
 }
 
 /* ── 04 iteration additions ── */
@@ -644,7 +556,7 @@
   stroke-dasharray: 4 3;
 }
 .stl-replay-head.paused polygon {
-  fill: var(--warning);
+  fill: var(--orange);
 }
 
 /* Re-collapse pill over an expanded idle stretch. */
@@ -712,6 +624,9 @@
   display: inline-flex;
   align-items: center;
   gap: var(--space-4);
+  flex-wrap: wrap;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .stl-inline-readout {
@@ -731,7 +646,7 @@
 }
 .stl-inline-readout b {
   color: var(--text);
-  font-weight: 650;
+  font-weight: 700;
 }
 .stl-inline-readout span i {
   font-style: normal;
@@ -751,7 +666,7 @@
   color: var(--overlay0);
   font-style: italic;
   font-size: var(--font-small);
-  white-space: nowrap;
+  white-space: normal;
   cursor: help;
 }
 
@@ -761,17 +676,12 @@
   align-items: center;
   gap: var(--space-6);
   font-size: var(--font-small);
-  font-weight: 800;
+  font-weight: 700;
   color: var(--success);
-  animation: stl-servo-pulse 1s ease-in-out infinite;
 }
 .stl-servo-deck i {
   font-style: normal;
-  font-weight: 600;
+  font-weight: 700;
   opacity: 0.85;
   margin-left: var(--space-2);
-}
-@keyframes stl-servo-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.55; }
 }

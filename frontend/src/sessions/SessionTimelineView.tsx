@@ -12,7 +12,7 @@
  * click = moment (and SEEK while a replay is rolling), space =
  * pause/resume replay. A moving playhead tracks session replay.
  */
-import { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { ReactNode } from 'react';
 import { flushSync } from 'react-dom';
 import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -105,13 +105,7 @@ const MAX_PX_PER_SEC = 60;
 const DETAIL_MARKS_MAX_VISIBLE_S = 600;
 /** Canvas draws this much beyond the viewport each side, so native
  * scrolling never outruns the painted window between re-centers. */
-const CANVAS_MARGIN = 400;
-/** Zoom gestures BLIT the last full waveform paint (per-axis-segment
- * drawImage) instead of re-interpreting the waveform per wheel frame —
- * at low zoom a full CPU repaint spans the whole session × 4 lanes and
- * blocked every frame of the gesture (this issue). The real repaint
- * runs once, this long after the last zoom wheel event. */
-const ZOOM_REPAINT_SETTLE_MS = 160;
+const CANVAS_MARGIN = 160;
 
 // ── Formatting ──────────────────────────────────────────────────────────
 
@@ -393,22 +387,6 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusFlash, f
   zoomCtxRef.current = { model, axis, fitPx, viewportW, collapseIdle, thresholdS, expandedGaps };
   const pendingZoomRef = useRef<{ factor: number; clientX: number } | null>(null);
   const wheelGestureRef = useRef<{ axis: 'pan' | 'zoom'; last: number } | null>(null);
-  // Zoom-gesture blit state: the last FULL canvas paint plus the axis it
-  // was painted under. While `zoomBlitUntilRef` is in the future the
-  // canvas effect remaps this snapshot instead of repainting; the settle
-  // timer then forces one real repaint (paintEpoch) iff any blit ran.
-  const paintSnapshotRef = useRef<{
-    canvas: HTMLCanvasElement;
-    x0: number;
-    winW: number;
-    dpr: number;
-    svgH: number;
-    segments: TimeAxis['segments'];
-  } | null>(null);
-  const zoomBlitUntilRef = useRef(0);
-  const blitDirtyRef = useRef(false);
-  const settleTimerRef = useRef(0);
-  const [paintEpoch, setPaintEpoch] = useState(0);
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
@@ -438,10 +416,10 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusFlash, f
         pxPerSec: next,
       });
       const newW = Math.max(ctx.viewportW, Math.ceil(newAxis.totalPx));
-      const newScroll = Math.max(
+      const newScroll = Math.round(Math.max(
         0,
         Math.min(newAxis.tToPx(tCursor) - cursorX, newW - ctx.viewportW)
-      );
+      ));
       // Commit zoom + the matching scroll WINDOW in one synchronous render
       // (the DawTimeline flushSync idiom): the new width, the canvas
       // window, and the DOM scroll all land in the same frame — no torn
@@ -458,7 +436,7 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusFlash, f
       const now = performance.now();
       const latch = wheelGestureRef.current;
       const gestureAxis =
-        latch && now - latch.last < 150
+        e.ctrlKey || e.metaKey ? 'zoom' : latch && now - latch.last < 150
           ? latch.axis
           : Math.abs(e.deltaX) > Math.abs(e.deltaY)
             ? ('pan' as const)
@@ -470,25 +448,15 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusFlash, f
       }
       const pending = pendingZoomRef.current;
       pendingZoomRef.current = {
-        factor: (pending?.factor ?? 1) * Math.pow(1.0015, -e.deltaY * unit),
+        factor: (pending?.factor ?? 1) * Math.exp(-e.deltaY * unit * (e.ctrlKey || e.metaKey ? 0.01 : 0.0015)),
         clientX: e.clientX,
       };
-      // Gesture in flight: the canvas blits until the wheel goes quiet,
-      // then one real repaint (only if a blit actually painted — a zoom
-      // pinned at the fit floor never dirtied the canvas).
-      zoomBlitUntilRef.current = now + ZOOM_REPAINT_SETTLE_MS + 80;
-      window.clearTimeout(settleTimerRef.current);
-      settleTimerRef.current = window.setTimeout(() => {
-        zoomBlitUntilRef.current = 0;
-        if (blitDirtyRef.current) setPaintEpoch((v) => v + 1);
-      }, ZOOM_REPAINT_SETTLE_MS);
       if (!raf) raf = requestAnimationFrame(applyZoom);
     };
     el.addEventListener('wheel', handler, { passive: false });
     return () => {
       el.removeEventListener('wheel', handler);
       if (raf) cancelAnimationFrame(raf);
-      window.clearTimeout(settleTimerRef.current);
     };
      
   }, [hasModel, setScrollLeft]);
@@ -577,12 +545,11 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusFlash, f
     setSelection({ kind: 'moment', t: focusS });
     const el = scrollRef.current;
     if (el) setScrollLeft(el, Math.max(0, axis.tToPx(focusS) - el.clientWidth / 2));
-    // Provenance flash (gh#170): pulse the source region once, keyed so a
-    // repeated deep-link re-triggers the CSS animation.
+    // A repeated deep-link restarts the temporary source-region highlight.
     if (focusFlash) setFlash({ ...focusFlash, key: focusVersion ?? 0 });
   }, [focusS, focusSpanS, focusFlash, focusVersion, model, axis, width, fitPx, viewportW, setScrollLeft]);
 
-  // Momentary region flash state (cleared after the animation).
+  // Momentary region highlight.
   const [flash, setFlash] = useState<{ start: number; end: number; key: number } | null>(null);
   useEffect(() => {
     if (!flash) return;
@@ -813,6 +780,13 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusFlash, f
     return out;
   }, [model, runMinDtS]);
 
+  const spanRunsByDeck = useMemo(() => Object.fromEntries(ALL_DECKS.map(deck => [deck,
+    model?.decks[deck].trackSpans.map(span => ({ ...span,
+      runs: runsByDeck[deck].filter(run => run.t0 >= span.start && run.t1 <= span.end),
+    })) ?? [],
+  ])) as Record<CaptureDeck, { trackId: number; start: number; end: number; runs: TraceRun[] }[]>,
+  [model, runsByDeck]);
+
   // Scene copies of the traces, thinned to the SAME zoom bucket (this
   // issue, part 2): the trace polylines walked every raw sample per scene
   // render — at low zoom that's the whole multi-hour trace × 4 decks on
@@ -841,7 +815,7 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusFlash, f
   // window is quantized: native scroll carries the canvas smoothly (it
   // lives in the scrolled content); the redraw only re-centers when the
   // scroll crosses a quantum, so edges never blank within the margin.
-  const canvasWinStart = Math.max(0, Math.floor((scrollX - CANVAS_MARGIN) / 300) * 300);
+  const canvasWinStart = Math.max(0, Math.floor((scrollX - CANVAS_MARGIN) / 100) * 100);
   // The SVG scene windows on the SAME quantum: scrollX changes every
   // scroll frame, but the memoized scene only re-renders when the scroll
   // crosses a quantum (issue 13 — reconciling thousands of un-windowed
@@ -849,15 +823,15 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusFlash, f
   const sceneX0 = canvasWinStart;
   const sceneX1 = Math.min(width, canvasWinStart + viewportW + 2 * CANVAS_MARGIN);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  useEffect(() => {
+  useLayoutEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || !model || !axis) return;
     const dpr = window.devicePixelRatio || 1;
     const x0 = Math.max(0, Math.floor(canvasWinStart));
     const x1 = Math.min(width, x0 + viewportW + 2 * CANVAS_MARGIN);
     const winW = Math.max(1, x1 - x0);
-    canvas.width = winW * dpr;
-    canvas.height = svgH * dpr;
+    if (canvas.width !== Math.ceil(winW * dpr)) canvas.width = Math.ceil(winW * dpr);
+    if (canvas.height !== Math.ceil(svgH * dpr)) canvas.height = Math.ceil(svgH * dpr);
     canvas.style.transform = `translateX(${x0}px)`;
     canvas.style.width = `${winW}px`;
     const ctx = canvas.getContext('2d');
@@ -865,47 +839,8 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusFlash, f
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, winW, svgH);
     ctx.translate(-x0, 0); // helpers draw in timeline coordinates
-    // Zoom gesture in flight: remap the last full paint through the new
-    // axis instead of re-interpreting the waveform. The axis is piecewise
-    // linear, so a per-segment drawImage is exact in position (waveform
-    // detail stretches until the settle repaint) — GPU-cheap where the
-    // full paint was a per-frame main-thread stall at low zoom.
-    const snap = paintSnapshotRef.current;
-    if (
-      performance.now() < zoomBlitUntilRef.current &&
-      snap !== null &&
-      snap.svgH === svgH &&
-      snap.segments.length === axis.segments.length
-    ) {
-      blitDirtyRef.current = true;
-      for (let i = 0; i < axis.segments.length; i++) {
-        const os = snap.segments[i];
-        const ns = axis.segments[i];
-        // The slice of this segment the snapshot actually painted…
-        const o0 = Math.max(os.px0, snap.x0);
-        const o1 = Math.min(os.px1, snap.x0 + snap.winW);
-        if (o1 <= o0) continue;
-        // …mapped linearly into the new axis' px space.
-        const ow = os.px1 - os.px0;
-        const f0 = ow > 0 ? (o0 - os.px0) / ow : 0;
-        const f1 = ow > 0 ? (o1 - os.px0) / ow : 1;
-        const n0 = ns.px0 + f0 * (ns.px1 - ns.px0);
-        const n1 = ns.px0 + f1 * (ns.px1 - ns.px0);
-        if (n1 <= n0 || n1 <= x0 || n0 >= x1) continue;
-        ctx.drawImage(
-          snap.canvas,
-          (o0 - snap.x0) * snap.dpr,
-          0,
-          (o1 - o0) * snap.dpr,
-          snap.svgH * snap.dpr,
-          n0,
-          0,
-          n1 - n0,
-          svgH
-        );
-      }
-      return;
-    }
+    const startT = axis.pxToT(x0);
+    const endT = axis.pxToT(x1);
     for (const deck of LANE_ORDER) {
       const geo = { width, yOffset: laneY(deck), height: laneH, x0, x1 };
       const dt = model.decks[deck];
@@ -914,9 +849,10 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusFlash, f
       // 2. Full-color styled waveform per track span's runs, modulated by
       // the recorded mixer state (sessions 19: EQ kills drop their band,
       // fader/trim shrink the waveform).
-      for (const span of dt.trackSpans) {
+      for (const span of spanRunsByDeck[deck]) {
+        if (span.end < startT || span.start > endT) continue;
         const wave = wavesByTrack[span.trackId];
-        const spanRuns = runsByDeck[deck].filter((r) => r.t0 >= span.start && r.t1 <= span.end);
+        const spanRuns = span.runs;
         if (wave) {
           drawStyledRuns(ctx, wave, slot.styleId, slot.params, spanRuns, axis, geo, dt.controlSteps);
           // 3. Beat gridlines over the waveform (jump/pitch-aware).
@@ -935,15 +871,8 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusFlash, f
         }
       }
     }
-    // Snapshot the full paint for the next zoom gesture's blits.
-    const snapCanvas = snap?.canvas ?? document.createElement('canvas');
-    snapCanvas.width = canvas.width;
-    snapCanvas.height = canvas.height;
-    snapCanvas.getContext('2d')?.drawImage(canvas, 0, 0);
-    paintSnapshotRef.current = { canvas: snapCanvas, x0, winW, dpr, svgH, segments: axis.segments };
-    blitDirtyRef.current = false;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [model, axis, width, svgH, canvasWinStart, viewportW, wavesByTrack, gridsByTrack, laddersByTrack, runsByDeck, slot, paintEpoch]);
+  }, [model, axis, width, svgH, canvasWinStart, viewportW, wavesByTrack, gridsByTrack, laddersByTrack, spanRunsByDeck, slot]);
 
   // Stable scene callbacks (the scene is memoized — inline closures would
   // defeat it every render).
@@ -1015,7 +944,7 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusFlash, f
         toast(`Open failed: ${err instanceof Error ? err.message : String(err)}`);
       }
     },
-    [queryClient, session.uuid, toast]
+    [queryClient, toast]
   );
   // Persisted tier (gh#170 follow-up): the ◆ region's ✎ opens directly.
   const onOpenRoutine = useCallback((routineUuid: string) => {
@@ -1159,7 +1088,7 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusFlash, f
     <div className="session-timeline" ref={rootRef}>
       <div className="stl-controls">
         {onBack ? (
-          <button className="stl-back" onClick={onBack}>
+          <button className="btn btn-secondary" onClick={onBack}>
             ‹ Sessions
           </button>
         ) : null}
@@ -1176,17 +1105,17 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusFlash, f
         {replayHere ? (
           <span className="stl-cluster">
             {replay.status !== 'loading' ? (
-              <button className="stl-replay" onClick={toggleReplayPause}>
+              <button className="btn btn-success" aria-label={replay.status === 'paused' ? 'Resume replay' : 'Pause replay'} onClick={toggleReplayPause}>
                 {replay.status === 'paused' ? '▶' : '⏸'}
               </button>
             ) : null}
-            <button className="stl-replay stop" onClick={stopReplay}>
+            <button className="btn btn-danger" aria-label="Stop replay" onClick={stopReplay}>
               {replay.status === 'loading' ? 'loading…' : '■'}
             </button>
           </span>
         ) : selection.kind === 'moment' ? (
           <button
-            className="stl-replay"
+            className="btn btn-success"
             title="Replay through the shared live decks from this moment — any manual gesture takes over"
             onClick={() => replayFrom(selection.t)}
           >
@@ -1196,7 +1125,7 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusFlash, f
         {selection.kind === 'take' ? (
           <span className="stl-cluster">
             <button
-              className="stl-open-editor"
+              className="btn btn-primary"
               onClick={() => {
                 // #221: handover takes review on the Mix editor; Cameo
                 // (guest) takes keep the legacy path until the kind-aware
@@ -1221,7 +1150,7 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusFlash, f
               )}{' '}
               · open in editor
             </button>
-            <button className="stl-clear" onClick={() => setSelection({ kind: 'none' })}>
+            <button className="btn btn-secondary" aria-label="Clear selection" onClick={() => setSelection({ kind: 'none' })}>
               ✕
             </button>
           </span>
@@ -1241,7 +1170,7 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusFlash, f
                   </span>
                   {eff.cast.length >= 3 ? (
                     <button
-                      className="stl-confirm"
+                      className="btn btn-primary"
                       title={`Confirm this span as a Routine Take\n${chain}`}
                       onClick={() => void confirmCandidate()}
                     >
@@ -1249,7 +1178,7 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusFlash, f
                     </button>
                   ) : eff.cast.length === 2 ? (
                     <button
-                      className="stl-confirm two"
+                      className="btn btn-success"
                       title="A 2-cast span is a Transition — this cuts a hand-cut Take instead (ADR 0035)"
                       onClick={() => void cutTakeInstead()}
                     >
@@ -1259,7 +1188,7 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusFlash, f
                     <span className="stl-cand-title">window too tight</span>
                   )}
                   <button
-                    className="stl-clear"
+                    className="btn btn-secondary"
                     title="Reset trim to the miner's window"
                     onClick={() =>
                       setTrim({
@@ -1270,7 +1199,7 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusFlash, f
                   >
                     ↺
                   </button>
-                  <button className="stl-clear" onClick={() => setSelection({ kind: 'none' })}>
+                  <button className="btn btn-secondary" aria-label="Clear selection" onClick={() => setSelection({ kind: 'none' })}>
                     ✕
                   </button>
                 </span>
@@ -1294,7 +1223,7 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusFlash, f
               </span>
             ) : (
               <button
-                className="stl-confirm"
+                className="btn btn-primary"
                 title="Mechanically promote: deck→slot re-addressing + beat-domain rebase via the cast Beatgrids"
                 onClick={() => void promoteRoutineTake(selection.take)}
               >
@@ -1302,13 +1231,13 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusFlash, f
               </button>
             )}
             <button
-              className="stl-clear"
+              className="btn btn-danger"
               title="Delete this Routine Take"
               onClick={() => void deleteRoutineTake(selection.take)}
             >
               ✕ delete
             </button>
-            <button className="stl-clear" onClick={() => setSelection({ kind: 'none' })}>
+            <button className="btn btn-secondary" aria-label="Clear selection" onClick={() => setSelection({ kind: 'none' })}>
               ✕
             </button>
           </span>
@@ -1330,6 +1259,7 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusFlash, f
           gaps ≥
         </label>
         <select
+          aria-label="Collapse gaps longer than"
           value={thresholdS}
           onChange={(e) => setThresholdS(Number(e.target.value))}
           disabled={!collapseIdle}
@@ -1348,7 +1278,7 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusFlash, f
           traces
         </label>
         <span className="stl-zoom">
-          <button title="Zoom to fit" onClick={() => setPxPerSec(null)}>
+          <button className={`btn btn-secondary${pxPerSec === null ? ' btn-selected' : ''}`} title="Zoom to fit" onClick={() => setPxPerSec(null)}>
             fit
           </button>
         </span>
@@ -1803,7 +1733,6 @@ const TimelineScene = memo(function TimelineScene({
               y={chipY}
               width={x1 - x0}
               height={chipH}
-              rx={rows === 1 ? 5 : rows === 2 ? 4 : 2}
               style={grad ? { fill: grad } : undefined}
             />
             <text x={x0 + 4} y={textY} className="stl-chip-glyph">
@@ -1867,7 +1796,7 @@ const TimelineScene = memo(function TimelineScene({
           >
             <title>{`Routine candidate · ${chain} · returns ${c.evidence.returns ?? 0}, triples ${c.evidence.triples ?? 0} — click to confirm (with trim), ✎ to open in the Routine editor`}</title>
             <rect x={x0} y={lanesTop} width={x1 - x0} height={lanesBottom - lanesTop} className="stl-cand-band" />
-            <rect x={x0} y={chipY} width={x1 - x0} height={chipH} rx={rows === 1 ? 5 : rows === 2 ? 4 : 2} className="stl-cand-chip-rect" />
+            <rect x={x0} y={chipY} width={x1 - x0} height={chipH} className="stl-cand-chip-rect" />
             <text x={x0 + 4} y={textY} className="stl-chip-glyph">
               ⧉
             </text>
@@ -1887,7 +1816,7 @@ const TimelineScene = memo(function TimelineScene({
                 }}
               >
                 <title>Open in the Routine editor (confirms this candidate + promotes)</title>
-                <rect x={x1 - 18} y={chipY + 1} width={16} height={chipH - 2} rx={3} />
+                <rect x={x1 - 18} y={chipY + 1} width={16} height={chipH - 2} />
                 <text x={x1 - 10} y={textY} textAnchor="middle">
                   ✎
                 </text>
@@ -1949,7 +1878,6 @@ const TimelineScene = memo(function TimelineScene({
               y={chipY}
               width={x1 - x0}
               height={chipH}
-              rx={rows === 1 ? 5 : rows === 2 ? 4 : 2}
               className="stl-rtake-chip-rect"
             />
             <text x={x0 + 4} y={textY} className="stl-chip-glyph">
@@ -1974,7 +1902,7 @@ const TimelineScene = memo(function TimelineScene({
                     ? 'Open this Routine in the Routine editor'
                     : 'Promote + open in the Routine editor (review)'}
                 </title>
-                <rect x={x1 - 18} y={chipY + 1} width={16} height={chipH - 2} rx={3} />
+                <rect x={x1 - 18} y={chipY + 1} width={16} height={chipH - 2} />
                 <text x={x1 - 10} y={textY} textAnchor="middle">
                   ✎
                 </text>
@@ -2051,7 +1979,6 @@ function SceneOverlay({
           y={lanesTop}
           width={Math.max(X(flash.end) - X(flash.start), 8)}
           height={lanesBottom - lanesTop}
-          rx={4}
         />
       )}
       {/* Track labels: the LOAD bar itself is in the (windowed, memoized)
@@ -2067,14 +1994,14 @@ function SceneOverlay({
         );
         return (
           <g key={`labels-${deck}`}>
-            {labels.filter(label => label.row > 0).map(({ index, markerX, x, row }) => (
+            {labels.filter(label => label.shown && label.row > 0).map(({ index, markerX, x, row }) => (
               <path
                 key={`loadleader-${index}`}
                 d={`M ${markerX} ${y + 2} V ${y + row * 16 + 10} H ${x + 6}`}
                 stroke={color} strokeWidth={1} fill="none" opacity={0.7}
               />
             ))}
-            {labels.map(({ index, start, label, shown, x: lx, width: shownW, row }) => {
+            {labels.filter(label => label.shown).map(({ index, start, label, shown, x: lx, width: shownW, row }) => {
               const labelY = y + row * 16;
               return (
                 <g key={`trklabel-${index}`} className="stl-track-load" data-load-time={start}>
@@ -2086,7 +2013,7 @@ function SceneOverlay({
                         y={labelY + 3}
                         width={shownW + 12}
                         height={14}
-                        fill="var(--mantle, #181818)"
+                        fill="var(--mantle)"
                         opacity={0.92}
                       />
                       <text x={lx + 8} y={labelY + 14} className="stl-track-label" fill={color}>
@@ -2333,39 +2260,17 @@ function DeckLane({
       {/* LOAD bars (the labels ride the SceneOverlay — they stick to the
           viewport edge, an exact-scrollX behavior this memoized lane must
           not re-render for). */}
-      {dt.trackSpans.map((sp, i) => {
+      <path stroke={color} className="stl-load-bar" d={dt.trackSpans.map(sp => {
         const mx = X(sp.start);
-        if (mx < viewX0 || mx > viewX1) return null;
-        return (
-          <line
-            key={`trk-${i}`}
-            x1={mx}
-            y1={y}
-            x2={mx}
-            y2={y + h}
-            stroke={color}
-            className="stl-load-bar"
-          />
-        );
-      })}
+        return mx < viewX0 || mx > viewX1 ? '' : `M${mx},${y}v${h}`;
+      }).join('')} />
 
       {/* Playing-but-silent underline (audibility itself is the area fill). */}
-      {dt.playingSpans.map((sp, i) => {
+      <path fill={color} opacity={0.4} d={dt.playingSpans.map(sp => {
         const x0 = X(sp.start);
         const x1 = X(sp.end);
-        if (x1 < viewX0 || x0 > viewX1) return null;
-        return (
-          <rect
-            key={`play-${i}`}
-            x={x0}
-            y={y + h - 3}
-            width={Math.max(x1 - x0, 2)}
-            height={3}
-            fill={color}
-            opacity={0.4}
-          />
-        );
-      })}
+        return x1 < viewX0 || x0 > viewX1 ? '' : `M${x0},${y + h - 3}h${Math.max(x1 - x0, 2)}v3H${x0}Z`;
+      }).join('')} />
 
       {/* Play/pause markers at the playing-span boundaries. Detail-gated
           (this issue): past ~10 visible minutes they're overlapping glyph
@@ -2445,24 +2350,16 @@ function DeckLane({
           tToPx + stringification dominated the scene render. The traces
           arrive pre-thinned to the zoom bucket (this issue), so a scene
           render walks ~px-resolution points, not every raw sample. */}
-      {showTraces
-        ? traces.map((trace, i) => {
+      {showTraces ? <path className="stl-trace" stroke={color} d={traces.map(trace => {
             const win = traceWindow(trace, tView0, tView1);
-            if (!win) return null;
-            return (
-              <polyline
-                key={`trace-${i}`}
-                points={tracePolylinePoints(
+            if (!win) return '';
+            const points = tracePolylinePoints(
                   win,
                   createMonotonicTToPx(axis),
                   (ph) => y + 18 + (1 - ph / maxPlayhead) * (h - 24)
-                )}
-                className="stl-trace"
-                stroke={color}
-              />
             );
-          })
-        : null}
+            return points ? `M${points.replaceAll(' ', 'L')}` : '';
+          }).join('')} /> : null}
     </g>
   );
 }

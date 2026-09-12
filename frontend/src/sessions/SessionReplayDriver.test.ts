@@ -15,6 +15,7 @@ import { SessionReplayDriver } from './SessionReplayDriver';
 import type { ReplayStopReason } from './SessionReplayDriver';
 import { scratchPosition, scratchFilterAt, moveScratch } from '../playback/worklet/scratchMotion';
 import type { ScratchFrame, ScratchFilter } from '../playback/worklet/scratchMotion';
+import { followScrollTarget } from './followScroll';
 
 // ── Fakes ────────────────────────────────────────────────────────────────
 
@@ -471,6 +472,28 @@ function planFor(events: CaptureEvent[], t: number): ReplayPlan {
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────
+
+it('keeps the playhead and follow viewport at the requested moment during startup loading', async () => {
+  let finish!: () => void;
+  const r = rig(planFor(simpleLog(), 5), true, async (engines, deck, id) => {
+    await new Promise<void>(resolve => { finish = resolve; });
+    engines[deck].finishLoad(id);
+    return true;
+  });
+  const started = r.driver.start();
+  try {
+    for (let i = 0; i < 3; i++) {
+      r.clock.t += 1;
+      const t = r.driver.nowT()!;
+      expect({ t, scroll: followScrollTarget(t * 100, 200, 600, 1000) })
+        .toEqual({ t: 5, scroll: null });
+    }
+  } finally {
+    finish();
+    await started;
+    r.driver.stop();
+  }
+});
 
 describe('SessionReplayDriver — seed and schedule', () => {
   it.each([false, true])('replays an unchanged-loop phase anchor (scheduled scratch: %s)', async scheduled => {
@@ -1115,6 +1138,22 @@ describe('SessionReplayDriver — pause/seek races (frozen-playhead fix)', () =>
     });
     return { ...r, release: () => release() };
   }
+
+  it.each([false, true])('pins the playhead to the seek target while loading (paused: %s)', async paused => {
+    const r = gatedRig(5);
+    await r.driver.start();
+    r.advance(2);
+    if (paused) r.driver.pauseReplay();
+    const seek = r.driver.seekTo(planFor(twoTrackLog(), 25));
+    try {
+      r.clock.t += 2;
+      expect(r.driver.nowT()).toBe(25);
+    } finally {
+      r.release();
+      await seek;
+      r.driver.stop();
+    }
+  });
 
   it('a pause landing inside a seek load is refused — the clock never freezes under rolling audio', async () => {
     const r = gatedRig(5);
