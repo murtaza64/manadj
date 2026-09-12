@@ -7,14 +7,16 @@
  * (B or D). The map is mirrored per hand, not per physical Deck.
  *
  * Guards mirror the library hub: keys are ignored while an input/textarea/
- * contenteditable has focus or with ctrl/meta/alt held, except Cmd+cue walk.
+ * contenteditable has focus or with ctrl/meta/alt held, except explicit Cmd chords.
  * Hold-style keys suppress key repeat.
  */
 import { useEffect, useRef } from 'react';
 import { useViewActive } from '../../contexts/viewActive';
 import { useDeck, useDeckReady, useDeckSnapshot } from '../../hooks/useDeck';
 import { useHotCueActions } from '../../hooks/useHotCueActions';
+import { useMatchAction } from '../../hooks/useMatchAction';
 import { useMixer } from '../../hooks/useMixer';
+import { doubleBeatjump, halveBeatjump } from '../../playback/beatjump';
 import { MouseJogController } from './mouseJog';
 import { getMouseJogSettings, setMouseJogSpeed } from './mouseJogSettings';
 import { DECK_KEYS, hasKeyboardOverlay, isGuardedKeyEvent, isQuantizeShortcut, isTextEntryTarget, isTypingTarget } from './performanceKeys';
@@ -23,7 +25,7 @@ import { invertControl, MIXER_DRAG_RANGE_PX, moveKnob, type KnobGesture } from '
 
 export function DeckKeys({ enabled = true }: { enabled?: boolean }) {
   const viewActive = useViewActive() && enabled;
-  const { deck, engine, loadedTrack, beatjumpBeats } = useDeck();
+  const { deck, engine, loadedTrack, beatjumpBeats, setBeatjumpBeats } = useDeck();
   const ready = useDeckReady();
   // The play key is allowed while loading — the engine latches play intent
   // (library-hub parity for space, on this view's play key).
@@ -32,6 +34,7 @@ export function DeckKeys({ enabled = true }: { enabled?: boolean }) {
       s.loadState === 'ready' || s.loadState === 'fetching' || s.loadState === 'decoding'
   );
   const hotCues = useHotCueActions(loadedTrack?.id ?? null);
+  const match = useMatchAction();
   const mixer = useMixer();
   const cueHeld = useRef(false);
   const padsHeld = useRef(new Map<number, () => void>());
@@ -226,24 +229,39 @@ export function DeckKeys({ enabled = true }: { enabled?: boolean }) {
       const i = keys.pads.indexOf(key);
       return i === -1 ? null : i + 1;
     };
+    // Shift changes punctuation's event.key; keyup must resolve the same pad
+    // whether Shift is released before or after the pad key.
+    const unshifted: Record<string, string> = { ':': ';', '<': ',', '>': '.', '?': '/' };
 
     const onKeyDown = (event: KeyboardEvent) => {
-      if (!viewActive || isTypingTarget(event) || hasKeyboardOverlay()) return;
-      const key = event.key.toLowerCase();
-      if (event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey &&
-          (key === keys.jumpBack || key === keys.jumpForward)) {
+      if (!viewActive || event.isComposing || isTypingTarget(event) || hasKeyboardOverlay()) return;
+      const key = unshifted[event.key] ?? event.key.toLowerCase();
+      const jumpKey = key === keys.jumpBack || key === keys.jumpForward;
+      if (event.metaKey && !event.ctrlKey && !event.altKey &&
+          (jumpKey || (key === keys.fader && !event.shiftKey))) {
         event.preventDefault();
-        if (!event.repeat && ready && !engine.getSnapshot().playing) {
+        if (event.repeat) return;
+        if (event.shiftKey) {
+          engine.resizeLoop(key === keys.jumpBack ? 'halve' : 'double');
+        } else if (key === keys.fader) {
+          if (ready) match();
+        } else if (ready && !engine.getSnapshot().playing) {
           hotCues.walk?.(key === keys.jumpBack ? 'prev' : 'next');
         }
         return;
       }
       if (isGuardedKeyEvent(event)) return;
+      if (event.shiftKey && jumpKey) {
+        event.preventDefault();
+        if (!event.repeat) setBeatjumpBeats(key === keys.jumpBack
+          ? halveBeatjump(beatjumpBeats) : doubleBeatjump(beatjumpBeats));
+        return;
+      }
 
       // Hold keys: swallow repeats but keep the event claimed.
       if (
         event.repeat &&
-        (key === keys.cue || padSlot(key) !== null)
+        (key === keys.cue || key === keys.loop || padSlot(key) !== null)
       ) {
         event.preventDefault();
         return;
@@ -252,12 +270,16 @@ export function DeckKeys({ enabled = true }: { enabled?: boolean }) {
       if (key === keys.play) {
         if (!canPlay) return;
         event.preventDefault();
-        engine.togglePlay();
+        engine.togglePlay(event.timeStamp);
       } else if (key === keys.cue) {
         if (!ready) return;
         event.preventDefault();
         cueHeld.current = true;
         engine.cueDown();
+      } else if (key === keys.loop && !event.shiftKey) {
+        if (!ready || !engine.getSnapshot().hasBeatgrid) return;
+        event.preventDefault();
+        engine.toggleLoop();
       } else if (key === keys.jumpBack || key === keys.jumpForward) {
         if (!ready) return;
         event.preventDefault();
@@ -267,14 +289,20 @@ export function DeckKeys({ enabled = true }: { enabled?: boolean }) {
         if (slot !== null) {
           if (!hotCues.enabled) return;
           event.preventDefault();
-          hotCues.down(slot);
-          padsHeld.current.set(slot, () => hotCues.up(slot));
+          if (event.shiftKey) {
+            padsHeld.current.get(slot)?.();
+            padsHeld.current.delete(slot);
+            hotCues.remove(slot);
+          } else {
+            hotCues.down(slot);
+            padsHeld.current.set(slot, () => hotCues.up(slot));
+          }
         }
       }
     };
 
     const onKeyUp = (event: KeyboardEvent) => {
-      const key = event.key.toLowerCase();
+      const key = unshifted[event.key] ?? event.key.toLowerCase();
 
       if (key === keys.cue) {
         if (!cueHeld.current) return;
@@ -297,7 +325,7 @@ export function DeckKeys({ enabled = true }: { enabled?: boolean }) {
       document.removeEventListener('keydown', onKeyDown);
       document.removeEventListener('keyup', onKeyUp);
     };
-  }, [deck, engine, ready, canPlay, beatjumpBeats, hotCues, viewActive]);
+  }, [deck, engine, ready, canPlay, beatjumpBeats, setBeatjumpBeats, hotCues, match, viewActive]);
 
   return null;
 }

@@ -15,6 +15,7 @@ export interface DeckKeyMap {
   /** Hold-cue (CDJ style). */
   cue: string;
   play: string;
+  loop: string;
   jumpBack: string;
   jumpForward: string;
   /** Hold and move vertically; mirrored from pinky (filter) to index (low). */
@@ -57,7 +58,7 @@ export function isTypingTarget(event: KeyboardEvent): boolean {
 
 /** Raw chord reservation; the global owner applies typing/overlay guards. */
 export function isQuantizeShortcut(event: KeyboardEvent): boolean {
-  return event.key.toLowerCase() === 'q' && event.shiftKey
+  return event.key === '=' && !event.shiftKey
     && !event.ctrlKey && !event.metaKey && !event.altKey;
 }
 
@@ -104,6 +105,7 @@ export const DECK_KEYS: Record<'A' | 'B', DeckKeyMap> = {
   A: {
     cue: 'f',
     play: 'd',
+    loop: 'b',
     jumpBack: 'a',
     jumpForward: 's',
     knobs: { filter: 'q', high: 'w', mid: 'e', low: 'r' },
@@ -114,6 +116,7 @@ export const DECK_KEYS: Record<'A' | 'B', DeckKeyMap> = {
   B: {
     cue: 'j',
     play: 'k',
+    loop: 'n',
     jumpBack: 'l',
     jumpForward: ';',
     knobs: { filter: 'p', high: 'o', mid: 'i', low: 'u' },

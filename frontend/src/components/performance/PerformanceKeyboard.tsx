@@ -25,7 +25,7 @@ const shortcuts = [
   ['Shift+A / B / C / D', 'Follow loaded deck track'],
   ['/', 'Search (Enter / Esc returns to results)'],
   ['f / n', 'Follow parameters / Known only'],
-  ['?', 'Keyboard help'],
+  ['? / F1', 'Keyboard help'],
 ];
 
 export function PerformanceKeyboard({ deckCount, left, right, onLoad }: {
@@ -60,7 +60,7 @@ export function PerformanceKeyboard({ deckCount, left, right, onLoad }: {
     if (!active) return;
     const claim = (event: KeyboardEvent) => { event.preventDefault(); event.stopImmediatePropagation(); };
     const down = (event: KeyboardEvent) => {
-      // TopBar owns this chord, regardless of capture-listener registration order.
+      // TopBar owns plain '=', regardless of capture-listener registration order.
       if (isQuantizeShortcut(event)) return;
       const key = event.key.toLowerCase();
       const physical = event.code || key;
@@ -68,7 +68,7 @@ export function PerformanceKeyboard({ deckCount, left, right, onLoad }: {
       if (!event.repeat) held.current.add(physical);
       if (!browseActive) return;
       if (help) {
-        if (key === 'escape' || key === '?') { claim(event); changeHelp(false); }
+        if (key === 'escape' || key === '?' || key === 'f1') { claim(event); changeHelp(false); }
         return;
       }
       if (hasKeyboardOverlay() || event.defaultPrevented || event.isComposing) return;
@@ -81,7 +81,10 @@ export function PerformanceKeyboard({ deckCount, left, right, onLoad }: {
         return;
       }
       if (isTypingTarget(event)) return;
-      if (key === '?' && !modified) { claim(event); if (!event.repeat) changeHelp(true); return; }
+      // Shift+/ belongs to hotcue 4 when decks own the keyboard.
+      if ((key === 'f1' || (library && key === '?')) && !modified) {
+        claim(event); if (!event.repeat) changeHelp(true); return;
+      }
       if (!library || key === '`') return;
       const browse = sharedBrowseHandle.current;
       if (!event.altKey && !event.shiftKey && (event.metaKey || event.ctrlKey) && key === 'a') {
@@ -147,7 +150,7 @@ export function PerformanceKeyboard({ deckCount, left, right, onLoad }: {
     {active && helpOpen && <div className="perf-keyboard-help-backdrop" onClick={() => changeHelp(false)}>
       <section className="perf-keyboard-help" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts" onClick={e => e.stopPropagation()}>
         <header><strong>{library ? 'LIBRARY' : 'DECKS'} KEYBOARD</strong><button onClick={() => changeHelp(false)}>Close (Esc)</button></header>
-        {library ? <dl>{shortcuts.map(([key, action]) => <div key={key}><dt>{key}</dt><dd>{action}</dd></div>)}</dl> : <p>On-control labels show deck keys. Hold mixer or jog keys and move the mouse. Use [ / ] to switch A/C and B/D. Tab enters library navigation.</p>}
+        {library ? <dl>{shortcuts.map(([key, action]) => <div key={key}><dt>{key}</dt><dd>{action}</dd></div>)}</dl> : <p>On-control labels show deck keys. Hold mixer or jog keys and move the mouse. Shift+pad clears its hotcue. Use [ / ] to switch A/C and B/D. Tab enters library navigation. F1 opens keyboard help.</p>}
         {library && <p>Loads keep library focus. Playing decks are locked. C/D loads are unavailable in two-deck layout. Follow uses loaded tracks, not the selected row.</p>}
       </section>
     </div>}

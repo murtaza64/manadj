@@ -38,12 +38,16 @@ function LoopIcon() {
 
 export function LoopRow({
   kbd,
+  halveTitleSuffix = '',
+  doubleTitleSuffix = '',
   titleSuffix = '',
 }: {
   /** On-control keyboard hint slot (Performance view). */
   kbd?: ReactNode;
   /** Title-only key hint (library view, e.g. " (R)"). */
   titleSuffix?: string;
+  halveTitleSuffix?: string;
+  doubleTitleSuffix?: string;
 }) {
   const { engine } = useDeck();
   const ready = useDeckReady();
@@ -68,7 +72,7 @@ export function LoopRow({
       <button
         className="player-button"
         onClick={() => engine.resizeLoop('halve')}
-        title={loop ? 'Halve the loop' : 'Halve loop size'}
+        title={`${loop ? 'Halve the loop' : 'Halve loop size'}${halveTitleSuffix}`}
       >
         1/2
       </button>
@@ -86,7 +90,7 @@ export function LoopRow({
       <button
         className="player-button"
         onClick={() => engine.resizeLoop('double')}
-        title={loop ? 'Double the loop' : 'Double loop size'}
+        title={`${loop ? 'Double the loop' : 'Double loop size'}${doubleTitleSuffix}`}
       >
         x2
       </button>

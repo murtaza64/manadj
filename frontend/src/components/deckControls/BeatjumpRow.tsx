@@ -16,6 +16,8 @@ import './deckControls.css';
 export function BeatjumpRow({
   backKbd,
   forwardKbd,
+  halveTitleSuffix = '',
+  doubleTitleSuffix = '',
   backTitleSuffix = '',
   forwardTitleSuffix = '',
 }: {
@@ -25,6 +27,8 @@ export function BeatjumpRow({
   /** Title-only key hints (library view, e.g. " (A)"). */
   backTitleSuffix?: string;
   forwardTitleSuffix?: string;
+  halveTitleSuffix?: string;
+  doubleTitleSuffix?: string;
 }) {
   const { engine, beatjumpBeats, setBeatjumpBeats } = useDeck();
   const ready = useDeckReady();
@@ -44,7 +48,7 @@ export function BeatjumpRow({
       <button
         className="player-button"
         onClick={() => setBeatjumpBeats(halveBeatjump(beatjumpBeats))}
-        title="Halve beatjump size"
+        title={`Halve beatjump size${halveTitleSuffix}`}
       >
         1/2
       </button>
@@ -76,7 +80,7 @@ export function BeatjumpRow({
       <button
         className="player-button"
         onClick={() => setBeatjumpBeats(doubleBeatjump(beatjumpBeats))}
-        title="Double beatjump size"
+        title={`Double beatjump size${doubleTitleSuffix}`}
       >
         x2
       </button>

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest';
-import { browseLoadTarget, hasKeyboardOverlay, isQuantizeShortcut, isTextEntryTarget, isTypingTarget } from './performanceKeys';
+import { browseLoadTarget, DECK_KEYS, hasKeyboardOverlay, isQuantizeShortcut, isTextEntryTarget, isTypingTarget } from './performanceKeys';
 import type { ControlFocus } from '../../performance/controlFocus';
 
 function input(type: string): HTMLInputElement {
@@ -9,15 +9,24 @@ function input(type: string): HTMLInputElement {
   return el;
 }
 
-it('reserves only Shift+Q, including repeats and composing events for the owner to guard', () => {
-  for (const key of ['q', 'Q']) {
-    expect(isQuantizeShortcut(new KeyboardEvent('keydown', { key, shiftKey: true }))).toBe(true);
-    expect(isQuantizeShortcut(new KeyboardEvent('keydown', { key, shiftKey: true, repeat: true, isComposing: true }))).toBe(true);
-    for (const options of [{ shiftKey: false }, { ctrlKey: true }, { metaKey: true }, { altKey: true }]) {
-      expect(isQuantizeShortcut(new KeyboardEvent('keydown', { key, shiftKey: true, ...options }))).toBe(false);
+it('reserves only plain =, including repeats and composing events for the owner to guard', () => {
+  expect(isQuantizeShortcut(new KeyboardEvent('keydown', { key: '=' }))).toBe(true);
+  expect(isQuantizeShortcut(new KeyboardEvent('keydown', { key: '=', repeat: true, isComposing: true }))).toBe(true);
+  for (const options of [{ shiftKey: true }, { ctrlKey: true }, { metaKey: true }, { altKey: true }]) {
+    expect(isQuantizeShortcut(new KeyboardEvent('keydown', { key: '=', ...options }))).toBe(false);
+  }
+  for (const key of ['q', 'Q', '+', 'W']) {
+    for (const shiftKey of [false, true]) {
+      expect(isQuantizeShortcut(new KeyboardEvent('keydown', { key, shiftKey }))).toBe(false);
     }
   }
-  expect(isQuantizeShortcut(new KeyboardEvent('keydown', { key: 'W', shiftKey: true }))).toBe(false);
+});
+
+it('maps loops to B/N and keeps plain Q available for the left filter', () => {
+  expect(DECK_KEYS.A.loop).toBe('b');
+  expect(DECK_KEYS.B.loop).toBe('n');
+  expect(DECK_KEYS.A.knobs.filter).toBe('q');
+  expect(isQuantizeShortcut(new KeyboardEvent('keydown', { key: DECK_KEYS.A.knobs.filter }))).toBe(false);
 });
 
 it('ignores overlays inside hidden keep-alive ancestors', () => {

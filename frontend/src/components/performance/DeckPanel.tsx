@@ -456,7 +456,7 @@ export function DeckWaveform({
 
 /** On-control hint for this deck's key (from the shared map — can't drift). */
 function Kbd({ k }: { k: string }) {
-  return <kbd className="perf-kbd">{k.toUpperCase()}</kbd>;
+  return <kbd className="perf-kbd" aria-hidden="true">{k.toUpperCase()}</kbd>;
 }
 
 // ── TRACK zone (persistent — curation class) ─────────────────────────────
@@ -669,8 +669,14 @@ function PlayZone() {
           <BeatjumpRow
             backKbd={<Kbd k={keys.jumpBack} />}
             forwardKbd={<Kbd k={keys.jumpForward} />}
+            halveTitleSuffix={` (Shift+${keys.jumpBack.toUpperCase()})`}
+            doubleTitleSuffix={` (Shift+${keys.jumpForward.toUpperCase()})`}
           />
-          <LoopRow />
+          <LoopRow
+            kbd={<Kbd k={keys.loop} />}
+            halveTitleSuffix={` (Cmd+Shift+${keys.jumpBack.toUpperCase()})`}
+            doubleTitleSuffix={` (Cmd+Shift+${keys.jumpForward.toUpperCase()})`}
+          />
           <div className="perf-pads">
             <HotCuePads
               padKbd={(slot) => (slot <= 4 ? <Kbd k={keys.pads[slot - 1]} /> : null)}
@@ -726,8 +732,8 @@ function PlayZone() {
               onPointerCancel={bendEnd}
             >
               ◀◀
-              <Kbd k={`${keys.jog} \u2190`} />
             </button>
+            <Kbd k={keys.jog} />
             <button
               className={`player-button${bend > 0 ? ' perf-nudge-held' : ''}`}
               disabled={!ready}
@@ -737,7 +743,6 @@ function PlayZone() {
               onPointerCancel={bendEnd}
             >
               ▶▶
-              <Kbd k={`${keys.jog} \u2192`} />
             </button>
           </div>
           <CueWalkButtons
@@ -1045,6 +1050,7 @@ function MixZone({ track }: { track: Track | null }) {
           title="Match the nearest playing Deck's tempo (half/double-aware)"
         >
           {hint ? '\u2260' : '='}
+          <Kbd k={`\u2318${keys.fader}`} />
         </button>
       </div>
     </div>

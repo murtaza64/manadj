@@ -89,27 +89,27 @@ it('retains overflow mode selection and navigation while Settings is open', () =
 });
 
 function key(options: KeyboardEventInit = {}, target: EventTarget = document.body, type = 'keydown') {
-  const event = new KeyboardEvent(type, { key: 'Q', code: 'KeyQ', shiftKey: true, bubbles: true, cancelable: true, ...options });
+  const event = new KeyboardEvent(type, { key: '=', code: 'Equal', bubbles: true, cancelable: true, ...options });
   act(() => { target.dispatchEvent(event); });
   return event;
 }
 
-it.each(['q', 'Q'])('toggles once on fresh Shift+%s and claims repeats without toggling', value => {
+it('toggles once on fresh = and claims repeats without toggling', () => {
   render(false);
   const laterCapture = vi.fn();
   const bubble = vi.fn();
   document.addEventListener('keydown', laterCapture, true);
   document.addEventListener('keydown', bubble);
   try {
-    expect(key({ key: value }).defaultPrevented).toBe(true);
+    expect(key().defaultPrevented).toBe(true);
     expect(isQuantizeOn()).toBe(true);
-    expect(key({ key: value, repeat: true }).defaultPrevented).toBe(true);
-    expect(key({ key: value, repeat: true }).defaultPrevented).toBe(true);
+    expect(key({ repeat: true }).defaultPrevented).toBe(true);
+    expect(key({ repeat: true }).defaultPrevented).toBe(true);
     expect(writeSetting).toHaveBeenCalledExactlyOnceWith('manadj-quantize', 'true');
     expect(laterCapture).not.toHaveBeenCalled();
     expect(bubble).not.toHaveBeenCalled();
     expect(key({}, document.body, 'keyup').defaultPrevented).toBe(false);
-    key({ key: value });
+    key();
     expect(isQuantizeOn()).toBe(false);
     expect(writeSetting).toHaveBeenCalledTimes(2);
   } finally {
@@ -121,13 +121,13 @@ it.each(['q', 'Q'])('toggles once on fresh Shift+%s and claims repeats without t
 it('reads current state before React repaints and exposes the hint, name and on state', () => {
   render(false);
   const button = host.querySelector<HTMLButtonElement>('[aria-label="Quantize"]')!;
-  expect(button.querySelector('kbd')?.textContent).toBe('Shift+Q');
-  expect(button.title).toContain('Shift+Q');
-  expect(button.getAttribute('aria-keyshortcuts')).toBe('Shift+Q');
+  expect(button.querySelector('kbd')?.textContent).toBe('=');
+  expect(button.title).toContain('(=)');
+  expect(button.getAttribute('aria-keyshortcuts')).toBe('=');
   expect(stealsFocus(button.querySelector('kbd'))).toBe(true);
   act(() => {
     setQuantize(true);
-    document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Q', shiftKey: true, bubbles: true }));
+    document.body.dispatchEvent(new KeyboardEvent('keydown', { key: '=', bubbles: true }));
   });
   expect(isQuantizeOn()).toBe(false);
   act(() => button.click());
@@ -143,7 +143,7 @@ it.each(['library', 'performance', 'transition', 'routine', 'history', 'sync'] a
   }
 );
 
-it.each([{ shiftKey: false }, { ctrlKey: true }, { metaKey: true }, { altKey: true }, { isComposing: true }, { key: 'W' }])(
+it.each([{ shiftKey: true }, { ctrlKey: true }, { metaKey: true }, { altKey: true }, { isComposing: true }, { key: '+' }, { key: 'W' }])(
   'ignores other chords and composing events: %j', options => {
     render(false);
     expect(key(options).defaultPrevented).toBe(false);
@@ -151,9 +151,24 @@ it.each([{ shiftKey: false }, { ctrlKey: true }, { metaKey: true }, { altKey: tr
   }
 );
 
+it.each([false, true])('leaves Q for downstream handlers without toggling Quantize (Shift: %s)', shiftKey => {
+  render(false);
+  const downstream = vi.fn();
+  document.addEventListener('keydown', downstream);
+  try {
+    const event = key({ key: shiftKey ? 'Q' : 'q', code: 'KeyQ', shiftKey });
+    expect(event.defaultPrevented).toBe(false);
+    expect(downstream).toHaveBeenCalledExactlyOnceWith(event);
+    expect(isQuantizeOn()).toBe(false);
+    expect(writeSetting).not.toHaveBeenCalled();
+  } finally {
+    document.removeEventListener('keydown', downstream);
+  }
+});
+
 it('leaves an already-claimed shortcut alone', () => {
   render(false);
-  const event = new KeyboardEvent('keydown', { key: 'Q', shiftKey: true, bubbles: true, cancelable: true });
+  const event = new KeyboardEvent('keydown', { key: '=', bubbles: true, cancelable: true });
   event.preventDefault();
   act(() => { document.body.dispatchEvent(event); });
   expect(writeSetting).not.toHaveBeenCalled();

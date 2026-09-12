@@ -174,13 +174,15 @@ describe('Performance library keyboard focus', () => {
   }
   const isLibrary = () => container.querySelector('.perf-keyboard-scope')?.getAttribute('data-library-focus') === 'true';
 
-  it('reserves Shift+Q before claiming library letters or blocking held physical keys', () => {
+  it('reserves plain = before claiming library keys or blocking held physical keys', () => {
     browse(); render();
-    act(() => document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'q', code: 'KeyQ', bubbles: true })));
+    expect(press('q', { code: 'KeyQ' }).defaultPrevented).toBe(false);
+    act(() => document.body.dispatchEvent(new KeyboardEvent('keydown', { key: '+', code: 'Equal', shiftKey: true, bubbles: true })));
     press('Tab');
     expect(isLibrary()).toBe(true);
-    expect(press('Q', { code: 'KeyQ', shiftKey: true, repeat: true }).defaultPrevented).toBe(false);
-    expect(press('Q', { code: 'KeyQ', shiftKey: true }).defaultPrevented).toBe(false);
+    expect(press('=', { code: 'Equal', repeat: true }).defaultPrevented).toBe(false);
+    expect(press('=', { code: 'Equal' }).defaultPrevented).toBe(false);
+    expect(press('Q', { code: 'KeyQ', shiftKey: true }).defaultPrevented).toBe(true);
     expect(press('q', { code: 'KeyQ' }).defaultPrevented).toBe(true);
   });
 
@@ -280,7 +282,10 @@ describe('Performance library keyboard focus', () => {
     press('j'); expect(handle.navigate).not.toHaveBeenCalled();
     press('Escape'); expect(container.querySelector('[role="dialog"]')).toBeNull();
     expect(isLibrary()).toBe(true);
-    press('Escape'); press('?');
+    press('Escape');
+    expect(press('?', { code: 'Slash', shiftKey: true }).defaultPrevented).toBe(false);
+    expect(container.querySelector('[role="dialog"]')).toBeNull();
+    press('F1');
     expect(container.querySelector('[role="dialog"]')?.textContent).toContain('DECKS KEYBOARD');
   });
 
@@ -296,7 +301,7 @@ describe('Performance library keyboard focus', () => {
   });
 
   it('does not let a press originating in help leak into deck transport on close', () => {
-    browse(); render(); press('?');
+    browse(); render(); press('F1');
     act(() => document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'd', bubbles: true })));
     press('Escape');
     expect(press('d', { repeat: true }).defaultPrevented).toBe(true);

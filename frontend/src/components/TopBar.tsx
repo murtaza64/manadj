@@ -75,12 +75,12 @@ function QuantizeToggle() {
       className={`topbar-quantize${on ? ' on' : ''}`}
       aria-label="Quantize"
       aria-pressed={on}
-      aria-keyshortcuts="Shift+Q"
-      title={`${on ? 'Quantize on: gestures snap to the beat' : 'Quantize off: exact placement'} (Shift+Q)`}
+      aria-keyshortcuts="="
+      title={`${on ? 'Quantize on: gestures snap to the beat' : 'Quantize off: exact placement'} (=)`}
       onClick={() => setQuantize(!isQuantizeOn())}
     >
       Q
-      <kbd className="topbar-quantize-hint" aria-hidden="true">Shift+Q</kbd>
+      <kbd className="topbar-quantize-hint" aria-hidden="true">=</kbd>
     </button>
   );
 }

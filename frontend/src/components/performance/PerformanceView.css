@@ -668,6 +668,7 @@
 
 /* Nudge pair as one segmented unit (same idiom as .deck-bpm/.deck-jumprow) */
 .perf-nudge {
+  position: relative;
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 0;
@@ -683,7 +684,7 @@
   position: relative;
 }
 
-.perf-nudge > .player-button + .player-button {
+.perf-nudge > .player-button ~ .player-button {
   border-left: 1px solid var(--surface2);
 }
 
@@ -1281,6 +1282,64 @@
   margin-left: var(--space-4);
 }
 .perf-kbd-inline .perf-kbd { position: static; border: 0; padding: 0; }
+
+/* Hints never participate in button sizing. Keep the keycap treatment. */
+.perf-deckpanel .player-button > .perf-kbd,
+.perf-pad-wrap > .perf-kbd,
+.perf-nudge > .perf-kbd {
+  position: absolute;
+  padding: 0 2px;
+  line-height: 1;
+  letter-spacing: 0;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.perf-transport-col > .player-button,
+.perf-padcol .deck-loop-toggle {
+  padding-right: 14px;
+}
+.perf-padcol .deck-jumprow > .player-button:has(> .perf-kbd) {
+  padding-left: 2px;
+  padding-right: 14px;
+}
+.perf-pad-wrap:has(> .perf-kbd) .hot-cue { padding-right: 12px; }
+.perf-pad-wrap > .perf-kbd,
+.perf-transport-col > .player-button > .perf-kbd,
+.perf-padcol .deck-loop-toggle > .perf-kbd,
+.perf-padcol .deck-jumprow > .player-button > .perf-kbd {
+  top: 50%;
+  right: 2px;
+  bottom: auto;
+  transform: translateY(-50%);
+}
+.perf-mix-foot .player-button.perf-mini.perf-match {
+  padding-top: 0;
+  padding-bottom: 11px;
+  line-height: 9px;
+}
+.perf-transport-col .deck-cuewalk > .player-button {
+  /* Glyph row + hint space + borders must fit the existing 22px button. */
+  font-size: 8px;
+  padding-top: 0;
+  line-height: 7px;
+  padding-bottom: 13px;
+}
+.perf-deckpanel .deck-cuewalk .perf-kbd,
+.perf-deckpanel .perf-match > .perf-kbd {
+  left: 50%;
+  right: auto;
+  bottom: 1px;
+  transform: translateX(-50%);
+}
+.perf-nudge > .perf-kbd {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  right: auto;
+  bottom: auto;
+  transform: translate(-50%, -50%);
+  z-index: 1;
+}
 
 /* Load-lock refusal hint on the deck panel (view policy, issue 04) */
 .perf-lock-hint {
