@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 
 import { DeckScope } from '../contexts/DeckContext';
 import { useAtCuePoint } from '../hooks/useAtCuePoint';
 import { useBeatgridData } from '../hooks/useBeatgridData';
-import { useDeck, useDeckSnapshot } from '../hooks/useDeck';
+import { useDeck, useDeckSnapshot, useDeckSyncStatus } from '../hooks/useDeck';
 import { useHotCues } from '../hooks/useHotCues';
 import { useMixerValue } from '../hooks/useMixer';
 import { useFollowFlags } from '../follow/followStore';
@@ -57,6 +57,7 @@ function DeckFeedbackPublisher({
   onNeedsClock: (needs: boolean) => void;
 }) {
   const { deck, engine, loadedTrack } = useDeck();
+  const synced = useDeckSyncStatus() !== 'off';
   // A layered Controller may expose a different logical Deck on the same
   // physical surface after focus changes. Re-send all logical deck state so
   // the newly visible layer repaints immediately.
@@ -154,6 +155,7 @@ function DeckFeedbackPublisher({
   useEffect(() => {
     if (outputs.length === 0) return;
     const input = {
+      synced,
       playing,
       pendingPlay,
       previewing,
@@ -181,6 +183,7 @@ function DeckFeedbackPublisher({
     }
   }, [
     deck,
+    synced,
     playing,
     pendingPlay,
     previewing,

@@ -186,6 +186,7 @@ The chronological log of Takes and Cameo Takes, grouped by engagement — "what 
 
 **Session**:
 The persisted whole event log of one stretch of live performance — everything the always-on capture tap observes, under one capture clock, all four Decks unconditionally. Bounded by audibility, not by app lifetime (amended 2026-08-13, sessions 11; originally one per recorder lifetime with no boundary heuristics): the row opens on the first Master-audible Deck instant — loads, cueing, control setup, and tenure markers buffer as reconstruction context but never create a row, so a 100%-silent run persists nothing — and ten continuous minutes with no Master-audible Deck end it (machine tenure counts as inactivity; the observed idle tail stays in the old log; no engagement, chunk sequence, or Take provenance spans the boundary; the next Session opens lazily when performance resumes). The container Takes and Cameo Takes are detected within (each carries its Session); idle stretches shorter than the boundary are collapsed by the viewer. Non-performance stretches (editor auditions, Conductor playback) appear as Audible-surface tenure markers, not event streams — the log records that the machine held the surface from X to Y, never what it played. Stores control/transport events only, no audio; auditioning a moment replays events through the shared live Decks — a machine performance holding the Audible surface, invisible to capture, yielding to takeover like the Conductor: a manual gesture ends replay and capture resumes (decided 2026-07-15).
+Master-audible cue previews count for Session activity and retention (2026-09-12, ADR 0033); silent/PFL-only cueing does not. Timeline idle begins after five seconds of continuous silence, without backdating. Take detection and Played accounting still exclude previews.
 _Avoid_: capture session (the informal precursor, canonicalized 2026-07-15), session recording (implies audio; a Session stores events), whole-session capture (ADR 0020's placeholder phrase), one Session per recorder lifetime (the pre-sessions-11 boundary)
 
 **Played** (Track, this Session):
@@ -361,6 +362,12 @@ _Avoid_: snap (the Transition editor's separate affordance), quantization (the A
 **Key Lock**:
 A sticky per-Deck setting (default on): playback-rate changes on that Deck (pitch fader, Nudge) do not shift the loaded Track's Key. Scratching bypasses it until release. Belongs to the Deck — not to the Track, not to the Mixer. Named tension: DJ-jargon *pitch* (the fader, the Deck's ±% rate) changes tempo; Key Lock keeps the *musical* pitch — the Key — constant while it does. Also known as master tempo (Pioneer).
 _Avoid_: "pitch-preserving", "pitch shift" — "pitch" already means the rate control.
+
+**Sync Group / Group Tempo**:
+The engaged Decks sharing one effective tempo, with per-Deck half/double-time relationships. Pitch input on any member changes Group Tempo; Nudge remains individual. There is no Tempo Master, no continuous chasing of unsynced Decks, and no phase lock. A member outside its pitch reach stays engaged but out-of-lock until tempo becomes reachable again.
+
+**MATCH / SYNC**:
+MATCH captures another playing Deck's tempo once without changing group membership. SYNC joins or leaves the Sync Group. With Quantize on, either successful MATCH or SYNC engagement aligns a playing Deck's beat phase once; neither edits the stored Beatgrid. Disengagement leaves pitch unchanged.
 
 **Alignment nudge**:
 Realigning the Transition editor's pair by a fixed time step — the editor's counterpart of a performance Nudge: both ride the pair's relative alignment, but a Nudge does it live and leaves nothing behind, while an Alignment nudge edits the sketch (autosaved). A Slide variant. Distinct from a grid nudge, which edits the Track's stored Beatgrid.

@@ -5,7 +5,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { RoutineDetailWire } from '../api/client';
 import { RoutineTimeline } from './RoutineTimeline';
 import type { RoutinePlayer } from './RoutinePlayer';
-import { buildEditorRoutine, recordedJumps, recordedPauses } from './routineEditorModel';
+import { buildEditorRoutine, buildTrackMeter, recordedJumps, recordedPauses, type TrackMeter } from './routineEditorModel';
 import { RoutineDraftStore, useRoutineDraft } from './routineDraftStore';
 import { emptyEdits } from './routineDraft';
 import type { EditorMode } from './editorMode';
@@ -28,14 +28,16 @@ let host: HTMLDivElement;
 let root: Root;
 let store: RoutineDraftStore;
 let resizeCallbacks: (() => void)[];
+let visibilityCallback: IntersectionObserverCallback;
 
-function Timeline({ source = detail, mode = 'select', pairMode = false, pairBounds, auditionRange, tracks = new Map() }: {
+function Timeline({ source = detail, mode = 'select', pairMode = false, pairBounds, auditionRange, tracks = new Map(), meters = new Map() }: {
   source?: RoutineDetailWire;
   mode?: EditorMode;
   pairMode?: boolean;
   pairBounds?: { handover: { enter: number; exit: number } | null };
   auditionRange?: { startSec: number; endSec: number };
   tracks?: Map<number, Track>;
+  meters?: Map<number, TrackMeter>;
 }) {
   const { edits } = useRoutineDraft(store);
   const editor = buildEditorRoutine(source, [120, 120, 120], 120, edits)!;
@@ -46,7 +48,7 @@ function Timeline({ source = detail, mode = 'select', pairMode = false, pairBoun
     editor={editor} plannedForRuns={editor.planned}
     recordedJumpsBySlot={Object.fromEntries(raw.slots.map((s) => [s.slotId, recordedJumps(s.trace)]))}
     recordedPausesBySlot={Object.fromEntries(raw.slots.map((s) => [s.slotId, recordedPauses(s.trace)]))}
-    tracks={tracks} waves={new Map()} meters={new Map()} hotcues={new Map()}
+    tracks={tracks} waves={new Map()} meters={meters} hotcues={new Map()}
     player={{ getBeat: () => 0 } as RoutinePlayer}
     draftStore={store} edits={edits} trim={pairMode ? null : editor.planned.playbackBounds}
     onTrimChange={pairMode ? null : (bounds) => store.setPlaybackBounds(bounds)}
@@ -58,6 +60,11 @@ beforeEach(() => {
   resizeCallbacks = [];
   vi.stubGlobal('ResizeObserver', class {
     constructor(callback: () => void) { resizeCallbacks.push(callback); }
+    observe() {}
+    disconnect() {}
+  });
+  vi.stubGlobal('IntersectionObserver', class {
+    constructor(callback: IntersectionObserverCallback) { visibilityCallback = callback; }
     observe() {}
     disconnect() {}
   });
@@ -333,6 +340,62 @@ it('resizes waveform bitmaps on height-only panel changes without a resize redra
   vi.mocked(HTMLCanvasElement.prototype.getContext).mockClear();
   act(() => resizeCallbacks.forEach((callback) => callback()));
   expect(HTMLCanvasElement.prototype.getContext).not.toHaveBeenCalled();
+});
+
+it('skips offscreen waveforms and lanes on zoom, then paints current geometry on re-entry', () => {
+  const contexts = new Map<HTMLCanvasElement, CanvasRenderingContext2D>();
+  vi.mocked(HTMLCanvasElement.prototype.getContext).mockImplementation(function (this: HTMLCanvasElement) {
+    if (!contexts.has(this)) contexts.set(this, new Proxy({
+      clearRect: vi.fn(), measureText: () => ({ width: 10 }),
+      createLinearGradient: () => ({ addColorStop: () => {} }),
+    }, { get: (target, key) => key in target ? target[key as keyof typeof target] : () => {} }) as unknown as CanvasRenderingContext2D);
+    return contexts.get(this)!;
+  });
+  act(() => store.setLane('2', 'fader', [{ beat: 0, value: 1 }, { beat: 64, value: 0 }]));
+  const block = host.querySelectorAll<HTMLElement>('.rt-slotblock')[2];
+  const canvases = Array.from(block.querySelectorAll('canvas'));
+  const visibility = (isIntersecting: boolean) => act(() => visibilityCallback(
+    [{ target: block, isIntersecting, intersectionRatio: isIntersecting ? 1 : 0, time: 0,
+      boundingClientRect: block.getBoundingClientRect(), intersectionRect: block.getBoundingClientRect(), rootBounds: null }], {} as IntersectionObserver));
+  visibility(false);
+  for (const canvas of canvases) vi.mocked(contexts.get(canvas)!.clearRect).mockClear();
+  act(() => wave().dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -20, ctrlKey: true })));
+  for (const canvas of canvases) expect(contexts.get(canvas)!.clearRect).not.toHaveBeenCalled();
+  expect(host.querySelectorAll('.rt-slotblock')).toHaveLength(3);
+  visibility(true);
+  for (const canvas of canvases) expect(contexts.get(canvas)!.clearRect).toHaveBeenCalled();
+});
+
+it('reuses waveform and metered lane rasters while panning, but redraws on edits and zoom', () => {
+  const contexts = new Map<HTMLCanvasElement, CanvasRenderingContext2D>();
+  vi.mocked(HTMLCanvasElement.prototype.getContext).mockImplementation(function (this: HTMLCanvasElement) {
+    if (!contexts.has(this)) contexts.set(this, new Proxy({
+      clearRect: vi.fn(),
+      measureText: () => ({ width: 10 }),
+      createLinearGradient: () => ({ addColorStop: () => {} }),
+    }, { get: (target, key) => key in target ? target[key as keyof typeof target] : () => {} }) as unknown as CanvasRenderingContext2D);
+    return contexts.get(this)!;
+  });
+  const beats = Array.from({ length: 256 }, (_, i) => i / 2);
+  const meter = buildTrackMeter({ beat_times: beats, downbeat_times: beats.filter((_, i) => i % 4 === 0),
+    tempo_changes: [{ start_time: 0, bpm: 120, time_signature_num: 4, time_signature_den: 4, bar_position: 1 }] }, null)!;
+  act(() => root.render(<Timeline meters={new Map([[1, meter], [2, meter], [3, meter]])} />));
+  act(() => store.setLane('0', 'fader', [{ beat: 0, value: 1 }, { beat: 64, value: 0 }]));
+  const lane = host.querySelector<HTMLCanvasElement>('.editor-lanehit canvas')!;
+  const canvas = wave();
+  const pan = (deltaX: number) => act(() => canvas.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaX })));
+  pan(12); // Populate waveform overscan.
+  vi.mocked(contexts.get(canvas)!.clearRect).mockClear();
+  vi.mocked(contexts.get(lane)!.clearRect).mockClear();
+  pan(12);
+  expect(contexts.get(canvas)!.clearRect).not.toHaveBeenCalled();
+  expect(contexts.get(lane)!.clearRect).not.toHaveBeenCalled();
+  act(() => canvas.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -4, ctrlKey: true })));
+  expect(contexts.get(canvas)!.clearRect).toHaveBeenCalled();
+  expect(contexts.get(lane)!.clearRect).toHaveBeenCalled();
+  vi.mocked(contexts.get(canvas)!.clearRect).mockClear();
+  act(() => store.setLane('0', 'fader', [{ beat: 0, value: 0.5 }, { beat: 64, value: 0 }]));
+  expect(contexts.get(canvas)!.clearRect).toHaveBeenCalled();
 });
 
 it('renders pair handover bounds and edits pre-window jumps without Routine trims', () => {

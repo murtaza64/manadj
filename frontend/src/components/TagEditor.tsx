@@ -6,7 +6,7 @@ import { getTagColor } from '../utils/colorUtils';
 import EditableCell from './EditableCell';
 import EnergySquare from './EnergySquare';
 import WaveformMinimap from './WaveformMinimap';
-import { useDeck, useDeckReady, useDeckSnapshot } from '../hooks/useDeck';
+import { useDeck, useDeckReady, useDeckSnapshot, deckReadyNow } from '../hooks/useDeck';
 import { BpmControl } from './deckControls/BpmControl';
 import { MusicIcon, PersonIcon, EnergyIcon, TagIcon, NeedleIcon, KeyIcon, SpeedIcon, SettingsIcon } from './icons';
 import TagManagementModal from './TagManagementModal';
@@ -316,7 +316,8 @@ const TagEditor = forwardRef<TagEditorHandle, Props>(({ track, onSave, onUpdate,
                 }
               }}
               grid={{
-                getPlayhead: () => engine.getPlayhead(),
+                getPlayhead: () => loadedTrack?.id === track?.id && deckReadyNow(engine, track?.id ?? null)
+                  ? engine.getPlayhead() : null,
                 disabled: !isBeatgridEditable,
                 disabledTitle: 'Load this track to edit its beatgrid',
               }}
@@ -355,7 +356,7 @@ const TagEditor = forwardRef<TagEditorHandle, Props>(({ track, onSave, onUpdate,
                 trackId={loadedTrack?.id ?? null}
                 clock={engine}
                 cuePoint={deckCuePoint}
-                onSeek={(t) => engine.seek(t)}
+                onSeek={(t) => { if (deckReadyNow(engine, loadedTrack?.id ?? null)) engine.seek(t); }}
                 dimmed={loadedTrack !== null && !deckReady}
               />
             </div>

@@ -1,4 +1,4 @@
-import { useSyncExternalStore } from 'react';
+import { useCallback, useSyncExternalStore } from 'react';
 import { deckMasterGain, isDeckSounding } from '../capture/audibility';
 import { DEFAULT_DETECTOR_PARAMS } from '../capture/events';
 import { CHANNEL_IDS } from '../playback/mixer';
@@ -6,14 +6,14 @@ import type { ChannelId } from '../playback/mixer';
 import { masterValueToGain, trimToGain, TRIM_NEUTRAL } from '../playback/mixerMath';
 import { useDecks } from './useDeck';
 import { useMixer } from './useMixer';
+import { presentationOf } from '../utils/presentationStore';
 
 /** Live output, not Session evidence: machine playback also has row indicators. */
 export function useDeckPlaybackLevels(): Record<ChannelId, number> {
   const decks = useDecks();
   const mixer = useMixer();
-  const levels = useSyncExternalStore(
-    (notify) => {
-      const unsubs = CHANNEL_IDS.map((ch) => decks[ch].engine.subscribe(notify));
+  const subscribe = useCallback((notify: () => void) => {
+      const unsubs = CHANNEL_IDS.map((ch) => presentationOf(decks[ch].engine).subscribe(notify));
       unsubs.push(mixer.subscribe(notify));
       // Automation writes bypass mixer subscribers. Poll only the four
       // levels; CSS animates the bars without React frame updates.
@@ -22,15 +22,17 @@ export function useDeckPlaybackLevels(): Record<ChannelId, number> {
         clearInterval(timer);
         for (const unsub of unsubs) unsub();
       };
-    },
+    }, [decks, mixer]);
+  const levels = useSyncExternalStore(
+    subscribe,
     () => CHANNEL_IDS.map((ch) => {
-      const engine = decks[ch].engine;
+      const snapshot = presentationOf(decks[ch].engine).getSnapshot();
       const state = mixer.getChannelState(ch);
       const auto = mixer.getAutomation(ch);
       const stems = auto?.stems ?? state.stems;
-      if (engine.getSnapshot().stemsLoaded && !Object.values(stems).some(Boolean)) return 0;
+      if (snapshot.stemsLoaded && !Object.values(stems).some(Boolean)) return 0;
       const inputs = {
-        playing: engine.isAudioRunning(),
+        playing: snapshot.playing || snapshot.previewing || snapshot.hotCuePreviewSlot !== null || snapshot.scratching,
         fader: auto?.fader ?? state.fader,
         trim: auto?.trim ?? state.trim,
         eq: auto?.eq ?? state.eq,

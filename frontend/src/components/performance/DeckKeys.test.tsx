@@ -18,7 +18,7 @@ const engine = vi.hoisted(() => ({
 const fixture = vi.hoisted(() => ({
   deck: 'A' as ChannelId,
   trackId: 7,
-  snapshot: { playing: false, loadState: 'ready', bendPercent: 0, scratching: false, vinylMode: true },
+  snapshot: { trackId: 7, playing: false, loadState: 'ready', bendPercent: 0, scratching: false, vinylMode: true },
   channel: { filter: 0, eq: { high: 0.5, mid: 0.5, low: 0.5 }, fader: 0.5 },
   listener: () => {},
   transportListener: vi.fn<(event: { action: string }) => void>(),
@@ -44,7 +44,7 @@ beforeEach(() => {
   resetMouseJogSettings();
   fixture.deck = 'A';
   fixture.trackId = 7;
-  fixture.snapshot = { playing: false, loadState: 'ready', bendPercent: 0, scratching: false, vinylMode: true };
+  fixture.snapshot = { trackId: 7, playing: false, loadState: 'ready', bendPercent: 0, scratching: false, vinylMode: true };
   fixture.channel = { filter: 0, eq: { high: 0.5, mid: 0.5, low: 0.5 }, fader: 0.5 };
   engine.getSnapshot.mockImplementation(() => fixture.snapshot);
   engine.getPlayhead.mockReturnValue(30);
@@ -193,6 +193,25 @@ describe('mouse-key gestures and cue walking', () => {
       expect(hotCues.walk).not.toHaveBeenCalled();
       expect(engine.togglePlay).not.toHaveBeenCalled();
     } finally { dialog.remove(); }
+  });
+
+  it('uses live readiness between publications, including track identity', () => {
+    render();
+    fixture.snapshot.loadState = 'fetching';
+    key('a'); key('f'); key('z'); key('d');
+    expect(engine.jumpBeats).not.toHaveBeenCalled();
+    expect(engine.cueDown).not.toHaveBeenCalled();
+    expect(hotCues.down).not.toHaveBeenCalled();
+    expect(engine.togglePlay).toHaveBeenCalledOnce();
+    fixture.snapshot.loadState = 'ready';
+    fixture.snapshot.trackId = 99;
+    key('a'); key('z');
+    expect(engine.jumpBeats).not.toHaveBeenCalled();
+    expect(hotCues.down).not.toHaveBeenCalled();
+    fixture.snapshot.trackId = fixture.trackId;
+    key('a'); key('z');
+    expect(engine.jumpBeats).toHaveBeenCalledWith(-32);
+    expect(hotCues.down).toHaveBeenCalledWith(1);
   });
 
   it.each(['A', 'B', 'C', 'D'] as const)('maps all knobs and the fader to focused deck %s', (deck) => {

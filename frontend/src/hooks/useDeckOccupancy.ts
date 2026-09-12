@@ -13,11 +13,13 @@ import type { DeckContextValue } from './useDeck';
 import type { DeckEngine, DeckSnapshot } from '../playback/DeckEngine';
 import type { DeckOccupancyMap } from '../sets/rowMarks';
 import type { ChannelId } from '../playback/mixer';
+import { presentationOf } from '../utils/presentationStore';
 
 function useEngineSlice<T>(engine: DeckEngine, selector: (s: DeckSnapshot) => T): T {
+  const store = presentationOf(engine);
   return useSyncExternalStore(
-    (cb) => engine.subscribe(cb),
-    () => selector(engine.getSnapshot())
+    store.subscribe,
+    () => selector(store.getSnapshot())
   );
 }
 

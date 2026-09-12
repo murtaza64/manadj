@@ -17,7 +17,7 @@ import {
 import { useMetricLadderData, usePutMetricLadder } from './useMetricLadderData';
 import { nearestDownbeatOrdinal, nearestMark } from '../meter/ladder';
 import { shiftBeatgrid } from '../midi/gridChord';
-import { useDeck, useDeckReady } from './useDeck';
+import { useDeck, deckReadyNow } from './useDeck';
 import type { BeatgridResponse } from '../types';
 
 /**
@@ -64,7 +64,6 @@ export interface GridEditActions {
 
 export function useGridEditActions(): GridEditActions {
   const { engine, loadedTrack } = useDeck();
-  const ready = useDeckReady();
   const queryClient = useQueryClient();
   const trackId = loadedTrack?.id ?? null;
 
@@ -145,17 +144,16 @@ export function useGridEditActions(): GridEditActions {
       );
     },
     setDownbeatAtPlayhead: () => {
-      // `ready` gates the playhead read, like the on-screen buttons' gates.
-      if (!hasBeatgrid || trackId === null || !ready) return;
+      if (!hasBeatgrid || trackId === null || !deckReadyNow(engine, trackId)) return;
       setDownbeat.mutate({ trackId, downbeatTime: engine.getPlayhead() });
     },
     dropAnchorAtPlayhead: () => {
-      if (!hasBeatgrid || trackId === null || !ready) return;
+      if (!hasBeatgrid || trackId === null || !deckReadyNow(engine, trackId)) return;
       dropAnchor.mutate({ trackId, dropTime: engine.getPlayhead() });
     },
     markResetAtPlayhead: () => {
       const downbeats = grid?.data.downbeat_times ?? [];
-      if (!hasBeatgrid || trackId === null || !ready || downbeats.length === 0) return;
+      if (!hasBeatgrid || trackId === null || !deckReadyNow(engine, trackId) || downbeats.length === 0) return;
       const snapped = downbeats[nearestDownbeatOrdinal(downbeats, engine.getPlayhead())];
       putLadder.mutate({
         trackId,
@@ -163,7 +161,7 @@ export function useGridEditActions(): GridEditActions {
       });
     },
     deleteResetNearestPlayhead: () => {
-      if (!hasBeatgrid || trackId === null || !ready) return;
+      if (!hasBeatgrid || trackId === null || !deckReadyNow(engine, trackId)) return;
       const marks = ladder?.reset_marks ?? [];
       const nearest = nearestMark(marks, engine.getPlayhead());
       if (nearest === null) return;

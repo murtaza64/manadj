@@ -546,35 +546,41 @@ export function createSlotLanesCursor(
   eq: { low: number; mid: number; high: number };
   filter: number;
 } {
-  const l = slot.lanes;
-  const mk = (control: 'fader' | 'trim' | 'eqLow' | 'eqMid' | 'eqHigh' | 'filter', fallback: number) => {
-    const pts = l[control];
-    const authored = !!l.authored?.[control];
-    let i = -1; // last point at or before the cursor beat
-    return (beat: number): number => {
-      if (pts.length === 0) return fallback;
-      while (i + 1 < pts.length && pts[i + 1].beat <= beat) i++;
-      if (i < 0) return authored ? pts[0].value : fallback;
-      if (!authored) return pts[i].value;
-      const a = pts[i];
-      const b = pts[i + 1];
-      if (!b || b.beat <= a.beat) return a.value;
-      const f = (beat - a.beat) / (b.beat - a.beat);
-      return a.value + (b.value - a.value) * f;
-    };
-  };
-  const fader = mk('fader', l.defaults.fader);
-  const trim = mk('trim', l.defaults.trim);
-  const eqLow = mk('eqLow', l.defaults.eq);
-  const eqMid = mk('eqMid', l.defaults.eq);
-  const eqHigh = mk('eqHigh', l.defaults.eq);
-  const filter = mk('filter', l.defaults.filter);
+  const fader = createSlotLaneCursor(slot, 'fader');
+  const trim = createSlotLaneCursor(slot, 'trim');
+  const eqLow = createSlotLaneCursor(slot, 'eqLow');
+  const eqMid = createSlotLaneCursor(slot, 'eqMid');
+  const eqHigh = createSlotLaneCursor(slot, 'eqHigh');
+  const filter = createSlotLaneCursor(slot, 'filter');
   return (beat: number) => ({
     fader: fader(beat),
-    trim: Math.max(0, Math.min(1, trim(beat) + (slot.trim - 0.5))),
+    trim: trim(beat),
     eq: { low: eqLow(beat), mid: eqMid(beat), high: eqHigh(beat) },
     filter: filter(beat),
   });
+}
+
+/** Scalar cursor for lane strips: no sampling of unrelated controls or
+ * per-pixel mixer-state objects. Beats must advance monotonically. */
+export function createSlotLaneCursor(
+  slot: PlannedRoutineSlot,
+  control: 'fader' | 'trim' | 'eqLow' | 'eqMid' | 'eqHigh' | 'filter',
+): (beat: number) => number {
+  const l = slot.lanes;
+  const pts = l[control];
+  const authored = !!l.authored?.[control];
+  const fallback = control === 'fader' || control === 'trim' || control === 'filter'
+    ? l.defaults[control] : l.defaults.eq;
+  let i = -1;
+  return (beat) => {
+    while (i + 1 < pts.length && pts[i + 1].beat <= beat) i++;
+    let value = i < 0 ? (authored && pts.length ? pts[0].value : fallback) : pts[i].value;
+    if (authored && i >= 0 && i + 1 < pts.length) {
+      const a = pts[i], b = pts[i + 1];
+      if (b.beat > a.beat) value += (b.value - a.value) * ((beat - a.beat) / (b.beat - a.beat));
+    }
+    return control === 'trim' ? Math.max(0, Math.min(1, value + (slot.trim - 0.5))) : value;
+  };
 }
 
 // ── Deck allocation ──────────────────────────────────────────────────────

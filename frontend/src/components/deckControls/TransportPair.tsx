@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
+import { useRef } from 'react';
 import { useAtCuePoint } from '../../hooks/useAtCuePoint';
-import { useDeck, useDeckReady, useDeckSnapshot } from '../../hooks/useDeck';
+import { useDeck, useDeckReady, useDeckSnapshot, deckReadyNow } from '../../hooks/useDeck';
 import { cueButtonState, playButtonState } from './transportButtonState';
 
 /**
@@ -30,6 +31,12 @@ export function TransportPair({
   cueTitle?: string;
 }) {
   const { engine, loadedTrack } = useDeck();
+  const cueHeld = useRef(false);
+  const releaseCue = () => {
+    if (!cueHeld.current) return;
+    cueHeld.current = false;
+    engine.cueUp();
+  };
   const ready = useDeckReady();
   const previewing = useDeckSnapshot((s) => s.previewing);
   const cuePoint = useDeckSnapshot((s) => s.cuePoint);
@@ -57,12 +64,13 @@ export function TransportPair({
     <>
       <button
         onPointerDown={(e) => {
-          if (!ready) return;
+          if (!deckReadyNow(engine, loadedTrack?.id ?? null)) return;
           e.currentTarget.setPointerCapture(e.pointerId);
+          cueHeld.current = true;
           engine.cueDown();
         }}
-        onPointerUp={() => ready && engine.cueUp()}
-        onPointerCancel={() => ready && engine.cueUp()}
+        onPointerUp={releaseCue}
+        onPointerCancel={releaseCue}
         disabled={!ready}
         className={`player-button player-button-cue ${
           cueState === 'held'

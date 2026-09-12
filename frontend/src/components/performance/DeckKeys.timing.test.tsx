@@ -2,7 +2,7 @@
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, expect, it, vi } from 'vitest';
-import { DeckContext, type DeckContextValue } from '../../hooks/useDeck';
+import { DeckContext, useDeckSnapshot, type DeckContextValue } from '../../hooks/useDeck';
 import { DeckEngine } from '../../playback/DeckEngine';
 import { _clearBufferCacheForTests, putCachedBuffer } from '../../playback/bufferCache';
 import { setQuantize } from '../../playback/quantizeStore';
@@ -33,12 +33,16 @@ vi.mock('../../playback/worklet/deckSourceNode', () => ({
 }));
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+function Status() {
+  return <span>{useDeckSnapshot(s => s.playing) ? 'playing' : 'paused'}</span>;
+}
 afterEach(() => {
   _clearBufferCacheForTests();
   setQuantize(true);
   vi.restoreAllMocks();
   starts.length = 0;
   build.gate = null;
+  vi.useRealTimers();
 });
 
 it.each<{ gapMs: number; warm: boolean; quantize: boolean; running: boolean; resumeBetween?: boolean }>([
@@ -50,6 +54,7 @@ it.each<{ gapMs: number; warm: boolean; quantize: boolean; running: boolean; res
   { gapMs: 0, warm: true, quantize: false, running: false, resumeBetween: true },
   { gapMs: 0, warm: false, quantize: false, running: false, resumeBetween: true },
 ])('keyboard start timing: %j', async ({ gapMs, warm, quantize, running, resumeBetween }) => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
   setQuantize(quantize);
   let wall = 1000;
   let audio = 10;
@@ -73,7 +78,8 @@ it.each<{ gapMs: number; warm: boolean; quantize: boolean; running: boolean; res
     duration: 180, sampleRate: 44100, numberOfChannels: 1,
     getChannelData: () => new Float32Array(44100),
   } as unknown as AudioBuffer);
-  const root = createRoot(document.createElement('div'));
+  const container = document.createElement('div');
+  const root = createRoot(container);
   try {
     for (const engine of [engines.A, engines.B]) {
       await engine.load({ trackId: 1, audioUrl: '/unused', bpm: 120,
@@ -86,14 +92,15 @@ it.each<{ gapMs: number; warm: boolean; quantize: boolean; running: boolean; res
       engine.seek(30);
       engine.setPitch(10);
     }
-    await act(async () => root.render(<>
+    const render = () => act(async () => root.render(<>
       {(['A', 'B'] as const).map(deck => (
         <DeckContext.Provider key={deck} value={{ deck, engine: engines[deck],
           loadedTrack: { id: 1 }, beatjumpBeats: 32 } as DeckContextValue}>
-          <DeckKeys />
+          <DeckKeys /><Status />
         </DeckContext.Provider>
       ))}
     </>));
+    await render();
     recorder = new CaptureRecorder(mixer, engines, () => {}, event => captured.push(event));
     recorder.start();
     if (!warm) build.gate = new Promise(resolve => { releaseBuild = resolve; });
@@ -121,6 +128,12 @@ it.each<{ gapMs: number; warm: boolean; quantize: boolean; running: boolean; res
       { position: 30 * 44100, when: 10 },
       { position: 30 * 44100, when: 10 + gapSeconds },
     ]);
+    // Source commands and capture precede publication. An unrelated parent
+    // render must not sneak the authoritative state into the UI early.
+    await render();
+    expect(container.textContent).toBe('pausedpaused');
+    act(() => vi.runOnlyPendingTimers());
+    expect(container.textContent).toBe('playingplaying');
     // Pausing uses the live position, not the age of its keyboard event.
     const pauseElapsed = state === 'running' ? 1 : 0;
     audio += pauseElapsed;

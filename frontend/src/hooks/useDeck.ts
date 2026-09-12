@@ -2,6 +2,8 @@ import { createContext, useContext, useSyncExternalStore } from 'react';
 import type { DeckEngine, DeckSnapshot } from '../playback/DeckEngine';
 import type { ChannelId } from '../playback/mixer';
 import type { Track } from '../types';
+import type { SyncGroup, SyncStatus } from '../playback/SyncGroup';
+import { presentationOf } from '../utils/presentationStore';
 
 /**
  * Deck addressing (performance-mode issue 02): all four Decks live app-wide
@@ -20,6 +22,7 @@ export interface DeckContextValue {
   /** Which mixer channel this scope addresses. */
   deck: ChannelId;
   engine: DeckEngine;
+  syncGroup: SyncGroup;
   /** The Track on the Deck (kept alongside the engine's trackId for display). */
   loadedTrack: Track | null;
   /** Load a Track onto the Deck: fetch + decode, replacing the current one. */
@@ -47,6 +50,12 @@ export function useDeck(): DeckContextValue {
   return ctx;
 }
 
+export function useDeckSyncStatus(): SyncStatus {
+  const { deck, syncGroup } = useDeck();
+  const store = presentationOf(syncGroup);
+  return useSyncExternalStore(store.subscribe, () => store.getSnapshot().decks[deck]);
+}
+
 /**
  * All four Decks at once — for the few cross-deck spots (BPM match,
  * load-to-A–D buttons) that can't live inside a single scope. Everything
@@ -67,10 +76,17 @@ export function useDecks(): Record<ChannelId, DeckContextValue> {
  */
 export function useDeckSnapshot<T>(selector: (s: DeckSnapshot) => T): T {
   const { engine } = useDeck();
+  const store = presentationOf(engine);
   return useSyncExternalStore(
-    (cb) => engine.subscribe(cb),
-    () => selector(engine.getSnapshot())
+    store.subscribe,
+    () => selector(store.getSnapshot())
   );
+}
+
+/** Commands check authoritative readiness, never a published display value. */
+export function deckReadyNow(engine: DeckEngine, trackId: number | null): boolean {
+  const snapshot = engine.getSnapshot();
+  return trackId !== null && snapshot.loadState === 'ready' && snapshot.trackId === trackId;
 }
 
 /**

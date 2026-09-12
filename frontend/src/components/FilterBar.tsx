@@ -11,7 +11,7 @@ import BpmModal from './BpmModal';
 import FollowParamsModal from './FollowParamsModal';
 import { DEFAULT_FILTERS, useFilters } from '../contexts/FilterContext';
 import { useSearchKeys } from './searchKeys';
-import { dispatchFollow, useFollowFlags } from '../follow/followStore';
+import { dispatchFollow, getFollowFlags, useFollowFlags } from '../follow/followStore';
 import { useFollowParams } from '../follow/paramsStore';
 import { followedReferences, followSummary } from '../follow/model';
 import type { ChannelId } from '../playback/mixer';
@@ -378,7 +378,7 @@ export default function FilterBar({ ref, totalTracks, filteredCount, loadedByDec
             setSearchInput('');
             setFilters({ ...DEFAULT_FILTERS });
             for (const deck of CHANNEL_IDS) {
-              if (followFlags[deck]) dispatchFollow({ type: 'toggle', deck, loaded: false });
+              if (getFollowFlags()[deck]) dispatchFollow({ type: 'toggle', deck, loaded: false });
             }
           }}
           disabled={!hasActiveFilters}

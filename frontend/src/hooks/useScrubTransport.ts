@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import type { ScrubTransport } from '../components/WebGLWaveform';
-import { useDeck, useDeckReady } from './useDeck';
+import { useDeck, deckReadyNow } from './useDeck';
 
 /**
  * The waveform's transport port for the scoped deck — the one
@@ -9,17 +9,17 @@ import { useDeck, useDeckReady } from './useDeck';
  * scrubbing a loading deck is a no-op.
  */
 export function useScrubTransport(): ScrubTransport {
-  const { engine } = useDeck();
-  const ready = useDeckReady();
+  const { engine, loadedTrack } = useDeck();
+  const trackId = loadedTrack?.id ?? null;
   return useMemo(
     () => ({
       isPlaying: () => engine.isAudioRunning(),
       pause: () => engine.pause(),
       play: () => engine.play(),
       seek: (t) => {
-        if (ready) engine.seek(t);
+        if (deckReadyNow(engine, trackId)) engine.seek(t);
       },
     }),
-    [engine, ready]
+    [engine, trackId]
   );
 }

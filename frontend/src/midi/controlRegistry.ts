@@ -40,6 +40,7 @@ export interface MidiDeckControls {
   getPitch(): number;
   /** Stateless one-shot BPM match against the other deck (on-screen MATCH). */
   match(): void;
+  toggleSync(): void;
   /** Jog rim ticks (signed): bend when playing, seek when paused. */
   jogTicks(ticks: number, jogProfile?: JogProfile, vinylOff?: boolean): void;
   jogTouch(held: boolean): void;

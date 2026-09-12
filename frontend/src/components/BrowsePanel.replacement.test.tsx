@@ -21,10 +21,10 @@ globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
 const { deck, hotCues, scrub, nudge, downbeat } = vi.hoisted(() => ({
   deck: {
-    loadedTrack: null, beatjumpBeats: 4, loadTrack: vi.fn(),
+    loadedTrack: { id: 7, tags: [] } as unknown as Track, beatjumpBeats: 4, loadTrack: vi.fn(),
     engine: {
       subscribe: () => () => {}, isAudioRunning: () => false,
-      getSnapshot: () => ({ pendingPlay: false }),
+      getSnapshot: () => ({ pendingPlay: false, loadState: 'ready', trackId: 7 }),
       togglePlay: vi.fn(), cueDown: vi.fn(), cueUp: vi.fn(), jumpBeats: vi.fn(),
       toggleLoop: vi.fn(),
     },
@@ -35,7 +35,8 @@ const { deck, hotCues, scrub, nudge, downbeat } = vi.hoisted(() => ({
 
 // Real Library, selection, keyboard hub, browse registry and FilterProvider;
 // substitute audio/canvas rendering and unrelated discovery queries.
-vi.mock('../hooks/useDeck', () => ({
+vi.mock('../hooks/useDeck', async importOriginal => ({
+  ...await importOriginal<typeof import('../hooks/useDeck')>(),
   useDeck: () => deck, useDeckReady: () => true, useDeckSnapshot: () => true,
   useDecks: () => ({ A: deck, B: deck, C: deck, D: deck }),
 }));
@@ -91,6 +92,7 @@ beforeEach(() => {
   HTMLElement.prototype.scrollIntoView = vi.fn();
   _resetBrowseSessionForTests();
   vi.spyOn(api.tracks, 'list').mockResolvedValue({ items: tracks });
+  vi.spyOn(api.tracks, 'get').mockResolvedValue(deck.loadedTrack);
   vi.spyOn(api.playlists, 'list').mockResolvedValue([]);
   vi.spyOn(api.sets, 'list').mockResolvedValue([]);
   vi.spyOn(api.playlists, 'get').mockResolvedValue({ id: 1, name: 'Playlist', tracks } as Awaited<ReturnType<typeof api.playlists.get>>);

@@ -102,6 +102,7 @@ export interface DeckFeedback {
    * always agree.
    */
   quantize: LedAddress;
+  sync?: LedAddress;
   /** Dedicated base-layer Key Lock / Master Tempo lamp, when present. */
   keyLock?: LedAddress;
   slipMode?: LedAddress;

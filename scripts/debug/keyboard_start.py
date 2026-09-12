@@ -15,13 +15,17 @@ async def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--url", required=True)
     parser.add_argument("--track-id", type=int, default=1)
+    parser.add_argument("--other-track-id", type=int)
     parser.add_argument("--follow-off", action="store_true")
     parser.add_argument("--profile", action="store_true")
+    parser.add_argument("--verbose", action="store_true")
+    parser.add_argument("--max-handler-gap-ms", type=float, default=20)
     args = parser.parse_args()
     async with async_playwright() as p:
         browser = await p.chromium.launch(args=["--autoplay-policy=no-user-gesture-required"])
         page = await browser.new_page(viewport={"width": 1600, "height": 1000})
-        await page.add_init_script("""navigator.requestMIDIAccess = async () => ({
+        await page.add_init_script("""performance.setResourceTimingBufferSize(10000);
+        navigator.requestMIDIAccess = async () => ({
           inputs: new Map(), outputs: new Map(), addEventListener() {}, removeEventListener() {}
         });""")
         page.on("pageerror", lambda e: print("PAGE ERROR:", e))
@@ -29,11 +33,11 @@ async def main():
         page.on("framenavigated", lambda f: print("NAVIGATED:", f.url))
         await page.goto(f"{args.url}/?view=performance")
         await page.wait_for_function("!!window.__manadj")
-        await page.evaluate("""async id => {
+        await page.evaluate("""async ([a, b]) => {
           const {setQuantize} = await import('/src/playback/quantizeStore.ts');
           setQuantize(false);
-          await Promise.all(['A', 'B'].map(d => __manadj.loadTrackById(d, id)));
-        }""", args.track_id)
+          await Promise.all([__manadj.loadTrackById('A', a), __manadj.loadTrackById('B', b)]);
+        }""", [args.track_id, args.other_track_id or args.track_id])
         await page.wait_for_function("""() => ['A', 'B'].every(d =>
           __manadj.engines[d].getSnapshot().loadState === 'ready')""", timeout=60000)
         await page.evaluate("""async off => {
@@ -44,8 +48,27 @@ async def main():
             }
           }
         }""", args.follow_off)
-        await page.evaluate("""() => {
+        await page.evaluate("""async () => {
           window.timing = [];
+          const moduleUrl = performance.getEntriesByType('resource').find(e =>
+            new URL(e.name).pathname.endsWith('/src/follow/rankedFollow.ts'))?.name;
+          if (!moduleUrl) throw new Error('Follow ranking module was not loaded');
+          const {FollowRanking} = await import(moduleUrl);
+          const derive = FollowRanking.prototype.derive;
+          FollowRanking.prototype.derive = function (...args) {
+            const before = performance.now();
+            const result = derive.apply(this, args);
+            timing.push({kind: 'follow-derive', cost: performance.now() - before,
+              references: args[0].map(r => r.track.id)});
+            const project = result.project;
+            result.project = (...args) => {
+              const before = performance.now();
+              const tracks = project(...args);
+              timing.push({kind: 'follow-project', cost: performance.now() - before});
+              return tracks;
+            };
+            return result;
+          };
           document.addEventListener('keydown', e => timing.push({
             kind: 'key', key: e.key, eventTime: e.timeStamp, wall: performance.now(),
             audio: __manadj.mixer.now(),
@@ -89,7 +112,11 @@ async def main():
               delta: __manadj.engines.A.getPlayhead() - __manadj.engines.B.getPlayhead(),
               states: ['A', 'B'].map(d => __manadj.engines[d].getSnapshot().playing)})""")
             results.append(result)
-            print(json.dumps({"trial": trial, **result}, indent=2))
+            keys = [e for e in result["timing"] if e["kind"] == "key"]
+            assert len(keys) == 2, "Expected both keyboard events"
+            summary = {"handler_gap_ms": keys[1]["wall"] - keys[0]["wall"],
+                       "phase_ms": result["delta"] * 1000, "playing": result["states"]}
+            print(json.dumps({"trial": trial, **(result if args.verbose else summary)}, indent=2))
             if args.profile:
                 profile = (await cdp.send("Profiler.stop"))["profile"]
                 nodes = {n["id"]: n["callFrame"] for n in profile["nodes"]}
@@ -101,7 +128,18 @@ async def main():
                 print(json.dumps(sorted(costs.items(), key=lambda item: -item[1])[:15], indent=2))
         await browser.close()
         assert all(all(r["states"]) for r in results), "Both decks must start"
+        for result in results:
+            for event in result["timing"]:
+                if event["kind"] == "follow-derive":
+                    assert len(set(event["references"])) == len(event["references"]), event
         assert max(abs(r["delta"]) for r in results) < 0.02, "Simultaneous starts diverged by >20ms"
+        keys = [[entry for entry in r["timing"] if entry["kind"] == "key"] for r in results]
+        gaps = [events[1]["wall"] - events[0]["wall"] for events in keys]
+        print(f"Handler gaps (ms): {gaps}")
+        for kind in ("follow-derive", "follow-project"):
+            costs = [e["cost"] for r in results for e in r["timing"] if e["kind"] == kind]
+            print(f"Max {kind} (ms): {max(costs) if costs else 'not observed'}")
+        assert max(gaps) < args.max_handler_gap_ms, "UI work delayed the second keyboard handler"
 
 
 asyncio.run(main())

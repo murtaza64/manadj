@@ -12,7 +12,7 @@
  */
 import { useEffect, useRef } from 'react';
 import { useViewActive } from '../../contexts/viewActive';
-import { useDeck, useDeckReady, useDeckSnapshot } from '../../hooks/useDeck';
+import { useDeck } from '../../hooks/useDeck';
 import { useHotCueActions } from '../../hooks/useHotCueActions';
 import { useMixer } from '../../hooks/useMixer';
 import { MouseJogController } from './mouseJog';
@@ -24,13 +24,6 @@ import { invertControl, MIXER_DRAG_RANGE_PX, moveKnob, type KnobGesture } from '
 export function DeckKeys({ enabled = true }: { enabled?: boolean }) {
   const viewActive = useViewActive() && enabled;
   const { deck, engine, loadedTrack, beatjumpBeats } = useDeck();
-  const ready = useDeckReady();
-  // The play key is allowed while loading — the engine latches play intent
-  // (library-hub parity for space, on this view's play key).
-  const canPlay = useDeckSnapshot(
-    (s) =>
-      s.loadState === 'ready' || s.loadState === 'fetching' || s.loadState === 'decoding'
-  );
   const hotCues = useHotCueActions(loadedTrack?.id ?? null);
   const mixer = useMixer();
   const cueHeld = useRef(false);
@@ -228,6 +221,9 @@ export function DeckKeys({ enabled = true }: { enabled?: boolean }) {
 
     const onKeyDown = (event: KeyboardEvent) => {
       if (!viewActive || isTypingTarget(event) || hasKeyboardOverlay()) return;
+      const snapshot = engine.getSnapshot();
+      const ready = snapshot.loadState === 'ready' && snapshot.trackId === loadedTrack?.id;
+      const canPlay = snapshot.loadState === 'ready' || snapshot.loadState === 'fetching' || snapshot.loadState === 'decoding';
       const key = event.key.toLowerCase();
       if (event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey &&
           (key === keys.jumpBack || key === keys.jumpForward)) {
@@ -264,7 +260,7 @@ export function DeckKeys({ enabled = true }: { enabled?: boolean }) {
       } else {
         const slot = padSlot(key);
         if (slot !== null) {
-          if (!hotCues.enabled) return;
+          if (!ready) return;
           event.preventDefault();
           hotCues.down(slot);
           padsHeld.current.set(slot, () => hotCues.up(slot));
@@ -296,7 +292,7 @@ export function DeckKeys({ enabled = true }: { enabled?: boolean }) {
       document.removeEventListener('keydown', onKeyDown);
       document.removeEventListener('keyup', onKeyUp);
     };
-  }, [deck, engine, ready, canPlay, beatjumpBeats, hotCues, viewActive]);
+  }, [deck, engine, loadedTrack?.id, beatjumpBeats, hotCues, viewActive]);
 
   return null;
 }

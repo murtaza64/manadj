@@ -1194,6 +1194,7 @@ export default function RoutineEditorView() {
       }
       if (isGuardedKeyEvent(e)) return;
       if ((e.target as HTMLElement | null)?.tagName === 'SELECT') return;
+      if ((e.key === 'Enter' || e.key === ' ') && e.target instanceof Element && e.target.closest('button')) return;
       if (e.key === ' ') {
         e.preventDefault();
         e.stopPropagation();
@@ -1426,11 +1427,12 @@ export default function RoutineEditorView() {
     }
   }, [draftStore, queryClient, toast]);
 
-  const deckTrackIds = useMemo(
+  const deckTracks = useMemo(
     () =>
-      ROUTINE_DECK_ORDER.map((d) => decks[d].loadedTrack?.id).filter(
-        (id): id is number => typeof id === 'number'
-      ),
+      ROUTINE_DECK_ORDER.flatMap((deck) => {
+        const track = decks[deck].loadedTrack;
+        return track ? [{ deck, track }] : [];
+      }),
     [decks]
   );
   // Scoped sibling cycling: within the current artifact's move.
@@ -1809,7 +1811,7 @@ export default function RoutineEditorView() {
           routineTakes={unpromotedTakes}
           candidates={unconfirmedCandidates}
           takes={takeRows}
-          deckTrackIds={deckTrackIds}
+          deckTracks={deckTracks}
           busy={openFlowBusy}
           onOpen={(ref) => void openMixRef(ref)}
           onRenameTransition={(ref, name) =>

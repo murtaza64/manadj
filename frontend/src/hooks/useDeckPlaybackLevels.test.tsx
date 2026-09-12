@@ -11,17 +11,20 @@ const live = vi.hoisted(() => ({
   notify: () => {},
 }));
 const channel = freshDeck('left');
-vi.mock('./useDeck', () => ({
-  useDecks: () => Object.fromEntries(['A', 'B', 'C', 'D'].map((ch) => [ch, {
+const engineListeners = vi.hoisted(() => new Set<() => void>());
+const decks = vi.hoisted(() => Object.fromEntries(['A', 'B', 'C', 'D'].map((ch) => [ch, {
     engine: {
-      subscribe: () => () => {},
+      subscribe: (listener: () => void) => {
+        engineListeners.add(listener);
+        return () => engineListeners.delete(listener);
+      },
       isAudioRunning: () => ch === 'A' && live.running,
-      getSnapshot: () => ({ stemsLoaded: live.stemsLoaded }),
+      getSnapshot: () => ({ stemsLoaded: live.stemsLoaded, playing: ch === 'A' && live.running,
+        previewing: false, hotCuePreviewSlot: null, scratching: false }),
     },
-  }])),
-}));
-vi.mock('./useMixer', () => ({
-  useMixer: () => ({
+  }])));
+vi.mock('./useDeck', () => ({ useDecks: () => decks }));
+const mixer = vi.hoisted(() => ({
     subscribe: (fn: () => void) => { live.notify = fn; return () => {}; },
     getChannelState: () => channel,
     getAutomation: () => live.auto ? { fader: live.autoFader } : null,
@@ -30,8 +33,8 @@ vi.mock('./useMixer', () => ({
     getCrossfaderEnabled: () => true,
     getCrossfaderAssignment: () => 'left',
     getMaster: () => live.master,
-  }),
 }));
+vi.mock('./useMixer', () => ({ useMixer: () => mixer }));
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 afterEach(() => vi.useRealTimers());
@@ -42,7 +45,12 @@ it('tracks mixer kills, master mute, engine stops, stems, and unnotified automat
   const root = createRoot(container);
   function Probe() { return <span>{useDeckPlaybackLevels().A}</span>; }
   act(() => root.render(<Probe />));
-  const update = (fn: () => void) => act(() => { fn(); live.notify(); });
+  const update = (fn: () => void) => act(() => {
+    fn();
+    for (const listener of engineListeners) listener();
+    live.notify();
+    vi.advanceTimersByTime(0);
+  });
   expect(container.textContent).toBe('100');
   update(() => { channel.fader = 0.5; });
   expect(container.textContent).toBe('50');
@@ -74,7 +82,13 @@ it('tracks mixer kills, master mute, engine stops, stems, and unnotified automat
   expect(container.textContent).toBe('0');
   update(() => { live.stemsLoaded = false; });
   expect(container.textContent).toBe('100');
-  update(() => { live.running = false; });
+  act(() => {
+    live.running = false;
+    for (const listener of engineListeners) listener();
+    root.render(<Probe />);
+  });
+  expect(container.textContent).toBe('100'); // An unrelated render cannot publish early.
+  act(() => vi.advanceTimersByTime(0));
   expect(container.textContent).toBe('0');
   act(() => root.unmount());
   expect(vi.getTimerCount()).toBe(0);
