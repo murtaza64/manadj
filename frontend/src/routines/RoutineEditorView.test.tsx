@@ -32,7 +32,7 @@ const { toast, decks, mixer, timeline, picker } = vi.hoisted(() => ({
   timeline: vi.fn(),
   picker: vi.fn(),
   decks: Object.fromEntries(['A', 'B', 'C', 'D'].map((id) => [
-    id, { engine: {}, loadedTrack: null, loadTrack: vi.fn() },
+    id, { engine: {}, loadedTrack: null as Track | null, loadTrack: vi.fn() },
   ])),
   mixer: { now: () => performance.now() / 1000 },
 }));
@@ -83,6 +83,7 @@ let client: QueryClient;
 
 beforeEach(() => {
   vi.clearAllMocks();
+  for (const deck of Object.values(decks)) deck.loadedTrack = null;
   notifyManager.setNotifyFunction((notify) => act(notify));
   const storage = new Map<string, string>();
   vi.stubGlobal('localStorage', {
@@ -160,6 +161,16 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
   vi.useRealTimers();
+});
+
+it('preserves deck identity and loaded metadata in picker shortcuts when earlier decks are empty', async () => {
+  const track = { id: 2, title: 'Track 2' } as Track;
+  decks.C.loadedTrack = track;
+  await act(async () => root.render(
+    <QueryClientProvider client={client}><RoutineEditorView /></QueryClientProvider>,
+  ));
+  expect(pickerProps().deckTracks).toEqual([{ deck: 'C', track }]);
+  expect(decks.C.loadTrack).not.toHaveBeenCalled();
 });
 
 it.each(['0', '1'])('keeps slot %s dragged material in place after pair autosave, undo and reopen', async (slotId) => {
@@ -308,6 +319,20 @@ it('keeps editor Space and undo with browse hidden, but leaves Settings native k
   expect(press('Z', document.body, { metaKey: true, shiftKey: true }).defaultPrevented).toBe(true);
   expect(undo).toHaveBeenCalledOnce();
   expect(redo).toHaveBeenCalledOnce();
+});
+
+it('leaves Enter and Space on focused editor buttons to native activation', async () => {
+  await openReview(false);
+  vi.spyOn(RoutinePlayer.prototype, 'isPlaying').mockReturnValue(true);
+  const pause = vi.spyOn(RoutinePlayer.prototype, 'pause').mockImplementation(() => {});
+  const button = host.querySelector<HTMLButtonElement>('.re-promote')!;
+  button.focus();
+  for (const key of ['Enter', ' ']) {
+    const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true });
+    act(() => button.dispatchEvent(event));
+    expect(event.defaultPrevented).toBe(false);
+  }
+  expect(pause).not.toHaveBeenCalled();
 });
 
 it('auditions a pre-window outgoing jump only at its actual instant', async () => {
