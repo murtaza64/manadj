@@ -21,6 +21,11 @@ import { HFader, Knob } from './MixerStrip';
 import { dispatchFollow } from '../../follow/followStore';
 import { getFollowParams } from '../../follow/paramsStore';
 import { isQuantizeOn, setQuantize } from '../../playback/quantizeStore';
+import {
+  isSoftTakeoverEnabled,
+  setSoftTakeoverEnabled,
+  SOFT_TAKEOVER_SETTING_KEY,
+} from '../../midi/softTakeoverStore';
 
 const css = readFileSync('src/components/performance/PerformanceView.css', 'utf8');
 
@@ -131,6 +136,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  act(() => setSoftTakeoverEnabled(true));
   act(() => root.unmount());
   container.remove();
   style.remove();
@@ -185,6 +191,21 @@ it('places QUANTIZE before XF and hides only its keycap when KBD is off', () => 
     click('KBD');
     expect(getComputedStyle(hint).visibility).not.toBe('hidden');
   } finally { act(() => setQuantize(before)); }
+});
+
+it('toggles persisted soft takeover beside the performance section controls', () => {
+  render();
+  const button = [...container.querySelectorAll('button')].find((node) => node.textContent === 'TAKEOVER')!;
+  const leftLabels = [...container.querySelectorAll('.perf-strip-left button')].map((node) => node.textContent);
+  expect(leftLabels.slice(-4)).toEqual(['KBD', 'WAVE', 'DECK', 'TAKEOVER']);
+  expect(button.getAttribute('aria-pressed')).toBe('true');
+
+  act(() => button.click());
+
+  expect(isSoftTakeoverEnabled()).toBe(false);
+  expect(button.getAttribute('aria-pressed')).toBe('false');
+  expect(localStorage.getItem(SOFT_TAKEOVER_SETTING_KEY)).toBe('off');
+  expect(PERSISTED_SETTING_KEYS).toContain(SOFT_TAKEOVER_SETTING_KEY);
 });
 
 describe('Performance library keyboard focus', () => {

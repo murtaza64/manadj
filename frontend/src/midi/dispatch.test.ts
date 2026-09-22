@@ -34,6 +34,7 @@ import {
   forgetHardwareState,
 } from './dispatch';
 import { _resetTakeoverFeedbackForTests, takeoverHint, takeoverKey } from './takeoverFeedback';
+import { setSoftTakeoverEnabled } from './softTakeoverStore';
 import {
   _resetControlFocusForTests,
   getControlFocus,
@@ -231,6 +232,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  setSoftTakeoverEnabled(true);
   _resetAudibleSurfacesForTests();
   _resetMidiControlsForTests();
   _resetGridChordForTests();
@@ -956,6 +958,36 @@ describe('mixer/pitch/match (midi-controller 04)', () => {
     expect(calls).toEqual([]);
     dispatchMidiAction({ kind: 'absolute', target: { control: 'trim', channel: 'A' }, value: 0.6 });
     expect(calls).toEqual(['mixer:trim:A:0.6']);
+  });
+
+  it('disabled soft takeover applies every absolute controller value immediately', () => {
+    registerFakeDeckControls('A');
+    registerFakeMixerControls();
+    fakePitch.A = 4;
+    setSoftTakeoverEnabled(false);
+
+    dispatchMidiAction({ kind: 'absolute', target: { control: 'pitch', deck: 'A' }, value: 0.2 });
+    dispatchMidiAction({ kind: 'absolute', target: { control: 'trim', channel: 'A' }, value: 0.1 });
+    dispatchMidiAction({ kind: 'absolute', target: { control: 'eq', channel: 'A', band: 'low' }, value: 0.1 });
+    dispatchMidiAction({ kind: 'absolute', target: { control: 'filter', channel: 'A' }, value: 0.2 });
+    dispatchMidiAction({ kind: 'absolute', target: { control: 'channel-fader', channel: 'A' }, value: 0.2 });
+    dispatchMidiAction({ kind: 'absolute', target: { control: 'crossfader' }, value: 0.2 });
+    dispatchMidiAction({ kind: 'absolute', target: { control: 'master' }, value: 0.2 });
+    dispatchMidiAction({ kind: 'absolute', target: { control: 'cue-level' }, value: 0.2 });
+    dispatchMidiAction({ kind: 'absolute', target: { control: 'cue-mix' }, value: 0.2 });
+
+    expect(calls).toEqual([
+      'A:setPitch:-4.8',
+      'mixer:trim:A:0.1',
+      'mixer:eq:A:low:0.1',
+      'mixer:filter:A:-0.6',
+      'mixer:fader:A:0.2',
+      'mixer:crossfader:-0.6',
+      'mixer:master:0.2',
+      'mixer:cueLevel:0.2',
+      'mixer:cueMix:0.2',
+    ]);
+    expect(takeoverHint(takeoverKey.pitch('A'))).toBeNull();
   });
 
   it('mixer takeover: an external (on-screen) change unlatches that control only', () => {

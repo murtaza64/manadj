@@ -44,6 +44,7 @@ export const PERSISTED_SETTING_KEYS: readonly string[] = [
   'perf-kbd-hints',
   'manadj-perf-deck-count',
   'manadj-mouse-jog',
+  'manadj-soft-takeover',
   // Sets
   'manadj-set-settings',
   // Library browsing

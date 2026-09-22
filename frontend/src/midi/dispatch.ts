@@ -27,6 +27,7 @@ import {
   SoftTakeover,
   UNIPOLAR_PICKUP_TOLERANCE,
 } from './softTakeover';
+import { isSoftTakeoverEnabled } from './softTakeoverStore';
 import { reportPickedUp, reportSuppressed, takeoverKey } from './takeoverFeedback';
 import { focusDeck, toggleControlFocus } from '../performance/controlFocus';
 
@@ -614,6 +615,11 @@ function routeAbsolute(target: AbsoluteAction['target'], value: number): Absolut
 function dispatchAbsolute(target: AbsoluteAction['target'], value: number): void {
   const route = routeAbsolute(target, value);
   if (!route) return;
+  if (!isSoftTakeoverEnabled()) {
+    reportPickedUp(route.key);
+    route.apply(route.value);
+    return;
+  }
   if (!takeoverFor(route.key, route.tolerance).feed(route.value, route.current)) {
     // Waiting for pickup: tell the on-screen control which way the hand
     // must move (midi-controller 18).

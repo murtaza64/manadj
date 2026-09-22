@@ -24,6 +24,11 @@ import { CROSSFADER_ASSIGNMENTS } from '../../playback/crossfaderAssignmentStore
 import { DiagonalPairLinks } from '../../links/PerformancePairLinks';
 import { PerfSectionToggles } from './PerfSectionToggles';
 import type { DeckCount } from './waveformOrder';
+import {
+  isSoftTakeoverEnabled,
+  setSoftTakeoverEnabled,
+  subscribeSoftTakeover,
+} from '../../midi/softTakeoverStore';
 
 /** Vertical drag distance (px) that sweeps a knob end to end. */
 const KNOB_DRAG_RANGE_PX = 150;
@@ -375,6 +380,7 @@ export function MixerStrip({
   const mixer = useMixer();
   const crossfader = useMixerValue((m) => m.getCrossfader());
   const quantizeOn = useSyncExternalStore(subscribeQuantize, isQuantizeOn);
+  const softTakeoverOn = useSyncExternalStore(subscribeSoftTakeover, isSoftTakeoverEnabled);
   // Crossfader bypass — audio truth lives in the Mixer; UI repaints
   // through the same subscription as every other mixer control.
   const xfOn = useMixerValue((m) => m.getCrossfaderEnabled());
@@ -417,6 +423,16 @@ export function MixerStrip({
             strip never hides, so they stay reachable when everything
             around it is collapsed. */}
         <PerfSectionToggles />
+        <button
+          className={`btn btn-mini btn-success${softTakeoverOn ? ' btn-selected' : ''}`}
+          aria-pressed={softTakeoverOn}
+          onClick={() => setSoftTakeoverEnabled(!softTakeoverOn)}
+          title={softTakeoverOn
+            ? 'Soft takeover on: controller values wait for pickup'
+            : 'Soft takeover off: controller values apply immediately'}
+        >
+          TAKEOVER
+        </button>
       </div>
       <div className="perf-strip-slot wide">
         <button
