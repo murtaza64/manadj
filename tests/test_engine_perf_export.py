@@ -1,4 +1,5 @@
 import struct
+from itertools import pairwise
 
 import pytest
 
@@ -68,6 +69,43 @@ def test_engine_perf_export_overwrites_all_supported_fields(tmp_path) -> None:
         assert saved.key == 7 and saved.rating == 100
         assert parse_track_data(perf.trackData).key == 7
         assert cues.hot_cues[0].sample_offset == pytest.approx(30 * 44100)
+        assert cues.hot_cues[0].color_hex == "#FF0080"
         assert cues.main_cue_samples == pytest.approx(15 * 44100)
         assert cues.main_cue_overridden is True
         assert beat.adjusted_grid[1].sample_offset == pytest.approx(0.5 * 44100)
+        for grid in (beat.default_grid, beat.adjusted_grid):
+            for marker, following in pairwise(grid):
+                assert marker.beats_to_next == following.beat_index - marker.beat_index
+                native_bpm = 60 * beat.sample_rate * marker.beats_to_next / (
+                    following.sample_offset - marker.sample_offset
+                )
+                assert native_bpm == pytest.approx(128.0)
+
+
+def test_blank_colors_use_engine_slot_palette(tmp_path) -> None:
+    root = tmp_path / "Engine Library"
+    (root / "Database2").mkdir(parents=True)
+    database = InMemoryEngineDB(root)
+    with database.session_m_write() as session:
+        track = EDJTrack(path="../Tracks/a.flac", filename="a.flac", title="A")
+        session.add(track)
+        session.flush()
+        session.add(
+            PerformanceData(
+                trackId=track.id,
+                beatData=build_beat_blob(default_grid=CONSTANT_GRID),
+                quickCues=build_quick_cues_blob([EMPTY_SLOT] * 8),
+            )
+        )
+    EnginePerfExporter(database, root / "Database2").export_performance(
+        "/music/a.flac",
+        cues=[(1, 10, None, None), (4, 20, None, None)],
+        tempo_changes=None,
+        key=None,
+        maincue=None,
+        energy=None,
+        duration=180,
+    )
+    with database.session_m() as session:
+        cues = parse_quick_cues(session.query(PerformanceData).one().quickCues)
+    assert [cue.color_hex for cue in cues.hot_cues] == ["#F4D338", "#CE3239"]
