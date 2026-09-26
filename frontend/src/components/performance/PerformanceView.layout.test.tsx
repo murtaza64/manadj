@@ -198,11 +198,13 @@ it('toggles persisted soft takeover beside the performance section controls', ()
   const button = [...container.querySelectorAll('button')].find((node) => node.textContent === 'TAKEOVER')!;
   const leftLabels = [...container.querySelectorAll('.perf-strip-left button')].map((node) => node.textContent);
   expect(leftLabels.slice(-4)).toEqual(['KBD', 'WAVE', 'DECK', 'TAKEOVER']);
+  expect(button.className).toBe('player-button perf-strip-toggle on');
   expect(button.getAttribute('aria-pressed')).toBe('true');
 
   act(() => button.click());
 
   expect(isSoftTakeoverEnabled()).toBe(false);
+  expect(button.className).toBe('player-button perf-strip-toggle');
   expect(button.getAttribute('aria-pressed')).toBe('false');
   expect(localStorage.getItem(SOFT_TAKEOVER_SETTING_KEY)).toBe('off');
   expect(PERSISTED_SETTING_KEYS).toContain(SOFT_TAKEOVER_SETTING_KEY);

@@ -424,7 +424,7 @@ export function MixerStrip({
             around it is collapsed. */}
         <PerfSectionToggles />
         <button
-          className={`btn btn-mini btn-success${softTakeoverOn ? ' btn-selected' : ''}`}
+          className={`player-button perf-strip-toggle${softTakeoverOn ? ' on' : ''}`}
           aria-pressed={softTakeoverOn}
           onClick={() => setSoftTakeoverEnabled(!softTakeoverOn)}
           title={softTakeoverOn
