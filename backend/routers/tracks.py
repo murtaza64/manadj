@@ -102,7 +102,7 @@ def create_track(track: schemas.TrackCreate, db: Session = Depends(get_db)):
     return crud.create_track(db, track)
 
 
-@router.post("/relocate-files")
+@router.post("/files/relocate")
 def relocate_track_files(
     request: schemas.TrackFileRelocationRequest,
     db: Session = Depends(get_db),
