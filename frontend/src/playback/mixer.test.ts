@@ -219,12 +219,12 @@ describe('global filter preferences', () => {
   it('defaults to the approved sound and changes preferences without creating audio or moving decks', () => {
     forbidAudio();
     const mixer = new Mixer();
-    expect(mixer.getFilterSettings()).toMatchObject({ model: 'res24', resonance: 17, compensation: 0.15 });
+    expect(mixer.getFilterSettings()).toMatchObject({ model: 'res24', resonance: 17, compensation: 0.85 });
     const before = mixer.getChannelState('A');
     const notify = vi.fn();
     mixer.subscribe(notify);
     mixer.setFilterSettings({ model: 'dual', resonance: 20 });
-    expect(mixer.getFilterSettings()).toMatchObject({ model: 'dual', resonance: 20, compensation: 0.15 });
+    expect(mixer.getFilterSettings()).toMatchObject({ model: 'dual', resonance: 20, compensation: 0.85 });
     expect(mixer.getChannelState('A')).toBe(before);
     expect(notify).toHaveBeenCalledWith('filterSettings');
   });

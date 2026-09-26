@@ -30,9 +30,9 @@ const PARAMS = [
   },
   {
     key: 'compensation',
-    label: 'Resonance trim',
+    label: 'Peak compensation',
     unit: '%',
-    note: 'Subtract this fraction of resonance in dB. This is not loudness normalization.',
+    note: 'Subtract this fraction of the measured resonant peak. 100% holds the peak at the dry level; 0% leaves it raw.',
   },
   {
     key: 'curve',

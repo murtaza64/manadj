@@ -106,7 +106,7 @@ it('edits typed values only on commit, supports cancel/reset and does not create
   expect(mixer.getFilterSettings()).toMatchObject({
     model: 'res24',
     resonance: 17,
-    compensation: 0.15,
+    compensation: 0.85,
   });
   let input = host.querySelector<HTMLInputElement>(
     '[aria-label="High-pass endpoint value"]',

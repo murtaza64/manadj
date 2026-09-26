@@ -47,7 +47,7 @@ export interface FilterSettings {
 export const DEFAULT_FILTER_SETTINGS: Readonly<FilterSettings> = Object.freeze({
   model: 'res24',
   resonance: 17,
-  compensation: 0.15,
+  compensation: 0.85,
   curve: 1,
   deadzone: 0.03,
   lpMin: 40,

@@ -716,8 +716,7 @@ export const api = {
     },
 
     sync: async (playlistName: string, request: SyncPlaylistRequest): Promise<SyncResult | SyncResult[]> => {
-      const encodedName = encodeURIComponent(playlistName);
-      const res = await fetch(`${API_BASE}/sync/playlists/${encodedName}/sync`, {
+      const res = await fetch(`${API_BASE}/sync/playlists/sync?playlist=${encodeURIComponent(playlistName)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(request),
@@ -733,8 +732,7 @@ export const api = {
       playlistName: string,
       targets: PlaylistExportTarget[],
     ): Promise<PlaylistFullExportReport> => {
-      const encodedName = encodeURIComponent(playlistName);
-      const res = await fetch(`${API_BASE}/sync/export/playlists/${encodedName}/performance`, {
+      const res = await fetch(`${API_BASE}/sync/export/playlists/performance?playlist=${encodeURIComponent(playlistName)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ targets }),
@@ -749,9 +747,8 @@ export const api = {
     previewExportPerformance: async (
       playlistName: string,
     ): Promise<PlaylistFullExportPreview> => {
-      const encodedName = encodeURIComponent(playlistName);
       const res = await fetch(
-        `${API_BASE}/sync/export/playlists/${encodedName}/performance/preview`,
+        `${API_BASE}/sync/export/playlists/performance/preview?playlist=${encodeURIComponent(playlistName)}`,
       );
       if (!res.ok) {
         const detail = (await res.json().catch(() => null))?.detail;

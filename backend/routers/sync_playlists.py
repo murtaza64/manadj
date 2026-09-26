@@ -1,6 +1,6 @@
 """Playlist synchronization API endpoints."""
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 
@@ -93,10 +93,10 @@ class SyncPlaylistRequest(BaseModel):
     dry_run: bool = False
 
 
-@router.post("/{playlist_name}/sync")
+@router.post("/sync")
 def sync_playlist(
-    playlist_name: str,
     request: SyncPlaylistRequest,
+    playlist: str = Query(min_length=1),
     db: Session = Depends(get_db)
 ):
     """Sync playlist from source to target(s).
@@ -105,7 +105,7 @@ def sync_playlist(
     If target is None, syncs to all available databases except source.
 
     Args:
-        playlist_name: Name of playlist to sync (URL-encoded)
+        playlist: Name of playlist to sync (query param; may contain slashes)
         request: Sync parameters (source, target, flags)
         db: manadj database session (injected)
 
@@ -136,7 +136,7 @@ def sync_playlist(
     # Sync to single target or all targets
     if request.target:
         result = manager.sync_playlist_to_target(
-            playlist_name=playlist_name,
+            playlist_name=playlist,
             source=request.source,
             target=request.target,
             ignore_missing_tracks=request.ignore_missing_tracks,
@@ -154,7 +154,7 @@ def sync_playlist(
     else:
         # Sync to all available targets
         results = manager.sync_playlist_to_all(
-            playlist_name=playlist_name,
+            playlist_name=playlist,
             source=request.source,
             ignore_missing_tracks=request.ignore_missing_tracks,
             dry_run=request.dry_run

@@ -62,7 +62,7 @@ export function FilterResponse() {
         ))}
         <polyline points={points} />
       </svg>
-      <p className="settings-hint">Target response at 48 kHz, including resonance trim. Excludes drive and output limiting.</p>
+      <p className="settings-hint">Target response at 48 kHz, including measured peak compensation. Excludes drive and output limiting.</p>
       {owned && <p className="settings-hint">Automation owns the filter sweep. Preferences still apply live.</p>}
     </section>
   );

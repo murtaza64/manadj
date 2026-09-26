@@ -1,6 +1,85 @@
 import { BUTTERWORTH_Q_DB, sweepPositionToFilter } from './graph';
 import { FILTER_MODELS, type FilterSettings } from './filterSettings';
 
+type StageType = 'lowpass' | 'highpass';
+interface Stage {
+  readonly frequency: number;
+  readonly qDb: number;
+}
+
+/** Complex response of one Web Audio low/high-pass biquad stage at hz. */
+function stageResponse(
+  type: StageType,
+  stage: Stage,
+  hz: number,
+  sampleRate: number,
+): [real: number, imag: number] {
+  const w = (2 * Math.PI * stage.frequency) / sampleRate;
+  const c = Math.cos(w),
+    alpha = Math.sin(w) / (2 * 10 ** (stage.qDb / 20));
+  const b0 = (type === 'lowpass' ? 1 - c : 1 + c) / 2;
+  const b1 = type === 'lowpass' ? 1 - c : -(1 + c);
+  const z = (2 * Math.PI * hz) / sampleRate;
+  const nr = b0 + b1 * Math.cos(z) + b0 * Math.cos(2 * z);
+  const ni = -b1 * Math.sin(z) - b0 * Math.sin(2 * z);
+  const dr = 1 + alpha - 2 * c * Math.cos(z) + (1 - alpha) * Math.cos(2 * z);
+  const di = 2 * c * Math.sin(z) - (1 - alpha) * Math.sin(2 * z);
+  const den = dr * dr + di * di;
+  return [(nr * dr + ni * di) / den, (ni * dr - nr * di) / den];
+}
+
+function cascadeGainDb(
+  type: StageType,
+  stages: readonly Stage[],
+  hz: number,
+  sampleRate: number,
+): number {
+  let magnitude = 1;
+  for (const stage of stages) {
+    const [r, im] = stageResponse(type, stage, hz, sampleRate);
+    magnitude *= Math.hypot(r, im);
+  }
+  return 20 * Math.log10(Math.max(1e-9, magnitude));
+}
+
+/**
+ * Measured peak gain of the biquad cascade in dB (0 = no overshoot).
+ * Coarse-to-fine log-frequency search around the stage cutoffs; the
+ * resonant hump always lives there.
+ */
+export function cascadePeakDb(
+  type: StageType,
+  stages: readonly Stage[],
+  sampleRate: number,
+): number {
+  const limit = sampleRate * 0.499;
+  let lo = Infinity,
+    hi = 0;
+  for (const stage of stages) {
+    lo = Math.min(lo, stage.frequency);
+    hi = Math.max(hi, stage.frequency);
+  }
+  lo = Math.max(1, lo / 4);
+  hi = Math.min(limit, hi * 4);
+  let bestDb = -Infinity,
+    best = lo;
+  for (let pass = 0; pass < 3; pass++) {
+    const n = 48;
+    const step = (hi / lo) ** (1 / n);
+    for (let i = 0; i <= n; i++) {
+      const hz = lo * step ** i;
+      const db = cascadeGainDb(type, stages, hz, sampleRate);
+      if (db > bestDb) {
+        bestDb = db;
+        best = hz;
+      }
+    }
+    lo = Math.max(1, best / step);
+    hi = Math.min(limit, best * step);
+  }
+  return Math.max(0, bestDb);
+}
+
 /** Target response; Web Audio's low/high-pass Q is expressed in dB. */
 export function describeSweepFilter(
   s: Readonly<FilterSettings>,
@@ -22,7 +101,7 @@ export function describeSweepFilter(
   }
   const distance = Math.max(0, Math.abs(p) - s.deadzone);
   const amount = (distance / (1 - s.deadzone)) ** s.curve;
-  const type = p < 0 ? 'lowpass' : 'highpass';
+  const type: StageType = p < 0 ? 'lowpass' : 'highpass';
   const open = type === 'lowpass' ? Math.min(20000, limit) : 20;
   const end = type === 'lowpass' ? s.lpMin : Math.min(s.hpMax, limit);
   const frequency = open * (end / open) ** amount;
@@ -35,27 +114,31 @@ export function describeSweepFilter(
         : s.model === 'dual'
           ? [Math.SQRT1_2, Math.SQRT1_2]
           : [Math.SQRT1_2];
+  const stages = qs.map((q, i) => ({
+    frequency: Math.min(
+      limit,
+      Math.max(
+        10,
+        frequency * (s.model === 'dual' ? 2 ** ((i - 0.5) * s.spread) : 1),
+      ),
+    ),
+    qDb:
+      20 * Math.log10(q) +
+      (s.model === 'dual'
+        ? s.resonance / 2
+        : i === qs.length - 1
+          ? s.resonance
+          : 0),
+  }));
+  // Measured peak-gain normalization (#270): compensate the cascade's actual
+  // resonant hump at this position, not the nominal resonance. 0 = raw,
+  // 1 = the hump peaks at the dry level (flat loudness).
   return {
     type,
     frequency,
     wet: Math.min(1, distance / 0.07),
-    gainDb: s.trim - s.resonance * s.compensation,
-    stages: qs.map((q, i) => ({
-      frequency: Math.min(
-        limit,
-        Math.max(
-          10,
-          frequency * (s.model === 'dual' ? 2 ** ((i - 0.5) * s.spread) : 1),
-        ),
-      ),
-      qDb:
-        20 * Math.log10(q) +
-        (s.model === 'dual'
-          ? s.resonance / 2
-          : i === qs.length - 1
-            ? s.resonance
-            : 0),
-    })),
+    gainDb: s.trim - s.compensation * cascadePeakDb(type, stages, sampleRate),
+    stages,
   };
 }
 
@@ -72,20 +155,7 @@ export function sweepResponseDb(
     let real = 1,
       imag = 0;
     for (const stage of d.stages) {
-      const w = (2 * Math.PI * stage.frequency) / sampleRate;
-      const c = Math.cos(w),
-        alpha = Math.sin(w) / (2 * 10 ** (stage.qDb / 20));
-      const b0 = (d.type === 'lowpass' ? 1 - c : 1 + c) / 2;
-      const b1 = d.type === 'lowpass' ? 1 - c : -(1 + c);
-      const z = (2 * Math.PI * hz) / sampleRate;
-      const nr = b0 + b1 * Math.cos(z) + b0 * Math.cos(2 * z);
-      const ni = -b1 * Math.sin(z) - b0 * Math.sin(2 * z);
-      const dr =
-        1 + alpha - 2 * c * Math.cos(z) + (1 - alpha) * Math.cos(2 * z);
-      const di = 2 * c * Math.sin(z) - (1 - alpha) * Math.sin(2 * z);
-      const den = dr * dr + di * di;
-      const r = (nr * dr + ni * di) / den,
-        im = (ni * dr - nr * di) / den;
+      const [r, im] = stageResponse(d.type, stage, hz, sampleRate);
       [real, imag] = [real * r - imag * im, real * im + imag * r];
     }
     const gain = 10 ** (d.gainDb / 20);
