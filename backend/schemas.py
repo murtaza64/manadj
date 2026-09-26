@@ -65,6 +65,15 @@ class TrackCreate(TrackBase):
     """bpm is float BPM; conversion to the storage unit happens in crud.create_track."""
 
 
+class TrackFileRelocation(BaseModel):
+    track_id: int
+    destination: str
+
+
+class TrackFileRelocationRequest(BaseModel):
+    relocations: list[TrackFileRelocation]
+
+
 class TrackProvenance(BaseModel):
     """Audio Provenance summary for track list responses."""
     label: str
