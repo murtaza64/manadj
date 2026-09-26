@@ -7,7 +7,7 @@ seam (ADR 0002/0004)."""
 
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -197,16 +197,16 @@ def get_playlist_full_export_service(db: Session = Depends(get_db)):
     return build_playlist_full_export_service(db)
 
 
-@router.post("/playlists/{playlist_name}/performance")
+@router.post("/playlists/performance")
 def export_playlist_performance_endpoint(
-    playlist_name: str,
     request: PlaylistFullExportRequest,
+    playlist: str = Query(min_length=1),
     service=Depends(get_playlist_full_export_service),
 ):
     if not request.targets:
         raise HTTPException(status_code=422, detail="Select at least one destination")
     try:
-        return service.export(playlist_name, request.targets)
+        return service.export(playlist, request.targets)
     except LookupError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
 
@@ -220,14 +220,14 @@ def get_playlist_full_export_previewer(db: Session = Depends(get_db)):
     return previewer
 
 
-@router.get("/playlists/{playlist_name}/performance/preview")
+@router.get("/playlists/performance/preview")
 def preview_playlist_performance_endpoint(
-    playlist_name: str,
+    playlist: str = Query(min_length=1),
     previewer=Depends(get_playlist_full_export_previewer),
 ):
     """Read-only plan of a full playlist export: create vs replace, add/remove/
     reorder counts, and unmatched tracks per destination. Writes nothing."""
     try:
-        return previewer(playlist_name, ["rekordbox", "engine"])
+        return previewer(playlist, ["rekordbox", "engine"])
     except LookupError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error

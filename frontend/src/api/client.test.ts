@@ -34,12 +34,27 @@ describe('playlistSync', () => {
     await api.playlistSync.exportPerformance('Alien & Friends', ['rekordbox', 'engine']);
 
     expect(globalThis.fetch).toHaveBeenCalledWith(
-      'http://localhost:8127/api/sync/export/playlists/Alien%20%26%20Friends/performance',
+      'http://localhost:8127/api/sync/export/playlists/performance?playlist=Alien%20%26%20Friends',
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ targets: ['rekordbox', 'engine'] }),
       },
+    );
+  });
+
+  it('routes playlist syncs with slashes in the name through a query param', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({})));
+
+    await api.playlistSync.sync('scb/halloween', {
+      source: 'manadj',
+      ignore_missing_tracks: false,
+      dry_run: false,
+    });
+
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      'http://localhost:8127/api/sync/playlists/sync?playlist=scb%2Fhalloween',
+      expect.objectContaining({ method: 'POST' }),
     );
   });
 });
