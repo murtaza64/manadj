@@ -7,7 +7,7 @@ from alembic import command as alembic_command
 from alembic.config import Config as AlembicConfig
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from .routers import tracks, tags, waveforms, playlists, beatgrids, metric_ladders, hotcues, sync_playlists, sync_status, sync_performance, sync_export, sync_tags, sync_tracks, sync_library, analyze, transitions, transition_templates, track_links, takes, sessions, sets, tasks, drops, visualizer_ga, routine_candidates, routine_takes, routines, settings, cameos
+from .routers import tracks, tags, waveforms, playlists, beatgrids, metric_ladders, hotcues, sync_playlists, sync_status, sync_performance, sync_export, sync_tags, sync_tracks, sync_library, analyze, transitions, transition_templates, track_links, takes, sessions, sets, tasks, drops, visualizer_ga, routine_candidates, routine_takes, routines, settings, cameos, app_config
 from .acquisition import models as acquisition_models  # noqa: F401  (registers tables on Base)
 from .acquisition.router import router as acquisition_router
 from .tasks import models as task_models  # noqa: F401  (registers tables on Base)
@@ -17,17 +17,21 @@ from .logging_config import setup_logging
 # Configure logging with colors and override uvicorn handlers
 setup_logging()
 
-# Pre-migration backup of the real DB (editspace-migration 06; incident
-# 2026-07-08). Only when THIS instance serves the real DB — lane backends run
-# against their own sandbox clones and must not touch the real file.
+# Pre-migration backup of the DB this instance serves (editspace-migration 06;
+# incident 2026-07-08). Backs up into the data root's own backups dir, so the
+# real DB, lane sandbox clones and packaged installs are all covered
+# (packaged-app #277); APFS clones make the sandbox copies free.
 import sys as _sys
 
 _repo_root = Path(__file__).parent.parent
 _sys.path.insert(0, str(_repo_root / "scripts" / "agent"))
 import db_backup as _db_backup  # noqa: E402
 
-if (_repo_root / "data" / "library.db").resolve() == _db_backup.REAL_DB.resolve():
-    _db_backup.maybe_backup()
+from .data_root import backups_dir as _backups_dir  # noqa: E402
+from .database import DB_PATH as _db_path  # noqa: E402
+
+if _db_path is not None:
+    _db_backup.maybe_backup(db=_db_path, backup_dir=_backups_dir())
 
 # Migrate the database to the latest revision (replaces Base.metadata.create_all)
 _alembic_cfg = AlembicConfig(str(Path(__file__).parent.parent / "alembic.ini"))
@@ -78,6 +82,7 @@ app.include_router(routines.router, prefix="/api/routines", tags=["routines"])
 app.include_router(cameos.router, prefix="/api/cameos", tags=["cameos"])
 app.include_router(visualizer_ga.router, prefix="/api/ga", tags=["visualizer-ga"])
 app.include_router(settings.router, prefix="/api/settings", tags=["settings"])
+app.include_router(app_config.router, prefix="/api/config", tags=["app-config"])
 
 
 

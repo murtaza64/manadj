@@ -21,6 +21,7 @@ dependencies = [
     "soundfile>=0.13.1",
     "sqlalchemy>=2.0.0,<3.0.0",
     "tensorflow>=2.20.0",
+    "tomlkit>=0.15.1",
     "torchaudio==2.9.1",
     "types-requests>=2.33.0.20260518",
     "uvicorn>=0.38.0",

@@ -260,3 +260,28 @@
     grid-template-columns: repeat(2, 1fr);
   }
 }
+
+/* Library section (packaged-app #277) */
+.settings-library-inputs {
+  display: flex;
+  gap: var(--space-8);
+  align-items: center;
+  margin-top: var(--space-8);
+}
+.settings-library-inputs input[type='text'] {
+  flex: 1;
+}
+.settings-library-toggle {
+  display: inline-flex;
+  gap: var(--space-8);
+  align-items: center;
+  font-size: var(--font-small);
+  cursor: pointer;
+}
+.settings-content code {
+  background: var(--crust);
+  border: 1px solid var(--surface1);
+  border-radius: var(--radius);
+  padding: 0 var(--space-4);
+  font-size: var(--font-small);
+}

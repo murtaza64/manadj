@@ -333,6 +333,21 @@ function registerVisualizerIpc() {
   });
 }
 
+// Settings → Library folder pickers (packaged-app #277): the web app cannot
+// open a native directory dialog, so the shell brokers one over IPC.
+function registerSettingsIpc() {
+  ipcMain.handle("settings:pick-folder", async (event, options) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    const result = await dialog.showOpenDialog(win, {
+      title: options?.title || "Choose a folder",
+      defaultPath: options?.defaultPath || undefined,
+      properties: ["openDirectory", "createDirectory"],
+    });
+    if (result.canceled || result.filePaths.length === 0) return null;
+    return result.filePaths[0];
+  });
+}
+
 function createWindow() {
   const win = new BrowserWindow({
     ...loadBounds(),
@@ -458,6 +473,7 @@ app.whenReady().then(() => {
   const disposeRecordingIpc = registerRecordingIpc({ app, dialog, ipcMain });
   app.once("before-quit", disposeRecordingIpc);
   registerVisualizerIpc();
+  registerSettingsIpc();
   createWindow();
 });
 

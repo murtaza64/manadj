@@ -14,11 +14,13 @@ import { HFader } from '../components/performance/MixerStrip';
 const WaveformSettings = lazy(() => import('../waveform/StyleTuningPage'));
 const JogSettings = lazy(() => import('../midi/JogTuningPage'));
 const MouseJogSettings = lazy(() => import('./MouseJogSettings'));
+const LibrarySettings = lazy(() => import('./LibrarySettings'));
 const SECTIONS = [
   { id: 'filters', title: 'Filters', detail: 'Sound and sweep response' },
   { id: 'waveforms', title: 'Waveforms', detail: 'Color and rendering' },
   { id: 'jog', title: 'Jog calibration', detail: 'DDJ-GRV6 response' },
   { id: 'mouse-jog', title: 'Mouse jog', detail: 'Keyboard and mouse response' },
+  { id: 'library', title: 'Library', detail: 'Folders, DJ software, export' },
 ] as const;
 type Section = (typeof SECTIONS)[number]['id'];
 const PARAMS = [
@@ -258,6 +260,8 @@ export default function SettingsPage({ performance = false }: { performance?: bo
               <WaveformSettings />
             ) : section === 'jog' ? (
               <JogSettings />
+            ) : section === 'library' ? (
+              <LibrarySettings />
             ) : (
               <MouseJogSettings performance={performance} />
             )}
