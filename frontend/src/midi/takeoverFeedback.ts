@@ -31,6 +31,7 @@ export const takeoverKey = {
   master: () => 'master',
   cueLevel: () => 'cue-level',
   cueMix: () => 'cue-mix',
+  beatFxLevel: () => 'beat-fx-level',
 } as const;
 
 /** How long a hint outlives the last suppressed move. Long enough to read,

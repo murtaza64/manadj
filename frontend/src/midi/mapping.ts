@@ -164,6 +164,14 @@ export interface MeterAddress {
   peakValue: number;
 }
 
+/** Device-specific CC encoding for a Beat FX time-unit indicator. */
+export interface BeatFxBeatAddress {
+  channel: number;
+  number: number;
+  offValue: number;
+  values: readonly { beats: number; value: number }[];
+}
+
 /** Device knowledge for Feedback: every light the app writes, per deck. */
 export interface MappingFeedback {
   /** A two-Deck Controller may omit C/D; layered four-Deck devices provide all. */
@@ -174,6 +182,13 @@ export interface MappingFeedback {
    * the decks. Optional: absent until the address is hardware-learned.
    */
   assistant?: LedAddress;
+  /**
+   * The Beat FX ON/OFF light (gh#272) — mirrors the one section's master
+   * gate. Optional: devices without a Beat FX section omit it.
+   */
+  beatFx?: LedAddress;
+  /** Beat FX time-unit indicator (GRV6 CC output), if host-driven. */
+  beatFxBeat?: BeatFxBeatAddress;
   /**
    * Per-channel level-meter output addresses (four-deck-performance 36).
    * A four-channel device provides all of A–D; a device without host-driven

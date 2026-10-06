@@ -15,6 +15,8 @@ import {
   beatFlashPhase,
   blinkPhase,
   encodeAssistantLed,
+  encodeBeatFxBeat,
+  encodeBeatFxLed,
   encodeDeckLeds,
   ledStates,
 } from '../midi/feedback';
@@ -243,6 +245,28 @@ function AssistantFeedbackPublisher() {
   return null;
 }
 
+/**
+ * Beat FX output mirrors the section gate and time-unit fraction, including
+ * full resync on connect/replug.
+ */
+function BeatFxFeedbackPublisher() {
+  const section = useMixerValue((m) => m.getBeatFxSection());
+  const outputs = useSyncExternalStore(subscribeOutputs, connectedOutputs);
+  useEffect(() => {
+    if (outputs.length === 0) return;
+    for (const output of outputs) {
+      if (!output.mapping.feedback) continue;
+      for (const message of [
+        ...encodeBeatFxLed(output.mapping.feedback, section.on),
+        ...encodeBeatFxBeat(output.mapping.feedback, section.beats),
+      ]) {
+        output.send(message);
+      }
+    }
+  }, [section, outputs]);
+  return null;
+}
+
 /** Tick period for the shared blink clock. Fast enough to resolve a beat
  * flash at any playable tempo (200 BPM = 300 ms period, 150 ms half-cycle);
  * per-deck phase booleans are derived from the timestamp, so lights still
@@ -295,6 +319,7 @@ export function MidiFeedbackBridge() {
         <DeckFeedbackPublisher clockNow={clockNow} onNeedsClock={onNeedsD} />
       </DeckScope>
       <AssistantFeedbackPublisher />
+      <BeatFxFeedbackPublisher />
     </>
   );
 }

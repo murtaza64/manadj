@@ -381,7 +381,37 @@ export function encodeAssistantLed(
   return feedback.assistant ? [encodeLed(feedback.assistant, lit)] : [];
 }
 
+/**
+ * Beat FX ON/OFF lamp state → messages (gh#272): mirrors the section gate.
+ */
+export function encodeBeatFxLed(
+  feedback: MappingFeedback,
+  lit: boolean
+): readonly MidiMessage[] {
+  return feedback.beatFx ? [encodeLed(feedback.beatFx, lit)] : [];
+}
+
 const CONTROL_CHANGE = 0xb;
+
+/** Current Beat FX fraction → the device's time-unit indicator CC. */
+export function encodeBeatFxBeat(
+  feedback: MappingFeedback,
+  beats: number
+): readonly MidiMessage[] {
+  const address = feedback.beatFxBeat;
+  if (!address) return [];
+  const encoded = address.values.find((entry) => entry.beats === beats);
+  return encoded
+    ? [[(CONTROL_CHANGE << 4) | address.channel, address.number, encoded.value]]
+    : [];
+}
+
+function beatFxBeatOffMessage(feedback: MappingFeedback): MidiMessage[] {
+  const address = feedback.beatFxBeat;
+  return address
+    ? [[(CONTROL_CHANGE << 4) | address.channel, address.number, address.offValue]]
+    : [];
+}
 
 /**
  * A channel level meter's normalized position [0, 1] → its CC message.
@@ -420,6 +450,8 @@ export function allOffMessages(feedback: MappingFeedback): readonly MidiMessage[
       return addresses ? deckAddresses(addresses).map((address) => encodeLed(address, false)) : [];
     }),
     ...encodeAssistantLed(feedback, false),
+    ...encodeBeatFxLed(feedback, false),
+    ...beatFxBeatOffMessage(feedback),
     ...CHANNEL_IDS.flatMap((channel) => {
       const meter = feedback.meters?.[channel];
       return meter ? [meterOffMessage(meter)] : [];

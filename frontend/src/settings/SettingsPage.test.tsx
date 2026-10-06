@@ -10,6 +10,7 @@ import { DEFAULT_FILTER_SETTINGS, FILTER_PARAMETER_RANGES } from '../playback/fi
 import { defaultSlots, getSlot, getSlots, resetSlots } from '../waveform/styleSlots';
 import { GRV6_JOG_CALIBRATION } from '../midi/jogCalibration';
 import { getJogCalibration, resetGrv6JogCalibration } from '../midi/jogCalibrationStore';
+import { BEAT_FX_PARAMETER_RANGES, DEFAULT_BEAT_FX_SETTINGS } from '../playback/beatFxSettings';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 vi.hoisted(() => {
@@ -150,11 +151,37 @@ it('edits typed values only on commit, supports cancel/reset and does not create
   expect(input.value).toBe('16000');
   act(() => { input.focus(); input.blur(); });
   expect(mixer.getFilterSettings().hpMax).toBe(16000);
-  expect(host.querySelectorAll('.settings-nav button')).toHaveLength(4);
+  expect(host.querySelectorAll('.settings-nav button')).toHaveLength(5);
   expect(host.querySelector('[aria-label="Filter frequency response"] polyline')?.getAttribute('points')?.split(' ')).toHaveLength(180);
   expect(host.querySelector('input[type="search"], canvas')).toBeNull();
   expect(host.textContent).toContain('Target response at 48 kHz');
   expectFaders(host, 11);
+});
+
+it('edits and resets persisted Beat FX sound parameters without creating audio', async () => {
+  const mixer = new Mixer();
+  const host = document.createElement('div');
+  document.body.append(host);
+  root = createRoot(host);
+  await act(async () => root!.render(<MixerContext value={mixer}><SettingsPage /></MixerContext>));
+  const effects = [...host.querySelectorAll<HTMLButtonElement>('.settings-nav button')]
+    .find((button) => button.textContent?.startsWith('Beat FX'))!;
+  act(() => effects.click());
+  expect([...host.querySelectorAll('.settings-effect-card h3')].map((node) => node.textContent))
+    .toEqual(['Echo', 'Reverb', 'Flanger']);
+  expectFaders(host, Object.keys(BEAT_FX_PARAMETER_RANGES).length);
+
+  const feedback = host.querySelector<HTMLElement>('#beat-fx-flangerFeedback')!;
+  press(feedback, 'End');
+  expect(mixer.getBeatFxSettings().flangerFeedback).toBe(0.9);
+  const decay = host.querySelector<HTMLElement>('#beat-fx-reverbDecay')!;
+  press(decay, 'Home');
+  expect(mixer.getBeatFxSettings().reverbDecay).toBe(0.5);
+
+  const reset = [...host.querySelectorAll<HTMLButtonElement>('button')]
+    .find((button) => button.textContent === 'Reset effect defaults')!;
+  act(() => reset.click());
+  expect(mixer.getBeatFxSettings()).toEqual(DEFAULT_BEAT_FX_SETTINGS);
 });
 
 it('binds every filter fader to its scaled parameter and keeps model-disabled fields inert', async () => {
