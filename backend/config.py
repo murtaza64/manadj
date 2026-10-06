@@ -152,6 +152,17 @@ def _soundcloud_token(data: dict[str, Any]) -> str | None:
     return os.environ.get("SOUNDCLOUD_OAUTH_TOKEN") or section.get("oauth_token") or None
 
 
+def _tracks_directory_override() -> str | None:
+    """MANADJ_TRACKS_DIRECTORY env override for the library tracks directory.
+
+    Lane isolation hook: config.toml is committed with Murtaza's real tracks
+    directory, so empty-DB lane apps (scripts/agent/lane_app.py --empty-db)
+    point the backend at a lane-local directory via this variable instead of
+    the real library.
+    """
+    return os.environ.get("MANADJ_TRACKS_DIRECTORY") or None
+
+
 def load_config() -> Config:
     """Load configuration from config.toml.
 
@@ -172,7 +183,7 @@ def load_config() -> Config:
                 rekordbox_path=None
             ),
             library=LibraryConfig(
-                tracks_directory=None
+                tracks_directory=_tracks_directory_override()
             ),
             soundcloud=SoundCloudConfig(oauth_token=_soundcloud_token({})),
             soulseek=_soulseek_config({}),
@@ -195,7 +206,7 @@ def load_config() -> Config:
     # Parse library config
     lib_config = data.get("library", {})
     tracks_dir = lib_config.get("tracks_directory", "")
-    tracks_dir = tracks_dir if tracks_dir else None
+    tracks_dir = _tracks_directory_override() or (tracks_dir if tracks_dir else None)
 
     return Config(
         database=DatabaseConfig(
