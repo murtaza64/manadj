@@ -290,7 +290,7 @@ export default function PlaylistSidebar({
 
   return (
     <>
-      <div data-browse-area="sidebar" data-browse-focused={focused} style={{
+      <div data-browse-area="sidebar" data-tour="library.sidebar" data-browse-focused={focused} style={{
         width: '200px',
         background: 'var(--crust)',
         borderRight: '1px solid var(--surface0)',
@@ -356,6 +356,7 @@ export default function PlaylistSidebar({
                 timeline. */}
             <div
               data-entry-key="view:session"
+              data-tour="library.sessions-row"
               onClick={() => onSelectView('session')}
               className={rowClass('view:session', selectedView === 'session')}
             >

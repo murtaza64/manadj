@@ -61,6 +61,8 @@ export const PERSISTED_SETTING_KEYS: readonly string[] = [
   'manadj-filter-settings',
   // Hardware calibration
   'manadj.grv6JogCalibration',
+  // Coach-mark tour progress (feature-tour #282)
+  'manadj-tour-state',
 ];
 
 // Dynamic-key families (key = prefix + id), also preferences.

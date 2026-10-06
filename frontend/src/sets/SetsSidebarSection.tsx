@@ -167,7 +167,7 @@ export default function SetsSidebarSection({
 
   return (
     <>
-      <div>
+      <div data-tour="sets.sidebar">
         <SidebarSectionHeader id="sets" label="Sets" />
         {!collapsed &&
           sets.map((set) => (

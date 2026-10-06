@@ -219,7 +219,7 @@ export function PerformanceView() {
           deckCount={deckCount}
           onDeckCountChange={changeDeckCount}
         />
-        <div className="perf-decks" style={decksShown ? undefined : { display: 'none' }}>
+        <div className="perf-decks" data-tour="performance.decks" style={decksShown ? undefined : { display: 'none' }}>
           {/* Six-pair Linking (four-deck-performance 19): the four
               adjacent pairs ride the grid's shared edges; the diagonals
               live on the mixer strip (DiagonalPairLinks). */}
@@ -259,7 +259,7 @@ function PerfWaves({ hidden, deckCount }: { hidden?: boolean; deckCount: DeckCou
   return (
     // Hidden = display:none (mixer-strip WAVE toggle, gh#68); stays mounted
     // so the shared zoom survives a hide/show round-trip.
-    <div className="perf-waves" style={hidden ? { display: 'none' } : undefined}>
+    <div className="perf-waves" data-tour="performance.waves" style={hidden ? { display: 'none' } : undefined}>
       {PERFORMANCE_WAVEFORM_ORDER.map((deck) => (
         <DeckScope key={deck} deck={deck}>
           <DeckWaveform

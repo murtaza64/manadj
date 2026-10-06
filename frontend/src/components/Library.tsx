@@ -32,6 +32,7 @@ import {
   type SidebarEntry,
 } from './browseNav';
 import { browseSession, restoredView, updateBrowseSession } from './browseStore';
+import { setLibrarySubview } from '../tour/tourState';
 import { isSidebarSectionCollapsed, subscribeSidebarSections } from './sidebarSectionsStore';
 import { useSetBeatgridDownbeat, useNudgeBeatgrid } from '../hooks/useBeatgridData';
 import { useHotCueActions } from '../hooks/useHotCueActions';
@@ -179,6 +180,14 @@ export default function Library({
     window.addEventListener(NAVIGATE_SET_EVENT, onNavigateSet);
     return () => window.removeEventListener(NAVIGATE_SET_EVENT, onNavigateSet);
   }, []);
+  // Tour activity (feature-tour #282): Sets and Sessions are tour
+  // sections of their own, living inside the Library — announce which
+  // inner pane is up so their coach marks fire on first entry.
+  useEffect(() => {
+    setLibrarySubview(
+      selectedView === 'set' ? 'sets' : selectedView === 'session' ? 'sessions' : null
+    );
+  }, [selectedView]);
   // Session deep-link (sessions 04): same two-part shape as Sets — the
   // store carries the selection; this nudges a mounted instance.
   useEffect(() => {
@@ -1087,7 +1096,7 @@ export default function Library({
       {/* Waveform at top (full width), controls and editor below.
           Hidden in browseOnly mode (deck surface rendered by the host). */}
       {!browseOnly && (
-        <div style={{
+        <div data-tour="library.player" style={{
           display: 'flex',
           flexDirection: 'column',
           borderBottom: '1px solid var(--surface0)'
@@ -1136,7 +1145,7 @@ export default function Library({
         />
 
         {/* Main library area (filter + table; split panes when editing) */}
-        <div data-browse-area="tracks" data-browse-focused={!sidebarFocused} onMouseDownCapture={() => { if (!splitView) setFocusedArea('main'); }} style={{
+        <div data-browse-area="tracks" data-tour="library.table" data-browse-focused={!sidebarFocused} onMouseDownCapture={() => { if (!splitView) setFocusedArea('main'); }} style={{
           flex: 1,
           display: 'flex',
           flexDirection: 'column',
