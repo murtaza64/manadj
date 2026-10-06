@@ -3,15 +3,15 @@ name = "manadj"
 version = "0.1.0"
 description = "Engine DJ database access library"
 requires-python = ">=3.13"
+# Unimported heavyweights (tensorflow, librosa, beatnet, matplotlib) were
+# removed from the base install for the packaged app (ADR 0043, #280) —
+# nothing imports them (tests/test_heavy_dep_guard.py polices the suite).
 dependencies = [
     "alembic>=1.18.5",
     "beat-this",
-    "beatnet>=1.1.1",
     "essentia>=2.1b6.dev1389",
     "fastapi>=0.122.0",
-    "librosa>=0.11.0",
     "madmom",
-    "matplotlib>=3.10.7",
     "mutagen>=1.47.0",
     "numpy>=2.3.5",
     "pillow>=12.0.0",
@@ -20,7 +20,6 @@ dependencies = [
     "scipy>=1.16.3",
     "soundfile>=0.13.1",
     "sqlalchemy>=2.0.0,<3.0.0",
-    "tensorflow>=2.20.0",
     "torchaudio==2.9.1",
     "types-requests>=2.33.0.20260518",
     "uvicorn>=0.38.0",
