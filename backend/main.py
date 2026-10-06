@@ -269,6 +269,15 @@ async def shutdown_event():
         _task_worker.stop()
 
 
-@app.get("/")
-def root():
-    return {"message": "Music Library Manager API"}
+# Serve the built frontend when one exists (packaged app, ADR 0043). Mounted
+# after all API routers so the SPA catch-all loses to every /api route. In
+# dev there is normally no frontend/dist and the plain API root survives.
+from .spa import frontend_dist, mount_spa  # noqa: E402
+
+_dist = frontend_dist()
+if _dist is not None:
+    mount_spa(app, _dist)
+else:
+    @app.get("/")
+    def root():
+        return {"message": "Music Library Manager API"}
