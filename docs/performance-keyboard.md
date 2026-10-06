@@ -19,7 +19,15 @@
 | Scratch with Vinyl on | Shift+T + mouse | Shift+Y + mouse |
 | Switch focused deck | [ | ] |
 
-- `=` toggles global Quantize. `F1` opens help.
-- `Tab` switches deck/library keyboard focus; `Escape` returns from library focus. Library help also uses `?`.
+| Beat FX action | Key |
+|---|---|
+| Select Echo / Reverb / Flanger | 1 / 2 / 3 |
+| Beat FX on/off | 4 |
+| Beat fraction shorter / longer | 5 / 6 |
+| LEVEL/DEPTH down / up | 7 / 8 |
+| Previous / next target | 9 / 0 |
+
+- `=` toggles global Quantize. `?` and `F1` open the app-wide keyboard map.
+- `Tab` switches deck/library keyboard focus; `Escape` returns from library focus.
 - Typing and open dialogs suppress deck shortcuts. Size changes, loop toggles, MATCH, Sync and cue deletion ignore key repeat.
 - Sync entry requires a ready track with BPM. Engaged Sync can always be switched off, including while waiting for a track.

@@ -228,6 +228,20 @@ describe('Performance library keyboard focus', () => {
   }
   const isLibrary = () => container.querySelector('.perf-keyboard-scope')?.getAttribute('data-library-focus') === 'true';
 
+  it('routes the number row to Beat FX only while decks own the keyboard', () => {
+    browse(); render();
+    for (const key of ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0']) press(key);
+    expect(vi.mocked(mixer.selectBeatFx).mock.calls).toEqual([['echo'], ['reverb'], ['flanger']]);
+    expect(vi.mocked(mixer.toggleBeatFxOn)).toHaveBeenCalledOnce();
+    expect(vi.mocked(mixer.stepBeatFxBeats).mock.calls).toEqual([['halve'], ['double']]);
+    expect(vi.mocked(mixer.setBeatFxDepth).mock.calls).toEqual([[-0.1], [0.1]]);
+    expect(vi.mocked(mixer.selectBeatFxTarget).mock.calls).toEqual([['master'], ['B']]);
+    press('Tab');
+    const before = vi.mocked(mixer.selectBeatFx).mock.calls.length;
+    press('1');
+    expect(vi.mocked(mixer.selectBeatFx)).toHaveBeenCalledTimes(before);
+  });
+
   it('reserves plain = before claiming library keys or blocking held physical keys', () => {
     browse(); render();
     expect(press('q', { code: 'KeyQ' }).defaultPrevented).toBe(false);
@@ -324,23 +338,15 @@ describe('Performance library keyboard focus', () => {
     expect(document.activeElement).not.toBe(input);
   });
 
-  it('lets dialogs dismiss before focus exits, and help is contextual', () => {
+  it('lets dialogs dismiss before focus exits', () => {
     const handle = browse(); render(); press('Tab');
     const dialog = document.createElement('div'); dialog.className = 'follow-modal-overlay'; container.append(dialog);
     press('Escape'); press('Tab'); press('j'); press('a');
     expect(isLibrary()).toBe(true);
     expect(handle.navigate).not.toHaveBeenCalled();
     expect(decks.A.loadTrack).not.toHaveBeenCalled();
-    dialog.remove(); press('?');
-    expect(container.querySelector('[role="dialog"]')?.textContent).toContain('LIBRARY KEYBOARD');
-    press('j'); expect(handle.navigate).not.toHaveBeenCalled();
-    press('Escape'); expect(container.querySelector('[role="dialog"]')).toBeNull();
-    expect(isLibrary()).toBe(true);
-    press('Escape');
-    expect(press('?', { code: 'Slash', shiftKey: true }).defaultPrevented).toBe(false);
-    expect(container.querySelector('[role="dialog"]')).toBeNull();
-    press('F1');
-    expect(container.querySelector('[role="dialog"]')?.textContent).toContain('DECKS KEYBOARD');
+    dialog.remove();
+    expect(press('?', { code: 'Slash', shiftKey: true }).defaultPrevented).toBe(true);
   });
 
   it('blocks held keys across focus changes until release, and stays inert while inactive', () => {
@@ -354,13 +360,6 @@ describe('Performance library keyboard focus', () => {
     expect(handle.navigate).toHaveBeenCalledOnce(); expect(decks.A.loadTrack).not.toHaveBeenCalled();
   });
 
-  it('does not let a press originating in help leak into deck transport on close', () => {
-    browse(); render(); press('F1');
-    act(() => document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'd', bubbles: true })));
-    press('Escape');
-    expect(press('d', { repeat: true }).defaultPrevented).toBe(true);
-    expect(press('d').defaultPrevented).toBe(false);
-  });
 });
 
 describe('Performance deck-count layout', () => {

@@ -37,6 +37,7 @@ import { installNoFocusRule } from './focus/noFocusRule';
 import { useAnalysisPendingSync } from './hooks/useAnalysisPending';
 import { isTypingTarget } from './components/performance/performanceKeys';
 import { registerViewToggle } from './midi/controlRegistry';
+import { KeyboardShortcutOverlay } from './components/KeyboardShortcutOverlay';
 
 /** The one poller keeping track rows / Analyze buttons live against
  * background analysis (analysis-curation 03) — a bridge like the MIDI
@@ -256,6 +257,7 @@ function App() {
               </BrowseActiveContext.Provider>
             </main>
           </div>
+          <KeyboardShortcutOverlay mode={view} />
         </FilterProvider>
       </DeckProvider>
       </ToastProvider>

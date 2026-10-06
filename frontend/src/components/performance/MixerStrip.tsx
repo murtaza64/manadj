@@ -23,6 +23,7 @@ import { isQuantizeOn, setQuantize, subscribeQuantize } from '../../playback/qua
 import type { ChannelId } from '../../playback/mixer';
 import { DiagonalPairLinks } from '../../links/PerformancePairLinks';
 import { AutoBlurSelect } from '../AutoBlurSelect';
+import { openKeyboardHelp } from '../keyboardHelpStore';
 import { PerfSectionToggles } from './PerfSectionToggles';
 import type { DeckCount } from './waveformOrder';
 import {
@@ -492,13 +493,23 @@ export function MixerStrip({
           </span>
         )}
         {onToggleHints && (
-          <button
-            className={`player-button perf-strip-toggle${hintsOn ? ' on' : ''}`}
-            onClick={onToggleHints}
-            title={hintsOn ? 'Hide keyboard hints' : 'Show keyboard hints'}
-          >
-            KBD
-          </button>
+          <span className="perf-kbd-toggle-group">
+            <button
+              className={`player-button perf-strip-toggle${hintsOn ? ' on' : ''}`}
+              onClick={onToggleHints}
+              title={hintsOn ? 'Hide keyboard hints' : 'Show keyboard hints'}
+            >
+              KBD
+            </button>
+            <button
+              className="player-button perf-strip-toggle"
+              aria-label="Keyboard shortcuts"
+              onClick={openKeyboardHelp}
+              title="Show keyboard map (?)"
+            >
+              ?
+            </button>
+          </span>
         )}
         {/* Waveform/deck section toggles (perf-layout 12 / gh#68): the
             strip never hides, so they stay reachable when everything

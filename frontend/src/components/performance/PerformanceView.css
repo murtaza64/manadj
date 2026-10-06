@@ -307,6 +307,8 @@
 }
 
 .perf-deck-count { display: inline-flex; flex-shrink: 0; }
+.perf-kbd-toggle-group { display: inline-flex; flex-shrink: 0; }
+.perf-kbd-toggle-group .perf-strip-toggle + .perf-strip-toggle { border-left: 0; }
 
 @media (max-width: 1279px) {
   .perf-strip {
@@ -1502,32 +1504,3 @@
   background: var(--surface0);
   border-color: var(--surface1);
 }
-.perf-keyboard-help-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 10000;
-  display: grid;
-  place-items: center;
-  background: #000b;
-}
-.perf-keyboard-help {
-  width: min(540px, calc(100vw - 24px));
-  max-height: calc(100dvh - 24px);
-  overflow: auto;
-  box-sizing: border-box;
-  padding: 16px;
-  background: var(--mantle);
-  border: 1px solid var(--accent);
-  color: var(--text);
-  font-size: 12px;
-}
-.perf-keyboard-help header, .perf-keyboard-help dl > div {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-}
-.perf-keyboard-help dl > div { padding: 5px 0; border-bottom: 1px solid var(--surface0); }
-.perf-keyboard-help dt { flex: 0 0 44%; color: var(--accent); font-family: monospace; }
-.perf-keyboard-help dd { margin: 0; flex: 1; }
-.perf-keyboard-help p { color: var(--subtext0); line-height: 1.5; }
-.perf-keyboard-help button { background: var(--surface0); color: var(--text); border: 1px solid var(--surface1); cursor: pointer; }

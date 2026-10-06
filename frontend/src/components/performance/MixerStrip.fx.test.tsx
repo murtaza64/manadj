@@ -5,6 +5,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { MixerStrip } from './MixerStrip';
 import { MixerContext } from '../../hooks/useMixer';
 import type { Mixer } from '../../playback/mixer';
+import { _resetKeyboardHelpForTests, isKeyboardHelpOpen } from '../keyboardHelpStore';
 
 vi.mock('../../settings/persistedSettings', () => ({ writeSetting: vi.fn(), removeSetting: vi.fn() }));
 vi.mock('../../links/PerformancePairLinks', () => ({ DiagonalPairLinks: () => null }));
@@ -41,12 +42,13 @@ const mixer = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  _resetKeyboardHelpForTests();
   container = document.createElement('div');
   document.body.append(container);
   root = createRoot(container);
   act(() => root.render(
     <MixerContext.Provider value={mixer}>
-      <MixerStrip deckCount={4} />
+      <MixerStrip deckCount={4} onToggleHints={() => undefined} />
     </MixerContext.Provider>
   ));
 });
@@ -54,6 +56,7 @@ beforeEach(() => {
 afterEach(() => {
   act(() => root.unmount());
   container.remove();
+  _resetKeyboardHelpForTests();
 });
 
 it('renders one GRV6-shaped section and the five useful targets', () => {
@@ -80,6 +83,13 @@ it('assigns A/C only left and B/D only right from compact toggles', () => {
     act(() => (container.querySelector(`[aria-label="Deck ${deck} crossfader assignment"]`) as HTMLElement).click());
     expect(setCrossfaderAssignment).toHaveBeenLastCalledWith(deck, side);
   }
+});
+
+it('attaches a keyboard-map button to KBD', () => {
+  const help = container.querySelector<HTMLElement>('[aria-label="Keyboard shortcuts"]')!;
+  expect(help.parentElement?.className).toBe('perf-kbd-toggle-group');
+  act(() => help.click());
+  expect(isKeyboardHelpOpen()).toBe(true);
 });
 
 it('routes ON/OFF, SELECT, and channel assignment to distinct Mixer controls', () => {

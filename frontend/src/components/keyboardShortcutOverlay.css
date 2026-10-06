@@ -1,0 +1,62 @@
+.keyboard-map-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  padding: var(--space-16);
+  background: rgb(0 0 0 / 0.82);
+  backdrop-filter: blur(4px);
+}
+.keyboard-map {
+  width: min(1500px, 100%);
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+  padding: var(--space-16);
+  border: 1px solid var(--overlay0);
+  background: var(--crust);
+  box-shadow: 0 18px 60px rgb(0 0 0 / 0.7);
+}
+.keyboard-map > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-16);
+}
+.keyboard-map > header div { display: flex; align-items: baseline; gap: var(--space-12); }
+.keyboard-map > header span { color: var(--accent); font-size: var(--font-small); letter-spacing: 0.12em; }
+.keyboard-map > header strong { font-size: var(--font-title); }
+.keyboard-map > nav { display: flex; gap: var(--space-6); margin: var(--space-12) 0; }
+.keyboard-map-board { min-width: 920px; }
+.keyboard-map-row { display: flex; gap: 5px; margin-top: 5px; }
+.keyboard-map-key {
+  flex: var(--key-width) 0 0;
+  min-width: 0;
+  height: 74px;
+  padding: 5px;
+  border: 1px solid var(--surface1);
+  background: var(--mantle);
+  color: var(--overlay0);
+}
+.keyboard-map-key.mapped { border-color: var(--surface2); color: var(--text); }
+.keyboard-map-key kbd {
+  display: block;
+  font-family: inherit;
+  font-size: var(--font-small);
+  font-weight: 800;
+}
+.keyboard-map-key div { display: grid; gap: 2px; margin-top: 5px; }
+.keyboard-map-key span { font-size: 9px; line-height: 1.15; color: var(--subtext0); }
+.keyboard-map-key em {
+  display: inline-block;
+  margin-right: 3px;
+  padding: 0 2px;
+  color: var(--warning);
+  border: 1px solid var(--surface2);
+  font-style: normal;
+}
+.keyboard-map > p { margin: var(--space-12) 0 0; color: var(--subtext0); font-size: var(--font-small); }
+@media (max-width: 800px) {
+  .keyboard-map-backdrop { padding: 0; place-items: stretch; }
+  .keyboard-map { max-height: 100vh; border: 0; }
+}
