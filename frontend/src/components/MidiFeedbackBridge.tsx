@@ -76,6 +76,13 @@ function DeckFeedbackPublisher({
   // the same change subscription as the on-screen PFL button, so hardware
   // toggles, screen clicks and this light can never disagree.
   const pfl = useMixerValue((m) => m.getChannelState(deck).pfl);
+  // Stem kill pads (stems #210): the EFFECTIVE mask (automation lane wins,
+  // ADR 0022) — the same read the on-screen stem row renders — dark when
+  // the Track has no stems (stemsLoaded, engine snapshot). The effective
+  // object is replaced immutably on every change, so the per-channel
+  // subscribe fires exactly when the mask moves.
+  const stems = useMixerValue((m) => m.getAutomation(deck)?.stems ?? m.getChannelState(deck).stems);
+  const stemsLoaded = useDeckSnapshot((s) => s.stemsLoaded);
   // Q lamp (midi-performance-ops 07): the app-wide Quantize store — the
   // same subscription the TopBar Q toggle renders from, so both hardware
   // lamps and the screen always agree.
@@ -170,6 +177,7 @@ function DeckFeedbackPublisher({
       slipMode,
       vinylMode,
       loopBeats,
+      stems: stemsLoaded ? stems : null,
     };
     const states = ledStates(
       holderPlaying === null ? input : audibleTransportOverride(input, holderPlaying),
@@ -198,6 +206,8 @@ function DeckFeedbackPublisher({
     slipMode,
     vinylMode,
     loopBeats,
+    stems,
+    stemsLoaded,
     holderPlaying,
     pendingPhase,
     beatFlash,
