@@ -72,6 +72,18 @@ export interface DeckFeedback {
   /** The channel's PFL button light (headphone-cue 05). */
   pfl: LedAddress;
   /**
+   * Stem kill pads (stems #210), when a Mapping binds a pad block to the
+   * stems gesture: pad i mirrors STEM_NAMES[i] — lit while the stem is
+   * audible, dark while killed or when the Track has no stems. Optional:
+   * devices without a stem pad block omit it and are never written.
+   */
+  stemPads?: readonly LedAddress[];
+  /**
+   * The stem pads' SHIFT layer (solo): mirrors the same enabled state so
+   * pads stay lit while SHIFT is held, like the hot-cue shift layer.
+   */
+  stemPadsShifted?: readonly LedAddress[];
+  /**
    * Pads 1..8 by index, HOTCUE base-layer addresses ONLY — pad modes are
    * note-isolated on this class of device, and Feedback writes only the
    * modes the app maps (HOTCUE here, the grid-edit SAMPLER layer below);

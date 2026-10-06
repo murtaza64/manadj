@@ -1,4 +1,5 @@
-import type { ChannelId } from '../../playback/mixer';
+import type { ChannelId, StemName } from '../../playback/mixer';
+import { STEM_NAMES } from '../../playback/mixer';
 import type { Binding, DeckFeedback, LedAddress, Mapping, MeterAddress } from '../mapping';
 
 interface DeckMidi {
@@ -24,6 +25,17 @@ const PAD_BLOCK = {
 
 const LOOP_PRESETS = [0.25, 0.5, 1, 2, 4, 8, 16, 32] as const;
 const JUMP_DIVISORS = [8, 8, 4, 4, 2, 2, 1, 1] as const;
+
+/**
+ * Groove Circuit DRUM SWAP 1–4 (E1, hardware-verified notes 0–3 / shift
+ * 44–47 on deck channels): repurposed as the stem kill block (CONTEXT.md
+ * Mapping entry — the section's official drum-remix engine has no manadj
+ * counterpart, so the pad shape is free real estate). Pad n toggles the
+ * matching STEM_NAMES stem; SHIFT+pad solos it. Only four pads, eight
+ * stems — pads address the four STEM_NAMES in order; the rest stay
+ * screen-only on this device.
+ */
+const STEM_PADS: readonly StemName[] = STEM_NAMES;
 
 const button = (
   channel: number,
@@ -190,6 +202,13 @@ function deckBindings({ deck, channel, padChannel, shiftedPadChannel }: DeckMidi
     }),
     button(padChannel, PAD_BLOCK.grid + 6, { control: 'grid-reset-mark', deck }),
     button(padChannel, PAD_BLOCK.grid + 7, { control: 'grid-reset-delete', deck }),
+    // DRUM SWAP 1–4 → stem kill/solo block (see STEM_PADS note above).
+    ...STEM_PADS.map((stem, pad) =>
+      button(channel, pad, { control: 'stem', channel: deck, stem })
+    ),
+    ...STEM_PADS.map((stem, pad) =>
+      button(channel, 44 + pad, { control: 'stem-solo', channel: deck, stem })
+    ),
   ];
 }
 
@@ -213,6 +232,8 @@ function deckFeedback({ channel, padChannel, shiftedPadChannel }: DeckMidi): Dec
       beats,
     })),
     loopPadsShifted: [],
+    stemPads: STEM_PADS.map((_, pad) => led(channel, pad)),
+    stemPadsShifted: STEM_PADS.map((_, pad) => led(channel, 44 + pad)),
   };
 }
 

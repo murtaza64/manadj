@@ -1,6 +1,6 @@
 import type { DeckFeedback, LedAddress, MappingFeedback, MeterAddress } from './mapping';
-import { CHANNEL_IDS } from '../playback/mixer';
-import type { ChannelId } from '../playback/mixer';
+import { CHANNEL_IDS, STEM_NAMES } from '../playback/mixer';
+import type { ChannelId, StemName } from '../playback/mixer';
 import { beatsBetween } from '../playback/quantize';
 import { encodeMeterValue } from './levelMeter';
 
@@ -77,6 +77,12 @@ export interface DeckLedInput {
    * no pad and show all dark (the screen stays the truth).
    */
   loopBeats: number | null;
+  /**
+   * Effective per-stem enable state (stems #210) or null when the Track
+   * has no stems — drives the stem pad block, when the Mapping has one:
+   * STEM_NAMES order; a stem-less Track renders every stem pad dark.
+   */
+  stems: Record<StemName, boolean> | null;
 }
 
 /** Desired on/off per light of one deck. */
@@ -102,6 +108,8 @@ export interface DeckLedStates {
    * LOOP-mode pad whose mapped preset equals it (exact dyadic equality;
    * lengths and presets are both exact binary fractions). */
   loopBeats: number | null;
+  /** Effective stem enables (STEM_NAMES order) or null = stem-less. */
+  stems: Record<StemName, boolean> | null;
 }
 
 /** [status, data1, data2] — ready for MIDIOutput.send. */
@@ -223,6 +231,7 @@ export function ledStates(input: DeckLedInput, phases: BlinkPhases = STEADY): De
     slipMode: input.slipMode,
     vinylMode: input.vinylMode,
     loopBeats: input.loopBeats,
+    stems: input.stems,
   };
 }
 
@@ -288,6 +297,8 @@ function deckAddresses(deck: DeckFeedback): readonly LedAddress[] {
     ...(deck.keyLockShifted ? [deck.keyLockShifted] : []),
     ...deck.loopPads,
     ...deck.loopPadsShifted,
+    ...(deck.stemPads ?? []),
+    ...(deck.stemPadsShifted ?? []),
   ];
 }
 
@@ -335,6 +346,15 @@ export function encodeDeckLeds(
     // the mapping and are never written.
     ...[...addresses.loopPads, ...addresses.loopPadsShifted].map((pad) =>
       encodeLed(pad, states.loopBeats === pad.beats)
+    ),
+    // Stem kill pads (stems #210): pad i mirrors STEM_NAMES[i]; dark when
+    // the Track has no stems. The SHIFT layer mirrors the base layer, so
+    // pads stay lit while SHIFT is held (the hot-cue shift idiom).
+    ...(addresses.stemPads ?? []).map((address, i) =>
+      encodeLed(address, states.stems?.[STEM_NAMES[i]] ?? false)
+    ),
+    ...(addresses.stemPadsShifted ?? []).map((address, i) =>
+      encodeLed(address, states.stems?.[STEM_NAMES[i]] ?? false)
     ),
   ];
 }

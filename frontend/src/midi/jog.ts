@@ -207,15 +207,17 @@ export class JogController {
 
   /** Begin (or re-acquire) the scratch the held contact owns. */
   private beginHeldScratch(nowMs: number): void {
+    const scratch = this.port.scratch;
+    if (!scratch) return;
     this.releaseBend();
     this.clearScratchTimer();
     this.suppressRimUntil = -Infinity;
     // begin() can synchronously notify a surface displacement. Let that
     // cancellation see the in-flight gesture before querying acceptance.
     this.scratching = true;
-    this.port.scratch.begin();
+    scratch.begin();
     this.scratchMotionMs = null;
-    this.scratching = this.port.scratch.isActive();
+    this.scratching = scratch.isActive();
     this.scratchTickMs = nowMs;
   }
 

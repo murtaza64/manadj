@@ -158,6 +158,7 @@ function registerFakeMixerControls(): void {
     },
     togglePfl: (channel) => calls.push(`mixer:pfl:${channel}`),
     toggleStem: (channel, stem) => calls.push(`mixer:stem:${channel}:${stem}`),
+    soloStem: (channel, stem) => calls.push(`mixer:stemSolo:${channel}:${stem}`),
     setCueLevel: (value) => {
       fakeMixer.cueLevel = value;
       calls.push(`mixer:cueLevel:${value}`);
@@ -1511,5 +1512,25 @@ describe('stem kill switches (stems #210)', () => {
     dispatchMidiAction(stem('A', 'drums', 'up'));
     dispatchMidiAction(stem('B', 'vocals', 'down'));
     expect(calls).toEqual(['mixer:stem:A:drums', 'mixer:stem:B:vocals']);
+  });
+
+  it('stem-solo buttons solo through the mixer surface on the down edge only', () => {
+    registerFakeMixerControls();
+    dispatchMidiAction({
+      kind: 'button',
+      edge: 'down',
+      target: { control: 'stem-solo', channel: 'C', stem: 'bass' },
+    });
+    dispatchMidiAction({
+      kind: 'button',
+      edge: 'up',
+      target: { control: 'stem-solo', channel: 'C', stem: 'bass' },
+    });
+    dispatchMidiAction({
+      kind: 'button',
+      edge: 'down',
+      target: { control: 'stem-solo', channel: 'D', stem: 'other' },
+    });
+    expect(calls).toEqual(['mixer:stemSolo:C:bass', 'mixer:stemSolo:D:other']);
   });
 });

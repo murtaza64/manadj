@@ -66,7 +66,12 @@ LED size semantics. Beat Loop mode (p.77): pads = fixed 1/4, 1/2, 1, 2, 4,
 ## Groove Circuit (per deck side)
 
 Drum-remix engine over the Drums stem (rekordbox): swap loops replace/layer
-the track's drums, beat-synced; disabled in dual-deck mode.
+the track's drums, beat-synced; disabled in dual-deck mode. No manadj
+counterpart — the section is repurposed territory (CONTEXT.md, Mapping
+entry; see the mapping-design doc). E1 wire notes: DRUM SWAP 1–4 are notes
+0–3 on deck channels 1–4, +SHIFT notes 44–47 (GROOVE CIRCUIT block);
+CAPTURE note 36 (shift 38 = 4-beat, 39 = 8-beat); GAIN is CC 18/50
+14-bit (spontaneously re-reported on DECK 3/4 activation — unreliable).
 
 | Control | Official function |
 |---|---|

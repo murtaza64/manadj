@@ -273,6 +273,13 @@ function dispatchButton(target: ButtonAction['target'], edge: 'down' | 'up'): vo
       midiMixerControls()?.toggleStem(target.channel, target.stem);
       return;
     }
+    case 'stem-solo': {
+      // Shift layer of the stems gesture: same mixer-class routing, the
+      // solo semantics the on-screen shift-click uses (mixer.soloStem).
+      if (edge !== 'down') return;
+      midiMixerControls()?.soloStem(target.channel, target.stem);
+      return;
+    }
     case 'loop-preset': {
       // Loops gesture class (ADR 0019, midi-performance-ops 02): dropped
       // where the audible surface registers no loops (e.g. the editor).

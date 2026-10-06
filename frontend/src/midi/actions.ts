@@ -48,6 +48,9 @@ export type ButtonTarget =
   | { control: 'pfl'; channel: ChannelId }
   /** Stem kill toggle (stems #210): mixer-class button like PFL. */
   | { control: 'stem'; channel: ChannelId; stem: StemName }
+  /** Stem solo (stems review, shift layer): only this stem plays;
+   * soloing the already-soloed stem restores all-on (mixer.soloStem). */
+  | { control: 'stem-solo'; channel: ChannelId; stem: StemName }
   /** Grid editing (midi-performance-ops 05) — stored-data edits, hence
    * registry-direct (ADR 0019): grid ops mean the same thing on every
    * view. Nudge translates the Beatgrid by one discrete ±10ms step. */
