@@ -179,8 +179,7 @@ export class JogController {
       if (!this.touching) return;
       this.touching = false;
       const throwEligible = this.scratchMotionMs !== null
-        && nowMs - this.scratchMotionMs < JOG_RELEASE_FRESH_MS
-        && Math.abs(this.port.scratch?.rate() ?? 0) > 0;
+        && nowMs - this.scratchMotionMs < JOG_RELEASE_FRESH_MS;
       if (throwEligible) this.scheduleScratchEnd();
       else this.finishScratch();
       this.suppressRimUntil = nowMs + JOG_RELEASE_RIM_SUPPRESS_MS;

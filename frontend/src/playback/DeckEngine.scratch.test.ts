@@ -429,6 +429,31 @@ describe('DeckEngine platter', () => {
     } finally { vi.useRealTimers(); }
   });
 
+  it('keeps a playing forward release when fresh motion precedes filtered velocity', async () => {
+    vi.useFakeTimers();
+    try {
+      const { deck, ctx } = await setup();
+      deck.play();
+      const jog = new JogController({
+        isPlaying: () => deck.getSnapshot().playing, getPlayhead: () => deck.getPlayhead(),
+        seek: p => deck.seek(p), setBend: p => deck.setBend(p),
+        scratch: { begin: () => deck.beginScratch(), move: (d, t) => deck.scratchMove(d, t),
+          end: () => deck.endScratch(), isActive: () => deck.getSnapshot().scratching,
+          vinylMode: () => deck.getSnapshot().vinylMode, rate: () => deck.getScratchState()?.rate ?? 0 },
+      });
+      jog.onTouch(true, 0);
+      await Promise.resolve();
+      ctx.currentTime = 0.005;
+      jog.onTouchTicks(20, 5, GRV6_JOG_CALIBRATION, 'grv6');
+      expect(deck.getScratchState()!.rate).toBe(0);
+
+      jog.onTouch(false, 5);
+
+      expect(deck.getSnapshot().scratching).toBe(true);
+      jog.dispose();
+    } finally { vi.useRealTimers(); }
+  });
+
   it.each([
     ['reverse', false, -1],
     ['reverse', true, -1],
