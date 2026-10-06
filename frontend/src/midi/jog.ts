@@ -93,8 +93,10 @@ export const JOG_FINE_CONTINUATION_MS = 250;
  * (JOG_RELEASE_IDLE_MS tick-free) or the platter is re-grabbed. A platter
  * held still at release (no fresh motion) ends immediately. */
 export const JOG_RELEASE_FRESH_MS = 24;
-export const JOG_RELEASE_IDLE_MS = 12;
-export const JOG_RELEASE_RIM_SUPPRESS_MS = 80;
+// The side stream is threshold-gated; allow its first packet to arrive after
+// contact loss before deciding that the released platter has stopped.
+export const JOG_RELEASE_IDLE_MS = 80;
+export const JOG_RELEASE_RIM_SUPPRESS_MS = JOG_RELEASE_IDLE_MS;
 
 /** Rate smoothing (paused rim seek): how much of the instantaneous rate
  * each burst carries. */

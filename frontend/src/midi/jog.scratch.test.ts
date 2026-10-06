@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { JogController, JOG_RELEASE_IDLE_MS, JOG_RELEASE_RIM_SUPPRESS_MS } from './jog';
+import { JogController, JOG_RELEASE_IDLE_MS } from './jog';
 import { GRV6_JOG_CALIBRATION as calibration } from './jogCalibration';
 
 describe('GRV6 scratch controller', () => {
@@ -135,11 +135,21 @@ describe('GRV6 scratch controller', () => {
     expect(vi.getTimerCount()).toBe(0);
     rimTicks(20);
     vi.advanceTimersByTime(25);
-    expect(bend).not.toHaveBeenCalled();
-    vi.advanceTimersByTime(JOG_RELEASE_RIM_SUPPRESS_MS);
-    rimTicks(20);
-    vi.advanceTimersByTime(25);
     expect(bend).toHaveBeenCalled();
+  });
+
+  it('keeps a forward throw through the threshold-gated touch-to-rim handoff', () => {
+    jog.onTouch(true, 0);
+    touchTicks(63);
+    rate.mockReturnValue(3);
+    jog.onTouch(false, 1);
+
+    vi.advanceTimersByTime(20);
+    rimTicks(20);
+
+    expect(active).toBe(true);
+    expect(end).not.toHaveBeenCalled();
+    expect(move).toHaveBeenCalledTimes(2);
   });
 
   it('releases promptly after motion stopped while still touching', () => {
@@ -194,12 +204,12 @@ describe('GRV6 scratch controller', () => {
     expect(end).toHaveBeenCalledOnce();
   });
 
-  it('ends a recognized throw after 12ms even if no rim tick follows hand-up', () => {
+  it('ends a recognized throw after the release window if no rim tick follows hand-up', () => {
     jog.onTouch(true);
     touchTicks(-60);
     rate.mockReturnValue(-3);
     jog.onTouch(false);
-    vi.advanceTimersByTime(11);
+    vi.advanceTimersByTime(JOG_RELEASE_IDLE_MS - 1);
     expect(end).not.toHaveBeenCalled();
     vi.advanceTimersByTime(1);
     expect(end).toHaveBeenCalledOnce();
@@ -228,7 +238,7 @@ describe('GRV6 scratch controller', () => {
     if (via === 'override' || via === 'timer') {
       active = false;
       if (via === 'override') jog.syncState();
-      else vi.advanceTimersByTime(12);
+      else vi.advanceTimersByTime(JOG_RELEASE_IDLE_MS);
     }
     rimTicks(-20);
     vi.advanceTimersByTime(25);

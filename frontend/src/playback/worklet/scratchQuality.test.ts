@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { DeckSourceKernel } from './deckSourceKernel';
 import { moveScratch, scratchPosition } from './scratchMotion';
 import type { ScratchMotion } from './scratchMotion';
-import { JogController } from '../../midi/jog';
+import { JogController, JOG_RELEASE_IDLE_MS } from '../../midi/jog';
 import { GRV6_JOG_CALIBRATION } from '../../midi/jogCalibration';
 import { planReplay } from '../../sessions/replayPlanner';
 import type { CaptureEvent } from '../../capture/events';
@@ -132,7 +132,7 @@ describe('scratch quality regressions', () => {
       jog.onTouch(false, now);
       expect(end).toHaveBeenCalledTimes(moving ? 0 : 1);
       if (moving) {
-        vi.advanceTimersByTime(12);
+        vi.advanceTimersByTime(JOG_RELEASE_IDLE_MS);
         expect(end).toHaveBeenCalledOnce();
       }
       expect(vi.getTimerCount()).toBe(0);
