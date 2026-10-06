@@ -79,6 +79,11 @@ app.include_router(cameos.router, prefix="/api/cameos", tags=["cameos"])
 app.include_router(visualizer_ga.router, prefix="/api/ga", tags=["visualizer-ga"])
 app.include_router(settings.router, prefix="/api/settings", tags=["settings"])
 
+# Onboarding (#274): Rekordbox bulk import for first run.
+from .routers import onboarding as onboarding_router  # noqa: E402
+
+app.include_router(onboarding_router.router, prefix="/api/onboarding", tags=["onboarding"])
+
 
 
 def _waveform_generation_enabled() -> bool:
@@ -130,6 +135,14 @@ def _build_task_worker() -> "TaskWorker | None":
     # heavy deps — always registered.
     from .routine_miner_tasks import ROUTINE_MINE_TASK_TYPE, make_routine_mine_handler
     handlers[ROUTINE_MINE_TASK_TYPE] = make_routine_mine_handler()
+
+    # Rekordbox onboarding import (#274): always registered — it reads a
+    # snapshot of the Rekordbox library and never writes back.
+    from .onboarding.tasks import (
+        ONBOARDING_IMPORT_TASK_TYPE,
+        make_onboarding_import_handler,
+    )
+    handlers[ONBOARDING_IMPORT_TASK_TYPE] = make_onboarding_import_handler()
 
     config = get_config()
     delays: dict[str, float] = {}

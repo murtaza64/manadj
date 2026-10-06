@@ -184,13 +184,18 @@ def import_tracks_from_rekordbox(
 
         bpm = rb_track.BPM if rb_track.BPM else None
 
+        # DjmdContent.KeyID is a FOREIGN KEY into djmdKey, not a Mixxx key
+        # id — the old from_mixxx_id(KeyID) call made every imported key
+        # wrong or null (#274). The key's name lives in Key.ScaleName.
         key = None
-        if rb_track.KeyID:
-            try:
-                key_obj = Key.from_mixxx_id(rb_track.KeyID)
-                key = key_obj.engine_id if key_obj else None
-            except Exception:
-                key = None
+        key_provenance = None
+        try:
+            scale_name = rb_track.Key.ScaleName if rb_track.Key else None
+            key_obj = Key.from_musical(scale_name)
+            key = key_obj.engine_id if key_obj else None
+            key_provenance = "imported" if key is not None else None
+        except Exception:
+            key = None
 
         artist = None
         if hasattr(rb_track, 'Artist') and rb_track.Artist:
@@ -202,6 +207,7 @@ def import_tracks_from_rekordbox(
             artist=artist,
             bpm=bpm,
             key=key,
+            key_provenance=key_provenance,
             energy=None,
         )
 
