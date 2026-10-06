@@ -21,6 +21,10 @@ import type { JogProfile } from './jogCalibration';
 
 export type EqBand = 'low' | 'mid' | 'high';
 
+/** Per-Deck absolute controls a hardware layer switch can move between
+ * Decks (A⟷C, B⟷D). */
+export type LayeredControl = 'pitch' | 'trim' | 'eq' | 'filter' | 'channel-fader';
+
 export type ButtonTarget =
   | { control: 'transport'; deck: ChannelId }
   | { control: 'jog-touch-edge'; deck: ChannelId; shifted: boolean }
@@ -73,8 +77,11 @@ export type ButtonTarget =
   | { control: 'key-lock'; deck: ChannelId }
   /** Switch the layered physical deck surface on one side (four-Deck 03). */
   | { control: 'control-focus'; side: 'left' | 'right' }
-  /** Select an explicit Deck layer when hardware reports logical state. */
-  | { control: 'set-control-focus'; deck: ChannelId }
+  /** Select an explicit Deck layer when hardware reports logical state.
+   * `layered` names the absolute controls the device moves with the layer
+   * (its physical control reports on the active layer's channel only):
+   * their soft takeover re-arms for both Decks of the pair on every switch. */
+  | { control: 'set-control-focus'; deck: ChannelId; layered?: readonly LayeredControl[] }
   /** The assistant button (midi-performance-ops 08): a macro over the
    * per-Deck Follow model — all on (playing Decks, or both when nothing
    * plays) or all off. Registry-direct, browse-adjacent. */
@@ -110,7 +117,12 @@ export type ButtonTarget =
   | { control: 'beat-fx-select'; effect: BeatFxEffectId | null }
   | { control: 'beat-fx-target'; target: BeatFxTarget }
   | { control: 'beat-fx-on-off' }
-  | { control: 'beat-fx-beats'; change: 'halve' | 'double' };
+  | { control: 'beat-fx-beats'; change: 'halve' | 'double' }
+  /** One-press FX buttons over the ONE section (DDJ-SB3 FX1/FX2 units):
+   * engage `effect` on the scope — a side's focused Deck, or master —
+   * (select + retarget + on); pressed again while that exact pairing runs,
+   * turn the section off. */
+  | { control: 'beat-fx-engage'; scope: 'left' | 'right' | 'master'; effect: BeatFxEffectId };
 
 export type AbsoluteTarget =
   | { control: 'pitch'; deck: ChannelId }
@@ -125,7 +137,7 @@ export type AbsoluteTarget =
   /** Cue/mix blend. No control on this device; bindable for others. */
   | { control: 'cue-mix' }
   /** The section's single LEVEL/DEPTH balance knob (gh#272). */
-  | { control: 'beat-fx-level' };
+  | { control: 'beat-fx-level'; side?: 'left' | 'right' };
 
 export type RelativeTarget =
   | { control: 'jog'; deck: ChannelId }

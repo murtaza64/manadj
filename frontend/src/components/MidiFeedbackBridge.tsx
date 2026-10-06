@@ -16,6 +16,7 @@ import {
   blinkPhase,
   encodeAssistantLed,
   encodeBeatFxBeat,
+  encodeBeatFxEngageLeds,
   encodeBeatFxLed,
   encodeDeckLeds,
   ledStates,
@@ -251,6 +252,7 @@ function AssistantFeedbackPublisher() {
  */
 function BeatFxFeedbackPublisher() {
   const section = useMixerValue((m) => m.getBeatFxSection());
+  const focus = useControlFocus();
   const outputs = useSyncExternalStore(subscribeOutputs, connectedOutputs);
   useEffect(() => {
     if (outputs.length === 0) return;
@@ -259,11 +261,12 @@ function BeatFxFeedbackPublisher() {
       for (const message of [
         ...encodeBeatFxLed(output.mapping.feedback, section.on),
         ...encodeBeatFxBeat(output.mapping.feedback, section.beats),
+        ...encodeBeatFxEngageLeds(output.mapping.feedback, section, focus),
       ]) {
         output.send(message);
       }
     }
-  }, [section, outputs]);
+  }, [section, focus, outputs]);
   return null;
 }
 

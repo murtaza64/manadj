@@ -404,6 +404,10 @@ A hardware MIDI control surface (e.g. the DJControl Inpulse 300 MK2) driving Dec
 **Control focus**:
 The pair of application Decks currently addressed by the left and right layered control surfaces, shared by Controller and keyboard input. On a two-surface, four-Deck Controller, one Deck is focused on each side; changing either side from hardware or keyboard, or interacting with an on-screen Deck panel, updates the same focus. Focus changes input routing and its UI emphasis only; it says nothing about which Decks are loaded, playing, audible, or followed.
 
+**Layered control**:
+A physical continuous control (fader, knob) that a Controller's layer switch re-points from one Deck of a side's pair to the other — the tempo fader on any layered surface, and the whole mixer strip on Controllers whose mixer has fewer channels than Decks (DDJ-SB3). Every layer switch re-arms soft takeover for both Decks of the pair: the control applies nothing until it reaches the now-addressed Deck's value (rekordbox-style pickup).
+_Avoid_: shared control
+
 **Browse focus**:
 PERFORM's library keyboard mode, toggled with Tab without changing the app view or Control focus. Deck keyboard gestures are released and disabled while browsing; MIDI and pointer controls are unchanged. Letter loads address physical Decks and retain Browse focus. Escape returns to decks; search and dialogs consume their own Escape first. Press `?` for bindings. The active browse area has an accent frame; sidebar focus, cursor, and track selection are shared with MIDI browsing.
 
