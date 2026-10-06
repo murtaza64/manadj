@@ -68,18 +68,17 @@ function DeckControlsRegistrar() {
     let previous = engine.getSnapshot();
     const unsubscribe = engine.subscribe(() => {
       const next = engine.getSnapshot();
-      const reset = next.trackId !== previous.trackId || next.loadState !== previous.loadState
-        || next.playing !== previous.playing;
+      // A Load is a hard reset. Everything else (play/pause, seeks, cues —
+      // the dispatches another control triggers mid-scratch) already ended
+      // the engine scratch; syncState's override keeps the physical
+      // contact so platter rotation re-acquires without a re-touch.
+      const reset = next.trackId !== previous.trackId || next.loadState !== previous.loadState;
       previous = next;
       if (reset) jog.cancel();
       else jog.syncState();
     });
-    const unsubscribeTransport = engine.addTransportEventListener(event => {
-      if (event.action === 'seek' || event.action === 'jumpBeats' || event.action === 'hotCue') jog.cancel();
-    });
     return () => {
       unsubscribe();
-      unsubscribeTransport();
       jog.dispose();
     };
   }, [engine, jog]);

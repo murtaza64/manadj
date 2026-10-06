@@ -399,30 +399,34 @@ describe('DeckEngine platter', () => {
       expect(seed.scratch!.drive).toBeCloseTo(deck.getScratchState()!.drive, 12);
     } finally { recorder?.dispose(); vi.useRealTimers(); }
   });
-  it.each([false, true])('moving hand-up immediately resumes pitch-adjusted intent (playing=%s)', async playing => {
-    const { deck, ctx } = await setup();
-    deck.setPitch(20);
-    if (playing) deck.play();
-    const jog = new JogController({
-      isPlaying: () => deck.getSnapshot().playing, getPlayhead: () => deck.getPlayhead(),
-      seek: p => deck.seek(p), setBend: p => deck.setBend(p),
-      scratch: { begin: () => deck.beginScratch(), move: (d, t) => deck.scratchMove(d, t),
-        end: () => deck.endScratch(), isActive: () => deck.getSnapshot().scratching,
-        vinylMode: () => deck.getSnapshot().vinylMode, rate: () => deck.getScratchState()?.rate ?? 0 },
-    });
-    jog.onTouch(true, 0);
-    await Promise.resolve();
-    for (let i = 1; i <= 10; i++) {
-      ctx.currentTime = i * 0.005;
-      jog.onTouchTicks(20, i * 5, GRV6_JOG_CALIBRATION, 'grv6');
-    }
-    ctx.currentTime = 0.051;
-    const landing = deck.getPlayhead();
-    jog.onTouch(false, 51);
-    expect(deck.getSnapshot()).toMatchObject({ playing, scratching: false });
-    ctx.currentTime = 0.052;
-    expect(deck.getPlayhead()).toBeCloseTo(landing + (playing ? 0.0012 : 0), 9);
-    jog.dispose();
+  it.each([false, true])('still hand-up immediately resumes pitch-adjusted intent (playing=%s)', async playing => {
+    vi.useFakeTimers({ toFake: ['performance', 'setTimeout', 'clearTimeout'] });
+    try {
+      const { deck, ctx } = await setup();
+      deck.setPitch(20);
+      if (playing) deck.play();
+      const jog = new JogController({
+        isPlaying: () => deck.getSnapshot().playing, getPlayhead: () => deck.getPlayhead(),
+        seek: p => deck.seek(p), setBend: p => deck.setBend(p),
+        scratch: { begin: () => deck.beginScratch(), move: (d, t) => deck.scratchMove(d, t),
+          end: () => deck.endScratch(), isActive: () => deck.getSnapshot().scratching,
+          vinylMode: () => deck.getSnapshot().vinylMode, rate: () => deck.getScratchState()?.rate ?? 0 },
+      });
+      jog.onTouch(true, 0);
+      await Promise.resolve();
+      for (let i = 1; i <= 10; i++) {
+        ctx.currentTime = i * 0.005;
+        jog.onTouchTicks(20, i * 5, GRV6_JOG_CALIBRATION, 'grv6');
+      }
+      ctx.currentTime = 0.051;
+      vi.advanceTimersByTime(30); // Motion goes stale: release must not coast.
+      const landing = deck.getPlayhead();
+      jog.onTouch(false, 81);
+      expect(deck.getSnapshot()).toMatchObject({ playing, scratching: false });
+      ctx.currentTime = 0.052;
+      expect(deck.getPlayhead()).toBeCloseTo(landing + (playing ? 0.0012 : 0), 9);
+      jog.dispose();
+    } finally { vi.useRealTimers(); }
   });
 
   it.each([false, true])('fresh physical reverse rim ticks preserve playing=%s without bending', async playing => {

@@ -117,18 +117,27 @@ describe('scratch quality regressions', () => {
     for (const frequency of [880, 1280]) expect(20 * Math.log10(amplitude(frequency) / carrier)).toBeLessThan(-24);
   });
 
-  it('ordinary moving hand-up calls transport handover synchronously', () => {
-    let active = false;
-    const end = vi.fn(() => { active = false; });
-    const jog = new JogController({ isPlaying: () => true, getPlayhead: () => 10,
-      seek: vi.fn(), setBend: vi.fn(), scratch: { isActive: () => active,
-        vinylMode: () => true, begin: () => { active = true; }, move: vi.fn(),
-        rate: () => 1, end } });
-    jog.onTouch(true, 0);
-    jog.onTouchTicks(20, 10, GRV6_JOG_CALIBRATION, 'grv6');
-    jog.onTouch(false, 11);
-    expect(end).toHaveBeenCalledOnce();
-    jog.dispose();
+  it.each([true, false])('hand-up after %s motion ends the scratch at once', moving => {
+    vi.useFakeTimers();
+    try {
+      let active = false;
+      const end = vi.fn(() => { active = false; });
+      const jog = new JogController({ isPlaying: () => true, getPlayhead: () => 10,
+        seek: vi.fn(), setBend: vi.fn(), scratch: { isActive: () => active,
+          vinylMode: () => true, begin: () => { active = true; }, move: vi.fn(),
+          rate: () => 1, end } });
+      jog.onTouch(true, 0);
+      if (moving) jog.onTouchTicks(20, 10, GRV6_JOG_CALIBRATION, 'grv6');
+      const now = moving ? 11 : 35; // fresh motion coasts; stale motion ends.
+      jog.onTouch(false, now);
+      expect(end).toHaveBeenCalledTimes(moving ? 0 : 1);
+      if (moving) {
+        vi.advanceTimersByTime(12);
+        expect(end).toHaveBeenCalledOnce();
+      }
+      expect(vi.getTimerCount()).toBe(0);
+      jog.dispose();
+    } finally { vi.useRealTimers(); }
   });
 
   it('ordinary release crossfades without a doubled-gain DC transient', () => {

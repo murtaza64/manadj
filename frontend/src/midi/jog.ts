@@ -87,11 +87,13 @@ export const JOG_TOUCH_SEEK_SECONDS_PER_TICK = 0.01;
  * mapping relies on the same exclusivity).
  */
 export const JOG_FINE_CONTINUATION_MS = 250;
-/** Provisional GRV6 throw thresholds: retain the gesture only for fresh,
- * fast reverse motion. Continued real ticks, never inertia, keep it alive. */
-export const JOG_SPINBACK_RATE = -2;
-export const JOG_SPINBACK_FRESH_MS = 24;
-export const JOG_SPINBACK_IDLE_MS = 12;
+/** Release coast (vinyl hold): a released platter that was still moving
+ * keeps the scratch engaged — any stream's real ticks extend the gesture,
+ * forward or reverse, paused or playing — until rotation stops
+ * (JOG_RELEASE_IDLE_MS tick-free) or the platter is re-grabbed. A platter
+ * held still at release (no fresh motion) ends immediately. */
+export const JOG_RELEASE_FRESH_MS = 24;
+export const JOG_RELEASE_IDLE_MS = 12;
 export const JOG_RELEASE_RIM_SUPPRESS_MS = 80;
 
 /** Rate smoothing (paused rim seek): how much of the instantaneous rate
@@ -159,26 +161,24 @@ export class JogController {
     if (held) {
       if (this.touching || !this.port.scratch?.vinylMode()) return;
       if (!this.scratching && this.port.scratch.isActive()) return;
-      this.releaseBend();
-      this.clearScratchTimer();
-      this.suppressRimUntil = -Infinity;
-      if (!this.scratching) {
-        // begin() can synchronously notify a surface displacement. Let that
-        // cancellation see the in-flight gesture before querying acceptance.
-        this.scratching = true;
+      if (this.scratching) {
+        // Retouch of a released, still-spinning platter: same gesture —
+        // no new begin (Slip latch and trajectory survive), just re-hold.
+        this.releaseBend();
+        this.clearScratchTimer();
+        this.suppressRimUntil = -Infinity;
         this.touching = true;
-        this.port.scratch.begin();
-        this.scratchMotionMs = null;
+        this.scratchTickMs = nowMs;
+        return;
       }
-      this.scratching = this.port.scratch.isActive();
+      this.beginHeldScratch(nowMs);
       this.touching = this.scratching;
-      this.scratchTickMs = nowMs;
     } else {
       if (!this.touching) return;
       this.touching = false;
       const throwEligible = this.scratchMotionMs !== null
-        && nowMs - this.scratchMotionMs < JOG_SPINBACK_FRESH_MS
-        && (this.port.scratch?.rate() ?? 0) < JOG_SPINBACK_RATE;
+        && nowMs - this.scratchMotionMs < JOG_RELEASE_FRESH_MS
+        && Math.abs(this.port.scratch?.rate() ?? 0) > 0;
       if (throwEligible) this.scheduleScratchEnd();
       else this.finishScratch();
       this.suppressRimUntil = nowMs + JOG_RELEASE_RIM_SUPPRESS_MS;
@@ -187,8 +187,36 @@ export class JogController {
 
   /** Engine overrides (load/pause/seek/mode changes) invalidate controller holds. */
   syncState(): void {
-    if (this.scratching && !this.port.scratch?.isActive()) this.cancel();
+    if (this.scratching && !this.port.scratch?.isActive()) this.override();
     if (!this.scratching && this.port.scratch?.isActive()) this.releaseBend();
+  }
+
+  /**
+   * The engine ended our scratch (another control's transport dispatch,
+   * an override, a takeover): drop the scratch/coast state but KEEP the
+   * physical contact latch — the finger never left the platter, so its
+   * next touch ticks re-acquire the scratch. Only genuine contact loss
+   * (cancel: touch-up, unplug, surface or layer change) demands a
+   * re-touch.
+   */
+  override(): void {
+    const touching = this.touching;
+    this.cancel();
+    this.touching = touching;
+  }
+
+  /** Begin (or re-acquire) the scratch the held contact owns. */
+  private beginHeldScratch(nowMs: number): void {
+    this.releaseBend();
+    this.clearScratchTimer();
+    this.suppressRimUntil = -Infinity;
+    // begin() can synchronously notify a surface displacement. Let that
+    // cancellation see the in-flight gesture before querying acceptance.
+    this.scratching = true;
+    this.port.scratch.begin();
+    this.scratchMotionMs = null;
+    this.scratching = this.port.scratch.isActive();
+    this.scratchTickMs = nowMs;
   }
 
   cancel(): void {
@@ -221,7 +249,7 @@ export class JogController {
 
   private scheduleScratchEnd(): void {
     this.clearScratchTimer();
-    this.scratchTimer = setTimeout(() => this.finishScratch(), JOG_SPINBACK_IDLE_MS);
+    this.scratchTimer = setTimeout(() => this.finishScratch(), JOG_RELEASE_IDLE_MS);
   }
 
   private finishScratch(): void {
@@ -252,7 +280,12 @@ export class JogController {
     if (!this.scratching && this.port.scratch?.isActive()) return;
     if (profile === 'grv6') {
       if (!this.port.scratch?.vinylMode()) this.onTicks(ticks, nowMs, calibration, profile);
-      else if (this.scratching) this.moveScratch(ticks, nowMs, calibration);
+      else {
+        // Finger never left: the scratch was ended by an engine override
+        // (another control's transport dispatch) — rotation re-acquires it.
+        if (this.touching && !this.scratching) this.beginHeldScratch(nowMs);
+        if (this.scratching) this.moveScratch(ticks, nowMs, calibration);
+      }
       return;
     }
     if (this.port.isPlaying()) return;
@@ -277,8 +310,7 @@ export class JogController {
     if (profile === 'grv6' && this.scratching) {
       this.moveScratch(ticks, nowMs, calibration);
       return;
-    }
-    this.foldRate(ticks, nowMs);
+    }    this.foldRate(ticks, nowMs);
 
     if (this.port.isPlaying()) {
       this.setBendCalibration(calibration);
