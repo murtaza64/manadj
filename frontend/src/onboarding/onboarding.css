@@ -1,0 +1,205 @@
+/* First run + Rekordbox import wizard (#275). Flat design-system chrome
+   (utilities.css .btn vocabulary, tokens.ts vars); accent is the bright
+   saturated project accent. No backdrop-filter (stability/01). */
+
+.onboarding-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.75);
+}
+
+.onboarding-panel {
+  width: min(640px, calc(100vw - 48px));
+  max-height: calc(100vh - 48px);
+  overflow: auto;
+  background: var(--mantle);
+  border: 1px solid var(--accent);
+  padding: var(--space-24);
+}
+
+.onboarding-guide {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-12);
+  color: var(--text);
+  font-size: var(--font-body);
+}
+
+/* Standalone host (SYNC tab): same guide, page-width cap. */
+.onboarding-standalone {
+  max-width: 640px;
+  overflow: auto;
+}
+
+.onboarding-hero {
+  margin: 0;
+  font-size: var(--font-display);
+  color: var(--accent);
+}
+
+.onboarding-title {
+  margin: 0;
+  font-size: var(--font-title);
+  color: var(--accent);
+}
+
+.onboarding-muted {
+  margin: 0;
+  color: var(--subtext0);
+}
+
+.onboarding-muted code,
+.onboarding-guide code {
+  color: var(--text);
+}
+
+.onboarding-error {
+  margin: 0;
+  color: var(--danger);
+  font-weight: bold;
+}
+
+.onboarding-choices {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-12);
+}
+
+.onboarding-choice {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  padding: var(--space-16);
+  text-align: left;
+  background: transparent;
+  border: 1px solid var(--surface1);
+  color: var(--text);
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.onboarding-choice:hover:not(:disabled) {
+  background: var(--surface0);
+  border-color: var(--text);
+}
+
+.onboarding-choice.primary {
+  border-color: var(--accent);
+}
+
+.onboarding-choice.primary .onboarding-choice-title {
+  color: var(--accent);
+}
+
+.onboarding-choice:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.onboarding-choice-title {
+  font-size: var(--font-large);
+  font-weight: bold;
+}
+
+.onboarding-choice-desc {
+  color: var(--subtext0);
+}
+
+.onboarding-actions {
+  display: flex;
+  gap: var(--space-8);
+  justify-content: flex-end;
+}
+
+.onboarding-option {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  cursor: pointer;
+}
+
+.onboarding-counts,
+.onboarding-summary {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-12);
+}
+
+.onboarding-counts table,
+.onboarding-summary table {
+  border-collapse: collapse;
+}
+
+.onboarding-counts th,
+.onboarding-summary th {
+  text-align: left;
+  font-weight: normal;
+  color: var(--subtext0);
+  padding: var(--space-2) var(--space-16) var(--space-2) 0;
+  white-space: nowrap;
+}
+
+.onboarding-counts td,
+.onboarding-summary td {
+  color: var(--text);
+  font-weight: bold;
+  padding: var(--space-2) 0;
+}
+
+.onboarding-subhead {
+  font-size: var(--font-small);
+  font-weight: bold;
+  text-transform: uppercase;
+  color: var(--subtext0);
+  margin-bottom: var(--space-4);
+}
+
+.onboarding-skipped {
+  color: var(--warning);
+}
+
+.onboarding-phases {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+}
+
+.onboarding-phase {
+  display: grid;
+  grid-template-columns: 200px 1fr 110px;
+  align-items: center;
+  gap: var(--space-12);
+  color: var(--subtext0);
+}
+
+.onboarding-phase.active {
+  color: var(--accent);
+  font-weight: bold;
+}
+
+.onboarding-phase.done {
+  color: var(--success);
+}
+
+.onboarding-bar {
+  height: 6px;
+  background: var(--surface0);
+}
+
+.onboarding-bar-fill {
+  display: block;
+  height: 100%;
+  background: currentColor;
+}
+
+.onboarding-phase-count {
+  text-align: right;
+  font-size: var(--font-small);
+}
