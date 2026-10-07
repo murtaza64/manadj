@@ -89,6 +89,41 @@ CAPTURE note 36 (shift 38 = 4-beat, 39 = 8-beat); GAIN is CC 18/50
 - Sound Color FX: 4 per-channel knobs + one ON/OFF button (shift = cycle
   type FILTER/DUB ECHO/REVERB/NOISE).
 
+### Beat FX MIDI (channel 5, E1 p.3 — verified from the official PDF 2026-10-06)
+
+All messages on MIDI channel 5 (status nibble 4: note 0x94, CC 0xB4).
+
+| Control | Message | Shift |
+|---|---|---|
+| SELECT knob | NOTE per detent, 32–45 (below) | — |
+| CH SELECT 1/2/3/4 | NOTE 16/17/18/19 | 24/25/26/27 |
+| CH SELECT SP / MST | NOTE 22 / 20 | 30 / 28 |
+| LEVEL/DEPTH | CC 2 (MSB) / 34 (LSB), 14-bit | — |
+| ON/OFF | NOTE 71 (MIDI-OUT mirrors: lamp) | 67 (release FX) |
+| BEAT ◄ | NOTE 74 | 102 |
+| BEAT ► | NOTE 75 | 107 |
+| Beat indicator | MIDI-OUT only: CC 100, value = beats (below) | — |
+
+SELECT detent notes (rotating emits note-on for the new position): 32 DELAY,
+33 ECHO, 34 LOW CUT ECHO, 35 SPIRAL, 36 HELIX, 37 REVERB, 38 FLANGER,
+39 PHASER, 40 FILTER, 41 TRANS, 42 PITCH, 43 ROLL, 44 MOBIUS SAW,
+45 MOBIUS TRI.
+
+Beat indicator CC 100 values (per the E1 details column): 0x03=1/4,
+0x04=1/2, 0x21=3/4, 0x05=1, 0x06=2 (lights 1 and 4), 0x07=4, 0x08=8,
+0x09=16, 0x0A=32. manadj publishes the supported 1/4…8 ladder on connect
+and every BEAT change, and sends 0 on detach/all-off.
+
+manadj mapping (gh#272): ECHO/REVERB/FLANGER SELECT detents swap the one
+section's effect live; every unsupported detent explicitly selects `---` and turns FX
+off rather than retaining the prior effect. CH SELECT 1/2/3/4 map mutually
+exclusively to A/B/C/D, SP selects the currently silent hardware-only sampler
+target (omitted from the UI), and MST processes the summed
+post-crossfader/pre-Master program; ON/OFF gates the section and drives its
+LED; BEAT ◄ ► controls the global Echo fraction; LEVEL/DEPTH maps the unsigned
+MIDI throw to manadj's -1…1 balance coordinate (center 0). Shift-layer channel
+notes and release FX stay unbound. CH SELECT LEDs are hardware-controlled.
+
 ## Mixer
 
 4 strips: TRIM, 3-band EQ, headphone CUE button (shift = EQ↔stem-level mode),

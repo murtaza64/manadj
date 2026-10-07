@@ -55,15 +55,8 @@
 
 /* ── Diagonal pairs: grid mini-maps on the mixer strip ─────────────── */
 
-/* They sit absolutely over the wide crossfader slot's right edge so the
-   fader's centering flex math is untouched. */
-.perf-strip-slot.wide { position: relative; }
-
+/* They live between X-FADER and the Beat FX rack. */
 .pairlink-strip {
-  position: absolute;
-  left: calc(100% + 10px);
-  top: 50%;
-  transform: translateY(-50%);
   display: flex;
   align-items: center;
   gap: var(--space-4);

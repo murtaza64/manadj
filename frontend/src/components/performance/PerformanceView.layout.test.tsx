@@ -124,8 +124,19 @@ beforeEach(() => {
     getCrossfaderEnabled: () => true,
     getCueMix: () => 0,
     getCrossfaderAssignment: () => 'thru',
+    // Stable object: useMixerValue snapshots rely on reference equality.
+    getChannelState: (() => {
+      const flat = {};
+      return () => flat;
+    })(),
+    getBeatFxSection: (() => {
+      const section = { selected: 'echo', target: 'A', on: false, depth: 0, beats: 0.5 } as const;
+      return () => section;
+    })(),
     setCrossfader: vi.fn(), setCrossfaderEnabled: vi.fn(),
     setCrossfaderAssignment: vi.fn(), setCueMix: vi.fn(),
+    toggleBeatFxOn: vi.fn(), setBeatFxOn: vi.fn(), selectBeatFx: vi.fn(), selectBeatFxTarget: vi.fn(),
+    setBeatFxDepth: vi.fn(), stepBeatFxBeats: vi.fn(),
   } as unknown as Mixer;
   style = document.createElement('style');
   style.textContent = css;
@@ -169,35 +180,30 @@ function press(key: string, options: KeyboardEventInit = {}, target: EventTarget
   return event;
 }
 
-it('places QUANTIZE before XF and hides only its keycap when KBD is off', () => {
+it('places QUANT with the left utilities using the standard toggle style', () => {
   render();
   const button = container.querySelector<HTMLButtonElement>('button[aria-label="Quantize"]')!;
-  const hint = button.querySelector('kbd')!;
-  const label = button.querySelector('.perf-quantize-label')!;
-  expect(button.closest('.perf-strip-slot.wide')).not.toBeNull();
-  expect(button.nextElementSibling?.textContent).toBe('XF');
-  expect(label.textContent).toBe('QUANTIZE');
-  expect(hint.textContent).toBe('=');
+  expect(button.closest('.perf-strip-left')).not.toBeNull();
+  expect(button.textContent).toBe('QUANT');
+  expect(button.className).toContain('perf-strip-toggle');
   expect(button.getAttribute('aria-keyshortcuts')).toBe('=');
   const before = isQuantizeOn();
   try {
     act(() => button.click());
     expect(isQuantizeOn()).toBe(!before);
     expect(button.getAttribute('aria-pressed')).toBe(String(!before));
-    click('KBD');
-    expect(getComputedStyle(hint).visibility).toBe('hidden');
-    expect(getComputedStyle(label).gridColumn).toBe('1 / -1');
     expect(button.disabled).toBe(false);
-    click('KBD');
-    expect(getComputedStyle(hint).visibility).not.toBe('hidden');
   } finally { act(() => setQuantize(before)); }
 });
 
 it('toggles persisted soft takeover beside the performance section controls', () => {
   render();
+  const links = container.querySelector('.pairlink-strip')!;
+  expect(links.parentElement?.className).toBe('perf-strip-right');
+  expect(links.nextElementSibling?.className).toBe('perf-fx-row');
   const button = [...container.querySelectorAll('button')].find((node) => node.textContent === 'TAKEOVER')!;
   const leftLabels = [...container.querySelectorAll('.perf-strip-left button')].map((node) => node.textContent);
-  expect(leftLabels.slice(-4)).toEqual(['KBD', 'WAVE', 'DECK', 'TAKEOVER']);
+  expect(leftLabels.slice(-4)).toEqual(['WAVE', 'DECK', 'QUANT', 'TAKEOVER']);
   expect(button.className).toBe('player-button perf-strip-toggle on');
   expect(button.getAttribute('aria-pressed')).toBe('true');
 

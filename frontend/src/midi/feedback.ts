@@ -3,6 +3,7 @@ import { CHANNEL_IDS, STEM_NAMES } from '../playback/mixer';
 import type { ChannelId, StemName } from '../playback/mixer';
 import { beatsBetween } from '../playback/quantize';
 import { encodeMeterValue } from './levelMeter';
+import type { BeatFxSectionState } from '../playback/beatFx';
 
 /**
  * The Feedback seam (midi-pad-leds PRD, ADR 0002): deck state in →
@@ -381,7 +382,54 @@ export function encodeAssistantLed(
   return feedback.assistant ? [encodeLed(feedback.assistant, lit)] : [];
 }
 
+/**
+ * Beat FX ON/OFF lamp state → messages (gh#272): mirrors the section gate.
+ */
+export function encodeBeatFxLed(
+  feedback: MappingFeedback,
+  lit: boolean
+): readonly MidiMessage[] {
+  return feedback.beatFx ? [encodeLed(feedback.beatFx, lit)] : [];
+}
+
+/** FX button lights (beat-fx-engage): a button is lit iff the section
+ * runs its effect on the button's scope (side's focused Deck, or master). */
+export function encodeBeatFxEngageLeds(
+  feedback: MappingFeedback,
+  section: Readonly<Pick<BeatFxSectionState, 'on' | 'selected' | 'target'>>,
+  focus: Readonly<Record<'left' | 'right', ChannelId>>
+): readonly MidiMessage[] {
+  return (feedback.beatFxEngage ?? []).map((lamp) =>
+    encodeLed(
+      lamp,
+      section.on &&
+        section.selected === lamp.effect &&
+        section.target === (lamp.scope === 'master' ? 'master' : focus[lamp.scope])
+    )
+  );
+}
+
 const CONTROL_CHANGE = 0xb;
+
+/** Current Beat FX fraction → the device's time-unit indicator CC. */
+export function encodeBeatFxBeat(
+  feedback: MappingFeedback,
+  beats: number
+): readonly MidiMessage[] {
+  const address = feedback.beatFxBeat;
+  if (!address) return [];
+  const encoded = address.values.find((entry) => entry.beats === beats);
+  return encoded
+    ? [[(CONTROL_CHANGE << 4) | address.channel, address.number, encoded.value]]
+    : [];
+}
+
+function beatFxBeatOffMessage(feedback: MappingFeedback): MidiMessage[] {
+  const address = feedback.beatFxBeat;
+  return address
+    ? [[(CONTROL_CHANGE << 4) | address.channel, address.number, address.offValue]]
+    : [];
+}
 
 /**
  * A channel level meter's normalized position [0, 1] → its CC message.
@@ -420,6 +468,9 @@ export function allOffMessages(feedback: MappingFeedback): readonly MidiMessage[
       return addresses ? deckAddresses(addresses).map((address) => encodeLed(address, false)) : [];
     }),
     ...encodeAssistantLed(feedback, false),
+    ...encodeBeatFxLed(feedback, false),
+    ...(feedback.beatFxEngage ?? []).map((lamp) => encodeLed(lamp, false)),
+    ...beatFxBeatOffMessage(feedback),
     ...CHANNEL_IDS.flatMap((channel) => {
       const meter = feedback.meters?.[channel];
       return meter ? [meterOffMessage(meter)] : [];

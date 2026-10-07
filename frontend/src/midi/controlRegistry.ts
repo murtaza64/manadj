@@ -1,5 +1,6 @@
 import type { EqBand } from '../playback/graph';
 import type { ChannelId, StemName } from '../playback/mixer';
+import type { BeatFxEffectId, BeatFxSectionState, BeatFxTarget } from '../playback/beatFx';
 import type { Track } from '../types';
 import type { JogProfile } from './jogCalibration';
 
@@ -130,6 +131,7 @@ export interface MidiMixerControls {
     filter: number;
     fader: number;
   };
+  getBeatFxSection(): Readonly<BeatFxSectionState>;
   getCrossfader(): number;
   getMaster(): number;
   getCueLevel(): number;
@@ -151,6 +153,15 @@ export interface MidiMixerControls {
   setCueLevel(value: number): void;
   /** Cue/mix blend, 0 (cue only) .. 1 (master only) (headphone-cue 03). */
   setCueMix(value: number): void;
+  /** The one Beat FX section (gh#272), mirrored by GRV6 channel 5. */
+  toggleBeatFxOn(): void;
+  /** Gate the section explicitly (no-op turning on with nothing selected). */
+  setBeatFxOn(on: boolean): void;
+  selectBeatFx(effect: BeatFxEffectId | null): void;
+  selectBeatFxTarget(target: BeatFxTarget): void;
+  /** Bipolar balance coordinate: -1 original, 0 midpoint, +1 effect. */
+  setBeatFxDepth(depth: number): void;
+  stepBeatFxBeats(change: 'halve' | 'double'): void;
 }
 
 const deckControls = new Map<ChannelId, MidiDeckControls>();
