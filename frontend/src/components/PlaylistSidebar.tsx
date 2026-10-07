@@ -400,6 +400,12 @@ export default function PlaylistSidebar({
             )}
             {isLoading ? (
               <div style={{ padding: '8px 12px', color: 'var(--subtext1)' }}>Loading...</div>
+            ) : playlists.length === 0 && !isCreating ? (
+              /* Empty-state guidance (feature-tour #283) */
+              <div style={{ padding: '8px 12px', color: 'var(--overlay1)' }}>
+                No playlists yet — create one with + New… below, or import from
+                rekordbox in SYNC.
+              </div>
             ) : (
               playlists.map((playlist: Playlist) => (
                 <div
