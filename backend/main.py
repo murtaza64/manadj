@@ -15,6 +15,7 @@ from .tasks import models as task_models  # noqa: F401  (registers tables on Bas
 from .tasks.worker import TaskWorkerPool
 from .soulseek import router as soulseek_router
 from .acquisition import connect_router as soundcloud_connect_router
+from .spotify import router as spotify_router
 from .logging_config import setup_logging
 from .feedback import FeedbackService, Workspace
 from .routers.feedback import router as feedback_router
@@ -95,6 +96,8 @@ app.include_router(feedback_router)
 app.include_router(app_config.router, prefix="/api/config", tags=["app-config"])
 app.include_router(soulseek_router.router, prefix="/api/soulseek", tags=["soulseek"])
 app.include_router(soundcloud_connect_router.router, prefix="/api/soundcloud", tags=["soundcloud"])
+app.include_router(spotify_router.router, prefix="/api/spotify", tags=["spotify"])
+app.include_router(spotify_router.want_router, prefix="/api/acquisition", tags=["acquisition"])
 
 # Onboarding (#274): Rekordbox bulk import for first run.
 from .routers import onboarding as onboarding_router  # noqa: E402

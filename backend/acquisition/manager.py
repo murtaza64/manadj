@@ -98,14 +98,17 @@ def set_classification(db: Session, item_id: int, classification: str) -> Source
     return item
 
 
-def list_source_items(db: Session, source_name: str = "soundcloud") -> list[SourceItem]:
-    """All Source Items for a Source, most recently liked first."""
-    return (
-        db.query(SourceItem)
-        .filter(SourceItem.source == source_name)
-        .order_by(SourceItem.liked_at.desc())
-        .all()
-    )
+def list_source_items(db: Session, source_name: str | None = "soundcloud") -> list[SourceItem]:
+    """Source Items for a Source (None = every Source), most recently liked first."""
+    query = db.query(SourceItem)
+    if source_name is not None:
+        query = query.filter(SourceItem.source == source_name)
+    return query.order_by(SourceItem.liked_at.desc(), SourceItem.id.desc()).all()
+
+
+# Sources whose Source Items address their own audio (Direct Suppliers).
+# Others (Spotify, #347) are fulfilled through a Search Supplier only.
+DIRECT_SUPPLIER_SOURCES = ("soundcloud",)
 
 
 @dataclass(frozen=True)
@@ -312,6 +315,11 @@ def queue_item(db: Session, item_id: int) -> "Task":
     from ..tasks.manager import create_task, list_tasks
 
     item = db.query(SourceItem).filter(SourceItem.id == item_id).one()
+    if item.source not in DIRECT_SUPPLIER_SOURCES:
+        raise ValueError(
+            f"source item {item_id} is from {item.source}, which supplies no audio — "
+            "get it through Soulseek"
+        )
     if item.state not in ("new", "queued"):
         raise ValueError(f"source item {item_id} is {item.state}; only new items can be queued")
 
@@ -351,6 +359,7 @@ def queue_bulk(db: Session, item_ids: list[int]) -> BulkQueueStats:
         item = db.query(SourceItem).filter(SourceItem.id == item_id).one_or_none()
         if (
             item is None
+            or item.source not in DIRECT_SUPPLIER_SOURCES
             or item.state not in ("new", "queued")
             or _has_failed_task(db, item_id)
             or get_correspondence(db, item_id) is not None

@@ -38,6 +38,7 @@ const SetupSettings = lazy(() => import('../setup/SetupSettings'));
 const ControllerCheckSettings = lazy(() => import('../setup/controllerCheck/ControllerCheckSettings'));
 const SoulseekSettings = lazy(() => import('../setup/soulseek/SoulseekSettings'));
 const SoundCloudSettings = lazy(() => import('../setup/soundcloud/SoundCloudSettings'));
+const SpotifySettings = lazy(() => import('../setup/spotify/SpotifySettings'));
 const PARAMS = [
   {
     key: 'resonance',
@@ -460,6 +461,7 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
     detail: 'SoundCloud, Soulseek',
     sections: [
       { id: 'soundcloud', title: 'SoundCloud', render: () => <SoundCloudSettings /> },
+      { id: 'spotify', title: 'Spotify', render: () => <SpotifySettings /> },
       { id: 'soulseek', title: 'Soulseek', render: () => <SoulseekSettings /> },
     ],
   },

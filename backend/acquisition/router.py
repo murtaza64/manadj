@@ -267,12 +267,20 @@ def _search_query(item: SourceItem) -> str:
 
 
 @router.get("/items", response_model=list[SourceItemResponse])
-def get_source_items(db: Session = Depends(get_db)) -> list[SourceItemResponse]:
+def get_source_items(
+    source: str | None = None, db: Session = Depends(get_db)
+) -> list[SourceItemResponse]:
+    """Source Items of every Source (or one, with ?source=), newest first."""
+    return item_responses(db, list_source_items(db, source))
+
+
+def item_responses(db: Session, items: list[SourceItem]) -> list[SourceItemResponse]:
+    """Wire shapes for Source Items: correspondence, download, provenance joined."""
     correspondences = _correspondence_map(db)
     downloads = _download_map(db)
     provenances = _provenance_map(db)
     responses = []
-    for item in list_source_items(db):
+    for item in items:
         resp = SourceItemResponse.model_validate(item)
         resp.correspondence = correspondences.get(item.id)
         resp.download = downloads.get(item.id)
