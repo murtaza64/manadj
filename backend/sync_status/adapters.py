@@ -58,10 +58,18 @@ class EngineSurfaceReader:
         {"title", "artist", "key", "bpm", "energy", "tags", "hotcues", "beatgrid", "maincue"}
     )
 
-    def __init__(self, engine_db) -> None:  # EngineDJDatabase
-        self._db = engine_db
+    def __init__(self, engine_db, drive_dbs=()) -> None:  # EngineDJDatabase(s)
+        # Main library first, then per-drive libraries (#307): one Surface.
+        self._dbs = [engine_db, *drive_dbs]
 
     def list_tracks(self) -> list[SurfaceTrackRef]:
+        refs: list[SurfaceTrackRef] = []
+        for db in self._dbs:
+            refs.extend(self._list_library(db))
+        return refs
+
+    @staticmethod
+    def _list_library(engine_db) -> list[SurfaceTrackRef]:
         from sqlalchemy.orm import joinedload
 
         from backend.sync_performance import performance_fields_from_blobs
@@ -70,7 +78,7 @@ class EngineSurfaceReader:
         from enginedj.models.track import Track as EDJTrack
         from enginedj.ratings import rating_to_energy
 
-        with self._db.session_m() as session:
+        with engine_db.session_m() as session:
             tags_by_track: dict[int, list[str]] = {}
             root = (
                 session.query(Playlist)
@@ -290,9 +298,11 @@ def build_surfaces() -> dict[str, SurfaceReader]:
     try:
         if config.database.engine_dj_path:
             from enginedj.connection import EngineDJDatabase
+            from enginedj.libraries import open_drive_libraries
 
+            main = EngineDJDatabase(Path(config.database.engine_dj_path))
             surfaces["engine"] = EngineSurfaceReader(
-                EngineDJDatabase(Path(config.database.engine_dj_path))
+                main, open_drive_libraries(main.database_path)
             )
     except Exception as e:
         logger.warning("sync_status: Engine DJ surface unavailable: %s", e)

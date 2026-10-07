@@ -21,42 +21,18 @@ export interface TourSection {
   steps: TourStep[];
 }
 
+// Perform first (setup-guides #301): fresh installs open in PERFORM, so its
+// tour fires first and carries the Modes step; order is also the ? menu's.
 export const TOUR_SECTIONS: TourSection[] = [
-  {
-    id: 'library',
-    label: 'Library',
-    steps: [
-      {
-        anchor: 'topbar.modes',
-        title: 'Modes',
-        body: 'PERFORM is for playing, EDIT for shaping mixes, SYNC for importing and exporting. EXPORT opens the full Library. Backtick (`) switches between the Library and Decks.',
-      },
-      {
-        anchor: 'library.sidebar',
-        title: 'Organize your Tracks',
-        body: 'Choose a playlist here, or make one with + New…. Sets hold a planned running order; Sessions hold what you played.',
-      },
-      {
-        anchor: 'library.search',
-        title: 'Search and filters',
-        body: 'Search by name, then narrow the results with BPM, Key or tags. Filters combine; the count shows matching Tracks / total.',
-      },
-      {
-        anchor: 'library.table',
-        title: 'Track table',
-        body: 'Select a Track to inspect it below. Drag Tracks into a playlist or Set; drag column headers to arrange the table.',
-      },
-      {
-        anchor: 'library.player',
-        title: 'Listen and prepare',
-        body: 'Preview the selected Track here, set Hot Cues, and edit its metadata. Close this Tour to try the controls.',
-      },
-    ],
-  },
   {
     id: 'performance',
     label: 'Perform',
     steps: [
+      {
+        anchor: 'topbar.modes',
+        title: 'Modes',
+        body: 'PERFORM is for playing, EDIT for shaping mixes, SYNC for importing and exporting. ⋯ holds EXPORT (the full Library) and HISTORY. Backtick (`) switches between the Library and Decks.',
+      },
       {
         anchor: 'performance.browse',
         title: 'Start with your music',
@@ -76,6 +52,32 @@ export const TOUR_SECTIONS: TourSection[] = [
         anchor: 'performance.mixer',
         title: 'Blend the Decks',
         body: 'The crossfader blends its assigned Decks. This strip also holds deck count and keyboard-hint controls. Close the Tour when you are ready to play.',
+      },
+    ],
+  },
+  {
+    id: 'library',
+    label: 'Library (Export)',
+    steps: [
+      {
+        anchor: 'library.sidebar',
+        title: 'Organize your Tracks',
+        body: 'Choose a playlist here, or make one with + New…. Sets hold a planned running order; Sessions hold what you played.',
+      },
+      {
+        anchor: 'library.search',
+        title: 'Search and filters',
+        body: 'Search by name, then narrow the results with BPM, Key or tags. Filters combine; the count shows matching Tracks / total.',
+      },
+      {
+        anchor: 'library.table',
+        title: 'Track table',
+        body: 'Select a Track to inspect it below. Drag Tracks into a playlist or Set; drag column headers to arrange the table.',
+      },
+      {
+        anchor: 'library.player',
+        title: 'Listen and prepare',
+        body: 'Preview the selected Track here, set Hot Cues, and edit its metadata. Close this Tour to try the controls.',
       },
     ],
   },

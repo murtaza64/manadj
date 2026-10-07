@@ -24,11 +24,14 @@ import {
   DEFAULT_BEAT_FX_SETTINGS,
   type BeatFxSettings,
 } from '../playback/beatFxSettings';
+import { APP_VERSION } from '../version';
 
 const WaveformSettings = lazy(() => import('../waveform/StyleTuningPage'));
 const ControllerCalibrationSettings = lazy(() => import('./ControllerCalibrationSettings'));
 const MouseJogSettings = lazy(() => import('./MouseJogSettings'));
 const LibrarySettings = lazy(() => import('./LibrarySettings'));
+const ControllerCheckSettings = lazy(() => import('../setup/controllerCheck/ControllerCheckSettings'));
+const SoulseekSettings = lazy(() => import('../setup/soulseek/SoulseekSettings'));
 const PARAMS = [
   {
     key: 'resonance',
@@ -396,7 +399,7 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
     title: 'Controllers',
     detail: 'Controller check, jog calibration',
     sections: [
-      // slot: Controller check (#292) — goes first
+      { id: 'controller-check', title: 'Controller check', render: () => <ControllerCheckSettings /> },
       { id: 'jog', title: 'Jog calibration', render: () => <ControllerCalibrationSettings /> },
     ],
   },
@@ -419,7 +422,7 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
     detail: 'SoundCloud, Soulseek',
     sections: [
       // slot: SoundCloud (#290)
-      // slot: Soulseek (#291)
+      { id: 'soulseek', title: 'Soulseek', render: () => <SoulseekSettings /> },
     ],
   },
   {
@@ -471,6 +474,7 @@ export default function SettingsPage({ performance = false }: { performance?: bo
         </div>
         <p>
           Changes apply immediately. Preferences are stored with your library.
+          <span className="settings-version">manaDJ v{APP_VERSION}</span>
         </p>
       </header>
       <div className="settings-layout">

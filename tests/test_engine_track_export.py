@@ -246,3 +246,51 @@ def test_ensure_engine_closed_uses_psutil(monkeypatch):
     )
     with pytest.raises(te.EngineRunningError):
         te.ensure_engine_closed()
+
+
+# --- cross-drive guard (#306) -------------------------------------------------
+
+
+def _windows_relpath(other_drive: Path):
+    """os.path.relpath as ntpath raises it for a track on another drive."""
+    import os
+
+    real = os.path.relpath
+
+    def relpath(path, start=None):
+        if Path(path).is_relative_to(other_drive):
+            raise ValueError("path is on mount 'D:', start on mount 'C:'")
+        return real(path, start)
+
+    return relpath
+
+
+def test_cross_drive_track_skipped_and_reported(db, make_track, library, monkeypatch):
+    import enginedj.track_export as te
+
+    root, tracks = library
+    other = tracks.parent / "D-drive"
+    other.mkdir()
+    edb = InMemoryEngineDB(root)
+    near = make_file(tracks, "near.mp3")
+    far = make_file(other, "far.mp3")
+    make_track(filename=str(near), title="Near")
+    make_track(filename=str(far), title="Far")
+    monkeypatch.setattr(te.os.path, "relpath", _windows_relpath(other))
+
+    result = export_tracks_to_engine(db, edb)
+
+    assert result.exported_to_target == 1
+    assert result.skipped_other_drive == 1
+    assert result.skipped_other_drive_paths == [str(far)]
+    with edb.session_m() as s:
+        assert [t.path for t in s.query(EDJTrack).all()] == ["../Tracks/near.mp3"]
+
+
+def test_engine_relative_path_raises_other_drive(library, monkeypatch):
+    import enginedj.track_export as te
+
+    root, tracks = library
+    monkeypatch.setattr(te.os.path, "relpath", _windows_relpath(tracks))
+    with pytest.raises(te.OtherDriveError):
+        te.engine_relative_path(tracks / "x.mp3", root)

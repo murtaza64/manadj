@@ -1,0 +1,119 @@
+# Short, user-facing definitions. Canonical meanings: CONTEXT.md.
+# slug is stable — chapters reference it, and it anchors #term-<slug>.
+- slug: track
+  term: Track
+  def: An audio file plus everything you know about it — title, artist, Key, BPM, Energy, Tags, Hot Cues.
+- slug: tag
+  term: Tag
+  def: A label you put on a Track. Every Tag belongs to one Tag Category.
+- slug: tag-category
+  term: Tag Category
+  def: A named, colored, ordered group of Tags — Genre, Vibe, Role.
+- slug: energy
+  term: Energy
+  def: How intense a Track is, 1–5. Its own field, not a Tag.
+- slug: playlist
+  term: Playlist
+  def: A hand-ordered list of Tracks, curated in manadj and Exported.
+- slug: unprocessed
+  term: Unprocessed track
+  def: Added but not yet curated — no Tags, title and artist not cleaned up.
+- slug: archived
+  term: Archived
+  def: Out of your active library. Nothing is deleted, and it never comes back on its own. Reversible.
+- slug: deck
+  term: Deck
+  def: One of four players, A–D. A Deck keeps playing when you switch views.
+- slug: mixer
+  term: Mixer
+  def: Trim, 3-band EQ, filter, and fader per Deck, plus crossfader, master, and Beat FX.
+- slug: hot-cue
+  term: Hot Cue
+  def: One of 8 saved positions in a Track that you jump to while playing.
+- slug: cue-mode
+  term: Cue mode
+  def: What a Hot Cue does on a paused Deck. Gated previews while held; Trigger starts playback.
+- slug: quantize
+  term: Quantize
+  def: Snaps cue placement and loops to beats; Hot Cue jumps preserve the playing Deck's beat phase.
+- slug: key-lock
+  term: Key Lock
+  def: Keeps a Track in its Key while you move the pitch fader.
+- slug: sync
+  term: SYNC
+  def: Decks join one shared tempo. Move any member's pitch and the group follows.
+- slug: follow-mode
+  term: Follow mode
+  def: Keeps the track list filtered to good next Tracks for what is playing.
+- slug: linked
+  term: Linked
+  def: Your one-tap note that two Tracks go well together.
+- slug: known
+  term: Known
+  def: Tracks connected by something you did — Linked, or a saved Transition or Cameo.
+- slug: observed
+  term: Observed
+  def: A pair you have mixed more than once without saving anything for it.
+- slug: compatible
+  term: Compatible
+  def: Tracks whose tempo fits and whose Key, Tags, or shared artist suggest a match. Energy helps rank them.
+- slug: session
+  term: Session
+  def: The record of one stretch of playing, timed to the moment. Controls only, no audio.
+- slug: take
+  term: Take
+  def: A blend between two Tracks, captured automatically while you play.
+- slug: transition
+  term: Transition
+  def: A saved move from one Track into another, with alignment, fades, EQ, and filter moves.
+- slug: cameo
+  term: Cameo
+  def: A guest Track that drops in over a host Track and leaves again — a double or a tease.
+- slug: routine
+  term: Routine
+  def: A saved passage weaving three or more Track slots, captured live or authored in the Mix editor.
+- slug: mix-editor
+  term: Mix editor
+  def: One timeline for editing any Transition, Cameo, or Routine, or reviewing a Take.
+- slug: promote
+  term: Promote
+  def: Turning a reviewed Take into a saved Transition (or Cameo, or Routine).
+- slug: set
+  term: Set
+  def: Tracks in order, where each handover points at a Transition, a Take, or a hard cut.
+- slug: unresolved
+  term: Unresolved
+  def: A handover in a Set with nothing pinned. It uses your best saved Transition for the pair.
+- slug: conductor
+  term: Conductor
+  def: Plays a Set on the Decks and Mixer. A manual Deck or Mixer gesture hands control back to you.
+- slug: pickup
+  term: Pickup
+  def: Hand control back to the Conductor from where the Decks are now.
+- slug: beatgrid
+  term: Beatgrid
+  def: Where every beat falls in a Track. BPM is read from it.
+- slug: structure
+  term: Structure
+  def: A Track split into intro, buildup, drop, breakdown, and outro, found by Analysis.
+- slug: cue-ladder
+  term: Cue-slot convention
+  def: Hot Cues 1–4 lead into the drop. 4 is the drop; 3 is 8 bars before, 2 is 16 bars before, and 1 is typically 32 bars before.
+- slug: export
+  term: Export
+  def: Pushes your Library out to Engine DJ, Rekordbox, or file tags. manadj's values win.
+- slug: external-import
+  term: External Import
+  def: Pulls things you changed downstream back in, like cues set at a gig or Keys analyzed in Engine.
+- slug: source-item
+  term: Source Item
+  def: A track on SoundCloud you've liked and might want to download.
+- slug: controller
+  term: Controller
+  def: A MIDI DJ controller driving the Decks, Mixer, and library browsing.
+- slug: setup-guide
+  term: Setup guide
+  def: Planned for the first release — a short, skippable flow that sets up one thing, rerunnable from Settings.
+- slug: tour
+  term: Tour
+  def: Pointers to the main controls, shown the first time you open each area.

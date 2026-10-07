@@ -119,14 +119,19 @@ def export_engine_tracks(
     except EngineRunningError as e:
         raise HTTPException(status_code=409, detail=str(e))
 
+    from enginedj.libraries import open_drive_libraries
+
     engine_db = EngineDJDatabase(Path(config.database.engine_dj_path))
-    snapshot_database(engine_db.database_path)
+    drive_dbs = open_drive_libraries(engine_db.database_path)
+    for lib in (engine_db, *drive_dbs):
+        snapshot_database(lib.database_path)
 
     return export_tracks_to_engine(
         manadj_session=db,
         engine_db=engine_db,
         playlist_name=request.playlist_name,
         validate_files=request.validate_files,
+        drive_dbs=drive_dbs,
     )
 
 

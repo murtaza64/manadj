@@ -8,6 +8,7 @@ import { createBeatjumpSize, type BeatjumpSize } from '../../playback/beatjump';
 import { KeepAliveView } from '../../contexts/KeepAliveView';
 import { DeckKeys } from './DeckKeys';
 import { DECK_KEYS } from './performanceKeys';
+import { setPlatformOverride } from '../../utils/platform';
 import { mouseSeekDelta } from './mouseControl';
 import { resetMouseJogSettings, setMouseJogSettings } from './mouseJogSettings';
 
@@ -208,6 +209,24 @@ describe('mouse-key gestures and cue walking', () => {
     expect(engine.resizeLoop.mock.calls).toEqual([['halve'], ['double']]);
     expect(engine.jumpBeats).not.toHaveBeenCalled();
     expect(hotCues.walk).not.toHaveBeenCalled();
+  });
+
+  it('uses Ctrl (not the Win/Super key) for the primary chords off macOS', () => {
+    setPlatformOverride('other');
+    try {
+      fixture.deck = 'A'; render();
+      expect(key('g', { metaKey: true }).defaultPrevented).toBe(false);
+      expect(syncGroup.match).not.toHaveBeenCalled();
+      expect(key('g', { ctrlKey: true }).defaultPrevented).toBe(true);
+      expect(syncGroup.match).toHaveBeenCalledExactlyOnceWith('A');
+      key('G', { ctrlKey: true, shiftKey: true });
+      expect(syncGroup.toggle).toHaveBeenCalledExactlyOnceWith('A');
+      key('S', { ctrlKey: true, shiftKey: true });
+      expect(engine.resizeLoop).toHaveBeenCalledExactlyOnceWith('double');
+      expect(key('s', { ctrlKey: true, metaKey: true }).defaultPrevented).toBe(false);
+    } finally {
+      setPlatformOverride('mac');
+    }
   });
 
   it.each(['A', 'B', 'C', 'D'] as const)('keeps all four hotcue triggers and Shift-unsets on %s', deck => {
