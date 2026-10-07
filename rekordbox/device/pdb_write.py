@@ -150,7 +150,9 @@ class TrackRowSpec:
     unknown26: int = 41
     color_id: int = 0
     rating: int = 0
-    unknown29: int = 4
+    # crate-digger leaves this unnamed, but the corpus distribution matches
+    # codecs exactly: MP3=1, M4A/AAC=4, FLAC=5, WAV=0x0b (AIFF=0x0c)
+    file_type: int = 4
     unknown30: int = 3
 
     def __post_init__(self) -> None:
@@ -207,7 +209,7 @@ def encode_track_row(spec: TrackRowSpec) -> bytes:
         spec.unknown26,
         spec.color_id,
         spec.rating,
-        spec.unknown29,
+        spec.file_type,
         spec.unknown30,
     )
     assert len(fixed) == 94
