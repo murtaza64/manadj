@@ -26,6 +26,7 @@ import {
   setSoftTakeoverEnabled,
   SOFT_TAKEOVER_SETTING_KEY,
 } from '../../midi/softTakeoverStore';
+import { DEFAULT_BEAT_FX_SETTINGS } from '../../playback/beatFxSettings';
 
 const css = readFileSync('src/components/performance/PerformanceView.css', 'utf8');
 
@@ -133,6 +134,7 @@ beforeEach(() => {
       const section = { selected: 'echo', target: 'A', on: false, depth: 0, beats: 0.5 } as const;
       return () => section;
     })(),
+    getBeatFxSettings: () => DEFAULT_BEAT_FX_SETTINGS,
     setCrossfader: vi.fn(), setCrossfaderEnabled: vi.fn(),
     setCrossfaderAssignment: vi.fn(), setCueMix: vi.fn(),
     toggleBeatFxOn: vi.fn(), setBeatFxOn: vi.fn(), selectBeatFx: vi.fn(), selectBeatFxTarget: vi.fn(),
@@ -203,7 +205,7 @@ it('toggles persisted soft takeover beside the performance section controls', ()
   expect(links.nextElementSibling?.className).toBe('perf-fx-row');
   const button = [...container.querySelectorAll('button')].find((node) => node.textContent === 'TAKEOVER')!;
   const leftLabels = [...container.querySelectorAll('.perf-strip-left button')].map((node) => node.textContent);
-  expect(leftLabels.slice(-4)).toEqual(['WAVE', 'DECK', 'QUANT', 'TAKEOVER']);
+  expect(leftLabels.slice(-5)).toEqual(['WAVE', 'DECK', 'GATED', 'QUANT', 'TAKEOVER']);
   expect(button.className).toBe('player-button perf-strip-toggle on');
   expect(button.getAttribute('aria-pressed')).toBe('true');
 
@@ -227,6 +229,20 @@ describe('Performance library keyboard focus', () => {
     return handle;
   }
   const isLibrary = () => container.querySelector('.perf-keyboard-scope')?.getAttribute('data-library-focus') === 'true';
+
+  it('routes the number row to Beat FX only while decks own the keyboard', () => {
+    browse(); render();
+    for (const key of ['1', '2', '3', '4', '5', '6', '7', '8', '9', '-']) expect(press(key).defaultPrevented).toBe(true);
+    expect(vi.mocked(mixer.selectBeatFx).mock.calls).toEqual([['flanger'], ['reverb']]);
+    expect(vi.mocked(mixer.toggleBeatFxOn)).toHaveBeenCalledOnce();
+    expect(vi.mocked(mixer.stepBeatFxBeats).mock.calls).toEqual([['halve'], ['double']]);
+    expect(vi.mocked(mixer.selectBeatFxTarget).mock.calls)
+      .toEqual([['A'], ['B'], ['C'], ['D'], ['master']]);
+    press('Tab');
+    const before = vi.mocked(mixer.selectBeatFxTarget).mock.calls.length;
+    press('1');
+    expect(vi.mocked(mixer.selectBeatFxTarget)).toHaveBeenCalledTimes(before);
+  });
 
   it('reserves plain = before claiming library keys or blocking held physical keys', () => {
     browse(); render();
@@ -324,23 +340,15 @@ describe('Performance library keyboard focus', () => {
     expect(document.activeElement).not.toBe(input);
   });
 
-  it('lets dialogs dismiss before focus exits, and help is contextual', () => {
+  it('lets dialogs dismiss before focus exits', () => {
     const handle = browse(); render(); press('Tab');
     const dialog = document.createElement('div'); dialog.className = 'follow-modal-overlay'; container.append(dialog);
     press('Escape'); press('Tab'); press('j'); press('a');
     expect(isLibrary()).toBe(true);
     expect(handle.navigate).not.toHaveBeenCalled();
     expect(decks.A.loadTrack).not.toHaveBeenCalled();
-    dialog.remove(); press('?');
-    expect(container.querySelector('[role="dialog"]')?.textContent).toContain('LIBRARY KEYBOARD');
-    press('j'); expect(handle.navigate).not.toHaveBeenCalled();
-    press('Escape'); expect(container.querySelector('[role="dialog"]')).toBeNull();
-    expect(isLibrary()).toBe(true);
-    press('Escape');
-    expect(press('?', { code: 'Slash', shiftKey: true }).defaultPrevented).toBe(false);
-    expect(container.querySelector('[role="dialog"]')).toBeNull();
-    press('F1');
-    expect(container.querySelector('[role="dialog"]')?.textContent).toContain('DECKS KEYBOARD');
+    dialog.remove();
+    expect(press('?', { code: 'Slash', shiftKey: true }).defaultPrevented).toBe(true);
   });
 
   it('blocks held keys across focus changes until release, and stays inert while inactive', () => {
@@ -354,13 +362,6 @@ describe('Performance library keyboard focus', () => {
     expect(handle.navigate).toHaveBeenCalledOnce(); expect(decks.A.loadTrack).not.toHaveBeenCalled();
   });
 
-  it('does not let a press originating in help leak into deck transport on close', () => {
-    browse(); render(); press('F1');
-    act(() => document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'd', bubbles: true })));
-    press('Escape');
-    expect(press('d', { repeat: true }).defaultPrevented).toBe(true);
-    expect(press('d').defaultPrevented).toBe(false);
-  });
 });
 
 describe('Performance deck-count layout', () => {

@@ -55,7 +55,7 @@ def get_source() -> Source:
     if not token:
         raise HTTPException(
             status_code=400,
-            detail="SoundCloud is not connected: set SOUNDCLOUD_OAUTH_TOKEN (or [soundcloud] oauth_token in the settings file).",
+            detail="SoundCloud isn't connected — connect it in Settings → SoundCloud.",
         )
     return SoundCloudSource(token)
 

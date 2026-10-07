@@ -12,6 +12,7 @@ from pathlib import Path
 from sqlalchemy.orm import Session
 
 from .. import crud
+from ..sync_common.matching import path_key
 from ..stems_tasks import BACKLOG_GUARD
 from .import_manager import LibraryImportManager, build_candidate
 from .models import DropImportResult
@@ -69,7 +70,7 @@ def drop_import(
     # library_path is unused on this path (no directory scan).
     manager = LibraryImportManager(db, '.')
     existing = manager.existing_paths()
-    new_files = [f for f in files if str(f) not in existing]
+    new_files = [f for f in files if path_key(str(f)) not in existing]
     result.skipped = len(files) - len(new_files)
 
     if new_files:
