@@ -214,7 +214,7 @@ export function UnifiedTracksSync() {
         `${r.playlist_name ? ` (playlist "${r.playlist_name}")` : ''}. ` +
         'Engine analyzes them on first load.' +
         (r.skipped_other_drive
-          ? ` Skipped ${r.skipped_other_drive} not on the Engine Library drive.`
+          ? ` Skipped ${r.skipped_other_drive} on a drive without an Engine Library.`
           : ''),
       ),
     onError: failed,

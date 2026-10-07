@@ -49,6 +49,8 @@ class EngineTrackExportResult:
     # Tracks on a different drive than the Engine Library (Windows, #306).
     skipped_other_drive: int = 0
     skipped_other_drive_paths: list[str] = field(default_factory=list)
+    # Library root -> tracks written there (per-drive libraries, #307).
+    exported_by_library: dict[str, int] = field(default_factory=dict)
     playlist_name: str | None = None
     playlist_created: bool = False
 

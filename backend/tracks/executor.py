@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from collections.abc import Sequence
 from typing import Any
 
 from backend.key import Key
@@ -61,69 +62,99 @@ def export_tracks_to_engine(
     engine_db: Any,
     playlist_name: str | None = None,
     validate_files: bool = True,
+    drive_dbs: Sequence[Any] = (),
 ) -> EngineTrackExportResult:
     """Directly insert manadj-only tracks into Engine's m.db and collect
     them in a needs-analysis playlist. Caller is responsible for the
-    Engine-closed guard and pre-write snapshot (router dependency)."""
+    Engine-closed guard and pre-write snapshot (router dependency).
+
+    `engine_db` is the main library; `drive_dbs` are the per-drive
+    libraries (#307). A track counts as present if any library has it, and
+    is written to the library on its own drive — skipped and reported when
+    that drive has no Engine Library."""
+    from enginedj.libraries import owning_library
     from enginedj.sync import find_missing_tracks_in_enginedj
     from enginedj.track_export import EngineTrackSpec, OtherDriveError, insert_track
 
-    library_root = engine_db.database_path.parent
-
-    with engine_db.session_m() as edj_session:
-        missing, stats = find_missing_tracks_in_enginedj(
-            manadj_session,
-            edj_session,
-            validate_paths=validate_files,
-        )
-
-    inserted_ids: list[int] = []
-    other_drive: list[str] = []
-    with engine_db.session_m_write() as session:
-        for track in missing:
-            abs_path = Path(track.filename)
-            tags = _file_tags(abs_path)
-            spec = EngineTrackSpec(
-                abs_path=abs_path,
-                title=track.title or abs_path.stem,
-                artist=track.artist,
-                album=tags.get("album"),
-                genre=tags.get("genre"),
-                year=tags.get("year"),
-                length_secs=(
-                    int(track.duration_secs)
-                    if track.duration_secs
-                    else tags.get("length_secs")
-                ),
-                bitrate_kbps=track.bitrate_kbps or tags.get("bitrate_kbps"),
+    libraries = [engine_db, *drive_dbs]
+    missing_ids: set[int] | None = None
+    missing: list[ManAdjTrack] = []
+    stats: dict[str, int] = {}
+    for lib in libraries:
+        with lib.session_m() as edj_session:
+            lib_missing, lib_stats = find_missing_tracks_in_enginedj(
+                manadj_session,
+                edj_session,
+                validate_paths=validate_files,
             )
-            try:
-                inserted_ids.append(insert_track(session, spec, library_root))
-            except OtherDriveError:
-                # Engine keeps one library per drive (#307); skip + report.
-                other_drive.append(track.filename)
+        if missing_ids is None:
+            missing, stats = lib_missing, lib_stats
+            missing_ids = {t.id for t in lib_missing}
+        else:
+            missing_ids &= {t.id for t in lib_missing}
+    missing = [t for t in missing if t.id in (missing_ids or set())]
+
+    def root_of(lib: Any) -> Path:
+        return lib.database_path.parent
+
+    by_library: dict[int, list[ManAdjTrack]] = {}
+    other_drive: list[str] = []
+    for track in missing:
+        lib = owning_library(track.filename, libraries, root_of)
+        if lib is None:
+            other_drive.append(track.filename)
+        else:
+            by_library.setdefault(libraries.index(lib), []).append(track)
 
     final_playlist_name = playlist_name or default_needs_analysis_playlist_name()
-    playlist_created = False
-    if inserted_ids:
+    exported = 0
+    exported_by_library: dict[str, int] = {}
+    for index, tracks in by_library.items():
+        lib = libraries[index]
+        library_root = root_of(lib)
+        inserted_ids: list[int] = []
+        with lib.session_m_write() as session:
+            for track in tracks:
+                abs_path = Path(track.filename)
+                tags = _file_tags(abs_path)
+                spec = EngineTrackSpec(
+                    abs_path=abs_path,
+                    title=track.title or abs_path.stem,
+                    artist=track.artist,
+                    album=tags.get("album"),
+                    genre=tags.get("genre"),
+                    year=tags.get("year"),
+                    length_secs=(
+                        int(track.duration_secs)
+                        if track.duration_secs
+                        else tags.get("length_secs")
+                    ),
+                    bitrate_kbps=track.bitrate_kbps or tags.get("bitrate_kbps"),
+                )
+                try:
+                    inserted_ids.append(insert_track(session, spec, library_root))
+                except OtherDriveError:
+                    # Same volume key but no relative path (#306): skip + report.
+                    other_drive.append(track.filename)
+        if inserted_ids:
 
-        @dataclass
-        class _Ref:
-            id: int
+            @dataclass
+            class _Ref:
+                id: int
 
-        engine_db.create_playlist(
-            final_playlist_name, [_Ref(i) for i in inserted_ids]
-        )
-        playlist_created = True
+            lib.create_playlist(final_playlist_name, [_Ref(i) for i in inserted_ids])
+            exported += len(inserted_ids)
+            exported_by_library[str(library_root)] = len(inserted_ids)
 
     return EngineTrackExportResult(
         target="engine",
-        exported_to_target=len(inserted_ids),
+        exported_to_target=exported,
         skipped_file_not_found=stats.get("skipped_file_not_found", 0),
         skipped_other_drive=len(other_drive),
         skipped_other_drive_paths=other_drive,
-        playlist_name=final_playlist_name if inserted_ids else None,
-        playlist_created=playlist_created,
+        exported_by_library=exported_by_library,
+        playlist_name=final_playlist_name if exported else None,
+        playlist_created=bool(exported),
     )
 
 

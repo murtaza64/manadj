@@ -322,6 +322,8 @@ export interface EngineTrackExportResult {
   /** Tracks not on the Engine Library's drive (Windows, #306). */
   skipped_other_drive: number;
   skipped_other_drive_paths: string[];
+  /** Library root -> tracks written there (per-drive libraries, #307). */
+  exported_by_library: Record<string, number>;
   playlist_name: string | null;
   playlist_created: boolean;
 }
