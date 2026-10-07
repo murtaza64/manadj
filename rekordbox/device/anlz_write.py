@@ -41,11 +41,15 @@ class PathSection:  # PPTH
 class VbrSection:  # PVBR
     index: list[int] = field(default_factory=lambda: [0] * 400)
     unknown0: int = 0
+    unknown2: int = 0
 
     def encode(self) -> bytes:
-        # 400 entries normally; VBR-analyzed files carry 401
-        body = struct.pack(">I", self.unknown0) + struct.pack(
-            f">{len(self.index)}I", *self.index
+        if len(self.index) != 400:
+            raise ValueError("PVBR requires exactly 400 index entries")
+        body = (
+            struct.pack(">I", self.unknown0)
+            + struct.pack(f">{len(self.index)}I", *self.index)
+            + struct.pack(">I", self.unknown2)
         )
         return _section(b"PVBR", 16, body)
 
@@ -82,8 +86,8 @@ class CueEntry:  # PCPT
     status: int = 0
     order_first: int = 0xFFFF
     order_last: int = 0xFFFF
-    unknown5: int = 0
-    unknown9: bytes = b"\x00" * 3
+    unknown5: int = 0x00010000
+    unknown9: bytes = b"\x00\x03\xe8"
     unknown12: bytes = b"\x00" * 16
 
     def encode(self) -> bytes:
@@ -103,12 +107,15 @@ class CueEntry:  # PCPT
 class CueListSection:  # PCOB
     list_type: int  # 0 memory cues / 1 hot cues
     cues: list[CueEntry] = field(default_factory=list)
-    memory_count: int = 0
+    memory_count: int | None = None
     unknown1: int = 0
 
     def encode(self) -> bytes:
+        count = self.memory_count
+        if count is None:
+            count = (len(self.cues) - 1) & 0xFFFFFFFF if self.list_type == 0 else 0xFFFFFFFF
         body = struct.pack(
-            ">IHHI", self.list_type, self.unknown1, len(self.cues), self.memory_count
+            ">IHHI", self.list_type, self.unknown1, len(self.cues), count
         ) + b"".join(c.encode() for c in self.cues)
         return _section(b"PCOB", 24, body)
 
@@ -125,8 +132,8 @@ class CueExtendedEntry:  # PCP2
     color_rgb: tuple[int, int, int] = (0, 0, 0)
     loop_numerator: int = 0
     loop_denominator: int = 0
-    unknown5: bytes = b"\x00" * 3
-    unknown9: bytes = b"\x00" * 7
+    unknown5: bytes = b"\x00\x03\xe8"
+    unknown9: bytes = b"\x01" + b"\x00" * 6
     tail: bytes = b""  # unknown trailing bytes after the color fields
 
     def encode(self) -> bytes:

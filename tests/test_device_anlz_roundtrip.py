@@ -58,12 +58,9 @@ def adapt_section(section, raw_stats: Counter):
     if fourcc == tags.path:
         return PathSection(path=body.path)
     if fourcc == tags.vbr:
-        # the generated parser reads only 400 entries; VBR files carry 401 —
-        # recover the full index from the raw section body
         raw = section._raw_body
-        count = (len(raw) - 4) // 4
-        unknown0, *index = struct.unpack(f">{count + 1}I", raw[: 4 + 4 * count])
-        return VbrSection(index=index, unknown0=unknown0)
+        unknown0, *index, unknown2 = struct.unpack(">402I", raw)
+        return VbrSection(index=index, unknown0=unknown0, unknown2=unknown2)
     if fourcc == tags.beat_grid:
         return BeatGridSection(
             beats=[Beat(b.beat_number, b.tempo, b.time) for b in body.beats],

@@ -7,9 +7,8 @@ Two layers:
   round-trip tests, which re-encode every present row of a real export and
   require the reassembled file to be byte-identical).
 - From-scratch builders: pages and whole database files for the device
-  exporter. Index pages are written header-only (their heap structure is
-  not reverse-engineered; players fall back to scanning data pages — the
-  approach hardware-proven by pino/rekordcrate).
+  exporter, including the index-page free-space structure required by
+  desktop Rekordbox (not inspected by the row-reading oracle).
 
 Hardware pitfalls honored (learned the hard way by the rekordcrate work):
 track rows are padded to a minimum size via the comment string (short rows
@@ -499,9 +498,7 @@ def encode_row_index(
         else:
             presence = (1 << len(chunk)) - 1
         struct.pack_into("<H", page, base - 4, presence)
-        struct.pack_into(
-            "<H", page, base - 2, transaction_flags[group] if transaction_flags else 0
-        )
+        struct.pack_into("<H", page, base - 2, transaction_flags[group] if transaction_flags else 0)
 
 
 def build_data_page(
@@ -541,7 +538,7 @@ def build_data_page(
         num_rows=len(rows),
         page_flags=DATA_PAGE_FLAGS,
         used_size=used,
-        free_size=len_page - PAGE_HEADER_LEN - used - (4 + 2 * len(rows)),
+        free_size=len_page - PAGE_HEADER_LEN - used - (4 * num_groups + 2 * len(rows)),
     )
     page[:PAGE_HEADER_LEN] = header.encode()
     page[PAGE_HEADER_LEN : PAGE_HEADER_LEN + len(heap)] = heap
@@ -554,10 +551,11 @@ def build_index_page(
     page_type: int,
     next_page: int,
     *,
+    first_data_page: int | None = None,
     sequence: int = 1,
     len_page: int = PAGE_LEN,
 ) -> bytes:
-    """Header-only index page (heap left zeroed; see module docstring)."""
+    """Native index page with an empty free-space entry array."""
     page = bytearray(len_page)
     header = PageHeaderSpec(
         page_index=page_index,
@@ -570,6 +568,20 @@ def build_index_page(
         unknown14=INDEX_PAGE_MAGIC,
     )
     page[:PAGE_HEADER_LEN] = header.encode()
+    # Unlike the row-only read oracle, Rekordbox validates the index body.
+    struct.pack_into(
+        "<IIQHH",
+        page,
+        PAGE_HEADER_LEN,
+        page_index,
+        first_data_page if first_data_page is not None else 0x03FFFFFF,
+        0x03FFFFFF,
+        0,
+        0x1FFF,
+    )
+    slots_start = PAGE_HEADER_LEN + 20
+    slots_end = len_page - 20
+    page[slots_start:slots_end] = struct.pack("<I", 0x1FFFFFF8) * ((slots_end - slots_start) // 4)
     return bytes(page)
 
 
@@ -581,10 +593,7 @@ def fit_rows(rows: list[bytes], len_page: int = PAGE_LEN) -> list[list[bytes]]:
     for row in rows:
         padded = len(row) + (-len(row)) % 4
         groups = len(current) // 16 + 1
-        if (
-            current
-            and PAGE_HEADER_LEN + heap + padded + groups * ROW_GROUP_BYTES > len_page
-        ):
+        if current and PAGE_HEADER_LEN + heap + padded + groups * ROW_GROUP_BYTES > len_page:
             pages.append(current)
             current, heap = [], 0
         current.append(row)
@@ -633,36 +642,43 @@ def build_pdb(
 ) -> bytes:
     """Assemble a full database file from scratch.
 
-    Every table gets an index page first (header-only), then data pages for
-    its rows; empty tables are index-page-only, matching rekordbox's own
-    layout. Each table's empty_candidate points at one shared zeroed page.
+    Every table gets an index page, its data pages, and a separate reserved
+    zero page. The final link points to that table's reserved page.
     """
     # plan page allocation
     next_index = 1
-    plans = []  # (table, index_page, [data_page_indices])
+    plans = []  # (table, index_page, chunks, data_page_indices, empty_candidate)
     for table in tables:
         index_page = next_index
         next_index += 1
         chunks = fit_rows(table.rows, len_page) if table.rows else []
         data_pages = list(range(next_index, next_index + len(chunks)))
         next_index += len(chunks)
-        plans.append((table, index_page, chunks, data_pages))
-    empty_candidate = next_index
-    next_index += 1
+        empty_candidate = next_index
+        next_index += 1
+        plans.append((table, index_page, chunks, data_pages, empty_candidate))
     num_pages = next_index
 
     pages: dict[int, bytes] = {}
     table_pointers = b""
-    for table, index_page, chunks, data_pages in plans:
+    for table, index_page, chunks, data_pages, empty_candidate in plans:
         chain = data_pages + [empty_candidate]
         pages[index_page] = build_index_page(
-            index_page, table.page_type, chain[0] if data_pages else empty_candidate,
-            sequence=sequence, len_page=len_page,
+            index_page,
+            table.page_type,
+            chain[0] if data_pages else empty_candidate,
+            first_data_page=data_pages[0] if data_pages else None,
+            sequence=sequence,
+            len_page=len_page,
         )
         for i, (chunk, page_index) in enumerate(zip(chunks, data_pages)):
             pages[page_index] = build_data_page(
-                page_index, table.page_type, chain[i + 1],
-                chunk, sequence=sequence, len_page=len_page,
+                page_index,
+                table.page_type,
+                chain[i + 1],
+                chunk,
+                sequence=sequence,
+                len_page=len_page,
             )
         last_page = data_pages[-1] if data_pages else index_page
         table_pointers += struct.pack(

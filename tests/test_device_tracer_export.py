@@ -2,6 +2,7 @@
 verified end-to-end through the independent read oracle."""
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -81,8 +82,7 @@ def test_tracer_exports_complete_tree(library):
 
     assert pdb.tables["playlist_tree"].rows[0].name == "Tracer Set"
     entry_order = [
-        e.track_id
-        for e in sorted(pdb.tables["playlist_entries"].rows, key=lambda e: e.entry_index)
+        e.track_id for e in sorted(pdb.tables["playlist_entries"].rows, key=lambda e: e.entry_index)
     ]
     assert entry_order == [t.id for t in tracks]
 
@@ -136,3 +136,138 @@ def test_missing_audio_is_skipped_not_fatal(db, make_track, tmp_path):
     assert report.skipped and report.skipped[0][0] == track.id
     pdb = read_pdb(tmp_path / "usb" / "PIONEER" / "rekordbox" / "export.pdb")
     assert pdb.tables["tracks"].row_count == 0
+
+
+def test_export_has_extended_analysis_and_all_hotcue_slots(library):
+    from pyrekordbox.anlz import AnlzFile
+
+    db, playlist, tracks, dest = library
+    for slot in range(1, 9):
+        db.add(
+            models.HotCue(
+                track_id=tracks[0].id,
+                slot_number=slot,
+                time_seconds=slot * 0.2,
+                label=f"Cue {slot}",
+                color="#E42B2B",
+            )
+        )
+    db.commit()
+    export_playlists(db, [playlist.id], dest)
+    pdb = read_pdb(dest / "PIONEER/rekordbox/export.pdb")
+    row = next(t for t in pdb.tables["tracks"].rows if t.id == tracks[0].id)
+    assert row.analyze_date
+    assert row.autoload_hot_cues == "ON"
+    path = dest / row.analyze_path.lstrip("/")
+    for suffix in (".DAT", ".EXT"):
+        AnlzFile.parse_file(path.with_suffix(suffix))
+    dat = read_anlz(path)
+    ext = read_anlz(path.with_suffix(".EXT"))
+    assert len([c for c in dat.cues if c.list_type == "memory_cues"]) == 9
+    assert {w.kind for w in ext.waveforms} == {"PWV3", "PWV4", "PWV5"}
+    hot = [c for c in ext.cues_extended if c.hot_cue]
+    assert [c.hot_cue for c in hot] == list(range(1, 9))
+    offset = export_offset_ms(tracks[0].filename)
+    assert [c.time_ms for c in hot] == [i * 200 + offset for i in range(1, 9)]
+    assert [c.comment.rstrip("\x00") for c in hot] == [f"Cue {i}" for i in range(1, 9)]
+    assert all(c.color_rgb == (228, 43, 43) for c in hot)
+
+
+def test_readback_verification_detects_incomplete_analysis(library):
+    from rekordbox.device.verify import verify_export
+
+    db, playlist, _tracks, dest = library
+    export_playlists(db, [playlist.id], dest)
+    report = verify_export(dest)
+    assert report == {"tracks": 2, "playlists": 1, "analysis_files": 6, "errors": []}
+    next((dest / "PIONEER/USBANLZ").rglob("*.EXT")).unlink()
+    assert verify_export(dest)["errors"]
+
+
+def test_browser_preview_is_exported_without_rekordbox_analysis(library):
+    from rekordbox.device.verify import verify_export
+
+    db, playlist, _tracks, dest = library
+    export_playlists(db, [playlist.id], dest)
+    rows = read_pdb(dest / "PIONEER/rekordbox/export.pdb").tables["tracks"].rows
+    for row in rows:
+        path = (dest / row.analyze_path.lstrip("/")).with_suffix(".2EX")
+        assert path.exists(), "Rekordbox's 3Band browser preview does not fall back to DAT/EXT"
+        extra = read_anlz(path)
+        assert extra.audio_path == row.file_path
+        waves = {w.kind: w for w in extra.waveforms}
+        assert waves["PWV6"].len_entries == 1200
+        assert waves["PWV6"].len_entry_bytes == 3
+        ext = read_anlz(path.with_suffix(".EXT"))
+        detail_count = next(w.len_entries for w in ext.waveforms if w.kind == "PWV3")
+        assert waves["PWV7"].len_entries == detail_count
+    assert not verify_export(dest)["errors"]
+    path.unlink()
+    assert verify_export(dest)["errors"], "Read-back must catch a missing browser preview"
+
+
+def test_segment_boundaries_collapsing_to_same_millisecond_use_new_tempo(library):
+    db, playlist, tracks, dest = library
+    tracks[0].beatgrid.tempo_changes_json = json.dumps(
+        [
+            {"start_time": 0.1, "bpm": 120.0, "bar_position": 1},
+            {"start_time": 0.6000001, "bpm": 150.0, "bar_position": 2},
+        ]
+    )
+    db.commit()
+    export_playlists(db, [playlist.id], dest)
+    row = read_pdb(dest / "PIONEER/rekordbox/export.pdb").tables["tracks"].rows[0]
+    beats = read_anlz(dest / row.analyze_path.lstrip("/")).beats
+    times = [b.time_ms for b in beats]
+    assert len(times) == len(set(times))
+    boundary = next(b for b in beats if b.time_ms == 600 + export_offset_ms(tracks[0].filename))
+    assert boundary.tempo_centibpm == 15000
+    assert boundary.beat_number == 2
+
+
+@pytest.mark.parametrize("corruption", ["first_data", "slot", "cycle"])
+def test_verifier_rejects_corrupt_index_and_chain(library, corruption):
+    import struct
+
+    from rekordbox.device.verify import verify_export
+
+    db, playlist, _tracks, dest = library
+    export_playlists(db, [playlist.id], dest)
+    path = dest / "PIONEER/rekordbox/export.pdb"
+    data = bytearray(path.read_bytes())
+    first = struct.unpack_from("<I", data, 36)[0]
+    field = {"first_data": 44, "slot": 60, "cycle": 12}[corruption]
+    value = first if corruption == "cycle" else 0
+    struct.pack_into("<I", data, first * 4096 + field, value)
+    path.write_bytes(data)
+    assert verify_export(dest)["errors"]
+
+
+def test_device_paths_are_unique_on_case_insensitive_filesystems(library):
+    from shutil import copyfile
+
+    db, playlist, tracks, dest = library
+    for track, name in zip(tracks, ["Same.mp3", "same.mp3"]):
+        source = dest.parent / str(track.id) / name
+        source.parent.mkdir()
+        copyfile(tracks[0].filename, source)
+        track.filename = str(source)
+    db.commit()
+    export_playlists(db, [playlist.id], dest)
+    rows = read_pdb(dest / "PIONEER/rekordbox/export.pdb").tables["tracks"].rows
+    assert len({r.file_path.casefold() for r in rows}) == len(rows)
+
+
+def test_export_refuses_source_audio_inside_destination(library):
+    from shutil import copyfile
+
+    db, playlist, tracks, dest = library
+    source = dest / "Contents" / Path(tracks[0].filename).name
+    source.parent.mkdir(parents=True)
+    copyfile(tracks[1].filename, source)
+    before = source.read_bytes()
+    tracks[1].filename = str(source)
+    db.commit()
+    with pytest.raises(ValueError, match="source audio"):
+        export_playlists(db, [playlist.id], dest)
+    assert source.read_bytes() == before

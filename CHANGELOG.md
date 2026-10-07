@@ -5,6 +5,7 @@ versions follow [Semantic Versioning](https://semver.org/). Install: [docs/insta
 
 ## [Unreleased]
 
+- Added direct classic Rekordbox USB export with Playlists, Hot Cues, beatgrids, waveforms and read-back verification (#91–#94, #265).
 - Experimental direct Engine USB export: `scripts/engine_usb.py export/verify` builds a standalone Engine device library (tracks, playlists, cues, grids, optional donor analysis) in a target directory and verifies it against your library — behind the export toggle, and not yet wired to real USB drives (#267, #268).
 - Sessions are grouped by day with longest-first previews and mined-candidate counts; timelines gain live zoom redraws, progressive gridlines, and stable playback-start positioning (#263).
 - In-app FEEDBACK button (top bar): files a bug/feature report on GitHub with a screenshot and app-state capture; QUEUE holds filed reports until you explicitly send them to the agent batch (#243, #244, #245).

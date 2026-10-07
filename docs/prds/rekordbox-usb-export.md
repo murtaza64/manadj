@@ -35,9 +35,9 @@ Fidelity standard ("byte-equivalent"):
    hardware.
 
 Exact byte-identity with rekordbox's own from-scratch output is a non-goal:
-edit-sequence counters and the un-reverse-engineered index/tree pages make it
-impossible, and players don't require it (empty index pages are the proven
-approach — players fall back to linear scan).
+edit-sequence counters make it impossible. Index pages still require their
+native free-space headers and sentinel arrays; zero-filled bodies are rejected
+by desktop Rekordbox. See `docs/research/rekordbox-usb-verification.md`.
 
 ### Validation ladder (hardware reality)
 
