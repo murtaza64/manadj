@@ -5,6 +5,8 @@ versions follow [Semantic Versioning](https://semver.org/). Install: [docs/insta
 
 ## [Unreleased]
 
+- Added prerelease downloads and an install/Setup guide at https://manadj.murt.dev.
+
 ## [0.1.0-rc.3] - 2026-10-07
 
 ### Added

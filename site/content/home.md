@@ -1,5 +1,5 @@
 ---
-kicker: Keyboard DJing · macOS · pre-alpha
+kicker: Keyboard DJing · macOS / Windows · prerelease
 title: manadj
 tagline: DJ from your keyboard. Keep what works.
 hero_clip: perform

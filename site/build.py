@@ -9,16 +9,17 @@
 
 Inputs:  site/content/ (copy), site/templates/ (layout),
          frontend/src/theme/{tokens,deckColors,routineColor}.ts (design tokens).
-Outputs: site/index.html, site/assets/tokens.css, site/assets/logo.png.
+Outputs: site/{index,install}.html, site/assets/tokens.css, site/assets/logo.png.
 """
 
 from __future__ import annotations
 
+import posixpath
 import re
 import shutil
 from html.parser import HTMLParser
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 
 import markdown
 import yaml
@@ -107,6 +108,11 @@ def load_content() -> dict:
     home, home_body = _frontmatter(content / "home.md")
     home["body_html"] = _md(home_body)
 
+    install, install_body = _frontmatter(content / "install.md")
+    guide = markdown.Markdown(extensions=["attr_list", "toc"])
+    install["body_html"] = guide.convert(install_body)
+    install["toc_html"] = guide.toc
+
     glossary = yaml.safe_load((content / "glossary.yml").read_text(encoding="utf-8"))
     terms = {t["slug"]: t for t in glossary}
 
@@ -126,11 +132,11 @@ def load_content() -> dict:
     slugs = [f["slug"] for f in features]
     if len(set(slugs)) != len(slugs):
         raise SystemExit(f"duplicate feature slugs: {slugs}")
-    return {"home": home, "features": features, "glossary": sorted(glossary, key=lambda t: t["term"].lower())}
+    return {"home": home, "install": install, "features": features, "glossary": sorted(glossary, key=lambda t: t["term"].lower())}
 
 
-def validate_page(html: str) -> None:
-    """Catch broken anchors and missing media before Pages publishes them."""
+def validate_pages(pages: dict[str, str], root: Path = SITE) -> None:
+    """Validate in-memory pages together, including cross-page fragments."""
     class Links(HTMLParser):
         def __init__(self):
             super().__init__()
@@ -144,23 +150,30 @@ def validate_page(html: str) -> None:
                 elif key in {"href", "src", "poster"} and value:
                     self.urls.append(value)
 
-    links = Links()
-    links.feed(html)
-    if len(links.ids) != len(set(links.ids)):
-        raise SystemExit("page: duplicate element IDs")
-    for raw in links.urls:
-        url = urlsplit(raw)
-        if url.scheme or url.netloc:
-            continue
-        if url.path and not (SITE / url.path).is_file():
-            raise SystemExit(f"page: missing asset {raw}")
-        if not url.path and url.fragment and url.fragment not in links.ids:
-            raise SystemExit(f"page: missing anchor {raw}")
+    parsed = {}
+    for name, html in pages.items():
+        links = Links()
+        links.feed(html)
+        if len(links.ids) != len(set(links.ids)):
+            raise SystemExit(f"{name}: duplicate element IDs")
+        parsed[name] = links
+    for name, links in parsed.items():
+        for raw in links.urls:
+            url = urlsplit(raw)
+            if url.scheme or url.netloc:
+                continue
+            path = unquote(url.path)
+            target = posixpath.normpath(posixpath.join(posixpath.dirname(name), path)) if path else name
+            if path.startswith("/") or target == ".." or target.startswith("../"):
+                raise SystemExit(f"{name}: link must stay relative to site root: {raw}")
+            if target not in parsed:
+                if target.endswith(".html") or not (root / target).is_file():
+                    raise SystemExit(f"{name}: missing asset or page {raw}")
+            elif url.fragment and unquote(url.fragment) not in parsed[target].ids:
+                raise SystemExit(f"{name}: missing anchor {raw}")
 
 
-def main() -> None:
-    (SITE / "assets" / "tokens.css").write_text(build_tokens(), encoding="utf-8")
-    shutil.copyfile(REPO / "frontend" / "public" / "logo.png", SITE / "assets" / "logo.png")
+def render_pages() -> dict[str, str]:
     env = Environment(
         loader=FileSystemLoader(SITE / "templates"),
         undefined=StrictUndefined,
@@ -168,10 +181,18 @@ def main() -> None:
         trim_blocks=True,
         lstrip_blocks=True,
     )
-    html = env.get_template("index.html").render(**load_content())
-    validate_page(html)
-    (SITE / "index.html").write_text(html, encoding="utf-8")
-    print(f"built {SITE / 'index.html'}")
+    content = load_content()
+    return {name: env.get_template(name).render(**content) for name in ("index.html", "install.html")}
+
+
+def main() -> None:
+    (SITE / "assets" / "tokens.css").write_text(build_tokens(), encoding="utf-8")
+    shutil.copyfile(REPO / "frontend" / "public" / "logo.png", SITE / "assets" / "logo.png")
+    pages = render_pages()
+    validate_pages(pages)
+    for name, html in pages.items():
+        (SITE / name).write_text(html, encoding="utf-8")
+        print(f"built {SITE / name}")
 
 
 if __name__ == "__main__":

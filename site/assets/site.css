@@ -157,6 +157,33 @@ main { max-width: 1280px; margin: 0 auto; padding: 0 var(--space-24); }
 }
 .actions { display: flex; gap: var(--space-8); flex-wrap: wrap; margin-top: var(--space-8); }
 
+/* ── Downloads and installation guide ────────────────────────────────── */
+
+.download-panel {
+  padding: var(--space-24);
+  margin-bottom: var(--space-24);
+  border: 1px solid var(--surface1);
+  background: var(--base);
+}
+.download-platforms { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-24); }
+.download-platforms p { margin-top: var(--space-8); color: var(--subtext1); }
+.download-platforms a:not(.btn) { display: inline-block; margin-top: var(--space-8); }
+.download-links { margin-top: var(--space-24); color: var(--subtext0); }
+.install-head { padding: var(--space-24) 0; }
+.install-head h1 { font-size: var(--font-display); }
+.install-head p { color: var(--subtext1); }
+.install-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 3fr); gap: var(--space-24); padding-bottom: var(--space-24); }
+.install-toc { align-self: start; position: sticky; top: 56px; }
+.install-toc ul { list-style: none; }
+.install-toc a { display: block; padding: var(--space-4) 0; }
+.install-guide { max-width: 80ch; min-width: 0; overflow-wrap: anywhere; }
+.install-guide h2 { font-size: var(--font-display); line-height: 1.25; padding-top: var(--space-24); margin: var(--space-24) 0 var(--space-12); border-top: 1px solid var(--surface0); }
+.install-guide h2:first-child { margin-top: 0; }
+.install-guide ol { padding-left: var(--space-24); margin-bottom: var(--space-16); }
+.install-guide ol li { padding-left: var(--space-4); }
+.install-guide ol li::before { content: none; }
+.install-guide a { text-decoration: underline; }
+
 /* ── Screenshot frame: a panel with a title bar ───────────────────────── */
 
 .shot { border: 1px solid var(--surface1); background: var(--void); }
@@ -392,6 +419,9 @@ kbd {
 /* ── Narrow screens ───────────────────────────────────────────────────── */
 
 @media (max-width: 900px) {
+  .download-platforms, .install-layout { grid-template-columns: 1fr; }
+  .download-panel { padding: var(--space-12); }
+  .install-toc { position: static; }
   main { padding: 0 var(--space-12); }
   .hero, .chapter-body, .chapter:nth-of-type(odd) .chapter-body:not(.chapter-body-text) { grid-template-columns: 1fr; }
   .chapter:nth-of-type(odd) .chapter-body .prose { order: 0; }
