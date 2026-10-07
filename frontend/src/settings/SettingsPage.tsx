@@ -276,7 +276,7 @@ const EFFECT_GROUPS = [
   },
   {
     name: 'Flanger',
-    detail: 'One sine-LFO cycle per selected Beat FX span.',
+    detail: 'One sine-LFO cycle per BEAT ◄ ► length (bars or beats).',
     fields: [
       ['flangerDelayMs', 'Center delay', 'ms', 'Center of the comb-filter delay sweep.'],
       ['flangerWidthMs', 'Sweep width', 'ms', 'Peak-to-peak delay modulation range.'],
@@ -349,6 +349,24 @@ function BeatFxSettingsPanel() {
                 </div>
               );
             })}
+            {group.name === 'Flanger' && (
+              <div className="settings-field">
+                <span className="settings-field-label">Length unit</span>
+                <p>How the BEAT ◄ ► length reads for the Flanger. 1 bar = 4 beats.</p>
+                <div className="settings-unit-toggle" role="group" aria-label="Flanger length unit">
+                  {(['bars', 'beats'] as const).map((unit) => (
+                    <button
+                      key={unit}
+                      className={`btn${settings.flangerLengthUnit === unit ? ' btn-selected' : ''}`}
+                      aria-pressed={settings.flangerLengthUnit === unit}
+                      onClick={() => mixer.setBeatFxSettings({ flangerLengthUnit: unit })}
+                    >
+                      {unit === 'bars' ? 'Bars' : 'Beats'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
           </section>
         ))}
       </div>

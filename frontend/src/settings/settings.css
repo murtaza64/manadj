@@ -305,3 +305,8 @@
   display: flex;
   gap: var(--space-8);
 }
+
+.settings-unit-toggle {
+  display: inline-flex;
+  gap: var(--space-4);
+}
