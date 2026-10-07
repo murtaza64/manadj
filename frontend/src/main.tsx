@@ -4,6 +4,7 @@ import './index.css'
 import { installPerfHook } from './perfHook.ts'
 import { FONT_MONO, installTheme } from './theme/tokens.ts'
 import { DEV_SURFACES } from './devMode.ts'
+import { isMac } from './utils/platform.ts'
 import { hydratePersistedSettings } from './settings/persistedSettings.ts'
 import RootErrorBoundary from './components/RootErrorBoundary.tsx'
 
@@ -17,6 +18,8 @@ installTheme()
 const isDesktopShell = navigator.userAgent.includes('Electron')
 if (isDesktopShell) {
   document.documentElement.classList.add('desktop-shell')
+  // Windows/Linux caption buttons sit on the right, not traffic lights (gh#313).
+  if (!isMac()) document.documentElement.classList.add('platform-other')
   // Perf hook is a dev surface (packaged-app #278): dev shells only.
   if (DEV_SURFACES) installPerfHook()
 }
