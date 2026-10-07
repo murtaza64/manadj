@@ -239,10 +239,10 @@ export function MixPicker(props: MixPickerProps) {
         pushCandidate(c, 'Miner candidates through the pair');
       }
       out.push({
-        ref: { kind: 'new-blank' },
+        ref: { kind: 'new-blank', seedTrackIds: [chipA, chipB] },
         glyph: '+',
         label: 'New blank mix',
-        meta: 'kind-fluid draft (ADR 0039) — lands with #198',
+        meta: 'seeded with both tracks · drag more from the library · saves from 3 slots',
         group: 'New',
       });
       return out;
@@ -270,6 +270,13 @@ export function MixPicker(props: MixPickerProps) {
       for (const c of castIncluding(props.candidates, chipA)) {
         pushCandidate(c, 'Miner candidates through');
       }
+      out.push({
+        ref: { kind: 'new-blank', seedTrackIds: [chipA] },
+        glyph: '+',
+        label: 'New blank mix',
+        meta: 'starts with this track · drag more from the library · saves from 3 slots',
+        group: 'New',
+      });
       return out;
     }
 
@@ -283,6 +290,13 @@ export function MixPicker(props: MixPickerProps) {
       pushRoutineTake(tk, 'Routine Takes');
     }
     for (const c of props.candidates) pushCandidate(c, 'Miner candidates');
+    out.push({
+      ref: { kind: 'new-blank' },
+      glyph: '+',
+      label: 'New blank mix',
+      meta: 'empty canvas · drag tracks from the library · saves from 3 slots',
+      group: 'New',
+    });
     return out;
   }, [chipA, chipB, props, trackById]);
 

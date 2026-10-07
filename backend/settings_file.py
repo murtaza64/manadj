@@ -53,7 +53,7 @@ enabled = false
 def _document() -> tomlkit.TOMLDocument:
     path = settings_file_path()
     if path.exists():
-        return tomlkit.parse(path.read_text())
+        return tomlkit.parse(path.read_text(encoding="utf-8"))
     return tomlkit.parse(_FRESH_TEMPLATE)
 
 
@@ -84,7 +84,7 @@ def update_settings_file(changes: dict[str, Any]) -> None:
             del table[key]
     path = settings_file_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(tomlkit.dumps(doc))
+    path.write_text(tomlkit.dumps(doc), encoding="utf-8")
 
 
 def update_secrets(changes: dict[str, str | None]) -> None:
@@ -101,7 +101,7 @@ def update_secrets(changes: dict[str, str | None]) -> None:
     from backend.data_root import dotenv_path
 
     path = dotenv_path()
-    lines = path.read_text().splitlines() if path.exists() else []
+    lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
     out: list[str] = []
     written: set[str] = set()
     for line in lines:
@@ -119,7 +119,7 @@ def update_secrets(changes: dict[str, str | None]) -> None:
             out.append(f"{key}={_dotenv_value(value)}")
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text("\n".join(out) + "\n" if out else "")
+    tmp.write_text("\n".join(out) + "\n" if out else "", encoding="utf-8")
     tmp.chmod(0o600)
     tmp.replace(path)
     for key, value in changes.items():

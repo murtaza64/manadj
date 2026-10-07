@@ -38,6 +38,8 @@ import { BpmControl } from '../deckControls/BpmControl';
 import { HFader, Knob } from './MixerStrip';
 import { PlayGuideMinimapMarks } from '../../performance/PlayGuideMinimapMarks';
 import { TagPopover } from './TagPopover';
+import TagManagementModal from '../TagManagementModal';
+import { createPortal } from 'react-dom';
 import { useDeckDropTarget } from '../../selection/deckDrop';
 import { DeckDropOverlay } from '../../selection/DeckDropOverlay';
 import { NUDGE_BEND_PERCENT, composeRate, effectiveBpm, keyDrifted } from '../../playback/tempo';
@@ -57,6 +59,7 @@ import { DECK_KEYS } from './performanceKeys';
 import { CHANNEL_IDS, STEM_NAMES } from '../../playback/mixer';
 import type { ChannelId, StemName } from '../../playback/mixer';
 import { presentationOf } from '../../utils/presentationStore';
+import { primaryModGlyph, primaryModName } from '../../utils/platform';
 
 /** Stem kill-switch labels (stems #210): compact, hardware-ish. */
 const STEM_LABELS: Record<StemName, string> = {
@@ -469,7 +472,13 @@ function Kbd({ k, offset = false }: { k: string; offset?: boolean }) {
             <path d="M6 1 11 6H8V13H4V6H1Z" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
           </svg>
         </span>
-      : character)}
+      : character === '\u2303'
+        ? <span className="perf-kbd-ctrl" key={index}>{character}
+            <svg viewBox="0 0 12 14" aria-hidden="true">
+              <path d="M1.5 8 6 3.5 10.5 8" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" strokeLinecap="round" />
+            </svg>
+          </span>
+        : character)}
   </kbd>;
 }
 
@@ -545,6 +554,7 @@ function TrackZone({ track }: { track: Track | null }) {
   const [tagsOpenFor, setTagsOpenFor] = useState<number | null>(null);
   const tagsOpen = track !== null && tagsOpenFor === track.id;
   const tagRowRef = useRef<HTMLDivElement>(null);
+  const [manageTagsOpen, setManageTagsOpen] = useState(false);
 
   const commitField = (field: 'title' | 'artist') => (value: string) => {
     const trimmed = value.trim();
@@ -606,8 +616,24 @@ function TrackZone({ track }: { track: Track | null }) {
             anchorRef={tagRowRef}
             commit={(tagIds) => edit.commit({ tag_ids: tagIds })}
             onClose={() => setTagsOpenFor(null)}
+            onManage={() => {
+              setTagsOpenFor(null);
+              setManageTagsOpen(true);
+            }}
           />
         )}
+        {manageTagsOpen &&
+          createPortal(
+            <TagManagementModal
+              isOpen
+              onClose={() => {
+                setManageTagsOpen(false);
+                // Back to tagging this track with the edited vocabulary.
+                if (track) setTagsOpenFor(track.id);
+              }}
+            />,
+            document.body
+          )}
       </div>
       <div className="perf-track-row" title="Energy">
         <span className="perf-row-icon">
@@ -691,10 +717,10 @@ function PlayZone() {
           />
           <LoopRow
             kbd={<Kbd k={keys.loop} />}
-            halveKbd={<Kbd k={`\u2318\u21e7${keys.jumpBack}`} offset />}
-            doubleKbd={<Kbd k={`\u2318\u21e7${keys.jumpForward}`} offset />}
-            halveTitleSuffix={` (Cmd+Shift+${keys.jumpBack.toUpperCase()})`}
-            doubleTitleSuffix={` (Cmd+Shift+${keys.jumpForward.toUpperCase()})`}
+            halveKbd={<Kbd k={`${primaryModGlyph()}\u21e7${keys.jumpBack}`} offset />}
+            doubleKbd={<Kbd k={`${primaryModGlyph()}\u21e7${keys.jumpForward}`} offset />}
+            halveTitleSuffix={` (${primaryModName()}+Shift+${keys.jumpBack.toUpperCase()})`}
+            doubleTitleSuffix={` (${primaryModName()}+Shift+${keys.jumpForward.toUpperCase()})`}
           />
           <div className="perf-pads">
             <HotCuePads
@@ -765,8 +791,8 @@ function PlayZone() {
             </button>
           </div>
           <CueWalkButtons
-            prevKbd={<Kbd k={`\u2318${keys.jumpBack}`} />}
-            nextKbd={<Kbd k={`\u2318${keys.jumpForward}`} />}
+            prevKbd={<Kbd k={`${primaryModGlyph()}${keys.jumpBack}`} />}
+            nextKbd={<Kbd k={`${primaryModGlyph()}${keys.jumpForward}`} />}
           />
           <TransportPair cueKbd={<Kbd k={keys.cue} />} playKbd={<Kbd k={keys.play} />} />
         </div>
@@ -1075,7 +1101,7 @@ function MixZone({ track }: { track: Track | null }) {
                 : 'SYNC: join/leave shared tempo; ride any member pitch fader. Quantize snaps beats once on entry.'}
           >
             <span className="perf-sync-label">{hint === 'sync' || syncStatus === 'out-of-lock' ? 'SYNC!' : 'SYNC'}</span>
-            <Kbd k={`\u2318\u21e7${keys.fader}`} />
+            <Kbd k={`${primaryModGlyph()}\u21e7${keys.fader}`} />
           </button>
           {/* MATCH as an equals glyph: = matches the other deck's tempo;
               ≠ flashes red while the target is out of pitch-fader reach. */}
@@ -1087,7 +1113,7 @@ function MixZone({ track }: { track: Track | null }) {
             title="MATCH: nearest playing Deck's tempo; align beats once with Quantize on (Shift + BEAT SYNC)"
           >
             {hint === 'match' ? '\u2260' : '='}
-            <Kbd k={`\u2318${keys.fader}`} offset />
+            <Kbd k={`${primaryModGlyph()}${keys.fader}`} offset />
           </button>
         </div>
       </div>
