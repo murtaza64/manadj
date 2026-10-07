@@ -140,6 +140,143 @@ def create_authored_routine(
     return _detail(r)
 
 
+def _repoint_pins(
+    db: Session,
+    from_kind: str,
+    from_uuid: str,
+    to_kind: str,
+    to_uuid: str,
+    head_track_id: int,
+    second_track_id: int,
+) -> tuple[int, int]:
+    """Re-point Set pins across a kind crossing (ADR 0039, gh#330) — the
+    Take-promotion idiom. An active pin moves only when it heads the new
+    artifact's adjacency (its entry IS the new first track); any other
+    becomes Unresolved. A Dormant memory moves only when it remembers the
+    new artifact's first pair; any other is dropped. Returns (repointed,
+    dropped). The caller commits."""
+    repointed = dropped = 0
+    for e in (
+        db.query(models.SetEntry)
+        .filter(models.SetEntry.pin_kind == from_kind, models.SetEntry.pin_uuid == from_uuid)
+        .all()
+    ):
+        if e.track_id == head_track_id:
+            e.pin_kind, e.pin_uuid = to_kind, to_uuid
+            repointed += 1
+        else:
+            e.pin_kind = e.pin_uuid = None
+            dropped += 1
+    for d in (
+        db.query(models.SetDormantPin)
+        .filter(
+            models.SetDormantPin.pin_kind == from_kind,
+            models.SetDormantPin.pin_uuid == from_uuid,
+        )
+        .all()
+    ):
+        if (d.a_track_id, d.b_track_id) == (head_track_id, second_track_id):
+            d.pin_kind, d.pin_uuid = to_kind, to_uuid
+            repointed += 1
+        else:
+            db.delete(d)
+            dropped += 1
+    return repointed, dropped
+
+
+@router.post("/from-transition/{transition_uuid}", response_model=schemas.KindConversion)
+def convert_transition_to_routine(
+    transition_uuid: str,
+    payload: schemas.RoutineAuthoredCreate,
+    db: Session = Depends(get_db),
+) -> schemas.KindConversion:
+    """2→3 crossing (ADR 0039, gh#330): a Transition grown to ≥ 3 slots in
+    the Mix editor becomes an AUTHORED Routine. One transaction: mint the
+    Routine, re-point the Transition's Set pins onto it, clear any Take's
+    promoted mark (the evidence survives, re-promotable), delete the
+    Transition."""
+    t = db.query(models.Transition).filter(models.Transition.uuid == transition_uuid).first()
+    if t is None:
+        raise HTTPException(status_code=404, detail="transition not found")
+    if db.query(models.Routine).filter(models.Routine.uuid == payload.uuid).first():
+        raise HTTPException(status_code=409, detail="routine uuid already exists")
+    r = models.Routine(
+        uuid=payload.uuid, name=payload.name, events_json="[]", origin_take_uuid=None
+    )
+    _apply_structure(r, payload, db)
+    db.add(r)
+    cast = json.loads(r.cast_json)
+    repointed, dropped = _repoint_pins(
+        db, "transition", transition_uuid, "routine", r.uuid, cast[0], cast[1]
+    )
+    db.query(models.Take).filter(models.Take.promoted_transition_uuid == transition_uuid).update(
+        {models.Take.promoted_transition_uuid: None}, synchronize_session=False
+    )
+    db.delete(t)
+    db.commit()
+    return schemas.KindConversion(
+        kind="routine", uuid=r.uuid, repointed_pins=repointed, dropped_pins=dropped
+    )
+
+
+@router.post("/{uuid}/to-transition", response_model=schemas.KindConversion)
+def convert_routine_to_transition(
+    uuid: str, payload: schemas.RoutineToTransition, db: Session = Depends(get_db)
+) -> schemas.KindConversion:
+    """3→2 crossing (ADR 0039, gh#330): an AUTHORED Routine edited down to
+    2 slots saves as a Transition (a 2-cast Routine is forbidden at rest).
+    One transaction: append the Transition to its ordered pair, re-point
+    the Routine's Set pins onto it, delete the Routine. Promoted Routines
+    never cross (their cast is baked evidence) — 409."""
+    r = db.query(models.Routine).filter(models.Routine.uuid == uuid).first()
+    if r is None:
+        raise HTTPException(status_code=404, detail="routine not found")
+    if r.origin_take_uuid is not None:
+        raise HTTPException(status_code=409, detail="promoted routine — cannot convert")
+    if payload.a_track_id == payload.b_track_id:
+        raise HTTPException(status_code=422, detail="a Transition needs two distinct tracks")
+    for tid in (payload.a_track_id, payload.b_track_id):
+        if db.query(models.Track.id).filter(models.Track.id == tid).first() is None:
+            raise HTTPException(status_code=422, detail=f"unknown track {tid}")
+    if db.query(models.Transition).filter(
+        models.Transition.uuid == payload.transition_uuid
+    ).first():
+        raise HTTPException(status_code=409, detail="transition uuid already exists")
+    pair = db.query(models.Transition).filter(
+        models.Transition.a_track_id == payload.a_track_id,
+        models.Transition.b_track_id == payload.b_track_id,
+    )
+    position = max([t.position for t in pair.all()], default=-1) + 1
+    db.add(
+        models.Transition(
+            a_track_id=payload.a_track_id,
+            b_track_id=payload.b_track_id,
+            uuid=payload.transition_uuid,
+            position=position,
+            name=payload.name,
+            favorite=False,
+            data_json=json.dumps(payload.data),
+        )
+    )
+    repointed, dropped = _repoint_pins(
+        db,
+        "routine",
+        uuid,
+        "transition",
+        payload.transition_uuid,
+        payload.a_track_id,
+        payload.b_track_id,
+    )
+    db.delete(r)
+    db.commit()
+    return schemas.KindConversion(
+        kind="transition",
+        uuid=payload.transition_uuid,
+        repointed_pins=repointed,
+        dropped_pins=dropped,
+    )
+
+
 @router.put("/{uuid}/structure", response_model=schemas.RoutineDetail)
 def put_routine_structure(
     uuid: str, payload: schemas.RoutineStructure, db: Session = Depends(get_db)

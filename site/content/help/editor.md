@@ -26,4 +26,4 @@ caption: A saved Transition is auditioned through the shared Decks in the Mix ed
 
 ## Blank mix {#blank-mix}
 
-7. Choose **+ New blank mix**; drag Library tracks onto the canvas. It autosaves as a Routine at **three slots**; fewer remain unsaved. For two tracks, select outgoing/incoming tracks in the picker → **New Transition**.
+7. Choose **+ New blank mix**; drag Library Tracks onto the canvas. Two slots save as a **Transition**, three or more as a **Routine**; fewer than two remain unsaved. Adding or removing a slot across that boundary converts the saved mix; Set pins follow.

@@ -6,6 +6,7 @@ versions follow [Semantic Versioning](https://semver.org/). Install: [docs/insta
 ## [Unreleased]
 
 - Added website help pages and the offline in-app Help manual, linked from Settings, Tours and Setup guides (#295).
+- Mix editor: author mixes from scratch with + New blank mix — drag tracks from the library onto the canvas/timeline. 2 tracks save as a Transition, 3 or more as a Routine; adding or removing a track across that line converts it on save (Set pins follow). Drop a track onto an open Transition to grow it into a Routine (#325, #330).
 - Reordered the site into eight workflow sections, expanded Library curation, folded controllers into Perform, and removed the glossary (#346).
 - Added direct classic Rekordbox USB export with Playlists, Hot Cues, beatgrids, waveforms and read-back verification (#91–#94, #265).
 - Experimental direct Engine USB export: `scripts/engine_usb.py export/verify` builds a standalone Engine device library (tracks, playlists, cues, grids, optional donor analysis) in a target directory and verifies it against your library — behind the export toggle, and not yet wired to real USB drives (#267, #268).

@@ -609,6 +609,26 @@ class RoutineAuthoredCreate(RoutineStructure):
     name: str | None = None
 
 
+class RoutineToTransition(BaseModel):
+    """Convert an AUTHORED Routine edited down to 2 slots into a
+    Transition (ADR 0039 kind-fluid convert-on-save, gh#330). The client
+    projects the slot form onto the seconds-anchored pair payload."""
+    transition_uuid: str
+    a_track_id: int
+    b_track_id: int
+    name: str
+    data: dict
+
+
+class KindConversion(BaseModel):
+    """Result of a 2↔3 kind crossing: the minted artifact's uuid/kind and
+    how many Set pins re-pointed onto it (the rest degraded/dropped)."""
+    kind: str
+    uuid: str
+    repointed_pins: int
+    dropped_pins: int
+
+
 class RoutineDetail(RoutineRow):
     """One Routine with its slot-addressed, beat-domain event replay and
     the editor's authored edits layer (gh#170 pass 2; null = unedited)."""
