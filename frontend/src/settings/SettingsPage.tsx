@@ -1,5 +1,13 @@
-import { lazy, Suspense, useState } from 'react';
+import { lazy, Suspense, useState, useSyncExternalStore } from 'react';
 import { useMixer, useMixerValue } from '../hooks/useMixer';
+import { TOUR_SECTIONS } from '../tour/steps';
+import {
+  allToursSkipped,
+  isSectionSeen,
+  resetTourProgress,
+  subscribeTour,
+  tourVersion,
+} from '../tour/tourState';
 import {
   DEFAULT_FILTER_SETTINGS,
   FILTER_MODELS,
@@ -19,12 +27,15 @@ import {
 const WaveformSettings = lazy(() => import('../waveform/StyleTuningPage'));
 const JogSettings = lazy(() => import('../midi/JogTuningPage'));
 const MouseJogSettings = lazy(() => import('./MouseJogSettings'));
+const LibrarySettings = lazy(() => import('./LibrarySettings'));
 const SECTIONS = [
   { id: 'filters', title: 'Filters', detail: 'Sound and sweep response' },
   { id: 'effects', title: 'Beat FX', detail: 'Echo, Reverb and Flanger' },
   { id: 'waveforms', title: 'Waveforms', detail: 'Color and rendering' },
   { id: 'jog', title: 'Jog calibration', detail: 'DDJ-GRV6 response' },
   { id: 'mouse-jog', title: 'Mouse jog', detail: 'Keyboard and mouse response' },
+  { id: 'library', title: 'Library', detail: 'Folders, DJ software, export' },
+  { id: 'tour', title: 'Tour', detail: 'Coach marks and guidance' },
 ] as const;
 type Section = (typeof SECTIONS)[number]['id'];
 const PARAMS = [
@@ -216,6 +227,35 @@ function FilterSettingsPanel() {
   );
 }
 
+/** Tour reset (feature-tour #282, story 7): forget seen sections and the
+ * skip-all flag, so every section's coach marks fire again on first entry.
+ * Also the demo hook. Replays of single sections live in the TopBar ?. */
+function TourSettingsPanel() {
+  useSyncExternalStore(subscribeTour, tourVersion);
+  const seenCount = TOUR_SECTIONS.filter((s) => isSectionSeen(s.id)).length;
+  return (
+    <>
+      <div className="settings-section-heading">
+        <div>
+          <h2>Tour</h2>
+          <p>
+            Each area shows a short guided walkthrough the first time you enter
+            it. Replay any section from the ? button in the top bar.
+          </p>
+        </div>
+        <button className="btn btn-secondary" onClick={resetTourProgress}>
+          Reset tour progress
+        </button>
+      </div>
+      <p className="settings-hint">
+        {allToursSkipped()
+          ? 'Tours are currently skipped — resetting turns them back on.'
+          : `${seenCount} of ${TOUR_SECTIONS.length} section tours seen. Resetting replays them on next visit.`}
+      </p>
+    </>
+  );
+}
+
 const EFFECT_GROUPS = [
   {
     name: 'Echo',
@@ -367,6 +407,10 @@ export default function SettingsPage({ performance = false }: { performance?: bo
               <WaveformSettings />
             ) : section === 'jog' ? (
               <JogSettings />
+            ) : section === 'library' ? (
+              <LibrarySettings />
+            ) : section === 'tour' ? (
+              <TourSettingsPanel />
             ) : (
               <MouseJogSettings performance={performance} />
             )}

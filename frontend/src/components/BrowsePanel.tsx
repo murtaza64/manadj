@@ -58,6 +58,7 @@ function BrowseSurfaceFrame({
   return (
     <div
       className={`app-browse${lockClasses}`}
+      data-tour="performance.browse"
       style={visible ? undefined : { display: 'none' }}
     >
       {children}

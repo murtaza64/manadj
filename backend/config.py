@@ -8,6 +8,16 @@ from typing import Any
 
 from backend.acquisition.classification import ClassificationConfig
 from backend.acquisition.cleanup import CleanupConfig
+from backend.data_root import dotenv_path, settings_file_path, stems_dir
+
+# Where Rekordbox keeps its database on macOS; used when the settings file
+# does not pin a location (Settings shows the detected path as the default).
+REKORDBOX_DEFAULT_LOCATION = Path.home() / "Library" / "Pioneer" / "rekordbox"
+
+
+def detect_rekordbox_path() -> str | None:
+    """Auto-detect the Rekordbox database folder (None if not installed)."""
+    return str(REKORDBOX_DEFAULT_LOCATION) if REKORDBOX_DEFAULT_LOCATION.is_dir() else None
 
 
 @dataclass
@@ -15,6 +25,8 @@ class DatabaseConfig:
     """Database configuration."""
     engine_dj_path: str | None
     rekordbox_path: str | None
+    # True when rekordbox_path came from auto-detection, not the settings file.
+    rekordbox_autodetected: bool = False
 
 
 @dataclass
@@ -59,7 +71,17 @@ class StemsConfig:
 
     def __post_init__(self) -> None:
         if not self.directory:
-            self.directory = str(Path(__file__).parent.parent / "data" / "stems")
+            self.directory = str(stems_dir())
+
+
+@dataclass
+class ExportConfig:
+    """Export to External libraries (ADR 0043): off by default.
+
+    Gates Rekordbox/Engine WRITE surfaces (UI and endpoints); imports are
+    always available. Toggled in Settings -> Library ([export] enabled).
+    """
+    enabled: bool = False
 
 
 @dataclass
@@ -81,18 +103,19 @@ class Config:
     soulseek: SoulseekConfig
     acquisition: AcquisitionConfig
     stems: StemsConfig = field(default_factory=StemsConfig)
+    export: ExportConfig = field(default_factory=ExportConfig)
 
 
 def _load_dotenv() -> None:
-    """Load KEY=VALUE lines from repo-root .env into the environment.
+    """Load KEY=VALUE lines from the data root's .env into the environment.
 
-    Secrets live in .env (gitignored) because config.toml is committed.
-    Real environment variables take precedence over .env values.
+    Secrets live in .env (gitignored) because the settings file is committed
+    in dev. Real environment variables take precedence over .env values.
     """
-    dotenv_path = Path(__file__).parent.parent / ".env"
-    if not dotenv_path.exists():
+    path = dotenv_path()
+    if not path.exists():
         return
-    for line in dotenv_path.read_text().splitlines():
+    for line in path.read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
@@ -163,56 +186,51 @@ def _tracks_directory_override() -> str | None:
     return os.environ.get("MANADJ_TRACKS_DIRECTORY") or None
 
 
+def _database_config(data: dict[str, Any]) -> DatabaseConfig:
+    """[database] paths; Rekordbox auto-detects when the file doesn't pin it.
+
+    An explicit empty string disables Rekordbox (no auto-detect); a missing
+    key means "find it for me".
+    """
+    section: dict[str, Any] = data.get("database", {})
+    engine_path = section.get("engine_dj_path") or None
+    autodetected = False
+    if "rekordbox_path" in section:
+        rekordbox_path = section["rekordbox_path"] or None
+    else:
+        rekordbox_path = detect_rekordbox_path()
+        autodetected = rekordbox_path is not None
+    return DatabaseConfig(
+        engine_dj_path=engine_path,
+        rekordbox_path=rekordbox_path,
+        rekordbox_autodetected=autodetected,
+    )
+
+
+def _export_config(data: dict[str, Any]) -> ExportConfig:
+    """[export] enabled: External-library writes gate, default off (ADR 0043)."""
+    section: dict[str, Any] = data.get("export", {})
+    return ExportConfig(enabled=bool(section.get("enabled", False)))
+
+
 def load_config() -> Config:
-    """Load configuration from config.toml.
+    """Load configuration from the settings file (config.toml in the data root).
 
-    Returns:
-        Config object with all configuration values
-
-    Raises:
-        FileNotFoundError: If config.toml doesn't exist
+    A missing file is not an error: defaults apply (fresh packaged install).
     """
     _load_dotenv()
-    config_path = Path(__file__).parent.parent / "config.toml"
+    config_path = settings_file_path()
 
-    if not config_path.exists():
-        # Return default empty config if file doesn't exist
-        return Config(
-            database=DatabaseConfig(
-                engine_dj_path=None,
-                rekordbox_path=None
-            ),
-            library=LibraryConfig(
-                tracks_directory=_tracks_directory_override()
-            ),
-            soundcloud=SoundCloudConfig(oauth_token=_soundcloud_token({})),
-            soulseek=_soulseek_config({}),
-            acquisition=AcquisitionConfig(),
-            stems=_stems_config({}),
-        )
+    data: dict[str, Any] = {}
+    if config_path.exists():
+        with open(config_path, "rb") as f:
+            data = tomllib.load(f)
 
-    with open(config_path, "rb") as f:
-        data = tomllib.load(f)
-
-    # Parse database config
-    db_config = data.get("database", {})
-    engine_path = db_config.get("engine_dj_path", "")
-    rekordbox_path = db_config.get("rekordbox_path", "")
-
-    # Convert empty strings to None
-    engine_path = engine_path if engine_path else None
-    rekordbox_path = rekordbox_path if rekordbox_path else None
-
-    # Parse library config
     lib_config = data.get("library", {})
-    tracks_dir = lib_config.get("tracks_directory", "")
-    tracks_dir = _tracks_directory_override() or (tracks_dir if tracks_dir else None)
+    tracks_dir = _tracks_directory_override() or lib_config.get("tracks_directory") or None
 
     return Config(
-        database=DatabaseConfig(
-            engine_dj_path=engine_path,
-            rekordbox_path=rekordbox_path
-        ),
+        database=_database_config(data),
         library=LibraryConfig(
             tracks_directory=tracks_dir
         ),
@@ -224,6 +242,7 @@ def load_config() -> Config:
             download_delay_secs=_download_delay_secs(data),
         ),
         stems=_stems_config(data),
+        export=_export_config(data),
     )
 
 

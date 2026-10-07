@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from backend import crud, models
 from backend.database import get_db
+from backend.export_gate import require_export_enabled
 
 router = APIRouter(prefix="/sync/export", tags=["sync"])
 
@@ -61,7 +62,7 @@ class HotcueExportRequest(BaseModel):
     mode: Literal["add-only", "replace-all"]
 
 
-@router.post("/hotcues/rekordbox")
+@router.post("/hotcues/rekordbox", dependencies=[Depends(require_export_enabled)])
 def export_hotcues_endpoint(
     request: HotcueExportRequest,
     db: Session = Depends(get_db),
@@ -89,7 +90,7 @@ class BeatgridExportRequest(BaseModel):
     track_id: int  # always the confirmed tier: grid export overwrites RB's
 
 
-@router.post("/beatgrid/rekordbox")
+@router.post("/beatgrid/rekordbox", dependencies=[Depends(require_export_enabled)])
 def export_beatgrid_endpoint(
     request: BeatgridExportRequest,
     db: Session = Depends(get_db),
@@ -120,7 +121,7 @@ def export_beatgrid_endpoint(
         raise HTTPException(status_code=409, detail=str(e))
 
 
-@router.post("/key/rekordbox")
+@router.post("/key/rekordbox", dependencies=[Depends(require_export_enabled)])
 def export_key_endpoint(
     request: KeyExportRequest,
     db: Session = Depends(get_db),
@@ -148,7 +149,7 @@ class AutoExportRequest(BaseModel):
     track_ids: list[int] | None = None  # None = whole Library
 
 
-@router.post("/rekordbox/auto")
+@router.post("/rekordbox/auto", dependencies=[Depends(require_export_enabled)])
 def auto_export_endpoint(
     request: AutoExportRequest,
     db: Session = Depends(get_db),
@@ -197,7 +198,7 @@ def get_playlist_full_export_service(db: Session = Depends(get_db)):
     return build_playlist_full_export_service(db)
 
 
-@router.post("/playlists/performance")
+@router.post("/playlists/performance", dependencies=[Depends(require_export_enabled)])
 def export_playlist_performance_endpoint(
     request: PlaylistFullExportRequest,
     playlist: str = Query(min_length=1),

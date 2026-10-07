@@ -3,7 +3,7 @@ description: manadj lane agent — yolo-style unattended implementation session 
 mode: primary
 # Cost default: spawned lane agents run on opus unless the spawner passes
 # --model explicitly (editspace-migration 05).
-model: anthropic/claude-fable-5
+model: anthropic/claude-opus-5-5
 # NOTE (incident 2026-07-08): edit-permission deny rules are INERT in current
 # opencode (verified empirically — agent and project level, every pattern
 # syntax). Do not add edit denies here and trust them. The real-DB write wall

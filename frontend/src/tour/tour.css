@@ -1,0 +1,106 @@
+/* Coach-mark tour (feature-tour #282). Tokens only; no animation (D9);
+   flat geometry (D5). Sits at --z-modal — the tour is an exclusive
+   overlay, same tier as modals; toasts stay above. */
+
+.tour-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal);
+}
+
+/* The hole: the scrim is the spotlight's giant box-shadow, so the anchor
+   stays visible at full brightness inside a 1px accent frame. */
+.tour-spotlight {
+  position: fixed;
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.55);
+  border: 1px solid var(--accent);
+  pointer-events: none;
+}
+
+.tour-popover {
+  position: fixed;
+  width: 320px;
+  background: var(--mantle);
+  border: 1px solid var(--accent);
+  padding: var(--space-12);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+}
+
+.tour-popover-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-8);
+}
+
+.tour-popover-title {
+  color: var(--accent);
+  font-size: var(--font-large);
+  font-weight: 700;
+}
+
+.tour-popover-count {
+  color: var(--overlay1);
+  font-size: var(--font-small);
+}
+
+.tour-popover-body {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--font-body);
+  line-height: 1.5;
+}
+
+.tour-popover-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+}
+
+.tour-popover-spacer {
+  flex: 1;
+}
+
+.tour-skip {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--overlay1);
+  font-size: var(--font-small);
+  cursor: pointer;
+}
+
+.tour-skip:hover {
+  color: var(--subtext1);
+  text-decoration: underline;
+}
+
+/* ── TopBar ? replay button ──────────────────────────────────────────── */
+
+.tour-replay {
+  position: relative;
+  display: inline-flex;
+}
+
+.tour-replay-button {
+  width: 22px;
+  height: 22px;
+  background: transparent;
+  border: 1px solid var(--surface1);
+  color: var(--overlay1);
+  font-size: var(--font-small);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.tour-replay-button:hover,
+.tour-replay-button[aria-expanded='true'] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.tour-replay-menu {
+  top: calc(100% + 10px);
+}

@@ -38,6 +38,8 @@ import { BpmControl } from '../deckControls/BpmControl';
 import { HFader, Knob } from './MixerStrip';
 import { PlayGuideMinimapMarks } from '../../performance/PlayGuideMinimapMarks';
 import { TagPopover } from './TagPopover';
+import { useDeckDropTarget } from '../../selection/deckDrop';
+import { DeckDropOverlay } from '../../selection/DeckDropOverlay';
 import { NUDGE_BEND_PERCENT, composeRate, effectiveBpm, keyDrifted } from '../../playback/tempo';
 import { DECK_COLORS, hexToRgbTriplet } from '../../theme/deckColors';
 import { AUDIBILITY_FILL_ALPHA } from '../../theme/markers';
@@ -421,10 +423,12 @@ export function DeckWaveform({
   const automationGhost = useAutomationGhost(deck);
   const machineHeld = automationGhost !== null;
   const showFocus = focused && !machineHeld;
+  const { dropState, dropHandlers } = useDeckDropTarget(deck);
 
   return (
     <div
       className={`perf-wave-row deck-${deck.toLowerCase()}${showFocus ? ' focused' : ''}${machineHeld ? ' machine' : ''}`}
+      {...dropHandlers}
     >
       {/* Fader area fill UNDERLAY (see fillCss note): the GL strip has a
           transparent background, so the fill shows through background
@@ -451,6 +455,7 @@ export function DeckWaveform({
         getSlipReturnPlayhead={getSlipReturnPlayhead}
       />
       {showFocus ? <div className="perf-wave-focus-frame" /> : null}
+      <DeckDropOverlay deck={deck} state={dropState} />
     </div>
   );
 }
@@ -1103,6 +1108,7 @@ export function DeckPanel({
   const { deck, engine } = useDeck();
   const controlFocus = useControlFocus();
   const focused = controlFocus.left === deck || controlFocus.right === deck;
+  const { dropState, dropHandlers } = useDeckDropTarget(deck);
   const ready = useDeckReady();
   const cuePoint = useDeckSnapshot((s) => s.cuePoint);
   const loop = useDeckSnapshot((s) => s.loop);
@@ -1133,6 +1139,7 @@ export function DeckPanel({
         focused ? ' focused' : ''
       }`}
       onPointerDownCapture={() => focusDeck(deck)}
+      {...dropHandlers}
     >
       <div className="perf-deck-minimap">
         <span className={`perf-decktag deck-${deck.toLowerCase()}`}>{deck}</span>
@@ -1161,6 +1168,7 @@ export function DeckPanel({
         <PlayZone />
         <MixZone track={track} />
       </div>
+      <DeckDropOverlay deck={deck} state={dropState} />
     </section>
   );
 }

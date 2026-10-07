@@ -11,6 +11,11 @@ rekordbox_path = "/Users/murtaza/Library/Pioneer/rekordbox"
 # Path to music library directory for importing tracks
 tracks_directory = "/Users/murtaza/Music/Tracks"
 
+[export]
+# Allow manaDJ to WRITE to the Rekordbox / Engine DJ libraries above
+# (ADR 0043). Off by default for outside users; on for Murtaza's dev setup.
+enabled = true
+
 [acquisition]
 # Seconds the download worker waits between tasks, to stay under SoundCloud's
 # request budget (~600 req / 10 min). Rate-limit (429) backoff is automatic.

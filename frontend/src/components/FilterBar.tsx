@@ -126,7 +126,7 @@ export default function FilterBar({ ref, totalTracks, filteredCount, loadedByDec
     CHANNEL_IDS.some((deck) => followFlags[deck]);
 
   return (
-    <div style={{
+    <div data-tour="library.search" style={{
       background: 'var(--mantle)',
       borderBottom: '1px solid var(--surface0)',
       padding: '4px 12px',
