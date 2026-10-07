@@ -36,8 +36,15 @@ import {
   type PlannedRoutineSlot,
   type RoutineDeck,
 } from '../sets/routinePlan';
+import { scratchClipAt, scratchFramesFrom, type PlannedScratchClip } from '../sets/routineScratch';
 
 const DRIFT_TOLERANCE_S = 0.12;
+/** Scratch clips (#352) hand over to the audio thread this far ahead of
+ * their first frame — comfortably more than a rAF tick. */
+const SCRATCH_LEAD_S = 0.12;
+/** A recorded jump this close to a clip's end is the clip's own landing
+ * (the end frame already put the deck there) — no hard re-seek. */
+const SCRATCH_LANDING_EPS_S = 0.05;
 const PITCH_EPS = 0.005;
 
 /** Audition margin beyond the Routine window, in Routine beats (gh#190
@@ -82,6 +89,11 @@ export class RoutinePlayer {
   /** Last load requested per deck (one request per target — the engine
    * snapshot lags the async fetch; the Conductor's idiom). */
   private loadRequested: Partial<Record<RoutineDeck, number>> = {};
+  /** Scratch clips handed to a deck's audio thread (#352): the deck is
+   * the clip's until its end — drift sync stands off. */
+  private scratchRuns: Partial<Record<RoutineDeck, { clip: PlannedScratchClip; owner: symbol }>> = {};
+  /** Clips the engine refused (no prepared source): positional fallback. */
+  private scratchRefused = new WeakSet<PlannedScratchClip>();
 
   constructor(audio: RoutinePlayerAudio) {
     this.mixer = audio.mixer;
@@ -95,6 +107,7 @@ export class RoutinePlayer {
    * Resets the transport to the span start. */
   setRoutine(routine: PlannedRoutine | null): void {
     this.pause();
+    this.cancelScratches();
     this.routine = routine;
     this.mixTimeAtAnchor = routine?.mixStartSec ?? 0;
     this.lastTickT = this.mixTimeAtAnchor;
@@ -247,6 +260,11 @@ export class RoutinePlayer {
     this.anchorAudioTime = this.mixer.now();
     this.lastTickT = this.getMixTime();
     this.lastPitch = {};
+    for (const deck of this.drivenDecks()) {
+      if (this.routine.slots.some((s) => s.deck === deck && s.scratches?.length)) {
+        void this.engine(deck)?.prepareScratchReplay().catch(() => undefined);
+      }
+    }
     this.selfOp(() => this.syncDecks(this.getMixTime(), true));
     this.applyLanes(this.getMixTime());
     this.raf = requestAnimationFrame(this.tick);
@@ -260,6 +278,7 @@ export class RoutinePlayer {
     this.mixTimeAtAnchor = this.getMixTime();
     this.playing = false;
     cancelAnimationFrame(this.raf);
+    this.cancelScratches();
     this.selfOp(() => {
       for (const deck of this.drivenDecks()) this.engine(deck)?.pause();
     });
@@ -274,6 +293,9 @@ export class RoutinePlayer {
     this.mixTimeAtAnchor = this.getMixTime();
     this.playing = false;
     cancelAnimationFrame(this.raf);
+    // The human has the decks: a recorded gesture must not keep moving
+    // the platter under their hand.
+    this.cancelScratches();
     this.emit();
   }
 
@@ -287,6 +309,7 @@ export class RoutinePlayer {
     this.mixTimeAtAnchor = t;
     this.lastTickT = t;
     this.anchorAudioTime = this.mixer.now();
+    this.cancelScratches();
     if (this.playing) {
       this.selfOp(() => this.syncDecks(t, true));
       this.applyLanes(t);
@@ -342,7 +365,14 @@ export class RoutinePlayer {
       if (this.constrainToBounds() && this.routine) this.mixTimeAtAnchor = this.routine.mixEndSec;
       return;
     }
-    this.selfOp(() => this.syncDecks(t, false));
+    this.selfOp(() => {
+      // Mirror audio-thread scratch progress onto the decks (UI + the
+      // takeover watcher reads these emits as the player's own).
+      for (const deck of Object.keys(this.scratchRuns) as RoutineDeck[]) {
+        this.engine(deck)?.syncScheduledScratch(true);
+      }
+      this.syncDecks(t, false);
+    });
     this.applyLanes(t);
     this.lastTickT = t;
     this.raf = requestAnimationFrame(this.tick);
@@ -377,15 +407,53 @@ export class RoutinePlayer {
         if (engine.getSnapshot().playing) engine.pause();
         continue;
       }
+      if (this.driveScratch(engine, deck, occupant, t)) continue;
       const state = this.slotStateAt(occupant, t);
       // Recorded discontinuity crossed since the last tick → hard-sync
       // THIS deck only (#161 per-deck jump scoping), and only within the
-      // occupant's own tenure.
+      // occupant's own tenure. A scratch landing is the clip's own doing.
       const jumped =
         !hard &&
-        occupant.jumpMixSecs.some((j) => j > this.lastTickT && j <= t);
+        occupant.jumpMixSecs.some((j) => j > this.lastTickT && j <= t &&
+          !(occupant.scratches ?? []).some((c) => j >= c.startMixSec && j <= c.endMixSec + SCRATCH_LANDING_EPS_S));
       this.syncDeck(engine, deck, state.playing, state.trackTime, state.pitchPercent, hard || jumped);
     }
+  }
+
+  /** Scratch clips (#352): true while `deck` belongs to a running clip
+   * (drift sync must stand off). Hands an upcoming clip to the engine's
+   * audio thread SCRATCH_LEAD_S ahead; a clip the engine refuses falls
+   * back to positional sync. */
+  private driveScratch(engine: DeckEngine, deck: RoutineDeck, occupant: PlannedRoutineSlot, t: number): boolean {
+    const run = this.scratchRuns[deck];
+    if (run) {
+      if (t < run.clip.endMixSec) return true;
+      delete this.scratchRuns[deck];
+      return false;
+    }
+    if (!this.playing) return false;
+    const clip = scratchClipAt(occupant.scratches, t, SCRATCH_LEAD_S);
+    if (!clip || this.scratchRefused.has(clip)) return false;
+    const frames = scratchFramesFrom(clip, t,
+      (mixSec) => this.anchorAudioTime + (mixSec - this.mixTimeAtAnchor));
+    if (frames.length === 0) return false;
+    try {
+      this.scratchRuns[deck] = { clip, owner: engine.scheduleScratch(frames) };
+      return true;
+    } catch {
+      this.scratchRefused.add(clip);
+      return false;
+    }
+  }
+
+  private cancelScratches(): void {
+    const runs = this.scratchRuns;
+    this.scratchRuns = {};
+    this.selfOp(() => {
+      for (const [deck, run] of Object.entries(runs) as [RoutineDeck, { owner: symbol }][]) {
+        this.engine(deck)?.cancelScheduledScratch(run.owner);
+      }
+    });
   }
 
   private syncDeck(

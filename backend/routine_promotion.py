@@ -109,6 +109,11 @@ def deck_playhead_samples(
         t = float(e.get("t", 0))
         kind = e.get("kind")
         if kind in ("transport", "loop") and e.get("channel"):
+            # Per-move scratch samples are gesture evidence (replayed as
+            # scratch clips, #352), not transport motion: the clock and
+            # entry positions read begin + landing only.
+            if kind == "transport" and e.get("action") == "scratchMove":
+                continue
             ph = e.get("playhead")
             if ph is not None:
                 out.setdefault(e["channel"], []).append((t, float(ph)))
@@ -444,28 +449,6 @@ def promote(
 
     events = sorted(events, key=lambda e: e.get("t", 0))
     residencies = map_slots(events, cast, window_start_s, window_end_s, entry_offsets)
-    # Input is the whole Session, not just this Take. Reject only scratch
-    # brackets intersecting a cast residency inside the promoted window.
-    for r in residencies:
-        start, end = max(window_start_s, r.start), min(window_end_s, r.end)
-        held = False
-        for e in events:
-            t = float(e.get("t", 0))
-            if t > end:
-                break
-            if e.get("kind") == "init":
-                held = bool(e.get("decks", {}).get(r.deck, {}).get("scratching", False))
-            elif e.get("channel") == r.deck:
-                if e.get("kind") == "load":
-                    held = False
-                elif e.get("kind") == "transport" and str(e.get("action", "")).startswith("scratch"):
-                    if t >= start:
-                        raise PromotionError("unsupported scratch motion: Routine beat clocks are forward-only")
-                    held = e["action"] != "scratchEnd"
-            if held and t >= start:
-                raise PromotionError("unsupported scratch motion: Routine beat clocks are forward-only")
-        if held:
-            raise PromotionError("unsupported scratch motion: Routine beat clocks are forward-only")
     beat_at = build_beat_clock(events, residencies, grids, window_start_s, window_end_s)
     samples = deck_playhead_samples(events)
 

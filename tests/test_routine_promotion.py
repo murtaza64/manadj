@@ -29,13 +29,28 @@ OFFSETS = [0.0, 10.0, 30.0]
 GRIDS = {tid: constant_tempo_changes(120.0) for tid in CAST}
 
 
-@pytest.mark.parametrize("action", ["scratchBegin", "scratchMove", "scratchEnd"])
-def test_scratch_promotion_is_explicitly_unsupported(action):
-    events = weave_events() + [{"t": 15, "kind": "transport", "channel": "A",
-                                "action": action, "playhead": 12,
-                                "deltaSeconds": -2, "durationSeconds": 0.5}]
-    with pytest.raises(PromotionError, match="unsupported scratch motion"):
-        promote(events, CAST, *WINDOW, OFFSETS, GRIDS)
+def test_scratch_promotes_as_slot_addressed_gesture_events():
+    """#352: a scratch inside a cast residency promotes. Its events ride
+    the recording slot-addressed (the planner builds scratch clips from
+    them); per-move samples never bend the beat clock."""
+    scratch = [
+        {"t": 15.0, "kind": "transport", "channel": "A", "action": "scratchBegin", "playhead": 15.0, "audioTime": 100.0},
+        *[
+            {"t": 15.0 + i * 0.01, "kind": "transport", "channel": "A", "action": "scratchMove",
+             "playhead": 15.0 - i * 0.02, "filter": {"drive": -4, "rate": -2}, "audioTime": 100.0 + i * 0.01}
+            for i in range(1, 50)
+        ],
+        {"t": 15.5, "kind": "transport", "channel": "A", "action": "scratchEnd", "playhead": 15.5, "audioTime": 100.5},
+    ]
+    plain = promote(weave_events(), CAST, *WINDOW, OFFSETS, GRIDS)
+    p = promote(sorted(weave_events() + scratch, key=lambda e: e["t"]), CAST, *WINDOW, OFFSETS, GRIDS)
+    moves = [e for e in p.events if e.get("action") == "scratchMove"]
+    assert len(moves) == 49
+    assert all(e["slot"] == 0 for e in moves)
+    assert moves[0]["filter"] == {"drive": -4, "rate": -2}
+    assert "audioTime" in moves[0]
+    assert p.entry_offsets_beats == plain.entry_offsets_beats
+    assert p.duration_beats == pytest.approx(plain.duration_beats, abs=0.5)
 
 
 @pytest.mark.parametrize("t,channel", [(70, "A"), (15, "D")])

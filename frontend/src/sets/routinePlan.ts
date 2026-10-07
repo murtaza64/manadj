@@ -41,6 +41,8 @@
  */
 import { MAX_PITCH_RANGE_PERCENT } from '../playback/tempo';
 import { applyJumpEditsToTrace, applyPauseEditsToTrace } from '../routines/routineDraft';
+import { isScratchMoveSample, planScratchClip, slotScratchClips } from './routineScratch';
+import type { PlannedScratchClip } from './routineScratch';
 
 // ── Input (the seam) ─────────────────────────────────────────────────────
 
@@ -165,6 +167,10 @@ export interface PlannedRoutineSlot {
    * seek on one deck must never snap the others (they may be mid-blend
    * or nudging; an all-deck seek reads as an audible hiccup). */
   jumpMixSecs: number[];
+  /** Recorded Vinyl gestures (#352), on the mix axis — players hand each
+   * to DeckEngine.scheduleScratch and stand off the deck while it runs.
+   * The trace carries only their net effect (landing = a jump). */
+  scratches?: PlannedScratchClip[];
 }
 
 export interface PlannedRoutine {
@@ -248,7 +254,7 @@ function slotSamples(events: RoutineEventInput[], slot: number): { beat: number;
       const playheads = e.playheads as Record<string, unknown> | undefined;
       const pos = num(playheads?.[String(slot)]);
       if (pos !== null) out.push({ beat, pos });
-    } else if ((e.kind === 'transport' || e.kind === 'loop') && e.slot === slot) {
+    } else if ((e.kind === 'transport' || e.kind === 'loop') && e.slot === slot && !isScratchMoveSample(e)) {
       const pos = num(e.playhead);
       if (pos !== null) out.push({ beat, pos });
     }
@@ -1006,6 +1012,15 @@ export function buildPlannedRoutine(
         ];
       }
     }
+    // Clips ride the FINAL trace: anchored where it stands at each
+    // gesture's start, so nudges, entry shifts and authored jumps before
+    // the gesture move the gesture with its material.
+    const scratches = input.authored ? [] : slotScratchClips(input.events, order[slot]).map((clip) => {
+      const after = traceStateAt(trace, clip.endBeat + delta + 1e-6);
+      const rateAfter = after.moving ? after.ratePerBeat / secPerBeat : 1 + basePitchPercent / 100;
+      const posShift = traceStateAt(trace, clip.startBeat + delta).pos - clip.frames[0].position;
+      return planScratchClip(clip, { beatShift: delta, posShift, beatOriginMixSec, secPerBeat, rateAfter });
+    });
     return {
       slot,
       slotId,
@@ -1025,6 +1040,7 @@ export function buildPlannedRoutine(
         .filter((p) => p.jump && p.beat >= startBeat && p.beat <= endBeat)
         .map((p) => beatOriginMixSec + p.beat * secPerBeat)
         .sort((a, b) => a - b),
+      ...(scratches.length > 0 ? { scratches } : {}),
     };
   });
 

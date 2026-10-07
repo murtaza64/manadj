@@ -7,8 +7,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DeckEngine } from '../playback/DeckEngine';
 import type { Mixer } from '../playback/mixer';
+import type { ScratchFrame } from '../playback/worklet/scratchMotion';
 import {
   buildPlannedRoutine,
+  type PlannedRoutine,
   type RoutineEventInput,
   type RoutinePlanInput,
 } from '../sets/routinePlan';
@@ -401,5 +403,81 @@ describe('the audible gate', () => {
     const before = engines.A.seeks;
     player.seek(10);
     expect(engines.A.seeks).toBe(before);
+  });
+});
+
+describe('scratch clips (#352)', () => {
+  /** Slot 1 scratches at beats 20–21 (mix 10–10.5 s) and lands 0.5 s
+   * behind its pre-gesture path. */
+  function scratched(): PlannedRoutine {
+    const input = recording();
+    input.events = input.events.map((e) =>
+      e.kind === 'tick' && (e.beat as number) >= 24
+        ? { ...e, playheads: { ...(e.playheads as Record<string, number>),
+            1: ((e.playheads as Record<string, number>)['1'] ?? 0) - 0.5 } }
+        : e);
+    input.events.push(
+      { kind: 'transport', beat: 20, slot: 1, action: 'scratchBegin', playhead: 2 },
+      { kind: 'transport', beat: 20.4, slot: 1, action: 'scratchMove', playhead: 1.8, filter: { drive: -4, rate: -1 } },
+      { kind: 'transport', beat: 21, slot: 1, action: 'scratchEnd', playhead: 2 },
+    );
+    input.events.sort((a, b) => (a.beat as number) - (b.beat as number));
+    return buildPlannedRoutine(input, {
+      startEntryIndex: 0, mixStartSec: 0, targetBpm: 120, adoptedDeck: 'A', busy: [], trackBpms: [120, 120, 120],
+    }).routine;
+  }
+
+  function withScratchEngine(engine: FakeEngine) {
+    const e = engine as FakeEngine & {
+      scheduled: ScratchFrame[][]; cancelled: number;
+      scheduleScratch(f: ScratchFrame[]): symbol; cancelScheduledScratch(): void;
+      syncScheduledScratch(): null; prepareScratchReplay(): Promise<void>;
+    };
+    e.scheduled = [];
+    e.cancelled = 0;
+    e.scheduleScratch = (f) => { e.scheduled.push(f); return Symbol('owner'); };
+    e.cancelScheduledScratch = () => { e.cancelled++; };
+    // Executed frames land the deck where the recording says (the worklet's
+    // job) — modeled as a re-anchor, not a seek.
+    e.syncScheduledScratch = () => {
+      const f = e.scheduled.at(-1)?.filter((x) => x.time <= now).at(-1);
+      if (f) Object.assign(e, { anchorPos: f.position + (now - f.time), anchorCtx: now });
+      return null;
+    };
+    e.prepareScratchReplay = async () => {};
+    return e;
+  }
+
+  it('hands the clip to the deck audio thread ahead of time and stands off until it ends', () => {
+    const { player, engines } = makePlayer();
+    const b = withScratchEngine(engines.B);
+    player.setRoutine(scratched());
+    player.play();
+    tickAt(9.8);
+    expect(b.scheduled).toHaveLength(0);
+    tickAt(9.95); // within the lead
+    expect(b.scheduled).toHaveLength(1);
+    expect(b.scheduled[0].map((f) => f.time)).toEqual([10, 10.2, 10.5]);
+    expect(b.scheduled[0].at(-1)).toMatchObject({ motion: null, position: 2, playing: true });
+    const seeks = b.seeks;
+    tickAt(10.3);
+    expect(b.seeks).toBe(seeks); // no drift sync mid-gesture
+    tickAt(10.6);
+    expect(b.scheduled).toHaveLength(1); // not rescheduled
+    expect(b.seeks).toBe(seeks); // the landing jump is the clip's own
+  });
+
+  it('seeking into a clip schedules from the reconstructed mid-gesture state; pause cancels', () => {
+    const { player, engines } = makePlayer();
+    const b = withScratchEngine(engines.B);
+    player.setRoutine(scratched());
+    player.seek(10.25);
+    player.play(); // audio clock 0 ≡ mix 10.25
+    const head = b.scheduled.at(-1)![0];
+    expect(head.time).toBeCloseTo(0, 6);
+    expect(head.motion).not.toBeNull();
+    expect(head.position).toBeLessThan(2);
+    player.pause();
+    expect(b.cancelled).toBe(1);
   });
 });
