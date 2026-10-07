@@ -64,6 +64,7 @@ export const PERSISTED_SETTING_KEYS: readonly string[] = [
   'manadj.grv6JogCalibration',
   // Coach-mark tour progress (feature-tour #282)
   'manadj-tour-state',
+  'manadj-tutorial-state',
 ];
 
 // Dynamic-key families (key = prefix + id), also preferences.

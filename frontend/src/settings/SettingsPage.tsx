@@ -1,6 +1,7 @@
 import { lazy, Suspense, useState, useSyncExternalStore } from 'react';
 import { useMixer, useMixerValue } from '../hooks/useMixer';
 import { TOUR_SECTIONS } from '../tour/steps';
+import { TutorialSettings } from '../tutorials/TutorialSettings';
 import {
   allToursSkipped,
   isSectionSeen,
@@ -252,6 +253,7 @@ function TourSettingsPanel() {
           ? 'Tours are currently skipped — resetting turns them back on.'
           : `${seenCount} of ${TOUR_SECTIONS.length} section tours seen. Resetting replays them on next visit.`}
       </p>
+      <TutorialSettings />
     </>
   );
 }
