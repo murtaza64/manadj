@@ -21,16 +21,44 @@ export interface TourSection {
   steps: TourStep[];
 }
 
+// Perform first (setup-guides #301): fresh installs open in PERFORM, so its
+// tour fires first and carries the Modes step; order is also the ? menu's.
 export const TOUR_SECTIONS: TourSection[] = [
   {
-    id: 'library',
-    label: 'Library',
+    id: 'performance',
+    label: 'Perform',
     steps: [
       {
         anchor: 'topbar.modes',
         title: 'Modes',
-        body: 'The app is a set of modes: EXPORT is your library, PERFORM the decks, EDIT the mix editor, SYNC import/export. Backtick (`) flips between library and decks.',
+        body: 'The app is a set of modes: PERFORM the decks, EDIT the mix editor, SYNC import/export. ⋯ holds EXPORT (your full library) and HISTORY. Backtick (`) flips between decks and library.',
       },
+      {
+        anchor: 'performance.waves',
+        title: 'Waveforms',
+        body: 'Every deck\u2019s waveform, aligned to the beat. Click to seek; the pink playhead is the audible mix position.',
+      },
+      {
+        anchor: 'performance.mixer',
+        title: 'Mixer',
+        body: 'Channel faders, EQ, filter and the crossfader — mirrored on a connected MIDI controller, which keeps working during this tour.',
+      },
+      {
+        anchor: 'performance.decks',
+        title: 'Decks',
+        body: 'Transport, hot cues, loops and jog per deck. Keyboard hints live on the deck panels; load tracks from the library below.',
+      },
+      {
+        anchor: 'performance.browse',
+        title: 'Library stays with you',
+        body: 'The browse panel rides along under every mode — search and load without leaving the decks.',
+      },
+    ],
+  },
+  {
+    id: 'library',
+    label: 'Library (Export)',
+    steps: [
       {
         anchor: 'library.sidebar',
         title: 'Sidebar',
@@ -50,32 +78,6 @@ export const TOUR_SECTIONS: TourSection[] = [
         anchor: 'library.player',
         title: 'Preview deck',
         body: 'The selected track loads here — waveform, hot cues, and the metadata editor for the loaded track.',
-      },
-    ],
-  },
-  {
-    id: 'performance',
-    label: 'Perform',
-    steps: [
-      {
-        anchor: 'performance.waves',
-        title: 'Waveforms',
-        body: 'All four decks\u2019 waveforms, aligned to the beat. Click to seek; the pink playhead is the audible mix position.',
-      },
-      {
-        anchor: 'performance.mixer',
-        title: 'Mixer',
-        body: 'Channel faders, EQ, filter and the crossfader — mirrored on a connected MIDI controller, which keeps working during this tour.',
-      },
-      {
-        anchor: 'performance.decks',
-        title: 'Decks',
-        body: 'Transport, hot cues, loops and jog per deck. Keyboard hints live on the deck panels; load tracks from the library below.',
-      },
-      {
-        anchor: 'performance.browse',
-        title: 'Library stays with you',
-        body: 'The browse panel rides along under every mode — search and load without leaving the decks.',
       },
     ],
   },

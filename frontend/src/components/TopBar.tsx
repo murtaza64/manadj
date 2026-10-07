@@ -2,9 +2,9 @@
  * Persistent top bar, mode-first (gh#66 redesign, variant B):
  *
  * - The bar's spine is a prominent labeled segmented mode control
- *   (EXPORT / PERFORM / EDIT / SYNC), followed by the Settings toggle;
- *   rarer modes live behind an overflow trigger at the control's right
- *   end, which wears the active overflow mode's segment when one is
+ *   (PERFORM / EDIT / SYNC), followed by the Settings toggle; rarer
+ *   modes (EXPORT, HISTORY — setup-guides #301) live behind an overflow
+ *   trigger at the control's right end, which wears the active overflow mode's segment when one is
  *   selected. No title — segments carry their own labels.
  * - Global status docks right, stable across modes, grouped by concern:
  *   visualizer | tasks | recording | audio (routing · deck ownership · MIDI).
@@ -30,10 +30,8 @@ export type AppMode = 'library' | 'performance' | 'transition' | 'routine' | 'hi
 type ModeMeta = { id: AppMode; icon: string; label: string; title: string };
 
 /** The daily-driver modes: always visible as labeled segments, full-word
- * labels. The library mode presents as EXPORT (the id stays 'library' —
- * it's baked into ?view=, the stored view, and mode plumbing). */
+ * labels. */
 const PRIMARY_MODES: ModeMeta[] = [
-  { id: 'library', icon: '≡', label: 'EXPORT', title: 'Export' },
   { id: 'performance', icon: '▸', label: 'PERFORM', title: 'Performance' },
   // #221 phase 3 (ADR 0037): the MIX EDITOR is THE editor — the primary
   // EDIT slot routes to the unified surface (mode id 'routine'); the pair
@@ -44,8 +42,11 @@ const PRIMARY_MODES: ModeMeta[] = [
 ];
 
 /** Rarer modes, relegated to the overflow menu (walkthrough verdict on
- * gh#66). */
+ * gh#66). The library mode presents as EXPORT (the id stays 'library' —
+ * it's baked into ?view=, the stored view, and mode plumbing); it moved
+ * here from the primary segments in setup-guides #301. */
 const OVERFLOW_MODES: ModeMeta[] = [
+  { id: 'library', icon: '≡', label: 'EXPORT', title: 'Export' },
   { id: 'history', icon: '↻', label: 'HISTORY', title: 'Transition history' },
 ];
 
@@ -190,7 +191,7 @@ function ModeControl({
         title={
           activeOverflow
             ? `${activeOverflow.title} — more modes`
-            : 'More modes (Transition history)'
+            : 'More modes (Export, Transition history)'
         }
         onClick={() => setMenu((v) => !v)}
       >

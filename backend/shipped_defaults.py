@@ -10,7 +10,8 @@
   cleanup, download delay). Layered under config.toml: a key present in the
   file wins, a missing key falls back here, then to code defaults.
 
-Inclusion lists live here so the snapshot script and the loader agree.
+Inclusion lists and overrides live here so the snapshot script and the
+loader agree.
 Excluded by design: audio-routing device IDs, paths, tokens, Export
 enablement, session-only keys.
 """
@@ -46,6 +47,13 @@ SETTING_KEYS: tuple[str, ...] = (
     "perf-kbd-hints",
 )
 SETTING_PREFIXES: tuple[str, ...] = ("manadj-visualizer-params:",)
+
+# Deliberate overrides of the snapshot: shipped regardless of Murtaza's own
+# stored value (which stays as-is in his DB).
+SETTING_OVERRIDES: dict[str, str] = {
+    # New users start with 2 decks (setup-guides #301); Murtaza runs 4.
+    "manadj-perf-deck-count": "2",
+}
 
 # Non-path config sections/keys snapshotted from config.toml.
 CONFIG_KEYS: dict[str, tuple[str, ...]] = {

@@ -27,14 +27,16 @@ DEFAULT_CONFIG = ROOT / "config.toml"
 
 
 def read_settings(db_path: Path) -> dict[str, str]:
-    """Included preference rows, opened read-only (never writes the DB)."""
+    """Included preference rows (+ SETTING_OVERRIDES), opened read-only."""
     uri = f"file:{db_path.resolve()}?mode=ro"
     conn = sqlite3.connect(uri, uri=True)
     try:
         rows = conn.execute("SELECT key, value FROM settings").fetchall()
     finally:
         conn.close()
-    return {k: v for k, v in sorted(rows) if shipped_defaults.is_shipped_setting(k)}
+    settings = {k: v for k, v in rows if shipped_defaults.is_shipped_setting(k)}
+    settings.update(shipped_defaults.SETTING_OVERRIDES)
+    return dict(sorted(settings.items()))
 
 
 def read_config(config_path: Path) -> dict:

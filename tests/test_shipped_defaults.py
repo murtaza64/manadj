@@ -84,6 +84,16 @@ def test_snapshot_reads_decoy_db_read_only(tmp_path):
 
     payload = json.loads(_snapshot_module().snapshot(db, config))
 
-    assert payload["settings"] == {"manadj-quantize": "true", "manadj-visualizer-params:neon": '{"speed":2}'}
+    assert payload["settings"] == {
+        "manadj-quantize": "true",
+        "manadj-visualizer-params:neon": '{"speed":2}',
+        **shipped_defaults.SETTING_OVERRIDES,
+    }
     assert payload["config"] == {"acquisition": {"download_delay_secs": 4}}
     assert db.read_bytes() == before
+
+
+def test_new_users_start_with_two_decks():
+    # setup-guides #301: deliberate override of the snapshot (Murtaza runs 4).
+    raw = json.loads(shipped_defaults.DEFAULTS_PATH.read_text())
+    assert raw["settings"]["manadj-perf-deck-count"] == "2"
