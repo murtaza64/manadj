@@ -27,6 +27,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
+import psutil
 from sqlalchemy.orm import Session
 
 from .models.album_art import AlbumArt
@@ -39,20 +40,29 @@ logger = logging.getLogger(__name__)
 # Database2 dirs already snapshotted during this backend process run.
 _snapshotted: set[str] = set()
 
-# Matches the app binary only: crashpad_handler processes under
-# Contents/Resources linger after Engine quits and must not count.
-_ENGINE_PROCESS_PATTERN = r"Engine DJ\.app/Contents/MacOS/Engine DJ"
+# The app binary's process name: "Engine DJ" (macOS) / "Engine DJ.exe"
+# (Windows). Exact match, so crashpad_handler processes that linger after
+# Engine quits don't count.
+_ENGINE_PROCESS_NAMES = frozenset({"engine dj", "engine dj.exe"})
 
 
 class EngineRunningError(RuntimeError):
     """Engine DJ is open; its database must not be written."""
 
 
+def is_engine_process_name(name: str | None) -> bool:
+    return (name or "").casefold() in _ENGINE_PROCESS_NAMES
+
+
+def engine_running() -> bool:
+    for proc in psutil.process_iter(["name"]):
+        if is_engine_process_name(proc.info.get("name")):
+            return True
+    return False
+
+
 def ensure_engine_closed() -> None:
-    probe = subprocess.run(
-        ["pgrep", "-f", _ENGINE_PROCESS_PATTERN], capture_output=True
-    )
-    if probe.returncode == 0:
+    if engine_running():
         raise EngineRunningError(
             "Engine DJ is running — quit it before exporting"
         )
