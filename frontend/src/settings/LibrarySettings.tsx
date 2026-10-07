@@ -86,9 +86,14 @@ export default function LibrarySettings() {
           <h2>Library</h2>
           <p>Where your music lives and which DJ software manaDJ talks to.</p>
         </div>
-        <button className="btn btn-secondary" onClick={reveal}>
-          Reveal settings file
-        </button>
+        <div className="settings-library-actions">
+          <button className="btn btn-secondary" onClick={reveal}>
+            Reveal settings file
+          </button>
+          <button className="btn btn-secondary" onClick={() => api.appConfig.revealLogs()}>
+            Reveal logs
+          </button>
+        </div>
       </div>
       <div className="settings-fields">
         <PathField

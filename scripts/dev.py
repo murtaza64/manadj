@@ -125,8 +125,10 @@ def main() -> int:
             "--reload",
             "--reload-dir",
             "backend",
+            # Loopback only (packaged-app #278, PRD story 8): the backend
+            # must never be reachable from the network.
             "--host",
-            "0.0.0.0",
+            "127.0.0.1",
             "--port",
             str(args.backend_port),
         ],

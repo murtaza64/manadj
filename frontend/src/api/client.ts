@@ -1682,6 +1682,12 @@ export const api = {
       const res = await fetch(`${API_BASE}/config/reveal`, { method: 'POST' });
       if (!res.ok) throw new Error(`Failed to reveal settings file (${res.status})`);
     },
+
+    /** Open the backend log folder in Finder (packaged-app #278). */
+    revealLogs: async (): Promise<void> => {
+      const res = await fetch(`${API_BASE}/config/reveal-logs`, { method: 'POST' });
+      if (!res.ok) throw new Error(`Failed to reveal logs (${res.status})`);
+    },
   },
 };
 
@@ -1696,6 +1702,8 @@ export interface AppConfigWire {
   engine_dj_path: string | null;
   export_enabled: boolean;
   settings_file: string;
+  /** Live PATH check (packaged-app #278): false => waveforms/analysis/stems broken. */
+  ffmpeg_available: boolean;
 }
 
 export interface AppConfigUpdateWire {

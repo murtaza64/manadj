@@ -7,6 +7,7 @@ Distinct from /api/settings, which stores opaque UI preferences in the DB.
 
 from __future__ import annotations
 
+import shutil
 import subprocess
 import sys
 
@@ -14,7 +15,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from ..config import detect_rekordbox_path, get_config, reload_config
-from ..data_root import settings_file_path
+from ..data_root import logs_dir, settings_file_path
 from ..settings_file import update_settings_file
 
 router = APIRouter()
@@ -41,6 +42,9 @@ def _state() -> dict:
         "engine_dj_path": config.database.engine_dj_path,
         "export_enabled": config.export.enabled,
         "settings_file": str(settings_file_path()),
+        # ffmpeg health (packaged-app #278): checked live so installing it
+        # mid-session clears the UI warning on the next config fetch.
+        "ffmpeg_available": shutil.which("ffmpeg") is not None,
     }
 
 
@@ -68,4 +72,15 @@ def reveal_settings_file() -> dict:
     if sys.platform != "darwin":
         raise HTTPException(status_code=501, detail="Reveal is only supported on macOS")
     subprocess.Popen(["open", "-R", str(path)])
+    return {"revealed": str(path)}
+
+
+@router.post("/reveal-logs")
+def reveal_logs() -> dict:
+    """Open the backend log folder in Finder (packaged-app #278)."""
+    path = logs_dir()
+    path.mkdir(parents=True, exist_ok=True)
+    if sys.platform != "darwin":
+        raise HTTPException(status_code=501, detail="Reveal is only supported on macOS")
+    subprocess.Popen(["open", str(path)])
     return {"revealed": str(path)}

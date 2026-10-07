@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { queryClient } from './api/queryClient';
+import { DEV_SURFACES } from './devMode';
 
 const SettingsPage = lazy(() => import('./settings/SettingsPage'));
 const MidiInspectorPage = lazy(() => import('./midi/MidiInspectorPage'));
@@ -59,6 +60,10 @@ function initialMode(): AppMode | 'settings' {
   for (const mode of [requestedView, storedView]) {
     // Published Settings links and the former persisted mode remain usable.
     if (mode === 'settings') return mode;
+    // The legacy PAIR editor is a dev surface (packaged-app #278): deep
+    // links / restores don't open it in production builds. In-app events
+    // (take review, pair edit) still can.
+    if (mode === 'transition' && !DEV_SURFACES) continue;
     if (MODE_IDS.includes(mode as AppMode)) return mode as AppMode;
   }
   return 'library';
@@ -164,7 +169,8 @@ function App() {
     return () => window.removeEventListener(OPEN_SESSION_EVENT, onOpenSession);
   }, []);
 
-  if (window.location.pathname === '/midi-inspect') {
+  // Dev-only surface (packaged-app #278): hand-typed path, dev builds only.
+  if (DEV_SURFACES && window.location.pathname === '/midi-inspect') {
     return (
       <Suspense fallback={null}>
         <MidiInspectorPage />
@@ -179,7 +185,9 @@ function App() {
   if (window.location.pathname === '/visualizer') {
     // ?arena=1 → the genetic judging arena (realtime-visualization 06);
     // same standalone rules: no DeckProvider, never an AudioContext.
-    const arena = new URLSearchParams(window.location.search).has('arena');
+    // Dev-only (packaged-app #278): the arena writes genepool files into
+    // the source tree — never a packaged-app surface.
+    const arena = DEV_SURFACES && new URLSearchParams(window.location.search).has('arena');
     return (
       <Suspense fallback={null}>{arena ? <ArenaApp /> : <VisualizerApp />}</Suspense>
     );

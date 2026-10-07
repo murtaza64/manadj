@@ -217,3 +217,37 @@ def test_db_backup_explicit_paths(tmp_path):
     dest = db_backup.backup(force=True, quiet=True, db=db, backup_dir=backups)
     assert dest is not None and dest.parent == backups
     assert dest.read_text() == "decoy database"
+
+
+# -- #278 rough edges ----------------------------------------------------------
+
+
+def test_config_reports_ffmpeg_health(client, monkeypatch):
+    import backend.routers.app_config as app_config
+
+    monkeypatch.setattr(app_config.shutil, "which", lambda name: None)
+    assert client.get("/api/config").json()["ffmpeg_available"] is False
+    monkeypatch.setattr(app_config.shutil, "which", lambda name: "/usr/bin/ffmpeg")
+    assert client.get("/api/config").json()["ffmpeg_available"] is True
+
+
+def test_backend_log_file_in_data_root(temp_data_root):
+    import logging
+    from logging.handlers import RotatingFileHandler
+
+    from backend.logging_config import setup_logging
+
+    saved = list(logging.root.handlers)
+    try:
+        setup_logging()
+        files = [h for h in logging.root.handlers if isinstance(h, RotatingFileHandler)]
+        assert len(files) == 1
+        assert Path(files[0].baseFilename) == temp_data_root / "logs" / "backend.log"
+        logging.getLogger("backend.test").info("hello log file")
+        files[0].flush()
+        assert "hello log file" in (temp_data_root / "logs" / "backend.log").read_text()
+    finally:
+        for h in logging.root.handlers:
+            if h not in saved:
+                h.close()
+        logging.root.handlers[:] = saved

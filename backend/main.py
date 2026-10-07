@@ -198,9 +198,19 @@ async def startup_event():
     """Start background workers on server startup."""
     global _task_worker
 
-    # Waveform data generation (ADR 0014) requires ffmpeg; fail loudly at startup.
+    # Waveform data generation (ADR 0014) requires ffmpeg. Non-fatal
+    # (packaged-app #278, PRD story 6): the app boots and the UI surfaces
+    # the problem (/api/config ffmpeg_available); per-track decode failures
+    # land as failed tasks until ffmpeg appears.
+    import logging
+
     from .waveform_data import ensure_ffmpeg
-    ensure_ffmpeg()
+    try:
+        ensure_ffmpeg()
+    except RuntimeError as exc:
+        logging.getLogger("backend.main").error(
+            "%s — waveforms, analysis and stems will fail until it is installed", exc
+        )
     if os.getenv("DISABLE_TASK_WORKER", "").lower() not in ("true", "1", "yes"):
         _task_worker = _build_task_worker()
         if _task_worker is not None:
