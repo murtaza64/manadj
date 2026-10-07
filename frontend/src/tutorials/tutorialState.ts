@@ -5,7 +5,7 @@ import { keyboardLesson } from './keyboardLesson';
 export const TUTORIAL_STATE_KEY = 'manadj-tutorial-state';
 export const OPEN_TUTORIAL_EVENT = 'manadj:open-tutorial';
 export const lessons: Lesson[] = [keyboardLesson];
-let progress: Partial<Record<TutorialId, Progress>> = {};
+const progress: Partial<Record<TutorialId, Progress>> = {};
 try {
   const stored = JSON.parse(localStorage.getItem(TUTORIAL_STATE_KEY) ?? '{}');
   for (const id of ['keyboard', 'transition'] as const) {

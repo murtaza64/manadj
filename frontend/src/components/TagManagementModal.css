@@ -79,6 +79,27 @@
   font-weight: bold;
 }
 
+.category-header {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-8);
+}
+
+.category-header .btn-delete-small { opacity: 0.5; }
+.category-header .btn-delete-small:hover:not(:disabled) { opacity: 1; }
+
+.category-header .btn-delete-small:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.category-add-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  max-width: 320px;
+}
+
 /* Tag Grid - 3 columns */
 .tag-grid {
   display: grid;

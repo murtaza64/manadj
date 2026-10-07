@@ -11,6 +11,7 @@ import { _resetControlFocusForTests, focusDeck } from '../../performance/control
 import { BeatjumpRow } from '../deckControls/BeatjumpRow';
 import { LoopRow } from '../deckControls/LoopRow';
 import { DeckPanel } from './DeckPanel';
+import { setPlatformOverride } from '../../utils/platform';
 
 vi.hoisted(() => {
   vi.stubGlobal('localStorage', { getItem: () => null, setItem: () => {} });
@@ -159,6 +160,22 @@ describe('DeckPanel keyboard hints', () => {
     expect(getComputedStyle(volumeHint).position).toBe('static');
     expect(getComputedStyle(volumeHint).bottom).toBe('-6px');
     expect(getComputedStyle(volumeHint).right).toBe('-4px');
+  });
+
+  it('labels primary chords with Ctrl off macOS', () => {
+    setPlatformOverride('other');
+    try {
+      render('A');
+      expect(container.querySelector('[title="Halve loop size (Ctrl+Shift+A)"]')).not.toBeNull();
+      expect(container.querySelector('[title="Double loop size (Ctrl+Shift+S)"]')).not.toBeNull();
+      const match = container.querySelector('[aria-label="Match tempo"] > .perf-kbd')!;
+      expect(match.textContent).toBe('\u2303G');
+      expect(match.querySelectorAll('.perf-kbd-ctrl > svg')).toHaveLength(1);
+      expect(container.querySelector('[aria-label="Sync tempo"] > .perf-kbd')!.textContent).toBe('\u2303\u21e7G');
+      expect(container.textContent).not.toContain('\u2318');
+    } finally {
+      setPlatformOverride('mac');
+    }
   });
 
   it('preserves hint visibility gates', () => {

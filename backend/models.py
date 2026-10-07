@@ -716,6 +716,11 @@ class Routine(Base):
     # any slot, beat-domain. Opaque JSON (the events_json posture); the
     # recording above stays evidence and never changes. Null = unedited.
     edits_json = Column(Text, nullable=True)
+    # Stable slot ids, parallel to cast_json (ADR 0039, gh#325). Null =
+    # promoted (slot id = String(index)); authored Routines always set it.
+    slot_ids_json = Column(Text, nullable=True)
+    # Null = an AUTHORED Routine (ADR 0039): built from scratch, no
+    # recording; cast/entry offsets/positions are first-class mutable.
     origin_take_uuid = Column(String, nullable=True)
     # The CURRENT capture-clock window this Routine was promoted over
     # (gh#190): equals the origin take's window at promote time, then
