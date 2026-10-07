@@ -319,6 +319,9 @@ export interface EngineTrackExportResult {
   target: 'engine';
   exported_to_target: number;
   skipped_file_not_found: number;
+  /** Tracks not on the Engine Library's drive (Windows, #306). */
+  skipped_other_drive: number;
+  skipped_other_drive_paths: string[];
   playlist_name: string | null;
   playlist_created: boolean;
 }

@@ -66,7 +66,7 @@ def export_tracks_to_engine(
     them in a needs-analysis playlist. Caller is responsible for the
     Engine-closed guard and pre-write snapshot (router dependency)."""
     from enginedj.sync import find_missing_tracks_in_enginedj
-    from enginedj.track_export import EngineTrackSpec, insert_track
+    from enginedj.track_export import EngineTrackSpec, OtherDriveError, insert_track
 
     library_root = engine_db.database_path.parent
 
@@ -78,6 +78,7 @@ def export_tracks_to_engine(
         )
 
     inserted_ids: list[int] = []
+    other_drive: list[str] = []
     with engine_db.session_m_write() as session:
         for track in missing:
             abs_path = Path(track.filename)
@@ -96,7 +97,11 @@ def export_tracks_to_engine(
                 ),
                 bitrate_kbps=track.bitrate_kbps or tags.get("bitrate_kbps"),
             )
-            inserted_ids.append(insert_track(session, spec, library_root))
+            try:
+                inserted_ids.append(insert_track(session, spec, library_root))
+            except OtherDriveError:
+                # Engine keeps one library per drive (#307); skip + report.
+                other_drive.append(track.filename)
 
     final_playlist_name = playlist_name or default_needs_analysis_playlist_name()
     playlist_created = False
@@ -115,6 +120,8 @@ def export_tracks_to_engine(
         target="engine",
         exported_to_target=len(inserted_ids),
         skipped_file_not_found=stats.get("skipped_file_not_found", 0),
+        skipped_other_drive=len(other_drive),
+        skipped_other_drive_paths=other_drive,
         playlist_name=final_playlist_name if inserted_ids else None,
         playlist_created=playlist_created,
     )

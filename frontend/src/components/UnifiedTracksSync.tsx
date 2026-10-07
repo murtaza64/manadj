@@ -212,7 +212,10 @@ export function UnifiedTracksSync() {
       done(
         `Exported ${r.exported_to_target} tracks to Engine DJ` +
         `${r.playlist_name ? ` (playlist "${r.playlist_name}")` : ''}. ` +
-        'Engine analyzes them on first load.',
+        'Engine analyzes them on first load.' +
+        (r.skipped_other_drive
+          ? ` Skipped ${r.skipped_other_drive} not on the Engine Library drive.`
+          : ''),
       ),
     onError: failed,
   });

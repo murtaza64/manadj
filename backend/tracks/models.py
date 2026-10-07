@@ -1,6 +1,6 @@
 """Data models for track synchronization."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass
@@ -46,6 +46,9 @@ class EngineTrackExportResult:
     target: str = 'engine'
     exported_to_target: int = 0
     skipped_file_not_found: int = 0
+    # Tracks on a different drive than the Engine Library (Windows, #306).
+    skipped_other_drive: int = 0
+    skipped_other_drive_paths: list[str] = field(default_factory=list)
     playlist_name: str | None = None
     playlist_created: bool = False
 
