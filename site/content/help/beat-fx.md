@@ -1,9 +1,10 @@
 ---
 slug: beat-fx
+draft: true
 title: Beat FX and filters
 summary: Apply Echo, Reverb, or Flanger to a Deck or Master, and tune the shared sweep-filter sound.
 order: 13
-related: [perform, audio, controllers]
+related: [perform]
 ---
 
 ## Use Beat FX {#effects}
@@ -25,7 +26,7 @@ In Performance, with deck keyboard controls active:
 - Hold **0** and move the mouse to adjust depth; double-tap **0** to center it.
 - **-** toggles FX on/off.
 
-If nothing changes, check the target, its channel fader, FX on/off, and depth. **---** disables the section. PFL listens before Beat FX; [blend Master into CUE MIX](../audio/index.html#outputs) to hear the processed mix in headphones. Closing a fader stops new audio entering the effect, but existing tails can ring out. Master uses the last selected Deck target as its tempo source.
+If nothing changes, check the target, its channel fader, FX on/off, and depth. **---** disables the section. PFL listens before Beat FX; blend Master into CUE MIX to hear the processed mix in headphones. Closing a fader stops new audio entering the effect, but existing tails can ring out. Master uses the last selected Deck target as its tempo source.
 
 ## Tune the sweep filters {#filters}
 

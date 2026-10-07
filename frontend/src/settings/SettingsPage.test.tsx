@@ -465,7 +465,7 @@ it('opens contextual Help without changing the Settings group and exposes the ma
   await act(async () => root!.render(<MixerContext value={new Mixer()}><SettingsPage /><HelpViewer /></MixerContext>));
   const opener = host.querySelector<HTMLButtonElement>('[aria-label="Help: Filters"]')!;
   act(() => opener.click());
-  expect(document.querySelector('iframe')?.getAttribute('src')).toBe('/manual/help/beat-fx/index.html#filters');
+  expect(document.querySelector('iframe')?.getAttribute('src')).toBe('/manual/help/index.html');
   act(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
   expect(document.activeElement).toBe(opener);
   expect(host.querySelector('.settings-content')?.getAttribute('aria-label')).toBe('Performance');
@@ -477,4 +477,19 @@ it('opens contextual Help without changing the Settings group and exposes the ma
   expect(SETTINGS_GROUPS.find((g) => g.id === 'help')!.sections.filter((s) => s.id === 'manual')).toHaveLength(1);
   act(() => (manual.querySelector('button') as HTMLButtonElement).click());
   expect(document.querySelector('iframe')?.getAttribute('src')).toBe('/manual/help/index.html');
+});
+
+it('opens the mapped keyboard Help article from Settings', async () => {
+  history.replaceState(null, '', '/?section=shortcuts');
+  const host = document.createElement('div');
+  document.body.append(host);
+  root = createRoot(host);
+  await act(async () => root!.render(<><SettingsPage /><HelpViewer /></>));
+  const opener = host.querySelector<HTMLButtonElement>('#settings-section-shortcuts [data-help-link]')!;
+  expect(opener).not.toBeNull();
+  act(() => opener.click());
+  expect(document.querySelector('iframe')?.getAttribute('src')).toBe('/manual/help/perform/index.html#keyboard');
+  act(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+  expect(document.activeElement).toBe(opener);
+  expect(host.querySelector('.settings-content')?.getAttribute('aria-label')).toBe('Keyboard + mouse');
 });

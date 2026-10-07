@@ -1,9 +1,10 @@
 ---
 slug: sync
+draft: true
 title: Import and export
 summary: Bring tracks and external edits into manadj, then export your curated Library to disk or DJ software.
 order: 8
-related: [start, curate, analysis, acquire]
+related: [start, curate]
 ---
 
 ## Import tracks or external edits {#import}

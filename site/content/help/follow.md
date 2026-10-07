@@ -1,9 +1,10 @@
 ---
 slug: follow
+draft: true
 title: Find the next Track with Follow
 summary: Follow loaded Decks to browse candidate Tracks, then adjust matching and Temperature without changing what is playing.
 order: 3
-related: [curate, perform, analysis, editor, sets]
+related: [curate, perform, editor]
 shot: follow
 caption: Follow filters the browse list around loaded Tracks and shows candidate matching.
 ---
@@ -24,7 +25,7 @@ Compatible matching considers BPM, including half/double-time relationships. Key
 
 Click the gear beside the Follow buttons to open **Follow Parameters**. Adjust the BPM tolerance or select **Known only**. Changes apply immediately; **Reset** restores the parameter defaults.
 
-If the list is unexpectedly short, turn off Known only and check your text, Tag, and other Library filters. Those still narrow what you see. Missing metadata supplies less matching evidence: [curate Tags and Energy](../curate/index.html#tags) or [check Analysis](../analysis/index.html) before assuming a Track cannot fit.
+If the list is unexpectedly short, turn off Known only and check your text, Tag, and other Library filters. Those still narrow what you see. Missing metadata supplies less matching evidence: [curate Tags and Energy](../curate/index.html#tags) or check Analysis before assuming a Track cannot fit.
 
 ## Add variety with Temperature {#temperature}
 

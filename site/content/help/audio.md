@@ -1,9 +1,10 @@
 ---
 slug: audio
+draft: true
 title: Audio and Cue mode
 summary: Route Master and headphone audio, check PFL, and choose how paused Hot Cues behave.
 order: 12
-related: [controllers, perform, beat-fx, start]
+related: [perform, start]
 ---
 
 ## Set audio outputs {#outputs}

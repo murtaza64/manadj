@@ -12,10 +12,12 @@ from .routers import tracks, tags, waveforms, playlists, beatgrids, metric_ladde
 from .acquisition import models as acquisition_models  # noqa: F401  (registers tables on Base)
 from .acquisition.router import router as acquisition_router
 from .tasks import models as task_models  # noqa: F401  (registers tables on Base)
-from .tasks.worker import TaskWorker
+from .tasks.worker import TaskWorkerPool
 from .soulseek import router as soulseek_router
 from .acquisition import connect_router as soundcloud_connect_router
 from .logging_config import setup_logging
+from .feedback import FeedbackService, Workspace
+from .routers.feedback import router as feedback_router
 
 if TYPE_CHECKING:
     from .config import Config
@@ -89,6 +91,7 @@ app.include_router(routines.router, prefix="/api/routines", tags=["routines"])
 app.include_router(cameos.router, prefix="/api/cameos", tags=["cameos"])
 app.include_router(visualizer_ga.router, prefix="/api/ga", tags=["visualizer-ga"])
 app.include_router(settings.router, prefix="/api/settings", tags=["settings"])
+app.include_router(feedback_router)
 app.include_router(app_config.router, prefix="/api/config", tags=["app-config"])
 app.include_router(soulseek_router.router, prefix="/api/soulseek", tags=["soulseek"])
 app.include_router(soundcloud_connect_router.router, prefix="/api/soundcloud", tags=["soundcloud"])
@@ -112,8 +115,14 @@ def _stems_enabled() -> bool:
     return os.getenv("DISABLE_STEMS_WORKER", "").lower() not in ("true", "1", "yes")
 
 
-def _build_task_worker() -> "TaskWorker | None":
-    """The task worker (ADR-0003): waveform generation always, downloads if configured."""
+def _build_task_worker() -> "TaskWorkerPool | None":
+    """The task workers (ADR-0003, gh#224): one per concurrency lane.
+
+    Handlers are registered as before (waveform generation always, downloads
+    if configured); the pool splits them into lanes (backend.tasks.lanes) so
+    downloads, soulseek traffic, and compute work proceed in parallel while
+    each task type stays serialized within its lane.
+    """
     import logging
 
     from .config import get_config
@@ -194,7 +203,10 @@ def _build_task_worker() -> "TaskWorker | None":
 
     if not handlers:
         return None
-    return TaskWorker(SessionLocal, handlers, delays=delays)
+    # One worker thread per concurrency lane (gh#224): downloads, soulseek
+    # traffic and compute work proceed in parallel; each task type stays
+    # serialized within its lane.
+    return TaskWorkerPool(SessionLocal, handlers, delays=delays)
 
 
 def _download_handlers(config: "Config", soulseek_fallback: bool) -> dict[str, "Handler"]:
@@ -264,7 +276,7 @@ def _on_soundcloud_connected() -> None:
 
 soundcloud_connect_router.on_connected = _on_soundcloud_connected
 
-_task_worker: "TaskWorker | None" = None
+_task_worker: "TaskWorkerPool | None" = None
 
 
 @app.on_event("startup")
@@ -358,12 +370,16 @@ async def startup_event():
             finally:
                 db.close()
 
+    app.state.feedback_service = FeedbackService(Workspace(_repo_root))
+    app.state.feedback_service.start()
+
 
 @app.on_event("shutdown")
 async def shutdown_event():
     """Stop background workers on server shutdown."""
     if _task_worker is not None:
         _task_worker.stop()
+    app.state.feedback_service.stop()
     from .soulseek.supervisor import get_supervisor
 
     get_supervisor().stop()

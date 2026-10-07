@@ -4,8 +4,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Mix with Decks and Mixer — manadj</title>
-  <meta name="description" content="Load Tracks, control the focused Decks from your keyboard, and shape playback with the Mixer, mouse jog, and stems.">
+  <title>Keyboard DJing — manadj</title>
+  <meta name="description" content="Load Decks and use keyboard, mouse, or controller controls.">
   <link rel="icon" href="../../assets/logo.png">
   <link rel="preload" href="../../assets/fonts/UbuntuMono-Regular.ttf" as="font" type="font/ttf" crossorigin>
   <link rel="preload" href="../../assets/fonts/UbuntuMono-Bold.ttf" as="font" type="font/ttf" crossorigin>
@@ -20,7 +20,7 @@
     <nav class="segments" aria-label="Site">
       <a class="segment" href="../../index.html">TOUR</a>
       <a class="segment active" href="../../help/index.html">HELP</a>
-      <a class="segment" href="../../index.html#words">GLOSSARY</a>
+      <a class="segment" href="../../install.html">INSTALL</a>
     </nav>
   </header>
   <div class="help-layout">
@@ -29,19 +29,10 @@
         <summary>Help articles</summary>
         <nav aria-label="Help articles">
           <a href="../../help/index.html">All articles</a>
-          <a href="../../help/curate/index.html">Curate your Library</a>
-          <a href="../../help/perform/index.html" aria-current="page">Mix with Decks and Mixer</a>
-          <a href="../../help/follow/index.html">Find the next Track with Follow</a>
-          <a href="../../help/capture/index.html">Review Sessions and Takes</a>
-          <a href="../../help/editor/index.html">Edit and audition a mix</a>
-          <a href="../../help/sets/index.html">Plan and play a Set</a>
-          <a href="../../help/analysis/index.html">Analysis and waveforms</a>
-          <a href="../../help/sync/index.html">Import and export</a>
-          <a href="../../help/acquire/index.html">Acquire tracks</a>
-          <a href="../../help/controllers/index.html">Controllers</a>
-          <a href="../../help/start/index.html">Get started</a>
-          <a href="../../help/audio/index.html">Audio and Cue mode</a>
-          <a href="../../help/beat-fx/index.html">Beat FX and filters</a>
+          <a href="../../help/start/index.html">Getting started</a>
+          <a href="../../help/curate/index.html">Library &amp; tagging</a>
+          <a href="../../help/perform/index.html" aria-current="page">Keyboard DJing</a>
+          <a href="../../help/editor/index.html">Mix editor</a>
         </nav>
       </details>
     </aside>
@@ -49,18 +40,18 @@
       <article>
         <header class="help-heading">
           <a class="kicker" href="../index.html">Help manual</a>
-          <h1>Mix with Decks and Mixer</h1>
-          <p>Load Tracks, control the focused Decks from your keyboard, and shape playback with the Mixer, mouse jog, and stems.</p>
+          <h1>Keyboard DJing</h1>
+          <p>Load Decks and use keyboard, mouse, or controller controls.</p>
         </header>
         <details class="help-toc" open>
           <summary>On this page</summary>
           <nav aria-label="On this page"><div class="toc">
 <ul>
-<li><a href="#keyboard">Start with the keyboard</a></li>
-<li><a href="#loading">Load the next Track</a></li>
-<li><a href="#mixer">Shape the blend</a></li>
-<li><a href="#mouse-jog">Nudge with mouse jog</a></li>
-<li><a href="#stems">Separate and control stems</a></li>
+<li><a href="#keyboard">Controls</a></li>
+<li><a href="#loading">Load</a></li>
+<li><a href="#mixer">Mixer</a></li>
+<li><a href="#mouse-jog">Mouse jog</a></li>
+<li><a href="#stems">Stems</a></li>
 </ul>
 </div>
 </nav>
@@ -71,48 +62,55 @@
     <source src="../../media/perform.mp4" type="video/mp4">
     <a href="../../media/perform.mp4">Watch the silent clip</a>
   </video>
-  <div class="clip-note">Real app · silent recording · press play to watch <a href="../../media/perform.mp4">Open full-size ↗</a></div>
+  <div class="clip-note">Silent recording · <a href="../../media/perform.mp4">Open full-size ↗</a></div>
 </figure>
-        <div class="prose help-prose"><h2 id="keyboard">Start with the keyboard</h2>
-<p>Open <strong>PERFORM</strong>. The left-hand keys control A or C; the right-hand keys control B or D. <strong>[</strong> switches left focus, <strong>]</strong> switches right focus. Check which Deck is focused before playing.</p>
-<ul>
-<li><strong>D / K</strong>: play or pause left / right.</li>
-<li><strong>F / J</strong>: hold Cue.</li>
-<li><strong>Z X C V / M , . /</strong>: Hot Cues 1–4; <strong>Shift</strong> plus a pad clears it.</li>
-<li><strong>B / N</strong>: toggle the loop.</li>
-<li><strong>A / S</strong> and <strong>L / ;</strong>: jump backward / forward.</li>
-</ul>
-<p>Press <strong>?</strong> or <strong>F1</strong> for the keyboard map. Typing and open dialogs suppress Deck shortcuts. <strong>=</strong> toggles Quantize.</p>
-<p>The number row controls Beat FX: <strong>1–5</strong> select A/B/C/D/MST, <strong>6/7</strong> halve/double length, <strong>8/9</strong> change effect, <strong>0</strong> plus mouse adjusts depth, and <strong>-</strong> toggles FX. See <a href="../beat-fx/index.html">Beat FX</a> for effect controls.</p>
-<h2 id="loading">Load the next Track</h2>
-<p>Drag a Library Track onto the intended Deck, or use its right-click <strong>Load</strong> action. Wait for loading to finish before judging the waveform or transport response.</p>
-<p>For keyboard browsing, press <strong>Tab</strong>, move through Tracks with the arrows, and press <strong>A</strong>, <strong>B</strong>, <strong>C</strong>, or <strong>D</strong> to load that Deck; C/D require four-Deck mode. <strong>Escape</strong> returns keyboard focus to the Decks. <a href="../follow/index.html#suggestions">Follow</a> can keep this list matched to what is playing.</p>
-<h2 id="mixer">Shape the blend</h2>
-<p>Drag the on-screen channel faders, EQ, filter, and crossfader, or hold a control key while moving the mouse:</p>
-<ul>
-<li><strong>Q W E R</strong>: left filter, high, mid, low.</li>
-<li><strong>P O I U</strong>: right filter, high, mid, low.</li>
-<li><strong>G / H</strong>: left / right channel fader.</li>
-</ul>
-<p>Release the key to finish the gesture. If a playing Track is silent, check its channel level, crossfader assignment, and kills, then <a href="../audio/index.html">audio routing</a>. The clip above shows on-screen mixer drags.</p>
-<h2 id="mouse-jog">Nudge with mouse jog</h2>
-<p>Hold <strong>T / Y</strong> and move horizontally to jog the focused left / right Deck. With Vinyl on, <strong>Shift+T / Shift+Y</strong> arms scratching; playback continues until you move. Adjust sensitivity and smoothing under <strong>Settings → Keyboard + mouse → Mouse jog</strong>.</p>
-<h2 id="stems">Separate and control stems</h2>
-<p>Hover the stem row beneath the pads and click <strong>EXTRACT STEMS</strong>. When processing finishes, choose <strong>STEMS READY — RELOAD</strong> to load the separated audio onto that Deck.</p>
-<p>Click vocals, drums, bass, or other to kill or restore that part; <strong>Shift-click</strong> solos it. Disabled stem buttons mean stems are not loaded yet, even if extraction has just finished.</p></div>
+        <div class="prose help-prose"><h2 id="keyboard">Controls</h2>
+<p>Open <strong>PERFORM</strong>; use the keyboard, mouse, or a mapped controller. Configure controller and <a href="../../install.html#controller-check">audio outputs</a> in Setup.</p>
+<table>
+<thead>
+<tr>
+<th>Left / right</th>
+<th>Action</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>D / K</td>
+<td>Play/pause</td>
+</tr>
+<tr>
+<td>F / J</td>
+<td>Hold Cue</td>
+</tr>
+<tr>
+<td>B / N</td>
+<td>Toggle loop</td>
+</tr>
+<tr>
+<td>[ / ]</td>
+<td>Switch A/C or B/D focus</td>
+</tr>
+</tbody>
+</table>
+<p>Check Deck focus. <strong>? / F1</strong> opens the keyboard map. Typing and dialogs suppress shortcuts.</p>
+<h2 id="loading">Load</h2>
+<p>Drag a Library track onto a Deck. Or <strong>Tab</strong>, browse with arrows, then <strong>A/B/C/D</strong> to load; C/D require four-Deck mode. <strong>Escape</strong> returns to Deck controls. Wait for loading.</p>
+<h2 id="mixer">Mixer</h2>
+<p>Drag faders, EQ, filter, or crossfader. Hold <strong>G/H</strong> and move the mouse for left/right channel level; release to finish. If silent, check levels, crossfader assignment, kills, and audio outputs.</p>
+<h2 id="mouse-jog">Mouse jog</h2>
+<p>Hold <strong>T/Y</strong> and move horizontally to jog left/right. Configure sensitivity under <strong>Settings → Keyboard + mouse → Mouse jog</strong>.</p>
+<h2 id="stems">Stems</h2>
+<p>Choose <strong>EXTRACT STEMS</strong>, then <strong>STEMS READY — RELOAD</strong>. Click a part to kill/restore; <strong>Shift-click</strong> solos. Disabled buttons mean stems are not loaded.</p></div>
         <nav class="help-related" aria-label="Related articles">
           <h2>Related articles</h2>
           <ul class="help-cards">
-            <li><a href="../audio/index.html"><strong>Audio and Cue mode</strong><span>Route Master and headphone audio, check PFL, and choose how paused Hot Cues behave.</span></a></li>
-            <li><a href="../beat-fx/index.html"><strong>Beat FX and filters</strong><span>Apply Echo, Reverb, or Flanger to a Deck or Master, and tune the shared sweep-filter sound.</span></a></li>
-            <li><a href="../controllers/index.html"><strong>Controllers</strong><span>Check a controller&#39;s mapped controls and audio outputs, then tune DDJ-GRV6 jog response if needed.</span></a></li>
-            <li><a href="../follow/index.html"><strong>Find the next Track with Follow</strong><span>Follow loaded Decks to browse candidate Tracks, then adjust matching and Temperature without changing what is playing.</span></a></li>
-            <li><a href="../capture/index.html"><strong>Review Sessions and Takes</strong><span>Revisit live performance events in Sessions and open captured Takes for review before saving reusable mix artifacts.</span></a></li>
-            <li><a href="../editor/index.html"><strong>Edit and audition a mix</strong><span>Shape saved Transitions and Routines, review Takes, and author multi-Track material on the Mix editor timeline.</span></a></li>
+            <li><a href="../start/index.html"><strong>Getting started</strong><span>Run Setup, import tracks, and open Tours or Tutorials.</span></a></li>
+            <li><a href="../curate/index.html"><strong>Library &amp; tagging</strong><span>Browse tracks, assign Tags and Energy, and arrange Playlists.</span></a></li>
+            <li><a href="../editor/index.html"><strong>Mix editor</strong><span>Edit timelines, audition changes, and promote reviewed Takes.</span></a></li>
           </ul>
         </nav>
       </article>
-      <footer class="help-footer"><a href="../../help/index.html">Help index</a><a href="../../index.html#words">Glossary</a></footer>
+      <footer class="help-footer"><a href="../../help/index.html">Help index</a><a href="../../install.html">Install &amp; Setup</a></footer>
     </main>
   </div>
   <script src="../../assets/help.js" defer></script>

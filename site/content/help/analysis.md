@@ -1,9 +1,10 @@
 ---
 slug: analysis
+draft: true
 title: Analysis and waveforms
 summary: Check a track's key and Beatgrid, correct its timing, and adjust how waveforms look.
 order: 7
-related: [curate, perform, sync]
+related: [curate, perform]
 ---
 
 ## Check the analysis {#analysis}
@@ -19,7 +20,7 @@ Automatic Analysis preserves imported or hand-edited keys and Beatgrids. Clickin
 
 For a small timing offset, use the grid-nudge arrows. To establish the downbeat, position the playhead and choose **Set downbeat at playhead**. These change the track's saved Beatgrid. A performance Nudge only bends playback temporarily.
 
-If Analysis cannot fit a reliable grid and no saved grid exists, the track appears in **Needs attention** in the Library sidebar. Retry Analysis, edit the grid, or [import a saved grid from Engine DJ](../sync/index.html#import). The worklist clears when the track has a saved grid; a generated placeholder is not enough. Analysis does not place Hot Cues for you.
+If Analysis cannot fit a reliable grid and no saved grid exists, the track appears in **Needs attention** in the Library sidebar. Retry Analysis, edit the grid, or import a saved grid from Engine DJ. The worklist clears when the track has a saved grid; a generated placeholder is not enough. Analysis does not place Hot Cues for you.
 
 ## Change waveform appearance {#waveforms}
 

@@ -10,6 +10,7 @@ dependencies = [
     "alembic>=1.18.5",
     "beat-this",
     "fastapi>=0.122.0",
+    "kaitaistruct>=0.11",
     "madmom",
     "mutagen>=1.47.0",
     "numpy>=2.3.5",

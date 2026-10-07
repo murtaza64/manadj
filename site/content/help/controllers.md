@@ -1,9 +1,10 @@
 ---
 slug: controllers
+draft: true
 title: Controllers
 summary: Check a controller's mapped controls and audio outputs, then tune DDJ-GRV6 jog response if needed.
 order: 10
-related: [audio, perform, beat-fx, start]
+related: [perform, start]
 ---
 
 ## Check your controller {#check}
@@ -16,7 +17,7 @@ related: [audio, perform, beat-fx, start]
 
 Supported models are the Pioneer DDJ-GRV6, Pioneer DDJ-SB3, and Hercules DJControl Inpulse 300 MK2. **No Mapping** means detection succeeded but that device's controls cannot operate manadj. An **Unmapped control** message on a supported model means that particular control has no assigned action.
 
-If no device appears, check its connection. Allow MIDI access if prompted; a browser reporting MIDI unavailable cannot run this check. MIDI detection and audio routing are separate: a responding button does not confirm the headphone output. See [audio outputs](../audio/index.html#outputs) for PFL and Cue-bus checks.
+If no device appears, check its connection. Allow MIDI access if prompted; a browser reporting MIDI unavailable cannot run this check. MIDI detection and audio routing are separate: a responding button does not confirm the headphone output. See [audio outputs](../../install.html#controller-check) for output checks.
 
 The check observes real controller input; mapped controls still operate the app while you test them.
 

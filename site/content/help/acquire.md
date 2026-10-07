@@ -1,9 +1,10 @@
 ---
 slug: acquire
+draft: true
 title: Acquire tracks
 summary: Connect SoundCloud and Soulseek, review wanted tracks, and download audio into your Library.
 order: 9
-related: [start, sync, curate]
+related: [start, curate]
 ---
 
 ## Connect SoundCloud and review likes {#soundcloud}

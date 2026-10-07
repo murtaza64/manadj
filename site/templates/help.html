@@ -21,7 +21,7 @@
     <nav class="segments" aria-label="Site">
       <a class="segment" href="{{ root }}index.html">TOUR</a>
       <a class="segment active" href="{{ root }}help/index.html"{% if not article %} aria-current="page"{% endif %}>HELP</a>
-      <a class="segment" href="{{ root }}index.html#words">GLOSSARY</a>
+      <a class="segment" href="{{ root }}install.html">INSTALL</a>
     </nav>
   </header>
   <div class="help-layout">
@@ -77,7 +77,7 @@
         {% endfor %}
       </ul>
       {% endif %}
-      <footer class="help-footer"><a href="{{ root }}help/index.html">Help index</a><a href="{{ root }}index.html#words">Glossary</a></footer>
+      <footer class="help-footer"><a href="{{ root }}help/index.html">Help index</a><a href="{{ root }}install.html">Install &amp; Setup</a></footer>
     </main>
   </div>
   <script src="{{ root }}assets/help.js" defer></script>

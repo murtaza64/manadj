@@ -1,9 +1,10 @@
 ---
 slug: capture
+draft: true
 title: Review Sessions and Takes
 summary: Revisit live performance events in Sessions and open captured Takes for review before saving reusable mix artifacts.
 order: 4
-related: [perform, editor, sets, audio]
+related: [perform, editor]
 shot: session
 caption: A Session timeline shows Track playback, captured Takes, and control events.
 ---

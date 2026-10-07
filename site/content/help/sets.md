@@ -1,9 +1,10 @@
 ---
 slug: sets
+draft: true
 title: Plan and play a Set
 summary: Arrange Tracks, choose the saved moves between them, and use the Conductor to play the plan or hand control back to you.
 order: 6
-related: [curate, editor, capture, follow, perform]
+related: [curate, editor, perform]
 shot: set-motion
 clip: set
 caption: Set playback advances through the plan while the Conductor drives the shared Decks.
@@ -33,6 +34,6 @@ Choose **Riding** to let incoming Tracks ease back to native tempo between hando
 
 ## Take over and pick up {#takeover}
 
-Move any live Deck or Mixer control to stop the Conductor's automation. The Decks keep playing, and you are mixing live. [Take capture](../capture/index.html#takes) resumes at takeover; automated Set playback itself does not create Takes.
+Move any live Deck or Mixer control to stop the Conductor's automation. The Decks keep playing, and you are mixing live. Take capture resumes at takeover; automated Set playback itself does not create Takes.
 
 Click **Pick up** to resume the plan when the live Deck state matches it. If unavailable, hover for the reason. A misaligned blend may need its stray Deck faded out first. Pick up during an unfinished Handover abandons that in-flight capture rather than completing a Take by machine.

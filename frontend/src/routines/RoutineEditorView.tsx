@@ -16,6 +16,7 @@
  * apply at replay-build time, so the set Conductor hears them too.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { registerDiagnostics } from '../feedback/diagnostics';
 import { useQuery, useQueries, useQueryClient } from '@tanstack/react-query';
 import {
   api,
@@ -206,6 +207,14 @@ export default function RoutineEditorView() {
     return req ? { kind: 'routine', uuid: req.routineUuid } : restoreLastMix();
   });
   const routineUuid = opened?.kind === 'routine' ? opened.uuid : null;
+  useEffect(() => {
+    if (!viewActive) return;
+    return registerDiagnostics('editor', () => ({
+      surface: 'mix', kind: opened?.kind ?? null, uuid: opened?.uuid ?? null, mode: editorMode,
+      a_track_id: opened?.kind === 'transition' ? opened.aTrackId : null,
+      b_track_id: opened?.kind === 'transition' ? opened.bTrackId : null,
+    }));
+  }, [viewActive, opened, editorMode]);
   const openRequestRef = useRef(0);
   const [openFlowBusy, setOpenFlowBusy] = useState(false);
   useEffect(() => {

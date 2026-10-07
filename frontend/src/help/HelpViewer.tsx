@@ -67,6 +67,10 @@ function HelpDialog({ href, navigation, opener }: { href: string; navigation: nu
       }
       if (!isManualUrl(url.href)) {
         event.preventDefault();
+        if ((url.protocol === 'https:' || url.protocol === 'http:') && event.button <= 1) {
+          // Open from the parent: the article sandbox intentionally denies popups.
+          window.open(url.href, '_blank', 'noopener,noreferrer');
+        }
         return;
       }
       // Keep native article/hash navigation, but all activations stay in this
@@ -92,29 +96,32 @@ function HelpDialog({ href, navigation, opener }: { href: string; navigation: nu
     const panel = host.current!.querySelector<HTMLElement>('[role="dialog"]')!;
     panel.setAttribute('aria-label', 'Help manual');
     const onKey = (event: KeyboardEvent) => {
+      // Stop before document-capture editor shortcuts, including key releases.
+      // Keep native button activation, selection, clipboard and scroll defaults.
+      event.stopImmediatePropagation();
+      if (event.type === 'keyup') return;
       if (escape(event) || event.key !== 'Tab') return;
       const nodes = outerNodes();
       const active = document.activeElement;
       if ((event.shiftKey && active === nodes[0]) || (!event.shiftKey && active === nodes.at(-1))) {
         event.preventDefault();
-        event.stopImmediatePropagation();
         focusFrame(event.shiftKey);
       } else if (active === frame.current || !panel.contains(active)) {
         event.preventDefault();
-        event.stopImmediatePropagation();
         (event.shiftKey ? nodes.at(-1) : nodes[0])?.focus();
       }
     };
     const onFocus = (event: FocusEvent) => {
       if (!panel.contains(event.target as Node)) outerNodes()[0]?.focus();
     };
-    // Window capture precedes the underlying Modal's document Escape listener,
-    // regardless of mount order. Do not let a nested close reach that listener.
+    // Window capture precedes underlying document handlers regardless of mount order.
     window.addEventListener('keydown', onKey, true);
+    window.addEventListener('keyup', onKey, true);
     window.addEventListener('focusin', onFocus, true);
     outerNodes()[0]?.focus();
     return () => {
       window.removeEventListener('keydown', onKey, true);
+      window.removeEventListener('keyup', onKey, true);
       window.removeEventListener('focusin', onFocus, true);
       detachFrame.current();
       if (opener?.isConnected) opener.focus({ preventScroll: true });
@@ -123,7 +130,7 @@ function HelpDialog({ href, navigation, opener }: { href: string; navigation: nu
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  return <div ref={host} className="help-host" data-tour-suppress="" data-focusable="" onKeyDown={(event) => event.stopPropagation()}>
+  return <div ref={host} className="help-host" data-tour-suppress="" data-focusable="">
     <Modal title="Help manual" className="help-panel" onClose={closeHelp}>
       <nav className="help-toolbar" aria-label="Help navigation">
         <button type="button" className="btn btn-secondary" onClick={() => openHelp()}>Help index</button>

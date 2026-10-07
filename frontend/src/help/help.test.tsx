@@ -36,6 +36,7 @@ afterEach(() => {
   act(() => closeHelp());
   act(() => root.unmount());
   host.remove();
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
 
@@ -56,11 +57,20 @@ function loadArticle(html = '<a href="#main">First</a><video controls tabindex="
   return { frame, doc };
 }
 
+function clickLink(link: HTMLAnchorElement, init: MouseEventInit = {}, type = 'click') {
+  const event = new MouseEvent(type, { bubbles: true, cancelable: true, ...init });
+  // Observe native navigation before suppressing jsdom's unimplemented default.
+  let prevented = false;
+  link.addEventListener(type, () => { prevented = event.defaultPrevented; event.preventDefault(); }, { once: true });
+  act(() => { link.dispatchEvent(event); });
+  return prevented;
+}
+
 describe('Help routes and contexts', () => {
   it('uses the generated manifest with root and nested deployment bases', () => {
-    expect(HELP_TOPICS).toHaveLength(13);
+    expect(HELP_TOPICS.map(({ slug }) => slug)).toEqual(['start', 'curate', 'perform', 'editor']);
     expect(helpHref()).toBe('/manual/help/index.html');
-    expect(helpHref('controllers', 'check', '/app/')).toBe('/app/manual/help/controllers/index.html#check');
+    expect(helpHref('perform', 'keyboard', '/app/')).toBe('/app/manual/help/perform/index.html#keyboard');
     for (const article of HELP_TOPICS) {
       expect(helpHref(article.slug)).toBe(`/manual/help/${article.slug}/index.html`);
       for (const anchor of article.anchors) expect(helpHref(article.slug, anchor)).toContain(`#${anchor}`);
@@ -68,7 +78,7 @@ describe('Help routes and contexts', () => {
   });
 
   it('rejects unknown topics, invalid anchors and path/URL injection without opening', () => {
-    for (const topic of ['missing', '../start', '/start', 'https://example.com', 'start?x', '%2e%2e']) {
+    for (const topic of ['missing', 'controllers', 'acquire', 'analysis', 'sync', 'sets', 'capture', 'follow', 'audio', 'beat-fx', '../start', '/start', 'https://example.com', 'start?x', '%2e%2e']) {
       expect(helpHref(topic)).toBeNull();
       expect(openHelp(topic)).toBe(false);
     }
@@ -97,7 +107,6 @@ describe('Help routes and contexts', () => {
   it('keeps all Settings, guide, section and step mappings valid against the manifest', () => {
     for (const map of [SETTINGS_HELP, GUIDE_HELP, TOUR_SECTION_HELP, TOUR_STEP_HELP]) {
       for (const [context, target] of Object.entries(map)) {
-        expect(target.topic, context).toBeTruthy();
         expect(helpHref(target.topic, target.anchor), context).not.toBeNull();
       }
     }
@@ -109,6 +118,63 @@ describe('Help routes and contexts', () => {
 });
 
 describe('Help viewer', () => {
+  it.each(['metaKey', 'ctrlKey'] as const)('isolates %s undo from document capture and restores shortcuts after closing', (modifier) => {
+    let undoCount = 0;
+    let releaseCount = 0;
+    const undo = (event: KeyboardEvent) => {
+      if (event[modifier] && event.key === 'z') undoCount++;
+    };
+    const release = (event: KeyboardEvent) => {
+      if (event[modifier] && event.key === 'z') releaseCount++;
+    };
+    // Register before Help mounts, like the underlying Mix editor.
+    document.addEventListener('keydown', undo, true);
+    document.addEventListener('keyup', release, true);
+    const press = (target: EventTarget) => {
+      for (const type of ['keydown', 'keyup']) {
+        const event = new KeyboardEvent(type, { key: 'z', [modifier]: true, bubbles: true, cancelable: true });
+        act(() => { target.dispatchEvent(event); });
+        expect(event.defaultPrevented).toBe(false);
+      }
+    };
+    try {
+      act(() => root.render(<HelpViewer />));
+      act(() => { openHelp(); });
+      const { doc } = loadArticle();
+      for (const target of [document, document.querySelector('.help-toolbar button')!, doc.querySelector('a')!]) press(target);
+      expect(undoCount).toBe(0);
+      expect(releaseCount).toBe(0);
+      act(() => closeHelp());
+      press(document);
+      expect(undoCount).toBe(1);
+      expect(releaseCount).toBe(1);
+    } finally {
+      document.removeEventListener('keydown', undo, true);
+      document.removeEventListener('keyup', release, true);
+    }
+  });
+
+  it('leaves button activation, selection, copy and scrolling defaults uncanceled', () => {
+    act(() => root.render(<HelpViewer />));
+    act(() => { openHelp('perform'); });
+    const index = document.querySelector<HTMLButtonElement>('.help-toolbar button')!;
+    index.focus();
+    for (const init of [{ key: ' ' }, { key: 'Enter' }, { key: 'ArrowDown', shiftKey: true },
+      { key: 'PageDown' }, { key: 'a', metaKey: true }, { key: 'c', metaKey: true },
+      { key: 'a', ctrlKey: true }, { key: 'c', ctrlKey: true }]) {
+      for (const type of ['keydown', 'keyup']) {
+        const event = new KeyboardEvent(type, { ...init, bubbles: true, cancelable: true });
+        act(() => { index.dispatchEvent(event); });
+        expect(event.defaultPrevented, `${type}: ${init.key}`).toBe(false);
+      }
+    }
+    // jsdom cannot synthesize keyboard default clicks; verify the click path too.
+    act(() => index.click());
+    expect(document.querySelector('iframe')?.getAttribute('src')).toBe('/manual/help/index.html');
+    act(() => document.querySelector<HTMLButtonElement>('.help-panel .modal-x')!.click());
+    expect(isHelpOpen()).toBe(false);
+  });
+
   it('traps focus across iframe boundaries, supports video keys, and restores its opener', () => {
     act(() => root.render(<><HelpLink topic="perform" anchor="keyboard" /><HelpViewer /></>));
     const opener = host.querySelector('button')!;
@@ -166,7 +232,7 @@ describe('Help viewer', () => {
     });
     const opener = host.querySelector<HTMLButtonElement>('[data-help-link]')!;
     act(() => opener.click());
-    expect(document.querySelector('iframe')?.getAttribute('src')).toBe('/manual/help/acquire/index.html#soundcloud');
+    expect(document.querySelector('iframe')?.getAttribute('src')).toBe('/manual/help/start/index.html#setup');
     const { doc } = loadArticle();
     const first = doc.querySelector('a')!;
     first.focus();
@@ -185,28 +251,60 @@ describe('Help viewer', () => {
     expect(document.activeElement).toBe(opener);
   });
 
-  it('keeps native manual links in-frame, blocks app/external links and rebinds each loaded document', () => {
+  it('keeps native manual links in-frame and rebinds each loaded document', () => {
+    const open = vi.spyOn(window, 'open').mockReturnValue(null);
     act(() => root.render(<HelpViewer />));
     act(() => { openHelp('perform'); });
-    const { frame, doc } = loadArticle('<a href="../editor/index.html#editing" target="_top">Article</a><a href="/">App</a><a href="https://example.com">External</a>');
+    const { frame, doc } = loadArticle('<a href="../editor/index.html#editing" target="_top" download>Article</a><a href="#keyboard">Section</a>');
     expect(frame.getAttribute('sandbox')).toBe('allow-same-origin');
-    const [article, app, external] = [...doc.querySelectorAll('a')];
-    const click = (link: HTMLAnchorElement) => {
-      const event = new MouseEvent('click', { bubbles: true, cancelable: true });
-      // Observe whether the viewer allows native navigation, then stop jsdom's
-      // unimplemented navigation default after that capture listener has run.
-      let prevented = false;
-      link.addEventListener('click', () => { prevented = event.defaultPrevented; event.preventDefault(); }, { once: true });
-      act(() => link.dispatchEvent(event));
-      return prevented;
-    };
-    expect(click(article)).toBe(false);
+    const [article, section] = [...doc.querySelectorAll('a')];
+    expect(clickLink(article)).toBe(false);
     expect(article.target).toBe('_self');
-    expect(click(app)).toBe(true);
-    expect(click(external)).toBe(true);
+    expect(article.hasAttribute('download')).toBe(false);
+    expect(clickLink(section)).toBe(false);
+    expect(open).not.toHaveBeenCalled();
     const next = loadArticle('<a href="#main">New document</a>');
+    expect(clickLink(next.doc.querySelector('a')!)).toBe(false);
     key(next.doc.querySelector('a')!, 'Escape');
     expect(isHelpOpen()).toBe(false);
+  });
+
+  it.each([
+    ['https://github.com/murtaza64/manadj/releases/latest', {}, 'click'],
+    ['https://soundcloud.com/', { ctrlKey: true }, 'click'],
+    ['https://github.com/murtaza64/manadj', { metaKey: true }, 'click'],
+    ['http://example.com/download', { button: 1 }, 'auxclick'],
+  ] as const)('opens safe external link %s from the parent window', (href, init, type) => {
+    const open = vi.spyOn(window, 'open').mockReturnValue(null);
+    act(() => root.render(<HelpViewer />));
+    act(() => { openHelp('start'); });
+    const { doc, frame } = loadArticle(`<a href="${href}" target="_top"><span>External</span></a>`);
+    const frameOpen = vi.spyOn(frame.contentWindow!, 'open').mockReturnValue(null);
+    const event = new MouseEvent(type, { ...init, bubbles: true, cancelable: true });
+    act(() => { doc.querySelector('span')!.dispatchEvent(event); });
+    expect(event.defaultPrevented).toBe(true);
+    expect(open).toHaveBeenCalledExactlyOnceWith(href, '_blank', 'noopener,noreferrer');
+    expect(frameOpen).not.toHaveBeenCalled();
+    expect(frame.getAttribute('src')).toBe('/manual/help/start/index.html');
+    expect(isHelpOpen()).toBe(true);
+  });
+
+  it.each(['javascript:alert(1)', 'data:text/html,hello', 'file:///tmp/manual.html', 'mailto:hello@example.com', 'custom:launch', 'https://[invalid'])('blocks unsafe or unknown URL %s', (href) => {
+    const open = vi.spyOn(window, 'open').mockReturnValue(null);
+    act(() => root.render(<HelpViewer />));
+    act(() => { openHelp(); });
+    const { doc } = loadArticle(`<a href="${href}">Blocked</a>`);
+    expect(clickLink(doc.querySelector('a')!)).toBe(true);
+    expect(open).not.toHaveBeenCalled();
+  });
+
+  it('does not open an external link on right-click', () => {
+    const open = vi.spyOn(window, 'open').mockReturnValue(null);
+    act(() => root.render(<HelpViewer />));
+    act(() => { openHelp(); });
+    const { doc } = loadArticle('<a href="https://github.com/">External</a>');
+    expect(clickLink(doc.querySelector('a')!, { button: 2 }, 'auxclick')).toBe(true);
+    expect(open).not.toHaveBeenCalled();
   });
 
   it('can return to the index after native navigation even when the initial route was the index', () => {
