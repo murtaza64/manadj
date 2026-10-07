@@ -28,6 +28,7 @@
  */
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { Track, HotCue } from '../types';
+import { primaryModName } from '../utils/platform';
 import type { DecodedWaveform } from '../waveform/blob';
 import type { ColumnModulation } from '../sets/ladderWaveStyle';
 import { drawStyledRuns } from '../sessions/waveformLanes';
@@ -1808,7 +1809,7 @@ export function RoutineTimeline({
                 }}
                 title={
                   selectedSlots.includes(slot.slotId)
-                    ? 'Selected — drag horizontally to MOVE the slot (entry + automation travel; bar-snapped, shift = fine); ALT-drag to slide only the MATERIAL under the clock; drag vertically to reorder. Cmd-click to deselect, Esc clears.'
+                    ? `Selected — drag horizontally to MOVE the slot (entry + automation travel; bar-snapped, shift = fine); ALT-drag to slide only the MATERIAL under the clock; drag vertically to reorder. ${primaryModName()}-click to deselect, Esc clears.`
                     : undefined
                 }
               >

@@ -1384,8 +1384,8 @@
 .perf-kbd-inline .perf-kbd { position: static; border: 0; padding: 0; }
 
 /* Retain the character's advance; replace the font's narrow, low Shift glyph. */
-.perf-kbd-shift { position: relative; color: transparent; }
-.perf-kbd-shift > svg {
+.perf-kbd-shift, .perf-kbd-ctrl { position: relative; color: transparent; }
+.perf-kbd-shift > svg, .perf-kbd-ctrl > svg {
   position: absolute;
   width: 100%;
   height: 0.9em;
