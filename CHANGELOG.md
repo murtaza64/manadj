@@ -5,6 +5,9 @@ versions follow [Semantic Versioning](https://semver.org/). Install: [docs/insta
 
 ## [Unreleased]
 
+### Added
+- Mix editor: author mixes from scratch with + New blank mix — drag tracks from the library onto the canvas/timeline. 2 tracks save as a Transition, 3 or more as a Routine; adding or removing a track across that line converts it on save (Set pins follow). Drop a track onto an open Transition to grow it into a Routine.
+
 ## [0.1.0-rc.3] - 2026-10-07
 
 ### Added

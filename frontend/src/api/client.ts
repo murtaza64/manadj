@@ -1549,6 +1549,43 @@ export const api = {
       return res.json();
     },
 
+    /** 2→3 kind crossing (ADR 0039, gh#330): a Transition grown to ≥ 3
+     * slots becomes an authored Routine; Set pins re-point, the
+     * Transition row goes. */
+    fromTransition: async (
+      transitionUuid: string,
+      body: RoutineStructureWire & { uuid: string; name?: string | null }
+    ): Promise<KindConversionWire> => {
+      const res = await fetch(`${API_BASE}/routines/from-transition/${transitionUuid}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const detail = await res.json().then((d) => d.detail).catch(() => null);
+        throw new Error(detail || `Failed to convert to a Routine (${res.status})`);
+      }
+      return res.json();
+    },
+
+    /** 3→2 kind crossing (ADR 0039, gh#330): an authored Routine edited
+     * down to 2 slots saves as a Transition; Set pins re-point. */
+    toTransition: async (
+      uuid: string,
+      body: { transition_uuid: string; a_track_id: number; b_track_id: number; name: string; data: Record<string, unknown> }
+    ): Promise<KindConversionWire> => {
+      const res = await fetch(`${API_BASE}/routines/${uuid}/to-transition`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const detail = await res.json().then((d) => d.detail).catch(() => null);
+        throw new Error(detail || `Failed to convert to a Transition (${res.status})`);
+      }
+      return res.json();
+    },
+
     /** Replace an authored Routine's structure (cast/slot ids/entry
      * offsets/positions/duration; optional edits in the same write). */
     putStructure: async (uuid: string, body: RoutineStructureWire): Promise<RoutineDetailWire> => {
@@ -1892,6 +1929,14 @@ export interface RoutineRowWire {
    * synthesizes traces. Absent = false. */
   authored?: boolean;
   created_at: string | null;
+}
+
+/** A 2↔3 kind crossing's result (ADR 0039, gh#330). */
+export interface KindConversionWire {
+  kind: 'routine' | 'transition';
+  uuid: string;
+  repointed_pins: number;
+  dropped_pins: number;
 }
 
 /** An authored Routine's mutable structure (ADR 0039, gh#325). */
