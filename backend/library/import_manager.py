@@ -4,6 +4,7 @@ import re
 from pathlib import Path
 from sqlalchemy.orm import Session
 from ..models import Track
+from ..sync_common.matching import path_key
 from ..track_metadata import FileMetadataError, read_file_metadata
 from ..track_metadata.units import bpm_to_centibpm
 from .models import (
@@ -53,6 +54,38 @@ def parse_filename_metadata(filename: str) -> dict[str, str | None]:
 
 
 
+def build_candidate(file_path: Path) -> LibraryTrackCandidate:
+    """Read tags (falling back to filename heuristics) into a candidate."""
+    file_path_str = str(file_path)
+    # Extract metadata from file tags (unreadable file -> no metadata)
+    try:
+        metadata = read_file_metadata(file_path_str)
+    except FileMetadataError:
+        metadata = None
+
+    title = metadata.title if metadata else None
+    artist = metadata.artist if metadata else None
+
+    # Fallback to filename parsing if no title in metadata
+    if not title:
+        filename_metadata = parse_filename_metadata(file_path.name)
+        title = filename_metadata['title']
+        # Only use filename artist if ID3 artist is also missing
+        if not artist:
+            artist = filename_metadata['artist']
+
+    return LibraryTrackCandidate(
+        filepath=file_path_str,
+        filename=file_path.name,
+        title=title,
+        artist=artist,
+        bpm=metadata.bpm if metadata else None,
+        key=metadata.key if metadata else None,
+        # Track has metadata if it has at least a title (from any source)
+        has_metadata=bool(title),
+    )
+
+
 class LibraryImportManager:
     """Manages library track import operations."""
 
@@ -66,6 +99,12 @@ class LibraryImportManager:
         """
         self.manadj_session = manadj_session
         self.library_path = Path(library_path)
+
+    def existing_paths(self) -> set[str]:
+        """``path_key``s of every Track's resolved path, archived included
+        (never re-proposed). Test membership with ``path_key(str(path))``."""
+        rows = self.manadj_session.query(Track.filename).all()
+        return {path_key(str(Path(t.filename).resolve())) for t in rows}
 
     def get_import_candidates(self, recursive: bool = False) -> LibraryImportResult:
         """
@@ -83,56 +122,22 @@ class LibraryImportManager:
         audio_files = scan_directory(self.library_path, recursive)
         stats.files_scanned = len(audio_files)
 
-        # Get existing tracks from database
-        existing_tracks = self.manadj_session.query(Track.filename).all()
-        existing_filenames = {str(Path(t.filename).resolve()) for t in existing_tracks}
+        existing_filenames = self.existing_paths()
 
         # Find new tracks and extract metadata
         candidates = []
         for file_path in audio_files:
-            file_path_str = str(file_path)
-
             # Skip if already in database
-            if file_path_str in existing_filenames:
+            if path_key(str(file_path)) in existing_filenames:
                 stats.already_in_db += 1
                 continue
 
             stats.new_tracks += 1
-
-            # Extract metadata from file tags (unreadable file -> no metadata)
-            try:
-                metadata = read_file_metadata(file_path_str)
-            except FileMetadataError:
-                metadata = None
-
-            title = metadata.title if metadata else None
-            artist = metadata.artist if metadata else None
-
-            # Fallback to filename parsing if no title in metadata
-            if not title:
-                filename_metadata = parse_filename_metadata(file_path.name)
-                title = filename_metadata['title']
-                # Only use filename artist if ID3 artist is also missing
-                if not artist:
-                    artist = filename_metadata['artist']
-
-            # Track has metadata if it has at least a title (from any source)
-            has_metadata = bool(title)
-
-            if has_metadata:
+            candidate = build_candidate(file_path)
+            if candidate.has_metadata:
                 stats.with_metadata += 1
             else:
                 stats.without_metadata += 1
-
-            candidate = LibraryTrackCandidate(
-                filepath=file_path_str,
-                filename=file_path.name,
-                title=title,
-                artist=artist,
-                bpm=metadata.bpm if metadata else None,
-                key=metadata.key if metadata else None,
-                has_metadata=has_metadata
-            )
             candidates.append(candidate)
 
         return LibraryImportResult(candidates=candidates, stats=stats)
@@ -141,6 +146,7 @@ class LibraryImportManager:
         self,
         candidates: list[LibraryTrackCandidate] | None = None,
         derive_provenance: bool = True,
+        stem_guard: int | None = None,
     ) -> LibraryImportExecutionResult:
         """
         Import tracks into database.
@@ -150,6 +156,9 @@ class LibraryImportManager:
             derive_provenance: derive asserted Audio Provenance from file
                 hints (backfill rules). The acquisition download path opts
                 out — it records provenance itself.
+            stem_guard: when set, a batch of more than this many new
+                Tracks enqueues no stem splits (bulk drops; the startup
+                sweep's backlog guard). None = always enqueue.
 
         Returns:
             LibraryImportExecutionResult with import statistics
@@ -198,10 +207,12 @@ class LibraryImportManager:
                 # ... and native grid+key Analysis (ADR 0024).
                 from ..analysis_tasks import enqueue_missing_analysis
                 enqueue_missing_analysis(self.manadj_session)
+                result.track_ids = [t.id for t in imported_tracks]
                 # Queue only this import, never the guarded full-library sweep.
                 from ..stems_tasks import enqueue_stem_split
-                for track in imported_tracks:
-                    enqueue_stem_split(self.manadj_session, track.id)
+                if stem_guard is None or len(imported_tracks) <= stem_guard:
+                    for track in imported_tracks:
+                        enqueue_stem_split(self.manadj_session, track.id)
                 if derive_provenance:
                     from ..acquisition.provenance import derive_and_write_provenance
                     imported_paths = [c.filepath for c in candidates]
@@ -217,5 +228,6 @@ class LibraryImportManager:
                 result.error_messages.append(f"Commit failed: {str(e)}")
                 result.errors += result.imported
                 result.imported = 0
+                result.track_ids = []
 
         return result

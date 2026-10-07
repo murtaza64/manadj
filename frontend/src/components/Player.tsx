@@ -1,4 +1,4 @@
-import { useCallback } from 'react';
+import { useCallback, useMemo } from 'react';
 import WebGLWaveform from './WebGLWaveform';
 import { useDeck, useDeckReady, useDeckSnapshot, useBeatjumpBeats } from '../hooks/useDeck';
 import { useScrubTransport } from '../hooks/useScrubTransport';
@@ -6,6 +6,8 @@ import { TransportPair } from './deckControls/TransportPair';
 import { HotCuePads } from './deckControls/HotCuePads';
 import { BeatjumpRow } from './deckControls/BeatjumpRow';
 import { CueWalkButton } from './deckControls/CueWalkButtons';
+import { useDeckDropTarget, type DeckDropPolicy } from '../selection/deckDrop';
+import { DeckDropOverlay } from '../selection/DeckDropOverlay';
 import './Player.css';
 
 /**
@@ -15,7 +17,10 @@ import './Player.css';
  * components the Performance DeckPanel renders, minus the key-hint slots.
  */
 export default function Player() {
-  const { engine, loadedTrack, beatjump } = useDeck();
+  const { deck, engine, loadedTrack, beatjump, loadTrack } = useDeck();
+  // Drag-to-Load (gh#296): the library replaces freely, as Load does here.
+  const dropPolicy = useMemo<DeckDropPolicy>(() => ({ load: (_deck, track) => loadTrack(track) }), [loadTrack]);
+  const { dropState, dropHandlers } = useDeckDropTarget(deck, dropPolicy);
   const beatjumpBeats = useBeatjumpBeats(beatjump);
   const ready = useDeckReady();
   const loadState = useDeckSnapshot((s) => s.loadState);
@@ -40,7 +45,11 @@ export default function Player() {
   return (
     <>
       {/* Waveform with controls overlays */}
-      <div style={{ position: 'relative' }}>
+      <div
+        className="player-drop"
+        style={{ position: 'relative' }}
+        {...dropHandlers}
+      >
         <WebGLWaveform
           trackId={trackId}
           clock={engine}
@@ -86,6 +95,7 @@ export default function Player() {
           <HotCuePads />
           <CueWalkButton direction="next" className="player-cuewalk player-cuewalk-next" />
         </div>
+        <DeckDropOverlay deck={deck} state={dropState} />
       </div>
     </>
   );

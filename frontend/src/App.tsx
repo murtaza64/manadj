@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { queryClient } from './api/queryClient';
+import { DEV_SURFACES } from './devMode';
 
 const SettingsPage = lazy(() => import('./settings/SettingsPage'));
 const MidiInspectorPage = lazy(() => import('./midi/MidiInspectorPage'));
@@ -37,6 +38,22 @@ import { installNoFocusRule } from './focus/noFocusRule';
 import { useAnalysisPendingSync } from './hooks/useAnalysisPending';
 import { isTypingTarget } from './components/performance/performanceKeys';
 import { registerViewToggle } from './midi/controlRegistry';
+import { KeyboardShortcutOverlay } from './components/KeyboardShortcutOverlay';
+import { TourController } from './tour/TourController';
+import { TutorialController } from './tutorials/TutorialController';
+import { OPEN_TUTORIAL_EVENT } from './tutorials/tutorialState';
+import { setTourArea, type TourArea } from './tour/tourState';
+
+/** Where each mode lands in the tour's section map (feature-tour #282):
+ * the legacy pair editor counts as the mix editor's area. */
+const TOUR_AREA_BY_MODE: Record<AppMode, TourArea> = {
+  library: 'library',
+  performance: 'performance',
+  transition: 'edit',
+  routine: 'edit',
+  history: 'history',
+  sync: 'sync',
+};
 
 /** The one poller keeping track rows / Analyze buttons live against
  * background analysis (analysis-curation 03) — a bridge like the MIDI
@@ -52,16 +69,21 @@ const MODE_IDS: AppMode[] = ['library', 'performance', 'transition', 'routine', 
 const MODE_KEY = 'manadj-app-mode';
 
 // Deep link: ?view=<mode> opens straight into that mode (beats the
-// remembered one); otherwise restore the last mode, defaulting to library.
+// remembered one); otherwise restore the last mode. Fresh installs open in
+// PERFORM (setup-guides #301).
 function initialMode(): AppMode | 'settings' {
   const requestedView = new URLSearchParams(window.location.search).get('view');
   const storedView = localStorage.getItem(MODE_KEY);
   for (const mode of [requestedView, storedView]) {
     // Published Settings links and the former persisted mode remain usable.
     if (mode === 'settings') return mode;
+    // The legacy PAIR editor is a dev surface (packaged-app #278): deep
+    // links / restores don't open it in production builds. In-app events
+    // (take review, pair edit) still can.
+    if (mode === 'transition' && !DEV_SURFACES) continue;
     if (MODE_IDS.includes(mode as AppMode)) return mode as AppMode;
   }
-  return 'library';
+  return 'performance';
 }
 
 function persistMode(mode: AppMode, settingsOpen = false) {
@@ -99,6 +121,12 @@ function App() {
   // (keyboard-focus 01) — one enforcement site for the whole app.
   useEffect(installNoFocusRule, []);
 
+  // Tour activity (feature-tour #282): tell the tour where the user is;
+  // TourController auto-starts unseen sections' coach marks from this.
+  useEffect(() => {
+    setTourArea(settingsOpen ? 'settings' : TOUR_AREA_BY_MODE[view]);
+  }, [view, settingsOpen]);
+
   // Performance ⟷ Library toggle (four-deck-performance 24/25): one
   // action, two handles — ` (backtick) app-wide, and the hardware VIEW
   // button through the registry. Other modes are pointer-only
@@ -122,6 +150,11 @@ function App() {
     return () => document.removeEventListener('keydown', onKeyDown);
   }, []);
   useEffect(() => registerViewToggle(toggleView), []);
+  useEffect(() => {
+    const open = (event: Event) => setView((event as CustomEvent).detail === 'performance' ? 'performance' : 'routine');
+    window.addEventListener(OPEN_TUTORIAL_EVENT, open);
+    return () => window.removeEventListener(OPEN_TUTORIAL_EVENT, open);
+  }, []);
 
   // A Take review request (Transition history row) opens the editor; the
   // mounted editor consumes the pending uuid itself (takeReview.ts).
@@ -164,7 +197,8 @@ function App() {
     return () => window.removeEventListener(OPEN_SESSION_EVENT, onOpenSession);
   }, []);
 
-  if (window.location.pathname === '/midi-inspect') {
+  // Dev-only surface (packaged-app #278): hand-typed path, dev builds only.
+  if (DEV_SURFACES && window.location.pathname === '/midi-inspect') {
     return (
       <Suspense fallback={null}>
         <MidiInspectorPage />
@@ -179,7 +213,9 @@ function App() {
   if (window.location.pathname === '/visualizer') {
     // ?arena=1 → the genetic judging arena (realtime-visualization 06);
     // same standalone rules: no DeckProvider, never an AudioContext.
-    const arena = new URLSearchParams(window.location.search).has('arena');
+    // Dev-only (packaged-app #278): the arena writes genepool files into
+    // the source tree — never a packaged-app surface.
+    const arena = DEV_SURFACES && new URLSearchParams(window.location.search).has('arena');
     return (
       <Suspense fallback={null}>{arena ? <ArenaApp /> : <VisualizerApp />}</Suspense>
     );
@@ -206,6 +242,10 @@ function App() {
         {/* Space → Conductor context (sets 34): plan assembly for the
             SELECTED Set — above the view switch, like the selection. */}
         <SetSpaceTransport />
+        {/* Coach-mark tour (feature-tour #282): above the view switch so
+            it can spotlight anchors in any mode. */}
+        <TourController />
+        <TutorialController />
         <FilterProvider>
           <div className="app-shell">
             <TopBar
@@ -256,6 +296,7 @@ function App() {
               </BrowseActiveContext.Provider>
             </main>
           </div>
+          <KeyboardShortcutOverlay mode={view} />
         </FilterProvider>
       </DeckProvider>
       </ToastProvider>

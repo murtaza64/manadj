@@ -1,5 +1,14 @@
-import { lazy, Suspense, useState } from 'react';
+import { lazy, Suspense, useEffect, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { useMixer, useMixerValue } from '../hooks/useMixer';
+import { TOUR_SECTIONS } from '../tour/steps';
+import { TutorialSettings } from '../tutorials/TutorialSettings';
+import {
+  allToursSkipped,
+  isSectionSeen,
+  resetTourProgress,
+  subscribeTour,
+  tourVersion,
+} from '../tour/tourState';
 import {
   DEFAULT_FILTER_SETTINGS,
   FILTER_MODELS,
@@ -9,18 +18,22 @@ import {
 import { FilterResponse } from './FilterResponse';
 import './settings.css';
 import { CommittedNumberInput } from '../components/CommittedNumberInput';
+import { openKeyboardHelp } from '../components/keyboardHelpStore';
 import { HFader } from '../components/performance/MixerStrip';
+import {
+  BEAT_FX_PARAMETER_RANGES,
+  DEFAULT_BEAT_FX_SETTINGS,
+  type BeatFxSettings,
+} from '../playback/beatFxSettings';
+import { APP_VERSION } from '../version';
 
 const WaveformSettings = lazy(() => import('../waveform/StyleTuningPage'));
-const JogSettings = lazy(() => import('../midi/JogTuningPage'));
+const ControllerCalibrationSettings = lazy(() => import('./ControllerCalibrationSettings'));
 const MouseJogSettings = lazy(() => import('./MouseJogSettings'));
-const SECTIONS = [
-  { id: 'filters', title: 'Filters', detail: 'Sound and sweep response' },
-  { id: 'waveforms', title: 'Waveforms', detail: 'Color and rendering' },
-  { id: 'jog', title: 'Jog calibration', detail: 'DDJ-GRV6 response' },
-  { id: 'mouse-jog', title: 'Mouse jog', detail: 'Keyboard and mouse response' },
-] as const;
-type Section = (typeof SECTIONS)[number]['id'];
+const LibrarySettings = lazy(() => import('./LibrarySettings'));
+const ControllerCheckSettings = lazy(() => import('../setup/controllerCheck/ControllerCheckSettings'));
+const SoulseekSettings = lazy(() => import('../setup/soulseek/SoulseekSettings'));
+const SoundCloudSettings = lazy(() => import('../setup/soundcloud/SoundCloudSettings'));
 const PARAMS = [
   {
     key: 'resonance',
@@ -210,13 +223,282 @@ function FilterSettingsPanel() {
   );
 }
 
+/** Tour reset (feature-tour #282, story 7): forget seen sections and the
+ * skip-all flag, so every section's coach marks fire again on first entry.
+ * Also the demo hook. Replays of single sections live in the TopBar ?. */
+function KeyboardShortcutsPanel() {
+  return (
+    <div className="settings-section-heading">
+      <div>
+        <h2>Keyboard shortcuts</h2>
+        <p>The full keyboard map for every area. Also opens with ? or F1 anywhere.</p>
+      </div>
+      <button className="btn btn-secondary" onClick={openKeyboardHelp}>
+        Open keyboard map
+      </button>
+    </div>
+  );
+}
+
+function TourSettingsPanel() {
+  useSyncExternalStore(subscribeTour, tourVersion);
+  const seenCount = TOUR_SECTIONS.filter((s) => isSectionSeen(s.id)).length;
+  return (
+    <>
+      <div className="settings-section-heading">
+        <div>
+          <h2>Tour</h2>
+          <p>
+            Tours explain the interface. Tutorials teach through real actions.
+            Replay either from the ? button in the top bar.
+          </p>
+        </div>
+        <button className="btn btn-secondary" onClick={resetTourProgress}>
+          Reset tour progress
+        </button>
+      </div>
+      <p className="settings-hint">
+        {allToursSkipped()
+          ? 'Tours are currently skipped — resetting turns them back on.'
+          : `${seenCount} of ${TOUR_SECTIONS.length} section tours seen. Resetting replays them on next visit.`}
+      </p>
+    </>
+  );
+}
+
+const EFFECT_GROUPS = [
+  {
+    name: 'Echo',
+    detail: 'Full-band beat delay. LEVEL/DEPTH remains on the mixer.',
+    fields: [
+      ['echoFeedback', 'Feedback', '%', 'Repeat regeneration. Higher values produce longer tails.'],
+      ['echoSaturation', 'Saturation', 'x', 'Safety soft clipping in the feedback path. Zero is linear.'],
+    ],
+  },
+  {
+    name: 'Reverb',
+    detail: 'Synthesized stereo convolution impulse.',
+    fields: [
+      ['reverbDecay', 'Decay', 's', 'Impulse length and exponential decay time.'],
+      ['reverbDampingHz', 'Damping', 'Hz', 'Low-pass cutoff applied while synthesizing the impulse.'],
+      ['reverbStereoWidth', 'Stereo width', '%', 'Zero is mono-correlated; 100% decorrelates both sides.'],
+    ],
+  },
+  {
+    name: 'Flanger',
+    detail: 'One sine-LFO cycle per BEAT ◄ ► length (bars or beats).',
+    fields: [
+      ['flangerDelayMs', 'Center delay', 'ms', 'Center of the comb-filter delay sweep.'],
+      ['flangerWidthMs', 'Sweep width', 'ms', 'Peak-to-peak delay modulation range.'],
+      ['flangerFeedback', 'Feedback', '%', 'Regeneration around the short delay.'],
+    ],
+  },
+] as const;
+
+function BeatFxSettingsPanel() {
+  const mixer = useMixer();
+  const settings = useMixerValue((m) => m.getBeatFxSettings());
+  const [resetKey, setResetKey] = useState(0);
+  return (
+    <>
+      <div className="settings-section-heading">
+        <div>
+          <h2>Beat FX</h2>
+          <p>Sound tuning for the shared post-fader Beat FX section.</p>
+        </div>
+        <button
+          className="btn btn-secondary"
+          onClick={() => {
+            setResetKey((key) => key + 1);
+            mixer.setBeatFxSettings(DEFAULT_BEAT_FX_SETTINGS);
+          }}
+        >
+          Reset effect defaults
+        </button>
+      </div>
+      <div className="settings-effect-groups">
+        {EFFECT_GROUPS.map((group) => (
+          <section className="settings-effect-card" key={group.name}>
+            <h3>{group.name}</h3>
+            <p>{group.detail}</p>
+            {group.fields.map(([key, label, unit, note]) => {
+              const [min, max, step] = BEAT_FX_PARAMETER_RANGES[key];
+              const scale = unit === '%' ? 100 : 1;
+              const value = Number((settings[key] * scale).toFixed(4));
+              const set = (raw: number) => mixer.setBeatFxSettings({ [key]: raw / scale } as Partial<BeatFxSettings>);
+              return (
+                <div className="settings-field" key={key}>
+                  <span className="settings-field-label">{label}</span>
+                  <p>{note}</p>
+                  <div className="settings-field-inputs">
+                    <HFader
+                      id={`beat-fx-${key}`}
+                      ariaLabel={label}
+                      label={Number(value.toPrecision(6)).toString()}
+                      accent
+                      fill
+                      fillColor="var(--accent)"
+                      min={min * scale}
+                      max={max * scale}
+                      step={step * scale}
+                      value={value}
+                      defaultValue={DEFAULT_BEAT_FX_SETTINGS[key] * scale}
+                      onChange={set}
+                    />
+                    <CommittedNumberInput
+                      key={`${key}:${resetKey}`}
+                      aria-label={`${label} value`}
+                      min={min * scale}
+                      max={max * scale}
+                      step={step * scale}
+                      value={value}
+                      onCommit={set}
+                    />
+                    <span>{unit}</span>
+                  </div>
+                </div>
+              );
+            })}
+            {group.name === 'Flanger' && (
+              <div className="settings-field">
+                <span className="settings-field-label">Length unit</span>
+                <p>How the BEAT ◄ ► length reads for the Flanger. 1 bar = 4 beats.</p>
+                <div className="settings-unit-toggle" role="group" aria-label="Flanger length unit">
+                  {(['bars', 'beats'] as const).map((unit) => (
+                    <button
+                      key={unit}
+                      className={`btn${settings.flangerLengthUnit === unit ? ' btn-selected' : ''}`}
+                      aria-pressed={settings.flangerLengthUnit === unit}
+                      onClick={() => mixer.setBeatFxSettings({ flangerLengthUnit: unit })}
+                    >
+                      {unit === 'bars' ? 'Bars' : 'Beats'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </section>
+        ))}
+      </div>
+      <p className="settings-hint">Settings apply live and persist across launches.</p>
+    </>
+  );
+}
+
+// ── Settings groups (#328) ─────────────────────────────────────────────
+// The nav lists GROUPS; each group renders its sections as headed blocks in
+// one scroll. To add a section, append ONE entry to its group's `sections`
+// (slots for parked work are noted per group). Section ids double as deep
+// links (?section=<id>, anchor #settings-section-<id>); ?section=<group id>
+// opens a group at the top. Groups with no sections are hidden.
+
+export interface SettingsSection {
+  id: string;
+  title: string;
+  render: (ctx: { performance: boolean }) => ReactNode;
+}
+
+export interface SettingsGroup {
+  id: string;
+  title: string;
+  detail: string;
+  sections: SettingsSection[];
+}
+
+export const SETTINGS_GROUPS: SettingsGroup[] = [
+  {
+    id: 'library',
+    title: 'Library',
+    detail: 'Folders, DJ software, export',
+    sections: [{ id: 'library', title: 'Library', render: () => <LibrarySettings /> }],
+  },
+  {
+    id: 'performance',
+    title: 'Performance',
+    detail: 'Filters, Beat FX, cue mode',
+    sections: [
+      { id: 'filters', title: 'Filters', render: () => <FilterSettingsPanel /> },
+      { id: 'effects', title: 'Beat FX', render: () => <BeatFxSettingsPanel /> },
+      // slot: Cue mode (#289)
+    ],
+  },
+  {
+    id: 'display',
+    title: 'Display',
+    detail: 'Waveforms and visuals',
+    sections: [{ id: 'waveforms', title: 'Waveforms', render: () => <WaveformSettings /> }],
+  },
+  {
+    id: 'controllers',
+    title: 'Controllers',
+    detail: 'Controller check, jog calibration',
+    sections: [
+      { id: 'controller-check', title: 'Controller check', render: () => <ControllerCheckSettings /> },
+      { id: 'jog', title: 'Jog calibration', render: () => <ControllerCalibrationSettings /> },
+    ],
+  },
+  {
+    id: 'keyboard-mouse',
+    title: 'Keyboard + mouse',
+    detail: 'Mouse jog, shortcuts',
+    sections: [
+      {
+        id: 'mouse-jog',
+        title: 'Mouse jog',
+        render: ({ performance }) => <MouseJogSettings performance={performance} />,
+      },
+      { id: 'shortcuts', title: 'Keyboard shortcuts', render: () => <KeyboardShortcutsPanel /> },
+    ],
+  },
+  {
+    id: 'accounts',
+    title: 'Accounts',
+    detail: 'SoundCloud, Soulseek',
+    sections: [
+      { id: 'soundcloud', title: 'SoundCloud', render: () => <SoundCloudSettings /> },
+      { id: 'soulseek', title: 'Soulseek', render: () => <SoulseekSettings /> },
+    ],
+  },
+  {
+    id: 'help',
+    title: 'Help',
+    detail: 'Setup guides, tour, about',
+    sections: [
+      // slot: Setup guides status/relaunch (#288) — goes first
+      { id: 'tour', title: 'Tour', render: () => <TourSettingsPanel /> },
+      { id: 'tutorials', title: 'Tutorials', render: () => <TutorialSettings /> },
+      // slot: version/licenses/about
+    ],
+  },
+];
+
+const VISIBLE_GROUPS = SETTINGS_GROUPS.filter((g) => g.sections.length > 0);
+
+/** Resolve ?section= (group id or section id) to a group + optional anchor. */
+function resolveSection(requested: string | null): { group: SettingsGroup; anchor: string | null } {
+  const byGroup = VISIBLE_GROUPS.find((g) => g.id === requested);
+  if (byGroup) return { group: byGroup, anchor: null };
+  const owner = VISIBLE_GROUPS.find((g) => g.sections.some((s) => s.id === requested));
+  if (owner) return { group: owner, anchor: requested };
+  const fallback = VISIBLE_GROUPS.find((g) => g.id === 'performance') ?? VISIBLE_GROUPS[0];
+  return { group: fallback, anchor: null };
+}
+
 export default function SettingsPage({ performance = false }: { performance?: boolean }) {
-  const [section, setSection] = useState<Section>(() => {
-    const requested = new URLSearchParams(location.search).get('section');
-    return SECTIONS.some((s) => s.id === requested)
-      ? (requested as Section)
-      : 'filters';
-  });
+  const [initial] = useState(() =>
+    resolveSection(new URLSearchParams(location.search).get('section')),
+  );
+  const [groupId, setGroupId] = useState(initial.group.id);
+  const group = VISIBLE_GROUPS.find((g) => g.id === groupId)!;
+  // Old per-section deep links scroll to their block once it has rendered
+  // (lazy panels may land a frame later).
+  useEffect(() => {
+    if (!initial.anchor) return;
+    const timer = setTimeout(() => {
+      document.getElementById(`settings-section-${initial.anchor}`)?.scrollIntoView?.({ block: 'start' });
+    }, 50);
+    return () => clearTimeout(timer);
+  }, [initial.anchor]);
   return (
     <div className="settings-page">
       <header className="settings-header">
@@ -226,42 +508,45 @@ export default function SettingsPage({ performance = false }: { performance?: bo
         </div>
         <p>
           Changes apply immediately. Preferences are stored with your library.
+          <span className="settings-version">manaDJ v{APP_VERSION}</span>
         </p>
       </header>
       <div className="settings-layout">
-        <nav className="settings-nav" aria-label="Settings sections">
-          {SECTIONS.map((s) => (
+        <nav className="settings-nav" data-tour="settings.nav" aria-label="Settings sections">
+          {VISIBLE_GROUPS.map((g) => (
             <button
-              key={s.id}
-              className={`btn${section === s.id ? ' btn-selected' : ''}`}
-              aria-current={section === s.id ? 'page' : undefined}
+              key={g.id}
+              className={`btn${groupId === g.id ? ' btn-selected' : ''}`}
+              aria-current={groupId === g.id ? 'page' : undefined}
               onClick={() => {
-                setSection(s.id);
+                setGroupId(g.id);
                 const url = new URL(location.href);
-                url.searchParams.set('section', s.id);
+                url.searchParams.set('section', g.id);
                 history.replaceState(null, '', url);
               }}
             >
-              <strong>{s.title}</strong>
-              <span>{s.detail}</span>
+              <strong>{g.title}</strong>
+              <span>{g.detail}</span>
             </button>
           ))}
         </nav>
         <section
           className="settings-content"
-          aria-label={SECTIONS.find((s) => s.id === section)!.title}
+          data-tour="settings.content"
+          aria-label={group.title}
         >
-          <Suspense fallback={<p role="status">Loading settings...</p>}>
-            {section === 'filters' ? (
-              <FilterSettingsPanel />
-            ) : section === 'waveforms' ? (
-              <WaveformSettings />
-            ) : section === 'jog' ? (
-              <JogSettings />
-            ) : (
-              <MouseJogSettings performance={performance} />
-            )}
-          </Suspense>
+          {group.sections.map((s) => (
+            <section
+              key={s.id}
+              id={`settings-section-${s.id}`}
+              className="settings-subsection"
+              aria-label={s.title}
+            >
+              <Suspense fallback={<p role="status">Loading settings...</p>}>
+                {s.render({ performance })}
+              </Suspense>
+            </section>
+          ))}
         </section>
       </div>
     </div>
