@@ -1,0 +1,142 @@
+# THROWAWAY probe for #299 — lives only on probe/* bookmarks, never lands.
+name: probe-cross-platform
+on:
+  push:
+    branches: ["probe/**"]
+  workflow_dispatch:
+
+jobs:
+  deps:
+    name: deps ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, ubuntu-24.04-arm, windows-11-arm, macos-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: isolated per-package install probe
+        run: |
+          set +e
+          echo "## per-package install (${{ matrix.os }}, py3.13)" >> "$GITHUB_STEP_SUMMARY"
+          echo "| pkg | result | secs |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|---|---|---|" >> "$GITHUB_STEP_SUMMARY"
+          probe() {
+            name="$1"; shift
+            d="$RUNNER_TEMP/venv-$name"
+            uv venv -q --python 3.13 "$d"
+            start=$(date +%s)
+            if [ "$RUNNER_OS" = "Windows" ]; then py="$d/Scripts/python.exe"; else py="$d/bin/python"; fi
+            uv pip install -q --python "$py" "$@" > "$RUNNER_TEMP/$name.log" 2>&1
+            rc=$?
+            secs=$(( $(date +%s) - start ))
+            if [ $rc -eq 0 ]; then r=ok; else r="FAIL"; tail -25 "$RUNNER_TEMP/$name.log"; fi
+            echo "| $name | $r | $secs |" >> "$GITHUB_STEP_SUMMARY"
+            echo "::group::$name $r"; tail -5 "$RUNNER_TEMP/$name.log"; echo "::endgroup::"
+            rm -rf "$d"
+          }
+          probe essentia "essentia>=2.1b6.dev1389"
+          probe madmom "madmom @ git+https://github.com/CPJKU/madmom"
+          probe beat-this "beat-this @ git+https://github.com/CPJKU/beat_this"
+          probe torch-pypi "torch==2.9.1" "torchaudio==2.9.1"
+          probe torch-cpu-index --index-url https://download.pytorch.org/whl/cpu "torch==2.9.1" "torchaudio==2.9.1"
+          probe demucs "demucs>=4.0.1"
+          probe pyrekordbox "pyrekordbox>=0.4.4"
+          probe tensorflow "tensorflow>=2.20.0"
+          probe beatnet "beatnet>=1.1.1"
+          probe librosa "librosa>=0.11.0"
+          probe soundfile "soundfile>=0.13.1"
+          exit 0
+
+  suite:
+    name: suite ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: ffmpeg
+        run: |
+          case "$RUNNER_OS" in
+            Linux) sudo apt-get update -q && sudo apt-get install -yq ffmpeg ;;
+            Windows) choco install ffmpeg -y --no-progress ;;
+            macOS) brew install ffmpeg ;;
+          esac
+          ffmpeg -version | head -1
+      - name: uv sync --frozen (as-is)
+        id: sync
+        continue-on-error: true
+        run: uv sync --frozen 2>&1 | tail -40
+      - name: uv sync minus essentia (fallback)
+        if: steps.sync.outcome == 'failure'
+        run: |
+          uv remove essentia 2>&1 | tail -20
+          uv sync 2>&1 | tail -40
+          echo "SYNC: needed essentia removal" >> "$GITHUB_STEP_SUMMARY"
+      - name: pytest
+        continue-on-error: true
+        env:
+          PYTHONUTF8: "0"
+        run: |
+          mkdir -p data
+          uv run pytest -q -p no:cacheprovider -o junit_family=xunit2 --junitxml=junit.xml 2>&1 | tail -150
+      - name: summarize pytest
+        if: always()
+        run: |
+          uv run python - <<'EOF' >> "$GITHUB_STEP_SUMMARY"
+          import xml.etree.ElementTree as ET, os
+          try:
+              r = ET.parse("junit.xml").getroot()
+          except Exception as e:
+              print(f"no junit: {e}"); raise SystemExit
+          s = r if r.tag == "testsuite" else r.find("testsuite")
+          print(f"## pytest {os.environ.get('RUNNER_OS')}: tests={s.get('tests')} fail={s.get('failures')} err={s.get('errors')} skip={s.get('skipped')}")
+          for tc in s.iter("testcase"):
+              for k in ("failure", "error"):
+                  el = tc.find(k)
+                  if el is not None:
+                      msg = (el.get("message") or "").replace("\n", " ")[:220]
+                      print(f"- {k}: `{tc.get('classname')}::{tc.get('name')}` — {msg}")
+          EOF
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: junit-${{ matrix.os }}
+          path: junit.xml
+      - name: backend startup smoke
+        continue-on-error: true
+        env:
+          DISABLE_TASK_WORKER: "1"
+          DISABLE_WAVEFORM_WORKER: "1"
+          DISABLE_ANALYSIS_WORKER: "1"
+          DISABLE_STEMS_WORKER: "1"
+        run: |
+          mkdir -p data
+          uv run uvicorn backend.main:app --host 127.0.0.1 --port 8127 > uvicorn.log 2>&1 &
+          for i in $(seq 1 90); do
+            if curl -sf http://127.0.0.1:8127/api/tracks > /dev/null; then echo "SMOKE ok after ${i}s" | tee -a "$GITHUB_STEP_SUMMARY"; break; fi
+            sleep 1
+          done
+          curl -sf http://127.0.0.1:8127/api/tracks | head -c 200 || { echo "SMOKE FAIL" | tee -a "$GITHUB_STEP_SUMMARY"; }
+          tail -60 uvicorn.log
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: vitest
+        continue-on-error: true
+        working-directory: frontend
+        run: |
+          npm ci --no-audit --no-fund 2>&1 | tail -5
+          npx vitest run 2>&1 | tail -80 | tee vitest.log
+          echo "## vitest $RUNNER_OS" >> "$GITHUB_STEP_SUMMARY"
+          grep -E "Test Files|Tests |FAIL" vitest.log | head -40 >> "$GITHUB_STEP_SUMMARY"
