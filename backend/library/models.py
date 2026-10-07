@@ -35,6 +35,9 @@ class LibraryImportResult(BaseModel):
 class LibraryImportRequest(BaseModel):
     """Request to import tracks."""
     candidate_filepaths: list[str] | None = None  # None = import all
+    # Scan subfolders (onboarding #276): must match the candidates scan, or
+    # files found in subfolders are silently dropped on import.
+    recursive: bool = True
 
 
 class LibraryImportExecutionResult(BaseModel):

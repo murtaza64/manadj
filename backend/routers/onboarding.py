@@ -78,3 +78,36 @@ def rekordbox_import_status(db: Session = Depends(get_db)):
         "summary": task.payload.get("summary"),
         "error": task.error,
     }
+
+
+# -- tracks directory (#276) ---------------------------------------------------
+
+
+@router.post("/tracks-directory/import")
+def start_tracks_directory_import(db: Session = Depends(get_db)):
+    """Queue a recursive Scan + Disk Import of the configured tracks
+    directory. 400 when unset; 409 when one is already in flight."""
+    from ..config import get_config
+    from ..onboarding.tracks_directory import enqueue_tracks_directory_import
+
+    if not get_config().library.tracks_directory:
+        raise HTTPException(status_code=400, detail="Tracks directory is not set")
+    task = enqueue_tracks_directory_import(db)
+    if task is None:
+        raise HTTPException(status_code=409, detail="A scan is already in flight")
+    return {"task_id": task.id}
+
+
+@router.get("/tracks-directory/status")
+def tracks_directory_import_status(db: Session = Depends(get_db)):
+    from ..onboarding import tracks_directory as td
+
+    task = td.latest_task(db)
+    if task is None:
+        return {"state": "none", "progress": None, "summary": None, "error": None}
+    return {
+        "state": task.state,
+        "progress": td.get_progress() if task.state == "running" else None,
+        "summary": task.payload.get("summary"),
+        "error": task.error,
+    }

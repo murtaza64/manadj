@@ -101,3 +101,31 @@ export const onboardingApi = {
   status: async (): Promise<RekordboxImportStatus> =>
     json(await fetch(`${API_BASE}/onboarding/rekordbox/status`), 'Failed to read import status'),
 };
+
+// -- tracks directory (#276) --------------------------------------------------
+
+export interface TracksDirectorySummary {
+  directory: string;
+  files_scanned: number;
+  already_in_library: number;
+  imported: number;
+  errors: number;
+  error_messages: string[];
+}
+
+export interface TracksDirectoryStatus {
+  state: 'none' | 'pending' | 'running' | 'done' | 'failed';
+  progress: ImportProgress | null;
+  summary: TracksDirectorySummary | null;
+  error: string | null;
+}
+
+export const tracksDirectoryApi = {
+  startScan: async (): Promise<{ task_id: number }> =>
+    json(
+      await fetch(`${API_BASE}/onboarding/tracks-directory/import`, { method: 'POST' }),
+      'Failed to start the scan',
+    ),
+  status: async (): Promise<TracksDirectoryStatus> =>
+    json(await fetch(`${API_BASE}/onboarding/tracks-directory/status`), 'Failed to read scan status'),
+};

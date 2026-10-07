@@ -81,6 +81,8 @@ function installFetch(b: Backend) {
       if (url.endsWith('/rekordbox/status'))
         return ok(b.statuses.length > 1 ? b.statuses.shift() : b.statuses[0]);
       if (url.includes('/settings')) return ok({});
+      if (url.endsWith('/tracks-directory/status')) return ok(NONE);
+      if (url.endsWith('/config')) return ok({ tracks_directory: null });
       throw new Error(`unexpected fetch ${url}`);
     }),
   );
@@ -271,7 +273,12 @@ describe('FirstRunWelcome', () => {
     expect(container.querySelector('[data-testid=rekordbox-import-guide]')).not.toBeNull();
     act(() => button('Skip').click());
     expect(guideStatus('rekordbox-import')).toBe('skipped');
-    // Step 2: the test guide; finishing it ends First run.
+    // Step 2: tracks directory — skip it.
+    await flush();
+    expect(container.querySelector('[data-testid=tracks-directory-guide]')).not.toBeNull();
+    act(() => button('Skip').click());
+    expect(guideStatus('tracks-directory')).toBe('skipped');
+    // Step 3: the test guide; finishing it ends First run.
     act(() => button('finish test guide').click());
     expect(guideStatus('test-guide')).toBe('done');
     expect(guideStatus('welcome')).toBe('done');

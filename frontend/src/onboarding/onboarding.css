@@ -103,6 +103,26 @@
   justify-content: flex-end;
 }
 
+.onboarding-path {
+  display: flex;
+  gap: var(--space-8);
+}
+
+.onboarding-path input {
+  flex: 1;
+  padding: var(--space-6) var(--space-8);
+  background: var(--base);
+  border: 1px solid var(--surface1);
+  color: var(--text);
+  font-family: inherit;
+  font-size: var(--font-body);
+}
+
+.onboarding-path input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
 .onboarding-option {
   display: flex;
   align-items: center;

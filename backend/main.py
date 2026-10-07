@@ -148,6 +148,12 @@ def _build_task_worker() -> "TaskWorker | None":
         make_onboarding_import_handler,
     )
     handlers[ONBOARDING_IMPORT_TASK_TYPE] = make_onboarding_import_handler()
+    # Tracks directory Scan (#276): onboarding's "Add a tracks directory".
+    from .onboarding.tracks_directory import (
+        TRACKS_DIRECTORY_IMPORT_TASK_TYPE,
+        make_tracks_directory_import_handler,
+    )
+    handlers[TRACKS_DIRECTORY_IMPORT_TASK_TYPE] = make_tracks_directory_import_handler()
 
     config = get_config()
     delays: dict[str, float] = {}
