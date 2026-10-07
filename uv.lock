@@ -305,9 +305,9 @@ name = "essentia"
 version = "2.1b6.dev1389"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "numpy" },
-    { name = "pyyaml" },
-    { name = "six" },
+    { name = "numpy", marker = "python_full_version >= '3.15' or platform_machine != 'aarch64' or platform_python_implementation != 'CPython' or sys_platform != 'linux'" },
+    { name = "pyyaml", marker = "python_full_version >= '3.15' or platform_machine != 'aarch64' or platform_python_implementation != 'CPython' or sys_platform != 'linux'" },
+    { name = "six", marker = "python_full_version >= '3.15' or platform_machine != 'aarch64' or platform_python_implementation != 'CPython' or sys_platform != 'linux'" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/ef/e3/36868a49b9b2d5a307dda19ff7bf2880d9a7e79897dc7b3d28953f75776a/essentia-2.1b6.dev1389-cp313-cp313-macosx_13_0_x86_64.whl", hash = "sha256:cf6a7fd7965f47d14acbd444fb93650ff116f0b28750f9a1a6aa8a551b8538e7", size = 21946386, upload-time = "2025-07-24T21:08:17.617Z" },
@@ -499,6 +499,15 @@ wheels = [
 ]
 
 [[package]]
+name = "kaitaistruct"
+version = "0.11"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/27/b8/ca7319556912f68832daa4b81425314857ec08dfccd8dbc8c0f65c992108/kaitaistruct-0.11.tar.gz", hash = "sha256:053ee764288e78b8e53acf748e9733268acbd579b8d82a427b1805453625d74b", size = 11519, upload-time = "2025-09-08T15:46:25.037Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/4a/4a/cf14bf3b1f5ffb13c69cf5f0ea78031247790558ee88984a8bdd22fae60d/kaitaistruct-0.11-py2.py3-none-any.whl", hash = "sha256:5c6ce79177b4e193a577ecd359e26516d1d6d000a0bffd6e1010f2a46a62a561", size = 11372, upload-time = "2025-09-08T15:46:23.635Z" },
+]
+
+[[package]]
 name = "lameenc"
 version = "1.8.4"
 source = { registry = "https://pypi.org/simple" }
@@ -570,6 +579,7 @@ dependencies = [
     { name = "alembic" },
     { name = "beat-this" },
     { name = "fastapi" },
+    { name = "kaitaistruct" },
     { name = "madmom" },
     { name = "mutagen" },
     { name = "numpy" },
@@ -620,6 +630,7 @@ requires-dist = [
     { name = "beat-this", git = "https://github.com/CPJKU/beat_this" },
     { name = "fastapi", specifier = ">=0.122.0" },
     { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.28.1" },
+    { name = "kaitaistruct", specifier = ">=0.11" },
     { name = "madmom", git = "https://github.com/CPJKU/madmom" },
     { name = "mutagen", specifier = ">=1.47.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.7.0" },
