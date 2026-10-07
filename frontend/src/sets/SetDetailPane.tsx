@@ -1689,7 +1689,11 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
                       )}
                       routineUuid={cov.uuid}
                       coversCount={cov.cast.length - 1}
-                      onOpenSource={openRoutinePinSource}
+                      onOpenSource={
+                        routineRows.find((r) => r.uuid === cov.uuid)?.authored
+                          ? null // authored from scratch (ADR 0039): no source Session
+                          : openRoutinePinSource
+                      }
                       exitLabel={
                         trackMap?.get(cov.cast[cov.cast.length - 1])?.title ||
                         `Track ${cov.cast[cov.cast.length - 1]}`
