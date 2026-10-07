@@ -2,7 +2,7 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
 import { installPerfHook } from './perfHook.ts'
-import { installTheme } from './theme/tokens.ts'
+import { FONT_MONO, installTheme } from './theme/tokens.ts'
 import { DEV_SURFACES } from './devMode.ts'
 import { hydratePersistedSettings } from './settings/persistedSettings.ts'
 import RootErrorBoundary from './components/RootErrorBoundary.tsx'
@@ -24,8 +24,16 @@ if (isDesktopShell) {
 // Settings hydrate BEFORE App is imported (settings, #176): module-level
 // preference stores read localStorage at import time, so the DB->cache
 // hydration must land first. App is therefore imported dynamically.
+// App font (gh#312): canvas text doesn't trigger @font-face loads, so load
+// the faces before first render (capped, falls back to monospace on timeout).
+function loadAppFont(): Promise<unknown> {
+  if (!document.fonts) return Promise.resolve()
+  const faces = ['400', '700'].map(weight => document.fonts.load(`${weight} 16px ${FONT_MONO}`))
+  return Promise.race([Promise.allSettled(faces), new Promise(resolve => setTimeout(resolve, 1500))])
+}
+
 async function boot() {
-  await hydratePersistedSettings()
+  await Promise.all([hydratePersistedSettings(), loadAppFont()])
   const { default: App } = await import('./App.tsx')
   createRoot(document.getElementById('root')!).render(
     <StrictMode>
