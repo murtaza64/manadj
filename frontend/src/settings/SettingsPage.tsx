@@ -30,6 +30,7 @@ const WaveformSettings = lazy(() => import('../waveform/StyleTuningPage'));
 const ControllerCalibrationSettings = lazy(() => import('./ControllerCalibrationSettings'));
 const MouseJogSettings = lazy(() => import('./MouseJogSettings'));
 const LibrarySettings = lazy(() => import('./LibrarySettings'));
+const ControllerCheckSettings = lazy(() => import('../setup/controllerCheck/ControllerCheckSettings'));
 const PARAMS = [
   {
     key: 'resonance',
@@ -397,7 +398,7 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
     title: 'Controllers',
     detail: 'Controller check, jog calibration',
     sections: [
-      // slot: Controller check (#292) — goes first
+      { id: 'controller-check', title: 'Controller check', render: () => <ControllerCheckSettings /> },
       { id: 'jog', title: 'Jog calibration', render: () => <ControllerCalibrationSettings /> },
     ],
   },
