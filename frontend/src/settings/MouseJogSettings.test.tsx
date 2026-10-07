@@ -133,7 +133,7 @@ it('deep-links to Mouse jog with live ranges, stored values and derived targets'
   await render();
   expect(container.querySelector('.settings-content')?.getAttribute('aria-label')).toBe('Mouse jog');
   expect(container.querySelector('.settings-nav [aria-current="page"]')?.textContent).toBe('Mouse jogKeyboard and mouse response');
-  expect(container.querySelectorAll('.settings-nav button')).toHaveLength(5);
+  expect(container.querySelectorAll('.settings-nav button')).toHaveLength(6);
   expect(container.textContent).not.toContain('MOUSE / JOG TUNE');
   const ranges = [...container.querySelectorAll<HTMLElement>('.settings-fields [role="slider"]')];
   expect(container.querySelector('input[type="range"]')).toBeNull();

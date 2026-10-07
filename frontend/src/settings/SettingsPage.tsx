@@ -19,12 +19,14 @@ import {
 const WaveformSettings = lazy(() => import('../waveform/StyleTuningPage'));
 const JogSettings = lazy(() => import('../midi/JogTuningPage'));
 const MouseJogSettings = lazy(() => import('./MouseJogSettings'));
+const ControllerCheckSettings = lazy(() => import('../setup/controllerCheck/ControllerCheckSettings'));
 const SECTIONS = [
   { id: 'filters', title: 'Filters', detail: 'Sound and sweep response' },
   { id: 'effects', title: 'Beat FX', detail: 'Echo, Reverb and Flanger' },
   { id: 'waveforms', title: 'Waveforms', detail: 'Color and rendering' },
   { id: 'jog', title: 'Jog calibration', detail: 'DDJ-GRV6 response' },
   { id: 'mouse-jog', title: 'Mouse jog', detail: 'Keyboard and mouse response' },
+  { id: 'controller-check', title: 'Controller check', detail: 'Audio outputs and MIDI' },
 ] as const;
 type Section = (typeof SECTIONS)[number]['id'];
 const PARAMS = [
@@ -367,6 +369,8 @@ export default function SettingsPage({ performance = false }: { performance?: bo
               <WaveformSettings />
             ) : section === 'jog' ? (
               <JogSettings />
+            ) : section === 'controller-check' ? (
+              <ControllerCheckSettings />
             ) : (
               <MouseJogSettings performance={performance} />
             )}
