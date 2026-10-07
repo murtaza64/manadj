@@ -1,5 +1,6 @@
 import type { AbsoluteTarget, ButtonTarget, RelativeTarget } from './actions';
 import type { ChannelId } from '../playback/mixer';
+import type { BeatFxEffectId } from '../playback/beatFx';
 import type { JogProfile } from './jogCalibration';
 
 /**
@@ -172,6 +173,11 @@ export interface BeatFxBeatAddress {
   values: readonly { beats: number; value: number }[];
 }
 
+export type BeatFxEngageLamp = LedAddress & {
+  scope: 'left' | 'right' | 'master';
+  effect: BeatFxEffectId;
+};
+
 /** Device knowledge for Feedback: every light the app writes, per deck. */
 export interface MappingFeedback {
   /** A two-Deck Controller may omit C/D; layered four-Deck devices provide all. */
@@ -189,6 +195,11 @@ export interface MappingFeedback {
   beatFx?: LedAddress;
   /** Beat FX time-unit indicator (GRV6 CC output), if host-driven. */
   beatFxBeat?: BeatFxBeatAddress;
+  /**
+   * FX button lights (beat-fx-engage, DDJ-SB3): lit iff the section is on
+   * with `effect` targeting the lamp's scope (side's focused Deck / master).
+   */
+  beatFxEngage?: readonly BeatFxEngageLamp[];
   /**
    * Per-channel level-meter output addresses (four-deck-performance 36).
    * A four-channel device provides all of A–D; a device without host-driven

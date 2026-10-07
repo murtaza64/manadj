@@ -106,8 +106,10 @@ function deckBindings({ deck, channel, padChannel, shiftedPadChannel }: DeckMidi
     button(channel, 92, { control: 'match', deck }),
     button(channel, 84, { control: 'pfl', channel: deck }),
     // The controller reports selected logical Deck state on note 60:
-    // velocity 0x7f for selected, 0 for the displaced layer.
-    button(channel, 60, { control: 'set-control-focus', deck }),
+    // velocity 0x7f for selected, 0 for the displaced layer. Only the
+    // TEMPO fader is layered (the mixer is four fixed strips): its pickup
+    // re-arms for the pair on every switch.
+    button(channel, 60, { control: 'set-control-focus', deck, layered: ['pitch'] }),
     button(channel, 16, { control: 'beatjump', deck, direction: 'back' }),
     button(channel, 17, { control: 'beatjump', deck, direction: 'forward' }),
     button(channel, 76, { control: 'loop-or-jump-size', deck, change: 'halve' }),

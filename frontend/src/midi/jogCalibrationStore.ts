@@ -2,6 +2,7 @@ import { useSyncExternalStore } from 'react';
 import {
   DEFAULT_JOG_CALIBRATION,
   GRV6_JOG_CALIBRATION,
+  SB3_JOG_CALIBRATION,
 } from './jogCalibration';
 import type { JogCalibration, JogProfile } from './jogCalibration';
 import { removeSetting, writeSetting } from '../settings/persistedSettings';
@@ -54,7 +55,9 @@ let grv6Calibration = load();
 const listeners = new Set<() => void>();
 
 export function getJogCalibration(profile?: JogProfile): JogCalibration {
-  return profile === 'grv6' ? grv6Calibration : DEFAULT_JOG_CALIBRATION;
+  if (profile === 'grv6') return grv6Calibration;
+  if (profile === 'ddj-sb3') return SB3_JOG_CALIBRATION;
+  return DEFAULT_JOG_CALIBRATION;
 }
 
 export function setGrv6JogCalibration(patch: Partial<JogCalibration>): void {
