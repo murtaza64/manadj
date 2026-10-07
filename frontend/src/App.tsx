@@ -40,7 +40,10 @@ import { isTypingTarget } from './components/performance/performanceKeys';
 import { registerViewToggle } from './midi/controlRegistry';
 import { FirstRunWelcome } from './onboarding/FirstRunWelcome';
 import './setup/allGuides';
+import { KeyboardShortcutOverlay } from './components/KeyboardShortcutOverlay';
 import { TourController } from './tour/TourController';
+import { TutorialController } from './tutorials/TutorialController';
+import { OPEN_TUTORIAL_EVENT } from './tutorials/tutorialState';
 import { setTourArea, type TourArea } from './tour/tourState';
 
 /** Where each mode lands in the tour's section map (feature-tour #282):
@@ -68,7 +71,8 @@ const MODE_IDS: AppMode[] = ['library', 'performance', 'transition', 'routine', 
 const MODE_KEY = 'manadj-app-mode';
 
 // Deep link: ?view=<mode> opens straight into that mode (beats the
-// remembered one); otherwise restore the last mode, defaulting to library.
+// remembered one); otherwise restore the last mode. Fresh installs open in
+// PERFORM (setup-guides #301).
 function initialMode(): AppMode | 'settings' {
   const requestedView = new URLSearchParams(window.location.search).get('view');
   const storedView = localStorage.getItem(MODE_KEY);
@@ -81,7 +85,7 @@ function initialMode(): AppMode | 'settings' {
     if (mode === 'transition' && !DEV_SURFACES) continue;
     if (MODE_IDS.includes(mode as AppMode)) return mode as AppMode;
   }
-  return 'library';
+  return 'performance';
 }
 
 function persistMode(mode: AppMode, settingsOpen = false) {
@@ -148,6 +152,11 @@ function App() {
     return () => document.removeEventListener('keydown', onKeyDown);
   }, []);
   useEffect(() => registerViewToggle(toggleView), []);
+  useEffect(() => {
+    const open = (event: Event) => setView((event as CustomEvent).detail === 'performance' ? 'performance' : 'routine');
+    window.addEventListener(OPEN_TUTORIAL_EVENT, open);
+    return () => window.removeEventListener(OPEN_TUTORIAL_EVENT, open);
+  }, []);
 
   // A Take review request (Transition history row) opens the editor; the
   // mounted editor consumes the pending uuid itself (takeReview.ts).
@@ -237,7 +246,9 @@ function App() {
         <SetSpaceTransport />
         {/* Coach-mark tour (feature-tour #282): above the view switch so
             it can spotlight anchors in any mode. */}
-        <TourController />
+            <FirstRunWelcome />
+            <TourController />
+        <TutorialController />
         <FilterProvider>
           <div className="app-shell">
             <TopBar
@@ -287,9 +298,8 @@ function App() {
               />
               </BrowseActiveContext.Provider>
             </main>
-            {/* First run (#275): welcome overlay over an empty Library. */}
-            <FirstRunWelcome />
           </div>
+          <KeyboardShortcutOverlay mode={view} />
         </FilterProvider>
       </DeckProvider>
       </ToastProvider>

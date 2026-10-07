@@ -56,12 +56,12 @@ def state() -> dict:
     manifest: dict = {"generation": 0, "candidates": {}}
     if MANIFEST_PATH.exists():
         try:
-            manifest = json.loads(MANIFEST_PATH.read_text())
+            manifest = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
         except json.JSONDecodeError:
             pass  # orchestrator's problem; serve the default
     events: list[dict] = []
     if EVENTS_PATH.exists():
-        for line in EVENTS_PATH.read_text().splitlines():
+        for line in EVENTS_PATH.read_text(encoding="utf-8").splitlines():
             line = line.strip()
             if not line:
                 continue
@@ -76,6 +76,6 @@ def state() -> dict:
 def append_event(event: ArenaEvent) -> dict:
     GEN_DIR.mkdir(parents=True, exist_ok=True)
     record = {"at": time.time(), **event.model_dump(exclude_none=True)}
-    with EVENTS_PATH.open("a") as handle:
+    with EVENTS_PATH.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(record) + "\n")
     return {"ok": True}

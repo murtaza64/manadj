@@ -520,6 +520,29 @@ describe('DeckEngine cross-deck launch reference (cue-quantize-bpm 04)', () => {
     }
   });
 
+  it('Cue mode gates a paused hot cue press (#289)', async () => {
+    const store = await import('./cueModeStore');
+    const engine = await loadedEngine(58);
+    const taps: string[] = [];
+    engine.setTransportEventHandler((e) => taps.push(e.action));
+    // Gated (default): hold previews, release returns and stops.
+    engine.hotCueDown(1, 30);
+    expect(engine.getSnapshot()).toMatchObject({ playing: false, hotCuePreviewSlot: 1 });
+    engine.hotCueUp(1, 30);
+    expect(engine.getSnapshot()).toMatchObject({ playing: false, hotCuePreviewSlot: null });
+    // Trigger: press starts the deck; release leaves it running.
+    store.setCueMode('trigger');
+    try {
+      engine.hotCueDown(2, 40);
+      expect(engine.getSnapshot()).toMatchObject({ playing: true, hotCuePreviewSlot: null });
+      engine.hotCueUp(2, 40);
+      expect(engine.getSnapshot().playing).toBe(true);
+      expect(taps).toEqual(['hotCue', 'hotCue']);
+    } finally {
+      store.setCueMode('gated');
+    }
+  });
+
   it('launches immediately when Quantize governs but no peer is playing', async () => {
     const launcher = await loadedEngine(57, grid120);
     // No provider wired → launchReference() is null → immediate start.

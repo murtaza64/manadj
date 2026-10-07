@@ -117,6 +117,13 @@ Shared draw helpers/tables: `frontend/src/theme/markers.ts` (gh#201).
   content, not UI.
 - Pre-mount boot splash (`index.html`) and Electron splash
   (`desktop/main.js`) — render before `installTheme()`; literals by design.
+- **Explainer-site hero type** (#294, human-approved): `site/assets/site.css`
+  defines local `--site-font-hero: 48px` for the hero tagline/headline only.
+  At `max-width: 900px`, it scales with `6vw`, bounded by `--font-display`
+  and `--site-font-hero`. Site body stays `--font-large` (14px); brand and
+  chapter headings use `--font-display` (24px). App type tokens are unchanged.
+  The site bundles unmodified Ubuntu Mono regular/bold (400/700), under the
+  Ubuntu Font Licence 1.0, instead of the app's Nerd Font variant.
 
 ## Rules for agents
 
