@@ -90,6 +90,24 @@ export const STEM_COLORS = {
   other: '#00cec9',
 } as const;
 
+// ── Tag palette (onboarding #326) — bright, fully saturated, never pastel.
+// Imported Tags / Tag Categories with no color get a random pick from
+// here. Mirrored by backend/tag_palette.py (test-guarded).
+export const TAG_COLORS: readonly string[] = [
+  '#ff1744',
+  '#ff8800',
+  '#ffd400',
+  '#76ff03',
+  '#2ed573',
+  '#00cec9',
+  '#00b0ff',
+  '#1e90ff',
+  '#651fff',
+  '#a855f7',
+  '#d500f9',
+  '#ff5cc8',
+];
+
 // ── Energy gradient ──────────────────────────────────────────────────────
 export const ENERGY_COLORS: Record<number, string> = {
   1: '#ffffcc',

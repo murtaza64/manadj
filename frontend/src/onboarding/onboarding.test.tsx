@@ -49,6 +49,7 @@ const SUMMARY = {
   tag_assignments_added: 14,
   genre_tags_created: 3,
   genre_assignments_added: 10,
+  tag_colors_assigned: 11,
   playlists_created: 4,
   playlist_entries_added: 20,
   playlists_already_present: 0,

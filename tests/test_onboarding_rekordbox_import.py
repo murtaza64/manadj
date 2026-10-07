@@ -399,3 +399,36 @@ def test_executor_import_uses_scale_name(db):
     track = db.query(models.Track).filter_by(filename="/music/x.wav").one()
     assert track.key == AM_ENGINE_ID
     assert track.key_provenance == "imported"
+
+
+# -- imported tag colors (#326) -------------------------------------------------
+
+
+def test_imported_tags_and_categories_get_saturated_colors(db, rb_db):
+    from backend.tag_palette import TAG_COLORS
+
+    rb, _files = rb_db
+    summary = run_import(db, rb)
+    rows = db.query(models.TagCategory).all() + db.query(models.Tag).all()
+    assert rows and all(r.color in TAG_COLORS for r in rows)
+    assert summary.tag_colors_assigned == len(rows)
+    # siblings draw from a shuffled deck: no repeats until the palette cycles
+    situation = db.query(models.TagCategory).filter_by(name="Situation").one()
+    colors = [t.color for t in situation.tags]
+    assert len(set(colors)) == len(colors)
+
+
+def test_reimport_fills_grey_tags_but_never_overwrites_colors(db, rb_db):
+    rb, _files = rb_db
+    run_import(db, rb)
+    opener = db.query(models.Tag).filter_by(name="Opener").one()
+    closer = db.query(models.Tag).filter_by(name="Closer").one()
+    opener.color = "#123456"  # user-chosen
+    closer.color = None  # grey from a pre-#326 import
+    db.commit()
+    summary = run_import(db, rb)
+    db.refresh(opener)
+    db.refresh(closer)
+    assert opener.color == "#123456"
+    assert closer.color is not None
+    assert summary.tag_colors_assigned == 1

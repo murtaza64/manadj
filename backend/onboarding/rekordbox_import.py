@@ -28,6 +28,7 @@ from sqlalchemy.orm import Session
 
 from backend import models
 from backend.config import get_config
+from backend.tag_palette import TagColorPicker
 from backend.sync_performance.bulk import bulk_import
 from backend.sync_performance.rekordbox_source import (
     RekordboxPerformanceSource,
@@ -380,6 +381,7 @@ class ImportSummary:
     tag_assignments_added: int = 0
     genre_tags_created: int = 0
     genre_assignments_added: int = 0
+    tag_colors_assigned: int = 0  # new or colorless Tags/Categories (#326)
     playlists_created: int = 0
     playlist_entries_added: int = 0
     playlists_already_present: int = 0
@@ -397,8 +399,12 @@ def run_import(
     rb_db: "Rekordbox6Database",
     include_genre: bool = True,
     progress: Progress | None = None,
+    color_picker: TagColorPicker | None = None,
 ) -> ImportSummary:
     """The bulk External Import. Fill-blanks only; idempotent on re-run.
+
+    Tag Categories / Tags the import creates — or finds colorless — get a
+    random saturated color (#326); an existing color is never replaced.
 
     Phases (each reported via `progress`): tracks -> performance -> tags
     [-> genre] -> playlists -> finalize. Enqueues waveforms and missing
@@ -410,6 +416,7 @@ def run_import(
             progress(phase, done, total)
 
     summary = ImportSummary()
+    picker = color_picker or TagColorPicker()
     split = _split_contents(rb_db)
     summary.tracks_missing_file = len(split.missing)
     summary.tracks_streaming = len(split.streaming)
@@ -479,10 +486,10 @@ def run_import(
     cat_list, tags_by_cat, assignments = _mytag_structure(rb_db)
     report("tags", 0, len(cat_list) or 1)
     for done, (seq, cat_name) in enumerate(cat_list, start=1):
-        category, created = _get_or_create_category(db, cat_name, seq)
+        category, created = _get_or_create_category(db, cat_name, seq, picker, summary)
         summary.tag_categories_created += created
         for tag_seq, tag_name in tags_by_cat.get(cat_name, []):
-            _, created = _get_or_create_tag(db, category, tag_name, tag_seq)
+            _, created = _get_or_create_tag(db, category, tag_name, tag_seq, picker, summary)
             summary.tags_created += created
         report("tags", done, len(cat_list) or 1)
     db.commit()
@@ -508,11 +515,11 @@ def run_import(
                 genre_assignments.append((tid, GENRE_CATEGORY_NAME, name))
         if genre_names:
             category, created = _get_or_create_category(
-                db, GENRE_CATEGORY_NAME, len(cat_list)
+                db, GENRE_CATEGORY_NAME, len(cat_list), picker, summary
             )
             summary.tag_categories_created += created
             for i, name in enumerate(genre_names):
-                _, created = _get_or_create_tag(db, category, name, i)
+                _, created = _get_or_create_tag(db, category, name, i, picker, summary)
                 summary.genre_tags_created += created
             db.commit()
             summary.genre_assignments_added += _add_assignments(db, genre_assignments)
@@ -565,20 +572,38 @@ def run_import(
 # -- tag helpers ---------------------------------------------------------------
 
 
+def _fill_color(row, picker: TagColorPicker, summary: "ImportSummary") -> None:
+    """Give a colorless Tag/Category a palette color; never overwrite."""
+    if not row.color:
+        row.color = picker.next()
+        summary.tag_colors_assigned += 1
+
+
 def _get_or_create_category(
-    db: Session, name: str, display_order: int
+    db: Session,
+    name: str,
+    display_order: int,
+    picker: TagColorPicker,
+    summary: "ImportSummary",
 ) -> tuple[models.TagCategory, bool]:
     row = db.query(models.TagCategory).filter(models.TagCategory.name == name).first()
     if row is not None:
+        _fill_color(row, picker, summary)  # one-time fix for grey imports
         return row, False
     row = models.TagCategory(name=name, display_order=display_order)
+    _fill_color(row, picker, summary)
     db.add(row)
     db.flush()
     return row, True
 
 
 def _get_or_create_tag(
-    db: Session, category: models.TagCategory, name: str, display_order: int
+    db: Session,
+    category: models.TagCategory,
+    name: str,
+    display_order: int,
+    picker: TagColorPicker,
+    summary: "ImportSummary",
 ) -> tuple[models.Tag, bool]:
     row = (
         db.query(models.Tag)
@@ -586,8 +611,10 @@ def _get_or_create_tag(
         .first()
     )
     if row is not None:
+        _fill_color(row, picker, summary)
         return row, False
     row = models.Tag(category_id=category.id, name=name, display_order=display_order)
+    _fill_color(row, picker, summary)
     db.add(row)
     db.flush()
     return row, True

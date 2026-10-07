@@ -44,6 +44,7 @@ export interface RekordboxImportSummary {
   tag_assignments_added: number;
   genre_tags_created: number;
   genre_assignments_added: number;
+  tag_colors_assigned: number;
   playlists_created: number;
   playlist_entries_added: number;
   playlists_already_present: number;
