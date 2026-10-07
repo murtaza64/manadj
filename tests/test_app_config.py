@@ -33,6 +33,7 @@ def temp_data_root(tmp_path, monkeypatch):
     monkeypatch.setattr(
         config_module, "REKORDBOX_DEFAULT_LOCATION", tmp_path / "no-rekordbox"
     )
+    monkeypatch.setattr(config_module, "ENGINE_DEFAULT_LOCATION", tmp_path / "no-engine")
     yield tmp_path
     config_module._config = saved
 
@@ -251,3 +252,90 @@ def test_backend_log_file_in_data_root(temp_data_root):
             if h not in saved:
                 h.close()
         logging.root.handlers[:] = saved
+
+
+# -- #309 per-OS data root, External library discovery, reveal --------------
+
+
+def test_packaged_default_per_os(tmp_path):
+    from backend.data_root import packaged_default
+
+    home = tmp_path / "home"
+    assert packaged_default("darwin", {}, home) == home / "Library" / "Application Support" / "manaDJ"
+    assert packaged_default("win32", {"APPDATA": str(tmp_path / "Roaming")}, home) == (
+        tmp_path / "Roaming" / "manaDJ"
+    )
+    assert packaged_default("win32", {}, home) == home / "AppData" / "Roaming" / "manaDJ"
+    assert packaged_default("linux", {"XDG_DATA_HOME": str(tmp_path / "xdg")}, home) == (
+        tmp_path / "xdg" / "manaDJ"
+    )
+    assert packaged_default("linux", {}, home) == home / ".local" / "share" / "manaDJ"
+
+
+def test_external_library_default_locations(tmp_path):
+    from backend.config import engine_default_location, rekordbox_default_location
+
+    home = tmp_path / "home"
+    assert rekordbox_default_location("darwin", {}, home) == home / "Library" / "Pioneer" / "rekordbox"
+    assert rekordbox_default_location("win32", {"APPDATA": str(tmp_path / "R")}, home) == (
+        tmp_path / "R" / "Pioneer" / "rekordbox"
+    )
+    assert rekordbox_default_location("linux", {}, home) is None
+    for platform in ("darwin", "win32"):
+        assert engine_default_location(platform, home) == (
+            home / "Music" / "Engine Library" / "Database2"
+        )
+    assert engine_default_location("linux", home) is None
+
+
+def test_engine_autodetect_default(temp_data_root):
+    (temp_data_root / "no-engine").mkdir()
+    cfg = load_config()
+    assert cfg.database.engine_dj_path == str(temp_data_root / "no-engine")
+    assert cfg.database.engine_autodetected is True
+
+
+def test_explicit_empty_engine_disables(temp_data_root):
+    (temp_data_root / "no-engine").mkdir()
+    (temp_data_root / "config.toml").write_text('[database]\nengine_dj_path = ""\n')
+    cfg = load_config()
+    assert cfg.database.engine_dj_path is None
+    assert cfg.database.engine_autodetected is False
+
+
+def test_settings_writes_windows_paths_as_valid_toml(temp_data_root):
+    r"""A hand-typed "C:\Users\..." is an invalid TOML escape; Settings
+    writes must escape it (tomlkit) so startup never crashes."""
+    win = "C:\\Users\\dj\\Music\\Tracks"
+    update_settings_file({"tracks_directory": win, "rekordbox_path": "D:\\Pioneer\\rekordbox"})
+    cfg = load_config()
+    assert cfg.library.tracks_directory == win
+    assert cfg.database.rekordbox_path == "D:\\Pioneer\\rekordbox"
+
+
+def test_reveal_command_per_os():
+    from backend.routers.app_config import reveal_command
+
+    assert reveal_command("/a/b.toml", True, "darwin") == ["open", "-R", "/a/b.toml"]
+    assert reveal_command("C:\\d\\config.toml", True, "win32") == [
+        "explorer",
+        "/select,C:\\d\\config.toml",
+    ]
+    assert reveal_command("C:\\d\\logs", False, "win32") == ["explorer", "C:\\d\\logs"]
+    assert reveal_command("/a/b.toml", True, "linux") == ["xdg-open", "/a"]
+
+
+def test_pyrekordbox_discovery_assertion_is_contained(tmp_path, monkeypatch):
+    """pyrekordbox's install discovery asserts on a mismatched options.json;
+    get_rekordbox_db passes explicit paths, so that must not crash it."""
+    from pyrekordbox import config as rb_config
+
+    import rekordbox.connection as conn
+
+    def broken(section, key=None):
+        raise AssertionError
+
+    monkeypatch.setattr(rb_config, "get_config", broken)
+    monkeypatch.setitem(rb_config.__config__, "rekordbox7", {})
+    conn._ensure_pyrekordbox_config(tmp_path)
+    assert rb_config.__config__["rekordbox7"]["db_path"] == tmp_path / "master.db"

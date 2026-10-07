@@ -1763,6 +1763,9 @@ export interface AppConfigWire {
   rekordbox_autodetected: boolean;
   rekordbox_detected_path: string | null;
   engine_dj_path: string | null;
+  /** True when engine_dj_path came from auto-detection (#309). */
+  engine_autodetected: boolean;
+  engine_detected_path: string | null;
   export_enabled: boolean;
   settings_file: string;
   /** Live PATH check (packaged-app #278): false => waveforms/analysis/stems broken. */
@@ -1770,7 +1773,7 @@ export interface AppConfigWire {
 }
 
 export interface AppConfigUpdateWire {
-  /** Path fields: '' clears the key (Rekordbox returns to auto-detect). */
+  /** Path fields: '' clears the key (Rekordbox/Engine return to auto-detect). */
   tracks_directory?: string;
   rekordbox_path?: string;
   engine_dj_path?: string;
