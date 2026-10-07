@@ -1670,7 +1670,62 @@ export const api = {
       return res.json();
     },
   },
+
+  // ── App configuration (packaged-app #277): the settings file, not the
+  // DB settings table. Settings → Library edits these.
+  appConfig: {
+    get: async (): Promise<AppConfigWire> => {
+      const res = await fetch(`${API_BASE}/config`);
+      if (!res.ok) throw new Error(`Failed to load app config (${res.status})`);
+      return res.json();
+    },
+
+    update: async (changes: AppConfigUpdateWire): Promise<AppConfigWire> => {
+      const res = await fetch(`${API_BASE}/config`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(changes),
+      });
+      if (!res.ok) throw new Error(`Failed to save app config (${res.status})`);
+      return res.json();
+    },
+
+    /** Show the settings file in Finder. */
+    reveal: async (): Promise<void> => {
+      const res = await fetch(`${API_BASE}/config/reveal`, { method: 'POST' });
+      if (!res.ok) throw new Error(`Failed to reveal settings file (${res.status})`);
+    },
+
+    /** Open the backend log folder in Finder (packaged-app #278). */
+    revealLogs: async (): Promise<void> => {
+      const res = await fetch(`${API_BASE}/config/reveal-logs`, { method: 'POST' });
+      if (!res.ok) throw new Error(`Failed to reveal logs (${res.status})`);
+    },
+  },
 };
+
+// ── App config wire types (packaged-app #277) ──────────────────────────
+
+export interface AppConfigWire {
+  tracks_directory: string | null;
+  rekordbox_path: string | null;
+  /** True when rekordbox_path came from auto-detection, not the settings file. */
+  rekordbox_autodetected: boolean;
+  rekordbox_detected_path: string | null;
+  engine_dj_path: string | null;
+  export_enabled: boolean;
+  settings_file: string;
+  /** Live PATH check (packaged-app #278): false => waveforms/analysis/stems broken. */
+  ffmpeg_available: boolean;
+}
+
+export interface AppConfigUpdateWire {
+  /** Path fields: '' clears the key (Rekordbox returns to auto-detect). */
+  tracks_directory?: string;
+  rekordbox_path?: string;
+  engine_dj_path?: string;
+  export_enabled?: boolean;
+}
 
 // ── Take wire types (transition-takes 02) ───────────────────────────────
 

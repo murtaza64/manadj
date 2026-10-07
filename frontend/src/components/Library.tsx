@@ -32,6 +32,7 @@ import {
   type SidebarEntry,
 } from './browseNav';
 import { browseSession, restoredView, updateBrowseSession } from './browseStore';
+import { setLibrarySubview } from '../tour/tourState';
 import { isSidebarSectionCollapsed, subscribeSidebarSections } from './sidebarSectionsStore';
 import { useSetBeatgridDownbeat, useNudgeBeatgrid } from '../hooks/useBeatgridData';
 import { useHotCueActions } from '../hooks/useHotCueActions';
@@ -69,6 +70,7 @@ import { SessionTimelinePane } from '../sessions/SessionTimelinePane';
 import { SessionsListView } from '../sessions/SessionsListView';
 import { NAVIGATE_SET_EVENT } from '../sets/navigateToSet';
 import { PlaylistFullExportModal } from './PlaylistFullExportModal';
+import { useExportEnabled } from '../settings/useAppConfig';
 import { PlaylistStatusBadge } from './PlaylistStatusBadge';
 import { playlistStatus } from './playlistStatus';
 import { trackMatchesFilters } from './playlistFilter';
@@ -165,6 +167,9 @@ export default function Library({
     () => browseSession().playlistId
   );
   const [playlistExportOpen, setPlaylistExportOpen] = useState(false);
+  // Export gate (ADR 0043): the playlist Sync/Export modal only writes
+  // external libraries, so it hides until the Settings toggle is on.
+  const exportEnabled = useExportEnabled();
   const [selectedSetId, setSelectedSetId] = useState<number | null>(() => getSelectedSetId());
   const [selectedSessionUuid, setSelectedSessionUuid] = useState<string | null>(() =>
     getSelectedSessionUuid()
@@ -183,6 +188,14 @@ export default function Library({
     window.addEventListener(NAVIGATE_SET_EVENT, onNavigateSet);
     return () => window.removeEventListener(NAVIGATE_SET_EVENT, onNavigateSet);
   }, []);
+  // Tour activity (feature-tour #282): Sets and Sessions are tour
+  // sections of their own, living inside the Library — announce which
+  // inner pane is up so their coach marks fire on first entry.
+  useEffect(() => {
+    setLibrarySubview(
+      selectedView === 'set' ? 'sets' : selectedView === 'session' ? 'sessions' : null
+    );
+  }, [selectedView]);
   // Session deep-link (sessions 04): same two-part shape as Sets — the
   // store carries the selection; this nudges a mounted instance.
   useEffect(() => {
@@ -868,6 +881,23 @@ export default function Library({
     ? playlistData?.tracks?.length || 0
     : allTracksData?.library_total || 0;
 
+  // Empty-table guidance (feature-tour #283): what to do next depends on
+  // WHY the table is empty — a fresh Library reads differently from an
+  // empty playlist, an all-clear worklist, or filters with no hits.
+  const libraryEmpty = (allTracksData?.library_total ?? 0) === 0;
+  const emptyTableMessage =
+    selectedView === 'playlist'
+      ? 'Empty playlist — drag tracks here from All tracks.'
+      : libraryEmpty
+        ? 'No tracks yet — import your library (rekordbox or a folder of audio files) from the SYNC view, and your music lands here.'
+        : selectedView === 'unprocessed'
+          ? 'Nothing unprocessed — every track has been analyzed.'
+          : selectedView === 'needs-attention'
+            ? 'Nothing needs attention — no tracks are waiting on a beatgrid.'
+            : selectedView === 'archived'
+              ? 'No archived tracks — Archive in a row\u2019s context menu tucks tracks away here.'
+              : 'No tracks match these filters — clear or loosen them above.';
+
   // Embedded, double-click routes through the view's load policy (and its
   // load lock) instead of loading directly, targeting the embedding view's
   // double-click Deck (issue 22: the Performance focused left Deck; Deck A
@@ -1106,7 +1136,7 @@ export default function Library({
       {/* Waveform at top (full width), controls and editor below.
           Hidden in browseOnly mode (deck surface rendered by the host). */}
       {!browseOnly && (
-        <div style={{
+        <div data-tour="library.player" style={{
           display: 'flex',
           flexDirection: 'column',
           borderBottom: '1px solid var(--surface0)'
@@ -1156,7 +1186,7 @@ export default function Library({
         />
 
         {/* Main library area (filter + table; split panes when editing) */}
-        <div data-browse-area="tracks" data-browse-focused={!sidebarFocused} onMouseDownCapture={() => { if (!splitView) setFocusedArea('main'); }} style={{
+        <div data-browse-area="tracks" data-tour="library.table" data-browse-focused={!sidebarFocused} onMouseDownCapture={() => { if (!splitView) setFocusedArea('main'); }} style={{
           flex: 1,
           display: 'flex',
           flexDirection: 'column',
@@ -1213,15 +1243,17 @@ export default function Library({
                 {unifiedPlaylist && (
                   <PlaylistStatusBadge status={playlistStatus(unifiedPlaylist)} />
                 )}
-                <button
-                  className="playlist-export-submit"
-                  onClick={() => setPlaylistExportOpen(true)}
-                  disabled={!playlistData?.name}
-                  aria-label="Open playlist sync and export"
-                  style={{ padding: '2px 10px' }}
-                >
-                  Sync / Export
-                </button>
+                {exportEnabled && (
+                  <button
+                    className="playlist-export-submit"
+                    onClick={() => setPlaylistExportOpen(true)}
+                    disabled={!playlistData?.name}
+                    aria-label="Open playlist sync and export"
+                    style={{ padding: '2px 10px' }}
+                  >
+                    Sync / Export
+                  </button>
+                )}
                 {!browseOnly && (
                   <button
                     onClick={() => setIsSplitViewOpen((v) => !v)}
@@ -1456,6 +1488,7 @@ export default function Library({
                   sortColumn={selectedView === 'playlist' ? playlistSort.column : filters.sortColumn}
                   sortDirection={selectedView === 'playlist' ? playlistSort.direction : filters.sortDirection}
                   onSort={handleSort}
+                  emptyMessage={emptyTableMessage}
                 />
               </div>
             </>

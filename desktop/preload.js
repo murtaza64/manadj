@@ -7,6 +7,12 @@ contextBridge.exposeInMainWorld("manadjVisualizer", {
   toggleFullscreen: () => ipcRenderer.invoke("visualizer:toggle-fullscreen"),
 });
 
+contextBridge.exposeInMainWorld("manadjSettings", {
+  // Settings → Library folder pickers (packaged-app #277). Resolves to the
+  // chosen absolute path, or null when cancelled.
+  pickFolder: (options) => ipcRenderer.invoke("settings:pick-folder", options),
+});
+
 contextBridge.exposeInMainWorld("manadjRecording", {
   start: (meta) => ipcRenderer.invoke("recording:start", meta),
   // Electron transfer lists accept MessagePorts, not ArrayBuffers. PCM

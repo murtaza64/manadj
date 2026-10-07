@@ -377,7 +377,7 @@ export function MixPicker(props: MixPickerProps) {
     );
 
   return (
-    <div className="mp-panel" onKeyDown={onKeyDown}>
+    <div className="mp-panel" data-tour="edit.picker" onKeyDown={onKeyDown}>
       <div className="mp-chips">
         {chip(chipA, () => setChipA(null), chipB !== null ? 'outgoing…' : 'track…')}
         <button
