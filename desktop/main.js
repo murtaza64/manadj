@@ -23,7 +23,11 @@ process.env.ELECTRON_DISABLE_SECURITY_WARNINGS = "true";
 
 const DEFAULT_URL = "http://localhost:5173";
 const RETRY_INTERVAL_MS = 2000;
-const STATE_FILE = path.join(__dirname, "window-state.json");
+// Packaged: never write inside the (signed, possibly read-only) bundle —
+// window state lives in userData. Dev keeps the gitignored repo file.
+const STATE_FILE = app.isPackaged
+  ? path.join(app.getPath("userData"), "window-state.json")
+  : path.join(__dirname, "window-state.json");
 const APP_NAME = "manaDJ";
 
 // Rename what CAN be renamed at runtime (desktop-shell 06). The macOS

@@ -102,6 +102,13 @@ function backendEnv(cfg, { token, baseEnv = process.env }) {
   // backend/serve.py exits when the shell's end of stdin closes.
   env.MANADJ_SHELL_LIFELINE = "1";
   if (cfg.dataRoot) env.MANADJ_DATA_DIR = cfg.dataRoot;
+  // Packaged: bytecode goes to the data root, never into the signed bundle
+  // (writing __pycache__ there breaks the code seal and fails on read-only
+  // installs).
+  if (cfg.packaged && cfg.dataRoot) {
+    const sep = cfg.platform === "win32" ? "\\" : "/";
+    env.PYTHONPYCACHEPREFIX = cfg.dataRoot + sep + "pycache";
+  }
   // backend/data_root.py (#277): packaged posture (data root, Export off
   // by default, dev surfaces hidden) keys off MANADJ_PACKAGED.
   if (cfg.packaged) env.MANADJ_PACKAGED = "1";

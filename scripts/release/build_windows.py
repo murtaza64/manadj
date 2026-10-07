@@ -18,8 +18,7 @@ resolves the same contract:
     resources\\python\\            python-build-standalone 3.13 x86_64-pc-windows-msvc
                                  with the full dependency set (python.exe, Lib\\)
     resources\\ffmpeg\\            ffmpeg.exe + ffprobe.exe (BtbN LGPL win64 static)
-    resources\\slskd\\             RESERVED (#291): slskd win-x64, fetched when
-                                 scripts/slskd/fetch_slskd.py exists
+    resources\\slskd\\             slskd 0.26.0 win-x64, unmodified (AGPL; #291)
 
 Then: smoke tests against the assembled app (bundled python imports, backend
 boot + graceful shutdown hook, the real manaDJ.exe launching and quitting
@@ -165,8 +164,7 @@ def build_ico() -> Path:
 
 
 def fetch_slskd(dest: Path) -> None:
-    """Bundled slskd slot (#291). Contract: fetch_slskd.py --dest <dir>; the
-    win-x64 selector is passed as --rid (to be confirmed by the #291 lane)."""
+    """Bundled slskd (#291): fetch_slskd.py --dest <dir> --rid win-x64."""
     script = ROOT / "scripts" / "slskd" / "fetch_slskd.py"
     if not script.exists():
         print("  slskd: not included (#291 not in this tree)")
@@ -270,8 +268,10 @@ def smoke_backend(app: Path) -> None:
     step("smoke: bundled python + backend boot + shutdown hook")
     res = app / "resources"
     py = res / "python" / "python.exe"
-    run([py, "-c", "import uvicorn, fastapi, sqlalchemy, alembic, madmom, demucs, torch; print('imports ok')"])
+    run([py, "-B", "-c", "import uvicorn, fastapi, sqlalchemy, alembic, madmom, demucs, torch; print('imports ok')"])
     run([res / "ffmpeg" / "ffmpeg.exe", "-version"], stdout=subprocess.DEVNULL)
+    if not (res / "slskd" / "slskd.exe").is_file():
+        sys.exit("bundled slskd.exe missing (#291)")
 
     port, token = _free_port(), secrets.token_hex(16)
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as data:
@@ -281,6 +281,7 @@ def smoke_backend(app: Path) -> None:
             "MANADJ_PACKAGED": "1",
             "MANADJ_SHELL_TOKEN": token,
             "PYTHONUTF8": "1",
+            "PYTHONPYCACHEPREFIX": str(Path(data) / "pycache"),
             "PATH": str(res / "ffmpeg") + os.pathsep + os.environ.get("PATH", ""),
         }
         proc = subprocess.Popen(

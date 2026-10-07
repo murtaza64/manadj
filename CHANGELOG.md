@@ -17,6 +17,8 @@ versions follow [Semantic Versioning](https://semver.org/). Install: [docs/insta
 
 - Added a hands-on Transition Tutorial covering Track selection, Slide, automation, audition and confirmed autosave (#323).
 - Revised Tour orientation copy, explicit dismissal and popover positioning; Tours and hands-on Tutorials are labeled separately (#332).
+- Windows x64 installer (per-user, no admin; data in `%APPDATA%\manaDJ`). Untested on Windows hardware so far — see Known limitations (#317).
+- Quitting manaDJ always shuts its backend down cleanly, on macOS and Windows, and the backend no longer lingers if the app crashes (#314).
 
 ## [0.1.0] - 2026-10-07
 

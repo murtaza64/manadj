@@ -84,6 +84,7 @@ test("backend env: token, lifeline, packaged, ffmpeg on Windows Path key", () =>
   assert.equal(env.MANADJ_SHELL_LIFELINE, "1");
   assert.equal(env.MANADJ_PACKAGED, "1");
   assert.equal(env.MANADJ_DATA_DIR, "C:\\data");
+  assert.equal(env.PYTHONPYCACHEPREFIX, "C:\\data\\pycache");
   assert.equal(env.Path, "C:\\R\\ffmpeg;C:\\Windows");
   assert.equal(env.PATH, undefined);
 });

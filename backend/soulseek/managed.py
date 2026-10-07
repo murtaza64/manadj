@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import secrets
 import socket
 from dataclasses import dataclass
@@ -54,8 +55,9 @@ def resolve_binary() -> Path | None:
     """The slskd executable per the binary contract, or None when not shipped."""
     env = os.environ.get(SLSKD_BIN_ENV)
     candidates = [Path(env)] if env else []
-    candidates.append(REPO_ROOT.parent / "slskd" / "slskd")
-    candidates.append(REPO_ROOT / "vendor" / "slskd" / "slskd")
+    name = "slskd.exe" if sys.platform == "win32" else "slskd"
+    candidates.append(REPO_ROOT.parent / "slskd" / name)
+    candidates.append(REPO_ROOT / "vendor" / "slskd" / name)
     for candidate in candidates:
         if candidate.is_file() and os.access(candidate, os.X_OK):
             return candidate

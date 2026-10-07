@@ -1,5 +1,9 @@
 # Windows x64 installer build (cross-platform #317, ADR 0043 amendment).
 #
+# UNTESTED ON WINDOWS HARDWARE (#316): CI smoke-tests the bundle on a
+# windows-latest VM (imports, backend boot, launch/quit), but audio, MIDI,
+# stems and the installer UX have not been validated on a real Windows box.
+#
 # Triggered by scripts/release/release.py pushing `release/v<version>` at the
 # release commit (the macOS DMG is built locally; this builds the Windows
 # installer from the exact same commit and attaches it to the GitHub
@@ -46,7 +50,7 @@ jobs:
           if [ -z "$v" ] && [[ "$GITHUB_REF_NAME" == release/v* ]]; then v="${GITHUB_REF_NAME#release/v}"; fi
           if [ -z "$v" ]; then v=$(sed -nE 's/^version *= *"([^"]+)".*/\1/p' pyproject.toml | head -1); fi
           echo "version=$v" >> "$GITHUB_OUTPUT"
-          echo "## manaDJ $v (Windows x64)" >> "$GITHUB_STEP_SUMMARY"
+          echo "## manaDJ $v (Windows x64) — untested on Windows hardware (#316)" >> "$GITHUB_STEP_SUMMARY"
       - name: Inno Setup
         run: |
           if [ ! -f "/c/Program Files (x86)/Inno Setup 6/ISCC.exe" ]; then choco install innosetup -y --no-progress; fi
