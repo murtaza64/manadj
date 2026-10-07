@@ -169,22 +169,6 @@ export const TOUR_SECTIONS: TourSection[] = [
       },
     ],
   },
-  {
-    id: 'settings',
-    label: 'Settings',
-    steps: [
-      {
-        anchor: 'settings.nav',
-        title: 'Sections',
-        body: 'Filters, waveform styling, jog calibration and more. Changes apply live and persist with your library.',
-      },
-      {
-        anchor: 'settings.content',
-        title: 'Tuning',
-        body: 'Each section edits one concern. The Tour section resets this tour if you ever want the walkthrough again.',
-      },
-    ],
-  },
 ];
 
 export function tourSection(id: TourSectionId): TourSection | undefined {

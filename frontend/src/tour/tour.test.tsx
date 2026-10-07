@@ -245,6 +245,12 @@ describe('active section derivation', () => {
     setLibrarySubview(null);
     expect(activeTourSection()).toBe('library');
   });
+
+  it('Settings has no tour (#324)', () => {
+    setTourArea('settings');
+    expect(activeTourSection()).toBeNull();
+    expect(TOUR_SECTIONS.some((s) => (s.id as string) === 'settings')).toBe(false);
+  });
 });
 
 describe('step data', () => {
@@ -259,7 +265,6 @@ describe('step data', () => {
         'sets',
         'sessions',
         'history',
-        'settings',
       ])
     );
     for (const section of TOUR_SECTIONS) {
