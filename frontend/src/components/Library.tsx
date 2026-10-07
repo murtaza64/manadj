@@ -7,12 +7,14 @@ import {
   useCallback,
   useSyncExternalStore,
 } from 'react';
-import type { Ref } from 'react';
+import type { ReactNode, Ref } from 'react';
+import { BrowseActiveContext, useBrowseActive } from '../contexts/browseActive';
+import { useViewActive } from '../contexts/viewActive';
 import { DRAG_POINTER_STALE_MS, dragEdgeScrollDelta } from './dragScroll';
-import { useQueries, useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import TrackList from './TrackList';
-import FilterBar from './FilterBar';
+import FilterBar, { type FilterBarHandle } from './FilterBar';
 import TagEditor, { type TagEditorHandle } from './TagEditor';
 import Player from './Player';
 import PlaylistSidebar, { type ViewType } from './PlaylistSidebar';
@@ -30,34 +32,19 @@ import {
   type SidebarEntry,
 } from './browseNav';
 import { browseSession, restoredView, updateBrowseSession } from './browseStore';
+import { setLibrarySubview } from '../tour/tourState';
 import { isSidebarSectionCollapsed, subscribeSidebarSections } from './sidebarSectionsStore';
 import { useSetBeatgridDownbeat, useNudgeBeatgrid } from '../hooks/useBeatgridData';
 import { useHotCueActions } from '../hooks/useHotCueActions';
 import { registerBrowseSurface } from '../midi/controlRegistry';
-import type { PaginatedTracks, Track } from '../types';
+import type { Track } from '../types';
 import type { ChannelId } from '../playback/mixer';
 import { useFilters } from '../contexts/FilterContext';
-import { useDeck, useDeckReady, useDecks } from '../hooks/useDeck';
+import { useDeck, useDecks, deckReadyNow } from '../hooks/useDeck';
 import { transitionsFrom, useTransitionIndex } from '../editor/transitionIndex';
-import { linkedIdsOf, useLinks } from '../links/linkStore';
-import { knownStrengthOf } from '../links/known';
-import {
-  candidateIdSet,
-  deriveFollowQuery,
-  followedReferences,
-  partitionFollowedTracks,
-} from '../follow/model';
-import type { FollowReference } from '../follow/model';
-import {
-  matchedSignals,
-  orderByRank,
-  passesAffinityFloor,
-  pinKnownStrata,
-  rankAgainst,
-  rankLabel,
-} from '../follow/matchScore';
-import { useFollowFlags } from '../follow/followStore';
-import { useFollowParams } from '../follow/paramsStore';
+import { useLinks } from '../links/linkStore';
+import { useRankedFollow } from '../follow/useRankedFollow';
+import { FollowTemperatureControls } from '../follow/FollowTemperatureControls';
 import { EMPTY_SELECTION, click, menuTargets } from '../selection/selectionModel';
 import { useTrackSelection } from '../selection/useTrackSelection';
 import {
@@ -83,6 +70,7 @@ import { SessionTimelinePane } from '../sessions/SessionTimelinePane';
 import { SessionsListView } from '../sessions/SessionsListView';
 import { NAVIGATE_SET_EVENT } from '../sets/navigateToSet';
 import { PlaylistFullExportModal } from './PlaylistFullExportModal';
+import { useExportEnabled } from '../settings/useAppConfig';
 import { PlaylistStatusBadge } from './PlaylistStatusBadge';
 import { playlistStatus } from './playlistStatus';
 import { trackMatchesFilters } from './playlistFilter';
@@ -96,6 +84,10 @@ import {
   type PlaylistSort,
   type PlaylistSortColumn,
 } from '../utils/trackSort';
+import FileDropOverlay from '../dropImport/FileDropOverlay';
+import {
+  useFileDropImport, useFileDropTarget, useSuppressStrayFileDrops,
+} from '../dropImport/useFileDropImport';
 
 /** Which selection instance a row menu acts on. */
 type MenuPane = 'main' | 'editLibrary';
@@ -111,11 +103,20 @@ const EMPTY_TRACKS: Track[] = [];
  */
 export interface LibraryBrowseHandle {
   /** Move the selection up (-1) / down (+1), scrolling it into view. */
-  navigate: (delta: 1 | -1) => void;
+  navigate: (delta: 1 | -1, extend?: boolean) => void;
   getSelectedTrack: () => Track | null;
+  navigatePage: (direction: 1 | -1, half?: boolean) => void;
+  navigateEnd: (direction: 1 | -1) => void;
+  areaMove: (delta: 1 | -1) => void;
+  activate: () => void;
+  selectAll: () => void;
+  focusSearch: () => void;
+  openFollowParams: () => void;
 }
 
 interface LibraryProps {
+  /** Replace only the lower browse body, retaining its mounted state. */
+  replacement?: ReactNode;
   /** Render only the browse surface (sidebar/filter/table) without the
    * Player/TagEditor block — used when a deck surface is shown elsewhere
    * (performance/transition modes of the shared BrowsePanel). Implies: the
@@ -147,7 +148,12 @@ export default function Library({
   onRowDoubleClick,
   doubleClickDeck = 'A',
   browseRef,
+  replacement,
 }: LibraryProps) {
+  const viewActive = useViewActive();
+  const parentBrowseActive = useBrowseActive();
+  const hasReplacement = replacement != null;
+  const browseActive = parentBrowseActive && !hasReplacement;
   // Set-view state lives in the set store (sets 01) and view/playlist
   // selection seeds from the browse-session store (issue 27). Since gh#165
   // there is ONE Library instance (BrowsePanel) that never remounts on
@@ -161,6 +167,9 @@ export default function Library({
     () => browseSession().playlistId
   );
   const [playlistExportOpen, setPlaylistExportOpen] = useState(false);
+  // Export gate (ADR 0043): the playlist Sync/Export modal only writes
+  // external libraries, so it hides until the Settings toggle is on.
+  const exportEnabled = useExportEnabled();
   const [selectedSetId, setSelectedSetId] = useState<number | null>(() => getSelectedSetId());
   const [selectedSessionUuid, setSelectedSessionUuid] = useState<string | null>(() =>
     getSelectedSessionUuid()
@@ -179,6 +188,14 @@ export default function Library({
     window.addEventListener(NAVIGATE_SET_EVENT, onNavigateSet);
     return () => window.removeEventListener(NAVIGATE_SET_EVENT, onNavigateSet);
   }, []);
+  // Tour activity (feature-tour #282): Sets and Sessions are tour
+  // sections of their own, living inside the Library — announce which
+  // inner pane is up so their coach marks fire on first entry.
+  useEffect(() => {
+    setLibrarySubview(
+      selectedView === 'set' ? 'sets' : selectedView === 'session' ? 'sessions' : null
+    );
+  }, [selectedView]);
   // Session deep-link (sessions 04): same two-part shape as Sets — the
   // store carries the selection; this nudges a mounted instance.
   useEffect(() => {
@@ -199,7 +216,6 @@ export default function Library({
   // selection. Narrow snapshot selector so transport events don't re-render
   // the (large) library tree.
   const { engine, loadedTrack, loadTrack } = useDeck();
-  const deckReady = useDeckReady();
   const showToast = useToast();
 
   // Transition-library discovery (transition-library 02; A–D per
@@ -222,89 +238,10 @@ export default function Library({
     D: decks.D.loadedTrack?.id ?? null,
   };
 
-  // ── Follow mode (follow-mode 01) ───────────────────────────────────────
-  // Follow composes BESIDE the manual filters: one candidates query per
-  // followed reference (full conjunction per reference), unioned by id,
-  // intersected with the manually-filtered list below. Never writes
-  // FilterState — toggling Follow off restores the manual view exactly.
-  // A Load onto a followed Deck changes the reference → new query keys →
-  // the list updates hands-off. (Proven tier folds in via issue 03;
-  // playback rules 02; tiered ordering 04; own parameters modal 05.)
-  const followFlags = useFollowFlags();
-  const followParams = useFollowParams();
-  const followRefs = followedReferences(
-    followFlags,
-    {
-      A: decks.A.loadedTrack,
-      B: decks.B.loadedTrack,
-      C: decks.C.loadedTrack,
-      D: decks.D.loadedTrack,
-    },
-    // Facts read through the track cache (ADR 0027 §7): an edited BPM
-    // re-centers the candidate query without a re-Load.
-    (id) => queryClient.getQueryData<Track>(['track', id])
-  );
-  const followQueries = useQueries({
-    queries: followRefs.map(({ deck, reference }) => {
-      const q = deriveFollowQuery(reference, followParams);
-      return {
-        queryKey: ['tracks', 'follow', deck, reference.id, q, selectedView === 'archived'],
-        // Uncapped (match-score PRD): the loose BPM-only gate admits many
-        // more candidates; a parity truncation would silently drop them
-        // before scoring. 10000 is the API's per_page ceiling — plenty at
-        // this library size (backend scoring is the named future answer).
-        queryFn: (): Promise<PaginatedTracks> =>
-          api.tracks.list(1, 10000, {
-            bpmCenter: q.bpmCenter,
-            bpmThresholdPercent: q.bpmThresholdPercent,
-            archived: selectedView === 'archived' ? true : undefined,
-          }),
-        placeholderData: (previousData: unknown) => previousData,
-      };
-    }),
-  });
-  /** Candidate ids while following: both evidence tiers (follow-mode 03 /
-   * linked-pairs 04) — heuristic query results unioned with the known
-   * tier (saved Transitions from each followed reference, plus its Linked
-   * Tracks), or the known tier alone under knownOnly. Heuristic sets come
-   * from the reference queries that have data: a still-loading second
-   * reference doesn't un-narrow the already-followed list. Null (= no
-   * filtering) only when nothing is followed, or when heuristics are
-   * wanted but none have resolved yet — the manual list shows unfiltered
-   * rather than flashing empty. */
-  const followKnownSets = followRefs.map(({ reference }) => {
-    const ids = new Set(transitionsFrom(transitionIndex, reference.id).keys());
-    for (const id of linkedIdsOf(links, reference.id)) ids.add(id);
-    return ids;
-  });
-  // The Affinity floor is the cut (match-score PRD): each reference's
-  // gated candidates are narrowed to the admitted ones before the union —
-  // BPM+energy comfort alone never admits; Known ORs in below regardless.
-  const resolvedFollowSets = followRefs.flatMap(({ reference }, i) => {
-    const data = followQueries[i].data;
-    if (data === undefined) return [];
-    return [(data.items ?? []).filter((t: Track) => passesAffinityFloor(reference, t))];
-  });
-  const followCandidateIds = (() => {
-    if (followRefs.length === 0) return null;
-    if (!followParams.knownOnly && resolvedFollowSets.length === 0) return null;
-    return candidateIdSet(
-      resolvedFollowSets,
-      followKnownSets,
-      followParams.knownOnly,
-      // The loaded/followed tracks never list themselves.
-      followRefs.map(({ reference }) => reference.id)
-    );
-  })();
-  /** References for tier ordering (follow-mode 04), known lookups
-   * included (favorited Transition > Linked > unfavorited Transition). */
-  const followReferences: FollowReference[] = followRefs.map(({ reference }) => ({
-    track: reference,
-    knownStrength: (id: number) =>
-      knownStrengthOf(transitionsFrom(transitionIndex, reference.id), links, reference.id, id),
-  }));
-  const followedTrackIds = followRefs.map(({ reference }) => reference.id);
-  const followedTrackIdSet = new Set(followedTrackIds);
+  const follow = useRankedFollow({
+    A: decks.A.loadedTrack, B: decks.B.loadedTrack,
+    C: decks.C.loadedTrack, D: decks.D.loadedTrack,
+  }, transitionIndex, links, selectedView === 'archived');
 
   // Beatgrid mutation hooks
   const setDownbeat = useSetBeatgridDownbeat();
@@ -582,12 +519,12 @@ export default function Library({
 
   // Beatgrid edits are playhead-dependent, so they act on the loaded Track
   const handleNudgeBeatgrid = (offsetMs: number) => {
-    if (!loadedTrack || !deckReady) return;
+    if (!loadedTrack || !deckReadyNow(engine, loadedTrack.id)) return;
     nudgeGrid.mutate({ trackId: loadedTrack.id, offsetMs });
   };
 
   const handleSetDownbeat = () => {
-    if (!loadedTrack || !deckReady) return;
+    if (!loadedTrack || !deckReadyNow(engine, loadedTrack.id)) return;
     setDownbeat.mutate({
       trackId: loadedTrack.id,
       downbeatTime: engine.getPlayhead(),
@@ -597,80 +534,39 @@ export default function Library({
   // ── Track lists per pane ───────────────────────────────────────────────
   // Library list ('all'/'unprocessed' views and the edit-mode library pane),
   // with the Follow candidate set composed client-side (follow-mode 01/03).
-  let libraryTracks = allTracksData?.items || [];
-  if (followRefs.length > 0) {
-    const { followed, rest } = partitionFollowedTracks(libraryTracks, followedTrackIds);
-    // Filter to candidates, then rank-order them (match-score PRD):
-    // score is the default sort of the heuristic stratum; a user's column
-    // sort takes over within the strata (Known stays pinned regardless) —
-    // both sorts are stable, so the server order breaks ties.
-    const candidates = followCandidateIds
-      ? rest.filter((t: Track) => followCandidateIds.has(t.id))
-      : rest;
-    const ordered = followCandidateIds
-      ? followScoreSort
-        ? orderByRank(candidates, followReferences, followParams.bpmThresholdPercent)
-        : pinKnownStrata(candidates, followReferences, followParams.bpmThresholdPercent)
-      : candidates;
-    libraryTracks = [...followed, ...ordered];
-  }
+  const libraryTracks = follow.project(allTracksData?.items ?? EMPTY_TRACKS, followScoreSort);
 
   // Playlist list, in the view-only playlist sort. The Follow filter
   // applies only outside edit mode — in the split, the FilterBar belongs
   // to the library pane — and only while the per-playlist filter toggle
   // shows the FilterBar (#156): Follow's controls live there, so a hidden
   // bar must not leave the list silently match-reordered.
-  let playlistTracks = sortPlaylistTracks(playlistData?.tracks || [], playlistSort);
+  const filteredPlaylistTracks = useMemo(() => {
+    const sorted = sortPlaylistTracks(playlistData?.tracks ?? EMPTY_TRACKS, playlistSort);
+    return playlistFilterOn ? sorted.filter(t => trackMatchesFilters(t, filters)) : sorted;
+  }, [playlistData?.tracks, playlistSort, playlistFilterOn, filters]);
   // The per-playlist toggle applies the global params (playlist-editing
   // 09); thinning is tracked so positional reorders can refuse — a drop
   // index against a thinned list doesn't address the full Play order.
-  if (playlistFilterOn) {
-    playlistTracks = playlistTracks.filter((t: Track) => trackMatchesFilters(t, filters));
-  }
   const playlistThinned =
-    playlistFilterOn && playlistTracks.length !== (playlistData?.tracks?.length ?? 0);
-  if (followRefs.length > 0 && !splitView && playlistFilterOn) {
-    const { followed, rest } = partitionFollowedTracks(playlistTracks, followedTrackIds);
-    const candidates = followCandidateIds
-      ? rest.filter((t: Track) => followCandidateIds.has(t.id))
-      : rest;
-    const ordered = followCandidateIds
-      ? followScoreSort
-        ? orderByRank(candidates, followReferences, followParams.bpmThresholdPercent)
-        : pinKnownStrata(candidates, followReferences, followParams.bpmThresholdPercent)
-      : candidates;
-    playlistTracks = [...followed, ...ordered];
-  }
+    playlistFilterOn && filteredPlaylistTracks.length !== (playlistData?.tracks?.length ?? 0);
+  const playlistTracks = !splitView && playlistFilterOn
+    ? follow.project(filteredPlaylistTracks, followScoreSort) : filteredPlaylistTracks;
 
   /** Section headers (follow-mode 08, match-score PRD): the Known strata
    * keep their headers and marks; the heuristic stratum is one
-   * 'Compatible' section, score-ordered within. Only while Follow
+   * 'Compatible' section, temperature-ordered when enabled. Only while Follow
    * filters — manual browsing stays a flat table. */
-  const followGroupLabel = followRefs.length > 0
-    ? (t: Track) =>
-        followedTrackIdSet.has(t.id)
-          ? 'Following'
-          : followCandidateIds
-            ? rankLabel(rankAgainst(t, followReferences, followParams.bpmThresholdPercent))
-            : 'Library'
-    : undefined;
+  const followGroupLabel = follow.groupLabelFor;
+  const followGroupControls = (label: string) => label === 'Compatible' ? (
+    <FollowTemperatureControls active={followScoreSort} />
+  ) : null;
   /** Why-did-this-match dimming: rows grey the key/tags that earned
    * nothing toward the score. */
-  const followMatchSignals = followCandidateIds
-    ? (t: Track) =>
-        followedTrackIdSet.has(t.id)
-          ? { key: true, tagIds: new Set(t.tags.map((tag) => tag.id)) }
-          : matchedSignals(t, followReferences)
-    : undefined;
+  const followMatchSignals = follow.matchSignalsFor;
   /** Match-score column (match-score PRD): visible while Follow filters.
    * Known rows show their evidence marks, not a score (null = blank). */
-  const followScoreFor = followCandidateIds
-    ? (t: Track) => {
-        if (followedTrackIdSet.has(t.id)) return null;
-        const rank = rankAgainst(t, followReferences, followParams.bpmThresholdPercent);
-        return rank.known !== null ? null : rank.score;
-      }
-    : undefined;
+  const followScoreFor = follow.scoreFor;
 
   // Follow decorations ride the same gate as the ordering (#156): the main
   // table in playlist view drops them while the FilterBar (and with it the
@@ -885,6 +781,21 @@ export default function Library({
     }
   };
 
+  // ── Drop import (#297): OS files dropped onto the track table import in
+  // place; in playlist view they are also appended to that playlist.
+  const importDroppedFiles = useFileDropImport();
+  const tableDropPlaylistId = selectedView === 'playlist' ? selectedPlaylistId : null;
+  const handleTableFiles = useCallback(
+    (dt: DataTransfer) => { void importDroppedFiles(dt, tableDropPlaylistId); },
+    [importDroppedFiles, tableDropPlaylistId],
+  );
+  const tableFileDrop = useFileDropTarget(handleTableFiles);
+  useSuppressStrayFileDrops();
+  const handleSidebarFileDrop = useCallback(
+    (playlistId: number, dt: DataTransfer) => { void importDroppedFiles(dt, playlistId); },
+    [importDroppedFiles],
+  );
+
   // ── Track-row context menu (playlist-editing 03) ───────────────────────
   const { menu: rowMenu, openMenu: openRowMenu, closeMenu: closeRowMenu } =
     useContextMenuState<{ track: Track; pane: MenuPane }>();
@@ -970,6 +881,23 @@ export default function Library({
     ? playlistData?.tracks?.length || 0
     : allTracksData?.library_total || 0;
 
+  // Empty-table guidance (feature-tour #283): what to do next depends on
+  // WHY the table is empty — a fresh Library reads differently from an
+  // empty playlist, an all-clear worklist, or filters with no hits.
+  const libraryEmpty = (allTracksData?.library_total ?? 0) === 0;
+  const emptyTableMessage =
+    selectedView === 'playlist'
+      ? 'Empty playlist — drag tracks here from All tracks.'
+      : libraryEmpty
+        ? 'No tracks yet — import your library (rekordbox or a folder of audio files) from the SYNC view, and your music lands here.'
+        : selectedView === 'unprocessed'
+          ? 'Nothing unprocessed — every track has been analyzed.'
+          : selectedView === 'needs-attention'
+            ? 'Nothing needs attention — no tracks are waiting on a beatgrid.'
+            : selectedView === 'archived'
+              ? 'No archived tracks — Archive in a row\u2019s context menu tucks tracks away here.'
+              : 'No tracks match these filters — clear or loosen them above.';
+
   // Embedded, double-click routes through the view's load policy (and its
   // load lock) instead of loading directly, targeting the embedding view's
   // double-click Deck (issue 22: the Performance focused left Deck; Deck A
@@ -980,16 +908,6 @@ export default function Library({
       onRowDoubleClick ??
       (browseOnly && onLoadToDeck ? (t: Track) => onLoadToDeck(doubleClickDeck, t) : loadTrack),
     [browseOnly, onLoadToDeck, doubleClickDeck, loadTrack, onRowDoubleClick]
-  );
-
-  // Selection access for an embedding view's own keyboard hub (issue 04).
-  useImperativeHandle(
-    browseRef,
-    () => ({
-      navigate: mainSel.handleNavigate,
-      getSelectedTrack: () => mainSel.selectedTrack,
-    }),
-    [mainSel]
   );
 
   // The same handle, registered module-level as the active browse surface
@@ -1016,6 +934,7 @@ export default function Library({
   // focused area owns navigation. Sidebar focused, motion walks the
   // cursor; otherwise it drives the focused pane's selection.
   const openSidebarEntry = (entry: SidebarEntry) => {
+    setFocusedArea('main');
     if (entry.kind === 'view') {
       setSelectedView(entry.view);
       selectSet(null);
@@ -1077,10 +996,42 @@ export default function Library({
     const entry = sidebarNavEntries.find((e) => entryKey(e) === sidebarCursor);
     if (!entry) return;
     openSidebarEntry(entry);
-    // Opening pushes focus into the (single) track pane, rekordbox-style.
-    setFocusedArea('main');
   };
   const splitViewAvailable = !browseOnly && selectedView === 'playlist' && selectedPlaylistId !== null;
+
+  const filterBarRef = useRef<FilterBarHandle>(null);
+  const tableVisible = !viewingSet && !viewingSessionPane;
+  useImperativeHandle(browseRef, () => ({
+    navigate: (delta, extend) => {
+      if (!viewActive || !browseActive) return;
+      if (sidebarFocused) moveSidebarCursor(delta);
+      else if (tableVisible) activeSel.handleNavigate(delta, extend);
+    },
+    getSelectedTrack: () => viewActive && browseActive && tableVisible && !sidebarFocused ? activeSel.selectedTrack : null,
+    navigatePage: (direction, half) => {
+      if (!viewActive || !browseActive) return;
+      if (sidebarFocused) moveSidebarCursor(direction * (half ? Math.ceil(BROWSE_PAGE_ROWS / 2) : BROWSE_PAGE_ROWS));
+      else if (tableVisible) {
+        if (half) activeSel.handleNavigateHalfPage(direction);
+        else activeSel.handleNavigatePage(direction);
+      }
+    },
+    navigateEnd: (direction) => { if (viewActive && browseActive && (sidebarFocused || tableVisible)) handleNavigateEndArea(direction); },
+    areaMove: (direction) => { if (viewActive && browseActive) handleAreaMove(direction); },
+    activate: () => { if (viewActive && browseActive && sidebarFocused) activateSidebarCursor(); },
+    selectAll: () => { if (viewActive && browseActive && tableVisible && !sidebarFocused) activeSel.handleSelectAll(); },
+    focusSearch: () => {
+      if (!viewActive || !browseActive) return;
+      if (!filterBarRef.current) { showToast('Search requires a filtered track list'); return; }
+      setFocusedArea(splitView ? 'library' : 'main');
+      filterBarRef.current.focusSearch();
+    },
+    openFollowParams: () => {
+      if (!viewActive || !browseActive) return;
+      if (!filterBarRef.current) { showToast('Follow parameters require a filtered track list'); return; }
+      filterBarRef.current.openFollowParams();
+    },
+  }));
 
   // ── Session write-back (issue 27) ───────────────────────────────────────
   // The next Library mount (any mode's instance) seeds from the store.
@@ -1134,6 +1085,7 @@ export default function Library({
   });
 
   useEffect(() => {
+    if (!viewActive || !browseActive) return;
     if (viewingSet) return; // the Set pane owns the browse surface
     if (viewingSessionPane) return; // sessions own the main area; no hidden list grabs
     return registerBrowseSurface({
@@ -1147,10 +1099,10 @@ export default function Library({
       focusSidebar: () => browseNavRef.current.focusSidebar(),
       toggleSplitView: () => browseNavRef.current.toggleSplitView(),
     });
-  }, [viewingSet, viewingSessionPane]);
+  }, [viewingSet, viewingSessionPane, viewActive, browseActive]);
 
   return (
-    <>
+    <BrowseActiveContext.Provider value={browseActive}>
     {/* The library keyboard hub — only when this view owns the keyboard.
         Embedded (browseOnly), the Performance hub drives everything. */}
     {!browseOnly && (
@@ -1176,6 +1128,7 @@ export default function Library({
     )}
     <div style={{
       height: '100%',
+      minHeight: 0,
       display: 'flex',
       flexDirection: 'column',
       background: 'var(--crust)'
@@ -1183,7 +1136,7 @@ export default function Library({
       {/* Waveform at top (full width), controls and editor below.
           Hidden in browseOnly mode (deck surface rendered by the host). */}
       {!browseOnly && (
-        <div style={{
+        <div data-tour="library.player" style={{
           display: 'flex',
           flexDirection: 'column',
           borderBottom: '1px solid var(--surface0)'
@@ -1207,9 +1160,10 @@ export default function Library({
       )}
 
       {/* Library section with sidebar */}
-      <div style={{
+      <div className="Library" style={{
         flex: 1,
-        display: 'flex',
+        minHeight: 0,
+        display: hasReplacement ? 'none' : 'flex',
         overflow: 'hidden'
       }}>
         {/* Sidebar */}
@@ -1224,6 +1178,7 @@ export default function Library({
           }}
           onSelectPlaylist={(id) => openSidebarEntry({ kind: 'playlist', id })}
           onTrackDrop={handleTrackDrop}
+          onFileDrop={handleSidebarFileDrop}
           selectedSetId={selectedSetId}
           onSelectSet={(id) => openSidebarEntry({ kind: 'set', id })}
           focused={sidebarFocused}
@@ -1231,7 +1186,7 @@ export default function Library({
         />
 
         {/* Main library area (filter + table; split panes when editing) */}
-        <div style={{
+        <div data-browse-area="tracks" data-tour="library.table" data-browse-focused={!sidebarFocused} onMouseDownCapture={() => { if (!splitView) setFocusedArea('main'); }} style={{
           flex: 1,
           display: 'flex',
           flexDirection: 'column',
@@ -1288,15 +1243,17 @@ export default function Library({
                 {unifiedPlaylist && (
                   <PlaylistStatusBadge status={playlistStatus(unifiedPlaylist)} />
                 )}
-                <button
-                  className="playlist-export-submit"
-                  onClick={() => setPlaylistExportOpen(true)}
-                  disabled={!playlistData?.name}
-                  aria-label="Open playlist sync and export"
-                  style={{ padding: '2px 10px' }}
-                >
-                  Sync / Export
-                </button>
+                {exportEnabled && (
+                  <button
+                    className="playlist-export-submit"
+                    onClick={() => setPlaylistExportOpen(true)}
+                    disabled={!playlistData?.name}
+                    aria-label="Open playlist sync and export"
+                    style={{ padding: '2px 10px' }}
+                  >
+                    Sync / Export
+                  </button>
+                )}
                 {!browseOnly && (
                   <button
                     onClick={() => setIsSplitViewOpen((v) => !v)}
@@ -1338,7 +1295,7 @@ export default function Library({
             )
           ) : selectedView === 'set' && selectedSetId !== null ? (
             /* Set detail view (sets 01): replaces the track table. */
-            <SetDetailPane setId={selectedSetId} onLoadToDeck={loadWithViewPolicy} />
+            <SetDetailPane key={selectedSetId} setId={selectedSetId} onLoadToDeck={loadWithViewPolicy} />
           ) : splitView ? (
             <>
               {/* Playlist pane (Play order) */}
@@ -1395,6 +1352,7 @@ export default function Library({
 
               {/* Library pane (full FilterBar + table) */}
               <FilterBar
+                ref={filterBarRef}
                 totalTracks={allTracksData?.library_total || 0}
                 filteredCount={libraryTracks.length}
                 loadedByDeck={{
@@ -1429,6 +1387,7 @@ export default function Library({
                   links={links}
                   deckIds={deckIds}
                   groupLabelFor={followGroupLabel}
+                  groupControlsFor={followGroupControls}
                   scoreFor={followScoreFor}
                   scoreSorted={followScoreSort}
                   onScoreSort={() => setFollowScoreSort(true)}
@@ -1446,6 +1405,7 @@ export default function Library({
                   is off there. Other views always filter. */}
               {(selectedView !== 'playlist' || playlistFilterOn) && (
                 <FilterBar
+                  ref={filterBarRef}
                   totalTracks={totalTracks}
                   filteredCount={currentTracks.length}
                   loadedByDeck={{
@@ -1467,15 +1427,28 @@ export default function Library({
                   playlistPaneRef.current = selectedView === 'playlist' ? el : null;
                 }}
                 onScroll={handleBrowseScroll}
-                onDragOver={selectedView === 'playlist' ? handlePlaylistPaneDragOver : undefined}
-                onDragLeave={selectedView === 'playlist' ? handlePlaylistPaneDragLeave : undefined}
-                onDrop={selectedView === 'playlist' ? handlePlaylistPaneDrop : undefined}
+                onDragOver={(e) => {
+                  if (tableFileDrop.onDragOver(e)) return;
+                  if (selectedView === 'playlist') handlePlaylistPaneDragOver(e);
+                }}
+                onDragLeave={(e) => {
+                  tableFileDrop.onDragLeave(e);
+                  if (selectedView === 'playlist') handlePlaylistPaneDragLeave(e);
+                }}
+                onDrop={(e) => {
+                  if (tableFileDrop.onDrop(e)) return;
+                  if (selectedView === 'playlist') handlePlaylistPaneDrop(e);
+                }}
                 style={{
                   position: 'relative',
                   flex: 1,
                   overflow: 'auto'
                 }}
               >
+                <FileDropOverlay
+                  rect={tableFileDrop.rect}
+                  label={tableDropPlaylistId !== null ? 'Drop to import and add to playlist' : 'Drop to import'}
+                />
                 {selectedView === 'playlist' && dropIndicator && (
                   <div
                     style={{
@@ -1507,6 +1480,7 @@ export default function Library({
                   links={links}
                   deckIds={deckIds}
                   groupLabelFor={followInMain ? followGroupLabel : undefined}
+                  groupControlsFor={followInMain ? followGroupControls : undefined}
                   scoreFor={followInMain ? followScoreFor : undefined}
                   scoreSorted={followScoreSort}
                   onScoreSort={() => setFollowScoreSort(true)}
@@ -1514,12 +1488,19 @@ export default function Library({
                   sortColumn={selectedView === 'playlist' ? playlistSort.column : filters.sortColumn}
                   sortDirection={selectedView === 'playlist' ? playlistSort.direction : filters.sortDirection}
                   onSort={handleSort}
+                  emptyMessage={emptyTableMessage}
                 />
               </div>
             </>
           )}
         </div>
       </div>
+
+      {hasReplacement && (
+        <div className="Library-replacement" style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
+          {replacement}
+        </div>
+      )}
 
       {rowMenu && (
         <ContextMenu x={rowMenu.x} y={rowMenu.y} items={rowMenuItems} onClose={closeRowMenu} />
@@ -1531,7 +1512,7 @@ export default function Library({
         />
       )}
     </div>
-    </>
+    </BrowseActiveContext.Provider>
   );
 }
 

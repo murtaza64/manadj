@@ -1,4 +1,5 @@
 import type { ChannelId, StemName } from '../playback/mixer';
+import type { BeatFxEffectId, BeatFxTarget } from '../playback/beatFx';
 import type { JogProfile } from './jogCalibration';
 
 /**
@@ -20,8 +21,15 @@ import type { JogProfile } from './jogCalibration';
 
 export type EqBand = 'low' | 'mid' | 'high';
 
+/** Per-Deck absolute controls a hardware layer switch can move between
+ * Decks (A⟷C, B⟷D). */
+export type LayeredControl = 'pitch' | 'trim' | 'eq' | 'filter' | 'channel-fader';
+
 export type ButtonTarget =
   | { control: 'transport'; deck: ChannelId }
+  | { control: 'jog-touch-edge'; deck: ChannelId; shifted: boolean }
+  | { control: 'slip-mode'; deck: ChannelId }
+  | { control: 'vinyl-mode'; deck: ChannelId }
   | { control: 'cue'; deck: ChannelId }
   | { control: 'hot-cue'; deck: ChannelId; pad: number }
   | { control: 'hot-cue-clear'; deck: ChannelId; pad: number }
@@ -39,11 +47,15 @@ export type ButtonTarget =
    * hardware binding yet (loop-section mapping is follow-up MIDI work). */
   | { control: 'loop-toggle'; deck: ChannelId }
   | { control: 'match'; deck: ChannelId }
+  | { control: 'sync'; deck: ChannelId }
   | { control: 'load'; deck: ChannelId }
   /** PFL toggle (headphone-cue 02) — mixer-facing, hence `channel`. */
   | { control: 'pfl'; channel: ChannelId }
   /** Stem kill toggle (stems #210): mixer-class button like PFL. */
   | { control: 'stem'; channel: ChannelId; stem: StemName }
+  /** Stem solo (stems review, shift layer): only this stem plays;
+   * soloing the already-soloed stem restores all-on (mixer.soloStem). */
+  | { control: 'stem-solo'; channel: ChannelId; stem: StemName }
   /** Grid editing (midi-performance-ops 05) — stored-data edits, hence
    * registry-direct (ADR 0019): grid ops mean the same thing on every
    * view. Nudge translates the Beatgrid by one discrete ±10ms step. */
@@ -65,8 +77,11 @@ export type ButtonTarget =
   | { control: 'key-lock'; deck: ChannelId }
   /** Switch the layered physical deck surface on one side (four-Deck 03). */
   | { control: 'control-focus'; side: 'left' | 'right' }
-  /** Select an explicit Deck layer when hardware reports logical state. */
-  | { control: 'set-control-focus'; deck: ChannelId }
+  /** Select an explicit Deck layer when hardware reports logical state.
+   * `layered` names the absolute controls the device moves with the layer
+   * (its physical control reports on the active layer's channel only):
+   * their soft takeover re-arms for both Decks of the pair on every switch. */
+  | { control: 'set-control-focus'; deck: ChannelId; layered?: readonly LayeredControl[] }
   /** The assistant button (midi-performance-ops 08): a macro over the
    * per-Deck Follow model — all on (playing Decks, or both when nothing
    * plays) or all off. Registry-direct, browse-adjacent. */
@@ -95,7 +110,19 @@ export type ButtonTarget =
   | { control: 'view-toggle' }
   /** SHIFT+DISCOVER: Follow's "known only" narrowing — module-store
    * direct, like Quantize. */
-  | { control: 'follow-known-only' };
+  | { control: 'follow-known-only' }
+  /** Beat FX (gh#272). The hardware section is ONE strip over a radio
+   * A–D/SP/MST target: SELECT swaps the live effect, ON/OFF gates the section,
+   * and BEAT ◄ ► walks the global echo ladder. */
+  | { control: 'beat-fx-select'; effect: BeatFxEffectId | null }
+  | { control: 'beat-fx-target'; target: BeatFxTarget }
+  | { control: 'beat-fx-on-off' }
+  | { control: 'beat-fx-beats'; change: 'halve' | 'double' }
+  /** One-press FX buttons over the ONE section (DDJ-SB3 FX1/FX2 units):
+   * engage `effect` on the scope — a side's focused Deck, or master —
+   * (select + retarget + on); pressed again while that exact pairing runs,
+   * turn the section off. */
+  | { control: 'beat-fx-engage'; scope: 'left' | 'right' | 'master'; effect: BeatFxEffectId };
 
 export type AbsoluteTarget =
   | { control: 'pitch'; deck: ChannelId }
@@ -108,10 +135,13 @@ export type AbsoluteTarget =
   /** Cue bus volume — the hardware headphone-level knob (headphone-cue 03). */
   | { control: 'cue-level' }
   /** Cue/mix blend. No control on this device; bindable for others. */
-  | { control: 'cue-mix' };
+  | { control: 'cue-mix' }
+  /** The section's single LEVEL/DEPTH balance knob (gh#272). */
+  | { control: 'beat-fx-level'; side?: 'left' | 'right' };
 
 export type RelativeTarget =
   | { control: 'jog'; deck: ChannelId }
+  | { control: 'jog-vinyl-off'; deck: ChannelId }
   /** The jog's touch surface: a denser tick stream for fine paused seeks. */
   | { control: 'jog-touch'; deck: ChannelId }
   /** The jog's SHIFT layer: deliberate velocity-accelerated fast seek. */

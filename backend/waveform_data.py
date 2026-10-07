@@ -32,8 +32,11 @@ import shutil
 import struct
 import subprocess
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import IO, Callable
+from fractions import Fraction
+from itertools import pairwise
+from typing import IO
 
 import numpy as np
 
@@ -46,6 +49,7 @@ BAND_EDGES = [20.0, 60.0, 150.0, 400.0, 1000.0, 2500.0, 6000.0, 12000.0, 20000.0
 N_BANDS = len(BAND_EDGES) - 1
 BLOCK_SECONDS = 10.0
 FORMAT_VERSION = 2
+PREVIEW_BINS = 256
 _ALIGN = STFT_WINDOW // 2
 
 # Multi-resolution window groups (format v2, ADR 0014): (window_size, band indices).
@@ -230,6 +234,46 @@ def generate_blob(
     """Analyze an audio file and return its Waveform data blob."""
     peaks, bands, duration = analyze(filepath, on_progress=on_progress)
     return build_blob(peaks, bands, duration)
+
+
+def build_preview_blob(blob: bytes) -> bytes:
+    """Reduce stored MWF data to 256 max-peak / mean-band bins (2388 bytes).
+
+    Means are in quantized space, matching the client's LOD reducer. Source
+    peak intervals and band frame centers map onto equal-duration bins; empty
+    band bins use the nearest frame (including short clips and STFT edges).
+    The header uses a synthetic sample rate/hop ratio so 256 bins cover the
+    source duration exactly to its sample precision, without integer-hop drift.
+    """
+    d = decode_blob(blob)
+    samples = max(1, round(d["duration"] * d["sample_rate"]))
+    grid = Fraction(PREVIEW_BINS * d["sample_rate"], samples).limit_denominator(2**32 - 1)
+    hop = grid.denominator
+    edges = np.linspace(0, samples, PREVIEW_BINS + 1)
+    peaks = np.zeros(PREVIEW_BINS, dtype=np.uint8)
+    bands = np.zeros((PREVIEW_BINS, d["n_bands"]), dtype=np.uint8)
+    centers = np.arange(len(d["bands"])) * d["band_hop"] + d["stft_window"] / 2
+    for i, (start, end) in enumerate(pairwise(edges)):
+        if len(d["peaks"]):
+            p0 = min(int(start // d["peak_hop"]), len(d["peaks"]) - 1)
+            p1 = min(int(np.ceil(end / d["peak_hop"])), len(d["peaks"]))
+            peaks[i] = d["peaks"][p0:max(p0 + 1, p1)].max()
+        if len(centers):
+            b0, b1 = np.searchsorted(centers, [start, end])
+            if b0 == b1:
+                b0 = int(np.clip(
+                    np.floor(((start + end) / 2 - centers[0]) / d["band_hop"] + 0.5),
+                    0, len(centers) - 1,
+                ))
+                b1 = b0 + 1
+            bands[i] = np.floor(d["bands"][b0:b1].mean(axis=0) + 0.5).astype(np.uint8)
+    header = struct.pack(
+        _HEADER_FMT, b"MWF1", d["version"], 0, grid.numerator, d["duration"],
+        hop, hop, hop, d["n_bands"], d["gamma"],
+    )
+    header += struct.pack(f"<{d['n_bands'] + 1}f", *d["band_edges"])
+    header += struct.pack("<II", PREVIEW_BINS, PREVIEW_BINS)
+    return header + peaks.tobytes() + bands.tobytes()
 
 
 def decode_blob(blob: bytes) -> dict:

@@ -21,7 +21,7 @@ from backend.database import apply_sqlite_pragmas
 from backend.tasks.lanes import LANES, split_handlers
 from backend.tasks.manager import create_task, recover_interrupted
 from backend.tasks.models import Task
-from backend.tasks.worker import TaskWorker
+from backend.tasks.worker import TaskWorker, TaskWorkerPool
 
 ALEMBIC_INI = Path(__file__).parent.parent / "alembic.ini"
 
@@ -44,12 +44,21 @@ def test_split_handlers_groups_by_lane() -> None:
         "analysis": _noop,
         "stem-split": _noop,
         "routine-mine": _noop,
+        "rekordbox-onboarding-import": _noop,
+        "tracks-directory-import": _noop,
     }
     by_lane = split_handlers(handlers)
     assert set(by_lane) == {"soundcloud", "soulseek", "compute"}
     assert set(by_lane["soundcloud"]) == {"download"}
     assert set(by_lane["soulseek"]) == {"soulseek-download", "soulseek-search"}
-    assert set(by_lane["compute"]) == {"waveform", "analysis", "stem-split", "routine-mine"}
+    assert set(by_lane["compute"]) == {
+        "waveform",
+        "analysis",
+        "stem-split",
+        "routine-mine",
+        "rekordbox-onboarding-import",
+        "tracks-directory-import",
+    }
 
 
 def test_split_handlers_omits_empty_lanes() -> None:
@@ -164,4 +173,45 @@ def test_compute_task_completes_while_download_is_running(tmp_path: Path) -> Non
         assert dl.state == "done", f"download ended {dl.state}: {dl.error}"
     finally:
         db.close()
+        engine.dispose()
+
+
+def _wait_for_state(factory, type_: str, state: str, timeout: float = 5.0) -> Task:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        db = factory()
+        try:
+            task = db.query(Task).filter(Task.type == type_).one()
+            if task.state == state:
+                return task
+            assert task.state != "failed", f"{type_} failed: {task.error}"
+        finally:
+            db.close()
+        time.sleep(0.02)
+    raise AssertionError(f"{type_} never reached {state}")
+
+
+def test_pool_add_handlers_starts_new_lane_and_extends_running_one(tmp_path: Path) -> None:
+    """A setup guide configuring soulseek mid-session (#290/#291) routes new
+    handlers through the pool: a new lane's worker starts on the fly, and a
+    handler for an already-running lane extends that worker."""
+    engine = _make_file_engine(tmp_path)
+    factory = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+    db = factory()
+    create_task(db, "soulseek-search", {})
+    create_task(db, "analysis", {})
+    db.close()
+
+    pool = TaskWorkerPool(factory, {"waveform": _noop}, poll_interval=0.05)
+    pool.start()
+    try:
+        # New lane, brought up mid-session.
+        pool.add_handlers({"soulseek-search": _noop})
+        _wait_for_state(factory, "soulseek-search", "done")
+        # Existing (running) lane, extended.
+        pool.add_handlers({"analysis": _noop})
+        _wait_for_state(factory, "analysis", "done")
+    finally:
+        pool.stop()
         engine.dispose()

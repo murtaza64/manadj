@@ -34,6 +34,7 @@ import {
   forgetHardwareState,
 } from './dispatch';
 import { _resetTakeoverFeedbackForTests, takeoverHint, takeoverKey } from './takeoverFeedback';
+import { setSoftTakeoverEnabled } from './softTakeoverStore';
 import {
   _resetControlFocusForTests,
   getControlFocus,
@@ -62,12 +63,24 @@ let fakePitch: Record<ChannelId, number>;
 interface FakeMixerState {
   channels: Record<
     ChannelId,
-    { trim: number; eq: { low: number; mid: number; high: number }; filter: number; fader: number }
+    {
+      trim: number;
+      eq: { low: number; mid: number; high: number };
+      filter: number;
+      fader: number;
+    }
   >;
   crossfader: number;
   master: number;
   cueLevel: number;
   cueMix: number;
+  beatFxSection: {
+    selected: 'echo' | 'reverb' | 'flanger' | null;
+    target: 'A' | 'B' | 'C' | 'D' | 'sampler' | 'master';
+    on: boolean;
+    depth: number;
+    beats: number;
+  };
 }
 let fakeMixer: FakeMixerState;
 
@@ -84,6 +97,7 @@ function flatFakeMixer(): FakeMixerState {
     master: 1,
     cueLevel: 0.7,
     cueMix: 0,
+    beatFxSection: { selected: 'echo', target: 'A', on: false, depth: 0, beats: 0.5 },
   };
 }
 
@@ -103,9 +117,14 @@ function registerFakeDeckControls(deck: ChannelId): void {
     },
     getPitch: () => fakePitch[deck],
     match: () => calls.push(`${deck}:match`),
+    toggleSync: () => calls.push(`${deck}:sync`),
     jogTicks: (ticks) => calls.push(`${deck}:jog:${ticks}`),
     jogTouchTicks: (ticks) => calls.push(`${deck}:jogTouch:${ticks}`),
     jogSeekTicks: (ticks) => calls.push(`${deck}:jogSeek:${ticks}`),
+    jogTouch: (held) => calls.push(`${deck}:touch:${held}`),
+    cancelJog: () => calls.push(`${deck}:cancelJog`),
+    toggleSlipMode: () => calls.push(`${deck}:toggleSlipMode`),
+    toggleVinylMode: () => calls.push(`${deck}:toggleVinylMode`),
     gridNudgeStep: (direction) => calls.push(`${deck}:gridNudge:${direction}`),
     gridSetDownbeat: () => calls.push(`${deck}:gridAnchor`),
     gridDropAnchor: () => calls.push(`${deck}:gridDropAnchor`),
@@ -126,6 +145,7 @@ function registerFakeMixerControls(): void {
     getMaster: () => fakeMixer.master,
     getCueLevel: () => fakeMixer.cueLevel,
     getCueMix: () => fakeMixer.cueMix,
+    getBeatFxSection: () => fakeMixer.beatFxSection,
     setTrim: (channel, value) => {
       fakeMixer.channels[channel].trim = value;
       calls.push(`mixer:trim:${channel}:${value}`);
@@ -152,6 +172,7 @@ function registerFakeMixerControls(): void {
     },
     togglePfl: (channel) => calls.push(`mixer:pfl:${channel}`),
     toggleStem: (channel, stem) => calls.push(`mixer:stem:${channel}:${stem}`),
+    soloStem: (channel, stem) => calls.push(`mixer:stemSolo:${channel}:${stem}`),
     setCueLevel: (value) => {
       fakeMixer.cueLevel = value;
       calls.push(`mixer:cueLevel:${value}`);
@@ -160,8 +181,44 @@ function registerFakeMixerControls(): void {
       fakeMixer.cueMix = value;
       calls.push(`mixer:cueMix:${value}`);
     },
+    toggleBeatFxOn: () => {
+      fakeMixer.beatFxSection.on = !fakeMixer.beatFxSection.on;
+      calls.push('mixer:beatFxOn');
+    },
+    setBeatFxOn: (on) => {
+      if (on && fakeMixer.beatFxSection.selected === null) return;
+      fakeMixer.beatFxSection.on = on;
+      calls.push(`mixer:beatFxSetOn:${on}`);
+    },
+    selectBeatFx: (effect) => {
+      fakeMixer.beatFxSection.selected = effect;
+      if (effect === null) fakeMixer.beatFxSection.on = false;
+      calls.push(`mixer:beatFxSelect:${effect}`);
+    },
+    selectBeatFxTarget: (target) => {
+      fakeMixer.beatFxSection.target = target;
+      calls.push(`mixer:beatFxTarget:${target}`);
+    },
+    setBeatFxDepth: (value) => {
+      fakeMixer.beatFxSection.depth = value;
+      calls.push(`mixer:beatFxDepth:${value}`);
+    },
+    stepBeatFxBeats: (change) => calls.push(`mixer:beatFxBeats:${change}`),
   });
 }
+
+describe('Slip and Vinyl mode buttons', () => {
+  it('toggle per-deck engine state only on down, independently of the audible holder', () => {
+    registerFakeDeckControls('C');
+    claimAudible('editor');
+    for (const control of ['slip-mode', 'vinyl-mode'] as const) {
+      for (const edge of ['down', 'up'] as const) {
+        dispatchMidiAction({ kind: 'button', target: { control, deck: 'C' }, edge });
+      }
+    }
+    expect(calls).toEqual(['C:toggleSlipMode', 'C:toggleVinylMode']);
+  });
+});
 
 beforeEach(() => {
   calls = [];
@@ -213,6 +270,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  setSoftTakeoverEnabled(true);
   _resetAudibleSurfacesForTests();
   _resetMidiControlsForTests();
   _resetGridChordForTests();
@@ -814,6 +872,20 @@ describe('spin-to-nudge chord (midi-performance-ops 06)', () => {
 });
 
 describe('mixer/pitch/match (midi-controller 04)', () => {
+  it('SYNC fires only on down and both tempo buttons drop under machine ownership', () => {
+    registerFakeDeckControls('C');
+    for (const edge of ['down', 'up'] as const) {
+      dispatchMidiAction({ kind: 'button', edge, target: { control: 'sync', deck: 'C' } });
+    }
+    expect(calls).toEqual(['C:sync']);
+    claimAudible('editor');
+    calls.length = 0;
+    for (const control of ['match', 'sync'] as const) {
+      dispatchMidiAction({ kind: 'button', edge: 'down', target: { control, deck: 'C' } });
+    }
+    expect(calls).toEqual([]);
+  });
+
   it('MATCH fires on the down edge only', () => {
     registerFakeDeckControls('A');
     dispatchMidiAction({
@@ -924,6 +996,36 @@ describe('mixer/pitch/match (midi-controller 04)', () => {
     expect(calls).toEqual([]);
     dispatchMidiAction({ kind: 'absolute', target: { control: 'trim', channel: 'A' }, value: 0.6 });
     expect(calls).toEqual(['mixer:trim:A:0.6']);
+  });
+
+  it('disabled soft takeover applies every absolute controller value immediately', () => {
+    registerFakeDeckControls('A');
+    registerFakeMixerControls();
+    fakePitch.A = 4;
+    setSoftTakeoverEnabled(false);
+
+    dispatchMidiAction({ kind: 'absolute', target: { control: 'pitch', deck: 'A' }, value: 0.2 });
+    dispatchMidiAction({ kind: 'absolute', target: { control: 'trim', channel: 'A' }, value: 0.1 });
+    dispatchMidiAction({ kind: 'absolute', target: { control: 'eq', channel: 'A', band: 'low' }, value: 0.1 });
+    dispatchMidiAction({ kind: 'absolute', target: { control: 'filter', channel: 'A' }, value: 0.2 });
+    dispatchMidiAction({ kind: 'absolute', target: { control: 'channel-fader', channel: 'A' }, value: 0.2 });
+    dispatchMidiAction({ kind: 'absolute', target: { control: 'crossfader' }, value: 0.2 });
+    dispatchMidiAction({ kind: 'absolute', target: { control: 'master' }, value: 0.2 });
+    dispatchMidiAction({ kind: 'absolute', target: { control: 'cue-level' }, value: 0.2 });
+    dispatchMidiAction({ kind: 'absolute', target: { control: 'cue-mix' }, value: 0.2 });
+
+    expect(calls).toEqual([
+      'A:setPitch:-4.8',
+      'mixer:trim:A:0.1',
+      'mixer:eq:A:low:0.1',
+      'mixer:filter:A:-0.6',
+      'mixer:fader:A:0.2',
+      'mixer:crossfader:-0.6',
+      'mixer:master:0.2',
+      'mixer:cueLevel:0.2',
+      'mixer:cueMix:0.2',
+    ]);
+    expect(takeoverHint(takeoverKey.pitch('A'))).toBeNull();
   });
 
   it('mixer takeover: an external (on-screen) change unlatches that control only', () => {
@@ -1083,6 +1185,57 @@ describe('deck unplug control memory (midi-controller 20)', () => {
       target: { control: 'grid-nudge', deck: 'A', direction: 'later' },
     });
     expect(calls).toEqual(['A:gridLocal:3', 'A:jog:2']);
+  });
+});
+
+describe('hardware layer switch re-arms layered pickup (ddj-sb3 #284)', () => {
+  const fader = (channel: ChannelId, value: number): MidiAction => ({
+    kind: 'absolute',
+    target: { control: 'channel-fader', channel },
+    value,
+  });
+  const layer = (deck: ChannelId, layered?: readonly ('channel-fader' | 'pitch')[]): MidiAction => ({
+    kind: 'button',
+    edge: 'down',
+    target: { control: 'set-control-focus', deck, ...(layered ? { layered } : {}) },
+  });
+
+  it('a layered fader picks up per Deck across DECK switches (rekordbox-style)', () => {
+    registerFakeMixerControls();
+    dispatchMidiAction(fader('A', 1)); // A latches at the default
+    dispatchMidiAction(fader('A', 0.8)); // A remembers 0.8
+    dispatchMidiAction(layer('C', ['channel-fader']));
+    expect(getControlFocus().left).toBe('C');
+    // Same physical fader, now on C (software 1): within first-touch grace,
+    // but a layer switch withholds grace — needs pickup.
+    dispatchMidiAction(fader('C', 0.97));
+    expect(takeoverHint(takeoverKey.channelFader('C'))).toBe('up');
+    dispatchMidiAction(fader('C', 1)); // reaches C's value: latched
+    dispatchMidiAction(layer('A', ['channel-fader']));
+    // Back on A with the fader at the top: A (0.8) must not jump.
+    dispatchMidiAction(fader('A', 0.95));
+    expect(calls).toEqual(['mixer:fader:A:1', 'mixer:fader:A:0.8', 'mixer:fader:C:1']);
+    dispatchMidiAction(fader('A', 0.78)); // crossed 0.8: picked up
+    expect(calls.at(-1)).toBe('mixer:fader:A:0.78');
+  });
+
+  it('controls not declared layered keep their latch (GRV6 fixed mixer strips)', () => {
+    registerFakeMixerControls();
+    dispatchMidiAction(fader('C', 1));
+    dispatchMidiAction(fader('C', 0.8));
+    dispatchMidiAction(layer('A', ['pitch']));
+    dispatchMidiAction(fader('C', 0.7));
+    expect(calls.at(-1)).toBe('mixer:fader:C:0.7');
+  });
+
+  it('no layered list: the focus switch leaves pickup alone', () => {
+    registerFakeMixerControls();
+    dispatchMidiAction(fader('A', 1));
+    dispatchMidiAction(fader('A', 0.8));
+    dispatchMidiAction(layer('C'));
+    dispatchMidiAction(layer('A'));
+    dispatchMidiAction(fader('A', 0.6));
+    expect(calls.at(-1)).toBe('mixer:fader:A:0.6');
   });
 });
 
@@ -1447,5 +1600,163 @@ describe('stem kill switches (stems #210)', () => {
     dispatchMidiAction(stem('A', 'drums', 'up'));
     dispatchMidiAction(stem('B', 'vocals', 'down'));
     expect(calls).toEqual(['mixer:stem:A:drums', 'mixer:stem:B:vocals']);
+  });
+
+  it('stem-solo buttons solo through the mixer surface on the down edge only', () => {
+    registerFakeMixerControls();
+    dispatchMidiAction({
+      kind: 'button',
+      edge: 'down',
+      target: { control: 'stem-solo', channel: 'C', stem: 'bass' },
+    });
+    dispatchMidiAction({
+      kind: 'button',
+      edge: 'up',
+      target: { control: 'stem-solo', channel: 'C', stem: 'bass' },
+    });
+    dispatchMidiAction({
+      kind: 'button',
+      edge: 'down',
+      target: { control: 'stem-solo', channel: 'D', stem: 'other' },
+    });
+    expect(calls).toEqual(['mixer:stemSolo:C:bass', 'mixer:stemSolo:D:other']);
+  });
+});
+
+describe('Beat FX (gh#272)', () => {
+  const press = (
+    target:
+      | { control: 'beat-fx-on-off' }
+      | { control: 'beat-fx-select'; effect: 'echo' | 'reverb' | 'flanger' | null }
+      | { control: 'beat-fx-target'; target: 'A' | 'B' | 'C' | 'D' | 'sampler' | 'master' }
+      | { control: 'beat-fx-beats'; change: 'halve' | 'double' },
+    edge: 'down' | 'up' = 'down'
+  ): MidiAction => ({ kind: 'button', edge, target });
+  const level = (value: number): MidiAction => ({
+    kind: 'absolute',
+    target: { control: 'beat-fx-level' },
+    value,
+  });
+
+  it('ON/OFF toggles the section gate on the down edge only', () => {
+    registerFakeMixerControls();
+    dispatchMidiAction(press({ control: 'beat-fx-on-off' }));
+    dispatchMidiAction(press({ control: 'beat-fx-on-off' }, 'up'));
+    expect(calls).toEqual(['mixer:beatFxOn']);
+  });
+
+  it('SELECT knob positions swap the Mixer section effect', () => {
+    registerFakeMixerControls();
+    dispatchMidiAction(press({ control: 'beat-fx-select', effect: 'reverb' }));
+    expect(fakeMixer.beatFxSection.selected).toBe('reverb');
+    expect(calls).toEqual(['mixer:beatFxSelect:reverb']);
+    dispatchMidiAction(press({ control: 'beat-fx-select', effect: 'echo' }, 'up'));
+    expect(fakeMixer.beatFxSection.selected).toBe('reverb'); // up edge ignored
+  });
+
+  it('an unsupported SELECT detent clears the effect and section gate', () => {
+    registerFakeMixerControls();
+    fakeMixer.beatFxSection.on = true;
+    dispatchMidiAction(press({ control: 'beat-fx-select', effect: null }));
+    expect(fakeMixer.beatFxSection).toMatchObject({ selected: null, on: false });
+    expect(calls).toEqual(['mixer:beatFxSelect:null']);
+  });
+
+  it('CH SELECT routes 1–4/SP/MST as one Mixer target, down edge only', () => {
+    registerFakeMixerControls();
+    for (const target of ['A', 'D', 'sampler', 'master'] as const) {
+      dispatchMidiAction(press({ control: 'beat-fx-target', target }));
+    }
+    dispatchMidiAction(press({ control: 'beat-fx-target', target: 'B' }, 'up'));
+    expect(calls).toEqual([
+      'mixer:beatFxTarget:A',
+      'mixer:beatFxTarget:D',
+      'mixer:beatFxTarget:sampler',
+      'mixer:beatFxTarget:master',
+    ]);
+    expect(fakeMixer.beatFxSection.target).toBe('master');
+  });
+
+  it('BEAT ◄ ► walk the section echo ladder', () => {
+    registerFakeMixerControls();
+    dispatchMidiAction(press({ control: 'beat-fx-beats', change: 'double' }));
+    dispatchMidiAction(press({ control: 'beat-fx-beats', change: 'halve' }));
+    expect(calls).toEqual(['mixer:beatFxBeats:double', 'mixer:beatFxBeats:halve']);
+  });
+
+  it('LEVEL/DEPTH maps the full hardware throw to bipolar depth with pickup', () => {
+    registerFakeMixerControls();
+    fakeMixer.beatFxSection.depth = 0.8; // software high, knob physically low
+    dispatchMidiAction(level(0.2));
+    expect(calls).toEqual([]); // suppressed until pickup
+    expect(takeoverHint(takeoverKey.beatFxLevel())).toBe('up');
+    dispatchMidiAction(level(0.95)); // bipolar +0.9 crosses +0.8
+    expect(calls).toEqual([`mixer:beatFxDepth:${0.95 * 2 - 1}`]);
+  });
+
+  it('LEVEL/DEPTH hardware center snaps exactly to Mixer depth 0', () => {
+    registerFakeMixerControls();
+    dispatchMidiAction(level(0.5));
+    expect(calls).toEqual(['mixer:beatFxDepth:0']);
+  });
+
+  const engage = (
+    scope: 'left' | 'right' | 'master',
+    effect: 'echo' | 'reverb' | 'flanger',
+    edge: 'down' | 'up' = 'down'
+  ): MidiAction => ({ kind: 'button', edge, target: { control: 'beat-fx-engage', scope, effect } });
+  const sideLevel = (side: 'left' | 'right', value: number): MidiAction => ({
+    kind: 'absolute',
+    target: { control: 'beat-fx-level', side },
+    value,
+  });
+
+  it('engage selects, retargets to the side focus, and turns on; same press again turns off', () => {
+    registerFakeMixerControls();
+    dispatchMidiAction({ kind: 'button', edge: 'down', target: { control: 'set-control-focus', deck: 'C' } });
+    dispatchMidiAction(engage('left', 'reverb'));
+    expect(fakeMixer.beatFxSection).toMatchObject({ selected: 'reverb', target: 'C', on: true });
+    dispatchMidiAction(engage('left', 'reverb', 'up'));
+    expect(fakeMixer.beatFxSection.on).toBe(true); // up edge ignored
+    dispatchMidiAction(engage('left', 'reverb'));
+    expect(fakeMixer.beatFxSection.on).toBe(false);
+  });
+
+  it('engage on the other side or another effect moves the running section', () => {
+    registerFakeMixerControls();
+    dispatchMidiAction(engage('left', 'echo'));
+    dispatchMidiAction(engage('right', 'echo'));
+    expect(fakeMixer.beatFxSection).toMatchObject({ selected: 'echo', target: 'B', on: true });
+    dispatchMidiAction(engage('right', 'flanger'));
+    expect(fakeMixer.beatFxSection).toMatchObject({ selected: 'flanger', target: 'B', on: true });
+    dispatchMidiAction(engage('master', 'flanger'));
+    expect(fakeMixer.beatFxSection).toMatchObject({ target: 'master', on: true });
+  });
+
+  it('per-side LEVEL drives depth only from the side focused on the target Deck', () => {
+    registerFakeMixerControls();
+    fakeMixer.beatFxSection.target = 'B';
+    dispatchMidiAction(sideLevel('left', 0.5)); // left side is on A: dropped
+    expect(calls).toEqual([]);
+    dispatchMidiAction(sideLevel('right', 0.5));
+    expect(calls).toEqual(['mixer:beatFxDepth:0']);
+  });
+
+  it('per-side LEVEL knobs keep separate pickup machines (master target: both live)', () => {
+    registerFakeMixerControls();
+    fakeMixer.beatFxSection.target = 'master';
+    dispatchMidiAction(sideLevel('left', 0.5)); // latches at 0
+    dispatchMidiAction(sideLevel('left', 0.6));
+    // Right knob parked at the bottom: its first sample must not "cross"
+    // against the left knob's last sample.
+    dispatchMidiAction(sideLevel('right', 0.1));
+    expect(calls).toEqual(['mixer:beatFxDepth:0', `mixer:beatFxDepth:${0.6 * 2 - 1}`]);
+  });
+
+  it('drops silently with no registered mixer surface', () => {
+    dispatchMidiAction(press({ control: 'beat-fx-on-off' }));
+    dispatchMidiAction(press({ control: 'beat-fx-beats', change: 'double' }));
+    dispatchMidiAction(level(0.4));
+    expect(calls).toEqual([]);
   });
 });

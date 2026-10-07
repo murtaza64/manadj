@@ -2,5 +2,6 @@
    theme/tokens.ts installs every custom property on :root at boot
    (installTheme() in main.tsx) so canvas/GL and CSS can't drift. See
    DESIGN.md. */
+@import './styles/fonts.css';
 @import './styles/base.css';
 @import './styles/utilities.css';

@@ -6,12 +6,14 @@ import { getTagColor } from '../utils/colorUtils';
 import EditableCell from './EditableCell';
 import EnergySquare from './EnergySquare';
 import WaveformMinimap from './WaveformMinimap';
-import { useDeck, useDeckReady, useDeckSnapshot } from '../hooks/useDeck';
+import { useDeck, useDeckReady, useDeckSnapshot, deckReadyNow } from '../hooks/useDeck';
 import { BpmControl } from './deckControls/BpmControl';
 import { MusicIcon, PersonIcon, EnergyIcon, TagIcon, NeedleIcon, KeyIcon, SpeedIcon, SettingsIcon } from './icons';
 import TagManagementModal from './TagManagementModal';
 import { formatKeyDisplay } from '../utils/keyUtils';
 import { getKeyColor } from '../utils/displayColors';
+import { useViewActive } from '../contexts/viewActive';
+import { fileBasename } from '../utils/pathDisplay';
 import './TagEditor.css';
 
 interface Props {
@@ -35,6 +37,7 @@ export interface TagEditorHandle {
 }
 
 const TagEditor = forwardRef<TagEditorHandle, Props>(({ track, onSave, onUpdate, onEnergyEditModeChange }, ref) => {
+  const viewActive = useViewActive();
   const isDisabled = !track;
   // Beatgrid edits are playhead-dependent: they only apply when the track
   // being edited is the one on the Deck. Narrow selectors keep transport
@@ -154,9 +157,10 @@ const TagEditor = forwardRef<TagEditorHandle, Props>(({ track, onSave, onUpdate,
   // Handler for analyze button. Manual analysis now rides the task system
   // Keyboard handler for tag edit mode
   useEffect(() => {
-    if (!isTagEditMode) return;
+    if (!isTagEditMode || !viewActive) return;
 
     const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.target instanceof Element && event.target.closest('.settings-page')) return;
       event.stopPropagation();
       const key = event.key.toLowerCase();
 
@@ -186,7 +190,7 @@ const TagEditor = forwardRef<TagEditorHandle, Props>(({ track, onSave, onUpdate,
 
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [isTagEditMode, filteredTags, selectedIndex]);
+  }, [isTagEditMode, filteredTags, selectedIndex, viewActive]);
 
   // Reset selectedIndex on search change
   useEffect(() => {
@@ -196,9 +200,10 @@ const TagEditor = forwardRef<TagEditorHandle, Props>(({ track, onSave, onUpdate,
 
   // Keyboard handler for energy edit mode
   useEffect(() => {
-    if (!isEnergyEditMode) return;
+    if (!isEnergyEditMode || !viewActive) return;
 
     const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.target instanceof Element && event.target.closest('.settings-page')) return;
       event.stopPropagation();
       const key = event.key.toLowerCase();
 
@@ -215,10 +220,10 @@ const TagEditor = forwardRef<TagEditorHandle, Props>(({ track, onSave, onUpdate,
 
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [isEnergyEditMode]);
+  }, [isEnergyEditMode, viewActive]);
 
   // Extract just the filename from the full path
-  const filename = track?.filename.split('/').pop() || 'No track selected';
+  const filename = (track && fileBasename(track.filename)) || 'No track selected';
 
   return (
     <div className={`tag-editor ${isDisabled ? 'tag-editor-disabled' : ''}`}>
@@ -312,7 +317,8 @@ const TagEditor = forwardRef<TagEditorHandle, Props>(({ track, onSave, onUpdate,
                 }
               }}
               grid={{
-                getPlayhead: () => engine.getPlayhead(),
+                getPlayhead: () => loadedTrack?.id === track?.id && deckReadyNow(engine, track?.id ?? null)
+                  ? engine.getPlayhead() : null,
                 disabled: !isBeatgridEditable,
                 disabledTitle: 'Load this track to edit its beatgrid',
               }}
@@ -351,7 +357,7 @@ const TagEditor = forwardRef<TagEditorHandle, Props>(({ track, onSave, onUpdate,
                 trackId={loadedTrack?.id ?? null}
                 clock={engine}
                 cuePoint={deckCuePoint}
-                onSeek={(t) => engine.seek(t)}
+                onSeek={(t) => { if (deckReadyNow(engine, loadedTrack?.id ?? null)) engine.seek(t); }}
                 dimmed={loadedTrack !== null && !deckReady}
               />
             </div>

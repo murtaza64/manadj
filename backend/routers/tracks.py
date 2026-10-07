@@ -2,6 +2,7 @@
 
 import logging
 import mimetypes
+import shutil
 from pathlib import Path
 from typing import List
 
@@ -12,6 +13,7 @@ from sqlalchemy.orm import Session
 from .. import crud, schemas, track_metadata
 from ..beatgrid_ops import VariableGridBPMError
 from ..database import get_db
+from ..fs_retry import retry_locked
 from ..track_metadata import MetadataComparisonResult, MetadataSyncRequest, MetadataSyncResult, TrackChanges
 
 router = APIRouter()
@@ -99,6 +101,75 @@ def get_track(track_id: int, db: Session = Depends(get_db)):
 @router.post("/", response_model=schemas.Track, status_code=201)
 def create_track(track: schemas.TrackCreate, db: Session = Depends(get_db)):
     return crud.create_track(db, track)
+
+
+@router.post("/files/relocate")
+def relocate_track_files(
+    request: schemas.TrackFileRelocationRequest,
+    db: Session = Depends(get_db),
+):
+    """Copy tracks to unique ASCII filenames while retaining their Library IDs."""
+    if not request.relocations:
+        raise HTTPException(status_code=400, detail="No relocations supplied")
+    ids = [item.track_id for item in request.relocations]
+    destinations = [Path(item.destination) for item in request.relocations]
+    if len(ids) != len(set(ids)) or len(destinations) != len(set(destinations)):
+        raise HTTPException(status_code=400, detail="Track IDs and destinations must be unique")
+
+    tracks = {track.id: track for track in db.query(crud.models.Track).filter(crud.models.Track.id.in_(ids))}
+    if len(tracks) != len(ids):
+        raise HTTPException(status_code=404, detail="Track not found")
+
+    planned = []
+    for item, destination in zip(request.relocations, destinations):
+        track = tracks[item.track_id]
+        source = Path(track.filename)
+        if not source.is_file():
+            raise HTTPException(status_code=409, detail=f"Source missing: {source}")
+        if not destination.is_absolute() or not destination.name.isascii():
+            raise HTTPException(status_code=400, detail=f"Destination must be absolute and ASCII: {destination}")
+        if source.parent.resolve() != destination.parent.resolve() or source.suffix.lower() != destination.suffix.lower():
+            raise HTTPException(status_code=400, detail=f"Destination must retain directory and extension: {destination}")
+        if destination.exists():
+            raise HTTPException(status_code=409, detail=f"Destination exists: {destination}")
+        planned.append((track, source, destination))
+
+    created = []
+    try:
+        for track, source, destination in planned:
+            shutil.copy2(source, destination)
+            if destination.stat().st_size != source.stat().st_size:
+                raise OSError(f"Copy size mismatch: {destination}")
+            created.append(destination)
+            track.filename = str(destination)
+        db.commit()
+    except Exception:
+        db.rollback()
+        for destination in created:
+            destination.unlink(missing_ok=True)
+        raise
+
+    old_files = {}
+    for _track, source, _destination in planned:
+        stat = source.stat()
+        old_files.setdefault((stat.st_dev, stat.st_ino), source)
+    # Committed: the DB already points at the copies. Windows refuses to
+    # delete a source that is open (e.g. being streamed) — retry briefly, then
+    # report it as left over instead of failing a relocation that succeeded.
+    leftover = []
+    for source in old_files.values():
+        try:
+            retry_locked(source.unlink)
+        except OSError as exc:
+            logger.warning("relocate: could not delete old file %s: %s", source, exc)
+            leftover.append(str(source))
+    return {
+        "relocations": [
+            {"track_id": track.id, "source": str(source), "destination": str(destination)}
+            for track, source, destination in planned
+        ],
+        "leftover_sources": leftover,
+    }
 
 
 @router.get("/{track_id}/playlists", response_model=List[schemas.Playlist])

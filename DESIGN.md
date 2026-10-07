@@ -57,6 +57,11 @@ hardcodes a color literal — import the token (TS/canvas) or `var(--…)`
 Deprecated, die with gh#200: `--sapphire --green --teal --yellow --red
 --mauve --lavender` (migrate to semantic roles), `--blue` (→ `--accent`).
 
+Settings uses `--crust` for its canvas and preview/input wells, matching Sync.
+Active gain-boost controls use `--warning`; active attenuation uses `--success`.
+Playback status uses the existing active/error/machine roles. Waveform band
+controls show the user's actual band colors; navigation and focus stay `--accent`.
+
 ## Scales
 
 | Scale | Tokens | Notes |
@@ -86,8 +91,8 @@ Shared draw helpers/tables: `frontend/src/theme/markers.ts` (gh#201).
 
 | Element | Spec |
 |---|---|
-| Waveform body | GL: `WaveformRendererV2` + `waveform/styles.ts` style slots (`full`/`minimap`). CPU: `sets/ladderWaveStyle.createStyledColumnRenderer` (deliberate port, test-guarded). No other waveform implementations. Background `--void`; minimap dim `MINIMAP_BRIGHTNESS = 0.65`; audibility/gain fill = deck color at alpha 0.16 |
-| Hotcue flag | 2px full-height pole + flag. Variants: `full` (16px numbered square, ink `rgb(17,17,17)`, number `--font-micro` bold) and `mini` (5×5, unnumbered). Color via `cueCssColor` (stored-hex validation) — no surface grows its own fallback. PerfDiffViewer exception: source-based coloring (diagnostic), shared geometry |
+| Waveform body | GL: `WaveformRendererV2` + `waveform/styles.ts` style slots (`full`/`minimap`). CPU: `sets/ladderWaveStyle.createStyledColumnRenderer` (deliberate port, test-guarded). No other waveform implementations. Background `--void` except transparent tracklist previews; minimap dim `MINIMAP_BRIGHTNESS = 0.65`; audibility/gain fill = deck color at alpha 0.16 |
+| Hotcue flag | 2px full-height pole + flag. Variants: `full` (16px numbered square, ink `rgb(17,17,17)`, number `--font-micro` bold) and `mini` (5×5, unnumbered). Tracklist previews use a 3×3 square and 1px pole. Color via `cueCssColor` (stored-hex validation) — no surface grows its own fallback. PerfDiffViewer exception: source-based coloring (diagnostic), shared geometry |
 | Main cue | `--orange` 2px line + bottom triangle. Same orange family as Machine — geometry disambiguates (D11: chosen over recoloring) |
 | Beatgrid / hypermeter | tier tables as data: `full` (GL widths/alphas) and `dim` (lane guides). All beat-domain surfaces render tier-aware — dropping hypermeter silently is a bug |
 | Loop region | `waveform/loopOverlay.ts`: `#00f900`, fill alpha 0.18, edges on full, 2px top band on minimaps. Session-history loops: deck-color brackets (intentionally distinct: history, not live state) |
@@ -95,10 +100,13 @@ Shared draw helpers/tables: `frontend/src/theme/markers.ts` (gh#201).
 
 ## Components
 
+- Track table: drag headers to reorder; widths and order are saved. Up to five leading positions are frozen (six with playlist `#`); wide columns or narrow panes shorten that prefix to keep a scrolling region visible. The shadow follows the frozen boundary. Rows remain 28px.
 - **Buttons are CSS classes** (D10): `.btn` + `.btn-primary/-success/
   -danger/-secondary` in `styles/utilities.css`. New buttons use `.btn`;
   new variants are added to utilities.css, never hand-rolled in feature
   CSS.
+- **Persistent button selection** uses `.btn-selected`: accent fill, accent
+  border, dark ink, including secondary detail text.
 - **Modals use `<Modal>`** (gh#202): overlay, centering, escape/backdrop
   close, `--z-modal`, title bar.
 - No other primitives until a third duplication appears (D10).
@@ -109,6 +117,13 @@ Shared draw helpers/tables: `frontend/src/theme/markers.ts` (gh#201).
   content, not UI.
 - Pre-mount boot splash (`index.html`) and Electron splash
   (`desktop/main.js`) — render before `installTheme()`; literals by design.
+- **Explainer-site hero type** (#294, human-approved): `site/assets/site.css`
+  defines local `--site-font-hero: 48px` for the hero tagline/headline only.
+  At `max-width: 900px`, it scales with `6vw`, bounded by `--font-display`
+  and `--site-font-hero`. Site body stays `--font-large` (14px); brand and
+  chapter headings use `--font-display` (24px). App type tokens are unchanged.
+  The site bundles unmodified Ubuntu Mono regular/bold (400/700), under the
+  Ubuntu Font Licence 1.0, instead of the app's Nerd Font variant.
 
 ## Rules for agents
 

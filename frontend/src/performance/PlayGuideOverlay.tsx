@@ -23,6 +23,7 @@ import { guideScreenFraction } from './playGuideModel';
 import { composeRate } from '../playback/tempo';
 import { trackWindowSeconds } from '../utils/waveformZoom';
 import { PLAY_MARKER_FRACTION } from '../theme/markers';
+import type { ChannelId } from '../playback/mixer';
 import {
   waveformRowCenterPercent,
   waveformRowTopPercent,
@@ -45,9 +46,16 @@ function formatPitch(percent: number): string {
   return `${percent >= 0 ? '+' : ''}${percent.toFixed(1)}%`;
 }
 
-export function PlayGuideOverlay({ visibleSeconds }: { visibleSeconds: number }) {
+export function PlayGuideOverlay({ visibleSeconds, order }: {
+  visibleSeconds: number;
+  order: readonly ChannelId[];
+}) {
   const { A, B, C, D } = useDecks();
   const frames = usePlayGuides();
+  const visibleFrames = frames.filter(
+    (frame) => order.includes(frame.outgoing) && order.includes(frame.incoming)
+  );
+  const hasVisibleGuides = visibleFrames.length > 0;
   const viewActive = useViewActive();
 
   const containerRef = useRef<HTMLDivElement>(null);
@@ -74,7 +82,7 @@ export function PlayGuideOverlay({ visibleSeconds }: { visibleSeconds: number })
   // signature gate) restarts the loop when the guide LIST changes, so a new
   // guide is positioned on its first painted frame, not an idle poll later.
   useEffect(() => {
-    if (frames.length === 0 || !viewActive) return;
+    if (!hasVisibleGuides || !viewActive) return;
     let raf = 0;
     let idleTimer = 0;
     let lastKey = '';
@@ -94,6 +102,7 @@ export function PlayGuideOverlay({ visibleSeconds }: { visibleSeconds: number })
       // Each direction projects on ITS outgoing Deck's timeline (both-paused
       // shows two directions at once — issue 01).
       for (const frame of framesRef.current) {
+        if (!order.includes(frame.outgoing) || !order.includes(frame.incoming)) continue;
         const engine =
           frame.outgoing === 'A'
             ? engineA
@@ -143,13 +152,13 @@ export function PlayGuideOverlay({ visibleSeconds }: { visibleSeconds: number })
       cancelAnimationFrame(raf);
       window.clearTimeout(idleTimer);
     };
-  }, [engineA, engineB, engineC, engineD, frames, viewActive]);
+  }, [engineA, engineB, engineC, engineD, frames, viewActive, order, hasVisibleGuides]);
 
-  if (frames.length === 0) return null;
+  if (!hasVisibleGuides) return null;
 
   return (
     <div ref={containerRef} className="perf-playguides" aria-hidden>
-      {frames.map((frame) =>
+      {visibleFrames.map((frame) =>
         frame.guides.map((guide) => {
           const key = `${frame.outgoing}>${frame.incoming}:${guide.uuid}`;
           return (
@@ -166,15 +175,21 @@ export function PlayGuideOverlay({ visibleSeconds }: { visibleSeconds: number })
             >
               <div
                 className="perf-playguide-line"
-                style={{ top: `${waveformRowTopPercent(frame.outgoing)}%` }}
+                style={{
+                  top: `${waveformRowTopPercent(frame.outgoing, order)}%`,
+                  height: `${100 / order.length}%`,
+                }}
               />
               <div
                 className="perf-playguide-line"
-                style={{ top: `${waveformRowTopPercent(frame.incoming)}%` }}
+                style={{
+                  top: `${waveformRowTopPercent(frame.incoming, order)}%`,
+                  height: `${100 / order.length}%`,
+                }}
               />
               <div
                 className="perf-playguide-chip"
-                style={{ top: `${waveformRowCenterPercent(frame.incoming)}%` }}
+                style={{ top: `${waveformRowCenterPercent(frame.incoming, order)}%` }}
               >
                 <span className="perf-playguide-glyph">▶</span>
                 <span className="perf-playguide-pair">

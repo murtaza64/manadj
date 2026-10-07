@@ -6,9 +6,12 @@ import {
   audiblePads,
   audibleTransport,
 } from '../playback/audibleSurface';
+import type { SurfaceJog } from '../playback/audibleSurface';
+import { CHANNEL_IDS } from '../playback/mixer';
+import type { ChannelId } from '../playback/mixer';
 import { PITCH_RANGE_PERCENT } from '../playback/tempo';
 import { isQuantizeOn, setQuantize } from '../playback/quantizeStore';
-import type { MidiAction } from './actions';
+import type { EqBand, LayeredControl, MidiAction } from './actions';
 import {
   browseSurface,
   deckControlsFor,
@@ -25,8 +28,9 @@ import {
   SoftTakeover,
   UNIPOLAR_PICKUP_TOLERANCE,
 } from './softTakeover';
+import { isSoftTakeoverEnabled } from './softTakeoverStore';
 import { reportPickedUp, reportSuppressed, takeoverKey } from './takeoverFeedback';
-import { focusDeck, toggleControlFocus } from '../performance/controlFocus';
+import { focusDeck, getControlFocus, toggleControlFocus } from '../performance/controlFocus';
 
 /** Encoder detents per action are tiny; cap steps so a burst can't warp the
  * selection across the whole library in one message. */
@@ -66,8 +70,27 @@ export function dispatchMidiAction(action: MidiAction): void {
  * deliberate gesture).
  */
 let gridChordState = initialGridChordState();
+// Keep the original recipient even after touch-up: rim continuation and
+// bend timers still belong to it, not to whichever surface is audible later.
+const jogRecipients = new Map<ChannelId, SurfaceJog>();
+const touchRecipients = new Map<ChannelId, SurfaceJog>();
+
+function cancelJog(deck: ChannelId): void {
+  const recipients = new Set([jogRecipients.get(deck), touchRecipients.get(deck)]);
+  jogRecipients.delete(deck);
+  touchRecipients.delete(deck);
+  for (const jog of recipients) jog?.cancel?.(deck);
+}
+
+function routedJog(deck: ChannelId): SurfaceJog | null {
+  const jog = audibleJog();
+  if (jogRecipients.get(deck) !== jog) cancelJog(deck);
+  if (jog) jogRecipients.set(deck, jog);
+  return jog;
+}
 
 export function _resetGridChordForTests(): void {
+  for (const deck of new Set([...jogRecipients.keys(), ...touchRecipients.keys()])) cancelJog(deck);
   gridChordState = initialGridChordState();
 }
 
@@ -81,8 +104,10 @@ function executeGridChordCommand(command: GridChordCommand): void {
   switch (command.type) {
     case 'pass-jog': {
       // Not armed: the tick keeps its normal surface-routed meaning.
-      const jog = audibleJog();
-      if (command.stream === 'rim') {
+      const jog = routedJog(command.deck);
+      if (command.stream === 'vinyl-off') {
+        jog?.rimTicks(command.deck, command.ticks, command.jogProfile, true);
+      } else if (command.stream === 'rim') {
         jog?.rimTicks(command.deck, command.ticks, command.jogProfile);
       } else {
         jog?.touchTicks(command.deck, command.ticks, command.jogProfile);
@@ -114,6 +139,9 @@ type RelativeAction = Extract<MidiAction, { kind: 'relative' }>;
 function dispatchRelative(action: RelativeAction): void {
   const { target, ticks, jogProfile } = action;
   switch (target.control) {
+    case 'jog-vinyl-off':
+      runGridChord({ type: 'jog-ticks', deck: target.deck, stream: 'vinyl-off', ticks, jogProfile });
+      return;
     case 'jog':
       // Rim and touch flow through the chord fold first (midi-performance-
       // ops 06): armed decks nudge the grid, unarmed decks pass through to
@@ -124,7 +152,8 @@ function dispatchRelative(action: RelativeAction): void {
       runGridChord({ type: 'jog-ticks', deck: target.deck, stream: 'touch', ticks, jogProfile });
       return;
     case 'jog-seek':
-      audibleJog()?.shiftRimTicks(target.deck, ticks, jogProfile);
+      if (touchRecipients.has(target.deck)) cancelJog(target.deck);
+      routedJog(target.deck)?.shiftRimTicks(target.deck, ticks, jogProfile);
       return;
     case 'selection-move': {
       const surface = browseSurface();
@@ -139,11 +168,38 @@ function dispatchRelative(action: RelativeAction): void {
 
 function dispatchButton(target: ButtonAction['target'], edge: 'down' | 'up'): void {
   switch (target.control) {
+    case 'jog-touch-edge': {
+      if (target.shifted) {
+        cancelJog(target.deck);
+      } else if (edge === 'up') {
+        const jog = touchRecipients.get(target.deck);
+        jog?.touch?.(target.deck, false);
+      } else if (!gridChordState[target.deck]) {
+        const jog = routedJog(target.deck);
+        if (jog?.touch) {
+          touchRecipients.set(target.deck, jog);
+          jog.touch(target.deck, true);
+        }
+      }
+      return;
+    }
+    case 'slip-mode':
+      if (edge === 'down') deckControlsFor(target.deck)?.toggleSlipMode();
+      return;
+    case 'vinyl-mode':
+      if (edge === 'down') deckControlsFor(target.deck)?.toggleVinylMode();
+      return;
     case 'control-focus':
       if (edge === 'down') toggleControlFocus(target.side);
       return;
     case 'set-control-focus':
-      if (edge === 'down') focusDeck(target.deck);
+      if (edge === 'down') {
+        focusDeck(target.deck);
+        if (target.layered) invalidateLayerPair(target.deck, target.layered);
+      } else {
+        cancelJog(target.deck);
+        gridChordState = { ...gridChordState, [target.deck]: null };
+      }
       return;
     case 'transport': {
       if (edge !== 'down') return;
@@ -195,8 +251,13 @@ function dispatchButton(target: ButtonAction['target'], edge: 'down' | 'up'): vo
       return;
     }
     case 'match': {
-      if (edge !== 'down') return;
+      if (edge !== 'down' || audibleHolder() !== 'shared') return;
       deckControlsFor(target.deck)?.match();
+      return;
+    }
+    case 'sync': {
+      if (edge !== 'down' || audibleHolder() !== 'shared') return;
+      deckControlsFor(target.deck)?.toggleSync();
       return;
     }
     case 'pfl': {
@@ -213,6 +274,56 @@ function dispatchButton(target: ButtonAction['target'], edge: 'down' | 'up'): vo
       // mixer owns kill state; the deck worklet applies it.
       if (edge !== 'down') return;
       midiMixerControls()?.toggleStem(target.channel, target.stem);
+      return;
+    }
+    case 'stem-solo': {
+      // Shift layer of the stems gesture: same mixer-class routing, the
+      // solo semantics the on-screen shift-click uses (mixer.soloStem).
+      if (edge !== 'down') return;
+      midiMixerControls()?.soloStem(target.channel, target.stem);
+      return;
+    }
+    case 'beat-fx-select': {
+      // SELECT swaps the live effect on the current target. Unsupported
+      // detents carry null, which disables the section instead of retaining
+      // the previously selected implementation.
+      if (edge !== 'down') return;
+      midiMixerControls()?.selectBeatFx(target.effect);
+      return;
+    }
+    case 'beat-fx-engage': {
+      if (edge !== 'down') return;
+      const mixer = midiMixerControls();
+      if (!mixer) return;
+      const fxTarget = target.scope === 'master' ? 'master' : getControlFocus()[target.scope];
+      const section = mixer.getBeatFxSection();
+      if (section.on && section.selected === target.effect && section.target === fxTarget) {
+        mixer.setBeatFxOn(false);
+        return;
+      }
+      mixer.selectBeatFx(target.effect);
+      mixer.selectBeatFxTarget(fxTarget);
+      mixer.setBeatFxOn(true);
+      return;
+    }
+    case 'beat-fx-target': {
+      // GRV6 CH SELECT is hardware-radio state; only down edges select.
+      // SP is represented but silent until manadj has a sampler bus.
+      if (edge !== 'down') return;
+      midiMixerControls()?.selectBeatFxTarget(target.target);
+      return;
+    }
+    case 'beat-fx-on-off': {
+      // The hardware's one ON/OFF gates the whole section; per-channel
+      // assignment is on-screen because CH SELECT stays unbound.
+      if (edge !== 'down') return;
+      midiMixerControls()?.toggleBeatFxOn();
+      return;
+    }
+    case 'beat-fx-beats': {
+      // BEAT ◄ ► controls the section's one echo beat-fraction ladder.
+      if (edge !== 'down') return;
+      midiMixerControls()?.stepBeatFxBeats(target.change);
       return;
     }
     case 'loop-preset': {
@@ -244,6 +355,7 @@ function dispatchButton(target: ButtonAction['target'], edge: 'down' | 'up'): vo
       return;
     }
     case 'grid-nudge': {
+      if (edge === 'down') cancelJog(target.deck);
       // Grid edits are stored-data operations, not playback gestures —
       // registry-direct regardless of the audible surface (ADR 0019,
       // midi-performance-ops 05). Chorded since issue 06: the down edge
@@ -282,6 +394,7 @@ function dispatchButton(target: ButtonAction['target'], edge: 'down' | 'up'): vo
       // BPM adjust, in-session decision 2026-07-06); halve/double stay
       // plain taps.
       if (target.change === 'grow' || target.change === 'shrink') {
+        if (edge === 'down') cancelJog(target.deck);
         runGridChord({
           type: edge === 'down' ? 'bpm-pad-down' : 'bpm-pad-up',
           deck: target.deck,
@@ -402,6 +515,48 @@ function takeoverFor(key: string, tolerance: number): SoftTakeover {
   return takeover;
 }
 
+const LAYER_PARTNER: Record<ChannelId, ChannelId> = { A: 'C', B: 'D', C: 'A', D: 'B' };
+const EQ_BANDS: readonly EqBand[] = ['low', 'mid', 'high'];
+
+function layeredKeys(deck: ChannelId, control: LayeredControl): string[] {
+  switch (control) {
+    case 'pitch':
+      return [takeoverKey.pitch(deck)];
+    case 'trim':
+      return [takeoverKey.trim(deck)];
+    case 'eq':
+      return EQ_BANDS.map((band) => takeoverKey.eq(deck, band));
+    case 'filter':
+      return [takeoverKey.filter(deck)];
+    case 'channel-fader':
+      return [takeoverKey.channelFader(deck)];
+  }
+}
+
+/**
+ * A hardware layer switch (DDJ DECK button) re-points the side's layered
+ * physical controls at another Deck. Re-arm pickup for both Decks of the
+ * pair (rekordbox-style): the newly active Deck's value differs from where
+ * the hand left the control, and the displaced Deck's control moves
+ * unobserved until the layer comes back. Missing machines are created
+ * already invalidated so a never-touched Deck gets no first-touch grace.
+ */
+function invalidateLayerPair(deck: ChannelId, layered: readonly LayeredControl[]): void {
+  for (const member of [deck, LAYER_PARTNER[deck]]) {
+    for (const control of layered) {
+      for (const key of layeredKeys(member, control)) {
+        const tolerance =
+          control === 'pitch'
+            ? PITCH_PICKUP_TOLERANCE
+            : control === 'filter'
+              ? BIPOLAR_PICKUP_TOLERANCE
+              : UNIPOLAR_PICKUP_TOLERANCE;
+        takeoverFor(key, tolerance).invalidate();
+      }
+    }
+  }
+}
+
 export function _resetSoftTakeoverForTests(): void {
   takeovers.clear();
 }
@@ -421,6 +576,7 @@ export function _resetSoftTakeoverForTests(): void {
  * by the adapter; LEDs resync via the output store.)
  */
 export function forgetHardwareState(): void {
+  for (const deck of new Set([...jogRecipients.keys(), ...touchRecipients.keys()])) cancelJog(deck);
   takeovers.clear();
   gridChordState = initialGridChordState();
 }
@@ -434,6 +590,9 @@ interface AbsoluteRoute {
   /** Current software value (base state — never the automation overlay). */
   current: number;
   apply: (value: number) => void;
+  /** Pickup machine identity when several physical controls share one
+   * target (hint key stays `key`). Defaults to `key`. */
+  machine?: string;
 }
 
 /**
@@ -548,13 +707,41 @@ function routeAbsolute(target: AbsoluteAction['target'], value: number): Absolut
         apply: (v) => mixer.setCueMix(v),
       };
     }
+    case 'beat-fx-level': {
+      // LEVEL/DEPTH: hardware unsigned throw → Mixer's bipolar balance
+      // coordinate, center snapped exactly to 0 like the other bipolar
+      // controls. One soft-takeover machine for the one physical knob.
+      const mixer = midiMixerControls();
+      if (!mixer) return null;
+      const section = mixer.getBeatFxSection();
+      // Per-side knobs (DDJ-SB3 FX1/FX2 LEVEL): while the section targets a
+      // Deck, only the knob on the side focused on that Deck drives it.
+      // Each knob is its own physical control → its own pickup machine.
+      if (target.side) {
+        const deckTarget = (CHANNEL_IDS as readonly string[]).includes(section.target);
+        if (deckTarget && getControlFocus()[target.side] !== section.target) return null;
+      }
+      return {
+        key: takeoverKey.beatFxLevel(),
+        tolerance: BIPOLAR_PICKUP_TOLERANCE,
+        value: bipolar(value),
+        current: section.depth,
+        apply: (v) => mixer.setBeatFxDepth(v),
+        ...(target.side ? { machine: `${takeoverKey.beatFxLevel()}:${target.side}` } : {}),
+      };
+    }
   }
 }
 
 function dispatchAbsolute(target: AbsoluteAction['target'], value: number): void {
   const route = routeAbsolute(target, value);
   if (!route) return;
-  if (!takeoverFor(route.key, route.tolerance).feed(route.value, route.current)) {
+  if (!isSoftTakeoverEnabled()) {
+    reportPickedUp(route.key);
+    route.apply(route.value);
+    return;
+  }
+  if (!takeoverFor(route.machine ?? route.key, route.tolerance).feed(route.value, route.current)) {
     // Waiting for pickup: tell the on-screen control which way the hand
     // must move (midi-controller 18).
     reportSuppressed(route.key, route.value < route.current ? 'up' : 'down');

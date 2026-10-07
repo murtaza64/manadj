@@ -20,7 +20,7 @@
   position: sticky;
   top: 0;
   background: var(--mantle);
-  z-index: 10;
+  z-index: 2;
 }
 
 /* Sortable header base styles. Unified vocabulary: hover = bg tint
@@ -64,13 +64,13 @@
 }
 
 /* Generic sticky column styles. Header z-index sits ABOVE the resize
-   handles (z 12): a non-sticky header sliding under a pinned one must
+   handles (z 2): a non-sticky header sliding under a pinned one must
    take its divider handle with it (the handles otherwise paint over the
    pinned headers during horizontal scroll). */
 .sticky-col-header {
   position: sticky;
   background: var(--mantle);
-  z-index: 13;
+  z-index: 3;
 }
 
 .sticky-col-cell {
@@ -94,6 +94,13 @@
 
 .track-table-error {
   color: var(--danger);
+}
+
+/* Empty-state guidance (feature-tour #283) — the Takes/Sessions empty voice. */
+.track-table-empty {
+  color: var(--overlay1);
+  font-size: var(--font-large);
+  padding: 32px var(--space-16);
 }
 
 /* Fetching overlay */
@@ -122,10 +129,27 @@
 /* Column resize handles */
 /* NOTE: sticky headers are already positioned (position: sticky) — do not
    override them to relative or they stop sticking */
-.sortable-header:not(.sticky-col-header), .tags-header { position: relative; }
+.sortable-header:not(.sticky-col-header) { position: relative; }
+.track-column-header { cursor: pointer; }
+body.column-dragging,
+body.column-dragging * { cursor: grabbing !important; }
+.track-column-header.column-drop-before::after,
+.track-column-header.column-drop-after::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--accent);
+  z-index: 4;
+  pointer-events: none;
+}
+.track-column-header.column-drop-before::after { left: 0; }
+.track-column-header.column-drop-after::after { right: 0; }
+.track-column-header.tags-header { padding: var(--space-6) var(--space-12); }
 .col-resize-handle {
   position: absolute; top: 0; right: -4px; width: 9px; height: 100%;
-  cursor: col-resize; z-index: 12;
+  cursor: col-resize; z-index: 2;
   /* visible 1px line centered in the hit area */
   background: linear-gradient(
     to right,
@@ -167,13 +191,68 @@ body.col-resizing { cursor: col-resize; user-select: none; }
 .track-tier-header .track-tier-label {
   position: sticky;
   left: 12px;
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-12);
+  white-space: nowrap;
 }
 
 .track-tier-header .track-tier-count {
   color: var(--subtext0);
   font-weight: normal;
   letter-spacing: normal;
+}
+
+.follow-temperature-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-6);
+  color: var(--subtext0);
+  font-weight: normal;
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.follow-temperature-fader {
+  width: 112px;
+}
+
+.follow-temperature-fader:focus:not(:focus-visible),
+.follow-temperature-fader[data-pointer-focus="true"]:focus {
+  outline: none;
+}
+
+.follow-temperature-fader:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.follow-temperature-controls output {
+  font-variant-numeric: tabular-nums;
+}
+
+.follow-temperature-controls button {
+  height: 22px;
+  padding: 0 var(--space-6);
+  border: 1px solid var(--surface1);
+  background: var(--surface0);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.follow-temperature-controls button:hover:not(:disabled) {
+  border-color: var(--success);
+}
+
+.follow-temperature-controls :disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+@media (max-width: 600px) {
+  /* Let narrow panes scroll the entire toolbar into view. */
+  .track-tier-header .track-tier-label { position: static; }
 }
 
 /* Match score in the marks column (match-score PRD, tuning 2026-07-10):

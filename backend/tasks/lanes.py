@@ -24,8 +24,17 @@ LANES: dict[str, tuple[str, ...]] = {
     "soundcloud": ("download",),
     # Soulseek traffic polls slskd — no SoundCloud budget applies to it.
     "soulseek": ("soulseek-download", "soulseek-search"),
-    # CPU-bound local work.
-    "compute": ("waveform", "analysis", "stem-split", "routine-mine"),
+    # CPU-bound local work, plus the onboarding imports (#274/#276): imports
+    # share the lane with the waveform/analysis tasks they enqueue, matching
+    # the pre-lane serialized ordering.
+    "compute": (
+        "waveform",
+        "analysis",
+        "stem-split",
+        "routine-mine",
+        "rekordbox-onboarding-import",
+        "tracks-directory-import",
+    ),
 }
 
 _TYPE_TO_LANE: dict[str, str] = {

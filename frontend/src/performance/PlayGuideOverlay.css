@@ -25,7 +25,6 @@
   position: absolute;
   left: -1px;
   width: 2px;
-  height: 25%;
 }
 .perf-playguide.incoming-a .perf-playguide-line {
   background: var(--deck-a);

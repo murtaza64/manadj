@@ -125,6 +125,45 @@
 .mp-chipx:hover {
   color: var(--danger);
 }
+.mp-deck-shortcuts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-4);
+  margin: var(--space-4) var(--space-8);
+}
+.mp-deck-shortcut {
+  display: flex;
+  align-items: center;
+  gap: var(--space-6);
+  min-width: 0;
+  padding: var(--space-4) var(--space-6);
+  background: transparent;
+  border: 1px solid currentColor;
+  font: inherit;
+  font-size: var(--font-small);
+  text-align: left;
+  cursor: pointer;
+}
+.mp-deck-letter {
+  font-weight: 800;
+}
+.mp-deck-title {
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mp-deck-shortcut:hover:not(:disabled) {
+  background: color-mix(in srgb, currentColor 16%, transparent);
+}
+.mp-deck-shortcut:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 1px;
+}
+.mp-deck-shortcut:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
 .mp-panel .mp-search {
   margin: var(--space-4) var(--space-8) var(--space-6);
   padding: var(--space-2) var(--space-6);
@@ -523,7 +562,7 @@
   position: absolute;
   top: 2px;
   right: 8px;
-  z-index: 5;
+  z-index: calc(var(--z-sticky) + 1);
 }
 /* The editor's fit-button look. */
 .rt-fit {
@@ -556,11 +595,51 @@
   cursor: default;
   touch-action: none;
 }
+.rt-start-control {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-4);
+  margin-top: var(--space-4);
+  font-size: var(--font-small);
+  color: var(--subtext0);
+}
+.rt-start-control input {
+  width: 52px;
+  min-width: 0;
+  color: var(--text);
+  background: var(--void);
+  border: 1px solid var(--surface1);
+}
+.rt-start-control button {
+  color: var(--text);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+.rt-track-start {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 9px;
+  border-left: 3px solid;
+  cursor: ew-resize;
+  z-index: 3;
+  touch-action: none;
+}
+.rt-track-start:hover {
+  background: rgba(255, 255, 255, 0.18);
+}
 .rt-slotblock {
   position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
 }
 .rt-wave-row {
   position: relative;
+  grid-area: 1 / 1;
+  min-width: 0;
+  min-height: 64px;
 }
 /* Slot blocks separate with real GAPS (gh#190 iteration: hierarchy —
    a track and its lanes read as one unit, blocks read apart). */
@@ -571,6 +650,12 @@
 .rt-lanestrip canvas {
   display: block;
   width: 100%;
+}
+.rt-wave-row > canvas {
+  /* Bitmap resizing must not affect the panel-driven grid row height. */
+  position: absolute;
+  inset: 0;
+  height: 100%;
 }
 
 /* Lane strips: the editor's flat #0e0e0e strip + 3px color edge + terse
@@ -608,10 +693,6 @@
   z-index: 3; /* above the slot panel */
 }
 
-/* Slot chip: identity header floating at the row's top-left. */
-/* Fixed-width dim panel behind the left-side controls (gh#190): spans the
-   slot block; content scrolls behind it without distracting. Fixed width,
-   titles truncate. */
 /* The continuous tint column (gh#190 iteration): spans the whole rows
    area so block gaps never cut it; slot panels are transparent content
    layered over it. */
@@ -627,20 +708,27 @@
   box-sizing: border-box;
 }
 .rt-slotpanel {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: 0;
+  position: relative;
+  grid-area: 1 / 1;
   width: 208px;
+  min-height: 64px;
   z-index: 2;
   padding: var(--space-4) var(--space-8);
   box-sizing: border-box;
   font-size: var(--font-small);
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  align-items: flex-start;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 48px;
+  gap: var(--space-4);
+  align-content: start;
+  align-items: start;
   pointer-events: auto;
+}
+.rt-sp-title,
+.rt-sp-artist,
+.rt-sp-meta,
+.rt-lanetoggles {
+  grid-column: 1 / -1;
+  min-width: 0;
 }
 .rt-sp-title {
   display: flex;
@@ -650,6 +738,7 @@
   max-width: 100%;
 }
 .rt-sp-trunc {
+  min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -661,23 +750,35 @@
 }
 .rt-sp-meta {
   display: flex;
+  flex-wrap: wrap;
   gap: var(--space-8);
   align-items: center;
   color: var(--subtext0);
   font-size: var(--font-micro);
   white-space: nowrap;
 }
+.rt-sp-controls {
+  grid-column: 1;
+  grid-row: 4;
+  min-width: 0;
+}
+.rt-sp-role {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-4);
+}
 .rt-sp-trim {
-  /* Bottom-right of the TRACK MAIN area (the wave row's 64px), not the
-     automation lanes below (gh#190 iteration). */
-  position: absolute;
-  right: 6px;
-  top: 26px;
+  grid-column: 2;
+  grid-row: 4;
+  justify-self: center;
+  min-width: 0;
 }
 .rt-sp-trim.on .perf-knob span {
   color: var(--routine-accent);
 }
 .rt-slotnum {
+  flex-shrink: 0;
   color: var(--crust);
   font-weight: 700;
   border-radius: var(--radius);
@@ -694,6 +795,9 @@
 /* Edited entry-offset badge (ADR 0039, #207 slice 2): the '✎ edited'
    idiom on the slot panel — click reverts to the recorded entry. */
 .rt-entrybadge {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
   background: transparent;
   border: 1px solid var(--routine-accent);
   color: var(--routine-accent);
@@ -710,17 +814,11 @@
 }
 
 
-/* Lane toggle chips (the editor's gutter idiom, floated top-right of the
-   wave row). */
-/* Left-anchored (gh#190 iteration): controls live where the labels are —
-   bottom-left of the wave row, under the slot chip. */
+/* Lane toggles stay inside the panel even when every lane is hidden. */
 .rt-lanetoggles {
-  position: absolute;
-  bottom: 3px;
-  left: 6px;
   display: flex;
+  flex-wrap: wrap;
   gap: var(--space-2);
-  z-index: 3;
 }
 .rt-lanetoggle {
   width: 16px;
@@ -741,8 +839,7 @@
 
 /* Jumps — the editor's .editor-jump idiom (2px pole, chip riding the
    waveform's bottom edge, popover editor), slot-colored. Recorded =
-   solid; authored = draggable (grab cursor); ghost (removed recorded) =
-   dashed + dim. */
+   solid; authored = draggable (grab cursor). Deleted events do not render. */
 .rt-jump {
   position: absolute;
   top: 0;
@@ -766,9 +863,18 @@
 /* Selected wave rows (gh#190 track drag): slot-colored outline; the row
    drags as a clip while selected. */
 .rt-wave-row.rt-selected {
-  outline: 1px solid;
-  outline-offset: -1px;
   cursor: grab;
+}
+.rt-wave-row.rt-selected::after {
+  /* Paint above the positioned waveform, without resizing its bitmap or hit target. */
+  content: '';
+  position: absolute;
+  inset: 0;
+  outline: 3px solid;
+  outline-color: inherit;
+  outline-offset: -3px;
+  z-index: 3;
+  pointer-events: none;
 }
 .rt-wave-row.rt-selected:active {
   cursor: grabbing;
@@ -803,32 +909,15 @@
 }
 
 /* Pause markers (gh#190 play/pause events) — the jump idiom's look;
-   authored/ghost variants mirror the jump classes. */
+   authored variants mirror the jump classes. */
 .rt-jump.authored-pause {
   border-left-style: dashed;
-}
-.rt-jump.ghost-pause {
-  opacity: 0.45;
-}
-.rt-jump.ghost-pause .rt-jump-chip {
-  background: transparent !important;
-  color: var(--subtext0);
-  border: 1px dashed var(--subtext0);
 }
 
 .rt-jump.authored {
   cursor: grab;
   border-left-style: double;
   border-left-width: 3px;
-}
-.rt-jump.ghost {
-  border-left-style: dashed;
-  opacity: 0.45;
-}
-.rt-jump.ghost .rt-jump-chip {
-  background: transparent !important;
-  color: var(--overlay1);
-  border: 1px dashed var(--overlay0);
 }
 .rt-jump-chip {
   position: absolute;
@@ -1012,36 +1101,6 @@
   border-radius: var(--radius);
   background: var(--surface0);
 }
-.rt-trimextend {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  background: repeating-linear-gradient(
-    45deg,
-    rgba(var(--routine-accent-rgb), 0.14),
-    rgba(var(--routine-accent-rgb), 0.14) 6px,
-    rgba(0, 0, 0, 0.15) 6px,
-    rgba(0, 0, 0, 0.15) 12px
-  );
-  border-left: 1px dashed var(--routine-accent);
-  border-right: 1px dashed var(--routine-accent);
-  pointer-events: none;
-  z-index: 1;
-}
-.rt-trimshade {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  background: repeating-linear-gradient(
-    -45deg,
-    rgba(var(--routine-accent-rgb), 0.1),
-    rgba(var(--routine-accent-rgb), 0.1) 6px,
-    rgba(0, 0, 0, 0.25) 6px,
-    rgba(0, 0, 0, 0.25) 12px
-  );
-  pointer-events: none;
-  z-index: 1;
-}
 
 /* Pair-mode authoring gate (#221): the trim knob slot stays laid out but
    empty — a Transition has no trim field to persist. */
@@ -1054,4 +1113,65 @@
    fit, the OLDER label dims — superimposition reads as "zoom in". */
 .rt-jump-overlapped .rt-jump-chip {
   opacity: 0.35;
+}
+
+/* ── Authored mixes (ADR 0039, gh#325) ───────────────────────────────── */
+.rt-dropline {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 2px;
+  background: #00ff66;
+  pointer-events: none;
+  z-index: 30;
+}
+.rt-droplabel {
+  position: absolute;
+  top: 4px;
+  left: 6px;
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 700;
+  color: #0b0b0b;
+  background: #00ff66;
+  padding: 1px 5px;
+}
+.rt-slotremove {
+  background: transparent;
+  border: 1px solid #ff2a2a;
+  color: #ff2a2a;
+  font-size: 10px;
+  line-height: 1;
+  padding: 1px 4px;
+  cursor: pointer;
+}
+.rt-slotremove:hover {
+  background: #ff2a2a;
+  color: #0b0b0b;
+}
+.re-blank-canvas {
+  flex: 1;
+  margin: 16px;
+  border: 2px dashed #00ff66;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: #d8d8d8;
+  font-size: 13px;
+  text-align: center;
+  padding: 24px;
+}
+.re-blank-canvas.over {
+  background: rgba(0, 255, 102, 0.12);
+}
+.re-blank-canvas b {
+  color: #00ff66;
+}
+.re-authored-hint {
+  color: #ffd400;
+  font-size: 11px;
+  margin-left: 8px;
 }

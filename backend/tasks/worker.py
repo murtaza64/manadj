@@ -48,6 +48,14 @@ class TaskWorker:
         self._thread.start()
         logger.info("task worker %s started (types: %s)", self._name, sorted(self._handlers))
 
+    def add_handlers(self, handlers: dict[str, Handler], delays: dict[str, float] | None = None) -> None:
+        """Register handlers on a running worker (copy-on-write: the loop
+        may be iterating the current dict)."""
+        self._handlers = {**self._handlers, **handlers}
+        if delays:
+            self._delays = {**self._delays, **delays}
+        logger.info("task worker handlers added: %s", sorted(handlers))
+
     def stop(self) -> None:
         self._stop.set()
         if self._thread is not None:
@@ -63,3 +71,59 @@ class TaskWorker:
             finally:
                 db.close()
             self._stop.wait(self._poll_interval)
+
+
+class TaskWorkerPool:
+    """One TaskWorker per concurrency lane (backend.tasks.lanes, gh#224).
+
+    Presents the same start/stop/add_handlers surface as a single TaskWorker;
+    `add_handlers` routes each handler to its lane, extending that lane's
+    running worker or starting a fresh one (a setup guide configuring
+    SoundCloud/soulseek mid-session brings the lane up without a restart).
+    """
+
+    def __init__(
+        self,
+        session_factory: "sessionmaker",  # type: ignore[type-arg]
+        handlers: dict[str, Handler],
+        poll_interval: float = POLL_INTERVAL_SECS,
+        delays: dict[str, float] | None = None,
+    ) -> None:
+        self._session_factory = session_factory
+        self._poll_interval = poll_interval
+        self._workers: dict[str, TaskWorker] = {}
+        self._started = False
+        self._add_lane_workers(handlers, delays or {})
+
+    def _add_lane_workers(self, handlers: dict[str, Handler], delays: dict[str, float]) -> None:
+        from .lanes import split_handlers
+
+        for lane, lane_handlers in split_handlers(handlers).items():
+            lane_delays = {t: delays[t] for t in lane_handlers if t in delays}
+            worker = self._workers.get(lane)
+            if worker is not None:
+                worker.add_handlers(lane_handlers, delays=lane_delays)
+                continue
+            worker = TaskWorker(
+                self._session_factory,
+                lane_handlers,
+                poll_interval=self._poll_interval,
+                delays=lane_delays,
+                name=f"task-worker-{lane}",
+            )
+            self._workers[lane] = worker
+            if self._started:
+                worker.start()
+
+    def start(self) -> None:
+        self._started = True
+        for worker in self._workers.values():
+            worker.start()
+
+    def add_handlers(self, handlers: dict[str, Handler], delays: dict[str, float] | None = None) -> None:
+        self._add_lane_workers(handlers, delays or {})
+
+    def stop(self) -> None:
+        self._started = False
+        for worker in self._workers.values():
+            worker.stop()

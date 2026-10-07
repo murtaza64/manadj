@@ -6,6 +6,7 @@
  */
 import { useSyncExternalStore } from 'react';
 import type { DeckEngine } from '../../playback/DeckEngine';
+import { presentationOf } from '../../utils/presentationStore';
 
 /** True while a Load onto this deck must be refused (audible or about to be). */
 export function isDeckLocked(engine: DeckEngine): boolean {
@@ -14,8 +15,12 @@ export function isDeckLocked(engine: DeckEngine): boolean {
 
 /** Reactive version of the lock, for styling the row affordances. */
 export function useDeckLocked(engine: DeckEngine): boolean {
+  const store = presentationOf(engine);
   return useSyncExternalStore(
-    (cb) => engine.subscribe(cb),
-    () => isDeckLocked(engine)
+    store.subscribe,
+    () => {
+      const s = store.getSnapshot();
+      return s.playing || s.previewing || s.hotCuePreviewSlot !== null || s.scratching || s.pendingPlay;
+    }
   );
 }

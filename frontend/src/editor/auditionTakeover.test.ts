@@ -76,7 +76,7 @@ class FakeParam {
 }
 
 class FakeNode {
-  connect(destination: FakeNode): FakeNode {
+  connect<T extends FakeNode | FakeParam>(destination: T): T {
     return destination;
   }
   disconnect(): void {}
@@ -84,6 +84,7 @@ class FakeNode {
 
 class FakeAudioContext {
   currentTime = 0;
+  sampleRate = 48000;
   state = 'running';
   destination = new FakeNode();
 
@@ -105,6 +106,30 @@ class FakeAudioContext {
   }
   createWaveShaper() {
     return Object.assign(new FakeNode(), { curve: null, oversample: 'none' });
+  }
+  createDelay(maxDelayTime: number) {
+    return Object.assign(new FakeNode(), { maxDelayTime, delayTime: this.param(0) });
+  }
+  createOscillator() {
+    return Object.assign(new FakeNode(), {
+      type: 'sine',
+      frequency: this.param(1),
+      start(): void {},
+      stop(): void {},
+    });
+  }
+  createConvolver() {
+    return Object.assign(new FakeNode(), { buffer: null });
+  }
+  createBuffer(channels: number, length: number, sampleRate: number) {
+    const data = Array.from({ length: channels }, () => new Float32Array(length));
+    return {
+      numberOfChannels: channels,
+      length,
+      sampleRate,
+      getChannelData: (i: number) => data[i],
+      copyToChannel: (source: Float32Array, i: number) => data[i].set(source),
+    };
   }
   createMediaStreamDestination() {
     return Object.assign(new FakeNode(), { stream: {} });

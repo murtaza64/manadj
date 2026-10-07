@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useImperativeHandle, type Ref } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { Tag, Track } from '../types';
@@ -11,14 +11,21 @@ import BpmModal from './BpmModal';
 import FollowParamsModal from './FollowParamsModal';
 import { DEFAULT_FILTERS, useFilters } from '../contexts/FilterContext';
 import { useSearchKeys } from './searchKeys';
-import { dispatchFollow, useFollowFlags } from '../follow/followStore';
+import { dispatchFollow, getFollowFlags, useFollowFlags } from '../follow/followStore';
 import { useFollowParams } from '../follow/paramsStore';
 import { followedReferences, followSummary } from '../follow/model';
 import type { ChannelId } from '../playback/mixer';
 import { CHANNEL_IDS } from '../playback/mixer';
+import { clearPlayed, usePlayedTracks } from '../sessions/playedStore';
 import './FilterBar.css';
 
+export interface FilterBarHandle {
+  focusSearch(): void;
+  openFollowParams(): void;
+}
+
 interface FilterBarProps {
+  ref?: Ref<FilterBarHandle>;
   totalTracks: number;
   filteredCount: number;
   /** Loaded decks — Follow's reference model: the followed Deck's loaded
@@ -26,8 +33,9 @@ interface FilterBarProps {
   loadedByDeck: Record<ChannelId, Track | null>;
 }
 
-export default function FilterBar({ totalTracks, filteredCount, loadedByDeck }: FilterBarProps) {
+export default function FilterBar({ ref, totalTracks, filteredCount, loadedByDeck }: FilterBarProps) {
   const { filters, setFilters } = useFilters();
+  const played = usePlayedTracks();
   const [searchInput, setSearchInput] = useState(filters.search);
   const searchRef = useRef<HTMLInputElement>(null);
 
@@ -41,6 +49,10 @@ export default function FilterBar({ totalTracks, filteredCount, loadedByDeck }: 
   const [showTagFilters, setShowTagFilters] = useState(false);
   const [showParamsModal, setShowParamsModal] = useState(false);
   const [paramsModalPosition, setParamsModalPosition] = useState<{ x: number; y: number } | undefined>(undefined);
+  useImperativeHandle(ref, () => ({
+    focusSearch: () => { searchRef.current?.focus(); searchRef.current?.select(); },
+    openFollowParams: () => { setParamsModalPosition(undefined); setShowParamsModal(true); },
+  }), []);
 
   // Fetch all tags
   const { data: allTags } = useQuery({
@@ -110,10 +122,11 @@ export default function FilterBar({ totalTracks, filteredCount, loadedByDeck }: 
     filters.energyMin !== 1 ||
     filters.energyMax !== 5 ||
     filters.bpmCenter !== null ||
-    filters.selectedKeyCamelotIds.length > 0;
+    filters.selectedKeyCamelotIds.length > 0 ||
+    CHANNEL_IDS.some((deck) => followFlags[deck]);
 
   return (
-    <div style={{
+    <div data-tour="library.search" style={{
       background: 'var(--mantle)',
       borderBottom: '1px solid var(--surface0)',
       padding: '4px 12px',
@@ -364,11 +377,23 @@ export default function FilterBar({ totalTracks, filteredCount, loadedByDeck }: 
           onClick={() => {
             setSearchInput('');
             setFilters({ ...DEFAULT_FILTERS });
+            for (const deck of CHANNEL_IDS) {
+              if (getFollowFlags()[deck]) dispatchFollow({ type: 'toggle', deck, loaded: false });
+            }
           }}
           disabled={!hasActiveFilters}
           className="filter-bar-clear-all-btn"
         >
           Clear All
+        </button>
+
+        <button
+          onClick={() => clearPlayed()}
+          disabled={played.size === 0}
+          className="filter-bar-clear-played-btn"
+          title="Clear played track history without changing playback or filters"
+        >
+          Clear played
         </button>
 
         {/* Result Count */}

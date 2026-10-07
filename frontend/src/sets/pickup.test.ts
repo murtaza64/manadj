@@ -36,7 +36,7 @@ const tr = (over: Partial<Transition> = {}): Transition => ({
   durationSec: 20,
   bInSec: 8,
   tempoMatch: false,
-  lanes: {},
+  lanes: { faderA: [{ x: 0, y: 1 }, { x: 1, y: 1 }, { x: 1, y: 0 }] },
   ...over,
 });
 

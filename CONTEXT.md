@@ -21,8 +21,28 @@ A curation verdict on a Track: out of the active Library (bad rip, duplicate, di
 _Avoid_: hidden (sounds like a view filter), deleted (nothing is)
 
 **Desktop shell**:
-The window manadj runs in when launched as an app rather than a browser tab. Purely presentational — it attaches to a running manadj and owns no processes or state.
-_Avoid_: native app (implies a packaged distributable, which this is not)
+The window manadj runs in when launched as an app rather than a browser tab. In development it attaches to a running manadj and owns no processes; in the Packaged app it also starts and stops the backend it shows (revised 2026-10-06, ADR 0043).
+
+**Packaged app**:
+manadj as a downloadable macOS app for users other than the developer: one bundle carrying the Desktop shell, backend, frontend, and audio tooling, keeping all mutable state in a per-user data root outside the bundle.
+_Avoid_: release build, native app
+
+**First run**:
+The state of a manadj with an empty Library. Starts the Setup sequence before anything else.
+
+**Setup guide**:
+A short, skippable, independently re-runnable flow configuring one thing: Rekordbox import, tracks directory, Cue mode, SoundCloud, Soulseek, Controller check. First run chains them in order (the Setup sequence), then starts the Tour; Settings lists each with its status (done, skipped, not started) and relaunches any of them alone.
+
+**Shipped defaults**:
+The preference values a fresh install starts with — a deliberate snapshot of the developer's own preferences, excluding anything machine- or account-bound (device IDs, paths, tokens, Export enablement). A user's own setting always wins; re-snapshotting changes only what fresh or never-touched keys see.
+
+**Tour**:
+Per-section coach marks shown the first time a user enters each major area of the app, replayable on demand. Explains the UI; changes no Library state. Settings has no Tour.
+_Avoid_: walkthrough (Walkthrough is the lane review artifact)
+
+**Tutorial**:
+A hands-on lesson where each step advances only when the user actually performs the taught action (load a Track, press play, nudge, set a Hot Cue, edit a Transition) — game-like, not read-and-click-next. Distinct from the Tour, which only points at UI. Triggered by first contact with the skill (the Keyboard DJing tutorial on the first Load onto a Deck; the Transition tutorial on first entering the Mix editor), skippable, replayable. Tutorials may create real artifacts (a Transition saved during the lesson is an ordinary Transition).
+_Avoid_: walkthrough
 
 ### Curation
 
@@ -53,6 +73,9 @@ The hand-curated ordering of Tracks within a Playlist — part of the Playlist's
 
 **Transition**:
 A first-class persisted artifact: the handover between an ordered pair of Tracks — entry/exit anchors (in seconds), a duration, an optional tempo-match, drawn automation lanes for mixer controls, and Jump events on either role (outgoing-side admitted 2026-08-26; incoming-only before that). Directional (A→B is not B→A); a pair usually has one Transition, occasionally several. The incoming entry anchor may be negative: the incoming Track's audio then begins partway into the Transition (a silent lead gap). Beat-snapping and tempo-matching are editing affordances, not the model. The accumulating set of saved Transitions is the library of "what mixes well into what" — the seed of track-association features.
+
+**Transition bounds**:
+The handover's audible extent: incoming onset through outgoing final cessation, including intervening cross-cuts. An outgoing Track left open continues to its natural end, including replayed material; a fade or kill can end it sooner. Incoming solo playback lies outside the handover. The bounds do not constrain authoring: setup Jumps and automation outside them remain editable and retain their timing. A saved duration is not an implicit outgoing stop (decided 2026-09-09, ADR 0040).
 
 **Sketch origin**:
 The Transition editor's timeline starts at the outgoing Track's start — an invariant, not a setting. The outgoing Track never moves on the timeline — but it may Jump inside the window (restated 2026-08-26, admitting outgoing-side Jump events): mix time ≡ the outgoing's elapsed play through the window, so the outgoing runs the full window width even when its Jumps repeat material (window mix-duration ≠ outgoing-audio-span is the accepted asymmetry; downstream anchors on the outgoing's timeline simulate through its Jumps). Anchors stay in track time — the window starts at the outgoing's track-time anchor, the incoming's entry alignment is unchanged — so the artifact is context-free: it replays identically regardless of where either Track's playback began in the Set. Every alignment gesture is expressible as a Slide of the incoming Track, the window, or both. Holds for Cameos with host as the outgoing role — the same rule with the host in the outgoing seat.
@@ -142,6 +165,8 @@ The Cameo's detection target — the complementary verdict of the same detector 
 **Cameo Take**:
 A Guest engagement detected and captured automatically during live performance playback (or hand-cut from a Session — the classifier's verdict decides which sibling a cut becomes) — the Cameo sibling of a Take, with the same rules throughout: lives in the Transition history, never in any library; reviewed via Vectorization; promotion saves a Cameo; a Set entry may pin one (manually, never by auto-fill); counts for nothing in discovery until promoted.
 
+A reviewed Cameo Take may instead produce a Transition when its authored incoming Track survives the outgoing. The recording remains a Cameo Take; existing Cameo Take pins retain the original evidence rather than becoming adjacency pins.
+
 **Cameo library**:
 The queryable index over saved Cameos — "what guests over this Track / what hosts this Track" — directional (host→guest) and distinct from the Transition library, whose "what mixes into what" stays Transition-only. Cameo Takes are not in it: only promotion adds.
 
@@ -160,6 +185,12 @@ _Avoid_: non-session routine, synthetic routine, blank routine (the draft has no
 **Slot id**:
 The stable identity of a cast slot (client-minted at drag-in), which lanes, Jumps, and other slot-addressed edits key on. The entry-ordered slot *index* (slot 0 … n−1) is a derived view recomputed from entry offsets — reordering a cast never re-keys its edits (ADR 0039). On promoted Routines, entry offsets are additionally editable as per-slot **offset overrides** in the edits layer (nudges, phrase shifts) — the baked promotion outputs stay immutable testimony, like a recorded lane under an authored one.
 
+**Routine playback bounds**:
+The start and end of a saved Routine's playback, independent of its source Session. Resizing retains material and edits outside the bounds; expanding restores that material or continues the artifact's boundary motion and control values. The current bounds define the Routine's extent; its original length is provenance, not a privileged editing boundary. Bounds must retain playable material from every cast slot: delete the slot explicitly before trimming further. Muting a slot does not remove its membership or change these limits. Candidate trimming instead changes the Session excerpt being considered for promotion.
+
+**Track-start trim**:
+Revealing more intro or shortening the initial passage of an incoming Routine slot without shifting its later material, jumps, or automation. Extending uses the track's own continuation, not more Session evidence. Limited to the initial continuous passage and the neighboring entries; never reorders or removes slots. The Routine's entry slot uses the Routine playback start instead. Distinct from moving the whole slot or sliding its material. Undoable; trimmed source material remains retained.
+
 **Practice rep**:
 A detected return or alternation attributable to rehearsal rather than performance: backward transport motion on the returning Deck during the away-gap (re-seeking to replay a junction), or a pair-isolated alternation (only the two Tracks audible while they trade repeatedly — fader-drill reps). Excluded from style mining, Move candidate suggestion, and any evidence tier; retained in Sessions as ordinary events (the log is impartial — practice classification is a read-time verdict, and its thresholds are tunable heuristics).
 
@@ -175,7 +206,12 @@ The chronological log of Takes and Cameo Takes, grouped by engagement — "what 
 
 **Session**:
 The persisted whole event log of one stretch of live performance — everything the always-on capture tap observes, under one capture clock, all four Decks unconditionally. Bounded by audibility, not by app lifetime (amended 2026-08-13, sessions 11; originally one per recorder lifetime with no boundary heuristics): the row opens on the first Master-audible Deck instant — loads, cueing, control setup, and tenure markers buffer as reconstruction context but never create a row, so a 100%-silent run persists nothing — and ten continuous minutes with no Master-audible Deck end it (machine tenure counts as inactivity; the observed idle tail stays in the old log; no engagement, chunk sequence, or Take provenance spans the boundary; the next Session opens lazily when performance resumes). The container Takes and Cameo Takes are detected within (each carries its Session); idle stretches shorter than the boundary are collapsed by the viewer. Non-performance stretches (editor auditions, Conductor playback) appear as Audible-surface tenure markers, not event streams — the log records that the machine held the surface from X to Y, never what it played. Stores control/transport events only, no audio; auditioning a moment replays events through the shared live Decks — a machine performance holding the Audible surface, invisible to capture, yielding to takeover like the Conductor: a manual gesture ends replay and capture resumes (decided 2026-07-15).
+Master-audible cue previews count for Session activity and retention (2026-09-12, ADR 0033); silent/PFL-only cueing does not. Timeline idle begins after five seconds of continuous silence, without backdating. Take detection and Played accounting still exclude previews.
 _Avoid_: capture session (the informal precursor, canonicalized 2026-07-15), session recording (implies audio; a Session stores events), whole-session capture (ADR 0020's placeholder phrase), one Session per recorder lifetime (the pre-sessions-11 boundary)
+
+**Played** (Track, this Session):
+A Track that has been Master-audible for more than 20 cumulative seconds since the last reset (2026-09-09, gh#106), rendered as green title/artist text. Live-only: restart/reload, ten quiet minutes, or the filter bar's Clear played button clears the marks and accumulated time. Manual clearing leaves playback and filters unchanged; a running Track starts earning audible time again from the click. Load-only, CUE/preview stabs, PFL, kills, and machine-tenure playback contribute nothing. Historical Sessions never restore marks.
+_Avoid_: history (rekordbox's persisted list; Played is live-scoped), audible Track (the Sessions-list count — any audible instant, no threshold).
 
 **Transition template**:
 Retired term (2026-08-27, ADR 0037). The named beat-domain recipe system for stamping Transitions was dropped entirely with the editor supersession — unused in practice, and its anchor-resolution machinery consumed the pair window model the unified surface translates away. The concept may return later as a Routine-native "choreography recipe" if missed; nothing survives of the implementation (`transition_templates` router, template UI).
@@ -228,6 +264,9 @@ _Avoid_: same artist (implies exact string equality, which the library cannot su
 **Follow mode**:
 A per-Deck toggle that keeps the browse list continuously filtered to candidate next Tracks for that Deck's loaded Track, updating hands-off as Tracks change — serving "finding the next track painlessly during a set". A followed Track's candidates carry all three evidence tiers: heuristic Compatible Tracks unioned with the Observed tier and the known tier (Tracks with a saved Transition from it, Tracks with a saved Cameo hosted by it, and Linked Tracks) — a known or Observed Track surfaces even when heuristics would exclude it, and "known only" narrows to just the known tier. With multiple Decks following, their candidate sets union. The followed list is ordered by one total candidate order: the Known strata first (in Known-strength order; a pair takes its best), then Observed (by Take count and recency), then Compatible Tracks by Match score (revised 2026-07-08 from the provisional key-relation tiers); best position wins across followed Decks. The score is a sortable column, the heuristic stratum's default sort — choosing another sort deliberately reorders that stratum, while the Known and Observed strata stay pinned on top. Follow rides playback: once any Deck follows, all playing Decks become references; starting a Deck spreads Follow to it, and pausing one removes it while another plays. The last followed Deck survives full silence. Playback never enables Follow from nothing: when no Deck follows, turning it on is the user's act.
 
+**Temperature**:
+Follow's opt-in variety control within Compatible (#251). Zero preserves descending Match score; higher values sample a score-weighted order without replacement. Known ordering, admission, and displayed scores do not change; explicit column sorts override Temperature. Draws are keyed by the followed Track set, candidate identity, and a session-only reroll seed, so filtering and rerenders preserve relative order. Temperature is a persisted preference; Reroll changes only the draw. Separate from Auto DJ's planned adventurousness dial and Dig's Wildcard.
+
 **Observed**:
 Discovery's middle evidence tier: an ordered Track pair mixed repeatedly — multiple Takes — with nothing curated for the pair (no Link, no saved Transition). Behavioral evidence, accrued hands-off from normal playing: stronger than Compatible's metadata heuristics, weaker than Known's explicit acts. The Take-count floor is a tunable heuristic (nominally ≥2, because Handover detection is deliberately liberal), not part of the definition; Take count and recency order within the tier. Cameo Takes still count for nothing in discovery until promoted. A pair leaves the tier upward the moment it becomes Known.
 _Avoid_: implicit favorite, inferred pair
@@ -249,7 +288,7 @@ _Avoid_: chain (bare noun implies a stored artifact)
 
 **Wildcard**:
 The deliberate randomness slot in discovery's surfaces: alternates between a neglected Unplaced Track (sampled by anti-ranking — old, evidence-free, never auditioned) and an untried pair (Compatible, zero Takes). Reroll is its only control; it respects the active filter chips (spice within tonight's vibe, not against it) and never blends into ranked or evidence-ordered lists. The untried-pair form is an evidence generator: audition it and the loop closes — Take, Observed, Chain candidate.
-_Avoid_: shuffle, ranking jitter (rejected: noise inside a ranking makes the ranking untrustworthy)
+_Avoid_: shuffle, ranking jitter (Wildcard stays separate from ranked lists; Follow's opt-in Temperature is a distinct control)
 
 **Seed Set from Playlist**:
 A gesture creating a Set from a Playlist: the Play order becomes the Set's order, adjacencies Unresolved; the source Playlist is untouched and no link between them persists. The standing bridge from playlist-first planning (the giant playlist firms up, then one gesture hands over to the Set editor), and the one-time migration for playlist-era sets so Unplaced graduation reflects history.
@@ -292,8 +331,20 @@ _Avoid_: theme (implies switchable; manadj is dark-only)
 **Mixer**:
 The single shared output stage: one channel strip per Deck (trim, 3-band EQ, sweep filter, channel fader), plus crossfader, master volume, and an always-on final sample ceiling. Neutral trim is -6 dB, supplying expected two-channel summing headroom; Master has explicit unity at 50% and +6 dB at maximum; the -2 dBFS Master/Cue ceiling guards overload without changing ordinary program loudness. Each channel may be assigned to the crossfader's left side, right side, or neither; Deck identity does not determine that assignment. Mirrors a hardware DJ mixer.
 
+**Trim automation**:
+A Routine slot's channel-trim envelope, recorded or authored. Its knob offsets the envelope and displays the resulting average; resetting the knob removes the offset without deleting authored nodes. Distinct from playback-bound resizing or Track-start trim.
+
 **Audible surface**:
 A playback mode's claim on the shared Decks+Mixer — the plain deck-transport semantics of the Performance and library views, or the Transition editor's mix-timeline semantics. Exactly one surface is audible at a time; an arbiter owns which, and a displaced surface's playback pauses rather than coexist. Playback gestures from app-wide inputs (a Controller) route by gesture class — transport, cue, pads, jumps, loops, jog — to the audible surface; a class the surface doesn't register is dropped, mirroring what the keyboard does there. Mixer-state controls and Load are not gesture classes: they belong to the shared Mixer and to the mounted browse view respectively. (Redefined 2026-07-05: formerly a group of playback machinery that could produce sound as a unit — the editor had a private player; every surface now plays through the shared Decks+Mixer.)
+
+**Settings**:
+The permanent preference surface for sweep-filter sound, Waveform styles, Controller jog calibration, and app configuration (tracks directory, External library locations, whether Export is enabled). App configuration is persisted as a human-readable file a technical user can open directly; editing it in Settings and editing the file are equivalent. Export to External libraries is off until enabled here. Preferences persist with the library; preview playback uses an explicitly selected shared Deck, not a separate player. Filter tuning is global across channel strips and applies to current automation without changing Deck filter positions or taking over playback.
+
+**Sweep filter**:
+The Mixer's per-channel low/high-pass effect, post-EQ and pre-fader/PFL. Its position is a live Deck control; model, resonance and response shape are global Settings. Default: resonant 24 dB/octave, 17 dB added resonance, 15% resonance trim. Existing Transitions and Session replays use current filter preferences, not historical filter configurations.
+
+**Beat FX**:
+The Mixer's one time-based effects section (gh#272), mirrored after the GRV6: SELECT swaps Echo/Reverb/Flanger live; unsupported detents select `---`, switch the section off, and cannot be re-enabled; CH SELECT is one radio target across A–D, SP and MST (SP is hardware-only/silent until manadj has a sampler bus; MST processes summed post-crossfader program and retains the last selected A–D Deck as its tempo source); ON/OFF gates the section; one bipolar LEVEL/DEPTH coordinate runs from original-only (-1), through balance midpoint (0), to effect-only (+1); BEAT ◄ ► selects the global timing fraction. Echo is a full-band beat-synced feedback delay quantized to 1/4…8 beats (no built-in Reverb; LOW CUT ECHO is a separate Pioneer effect). Reverb is beatless convolution with a synthesized stereo impulse. Flanger is a short modulated delay whose one LFO cycle spans the selected length, read as bars by default (1 = 1 bar = 4 beats; Settings toggles Bars/Beats, gh#331). A–D processing is post-channel-fader/pre-crossfader; MST is post-crossfader/pre-Master; PFL/meter remain pre-fader/pre-FX. Changing targets or closing a fader stops new excitation while existing tails ring out. Echo feedback/saturation, Reverb decay/damping/width and Flanger delay/width/feedback/length unit are live persisted Settings. The automation overlay never owns Beat FX.
 
 **Performance view**:
 The four-Deck view for practicing and performing mixes: four stacked full-width waveforms with linked zoom, a 2×2 grid of Deck controls, the Mixer, and the Library's browse surface embedded below. All four Decks remain visible regardless of Controller focus. Replaces the Practice view. Curation beyond quick edits (tags, provenance) stays in the library view.
@@ -302,19 +353,47 @@ The four-Deck view for practicing and performing mixes: four stacked full-width 
 Placing a Track on a Deck for playback — an explicit act, as in DJ hardware. Selecting a track in the library browses without loading; the Deck keeps its Track until another Load replaces it. In the Performance view, Loading onto a playing Deck is blocked (protecting the mix); in the library it simply replaces what's playing.
 
 **Nudge**:
-A momentary tempo bend on a Deck used to ride phase alignment against the other Deck — held (a key or button) or impulse-driven (jog wheel rotation); when the input stops, the Deck's pitch is restored exactly. Distinct from a *grid nudge*, which shifts a Track's Beatgrid and changes stored data — a Nudge changes only what is playing right now. Jog rotation on a paused Deck is a seek, not a Nudge. The Transition editor's counterpart of the same intent is the Alignment nudge.
+A momentary tempo bend on a Deck used to ride phase alignment against the other Deck — held (a key or button) or impulse-driven (jog wheel rotation); when the input stops, the Deck's pitch is restored exactly. Distinct from a *grid nudge*, which shifts a Track's Beatgrid and changes stored data — a Nudge changes only what is playing right now. Bare-rim rotation on a paused Deck is a seek, not a Nudge; a touched Vinyl platter scratches instead. The Transition editor's counterpart of the same intent is the Alignment nudge.
 
 **Play guide**:
 A derived, view-only marker in the Performance view: one per saved Transition from a playing outgoing-candidate Track to a paused Track, marking the instant to press play on the paused Deck so the pair rides that Transition's alignment. Every applicable playing→paused pair gets its own guide; a guide identifies both Decks and spans only their waveform rows. When all applicable Decks are paused, both directions may show; starting a Deck prunes guides to live directions. Computed from the Transition's alignment and tempo-match ratio and the paused Deck's current playhead (works wherever the incoming Track is cued), projected on the trajectory before the Transition's first Jump event. A missed guide (already behind the playhead) stays visible rather than disappearing. Labeled with the Transition's name and carrying the incoming (to-be-pressed) Deck's color. Purely visual — never stored, never editable, never enforcing pitch (a pitch mismatch against the Transition's tempo-match is surfaced, not corrected).
 _Avoid_: transition guide (collides with Transition template), entry/cue marker ("cue" is overloaded)
 
+**Vinyl mode**:
+A per-Deck setting enabling platter touch to hold the Track and platter movement to scratch it forward or backward, including while paused. With Vinyl off, jog movement nudges or seeks without scratching. Scratching temporarily bypasses Key Lock; release restores the prior play/pause intent.
+
+**Spinback**:
+A backward platter spin that continues after the hand releases, ending when the jog stops rotating. Part of the same Scratch gesture, not a button-triggered effect.
+
+**Scratch**:
+A platter-controlled gesture that holds or moves the audible Track position forward and backward, with speed and musical pitch coupled. Includes any released Spinback continuation.
+
+**Slip mode**:
+A per-Deck setting that keeps the normal playback timeline advancing behind a Scratch, Spinback, or Slip loop and returns to it on release. With Slip off, release keeps the manipulated position. A paused Deck stays paused. Slip arms at scratch touch-down or loop entry. Switching it off immediately cancels all pending returns without moving playback or ending the gesture; switching it on applies only to the next gesture.
+
+During an active Slip gesture, the lower performance waveform and its beat/cue marks follow the return timeline; the upper half follows audible playback. A scratch inside an ordinary loop has a looped return; inside a Slip loop the lower half follows the outer, unlooped return.
+
+**Slip loop**:
+A loop entered with Slip enabled. Its background timeline advances unlooped at composed pitch/bend, surviving resize, relative loop translation, and nested scratches. Loop toggle or the lit preset releases to that timeline; pause, absolute seek/cue, Load, or machine replacement cancels the return. Paused entry arms a stationary return until audio starts. The audible loop can continue after the hidden timeline reaches track end; release then stops at EOF. Dedicated momentary Roll pads are not implemented.
+
+Sessions replay the recorded loop-exit landing, including from a mid-loop start. The hidden return waveform is live-only; replay does not reconstruct its clock. Take/Routine promotion refuses Slip-loop evidence until it can preserve the return jump.
+
 **Quantize**:
 An app-wide sticky toggle (default on) making beat-relative performance gestures grid-aligned: cue and Hot Cue placement snap to the nearest beat, auto-loop regions snap to the nearest beat, and Hot Cue jumps while playing are phase-preserving — a whole-beat displacement landing at the cue plus the playhead's intra-beat phase, so the groove never stumbles. Evaluated at gesture time; imports are not gestures and never snap. Gridless Tracks behave as if it were off. Beat jump (inherently whole-beat), cue return, paused-cue seeks, loop halve/double, and Transition-editor snapping are outside its authority.
 _Avoid_: snap (the Transition editor's separate affordance), quantization (the Analysis sense — see Quantized track)
 
+**Cue mode**:
+An app-wide preference for what pressing a Hot Cue does on a paused Deck. **Gated** (default): holding previews from the cue and releasing returns to it. **Trigger**: pressing jumps to the cue and starts playback, which continues after release. Hot Cues on a playing Deck jump in either mode; the Main cue keeps its CDJ hold behavior regardless.
+
 **Key Lock**:
-A sticky per-Deck setting (default on): playback-rate changes on that Deck (pitch fader, Nudge) do not shift the loaded Track's Key. Belongs to the Deck — not to the Track, not to the Mixer. Named tension: DJ-jargon *pitch* (the fader, the Deck's ±% rate) changes tempo; Key Lock keeps the *musical* pitch — the Key — constant while it does. Also known as master tempo (Pioneer).
+A sticky per-Deck setting (default on): playback-rate changes on that Deck (pitch fader, Nudge) do not shift the loaded Track's Key. Scratching bypasses it until release. Belongs to the Deck — not to the Track, not to the Mixer. Named tension: DJ-jargon *pitch* (the fader, the Deck's ±% rate) changes tempo; Key Lock keeps the *musical* pitch — the Key — constant while it does. Also known as master tempo (Pioneer).
 _Avoid_: "pitch-preserving", "pitch shift" — "pitch" already means the rate control.
+
+**Sync Group / Group Tempo**:
+The engaged Decks sharing one effective tempo, with per-Deck half/double-time relationships. Pitch input on any member changes Group Tempo; Nudge remains individual. There is no Tempo Master, no continuous chasing of unsynced Decks, and no phase lock. A member outside its pitch reach stays engaged but out-of-lock until tempo becomes reachable again.
+
+**MATCH / SYNC**:
+MATCH captures another playing Deck's tempo once without changing group membership. SYNC joins or leaves the Sync Group. With Quantize on, either successful MATCH or SYNC engagement aligns a playing Deck's beat phase once; neither edits the stored Beatgrid. Disengagement leaves pitch unchanged.
 
 **Alignment nudge**:
 Realigning the Transition editor's pair by a fixed time step — the editor's counterpart of a performance Nudge: both ride the pair's relative alignment, but a Nudge does it live and leaves nothing behind, while an Alignment nudge edits the sketch (autosaved). A Slide variant. Distinct from a grid nudge, which edits the Track's stored Beatgrid.
@@ -337,6 +416,13 @@ A hardware MIDI control surface (e.g. the DJControl Inpulse 300 MK2) driving Dec
 
 **Control focus**:
 The pair of application Decks currently addressed by the left and right layered control surfaces, shared by Controller and keyboard input. On a two-surface, four-Deck Controller, one Deck is focused on each side; changing either side from hardware or keyboard, or interacting with an on-screen Deck panel, updates the same focus. Focus changes input routing and its UI emphasis only; it says nothing about which Decks are loaded, playing, audible, or followed.
+
+**Layered control**:
+A physical continuous control (fader, knob) that a Controller's layer switch re-points from one Deck of a side's pair to the other — the tempo fader on any layered surface, and the whole mixer strip on Controllers whose mixer has fewer channels than Decks (DDJ-SB3). Every layer switch re-arms soft takeover for both Decks of the pair: the control applies nothing until it reaches the now-addressed Deck's value (rekordbox-style pickup).
+_Avoid_: shared control
+
+**Browse focus**:
+PERFORM's library keyboard mode, toggled with Tab without changing the app view or Control focus. Deck keyboard gestures are released and disabled while browsing; MIDI and pointer controls are unchanged. Letter loads address physical Decks and retain Browse focus. Escape returns to decks; search and dialogs consume their own Escape first. Press `?` for bindings. The active browse area has an accent frame; sidebar focus, cursor, and track selection are shared with MIDI browsing.
 
 **Mapping**:
 The device-specific translation from a Controller's physical controls to manadj actions, and of manadj state to the Controller's Feedback addresses. One Mapping per device model; controls with no manadj counterpart are simply absent from it and do nothing. A counterpart is assigned, not read off the silkscreen: a Mapping may repurpose a control away from its printed label for any existing action whose gesture shape (momentary, toggle, continuous) and scope (Deck-surface, channel-fixed, global) match the physical control — label affinity is a preference for choosing among candidates, never a requirement (resolved 2026-07-13; the GRV6 runs only manadj, so foreign-software muscle memory is not protected).
@@ -381,7 +467,7 @@ A Track produced against a fixed tempo grid, so a constant-tempo Beatgrid (BPM +
 The stored Analysis artifact for a Track's audio: broadband peaks plus per-band energies over time, style-agnostic — no aesthetic choices baked in. Internal to manadj — never transferred by Sync; each external library computes its own.
 
 **Waveform**:
-A rendering of a Track's Waveform data in manadj's player UI. Many render styles can be drawn from the same Waveform data; style is a display concern, not an Analysis one.
+A rendering of a Track's Waveform data in manadj's player or tracklist UI. Many render styles can be drawn from the same Waveform data; style is a display concern, not an Analysis one. Tracklist previews use a stored, bounded reduction of that data and the saved minimap style, with Hot Cue positions overlaid separately.
 
 **Waveform style**:
 A named render recipe over Waveform data: a shader variant plus its tunable display parameters (band grouping, per-group gain, gamma, smoothing). A display concern — never baked into Waveform data; switching or tweaking a style never requires re-Analysis.
@@ -448,21 +534,21 @@ _Avoid_: publish, push, write-to-files (that's Export to Disk)
 Any operation that brings tracks or track data into manadj. Two kinds: Disk Import and External Import.
 
 **Disk Import**:
-New audio files from the tracks directory becoming Tracks: a Scan discovers candidates, accepting a candidate creates a Track.
+New audio files becoming Tracks, always imported in place (the Track points at the file where it sits; nothing is copied). Two entry points: a Scan of the tracks directory discovers candidates and accepting one creates a Track; or files/folders dropped onto the Library from anywhere on disk (folders recurse, non-audio ignored, files already Tracks — archived included — skipped). Dropping onto a Playlist also appends the new Tracks to it.
 
 **External Import**:
 A Sync operation that pulls state from an external library into manadj, for data that originated downstream — keys/BPM analyzed in Engine, hot cues set at a gig, tracks added elsewhere first. Less common than Export but routine, not exceptional. The counterpart of Export.
 _Avoid_: pull, Library Import
 
 **Scan**:
-The discovery step of a Disk Import: finding audio files in the tracks directory that are not yet Tracks and proposing them as candidates.
+The discovery step of a tracks-directory Disk Import: finding audio files in the tracks directory that are not yet Tracks and proposing them as candidates. A drop needs no Scan — the dropped files are the selection.
 
 **Diverged**:
 A track field (title, artist, key, BPM, energy, Tag assignment, Hot Cues, Beatgrid, Main cue) whose value differs between the Library and another Surface. The default resolution is Export (manadj wins); Import is the explicit exception. Set-valued fields (Tag assignment, Hot Cues) compare as whole sets; a placeholder grid counts as absent, not as a value that can diverge.
 _Avoid_: discrepancy (implementation term)
 
 **Match**:
-The association between a Track and its counterpart in an external library, established during a Sync operation by file path, falling back to filename. Recomputed each run; not persisted.
+The association between a Track and its counterpart in an external library, established during a Sync operation by file path, falling back to filename. Paths compare by identity, not spelling: `/` and `\` separators are equal, Unicode is NFC-normalized, and on Windows case is ignored. Recomputed each run; not persisted.
 
 **Sync inbox**:
 The default unified-sync presentation: every attention-worthy track appears exactly once, in the highest-priority section that applies. Answers "what should I deal with, in what order" — a triage view, not a query.

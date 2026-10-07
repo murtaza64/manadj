@@ -13,12 +13,23 @@ import { planReplay } from './replayPlanner';
 import type { ReplayPlan } from './replayPlanner';
 import { SessionReplayDriver } from './SessionReplayDriver';
 import type { ReplayStopReason } from './SessionReplayDriver';
+import { scratchPosition, scratchFilterAt, moveScratch } from '../playback/worklet/scratchMotion';
+import type { ScratchFrame, ScratchFilter } from '../playback/worklet/scratchMotion';
 
 // ── Fakes ────────────────────────────────────────────────────────────────
 
 class FakeEngine {
   trackId: number | null = null;
   playing = false;
+  scratching = false;
+  slipMode = false;
+  vinylMode = true;
+  scratch: ScratchFilter | null = null;
+  scratchCalls: { deltaSeconds: number; durationSeconds: number }[] = [];
+  scratchEnds: number[] = [];
+  loop: { start: number; end: number; lengthBeats: number } | null = null;
+  scheduled: { owner: symbol; frames: ScratchFrame[]; index: number } | null = null;
+  private preserveSchedule = false;
   previewing = false;
   playhead = 0;
   playheadAt = 0;
@@ -35,10 +46,15 @@ class FakeEngine {
   }
 
   getSnapshot() {
+    this.syncScheduledScratch();
     return {
       trackId: this.trackId,
       loadState: this.trackId === null ? 'empty' : 'ready',
       playing: this.playing,
+      scratching: this.scratching,
+      slipMode: this.slipMode,
+      vinylMode: this.vinylMode,
+      loop: this.loop,
       duration: 600,
       pitchPercent: this.pitchPercent,
       bendPercent: 0,
@@ -49,14 +65,100 @@ class FakeEngine {
   }
 
   getPlayhead(): number {
+    this.syncScheduledScratch();
+    if (this.scratch) return scratchPosition({ ...this.scratch, position: this.playhead,
+      time: this.playheadAt, trackDuration: 600, loop: this.loop }, this.clock());
     // Pitch-aware (sessions 18): the engine advances at its true rate, so
     // rate-inference tests can assert drift actually stops.
     const rate = 1 + this.pitchPercent / 100;
     return this.playing ? this.playhead + (this.clock() - this.playheadAt) * rate : this.playhead;
   }
 
+  setLoopRegion(loop: { start: number; end: number } | null, position?: number) {
+    this.loop = loop ? { ...loop, lengthBeats: 4 } : null;
+    if (position !== undefined) {
+      this.playhead = position;
+      this.playheadAt = this.clock();
+      this.scratching = false;
+      this.scratch = null;
+    }
+  }
+  async prepareScratchReplay() {}
+  scheduleScratch(frames: ScratchFrame[]): symbol {
+    const owner = Symbol();
+    this.scheduled = { owner, frames, index: -1 };
+    return owner;
+  }
+  withScratchSchedule<T>(fn: () => T): T {
+    const before = this.preserveSchedule;
+    this.preserveSchedule = true;
+    try { return fn(); } finally { this.preserveSchedule = before; }
+  }
+  syncScheduledScratch(): number | null {
+    const s = this.scheduled;
+    if (!s) return null;
+    while (s.frames[s.index + 1]?.time <= this.clock()) {
+      const f = s.frames[++s.index];
+      if (!f.motion && this.scratching) this.scratchEnds.push(f.position);
+      this.playhead = f.position;
+      this.playheadAt = f.time;
+      this.playing = f.playing;
+      this.setLoopRegion(f.loop);
+      this.pitchPercent = (f.rate - 1) * 100;
+      this.scratching = f.motion !== null;
+      this.scratch = f.motion ? { drive: f.motion.drive, rate: f.motion.rate } : null;
+    }
+    return s.frames[s.index]?.time ?? null;
+  }
+  cancelScheduledScratch(owner?: symbol): void {
+    if (!this.scheduled || (owner && owner !== this.scheduled.owner)) return;
+    this.syncScheduledScratch();
+    this.scheduled = null;
+    if (this.scratching) this.endScratch(this.getPlayhead());
+  }
+
+  setSlipMode(on: boolean): void { this.slipMode = on; this.emit(); }
+  setVinylMode(on: boolean): void {
+    if (this.vinylMode === on) return;
+    if (!on && this.scratching && !this.preserveSchedule) this.endScratch(this.getPlayhead());
+    this.vinylMode = on;
+    this.emit();
+  }
+  getScratchState() {
+    this.syncScheduledScratch();
+    if (!this.scratch) return null;
+    return scratchFilterAt({ ...this.scratch, time: this.playheadAt }, this.clock());
+  }
+  beginScratch(): void {
+    if (!this.preserveSchedule) this.cancelScheduledScratch();
+    this.playhead = this.getPlayhead();
+    this.playheadAt = this.clock();
+    this.scratching = true;
+    this.scratch = { drive: 0, rate: 0 };
+    this.emit();
+  }
+  scratchMove(deltaSeconds: number, durationSeconds: number): void {
+    const previous = this.getScratchState();
+    this.playhead = this.getPlayhead();
+    this.playheadAt = this.clock();
+    this.scratchCalls.push({ deltaSeconds, durationSeconds });
+    this.scratch = moveScratch({ drive: previous?.drive ?? 0, rate: previous?.rate ?? 0,
+      position: this.playhead, time: this.playheadAt, trackDuration: 600, loop: this.loop },
+    this.clock(), deltaSeconds, durationSeconds);
+  }
+  endScratch(positionSeconds: number): void {
+    this.scratchEnds.push(positionSeconds);
+    this.playhead = positionSeconds;
+    this.playheadAt = this.clock();
+    this.scratching = false;
+    this.scratch = null;
+    this.emit();
+  }
+
   seek(t: number): void {
+    if (!this.preserveSchedule) this.cancelScheduledScratch();
     this.seeks.push(t);
+    this.loop = null;
     this.playhead = t;
     this.playheadAt = this.clock();
     this.emit();
@@ -71,6 +173,7 @@ class FakeEngine {
   }
 
   pause(): void {
+    if (!this.preserveSchedule) this.cancelScheduledScratch();
     if (!this.playing) return;
     this.playhead = this.getPlayhead();
     this.playing = false;
@@ -112,6 +215,7 @@ class FakeEngine {
 
   /** The load path completing: trackId lands + ready, emits (async flow). */
   finishLoad(trackId: number): void {
+    this.scheduled = null;
     this.trackId = trackId;
     this.playing = false;
     this.playhead = 0;
@@ -369,6 +473,370 @@ function planFor(events: CaptureEvent[], t: number): ReplayPlan {
 // ── Tests ────────────────────────────────────────────────────────────────
 
 describe('SessionReplayDriver — seed and schedule', () => {
+  it.each([false, true])('replays an unchanged-loop phase anchor (scheduled scratch: %s)', async scheduled => {
+    const region = { start: 10, end: 12 };
+    const events: CaptureEvent[] = [
+      { t: 0, kind: 'load', channel: 'A', trackId: 11, bpm: 120 },
+      { t: 0, kind: 'loop', channel: 'A', playhead: 10, region },
+      { t: 0, kind: 'transport', channel: 'A', action: 'play', playhead: 10 },
+      { t: 1, kind: 'loop', channel: 'A', playhead: 11.2, region },
+      ...(scheduled ? [
+        { t: 3, kind: 'transport', channel: 'A', action: 'scratchBegin', playhead: 11.2 },
+        { t: 4, kind: 'transport', channel: 'A', action: 'scratchEnd', playhead: 11.2 },
+      ] as CaptureEvent[] : []),
+      { t: 6, kind: 'tick', playheads: {} },
+    ];
+    const r = rig(planFor(events, 0));
+    try {
+      await r.driver.start();
+      r.advance(1.25);
+      expect(r.engines.A.loop).toMatchObject(region);
+      expect(r.engines.A.getPlayhead()).toBeGreaterThanOrEqual(11.2);
+      expect(r.engines.A.getPlayhead()).toBeLessThan(11.5);
+      expect(r.stops).toEqual([]);
+    } finally { r.driver.stop(); }
+  });
+
+  it('retains equal-timestamp loop/scratch ordering on the audio clock', async () => {
+    const events: CaptureEvent[] = [
+      { t: 0, kind: 'load', channel: 'A', trackId: 11, bpm: 120 },
+      { t: 1, kind: 'loop', channel: 'A', playhead: 11, region: { start: 11, end: 13 } },
+      { t: 1, kind: 'transport', channel: 'A', action: 'play', playhead: 11 },
+      { t: 1, kind: 'transport', channel: 'A', action: 'scratchBegin', playhead: 11 },
+      { t: 1, kind: 'transport', channel: 'A', action: 'scratchMove', playhead: 11, filter: { drive: -8, rate: -2 } },
+      { t: 2, kind: 'transport', channel: 'A', action: 'scratchEnd', playhead: 12 },
+      { t: 2, kind: 'loop', channel: 'A', playhead: 14, region: null },
+      { t: 4, kind: 'tick', playheads: {} },
+    ];
+    const r = rig(planFor(events, 0));
+    try {
+      await r.driver.start();
+      r.advance(1.06);
+      expect(r.engines.A.getSnapshot().scratching).toBe(true);
+      expect(r.engines.A.loop).toMatchObject({ start: 11, end: 13 });
+      r.advance(1);
+      expect(r.engines.A.getSnapshot().scratching).toBe(false);
+      expect(r.engines.A.loop).toBeNull();
+      expect(r.engines.A.getPlayhead()).toBeCloseTo(14.01);
+      expect(r.stops).toEqual([]);
+    } finally { r.driver.stop(); }
+  });
+
+  it('preserves an armed loop across recorded Play, Pause, and resume', async () => {
+    const events: CaptureEvent[] = [
+      { t: 0, kind: 'load', channel: 'A', trackId: 11, bpm: 120 },
+      { t: 0, kind: 'loop', channel: 'A', playhead: 10, region: { start: 10, end: 12 }, slip: true },
+      { t: 1, kind: 'transport', channel: 'A', action: 'play', playhead: 10 },
+      { t: 2, kind: 'transport', channel: 'A', action: 'pause', playhead: 11 },
+      { t: 2, kind: 'loop', channel: 'A', playhead: 11, region: { start: 10, end: 12 }, slip: false },
+      { t: 3, kind: 'transport', channel: 'A', action: 'play', playhead: 11 },
+      { t: 5, kind: 'tick', playheads: {} },
+    ];
+    const r = rig(planFor(events, 0));
+    try {
+      await r.driver.start();
+      for (let t = 1; t <= 3; t++) {
+        r.advance(1);
+        expect(r.engines.A.loop).toMatchObject({ start: 10, end: 12 });
+        expect(r.engines.A.playing).toBe(t !== 2);
+      }
+    } finally { r.driver.stop(); }
+  });
+
+  it('a human loop change takes over replay', async () => {
+    const r = rig(planFor(simpleLog(), 2));
+    try {
+      await r.driver.start();
+      r.engines.A.setLoopRegion({ start: 50, end: 52 });
+      r.engines.A.setSlipMode(false); // notify without changing the preference
+      expect(r.stops).toEqual(['takeover']);
+    } finally { r.driver.stop(); }
+  });
+
+  it.each([0, 3])('replays the resolved Slip loop exit from start %s without a correcting tick', async start => {
+    const events: CaptureEvent[] = [
+      { t: 0, kind: 'load', channel: 'A', trackId: 11, bpm: 120 },
+      { t: 0, kind: 'transport', channel: 'A', action: 'play', playhead: 10 },
+      { t: 1, kind: 'loop', channel: 'A', playhead: 11, region: { start: 11, end: 13 } },
+      { t: 4, kind: 'loop', channel: 'A', playhead: 11, region: { start: 11, end: 12 } },
+      { t: 6, kind: 'loop', channel: 'A', playhead: 16, region: null },
+      { t: 10, kind: 'tick', playheads: {} },
+    ];
+    const plan = planFor(events, start);
+    expect(plan.cues.find(c => c.kind === 'loop' && c.region === null)).toMatchObject({ playhead: 16 });
+    const r = rig(plan);
+    try {
+      await r.driver.start();
+      if (start === 0) r.advance(1);
+      r.advance(4 - Math.max(1, start));
+      expect(r.engines.A.getPlayhead()).toBe(11);
+      expect(r.engines.A.loop).toMatchObject({ start: 11, end: 12 });
+      r.advance(2);
+      expect(r.engines.A.loop).toBeNull();
+      expect(r.engines.A.getPlayhead()).toBe(16);
+      for (let i = 0; i < 10; i++) r.advance(0.1);
+      expect(r.engines.A.getPlayhead()).toBeCloseTo(17);
+    } finally { r.driver.stop(); }
+  });
+
+  it('bounds scratch seed and resume loops without truncating transport loop intent', async () => {
+    const loop = { start: 599, end: 601 }; // FakeEngine's track duration is 600.
+    const events: CaptureEvent[] = [
+      { t: 0, kind: 'load', channel: 'A', trackId: 1, bpm: 120 },
+      { t: 0, kind: 'loop', channel: 'A', playhead: 599.9, region: loop },
+      { t: 1, kind: 'transport', channel: 'A', action: 'scratchBegin', playhead: 599.9, trackDuration: 600 },
+      { t: 1, kind: 'transport', channel: 'A', action: 'scratchMove', playhead: 599.9,
+        trackDuration: 600, filter: { drive: 16, rate: 16 } },
+      { t: 2, kind: 'tick', playheads: {} },
+    ];
+    const r = rig(planFor(events, 1.001));
+    await r.driver.start();
+    expect(r.engines.A.scheduled!.frames[0]).toMatchObject({ loop, motion: { loop: { start: 599, end: 600 } } });
+    r.advance(0.05);
+    r.driver.pauseReplay();
+    r.driver.resumeReplay();
+    expect(r.engines.A.scheduled!.frames[0]).toMatchObject({ loop, motion: { loop: { start: 599, end: 600 } } });
+    r.driver.stop();
+  });
+  it('delayed rAF applies off/on preferences without erasing the newer scratch', async () => {
+    const events: CaptureEvent[] = [
+      { t: 0, kind: 'load', channel: 'A', trackId: 1, bpm: 120 },
+      { t: 0.1, kind: 'control', channel: 'A', control: 'vinylMode', value: 0 },
+      { t: 0.2, kind: 'control', channel: 'A', control: 'vinylMode', value: 1 },
+      { t: 0.3, kind: 'transport', channel: 'A', action: 'scratchBegin', playhead: 20 },
+      { t: 0.3, kind: 'transport', channel: 'A', action: 'scratchMove', playhead: 20, filter: { drive: -8, rate: -2 } },
+      { t: 2, kind: 'transport', channel: 'A', action: 'scratchEnd', playhead: 19.2 },
+      { t: 3, kind: 'tick', playheads: {} },
+    ];
+    const r = rig(planFor(events, 0));
+    await r.driver.start();
+    r.advance(0.85);
+    expect(r.engines.A.getSnapshot()).toMatchObject({ scratching: true, vinylMode: true });
+    expect(r.engines.A.getPlayhead()).toBeCloseTo(19.92);
+    expect(r.stops).toEqual([]);
+    r.driver.stop();
+  });
+
+  it.each([false, true])('cached load with scratch 40ms later (deadline missed=%s)', async (missed) => {
+    const events: CaptureEvent[] = [
+      { t: 0, kind: 'load', channel: 'A', trackId: 1, bpm: 120 },
+      { t: 0, kind: 'transport', channel: 'A', action: 'play', playhead: 0 },
+      { t: 1, kind: 'load', channel: 'A', trackId: 2, bpm: 120 },
+      { t: 1.04, kind: 'transport', channel: 'A', action: 'scratchBegin', playhead: 20 },
+      { t: 1.04, kind: 'transport', channel: 'A', action: 'scratchMove', playhead: 20, filter: { drive: -8, rate: -2 } },
+      { t: 2, kind: 'transport', channel: 'A', action: 'scratchEnd', playhead: 19 },
+      { t: 3, kind: 'tick', playheads: {} },
+    ];
+    const r = rig(planFor(events, 0));
+    await r.driver.start();
+    r.advance(missed ? 1.11 : 1.05);
+    for (let i = 0; i < 6; i++) await Promise.resolve();
+    if (missed) {
+      expect(r.stops).toEqual(['load-failed']);
+      expect(r.engines.A.scheduled).toBeNull();
+    } else {
+      expect(r.stops).toEqual([]);
+      expect(r.engines.A.scheduled?.frames[0].time).toBeCloseTo(101.09);
+      r.advance(0.06);
+      expect(r.engines.A.getSnapshot().scratching).toBe(true);
+      expect(r.engines.A.getPlayhead()).toBeCloseTo(19.9397);
+      r.driver.stop();
+    }
+  });
+
+  it('a cached load catches up same-time ordinary frames without treating them as missed scratch', async () => {
+    const events: CaptureEvent[] = [
+      { t: 0, kind: 'load', channel: 'A', trackId: 1, bpm: 120 },
+      { t: 1, kind: 'load', channel: 'A', trackId: 2, bpm: 120 },
+      { t: 1, kind: 'loop', channel: 'A', playhead: 20, region: { start: 20, end: 22 } },
+      { t: 1, kind: 'transport', channel: 'A', action: 'play', playhead: 20 },
+      { t: 2, kind: 'transport', channel: 'A', action: 'scratchBegin', playhead: 21 },
+      { t: 3, kind: 'transport', channel: 'A', action: 'scratchEnd', playhead: 21 },
+      { t: 4, kind: 'tick', playheads: {} },
+    ];
+    const r = rig(planFor(events, 0));
+    try {
+      await r.driver.start();
+      r.advance(1.1);
+      for (let i = 0; i < 6; i++) await Promise.resolve();
+      expect(r.stops).toEqual([]);
+      expect(r.engines.A.getPlayhead()).toBeCloseTo(20.05);
+      expect(r.engines.A.loop).toMatchObject({ start: 20, end: 22 });
+      r.advance(1);
+      expect(r.engines.A.getSnapshot().scratching).toBe(true);
+    } finally { r.driver.stop(); }
+  });
+
+  it('queues opposite strokes and release before their timestamps, independent of UI frames', async () => {
+    const events: CaptureEvent[] = [
+      { t: 0, kind: 'load', channel: 'A', trackId: 1, bpm: 120 },
+      { t: 0.1, kind: 'transport', channel: 'A', action: 'scratchBegin', playhead: 20 },
+      { t: 0.1, kind: 'transport', channel: 'A', action: 'scratchMove', playhead: 20, filter: { drive: 10, rate: 0 } },
+      { t: 0.108, kind: 'transport', channel: 'A', action: 'scratchMove', playhead: 20.021139,
+        filter: { drive: -6.321206, rate: 3.678794 } },
+      { t: 0.114, kind: 'transport', channel: 'A', action: 'scratchEnd', playhead: 20 },
+      { t: 1, kind: 'tick', playheads: {} },
+    ];
+    const r = rig(planFor(events, 0));
+    await r.driver.start();
+    const frames = r.engines.A.scheduled!.frames;
+    expect(frames[2].time).toBeCloseTo(100.15);
+    expect(frames[3].time).toBeCloseTo(100.158);
+    expect(frames[4].time).toBeCloseTo(100.164);
+    r.clock.t = 100.16; // no pump/rAF: the audio-clock mirror still advances
+    expect(r.engines.A.getPlayhead()).toBeGreaterThan(20.021);
+    expect(r.engines.A.getPlayhead()).toBeLessThan(20.04);
+    r.clock.t = 100.17;
+    expect(r.engines.A.getSnapshot()).toMatchObject({ scratching: false, playing: false });
+    expect(r.engines.A.getPlayhead()).toBe(20);
+    expect(r.engines.A.scratchCalls).toEqual([]); // no live increment replay
+    r.driver.stop();
+  });
+
+  it('seeks into looped scratch while paused without inheriting a live loop or starting audio', async () => {
+    const events: CaptureEvent[] = [
+      { t: 0, kind: 'load', channel: 'A', trackId: 1, bpm: 120 },
+      { t: 0, kind: 'loop', channel: 'A', region: { start: 10, end: 12 }, playhead: 10.1 },
+      { t: 1, kind: 'transport', channel: 'A', action: 'scratchBegin', playhead: 10.1 },
+      { t: 1, kind: 'transport', channel: 'A', action: 'scratchMove', playhead: 10.1, filter: { drive: -16, rate: -4 } },
+      { t: 2, kind: 'transport', channel: 'A', action: 'scratchEnd', playhead: 10.5 },
+      { t: 3, kind: 'tick', playheads: {} },
+    ];
+    const r = rig(planFor(events, 0));
+    r.engines.A.setLoopRegion({ start: 50, end: 60 });
+    await r.driver.start();
+    expect(r.engines.A.loop).toMatchObject({ start: 10, end: 12 });
+    r.driver.pauseReplay();
+    await r.driver.seekTo(planFor(events, 1.05));
+    expect(r.engines.A.scheduled).toBeNull();
+    expect(r.engines.A.getSnapshot()).toMatchObject({ scratching: false, playing: false });
+    expect(r.engines.A.getPlayhead()).toBeCloseTo(11.94);
+    r.driver.resumeReplay();
+    r.advance(0.1);
+    expect(r.engines.A.getPlayhead()).toBeCloseTo(11.94);
+    expect(r.engines.A.loop).toMatchObject({ start: 10, end: 12 });
+    r.driver.stop();
+  });
+
+  it('queues a later loaded track before its scratch and cancels it on stop', async () => {
+    const events: CaptureEvent[] = [
+      { t: 0, kind: 'load', channel: 'A', trackId: 1, bpm: 120 },
+      { t: 0, kind: 'transport', channel: 'A', action: 'play', playhead: 0 },
+      { t: 1, kind: 'load', channel: 'A', trackId: 2, bpm: 120 },
+      { t: 2, kind: 'transport', channel: 'A', action: 'scratchBegin', playhead: 20 },
+      { t: 2, kind: 'transport', channel: 'A', action: 'scratchMove', playhead: 20, filter: { drive: -8, rate: -2 } },
+      { t: 3, kind: 'transport', channel: 'A', action: 'scratchEnd', playhead: 19 },
+      { t: 4, kind: 'tick', playheads: {} },
+    ];
+    const r = rig(planFor(events, 0));
+    await r.driver.start();
+    r.advance(1.05);
+    for (let i = 0; i < 6; i++) await Promise.resolve();
+    expect(r.engines.A.trackId).toBe(2);
+    expect(r.engines.A.scheduled?.frames[0].time).toBeCloseTo(102.05);
+    r.driver.stop();
+    expect(r.engines.A.scheduled).toBeNull();
+    r.clock.t += 2;
+    expect(r.engines.A.getSnapshot().scratching).toBe(false);
+  });
+
+  it.each([false, true])('mixer takeover releases replay scratch and preserves prior playing=%s', async (playing) => {
+    const events: CaptureEvent[] = [
+      { t: 0, kind: 'load', channel: 'A', trackId: 1, bpm: 120 },
+      ...(playing ? [{ t: 0, kind: 'transport', channel: 'A', action: 'play', playhead: 20 } as CaptureEvent] : []),
+      { t: 0, kind: 'transport', channel: 'A', action: 'scratchBegin', playhead: 20 },
+      { t: 0, kind: 'transport', channel: 'A', action: 'scratchMove', playhead: 20, filter: { drive: -8, rate: -2 } },
+      { t: 3, kind: 'transport', channel: 'A', action: 'scratchEnd', playhead: 24 },
+      { t: 4, kind: 'tick', playheads: {} },
+    ];
+    const r = rig(planFor(events, 0));
+    await r.driver.start();
+    r.advance(0.3);
+    const position = r.engines.A.getPlayhead();
+    r.mixer.setFader('B', 0.3);
+    expect(r.stops).toEqual(['takeover']);
+    expect(r.engines.A.getSnapshot()).toMatchObject({ scratching: false, playing });
+    expect(r.engines.A.getPlayhead()).toBeCloseTo(position);
+    expect(r.engines.A.scheduled).toBeNull();
+    r.advance(5);
+    expect(r.engines.A.getPlayhead()).toBeCloseTo(position + (playing ? 5 : 0));
+  });
+
+  it('takeover does not end the replacement human scratch', async () => {
+    const events: CaptureEvent[] = [
+      { t: 0, kind: 'load', channel: 'A', trackId: 1, bpm: 120 },
+      { t: 0, kind: 'transport', channel: 'A', action: 'scratchBegin', playhead: 20 },
+      { t: 0, kind: 'transport', channel: 'A', action: 'scratchMove', playhead: 20, filter: { drive: -8, rate: -2 } },
+      { t: 3, kind: 'transport', channel: 'A', action: 'scratchEnd', playhead: 24 },
+      { t: 4, kind: 'tick', playheads: {} },
+    ];
+    const r = rig(planFor(events, 0));
+    await r.driver.start();
+    r.advance(0.3);
+    r.engines.A.beginScratch();
+    r.engines.A.scratchMove(0.1, 0.02);
+    expect(r.stops).toEqual(['takeover']);
+    expect(r.engines.A.getSnapshot().scratching).toBe(true);
+    expect(r.engines.A.getScratchState()?.drive).toBeGreaterThan(0);
+  });
+
+  it('seeds a paused continuous filter, pauses/resumes it, and uses recorded end landing', async () => {
+    const events: CaptureEvent[] = [
+      { t: 0, kind: 'load', channel: 'A', trackId: 1, bpm: 120 },
+      { t: 1, kind: 'transport', channel: 'A', action: 'scratchBegin', playhead: 20 },
+      { t: 1, kind: 'transport', channel: 'A', action: 'scratchMove', playhead: 20, filter: { drive: -8, rate: -2 } },
+      { t: 4, kind: 'control', channel: 'A', control: 'slipMode', value: 1 },
+      { t: 5, kind: 'transport', channel: 'A', action: 'scratchEnd', playhead: 23 },
+      { t: 6, kind: 'tick', playheads: {} },
+    ];
+    const r = rig(planFor(events, 1.008));
+    await r.driver.start();
+    r.advance(0.05);
+    expect(r.engines.A.getSnapshot()).toMatchObject({ playing: false, scratching: true });
+    expect(r.engines.A.getScratchState()!.rate).toBeCloseTo(-3.678794, 5);
+    r.advance(0.004);
+    const position = r.engines.A.getPlayhead();
+    const filter = r.engines.A.getScratchState();
+    r.driver.pauseReplay();
+    expect(r.engines.A.getPlayhead()).toBeCloseTo(position);
+    r.advance(10);
+    expect(r.engines.A.getPlayhead()).toBeCloseTo(position);
+    r.driver.resumeReplay();
+    r.advance(0.05);
+    expect(r.engines.A.getScratchState()!.rate).toBeCloseTo(filter!.rate, 8);
+    r.advance(4);
+    expect(r.engines.A.scratchEnds.at(-1)).toBe(23);
+    expect(r.engines.A.playing).toBe(false);
+    r.driver.stop();
+    expect(r.engines.A.scratching).toBe(false);
+  });
+
+  it('delivers every batched displacement and never phase-corrects or infers scratch pitch', async () => {
+    const events: CaptureEvent[] = [
+      { t: 0, kind: 'load', channel: 'A', trackId: 1, bpm: 120 },
+      { t: 0, kind: 'transport', channel: 'A', action: 'play', playhead: 20 },
+      { t: 1, kind: 'transport', channel: 'A', action: 'scratchBegin', playhead: 21 },
+      { t: 1.001, kind: 'transport', channel: 'A', action: 'scratchMove', playhead: 21, filter: { drive: -8, rate: 0 } },
+      { t: 1.002, kind: 'transport', channel: 'A', action: 'scratchMove', playhead: 20.998, filter: { drive: -16, rate: -1 } },
+      ...[2, 3, 4, 5, 6, 7].map((t): CaptureEvent => ({ t, kind: 'tick', playheads: { A: 100 + t } })),
+      { t: 8, kind: 'transport', channel: 'A', action: 'scratchEnd', playhead: 29 },
+      { t: 9, kind: 'tick', playheads: {} },
+    ];
+    const r = rig(planFor(events, 0));
+    await r.driver.start();
+    r.advance(1.06);
+    const seeks = [...r.engines.A.seeks];
+    const motions = r.engines.A.scheduled!.frames.filter((f) => f.motion);
+    expect(motions).toHaveLength(3);
+    expect(motions[2].motion).toMatchObject({ drive: -16, rate: -1 });
+    r.advance(0.5);
+    expect(r.engines.A.getPlayhead()).toBeCloseTo(20.862);
+    for (let i = 0; i < 5; i++) r.advance(1);
+    expect(r.engines.A.seeks).toEqual(seeks);
+    expect(r.engines.A.pitchPercent).toBe(0);
+    r.driver.stop();
+  });
+
   it('claims the surface, loads, seeds decks + mixer, then rolls the cues', async () => {
     const r = rig(planFor(simpleLog(), 5));
     await r.driver.start();

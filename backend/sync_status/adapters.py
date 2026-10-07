@@ -58,10 +58,18 @@ class EngineSurfaceReader:
         {"title", "artist", "key", "bpm", "energy", "tags", "hotcues", "beatgrid", "maincue"}
     )
 
-    def __init__(self, engine_db) -> None:  # EngineDJDatabase
-        self._db = engine_db
+    def __init__(self, engine_db, drive_dbs=()) -> None:  # EngineDJDatabase(s)
+        # Main library first, then per-drive libraries (#307): one Surface.
+        self._dbs = [engine_db, *drive_dbs]
 
     def list_tracks(self) -> list[SurfaceTrackRef]:
+        refs: list[SurfaceTrackRef] = []
+        for db in self._dbs:
+            refs.extend(self._list_library(db))
+        return refs
+
+    @staticmethod
+    def _list_library(engine_db) -> list[SurfaceTrackRef]:
         from sqlalchemy.orm import joinedload
 
         from backend.sync_performance import performance_fields_from_blobs
@@ -70,7 +78,7 @@ class EngineSurfaceReader:
         from enginedj.models.track import Track as EDJTrack
         from enginedj.ratings import rating_to_energy
 
-        with self._db.session_m() as session:
+        with engine_db.session_m() as session:
             tags_by_track: dict[int, list[str]] = {}
             root = (
                 session.query(Playlist)
@@ -185,34 +193,36 @@ class RekordboxSurfaceReader:
         return refs
 
     def _rb_beatgrid(self, content):
-        """The track's PQTZ grid (ANLZ .DAT), offset into manadj's frame.
-        None when unanalyzed/unreadable — not a divergence."""
-        from rekordbox.anlz_grid import read_pqtz
-        from rekordbox.decode_offset import export_offset_ms
+        return rb_beatgrid(content, Path(self._db._db_dir))
 
-        if not content.AnalysisDataPath:
-            return None
-        dat = (
-            Path(self._db._db_dir) / "share" / content.AnalysisDataPath.lstrip("/\\")
-        )
-        grid = read_pqtz(dat)
-        if grid is None or not grid.tempo_changes:
-            return grid
-        offset_s = export_offset_ms(content.FolderPath or "") / 1000.0
-        if offset_s == 0:
-            return grid
-        from backend.sync_status.models import BeatgridValue, TempoChangeValue
 
-        return BeatgridValue(
-            tempo_changes=[
-                TempoChangeValue(
-                    start_time=tc.start_time - offset_s,
-                    bpm=tc.bpm,
-                    bar_position=tc.bar_position,
-                )
-                for tc in grid.tempo_changes
-            ]
-        )
+def rb_beatgrid(content, db_dir: Path):
+    """The track's PQTZ grid (ANLZ .DAT), offset into manadj's frame.
+    None when unanalyzed/unreadable — not a divergence."""
+    from rekordbox.anlz_grid import read_pqtz
+    from rekordbox.decode_offset import export_offset_ms
+
+    if not content.AnalysisDataPath:
+        return None
+    dat = db_dir / "share" / content.AnalysisDataPath.lstrip("/\\")
+    grid = read_pqtz(dat)
+    if grid is None or not grid.tempo_changes:
+        return grid
+    offset_s = export_offset_ms(content.FolderPath or "") / 1000.0
+    if offset_s == 0:
+        return grid
+    from backend.sync_status.models import BeatgridValue, TempoChangeValue
+
+    return BeatgridValue(
+        tempo_changes=[
+            TempoChangeValue(
+                start_time=tc.start_time - offset_s,
+                bpm=tc.bpm,
+                bar_position=tc.bar_position,
+            )
+            for tc in grid.tempo_changes
+        ]
+    )
 
 
 def rb_hotcues_from_cue_rows(
@@ -251,12 +261,28 @@ def rb_hotcues_from_cue_rows(
             slot=KIND_TO_SLOT[c.Kind],
             time=rb_ms_to_manadj_seconds(c.InMsec, folder_path or ""),
             label=(c.Comment or None),
-            color=palette_index_to_hex(c.Color if (c.Color or -1) >= 0 else None),
+            color=palette_index_to_hex(rb_cue_palette_index(c)),
         )
         for c in sorted(hot, key=lambda c: KIND_TO_SLOT[c.Kind])
     ]
     mirror_ok = memory_ms == sorted({c.InMsec for c in hot})
     return hotcues, mirror_ok
+
+
+def rb_cue_palette_index(cue) -> int | None:
+    """A djmdCue row's palette index, handling both color shapes.
+
+    RB7 shape: Color IS the palette index, -1 = none. Color=0 is pink —
+    a previous `c.Color or -1` treated it as falsy and dropped it (#274).
+    Legacy RB5/6 shape (real libraries predating RB7): Color=255 with the
+    palette index in ColorTableIndex (spike 2026-07-10, exp_b_cues) — RB7
+    won't *render* that shape but old rows still carry real colors.
+    """
+    color = getattr(cue, "Color", None)
+    if color == 255:
+        legacy = getattr(cue, "ColorTableIndex", None)
+        return legacy if legacy is not None and legacy >= 0 else None
+    return color if color is not None and color >= 0 else None
 
 
 def _rb_related(content, relation: str, attr: str) -> str | None:
@@ -290,9 +316,11 @@ def build_surfaces() -> dict[str, SurfaceReader]:
     try:
         if config.database.engine_dj_path:
             from enginedj.connection import EngineDJDatabase
+            from enginedj.libraries import open_drive_libraries
 
+            main = EngineDJDatabase(Path(config.database.engine_dj_path))
             surfaces["engine"] = EngineSurfaceReader(
-                EngineDJDatabase(Path(config.database.engine_dj_path))
+                main, open_drive_libraries(main.database_path)
             )
     except Exception as e:
         logger.warning("sync_status: Engine DJ surface unavailable: %s", e)

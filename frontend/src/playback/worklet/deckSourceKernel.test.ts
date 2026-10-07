@@ -1,7 +1,192 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { DeckSourceKernel } from './deckSourceKernel';
 import type { StretchEngine } from './deckSourceKernel';
 import type { TrackSource } from './trackSource';
+import type { ScratchMotion, ScheduledScratchFrame } from './scratchMotion';
+import { moveScratch, scratchPosition } from './scratchMotion';
+
+describe('DeckSourceKernel platter trajectory', () => {
+  it.each(['resample', 'stretch'] as const)('uses the rate offset after an intra-block %s release', mode => {
+    const kernel = new DeckSourceKernel(1);
+    kernel.setTrack([ramp(1000)], 1);
+    const primes: number[] = [];
+    kernel.setStretchEngine({ ready: true, prime: (_s, _p, rate) => primes.push(rate),
+      render: (out, frames) => { for (const channel of out) channel.fill(1, 0, frames); } });
+    kernel.scheduleScratch([
+      { time: 0, motion: { position: 0.1, time: 0, drive: -8, rate: -2, trackDuration: 1, loop: null },
+        position: 0.1, playing: false, loop: null, rate: 1, mode, startId: 1 },
+      { time: 0.003, motion: null, position: 0.2, playing: true, loop: null, rate: 1, mode, startId: 2 },
+    ]);
+    kernel.render([new Float32Array(8)], new Float32Array([9, 9, 9, 1, 2, 3, 4, 5]), 0, 1000);
+    expect(kernel.livePositionFrames).toBe(215);
+    expect(primes).toEqual(mode === 'stretch' ? [1] : []);
+  });
+  it('renders pending and split schedules without allocating channel or rate views', () => {
+    const kernel = new DeckSourceKernel(4);
+    kernel.setTrack([new Float32Array(48000).fill(1)], 1);
+    kernel.scheduleScratch([
+      { time: 0.001, motion: { position: 0.5, time: 0.001, drive: -8, rate: -2, trackDuration: 1, loop: null },
+        position: 0.5, playing: false, loop: null, rate: 1, mode: 'resample', startId: 1 },
+      { time: 0.005, motion: null, position: 0.45, playing: true, loop: null, rate: 1, mode: 'resample', startId: 2 },
+      { time: 10, motion: null, position: 0, playing: false, loop: null, rate: 1, mode: 'resample', startId: 3 },
+    ]);
+    const out = [new Float32Array(128), new Float32Array(128)];
+    const rates = new Float32Array(128).fill(1);
+    const views = vi.spyOn(Float32Array.prototype, 'subarray');
+    const maps = vi.spyOn(Array.prototype, 'map');
+    const slices = vi.spyOn(Array.prototype, 'slice');
+    const splices = vi.spyOn(Array.prototype, 'splice');
+    let counts: number[];
+    try {
+      for (let i = 0; i < 20; i++) kernel.render(out, rates, i * 128 / 48000, 48000);
+      counts = [views.mock.calls.length, maps.mock.calls.length, slices.mock.calls.length, splices.mock.calls.length];
+    } finally { views.mockRestore(); maps.mockRestore(); slices.mockRestore(); splices.mockRestore(); }
+    expect(counts).toEqual([0, 0, 0, 0]);
+    expect(out[0][127]).toBe(1);
+  });
+  it.each([false, true])('renders both opposite 5ms strokes and release inside one quantum (playing=%s)', (playing) => {
+    const kernel = new DeckSourceKernel(1, 0);
+    kernel.setTrack([ramp(8000)], 1);
+    const primes: number[] = [];
+    kernel.setStretchEngine({ ready: true, prime: (_s, p) => primes.push(p),
+      render: (out, frames) => out.forEach((c) => c.fill(-7, 0, frames)) });
+    const base = { position: 0.5, time: 1, drive: 10, rate: 4, trackDuration: 1, loop: null };
+    const reverse = moveScratch(base, 1.008, -0.08, 0.005);
+    const frames: ScheduledScratchFrame[] = [
+      { time: 1, motion: base, position: 0.5, playing, loop: null, rate: 1, mode: 'stretch', startId: 1 },
+      { time: 1.008, motion: reverse,
+        position: reverse.position, playing, loop: null, rate: 1, mode: 'stretch', startId: 2 },
+      { time: 1.014, motion: null, position: 0.7, playing, loop: null, rate: 1, mode: 'stretch', startId: 3 },
+    ];
+    kernel.scheduleScratch(frames);
+    const out = [new Float32Array(128)];
+    kernel.render(out, new Float32Array([1]), 1, 8000);
+    expect(out[0][16]).toBeGreaterThan(4001);
+    expect(out[0][55]).toBeGreaterThan(out[0][16]); // no packet-expiry hold
+    expect(out[0].slice(65, 110).some(v => v > 0)).toBe(true);
+    expect(out[0][127]).toBe(playing ? -7 : 0);
+    expect(primes).toEqual(playing ? [5600] : []);
+    expect(kernel.livePositionFrames).toBe(playing ? 5616 : null);
+  });
+
+  it.each(['stop', 'start', 'load', 'manual'] as const)('%s cancels future scheduled scratch', (action) => {
+    const kernel = new DeckSourceKernel(1, 0);
+    kernel.setTrack([ramp(1000)], 1);
+    kernel.scheduleScratch([{ time: 2, motion: { position: 0.5, time: 2, drive: -4,
+      rate: -1, trackDuration: 1, loop: null }, position: 0.5, playing: false,
+      loop: null, rate: 1, mode: 'resample', startId: 1 }]);
+    if (action === 'stop') kernel.stop();
+    if (action === 'start') kernel.start(100, 2);
+    if (action === 'load') kernel.setTrack([ramp(1000)], 1);
+    if (action === 'manual') kernel.setScratch({ position: 0.2, time: 1, drive: 0,
+      rate: 0, trackDuration: 1, loop: null });
+    kernel.render([new Float32Array(10)], new Float32Array([1]), 2, 1000);
+    expect(kernel.livePositionFrames).toBe(action === 'start' ? 110 : action === 'manual' ? 200 : null);
+  });
+  const motion: ScratchMotion = { position: 0.5, time: 1, drive: -10,
+    rate: -2.5, trackDuration: 1, loop: null };
+
+  it('renders timestamped reverse PCM and converges to a silent hold', () => {
+    const kernel = new DeckSourceKernel(2, 0);
+    kernel.setTrack([ramp(1000)], 1);
+    kernel.setScratch(motion);
+    const out = [new Float32Array(10)];
+    kernel.render(out, new Float32Array([1]), 1.005, 1000);
+    expect(out[0][3]).toBeCloseTo(1000 * scratchPosition(motion, 1.008) + 1, 4);
+    expect(kernel.livePositionFrames).toBeCloseTo(1000 * scratchPosition(motion, 1.015));
+    kernel.render([new Float32Array(20)], new Float32Array([1]), 1.015, 1000);
+    expect(kernel.livePositionFrames).toBeGreaterThan(400);
+    kernel.render(out, new Float32Array([1]), 1.12, 1000);
+    expect(Array.from(out[0])).toEqual(new Array(10).fill(0));
+    expect(kernel.livePositionFrames).toBeCloseTo(400, 3);
+  });
+
+  it('declicks reverse loop wraps without changing the timestamped position', () => {
+    const kernel = new DeckSourceKernel(4, 0);
+    const data = new Float32Array(1000);
+    for (let i = 100; i < 120; i++) data[i] = (i - 100) / 9.5 - 1;
+    kernel.setTrack([data], 1);
+    const looped = { ...motion, position: 0.106, drive: -2, rate: -0.5,
+      loop: { start: 0.1, end: 0.12 } };
+    kernel.setScratch(looped);
+    const out = [new Float32Array(20)];
+    kernel.render(out, new Float32Array([1]), 1, 1000);
+    expect(Math.abs(out[0][7] - out[0][6])).toBeLessThan(0.5);
+    expect(kernel.livePositionFrames).toBeCloseTo(scratchPosition(looped, 1.02) * 1000);
+  });
+
+  it('ramps stem kills in output time while reversing and while held', () => {
+    const kernel = new DeckSourceKernel(4, 0);
+    kernel.setStems([[new Float32Array(1000).fill(1)]], 1);
+    kernel.setScratch(motion);
+    const out = [new Float32Array(8)];
+    kernel.render(out, new Float32Array([1]), 1, 1000);
+    kernel.setStemGains([0]);
+    kernel.render(out, new Float32Array([1]), 1.008, 1000);
+    expect(out[0][0]).toBe(1);
+    expect(out[0][2]).toBeCloseTo(0.5);
+    expect(out[0][7]).toBe(0);
+    kernel.setScratch({ ...motion, position: 0.484, time: 1.016, drive: 0, rate: 0 });
+    kernel.setStemGains([1]);
+    kernel.render(out, new Float32Array([1]), 1.016, 1000);
+    kernel.setScratch({ ...motion, position: 0.484, time: 1.024, drive: 10, rate: 1 });
+    kernel.render(out, new Float32Array([1]), 1.024, 1000);
+    expect(out[0][7]).toBe(1);
+  });
+
+  it('never feeds signed or held scratch rates to Key Lock and restores stretch on start', () => {
+    const kernel = new DeckSourceKernel(4, 0);
+    const seen: number[] = [];
+    kernel.setStretchEngine({ ready: true, prime: (_s, _p, rate) => seen.push(rate),
+      render: (out, _n, _s, _p, rate) => { seen.push(rate); out.forEach(c => c.fill(1)); } });
+    kernel.setTrack([new Float32Array(1000).fill(1)], 1);
+    kernel.setMode('stretch');
+    kernel.setScratch(motion);
+    kernel.render([new Float32Array(50)], new Float32Array([1.2]), 1, 1000);
+    expect(seen).toEqual([]);
+    kernel.stop();
+    kernel.start(400, 1);
+    kernel.render([new Float32Array(8)], new Float32Array([1.2]), 1.05, 1000);
+    expect(seen).toHaveLength(2);
+    expect(seen[0]).toBeCloseTo(1.2);
+  });
+
+  it('fades stops to silence and does not resurrect held DC on release', () => {
+    const kernel = new DeckSourceKernel(4, 0);
+    kernel.setTrack([new Float32Array(1000).fill(1)], 1);
+    kernel.setScratch(motion);
+    kernel.render([new Float32Array(150)], new Float32Array([1]), 1, 1000);
+    kernel.stop();
+    const out = [new Float32Array(8)];
+    kernel.render(out, new Float32Array([1]), 1.15, 1000);
+    expect(Array.from(out[0])).toEqual(new Array(8).fill(0));
+  });
+
+  it('catches a normal handoff up to the main-thread anchor before rendering', () => {
+    const kernel = new DeckSourceKernel(4, 0);
+    kernel.setTrack([ramp(1000)], 1);
+    kernel.start(410, 1, 1.018);
+    const out = [new Float32Array(8)];
+    kernel.render(out, new Float32Array([1.25]), 1.026, 1000);
+    expect(out[0][0]).toBeCloseTo(421);
+    expect(kernel.livePositionFrames).toBeCloseTo(430);
+  });
+
+  it.each([0, 1])('holds silently at track boundary %s and accepts motion back into the track', boundary => {
+    const kernel = new DeckSourceKernel(4, 0);
+    kernel.setTrack([new Float32Array(2000).fill(1)], 2);
+    kernel.setScratch({ ...motion, position: boundary, drive: boundary === 0 ? -10 : 10, rate: 0 });
+    const out = [new Float32Array(20)];
+    expect(kernel.render(out, new Float32Array([1]), 1, 1000)).toBeNull();
+    expect(Array.from(out[0])).toEqual(new Array(20).fill(0));
+    expect(kernel.livePositionFrames).toBe(boundary * 2000);
+    const inward = { ...motion, time: 2, position: boundary, drive: boundary === 0 ? 10 : -10, rate: 0 };
+    kernel.setScratch(inward);
+    kernel.render(out, new Float32Array([1]), 2, 1000);
+    expect(out[0][5]).toBe(1);
+    expect(kernel.livePositionFrames).toBeCloseTo(scratchPosition(inward, 2.02) * 2000);
+  });
+});
 
 /**
  * Pure position-bookkeeping and declick tests for the worklet kernel —
@@ -103,7 +288,7 @@ describe('DeckSourceKernel resample voice', () => {
     const kernel = new DeckSourceKernel(DECLICK);
     kernel.setTrack([ramp(8)], 1);
     kernel.start(1000, 1);
-    expect(kernel.livePositionFrames).toBe(7);
+    expect(kernel.livePositionFrames).toBe(8);
   });
 
   it('interpolates linearly at fractional rates', () => {

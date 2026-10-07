@@ -65,6 +65,10 @@ export interface RoutinePlanInput {
    * time so the editor's audition and the set Conductor replay the same
    * result. Opaque here; parsed by routines/routineDraft. */
   edits?: import('../routines/routineDraft').RoutineEdits | null;
+  /** Authored from scratch (ADR 0039, gh#325): no recording — each
+   * slot's trace is SYNTHESIZED from (entry beat, entry position,
+   * beatmatched rate) instead of replayed from events. */
+  authored?: boolean;
 }
 
 export type RoutineEventInput = Record<string, unknown>;
@@ -119,6 +123,8 @@ export interface RoutineSlotLanes {
 }
 
 export interface PlannedRoutineSlot {
+  /** Explicit pair transport extent, independent of the authoring window. */
+  transportBounds?: { startBeat: number; endBeat: number; trackDurationSec: number };
   /** Entry-ordered index — the RENDER handle (derived view, ADR 0039). */
   slot: number;
   /** Stable slot id — the EDIT handle (draft mutations key on this). */
@@ -142,6 +148,9 @@ export interface PlannedRoutineSlot {
   releaseMixSec: number;
   entryMixSec: number;
   entryTrackSec: number;
+  /** Intro-only trimming limits on the artifact clock. The first slot
+   * uses the Routine's playback boundary instead. */
+  startTrim?: { anchorBeat: number; minBeat: number; maxBeat: number };
   /** (targetBpm / trackBpm − 1)·100, clamped to the varispeed range —
    * the slot's beatmatched deck pitch at the Set tempo. */
   basePitchPercent: number;
@@ -159,10 +168,16 @@ export interface PlannedRoutineSlot {
 }
 
 export interface PlannedRoutine {
+  /** Pair audition covers available material, not an arbitrary beat margin. */
+  auditionRange?: { startSec: number; endSec: number };
   /** Entry index of slot 0 (the adopted, already-sounding track). */
   startEntryIndex: number;
   mixStartSec: number;
   mixEndSec: number;
+  /** Global mix instant of artifact beat zero, independent of the playback crop. */
+  beatOriginMixSec: number;
+  playbackBounds: { startBeat: number; endBeat: number };
+  boundsLimits: { maxStartBeat: number; minEndBeat: number };
   targetBpm: number;
   /** Mix seconds per Routine beat (60 / targetBpm). */
   secPerBeat: number;
@@ -191,6 +206,9 @@ export interface RoutineBuildWarning {
 export interface BuildRoutineContext {
   startEntryIndex: number;
   mixStartSec: number;
+  /** Set adoption: the outgoing track position/rate at the uncropped
+   * anchor. A crop starts where that track reaches the edited trace. */
+  entryAnchor?: { trackSec: number; rate: number };
   targetBpm: number;
   /** Slot 0's deck — the sounding deck at the window start (adopted). */
   adoptedDeck: RoutineDeck;
@@ -416,6 +434,23 @@ export function traceStateAt(trace: RoutineTracePoint[], beat: number): TraceSta
   };
 }
 
+/** An authored slot's synthesized trace (ADR 0039): playing from its
+ * entry at the beatmatched rate through `horizonBeat` — the slot holds
+ * its deck to the routine end (exits are the author's fader work). */
+export function synthesizedSlotTrace(
+  entryBeat: number,
+  entryPos: number,
+  syncRate: number,
+  horizonBeat: number
+): RoutineTracePoint[] {
+  const head: RoutineTracePoint = { beat: entryBeat, pos: entryPos, jump: false, moving: true, ratePerBeat: syncRate };
+  if (horizonBeat <= entryBeat) return [head];
+  return [
+    head,
+    { beat: horizonBeat, pos: entryPos + (horizonBeat - entryBeat) * syncRate, jump: false, moving: true, ratePerBeat: syncRate },
+  ];
+}
+
 // ── Lane building ────────────────────────────────────────────────────────
 
 const LANE_CONTROLS = ['fader', 'trim', 'eqLow', 'eqMid', 'eqHigh', 'filter'] as const;
@@ -532,35 +567,41 @@ export function createSlotLanesCursor(
   eq: { low: number; mid: number; high: number };
   filter: number;
 } {
-  const l = slot.lanes;
-  const mk = (control: 'fader' | 'trim' | 'eqLow' | 'eqMid' | 'eqHigh' | 'filter', fallback: number) => {
-    const pts = l[control];
-    const authored = !!l.authored?.[control];
-    let i = -1; // last point at or before the cursor beat
-    return (beat: number): number => {
-      if (pts.length === 0) return fallback;
-      while (i + 1 < pts.length && pts[i + 1].beat <= beat) i++;
-      if (i < 0) return authored ? pts[0].value : fallback;
-      if (!authored) return pts[i].value;
-      const a = pts[i];
-      const b = pts[i + 1];
-      if (!b || b.beat <= a.beat) return a.value;
-      const f = (beat - a.beat) / (b.beat - a.beat);
-      return a.value + (b.value - a.value) * f;
-    };
-  };
-  const fader = mk('fader', l.defaults.fader);
-  const trim = mk('trim', l.defaults.trim);
-  const eqLow = mk('eqLow', l.defaults.eq);
-  const eqMid = mk('eqMid', l.defaults.eq);
-  const eqHigh = mk('eqHigh', l.defaults.eq);
-  const filter = mk('filter', l.defaults.filter);
+  const fader = createSlotLaneCursor(slot, 'fader');
+  const trim = createSlotLaneCursor(slot, 'trim');
+  const eqLow = createSlotLaneCursor(slot, 'eqLow');
+  const eqMid = createSlotLaneCursor(slot, 'eqMid');
+  const eqHigh = createSlotLaneCursor(slot, 'eqHigh');
+  const filter = createSlotLaneCursor(slot, 'filter');
   return (beat: number) => ({
     fader: fader(beat),
-    trim: Math.max(0, Math.min(1, trim(beat) + (slot.trim - 0.5))),
+    trim: trim(beat),
     eq: { low: eqLow(beat), mid: eqMid(beat), high: eqHigh(beat) },
     filter: filter(beat),
   });
+}
+
+/** Scalar cursor for lane strips: no sampling of unrelated controls or
+ * per-pixel mixer-state objects. Beats must advance monotonically. */
+export function createSlotLaneCursor(
+  slot: PlannedRoutineSlot,
+  control: 'fader' | 'trim' | 'eqLow' | 'eqMid' | 'eqHigh' | 'filter',
+): (beat: number) => number {
+  const l = slot.lanes;
+  const pts = l[control];
+  const authored = !!l.authored?.[control];
+  const fallback = control === 'fader' || control === 'trim' || control === 'filter'
+    ? l.defaults[control] : l.defaults.eq;
+  let i = -1;
+  return (beat) => {
+    while (i + 1 < pts.length && pts[i + 1].beat <= beat) i++;
+    let value = i < 0 ? (authored && pts.length ? pts[0].value : fallback) : pts[i].value;
+    if (authored && i >= 0 && i + 1 < pts.length) {
+      const a = pts[i], b = pts[i + 1];
+      if (b.beat > a.beat) value += (b.value - a.value) * ((beat - a.beat) / (b.beat - a.beat));
+    }
+    return control === 'trim' ? Math.max(0, Math.min(1, value + (slot.trim - 0.5))) : value;
+  };
 }
 
 // ── Deck allocation ──────────────────────────────────────────────────────
@@ -696,7 +737,7 @@ function withLaneEdits(
   slotId: string
 ): RoutineSlotLanes {
   if (!edits) return lanes;
-  const controls = ['fader', 'eqLow', 'eqMid', 'eqHigh', 'filter'] as const;
+  const controls = ['fader', 'trim', 'eqLow', 'eqMid', 'eqHigh', 'filter'] as const;
   let out = lanes;
   for (const control of controls) {
     const pts = edits.lanes[`${slotId}:${control}`];
@@ -715,9 +756,8 @@ export function buildPlannedRoutine(
   const warnings: RoutineBuildWarning[] = [];
   const n = input.cast.length;
   const secPerBeat = 60 / ctx.targetBpm;
-  const mixEndSec = ctx.mixStartSec + input.durationBeats * secPerBeat;
-
   const edits = input.edits ?? null;
+  const editHorizon = Math.max(input.durationBeats, edits?.playbackBounds?.endBeat ?? input.durationBeats);
   // Stable slot ids (ADR 0039): the edit-addressing handle. Absent input
   // ids default to the migration identity slotId = String(index).
   const slotIdsIn = input.cast.map((_, slot) => input.slotIds?.[slot] ?? String(slot));
@@ -742,7 +782,6 @@ export function buildPlannedRoutine(
   const entryPositions = order.map((i) => input.entryPositions[i]);
   const trackBpms = order.map((i) => ctx.trackBpms[i]);
   const castOrdered = order.map((i) => input.cast[i]);
-  const entryMixSecs = entryBeats.map((b) => ctx.mixStartSec + b * secPerBeat);
 
   // Traces first (gh#170 pass 2): allocation needs each slot's RELEASE —
   // the end of its recorded motion — so freed decks can serve later
@@ -750,32 +789,80 @@ export function buildPlannedRoutine(
   // Authored jump edits (the Routine editor's draft layer) apply here so
   // every downstream consumer — allocation, jump scoping, the Conductor,
   // the editor's audition — sees the edited trajectory.
+  const introAnchors: { pos: number; rate: number }[] = [];
+  const sourceExtended: boolean[] = [];
   const traces = castOrdered.map((_, slot) => {
     const slotId = slotIds[slot];
-    let raw = buildSlotTrace(
-      slotSamples(input.events, order[slot]),
-      60 / trackBpms[slot],
-      input.entryOffsetsBeats[order[slot]],
-      entryPositions[slot]
-    );
+    let raw = input.authored
+      ? synthesizedSlotTrace(
+          input.entryOffsetsBeats[order[slot]],
+          entryPositions[slot],
+          60 / trackBpms[slot],
+          editHorizon - entryDeltas[slot]
+        )
+      : buildSlotTrace(
+          slotSamples(input.events, order[slot]),
+          60 / trackBpms[slot],
+          input.entryOffsetsBeats[order[slot]],
+          entryPositions[slot]
+        );
     // Entry-offset override: the whole recorded trajectory shifts to the
     // new entry beat BEFORE the (absolute-beat) jump/pause edits apply.
     const delta = entryDeltas[slot];
     if (delta !== 0) raw = raw.map((p) => ({ ...p, beat: p.beat + delta }));
+    const intro = edits?.startTrims?.[slotId] ?? 0;
+    const authored = (edits?.jumps ?? []).filter(j => j.slotId === slotId);
+    const pauses = (edits?.pauses ?? []).filter(p => p.slotId === slotId);
+    // Retained authored events need stable source context even after the
+    // start is cropped past them; their displacement must not change.
+    const sourceStart = Math.min(
+      entryBeats[slot],
+      slot > 0 ? entryBeats[slot] + Math.min(0, intro) : entryBeats[slot],
+      entryBeats[slot] <= 0 ? edits?.playbackBounds?.startBeat ?? 0 : entryBeats[slot],
+      ...authored.map(j => j.beat - 1), ...pauses.map(p => p.beat - 1)
+    );
+    // Pair projections already supply their pre-jump transport context.
+    // Routine intro reconstruction must not replace that earlier trace.
+    const extending = n > 2 && sourceStart < entryBeats[slot];
+    sourceExtended[slot] = extending;
+    const removed = (edits?.removedRecordedJumps ?? []).filter(r => r.slotId === slotId);
+    const removedPauses = (edits?.removedRecordedPauses ?? []).filter(r => r.slotId === slotId);
+    if (extending) {
+      // Resolve deletions before replacing pre-entry evidence with an
+      // intro continuation; otherwise a deleted entry jump could return.
+      const before = removed.filter(r => r.beat <= entryBeats[slot]);
+      const holds = removedPauses.filter(r => r.beat <= entryBeats[slot]);
+      if (before.length) raw = applyJumpEditsToTrace(raw, [], before, editHorizon);
+      if (holds.length) raw = applyPauseEditsToTrace(raw, [], holds, editHorizon);
+    }
+    const anchor = traceStateAt(raw, entryBeats[slot]);
+    const initialMotion = traceStateAt(raw, entryBeats[slot] + 1e-6);
+    const initialRate = initialMotion.ratePerBeat > 0 ? initialMotion.ratePerBeat : 60 / trackBpms[slot];
+    introAnchors[slot] = { pos: anchor.pos + (edits?.nudges?.[slotId] ?? 0), rate: initialRate };
+    if (extending) {
+      const beat = entryBeats[slot];
+      // Extend the source BEFORE applying authored events, so a new jump
+      // or pause in the revealed intro still executes at its own beat.
+      raw = [
+        { beat: sourceStart, pos: anchor.pos + (sourceStart - beat) * (slot === 0 && !initialMotion.moving ? 0 : initialRate),
+          moving: slot > 0 || initialMotion.moving, ratePerBeat: initialRate, jump: false },
+        { beat, pos: anchor.pos, moving: initialMotion.moving, ratePerBeat: initialMotion.ratePerBeat,
+          jump: raw.some(p => p.beat === beat && p.jump) },
+        ...raw.filter(p => p.beat > beat),
+      ];
+    }
     if (!edits) return raw;
-    const authored = edits.jumps.filter((j) => j.slotId === slotId);
-    const removed = edits.removedRecordedJumps.filter((r) => r.slotId === slotId);
+    const remainingRemoved = extending ? removed.filter(r => r.beat > entryBeats[slot]) : removed;
     let trace =
-      authored.length === 0 && removed.length === 0
+      authored.length === 0 && remainingRemoved.length === 0
         ? raw
-        : applyJumpEditsToTrace(raw, authored, removed, input.durationBeats);
+        : applyJumpEditsToTrace(raw, authored, remainingRemoved, editHorizon);
     // Pause edits (gh#190: play/pause events, the jump idiom's sibling) —
     // authored holds + removed recorded holds, after jump edits (both
     // keep beats fixed; displacement composes).
-    const pauses = (edits.pauses ?? []).filter((p) => p.slotId === slotId);
-    const removedPauses = (edits.removedRecordedPauses ?? []).filter((r) => r.slotId === slotId);
-    if (pauses.length > 0 || removedPauses.length > 0) {
-      trace = applyPauseEditsToTrace(trace, pauses, removedPauses, input.durationBeats);
+    const remainingHolds = extending ? removedPauses.filter(r => r.beat > entryBeats[slot]) : removedPauses;
+    if (pauses.length > 0 || remainingHolds.length > 0) {
+      trace = applyPauseEditsToTrace(trace, pauses, remainingHolds, editHorizon);
     }
     // Alignment nudge (gh#190 item 6): a RIGID track-time slide — the
     // slot plays material offset by deltaSec at the same routine beats.
@@ -785,15 +872,83 @@ export function buildPlannedRoutine(
     if (nudge !== 0) trace = trace.map((p) => ({ ...p, pos: p.pos + nudge }));
     return trace;
   });
+  const anchorBeats = [...entryBeats];
+  const startTrimLimits: NonNullable<PlannedRoutineSlot['startTrim']>[] = [];
+  for (let slot = 0; slot < traces.length; slot++) {
+    const trace = traces[slot];
+    const anchorBeat = anchorBeats[slot];
+    const fixed = { anchorBeat, minBeat: anchorBeat, maxBeat: anchorBeat };
+    startTrimLimits.push(fixed);
+    if (slot === 0 || trace.length === 0) continue;
+    const anchor = introAnchors[slot];
+    const cut = trace.find(p => p.beat > anchorBeat && (p.jump || !p.moving))?.beat;
+    const next = anchorBeats[slot + 1];
+    const nextStart = next === undefined ? Infinity : next + (edits?.startTrims?.[slotIds[slot + 1]] ?? 0);
+    const minBeat = Math.max(entryBeats[slot - 1] + 1e-3, anchorBeat - Math.max(0, anchor.pos) / anchor.rate);
+    const maxBeat = Math.min(nextStart, cut ?? lastMotionEndBeat(trace, editHorizon)) - 1e-3;
+    if (minBeat > maxBeat) continue;
+    const limits = { anchorBeat, minBeat, maxBeat };
+    startTrimLimits[slot] = limits;
+    const trim = edits?.startTrims?.[slotIds[slot]] ?? 0;
+    if (trim === 0 && !sourceExtended[slot]) continue;
+    const beat = trim === 0 ? anchorBeat : Math.max(minBeat, Math.min(anchorBeat + trim, maxBeat));
+    entryBeats[slot] = beat;
+    const at = traceStateAt(trace, beat);
+    const after = traceStateAt(trace, beat + 1e-6);
+    const head: RoutineTracePoint = { beat, pos: at.pos,
+      moving: after.moving, ratePerBeat: after.ratePerBeat, jump: false };
+    // This is a crop/extension, not a slide: preserve every later point.
+    traces[slot] = [head, ...trace.filter(p => p.beat > beat)];
+    entryPositions[slot] = head.pos - (edits?.nudges?.[slotIds[slot]] ?? 0);
+  }
+  // A parked interval or negative lead is not a slot's contribution.
+  // Derive limits against the other boundary so a crop cannot contain
+  // only a pause while that slot's actual motion sits outside it.
+  const motionSpans = traces.map((trace, slot) => trace.flatMap((p, i) => {
+    if (!p.moving || p.ratePerBeat <= 0) return [];
+    const from = Math.max(entryBeats[slot], p.beat, p.beat - p.pos / p.ratePerBeat);
+    const to = trace[i + 1]?.beat ?? (slot === n - 1 ? Infinity : lastMotionEndBeat(trace, editHorizon));
+    return to > from ? [{ from, to }] : [];
+  }));
+  const requested = edits?.playbackBounds;
+  const lastMotion = Math.min(...motionSpans.map((spans) => spans.at(-1)?.to ?? input.durationBeats)) - 1e-3;
+  let startBeat = requested ? Math.min(requested.startBeat, lastMotion) : 0;
+  const minEndBeat = Math.max(...motionSpans.map((spans, slot) => {
+    const first = spans.find((span) => span.to > startBeat);
+    return first ? Math.max(startBeat, first.from) : entryBeats[slot];
+  })) + 1e-3;
+  const endBeat = requested ? Math.max(requested.endBeat, minEndBeat, startBeat + 8) : input.durationBeats;
+  const maxStartBeat = Math.min(...motionSpans.map((spans) => {
+    const last = spans.filter((span) => span.from < endBeat).at(-1);
+    return last ? Math.min(endBeat, last.to) : 0;
+  })) - 1e-3;
+  if (requested) startBeat = Math.min(startBeat, maxStartBeat);
+  const boundsLimits = { maxStartBeat, minEndBeat };
+  const playbackBounds = { startBeat, endBeat };
+  // Extend only slots already rolling at artifact zero. Later slots keep
+  // their original entry; no source Session is consulted.
+  for (const [slot, trace] of traces.entries()) {
+    const first = trace[0];
+    if (startBeat < 0 && entryBeats[slot] <= 0 && first?.moving && first.beat > startBeat) {
+      trace.unshift({ ...first, beat: startBeat,
+        pos: first.pos + (startBeat - first.beat) * first.ratePerBeat, jump: false });
+    }
+  }
+  const mixStartSec = startBeat !== 0 && ctx.entryAnchor
+    ? ctx.mixStartSec + (Math.max(0, traceStateAt(traces[0], startBeat).pos) - ctx.entryAnchor.trackSec) / ctx.entryAnchor.rate
+    : ctx.mixStartSec + startBeat * secPerBeat;
+  const beatOriginMixSec = mixStartSec - startBeat * secPerBeat;
+  const mixEndSec = beatOriginMixSec + endBeat * secPerBeat;
+  const entryMixSecs = entryBeats.map((b) => beatOriginMixSec + b * secPerBeat);
   const releaseMixSecs = traces.map((trace, slot) =>
     slot === n - 1
       ? mixEndSec // the exit slot holds its deck to the boundary contract
-      : ctx.mixStartSec + lastMotionEndBeat(trace, input.durationBeats) * secPerBeat
+      : Math.min(mixEndSec, beatOriginMixSec + lastMotionEndBeat(trace, editHorizon) * secPerBeat)
   );
 
   const assignments = allocateRoutineDecks(
     entryMixSecs.map((entryMixSec, slot) => ({
-      entryMixSec,
+      entryMixSec: Math.max(mixStartSec, entryMixSec),
       releaseMixSec: releaseMixSecs[slot],
     })),
     ctx.adoptedDeck,
@@ -831,6 +986,26 @@ export function buildPlannedRoutine(
         filter: recordedLanes.filter.map((p) => ({ ...p, beat: p.beat + delta })),
       };
     }
+    if (startBeat < 0) {
+      for (const control of LANE_CONTROLS) {
+        const points = recordedLanes[control];
+        if (points[0] && points[0].beat <= 0 && points[0].beat > startBeat) {
+          recordedLanes[control] = [{ beat: startBeat, value: points[0].value }, ...points];
+        }
+      }
+    }
+    if (entryBeats[slot] < anchorBeats[slot]) {
+      for (const control of LANE_CONTROLS) {
+        const fallback = control === 'fader' ? recordedLanes.defaults.fader
+          : control === 'filter' ? recordedLanes.defaults.filter
+            : control === 'trim' ? recordedLanes.defaults.trim : recordedLanes.defaults.eq;
+        const value = laneValueAt(recordedLanes[control], anchorBeats[slot], fallback);
+        recordedLanes[control] = [
+          { beat: entryBeats[slot], value },
+          ...recordedLanes[control].filter(p => p.beat >= anchorBeats[slot]),
+        ];
+      }
+    }
     return {
       slot,
       slotId,
@@ -840,14 +1015,15 @@ export function buildPlannedRoutine(
       releaseMixSec: releaseMixSecs[slot],
       entryMixSec: entryMixSecs[slot],
       entryTrackSec: entryPositions[slot] + (edits?.nudges?.[slotId] ?? 0),
+      startTrim: startTrimLimits[slot],
       basePitchPercent,
       trace,
       lanes: withLaneEdits(recordedLanes, edits, slotId),
       // Per-slot channel trim (gh#190): draft-authored, 0.5 nominal.
       trim: edits?.trims?.[slotId] ?? 0.5,
       jumpMixSecs: trace
-        .filter((p) => p.jump)
-        .map((p) => ctx.mixStartSec + p.beat * secPerBeat)
+        .filter((p) => p.jump && p.beat >= startBeat && p.beat <= endBeat)
+        .map((p) => beatOriginMixSec + p.beat * secPerBeat)
         .sort((a, b) => a - b),
     };
   });
@@ -881,7 +1057,7 @@ export function buildPlannedRoutine(
       last.ratePerBeat = 60 / trackBpms[n - 1];
     }
   }
-  const trackSecAtEnd = Math.max(0, traceStateAt(exitTrace, input.durationBeats).pos);
+  const trackSecAtEnd = Math.max(0, traceStateAt(exitTrace, endBeat).pos);
 
   // Routine-wide list kept for whole-plan queries (per-deck hard-sync
   // scoping reads the slots' own lists — #161).
@@ -890,8 +1066,11 @@ export function buildPlannedRoutine(
   return {
     routine: {
       startEntryIndex: ctx.startEntryIndex,
-      mixStartSec: ctx.mixStartSec,
+      mixStartSec,
       mixEndSec,
+      beatOriginMixSec,
+      playbackBounds,
+      boundsLimits,
       targetBpm: ctx.targetBpm,
       secPerBeat,
       slots,
@@ -922,7 +1101,20 @@ export function routineSlotStateAt(
   slot: PlannedRoutineSlot,
   mixTime: number
 ): RoutineSlotState {
-  const beat = (mixTime - routine.mixStartSec) / routine.secPerBeat;
+  const beat = (mixTime - routine.beatOriginMixSec) / routine.secPerBeat;
+  if (slot.transportBounds) {
+    const { startBeat, endBeat } = slot.transportBounds;
+    const at = Math.max(startBeat, Math.min(beat, endBeat));
+    const first = slot.trace[0];
+    const t = at < first.beat
+      ? { ...first, pos: first.pos + (at - first.beat) * first.ratePerBeat }
+      : traceStateAt(slot.trace, at);
+    return {
+      trackTime: Math.max(0, Math.min(t.pos, slot.transportBounds.trackDurationSec)),
+      playing: beat >= startBeat && beat < endBeat && t.pos >= 0 && t.moving,
+      pitchPercent: (t.ratePerBeat / routine.secPerBeat - 1) * 100,
+    };
+  }
   const t = traceStateAt(slot.trace, beat);
   if (!t.moving) {
     return {

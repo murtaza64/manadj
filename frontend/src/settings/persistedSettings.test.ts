@@ -12,6 +12,7 @@ import {
   hydratePersistedSettings,
   writeSetting,
   removeSetting,
+  shippedDefault,
 } from './persistedSettings';
 
 function fakeStorage(initial: Record<string, string> = {}): Storage {
@@ -60,6 +61,7 @@ describe('hydratePersistedSettings', () => {
 
   it('seeds an empty DB from inventoried localStorage keys only', async () => {
     localStorage.setItem('manadj.waveformStyles', '{"version":1}');
+    localStorage.setItem('manadj-column-order-v1', '["waveform","title"]');
     localStorage.setItem('manadj-visualizer-params:neon', '{"speed":2}');
     localStorage.setItem('manadj-last-pair', '12:34'); // ephemera: excluded
     const fetchMock = mockFetch((url) =>
@@ -73,6 +75,7 @@ describe('hydratePersistedSettings', () => {
     const payload = JSON.parse(seedCall![1]!.body as string);
     expect(payload.settings).toEqual({
       'manadj.waveformStyles': '{"version":1}',
+      'manadj-column-order-v1': '["waveform","title"]',
       'manadj-visualizer-params:neon': '{"speed":2}',
     });
   });
@@ -109,7 +112,85 @@ describe('hydratePersistedSettings', () => {
   });
 });
 
+describe('shipped defaults (setup-guides #293)', () => {
+  const DEFAULTS = { 'manadj-quantize': 'true', 'manadj-keylock': '{"A":true}', trackListSort: '{"column":"bpm"}' };
+
+  function backend(rows: Record<string, string>) {
+    return mockFetch((url) => (url.endsWith('/defaults') ? { defaults: DEFAULTS } : url.endsWith('/seed') ? { seeded: true } : { settings: rows }));
+  }
+
+  it('fills only unset keys: DB rows and local values win', async () => {
+    localStorage.setItem('manadj-keylock', '{"A":false}');
+    backend({ trackListSort: '{"column":"title"}' });
+
+    await hydratePersistedSettings();
+
+    expect(localStorage.getItem('manadj-quantize')).toBe('true');
+    expect(localStorage.getItem('manadj-keylock')).toBe('{"A":false}');
+    expect(localStorage.getItem('trackListSort')).toBe('{"column":"title"}');
+    expect(shippedDefault('manadj-quantize')).toBe('true');
+  });
+
+  it('applies defaults on an empty DB without writing them to the DB', async () => {
+    const fetchMock = backend({});
+
+    await hydratePersistedSettings();
+    expect(localStorage.getItem('trackListSort')).toBe('{"column":"bpm"}');
+
+    // Next boot: DB still empty, cache now holds the defaults — not seeded.
+    await hydratePersistedSettings();
+    const writes = fetchMock.mock.calls.filter(([url, init]) => url.endsWith('/seed') || init?.method === 'PUT');
+    expect(writes).toEqual([]);
+  });
+
+  it('does not push local values equal to their default, but pushes real edits', async () => {
+    localStorage.setItem('manadj-quantize', 'true');
+    localStorage.setItem('trackListSort', '{"column":"key"}');
+    const fetchMock = backend({ 'manadj-keylock': '{}' });
+
+    await hydratePersistedSettings();
+    await vi.waitFor(() => {
+      expect(fetchMock.mock.calls.some(([url, init]) => init?.method === 'PUT' && url.endsWith('/trackListSort'))).toBe(true);
+    });
+    expect(fetchMock.mock.calls.some(([url, init]) => init?.method === 'PUT' && url.endsWith('/manadj-quantize'))).toBe(false);
+  });
+
+  it('ignores defaults for keys outside the inventory', async () => {
+    mockFetch((url) => (url.endsWith('/defaults') ? { defaults: { 'manadj-app-mode': 'perf' } } : { settings: {} }));
+    await hydratePersistedSettings();
+    expect(localStorage.getItem('manadj-app-mode')).toBeNull();
+  });
+});
+
 describe('writeSetting / removeSetting', () => {
+  it('recovers unsent preferences after restart instead of overwriting them with stale DB values', async () => {
+    const failed = vi.fn().mockRejectedValue(new Error('offline'));
+    vi.stubGlobal('fetch', failed);
+    writeSetting('manadj-filter-settings', 'latest');
+    await vi.waitFor(() => expect(failed).toHaveBeenCalled());
+    await vi.resetModules();
+    const restarted = await import('./persistedSettings');
+    const fetchMock = mockFetch(() => ({ settings: { 'manadj-filter-settings': 'old' } }));
+    await restarted.hydratePersistedSettings();
+    expect(localStorage.getItem('manadj-filter-settings')).toBe('latest');
+    await vi.waitFor(() => expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'PUT' && init.body === JSON.stringify({ value: 'latest' }))).toBe(true));
+  });
+
+  it('serializes and coalesces rapid changes so an older slider write cannot win', async () => {
+    let finish!: (response: Response) => void;
+    const fetchMock = vi.fn().mockImplementationOnce(() => new Promise<Response>(resolve => { finish = resolve; }))
+      .mockResolvedValue({ ok: true });
+    vi.stubGlobal('fetch', fetchMock);
+    writeSetting('manadj-filter-settings', 'first');
+    writeSetting('manadj-filter-settings', 'middle');
+    writeSetting('manadj-filter-settings', 'last');
+    expect(localStorage.getItem('manadj-filter-settings')).toBe('last');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    finish({ ok: true } as Response);
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({ value: 'last' });
+  });
+
   it('writes the cache synchronously and PUTs through', async () => {
     const fetchMock = mockFetch(() => ({}));
 

@@ -340,6 +340,16 @@ def create_tag_category(db: Session, category: schemas.TagCategoryCreate):
     return db_category
 
 
+def delete_tag_category(db: Session, category_id: int):
+    """Delete a category, its Tags, and their TrackTag rows (ORM cascade)."""
+    category = db.query(models.TagCategory).filter(models.TagCategory.id == category_id).first()
+    if not category:
+        return None
+    db.delete(category)
+    db.commit()
+    return True
+
+
 def create_tag(db: Session, tag: schemas.TagCreate):
     db_tag = models.Tag(**tag.model_dump())
     db.add(db_tag)
@@ -404,15 +414,17 @@ def create_waveform(db: Session, track_id: int, filepath: str):
 
     Returns the created Waveform model instance; raises on analysis failure.
     """
-    from .waveform_data import PEAK_HOP, SAMPLE_RATE, analyze, build_blob
+    from .waveform_data import PEAK_HOP, SAMPLE_RATE, analyze, build_blob, build_preview_blob
 
     peaks, bands, duration = analyze(filepath)
+    blob = build_blob(peaks, bands, duration)
     db_waveform = models.Waveform(
         track_id=track_id,
         sample_rate=SAMPLE_RATE,
         duration=duration,
         samples_per_peak=PEAK_HOP,
-        data_blob=build_blob(peaks, bands, duration),
+        data_blob=blob,
+        preview_blob=build_preview_blob(blob),
     )
     db.add(db_waveform)
     db.commit()

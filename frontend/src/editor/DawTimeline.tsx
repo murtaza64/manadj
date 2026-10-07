@@ -19,6 +19,7 @@ import { cueCssColor } from '../hotcues/palette';
 import { AUDIBILITY_FILL_ALPHA } from '../theme/markers';
 import { hexToRgbTriplet } from '../theme/deckColors';
 import type { LaneGuide } from './LaneCanvas';
+import { presentationOf } from '../utils/presentationStore';
 import {
   LANE_IDS,
   aContentSegments,
@@ -258,8 +259,8 @@ export function DawTimeline({
   // handover ("misaligned depending on the set's play position").
   const engineDur = (snap: { trackId: number | null; duration: number }, trackId: number | null) =>
     trackId !== null && snap.trackId === trackId ? snap.duration : 0;
-  const durA = engineDur(player.engineA.getSnapshot(), trackAId) || (waveA?.duration ?? 0);
-  const durB = engineDur(player.engineB.getSnapshot(), trackBId) || (waveB?.duration ?? 0);
+  const durA = engineDur(presentationOf(player.engineA).getSnapshot(), trackAId) || (waveA?.duration ?? 0);
+  const durB = engineDur(presentationOf(player.engineB).getSnapshot(), trackBId) || (waveB?.duration ?? 0);
   const waveDursRef = useRef({ a: 0, b: 0 });
   useEffect(() => {
     waveDursRef.current = { a: waveA?.duration ?? 0, b: waveB?.duration ?? 0 };
@@ -577,8 +578,8 @@ export function DawTimeline({
       // them changed since the last frame (idle editor = idle GPU).
       // Same pre-decode duration fallback — and the same own-track gate —
       // as the render path (issue 28; conductor-load misalignment fix).
-      const snapA = player.engineA.getSnapshot();
-      const snapB = player.engineB.getSnapshot();
+      const snapA = presentationOf(player.engineA).getSnapshot();
+      const snapB = presentationOf(player.engineB).getSnapshot();
       const dA =
         (snapA.trackId === trackIdsRef.current.a ? snapA.duration : 0) ||
         waveDursRef.current.a;

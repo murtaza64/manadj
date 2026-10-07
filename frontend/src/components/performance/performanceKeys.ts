@@ -9,19 +9,20 @@
  *
  * Space is deliberately absent (unbound in the Performance view —
  * single-deck muscle-memory hazard, confirmed decision). Pads 5-8 are
- * mouse-only. No curation keys; beatgrid/mixer stay mouse-only.
+ * mouse-only. Mixer and jog gestures combine held keys with mouse movement.
  */
 export interface DeckKeyMap {
   /** Hold-cue (CDJ style). */
   cue: string;
   play: string;
+  loop: string;
   jumpBack: string;
   jumpForward: string;
-  /** Hold-to-nudge (momentary bend). */
-  nudgeBack: string;
-  nudgeForward: string;
-  /** Auto-loop engage/release toggle (looping 03). */
-  loop: string;
+  /** Hold and move vertically; mirrored from pinky (filter) to index (low). */
+  knobs: Record<'filter' | 'high' | 'mid' | 'low', string>;
+  fader: string;
+  /** Hold and move horizontally: bend playing decks, seek paused decks. */
+  jog: string;
   /** Hot cue pads 1-4, in slot order. */
   pads: [string, string, string, string];
 }
@@ -55,11 +56,21 @@ export function isTypingTarget(event: KeyboardEvent): boolean {
   return isTextEntryTarget(event.target);
 }
 
+/** Raw chord reservation; the global owner applies typing/overlay guards. */
+export function isQuantizeShortcut(event: KeyboardEvent): boolean {
+  return event.key === '=' && !event.shiftKey
+    && !event.ctrlKey && !event.metaKey && !event.altKey;
+}
+
 /** The predicate behind isTypingTarget, on the target itself (testable). */
 export function isTextEntryTarget(target: EventTarget | null): boolean {
   if (!(target instanceof Element)) return false;
   if (target.tagName === 'TEXTAREA') return true;
-  if ((target as HTMLElement).contentEditable === 'true') return true;
+  for (let node: Element | null = target; node; node = node.parentElement) {
+    const editable = (node as HTMLElement).contentEditable ?? node.getAttribute('contenteditable');
+    if (editable === 'false') break;
+    if (editable === 'true' || editable === '' || editable === 'plaintext-only') return true;
+  }
   return target.tagName === 'INPUT' && TEXT_INPUT_TYPES.has((target as HTMLInputElement).type);
 }
 
@@ -70,7 +81,21 @@ export function isTextEntryTarget(target: EventTarget | null): boolean {
  * like the library hub), or a held cue would stick.
  */
 export function isGuardedKeyEvent(event: KeyboardEvent): boolean {
-  return isTypingTarget(event) || event.ctrlKey || event.metaKey || event.altKey;
+  return isTypingTarget(event) || event.ctrlKey || event.metaKey || event.altKey || hasKeyboardOverlay();
+}
+
+/** Legacy filter dialogs and current dialog/menu surfaces both own their keys. */
+export function hasKeyboardOverlay(): boolean {
+  if (typeof document === 'undefined') return false;
+  return [...document.querySelectorAll<HTMLElement>('[role="dialog"], [role="menu"], [class*="modal-overlay"]')]
+    .some(node => {
+      if (node.closest('[hidden], [inert], [aria-hidden="true"]')) return false;
+      for (let parent: HTMLElement | null = node; parent; parent = parent.parentElement) {
+        const style = getComputedStyle(parent);
+        if (style.display === 'none' || style.visibility === 'hidden') return false;
+      }
+      return true;
+    });
 }
 
 // The two keys are the left/right HAND layouts, not Deck A/B: 'A' is the
@@ -80,21 +105,23 @@ export const DECK_KEYS: Record<'A' | 'B', DeckKeyMap> = {
   A: {
     cue: 'f',
     play: 'd',
+    loop: 'b',
     jumpBack: 'a',
     jumpForward: 's',
-    nudgeBack: 'w',
-    nudgeForward: 'e',
-    loop: 'r',
+    knobs: { filter: 'q', high: 'w', mid: 'e', low: 'r' },
+    fader: 'g',
+    jog: 't',
     pads: ['z', 'x', 'c', 'v'],
   },
   B: {
     cue: 'j',
     play: 'k',
+    loop: 'n',
     jumpBack: 'l',
     jumpForward: ';',
-    nudgeBack: 'i',
-    nudgeForward: 'o',
-    loop: 'u',
+    knobs: { filter: 'p', high: 'o', mid: 'i', low: 'u' },
+    fader: 'h',
+    jog: 'y',
     pads: ['m', ',', '.', '/'],
   },
 };

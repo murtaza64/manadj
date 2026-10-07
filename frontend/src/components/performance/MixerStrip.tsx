@@ -11,15 +11,27 @@
  * midi-controller 09) and pushing changes through the setters. The shared
  * rotary Knob lives here too (used by the deck MIX zones).
  */
-import { useRef } from 'react';
+import { useRef, useSyncExternalStore, type CSSProperties, type ReactNode } from 'react';
+import { knobAppearance, type KnobControl } from './knobAppearance';
+import { useStyleSlot } from '../../waveform/styleSlots';
 import { useMixer, useMixerValue } from '../../hooks/useMixer';
 import { useTakeoverHint } from '../../hooks/useTakeoverHint';
 import { takeoverKey, type TakeoverDirection } from '../../midi/takeoverFeedback';
-import { CUE_MIX_DEFAULT } from '../../playback/mixer';
+import { CHANNEL_IDS, CUE_MIX_DEFAULT } from '../../playback/mixer';
+import { beatFxLengthUnit, type BeatFxTarget } from '../../playback/beatFx';
+import { isQuantizeOn, setQuantize, subscribeQuantize } from '../../playback/quantizeStore';
 import type { ChannelId } from '../../playback/mixer';
-import { CROSSFADER_ASSIGNMENTS } from '../../playback/crossfaderAssignmentStore';
 import { DiagonalPairLinks } from '../../links/PerformancePairLinks';
+import { AutoBlurSelect } from '../AutoBlurSelect';
+import { openKeyboardHelp } from '../keyboardHelpStore';
 import { PerfSectionToggles } from './PerfSectionToggles';
+import { PERFORMANCE_FX_KEYS, performanceFxTargetKey } from './performanceFxKeys';
+import type { DeckCount } from './waveformOrder';
+import {
+  isSoftTakeoverEnabled,
+  setSoftTakeoverEnabled,
+  subscribeSoftTakeover,
+} from '../../midi/softTakeoverStore';
 
 /** Vertical drag distance (px) that sweeps a knob end to end. */
 const KNOB_DRAG_RANGE_PX = 150;
@@ -34,6 +46,7 @@ function wheelDelta(e: React.WheelEvent, min: number, max: number): number {
 
 export function Knob({
   label,
+  kbd,
   min,
   max,
   defaultValue,
@@ -41,10 +54,12 @@ export function Knob({
   onChange,
   title,
   className,
+  control,
   ghost = null,
   takeover = null,
 }: {
   label: string;
+  kbd?: ReactNode;
   min: number;
   max: number;
   /** Double-click reset position. */
@@ -55,6 +70,8 @@ export function Knob({
   title?: string;
   /** Extra class(es) on the knob wrapper (size/ring variants). */
   className?: string;
+  /** Match editor parameter colors and value shading; other knobs stay neutral. */
+  control?: KnobControl;
   /** Automation ghost (sets 15): a second, translucent pointer at the live
    * automation value while an overlay is engaged. Display only — never
    * affects the real pointer (base state) or gesture handling. */
@@ -64,6 +81,7 @@ export function Knob({
   takeover?: TakeoverDirection | null;
 }) {
   const drag = useRef<{ startY: number; startValue: number } | null>(null);
+  const waveform = useStyleSlot('full');
 
   const set = (v: number) => {
     onChange(Math.max(min, Math.min(max, v)));
@@ -74,12 +92,15 @@ export function Knob({
     -135 + Math.max(0, Math.min(1, (v - min) / (max - min))) * 270;
   const angle = toAngle(value);
   const ghostAngle = ghost === null ? null : toAngle(ghost);
+  const appearance = control ? knobAppearance(control,
+    (value - min) / (max - min), ghost === null ? null : (ghost - min) / (max - min), waveform) : null;
 
   return (
     <div
-      className={`perf-knob${className ? ` ${className}` : ''}${
+      className={`perf-knob${control ? ' perf-knob-colored' : ''}${className ? ` ${className}` : ''}${
         takeover ? ` perf-takeover perf-takeover-${takeover}` : ''
       }`}
+      style={appearance?.style as CSSProperties | undefined}
     >
       <div
         className="perf-knob-dial"
@@ -98,6 +119,11 @@ export function Knob({
         onDoubleClick={() => set(defaultValue)}
         onWheel={(e) => set(value + wheelDelta(e, min, max))}
       >
+        {control && <>
+          <div className="perf-knob-ring perf-knob-ring-track" aria-hidden="true" />
+          <div className="perf-knob-ring perf-knob-ring-fill" style={{ background: appearance?.arcBackground }} aria-hidden="true" />
+          <div className="perf-knob-detent" aria-hidden="true" />
+        </>}
         {ghostAngle !== null && (
           <div
             className="perf-knob-pointer perf-knob-ghost"
@@ -111,7 +137,7 @@ export function Knob({
           style={{ transform: `rotate(${angle}deg)` }}
         />
       </div>
-      <span>{label}</span>
+      <span>{label}{kbd != null && <span className="perf-kbd perf-kbd-inline">{kbd}</span>}</span>
     </div>
   );
 }
@@ -129,6 +155,10 @@ export function Knob({
  */
 export function HFader({
   label,
+  kbd,
+  id,
+  ariaLabel,
+  step,
   min,
   max,
   value,
@@ -145,6 +175,10 @@ export function HFader({
   takeover = null,
 }: {
   label: string;
+  kbd?: ReactNode;
+  id?: string;
+  ariaLabel?: string;
+  step?: number;
   min: number;
   max: number;
   value: number;
@@ -168,11 +202,21 @@ export function HFader({
   const ref = useRef<HTMLDivElement>(null);
   const dragging = useRef(false);
 
+  const set = (raw: number) => {
+    if (!Number.isFinite(raw)) return;
+    const clamped = Math.max(min, Math.min(max, raw));
+    const snapped = step && step > 0
+      ? Number((min + Math.round((clamped - min) / step) * step).toPrecision(12))
+      : clamped;
+    onChange(Math.max(min, Math.min(max, snapped)));
+  };
+
   const setFromPointer = (clientX: number) => {
     if (!ref.current) return;
     const rect = ref.current.getBoundingClientRect();
+    if (rect.width <= 0) return;
     const f = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
-    onChange(min + f * (max - min));
+    set(min + f * (max - min));
   };
 
   const fraction = (value - min) / (max - min);
@@ -185,10 +229,19 @@ export function HFader({
   return (
     <div
       ref={ref}
+      id={id}
+      role={ariaLabel ? 'slider' : undefined}
+      aria-label={ariaLabel}
+      aria-valuemin={ariaLabel ? min : undefined}
+      aria-valuemax={ariaLabel ? max : undefined}
+      aria-valuenow={ariaLabel ? value : undefined}
+      aria-disabled={ariaLabel ? disabled : undefined}
+      tabIndex={ariaLabel ? (disabled ? -1 : 0) : undefined}
       className={`perf-fader${accent ? ' accent' : ''}${disabled ? ' disabled' : ''}${takeover ? ` perf-takeover perf-takeover-${takeover}` : ''}`}
       title={title}
       onPointerDown={(e) => {
         if (disabled) return;
+        if (ariaLabel) e.currentTarget.focus({ preventScroll: true });
         e.currentTarget.setPointerCapture(e.pointerId);
         dragging.current = true;
         setFromPointer(e.clientX);
@@ -196,12 +249,31 @@ export function HFader({
       onPointerMove={(e) => {
         if (dragging.current && !disabled) setFromPointer(e.clientX);
       }}
-      onPointerUp={() => (dragging.current = false)}
+      onPointerUp={(e) => {
+        dragging.current = false;
+        if (ariaLabel) e.currentTarget.blur();
+      }}
       onPointerCancel={() => (dragging.current = false)}
-      onDoubleClick={() => !disabled && onChange(defaultValue)}
+      onLostPointerCapture={() => (dragging.current = false)}
+      onDoubleClick={() => !disabled && set(defaultValue)}
+      onKeyDown={(e) => {
+        if (!ariaLabel || disabled || e.ctrlKey || e.metaKey || e.altKey) return;
+        const increment = step ?? (max - min) / 100;
+        let next: number;
+        if (e.key === 'ArrowRight' || e.key === 'ArrowUp') next = value + increment;
+        else if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') next = value - increment;
+        else if (e.key === 'PageUp') next = value + increment * 10;
+        else if (e.key === 'PageDown') next = value - increment * 10;
+        else if (e.key === 'Home') next = min;
+        else if (e.key === 'End') next = max;
+        else return;
+        e.preventDefault();
+        e.stopPropagation();
+        set(next);
+      }}
       onWheel={(e) => {
         if (disabled) return;
-        onChange(Math.max(min, Math.min(max, value + wheelDelta(e, min, max))));
+        set(value + wheelDelta(e, min, max));
       }}
     >
       <div className="perf-fader-track" />
@@ -252,45 +324,164 @@ export function HFader({
         }}
       >
         {label}
+        {kbd != null && <span className="perf-kbd perf-kbd-inline">{kbd}</span>}
       </div>
     </div>
   );
 }
 
 /**
- * Per-channel crossfader assignment (four-deck 08): a deck-labeled L/T/R
- * segment riding the strip beside the X-FADER — assignment is crossfader
- * topology, so it lives with the crossfader, not on the per-deck MIX
- * zones. Deck letters carry the Deck identity colors; the lit segment is
- * state — active green like the strip's other toggles, except thru,
- * which lights grey (opted out of the topology, not "active" in it).
- * While the crossfader is bypassed (XF off) the whole topology is moot —
- * the segments grey out and disable, like the fader itself.
+ * Compact natural-side assignment. A/C can only join the left side; B/D
+ * only the right. Off = thru (bypass), on = assigned to that side.
  */
 function XfAssign({ deck }: { deck: ChannelId }) {
   const mixer = useMixer();
   const assignment = useMixerValue((m) => m.getCrossfaderAssignment(deck));
   const xfOn = useMixerValue((m) => m.getCrossfaderEnabled());
+  const side = deck === 'A' || deck === 'C' ? 'left' : 'right';
+  const assigned = assignment === side;
   return (
-    <div
-      className={`perf-xf-assign${xfOn ? '' : ' disabled'}`}
-      role="group"
+    <button
+      className={`player-button perf-strip-toggle perf-xf-assign deck-${deck.toLowerCase()}${assigned ? ' on' : ''}`}
       aria-label={`Deck ${deck} crossfader assignment`}
+      aria-pressed={assigned}
+      disabled={!xfOn}
+      onClick={() => mixer.setCrossfaderAssignment(deck, assigned ? 'thru' : side)}
+      title={`Deck ${deck}: ${assigned ? `${side} side` : 'thru'}`}
     >
-      <span className={`perf-xf-assign-deck deck-${deck.toLowerCase()}`}>{deck}</span>
-      {CROSSFADER_ASSIGNMENTS.map((a) => (
+      {deck}
+    </button>
+  );
+}
+
+/** 0.25 → "1/4", 0.75 → "3/4", 2 → "2" — the echo beats readout. */
+function formatEchoBeats(beats: number): string {
+  if (beats === 0.25) return '1/4';
+  if (beats === 0.5) return '1/2';
+  if (beats === 0.75) return '3/4';
+  return String(beats);
+}
+
+/** On-control key hint (hidden with KBD off, like the deck hints). */
+function FxKbd({ k }: { k: string | null }) {
+  return k === null ? null : <kbd className="perf-kbd" aria-hidden="true">{k}</kbd>;
+}
+
+/** One CH SELECT radio target; LEDs on the GRV6 are hardware-controlled. */
+function BeatFxTargetToggle({ target, label }: { target: BeatFxTarget; label: string }) {
+  const mixer = useMixer();
+  const selected = useMixerValue((m) => m.getBeatFxSection().target === target);
+  const deckClass = CHANNEL_IDS.includes(target as ChannelId)
+    ? ` deck-${target.toLowerCase()}`
+    : '';
+  const key = performanceFxTargetKey(target);
+  return (
+    <button
+      className={`player-button perf-strip-toggle perf-fx-ch${deckClass}${selected ? ' on' : ''}`}
+      aria-pressed={selected}
+      aria-label={`Beat FX target ${label}`}
+      onClick={() => mixer.selectBeatFxTarget(target)}
+      title={target === 'sampler'
+        ? 'Sampler target (no sampler bus in manadj)'
+        : `Beat FX target: ${label}${key ? ` (${key})` : ''}`}
+    >
+      {label}
+      <FxKbd k={key} />
+    </button>
+  );
+}
+
+/** One GRV6-shaped section: ON/OFF, SELECT, BEAT ◄ ►, single bipolar
+ * DEPTH, then the mutually-exclusive A–D/MST CH SELECT targets. */
+function BeatFxRow({ deckCount }: { deckCount: DeckCount }) {
+  const mixer = useMixer();
+  const section = useMixerValue((m) => m.getBeatFxSection());
+  const flangerUnit = useMixerValue((m) => m.getBeatFxSettings().flangerLengthUnit);
+  const lengthUnit = beatFxLengthUnit(section.selected, flangerUnit);
+  const depthTakeover = useTakeoverHint(takeoverKey.beatFxLevel());
+  const channels = deckCount === 4 ? CHANNEL_IDS : (['A', 'B'] as const);
+  return (
+    <div className="perf-fx-row" role="group" aria-label="Beat FX">
+      <div className="perf-fx-controls">
         <button
-          key={a}
-          className={`player-button${a === 'thru' ? ' thru' : ''}${assignment === a ? ' on' : ''}`}
-          onClick={() => mixer.setCrossfaderAssignment(deck, a)}
-          disabled={!xfOn}
-          aria-label={`Assign Deck ${deck} to crossfader ${a}`}
-          aria-pressed={assignment === a}
-          title={`Deck ${deck} crossfader: ${a}`}
+          className={`player-button perf-strip-toggle perf-fx-on${section.on ? ' on' : ''}`}
+          aria-label="Beat FX on/off"
+          aria-pressed={section.on}
+          disabled={section.selected === null}
+          onClick={() => mixer.toggleBeatFxOn()}
+          title={`Beat FX master on/off (GRV6 ON/OFF) (${PERFORMANCE_FX_KEYS.toggle})`}
         >
-          {a === 'left' ? 'L' : a === 'right' ? 'R' : 'T'}
+          FX
+          <FxKbd k={PERFORMANCE_FX_KEYS.toggle} />
         </button>
-      ))}
+        <AutoBlurSelect
+          className="perf-fx-select"
+          aria-label="Beat FX effect"
+          value={section.selected ?? ''}
+          onChange={(event) => {
+            const value = event.currentTarget.value;
+            mixer.selectBeatFx(value === '' ? null : value as 'echo' | 'reverb' | 'flanger');
+          }}
+          title="Beat FX SELECT; swaps the current target live"
+      >
+        <option value="">---</option>
+        <option value="echo">ECH</option>
+        <option value="reverb">RVB</option>
+        <option value="flanger">FLG</option>
+        </AutoBlurSelect>
+        <div
+          className="perf-fx-size"
+          role="group"
+          aria-label="Beat FX length controls"
+          onWheel={(e) => mixer.stepBeatFxBeats(e.deltaY < 0 ? 'double' : 'halve')}
+        >
+          <button
+            className="player-button"
+            aria-label="Halve Beat FX length"
+            onClick={() => mixer.stepBeatFxBeats('halve')}
+            title={`Halve Beat FX length (${PERFORMANCE_FX_KEYS.beatHalve})`}
+          >
+            1/2
+            <FxKbd k={PERFORMANCE_FX_KEYS.beatHalve} />
+          </button>
+          <span
+            className={`perf-fx-beats${lengthUnit === 'bars' ? ' bars' : ''}`}
+            aria-label="Beat FX length"
+            data-unit={lengthUnit}
+            title={`Beat FX length in ${lengthUnit} (scroll to change)`}
+          >
+            {formatEchoBeats(section.beats)}
+            {lengthUnit === 'bars' && <span className="perf-fx-unit">BAR</span>}
+          </span>
+          <button
+            className="player-button"
+            aria-label="Double Beat FX length"
+            onClick={() => mixer.stepBeatFxBeats('double')}
+            title={`Double Beat FX length (${PERFORMANCE_FX_KEYS.beatDouble})`}
+          >
+            x2
+            <FxKbd k={PERFORMANCE_FX_KEYS.beatDouble} />
+          </button>
+        </div>
+        <Knob
+          label="DEPTH"
+          kbd={PERFORMANCE_FX_KEYS.depth}
+          min={-1}
+          max={1}
+          defaultValue={0}
+          value={section.depth}
+          onChange={(value) => mixer.setBeatFxDepth(value)}
+          title={`LEVEL/DEPTH: original ← 0 balance → effect (drag, scroll, double-click resets; hold ${PERFORMANCE_FX_KEYS.depth} + mouse)`}
+          className="perf-knob-small perf-fx-depth"
+          takeover={depthTakeover}
+        />
+      </div>
+      <div className="perf-fx-targets" role="group" aria-label="Beat FX target">
+        {channels.map((channel) => (
+          <BeatFxTargetToggle key={channel} target={channel} label={channel} />
+        ))}
+        <BeatFxTargetToggle target="master" label="MST" />
+      </div>
     </div>
   );
 }
@@ -298,13 +489,19 @@ function XfAssign({ deck }: { deck: ChannelId }) {
 export function MixerStrip({
   hintsOn = true,
   onToggleHints,
+  deckCount = 4,
+  onDeckCountChange,
 }: {
   /** Keyboard-hint visibility (the KBD toggle in the strip's left cell). */
   hintsOn?: boolean;
   onToggleHints?: () => void;
+  deckCount?: DeckCount;
+  onDeckCountChange?: (count: DeckCount) => void;
 }) {
   const mixer = useMixer();
   const crossfader = useMixerValue((m) => m.getCrossfader());
+  const quantizeOn = useSyncExternalStore(subscribeQuantize, isQuantizeOn);
+  const softTakeoverOn = useSyncExternalStore(subscribeSoftTakeover, isSoftTakeoverEnabled);
   // Crossfader bypass — audio truth lives in the Mixer; UI repaints
   // through the same subscription as every other mixer control.
   const xfOn = useMixerValue((m) => m.getCrossfaderEnabled());
@@ -317,25 +514,70 @@ export function MixerStrip({
   const crossfaderTakeover = useTakeoverHint(takeoverKey.crossfader());
 
   return (
-    <div className="perf-strip">
+    <div className="perf-strip" data-tour="performance.mixer">
       <div className="perf-strip-left">
+        {onDeckCountChange && (
+          <span className="perf-deck-count" role="group" aria-label="Displayed decks">
+            {([2, 4] as const).map((count) => (
+              <button
+                key={count}
+                className={`player-button perf-strip-toggle${deckCount === count ? ' on' : ''}`}
+                aria-pressed={deckCount === count}
+                onClick={() => onDeckCountChange(count)}
+                title={`Show ${count} decks (display only)`}
+              >
+                {count} DECKS
+              </button>
+            ))}
+          </span>
+        )}
         {onToggleHints && (
-          <button
-            className={`player-button perf-strip-toggle${hintsOn ? ' on' : ''}`}
-            onClick={onToggleHints}
-            title={hintsOn ? 'Hide keyboard hints' : 'Show keyboard hints'}
-          >
-            KBD
-          </button>
+          <span className="perf-kbd-toggle-group">
+            <button
+              className={`player-button perf-strip-toggle${hintsOn ? ' on' : ''}`}
+              onClick={onToggleHints}
+              title={hintsOn ? 'Hide keyboard hints' : 'Show keyboard hints'}
+            >
+              KBD
+            </button>
+            <button
+              className="player-button perf-strip-toggle"
+              aria-label="Keyboard shortcuts"
+              onClick={openKeyboardHelp}
+              title="Show keyboard map (?)"
+            >
+              ?
+            </button>
+          </span>
         )}
         {/* Waveform/deck section toggles (perf-layout 12 / gh#68): the
             strip never hides, so they stay reachable when everything
             around it is collapsed. */}
         <PerfSectionToggles />
-      </div>
-      <div className="perf-strip-slot wide">
         <button
-          className={`player-button perf-strip-toggle${xfOn ? ' on' : ''}`}
+          className={`player-button perf-strip-toggle${quantizeOn ? ' on' : ''}`}
+          aria-label="Quantize"
+          aria-pressed={quantizeOn}
+          aria-keyshortcuts="="
+          title={`${quantizeOn ? 'Quantize on: gestures snap to the beat' : 'Quantize off: exact placement'} (=)`}
+          onClick={() => setQuantize(!isQuantizeOn())}
+        >
+          QUANT
+        </button>
+        <button
+          className={`player-button perf-strip-toggle${softTakeoverOn ? ' on' : ''}`}
+          aria-pressed={softTakeoverOn}
+          onClick={() => setSoftTakeoverEnabled(!softTakeoverOn)}
+          title={softTakeoverOn
+            ? 'Soft takeover on: controller values wait for pickup'
+            : 'Soft takeover off: controller values apply immediately'}
+        >
+          TAKEOVER
+        </button>
+      </div>
+      <div className="perf-xf-tools">
+        <button
+          className={`player-button perf-strip-toggle perf-xf-enable${xfOn ? ' on' : ''}`}
           onClick={() => mixer.setCrossfaderEnabled(!xfOn)}
           title={
             xfOn
@@ -345,14 +587,11 @@ export function MixerStrip({
         >
           XF
         </button>
-        {/* Assignment segments flank the fader on their default sides
-            (A/C left, B/D right — matching the 2×2 deck grid columns);
-            an assignment is free to point anywhere regardless. */}
+        {/* Physical order follows the deck grid: C A | fader | B D. */}
+        {deckCount === 4 && <XfAssign deck="C" />}
         <XfAssign deck="A" />
-        <XfAssign deck="C" />
-        {/* End labels flank the fader (flex flow, never over the track);
-            physical orientation — only the fills are reversed. */}
-        <span className="perf-xfade-end">L</span>
+      </div>
+      <div className="perf-xf-fader">
         <HFader
           label="X-FADER"
           min={-1}
@@ -366,34 +605,29 @@ export function MixerStrip({
           title="Crossfader (double-click to center)"
           takeover={crossfaderTakeover}
         />
-        <span className="perf-xfade-end">R</span>
-        <XfAssign deck="B" />
-        <XfAssign deck="D" />
-        {/* Invisible twin of the XF toggle: keeps the fader's center on the
-            deck divider axis. */}
-        <span className="player-button perf-strip-toggle perf-strip-ghost" aria-hidden="true">
-          XF
-        </span>
-        {/* Diagonal pair Links (four-deck-performance 19): A·D and B·C
-            have no shared Deck edge, so their toggles hang here beside
-            the crossfader. Adjacent pairs live on the Deck grid's edges
-            (EdgePairLinks). */}
-        <DiagonalPairLinks />
       </div>
-      <div className="perf-strip-slot">
-        {/* Headphone blend. MASTER and PHONES gain moved to the top bar's
-            routing knobs (gh#66) — the blend is the only cue control left
-            in the strip. */}
-        <HFader
-          label="CUE MIX"
-          min={0}
-          max={1}
-          value={cueMix}
-          defaultValue={CUE_MIX_DEFAULT}
-          onChange={(v) => mixer.setCueMix(v)}
-          title="Headphone blend: cue only ← → master only (double-click = cue only)"
-          takeover={cueMixTakeover}
-        />
+      <div className="perf-xf-right">
+        <XfAssign deck="B" />
+        {deckCount === 4 && <XfAssign deck="D" />}
+      </div>
+      <div className="perf-strip-right">
+        {deckCount === 4 && <DiagonalPairLinks />}
+        <BeatFxRow deckCount={deckCount} />
+        <div className="perf-strip-slot">
+          {/* Headphone blend. MASTER and PHONES gain moved to the top bar's
+              routing knobs (gh#66) — the blend is the only cue control left
+              in the strip. */}
+          <HFader
+            label="CUE MIX"
+            min={0}
+            max={1}
+            value={cueMix}
+            defaultValue={CUE_MIX_DEFAULT}
+            onChange={(v) => mixer.setCueMix(v)}
+            title="Headphone blend: cue only ← → master only (double-click = cue only)"
+            takeover={cueMixTakeover}
+          />
+        </div>
       </div>
     </div>
   );

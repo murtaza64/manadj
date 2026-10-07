@@ -145,7 +145,7 @@ function tickAt(t: number): void {
   frame?.();
 }
 
-function makePlayer(opts: { audible?: () => boolean; withJump?: boolean } = {}) {
+function makePlayer(opts: { audible?: () => boolean; withJump?: boolean; constrainToBounds?: () => boolean } = {}) {
   const clock = () => now;
   const engines = {
     A: new FakeEngine(clock),
@@ -161,6 +161,7 @@ function makePlayer(opts: { audible?: () => boolean; withJump?: boolean } = {}) 
     mixer: fakeMixer(clock, lanes),
     engines: engines as unknown as Record<Deck, DeckEngine>,
     audible: opts.audible ?? (() => true),
+    constrainToBounds: opts.constrainToBounds,
   });
   player.setRoutine(planned(opts.withJump));
   return { player, engines, lanes };
@@ -183,6 +184,30 @@ afterEach(() => {
 });
 
 describe('slot→deck driving', () => {
+  it('saved Routine auditions start and stop at their cropped bounds', () => {
+    const { player } = makePlayer({ constrainToBounds: () => true });
+    const input = recording();
+    input.edits = { lanes: {}, jumps: [], pauses: [], removedRecordedJumps: [],
+      removedRecordedPauses: [], nudges: {}, trims: {}, entryOffsets: {},
+      playbackBounds: { startBeat: 16, endBeat: 48 } };
+    const r = buildPlannedRoutine(input, {
+      startEntryIndex: 0, mixStartSec: 0, targetBpm: 120,
+      adoptedDeck: 'A', busy: [], trackBpms: [120, 120, 120],
+    }).routine;
+    player.setRoutine(r);
+    expect(player.getBeat()).toBe(16);
+    player.seek(-100);
+    expect(player.getBeat()).toBe(16);
+    player.play();
+    tickAt(15.5);
+    expect(player.isPlaying()).toBe(true);
+    tickAt(16.1);
+    expect(player.isPlaying()).toBe(false);
+    expect(player.getBeat()).toBe(48);
+    player.play();
+    expect(player.getBeat()).toBe(16);
+  });
+
   it('slot 0 plays from its entry position; later slots park until their entries', () => {
     const { player, engines } = makePlayer();
     player.play();

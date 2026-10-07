@@ -5,10 +5,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from collections.abc import Sequence
 from typing import Any
 
 from backend.key import Key
 from backend.models import Track as ManAdjTrack
+from backend.sync_common.matching import path_key
 from rekordbox.sync import (
     find_missing_tracks_in_manadj_from_rekordbox,
     find_missing_tracks_in_rekordbox,
@@ -60,62 +62,99 @@ def export_tracks_to_engine(
     engine_db: Any,
     playlist_name: str | None = None,
     validate_files: bool = True,
+    drive_dbs: Sequence[Any] = (),
 ) -> EngineTrackExportResult:
     """Directly insert manadj-only tracks into Engine's m.db and collect
     them in a needs-analysis playlist. Caller is responsible for the
-    Engine-closed guard and pre-write snapshot (router dependency)."""
+    Engine-closed guard and pre-write snapshot (router dependency).
+
+    `engine_db` is the main library; `drive_dbs` are the per-drive
+    libraries (#307). A track counts as present if any library has it, and
+    is written to the library on its own drive — skipped and reported when
+    that drive has no Engine Library."""
+    from enginedj.libraries import owning_library
     from enginedj.sync import find_missing_tracks_in_enginedj
-    from enginedj.track_export import EngineTrackSpec, insert_track
+    from enginedj.track_export import EngineTrackSpec, OtherDriveError, insert_track
 
-    library_root = engine_db.database_path.parent
-
-    with engine_db.session_m() as edj_session:
-        missing, stats = find_missing_tracks_in_enginedj(
-            manadj_session,
-            edj_session,
-            validate_paths=validate_files,
-        )
-
-    inserted_ids: list[int] = []
-    with engine_db.session_m_write() as session:
-        for track in missing:
-            abs_path = Path(track.filename)
-            tags = _file_tags(abs_path)
-            spec = EngineTrackSpec(
-                abs_path=abs_path,
-                title=track.title or abs_path.stem,
-                artist=track.artist,
-                album=tags.get("album"),
-                genre=tags.get("genre"),
-                year=tags.get("year"),
-                length_secs=(
-                    int(track.duration_secs)
-                    if track.duration_secs
-                    else tags.get("length_secs")
-                ),
-                bitrate_kbps=track.bitrate_kbps or tags.get("bitrate_kbps"),
+    libraries = [engine_db, *drive_dbs]
+    missing_ids: set[int] | None = None
+    missing: list[ManAdjTrack] = []
+    stats: dict[str, int] = {}
+    for lib in libraries:
+        with lib.session_m() as edj_session:
+            lib_missing, lib_stats = find_missing_tracks_in_enginedj(
+                manadj_session,
+                edj_session,
+                validate_paths=validate_files,
             )
-            inserted_ids.append(insert_track(session, spec, library_root))
+        if missing_ids is None:
+            missing, stats = lib_missing, lib_stats
+            missing_ids = {t.id for t in lib_missing}
+        else:
+            missing_ids &= {t.id for t in lib_missing}
+    missing = [t for t in missing if t.id in (missing_ids or set())]
+
+    def root_of(lib: Any) -> Path:
+        return lib.database_path.parent
+
+    by_library: dict[int, list[ManAdjTrack]] = {}
+    other_drive: list[str] = []
+    for track in missing:
+        lib = owning_library(track.filename, libraries, root_of)
+        if lib is None:
+            other_drive.append(track.filename)
+        else:
+            by_library.setdefault(libraries.index(lib), []).append(track)
 
     final_playlist_name = playlist_name or default_needs_analysis_playlist_name()
-    playlist_created = False
-    if inserted_ids:
+    exported = 0
+    exported_by_library: dict[str, int] = {}
+    for index, tracks in by_library.items():
+        lib = libraries[index]
+        library_root = root_of(lib)
+        inserted_ids: list[int] = []
+        with lib.session_m_write() as session:
+            for track in tracks:
+                abs_path = Path(track.filename)
+                tags = _file_tags(abs_path)
+                spec = EngineTrackSpec(
+                    abs_path=abs_path,
+                    title=track.title or abs_path.stem,
+                    artist=track.artist,
+                    album=tags.get("album"),
+                    genre=tags.get("genre"),
+                    year=tags.get("year"),
+                    length_secs=(
+                        int(track.duration_secs)
+                        if track.duration_secs
+                        else tags.get("length_secs")
+                    ),
+                    bitrate_kbps=track.bitrate_kbps or tags.get("bitrate_kbps"),
+                )
+                try:
+                    inserted_ids.append(insert_track(session, spec, library_root))
+                except OtherDriveError:
+                    # Same volume key but no relative path (#306): skip + report.
+                    other_drive.append(track.filename)
+        if inserted_ids:
 
-        @dataclass
-        class _Ref:
-            id: int
+            @dataclass
+            class _Ref:
+                id: int
 
-        engine_db.create_playlist(
-            final_playlist_name, [_Ref(i) for i in inserted_ids]
-        )
-        playlist_created = True
+            lib.create_playlist(final_playlist_name, [_Ref(i) for i in inserted_ids])
+            exported += len(inserted_ids)
+            exported_by_library[str(library_root)] = len(inserted_ids)
 
     return EngineTrackExportResult(
         target="engine",
-        exported_to_target=len(inserted_ids),
+        exported_to_target=exported,
         skipped_file_not_found=stats.get("skipped_file_not_found", 0),
-        playlist_name=final_playlist_name if inserted_ids else None,
-        playlist_created=playlist_created,
+        skipped_other_drive=len(other_drive),
+        skipped_other_drive_paths=other_drive,
+        exported_by_library=exported_by_library,
+        playlist_name=final_playlist_name if exported else None,
+        playlist_created=bool(exported),
     )
 
 
@@ -135,7 +174,8 @@ def export_tracks_to_rekordbox(
             continue
 
         title = track.title or file_path.stem
-        rb_db.add_content(str(file_path.absolute()), Title=title)
+        # Rekordbox stores "/"-separated FolderPaths on every OS (#305).
+        rb_db.add_content(file_path.absolute().as_posix(), Title=title)
         exported += 1
 
     if exported > 0:
@@ -157,10 +197,10 @@ def create_needs_analysis_playlist(
     playlist = rb_db.create_playlist(name=playlist_name)
 
     rb_contents = list(rb_db.get_content())
-    track_paths = {t.filename for t in tracks}
+    track_paths = {path_key(t.filename) for t in tracks}
 
     for rb_content in rb_contents:
-        if rb_content.FolderPath in track_paths:
+        if rb_content.FolderPath and path_key(rb_content.FolderPath) in track_paths:
             rb_db.add_to_playlist(playlist, rb_content)
 
     rb_db.commit(autoinc=True)
@@ -177,38 +217,51 @@ def import_tracks_from_rekordbox(
         return 0
 
     imported = 0
+    imported_tracks = []
     for rb_track in rb_tracks:
         if not rb_track.FolderPath:
             continue
 
         bpm = rb_track.BPM if rb_track.BPM else None
 
+        # DjmdContent.KeyID is a FOREIGN KEY into djmdKey, not a Mixxx key
+        # id — the old from_mixxx_id(KeyID) call made every imported key
+        # wrong or null (#274). The key's name lives in Key.ScaleName.
         key = None
-        if rb_track.KeyID:
-            try:
-                key_obj = Key.from_mixxx_id(rb_track.KeyID)
-                key = key_obj.engine_id if key_obj else None
-            except Exception:
-                key = None
+        key_provenance = None
+        try:
+            scale_name = rb_track.Key.ScaleName if rb_track.Key else None
+            key_obj = Key.from_musical(scale_name)
+            key = key_obj.engine_id if key_obj else None
+            key_provenance = "imported" if key is not None else None
+        except Exception:
+            key = None
 
         artist = None
         if hasattr(rb_track, 'Artist') and rb_track.Artist:
             artist = rb_track.Artist.Name if hasattr(rb_track.Artist, 'Name') else None
 
         manadj_track = ManAdjTrack(
-            filename=rb_track.FolderPath,
+            # Native separators: Rekordbox's "C:/..." becomes "C:\\..." on
+            # Windows; a no-op on POSIX (#305).
+            filename=str(Path(rb_track.FolderPath)),
             title=rb_track.Title,
             artist=artist,
             bpm=bpm,
             key=key,
+            key_provenance=key_provenance,
             energy=None,
         )
 
         manadj_session.add(manadj_track)
+        imported_tracks.append(manadj_track)
         imported += 1
 
     if imported > 0:
         manadj_session.commit()
+        from ..stems_tasks import enqueue_stem_split
+        for track in imported_tracks:
+            enqueue_stem_split(manadj_session, track.id)
 
     return imported
 

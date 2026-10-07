@@ -68,6 +68,32 @@ function baseInput(events: CaptureEvent[] = []) {
 const facts = { bpmA: 174, bpmB: 174 };
 
 describe('anchors', () => {
+  it('uses a loop phase-correction anchor without needing a later tick', () => {
+    const input = baseInput([
+      { t: 119.8, kind: 'loop', channel: 'B', playhead: 28, region: { start: 28, end: 30 } },
+    ]);
+    const tr = vectorizeTake(input, facts)!.transition;
+    expect(tr.bInSec).toBeCloseTo(8.2);
+    expect(tr.jumps).toBeUndefined();
+  });
+  it('refuses Slip-loop Takes rather than dropping the return jump', () => {
+    expect(vectorizeTake(baseInput([
+      { t: 105, kind: 'loop', channel: 'A', playhead: 65, region: { start: 65, end: 67 }, slip: true },
+      { t: 110, kind: 'loop', channel: 'A', playhead: 70, region: null },
+    ]), facts)).toBeNull();
+    const input = baseInput();
+    input.events[0] = init('A', 100, { decks: { A: deck({ slipLoopActive: true }), B: deck({ trackId: 2 }) } });
+    expect(vectorizeTake(input, facts)).toBeNull();
+  });
+  it('refuses scratch events and a slice opening inside a held scratch', () => {
+    expect(vectorizeTake(baseInput(), facts)).not.toBeNull();
+    expect(vectorizeTake(baseInput([
+      { t: 105, kind: 'transport', channel: 'A', action: 'scratchMove', playhead: 65, deltaSeconds: -2, durationSeconds: 1 },
+    ]), facts)).toBeNull();
+    const input = baseInput();
+    input.events[0] = init('A', 100, { decks: { A: deck({ scratching: true }), B: deck({ trackId: 2 }) } });
+    expect(vectorizeTake(input, facts)).toBeNull();
+  });
   it('derives startSec/bInSec from playhead samples at the window start', () => {
     const draft = vectorizeTake(baseInput(), facts)!;
     expect(draft.outgoingChannel).toBe('A');

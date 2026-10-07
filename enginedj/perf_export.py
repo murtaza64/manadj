@@ -1,5 +1,7 @@
 """Overwrite performance data on tracks already present in Engine DJ."""
 
+import math
+from itertools import pairwise
 from pathlib import Path
 
 from backend.sync_common.matching import TrackIndex
@@ -28,6 +30,18 @@ class TrackNotInEngineError(LookupError):
     pass
 
 
+DEFAULT_HOT_CUE_COLORS = (
+    "#F4D338",
+    "#EF8130",
+    "#AA55C4",
+    "#CE3239",
+    "#86C64B",
+    "#20C670",
+    "#00A8A9",
+    "#1571E2",
+)
+
+
 def _grid_markers(
     changes: list[TempoChangeValue], sample_rate: float, duration: float
 ) -> list[GridMarker]:
@@ -42,14 +56,18 @@ def _grid_markers(
         )
     ]
     index = first_index
-    for previous, change in zip(changes, changes[1:]):
+    for previous, change in pairwise(changes):
         beats = round((change.start_time - previous.start_time) * previous.bpm / 60.0)
         index += beats
         markers.append(GridMarker(change.start_time * sample_rate, index, 0))
     markers.insert(1, GridMarker(first.start_time * sample_rate, first_index, 0))
     last = changes[-1]
-    end_index = index + max(1, round((duration - last.start_time) * last.bpm / 60.0))
-    markers.append(GridMarker(duration * sample_rate, end_index, 0))
+    end_beats = max(1, math.ceil((duration - last.start_time) * last.bpm / 60.0) + 1)
+    end_index = index + end_beats
+    end_time = last.start_time + end_beats * 60.0 / last.bpm
+    markers.append(GridMarker(end_time * sample_rate, end_index, 0))
+    for marker, following in pairwise(markers):
+        marker.beats_to_next = following.beat_index - marker.beat_index
     return markers
 
 
@@ -99,7 +117,7 @@ class EnginePerfExporter:
                         slot=slot - 1,
                         label=label or "",
                         sample_offset=seconds * sample_rate,
-                        color_hex=color or "#000000",
+                        color_hex=color or DEFAULT_HOT_CUE_COLORS[slot - 1],
                     )
                     for slot, seconds, label, color in cues
                 ]

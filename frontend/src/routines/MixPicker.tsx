@@ -25,6 +25,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CameoRowWire, RoutineCandidateWire, RoutineRowWire, RoutineTakeRowWire, TakeRowWire } from '../api/client';
 import { subscribeChipFills } from './pickerChips';
+import { reportTutorialAction } from '../tutorials/engine';
+import type { ChannelId } from '../playback/mixer';
+import { DECK_COLORS } from '../theme/deckColors';
 import {
   castIncluding,
   castThroughPair,
@@ -56,8 +59,8 @@ export interface MixPickerProps {
   routineTakes: RoutineTakeRowWire[];
   candidates: RoutineCandidateWire[];
   takes: TakeRowWire[];
-  /** Track ids loaded on decks right now (cold surfacing). */
-  deckTrackIds: number[];
+  /** Live deck identity and metadata, also available before library search loads. */
+  deckTracks: { deck: ChannelId; track: TrackLike }[];
   busy: boolean;
   onOpen: (ref: MixArtifactRef) => void;
   onRenameTransition: (ref: { aTrackId: number; bTrackId: number; uuid: string }, name: string) => void;
@@ -86,6 +89,10 @@ const short = (t: TrackLike | undefined, id: number): string =>
   t ? trackTitleShort(t) : `#${id}`;
 
 export function MixPicker(props: MixPickerProps) {
+  const trackById = useCallback(
+    (id: number) => props.trackById(id) ?? props.deckTracks.find((d) => d.track.id === id)?.track,
+    [props.trackById, props.deckTracks]
+  );
   const [chipA, setChipA] = useState<number | null>(null);
   const [chipB, setChipB] = useState<number | null>(null);
   const [query, setQuery] = useState('');
@@ -122,6 +129,7 @@ export function MixPicker(props: MixPickerProps) {
         else if (b === null) nextB = trackId;
         else nextB = trackId;
         if (nextA === nextB) return; // same track twice: no self-pairs
+        if (nextA !== a || nextB !== b) reportTutorialAction({ type: a === null ? 'transition-pick-a' : 'transition-pick-b' });
         setChipA(nextA);
         setChipB(nextB);
         setQuery('');
@@ -153,7 +161,7 @@ export function MixPicker(props: MixPickerProps) {
   // ── Rows for the current page shape ────────────────────────────────────
   const rows = useMemo((): Row[] => {
     const out: Row[] = [];
-    const t = (id: number) => props.trackById(id);
+    const t = trackById;
     const pushTransition = (r: TransitionRowLike, group: string) =>
       out.push({
         ref: { kind: 'transition', aTrackId: r.a_track_id, bTrackId: r.b_track_id, uuid: r.uuid },
@@ -233,10 +241,10 @@ export function MixPicker(props: MixPickerProps) {
         pushCandidate(c, 'Miner candidates through the pair');
       }
       out.push({
-        ref: { kind: 'new-blank' },
+        ref: { kind: 'new-blank', seedTrackIds: [chipA, chipB] },
         glyph: '+',
         label: 'New blank mix',
-        meta: 'kind-fluid draft (ADR 0039) — lands with #198',
+        meta: 'seeded with both tracks · drag more from the library · saves from 3 slots',
         group: 'New',
       });
       return out;
@@ -264,11 +272,18 @@ export function MixPicker(props: MixPickerProps) {
       for (const c of castIncluding(props.candidates, chipA)) {
         pushCandidate(c, 'Miner candidates through');
       }
+      out.push({
+        ref: { kind: 'new-blank', seedTrackIds: [chipA] },
+        glyph: '+',
+        label: 'New blank mix',
+        meta: 'starts with this track · drag more from the library · saves from 3 slots',
+        group: 'New',
+      });
       return out;
     }
 
     // COLD: deck surfacing first, then the full inventory tiers.
-    const surf = deckSurfacing(props.deckTrackIds, props.transitions, props.routines);
+    const surf = deckSurfacing(props.deckTracks.map((d) => d.track.id), props.transitions, props.routines);
     for (const r of surf.transitions) pushTransition(r, 'On the decks');
     for (const r of surf.routines) pushRoutine(r, 'On the decks');
     for (const r of props.routines) pushRoutine(r, 'Saved Routines');
@@ -277,8 +292,15 @@ export function MixPicker(props: MixPickerProps) {
       pushRoutineTake(tk, 'Routine Takes');
     }
     for (const c of props.candidates) pushCandidate(c, 'Miner candidates');
+    out.push({
+      ref: { kind: 'new-blank' },
+      glyph: '+',
+      label: 'New blank mix',
+      meta: 'empty canvas · drag tracks from the library · saves from 3 slots',
+      group: 'New',
+    });
     return out;
-  }, [chipA, chipB, props]);
+  }, [chipA, chipB, props, trackById]);
 
   // Contiguous group runs (#205 bug: a row can legitimately appear in TWO
   // groups — 'On the decks' AND the inventory — so React keys must be
@@ -304,8 +326,10 @@ export function MixPicker(props: MixPickerProps) {
 
   const pickTrack = useCallback(
     (id: number) => {
+      if (id === chipA || id === chipB) return;
+      reportTutorialAction({ type: chipA === null ? 'transition-pick-a' : 'transition-pick-b' });
       if (chipA === null) setChipA(id);
-      else if (chipB === null) setChipB(id);
+      else setChipB(id);
       setQuery('');
       setHighlight(0);
       inputRef.current?.focus();
@@ -360,7 +384,7 @@ export function MixPicker(props: MixPickerProps) {
   const chip = (id: number | null, clear: () => void, placeholder: string) =>
     id !== null ? (
       <span className="mp-chip set">
-        {short(props.trackById(id), id)}
+        {short(trackById(id), id)}
         <button className="mp-chipx" onClick={clear} title="Clear">
           ✕
         </button>
@@ -370,7 +394,7 @@ export function MixPicker(props: MixPickerProps) {
     );
 
   return (
-    <div className="mp-panel" onKeyDown={onKeyDown}>
+    <div className="mp-panel" data-tour="edit.picker" onKeyDown={onKeyDown}>
       <div className="mp-chips">
         {chip(chipA, () => setChipA(null), chipB !== null ? 'outgoing…' : 'track…')}
         <button
@@ -383,6 +407,29 @@ export function MixPicker(props: MixPickerProps) {
         </button>
         {chip(chipB, () => setChipB(null), 'incoming…')}
       </div>
+      {props.deckTracks.length > 0 && (
+        <div className="mp-deck-shortcuts" role="group" aria-label="Loaded deck tracks">
+          {props.deckTracks.map(({ deck, track }) => (
+            <button
+              key={deck}
+              type="button"
+              className="mp-deck-shortcut"
+              style={{ color: DECK_COLORS[deck] }}
+              disabled={track.id === chipA || track.id === chipB}
+              title={`Search deck ${deck}: ${trackLabel(track)}`}
+              aria-label={`Search deck ${deck}: ${trackLabel(track)}`}
+              onClick={() => pickTrack(track.id)}
+              onKeyDown={(e) => {
+                // Enter belongs to this button, not the highlighted artifact row.
+                if (e.key === 'Enter' || e.key === ' ') e.stopPropagation();
+              }}
+            >
+              <span className="mp-deck-letter">{deck}</span>
+              <span className="mp-deck-title">{trackTitleShort(track)}</span>
+            </button>
+          ))}
+        </div>
+      )}
       <input
         ref={inputRef}
         className="input mp-search"
@@ -433,6 +480,7 @@ export function MixPicker(props: MixPickerProps) {
                 return (
                   <div
                     key={key}
+                    data-tutorial={row.ref.kind === 'new-transition' ? 'new-transition' : undefined}
                     className={`mp-row${flat === highlight ? ' hl' : ''}${isOpen ? ' open' : ''}`}
                     onMouseEnter={() => setHighlight(flat)}
                   onMouseDown={(e) => {

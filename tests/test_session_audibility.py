@@ -55,6 +55,11 @@ def test_playing_flat_deck_is_audible():
     assert events_contain_audible([load(1.0), play(2.0)]) is True
 
 
+def test_transport_without_position_still_sets_audibility():
+    event = {**play(2.0), "playhead": None}
+    assert events_contain_audible([load(1.0), event]) is True
+
+
 def test_playing_into_closed_fader_is_silent_until_it_opens():
     silent = [load(1.0), control(1.5, "fader", 0.0, "A"), play(2.0), tick(3.0)]
     assert events_contain_audible(silent) is False
@@ -114,16 +119,26 @@ def test_crossfader_disabled_reads_as_center():
     assert events_contain_audible(events) is True
 
 
-def test_cue_stab_preview_is_invisible():
-    """The audibility definition ignores preview (phase-1 boundary) — a
-    stab-only stream is silent, exactly as the frontend detector sees it."""
+def test_audible_cue_stab_preview_keeps_the_session():
     events = [
         load(1.0),
         {"t": 2.0, "kind": "transport", "channel": "A", "action": "previewStart", "playhead": 30.0},
         tick(3.0, {"A": 31.0}),
         {"t": 4.0, "kind": "transport", "channel": "A", "action": "previewEnd", "playhead": 32.0},
     ]
-    assert events_contain_audible(events) is False
+    assert events_contain_audible(events) is True
+
+
+def test_preview_respects_mixer_gates_and_ends_on_release_or_load():
+    preview = {"t": 2.0, "kind": "transport", "channel": "A", "action": "previewStart", "playhead": 30.0}
+    for gate in (control(1.5, "fader", 0, "A"), control(1.5, "filter", 1, "A"),
+                 control(1.5, "crossfader", 1),
+                 {"t": 1.5, "kind": "tenure", "edge": "start", "holder": "editor"}):
+        assert not events_contain_audible([load(1), gate, preview, tick(3)])
+    muted = [load(1), control(1.5, "fader", 0, "A"), preview]
+    assert events_contain_audible(muted + [control(3, "fader", 1, "A")])
+    for end in ({**preview, "t": 2.5, "action": "previewEnd"}, load(2.5)):
+        assert not events_contain_audible(muted + [end, control(3, "fader", 1, "A")])
 
 
 def test_pfl_is_invisible():
@@ -134,3 +149,80 @@ def test_pfl_is_invisible():
 def test_any_of_the_four_decks_counts():
     # D defaults to the right side; crossfader center leaves it at unity.
     assert events_contain_audible([load(1.0, "D", 7), play(2.0, "D")]) is True
+
+
+def scratch(t, action, drive=0, rate=0):
+    return {"t": t, "kind": "transport", "channel": "A", "action": action,
+            "playhead": 20, "filter": {"drive": drive, "rate": rate}}
+
+
+def test_paused_reverse_scratch_is_audible_but_touch_alone_is_not():
+    held = [load(0), scratch(1, "scratchBegin")]
+    assert not events_contain_audible(held + [tick(2)])
+    assert events_contain_audible(held + [scratch(2, "scratchMove", -8, -2)])
+
+
+def test_scratch_hold_silences_playing_deck_and_filter_settles_before_fader_opens():
+    events = [load(0), control(0, "fader", 0, "A"), play(0),
+              scratch(1, "scratchBegin"), scratch(1, "scratchMove", -8, -2)]
+    assert not events_contain_audible(events + [control(2, "fader", 1, "A")])
+    assert events_contain_audible(events + [control(1.02, "fader", 1, "A")])
+    assert events_contain_audible(events + [control(2, "fader", 1, "A"), scratch(3, "scratchEnd")])
+
+
+def test_new_scratch_move_adopts_complete_filter_state():
+    events = [load(0), control(0, "fader", 0, "A"), scratch(1, "scratchBegin"),
+              scratch(1, "scratchMove", -8, -2), scratch(2, "scratchMove", 0, 0)]
+    assert not events_contain_audible(events + [control(2, "fader", 1, "A")])
+
+
+def test_saturated_scratch_has_no_unbounded_motion_debt():
+    events = [load(0), control(0, "fader", 0, "A"), scratch(1, "scratchBegin"),
+              scratch(1, "scratchMove", -16, -16)]
+    assert events_contain_audible(events + [control(1.02, "fader", 1, "A")])
+    assert not events_contain_audible(events + [control(1.1, "fader", 1, "A")])
+
+
+def test_reversal_seed_retains_velocity_even_when_drive_is_zero():
+    held = [load(0), scratch(1, "scratchBegin")]
+    assert events_contain_audible(held + [scratch(1.01, "scratchMove", 0, -2)])
+
+
+def test_outward_edge_scratch_is_silent_but_inward_impulse_activates():
+    for position, outward in [(0, -8), (100, 8)]:
+        held = [load(0), {**scratch(1, "scratchBegin"), "playhead": position, "trackDuration": 100}]
+        move = {**scratch(1, "scratchMove", outward, 0), "playhead": position, "trackDuration": 100}
+        assert not events_contain_audible(held + [move, tick(2)])
+        inward = {**move, "t": 1.02, "filter": {"drive": -outward, "rate": 0}}
+        assert events_contain_audible(held + [move, inward])
+
+
+def test_reverse_loop_start_is_not_a_track_edge_hold():
+    events = [load(0), {"t": 0, "kind": "loop", "channel": "A", "playhead": 0,
+                        "region": {"start": 0, "end": 1}},
+              {**scratch(1, "scratchBegin"), "playhead": 0, "trackDuration": 100},
+              {**scratch(1, "scratchMove", -8, 0), "playhead": 0, "trackDuration": 100}]
+    assert events_contain_audible(events)
+
+
+def test_edge_turning_point_reconstruction_can_sound_after_reversal():
+    events = [load(0), control(0, "fader", 0, "A"),
+              {**scratch(1, "scratchBegin"), "playhead": 100, "trackDuration": 100},
+              {**scratch(1, "scratchMove", -8, 8), "playhead": 100, "trackDuration": 100}]
+    assert not events_contain_audible(events + [control(1.004, "fader", 1, "A")])
+    assert events_contain_audible(events + [control(1.012, "fader", 1, "A")])
+
+
+def test_short_edge_return_between_move_and_release_is_audible():
+    events = [load(0), {**scratch(1, "scratchBegin"), "playhead": 100, "trackDuration": 100},
+              {**scratch(1, "scratchMove", -8, 8), "playhead": 100, "trackDuration": 100}]
+    assert not events_contain_audible(events + [scratch(1.004, "scratchEnd")])
+    assert events_contain_audible(events + [scratch(1.012, "scratchEnd")])
+
+
+def test_eof_straddling_loop_does_not_make_an_outward_eof_hold_audible():
+    events = [load(0), {"t": 0, "kind": "loop", "channel": "A", "playhead": 100,
+                        "region": {"start": 99, "end": 101}},
+              {**scratch(1, "scratchBegin"), "playhead": 100, "trackDuration": 100},
+              {**scratch(1, "scratchMove", 8, 0), "playhead": 100, "trackDuration": 100}]
+    assert not events_contain_audible(events + [tick(2)])

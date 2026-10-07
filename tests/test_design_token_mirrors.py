@@ -34,3 +34,24 @@ def test_hotcue_palette_mirrors_frontend_tokens():
     )
     assert backend == frontend
     assert set(backend) == set(range(1, 9))
+
+
+HEX_ITEM_RE = re.compile(r"['\"](#[0-9a-fA-F]{6})['\"]")
+
+
+def _hex_list(text: str, block_marker: str) -> list[str]:
+    # the list literal: first "= [" after the marker (skips `string[]`)
+    open_ = text.index("= [", text.index(block_marker)) + 2
+    block = text[open_ : text.index("]", open_)]
+    items = HEX_ITEM_RE.findall(block)
+    assert items, f"no hex items found after {block_marker!r}"
+    return [h.lower() for h in items]
+
+
+def test_tag_palette_mirrors_frontend_tokens():
+    backend = _hex_list((REPO / "backend" / "tag_palette.py").read_text(), "TAG_COLORS")
+    frontend = _hex_list(
+        (REPO / "frontend" / "src" / "theme" / "tokens.ts").read_text(), "TAG_COLORS"
+    )
+    assert backend == frontend
+    assert len(set(backend)) == len(backend)

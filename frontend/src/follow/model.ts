@@ -109,6 +109,8 @@ export interface FollowParams {
    * Transition (glossary: Known; formerly "proven only"). Consumed by
    * candidateIdSet, not by the per-reference query derivation. */
   knownOnly: boolean;
+  /** 0 = Match-score order; 1 = adventurous, score-weighted Compatible order. */
+  temperature: number;
 }
 
 /** Canonical defaults — the params store boots from these. */
@@ -116,6 +118,7 @@ export const DEFAULT_FOLLOW_PARAMS: FollowParams = {
   bpm: true,
   bpmThresholdPercent: 5,
   knownOnly: false,
+  temperature: 0,
 };
 
 // ── Derivation ──────────────────────────────────────────────────────────
@@ -167,6 +170,8 @@ export function followSummary(reference: Track, params: FollowParams): string {
   }
   if (params.knownOnly) {
     parts.push('◆🔗only');
+  } else if (params.temperature > 0) {
+    parts.push(`T${params.temperature.toFixed(2)}`);
   }
   return parts.length > 0 ? parts.join('·') : '—';
 }

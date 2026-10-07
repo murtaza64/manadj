@@ -47,6 +47,8 @@ export type TransportEvent =
   | { type: 'toggle-play' }
   /** Absolute relocation (waveform seek, scrub): cancels an active loop. */
   | { type: 'seek'; time: number }
+  /** Beat-phase correction leaves the loop region and cue untouched. */
+  | { type: 'phase-align'; time: number }
   /** Relative displacement (beat jump, looping 04): translates an active
    * loop with the playhead — position-in-loop is preserved. */
   | { type: 'jump'; time: number }
@@ -116,6 +118,12 @@ export interface TransportContext {
    * Defaults to unity.
    */
   playRate?: number;
+  /**
+   * App-wide Cue mode (setup-guides #289): what a Hot Cue press does on a
+   * paused deck. 'gated' (default/absent) holds-to-preview; 'trigger'
+   * jumps and starts playback that continues after release.
+   */
+  cueMode?: 'gated' | 'trigger';
 }
 
 const UNQUANTIZED: TransportContext = { quantize: false, beatTimes: null };
@@ -198,6 +206,9 @@ export function reduceTransport(
       return [next, isAudioRunning(s) ? [{ type: 'start', at: e.time }] : []];
     }
 
+    case 'phase-align':
+      return [{ ...s, playhead: e.time }, isAudioRunning(s) ? [{ type: 'start', at: e.time }] : []];
+
     case 'jump': {
       // Relative displacement: the region translates with the playhead —
       // you cannot beat-jump out of a loop. Clamp so a jump at the track
@@ -268,6 +279,15 @@ export function reduceTransport(
           ? phasePreservingJumpTarget(e.time, s.playhead, ctx.beatTimes)
           : e.time;
         return [{ ...s, playhead: at, loop: null }, [{ type: 'start', at }]];
+      }
+      if (ctx.cueMode === 'trigger') {
+        // Trigger Cue mode (#289): jump and start the deck — a real Play,
+        // not a preview, so release is inert and capture logs play (no
+        // stab). Cross-deck quantized like any paused launch.
+        return [
+          { ...s, playing: true, playhead: e.time, loop: null },
+          [launchStart(e.time, ctx)],
+        ];
       }
       // Hold-to-preview from the hot cue — cross-deck quantized against a
       // playing peer when Quantize is on (04). The playhead records the hot

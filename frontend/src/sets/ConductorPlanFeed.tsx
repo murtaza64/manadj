@@ -40,7 +40,7 @@ function Feed({ setId }: { setId: number }): null {
   // tempo chip's ['sets'] invalidation re-plans the run.
   const { data: sets = [] } = useQuery({ queryKey: ['sets'], queryFn: api.sets.list });
   const set = sets.find((s) => s.id === setId);
-  const trackIds = (entries ?? []).map((e) => e.trackId);
+  const trackIds = (entries ?? []).map((e) => e.trackId).sort((a, b) => a - b);
   const { data: trackMap } = useQuery({
     queryKey: ['tracks', 'set-rows', setId, trackIds.join(',')],
     enabled: trackIds.length > 0,

@@ -156,3 +156,16 @@ def test_backend_stems_never_imports_torch_or_demucs() -> None:
     )
     proc = subprocess.run([sys.executable, "-c", code], capture_output=True, check=False)
     assert proc.returncode == 0, proc.stderr.decode()
+
+
+# --- device (#308) ------------------------------------------------------------
+
+
+def test_device_auto_defers_to_demucs_default() -> None:
+    from backend.stems import _demucs_command
+
+    assert StemsConfig().device == "auto"
+    cmd = _demucs_command(Path("in.wav"), Path("out"), StemsConfig(directory="x"))
+    assert "-d" not in cmd  # demucs picks cuda -> mps -> cpu
+    cmd = _demucs_command(Path("in.wav"), Path("out"), StemsConfig(directory="x", device="cpu"))
+    assert cmd[cmd.index("-d") + 1] == "cpu"

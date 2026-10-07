@@ -194,7 +194,7 @@ def test_take_kind_defaults_to_handover(client, make_track):
     assert row["engagement_uuid"] is None
 
 
-def test_guest_take_refuses_transition_promotion(client, make_track):
+def test_guest_take_refuses_missing_transition_promotion(client, make_track):
     a, b = make_track(), make_track()
     client.post(
         "/api/takes",
@@ -214,4 +214,6 @@ def test_guest_take_refuses_transition_promotion(client, make_track):
     resp = client.patch(
         "/api/takes/gt1/promoted", json={"promoted_transition_uuid": "tr1"}
     )
-    assert resp.status_code == 409
+    assert resp.status_code == 404
+    assert resp.json()["detail"] == "promoted Transition not found"
+    assert client.get("/api/takes/gt1").json()["promoted_transition_uuid"] is None

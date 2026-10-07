@@ -231,6 +231,8 @@ function openEngagement(
   const snapDeck = (d: DeckCapture) => ({
     trackId: d.trackId,
     playing: d.playing,
+    scratching: d.scratch !== null,
+    slipLoopActive: d.slipLoopActive,
     fader: d.fader,
     trim: d.trim,
     eq: { ...d.eq },

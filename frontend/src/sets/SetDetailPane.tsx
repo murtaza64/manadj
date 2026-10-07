@@ -46,11 +46,15 @@ import {
   selectGesture,
 } from '../selection/selectionModel';
 import { registerBrowseSurface } from '../midi/controlRegistry';
+import { useBrowseActive } from '../contexts/browseActive';
+import { useViewActive } from '../contexts/viewActive';
 import type { SelectMods } from '../components/TrackRow';
 import { useToast } from '../components/Toast';
 import ContextMenu, { useContextMenuState } from '../components/ContextMenu';
 import EnergySquare from '../components/EnergySquare';
 import { useTrackMenuItems } from '../components/useTrackMenuItems';
+import { useDragEdgeScroll } from '../components/useDragEdgeScroll';
+import { DRAG_EDGE_ZONE_PX } from '../components/dragScroll';
 import type { ChannelId } from '../playback/mixer';
 import {
   initTransitionStore,
@@ -213,7 +217,10 @@ interface SetDetailPaneProps {
 }
 
 export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProps) {
+  const browseActive = useBrowseActive();
+  const viewActive = useViewActive();
   const showToast = useToast();
+  const paneRef = useRef<HTMLDivElement>(null);
   const entries = useSetEntries(setId);
   // Live entries for the identity-stable handlers (issue 42; the
   // useTrackSelection ref pattern — handlers feed memoized rows).
@@ -234,6 +241,31 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
     void initTransitionStore();
   }, []);
   const { data: takes = [] } = useQuery({ queryKey: ['takes'], queryFn: api.takes.list });
+  // Pair identities survive reordering; unchanged adjacency rows can stay memoized.
+  const evidenceByPair = useMemo(() => {
+    const byPair = new Map<string, typeof EMPTY_EVIDENCE>();
+    for (const [key, pair] of Object.entries(pairStore)) {
+      byPair.set(key, {
+        transitions: pair.items.map((it) => ({
+          uuid: it.uuid, name: it.name, favorite: it.favorite ?? false, updatedAtMs: it.updatedAtMs,
+        })),
+        takes: [],
+      });
+    }
+    for (const take of takes) {
+      const key = `${take.a_track_id}:${take.b_track_id}`;
+      let evidence = byPair.get(key);
+      if (!evidence) {
+        evidence = { transitions: [], takes: [] };
+        byPair.set(key, evidence);
+      }
+      evidence.takes.push({
+        uuid: take.uuid, detectedAt: take.detected_at,
+        windowS: take.window_end_s - take.window_start_s,
+      });
+    }
+    return byPair;
+  }, [pairStore, takes]);
   // Fresh-Take offers (sets 13): the capture sink records the latest Take
   // per ordered pair; matching adjacencies grow a "new take — pin?" chip.
   const freshTakes = useSyncExternalStore(subscribeFreshTakes, snapshotFreshTakes);
@@ -358,18 +390,13 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
     if (entries) {
       for (let i = 0; i < entries.length - 1; i++) {
         if (entries[i].pin !== null || entryCoverage[i]) continue;
-        const { transitions } = buildPairEvidence(
-          pairStore,
-          takes,
-          entries[i].trackId,
-          entries[i + 1].trackId
-        );
+        const { transitions } = evidenceByPair.get(`${entries[i].trackId}:${entries[i + 1].trackId}`) ?? EMPTY_EVIDENCE;
         const resolved = resolveTransition(transitions);
         if (resolved) fillable.set(entries[i].trackId, { kind: 'transition', uuid: resolved.uuid });
       }
     }
     return fillable;
-  }, [entries, entryCoverage, pairStore, takes]);
+  }, [entries, entryCoverage, evidenceByPair]);
 
   // Resolve from evidence (sets #163): the bulk best-Take proposal for
   // every Unresolved adjacency — previewed in a modal, applied by ONE
@@ -383,10 +410,10 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
     () =>
       resolveFromEvidence(
         entries ?? [],
-        (a, b) => buildPairEvidence(pairStore, takes, a, b),
+        (a, b) => evidenceByPair.get(`${a}:${b}`) ?? EMPTY_EVIDENCE,
         castOf
       ),
-    [entries, pairStore, takes, castOf]
+    [entries, evidenceByPair, castOf]
   );
 
   // Track metadata for the entry rows (batch-by-Promise.all pattern, as in
@@ -394,7 +421,7 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
   // every track mutation's invalidation (archive/unarchive/update) reaches
   // it — as ['set-tracks', …] the rows kept a stale archived_at until
   // remount (the drift class sets 12 patched).
-  const trackIds = (entries ?? []).map((e) => e.trackId);
+  const trackIds = (entries ?? []).map((e) => e.trackId).sort((a, b) => a - b);
   const { data: trackMap } = useQuery({
     queryKey: ['tracks', 'set-rows', setId, trackIds.join(',')],
     enabled: trackIds.length > 0,
@@ -413,7 +440,7 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
     set ? { policy: set.tempo_policy, setTempoBpm: set.set_tempo_bpm } : undefined
   );
   // Stale-while-replanning (#161): the last computed plan, held across
-  // the momentary undefined a reorder's fresh evidence query causes —
+  // the momentary undefined a fresh evidence query causes —
   // the ladder keeps its frame (and the layout its height) instead of
   // unmounting. Cleared on Set switch (the ref is per mount; the pane
   // remounts per set via the browse host).
@@ -442,11 +469,6 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
         : null,
     [previewOrder, entries, dormant]
   );
-  const previewPlan = useSetPlan(
-    previewState?.entries,
-    trackMap,
-    set ? { policy: set.tempo_policy, setTempoBpm: set.set_tempo_bpm } : undefined
-  );
   const previewFutures = useMemo(
     () =>
       previewOrder && entries
@@ -459,15 +481,40 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
         : undefined,
     [previewOrder, entries, dormant, pairStore]
   );
+  // Row movement is immediate; Take vectorization and whole-timeline
+  // sampling wait until the target settles. Drop still commits previewOrder.
+  const [settledPreview, setSettledPreview] = useState<{
+    state: NonNullable<typeof previewState>;
+    futures: typeof previewFutures;
+  } | null>(null);
+  const previewPlan = useSetPlan(
+    previewState ? settledPreview?.state.entries : undefined,
+    trackMap,
+    set ? { policy: set.tempo_policy, setTempoBpm: set.set_tempo_bpm } : undefined
+  );
+  const [readyPreview, setReadyPreview] = useState<{
+    plan: SetPlan;
+    futures: typeof previewFutures;
+  } | null>(null);
+  if (!previewState && readyPreview) {
+    setReadyPreview(null);
+  } else if (previewState && previewPlan && settledPreview && (
+    readyPreview?.plan !== previewPlan || readyPreview?.futures !== settledPreview.futures
+  )) {
+    // Retain plan and markers together while a newly restored pin loads.
+    setReadyPreview({ plan: previewPlan, futures: settledPreview.futures });
+  }
 
   // What the row stack renders (sets 23): the hypothetical state while a
   // preview is live, the committed state otherwise. Everything the rows
-  // read (entries, plan, futures) switches together, so the list is
-  // internally consistent mid-drag. Row affordances stay mounted (layout
+  // read switches to that order; timing cells wait for its matching plan
+  // rather than showing another order's times. Row affordances stay mounted (layout
   // stability for the dragover math) but are inert mid-drag — no click
   // can happen during an HTML5 drag.
   const displayEntries = previewState?.entries ?? entries;
-  const displayPlan = previewState ? previewPlan : plan;
+  const displayPlan = previewState
+    ? (settledPreview?.state === previewState ? previewPlan : undefined)
+    : plan;
   // Displayed order for the stable suggest-insert handler (issue 42).
   const displayEntriesRef = useRef(displayEntries);
   displayEntriesRef.current = displayEntries;
@@ -557,10 +604,10 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
     return displayEntries.map((e, i) => {
       const next = displayEntries[i + 1];
       return next
-        ? buildPairEvidence(pairStore, takes, e.trackId, next.trackId)
-        : { transitions: [], takes: [] };
+        ? (evidenceByPair.get(`${e.trackId}:${next.trackId}`) ?? EMPTY_EVIDENCE)
+        : EMPTY_EVIDENCE;
     });
-  }, [displayEntries, pairStore, takes]);
+  }, [displayEntries, evidenceByPair]);
   const warningsByAdj = useMemo(() => {
     if (!displayPlan) return undefined;
     return displayPlan.adjacencies.map((_, i) =>
@@ -585,26 +632,31 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
   // preview colors the hypothetical neighbors. Memoized per-row objects
   // (issue 42): fresh {kind, bpm} literals per render would defeat the
   // row memo.
+  const predecessorBpmRefs = useMemo(() => new Map(
+    [...(trackMap?.values() ?? [])].map((track) => {
+      const bpm = trackEffectiveBpm(track);
+      return [track.id, bpm ? { kind: 'predecessor', bpm } as BpmDeltaRef : null];
+    })
+  ), [trackMap]);
+  const firstBpm = displayEntries?.[0]
+    ? predecessorBpmRefs.get(displayEntries[0].trackId)?.bpm
+    : null;
+  const fixedBpm = set?.set_tempo_bpm ?? firstBpm;
+  const fixedBpmRef = useMemo<BpmDeltaRef | null>(
+    () => fixedBpm ? { kind: 'set-tempo', bpm: fixedBpm } : null,
+    [fixedBpm]
+  );
   const bpmRefs = useMemo<(BpmDeltaRef | null)[] | undefined>(() => {
     if (!displayEntries) return undefined;
-    const effectiveBpmOf = (trackId: number): number | null => {
-      const t = trackMap?.get(trackId);
-      return t ? trackEffectiveBpm(t) : null;
-    };
     if (set?.tempo_policy === 'fixed') {
-      const bpm =
-        set.set_tempo_bpm ??
-        (displayEntries.length > 0 ? effectiveBpmOf(displayEntries[0].trackId) : null);
-      const fixedRef: BpmDeltaRef | null = bpm ? { kind: 'set-tempo', bpm } : null;
-      return displayEntries.map(() => fixedRef);
+      return displayEntries.map(() => fixedBpmRef);
     }
     return displayEntries.map((_, i) => {
       const prev = displayEntries[i - 1];
       if (!prev) return null; // first row under Riding: no reference
-      const bpm = effectiveBpmOf(prev.trackId);
-      return bpm ? { kind: 'predecessor', bpm } : null;
+      return predecessorBpmRefs.get(prev.trackId) ?? null;
     });
-  }, [displayEntries, trackMap, set?.tempo_policy, set?.set_tempo_bpm]);
+  }, [displayEntries, predecessorBpmRefs, set?.tempo_policy, fixedBpmRef]);
 
   // Real hot cues for the ladder clips — the same bulk query useSetPlan
   // rides (issue 43: one GET + one resolution for the whole set, and a
@@ -860,7 +912,6 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
   }, []);
 
   // ── Scroll persistence (set store — survives mode switches) ──────────
-  const paneRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const pane = paneRef.current;
     if (pane) pane.scrollTop = getSetScroll(setId);
@@ -897,6 +948,35 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
   // set store (survives mode switches; readable by the menu, keyboard,
   // and drag handlers). Entry mutations prune it store-side.
   const selection = useSetSelection(setId);
+  const [moveIds, setMoveIds] = useState<number[] | null>(null);
+  const cancelMove = () => {
+    setMoveIds(null);
+    paneRef.current?.focus({ preventScroll: true });
+  };
+  const moveOrders = useMemo(() => {
+    if (!moveIds || !entries) return [];
+    const order = entries.map((entry) => entry.trackId);
+    return Array.from({ length: order.length + 1 }, (_, index) => {
+      const next = applyReorder(order, moveIds, index);
+      return next.every((id, i) => id === order[i]) ? null : next;
+    });
+  }, [entries, moveIds]);
+  const moveTarget = (index: number, label: string) => (
+    <button
+      type="button"
+      className="set-move-target"
+      data-set-move-index={index}
+      disabled={!moveOrders[index]}
+      onClick={() => {
+        const order = moveOrders[index];
+        if (order) reorderSetEntries(setId, order);
+        cancelMove();
+      }}
+    >
+      <strong>{moveOrders[index] ? 'Move here' : 'Current position'}</strong>
+      <span>{label}</span>
+    </button>
+  );
   const selectedIds = useMemo(() => new Set(selection.ids), [selection.ids]);
   // Identity-stable (issue 42): props on ~88 memoized track rows; live
   // state comes through refs / imperative store reads.
@@ -917,7 +997,18 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
   // the single-row ✕). Bubble-phase on purpose: an open ContextMenu
   // eats Escape on capture, so closing a menu never clears the rows.
   useEffect(() => {
+    if (!viewActive || !browseActive) return;
     const onKeyDown = (e: KeyboardEvent) => {
+      if (e.defaultPrevented) return;
+      if (moveIds) {
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          setMoveIds(null);
+          paneRef.current?.focus({ preventScroll: true });
+        }
+        return;
+      }
+      if (e.defaultPrevented || !(e.target instanceof Node) || !paneRef.current?.contains(e.target)) return;
       const sel = getSetSelection(setId);
       if (sel.ids.length === 0) return;
       const target = e.target as HTMLElement | null;
@@ -937,7 +1028,7 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [setId]);
+  }, [setId, moveIds, viewActive, browseActive]);
   /** Group drag (sets 18): a selected row drags the whole selection —
    * in SET order, so a non-contiguous selection compacts at the drop
    * point as one contiguous run (playlist-editor convention). An
@@ -1029,8 +1120,9 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
     onLoadToDeckRef.current = onLoadToDeck;
   });
   useEffect(
-    () =>
-      registerBrowseSurface({
+    () => {
+      if (!viewActive || !browseActive) return;
+      return registerBrowseSurface({
         navigate: (delta) => {
           const order = (entriesRef.current ?? []).map((e) => e.trackId);
           if (order.length === 0) return;
@@ -1055,8 +1147,9 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
           return anchorId !== null ? (trackMapRef.current?.get(anchorId) ?? null) : null;
         },
         load: (deck, track) => onLoadToDeckRef.current(deck, track),
-      }),
-    [setId]
+      });
+    },
+    [setId, viewActive, browseActive]
   );
 
   // ── Track-row context menu (sets 17): the universal track menu plus
@@ -1091,6 +1184,17 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
     surfaceItems: rowMenu
       ? [
           {
+            label: rowMenuTargets.length > 1 ? `Move ${rowMenuTargets.length} tracks` : 'Move track',
+            onSelect: () => {
+              const targets = new Set(rowMenuTargets.map((track) => track.id));
+              setMoveIds((entries ?? []).filter((entry) => targets.has(entry.trackId)).map((entry) => entry.trackId));
+              setPicker(null);
+              setSuggest(null);
+              setEvidenceModalOpen(false);
+              paneRef.current?.focus({ preventScroll: true });
+            },
+          },
+          {
             label:
               rowMenuTargets.length > 1
                 ? `Remove ${rowMenuTargets.length} from set`
@@ -1113,14 +1217,11 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
     });
   };
 
-  const handleDragOver = (e: React.DragEvent) => {
-    if (!isTrackDrag(e.dataTransfer)) return;
-    e.preventDefault();
-    e.dataTransfer.dropEffect = 'copy';
+  const updateDragTarget = (clientY: number) => {
     const pane = paneRef.current;
     if (!pane) return;
     const rects = rowRects(pane);
-    const pointerY = e.clientY - pane.getBoundingClientRect().top + pane.scrollTop;
+    const pointerY = clientY - pane.getBoundingClientRect().top + pane.scrollTop;
     const index = insertionIndexFromPointer(pointerY, rects);
 
     // In-pane reorder drags feed the live preview (sets 07/23): the rows
@@ -1143,14 +1244,42 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
       });
       return;
     }
-    setDropIndicator({ index, y: indicatorY(index, rects) });
+    const y = indicatorY(index, rects);
+    setDropIndicator((prev) => prev?.index === index && prev.y === y ? prev : { index, y });
   };
 
+  const handleDragOver = (e: React.DragEvent) => {
+    if (!isTrackDrag(e.dataTransfer)) return;
+    if (moveIds) setMoveIds(null);
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+    updateDragTarget(e.clientY);
+  };
+
+  const edgeScrolling = useDragEdgeScroll(
+    paneRef,
+    updateDragTarget,
+    () => { handleRowDragEnd(); setDropIndicator(null); },
+  );
+  useEffect(() => {
+    if (edgeScrolling) return;
+    const timer = window.setTimeout(() => {
+      setSettledPreview(previewState ? { state: previewState, futures: previewFutures } : null);
+    }, previewState ? 180 : 0);
+    return () => window.clearTimeout(timer);
+  }, [previewState, previewFutures, edgeScrolling]);
+
   const handleDragLeave = (e: React.DragEvent) => {
-    if (!paneRef.current?.contains(e.relatedTarget as Node)) {
-      setDropIndicator(null);
-      setPreviewOrder(null); // cancelled hypothesis — the ladder snaps back
-    }
+    const pane = paneRef.current;
+    if (!pane || pane.contains(e.relatedTarget as Node)) return;
+    const rect = pane.getBoundingClientRect();
+    // Reordering can emit dragleave without pointer movement. Vertical
+    // overshoot is also a scroll gesture, not a cancelled hypothesis.
+    if (e.clientX >= rect.left && e.clientX <= rect.right &&
+        e.clientY >= rect.top - DRAG_EDGE_ZONE_PX * 2 &&
+        e.clientY <= rect.bottom + DRAG_EDGE_ZONE_PX * 2) return;
+    setDropIndicator(null);
+    setPreviewOrder(null);
   };
 
   const handleDrop = (e: React.DragEvent) => {
@@ -1197,7 +1326,7 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
           convention, the view's primary action), secondary actions
           right. The transport never shrinks or moves at narrow widths;
           the side zones wrap first. */}
-      <div className="set-header" ref={headerRef}>
+      <div className="set-header" data-tour="sets.header" ref={headerRef}>
         <span className="set-header-left">
           {set?.color && (
             <span
@@ -1316,7 +1445,7 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
           <button
             className="btn btn-success"
             onClick={() => setAdjacencyPins(setId, autoFillable)}
-            disabled={autoFillable.size === 0}
+            disabled={moveIds !== null || autoFillable.size === 0}
             title={
               autoFillable.size === 0
                 ? 'No unpinned adjacency auto-resolves to a Transition'
@@ -1332,7 +1461,7 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
           <button
             className="btn"
             onClick={() => setEvidenceModalOpen(true)}
-            disabled={evidenceProposal.rows.length === 0 && evidenceProposal.hardCuts.length === 0}
+            disabled={moveIds !== null || (evidenceProposal.rows.length === 0 && evidenceProposal.hardCuts.length === 0)}
             title={
               evidenceProposal.rows.length === 0 && evidenceProposal.hardCuts.length === 0
                 ? 'Every adjacency is pinned or auto-resolves to a Transition'
@@ -1367,8 +1496,8 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
         <OverviewLadder
           key={setId}
           setId={setId}
-          plan={previewOrder && previewPlan ? previewPlan : ladderPlan}
-          previewFutures={previewOrder && previewPlan ? previewFutures : undefined}
+          plan={readyPreview?.plan ?? ladderPlan}
+          previewFutures={readyPreview?.futures}
           tracks={trackMap}
           hotCuesByTrack={hotCuesByTrack}
           conducting={conductingThis}
@@ -1379,6 +1508,25 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
 
       <div
         ref={paneRef}
+        className={moveIds ? 'set-move-mode' : undefined}
+        data-tour="sets.entries"
+        tabIndex={-1}
+        onKeyDownCapture={(e) => {
+          if (!moveIds) return;
+          // Keep native button/Tab behavior, not the browse hub's deck-load,
+          // selection and area-navigation shortcuts.
+          e.stopPropagation();
+          if (e.key === 'Escape') {
+            e.preventDefault();
+            cancelMove();
+          }
+        }}
+        onPointerDownCapture={(e) => {
+          const target = e.target as HTMLElement;
+          if (!target.closest('input, textarea, select, button, [contenteditable]')) {
+            e.currentTarget.focus({ preventScroll: true });
+          }
+        }}
         onScroll={(e) => {
           setSetScroll(setId, e.currentTarget.scrollTop);
           // Manual list scroll disengages follow (sets 05); programmatic
@@ -1395,6 +1543,7 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
         onClick={(e) => {
+          if (moveIds) return;
           // Empty-space click clears the selection (sets 18). Clicks on
           // rows (track or adjacency) are theirs — only the bare pane
           // beneath/between counts as empty space.
@@ -1405,8 +1554,25 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
             setSetSelection(setId, EMPTY_SELECTION);
           }
         }}
-        style={{ position: 'relative', flex: 1, overflow: 'auto' }}
+        // Programmatic scrolling still works with hidden overflow; Chromium's
+        // native drag auto-scroll must not compete with our frame-driven loop.
+        style={{ position: 'relative', flex: 1, overflow: dragIds ? 'hidden' : 'auto',
+          overflowAnchor: 'none', scrollbarGutter: 'stable' }}
       >
+        {moveIds && (
+          <div className="set-move-banner">
+            <span role="status">
+              <strong>{moveIds.length === 1
+                ? `Moving ${trackMap?.get(moveIds[0])?.title || 'track'}`
+                : `Moving ${moveIds.length} tracks`}</strong>
+              <span>Choose a transition row. Scroll freely.</span>
+            </span>
+            <button type="button" className="btn" aria-label="Cancel move" onClick={cancelMove}>
+              Cancel <kbd>Esc</kbd>
+            </button>
+          </div>
+        )}
+        {moveIds && moveTarget(0, 'Start of Set')}
         {dropIndicator && (
           <div
             style={{
@@ -1440,6 +1606,7 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
             return (
               <div
                 key={entry.trackId}
+                data-moving={moveIds?.includes(entry.trackId) || undefined}
                 // Cast bracket (sets 160, restyled at #161): covered
                 // entries keep FULL-opacity titles — the magenta bracket
                 // and the cast/exit chips carry the meaning (dimming read
@@ -1456,6 +1623,7 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
                 }
               >
                 <SetTrackRow
+                  inert={moveIds !== null}
                   index={i}
                   trackId={entry.trackId}
                   track={track}
@@ -1485,6 +1653,7 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
                 {entry.cameoPins && entry.cameoPins.length > 0 && (
                   <div
                     className="set-cameo-pin-row"
+                    inert={moveIds !== null}
                     title="Cameo pins on this entry — guests play on a free deck inside the host's span; the Set order never advances. Click to edit."
                     onClick={(e) => {
                       e.stopPropagation();
@@ -1510,7 +1679,9 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
                   </div>
                 )}
                 {next &&
-                  (cov && cov.headIndex !== i ? null : cov ? ( // covered interior: collapsed
+                  (moveIds ? moveTarget(i + 1,
+                    `${track?.title || `Track ${entry.trackId}`} / ${trackMap?.get(next.trackId)?.title || `Track ${next.trackId}`}`
+                  ) : cov && cov.headIndex !== i ? null : cov ? ( // covered interior: collapsed
                     <RoutinePinRow
                       index={i}
                       label={routineRowLabel(cov, routineRows, (id) =>
@@ -1518,7 +1689,11 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
                       )}
                       routineUuid={cov.uuid}
                       coversCount={cov.cast.length - 1}
-                      onOpenSource={openRoutinePinSource}
+                      onOpenSource={
+                        routineRows.find((r) => r.uuid === cov.uuid)?.authored
+                          ? null // authored from scratch (ADR 0039): no source Session
+                          : openRoutinePinSource
+                      }
                       exitLabel={
                         trackMap?.get(cov.cast[cov.cast.length - 1])?.title ||
                         `Track ${cov.cast[cov.cast.length - 1]}`
@@ -1562,7 +1737,8 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
             (append IS an insert at the terminal gap). Permanently
             visible, not hover-revealed: the primary set-building
             affordance. Empty set: disabled, teaching copy inline. */}
-        {displayEntries !== undefined && (
+        {moveIds && displayEntries && moveTarget(displayEntries.length, 'End of Set')}
+        {!moveIds && displayEntries !== undefined && (
           <button
             data-set-suggest-row
             className="set-suggest-row"
@@ -1815,6 +1991,7 @@ const WARNING_LABELS: Record<PlanWarning['kind'], string> = {
   'insufficient-runway': 'tempo runway',
   'window-overlap': 'windows overlap',
   'window-past-end': 'window past end',
+  'unreachable-transition-anchor': 'unreachable anchor: hard cut',
   'incoming-ends-inside-window': 'incoming ends early',
   'no-bpm': 'no BPM',
   'pitch-clamped': 'pitch clamped',
@@ -2372,16 +2549,15 @@ const RoutinePinRow = memo(function RoutinePinRow({
         ▾ ◆ ROUTINE {label}
       </button>
       <button
-        className="set-chip-btn"
+        className="set-chip-btn set-icon-btn"
         data-routine-edit
         onClick={(e) => {
           e.stopPropagation();
           requestRoutineEdit({ routineUuid });
         }}
-        title="Open this Routine in the Routine editor (gh#170) — slot view, replay audition, boundary trim"
-        style={{ color: ROUTINE_COLOR }}
+        title="Open this Routine in the Mix editor"
       >
-        ⧉ edit
+        ⋈
       </button>
       {onOpenSource && (
         <button
@@ -2412,6 +2588,7 @@ const RoutinePinRow = memo(function RoutinePinRow({
  * trackId/index), stable object props (trackMap/plan slices, the
  * memoized occupancy map). */
 const SetTrackRow = memo(function SetTrackRow({
+  inert,
   index,
   trackId,
   track,
@@ -2432,6 +2609,7 @@ const SetTrackRow = memo(function SetTrackRow({
   onTrimChange,
   onContextMenu,
 }: {
+  inert: boolean;
   index: number;
   trackId: number;
   track: Track | undefined;
@@ -2505,6 +2683,7 @@ const SetTrackRow = memo(function SetTrackRow({
       // scrolls the selected row into view by it); presence selectors
       // ([data-set-track-row]) keep working for row rects / convergence.
       data-set-track-row={trackId}
+      inert={inert}
       draggable
       className={`set-track-row${selected ? ' selected' : ''}`}
       onClick={(e) => onSelect(trackId, { shift: e.shiftKey, toggle: e.metaKey || e.ctrlKey })}

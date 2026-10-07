@@ -120,7 +120,7 @@ npm install
 
 ```bash
 # From project root
-uv run uvicorn backend.main:app --reload --host 0.0.0.0 --port 8127
+uv run uvicorn backend.main:app --reload --host 127.0.0.1 --port 8127
 ```
 
 The API will be available at `http://localhost:8127`
@@ -253,6 +253,21 @@ The Soulseek Supplier fulfills unfulfilled Source Items from the Soulseek
 network. manadj is a thin REST client; the actual Soulseek connection is a
 local [slskd](https://github.com/slskd/slskd) daemon. The Supplier is opt-in:
 if `slskd_url` / `SLSKD_API_KEY` are unset, it does not appear in the UI.
+
+#### Managed slskd (default for new setups)
+
+With `slskd_url` / `SLSKD_API_KEY` unset, manadj runs its own slskd:
+
+1. `uv run scripts/slskd/fetch_slskd.py` — pinned, sha256-verified release
+   into `vendor/slskd/` (packaged app: `MANADJ_SLSKD_BIN` points at the
+   bundled binary).
+2. Settings → Soulseek (the Soulseek Setup guide): enter a Soulseek
+   username/password. manadj stores them (plus a generated API key/ports) in
+   `.env` as `SOULSEEK_*` / `SLSKD_MANAGED_*`, writes
+   `data/slskd/slskd.yml` (loopback web API on 5130+), starts slskd with the
+   backend, stops it on shutdown, and shows login state.
+
+The external setup below takes precedence when configured.
 
 #### 1. manadj side (config)
 

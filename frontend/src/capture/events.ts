@@ -4,8 +4,9 @@
  * ONE format shared by the live tap (recorder) and the Handover detector —
  * synthetic streams in tests are the same shape as real capture, so the
  * detector's tests exercise the real seam. Events are timestamped on a
- * monotonic seconds clock (performance.now()/1000 in the recorder; the
- * audio clock is unusable — it freezes while the surface is displaced).
+ * monotonic capture clock: audio time during an active audio epoch, wall
+ * time through suspended/gated intervals. Epochs are anchored once, not
+ * individually fitted to event callback arrival times.
  *
  * The raw slice stored on a Take is a window of these events: the
  * evidence, not the verdict. Vectorization (issue 03) re-derives from it,
@@ -43,6 +44,8 @@ export type CaptureControlId =
   | 'filter'
   | 'fader'
   | 'pfl'
+  | 'slipMode'
+  | 'vinylMode'
   | 'crossfaderAssignment'
   | 'crossfader'
   | 'crossfaderEnabled'
@@ -79,12 +82,22 @@ export type CaptureEvent =
        * (deliberate; a follow-up grill revisits it). A hot-cue stab ALSO
        * logs its launch `hotCue` gesture (handler tap, after the start
        * edge). */
-      action: 'play' | 'pause' | 'seek' | 'jumpBeats' | 'hotCue' | 'cue' | 'previewStart' | 'previewEnd';
+      action: 'play' | 'pause' | 'seek' | 'jumpBeats' | 'hotCue' | 'cue' | 'previewStart' | 'previewEnd' | 'scratchBegin' | 'scratchMove' | 'scratchEnd';
       /** Deck track-time after the action (s). */
       playhead: number;
       /** Action-specific: beats for jumpBeats, slot for hotCue, slot for a
        * hot-cue stab's previewStart (absent on a main-cue stab). */
       detail?: number;
+      /** Input displacement/interval are evidence, not a finite trajectory.
+       * Filter is the complete post-input state (also present on seeds).
+       * scratchEnd.playhead is the resolved landing, including Slip. */
+      deltaSeconds?: number;
+      durationSeconds?: number;
+      filter?: import('../playback/worklet/scratchMotion').ScratchFilter;
+      /** Finite source boundary for scratch turning-point clipping. */
+      trackDuration?: number;
+      /** Authoritative snapshot instant; t maps it into the capture epoch. */
+      audioTime?: number;
     }
   | { t: number; kind: 'pitch' | 'bend'; channel: CaptureDeck; value: number }
   /** Active-loop state change (looping 06): engage/resize carry the new
@@ -98,6 +111,8 @@ export type CaptureEvent =
       playhead: number;
       /** The region after the change (track seconds), or null. */
       region: { start: number; end: number } | null;
+      /** Entry-latched Slip, distinct from the current Slip preference. */
+      slip?: boolean;
     }
   | { t: number; kind: 'load'; channel: CaptureDeck; trackId: number | null; bpm: number | null }
   /** Coarse periodic sample (~1 Hz): keeps alignment reconstructible and
@@ -130,6 +145,8 @@ export type CaptureEvent =
 export interface InitDeckState {
   trackId: number | null;
   playing: boolean;
+  scratching?: boolean;
+  slipLoopActive?: boolean;
   fader: number;
   trim: number;
   eq: { low: number; mid: number; high: number };
@@ -164,7 +181,8 @@ export interface InitDeckState {
  * and every capture carries its engagement identity (concurrent
  * deck-sharing engagements share one uuid, so a triple's pairwise
  * offspring are a first-class group). */
-export const DETECTOR_VERSION = 6;
+// v7 (#225): paused scratch motion is audible; touched stationary holds are not.
+export const DETECTOR_VERSION = 7;
 
 export interface DetectorParams {
   /** Master-bus gain (trim × channel fader × crossfader) below which a

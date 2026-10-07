@@ -2,6 +2,9 @@ import { createContext, useContext, useSyncExternalStore } from 'react';
 import type { DeckEngine, DeckSnapshot } from '../playback/DeckEngine';
 import type { ChannelId } from '../playback/mixer';
 import type { Track } from '../types';
+import type { SyncGroup, SyncStatus } from '../playback/SyncGroup';
+import { presentationOf } from '../utils/presentationStore';
+import type { BeatjumpSize } from '../playback/beatjump';
 
 /**
  * Deck addressing (performance-mode issue 02): all four Decks live app-wide
@@ -20,6 +23,7 @@ export interface DeckContextValue {
   /** Which mixer channel this scope addresses. */
   deck: ChannelId;
   engine: DeckEngine;
+  syncGroup: SyncGroup;
   /** The Track on the Deck (kept alongside the engine's trackId for display). */
   loadedTrack: Track | null;
   /** Load a Track onto the Deck: fetch + decode, replacing the current one. */
@@ -29,9 +33,7 @@ export interface DeckContextValue {
    * (playback/beatjump.ts). ONE per-deck value shared by every mode
    * (deck-controls PRD): buttons and jump keys in any view use the same N.
    */
-  beatjumpBeats: number;
-  /** Set the beatjump size (clamped into bounds by the provider). */
-  setBeatjumpBeats: (beats: number) => void;
+  beatjump: BeatjumpSize;
 }
 
 export const DeckContext = createContext<DeckContextValue | undefined>(undefined);
@@ -45,6 +47,16 @@ export function useDeck(): DeckContextValue {
   const ctx = useContext(DeckContext);
   if (!ctx) throw new Error('useDeck must be used within a DeckScope');
   return ctx;
+}
+
+export function useBeatjumpBeats(size: BeatjumpSize): number {
+  return useSyncExternalStore(size.subscribe, size.getSnapshot);
+}
+
+export function useDeckSyncStatus(): SyncStatus {
+  const { deck, syncGroup } = useDeck();
+  const store = presentationOf(syncGroup);
+  return useSyncExternalStore(store.subscribe, () => store.getSnapshot().decks[deck]);
 }
 
 /**
@@ -67,10 +79,17 @@ export function useDecks(): Record<ChannelId, DeckContextValue> {
  */
 export function useDeckSnapshot<T>(selector: (s: DeckSnapshot) => T): T {
   const { engine } = useDeck();
+  const store = presentationOf(engine);
   return useSyncExternalStore(
-    (cb) => engine.subscribe(cb),
-    () => selector(engine.getSnapshot())
+    store.subscribe,
+    () => selector(store.getSnapshot())
   );
+}
+
+/** Commands check authoritative readiness, never a published display value. */
+export function deckReadyNow(engine: DeckEngine, trackId: number | null): boolean {
+  const snapshot = engine.getSnapshot();
+  return trackId !== null && snapshot.loadState === 'ready' && snapshot.trackId === trackId;
 }
 
 /**

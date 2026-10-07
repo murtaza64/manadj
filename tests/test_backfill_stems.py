@@ -1,6 +1,7 @@
 """Backfill script GC behavior (#196). The split loop reuses the pipeline
 and currency check tested elsewhere; here we pin the GC's blast radius."""
 
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -64,3 +65,45 @@ def test_playlist_track_ids_matches_and_errors(db, make_track) -> None:
     assert playlist_track_ids(db, "relentless") == {tracks[0].id, tracks[1].id}  # substring
     with pytest.raises(SystemExit, match="Relentless Groove"):
         playlist_track_ids(db, "no such list")
+
+
+@pytest.mark.parametrize("dry_run", [False, True])
+def test_recent_backfill_skips_old_archived_current_and_gc(
+    db, make_track, audio_file, stems_root, monkeypatch, capsys, dry_run,
+):
+    from scripts import backfill_stems
+
+    old = make_track(
+        filename=str(audio_file(name="old.mp3")), created_at=datetime(2026, 9, 7, tzinfo=UTC),
+    )
+    recent = make_track(
+        filename=str(audio_file(name="recent.mp3")), created_at=datetime(2026, 9, 8, tzinfo=UTC),
+    )
+    current = make_track(
+        filename=str(audio_file(name="current.mp3")), created_at=datetime(2026, 9, 9, tzinfo=UTC),
+    )
+    make_track(
+        filename=str(audio_file(name="archived.mp3")),
+        created_at=datetime(2026, 9, 9, tzinfo=UTC), archived_at=datetime(2026, 9, 10, tzinfo=UTC),
+    )
+    orphan = _mk(stems_root, "999")
+    old_stems = _mk(stems_root, str(old.id))
+    monkeypatch.setattr(backfill_stems, "SessionLocal", lambda: db)
+    monkeypatch.setattr(backfill_stems, "is_current", lambda id, *args: id == current.id)
+    split_ids = []
+
+    def split(id, *args):
+        split_ids.append(id)
+        return _mk(stems_root, str(id))
+
+    monkeypatch.setattr(backfill_stems, "split_track", split)
+    monkeypatch.setattr(
+        "sys.argv",
+        ["backfill_stems", "--since", "2026-09-08", "--skip-gc"]
+        + (["--dry-run"] if dry_run else []),
+    )
+    backfill_stems.main()
+    assert split_ids == ([] if dry_run else [recent.id])
+    assert "2 active tracks; 1 current, 1 to split" in capsys.readouterr().out
+    assert orphan.exists()
+    assert old_stems.exists()

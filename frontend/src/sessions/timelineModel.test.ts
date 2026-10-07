@@ -39,6 +39,75 @@ function seed(t: number): CaptureEvent[] {
 }
 
 describe('deriveTimeline', () => {
+  it('does not classify repeated audible cue stabs as idle', () => {
+    const events: CaptureEvent[] = [
+      ...seed(0),
+      { t: 0, kind: 'load', channel: 'A', trackId: 7, bpm: 174 },
+      { t: 0, kind: 'transport', channel: 'A', action: 'previewStart', playhead: 10 },
+      { t: 1, kind: 'transport', channel: 'A', action: 'previewEnd', playhead: 11 },
+      { t: 4, kind: 'transport', channel: 'A', action: 'previewStart', playhead: 10 },
+      { t: 5, kind: 'transport', channel: 'A', action: 'previewEnd', playhead: 11 },
+      { t: 8, kind: 'transport', channel: 'A', action: 'previewStart', playhead: 10 },
+      { t: 9, kind: 'transport', channel: 'A', action: 'previewEnd', playhead: 11 },
+      { t: 10, kind: 'tick', playheads: {} },
+    ];
+    expect(deriveTimeline(events).idle).toEqual([]);
+    expect(deriveTimeline(events).decks.A.audibleSpans).toEqual([
+      { start: 0, end: 1 }, { start: 4, end: 5 }, { start: 8, end: 9 },
+    ]);
+  });
+
+  it('starts idle only after five seconds of continuous silence, without needing ticks', () => {
+    const events: CaptureEvent[] = [
+      ...seed(0),
+      { t: 0, kind: 'load', channel: 'A', trackId: 7, bpm: 174 },
+      { t: 0, kind: 'transport', channel: 'A', action: 'play', playhead: 0 },
+      { t: 10, kind: 'transport', channel: 'A', action: 'pause', playhead: 10 },
+      { t: 50, kind: 'transport', channel: 'A', action: 'play', playhead: 10 },
+    ];
+    expect(deriveTimeline(events).idle).toEqual([{ start: 15, end: 50 }]);
+  });
+
+  it('ends idle immediately on a stab and restarts grace after its release', () => {
+    const events: CaptureEvent[] = [
+      ...seed(0),
+      { t: 0, kind: 'load', channel: 'D', trackId: 7, bpm: 174 },
+      { t: 10, kind: 'transport', channel: 'D', action: 'previewStart', playhead: 10, detail: 2 },
+      { t: 10.1, kind: 'transport', channel: 'D', action: 'previewEnd', playhead: 10 },
+      { t: 20, kind: 'tick', playheads: {} },
+    ];
+    expect(deriveTimeline(events).idle).toEqual([{ start: 5, end: 10 }, { start: 15.1, end: 20 }]);
+  });
+
+  it('muted previews stay idle and tenure resets the grace', () => {
+    const events: CaptureEvent[] = [
+      ...seed(0),
+      { t: 0, kind: 'control', control: 'fader', channel: 'A', value: 0 },
+      { t: 0, kind: 'load', channel: 'A', trackId: 7, bpm: 174 },
+      { t: 2, kind: 'transport', channel: 'A', action: 'previewStart', playhead: 10 },
+      { t: 10, kind: 'transport', channel: 'A', action: 'previewEnd', playhead: 10 },
+      { t: 20, kind: 'tenure', edge: 'start', holder: 'editor' },
+      { t: 30, kind: 'tenure', edge: 'end', holder: 'shared' },
+      { t: 40, kind: 'tick', playheads: {} },
+    ];
+    expect(deriveTimeline(events).idle).toEqual([{ start: 5, end: 20 }, { start: 35, end: 40 }]);
+  });
+
+  it('breaks the waveform trace at a resolved Slip loop return', () => {
+    const events: CaptureEvent[] = [
+      { t: 0, kind: 'load', channel: 'A', trackId: 7, bpm: 120 },
+      { t: 0, kind: 'transport', channel: 'A', action: 'play', playhead: 10 },
+      { t: 1, kind: 'loop', channel: 'A', playhead: 11, region: { start: 11, end: 13 } },
+      { t: 4, kind: 'tick', playheads: { A: 12 } },
+      { t: 4.5, kind: 'loop', channel: 'A', playhead: 14.5, region: null },
+      { t: 5, kind: 'tick', playheads: { A: 15 } },
+    ];
+    const model = deriveTimeline(events);
+    expect(model.decks.A.traces.some(trace => trace.some(p => p.t === 4.5 && p.playhead === 12.5))).toBe(true);
+    expect(model.decks.A.traces.some(trace => trace[0].t === 4.5 && trace[0].playhead === 14.5)).toBe(true);
+    expect(stateAt(events, 4.75).decks.A.playhead).toBe(14.75);
+  });
+
   it('audibility follows the fader, not just transport', () => {
     const events: CaptureEvent[] = [
       ...seed(0),
@@ -68,7 +137,7 @@ describe('deriveTimeline', () => {
       { start: 2, end: 5 },
       { start: 15, end: 30 },
     ]);
-    expect(m.idle).toEqual([{ start: 0, end: 2 }]);
+    expect(m.idle).toEqual([]);
   });
 
   it('an unclosed tenure at log end is marked open', () => {
@@ -81,7 +150,7 @@ describe('deriveTimeline', () => {
     expect(m.tenures).toEqual([{ start: 5, end: 20, holder: 'conductor', open: true }]);
   });
 
-  it('idle spans open when nothing is audible and close on resume', () => {
+  it('idle spans open after the silence grace and close on resume', () => {
     const events: CaptureEvent[] = [
       ...seed(0),
       { t: 1, kind: 'load', channel: 'A', trackId: 7, bpm: 174 },
@@ -92,8 +161,7 @@ describe('deriveTimeline', () => {
     ];
     const m = deriveTimeline(events);
     expect(m.idle).toEqual([
-      { start: 0, end: 2 },
-      { start: 10, end: 500 },
+      { start: 15, end: 500 },
     ]);
   });
 
@@ -221,11 +289,11 @@ describe('buildTimeAxis (idle collapse)', () => {
     const axis = buildTimeAxis(m, { collapseIdle: true, thresholdS: 45, pxPerSec: 2 });
     const collapsed = axis.segments.filter((s) => s.collapsed);
     expect(collapsed).toHaveLength(1);
-    expect(collapsed[0].start).toBe(100);
+    expect(collapsed[0].start).toBe(105);
     expect(collapsed[0].end).toBe(1000);
     expect(collapsed[0].px1 - collapsed[0].px0).toBe(COLLAPSED_MARKER_PX);
-    // 200s visible at 2 px/s + one marker.
-    expect(axis.totalPx).toBeCloseTo(200 * 2 + COLLAPSED_MARKER_PX, 5);
+    // The five-second grace stays visible beside the collapsed marker.
+    expect(axis.totalPx).toBeCloseTo(205 * 2 + COLLAPSED_MARKER_PX, 5);
     for (const t of [2, 50, 99, 1001, 1099]) {
       expect(axis.pxToT(axis.tToPx(t))).toBeCloseTo(t, 3);
     }
@@ -253,7 +321,7 @@ describe('buildTimeAxis (idle collapse)', () => {
   it('respects the expanded set and the collapse toggle', () => {
     const off = buildTimeAxis(m, { collapseIdle: false, thresholdS: 45, pxPerSec: 2 });
     expect(off.segments.every((s) => !s.collapsed)).toBe(true);
-    const idx = m.idle.findIndex((sp) => sp.start === 100);
+    const idx = m.idle.findIndex((sp) => sp.start === 105);
     const expanded = buildTimeAxis(m, {
       collapseIdle: true,
       thresholdS: 45,
@@ -740,7 +808,7 @@ describe('tenure collapse (sessions 14)', () => {
     const tenure = c.find((sp) => sp.kind === 'tenure');
     const idles = c.filter((sp) => sp.kind === 'idle');
     expect(tenure).toMatchObject({ start: 100, end: 1000, holder: 'replay' });
-    expect(idles.some((sp) => sp.start === 1100 && sp.end === 1600)).toBe(true);
+    expect(idles.some((sp) => sp.start === 1105 && sp.end === 1600)).toBe(true);
     for (let i = 1; i < c.length; i++) expect(c[i].start).toBeGreaterThanOrEqual(c[i - 1].start);
   });
 
@@ -771,7 +839,7 @@ describe('tenure collapse (sessions 14)', () => {
     const collapsed = axis.segments.filter((s) => s.collapsed);
     expect(collapsed).toHaveLength(1);
     expect(collapsed[0].kind).toBe('idle');
-    expect(collapsed[0].start).toBe(1100);
+    expect(collapsed[0].start).toBe(1105);
   });
 
   it('an open tenure at log end collapses too', () => {

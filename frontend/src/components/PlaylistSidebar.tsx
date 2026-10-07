@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import { isTrackDrag, readTrackDragPayload } from '../selection/trackDrag';
+import { isFileDrag } from '../dropImport/fileDrop';
 import {
   isPlaylistDrag,
   readPlaylistDragPayload,
@@ -43,6 +44,8 @@ interface PlaylistSidebarProps {
   onSelectPlaylist: (playlistId: number) => void;
   /** Tracks dropped onto a playlist row (whole selection, selection order). */
   onTrackDrop: (playlistId: number, trackIds: number[]) => void;
+  /** OS files dropped onto a playlist row (drop import #297). */
+  onFileDrop?: (playlistId: number, dt: DataTransfer) => void;
   /** Sets section (sets 01): sidebar siblings of Playlists. */
   selectedSetId: number | null;
   onSelectSet: (setId: number) => void;
@@ -59,6 +62,7 @@ export default function PlaylistSidebar({
   onSelectView,
   onSelectPlaylist,
   onTrackDrop,
+  onFileDrop,
   selectedSetId,
   onSelectSet,
   focused = false,
@@ -229,6 +233,12 @@ export default function PlaylistSidebar({
   });
 
   const handleRowDragOver = (e: React.DragEvent, playlistId: number) => {
+    if (onFileDrop && isFileDrag(e.dataTransfer)) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'copy';
+      setDragOverPlaylistId(playlistId);
+      return;
+    }
     if (!isTrackDrag(e.dataTransfer) || isPlaylistDrag(e.dataTransfer)) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = 'copy';
@@ -239,6 +249,10 @@ export default function PlaylistSidebar({
     if (isPlaylistDrag(e.dataTransfer)) return; // container handles reorders
     e.preventDefault();
     setDragOverPlaylistId(null);
+    if (onFileDrop && isFileDrag(e.dataTransfer)) {
+      onFileDrop(playlistId, e.dataTransfer);
+      return;
+    }
     const trackIds = readTrackDragPayload(e.dataTransfer);
     if (trackIds.length > 0) {
       onTrackDrop(playlistId, trackIds);
@@ -290,7 +304,7 @@ export default function PlaylistSidebar({
 
   return (
     <>
-      <div style={{
+      <div data-browse-area="sidebar" data-tour="library.sidebar" data-browse-focused={focused} style={{
         width: '200px',
         background: 'var(--crust)',
         borderRight: '1px solid var(--surface0)',
@@ -356,6 +370,7 @@ export default function PlaylistSidebar({
                 timeline. */}
             <div
               data-entry-key="view:session"
+              data-tour="library.sessions-row"
               onClick={() => onSelectView('session')}
               className={rowClass('view:session', selectedView === 'session')}
             >
@@ -399,6 +414,12 @@ export default function PlaylistSidebar({
             )}
             {isLoading ? (
               <div style={{ padding: '8px 12px', color: 'var(--subtext1)' }}>Loading...</div>
+            ) : playlists.length === 0 && !isCreating ? (
+              /* Empty-state guidance (feature-tour #283) */
+              <div style={{ padding: '8px 12px', color: 'var(--overlay1)' }}>
+                No playlists yet — create one with + New… below, or import from
+                rekordbox in SYNC.
+              </div>
             ) : (
               playlists.map((playlist: Playlist) => (
                 <div

@@ -7,6 +7,7 @@
  */
 import type { RoutineSlotLanes } from './routinePlan';
 import { describe, expect, it } from 'vitest';
+import { emptyEdits as emptyEditsForTest } from '../routines/routineDraft';
 import {
   allocateRoutineDecks,
   buildPlannedRoutine,
@@ -17,6 +18,7 @@ import {
   slotOccupyingDeckAt,
   traceStateAt,
   createSlotLanesCursor,
+  createSlotLaneCursor,
   type RoutineEventInput,
   type RoutinePlanInput,
 } from './routinePlan';
@@ -534,8 +536,68 @@ describe('createSlotLanesCursor (#221 perf)', () => {
       jumpMixSecs: [],
     };
     const cursor = createSlotLanesCursor(slot);
+    const controls = ['fader', 'trim', 'eqLow', 'eqMid', 'eqHigh', 'filter'] as const;
+    const scalar = controls.map((control) => createSlotLaneCursor(slot, control));
     for (let b = 0; b <= 12; b += 0.37) {
-      expect(cursor(b)).toEqual(slotLanesAt(slot, b));
+      const expected = slotLanesAt(slot, b);
+      expect(cursor(b)).toEqual(expected);
+      expect(scalar.map((valueAt) => valueAt(b))).toEqual([
+        expected.fader, expected.trim, expected.eq.low, expected.eq.mid, expected.eq.high, expected.filter,
+      ]);
     }
+  });
+});
+
+// ── Authored routines (ADR 0039, gh#325) ─────────────────────────────────
+
+describe('authored routine trace synthesis', () => {
+  const authored = (over: Partial<RoutinePlanInput> = {}): RoutinePlanInput => ({
+    cast: [1, 2, 3],
+    slotIds: ['x', 'y', 'z'],
+    entryOffsetsBeats: [0, 16, 32],
+    entryPositions: [60, 0, 10],
+    durationBeats: 64,
+    events: [],
+    authored: true,
+    ...over,
+  });
+
+  it('plays every slot beatmatched from its entry position at its entry beat', () => {
+    const { routine } = buildPlannedRoutine(authored(), { ...baseCtx, trackBpms: [120, 120, 100] });
+    const [s0, s1, s2] = routine.slots;
+    expect(traceStateAt(s0.trace, 8)).toMatchObject({ pos: 64, moving: true });
+    // Before its entry the slot is parked on its entry position.
+    expect(traceStateAt(s1.trace, 8)).toMatchObject({ pos: 0, moving: false });
+    expect(traceStateAt(s1.trace, 24)).toMatchObject({ pos: 4, moving: true });
+    // 100 BPM track: 0.6 track-sec per routine beat.
+    expect(traceStateAt(s2.trace, 42).pos).toBeCloseTo(16);
+    expect(s2.basePitchPercent).toBeCloseTo(20);
+    expect(s1.slotId).toBe('y');
+  });
+
+  it('holds each deck to the routine end (no recorded motion end)', () => {
+    const { routine, warnings } = buildPlannedRoutine(authored(), baseCtx);
+    expect(warnings).toEqual([]);
+    expect(routine.slots.map((s) => s.deck)).toEqual(['A', 'B', 'C']);
+    for (const s of routine.slots) expect(s.releaseMixSec).toBeCloseTo(routine.mixEndSec);
+  });
+
+  it('a non-authored routine with no events still parks (no synthesis)', () => {
+    const { routine } = buildPlannedRoutine(authored({ authored: false }), baseCtx);
+    expect(traceStateAt(routine.slots[1].trace, 24).moving).toBe(false);
+  });
+
+  it('entry-offset overrides move the synthesized entry', () => {
+    const { routine } = buildPlannedRoutine(
+      authored({
+        edits: {
+          ...emptyEditsForTest(),
+          entryOffsets: { y: 20 },
+        },
+      }),
+      baseCtx
+    );
+    expect(traceStateAt(routine.slots[1].trace, 19.9).moving).toBe(false);
+    expect(traceStateAt(routine.slots[1].trace, 24).pos).toBeCloseTo(2);
   });
 });

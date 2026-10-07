@@ -28,13 +28,16 @@
  */
 import { ROUTINE_ACCENT } from '../theme/routineColor';
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { bContentSegments } from '../editor/mixModel';
+import { aContentSegments } from '../editor/mixModel';
+import { outgoingAutomationStart } from '../editor/pairBounds';
 import { DECK_COLORS } from '../theme/deckColors';
 import type { HotCue, Track } from '../types';
 import type { DecodedWaveform } from '../waveform/blob';
 import { useStyleSlot } from '../waveform/styleSlots';
 import { useWaveformBlob } from '../waveform/useWaveformBlob';
 import { cueCssColor } from '../hotcues/palette';
+import { traceDrawRuns } from '../routines/routineWaveRuns';
+import { routineSlotStateAt } from './routinePlan';
 import { getConductor, setFollowPlayback } from './conductorStore';
 import { WILL_RESTORE_COLOR, type AdjacencyFuture } from './dormancy';
 import { drawStyledWave, MINIMAP_BRIGHTNESS } from './ladderWaveStyle';
@@ -47,6 +50,7 @@ import {
 import { planColumnModulator } from './ladderPlanModulation';
 import {
   planStateAt,
+  incomingMotionSpans,
   type PlanDeck,
   type PlannedAdjacency,
   type PlannedEntry,
@@ -168,6 +172,7 @@ export const OverviewLadder = memo(function OverviewLadder({
    * this viewport x through the width change. */
   const zoomAnchor = useRef<{ mixTime: number; viewportX: number } | null>(null);
   const lastAutoScrollAt = useRef(0);
+  const autoScrollTarget = useRef<number | null>(null);
   const lastMixTime = useRef<number | null>(null);
   const total = Math.max(plan.totalSec, 0.001);
 
@@ -224,8 +229,9 @@ export const OverviewLadder = memo(function OverviewLadder({
       if (!inner) return;
       const outerW = outer.clientWidth;
       const maxZoom = Math.max(1, (total * MAX_PX_PER_SEC) / outerW);
+      const sensitivity = e.ctrlKey || e.metaKey ? 0.01 : 0.002;
       setZoom((z) => {
-        const next = Math.min(maxZoom, Math.max(1, z * Math.exp(-e.deltaY * 0.002)));
+        const next = Math.min(maxZoom, Math.max(1, z * Math.exp(-e.deltaY * sensitivity)));
         if (next === z) return z;
         const rect = outer.getBoundingClientRect();
         const conductor = getConductor();
@@ -255,6 +261,7 @@ export const OverviewLadder = memo(function OverviewLadder({
     const anchor = zoomAnchor.current;
     if (!outer || !inner || !anchor) return;
     zoomAnchor.current = null;
+    autoScrollTarget.current = null;
     lastAutoScrollAt.current = performance.now(); // not a user pan
     outer.scrollLeft = (anchor.mixTime / total) * inner.clientWidth - anchor.viewportX;
     setLadderView(setId, { zoom, scrollLeft: outer.scrollLeft });
@@ -266,12 +273,28 @@ export const OverviewLadder = memo(function OverviewLadder({
     if (!outer) return;
     const onScroll = () => {
       setLadderView(setId, { zoom, scrollLeft: outer.scrollLeft });
+      if (autoScrollTarget.current !== null) {
+        lastAutoScrollAt.current = performance.now();
+        return;
+      }
       if (performance.now() - lastAutoScrollAt.current > AUTO_SCROLL_WINDOW_MS) {
         if (conducting && follow) setFollowPlayback(false);
       }
     };
+    const onScrollEnd = () => {
+      const target = autoScrollTarget.current;
+      autoScrollTarget.current = null;
+      // Native user input can interrupt a smooth pan before its destination.
+      if (target !== null && Math.abs(outer.scrollLeft - target) > 1 && conducting && follow) {
+        setFollowPlayback(false);
+      }
+    };
     outer.addEventListener('scroll', onScroll);
-    return () => outer.removeEventListener('scroll', onScroll);
+    outer.addEventListener('scrollend', onScrollEnd);
+    return () => {
+      outer.removeEventListener('scroll', onScroll);
+      outer.removeEventListener('scrollend', onScrollEnd);
+    };
   }, [setId, zoom, conducting, follow]);
 
   // ── Playhead + follow auto-scroll (rAF, no React state per frame) ─────
@@ -297,15 +320,32 @@ export const OverviewLadder = memo(function OverviewLadder({
           const viewX = px - outer.scrollLeft;
           const outerW = outer.clientWidth;
           const seeked =
-            lastMixTime.current !== null && Math.abs(t - lastMixTime.current) > SEEK_JUMP_S;
+            lastMixTime.current === null || Math.abs(t - lastMixTime.current) > SEEK_JUMP_S;
+          let target: number | null = null;
+          if (seeked && autoScrollTarget.current !== null && viewX >= 0 && viewX <= outerW) {
+            autoScrollTarget.current = null;
+            lastAutoScrollAt.current = performance.now();
+            outer.scrollTo({ left: outer.scrollLeft, behavior: 'instant' });
+          }
           if (seeked && (viewX < 0 || viewX > outerW)) {
             // Seek landed off-viewport: animated pan to CENTER it.
-            lastAutoScrollAt.current = performance.now();
-            outer.scrollTo({ left: px - outerW / 2, behavior: 'smooth' });
-          } else if (viewX > outerW * PAGE_TRIGGER || viewX < 0) {
+            target = px - outerW / 2;
+          } else if (
+            !seeked &&
+            autoScrollTarget.current === null &&
+            (viewX > outerW * PAGE_TRIGGER || viewX < 0)
+          ) {
             // DAW-style page: re-enter at the leading edge.
-            lastAutoScrollAt.current = performance.now();
-            outer.scrollTo({ left: px - outerW * PAGE_REENTRY, behavior: 'smooth' });
+            target = px - outerW * PAGE_REENTRY;
+          }
+          if (target !== null) {
+            target = Math.max(0, Math.min(outer.scrollWidth - outerW, target));
+            // Let native smooth scrolling finish instead of restarting it every frame.
+            if (Math.abs(outer.scrollLeft - target) > 1) {
+              autoScrollTarget.current = target;
+              lastAutoScrollAt.current = performance.now();
+              outer.scrollTo({ left: target, behavior: 'smooth' });
+            }
           }
         }
         lastMixTime.current = t;
@@ -620,17 +660,21 @@ export interface ClipContentSegment {
   trackEnd: number;
 }
 
-/** Merge tolerance: consecutive runs whose positions meet within this
- * are one continuous strip (no splice mark for numeric dust). */
-const SEGMENT_MERGE_EPS_S = 0.5;
+const SEGMENT_MERGE_EPS_S = 1e-6;
 
 function pushRun(out: ClipContentSegment[], seg: ClipContentSegment): void {
   if (seg.mixEnd - seg.mixStart <= 1e-6) return;
   const prev = out[out.length - 1];
+  // A continuous position is not enough: merging unequal rates moves
+  // waveform features and cues away from their playback instants.
   if (
     prev &&
     Math.abs(prev.mixEnd - seg.mixStart) < 1e-6 &&
-    Math.abs(prev.trackEnd - seg.trackStart) < SEGMENT_MERGE_EPS_S
+    Math.abs(prev.trackEnd - seg.trackStart) < SEGMENT_MERGE_EPS_S &&
+    Math.abs(
+      (prev.trackEnd - prev.trackStart) / (prev.mixEnd - prev.mixStart) -
+      (seg.trackEnd - seg.trackStart) / (seg.mixEnd - seg.mixStart)
+    ) < 1e-6
   ) {
     prev.mixEnd = seg.mixEnd;
     prev.trackEnd = seg.trackEnd;
@@ -643,7 +687,7 @@ function pushRun(out: ClipContentSegment[], seg: ClipContentSegment): void {
  * Per-entry audible content runs (#161): the ladder renders the audio AS
  * IT WILL PLAY — repeated sections drawn repeated, skipped audio skipped,
  * silent leads/pauses blank. Windowed entries take the transition model's
- * own piecewise walk (bContentSegments, jump-expanded); Routine entries
+ * own piecewise walks (incoming and outgoing, jump-expanded); Routine entries
  * take their slot trace's moving runs; everything else is one linear
  * strip.
  */
@@ -656,6 +700,36 @@ export function clipContentSegments(
     const span = entry.exitMixSec - entry.entryMixSec;
     if (span <= 0) return out;
 
+    const exitAdj = plan.adjacencies[i];
+    const exitWindow = exitAdj && (exitAdj.kind === 'transition' || exitAdj.kind === 'take') &&
+      exitAdj.transition.jumpsA?.length ? exitAdj : null;
+    const appendTail = (mixStart: number, trackStart: number) => {
+      const soloEnd = Math.min(entry.exitMixSec, exitWindow?.mixStartSec ?? entry.exitMixSec);
+      pushRun(out, {
+        mixStart,
+        mixEnd: soloEnd,
+        trackStart,
+        trackEnd: exitWindow && soloEnd === exitWindow.mixStartSec
+          ? exitWindow.transition.startSec : entry.exitSec,
+      });
+      if (!exitWindow) return;
+      // The outgoing walk uses authored elapsed time, not its jumped exit position.
+      const tr = exitWindow.transition;
+      const rate = exitWindow.rateOutgoing;
+      for (const s of aContentSegments(tr, durOf(entry.trackId))) {
+        const g0 = exitWindow.mixStartSec + (s.mixStartSec - tr.startSec) / rate;
+        const g1 = exitWindow.mixStartSec + (s.mixEndSec - tr.startSec) / rate;
+        const start = Math.max(mixStart, exitWindow.mixStartSec, g0);
+        const end = Math.min(entry.exitMixSec, g1);
+        pushRun(out, {
+          mixStart: start,
+          mixEnd: end,
+          trackStart: s.bStartSec + (start - g0) * rate,
+          trackEnd: s.bStartSec + (end - g0) * rate,
+        });
+      }
+    };
+
     // Routine slot? Its trace IS the playback (runs between jumps/pauses).
     const routine = plan.routines.find(
       (r) => i >= r.startEntryIndex && i < r.startEntryIndex + r.slots.length
@@ -665,94 +739,72 @@ export function clipContentSegments(
       const spb = routine.secPerBeat;
       // Head plays from its own entry up to the span open (linear).
       if (entry.entryMixSec < routine.mixStartSec) {
-        const first = slot.trace[0];
         pushRun(out, {
           mixStart: entry.entryMixSec,
           mixEnd: routine.mixStartSec,
           trackStart: entry.entrySec,
-          trackEnd: Math.max(0, first?.pos ?? entry.entrySec),
+          trackEnd: routineSlotStateAt(routine, slot, routine.mixStartSec).trackTime,
         });
       }
-      for (let k = 0; k < slot.trace.length - 1; k++) {
-        const a = slot.trace[k];
-        const b = slot.trace[k + 1];
-        if (!a.moving || a.ratePerBeat <= 0) continue;
-        // Run to the next point (jump landings cut runs; traceStateAt
-        // rides a's rate up to the landing).
-        let beat0 = a.beat;
-        let pos0 = a.pos;
-        const beat1 = b.beat;
-        const pos1 = b.jump ? a.pos + a.ratePerBeat * (beat1 - a.beat) : b.pos;
-        if (pos1 <= 0) continue; // wholly inside the silent lead
-        if (pos0 < 0) {
-          // Clip the run at its 0-crossing (park-until-positive rule).
-          beat0 = a.beat + -a.pos / a.ratePerBeat;
-          pos0 = 0;
-        }
+      const durationBeats = routine.playbackBounds.endBeat;
+      // Replay extrapolates until another slot claims the deck, not merely
+      // until this slot's last recorded motion sample (releaseMixSec).
+      const nextOccupant = routine.slots.find((s) => s.slot > slot.slot && s.deck === slot.deck);
+      for (const run of traceDrawRuns(slot.trace, durationBeats)) {
+        if (run.held || run.ph1 <= run.ph0) continue;
+        const rate = (run.ph1 - run.ph0) / ((run.b1 - run.b0) * spb);
+        const start = routine.beatOriginMixSec + run.b0 * spb;
+        const mixStart = Math.max(
+          entry.entryMixSec, routine.mixStartSec, slot.occupyFromMixSec, start,
+          start - run.ph0 / rate // silent lead ends when track time reaches zero
+        );
+        const mixEnd = Math.min(
+          entry.exitMixSec, nextOccupant?.occupyFromMixSec ?? routine.mixEndSec, routine.mixEndSec,
+          routine.beatOriginMixSec + run.b1 * spb
+        );
+        // Clip both axes together, including traces that started before
+        // this slot's entry. The last trace point extrapolates to the end.
         pushRun(out, {
-          mixStart: Math.max(entry.entryMixSec, routine.mixStartSec + beat0 * spb),
-          mixEnd: Math.min(entry.exitMixSec, routine.mixStartSec + beat1 * spb),
-          trackStart: pos0,
-          trackEnd: pos1,
+          mixStart,
+          mixEnd,
+          trackStart: run.ph0 + (mixStart - start) * rate,
+          trackEnd: run.ph0 + (mixEnd - start) * rate,
         });
       }
-      // The exit slot keeps sounding past the span end (linear to exit).
+      // The exit slot keeps sounding past the span end, including its outgoing jumps.
       if (entry.exitMixSec > routine.mixEndSec) {
-        pushRun(out, {
-          mixStart: routine.mixEndSec,
-          mixEnd: entry.exitMixSec,
-          trackStart: routine.exit.trackSecAtEnd,
-          trackEnd: entry.exitSec,
-        });
+        appendTail(routine.mixEndSec, routine.exit.trackSecAtEnd);
       }
       return out;
     }
 
-    // Windowed incoming: the transition model's own audible walk (lead
-    // gaps deferred, jumps expanded — loops render repeated).
+    // Incoming trajectory through handover, return, and retained jumps.
     const entryAdj = i > 0 ? plan.adjacencies[i - 1] : undefined;
     if (entryAdj && (entryAdj.kind === 'transition' || entryAdj.kind === 'take')) {
-      const tr = entryAdj.transition;
-      const authoredEnd = tr.startSec + tr.durationSec;
-      const segs = bContentSegments(tr, durOf(entry.trackId), entryAdj.rateIncoming);
-      for (const s of segs) {
-        // The walk runs to B's track end; the window owns only its own
-        // span — the post-window solo strip is appended below.
-        const a0 = s.mixStartSec;
-        const a1 = Math.min(s.mixEndSec, authoredEnd);
-        if (a1 <= a0) continue;
-        // Authored window axis → global mix axis via the outgoing's rate.
-        const g0 = entryAdj.mixStartSec + (a0 - tr.startSec) / entryAdj.rateOutgoing;
-        const g1 = entryAdj.mixStartSec + (a1 - tr.startSec) / entryAdj.rateOutgoing;
+      const until = Math.min(entry.exitMixSec,
+        exitAdj && (exitAdj.kind === 'transition' || exitAdj.kind === 'take')
+          ? exitAdj.mixStartSec + (outgoingAutomationStart(exitAdj.transition) - exitAdj.transition.startSec) / exitAdj.rateOutgoing
+          : Infinity);
+      for (const s of incomingMotionSpans(entryAdj, entry.rate, until)) {
+        const position = (t: number) => s.trackTime + s.rate * (t - s.start) + s.acceleration * (t - s.start) ** 2 / 2;
+        if (position(s.end) <= 0) continue;
+        const zeroOffset = s.trackTime < 0
+          ? -2 * s.trackTime / (s.rate + Math.sqrt(s.rate * s.rate - 2 * s.acceleration * s.trackTime)) : 0;
+        const start = Math.max(entry.entryMixSec, s.start + zeroOffset);
+        // Tempo-return curvature remains an endpoint-exact minimap chord.
         pushRun(out, {
-          mixStart: Math.max(entry.entryMixSec, g0),
-          mixEnd: Math.min(entry.exitMixSec, g1),
-          trackStart: s.bStartSec,
-          trackEnd: s.bStartSec + (a1 - a0) * entryAdj.rateIncoming,
+          mixStart: start, mixEnd: s.end,
+          trackStart: position(start), trackEnd: position(s.end),
         });
       }
-      // Past the window: solo to the exit (Tempo return curvature is
-      // sub-pixel at minimap scale — endpoints exact).
-      const windowEndGlobal = entryAdj.mixEndSec;
-      if (entry.exitMixSec > windowEndGlobal) {
+      if (entry.exitMixSec > until) {
         const last = out[out.length - 1];
-        pushRun(out, {
-          mixStart: Math.max(entry.entryMixSec, windowEndGlobal),
-          mixEnd: entry.exitMixSec,
-          trackStart: last ? last.trackEnd : entry.entrySec,
-          trackEnd: entry.exitSec,
-        });
+        appendTail(until, last ? last.trackEnd : entry.entrySec);
       }
       if (out.length > 0) return out;
     }
 
-    // Plain entry: one linear strip (the pre-#161 render).
-    pushRun(out, {
-      mixStart: entry.entryMixSec,
-      mixEnd: entry.exitMixSec,
-      trackStart: entry.entrySec,
-      trackEnd: entry.exitSec,
-    });
+    appendTail(entry.entryMixSec, entry.entrySec);
     return out;
   });
 }
@@ -804,7 +856,7 @@ const LEVEL_VIEW_W = 4000;
 /** One deck's fader-level curve (variant E): a filled polyline on the
  * deck's lane, anchored at the braid's center line (up lanes fill upward,
  * down lanes downward) in the deck's identity color. */
-function FaderLevelLane({
+const FaderLevelLane = memo(function FaderLevelLane({
   deck,
   top,
   points,
@@ -853,9 +905,9 @@ function FaderLevelLane({
       />
     </svg>
   );
-}
+});
 
-function AdjacencyBand({
+const AdjacencyBand = memo(function AdjacencyBand({
   adj,
   total,
   future,
@@ -959,7 +1011,7 @@ function AdjacencyBand({
       )}
     </div>
   );
-}
+});
 
 /** Memoized (issue 43): a big set mounts ~90 of these; without the memo
  * every ladder render re-ran them all (528 clip renders per 88-track
@@ -1034,8 +1086,10 @@ const LadderClip = memo(function LadderClip({
               width: `${((seg.mixEnd - seg.mixStart) / span) * 100}%`,
               top: 0,
               bottom: 0,
-              // Splice mark: a run boundary is a real playback jump.
-              borderLeft: k > 0 ? '1px solid rgba(255,255,255,0.45)' : undefined,
+              // Rate changes split draw runs without splicing the audio.
+              borderLeft: k > 0 &&
+                Math.abs(segments[k - 1].trackEnd - seg.trackStart) > SEGMENT_MERGE_EPS_S
+                ? '1px solid rgba(255,255,255,0.45)' : undefined,
             }}
           >
             <LadderWave

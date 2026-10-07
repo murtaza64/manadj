@@ -8,7 +8,7 @@ export interface ColumnConfig {
 }
 
 export const COLUMN_CONFIG: ColumnConfig[] = [
-  // Play order (#): playlist tables only — tables opt in via useColumnWidths(showOrder)
+  // Default layout; columnOrder resolves the visible order and frozen prefix.
   { id: 'order', width: 36, sticky: true, align: 'right' },
   { id: 'key', width: 40, sticky: true, align: 'right' },
   { id: 'bpm', width: 40, sticky: true },
@@ -21,6 +21,7 @@ export const COLUMN_CONFIG: ColumnConfig[] = [
   { id: 'marks', width: 34, sticky: true },
   { id: 'title', width: 180, sticky: true, showShadow: true },
   { id: 'artist', width: 180 },
+  { id: 'waveform', width: 208 },
   { id: 'created_at', width: 75, align: 'right' },
   { id: 'tags', width: 700 },
   // Stems presence (stems map #118): a checkmark when current stems exist.
@@ -29,8 +30,3 @@ export const COLUMN_CONFIG: ColumnConfig[] = [
   { id: 'size', width: 60, align: 'right' },
   { id: 'provenance', width: 90 },
 ];
-
-// Get column by id
-export function getColumnConfig(id: string): ColumnConfig | undefined {
-  return COLUMN_CONFIG.find(col => col.id === id);
-}

@@ -1,6 +1,6 @@
 /**
  * One automation lane: breakpoint polyline editor. The hit div spans the
- * whole lane window (pointer coords map 1:1 to lane values); the canvas is
+ * whole lane window, including its value-axis grab gutters; the canvas is
  * viewport-windowed — it covers only the visible slice + margins and is
  * repositioned/redrawn imperatively when scrolling exhausts the margin
  * (full-window canvases were giant compositor surfaces).
@@ -8,6 +8,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { insertChop, nearestTime } from './mixModel';
 import { indicesInRect, moveGroup, toggleIndex } from './laneSelection';
+import { hitLane, lanePolyline, laneValueY, laneYValue, LANE_SNAP_PX } from './laneHit';
 import type { SelectRect } from './laneSelection';
 import { LANE_COLORS } from './laneColors';
 import { BEAT_TIER_DIM, LADDER_GOLD_RGB } from '../theme/markers';
@@ -18,6 +19,7 @@ import {
   laneNeutral,
   pointStroke,
   segmentShade,
+  type LaneControlKind,
 } from './laneShade';
 import type { LaneId, LanePoint } from './mixModel';
 /** One automation lane: breakpoint polyline editor (canvas only; the label
@@ -39,22 +41,17 @@ export interface LaneGuide {
 /** Lane-guide styling per Metric-ladder tier (bar … 16-bar). Dimmer than
  * the waveform gridlines — guides sit under automation breakpoints. Data
  * lives in theme/markers.ts (BEAT_TIER_DIM, gh#201). */
-export const GUIDE_TIER_ALPHA = BEAT_TIER_DIM.alpha;
-export const GUIDE_TIER_WIDTH = BEAT_TIER_DIM.width;
+const GUIDE_TIER_ALPHA = BEAT_TIER_DIM.alpha;
+const GUIDE_TIER_WIDTH = BEAT_TIER_DIM.width;
 
 /** Breakpoint circle radius (uniform for all points). */
 const LANE_POINT_R = 5;
-/** Grab tolerance around a breakpoint (px). */
-const LANE_GRAB_PX = 13;
 
 /** Lane canvas bitmap width cap (buffer px): effective DPR shrinks once a
  * window's CSS width exceeds this, keeping deep-zoom canvases inside GPU
  * limits and the compositor budget. */
 const LANE_MAX_BITMAP_PX = 8192;
-/** Beat-line magnet radius (px) — loose: outside it placement is free. */
-const LANE_SNAP_PX = 6;
-/** Canvas overhang past the editable lane rect on every side, so breakpoint
- * circles at the extremes render complete, floating over the window borders.
+/** Canvas render padding; horizontal endpoint circles may overhang the plot.
  * Must match the canvas inset/size in transitionEditor.css. */
 const LANE_PAD = 7;
 /** Pointer travel (px) below which a cmd/ctrl gesture is a CLICK (toggle
@@ -63,6 +60,7 @@ const MARQUEE_CLICK_PX = 4;
 
 export function LaneCanvas({
   id,
+  kind,
   color: colorProp,
   widthPx,
   points,
@@ -73,13 +71,18 @@ export function LaneCanvas({
   onChange,
   selected,
   onSelectedChange,
+  visible = true,
 }: {
+  /** Offscreen timeline rows retain editing state but defer raster work. */
+  visible?: boolean;
   /** Lane identity: kind semantics (neutral line, fill anchor, shade
    * ramps, filter snap) key off the id's control prefix. The Routine
    * editor passes kind-matched ids for its slot lanes (gh#170 pass 2 —
    * a pair is the 2-slot special case; this canvas is the shared lane
    * editor) with a `color` override carrying slot identity. */
   id: LaneId;
+  /** Override renderer semantics without expanding the pair artifact model. */
+  kind?: LaneControlKind;
   /** Stroke/fill color; defaults to the pair palette (LANE_COLORS[id]). */
   color?: string;
   /** Rendered width — a draw-effect dependency so zoom resizes redraw in
@@ -102,16 +105,28 @@ export function LaneCanvas({
   selected: number[];
   onSelectedChange: (indices: number[]) => void;
 }) {
+  const styleId = kind ?? id;
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const pointsRef = useRef(points);
-  useEffect(() => {
-    pointsRef.current = points;
-  });
+  useLayoutEffect(() => { pointsRef.current = points; }, [points]);
   const dragIndex = useRef<number | null>(null);
+  const dragOffset = useRef<LanePoint>({ x: 0, y: 0 });
   /** Alt-drag lane translation (redirect 2026-09-02). */
   const laneShift = useRef<{ orig: LanePoint[]; startX: number } | null>(null);
   /** Hovered breakpoint index (shows its value readout). */
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
+  const [hoverInsertion, setInsertPreview] = useState<{
+    point: LanePoint; height: number; points: LanePoint[]; guides: LaneGuide[]; width: number; id: LaneId; kind?: LaneControlKind;
+  } | null>(null);
+  const insertPreview = hoverInsertion?.points === points && hoverInsertion.guides === guides &&
+    hoverInsertion.width === widthPx && hoverInsertion.id === id && hoverInsertion.kind === kind ? hoverInsertion : null;
+  useEffect(() => {
+    const clearForModifier = (e: KeyboardEvent) => {
+      if (['Alt', 'Control', 'Meta', 'Shift'].includes(e.key)) setInsertPreview(null);
+    };
+    window.addEventListener('keydown', clearForModifier);
+    return () => window.removeEventListener('keydown', clearForModifier);
+  }, []);
   /** Redraw on HEIGHT changes only: strips flex-share the timeline height,
    * so adding/removing ANY lane resizes this one (a stale bitmap would
    * stretch). Width changes are already covered by the `widthPx` draw dep —
@@ -126,6 +141,7 @@ export function LaneCanvas({
       const h = entries[0]?.contentRect.height ?? 0;
       if (h !== lastH) {
         lastH = h;
+        setInsertPreview(null);
         setResizeTick((n) => n + 1);
       }
     });
@@ -138,13 +154,11 @@ export function LaneCanvas({
 
   // ── Group selection (mix-editor 16) ──
   const selectedRef = useRef(selected);
-  useEffect(() => {
-    selectedRef.current = selected;
-  });
-  /** In-flight rubber-band gesture (cmd/ctrl+drag): anchor in RAW lane
+  useLayoutEffect(() => { selectedRef.current = selected; }, [selected]);
+  /** In-flight rectangle or cmd/ctrl time-span gesture: anchor in RAW lane
    * coords (the band never beat-snaps) plus the client px origin for the
    * click-vs-drag threshold. Stays a click until it travels. */
-  const marqueeStart = useRef<{ x: number; y: number; cx: number; cy: number; armed: boolean } | null>(
+  const marqueeStart = useRef<{ x: number; y: number; cx: number; cy: number; armed: boolean; timeRange: boolean } | null>(
     null
   );
   const [marquee, setMarquee] = useState<SelectRect | null>(null);
@@ -180,19 +194,26 @@ export function LaneCanvas({
   // Scrolling inside the margin just translates (with the content layer);
   // leaving it repositions + redraws imperatively via the rAF tick.
   const geomRef = useRef({ widthPx, windowLeftPx });
-  // Mirror during RENDER (#221 zoom-jump report): the redraw is a LAYOUT
-  // effect (same-frame with the window's resize), but this ref updated in
-  // a PASSIVE effect — every zoom commit drew the envelope at the
-  // PREVIOUS zoom's x-scale, then settled a frame later (nodes/lines
-  // "jumping all over while zooming").
-  geomRef.current = { widthPx, windowLeftPx };
+  // Mirror before the redraw layout effect: passive updates draw one
+  // frame at the previous zoom scale (#221).
+  useLayoutEffect(() => { geomRef.current = { widthPx, windowLeftPx }; }, [widthPx, windowLeftPx]);
   /** Last visible range in window-local CSS px (fed by the tick). */
   const lastViewRef = useRef<{ l: number; r: number } | null>(null);
   /** The span currently drawn (window-local), and the window width it was
    * computed against (zoom changes invalidate it). */
   const spanRef = useRef<{ left: number; width: number; forWidth: number } | null>(null);
 
+  const color = colorProp ?? LANE_COLORS[id];
+  const shaded = useMemo(() => {
+    const line = lanePolyline(points, emptyLaneShade(styleId).y);
+    return {
+      segments: line.slice(1).map((b, i) => ({ a: line[i], b, shade: segmentShade(styleId, color, line[i].y, b.y) })),
+      nodes: points.map((p) => pointStroke(styleId, color, p.y)),
+    };
+  }, [points, styleId, color]);
+
   const draw = () => {
+    if (!visible) return;
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext('2d');
     if (!canvas || !ctx) return;
@@ -208,35 +229,29 @@ export function LaneCanvas({
     const w = spanW + LANE_PAD * 2;
     const h = canvas.clientHeight;
     const dpr = Math.min(window.devicePixelRatio || 1, LANE_MAX_BITMAP_PX / Math.max(w, 1));
-    if (canvas.width !== Math.round(w * dpr) || canvas.height !== Math.round(h * dpr)) {
-      canvas.width = Math.round(w * dpr);
-      canvas.height = Math.round(h * dpr);
-    }
+    if (canvas.width !== Math.round(w * dpr)) canvas.width = Math.round(w * dpr);
+    if (canvas.height !== Math.round(h * dpr)) canvas.height = Math.round(h * dpr);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
-    // The editable lane rect sits inset by LANE_PAD; the pad ring stays
-    // transparent except where breakpoint circles overflow into it.
+    // Canvas padding is outside the hit rect; the value-axis gutter is inside it.
     const lh = h - LANE_PAD * 2;
     const lx = (nx: number) => LANE_PAD + nx * lw - spanL;
-    // Value axis spans the FULL lane rect: y=0/y=1 sit exactly on the
-    // background edges, so the min/max lines, the strip borders, and the
-    // ruled guides all coincide (walkthrough feedback, mix-editor 39 —
-    // a 6px inset here read as awkward gaps in the grid). Edge points
-    // remain grabbable via LANE_GRAB_PX; their circles overflow into the
-    // canvas pad and render complete.
-    const ly = (ny: number) => LANE_PAD + (1 - ny) * lh;
+    // Keep boundary nodes inside their own pointer target. The surrounding
+    // gutter is clickable without overlapping the next automation strip.
+    const ly = (ny: number) => LANE_PAD + laneValueY(ny, lh);
+    const plotTop = ly(1);
+    const plotHeight = ly(0) - plotTop;
     // Background + NEUTRAL guide clipped to the lane rect ∩ this canvas.
     // The guide sits at the lane's neutral (mix-editor 39): center for
     // EQ/filter, EMPTY (bottom) for faders. Filters fill from this line;
     // faders and EQ fill from MIN (energy present — laneFillAnchor). The
-    // fader guide coincides with the strip's bottom edge, which is fine:
-    // silence needs no extra line.
-    const neutralY = ly(laneNeutral(id));
+    // fader guide coincides with the plot's bottom edge.
+    const neutralY = ly(laneNeutral(styleId));
     const bx1 = Math.max(lx(0), 0);
     const bx2 = Math.min(lx(1), w);
     if (bx2 > bx1) {
       ctx.fillStyle = 'rgba(24, 24, 24, 0.85)';
-      ctx.fillRect(bx1, LANE_PAD, bx2 - bx1, lh);
+      ctx.fillRect(bx1, plotTop, bx2 - bx1, plotHeight);
       ctx.fillStyle = 'rgba(255,255,255,0.13)';
       ctx.fillRect(bx1, neutralY, bx2 - bx1, 1);
     }
@@ -248,7 +263,7 @@ export function LaneCanvas({
       if (g.color) {
         ctx.fillStyle = g.color;
         ctx.globalAlpha = 0.5;
-        ctx.fillRect(gx - 0.5, LANE_PAD, 1.5, lh);
+        ctx.fillRect(gx - 0.5, plotTop, 1.5, plotHeight);
         ctx.globalAlpha = 1;
       } else if (g.tier !== undefined) {
         const t = Math.min(g.tier, GUIDE_TIER_ALPHA.length - 1);
@@ -257,10 +272,10 @@ export function LaneCanvas({
         ctx.fillStyle = g.parenthetical
           ? `rgba(${LADDER_GOLD_RGB},${GUIDE_TIER_ALPHA[t] + 0.12})`
           : `rgba(255,255,255,${GUIDE_TIER_ALPHA[t]})`;
-        ctx.fillRect(gx, LANE_PAD, GUIDE_TIER_WIDTH[t], lh);
+        ctx.fillRect(gx, plotTop, GUIDE_TIER_WIDTH[t], plotHeight);
       } else {
         ctx.fillStyle = g.strong ? 'rgba(255,255,255,0.22)' : 'rgba(255,255,255,0.09)';
-        ctx.fillRect(gx, LANE_PAD, g.strong ? 1.5 : 1, lh);
+        ctx.fillRect(gx, plotTop, g.strong ? 1.5 : 1, plotHeight);
       }
     }
 
@@ -269,10 +284,9 @@ export function LaneCanvas({
       const a = lx(Math.min(chopPreview.x0, chopPreview.x1));
       const b = lx(Math.max(chopPreview.x0, chopPreview.x1));
       ctx.fillStyle = 'rgba(255, 45, 85, 0.3)';
-      ctx.fillRect(a, LANE_PAD, Math.max(b - a, 1.5), lh);
+      ctx.fillRect(a, plotTop, Math.max(b - a, 1.5), plotHeight);
     }
 
-    const color = colorProp ?? LANE_COLORS[id];
     // DEVIATION rendering (mix-editor 39): the curve renders per straight
     // segment — grey at/near neutral ramping to the deck color with
     // deviation, with the area between curve and NEUTRAL AXIS filled as a
@@ -282,19 +296,12 @@ export function LaneCanvas({
     // (off-canvas coordinates clip harmlessly). Filter segments hue-split
     // by side (LPF dark / HPF light) inside segmentShade.
     if (points.length > 0) {
-      const fillY = ly(laneFillAnchor(id));
-      const ext: LanePoint[] = [
-        { x: 0, y: points[0].y },
-        ...points,
-        { x: 1, y: points[points.length - 1].y },
-      ];
-      for (let i = 0; i < ext.length - 1; i++) {
-        const a = ext[i];
-        const b = ext[i + 1];
-        const shade = segmentShade(id, color, a.y, b.y);
+      const fillY = ly(laneFillAnchor(styleId));
+      for (const { a, b, shade } of shaded.segments) {
+        const x0 = lx(a.x);
+        const x1 = lx(b.x);
+        if (x1 < -2 || x0 > w + 2) continue;
         if (shade.fill !== null) {
-          const x0 = lx(a.x);
-          const x1 = lx(b.x);
           ctx.beginPath();
           ctx.moveTo(x0, ly(a.y));
           ctx.lineTo(x1, ly(b.y));
@@ -315,8 +322,6 @@ export function LaneCanvas({
           // Stroke: same per-value gradient as the fill. Degenerate spans
           // (vertical slams) take the strongest endpoint so a slam still
           // reads at full strength.
-          const x0 = lx(a.x);
-          const x1 = lx(b.x);
           ctx.beginPath();
           ctx.moveTo(x0, ly(a.y));
           ctx.lineTo(x1, ly(b.y));
@@ -325,8 +330,8 @@ export function LaneCanvas({
             for (const s of shade.stroke) grad.addColorStop(s.offset, s.color);
             ctx.strokeStyle = grad;
           } else {
-            const deeper = laneDeviation(id, a.y) >= laneDeviation(id, b.y) ? a.y : b.y;
-            ctx.strokeStyle = pointStroke(id, color, deeper);
+            const deeper = laneDeviation(styleId, a.y) >= laneDeviation(styleId, b.y) ? a.y : b.y;
+            ctx.strokeStyle = pointStroke(styleId, color, deeper);
           }
           ctx.lineWidth = 2;
           ctx.stroke();
@@ -336,9 +341,9 @@ export function LaneCanvas({
       // EMPTY lane: a flat neutral-grey line at the resting default with a
       // grey fill down to the anchor — present but untouched, instead of a
       // bare background (walkthrough feedback).
-      const es = emptyLaneShade(id);
+      const es = emptyLaneShade(styleId);
       const yPx = ly(es.y);
-      const fillY = ly(laneFillAnchor(id));
+      const fillY = ly(laneFillAnchor(styleId));
       if (Math.abs(fillY - yPx) > 0.5) {
         ctx.fillStyle = es.fill;
         ctx.fillRect(bx1, Math.min(yPx, fillY), bx2 - bx1, Math.abs(fillY - yPx));
@@ -351,15 +356,14 @@ export function LaneCanvas({
       ctx.stroke();
     }
 
-    // Breakpoints: uniform size, centered on their true curve position —
-    // circles at the extremes overflow into the pad, floating over the
-    // window borders instead of getting cut off or nudged inward. Dots
+    // Breakpoints: uniform size, centered on their true curve position. Dots
     // follow the deviation ramp too: a breakpoint parked at neutral is
     // quiet grey, a working one carries the lane color.
-    points.forEach((p) => {
+    points.forEach((p, i) => {
+      if (lx(p.x) < -LANE_POINT_R || lx(p.x) > w + LANE_POINT_R) return;
       ctx.beginPath();
       ctx.arc(lx(p.x), ly(p.y), LANE_POINT_R, 0, Math.PI * 2);
-      ctx.fillStyle = pointStroke(id, color, p.y);
+      ctx.fillStyle = shaded.nodes[i];
       ctx.fill();
     });
 
@@ -375,14 +379,12 @@ export function LaneCanvas({
       ctx.stroke();
     }
 
-    // Rubber-band rect (cmd/ctrl+drag in flight).
+    // Plain rectangle or modifier time-span selection.
     if (marquee) {
-      // TIME-RANGE band (redirect 2026-09-02): full lane height — the
-      // selection sweeps a span, not a rectangle.
       const mx0 = lx(Math.min(marquee.x0, marquee.x1));
       const mx1 = lx(Math.max(marquee.x0, marquee.x1));
-      const my0 = 0;
-      const my1 = canvas.clientHeight;
+      const my0 = ly(Math.max(marquee.y0, marquee.y1));
+      const my1 = ly(Math.min(marquee.y0, marquee.y1));
       ctx.fillStyle = 'rgba(255, 255, 255, 0.12)';
       ctx.fillRect(mx0, my0, mx1 - mx0, my1 - my0);
       ctx.setLineDash([4, 3]);
@@ -411,9 +413,7 @@ export function LaneCanvas({
     }
   };
   const drawRef = useRef(draw);
-  useEffect(() => {
-    drawRef.current = draw;
-  });
+  useLayoutEffect(() => { drawRef.current = draw; });
 
   // React-triggered redraws (model/hover/zoom/height changes). LAYOUT
   // effect (#221 desync): on zoom the lane window rescales during the
@@ -421,7 +421,7 @@ export function LaneCanvas({
   // geometry for a frame (the "automation jumping around while zooming").
   useLayoutEffect(() => {
     drawRef.current();
-  }, [points, id, colorProp, guides, widthPx, hoverIndex, chopPreview, resizeTick, selected, marquee]);
+  }, [points, id, kind, colorProp, guides, widthPx, hoverIndex, chopPreview, resizeTick, selected, marquee, visible]);
 
   // Scroll-triggered redraws: reposition only when the view leaves the
   // drawn span (or the zoom it was drawn at changed). LAYOUT effect: the
@@ -432,6 +432,9 @@ export function LaneCanvas({
       const { widthPx: lw, windowLeftPx: left } = geomRef.current;
       const l = Math.max(0, viewL - left);
       const r = Math.min(lw, viewR - left);
+      if (lastViewRef.current && (lastViewRef.current.l !== l || lastViewRef.current.r !== r)) {
+        setInsertPreview(null);
+      }
       lastViewRef.current = { l, r };
       const s = spanRef.current;
       if (!s || s.forWidth !== lw || l < s.left || r > s.left + s.width) {
@@ -441,7 +444,7 @@ export function LaneCanvas({
     return () => registerScrollDraw(id, null);
   }, [id, registerScrollDraw]);
 
-  const pointAt = (e: React.PointerEvent | React.MouseEvent) => {
+  const pointAt = (e: React.PointerEvent | React.MouseEvent, offset: LanePoint = { x: 0, y: 0 }) => {
     // The hit div overhangs the lane rect by LANE_PAD on the sides (grabbing
     // the x=0/x=1 breakpoints from either half of their circle); vertically
     // it stays exact so it never steals clicks from the strips above/below.
@@ -449,8 +452,11 @@ export function LaneCanvas({
     const lw = rect.width - LANE_PAD * 2;
     const ex = e.clientX - rect.left;
     const ey = e.clientY - rect.top;
-    const rawX = Math.max(0, Math.min(1, (ex - LANE_PAD) / lw));
-    let x = rawX;
+    // Keep the pointer unbounded for rectangles and grab offsets. Clamp
+    // only the final node position after the offset has been applied.
+    const rawX = (ex - LANE_PAD) / lw;
+    const rawY = laneYValue(ey, rect.height);
+    let x = Math.max(0, Math.min(1, rawX + offset.x));
     // Loose beat-line magnet: within a few px the point snaps onto the
     // guide; beyond that placement is free (fine control between beats).
     // Shift suspends it, like every other snap.
@@ -467,46 +473,41 @@ export function LaneCanvas({
       }
       if (bestX !== null) x = bestX;
     }
-    // Same full-height value axis as the draw effect.
-    const vh = rect.height;
+    const plain = !e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey;
+    const hit = hitLane(pointsRef.current, ex - LANE_PAD, ey, lw, rect.height,
+      emptyLaneShade(styleId).y, plain ? beatXs : []);
+    const insertion = hit.insertion && plain
+      ? { ...hit.insertion, y: snapValue(hit.insertion.y, e) } : null;
+    const coincident = insertion ? pointsRef.current.findIndex(p =>
+      Math.abs(p.x - insertion.x) < 1e-9 && Math.abs(p.y - insertion.y) < 1e-9) : -1;
     return {
       x,
       /** Unsnapped x — the rubber band never beat-snaps. */
       rawX,
-      y: Math.max(0, Math.min(1, 1 - ey / vh)),
-      nearestIndex: (() => {
-        let best = -1;
-        let bestDist = Infinity;
-        pointsRef.current.forEach((p, i) => {
-          const dx = LANE_PAD + p.x * lw - ex;
-          const dy = (1 - p.y) * vh - ey;
-          const d = Math.hypot(dx, dy);
-          if (d < bestDist) {
-            bestDist = d;
-            best = i;
-          }
-        });
-        return bestDist < LANE_GRAB_PX ? best : -1;
-      })(),
+      rawY,
+      y: Math.max(0, Math.min(1, rawY + offset.y)),
+      nearestIndex: coincident >= 0 ? coincident : hit.nearestIndex,
+      insertion: coincident >= 0 ? null : insertion,
+      insertionIndex: hit.insertionIndex,
+      height: rect.height,
     };
   };
 
   const commit = (pts: LanePoint[]) => onChange([...pts].sort((a, b) => a.x - b.x));
 
-  /** Filter lanes magnet to 0.5 (= filter off) so a curve can return to
-   * exactly neutral. Shift suspends it, like every other snap. */
+  /** Non-fader controls magnet to their neutral 0.5. Shift suspends snapping. */
   const snapValue = (y: number, e: { shiftKey: boolean }) =>
-    id.startsWith('filter') && !e.shiftKey && Math.abs(y - 0.5) < 0.08 ? 0.5 : y;
+    !styleId.startsWith('fader') && !e.shiftKey && Math.abs(y - 0.5) < 0.08 ? 0.5 : y;
 
-  // The hit div fills the lane rect exactly; the canvas (pointer-events:
-  // none) pads past it so edge breakpoints render as full circles floating
-  // over the window borders without stealing clicks from neighboring strips.
+  // Vertical gutters belong to this lane; neighboring hit areas never overlap.
   return (
     <div
       className="editor-lanehit"
       onPointerDown={(e) => {
+        if (e.button !== 0) return;
         e.stopPropagation();
         e.currentTarget.setPointerCapture(e.pointerId);
+        setInsertPreview(null);
         const hit = pointAt(e);
         if (e.altKey) {
           // Redirect 2026-09-02: alt-drag TRANSLATES the whole envelope
@@ -515,34 +516,41 @@ export function LaneCanvas({
         } else if (e.metaKey || e.ctrlKey) {
           // Selection gesture (mix-editor 16): stays a click (toggle the
           // node under the pointer) until it travels — then rubber-band.
-          marqueeStart.current = { x: hit.rawX, y: hit.y, cx: e.clientX, cy: e.clientY, armed: false };
+          marqueeStart.current = { x: hit.rawX, y: hit.rawY, cx: e.clientX, cy: e.clientY, armed: false, timeRange: true };
         } else if (hit.nearestIndex >= 0 && selectedRef.current.includes(hit.nearestIndex)) {
           // Group drag: any selected node tows the whole selection.
           groupDrag.current = {
             orig: pointsRef.current,
             grab: pointsRef.current[hit.nearestIndex],
           };
+          dragOffset.current = { x: groupDrag.current.grab.x - hit.rawX, y: groupDrag.current.grab.y - hit.rawY };
         } else if (hit.nearestIndex >= 0) {
           // Grabbing a breakpoint wins over the chop gesture: shift+drag ON
           // a point stays the fine-drag (snap suspended) from issue 09.
           dragIndex.current = hit.nearestIndex;
+          const p = pointsRef.current[hit.nearestIndex];
+          dragOffset.current = { x: p.x - hit.rawX, y: p.y - hit.rawY };
+          onSelectedChange([]);
         } else if (e.shiftKey) {
           // Chop stamp: shift+drag spans a cut, shift+click cuts one beat.
           chopStart.current = hit.x;
           setChopPreview({ x0: snapCutX(hit.x), x1: snapCutX(hit.x) });
-        } else if (selectedRef.current.length > 0) {
-          // Plain click on empty space while a selection is active:
-          // deselect instead of adding (click again to add as usual).
+        } else if (hit.insertion) {
+          const point = hit.insertion;
+          const pts = [...pointsRef.current];
+          pts.splice(hit.insertionIndex, 0, point);
+          pts.sort((a, b) => a.x - b.x);
+          dragIndex.current = pts.indexOf(point);
+          dragOffset.current = { x: point.x - hit.rawX, y: point.y - hit.rawY };
           onSelectedChange([]);
-        } else {
-          const y = snapValue(hit.y, e);
-          const pts = [...pointsRef.current, { x: hit.x, y }].sort((a, b) => a.x - b.x);
-          dragIndex.current = pts.findIndex((p) => p.x === hit.x && p.y === y);
           commit(pts);
+        } else {
+          onSelectedChange([]);
+          marqueeStart.current = { x: hit.rawX, y: hit.rawY, cx: e.clientX, cy: e.clientY, armed: false, timeRange: false };
         }
       }}
       onPointerMove={(e) => {
-        const hit = pointAt(e);
+        const hit = pointAt(e, dragIndex.current !== null || groupDrag.current ? dragOffset.current : undefined);
         if (laneShift.current) {
           const dx = hit.rawX - laneShift.current.startX;
           onChange(laneShift.current.orig.map((p) => ({ ...p, x: p.x + dx })));
@@ -554,7 +562,8 @@ export function LaneCanvas({
             m.armed = true;
           }
           if (m.armed) {
-            const rect: SelectRect = { x0: m.x, y0: m.y, x1: hit.rawX, y1: hit.y };
+            const rect: SelectRect = { x0: m.x, y0: m.timeRange ? 0 : m.y,
+              x1: hit.rawX, y1: m.timeRange ? 1 : hit.rawY };
             setMarquee(rect);
             onSelectedChange(indicesInRect(pointsRef.current, rect));
           }
@@ -562,7 +571,7 @@ export function LaneCanvas({
         }
         if (groupDrag.current) {
           const { orig, grab } = groupDrag.current;
-          onChange(moveGroup(orig, selectedRef.current, hit.x - grab.x, hit.y - grab.y));
+          onChange(moveGroup(orig, selectedRef.current, hit.x - grab.x, snapValue(hit.y, e) - grab.y));
           return;
         }
         if (chopStart.current !== null) {
@@ -571,6 +580,8 @@ export function LaneCanvas({
         }
         if (dragIndex.current === null) {
           setHoverIndex(hit.nearestIndex >= 0 ? hit.nearestIndex : null);
+          setInsertPreview(hit.insertion ? { point: hit.insertion, height: hit.height,
+            points: pointsRef.current, guides, width: widthPx, id, kind } : null);
           return;
         }
         const pts = [...pointsRef.current];
@@ -581,6 +592,7 @@ export function LaneCanvas({
         onChange(pts);
       }}
       onPointerUp={(e) => {
+        dragOffset.current = { x: 0, y: 0 };
         if (laneShift.current) {
           laneShift.current = null;
           return;
@@ -594,7 +606,7 @@ export function LaneCanvas({
             // the selection; on empty space it deselects.
             const hit = pointAt(e);
             onSelectedChange(
-              hit.nearestIndex >= 0 ? toggleIndex(selectedRef.current, hit.nearestIndex) : []
+              m.timeRange && hit.nearestIndex >= 0 ? toggleIndex(selectedRef.current, hit.nearestIndex) : []
             );
           }
           return;
@@ -624,6 +636,8 @@ export function LaneCanvas({
         }
       }}
       onPointerCancel={() => {
+        setInsertPreview(null);
+        dragOffset.current = { x: 0, y: 0 };
         laneShift.current = null;
         dragIndex.current = null;
         chopStart.current = null;
@@ -632,7 +646,7 @@ export function LaneCanvas({
         setMarquee(null);
         groupDrag.current = null;
       }}
-      onPointerLeave={() => setHoverIndex(null)}
+      onPointerLeave={() => { setHoverIndex(null); setInsertPreview(null); }}
       onDoubleClick={(e) => {
         e.stopPropagation();
         const hit = pointAt(e);
@@ -645,7 +659,13 @@ export function LaneCanvas({
       }}
     >
       <canvas ref={canvasRef} />
+      {insertPreview && (
+        <span className="editor-lane-insert-preview" aria-hidden="true" style={{
+          left: LANE_PAD + insertPreview.point.x * widthPx,
+          top: laneValueY(insertPreview.point.y, insertPreview.height),
+          background: pointStroke(styleId, colorProp ?? LANE_COLORS[id], insertPreview.point.y),
+        }} />
+      )}
     </div>
   );
 }
-

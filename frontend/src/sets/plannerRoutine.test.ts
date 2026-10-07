@@ -11,6 +11,8 @@ import { describe, expect, it } from 'vitest';
 import type { Transition } from '../editor/mixModel';
 import { planSet, planStateAt, jumpCrossed, type PlanInput } from './planner';
 import type { RoutineEventInput, RoutinePlanInput } from './routinePlan';
+import { evaluateReplan } from './replan';
+import { mixTimeForTrackTime } from './pickup';
 
 // ── Synthetic recording (the routinePlan.test.ts fixture, shared shape) ─
 
@@ -77,6 +79,67 @@ function routineInput(over: Partial<PlanInput> = {}): PlanInput {
 }
 
 describe('planSet with a pinned Routine', () => {
+  it('replans while the incoming routine slot anchors playback', () => {
+    const plan = planSet(routineInput());
+    expect(planStateAt(plan, 85).decks.B.trackTime).toBeCloseTo(17);
+    expect(evaluateReplan(plan, 85, planSet(routineInput()))).toEqual({
+      ok: true, mixTime: 85, flip: false, anchor: 'B',
+    });
+  });
+
+  it('maps routine slots and the exit tempo return back to mix time', () => {
+    const input = routineInput({
+      tracks: { 1: facts(240), 2: facts(240), 3: facts(240, 125), 9: facts(240) },
+    });
+    const plan = planSet(input);
+    for (const [idx, time] of [[0, 65], [1, 85], [2, 90], [2, 96], [2, 110]]) {
+      const deck = planStateAt(plan, time).decks[plan.entries[idx].deck];
+      expect(mixTimeForTrackTime(plan, idx, deck.trackTime)).toBeCloseTo(time, 6);
+    }
+  });
+
+  it('maps a routine at fixed tempo without using its solo offset', () => {
+    const plan = planSet(routineInput({ tempo: { policy: 'fixed', setTempoBpm: 132 } }));
+    const time = plan.routines[0].mixStartSec + 25;
+    expect(evaluateReplan(plan, time, plan)).toMatchObject({ ok: true, anchor: 'B' });
+    const decision = evaluateReplan(plan, time, plan);
+    if (decision.ok) expect(decision.mixTime).toBeCloseTo(time, 6);
+  });
+
+  it('does not map skipped routine content through the solo anchor', () => {
+    const routine = recording([1, 2, 3]);
+    routine.events = routine.events.map((event) => {
+      if (event.kind !== 'tick' || Number(event.beat) < 40) return event;
+      const playheads = event.playheads as Record<string, number>;
+      return { ...event, playheads: { ...playheads, 1: playheads['1'] + 20 } };
+    });
+    routine.events.push({ kind: 'transport', beat: 40, slot: 1, action: 'seek', playhead: 32 });
+    const plan = planSet(routineInput({ routines: [{ startEntryIndex: 0, routine }] }));
+    expect(planStateAt(plan, 85).decks.B.trackTime).toBeCloseTo(37);
+    expect(mixTimeForTrackTime(plan, 1, 37)).toBeCloseTo(85, 6);
+    expect(mixTimeForTrackTime(plan, 1, 17)).toBeNull();
+    expect(mixTimeForTrackTime(plan, 1, 30)).toBeNull();
+  });
+
+  it('maps the exit tail below its entry position after a backward jump', () => {
+    const routine = recording([1, 2, 3]);
+    routine.events = routine.events.map((event) => {
+      if (event.kind !== 'tick' || Number(event.beat) < 60) return event;
+      const playheads = event.playheads as Record<string, number>;
+      return { ...event, playheads: { ...playheads, 2: playheads['2'] - 24 } };
+    });
+    routine.events.push({ kind: 'transport', beat: 60, slot: 2, action: 'seek', playhead: 0 });
+    const plan = planSet(routineInput({
+      tracks: { 1: facts(240), 2: facts(240), 3: facts(240, 122), 9: facts(240) },
+      routines: [{ startEntryIndex: 0, routine }],
+    }));
+    for (const time of [94, 96]) {
+      const tau = planStateAt(plan, time).decks.C.trackTime;
+      expect(tau).toBeLessThan(plan.entries[2].entrySec);
+      expect(mixTimeForTrackTime(plan, 2, tau)).toBeCloseTo(time, 6);
+    }
+  });
+
   it('covers the cast adjacencies and anchors the window on slot 0\'s timeline', () => {
     const plan = planSet(routineInput());
     expect(plan.routines).toHaveLength(1);
@@ -356,7 +419,7 @@ describe('planSet with a pinned Routine', () => {
       durationSec: 20,
       bInSec: 0,
       tempoMatch: false,
-      lanes: {},
+      lanes: { faderA: [{ x: 0, y: 1 }, { x: 1, y: 1 }, { x: 1, y: 0 }] },
     };
     const input: PlanInput = {
       entries: [

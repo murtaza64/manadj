@@ -26,6 +26,8 @@ import type {
   LibraryImportResult,
   LibraryImportRequest,
   LibraryImportExecutionResult,
+  DropImportRequest,
+  DropImportResult,
   SourceItem,
   AcquisitionRefreshStats,
   Classification,
@@ -55,8 +57,12 @@ export interface TransitionTemplateWire {
   lanes: Record<string, unknown>;
 }
 
-// Backend URL configuration - can be overridden with VITE_API_URL env var
-const BACKEND_URL = import.meta.env.VITE_API_URL || 'http://localhost:8127';
+// Backend URL: VITE_API_URL when set (scripts/dev.py injects it); dev/test
+// fallback :8127. Production builds default to '' — same-origin relative
+// URLs, for when the backend itself serves the built frontend (packaged
+// app, ADR 0043 / #279).
+const BACKEND_URL =
+  import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://localhost:8127' : '');
 const API_BASE = `${BACKEND_URL}/api`;
 
 // Export for use in other components (e.g., for static file URLs)
@@ -343,6 +349,24 @@ export const api = {
       return response.json();
     },
 
+    createCategory: async (category: { name: string; display_order?: number; color?: string }) => {
+      const response = await fetch(`${API_BASE}/tags/categories`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(category),
+      });
+      if (!response.ok) {
+        const body = await response.json().catch(() => null);
+        throw new Error(body?.detail ?? 'Failed to create category');
+      }
+      return response.json();
+    },
+
+    deleteCategory: async (id: number) => {
+      const response = await fetch(`${API_BASE}/tags/categories/${id}`, { method: 'DELETE' });
+      if (!response.ok) throw new Error('Failed to delete category');
+    },
+
     listByCategory: async (categoryId: number) => {
       const response = await fetch(`${API_BASE}/tags/categories/${categoryId}/tags`);
       return response.json();
@@ -391,6 +415,18 @@ export const api = {
   },
 
   waveforms: {
+    /** Bounded preview substrate; 202 means the waveform worker is preparing it. */
+    getPreview: async (trackId: number): Promise<{ blob: ArrayBuffer; etag: string } | null> => {
+      const response = await fetch(`${API_BASE}/waveforms/${trackId}/preview`);
+      if (response.status === 202) return null;
+      if (!response.ok) {
+        throw Object.assign(new Error(`Failed to fetch waveform preview (${response.status})`), { status: response.status });
+      }
+      const etag = response.headers.get('ETag');
+      if (!etag) throw new Error('Waveform preview response missing ETag');
+      return { blob: await response.arrayBuffer(), etag };
+    },
+
     /** Waveform data v2 blob (ADR 0014): binary, immutable once generated. */
     getData: async (trackId: number): Promise<ArrayBuffer> => {
       const response = await fetch(`${API_BASE}/waveforms/${trackId}/data`);
@@ -704,8 +740,7 @@ export const api = {
     },
 
     sync: async (playlistName: string, request: SyncPlaylistRequest): Promise<SyncResult | SyncResult[]> => {
-      const encodedName = encodeURIComponent(playlistName);
-      const res = await fetch(`${API_BASE}/sync/playlists/${encodedName}/sync`, {
+      const res = await fetch(`${API_BASE}/sync/playlists/sync?playlist=${encodeURIComponent(playlistName)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(request),
@@ -721,8 +756,7 @@ export const api = {
       playlistName: string,
       targets: PlaylistExportTarget[],
     ): Promise<PlaylistFullExportReport> => {
-      const encodedName = encodeURIComponent(playlistName);
-      const res = await fetch(`${API_BASE}/sync/export/playlists/${encodedName}/performance`, {
+      const res = await fetch(`${API_BASE}/sync/export/playlists/performance?playlist=${encodeURIComponent(playlistName)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ targets }),
@@ -737,9 +771,8 @@ export const api = {
     previewExportPerformance: async (
       playlistName: string,
     ): Promise<PlaylistFullExportPreview> => {
-      const encodedName = encodeURIComponent(playlistName);
       const res = await fetch(
-        `${API_BASE}/sync/export/playlists/${encodedName}/performance/preview`,
+        `${API_BASE}/sync/export/playlists/performance/preview?playlist=${encodeURIComponent(playlistName)}`,
       );
       if (!res.ok) {
         const detail = (await res.json().catch(() => null))?.detail;
@@ -1028,6 +1061,17 @@ export const api = {
         body: JSON.stringify(request),
       });
       if (!response.ok) throw new Error('Failed to import tracks');
+      return response.json();
+    },
+
+    /** Drop import (#297): dropped files/folders, imported in place. */
+    dropImport: async (request: DropImportRequest): Promise<DropImportResult> => {
+      const response = await fetch(`${API_BASE}/sync/library/drop-import`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(request),
+      });
+      if (!response.ok) throw new Error('Drop import failed');
       return response.json();
     },
   },
@@ -1347,7 +1391,10 @@ export const api = {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ promoted_transition_uuid: transitionUuid }),
       });
-      if (!res.ok) throw new Error(`Failed to set take promotion (${res.status})`);
+      if (!res.ok) {
+        const detail = (await res.json().catch(() => null))?.detail;
+        throw new Error(detailToMessage(detail, `Failed to set take promotion (${res.status})`));
+      }
       return res.json();
     },
   },
@@ -1482,6 +1529,38 @@ export const api = {
         body: JSON.stringify({ edits }),
       });
       if (!res.ok) throw new Error(`Failed to save routine edits (${res.status})`);
+      return res.json();
+    },
+
+    /** Mint an AUTHORED Routine (ADR 0039, gh#325) — the blank draft's
+     * first persist (≥ 3 slots). The draft's client-minted uuid. */
+    createAuthored: async (
+      body: RoutineStructureWire & { uuid: string; name?: string | null }
+    ): Promise<RoutineDetailWire> => {
+      const res = await fetch(`${API_BASE}/routines`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const detail = await res.json().then((d) => d.detail).catch(() => null);
+        throw new Error(detail || `Failed to create routine (${res.status})`);
+      }
+      return res.json();
+    },
+
+    /** Replace an authored Routine's structure (cast/slot ids/entry
+     * offsets/positions/duration; optional edits in the same write). */
+    putStructure: async (uuid: string, body: RoutineStructureWire): Promise<RoutineDetailWire> => {
+      const res = await fetch(`${API_BASE}/routines/${uuid}/structure`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const detail = await res.json().then((d) => d.detail).catch(() => null);
+        throw new Error(detail || `Failed to save routine structure (${res.status})`);
+      }
       return res.json();
     },
 
@@ -1645,7 +1724,65 @@ export const api = {
       return res.json();
     },
   },
+
+  // ── App configuration (packaged-app #277): the settings file, not the
+  // DB settings table. Settings → Library edits these.
+  appConfig: {
+    get: async (): Promise<AppConfigWire> => {
+      const res = await fetch(`${API_BASE}/config`);
+      if (!res.ok) throw new Error(`Failed to load app config (${res.status})`);
+      return res.json();
+    },
+
+    update: async (changes: AppConfigUpdateWire): Promise<AppConfigWire> => {
+      const res = await fetch(`${API_BASE}/config`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(changes),
+      });
+      if (!res.ok) throw new Error(`Failed to save app config (${res.status})`);
+      return res.json();
+    },
+
+    /** Show the settings file in Finder. */
+    reveal: async (): Promise<void> => {
+      const res = await fetch(`${API_BASE}/config/reveal`, { method: 'POST' });
+      if (!res.ok) throw new Error(`Failed to reveal settings file (${res.status})`);
+    },
+
+    /** Open the backend log folder in Finder (packaged-app #278). */
+    revealLogs: async (): Promise<void> => {
+      const res = await fetch(`${API_BASE}/config/reveal-logs`, { method: 'POST' });
+      if (!res.ok) throw new Error(`Failed to reveal logs (${res.status})`);
+    },
+  },
 };
+
+// ── App config wire types (packaged-app #277) ──────────────────────────
+
+export interface AppConfigWire {
+  tracks_directory: string | null;
+  rekordbox_path: string | null;
+  /** True when rekordbox_path came from auto-detection, not the settings file. */
+  rekordbox_autodetected: boolean;
+  rekordbox_detected_path: string | null;
+  engine_dj_path: string | null;
+  /** True when engine_dj_path came from auto-detection (#309). */
+  engine_autodetected: boolean;
+  engine_detected_path: string | null;
+  export_enabled: boolean;
+  settings_file: string;
+  /** Live PATH check (packaged-app #278): false => waveforms/analysis/stems broken. */
+  ffmpeg_available: boolean;
+}
+
+export interface AppConfigUpdateWire {
+  /** Path fields: '' clears the key (Rekordbox/Engine return to auto-detect). */
+  tracks_directory?: string;
+  rekordbox_path?: string;
+  engine_dj_path?: string;
+  export_enabled?: boolean;
+}
 
 // ── Take wire types (transition-takes 02) ───────────────────────────────
 
@@ -1748,7 +1885,24 @@ export interface RoutineRowWire {
   entry_positions: number[];
   duration_beats: number;
   origin_take_uuid: string | null;
+  /** Stable slot ids parallel to cast (ADR 0039); null/absent = promoted
+   * (slot id = String(index)). */
+  slot_ids?: string[] | null;
+  /** Authored from scratch (ADR 0039, gh#325): no recording; replay
+   * synthesizes traces. Absent = false. */
+  authored?: boolean;
   created_at: string | null;
+}
+
+/** An authored Routine's mutable structure (ADR 0039, gh#325). */
+export interface RoutineStructureWire {
+  cast: number[];
+  slot_ids: string[];
+  entry_offsets_beats: number[];
+  entry_positions: number[];
+  duration_beats: number;
+  /** Present = replace the edits layer in the same write. */
+  edits?: Record<string, unknown> | null;
 }
 
 export interface RoutineDetailWire extends RoutineRowWire {

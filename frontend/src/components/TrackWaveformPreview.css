@@ -1,0 +1,43 @@
+.track-waveform-preview {
+  position: relative;
+  height: 20px;
+  overflow: hidden;
+}
+
+.track-waveform-preview img {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.track-waveform-placeholder {
+  display: block;
+  height: 100%;
+  background: linear-gradient(var(--surface0), var(--surface0)) center / 100% 1px no-repeat;
+}
+
+.track-waveform-cue {
+  position: absolute;
+  left: clamp(1px, var(--cue-position), calc(100% - 1px));
+  top: 0;
+  height: 100%;
+  transform: translateX(-50%);
+  background: currentColor;
+}
+
+.track-waveform-cue i {
+  position: absolute;
+  left: 100%;
+  top: 0;
+  background: currentColor;
+}
+
+.track-waveform-header {
+  padding: var(--space-6) var(--space-8);
+  text-align: left;
+  color: var(--subtext0);
+  font-weight: 400;
+  font-size: var(--font-small);
+  overflow: hidden;
+  white-space: nowrap;
+}

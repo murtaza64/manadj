@@ -158,16 +158,16 @@ export function reconcilePairFromServer(
  * listeners fire synchronously (optimistic — flush-before-repoint relies
  * on this); the PUT runs in the background, reconciled by uuid. Write
  * failures log only (ADR 0011: no retry queue). `active` goes to
- * localStorage, not the DB.
+ * localStorage, not the DB. The returned promise reports PUT completion.
  */
-export function savePairEntry(pairKey: string, entry: PairEntry | null): void {
+export function savePairEntry(pairKey: string, entry: PairEntry | null): Promise<boolean> {
   const next = { ...snapshot };
   if (entry) next[pairKey] = { ...entry, items: stampEdits(snapshot[pairKey]?.items, entry.items) };
   else delete next[pairKey];
   snapshot = next;
   writeActive(pairKey, entry?.active ?? null);
   notify();
-  void pushPair(pairKey, entry?.items ?? []);
+  return pushPair(pairKey, entry?.items ?? []);
 }
 
 /** Carry edit stamps across a pair write (sets 26): an item that is new,

@@ -368,3 +368,93 @@
 .set-cameo-pin-row:hover .set-cameo-pin-chip {
   border-color: var(--orange);
 }
+
+.set-move-banner {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-12);
+  padding: var(--space-8) var(--space-12);
+  background: var(--crust);
+  border-bottom: 2px solid var(--accent);
+  font-size: var(--font-body);
+}
+
+.set-move-banner > span {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: var(--space-4);
+}
+
+.set-move-banner strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--accent);
+}
+
+.set-move-banner .btn {
+  flex-shrink: 0;
+}
+
+.set-move-banner kbd {
+  margin-left: var(--space-8);
+  color: var(--subtext0);
+}
+
+.set-move-target {
+  scroll-margin-top: 64px;
+  display: flex;
+  align-items: center;
+  gap: var(--space-12);
+  width: 100%;
+  min-height: 32px;
+  padding: var(--space-6) var(--space-12);
+  background: var(--crust);
+  border: 0;
+  border-bottom: 1px dashed var(--accent);
+  color: var(--accent);
+  font: inherit;
+  font-size: var(--font-body);
+  text-align: left;
+  cursor: pointer;
+}
+
+.set-move-target strong {
+  flex-shrink: 0;
+}
+
+.set-move-target span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--subtext1);
+}
+
+.set-move-target:hover:not(:disabled),
+.set-move-target:focus-visible {
+  background: var(--accent);
+  color: var(--base);
+  outline: 2px solid var(--text);
+  outline-offset: -2px;
+}
+
+.set-move-target:hover:not(:disabled) span,
+.set-move-target:focus-visible span {
+  color: var(--base);
+}
+
+.set-move-target:disabled {
+  border-color: var(--surface1);
+  color: var(--subtext0);
+  cursor: default;
+}
+
+.set-move-mode [data-moving] .set-track-row {
+  box-shadow: inset 4px 0 var(--accent);
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+}
