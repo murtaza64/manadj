@@ -345,6 +345,24 @@ export const api = {
       return response.json();
     },
 
+    createCategory: async (category: { name: string; display_order?: number; color?: string }) => {
+      const response = await fetch(`${API_BASE}/tags/categories`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(category),
+      });
+      if (!response.ok) {
+        const body = await response.json().catch(() => null);
+        throw new Error(body?.detail ?? 'Failed to create category');
+      }
+      return response.json();
+    },
+
+    deleteCategory: async (id: number) => {
+      const response = await fetch(`${API_BASE}/tags/categories/${id}`, { method: 'DELETE' });
+      if (!response.ok) throw new Error('Failed to delete category');
+    },
+
     listByCategory: async (categoryId: number) => {
       const response = await fetch(`${API_BASE}/tags/categories/${categoryId}/tags`);
       return response.json();
@@ -1510,6 +1528,38 @@ export const api = {
       return res.json();
     },
 
+    /** Mint an AUTHORED Routine (ADR 0039, gh#325) — the blank draft's
+     * first persist (≥ 3 slots). The draft's client-minted uuid. */
+    createAuthored: async (
+      body: RoutineStructureWire & { uuid: string; name?: string | null }
+    ): Promise<RoutineDetailWire> => {
+      const res = await fetch(`${API_BASE}/routines`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const detail = await res.json().then((d) => d.detail).catch(() => null);
+        throw new Error(detail || `Failed to create routine (${res.status})`);
+      }
+      return res.json();
+    },
+
+    /** Replace an authored Routine's structure (cast/slot ids/entry
+     * offsets/positions/duration; optional edits in the same write). */
+    putStructure: async (uuid: string, body: RoutineStructureWire): Promise<RoutineDetailWire> => {
+      const res = await fetch(`${API_BASE}/routines/${uuid}/structure`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const detail = await res.json().then((d) => d.detail).catch(() => null);
+        throw new Error(detail || `Failed to save routine structure (${res.status})`);
+      }
+      return res.json();
+    },
+
     /** Boundary trim + mechanical re-promotion (gh#170): re-run promotion
      * over the origin Routine Take with the window narrowed by beat
      * amounts from either edge; the Routine row updates IN PLACE (same
@@ -1828,7 +1878,24 @@ export interface RoutineRowWire {
   entry_positions: number[];
   duration_beats: number;
   origin_take_uuid: string | null;
+  /** Stable slot ids parallel to cast (ADR 0039); null/absent = promoted
+   * (slot id = String(index)). */
+  slot_ids?: string[] | null;
+  /** Authored from scratch (ADR 0039, gh#325): no recording; replay
+   * synthesizes traces. Absent = false. */
+  authored?: boolean;
   created_at: string | null;
+}
+
+/** An authored Routine's mutable structure (ADR 0039, gh#325). */
+export interface RoutineStructureWire {
+  cast: number[];
+  slot_ids: string[];
+  entry_offsets_beats: number[];
+  entry_positions: number[];
+  duration_beats: number;
+  /** Present = replace the edits layer in the same write. */
+  edits?: Record<string, unknown> | null;
 }
 
 export interface RoutineDetailWire extends RoutineRowWire {
