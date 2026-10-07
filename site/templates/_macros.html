@@ -1,0 +1,89 @@
+{# Shared building blocks — the pitch page and future help pages (#295) both use these. #}
+
+{% macro shot(name, caption, label='') -%}
+<figure class="shot">
+  <figcaption class="shot-bar"><span class="shot-label">{{ label }}</span>{{ caption }}</figcaption>
+  <a href="shots/{{ name }}.webp" target="_blank" rel="noopener">
+    <img src="shots/{{ name }}.webp" alt="{{ caption }}" loading="lazy">
+  </a>
+</figure>
+{%- endmacro %}
+
+{% macro clip(name, poster, caption, label='') -%}
+<figure class="shot clip">
+  <figcaption class="shot-bar" id="clip-{{ name }}-caption"><span class="shot-label">{{ label }}</span>{{ caption }}</figcaption>
+  <video controls muted playsinline loop preload="none" poster="shots/{{ poster }}.webp" width="1440" height="900" aria-describedby="clip-{{ name }}-caption">
+    <source src="media/{{ name }}.mp4" type="video/mp4">
+    <a href="media/{{ name }}.mp4">Watch the silent clip</a>
+  </video>
+  <div class="clip-note">Real app · silent recording · press play to watch <a href="media/{{ name }}.mp4">Open full-size ↗</a></div>
+</figure>
+{%- endmacro %}
+
+{% macro term_chips(terms) -%}
+<ul class="chips" aria-label="Words used here">
+  {% for t in terms %}
+  <li><a class="chip" href="#term-{{ t.slug }}" title="{{ t.def }}">{{ t.term }}</a></li>
+  {% endfor %}
+</ul>
+{%- endmacro %}
+
+{% macro visual(kind) -%}
+{% if kind == 'energy' %}
+<div class="visual" aria-label="Energy 1 to 5">
+  <span class="visual-label">ENERGY</span>
+  {% for n in range(1, 6) %}<span class="energy-sq" style="background: var(--energy-{{ n }})">{{ n }}</span>{% endfor %}
+</div>
+{% elif kind == 'decks' %}
+<div class="visual" aria-label="Decks A to D">
+  <span class="visual-label">DECKS</span>
+  {% for d in ['a', 'b', 'c', 'd'] %}<span class="deck-chip" style="--deck: var(--deck-{{ d }})">{{ d | upper }}</span>{% endfor %}
+</div>
+{% elif kind == 'cues' %}
+<div class="visual cue-ladder" aria-label="Cue-slot convention">
+  <span class="visual-label">CUE LADDER</span>
+  {% for slot, label in [(1, 'first buildup'), (2, '−16 bars'), (3, '−8 bars'), (4, 'drop')] %}
+  <span class="cue"><span class="cue-flag" style="background: var(--hc-{{ slot }})">{{ slot }}</span><span class="cue-text">{{ label }}</span></span>
+  {% endfor %}
+</div>
+{% elif kind == 'controllers' %}
+<table class="visual-table">
+  <thead><tr><th>Controller</th><th>Decks</th></tr></thead>
+  <tbody>
+    {% for name, decks in [('Pioneer DDJ-GRV6', 'abcd'), ('Pioneer DDJ-SB3', 'abcd'), ('Hercules Inpulse 300 MK2', 'ab')] %}
+    <tr><td>{{ name }}</td><td>{% for d in decks %}<span class="deck-chip deck-chip-sm" style="--deck: var(--deck-{{ d }})">{{ d | upper }}</span>{% endfor %}</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% elif kind == 'setup' %}
+<ol class="steps" aria-label="First-run sequence">
+  {% for s in ['Welcome', 'Rekordbox import', 'Tracks directory', 'Cue mode', 'SoundCloud', 'Soulseek', 'Controller check', 'Tour'] %}
+  <li class="step"><span class="step-n">{{ loop.index }}</span>{{ s }}</li>
+  {% endfor %}
+</ol>
+{% endif %}
+{%- endmacro %}
+
+{% macro chapter(f) -%}
+<section class="chapter" id="{{ f.slug }}" data-slug="{{ f.slug }}">
+  <header class="chapter-head">
+    <span class="kicker">{{ '%02d' % f.order }} · {{ f.kicker }}</span>
+    {% if f.get('status') == 'coming' %}<span class="status status-coming">FIRST RELEASE</span>{% endif %}
+    <h2>{{ f.title }}</h2>
+    {% if f.get('where') %}<span class="where">in the app: {{ f.where }}</span>{% endif %}
+  </header>
+  <div class="chapter-body{% if not f.get('shot') %} chapter-body-text{% endif %}">
+    <div class="prose">
+      {{ f.body_html }}
+      {% if f.get('visual') %}{{ visual(f.visual) }}{% endif %}
+      {{ term_chips(f.term_objs) }}
+    </div>
+    {% if f.get('shot') %}
+    <div class="shots">
+      {% if f.get('clip') %}{{ clip(f.clip, f.shot, f.caption, f.kicker) }}{% else %}{{ shot(f.shot, f.caption, f.kicker) }}{% endif %}
+      {% if f.get('shot2') %}{{ shot(f.shot2, f.caption2, f.kicker) }}{% endif %}
+    </div>
+    {% endif %}
+  </div>
+</section>
+{%- endmacro %}
