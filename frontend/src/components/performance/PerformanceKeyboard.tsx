@@ -9,9 +9,10 @@ import type { ChannelId } from '../../playback/mixer';
 import type { Track } from '../../types';
 import { sharedBrowseHandle } from '../browseHost';
 import { DeckKeys } from './DeckKeys';
+import { BeatFxKeys } from './BeatFxKeys';
 import { hasKeyboardOverlay, isQuantizeShortcut, isTypingTarget } from './performanceKeys';
 import { MixerContext } from '../../hooks/useMixer';
-import { dispatchPerformanceFxKey } from './performanceFxKeys';
+import { dispatchPerformanceFxKey, isPerformanceFxKey } from './performanceFxKeys';
 
 export function PerformanceKeyboard({ deckCount, left, right, onLoad }: {
   deckCount: 2 | 4;
@@ -49,10 +50,12 @@ export function PerformanceKeyboard({ deckCount, left, right, onLoad }: {
       if (hasKeyboardOverlay() || event.defaultPrevented || event.isComposing) return;
       const modified = event.metaKey || event.ctrlKey || event.altKey;
       const typing = isTypingTarget(event);
-      if (mixer && !typing && !libraryFocus && !modified && !event.shiftKey && /^[0-9]$/.test(key)) {
-        claim(event);
-        if (!event.repeat) dispatchPerformanceFxKey(key, mixer, deckCount);
-        return;
+      if (mixer && !typing && !libraryFocus && !modified && !event.shiftKey && /^[0-9-]$/.test(key)) {
+        // Unmapped number-row keys stay unclaimed (they may get bindings later).
+        if (event.repeat ? isPerformanceFxKey(key, deckCount) : dispatchPerformanceFxKey(key, mixer, deckCount)) {
+          claim(event);
+          return;
+        }
       }
       if (!browseActive) return;
       // Tab also works inside search, but never hijacks other text editors.
@@ -125,5 +128,6 @@ export function PerformanceKeyboard({ deckCount, left, right, onLoad }: {
   return <div className="perf-keyboard-scope" data-library-focus={libraryFocus}>
     <DeckScope deck={left}><DeckKeys enabled={!libraryFocus} /></DeckScope>
     <DeckScope deck={right}><DeckKeys enabled={!libraryFocus} /></DeckScope>
+    {mixer && <BeatFxKeys enabled={!libraryFocus} />}
   </div>;
 }

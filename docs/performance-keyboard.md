@@ -21,11 +21,11 @@
 
 | Beat FX action | Key |
 |---|---|
-| Select Echo / Reverb / Flanger | 1 / 2 / 3 |
-| Beat FX on/off | 4 |
-| Beat fraction shorter / longer | 5 / 6 |
-| LEVEL/DEPTH down / up | 7 / 8 |
-| Previous / next target | 9 / 0 |
+| Target A / B / C / D / MST | 1 / 2 / 3 / 4 / 5 |
+| Length halve / double (Flanger: bars by default) | 6 / 7 |
+| Previous / next effect type | 8 / 9 |
+| LEVEL/DEPTH (hold + mouse; double-tap = center) | 0 |
+| Beat FX on/off | - |
 
 - `=` toggles global Quantize. `?` and `F1` open the app-wide keyboard map.
 - `Tab` switches deck/library keyboard focus; `Escape` returns from library focus.

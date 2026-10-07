@@ -26,6 +26,7 @@ import {
   setSoftTakeoverEnabled,
   SOFT_TAKEOVER_SETTING_KEY,
 } from '../../midi/softTakeoverStore';
+import { DEFAULT_BEAT_FX_SETTINGS } from '../../playback/beatFxSettings';
 
 const css = readFileSync('src/components/performance/PerformanceView.css', 'utf8');
 
@@ -133,6 +134,7 @@ beforeEach(() => {
       const section = { selected: 'echo', target: 'A', on: false, depth: 0, beats: 0.5 } as const;
       return () => section;
     })(),
+    getBeatFxSettings: () => DEFAULT_BEAT_FX_SETTINGS,
     setCrossfader: vi.fn(), setCrossfaderEnabled: vi.fn(),
     setCrossfaderAssignment: vi.fn(), setCueMix: vi.fn(),
     toggleBeatFxOn: vi.fn(), setBeatFxOn: vi.fn(), selectBeatFx: vi.fn(), selectBeatFxTarget: vi.fn(),
@@ -230,16 +232,16 @@ describe('Performance library keyboard focus', () => {
 
   it('routes the number row to Beat FX only while decks own the keyboard', () => {
     browse(); render();
-    for (const key of ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0']) press(key);
-    expect(vi.mocked(mixer.selectBeatFx).mock.calls).toEqual([['echo'], ['reverb'], ['flanger']]);
+    for (const key of ['1', '2', '3', '4', '5', '6', '7', '8', '9', '-']) expect(press(key).defaultPrevented).toBe(true);
+    expect(vi.mocked(mixer.selectBeatFx).mock.calls).toEqual([['flanger'], ['reverb']]);
     expect(vi.mocked(mixer.toggleBeatFxOn)).toHaveBeenCalledOnce();
     expect(vi.mocked(mixer.stepBeatFxBeats).mock.calls).toEqual([['halve'], ['double']]);
-    expect(vi.mocked(mixer.setBeatFxDepth).mock.calls).toEqual([[-0.1], [0.1]]);
-    expect(vi.mocked(mixer.selectBeatFxTarget).mock.calls).toEqual([['master'], ['B']]);
+    expect(vi.mocked(mixer.selectBeatFxTarget).mock.calls)
+      .toEqual([['A'], ['B'], ['C'], ['D'], ['master']]);
     press('Tab');
-    const before = vi.mocked(mixer.selectBeatFx).mock.calls.length;
+    const before = vi.mocked(mixer.selectBeatFxTarget).mock.calls.length;
     press('1');
-    expect(vi.mocked(mixer.selectBeatFx)).toHaveBeenCalledTimes(before);
+    expect(vi.mocked(mixer.selectBeatFxTarget)).toHaveBeenCalledTimes(before);
   });
 
   it('reserves plain = before claiming library keys or blocking held physical keys', () => {

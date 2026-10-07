@@ -237,6 +237,8 @@
 }
 
 .perf-fx-targets {
+  gap: 0;
+  margin-left: var(--space-2);
   padding-left: var(--space-6);
   border-left: 1px solid var(--surface1);
 }
@@ -283,6 +285,9 @@
   border-color: var(--surface1);
   flex-shrink: 0;
 }
+/* CH SELECT is one joined segmented strip (#285 review). */
+.perf-fx-targets > .perf-fx-ch + .perf-fx-ch { border-left: 0; }
+.perf-fx-targets > .perf-fx-ch.on + .perf-fx-ch { border-left: 0; }
 .perf-fx-ch.deck-a { color: var(--deck-a); }
 .perf-fx-ch.deck-b { color: var(--deck-b); }
 .perf-fx-ch.deck-c { color: var(--deck-c); }
@@ -295,15 +300,59 @@
   border-color: var(--success);
 }
 
+/* BEAT ◄ ►: 1/2 · size · x2 as one segmented unit, styled like the
+   deck beatjump row (.deck-jumprow). */
+.perf-fx-size {
+  display: inline-flex;
+  align-items: stretch;
+  border: 1px solid var(--surface1);
+}
+.perf-fx-size:hover { border-color: var(--text); }
+.perf-fx-size > .player-button {
+  border: 0;
+  padding: 1px var(--space-4);
+  font-size: var(--font-micro);
+  font-weight: 800;
+  color: var(--subtext0);
+}
+.perf-fx-size > .player-button:hover:not(:disabled) { background: var(--surface0); color: var(--text); }
 .perf-fx-beats {
   box-sizing: border-box;
-  width: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   min-width: 26px;
-  max-width: 26px;
-  padding-left: 0;
-  padding-right: 0;
-  text-align: center;
+  padding: 0 var(--space-4);
+  border-left: 1px solid var(--surface2);
+  border-right: 1px solid var(--surface2);
+  color: var(--warning);
+  font-size: var(--font-micro);
+  font-weight: 800;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* Flanger length reads in bars (#331): unit tag + accent so 1 BAR never
+ * reads as 1 beat. */
+.perf-fx-beats.bars { color: var(--accent); }
+.perf-fx-unit {
+  margin-left: 2px;
+  font-size: 0.8em;
+  letter-spacing: 0;
+}
+
+/* Beat FX key hints: keycap corner like the deck controls. */
+.perf-fx-row .player-button { position: relative; }
+.perf-fx-row .player-button > .perf-kbd {
+  position: absolute;
+  bottom: -7px;
+  right: -3px;
+  z-index: 1;
+  padding: 0 2px;
+  line-height: 1;
+  letter-spacing: 0;
+  white-space: nowrap;
+  pointer-events: none;
 }
 
 .perf-deck-count { display: inline-flex; flex-shrink: 0; }

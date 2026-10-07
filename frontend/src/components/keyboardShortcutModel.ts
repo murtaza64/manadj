@@ -60,14 +60,16 @@ export function keyboardActions(scope: KeyboardHelpScope): ReadonlyMap<string, K
     add(map, 'Tab', 'Library keyboard');
     add(map, 'ArrowLeft', 'Load focused left'); add(map, 'ArrowRight', 'Load focused right');
     add(map, 'Enter', 'Load focused left');
-    add(map, '1', 'FX Echo'); add(map, '2', 'FX Reverb'); add(map, '3', 'FX Flanger');
+    for (const [key, target] of Object.entries(PERFORMANCE_FX_KEYS.targets)) {
+      add(map, key, `FX target ${target === 'master' ? 'MST' : target}`);
+    }
+    add(map, PERFORMANCE_FX_KEYS.beatHalve, 'FX length ÷2');
+    add(map, PERFORMANCE_FX_KEYS.beatDouble, 'FX length ×2');
+    add(map, PERFORMANCE_FX_KEYS.effectPrevious, 'FX type previous');
+    add(map, PERFORMANCE_FX_KEYS.effectNext, 'FX type next');
+    add(map, PERFORMANCE_FX_KEYS.depth, 'FX depth + mouse');
     add(map, PERFORMANCE_FX_KEYS.toggle, 'FX on/off');
-    add(map, PERFORMANCE_FX_KEYS.beatHalve, 'FX beat ÷2');
-    add(map, PERFORMANCE_FX_KEYS.beatDouble, 'FX beat ×2');
-    add(map, PERFORMANCE_FX_KEYS.depthDown, 'FX depth −');
-    add(map, PERFORMANCE_FX_KEYS.depthUp, 'FX depth +');
-    add(map, PERFORMANCE_FX_KEYS.targetPrevious, 'FX target previous');
-    add(map, PERFORMANCE_FX_KEYS.targetNext, 'FX target next');
+    add(map, '=', 'Quantize');
     return map;
   }
   if (scope === 'library') {

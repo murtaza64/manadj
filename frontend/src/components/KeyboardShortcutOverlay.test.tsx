@@ -36,7 +36,7 @@ it('opens app-wide with ?, renders the whole keyboard, changes scope and closes'
   expect(host.querySelectorAll('.keyboard-map-key')).toHaveLength(
     KEYBOARD_ROWS.reduce((count, row) => count + row.length, 0)
   );
-  expect(host.textContent).toContain('FX Echo');
+  expect(host.textContent).toContain('FX target A');
   const library = [...host.querySelectorAll<HTMLButtonElement>('nav button')]
     .find((button) => button.textContent === 'Library')!;
   act(() => library.click());
@@ -62,6 +62,13 @@ it('reserves app shortcuts while open but leaves Tab available', () => {
 
 it('keeps the keyboard legend and effect handler on one shared number-row map', () => {
   const actions = keyboardActions('performance');
-  expect(actions.get('1')?.map((action) => action.action)).toContain('FX Echo');
-  expect(actions.get('0')?.map((action) => action.action)).toContain('FX target next');
+  expect(actions.get('1')?.map((action) => action.action)).toContain('FX target A');
+  expect(actions.get('5')?.map((action) => action.action)).toContain('FX target MST');
+  expect(actions.get('6')?.map((action) => action.action)).toContain('FX length ÷2');
+  expect(actions.get('7')?.map((action) => action.action)).toContain('FX length ×2');
+  expect(actions.get('-')?.map((action) => action.action)).toContain('FX on/off');
+  expect(actions.get('8')?.map((action) => action.action)).toContain('FX type previous');
+  expect(actions.get('9')?.map((action) => action.action)).toContain('FX type next');
+  expect(actions.get('0')?.map((action) => action.action)).toContain('FX depth + mouse');
+  expect(actions.get('=')?.map((action) => action.action)).toContain('Quantize');
 });

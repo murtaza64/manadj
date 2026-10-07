@@ -68,19 +68,19 @@ export function KeyboardShortcutOverlay({ mode }: { mode: AppMode }) {
         onMouseDown={(event) => event.stopPropagation()}
       >
         <header>
-          <div><span>KEYBOARD MAP</span><strong>{SCOPES.find((item) => item.id === scope)!.label}</strong></div>
-          <button className="btn btn-secondary" onClick={close}>Close [Esc]</button>
+          <span className="keyboard-map-title">Keyboard</span>
+          <nav aria-label="Keyboard shortcut scope">
+            {SCOPES.map((item) => (
+              <button
+                key={item.id}
+                className={scope === item.id ? 'selected' : ''}
+                aria-pressed={scope === item.id}
+                onClick={() => setScopeOverride(item.id)}
+              >{item.label}</button>
+            ))}
+          </nav>
+          <button className="keyboard-map-close" onClick={close} aria-label="Close keyboard map">Esc</button>
         </header>
-        <nav aria-label="Keyboard shortcut scope">
-          {SCOPES.map((item) => (
-            <button
-              key={item.id}
-              className={`btn${scope === item.id ? ' btn-selected' : ''}`}
-              aria-pressed={scope === item.id}
-              onClick={() => setScopeOverride(item.id)}
-            >{item.label}</button>
-          ))}
-        </nav>
         <div className="keyboard-map-board">
           {KEYBOARD_ROWS.map((row, rowIndex) => (
             <div className="keyboard-map-row" key={rowIndex}>
