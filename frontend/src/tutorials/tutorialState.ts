@@ -35,6 +35,7 @@ export const activeTutorial = () => active;
 export const tutorialFeedback = () => feedback;
 export const lessonById = (id: TutorialId) => lessons.find(l => l.id === id)!;
 export function requestTutorial(id: TutorialId) {
+  if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
   startTutorial(id);
   window.dispatchEvent(new CustomEvent(OPEN_TUTORIAL_EVENT, { detail: lessonById(id).area }));
 }

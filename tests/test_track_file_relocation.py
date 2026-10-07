@@ -1,9 +1,16 @@
+import sys
 from pathlib import Path
+
+import pytest
 
 from backend import models, schemas
 from backend.routers.tracks import relocate_track_files
 
 
+# APFS resolves NFC and NFD spellings to the same file; ext4/NTFS don't, so
+# the second row's spelling doesn't exist there (#305 keeps Match tolerant;
+# opening files still needs the on-disk spelling).
+@pytest.mark.skipif(sys.platform != "darwin", reason="APFS normalization-insensitive lookup")
 def test_relocate_shared_unicode_file_to_unique_ascii_paths(db_session, tmp_path: Path):
     source = tmp_path / "Anaïs - Empire.m4a"
     source.write_bytes(b"audio")
