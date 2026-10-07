@@ -3,7 +3,13 @@ import { initialDecoderState, translateMidiMessage } from '../translator';
 import type { DecoderState } from '../translator';
 import type { MidiAction } from '../actions';
 import { DDJ_GRV6 } from './ddjGrv6';
-import { allOffMessages, encodeDeckLeds, ledStates } from '../feedback';
+import {
+  allOffMessages,
+  encodeBeatFxBeat,
+  encodeBeatFxLed,
+  encodeDeckLeds,
+  ledStates,
+} from '../feedback';
 
 function translate(messages: number[][]): MidiAction[] {
   let state: DecoderState = initialDecoderState();
@@ -79,6 +85,70 @@ describe('DDJ-GRV6 Mapping — official E1 message table', () => {
 
   it('matches the device port name', () => {
     expect('AlphaTheta DDJ-GRV6'.includes(DDJ_GRV6.portNameMatch)).toBe(true);
+  });
+
+  it('maps the Beat FX section on channel 5 (gh#272, E1 p.3)', () => {
+    // Every SELECT detent binds: unsupported algorithms explicitly select
+    // none so the previous effect cannot remain live.
+    const effects = [
+      null, 'echo', null, null, null, 'reverb', 'flanger',
+      null, null, null, null, null, null, null,
+    ] as const;
+    expect(translate(effects.map((_, index) => press(4, 32 + index)))).toEqual(
+      effects.map((effect) => ({
+        kind: 'button',
+        target: { control: 'beat-fx-select', effect },
+        edge: 'down',
+      }))
+    );
+    // ON/OFF (71), BEAT ◄ (74), BEAT ► (75); SHIFT layer (67/102/107) unbound.
+    expect(translate([press(4, 71), press(4, 74), press(4, 75), press(4, 67), press(4, 102)]))
+      .toEqual([
+        { kind: 'button', target: { control: 'beat-fx-on-off' }, edge: 'down' },
+        { kind: 'button', target: { control: 'beat-fx-beats', change: 'halve' }, edge: 'down' },
+        { kind: 'button', target: { control: 'beat-fx-beats', change: 'double' }, edge: 'down' },
+      ]);
+    // LEVEL/DEPTH is a 14-bit CC pair (2/34).
+    expect(translate([cc(4, 2, 96), cc(4, 34, 0)])).toEqual([
+      { kind: 'absolute', target: { control: 'beat-fx-level' }, value: (96 << 7) / 16383 },
+    ]);
+    // CH SELECT 1/2/3/4/SP/MST (hardware radio); shifted layer stays unbound.
+    expect(translate([
+      press(4, 16), press(4, 17), press(4, 18), press(4, 19), press(4, 22), press(4, 20),
+      press(4, 24), press(4, 28),
+    ])).toEqual([
+      { kind: 'button', target: { control: 'beat-fx-target', target: 'A' }, edge: 'down' },
+      { kind: 'button', target: { control: 'beat-fx-target', target: 'B' }, edge: 'down' },
+      { kind: 'button', target: { control: 'beat-fx-target', target: 'C' }, edge: 'down' },
+      { kind: 'button', target: { control: 'beat-fx-target', target: 'D' }, edge: 'down' },
+      { kind: 'button', target: { control: 'beat-fx-target', target: 'sampler' }, edge: 'down' },
+      { kind: 'button', target: { control: 'beat-fx-target', target: 'master' }, edge: 'down' },
+    ]);
+  });
+
+  it('treats SELECT detents as radio positions even without note-off edges', () => {
+    expect(translate([press(4, 33), press(4, 32), press(4, 33)])).toEqual([
+      { kind: 'button', target: { control: 'beat-fx-select', effect: 'echo' }, edge: 'down' },
+      { kind: 'button', target: { control: 'beat-fx-select', effect: null }, edge: 'down' },
+      { kind: 'button', target: { control: 'beat-fx-select', effect: 'echo' }, edge: 'down' },
+    ]);
+  });
+
+  it('drives the Beat FX ON/OFF lamp and clears it in all-off (gh#272)', () => {
+    expect(encodeBeatFxLed(DDJ_GRV6.feedback!, true)).toEqual([[0x94, 71, 0x7f]]);
+    expect(encodeBeatFxLed(DDJ_GRV6.feedback!, false)).toEqual([[0x94, 71, 0]]);
+    expect(allOffMessages(DDJ_GRV6.feedback!)).toContainEqual([0x94, 71, 0]);
+  });
+
+  it.each([
+    [0.25, 0x03], [0.5, 0x04], [0.75, 0x21], [1, 0x05],
+    [2, 0x06], [4, 0x07], [8, 0x08],
+  ])('drives the Beat FX time-unit indicator for %s beats', (beats, value) => {
+    expect(encodeBeatFxBeat(DDJ_GRV6.feedback!, beats)).toEqual([[0xb4, 100, value]]);
+  });
+
+  it('clears the Beat FX time-unit indicator in all-off', () => {
+    expect(allOffMessages(DDJ_GRV6.feedback!)).toContainEqual([0xb4, 100, 0]);
   });
 
   it('maps transport and logical Deck selection across A–D', () => {
@@ -287,13 +357,12 @@ describe('DDJ-GRV6 Mapping — official E1 message table', () => {
     ]);
   });
 
-  it('leaves Groove Circuit GAIN, CAPTURE, DRUM ROLL, DRUM RELEASE, effects, Pad FX, Sampler, Key Shift, and Keyboard unmapped', () => {
+  it('leaves Groove Circuit GAIN, CAPTURE, DRUM ROLL, DRUM RELEASE, Pad FX, Sampler, Key Shift, and Keyboard unmapped', () => {
     expect(
       translate([
         cc(0, 18, 64),
         press(0, 36),
         press(0, 4),
-        press(4, 16),
         press(8, 16),
         press(7, 48),
         press(14, 112),

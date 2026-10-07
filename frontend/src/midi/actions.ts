@@ -1,4 +1,5 @@
 import type { ChannelId, StemName } from '../playback/mixer';
+import type { BeatFxEffectId, BeatFxTarget } from '../playback/beatFx';
 import type { JogProfile } from './jogCalibration';
 
 /**
@@ -102,7 +103,14 @@ export type ButtonTarget =
   | { control: 'view-toggle' }
   /** SHIFT+DISCOVER: Follow's "known only" narrowing — module-store
    * direct, like Quantize. */
-  | { control: 'follow-known-only' };
+  | { control: 'follow-known-only' }
+  /** Beat FX (gh#272). The hardware section is ONE strip over a radio
+   * A–D/SP/MST target: SELECT swaps the live effect, ON/OFF gates the section,
+   * and BEAT ◄ ► walks the global echo ladder. */
+  | { control: 'beat-fx-select'; effect: BeatFxEffectId | null }
+  | { control: 'beat-fx-target'; target: BeatFxTarget }
+  | { control: 'beat-fx-on-off' }
+  | { control: 'beat-fx-beats'; change: 'halve' | 'double' };
 
 export type AbsoluteTarget =
   | { control: 'pitch'; deck: ChannelId }
@@ -115,7 +123,9 @@ export type AbsoluteTarget =
   /** Cue bus volume — the hardware headphone-level knob (headphone-cue 03). */
   | { control: 'cue-level' }
   /** Cue/mix blend. No control on this device; bindable for others. */
-  | { control: 'cue-mix' };
+  | { control: 'cue-mix' }
+  /** The section's single LEVEL/DEPTH balance knob (gh#272). */
+  | { control: 'beat-fx-level' };
 
 export type RelativeTarget =
   | { control: 'jog'; deck: ChannelId }

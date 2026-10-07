@@ -59,6 +59,7 @@ export const PERSISTED_SETTING_KEYS: readonly string[] = [
   'manadj-crossfader-assignments',
   'manadj-crossfader-enabled',
   'manadj-filter-settings',
+  'manadj-beat-fx-settings',
   // Hardware calibration
   'manadj.grv6JogCalibration',
 ];

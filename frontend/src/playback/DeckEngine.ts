@@ -1094,6 +1094,26 @@ export class DeckEngine {
     return this.snapshot;
   }
 
+  /**
+   * Wall-clock seconds per musical beat at the playhead (Beat FX echo,
+   * gh#272): the LOCAL beat interval projected through the Beatgrid
+   * (quantize.ts math — piecewise grids stay honest), scaled by the
+   * composed play rate so varispeed shortens the echo; gridless Tracks
+   * fall back to the bpm scalar. Null = no tempo knowledge (unloaded or
+   * BPM-less) — the Mixer then keeps its last known clock.
+   */
+  echoBeatSeconds(): number | null {
+    const rate = this.currentRate() || 1;
+    if (this.beatTimes && this.beatTimes.length >= 2) {
+      const playhead = this.getPlayhead();
+      const interval = addBeats(playhead, 1, this.beatTimes) - playhead;
+      if (interval > 0) return interval / rate;
+    }
+    const bpm = this.trackInfo?.bpm ?? null;
+    if (bpm === null || bpm <= 0) return null;
+    return 60 / bpm / rate;
+  }
+
   subscribe(listener: () => void): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);

@@ -175,6 +175,17 @@ def _soundcloud_token(data: dict[str, Any]) -> str | None:
     return os.environ.get("SOUNDCLOUD_OAUTH_TOKEN") or section.get("oauth_token") or None
 
 
+def _tracks_directory_override() -> str | None:
+    """MANADJ_TRACKS_DIRECTORY env override for the library tracks directory.
+
+    Lane isolation hook: config.toml is committed with Murtaza's real tracks
+    directory, so empty-DB lane apps (scripts/agent/lane_app.py --empty-db)
+    point the backend at a lane-local directory via this variable instead of
+    the real library.
+    """
+    return os.environ.get("MANADJ_TRACKS_DIRECTORY") or None
+
+
 def _database_config(data: dict[str, Any]) -> DatabaseConfig:
     """[database] paths; Rekordbox auto-detects when the file doesn't pin it.
 
@@ -216,7 +227,7 @@ def load_config() -> Config:
             data = tomllib.load(f)
 
     lib_config = data.get("library", {})
-    tracks_dir = lib_config.get("tracks_directory") or None
+    tracks_dir = _tracks_directory_override() or lib_config.get("tracks_directory") or None
 
     return Config(
         database=_database_config(data),
