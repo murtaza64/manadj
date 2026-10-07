@@ -401,7 +401,7 @@ it('groups sections, hides empty groups and maps old section deep links to their
   await act(async () => root!.render(<SettingsPage />));
   await act(async () => { await vi.dynamicImportSettled(); });
   const nav = [...host.querySelectorAll('.settings-nav button strong')].map((n) => n.textContent);
-  expect(nav).toEqual(['Library', 'Performance', 'Display', 'Controllers', 'Keyboard + mouse', 'Help']);
+  expect(nav).toEqual(['Library', 'Performance', 'Display', 'Controllers', 'Keyboard + mouse', 'Accounts', 'Help']);
   expect(host.querySelector('.settings-content')?.getAttribute('aria-label')).toBe('Controllers');
   expect(host.querySelector('#settings-section-jog')).not.toBeNull();
   // Jog calibration is GRV6-only; the other known controllers say so.

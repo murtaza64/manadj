@@ -56,6 +56,7 @@ export const PERSISTED_SETTING_KEYS: readonly string[] = [
   'manadj-audio-routing',
   'manadj-keylock',
   'manadj-quantize',
+  'manadj-cue-mode',
   'manadj-crossfader-assignments',
   'manadj-crossfader-enabled',
   'manadj-filter-settings',

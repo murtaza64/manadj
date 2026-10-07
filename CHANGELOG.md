@@ -5,6 +5,10 @@ versions follow [Semantic Versioning](https://semver.org/). Install: [docs/insta
 
 ## [Unreleased]
 
+### Added
+- Cue mode: Trigger makes a Hot Cue on a paused Deck jump and start playing (Gated hold-to-preview stays the default). Toggle with GATED in the Performance view mixer strip; also a Setup guide.
+- Soulseek: manaDJ bundles and runs slskd itself — enter a Soulseek username/password in Settings → Accounts → Soulseek (also a Setup guide). An existing slskd configured via `slskd_url` + `SLSKD_API_KEY` still takes precedence.
+
 ## [0.1.0] - 2026-10-07
 
 First public release: a DJ library manager and performance app for Apple Silicon Macs.

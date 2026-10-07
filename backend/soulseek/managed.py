@@ -11,7 +11,10 @@ Binary contract (packaging #280): an unpacked, unmodified slskd release
 directory (`slskd` executable + `wwwroot/`), located by
 1. `MANADJ_SLSKD_BIN` (absolute path to the executable) — the packaged app
    sets this to `<App>/Contents/Resources/slskd/slskd`;
-2. `<repo>/vendor/slskd/slskd` — dev, via scripts/slskd/fetch_slskd.py.
+2. `<backend root>/../slskd/slskd` — the DMG layout (#280): the backend
+   tree is `Resources/backend/`, slskd goes in the reserved
+   `Resources/slskd/`, so no shell env var is needed;
+3. `<repo>/vendor/slskd/slskd` — dev, via scripts/slskd/fetch_slskd.py.
 
 Storage: credentials + generated values live behind `ManagedSoulseekStore`;
 `DotenvManagedSoulseekStore` keeps them in the data root's .env (the
@@ -51,6 +54,7 @@ def resolve_binary() -> Path | None:
     """The slskd executable per the binary contract, or None when not shipped."""
     env = os.environ.get(SLSKD_BIN_ENV)
     candidates = [Path(env)] if env else []
+    candidates.append(REPO_ROOT.parent / "slskd" / "slskd")
     candidates.append(REPO_ROOT / "vendor" / "slskd" / "slskd")
     for candidate in candidates:
         if candidate.is_file() and os.access(candidate, os.X_OK):
