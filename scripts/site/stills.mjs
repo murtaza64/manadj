@@ -124,6 +124,19 @@ try {
     page.setDefaultTimeout(30_000);
     const errors = [];
     page.on('pageerror', (error) => errors.push(error.message));
+    const pendingData = new Set();
+    let lastDataActivity = Date.now();
+    page.on('request', (request) => {
+      if (request.method() === 'GET' && /^\/api\/(tracks|waveforms|beatgrids|metric-ladders|hotcues|sessions|sets|routines|transitions|takes)(\/|$)/.test(new URL(request.url()).pathname)) {
+        pendingData.add(request);
+        lastDataActivity = Date.now();
+      }
+    });
+    const dataFinished = (request) => {
+      if (pendingData.delete(request)) lastDataActivity = Date.now();
+    };
+    page.on('requestfinished', dataFinished);
+    page.on('requestfailed', dataFinished);
     // Refuse accidental redirects or a frontend configured against another local backend.
     await context.route('**/*', async (route) => {
       const url = new URL(route.request().url());
@@ -135,16 +148,51 @@ try {
       } else await route.continue();
     });
     const wait = (ms) => page.waitForTimeout(ms);
-    async function go(view, extra = '') {
-      await page.goto(`${base}/?view=${view}${extra}`, { waitUntil: 'networkidle' });
-      await wait(2500);
-      for (let i = 0; i < 4; i++) {
-        const skip = page.getByRole('button', { name: /^(Skip all|Skip tour|Skip)$/ }).first();
-        if (!await skip.isVisible()) break;
-        await skip.click();
-        await wait(300);
+    async function dismissGuides() {
+      for (let i = 0; i < 8; i++) {
+        const tour = page.locator('.tour-overlay:visible');
+        const skip = tour.getByRole('button', { name: 'Skip all tours', exact: true });
+        const close = tour.getByRole('button', { name: 'Close', exact: true });
+        const tutorial = page.getByRole('button', { name: 'Skip tutorial', exact: true });
+        if (await skip.isVisible()) await skip.click();
+        else if (await close.isVisible()) await close.click();
+        else if (await tutorial.isVisible()) await tutorial.click();
+        else break;
+        await wait(500);
       }
-      await page.keyboard.press('Escape');
+      if (await page.locator('.tour-overlay:visible').count()) throw Error('Tour still visible');
+    }
+    async function dataReady() {
+      const deadline = Date.now() + 180_000;
+      while (pendingData.size || Date.now() - lastDataActivity < 1500) {
+        if (Date.now() > deadline) throw Error(`Data still pending: ${[...pendingData].map((r) => new URL(r.url()).pathname).join(', ')}`);
+        await wait(250);
+      }
+      await dismissGuides();
+    }
+    async function paintedCanvases(selector, minimum) {
+      // Read real 2D pixels, not just mounted canvas elements. No pixel changes.
+      await page.waitForFunction(({ selector, minimum }) => {
+        let painted = 0;
+        for (const canvas of document.querySelectorAll(selector)) {
+          const rect = canvas.getBoundingClientRect();
+          if (!canvas.checkVisibility() || rect.width < 20 || rect.height < 10 || rect.right <= 0 || rect.left >= innerWidth || rect.bottom <= 0 || rect.top >= innerHeight) continue;
+          const ctx = canvas.getContext('2d');
+          if (!ctx || !canvas.width || !canvas.height) continue;
+          const { data } = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          let colored = 0;
+          for (let i = 0; i < data.length; i += 64) {
+            if (data[i + 3] > 80 && Math.max(data[i], data[i + 1], data[i + 2]) - Math.min(data[i], data[i + 1], data[i + 2]) > 50) colored++;
+          }
+          if (colored > 30) painted++;
+        }
+        return painted >= minimum;
+      }, { selector, minimum }, { timeout: 180_000, polling: 1000 });
+    }
+    async function go(view, extra = '') {
+      await page.goto(`${base}/?view=${view}${extra}`, { waitUntil: 'domcontentloaded' });
+      await wait(2500);
+      await dismissGuides();
     }
     async function search(query) {
       const box = page.locator('input[placeholder^="search"]:visible').first();
@@ -166,6 +214,8 @@ try {
       await followOff();
       await search(track.title);
       const row = page.locator('.track-row:visible').filter({ has: page.getByText(track.title, { exact: true }) });
+      // Initial library hydration can outlast the search debounce.
+      await row.waitFor({ state: 'visible', timeout: 60_000 });
       if (await row.count() !== 1) throw Error(`Expected one visible track titled ${title}`);
       await row.hover();
       const button = row.getByTitle(`Load to Deck ${deck}`, { exact: true });
@@ -175,13 +225,57 @@ try {
         await page.getByText(`Load to Deck ${deck}`, { exact: true }).click();
       }
       await wait(2000);
+      await dismissGuides();
+      const panel = page.locator(`.perf-deckpanel.deck-${deck.toLowerCase()}:visible`);
+      if (await panel.count()) {
+        await dataReady();
+        // Minimap is WebGL; its loading/error branches do not mount this canvas.
+        await panel.locator('.minimap-canvas').waitFor({ timeout: 180_000 });
+        await panel.locator('.minimap-loading').waitFor({ state: 'hidden', timeout: 180_000 });
+      }
     }
     async function shot(name) {
+      await dataReady();
       const [x, y, width, height] = crops[name];
-      const clip = { x, y, width, height };
+      let clip = { x, y, width, height };
+      // Include the current topbar and complete panels/rows, not a stale fixed cut.
+      if (name === 'perform' || name === 'sync') {
+        const content = page.locator(name === 'perform' ? '.perf-decks' : '.uts-group').first();
+        const bounds = await content.boundingBox();
+        if (!bounds) throw Error(`No visible ${name} content to crop`);
+        const bottom = Math.ceil(bounds.y + bounds.height);
+        if (bottom > page.viewportSize().height) throw Error(`${name} content exceeds viewport`);
+        clip = { x: 0, y: 0, width: page.viewportSize().width, height: bottom };
+      }
+      if (['follow', 'set', 'session', 'editor', 'routine'].includes(name)) {
+        clip = await page.evaluate((name) => {
+          const rect = (selector) => {
+            const el = document.querySelector(selector);
+            if (!el) throw Error(`Missing crop anchor ${selector}`);
+            return el.getBoundingClientRect();
+          };
+          let top, bottom, left, right;
+          if (name === 'session') {
+            const pane = rect('.session-timeline'), stage = rect('.stl-stage');
+            top = pane.top; bottom = stage.bottom; left = pane.left; right = pane.right;
+          } else if (name === 'editor' || name === 'routine') {
+            const header = rect('.re-header'), main = rect('.re-main');
+            top = header.top; bottom = main.bottom; left = main.left; right = main.right;
+          } else {
+            const anchor = rect(name === 'set' ? '.set-header' : '.perf-decks');
+            const rows = [...document.querySelectorAll(name === 'set' ? '.set-track-row' : '.track-row')]
+              .map((el) => el.getBoundingClientRect()).filter((r) => r.height > 0 && r.top >= anchor.bottom && r.bottom <= innerHeight);
+            if (rows.length < 3) throw Error(`Not enough complete ${name} rows`);
+            top = anchor.top; bottom = Math.max(...rows.map((r) => r.bottom)); left = anchor.left; right = anchor.right;
+          }
+          return { x: Math.floor(left), y: Math.floor(top), width: Math.floor(right) - Math.floor(left), height: Math.floor(bottom) - Math.floor(top) };
+        }, name);
+      }
       await page.mouse.move(1599, 999);
       await page.evaluate(() => document.fonts.ready);
       await wait(500);
+      await dismissGuides();
+      if (await page.locator('.tour-overlay:visible').count()) throw Error('Refusing capture with visible Tour');
       if (errors.length) throw Error(errors.join('\n'));
       // Audit only text actually intersecting the crop, including scroll clipping.
       // This reads the DOM; it never removes/relabels content or masks pixels.
@@ -189,7 +283,7 @@ try {
         const found = new Set();
         const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
         for (let node; (node = walker.nextNode());) {
-          if (!/like a bitch|fcukers|hello world|^test$/i.test(node.textContent.trim())) continue;
+          if (!/like a bitch|fcukers|hello world|^test$|\bLoading(?:…|\.{3}|\b)|^Track #?\d+$|^#\d{3,}$/i.test(node.textContent.trim())) continue;
           const parent = node.parentElement;
           if (!parent?.checkVisibility({ checkVisibilityCSS: true, checkOpacity: true })) continue;
           const range = document.createRange();
@@ -214,7 +308,7 @@ try {
         if (result.error || result.status !== 0) throw result.error || Error(`Pillow conversion failed: ${result.status}`);
       }
       completed.push(name);
-      console.log(`${check ? 'Checked' : 'Captured'} ${name}: ${width * 2}×${height * 2}, crop ${JSON.stringify(clip)}`);
+      console.log(`${check ? 'Checked' : 'Captured'} ${name}: ${clip.width * 2}×${clip.height * 2}, crop ${JSON.stringify(clip)}`);
     }
     async function sessionsList() {
       await go('library');
@@ -243,24 +337,36 @@ try {
         await go('performance');
         await page.getByRole('button', { name: '4 DECKS', exact: true }).click();
         for (const [title, deck] of [['Last Time', 'A'], ['Body Work VIP', 'B'], [weeble, 'C'], ['Calling For A Sign', 'D']]) await load(title, deck);
+        await page.waitForFunction(() => {
+          const waves = [...document.querySelectorAll('.perf-wave-row')];
+          return waves.length === 4 && waves.every((row) => row.querySelector('canvas') && !row.textContent.includes('No track loaded'));
+        });
         await search('');
         await wait(4000);
         await shot(scene);
       } else if (scene === 'library') {
         await go('library');
         await load('Last Time', 'A');
+        await followOff();
         await search('Circadian');
         await page.locator('.track-row:visible').filter({ has: page.getByText(weeble, { exact: true }) }).click();
         await wait(2500);
         await shot(scene);
       } else if (scene === 'follow') {
         await go('performance');
+        await page.getByRole('button', { name: '2 DECKS', exact: true }).click();
         await load('Last Time', 'A');
         await load(weeble, 'B');
         await search('');
+        await followOff();
         await page.locator('button[title^="Follow Deck A"]:visible').first().click();
         await page.locator('.filter-bar-follow-btn[aria-pressed="true"]:visible').first().waitFor();
-        await wait(3000);
+        await page.getByTitle('Follow parameters', { exact: true }).click();
+        await page.getByRole('checkbox', { name: /Known only/ }).uncheck();
+        await page.locator('.follow-modal-content').getByRole('button', { name: 'Close', exact: true }).click();
+        await page.getByRole('slider', { name: 'Compatible temperature', exact: true }).waitFor({ timeout: 180_000 });
+        await dataReady();
+        await page.waitForFunction(() => document.querySelectorAll('.track-row').length >= 8, null, { timeout: 180_000 });
         await shot(scene);
       } else if (scene === 'routine' || scene === 'editor') {
         const artifact = scene === 'routine' ? await routine() : await transition();
@@ -272,8 +378,10 @@ try {
             ? { kind: 'routine', uuid: artifact.uuid }
             : { kind: 'transition', uuid: artifact.uuid, aTrackId: artifact.a_track_id, bTrackId: artifact.b_track_id } });
         }, { artifact, scene });
-        await page.locator('.re-transport:visible').waitFor();
-        await wait(6000);
+        await dismissGuides();
+        await page.locator('.rt-slotpanel').nth(1).waitFor({ timeout: 180_000 });
+        await dataReady();
+        await paintedCanvases('.rt-wave-row > canvas', 2);
         await shot(scene);
       } else if (scene === 'set') {
         const name = process.env.SITE_SET || 'relentless groove';
@@ -281,11 +389,19 @@ try {
         await go('library');
         await page.getByText(set.name, { exact: true }).first().click();
         await page.locator('.set-header-transport:visible').waitFor();
-        await wait(5000);
+        await dismissGuides();
+        const showTimeline = page.getByTitle('Show the set timeline', { exact: true });
+        if (await showTimeline.isVisible()) await showTimeline.click();
+        await page.waitForFunction(() => {
+          const rows = [...document.querySelectorAll('.set-track-row')];
+          return rows.length > 2 && rows.every((row) => !/\bTrack #?\d+\b/.test(row.textContent));
+        }, null, { timeout: 180_000 });
+        await dataReady();
+        await paintedCanvases('.set-header + div canvas', 2);
         await shot(scene);
       } else if (scene === 'session' || scene === 'sessions-list') {
         await sessionsList();
-        await shot('sessions-list');
+        if (scene === 'sessions-list') await shot(scene);
         if (scene === 'session') {
           const startedAt = process.env.SITE_SESSION_STARTED_AT || '2026-10-06T19:10:26';
           const session = one((await get('sessions')).filter((row) => row.started_at === startedAt), `Session started ${startedAt}`);
@@ -293,17 +409,29 @@ try {
             const { requestSessionMoment } = await import('/src/sessions/openSession.ts');
             requestSessionMoment({ sessionUuid: uuid, atS: null });
           }, session.uuid);
-          await wait(8000);
-          await page.waitForFunction(() => !/#\d{3,}/.test(document.body.innerText), null, { timeout: 30_000 });
+          await dismissGuides();
+          await page.locator('.stl-track-label').first().waitFor({ timeout: 180_000 });
+          await page.locator('.stl-loading').waitFor({ state: 'hidden', timeout: 180_000 });
+          await dataReady();
+          await page.waitForFunction(() => {
+            const timeline = document.querySelector('.session-timeline');
+            const labels = [...(timeline?.querySelectorAll('.stl-track-label') ?? [])];
+            // SVG tooltips contain issue references such as (#140), not placeholders.
+            return timeline && !timeline.querySelector('.stl-loading, .stl-error') && labels.length > 1
+              && labels.every((label) => label.textContent.trim() && !/^(?:Track\s+)?#?\d+$/.test(label.textContent.trim()))
+              && timeline.querySelectorAll('.stl-load-bar').length > 1;
+          }, null, { timeout: 180_000 });
+          await paintedCanvases('.stl-canvas', 1);
           await shot(scene);
         }
       } else if (scene === 'sync' || scene === 'acquisition') {
         await go('sync');
         if (scene === 'sync') {
-          await page.getByText('Computing sync status…', { exact: true }).waitFor({ state: 'hidden', timeout: 60_000 });
+          // Require real results: a vanished spinner can also mean an error.
+          await page.locator('.uts-root').waitFor({ timeout: 120_000 });
+          await page.locator('.uts-group .uts-card').first().waitFor();
           await shot('sync');
-        }
-        await acquisition();
+        } else await acquisition();
       } else if (scene === 'history') {
         await go('history');
         await shot(scene);

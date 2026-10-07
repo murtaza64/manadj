@@ -20,14 +20,6 @@
 </figure>
 {%- endmacro %}
 
-{% macro term_chips(terms) -%}
-<ul class="chips" aria-label="Words used here">
-  {% for t in terms %}
-  <li><a class="chip" href="#term-{{ t.slug }}" title="{{ t.def }}">{{ t.term }}</a></li>
-  {% endfor %}
-</ul>
-{%- endmacro %}
-
 {% macro visual(kind) -%}
 {% if kind == 'energy' %}
 <div class="visual" aria-label="Energy 1 to 5">
@@ -76,7 +68,6 @@
     <div class="prose">
       {{ f.body_html }}
       {% if f.get('visual') %}{{ visual(f.visual) }}{% endif %}
-      {{ term_chips(f.term_objs) }}
     </div>
     {% if f.get('shot') %}
     <div class="shots">

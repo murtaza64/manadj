@@ -18,6 +18,7 @@ class Page(HTMLParser):
         super().__init__()
         self.links = []
         self.ids = []
+        self.chapters = []
         self.text = []
         self.feed(html)
 
@@ -27,6 +28,8 @@ class Page(HTMLParser):
             self.links.append(attrs.get("href"))
         if "id" in attrs:
             self.ids.append(attrs["id"])
+        if "data-slug" in attrs:
+            self.chapters.append(attrs["data-slug"])
 
     def handle_data(self, data):
         self.text.append(data)
@@ -102,6 +105,18 @@ class InstallBuildTests(unittest.TestCase):
 
     def test_domain(self):
         self.assertEqual((SITE / "CNAME").read_text(), "manadj.murt.dev\n")
+
+    def test_workflow_and_retired_glossary(self):
+        html = self.pages["index.html"]
+        page = Page(html)
+        self.assertEqual(page.chapters, ["acquire", "curate", "perform", "follow", "capture", "editor", "sets", "sync"])
+        self.assertIn("07 · ARRANGE", html)
+        for alias in ["analysis", "controllers", "start"]:
+            self.assertIn(alias, page.ids)
+        self.assertNotIn("words", page.ids)
+        self.assertFalse(any(id.startswith("term-") for id in page.ids))
+        self.assertNotIn('class="chips"', html)
+        self.assertFalse(any(link.startswith(("#term-", "#words")) for link in page.links))
 
     def test_both_pages_offer_pinned_installers_and_distinct_release_links(self):
         releases = "https://github.com/murtaza64/manadj/releases"

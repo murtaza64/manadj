@@ -1,6 +1,6 @@
 ---
 slug: capture
-order: 2
+order: 5
 kicker: CAPTURE
 where: Sessions · HISTORY
 title: Sessions and Takes

@@ -1,7 +1,7 @@
 ---
 slug: sets
-order: 4
-kicker: SETS
+order: 7
+kicker: ARRANGE
 where: library sidebar · Sets
 title: Sets
 clip: set

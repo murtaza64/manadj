@@ -228,7 +228,7 @@ kbd {
 .loop-steps {
   list-style: none;
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: var(--space-24);
   margin-top: var(--space-12);
 }
@@ -243,7 +243,7 @@ kbd {
   font-weight: 700;
 }
 .loop-steps li:last-child::after {
-  content: '↺ back to PLAY';
+  content: '↺ back to ACQUIRE';
   position: absolute;
   right: 0;
   bottom: calc(-1 * var(--space-24));
@@ -291,20 +291,6 @@ kbd {
 .chapter-body-text { grid-template-columns: minmax(0, 720px); }
 .chapter:nth-of-type(odd) .chapter-body:not(.chapter-body-text) { grid-template-columns: 8fr minmax(280px, 4fr); }
 .chapter:nth-of-type(odd) .chapter-body:not(.chapter-body-text) .prose { order: 2; }
-
-/* ── Term chips: the app's tag-chip look ──────────────────────────────── */
-
-.chips { list-style: none; display: flex; flex-wrap: wrap; gap: var(--space-4); margin-top: var(--space-16); }
-.chips li::before { content: none; }
-.chips li { padding: 0; margin: 0; }
-.chip {
-  display: inline-block;
-  padding: 0 var(--space-8);
-  font-size: var(--font-body);
-  color: var(--subtext1);
-  border: 1px solid var(--surface1);
-}
-.chip:hover { border-color: var(--accent); color: var(--accent); text-decoration: none; }
 
 /* ── Domain visuals (DESIGN.md element specs) ─────────────────────────── */
 
@@ -389,18 +375,6 @@ kbd {
 }
 .prose .step::before { content: none; }
 .step-n { color: var(--accent); font-weight: 700; }
-
-/* ── Glossary ─────────────────────────────────────────────────────────── */
-
-.glossary {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: var(--space-8);
-}
-.term { padding: var(--space-8) var(--space-12); border: 1px solid var(--surface0); background: var(--base); }
-.term:target { border-color: var(--accent); }
-.term dt { font-weight: 700; color: var(--text); }
-.term dd { color: var(--subtext0); font-size: var(--font-body); }
 
 /* ── Footer ───────────────────────────────────────────────────────────── */
 

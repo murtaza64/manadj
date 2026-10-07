@@ -19,7 +19,6 @@
     <div class="segments">
       <a class="segment" href="install.html">INSTALL</a>
       {% for f in features %}<a class="segment" href="#{{ f.slug }}" data-target="{{ f.slug }}">{{ f.kicker }}</a>{% endfor %}
-      <a class="segment" href="#words" data-target="words">WORDS</a>
     </div>
   </nav>
 
@@ -32,7 +31,7 @@
         <div class="prose">{{ home.body_html }}</div>
         <div class="actions">
           <a class="btn btn-primary" href="#download">Download / Get started ↓</a>
-          <a class="btn" href="install.html">Install &amp; Setup</a>
+          <a class="btn" id="start" href="install.html">Install &amp; Setup</a>
           <a class="btn" href="#{{ features[0].slug }}">Take the tour ↓</a>
           <a class="btn" href="{{ home.github }}">Source on GitHub</a>
         </div>
@@ -53,18 +52,6 @@
 
     {% for f in features %}{{ chapter(f) }}{% endfor %}
 
-    <section class="chapter" id="words">
-      <header class="chapter-head">
-        <span class="kicker">WORDS</span>
-        <h2>The words manadj uses</h2>
-        <span class="where">the same names appear in the app</span>
-      </header>
-      <dl class="glossary">
-        {% for t in glossary %}
-        <div class="term" id="term-{{ t.slug }}"><dt>{{ t.term }}</dt><dd>{{ t.def }}</dd></div>
-        {% endfor %}
-      </dl>
-    </section>
   </main>
 
   <footer class="footer">

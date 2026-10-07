@@ -1,6 +1,6 @@
 ---
 slug: acquire
-order: 9
+order: 1
 kicker: ACQUIRE
 where: SYNC › Acquisition
 title: Acquisition

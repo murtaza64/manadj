@@ -113,26 +113,19 @@ def load_content() -> dict:
     install["body_html"] = guide.convert(install_body)
     install["toc_html"] = guide.toc
 
-    glossary = yaml.safe_load((content / "glossary.yml").read_text(encoding="utf-8"))
-    terms = {t["slug"]: t for t in glossary}
-
     features = []
     for path in sorted((content / "features").glob("*.md")):
         meta, body = _frontmatter(path)
         for key in ("slug", "kicker", "title", "order"):
             if key not in meta:
                 raise SystemExit(f"{path}: frontmatter needs {key!r}")
-        unknown = [t for t in meta.get("terms", []) if t not in terms]
-        if unknown:
-            raise SystemExit(f"{path}: unknown glossary terms {unknown}")
         meta["body_html"] = _md(body)
-        meta["term_objs"] = [terms[t] for t in meta.get("terms", [])]
         features.append(meta)
     features.sort(key=lambda f: f["order"])
     slugs = [f["slug"] for f in features]
     if len(set(slugs)) != len(slugs):
         raise SystemExit(f"duplicate feature slugs: {slugs}")
-    return {"home": home, "install": install, "features": features, "glossary": sorted(glossary, key=lambda t: t["term"].lower())}
+    return {"home": home, "install": install, "features": features}
 
 
 def validate_pages(pages: dict[str, str], root: Path = SITE) -> None:

@@ -17,8 +17,7 @@
     <a class="topbar-brand" href="#top"><img src="assets/logo.png" alt="" width="24" height="24">manadj</a>
     <div class="segments">
       <a class="segment" href="install.html">INSTALL</a>
-<a class="segment" href="#perform" data-target="perform">PERFORM</a><a class="segment" href="#capture" data-target="capture">CAPTURE</a><a class="segment" href="#editor" data-target="editor">EDIT</a><a class="segment" href="#sets" data-target="sets">SETS</a><a class="segment" href="#follow" data-target="follow">FOLLOW</a><a class="segment" href="#curate" data-target="curate">CURATE</a><a class="segment" href="#analysis" data-target="analysis">ANALYSIS</a><a class="segment" href="#sync" data-target="sync">SYNC</a><a class="segment" href="#acquire" data-target="acquire">ACQUIRE</a><a class="segment" href="#controllers" data-target="controllers">CONTROL</a><a class="segment" href="#start" data-target="start">START</a>      <a class="segment" href="#words" data-target="words">WORDS</a>
-    </div>
+<a class="segment" href="#acquire" data-target="acquire">ACQUIRE</a><a class="segment" href="#curate" data-target="curate">CURATE</a><a class="segment" href="#perform" data-target="perform">PERFORM</a><a class="segment" href="#follow" data-target="follow">FOLLOW</a><a class="segment" href="#capture" data-target="capture">CAPTURE</a><a class="segment" href="#editor" data-target="editor">EDIT</a><a class="segment" href="#sets" data-target="sets">ARRANGE</a><a class="segment" href="#sync" data-target="sync">SYNC</a>    </div>
   </nav>
 
   <main id="top">
@@ -30,8 +29,8 @@
         <div class="prose"><p>Four Decks, a Library, a Mix editor, and Sets.</p></div>
         <div class="actions">
           <a class="btn btn-primary" href="#download">Download / Get started ↓</a>
-          <a class="btn" href="install.html">Install &amp; Setup</a>
-          <a class="btn" href="#perform">Take the tour ↓</a>
+          <a class="btn" id="start" href="install.html">Install &amp; Setup</a>
+          <a class="btn" href="#acquire">Take the tour ↓</a>
           <a class="btn" href="https://github.com/murtaza64/manadj">Source on GitHub</a>
         </div>
       </div>
@@ -70,34 +69,78 @@
     <section class="loop" aria-label="How it fits together">
       <span class="kicker">THE LOOP</span>
       <ol class="loop-steps">
-        <li><a class="loop-step" href="#perform"><span class="loop-label">PLAY</span><span class="loop-text">Keyboard and mouse controls</span></a></li>
-        <li><a class="loop-step" href="#capture"><span class="loop-label">CAPTURE</span><span class="loop-text">Sessions and Takes</span></a></li>
-        <li><a class="loop-step" href="#editor"><span class="loop-label">PROMOTE</span><span class="loop-text">Saved Transitions</span></a></li>
-        <li><a class="loop-step" href="#sets"><span class="loop-label">PLAN</span><span class="loop-text">Sets and handovers</span></a></li>
+        <li><a class="loop-step" href="#acquire"><span class="loop-label">ACQUIRE</span><span class="loop-text">Find and import music</span></a></li>
+        <li><a class="loop-step" href="#curate"><span class="loop-label">CURATE</span><span class="loop-text">Library and Playlists</span></a></li>
+        <li><a class="loop-step" href="#perform"><span class="loop-label">PERFORM</span><span class="loop-text">Keyboard and controllers</span></a></li>
         <li><a class="loop-step" href="#follow"><span class="loop-label">FOLLOW</span><span class="loop-text">Next-Track suggestions</span></a></li>
+        <li><a class="loop-step" href="#capture"><span class="loop-label">CAPTURE</span><span class="loop-text">Sessions and Takes</span></a></li>
+        <li><a class="loop-step" href="#editor"><span class="loop-label">EDIT</span><span class="loop-text">Transitions and Routines</span></a></li>
+        <li><a class="loop-step" href="#sets"><span class="loop-label">ARRANGE</span><span class="loop-text">Sets and handovers</span></a></li>
+        <li><a class="loop-step" href="#sync"><span class="loop-label">SYNC</span><span class="loop-text">Rekordbox and Engine DJ</span></a></li>
       </ol>
     </section>
 
-<section class="chapter" id="perform" data-slug="perform">
+<section class="chapter" id="acquire" data-slug="acquire">
   <header class="chapter-head">
-    <span class="kicker">01 · PERFORM</span>
-    <h2>Keyboard DJing</h2>
+    <span class="kicker">01 · ACQUIRE</span>
+    <h2>Acquisition</h2>
+<span class="where">in the app: SYNC › Acquisition</span>  </header>
+  <div class="chapter-body">
+    <div class="prose">
+      <p>Browse SoundCloud likes, check Library matches, and download audio from SoundCloud or search <strong>Soulseek</strong> when SoundCloud cannot supply it.</p>
+    </div>
+    <div class="shots">
+<figure class="shot">
+  <figcaption class="shot-bar"><span class="shot-label">ACQUIRE</span>SoundCloud likes and download status</figcaption>
+  <a href="shots/acquisition.webp" target="_blank" rel="noopener">
+    <img src="shots/acquisition.webp" alt="SoundCloud likes and download status" loading="lazy">
+  </a>
+</figure>    </div>
+  </div>
+</section><section class="chapter" id="curate" data-slug="curate">
+  <header class="chapter-head">
+    <span class="kicker">02 · CURATE</span>
+    <h2>Library</h2>
+<span class="where">in the app: EXPORT view</span>  </header>
+  <div class="chapter-body">
+    <div class="prose">
+      <p>Browse and search the <strong>Library</strong>; drop files or folders to import in place.</p>
+<ul>
+<li>Organize Tracks with <strong>Tags</strong>, <strong>Tag Categories</strong> and colors.</li>
+<li>Match <strong>ANY</strong> or <strong>ALL</strong> selected Tags; filter by BPM, Key and <strong>Energy</strong>.</li>
+<li>Build <strong>Playlists</strong> with editable play order; mark Tracks <strong>Archived</strong> without deleting files.</li>
+</ul>
+<p id="analysis">Analysis detects <strong>Beatgrid</strong>, Key, waveform and <strong>Structure</strong>; manually stamping Hot Cues 1–4 fills empty slots leading into the detected drop.</p>
+<div class="visual" aria-label="Energy 1 to 5">
+  <span class="visual-label">ENERGY</span>
+<span class="energy-sq" style="background: var(--energy-1)">1</span><span class="energy-sq" style="background: var(--energy-2)">2</span><span class="energy-sq" style="background: var(--energy-3)">3</span><span class="energy-sq" style="background: var(--energy-4)">4</span><span class="energy-sq" style="background: var(--energy-5)">5</span></div>
+    </div>
+    <div class="shots">
+<figure class="shot">
+  <figcaption class="shot-bar"><span class="shot-label">CURATE</span>Track Tags, Energy and Tag columns</figcaption>
+  <a href="shots/library.webp" target="_blank" rel="noopener">
+    <img src="shots/library.webp" alt="Track Tags, Energy and Tag columns" loading="lazy">
+  </a>
+</figure><figure class="shot">
+  <figcaption class="shot-bar"><span class="shot-label">CURATE</span>Waveform styles</figcaption>
+  <a href="shots/waveforms.webp" target="_blank" rel="noopener">
+    <img src="shots/waveforms.webp" alt="Waveform styles" loading="lazy">
+  </a>
+</figure>    </div>
+  </div>
+</section><section class="chapter" id="perform" data-slug="perform">
+  <header class="chapter-head">
+    <span class="kicker">03 · PERFORM</span>
+    <h2>Keyboard and controllers</h2>
 <span class="where">in the app: PERFORM view</span>  </header>
   <div class="chapter-body">
     <div class="prose">
-      <p>Four <strong>Decks</strong> with keyboard/mouse controls, drag-to-load, and stem mute/solo; <strong>KBD</strong> labels show shortcuts.</p>
+      <p><strong>Keyboard and mouse:</strong> four <strong>Decks</strong>, drag-to-load and stem mute/solo; <strong>KBD</strong> labels show shortcuts.</p>
+<p id="controllers"><strong>Controllers:</strong> Deck and Mixer controls, with pad and transport lights reflecting the app state.</p>
+<p>Supported: Pioneer DDJ-GRV6, Pioneer DDJ-SB3 (four Decks); Hercules Inpulse 300 MK2 (two Decks).</p>
 <div class="visual" aria-label="Decks A to D">
   <span class="visual-label">DECKS</span>
 <span class="deck-chip" style="--deck: var(--deck-a)">A</span><span class="deck-chip" style="--deck: var(--deck-b)">B</span><span class="deck-chip" style="--deck: var(--deck-c)">C</span><span class="deck-chip" style="--deck: var(--deck-d)">D</span></div>
-      <ul class="chips" aria-label="Words used here">
-  <li><a class="chip" href="#term-deck" title="One of four players, A–D. A Deck keeps playing when you switch views.">Deck</a></li>
-  <li><a class="chip" href="#term-mixer" title="Trim, 3-band EQ, filter, and fader per Deck, plus crossfader, master, and Beat FX.">Mixer</a></li>
-  <li><a class="chip" href="#term-hot-cue" title="One of 8 saved positions in a Track that you jump to while playing.">Hot Cue</a></li>
-  <li><a class="chip" href="#term-cue-mode" title="What a Hot Cue does on a paused Deck. Gated previews while held; Trigger starts playback.">Cue mode</a></li>
-  <li><a class="chip" href="#term-quantize" title="Snaps cue placement and loops to beats; Hot Cue jumps preserve the playing Deck's beat phase.">Quantize</a></li>
-  <li><a class="chip" href="#term-key-lock" title="Keeps a Track in its Key while you move the pitch fader.">Key Lock</a></li>
-  <li><a class="chip" href="#term-sync" title="Decks join one shared tempo. Move any member's pitch and the group follows.">SYNC</a></li>
-</ul>
     </div>
     <div class="shots">
 <figure class="shot">
@@ -107,19 +150,31 @@
   </a>
 </figure>    </div>
   </div>
+</section><section class="chapter" id="follow" data-slug="follow">
+  <header class="chapter-head">
+    <span class="kicker">04 · FOLLOW</span>
+    <h2>Follow mode</h2>
+<span class="where">in the app: any track list</span>  </header>
+  <div class="chapter-body">
+    <div class="prose">
+      <p><strong>Follow</strong> suggests Tracks for the loaded Deck, listing <strong>Known</strong> pairs first, then <strong>Observed</strong> pairs and <strong>Compatible</strong> metadata matches.</p>
+    </div>
+    <div class="shots">
+<figure class="shot">
+  <figcaption class="shot-bar"><span class="shot-label">FOLLOW</span>Deck A Follow suggestions</figcaption>
+  <a href="shots/follow.webp" target="_blank" rel="noopener">
+    <img src="shots/follow.webp" alt="Deck A Follow suggestions" loading="lazy">
+  </a>
+</figure>    </div>
+  </div>
 </section><section class="chapter" id="capture" data-slug="capture">
   <header class="chapter-head">
-    <span class="kicker">02 · CAPTURE</span>
+    <span class="kicker">05 · CAPTURE</span>
     <h2>Sessions and Takes</h2>
 <span class="where">in the app: Sessions · HISTORY</span>  </header>
   <div class="chapter-body">
     <div class="prose">
       <p><strong>Sessions</strong> log Deck and Mixer events without recording audio; detected handovers become <strong>Takes</strong> that replay through the Decks.</p>
-      <ul class="chips" aria-label="Words used here">
-  <li><a class="chip" href="#term-session" title="The record of one stretch of playing, timed to the moment. Controls only, no audio.">Session</a></li>
-  <li><a class="chip" href="#term-take" title="A blend between two Tracks, captured automatically while you play.">Take</a></li>
-  <li><a class="chip" href="#term-cameo" title="A guest Track that drops in over a host Track and leaves again — a double or a tease.">Cameo</a></li>
-</ul>
     </div>
     <div class="shots">
 <figure class="shot">
@@ -136,19 +191,12 @@
   </div>
 </section><section class="chapter" id="editor" data-slug="editor">
   <header class="chapter-head">
-    <span class="kicker">03 · EDIT</span>
+    <span class="kicker">06 · EDIT</span>
     <h2>Mix editor</h2>
 <span class="where">in the app: EDIT view</span>  </header>
   <div class="chapter-body">
     <div class="prose">
       <p>Edit Track timing, fades and jumps on a timeline, audition through the Decks, and <strong>Promote</strong> drafts to <strong>Transitions</strong>, <strong>Cameos</strong> or <strong>Routines</strong>.</p>
-      <ul class="chips" aria-label="Words used here">
-  <li><a class="chip" href="#term-mix-editor" title="One timeline for editing any Transition, Cameo, or Routine, or reviewing a Take.">Mix editor</a></li>
-  <li><a class="chip" href="#term-transition" title="A saved move from one Track into another, with alignment, fades, EQ, and filter moves.">Transition</a></li>
-  <li><a class="chip" href="#term-cameo" title="A guest Track that drops in over a host Track and leaves again — a double or a tease.">Cameo</a></li>
-  <li><a class="chip" href="#term-routine" title="A saved passage with three or more Track slots, captured live or authored in the Mix editor.">Routine</a></li>
-  <li><a class="chip" href="#term-promote" title="Turning a reviewed Take into a saved Transition (or Cameo, or Routine).">Promote</a></li>
-</ul>
     </div>
     <div class="shots">
 <figure class="shot clip">
@@ -167,109 +215,21 @@
   </div>
 </section><section class="chapter" id="sets" data-slug="sets">
   <header class="chapter-head">
-    <span class="kicker">04 · SETS</span>
+    <span class="kicker">07 · ARRANGE</span>
     <h2>Sets</h2>
 <span class="where">in the app: library sidebar · Sets</span>  </header>
   <div class="chapter-body">
     <div class="prose">
       <p>Order Tracks with <strong>Transitions</strong>, <strong>Takes</strong> or hard cuts; the <strong>Conductor</strong> plays these handovers on the Decks and Mixer until manual control.</p>
-      <ul class="chips" aria-label="Words used here">
-  <li><a class="chip" href="#term-set" title="Tracks in order, where each handover points at a Transition, a Take, or a hard cut.">Set</a></li>
-  <li><a class="chip" href="#term-unresolved" title="A handover in a Set with nothing pinned. It uses your best saved Transition for the pair.">Unresolved</a></li>
-  <li><a class="chip" href="#term-conductor" title="Plays a Set on the Decks and Mixer. A manual Deck or Mixer gesture hands control back to you.">Conductor</a></li>
-  <li><a class="chip" href="#term-pickup" title="Hand control back to the Conductor from where the Decks are now.">Pickup</a></li>
-</ul>
     </div>
     <div class="shots">
 <figure class="shot clip">
-  <figcaption class="shot-bar" id="clip-set-caption"><span class="shot-label">SETS</span>Conductor playback on the Decks and Mixer</figcaption>
+  <figcaption class="shot-bar" id="clip-set-caption"><span class="shot-label">ARRANGE</span>Conductor playback on the Decks and Mixer</figcaption>
   <video controls muted playsinline loop preload="none" poster="shots/set-motion.webp" width="1440" height="900" aria-describedby="clip-set-caption">
     <source src="media/set.mp4" type="video/mp4">
     <a href="media/set.mp4">Watch the silent clip</a>
   </video>
   <div class="clip-note">Silent recording · <a href="media/set.mp4">Open full-size ↗</a></div>
-</figure>    </div>
-  </div>
-</section><section class="chapter" id="follow" data-slug="follow">
-  <header class="chapter-head">
-    <span class="kicker">05 · FOLLOW</span>
-    <h2>Follow mode</h2>
-<span class="where">in the app: any track list</span>  </header>
-  <div class="chapter-body">
-    <div class="prose">
-      <p><strong>Follow</strong> suggests Tracks for the loaded Deck, listing <strong>Known</strong> pairs first, then <strong>Observed</strong> pairs and <strong>Compatible</strong> metadata matches.</p>
-      <ul class="chips" aria-label="Words used here">
-  <li><a class="chip" href="#term-follow-mode" title="Filters the track list to next-Track suggestions for the playing Deck.">Follow mode</a></li>
-  <li><a class="chip" href="#term-known" title="Tracks connected by a Linked association, saved Transition or Cameo.">Known</a></li>
-  <li><a class="chip" href="#term-observed" title="A pair you have mixed more than once without saving anything for it.">Observed</a></li>
-  <li><a class="chip" href="#term-compatible" title="Tracks whose tempo fits and whose Key, Tags, or shared artist suggest a match. Energy helps rank them.">Compatible</a></li>
-  <li><a class="chip" href="#term-linked" title="A manually marked association between two Tracks.">Linked</a></li>
-</ul>
-    </div>
-    <div class="shots">
-<figure class="shot">
-  <figcaption class="shot-bar"><span class="shot-label">FOLLOW</span>Deck A Follow suggestions</figcaption>
-  <a href="shots/follow.webp" target="_blank" rel="noopener">
-    <img src="shots/follow.webp" alt="Deck A Follow suggestions" loading="lazy">
-  </a>
-</figure>    </div>
-  </div>
-</section><section class="chapter" id="curate" data-slug="curate">
-  <header class="chapter-head">
-    <span class="kicker">06 · CURATE</span>
-    <h2>Library</h2>
-<span class="where">in the app: EXPORT view</span>  </header>
-  <div class="chapter-body">
-    <div class="prose">
-      <p>Drop files or folders from Finder to import in place; assign <strong>Tags</strong> and <strong>Energy</strong>, order <strong>Playlists</strong>, or mark Tracks <strong>Archived</strong>.</p>
-<div class="visual" aria-label="Energy 1 to 5">
-  <span class="visual-label">ENERGY</span>
-<span class="energy-sq" style="background: var(--energy-1)">1</span><span class="energy-sq" style="background: var(--energy-2)">2</span><span class="energy-sq" style="background: var(--energy-3)">3</span><span class="energy-sq" style="background: var(--energy-4)">4</span><span class="energy-sq" style="background: var(--energy-5)">5</span></div>
-      <ul class="chips" aria-label="Words used here">
-  <li><a class="chip" href="#term-track" title="An audio file with metadata, including title, artist, Key, BPM, Energy, Tags and Hot Cues.">Track</a></li>
-  <li><a class="chip" href="#term-tag" title="A label you put on a Track. Every Tag belongs to one Tag Category.">Tag</a></li>
-  <li><a class="chip" href="#term-tag-category" title="A named, colored, ordered group of Tags — Genre, Vibe, Role.">Tag Category</a></li>
-  <li><a class="chip" href="#term-energy" title="How intense a Track is, 1–5. Its own field, not a Tag.">Energy</a></li>
-  <li><a class="chip" href="#term-playlist" title="A hand-ordered list of Tracks, curated in manadj and Exported.">Playlist</a></li>
-  <li><a class="chip" href="#term-unprocessed" title="Added but not yet curated — no Tags, title and artist not cleaned up.">Unprocessed track</a></li>
-  <li><a class="chip" href="#term-archived" title="Hidden from the active Library until restored; files and metadata are retained.">Archived</a></li>
-</ul>
-    </div>
-    <div class="shots">
-<figure class="shot">
-  <figcaption class="shot-bar"><span class="shot-label">CURATE</span>Track Tags, Energy and Tag columns</figcaption>
-  <a href="shots/library.webp" target="_blank" rel="noopener">
-    <img src="shots/library.webp" alt="Track Tags, Energy and Tag columns" loading="lazy">
-  </a>
-</figure>    </div>
-  </div>
-</section><section class="chapter" id="analysis" data-slug="analysis">
-  <header class="chapter-head">
-    <span class="kicker">07 · ANALYSIS</span>
-    <h2>Track analysis</h2>
-<span class="where">in the app: automatic · Settings › Waveforms</span>  </header>
-  <div class="chapter-body">
-    <div class="prose">
-      <p>Analysis detects <strong>Beatgrid</strong>, Key, waveform and <strong>Structure</strong>; manually stamping Hot Cues 1–4 fills empty slots leading into the detected drop.</p>
-<div class="visual cue-ladder" aria-label="Cue-slot convention">
-  <span class="visual-label">CUE LADDER</span>
-  <span class="cue"><span class="cue-flag" style="background: var(--hc-1)">1</span><span class="cue-text">first buildup</span></span>
-  <span class="cue"><span class="cue-flag" style="background: var(--hc-2)">2</span><span class="cue-text">−16 bars</span></span>
-  <span class="cue"><span class="cue-flag" style="background: var(--hc-3)">3</span><span class="cue-text">−8 bars</span></span>
-  <span class="cue"><span class="cue-flag" style="background: var(--hc-4)">4</span><span class="cue-text">drop</span></span>
-</div>
-      <ul class="chips" aria-label="Words used here">
-  <li><a class="chip" href="#term-beatgrid" title="Where every beat falls in a Track. BPM is read from it.">Beatgrid</a></li>
-  <li><a class="chip" href="#term-structure" title="A Track split into intro, buildup, drop, breakdown, and outro, found by Analysis.">Structure</a></li>
-  <li><a class="chip" href="#term-cue-ladder" title="Hot Cues 1–4 lead into the drop. 4 is the drop; 3 is 8 bars before, 2 is 16 bars before, and 1 is typically 32 bars before.">Cue-slot convention</a></li>
-</ul>
-    </div>
-    <div class="shots">
-<figure class="shot">
-  <figcaption class="shot-bar"><span class="shot-label">ANALYSIS</span>Waveform styles</figcaption>
-  <a href="shots/waveforms.webp" target="_blank" rel="noopener">
-    <img src="shots/waveforms.webp" alt="Waveform styles" loading="lazy">
-  </a>
 </figure>    </div>
   </div>
 </section><section class="chapter" id="sync" data-slug="sync">
@@ -280,10 +240,6 @@
   <div class="chapter-body">
     <div class="prose">
       <p><strong>Export</strong> sends metadata and playlists to Engine DJ or Rekordbox when enabled (off by default); <strong>External Import</strong> reads changes back.</p>
-      <ul class="chips" aria-label="Words used here">
-  <li><a class="chip" href="#term-export" title="Pushes your Library out to Engine DJ, Rekordbox, or file tags. manadj's values win.">Export</a></li>
-  <li><a class="chip" href="#term-external-import" title="Imports metadata changes from external libraries, such as cues or analyzed Keys.">External Import</a></li>
-</ul>
     </div>
     <div class="shots">
 <figure class="shot">
@@ -293,121 +249,7 @@
   </a>
 </figure>    </div>
   </div>
-</section><section class="chapter" id="acquire" data-slug="acquire">
-  <header class="chapter-head">
-    <span class="kicker">09 · ACQUIRE</span>
-    <h2>Acquisition</h2>
-<span class="where">in the app: SYNC › Acquisition</span>  </header>
-  <div class="chapter-body">
-    <div class="prose">
-      <p>Browse SoundCloud likes, check Library matches, and download audio from SoundCloud or search <strong>Soulseek</strong> when SoundCloud cannot supply it.</p>
-      <ul class="chips" aria-label="Words used here">
-  <li><a class="chip" href="#term-source-item" title="A liked track on SoundCloud.">Source Item</a></li>
-</ul>
-    </div>
-    <div class="shots">
-<figure class="shot">
-  <figcaption class="shot-bar"><span class="shot-label">ACQUIRE</span>SoundCloud likes and download status</figcaption>
-  <a href="shots/acquisition.webp" target="_blank" rel="noopener">
-    <img src="shots/acquisition.webp" alt="SoundCloud likes and download status" loading="lazy">
-  </a>
-</figure>    </div>
-  </div>
-</section><section class="chapter" id="controllers" data-slug="controllers">
-  <header class="chapter-head">
-    <span class="kicker">10 · CONTROL</span>
-    <h2>Controllers</h2>
-<span class="where">in the app: plug in · Settings › Jog calibration</span>  </header>
-  <div class="chapter-body chapter-body-text">
-    <div class="prose">
-      <p>Supported <strong>Controllers</strong> operate the Decks and Mixer, with pad and transport lights reflecting the app state.</p>
-<table class="visual-table">
-  <thead><tr><th>Controller</th><th>Decks</th></tr></thead>
-  <tbody>
-    <tr><td>Pioneer DDJ-GRV6</td><td><span class="deck-chip deck-chip-sm" style="--deck: var(--deck-a)">A</span><span class="deck-chip deck-chip-sm" style="--deck: var(--deck-b)">B</span><span class="deck-chip deck-chip-sm" style="--deck: var(--deck-c)">C</span><span class="deck-chip deck-chip-sm" style="--deck: var(--deck-d)">D</span></td></tr>
-    <tr><td>Pioneer DDJ-SB3</td><td><span class="deck-chip deck-chip-sm" style="--deck: var(--deck-a)">A</span><span class="deck-chip deck-chip-sm" style="--deck: var(--deck-b)">B</span><span class="deck-chip deck-chip-sm" style="--deck: var(--deck-c)">C</span><span class="deck-chip deck-chip-sm" style="--deck: var(--deck-d)">D</span></td></tr>
-    <tr><td>Hercules Inpulse 300 MK2</td><td><span class="deck-chip deck-chip-sm" style="--deck: var(--deck-a)">A</span><span class="deck-chip deck-chip-sm" style="--deck: var(--deck-b)">B</span></td></tr>
-  </tbody>
-</table>
-      <ul class="chips" aria-label="Words used here">
-  <li><a class="chip" href="#term-controller" title="A MIDI DJ controller driving the Decks, Mixer, and library browsing.">Controller</a></li>
-</ul>
-    </div>
-  </div>
-</section><section class="chapter" id="start" data-slug="start">
-  <header class="chapter-head">
-    <span class="kicker">11 · START</span>
-<span class="status status-coming">FIRST RELEASE</span>    <h2>Setup guides and Tour</h2>
-<span class="where">in the app: first launch</span>  </header>
-  <div class="chapter-body chapter-body-text">
-    <div class="prose">
-      <p>Planned <strong>Setup guides</strong> cover configuration and Rekordbox import; the existing <strong>Tour</strong> points out controls when you first enter an area.</p>
-<ol class="steps" aria-label="First-run sequence">
-  <li class="step"><span class="step-n">1</span>Welcome</li>
-  <li class="step"><span class="step-n">2</span>Rekordbox import</li>
-  <li class="step"><span class="step-n">3</span>Tracks directory</li>
-  <li class="step"><span class="step-n">4</span>Cue mode</li>
-  <li class="step"><span class="step-n">5</span>SoundCloud</li>
-  <li class="step"><span class="step-n">6</span>Soulseek</li>
-  <li class="step"><span class="step-n">7</span>Controller check</li>
-  <li class="step"><span class="step-n">8</span>Tour</li>
-</ol>
-      <ul class="chips" aria-label="Words used here">
-  <li><a class="chip" href="#term-setup-guide" title="Planned for the first release — a short, skippable flow that sets up one thing, rerunnable from Settings.">Setup guide</a></li>
-  <li><a class="chip" href="#term-cue-mode" title="What a Hot Cue does on a paused Deck. Gated previews while held; Trigger starts playback.">Cue mode</a></li>
-  <li><a class="chip" href="#term-tour" title="Pointers to the main controls, shown the first time you open each area.">Tour</a></li>
-</ul>
-    </div>
-  </div>
 </section>
-    <section class="chapter" id="words">
-      <header class="chapter-head">
-        <span class="kicker">WORDS</span>
-        <h2>The words manadj uses</h2>
-        <span class="where">the same names appear in the app</span>
-      </header>
-      <dl class="glossary">
-        <div class="term" id="term-archived"><dt>Archived</dt><dd>Hidden from the active Library until restored; files and metadata are retained.</dd></div>
-        <div class="term" id="term-beatgrid"><dt>Beatgrid</dt><dd>Where every beat falls in a Track. BPM is read from it.</dd></div>
-        <div class="term" id="term-cameo"><dt>Cameo</dt><dd>A guest Track that drops in over a host Track and leaves again — a double or a tease.</dd></div>
-        <div class="term" id="term-compatible"><dt>Compatible</dt><dd>Tracks whose tempo fits and whose Key, Tags, or shared artist suggest a match. Energy helps rank them.</dd></div>
-        <div class="term" id="term-conductor"><dt>Conductor</dt><dd>Plays a Set on the Decks and Mixer. A manual Deck or Mixer gesture hands control back to you.</dd></div>
-        <div class="term" id="term-controller"><dt>Controller</dt><dd>A MIDI DJ controller driving the Decks, Mixer, and library browsing.</dd></div>
-        <div class="term" id="term-cue-mode"><dt>Cue mode</dt><dd>What a Hot Cue does on a paused Deck. Gated previews while held; Trigger starts playback.</dd></div>
-        <div class="term" id="term-cue-ladder"><dt>Cue-slot convention</dt><dd>Hot Cues 1–4 lead into the drop. 4 is the drop; 3 is 8 bars before, 2 is 16 bars before, and 1 is typically 32 bars before.</dd></div>
-        <div class="term" id="term-deck"><dt>Deck</dt><dd>One of four players, A–D. A Deck keeps playing when you switch views.</dd></div>
-        <div class="term" id="term-energy"><dt>Energy</dt><dd>How intense a Track is, 1–5. Its own field, not a Tag.</dd></div>
-        <div class="term" id="term-export"><dt>Export</dt><dd>Pushes your Library out to Engine DJ, Rekordbox, or file tags. manadj's values win.</dd></div>
-        <div class="term" id="term-external-import"><dt>External Import</dt><dd>Imports metadata changes from external libraries, such as cues or analyzed Keys.</dd></div>
-        <div class="term" id="term-follow-mode"><dt>Follow mode</dt><dd>Filters the track list to next-Track suggestions for the playing Deck.</dd></div>
-        <div class="term" id="term-hot-cue"><dt>Hot Cue</dt><dd>One of 8 saved positions in a Track that you jump to while playing.</dd></div>
-        <div class="term" id="term-key-lock"><dt>Key Lock</dt><dd>Keeps a Track in its Key while you move the pitch fader.</dd></div>
-        <div class="term" id="term-known"><dt>Known</dt><dd>Tracks connected by a Linked association, saved Transition or Cameo.</dd></div>
-        <div class="term" id="term-linked"><dt>Linked</dt><dd>A manually marked association between two Tracks.</dd></div>
-        <div class="term" id="term-mix-editor"><dt>Mix editor</dt><dd>One timeline for editing any Transition, Cameo, or Routine, or reviewing a Take.</dd></div>
-        <div class="term" id="term-mixer"><dt>Mixer</dt><dd>Trim, 3-band EQ, filter, and fader per Deck, plus crossfader, master, and Beat FX.</dd></div>
-        <div class="term" id="term-observed"><dt>Observed</dt><dd>A pair you have mixed more than once without saving anything for it.</dd></div>
-        <div class="term" id="term-pickup"><dt>Pickup</dt><dd>Hand control back to the Conductor from where the Decks are now.</dd></div>
-        <div class="term" id="term-playlist"><dt>Playlist</dt><dd>A hand-ordered list of Tracks, curated in manadj and Exported.</dd></div>
-        <div class="term" id="term-promote"><dt>Promote</dt><dd>Turning a reviewed Take into a saved Transition (or Cameo, or Routine).</dd></div>
-        <div class="term" id="term-quantize"><dt>Quantize</dt><dd>Snaps cue placement and loops to beats; Hot Cue jumps preserve the playing Deck's beat phase.</dd></div>
-        <div class="term" id="term-routine"><dt>Routine</dt><dd>A saved passage with three or more Track slots, captured live or authored in the Mix editor.</dd></div>
-        <div class="term" id="term-session"><dt>Session</dt><dd>The record of one stretch of playing, timed to the moment. Controls only, no audio.</dd></div>
-        <div class="term" id="term-set"><dt>Set</dt><dd>Tracks in order, where each handover points at a Transition, a Take, or a hard cut.</dd></div>
-        <div class="term" id="term-setup-guide"><dt>Setup guide</dt><dd>Planned for the first release — a short, skippable flow that sets up one thing, rerunnable from Settings.</dd></div>
-        <div class="term" id="term-source-item"><dt>Source Item</dt><dd>A liked track on SoundCloud.</dd></div>
-        <div class="term" id="term-structure"><dt>Structure</dt><dd>A Track split into intro, buildup, drop, breakdown, and outro, found by Analysis.</dd></div>
-        <div class="term" id="term-sync"><dt>SYNC</dt><dd>Decks join one shared tempo. Move any member's pitch and the group follows.</dd></div>
-        <div class="term" id="term-tag"><dt>Tag</dt><dd>A label you put on a Track. Every Tag belongs to one Tag Category.</dd></div>
-        <div class="term" id="term-tag-category"><dt>Tag Category</dt><dd>A named, colored, ordered group of Tags — Genre, Vibe, Role.</dd></div>
-        <div class="term" id="term-take"><dt>Take</dt><dd>A blend between two Tracks, captured automatically while you play.</dd></div>
-        <div class="term" id="term-tour"><dt>Tour</dt><dd>Pointers to the main controls, shown the first time you open each area.</dd></div>
-        <div class="term" id="term-track"><dt>Track</dt><dd>An audio file with metadata, including title, artist, Key, BPM, Energy, Tags and Hot Cues.</dd></div>
-        <div class="term" id="term-transition"><dt>Transition</dt><dd>A saved move from one Track into another, with alignment, fades, EQ, and filter moves.</dd></div>
-        <div class="term" id="term-unprocessed"><dt>Unprocessed track</dt><dd>Added but not yet curated — no Tags, title and artist not cleaned up.</dd></div>
-        <div class="term" id="term-unresolved"><dt>Unresolved</dt><dd>A handover in a Set with nothing pinned. It uses your best saved Transition for the pair.</dd></div>
-      </dl>
-    </section>
   </main>
 
   <footer class="footer">

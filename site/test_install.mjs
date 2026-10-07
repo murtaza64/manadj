@@ -48,7 +48,10 @@ try {
         assert.equal(await page.locator('#download .btn-primary').count(), 2);
         assert(await page.locator('#download').innerText().then((text) => text.includes('untested on Windows hardware')));
         if (name === 'index.html') {
-          assert.equal(await page.locator('.chapter[data-slug]').count(), 11);
+          assert.deepEqual(await page.locator('.chapter[data-slug]').evaluateAll((els) => els.map((el) => el.dataset.slug)),
+            ['acquire', 'curate', 'perform', 'follow', 'capture', 'editor', 'sets', 'sync']);
+          assert.equal(await page.locator('#words, .glossary, .chips, [id^="term-"]').count(), 0);
+          assert.equal(await page.locator('.segment[href="#sets"]').innerText(), 'ARRANGE');
           assert.equal(await page.locator('video[controls]').count(), 3);
           await page.getByRole('link', { name: 'Download / Get started' }).click();
           assert.equal(new URL(page.url()).hash, '#download');

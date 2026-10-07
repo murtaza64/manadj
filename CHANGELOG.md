@@ -5,6 +5,7 @@ versions follow [Semantic Versioning](https://semver.org/). Install: [docs/insta
 
 ## [Unreleased]
 
+- Reordered the site into eight workflow sections, expanded Library curation, folded controllers into Perform, and removed the glossary (#346).
 - Added direct classic Rekordbox USB export with Playlists, Hot Cues, beatgrids, waveforms and read-back verification (#91–#94, #265).
 - Experimental direct Engine USB export: `scripts/engine_usb.py export/verify` builds a standalone Engine device library (tracks, playlists, cues, grids, optional donor analysis) in a target directory and verifies it against your library — behind the export toggle, and not yet wired to real USB drives (#267, #268).
 - Sessions are grouped by day with longest-first previews and mined-candidate counts; timelines gain live zoom redraws, progressive gridlines, and stable playback-start positioning (#263).

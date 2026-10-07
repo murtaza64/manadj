@@ -1,6 +1,6 @@
 ---
 slug: editor
-order: 3
+order: 6
 kicker: EDIT
 where: EDIT view
 title: Mix editor

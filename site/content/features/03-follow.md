@@ -1,6 +1,6 @@
 ---
 slug: follow
-order: 5
+order: 4
 kicker: FOLLOW
 where: any track list
 title: Follow mode
