@@ -63,11 +63,13 @@ class StemsConfig:
     directory: on-disk stem cache root (data/stems by default) — the first
     on-disk derived-artifact cache; filesystem is the source of truth.
     model: demucs model name (a knob — htdemucs_ft is a candidate upgrade).
-    device: torch device for the split subprocess (cpu fallback ~3.8x realtime).
+    device: torch device for the split subprocess. "auto" (default) lets
+    demucs pick cuda -> mps -> cpu (#308); cpu is ~3.8x realtime on Apple
+    Silicon (docs/research/stem-splitting-model-benchmark.md).
     """
     directory: str = ""
     model: str = "htdemucs"
-    device: str = "mps"
+    device: str = "auto"
 
     def __post_init__(self) -> None:
         if not self.directory:
