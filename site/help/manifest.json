@@ -109,15 +109,41 @@
     ]
   },
   {
+    "slug": "capture",
+    "title": "Review Sessions and Takes",
+    "anchors": [
+      "main",
+      "sessions",
+      "timeline",
+      "takes",
+      "routine-evidence"
+    ]
+  },
+  {
     "slug": "editor",
     "title": "Mix editor",
     "anchors": [
       "main",
       "clip-editor-caption",
       "editing",
+      "blank-mix",
+      "modes",
+      "automation",
       "audition",
       "promote",
-      "blank-mix"
+      "saving"
+    ]
+  },
+  {
+    "slug": "sets",
+    "title": "Plan and play a Set",
+    "anchors": [
+      "main",
+      "clip-set-caption",
+      "planning",
+      "pins",
+      "playback",
+      "takeover"
     ]
   },
   {

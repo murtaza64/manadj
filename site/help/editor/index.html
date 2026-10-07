@@ -5,7 +5,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Mix editor — manadj</title>
-  <meta name="description" content="Edit timelines, audition changes, and promote reviewed Takes.">
+  <meta name="description" content="Build and review Transitions and multi-Track Routines on the slot timeline.">
   <link rel="icon" href="../../assets/logo.png">
   <link rel="preload" href="../../assets/fonts/UbuntuMono-Regular.ttf" as="font" type="font/ttf" crossorigin>
   <link rel="preload" href="../../assets/fonts/UbuntuMono-Bold.ttf" as="font" type="font/ttf" crossorigin>
@@ -38,7 +38,9 @@
           <a href="../../help/audio/index.html">Audio and Cue mode</a>
           <a href="../../help/beat-fx/index.html">Beat FX and filters</a>
           <a href="../../help/follow/index.html">Follow loaded Tracks</a>
+          <a href="../../help/capture/index.html">Review Sessions and Takes</a>
           <a href="../../help/editor/index.html" aria-current="page">Mix editor</a>
+          <a href="../../help/sets/index.html">Plan and play a Set</a>
           <a href="../../help/sync/index.html">Compare and Sync libraries</a>
         </nav>
       </details>
@@ -48,53 +50,134 @@
         <header class="help-heading">
           <a class="kicker" href="../index.html">Help manual</a>
           <h1>Mix editor</h1>
-          <p>Edit timelines, audition changes, and promote reviewed Takes.</p>
+          <p>Build and review Transitions and multi-Track Routines on the slot timeline.</p>
         </header>
         <details class="help-toc" open>
           <summary>On this page</summary>
           <nav aria-label="On this page"><div class="toc">
 <ul>
-<li><a href="#editing">Edit</a></li>
-<li><a href="#audition">Audition</a></li>
-<li><a href="#promote">Promote</a></li>
-<li><a href="#blank-mix">Blank mix</a></li>
+<li><a href="#editing">Find or start a mix</a></li>
+<li><a href="#blank-mix">Add and arrange slots</a></li>
+<li><a href="#modes">Select, Pan and Jump</a></li>
+<li><a href="#automation">Draw automation and stamp a Chop</a></li>
+<li><a href="#audition">Audition and take over</a></li>
+<li><a href="#promote">Review a Take and Promote</a></li>
+<li><a href="#saving">Saving, undo and errors</a></li>
 </ul>
 </div>
 </nav>
         </details>
         <figure class="shot clip">
-  <figcaption class="shot-bar" id="clip-editor-caption"><span class="shot-label">WATCH</span>A saved Transition is auditioned through the shared Decks in the Mix editor.</figcaption>
+  <figcaption class="shot-bar" id="clip-editor-caption"><span class="shot-label">WATCH</span>A saved Transition auditioned through the shared Decks and Mixer.</figcaption>
   <video controls muted playsinline loop preload="none" poster="../../shots/editor-motion.webp" width="1440" height="900" aria-describedby="clip-editor-caption">
     <source src="../../media/editor.mp4" type="video/mp4">
     <a href="../../media/editor.mp4">Watch the silent clip</a>
   </video>
   <div class="clip-note">Silent recording · <a href="../../media/editor.mp4">Open full-size ↗</a></div>
 </figure>
-        <div class="prose help-prose"><h2 id="editing">Edit</h2>
+        <div class="prose help-prose"><h2 id="editing">Find or start a mix</h2>
+<p>Open <strong>EDIT</strong>. The right-hand picker is a navigator, not a Deck: search for a Track, use the loaded-Deck shortcuts, or choose a saved artifact. One Track chip lists moves out of and into it; two chips specify an <strong>ordered</strong> outgoing → incoming pair. <strong>⇄</strong> reverses that direction. With two chips, choose a saved Transition, <strong>New Transition</strong>, an unpromoted Take, or <strong>+ New blank mix</strong> seeded with those Tracks. With no chips, browse Routines, Routine Takes and candidates, or start a blank mix. <strong>↑/↓</strong> and <strong>Enter</strong> navigate picker results; <strong>Escape</strong> clears the search, then the second chip, then the first. The header's <strong>◀/▶</strong> cycle siblings of the current pair or cast. A Cameo may appear in the picker, but its editor currently reports that Cameo editing is not available here.</p>
+<p><img alt="The picker beside an open Transition and its slot timeline." src="../../shots/help-editor-picker.webp" /></p>
+<p><em>Ordered pair in the picker; Select, Pan, Jump, undo and audition controls above the timeline.</em></p>
+<table>
+<thead>
+<tr>
+<th>Start</th>
+<th>What exists immediately</th>
+<th>What saves it</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>New Transition</strong> for an ordered pair</td>
+<td>A two-slot seeded draft</td>
+<td>The first actual edit, via autosave; opening or auditioning does not save</td>
+</tr>
+<tr>
+<td><strong>+ New blank mix</strong></td>
+<td>A blank, in-memory draft; selected Track chips seed slots</td>
+<td>Two slots become a Transition, three or more a Routine, after an edit; zero or one never persist</td>
+</tr>
+<tr>
+<td>Saved Transition or Routine</td>
+<td>The existing artifact and its editable timeline</td>
+<td>Subsequent edits autosave</td>
+</tr>
+<tr>
+<td>Unpromoted Take or Routine candidate</td>
+<td>A review draft over captured evidence</td>
+<td><strong>↑ Promote</strong>, not audition or navigation</td>
+</tr>
+</tbody>
+</table>
+<h2 id="blank-mix">Add and arrange slots</h2>
 <ol>
-<li>Open <strong>EDIT</strong>; choose a mix in the right-hand picker.</li>
-<li><strong>Select (V)</strong> selects and moves slots; the outgoing slot anchors a Transition. <strong>Pan (H)</strong> moves the view; <strong>Jump (J)</strong> edits jumps/pauses.</li>
-<li>Open a control lane's breakpoint editor. Click to add nodes, drag to adjust, double-click to delete. <strong>Cmd/Ctrl+Z</strong> undoes; <strong>Cmd/Ctrl+Shift+Z</strong> redoes. Saved mixes autosave.</li>
+<li>Choose <strong>+ New blank mix</strong>. Drag a Library Track onto the empty canvas; drag another onto the timeline. The insertion line displays its entry beat. Drop location snaps to a four-beat bar; hold <strong>Shift</strong> while dropping to place between bars. A Track without BPM is skipped. Hot Cue 1, if present, supplies its initial playback position; otherwise it starts at the beginning. Multiple dragged Tracks enter in succession.</li>
+<li>Read each slot panel: its number is <strong>entry order</strong>, not the letter of a physical Deck. The first slot enters with the mix; the last exits with it. A Track can occur in more than one slot. Newly added slots receive an initial closed-to-open fader step; expand the lane to adjust it.</li>
+<li>Use <strong>Select (V)</strong> and drag a waveform row horizontally to shift its entry and authored material. Drag vertically across a neighboring row to reorder Routine entries. <strong>Alt-drag</strong> slides Track material under the clock without moving its authored automation. Hold <strong>Shift</strong> during a drag to bypass snapping. Click rows to select; <strong>Cmd/Ctrl-click</strong> toggles and <strong>Shift-click</strong> selects a range. Drag one selected row to move the selected group.</li>
+<li>In a Routine, edit a later slot's <strong>Start</strong> beat or its left start handle to shorten or reveal its intro without shifting later events. Drag playback-bound handles to crop the Routine without deleting outside material; <strong>↺</strong> restores source bounds. The entry slot uses playback start instead. Pair Transitions do not have these Routine-only handles.</li>
+<li>Use a slot panel's <strong>✕</strong> to remove an authored slot. The remaining slots re-number by entry position, while their lane and Jump edits stay with their original slot identities. Undo if removal was accidental.</li>
 </ol>
-<h2 id="audition">Audition</h2>
-<ol>
-<li>Press play or <strong>Space</strong>. Audition uses the shared Decks and Mixer; opening a mix alone does not interrupt playback. Wait while loading, or press again to cancel.</li>
-<li>Pause with editor transport. Moving live Deck/Mixer controls takes over playback. Auditions create no Takes.</li>
-</ol>
-<h2 id="promote">Promote</h2>
-<ol>
-<li>An unpromoted Take opens in <strong>REVIEW</strong>. Edit, audition, then <strong>Promote</strong> to save a Transition or Routine. Review edits do not persist before promotion; original evidence remains.</li>
-</ol>
-<h2 id="blank-mix">Blank mix</h2>
-<ol>
-<li>Choose <strong>+ New blank mix</strong>; drag Library Tracks onto the canvas. Two slots save as a <strong>Transition</strong>, three or more as a <strong>Routine</strong>; fewer than two remain unsaved. Adding or removing a slot across that boundary converts the saved mix; Set pins follow.</li>
-</ol></div>
+<p><img alt="Blank canvas before the first slot is added." src="../../shots/help-editor-blank.webp" /></p>
+<p><em>Zero-slot canvas: add the first Track from the Library below; nothing is saved yet.</em></p>
+<p><img alt="An incoming slot realigned against the outgoing Track." src="../../shots/help-editor-alignment.webp" /></p>
+<p><em>Select-mode horizontal drag shifts the incoming slot from its seeded bar to a later bar.</em></p>
+<p><img alt="A multi-Track Routine with ordered slots and its playback bounds." src="../../shots/help-editor-routine.webp" /></p>
+<p><em>Seven entry-ordered slots in a saved Routine; cast order is distinct from physical Deck assignment.</em></p>
+<p><strong>Current kind boundary:</strong> zero or one slot remains a draft. Two slots persist as a Transition; three or more as a Routine. Adding a third slot to a saved authored Transition, or removing the third from a saved authored Routine, converts on save and re-points Set pins. Check the conversion notice and the Set afterward. A recorded Routine's immutable source cast is not a blank authored cast; do not assume removing a recorded slot changes its evidence.</p>
+<h2 id="modes">Select, Pan and Jump</h2>
+<table>
+<thead>
+<tr>
+<th>Mode</th>
+<th>Shortcut</th>
+<th>Canvas gesture</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Select</strong></td>
+<td><strong>V</strong></td>
+<td>Select slot rows; drag to align or reorder; edit expanded lane nodes and trim handles. Default mode.</td>
+</tr>
+<tr>
+<td><strong>Pan</strong></td>
+<td><strong>H</strong></td>
+<td>Drag to navigate horizontally/vertically without moving a slot. Hold <strong>H</strong> momentarily, then release to return to the prior mode; a tap leaves Pan active.</td>
+</tr>
+<tr>
+<td><strong>Jump</strong></td>
+<td><strong>J</strong></td>
+<td>Click a slot's waveform row to insert a Jump at that beat; select its marker to configure it.</td>
+</tr>
+</tbody>
+</table>
+<p>The ruler and empty timeline background seek rather than insert a Jump. <strong>fit</strong> frames the window; <strong>fit⤢</strong> includes surrounding Track material. Zoom around the cursor with Ctrl/Cmd-wheel or pinch, pan horizontally with a horizontal wheel gesture. <strong>Escape</strong> closes a Jump popup, clears a selection, then returns to Select.</p>
+<p>To repeat a buildup, choose <strong>Jump (J)</strong>, click the slot waveform at the intended mix instant, then configure the popup: <strong>◀</strong> replays backward, <strong>▶</strong> skips forward, and <strong>⏸</strong> holds (Routine only). Set distance in beats <strong>b</strong> or seconds <strong>s</strong>, use <strong>½ / ×2</strong> to resize, and for backward Jumps set <strong>×</strong> repeats (1–64). The initial Jump is four Track beats backward. Drag the marker to change its time, or click it and choose <strong>delete</strong>. A recorded marker instead offers <strong>✎ edit</strong> (replace with an editable copy) or <strong>remove</strong> (play through the discontinuity). Removing recorded evidence changes the draft's interpretation, not the raw Session record. In Select, double-clicking a waveform also inserts a Jump.</p>
+<p><img alt="A Jump popup attached to a waveform marker." src="../../shots/help-editor-jump.webp" /></p>
+<p><em>A backward four-beat Jump on a one-slot draft; direction, beats, seconds and repeats are editable in the popup.</em></p>
+<h2 id="automation">Draw automation and stamp a Chop</h2>
+<p>Use the lane chips under a slot to show <strong>fader</strong>, <strong>LOW EQ</strong>, <strong>filter</strong>, <strong>trim</strong>, <strong>MID EQ</strong> or <strong>HIGH EQ</strong> (fader, LOW EQ and filter show initially). On a recorded strip, click <strong>✎</strong> to author an editable envelope over it; <strong>⊟</strong> collapses the editor, and <strong>↺</strong> on a collapsed authored strip removes the authored override so the recorded lane plays again. A Transition has no editable trim lane.</p>
+<p>In an expanded lane, click the curve preview to add a breakpoint, drag a point to change time or value, double-click it to delete. Drag empty lane space to box-select nodes; <strong>Cmd/Ctrl-click</strong> toggles a node, <strong>Cmd/Ctrl-drag</strong> selects a time span, and dragging a selected node moves the group. <strong>Delete/Backspace</strong> removes selected nodes (the lane keeps at least one). <strong>Alt-drag</strong> shifts the envelope in time. For a quick full cut, <strong>Shift-drag</strong> across empty lane space to stamp a rectangular <strong>Chop</strong> between beats, or <strong>Shift-click</strong> for a one-beat cut. The resulting walls are normal editable breakpoints. Shift also disables magnets during node moves.</p>
+<p><img alt="An expanded automation lane with its authored nodes and a Chop." src="../../shots/help-editor-chop.webp" /></p>
+<p><em>Shift-drag stamped a fader cut with editable walls; the waveform above reflects the cut.</em></p>
+<h2 id="audition">Audition and take over</h2>
+<p>Press <strong>▶</strong> or <strong>Space</strong> outside a text field to audition; the first press may show loading while the editor arms the shared Decks. Press again to cancel arming, or pause a playing audition. Opening an artifact alone does <strong>not</strong> claim the audible surface. Audition automation drives the shared Mixer; it is not captured as a new Take. A manual Mixer gesture or transport/pitch/jog/key-lock gesture on a driven Deck takes over: editor automation stops, but sounding Decks continue under your control. Gestures on an undriven Deck do not necessarily take over.</p>
+<h2 id="promote">Review a Take and Promote</h2>
+<p>Open a handover Take from <a href="../capture/index.html#takes">Sessions or HISTORY</a>. The header reads <strong>REVIEW</strong>. The app derives an editable Transition draft from the recorded events: inspect slot timing, Jumps and lanes; adjust and audition before <strong>↑ Promote</strong>. The original Take remains separate evidence. A Routine Take or mined candidate opens a Routine review preview; promoting a candidate first confirms a Routine Take. Switching away from an unpromoted review loses its draft edits. A recorded Cameo Take is not currently promoted through the handover history action; do not treat a Cameo as a Transition merely because both appear in history.</p>
+<p><img alt="An unpromoted Take open as a REVIEW draft with the Promote control." src="../../shots/help-editor-review.webp" /></p>
+<p><em>A handover Take opened for review; Promote is the explicit persistence action.</em></p>
+<h2 id="saving">Saving, undo and errors</h2>
+<p>There is no <strong>Save</strong> button. Edits to persisted artifacts autosave after a short pause (about 700 ms); <strong>✎ edited</strong> means a draft changed, <strong>not</strong> that the server acknowledged it. Wait for a write before leaving, especially after structural edits; navigation does not promise to flush a pending save. <strong>↩ / ↪</strong> or <strong>Cmd/Ctrl+Z / Cmd/Ctrl+Shift+Z</strong> undo/redo editor gestures. A drag is one history step. Selection and view navigation are not content changes. Undo history is scoped to the opened artifact, not a global history across mixes.</p>
+<p>Authored Routine create/structure failures can show <strong>Save failed: …</strong>; some Transition and edits-autosave failures currently log to the developer console instead of displaying a visible recovery notice. If a change appears not to stick, stop editing, inspect the console/error, and verify by reopening the artifact; do not assume automatic retry. Promotion is a separate explicit write—check that the REVIEW badge changes before treating it as saved.</p></div>
         <nav class="help-related" aria-label="Related articles">
           <h2>Related articles</h2>
           <ul class="help-cards">
             <li><a href="../start/index.html"><strong>First run and returning to Setup</strong><span>Complete or skip optional guides, resume later, and relaunch one guide without resetting the Library.</span></a></li>
             <li><a href="../curate/index.html"><strong>Curate the Library</strong><span>Import Tracks, assign Tags and Energy, filter, build Playlists, and archive rejects.</span></a></li>
             <li><a href="../perform/index.html"><strong>Keyboard DJing</strong><span>Choose a Deck, load a Track, and perform with the two-hand keyboard and mouse controls.</span></a></li>
+            <li><a href="../capture/index.html"><strong>Review Sessions and Takes</strong><span>Replay performance events, inspect detected handovers, and promote chosen evidence.</span></a></li>
+            <li><a href="../sets/index.html"><strong>Plan and play a Set</strong><span>Arrange Tracks, pin moves, inspect the plan and hand off Conductor playback.</span></a></li>
           </ul>
         </nav>
       </article>

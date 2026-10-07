@@ -1,36 +1,47 @@
 ---
 slug: capture
-draft: true
 title: Review Sessions and Takes
-summary: Revisit live performance events in Sessions and open captured Takes for review before saving reusable mix artifacts.
-order: 4
-related: [perform, editor]
+summary: Replay performance events, inspect detected handovers, and promote chosen evidence.
+order: 5
+related: [perform, editor, sets]
 shot: session
-caption: A Session timeline shows Track playback, captured Takes, and control events.
+caption: A Session timeline shows playback on physical Deck lanes and captured evidence.
 ---
 
-## Find a performance Session {#sessions}
+## What capture keeps {#sessions}
 
-Play in [Performance](../perform/index.html). Capture is always on: a **Session** opens when a Deck first becomes audible on the Master bus. Loading Tracks or cueing only in headphones does not open one. Ten continuous minutes without Master-audible performance end the Session; the next audible performance starts another.
+Capture runs during live Performance without a Record button. A Session opens on the first **Master-audible** Deck instant. Silent loads and headphone-only Cue do not start it; ten uninterrupted minutes without Master-audible activity end it. The next live audible stretch starts another Session. Sessions store transport and control **events, not audio**; replay needs the Library Tracks. Editor auditions and Conductor playback show as machine-held stretches, not captured performances. A short Master-audible preview can keep a Session active without counting as a played Track or a Take.
 
-Open **Sessions** in the Library sidebar, then click a row to see its timeline. Rows show when the Session started, its duration, audible Track count, and Take count.
+| Record | Scope | How to find it |
+| --- | --- | --- |
+| **Session** | Whole stretch of live Deck/Mixer events, across up to four Decks | Library sidebar **▦ Sessions** |
+| **Take** | Detected pair handover inside an engagement | Session timeline or top-bar **⋯ → HISTORY** |
+| **Cameo Take** | Guest comes and goes while host remains current | Session timeline/history; not an ordinary handover Transition |
+| **Routine Take** | Confirmed multi-Track passage | Session candidate controls and Mix editor review |
 
-To revisit a moment:
+## Open and replay a Session {#timeline}
 
-1. Zoom with the wheel or pan with the trackpad. Use **fit** to see the whole Session.
-2. Click a timeline moment, then its play button to replay from there.
-3. Use the replay controls to pause or stop. A manual Deck or Mixer gesture takes over and returns you to live performance.
+1. Choose **▦ Sessions** in the sidebar. The list groups by day, longest first; rows show time, duration, Master-audible Track count and Take count. Choose **Open timeline**. **‹ Sessions** returns to the list.
+2. Read the physical Deck lanes **C, A, B, D** and Track labels. Waveforms show played portions; height indicates Master gain. Hover for a moment's readout, then click a moment to select it. **fit** frames the Session. Horizontal wheel/trackpad pans; vertical wheel zooms around the cursor.
+3. At the selected moment press **▶** beside its timestamp to replay recorded events through the shared live Decks. Pause/resume or **■ Stop replay**; **Space** toggles pause. A manual Deck or Mixer gesture ends replay and takes over. Replay is not new captured evidence.
+4. Use **gaps ≥** to choose the minimum collapsed gap (30s, 45s, 2m or 5m); click a collapsed gap to expand it. **traces** toggles transport traces. Machine-controlled gaps contain tenure markers rather than the machine's individual control events.
 
-The **gaps ≥** control collapses long quiet or machine-controlled stretches; uncheck it to inspect their timing. Enable **traces** to examine transport movement.
+![A Session timeline with Deck lanes and a selected Take.](../../shots/help-editor-session-timeline.webp)
 
-A Session stores events, not audio. Replay uses the original Tracks through the shared Decks and Mixer. Editor auditions and Set playback appear as machine-controlled stretches rather than captured performance event streams.
+*Selected Take exposes **open in editor** above four physical Deck lanes and the collapsed gaps.*
 
-## Review a captured Take {#takes}
+Deleting a Session from the list removes its event timeline and mined candidates, **not its persisted Takes**; the row says **Delete this Session (Takes are kept)**. Confirm what provenance you need before deleting; this action is not an editing shortcut.
 
-A **Take** records a detected Handover: the incoming Track becomes audible and the outgoing eventually stays silent. Brief cross-cuts can belong to the same Take. If the original Track survives a guest's appearance, the result can instead be a **Cameo Take**. Cue-bus listening is not a Handover, and a blend is not guaranteed to produce a Take.
+## Find and review a Take {#takes}
 
-Click a Take on the Session timeline, then **open in editor**. You can also find captured evidence in **Transition history** and use its Session link to return to the surrounding performance.
+A handover Take is detected only when the incoming Track becomes Master-audible and the outgoing eventually stays silent. Brief returns can belong to the same engagement; not every blend yields a Take. If the guest ends while the host continues, the evidence is a Cameo Take instead. Headphone Cue and automated playback cannot create handover Takes.
 
-In review, audition the draft and adjust it before [Promote](../editor/index.html#promote). Opening a Take does not add a Transition to the Transition library. The captured evidence stays separate from the saved artifact.
+Click a Take chip on the Session timeline, then **open in editor**. Or choose top-bar **⋯ → HISTORY** to browse engagements by time, window, confidence and promotion state. The **▦** link jumps back to a source Session when present. A handover row opens an editable **REVIEW** draft in the [Mix editor](../editor/index.html#promote). Inspect and audition, then **↑ Promote** to save a Transition; opening it alone creates no library Transition. The Take remains evidence. A Cameo Take in history currently links back to its Session rather than launching the same handover review flow.
 
-For a suggested multi-Track passage, select its candidate span and trim the edges. Choose **Confirm Routine Take** when it contains at least three Tracks. Confirmation keeps evidence for later review; promotion saves the Routine. A two-Track span offers **Cut Take instead**.
+![HISTORY with recorded Takes and links back to Sessions.](../../shots/help-editor-take-history.webp)
+
+*Engagement-grouped Take history with duration, confidence and source Session links.*
+
+## Multi-Track candidates {#routine-evidence}
+
+The Session timeline can surface mined Routine candidates. Select one, trim its proposed span and inspect its cast. **Confirm Routine Take** retains a chosen passage as evidence; **Promote** turns a reviewed Routine Take into a saved Routine. If trimming a selected candidate leaves two Tracks, **Cut Take instead** offers pair evidence. This is **not** a general drag-any-range cutting tool on the Session timeline. A candidate and its promoted artifact are different records; do not confuse a suggested span with a saved Routine.
