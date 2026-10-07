@@ -1,0 +1,104 @@
+/* Setup framework (setup-guides #288): overlay chrome, sequence header,
+   Settings → Setup list. Flat tokens; bright accent for the active step. */
+
+.setup-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.75);
+}
+
+.setup-panel {
+  width: min(720px, calc(100vw - 48px));
+  max-height: calc(100vh - 48px);
+  overflow: auto;
+  background: var(--mantle);
+  border: 1px solid var(--accent);
+  padding: var(--space-24);
+}
+
+.setup-sequence {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-16);
+}
+
+.setup-sequence-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-12);
+}
+
+.setup-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.setup-step {
+  padding: var(--space-2) var(--space-8);
+  border: 1px solid var(--surface1);
+  color: var(--subtext0);
+  font-size: var(--font-small);
+}
+
+.setup-step.past {
+  border-color: var(--success);
+  color: var(--success);
+}
+
+.setup-step.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--base);
+  font-weight: bold;
+}
+
+.setup-leave {
+  flex-shrink: 0;
+}
+
+.setup-guide-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  max-width: 560px;
+}
+
+.setup-guide-row {
+  display: grid;
+  grid-template-columns: 1fr 110px 70px;
+  align-items: center;
+  gap: var(--space-12);
+  padding: var(--space-6) var(--space-8);
+  border: 1px solid var(--surface0);
+}
+
+.setup-guide-title {
+  color: var(--text);
+  font-weight: bold;
+}
+
+.setup-status {
+  font-size: var(--font-small);
+  font-weight: bold;
+  color: var(--subtext0);
+}
+
+.setup-status.done {
+  color: var(--success);
+}
+
+.setup-status.skipped {
+  color: var(--warning);
+}

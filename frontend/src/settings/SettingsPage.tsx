@@ -28,6 +28,7 @@ const WaveformSettings = lazy(() => import('../waveform/StyleTuningPage'));
 const JogSettings = lazy(() => import('../midi/JogTuningPage'));
 const MouseJogSettings = lazy(() => import('./MouseJogSettings'));
 const LibrarySettings = lazy(() => import('./LibrarySettings'));
+const SetupSettings = lazy(() => import('../setup/SetupSettings'));
 const SECTIONS = [
   { id: 'filters', title: 'Filters', detail: 'Sound and sweep response' },
   { id: 'effects', title: 'Beat FX', detail: 'Echo, Reverb and Flanger' },
@@ -36,6 +37,7 @@ const SECTIONS = [
   { id: 'mouse-jog', title: 'Mouse jog', detail: 'Keyboard and mouse response' },
   { id: 'library', title: 'Library', detail: 'Folders, DJ software, export' },
   { id: 'tour', title: 'Tour', detail: 'Coach marks and guidance' },
+  { id: 'setup', title: 'Setup', detail: 'First-run guides' },
 ] as const;
 type Section = (typeof SECTIONS)[number]['id'];
 const PARAMS = [
@@ -412,6 +414,8 @@ export default function SettingsPage({ performance = false }: { performance?: bo
               <LibrarySettings />
             ) : section === 'tour' ? (
               <TourSettingsPanel />
+            ) : section === 'setup' ? (
+              <SetupSettings />
             ) : (
               <MouseJogSettings performance={performance} />
             )}

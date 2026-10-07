@@ -39,7 +39,7 @@ import { useAnalysisPendingSync } from './hooks/useAnalysisPending';
 import { isTypingTarget } from './components/performance/performanceKeys';
 import { registerViewToggle } from './midi/controlRegistry';
 import { FirstRunWelcome } from './onboarding/FirstRunWelcome';
-import './onboarding/registerGuides';
+import './setup/allGuides';
 import { TourController } from './tour/TourController';
 import { setTourArea, type TourArea } from './tour/tourState';
 

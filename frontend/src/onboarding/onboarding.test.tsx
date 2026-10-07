@@ -7,7 +7,7 @@ import { createRoot } from 'react-dom/client';
 import type { Root } from 'react-dom/client';
 import { RekordboxImportGuide } from './RekordboxImportGuide';
 import { FirstRunWelcome } from './FirstRunWelcome';
-import { guideStatus, SETUP_STATE_KEY } from '../setup/guides';
+import { guideStatus, registerGuide, SETUP_STATE_KEY } from '../setup/guides';
 
 declare global {
   var IS_REACT_ACT_ENVIRONMENT: boolean | undefined;
@@ -227,7 +227,7 @@ describe('FirstRunWelcome', () => {
     const overlay = container.querySelector('[data-testid=first-run-welcome]');
     expect(overlay).not.toBeNull();
     expect(overlay?.hasAttribute('data-tour-suppress')).toBe(true);
-    act(() => button('Skip').click());
+    act(() => button('Skip setup').click());
     expect(container.querySelector('[data-testid=first-run-welcome]')).toBeNull();
     expect(guideStatus('welcome')).toBe('skipped');
   });
@@ -247,12 +247,34 @@ describe('FirstRunWelcome', () => {
     expect(container.querySelector('[data-testid=first-run-welcome]')).toBeNull();
   });
 
-  it('Import from Rekordbox opens the wizard', async () => {
+  it('Get started chains every registered guide, then finishes First run', async () => {
+    // A second guide alongside the real Rekordbox one (registered by allGuides).
+    registerGuide({
+      id: 'test-guide',
+      title: 'Test guide',
+      order: 99,
+      status: () => guideStatus('test-guide'),
+      Component: ({ onDone }) => (
+        <button className="btn" onClick={onDone}>
+          finish test guide
+        </button>
+      ),
+    });
     installFetch({ libraryTotal: 0, found: true, statuses: [NONE], importBodies: [] });
     act(() => root.render(<FirstRunWelcome />));
     await flush();
-    act(() => button('Import from Rekordbox').click());
+    expect(container.textContent).toContain('Rekordbox import');
+    expect(container.textContent).toContain('Test guide');
+    act(() => button('Get started').click());
     await flush();
+    // Step 1: the Rekordbox wizard inside the sequence — skip it.
     expect(container.querySelector('[data-testid=rekordbox-import-guide]')).not.toBeNull();
+    act(() => button('Skip').click());
+    expect(guideStatus('rekordbox-import')).toBe('skipped');
+    // Step 2: the test guide; finishing it ends First run.
+    act(() => button('finish test guide').click());
+    expect(guideStatus('test-guide')).toBe('done');
+    expect(guideStatus('welcome')).toBe('done');
+    expect(container.querySelector('[data-testid=first-run-welcome]')).toBeNull();
   });
 });

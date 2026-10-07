@@ -18,7 +18,8 @@ export interface GuideProps {
   onDone: () => void;
   /** Absent when standalone: no Skip affordance. */
   onSkip?: () => void;
-  /** Host can hide itself while the import task runs. */
+  /** Host can hide itself while the import task runs (defaults to onDone
+   * when hosted with a Skip affordance). */
   onBackground?: () => void;
   /** Poll interval for import status (tests shorten it). */
   pollMs?: number;
@@ -200,9 +201,11 @@ export function RekordboxImportGuide({ onDone, onSkip, onBackground, pollMs = 10
         <>
           <ImportProgressView progress={step.progress} />
           <p className="onboarding-muted">You can keep using manadj while this runs.</p>
-          {onBackground && (
+          {/* Inside First run / a relaunch (onSkip given): move on while the
+              import task keeps running — it counts as done for the sequence. */}
+          {(onBackground || onSkip) && (
             <div className="onboarding-actions">
-              <button className="btn" onClick={onBackground}>
+              <button className="btn" onClick={onBackground ?? onDone}>
                 Continue in background
               </button>
             </div>
