@@ -104,6 +104,21 @@ export function DeckProvider({ children }: { children: ReactNode }) {
     [engines, mixer]
   );
 
+  // Beat FX echo clock (gh#272): each Deck pushes its wall-seconds-per-beat
+  // into the Mixer so the per-channel echo delay tracks BPM/beat-grid
+  // changes. Engine notifications fire on every snapshot change (including
+  // playback frames); the Mixer dedupes and ramps, so this stays cheap and
+  // the delay glides instead of stepping.
+  useEffect(() => {
+    const push = (deck: ChannelId) =>
+      mixer.setChannelBeatSeconds(deck, engines[deck].echoBeatSeconds());
+    const unsubscribes = CHANNEL_IDS.map((deck) => {
+      push(deck);
+      return engines[deck].subscribe(() => push(deck));
+    });
+    return () => unsubscribes.forEach((unsubscribe) => unsubscribe());
+  }, [engines, mixer]);
+
   // Synced launches reference a locked member, never an unrelated playing Deck.
   useEffect(() => {
     for (const deck of CHANNEL_IDS) {

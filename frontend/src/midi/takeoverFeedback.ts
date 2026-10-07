@@ -31,6 +31,7 @@ export const takeoverKey = {
   master: () => 'master',
   cueLevel: () => 'cue-level',
   cueMix: () => 'cue-mix',
+  beatFxLevel: () => 'beat-fx-level',
 } as const;
 
 /** How long a hint outlives the last suppressed move. Long enough to read,
@@ -82,9 +83,19 @@ export function subscribeTakeoverHints(listener: () => void): () => void {
   return () => listeners.delete(listener);
 }
 
-export function _resetTakeoverFeedbackForTests(): void {
+function clearAllHints(notifyListeners: boolean): void {
   for (const timer of timers.values()) clearTimeout(timer);
   timers.clear();
+  if (hints.size === 0) return;
   hints.clear();
+  if (notifyListeners) notify();
+}
+
+export function clearTakeoverHints(): void {
+  clearAllHints(true);
+}
+
+export function _resetTakeoverFeedbackForTests(): void {
+  clearAllHints(false);
   listeners.clear();
 }

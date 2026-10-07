@@ -2,15 +2,17 @@
  * Persistent top bar, mode-first (gh#66 redesign, variant B):
  *
  * - The bar's spine is a prominent labeled segmented mode control
- *   (EXPORT / PERFORM / EDIT / SYNC), followed by the Settings toggle;
- *   rarer modes live behind an overflow trigger at the control's right
- *   end, which wears the active overflow mode's segment when one is
+ *   (PERFORM / EDIT / SYNC), followed by the Settings toggle; rarer
+ *   modes (EXPORT, HISTORY — setup-guides #301) live behind an overflow
+ *   trigger at the control's right end, which wears the active overflow mode's segment when one is
  *   selected. No title — segments carry their own labels.
  * - Global status docks right, stable across modes, grouped by concern:
  *   visualizer | tasks | recording | audio (routing · deck ownership · MIDI).
  */
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import { pairEditorFallback } from '../routines/openMix';
+import { DEV_SURFACES } from '../devMode';
+import { useAppConfig } from '../settings/useAppConfig';
 import { connectedControllers, subscribeControllers } from '../midi/connectionStore';
 import { isQuantizeOn, setQuantize } from '../playback/quantizeStore';
 import { AudioRoutingPicker } from './AudioRoutingPicker';
@@ -20,6 +22,7 @@ import { MasterRecorderControl } from './MasterRecorderControl';
 import { isVisualizerOpen, toggleVisualizer } from '../visualizer/windowControl';
 import { VisualizerControlModal } from './VisualizerControlModal';
 import { hasKeyboardOverlay, isQuantizeShortcut, isTypingTarget } from './performance/performanceKeys';
+import { TourReplayButton } from '../tour/TourReplayButton';
 import './TopBar.css';
 
 export type AppMode = 'library' | 'performance' | 'transition' | 'routine' | 'history' | 'sync';
@@ -27,10 +30,8 @@ export type AppMode = 'library' | 'performance' | 'transition' | 'routine' | 'hi
 type ModeMeta = { id: AppMode; icon: string; label: string; title: string };
 
 /** The daily-driver modes: always visible as labeled segments, full-word
- * labels. The library mode presents as EXPORT (the id stays 'library' —
- * it's baked into ?view=, the stored view, and mode plumbing). */
+ * labels. */
 const PRIMARY_MODES: ModeMeta[] = [
-  { id: 'library', icon: '≡', label: 'EXPORT', title: 'Export' },
   { id: 'performance', icon: '▸', label: 'PERFORM', title: 'Performance' },
   // #221 phase 3 (ADR 0037): the MIX EDITOR is THE editor — the primary
   // EDIT slot routes to the unified surface (mode id 'routine'); the pair
@@ -41,8 +42,11 @@ const PRIMARY_MODES: ModeMeta[] = [
 ];
 
 /** Rarer modes, relegated to the overflow menu (walkthrough verdict on
- * gh#66). */
+ * gh#66). The library mode presents as EXPORT (the id stays 'library' —
+ * it's baked into ?view=, the stored view, and mode plumbing); it moved
+ * here from the primary segments in setup-guides #301. */
 const OVERFLOW_MODES: ModeMeta[] = [
+  { id: 'library', icon: '≡', label: 'EXPORT', title: 'Export' },
   { id: 'history', icon: '↻', label: 'HISTORY', title: 'Transition history' },
 ];
 
@@ -91,6 +95,23 @@ function VisualizerCluster() {
   );
 }
 
+/** ffmpeg health (packaged-app #278): waveforms/analysis/stems all decode
+ * through ffmpeg, so a missing binary is an app-level error state. Renders
+ * nothing while healthy (the overwhelmingly common case). */
+function FfmpegWarning() {
+  const { data } = useAppConfig();
+  if (!data || data.ffmpeg_available) return null;
+  return (
+    <span
+      className="topbar-ffmpeg-warning"
+      role="alert"
+      title="ffmpeg was not found. Waveforms, analysis and stems will fail until it is installed (brew install ffmpeg), then restart manaDJ."
+    >
+      ⚠ ffmpeg missing
+    </span>
+  );
+}
+
 function MidiBadge() {
   const controllers = useSyncExternalStore(subscribeControllers, connectedControllers);
   const on = controllers.length > 0;
@@ -121,9 +142,10 @@ function ModeControl({
 }) {
   const [menu, setMenu] = useState(false);
   // The legacy pair editor rides the overflow only under the dev fallback
-  // flag (or while it IS the active view — never strand the user).
+  // flag in dev builds (packaged-app #278), or while it IS the active view —
+  // never strand the user.
   const overflowModes =
-    pairEditorFallback() || mode === 'transition'
+    (DEV_SURFACES && pairEditorFallback()) || mode === 'transition'
       ? [...OVERFLOW_MODES, PAIR_EDITOR_MODE]
       : OVERFLOW_MODES;
   const activeOverflow = overflowModes.find((m) => m.id === mode);
@@ -138,7 +160,7 @@ function ModeControl({
   }, [menu]);
 
   return (
-    <nav className="topbar-mode-control" aria-label="Mode">
+    <nav className="topbar-mode-control" aria-label="Mode" data-tour="topbar.modes">
       {PRIMARY_MODES.map((m) => (
         <button
           key={m.id}
@@ -169,7 +191,7 @@ function ModeControl({
         title={
           activeOverflow
             ? `${activeOverflow.title} — more modes`
-            : 'More modes (Transition history)'
+            : 'More modes (Export, Transition history)'
         }
         onClick={() => setMenu((v) => !v)}
       >
@@ -242,6 +264,7 @@ export function TopBar({
         onSettingsToggle={onSettingsToggle}
       />
       <div className="topbar-status">
+        <FfmpegWarning />
         <VisualizerCluster />
         <span className="topbar-divider" />
         <TasksWidget />
@@ -253,6 +276,9 @@ export function TopBar({
           <AudioOwnershipChip mode={mode} onModeChange={onModeChange} />
           <MidiBadge />
         </div>
+        <span className="topbar-divider" />
+        {/* Tour replay (feature-tour #282): every section's coach marks. */}
+        <TourReplayButton onModeChange={onModeChange} />
       </div>
     </header>
   );

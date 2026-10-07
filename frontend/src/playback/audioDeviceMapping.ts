@@ -11,7 +11,7 @@ export interface AudioRouteDefaults {
  * routes stays null and callers must require an explicit output pair.
  */
 export interface AudioDeviceMapping {
-  model: 'inpulse-300-mk2' | 'ddj-grv6';
+  model: 'inpulse-300-mk2' | 'ddj-grv6' | 'ddj-sb3';
   matches: readonly string[];
   routes: AudioRouteDefaults | null;
   verification: 'verified' | 'required';
@@ -32,6 +32,14 @@ const AUDIO_DEVICE_MAPPINGS: readonly AudioDeviceMapping[] = [
     matches: ['ddj-grv6'],
     // Physical output order remains deliberately absent until the hardware
     // walkthrough records it. MIDI documentation is not an audio authority.
+    routes: null,
+    verification: 'required',
+  },
+  {
+    model: 'ddj-sb3',
+    matches: ['ddj-sb3'],
+    // Mixxx documents outs 1-2 master / 3-4 headphones; unverified here.
+    // Firmware: decks 3/4 only work while the host uses this interface.
     routes: null,
     verification: 'required',
   },

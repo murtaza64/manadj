@@ -1,0 +1,88 @@
+# Regression gate: backend + frontend + desktop shell on Windows, Linux and
+# macOS (cross-platform #319; promoted from the #299 probe workflow).
+#
+# Known per-OS failures are deselected in the pytest step with the issue
+# that fixes each; the lane landing a fix deletes its
+# line, so the gate only ever goes red on NEW breakage.
+name: ci
+on:
+  push:
+    branches: [main, "probe/**"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: test ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    env:
+      PYTHONUTF8: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: ffmpeg
+        run: |
+          case "$RUNNER_OS" in
+            Linux) sudo apt-get update -q && sudo apt-get install -yq ffmpeg ;;
+            Windows) choco install ffmpeg -y --no-progress ;;
+            macOS) brew install ffmpeg ;;
+          esac
+          ffmpeg -version | head -1
+
+      - name: uv sync
+        run: uv sync --frozen
+
+      - name: pytest
+        run: |
+          deselect=()
+          uv run --no-sync pytest -q -p no:cacheprovider "${deselect[@]}"
+
+      - name: backend boot smoke
+        env:
+          DISABLE_TASK_WORKER: "1"
+        run: |
+          export MANADJ_DATA_DIR="$RUNNER_TEMP/manadj-data"
+          mkdir -p "$MANADJ_DATA_DIR"
+          # Run the venv python directly (not `uv run`): a lingering uv process
+          # holds the cache lock and fails setup-uv's post-job cache prune.
+          if [ "$RUNNER_OS" = "Windows" ]; then py=.venv/Scripts/python.exe; else py=.venv/bin/python; fi
+          "$py" -m backend.serve --port 8127 > boot.log 2>&1 &
+          pid=$!
+          ok=1
+          for i in $(seq 1 120); do
+            if curl -sf http://127.0.0.1:8127/api/tracks/ > /dev/null; then echo "boot ok after ${i}s"; ok=0; break; fi
+            sleep 1
+          done
+          kill "$pid" 2>/dev/null || true
+          [ "$ok" = 0 ] || { cat boot.log; exit 1; }
+
+      - name: vitest
+        working-directory: frontend
+        run: |
+          npm ci --no-audit --no-fund
+          npx vitest run
+
+      - name: typecheck
+        working-directory: frontend
+        run: npx tsc -b
+
+      - name: desktop shell tests
+        # The preload smoke launches a real Electron binary (desktop/node_modules
+        # isn't installed here); everything else is plain node.
+        run: node --test --test-skip-pattern "production preload" desktop/backend.test.js desktop/recording.test.js

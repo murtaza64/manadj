@@ -555,14 +555,24 @@ def test_verify_flags_order_drift(library):
 # --- CLI -------------------------------------------------------------------
 
 
-def test_cli_export_and_verify(library, tmp_path, capsys):
+def test_cli_export_and_verify(library, tmp_path, capsys, monkeypatch):
     import importlib.util
+    from types import SimpleNamespace
 
     spec = importlib.util.spec_from_file_location(
         "engine_usb_cli", Path(__file__).parent.parent / "scripts" / "engine_usb.py"
     )
     cli = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(cli)
+
+    # Pin the export gate open (ADR 0043) — don't depend on the repo config.
+    import backend.config as backend_config
+
+    monkeypatch.setattr(
+        backend_config,
+        "get_config",
+        lambda: SimpleNamespace(export=SimpleNamespace(enabled=True)),
+    )
 
     # a file-backed manadj db for the CLI
     manadj_db = tmp_path / "manadj.db"
@@ -588,3 +598,15 @@ def test_cli_export_and_verify(library, tmp_path, capsys):
     assert cli.main(
         ["export", "--dest", "/Volumes/REROLL SD", "--manadj-db", str(manadj_db)]
     ) == 2
+
+    # export gate closed (ADR 0043): device export refuses before any write
+    monkeypatch.setattr(
+        backend_config,
+        "get_config",
+        lambda: SimpleNamespace(export=SimpleNamespace(enabled=False)),
+    )
+    gated_dest = tmp_path / "gated-device"
+    assert cli.main(
+        ["export", "--dest", str(gated_dest), "--manadj-db", str(manadj_db)]
+    ) == 2
+    assert not gated_dest.exists()

@@ -39,6 +39,15 @@ def _manadj_session(db_path: Path):
 
 
 def cmd_export(args: argparse.Namespace) -> int:
+    # Export gate (ADR 0043): device export is an external-library write.
+    # Gated at this entry point, matching the routers' Depends pattern.
+    from backend.config import get_config
+    from backend.export_gate import EXPORT_DISABLED_DETAIL
+
+    if not get_config().export.enabled:
+        print(f"REFUSED: {EXPORT_DISABLED_DETAIL}", file=sys.stderr)
+        return 2
+
     session = _manadj_session(Path(args.manadj_db))
     options = DeviceExportOptions(
         dest_root=Path(args.dest),

@@ -15,6 +15,9 @@ import {
   beatFlashPhase,
   blinkPhase,
   encodeAssistantLed,
+  encodeBeatFxBeat,
+  encodeBeatFxEngageLeds,
+  encodeBeatFxLed,
   encodeDeckLeds,
   ledStates,
 } from '../midi/feedback';
@@ -76,6 +79,13 @@ function DeckFeedbackPublisher({
   // the same change subscription as the on-screen PFL button, so hardware
   // toggles, screen clicks and this light can never disagree.
   const pfl = useMixerValue((m) => m.getChannelState(deck).pfl);
+  // Stem kill pads (stems #210): the EFFECTIVE mask (automation lane wins,
+  // ADR 0022) — the same read the on-screen stem row renders — dark when
+  // the Track has no stems (stemsLoaded, engine snapshot). The effective
+  // object is replaced immutably on every change, so the per-channel
+  // subscribe fires exactly when the mask moves.
+  const stems = useMixerValue((m) => m.getAutomation(deck)?.stems ?? m.getChannelState(deck).stems);
+  const stemsLoaded = useDeckSnapshot((s) => s.stemsLoaded);
   // Q lamp (midi-performance-ops 07): the app-wide Quantize store — the
   // same subscription the TopBar Q toggle renders from, so both hardware
   // lamps and the screen always agree.
@@ -170,6 +180,7 @@ function DeckFeedbackPublisher({
       slipMode,
       vinylMode,
       loopBeats,
+      stems: stemsLoaded ? stems : null,
     };
     const states = ledStates(
       holderPlaying === null ? input : audibleTransportOverride(input, holderPlaying),
@@ -198,6 +209,8 @@ function DeckFeedbackPublisher({
     slipMode,
     vinylMode,
     loopBeats,
+    stems,
+    stemsLoaded,
     holderPlaying,
     pendingPhase,
     beatFlash,
@@ -230,6 +243,30 @@ function AssistantFeedbackPublisher() {
       }
     }
   }, [follows, outputs]);
+  return null;
+}
+
+/**
+ * Beat FX output mirrors the section gate and time-unit fraction, including
+ * full resync on connect/replug.
+ */
+function BeatFxFeedbackPublisher() {
+  const section = useMixerValue((m) => m.getBeatFxSection());
+  const focus = useControlFocus();
+  const outputs = useSyncExternalStore(subscribeOutputs, connectedOutputs);
+  useEffect(() => {
+    if (outputs.length === 0) return;
+    for (const output of outputs) {
+      if (!output.mapping.feedback) continue;
+      for (const message of [
+        ...encodeBeatFxLed(output.mapping.feedback, section.on),
+        ...encodeBeatFxBeat(output.mapping.feedback, section.beats),
+        ...encodeBeatFxEngageLeds(output.mapping.feedback, section, focus),
+      ]) {
+        output.send(message);
+      }
+    }
+  }, [section, focus, outputs]);
   return null;
 }
 
@@ -285,6 +322,7 @@ export function MidiFeedbackBridge() {
         <DeckFeedbackPublisher clockNow={clockNow} onNeedsClock={onNeedsD} />
       </DeckScope>
       <AssistantFeedbackPublisher />
+      <BeatFxFeedbackPublisher />
     </>
   );
 }

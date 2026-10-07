@@ -1096,6 +1096,24 @@ describe('hot-cue stab capture (sessions 11)', () => {
     r.recorder.dispose();
   });
 
+  it('a Trigger Cue mode press (#289) logs play + hotCue, never a stab', () => {
+    // Trigger flips `playing` (no hotCuePreviewSlot): the press is a real
+    // Play, and release is inert — nothing to bracket.
+    const r = rig();
+    r.recorder.start();
+    r.decks.A.load(1);
+    const before = r.logged.length;
+    r.decks.A.seek(64);
+    r.decks.A.play();
+    r.decks.A.fireTransport({ action: 'hotCue', playhead: 64, detail: 3 });
+    const actions = r.logged
+      .slice(before)
+      .filter((e): e is Extract<CaptureEvent, { kind: 'transport' }> => e.kind === 'transport')
+      .map((e) => e.action);
+    expect(actions).toEqual(['play', 'hotCue']);
+    r.recorder.dispose();
+  });
+
   it("ticks sample a hot-cue-previewing deck's playhead", () => {
     const r = rig();
     r.recorder.start();

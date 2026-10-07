@@ -5,7 +5,9 @@ from sqlalchemy.orm import Session
 from ..database import get_db
 from ..config import get_config
 from ..library.import_manager import LibraryImportManager
+from ..library.drop_import import drop_import
 from ..library.models import (
+    DropImportRequest, DropImportResult,
     LibraryImportResult, LibraryImportRequest,
     LibraryImportExecutionResult
 )
@@ -15,7 +17,7 @@ router = APIRouter()
 
 @router.get("/sync/library/candidates", response_model=LibraryImportResult)
 def get_import_candidates(
-    recursive: bool = False,
+    recursive: bool = True,
     db: Session = Depends(get_db)
 ):
     """Get list of tracks available for import from library."""
@@ -24,7 +26,7 @@ def get_import_candidates(
     if not config.library.tracks_directory:
         raise HTTPException(
             status_code=400,
-            detail="Library tracks_directory not configured in config.toml"
+            detail="Tracks directory is not set. Choose one in Settings → Library."
         )
 
     manager = LibraryImportManager(db, config.library.tracks_directory)
@@ -42,20 +44,30 @@ def import_library_tracks(
     if not config.library.tracks_directory:
         raise HTTPException(
             status_code=400,
-            detail="Library tracks_directory not configured in config.toml"
+            detail="Tracks directory is not set. Choose one in Settings → Library."
         )
 
     manager = LibraryImportManager(db, config.library.tracks_directory)
 
-    # If specific candidates provided, reconstruct from filepaths
-    candidates = None
+    # Re-scan with the same recursion as the candidates listing (#276: the
+    # old non-recursive re-scan dropped every subfolder file), then filter
+    # to the requested filepaths when given.
+    candidates = manager.get_import_candidates(recursive=request.recursive).candidates
     if request.candidate_filepaths:
-        # Get full candidate list and filter
-        all_candidates = manager.get_import_candidates()
         filepath_set = set(request.candidate_filepaths)
-        candidates = [
-            c for c in all_candidates.candidates
-            if c.filepath in filepath_set
-        ]
+        candidates = [c for c in candidates if c.filepath in filepath_set]
 
     return manager.import_tracks(candidates)
+
+
+@router.post("/sync/library/drop-import", response_model=DropImportResult)
+def drop_import_tracks(request: DropImportRequest, db: Session = Depends(get_db)):
+    """Disk Import files/folders dropped from anywhere, in place (no copy).
+
+    Independent of tracks_directory. Optionally appends the imported Tracks
+    to `playlist_id`.
+    """
+    try:
+        return drop_import(db, request.paths, request.playlist_id)
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e))

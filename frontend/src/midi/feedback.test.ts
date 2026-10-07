@@ -44,6 +44,7 @@ const idle = {
   slipMode: false,
   vinylMode: true,
   loopBeats: null,
+  stems: null,
 };
 
 const unloaded = { ...idle, loaded: false };
@@ -153,6 +154,12 @@ describe('ledStates', () => {
     expect(ledStates(idle).loopBeats).toBeNull();
   });
 
+  it('carries the effective stem mask through for the stem pads, null = stem-less', () => {
+    const stems = { vocals: false, drums: true, bass: true, other: false };
+    expect(ledStates({ ...idle, stems }).stems).toEqual(stems);
+    expect(ledStates(idle).stems).toBeNull();
+  });
+
   it('grid pads light steadily iff the Track has a Beatgrid, pad 3 dark always (midi-performance-ops 05)', () => {
     expect(ledStates({ ...idle, hasBeatgrid: true }).gridPads).toEqual([
       true, // 1: nudge earlier
@@ -216,6 +223,7 @@ describe('audibleTransportOverride (editor-midi 05)', () => {
     slipMode: true,
     vinylMode: false,
     loopBeats: 4,
+    stems: { vocals: true, drums: true, bass: true, other: true },
   };
 
   it('PLAY follows the audible holder (both decks report the one mix transport)', () => {
@@ -397,6 +405,16 @@ describe('encodeDeckLeds', () => {
     for (const [, note] of messages) {
       expect([0x1b, 0x1d, 0x1e, 0x1f].includes(note)).toBe(false);
     }
+  });
+
+  it('skips stem pads entirely when the mapping has no stem block', () => {
+    // The Inpulse carries no stem pad block: no extra messages appear
+    // whether or not stem state exists.
+    const withStems = encodeDeckLeds(feedback, 'A', {
+      ...dark,
+      stems: { vocals: false, drums: true, bass: true, other: true },
+    });
+    expect(withStems).toEqual(encodeDeckLeds(feedback, 'A', dark));
   });
 
   it('covers every light of the deck exactly once', () => {

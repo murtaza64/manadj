@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { JogController, JOG_SPINBACK_IDLE_MS, JOG_RELEASE_RIM_SUPPRESS_MS } from './jog';
+import { JogController, JOG_RELEASE_IDLE_MS } from './jog';
 import { GRV6_JOG_CALIBRATION as calibration } from './jogCalibration';
 
 describe('GRV6 scratch controller', () => {
@@ -128,18 +128,28 @@ describe('GRV6 scratch controller', () => {
     expect(move).toHaveBeenCalledTimes(5);
     expect(begin).toHaveBeenCalledOnce();
     expect(bend).not.toHaveBeenCalled();
-    vi.advanceTimersByTime(JOG_SPINBACK_IDLE_MS - 1);
+    vi.advanceTimersByTime(JOG_RELEASE_IDLE_MS - 1);
     expect(end).not.toHaveBeenCalled();
     vi.advanceTimersByTime(1);
     expect(end).toHaveBeenCalledOnce();
     expect(vi.getTimerCount()).toBe(0);
     rimTicks(20);
     vi.advanceTimersByTime(25);
-    expect(bend).not.toHaveBeenCalled();
-    vi.advanceTimersByTime(JOG_RELEASE_RIM_SUPPRESS_MS);
-    rimTicks(20);
-    vi.advanceTimersByTime(25);
     expect(bend).toHaveBeenCalled();
+  });
+
+  it('keeps a forward throw through the threshold-gated touch-to-rim handoff', () => {
+    jog.onTouch(true, 0);
+    touchTicks(63);
+    rate.mockReturnValue(3);
+    jog.onTouch(false, 1);
+
+    vi.advanceTimersByTime(20);
+    rimTicks(20);
+
+    expect(active).toBe(true);
+    expect(end).not.toHaveBeenCalled();
+    expect(move).toHaveBeenCalledTimes(2);
   });
 
   it('releases promptly after motion stopped while still touching', () => {
@@ -151,10 +161,11 @@ describe('GRV6 scratch controller', () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
-  it.each([-2, -1, 4])('ordinary moving release at %sx never waits for residual motion', speed => {
+  it.each([-2, -1, 4])('release above the fresh-motion threshold ends despite residual rate %sx', speed => {
     jog.onTouch(true);
     touchTicks(-63);
     rate.mockReturnValue(speed);
+    vi.advanceTimersByTime(25);
     jog.onTouch(false);
     expect(end).toHaveBeenCalledOnce();
     rimTicks(-20);
@@ -193,12 +204,12 @@ describe('GRV6 scratch controller', () => {
     expect(end).toHaveBeenCalledOnce();
   });
 
-  it('ends a recognized throw after 12ms even if no rim tick follows hand-up', () => {
+  it('ends a recognized throw after the release window if no rim tick follows hand-up', () => {
     jog.onTouch(true);
     touchTicks(-60);
     rate.mockReturnValue(-3);
     jog.onTouch(false);
-    vi.advanceTimersByTime(11);
+    vi.advanceTimersByTime(JOG_RELEASE_IDLE_MS - 1);
     expect(end).not.toHaveBeenCalled();
     vi.advanceTimersByTime(1);
     expect(end).toHaveBeenCalledOnce();
@@ -227,7 +238,7 @@ describe('GRV6 scratch controller', () => {
     if (via === 'override' || via === 'timer') {
       active = false;
       if (via === 'override') jog.syncState();
-      else vi.advanceTimersByTime(12);
+      else vi.advanceTimersByTime(JOG_RELEASE_IDLE_MS);
     }
     rimTicks(-20);
     vi.advanceTimersByTime(25);
@@ -283,14 +294,15 @@ describe('GRV6 scratch controller', () => {
       rimTicks(-20);
       end.mockClear();
       move.mockClear();
-      touchTicks(-20);
+      touchTicks(-20); // Touch stream while released: coast continues it.
     }
     active = false; // Engine load/pause/manual seek already ended this scratch.
     if (via === 'sync') jog.syncState();
     if (via === 'tick') touchTicks(20);
     if (via === 'timer') vi.advanceTimersByTime(100);
     expect(end).not.toHaveBeenCalled();
-    expect(move).toHaveBeenCalledOnce();
+    if (via === 'tick') expect(move).toHaveBeenCalledTimes(2); // override + held re-acquire
+    else expect(move).toHaveBeenCalledOnce();
     active = true; // A later gesture must not be ended by an old timer.
     vi.advanceTimersByTime(1_000);
     expect(end).not.toHaveBeenCalled();

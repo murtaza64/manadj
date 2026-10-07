@@ -7,12 +7,13 @@ seam (ADR 0002/0004)."""
 
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from backend import crud, models
 from backend.database import get_db
+from backend.export_gate import require_export_enabled
 
 router = APIRouter(prefix="/sync/export", tags=["sync"])
 
@@ -61,7 +62,7 @@ class HotcueExportRequest(BaseModel):
     mode: Literal["add-only", "replace-all"]
 
 
-@router.post("/hotcues/rekordbox")
+@router.post("/hotcues/rekordbox", dependencies=[Depends(require_export_enabled)])
 def export_hotcues_endpoint(
     request: HotcueExportRequest,
     db: Session = Depends(get_db),
@@ -89,7 +90,7 @@ class BeatgridExportRequest(BaseModel):
     track_id: int  # always the confirmed tier: grid export overwrites RB's
 
 
-@router.post("/beatgrid/rekordbox")
+@router.post("/beatgrid/rekordbox", dependencies=[Depends(require_export_enabled)])
 def export_beatgrid_endpoint(
     request: BeatgridExportRequest,
     db: Session = Depends(get_db),
@@ -120,7 +121,7 @@ def export_beatgrid_endpoint(
         raise HTTPException(status_code=409, detail=str(e))
 
 
-@router.post("/key/rekordbox")
+@router.post("/key/rekordbox", dependencies=[Depends(require_export_enabled)])
 def export_key_endpoint(
     request: KeyExportRequest,
     db: Session = Depends(get_db),
@@ -148,7 +149,7 @@ class AutoExportRequest(BaseModel):
     track_ids: list[int] | None = None  # None = whole Library
 
 
-@router.post("/rekordbox/auto")
+@router.post("/rekordbox/auto", dependencies=[Depends(require_export_enabled)])
 def auto_export_endpoint(
     request: AutoExportRequest,
     db: Session = Depends(get_db),
@@ -197,16 +198,16 @@ def get_playlist_full_export_service(db: Session = Depends(get_db)):
     return build_playlist_full_export_service(db)
 
 
-@router.post("/playlists/{playlist_name}/performance")
+@router.post("/playlists/performance", dependencies=[Depends(require_export_enabled)])
 def export_playlist_performance_endpoint(
-    playlist_name: str,
     request: PlaylistFullExportRequest,
+    playlist: str = Query(min_length=1),
     service=Depends(get_playlist_full_export_service),
 ):
     if not request.targets:
         raise HTTPException(status_code=422, detail="Select at least one destination")
     try:
-        return service.export(playlist_name, request.targets)
+        return service.export(playlist, request.targets)
     except LookupError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
 
@@ -220,14 +221,14 @@ def get_playlist_full_export_previewer(db: Session = Depends(get_db)):
     return previewer
 
 
-@router.get("/playlists/{playlist_name}/performance/preview")
+@router.get("/playlists/performance/preview")
 def preview_playlist_performance_endpoint(
-    playlist_name: str,
+    playlist: str = Query(min_length=1),
     previewer=Depends(get_playlist_full_export_previewer),
 ):
     """Read-only plan of a full playlist export: create vs replace, add/remove/
     reorder counts, and unmatched tracks per destination. Writes nothing."""
     try:
-        return previewer(playlist_name, ["rekordbox", "engine"])
+        return previewer(playlist, ["rekordbox", "engine"])
     except LookupError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
