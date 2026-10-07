@@ -21,7 +21,7 @@ type Step =
   | { kind: 'choose'; current: string }
   | { kind: 'running'; progress: ImportProgress | null }
   | { kind: 'summary'; summary: TracksDirectorySummary }
-  | { kind: 'error'; message: string; current: string };
+  | { kind: 'error'; message: string; current: string; connection?: boolean };
 
 function n(value: number): string {
   return value.toLocaleString();
@@ -36,6 +36,7 @@ export function TracksDirectoryGuide({ onDone, onSkip, pollMs = 1000 }: TracksDi
   const [draft, setDraft] = useState('');
   const [saving, setSaving] = useState(false);
   const generation = useRef(0);
+  const busy = useRef(false);
   useEffect(
     () => () => {
       generation.current += 1;
@@ -43,7 +44,7 @@ export function TracksDirectoryGuide({ onDone, onSkip, pollMs = 1000 }: TracksDi
     [],
   );
 
-  const load = useCallback(() => {
+  const load = useCallback((recover = false) => {
     const gen = ++generation.current;
     void (async (): Promise<Step> => {
       try {
@@ -51,7 +52,13 @@ export function TracksDirectoryGuide({ onDone, onSkip, pollMs = 1000 }: TracksDi
         if (status.state === 'pending' || status.state === 'running') {
           return { kind: 'running', progress: status.progress };
         }
+        if (recover && status.state === 'done' && status.summary) {
+          return { kind: 'summary', summary: status.summary };
+        }
         const config = await api.appConfig.get();
+        if (recover && status.state === 'failed') {
+          return { kind: 'error', message: status.error || 'Scan failed', current: config.tracks_directory ?? '' };
+        }
         return { kind: 'choose', current: config.tracks_directory ?? '' };
       } catch (e) {
         return { kind: 'error', message: message(e), current: '' };
@@ -62,119 +69,148 @@ export function TracksDirectoryGuide({ onDone, onSkip, pollMs = 1000 }: TracksDi
       setStep(next);
     });
   }, []);
-  useEffect(load, [load]);
+  useEffect(() => load(), [load]);
 
   const running = step.kind === 'running';
   useEffect(() => {
     if (!running) return;
     const gen = generation.current;
     let ticks = 0;
+    let disposed = false;
+    let polling = false;
     const id = window.setInterval(async () => {
+      if (disposed || polling) return;
+      polling = true;
       try {
         const status = await tracksDirectoryApi.status();
-        if (gen !== generation.current) return;
+        if (disposed || gen !== generation.current) return;
         ticks += 1;
         if (ticks % 5 === 0) void queryClient.invalidateQueries({ queryKey: ['tracks'] });
         if (status.state === 'done' && status.summary) {
+          disposed = true;
           void queryClient.invalidateQueries({ queryKey: ['tracks'] });
           setStep({ kind: 'summary', summary: status.summary });
         } else if (status.state === 'failed') {
+          disposed = true;
           setStep({ kind: 'error', message: status.error || 'Scan failed', current: draft });
         } else {
           setStep({ kind: 'running', progress: status.progress });
         }
       } catch (e) {
-        if (gen === generation.current) setStep({ kind: 'error', message: message(e), current: draft });
+        if (!disposed && gen === generation.current) {
+          disposed = true;
+          setStep({ kind: 'error', message: message(e), current: draft, connection: true });
+        }
+      } finally {
+        polling = false;
       }
     }, pollMs);
-    return () => window.clearInterval(id);
+    return () => { disposed = true; window.clearInterval(id); };
   }, [running, pollMs, draft]);
 
   const current = step.kind === 'choose' || step.kind === 'error' ? step.current : '';
   const save = async (path: string): Promise<boolean> => {
-    setSaving(true);
+    const gen = generation.current;
     try {
       const config = await api.appConfig.update({ tracks_directory: path });
+      if (gen !== generation.current) return false;
       queryClient.setQueryData(APP_CONFIG_QUERY_KEY, config);
       setDraft(config.tracks_directory ?? '');
       setStep({ kind: 'choose', current: config.tracks_directory ?? '' });
       return true;
     } catch (e) {
-      setStep({ kind: 'error', message: message(e), current });
+      if (gen === generation.current) setStep({ kind: 'error', message: message(e), current });
       return false;
-    } finally {
-      setSaving(false);
     }
   };
   const pick = async () => {
-    const picked = await window.manadjSettings?.pickFolder({
-      title: 'Choose your tracks folder',
-      defaultPath: draft || undefined,
-    });
-    if (picked) await save(picked);
-  };
-  const scan = async () => {
-    // Commit an edited path first, so the Scan reads what the user sees.
-    if (draft.trim() !== current && !(await save(draft.trim()))) return;
-    const gen = ++generation.current;
+    if (busy.current) return;
+    busy.current = true;
+    setSaving(true);
+    const gen = generation.current;
     try {
+      const picked = await window.manadjSettings?.pickFolder({
+        title: 'Choose your music folder', defaultPath: draft || undefined,
+      });
+      if (picked && gen === generation.current) setDraft(picked);
+    } catch (e) {
+      if (gen === generation.current) setStep({ kind: 'error', message: message(e), current });
+    } finally {
+      busy.current = false;
+      setSaving(false);
+    }
+  };
+  const commit = async (scan: boolean) => {
+    if (busy.current || !draft.trim()) return;
+    busy.current = true;
+    setSaving(true);
+    const gen = generation.current;
+    try {
+      if (draft.trim() !== current && !(await save(draft.trim()))) return;
+      if (gen !== generation.current) return;
+      if (!scan) { onDone(); return; }
       await tracksDirectoryApi.startScan();
       if (gen === generation.current) setStep({ kind: 'running', progress: null });
     } catch (e) {
       if (gen === generation.current) setStep({ kind: 'error', message: message(e), current: draft });
+    } finally {
+      busy.current = false;
+      setSaving(false);
     }
   };
 
   const skipButton = onSkip ? (
-    <button className="btn" onClick={onSkip}>
-      Skip
+    <button className="btn btn-secondary" onClick={onSkip} disabled={saving}>
+      Skip for now
     </button>
   ) : null;
-  const dirty = draft.trim() !== current;
 
   return (
     <div className="onboarding-guide" data-testid="tracks-directory-guide">
-      <h2 className="onboarding-title">Add a tracks directory</h2>
+      <h2 className="onboarding-title">{step.kind === 'summary' ? 'Your folder has been scanned.' : 'Give your music a home'}</h2>
 
-      {step.kind === 'loading' && <p className="onboarding-muted">Loading…</p>}
+      {step.kind === 'loading' && <p className="onboarding-loading" role="status">Checking your music folder…</p>}
 
       {(step.kind === 'choose' || step.kind === 'error') && (
         <>
           <p className="onboarding-muted">
-            One folder for your music: manadj scans it (subfolders included) and downloads new tracks
-            into it. Files stay where they are.
+            Choose the folder where you keep your tracks. A Scan adds audio files from this folder and
+            all its subfolders to your Library, without moving them.
           </p>
+          <p className="onboarding-muted">Already imported from Rekordbox? This is optional. Tracks already in your Library won’t be added twice.</p>
+          <label htmlFor="setup-tracks-folder">Music folder <span className="onboarding-muted">(tracks directory)</span></label>
           <div className="onboarding-path">
             <input
               type="text"
+              id="setup-tracks-folder"
               aria-label="Tracks directory"
               value={draft}
-              placeholder="/Users/you/Music/Tracks"
+              placeholder="Full path to your music folder"
+              disabled={saving}
               spellCheck={false}
               onChange={(e) => setDraft(e.target.value)}
             />
             {window.manadjSettings ? (
               <button className="btn" onClick={() => void pick()} disabled={saving}>
-                Choose…
+                Choose folder…
               </button>
             ) : null}
           </div>
-          {step.kind === 'error' && <p className="onboarding-error">{step.message}</p>}
+          {!window.manadjSettings && <p className="onboarding-muted">In the browser, paste a folder path. The desktop app has a folder picker.</p>}
+          <p className="onboarding-muted">New downloads will also be saved here if you connect an account later.</p>
+          {step.kind === 'error' && <div className="onboarding-notice onboarding-error" role="alert">
+            <strong>{step.connection ? 'We lost touch with the Scan.' : 'We couldn’t use this folder.'}</strong>
+            <p>{step.connection ? 'The Scan may still be running. Check progress before starting another.' : 'Check that the folder exists and its drive is connected. Any tracks already added are kept.'}</p>
+            <details><summary>Technical details</summary><p>{step.message}</p></details>
+          </div>}
           <div className="onboarding-actions">
-            {dirty && (
-              <button className="btn" onClick={() => void save(draft.trim())} disabled={saving}>
-                Save
-              </button>
-            )}
-            <button className="btn btn-primary" onClick={() => void scan()} disabled={saving || !draft.trim()}>
-              Scan now
-            </button>
-            {current && !dirty && (
-              <button className="btn" onClick={onDone}>
-                Save without scanning
-              </button>
-            )}
             {skipButton}
+            {step.kind === 'error' && step.connection ? <button className="btn btn-primary" onClick={() => load(true)}>Check progress</button> : <>
+              {draft.trim() && <button className="btn btn-secondary" onClick={() => void commit(false)} disabled={saving}>Use folder without scanning</button>}
+              <button className="btn btn-primary" onClick={() => void commit(true)} disabled={saving || !draft.trim()}>
+                {saving ? 'Preparing Scan…' : 'Save & scan folder'}
+              </button>
+            </>}
           </div>
         </>
       )}
@@ -182,11 +218,11 @@ export function TracksDirectoryGuide({ onDone, onSkip, pollMs = 1000 }: TracksDi
       {step.kind === 'running' && (
         <>
           <ScanProgress progress={step.progress} />
-          <p className="onboarding-muted">You can keep using manadj while this runs.</p>
+          <p className="onboarding-muted">Keep manaDJ open. You can continue setup while the Scan runs.</p>
           {onSkip && (
             <div className="onboarding-actions">
               <button className="btn" onClick={onDone}>
-                Continue in background
+                Continue setup while scanning
               </button>
             </div>
           )}
@@ -196,6 +232,13 @@ export function TracksDirectoryGuide({ onDone, onSkip, pollMs = 1000 }: TracksDi
       {step.kind === 'summary' && (
         <>
           <div className="onboarding-summary" data-testid="scan-summary">
+            <div className="onboarding-stats">
+              <div><strong>{n(step.summary.imported)}</strong><span>tracks added</span></div>
+              <div><strong>{n(step.summary.already_in_library)}</strong><span>already in your Library</span></div>
+            </div>
+            {step.summary.files_scanned === 0 && <p className="onboarding-notice">No audio files were found. Choose a different folder, or add music here and Scan again later.</p>}
+            <p className="onboarding-source">Folder: <code>{step.summary.directory}</code></p>
+            <details className="onboarding-details"><summary>Scan details</summary>
             <table>
               <tbody>
                 <tr>
@@ -207,11 +250,12 @@ export function TracksDirectoryGuide({ onDone, onSkip, pollMs = 1000 }: TracksDi
                   <td>{n(step.summary.imported)}</td>
                 </tr>
                 <tr>
-                  <th>Already in manadj</th>
+                  <th>Already in manaDJ</th>
                   <td>{n(step.summary.already_in_library)}</td>
                 </tr>
               </tbody>
             </table>
+            </details>
             {step.summary.errors > 0 && (
               <div className="onboarding-skipped">
                 <div className="onboarding-subhead">Couldn’t import {n(step.summary.errors)}</div>
@@ -222,8 +266,9 @@ export function TracksDirectoryGuide({ onDone, onSkip, pollMs = 1000 }: TracksDi
             )}
           </div>
           <div className="onboarding-actions">
+            <button className="btn btn-secondary" onClick={() => load()}>Choose another folder</button>
             <button className="btn btn-primary" onClick={onDone}>
-              Done
+              Continue
             </button>
           </div>
         </>
@@ -233,33 +278,14 @@ export function TracksDirectoryGuide({ onDone, onSkip, pollMs = 1000 }: TracksDi
 }
 
 function ScanProgress({ progress }: { progress: ImportProgress | null }) {
-  const phases: [string, string][] = [
-    ['scanning', 'Reading files'],
-    ['importing', 'Adding to Library'],
-  ];
-  const current = progress ? phases.findIndex(([id]) => id === progress.phase) : 0;
+  const pct = progress && progress.total > 0 ? Math.min(100, Math.round(100 * progress.done / progress.total)) : undefined;
   return (
-    <ol className="onboarding-phases" data-testid="scan-progress">
-      {phases.map(([id, label], i) => {
-        const state = i < current ? 'done' : i === current ? 'active' : 'todo';
-        const pct =
-          state === 'done' ? 100 : state === 'active' && progress && progress.total > 0
-            ? Math.round((100 * progress.done) / progress.total)
-            : 0;
-        return (
-          <li key={id} className={`onboarding-phase ${state}`}>
-            <span className="onboarding-phase-label">{label}</span>
-            <span className="onboarding-bar">
-              <span className="onboarding-bar-fill" style={{ width: `${pct}%` }} />
-            </span>
-            {state === 'active' && progress && progress.total > 0 && (
-              <span className="onboarding-phase-count">
-                {n(progress.done)} / {n(progress.total)}
-              </span>
-            )}
-          </li>
-        );
-      })}
-    </ol>
+    <div className="onboarding-progress" data-testid="scan-progress">
+      <p className="onboarding-progress-title" role="status">{!progress ? 'Your Scan is queued' : progress.phase === 'importing' ? 'Adding tracks to your Library' : 'Looking through your music folder'}</p>
+      <div className="onboarding-bar" role="progressbar" aria-label="Folder Scan" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct}>
+        <span className="onboarding-bar-fill" style={{ width: `${pct ?? 0}%` }} />
+      </div>
+      <p className="onboarding-muted">{progress && progress.total > 0 ? `${n(progress.done)} / ${n(progress.total)} files` : 'This may wait while other Library tasks finish. There’s no need to start it again.'}</p>
+    </div>
   );
 }

@@ -66,6 +66,7 @@ afterEach(() => {
   act(() => root.unmount());
   container.remove();
   vi.unstubAllGlobals();
+  delete window.manadjSettings;
 });
 
 async function flush(ms = 0) {
@@ -90,6 +91,64 @@ function typePath(value: string) {
 }
 
 describe('TracksDirectoryGuide', () => {
+  it.each(['done', 'failed'])('recovers a %s Scan after a lost status connection', async (terminal) => {
+    const b: Backend = { tracksDirectory: '/music', statuses: [{ state: 'running', progress: null }], puts: [], scans: 0 };
+    installFetch(b);
+    const base = fetch;
+    let reads = 0;
+    vi.stubGlobal('fetch', vi.fn((url: string, init?: RequestInit) => {
+      if (url.endsWith('/tracks-directory/status') && ++reads === 2) return Promise.reject(new Error('offline'));
+      return base(url, init);
+    }));
+    act(() => root.render(<TracksDirectoryGuide onDone={vi.fn()} pollMs={5} />));
+    await flush();
+    await flush(30);
+    expect(container.textContent).toContain('may still be running');
+    b.statuses = [{ state: terminal, summary: terminal === 'done' ? SUMMARY : null, error: 'Drive disconnected' }];
+    await act(async () => button('Check progress').click());
+    if (terminal === 'done') expect(container.querySelector('[data-testid=scan-summary]')).not.toBeNull();
+    else expect(container.querySelector('[role=alert]')?.textContent).toContain('Drive disconnected');
+    expect(b.scans).toBe(0);
+  });
+
+  it('saves a typed folder without requiring a Scan or a separate Save', async () => {
+    const b: Backend = { tracksDirectory: null, statuses: [NONE], puts: [], scans: 0 };
+    installFetch(b);
+    const onDone = vi.fn();
+    act(() => root.render(<TracksDirectoryGuide onDone={onDone} />));
+    await flush();
+    typePath('/music');
+    await act(async () => button('Use folder without scanning').click());
+    expect(b.puts).toEqual([{ tracks_directory: '/music' }]);
+    expect(b.scans).toBe(0);
+    expect(onDone).toHaveBeenCalledOnce();
+  });
+
+  it('picker cancellation leaves the choice alone; rejection is recoverable', async () => {
+    const b: Backend = { tracksDirectory: '/music', statuses: [NONE], puts: [], scans: 0 };
+    installFetch(b);
+    const pickFolder = vi.fn().mockResolvedValueOnce(null).mockRejectedValueOnce(new Error('Picker unavailable'));
+    Object.defineProperty(window, 'manadjSettings', { configurable: true, value: { pickFolder } });
+    act(() => root.render(<TracksDirectoryGuide onDone={vi.fn()} />));
+    await flush();
+    await act(async () => button('Choose folder').click());
+    expect(b.puts).toEqual([]);
+    expect((container.querySelector('input') as HTMLInputElement).value).toBe('/music');
+    await act(async () => button('Choose folder').click());
+    expect(container.querySelector('[role=alert]')?.textContent).toContain('Picker unavailable');
+    expect(button('Save & scan folder').disabled).toBe(false);
+  });
+
+  it('keeps a zero-file result actionable', async () => {
+    installFetch({ tracksDirectory: '/empty', statuses: [NONE, { state: 'done', summary: { ...SUMMARY, files_scanned: 0, imported: 0, already_in_library: 0 } }], puts: [], scans: 0 });
+    act(() => root.render(<TracksDirectoryGuide onDone={vi.fn()} pollMs={5} />));
+    await flush();
+    await act(async () => button('Save & scan folder').click());
+    await flush(30);
+    expect(container.textContent).toContain('No audio files were found');
+    button('Choose another folder');
+  });
+
   it('saves a typed folder, scans with progress, then summarizes', async () => {
     const b: Backend = {
       tracksDirectory: null,
@@ -105,15 +164,15 @@ describe('TracksDirectoryGuide', () => {
     const onDone = vi.fn();
     act(() => root.render(<TracksDirectoryGuide onDone={onDone} onSkip={() => {}} pollMs={5} />));
     await flush();
-    expect(button('Scan now').disabled).toBe(true);
+    expect(button('Save & scan folder').disabled).toBe(true);
     typePath('/music');
-    await act(async () => button('Scan now').click());
+    await act(async () => button('Save & scan folder').click());
     expect(b.puts).toEqual([{ tracks_directory: '/music' }]); // saved before scanning
     expect(b.scans).toBe(1);
     expect(container.querySelector('[data-testid=scan-progress]')).not.toBeNull();
     await flush(50);
     expect(container.querySelector('[data-testid=scan-summary]')?.textContent).toContain('Imported10');
-    act(() => button('Done').click());
+    act(() => button('Continue').click());
     expect(onDone).toHaveBeenCalled();
   });
 
@@ -122,7 +181,7 @@ describe('TracksDirectoryGuide', () => {
     const onDone = vi.fn();
     act(() => root.render(<TracksDirectoryGuide onDone={onDone} onSkip={() => {}} />));
     await flush();
-    act(() => button('Save without scanning').click());
+    await act(async () => button('Use folder without scanning').click());
     expect(onDone).toHaveBeenCalled();
   });
 
@@ -135,7 +194,7 @@ describe('TracksDirectoryGuide', () => {
     });
     act(() => root.render(<TracksDirectoryGuide onDone={() => {}} pollMs={5} />));
     await flush();
-    await act(async () => button('Scan now').click());
+    await act(async () => button('Save & scan folder').click());
     await flush(30);
     expect(container.textContent).toContain('No such folder');
     expect(container.querySelector('input[aria-label="Tracks directory"]')).not.toBeNull();
