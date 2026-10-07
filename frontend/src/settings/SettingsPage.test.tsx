@@ -465,7 +465,7 @@ it('opens contextual Help without changing the Settings group and exposes the ma
   await act(async () => root!.render(<MixerContext value={new Mixer()}><SettingsPage /><HelpViewer /></MixerContext>));
   const opener = host.querySelector<HTMLButtonElement>('[aria-label="Help: Filters"]')!;
   act(() => opener.click());
-  expect(document.querySelector('iframe')?.getAttribute('src')).toBe('/manual/help/index.html');
+  expect(document.querySelector('iframe')?.getAttribute('src')).toBe('/manual/help/beat-fx/index.html#filters');
   act(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
   expect(document.activeElement).toBe(opener);
   expect(host.querySelector('.settings-content')?.getAttribute('aria-label')).toBe('Performance');

@@ -68,7 +68,10 @@ function clickLink(link: HTMLAnchorElement, init: MouseEventInit = {}, type = 'c
 
 describe('Help routes and contexts', () => {
   it('uses the generated manifest with root and nested deployment bases', () => {
-    expect(HELP_TOPICS.map(({ slug }) => slug)).toEqual(['start', 'curate', 'perform', 'editor']);
+    expect(HELP_TOPICS.map(({ slug }) => slug)).toEqual([
+      'start', 'acquire', 'curate', 'analysis', 'perform', 'controllers', 'audio',
+      'beat-fx', 'follow', 'capture', 'editor', 'sets', 'sync',
+    ]);
     expect(helpHref()).toBe('/manual/help/index.html');
     expect(helpHref('perform', 'keyboard', '/app/')).toBe('/app/manual/help/perform/index.html#keyboard');
     for (const article of HELP_TOPICS) {
@@ -78,7 +81,7 @@ describe('Help routes and contexts', () => {
   });
 
   it('rejects unknown topics, invalid anchors and path/URL injection without opening', () => {
-    for (const topic of ['missing', 'controllers', 'acquire', 'analysis', 'sync', 'sets', 'capture', 'follow', 'audio', 'beat-fx', '../start', '/start', 'https://example.com', 'start?x', '%2e%2e']) {
+    for (const topic of ['missing', '../start', '/start', 'https://example.com', 'start?x', '%2e%2e']) {
       expect(helpHref(topic)).toBeNull();
       expect(openHelp(topic)).toBe(false);
     }
@@ -92,10 +95,10 @@ describe('Help routes and contexts', () => {
     expect(helpSnapshot()).toBe(before);
   });
 
-  it('confines native navigation to the bundled manual, including glossary and clips', () => {
+  it('confines native navigation to the bundled manual, including the tour and clips', () => {
     const base = '/app/';
     const origin = 'http://localhost:5173/app/';
-    for (const path of ['help/start/index.html#setup', 'index.html#words', 'media/editor.mp4']) {
+    for (const path of ['help/start/index.html#setup', 'index.html#editor', 'media/editor.mp4']) {
       expect(isManualUrl(`/app/manual/${path}`, base, origin)).toBe(true);
     }
     for (const path of ['/app/', '/app/manual-escape/x', '/app/manual/../../', '/app/manual/%2e%2e/x',
@@ -107,6 +110,7 @@ describe('Help routes and contexts', () => {
   it('keeps all Settings, guide, section and step mappings valid against the manifest', () => {
     for (const map of [SETTINGS_HELP, GUIDE_HELP, TOUR_SECTION_HELP, TOUR_STEP_HELP]) {
       for (const [context, target] of Object.entries(map)) {
+        expect(target.topic, context).toBeDefined();
         expect(helpHref(target.topic, target.anchor), context).not.toBeNull();
       }
     }
@@ -232,7 +236,7 @@ describe('Help viewer', () => {
     });
     const opener = host.querySelector<HTMLButtonElement>('[data-help-link]')!;
     act(() => opener.click());
-    expect(document.querySelector('iframe')?.getAttribute('src')).toBe('/manual/help/start/index.html#setup');
+    expect(document.querySelector('iframe')?.getAttribute('src')).toBe('/manual/help/start/index.html#accounts');
     const { doc } = loadArticle();
     const first = doc.querySelector('a')!;
     first.focus();

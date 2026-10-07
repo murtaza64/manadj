@@ -11,7 +11,7 @@ export function helpHref(topic?: string, anchor?: string, base = import.meta.env
   return `${base}manual/help/${article.slug}/index.html${anchor === undefined ? '' : `#${anchor}`}`;
 }
 
-/** Article links may also reach the bundled glossary and video files. */
+/** Article links may also reach the bundled feature tour and media files. */
 export function isManualUrl(href: string, base = import.meta.env.BASE_URL, origin = location.href): boolean {
   try {
     const root = new URL(`${base}manual/`, origin);

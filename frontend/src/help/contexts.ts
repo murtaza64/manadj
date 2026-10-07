@@ -36,9 +36,9 @@ export const TOUR_SECTION_HELP: Record<TourSectionId, HelpTarget> = {
   library: { topic: 'curate' },
   edit: { topic: 'editor', anchor: 'editing' },
   sync: { topic: 'sync' },
-  sets: {},
-  sessions: {},
-  history: {},
+  sets: { topic: 'sets' },
+  sessions: { topic: 'capture', anchor: 'sessions' },
+  history: { topic: 'capture', anchor: 'takes' },
 };
 
 export const TOUR_STEP_HELP: Record<string, HelpTarget> = {
@@ -52,17 +52,17 @@ export const TOUR_STEP_HELP: Record<string, HelpTarget> = {
   'library.table': { topic: 'curate', anchor: 'tags' },
   'library.player': { topic: 'curate', anchor: 'edit-track' },
   'edit.picker': { topic: 'editor', anchor: 'editing' },
-  'edit.main': { topic: 'editor', anchor: 'editing' },
+  'edit.main': { topic: 'editor', anchor: 'modes' },
   'edit.transport': { topic: 'editor', anchor: 'audition' },
   'sync.tabs': { topic: 'sync' },
   'sync.tracks': { topic: 'sync', anchor: 'inspect' },
-  'sets.sidebar': {},
-  'sets.header': {},
-  'sets.entries': {},
-  'sessions.list': {},
-  'library.sessions-row': {},
-  'history.root': {},
-  'history.table': {},
+  'sets.sidebar': { topic: 'sets', anchor: 'planning' },
+  'sets.header': { topic: 'sets', anchor: 'playback' },
+  'sets.entries': { topic: 'sets', anchor: 'pins' },
+  'sessions.list': { topic: 'capture', anchor: 'timeline' },
+  'library.sessions-row': { topic: 'capture', anchor: 'timeline' },
+  'history.root': { topic: 'capture', anchor: 'takes' },
+  'history.table': { topic: 'capture', anchor: 'takes' },
 };
 
 export function tourHelp(section: TourSectionId, step: string): HelpTarget {

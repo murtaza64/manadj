@@ -60,9 +60,41 @@
       "clip-perform-caption",
       "keyboard",
       "loading",
+      "cues",
       "mixer",
       "mouse-jog",
       "stems"
+    ]
+  },
+  {
+    "slug": "controllers",
+    "title": "Controllers",
+    "anchors": [
+      "main",
+      "check",
+      "mapping",
+      "jog-calibration",
+      "troubleshooting"
+    ]
+  },
+  {
+    "slug": "audio",
+    "title": "Audio and Cue mode",
+    "anchors": [
+      "main",
+      "outputs",
+      "pfl",
+      "cue-mode"
+    ]
+  },
+  {
+    "slug": "beat-fx",
+    "title": "Beat FX and filters",
+    "anchors": [
+      "main",
+      "effects",
+      "controller-fx",
+      "filters"
     ]
   },
   {
