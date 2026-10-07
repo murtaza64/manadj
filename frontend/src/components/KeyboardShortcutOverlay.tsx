@@ -16,12 +16,18 @@ import './keyboardShortcutOverlay.css';
 const SCOPES: { id: KeyboardHelpScope; label: string }[] = [
   { id: 'global', label: 'Global' },
   { id: 'performance', label: 'Performance' },
-  { id: 'library', label: 'Library' },
+  { id: 'browse', label: 'Track browsing' },
+  { id: 'library', label: 'Export' },
   { id: 'editors', label: 'Editors' },
 ];
 
+/** Perform with the library keyboard engaged (Tab) opens on Track browsing. */
+const performLibraryFocused = () =>
+  document.querySelector('.perf-keyboard-scope[data-library-focus="true"]') !== null;
+
 const scopeForMode = (mode: AppMode): KeyboardHelpScope =>
-  mode === 'performance' ? 'performance' : mode === 'library' ? 'library' :
+  mode === 'performance' ? (performLibraryFocused() ? 'browse' : 'performance') :
+    mode === 'library' ? 'library' :
     mode === 'transition' || mode === 'routine' ? 'editors' : 'global';
 
 export function KeyboardShortcutOverlay({ mode }: { mode: AppMode }) {
@@ -104,7 +110,7 @@ export function KeyboardShortcutOverlay({ mode }: { mode: AppMode }) {
             </div>
           ))}
         </div>
-        <p>Actions follow the selected scope. Hold-style controls release on keyup; “+ mouse” controls use pointer movement.</p>
+        <p>Actions follow the selected scope. Hold-style controls release on keyup; “+ mouse” controls use pointer movement. In Track browsing, <em>Decks</em> works while the decks own the keyboard; <em>Lib</em> after Tab hands it to the library.</p>
       </section>
     </div>
   );

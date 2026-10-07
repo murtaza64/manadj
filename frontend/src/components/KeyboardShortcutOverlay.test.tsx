@@ -38,7 +38,7 @@ it('opens app-wide with ?, renders the whole keyboard, changes scope and closes'
   );
   expect(host.textContent).toContain('FX target A');
   const library = [...host.querySelectorAll<HTMLButtonElement>('nav button')]
-    .find((button) => button.textContent === 'Library')!;
+    .find((button) => button.textContent === 'Export')!;
   act(() => library.click());
   expect(host.textContent).toContain('Hot cue 1');
   expect(press('Escape').defaultPrevented).toBe(true);
@@ -71,4 +71,35 @@ it('keeps the keyboard legend and effect handler on one shared number-row map', 
   expect(actions.get('9')?.map((action) => action.action)).toContain('FX type next');
   expect(actions.get('0')?.map((action) => action.action)).toContain('FX depth + mouse');
   expect(actions.get('=')?.map((action) => action.action)).toContain('Quantize');
+});
+
+it('lists the Perform browse-panel keys on a Track browsing tab (#337)', () => {
+  const actions = keyboardActions('browse');
+  const legends = (id: string) => (actions.get(id) ?? []).map((a) => `${a.modifier ? `${a.modifier}:` : ''}${a.action}`);
+  expect(legends('ArrowDown')).toContain('Next track');
+  expect(legends('ArrowLeft')).toContain('Decks:Load focused left');
+  expect(legends('Tab')).toContain('Library keyboard ↔ decks');
+  expect(legends('F')).toEqual(expect.arrayContaining(['Cmd/Ctrl:Focus search', 'Lib:Follow parameters']));
+  expect(legends('/')).toContain('Lib:Search');
+  expect(legends('C')).toEqual(expect.arrayContaining(['Lib:Load onto C', 'Lib+Shift:Follow C']));
+  expect(legends('N')).toContain('Lib:Known only');
+  press('?');
+  const tab = [...host.querySelectorAll<HTMLButtonElement>('nav button')]
+    .find((button) => button.textContent === 'Track browsing')!;
+  act(() => tab.click());
+  expect(host.textContent).toContain('Load onto A');
+});
+
+it('opens on Track browsing while Perform has library keyboard focus', () => {
+  const scope = document.createElement('div');
+  scope.className = 'perf-keyboard-scope';
+  scope.dataset.libraryFocus = 'true';
+  document.body.append(scope);
+  try {
+    act(() => root.render(<KeyboardShortcutOverlay mode="performance" />));
+    press('?');
+    expect(host.querySelector('nav button[aria-pressed="true"]')!.textContent).toBe('Track browsing');
+  } finally {
+    scope.remove();
+  }
 });

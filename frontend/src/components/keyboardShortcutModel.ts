@@ -1,7 +1,7 @@
 import { DECK_KEYS } from './performance/performanceKeys';
 import { PERFORMANCE_FX_KEYS } from './performance/performanceFxKeys';
 
-export type KeyboardHelpScope = 'global' | 'performance' | 'library' | 'editors';
+export type KeyboardHelpScope = 'global' | 'performance' | 'browse' | 'library' | 'editors';
 export interface KeyboardKey { id: string; label: string; width?: number }
 export interface KeyboardAction { action: string; modifier?: string }
 
@@ -70,6 +70,34 @@ export function keyboardActions(scope: KeyboardHelpScope): ReadonlyMap<string, K
     add(map, PERFORMANCE_FX_KEYS.depth, 'FX depth + mouse');
     add(map, PERFORMANCE_FX_KEYS.toggle, 'FX on/off');
     add(map, '=', 'Quantize');
+    return map;
+  }
+  if (scope === 'browse') {
+    // Perform's browse panel (#337). Two layers: deck focus (always live)
+    // and library focus (Tab). Tagged legends name the layer.
+    add(map, 'Tab', 'Library keyboard ↔ decks');
+    add(map, 'ArrowDown', 'Next track'); add(map, 'ArrowUp', 'Previous track');
+    add(map, 'ArrowLeft', 'Load focused left', 'Decks'); add(map, 'ArrowRight', 'Load focused right', 'Decks');
+    add(map, 'Enter', 'Load focused left', 'Decks');
+    add(map, 'F', 'Focus search', 'Cmd/Ctrl');
+    add(map, 'Escape', 'Clear search', 'Decks');
+    add(map, 'Escape', 'Back to decks', 'Lib');
+    add(map, 'J', 'Next track', 'Lib'); add(map, 'K', 'Previous track', 'Lib');
+    add(map, 'J', 'Extend selection', 'Lib+Shift'); add(map, 'K', 'Extend selection', 'Lib+Shift');
+    add(map, 'ArrowDown', 'Extend selection', 'Lib+Shift'); add(map, 'ArrowUp', 'Extend selection', 'Lib+Shift');
+    add(map, 'D', 'Half page down', 'Lib+Ctrl'); add(map, 'U', 'Half page up', 'Lib+Ctrl');
+    add(map, 'PageDown', 'Page down', 'Lib'); add(map, 'PageUp', 'Page up', 'Lib');
+    add(map, 'Home', 'First track', 'Lib'); add(map, 'End', 'Last track', 'Lib');
+    add(map, 'A', 'Select all', 'Lib+Cmd/Ctrl');
+    add(map, 'H', 'Sidebar', 'Lib'); add(map, 'L', 'Track list', 'Lib');
+    add(map, 'Enter', 'Open sidebar item', 'Lib');
+    for (const deck of ['A', 'B', 'C', 'D']) {
+      add(map, deck, `Load onto ${deck}`, 'Lib');
+      add(map, deck, `Follow ${deck}`, 'Lib+Shift');
+    }
+    add(map, '/', 'Search', 'Lib');
+    add(map, 'F', 'Follow parameters', 'Lib');
+    add(map, 'N', 'Known only', 'Lib');
     return map;
   }
   if (scope === 'library') {
