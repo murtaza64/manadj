@@ -4,6 +4,9 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { visibleSteps } from './anchors';
 import { TourOverlay } from './TourOverlay';
+import { TourController } from './TourController';
+import { HelpViewer } from '../help/HelpViewer';
+import { closeHelp, isHelpOpen, openHelp } from '../help/helpStore';
 import type { TourSection } from './steps';
 import { TOUR_SECTIONS } from './steps';
 import {
@@ -109,8 +112,10 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  act(() => closeHelp());
   cleanups.splice(0).forEach((fn) => fn());
   document.body.innerHTML = '';
+  vi.useRealTimers();
 });
 
 describe('visibleSteps (story 5)', () => {
@@ -224,6 +229,69 @@ describe('TourOverlay sequencing', () => {
       window.dispatchEvent(new Event('resize'));
     });
     expect(popoverTitle()).toBe('Two');
+  });
+});
+
+describe('Tour Help integration', () => {
+  it.each(['parent', 'iframe'])('opens context help with Enter and resumes the same controller step after %s Escape', (source) => {
+    vi.useFakeTimers();
+    const section = TOUR_SECTIONS.find((s) => s.id === 'performance')!;
+    section.steps.forEach((step) => addAnchor(step.anchor));
+    mount(<><TourController /><HelpViewer /></>);
+    act(() => vi.advanceTimersByTime(250));
+    clickButton('Next');
+    expect(popoverTitle()).toBe('Start with your music');
+    const overlay = document.querySelector('.tour-overlay');
+    const opener = document.querySelector<HTMLButtonElement>('.tour-popover [data-help-link]')!;
+    opener.focus();
+    const enter = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+    act(() => opener.dispatchEvent(enter));
+    expect(enter.defaultPrevented).toBe(false);
+    expect(popoverTitle()).toBe('Start with your music');
+    // jsdom doesn't synthesize the native keyboard click.
+    act(() => opener.click());
+    expect(isHelpOpen()).toBe(true);
+    expect(document.querySelector('iframe')?.getAttribute('src')).toBe('/manual/help/perform/index.html#loading');
+    pressKey('ArrowRight');
+    pressKey('Enter');
+    pressKey('ArrowLeft');
+    act(() => vi.advanceTimersByTime(1000));
+    expect(document.querySelector('.tour-overlay')).toBe(overlay);
+    expect(popoverTitle()).toBe('Start with your music');
+    expect(isSectionSeen('performance')).toBe(false);
+    expect(allToursSkipped()).toBe(false);
+    expect(localStorage.getItem(TOUR_STATE_KEY)).toBeNull();
+    if (source === 'iframe') {
+      const frame = document.querySelector('iframe')!;
+      const doc = frame.contentDocument!;
+      doc.open();
+      doc.write('<html><body><a href="#main">Article</a></body></html>');
+      doc.close();
+      act(() => frame.dispatchEvent(new Event('load')));
+      doc.querySelector('a')!.focus();
+      act(() => doc.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })));
+    } else {
+      pressKey('Escape');
+    }
+    expect(isHelpOpen()).toBe(false);
+    expect(document.activeElement).toBe(opener);
+    expect(popoverTitle()).toBe('Start with your music');
+    expect(isSectionSeen('performance')).toBe(false);
+    pressKey('ArrowRight');
+    expect(popoverTitle()).toBe('Play a Track');
+  });
+
+  it('defers an unseen Tour until Help closes', () => {
+    vi.useFakeTimers();
+    addAnchor('performance.decks');
+    act(() => { openHelp(); });
+    mount(<><TourController /><HelpViewer /></>);
+    act(() => vi.advanceTimersByTime(1000));
+    expect(document.querySelector('.tour-overlay')).toBeNull();
+    act(() => closeHelp());
+    act(() => vi.advanceTimersByTime(250));
+    expect(popoverTitle()).toBe('Play a Track');
+    expect(isSectionSeen('performance')).toBe(false);
   });
 });
 

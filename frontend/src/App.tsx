@@ -42,6 +42,7 @@ import { FirstRunWelcome } from './onboarding/FirstRunWelcome';
 import './setup/allGuides';
 import { KeyboardShortcutOverlay } from './components/KeyboardShortcutOverlay';
 import { TourController } from './tour/TourController';
+import { HelpViewer } from './help/HelpViewer';
 import { TutorialController } from './tutorials/TutorialController';
 import { OPEN_TUTORIAL_EVENT } from './tutorials/tutorialState';
 import { setTourArea, type TourArea } from './tour/tourState';
@@ -247,7 +248,8 @@ function App() {
         {/* Coach-mark tour (feature-tour #282): above the view switch so
             it can spotlight anchors in any mode. */}
             <FirstRunWelcome />
-            <TourController />
+             <TourController />
+        <HelpViewer />
         <TutorialController />
         <FilterProvider>
           <div className="app-shell">

@@ -3,6 +3,7 @@
  * setup is out of the way (TourController). */
 import { useEffect, useRef, type ReactNode } from 'react';
 import Modal from '../components/Modal';
+import { isHelpOpen } from '../help/helpStore';
 import './setup.css';
 
 export function SetupOverlay({ children, testId, onClose }: { children: ReactNode; testId?: string; onClose: () => void }) {
@@ -15,6 +16,7 @@ export function SetupOverlay({ children, testId, onClose }: { children: ReactNod
     panel.setAttribute('aria-label', 'manaDJ Setup');
     panel.focus();
     const trap = (event: KeyboardEvent) => {
+      if (isHelpOpen()) return;
       if (event.key !== 'Tab') return;
       const nodes = [...panel.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href], summary, [tabindex="0"]')]
         .filter((node) => !node.closest('details:not([open])') || node.tagName === 'SUMMARY');

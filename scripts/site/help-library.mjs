@@ -1,6 +1,6 @@
 // Capture focused Library/Follow/Sync operations from this lane's running sandbox.
 // SITE_APP_URL=http://localhost:<vite> SITE_API_URL=http://localhost:<backend> \
-//   node scripts/site/help-library.mjs [tags,filters,follow,performance-sync]
+//   node scripts/site/help-library.mjs [tags,filters,follow,performance-sync,analysis-grid,analysis-cue]
 // Screenshot bytes are unmodified; actions below change only ephemeral UI state.
 import { chromium } from 'playwright';
 import { readFile } from 'node:fs/promises';
@@ -24,8 +24,8 @@ function checkedURL(name, expectedPort) {
 }
 const base = checkedURL('SITE_APP_URL', ports[2]);
 const api = checkedURL('SITE_API_URL', ports[1]);
-const scenes = process.argv[2]?.split(',') ?? ['tags', 'filters', 'follow', 'performance-sync'];
-for (const scene of scenes) if (!['tags', 'filters', 'follow', 'performance-sync'].includes(scene)) throw Error(`Unknown scene: ${scene}`);
+const scenes = process.argv[2]?.split(',') ?? ['tags', 'filters', 'follow', 'performance-sync', 'analysis-grid', 'analysis-cue'];
+for (const scene of scenes) if (!['tags', 'filters', 'follow', 'performance-sync', 'analysis-grid', 'analysis-cue'].includes(scene)) throw Error(`Unknown scene: ${scene}`);
 const browser = await chromium.launch({ args: ['--mute-audio'] });
 try {
   for (const scene of scenes) {
@@ -42,7 +42,7 @@ try {
       } else await route.continue();
     });
     try {
-      await page.goto(`${base}/?view=${scene === 'follow' ? 'performance' : scene === 'performance-sync' ? 'sync' : 'library'}`, { waitUntil: 'domcontentloaded' });
+      await page.goto(`${base}/?view=${scene === 'follow' || scene === 'analysis-cue' ? 'performance' : scene === 'performance-sync' ? 'sync' : 'library'}`, { waitUntil: 'domcontentloaded' });
       await page.evaluate(() => {
         localStorage.setItem('manadj-tour-state', JSON.stringify({ skippedAll: true }));
         sessionStorage.setItem('manadj-midi-boot-reloaded', '1');
@@ -51,7 +51,7 @@ try {
       await page.waitForTimeout(4500);
       const tour = page.getByRole('button', { name: 'Skip all tours' });
       if (await tour.isVisible()) await tour.click();
-      if (scene === 'tags' || scene === 'filters' || scene === 'follow') {
+      if (['tags', 'filters', 'follow', 'analysis-grid', 'analysis-cue'].includes(scene)) {
         // A named Track lookup, never a DB ID. No write to a Track or external source.
         const search = page.locator('input[placeholder="search..."]:visible').first();
         await search.click();
@@ -84,7 +84,12 @@ try {
         await page.getByTitle(/^Follow Deck A/).first().click();
         await page.getByTitle('Follow parameters').first().click();
         await page.waitForTimeout(800);
-      } else {
+      } else if (scene === 'analysis-cue') {
+        const cue = page.locator('.perf-deckpanel.deck-a .hot-cue.set:visible').first();
+        await cue.waitFor();
+        await cue.click({ button: 'right' });
+        await page.getByRole('dialog', { name: /^Edit Hot Cue/ }).waitFor();
+      } else if (scene !== 'analysis-grid') {
         await page.locator('.uts-root').waitFor({ timeout: 120_000 });
         const expandable = page.locator('.uts-card:visible').first();
         await expandable.waitFor();
@@ -96,13 +101,24 @@ try {
       const target = scene === 'tags' ? page.locator('.modal-content:visible').last()
         : scene === 'follow' ? page.locator('.follow-modal-content:visible')
           : scene === 'performance-sync' ? page.locator('.uts-root:visible')
-            : page.locator('.filter-bar-tag-toggle:visible').locator('..').locator('..');
+            : scene === 'analysis-grid' ? page.locator('.tag-editor:visible').first()
+              : scene === 'analysis-cue' ? page.locator('.perf-deckpanel.deck-a .hot-cue.set:visible').first()
+                : page.locator('.filter-bar-tag-toggle:visible').locator('..').locator('..');
       await target.waitFor();
-      const box = await target.boundingBox();
+      let box = await target.boundingBox();
+      if (scene === 'analysis-cue') {
+        const popup = await page.locator('.hot-cue-editor:visible').boundingBox();
+        const tempo = await page.locator('.perf-deckpanel.deck-a .perf-track-tempo:visible').boundingBox();
+        if (!popup || !tempo || !box) throw Error(`Missing visible cue editor or grid row: popup=${JSON.stringify(popup)} tempo=${JSON.stringify(tempo)} pads=${JSON.stringify(box)}`);
+        const left = Math.min(box.x, popup.x, tempo.x), top = Math.min(box.y, popup.y, tempo.y);
+        box = { x: left, y: top,
+          width: Math.max(box.x + box.width, popup.x + popup.width, tempo.x + tempo.width) - left,
+          height: Math.max(box.y + box.height, popup.y + popup.height, tempo.y + tempo.height) - top };
+      }
       if (!box || box.width < 300 || box.height < 50) throw Error(`Unusable ${scene} screenshot bounds ${JSON.stringify(box)}`);
       const clip = {
         x: Math.max(0, Math.floor(box.x - 12)), y: Math.max(0, Math.floor(box.y - 12)),
-        width: Math.min(1600 - Math.max(0, Math.floor(box.x - 12)), Math.ceil(box.width + 24)),
+        width: Math.min(1600 - Math.max(0, Math.floor(box.x - 12)), scene === 'analysis-grid' ? 900 : Math.ceil(box.width + 24)),
         height: Math.min(1000 - Math.max(0, Math.floor(box.y - 12)), Math.ceil(box.height + 24)),
       };
       const unwanted = await page.evaluate(clip => {

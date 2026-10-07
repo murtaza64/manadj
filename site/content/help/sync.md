@@ -1,8 +1,11 @@
 ---
 slug: sync
 title: Compare and Sync libraries
-description: Read Sync status, choose imports, and distinguish additive exports from replacements.
-order: 40
+summary: Read Sync status, choose imports, and distinguish additive exports from replacements.
+order: 8
+related: [curate, analysis, acquire, start]
+shot: sync
+caption: Sync inbox and external-library presence indicators.
 ---
 
 ## Inspect before choosing a direction {#inspect}
@@ -11,7 +14,7 @@ Open **SYNC → Tracks** and press **↻ refresh** to update status. The inbox g
 
 Expand a Track to compare **Library / Disk / Engine DJ / Rekordbox** values. The matrix’s **← import** reads a value **into** manaDJ; an export arrow writes **out**. ⚠ warns when an empty Library value would be skipped by Export. **Visual diff** overlays performance data. This status matrix is a comparison, not a dry-run plan for every action: read the scope/confirmation before proceeding.
 
-![Track Sync inbox and divergence groups](../shots/sync.webp)
+![Expanded Track comparison across Library, Disk, Engine DJ and Rekordbox](../../shots/help-library-performance-sync.webp)
 
 ### Choose the import operation {#import-choices}
 
@@ -22,7 +25,9 @@ Expand a Track to compare **Library / Disk / Engine DJ / Rekordbox** values. The
 | Take a field changed elsewhere | Expand the Track, click the field’s **← import** | Title, artist, BPM, Key and Energy imports can apply **immediately**, not after a whole-page Save. Read the source column first. |
 | Fill missing performance data from Engine | **Import performance data ← Engine** (section, Track or Library scope) | First call **immediately fills blanks** (e.g. missing cues/grid/Main cue/Key). It then lists saved values that differ for explicit overwrites. Dismissing that panel does **not** undo blanks already filled. |
 
-For Engine performance conflicts, uncheck fields you do not want overwritten in the returned panel. For Hot Cues, **fill empty slots** keeps occupied Library slots; **replace all** replaces the set. **Apply N overwrites** authorizes only the listed Track/field pairs. Per-cell **← fill empty slots** and **← import** can apply immediately; replacement of existing grid or Cue presents a scope confirmation. Check the affected Track afterward. Manual [Analyze](analysis.html#reanalyze) is another overwrite path, independent of Sync.
+For Engine performance conflicts, uncheck fields you do not want overwritten in the returned panel. For Hot Cues, **fill empty slots** keeps occupied Library slots; **replace all** replaces the set. **Apply N overwrites** authorizes only the listed Track/field pairs. Per-cell **← fill empty slots** and **← import** can apply immediately; replacement of existing grid or Cue presents a scope confirmation. Check the affected Track afterward. Manual [Analyze](../analysis/index.html#reanalyze) is another overwrite path, independent of Sync.
+
+<span id="performance-data"></span>
 
 ## External writes {#external-writes}
 

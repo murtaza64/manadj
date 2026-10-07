@@ -1,0 +1,50 @@
+[
+  {
+    "slug": "start",
+    "title": "Getting started",
+    "anchors": [
+      "main",
+      "setup",
+      "rekordbox",
+      "tracks-directory",
+      "tour",
+      "tutorials"
+    ]
+  },
+  {
+    "slug": "curate",
+    "title": "Library & tagging",
+    "anchors": [
+      "main",
+      "importing",
+      "tags",
+      "playlists",
+      "archive"
+    ]
+  },
+  {
+    "slug": "perform",
+    "title": "Keyboard DJing",
+    "anchors": [
+      "main",
+      "clip-perform-caption",
+      "keyboard",
+      "loading",
+      "mixer",
+      "mouse-jog",
+      "stems"
+    ]
+  },
+  {
+    "slug": "editor",
+    "title": "Mix editor",
+    "anchors": [
+      "main",
+      "clip-editor-caption",
+      "editing",
+      "audition",
+      "promote",
+      "blank-mix"
+    ]
+  }
+]

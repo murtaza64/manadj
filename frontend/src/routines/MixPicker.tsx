@@ -244,7 +244,7 @@ export function MixPicker(props: MixPickerProps) {
         ref: { kind: 'new-blank', seedTrackIds: [chipA, chipB] },
         glyph: '+',
         label: 'New blank mix',
-        meta: 'seeded with both tracks · drag more from the library · saves from 3 slots',
+        meta: 'seeded with both tracks · drag more from the library · 2 slots = Transition, 3+ = Routine',
         group: 'New',
       });
       return out;
@@ -276,7 +276,7 @@ export function MixPicker(props: MixPickerProps) {
         ref: { kind: 'new-blank', seedTrackIds: [chipA] },
         glyph: '+',
         label: 'New blank mix',
-        meta: 'starts with this track · drag more from the library · saves from 3 slots',
+        meta: 'starts with this track · drag more from the library · 2 slots = Transition, 3+ = Routine',
         group: 'New',
       });
       return out;
@@ -296,7 +296,7 @@ export function MixPicker(props: MixPickerProps) {
       ref: { kind: 'new-blank' },
       glyph: '+',
       label: 'New blank mix',
-      meta: 'empty canvas · drag tracks from the library · saves from 3 slots',
+      meta: 'empty canvas · drag tracks from the library · 2 slots = Transition, 3+ = Routine',
       group: 'New',
     });
     return out;

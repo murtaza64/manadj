@@ -722,3 +722,41 @@ export function _resetSetStoreForTests(): void {
   loadPromises.clear();
   listeners.clear();
 }
+
+/** Mirror a kind crossing's server-side pin re-point (ADR 0039, gh#330)
+ * in every loaded Set: an active pin moves when its entry heads the new
+ * artifact (trackId === headTrackId), else goes Unresolved; a Dormant
+ * memory moves when it remembers the new first pair, else is dropped. */
+export function repointPinsLocal(
+  from: { kind: 'transition' | 'routine'; uuid: string },
+  to: { kind: 'transition' | 'routine'; uuid: string },
+  headTrackId: number,
+  secondTrackId: number
+): void {
+  const hit = (p: AdjacencyPin | null | undefined) =>
+    !!p && p.kind === from.kind && 'uuid' in p && p.uuid === from.uuid;
+  let changed = false;
+  const entriesBySet = { ...snapshot.entriesBySet };
+  for (const [setId, entries] of Object.entries(entriesBySet)) {
+    if (!entries.some((e) => hit(e.pin))) continue;
+    changed = true;
+    entriesBySet[Number(setId)] = entries.map((e) =>
+      hit(e.pin) ? { ...e, pin: e.trackId === headTrackId ? { ...to } : null } : e
+    );
+  }
+  const dormantBySet = { ...snapshot.dormantBySet };
+  for (const [setId, dormant] of Object.entries(dormantBySet)) {
+    if (!dormant.some((d) => hit(d.pin))) continue;
+    changed = true;
+    dormantBySet[Number(setId)] = dormant.flatMap((d) =>
+      !hit(d.pin)
+        ? [d]
+        : d.aTrackId === headTrackId && d.bTrackId === secondTrackId
+          ? [{ ...d, pin: { ...to } }]
+          : []
+    );
+  }
+  if (!changed) return;
+  snapshot = { ...snapshot, entriesBySet, dormantBySet };
+  notify();
+}

@@ -15,6 +15,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { findAnchor, visibleSteps } from './anchors';
 import type { TourSection, TourStep } from './steps';
+import { HelpLink } from '../help/HelpLink';
+import { tourHelp } from '../help/contexts';
+import { isHelpOpen } from '../help/helpStore';
 import './tour.css';
 
 const SPOTLIGHT_PAD = 6;
@@ -80,6 +83,7 @@ export function TourOverlay({
   useEffect(() => {
     if (!step) return;
     const update = () => {
+      if (isHelpOpen()) return;
       setViewport(prev => prev.width === window.innerWidth && prev.height === window.innerHeight
         ? prev : { width: window.innerWidth, height: window.innerHeight });
       const measured = measure(step.anchor);
@@ -110,6 +114,9 @@ export function TourOverlay({
   // Capture-phase keys: the tour claims Escape and arrows while open.
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      if (isHelpOpen()) return;
+      // Enter on the Help button opens the article, not the next tour step.
+      if (event.key === 'Enter' && (event.target as Element | null)?.closest?.('[data-help-link]')) return;
       if (event.key === 'Escape') {
         event.preventDefault();
         event.stopImmediatePropagation();
@@ -168,6 +175,7 @@ export function TourOverlay({
           </span>
         </div>
         <p className="tour-popover-body">{step.body}</p>
+        <HelpLink {...tourHelp(section.id, step.anchor)} label={`Help: ${step.title}`} />
         <div className="tour-popover-actions">
           <button className="btn btn-secondary" onClick={onDone}>
             Close

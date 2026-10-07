@@ -17,6 +17,8 @@ import { SetupOverlay } from './SetupOverlay';
 import { SetupSequence } from './SetupSequence';
 import { guidePresentation } from './guidePresentation';
 import { GuideContent } from './GuideContent';
+import { HelpLink } from '../help/HelpLink';
+import { guideHelp } from '../help/contexts';
 import './allGuides';
 import './setup.css';
 
@@ -85,7 +87,8 @@ export default function SetupSettings() {
       {launched && typeof launched !== 'string' && (
         <SetupOverlay testId="setup-relaunch" onClose={close}>
           <div className="setup-standalone-body">
-          <div className="setup-sequence-header"><span className="setup-eyebrow">Setup / {launched.title}</span><button className="btn btn-secondary btn-mini" onClick={close}>Close guide</button></div>
+           <div className="setup-sequence-header"><span className="setup-eyebrow">Setup / {launched.title}</span><button className="btn btn-secondary btn-mini" onClick={close}>Close guide</button></div>
+           <HelpLink {...guideHelp(launched.id)} label={`Help: ${launched.title}`} />
           <GuideContent key={launched.id}>
           <launched.Component
             onDone={() => {

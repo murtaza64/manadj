@@ -1,8 +1,9 @@
 ---
 slug: follow
 title: Follow loaded Tracks
-description: Keep candidate next Tracks in the browse list while Decks change.
-order: 20
+summary: Keep candidate next Tracks in the browse list while Decks change.
+order: 4
+related: [curate, perform, editor]
 ---
 
 ## Start following {#start-follow}
@@ -11,13 +12,15 @@ order: 20
 2. Read the resulting list: **Following** holds the loaded reference Tracks already in the visible list; **Known** evidence rows come next, followed by **Compatible** candidates. Load another Track onto the followed Deck to update the candidate list without re-entering a search. Toggle the letter off to stop following it.
 3. Turn on a second Deck’s letter to combine candidates for both loaded Tracks. Once Follow is on, starting playback on another Deck follows that playing Deck; pausing a Deck while another plays removes it as a reference. When all Decks pause, the last followed Deck remains. Playback never turns Follow on when all letters are off.
 
-![Follow candidate list beneath the Decks](../shots/follow.webp)
+![Follow candidate list beneath the Decks](../../shots/follow.webp)
 
 Follow intersects the other Library filters. If the list looks unexpectedly short, clear manual search/Tag/Key/Energy/BPM filters, or use **Clear All** (which also turns Follow off). A Playlist has its filter funnel off by default; enable the funnel to see filtered Follow results there. In split view Follow applies to the **lower full-Library pane**, not the Playlist above.
 
 ## Set the candidate rules {#parameters}
 
 Click the sliders button next to the Deck letters to open **Follow parameters**. The reference title, Key, BPM and Energy displayed there describe the loaded Tracks; they are not editable in this popup. Changes take effect immediately, without an Apply button.
+
+![Follow parameters, including live BPM tolerance and Known-only control](../../shots/help-library-follow.webp)
 
 | Setting | Effect |
 | --- | --- |

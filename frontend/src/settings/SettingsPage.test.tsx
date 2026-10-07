@@ -4,7 +4,13 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { MixerContext } from '../hooks/useMixer';
 import { Mixer } from '../playback/mixer';
-import SettingsPage from './SettingsPage';
+import SettingsPage, { SETTINGS_GROUPS } from './SettingsPage';
+import { SETTINGS_HELP, GUIDE_HELP } from '../help/contexts';
+import { HELP_TOPICS, helpHref } from '../help/routes';
+import { HelpViewer } from '../help/HelpViewer';
+import { closeHelp } from '../help/helpStore';
+import { listGuides } from '../setup/guides';
+import '../setup/allGuides';
 import { describeSweepFilter } from '../playback/sweepFilter';
 import { DEFAULT_FILTER_SETTINGS, FILTER_PARAMETER_RANGES } from '../playback/filterSettings';
 import { defaultSlots, getSlot, getSlots, resetSlots } from '../waveform/styleSlots';
@@ -89,6 +95,7 @@ function expectFaders(host: HTMLElement, count: number) {
 }
 
 afterEach(() => {
+  act(() => closeHelp());
   if (root) act(() => root!.unmount());
   root = undefined;
   document.body.innerHTML = '';
@@ -434,4 +441,55 @@ it('opens a group by id and the Performance group stacks Filters and Beat FX', a
   await act(async () => root!.render(<MixerContext value={new Mixer()}><SettingsPage /></MixerContext>));
   const blocks = [...host.querySelectorAll('.settings-subsection')].map((n) => n.id);
   expect(blocks).toEqual(['settings-section-filters', 'settings-section-effects']);
+});
+
+it('provides a valid Help context for every existing Settings subsection and registered Setup guide', () => {
+  for (const section of SETTINGS_GROUPS.flatMap((group) => group.sections)) {
+    if (section.id === 'manual') continue;
+    const target = SETTINGS_HELP[section.id];
+    expect(target, section.id).toBeDefined();
+    expect(helpHref(target.topic, target.anchor), section.id).not.toBeNull();
+  }
+  for (const guide of listGuides()) {
+    const target = GUIDE_HELP[guide.id];
+    expect(target, guide.id).toBeDefined();
+    expect(helpHref(target.topic, target.anchor), guide.id).not.toBeNull();
+  }
+});
+
+it('opens contextual Help without changing the Settings group and exposes the manual as one Help entry', async () => {
+  history.replaceState(null, '', '/?section=performance');
+  const host = document.createElement('div');
+  document.body.append(host);
+  root = createRoot(host);
+  await act(async () => root!.render(<MixerContext value={new Mixer()}><SettingsPage /><HelpViewer /></MixerContext>));
+  const opener = host.querySelector<HTMLButtonElement>('[aria-label="Help: Filters"]')!;
+  act(() => opener.click());
+  expect(document.querySelector('iframe')?.getAttribute('src')).toBe('/manual/help/index.html');
+  act(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+  expect(document.activeElement).toBe(opener);
+  expect(host.querySelector('.settings-content')?.getAttribute('aria-label')).toBe('Performance');
+  const help = [...host.querySelectorAll<HTMLButtonElement>('.settings-nav button')].find((b) => b.querySelector('strong')?.textContent === 'Help')!;
+  await act(async () => help.click());
+  await act(async () => { await vi.dynamicImportSettled(); });
+  const manual = host.querySelector('#settings-section-manual')!;
+  expect(manual.querySelectorAll('button')).toHaveLength(HELP_TOPICS.length + 1);
+  expect(SETTINGS_GROUPS.find((g) => g.id === 'help')!.sections.filter((s) => s.id === 'manual')).toHaveLength(1);
+  act(() => (manual.querySelector('button') as HTMLButtonElement).click());
+  expect(document.querySelector('iframe')?.getAttribute('src')).toBe('/manual/help/index.html');
+});
+
+it('opens the mapped keyboard Help article from Settings', async () => {
+  history.replaceState(null, '', '/?section=shortcuts');
+  const host = document.createElement('div');
+  document.body.append(host);
+  root = createRoot(host);
+  await act(async () => root!.render(<><SettingsPage /><HelpViewer /></>));
+  const opener = host.querySelector<HTMLButtonElement>('#settings-section-shortcuts [data-help-link]')!;
+  expect(opener).not.toBeNull();
+  act(() => opener.click());
+  expect(document.querySelector('iframe')?.getAttribute('src')).toBe('/manual/help/perform/index.html#keyboard');
+  act(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+  expect(document.activeElement).toBe(opener);
+  expect(host.querySelector('.settings-content')?.getAttribute('aria-label')).toBe('Keyboard + mouse');
 });

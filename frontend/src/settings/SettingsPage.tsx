@@ -26,6 +26,9 @@ import {
   type BeatFxSettings,
 } from '../playback/beatFxSettings';
 import { APP_VERSION } from '../version';
+import { HelpLink } from '../help/HelpLink';
+import { HelpSettings } from '../help/HelpSettings';
+import { SETTINGS_HELP } from '../help/contexts';
 
 const WaveformSettings = lazy(() => import('../waveform/StyleTuningPage'));
 const ControllerCalibrationSettings = lazy(() => import('./ControllerCalibrationSettings'));
@@ -466,6 +469,7 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
     detail: 'Setup guides, tour, about',
     sections: [
       { id: 'setup', title: 'Setup', render: () => <SetupSettings /> },
+      { id: 'manual', title: 'Manual', render: () => <HelpSettings /> },
       { id: 'tour', title: 'Tour', render: () => <TourSettingsPanel /> },
       { id: 'tutorials', title: 'Tutorials', render: () => <TutorialSettings /> },
       // slot: version/licenses/about
@@ -546,6 +550,7 @@ export default function SettingsPage({ performance = false }: { performance?: bo
               <Suspense fallback={<p role="status">Loading settings...</p>}>
                 {s.render({ performance })}
               </Suspense>
+              {SETTINGS_HELP[s.id] && <HelpLink {...SETTINGS_HELP[s.id]} label={`Help: ${s.title}`} />}
             </section>
           ))}
         </section>

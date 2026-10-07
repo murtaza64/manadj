@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { guideStatus, saveSetupJourney, setGuideStatus, type SetupGuide } from './guides';
 import { guidePresentation } from './guidePresentation';
 import { GuideContent } from './GuideContent';
+import { HelpLink } from '../help/HelpLink';
+import { guideHelp } from '../help/contexts';
 import './setup.css';
 
 export interface SetupSequenceProps {
@@ -53,6 +55,7 @@ export function SetupSequence({ guides, onFinish, onPause = onFinish, initialInd
         <header className="setup-sequence-header">
           <span className="setup-eyebrow" role="status">{guide ? `Step ${index + 1} of ${guides.length} · ${guidePresentation(guide.id).category}` : 'Setup reviewed'}</span>
           {guide && <button className="btn btn-secondary btn-mini" onClick={onPause}>Finish later</button>}
+          {guide && <HelpLink {...guideHelp(guide.id)} label={`Help: ${guide.title}`} />}
         </header>
         <div className="setup-sequence-body" ref={body} tabIndex={-1}>
           {guide ? (
