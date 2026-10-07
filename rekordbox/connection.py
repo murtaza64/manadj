@@ -29,10 +29,10 @@ def get_rekordbox_db(db_dir: str | Path | None = None) -> Rekordbox6Database:
         if config.database.rekordbox_path:
             db_dir = config.database.rekordbox_path
         else:
-            # Auto-detect (uses default Rekordbox location)
+            # Auto-detect already ran in config loading; nothing was found.
             raise ValueError(
-                "Rekordbox database path not specified in config.toml. "
-                "Please provide a path."
+                "Rekordbox was not found on this Mac. "
+                "Set its location in Settings → Library."
             )
 
     # Convert to Path if string

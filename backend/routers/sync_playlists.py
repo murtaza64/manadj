@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel
 
 from backend.database import get_db
+from backend.export_gate import require_export_enabled
 from backend.config import get_config
 from backend.playlists.sync_manager import PlaylistSyncManager
 from backend.playlists.models import UnifiedPlaylist, PlaylistSyncStats
@@ -117,6 +118,11 @@ def sync_playlist(
     """
     # Load config
     config = get_config()
+
+    # Export gate (ADR 0043): only the manadj target is an import; a specific
+    # external target — or "all targets" (None) — writes external libraries.
+    if request.target != "manadj":
+        require_export_enabled()
 
     # Create database connections
     engine_db = None

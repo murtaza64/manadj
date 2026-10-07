@@ -24,7 +24,7 @@ def get_import_candidates(
     if not config.library.tracks_directory:
         raise HTTPException(
             status_code=400,
-            detail="Library tracks_directory not configured in config.toml"
+            detail="Tracks directory is not set. Choose one in Settings → Library."
         )
 
     manager = LibraryImportManager(db, config.library.tracks_directory)
@@ -42,7 +42,7 @@ def import_library_tracks(
     if not config.library.tracks_directory:
         raise HTTPException(
             status_code=400,
-            detail="Library tracks_directory not configured in config.toml"
+            detail="Tracks directory is not set. Choose one in Settings → Library."
         )
 
     manager = LibraryImportManager(db, config.library.tracks_directory)

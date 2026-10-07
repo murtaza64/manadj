@@ -35,6 +35,7 @@ RESTORE RUNBOOK (incident-tested 2026-07-08):
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import subprocess
 import sys
@@ -42,7 +43,12 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-DATA_DIR = Path("/Users/murtaza/manadj/data")
+# Default target: the real data root (MANADJ_DATA_DIR overrides, so the
+# script works against any data root — packaged-app #277). Automatic call
+# sites (backend/main.py) pass explicit paths instead.
+DATA_DIR = (
+    Path(os.environ.get("MANADJ_DATA_DIR", "/Users/murtaza/manadj")).expanduser() / "data"
+)
 REAL_DB = DATA_DIR / "library.db"
 BACKUP_DIR = DATA_DIR / "backups"
 STAMP = "%Y%m%d-%H%M%S"
@@ -54,11 +60,11 @@ DAILY_WINDOW_S = 14 * 24 * 3600   # then one per day out to here
 # beyond DAILY_WINDOW_S: one per ISO week
 
 
-def _backups() -> list[tuple[float, Path]]:
+def _backups(backup_dir: Path = BACKUP_DIR) -> list[tuple[float, Path]]:
     out = []
-    if not BACKUP_DIR.is_dir():
+    if not backup_dir.is_dir():
         return out
-    for p in BACKUP_DIR.iterdir():
+    for p in backup_dir.iterdir():
         m = NAME_RE.match(p.name)
         if m:
             ts = datetime.strptime(m.group(1), STAMP).replace(tzinfo=timezone.utc)
@@ -87,29 +93,40 @@ def _clone(src: Path, dest: Path) -> None:
             )
 
 
-def backup(force: bool = False, quiet: bool = False) -> Path | None:
-    """Take a backup (respecting MIN_INTERVAL unless force). Returns the path."""
-    if not REAL_DB.exists():
+def backup(
+    force: bool = False,
+    quiet: bool = False,
+    db: Path | None = None,
+    backup_dir: Path | None = None,
+) -> Path | None:
+    """Take a backup (respecting MIN_INTERVAL unless force). Returns the path.
+
+    Defaults target the real DB; pass db/backup_dir to back up any data root
+    (packaged-app #277 — backend startup backs up whatever DB it serves).
+    """
+    db = db or REAL_DB
+    backup_dir = backup_dir or BACKUP_DIR
+    if not db.exists():
         if not quiet:
-            print(f"db_backup: no real DB at {REAL_DB}; nothing to do")
+            print(f"db_backup: no DB at {db}; nothing to do")
         return None
-    existing = _backups()
+    existing = _backups(backup_dir)
     now = time.time()
     if not force and existing and now - existing[-1][0] < MIN_INTERVAL_S:
         return None
     stamp = datetime.now(timezone.utc).strftime(STAMP)
-    dest = BACKUP_DIR / f"library-{stamp}.db"
-    _clone(REAL_DB, dest)
-    prune(quiet=quiet)
+    dest = backup_dir / f"library-{stamp}.db"
+    _clone(db, dest)
+    prune(quiet=quiet, backup_dir=backup_dir)
     if not quiet:
         print(f"db_backup: {dest}")
     return dest
 
 
-def maybe_backup() -> Path | None:
+def maybe_backup(db: Path | None = None, backup_dir: Path | None = None) -> Path | None:
     """Interval-gated backup for automatic call sites. Never raises."""
     try:
-        return backup(force=False, quiet=True)
+        return backup(force=False, quiet=True, db=db, backup_dir=backup_dir)
     except Exception:
         return None
 
@@ -133,13 +150,13 @@ def harvest(path: Path) -> Path | None:
     return dest
 
 
-def prune(quiet: bool = False) -> None:
+def prune(quiet: bool = False, backup_dir: Path = BACKUP_DIR) -> None:
     """Thin old backups: all <48h, dailies to 14d, weeklies beyond."""
     now = time.time()
     keep: set[Path] = set()
     daily_seen: set[str] = set()
     weekly_seen: set[str] = set()
-    for ts, p in reversed(_backups()):  # newest first
+    for ts, p in reversed(_backups(backup_dir)):  # newest first
         age = now - ts
         d = datetime.fromtimestamp(ts, timezone.utc)
         if age < KEEP_ALL_WINDOW_S:
@@ -154,7 +171,7 @@ def prune(quiet: bool = False) -> None:
             if key not in weekly_seen:
                 weekly_seen.add(key)
                 keep.add(p)
-    for _, p in _backups():
+    for _, p in _backups(backup_dir):
         if p not in keep:
             p.unlink()
             if not quiet:

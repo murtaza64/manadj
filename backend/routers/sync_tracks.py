@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy.orm import Session
 
 from backend.database import get_db
+from backend.export_gate import require_export_enabled
 from backend.config import get_config
 from backend.tracks.sync_manager import TrackSyncManager
 from backend.tracks.models import (
@@ -88,7 +89,7 @@ def get_rekordbox_track_discrepancies(
     return result
 
 
-@router.post("/engine/export", response_model=EngineTrackExportResult)
+@router.post("/engine/export", response_model=EngineTrackExportResult, dependencies=[Depends(require_export_enabled)])
 def export_engine_tracks(
     request: EngineTrackExportRequest,
     db: Session = Depends(get_db),
@@ -139,6 +140,11 @@ def sync_rekordbox_tracks_bidirectional(
 
     if not config.database.rekordbox_path:
         raise HTTPException(status_code=404, detail="Rekordbox database not configured")
+
+    # Bidirectional endpoint: only the export direction is gated (ADR 0043).
+    if not request.skip_export and not config.export.enabled:
+        from ..export_gate import EXPORT_DISABLED_DETAIL
+        raise HTTPException(status_code=403, detail=EXPORT_DISABLED_DETAIL)
 
     rb_db = get_rekordbox_db()
 

@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 import './index.css'
 import { installPerfHook } from './perfHook.ts'
 import { installTheme } from './theme/tokens.ts'
+import { DEV_SURFACES } from './devMode.ts'
 import { hydratePersistedSettings } from './settings/persistedSettings.ts'
 import RootErrorBoundary from './components/RootErrorBoundary.tsx'
 
@@ -16,7 +17,8 @@ installTheme()
 const isDesktopShell = navigator.userAgent.includes('Electron')
 if (isDesktopShell) {
   document.documentElement.classList.add('desktop-shell')
-  installPerfHook()
+  // Perf hook is a dev surface (packaged-app #278): dev shells only.
+  if (DEV_SURFACES) installPerfHook()
 }
 
 // Settings hydrate BEFORE App is imported (settings, #176): module-level
