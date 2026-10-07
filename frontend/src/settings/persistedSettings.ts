@@ -71,6 +71,7 @@ export const PERSISTED_SETTING_KEYS: readonly string[] = [
   'manadj.grv6JogCalibration',
   // Coach-mark tour progress (feature-tour #282)
   'manadj-tour-state',
+  'manadj-tutorial-state',
   // Setup guides (guide status: done / skipped)
   'manadj-setup-state',
 ];

@@ -39,6 +39,8 @@ import { useAnalysisPendingSync } from './hooks/useAnalysisPending';
 import { isTypingTarget } from './components/performance/performanceKeys';
 import { registerViewToggle } from './midi/controlRegistry';
 import { TourController } from './tour/TourController';
+import { TutorialController } from './tutorials/TutorialController';
+import { OPEN_TUTORIAL_EVENT } from './tutorials/tutorialState';
 import { setTourArea, type TourArea } from './tour/tourState';
 
 /** Where each mode lands in the tour's section map (feature-tour #282):
@@ -147,6 +149,11 @@ function App() {
     return () => document.removeEventListener('keydown', onKeyDown);
   }, []);
   useEffect(() => registerViewToggle(toggleView), []);
+  useEffect(() => {
+    const open = (event: Event) => setView((event as CustomEvent).detail === 'performance' ? 'performance' : 'routine');
+    window.addEventListener(OPEN_TUTORIAL_EVENT, open);
+    return () => window.removeEventListener(OPEN_TUTORIAL_EVENT, open);
+  }, []);
 
   // A Take review request (Transition history row) opens the editor; the
   // mounted editor consumes the pending uuid itself (takeReview.ts).
@@ -237,6 +244,7 @@ function App() {
         {/* Coach-mark tour (feature-tour #282): above the view switch so
             it can spotlight anchors in any mode. */}
         <TourController />
+        <TutorialController />
         <FilterProvider>
           <div className="app-shell">
             <TopBar

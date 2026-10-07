@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { useMixer, useMixerValue } from '../hooks/useMixer';
 import { TOUR_SECTIONS } from '../tour/steps';
+import { TutorialSettings } from '../tutorials/TutorialSettings';
 import {
   allToursSkipped,
   isSectionSeen,
@@ -430,7 +431,8 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
     sections: [
       // slot: Setup guides status/relaunch (#288) — goes first
       { id: 'tour', title: 'Tour', render: () => <TourSettingsPanel /> },
-      // slot: Tutorials (#322); version/licenses/about
+      { id: 'tutorials', title: 'Tutorials', render: () => <TutorialSettings /> },
+      // slot: version/licenses/about
     ],
   },
 ];

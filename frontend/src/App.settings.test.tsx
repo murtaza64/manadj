@@ -13,6 +13,7 @@ import { OPEN_PAIR_EVENT } from './editor/openPair';
 import { OPEN_ROUTINE_EVENT } from './routines/openRoutine';
 import { OPEN_MIX_EVENT } from './routines/openMix';
 import { OPEN_SESSION_EVENT } from './sessions/openSession';
+import { OPEN_TUTORIAL_EVENT } from './tutorials/tutorialState';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -38,6 +39,7 @@ vi.mock('./components/MidiFeedbackBridge', () => ({ MidiFeedbackBridge: () => nu
 vi.mock('./components/MidiLevelMeterBridge', () => ({ MidiLevelMeterBridge: () => null }));
 vi.mock('./components/AudioRoutingBridge', () => ({ AudioRoutingBridge: () => null }));
 vi.mock('./components/VisualizerBridge', () => ({ VisualizerBridge: () => null }));
+vi.mock('./tutorials/TutorialController', () => ({ TutorialController: () => null }));
 vi.mock('./sets/ConductorPlanFeed', () => ({ ConductorPlanFeed: () => null }));
 vi.mock('./sets/SetSpaceTransport', () => ({ SetSpaceTransport: () => null }));
 vi.mock('./hooks/useAnalysisPending', () => ({ useAnalysisPendingSync: () => {} }));
@@ -123,6 +125,14 @@ function settingsOpen() { return host.querySelector('[aria-label="Settings"]')!.
 function params() { return new URLSearchParams(window.location.search); }
 
 describe('Settings lower-panel shell', () => {
+  it.each([['performance', 'performance'], ['edit', 'routine']])('opens the %s Tutorial from Settings without remounting Decks', async (area, target) => {
+    await mount('?view=performance&settings=1');
+    const decks = host.querySelector('[data-decks]');
+    await act(async () => window.dispatchEvent(new CustomEvent(OPEN_TUTORIAL_EVENT, { detail: area })));
+    expect(mode()).toBe(target);
+    expect(settingsOpen()).toBe('false');
+    expect(host.querySelector('[data-decks]')).toBe(decks);
+  });
   it.each(['performance', 'transition', 'routine'] as const)('retains %s component state and active deck controls', async view => {
     await mount(`?view=${view}&section=mouse&other=keep`, view);
     const panel = host.querySelector<HTMLButtonElement>(`[data-panel="${view}"]`)!;
