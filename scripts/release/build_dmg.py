@@ -77,6 +77,7 @@ BACKEND_FILES = ["alembic.ini", "scripts/agent/db_backup.py"]
 SHELL_FILES = [
     "main.js",
     "backend.js",
+    "chrome.js",
     "preload.js",
     "recording.js",
     "assert-channel-labels.swift",

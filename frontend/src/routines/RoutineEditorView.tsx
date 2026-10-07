@@ -108,6 +108,7 @@ import {
   useEditorMode,
   type EditorMode,
 } from './editorMode';
+import { primaryChordLabel } from '../utils/platform';
 import './routineEditor.css';
 
 const LAST_ROUTINE_KEY = 'manadj-last-routine';
@@ -1850,7 +1851,7 @@ export default function RoutineEditorView() {
             <button
               className="re-histbtn"
               disabled={!draft.canUndo}
-              title="Undo (⌘Z)"
+              title={`Undo (${primaryChordLabel('Z')})`}
               onClick={() => draftStore.undo()}
             >
               ↩
@@ -1858,7 +1859,7 @@ export default function RoutineEditorView() {
             <button
               className="re-histbtn"
               disabled={!draft.canRedo}
-              title="Redo (⌘⇧Z)"
+              title={`Redo (${primaryChordLabel('Z', { shift: true })})`}
               onClick={() => draftStore.redo()}
             >
               ↪

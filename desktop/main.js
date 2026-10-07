@@ -8,11 +8,12 @@
 //
 // See README.md and .scratch/desktop-shell/issues/01-electron-attach-shell.md.
 
-const { app, BrowserWindow, dialog, ipcMain, net, screen, session } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain, Menu, net, screen, session } = require("electron");
 const { execFile } = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
 const backend = require("./backend");
+const { ICON, menuTemplate, windowChromeOptions } = require("./chrome");
 const { registerRecordingIpc } = require("./recording");
 
 // The Vite dev target has no CSP, so Electron's renderer-console security
@@ -24,7 +25,6 @@ const DEFAULT_URL = "http://localhost:5173";
 const RETRY_INTERVAL_MS = 2000;
 const STATE_FILE = path.join(__dirname, "window-state.json");
 const APP_NAME = "manaDJ";
-const DOCK_ICON = path.join(__dirname, "..", "logo.png");
 
 // Rename what CAN be renamed at runtime (desktop-shell 06). The macOS
 // dock/menu-bar NAME comes from the bundle's Info.plist, which
@@ -500,10 +500,9 @@ function createWindow() {
     ...loadBounds(),
     title: "manaDJ",
     // No native title bar: the app's TopBar is the titlebar (drag region +
-    // double-click-to-zoom via CSS in frontend TopBar.css). Traffic lights
-    // stay, vertically centered in the 40px bar.
-    titleBarStyle: "hidden",
-    trafficLightPosition: { x: 16, y: 13 },
+    // double-click-to-zoom via CSS in frontend TopBar.css). macOS traffic
+    // lights / Windows+Linux caption buttons sit in the 40px bar (chrome.js).
+    ...windowChromeOptions(),
     // Dark paint during navigation (splash → app) — never a white flash.
     backgroundColor: "#111111",
     webPreferences: {
@@ -523,6 +522,8 @@ function createWindow() {
     overrideBrowserWindowOptions: {
       title: details.frameName === "manadj-arena" ? "manaDJ arena" : "manaDJ visualizer",
       backgroundColor: "#000000",
+      // Windows/Linux: native frame here, so carry the icon; hide the shell menu.
+      ...(process.platform === "darwin" ? {} : { icon: ICON, autoHideMenuBar: true }),
       // An explicit webPreferences override REPLACES the opener's inherited
       // webPreferences rather than merging — so preload must be re-stated
       // here or the child window has no manadjVisualizer bridge (its ⛶ then
@@ -616,7 +617,7 @@ app.whenReady().then(() => {
   // Dock icon is runtime-settable even on a raw Electron.app (unlike the
   // name). Best-effort: a missing logo must never block the shell.
   try {
-    app.dock?.setIcon(DOCK_ICON);
+    app.dock?.setIcon(ICON);
   } catch {
     // logo.png missing/unreadable — keep the default icon
   }
@@ -625,6 +626,8 @@ app.whenReady().then(() => {
   app.once("before-quit", disposeRecordingIpc);
   registerVisualizerIpc();
   registerSettingsIpc();
+  const template = menuTemplate();
+  if (template) Menu.setApplicationMenu(Menu.buildFromTemplate(template));
   createWindow();
 });
 

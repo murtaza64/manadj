@@ -340,6 +340,16 @@ def create_tag_category(db: Session, category: schemas.TagCategoryCreate):
     return db_category
 
 
+def delete_tag_category(db: Session, category_id: int):
+    """Delete a category, its Tags, and their TrackTag rows (ORM cascade)."""
+    category = db.query(models.TagCategory).filter(models.TagCategory.id == category_id).first()
+    if not category:
+        return None
+    db.delete(category)
+    db.commit()
+    return True
+
+
 def create_tag(db: Session, tag: schemas.TagCreate):
     db_tag = models.Tag(**tag.model_dump())
     db.add(db_tag)
