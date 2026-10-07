@@ -4,12 +4,14 @@ import { createRoot } from 'react-dom/client';
 import { afterEach, expect, it, vi } from 'vitest';
 import { DeckContext, useDeckSnapshot, type DeckContextValue } from '../../hooks/useDeck';
 import { DeckEngine } from '../../playback/DeckEngine';
+import { createBeatjumpSize } from '../../playback/beatjump';
 import { _clearBufferCacheForTests, putCachedBuffer } from '../../playback/bufferCache';
 import { setQuantize } from '../../playback/quantizeStore';
 import type { DeckAudioPort } from '../../playback/mixer';
 import { DeckKeys } from './DeckKeys';
 import { CaptureRecorder, type CaptureMixerSource } from '../../capture/recorder';
 import type { CaptureEvent } from '../../capture/events';
+import { presentationOf } from '../../utils/presentationStore';
 
 const starts = vi.hoisted(() => [] as { position: number; when: number }[]);
 const build = vi.hoisted(() => ({ gate: null as Promise<void> | null }));
@@ -65,6 +67,8 @@ it.each<{ gapMs: number; warm: boolean; quantize: boolean; running: boolean; res
   const port: DeckAudioPort = { ensureAudio: () => ({ ctx, input: {} as AudioNode }) };
   const engines = { A: new DeckEngine(port), B: new DeckEngine(port),
     C: new DeckEngine(port), D: new DeckEngine(port) };
+  const syncGroup = { match: vi.fn(), toggle: vi.fn(),
+    getSnapshot: () => ({ tempo: null, decks: { A: 'off', B: 'off', C: 'off', D: 'off' } }) };
   const mixer: CaptureMixerSource = {
     getChannelState: () => ({ trim: 0.5, eq: { low: 0.5, mid: 0.5, high: 0.5 },
       filter: 0, fader: 1, pfl: false, stems: { vocals: true, drums: true, bass: true, other: true } }),
@@ -94,8 +98,8 @@ it.each<{ gapMs: number; warm: boolean; quantize: boolean; running: boolean; res
     }
     const render = () => act(async () => root.render(<>
       {(['A', 'B'] as const).map(deck => (
-        <DeckContext.Provider key={deck} value={{ deck, engine: engines[deck],
-          loadedTrack: { id: 1 }, beatjumpBeats: 32 } as DeckContextValue}>
+        <DeckContext.Provider key={deck} value={{ deck, engine: engines[deck], syncGroup,
+          loadedTrack: { id: 1 }, beatjump: createBeatjumpSize() } as unknown as DeckContextValue}>
           <DeckKeys /><Status />
         </DeckContext.Provider>
       ))}
@@ -146,6 +150,50 @@ it.each<{ gapMs: number; warm: boolean; quantize: boolean; running: boolean; res
     releaseBuild();
     act(() => root.unmount());
     for (const engine of Object.values(engines)) engine.dispose();
+  }
+});
+
+it.each(['match', 'toggle'] as const)('uses live engine readiness and BPM for Sync %s before UI publication', async action => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  const ctx = { currentTime: 10, state: 'running' } as AudioContext;
+  const engine = new DeckEngine({ ensureAudio: () => ({ ctx, input: {} as AudioNode }) });
+  const syncGroup = { match: vi.fn(), toggle: vi.fn(),
+    getSnapshot: () => ({ decks: { A: 'off' } }) };
+  const root = createRoot(document.createElement('div'));
+  const chord = () => act(() => {
+    document.dispatchEvent(new KeyboardEvent('keydown', {
+      key: action === 'toggle' ? 'G' : 'g', metaKey: true,
+      shiftKey: action === 'toggle', bubbles: true,
+    }));
+  });
+  putCachedBuffer(1, {
+    duration: 180, sampleRate: 44100, numberOfChannels: 1,
+    getChannelData: () => new Float32Array(44100),
+  } as unknown as AudioBuffer);
+  try {
+    act(() => root.render(
+      <DeckContext.Provider value={{ deck: 'A', engine, syncGroup,
+        loadedTrack: { id: 1, bpm: null }, beatjump: createBeatjumpSize() } as unknown as DeckContextValue}>
+        <DeckKeys /><Status />
+      </DeckContext.Provider>
+    ));
+    await act(async () => {
+      await engine.load({ trackId: 1, audioUrl: '/unused', bpm: 120 });
+    });
+    expect(engine.getSnapshot()).toMatchObject({ loadState: 'ready', bpm: 120 });
+    expect(presentationOf(engine).getSnapshot().loadState).not.toBe('ready');
+    chord();
+    expect(syncGroup[action]).toHaveBeenCalledExactlyOnceWith('A');
+
+    act(() => vi.runOnlyPendingTimers());
+    act(() => engine.setTrackBpm(1, null));
+    expect(engine.getSnapshot().bpm).toBeNull();
+    expect(presentationOf(engine).getSnapshot().bpm).toBe(120);
+    chord();
+    expect(syncGroup[action]).toHaveBeenCalledTimes(1);
+  } finally {
+    act(() => root.unmount());
+    engine.dispose();
   }
 });
 

@@ -65,6 +65,15 @@ class TrackCreate(TrackBase):
     """bpm is float BPM; conversion to the storage unit happens in crud.create_track."""
 
 
+class TrackFileRelocation(BaseModel):
+    track_id: int
+    destination: str
+
+
+class TrackFileRelocationRequest(BaseModel):
+    relocations: list[TrackFileRelocation]
+
+
 class TrackProvenance(BaseModel):
     """Audio Provenance summary for track list responses."""
     label: str
@@ -569,7 +578,35 @@ class RoutineRow(BaseModel):
     entry_positions: list[float]
     duration_beats: float
     origin_take_uuid: str | None = None
+    # Stable slot ids parallel to cast (ADR 0039); null = promoted
+    # (slot id = String(index)).
+    slot_ids: list[str] | None = None
+    # Authored from scratch (ADR 0039, gh#325): no recording — replay
+    # synthesizes each slot's trace from (entry beat, entry position,
+    # beatmatched rate). Promotion previews are never authored.
+    authored: bool = False
     created_at: datetime | None = None
+
+
+class RoutineStructure(BaseModel):
+    """An authored Routine's first-class structure (ADR 0039, gh#325):
+    parallel per-slot lists. The server re-sorts slots into entry order
+    (slot index = entry order, ADR 0035). n ≥ 3 — a 2-cast mix is a
+    Transition."""
+    cast: list[int]
+    slot_ids: list[str]
+    entry_offsets_beats: list[float]
+    entry_positions: list[float]
+    duration_beats: float
+    # Optional: replace the edits layer in the same write (slot removal
+    # prunes the removed slot's edits atomically).
+    edits: dict | None = None
+
+
+class RoutineAuthoredCreate(RoutineStructure):
+    """Mint an authored Routine (the blank draft's first persist)."""
+    uuid: str
+    name: str | None = None
 
 
 class RoutineDetail(RoutineRow):

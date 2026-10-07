@@ -35,6 +35,9 @@ class LibraryImportResult(BaseModel):
 class LibraryImportRequest(BaseModel):
     """Request to import tracks."""
     candidate_filepaths: list[str] | None = None  # None = import all
+    # Scan subfolders (onboarding #276): must match the candidates scan, or
+    # files found in subfolders are silently dropped on import.
+    recursive: bool = True
 
 
 class LibraryImportExecutionResult(BaseModel):
@@ -43,3 +46,21 @@ class LibraryImportExecutionResult(BaseModel):
     skipped_no_metadata: int = 0
     errors: int = 0
     error_messages: list[str] = []
+    track_ids: list[int] = []
+
+
+class DropImportRequest(BaseModel):
+    """Files/folders dropped from the filesystem (absolute paths)."""
+    paths: list[str]
+    playlist_id: int | None = None
+
+
+class DropImportResult(BaseModel):
+    """Outcome of a drop Disk Import (files imported in place)."""
+    imported: int = 0
+    skipped: int = 0  # already in the Library (path match, archived included)
+    failed: int = 0
+    ignored: int = 0  # non-audio files
+    error_messages: list[str] = []
+    track_ids: list[int] = []
+    playlist_added: int = 0

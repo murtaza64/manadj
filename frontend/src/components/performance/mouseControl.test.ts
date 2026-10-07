@@ -73,12 +73,15 @@ describe.each([false, true])('knob stroke (bipolar=%s)', (bipolar) => {
 
 describe('paused mouse seek response', () => {
   it('keeps slow movement gentle, with bounded acceleration for fast sweeps', () => {
-    expect(mouseSeekDelta(1, 20)).toBeCloseTo(0.0025, 5);
+    expect(mouseSeekDelta(1, 20)).toBeCloseTo(0.00125, 6);
+    expect(mouseSeekDelta(-1, 20)).toBeCloseTo(-0.00125, 6);
     const medium = mouseSeekDelta(5, 20) / 5;
-    expect(medium).toBeGreaterThan(0.0025);
+    expect(medium).toBeGreaterThan(0.00125);
     expect(medium).toBeLessThan(0.0075);
-    expect(mouseSeekDelta(20, 20)).toBeCloseTo(0.15);
-    expect(mouseSeekDelta(200, 20)).toBeCloseTo(1.5);
+    expect(mouseSeekDelta(5, 20)).toBeLessThan(0.02);
+    expect(mouseSeekDelta(20, 20)).toBeGreaterThan(0.4);
+    expect(mouseSeekDelta(20, 20)).toBeLessThan(0.5);
+    expect(mouseSeekDelta(200, 20)).toBe(10);
   });
 
   it('is symmetric and independent of event batching at the same speed', () => {

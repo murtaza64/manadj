@@ -32,7 +32,7 @@ it('persists the selected filter and restores approved defaults when reset', () 
   expect(loadFilterSettings()).toMatchObject({
     model: 'res48',
     resonance: 21,
-    compensation: 0.15,
+    compensation: 0.85,
   });
   saveFilterSettings(DEFAULT_FILTER_SETTINGS);
   expect(loadFilterSettings()).toEqual(DEFAULT_FILTER_SETTINGS);

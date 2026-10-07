@@ -13,9 +13,11 @@ const PARAMS = [
   { key: 'sensitivity', label: 'Sensitivity', unit: 'x', min: 0.25, max: 12, step: 0.25,
     note: 'Higher reaches full bend with slower movement.' },
   { key: 'acceleration', label: 'Acceleration', unit: '', min: 1, max: 3, step: 0.1,
-    note: 'Higher keeps fine control; full-bend speed stays the same.' },
+    note: 'Higher softens fine motion and strengthens fast swipes.' },
   { key: 'smoothingMs', label: 'Smoothing', unit: 'ms', min: 0, max: 200, step: 5,
     note: 'Higher adds inertia; zero responds immediately.' },
+  { key: 'maxBendPercent', label: 'Maximum bend', unit: '%', min: 8, max: 50, step: 1,
+    note: 'Raises the ceiling for coarse adjustments without amplifying fine bends.' },
 ] as const;
 
 function MouseReadout() {
@@ -73,8 +75,8 @@ export default function MouseJogSettings({ performance = false }: { performance?
             </div>
           ))}
           <div className="settings-field">
-            <p>Full bend (+/-8%) at <strong>{(6000 / settings.sensitivity).toFixed(0)} px/s</strong></p>
-            <p>Target magnitude (before smoothing):</p>
+            <p>Full bend (+/-{settings.maxBendPercent}%) at <strong>{(6000 / settings.sensitivity * (settings.maxBendPercent / 8) ** (1 / settings.acceleration)).toFixed(0)} px/s</strong></p>
+            <p>Steady-motion targets (before smoothing):</p>
             {[200, 600, 1200].map((speed) => (
               <p key={speed}>{speed} px/s: <strong>{mouseJogBendTarget(speed, settings).toFixed(2)}%</strong></p>
             ))}

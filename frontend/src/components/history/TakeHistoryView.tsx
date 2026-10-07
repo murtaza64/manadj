@@ -157,7 +157,7 @@ export function TakeHistoryView() {
   const empty = (rows?.length ?? 0) === 0 && (routineRows?.length ?? 0) === 0;
 
   return (
-    <div className="take-history">
+    <div className="take-history" data-tour="history.root">
       {error ? <div className="take-history-error">{String(error)}</div> : null}
       {rows === undefined ? (
         <div className="take-history-empty">Loading…</div>
@@ -166,7 +166,7 @@ export function TakeHistoryView() {
           No Takes yet — mix something in the Performance view and finished handovers land here.
         </div>
       ) : (
-        <table className="take-history-table">
+        <table className="take-history-table" data-tour="history.table">
           <thead>
             <tr>
               <th>When</th>

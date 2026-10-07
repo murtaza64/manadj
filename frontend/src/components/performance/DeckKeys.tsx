@@ -7,7 +7,8 @@
  * (B or D). The map is mirrored per hand, not per physical Deck.
  *
  * Guards mirror the library hub: keys are ignored while an input/textarea/
- * contenteditable has focus or with ctrl/meta/alt held, except Cmd+cue walk.
+ * contenteditable has focus or with ctrl/meta/alt held, except explicit primary-
+ * modifier chords (Cmd on macOS, Ctrl elsewhere — utils/platform).
  * Hold-style keys suppress key repeat.
  */
 import { useEffect, useRef } from 'react';
@@ -15,15 +16,17 @@ import { useViewActive } from '../../contexts/viewActive';
 import { useDeck } from '../../hooks/useDeck';
 import { useHotCueActions } from '../../hooks/useHotCueActions';
 import { useMixer } from '../../hooks/useMixer';
+import { doubleBeatjump, halveBeatjump } from '../../playback/beatjump';
+import { isPrimaryChord } from '../../utils/platform';
 import { MouseJogController } from './mouseJog';
 import { getMouseJogSettings, setMouseJogSpeed } from './mouseJogSettings';
-import { DECK_KEYS, hasKeyboardOverlay, isGuardedKeyEvent, isTextEntryTarget, isTypingTarget } from './performanceKeys';
+import { DECK_KEYS, hasKeyboardOverlay, isGuardedKeyEvent, isQuantizeShortcut, isTextEntryTarget, isTypingTarget } from './performanceKeys';
 import { registerKeyboardPointer, type KeyboardPointerFeedback } from './keyboardPointer';
 import { invertControl, MIXER_DRAG_RANGE_PX, moveKnob, type KnobGesture } from './mouseControl';
 
 export function DeckKeys({ enabled = true }: { enabled?: boolean }) {
   const viewActive = useViewActive() && enabled;
-  const { deck, engine, loadedTrack, beatjumpBeats } = useDeck();
+  const { deck, engine, syncGroup, loadedTrack, beatjump } = useDeck();
   const hotCues = useHotCueActions(loadedTrack?.id ?? null);
   const mixer = useMixer();
   const cueHeld = useRef(false);
@@ -104,6 +107,7 @@ export function DeckKeys({ enabled = true }: { enabled?: boolean }) {
       },
     });
     const onKeyDown = (event: KeyboardEvent) => {
+      if (isQuantizeShortcut(event)) return;
       if (isGuardedKeyEvent(event)) {
         release();
         return;
@@ -218,27 +222,46 @@ export function DeckKeys({ enabled = true }: { enabled?: boolean }) {
       const i = keys.pads.indexOf(key);
       return i === -1 ? null : i + 1;
     };
+    // Shift changes punctuation's event.key; keyup must resolve the same pad
+    // whether Shift is released before or after the pad key.
+    const unshifted: Record<string, string> = { ':': ';', '<': ',', '>': '.', '?': '/' };
 
     const onKeyDown = (event: KeyboardEvent) => {
-      if (!viewActive || isTypingTarget(event) || hasKeyboardOverlay()) return;
+      if (!viewActive || event.isComposing || isTypingTarget(event) || hasKeyboardOverlay()) return;
       const snapshot = engine.getSnapshot();
       const ready = snapshot.loadState === 'ready' && snapshot.trackId === loadedTrack?.id;
+      // Play may latch intent while loading; other transport requires readiness.
       const canPlay = snapshot.loadState === 'ready' || snapshot.loadState === 'fetching' || snapshot.loadState === 'decoding';
-      const key = event.key.toLowerCase();
-      if (event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey &&
-          (key === keys.jumpBack || key === keys.jumpForward)) {
+      const key = unshifted[event.key] ?? event.key.toLowerCase();
+      const jumpKey = key === keys.jumpBack || key === keys.jumpForward;
+      if (isPrimaryChord(event) && (jumpKey || key === keys.fader)) {
         event.preventDefault();
-        if (!event.repeat && ready && !engine.getSnapshot().playing) {
+        if (event.repeat) return;
+        if (key === keys.fader) {
+          if (event.shiftKey) {
+            if (syncGroup.getSnapshot().decks[deck] !== 'off' || (ready && snapshot.bpm)) {
+              syncGroup.toggle(deck);
+            }
+          } else if (ready && snapshot.bpm) syncGroup.match(deck);
+        } else if (event.shiftKey) {
+          engine.resizeLoop(key === keys.jumpBack ? 'halve' : 'double');
+        } else if (ready && !snapshot.playing) {
           hotCues.walk?.(key === keys.jumpBack ? 'prev' : 'next');
         }
         return;
       }
       if (isGuardedKeyEvent(event)) return;
+      if (event.shiftKey && jumpKey) {
+        event.preventDefault();
+        if (!event.repeat) beatjump.set(key === keys.jumpBack
+          ? halveBeatjump(beatjump.getSnapshot()) : doubleBeatjump(beatjump.getSnapshot()));
+        return;
+      }
 
       // Hold keys: swallow repeats but keep the event claimed.
       if (
         event.repeat &&
-        (key === keys.cue || padSlot(key) !== null)
+        (key === keys.cue || key === keys.loop || padSlot(key) !== null)
       ) {
         event.preventDefault();
         return;
@@ -253,23 +276,34 @@ export function DeckKeys({ enabled = true }: { enabled?: boolean }) {
         event.preventDefault();
         cueHeld.current = true;
         engine.cueDown();
+      } else if (key === keys.loop && !event.shiftKey) {
+        if (!ready || !engine.getSnapshot().hasBeatgrid) return;
+        event.preventDefault();
+        engine.toggleLoop();
       } else if (key === keys.jumpBack || key === keys.jumpForward) {
         if (!ready) return;
         event.preventDefault();
-        engine.jumpBeats(key === keys.jumpBack ? -beatjumpBeats : beatjumpBeats);
+        const beats = beatjump.getSnapshot();
+        engine.jumpBeats(key === keys.jumpBack ? -beats : beats);
       } else {
         const slot = padSlot(key);
         if (slot !== null) {
           if (!ready) return;
           event.preventDefault();
-          hotCues.down(slot);
-          padsHeld.current.set(slot, () => hotCues.up(slot));
+          if (event.shiftKey) {
+            padsHeld.current.get(slot)?.();
+            padsHeld.current.delete(slot);
+            hotCues.remove(slot);
+          } else {
+            hotCues.down(slot);
+            padsHeld.current.set(slot, () => hotCues.up(slot));
+          }
         }
       }
     };
 
     const onKeyUp = (event: KeyboardEvent) => {
-      const key = event.key.toLowerCase();
+      const key = unshifted[event.key] ?? event.key.toLowerCase();
 
       if (key === keys.cue) {
         if (!cueHeld.current) return;
@@ -292,7 +326,7 @@ export function DeckKeys({ enabled = true }: { enabled?: boolean }) {
       document.removeEventListener('keydown', onKeyDown);
       document.removeEventListener('keyup', onKeyUp);
     };
-  }, [deck, engine, loadedTrack?.id, beatjumpBeats, hotCues, viewActive]);
+  }, [deck, engine, syncGroup, loadedTrack?.id, beatjump, hotCues, viewActive]);
 
   return null;
 }

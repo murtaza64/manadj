@@ -106,7 +106,7 @@ export function SessionsListView({ onOpen }: { onOpen?: (uuid: string) => void }
     el.scrollTop = lastListScrollTop;
   }, [rows]);
 
-  return <div className="sessions-list" ref={scrollRef}
+  return <div className="sessions-list" data-tour="sessions.list" ref={scrollRef}
     onScroll={e => { lastListScrollTop = e.currentTarget.scrollTop; }}>
     <header className="sessions-list-header">
       <h2>Sessions</h2>

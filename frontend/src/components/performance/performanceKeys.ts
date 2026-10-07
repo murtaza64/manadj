@@ -15,6 +15,7 @@ export interface DeckKeyMap {
   /** Hold-cue (CDJ style). */
   cue: string;
   play: string;
+  loop: string;
   jumpBack: string;
   jumpForward: string;
   /** Hold and move vertically; mirrored from pinky (filter) to index (low). */
@@ -55,11 +56,21 @@ export function isTypingTarget(event: KeyboardEvent): boolean {
   return isTextEntryTarget(event.target);
 }
 
+/** Raw chord reservation; the global owner applies typing/overlay guards. */
+export function isQuantizeShortcut(event: KeyboardEvent): boolean {
+  return event.key === '=' && !event.shiftKey
+    && !event.ctrlKey && !event.metaKey && !event.altKey;
+}
+
 /** The predicate behind isTypingTarget, on the target itself (testable). */
 export function isTextEntryTarget(target: EventTarget | null): boolean {
   if (!(target instanceof Element)) return false;
   if (target.tagName === 'TEXTAREA') return true;
-  if ((target as HTMLElement).contentEditable === 'true') return true;
+  for (let node: Element | null = target; node; node = node.parentElement) {
+    const editable = (node as HTMLElement).contentEditable ?? node.getAttribute('contenteditable');
+    if (editable === 'false') break;
+    if (editable === 'true' || editable === '' || editable === 'plaintext-only') return true;
+  }
   return target.tagName === 'INPUT' && TEXT_INPUT_TYPES.has((target as HTMLInputElement).type);
 }
 
@@ -94,6 +105,7 @@ export const DECK_KEYS: Record<'A' | 'B', DeckKeyMap> = {
   A: {
     cue: 'f',
     play: 'd',
+    loop: 'b',
     jumpBack: 'a',
     jumpForward: 's',
     knobs: { filter: 'q', high: 'w', mid: 'e', low: 'r' },
@@ -104,6 +116,7 @@ export const DECK_KEYS: Record<'A' | 'B', DeckKeyMap> = {
   B: {
     cue: 'j',
     play: 'k',
+    loop: 'n',
     jumpBack: 'l',
     jumpForward: ';',
     knobs: { filter: 'p', high: 'o', mid: 'i', low: 'u' },

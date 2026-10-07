@@ -60,6 +60,14 @@
   padding-left: 84px;
 }
 
+/* Windows/Linux (gh#313): no traffic lights; the native caption buttons
+   (titleBarOverlay, desktop/chrome.js) overlay the right edge. Inset past
+   them via the window-controls-overlay area; 138px = Windows' 3 x 46px. */
+.desktop-shell.platform-other .topbar {
+  padding-left: var(--space-12);
+  padding-right: calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, calc(100vw - 138px)) + var(--space-12));
+}
+
 /* Anything interactive in the bar must opt out of the drag region, including
    controls other features add later. The knob dials are draggable divs —
    without the opt-out, turning a gain knob would drag the window. */
@@ -219,31 +227,6 @@
 
 .topbar-mode-menu-item.active .topbar-mode-menu-title {
   color: inherit;
-}
-
-/* Quantize toggle (looping 01): app-wide, lit green while gestures snap. */
-.topbar-quantize {
-  width: 24px;
-  height: 24px;
-  padding: 0;
-  background: transparent;
-  border: 1px solid var(--overlay0);
-  color: var(--subtext0);
-  font-size: var(--font-body);
-  font-weight: 800;
-  line-height: 1;
-  cursor: pointer;
-}
-
-.topbar-quantize:hover {
-  border-color: var(--success);
-  color: var(--success);
-}
-
-.topbar-quantize.on {
-  background: var(--success);
-  border-color: var(--success);
-  color: var(--base);
 }
 
 /* ── Recording ─────────────────────────────────────────────────────── */
@@ -531,4 +514,21 @@
 .topbar-visualizer-caret:hover {
   border-color: var(--accent);
   color: var(--accent);
+}
+
+/* ffmpeg health warning (packaged-app #278): rendered only when ffmpeg is
+   missing from PATH — an app-level error state, not a transient toast. */
+.topbar-ffmpeg-warning {
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  padding: 0 var(--space-8);
+  font-size: var(--font-micro);
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: var(--danger);
+  border: 1px solid var(--danger);
+  border-radius: var(--radius);
+  cursor: help;
+  user-select: none;
 }

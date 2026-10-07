@@ -171,11 +171,15 @@ export function wireRoutineToPlanInput(
     duration_beats: number;
     events: Record<string, unknown>[];
     edits?: Record<string, unknown> | null;
+    slot_ids?: string[] | null;
+    authored?: boolean;
   },
   editsOverride?: RoutineEdits | null
 ): RoutinePlanInput {
   return {
     cast: detail.cast,
+    slotIds: detail.slot_ids ?? undefined,
+    authored: detail.authored ?? false,
     entryOffsetsBeats: detail.entry_offsets_beats,
     entryPositions: detail.entry_positions,
     durationBeats: detail.duration_beats,

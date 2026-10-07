@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef } from 'react';
 import { DeckScope } from '../contexts/DeckContext';
 import { followMacroToggles } from '../follow/model';
 import { dispatchFollow, getFollowFlags } from '../follow/followStore';
-import { useDeck, deckReadyNow, useDecks } from '../hooks/useDeck';
+import { useDeck, deckReadyNow, useDecks, useBeatjumpBeats } from '../hooks/useDeck';
 import { useGridEditActions } from '../hooks/useGridEditActions';
 import { useHotCueActions } from '../hooks/useHotCueActions';
 import { useMixer } from '../hooks/useMixer';
@@ -34,7 +34,9 @@ import { setKeyLockFlag } from '../playback/keyLockStore';
  */
 
 function DeckControlsRegistrar() {
-  const { deck, engine, syncGroup, loadedTrack, beatjumpBeats, setBeatjumpBeats } = useDeck();
+  const { deck, engine, syncGroup, loadedTrack, beatjump } = useDeck();
+  const beatjumpBeats = useBeatjumpBeats(beatjump);
+  const setBeatjumpBeats = beatjump.set;
   const ready = () => deckReadyNow(engine, loadedTrack?.id ?? null);
   const hotCues = useHotCueActions(loadedTrack?.id ?? null);
   // Grid-edit pad ops (midi-performance-ops 05): the same mutations and
@@ -66,18 +68,17 @@ function DeckControlsRegistrar() {
     let previous = engine.getSnapshot();
     const unsubscribe = engine.subscribe(() => {
       const next = engine.getSnapshot();
-      const reset = next.trackId !== previous.trackId || next.loadState !== previous.loadState
-        || next.playing !== previous.playing;
+      // A Load is a hard reset. Everything else (play/pause, seeks, cues —
+      // the dispatches another control triggers mid-scratch) already ended
+      // the engine scratch; syncState's override keeps the physical
+      // contact so platter rotation re-acquires without a re-touch.
+      const reset = next.trackId !== previous.trackId || next.loadState !== previous.loadState;
       previous = next;
       if (reset) jog.cancel();
       else jog.syncState();
     });
-    const unsubscribeTransport = engine.addTransportEventListener(event => {
-      if (event.action === 'seek' || event.action === 'jumpBeats' || event.action === 'hotCue') jog.cancel();
-    });
     return () => {
       unsubscribe();
-      unsubscribeTransport();
       jog.dispose();
     };
   }, [engine, jog]);

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest';
-import { browseLoadTarget, hasKeyboardOverlay, isTextEntryTarget, isTypingTarget } from './performanceKeys';
+import { browseLoadTarget, DECK_KEYS, hasKeyboardOverlay, isQuantizeShortcut, isTextEntryTarget, isTypingTarget } from './performanceKeys';
 import type { ControlFocus } from '../../performance/controlFocus';
 
 function input(type: string): HTMLInputElement {
@@ -8,6 +8,26 @@ function input(type: string): HTMLInputElement {
   el.type = type;
   return el;
 }
+
+it('reserves only plain =, including repeats and composing events for the owner to guard', () => {
+  expect(isQuantizeShortcut(new KeyboardEvent('keydown', { key: '=' }))).toBe(true);
+  expect(isQuantizeShortcut(new KeyboardEvent('keydown', { key: '=', repeat: true, isComposing: true }))).toBe(true);
+  for (const options of [{ shiftKey: true }, { ctrlKey: true }, { metaKey: true }, { altKey: true }]) {
+    expect(isQuantizeShortcut(new KeyboardEvent('keydown', { key: '=', ...options }))).toBe(false);
+  }
+  for (const key of ['q', 'Q', '+', 'W']) {
+    for (const shiftKey of [false, true]) {
+      expect(isQuantizeShortcut(new KeyboardEvent('keydown', { key, shiftKey }))).toBe(false);
+    }
+  }
+});
+
+it('maps loops to B/N and keeps plain Q available for the left filter', () => {
+  expect(DECK_KEYS.A.loop).toBe('b');
+  expect(DECK_KEYS.B.loop).toBe('n');
+  expect(DECK_KEYS.A.knobs.filter).toBe('q');
+  expect(isQuantizeShortcut(new KeyboardEvent('keydown', { key: DECK_KEYS.A.knobs.filter }))).toBe(false);
+});
 
 it('ignores overlays inside hidden keep-alive ancestors', () => {
   const wrapper = document.createElement('div');
@@ -43,6 +63,15 @@ describe('isTextEntryTarget (the hubs\' typing guard, keyboard-focus 01)', () =>
     const el = document.createElement('div');
     el.contentEditable = 'true';
     expect(isTextEntryTarget(el)).toBe(true);
+  });
+
+  it('inherits editability while respecting an explicit non-editable child', () => {
+    const editor = document.createElement('div');
+    editor.setAttribute('contenteditable', '');
+    const child = editor.appendChild(document.createElement('span'));
+    expect(isTextEntryTarget(child)).toBe(true);
+    child.setAttribute('contenteditable', 'false');
+    expect(isTextEntryTarget(child)).toBe(false);
   });
 
   it('does not guard buttons, selects, plain divs, or nothing', () => {

@@ -15,6 +15,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Mixer } from './mixer';
 import { channelFaderToGain } from './mixerMath';
 import type { AutomationChannelValues } from './mixer';
+import { DEFAULT_BEAT_FX_SETTINGS } from './beatFxSettings';
 
 const values = (fader: number, eq: number, filter: number): AutomationChannelValues => ({
   fader,
@@ -45,7 +46,8 @@ class FakeNode {
   readonly inputs = new Set<FakeNode>();
   readonly outputs = new Set<FakeNode>();
 
-  connect(destination: FakeNode): FakeNode {
+  connect<T extends FakeNode | FakeParam>(destination: T): T {
+    if (!(destination instanceof FakeNode)) return destination;
     this.outputs.add(destination);
     destination.inputs.add(this);
     return destination;
@@ -65,6 +67,9 @@ class FakeAudioContext {
   params: FakeParam[] = [];
   filterParamOwners = new Map<FakeParam, FakeNode>();
   waveShapers: Array<FakeNode & { curve: Float32Array<ArrayBuffer> | null; oversample: string }> = [];
+  delays: Array<FakeNode & { maxDelayTime: number; delayTime: FakeParam }> = [];
+  oscillators: Array<FakeNode & { frequency: FakeParam }> = [];
+  convolvers: Array<FakeNode & { buffer: unknown }> = [];
   analyserData: readonly number[] = [0];
   currentTime = 0;
   sampleRate = 48000;
@@ -102,6 +107,39 @@ class FakeAudioContext {
     });
     this.waveShapers.push(node);
     return node;
+  }
+  createDelay(maxDelayTime: number) {
+    const node = Object.assign(new FakeNode(), {
+      maxDelayTime,
+      delayTime: this.param(0),
+    });
+    this.delays.push(node);
+    return node;
+  }
+  createOscillator() {
+    const oscillator = Object.assign(new FakeNode(), {
+      type: 'sine',
+      frequency: this.param(1),
+      start(): void {},
+      stop(): void {},
+    });
+    this.oscillators.push(oscillator);
+    return oscillator;
+  }
+  createConvolver() {
+    const node = Object.assign(new FakeNode(), { buffer: null as unknown });
+    this.convolvers.push(node);
+    return node;
+  }
+  createBuffer(channels: number, length: number, sampleRate: number) {
+    const data = Array.from({ length: channels }, () => new Float32Array(length));
+    return {
+      numberOfChannels: channels,
+      length,
+      sampleRate,
+      getChannelData: (i: number) => data[i],
+      copyToChannel: (source: Float32Array, i: number) => data[i].set(source),
+    };
   }
   createMediaStreamDestination() {
     return Object.assign(new FakeNode(), { stream: {} });
@@ -156,9 +194,13 @@ function forbidAudio(): void {
 
 /** Sorted param values of a fake context — the multiset fingerprint. */
 function fingerprint(ctx: FakeAudioContext): number[] {
-  const audible = (node: FakeNode): boolean => {
+  // Visited-set guard: the beat-fx echo's feedback loop makes the graph
+  // cyclic (gh#272); a revisited node terminates its path as not-audible.
+  const audible = (node: FakeNode, visiting = new Set<FakeNode>()): boolean => {
+    if (visiting.has(node)) return false;
+    visiting.add(node);
     if ('gain' in node && (node.gain as FakeParam).value === 0) return false;
-    return node.outputs.size === 0 || [...node.outputs].some(audible);
+    return node.outputs.size === 0 || [...node.outputs].some((next) => audible(next, visiting));
   };
   // Muted sweep branches retain their last cutoff for a click-free fade-out.
   return ctx.params.filter(p => !ctx.filterParamOwners.has(p) || audible(ctx.filterParamOwners.get(p)!))
@@ -219,12 +261,12 @@ describe('global filter preferences', () => {
   it('defaults to the approved sound and changes preferences without creating audio or moving decks', () => {
     forbidAudio();
     const mixer = new Mixer();
-    expect(mixer.getFilterSettings()).toMatchObject({ model: 'res24', resonance: 17, compensation: 0.15 });
+    expect(mixer.getFilterSettings()).toMatchObject({ model: 'res24', resonance: 17, compensation: 0.85 });
     const before = mixer.getChannelState('A');
     const notify = vi.fn();
     mixer.subscribe(notify);
     mixer.setFilterSettings({ model: 'dual', resonance: 20 });
-    expect(mixer.getFilterSettings()).toMatchObject({ model: 'dual', resonance: 20, compensation: 0.15 });
+    expect(mixer.getFilterSettings()).toMatchObject({ model: 'dual', resonance: 20, compensation: 0.85 });
     expect(mixer.getChannelState('A')).toBe(before);
     expect(notify).toHaveBeenCalledWith('filterSettings');
   });
@@ -636,5 +678,295 @@ describe('stem solo (stems review feedback)', () => {
       bass: true,
       other: false,
     });
+  });
+});
+
+// ── Beat FX insert (gh#272) ──────────────────────────────────────────────
+
+/** Resolve one channel strip's Beat FX nodes from the fake graph by
+ * topology: strips build in A–D order, so delay/convolver index = channel
+ * index. The feedback gain is the fixed 0.5 loop; the other delay feed is
+ * the echo SEND, the other soft-clip output is the echo WET. */
+function fxNodesFor(ctx: FakeAudioContext, index: number) {
+  type GainLike = FakeNode & { gain: FakeParam };
+  const delay = ctx.delays.filter((node) => node.maxDelayTime > 1)[index];
+  const feeds = [...delay.inputs] as GainLike[];
+  const feedback = feeds.find((node) => node.gain.value === 0.5)!;
+  const echoSend = feeds.find((node) => node !== feedback)!;
+  const clip = [...delay.outputs][0];
+  const clipOuts = [...clip.outputs] as GainLike[];
+  const echoWet = clipOuts.find((node) => node !== feedback)!;
+  const convolver = ctx.convolvers[index];
+  const reverbSend = [...convolver.inputs][0] as GainLike;
+  const reverbWet = [...convolver.outputs][0] as GainLike;
+  const output = [...echoWet.outputs][0];
+  const input = [...echoSend.inputs][0] as GainLike;
+  const dry = ([...output.inputs] as GainLike[]).find(
+    (node) => node !== echoWet && node !== reverbWet
+  )!;
+  return { delay, feedback, echoSend, echoWet, clip, convolver, reverbSend, reverbWet, input, output, dry };
+}
+
+function flangerNodesFor(ctx: FakeAudioContext, index: number) {
+  type GainLike = FakeNode & { gain: FakeParam };
+  const delay = ctx.delays.filter((node) => node.maxDelayTime <= 1)[index];
+  const feeds = [...delay.inputs] as GainLike[];
+  const feedback = feeds.find((node) => node.gain.value === DEFAULT_BEAT_FX_SETTINGS.flangerFeedback)!;
+  const send = feeds.find((node) => node !== feedback)!;
+  const wet = ([...delay.outputs] as GainLike[]).find((node) => node !== feedback)!;
+  const oscillator = ctx.oscillators[index];
+  const lfoDepth = [...oscillator.outputs][0] as GainLike;
+  return { delay, feedback, send, wet, oscillator, lfoDepth };
+}
+
+describe('Beat FX insert (gh#272)', () => {
+  it('builds transparent: sends at zero, dry at unity, stereo IR loaded', () => {
+    const Fake = withFakeAudio();
+    const mixer = new Mixer();
+    mixer.portFor('A').ensureAudio();
+    const fx = fxNodesFor(Fake.instances[0], 0);
+    expect(fx.echoSend.gain.value).toBe(0);
+    expect(fx.reverbSend.gain.value).toBe(0);
+    expect(flangerNodesFor(Fake.instances[0], 0).send.gain.value).toBe(0);
+    expect(fx.dry.gain.value).toBe(1);
+    expect(fx.feedback.gain.value).toBe(0.5);
+    // Half-beat echo at the 120 BPM default clock.
+    expect(fx.delay.delayTime.value).toBeCloseTo(0.25, 9);
+    const buffer = fx.convolver.buffer as { numberOfChannels: number; length: number };
+    expect(buffer.numberOfChannels).toBe(2);
+    expect(buffer.length).toBe(48000 * 2.5);
+  });
+
+  it('runs one beat-synchronized Flanger cycle on the selected target', () => {
+    const Fake = withFakeAudio();
+    const mixer = new Mixer();
+    mixer.portFor('A').ensureAudio();
+    const flanger = flangerNodesFor(Fake.instances[0], 0);
+    mixer.setBeatFxSettings({ flangerLengthUnit: 'beats' });
+    mixer.selectBeatFx('flanger');
+    mixer.toggleBeatFxOn();
+    expect(flanger.send.gain.value).toBe(1);
+    // Default 1/2 beat at 120 BPM = 0.25 seconds per LFO cycle.
+    expect(flanger.oscillator.frequency.value).toBeCloseTo(4, 9);
+    mixer.stepBeatFxBeats('double'); // 3/4 beat = 0.375 seconds
+    expect(flanger.oscillator.frequency.value).toBeCloseTo(1 / 0.375, 9);
+  });
+
+  it('reads the Flanger length in bars by default and retimes live on unit toggle', () => {
+    const Fake = withFakeAudio();
+    const mixer = new Mixer();
+    mixer.portFor('A').ensureAudio();
+    const flanger = flangerNodesFor(Fake.instances[0], 0);
+    const echoDelay = Fake.instances[0].delays.filter((node) => node.maxDelayTime > 1)[0];
+    mixer.selectBeatFx('flanger');
+    mixer.toggleBeatFxOn();
+    // Default 1/2 bar = 2 beats at 120 BPM = 1 second per LFO cycle.
+    expect(flanger.oscillator.frequency.value).toBeCloseTo(1, 9);
+    for (let i = 0; i < 5; i++) mixer.stepBeatFxBeats('double'); // top rung: 8
+    expect(flanger.oscillator.frequency.value).toBeCloseTo(1 / 16, 9); // 8 bars = 32 beats = 16 s
+    mixer.setBeatFxSettings({ flangerLengthUnit: 'beats' });
+    expect(flanger.oscillator.frequency.value).toBeCloseTo(1 / 4, 9); // 8 beats = 4 s
+    // Echo always reads beats.
+    expect(echoDelay.delayTime.value).toBeCloseTo(4, 9);
+  });
+
+  it('applies persisted effect tuning live without creating audio from settings alone', () => {
+    forbidAudio();
+    const cold = new Mixer();
+    cold.setBeatFxSettings({ echoFeedback: 0.7 });
+    expect(cold.getBeatFxSettings().echoFeedback).toBe(0.7);
+
+    const Fake = withFakeAudio();
+    const mixer = new Mixer();
+    mixer.portFor('A').ensureAudio();
+    const echo = fxNodesFor(Fake.instances[0], 0);
+    const flanger = flangerNodesFor(Fake.instances[0], 0);
+    mixer.setBeatFxSettings({
+      echoFeedback: 0.65,
+      reverbDecay: 1.2,
+      flangerDelayMs: 5,
+      flangerWidthMs: 4,
+      flangerFeedback: 0.6,
+    });
+    expect(echo.feedback.gain.value).toBe(0.65);
+    expect((echo.convolver.buffer as { length: number }).length).toBe(48000 * 1.2);
+    expect(flanger.delay.delayTime.value).toBeCloseTo(0.005, 9);
+    expect(flanger.lfoDepth.gain.value).toBeCloseTo(0.002, 9);
+    expect(flanger.feedback.gain.value).toBe(0.6);
+  });
+
+  it('is post-fader while PFL/meter stay pre-fader and pre-FX', () => {
+    const Fake = withFakeAudio();
+    const mixer = new Mixer();
+    mixer.portFor('A').ensureAudio();
+    const fx = fxNodesFor(Fake.instances[0], 0);
+    const fader = [...fx.input.inputs][0];
+    const sweepOutput = [...fader.inputs][0];
+    expect([...fader.outputs]).toContain(fx.input);
+    expect([...fx.output.outputs]).not.toContain(fader);
+    // Sweep fans out to fader + PFL + meter; Beat FX is downstream only.
+    expect(sweepOutput.outputs.size).toBe(3);
+    expect([...sweepOutput.outputs]).toContain(fader);
+    expect([...sweepOutput.outputs]).not.toContain(fx.input);
+  });
+
+  it('closing the channel fader stops excitation without scaling the tail return', () => {
+    const Fake = withFakeAudio();
+    const mixer = new Mixer();
+    mixer.portFor('A').ensureAudio();
+    const fx = fxNodesFor(Fake.instances[0], 0);
+    mixer.toggleBeatFxOn();
+    mixer.setFader('A', 0);
+    const fader = [...fx.input.inputs][0] as FakeNode & { gain: FakeParam };
+    expect(fader.gain.value).toBe(0);
+    expect(fx.echoSend.gain.value).toBe(1);
+    // Processor return bypasses the fader and still feeds the crossfader.
+    expect([...fx.output.outputs]).toHaveLength(1);
+    expect([...fx.output.outputs]).not.toContain(fader);
+  });
+
+  it('CH SELECT is mutually exclusive and master ON opens only its SEND', () => {
+    const Fake = withFakeAudio();
+    const mixer = new Mixer();
+    mixer.portFor('B').ensureAudio();
+    const fx = fxNodesFor(Fake.instances[0], 1);
+    mixer.selectBeatFxTarget('B');
+    expect(fx.echoSend.gain.value).toBe(0); // selected, section still OFF
+    mixer.toggleBeatFxOn();
+    expect(fx.echoSend.gain.value).toBe(1);
+    expect(fxNodesFor(Fake.instances[0], 0).echoSend.gain.value).toBe(0);
+    expect(fx.echoWet.gain.value).toBe(1); // center 0 = balance midpoint
+    expect(fx.dry.gain.value).toBe(1);
+    mixer.setBeatFxDepth(1); // full-effect echo-out
+    expect(fx.echoWet.gain.value).toBe(1);
+    expect(fx.dry.gain.value).toBe(0);
+    expect(mixer.getBeatFxSection().target).toBe('B');
+  });
+
+  it('SELECT swaps the live effect while the old branch rings out', () => {
+    const Fake = withFakeAudio();
+    const mixer = new Mixer();
+    mixer.portFor('A').ensureAudio();
+    const fx = fxNodesFor(Fake.instances[0], 0);
+    mixer.toggleBeatFxOn();
+    expect(fx.echoSend.gain.value).toBe(1);
+    mixer.selectBeatFx('reverb');
+    expect(fx.echoSend.gain.value).toBe(0);
+    expect(fx.reverbSend.gain.value).toBe(1);
+    // Old echo return + feedback stay wired: its existing tail survives.
+    expect(fx.echoWet.gain.value).toBe(1);
+    expect(fx.feedback.gain.value).toBe(0.5);
+    expect([...fx.clip.outputs]).toContain(fx.feedback);
+    expect([...fx.clip.outputs]).toContain(fx.echoWet);
+  });
+
+  it('unsupported SELECT disables the section instead of retaining an effect', () => {
+    const Fake = withFakeAudio();
+    const mixer = new Mixer();
+    mixer.portFor('A').ensureAudio();
+    const fx = fxNodesFor(Fake.instances[0], 0);
+    mixer.toggleBeatFxOn();
+    expect(fx.echoSend.gain.value).toBe(1);
+    mixer.selectBeatFx(null);
+    expect(mixer.getBeatFxSection()).toMatchObject({ selected: null, on: false });
+    expect(fx.echoSend.gain.value).toBe(0);
+    mixer.toggleBeatFxOn();
+    expect(mixer.getBeatFxSection().on).toBe(false);
+  });
+
+  it('changing CH SELECT zeroes the old SEND and restores transparent dry', () => {
+    const Fake = withFakeAudio();
+    const mixer = new Mixer();
+    mixer.portFor('A').ensureAudio();
+    const fx = fxNodesFor(Fake.instances[0], 0);
+    mixer.toggleBeatFxOn();
+    mixer.setBeatFxDepth(0.6);
+    mixer.selectBeatFxTarget('B');
+    expect(fx.echoSend.gain.value).toBe(0);
+    expect(fx.echoWet.gain.value).toBe(1);
+    expect(fx.dry.gain.value).toBe(1);
+  });
+
+  it('MST processes the summed program; SP is selectable but silent', () => {
+    const Fake = withFakeAudio();
+    const mixer = new Mixer();
+    mixer.portFor('A').ensureAudio();
+    const ctx = Fake.instances[0];
+    const masterFx = fxNodesFor(ctx, 4);
+    mixer.setChannelBeatSeconds('B', 60 / 100);
+    mixer.selectBeatFxTarget('B'); // MST retains B as its tempo source
+    mixer.selectBeatFxTarget('master');
+    mixer.toggleBeatFxOn();
+    expect(masterFx.echoSend.gain.value).toBe(1);
+    expect(ctx.delays.slice(0, 4).every((delay) => fxNodesFor(ctx, ctx.delays.indexOf(delay)).echoSend.gain.value === 0)).toBe(true);
+    expect(masterFx.delay.delayTime.value).toBeCloseTo(0.5 * (60 / 100), 9);
+    const program = [...masterFx.input.inputs][0];
+    expect(program.inputs.size).toBe(4); // summed post-crossfader channels
+    expect(masterFx.output.outputs.size).toBe(3); // recording, Master, headphone master-side
+
+    mixer.selectBeatFxTarget('sampler');
+    expect(mixer.getBeatFxSection().target).toBe('sampler');
+    expect(masterFx.echoSend.gain.value).toBe(0);
+  });
+
+  it('global BEAT ladder tracks each channel own beat clock', () => {
+    const Fake = withFakeAudio();
+    const mixer = new Mixer();
+    mixer.portFor('A').ensureAudio();
+    const fxA = fxNodesFor(Fake.instances[0], 0);
+    const fxB = fxNodesFor(Fake.instances[0], 1);
+    mixer.setChannelBeatSeconds('A', 60 / 128);
+    mixer.setChannelBeatSeconds('B', 60 / 100);
+    expect(fxA.delay.delayTime.value).toBeCloseTo(0.5 * (60 / 128), 9);
+    mixer.stepBeatFxBeats('double'); // 0.5 → 0.75
+    expect(mixer.getBeatFxSection().beats).toBe(0.75);
+    expect(fxA.delay.delayTime.value).toBeCloseTo(0.75 * (60 / 128), 9);
+    expect(fxB.delay.delayTime.value).toBeCloseTo(0.75 * (60 / 100), 9);
+    mixer.stepBeatFxBeats('halve');
+    mixer.stepBeatFxBeats('halve');
+    expect(mixer.getBeatFxSection().beats).toBe(0.25);
+    // Null clocks (unloaded deck) keep the last known tempo.
+    mixer.setChannelBeatSeconds('A', null);
+    expect(fxA.delay.delayTime.value).toBeCloseTo(0.25 * (60 / 128), 9);
+  });
+
+  it('beat-clock pushes never force-create a context (policy path)', () => {
+    forbidAudio();
+    const mixer = new Mixer();
+    mixer.setChannelBeatSeconds('C', 60 / 174); // no graph: stored only
+    expect(mixer.getBeatFxSection().beats).toBe(0.5);
+  });
+
+  it('graph revival reapplies FX state and the stored beat clock', () => {
+    const Fake = withFakeAudio();
+    const mixer = new Mixer();
+    mixer.portFor('D').ensureAudio();
+    mixer.selectBeatFxTarget('D');
+    mixer.selectBeatFx('reverb');
+    mixer.toggleBeatFxOn();
+    mixer.setBeatFxDepth(0.8);
+    mixer.setChannelBeatSeconds('D', 60 / 100);
+    mixer.stepBeatFxBeats('double');
+    mixer.dispose();
+    mixer.now(); // revive
+    const fx = fxNodesFor(Fake.instances[1], 3);
+    expect(fx.reverbSend.gain.value).toBe(1);
+    expect(fx.reverbWet.gain.value).toBe(1);
+    expect(fx.dry.gain.value).toBeCloseTo(0.2, 9);
+    expect(fx.delay.delayTime.value).toBeCloseTo(0.75 * (60 / 100), 9);
+  });
+
+  it('notifies every section control with the Beat FX global tag', () => {
+    const Fake = withFakeAudio();
+    void Fake;
+    const mixer = new Mixer();
+    const changes: unknown[] = [];
+    mixer.subscribe((changed) => changes.push(changed));
+    mixer.selectBeatFxTarget('B');
+    mixer.toggleBeatFxOn();
+    mixer.selectBeatFx('reverb');
+    mixer.setBeatFxDepth(0.3);
+    mixer.stepBeatFxBeats('double');
+    expect(changes).toEqual(['beatFx', 'beatFx', 'beatFx', 'beatFx', 'beatFx']);
   });
 });

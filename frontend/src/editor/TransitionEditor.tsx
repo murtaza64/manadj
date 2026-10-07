@@ -561,7 +561,7 @@ function TransitionEditorInner() {
           const { bpmA: a, bpmB: b, slideDeckB: slide } = midiGestures.current;
           const bpm = deck === 'A' ? a : b;
           if (!bpm || bpm <= 0) return; // same gate as the on-screen cluster
-          const beats = sharedDecksRef.current[deck].beatjumpBeats;
+          const beats = sharedDecksRef.current[deck].beatjump.getSnapshot();
           const n = direction === 'back' ? -beats : beats;
           if (deck === 'A') player.seek(player.getMixTime() + beatsToSeconds(n, bpm));
           // Apparent-motion polarity (mix-editor 32): ▶ slides B's drawn
