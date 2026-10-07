@@ -28,6 +28,7 @@ from sqlalchemy.orm import Session
 
 from backend import models
 from backend.config import get_config
+from backend.data_root import data_root
 from backend.tag_palette import TagColorPicker
 from backend.sync_performance.bulk import bulk_import
 from backend.sync_performance.rekordbox_source import (
@@ -41,9 +42,6 @@ if TYPE_CHECKING:
     from pyrekordbox.db6 import Rekordbox6Database
 
 logger = logging.getLogger(__name__)
-
-DATA_DIR = Path(__file__).resolve().parents[2] / "data"
-SNAPSHOTS_DIR = DATA_DIR / "rekordbox-snapshots"
 
 # Playlists manadj itself wrote into Rekordbox, never onboarding material.
 _SKIPPED_PLAYLIST_RE = re.compile(r"^manadj", re.IGNORECASE)
@@ -101,13 +99,14 @@ def _snapshot_locked(library_dir: Path) -> Path:
     Older onboarding snapshots are pruned when a new one is taken.
     """
     library_dir = Path(library_dir)
+    snapshots_dir = data_root() / "data" / "rekordbox-snapshots"
     cached = _snapshots.get(str(library_dir))
-    if cached is not None and cached.exists():
+    if cached is not None and cached.parent == snapshots_dir and cached.exists():
         return cached
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    dest = SNAPSHOTS_DIR / f"{stamp}-onboarding"
-    SNAPSHOTS_DIR.mkdir(parents=True, exist_ok=True)
-    for old in SNAPSHOTS_DIR.iterdir():
+    dest = snapshots_dir / f"{stamp}-onboarding"
+    snapshots_dir.mkdir(parents=True, exist_ok=True)
+    for old in snapshots_dir.iterdir():
         if old.is_dir() and old != dest:
             shutil.rmtree(old, ignore_errors=True)
     try:
