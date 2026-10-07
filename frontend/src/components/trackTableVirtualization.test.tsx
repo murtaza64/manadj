@@ -367,3 +367,32 @@ describe('TrackTable virtualization — transport-update budget', () => {
     expect(Math.abs(after - before)).toBeLessThanOrEqual(2);
   });
 });
+
+describe('TrackTable empty state (feature-tour #283)', () => {
+  it('renders the caller-supplied guidance only when loaded with zero rows', () => {
+    const { container, root, rerender } = renderList({
+      tracks: [],
+      emptyMessage: 'No tracks yet — import your library.',
+    });
+    cleanup.push(() => act(() => root.unmount()));
+    expect(container.querySelector('.track-table-empty')?.textContent).toContain(
+      'No tracks yet'
+    );
+
+    // Loading wins over the empty message…
+    rerender({ isLoading: true });
+    expect(container.querySelector('.track-table-empty')).toBeNull();
+    expect(container.querySelector('.track-table-loading')).toBeTruthy();
+
+    // …and rows win once data lands.
+    rerender({ isLoading: false, tracks: makeTracks(3) });
+    expect(container.querySelector('.track-table-empty')).toBeNull();
+    expect(mountedRowCount(container)).toBe(3);
+  });
+
+  it('absent emptyMessage keeps the legacy bare table', () => {
+    const { container, root } = renderList({ tracks: [] });
+    cleanup.push(() => act(() => root.unmount()));
+    expect(container.querySelector('.track-table-empty')).toBeNull();
+  });
+});

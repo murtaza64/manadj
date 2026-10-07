@@ -25,6 +25,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CameoRowWire, RoutineCandidateWire, RoutineRowWire, RoutineTakeRowWire, TakeRowWire } from '../api/client';
 import { subscribeChipFills } from './pickerChips';
+import { reportTutorialAction } from '../tutorials/engine';
 import type { ChannelId } from '../playback/mixer';
 import { DECK_COLORS } from '../theme/deckColors';
 import {
@@ -128,6 +129,7 @@ export function MixPicker(props: MixPickerProps) {
         else if (b === null) nextB = trackId;
         else nextB = trackId;
         if (nextA === nextB) return; // same track twice: no self-pairs
+        if (nextA !== a || nextB !== b) reportTutorialAction({ type: a === null ? 'transition-pick-a' : 'transition-pick-b' });
         setChipA(nextA);
         setChipB(nextB);
         setQuery('');
@@ -239,10 +241,10 @@ export function MixPicker(props: MixPickerProps) {
         pushCandidate(c, 'Miner candidates through the pair');
       }
       out.push({
-        ref: { kind: 'new-blank' },
+        ref: { kind: 'new-blank', seedTrackIds: [chipA, chipB] },
         glyph: '+',
         label: 'New blank mix',
-        meta: 'kind-fluid draft (ADR 0039) — lands with #198',
+        meta: 'seeded with both tracks · drag more from the library · saves from 3 slots',
         group: 'New',
       });
       return out;
@@ -270,6 +272,13 @@ export function MixPicker(props: MixPickerProps) {
       for (const c of castIncluding(props.candidates, chipA)) {
         pushCandidate(c, 'Miner candidates through');
       }
+      out.push({
+        ref: { kind: 'new-blank', seedTrackIds: [chipA] },
+        glyph: '+',
+        label: 'New blank mix',
+        meta: 'starts with this track · drag more from the library · saves from 3 slots',
+        group: 'New',
+      });
       return out;
     }
 
@@ -283,6 +292,13 @@ export function MixPicker(props: MixPickerProps) {
       pushRoutineTake(tk, 'Routine Takes');
     }
     for (const c of props.candidates) pushCandidate(c, 'Miner candidates');
+    out.push({
+      ref: { kind: 'new-blank' },
+      glyph: '+',
+      label: 'New blank mix',
+      meta: 'empty canvas · drag tracks from the library · saves from 3 slots',
+      group: 'New',
+    });
     return out;
   }, [chipA, chipB, props, trackById]);
 
@@ -311,6 +327,7 @@ export function MixPicker(props: MixPickerProps) {
   const pickTrack = useCallback(
     (id: number) => {
       if (id === chipA || id === chipB) return;
+      reportTutorialAction({ type: chipA === null ? 'transition-pick-a' : 'transition-pick-b' });
       if (chipA === null) setChipA(id);
       else setChipB(id);
       setQuery('');
@@ -377,7 +394,7 @@ export function MixPicker(props: MixPickerProps) {
     );
 
   return (
-    <div className="mp-panel" onKeyDown={onKeyDown}>
+    <div className="mp-panel" data-tour="edit.picker" onKeyDown={onKeyDown}>
       <div className="mp-chips">
         {chip(chipA, () => setChipA(null), chipB !== null ? 'outgoing…' : 'track…')}
         <button
@@ -463,6 +480,7 @@ export function MixPicker(props: MixPickerProps) {
                 return (
                   <div
                     key={key}
+                    data-tutorial={row.ref.kind === 'new-transition' ? 'new-transition' : undefined}
                     className={`mp-row${flat === highlight ? ' hl' : ''}${isOpen ? ' open' : ''}`}
                     onMouseEnter={() => setHighlight(flat)}
                   onMouseDown={(e) => {

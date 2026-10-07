@@ -80,7 +80,8 @@ def manadj_track_to_rekordbox_fields(track: ManAdjTrack) -> dict:
     """
     file_path = Path(track.filename)
     return {
-        "FolderPath": str(file_path.absolute()),
+        # Rekordbox stores "/"-separated FolderPaths on every OS (#305).
+        "FolderPath": file_path.absolute().as_posix(),
         "Title": track.title or file_path.stem,
         # NOTE: Omitting Artist, BPM, Key to avoid foreign key complexity
         # User can use Rekordbox's "Reload Tag" to populate from file metadata

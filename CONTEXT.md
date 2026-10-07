@@ -37,8 +37,12 @@ A short, skippable, independently re-runnable flow configuring one thing: Rekord
 The preference values a fresh install starts with — a deliberate snapshot of the developer's own preferences, excluding anything machine- or account-bound (device IDs, paths, tokens, Export enablement). A user's own setting always wins; re-snapshotting changes only what fresh or never-touched keys see.
 
 **Tour**:
-Per-section coach marks shown the first time a user enters each major area of the app, replayable on demand. Explains the UI; changes no Library state.
-_Avoid_: tutorial, walkthrough (Walkthrough is the lane review artifact)
+Per-section coach marks shown the first time a user enters each major area of the app, replayable on demand. Explains the UI; changes no Library state. Settings has no Tour.
+_Avoid_: walkthrough (Walkthrough is the lane review artifact)
+
+**Tutorial**:
+A hands-on lesson where each step advances only when the user actually performs the taught action (load a Track, press play, nudge, set a Hot Cue, edit a Transition) — game-like, not read-and-click-next. Distinct from the Tour, which only points at UI. Triggered by first contact with the skill (the Keyboard DJing tutorial on the first Load onto a Deck; the Transition tutorial on first entering the Mix editor), skippable, replayable. Tutorials may create real artifacts (a Transition saved during the lesson is an ordinary Transition).
+_Avoid_: walkthrough
 
 ### Curation
 
@@ -340,7 +344,7 @@ The permanent preference surface for sweep-filter sound, Waveform styles, Contro
 The Mixer's per-channel low/high-pass effect, post-EQ and pre-fader/PFL. Its position is a live Deck control; model, resonance and response shape are global Settings. Default: resonant 24 dB/octave, 17 dB added resonance, 15% resonance trim. Existing Transitions and Session replays use current filter preferences, not historical filter configurations.
 
 **Beat FX**:
-The Mixer's one time-based effects section (gh#272), mirrored after the GRV6: SELECT swaps Echo/Reverb/Flanger live; unsupported detents select `---`, switch the section off, and cannot be re-enabled; CH SELECT is one radio target across A–D, SP and MST (SP is hardware-only/silent until manadj has a sampler bus; MST processes summed post-crossfader program and retains the last selected A–D Deck as its tempo source); ON/OFF gates the section; one bipolar LEVEL/DEPTH coordinate runs from original-only (-1), through balance midpoint (0), to effect-only (+1); BEAT ◄ ► selects the global timing fraction. Echo is a full-band beat-synced feedback delay quantized to 1/4…8 beats (no built-in Reverb; LOW CUT ECHO is a separate Pioneer effect). Reverb is beatless convolution with a synthesized stereo impulse. Flanger is a short modulated delay whose one LFO cycle spans the selected beat fraction. A–D processing is post-channel-fader/pre-crossfader; MST is post-crossfader/pre-Master; PFL/meter remain pre-fader/pre-FX. Changing targets or closing a fader stops new excitation while existing tails ring out. Echo feedback/saturation, Reverb decay/damping/width and Flanger delay/width/feedback are live persisted Settings. The automation overlay never owns Beat FX.
+The Mixer's one time-based effects section (gh#272), mirrored after the GRV6: SELECT swaps Echo/Reverb/Flanger live; unsupported detents select `---`, switch the section off, and cannot be re-enabled; CH SELECT is one radio target across A–D, SP and MST (SP is hardware-only/silent until manadj has a sampler bus; MST processes summed post-crossfader program and retains the last selected A–D Deck as its tempo source); ON/OFF gates the section; one bipolar LEVEL/DEPTH coordinate runs from original-only (-1), through balance midpoint (0), to effect-only (+1); BEAT ◄ ► selects the global timing fraction. Echo is a full-band beat-synced feedback delay quantized to 1/4…8 beats (no built-in Reverb; LOW CUT ECHO is a separate Pioneer effect). Reverb is beatless convolution with a synthesized stereo impulse. Flanger is a short modulated delay whose one LFO cycle spans the selected length, read as bars by default (1 = 1 bar = 4 beats; Settings toggles Bars/Beats, gh#331). A–D processing is post-channel-fader/pre-crossfader; MST is post-crossfader/pre-Master; PFL/meter remain pre-fader/pre-FX. Changing targets or closing a fader stops new excitation while existing tails ring out. Echo feedback/saturation, Reverb decay/damping/width and Flanger delay/width/feedback/length unit are live persisted Settings. The automation overlay never owns Beat FX.
 
 **Performance view**:
 The four-Deck view for practicing and performing mixes: four stacked full-width waveforms with linked zoom, a 2×2 grid of Deck controls, the Mixer, and the Library's browse surface embedded below. All four Decks remain visible regardless of Controller focus. Replaces the Practice view. Curation beyond quick edits (tags, provenance) stays in the library view.
@@ -530,21 +534,21 @@ _Avoid_: publish, push, write-to-files (that's Export to Disk)
 Any operation that brings tracks or track data into manadj. Two kinds: Disk Import and External Import.
 
 **Disk Import**:
-New audio files from the tracks directory becoming Tracks: a Scan discovers candidates, accepting a candidate creates a Track.
+New audio files becoming Tracks, always imported in place (the Track points at the file where it sits; nothing is copied). Two entry points: a Scan of the tracks directory discovers candidates and accepting one creates a Track; or files/folders dropped onto the Library from anywhere on disk (folders recurse, non-audio ignored, files already Tracks — archived included — skipped). Dropping onto a Playlist also appends the new Tracks to it.
 
 **External Import**:
 A Sync operation that pulls state from an external library into manadj, for data that originated downstream — keys/BPM analyzed in Engine, hot cues set at a gig, tracks added elsewhere first. Less common than Export but routine, not exceptional. The counterpart of Export.
 _Avoid_: pull, Library Import
 
 **Scan**:
-The discovery step of a Disk Import: finding audio files in the tracks directory that are not yet Tracks and proposing them as candidates.
+The discovery step of a tracks-directory Disk Import: finding audio files in the tracks directory that are not yet Tracks and proposing them as candidates. A drop needs no Scan — the dropped files are the selection.
 
 **Diverged**:
 A track field (title, artist, key, BPM, energy, Tag assignment, Hot Cues, Beatgrid, Main cue) whose value differs between the Library and another Surface. The default resolution is Export (manadj wins); Import is the explicit exception. Set-valued fields (Tag assignment, Hot Cues) compare as whole sets; a placeholder grid counts as absent, not as a value that can diverge.
 _Avoid_: discrepancy (implementation term)
 
 **Match**:
-The association between a Track and its counterpart in an external library, established during a Sync operation by file path, falling back to filename. Recomputed each run; not persisted.
+The association between a Track and its counterpart in an external library, established during a Sync operation by file path, falling back to filename. Paths compare by identity, not spelling: `/` and `\` separators are equal, Unicode is NFC-normalized, and on Windows case is ignored. Recomputed each run; not persisted.
 
 **Sync inbox**:
 The default unified-sync presentation: every attention-worthy track appears exactly once, in the highest-priority section that applies. Answers "what should I deal with, in what order" — a triage view, not a query.

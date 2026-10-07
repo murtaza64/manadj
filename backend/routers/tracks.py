@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from .. import crud, schemas, track_metadata
 from ..beatgrid_ops import VariableGridBPMError
 from ..database import get_db
+from ..fs_retry import retry_locked
 from ..track_metadata import MetadataComparisonResult, MetadataSyncRequest, MetadataSyncResult, TrackChanges
 
 router = APIRouter()
@@ -152,13 +153,22 @@ def relocate_track_files(
     for _track, source, _destination in planned:
         stat = source.stat()
         old_files.setdefault((stat.st_dev, stat.st_ino), source)
+    # Committed: the DB already points at the copies. Windows refuses to
+    # delete a source that is open (e.g. being streamed) — retry briefly, then
+    # report it as left over instead of failing a relocation that succeeded.
+    leftover = []
     for source in old_files.values():
-        source.unlink()
+        try:
+            retry_locked(source.unlink)
+        except OSError as exc:
+            logger.warning("relocate: could not delete old file %s: %s", source, exc)
+            leftover.append(str(source))
     return {
         "relocations": [
             {"track_id": track.id, "source": str(source), "destination": str(destination)}
             for track, source, destination in planned
-        ]
+        ],
+        "leftover_sources": leftover,
     }
 
 

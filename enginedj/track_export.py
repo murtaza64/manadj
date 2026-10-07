@@ -20,14 +20,15 @@ from __future__ import annotations
 
 import logging
 import os
-import shutil
-import subprocess
 import time
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
+import psutil
 from sqlalchemy.orm import Session
+
+from backend.fs_clone import clone_tree
 
 from .models.album_art import AlbumArt
 from .models.information import Information
@@ -39,20 +40,29 @@ logger = logging.getLogger(__name__)
 # Database2 dirs already snapshotted during this backend process run.
 _snapshotted: set[str] = set()
 
-# Matches the app binary only: crashpad_handler processes under
-# Contents/Resources linger after Engine quits and must not count.
-_ENGINE_PROCESS_PATTERN = r"Engine DJ\.app/Contents/MacOS/Engine DJ"
+# The app binary's process name: "Engine DJ" (macOS) / "Engine DJ.exe"
+# (Windows). Exact match, so crashpad_handler processes that linger after
+# Engine quits don't count.
+_ENGINE_PROCESS_NAMES = frozenset({"engine dj", "engine dj.exe"})
 
 
 class EngineRunningError(RuntimeError):
     """Engine DJ is open; its database must not be written."""
 
 
+def is_engine_process_name(name: str | None) -> bool:
+    return (name or "").casefold() in _ENGINE_PROCESS_NAMES
+
+
+def engine_running() -> bool:
+    for proc in psutil.process_iter(["name"]):
+        if is_engine_process_name(proc.info.get("name")):
+            return True
+    return False
+
+
 def ensure_engine_closed() -> None:
-    probe = subprocess.run(
-        ["pgrep", "-f", _ENGINE_PROCESS_PATTERN], capture_output=True
-    )
-    if probe.returncode == 0:
+    if engine_running():
         raise EngineRunningError(
             "Engine DJ is running — quit it before exporting"
         )
@@ -61,7 +71,7 @@ def ensure_engine_closed() -> None:
 def snapshot_database(database_dir: Path) -> Path | None:
     """Snapshot the Engine Database2 dir next to the library, once per
     process run. Returns the snapshot path, or None when this run already
-    has one. APFS clonefile (`cp -Rc`), plain copy fallback."""
+    has one. Copy-on-write clone where the filesystem supports it."""
     database_dir = Path(database_dir)
     if str(database_dir) in _snapshotted:
         return None
@@ -73,14 +83,7 @@ def snapshot_database(database_dir: Path) -> Path | None:
         / f"{stamp}-manadj-pre-write-db2"
     )
     dest.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        subprocess.run(
-            ["cp", "-Rc", str(database_dir), str(dest)],
-            check=True,
-            capture_output=True,
-        )
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        shutil.copytree(database_dir, dest)
+    clone_tree(database_dir, dest)
     _snapshotted.add(str(database_dir))
     logger.info("engine Database2 snapshot: %s", dest)
     return dest
@@ -116,14 +119,31 @@ def get_or_create_empty_album_art(session: Session) -> int:
     return row.id
 
 
+class OtherDriveError(ValueError):
+    """The track is on a different drive than the Engine Library (Windows);
+    Engine stores library-relative paths, which can't cross drives."""
+
+
+def engine_relative_path(abs_path: Path, library_root: Path) -> str:
+    """The "/"-separated path Engine stores, relative to the library root.
+    Raises OtherDriveError when no relative path exists (#306)."""
+    try:
+        return Path(os.path.relpath(abs_path, library_root)).as_posix()
+    except ValueError as exc:  # Windows: "path is on mount 'D:', start on mount 'C:'"
+        raise OtherDriveError(
+            f"{abs_path} is not on the Engine Library drive ({library_root})"
+        ) from exc
+
+
 def insert_track(session: Session, spec: EngineTrackSpec, library_root: Path) -> int:
     """Insert one track row per the spike's minimal recipe. Returns the
-    new Engine track id. Caller owns the session/transaction."""
+    new Engine track id. Caller owns the session/transaction.
+    Raises OtherDriveError before writing anything for a cross-drive track."""
+    rel_path = engine_relative_path(spec.abs_path, library_root)
     info = session.query(Information).first()
     db_uuid = info.uuid if info else None
     stat = spec.abs_path.stat()
     now = int(time.time())
-    rel_path = Path(os.path.relpath(spec.abs_path, library_root)).as_posix()
 
     track = Track(
         path=rel_path,

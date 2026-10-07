@@ -13,6 +13,11 @@ import { getJogCalibration, resetGrv6JogCalibration } from '../midi/jogCalibrati
 import { BEAT_FX_PARAMETER_RANGES, DEFAULT_BEAT_FX_SETTINGS } from '../playback/beatFxSettings';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+// Settings renders Controller check too; device discovery belongs to its own tests.
+vi.mock('../playback/audioDevices', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../playback/audioDevices')>(),
+  listAudioOutputs: vi.fn(async () => []),
+}));
 vi.hoisted(() => {
   const values = new Map<string, string>();
   globalThis.localStorage = {
@@ -151,11 +156,11 @@ it('edits typed values only on commit, supports cancel/reset and does not create
   expect(input.value).toBe('16000');
   act(() => { input.focus(); input.blur(); });
   expect(mixer.getFilterSettings().hpMax).toBe(16000);
-  expect(host.querySelectorAll('.settings-nav button')).toHaveLength(5);
+  expect(host.querySelectorAll('.settings-nav button')).toHaveLength(7);
   expect(host.querySelector('[aria-label="Filter frequency response"] polyline')?.getAttribute('points')?.split(' ')).toHaveLength(180);
   expect(host.querySelector('input[type="search"], canvas')).toBeNull();
   expect(host.textContent).toContain('Target response at 48 kHz');
-  expectFaders(host, 11);
+  expectFaders(host.querySelector<HTMLElement>('#settings-section-filters')!, 11);
 });
 
 it('edits and resets persisted Beat FX sound parameters without creating audio', async () => {
@@ -165,11 +170,11 @@ it('edits and resets persisted Beat FX sound parameters without creating audio',
   root = createRoot(host);
   await act(async () => root!.render(<MixerContext value={mixer}><SettingsPage /></MixerContext>));
   const effects = [...host.querySelectorAll<HTMLButtonElement>('.settings-nav button')]
-    .find((button) => button.textContent?.startsWith('Beat FX'))!;
+    .find((button) => button.textContent?.startsWith('Performance'))!;
   act(() => effects.click());
   expect([...host.querySelectorAll('.settings-effect-card h3')].map((node) => node.textContent))
     .toEqual(['Echo', 'Reverb', 'Flanger']);
-  expectFaders(host, Object.keys(BEAT_FX_PARAMETER_RANGES).length);
+  expectFaders(host.querySelector<HTMLElement>('#settings-section-effects')!, Object.keys(BEAT_FX_PARAMETER_RANGES).length);
 
   const feedback = host.querySelector<HTMLElement>('#beat-fx-flangerFeedback')!;
   press(feedback, 'End');
@@ -177,6 +182,14 @@ it('edits and resets persisted Beat FX sound parameters without creating audio',
   const decay = host.querySelector<HTMLElement>('#beat-fx-reverbDecay')!;
   press(decay, 'Home');
   expect(mixer.getBeatFxSettings().reverbDecay).toBe(0.5);
+
+  const unit = host.querySelector('[aria-label="Flanger length unit"]')!;
+  const bars = [...unit.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent === 'Bars')!;
+  const beats = [...unit.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent === 'Beats')!;
+  expect(bars.getAttribute('aria-pressed')).toBe('true');
+  act(() => beats.click());
+  expect(mixer.getBeatFxSettings().flangerLengthUnit).toBe('beats');
+  expect(beats.getAttribute('aria-pressed')).toBe('true');
 
   const reset = [...host.querySelectorAll<HTMLButtonElement>('button')]
     .find((button) => button.textContent === 'Reset effect defaults')!;
@@ -284,7 +297,8 @@ it('shows waveform style controls without a player, track queries or deck provid
   root = createRoot(host);
   await act(async () => root!.render(<SettingsPage />));
   await act(async () => { await vi.dynamicImportSettled(); });
-  expect(host.querySelector('.settings-content')?.getAttribute('aria-label')).toBe('Waveforms');
+  expect(host.querySelector('.settings-content')?.getAttribute('aria-label')).toBe('Display');
+  expect(host.querySelector('#settings-section-waveforms')).not.toBeNull();
   expect(host.querySelector('[aria-label="Waveform color style"]')).not.toBeNull();
   expect(host.textContent).toContain('The waveforms above are the live preview');
   expect(host.querySelector('canvas, input[type="search"]')).toBeNull();
@@ -388,4 +402,36 @@ it('edits all hardware calibration faders without audio and preserves numeric en
     expect(getJogCalibration('grv6')).toEqual(GRV6_JOG_CALIBRATION);
     expect(host.querySelector<HTMLInputElement>('[aria-label="Playback bend gain value"]')!.value).toBe('0.1');
   }
+});
+
+// ── #328 groups ───────────────────────────────────────────────────────────
+
+it('groups sections, hides empty groups and maps old section deep links to their group', async () => {
+  history.replaceState(null, '', '/?section=jog');
+  const host = document.createElement('div');
+  document.body.append(host);
+  root = createRoot(host);
+  await act(async () => root!.render(<SettingsPage />));
+  await act(async () => { await vi.dynamicImportSettled(); });
+  const nav = [...host.querySelectorAll('.settings-nav button strong')].map((n) => n.textContent);
+  expect(nav).toEqual(['Library', 'Performance', 'Display', 'Controllers', 'Keyboard + mouse', 'Accounts', 'Help']);
+  expect(host.querySelector('.settings-content')?.getAttribute('aria-label')).toBe('Controllers');
+  expect(host.querySelector('#settings-section-jog')).not.toBeNull();
+  // Jog calibration is GRV6-only; the other known controllers say so.
+  const rows = [...host.querySelectorAll('.settings-controller-row')].map((n) => n.textContent);
+  expect(rows).toHaveLength(3);
+  expect(rows[0]).toContain('DDJ-GRV6');
+  expect(rows[1]).toContain('Fixed factory calibration');
+  expect(rows[2]).toContain('No jog calibration needed');
+  expect(host.textContent).toContain('Applies to the DDJ-GRV6 only');
+});
+
+it('opens a group by id and the Performance group stacks Filters and Beat FX', async () => {
+  history.replaceState(null, '', '/?section=performance');
+  const host = document.createElement('div');
+  document.body.append(host);
+  root = createRoot(host);
+  await act(async () => root!.render(<MixerContext value={new Mixer()}><SettingsPage /></MixerContext>));
+  const blocks = [...host.querySelectorAll('.settings-subsection')].map((n) => n.id);
+  expect(blocks).toEqual(['settings-section-filters', 'settings-section-effects']);
 });

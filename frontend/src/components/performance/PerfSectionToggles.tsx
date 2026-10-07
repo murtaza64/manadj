@@ -13,6 +13,7 @@ import {
   togglePerfSection,
   type PerfSection,
 } from '../../performance/perfSectionsStore';
+import { getCueMode, setCueMode, subscribeCueMode } from '../../playback/cueModeStore';
 
 const SECTIONS: { id: PerfSection; label: string; name: string }[] = [
   { id: 'waveforms', label: 'WAVE', name: 'Waveforms' },
@@ -25,7 +26,28 @@ export function PerfSectionToggles() {
       {SECTIONS.map((s) => (
         <PerfSectionToggle key={s.id} {...s} />
       ))}
+      <CueModeToggle />
     </span>
+  );
+}
+
+/** Cue mode (setup-guides #289): GATED lit = Gated, unlit = Trigger.
+ * Same on/off language as WAVE/DECK; the label never changes. */
+function CueModeToggle() {
+  const gated = useSyncExternalStore(subscribeCueMode, () => getCueMode() === 'gated');
+  return (
+    <button
+      className={`player-button perf-strip-toggle perf-cue-mode-toggle${gated ? ' on' : ''}`}
+      title={
+        gated
+          ? 'Cue mode: Gated — paused Hot Cue holds to preview. Click for Trigger.'
+          : 'Cue mode: Trigger — paused Hot Cue jumps and plays. Click for Gated.'
+      }
+      aria-pressed={gated}
+      onClick={() => setCueMode(gated ? 'trigger' : 'gated')}
+    >
+      GATED
+    </button>
   );
 }
 

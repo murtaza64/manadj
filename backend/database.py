@@ -1,14 +1,31 @@
-"""Database connection and session management."""
+"""Database connection and session management.
+
+URL resolution (packaged-app PRD): MANADJ_DB_URL wins outright (the same env
+var alembic/env.py consults, so app and migrations always agree); otherwise
+the SQLite file lives in the data root (backend.data_root — repo in dev,
+~/Library/Application Support/manaDJ packaged).
+"""
+
+import os
+from pathlib import Path
 
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
-from pathlib import Path
 
-# Database location
-DB_PATH = Path(__file__).parent.parent / "data" / "library.db"
-DB_PATH.parent.mkdir(exist_ok=True)
+from backend.data_root import db_path
 
-SQLALCHEMY_DATABASE_URL = f"sqlite:///{DB_PATH}"
+_db_url_env = os.environ.get("MANADJ_DB_URL")
+if _db_url_env:
+    SQLALCHEMY_DATABASE_URL = _db_url_env
+    # Best-effort file path for backup tooling; None for non-file URLs.
+    _prefix = "sqlite:///"
+    DB_PATH: Path | None = (
+        Path(_db_url_env.removeprefix(_prefix)) if _db_url_env.startswith(_prefix) else None
+    )
+else:
+    DB_PATH = db_path()
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    SQLALCHEMY_DATABASE_URL = f"sqlite:///{DB_PATH}"
 
 
 def apply_sqlite_pragmas(dbapi_connection, connection_record) -> None:
