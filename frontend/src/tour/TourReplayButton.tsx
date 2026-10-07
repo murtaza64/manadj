@@ -1,7 +1,7 @@
 /**
  * TopBar ? button (feature-tour #282, story 3): replay any section's
  * coach marks. Picking a section first navigates to its surface (mode
- * switch / Settings toggle — the sidebar-level Sets and Sessions tours
+ * switch — the sidebar-level Sets and Sessions tours
  * land on the Library), then requests the tour; TourController waits for
  * the anchors to render.
  */
@@ -12,7 +12,7 @@ import { TOUR_SECTIONS } from './steps';
 import { requestTour, type TourSectionId } from './tourState';
 import './tour.css';
 
-const TARGET_MODE: Record<Exclude<TourSectionId, 'settings'>, AppMode> = {
+const TARGET_MODE: Record<TourSectionId, AppMode> = {
   library: 'library',
   performance: 'performance',
   edit: 'routine',
@@ -24,12 +24,8 @@ const TARGET_MODE: Record<Exclude<TourSectionId, 'settings'>, AppMode> = {
 
 export function TourReplayButton({
   onModeChange,
-  settingsOpen,
-  onSettingsToggle,
 }: {
   onModeChange: (mode: AppMode) => void;
-  settingsOpen: boolean;
-  onSettingsToggle: () => void;
 }) {
   const [menu, setMenu] = useState(false);
 
@@ -44,11 +40,7 @@ export function TourReplayButton({
 
   const replay = (section: TourSectionId) => {
     setMenu(false);
-    if (section === 'settings') {
-      if (!settingsOpen) onSettingsToggle();
-    } else {
-      onModeChange(TARGET_MODE[section]);
-    }
+    onModeChange(TARGET_MODE[section]);
     requestTour(section);
   };
 
