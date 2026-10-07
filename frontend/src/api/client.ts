@@ -57,8 +57,12 @@ export interface TransitionTemplateWire {
   lanes: Record<string, unknown>;
 }
 
-// Backend URL configuration - can be overridden with VITE_API_URL env var
-const BACKEND_URL = import.meta.env.VITE_API_URL || 'http://localhost:8127';
+// Backend URL: VITE_API_URL when set (scripts/dev.py injects it); dev/test
+// fallback :8127. Production builds default to '' — same-origin relative
+// URLs, for when the backend itself serves the built frontend (packaged
+// app, ADR 0043 / #279).
+const BACKEND_URL =
+  import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://localhost:8127' : '');
 const API_BASE = `${BACKEND_URL}/api`;
 
 // Export for use in other components (e.g., for static file URLs)
@@ -1763,6 +1767,9 @@ export interface AppConfigWire {
   rekordbox_autodetected: boolean;
   rekordbox_detected_path: string | null;
   engine_dj_path: string | null;
+  /** True when engine_dj_path came from auto-detection (#309). */
+  engine_autodetected: boolean;
+  engine_detected_path: string | null;
   export_enabled: boolean;
   settings_file: string;
   /** Live PATH check (packaged-app #278): false => waveforms/analysis/stems broken. */
@@ -1770,7 +1777,7 @@ export interface AppConfigWire {
 }
 
 export interface AppConfigUpdateWire {
-  /** Path fields: '' clears the key (Rekordbox returns to auto-detect). */
+  /** Path fields: '' clears the key (Rekordbox/Engine return to auto-detect). */
   tracks_directory?: string;
   rekordbox_path?: string;
   engine_dj_path?: string;

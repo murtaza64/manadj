@@ -23,6 +23,7 @@ import {
   DEFAULT_BEAT_FX_SETTINGS,
   type BeatFxSettings,
 } from '../playback/beatFxSettings';
+import { APP_VERSION } from '../version';
 
 const WaveformSettings = lazy(() => import('../waveform/StyleTuningPage'));
 const ControllerCalibrationSettings = lazy(() => import('./ControllerCalibrationSettings'));
@@ -469,6 +470,7 @@ export default function SettingsPage({ performance = false }: { performance?: bo
         </div>
         <p>
           Changes apply immediately. Preferences are stored with your library.
+          <span className="settings-version">manaDJ v{APP_VERSION}</span>
         </p>
       </header>
       <div className="settings-layout">
