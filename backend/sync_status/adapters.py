@@ -193,34 +193,36 @@ class RekordboxSurfaceReader:
         return refs
 
     def _rb_beatgrid(self, content):
-        """The track's PQTZ grid (ANLZ .DAT), offset into manadj's frame.
-        None when unanalyzed/unreadable — not a divergence."""
-        from rekordbox.anlz_grid import read_pqtz
-        from rekordbox.decode_offset import export_offset_ms
+        return rb_beatgrid(content, Path(self._db._db_dir))
 
-        if not content.AnalysisDataPath:
-            return None
-        dat = (
-            Path(self._db._db_dir) / "share" / content.AnalysisDataPath.lstrip("/\\")
-        )
-        grid = read_pqtz(dat)
-        if grid is None or not grid.tempo_changes:
-            return grid
-        offset_s = export_offset_ms(content.FolderPath or "") / 1000.0
-        if offset_s == 0:
-            return grid
-        from backend.sync_status.models import BeatgridValue, TempoChangeValue
 
-        return BeatgridValue(
-            tempo_changes=[
-                TempoChangeValue(
-                    start_time=tc.start_time - offset_s,
-                    bpm=tc.bpm,
-                    bar_position=tc.bar_position,
-                )
-                for tc in grid.tempo_changes
-            ]
-        )
+def rb_beatgrid(content, db_dir: Path):
+    """The track's PQTZ grid (ANLZ .DAT), offset into manadj's frame.
+    None when unanalyzed/unreadable — not a divergence."""
+    from rekordbox.anlz_grid import read_pqtz
+    from rekordbox.decode_offset import export_offset_ms
+
+    if not content.AnalysisDataPath:
+        return None
+    dat = db_dir / "share" / content.AnalysisDataPath.lstrip("/\\")
+    grid = read_pqtz(dat)
+    if grid is None or not grid.tempo_changes:
+        return grid
+    offset_s = export_offset_ms(content.FolderPath or "") / 1000.0
+    if offset_s == 0:
+        return grid
+    from backend.sync_status.models import BeatgridValue, TempoChangeValue
+
+    return BeatgridValue(
+        tempo_changes=[
+            TempoChangeValue(
+                start_time=tc.start_time - offset_s,
+                bpm=tc.bpm,
+                bar_position=tc.bar_position,
+            )
+            for tc in grid.tempo_changes
+        ]
+    )
 
 
 def rb_hotcues_from_cue_rows(
@@ -259,12 +261,28 @@ def rb_hotcues_from_cue_rows(
             slot=KIND_TO_SLOT[c.Kind],
             time=rb_ms_to_manadj_seconds(c.InMsec, folder_path or ""),
             label=(c.Comment or None),
-            color=palette_index_to_hex(c.Color if (c.Color or -1) >= 0 else None),
+            color=palette_index_to_hex(rb_cue_palette_index(c)),
         )
         for c in sorted(hot, key=lambda c: KIND_TO_SLOT[c.Kind])
     ]
     mirror_ok = memory_ms == sorted({c.InMsec for c in hot})
     return hotcues, mirror_ok
+
+
+def rb_cue_palette_index(cue) -> int | None:
+    """A djmdCue row's palette index, handling both color shapes.
+
+    RB7 shape: Color IS the palette index, -1 = none. Color=0 is pink —
+    a previous `c.Color or -1` treated it as falsy and dropped it (#274).
+    Legacy RB5/6 shape (real libraries predating RB7): Color=255 with the
+    palette index in ColorTableIndex (spike 2026-07-10, exp_b_cues) — RB7
+    won't *render* that shape but old rows still carry real colors.
+    """
+    color = getattr(cue, "Color", None)
+    if color == 255:
+        legacy = getattr(cue, "ColorTableIndex", None)
+        return legacy if legacy is not None and legacy >= 0 else None
+    return color if color is not None and color >= 0 else None
 
 
 def _rb_related(content, relation: str, attr: str) -> str | None:

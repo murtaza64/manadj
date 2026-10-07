@@ -19,6 +19,12 @@ versions follow [Semantic Versioning](https://semver.org/). Install: [docs/insta
 - Revised Tour orientation copy, explicit dismissal and popover positioning; Tours and hands-on Tutorials are labeled separately (#332).
 - Windows x64 installer (per-user, no admin; data in `%APPDATA%\manaDJ`). Untested on Windows hardware so far — see Known limitations (#317).
 - Quitting manaDJ always shuts its backend down cleanly, on macOS and Windows, and the backend no longer lingers if the app crashes (#314).
+- Keyboard map: ? or F1 opens a full-keyboard shortcut overlay for every area (also Settings → Keyboard + mouse). Perform number row drives Beat FX: 1–5 target A/B/C/D/MST, 6/7 length ÷2/×2, 8/9 effect type, hold 0 + mouse for LEVEL/DEPTH, - on/off (#285).
+- Flanger length reads in bars by default (1 = 1 bar = 4 beats); toggle Bars/Beats in Settings → Performance → Beat FX → Flanger (#331).
+
+- First-launch welcome and resumable Setup sequence: Rekordbox import, music folder, Cue mode, SoundCloud, Soulseek and Controller check; replay individual guides from Settings → Help → Setup (#275, #288).
+- Rekordbox import previews Tracks, Playlists and MyTags, imports cues/grids/keys without changing Rekordbox, and reports progress and skipped items. Imported Tags and Tag Categories receive saturated colors (#274, #326).
+- Music-folder Setup saves the tracks directory and offers a recursive Scan, with progress and connection-error recovery (#276).
 
 ## [0.1.0] - 2026-10-07
 

@@ -29,11 +29,11 @@ const tabs = () => [...host.querySelectorAll('.sync-view-tab')].map((t) => t.tex
 it('hides Acquisition until SoundCloud is connected (setup-guides #290)', () => {
   gate.connected = false;
   act(() => root.render(<SyncView />));
-  expect(tabs()).toEqual(['Tracks', 'Playlists']);
+  expect(tabs()).toEqual(['Tracks', 'Playlists', 'Rekordbox import']);
 
   gate.connected = true;
   act(() => root.render(<SyncView />));
-  expect(tabs()).toEqual(['Tracks', 'Playlists', 'Acquisition']);
+  expect(tabs()).toEqual(['Tracks', 'Playlists', 'Acquisition', 'Rekordbox import']);
   act(() => (host.querySelectorAll('.sync-view-tab')[2] as HTMLButtonElement).click());
   expect(host.querySelector('[data-testid="acquisition"]')).not.toBeNull();
 

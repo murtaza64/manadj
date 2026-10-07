@@ -7,3 +7,4 @@ import './cueMode/register';
 import './controllerCheck/register';
 import './soundcloud/register';
 import './soulseek/register';
+import '../onboarding/registerGuides';

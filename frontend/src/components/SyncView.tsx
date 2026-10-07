@@ -2,15 +2,17 @@ import { useState } from 'react';
 import { PlaylistSync } from './PlaylistSync';
 import { Acquisition } from './Acquisition';
 import { UnifiedTracksSync } from './UnifiedTracksSync';
+import { RekordboxImportGuide } from '../onboarding/RekordboxImportGuide';
 import { useSoundCloudConnected } from '../setup/soundcloud/soundcloudApi';
 import './SyncView.css';
 
-type TabType = 'tracks' | 'playlists' | 'acquisition';
+type TabType = 'tracks' | 'playlists' | 'acquisition' | 'rekordbox-import';
 
 const TABS: { id: TabType; label: string }[] = [
   { id: 'tracks', label: 'Tracks' },
   { id: 'playlists', label: 'Playlists' },
   { id: 'acquisition', label: 'Acquisition' },
+  { id: 'rekordbox-import', label: 'Rekordbox import' },
 ];
 
 /** The Sync mode: a normal top-bar mode (the persistent TopBar is the way
@@ -40,6 +42,11 @@ export function SyncView() {
       {activeTab === 'tracks' && <UnifiedTracksSync />}
       {activeTab === 'playlists' && <PlaylistSync />}
       {activeTab === 'acquisition' && <Acquisition />}
+      {activeTab === 'rekordbox-import' && (
+        <div className="onboarding-standalone">
+          <RekordboxImportGuide onDone={() => setActiveTab('tracks')} />
+        </div>
+      )}
     </div>
   );
 }

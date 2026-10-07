@@ -7,6 +7,8 @@ import type { AppMode } from './TopBar';
 import { isQuantizeOn, setQuantize } from '../playback/quantizeStore';
 import { writeSetting } from '../settings/persistedSettings';
 import { PerformanceKeyboard } from './performance/PerformanceKeyboard';
+import { KeyboardShortcutOverlay } from './KeyboardShortcutOverlay';
+import { _resetKeyboardHelpForTests } from './keyboardHelpStore';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -27,6 +29,7 @@ let root: ReturnType<typeof createRoot>;
 const onModeChange = vi.fn();
 const onSettingsToggle = vi.fn();
 beforeEach(() => {
+  _resetKeyboardHelpForTests();
   vi.stubGlobal('localStorage', { getItem: () => null });
   host = document.createElement('div');
   document.body.append(host);
@@ -36,6 +39,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   act(() => root.unmount());
+  _resetKeyboardHelpForTests();
   host.remove();
   vi.unstubAllGlobals();
 });
@@ -256,6 +260,7 @@ it.each([false, true])('works with library-focus capture registered before TopBa
   const view = (topbar: boolean) => <>
     <PerformanceKeyboard deckCount={4} left="A" right="B" onLoad={vi.fn()} />
     {topbar && <TopBar mode="performance" onModeChange={onModeChange} settingsOpen={false} onSettingsToggle={onSettingsToggle} />}
+    <KeyboardShortcutOverlay mode="performance" />
   </>;
   act(() => root.render(view(!mountLate)));
   key({ key: 'Tab', code: 'Tab', shiftKey: false });

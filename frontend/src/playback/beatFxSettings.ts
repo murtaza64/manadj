@@ -9,7 +9,12 @@ export interface BeatFxSettings {
   flangerDelayMs: number;
   flangerWidthMs: number;
   flangerFeedback: number;
+  /** How the shared Beat FX length reads for the Flanger (#331):
+   * 'bars' — 1 = one bar (BEATS_PER_BAR beats); 'beats' — 1 = one beat. */
+  flangerLengthUnit: FlangerLengthUnit;
 }
+
+export type FlangerLengthUnit = 'bars' | 'beats';
 
 export const DEFAULT_BEAT_FX_SETTINGS: Readonly<BeatFxSettings> = Object.freeze({
   echoFeedback: 0.5,
@@ -20,6 +25,7 @@ export const DEFAULT_BEAT_FX_SETTINGS: Readonly<BeatFxSettings> = Object.freeze(
   flangerDelayMs: 3,
   flangerWidthMs: 2,
   flangerFeedback: 0.35,
+  flangerLengthUnit: 'bars',
 });
 
 export const BEAT_FX_PARAMETER_RANGES = {
@@ -33,17 +39,22 @@ export const BEAT_FX_PARAMETER_RANGES = {
   flangerFeedback: [0, 0.9, 0.01],
 } as const;
 
+export type BeatFxNumericKey = keyof typeof BEAT_FX_PARAMETER_RANGES;
+
 export const BEAT_FX_SETTINGS_KEY = 'manadj-beat-fx-settings';
 
 export function sanitizeBeatFxSettings(value: unknown): Readonly<BeatFxSettings> {
   const next = { ...DEFAULT_BEAT_FX_SETTINGS };
   if (!value || typeof value !== 'object') return Object.freeze(next);
   const input = value as Record<string, unknown>;
-  for (const key of Object.keys(BEAT_FX_PARAMETER_RANGES) as (keyof BeatFxSettings)[]) {
+  for (const key of Object.keys(BEAT_FX_PARAMETER_RANGES) as BeatFxNumericKey[]) {
     const raw = input[key];
     if (typeof raw !== 'number' || !Number.isFinite(raw)) continue;
     const [min, max] = BEAT_FX_PARAMETER_RANGES[key];
     next[key] = Math.max(min, Math.min(max, raw));
+  }
+  if (input.flangerLengthUnit === 'bars' || input.flangerLengthUnit === 'beats') {
+    next.flangerLengthUnit = input.flangerLengthUnit;
   }
   return Object.freeze(next);
 }

@@ -38,6 +38,9 @@ import { installNoFocusRule } from './focus/noFocusRule';
 import { useAnalysisPendingSync } from './hooks/useAnalysisPending';
 import { isTypingTarget } from './components/performance/performanceKeys';
 import { registerViewToggle } from './midi/controlRegistry';
+import { FirstRunWelcome } from './onboarding/FirstRunWelcome';
+import './setup/allGuides';
+import { KeyboardShortcutOverlay } from './components/KeyboardShortcutOverlay';
 import { TourController } from './tour/TourController';
 import { TutorialController } from './tutorials/TutorialController';
 import { OPEN_TUTORIAL_EVENT } from './tutorials/tutorialState';
@@ -243,7 +246,8 @@ function App() {
         <SetSpaceTransport />
         {/* Coach-mark tour (feature-tour #282): above the view switch so
             it can spotlight anchors in any mode. */}
-        <TourController />
+            <FirstRunWelcome />
+            <TourController />
         <TutorialController />
         <FilterProvider>
           <div className="app-shell">
@@ -295,6 +299,7 @@ function App() {
               </BrowseActiveContext.Provider>
             </main>
           </div>
+          <KeyboardShortcutOverlay mode={view} />
         </FilterProvider>
       </DeckProvider>
       </ToastProvider>

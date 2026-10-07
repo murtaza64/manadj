@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useContext, useEffect, useRef, useState } from 'react';
 import { DeckScope } from '../../contexts/DeckContext';
 import { useViewActive } from '../../contexts/viewActive';
 import { useBrowseActive } from '../../contexts/browseActive';
@@ -9,25 +9,11 @@ import type { ChannelId } from '../../playback/mixer';
 import type { Track } from '../../types';
 import { sharedBrowseHandle } from '../browseHost';
 import { DeckKeys } from './DeckKeys';
+import { BeatFxKeys } from './BeatFxKeys';
 import { hasKeyboardOverlay, isQuantizeShortcut, isTypingTarget } from './performanceKeys';
+import { MixerContext } from '../../hooks/useMixer';
+import { dispatchPerformanceFxKey, isPerformanceFxKey } from './performanceFxKeys';
 import { reportTutorialAction } from '../../tutorials/engine';
-
-const shortcuts = [
-  ['Tab / Esc', 'Return to decks'],
-  ['j / k or Down / Up', 'Next / previous track'],
-  ['Shift+J / K', 'Extend selection'],
-  ['Ctrl+D / U', 'Down / up half a page'],
-  ['PageDown / PageUp', 'Down / up a page'],
-  ['Home / End', 'First / last track'],
-  ['Cmd/Ctrl+A', 'Select all visible tracks'],
-  ['h / l', 'Sidebar / track list'],
-  ['Enter', 'Open sidebar item'],
-  ['a / b / c / d', 'Load selected track onto deck'],
-  ['Shift+A / B / C / D', 'Follow loaded deck track'],
-  ['/', 'Search (Enter / Esc returns to results)'],
-  ['f / n', 'Follow parameters / Known only'],
-  ['? / F1', 'Keyboard help'],
-];
 
 export function PerformanceKeyboard({ deckCount, left, right, onLoad }: {
   deckCount: 2 | 4;
@@ -38,10 +24,9 @@ export function PerformanceKeyboard({ deckCount, left, right, onLoad }: {
   const active = useViewActive();
   const browseActive = useBrowseActive();
   const decks = useDecks();
+  const mixer = useContext(MixerContext);
   const [library, setLibrary] = useState(false);
-  const [help, setHelp] = useState(false);
   const libraryFocus = library && browseActive;
-  const helpOpen = help && browseActive;
   const held = useRef(new Set<string>());
   const blocked = useRef(new Set<string>());
   const changeFocus = (next: boolean) => {
@@ -52,10 +37,6 @@ export function PerformanceKeyboard({ deckCount, left, right, onLoad }: {
       if (next) reportTutorialAction({ type: 'browse' });
     }
     if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
-  };
-  const changeHelp = (next: boolean) => {
-    for (const key of held.current) blocked.current.add(key);
-    setHelp(next);
   };
 
   useEffect(() => {
@@ -68,25 +49,25 @@ export function PerformanceKeyboard({ deckCount, left, right, onLoad }: {
       const physical = event.code || key;
       if (blocked.current.has(physical)) { claim(event); return; }
       if (!event.repeat) held.current.add(physical);
-      if (!browseActive) return;
-      if (help) {
-        if (key === 'escape' || key === '?' || key === 'f1') { claim(event); changeHelp(false); }
-        return;
-      }
       if (hasKeyboardOverlay() || event.defaultPrevented || event.isComposing) return;
       const modified = event.metaKey || event.ctrlKey || event.altKey;
+      const typing = isTypingTarget(event);
+      if (mixer && !typing && !libraryFocus && !modified && !event.shiftKey && /^[0-9-]$/.test(key)) {
+        // Unmapped number-row keys stay unclaimed (they may get bindings later).
+        if (event.repeat ? isPerformanceFxKey(key, deckCount) : dispatchPerformanceFxKey(key, mixer, deckCount)) {
+          claim(event);
+          return;
+        }
+      }
+      if (!browseActive) return;
       // Tab also works inside search, but never hijacks other text editors.
       const search = event.target instanceof Element && event.target.matches('.filter-bar-search');
-      if (key === 'tab' && !modified && (!isTypingTarget(event) || search)) {
+      if (key === 'tab' && !modified && (!typing || search)) {
         claim(event);
         if (!event.repeat) changeFocus(!library);
         return;
       }
-      if (isTypingTarget(event)) return;
-      // Shift+/ belongs to hotcue 4 when decks own the keyboard.
-      if ((key === 'f1' || (library && key === '?')) && !modified) {
-        claim(event); if (!event.repeat) changeHelp(true); return;
-      }
+      if (typing) return;
       if (!library || key === '`') return;
       const browse = sharedBrowseHandle.current;
       if (!event.altKey && !event.shiftKey && (event.metaKey || event.ctrlKey) && key === 'a') {
@@ -147,14 +128,8 @@ export function PerformanceKeyboard({ deckCount, left, right, onLoad }: {
   });
 
   return <div className="perf-keyboard-scope" data-library-focus={libraryFocus}>
-    <DeckScope deck={left}><DeckKeys enabled={!libraryFocus && !helpOpen} /></DeckScope>
-    <DeckScope deck={right}><DeckKeys enabled={!libraryFocus && !helpOpen} /></DeckScope>
-    {active && helpOpen && <div className="perf-keyboard-help-backdrop" onClick={() => changeHelp(false)}>
-      <section className="perf-keyboard-help" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts" onClick={e => e.stopPropagation()}>
-        <header><strong>{library ? 'LIBRARY' : 'DECKS'} KEYBOARD</strong><button onClick={() => changeHelp(false)}>Close (Esc)</button></header>
-        {library ? <dl>{shortcuts.map(([key, action]) => <div key={key}><dt>{key}</dt><dd>{action}</dd></div>)}</dl> : <p>On-control labels show deck keys. Hold mixer or jog keys and move the mouse. Shift+pad clears its hotcue. Use [ / ] to switch A/C and B/D. Tab enters library navigation. F1 opens keyboard help.</p>}
-        {library && <p>Loads keep library focus. Playing decks are locked. C/D loads are unavailable in two-deck layout. Follow uses loaded tracks, not the selected row.</p>}
-      </section>
-    </div>}
+    <DeckScope deck={left}><DeckKeys enabled={!libraryFocus} /></DeckScope>
+    <DeckScope deck={right}><DeckKeys enabled={!libraryFocus} /></DeckScope>
+    {mixer && <BeatFxKeys enabled={!libraryFocus} />}
   </div>;
 }
