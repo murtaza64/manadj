@@ -29,6 +29,13 @@ try {
       await Promise.all([...document.images].map((img) => img.decode()));
     });
     assert.equal(await page.locator('h1').count(), 1);
+    assert.deepEqual(await page.locator('.chapter[data-slug]').evaluateAll((els) => els.map((el) => el.dataset.slug)),
+      ['acquire', 'curate', 'perform', 'follow', 'capture', 'editor', 'sets', 'sync']);
+    assert.deepEqual(await page.locator('.segment').allTextContents(),
+      ['INSTALL', 'ACQUIRE', 'CURATE', 'PERFORM', 'FOLLOW', 'CAPTURE', 'EDIT', 'ARRANGE', 'SYNC']);
+    assert.deepEqual(await page.locator('.loop-step').evaluateAll((els) => els.map((el) => el.getAttribute('href'))),
+      ['#acquire', '#curate', '#perform', '#follow', '#capture', '#editor', '#sets', '#sync']);
+    assert.equal(await page.locator('#words, .glossary, .chips, [id^="term-"], a[href="#words"], a[href^="#term-"]').count(), 0);
     assert.equal(await page.locator('video').count(), 3);
     assert(await page.evaluate(() => document.fonts.check('700 48px "Ubuntu Mono"')));
     assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `Overflow at ${width}`);
@@ -63,8 +70,8 @@ try {
       await page.locator('.segment[href="#sets"]').click();
       await page.waitForTimeout(300);
       assert(await page.locator('.segment[href="#sets"]').evaluate((el) => el.classList.contains('active')));
-      await page.locator('#sets .chip[href="#term-conductor"]').click();
-      assert.equal(new URL(page.url()).hash, '#term-conductor');
+      assert.equal(new URL(page.url()).hash, '#sets');
+      assert.equal(await page.locator('#sets .chapter-head .kicker').innerText(), '07 · ARRANGE');
     }
     assert.deepEqual(errors, []);
     console.log(`Layout/fonts/assets passed at ${width}px`);
@@ -73,7 +80,7 @@ try {
   const plain = await browser.newContext({ javaScriptEnabled: false });
   const page = await plain.newPage();
   await page.goto(url);
-  assert.equal(await page.locator('.chapter[data-slug]').count(), 11);
+  assert.equal(await page.locator('.chapter[data-slug]').count(), 8);
   assert.equal(await page.locator('video[controls]').count(), 3);
   console.log('No-JavaScript content and native video controls passed');
   await plain.close();

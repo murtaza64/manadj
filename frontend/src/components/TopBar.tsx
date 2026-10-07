@@ -21,6 +21,7 @@ import { TasksWidget } from './TasksWidget';
 import { MasterRecorderControl } from './MasterRecorderControl';
 import { isVisualizerOpen, toggleVisualizer } from '../visualizer/windowControl';
 import { VisualizerControlModal } from './VisualizerControlModal';
+import { AppFeedbackEntry } from '../feedback/AppFeedbackEntry';
 import { hasKeyboardOverlay, isQuantizeShortcut, isTypingTarget } from './performance/performanceKeys';
 import { TourReplayButton } from '../tour/TourReplayButton';
 import './TopBar.css';
@@ -264,6 +265,8 @@ export function TopBar({
         onSettingsToggle={onSettingsToggle}
       />
       <div className="topbar-status">
+        <AppFeedbackEntry view={mode} />
+        <span className="topbar-divider" />
         <FfmpegWarning />
         <VisualizerCluster />
         <span className="topbar-divider" />

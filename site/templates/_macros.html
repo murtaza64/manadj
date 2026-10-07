@@ -16,16 +16,8 @@
     <source src="media/{{ name }}.mp4" type="video/mp4">
     <a href="media/{{ name }}.mp4">Watch the silent clip</a>
   </video>
-  <div class="clip-note">Real app · silent recording · press play to watch <a href="media/{{ name }}.mp4">Open full-size ↗</a></div>
+  <div class="clip-note">Silent recording · <a href="media/{{ name }}.mp4">Open full-size ↗</a></div>
 </figure>
-{%- endmacro %}
-
-{% macro term_chips(terms) -%}
-<ul class="chips" aria-label="Words used here">
-  {% for t in terms %}
-  <li><a class="chip" href="#term-{{ t.slug }}" title="{{ t.def }}">{{ t.term }}</a></li>
-  {% endfor %}
-</ul>
 {%- endmacro %}
 
 {% macro visual(kind) -%}
@@ -76,7 +68,6 @@
     <div class="prose">
       {{ f.body_html }}
       {% if f.get('visual') %}{{ visual(f.visual) }}{% endif %}
-      {{ term_chips(f.term_objs) }}
     </div>
     {% if f.get('shot') %}
     <div class="shots">

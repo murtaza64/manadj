@@ -181,9 +181,18 @@ def _defer_for_rate_limit(db: Session, task: Task, error: RateLimitedError) -> N
     )
 
 
-def recover_interrupted(db: Session) -> int:
-    """Re-queue tasks caught mid-flight by a crash or restart."""
-    tasks = db.query(Task).filter(Task.state == "running").all()
+def recover_interrupted(db: Session, types: list[str] | None = None) -> int:
+    """Re-queue tasks caught mid-flight by a crash or restart.
+
+    `types` scopes recovery to those task types. With one worker per lane
+    (gh#224) each worker recovers only its own types at start — otherwise a
+    lane starting second would re-queue a task the first lane is actively
+    running.
+    """
+    query = db.query(Task).filter(Task.state == "running")
+    if types is not None:
+        query = query.filter(Task.type.in_(types))
+    tasks = query.all()
     for task in tasks:
         task.state = "pending"
         task.started_at = None

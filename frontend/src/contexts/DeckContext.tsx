@@ -7,6 +7,7 @@ import { CHANNEL_IDS, Mixer, STEM_NAMES } from '../playback/mixer';
 import { CaptureRecorder } from '../capture/recorder';
 import { persistTake } from '../capture/takeSink';
 import { SessionSink } from '../capture/sessionSink';
+import { registerDiagnostics } from '../feedback/diagnostics';
 import { notePlayedEvent, resetPlayed } from '../sessions/playedStore';
 import type { ChannelId } from '../playback/mixer';
 import { registerSurface, unregisterSurface } from '../playback/audibleSurface';
@@ -159,6 +160,7 @@ export function DeckProvider({ children }: { children: ReactNode }) {
     // bug.
     const sink = new SessionSink();
     sink.start();
+    const unregisterDiagnostics = registerDiagnostics('session', () => ({ recording_uuid: sink.currentSessionUuid }));
     // Played state is live-only; a recorder restart starts fresh.
     resetPlayed();
     const recorder = new CaptureRecorder(
@@ -183,6 +185,7 @@ export function DeckProvider({ children }: { children: ReactNode }) {
     return () => {
       document.removeEventListener('visibilitychange', onHide);
       recorder.dispose();
+      unregisterDiagnostics();
       sink.stop();
     };
   }, [engines, mixer]);

@@ -76,6 +76,7 @@ SHELL_FILES = [
     "main.js",
     "backend.js",
     "chrome.js",
+    "feedback.js",
     "preload.js",
     "recording.js",
     "assert-channel-labels.swift",

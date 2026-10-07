@@ -107,6 +107,8 @@ Shared draw helpers/tables: `frontend/src/theme/markers.ts` (gh#201).
   CSS.
 - **Persistent button selection** uses `.btn-selected`: accent fill, accent
   border, dark ink, including secondary detail text.
+- **Top-bar buttons** use `.btn-toolbar`: 24px height, uppercase micro text,
+  muted outline at rest, accent hover and `.btn-selected` when open/engaged.
 - **Modals use `<Modal>`** (gh#202): overlay, centering, escape/backdrop
   close, `--z-modal`, title bar.
 - No other primitives until a third duplication appears (D10).

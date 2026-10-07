@@ -17,6 +17,7 @@ vi.mock('./AudioOwnershipChip', () => ({ AudioOwnershipChip: () => null }));
 vi.mock('./TasksWidget', () => ({ TasksWidget: () => null }));
 vi.mock('./MasterRecorderControl', () => ({ MasterRecorderControl: () => null }));
 vi.mock('./VisualizerControlModal', () => ({ VisualizerControlModal: () => null }));
+vi.mock('../feedback/AppFeedbackEntry', () => ({ AppFeedbackEntry: () => null }));
 vi.mock('../visualizer/windowControl', () => ({ isVisualizerOpen: () => false, toggleVisualizer: vi.fn() }));
 vi.mock('../settings/persistedSettings', () => ({ writeSetting: vi.fn() }));
 vi.mock('../settings/useAppConfig', () => ({ useAppConfig: () => ({ data: undefined }) }));

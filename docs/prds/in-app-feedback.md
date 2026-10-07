@@ -1,6 +1,8 @@
 # In-app feedback
 
-Status: agreed v1 behavior; implementation and detailed application map pending.
+Status: v1 implemented, parked for review in #243 (service #244, form #245).
+Service configuration and verification: [feedback-service.md](../agents/feedback-service.md).
+Application map and initial standing-area designation remain separate work.
 
 ## Capture and filing
 
@@ -49,16 +51,12 @@ Status: agreed v1 behavior; implementation and detailed application map pending.
 - Evidence must remain available to authorized triage/recipient sessions
   without granting access to the real DB or another lane's writable workspace.
 
-## Remaining design
+## Deferred
 
-- Electron capture and browser fallback; crash-boundary entry point.
-- Snapshot field contracts, redaction, bundle access and retention.
-- Durable filing retries, batch delivery acknowledgement and deduplication;
-  reconcile uncertain outcomes without duplicate issues or agent actions.
-- GitHub marker/claim rules separating filed-but-undispatched reports from
-  actionable work, and the main-app triage recipient.
-- Busy-session admission and ownership-safe delivery. Existing resume
-  plumbing has no durable queue; its status checking needs verification and
-  hardening before automated delivery relies on it.
+- Automatic bundle retention/deletion; v1 keeps evidence until manually removed.
+- Main-app triage session designation; configure an existing recipient rather
+  than guessing or spawning one. Unconfigured dispatch requires routing review.
+- Automated rerouting/recovery of permanently uncertain writes. V1 preserves
+  the evidence and outcome uncertainty instead of risking duplicate actions.
 - Application map and initial standing-lane designation. Preserve the agreed
   seven areas in agent guidance; do not fabricate live session assignments.

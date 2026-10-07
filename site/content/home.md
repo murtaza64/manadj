@@ -1,20 +1,20 @@
 ---
-kicker: Keyboard DJing · macOS · pre-alpha
+kicker: Keyboard DJing · macOS / Windows · prerelease
 title: manadj
-tagline: DJ from your keyboard. Keep what works.
+tagline: DJ software for keyboard, mouse and controllers.
 hero_clip: perform
 hero_shot: perform-motion
-hero_caption: "Keyboard-started Decks, scrolling waveforms, filter and volume moves"
+hero_caption: "Keyboard playback, filter and volume controls"
 github: https://github.com/murtaza64/manadj
 loop:
-  - { label: PLAY, text: "Mix with your keyboard and mouse", href: perform }
-  - { label: CAPTURE, text: "Listen back to your Takes", href: capture }
-  - { label: PROMOTE, text: "Keep the good ones as Transitions", href: editor }
-  - { label: PLAN, text: "Build a Set around saved handovers", href: sets }
-  - { label: FOLLOW, text: "Find what to play next", href: follow }
+  - { label: ACQUIRE, text: "Find and import music", href: acquire }
+  - { label: CURATE, text: "Library and Playlists", href: curate }
+  - { label: PERFORM, text: "Keyboard and controllers", href: perform }
+  - { label: FOLLOW, text: "Next-Track suggestions", href: follow }
+  - { label: CAPTURE, text: "Sessions and Takes", href: capture }
+  - { label: EDIT, text: "Transitions and Routines", href: editor }
+  - { label: ARRANGE, text: "Sets and handovers", href: sets }
+  - { label: SYNC, text: "Rekordbox and Engine DJ", href: sync }
 ---
 
-Play with your keyboard and mouse on four Decks. When a blend works,
-listen back to the Take, adjust the timing or fades, and keep it for
-another Set. Your library and the blends you've saved stay together
-in manadj.
+Four Decks, a Library, a Mix editor, and Sets.

@@ -157,6 +157,7 @@ export class SessionReplayDriver {
   private readonly hooks: ReplayHooks;
 
   private active = false;
+  private loading = true;
   private started = false;
   private stoppedFired = false;
   private suppressSilence = false;
@@ -243,8 +244,11 @@ export class SessionReplayDriver {
    * drives the timeline's moving playhead. */
   nowT(): number | null {
     if (!this.active) return null;
+    // Loading has no running clock yet; following a stale anchor moves
+    // both the timeline playhead and viewport away from the requested cue.
+    if (this.loading || this.seeking) return this.plan.startT;
     const offset = this.pausedAtOffset ?? this.elapsed();
-    return this.plan.startT + Math.min(offset, this.plan.endT - this.plan.startT);
+    return this.plan.startT + Math.max(0, Math.min(offset, this.plan.endT - this.plan.startT));
   }
 
   /** Live per-deck servo activity — absent when idle. */
@@ -323,6 +327,7 @@ export class SessionReplayDriver {
     // Seed decks + mixer, then start the clock and watchers.
     this.self(() => this.applySeed());
     this.anchorAudioTime = this.mixer.now() + (this.scheduledReplay ? SCRATCH_PREROLL_S : 0);
+    this.loading = false;
     if (this.scheduledReplay) this.self(() => {
       for (const d of seedLoads) this.queueScratchDeck(d, 0, this.parkedFrames[d]);
     });

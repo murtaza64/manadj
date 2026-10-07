@@ -15,10 +15,55 @@ import {
   createMonotonicPxToT,
   createMonotonicTToPx,
   decimatePlayheadTrace,
+  drawGridlines,
+  drawAudibilityArea,
   tracePolylinePoints,
   traceRuns,
 } from './waveformLanes';
 import type { DeckTimeline } from './timelineModel';
+import { BEAT_TIER_DIM, beatTierStyle } from '../theme/markers';
+import { ACCENT } from '../theme/tokens';
+
+it('draws one stepped audibility silhouette without per-column seams across collapsed gaps', () => {
+  const axis = makeCollapsedAxis();
+  const points: number[][] = [];
+  const ctx = { fillStyle: '', beginPath() {}, fill() {}, closePath() {},
+    moveTo(...args: number[]) { points.push(args); }, lineTo(...args: number[]) { points.push(args); } };
+  const steps = [{ t: 0, gain: 0.5 }, { t: 20, gain: 0 }, { t: 200, gain: 0.25 }];
+  drawAudibilityArea(ctx as unknown as CanvasRenderingContext2D, steps, axis, ACCENT,
+    { width: axis.totalPx, x0: 0, x1: axis.totalPx, height: 40, yOffset: 10 });
+  expect(points.length).toBeLessThanOrEqual(9);
+  for (let x = 0; x < axis.totalPx; x++) {
+    const t = axis.pxToT(x);
+    const gain = steps.filter(step => step.t <= t).at(-1)?.gain ?? 0;
+    const top = points.find((p, i) => points[i + 1]?.[1] === p[1] && x >= p[0] && x < points[i + 1][0]);
+    expect(50 - top![1]).toBe(gain / 0.5 * 40);
+  }
+});
+
+it('progressively re-thins metric gridlines as lower levels disappear', () => {
+  const beats = Array.from({ length: 129 }, (_, i) => i * 0.5);
+  const downs = beats.filter((_, i) => i % 4 === 0);
+  const ladder = { tierBars: [1, 2, 4, 8, 16], downs: new Map(downs.map((t, i) => [t,
+    { tier: i % 16 === 0 ? 4 : i % 8 === 0 ? 3 : i % 4 === 0 ? 2 : i % 2 === 0 ? 1 : 0,
+      parenthetical: i === 16 }])) };
+  for (const [pxPerSec, baseTier] of [[1, 4], [2, 3], [4, 2], [8, 1], [16, 0], [24, -1]]) {
+    const calls: { x: number; width: number; color: string }[] = [];
+    const ctx = { fillStyle: '', fillRect(x: number, _y: number, width: number) {
+      calls.push({ x, width, color: this.fillStyle });
+    } };
+    const axis: TimeAxis = { pxPerSec, totalPx: 64 * pxPerSec, visibleDurationS: 64,
+      segments: [{ start: 0, end: 64, px0: 0, px1: 64 * pxPerSec, collapsed: false }],
+      tToPx: t => t * pxPerSec, pxToT: x => x / pxPerSec };
+    drawGridlines(ctx as unknown as CanvasRenderingContext2D, beats, downs,
+      [{ t0: 0, t1: 64, ph0: 0, ph1: 64 }], axis,
+      { width: axis.totalPx, yOffset: 0, height: 40, x0: 0, x1: axis.totalPx }, ladder);
+    expect(calls.find(c => c.x === 0)?.width).toBe(beatTierStyle(4 - baseTier, BEAT_TIER_DIM).width);
+    expect(Math.min(...calls.map(c => c.width))).toBe(BEAT_TIER_DIM.weakWidth);
+    expect(calls.find(c => c.x === 32 * pxPerSec)?.color).toContain('255, 209, 102');
+    expect(calls.some(c => c.x === 0.5 * pxPerSec)).toBe(baseTier === -1);
+  }
+});
 
 const controls = (patch: Partial<DeckControlSteps> = {}): DeckControlSteps => ({
   fader: [{ t: 0, gain: 1 }],

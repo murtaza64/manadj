@@ -1,5 +1,9 @@
 const { contextBridge, ipcRenderer } = require("electron");
 
+contextBridge.exposeInMainWorld("manadjFeedback", {
+  captureScreenshot: () => ipcRenderer.invoke("feedback:capture"),
+});
+
 contextBridge.exposeInMainWorld("manadjVisualizer", {
   displays: () => ipcRenderer.invoke("visualizer:displays"),
   fullscreenOn: (displayId) => ipcRenderer.invoke("visualizer:fullscreen", displayId),
