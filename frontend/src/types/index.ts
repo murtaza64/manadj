@@ -319,6 +319,11 @@ export interface EngineTrackExportResult {
   target: 'engine';
   exported_to_target: number;
   skipped_file_not_found: number;
+  /** Tracks not on the Engine Library's drive (Windows, #306). */
+  skipped_other_drive: number;
+  skipped_other_drive_paths: string[];
+  /** Library root -> tracks written there (per-drive libraries, #307). */
+  exported_by_library: Record<string, number>;
   playlist_name: string | null;
   playlist_created: boolean;
 }
@@ -377,6 +382,22 @@ export interface LibraryImportExecutionResult {
   skipped_no_metadata: number;
   errors: number;
   error_messages: string[];
+  track_ids: number[];
+}
+
+export interface DropImportRequest {
+  paths: string[];
+  playlist_id?: number | null;
+}
+
+export interface DropImportResult {
+  imported: number;
+  skipped: number;
+  failed: number;
+  ignored: number;
+  error_messages: string[];
+  track_ids: number[];
+  playlist_added: number;
 }
 
 export interface GridAnalysisResponse {

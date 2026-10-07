@@ -116,6 +116,11 @@ export interface RoutineEdits {
    * phrase shift). Keyed by slotId; absent = the recorded entry plays.
    * Undoable, revert-to-recorded, badged '✎' — the authored-lane idiom. */
   entryOffsets: Record<string, number>;
+  /** AUTHORED mixes only (ADR 0039, gh#325): the from-scratch structure,
+   * held here so structural edits share undo/autosave. Client-side only —
+   * persisted as the Routine's first-class fields, never in edits_json
+   * (editsForSave strips it). Absent = a promoted/projected artifact. */
+  authored?: import('./authoredMix').AuthoredStructure;
 }
 
 export const EMPTY_EDITS: RoutineEdits = {

@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from backend.database import get_db
+from backend.export_gate import require_export_enabled
 from backend.config import get_config
 from backend.tags.sync_manager import TagSyncManager
 from backend.tags.models import UnifiedTagView, TagSyncStats, TagSyncRequest
@@ -84,7 +85,7 @@ def get_tag_stats(db: Session = Depends(get_db)):
     return stats
 
 
-@router.post("/sync/engine", response_model=TagSyncStats)
+@router.post("/sync/engine", response_model=TagSyncStats, dependencies=[Depends(require_export_enabled)])
 def sync_tags_to_engine(
     request: TagSyncRequest,
     db: Session = Depends(get_db)
@@ -119,7 +120,7 @@ def sync_tags_to_engine(
     return stats
 
 
-@router.post("/sync/rekordbox", response_model=TagSyncStats)
+@router.post("/sync/rekordbox", response_model=TagSyncStats, dependencies=[Depends(require_export_enabled)])
 def sync_tags_to_rekordbox(
     request: TagSyncRequest,
     db: Session = Depends(get_db)

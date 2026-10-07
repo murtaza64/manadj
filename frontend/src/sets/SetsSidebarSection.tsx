@@ -69,7 +69,7 @@ export default function SetsSidebarSection({
   const [renameDraft, setRenameDraft] = useState('');
   const [dragOverSetId, setDragOverSetId] = useState<number | null>(null);
 
-  const { data: sets = [] } = useQuery({ queryKey: ['sets'], queryFn: api.sets.list });
+  const { data: sets = [], isLoading } = useQuery({ queryKey: ['sets'], queryFn: api.sets.list });
 
   const createMutation = useMutation({
     mutationFn: (name: string) => api.sets.create({ name }),
@@ -167,8 +167,15 @@ export default function SetsSidebarSection({
 
   return (
     <>
-      <div>
+      <div data-tour="sets.sidebar">
         <SidebarSectionHeader id="sets" label="Sets" />
+        {/* Empty-state guidance (feature-tour #283) */}
+        {!collapsed && !isLoading && sets.length === 0 && !creating && (
+          <div style={{ padding: '8px 12px', color: 'var(--overlay1)' }}>
+            No Sets yet — a Set is a planned running order. Start one with +
+            New… below.
+          </div>
+        )}
         {!collapsed &&
           sets.map((set) => (
           <div

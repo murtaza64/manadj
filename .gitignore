@@ -13,3 +13,9 @@ node_modules/
 .editspace/
 .scratch/
 tmp/
+
+# release builds (scripts/release/build_dmg.py)
+build/
+
+# backend rotating log (packaged-app #278)
+logs/

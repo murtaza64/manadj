@@ -474,7 +474,7 @@ export function MixerStrip({
   const crossfaderTakeover = useTakeoverHint(takeoverKey.crossfader());
 
   return (
-    <div className="perf-strip">
+    <div className="perf-strip" data-tour="performance.mixer">
       <div className="perf-strip-left">
         {onDeckCountChange && (
           <span className="perf-deck-count" role="group" aria-label="Displayed decks">
