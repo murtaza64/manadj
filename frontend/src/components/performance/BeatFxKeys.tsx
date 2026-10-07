@@ -40,7 +40,7 @@ export function BeatFxKeys({ enabled = true }: { enabled?: boolean }) {
         if (!press) return [];
         const depth = mixer.getBeatFxSection().depth;
         return [{
-          id: key, kind: 'knob', control: 'trim', label: 'FX DEPTH', value: (depth + 1) / 2,
+          id: key, kind: 'knob', control: 'fxDepth', label: 'FX DEPTH', value: (depth + 1) / 2,
           color: 'var(--accent)',
           detail: depth === 0 ? 'BAL' : depth < 0 ? `DRY ${Math.round(-depth * 100)}%` : `WET ${Math.round(depth * 100)}%`,
         }];
@@ -62,7 +62,7 @@ export function BeatFxKeys({ enabled = true }: { enabled?: boolean }) {
       event.preventDefault();
       const now = performance.now();
       const tap = press.travel <= 3 && now - press.started <= 250;
-      if (tap && press.secondTap && !isGuardedKeyEvent(event)) mixer.setBeatFxDepth(0);
+      if (tap && press.secondTap && !isGuardedKeyEvent(event)) mixer.setBeatFxDepth(-1);
       else if (tap) lastTap = now;
       press = null;
       pointer.stop();

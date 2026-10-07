@@ -835,7 +835,10 @@ describe('Beat FX insert (gh#272)', () => {
     mixer.toggleBeatFxOn();
     expect(fx.echoSend.gain.value).toBe(1);
     expect(fxNodesFor(Fake.instances[0], 0).echoSend.gain.value).toBe(0);
-    expect(fx.echoWet.gain.value).toBe(1); // center 0 = balance midpoint
+    expect(fx.echoWet.gain.value).toBe(0); // starts fully dry
+    expect(fx.dry.gain.value).toBe(1);
+    mixer.setBeatFxDepth(0); // balance midpoint: both at unity
+    expect(fx.echoWet.gain.value).toBe(1);
     expect(fx.dry.gain.value).toBe(1);
     mixer.setBeatFxDepth(1); // full-effect echo-out
     expect(fx.echoWet.gain.value).toBe(1);
@@ -849,6 +852,7 @@ describe('Beat FX insert (gh#272)', () => {
     mixer.portFor('A').ensureAudio();
     const fx = fxNodesFor(Fake.instances[0], 0);
     mixer.toggleBeatFxOn();
+    mixer.setBeatFxDepth(0);
     expect(fx.echoSend.gain.value).toBe(1);
     mixer.selectBeatFx('reverb');
     expect(fx.echoSend.gain.value).toBe(0);

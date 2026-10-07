@@ -1,16 +1,18 @@
-import { AUTOMATION_COLORS, FILTER_LPF_COLOR } from '../../theme/automationColors';
+import { AUTOMATION_COLORS, FILTER_LPF_COLOR, FX_DEPTH_COLOR } from '../../theme/automationColors';
 import { laneFillAnchor, strokeColorAt } from '../../editor/laneShade';
 import { getStyle } from '../../waveform/styles';
 import type { SlotState } from '../../waveform/styleSlots';
 
-export type KnobControl = keyof typeof AUTOMATION_COLORS;
+/** Editor-lane parameters plus the Beat FX LEVEL/DEPTH balance (a level: grey
+ * at fully dry, wet color growing toward +1; not an editor lane). */
+export type KnobControl = keyof typeof AUTOMATION_COLORS | 'fxDepth';
 
 /** Normalized values shared by deck knobs and imperative keyboard feedback. */
 export function knobAppearance(control: KnobControl, value: number, ghost: number | null, waveform: SlotState) {
   const clamp = (v: number) => Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 0;
   const position = clamp(ghost ?? value);
-  const kind = control.startsWith('eq') ? 'eq' : control === 'filter' ? 'filter' : 'trim';
-  let baseColor: string = AUTOMATION_COLORS[control];
+  const kind = control.startsWith('eq') ? 'eq' : control === 'filter' ? 'filter' : control === 'fxDepth' ? 'fader' : 'trim';
+  let baseColor: string = control === 'fxDepth' ? FX_DEPTH_COLOR : AUTOMATION_COLORS[control];
   if (kind === 'eq') {
     const colors = waveform.params.colors ?? getStyle(waveform.styleId).defaultColors;
     const rgb = colors[control === 'eqLow' ? 0 : control === 'eqMid' ? 1 : 2];

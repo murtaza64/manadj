@@ -449,13 +449,14 @@ export class Mixer {
   private cueMix = CUE_MIX_DEFAULT; // 0 (cue only) .. 1 (master only)
   /** The one Beat FX section mirrored by the GRV6 controls: SELECT swaps
    * the live effect, CH SELECT picks one A–D/SP/MST target, ON/OFF gates it,
-   * LEVEL/DEPTH is a bipolar -1..1 balance coordinate (center 0), and the
-   * echo beat fraction is global. */
+   * LEVEL/DEPTH is a bipolar -1..1 balance coordinate (-1 = dry, 0 = balanced,
+   * +1 = wet; starts and resets fully dry), and the echo beat fraction is
+   * global. */
   private beatFxSection: BeatFxSectionState = {
     selected: 'echo',
     target: 'A',
     on: false,
-    depth: 0,
+    depth: -1,
     beats: ECHO_BEATS_DEFAULT,
   };
   /** MST has no Deck of its own; retain the last 1–4 target as its tempo

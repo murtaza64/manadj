@@ -468,10 +468,11 @@ function BeatFxRow({ deckCount }: { deckCount: DeckCount }) {
           kbd={PERFORMANCE_FX_KEYS.depth}
           min={-1}
           max={1}
-          defaultValue={0}
+          defaultValue={-1}
           value={section.depth}
           onChange={(value) => mixer.setBeatFxDepth(value)}
-          title={`LEVEL/DEPTH: original ← 0 balance → effect (drag, scroll, double-click resets; hold ${PERFORMANCE_FX_KEYS.depth} + mouse)`}
+          control="fxDepth"
+          title={`LEVEL/DEPTH: dry ← 0 balance → wet (drag, scroll, double-click resets to dry; hold ${PERFORMANCE_FX_KEYS.depth} + mouse)`}
           className="perf-knob-small perf-fx-depth"
           takeover={depthTakeover}
         />

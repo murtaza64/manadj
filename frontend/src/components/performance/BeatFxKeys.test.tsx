@@ -59,12 +59,12 @@ it('drives LEVEL/DEPTH while 0 is held, with keyboard-pointer feedback', () => {
   expect(mixer.setBeatFxDepth).not.toHaveBeenCalled();
 });
 
-it('double-tap resets to the balance center', () => {
+it('double-tap resets to fully dry', () => {
   section.depth = 0.7;
   render();
   key('0'); key('0', 'keyup');
   key('0'); key('0', 'keyup');
-  expect(mixer.setBeatFxDepth).toHaveBeenLastCalledWith(0);
+  expect(mixer.setBeatFxDepth).toHaveBeenLastCalledWith(-1);
 });
 
 it('ignores 0 while disabled (library focus) or with modifiers', () => {
