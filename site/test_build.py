@@ -127,10 +127,15 @@ class HelpBuildTests(unittest.TestCase):
     def test_drafts_excluded_and_available_articles_follow_workflow(self):
         self.article("start", "## Setup {#setup}", related="[acquire, curate]")
         self.article("editor", "## Edit {#edit}")
+        for slug in ("analysis", "controllers", "audio", "beat-fx", "follow", "capture", "sets", "sync"):
+            self.article(slug, f"## {slug} {{#section}}")
         self.article("acquire", "[Unfinished](../missing/index.html)", draft=True)
         build(self.source, self.output, self.public)
         manifest = json.loads((self.output / "help" / "manifest.json").read_text())
-        self.assertEqual([a["slug"] for a in manifest], ["start", "curate", "perform", "editor"])
+        self.assertEqual([a["slug"] for a in manifest], [
+            "start", "curate", "analysis", "perform", "controllers", "audio", "beat-fx",
+            "follow", "capture", "editor", "sets", "sync",
+        ])
         self.assertFalse((self.output / "help" / "acquire").exists())
         self.assertFalse((self.public / "manual" / "help" / "acquire").exists())
         self.assertNotIn("help/acquire/", (self.output / "index.html").read_text())

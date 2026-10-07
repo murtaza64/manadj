@@ -163,7 +163,10 @@ def load_help(site: Path) -> list[dict]:
         meta["body_html"] = md.convert(body)
         meta["toc_html"] = md.toc
         articles.append(meta)
-    workflow = ["start", "acquire", "curate", "perform", "follow", "capture", "editor", "sets", "sync"]
+    workflow = [
+        "start", "acquire", "curate", "analysis", "perform", "controllers",
+        "audio", "beat-fx", "follow", "capture", "editor", "sets", "sync",
+    ]
     articles.sort(key=lambda article: (
         workflow.index(article["slug"]) if article["slug"] in workflow else len(workflow),
         article["order"], article["slug"],

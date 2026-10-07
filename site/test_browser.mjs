@@ -36,6 +36,13 @@ try {
         const url = new URL(`help/${article.slug}/index.html`, root).href;
         await page.goto(url, { waitUntil: 'networkidle' });
         await page.evaluate(() => document.fonts.ready);
+        await page.locator('img').evaluateAll(async images => {
+          await Promise.all(images.map(async image => {
+            image.loading = 'eager';
+            await image.decode();
+            if (!image.naturalWidth) throw new Error(`Empty image: ${image.src}`);
+          }));
+        });
         assert.equal(await page.locator('h1').textContent(), article.title);
         assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `Overflow: ${width} ${url}`);
         for (const anchor of article.anchors) {
