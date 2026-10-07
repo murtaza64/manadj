@@ -6,6 +6,7 @@ versions follow [Semantic Versioning](https://semver.org/). Install: [docs/insta
 ## [Unreleased]
 
 ### Added
+- Fresh installs start from sensible preference defaults (waveform styles, column layout, keylock, quantize, visualizer, GRV6 jog calibration); your own settings always win.
 - Cue mode: Trigger makes a Hot Cue on a paused Deck jump and start playing (Gated hold-to-preview stays the default). Toggle with GATED in the Performance view mixer strip; also a Setup guide.
 - Added an action-gated Keyboard DJing Tutorial, replayable from ? and Settings → Help → Tutorials (#322).
 - Controller check (Settings → Controllers; also a Setup guide): pick Master/Cue outputs with a test tone on each, see whether your MIDI controller has a Mapping, press any control to see it light up, and open jog calibration for the DDJ-GRV6.
