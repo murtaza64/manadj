@@ -2,17 +2,23 @@
 supervision, and the /api/soulseek guide API.
 
 The slskd binary is a DECOY: a tiny python script that parses the generated
-config for its web port and answers /api/v0/server like slskd does. Real
-slskd behaviour (0.26.0) was verified live; see backend/soulseek/.
+config for its web port and answers /api/v0/server like slskd does. It is
+launched through the supervisor's `popen` seam as `[sys.executable, script,
+...]` — never via its shebang (Windows can't exec scripts; CI runners' system
+python3 is slow or absent, #333). Real slskd behaviour (0.26.0) was verified
+live; see backend/soulseek/.
 """
 
 import json
 import os
 import stat
+import subprocess
+import sys
 import time
 from collections.abc import Iterator
 from pathlib import Path
 
+import psutil
 import pytest
 import requests
 from fastapi import FastAPI
@@ -25,8 +31,7 @@ from backend.soulseek import router as soulseek_router
 from backend.soulseek.managed import _ENV_KEYS, new_managed, render_slskd_config
 from backend.soulseek.supervisor import SlskdSupervisor
 
-FAKE_SLSKD = r'''#!/usr/bin/env python3
-import http.server, json, os, re, sys
+FAKE_SLSKD = r'''import http.server, json, os, re, socketserver, sys
 args = sys.argv[1:]
 cfg = open(args[args.index("--config") + 1]).read()
 port = int(re.search(r"^  port: (\d+)$", cfg, re.M).group(1))
@@ -44,15 +49,30 @@ class H(http.server.BaseHTTPRequestHandler):
         self.send_response(200); self.send_header("Content-Type", "application/json"); self.end_headers()
         self.wfile.write(body)
     def log_message(self, *a): pass
-http.server.HTTPServer(("127.0.0.1", port), H).serve_forever()
+class Server(http.server.HTTPServer):
+    # HTTPServer.server_bind does a reverse-DNS socket.getfqdn(), which
+    # stalls for many seconds on CI macOS runners (#333).
+    def server_bind(self):
+        socketserver.TCPServer.server_bind(self)
+        self.server_name, self.server_port = "localhost", port
+Server(("127.0.0.1", port), H).serve_forever()
 '''
+
+
+def python_popen(args: list[str], **kwargs):  # type: ignore[no-untyped-def]
+    """Run the decoy script with this interpreter, whatever the OS."""
+    return subprocess.Popen([sys.executable, *args], **kwargs)
+
+
+def make_supervisor(binary: Path | None) -> SlskdSupervisor:
+    return SlskdSupervisor(binary, managed.slskd_app_dir(), managed.get_store(), popen=python_popen)
 
 
 @pytest.fixture
 def fake_binary(tmp_path: Path) -> Path:
-    path = tmp_path / "bundle" / "slskd"
+    path = tmp_path / "bundle" / ("slskd.exe" if sys.platform == "win32" else "slskd")
     path.parent.mkdir()
-    path.write_text(FAKE_SLSKD)
+    path.write_text(FAKE_SLSKD, encoding="utf-8")
     path.chmod(path.stat().st_mode | stat.S_IXUSR)
     return path
 
@@ -67,7 +87,8 @@ def env(tmp_path: Path, fake_binary: Path, monkeypatch: pytest.MonkeyPatch) -> I
     for key in _ENV_KEYS.values():
         monkeypatch.delenv(key, raising=False)
     monkeypatch.setattr(config_module, "_load_dotenv", lambda: None)
-    monkeypatch.setattr(supervisor, "_supervisor", None)
+    # the router reaches the supervisor through get_supervisor()
+    monkeypatch.setattr(supervisor, "_supervisor", make_supervisor(fake_binary))
     config_module.reload_config()
     yield data
     if supervisor._supervisor is not None:
@@ -125,7 +146,8 @@ def test_store_roundtrip_in_dotenv(env: Path) -> None:
     text = dotenv.read_text()
     assert "SOUNDCLOUD_OAUTH_TOKEN=keep" in text and "# mine" in text
     assert 'SOULSEEK_PASSWORD="p a#ss"' in text
-    assert stat.S_IMODE(os.stat(dotenv).st_mode) == 0o600
+    if sys.platform != "win32":  # Windows has no POSIX mode bits
+        assert stat.S_IMODE(os.stat(dotenv).st_mode) == 0o600
     # a fresh process reads it back through load_config's .env loading
     for key in _ENV_KEYS.values():
         os.environ.pop(key)
@@ -162,7 +184,7 @@ def test_config_managed_fallback_and_external_precedence(env: Path, monkeypatch:
 
 def test_supervisor_start_health_stop(env: Path, fake_binary: Path) -> None:
     store = managed.get_store()
-    sup = SlskdSupervisor(fake_binary, managed.slskd_app_dir(), store)
+    sup = make_supervisor(fake_binary)
     assert sup.start() is False  # no credentials yet
     store.save(new_managed("alice", "a"))
     assert sup.start() is True
@@ -172,14 +194,13 @@ def test_supervisor_start_health_stop(env: Path, fake_binary: Path) -> None:
     pid = st.pid
     sup.stop()
     assert sup.status().process == "stopped"
-    with pytest.raises(ProcessLookupError):
-        os.kill(pid, 0)  # type: ignore[arg-type]
+    assert pid is not None and not psutil.pid_exists(pid)
 
 
 def test_supervisor_surfaces_login_issue(env: Path, fake_binary: Path) -> None:
     store = managed.get_store()
     store.save(new_managed("wrong", "a"))
-    sup = SlskdSupervisor(fake_binary, managed.slskd_app_dir(), store)
+    sup = make_supervisor(fake_binary)
     sup.start()
     st = wait_for(lambda: (s := sup.status()).server is not None and s)
     assert not st.server.logged_in
@@ -193,7 +214,7 @@ def test_supervisor_gives_up_after_crashes(env: Path, fake_binary: Path, monkeyp
     monkeypatch.setattr(supervisor.time, "sleep", lambda _s: None)
     store = managed.get_store()
     store.save(new_managed("alice", "a"))
-    sup = SlskdSupervisor(fake_binary, managed.slskd_app_dir(), store)
+    sup = make_supervisor(fake_binary)
     sup.start()
     st = wait_for(lambda: (s := sup.status()).process == "crashed" and s)
     assert st.exit_code == 3
@@ -210,7 +231,7 @@ def test_supervisor_moves_taken_port(env: Path, fake_binary: Path) -> None:
         m = new_managed("alice", "a")
         m.web_port = blocker.getsockname()[1]
         store.save(m)
-        sup = SlskdSupervisor(fake_binary, managed.slskd_app_dir(), store)
+        sup = make_supervisor(fake_binary)
         sup.start()
         moved = store.load()
         assert moved is not None and moved.web_port != m.web_port
