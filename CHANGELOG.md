@@ -5,6 +5,8 @@ versions follow [Semantic Versioning](https://semver.org/). Install: [docs/insta
 
 ## [Unreleased]
 
+## [0.1.0-rc.3] - 2026-10-07
+
 ### Added
 - New users start in PERFORM with 2 decks; EXPORT (the full library view) moved into the ⋯ menu next to HISTORY. Backtick and ?view=library still reach it.
 - Fresh installs start from sensible preference defaults (waveform styles, column layout, keylock, quantize, visualizer, GRV6 jog calibration); your own settings always win.
@@ -68,5 +70,6 @@ First public release: a DJ library manager and performance app for Apple Silicon
 - No auto-update: download new versions from GitHub Releases.
 - The first launch takes longer than later ones while manaDJ prepares its database and analysis engine.
 
-[Unreleased]: https://github.com/murtaza64/manadj/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/murtaza64/manadj/compare/v0.1.0-rc.3...HEAD
+[0.1.0-rc.3]: https://github.com/murtaza64/manadj/releases/tag/v0.1.0-rc.3
 [0.1.0]: https://github.com/murtaza64/manadj/releases/tag/v0.1.0

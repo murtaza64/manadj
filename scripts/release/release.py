@@ -116,7 +116,7 @@ def roll_changelog(text: str, version: str, date: str) -> str:
     return text
 
 
-def release_notes(changelog: str, install_doc: str, version: str) -> str:
+def release_notes(changelog: str, install_doc: str, version: str, extra: str = "") -> str:
     """Release body: the changelog section for this version + install doc."""
     section = changelog_section(changelog, version)
     if section is None:
@@ -131,6 +131,10 @@ def release_notes(changelog: str, install_doc: str, version: str) -> str:
             f"v{base_version(version)}. Expect rough edges; data formats may change "
             "before the final release. Windows builds are untested on Windows hardware."
         )
+    if extra.strip():
+        parts.append(extra.strip())
+    if is_prerelease(version) and changelog_section(changelog, version) is not None:
+        section = f"## What's new in {version}\n\n{section}"
     parts.append(section)
     # Drop the doc's own H1; the release title already names the app.
     install = re.sub(r"\A# [^\n]*\n+", "", install_doc)
@@ -164,6 +168,19 @@ def bump_files(version: str) -> bool:
         CHANGELOG.write_text(rolled)
         changed = True
     return changed
+
+
+def roll_prerelease_changelog(version: str) -> bool:
+    """Mechanical [Unreleased] -> [version] roll for a prerelease (no-op when
+    the section exists or [Unreleased] is empty). Returns True if changed."""
+    log = CHANGELOG.read_text()
+    if not (changelog_section(log, "Unreleased") or "").strip():
+        return False
+    rolled = roll_changelog(log, version, dt.date.today().isoformat())
+    if rolled == log:
+        return False
+    CHANGELOG.write_text(rolled)
+    return True
 
 
 def jj_out(*args: str) -> str:
@@ -223,6 +240,8 @@ def main() -> None:
     ap.add_argument("--skip-build", action="store_true", help="reuse the built DMG")
     ap.add_argument("--no-windows", action="store_true", help="macOS only (don't wait for the installer)")
     ap.add_argument("--no-wait", action="store_true", help="don't wait for the Windows build")
+    ap.add_argument("--extra-notes", type=Path, default=None,
+                    help="markdown inserted after the preview banner (e.g. what to try)")
     args = ap.parse_args()
 
     version = args.version.removeprefix("v")
@@ -240,6 +259,14 @@ def main() -> None:
                 f"bumped files for {version} — commit, land and push them to main, "
                 "then re-run (the release must point at a pushed commit)"
             )
+    elif args.rev == "main" and roll_prerelease_changelog(version):
+        # Prereleases keep the pyproject version (the build is stamped with
+        # the rc version) but roll [Unreleased] into [X.Y.Z-rc.N] so the
+        # changelog records what each rc shipped.
+        sys.exit(
+            f"rolled CHANGELOG [Unreleased] -> [{version}] — land and push it to main, "
+            "then re-run"
+        )
     sha = commit_of(args.rev)
     if not working_copy_matches(args.rev):
         sys.exit(f"working copy differs from {args.rev} — `jj new {args.rev}` first "
@@ -258,7 +285,8 @@ def main() -> None:
         sys.exit(f"{sha[:12]} did not reach GitHub")
     pushed_at = time.time()
 
-    notes = release_notes(CHANGELOG.read_text(), INSTALL_DOC.read_text(), version)
+    extra = args.extra_notes.read_text() if args.extra_notes else ""
+    notes = release_notes(CHANGELOG.read_text(), INSTALL_DOC.read_text(), version, extra)
     with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False) as f:
         f.write(notes)
         notes_file = f.name
