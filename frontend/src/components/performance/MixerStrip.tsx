@@ -18,12 +18,14 @@ import { useMixer, useMixerValue } from '../../hooks/useMixer';
 import { useTakeoverHint } from '../../hooks/useTakeoverHint';
 import { takeoverKey, type TakeoverDirection } from '../../midi/takeoverFeedback';
 import { CHANNEL_IDS, CUE_MIX_DEFAULT } from '../../playback/mixer';
-import type { BeatFxTarget } from '../../playback/beatFx';
+import { beatFxLengthUnit, type BeatFxTarget } from '../../playback/beatFx';
 import { isQuantizeOn, setQuantize, subscribeQuantize } from '../../playback/quantizeStore';
 import type { ChannelId } from '../../playback/mixer';
 import { DiagonalPairLinks } from '../../links/PerformancePairLinks';
 import { AutoBlurSelect } from '../AutoBlurSelect';
+import { openKeyboardHelp } from '../keyboardHelpStore';
 import { PerfSectionToggles } from './PerfSectionToggles';
+import { PERFORMANCE_FX_KEYS, performanceFxTargetKey } from './performanceFxKeys';
 import type { DeckCount } from './waveformOrder';
 import {
   isSoftTakeoverEnabled,
@@ -360,6 +362,11 @@ function formatEchoBeats(beats: number): string {
   return String(beats);
 }
 
+/** On-control key hint (hidden with KBD off, like the deck hints). */
+function FxKbd({ k }: { k: string | null }) {
+  return k === null ? null : <kbd className="perf-kbd" aria-hidden="true">{k}</kbd>;
+}
+
 /** One CH SELECT radio target; LEDs on the GRV6 are hardware-controlled. */
 function BeatFxTargetToggle({ target, label }: { target: BeatFxTarget; label: string }) {
   const mixer = useMixer();
@@ -367,38 +374,45 @@ function BeatFxTargetToggle({ target, label }: { target: BeatFxTarget; label: st
   const deckClass = CHANNEL_IDS.includes(target as ChannelId)
     ? ` deck-${target.toLowerCase()}`
     : '';
+  const key = performanceFxTargetKey(target);
   return (
     <button
       className={`player-button perf-strip-toggle perf-fx-ch${deckClass}${selected ? ' on' : ''}`}
       aria-pressed={selected}
       aria-label={`Beat FX target ${label}`}
       onClick={() => mixer.selectBeatFxTarget(target)}
-      title={target === 'sampler' ? 'Sampler target (no sampler bus in manadj)' : `Beat FX target: ${label}`}
+      title={target === 'sampler'
+        ? 'Sampler target (no sampler bus in manadj)'
+        : `Beat FX target: ${label}${key ? ` (${key})` : ''}`}
     >
       {label}
+      <FxKbd k={key} />
     </button>
   );
 }
 
-/** One GRV6-shaped section: ON/OFF, SELECT, BEAT, single bipolar DEPTH,
- * then the mutually-exclusive A–D/SP/MST CH SELECT targets. */
+/** One GRV6-shaped section: ON/OFF, SELECT, BEAT ◄ ►, single bipolar
+ * DEPTH, then the mutually-exclusive A–D/MST CH SELECT targets. */
 function BeatFxRow({ deckCount }: { deckCount: DeckCount }) {
   const mixer = useMixer();
   const section = useMixerValue((m) => m.getBeatFxSection());
+  const flangerUnit = useMixerValue((m) => m.getBeatFxSettings().flangerLengthUnit);
+  const lengthUnit = beatFxLengthUnit(section.selected, flangerUnit);
   const depthTakeover = useTakeoverHint(takeoverKey.beatFxLevel());
   const channels = deckCount === 4 ? CHANNEL_IDS : (['A', 'B'] as const);
   return (
     <div className="perf-fx-row" role="group" aria-label="Beat FX">
       <div className="perf-fx-controls">
         <button
-          className={`player-button perf-strip-toggle${section.on ? ' on' : ''}`}
+          className={`player-button perf-strip-toggle perf-fx-on${section.on ? ' on' : ''}`}
           aria-label="Beat FX on/off"
           aria-pressed={section.on}
           disabled={section.selected === null}
           onClick={() => mixer.toggleBeatFxOn()}
-          title="Beat FX master on/off (GRV6 ON/OFF)"
+          title={`Beat FX master on/off (GRV6 ON/OFF) (${PERFORMANCE_FX_KEYS.toggle})`}
         >
           FX
+          <FxKbd k={PERFORMANCE_FX_KEYS.toggle} />
         </button>
         <AutoBlurSelect
           className="perf-fx-select"
@@ -415,23 +429,49 @@ function BeatFxRow({ deckCount }: { deckCount: DeckCount }) {
         <option value="reverb">RVB</option>
         <option value="flanger">FLG</option>
         </AutoBlurSelect>
-        <button
-          className="player-button perf-strip-toggle perf-fx-beats"
-          aria-label="Echo beats"
-          onClick={(e) => mixer.stepBeatFxBeats(e.shiftKey ? 'halve' : 'double')}
+        <div
+          className="perf-fx-size"
+          role="group"
+          aria-label="Beat FX length controls"
           onWheel={(e) => mixer.stepBeatFxBeats(e.deltaY < 0 ? 'double' : 'halve')}
-          title="Echo beat fraction (click = double, shift-click = halve, scroll works too)"
         >
-          {formatEchoBeats(section.beats)}
-        </button>
+          <button
+            className="player-button"
+            aria-label="Halve Beat FX length"
+            onClick={() => mixer.stepBeatFxBeats('halve')}
+            title={`Halve Beat FX length (${PERFORMANCE_FX_KEYS.beatHalve})`}
+          >
+            1/2
+            <FxKbd k={PERFORMANCE_FX_KEYS.beatHalve} />
+          </button>
+          <span
+            className={`perf-fx-beats${lengthUnit === 'bars' ? ' bars' : ''}`}
+            aria-label="Beat FX length"
+            data-unit={lengthUnit}
+            title={`Beat FX length in ${lengthUnit} (scroll to change)`}
+          >
+            {formatEchoBeats(section.beats)}
+            {lengthUnit === 'bars' && <span className="perf-fx-unit">BAR</span>}
+          </span>
+          <button
+            className="player-button"
+            aria-label="Double Beat FX length"
+            onClick={() => mixer.stepBeatFxBeats('double')}
+            title={`Double Beat FX length (${PERFORMANCE_FX_KEYS.beatDouble})`}
+          >
+            x2
+            <FxKbd k={PERFORMANCE_FX_KEYS.beatDouble} />
+          </button>
+        </div>
         <Knob
           label="DEPTH"
+          kbd={PERFORMANCE_FX_KEYS.depth}
           min={-1}
           max={1}
           defaultValue={0}
           value={section.depth}
           onChange={(value) => mixer.setBeatFxDepth(value)}
-          title="LEVEL/DEPTH: original ← 0 balance → effect"
+          title={`LEVEL/DEPTH: original ← 0 balance → effect (drag, scroll, double-click resets; hold ${PERFORMANCE_FX_KEYS.depth} + mouse)`}
           className="perf-knob-small perf-fx-depth"
           takeover={depthTakeover}
         />
@@ -492,13 +532,23 @@ export function MixerStrip({
           </span>
         )}
         {onToggleHints && (
-          <button
-            className={`player-button perf-strip-toggle${hintsOn ? ' on' : ''}`}
-            onClick={onToggleHints}
-            title={hintsOn ? 'Hide keyboard hints' : 'Show keyboard hints'}
-          >
-            KBD
-          </button>
+          <span className="perf-kbd-toggle-group">
+            <button
+              className={`player-button perf-strip-toggle${hintsOn ? ' on' : ''}`}
+              onClick={onToggleHints}
+              title={hintsOn ? 'Hide keyboard hints' : 'Show keyboard hints'}
+            >
+              KBD
+            </button>
+            <button
+              className="player-button perf-strip-toggle"
+              aria-label="Keyboard shortcuts"
+              onClick={openKeyboardHelp}
+              title="Show keyboard map (?)"
+            >
+              ?
+            </button>
+          </span>
         )}
         {/* Waveform/deck section toggles (perf-layout 12 / gh#68): the
             strip never hides, so they stay reachable when everything

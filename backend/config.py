@@ -1,23 +1,60 @@
 """Configuration management for manadj."""
 
 import os
+import sys
 import tomllib
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from backend.acquisition.classification import ClassificationConfig
 from backend.acquisition.cleanup import CleanupConfig
 from backend.data_root import dotenv_path, settings_file_path, stems_dir
+from backend.shipped_defaults import with_config_defaults
 
-# Where Rekordbox keeps its database on macOS; used when the settings file
-# does not pin a location (Settings shows the detected path as the default).
-REKORDBOX_DEFAULT_LOCATION = Path.home() / "Library" / "Pioneer" / "rekordbox"
+def rekordbox_default_location(
+    platform: str = sys.platform,
+    env: Mapping[str, str] = os.environ,
+    home: Path | None = None,
+) -> Path | None:
+    """Where Rekordbox keeps master.db on this OS (None: Rekordbox has no
+    build here, e.g. Linux)."""
+    home = home if home is not None else Path.home()
+    if platform == "darwin":
+        return home / "Library" / "Pioneer" / "rekordbox"
+    if platform == "win32":
+        appdata = env.get("APPDATA")
+        base = Path(appdata) if appdata else home / "AppData" / "Roaming"
+        return base / "Pioneer" / "rekordbox"
+    return None
+
+
+def engine_default_location(platform: str = sys.platform, home: Path | None = None) -> Path | None:
+    """Engine DJ's main Database2 (macOS + Windows: ~/Music/Engine Library;
+    no Linux build)."""
+    if platform not in ("darwin", "win32"):
+        return None
+    home = home if home is not None else Path.home()
+    return home / "Music" / "Engine Library" / "Database2"
+
+
+# Used when the settings file does not pin a location (Settings shows the
+# detected path as the default).
+REKORDBOX_DEFAULT_LOCATION = rekordbox_default_location()
+ENGINE_DEFAULT_LOCATION = engine_default_location()
 
 
 def detect_rekordbox_path() -> str | None:
     """Auto-detect the Rekordbox database folder (None if not installed)."""
-    return str(REKORDBOX_DEFAULT_LOCATION) if REKORDBOX_DEFAULT_LOCATION.is_dir() else None
+    loc = REKORDBOX_DEFAULT_LOCATION
+    return str(loc) if loc is not None and loc.is_dir() else None
+
+
+def detect_engine_path() -> str | None:
+    """Auto-detect Engine DJ's Database2 folder (None if not installed)."""
+    loc = ENGINE_DEFAULT_LOCATION
+    return str(loc) if loc is not None and loc.is_dir() else None
 
 
 @dataclass
@@ -25,8 +62,9 @@ class DatabaseConfig:
     """Database configuration."""
     engine_dj_path: str | None
     rekordbox_path: str | None
-    # True when rekordbox_path came from auto-detection, not the settings file.
+    # True when the path came from auto-detection, not the settings file.
     rekordbox_autodetected: bool = False
+    engine_autodetected: bool = False
 
 
 @dataclass
@@ -39,6 +77,9 @@ class LibraryConfig:
 class SoundCloudConfig:
     """SoundCloud Source configuration."""
     oauth_token: str | None = None
+    # where the token came from: secrets = the data root's .env (what the
+    # SoundCloud guide writes, #290); env = process environment only
+    token_source: Literal["secrets", "env", "config"] | None = None
 
 
 @dataclass
@@ -50,6 +91,9 @@ class SoulseekConfig:
     """
     slskd_url: str | None = None
     api_key: str | None = None
+    # True when the values point at manadj's own supervised slskd (#291)
+    # rather than a user-run daemon.
+    managed: bool = False
 
     @property
     def configured(self) -> bool:
@@ -63,11 +107,13 @@ class StemsConfig:
     directory: on-disk stem cache root (data/stems by default) — the first
     on-disk derived-artifact cache; filesystem is the source of truth.
     model: demucs model name (a knob — htdemucs_ft is a candidate upgrade).
-    device: torch device for the split subprocess (cpu fallback ~3.8x realtime).
+    device: torch device for the split subprocess. "auto" (default) lets
+    demucs pick cuda -> mps -> cpu (#308); cpu is ~3.8x realtime on Apple
+    Silicon (docs/research/stem-splitting-model-benchmark.md).
     """
     directory: str = ""
     model: str = "htdemucs"
-    device: str = "mps"
+    device: str = "auto"
 
     def __post_init__(self) -> None:
         if not self.directory:
@@ -115,7 +161,7 @@ def _load_dotenv() -> None:
     path = dotenv_path()
     if not path.exists():
         return
-    for line in path.read_text().splitlines():
+    for line in path.read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
@@ -161,18 +207,39 @@ def _stems_config(data: dict[str, Any]) -> StemsConfig:
 
 
 def _soulseek_config(data: dict[str, Any]) -> SoulseekConfig:
-    """[soulseek] slskd_url from config.toml; the API key from env/.env only."""
+    """[soulseek] slskd_url from config.toml; the API key from env/.env only.
+
+    Unset => fall back to the managed slskd (#291) when the Soulseek guide
+    stored credentials and the binary is shipped.
+    """
     section: dict[str, Any] = data.get("soulseek", {})
-    return SoulseekConfig(
+    external = SoulseekConfig(
         slskd_url=section.get("slskd_url") or None,
         api_key=os.environ.get("SLSKD_API_KEY") or None,
     )
+    if external.configured:
+        return external
+    from backend.soulseek.managed import get_store, resolve_binary
+
+    managed = get_store().load()
+    if managed is not None and resolve_binary() is not None:
+        return SoulseekConfig(slskd_url=managed.url, api_key=managed.api_key, managed=True)
+    return external
 
 
-def _soundcloud_token(data: dict[str, Any]) -> str | None:
-    """Token from the environment (or .env); config.toml fallback for convenience."""
+def _soundcloud_config(data: dict[str, Any]) -> SoundCloudConfig:
+    """SOUNDCLOUD_OAUTH_TOKEN (environment or the data root's .env — where
+    the SoundCloud guide stores it, #290), then [soundcloud] oauth_token."""
     section: dict[str, Any] = data.get("soundcloud", {})
-    return os.environ.get("SOUNDCLOUD_OAUTH_TOKEN") or section.get("oauth_token") or None
+    token = os.environ.get("SOUNDCLOUD_OAUTH_TOKEN")
+    if token:
+        from backend.settings_file import read_secrets
+
+        in_dotenv = read_secrets().get("SOUNDCLOUD_OAUTH_TOKEN") == token
+        return SoundCloudConfig(token, "secrets" if in_dotenv else "env")
+    if section.get("oauth_token"):
+        return SoundCloudConfig(section["oauth_token"], "config")
+    return SoundCloudConfig()
 
 
 def _tracks_directory_override() -> str | None:
@@ -187,23 +254,27 @@ def _tracks_directory_override() -> str | None:
 
 
 def _database_config(data: dict[str, Any]) -> DatabaseConfig:
-    """[database] paths; Rekordbox auto-detects when the file doesn't pin it.
+    """[database] paths; Rekordbox/Engine auto-detect when the file doesn't
+    pin them.
 
-    An explicit empty string disables Rekordbox (no auto-detect); a missing
-    key means "find it for me".
+    An explicit empty string disables that library (no auto-detect); a
+    missing key means "find it for me".
     """
     section: dict[str, Any] = data.get("database", {})
-    engine_path = section.get("engine_dj_path") or None
-    autodetected = False
-    if "rekordbox_path" in section:
-        rekordbox_path = section["rekordbox_path"] or None
-    else:
-        rekordbox_path = detect_rekordbox_path()
-        autodetected = rekordbox_path is not None
+
+    def resolve(key: str, detect) -> tuple[str | None, bool]:
+        if key in section:
+            return section[key] or None, False
+        found = detect()
+        return found, found is not None
+
+    rekordbox_path, rekordbox_auto = resolve("rekordbox_path", detect_rekordbox_path)
+    engine_path, engine_auto = resolve("engine_dj_path", detect_engine_path)
     return DatabaseConfig(
         engine_dj_path=engine_path,
         rekordbox_path=rekordbox_path,
-        rekordbox_autodetected=autodetected,
+        rekordbox_autodetected=rekordbox_auto,
+        engine_autodetected=engine_auto,
     )
 
 
@@ -225,6 +296,8 @@ def load_config() -> Config:
     if config_path.exists():
         with open(config_path, "rb") as f:
             data = tomllib.load(f)
+    # Shipped defaults (setup-guides #293) fill unset non-path keys.
+    data = with_config_defaults(data)
 
     lib_config = data.get("library", {})
     tracks_dir = _tracks_directory_override() or lib_config.get("tracks_directory") or None
@@ -234,7 +307,7 @@ def load_config() -> Config:
         library=LibraryConfig(
             tracks_directory=tracks_dir
         ),
-        soundcloud=SoundCloudConfig(oauth_token=_soundcloud_token(data)),
+        soundcloud=_soundcloud_config(data),
         soulseek=_soulseek_config(data),
         acquisition=AcquisitionConfig(
             classification=_classification_config(data),

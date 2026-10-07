@@ -1,0 +1,18 @@
+Ubuntu Mono Regular and Bold
+Copyright 2011 Canonical Ltd.
+Licensed under the Ubuntu Font Licence 1.0 (UFL.txt).
+
+Unmodified upstream TrueType files from the Google Fonts source repository;
+served locally, with no Google Fonts API or CDN requests.
+
+Pinned source directory:
+https://github.com/google/fonts/tree/81e687fb3c5344bb18a4bfc74897ee7bd1c05afa/ufl/ubuntumono
+
+Download URLs:
+https://raw.githubusercontent.com/google/fonts/81e687fb3c5344bb18a4bfc74897ee7bd1c05afa/ufl/ubuntumono/UbuntuMono-Regular.ttf
+https://raw.githubusercontent.com/google/fonts/81e687fb3c5344bb18a4bfc74897ee7bd1c05afa/ufl/ubuntumono/UbuntuMono-Bold.ttf
+https://raw.githubusercontent.com/google/fonts/81e687fb3c5344bb18a4bfc74897ee7bd1c05afa/ufl/ubuntumono/UFL.txt
+
+SHA-256:
+b35dd9d2131d5d83a9b87fe9ad22c6288fa3d17688d43302c14da29812417d63  UbuntuMono-Regular.ttf
+11f15c3a6bbd998a8695fdefb3475931c3789aa035d7546f2efe78e83b352f6b  UbuntuMono-Bold.ttf

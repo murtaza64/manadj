@@ -23,8 +23,7 @@ export type TourSectionId =
   | 'sync'
   | 'sets'
   | 'sessions'
-  | 'history'
-  | 'settings';
+  | 'history';
 
 interface TourProgress {
   seen: Partial<Record<TourSectionId, boolean>>;
@@ -106,7 +105,7 @@ export type TourArea = 'library' | 'performance' | 'edit' | 'sync' | 'history' |
 /** The Library's inner panes that are tour sections of their own. */
 export type LibrarySubview = 'sets' | 'sessions' | null;
 
-let baseArea: TourArea = 'library';
+let baseArea: TourArea = 'performance'; // fresh installs open in PERFORM (#301)
 let librarySubview: LibrarySubview = null;
 
 export function setTourArea(area: TourArea): void {
@@ -121,8 +120,10 @@ export function setLibrarySubview(subview: LibrarySubview): void {
   notify();
 }
 
-/** The section whose tour should fire for the current screen. */
-export function activeTourSection(): TourSectionId {
+/** The section whose tour should fire for the current screen; null where
+ * no tour runs (Settings has none — #324). */
+export function activeTourSection(): TourSectionId | null {
+  if (baseArea === 'settings') return null;
   if (baseArea === 'library' && librarySubview) return librarySubview;
   return baseArea;
 }
@@ -147,7 +148,7 @@ export function consumeTourRequest(): void {
 
 export function _resetTourStoresForTests(): void {
   progress = readProgress();
-  baseArea = 'library';
+  baseArea = 'performance';
   librarySubview = null;
   requested = null;
 }

@@ -126,6 +126,8 @@ function useRoutinePinReplay(entries: SetEntryLocal[] | undefined): {
         startEntryIndex: p.startEntryIndex,
         routine: {
           cast: d.cast,
+          slotIds: d.slot_ids ?? undefined,
+          authored: d.authored ?? false,
           entryOffsetsBeats: d.entry_offsets_beats,
           entryPositions: d.entry_positions,
           durationBeats: d.duration_beats,
