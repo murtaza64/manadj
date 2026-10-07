@@ -376,7 +376,7 @@ export default function SettingsPage({ performance = false }: { performance?: bo
         </p>
       </header>
       <div className="settings-layout">
-        <nav className="settings-nav" data-tour="settings.nav" aria-label="Settings sections">
+        <nav className="settings-nav" aria-label="Settings sections">
           {SECTIONS.map((s) => (
             <button
               key={s.id}
@@ -396,7 +396,6 @@ export default function SettingsPage({ performance = false }: { performance?: bo
         </nav>
         <section
           className="settings-content"
-          data-tour="settings.content"
           aria-label={SECTIONS.find((s) => s.id === section)!.title}
         >
           <Suspense fallback={<p role="status">Loading settings...</p>}>
