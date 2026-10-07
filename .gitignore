@@ -16,3 +16,6 @@ tmp/
 
 # backend rotating log (packaged-app #278)
 logs/
+
+# slskd binary fetched by scripts/slskd/fetch_slskd.py
+vendor/

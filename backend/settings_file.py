@@ -85,3 +85,52 @@ def update_settings_file(changes: dict[str, Any]) -> None:
     path = settings_file_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(tomlkit.dumps(doc))
+
+
+def update_secrets(changes: dict[str, str | None]) -> None:
+    """Set (str) or remove (None) KEY=VALUE lines in the data root's .env.
+
+    The secrets counterpart of `update_settings_file` (setup guides #290/#291
+    store tokens/credentials here): other lines and comments pass through,
+    the file is written atomically with mode 0600, and the process
+    environment is updated to match (load_config only setdefault()s from
+    .env, so a removal must also leave os.environ).
+    """
+    import os
+
+    from backend.data_root import dotenv_path
+
+    path = dotenv_path()
+    lines = path.read_text().splitlines() if path.exists() else []
+    out: list[str] = []
+    written: set[str] = set()
+    for line in lines:
+        stripped = line.strip()
+        key = stripped.partition("=")[0].strip() if "=" in stripped and not stripped.startswith("#") else None
+        if key is not None and key in changes:
+            value = changes[key]
+            if value is not None and key not in written:
+                out.append(f"{key}={_dotenv_value(value)}")
+                written.add(key)
+            continue
+        out.append(line)
+    for key, value in changes.items():
+        if value is not None and key not in written:
+            out.append(f"{key}={_dotenv_value(value)}")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text("\n".join(out) + "\n" if out else "")
+    tmp.chmod(0o600)
+    tmp.replace(path)
+    for key, value in changes.items():
+        if value is None:
+            os.environ.pop(key, None)
+        else:
+            os.environ[key] = value
+
+
+def _dotenv_value(value: str) -> str:
+    if "\n" in value or "\r" in value:
+        raise ValueError("secret values must be single-line")
+    # load_config strips surrounding quotes; quote anything with spaces/#.
+    return f'"{value}"' if any(c in value for c in " #'\"=") else value
