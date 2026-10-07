@@ -87,9 +87,29 @@ it('retains overflow mode selection and navigation while Settings is open', () =
   expect(overflow.classList.contains('active')).toBe(true);
   expect(overflow.textContent).toContain('HISTORY');
   act(() => overflow.click());
-  act(() => host.querySelector<HTMLButtonElement>('[role="menuitem"]')!.click());
+  const history = [...host.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(b => b.textContent!.includes('HISTORY'))!;
+  act(() => history.click());
   expect(onModeChange).toHaveBeenCalledWith('history');
   expect(onSettingsToggle).not.toHaveBeenCalled();
+});
+
+it('primary segments are PERFORM / EDIT / SYNC; EXPORT lives in the overflow next to HISTORY (#301)', () => {
+  render(false);
+  const labels = [...host.querySelectorAll('nav > .topbar-segment:not(.topbar-segment-overflow) .topbar-segment-label')].map(n => n.textContent);
+  expect(labels).toEqual(['PERFORM', 'EDIT', 'SYNC', 'SETTINGS']);
+  const overflow = host.querySelector<HTMLButtonElement>('.topbar-segment-overflow')!;
+  act(() => overflow.click());
+  const items = [...host.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')];
+  expect(items.map(b => b.querySelector('.topbar-segment-label')!.textContent)).toEqual(['EXPORT', 'HISTORY']);
+  act(() => items[0].click());
+  expect(onModeChange).toHaveBeenCalledWith('library');
+});
+
+it('wears EXPORT on the overflow trigger while the library mode is active', () => {
+  render(false, 'library');
+  const overflow = host.querySelector<HTMLButtonElement>('.topbar-segment-overflow')!;
+  expect(overflow.classList.contains('active')).toBe(true);
+  expect(overflow.textContent).toContain('EXPORT');
 });
 
 function key(options: KeyboardEventInit = {}, target: EventTarget = document.body, type = 'keydown') {

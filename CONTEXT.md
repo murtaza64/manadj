@@ -548,7 +548,7 @@ A track field (title, artist, key, BPM, energy, Tag assignment, Hot Cues, Beatgr
 _Avoid_: discrepancy (implementation term)
 
 **Match**:
-The association between a Track and its counterpart in an external library, established during a Sync operation by file path, falling back to filename. Recomputed each run; not persisted.
+The association between a Track and its counterpart in an external library, established during a Sync operation by file path, falling back to filename. Paths compare by identity, not spelling: `/` and `\` separators are equal, Unicode is NFC-normalized, and on Windows case is ignored. Recomputed each run; not persisted.
 
 **Sync inbox**:
 The default unified-sync presentation: every attention-worthy track appears exactly once, in the highest-priority section that applies. Answers "what should I deal with, in what order" — a triage view, not a query.

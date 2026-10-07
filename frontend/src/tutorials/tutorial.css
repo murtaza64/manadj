@@ -1,0 +1,25 @@
+.tutorial-panel {
+  position: fixed;
+  right: var(--space-12);
+  bottom: var(--space-12);
+  width: min(360px, calc(100vw - 24px));
+  max-height: 45vh;
+  overflow: auto;
+  z-index: var(--z-overlay);
+  background: var(--crust);
+  color: var(--text);
+  border: 1px solid var(--accent);
+  padding: var(--space-12);
+  font-size: var(--font-body);
+}
+.tutorial-panel header { display: flex; align-items: center; justify-content: space-between; gap: var(--space-8); font-size: var(--font-small); }
+.tutorial-panel h2 { font-size: var(--font-title); margin: var(--space-8) 0; }
+.tutorial-panel p { line-height: 1.4; margin: var(--space-8) 0; }
+.tutorial-panel kbd { display: inline-block; border: 1px solid var(--accent); color: var(--accent); padding: var(--space-4) var(--space-8); font: inherit; font-weight: 700; }
+.tutorial-progress, .tutorial-wait { color: var(--subtext0); font-size: var(--font-small); }
+.tutorial-progress { margin-top: var(--space-12); }
+.tutorial-feedback { color: var(--success); margin-top: var(--space-8); font-size: var(--font-small); }
+.tutorial-target { outline: 2px solid var(--accent) !important; outline-offset: -2px; }
+.tutorial-settings-row { display: flex; align-items: center; gap: var(--space-12); margin: var(--space-12) 0; }
+.tutorial-left { right: auto; left: var(--space-12); }
+.tutorial-error { color: var(--danger); }
