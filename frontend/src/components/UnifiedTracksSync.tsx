@@ -621,7 +621,7 @@ export function UnifiedTracksSync() {
   );
 
   return (
-    <div className="uts-root">
+    <div className="uts-root" data-tour="sync.tracks">
       <div className="uts-chipbar">
         {GROUPS.map((g) => (
           <button
