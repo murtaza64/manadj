@@ -73,6 +73,11 @@ interface TrackListProps {
   sortColumn: SortColumn | null;
   sortDirection: 'asc' | 'desc';
   onSort: (column: SortColumn) => void;
+  /** Empty-state guidance (feature-tour #283): shown as a message row when
+   * the table has zero rows (loaded, no error). The caller owns the copy —
+   * an empty Library reads differently from an empty playlist or a filter
+   * with no hits. Absent = headers over an empty body (legacy). */
+  emptyMessage?: ReactNode;
 }
 
 export default function TrackList({
@@ -99,7 +104,8 @@ export default function TrackList({
   matchSignalsFor,
   sortColumn,
   sortDirection,
-  onSort
+  onSort,
+  emptyMessage
 }: TrackListProps) {
   // Live deck occupancy (across A–D) → per-row loaded identity mark,
   // mirroring the Set view's wash (sets 35). Memoized on engine slices,
@@ -253,6 +259,12 @@ export default function TrackList({
             <tr>
               <td colSpan={colSpan} className="track-table-message track-table-error">
                 Error loading tracks
+              </td>
+            </tr>
+          ) : rows.length === 0 && emptyMessage !== undefined ? (
+            <tr>
+              <td colSpan={colSpan} className="track-table-message track-table-empty">
+                {emptyMessage}
               </td>
             </tr>
           ) : (

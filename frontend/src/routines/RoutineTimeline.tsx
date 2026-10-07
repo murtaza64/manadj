@@ -71,6 +71,7 @@ import type { RoutineDraftStore } from './routineDraftStore';
 import type { AuthoredJump, AuthoredPause, RoutineEdits } from './routineDraft';
 import { traceDrawRuns, type BeatRun } from './routineWaveRuns';
 import { createWaveformViewport } from './waveformViewport';
+import { isTrackDrag, readTrackDragPayload } from '../selection/trackDrag';
 import type { EditorMode } from './editorMode';
 import {
   buildGlobalLadder,
@@ -185,8 +186,20 @@ export function RoutineTimeline({
   mode,
   onModeHome,
   pairMode = false,
+  authored = false,
+  onDropTracks,
+  onRemoveSlot,
 }: {
   editor: EditorRoutine;
+  /** An AUTHORED mix is open (ADR 0039, gh#325): entries are structure,
+   * not recorded — no "edited vs recorded" entry badge. */
+  authored?: boolean;
+  /** Drag-to-add (ADR 0039): library tracks dropped on the timeline land
+   * as new slots at the drop beat (`fine` = shift held: no bar snap).
+   * Absent = not a drop target (promoted/pair artifacts). */
+  onDropTracks?: (trackIds: number[], beat: number, fine: boolean) => void;
+  /** Remove an authored slot (✕ in the slot panel). Absent = no control. */
+  onRemoveSlot?: (slotId: string) => void;
   /** A PAIR artifact is open (#205/#221 authoring gates): edits with no
    * Transition-side field — pauses, the trim knob, entry-offset reorder —
    * are disabled rather than audition-only-then-silently-dropped. */
@@ -1615,7 +1628,20 @@ export function RoutineTimeline({
             {slot.slot === planned.slots.length - 1 && (
               <span className="rt-boundary-tag">exits with</span>
             )}
-            {edits.entryOffsets[slot.slotId] !== undefined && (
+            {onRemoveSlot && (
+              <button
+                className="rt-slotremove"
+                title="Remove this slot and its edits (undo restores it)"
+                aria-label={`Remove slot ${slot.slot}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onRemoveSlot(slot.slotId);
+                }}
+              >
+                ✕
+              </button>
+            )}
+            {!authored && edits.entryOffsets[slot.slotId] !== undefined && (
               <button
                 className="rt-entrybadge"
                 title={`Entry offset edited: recorded ${(
@@ -1743,10 +1769,51 @@ export function RoutineTimeline({
         </div>
       </div>
     );
-  }), [planned, tracks, edits, pairMode, draftStore, bakedEntryBySlotId, duration, lanesFor, toggleLane]);
+  }), [planned, tracks, edits, pairMode, draftStore, bakedEntryBySlotId, duration, lanesFor, toggleLane, authored, onRemoveSlot]);
+
+  // ── Drag-to-add (ADR 0039, gh#325) ───────────────────────────────────
+  const [dropBeat, setDropBeat] = useState<number | null>(null);
+  const dropBeatAt = (clientX: number, fine: boolean): number | null => {
+    const el = containerRef.current;
+    const { pxPerBeat: px, scrollBeat: sb } = viewRef.current;
+    if (!el || px <= 0) return null;
+    const beat = sb + (clientX - el.getBoundingClientRect().left) / px;
+    return fine ? beat : Math.round(beat / 4) * 4;
+  };
+  useEffect(() => {
+    if (dropBeat === null) return;
+    const clear = () => setDropBeat(null);
+    window.addEventListener('dragend', clear);
+    window.addEventListener('drop', clear);
+    return () => {
+      window.removeEventListener('dragend', clear);
+      window.removeEventListener('drop', clear);
+    };
+  }, [dropBeat]);
+  const dropHandlers = onDropTracks
+    ? {
+        onDragOver: (e: React.DragEvent) => {
+          if (!isTrackDrag(e.dataTransfer)) return;
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'copy';
+          setDropBeat(dropBeatAt(e.clientX, e.shiftKey));
+        },
+        onDragLeave: (e: React.DragEvent) => {
+          if (!(e.currentTarget as HTMLElement).contains(e.relatedTarget as Node | null)) setDropBeat(null);
+        },
+        onDrop: (e: React.DragEvent) => {
+          if (!isTrackDrag(e.dataTransfer)) return;
+          e.preventDefault();
+          const ids = readTrackDragPayload(e.dataTransfer);
+          const beat = dropBeatAt(e.clientX, e.shiftKey);
+          setDropBeat(null);
+          if (ids.length > 0 && beat !== null) onDropTracks(ids, beat, e.shiftKey);
+        },
+      }
+    : {};
 
   return (
-    <div className="rt-timeline" ref={containerRef} data-mode={mode}>
+    <div className="rt-timeline" ref={containerRef} data-mode={mode} {...dropHandlers}>
       <div className="rt-toolbar-float">
         <button className="rt-fit" title="Fit the window" onClick={fit}>
           fit
@@ -2154,6 +2221,11 @@ export function RoutineTimeline({
             );
           })}
         <div className="rt-playhead" ref={playheadRef} />
+        {dropBeat !== null && (
+          <div className="rt-dropline" style={{ transform: `translateX(${xOf(dropBeat)}px)` }}>
+            <span className="rt-droplabel">+ slot @ {Math.round(dropBeat * 10) / 10}b</span>
+          </div>
+        )}
       </div>
     </div>
   );

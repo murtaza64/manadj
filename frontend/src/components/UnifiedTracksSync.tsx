@@ -20,6 +20,7 @@ import {
   type PerfDiffSides,
 } from './PerfDiffViewer';
 import { CUE_TIME_TOLERANCE_S } from '../utils/perfDiffOverlay';
+import { useExportEnabled } from '../settings/useAppConfig';
 import './UnifiedTracksSync.css';
 
 // ------------------------------------------------------------------- types
@@ -155,6 +156,9 @@ async function fetchStatus(): Promise<StatusResponse> {
 export function UnifiedTracksSync() {
   const queryClient = useQueryClient();
   const { data, isLoading, error, isFetching } = useQuery({ queryKey: ['sync-status'], queryFn: fetchStatus });
+  // Export gate (ADR 0043): Rekordbox/Engine WRITE verbs hide until the
+  // Settings → Library toggle is on. Imports are never gated.
+  const exportEnabled = useExportEnabled();
 
   const [filter, setFilter] = useState<GroupKey | null>(null);
   const [showInSync, setShowInSync] = useState(false);
@@ -399,6 +403,7 @@ export function UnifiedTracksSync() {
   const chipRows = (key: GroupKey) => attention.filter((r) => chipMatches(r, key));
 
   const groupActions = (key: GroupKey, list: StatusRow[], selectedHere: StatusRow[]) => {
+    if (key === 'div-tags' && !exportEnabled) return null;
     if (key === 'div-tags') {
       // energy rides with tags: the tag exports also write energy (Rekordbox
       // colors, Engine star ratings), so energy-only divergences must still
@@ -437,6 +442,7 @@ export function UnifiedTracksSync() {
         </span>
       );
     }
+    if (key === 'missing-downstream' && !exportEnabled) return null;
     if (key === 'missing-downstream') {
       const missingRb = list.filter((r) => !r.presence.rekordbox).length;
       const missingEngine = list.filter((r) => !r.presence.engine).length;
@@ -514,14 +520,16 @@ export function UnifiedTracksSync() {
           </button>
           {/* auto tier (issue 08): additive only — new cues + absent keys;
               never touches existing RB values, so no confirmation */}
-          <button
-            className="uts-btn"
-            onClick={() =>
-              autoExportRb.mutate(list.map((r) => r.track_id!).filter((id) => id !== null))
-            }
-          >
-            Export new performance data → Rekordbox
-          </button>
+          {exportEnabled && (
+            <button
+              className="uts-btn"
+              onClick={() =>
+                autoExportRb.mutate(list.map((r) => r.track_id!).filter((id) => id !== null))
+              }
+            >
+              Export new performance data → Rekordbox
+            </button>
+          )}
         </span>
       );
     }
@@ -613,7 +621,7 @@ export function UnifiedTracksSync() {
   );
 
   return (
-    <div className="uts-root">
+    <div className="uts-root" data-tour="sync.tracks">
       <div className="uts-chipbar">
         {GROUPS.map((g) => (
           <button
@@ -755,18 +763,20 @@ export function UnifiedTracksSync() {
         >
           Import performance data ← Engine (whole library)
         </button>
-        <button
-          className="uts-btn uts-btn-ghost"
-          onClick={() =>
-            setPending({
-              scope: 'Rebuild the Engine "manaDJ Tags" playlist tree from scratch',
-              sideEffects: 'deletes and recreates the tag playlists in the Engine DJ database',
-              run: () => rebuildTagTree.mutate(),
-            })
-          }
-        >
-          Rebuild Engine tag tree
-        </button>
+        {exportEnabled && (
+          <button
+            className="uts-btn uts-btn-ghost"
+            onClick={() =>
+              setPending({
+                scope: 'Rebuild the Engine "manaDJ Tags" playlist tree from scratch',
+                sideEffects: 'deletes and recreates the tag playlists in the Engine DJ database',
+                run: () => rebuildTagTree.mutate(),
+              })
+            }
+          >
+            Rebuild Engine tag tree
+          </button>
+        )}
       </div>
     </div>
   );
@@ -1039,6 +1049,8 @@ function DivergenceMatrix({ row, onImportField, onImportPerf, onExportKeyToRb, o
   onExportHotcuesToRb: (mode: 'add-only' | 'replace-all') => void;
   onExportGridToRb: () => void;
 }) {
+  // Export gate (ADR 0043): per-cell "→ Rekordbox" verbs hide until enabled.
+  const exportEnabled = useExportEnabled();
   return (
     <table className="uts-matrix">
       <thead>
@@ -1088,7 +1100,7 @@ function DivergenceMatrix({ row, onImportField, onImportPerf, onExportKeyToRb, o
                 const lib = d.library_value as HotCueVal[];
                 const here = v as HotCueVal[];
                 const importable = row.track_id !== null && s.id === 'engine' && d.importable_from.includes(s.id); // perf import verbs call the Engine endpoints — never offer them on other surfaces
-                const rbExportable = row.track_id !== null && s.id === 'rekordbox' && lib.length > 0;
+                const rbExportable = exportEnabled && row.track_id !== null && s.id === 'rekordbox' && lib.length > 0;
                 return (
                   <td key={s.id} className="uts-conflict">
                     <HotCueDiff library={lib} here={here} />
@@ -1113,7 +1125,7 @@ function DivergenceMatrix({ row, onImportField, onImportPerf, onExportKeyToRb, o
                 const grid = v as BeatgridVal;
                 const importable = row.track_id !== null && s.id === 'engine' && d.importable_from.includes(s.id); // perf import verbs call the Engine endpoints — never offer them on other surfaces
                 const hasSaved = d.library_value !== null && d.library_value !== undefined;
-                const rbGridExportable = row.track_id !== null && s.id === 'rekordbox' && hasSaved;
+                const rbGridExportable = exportEnabled && row.track_id !== null && s.id === 'rekordbox' && hasSaved;
                 return (
                   <td key={s.id} className="uts-conflict">
                     <GridSummary grid={grid} />
@@ -1149,6 +1161,7 @@ function DivergenceMatrix({ row, onImportField, onImportPerf, onExportKeyToRb, o
                 );
               }
               const canExportKey =
+                exportEnabled &&
                 d.field === 'key' &&
                 s.id === 'rekordbox' &&
                 row.track_id !== null &&

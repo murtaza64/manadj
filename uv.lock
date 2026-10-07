@@ -564,11 +564,13 @@ dependencies = [
     { name = "mutagen" },
     { name = "numpy" },
     { name = "pillow" },
+    { name = "psutil" },
     { name = "pyrekordbox" },
     { name = "requests" },
     { name = "scipy" },
     { name = "soundfile" },
     { name = "sqlalchemy" },
+    { name = "tomlkit" },
     { name = "torchaudio" },
     { name = "types-requests" },
     { name = "uvicorn" },
@@ -607,6 +609,7 @@ requires-dist = [
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.7.0" },
     { name = "numpy", specifier = ">=2.3.5" },
     { name = "pillow", specifier = ">=12.0.0" },
+    { name = "psutil", specifier = ">=7.1.3" },
     { name = "pyrekordbox", specifier = ">=0.4.4" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=9.0.1" },
     { name = "requests", specifier = ">=2.32.5" },
@@ -614,6 +617,7 @@ requires-dist = [
     { name = "scipy", specifier = ">=1.16.3" },
     { name = "soundfile", specifier = ">=0.13.1" },
     { name = "sqlalchemy", specifier = ">=2.0.0,<3.0.0" },
+    { name = "tomlkit", specifier = ">=0.15.1" },
     { name = "torchaudio", specifier = "==2.9.1" },
     { name = "types-requests", specifier = ">=2.33.0.20260518" },
     { name = "types-yt-dlp", marker = "extra == 'dev'", specifier = ">=2026.3.17.20260605" },
@@ -1581,6 +1585,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/83/d3/803453b36afefb7c2bb238361cd4ae6125a569b4db67cd9e79846ba2d68c/sympy-1.14.0.tar.gz", hash = "sha256:d3d3fe8df1e5a0b42f0e7bdf50541697dbe7d23746e894990c030e2b05e72517", size = 7793921, upload-time = "2025-04-27T18:05:01.611Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/a2/09/77d55d46fd61b4a135c444fc97158ef34a095e5681d0a6c10b75bf356191/sympy-1.14.0-py3-none-any.whl", hash = "sha256:e091cc3e99d2141a0ba2847328f5479b05d94a6635cb96148ccb3f34671bd8f5", size = 6299353, upload-time = "2025-04-27T18:04:59.103Z" },
+]
+
+[[package]]
+name = "tomlkit"
+version = "0.15.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/94/96/e07752635b98536177fa1f37671c8f3cdde2e724c6bcf6034b2cfb571565/tomlkit-0.15.1.tar.gz", hash = "sha256:e25bbf38843005246210a12982776f27f99cb9be67160e14434d0c0d21ee1e97", size = 180129, upload-time = "2026-07-17T01:48:04.562Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/13/bc/8c13eb66537dce1d2bd3a57132902f38d0e7f5bb46fa9f4daed9fe9d76ee/tomlkit-0.15.1-py3-none-any.whl", hash = "sha256:177a05aece5a8ca5266fd3c448abb47b8d352f09d477d3ca8332db4d89b24304", size = 49449, upload-time = "2026-07-17T01:48:05.728Z" },
 ]
 
 [[package]]

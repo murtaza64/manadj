@@ -383,7 +383,7 @@ def main() -> None:
     icns = build_icns()
     app = assemble_app(python_runtime, ffmpeg_dir, icns, version)
     smoke_check(app)
-    dmg = build_dmg(app, version)
+    build_dmg(app, version)
     if args.launch:
         run(["open", app])
 

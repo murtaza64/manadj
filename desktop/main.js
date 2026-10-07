@@ -275,6 +275,9 @@ const CHANNEL_LABEL_ASSERTS = [{ name: "DDJ-GRV6", labels: "1,2,5,6" }];
 
 function assertChannelLabels() {
   if (process.platform !== "darwin") return;
+  // Dev-machine assumption (packaged-app #278): compiling the helper needs a
+  // Swift toolchain on PATH — never expected on an end user's Mac.
+  if (app.isPackaged) return;
   const helper = path.join(__dirname, "assert-channel-labels.swift");
   for (const { name, labels } of CHANNEL_LABEL_ASSERTS) {
     execFile("swift", [helper, name, labels], (err, stdout, stderr) => {
@@ -477,6 +480,21 @@ function registerVisualizerIpc() {
   });
 }
 
+// Settings → Library folder pickers (packaged-app #277): the web app cannot
+// open a native directory dialog, so the shell brokers one over IPC.
+function registerSettingsIpc() {
+  ipcMain.handle("settings:pick-folder", async (event, options) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    const result = await dialog.showOpenDialog(win, {
+      title: options?.title || "Choose a folder",
+      defaultPath: options?.defaultPath || undefined,
+      properties: ["openDirectory", "createDirectory"],
+    });
+    if (result.canceled || result.filePaths.length === 0) return null;
+    return result.filePaths[0];
+  });
+}
+
 function createWindow() {
   const win = new BrowserWindow({
     ...loadBounds(),
@@ -606,6 +624,7 @@ app.whenReady().then(() => {
   const disposeRecordingIpc = registerRecordingIpc({ app, dialog, ipcMain });
   app.once("before-quit", disposeRecordingIpc);
   registerVisualizerIpc();
+  registerSettingsIpc();
   createWindow();
 });
 
