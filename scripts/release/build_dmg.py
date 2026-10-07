@@ -3,7 +3,7 @@
 # requires-python = ">=3.12"
 # dependencies = []
 # ///
-"""Build (and optionally upload) the manaDJ DMG (packaged-app #280, ADR 0043).
+"""Build the manaDJ DMG (packaged-app #280, ADR 0043).
 
 Assembles a self-contained Apple Silicon app around the attach/managed
 desktop shell (desktop/main.js — managed mode, #279):
@@ -34,8 +34,9 @@ pipeline dependency-free and the signing story trivial.
 Usage:
   uv run scripts/release/build_dmg.py                 # build the DMG
   uv run scripts/release/build_dmg.py --launch        # build, then open the app
-  uv run scripts/release/build_dmg.py --upload        # build + GitHub release
   uv run scripts/release/build_dmg.py --fresh         # drop build/release caches
+
+Publishing is scripts/release/release.py (which calls this).
 
 Caches live in build/release/ (gitignored): the python runtime (rebuilt when
 the exported requirements change), downloaded ffmpeg, and the icon survive
@@ -83,6 +84,15 @@ SHELL_FILES = [
 ]
 
 
+def pyproject_version() -> str:
+    import re
+
+    m = re.search(r'^version\s*=\s*"([^"]+)"', (ROOT / "pyproject.toml").read_text(), re.M)
+    if not m:
+        sys.exit("no version in pyproject.toml")
+    return m.group(1)
+
+
 def run(cmd: list[str], **kwargs) -> subprocess.CompletedProcess:
     print(f"  $ {' '.join(str(c) for c in cmd)}")
     return subprocess.run([str(c) for c in cmd], check=True, **kwargs)
@@ -95,15 +105,15 @@ def step(name: str) -> None:
 # --- frontend -------------------------------------------------------------------
 
 
-def build_frontend() -> None:
+def build_frontend(version: str) -> None:
     step("frontend build (no VITE_API_URL -> same-origin API, #279)")
+    import os
+
     fe = ROOT / "frontend"
     if not (fe / "node_modules" / ".package-lock.json").exists():
         run(["npm", "install", "--no-audit", "--no-fund"], cwd=fe)
-    env_hole = {"VITE_API_URL": ""}  # belt & braces: never bake a URL
-    import os
-
-    env = {**os.environ, **env_hole}
+    # Never bake an API URL; stamp the (possibly prerelease) version (#298).
+    env = {**os.environ, "VITE_API_URL": "", "MANADJ_APP_VERSION": version}
     run(["npm", "run", "build"], cwd=fe, env=env)
 
 
@@ -276,6 +286,9 @@ def assemble_app(python_runtime: Path, ffmpeg_dir: Path, icns: Path, version: st
     app_dir.mkdir()
     for name in SHELL_FILES:
         shutil.copy2(ROOT / "desktop" / name, app_dir / name)
+    pkg = json.loads((app_dir / "package.json").read_text())
+    pkg["version"] = version  # app.getVersion() matches the build (#298)
+    (app_dir / "package.json").write_text(json.dumps(pkg, indent=2) + "\n")
 
     # Repo-shaped backend tree (MANADJ_BACKEND_ROOT default — desktop/backend.js).
     backend_root = resources / "backend"
@@ -348,43 +361,23 @@ def build_dmg(app: Path, version: str) -> Path:
     return dmg
 
 
-# --- release --------------------------------------------------------------------
-
-
-def upload(dmg: Path, version: str) -> None:
-    step(f"GitHub release v{version}")
-    tag = f"v{version}"
-    exists = subprocess.run(
-        ["gh", "release", "view", tag, "--repo", "murtaza64/manadj"],
-        capture_output=True,
-    ).returncode == 0
-    if not exists:
-        run(["gh", "release", "create", tag, "--repo", "murtaza64/manadj",
-             "--title", f"{APP_NAME} {tag}", "--notes",
-             f"{APP_NAME} {tag} — Apple Silicon DMG (unnotarized: right-click -> Open once)."])
-    run(["gh", "release", "upload", tag, dmg, "--repo", "murtaza64/manadj", "--clobber"])
-
-
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--version", default=None, help="default: desktop/package.json")
+    ap.add_argument("--version", default=None, help="default: pyproject.toml (single source, #298)")
     ap.add_argument("--fresh", action="store_true", help="drop build/release caches first")
     ap.add_argument("--launch", action="store_true", help="open the built app")
-    ap.add_argument("--upload", action="store_true", help="upload to GitHub Releases")
     args = ap.parse_args()
 
     if platform.system() != "Darwin" or platform.machine() != "arm64":
         sys.exit("this build targets Apple Silicon macOS and must run on it")
 
-    version = args.version or json.loads(
-        (ROOT / "desktop" / "package.json").read_text()
-    )["version"]
+    version = args.version or pyproject_version()
 
     if args.fresh and BUILD.exists():
         shutil.rmtree(BUILD)
     BUILD.mkdir(parents=True, exist_ok=True)
 
-    build_frontend()
+    build_frontend(version)
     python_runtime = build_python_runtime()
     ffmpeg_dir = fetch_ffmpeg()
     icns = build_icns()
@@ -393,8 +386,6 @@ def main() -> None:
     dmg = build_dmg(app, version)
     if args.launch:
         run(["open", app])
-    if args.upload:
-        upload(dmg, version)
 
 
 if __name__ == "__main__":
