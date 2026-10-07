@@ -15,6 +15,7 @@ import { act } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { PerfSectionToggles } from './PerfSectionToggles';
 import { setPerfSectionShown } from '../../performance/perfSectionsStore';
+import { getCueMode, setCueMode } from '../../playback/cueModeStore';
 import { PerformanceView } from './PerformanceView';
 
 declare global {
@@ -98,6 +99,7 @@ afterEach(() => {
   act(() => {
     setPerfSectionShown('waveforms', true);
     setPerfSectionShown('decks', true);
+    setCueMode('gated');
   });
   localStorage.clear();
 });
@@ -169,5 +171,26 @@ describe('performance section toggles', () => {
     expect(display(host.querySelector('.perf-waves'))).toBe('none');
     expect(display(host.querySelector('.perf-decks'))).toBe('none');
     expect(host.querySelector('.stub-mixer')).not.toBeNull();
+  });
+});
+
+describe('cue mode toggle (#289)', () => {
+  it('GATED is lit in Gated, unlit in Trigger; click flips; label fixed', () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true })));
+    const host = mount();
+    const btn = host.querySelector<HTMLButtonElement>('.perf-cue-mode-toggle')!;
+    expect(btn.textContent).toBe('GATED');
+    expect(btn.classList.contains('on')).toBe(true);
+    expect(btn.getAttribute('aria-pressed')).toBe('true');
+    act(() => btn.click());
+    expect(getCueMode()).toBe('trigger');
+    expect(btn.textContent).toBe('GATED');
+    expect(btn.classList.contains('on')).toBe(false);
+    expect(btn.getAttribute('aria-pressed')).toBe('false');
+    expect(localStorage.getItem('manadj-cue-mode')).toBe('trigger');
+    act(() => btn.click());
+    expect(getCueMode()).toBe('gated');
+    expect(btn.classList.contains('on')).toBe(true);
+    vi.unstubAllGlobals();
   });
 });

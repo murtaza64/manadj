@@ -56,6 +56,7 @@ export const PERSISTED_SETTING_KEYS: readonly string[] = [
   'manadj-audio-routing',
   'manadj-keylock',
   'manadj-quantize',
+  'manadj-cue-mode',
   'manadj-crossfader-assignments',
   'manadj-crossfader-enabled',
   'manadj-filter-settings',
@@ -65,6 +66,8 @@ export const PERSISTED_SETTING_KEYS: readonly string[] = [
   // Coach-mark tour progress (feature-tour #282)
   'manadj-tour-state',
   'manadj-tutorial-state',
+  // Setup guides (guide status: done / skipped)
+  'manadj-setup-state',
 ];
 
 // Dynamic-key families (key = prefix + id), also preferences.

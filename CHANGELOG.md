@@ -5,6 +5,8 @@ versions follow [Semantic Versioning](https://semver.org/). Install: [docs/insta
 
 ## [Unreleased]
 
+### Added
+- Cue mode: Trigger makes a Hot Cue on a paused Deck jump and start playing (Gated hold-to-preview stays the default). Toggle with GATED in the Performance view mixer strip; also a Setup guide.
 - Added an action-gated Keyboard DJing Tutorial, replayable from ? and Settings → Help → Tutorials (#322).
 
 ## [0.1.0] - 2026-10-07
