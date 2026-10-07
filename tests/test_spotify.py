@@ -24,7 +24,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from backend.acquisition.models import SourceItem
-from backend.acquisition.router import get_soulseek_supplier
+from backend.acquisition.router import get_soulseek_supplier, require_soundcloud_downloads
 from backend.acquisition.router import router as acquisition_router
 from backend.acquisition.supplier import SupplierSearchResult
 from backend.database import get_db
@@ -200,9 +200,29 @@ def clock() -> Clock:
     return Clock()
 
 
+class FakeListener:
+    def __init__(self) -> None:
+        self.running = False
+
+    @property
+    def port(self) -> int:
+        return 43827
+
+    def start(self) -> None:
+        self.running = True
+
+    def stop(self) -> None:
+        self.running = False
+
+
 @pytest.fixture
-def conn(env: Path, fake: FakeSpotify, clock: Clock) -> SpotifyConnection:
-    return SpotifyConnection(transport=fake, clock=clock)
+def listener() -> FakeListener:
+    return FakeListener()
+
+
+@pytest.fixture
+def conn(env: Path, fake: FakeSpotify, clock: Clock, listener: FakeListener) -> SpotifyConnection:
+    return SpotifyConnection(transport=fake, clock=clock, listener_factory=lambda _c: listener)
 
 
 @pytest.fixture
@@ -219,6 +239,7 @@ def make_client(
         app.dependency_overrides[get_connection] = lambda: conn
         app.dependency_overrides[get_feeds] = lambda: feeds
         app.dependency_overrides[get_soulseek_supplier] = lambda: soulseek
+        app.dependency_overrides[require_soundcloud_downloads] = lambda: None
         return TestClient(app, base_url=BASE_URL)
 
     return make
@@ -229,33 +250,45 @@ def client(make_client: Callable[..., TestClient]) -> TestClient:
     return make_client()
 
 
-def _connect(client: TestClient, fake: FakeSpotify) -> None:
-    assert client.put("/api/spotify/client", json={"client_id": CLIENT_ID}).status_code == 200
+def _callback(conn: SpotifyConnection, **params: str) -> tuple[bool, str, str]:
+    """What the loopback listener does with the browser's redirect."""
+    return conn.handle_callback(params)
+
+
+def _sign_in(client: TestClient, fake: FakeSpotify, conn: SpotifyConnection) -> None:
     started = client.post("/api/spotify/connect").json()
     state, code = fake.approve(started["authorize_url"])
-    r = client.get("/api/spotify/callback", params={"state": state, "code": code})
-    assert r.status_code == 200, r.text
+    ok, _, message = _callback(conn, state=state, code=code)
+    assert ok, message
+
+
+def _connect(client: TestClient, fake: FakeSpotify, conn: SpotifyConnection) -> None:
+    assert client.put("/api/spotify/client", json={"client_id": CLIENT_ID}).status_code == 200
+    _sign_in(client, fake, conn)
 
 
 # -- connect -----------------------------------------------------------------
 
 
-def test_connect_flow(client: TestClient, fake: FakeSpotify, env: Path) -> None:
+def test_connect_flow(
+    client: TestClient, fake: FakeSpotify, conn: SpotifyConnection, env: Path, listener: FakeListener
+) -> None:
     st = client.get("/api/spotify/status").json()
     assert st["state"] == "no_client" and st["account"] is None
-    assert st["redirect_uri"] == "http://127.0.0.1/api/spotify/callback"
-    assert st["redirect_uri_exact"] == "http://127.0.0.1:8127/api/spotify/callback"
+    assert st["redirect_uri"] == "http://127.0.0.1:43827/callback"
     assert client.post("/api/spotify/connect").status_code == 409
+    assert not listener.running
 
     assert client.put("/api/spotify/client", json={"client_id": "not a client id!"}).status_code == 422
     st = client.put("/api/spotify/client", json={"client_id": f" {CLIENT_ID} "}).json()
     assert st["state"] == "disconnected" and st["client_id"] == CLIENT_ID
 
     started = client.post("/api/spotify/connect").json()
-    assert started["redirect_uri"] == "http://127.0.0.1:8127/api/spotify/callback"
+    assert started["redirect_uri"] == "http://127.0.0.1:43827/callback"
+    assert listener.running
     state, code = fake.approve(started["authorize_url"])
-    page = client.get("/api/spotify/callback", params={"state": state, "code": code})
-    assert page.status_code == 200 and "Spotify connected" in page.text and "DJ One" in page.text
+    ok, title, message = _callback(conn, state=state, code=code)
+    assert ok and title == "Spotify connected" and "DJ One" in message
 
     st = client.get("/api/spotify/status").json()
     assert st["state"] == "connected"
@@ -266,8 +299,8 @@ def test_connect_flow(client: TestClient, fake: FakeSpotify, env: Path) -> None:
     assert stat.S_IMODE(dotenv.stat().st_mode) == 0o600
 
     # a state can't be replayed
-    replay = client.get("/api/spotify/callback", params={"state": state, "code": code})
-    assert replay.status_code == 400 and "expired or was already used" in replay.text
+    ok, _, message = _callback(conn, state=state, code=code)
+    assert not ok and "expired or was already used" in message
 
     st = client.delete("/api/spotify/token").json()
     assert st["state"] == "disconnected" and REFRESH_TOKEN_KEY not in dotenv.read_text()
@@ -275,29 +308,29 @@ def test_connect_flow(client: TestClient, fake: FakeSpotify, env: Path) -> None:
     assert st["state"] == "no_client" and CLIENT_ID_KEY not in dotenv.read_text()
 
 
-def test_callback_denied_and_bad_verifier(client: TestClient, fake: FakeSpotify) -> None:
+def test_callback_denied_and_bad_verifier(client: TestClient, fake: FakeSpotify, conn: SpotifyConnection) -> None:
     client.put("/api/spotify/client", json={"client_id": CLIENT_ID})
-    denied = client.get("/api/spotify/callback", params={"state": "x", "error": "access_denied"})
-    assert denied.status_code == 400 and "declined" in denied.text
+    ok, _, message = _callback(conn, state="x", error="access_denied")
+    assert not ok and "declined" in message
 
     started = client.post("/api/spotify/connect").json()
     state, code = fake.approve(started["authorize_url"])
     fake.codes[code] = ("wrong-challenge", fake.codes[code][1])
-    bad = client.get("/api/spotify/callback", params={"state": state, "code": code})
-    assert bad.status_code == 400 and "refused the sign-in" in bad.text
+    ok, _, message = _callback(conn, state=state, code=code)
+    assert not ok and "refused the sign-in" in message
     assert client.get("/api/spotify/status").json()["state"] == "disconnected"
 
 
-def test_changing_client_id_drops_the_token(client: TestClient, fake: FakeSpotify) -> None:
-    _connect(client, fake)
+def test_changing_client_id_drops_the_token(client: TestClient, fake: FakeSpotify, conn: SpotifyConnection) -> None:
+    _connect(client, fake, conn)
     st = client.put("/api/spotify/client", json={"client_id": "otherapp"}).json()
     assert st["state"] == "disconnected"
 
 
 def test_access_token_refresh_and_rotation(
-    client: TestClient, fake: FakeSpotify, clock: Clock, env: Path
+    client: TestClient, fake: FakeSpotify, conn: SpotifyConnection, clock: Clock, env: Path
 ) -> None:
-    _connect(client, fake)
+    _connect(client, fake, conn)
     first_refresh = os.environ[REFRESH_TOKEN_KEY]
     fake.calls.clear()
     client.get("/api/spotify/feeds")
@@ -317,8 +350,8 @@ def test_access_token_refresh_and_rotation(
     assert fake.calls.count("token:refresh_token") == 1
 
 
-def test_revoked_refresh_token_means_reconnect(client: TestClient, fake: FakeSpotify, clock: Clock) -> None:
-    _connect(client, fake)
+def test_revoked_refresh_token_means_reconnect(client: TestClient, fake: FakeSpotify, conn: SpotifyConnection, clock: Clock) -> None:
+    _connect(client, fake, conn)
     fake.revoke()
     clock.t += 3600
     r = client.get("/api/spotify/feeds")
@@ -327,9 +360,7 @@ def test_revoked_refresh_token_means_reconnect(client: TestClient, fake: FakeSpo
     assert st["state"] == "reconnect" and "Refresh token revoked" in st["error"]
 
     # reconnecting clears it
-    started = client.post("/api/spotify/connect").json()
-    state, code = fake.approve(started["authorize_url"])
-    client.get("/api/spotify/callback", params={"state": state, "code": code})
+    _sign_in(client, fake, conn)
     assert client.get("/api/spotify/status").json()["state"] == "connected"
     assert client.get("/api/spotify/feeds").status_code == 200
 
@@ -342,13 +373,14 @@ def test_not_connected_feeds_409(client: TestClient) -> None:
 # -- feeds -------------------------------------------------------------------
 
 
-def test_feeds_list(client: TestClient, fake: FakeSpotify) -> None:
-    _connect(client, fake)
+def test_feeds_list(client: TestClient, fake: FakeSpotify, conn: SpotifyConnection) -> None:
+    _connect(client, fake, conn)
     fake.playlists = fake.playlists * 20  # 60 playlists: /me/playlists pages at 50
     feeds = client.get("/api/spotify/feeds").json()
     assert feeds[0] == {
         "id": "liked", "kind": "liked", "name": "Liked Songs", "track_count": 3, "readable": True,
         "url": "https://open.spotify.com/collection/tracks", "image_url": None, "owner": None,
+        "last_added_at": "2026-10-03T10:00:00Z",
     }
     assert len(feeds) == 61
     mine, collab, followed = feeds[1:4]
@@ -364,8 +396,8 @@ def test_feeds_list(client: TestClient, fake: FakeSpotify) -> None:
     assert fake.calls == []
 
 
-def test_feed_page_paging_and_parsing(client: TestClient, fake: FakeSpotify, clock: Clock) -> None:
-    _connect(client, fake)
+def test_feed_page_paging_and_parsing(client: TestClient, fake: FakeSpotify, conn: SpotifyConnection, clock: Clock) -> None:
+    _connect(client, fake, conn)
     page = client.get("/api/spotify/feeds/liked", params={"limit": 2}).json()
     assert (page["total"], page["offset"], page["limit"], page["next_offset"]) == (3, 0, 2, 2)
     assert page["feed"]["name"] == "Liked Songs"
@@ -388,7 +420,8 @@ def test_feed_page_paging_and_parsing(client: TestClient, fake: FakeSpotify, clo
 
     # playlist entries use `item`; local files and episodes are dropped
     pl = client.get("/api/spotify/feeds/playlist:pl-mine").json()
-    assert pl["total"] == 3 and [r["spotify_id"] for r in pl["rows"]] == ["sp4"]
+    assert pl["total"] == 1 and pl["feed_total"] == 3
+    assert [r["spotify_id"] for r in pl["rows"]] == ["sp4"]
 
     forbidden = client.get("/api/spotify/feeds/playlist:pl-followed")
     assert forbidden.status_code == 403 and "own or collaborate" in forbidden.json()["detail"]
@@ -396,9 +429,9 @@ def test_feed_page_paging_and_parsing(client: TestClient, fake: FakeSpotify, clo
 
 
 def test_in_library_detection(
-    client: TestClient, fake: FakeSpotify, make_track: Callable[..., Track]
+    client: TestClient, fake: FakeSpotify, conn: SpotifyConnection, make_track: Callable[..., Track]
 ) -> None:
-    _connect(client, fake)
+    _connect(client, fake, conn)
     exact = make_track(title="Wake Up", artist="Hoax", duration_secs=274.4)
     make_track(title="Night Drive (Extended)", artist="Kessler", duration_secs=303.0)
     make_track(title="Rain Song", artist="Anna Lee", duration_secs=400.0)  # duration mismatch
@@ -413,8 +446,8 @@ def test_in_library_detection(
 # -- want --------------------------------------------------------------------
 
 
-def test_want_creates_spotify_source_item(client: TestClient, fake: FakeSpotify, db_session: Session) -> None:
-    _connect(client, fake)
+def test_want_creates_spotify_source_item(client: TestClient, fake: FakeSpotify, conn: SpotifyConnection, db_session: Session) -> None:
+    _connect(client, fake, conn)
     client.get("/api/spotify/feeds/liked")
     fake.calls.clear()
 
@@ -453,9 +486,9 @@ def test_want_creates_spotify_source_item(client: TestClient, fake: FakeSpotify,
 
 
 def test_want_in_library_track_links(
-    client: TestClient, fake: FakeSpotify, make_track: Callable[..., Track]
+    client: TestClient, fake: FakeSpotify, conn: SpotifyConnection, make_track: Callable[..., Track]
 ) -> None:
-    _connect(client, fake)
+    _connect(client, fake, conn)
     track = make_track(title="Wake Up", artist="Hoax", duration_secs=274.0)
     item = client.post("/api/acquisition/want", json={"external_id": "sp1"}).json()
     assert item["state"] == "fulfilled" and item["correspondence"]["track_id"] == track.id
@@ -465,8 +498,32 @@ def test_want_in_library_track_links(
     assert rows["sp1"]["library"]["confidence"] == "match"
 
 
+def test_want_anyway_rejects_the_library_match(
+    client: TestClient, fake: FakeSpotify, conn: SpotifyConnection, make_track: Callable[..., Track]
+) -> None:
+    """An erroneous "in library" is actionable (gh#342): want with
+    reject_track_id leaves the item new and the match rejected for good."""
+    _connect(client, fake, conn)
+    wrong = make_track(title="Wake Up", artist="Hoax", duration_secs=274.0)
+    item = client.post("/api/acquisition/want", json={"external_id": "sp1", "reject_track_id": wrong.id}).json()
+    assert item["state"] == "new" and item["stage"] == "new" and item["correspondence"] is None
+
+    rows = {r["spotify_id"]: r for r in client.get("/api/spotify/feeds/liked").json()["rows"]}
+    assert rows["sp1"]["source_item"]["state"] == "new"
+    # the rejection is remembered: nothing re-proposes it
+    assert rows["sp1"]["library"] is None or rows["sp1"]["library"]["linked"] is False
+
+
+def test_feeds_carry_last_added_at(client: TestClient, fake: FakeSpotify, conn: SpotifyConnection) -> None:
+    _connect(client, fake, conn)
+    feeds = {f["id"]: f for f in client.get("/api/spotify/feeds").json()}
+    assert feeds["liked"]["last_added_at"] == "2026-10-03T10:00:00Z"
+    assert feeds["playlist:pl-mine"]["last_added_at"] == "2026-09-01T00:00:00Z"
+    assert feeds["playlist:pl-followed"]["last_added_at"] is None  # unreadable: not sampled
+
+
 def test_want_queues_soulseek_search_when_configured(
-    make_client: Callable[..., TestClient], fake: FakeSpotify, db_session: Session
+    make_client: Callable[..., TestClient], fake: FakeSpotify, conn: SpotifyConnection, db_session: Session
 ) -> None:
     from backend.tasks.models import Task
 
@@ -475,7 +532,90 @@ def test_want_queues_soulseek_search_when_configured(
         size_bytes=1, duration_ms=274_000, queue_length=0,
     )])
     client = make_client(soulseek=soulseek)
-    _connect(client, fake)
+    _connect(client, fake, conn)
     item = client.post("/api/acquisition/want", json={"external_id": "sp1"}).json()
     tasks = db_session.query(Task).filter(Task.type == "soulseek-search").all()
     assert [t.ref for t in tasks] == [f"source_item:{item['id']}:soulseek-search"]
+
+
+def test_loopback_listener_serves_the_callback() -> None:
+    """The real fixed-port listener (ephemeral port here) hands the redirect's
+    query to the connection and renders the result page."""
+    import requests
+
+    from backend.spotify.loopback import LoopbackListener
+
+    seen: list[dict[str, str]] = []
+
+    def handle(params: dict[str, str]) -> tuple[bool, str, str]:
+        seen.append(params)
+        return params.get("code") == "good", "Spotify connected", "Signed in as <DJ>"
+
+    listener = LoopbackListener(0, handle)
+    listener.start()
+    try:
+        base = f"http://127.0.0.1:{listener.port}"
+        assert requests.get(f"{base}/elsewhere", timeout=5).status_code == 404
+        bad = requests.get(f"{base}/callback", params={"code": "nope", "state": "s"}, timeout=5)
+        assert bad.status_code == 400 and listener.running
+        r = requests.get(f"{base}/callback", params={"code": "good", "state": "s"}, timeout=5)
+        assert r.status_code == 200 and "Signed in as &lt;DJ&gt;" in r.text
+        assert seen[-1] == {"code": "good", "state": "s"}
+    finally:
+        listener.stop()
+
+
+def test_connect_reports_a_busy_redirect_port(
+    env: Path, fake: FakeSpotify, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import socket
+
+    from backend.spotify.connection import set_connection
+
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        sock.listen()
+        monkeypatch.setenv("MANADJ_SPOTIFY_REDIRECT_PORT", str(sock.getsockname()[1]))
+        real = SpotifyConnection(transport=fake)  # real LoopbackListener
+        real.set_client_id(CLIENT_ID)
+        app = FastAPI()
+        app.include_router(spotify_router.router, prefix="/api/spotify")
+        app.dependency_overrides[get_connection] = lambda: real
+        r = TestClient(app).post("/api/spotify/connect")
+        assert r.status_code == 409 and "Couldn't listen" in r.json()["detail"]
+        set_connection(None)
+
+
+def test_feed_sort_filter_over_the_whole_feed(client: TestClient, fake: FakeSpotify, conn: SpotifyConnection) -> None:
+    """The latest 1 of a feed is the latest of ALL rows, not of the first page (gh#342)."""
+    _connect(client, fake, conn)
+    newest = client.get("/api/spotify/feeds/liked", params={"sort": "added", "dir": "desc", "limit": 1}).json()
+    ids_by_added = sorted(
+        client.get("/api/spotify/feeds/liked").json()["rows"], key=lambda r: r["added_at"] or "", reverse=True
+    )
+    assert newest["rows"][0]["spotify_id"] == ids_by_added[0]["spotify_id"]
+    assert newest["total"] == 3 and newest["next_offset"] == 1
+
+    by_title = client.get("/api/spotify/feeds/liked", params={"sort": "title"}).json()
+    titles = [r["title"] for r in by_title["rows"]]
+    assert titles == sorted(titles, key=str.casefold)
+
+    hit = client.get("/api/spotify/feeds/liked", params={"q": "hoax wake"}).json()
+    assert [r["spotify_id"] for r in hit["rows"]] == ["sp1"] and hit["total"] == 1
+    assert client.get("/api/spotify/feeds/liked", params={"q": "zzz"}).json()["rows"] == []
+    assert client.get("/api/spotify/feeds/liked", params={"sort": "bogus"}).status_code == 422
+
+
+def test_feed_status_categories(
+    client: TestClient, fake: FakeSpotify, conn: SpotifyConnection, make_track: Callable[..., Track]
+) -> None:
+    """status=open hides detected library matches and wanted rows (gh#342)."""
+    _connect(client, fake, conn)
+    make_track(title="Wake Up", artist="Hoax", duration_secs=274.4)  # sp1 matches
+    client.post("/api/acquisition/want", json={"external_id": "sp3"})
+    page = client.get("/api/spotify/feeds/liked", params={"status": "open"}).json()
+    assert [r["spotify_id"] for r in page["rows"]] == ["sp2"]
+    assert page["counts"] == {"all": 3, "open": 1, "wanted": 1, "library": 1}
+    assert [r["spotify_id"] for r in client.get("/api/spotify/feeds/liked", params={"status": "library"}).json()["rows"]] == ["sp1"]
+    assert [r["spotify_id"] for r in client.get("/api/spotify/feeds/liked", params={"status": "wanted"}).json()["rows"]] == ["sp3"]
+    assert client.get("/api/spotify/feeds/liked", params={"status": "bogus"}).status_code == 422

@@ -4,8 +4,8 @@
 GET    /status          state (no_client|disconnected|connected|reconnect), account
 PUT    /client          store the Spotify app's Client ID
 DELETE /client          forget Client ID + refresh token
-POST   /connect         start PKCE sign-in -> {authorize_url}
-GET    /callback        loopback redirect target (HTML page for the browser)
+POST   /connect         start PKCE sign-in -> {authorize_url} (the redirect
+                        lands on loopback.py's fixed-port listener)
 DELETE /token           disconnect (forget the refresh token)
 GET    /feeds           Liked Songs + playlists, with counts
 GET    /feeds/{id}      a page of a Feed, rows annotated with library matches
@@ -17,17 +17,15 @@ POST   /want            Source Item for a Spotify track (source="spotify")
 
 from __future__ import annotations
 
-import html
 import logging
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from ..acquisition.classification import classify
-from ..acquisition.manager import run_matching
+from ..acquisition.manager import get_correspondence, run_matching
 from ..acquisition.matching import LibraryIndex, LibraryTrack, MatchingConfig
 from ..acquisition.models import SourceItem
 from ..acquisition.router import (
@@ -44,13 +42,11 @@ from ..config import get_config
 from ..database import get_db
 from ..models import Track
 from .connection import (
-    REGISTERED_REDIRECT_URI,
     SCOPES,
     NeedsReconnect,
     SpotifyConnection,
     SpotifyError,
     get_connection,
-    redirect_uri_for_port,
 )
 from .feeds import PAGE_MAX, Feed, FeedTrack, SpotifyFeeds, get_feeds
 
@@ -77,16 +73,14 @@ class AccountOut(BaseModel):
 class SpotifyStatus(BaseModel):
     state: Literal["no_client", "disconnected", "connected", "reconnect"]
     client_id: str | None
-    # register this in the Spotify dashboard (loopback, any port)
+    # register this in the Spotify dashboard (fixed loopback port)
     redirect_uri: str
-    # this backend's exact callback, should the portless one be refused
-    redirect_uri_exact: str
     scopes: list[str]
     account: AccountOut | None
     error: str | None
 
 
-def _status(request: Request, conn: SpotifyConnection, fresh: bool = False) -> SpotifyStatus:
+def _status(conn: SpotifyConnection, fresh: bool = False) -> SpotifyStatus:
     account: AccountOut | None = None
     error: str | None = None
     if conn.state() == "connected":
@@ -103,8 +97,7 @@ def _status(request: Request, conn: SpotifyConnection, fresh: bool = False) -> S
     return SpotifyStatus(
         state=state,
         client_id=conn.client_id,
-        redirect_uri=REGISTERED_REDIRECT_URI,
-        redirect_uri_exact=redirect_uri_for_port(request.url.port),
+        redirect_uri=conn.redirect_uri(),
         scopes=list(SCOPES),
         account=account,
         error=error,
@@ -113,9 +106,9 @@ def _status(request: Request, conn: SpotifyConnection, fresh: bool = False) -> S
 
 @router.get("/status", response_model=SpotifyStatus)
 def get_status(
-    request: Request, fresh: bool = False, conn: SpotifyConnection = Depends(get_connection)
+    fresh: bool = False, conn: SpotifyConnection = Depends(get_connection)
 ) -> SpotifyStatus:
-    return _status(request, conn, fresh)
+    return _status(conn, fresh)
 
 
 class ClientIn(BaseModel):
@@ -125,35 +118,32 @@ class ClientIn(BaseModel):
 @router.put("/client", response_model=SpotifyStatus)
 def put_client(
     body: ClientIn,
-    request: Request,
     conn: SpotifyConnection = Depends(get_connection),
     feeds: SpotifyFeeds = Depends(get_feeds),
 ) -> SpotifyStatus:
     conn.set_client_id(body.client_id)
     feeds.clear()
-    return _status(request, conn)
+    return _status(conn)
 
 
 @router.delete("/client", response_model=SpotifyStatus)
 def delete_client(
-    request: Request,
     conn: SpotifyConnection = Depends(get_connection),
     feeds: SpotifyFeeds = Depends(get_feeds),
 ) -> SpotifyStatus:
     conn.forget_client()
     feeds.clear()
-    return _status(request, conn)
+    return _status(conn)
 
 
 @router.delete("/token", response_model=SpotifyStatus)
 def delete_token(
-    request: Request,
     conn: SpotifyConnection = Depends(get_connection),
     feeds: SpotifyFeeds = Depends(get_feeds),
 ) -> SpotifyStatus:
     conn.disconnect()
     feeds.clear()
-    return _status(request, conn)
+    return _status(conn)
 
 
 class ConnectOut(BaseModel):
@@ -162,45 +152,12 @@ class ConnectOut(BaseModel):
 
 
 @router.post("/connect", response_model=ConnectOut)
-def connect(request: Request, conn: SpotifyConnection = Depends(get_connection)) -> ConnectOut:
-    redirect_uri = redirect_uri_for_port(request.url.port)
+def connect(conn: SpotifyConnection = Depends(get_connection)) -> ConnectOut:
     try:
-        return ConnectOut(authorize_url=conn.begin(redirect_uri), redirect_uri=redirect_uri)
+        url = conn.begin()
+        return ConnectOut(authorize_url=url, redirect_uri=conn.redirect_uri())
     except SpotifyError as e:
         raise _raise(e)
-
-
-def _page(title: str, message: str, ok: bool) -> HTMLResponse:
-    color = "#00e05a" if ok else "#ff2a2a"
-    close = "<script>setTimeout(() => window.close(), 1500)</script>" if ok else ""
-    body = f"""<!doctype html><meta charset="utf-8"><title>{html.escape(title)}</title>
-<body style="background:#000;color:#fff;font:16px system-ui;display:grid;place-items:center;height:90vh">
-<div style="max-width:32em;text-align:center"><h1 style="color:{color}">{html.escape(title)}</h1>
-<p>{html.escape(message)}</p></div>{close}</body>"""
-    return HTMLResponse(body, status_code=200 if ok else 400)
-
-
-@router.get("/callback", response_class=HTMLResponse)
-def callback(
-    state: str = "",
-    code: str | None = None,
-    error: str | None = None,
-    conn: SpotifyConnection = Depends(get_connection),
-    feeds: SpotifyFeeds = Depends(get_feeds),
-) -> HTMLResponse:
-    if error or not code:
-        reason = "you declined access" if error == "access_denied" else (error or "no code returned")
-        return _page("Spotify not connected", f"Spotify sign-in ended: {reason}.", ok=False)
-    try:
-        account = conn.complete(state, code)
-    except SpotifyError as e:
-        return _page("Spotify not connected", str(e), ok=False)
-    feeds.clear()
-    return _page(
-        "Spotify connected",
-        f"Signed in as {account.display_name}. You can close this window and return to manaDJ.",
-        ok=True,
-    )
 
 
 # -- feeds -------------------------------------------------------------------
@@ -216,6 +173,8 @@ class FeedOut(BaseModel):
     url: str | None
     image_url: str | None
     owner: str | None
+    # newest added_at sampled from the feed's last page (sort-by-activity)
+    last_added_at: str | None = None
 
 
 @router.get("/feeds", response_model=list[FeedOut])
@@ -258,6 +217,10 @@ class FeedPageOut(BaseModel):
     offset: int
     limit: int
     next_offset: int | None
+    # Spotify's own count for the feed (incl. rows manadj drops)
+    feed_total: int = 0
+    # category sizes over the whole (query-filtered) feed
+    counts: dict[str, int] = {}
     rows: list[FeedRowOut]
 
 
@@ -330,23 +293,62 @@ def get_feed_page(
     offset: int = 0,
     limit: int = PAGE_MAX,
     fresh: bool = False,
+    sort: str = "feed",
+    dir: str = "asc",
+    q: str = "",
+    status: str = "all",
     db: Session = Depends(get_db),
     feeds: SpotifyFeeds = Depends(get_feeds),
 ) -> FeedPageOut:
+    """A page of a feed after server-side filter (`q`: every term in title /
+    artist / album; `status`: all | open (not in the library, not wanted) |
+    wanted (a Source Item) | library (matched or fulfilled)) and sort
+    (`sort`: feed|added|title|artist|length, `dir`: asc|desc). The whole feed
+    is loaded and cached behind this (gh#342), so `limit` may go up to 500."""
+    if status not in FEED_STATUSES:
+        raise HTTPException(status_code=422, detail=f"unknown status {status!r}")
     try:
-        page = feeds.page(feed_id, offset, limit, fresh)
+        # page over everything so the status filter (which needs library
+        # detection) sees the whole feed; the slice happens after
+        whole = feeds.page(feed_id, 0, SERVE_ALL, fresh, sort=sort, desc=dir == "desc", query=q)
         feed = next((f for f in feeds.feeds() if f.id == feed_id), None)
     except SpotifyError as e:
         raise _raise(e)
+    rows = annotate(db, whole.tracks)
+    counts = {k: 0 for k in FEED_STATUSES}
+    for r in rows:
+        counts["all"] += 1
+        counts[row_status(r)] += 1
+    kept = rows if status == "all" else [r for r in rows if row_status(r) == status]
+    limit = max(1, min(limit, PAGE_LIMIT))
+    offset = max(0, offset)
+    nxt = offset + limit
     return FeedPageOut(
         feed=FeedOut(**vars(feed)) if isinstance(feed, Feed) else None,
-        feed_id=page.feed_id,
-        total=page.total,
-        offset=page.offset,
-        limit=page.limit,
-        next_offset=page.next_offset,
-        rows=annotate(db, page.tracks),
+        feed_id=whole.feed_id,
+        total=len(kept),
+        offset=offset,
+        limit=limit,
+        next_offset=nxt if nxt < len(kept) else None,
+        feed_total=whole.feed_total,
+        counts=counts,
+        rows=kept[offset:nxt],
     )
+
+
+FEED_STATUSES = ("all", "open", "wanted", "library")
+PAGE_LIMIT = 500
+SERVE_ALL = 100_000
+
+
+def row_status(r: FeedRowOut) -> str:
+    """A feed row's category: wanted (a Source Item exists, whatever its
+    stage) > library (a Track matches) > open."""
+    if r.source_item is not None and r.source_item.state != "fulfilled":
+        return "wanted"
+    if r.library is not None or (r.source_item is not None and r.source_item.state == "fulfilled"):
+        return "library"
+    return "open"
 
 
 # -- want --------------------------------------------------------------------
@@ -355,6 +357,9 @@ def get_feed_page(
 class WantIn(BaseModel):
     source: Literal["spotify"] = "spotify"
     external_id: str = Field(min_length=1, max_length=64)
+    # "that library match is wrong": any correspondence matching proposes or
+    # confirms against this Track is rejected, so the item stays acquirable
+    reject_track_id: int | None = None
 
 
 class WantOut(SourceItemResponse):
@@ -409,6 +414,14 @@ def want(
     db.commit()
     run_matching(db, MatchingConfig(), source_name=SOURCE_NAME)
     db.refresh(item)
+    if body.reject_track_id is not None:
+        corr = get_correspondence(db, item.id)
+        if corr is not None and corr.track_id == body.reject_track_id and corr.status != "rejected":
+            corr.status = "rejected"  # remembered: matching never re-proposes it
+            item.state = "new"
+            db.commit()
+            db.refresh(item)
+            logger.info("want: rejected library match track %d for item %d", corr.track_id, item.id)
     if item.state == "new" and soulseek is not None:
         enqueue_soulseek_search(db, item)
     logger.info("wanted spotify track %s (%s) -> source item %d", track.spotify_id, track.title, item.id)

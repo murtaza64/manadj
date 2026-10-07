@@ -508,6 +508,25 @@ export interface SourceItem {
   provenance: ProvenanceInfo | null;
   // Cleanup-derived default query for Search Supplier pickers
   search_query: string | null;
+  // the lifecycle on the wire (gh#342): state + latest task state folded
+  stage: SourceItemStage;
+  error_kind: ErrorKind | null;
+  // remembered Soulseek candidates, if a search ran
+  candidate_count: number | null;
+}
+
+export type SourceItemStage = 'new' | 'queued' | 'downloading' | 'failed' | 'fulfilled' | 'ignored';
+export type ErrorKind = 'drm' | 'gone' | 'ratelimit' | 'peer' | 'other';
+
+export interface BulkResult {
+  done: number;
+  skipped: number;
+}
+
+export interface AutoBulkResult {
+  started: number;
+  skipped: number;
+  reasons: Record<string, string>;
 }
 
 export interface ProvenanceInfo {

@@ -28,8 +28,7 @@ import { SPOTIFY_GUIDE_ID } from './register';
 const base: SpotifyStatus = {
   state: 'no_client',
   client_id: null,
-  redirect_uri: 'http://127.0.0.1/api/spotify/callback',
-  redirect_uri_exact: 'http://127.0.0.1:8127/api/spotify/callback',
+  redirect_uri: 'http://127.0.0.1:43827/callback',
   scopes: ['user-library-read'],
   account: null,
   error: null,
@@ -97,7 +96,7 @@ it('walks app creation: redirect URI shown, Client ID saved, Connect opens sign-
   api.status.mockResolvedValueOnce(base);
   const props = await render();
   expect(host.querySelector('[aria-label="Redirect URI"]')?.textContent).toBe(
-    'http://127.0.0.1/api/spotify/callback',
+    'http://127.0.0.1:43827/callback',
   );
   expect(host.textContent).toContain('Web API');
   expect(button('Connect').disabled).toBe(true);
@@ -116,7 +115,7 @@ it('walks app creation: redirect URI shown, Client ID saved, Connect opens sign-
   api.connect.mockResolvedValueOnce({ authorize_url: 'https://accounts.spotify.com/authorize?x', redirect_uri: '' });
   await act(async () => button('Connect').click());
   await flush();
-  expect(open).toHaveBeenCalledWith('https://accounts.spotify.com/authorize?x', '_blank');
+  expect(open).toHaveBeenCalledWith('https://accounts.spotify.com/authorize?x', '_blank', 'noopener');
   expect(host.textContent).toContain('Waiting for Spotify sign-in');
 
   api.status.mockResolvedValue(connected);
@@ -145,4 +144,18 @@ it('standalone Settings host persists skip', async () => {
   act(() => button('Skip').click());
   expect(guideStatus(SPOTIFY_GUIDE_ID)).toBe('skipped');
   expect(host.textContent).toContain('Guide status: Skipped');
+});
+
+it('under Electron, Connect opens the system browser via the shell bridge', async () => {
+  const openExternal = vi.fn(async () => true);
+  vi.stubGlobal('manadjSettings', { pickFolder: vi.fn(), openExternal });
+  const open = vi.fn();
+  vi.stubGlobal('open', open);
+  api.status.mockResolvedValue(disconnected);
+  api.connect.mockResolvedValueOnce({ authorize_url: 'https://accounts.spotify.com/authorize?y', redirect_uri: '' });
+  await render();
+  await act(async () => button('Connect').click());
+  await flush();
+  expect(openExternal).toHaveBeenCalledWith('https://accounts.spotify.com/authorize?y');
+  expect(open).not.toHaveBeenCalled();
 });

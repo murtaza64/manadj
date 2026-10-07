@@ -29,6 +29,8 @@ import type {
   DropImportRequest,
   DropImportResult,
   SourceItem,
+  BulkResult,
+  AutoBulkResult,
   AcquisitionRefreshStats,
   Classification,
   SupplierInfo,
@@ -1124,6 +1126,38 @@ export const api = {
       return res.json();
     },
 
+    ignoreBulk: async (itemIds: number[]): Promise<BulkResult> => {
+      const res = await fetch(`${API_BASE}/acquisition/items/ignore-bulk`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ item_ids: itemIds }),
+      });
+      if (!res.ok) throw new Error('Failed to ignore items');
+      return res.json();
+    },
+    acceptMatchBulk: async (itemIds: number[]): Promise<BulkResult> => {
+      const res = await fetch(`${API_BASE}/acquisition/items/accept-match-bulk`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ item_ids: itemIds }),
+      });
+      if (!res.ok) throw new Error('Failed to accept matches');
+      return res.json();
+    },
+    soulseekAutoBulk: async (itemIds: number[]): Promise<AutoBulkResult> => {
+      const res = await fetch(`${API_BASE}/acquisition/items/soulseek/auto-bulk`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ item_ids: itemIds }),
+      });
+      if (!res.ok) throw new Error((await res.json()).detail ?? 'Failed to start downloads');
+      return res.json();
+    },
+    cancelDownload: async (itemId: number): Promise<SourceItem> => {
+      const res = await fetch(`${API_BASE}/acquisition/items/${itemId}/cancel`, { method: 'POST' });
+      if (!res.ok) throw new Error((await res.json()).detail ?? 'Failed to cancel');
+      return res.json();
+    },
     ignoreItem: async (itemId: number): Promise<SourceItem> => {
       const res = await fetch(`${API_BASE}/acquisition/items/${itemId}/ignore`, { method: 'POST' });
       if (!res.ok) {

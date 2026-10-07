@@ -12,6 +12,7 @@ export const SETTINGS_HELP: Record<string, HelpTarget> = {
   shortcuts: { topic: 'perform', anchor: 'keyboard' },
   soundcloud: {},
   soulseek: {},
+  spotify: {},
   setup: { topic: 'start', anchor: 'setup' },
   tour: { topic: 'start', anchor: 'tour' },
   tutorials: { topic: 'start', anchor: 'tutorials' },
@@ -24,6 +25,7 @@ export const GUIDE_HELP: Record<string, HelpTarget> = {
   'cue-mode': SETTINGS_HELP.setup,
   soundcloud: SETTINGS_HELP.setup,
   soulseek: SETTINGS_HELP.setup,
+  spotify: SETTINGS_HELP.setup,
   'controller-check': SETTINGS_HELP.setup,
 };
 

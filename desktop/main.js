@@ -8,7 +8,7 @@
 //
 // See README.md and .scratch/desktop-shell/issues/01-electron-attach-shell.md.
 
-const { app, BrowserWindow, dialog, ipcMain, Menu, net, screen, session } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain, Menu, net, screen, session, shell } = require("electron");
 const { execFile } = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
@@ -497,6 +497,11 @@ function registerSettingsIpc() {
     });
     if (result.canceled || result.filePaths.length === 0) return null;
     return result.filePaths[0];
+  });
+  ipcMain.handle("settings:open-external", async (_event, url) => {
+    if (typeof url !== "string" || !url.startsWith("https://")) return false;
+    await shell.openExternal(url);
+    return true;
   });
 }
 

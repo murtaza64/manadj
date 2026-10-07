@@ -168,7 +168,6 @@
 .settings-field-inputs > .perf-fader {
   width: 100%;
 }
-.settings-page input[type='checkbox'],
 .settings-page input[type='radio'] {
   accent-color: var(--accent);
 }

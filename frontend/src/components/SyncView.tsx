@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import { PlaylistSync } from './PlaylistSync';
-import { Acquisition } from './Acquisition';
+import { AcquisitionView } from './acquisition/AcquisitionView';
+import { useAcquisitionAvailable } from './acquisition/useAcquisitionAvailable';
 import { UnifiedTracksSync } from './UnifiedTracksSync';
 import { RekordboxImportGuide } from '../onboarding/RekordboxImportGuide';
-import { useSoundCloudConnected } from '../setup/soundcloud/soundcloudApi';
 import './SyncView.css';
 
 type TabType = 'tracks' | 'playlists' | 'acquisition' | 'rekordbox-import';
@@ -19,10 +19,10 @@ const TABS: { id: TabType; label: string }[] = [
  * in and out), with a slim secondary tab row in the topbar design language. */
 export function SyncView() {
   const [selectedTab, setActiveTab] = useState<TabType>('tracks');
-  // Acquisition works off SoundCloud likes: hidden until SoundCloud is
-  // connected (Settings → SoundCloud, setup-guides #290).
-  const soundcloudConnected = useSoundCloudConnected();
-  const tabs = TABS.filter((t) => t.id !== 'acquisition' || soundcloudConnected);
+  // Acquisition needs a Supplier: hidden until SoundCloud or Soulseek is
+  // set up (Settings → Accounts; setup-guides #290/#291, gh#342).
+  const acquisitionAvailable = useAcquisitionAvailable();
+  const tabs = TABS.filter((t) => t.id !== 'acquisition' || acquisitionAvailable);
   const activeTab = tabs.some((t) => t.id === selectedTab) ? selectedTab : 'tracks';
 
   return (
@@ -41,7 +41,7 @@ export function SyncView() {
 
       {activeTab === 'tracks' && <UnifiedTracksSync />}
       {activeTab === 'playlists' && <PlaylistSync />}
-      {activeTab === 'acquisition' && <Acquisition />}
+      {activeTab === 'acquisition' && <AcquisitionView />}
       {activeTab === 'rekordbox-import' && (
         <div className="onboarding-standalone">
           <RekordboxImportGuide onDone={() => setActiveTab('tracks')} />

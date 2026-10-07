@@ -11,7 +11,12 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from backend.acquisition.router import get_soulseek_supplier, get_source, router
+from backend.acquisition.router import (
+    get_soulseek_supplier,
+    get_source,
+    require_soundcloud_downloads,
+    router,
+)
 from backend.acquisition.source import SourceItemData
 from backend.acquisition.supplier import SupplierSearchResult
 from backend.database import get_db
@@ -45,6 +50,7 @@ def client(db_session: Session) -> Iterator[TestClient]:
     app.include_router(router, prefix="/api/acquisition")
     app.dependency_overrides[get_db] = lambda: db_session
     app.dependency_overrides[get_source] = lambda: FakeSource([CANNED_ITEM])
+    app.dependency_overrides[require_soundcloud_downloads] = lambda: None
     app.dependency_overrides[get_soulseek_supplier] = lambda: None
     with TestClient(app) as c:
         yield c
@@ -57,6 +63,7 @@ def soulseek_client(db_session: Session) -> Iterator[TestClient]:
     app.include_router(router, prefix="/api/acquisition")
     app.dependency_overrides[get_db] = lambda: db_session
     app.dependency_overrides[get_source] = lambda: FakeSource([CANNED_ITEM])
+    app.dependency_overrides[require_soundcloud_downloads] = lambda: None
     app.dependency_overrides[get_soulseek_supplier] = lambda: FakeSource(
         [], search_results=[CANNED_RESULT]
     )
@@ -283,6 +290,7 @@ def make_soulseek_app(db_session: Session, results: list[SupplierSearchResult]) 
     app.include_router(router, prefix="/api/acquisition")
     app.dependency_overrides[get_db] = lambda: db_session
     app.dependency_overrides[get_source] = lambda: FakeSource([CANNED_ITEM])
+    app.dependency_overrides[require_soundcloud_downloads] = lambda: None
     app.dependency_overrides[get_soulseek_supplier] = lambda: FakeSource(
         [], search_results=results
     )
@@ -393,3 +401,119 @@ def test_set_provenance_endpoint_smoke(client: TestClient, db_session: Session) 
     resp = client.post(f"/api/acquisition/items/{item['id']}/provenance", json={"audio_from": "cd-rip"})
     assert resp.status_code == 200
     assert resp.json()["provenance"]["label"] == "cd-rip"
+
+
+# --- lifecycle on the wire, batch verbs, cancel (gh#342) ---------------------
+
+
+def test_items_carry_stage_and_cancel_returns_to_new(client: TestClient) -> None:
+    client.post("/api/acquisition/refresh")
+    item = client.get("/api/acquisition/items").json()[0]
+    assert item["stage"] == "new"
+    assert item["error_kind"] is None
+    assert item["candidate_count"] is None
+
+    queued = client.post(f"/api/acquisition/items/{item['id']}/queue").json()
+    assert queued["stage"] == "queued"
+
+    resp = client.post(f"/api/acquisition/items/{item['id']}/cancel")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["state"] == "new"
+    assert body["stage"] == "new"
+    assert body["download"] is None  # the pending task row is gone
+
+    resp = client.post(f"/api/acquisition/items/{item['id']}/cancel")
+    assert resp.status_code == 409  # nothing queued
+
+
+def test_failed_download_is_stage_failed_with_error_kind(
+    client: TestClient, db_session: Session
+) -> None:
+    from backend.tasks.models import Task
+
+    client.post("/api/acquisition/refresh")
+    item = client.get("/api/acquisition/items").json()[0]
+    client.post(f"/api/acquisition/items/{item['id']}/queue")
+    task = db_session.query(Task).filter(Task.ref == f"source_item:{item['id']}").one()
+    task.state = "failed"
+    task.error = "ERROR: [soundcloud] 2389765131: This video is DRM protected"
+    db_session.commit()
+
+    body = client.get("/api/acquisition/items").json()[0]
+    assert body["state"] == "queued"
+    assert body["stage"] == "failed"
+    assert body["error_kind"] == "drm"
+
+    # a failed download can be cancelled too: it leaves the failed task
+    # behind (history) but the item is new again
+    resp = client.post(f"/api/acquisition/items/{item['id']}/cancel")
+    assert resp.status_code == 200
+    assert resp.json()["stage"] == "new"
+
+
+def test_bulk_ignore_and_accept_endpoints_smoke(client: TestClient, db_session: Session) -> None:
+    from backend.acquisition.models import SourceCorrespondence
+    from backend.models import Track
+
+    client.post("/api/acquisition/refresh")
+    item = client.get("/api/acquisition/items").json()[0]
+
+    resp = client.post("/api/acquisition/items/accept-match-bulk", json={"item_ids": [item["id"]]})
+    assert resp.status_code == 200
+    assert resp.json() == {"done": 0, "skipped": 1}  # nothing proposed
+
+    track = Track(filename="/tracks/Hoax - Wake Up.mp3", title="Wake Up", artist="Hoax")
+    db_session.add(track)
+    db_session.commit()
+    db_session.add(
+        SourceCorrespondence(source_item_id=item["id"], track_id=track.id, status="proposed", score=0.8)
+    )
+    db_session.commit()
+    resp = client.post("/api/acquisition/items/accept-match-bulk", json={"item_ids": [item["id"], 4242]})
+    assert resp.json() == {"done": 1, "skipped": 1}
+    assert client.get("/api/acquisition/items").json()[0]["stage"] == "fulfilled"
+
+    resp = client.post("/api/acquisition/items/ignore-bulk", json={"item_ids": [item["id"]]})
+    assert resp.status_code == 200
+    assert resp.json() == {"done": 0, "skipped": 1}  # fulfilled items don't ignore
+
+
+def test_soulseek_auto_bulk_reports_per_item(db_session: Session) -> None:
+    """auto-bulk never aborts the batch: a 409 for one item is a reason."""
+    app = FastAPI()
+    app.include_router(router, prefix="/api/acquisition")
+    app.dependency_overrides[get_db] = lambda: db_session
+    app.dependency_overrides[get_source] = lambda: FakeSource([CANNED_ITEM])
+    app.dependency_overrides[require_soundcloud_downloads] = lambda: None
+    # flac only -> nothing auto-pickable (mp3 required)
+    app.dependency_overrides[get_soulseek_supplier] = lambda: FakeSource(
+        [], search_results=[CANNED_RESULT]
+    )
+    with TestClient(app) as c:
+        c.post("/api/acquisition/refresh")
+        item = c.get("/api/acquisition/items").json()[0]
+        resp = c.post("/api/acquisition/items/soulseek/auto-bulk", json={"item_ids": [item["id"], 777]})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["started"] == 0
+        assert body["skipped"] == 2
+        assert set(body["reasons"]) == {str(item["id"]), "777"}
+        # the fresh search was remembered along the way
+        assert c.get("/api/acquisition/items").json()[0]["candidate_count"] == 1
+
+
+def test_queue_refused_without_soundcloud(db_session: Session) -> None:
+    """No token => no download handler => queueing is a 409, not a stuck task."""
+    app = FastAPI()
+    app.include_router(router, prefix="/api/acquisition")
+    app.dependency_overrides[get_db] = lambda: db_session
+    app.dependency_overrides[get_source] = lambda: FakeSource([CANNED_ITEM])
+    app.dependency_overrides[get_soulseek_supplier] = lambda: None
+    with TestClient(app) as c:
+        c.post("/api/acquisition/refresh")
+        item = c.get("/api/acquisition/items").json()[0]
+        resp = c.post(f"/api/acquisition/items/{item['id']}/queue")
+        assert resp.status_code == 409 and "SoundCloud" in resp.json()["detail"]
+        assert c.post("/api/acquisition/items/queue-bulk", json={"item_ids": [item["id"]]}).status_code == 409
+        assert c.get("/api/acquisition/items").json()[0]["stage"] == "new"

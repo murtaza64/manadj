@@ -12,9 +12,13 @@ from ..config import get_config
 from ..database import get_db
 from ..models import Track
 from ..tasks.manager import list_tasks
+from .lifecycle import classify_error, derive_stage
 from .manager import (
+    accept_bulk,
     accept_proposal,
     assert_provenance,
+    cancel_item,
+    ignore_bulk,
     ignore_item,
     link_item_to_track,
     link_track_by_url,
@@ -39,7 +43,7 @@ from .searches import (
     remembered_results,
     remembered_search,
 )
-from .models import AudioProvenance, SourceCorrespondence, SourceItem
+from .models import AudioProvenance, SoulseekSearch, SourceCorrespondence, SourceItem
 from .source import SoundCloudSource, Source
 from .supplier import SearchSupplier, SupplierSearchResult
 
@@ -108,6 +112,13 @@ class SourceItemResponse(BaseModel):
     # Cleanup-derived default query for Search Supplier pickers (editable
     # client-side; junk tokens would poison peer search)
     search_query: str | None = None
+    # The lifecycle on the wire (gh#342): state + latest task state folded
+    # into one stage, and a coarse kind for a failed download's error.
+    stage: str = "new"
+    error_kind: str | None = None
+    # remembered Soulseek candidates (gh#216), so the UI can say "3 ready"
+    # without fetching the search per row
+    candidate_count: int | None = None
 
     model_config = {"from_attributes": True}
 
@@ -163,6 +174,11 @@ class BulkQueueRequest(BaseModel):
 
 class BulkQueueResponse(BaseModel):
     queued: int
+    skipped: int
+
+
+class BulkResponse(BaseModel):
+    done: int
     skipped: int
 
 
@@ -266,6 +282,27 @@ def _search_query(item: SourceItem) -> str:
     return default_search_query(item, get_config().acquisition.cleanup)
 
 
+def _candidate_count_map(db: Session) -> dict[int, int]:
+    """source_item_id -> remembered Soulseek candidate count (gh#216)."""
+    import json
+
+    counts: dict[int, int] = {}
+    for row in db.query(SoulseekSearch).all():
+        try:
+            counts[row.source_item_id] = len(json.loads(row.results_json))
+        except (TypeError, ValueError):
+            counts[row.source_item_id] = 0
+    return counts
+
+
+def _fold_lifecycle(resp: SourceItemResponse) -> None:
+    """Derive stage + error_kind from state and the latest download task."""
+    task_state = resp.download.task_state if resp.download else None
+    resp.stage = derive_stage(resp.state, task_state)
+    if resp.download and resp.stage == "failed":
+        resp.error_kind = classify_error(resp.download.error, resp.download.via)
+
+
 @router.get("/items", response_model=list[SourceItemResponse])
 def get_source_items(
     source: str | None = None, db: Session = Depends(get_db)
@@ -279,14 +316,17 @@ def item_responses(db: Session, items: list[SourceItem]) -> list[SourceItemRespo
     correspondences = _correspondence_map(db)
     downloads = _download_map(db)
     provenances = _provenance_map(db)
+    candidates = _candidate_count_map(db)
     responses = []
     for item in items:
         resp = SourceItemResponse.model_validate(item)
         resp.correspondence = correspondences.get(item.id)
         resp.download = downloads.get(item.id)
         resp.search_query = _search_query(item)
+        resp.candidate_count = candidates.get(item.id)
         if resp.correspondence is not None:
             resp.provenance = provenances.get(resp.correspondence.track_id)
+        _fold_lifecycle(resp)
         responses.append(resp)
     return responses
 
@@ -301,10 +341,32 @@ def _item_response(db: Session, item_id: int) -> SourceItemResponse:
     tasks = [t for t in list_tasks(db, ref=f"source_item:{item_id}") if t.type in DOWNLOAD_TASK_TYPES]
     if tasks:
         resp.download = _task_status(tasks[0])
+    row = remembered_search(db, item_id)
+    if row is not None:
+        resp.candidate_count = len(remembered_results(row))
+    _fold_lifecycle(resp)
     return resp
 
 
-@router.post("/items/{item_id}/queue", response_model=SourceItemResponse)
+def require_soundcloud_downloads() -> None:
+    """Dependency: a `download` task only runs when the SoundCloud handler is
+    registered (token + tracks directory); queueing without it would park the
+    item forever (gh#342). Overridden in tests."""
+    cfg = get_config()
+    if not cfg.soundcloud.oauth_token:
+        raise HTTPException(
+            status_code=409,
+            detail="SoundCloud isn't connected — connect it in Settings → Accounts, or get the track via Soulseek.",
+        )
+    if not cfg.library.tracks_directory:
+        raise HTTPException(status_code=409, detail="no tracks directory set (Settings → Library)")
+
+
+@router.post(
+    "/items/{item_id}/queue",
+    response_model=SourceItemResponse,
+    dependencies=[Depends(require_soundcloud_downloads)],
+)
 def queue_download(item_id: int, db: Session = Depends(get_db)) -> SourceItemResponse:
     try:
         queue_item(db, item_id)
@@ -315,10 +377,38 @@ def queue_download(item_id: int, db: Session = Depends(get_db)) -> SourceItemRes
     return _item_response(db, item_id)
 
 
-@router.post("/items/queue-bulk", response_model=BulkQueueResponse)
+@router.post(
+    "/items/queue-bulk",
+    response_model=BulkQueueResponse,
+    dependencies=[Depends(require_soundcloud_downloads)],
+)
 def queue_bulk_downloads(body: BulkQueueRequest, db: Session = Depends(get_db)) -> BulkQueueResponse:
     stats = queue_bulk(db, body.item_ids)
     return BulkQueueResponse(queued=stats.queued, skipped=stats.skipped)
+
+
+@router.post("/items/ignore-bulk", response_model=BulkResponse)
+def ignore_bulk_items(body: BulkQueueRequest, db: Session = Depends(get_db)) -> BulkResponse:
+    stats = ignore_bulk(db, body.item_ids)
+    return BulkResponse(done=stats.done, skipped=stats.skipped)
+
+
+@router.post("/items/accept-match-bulk", response_model=BulkResponse)
+def accept_match_bulk(body: BulkQueueRequest, db: Session = Depends(get_db)) -> BulkResponse:
+    stats = accept_bulk(db, body.item_ids)
+    return BulkResponse(done=stats.done, skipped=stats.skipped)
+
+
+@router.post("/items/{item_id}/cancel", response_model=SourceItemResponse)
+def cancel_download(item_id: int, db: Session = Depends(get_db)) -> SourceItemResponse:
+    """Cancel a not-yet-started download; the item returns to new."""
+    try:
+        cancel_item(db, item_id)
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except NoResultFound:
+        raise HTTPException(status_code=404, detail="source item not found")
+    return _item_response(db, item_id)
 
 
 @router.post("/items/{item_id}/ignore", response_model=SourceItemResponse)
@@ -405,7 +495,7 @@ def override_classification(
         item = set_classification(db, item_id, body.classification)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
-    return SourceItemResponse.model_validate(item)
+    return _item_response(db, item.id)
 
 
 # --- Suppliers (soulseek-supplier issue 03) ---------------------------------
@@ -602,12 +692,7 @@ def soulseek_adhoc_downloads(db: Session = Depends(get_db)) -> list[AdhocDownloa
     return [_adhoc_info(t) for t in list_tasks(db, ref=ADHOC_REF, limit=20)]
 
 
-@router.post("/items/{item_id}/soulseek/auto", response_model=SourceItemResponse)
-def soulseek_auto_download(
-    item_id: int,
-    db: Session = Depends(get_db),
-    supplier: "SearchSupplier | None" = Depends(get_soulseek_supplier),
-) -> SourceItemResponse:
+def _auto_download(db: Session, sup: SearchSupplier, item_id: int) -> None:
     """Hands-off download (gh#214): search if needed, auto-pick, download.
 
     Candidates come from the remembered search when one exists (remembering
@@ -623,7 +708,6 @@ def soulseek_auto_download(
         dicts_to_shaped,
     )
 
-    sup = _require_soulseek(supplier)
     try:
         item = db.query(SourceItem).filter(SourceItem.id == item_id).one()
     except NoResultFound:
@@ -662,7 +746,46 @@ def soulseek_auto_download(
     except RuntimeError as e:
         # every candidate peer rejected the request outright
         raise HTTPException(status_code=502, detail=str(e))
+
+
+@router.post("/items/{item_id}/soulseek/auto", response_model=SourceItemResponse)
+def soulseek_auto_download(
+    item_id: int,
+    db: Session = Depends(get_db),
+    supplier: "SearchSupplier | None" = Depends(get_soulseek_supplier),
+) -> SourceItemResponse:
+    """Hands-off download for one item (gh#214); see _auto_download."""
+    _auto_download(db, _require_soulseek(supplier), item_id)
     return _item_response(db, item_id)
+
+
+class AutoBulkResponse(BaseModel):
+    started: int
+    skipped: int
+    # item_id -> why it was skipped (nothing pickable, already downloading…)
+    reasons: dict[int, str]
+
+
+@router.post("/items/soulseek/auto-bulk", response_model=AutoBulkResponse)
+def soulseek_auto_bulk(
+    body: BulkQueueRequest,
+    db: Session = Depends(get_db),
+    supplier: "SearchSupplier | None" = Depends(get_soulseek_supplier),
+) -> AutoBulkResponse:
+    """Hands-off downloads for many items: each runs independently; a skip
+    never aborts the batch. Items without a remembered search get a fresh
+    one — expect ~20s per such item."""
+    sup = _require_soulseek(supplier)
+    started = 0
+    reasons: dict[int, str] = {}
+    for item_id in body.item_ids:
+        try:
+            _auto_download(db, sup, item_id)
+            started += 1
+        except HTTPException as e:
+            db.rollback()
+            reasons[item_id] = str(e.detail)
+    return AutoBulkResponse(started=started, skipped=len(reasons), reasons=reasons)
 
 
 @router.post("/items/{item_id}/soulseek/pick", response_model=SourceItemResponse)

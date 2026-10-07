@@ -9,7 +9,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import { queryClient } from '../../api/queryClient';
 import type { GuideProps } from '../guides';
-import { SPOTIFY_STATUS_KEY, spotifyApi } from './spotifyApi';
+import { SPOTIFY_STATUS_KEY, openInBrowser, spotifyApi } from './spotifyApi';
 import type { SpotifyStatus } from './spotifyApi';
 import '../soundcloud/soundcloud.css';
 import './spotify.css';
@@ -116,7 +116,7 @@ export default function SpotifyGuide({ onDone, onSkip }: GuideProps) {
     setBusy(true);
     try {
       const { authorize_url } = await spotifyApi.connect();
-      window.open(authorize_url, '_blank');
+      openInBrowser(authorize_url);
       pollStarted.current = Date.now();
       setWaiting(true);
       setError(null);
@@ -180,7 +180,15 @@ export default function SpotifyGuide({ onDone, onSkip }: GuideProps) {
           <li>
             <span>
               Open the{' '}
-              <a href={DASHBOARD_URL} target="_blank" rel="noreferrer">
+              <a
+                href={DASHBOARD_URL}
+                target="_blank"
+                rel="noreferrer"
+                onClick={(e) => {
+                  e.preventDefault();
+                  openInBrowser(DASHBOARD_URL);
+                }}
+              >
                 Spotify developer dashboard
               </a>{' '}
               and log in with your Spotify account. Development Mode apps need the app owner to
@@ -199,8 +207,8 @@ export default function SpotifyGuide({ onDone, onSkip }: GuideProps) {
             </span>
             <CopyField value={status.redirect_uri} label="Redirect URI" />
             <span className="sp-hint">
-              If Spotify later says the redirect URI is invalid, also add{' '}
-              <code>{status.redirect_uri_exact}</code>.
+              Paste it exactly, including <code>http://</code> and the port. Spotify allows plain
+              http for 127.0.0.1 addresses.
             </span>
           </li>
           <li>
@@ -233,7 +241,7 @@ export default function SpotifyGuide({ onDone, onSkip }: GuideProps) {
               </button>
             </div>
             {waiting ? (
-              <p role="status">Waiting for Spotify sign-in… finish it in the window that opened.</p>
+              <p role="status">Waiting for Spotify sign-in… finish it in your web browser.</p>
             ) : null}
             <span className="sp-hint">
               If Spotify answers 403 later, add your Spotify account under the app's{' '}

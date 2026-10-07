@@ -15,6 +15,7 @@ readable=False.
 from __future__ import annotations
 
 import threading
+import unicodedata
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -24,8 +25,15 @@ from .connection import SpotifyConnection, SpotifyError
 
 LIKED_FEED_ID = "liked"
 PLAYLIST_PREFIX = "playlist:"
-PAGE_MAX = 50
-CACHE_TTL_SECS = 120.0
+PAGE_MAX = 50  # Spotify's per-request cap
+# A feed is loaded whole (every Spotify page) and cached, so sorting and
+# filtering see all 3k+ tracks, not the first 50 (gh#342). Whole-feed loads
+# are the expensive call, so they live longer than the feed list.
+FEED_TTL_SECS = 600.0
+CACHE_TTL_SECS = 600.0  # the feed list samples every feed's last page
+SERVE_MAX = 100_000  # the router pages; this is the cached-feed slice cap
+FETCH_WORKERS = 4
+SORT_KEYS = ("feed", "added", "title", "artist", "length")
 
 
 @dataclass(frozen=True)
@@ -38,6 +46,9 @@ class Feed:
     url: str | None = None
     image_url: str | None = None
     owner: str | None = None
+    # when the feed last gained a track (newest added_at on its last page):
+    # Spotify exposes no modified time, and playlists append at the end
+    last_added_at: str | None = None
 
 
 @dataclass(frozen=True)
@@ -60,10 +71,13 @@ class FeedTrack:
 @dataclass(frozen=True)
 class FeedPage:
     feed_id: str
+    # rows matching the query (what offset/limit page over)
     total: int
     offset: int
     limit: int
     tracks: list[FeedTrack] = field(default_factory=list)
+    # every track in the feed as Spotify counts it (incl. local files/episodes)
+    feed_total: int = 0
 
     @property
     def next_offset(self) -> int | None:
@@ -99,6 +113,41 @@ def _count(playlist: dict[str, Any]) -> int:
     return 0
 
 
+def _norm(text: str) -> str:
+    return unicodedata.normalize("NFKD", text).casefold()
+
+
+def filter_tracks(tracks: list[FeedTrack], query: str) -> list[FeedTrack]:
+    """Every whitespace term must appear in title, an artist, or the album."""
+    terms = [t for t in _norm(query).split() if t]
+    if not terms:
+        return tracks
+    out = []
+    for t in tracks:
+        hay = _norm(" ".join([t.title, *t.artists, t.album or ""]))
+        if all(term in hay for term in terms):
+            out.append(t)
+    return out
+
+
+def sort_tracks(tracks: list[FeedTrack], sort: str, desc: bool) -> list[FeedTrack]:
+    """Stable sort by a SORT_KEYS key; "feed" keeps Spotify's order (reversed
+    when desc). Missing added_at sorts last either way."""
+    if sort == "feed":
+        return list(reversed(tracks)) if desc else list(tracks)
+    if sort == "added":
+        present = [t for t in tracks if t.added_at]
+        missing = [t for t in tracks if not t.added_at]
+        return sorted(present, key=lambda t: t.added_at or "", reverse=desc) + missing
+    if sort == "title":
+        key = lambda t: _norm(t.title)  # noqa: E731
+    elif sort == "artist":
+        key = lambda t: (_norm(", ".join(t.artists)), _norm(t.title))  # noqa: E731
+    else:  # length
+        key = lambda t: t.duration_ms  # noqa: E731
+    return sorted(tracks, key=key, reverse=desc)
+
+
 class SpotifyFeeds:
     """Feed listing and paging over a SpotifyConnection, with a TTL cache."""
 
@@ -114,12 +163,19 @@ class SpotifyFeeds:
         self._lock = threading.Lock()
         self._cache: dict[Any, tuple[float, Any]] = {}
         self._tracks: dict[str, FeedTrack] = {}  # spotify_id -> last seen row
+        self._generation = conn.generation
 
-    def _cached(self, key: Any, fetch: Callable[[], Any], fresh: bool = False) -> Any:
+    def _cached(
+        self, key: Any, fetch: Callable[[], Any], fresh: bool = False, ttl: float | None = None
+    ) -> Any:
         now = self._clock()
         with self._lock:
+            if self._generation != self.conn.generation:  # signed in/out since
+                self._cache.clear()
+                self._tracks.clear()
+                self._generation = self.conn.generation
             hit = self._cache.get(key)
-        if hit and not fresh and now - hit[0] < self.ttl:
+        if hit and not fresh and now - hit[0] < (ttl if ttl is not None else self.ttl):
             return hit[1]
         value = fetch()
         with self._lock:
@@ -170,18 +226,81 @@ class SpotifyFeeds:
                     )
                 )
             url, params = page.get("next"), None
-        return feeds
+        return self._with_last_added(feeds)
 
-    def page(self, feed_id: str, offset: int = 0, limit: int = PAGE_MAX, fresh: bool = False) -> FeedPage:
-        limit = max(1, min(limit, PAGE_MAX))
+    def _with_last_added(self, feeds: list[Feed]) -> list[Feed]:
+        """Sample each readable feed's last page for its newest added_at
+        (one request per feed, pooled) so the rail can sort by activity."""
+        from concurrent.futures import ThreadPoolExecutor
+        from dataclasses import replace
+
+        def last_added(feed: Feed) -> str | None:
+            if not feed.readable or feed.track_count <= 0:
+                return None
+            try:
+                page = self._fetch_page(feed.id, max(0, feed.track_count - PAGE_MAX), PAGE_MAX)
+            except SpotifyError:
+                return None
+            stamps = [t.added_at for t in page.tracks if t.added_at]
+            return max(stamps) if stamps else None
+
+        with ThreadPoolExecutor(max_workers=FETCH_WORKERS) as pool:
+            stamps = list(pool.map(last_added, feeds))
+        return [replace(f, last_added_at=st) for f, st in zip(feeds, stamps)]
+
+    def page(
+        self,
+        feed_id: str,
+        offset: int = 0,
+        limit: int = PAGE_MAX,
+        fresh: bool = False,
+        sort: str = "feed",
+        desc: bool = False,
+        query: str = "",
+    ) -> FeedPage:
+        """A page of the whole feed after filter + sort (server-side, so
+        "latest 50 of 3k" is the latest 50, not the first page's latest)."""
+        limit = max(1, min(limit, SERVE_MAX))
         offset = max(0, offset)
-        page: FeedPage = self._cached(
-            ("page", feed_id, offset, limit), lambda: self._fetch_page(feed_id, offset, limit), fresh
+        if sort not in SORT_KEYS:
+            raise SpotifyError(f"unknown sort {sort!r}", 422)
+        feed_total, tracks = self.all_tracks(feed_id, fresh)
+        rows = filter_tracks(tracks, query)
+        rows = sort_tracks(rows, sort, desc)
+        return FeedPage(
+            feed_id=feed_id,
+            total=len(rows),
+            offset=offset,
+            limit=limit,
+            tracks=rows[offset : offset + limit],
+            feed_total=feed_total,
+        )
+
+    def all_tracks(self, feed_id: str, fresh: bool = False) -> tuple[int, list[FeedTrack]]:
+        """(Spotify's total, every parseable track) for a feed, cached."""
+        result: tuple[int, list[FeedTrack]] = self._cached(
+            ("feed", feed_id), lambda: self._fetch_all(feed_id), fresh, ttl=FEED_TTL_SECS
         )
         with self._lock:
-            for t in page.tracks:
+            for t in result[1]:
                 self._tracks[t.spotify_id] = t
-        return page
+        return result
+
+    def _fetch_all(self, feed_id: str) -> tuple[int, list[FeedTrack]]:
+        """Every page of a feed: the first page serially (learns the total),
+        the rest through a small pool — a 3k-track feed is ~70 requests."""
+        first = self._fetch_page(feed_id, 0, PAGE_MAX)
+        total = first.total
+        offsets = list(range(PAGE_MAX, total, PAGE_MAX))
+        pages: dict[int, FeedPage] = {0: first}
+        if offsets:
+            from concurrent.futures import ThreadPoolExecutor
+
+            with ThreadPoolExecutor(max_workers=FETCH_WORKERS) as pool:
+                for page in pool.map(lambda off: self._fetch_page(feed_id, off, PAGE_MAX), offsets):
+                    pages[page.offset] = page
+        tracks = [t for off in sorted(pages) for t in pages[off].tracks]
+        return total, tracks
 
     def _fetch_page(self, feed_id: str, offset: int, limit: int) -> FeedPage:
         params = {"offset": offset, "limit": limit}

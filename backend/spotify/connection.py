@@ -1,10 +1,9 @@
 """Spotify connection (#347): Authorization Code with PKCE, no client secret.
 
 The user creates their own Spotify app (Development Mode) and gives manaDJ
-its Client ID. Connect sends the browser to Spotify's authorize page with a
-loopback redirect to this backend (`/api/spotify/callback` on 127.0.0.1 —
-Spotify accepts any port for loopback IP literals, RFC 8252 §7.3); the
-callback exchanges the code for tokens.
+its Client ID. Connect starts a fixed-port loopback listener (loopback.py) and sends the
+system browser to Spotify's authorize page with redirect
+http://127.0.0.1:<port>/callback; the callback exchanges the code for tokens.
 
 Persisted in the data root's .env (settings_file.update_secrets):
 SPOTIFY_CLIENT_ID (not a secret, but per-user setup) and
@@ -42,10 +41,6 @@ AUTHORIZE_URL = "https://accounts.spotify.com/authorize"
 TOKEN_URL = "https://accounts.spotify.com/api/token"
 API_BASE = "https://api.spotify.com/v1"
 SCOPES = ("user-library-read", "playlist-read-private", "playlist-read-collaborative")
-CALLBACK_PATH = "/api/spotify/callback"
-# What the user registers in the Spotify dashboard: loopback IP literal, no
-# port (Spotify matches any port for loopback redirects).
-REGISTERED_REDIRECT_URI = f"http://127.0.0.1{CALLBACK_PATH}"
 
 REQUEST_TIMEOUT_SECS = 15.0
 PENDING_TTL_SECS = 15 * 60
@@ -122,15 +117,18 @@ def pkce_pair() -> tuple[str, str]:
     return verifier, challenge
 
 
-def redirect_uri_for_port(port: int | None) -> str:
-    return f"http://127.0.0.1{':' + str(port) if port else ''}{CALLBACK_PATH}"
-
-
 @dataclass
 class _Pending:
     verifier: str
     redirect_uri: str
     created: float
+
+
+class Listener(Protocol):
+    @property
+    def port(self) -> int: ...
+    def start(self) -> None: ...
+    def stop(self) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -146,9 +144,14 @@ class SpotifyConnection:
         self,
         transport: SpotifyTransport | None = None,
         clock: Callable[[], float] = time.monotonic,
+        listener_factory: Callable[[SpotifyConnection], Listener] | None = None,
     ) -> None:
         self.transport: SpotifyTransport = transport or HttpTransport()
         self._clock = clock
+        self._listener_factory = listener_factory or _loopback_listener
+        self._listener: Listener | None = None
+        # bumped whenever the signed-in account may change (Feed caches key on it)
+        self.generation = 0
         self._lock = threading.RLock()
         self._pending: dict[str, _Pending] = {}
         self._access: tuple[str, float] | None = None  # token, expires_at
@@ -166,6 +169,7 @@ class SpotifyConnection:
         return os.environ.get(REFRESH_TOKEN_KEY) or None
 
     def _forget_session(self) -> None:
+        self.generation += 1
         self._access = None
         self._account = None
         self._reconnect = None
@@ -214,11 +218,35 @@ class SpotifyConnection:
 
     # -- authorization ------------------------------------------------------
 
-    def begin(self, redirect_uri: str) -> str:
-        """Start a PKCE authorization; returns the URL to open in a browser."""
+    def redirect_uri(self) -> str:
+        from .loopback import redirect_uri
+
+        listener = self._listener
+        return redirect_uri(listener.port if listener else None)
+
+    def begin(self) -> str:
+        """Start a PKCE authorization: the loopback listener comes up and the
+        returned URL is for the user's browser."""
         client_id = self.client_id
         if not client_id:
             raise SpotifyError("Enter your Spotify app's Client ID first.", 409)
+        with self._lock:
+            if self._listener is None:
+                self._listener = self._listener_factory(self)
+            try:
+                self._listener.start()
+            except OSError as e:
+                self._listener = None
+                raise SpotifyError(
+                    f"Couldn't listen for the Spotify sign-in on {self.redirect_uri()} ({e}). "
+                    "Is another manaDJ connecting to Spotify?",
+                    409,
+                ) from e
+            # stop listening once the sign-in can no longer complete
+            timer = threading.Timer(PENDING_TTL_SECS, self._listener.stop)
+            timer.daemon = True
+            timer.start()
+        redirect_uri = self.redirect_uri()
         verifier, challenge = pkce_pair()
         state = secrets.token_urlsafe(24)
         now = self._clock()
@@ -267,6 +295,28 @@ class SpotifyConnection:
             self._forget_session()
             self._store_access(body)
         return self.account(fresh=True)
+
+    def handle_callback(self, params: dict[str, str]) -> tuple[bool, str, str]:
+        """The loopback redirect: (ok, page title, message)."""
+        code, error = params.get("code"), params.get("error")
+        if error or not code:
+            reason = "you declined access" if error == "access_denied" else (error or "no code returned")
+            return False, "Spotify not connected", f"Spotify sign-in ended: {reason}."
+        try:
+            account = self.complete(params.get("state", ""), code)
+        except SpotifyError as e:
+            return False, "Spotify not connected", str(e)
+        return (
+            True,
+            "Spotify connected",
+            f"Signed in as {account.display_name}. You can close this tab and return to manaDJ.",
+        )
+
+    def stop_listener(self) -> None:
+        with self._lock:
+            listener, self._listener = self._listener, None
+        if listener is not None:
+            listener.stop()
 
     def _store_access(self, body: dict[str, Any]) -> None:
         expires_in = float(body.get("expires_in") or 3600)
@@ -364,6 +414,12 @@ def _describe(body: dict[str, Any], status: int) -> str:
         desc = body.get("error_description")
         return f"HTTP {status}: {err}{f' — {desc}' if desc else ''}"
     return f"HTTP {status}"
+
+
+def _loopback_listener(conn: SpotifyConnection) -> Listener:
+    from .loopback import LoopbackListener, redirect_port
+
+    return LoopbackListener(redirect_port(), conn.handle_callback)
 
 
 _connection: SpotifyConnection | None = None
