@@ -3,11 +3,11 @@ import type { HelpTarget } from './routes';
 
 export const SETTINGS_HELP: Record<string, HelpTarget> = {
   library: { topic: 'curate', anchor: 'importing' },
-  filters: {},
-  effects: {},
-  waveforms: {},
-  'controller-check': {},
-  jog: {},
+  filters: { topic: 'beat-fx', anchor: 'filters' },
+  effects: { topic: 'beat-fx', anchor: 'effects' },
+  waveforms: { topic: 'analysis', anchor: 'automatic-analysis' },
+  'controller-check': { topic: 'controllers', anchor: 'check' },
+  jog: { topic: 'controllers', anchor: 'jog-calibration' },
   'mouse-jog': { topic: 'perform', anchor: 'mouse-jog' },
   shortcuts: { topic: 'perform', anchor: 'keyboard' },
   soundcloud: { topic: 'acquire', anchor: 'soundcloud' },
@@ -21,10 +21,10 @@ export const GUIDE_HELP: Record<string, HelpTarget> = {
   welcome: { topic: 'start', anchor: 'setup' },
   'rekordbox-import': { topic: 'start', anchor: 'rekordbox' },
   'tracks-directory': { topic: 'start', anchor: 'tracks-directory' },
-  'cue-mode': { topic: 'start', anchor: 'cue-mode' },
+  'cue-mode': { topic: 'audio', anchor: 'cue-mode' },
   soundcloud: { topic: 'start', anchor: 'accounts' },
   soulseek: { topic: 'start', anchor: 'accounts' },
-  'controller-check': SETTINGS_HELP.setup,
+  'controller-check': SETTINGS_HELP['controller-check'],
 };
 
 export function guideHelp(id: string): HelpTarget {

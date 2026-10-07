@@ -1,25 +1,55 @@
 [
   {
     "slug": "start",
-    "title": "Getting started",
+    "title": "First run and returning to Setup",
     "anchors": [
       "main",
+      "welcome",
       "setup",
       "rekordbox",
       "tracks-directory",
+      "cue-mode",
+      "accounts",
+      "controller-check",
+      "relaunch",
       "tour",
       "tutorials"
     ]
   },
   {
+    "slug": "acquire",
+    "title": "Acquire Tracks",
+    "anchors": [
+      "main",
+      "prepare",
+      "soundcloud",
+      "review",
+      "download",
+      "soulseek"
+    ]
+  },
+  {
     "slug": "curate",
-    "title": "Library & tagging",
+    "title": "Curate the Library",
     "anchors": [
       "main",
       "importing",
+      "edit-track",
       "tags",
+      "tag-structure",
+      "filters",
       "playlists",
       "archive"
+    ]
+  },
+  {
+    "slug": "analysis",
+    "title": "Analyze Tracks and set cues",
+    "anchors": [
+      "main",
+      "automatic-analysis",
+      "reanalyze",
+      "cues"
     ]
   },
   {
@@ -36,6 +66,17 @@
     ]
   },
   {
+    "slug": "follow",
+    "title": "Follow loaded Tracks",
+    "anchors": [
+      "main",
+      "start-follow",
+      "parameters",
+      "evidence",
+      "temperature"
+    ]
+  },
+  {
     "slug": "editor",
     "title": "Mix editor",
     "anchors": [
@@ -45,6 +86,18 @@
       "audition",
       "promote",
       "blank-mix"
+    ]
+  },
+  {
+    "slug": "sync",
+    "title": "Compare and Sync libraries",
+    "anchors": [
+      "main",
+      "inspect",
+      "import-choices",
+      "performance-data",
+      "external-writes",
+      "playlists"
     ]
   }
 ]
