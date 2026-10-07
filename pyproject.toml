@@ -6,7 +6,6 @@ requires-python = ">=3.13"
 dependencies = [
     "alembic>=1.18.5",
     "beat-this",
-    "essentia>=2.1b6.dev1389",
     "fastapi>=0.122.0",
     "madmom",
     "mutagen>=1.47.0",
@@ -19,6 +18,7 @@ dependencies = [
     "soundfile>=0.13.1",
     "sqlalchemy>=2.0.0,<3.0.0",
     "tomlkit>=0.15.1",
+    "torch==2.9.1",
     "torchaudio==2.9.1",
     "types-requests>=2.33.0.20260518",
     "uvicorn>=0.38.0",
@@ -50,11 +50,24 @@ target-version = "py313"
 # stems is a default group so plain `uv run` never prunes demucs from the venv
 # (the split pipeline invokes it as a subprocess; the backend never imports it —
 # see backend/stems.py import-hygiene note, stems map #118 / #149).
-default-groups = ["dev", "stems"]
+#
+# harness: offline analysis candidates only (harness/*_candidates.py); the app
+# never imports essentia. It has no Windows wheel or sdist, nor a linux-aarch64
+# wheel (#302), so it installs only where wheels exist.
+default-groups = ["dev", "stems", "harness"]
 
 [tool.uv.sources]
 madmom = { git = "https://github.com/CPJKU/madmom" }
 beat-this = { git = "https://github.com/CPJKU/beat_this" }
+# Linux x86_64 PyPI torch is the CUDA build (~3.9 GB with nvidia/triton);
+# take the CPU build there. macOS/Windows PyPI wheels are already CPU (#302).
+torch = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
+torchaudio = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
 
 [dependency-groups]
 dev = [
@@ -64,4 +77,7 @@ dev = [
 ]
 stems = [
     "demucs>=4.0.1",
+]
+harness = [
+    "essentia>=2.1b6.dev1389; sys_platform == 'darwin' or (sys_platform == 'linux' and platform_machine == 'x86_64')",
 ]
