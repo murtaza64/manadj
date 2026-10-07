@@ -11,6 +11,8 @@
  */
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import { pairEditorFallback } from '../routines/openMix';
+import { DEV_SURFACES } from '../devMode';
+import { useAppConfig } from '../settings/useAppConfig';
 import { connectedControllers, subscribeControllers } from '../midi/connectionStore';
 import { isQuantizeOn, setQuantize } from '../playback/quantizeStore';
 import { AudioRoutingPicker } from './AudioRoutingPicker';
@@ -20,6 +22,7 @@ import { MasterRecorderControl } from './MasterRecorderControl';
 import { isVisualizerOpen, toggleVisualizer } from '../visualizer/windowControl';
 import { VisualizerControlModal } from './VisualizerControlModal';
 import { hasKeyboardOverlay, isQuantizeShortcut, isTypingTarget } from './performance/performanceKeys';
+import { TourReplayButton } from '../tour/TourReplayButton';
 import './TopBar.css';
 
 export type AppMode = 'library' | 'performance' | 'transition' | 'routine' | 'history' | 'sync';
@@ -91,6 +94,23 @@ function VisualizerCluster() {
   );
 }
 
+/** ffmpeg health (packaged-app #278): waveforms/analysis/stems all decode
+ * through ffmpeg, so a missing binary is an app-level error state. Renders
+ * nothing while healthy (the overwhelmingly common case). */
+function FfmpegWarning() {
+  const { data } = useAppConfig();
+  if (!data || data.ffmpeg_available) return null;
+  return (
+    <span
+      className="topbar-ffmpeg-warning"
+      role="alert"
+      title="ffmpeg was not found. Waveforms, analysis and stems will fail until it is installed (brew install ffmpeg), then restart manaDJ."
+    >
+      ⚠ ffmpeg missing
+    </span>
+  );
+}
+
 function MidiBadge() {
   const controllers = useSyncExternalStore(subscribeControllers, connectedControllers);
   const on = controllers.length > 0;
@@ -121,9 +141,10 @@ function ModeControl({
 }) {
   const [menu, setMenu] = useState(false);
   // The legacy pair editor rides the overflow only under the dev fallback
-  // flag (or while it IS the active view — never strand the user).
+  // flag in dev builds (packaged-app #278), or while it IS the active view —
+  // never strand the user.
   const overflowModes =
-    pairEditorFallback() || mode === 'transition'
+    (DEV_SURFACES && pairEditorFallback()) || mode === 'transition'
       ? [...OVERFLOW_MODES, PAIR_EDITOR_MODE]
       : OVERFLOW_MODES;
   const activeOverflow = overflowModes.find((m) => m.id === mode);
@@ -138,7 +159,7 @@ function ModeControl({
   }, [menu]);
 
   return (
-    <nav className="topbar-mode-control" aria-label="Mode">
+    <nav className="topbar-mode-control" aria-label="Mode" data-tour="topbar.modes">
       {PRIMARY_MODES.map((m) => (
         <button
           key={m.id}
@@ -242,6 +263,7 @@ export function TopBar({
         onSettingsToggle={onSettingsToggle}
       />
       <div className="topbar-status">
+        <FfmpegWarning />
         <VisualizerCluster />
         <span className="topbar-divider" />
         <TasksWidget />
@@ -253,6 +275,9 @@ export function TopBar({
           <AudioOwnershipChip mode={mode} onModeChange={onModeChange} />
           <MidiBadge />
         </div>
+        <span className="topbar-divider" />
+        {/* Tour replay (feature-tour #282): every section's coach marks. */}
+        <TourReplayButton onModeChange={onModeChange} />
       </div>
     </header>
   );

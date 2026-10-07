@@ -1638,7 +1638,7 @@ export default function RoutineEditorView() {
       </div>
 
       {detail && (
-        <div className="re-transport">
+        <div className="re-transport" data-tour="edit.transport">
           <button
             className={`re-play${playing ? ' on' : ''}${armPending ? ' arming' : ''}`}
             onClick={auditionTogglePlay}
@@ -1765,7 +1765,7 @@ export default function RoutineEditorView() {
       )}
 
       <div className="re-body">
-        <div className="re-main">
+        <div className="re-main" data-tour="edit.main">
           {!detail && (
             <div className="re-empty">
               Open a mix with the picker at the right — name two tracks to land on their

@@ -1326,7 +1326,7 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
           convention, the view's primary action), secondary actions
           right. The transport never shrinks or moves at narrow widths;
           the side zones wrap first. */}
-      <div className="set-header" ref={headerRef}>
+      <div className="set-header" data-tour="sets.header" ref={headerRef}>
         <span className="set-header-left">
           {set?.color && (
             <span
@@ -1509,6 +1509,7 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
       <div
         ref={paneRef}
         className={moveIds ? 'set-move-mode' : undefined}
+        data-tour="sets.entries"
         tabIndex={-1}
         onKeyDownCapture={(e) => {
           if (!moveIds) return;

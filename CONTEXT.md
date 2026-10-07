@@ -28,11 +28,21 @@ manadj as a downloadable macOS app for users other than the developer: one bundl
 _Avoid_: release build, native app
 
 **First run**:
-The state of a manadj with an empty Library. Offers the ways in — Import from Rekordbox, adding a tracks directory, or skipping — before anything else.
+The state of a manadj with an empty Library. Starts the Setup sequence before anything else.
+
+**Setup guide**:
+A short, skippable, independently re-runnable flow configuring one thing: Rekordbox import, tracks directory, Cue mode, SoundCloud, Soulseek, Controller check. First run chains them in order (the Setup sequence), then starts the Tour; Settings lists each with its status (done, skipped, not started) and relaunches any of them alone.
+
+**Shipped defaults**:
+The preference values a fresh install starts with — a deliberate snapshot of the developer's own preferences, excluding anything machine- or account-bound (device IDs, paths, tokens, Export enablement). A user's own setting always wins; re-snapshotting changes only what fresh or never-touched keys see.
 
 **Tour**:
-Per-section coach marks shown the first time a user enters each major area of the app, replayable on demand. Explains the UI; changes no Library state.
-_Avoid_: tutorial, walkthrough (Walkthrough is the lane review artifact)
+Per-section coach marks shown the first time a user enters each major area of the app, replayable on demand. Explains the UI; changes no Library state. Settings has no Tour.
+_Avoid_: walkthrough (Walkthrough is the lane review artifact)
+
+**Tutorial**:
+A hands-on lesson where each step advances only when the user actually performs the taught action (load a Track, press play, nudge, set a Hot Cue, edit a Transition) — game-like, not read-and-click-next. Distinct from the Tour, which only points at UI. Triggered by first contact with the skill (the Keyboard DJing tutorial on the first Load onto a Deck; the Transition tutorial on first entering the Mix editor), skippable, replayable. Tutorials may create real artifacts (a Transition saved during the lesson is an ordinary Transition).
+_Avoid_: walkthrough
 
 ### Curation
 
@@ -372,6 +382,9 @@ Sessions replay the recorded loop-exit landing, including from a mid-loop start.
 An app-wide sticky toggle (default on) making beat-relative performance gestures grid-aligned: cue and Hot Cue placement snap to the nearest beat, auto-loop regions snap to the nearest beat, and Hot Cue jumps while playing are phase-preserving — a whole-beat displacement landing at the cue plus the playhead's intra-beat phase, so the groove never stumbles. Evaluated at gesture time; imports are not gestures and never snap. Gridless Tracks behave as if it were off. Beat jump (inherently whole-beat), cue return, paused-cue seeks, loop halve/double, and Transition-editor snapping are outside its authority.
 _Avoid_: snap (the Transition editor's separate affordance), quantization (the Analysis sense — see Quantized track)
 
+**Cue mode**:
+An app-wide preference for what pressing a Hot Cue does on a paused Deck. **Gated** (default): holding previews from the cue and releasing returns to it. **Trigger**: pressing jumps to the cue and starts playback, which continues after release. Hot Cues on a playing Deck jump in either mode; the Main cue keeps its CDJ hold behavior regardless.
+
 **Key Lock**:
 A sticky per-Deck setting (default on): playback-rate changes on that Deck (pitch fader, Nudge) do not shift the loaded Track's Key. Scratching bypasses it until release. Belongs to the Deck — not to the Track, not to the Mixer. Named tension: DJ-jargon *pitch* (the fader, the Deck's ±% rate) changes tempo; Key Lock keeps the *musical* pitch — the Key — constant while it does. Also known as master tempo (Pioneer).
 _Avoid_: "pitch-preserving", "pitch shift" — "pitch" already means the rate control.
@@ -521,14 +534,14 @@ _Avoid_: publish, push, write-to-files (that's Export to Disk)
 Any operation that brings tracks or track data into manadj. Two kinds: Disk Import and External Import.
 
 **Disk Import**:
-New audio files from the tracks directory becoming Tracks: a Scan discovers candidates, accepting a candidate creates a Track.
+New audio files becoming Tracks, always imported in place (the Track points at the file where it sits; nothing is copied). Two entry points: a Scan of the tracks directory discovers candidates and accepting one creates a Track; or files/folders dropped onto the Library from anywhere on disk (folders recurse, non-audio ignored, files already Tracks — archived included — skipped). Dropping onto a Playlist also appends the new Tracks to it.
 
 **External Import**:
 A Sync operation that pulls state from an external library into manadj, for data that originated downstream — keys/BPM analyzed in Engine, hot cues set at a gig, tracks added elsewhere first. Less common than Export but routine, not exceptional. The counterpart of Export.
 _Avoid_: pull, Library Import
 
 **Scan**:
-The discovery step of a Disk Import: finding audio files in the tracks directory that are not yet Tracks and proposing them as candidates.
+The discovery step of a tracks-directory Disk Import: finding audio files in the tracks directory that are not yet Tracks and proposing them as candidates. A drop needs no Scan — the dropped files are the selection.
 
 **Diverged**:
 A track field (title, artist, key, BPM, energy, Tag assignment, Hot Cues, Beatgrid, Main cue) whose value differs between the Library and another Surface. The default resolution is Export (manadj wins); Import is the explicit exception. Set-valued fields (Tag assignment, Hot Cues) compare as whole sets; a placeholder grid counts as absent, not as a value that can diverge.
