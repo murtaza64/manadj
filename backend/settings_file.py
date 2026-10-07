@@ -53,7 +53,7 @@ enabled = false
 def _document() -> tomlkit.TOMLDocument:
     path = settings_file_path()
     if path.exists():
-        return tomlkit.parse(path.read_text())
+        return tomlkit.parse(path.read_text(encoding="utf-8"))
     return tomlkit.parse(_FRESH_TEMPLATE)
 
 
@@ -84,4 +84,4 @@ def update_settings_file(changes: dict[str, Any]) -> None:
             del table[key]
     path = settings_file_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(tomlkit.dumps(doc))
+    path.write_text(tomlkit.dumps(doc), encoding="utf-8")

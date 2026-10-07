@@ -50,7 +50,7 @@ export function TourReplayButton({
     <span className="tour-replay">
       <button
         className="tour-replay-button"
-        title="Tour: replay a section's guided walkthrough"
+        title="Help: hands-on Tutorials and UI Tours"
         aria-haspopup="menu"
         aria-expanded={menu}
         onClick={() => setMenu((v) => !v)}
