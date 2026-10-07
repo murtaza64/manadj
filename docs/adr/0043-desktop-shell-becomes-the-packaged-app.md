@@ -25,3 +25,23 @@ Status: accepted 2026-10-06 (onboarding for outside users). Supersedes the
   human-readable TOML file in the data root, revealable from Settings.
 - Export to External libraries is off by default (Settings toggle); outside
   users get Import only until they opt in.
+
+## Amendment 2026-10-07: Windows x64 (cross-platform #299, #317)
+
+- Targets: Apple Silicon macOS **and Windows x64**. The Windows build ships
+  in prereleases and v0.1.0 marked **untested on Windows hardware** until
+  the hardware session (#316). Linux stays deferred (#320/#321); Windows
+  arm64 is out of scope (no torch/essentia builds).
+- Same architecture as macOS: Electron owns a bundled python-build-standalone
+  3.13 runtime (x86_64-pc-windows-msvc, deps installed in-place) plus a
+  bundled ffmpeg (BtbN LGPL win64 static); the backend serves the built
+  frontend on `127.0.0.1`. Data root `%APPDATA%\manaDJ`.
+- Built on GitHub Actions `windows-latest` (madmom compiles there with MSVC)
+  from the same commit as the DMG; `scripts/release/release.py` attaches
+  both artifacts to one GitHub Release.
+- Installer: Inno Setup, per-user (no admin), `%LOCALAPPDATA%\Programs\manaDJ`;
+  NSIS was ruled out by its 2 GB cap against a 1–3 GB runtime. Unsigned:
+  users click through SmartScreen; signing is a separate decision (#318).
+- Backend supervision is OS-neutral (#314): a token-guarded shutdown hook
+  replaces signal-only stops (Windows `kill()` is TerminateProcess), with a
+  process-tree kill fallback and a stdin lifeline against orphans.

@@ -7,7 +7,7 @@ versions follow [Semantic Versioning](https://semver.org/). Install: [docs/insta
 
 ## [0.1.0] - 2026-10-07
 
-First public release: a DJ library manager and performance app for Apple Silicon Macs.
+First public release: a DJ library manager and performance app for Apple Silicon Macs, with a Windows x64 build marked untested on Windows hardware.
 
 ### Library
 - Library of Tracks from your tracks folder, with Tags, Tag Categories, Genre and Energy for curation.
@@ -40,8 +40,9 @@ First public release: a DJ library manager and performance app for Apple Silicon
 - Settings for audio routing, filters, Beat FX, waveforms and jog wheels; your library, settings and logs live in `~/Library/Application Support/manaDJ`.
 
 ### Known limitations
-- Apple Silicon (M1 or later) Macs only; no Intel or Windows build.
-- Not notarized: the first launch needs right-click → Open (see [docs/install.md](docs/install.md)).
+- macOS: Apple Silicon (M1 or later) only; no Intel build.
+- Windows x64: untested on Windows hardware; unsigned (SmartScreen "Run anyway"); stem splitting and audio/controller routing not yet validated there. No Windows on ARM.
+- macOS build not notarized: the first launch needs right-click → Open (see [docs/install.md](docs/install.md)).
 - Export to Rekordbox/Engine DJ is off until enabled in Settings.
 - No auto-update: download new versions from GitHub Releases.
 - The first launch takes longer than later ones while manaDJ prepares its database and analysis engine.

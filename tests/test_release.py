@@ -63,7 +63,7 @@ def test_roll_changelog():
 
 def test_prerelease_notes_use_base_section_and_install_doc():
     notes = release.release_notes(CHANGELOG, "# Installing\n\n1. Drag.\n", "0.1.0-rc.1")
-    assert "Prerelease 0.1.0-rc.1" in notes
+    assert "Preview build" in notes and "0.1.0-rc.1" in notes
     assert "First release." in notes
     assert "## Install\n\n1. Drag." in notes
     assert "# Installing" not in notes

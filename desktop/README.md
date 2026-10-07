@@ -96,6 +96,13 @@ incidents leave evidence even in attach mode (stability #188).
 - Chrome `--app=` mode can't own dock identity, MIDI permission grants, or
   throttling flags, and can't show the retry page.
 
+Stopping (#314): the shell POSTs a token-guarded shutdown hook
+(`backend/serve.py`, token in `MANADJ_SHELL_TOKEN`), waits, then kills the
+process tree (`taskkill /T /F` on Windows, process group on POSIX); the quit
+is held until the backend is gone. The backend also exits on stdin EOF (shell
+crash). Windows packaged layout: `resources\python\python.exe`, data root
+`%APPDATA%\manaDJ` (`scripts/release/build_windows.py`, #317).
+
 Distribution: ADR 0043 supersedes the old "not a distributable" stance —
 packaged builds run managed mode with a bundled python/ffmpeg/frontend
 (packaged-app #280).

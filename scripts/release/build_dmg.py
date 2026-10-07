@@ -95,8 +95,13 @@ def pyproject_version() -> str:
 
 
 def run(cmd: list[str], **kwargs) -> subprocess.CompletedProcess:
-    print(f"  $ {' '.join(str(c) for c in cmd)}")
-    return subprocess.run([str(c) for c in cmd], check=True, **kwargs)
+    print(f"  $ {' '.join(str(c) for c in cmd)}", flush=True)
+    args = [str(c) for c in cmd]
+    # Windows: npm/npx are .cmd shims that CreateProcess can't run by bare name.
+    resolved = shutil.which(args[0])
+    if resolved:
+        args[0] = resolved
+    return subprocess.run(args, check=True, **kwargs)
 
 
 def step(name: str) -> None:
@@ -115,14 +120,23 @@ def build_frontend(version: str) -> None:
         run(["npm", "install", "--no-audit", "--no-fund"], cwd=fe)
     # Never bake an API URL; stamp the (possibly prerelease) version (#298).
     env = {**os.environ, "VITE_API_URL": "", "MANADJ_APP_VERSION": version}
-    run(["npm", "run", "build"], cwd=fe, env=env)
+    # The `prebuild` hook (gen:keys) runs `uv run --project ..`, i.e. a full
+    # project sync — which fails on Windows (essentia, #302) and is wasted
+    # work here. The generator only needs stdlib backend/key.py: run it
+    # project-less, then build with pre/post hooks skipped.
+    run(["uv", "run", "--no-project", "python", "scripts/export/gen_key_table.py"], cwd=ROOT)
+    run(["npm", "run", "build", "--ignore-scripts"], cwd=fe, env=env)
 
 
 # --- python runtime -------------------------------------------------------------
 
 
-def export_requirements() -> Path:
-    """Lock -> requirements for the bundle: no dev tools, stems included."""
+def export_requirements(exclude: tuple[str, ...] = ()) -> Path:
+    """Lock -> requirements for the bundle: no dev tools, stems included.
+
+    `exclude`: distribution names to drop (Windows drops essentia — no wheel
+    or sdist there, harness-only import; proper markers are #302's job).
+    """
     reqs = BUILD / "requirements.txt"
     run(
         [
@@ -131,6 +145,12 @@ def export_requirements() -> Path:
         ],
         cwd=ROOT,
     )
+    if exclude:
+        kept = [
+            line for line in reqs.read_text().splitlines()
+            if not any(line.split("==")[0].split(" @ ")[0].strip() == name for name in exclude)
+        ]
+        reqs.write_text("\n".join(kept) + "\n")
     return reqs
 
 
