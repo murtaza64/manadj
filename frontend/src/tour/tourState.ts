@@ -23,8 +23,7 @@ export type TourSectionId =
   | 'sync'
   | 'sets'
   | 'sessions'
-  | 'history'
-  | 'settings';
+  | 'history';
 
 interface TourProgress {
   seen: Partial<Record<TourSectionId, boolean>>;
@@ -121,8 +120,10 @@ export function setLibrarySubview(subview: LibrarySubview): void {
   notify();
 }
 
-/** The section whose tour should fire for the current screen. */
-export function activeTourSection(): TourSectionId {
+/** The section whose tour should fire for the current screen; null where
+ * no tour runs (Settings has none — #324). */
+export function activeTourSection(): TourSectionId | null {
+  if (baseArea === 'settings') return null;
   if (baseArea === 'library' && librarySubview) return librarySubview;
   return baseArea;
 }

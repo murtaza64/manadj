@@ -358,6 +358,7 @@
   display: contents;
 }
 
+
 /* The toggle hides every on-control key hint */
 .perf-root.kbd-hints-off .perf-kbd { display: none; }
 
@@ -660,6 +661,23 @@
   font-style: italic;
   color: var(--overlay0);
 }
+
+/* Footer hand-off to the full tag editor (TagManagementModal) */
+.perf-tagpop-manage {
+  align-self: flex-start;
+  padding: var(--space-4) var(--space-8);
+  font-size: var(--font-small);
+  background: transparent;
+  border: 1px solid var(--surface1);
+  color: var(--subtext1);
+  cursor: pointer;
+}
+.perf-tagpop-manage:hover {
+  background: var(--surface0);
+  border-color: var(--text);
+  color: var(--text);
+}
+.perf-tagpop-manage:active { background: var(--surface1); }
 
 /* Energy picker: five mini squares, the set one lit */
 .perf-energy-picker { display: flex; gap: var(--space-2); flex-shrink: 0; }
@@ -1384,8 +1402,8 @@
 .perf-kbd-inline .perf-kbd { position: static; border: 0; padding: 0; }
 
 /* Retain the character's advance; replace the font's narrow, low Shift glyph. */
-.perf-kbd-shift { position: relative; color: transparent; }
-.perf-kbd-shift > svg {
+.perf-kbd-shift, .perf-kbd-ctrl { position: relative; color: transparent; }
+.perf-kbd-shift > svg, .perf-kbd-ctrl > svg {
   position: absolute;
   width: 100%;
   height: 0.9em;

@@ -278,11 +278,7 @@ export function TopBar({
         </div>
         <span className="topbar-divider" />
         {/* Tour replay (feature-tour #282): every section's coach marks. */}
-        <TourReplayButton
-          onModeChange={onModeChange}
-          settingsOpen={settingsOpen}
-          onSettingsToggle={onSettingsToggle}
-        />
+        <TourReplayButton onModeChange={onModeChange} />
       </div>
     </header>
   );

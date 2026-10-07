@@ -37,8 +37,12 @@ A short, skippable, independently re-runnable flow configuring one thing: Rekord
 The preference values a fresh install starts with — a deliberate snapshot of the developer's own preferences, excluding anything machine- or account-bound (device IDs, paths, tokens, Export enablement). A user's own setting always wins; re-snapshotting changes only what fresh or never-touched keys see.
 
 **Tour**:
-Per-section coach marks shown the first time a user enters each major area of the app, replayable on demand. Explains the UI; changes no Library state.
-_Avoid_: tutorial, walkthrough (Walkthrough is the lane review artifact)
+Per-section coach marks shown the first time a user enters each major area of the app, replayable on demand. Explains the UI; changes no Library state. Settings has no Tour.
+_Avoid_: walkthrough (Walkthrough is the lane review artifact)
+
+**Tutorial**:
+A hands-on lesson where each step advances only when the user actually performs the taught action (load a Track, press play, nudge, set a Hot Cue, edit a Transition) — game-like, not read-and-click-next. Distinct from the Tour, which only points at UI. Triggered by first contact with the skill (the Keyboard DJing tutorial on the first Load onto a Deck; the Transition tutorial on first entering the Mix editor), skippable, replayable. Tutorials may create real artifacts (a Transition saved during the lesson is an ordinary Transition).
+_Avoid_: walkthrough
 
 ### Curation
 
@@ -544,7 +548,7 @@ A track field (title, artist, key, BPM, energy, Tag assignment, Hot Cues, Beatgr
 _Avoid_: discrepancy (implementation term)
 
 **Match**:
-The association between a Track and its counterpart in an external library, established during a Sync operation by file path, falling back to filename. Recomputed each run; not persisted.
+The association between a Track and its counterpart in an external library, established during a Sync operation by file path, falling back to filename. Paths compare by identity, not spelling: `/` and `\` separators are equal, Unicode is NFC-normalized, and on Windows case is ignored. Recomputed each run; not persisted.
 
 **Sync inbox**:
 The default unified-sync presentation: every attention-worthy track appears exactly once, in the highest-priority section that applies. Answers "what should I deal with, in what order" — a triage view, not a query.

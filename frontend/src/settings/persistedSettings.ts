@@ -62,6 +62,7 @@ export const PERSISTED_SETTING_KEYS: readonly string[] = [
   'manadj-audio-routing',
   'manadj-keylock',
   'manadj-quantize',
+  'manadj-cue-mode',
   'manadj-crossfader-assignments',
   'manadj-crossfader-enabled',
   'manadj-filter-settings',
@@ -70,6 +71,8 @@ export const PERSISTED_SETTING_KEYS: readonly string[] = [
   'manadj.grv6JogCalibration',
   // Coach-mark tour progress (feature-tour #282)
   'manadj-tour-state',
+  // Setup guides (guide status: done / skipped)
+  'manadj-setup-state',
 ];
 
 // Dynamic-key families (key = prefix + id), also preferences.
@@ -77,7 +80,10 @@ export const PERSISTED_SETTING_PREFIXES: readonly string[] = [
   'manadj-visualizer-params:', // per-preset visualizer param overrides
 ];
 
-const BACKEND_URL = import.meta.env.VITE_API_URL || 'http://localhost:8127';
+// Same resolution as api/client.ts: production builds default to same-origin
+// (backend-served frontend, packaged app #279).
+const BACKEND_URL =
+  import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://localhost:8127' : '');
 const API_BASE = `${BACKEND_URL}/api/settings`;
 // Per-origin recovery journal, not a library preference or part of the seed inventory.
 const PENDING_KEY = 'manadj-pending-settings';
