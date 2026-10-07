@@ -51,18 +51,6 @@ jobs:
       - name: pytest
         run: |
           deselect=()
-          # #333: managed-slskd tests launch a shebang fake binary (Windows
-          # can't exec it; macOS runner times out) and assert POSIX modes.
-          if [ "$RUNNER_OS" != "Linux" ]; then
-            for t in test_supervisor_start_health_stop test_supervisor_surfaces_login_issue \
-                     test_supervisor_gives_up_after_crashes test_supervisor_moves_taken_port \
-                     test_router_guide_flow; do
-              deselect+=(--deselect "tests/test_soulseek_managed.py::$t")
-            done
-          fi
-          if [ "$RUNNER_OS" = "Windows" ]; then
-            deselect+=(--deselect tests/test_soulseek_managed.py::test_store_roundtrip_in_dotenv)
-          fi
           uv run --no-sync pytest -q -p no:cacheprovider "${deselect[@]}"
 
       - name: backend boot smoke

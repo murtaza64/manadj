@@ -140,7 +140,13 @@ def get_store() -> ManagedSoulseekStore:
 
 def _port_free(port: int) -> bool:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        # Windows SO_REUSEADDR lets a bind steal a port another socket is
+        # listening on, so it would report taken ports free; exclusive-use
+        # is the Windows equivalent of POSIX bind semantics.
+        if sys.platform == "win32":
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)  # type: ignore[attr-defined]
+        else:
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
             s.bind(("127.0.0.1", port))
         except OSError:
