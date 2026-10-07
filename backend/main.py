@@ -2,6 +2,7 @@
 
 import os
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from alembic import command as alembic_command
 from alembic.config import Config as AlembicConfig
@@ -12,7 +13,12 @@ from .acquisition import models as acquisition_models  # noqa: F401  (registers 
 from .acquisition.router import router as acquisition_router
 from .tasks import models as task_models  # noqa: F401  (registers tables on Base)
 from .tasks.worker import TaskWorker
+from .soulseek import router as soulseek_router
 from .logging_config import setup_logging
+
+if TYPE_CHECKING:
+    from .config import Config
+    from .tasks.manager import Handler
 
 # Configure logging with colors and override uvicorn handlers
 setup_logging()
@@ -83,6 +89,7 @@ app.include_router(cameos.router, prefix="/api/cameos", tags=["cameos"])
 app.include_router(visualizer_ga.router, prefix="/api/ga", tags=["visualizer-ga"])
 app.include_router(settings.router, prefix="/api/settings", tags=["settings"])
 app.include_router(app_config.router, prefix="/api/config", tags=["app-config"])
+app.include_router(soulseek_router.router, prefix="/api/soulseek", tags=["soulseek"])
 
 
 
@@ -171,15 +178,7 @@ def _build_task_worker() -> "TaskWorker | None":
         )
 
     if slskd is not None:
-        from .acquisition.download import SOULSEEK_TASK_TYPE, soulseek_download_handler
-        from .acquisition.searches import SOULSEEK_SEARCH_TASK_TYPE, soulseek_search_handler
-
-        handlers[SOULSEEK_TASK_TYPE] = soulseek_download_handler(
-            slskd, Path(config.library.tracks_directory), config.acquisition.cleanup
-        )
-        handlers[SOULSEEK_SEARCH_TASK_TYPE] = soulseek_search_handler(
-            slskd, config.acquisition.cleanup
-        )
+        handlers.update(_soulseek_handlers(config))
     else:
         logging.getLogger("backend.main").info(
             "soulseek download handler not registered: [soulseek]/SLSKD_API_KEY unset"
@@ -189,6 +188,35 @@ def _build_task_worker() -> "TaskWorker | None":
         return None
     return TaskWorker(SessionLocal, handlers, delays=delays)
 
+
+def _soulseek_handlers(config: "Config") -> dict[str, "Handler"]:
+    """soulseek-download + soulseek-search handlers over the configured slskd."""
+    from .acquisition.download import SOULSEEK_TASK_TYPE, soulseek_download_handler
+    from .acquisition.searches import SOULSEEK_SEARCH_TASK_TYPE, soulseek_search_handler
+    from .acquisition.slskd import SlskdSupplier
+
+    assert config.soulseek.slskd_url is not None and config.soulseek.api_key is not None
+    assert config.library.tracks_directory is not None
+    slskd = SlskdSupplier(config.soulseek.slskd_url, config.soulseek.api_key)
+    return {
+        SOULSEEK_TASK_TYPE: soulseek_download_handler(
+            slskd, Path(config.library.tracks_directory), config.acquisition.cleanup
+        ),
+        SOULSEEK_SEARCH_TASK_TYPE: soulseek_search_handler(slskd, config.acquisition.cleanup),
+    }
+
+
+def _on_soulseek_configured() -> None:
+    """The Soulseek guide configured the managed slskd mid-session (#291):
+    give the live worker its handlers without a backend restart."""
+    from .config import get_config
+
+    config = get_config()
+    if _task_worker is not None and config.soulseek.configured and config.library.tracks_directory:
+        _task_worker.add_handlers(_soulseek_handlers(config))
+
+
+soulseek_router.on_configured = _on_soulseek_configured
 
 _task_worker: "TaskWorker | None" = None
 
@@ -211,6 +239,14 @@ async def startup_event():
         logging.getLogger("backend.main").error(
             "%s — waveforms, analysis and stems will fail until it is installed", exc
         )
+
+    # Managed slskd (#291): before the worker, so Soulseek tasks find it up.
+    from .config import get_config as _get_config
+
+    if _get_config().soulseek.managed:
+        from .soulseek.supervisor import get_supervisor
+
+        get_supervisor().start()
     if os.getenv("DISABLE_TASK_WORKER", "").lower() not in ("true", "1", "yes"):
         _task_worker = _build_task_worker()
         if _task_worker is not None:
@@ -282,6 +318,9 @@ async def shutdown_event():
     """Stop background workers on server shutdown."""
     if _task_worker is not None:
         _task_worker.stop()
+    from .soulseek.supervisor import get_supervisor
+
+    get_supervisor().stop()
 
 
 # Serve the built frontend when one exists (packaged app, ADR 0043). Mounted

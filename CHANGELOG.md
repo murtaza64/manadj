@@ -12,6 +12,7 @@ versions follow [Semantic Versioning](https://semver.org/). Install: [docs/insta
 - Added an action-gated Keyboard DJing Tutorial, replayable from ? and Settings → Help → Tutorials (#322).
 - Controller check (Settings → Controllers; also a Setup guide): pick Master/Cue outputs with a test tone on each, see whether your MIDI controller has a Mapping, press any control to see it light up, and open jog calibration for the DDJ-GRV6.
 - Added the explainer site with keyboard DJing, real-app video clips, and a GitHub Pages build workflow (#294).
+- Soulseek: manaDJ bundles and runs slskd itself — enter a Soulseek username/password in Settings → Accounts → Soulseek (also a Setup guide). An existing slskd configured via `slskd_url` + `SLSKD_API_KEY` still takes precedence.
 
 - Added a hands-on Transition Tutorial covering Track selection, Slide, automation, audition and confirmed autosave (#323).
 - Revised Tour orientation copy, explicit dismissal and popover positioning; Tours and hands-on Tutorials are labeled separately (#332).

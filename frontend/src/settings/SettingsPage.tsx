@@ -31,6 +31,7 @@ const ControllerCalibrationSettings = lazy(() => import('./ControllerCalibration
 const MouseJogSettings = lazy(() => import('./MouseJogSettings'));
 const LibrarySettings = lazy(() => import('./LibrarySettings'));
 const ControllerCheckSettings = lazy(() => import('../setup/controllerCheck/ControllerCheckSettings'));
+const SoulseekSettings = lazy(() => import('../setup/soulseek/SoulseekSettings'));
 const PARAMS = [
   {
     key: 'resonance',
@@ -421,7 +422,7 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
     detail: 'SoundCloud, Soulseek',
     sections: [
       // slot: SoundCloud (#290)
-      // slot: Soulseek (#291)
+      { id: 'soulseek', title: 'Soulseek', render: () => <SoulseekSettings /> },
     ],
   },
   {

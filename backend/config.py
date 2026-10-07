@@ -88,6 +88,9 @@ class SoulseekConfig:
     """
     slskd_url: str | None = None
     api_key: str | None = None
+    # True when the values point at manadj's own supervised slskd (#291)
+    # rather than a user-run daemon.
+    managed: bool = False
 
     @property
     def configured(self) -> bool:
@@ -201,12 +204,24 @@ def _stems_config(data: dict[str, Any]) -> StemsConfig:
 
 
 def _soulseek_config(data: dict[str, Any]) -> SoulseekConfig:
-    """[soulseek] slskd_url from config.toml; the API key from env/.env only."""
+    """[soulseek] slskd_url from config.toml; the API key from env/.env only.
+
+    Unset => fall back to the managed slskd (#291) when the Soulseek guide
+    stored credentials and the binary is shipped.
+    """
     section: dict[str, Any] = data.get("soulseek", {})
-    return SoulseekConfig(
+    external = SoulseekConfig(
         slskd_url=section.get("slskd_url") or None,
         api_key=os.environ.get("SLSKD_API_KEY") or None,
     )
+    if external.configured:
+        return external
+    from backend.soulseek.managed import get_store, resolve_binary
+
+    managed = get_store().load()
+    if managed is not None and resolve_binary() is not None:
+        return SoulseekConfig(slskd_url=managed.url, api_key=managed.api_key, managed=True)
+    return external
 
 
 def _soundcloud_token(data: dict[str, Any]) -> str | None:
