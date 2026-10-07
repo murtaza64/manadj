@@ -1,8 +1,15 @@
 # manadj Desktop shell
 
-Attach-only Electron window around a running manadj. Owns no processes or
-state — `make dev` still runs the backend and Vite; this is just the window
-(dock icon, no MIDI prompts, no background throttling).
+Electron window around manadj, in two modes (packaged-app #279, ADR 0043):
+
+- **attach** (dev, default): window around an already-running manadj. Owns
+  no processes or state — `make dev` still runs the backend and Vite; this
+  is just the window (dock icon, no MIDI prompts, no background throttling).
+- **managed** (packaged builds, or `--managed`): the shell owns the backend.
+  It picks a free port, spawns uvicorn (`backend.js`), waits for health,
+  loads it (the backend serves `frontend/dist` — `backend/spa.py`), and
+  stops it on quit. Startup failures render an error page with a log tail,
+  never an endless splash.
 
 ## Usage
 
@@ -11,6 +18,23 @@ state — `make dev` still runs the backend and Vite; this is just the window
     make app              # window only — attaches to http://localhost:5173
     make app PORT=5193    # attaches to a lane's Vite port
     npx electron . --url http://localhost:5193   # arbitrary URL
+
+Managed mode (the packaged app's flow, runnable from a checkout — needs a
+built `frontend/dist`):
+
+    cd frontend && npm run build
+    cd desktop && npx electron . --managed
+
+Managed-mode resolution, overridable via env (packaged defaults in
+`backend.js`): `MANADJ_PYTHON` (default `.venv/bin/python3`; packaged
+`<resources>/python/bin/python3`), `MANADJ_BACKEND_ROOT` (repo-shaped tree;
+packaged `<resources>/backend`), `MANADJ_DATA_DIR` (packaged default
+`~/Library/Application Support/manaDJ`, exported to the backend),
+`MANADJ_FFMPEG_DIR` (prepended to PATH). The backend binds `127.0.0.1` on a
+free port; the shell captures its stdout/stderr to
+`<data root>/logs/shell-backend.log` (no data root:
+`~/Library/Logs/manaDJ/shell-backend.log`). Packaged builds also set
+`MANADJ_PACKAGED=1` (`backend/data_root.py`).
 
 Profiling:
 
@@ -72,8 +96,9 @@ incidents leave evidence even in attach mode (stability #188).
 - Chrome `--app=` mode can't own dock identity, MIDI permission grants, or
   throttling flags, and can't show the retry page.
 
-Not a distributable: no Python/ffmpeg/frontend bundling. Deliberate — see the
-issue file.
+Distribution: ADR 0043 supersedes the old "not a distributable" stance —
+packaged builds run managed mode with a bundled python/ffmpeg/frontend
+(packaged-app #280).
 
 ## Troubleshooting
 

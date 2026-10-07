@@ -19,13 +19,14 @@
  * deck is refused with a hint — in this view a deck is replaced only
  * deliberately. The library view keeps replace-freely.
  */
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { registerBrowseHost, sharedBrowseHandle } from '../browseHost';
 import { DeckScope } from '../../contexts/DeckContext';
 import { useViewActive } from '../../contexts/viewActive';
 import { useBrowseActive } from '../../contexts/browseActive';
 import { useDecks } from '../../hooks/useDeck';
 import { isDeckLocked } from './deckLock';
+import { DeckDropContext, type DeckDropPolicy } from '../../selection/deckDrop';
 import type { ChannelId } from '../../playback/mixer';
 import type { Track } from '../../types';
 import { DeckPanel, DeckWaveform } from './DeckPanel';
@@ -103,20 +104,34 @@ export function PerformanceView() {
   // All load paths in this view (row buttons, double-click, ←/→/Enter) go
   // through here. The callback stays stable between deck-count changes
   // (memoized rows depend on it).
+  const flashLockHint = useCallback((deck: ChannelId) => {
+    setLockHint(deck);
+    if (lockHintTimer.current) clearTimeout(lockHintTimer.current);
+    lockHintTimer.current = setTimeout(() => setLockHint(null), LOCK_HINT_MS);
+  }, []);
   const tryLoad = useCallback(
     (deck: ChannelId, track: Track) => {
       if (deckCount === 2) deck = deck === 'C' ? 'A' : deck === 'D' ? 'B' : deck;
       const target = decks[deck];
       const engine = target.engine;
       if (isDeckLocked(engine)) {
-        setLockHint(deck);
-        if (lockHintTimer.current) clearTimeout(lockHintTimer.current);
-        lockHintTimer.current = setTimeout(() => setLockHint(null), LOCK_HINT_MS);
+        flashLockHint(deck);
         return;
       }
       target.loadTrack(track);
     },
-    [decks, deckCount]
+    [decks, deckCount, flashLockHint]
+  );
+
+  // Drag-to-Load (gh#296): waveform rows + Deck panels accept track drags
+  // through the same load-locked path; a running Deck refuses on hover.
+  const deckDropPolicy = useMemo<DeckDropPolicy>(
+    () => ({
+      load: tryLoad,
+      isRefused: (deck) => isDeckLocked(decks[deck].engine),
+      onRefused: flashLockHint,
+    }),
+    [tryLoad, decks, flashLockHint]
   );
 
   // This view's load policy for the shared browse panel (gh#165): row
@@ -211,6 +226,7 @@ export function PerformanceView() {
     >
       {/* Performance surface — content-sized; the shared browse panel
           below (App-level BrowsePanel, gh#165) gets every remaining pixel. */}
+      <DeckDropContext.Provider value={deckDropPolicy}>
       <div className="perf-surface">
         <PerfWaves hidden={!wavesShown} deckCount={deckCount} />
         <MixerStrip
@@ -239,6 +255,7 @@ export function PerformanceView() {
         </div>
         <PerformanceKeyboard deckCount={deckCount} left={leftFocus} right={rightFocus} onLoad={tryLoad} />
       </div>
+      </DeckDropContext.Provider>
     </div>
   );
 }

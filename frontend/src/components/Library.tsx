@@ -70,6 +70,7 @@ import { SessionTimelinePane } from '../sessions/SessionTimelinePane';
 import { SessionsListView } from '../sessions/SessionsListView';
 import { NAVIGATE_SET_EVENT } from '../sets/navigateToSet';
 import { PlaylistFullExportModal } from './PlaylistFullExportModal';
+import { useExportEnabled } from '../settings/useAppConfig';
 import { PlaylistStatusBadge } from './PlaylistStatusBadge';
 import { playlistStatus } from './playlistStatus';
 import { trackMatchesFilters } from './playlistFilter';
@@ -83,6 +84,10 @@ import {
   type PlaylistSort,
   type PlaylistSortColumn,
 } from '../utils/trackSort';
+import FileDropOverlay from '../dropImport/FileDropOverlay';
+import {
+  useFileDropImport, useFileDropTarget, useSuppressStrayFileDrops,
+} from '../dropImport/useFileDropImport';
 
 /** Which selection instance a row menu acts on. */
 type MenuPane = 'main' | 'editLibrary';
@@ -162,6 +167,9 @@ export default function Library({
     () => browseSession().playlistId
   );
   const [playlistExportOpen, setPlaylistExportOpen] = useState(false);
+  // Export gate (ADR 0043): the playlist Sync/Export modal only writes
+  // external libraries, so it hides until the Settings toggle is on.
+  const exportEnabled = useExportEnabled();
   const [selectedSetId, setSelectedSetId] = useState<number | null>(() => getSelectedSetId());
   const [selectedSessionUuid, setSelectedSessionUuid] = useState<string | null>(() =>
     getSelectedSessionUuid()
@@ -773,6 +781,21 @@ export default function Library({
     }
   };
 
+  // ── Drop import (#297): OS files dropped onto the track table import in
+  // place; in playlist view they are also appended to that playlist.
+  const importDroppedFiles = useFileDropImport();
+  const tableDropPlaylistId = selectedView === 'playlist' ? selectedPlaylistId : null;
+  const handleTableFiles = useCallback(
+    (dt: DataTransfer) => { void importDroppedFiles(dt, tableDropPlaylistId); },
+    [importDroppedFiles, tableDropPlaylistId],
+  );
+  const tableFileDrop = useFileDropTarget(handleTableFiles);
+  useSuppressStrayFileDrops();
+  const handleSidebarFileDrop = useCallback(
+    (playlistId: number, dt: DataTransfer) => { void importDroppedFiles(dt, playlistId); },
+    [importDroppedFiles],
+  );
+
   // ── Track-row context menu (playlist-editing 03) ───────────────────────
   const { menu: rowMenu, openMenu: openRowMenu, closeMenu: closeRowMenu } =
     useContextMenuState<{ track: Track; pane: MenuPane }>();
@@ -1155,6 +1178,7 @@ export default function Library({
           }}
           onSelectPlaylist={(id) => openSidebarEntry({ kind: 'playlist', id })}
           onTrackDrop={handleTrackDrop}
+          onFileDrop={handleSidebarFileDrop}
           selectedSetId={selectedSetId}
           onSelectSet={(id) => openSidebarEntry({ kind: 'set', id })}
           focused={sidebarFocused}
@@ -1219,15 +1243,17 @@ export default function Library({
                 {unifiedPlaylist && (
                   <PlaylistStatusBadge status={playlistStatus(unifiedPlaylist)} />
                 )}
-                <button
-                  className="playlist-export-submit"
-                  onClick={() => setPlaylistExportOpen(true)}
-                  disabled={!playlistData?.name}
-                  aria-label="Open playlist sync and export"
-                  style={{ padding: '2px 10px' }}
-                >
-                  Sync / Export
-                </button>
+                {exportEnabled && (
+                  <button
+                    className="playlist-export-submit"
+                    onClick={() => setPlaylistExportOpen(true)}
+                    disabled={!playlistData?.name}
+                    aria-label="Open playlist sync and export"
+                    style={{ padding: '2px 10px' }}
+                  >
+                    Sync / Export
+                  </button>
+                )}
                 {!browseOnly && (
                   <button
                     onClick={() => setIsSplitViewOpen((v) => !v)}
@@ -1401,15 +1427,28 @@ export default function Library({
                   playlistPaneRef.current = selectedView === 'playlist' ? el : null;
                 }}
                 onScroll={handleBrowseScroll}
-                onDragOver={selectedView === 'playlist' ? handlePlaylistPaneDragOver : undefined}
-                onDragLeave={selectedView === 'playlist' ? handlePlaylistPaneDragLeave : undefined}
-                onDrop={selectedView === 'playlist' ? handlePlaylistPaneDrop : undefined}
+                onDragOver={(e) => {
+                  if (tableFileDrop.onDragOver(e)) return;
+                  if (selectedView === 'playlist') handlePlaylistPaneDragOver(e);
+                }}
+                onDragLeave={(e) => {
+                  tableFileDrop.onDragLeave(e);
+                  if (selectedView === 'playlist') handlePlaylistPaneDragLeave(e);
+                }}
+                onDrop={(e) => {
+                  if (tableFileDrop.onDrop(e)) return;
+                  if (selectedView === 'playlist') handlePlaylistPaneDrop(e);
+                }}
                 style={{
                   position: 'relative',
                   flex: 1,
                   overflow: 'auto'
                 }}
               >
+                <FileDropOverlay
+                  rect={tableFileDrop.rect}
+                  label={tableDropPlaylistId !== null ? 'Drop to import and add to playlist' : 'Drop to import'}
+                />
                 {selectedView === 'playlist' && dropIndicator && (
                   <div
                     style={{

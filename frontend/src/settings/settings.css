@@ -20,6 +20,12 @@
   font-size: var(--font-small);
   text-transform: uppercase;
 }
+.settings-version {
+  display: block;
+  text-align: right;
+  font-size: var(--font-small);
+  color: var(--overlay1);
+}
 .settings-header h1 {
   margin: var(--space-4) 0 0;
   font-size: var(--font-display);
@@ -275,4 +281,64 @@
   .settings-models {
     grid-template-columns: repeat(2, 1fr);
   }
+}
+
+/* Library section (packaged-app #277) */
+.settings-library-inputs {
+  display: flex;
+  gap: var(--space-8);
+  align-items: center;
+  margin-top: var(--space-8);
+}
+.settings-library-inputs input[type='text'] {
+  flex: 1;
+}
+.settings-library-toggle {
+  display: inline-flex;
+  gap: var(--space-8);
+  align-items: center;
+  font-size: var(--font-small);
+  cursor: pointer;
+}
+.settings-content code {
+  background: var(--crust);
+  border: 1px solid var(--surface1);
+  border-radius: var(--radius);
+  padding: 0 var(--space-4);
+  font-size: var(--font-small);
+}
+.settings-library-actions {
+  display: flex;
+  gap: var(--space-8);
+}
+
+/* Settings groups (#328): sections stack as headed blocks in one scroll. */
+.settings-subsection + .settings-subsection {
+  margin-top: var(--space-24);
+  padding-top: var(--space-16);
+  border-top: 2px solid var(--surface1);
+}
+.settings-controller-list {
+  display: grid;
+  gap: var(--space-4);
+  margin-bottom: var(--space-16);
+}
+.settings-controller-row {
+  display: grid;
+  grid-template-columns: minmax(200px, 1fr) 120px 2fr;
+  gap: var(--space-12);
+  align-items: center;
+  padding: var(--space-8) 0;
+  border-top: 1px solid var(--surface1);
+  font-size: var(--font-small);
+}
+.settings-controller-status {
+  color: var(--overlay0);
+  font-weight: 700;
+}
+.settings-controller-status.on {
+  color: var(--success);
+}
+.settings-controller-calibration {
+  color: var(--subtext0);
 }

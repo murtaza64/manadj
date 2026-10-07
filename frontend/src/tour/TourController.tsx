@@ -51,6 +51,7 @@ export function TourController() {
     const requested = replayRef.current;
     if (!requested && active) return;
     const candidate = requested ?? activeTourSection();
+    if (candidate === null) return;
     if (!requested && (allToursSkipped() || isSectionSeen(candidate))) return;
     const section = tourSection(candidate);
     if (!section) return;

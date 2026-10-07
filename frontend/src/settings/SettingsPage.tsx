@@ -1,4 +1,4 @@
-import { lazy, Suspense, useState, useSyncExternalStore } from 'react';
+import { lazy, Suspense, useEffect, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { useMixer, useMixerValue } from '../hooks/useMixer';
 import { TOUR_SECTIONS } from '../tour/steps';
 import {
@@ -23,19 +23,12 @@ import {
   DEFAULT_BEAT_FX_SETTINGS,
   type BeatFxSettings,
 } from '../playback/beatFxSettings';
+import { APP_VERSION } from '../version';
 
 const WaveformSettings = lazy(() => import('../waveform/StyleTuningPage'));
-const JogSettings = lazy(() => import('../midi/JogTuningPage'));
+const ControllerCalibrationSettings = lazy(() => import('./ControllerCalibrationSettings'));
 const MouseJogSettings = lazy(() => import('./MouseJogSettings'));
-const SECTIONS = [
-  { id: 'filters', title: 'Filters', detail: 'Sound and sweep response' },
-  { id: 'effects', title: 'Beat FX', detail: 'Echo, Reverb and Flanger' },
-  { id: 'waveforms', title: 'Waveforms', detail: 'Color and rendering' },
-  { id: 'jog', title: 'Jog calibration', detail: 'DDJ-GRV6 response' },
-  { id: 'mouse-jog', title: 'Mouse jog', detail: 'Keyboard and mouse response' },
-  { id: 'tour', title: 'Tour', detail: 'Coach marks and guidance' },
-] as const;
-type Section = (typeof SECTIONS)[number]['id'];
+const LibrarySettings = lazy(() => import('./LibrarySettings'));
 const PARAMS = [
   {
     key: 'resonance',
@@ -355,13 +348,119 @@ function BeatFxSettingsPanel() {
   );
 }
 
+// ── Settings groups (#328) ─────────────────────────────────────────────
+// The nav lists GROUPS; each group renders its sections as headed blocks in
+// one scroll. To add a section, append ONE entry to its group's `sections`
+// (slots for parked work are noted per group). Section ids double as deep
+// links (?section=<id>, anchor #settings-section-<id>); ?section=<group id>
+// opens a group at the top. Groups with no sections are hidden.
+
+export interface SettingsSection {
+  id: string;
+  title: string;
+  render: (ctx: { performance: boolean }) => ReactNode;
+}
+
+export interface SettingsGroup {
+  id: string;
+  title: string;
+  detail: string;
+  sections: SettingsSection[];
+}
+
+export const SETTINGS_GROUPS: SettingsGroup[] = [
+  {
+    id: 'library',
+    title: 'Library',
+    detail: 'Folders, DJ software, export',
+    sections: [{ id: 'library', title: 'Library', render: () => <LibrarySettings /> }],
+  },
+  {
+    id: 'performance',
+    title: 'Performance',
+    detail: 'Filters, Beat FX, cue mode',
+    sections: [
+      { id: 'filters', title: 'Filters', render: () => <FilterSettingsPanel /> },
+      { id: 'effects', title: 'Beat FX', render: () => <BeatFxSettingsPanel /> },
+      // slot: Cue mode (#289)
+    ],
+  },
+  {
+    id: 'display',
+    title: 'Display',
+    detail: 'Waveforms and visuals',
+    sections: [{ id: 'waveforms', title: 'Waveforms', render: () => <WaveformSettings /> }],
+  },
+  {
+    id: 'controllers',
+    title: 'Controllers',
+    detail: 'Controller check, jog calibration',
+    sections: [
+      // slot: Controller check (#292) — goes first
+      { id: 'jog', title: 'Jog calibration', render: () => <ControllerCalibrationSettings /> },
+    ],
+  },
+  {
+    id: 'keyboard-mouse',
+    title: 'Keyboard + mouse',
+    detail: 'Mouse jog, shortcuts',
+    sections: [
+      {
+        id: 'mouse-jog',
+        title: 'Mouse jog',
+        render: ({ performance }) => <MouseJogSettings performance={performance} />,
+      },
+      // slot: keyboard shortcut map (#285)
+    ],
+  },
+  {
+    id: 'accounts',
+    title: 'Accounts',
+    detail: 'SoundCloud, Soulseek',
+    sections: [
+      // slot: SoundCloud (#290)
+      // slot: Soulseek (#291)
+    ],
+  },
+  {
+    id: 'help',
+    title: 'Help',
+    detail: 'Setup guides, tour, about',
+    sections: [
+      // slot: Setup guides status/relaunch (#288) — goes first
+      { id: 'tour', title: 'Tour', render: () => <TourSettingsPanel /> },
+      // slot: Tutorials (#322); version/licenses/about
+    ],
+  },
+];
+
+const VISIBLE_GROUPS = SETTINGS_GROUPS.filter((g) => g.sections.length > 0);
+
+/** Resolve ?section= (group id or section id) to a group + optional anchor. */
+function resolveSection(requested: string | null): { group: SettingsGroup; anchor: string | null } {
+  const byGroup = VISIBLE_GROUPS.find((g) => g.id === requested);
+  if (byGroup) return { group: byGroup, anchor: null };
+  const owner = VISIBLE_GROUPS.find((g) => g.sections.some((s) => s.id === requested));
+  if (owner) return { group: owner, anchor: requested };
+  const fallback = VISIBLE_GROUPS.find((g) => g.id === 'performance') ?? VISIBLE_GROUPS[0];
+  return { group: fallback, anchor: null };
+}
+
 export default function SettingsPage({ performance = false }: { performance?: boolean }) {
-  const [section, setSection] = useState<Section>(() => {
-    const requested = new URLSearchParams(location.search).get('section');
-    return SECTIONS.some((s) => s.id === requested)
-      ? (requested as Section)
-      : 'filters';
-  });
+  const [initial] = useState(() =>
+    resolveSection(new URLSearchParams(location.search).get('section')),
+  );
+  const [groupId, setGroupId] = useState(initial.group.id);
+  const group = VISIBLE_GROUPS.find((g) => g.id === groupId)!;
+  // Old per-section deep links scroll to their block once it has rendered
+  // (lazy panels may land a frame later).
+  useEffect(() => {
+    if (!initial.anchor) return;
+    const timer = setTimeout(() => {
+      document.getElementById(`settings-section-${initial.anchor}`)?.scrollIntoView?.({ block: 'start' });
+    }, 50);
+    return () => clearTimeout(timer);
+  }, [initial.anchor]);
   return (
     <div className="settings-page">
       <header className="settings-header">
@@ -371,47 +470,45 @@ export default function SettingsPage({ performance = false }: { performance?: bo
         </div>
         <p>
           Changes apply immediately. Preferences are stored with your library.
+          <span className="settings-version">manaDJ v{APP_VERSION}</span>
         </p>
       </header>
       <div className="settings-layout">
         <nav className="settings-nav" data-tour="settings.nav" aria-label="Settings sections">
-          {SECTIONS.map((s) => (
+          {VISIBLE_GROUPS.map((g) => (
             <button
-              key={s.id}
-              className={`btn${section === s.id ? ' btn-selected' : ''}`}
-              aria-current={section === s.id ? 'page' : undefined}
+              key={g.id}
+              className={`btn${groupId === g.id ? ' btn-selected' : ''}`}
+              aria-current={groupId === g.id ? 'page' : undefined}
               onClick={() => {
-                setSection(s.id);
+                setGroupId(g.id);
                 const url = new URL(location.href);
-                url.searchParams.set('section', s.id);
+                url.searchParams.set('section', g.id);
                 history.replaceState(null, '', url);
               }}
             >
-              <strong>{s.title}</strong>
-              <span>{s.detail}</span>
+              <strong>{g.title}</strong>
+              <span>{g.detail}</span>
             </button>
           ))}
         </nav>
         <section
           className="settings-content"
           data-tour="settings.content"
-          aria-label={SECTIONS.find((s) => s.id === section)!.title}
+          aria-label={group.title}
         >
-          <Suspense fallback={<p role="status">Loading settings...</p>}>
-            {section === 'filters' ? (
-              <FilterSettingsPanel />
-            ) : section === 'effects' ? (
-              <BeatFxSettingsPanel />
-            ) : section === 'waveforms' ? (
-              <WaveformSettings />
-            ) : section === 'jog' ? (
-              <JogSettings />
-            ) : section === 'tour' ? (
-              <TourSettingsPanel />
-            ) : (
-              <MouseJogSettings performance={performance} />
-            )}
-          </Suspense>
+          {group.sections.map((s) => (
+            <section
+              key={s.id}
+              id={`settings-section-${s.id}`}
+              className="settings-subsection"
+              aria-label={s.title}
+            >
+              <Suspense fallback={<p role="status">Loading settings...</p>}>
+                {s.render({ performance })}
+              </Suspense>
+            </section>
+          ))}
         </section>
       </div>
     </div>
