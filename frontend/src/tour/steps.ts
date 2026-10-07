@@ -31,27 +31,27 @@ export const TOUR_SECTIONS: TourSection[] = [
       {
         anchor: 'topbar.modes',
         title: 'Modes',
-        body: 'The app is a set of modes: PERFORM the decks, EDIT the mix editor, SYNC import/export. ⋯ holds EXPORT (your full library) and HISTORY. Backtick (`) flips between decks and library.',
-      },
-      {
-        anchor: 'performance.waves',
-        title: 'Waveforms',
-        body: 'Every deck\u2019s waveform, aligned to the beat. Click to seek; the pink playhead is the audible mix position.',
-      },
-      {
-        anchor: 'performance.mixer',
-        title: 'Mixer',
-        body: 'Channel faders, EQ, filter and the crossfader — mirrored on a connected MIDI controller, which keeps working during this tour.',
-      },
-      {
-        anchor: 'performance.decks',
-        title: 'Decks',
-        body: 'Transport, hot cues, loops and jog per deck. Keyboard hints live on the deck panels; load tracks from the library below.',
+        body: 'PERFORM is for playing, EDIT for shaping mixes, SYNC for importing and exporting. ⋯ holds EXPORT (the full Library) and HISTORY. Backtick (`) switches between the Library and Decks.',
       },
       {
         anchor: 'performance.browse',
-        title: 'Library stays with you',
-        body: 'The browse panel rides along under every mode — search and load without leaving the decks.',
+        title: 'Start with your music',
+        body: 'Your Tracks appear here after importing in SYNC. After this Tour, load one onto a Deck to start the hands-on Keyboard DJing Tutorial.',
+      },
+      {
+        anchor: 'performance.decks',
+        title: 'Play a Track',
+        body: 'Each Deck has play, Main Cue, Hot Cues and loops, plus its own volume and EQ. Small key labels show the keyboard controls.',
+      },
+      {
+        anchor: 'performance.waves',
+        title: 'See the beat',
+        body: 'Each loaded Deck has a waveform. Beat lines help you compare timing; the pink line marks the playhead.',
+      },
+      {
+        anchor: 'performance.mixer',
+        title: 'Blend the Decks',
+        body: 'The crossfader blends its assigned Decks. This strip also holds deck count and keyboard-hint controls. Close the Tour when you are ready to play.',
       },
     ],
   },
@@ -61,23 +61,23 @@ export const TOUR_SECTIONS: TourSection[] = [
     steps: [
       {
         anchor: 'library.sidebar',
-        title: 'Sidebar',
-        body: 'Playlists, Sets and Sessions live here. + New… at the bottom creates a playlist or a planned Set; drag tracks onto a row to add them.',
+        title: 'Organize your Tracks',
+        body: 'Choose a playlist here, or make one with + New…. Sets hold a planned running order; Sessions hold what you played.',
       },
       {
         anchor: 'library.search',
         title: 'Search and filters',
-        body: 'Type to filter the table; BPM, key and tag filters stack on top. The count shows filtered / total.',
+        body: 'Search by name, then narrow the results with BPM, Key or tags. Filters combine; the count shows matching Tracks / total.',
       },
       {
         anchor: 'library.table',
         title: 'Track table',
-        body: 'Your library. Click a row to preview it below; drag column headers to reorder, drag rows onto playlists, Sets or decks.',
+        body: 'Select a Track to inspect it below. Drag Tracks into a playlist or Set; drag column headers to arrange the table.',
       },
       {
         anchor: 'library.player',
-        title: 'Preview deck',
-        body: 'The selected track loads here — waveform, hot cues, and the metadata editor for the loaded track.',
+        title: 'Listen and prepare',
+        body: 'Preview the selected Track here, set Hot Cues, and edit its metadata. Close this Tour to try the controls.',
       },
     ],
   },
@@ -88,17 +88,17 @@ export const TOUR_SECTIONS: TourSection[] = [
       {
         anchor: 'edit.picker',
         title: 'Mix picker',
-        body: 'Open a mix here: name two tracks to land on their Transitions, Cameos and Routines, or jump in from loaded decks.',
+        body: 'Choose an outgoing and incoming Track to see their saved Transitions, or create a new one. The hands-on Transition Tutorial is in ? → Tutorials.',
       },
       {
         anchor: 'edit.main',
         title: 'Timeline',
-        body: 'The opened mix\u2019s lanes: audio, fader and EQ automation over time. Record takes in PERFORM, refine them here.',
+        body: 'Waveforms show the audio; the lanes below shape volume and EQ over time. Slide changes audio alignment; moving a Track carries its automation along.',
       },
       {
         anchor: 'edit.transport',
         title: 'Transport',
-        body: 'Play the mix, undo/redo edits, and adjust the mix BPM. Only visible once a mix is open.',
+        body: 'Play to audition the open mix. Undo and redo are beside the tempo. Edits save automatically; opening a new Transition alone saves nothing.',
       },
     ],
   },
@@ -109,12 +109,12 @@ export const TOUR_SECTIONS: TourSection[] = [
       {
         anchor: 'sync.tabs',
         title: 'Import and export',
-        body: 'Tracks syncs your library against external sources (rekordbox, directories); Playlists pushes curated lists; Acquisition pulls new music in.',
+        body: 'Start in Tracks to import music from disk or Rekordbox. Playlists handles playlist sync; Acquisition handles downloads.',
       },
       {
         anchor: 'sync.tracks',
         title: 'Track sync',
-        body: 'Each row is a track with evidence of where it lives. Import from here fills an empty library.',
+        body: 'Compare each Track across your Library and external sources. Import adds it to the Library; review the row status before choosing an action.',
       },
     ],
   },
@@ -125,17 +125,17 @@ export const TOUR_SECTIONS: TourSection[] = [
       {
         anchor: 'sets.sidebar',
         title: 'Sets',
-        body: 'A Set is a planned sequence of tracks. Create one with + New…, then drag tracks onto its sidebar row.',
+        body: 'A Set is a planned running order. Create one with + New…, then add Tracks to its sidebar row.',
       },
       {
         anchor: 'sets.header',
         title: 'Set controls',
-        body: 'Play the plan, toggle the overview ladder, auto-fill transitions, or resolve them from recorded evidence.',
+        body: 'Play the Set from here. You can also show its overview and choose Transitions between neighboring Tracks.',
       },
       {
         anchor: 'sets.entries',
         title: 'Entries',
-        body: 'The running order. Each adjacency can carry a pinned transition — the Conductor plays them back to back.',
+        body: 'Arrange the Tracks in playing order. Pin a Transition between two neighbors to choose how the handover plays.',
       },
     ],
   },
@@ -146,12 +146,12 @@ export const TOUR_SECTIONS: TourSection[] = [
       {
         anchor: 'sessions.list',
         title: 'Sessions',
-        body: 'Every night you play in PERFORM is recorded as a Session — the whole timeline, every deck.',
+        body: 'Sessions record your activity in PERFORM: which Tracks played and how you used the Decks. Open one to revisit a moment.',
       },
       {
         anchor: 'library.sessions-row',
         title: 'Getting back here',
-        body: 'Sessions live in the library sidebar, under Tracks.',
+        body: 'Return to Sessions from the Library sidebar, below Tracks.',
       },
     ],
   },
@@ -162,12 +162,12 @@ export const TOUR_SECTIONS: TourSection[] = [
       {
         anchor: 'history.root',
         title: 'Transition history',
-        body: 'Finished handovers from PERFORM land here as Takes, grouped by track pair. Promote the keepers into the mix editor.',
+        body: 'A Take captures a handover you played in PERFORM. Takes are grouped by Track pair so you can compare attempts.',
       },
       {
         anchor: 'history.table',
         title: 'Takes',
-        body: 'Audition a take, open its Session moment, or promote it to the pair\u2019s active transition.',
+        body: 'Listen to a Take or open its moment in the Session. Promote one to keep it as a Transition you can edit and reuse.',
       },
     ],
   },

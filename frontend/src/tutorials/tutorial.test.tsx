@@ -5,7 +5,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { advance, reportTutorialAction, type Progress } from './engine';
 import { keyboardLesson } from './keyboardLesson';
 import { TutorialController } from './TutorialController';
-import { acceptTutorialEvent, activeTutorial, finishBonus, skipTutorial, startTutorial, tutorialProgress, TUTORIAL_STATE_KEY } from './tutorialState';
+import { acceptTutorialEvent, activeTutorial, finishBonus, requestTutorial, skipTutorial, startTutorial, tutorialProgress, TUTORIAL_STATE_KEY } from './tutorialState';
 import { setTourArea } from '../tour/tourState';
 import { hasKeyboardOverlay } from '../components/performance/performanceKeys';
 
@@ -58,6 +58,12 @@ it('persists cursor/context, records skip, and replay resets only that lesson', 
 it('cannot skip required tasks with the bonus finish action', () => {
   finishBonus();
   expect(tutorialProgress('keyboard')?.status).toBe('active');
+});
+
+it('explicit replay releases a previous view’s text focus before returning to Decks', () => {
+  const search = document.createElement('input'); document.body.append(search); search.focus();
+  requestTutorial('keyboard');
+  expect(document.activeElement).not.toBe(search);
 });
 
 it('routes asynchronous save replies to the lesson artifact while Keyboard is active', () => {

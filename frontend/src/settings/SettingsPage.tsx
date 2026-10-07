@@ -234,8 +234,8 @@ function TourSettingsPanel() {
         <div>
           <h2>Tour</h2>
           <p>
-            Each area shows a short guided walkthrough the first time you enter
-            it. Replay any section from the ? button in the top bar.
+            Tours explain the interface. Tutorials teach through real actions.
+            Replay either from the ? button in the top bar.
           </p>
         </div>
         <button className="btn btn-secondary" onClick={resetTourProgress}>

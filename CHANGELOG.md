@@ -16,6 +16,7 @@ versions follow [Semantic Versioning](https://semver.org/). Install: [docs/insta
 - SoundCloud connect (Settings → Accounts → SoundCloud; also a Setup guide): paste your soundcloud.com `oauth_token` cookie, manaDJ confirms the account and likes count. Sync → Acquisition only appears once SoundCloud is connected.
 
 - Added a hands-on Transition Tutorial covering Track selection, Slide, automation, audition and confirmed autosave (#323).
+- Revised Tour orientation copy, explicit dismissal and popover positioning; Tours and hands-on Tutorials are labeled separately (#332).
 
 ## [0.1.0] - 2026-10-07
 

@@ -11,7 +11,7 @@ import type { AppMode } from '../components/TopBar';
 import { TOUR_SECTIONS } from './steps';
 import { requestTour, type TourSectionId } from './tourState';
 import './tour.css';
-import { lessons, skipTutorial, startTutorial } from '../tutorials/tutorialState';
+import { lessons, requestTutorial, skipTutorial } from '../tutorials/tutorialState';
 
 const TARGET_MODE: Record<TourSectionId, AppMode> = {
   library: 'library',
@@ -50,7 +50,7 @@ export function TourReplayButton({
     <span className="tour-replay">
       <button
         className="tour-replay-button"
-        title="Tour: replay a section's guided walkthrough"
+        title="Help: hands-on Tutorials and UI Tours"
         aria-haspopup="menu"
         aria-expanded={menu}
         onClick={() => setMenu((v) => !v)}
@@ -65,7 +65,7 @@ export function TourReplayButton({
             {lessons.map(lesson => <button key={lesson.id} role="menuitem" className="topbar-mode-menu-item" onClick={() => {
               setMenu(false);
               onModeChange(lesson.area === 'performance' ? 'performance' : 'routine');
-              startTutorial(lesson.id);
+              requestTutorial(lesson.id);
             }}>{lesson.title}</button>)}
             <span className="topbar-segment-label">Tours — look around</span>
             {TOUR_SECTIONS.map((s) => (
