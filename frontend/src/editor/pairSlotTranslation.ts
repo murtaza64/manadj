@@ -20,6 +20,7 @@ import type { RoutineLanePoint } from '../sets/routinePlan';
 import type { HotCue } from '../types';
 import { addBeats } from '../playback/quantize';
 import { outgoingAutomationStart, pairBounds } from './pairBounds';
+import { pairFxToRoutine, routineBeatFxEqual, routineFxToPair } from './beatFxLane';
 
 /** Degraded-mode fallback: with no grid, one beat = one second, so the
  * slot surface still has a clock and the seconds math is untouched. */
@@ -231,7 +232,13 @@ export function pairToEdits(tr: Transition, durationBeats: number, offsetBeats =
   }
   for (const jump of jumps) jump.beat += offsetBeats;
 
+  // Beat FX (#353): the section track, roles → pair slots.
+  const beatFx = tr.beatFx
+    ? pairFxToRoutine(tr.beatFx, durationBeats, offsetBeats, (r) => (r === 'A' ? OUTGOING_SLOT : INCOMING_SLOT))
+    : undefined;
+
   return {
+    ...(beatFx ? { beatFx } : {}),
     lanes,
     jumps,
     removedRecordedJumps: [],
@@ -349,6 +356,16 @@ export function editedPairTransition(draft: RoutineEdits, baseline: RoutineEdits
     const jumps = draft.jumps.filter((j) => j.slotId === slot);
     if (!jumpListsEqual(jumps, baseline.jumps.filter((j) => j.slotId === slot)))
       out[field] = jumps.map((j) => authoredJumpToPair(j, ctx.durationBeats));
+  }
+  // Beat FX (#353): re-derived only when changed since load (lossless).
+  if (!routineBeatFxEqual(draft.beatFx, baseline.beatFx)) {
+    if (draft.beatFx) {
+      out.beatFx = routineFxToPair(
+        draft.beatFx,
+        (beat) => (ctx.durationBeats > 0 ? beat / ctx.durationBeats : 0),
+        (slotId) => (slotId === OUTGOING_SLOT ? 'A' : slotId === INCOMING_SLOT ? 'B' : null)
+      );
+    } else delete out.beatFx;
   }
   return out;
 }

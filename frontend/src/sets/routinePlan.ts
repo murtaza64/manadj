@@ -41,6 +41,13 @@
  */
 import { MAX_PITCH_RANGE_PERCENT } from '../playback/tempo';
 import { applyJumpEditsToTrace, applyPauseEditsToTrace } from '../routines/routineDraft';
+import {
+  fxSection,
+  recordedRoutineBeatFx,
+  routineFxAt,
+  type RoutineBeatFx,
+} from '../editor/beatFxLane';
+import type { BeatFxSectionState } from '../playback/beatFx';
 
 // ── Input (the seam) ─────────────────────────────────────────────────────
 
@@ -195,6 +202,22 @@ export interface PlannedRoutine {
   /** Trace discontinuity instants on the mix axis (jumpCrossed feeds the
    * Conductor's hard-sync). */
   jumpMixSecs: number[];
+  /** The Beat FX track that plays (#353): the authored edit when present,
+   * else the recording's. Null = no FX (the section reads OFF). */
+  beatFx?: RoutineBeatFx | null;
+  /** The recording's own FX track (the editor seeds authoring from it). */
+  beatFxRecorded?: RoutineBeatFx | null;
+}
+
+/** The Beat FX section a Routine asks for at `beat` (#353), physical
+ * targets resolved through slot allocation. Null = no FX track. */
+export function routineBeatFxAt(routine: PlannedRoutine, beat: number): BeatFxSectionState | null {
+  const fx = routine.beatFx;
+  if (!fx) return null;
+  return fxSection(routineFxAt(fx, beat), (target) => {
+    if (target === 'master') return 'master';
+    return routine.slots.find((s) => s.slotId === target)?.deck ?? null;
+  });
 }
 
 export interface RoutineBuildWarning {
@@ -713,14 +736,16 @@ export function plannedWithLaneEdits(
   planned: PlannedRoutine,
   edits: import('../routines/routineDraft').RoutineEdits | null
 ): PlannedRoutine {
+  const beatFx = edits?.beatFx ?? planned.beatFxRecorded ?? null;
   if (
     !edits ||
     (Object.keys(edits.lanes).length === 0 && Object.keys(edits.trims ?? {}).length === 0)
   ) {
-    return planned;
+    return beatFx === (planned.beatFx ?? null) ? planned : { ...planned, beatFx };
   }
   return {
     ...planned,
+    beatFx,
     slots: planned.slots.map((s) => ({
       ...s,
       lanes: withLaneEdits(s.lanes, edits, s.slotId),
@@ -1062,6 +1087,11 @@ export function buildPlannedRoutine(
   // Routine-wide list kept for whole-plan queries (per-deck hard-sync
   // scoping reads the slots' own lists — #161).
   const jumpMixSecs: number[] = slots.flatMap((s) => s.jumpMixSecs).sort((a, b) => a - b);
+  // Beat FX (#353): section-level — recorded events address baked slot
+  // indices; slot ids are the stable handle.
+  const beatFxRecorded = input.authored
+    ? null
+    : recordedRoutineBeatFx(input.events, (i) => slotIdsIn[i] ?? null);
 
   return {
     routine: {
@@ -1082,6 +1112,8 @@ export function buildPlannedRoutine(
         pitchPercent: exitSlot.basePitchPercent,
       },
       jumpMixSecs,
+      beatFx: edits?.beatFx ?? beatFxRecorded,
+      beatFxRecorded,
     },
     warnings,
   };

@@ -238,3 +238,36 @@ def test_promote_seeds_control_state_at_residency_start():
     c_low = next(e for e in seeds if e["slot"] == 2 and e["control"] == "eqLow")
     assert c_low["value"] == pytest.approx(0.25)
     assert c_low["beat"] > 0.0
+
+
+# ── Beat FX (#353) ───────────────────────────────────────────────────────
+
+
+def beat_fx(t, target, on, selected="echo", depth=0.0, beats=0.5):
+    return {"t": t, "kind": "beatFx", "selected": selected, "target": target,
+            "on": on, "depth": depth, "beats": beats}
+
+
+def test_beat_fx_target_readdresses_deck_to_slot():
+    events = sorted(weave_events() + [beat_fx(20, "B", True), beat_fx(40, "C", True),
+                                      beat_fx(50, "master", True), beat_fx(55, "D", True)],
+                    key=lambda e: e["t"])
+    out = promote(events, CAST, *WINDOW, OFFSETS, GRIDS)
+    fx = [e for e in out.events if e["kind"] == "beatFx"]
+    assert [(e["beat"], e["target"], e["on"]) for e in fx] == [
+        (40.0, 1, True), (80.0, 2, True), (100.0, "master", True), (110.0, None, False),
+    ]
+    assert all("slot" not in e for e in fx)
+
+
+def test_beat_fx_seeds_section_state_at_window_open():
+    events = sorted(weave_events() + [beat_fx(-5, "A", True, depth=0.4)], key=lambda e: e["t"])
+    out = promote(events, CAST, *WINDOW, OFFSETS, GRIDS)
+    seeded = [e for e in out.events if e["kind"] == "beatFx" and e.get("seeded")]
+    assert len(seeded) == 1
+    assert (seeded[0]["beat"], seeded[0]["target"], seeded[0]["on"], seeded[0]["depth"]) == (0.0, 0, True, 0.4)
+
+
+def test_no_beat_fx_evidence_seeds_nothing():
+    out = promote(weave_events(), CAST, *WINDOW, OFFSETS, GRIDS)
+    assert not [e for e in out.events if e["kind"] == "beatFx"]

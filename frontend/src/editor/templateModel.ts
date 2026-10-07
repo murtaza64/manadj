@@ -25,6 +25,7 @@ import { gridOriginSec } from '../meter/gridOrigin';
 import { dominantBpm } from '../components/deckControls/bpmCommit';
 import { defaultLanePoints } from './mixModel';
 import type { LaneId, LanePoint, Lanes, Transition } from './mixModel';
+import type { TransitionBeatFx } from './beatFxLane';
 import { freshTransition, isPristine } from './pairStore';
 import type { SavedTransition } from './pairStore';
 
@@ -60,6 +61,8 @@ export interface TransitionTemplate {
   /** Sparse normalized lanes: only lanes the author gave meaningful
    * content (hidden and untouched-default lanes are stripped at save). */
   lanes: Lanes;
+  /** Beat FX track (#353), normalized like the lanes; absent = none. */
+  beatFx?: TransitionBeatFx;
 }
 
 /** What anchor resolution needs to know about one side of the pair. */
@@ -172,6 +175,8 @@ export interface ApplyPatch {
   lanes: Lanes;
   /** Cleared: the stamped recipe has no dismissed lanes. */
   hiddenLanes: LaneId[];
+  /** The template's FX track — undefined clears the receiver's (#353). */
+  beatFx?: TransitionBeatFx | undefined;
   startSec?: number;
   durationSec?: number;
   bInSec?: number;
@@ -224,6 +229,7 @@ export function applyTemplate(
     tempoMatch: true,
     lanes: structuredClone(template.lanes),
     hiddenLanes: [],
+    beatFx: template.beatFx ? structuredClone(template.beatFx) : undefined,
   };
 
   if (!sides.a.beatgrid) {

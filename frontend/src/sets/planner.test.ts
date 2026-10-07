@@ -1416,3 +1416,46 @@ describe('per-entry trim (sets #164)', () => {
     expect(withEntryTrim(bare, 0)).toBe(bare);
   });
 });
+
+describe('Beat FX authority (#353)', () => {
+  const plan = planSet(
+    input({
+      entries: [
+        { trackId: 1, pin: { kind: 'transition', uuid: 't1' } },
+        { trackId: 2, pin: null },
+      ],
+      tracks: { 1: facts(90, 10), 2: facts(100) },
+      transitionsByUuid: {
+        t1: tr({
+          beatFx: {
+            steps: [
+              { x: 0.5, on: true, selected: 'echo', target: 'A', beats: 0.5 },
+              { x: 0.75, on: true, selected: 'reverb', target: 'B', beats: 1 },
+            ],
+            depth: [{ x: 0, y: 0.75 }],
+          },
+        }),
+      },
+    })
+  );
+  it('roles resolve to the window decks; FX before the window has no authority', () => {
+    const [a, b] = plan.entries;
+    expect(planStateAt(plan, 30).beatFx).toBeNull();
+    expect(planStateAt(plan, 65).beatFx).toMatchObject({ on: false });
+    expect(planStateAt(plan, 71).beatFx).toMatchObject({ on: true, target: a.deck, selected: 'echo', depth: 0.5 });
+    expect(planStateAt(plan, 76).beatFx).toMatchObject({ on: true, target: b.deck, selected: 'reverb' });
+  });
+  it('an outgoing-role FX left on reads OFF once its deck hosts another entry', () => {
+    const held = planSet(input({
+      entries: [
+        { trackId: 1, pin: { kind: 'transition', uuid: 't1' } },
+        { trackId: 2, pin: null },
+        { trackId: 3, pin: null },
+      ],
+      tracks: { 1: facts(90, 10), 2: facts(100), 3: facts(100) },
+      transitionsByUuid: { t1: tr({ beatFx: { steps: [{ x: 0.5, on: true, selected: 'echo', target: 'A', beats: 0.5 }], depth: [] } }) },
+    }));
+    expect(planStateAt(held, 75).beatFx?.on).toBe(true);
+    expect(planStateAt(held, 120).beatFx?.on).toBe(false);
+  });
+});

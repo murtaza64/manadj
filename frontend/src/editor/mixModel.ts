@@ -100,6 +100,9 @@ export interface Transition {
    * it — but read as their DEFAULT value during playback (an invisible
    * bass-kill still ducking the mix would be a lie). */
   hiddenLanes?: LaneId[];
+  /** Beat FX section automation (#353; absent = no FX — auditions with
+   * the section off). One track for the whole section: see beatFxLane. */
+  beatFx?: import('./beatFxLane').TransitionBeatFx;
 }
 
 export interface EditorMix {

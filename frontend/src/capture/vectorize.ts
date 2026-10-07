@@ -40,6 +40,7 @@ import { jumpRepeatCount, tempoMatchRatio } from '../editor/mixModel';
 import type { JumpEvent, LaneId, LanePoint, Lanes, Transition } from '../editor/mixModel';
 import { channelFaderToGain, crossfaderGains } from '../playback/mixerMath';
 import type { CaptureChannel, CaptureEvent, InitDeckState } from './events';
+import { deriveTransitionBeatFx } from '../editor/beatFxLane';
 
 const OTHER: Record<CaptureChannel, CaptureChannel> = { A: 'B', B: 'A' };
 
@@ -308,8 +309,15 @@ export function vectorizeTake(
       lanes: windowLen > 0 ? buildLanes(win, init, out) : {},
       ...(jumps.length > 0 ? { jumps } : {}),
       ...(jumpsA.length > 0 ? { jumpsA } : {}),
+      // Beat FX (#353): window-scoped section steps + depth, x on the
+      // (possibly widened) window.
+      ...withBeatFx(deriveTransitionBeatFx(input.events, windowStartS, windowEndS, out)),
     },
   };
+}
+
+function withBeatFx(beatFx: Transition['beatFx']): { beatFx?: Transition['beatFx'] } {
+  return beatFx ? { beatFx } : {};
 }
 
 /**

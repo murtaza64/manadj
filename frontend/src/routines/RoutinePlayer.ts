@@ -28,7 +28,9 @@
  */
 import type { DeckEngine } from '../playback/DeckEngine';
 import type { Mixer } from '../playback/mixer';
+import { BeatFxOverride } from '../editor/beatFxLane';
 import {
+  routineBeatFxAt,
   routineSlotStateAt,
   slotLanesAt,
   slotOccupyingDeckAt,
@@ -82,9 +84,12 @@ export class RoutinePlayer {
   /** Last load requested per deck (one request per target — the engine
    * snapshot lags the async fetch; the Conductor's idiom). */
   private loadRequested: Partial<Record<RoutineDeck, number>> = {};
+  /** Beat FX section borrow (#353): snapshot on play, restore on pause. */
+  private readonly beatFx: BeatFxOverride;
 
   constructor(audio: RoutinePlayerAudio) {
     this.mixer = audio.mixer;
+    this.beatFx = new BeatFxOverride(audio.mixer);
     this.engines = audio.engines;
     this.audible = audio.audible ?? (() => true);
     this.constrainToBounds = audio.constrainToBounds ?? (() => false);
@@ -247,6 +252,7 @@ export class RoutinePlayer {
     this.anchorAudioTime = this.mixer.now();
     this.lastTickT = this.getMixTime();
     this.lastPitch = {};
+    this.beatFx.engage();
     this.selfOp(() => this.syncDecks(this.getMixTime(), true));
     this.applyLanes(this.getMixTime());
     this.raf = requestAnimationFrame(this.tick);
@@ -263,6 +269,8 @@ export class RoutinePlayer {
     this.selfOp(() => {
       for (const deck of this.drivenDecks()) this.engine(deck)?.pause();
     });
+    // The live Beat FX section returns (a ringing tail keeps ringing).
+    this.beatFx.release();
     this.emit();
   }
 
@@ -274,6 +282,8 @@ export class RoutinePlayer {
     this.mixTimeAtAnchor = this.getMixTime();
     this.playing = false;
     cancelAnimationFrame(this.raf);
+    // Takeover: the FX section stays as it sounds.
+    this.beatFx.release({ keep: true });
     this.emit();
   }
 
@@ -444,6 +454,8 @@ export class RoutinePlayer {
         trim: lanes.trim,
       });
     }
+    // Beat FX (#353): section-level; target slots resolve to their decks.
+    this.beatFx.apply(routineBeatFxAt(this.routine, beat));
   }
 
   private emit(): void {

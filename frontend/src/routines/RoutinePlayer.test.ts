@@ -403,3 +403,34 @@ describe('the audible gate', () => {
     expect(engines.A.seeks).toBe(before);
   });
 });
+
+describe('Beat FX (#353)', () => {
+  it('plays the recorded FX on the slot deck, restores the live section on pause', () => {
+    const live = { selected: 'flanger', target: 'D', on: true, depth: -0.5, beats: 2 } as const;
+    let section: Record<string, unknown> = { ...live };
+    const clock = () => now;
+    const engines = { A: new FakeEngine(clock), B: new FakeEngine(clock), C: new FakeEngine(clock), D: new FakeEngine(clock) };
+    engines.A.trackId = 1;
+    engines.B.trackId = 2;
+    engines.C.trackId = 3;
+    const mixer = {
+      now: clock,
+      setAutomation: () => {},
+      getBeatFxSection: () => section,
+      setBeatFxSection: (s: Record<string, unknown>) => { section = { ...s }; },
+    } as unknown as Mixer;
+    const player = new RoutinePlayer({ mixer, engines: engines as unknown as Record<Deck, DeckEngine> });
+    const input = recording();
+    input.events.push({ kind: 'beatFx', beat: 20, selected: 'echo', target: 1, on: true, depth: 0.8, beats: 0.5 });
+    player.setRoutine(buildPlannedRoutine(input, {
+      startEntryIndex: 0, mixStartSec: 0, targetBpm: 120, adoptedDeck: 'A', busy: [], trackBpms: [120, 120, 120],
+    }).routine);
+    player.seek(5); // beat 10 — before the FX step
+    player.play();
+    expect(section).toMatchObject({ on: false });
+    tickAt(11); // beat 22
+    expect(section).toMatchObject({ on: true, selected: 'echo', target: 'B', depth: 0.8 });
+    player.pause();
+    expect(section).toEqual(live);
+  });
+});

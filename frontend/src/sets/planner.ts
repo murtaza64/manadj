@@ -55,8 +55,11 @@ import type { Track } from '../types';
 import type { AdjacencyPin } from './adjacency';
 import type { CameoPin } from './cameoPins';
 import type { CameoPlanSource } from './cameoPlan';
+import { fxSection, pairFxAt } from '../editor/beatFxLane';
+import type { BeatFxSectionState } from '../playback/beatFx';
 import {
   buildPlannedRoutine,
+  routineBeatFxAt,
   routineSlotStateAt,
   slotLanesAt,
   traceStateAt,
@@ -1203,6 +1206,10 @@ export interface PlanState {
   activeEntryIndex: number;
   /** Past the last exit: everything stopped. */
   done: boolean;
+  /** Beat FX section verdict (#353): the latest-begun artifact's FX track
+   * (window/span start ≤ t), role/slot targets resolved to decks. Null /
+   * absent = no FX authority — the Conductor holds the section OFF. */
+  beatFx?: BeatFxSectionState | null;
 }
 
 const IDLE_DECK: PlanDeckState = {
@@ -1563,6 +1570,8 @@ export function planStateAtRaw(plan: SetPlan, mixTime: number): PlanState {
     }
   }
 
+  if (!state.done) state.beatFx = planBeatFxAt(plan, state, mixTime);
+
   // Cameo override (#140): inside a planned Cameo's window (plus load
   // headroom) the guest owns its borrowed deck — parked at its start
   // position through the lead, then advancing with a linear fade in/out
@@ -1600,6 +1609,43 @@ export function planStateAtRaw(plan: SetPlan, mixTime: number): PlanState {
     }
   }
   return state;
+}
+
+/** Beat FX authority (#353): the latest artifact whose window (or
+ * Routine span) has begun owns the one shared section — the lanes'
+ * "holds until a later adjacency or Routine takes over" rule. A role
+ * target reads OFF once its deck no longer hosts that role's entry (an
+ * FX left on must never colour the deck's next track). */
+function planBeatFxAt(plan: SetPlan, state: PlanState, mixTime: number): BeatFxSectionState | null {
+  let best: { start: number; fx: () => BeatFxSectionState | null } | null = null;
+  plan.adjacencies.forEach((adj, i) => {
+    if (!isWindowed(adj) || adj.mixStartSec > mixTime) return;
+    if (best && best.start > adj.mixStartSec) return;
+    const fx = adj.transition.beatFx;
+    best = {
+      start: adj.mixStartSec,
+      fx: () => {
+        if (!fx) return null;
+        const tr = adj.transition;
+        const local = authoredLocalAt(adj, mixTime);
+        const x = tr.durationSec > 0 ? (local - tr.startSec) / tr.durationSec : 1;
+        const outDeck = plan.entries[i].deck;
+        const inDeck = plan.entries[i + 1].deck;
+        return fxSection(pairFxAt(fx, x), (role) =>
+          role === 'master' ? 'master'
+            : role === 'A' ? (state.decks[outDeck].entryIndex === i ? outDeck : null)
+              : state.decks[inDeck].entryIndex === i + 1 ? inDeck : null);
+      },
+    };
+  });
+  for (const r of plan.routines) {
+    if (r.mixStartSec > mixTime || (best && best.start > r.mixStartSec)) continue;
+    best = {
+      start: r.mixStartSec,
+      fx: () => routineBeatFxAt(r, (mixTime - r.beatOriginMixSec) / r.secPerBeat),
+    };
+  }
+  return best ? (best as { fx: () => BeatFxSectionState | null }).fx() : null;
 }
 
 // ── Authority-handoff ramp (sets #179) ──────────────────────────────────
