@@ -41,6 +41,7 @@ import type { DeckEngine, DeckSnapshot } from '../playback/DeckEngine';
 import type { Mixer } from '../playback/mixer';
 import {
   jumpCrossedDecks,
+  planScratchAt,
   planStateAt,
   PLAN_DECKS,
   type PlanAutomation,
@@ -49,8 +50,18 @@ import {
   type SetPlan,
 } from './planner';
 import { soundingWindowAt, soundingWindowKey } from './replan';
+import { scratchFramesFrom } from './routineScratch';
+
+/** Any recorded scratch gesture in the plan (#352)? */
+function planHasScratch(plan: SetPlan): boolean {
+  return plan.routines.some((r) => r.slots.some((s) => s.scratches?.length))
+    || plan.adjacencies.some((a) => Boolean(a.transition?.scratches?.length || a.transition?.scratchesA?.length));
+}
 
 const DRIFT_TOLERANCE_S = 0.12;
+/** Scratch gestures (#352) hand over to the deck's audio thread this far
+ * ahead of their first frame. */
+const SCRATCH_LEAD_S = 0.12;
 
 // ── Phase servo (#161 finding 4) ───────────────────────────────────────
 // Sub-seek drift corrects by riding the deck's rate a touch — a DJ's
@@ -187,6 +198,11 @@ export class Conductor {
   /** A seek landed: the next tick re-positions decks unconditionally
    * (sub-tolerance seeks must not be swallowed by the drift check). */
   private pendingHardSync = false;
+  /** Scratch gestures handed to a deck's audio thread (#352): the deck is
+   * the gesture's until its end — the servo stands off. */
+  private scratchRuns: Partial<Record<PlanDeck, { key: object; endMixSec: number; owner: symbol }>> = {};
+  /** Gestures the engine refused (unprepared source): positional fallback. */
+  private scratchRefused = new WeakSet<object>();
   /** Pickup convergence (sets 16): mixer lanes ramp from the adopted
    * base values to the plan's, and the anchor decks' pitch eases to the
    * plan's rate, over a short tunable window — the mirror of takeover's
@@ -270,6 +286,9 @@ export class Conductor {
     this.playing = true;
     this.anchorAudioTime = this.mixer.now();
     this.lastTickT = this.getMixTime();
+    if (planHasScratch(this.plan)) {
+      for (const deck of this.driven) void this.engine(deck).prepareScratchReplay?.().catch(() => undefined);
+    }
     this.raf = requestAnimationFrame(this.tick);
     this.emit();
   }
@@ -278,6 +297,7 @@ export class Conductor {
     if (!this.playing) return;
     this.mixTimeAtAnchor = this.getMixTime();
     this.playing = false;
+    this.cancelScratches();
     this.pickupRamp = null; // a paused pickup finishes converging silently
     cancelAnimationFrame(this.raf);
     this.pauseDecks();
@@ -308,6 +328,7 @@ export class Conductor {
     this.mixTimeAtAnchor = t;
     this.anchorAudioTime = this.mixer.now();
     this.lastTickT = t;
+    this.cancelScratches();
     this.activeEntryIndex = planStateAt(this.plan, t).activeEntryIndex;
     // Playing: the next tick reconciles everything (drift check forced).
     this.pendingHardSync = true;
@@ -399,6 +420,7 @@ export class Conductor {
     const oldT = this.getMixTime();
     const t = Math.max(0, Math.min(mixTime, Math.max(newPlan.totalSec - 0.001, 0)));
     this._plan = newPlan;
+    this.cancelScratches();
     // Note: watchers stay as attached at activation — a re-plan that
     // INTRODUCES the first Routine mid-run drives C/D without gesture
     // watchers until the next start (routine pins re-plan rarely; the
@@ -464,6 +486,7 @@ export class Conductor {
     if (!this.active) return;
     this.playing = false;
     cancelAnimationFrame(this.raf);
+    this.cancelScratches();
     this.pauseDecks();
     this.teardown({ release: true, disengage: true });
     this.fireStopped(reason);
@@ -556,6 +579,9 @@ export class Conductor {
    * from exactly what the user hears.
    */
   private takeover(touched?: ReadonlySet<string>): void {
+    // The human has the decks: a recorded gesture must not keep moving
+    // the platter under their hand.
+    this.cancelScratches();
     if (!this.active) return;
     this.playing = false;
     cancelAnimationFrame(this.raf);
@@ -590,6 +616,41 @@ export class Conductor {
       }
     }
     if (!skip('crossfader')) this.mixer.setCrossfader(0);
+  }
+
+  /** True while `deck` belongs to a scratch gesture; hands an upcoming one
+   * to the engine's audio thread SCRATCH_LEAD_S ahead (#352). */
+  private driveScratch(deck: PlanDeck, t: number): boolean {
+    const engine = this.engine(deck);
+    const run = this.scratchRuns[deck];
+    if (run) {
+      engine.syncScheduledScratch(true);
+      if (t < run.endMixSec) return true;
+      delete this.scratchRuns[deck];
+      return false;
+    }
+    const span = planScratchAt(this.plan, deck, t, SCRATCH_LEAD_S);
+    if (!span || this.scratchRefused.has(span.key)) return false;
+    const frames = scratchFramesFrom(span.build(), t,
+      (mixSec) => this.anchorAudioTime + (mixSec - this.mixTimeAtAnchor));
+    if (frames.length === 0) return false;
+    try {
+      this.scratchRuns[deck] = { key: span.key, endMixSec: span.endMixSec, owner: engine.scheduleScratch(frames) };
+      return true;
+    } catch {
+      this.scratchRefused.add(span.key);
+      return false;
+    }
+  }
+
+  private cancelScratches(): void {
+    const runs = this.scratchRuns;
+    this.scratchRuns = {};
+    this.self(() => {
+      for (const [deck, run] of Object.entries(runs) as [PlanDeck, { owner: symbol }][]) {
+        this.engine(deck).cancelScheduledScratch(run.owner);
+      }
+    });
   }
 
   private pauseDecks(): void {
@@ -767,8 +828,17 @@ export class Conductor {
     // reads ~0 while the actual audio runs behind by each deck's own
     // start latency (the set-playback clash bug; pausing and resuming
     // "fixed" it by doing exactly this restart-together).
+    // Scratch gestures (#352): a deck under a running (or imminent) gesture
+    // belongs to its audio-thread schedule — no join, no servo.
+    const scratching = new Set<PlanDeck>();
+    this.self(() => {
+      for (const deck of this.driven) {
+        if (ready[deck] && this.driveScratch(deck, t)) scratching.add(deck);
+      }
+    });
     const joining = this.driven.some(
       (d) =>
+        !scratching.has(d) &&
         ready[d] &&
         state.decks[d].playing &&
         !this.engine(d).getSnapshot().playing &&
@@ -794,7 +864,7 @@ export class Conductor {
       : state.lanes;
     this.self(() => {
       for (const deck of this.driven) {
-        if (ready[deck]) this.syncDeck(deck, state, hardAll || jumped.includes(deck), p);
+        if (ready[deck] && !scratching.has(deck)) this.syncDeck(deck, state, hardAll || jumped.includes(deck), p);
       }
       for (const deck of this.driven) this.mixer.setAutomation(deck, lanes[deck]);
     });

@@ -13,6 +13,7 @@ import type { Transition } from '../editor/mixModel';
 import type { Track } from '../types';
 import {
   jumpCrossed,
+  planScratchAt,
   planSet,
   plannerTrackFacts,
   planStateAt,
@@ -1414,5 +1415,31 @@ describe('per-entry trim (sets #164)', () => {
     expect(withEntryTrim(bare, 0.2).trim).toBeCloseTo(0.7);
     // Neutral offset leaves the lane alone (identity — no trim key).
     expect(withEntryTrim(bare, 0)).toBe(bare);
+  });
+});
+
+describe('planScratchAt (#352)', () => {
+  it('maps a window gesture onto the mix axis, anchored on the deck plan', () => {
+    const scratches: Transition['scratches'] = [{ x: 0.5, durationSec: 0.5, deltaSec: -0.4,
+      frames: [[0, 0, 0, 0, 1, 1], [0.2, -0.3, -6, -1, 1, 1], [0.5, 0.1, 0, 0, 1, 0]] }];
+    const plan = planSet(input({
+      entries: [{ trackId: 1, pin: { kind: 'transition', uuid: 't1' } }, { trackId: 2, pin: null }],
+      tracks: { 1: facts(200), 2: facts(200) },
+      transitionsByUuid: { t1: tr({ scratches }) },
+    }));
+    const adj = plan.adjacencies[0] as { mixStartSec: number };
+    const deck = plan.entries[1].deck;
+    const start = adj.mixStartSec + 10;
+    expect(planScratchAt(plan, deck, start - 0.2, 0.1)).toBeNull();
+    const span = planScratchAt(plan, deck, start - 0.05, 0.1)!;
+    expect(span.startMixSec).toBeCloseTo(start, 6);
+    const clip = span.build();
+    const p0 = planStateAt(plan, start - 1e-6).decks[deck].trackTime;
+    expect(clip.frames[0].position).toBeCloseTo(p0, 2);
+    expect(clip.frames[1].motion).toMatchObject({ drive: -6, rate: -1 });
+    expect(clip.frames.at(-1)).toMatchObject({ motion: null, position: expect.closeTo(p0 + 0.1, 2) });
+    // After release the plan resumes from the landing.
+    expect(planStateAt(plan, start + 1).decks[deck].trackTime).toBeCloseTo(p0 + 0.1 + 0.5, 2);
+    expect(planScratchAt(plan, plan.entries[0].deck, start, 0.1)).toBeNull();
   });
 });

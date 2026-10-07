@@ -39,7 +39,7 @@
  */
 import type { VectorizeInput } from '../capture/vectorize';
 import { vectorizeTake } from '../capture/vectorize';
-import type { Transition } from '../editor/mixModel';
+import type { Transition, TransitionScratch } from '../editor/mixModel';
 import { outgoingAutomationStart, pairAuthoringTransition, pairBounds } from '../editor/pairBounds';
 import {
   aTrackTimeAt,
@@ -50,6 +50,7 @@ import {
   tempoMatchPitch,
 } from '../editor/mixModel';
 import { TRIM_NEUTRAL } from '../playback/mixerMath';
+import { scratchClipAt, type PlannedScratchClip } from './routineScratch';
 import { MAX_PITCH_RANGE_PERCENT } from '../playback/tempo';
 import type { Track } from '../types';
 import type { AdjacencyPin } from './adjacency';
@@ -58,6 +59,7 @@ import type { CameoPlanSource } from './cameoPlan';
 import {
   buildPlannedRoutine,
   routineSlotStateAt,
+  slotOccupyingDeckAt,
   slotLanesAt,
   traceStateAt,
   type PlannedRoutine,
@@ -1274,6 +1276,10 @@ export function incomingMotionSpans(adj: WindowedAdjacency, soloRate: number, un
       knots.add(adj.mixStartSec + (j.x * adj.transition.durationSec + i * Math.max(0, -j.deltaSec) / adj.rateIncoming) / adj.rateOutgoing);
     }
   }
+  // Scratch landings (#352) are displacement knots too.
+  for (const c of adj.transition.scratches ?? []) {
+    knots.add(adj.mixStartSec + (c.x * adj.transition.durationSec + c.durationSec) / adj.rateOutgoing);
+  }
   const times = [...knots].filter((t) => t >= adj.mixStartSec && t < until).sort((a, b) => a - b);
   return times.map((start, i) => {
     const end = Math.min(times[i + 1] ?? Infinity, until);
@@ -1702,6 +1708,74 @@ export function planStateAt(plan: SetPlan, mixTime: number): PlanState {
     };
   }
   return state;
+}
+
+/** A recorded scratch gesture (#352) the Conductor should hand to `deck`'s
+ * audio thread: its span on the global mix axis, an identity stable for
+ * the plan's lifetime (one hand-off per gesture), and its frames — built
+ * lazily, since a gesture can carry thousands. */
+export interface PlanScratchSpan {
+  key: object;
+  startMixSec: number;
+  endMixSec: number;
+  build(): PlannedScratchClip;
+}
+
+/** The scratch gesture running on `deck` at mix time t (or starting within
+ * `leadSec`), from a Routine slot occupying the deck or a window's
+ * incoming / outgoing role. Window gestures map off the authored axis at
+ * the outgoing's rate and anchor on the deck's planned position at the
+ * gesture start, so slides, jumps and Tempo policy carry them. */
+export function planScratchAt(plan: SetPlan, deck: PlanDeck, t: number, leadSec = 0): PlanScratchSpan | null {
+  for (const routine of plan.routines) {
+    if (t < routine.mixStartSec - leadSec || t > routine.mixEndSec) continue;
+    const slot = slotOccupyingDeckAt(routine, deck, t);
+    const clip = slot ? scratchClipAt(slot.scratches, t, leadSec) : null;
+    if (clip) return { key: clip, startMixSec: clip.startMixSec, endMixSec: clip.endMixSec, build: () => clip };
+  }
+  for (let i = 0; i < plan.adjacencies.length; i++) {
+    const adj = plan.adjacencies[i];
+    if (!isWindowed(adj)) continue;
+    const tr = adj.transition;
+    const roles: { clips: TransitionScratch[] | undefined; entryIndex: number }[] = [
+      { clips: tr.scratchesA, entryIndex: i },
+      { clips: tr.scratches, entryIndex: i + 1 },
+    ];
+    for (const { clips, entryIndex } of roles) {
+      if (!clips?.length || plan.entries[entryIndex]?.deck !== deck) continue;
+      for (const c of clips) {
+        const start = adj.mixStartSec + (c.x * tr.durationSec) / adj.rateOutgoing;
+        const end = start + c.durationSec / adj.rateOutgoing;
+        if (t < start - leadSec || t >= end) continue;
+        return {
+          key: c,
+          startMixSec: start,
+          endMixSec: end,
+          build: () => {
+            const p0 = playingTrackTimeAt(plan.entries, plan.adjacencies, entryIndex, start).trackTime;
+            const after = playingTrackTimeAt(plan.entries, plan.adjacencies, entryIndex, end + 1e-6);
+            const rate = 1 + after.pitchPercent / 100;
+            const k = adj.rateOutgoing;
+            return {
+              startMixSec: start,
+              endMixSec: end,
+              frames: c.frames.map(([dt, dPos, drive, platterRate, running, hand]) => {
+                const time = start + dt / k;
+                const position = p0 + dPos;
+                const released = hand !== 1;
+                return {
+                  time, position, playing: running === 1, loop: null, rate,
+                  motion: released ? null : { drive: drive * k, rate: platterRate * k, position, time,
+                    trackDuration: Infinity, loop: null },
+                };
+              }),
+            };
+          },
+        };
+      }
+    }
+  }
+  return null;
 }
 
 /** Jump instants of the window containing [t0, t1), on the GLOBAL mix

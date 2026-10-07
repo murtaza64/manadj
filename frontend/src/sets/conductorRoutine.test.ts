@@ -11,6 +11,7 @@ import type { Mixer } from '../playback/mixer';
 import { Conductor, type ConductorAudio } from './Conductor';
 import { planSet, type PlanAutomation, type PlanInput, type SetPlan } from './planner';
 import type { RoutineEventInput, RoutinePlanInput } from './routinePlan';
+import type { ScratchFrame } from '../playback/worklet/scratchMotion';
 
 // ── Fakes (Conductor.test.ts's mold, four decks) ────────────────────────
 
@@ -497,5 +498,51 @@ describe('rolling junction decks (sets #143)', () => {
     expect(stopped).toEqual(['takeover']);
     expect(conductor.isActive()).toBe(false);
     expect(engines.A.getSnapshot().playing).toBe(true);
+  });
+});
+
+describe('scratch gestures in a Routine span (#352)', () => {
+  function scratchedPlan(): SetPlan {
+    const facts = { durationSec: 240, bpm: 120, hotCue1Sec: null };
+    const r = recording();
+    r.events = [...r.events,
+      { kind: 'transport', beat: 20, slot: 1, action: 'scratchBegin', playhead: 2 },
+      { kind: 'transport', beat: 20.4, slot: 1, action: 'scratchMove', playhead: 1.8, filter: { drive: -4, rate: -1 } },
+      { kind: 'transport', beat: 21, slot: 1, action: 'scratchEnd', playhead: 2.5 },
+    ].sort((a, b) => (a.beat as number) - (b.beat as number));
+    return planSet({
+      entries: [{ trackId: 1, pin: null }, { trackId: 2, pin: null }, { trackId: 3, pin: null }],
+      tracks: { 1: facts, 2: facts, 3: facts },
+      transitionsByUuid: {}, takesByUuid: {},
+      routines: [{ startEntryIndex: 0, routine: r }],
+    });
+  }
+
+  it('hands the gesture to the slot deck ahead of time; the servo stands off until release', () => {
+    const plan = scratchedPlan();
+    const routine = plan.routines[0];
+    const slot = routine.slots.find((s) => s.scratches?.length)!;
+    const clip = slot.scratches![0];
+    const { conductor, engines } = makeConductor(plan);
+    const deck = engines[slot.deck as Deck] as FakeEngine & Record<string, unknown>;
+    const scheduled: ScratchFrame[][] = [];
+    let cancelled = 0;
+    Object.assign(deck, {
+      scheduleScratch: (f: ScratchFrame[]) => { scheduled.push(f); return Symbol('o'); },
+      cancelScheduledScratch: () => { cancelled++; },
+      syncScheduledScratch: () => null,
+      prepareScratchReplay: async () => {},
+    });
+    conductor.playFromEntry(0);
+    tickAt(0);
+    tickAt(clip.startMixSec - 1);
+    tickAt(clip.startMixSec - 0.05);
+    expect(scheduled).toHaveLength(1);
+    expect(scheduled[0].at(-1)).toMatchObject({ motion: null, playing: true });
+    const seeks = deck.seeks;
+    tickAt(clip.startMixSec + 0.2);
+    expect(deck.seeks).toBe(seeks);
+    conductor.pause();
+    expect(cancelled).toBe(1);
   });
 });
