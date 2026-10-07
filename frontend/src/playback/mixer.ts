@@ -1269,6 +1269,27 @@ export class Mixer {
     this.applyMasterBeatFx();
   }
 
+  /** Write the whole section at once (#351: Session replay applies logged
+   * snapshots verbatim). One notify; a null SELECT forces OFF. */
+  setBeatFxSection(state: Readonly<BeatFxSectionState>): void {
+    const next = { ...state, on: state.selected === null ? false : state.on };
+    const cur = this.beatFxSection;
+    if (cur.selected === next.selected && cur.target === next.target && cur.on === next.on
+      && cur.depth === next.depth && cur.beats === next.beats) return;
+    if (CHANNEL_IDS.includes(next.target as ChannelId)) {
+      this.beatFxTempoChannel = next.target as ChannelId;
+    }
+    this.beatFxSection = next;
+    this.notify('beatFx');
+    this.ensure();
+    for (const channel of CHANNEL_IDS) {
+      this.applyBeatFx(channel);
+      this.applyBeatFxTiming(channel);
+    }
+    this.applyMasterBeatFx();
+    this.applyMasterBeatFxTiming();
+  }
+
   /** BEAT ◄ ► — walk the echo's beat-fraction ladder (beatFx.ts). */
   stepBeatFxBeats(change: 'halve' | 'double'): void {
     const beats = stepEchoBeats(this.beatFxSection.beats, change);

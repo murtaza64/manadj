@@ -33,6 +33,7 @@ import { DEFAULT_DETECTOR_PARAMS } from '../capture/events';
 import type { CaptureDeck, CaptureEvent, DetectorParams } from '../capture/events';
 import { scratchBoundary } from '../playback/worklet/scratchMotion';
 import type { ScratchFilter } from '../playback/worklet/scratchMotion';
+import type { BeatFxSectionState } from '../playback/beatFx';
 
 export { ALL_DECKS };
 
@@ -594,6 +595,8 @@ export interface StateAtT {
   crossfader: number;
   crossfaderEnabled: boolean;
   tenureHolder: string | null;
+  /** Beat FX section at T (#351); null = the log carries no FX evidence. */
+  beatFx: BeatFxSectionState | null;
   /** Events at or before T / strictly after T (replay fires the latter). */
   eventsBefore: number;
   eventsAfter: number;
@@ -664,6 +667,7 @@ function snapshotState(
     crossfader: s.crossfader,
     crossfaderEnabled: s.crossfaderEnabled,
     tenureHolder: s.tenureHolder,
+    beatFx: s.beatFx,
     eventsBefore: before,
     eventsAfter: total - before,
   };

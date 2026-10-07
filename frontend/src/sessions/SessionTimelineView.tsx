@@ -110,6 +110,10 @@ const CANVAS_MARGIN = 160;
 
 // ── Formatting ──────────────────────────────────────────────────────────
 
+/** Take replay (#351) starts this far before the window: the outgoing's
+ * lead-in, so the entry is heard in context. */
+const TAKE_REPLAY_LEAD_S = 4;
+
 function fmtClock(s: number): string {
   const abs = Math.abs(s);
   const h = Math.floor(abs / 3600);
@@ -1125,6 +1129,16 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusFlash, f
         ) : null}
         {selection.kind === 'take' ? (
           <span className="stl-cluster">
+            {!replayHere ? (
+              <button
+                className="btn btn-success"
+                aria-label="Replay take"
+                title="Replay this Take exactly as performed (scratches, Beat FX) through the shared decks — any manual gesture takes over"
+                onClick={() => replayFrom(Math.max(0, selection.take.window_start_s - TAKE_REPLAY_LEAD_S))}
+              >
+                ▶ take
+              </button>
+            ) : null}
             <button
               className="btn btn-primary"
               onClick={() => {

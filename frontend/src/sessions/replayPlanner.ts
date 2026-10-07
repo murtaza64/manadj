@@ -22,6 +22,7 @@ import type { CaptureDeck, CaptureEvent } from '../capture/events';
 import { ALL_DECKS, stateAt } from './timelineModel';
 import { applyEvent, initialAudibilityState, deckScratchMotion, deckPlayheadAt } from '../capture/audibilityReducer';
 import type { ScratchFrame, ScratchFilter } from '../playback/worklet/scratchMotion';
+import type { BeatFxSectionState } from '../playback/beatFx';
 
 export interface ReplaySeedDeck {
   trackId: number | null;
@@ -45,6 +46,9 @@ export interface ReplaySeed {
   decks: Record<CaptureDeck, ReplaySeedDeck>;
   crossfader: number;
   crossfaderEnabled: boolean;
+  /** Beat FX section at the start moment (#351); null = the log carries no
+   * FX evidence (pre-#351 capture) — replay runs with FX off. */
+  beatFx: BeatFxSectionState | null;
 }
 
 export type ReplayCue =
@@ -67,7 +71,9 @@ export type ReplayCue =
   | { offsetS: number; kind: 'pitch'; channel: CaptureDeck; value: number }
   | { offsetS: number; kind: 'load'; channel: CaptureDeck; trackId: number | null }
   | { offsetS: number; kind: 'loop'; channel: CaptureDeck; playhead: number; region: { start: number; end: number } | null }
-  | { offsetS: number; kind: 'sync'; playheads: Partial<Record<CaptureDeck, number>> };
+  | { offsetS: number; kind: 'sync'; playheads: Partial<Record<CaptureDeck, number>> }
+  /** Beat FX section snapshot (#351), applied whole. */
+  | { offsetS: number; kind: 'beatFx'; section: BeatFxSectionState };
 
 export interface ReplayPlan {
   /** Capture-clock start moment. */
@@ -119,6 +125,7 @@ export function planReplay(events: CaptureEvent[], startT: number): PlanReplayRe
     ) as Record<CaptureDeck, ReplaySeedDeck>,
     crossfader: state.crossfader,
     crossfaderEnabled: state.crossfaderEnabled,
+    beatFx: state.beatFx ? { ...state.beatFx } : null,
   };
 
   const trackIds = new Set<number>();
@@ -200,8 +207,14 @@ export function planReplay(events: CaptureEvent[], startT: number): PlanReplayRe
       case 'loop':
         cues.push({ offsetS, kind: 'loop', channel: e.channel, playhead: e.playhead, region: e.region });
         break;
+      case 'beatFx': {
+        const { selected, target, on, depth, beats } = e;
+        cues.push({ offsetS, kind: 'beatFx', section: { selected, target, on, depth, beats } });
+        break;
+      }
       // bend is momentary by definition;
-      // tenure markers and init snapshots never replay.
+      // tenure markers and init snapshots never replay; FX voicing
+      // (beatFxSettings) stays the live user's preference, like PFL/cue.
       default:
         break;
     }
