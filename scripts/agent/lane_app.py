@@ -156,17 +156,17 @@ def ensure_sandbox_db() -> None:
 
     db_backup.maybe_backup()
     db.parent.mkdir(parents=True, exist_ok=True)
-    subprocess.run(["cp", "-c", str(real), str(db)], check=True)
+    sys.path.insert(0, str(LANE_ROOT))
+    from backend.fs_clone import clone_file
+
+    clone_file(real, db)
     # WAL sidecars (performance-hardening 03): the real DB runs in WAL mode, so
     # committed-but-uncheckpointed rows live in `-wal`. Clone all present
     # sidecars or the sandbox starts stale (or corrupt on a lone-main copy).
     for suffix in ("-wal", "-shm"):
         sidecar = real.with_name(real.name + suffix)
         if sidecar.exists():
-            subprocess.run(
-                ["cp", "-c", str(sidecar), str(db.with_name(db.name + suffix))],
-                check=True,
-            )
+            clone_file(sidecar, db.with_name(db.name + suffix))
     print(f"cloned sandbox DB (APFS) from {real}")
 
 

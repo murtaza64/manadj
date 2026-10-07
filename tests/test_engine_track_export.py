@@ -213,3 +213,36 @@ class TestExportTracksToEngine:
         result = export_tracks_to_engine(db, edb)
 
         assert result.exported_to_target == 0
+
+
+# --- Engine-running guard (#304: psutil, no pgrep) ---------------------------
+
+
+def test_engine_process_name_matches_app_binary_only():
+    from enginedj.track_export import is_engine_process_name
+
+    assert is_engine_process_name("Engine DJ")
+    assert is_engine_process_name("Engine DJ.exe")
+    assert is_engine_process_name("ENGINE DJ.EXE")
+    assert not is_engine_process_name("crashpad_handler")
+    assert not is_engine_process_name("Engine DJ Helper")
+    assert not is_engine_process_name(None)
+
+
+def test_ensure_engine_closed_uses_psutil(monkeypatch):
+    import enginedj.track_export as te
+
+    class Proc:
+        def __init__(self, name):
+            self.info = {"name": name}
+
+    monkeypatch.setattr(
+        te.psutil, "process_iter", lambda attrs: iter([Proc("python"), Proc(None)])
+    )
+    te.ensure_engine_closed()  # no pgrep shell-out, no raise
+
+    monkeypatch.setattr(
+        te.psutil, "process_iter", lambda attrs: iter([Proc("Engine DJ.exe")])
+    )
+    with pytest.raises(te.EngineRunningError):
+        te.ensure_engine_closed()
