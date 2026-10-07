@@ -635,11 +635,20 @@ app.whenReady().then(() => {
 // No hidden-but-playing state.
 app.on("window-all-closed", () => app.quit());
 
-// Managed mode owns the backend's lifetime: stop it on the way out
-// (SIGTERM first — uvicorn shuts down cleanly — SIGKILL if it lingers).
-app.on("before-quit", () => {
+// Managed mode owns the backend's lifetime: stop it on the way out —
+// graceful shutdown hook, process-tree kill if it lingers (#314). The quit
+// is held until the backend is gone so it can't outlive the app (Windows:
+// TerminateProcess would otherwise be its only fate, and only via orphan
+// cleanup).
+let backendStopped = false;
+app.on("before-quit", (event) => {
   quitting = true;
-  backend.stopBackend(backendHandle);
+  if (backendStopped || !backendHandle || backendHandle.exited) return;
+  event.preventDefault();
+  backend.stopBackend(backendHandle).finally(() => {
+    backendStopped = true;
+    app.quit();
+  });
 });
 
 // A clean-quit marker distinguishes "user closed the app" from "the log just
