@@ -9,6 +9,7 @@ from typing import Any
 
 from backend.key import Key
 from backend.models import Track as ManAdjTrack
+from backend.sync_common.matching import path_key
 from rekordbox.sync import (
     find_missing_tracks_in_manadj_from_rekordbox,
     find_missing_tracks_in_rekordbox,
@@ -135,7 +136,8 @@ def export_tracks_to_rekordbox(
             continue
 
         title = track.title or file_path.stem
-        rb_db.add_content(str(file_path.absolute()), Title=title)
+        # Rekordbox stores "/"-separated FolderPaths on every OS (#305).
+        rb_db.add_content(file_path.absolute().as_posix(), Title=title)
         exported += 1
 
     if exported > 0:
@@ -157,10 +159,10 @@ def create_needs_analysis_playlist(
     playlist = rb_db.create_playlist(name=playlist_name)
 
     rb_contents = list(rb_db.get_content())
-    track_paths = {t.filename for t in tracks}
+    track_paths = {path_key(t.filename) for t in tracks}
 
     for rb_content in rb_contents:
-        if rb_content.FolderPath in track_paths:
+        if rb_content.FolderPath and path_key(rb_content.FolderPath) in track_paths:
             rb_db.add_to_playlist(playlist, rb_content)
 
     rb_db.commit(autoinc=True)
@@ -197,7 +199,9 @@ def import_tracks_from_rekordbox(
             artist = rb_track.Artist.Name if hasattr(rb_track.Artist, 'Name') else None
 
         manadj_track = ManAdjTrack(
-            filename=rb_track.FolderPath,
+            # Native separators: Rekordbox's "C:/..." becomes "C:\\..." on
+            # Windows; a no-op on POSIX (#305).
+            filename=str(Path(rb_track.FolderPath)),
             title=rb_track.Title,
             artist=artist,
             bpm=bpm,
