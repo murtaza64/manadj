@@ -71,6 +71,7 @@ import {
 } from './waveformLanes';
 import type { LaneLadder, TraceRun } from './waveformLanes';
 import { planReplay } from './replayPlanner';
+import { headerTakeCount } from './headerTakeCount';
 import type { ServoDeckActivity } from './replayStore';
 import {
   replayNowT,
@@ -1165,7 +1166,7 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusFlash, f
         ) : null}
         <span className="stl-title">
           {fmtWhen(session.started_at)}
-          {model ? ` · ${fmtDur(model.end - model.start)} · ${takes.length} takes` : ''}
+          {model ? ` · ${fmtDur(model.end - model.start)} · ${headerTakeCount(allTakes ? takes : undefined, session.take_count)} takes` : ''}
         </span>
 
         {/* Replay transport: present whenever THIS session is rolling —
