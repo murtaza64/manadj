@@ -122,9 +122,17 @@ export default function LibrarySettings() {
         />
         <PathField
           label="Engine DJ location"
-          note="Engine DJ Database2 folder. Leave empty if you don't use Engine DJ."
-          value={config.engine_dj_path ?? ''}
-          placeholder="Not set"
+          note={
+            config.engine_autodetected
+              ? 'Auto-detected. Set a path to override; clear it to auto-detect again.'
+              : 'Engine DJ Database2 folder. Leave empty to auto-detect.'
+          }
+          value={config.engine_autodetected ? '' : (config.engine_dj_path ?? '')}
+          placeholder={
+            config.engine_detected_path
+              ? `${config.engine_detected_path} (auto-detected)`
+              : 'Not found — set a path if Engine DJ is installed'
+          }
           pickerTitle="Choose your Engine DJ Database2 folder"
           onCommit={(path) => update.mutate({ engine_dj_path: path })}
         />
@@ -153,7 +161,7 @@ export default function LibrarySettings() {
       </div>
       <p className="settings-hint">
         Stored in <code>{config.settings_file}</code>
-        {revealed ? ' (revealed in Finder)' : ''}. Editing that file by hand is
+        {revealed ? ' (revealed)' : ''}. Editing that file by hand is
         equivalent to editing here.
       </p>
       {update.isError ? (
