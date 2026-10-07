@@ -2,7 +2,7 @@
 # slug is stable — chapters reference it, and it anchors #term-<slug>.
 - slug: track
   term: Track
-  def: An audio file plus everything you know about it — title, artist, Key, BPM, Energy, Tags, Hot Cues.
+  def: An audio file with metadata, including title, artist, Key, BPM, Energy, Tags and Hot Cues.
 - slug: tag
   term: Tag
   def: A label you put on a Track. Every Tag belongs to one Tag Category.
@@ -20,7 +20,7 @@
   def: Added but not yet curated — no Tags, title and artist not cleaned up.
 - slug: archived
   term: Archived
-  def: Out of your active library. Nothing is deleted, and it never comes back on its own. Reversible.
+  def: Hidden from the active Library until restored; files and metadata are retained.
 - slug: deck
   term: Deck
   def: One of four players, A–D. A Deck keeps playing when you switch views.
@@ -44,13 +44,13 @@
   def: Decks join one shared tempo. Move any member's pitch and the group follows.
 - slug: follow-mode
   term: Follow mode
-  def: Keeps the track list filtered to good next Tracks for what is playing.
+  def: Filters the track list to next-Track suggestions for the playing Deck.
 - slug: linked
   term: Linked
-  def: Your one-tap note that two Tracks go well together.
+  def: A manually marked association between two Tracks.
 - slug: known
   term: Known
-  def: Tracks connected by something you did — Linked, or a saved Transition or Cameo.
+  def: Tracks connected by a Linked association, saved Transition or Cameo.
 - slug: observed
   term: Observed
   def: A pair you have mixed more than once without saving anything for it.
@@ -71,7 +71,7 @@
   def: A guest Track that drops in over a host Track and leaves again — a double or a tease.
 - slug: routine
   term: Routine
-  def: A saved passage weaving three or more Track slots, captured live or authored in the Mix editor.
+  def: A saved passage with three or more Track slots, captured live or authored in the Mix editor.
 - slug: mix-editor
   term: Mix editor
   def: One timeline for editing any Transition, Cameo, or Routine, or reviewing a Take.
@@ -104,10 +104,10 @@
   def: Pushes your Library out to Engine DJ, Rekordbox, or file tags. manadj's values win.
 - slug: external-import
   term: External Import
-  def: Pulls things you changed downstream back in, like cues set at a gig or Keys analyzed in Engine.
+  def: Imports metadata changes from external libraries, such as cues or analyzed Keys.
 - slug: source-item
   term: Source Item
-  def: A track on SoundCloud you've liked and might want to download.
+  def: A liked track on SoundCloud.
 - slug: controller
   term: Controller
   def: A MIDI DJ controller driving the Decks, Mixer, and library browsing.

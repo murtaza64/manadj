@@ -75,101 +75,95 @@
       <article class="prose install-guide" aria-label="Installation and Setup guide">
         <h2 id="macos">Install on macOS</h2>
 <ol>
-<li>Download the <strong>macOS arm64 DMG</strong> above. Requires an Apple Silicon Mac (M1 or later) and recent macOS.</li>
-<li>Open the DMG, drag <strong>manaDJ</strong> into <strong>Applications</strong>, then eject the DMG.</li>
-<li>In Applications, <strong>right-click → Open</strong> (or Control-click → Open), then confirm <strong>Open</strong>.</li>
+<li>Download the <strong>macOS arm64 DMG</strong>: Apple Silicon (M1 or later), recent macOS required.</li>
+<li>Open it, drag <strong>manaDJ</strong> into <strong>Applications</strong>, eject.</li>
+<li>In Applications, right-click (or Control-click) manaDJ → <strong>Open</strong>; confirm <strong>Open</strong>.</li>
+<li>Not notarized: if blocked with <strong>Move to Trash / Done</strong>, use <strong>System Settings → Privacy &amp; Security → Open Anyway</strong>; confirm.</li>
 </ol>
-<p>manaDJ is not notarized by Apple. If macOS only offers <strong>Move to Trash</strong> or <strong>Done</strong>, open <strong>System Settings → Privacy &amp; Security</strong>, find the manaDJ blocked-app notice, select <strong>Open Anyway</strong>, and confirm. The first launch takes longer while the database is prepared.</p>
+<p>First launch takes longer while preparing the database.</p>
 <h2 id="windows">Install on Windows</h2>
-<p>Requires 64-bit Windows 10 or 11 (x64); <strong>untested on Windows hardware</strong>.</p>
 <ol>
-<li>Download and run the <strong>Windows x64 installer</strong> above.</li>
-<li>The installer is not code-signed. At SmartScreen’s <strong>Windows protected your PC</strong>, choose <strong>More info → Run anyway</strong>.</li>
-<li>Launch manaDJ from the Start menu. It installs to <code>%LOCALAPPDATA%\Programs\manaDJ</code> without administrator rights.</li>
+<li>Download and run the <strong>Windows x64 installer</strong>: 64-bit Windows 10/11; <strong>untested on Windows hardware</strong>.</li>
+<li>Not code-signed: SmartScreen’s <strong>Windows protected your PC</strong> → <strong>More info → Run anyway</strong>.</li>
+<li>Launch from Start. Installs to <code>%LOCALAPPDATA%\Programs\manaDJ</code> without administrator rights.</li>
 </ol>
-<p>If Windows 11 Smart App Control blocks the installer outright, there is no per-app bypass. Use a machine with Smart App Control off until manaDJ is signed.</p>
+<p>Windows 11 Smart App Control has no per-app bypass; use a machine with it off until manaDJ is signed.</p>
 <h2 id="welcome">Welcome</h2>
-<p>On an empty Library that has never finished or skipped First run, <strong>Welcome to manaDJ</strong> offers <strong>Get started</strong> or <strong>Skip setup</strong>. Every step is optional. The sequence is Rekordbox import → Tracks directory → Cue mode → SoundCloud → Soulseek → Controller check.</p>
-<p><strong>Finish later</strong> or closing the first-run overlay saves your place. On reopening manaDJ, <strong>Welcome back</strong> offers <strong>Resume setup</strong>, even if you have already imported tracks. Finish the sequence with <strong>Open manaDJ</strong>; the Tour then shows you around.</p>
+<ul>
+<li>First run requires an empty Library and a welcome never finished or skipped.</li>
+<li>Select <strong>Get started</strong> or <strong>Skip setup</strong>; all steps below are optional.</li>
+<li><strong>Finish later</strong> saves progress; <strong>Resume setup</strong> continues it.</li>
+<li>After Controller check, <strong>Open manaDJ</strong> starts the Tour.</li>
+</ul>
 <h2 id="rekordbox-import">Rekordbox import</h2>
 <ol>
-<li>Let manaDJ find your Rekordbox library and preview the counts. Nothing is imported during the preview.</li>
-<li>Choose whether to <strong>Keep my genres</strong> as Tags, then select <strong>Import … new tracks</strong>.</li>
-<li>Keep manaDJ open until the import finishes. <strong>Continue setup while importing</strong> moves to the next step while it runs.</li>
+<li>Preview the library; choose whether to <strong>Keep my genres</strong>, then <strong>Import … new tracks</strong>, or <strong>Skip for now</strong>.</li>
+<li>Keep manaDJ open; <strong>Continue setup while importing</strong> proceeds.</li>
 </ol>
-<p>The import reads a snapshot and <strong>never writes to Rekordbox</strong>. Music files stay in place. <strong>Export to Rekordbox / Engine DJ</strong> is <strong>off by default</strong> in Settings → Library; writing to those libraries requires opting in separately.</p>
-<p>Tracks, Hot Cues, beatgrids, keys, MyTags and playlists come across where available. The first memory cue becomes the Main cue. Other memory cues, saved loops, missing files and streaming-only tracks stay in Rekordbox. Smart playlists become regular playlists using their saved tracks. Existing manaDJ values are kept; repeating an import fills missing details without duplicating tracks.</p>
-<p>If no library is found, open Rekordbox once with your collection and select <strong>Look again</strong>, or set <strong>Settings → Library → Rekordbox location</strong>. Otherwise choose <strong>Skip for now</strong> and add a folder next.</p>
+<p>Import never writes to Rekordbox or moves music. Export is off by default.</p>
 <h2 id="music-folder">Music folder / Tracks directory</h2>
 <ol>
-<li>Select <strong>Choose folder…</strong> or enter the full path to your music folder.</li>
-<li>Select <strong>Save &amp; scan folder</strong> to add audio files from it and all subfolders, without moving them. Existing Library tracks are not added twice.</li>
-<li>Alternatively, select <strong>Use folder without scanning</strong> or <strong>Skip for now</strong>.</li>
+<li><strong>Choose folder…</strong> → <strong>Save &amp; scan folder</strong>, or <strong>Use folder without scanning / Skip for now</strong>.</li>
+<li>Keep manaDJ open during scanning. Downloads use this folder; imported files stay in place.</li>
 </ol>
-<p>This folder is also the destination for new Acquisition downloads. Keep manaDJ open during a Scan; <strong>Continue setup while scanning</strong> lets you proceed. Change the folder later in <strong>Settings → Library → Tracks directory</strong>.</p>
 <h2 id="cue-mode">Cue mode</h2>
-<p>Cue mode controls <strong>Hot Cues on a paused Deck</strong>, for keyboard, MIDI and on-screen pads:</p>
+<p>Paused-Deck Hot Cues:</p>
 <ul>
-<li><strong>Gated</strong> (default): hold a Hot Cue to preview; release stops playback and returns to that cue.</li>
-<li><strong>Trigger</strong>: press a Hot Cue to jump there and start playback; releasing it leaves playback running.</li>
+<li><strong>Gated</strong> (default): hold previews; release stops and returns.</li>
+<li><strong>Trigger</strong>: press starts playback; release continues.</li>
 </ul>
-<p>On a playing Deck, Hot Cues always jump. The Main cue keeps its hold behavior in both modes. Change the choice with <strong>GATED</strong> in Performance: lit means Gated, unlit means Trigger. Headphone output routing is a separate choice in <a href="#controller-check">Controller check</a>.</p>
+<p>Playing-Deck Hot Cues always jump; Main cue retains hold behavior. Headphone routing: <a href="#controller-check">Controller check</a>.</p>
 <h2 id="soundcloud">SoundCloud</h2>
-<p>Optional. Connect to see your likes in <strong>Sync → Acquisition</strong>.</p>
 <ol>
-<li>Log in at <a href="https://soundcloud.com">soundcloud.com</a> in your browser.</li>
-<li>Open developer tools: <strong>Option–Command–I</strong> on macOS or <strong>Ctrl–Shift–I</strong> on Windows. In Chrome/Edge/Brave, choose <strong>Application</strong>; in Firefox/Safari, choose <strong>Storage</strong>. Safari first needs Settings → Advanced → <strong>Show features for web developers</strong>.</li>
-<li>Under <strong>Cookies → https://soundcloud.com</strong>, copy the value of <strong>oauth_token</strong> (starts with <code>2-</code>).</li>
-<li>Paste it into the manaDJ guide and select <strong>Connect</strong>. Check the displayed account name and likes count, then select <strong>Done</strong>.</li>
+<li>Log into <a href="https://soundcloud.com">soundcloud.com</a>.</li>
+<li>Developer tools: <strong>Option–Command–I</strong> (macOS), <strong>Ctrl–Shift–I</strong> (Windows). Chrome/Edge/Brave: <strong>Application</strong>; Firefox/Safari: <strong>Storage</strong>. Safari: first enable <strong>Settings → Advanced → Show features for web developers</strong>.</li>
+<li><strong>Cookies → https://soundcloud.com</strong>: copy <strong>oauth_token</strong> (<code>2-…</code>).</li>
+<li>Paste into manaDJ → <strong>Connect</strong>; verify account and likes → <strong>Done</strong>.</li>
 </ol>
-<p>You can <strong>Skip</strong> and reconnect later through <strong>Settings → Accounts → SoundCloud</strong>. The copied token is a credential; keep it out of screenshots and issue reports.</p>
 <h2 id="soulseek">Soulseek</h2>
-<p>Optional. manaDJ can search Soulseek when a track cannot be downloaded from SoundCloud.</p>
 <ol>
-<li>Enter your Soulseek username and password, then select <strong>Connect</strong>. For a new account, choose a new username and a password you do not use elsewhere; Soulseek creates it on first login.</li>
-<li>Wait for <strong>Connected to Soulseek</strong>, then select <strong>Done</strong>. manaDJ runs the bundled slskd program separately.</li>
-<li>If login fails, use <strong>Re-enter account</strong> or <strong>Restart slskd</strong>. If the build reports slskd unavailable, <strong>Skip</strong> this step.</li>
+<li>Enter username/password → <strong>Connect</strong>. New accounts are created on first login.</li>
+<li>Wait for <strong>Connected to Soulseek</strong> → <strong>Done</strong>; if slskd is unavailable, <strong>Skip</strong>.</li>
 </ol>
-<p>Revisit it in <strong>Settings → Accounts → Soulseek</strong>. An existing external slskd configuration is shown as <strong>Using your own slskd</strong>.</p>
 <h2 id="controller-check">Controller check</h2>
-<ul>
-<li><strong>Audio outputs:</strong> choose <strong>Master</strong> for speakers and <strong>Cue</strong> for headphones, then use each <strong>Test tone</strong> button. Cue starts <strong>Off</strong>; a controller’s headphone jack is usually outputs 3/4. Choose an explicit output pair when prompted.</li>
-<li><strong>MIDI controller:</strong> connect over USB and check the detected device. With a Mapping, press buttons or move controls to see their names and the checked-control count. <strong>No Mapping</strong> means that device’s controls will not operate manaDJ.</li>
-<li><strong>Jog calibration:</strong> use <strong>Calibrate jog wheels</strong> when available; some controllers have fixed calibration.</li>
-</ul>
-<p>A controller is optional; you can use the keyboard and mouse. Select <strong>Done</strong> or <strong>Skip</strong>, and revisit the check in <strong>Settings → Controllers → Controller check</strong>.</p>
+<ol>
+<li>Choose <strong>Master</strong> (speakers), <strong>Cue</strong> (headphones; initially <strong>Off</strong>); select explicit output pairs when prompted, then <strong>Test tone</strong>. Controller headphones usually use outputs 3/4.</li>
+<li>Connect USB controller; test mapped controls. <strong>No Mapping</strong> means controls cannot operate manaDJ.</li>
+<li><strong>Calibrate jog wheels</strong> if available; <strong>Done / Skip</strong>.</li>
+</ol>
 <h2 id="rerun-setup">Run Setup again / first-run state</h2>
-<p>Open <strong>Settings → Help → Setup</strong>:</p>
 <ul>
-<li><strong>Start</strong> or <strong>Open</strong> launches one guide. Its status is <strong>Not started</strong>, <strong>Done</strong> or <strong>Skipped</strong>.</li>
-<li><strong>Run setup again</strong> replays all six guides from the beginning, including completed ones. It keeps your Library and existing configuration; choices you change in a guide still take effect.</li>
-<li><strong>Resume setup</strong> appears when a first-run checkpoint exists and continues from that saved step.</li>
+<li><strong>Settings → Help → Setup → Run setup again</strong> replays all six guides, retaining Library and configuration; changed choices apply.</li>
+<li><strong>Resume setup</strong> continues saved progress.</li>
+<li>No <strong>Reset to first run</strong> button; replay retains completion history without restoring Welcome.</li>
+<li><strong>Settings → Help → Tour → Reset tour progress</strong> resets only the Tour.</li>
 </ul>
-<p>There is currently <strong>no “Reset to first run” or “Reset setup progress” button</strong>. Replaying Setup does not clear completion history or restore the initial welcome. Setup progress (guide statuses and a saved step) is separate from Library contents: a new First run needs an empty Library and a welcome that has never been finished or skipped; a saved journey can resume with tracks already present. <strong>Do not delete your Library or data folder to replay Setup</strong>—use <strong>Run setup again</strong>.</p>
-<p><strong>Settings → Help → Tour → Reset tour progress</strong> resets the feature-tour history and turns tours back on. It does not reset Setup or the Library.</p>
 <h2 id="data">Where your data lives</h2>
 <ul>
-<li><strong>macOS:</strong> <code>~/Library/Application Support/manaDJ</code> — Finder → Go → Go to Folder…</li>
-<li><strong>Windows:</strong> <code>%APPDATA%\manaDJ</code> — paste into File Explorer.</li>
+<li><strong>macOS:</strong> <code>~/Library/Application Support/manaDJ</code></li>
+<li><strong>Windows:</strong> <code>%APPDATA%\manaDJ</code></li>
+<li>Contains database, backups, settings, stems and logs.</li>
 </ul>
-<p>The data root holds the Library database, backups, settings, stems and logs. <strong>Settings → Library → Reveal settings file</strong> opens the location of <code>config.toml</code>; <strong>Reveal logs</strong> opens the logs folder. Imported music stays at its original location; new downloads go to your chosen Tracks directory.</p>
 <h2 id="updates">Updates</h2>
-<p>Quit manaDJ before installing an update. On macOS, replace the Applications copy using the new DMG. On Windows, run the new installer over the old installation. Your data is kept. See <a href="https://github.com/murtaza64/manadj/releases/tag/v0.1.0-rc.3">current prerelease v0.1.0-rc.3</a> or <a href="https://github.com/murtaza64/manadj/releases/latest">latest release</a>; GitHub’s latest-release shortcut does not include prereleases.</p>
+<ol>
+<li>Quit manaDJ; replace the Applications copy using the new DMG (macOS) or run the new installer (Windows). Data remains.</li>
+<li><a href="https://github.com/murtaza64/manadj/releases/tag/v0.1.0-rc.3">Current prerelease v0.1.0-rc.3</a> / <a href="https://github.com/murtaza64/manadj/releases/latest">latest release</a> (excludes prereleases).</li>
+</ol>
 <h2 id="uninstall">Uninstall</h2>
 <ul>
-<li><strong>macOS:</strong> quit manaDJ and move it from Applications to the Trash.</li>
+<li><strong>macOS:</strong> quit; Applications → manaDJ → Trash.</li>
 <li><strong>Windows:</strong> Settings → Apps → Installed apps → manaDJ → Uninstall.</li>
 </ul>
-<p>The data folder is separate from the app. Keep it if you want your Library and settings when reinstalling.</p>
+<p>The data folder remains.</p>
 <h2 id="troubleshooting">Troubleshooting</h2>
 <ul>
-<li><strong>App blocked:</strong> follow the <a href="#macos">macOS</a> or <a href="#windows">Windows</a> first-launch steps above.</li>
-<li><strong>“manaDJ couldn’t start”:</strong> the window shows the error and full log path. Logs are inside the <a href="#data">data root</a>.</li>
-<li><strong>Import or Scan lost connection:</strong> choose <strong>Check progress</strong> before starting another task. Check that the music drive is connected; tracks already imported are kept.</li>
-<li><strong>No sound:</strong> reopen <a href="#controller-check">Controller check</a>, choose the correct output and use <strong>Test tone</strong>.</li>
-<li><strong>Account connection failed:</strong> reopen the relevant guide under <strong>Settings → Accounts</strong> and reconnect.</li>
+<li><strong>Blocked:</strong> <a href="#macos">macOS</a> / <a href="#windows">Windows</a>.</li>
+<li><strong>Startup failure:</strong> window shows error/log path; logs: <a href="#data">data root</a>.</li>
+<li><strong>Import/Scan disconnected:</strong> <strong>Check progress</strong>; check drive connection.</li>
+<li><strong>No sound:</strong> <a href="#controller-check">Controller check</a> → <strong>Test tone</strong>.</li>
+<li><strong>Account failure:</strong> <strong>Settings → Accounts</strong> → reconnect.</li>
+<li><a href="https://github.com/murtaza64/manadj/issues">GitHub issue</a>: version, OS, steps, log.</li>
 </ul>
-<p>Report the version, operating system, steps and relevant log in a <a href="https://github.com/murtaza64/manadj/issues">GitHub issue</a>. Remove credentials before sharing logs.</p>
 <p><a href="index.html#perform">Back to the feature tour</a></p>
       </article>
     </div>
