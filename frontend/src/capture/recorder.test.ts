@@ -109,6 +109,7 @@ function emptySnapshot(): DeckSnapshot {
     duration: 300,
     playing: false,
     scratching: false,
+    slipLoopActive: false,
     slipMode: false,
     vinylMode: true,
     pendingPlay: false,
@@ -155,6 +156,9 @@ class FakeDeckSource implements CaptureDeckSource {
   }
   setModes(slipMode: boolean, vinylMode: boolean): void {
     this.mutate({ slipMode, vinylMode });
+  }
+  setLoop(loop: DeckSnapshot['loop']): void {
+    this.mutate({ loop });
   }
   subscribe(fn: () => void): () => void {
     this.listeners.add(fn);
@@ -576,6 +580,21 @@ describe('capture gate (ADR 0022)', () => {
 describe('four-deck transport parity (sessions 09)', () => {
   const DECKS = ['A', 'B', 'C', 'D'] as const;
 
+  it('records phase alignment as a loop anchor while looping, otherwise a seek', () => {
+    const r = rig(); r.recorder.start();
+    r.decks.A.load(1); r.decks.A.play();
+    r.decks.A.setLoop({ start: 10, end: 12, lengthBeats: 4 });
+    const before = r.logged.length;
+    r.decks.A.fireTransport({ action: 'phaseAlign', playhead: 10.2 });
+    r.decks.B.fireTransport({ action: 'phaseAlign', playhead: 20.3 });
+    expect(r.logged.slice(before)).toEqual([
+      { t: expect.any(Number), kind: 'loop', channel: 'A', playhead: 10.2,
+        region: { start: 10, end: 12 }, slip: false },
+      { t: expect.any(Number), kind: 'transport', channel: 'B', action: 'seek', playhead: 20.3 },
+    ]);
+    r.recorder.dispose();
+  });
+
   it('installs the detailed transport handler on all four decks, and clears it on dispose', () => {
     const r = rig();
     for (const d of DECKS) expect(r.decks[d].transportHandler).toBeNull();
@@ -777,7 +796,7 @@ describe('cue-stab capture (sessions 10)', () => {
 // as context (activatesSession=false) but never create a row.
 
 describe('audible-only activation (sessions 11)', () => {
-  it('silent setup — loads, seeks, cue stabs, control moves, tenure — never activates', () => {
+  it('silent setup — loads, seeks, muted cue stabs, control moves, tenure — never activates', () => {
     const r = rig();
     r.recorder.start();
     r.decks.A.load(1);
@@ -785,7 +804,8 @@ describe('audible-only activation (sessions 11)', () => {
     r.decks.A.fireTransport({ action: 'seek', playhead: 30 });
     r.decks.B.load(2);
     r.mixer.setFader('B', 0.3);
-    r.decks.A.previewStart(); // CUE stab: the audibility definition ignores preview
+    r.mixer.setFader('A', 0);
+    r.decks.A.previewStart(); // PFL-only cueing is still silent on Master
     r.advance(2);
     r.decks.A.previewEnd();
     claimAudible('editor');
@@ -806,6 +826,21 @@ describe('audible-only activation (sessions 11)', () => {
     const idx = r.activated.findIndex(Boolean);
     expect(idx).toBeGreaterThanOrEqual(0);
     expect(r.logged[idx]).toMatchObject({ kind: 'transport', action: 'play', channel: 'A' });
+    r.recorder.dispose();
+  });
+
+  it.each(['main', 'hot'] as const)('an audible %s cue stab activates even between ticks', (kind) => {
+    const r = rig();
+    r.recorder.start();
+    r.decks.C.load(3);
+    if (kind === 'main') r.decks.C.previewStart();
+    else r.decks.C.hotCuePreview(2);
+    if (kind === 'main') r.decks.C.previewEnd();
+    else r.decks.C.hotCuePreviewEnd();
+    const idx = r.activated.findIndex(Boolean);
+    expect(idx).toBeGreaterThanOrEqual(0);
+    expect(r.logged[idx]).toMatchObject({ kind: 'transport', action: 'previewStart', channel: 'C' });
+    expect(r.activated.at(-1)).toBe(false);
     r.recorder.dispose();
   });
 
@@ -844,15 +879,17 @@ describe('ten-minute silence split (sessions 11)', () => {
     r.recorder.dispose();
   });
 
-  it('a Master-audible blip before the threshold resets the full ten-minute clock', () => {
+  it.each(['play', 'preview'] as const)('a Master-audible %s blip resets the full ten-minute clock', (kind) => {
     const r = rig();
     r.recorder.start();
     performBlend(r);
     goSilent(r);
     r.advance(590);
-    r.decks.B.play(); // audible again just before the threshold
+    if (kind === 'play') r.decks.B.play();
+    else r.decks.B.previewStart();
     r.advance(1);
-    r.decks.B.pause();
+    if (kind === 'play') r.decks.B.pause();
+    else r.decks.B.previewEnd();
     r.advance(598);
     expect(r.splits).toHaveLength(0); // full clock restarted at the pause
     r.advance(3);
@@ -1056,6 +1093,24 @@ describe('hot-cue stab capture (sessions 11)', () => {
       .map((e) => e.action);
     expect(actions).toEqual(['previewStart', 'hotCue']);
     r.decks.B.hotCuePreviewEnd();
+    r.recorder.dispose();
+  });
+
+  it('a Trigger Cue mode press (#289) logs play + hotCue, never a stab', () => {
+    // Trigger flips `playing` (no hotCuePreviewSlot): the press is a real
+    // Play, and release is inert — nothing to bracket.
+    const r = rig();
+    r.recorder.start();
+    r.decks.A.load(1);
+    const before = r.logged.length;
+    r.decks.A.seek(64);
+    r.decks.A.play();
+    r.decks.A.fireTransport({ action: 'hotCue', playhead: 64, detail: 3 });
+    const actions = r.logged
+      .slice(before)
+      .filter((e): e is Extract<CaptureEvent, { kind: 'transport' }> => e.kind === 'transport')
+      .map((e) => e.action);
+    expect(actions).toEqual(['play', 'hotCue']);
     r.recorder.dispose();
   });
 

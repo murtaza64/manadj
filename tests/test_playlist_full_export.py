@@ -53,7 +53,7 @@ def test_playlist_full_export_selects_destinations() -> None:
     client = TestClient(app)
 
     response = client.post(
-        "/api/sync/export/playlists/Alien/performance",
+        "/api/sync/export/playlists/performance?playlist=Alien",
         json={"targets": ["rekordbox", "engine"]},
     )
 
@@ -230,7 +230,7 @@ def test_preview_endpoint_returns_plan_for_both_destinations() -> None:
     )
     client = TestClient(app)
 
-    response = client.get("/api/sync/export/playlists/Alien/performance/preview")
+    response = client.get("/api/sync/export/playlists/performance/preview?playlist=Alien")
 
     assert response.status_code == 200
     body = response.json()
@@ -238,3 +238,33 @@ def test_preview_endpoint_returns_plan_for_both_destinations() -> None:
     assert [p["target"] for p in body["previews"]] == ["rekordbox", "engine"]
     assert body["previews"][0]["tracks_to_add"] == 1
     assert body["previews"][1]["available"] is False
+
+
+def test_export_and_preview_routes_accept_slash_in_playlist_name() -> None:
+    from backend.routers import sync_export
+
+    service = FakeService()
+    app = FastAPI()
+    app.include_router(sync_export.router, prefix="/api")
+    app.dependency_overrides[sync_export.get_playlist_full_export_service] = lambda: service
+    client = TestClient(app)
+
+    def fake_previewer(playlist_name: str, targets: list[str]) -> dict:
+        return {"playlist_name": playlist_name, "previews": []}
+
+    app.dependency_overrides[sync_export.get_playlist_full_export_previewer] = (
+        lambda: fake_previewer
+    )
+
+    export = client.post(
+        "/api/sync/export/playlists/performance?playlist=scb%2Fhalloween",
+        json={"targets": ["rekordbox"]},
+    )
+    preview = client.get(
+        "/api/sync/export/playlists/performance/preview?playlist=scb%2Fhalloween"
+    )
+
+    assert export.status_code == 200
+    assert service.calls == [("scb/halloween", ["rekordbox"])]
+    assert preview.status_code == 200
+    assert preview.json()["playlist_name"] == "scb/halloween"

@@ -1,13 +1,14 @@
 import './keyboardPointer.css';
+import { knobAppearance, type KnobControl } from './knobAppearance';
+import { getSlot } from '../../waveform/styleSlots';
 
-export interface KeyboardPointerFeedback {
+export type KeyboardPointerFeedback = {
   id: string;
-  kind: 'knob' | 'fader' | 'jog';
   label: string;
   value: number;
   detail: string;
   color: string;
-}
+} & ({ kind: 'knob'; control: KnobControl; ghost?: number | null } | { kind: 'fader' | 'jog' });
 
 interface Owner {
   move: (dx: number, dy: number, elapsedMs: number) => void;
@@ -38,23 +39,40 @@ function svgElement<K extends keyof SVGElementTagNameMap>(name: K, attrs: Record
 function createRow(kind: KeyboardPointerFeedback['kind']) {
   const node = document.createElement('div');
   node.className = 'keyboard-pointer-row';
-  const glyph = svgElement('svg', { viewBox: '0 0 48 48', 'aria-hidden': 'true', class: `keyboard-pointer-${kind}` });
-  const indicator = kind === 'fader'
+  const knob = kind === 'knob' ? document.createElement('div') : null;
+  const glyph = knob ?? svgElement('svg', { viewBox: '0 0 48 48', 'aria-hidden': 'true', class: `keyboard-pointer-${kind}` });
+  const indicator = knob ? document.createElement('div') : kind === 'fader'
     ? svgElement('rect', { x: '12', y: '-3', width: '24', height: '6', rx: '2', class: 'keyboard-pointer-indicator' })
     : svgElement('line', { x1: '24', y1: '24', x2: '24', y2: '7', class: 'keyboard-pointer-indicator' });
-  if (kind === 'fader') {
+  let fill: HTMLDivElement | undefined;
+  let ghost: HTMLDivElement | undefined;
+  if (knob) {
+    knob.setAttribute('aria-hidden', 'true');
+    const dial = document.createElement('div');
+    dial.className = 'perf-knob-dial';
+    const track = document.createElement('div');
+    track.className = 'perf-knob-ring perf-knob-ring-track';
+    fill = document.createElement('div');
+    fill.className = 'perf-knob-ring perf-knob-ring-fill';
+    const detent = document.createElement('div');
+    detent.className = 'perf-knob-detent';
+    ghost = document.createElement('div');
+    ghost.className = 'perf-knob-pointer perf-knob-ghost';
+    dial.append(track, fill, detent, ghost, indicator);
+    knob.append(dial);
+  } else if (kind === 'fader') {
     glyph.append(svgElement('rect', { x: '21', y: '6', width: '6', height: '36', rx: '3', class: 'keyboard-pointer-track' }));
   } else {
     glyph.append(svgElement('circle', { cx: '24', cy: '24', r: '21', class: 'keyboard-pointer-track' }));
     if (kind === 'jog') glyph.append(svgElement('circle', { cx: '24', cy: '24', r: '14', class: 'keyboard-pointer-groove' }));
   }
-  glyph.append(indicator);
+  if (!knob) glyph.append(indicator);
   const text = document.createElement('div');
   const label = document.createElement('strong');
   const detail = document.createElement('span');
   text.append(label, detail);
   node.append(glyph, text);
-  return { node, indicator, label, detail, kind };
+  return { node, indicator, label, detail, kind, knob, fill, ghost };
 }
 
 function createPointer() {
@@ -127,6 +145,7 @@ function createPointer() {
   }
 
   function render() {
+    const waveform = getSlot('full');
     const seen = new Set<string>();
     let index = 0;
     for (const client of clients) {
@@ -145,9 +164,20 @@ function createPointer() {
         row.detail.textContent = feedback.detail;
         const value = Number.isFinite(feedback.value) ? feedback.value : 0;
         const fraction = Math.max(0, Math.min(1, value));
-        row.indicator.setAttribute('transform', feedback.kind === 'fader'
-          ? `translate(0 ${42 - fraction * 36})`
-          : `rotate(${feedback.kind === 'jog' ? value : -135 + fraction * 270} 24 24)`);
+        if (row.knob && feedback.kind === 'knob') {
+          const appearance = knobAppearance(feedback.control, value, feedback.ghost ?? null, waveform);
+          row.label.style.color = appearance.style['--knob-value-color'];
+          row.knob.className = `keyboard-pointer-knob perf-knob perf-knob-colored${feedback.control === 'filter' ? ' perf-knob-filter' : ''}`;
+          for (const [property, value] of Object.entries(appearance.style)) row.knob.style.setProperty(property, value);
+          row.fill!.style.background = appearance.arcBackground;
+          row.indicator.setAttribute('class', `perf-knob-pointer${appearance.ghostAngle !== null ? ' perf-base-dim' : ''}`);
+          row.indicator.style.transform = `rotate(${appearance.angle}deg)`;
+          row.ghost!.hidden = appearance.ghostAngle === null;
+          row.ghost!.style.transform = `rotate(${appearance.ghostAngle ?? 0}deg)`;
+        } else {
+          row.indicator.setAttribute('transform', feedback.kind === 'fader'
+            ? `translate(0 ${42 - fraction * 36})` : `rotate(${value} 24 24)`);
+        }
         if (controls.children[index] !== row.node) controls.insertBefore(row.node, controls.children[index] ?? null);
         index++;
       }

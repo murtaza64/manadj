@@ -24,6 +24,7 @@
  *   resumes on release
  */
 import type { DeckEngine, DeckSnapshot } from '../playback/DeckEngine';
+import { foldLoopPlayhead } from '../playback/loop';
 import type { ChannelId, Mixer } from '../playback/mixer';
 import type { AutomationChannelValues } from '../playback/mixer';
 
@@ -156,6 +157,7 @@ export class SessionReplayDriver {
   private readonly hooks: ReplayHooks;
 
   private active = false;
+  private loading = true;
   private started = false;
   private stoppedFired = false;
   private suppressSilence = false;
@@ -242,8 +244,11 @@ export class SessionReplayDriver {
    * drives the timeline's moving playhead. */
   nowT(): number | null {
     if (!this.active) return null;
+    // Loading has no running clock yet; following a stale anchor moves
+    // both the timeline playhead and viewport away from the requested cue.
+    if (this.loading || this.seeking) return this.plan.startT;
     const offset = this.pausedAtOffset ?? this.elapsed();
-    return this.plan.startT + Math.min(offset, this.plan.endT - this.plan.startT);
+    return this.plan.startT + Math.max(0, Math.min(offset, this.plan.endT - this.plan.startT));
   }
 
   /** Live per-deck servo activity — absent when idle. */
@@ -322,6 +327,7 @@ export class SessionReplayDriver {
     // Seed decks + mixer, then start the clock and watchers.
     this.self(() => this.applySeed());
     this.anchorAudioTime = this.mixer.now() + (this.scheduledReplay ? SCRATCH_PREROLL_S : 0);
+    this.loading = false;
     if (this.scheduledReplay) this.self(() => {
       for (const d of seedLoads) this.queueScratchDeck(d, 0, this.parkedFrames[d]);
     });
@@ -684,13 +690,32 @@ export class SessionReplayDriver {
         }
         break;
       }
-      case 'loop':
-        this.engines[cue.channel].setLoopRegion(cue.region);
+      case 'loop': {
+        const d = cue.channel;
+        const engine = this.engines[d];
+        // Capture resolved the landing (including Slip); never re-latch it
+        // from the replay deck's preference or its folded audible clock.
+        // With vinyl in the plan, loop frames share the audio-clock queue
+        // so equal-timestamp loop/scratch events retain capture order.
+        if (!this.scheduledReplay) engine.setLoopRegion(cue.region, cue.playhead);
+        delete this.anchors[d];
+        delete this.rateBuf[d];
+        delete this.servo[d];
+        delete this.servoActivity[d];
+        delete this.unsettled[d];
+        this.syncDrift[d] = [];
+        if (engine.getSnapshot().playing && !engine.getSnapshot().scratching) {
+          this.anchors[d] = { offset: cue.offsetS, playhead: cue.playhead,
+            rate: 1 + engine.getSnapshot().pitchPercent / 100 };
+        }
         break;
+      }
       case 'play': {
         const engine = this.engines[cue.channel];
-        engine.seek(cue.playhead);
-        engine.play();
+        if (!this.scheduledReplay) {
+          engine.setLoopRegion(engine.getSnapshot().loop, cue.playhead);
+          engine.play();
+        }
         this.syncDrift[cue.channel] = [];
         delete this.rateBuf[cue.channel];
         this.unsettled[cue.channel] = true;
@@ -704,8 +729,10 @@ export class SessionReplayDriver {
       }
       case 'pause': {
         const engine = this.engines[cue.channel];
-        engine.pause();
-        engine.seek(cue.playhead);
+        if (!this.scheduledReplay) {
+          engine.pause();
+          engine.setLoopRegion(engine.getSnapshot().loop, cue.playhead);
+        }
         delete this.anchors[cue.channel];
         this.syncDrift[cue.channel] = [];
         delete this.rateBuf[cue.channel];
@@ -785,8 +812,17 @@ export class SessionReplayDriver {
              if (this.pausedAtOffset !== null) return;
              const entry = this.plan.scratchSchedules.find((s) => s.channel === cue.channel && s.loadOffset === cue.offsetS);
              const offset = this.elapsed();
-             if (entry?.frames.length && entry.frames[0].time <= offset) throw new Error('load missed scratch schedule');
-             this.self(() => this.queueScratchDeck(cue.channel, offset));
+              const past = entry?.frames.filter(f => f.time <= offset) ?? [];
+              if (past.some(f => f.motion)) throw new Error('load missed scratch schedule');
+              const last = past.at(-1);
+              let initial: ScratchFrame | undefined;
+              if (last) {
+                let position = last.position + (last.playing ? (offset - last.time) * last.rate : 0);
+                if (last.loop && last.playing) position = foldLoopPlayhead(position, last.loop.start,
+                  Math.min(last.loop.end, this.engines[cue.channel].getSnapshot().duration), last.position);
+                initial = { ...last, time: offset, position };
+              }
+              this.self(() => this.queueScratchDeck(cue.channel, offset, initial));
            })().catch((err) => {
              if (!this.active || gen !== this.seekGen || this.loadRequested[cue.channel] !== trackId) return;
              this.self(() => this.silenceDecks());
@@ -987,6 +1023,11 @@ export class SessionReplayDriver {
         if (snap.trackId !== before.trackId && snap.trackId !== this.loadRequested[deck]) {
           this.takeover(`foreign load on ${deck}`);
         }
+        return;
+      }
+      if (snap.loop?.start !== before.loop?.start || snap.loop?.end !== before.loop?.end
+        || snap.pendingLoopBeats !== before.pendingLoopBeats) {
+        this.takeover(`${deck} loop changed`);
         return;
       }
       if (

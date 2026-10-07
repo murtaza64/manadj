@@ -1,19 +1,6 @@
 .tune-page {
   min-width: 0;
 }
-.tune-preview-label {
-  font-size: var(--font-small);
-  color: var(--subtext0);
-  margin: var(--space-12) 0 var(--space-4);
-}
-.tune-main-preview .waveform-container,
-.tune-main-preview .waveform-canvas {
-  height: 192px;
-}
-.tune-minimap-preview .minimap-container,
-.tune-minimap-preview .minimap-canvas {
-  height: 64px;
-}
 .tune-controls {
   margin-top: var(--space-24);
   padding-top: var(--space-16);
@@ -47,8 +34,9 @@
 .tune-slider input {
   accent-color: var(--accent);
 }
-.tune-slider .val {
-  color: var(--text);
+.tune-slider > .perf-fader {
+  width: 100%;
+  flex-shrink: 0;
 }
 .tune-band-gain > span::before {
   content: '';
@@ -58,8 +46,8 @@
   margin-right: var(--space-8);
   background: var(--waveform-band);
 }
-.settings-page .tune-band-gain input[type='range'] {
-  accent-color: var(--waveform-band);
+.tune-band-gain > .perf-fader {
+  --accent: var(--waveform-band);
 }
 .tune-slider input[type='color'] {
   width: 100%;

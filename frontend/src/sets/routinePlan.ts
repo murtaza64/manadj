@@ -65,6 +65,10 @@ export interface RoutinePlanInput {
    * time so the editor's audition and the set Conductor replay the same
    * result. Opaque here; parsed by routines/routineDraft. */
   edits?: import('../routines/routineDraft').RoutineEdits | null;
+  /** Authored from scratch (ADR 0039, gh#325): no recording — each
+   * slot's trace is SYNTHESIZED from (entry beat, entry position,
+   * beatmatched rate) instead of replayed from events. */
+  authored?: boolean;
 }
 
 export type RoutineEventInput = Record<string, unknown>;
@@ -430,6 +434,23 @@ export function traceStateAt(trace: RoutineTracePoint[], beat: number): TraceSta
   };
 }
 
+/** An authored slot's synthesized trace (ADR 0039): playing from its
+ * entry at the beatmatched rate through `horizonBeat` — the slot holds
+ * its deck to the routine end (exits are the author's fader work). */
+export function synthesizedSlotTrace(
+  entryBeat: number,
+  entryPos: number,
+  syncRate: number,
+  horizonBeat: number
+): RoutineTracePoint[] {
+  const head: RoutineTracePoint = { beat: entryBeat, pos: entryPos, jump: false, moving: true, ratePerBeat: syncRate };
+  if (horizonBeat <= entryBeat) return [head];
+  return [
+    head,
+    { beat: horizonBeat, pos: entryPos + (horizonBeat - entryBeat) * syncRate, jump: false, moving: true, ratePerBeat: syncRate },
+  ];
+}
+
 // ── Lane building ────────────────────────────────────────────────────────
 
 const LANE_CONTROLS = ['fader', 'trim', 'eqLow', 'eqMid', 'eqHigh', 'filter'] as const;
@@ -546,35 +567,41 @@ export function createSlotLanesCursor(
   eq: { low: number; mid: number; high: number };
   filter: number;
 } {
-  const l = slot.lanes;
-  const mk = (control: 'fader' | 'trim' | 'eqLow' | 'eqMid' | 'eqHigh' | 'filter', fallback: number) => {
-    const pts = l[control];
-    const authored = !!l.authored?.[control];
-    let i = -1; // last point at or before the cursor beat
-    return (beat: number): number => {
-      if (pts.length === 0) return fallback;
-      while (i + 1 < pts.length && pts[i + 1].beat <= beat) i++;
-      if (i < 0) return authored ? pts[0].value : fallback;
-      if (!authored) return pts[i].value;
-      const a = pts[i];
-      const b = pts[i + 1];
-      if (!b || b.beat <= a.beat) return a.value;
-      const f = (beat - a.beat) / (b.beat - a.beat);
-      return a.value + (b.value - a.value) * f;
-    };
-  };
-  const fader = mk('fader', l.defaults.fader);
-  const trim = mk('trim', l.defaults.trim);
-  const eqLow = mk('eqLow', l.defaults.eq);
-  const eqMid = mk('eqMid', l.defaults.eq);
-  const eqHigh = mk('eqHigh', l.defaults.eq);
-  const filter = mk('filter', l.defaults.filter);
+  const fader = createSlotLaneCursor(slot, 'fader');
+  const trim = createSlotLaneCursor(slot, 'trim');
+  const eqLow = createSlotLaneCursor(slot, 'eqLow');
+  const eqMid = createSlotLaneCursor(slot, 'eqMid');
+  const eqHigh = createSlotLaneCursor(slot, 'eqHigh');
+  const filter = createSlotLaneCursor(slot, 'filter');
   return (beat: number) => ({
     fader: fader(beat),
-    trim: Math.max(0, Math.min(1, trim(beat) + (slot.trim - 0.5))),
+    trim: trim(beat),
     eq: { low: eqLow(beat), mid: eqMid(beat), high: eqHigh(beat) },
     filter: filter(beat),
   });
+}
+
+/** Scalar cursor for lane strips: no sampling of unrelated controls or
+ * per-pixel mixer-state objects. Beats must advance monotonically. */
+export function createSlotLaneCursor(
+  slot: PlannedRoutineSlot,
+  control: 'fader' | 'trim' | 'eqLow' | 'eqMid' | 'eqHigh' | 'filter',
+): (beat: number) => number {
+  const l = slot.lanes;
+  const pts = l[control];
+  const authored = !!l.authored?.[control];
+  const fallback = control === 'fader' || control === 'trim' || control === 'filter'
+    ? l.defaults[control] : l.defaults.eq;
+  let i = -1;
+  return (beat) => {
+    while (i + 1 < pts.length && pts[i + 1].beat <= beat) i++;
+    let value = i < 0 ? (authored && pts.length ? pts[0].value : fallback) : pts[i].value;
+    if (authored && i >= 0 && i + 1 < pts.length) {
+      const a = pts[i], b = pts[i + 1];
+      if (b.beat > a.beat) value += (b.value - a.value) * ((beat - a.beat) / (b.beat - a.beat));
+    }
+    return control === 'trim' ? Math.max(0, Math.min(1, value + (slot.trim - 0.5))) : value;
+  };
 }
 
 // ── Deck allocation ──────────────────────────────────────────────────────
@@ -766,12 +793,19 @@ export function buildPlannedRoutine(
   const sourceExtended: boolean[] = [];
   const traces = castOrdered.map((_, slot) => {
     const slotId = slotIds[slot];
-    let raw = buildSlotTrace(
-      slotSamples(input.events, order[slot]),
-      60 / trackBpms[slot],
-      input.entryOffsetsBeats[order[slot]],
-      entryPositions[slot]
-    );
+    let raw = input.authored
+      ? synthesizedSlotTrace(
+          input.entryOffsetsBeats[order[slot]],
+          entryPositions[slot],
+          60 / trackBpms[slot],
+          editHorizon - entryDeltas[slot]
+        )
+      : buildSlotTrace(
+          slotSamples(input.events, order[slot]),
+          60 / trackBpms[slot],
+          input.entryOffsetsBeats[order[slot]],
+          entryPositions[slot]
+        );
     // Entry-offset override: the whole recorded trajectory shifts to the
     // new entry beat BEFORE the (absolute-beat) jump/pause edits apply.
     const delta = entryDeltas[slot];

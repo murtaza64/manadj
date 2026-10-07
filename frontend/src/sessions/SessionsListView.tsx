@@ -1,80 +1,102 @@
-/**
- * Sessions list (Sessions PRD, ADR 0033): the persisted whole event logs —
- * "which nights did I play." Newest-first rows with start time, duration
- * (open Sessions read as "live"), the distinct Master-audible Track count
- * (issue 04), Take count, and a manual delete. Rows open the timeline;
- * deleting a Session never touches a Take.
- */
-import { useLayoutEffect, useMemo, useRef } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { api } from '../api/client';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
+import { api, type SessionRowWire } from '../api/client';
 import type { CaptureEvent } from '../capture/events';
 import { deriveTimeline } from './timelineModel';
+import { groupSessionsByDay, sessionDate, sessionDuration } from './sessionsListModel';
 import './sessionsList.css';
 
-function fmtWhen(iso: string): string {
-  const d = new Date(iso.endsWith('Z') || iso.includes('+') ? iso : `${iso}Z`);
-  return d.toLocaleString([], {
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-}
-
-function fmtDuration(startedAt: string, endedAt: string | null): string {
-  if (endedAt === null) return 'live';
-  const norm = (s: string) => (s.endsWith('Z') || s.includes('+') ? s : `${s}Z`);
-  const sec = (new Date(norm(endedAt)).getTime() - new Date(norm(startedAt)).getTime()) / 1000;
-  if (sec < 60) return `${Math.round(sec)}s`;
+function fmtDuration(session: SessionRowWire, now: number): string {
+  const sec = sessionDuration(session, now) / 1000;
+  if (sec < 60) return `${Math.floor(sec)}s`;
   if (sec < 3600) return `${Math.floor(sec / 60)}m`;
-  const h = Math.floor(sec / 3600);
-  const m = Math.floor((sec % 3600) / 60);
-  return `${h}h${String(m).padStart(2, '0')}m`;
+  return `${Math.floor(sec / 3600)}h ${String(Math.floor((sec % 3600) / 60)).padStart(2, '0')}m`;
 }
 
-/** The distinct Master-audible Track count for one Session, derived from
- * its whole event log through the SAME pure timeline model the timeline
- * uses (no divergent definition). Lazy + cached under the ['session',
- * uuid] key — opening the timeline afterwards is then free.
- *
- * Perf (issue 13): the derivation is MEMOIZED — this cell re-renders every
- * ~5s while recording (the sink invalidates ['sessions']), and re-reducing
- * every Session's full log per list render was an app-wide drag. An ended
- * Session's log is immutable: never refetch its multi-MB payload. */
-function SessionTracksCell({ uuid, ended }: { uuid: string; ended: boolean }) {
-  const { data } = useQuery({
-    queryKey: ['session', uuid],
-    queryFn: () => api.sessions.get(uuid),
-    staleTime: ended ? Infinity : 60_000,
+function SessionSummary({ session }: { session: SessionRowWire }) {
+  const previewRef = useRef<HTMLSpanElement>(null);
+  const [visible, setVisible] = useState(() => typeof IntersectionObserver === 'undefined');
+  useEffect(() => {
+    if (visible || !previewRef.current) return;
+    const observer = new IntersectionObserver(entries => {
+      if (entries.some(entry => entry.isIntersecting)) {
+        setVisible(true);
+        observer.disconnect();
+      }
+    }, { rootMargin: '300px' });
+    observer.observe(previewRef.current);
+    return () => observer.disconnect();
+  }, [visible]);
+  const { data, error } = useQuery({
+    queryKey: ['session', session.uuid],
+    queryFn: () => api.sessions.get(session.uuid),
+    staleTime: session.ended_at !== null ? Infinity : 60_000,
+    gcTime: 60_000,
+    enabled: visible,
   });
-  const count = useMemo(
-    () => (data === undefined ? null : deriveTimeline(data.events as CaptureEvent[]).audibleTrackIds.length),
-    [data]
-  );
-  if (count === null) return <span className="session-tracks-loading">…</span>;
-  return <>{count}</>;
+  const { data: candidates, error: candidateError } = useQuery({
+    queryKey: ['routine-candidates', session.uuid],
+    queryFn: () => api.routineCandidates.forSession(session.uuid),
+    enabled: visible,
+  });
+  // Keep the full-log reduction out of ordinary list refreshes.
+  const trackIds = useMemo(() => visible && data
+    ? deriveTimeline(data.events as CaptureEvent[]).audibleTrackIds : null, [visible, data]);
+  const tracks = useQueries({ queries: (trackIds?.slice(0, 3) ?? []).map(id => ({
+    queryKey: ['track', id], queryFn: () => api.tracks.getById(id), staleTime: 60_000,
+  })) });
+  const titles = tracks.map((q, i) => q.data?.title || q.data?.filename || `#${trackIds![i]}`);
+  const preview = titles.join(' / ');
+  return <>
+    <span className="session-preview" title={preview} ref={previewRef}>
+      {error ? 'Track preview unavailable' : trackIds === null ? 'Loading tracks...' :
+        trackIds.length === 0 ? 'No audible tracks' : <>{preview}
+          {trackIds.length > 3 && <span className="session-preview-more"> +{trackIds.length - 3} more</span>}
+        </>}
+    </span>
+    <span className="session-stats">
+      <span title="Distinct tracks that became Master-audible">{trackIds?.length ?? '-'} {trackIds?.length === 1 ? 'track' : 'tracks'}</span>
+      <span>{session.take_count} {session.take_count === 1 ? 'take' : 'takes'}</span>
+      <span className={candidates?.length ? 'session-candidates' : undefined}
+        title={candidateError ? 'Candidate count unavailable' : 'Routine candidates found by the miner, including confirmed spans'}>
+        {candidates?.length ?? '-'} mined {candidates?.length === 1 ? 'candidate' : 'candidates'}
+      </span>
+    </span>
+  </>;
 }
 
-/** Scroll retention across timeline round-trips (gh#170 follow-up): the
- * list unmounts when a Session opens; back must land where you left.
- * Module-level (the LAST_PAIR_KEY posture) — survives the unmount, not a
- * reload. */
+// Retain expansion as well as scroll when returning from a timeline.
 let lastListScrollTop = 0;
+let expandedDays = new Set<string>();
 
 export function SessionsListView({ onOpen }: { onOpen?: (uuid: string) => void }) {
   const queryClient = useQueryClient();
   const scrollRef = useRef<HTMLDivElement | null>(null);
-  // Restore BEFORE paint (rows may still be loading — re-apply when they
-  // land); save continuously (unmount-only saves miss keep-alive hides).
   const rowsReady = useRef(false);
-  const invalidate = () => void queryClient.invalidateQueries({ queryKey: ['sessions'] });
-
+  const [expanded, setExpanded] = useState(expandedDays);
+  const [deleting, setDeleting] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [now, setNow] = useState(Date.now);
   const { data: rows, error } = useQuery({ queryKey: ['sessions'], queryFn: api.sessions.list });
+  const hasLive = rows?.some(row => row.ended_at === null) ?? false;
+  useEffect(() => {
+    if (!hasLive) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 30_000);
+    return () => window.clearInterval(timer);
+  }, [hasLive]);
+  const groups = useMemo(() => groupSessionsByDay(rows ?? [], now), [rows, now]);
 
   const remove = async (uuid: string) => {
-    await api.sessions.delete(uuid).catch((err) => console.error('session delete failed', err));
-    invalidate();
+    setDeleting(uuid);
+    setDeleteError(null);
+    try {
+      await api.sessions.delete(uuid);
+      await queryClient.invalidateQueries({ queryKey: ['sessions'] });
+    } catch (err) {
+      setDeleteError(String(err));
+    } finally {
+      setDeleting(null);
+    }
   };
 
   useLayoutEffect(() => {
@@ -84,65 +106,47 @@ export function SessionsListView({ onOpen }: { onOpen?: (uuid: string) => void }
     el.scrollTop = lastListScrollTop;
   }, [rows]);
 
-  return (
-    <div
-      className="sessions-list"
-      ref={scrollRef}
-      onScroll={(e) => {
-        lastListScrollTop = (e.target as HTMLElement).scrollTop;
-      }}
-    >
-      {error ? <div className="sessions-list-error">{String(error)}</div> : null}
-      {rows === undefined ? (
-        <div className="sessions-list-empty">Loading…</div>
-      ) : rows.length === 0 ? (
-        <div className="sessions-list-empty">
-          No Sessions yet — play in the Performance view and the whole night lands here.
-        </div>
-      ) : (
-        <table className="sessions-list-table">
-          <thead>
-            <tr>
-              <th>Started</th>
-              <th>Duration</th>
-              <th>Tracks</th>
-              <th>Takes</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((s) => (
-              <tr
-                key={s.uuid}
-                className={`session-row${onOpen ? ' openable' : ''}`}
-                onClick={onOpen ? () => onOpen(s.uuid) : undefined}
-                title={onOpen ? 'Open this Session’s timeline' : undefined}
-              >
-                <td className="session-when">{fmtWhen(s.started_at)}</td>
-                <td className={`session-duration${s.ended_at === null ? ' live' : ''}`}>
-                  {fmtDuration(s.started_at, s.ended_at)}
-                </td>
-                <td className="session-tracks" title="Distinct Tracks that became audible">
-                  <SessionTracksCell uuid={s.uuid} ended={s.ended_at !== null} />
-                </td>
-                <td className="session-takes">{s.take_count}</td>
-                <td>
-                  <button
-                    className="session-delete"
-                    title="Delete this Session (Takes are kept)"
-                    onClick={(e) => {
-                      e.stopPropagation(); // never open the timeline on delete
-                      void remove(s.uuid);
-                    }}
-                  >
-                    ✕
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-    </div>
-  );
+  return <div className="sessions-list" data-tour="sessions.list" ref={scrollRef}
+    onScroll={e => { lastListScrollTop = e.currentTarget.scrollTop; }}>
+    <header className="sessions-list-header">
+      <h2>Sessions</h2>
+      <span>By day / longest first</span>
+    </header>
+    {error || deleteError ? <div className="sessions-list-error" role="alert">{String(error ?? deleteError)}</div> : null}
+    {rows === undefined ? <div className="sessions-list-empty">{error ? 'Could not load sessions.' : 'Loading sessions...'}</div> :
+      rows.length === 0 ? <div className="sessions-list-empty">No sessions yet. Play in Performance to start one.</div> :
+      groups.map(({ key, day, sessions }) => {
+        const isExpanded = expanded.has(key);
+        return <section className="session-day" key={key} aria-labelledby={`day-${key}`}>
+          <header className="session-day-header">
+            <h3 id={`day-${key}`}>{day.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}</h3>
+            <span>{sessions.length} {sessions.length === 1 ? 'session' : 'sessions'}</span>
+          </header>
+          <ul id={`sessions-${key}`} className="session-day-list">
+            {(isExpanded ? sessions : sessions.slice(0, 5)).map(session => <li className="session-row" key={session.uuid} data-session-uuid={session.uuid}>
+              <button className="session-open" disabled={!onOpen} onClick={() => onOpen?.(session.uuid)}
+                aria-label={`Open session from ${sessionDate(session.started_at).toLocaleString()}`}>
+                <span className="session-when">
+                  <time dateTime={sessionDate(session.started_at).toISOString()}>{sessionDate(session.started_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time>
+                  {session.ended_at === null && <span className="session-live">Live</span>}
+                </span>
+                <span className="session-duration">{fmtDuration(session, now)}</span>
+                <SessionSummary session={session} />
+                <span className="session-open-hint" aria-hidden="true">Open timeline</span>
+              </button>
+              <button className="btn btn-danger btn-mini session-delete" title="Delete this Session (Takes are kept)"
+                aria-label={`Delete session from ${sessionDate(session.started_at).toLocaleString()}`}
+                disabled={deleting !== null} onClick={() => void remove(session.uuid)}>Delete</button>
+            </li>)}
+          </ul>
+          {sessions.length > 5 && <button className="btn btn-secondary session-show-more" aria-expanded={isExpanded}
+            aria-controls={`sessions-${key}`} onClick={() => {
+              const next = new Set(expanded);
+              if (isExpanded) next.delete(key); else next.add(key);
+              expandedDays = next;
+              setExpanded(next);
+            }}>{isExpanded ? 'Show less' : `Show more (${sessions.length - 5})`}</button>}
+        </section>;
+      })}
+  </div>;
 }

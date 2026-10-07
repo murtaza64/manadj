@@ -96,11 +96,12 @@ export function vectorizeTake(
   input: VectorizeInput,
   facts: VectorizeFacts
 ): VectorizedDraft | null {
-  // The Transition clock is forward-only. Never idealize vinyl into
-  // tempo-match or Jump evidence; null is the existing unsupported result.
+  // Vinyl and Slip-loop returns aren't representable by this vectorizer.
+  // Refuse rather than silently retaining only the loop's backward wraps.
   if (input.events.some((e) =>
     (e.kind === 'transport' && e.action.startsWith('scratch')) ||
-    (e.kind === 'init' && Object.values(e.decks).some((d) => d.scratching))
+    (e.kind === 'loop' && e.slip) ||
+    (e.kind === 'init' && Object.values(e.decks).some((d) => d.scratching || d.slipLoopActive))
   )) return null;
   const init = input.events.find((e) => e.kind === 'init');
   if (!init || init.kind !== 'init') return null;
@@ -141,7 +142,7 @@ export function vectorizeTake(
     for (const e of input.events) {
       if (e.kind === 'tick' && e.playheads[ch] !== undefined) {
         samples.push({ t: e.t, pos: e.playheads[ch]! });
-      } else if (e.kind === 'transport' && e.channel === ch) {
+      } else if ((e.kind === 'transport' || e.kind === 'loop') && e.channel === ch) {
         samples.push({ t: e.t, pos: e.playhead });
       }
     }
@@ -481,7 +482,7 @@ function playheadStrictlyBefore(
   for (const e of events) {
     if (e.t >= t) continue;
     if (e.kind === 'tick' && e.playheads[ch] !== undefined) ref = { t: e.t, pos: e.playheads[ch]! };
-    else if (e.kind === 'transport' && e.channel === ch) ref = { t: e.t, pos: e.playhead };
+    else if ((e.kind === 'transport' || e.kind === 'loop') && e.channel === ch) ref = { t: e.t, pos: e.playhead };
   }
   return ref === null ? null : ref.pos + (t - ref.t) * rateAt(ch, ref.t);
 }

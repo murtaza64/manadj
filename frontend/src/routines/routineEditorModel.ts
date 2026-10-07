@@ -17,6 +17,7 @@
  */
 import type { RoutineDetailWire } from '../api/client';
 import { DECK_COLORS } from '../theme/deckColors';
+import { AUTOMATION_COLORS } from '../theme/automationColors';
 import { resolveLadder, resolvedMarkTimes, type PersistedLadder } from '../meter/ladder';
 import type { BeatgridData } from '../types';
 import type { BeatRun } from './routineWaveRuns';
@@ -76,31 +77,12 @@ export const SLOT_LANE_LABELS: Record<SlotLaneControl, string> = {
   filter: 'FILTER',
 };
 
-/** The RGB triad the pair editor's EQ lanes share (laneColors: LOW red,
- * MID green, HIGH blue) — plain, no per-slot tilt (gh#190 item 3). */
-const EQ_TRIAD: Record<'eqLow' | 'eqMid' | 'eqHigh', string> = {
-  eqLow: '#ff2d2d',
-  eqMid: '#2dff6a',
-  eqHigh: '#3d6aff',
-};
-
-/** THE filter color — one hue on every slot (gh#190 item 3): labels,
- * edges, toggles, and the HPF (above-center) side of the curve. */
-export const FILTER_COLOR = '#00ffc4';
-/** The LPF (below-center) side of the filter curve — warm against the
- * cool base, so hi/lo reads at a glance. */
-export const FILTER_LPF_COLOR = '#ff8a00';
-
 export function slotLaneColors(
   deck: 'A' | 'B' | 'C' | 'D' | null | undefined
 ): Record<SlotLaneControl, string> {
   return {
     fader: slotAccent(deck), // the deck accent — fader ONLY (gh#190)
-    trim: '#c9c9d4', // neutral silver — gain plumbing, not identity
-    eqLow: EQ_TRIAD.eqLow,
-    eqMid: EQ_TRIAD.eqMid,
-    eqHigh: EQ_TRIAD.eqHigh,
-    filter: FILTER_COLOR,
+    ...AUTOMATION_COLORS,
   };
 }
 
@@ -189,11 +171,15 @@ export function wireRoutineToPlanInput(
     duration_beats: number;
     events: Record<string, unknown>[];
     edits?: Record<string, unknown> | null;
+    slot_ids?: string[] | null;
+    authored?: boolean;
   },
   editsOverride?: RoutineEdits | null
 ): RoutinePlanInput {
   return {
     cast: detail.cast,
+    slotIds: detail.slot_ids ?? undefined,
+    authored: detail.authored ?? false,
     entryOffsetsBeats: detail.entry_offsets_beats,
     entryPositions: detail.entry_positions,
     durationBeats: detail.duration_beats,

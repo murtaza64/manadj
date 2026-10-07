@@ -15,6 +15,7 @@ import { SessionReplayDriver } from './SessionReplayDriver';
 import type { ReplayStopReason } from './SessionReplayDriver';
 import { scratchPosition, scratchFilterAt, moveScratch } from '../playback/worklet/scratchMotion';
 import type { ScratchFrame, ScratchFilter } from '../playback/worklet/scratchMotion';
+import { followScrollTarget } from './followScroll';
 
 // ── Fakes ────────────────────────────────────────────────────────────────
 
@@ -74,7 +75,15 @@ class FakeEngine {
     return this.playing ? this.playhead + (this.clock() - this.playheadAt) * rate : this.playhead;
   }
 
-  setLoopRegion(loop: { start: number; end: number } | null) { this.loop = loop ? { ...loop, lengthBeats: 4 } : null; }
+  setLoopRegion(loop: { start: number; end: number } | null, position?: number) {
+    this.loop = loop ? { ...loop, lengthBeats: 4 } : null;
+    if (position !== undefined) {
+      this.playhead = position;
+      this.playheadAt = this.clock();
+      this.scratching = false;
+      this.scratch = null;
+    }
+  }
   async prepareScratchReplay() {}
   scheduleScratch(frames: ScratchFrame[]): symbol {
     const owner = Symbol();
@@ -150,6 +159,7 @@ class FakeEngine {
   seek(t: number): void {
     if (!this.preserveSchedule) this.cancelScheduledScratch();
     this.seeks.push(t);
+    this.loop = null;
     this.playhead = t;
     this.playheadAt = this.clock();
     this.emit();
@@ -463,7 +473,135 @@ function planFor(events: CaptureEvent[], t: number): ReplayPlan {
 
 // ── Tests ────────────────────────────────────────────────────────────────
 
+it('keeps the playhead and follow viewport at the requested moment during startup loading', async () => {
+  let finish!: () => void;
+  const r = rig(planFor(simpleLog(), 5), true, async (engines, deck, id) => {
+    await new Promise<void>(resolve => { finish = resolve; });
+    engines[deck].finishLoad(id);
+    return true;
+  });
+  const started = r.driver.start();
+  try {
+    for (let i = 0; i < 3; i++) {
+      r.clock.t += 1;
+      const t = r.driver.nowT()!;
+      expect({ t, scroll: followScrollTarget(t * 100, 200, 600, 1000) })
+        .toEqual({ t: 5, scroll: null });
+    }
+  } finally {
+    finish();
+    await started;
+    r.driver.stop();
+  }
+});
+
 describe('SessionReplayDriver — seed and schedule', () => {
+  it.each([false, true])('replays an unchanged-loop phase anchor (scheduled scratch: %s)', async scheduled => {
+    const region = { start: 10, end: 12 };
+    const events: CaptureEvent[] = [
+      { t: 0, kind: 'load', channel: 'A', trackId: 11, bpm: 120 },
+      { t: 0, kind: 'loop', channel: 'A', playhead: 10, region },
+      { t: 0, kind: 'transport', channel: 'A', action: 'play', playhead: 10 },
+      { t: 1, kind: 'loop', channel: 'A', playhead: 11.2, region },
+      ...(scheduled ? [
+        { t: 3, kind: 'transport', channel: 'A', action: 'scratchBegin', playhead: 11.2 },
+        { t: 4, kind: 'transport', channel: 'A', action: 'scratchEnd', playhead: 11.2 },
+      ] as CaptureEvent[] : []),
+      { t: 6, kind: 'tick', playheads: {} },
+    ];
+    const r = rig(planFor(events, 0));
+    try {
+      await r.driver.start();
+      r.advance(1.25);
+      expect(r.engines.A.loop).toMatchObject(region);
+      expect(r.engines.A.getPlayhead()).toBeGreaterThanOrEqual(11.2);
+      expect(r.engines.A.getPlayhead()).toBeLessThan(11.5);
+      expect(r.stops).toEqual([]);
+    } finally { r.driver.stop(); }
+  });
+
+  it('retains equal-timestamp loop/scratch ordering on the audio clock', async () => {
+    const events: CaptureEvent[] = [
+      { t: 0, kind: 'load', channel: 'A', trackId: 11, bpm: 120 },
+      { t: 1, kind: 'loop', channel: 'A', playhead: 11, region: { start: 11, end: 13 } },
+      { t: 1, kind: 'transport', channel: 'A', action: 'play', playhead: 11 },
+      { t: 1, kind: 'transport', channel: 'A', action: 'scratchBegin', playhead: 11 },
+      { t: 1, kind: 'transport', channel: 'A', action: 'scratchMove', playhead: 11, filter: { drive: -8, rate: -2 } },
+      { t: 2, kind: 'transport', channel: 'A', action: 'scratchEnd', playhead: 12 },
+      { t: 2, kind: 'loop', channel: 'A', playhead: 14, region: null },
+      { t: 4, kind: 'tick', playheads: {} },
+    ];
+    const r = rig(planFor(events, 0));
+    try {
+      await r.driver.start();
+      r.advance(1.06);
+      expect(r.engines.A.getSnapshot().scratching).toBe(true);
+      expect(r.engines.A.loop).toMatchObject({ start: 11, end: 13 });
+      r.advance(1);
+      expect(r.engines.A.getSnapshot().scratching).toBe(false);
+      expect(r.engines.A.loop).toBeNull();
+      expect(r.engines.A.getPlayhead()).toBeCloseTo(14.01);
+      expect(r.stops).toEqual([]);
+    } finally { r.driver.stop(); }
+  });
+
+  it('preserves an armed loop across recorded Play, Pause, and resume', async () => {
+    const events: CaptureEvent[] = [
+      { t: 0, kind: 'load', channel: 'A', trackId: 11, bpm: 120 },
+      { t: 0, kind: 'loop', channel: 'A', playhead: 10, region: { start: 10, end: 12 }, slip: true },
+      { t: 1, kind: 'transport', channel: 'A', action: 'play', playhead: 10 },
+      { t: 2, kind: 'transport', channel: 'A', action: 'pause', playhead: 11 },
+      { t: 2, kind: 'loop', channel: 'A', playhead: 11, region: { start: 10, end: 12 }, slip: false },
+      { t: 3, kind: 'transport', channel: 'A', action: 'play', playhead: 11 },
+      { t: 5, kind: 'tick', playheads: {} },
+    ];
+    const r = rig(planFor(events, 0));
+    try {
+      await r.driver.start();
+      for (let t = 1; t <= 3; t++) {
+        r.advance(1);
+        expect(r.engines.A.loop).toMatchObject({ start: 10, end: 12 });
+        expect(r.engines.A.playing).toBe(t !== 2);
+      }
+    } finally { r.driver.stop(); }
+  });
+
+  it('a human loop change takes over replay', async () => {
+    const r = rig(planFor(simpleLog(), 2));
+    try {
+      await r.driver.start();
+      r.engines.A.setLoopRegion({ start: 50, end: 52 });
+      r.engines.A.setSlipMode(false); // notify without changing the preference
+      expect(r.stops).toEqual(['takeover']);
+    } finally { r.driver.stop(); }
+  });
+
+  it.each([0, 3])('replays the resolved Slip loop exit from start %s without a correcting tick', async start => {
+    const events: CaptureEvent[] = [
+      { t: 0, kind: 'load', channel: 'A', trackId: 11, bpm: 120 },
+      { t: 0, kind: 'transport', channel: 'A', action: 'play', playhead: 10 },
+      { t: 1, kind: 'loop', channel: 'A', playhead: 11, region: { start: 11, end: 13 } },
+      { t: 4, kind: 'loop', channel: 'A', playhead: 11, region: { start: 11, end: 12 } },
+      { t: 6, kind: 'loop', channel: 'A', playhead: 16, region: null },
+      { t: 10, kind: 'tick', playheads: {} },
+    ];
+    const plan = planFor(events, start);
+    expect(plan.cues.find(c => c.kind === 'loop' && c.region === null)).toMatchObject({ playhead: 16 });
+    const r = rig(plan);
+    try {
+      await r.driver.start();
+      if (start === 0) r.advance(1);
+      r.advance(4 - Math.max(1, start));
+      expect(r.engines.A.getPlayhead()).toBe(11);
+      expect(r.engines.A.loop).toMatchObject({ start: 11, end: 12 });
+      r.advance(2);
+      expect(r.engines.A.loop).toBeNull();
+      expect(r.engines.A.getPlayhead()).toBe(16);
+      for (let i = 0; i < 10; i++) r.advance(0.1);
+      expect(r.engines.A.getPlayhead()).toBeCloseTo(17);
+    } finally { r.driver.stop(); }
+  });
+
   it('bounds scratch seed and resume loops without truncating transport loop intent', async () => {
     const loop = { start: 599, end: 601 }; // FakeEngine's track duration is 600.
     const events: CaptureEvent[] = [
@@ -527,6 +665,29 @@ describe('SessionReplayDriver — seed and schedule', () => {
       expect(r.engines.A.getPlayhead()).toBeCloseTo(19.9397);
       r.driver.stop();
     }
+  });
+
+  it('a cached load catches up same-time ordinary frames without treating them as missed scratch', async () => {
+    const events: CaptureEvent[] = [
+      { t: 0, kind: 'load', channel: 'A', trackId: 1, bpm: 120 },
+      { t: 1, kind: 'load', channel: 'A', trackId: 2, bpm: 120 },
+      { t: 1, kind: 'loop', channel: 'A', playhead: 20, region: { start: 20, end: 22 } },
+      { t: 1, kind: 'transport', channel: 'A', action: 'play', playhead: 20 },
+      { t: 2, kind: 'transport', channel: 'A', action: 'scratchBegin', playhead: 21 },
+      { t: 3, kind: 'transport', channel: 'A', action: 'scratchEnd', playhead: 21 },
+      { t: 4, kind: 'tick', playheads: {} },
+    ];
+    const r = rig(planFor(events, 0));
+    try {
+      await r.driver.start();
+      r.advance(1.1);
+      for (let i = 0; i < 6; i++) await Promise.resolve();
+      expect(r.stops).toEqual([]);
+      expect(r.engines.A.getPlayhead()).toBeCloseTo(20.05);
+      expect(r.engines.A.loop).toMatchObject({ start: 20, end: 22 });
+      r.advance(1);
+      expect(r.engines.A.getSnapshot().scratching).toBe(true);
+    } finally { r.driver.stop(); }
   });
 
   it('queues opposite strokes and release before their timestamps, independent of UI frames', async () => {
@@ -977,6 +1138,22 @@ describe('SessionReplayDriver — pause/seek races (frozen-playhead fix)', () =>
     });
     return { ...r, release: () => release() };
   }
+
+  it.each([false, true])('pins the playhead to the seek target while loading (paused: %s)', async paused => {
+    const r = gatedRig(5);
+    await r.driver.start();
+    r.advance(2);
+    if (paused) r.driver.pauseReplay();
+    const seek = r.driver.seekTo(planFor(twoTrackLog(), 25));
+    try {
+      r.clock.t += 2;
+      expect(r.driver.nowT()).toBe(25);
+    } finally {
+      r.release();
+      await seek;
+      r.driver.stop();
+    }
+  });
 
   it('a pause landing inside a seek load is refused — the clock never freezes under rolling audio', async () => {
     const r = gatedRig(5);

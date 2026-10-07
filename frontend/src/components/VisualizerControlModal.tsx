@@ -16,6 +16,7 @@ import {
 } from '../visualizer/remote';
 import type { CycleMode } from '../visualizer/soloReview';
 import { isVisualizerOpen, openArena, toggleVisualizer } from '../visualizer/windowControl';
+import { DEV_SURFACES } from '../devMode';
 import './VisualizerControlModal.css';
 
 /**
@@ -106,9 +107,13 @@ export function VisualizerControlModal({ onClose }: { onClose: () => void }) {
           <button className="vizmodal-btn" onClick={() => toggleVisualizer()}>
             {isVisualizerOpen() || remote.open ? 'Focus / close' : 'Open window'}
           </button>
-          <button className="vizmodal-btn" onClick={() => openArena()}>
-            Open arena
-          </button>
+          {/* Dev-only (packaged-app #278): the GA arena writes genepool
+              files into the source tree. */}
+          {DEV_SURFACES && (
+            <button className="vizmodal-btn" onClick={() => openArena()}>
+              Open arena
+            </button>
+          )}
         </div>
 
         <h3>Review — {remote.presetId ?? 'no preset'}</h3>

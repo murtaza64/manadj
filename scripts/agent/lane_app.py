@@ -12,8 +12,17 @@ background (PID + logs in .lane-app/, gitignored).
 
 Usage (from inside an es lane workspace):
   uv run scripts/agent/lane_app.py start [--backend-port N --vite-port N]
+  uv run scripts/agent/lane_app.py start --empty-db [--reset]
   uv run scripts/agent/lane_app.py status
   uv run scripts/agent/lane_app.py stop
+
+--empty-db boots a brand-new user: the backend runs on a lane-local data
+root (MANADJ_DATA_DIR = .lane-app/data-root, ADR 0043) — fresh schema via
+`alembic upgrade head`, no settings file (tracks directory unset, Rekordbox
+auto-detected; the onboarding import only reads a snapshot of it), no
+secrets, empty stem cache. Setup guides write their settings there, never
+into the lane's committed config.toml. Sticky (marker in .lane-app/) so plain
+restarts keep it; --reset wipes the whole data root and starts fresh.
 
 Refuses to run in the default workspace — that is the human's real app
 (ports 8127/5173, real DB), managed by hand (docs/agents/parallel-work.md).
@@ -24,6 +33,7 @@ from __future__ import annotations
 import argparse
 import os
 import re
+import shutil
 import signal
 import subprocess
 import sys
@@ -36,6 +46,10 @@ LANE_ROOT = Path(__file__).resolve().parents[2]
 RUNTIME_DIR = LANE_ROOT / ".lane-app"
 PID_FILE = RUNTIME_DIR / "dev.pid"
 LOG_FILE = RUNTIME_DIR / "dev.log"
+EMPTY_DB_MARKER = RUNTIME_DIR / "empty-db"
+LANE_DB = LANE_ROOT / "data" / "library.db"
+EMPTY_DATA_ROOT = RUNTIME_DIR / "data-root"  # MANADJ_DATA_DIR in empty-DB mode
+EMPTY_DB = EMPTY_DATA_ROOT / "data" / "library.db"
 
 BASE_BACKEND, BASE_VITE = 8127, 5173
 PORTS_RE = re.compile(r"^ports:\s*backend\s+(\d+),\s*vite\s+(\d+)\s*$", re.M)
@@ -105,8 +119,32 @@ def resolve_ports(args: argparse.Namespace) -> tuple[int, int]:
     return record_ports() or self_assign_ports()
 
 
+def ensure_empty_db(reset: bool) -> None:
+    """Fresh data root + schema via alembic upgrade head — no real-DB clone."""
+    if EMPTY_DB.exists():
+        if not reset:
+            sys.exit(
+                f"error: empty-DB data root already exists at {EMPTY_DATA_ROOT} — "
+                "pass --reset to wipe it and start empty, or start without --empty-db"
+            )
+        shutil.rmtree(EMPTY_DATA_ROOT)
+        print(f"reset: removed {EMPTY_DATA_ROOT}")
+    EMPTY_DB.parent.mkdir(parents=True, exist_ok=True)
+    subprocess.run(
+        ["uv", "run", "alembic", "upgrade", "head"],
+        cwd=LANE_ROOT, check=True, env={**os.environ, **empty_db_env()},
+    )
+    print(f"created empty DB at {EMPTY_DB} (alembic upgrade head)")
+
+
+def empty_db_env() -> dict[str, str]:
+    """Env for the empty-DB backend: a lane-local data root (ADR 0043)."""
+    EMPTY_DATA_ROOT.mkdir(parents=True, exist_ok=True)
+    return {"MANADJ_DATA_DIR": str(EMPTY_DATA_ROOT)}
+
+
 def ensure_sandbox_db() -> None:
-    db = LANE_ROOT / "data" / "library.db"
+    db = LANE_DB
     if db.exists():
         return
     real = MAIN_ROOT / "data" / "library.db"
@@ -118,17 +156,17 @@ def ensure_sandbox_db() -> None:
 
     db_backup.maybe_backup()
     db.parent.mkdir(parents=True, exist_ok=True)
-    subprocess.run(["cp", "-c", str(real), str(db)], check=True)
+    sys.path.insert(0, str(LANE_ROOT))
+    from backend.fs_clone import clone_file
+
+    clone_file(real, db)
     # WAL sidecars (performance-hardening 03): the real DB runs in WAL mode, so
     # committed-but-uncheckpointed rows live in `-wal`. Clone all present
     # sidecars or the sandbox starts stale (or corrupt on a lone-main copy).
     for suffix in ("-wal", "-shm"):
         sidecar = real.with_name(real.name + suffix)
         if sidecar.exists():
-            subprocess.run(
-                ["cp", "-c", str(sidecar), str(db.with_name(db.name + suffix))],
-                check=True,
-            )
+            clone_file(sidecar, db.with_name(db.name + suffix))
     print(f"cloned sandbox DB (APFS) from {real}")
 
 
@@ -201,16 +239,31 @@ def running_pid() -> int | None:
 def cmd_start(args: argparse.Namespace) -> None:
     if pid := running_pid():
         sys.exit(f"already running (pid {pid}) — use status/stop")
+    if args.reset and not args.empty_db:
+        sys.exit("error: --reset only makes sense with --empty-db")
     backend_port, vite_port = resolve_ports(args)
-    ensure_sandbox_db()
-    ensure_frontend_deps()
-    ensure_venv()
     RUNTIME_DIR.mkdir(exist_ok=True)
+    ensure_venv()
+    if args.empty_db:
+        ensure_empty_db(args.reset)
+        EMPTY_DB_MARKER.touch()
+    elif EMPTY_DB_MARKER.exists():
+        if not EMPTY_DB.exists():
+            sys.exit(f"error: empty-DB lane but {EMPTY_DB} is missing — start --empty-db")
+    else:
+        ensure_sandbox_db()
+    ensure_frontend_deps()
+    env = os.environ.copy()
+    if EMPTY_DB_MARKER.exists():
+        # Sticky: once a lane went empty-DB, plain restarts keep the isolated
+        # data root (rm .lane-app/empty-db to return to the sandbox clone).
+        env.update(empty_db_env())
+        print(f"empty-DB mode: data root = {EMPTY_DATA_ROOT}")
     log = open(LOG_FILE, "a")
     proc = subprocess.Popen(
         ["uv", "run", "scripts/dev.py",
          "--backend-port", str(backend_port), "--vite-port", str(vite_port)],
-        cwd=LANE_ROOT, stdout=log, stderr=subprocess.STDOUT,
+        cwd=LANE_ROOT, stdout=log, stderr=subprocess.STDOUT, env=env,
         start_new_session=True,  # survives this script and the agent session
     )
     PID_FILE.write_text(str(proc.pid))
@@ -258,6 +311,10 @@ def main() -> None:
     start = sub.add_parser("start")
     start.add_argument("--backend-port", type=int)
     start.add_argument("--vite-port", type=int)
+    start.add_argument("--empty-db", action="store_true",
+                       help="fresh empty library (alembic schema, no real-DB clone)")
+    start.add_argument("--reset", action="store_true",
+                       help="with --empty-db: wipe an existing lane DB first")
     sub.add_parser("status")
     sub.add_parser("stop")
     args = ap.parse_args()

@@ -1,5 +1,6 @@
 import type { EqBand } from '../playback/graph';
 import type { ChannelId, StemName } from '../playback/mixer';
+import type { BeatFxEffectId, BeatFxSectionState, BeatFxTarget } from '../playback/beatFx';
 import type { Track } from '../types';
 import type { JogProfile } from './jogCalibration';
 
@@ -40,6 +41,7 @@ export interface MidiDeckControls {
   getPitch(): number;
   /** Stateless one-shot BPM match against the other deck (on-screen MATCH). */
   match(): void;
+  toggleSync(): void;
   /** Jog rim ticks (signed): bend when playing, seek when paused. */
   jogTicks(ticks: number, jogProfile?: JogProfile, vinylOff?: boolean): void;
   jogTouch(held: boolean): void;
@@ -129,6 +131,7 @@ export interface MidiMixerControls {
     filter: number;
     fader: number;
   };
+  getBeatFxSection(): Readonly<BeatFxSectionState>;
   getCrossfader(): number;
   getMaster(): number;
   getCueLevel(): number;
@@ -143,10 +146,22 @@ export interface MidiMixerControls {
   togglePfl(channel: ChannelId): void;
   /** Stem kill toggle (stems #210); inert for stem-less tracks. */
   toggleStem(channel: ChannelId, stem: StemName): void;
+  /** Stem solo (shift layer): only this stem plays; soloing the
+   * already-soloed stem restores all-on. */
+  soloStem(channel: ChannelId, stem: StemName): void;
   /** Cue bus volume, 0..1 (headphone-cue 03). */
   setCueLevel(value: number): void;
   /** Cue/mix blend, 0 (cue only) .. 1 (master only) (headphone-cue 03). */
   setCueMix(value: number): void;
+  /** The one Beat FX section (gh#272), mirrored by GRV6 channel 5. */
+  toggleBeatFxOn(): void;
+  /** Gate the section explicitly (no-op turning on with nothing selected). */
+  setBeatFxOn(on: boolean): void;
+  selectBeatFx(effect: BeatFxEffectId | null): void;
+  selectBeatFxTarget(target: BeatFxTarget): void;
+  /** Bipolar balance coordinate: -1 original, 0 midpoint, +1 effect. */
+  setBeatFxDepth(depth: number): void;
+  stepBeatFxBeats(change: 'halve' | 'double'): void;
 }
 
 const deckControls = new Map<ChannelId, MidiDeckControls>();

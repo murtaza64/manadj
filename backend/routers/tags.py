@@ -26,7 +26,19 @@ def list_all_tags(db: Session = Depends(get_db)):
 
 @router.post("/categories", response_model=schemas.TagCategory, status_code=201)
 def create_category(category: schemas.TagCategoryCreate, db: Session = Depends(get_db)):
-    return crud.create_tag_category(db, category)
+    name = category.name.strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="Category name is required")
+    if any(c.name.lower() == name.lower() for c in crud.get_tag_categories(db)):
+        raise HTTPException(status_code=409, detail="Category already exists")
+    return crud.create_tag_category(db, category.model_copy(update={"name": name}))
+
+
+@router.delete("/categories/{category_id}", status_code=204)
+def delete_category(category_id: int, db: Session = Depends(get_db)):
+    if not crud.delete_tag_category(db, category_id):
+        raise HTTPException(status_code=404, detail="Category not found")
+    return None
 
 
 @router.post("/", response_model=schemas.Tag, status_code=201)

@@ -32,8 +32,8 @@ export default function FollowParamsModal({
 
   // Clamp modal position to viewport bounds
   const getClampedPosition = (pos: { x: number; y: number }) => {
-    const modalWidth = 450;
-    const modalHeight = 500;
+    const modalWidth = Math.min(450, window.innerWidth - 40);
+    const modalHeight = Math.min(680, window.innerHeight - 40);
     const padding = 20;
     const minX = modalWidth / 2 + padding;
     const maxX = window.innerWidth - modalWidth / 2 - padding;
@@ -85,7 +85,7 @@ export default function FollowParamsModal({
           position: 'fixed',
           left: `${modalPosition.x}px`,
           top: `${modalPosition.y}px`,
-          transform: 'translate(-50%, -45%)',
+          transform: 'translate(-50%, -50%)',
         }}
       >
         <h2 style={{ margin: '0 0 16px 0', color: 'var(--text)', fontSize: '16px' }}>

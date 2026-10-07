@@ -1,10 +1,11 @@
 import { useMemo } from 'react';
-import { useDeck, useDeckReady } from './useDeck';
+import { useDeck, useDeckReady, deckReadyNow } from './useDeck';
 import { useBeatgridData } from './useBeatgridData';
 import { useHotCues, useSetHotCue, useDeleteHotCue } from './useHotCues';
 import { snapToNearestBeat } from '../playback/quantize';
 import { isQuantizeOn } from '../playback/quantizeStore';
 import type { HotCue } from '../types';
+import { reportTutorialAction } from '../tutorials/engine';
 
 export interface HotCueActions {
   /** Hot cues by slot number for the given track. */
@@ -28,11 +29,15 @@ export interface HotCueActions {
  * curation half (set-empty-at-playhead, delete) is shared and identical. */
 export interface HotCueSlotHandlers {
   enabled: boolean;
+  /** Live guard for Deck-backed actions; editor-only gestures use enabled. */
+  canAct?: () => boolean;
   getPlayhead: () => number;
   /** Press behavior for a SET cue. */
   trigger: (slot: number, timeSeconds: number) => void;
   /** Release, for hold-style triggers (absent = taps, e.g. editor gestures). */
   release?: (slot: number, timeSeconds: number) => void;
+  /** Confirmed placement only, not cue decoration or an optimistic cache write. */
+  onPlaced?: () => void;
 }
 
 /**
@@ -57,10 +62,11 @@ export function useHotCueSlots(
     [hotCues]
   );
 
+  const enabledNow = () => trackId !== null && (handlers.canAct?.() ?? handlers.enabled);
   const enabled = trackId !== null && handlers.enabled;
 
   const down = (slot: number) => {
-    if (!enabled || trackId === null) return;
+    if (!enabledNow() || trackId === null) return;
     const cue = bySlot.get(slot);
     if (!cue) {
       // Hot cue not set: set it at the current playhead — a placement
@@ -73,26 +79,26 @@ export function useHotCueSlots(
         trackId,
         slotNumber: slot,
         data: { time_seconds: time },
-      });
+      }, { onSuccess: handlers.onPlaced });
     } else {
       handlers.trigger(slot, cue.time_seconds);
     }
   };
 
   const up = (slot: number) => {
-    if (!enabled) return;
+    if (!enabledNow()) return;
     const cue = bySlot.get(slot);
     if (cue) handlers.release?.(slot, cue.time_seconds);
   };
 
   const remove = (slot: number) => {
-    if (!enabled || trackId === null) return;
+    if (!enabledNow() || trackId === null) return;
     const cue = bySlot.get(slot);
     if (cue) deleteHotCue.mutate({ trackId, slotNumber: slot });
   };
 
   const decorate = (slot: number, label: string | null, color: string) => {
-    if (!enabled || trackId === null) return;
+    if (!enabledNow() || trackId === null) return;
     const cue = bySlot.get(slot);
     if (!cue) return;
     setHotCue.mutate({
@@ -113,13 +119,17 @@ export function useHotCueSlots(
  * the Library don't re-render on every stab.
  */
 export function useHotCueActions(trackId: number | null): HotCueActions {
-  const { engine } = useDeck();
+  const { deck, engine } = useDeck();
   const ready = useDeckReady();
   const actions = useHotCueSlots(trackId, {
     enabled: ready,
+    canAct: () => deckReadyNow(engine, trackId),
     getPlayhead: () => engine.getPlayhead(),
     trigger: (slot, t) => engine.hotCueDown(slot, t),
     release: (slot, t) => engine.hotCueUp(slot, t),
+    onPlaced: () => {
+      if (engine.getSnapshot().trackId === trackId) reportTutorialAction({ type: 'hotcue-set', deck });
+    },
   });
   const stops = useMemo(
     () =>
@@ -131,7 +141,7 @@ export function useHotCueActions(trackId: number | null): HotCueActions {
   return {
     ...actions,
     walk: (direction) => {
-      if (actions.enabled) engine.hotCueWalk(direction, stops);
+      if (deckReadyNow(engine, trackId)) engine.hotCueWalk(direction, stops);
     },
   };
 }

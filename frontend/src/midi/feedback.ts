@@ -1,8 +1,9 @@
 import type { DeckFeedback, LedAddress, MappingFeedback, MeterAddress } from './mapping';
-import { CHANNEL_IDS } from '../playback/mixer';
-import type { ChannelId } from '../playback/mixer';
+import { CHANNEL_IDS, STEM_NAMES } from '../playback/mixer';
+import type { ChannelId, StemName } from '../playback/mixer';
 import { beatsBetween } from '../playback/quantize';
 import { encodeMeterValue } from './levelMeter';
+import type { BeatFxSectionState } from '../playback/beatFx';
 
 /**
  * The Feedback seam (midi-pad-leds PRD, ADR 0002): deck state in →
@@ -21,6 +22,7 @@ export const PAD_COUNT = 8;
 
 /** The slice of deck state Feedback reads. */
 export interface DeckLedInput {
+  synced: boolean;
   playing: boolean;
   /** Play latched during a load (deck snapshot vocabulary). */
   pendingPlay: boolean;
@@ -76,10 +78,17 @@ export interface DeckLedInput {
    * no pad and show all dark (the screen stays the truth).
    */
   loopBeats: number | null;
+  /**
+   * Effective per-stem enable state (stems #210) or null when the Track
+   * has no stems — drives the stem pad block, when the Mapping has one:
+   * STEM_NAMES order; a stem-less Track renders every stem pad dark.
+   */
+  stems: Record<StemName, boolean> | null;
 }
 
 /** Desired on/off per light of one deck. */
 export interface DeckLedStates {
+  sync: boolean;
   play: boolean;
   cue: boolean;
   /** PFL button light — lit while the channel is cued (headphone-cue 05). */
@@ -100,6 +109,8 @@ export interface DeckLedStates {
    * LOOP-mode pad whose mapped preset equals it (exact dyadic equality;
    * lengths and presets are both exact binary fractions). */
   loopBeats: number | null;
+  /** Effective stem enables (STEM_NAMES order) or null = stem-less. */
+  stems: Record<StemName, boolean> | null;
 }
 
 /** [status, data1, data2] — ready for MIDIOutput.send. */
@@ -201,6 +212,7 @@ export function ledStates(input: DeckLedInput, phases: BlinkPhases = STEADY): De
   const paused = !input.playing && !input.previewing;
   const pausedLoaded = paused && input.loaded;
   return {
+    sync: input.synced,
     play: input.playing
       ? true
       : input.pendingPlay
@@ -220,6 +232,7 @@ export function ledStates(input: DeckLedInput, phases: BlinkPhases = STEADY): De
     slipMode: input.slipMode,
     vinylMode: input.vinylMode,
     loopBeats: input.loopBeats,
+    stems: input.stems,
   };
 }
 
@@ -278,12 +291,15 @@ function deckAddresses(deck: DeckFeedback): readonly LedAddress[] {
     ...deck.jumpPads,
     ...deck.gridPads,
     deck.quantize,
+    ...(deck.sync ? [deck.sync] : []),
     ...(deck.keyLock ? [deck.keyLock] : []),
     ...(deck.slipMode ? [deck.slipMode] : []),
     ...(deck.vinylMode ? [deck.vinylMode] : []),
     ...(deck.keyLockShifted ? [deck.keyLockShifted] : []),
     ...deck.loopPads,
     ...deck.loopPadsShifted,
+    ...(deck.stemPads ?? []),
+    ...(deck.stemPadsShifted ?? []),
   ];
 }
 
@@ -317,6 +333,7 @@ export function encodeDeckLeds(
       )
     ),
     encodeLed(addresses.quantize, states.quantize),
+    ...(addresses.sync ? [encodeLed(addresses.sync, states.sync)] : []),
     ...(addresses.keyLock ? [encodeLed(addresses.keyLock, states.keyLock)] : []),
     ...(addresses.slipMode ? [encodeLed(addresses.slipMode, states.slipMode)] : []),
     ...(addresses.vinylMode ? [encodeLed(addresses.vinylMode, states.vinylMode)] : []),
@@ -330,6 +347,15 @@ export function encodeDeckLeds(
     // the mapping and are never written.
     ...[...addresses.loopPads, ...addresses.loopPadsShifted].map((pad) =>
       encodeLed(pad, states.loopBeats === pad.beats)
+    ),
+    // Stem kill pads (stems #210): pad i mirrors STEM_NAMES[i]; dark when
+    // the Track has no stems. The SHIFT layer mirrors the base layer, so
+    // pads stay lit while SHIFT is held (the hot-cue shift idiom).
+    ...(addresses.stemPads ?? []).map((address, i) =>
+      encodeLed(address, states.stems?.[STEM_NAMES[i]] ?? false)
+    ),
+    ...(addresses.stemPadsShifted ?? []).map((address, i) =>
+      encodeLed(address, states.stems?.[STEM_NAMES[i]] ?? false)
     ),
   ];
 }
@@ -356,7 +382,54 @@ export function encodeAssistantLed(
   return feedback.assistant ? [encodeLed(feedback.assistant, lit)] : [];
 }
 
+/**
+ * Beat FX ON/OFF lamp state → messages (gh#272): mirrors the section gate.
+ */
+export function encodeBeatFxLed(
+  feedback: MappingFeedback,
+  lit: boolean
+): readonly MidiMessage[] {
+  return feedback.beatFx ? [encodeLed(feedback.beatFx, lit)] : [];
+}
+
+/** FX button lights (beat-fx-engage): a button is lit iff the section
+ * runs its effect on the button's scope (side's focused Deck, or master). */
+export function encodeBeatFxEngageLeds(
+  feedback: MappingFeedback,
+  section: Readonly<Pick<BeatFxSectionState, 'on' | 'selected' | 'target'>>,
+  focus: Readonly<Record<'left' | 'right', ChannelId>>
+): readonly MidiMessage[] {
+  return (feedback.beatFxEngage ?? []).map((lamp) =>
+    encodeLed(
+      lamp,
+      section.on &&
+        section.selected === lamp.effect &&
+        section.target === (lamp.scope === 'master' ? 'master' : focus[lamp.scope])
+    )
+  );
+}
+
 const CONTROL_CHANGE = 0xb;
+
+/** Current Beat FX fraction → the device's time-unit indicator CC. */
+export function encodeBeatFxBeat(
+  feedback: MappingFeedback,
+  beats: number
+): readonly MidiMessage[] {
+  const address = feedback.beatFxBeat;
+  if (!address) return [];
+  const encoded = address.values.find((entry) => entry.beats === beats);
+  return encoded
+    ? [[(CONTROL_CHANGE << 4) | address.channel, address.number, encoded.value]]
+    : [];
+}
+
+function beatFxBeatOffMessage(feedback: MappingFeedback): MidiMessage[] {
+  const address = feedback.beatFxBeat;
+  return address
+    ? [[(CONTROL_CHANGE << 4) | address.channel, address.number, address.offValue]]
+    : [];
+}
 
 /**
  * A channel level meter's normalized position [0, 1] → its CC message.
@@ -395,6 +468,9 @@ export function allOffMessages(feedback: MappingFeedback): readonly MidiMessage[
       return addresses ? deckAddresses(addresses).map((address) => encodeLed(address, false)) : [];
     }),
     ...encodeAssistantLed(feedback, false),
+    ...encodeBeatFxLed(feedback, false),
+    ...(feedback.beatFxEngage ?? []).map((lamp) => encodeLed(lamp, false)),
+    ...beatFxBeatOffMessage(feedback),
     ...CHANNEL_IDS.flatMap((channel) => {
       const meter = feedback.meters?.[channel];
       return meter ? [meterOffMessage(meter)] : [];

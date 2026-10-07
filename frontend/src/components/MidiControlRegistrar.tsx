@@ -2,10 +2,9 @@ import { useEffect, useMemo, useRef } from 'react';
 import { DeckScope } from '../contexts/DeckContext';
 import { followMacroToggles } from '../follow/model';
 import { dispatchFollow, getFollowFlags } from '../follow/followStore';
-import { useDeck, useDeckReady, useDecks } from '../hooks/useDeck';
+import { useDeck, deckReadyNow, useDecks, useBeatjumpBeats } from '../hooks/useDeck';
 import { useGridEditActions } from '../hooks/useGridEditActions';
 import { useHotCueActions } from '../hooks/useHotCueActions';
-import { useMatchAction } from '../hooks/useMatchAction';
 import { useMixer } from '../hooks/useMixer';
 import {
   registerDeckControls,
@@ -24,8 +23,7 @@ import { setKeyLockFlag } from '../playback/keyLockStore';
  * hooks the on-screen controls use — hot cues via useHotCueActions
  * (set-empty / jump / hold-preview, React Query curation included),
  * beatjump via the same engine call + shared per-deck size as BeatjumpRow,
- * MATCH via the same useMatchAction as the on-screen button (out-of-reach
- * is silent: no hardware feedback channel), pitch via engine.setPitch with
+ * MATCH/SYNC/pitch via the shared SyncGroup (rejected joins stay unlit), with
  * the same ready gate as the on-screen fader. The Mixer registers itself —
  * MidiMixerControls is structurally a subset of Mixer.
  *
@@ -36,10 +34,11 @@ import { setKeyLockFlag } from '../playback/keyLockStore';
  */
 
 function DeckControlsRegistrar() {
-  const { deck, engine, loadedTrack, beatjumpBeats, setBeatjumpBeats } = useDeck();
-  const ready = useDeckReady();
+  const { deck, engine, syncGroup, loadedTrack, beatjump } = useDeck();
+  const beatjumpBeats = useBeatjumpBeats(beatjump);
+  const setBeatjumpBeats = beatjump.set;
+  const ready = () => deckReadyNow(engine, loadedTrack?.id ?? null);
   const hotCues = useHotCueActions(loadedTrack?.id ?? null);
-  const matchAction = useMatchAction();
   // Grid-edit pad ops (midi-performance-ops 05): the same mutations and
   // commit chain the on-screen grid/BPM controls use.
   const gridEdit = useGridEditActions();
@@ -69,40 +68,39 @@ function DeckControlsRegistrar() {
     let previous = engine.getSnapshot();
     const unsubscribe = engine.subscribe(() => {
       const next = engine.getSnapshot();
-      const reset = next.trackId !== previous.trackId || next.loadState !== previous.loadState
-        || next.playing !== previous.playing;
+      // A Load is a hard reset. Everything else (play/pause, seeks, cues —
+      // the dispatches another control triggers mid-scratch) already ended
+      // the engine scratch; syncState's override keeps the physical
+      // contact so platter rotation re-acquires without a re-touch.
+      const reset = next.trackId !== previous.trackId || next.loadState !== previous.loadState;
       previous = next;
       if (reset) jog.cancel();
       else jog.syncState();
     });
-    const unsubscribeTransport = engine.addTransportEventListener(event => {
-      if (event.action === 'seek' || event.action === 'jumpBeats' || event.action === 'hotCue') jog.cancel();
-    });
     return () => {
       unsubscribe();
-      unsubscribeTransport();
       jog.dispose();
     };
   }, [engine, jog]);
 
   const latest = useRef({
     engine,
+    syncGroup,
     ready,
     hotCues,
     beatjumpBeats,
     setBeatjumpBeats,
-    matchAction,
     jog,
     gridEdit,
   });
   useEffect(() => {
     latest.current = {
       engine,
+      syncGroup,
       ready,
       hotCues,
       beatjumpBeats,
       setBeatjumpBeats,
-      matchAction,
       jog,
       gridEdit,
     };
@@ -119,12 +117,12 @@ function DeckControlsRegistrar() {
         cueWalk: (direction) => latest.current.hotCues.walk?.(direction),
         beatjump: (direction) => {
           const { engine: e, ready: r, beatjumpBeats: beats } = latest.current;
-          if (!r) return; // same gate as BeatjumpRow's disabled jumps
+          if (!r()) return; // same gate as BeatjumpRow's disabled jumps
           e.jumpBeats(direction === 'back' ? -beats : beats);
         },
         beatjumpWindow: (direction, divisor) => {
           const { engine: e, ready: r, beatjumpBeats: beats } = latest.current;
-          if (!r) return;
+          if (!r()) return;
           const distance = beats / divisor;
           e.jumpBeats(direction === 'back' ? -distance : distance);
         },
@@ -133,20 +131,21 @@ function DeckControlsRegistrar() {
           set(change === 'halve' ? halveBeatjump(beats) : doubleBeatjump(beats));
         },
         setPitch: (percent) => {
-          const { engine: e, ready: r } = latest.current;
-          if (!r) return; // same gate as the on-screen pitch fader
-          e.setPitch(percent);
+          const { syncGroup: group, ready: r } = latest.current;
+          if (!r()) return; // same gate as the on-screen pitch fader
+          group.setPitch(deck, percent);
         },
         // Soft takeover's read side (midi-controller 15): the live engine
         // pitch, so external changes (MATCH, reload) unlatch the fader.
         getPitch: () => latest.current.engine.getSnapshot().pitchPercent,
         match: () => {
           // Out-of-reach/unavailable are silent: no hardware feedback channel.
-          latest.current.matchAction();
+          latest.current.syncGroup.match(deck);
         },
+        toggleSync: () => { latest.current.syncGroup.toggle(deck); },
         jogTouch: (held) => {
           const { jog: j, ready: r } = latest.current;
-          if (!held || r) j.onTouch(held);
+          if (!held || r()) j.onTouch(held);
         },
         cancelJog: () => latest.current.jog.cancel(),
         toggleSlipMode: () => {
@@ -159,17 +158,17 @@ function DeckControlsRegistrar() {
         },
         jogTicks: (ticks, profile, vinylOff) => {
           const { jog: j, ready: r } = latest.current;
-          if (!r) return; // no track/decoding: nothing to bend or seek
+          if (!r()) return; // no track/decoding: nothing to bend or seek
           j.onTicks(ticks, undefined, getJogCalibration(profile), profile, vinylOff);
         },
         jogTouchTicks: (ticks, profile) => {
           const { jog: j, ready: r } = latest.current;
-          if (!r) return;
+          if (!r()) return;
           j.onTouchTicks(ticks, undefined, getJogCalibration(profile), profile);
         },
         jogSeekTicks: (ticks, profile) => {
           const { jog: j, ready: r } = latest.current;
-          if (!r) return;
+          if (!r()) return;
           j.onSeekTicks(ticks, undefined, getJogCalibration(profile));
         },
         // Grid-edit pads (midi-performance-ops 05): registry-direct stored-

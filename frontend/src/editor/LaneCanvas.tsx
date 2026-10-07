@@ -71,7 +71,10 @@ export function LaneCanvas({
   onChange,
   selected,
   onSelectedChange,
+  visible = true,
 }: {
+  /** Offscreen timeline rows retain editing state but defer raster work. */
+  visible?: boolean;
   /** Lane identity: kind semantics (neutral line, fill anchor, shade
    * ramps, filter snap) key off the id's control prefix. The Routine
    * editor passes kind-matched ids for its slot lanes (gh#170 pass 2 —
@@ -200,7 +203,17 @@ export function LaneCanvas({
    * computed against (zoom changes invalidate it). */
   const spanRef = useRef<{ left: number; width: number; forWidth: number } | null>(null);
 
+  const color = colorProp ?? LANE_COLORS[id];
+  const shaded = useMemo(() => {
+    const line = lanePolyline(points, emptyLaneShade(styleId).y);
+    return {
+      segments: line.slice(1).map((b, i) => ({ a: line[i], b, shade: segmentShade(styleId, color, line[i].y, b.y) })),
+      nodes: points.map((p) => pointStroke(styleId, color, p.y)),
+    };
+  }, [points, styleId, color]);
+
   const draw = () => {
+    if (!visible) return;
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext('2d');
     if (!canvas || !ctx) return;
@@ -216,10 +229,8 @@ export function LaneCanvas({
     const w = spanW + LANE_PAD * 2;
     const h = canvas.clientHeight;
     const dpr = Math.min(window.devicePixelRatio || 1, LANE_MAX_BITMAP_PX / Math.max(w, 1));
-    if (canvas.width !== Math.round(w * dpr) || canvas.height !== Math.round(h * dpr)) {
-      canvas.width = Math.round(w * dpr);
-      canvas.height = Math.round(h * dpr);
-    }
+    if (canvas.width !== Math.round(w * dpr)) canvas.width = Math.round(w * dpr);
+    if (canvas.height !== Math.round(h * dpr)) canvas.height = Math.round(h * dpr);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
     // Canvas padding is outside the hit rect; the value-axis gutter is inside it.
@@ -276,7 +287,6 @@ export function LaneCanvas({
       ctx.fillRect(a, plotTop, Math.max(b - a, 1.5), plotHeight);
     }
 
-    const color = colorProp ?? LANE_COLORS[id];
     // DEVIATION rendering (mix-editor 39): the curve renders per straight
     // segment — grey at/near neutral ramping to the deck color with
     // deviation, with the area between curve and NEUTRAL AXIS filled as a
@@ -287,14 +297,11 @@ export function LaneCanvas({
     // by side (LPF dark / HPF light) inside segmentShade.
     if (points.length > 0) {
       const fillY = ly(laneFillAnchor(styleId));
-      const ext = lanePolyline(points, emptyLaneShade(styleId).y);
-      for (let i = 0; i < ext.length - 1; i++) {
-        const a = ext[i];
-        const b = ext[i + 1];
-        const shade = segmentShade(styleId, color, a.y, b.y);
+      for (const { a, b, shade } of shaded.segments) {
+        const x0 = lx(a.x);
+        const x1 = lx(b.x);
+        if (x1 < -2 || x0 > w + 2) continue;
         if (shade.fill !== null) {
-          const x0 = lx(a.x);
-          const x1 = lx(b.x);
           ctx.beginPath();
           ctx.moveTo(x0, ly(a.y));
           ctx.lineTo(x1, ly(b.y));
@@ -315,8 +322,6 @@ export function LaneCanvas({
           // Stroke: same per-value gradient as the fill. Degenerate spans
           // (vertical slams) take the strongest endpoint so a slam still
           // reads at full strength.
-          const x0 = lx(a.x);
-          const x1 = lx(b.x);
           ctx.beginPath();
           ctx.moveTo(x0, ly(a.y));
           ctx.lineTo(x1, ly(b.y));
@@ -354,10 +359,11 @@ export function LaneCanvas({
     // Breakpoints: uniform size, centered on their true curve position. Dots
     // follow the deviation ramp too: a breakpoint parked at neutral is
     // quiet grey, a working one carries the lane color.
-    points.forEach((p) => {
+    points.forEach((p, i) => {
+      if (lx(p.x) < -LANE_POINT_R || lx(p.x) > w + LANE_POINT_R) return;
       ctx.beginPath();
       ctx.arc(lx(p.x), ly(p.y), LANE_POINT_R, 0, Math.PI * 2);
-      ctx.fillStyle = pointStroke(styleId, color, p.y);
+      ctx.fillStyle = shaded.nodes[i];
       ctx.fill();
     });
 
@@ -415,7 +421,7 @@ export function LaneCanvas({
   // geometry for a frame (the "automation jumping around while zooming").
   useLayoutEffect(() => {
     drawRef.current();
-  }, [points, id, kind, colorProp, guides, widthPx, hoverIndex, chopPreview, resizeTick, selected, marquee]);
+  }, [points, id, kind, colorProp, guides, widthPx, hoverIndex, chopPreview, resizeTick, selected, marquee, visible]);
 
   // Scroll-triggered redraws: reposition only when the view leaves the
   // drawn span (or the zoom it was drawn at changed). LAYOUT effect: the

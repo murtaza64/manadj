@@ -2,13 +2,14 @@
 // Waveform style slots must track the shader's math — grouping/RMS, soft
 // limit, master, displayGamma, and each style's color logic.
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { DecodedWaveform } from '../waveform/blob';
 import { buildLodPack } from '../waveform/blob';
 import { DEFAULT_PARAMS, STYLE_REGISTRY, type StyleParams } from '../waveform/styles';
 import {
   computeStyledColumns,
   createStyledColumnRenderer,
+  drawStyledWave,
   PAINTABLE_STYLE_IDS,
 } from './ladderWaveStyle';
 import { WAVE_BG_GL } from '../theme/markers';
@@ -63,6 +64,21 @@ const parseCss = (css: string): [number, number, number] => {
   return [Number(m[1]), Number(m[2]), Number(m[3])];
 };
 
+describe('drawStyledWave background', () => {
+  it('leaves silence and out-of-track space transparent only when requested', () => {
+    const wave = makeWaveform(200, Array(8).fill(0), 0);
+    const ctx = { fillStyle: '', fillRect: vi.fn(), clearRect: vi.fn() };
+    const opts = { width: 192, height: 20, dir: 'bipolar' as const, range: [-1, wave.duration + 1] as [number, number] };
+    drawStyledWave(ctx as unknown as CanvasRenderingContext2D, wave, 'additive-rgb', params(), { ...opts, transparent: true });
+    expect(ctx.clearRect).toHaveBeenCalledWith(0, 0, 192, 20);
+    expect(ctx.fillRect).not.toHaveBeenCalled();
+    ctx.clearRect.mockClear();
+    drawStyledWave(ctx as unknown as CanvasRenderingContext2D, wave, 'additive-rgb', params(), opts);
+    expect(ctx.clearRect).not.toHaveBeenCalled();
+    expect(ctx.fillRect).toHaveBeenCalledWith(0, 0, 192, 20);
+  });
+});
+
 describe('registry coverage', () => {
   it('paints every style in the registry', () => {
     for (const s of STYLE_REGISTRY) {
@@ -72,6 +88,18 @@ describe('registry coverage', () => {
 });
 
 describe('computeStyledColumns', () => {
+  it('samples no broadband peaks for band-only styles', () => {
+    const wave = makeWaveform(200, Array(8).fill(128));
+    const data = wave.peaks.data;
+    const peaks = vi.fn(() => data);
+    Object.defineProperty(wave.peaks, 'data', { get: peaks });
+    for (const style of ['additive-rgb', 'additive-soft', 'additive-screen', 'transient-flux']) {
+      computeStyledColumns(wave, style, params(), 0.3, 0.9, 40);
+    }
+    expect(peaks.mock.calls.length).toBe(0);
+    computeStyledColumns(wave, 'layered-opaque', params(), 0.3, 0.9, 40);
+    expect(peaks).toHaveBeenCalled();
+  });
   // Constant signal: all 8 bands quantized at 128. With gamma 0.5 and
   // displayGamma 1, amp = (128/255)^2; groups (b1=3, b2=5) hold 3/2/3
   // bands. Gains chosen to keep every group below the 0.6 soft knee,
@@ -240,9 +268,11 @@ describe('computeStyledColumns', () => {
         [0.2, 0.3], // backward jump: no state may leak between calls
       ];
       for (const [t0, t1] of ranges) {
-        expect(renderer.render(t0, t1, 16)).toEqual(
-          computeStyledColumns(wave, s.id, p, t0, t1, 16),
-        );
+        for (const brightness of [1, 0.4, 1]) {
+          expect(renderer.render(t0, t1, 16, brightness)).toEqual(
+            computeStyledColumns(wave, s.id, p, t0, t1, 16, brightness),
+          );
+        }
       }
     }
   });

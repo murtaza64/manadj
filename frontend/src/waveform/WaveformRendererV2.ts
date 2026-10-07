@@ -415,6 +415,9 @@ void main() {
     (t0 < u_modPlayheadT || v_uv.y > 0.5 || u_stemLobeSplit < 0.5);
   if (g_stems) {
     g_mask = texture(u_stemMaskTex, vec2((t0 - u_stemMaskStart) / u_stemMaskSpan, 0.5));
+    // All-on uses the original mix: summed stem energies cannot reconstruct
+    // its envelope. Check per column so muted history still composites.
+    g_stems = !all(equal(g_mask, vec4(1.0)));
   }
   // Amplitude coordinate: mirrored (center) or edge-anchored half-waveforms.
   float yA = u_anchor == 0 ? abs(v_uv.y - 0.5) * 2.0
@@ -785,6 +788,13 @@ export class WaveformRendererV2 {
     this.markDirty();
   }
 
+  private getSlipReturnPlayhead: (() => number | null) | null = null;
+
+  public setSlipReturnPlayhead(get: (() => number | null) | null): void {
+    this.getSlipReturnPlayhead = get;
+    this.markDirty();
+  }
+
   /** Split mode (performance-mode 10): modulation reshapes only the TOP
    * lobe of the mirrored body; the bottom lobe stays ground truth. Only
    * meaningful with the center anchor. */
@@ -838,6 +848,28 @@ export class WaveformRendererV2 {
     }
 
     const view = this.computeView(w, h, dpr);
+    const slip = this.modSplit && this.anchor === 'center' && !this.isMinimap && !this.externalWindow
+      ? this.getSlipReturnPlayhead?.() : null;
+    if (slip != null && Number.isFinite(slip) && slip !== view.playhead) {
+      const lowerView = { ...view, startTime: view.startTime + slip - view.playhead, playhead: slip };
+      const lowerH = Math.ceil(h / 2);
+      const upperH = h - lowerH;
+      this.ensureOverlayContext()?.clearRect(0, 0, w, h);
+      // Keep full-height UVs; each lobe samples its own time window, including
+      // modulation/stem textures and marks. GL's origin is bottom-left.
+      gl.enable(gl.SCISSOR_TEST);
+      try {
+        gl.scissor(0, lowerH, w, upperH);
+        this.drawBody(view);
+        this.drawOverlays(view, { textClip: { x0: 0, y0: 0, w, h: upperH } });
+        gl.scissor(0, 0, w, lowerH);
+        this.drawBody(lowerView);
+        this.drawOverlays(lowerView, { textClip: { x0: 0, y0: upperH, w, h: lowerH } });
+      } finally {
+        gl.disable(gl.SCISSOR_TEST);
+      }
+      return;
+    }
     this.drawBody(view);
     this.drawOverlays(view);
   }
@@ -1200,7 +1232,7 @@ export class WaveformRendererV2 {
 
   private drawOverlays(
     view: FrameView,
-    opts: { skipPlayhead?: boolean; textClip?: { x0: number; w: number } } = {}
+    opts: { skipPlayhead?: boolean; textClip?: { x0: number; w: number; y0?: number; h?: number } } = {}
   ): void {
     const { gl } = this;
     const prog = this.overlayProgram!;
@@ -1277,7 +1309,7 @@ export class WaveformRendererV2 {
       if (opts.textClip) {
         ctx.save();
         ctx.beginPath();
-        ctx.rect(opts.textClip.x0, 0, opts.textClip.w, view.h);
+        ctx.rect(opts.textClip.x0, opts.textClip.y0 ?? 0, opts.textClip.w, opts.textClip.h ?? view.h);
         ctx.clip();
       } else {
         ctx.clearRect(0, 0, view.w, view.h);

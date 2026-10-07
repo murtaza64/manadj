@@ -1,9 +1,9 @@
 """Session silence evaluation (sessions 11).
 
-The one audibility definition — running transport (or filtered scratch motion
+Session audibility — running transport or preview (or filtered scratch motion
 while touched) AND not EQ-full-killed AND not
 filter-killed AND Master-bus gain (trim x channel fader x crossfader) at or
-above the audible threshold; PFL and CUE-stab preview invisible — ported
+above the audible threshold; PFL-only is invisible — ported
 from the frontend seam and replayed over a persisted Session event stream.
 
 KEPT IN LOCKSTEP with:
@@ -69,6 +69,7 @@ def _fresh_deck() -> dict[str, Any]:
     centered, filter off, stopped."""
     return {
         "playing": False,
+        "previewing": False,
         "scratch": None,
         "scratch_at": 0.0,
         "position": 0.0,
@@ -93,9 +94,9 @@ def _scratch_loop(deck: dict[str, Any]) -> dict[str, float] | None:
 
 def _deck_audible(deck: dict[str, Any], crossfader: float, crossfader_enabled: bool,
                   assignment: float) -> bool:
-    """audibility.ts isDeckAudible, verbatim semantics."""
+    """audibilityReducer.ts sessionDeckAudible, excluding the tenure gate."""
     motion = deck["scratch"]
-    running = deck["playing"]
+    running = deck["playing"] or deck["previewing"]
     if motion is not None:
         drive, rate = motion
         peak_time = max(0.0, 1 - rate / drive) if drive else 0.0
@@ -197,8 +198,8 @@ def _scratch_sounded_between(deck: dict[str, Any], elapsed: float) -> bool:
 def events_contain_audible(events: Iterable[dict[str, Any]]) -> bool:
     """Did any instant of this event stream have at least one Master-audible
     Deck? Replays the audibility inputs (controls, transport, crossfader
-    routing) and tests all four Decks after every event. PFL and CUE-stab
-    preview are invisible. Filtered scratch motion sounds even while paused;
+    routing) and tests all four Decks after every event. Audible cue stabs
+    count; PFL-only does not. Filtered scratch motion sounds even while paused;
     a touched hold is silent. Short-circuits on the first audible instant."""
     decks = {ch: _fresh_deck() for ch in _ALL_DECKS}
     # Default crossfader sides mirror the mixer (A/C left, B/D right) —
@@ -255,6 +256,10 @@ def events_contain_audible(events: Iterable[dict[str, Any]]) -> bool:
                     decks[channel]["playing"] = True
                 elif action in ("pause", "cue"):
                     decks[channel]["playing"] = False
+                elif action == "previewStart":
+                    decks[channel]["previewing"] = True
+                elif action == "previewEnd":
+                    decks[channel]["previewing"] = False
                 elif action == "scratchBegin":
                     decks[channel]["scratch"] = (0.0, 0.0)
                     decks[channel]["scratch_at"] = t
@@ -267,10 +272,9 @@ def events_contain_audible(events: Iterable[dict[str, Any]]) -> bool:
                         decks[channel]["scratch_at"] = t
                 elif action == "scratchEnd":
                     decks[channel]["scratch"] = None
-                # previewStart/previewEnd: preview never flips `playing`
-                # (phase-1 boundary, detector.ts); seek/jumpBeats/hotCue
-                # don't touch audibility inputs.
+                # seek/jumpBeats/hotCue don't touch audibility inputs.
         elif kind == "load" and e.get("channel") in decks:
+            decks[e["channel"]]["previewing"] = False
             decks[e["channel"]]["scratch"] = None
             decks[e["channel"]]["track_duration"] = float("inf")
             decks[e["channel"]]["loop"] = None

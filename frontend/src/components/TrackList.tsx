@@ -1,4 +1,7 @@
-import React, { useEffect, useMemo, useRef, type JSX } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
+import type { ReactNode } from 'react';
+import { keepPreviousData, useQuery } from '@tanstack/react-query';
+import { api } from '../api/client';
 import TrackRow, { type LoadedMark, type SelectMods, type TransitionMark } from './TrackRow';
 import { packRowEvidence } from './rowEvidence';
 import { useDecks } from '../hooks/useDeck';
@@ -6,13 +9,12 @@ import { useDeckOccupancy } from '../hooks/useDeckOccupancy';
 import { usePlayedTracks } from '../sessions/playedStore';
 import { useDeckPlaybackLevels } from '../hooks/useDeckPlaybackLevels';
 import { loadedDecks } from '../sets/rowMarks';
-import { MusicIcon, PersonIcon, KeyIcon, SpeedIcon, EnergyIcon, TagIcon, CalendarIcon, CrosshairIcon } from './icons';
 import type { Track } from '../types';
 import type { ChannelId } from '../playback/mixer';
 import type { PairInfo } from '../editor/transitionIndex';
 import { isLinked, type LinkKey } from '../links/linkStore';
-import { getColumnConfig } from './columnConfig';
-import { ColumnResizeHandle } from './ColumnResizeHandle';
+import { getColumnLayout, useColumnOrder } from './columnOrder';
+import { TrackColumnHeaders, type SortColumn } from './TrackColumnHeaders';
 import { useColumnWidths } from '../hooks/useColumnWidths';
 import {
   ROW_HEIGHT,
@@ -22,9 +24,6 @@ import {
   type TrackScroller,
 } from './virtualRows';
 import './TrackList.css';
-
-/** 'position' = Play order (#), playlist tables only. */
-type SortColumn = 'position' | 'key' | 'bpm' | 'energy' | 'title' | 'artist' | 'created_at' | 'bitrate_kbps' | 'filesize_bytes' | 'provenance';
 
 interface TrackListProps {
   tracks: Track[];
@@ -59,6 +58,7 @@ interface TrackListProps {
    * pre-grouped tracks (Follow's tier ordering); this only renders the
    * boundaries. Absent = flat table. */
   groupLabelFor?: (track: Track) => string;
+  groupControlsFor?: (label: string) => ReactNode;
   /** Match score column (match-score PRD): when set, a score column
    * renders (Follow views). Known rows show their marks, not a score —
    * callers may return null for them. */
@@ -73,6 +73,11 @@ interface TrackListProps {
   sortColumn: SortColumn | null;
   sortDirection: 'asc' | 'desc';
   onSort: (column: SortColumn) => void;
+  /** Empty-state guidance (feature-tour #283): shown as a message row when
+   * the table has zero rows (loaded, no error). The caller owns the copy —
+   * an empty Library reads differently from an empty playlist or a filter
+   * with no hits. Absent = headers over an empty body (legacy). */
+  emptyMessage?: ReactNode;
 }
 
 export default function TrackList({
@@ -92,13 +97,15 @@ export default function TrackList({
   links,
   deckIds,
   groupLabelFor,
+  groupControlsFor,
   scoreFor,
   scoreSorted = false,
   onScoreSort,
   matchSignalsFor,
   sortColumn,
   sortDirection,
-  onSort
+  onSort,
+  emptyMessage
 }: TrackListProps) {
   // Live deck occupancy (across A–D) → per-row loaded identity mark,
   // mirroring the Set view's wash (sets 35). Memoized on engine slices,
@@ -126,8 +133,12 @@ export default function TrackList({
       (deck) => markFor(transitionMarks?.[deck], id),
       (deck) => linkedFor(deckIds?.[deck], id)
     );
-  const { widths, setWidth, resetWidth, cssVars } = useColumnWidths(playOrder !== undefined);
-  const colSpan = playOrder !== undefined ? 13 : 12;
+  const order = useColumnOrder();
+  const showOrder = playOrder !== undefined;
+  const tableRef = useRef<HTMLTableElement | null>(null);
+  const configuredColumns = useMemo(() => getColumnLayout(order, showOrder), [order, showOrder]);
+  const { columns, widths, setWidth, resetWidth, cssVars } = useColumnWidths(configuredColumns, tableRef);
+  const colSpan = columns.length;
 
   // ── One indexed stream: tier headers + ordinary rows ──────────────────
   // Follow groups arrive pre-ordered; a header row opens each run of equal
@@ -172,8 +183,16 @@ export default function TrackList({
     return m;
   }, [rows]);
 
-  const tableRef = useRef<HTMLTableElement | null>(null);
   const { start, end, metrics, container } = useVirtualWindow(tableRef, rows.length);
+  const previewIds = rows.slice(start, end).flatMap(row => row.kind === 'track' ? [row.track.id] : []).sort((a, b) => a - b).join(',');
+  const { data: previewCues } = useQuery({
+    queryKey: ['hotcues', 'bulk', previewIds],
+    queryFn: () => api.hotcues.getBulk(previewIds.split(',').map(Number)),
+    placeholderData: keepPreviousData,
+    enabled: previewIds.length > 0,
+    staleTime: 60_000,
+    gcTime: 60_000,
+  });
 
   // Register a scroller so keyboard navigation can bring an off-screen
   // (unmounted) row into view by index geometry (useTrackSelection reads
@@ -218,135 +237,16 @@ export default function TrackList({
     return registerTrackScroller(scroller);
   }, []);
 
-  const SortableHeader = ({
-    column,
-    icon,
-    columnId,
-    label,
-    center = false
-  }: {
-    column: SortColumn;
-    icon?: JSX.Element;
-    columnId: string;
-    label?: string;
-    /** Center the icon (narrow icon-only columns: key/bpm/energy). */
-    center?: boolean;
-  }) => {
-    const config = getColumnConfig(columnId)!;
-    const className = [
-      'sortable-header',
-      config.sticky ? 'sticky-col-header' : '',
-      config.showShadow ? 'sticky-shadow' : '',
-      sortColumn === column ? 'sorted' : ''
-    ].filter(Boolean).join(' ');
-
-    const style: React.CSSProperties = {
-      width: `var(--colw-${config.id})`,
-      minWidth: `var(--colw-${config.id})`,
-      maxWidth: `var(--colw-${config.id})`,
-      textAlign: config.align || 'left',
-      ...(config.sticky ? { left: `var(--colleft-${config.id})` } : {})
-    };
-
-    return (
-      <th className={className} style={style} onClick={() => onSort(column)}>
-        <div className={`sortable-header-content ${center ? 'align-center' : config.align === 'right' ? 'align-right' : ''}`}>
-          {icon || label}
-          {sortColumn === column && (
-            <span className="sort-indicator">
-              {sortDirection === 'asc' ? '▲' : '▼'}
-            </span>
-          )}
-        </div>
-        <ColumnResizeHandle
-          columnId={config.id}
-          currentWidth={widths[config.id]}
-          onResize={setWidth}
-          onReset={resetWidth}
-        />
-      </th>
-    );
-  };
-
   return (
     <div style={{ position: 'relative', height: '100%', width: '100%', ...cssVars }}>
       <table className="track-table" ref={tableRef}>
         <thead>
-          <tr>
-            {playOrder !== undefined && <SortableHeader column="position" label="#" columnId="order" />}
-            <SortableHeader column="key" icon={<KeyIcon />} columnId="key" center />
-            <SortableHeader column="bpm" icon={<SpeedIcon />} columnId="bpm" center />
-            <SortableHeader column="energy" icon={<EnergyIcon />} columnId="energy" center />
-            {/* Marks/match column (follow-mode 09, match-score PRD): two
-                evidence slots per row; while Follow filters, Compatible
-                rows show their Match score here and the crosshair header
-                returns the list to the score order after a column sort
-                took over (client-side, so not a SortColumn). A full
-                column citizen: crosshair name, resize handle. */}
-            <th
-              className={`sortable-header sticky-col-header${scoreFor !== undefined && scoreSorted ? ' sorted' : ''}`}
-              style={{
-                width: 'var(--colw-marks)',
-                minWidth: 'var(--colw-marks)',
-                maxWidth: 'var(--colw-marks)',
-                left: 'var(--colleft-marks)',
-              }}
-              onClick={scoreFor !== undefined ? onScoreSort : undefined}
-              title={
-                scoreFor !== undefined
-                  ? 'Match score (click to sort by match)'
-                  : 'Evidence marks (saved transitions, links); match score while following'
-              }
-            >
-              {/* The crosshair names the column always; sorting by match
-                  only means something while Follow filters. */}
-              <div className="sortable-header-content align-center">
-                <CrosshairIcon width={13} height={13} />
-                {scoreFor !== undefined && scoreSorted && (
-                  <span className="sort-indicator">▼</span>
-                )}
-              </div>
-              <ColumnResizeHandle
-                columnId="marks"
-                currentWidth={widths.marks}
-                onResize={setWidth}
-                onReset={resetWidth}
-              />
-            </th>
-            <SortableHeader column="title" icon={<MusicIcon />} columnId="title" />
-            <SortableHeader column="artist" icon={<PersonIcon />} columnId="artist" />
-            <SortableHeader column="created_at" icon={<CalendarIcon />} columnId="created_at" />
-            <th className="tags-header" style={{ textAlign: 'left', padding: '6px 12px', width: 'var(--colw-tags)', minWidth: 'var(--colw-tags)', maxWidth: 'var(--colw-tags)' }}>
-              <TagIcon />
-              <ColumnResizeHandle
-                columnId="tags"
-                currentWidth={widths.tags}
-                onResize={setWidth}
-                onReset={resetWidth}
-              />
-            </th>
-            <th
-              className="stems-header"
-              title="Stems ready (split on disk)"
-              style={{
-                width: 'var(--colw-stems)',
-                minWidth: 'var(--colw-stems)',
-                maxWidth: 'var(--colw-stems)',
-                position: 'relative',
-              }}
-            >
-              st
-              <ColumnResizeHandle
-                columnId="stems"
-                currentWidth={widths.stems}
-                onResize={setWidth}
-                onReset={resetWidth}
-              />
-            </th>
-            <SortableHeader column="bitrate_kbps" label="quality" columnId="quality" />
-            <SortableHeader column="filesize_bytes" label="size" columnId="size" />
-            <SortableHeader column="provenance" label="from" columnId="provenance" />
-          </tr>
+          <TrackColumnHeaders
+            columns={columns} order={order}
+            widths={widths} setWidth={setWidth} resetWidth={resetWidth}
+            sortColumn={sortColumn} sortDirection={sortDirection} onSort={onSort}
+            hasScore={scoreFor !== undefined} scoreSorted={scoreSorted} onScoreSort={onScoreSort}
+          />
         </thead>
         <tbody>
           {isLoading && tracks.length === 0 ? (
@@ -359,6 +259,12 @@ export default function TrackList({
             <tr>
               <td colSpan={colSpan} className="track-table-message track-table-error">
                 Error loading tracks
+              </td>
+            </tr>
+          ) : rows.length === 0 && emptyMessage !== undefined ? (
+            <tr>
+              <td colSpan={colSpan} className="track-table-message track-table-empty">
+                {emptyMessage}
               </td>
             </tr>
           ) : (
@@ -379,8 +285,11 @@ export default function TrackList({
                         {/* Sticky-left so the label survives horizontal
                             scroll — the td spans the whole (wide) table. */}
                         <span className="track-tier-label">
-                          {row.label}
-                          <span className="track-tier-count"> — {row.count}</span>
+                          <span>
+                            {row.label}
+                            <span className="track-tier-count"> — {row.count}</span>
+                          </span>
+                          {groupControlsFor?.(row.label)}
                         </span>
                       </td>
                     </tr>
@@ -394,6 +303,8 @@ export default function TrackList({
                   <TrackRow
                     key={track.id}
                     track={track}
+                    columns={columns}
+                    previewCues={previewCues?.[track.id]}
                     isSelected={selectedIds.has(track.id)}
                     loadedOn={loadedFor(track.id)}
                     played={played.has(track.id)}

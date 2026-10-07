@@ -47,6 +47,9 @@ export const CUE_FLAG_FULL_SIZE = 16;
 export const CUE_FLAG_MINI_SIZE = 5;
 /** Pole width (CSS px), both variants. */
 export const CUE_FLAG_POLE_W = 2;
+/** Lighter tracklist-only markers (CSS px). */
+export const CUE_FLAG_PREVIEW_SIZE = 3;
+export const CUE_FLAG_PREVIEW_POLE_W = 1;
 /** Knockout ink for the slot number — near-black, reads on any cue color. */
 export const CUE_FLAG_INK = 'rgb(17, 17, 17)';
 

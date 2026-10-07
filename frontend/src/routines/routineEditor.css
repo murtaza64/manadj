@@ -125,6 +125,45 @@
 .mp-chipx:hover {
   color: var(--danger);
 }
+.mp-deck-shortcuts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-4);
+  margin: var(--space-4) var(--space-8);
+}
+.mp-deck-shortcut {
+  display: flex;
+  align-items: center;
+  gap: var(--space-6);
+  min-width: 0;
+  padding: var(--space-4) var(--space-6);
+  background: transparent;
+  border: 1px solid currentColor;
+  font: inherit;
+  font-size: var(--font-small);
+  text-align: left;
+  cursor: pointer;
+}
+.mp-deck-letter {
+  font-weight: 800;
+}
+.mp-deck-title {
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mp-deck-shortcut:hover:not(:disabled) {
+  background: color-mix(in srgb, currentColor 16%, transparent);
+}
+.mp-deck-shortcut:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 1px;
+}
+.mp-deck-shortcut:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
 .mp-panel .mp-search {
   margin: var(--space-4) var(--space-8) var(--space-6);
   padding: var(--space-2) var(--space-6);
@@ -824,9 +863,18 @@
 /* Selected wave rows (gh#190 track drag): slot-colored outline; the row
    drags as a clip while selected. */
 .rt-wave-row.rt-selected {
-  outline: 1px solid;
-  outline-offset: -1px;
   cursor: grab;
+}
+.rt-wave-row.rt-selected::after {
+  /* Paint above the positioned waveform, without resizing its bitmap or hit target. */
+  content: '';
+  position: absolute;
+  inset: 0;
+  outline: 3px solid;
+  outline-color: inherit;
+  outline-offset: -3px;
+  z-index: 3;
+  pointer-events: none;
 }
 .rt-wave-row.rt-selected:active {
   cursor: grabbing;
@@ -1065,4 +1113,65 @@
    fit, the OLDER label dims — superimposition reads as "zoom in". */
 .rt-jump-overlapped .rt-jump-chip {
   opacity: 0.35;
+}
+
+/* ── Authored mixes (ADR 0039, gh#325) ───────────────────────────────── */
+.rt-dropline {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 2px;
+  background: #00ff66;
+  pointer-events: none;
+  z-index: 30;
+}
+.rt-droplabel {
+  position: absolute;
+  top: 4px;
+  left: 6px;
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 700;
+  color: #0b0b0b;
+  background: #00ff66;
+  padding: 1px 5px;
+}
+.rt-slotremove {
+  background: transparent;
+  border: 1px solid #ff2a2a;
+  color: #ff2a2a;
+  font-size: 10px;
+  line-height: 1;
+  padding: 1px 4px;
+  cursor: pointer;
+}
+.rt-slotremove:hover {
+  background: #ff2a2a;
+  color: #0b0b0b;
+}
+.re-blank-canvas {
+  flex: 1;
+  margin: 16px;
+  border: 2px dashed #00ff66;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: #d8d8d8;
+  font-size: 13px;
+  text-align: center;
+  padding: 24px;
+}
+.re-blank-canvas.over {
+  background: rgba(0, 255, 102, 0.12);
+}
+.re-blank-canvas b {
+  color: #00ff66;
+}
+.re-authored-hint {
+  color: #ffd400;
+  font-size: 11px;
+  margin-left: 8px;
 }

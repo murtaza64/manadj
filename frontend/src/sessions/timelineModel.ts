@@ -6,8 +6,7 @@
  *
  * - per-Deck track spans (loads), playing spans (transport), audibility
  *   spans (via the SHARED audibility reducer, capture/audibilityReducer —
- *   the very reducer the detector runs, same params, so the bands are
- *   what the detector heard by construction), playhead traces (ticks +
+ *   same mixer thresholds as the detector, including previews), playhead traces (ticks +
  *   transport, broken at discontinuities — these also map session time to
  *   track time for waveform rendering)
  * - tenure holds (a machine held the Audible surface: honest gaps;
@@ -27,7 +26,7 @@ import {
   deckScratchMotion,
   deckGain,
   initialAudibilityState,
-  maskedDeckAudible,
+  sessionDeckAudible,
 } from '../capture/audibilityReducer';
 import type { AudibilityState } from '../capture/audibilityReducer';
 import { DEFAULT_DETECTOR_PARAMS } from '../capture/events';
@@ -45,6 +44,7 @@ const JOG_SEEK_MAX_S = 2;
 /** Minimum spacing between kept jog-trace samples (~20 Hz): rim ticks can
  * fire many times per frame; decimating bounds the point count. */
 const JOG_DECIMATE_S = 0.05;
+const IDLE_GRACE_S = 5;
 
 export interface Span {
   start: number;
@@ -147,7 +147,7 @@ export interface TimelineModel {
    * audibility span overlapped that Track's tenure on its deck). Repeated
    * audible plays count once; loaded-only, cue/PFL-only, and
    * tenure-masked Tracks are absent (audibleSpans already exclude them).
-   * The Sessions-list "Tracks" count. */
+   * Ordered by first audibility, for the Sessions-list count and preview. */
   audibleTrackIds: number[];
   eventCount: number;
 }
@@ -309,8 +309,8 @@ export function deriveTimeline(
     // is common and must not emit thousands of markers).
     let jogRef: number | null = null;
     if (
-      e.kind === 'transport' &&
-      (e.action === 'seek' || e.action === 'jumpBeats' || e.action === 'hotCue')
+      e.kind === 'loop' || (e.kind === 'transport' &&
+      (e.action === 'seek' || e.action === 'jumpBeats' || e.action === 'hotCue'))
     ) {
       const d = s.decks[e.channel];
       if (d.playing || d.previewing || d.scratch) {
@@ -362,6 +362,14 @@ export function deriveTimeline(
           sampleTrace(ch, e.t, s.decks[ch].scratch ? deckPlayheadAt(s.decks[ch], e.t) : p,
             false, s.decks[ch].scratch !== null);
         }
+      }
+    } else if (e.kind === 'loop') {
+      if (preJump !== null && Math.abs(e.playhead - preJump) > 1e-6) {
+        sampleTrace(e.channel, e.t, preJump);
+        breakTrace(e.channel);
+      }
+      if (s.decks[e.channel].playing || s.decks[e.channel].previewing) {
+        sampleTrace(e.channel, e.t, e.playhead);
       }
     } else if (e.kind === 'transport') {
       if (e.action === 'scratchBegin' || e.action === 'scratchMove') {
@@ -465,7 +473,7 @@ export function deriveTimeline(
     // suspends identically — one gate, audibilityReducer.ts).
     let audibleCount = 0;
     for (const ch of ALL_DECKS) {
-      const a = maskedDeckAudible(s, ch);
+      const a = sessionDeckAudible(s, ch);
       if (a) audibleCount += 1;
       audible[ch].set(a, e.t);
       playing[ch].set(s.decks[ch].playing, e.t);
@@ -525,14 +533,15 @@ export function deriveTimeline(
 
   // Distinct Master-audible Tracks (the Sessions-list "Tracks" count): a
   // Track counts iff its tenure on a deck overlapped that deck's
-  // audibility (which already excludes cue/PFL, loaded-silent, kills, and
+  // audibility (which already excludes PFL-only, loaded-silent, kills, and
   // tenure-masked stretches). One definition, reused — no divergence.
-  const audibleTrackIds = new Set<number>();
+  const firstAudible = new Map<number, number>();
   for (const ch of ALL_DECKS) {
     for (const span of trackSpans[ch]) {
-      if (audibleTrackIds.has(span.trackId)) continue;
-      if (audible[ch].spans.some((a) => a.start < span.end && a.end > span.start)) {
-        audibleTrackIds.add(span.trackId);
+      const heard = audible[ch].spans.find((a) => a.start < span.end && a.end > span.start);
+      if (heard) {
+        firstAudible.set(span.trackId, Math.min(firstAudible.get(span.trackId) ?? Infinity,
+          Math.max(span.start, heard.start)));
       }
     }
   }
@@ -542,10 +551,14 @@ export function deriveTimeline(
     end,
     decks,
     tenures,
-    idle: idle.spans,
+    // Keep the grace on the visible timeline, rather than backdating idle
+    // to the pause once the grace expires. Works for sparse logs too.
+    idle: idle.spans
+      .filter(span => span.end - span.start > IDLE_GRACE_S)
+      .map(span => ({ start: span.start + IDLE_GRACE_S, end: span.end })),
     overlaps: overlap.spans,
     trackIds: [...trackIds],
-    audibleTrackIds: [...audibleTrackIds],
+    audibleTrackIds: [...firstAudible].sort((a, b) => a[1] - b[1]).map(([id]) => id),
     eventCount: events.length,
   };
 }
@@ -631,7 +644,7 @@ function snapshotState(
           slipMode: d.slipMode,
           vinylMode: d.vinylMode,
           loop: d.loop ? { ...d.loop } : null,
-          audible: maskedDeckAudible(s, ch),
+          audible: sessionDeckAudible(s, ch),
           gain: deckGain(s, ch),
           playhead: Math.max(0, extrapolated),
           fader: d.fader,
@@ -853,27 +866,35 @@ export function buildTimeAxis(
   const tToPx = (t: number): number => {
     if (segments.length === 0) return 0;
     if (t <= segments[0].start) return 0;
-    for (const seg of segments) {
-      if (t <= seg.end) {
-        if (seg.collapsed) return (seg.px0 + seg.px1) / 2;
-        const dur = seg.end - seg.start;
-        return dur <= 0 ? seg.px0 : seg.px0 + ((t - seg.start) / dur) * (seg.px1 - seg.px0);
-      }
+    let lo = 0;
+    let hi = segments.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (segments[mid].end < t) lo = mid + 1;
+      else hi = mid;
     }
-    return totalPx;
+    const seg = segments[lo];
+    if (!seg) return totalPx;
+    if (seg.collapsed) return (seg.px0 + seg.px1) / 2;
+    const dur = seg.end - seg.start;
+    return dur <= 0 ? seg.px0 : seg.px0 + ((t - seg.start) / dur) * (seg.px1 - seg.px0);
   };
 
   const pxToT = (xq: number): number => {
     if (segments.length === 0) return 0;
     if (xq <= 0) return segments[0].start;
-    for (const seg of segments) {
-      if (xq <= seg.px1) {
-        if (seg.collapsed) return seg.start;
-        const w = seg.px1 - seg.px0;
-        return w <= 0 ? seg.start : seg.start + ((xq - seg.px0) / w) * (seg.end - seg.start);
-      }
+    let lo = 0;
+    let hi = segments.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (segments[mid].px1 < xq) lo = mid + 1;
+      else hi = mid;
     }
-    return segments[segments.length - 1].end;
+    const seg = segments[lo];
+    if (!seg) return segments[segments.length - 1].end;
+    if (seg.collapsed) return seg.start;
+    const w = seg.px1 - seg.px0;
+    return w <= 0 ? seg.start : seg.start + ((xq - seg.px0) / w) * (seg.end - seg.start);
   };
 
   return { segments, tToPx, pxToT, totalPx, visibleDurationS, pxPerSec };

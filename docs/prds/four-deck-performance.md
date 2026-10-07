@@ -117,7 +117,7 @@ Follow-ups:
 - Configurable or unbounded engine count (display count is configurable via #238)
 - N-ary Transitions, Cameos, automation lanes, or editor timelines
 - Automatic composition of pairwise Transitions into a multi-Deck authored move
-- Continuous beat sync or a Tempo Master in phase 1
+- Continuous beat sync or a Tempo Master in phase 1. Follow-up #19 is specified in [Performance sync](performance-sync.md): shared Group Tempo, no Tempo Master, one-shot quantized phase alignment.
 - Groove Circuit, stems, sampler, and effects implementation
 - Guessing mappings for ambiguous GRV6 controls before controller-in-hand verification
 - Numeric Deck labels or a label preference UI

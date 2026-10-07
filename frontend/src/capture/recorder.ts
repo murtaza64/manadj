@@ -159,9 +159,20 @@ export class CaptureRecorder {
     // Take classification, never the whole-Session capture (ADR 0033).
     // `ch` is a physical CaptureDeck: identity is preserved on the event.
     for (const ch of CHANNEL_IDS) {
-      this.engines[ch].setTransportEventHandler((e) =>
-        this.feed({ t: this.now(e.audioTime), kind: 'transport', channel: ch, ...e })
-      );
+      this.engines[ch].setTransportEventHandler((e) => {
+        const t = this.now(e.audioTime);
+        if (e.action === 'phaseAlign') {
+          const { loop, slipLoopActive } = this.engines[ch].getSnapshot();
+          // A phase correction repositions inside the SAME loop. Recording
+          // a seek would cancel that loop in replay; a loop anchor preserves it.
+          this.feed(loop
+            ? { t, kind: 'loop', channel: ch, playhead: e.playhead,
+              region: { start: loop.start, end: loop.end }, slip: slipLoopActive }
+            : { t, kind: 'transport', channel: ch, action: 'seek', playhead: e.playhead });
+        } else {
+          this.feed({ t, kind: 'transport', channel: ch, ...e, action: e.action });
+        }
+      });
     }
     if (this.surfaceGated) {
       // Booting under a machine tenure: mark it open so the detector
@@ -238,7 +249,8 @@ export class CaptureRecorder {
         this.feed({ t, kind: 'load', channel: ch, trackId: snap.trackId, bpm: snap.bpm });
       }
       this.feed({ t, kind: 'loop', channel: ch, playhead: this.engines[ch].getPlayhead(),
-        region: snap.loop ? { start: snap.loop.start, end: snap.loop.end } : null });
+        region: snap.loop ? { start: snap.loop.start, end: snap.loop.end } : null,
+        slip: snap.slipLoopActive });
       for (const control of ['slipMode', 'vinylMode'] as const) {
         this.feed({ t, kind: 'control', control, channel: ch, value: snap[control] ? 1 : 0 });
       }
@@ -519,7 +531,7 @@ export class CaptureRecorder {
     if (cur.bendPercent !== prev.bendPercent) {
       this.feed({ t, kind: 'bend', channel: ch, value: cur.bendPercent });
     }
-    if (cur.loop !== prev.loop) {
+    if (cur.loop !== prev.loop || cur.slipLoopActive !== prev.slipLoopActive) {
       // Loop engage/resize/translate/release (looping 06): the wraps
       // themselves are inaudible to snapshot diffs — vectorization derives
       // them from the region + rate.
@@ -529,6 +541,7 @@ export class CaptureRecorder {
         channel: ch,
         playhead: this.engines[ch].getPlayhead(),
         region: cur.loop ? { start: cur.loop.start, end: cur.loop.end } : null,
+        slip: cur.slipLoopActive,
       });
     }
   }

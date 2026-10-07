@@ -119,16 +119,26 @@ def test_crossfader_disabled_reads_as_center():
     assert events_contain_audible(events) is True
 
 
-def test_cue_stab_preview_is_invisible():
-    """The audibility definition ignores preview (phase-1 boundary) — a
-    stab-only stream is silent, exactly as the frontend detector sees it."""
+def test_audible_cue_stab_preview_keeps_the_session():
     events = [
         load(1.0),
         {"t": 2.0, "kind": "transport", "channel": "A", "action": "previewStart", "playhead": 30.0},
         tick(3.0, {"A": 31.0}),
         {"t": 4.0, "kind": "transport", "channel": "A", "action": "previewEnd", "playhead": 32.0},
     ]
-    assert events_contain_audible(events) is False
+    assert events_contain_audible(events) is True
+
+
+def test_preview_respects_mixer_gates_and_ends_on_release_or_load():
+    preview = {"t": 2.0, "kind": "transport", "channel": "A", "action": "previewStart", "playhead": 30.0}
+    for gate in (control(1.5, "fader", 0, "A"), control(1.5, "filter", 1, "A"),
+                 control(1.5, "crossfader", 1),
+                 {"t": 1.5, "kind": "tenure", "edge": "start", "holder": "editor"}):
+        assert not events_contain_audible([load(1), gate, preview, tick(3)])
+    muted = [load(1), control(1.5, "fader", 0, "A"), preview]
+    assert events_contain_audible(muted + [control(3, "fader", 1, "A")])
+    for end in ({**preview, "t": 2.5, "action": "previewEnd"}, load(2.5)):
+        assert not events_contain_audible(muted + [end, control(3, "fader", 1, "A")])
 
 
 def test_pfl_is_invisible():

@@ -13,6 +13,7 @@ vi.mock('../settings/persistedSettings', () => ({ writeSetting: vi.fn() }));
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
 it('Clear All resets filters and Follow; Clear played only resets played marks', async () => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
   vi.stubGlobal('localStorage', { getItem: () => null, setItem: () => {} });
   resetPlayed();
   const client = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity, retry: false } } });
@@ -36,9 +37,12 @@ it('Clear All resets filters and Follow; Clear played only resets played marks',
     act(() => {
       for (const deck of CHANNEL_IDS) dispatchFollow({ type: 'toggle', deck, loaded: true });
     });
+    expect(clearFilters.disabled).toBe(true);
+    act(() => vi.advanceTimersByTime(0));
     expect(clearFilters.disabled).toBe(false); // Follow alone enables Clear All.
     act(() => clearFilters.click());
     expect(getFollowFlags()).toEqual({ A: false, B: false, C: false, D: false });
+    act(() => vi.advanceTimersByTime(0));
     expect(clearFilters.disabled).toBe(true);
     act(() => {
       filters.setFilters({ ...filters.filters, search: 'test', energyMin: 3 });
@@ -68,5 +72,6 @@ it('Clear All resets filters and Follow; Clear played only resets played marks',
     client.clear();
     resetPlayed();
     vi.unstubAllGlobals();
+    vi.useRealTimers();
   }
 });

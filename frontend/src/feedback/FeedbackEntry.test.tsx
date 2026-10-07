@@ -10,7 +10,7 @@ import { DeckKeys } from '../components/performance/DeckKeys';
 
 const engine = vi.hoisted(() => ({
   jumpBeats: vi.fn(), setBend: vi.fn(), cueUp: vi.fn(), cueDown: vi.fn(), togglePlay: vi.fn(), toggleLoop: vi.fn(),
-  getSnapshot: vi.fn(() => ({ playing: false, loadState: 'ready', bendPercent: 0, scratching: false, vinylMode: true })),
+  getSnapshot: vi.fn(() => ({ playing: false, loadState: 'ready', trackId: 7, bendPercent: 0, scratching: false, vinylMode: true })),
   subscribe: vi.fn(() => () => {}), addTransportEventListener: vi.fn(() => () => {}),
   endScratch: vi.fn(),
 }));

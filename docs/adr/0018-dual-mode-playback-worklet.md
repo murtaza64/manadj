@@ -61,6 +61,12 @@ instant, and "Playhead = what is sounding" holds without compensation.
   Stem gain ramps use output time while scratching, not reversible track time.
 - Slip latches on touch-down. Its hidden timeline follows normal pitch/bend and
   loops; release records the resolved landing position.
+- Slip loops (#253) latch separately on loop entry and keep an unlooped clock.
+  Nested scratches keep their loop-local return; loop exit uses the outer clock.
+  Capture records the loop latch and resolved exit. Replay preserves loop/Play/
+  Pause ordering alongside scratches on the audio clock when vinyl is present.
+- Switching Slip off cancels both loop and scratch returns immediately, without
+  moving playback or ending the gesture. Switching it on arms future gestures only.
 - Ordinary hand-up resumes the prior transport synchronously with a 5 ms audio
   crossfade. A fresh reverse throw below -2x keeps the same gesture and Slip
   latch; real rotation extends a 12 ms coast timeout. Retouch cancels the timeout.
@@ -78,3 +84,5 @@ instant, and "Playhead = what is sounding" holds without compensation.
   path, without per-quantum array/view allocation.
 - Scratch-bearing Take/Routine promotion is refused until those artifacts can
   represent continuous signed motion. Session replay retains the raw gesture.
+- Slip-loop Take/Routine promotion is likewise refused until vectorization
+  preserves the compensating return jump, not only backward wraps.

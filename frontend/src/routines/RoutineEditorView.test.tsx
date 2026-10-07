@@ -21,6 +21,9 @@ import type { RoutineTimeline } from './RoutineTimeline';
 import type { MixPicker } from './MixPicker';
 import { routineSlotStateAt, slotLanesAt } from '../sets/routinePlan';
 import { emptyEdits, type RoutineEdits } from './routineDraft';
+import { BrowseActiveContext } from '../contexts/browseActive';
+import { sharedBrowseHandle } from '../components/browseHost';
+import { RoutinePlayer } from './RoutinePlayer';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -29,7 +32,7 @@ const { toast, decks, mixer, timeline, picker } = vi.hoisted(() => ({
   timeline: vi.fn(),
   picker: vi.fn(),
   decks: Object.fromEntries(['A', 'B', 'C', 'D'].map((id) => [
-    id, { engine: {}, loadedTrack: null, loadTrack: vi.fn() },
+    id, { engine: {}, loadedTrack: null as Track | null, loadTrack: vi.fn() },
   ])),
   mixer: { now: () => performance.now() / 1000 },
 }));
@@ -80,6 +83,7 @@ let client: QueryClient;
 
 beforeEach(() => {
   vi.clearAllMocks();
+  for (const deck of Object.values(decks)) deck.loadedTrack = null;
   notifyManager.setNotifyFunction((notify) => act(notify));
   const storage = new Map<string, string>();
   vi.stubGlobal('localStorage', {
@@ -146,6 +150,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  sharedBrowseHandle.current = null;
   act(() => root.unmount());
   client.clear();
   notifyManager.setNotifyFunction((notify) => notify());
@@ -156,6 +161,16 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
   vi.useRealTimers();
+});
+
+it('preserves deck identity and loaded metadata in picker shortcuts when earlier decks are empty', async () => {
+  const track = { id: 2, title: 'Track 2' } as Track;
+  decks.C.loadedTrack = track;
+  await act(async () => root.render(
+    <QueryClientProvider client={client}><RoutineEditorView /></QueryClientProvider>,
+  ));
+  expect(pickerProps().deckTracks).toEqual([{ deck: 'C', track }]);
+  expect(decks.C.loadTrack).not.toHaveBeenCalled();
 });
 
 it.each(['0', '1'])('keeps slot %s dragged material in place after pair autosave, undo and reopen', async (slotId) => {
@@ -239,9 +254,15 @@ it.each(['0', '1'])('keeps slot %s dragged material in place after pair autosave
   expect(props().editor.planned.slots[0].entryMixSec).toBe(0);
 });
 
-async function openReview(pinFollow: boolean) {
+async function openReview(pinFollow: boolean, browseActive = true) {
   act(() => root.render(
-    <QueryClientProvider client={client}><RoutineEditorView /></QueryClientProvider>,
+    <QueryClientProvider client={client}>
+      <BrowseActiveContext value={browseActive}><RoutineEditorView /></BrowseActiveContext>
+      {!browseActive && <div className="settings-page">
+        <input type="text" /><input type="number" /><input type="range" />
+        <input type="radio" /><input type="checkbox" /><select /><button>Settings</button>
+      </div>}
+    </QueryClientProvider>,
   ));
   await act(async () => requestMixEdit({
     open: { kind: 'transition', aTrackId: 1, bTrackId: 2, uuid: null, takeUuid: take.uuid },
@@ -259,6 +280,60 @@ async function openReview(pinFollow: boolean) {
   expect(timelineProps().trim).toBeNull();
   expect(timelineProps().onTrimChange).toBeNull();
 }
+
+it('keeps editor Space and undo with browse hidden, but leaves Settings native keys and text undo alone', async () => {
+  await openReview(false, false);
+  const navigate = vi.fn();
+  const selected = vi.fn(() => ({ id: 3 } as Track));
+  sharedBrowseHandle.current = { navigate, getSelectedTrack: selected,
+    navigatePage: vi.fn(), navigateEnd: vi.fn(), areaMove: vi.fn(), activate: vi.fn(),
+    selectAll: vi.fn(), focusSearch: vi.fn(), openFollowParams: vi.fn() };
+  const store = timelineProps().draftStore;
+  const undo = vi.spyOn(store, 'undo');
+  const redo = vi.spyOn(store, 'redo');
+  vi.spyOn(RoutinePlayer.prototype, 'isPlaying').mockReturnValue(true);
+  const pause = vi.spyOn(RoutinePlayer.prototype, 'pause').mockImplementation(() => {});
+  const press = (key: string, target: EventTarget = document.body, init: KeyboardEventInit = {}) => {
+    const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...init });
+    act(() => { target.dispatchEvent(event); });
+    return event;
+  };
+  for (const key of ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Enter']) {
+    expect(press(key).defaultPrevented).toBe(false);
+  }
+  expect(navigate).not.toHaveBeenCalled();
+  expect(selected).not.toHaveBeenCalled();
+  for (const target of host.querySelectorAll('.settings-page input, .settings-page select, .settings-page button')) {
+    for (const key of [' ', 'Enter', 'ArrowUp', 'ArrowLeft', 'Home', 'End']) {
+      expect(press(key, target).defaultPrevented).toBe(false);
+    }
+    expect(press('z', target, { ctrlKey: true }).defaultPrevented).toBe(false);
+    expect(press('Z', target, { metaKey: true, shiftKey: true }).defaultPrevented).toBe(false);
+  }
+  expect(undo).not.toHaveBeenCalled();
+  expect(redo).not.toHaveBeenCalled();
+  expect(pause).not.toHaveBeenCalled();
+  expect(press(' ').defaultPrevented).toBe(true);
+  expect(pause).toHaveBeenCalledOnce();
+  expect(press('z', document.body, { ctrlKey: true }).defaultPrevented).toBe(true);
+  expect(press('Z', document.body, { metaKey: true, shiftKey: true }).defaultPrevented).toBe(true);
+  expect(undo).toHaveBeenCalledOnce();
+  expect(redo).toHaveBeenCalledOnce();
+});
+
+it('leaves Enter and Space on focused editor buttons to native activation', async () => {
+  await openReview(false);
+  vi.spyOn(RoutinePlayer.prototype, 'isPlaying').mockReturnValue(true);
+  const pause = vi.spyOn(RoutinePlayer.prototype, 'pause').mockImplementation(() => {});
+  const button = host.querySelector<HTMLButtonElement>('.re-promote')!;
+  button.focus();
+  for (const key of ['Enter', ' ']) {
+    const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true });
+    act(() => button.dispatchEvent(event));
+    expect(event.defaultPrevented).toBe(false);
+  }
+  expect(pause).not.toHaveBeenCalled();
+});
 
 it('auditions a pre-window outgoing jump only at its actual instant', async () => {
   await openReview(false);

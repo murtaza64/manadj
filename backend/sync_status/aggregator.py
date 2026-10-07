@@ -7,13 +7,12 @@ This seam is a read-only down payment on the ExternalLibrary seam
 (architecture review candidate 3).
 """
 
-from pathlib import Path
 from typing import Mapping, Protocol
 
 from sqlalchemy.orm import Session, joinedload
 
 from backend import models
-from backend.sync_common.matching import TrackIndex
+from backend.sync_common.matching import TrackIndex, path_key
 
 from .compare import (
     CUE_TIME_TOLERANCE,
@@ -296,7 +295,9 @@ def _orphan_rows(
             if id(ref) in matched_ref_ids:
                 continue
             path = ref.path or ""
-            existing = by_path.get(path) or by_filename.get(Path(path).name)
+            key = path_key(path)
+            name = key.rsplit("/", 1)[-1]
+            existing = by_path.get(key) or by_filename.get(name)
             if existing is not None:
                 existing.presence[sid] = True
                 continue
@@ -316,7 +317,7 @@ def _orphan_rows(
                 unprocessed=False,
             )
             orphans.append(row)
-            by_path[path] = row
-            by_filename[Path(path).name] = row
+            by_path[key] = row
+            by_filename[name] = row
 
     return orphans

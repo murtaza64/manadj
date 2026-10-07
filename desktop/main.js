@@ -1,12 +1,19 @@
-// manadj Desktop shell — attach-only Electron window.
+// manadj Desktop shell.
 //
-// Attaches to an already-running manadj (`make dev`); owns no processes or
-// state. See README.md and .scratch/desktop-shell/issues/01-electron-attach-shell.md.
+// Two modes (packaged-app #279, ADR 0043):
+// - attach (dev, default): attaches to an already-running manadj
+//   (`make dev`); owns no processes or state.
+// - managed (packaged, or --managed): spawns and supervises the backend
+//   (which serves the built frontend), waits for health, stops it on quit.
+//
+// See README.md and .scratch/desktop-shell/issues/01-electron-attach-shell.md.
 
-const { app, BrowserWindow, dialog, ipcMain, net, screen, session } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain, Menu, net, screen, session } = require("electron");
 const { execFile } = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
+const backend = require("./backend");
+const { ICON, menuTemplate, windowChromeOptions } = require("./chrome");
 const { registerRecordingIpc } = require("./recording");
 const { registerFeedbackCapture } = require("./feedback");
 
@@ -17,9 +24,12 @@ process.env.ELECTRON_DISABLE_SECURITY_WARNINGS = "true";
 
 const DEFAULT_URL = "http://localhost:5173";
 const RETRY_INTERVAL_MS = 2000;
-const STATE_FILE = path.join(__dirname, "window-state.json");
+// Packaged: never write inside the (signed, possibly read-only) bundle —
+// window state lives in userData. Dev keeps the gitignored repo file.
+const STATE_FILE = app.isPackaged
+  ? path.join(app.getPath("userData"), "window-state.json")
+  : path.join(__dirname, "window-state.json");
 const APP_NAME = "manaDJ";
-const DOCK_ICON = path.join(__dirname, "..", "logo.png");
 
 // Rename what CAN be renamed at runtime (desktop-shell 06). The macOS
 // dock/menu-bar NAME comes from the bundle's Info.plist, which
@@ -81,14 +91,20 @@ function saveBounds(win) {
   }
 }
 
-// --- splash page (shown until the dev server answers) -------------------------
+// --- splash page (shown until the server answers) ------------------------------
 //
 // Loading screen: wordmark over a generic ring throbber. The status line
-// starts as a bare "loading" and only reveals the `make dev` hint once a
-// probe has actually failed (main process toggles body.down via
-// executeJavaScript) — the common case is a sub-second splash.
+// starts as a bare "loading" and only reveals the slow-path hint once a
+// probe has actually failed / startup drags on (main process toggles
+// body.down via executeJavaScript) — the common case is a sub-second splash.
+// Attach mode hints at `make dev`; managed mode explains the slow first
+// backend start instead (no Terminal advice for packaged users).
 
 function splashPageDataUrl(target) {
+  const hint = target
+    ? `<p>not running at <code>${target}</code></p>
+      <p>start it with <code>make dev</code> — retrying every ${RETRY_INTERVAL_MS / 1000}s</p>`
+    : `<p>still starting the backend — the first launch can take a little while</p>`;
   const html = `<!doctype html>
 <html><head><meta charset="utf-8"><title>manaDJ</title><style>
   body { background: #111; color: #ddd; font: 14px/1.6 -apple-system, sans-serif;
@@ -111,12 +127,48 @@ function splashPageDataUrl(target) {
   <div class="throbber"></div>
   <div class="status">
     <p class="loading">loading…</p>
-    <div class="hint">
-      <p>not running at <code>${target}</code></p>
-      <p>start it with <code>make dev</code> — retrying every ${RETRY_INTERVAL_MS / 1000}s</p>
-    </div>
+    <div class="hint">${hint}</div>
   </div>
 </div></body></html>`;
+  return "data:text/html;charset=utf-8," + encodeURIComponent(html);
+}
+
+// --- backend error page (managed mode, #279) ------------------------------------
+//
+// Startup failures must be visible in the window, not an endless splash
+// (PRD packaged-app, user story 6). Shows the failure plus a log tail.
+
+function escapeHtml(text) {
+  return String(text).replace(
+    /[&<>"']/g,
+    (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c],
+  );
+}
+
+function errorPageDataUrl(message, logTail, logFile) {
+  const tail = logTail.length
+    ? `<pre>${escapeHtml(logTail.join("\n"))}</pre>`
+    : "<p class='dim'>no backend output was captured</p>";
+  const html = `<!doctype html>
+<html><head><meta charset="utf-8"><title>manaDJ</title><style>
+  body { background: #111; color: #ddd; font: 14px/1.6 -apple-system, sans-serif;
+         margin: 0; padding: 48px 40px 32px; box-sizing: border-box; height: 100vh;
+         display: flex; flex-direction: column; }
+  h1 { font-size: 20px; font-weight: 700; margin: 0 0 6px; color: #ff6b6b;
+       -webkit-app-region: drag; /* no titlebar — the heading drags the window */ }
+  .message { color: #eee; margin: 0 0 14px; }
+  .dim { color: #888; }
+  pre { background: #000; border: 1px solid #333; border-radius: 6px; padding: 12px;
+        font: 11px/1.5 ui-monospace, monospace; overflow: auto; flex: 1;
+        user-select: text; white-space: pre-wrap; }
+  .logpath { color: #888; font-size: 12px; margin-top: 10px; }
+  code { color: #4fc3f7; user-select: text; }
+</style></head><body>
+  <h1>manaDJ couldn't start</h1>
+  <p class="message">${escapeHtml(message)}</p>
+  ${tail}
+  ${logFile ? `<p class="logpath">full log: <code>${escapeHtml(logFile)}</code></p>` : ""}
+</body></html>`;
   return "data:text/html;charset=utf-8," + encodeURIComponent(html);
 }
 
@@ -228,6 +280,9 @@ const CHANNEL_LABEL_ASSERTS = [{ name: "DDJ-GRV6", labels: "1,2,5,6" }];
 
 function assertChannelLabels() {
   if (process.platform !== "darwin") return;
+  // Dev-machine assumption (packaged-app #278): compiling the helper needs a
+  // Swift toolchain on PATH — never expected on an end user's Mac.
+  if (app.isPackaged) return;
   const helper = path.join(__dirname, "assert-channel-labels.swift");
   for (const { name, labels } of CHANNEL_LABEL_ASSERTS) {
     execFile("swift", [helper, name, labels], (err, stdout, stderr) => {
@@ -241,6 +296,10 @@ function assertChannelLabels() {
 
 // --- main ---------------------------------------------------------------------
 
+// Managed mode: packaged builds always own the backend; --managed opts a
+// dev checkout in (for testing the packaged flow without a DMG).
+const MANAGED = app.isPackaged || process.argv.includes("--managed");
+
 const TARGET = targetUrl(process.argv);
 
 function probe(url) {
@@ -250,6 +309,10 @@ function probe(url) {
     req.on("error", () => resolve(false));
     req.end();
   });
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 // Splash-first attach: show the branded splash immediately (no blank
@@ -272,6 +335,94 @@ async function attach(win) {
     setTimeout(tryAttach, RETRY_INTERVAL_MS);
   };
   tryAttach();
+}
+
+// --- managed backend (packaged mode, #279) --------------------------------------
+
+const STARTUP_TIMEOUT_MS = 180_000; // first launch cold-imports torch — be patient
+const SLOW_START_HINT_MS = 8_000;
+const HEALTH_POLL_MS = 500;
+
+let backendHandle = null;
+let backendHealthy = false;
+let quitting = false;
+
+function showBackendError(win, message) {
+  if (win.isDestroyed()) return;
+  const tail = backendHandle ? backendHandle.recentLines.slice(-40) : [];
+  logCrashSignal(`backend error: ${message}`);
+  win.loadURL(errorPageDataUrl(message, tail, backendHandle?.logFile)).catch(() => {});
+}
+
+// Splash-first managed start: spawn the backend on a free port, poll until
+// it answers, then load it. Any failure lands on the error page — never an
+// endless splash.
+async function managed(win) {
+  await win.loadURL(splashPageDataUrl(null)).catch(() => {});
+
+  const cfg = backend.resolveBackendConfig({
+    isPackaged: app.isPackaged,
+    resourcesPath: process.resourcesPath,
+    appDataPath: app.getPath("appData"),
+    repoRoot: path.join(__dirname, ".."),
+  });
+  // Packaged: logs live in the data root (PRD). Unpackaged --managed has no
+  // forced data root; fall back to the shell's own log dir.
+  const logFile = path.join(
+    cfg.dataRoot ?? app.getPath("logs"),
+    // shell-backend.log: the shell's capture of backend stdout/stderr
+    // (incl. startup crashes before logging is configured). The backend's
+    // own rotating log is <data root>/logs/backend.log (#277) — distinct
+    // file, no double-writer rotation.
+    ...(cfg.dataRoot ? ["logs", "shell-backend.log"] : ["shell-backend.log"]),
+  );
+
+  try {
+    backendHandle = await backend.startBackend(cfg, {
+      logFile,
+      onLine: (line) => process.stdout.write(`[backend] ${line}\n`),
+      onExit: (code) => {
+        if (quitting) return;
+        // Post-startup death: surface it instead of a dead white window.
+        if (backendHealthy) {
+          showBackendError(win, `the backend exited unexpectedly (code ${code ?? "?"})`);
+        }
+      },
+    });
+  } catch (err) {
+    showBackendError(win, `failed to start the backend: ${err.message}`);
+    return;
+  }
+  process.stdout.write(`[app] backend: ${backendHandle.url} (log: ${logFile})\n`);
+  logRenderer(`[session] managed backend pid=${backendHandle.child.pid} url=${backendHandle.url}`);
+
+  const deadline = Date.now() + STARTUP_TIMEOUT_MS;
+  const slowHintAt = Date.now() + SLOW_START_HINT_MS;
+  while (Date.now() < deadline) {
+    if (win.isDestroyed() || quitting) return;
+    if (backendHandle.exited) {
+      const why = backendHandle.spawnError
+        ? `could not run the backend: ${backendHandle.spawnError.message}`
+        : `the backend exited during startup (code ${backendHandle.exitCode ?? "?"})`;
+      showBackendError(win, why);
+      return;
+    }
+    if (await probe(backendHandle.url)) {
+      backendHealthy = true;
+      win.loadURL(backendHandle.url).catch(() => {
+        if (!win.isDestroyed()) showBackendError(win, "the backend answered but the app failed to load");
+      });
+      return;
+    }
+    if (Date.now() > slowHintAt) {
+      win.webContents.executeJavaScript("document.body.classList.add('down')").catch(() => {});
+    }
+    await sleep(HEALTH_POLL_MS);
+  }
+  showBackendError(
+    win,
+    `the backend did not become ready within ${STARTUP_TIMEOUT_MS / 1000}s`,
+  );
 }
 
 // The visualizer child window, when open (realtime-visualization 02/03):
@@ -334,15 +485,29 @@ function registerVisualizerIpc() {
   });
 }
 
+// Settings → Library folder pickers (packaged-app #277): the web app cannot
+// open a native directory dialog, so the shell brokers one over IPC.
+function registerSettingsIpc() {
+  ipcMain.handle("settings:pick-folder", async (event, options) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    const result = await dialog.showOpenDialog(win, {
+      title: options?.title || "Choose a folder",
+      defaultPath: options?.defaultPath || undefined,
+      properties: ["openDirectory", "createDirectory"],
+    });
+    if (result.canceled || result.filePaths.length === 0) return null;
+    return result.filePaths[0];
+  });
+}
+
 function createWindow() {
   const win = new BrowserWindow({
     ...loadBounds(),
     title: "manaDJ",
     // No native title bar: the app's TopBar is the titlebar (drag region +
-    // double-click-to-zoom via CSS in frontend TopBar.css). Traffic lights
-    // stay, vertically centered in the 40px bar.
-    titleBarStyle: "hidden",
-    trafficLightPosition: { x: 16, y: 13 },
+    // double-click-to-zoom via CSS in frontend TopBar.css). macOS traffic
+    // lights / Windows+Linux caption buttons sit in the 40px bar (chrome.js).
+    ...windowChromeOptions(),
     // Dark paint during navigation (splash → app) — never a white flash.
     backgroundColor: "#111111",
     webPreferences: {
@@ -364,6 +529,8 @@ function createWindow() {
     overrideBrowserWindowOptions: {
       title: details.frameName === "manadj-arena" ? "manaDJ arena" : "manaDJ visualizer",
       backgroundColor: "#000000",
+      // Windows/Linux: native frame here, so carry the icon; hide the shell menu.
+      ...(process.platform === "darwin" ? {} : { icon: ICON, autoHideMenuBar: true }),
       // An explicit webPreferences override REPLACES the opener's inherited
       // webPreferences rather than merging — so preload must be re-stated
       // here or the child window has no manadjVisualizer bridge (its ⛶ then
@@ -400,7 +567,11 @@ function createWindow() {
   win.on("close", () => saveBounds(win));
   // Console forwarding is wired app-wide in instrumentCrashSignals via
   // web-contents-created (covers this window plus visualizer/arena children).
-  attach(win);
+  if (MANAGED) {
+    managed(win);
+  } else {
+    attach(win);
+  }
 }
 
 // Forward the renderer's console to stdout with a "[browser] " prefix.
@@ -429,7 +600,7 @@ function forwardConsole(webContents) {
 
 const rendererLogFile = openRendererLog();
 logRenderer(
-  `[session] shell start pid=${process.pid} target=${TARGET} ` +
+  `[session] shell start pid=${process.pid} target=${MANAGED ? "(managed backend)" : TARGET} ` +
     `electron=${process.versions.electron} chrome=${process.versions.chrome}`,
 );
 if (rendererLogFile) process.stdout.write(`[app] renderer log: ${rendererLogFile}\n`);
@@ -453,7 +624,7 @@ app.whenReady().then(() => {
   // Dock icon is runtime-settable even on a raw Electron.app (unlike the
   // name). Best-effort: a missing logo must never block the shell.
   try {
-    app.dock?.setIcon(DOCK_ICON);
+    app.dock?.setIcon(ICON);
   } catch {
     // logo.png missing/unreadable — keep the default icon
   }
@@ -461,12 +632,31 @@ app.whenReady().then(() => {
   const disposeRecordingIpc = registerRecordingIpc({ app, dialog, ipcMain });
   app.once("before-quit", disposeRecordingIpc);
   registerVisualizerIpc();
+  registerSettingsIpc();
+  const template = menuTemplate();
+  if (template) Menu.setApplicationMenu(Menu.buildFromTemplate(template));
   createWindow();
 });
 
 // Single-window app: closing the window quits, even on macOS.
 // No hidden-but-playing state.
 app.on("window-all-closed", () => app.quit());
+
+// Managed mode owns the backend's lifetime: stop it on the way out —
+// graceful shutdown hook, process-tree kill if it lingers (#314). The quit
+// is held until the backend is gone so it can't outlive the app (Windows:
+// TerminateProcess would otherwise be its only fate, and only via orphan
+// cleanup).
+let backendStopped = false;
+app.on("before-quit", (event) => {
+  quitting = true;
+  if (backendStopped || !backendHandle || backendHandle.exited) return;
+  event.preventDefault();
+  backend.stopBackend(backendHandle).finally(() => {
+    backendStopped = true;
+    app.quit();
+  });
+});
 
 // A clean-quit marker distinguishes "user closed the app" from "the log just
 // stops" (main-process death) when reading the file after an incident.

@@ -11,11 +11,13 @@ interface PlaylistFullExportModalProps {
   onClose: () => void;
 }
 
-function TargetPlan({ preview, loading }: {
+function TargetPlan({ preview, loading, error }: {
   preview: PlaylistExportTargetPreview | undefined;
   loading: boolean;
+  error: boolean;
 }) {
   if (loading) return <span className="target-plan">computing plan...</span>;
+  if (error) return <span className="target-plan plan-unavailable">preview failed to load</span>;
   if (!preview) return <span className="target-plan">plan unavailable</span>;
   if (!preview.available) {
     return <span className="target-plan plan-unavailable">unavailable: {preview.error}</span>;
@@ -99,7 +101,7 @@ export function PlaylistFullExportModal({ playlistName, onClose }: PlaylistFullE
             <span className="target-mark target-mark-rb" />
             <span className="target-info">
               Rekordbox
-              <TargetPlan preview={previewFor('rekordbox')} loading={preview.isPending} />
+              <TargetPlan preview={previewFor('rekordbox')} loading={preview.isPending} error={preview.isError} />
             </span>
           </label>
           <label>
@@ -112,7 +114,7 @@ export function PlaylistFullExportModal({ playlistName, onClose }: PlaylistFullE
             <span className="target-mark target-mark-engine" />
             <span className="target-info">
               Engine DJ
-              <TargetPlan preview={previewFor('engine')} loading={preview.isPending} />
+              <TargetPlan preview={previewFor('engine')} loading={preview.isPending} error={preview.isError} />
             </span>
           </label>
         </fieldset>

@@ -1,6 +1,7 @@
 """API routes for waveforms (Waveform data v2 blobs, ADR 0014)."""
 
 import hashlib
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
@@ -8,8 +9,52 @@ from sqlalchemy.orm import Session
 
 from .. import crud, models
 from ..database import get_db
+from ..tasks.models import Task
+from ..waveform_tasks import WAVEFORM_TASK_TYPE, enqueue_waveform_task
 
 router = APIRouter()
+
+
+@router.get("/{track_id}/preview")
+def get_waveform_preview(track_id: int, request: Request, db: Annotated[Session, Depends(get_db)]):
+    """Serve only the stored bounded MWF preview; queue missing data off-request."""
+    blob = (
+        db.query(models.Waveform.preview_blob)
+        .filter(models.Waveform.track_id == track_id)
+        .scalar()
+    )
+    if blob is None:
+        if db.query(models.Track.id).filter(models.Track.id == track_id).scalar() is None:
+            raise HTTPException(
+                status_code=404, detail="Track not found", headers={"Cache-Control": "no-store"},
+            )
+        latest_state = (
+            db.query(Task.state)
+            .filter(Task.type == WAVEFORM_TASK_TYPE, Task.ref == f"track:{track_id}")
+            .order_by(Task.id.desc())
+            .limit(1)
+            .scalar()
+        )
+        # Polling must not retry failures, even when dismissed from the Tasks UI.
+        if latest_state == "failed":
+            raise HTTPException(
+                status_code=409,
+                detail="Waveform generation failed; retry it in Tasks",
+                headers={"Cache-Control": "no-store"},
+            )
+        enqueue_waveform_task(db, track_id)
+        return Response(status_code=202, headers={"Cache-Control": "no-store", "Retry-After": "2"})
+
+    etag = f'"{hashlib.sha256(blob).hexdigest()}"'
+    headers = {
+        "ETag": etag,
+        "Cache-Control": "private, no-cache",
+        "Access-Control-Expose-Headers": "ETag",
+    }
+    validators = request.headers.get("if-none-match", "").split(",")
+    if any(value.strip().removeprefix("W/") in (etag, "*") for value in validators):
+        return Response(status_code=304, headers=headers)
+    return Response(content=blob, media_type="application/octet-stream", headers=headers)
 
 
 @router.get("/{track_id}/data")

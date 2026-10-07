@@ -40,7 +40,7 @@ export function invertControl(value: number, on: number): number {
 /** Paused rim travel in track seconds; independent of playing bend sensitivity. */
 export function mouseSeekDelta(dx: number, elapsedMs: number): number {
   const speed = Math.abs(dx) * 1000 / Math.max(1, elapsedMs);
-  const t = Math.max(0, Math.min(1, (speed - 80) / 920));
-  const gain = 0.0025 + 0.005 * t * t * (3 - 2 * t);
+  const t = Math.max(0, Math.min(1, (speed - 150) / 1850));
+  const gain = 0.00125 + 0.04875 * t * t * (3 - 2 * t);
   return dx * gain;
 }
