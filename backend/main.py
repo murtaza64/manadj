@@ -14,6 +14,7 @@ from .acquisition.router import router as acquisition_router
 from .tasks import models as task_models  # noqa: F401  (registers tables on Base)
 from .tasks.worker import TaskWorker
 from .soulseek import router as soulseek_router
+from .acquisition import connect_router as soundcloud_connect_router
 from .logging_config import setup_logging
 
 if TYPE_CHECKING:
@@ -90,6 +91,7 @@ app.include_router(visualizer_ga.router, prefix="/api/ga", tags=["visualizer-ga"
 app.include_router(settings.router, prefix="/api/settings", tags=["settings"])
 app.include_router(app_config.router, prefix="/api/config", tags=["app-config"])
 app.include_router(soulseek_router.router, prefix="/api/soulseek", tags=["soulseek"])
+app.include_router(soundcloud_connect_router.router, prefix="/api/soundcloud", tags=["soundcloud"])
 
 
 
@@ -156,20 +158,7 @@ def _build_task_worker() -> "TaskWorker | None":
         slskd = SlskdSupplier(config.soulseek.slskd_url, config.soulseek.api_key)
 
     if config.soundcloud.oauth_token and config.library.tracks_directory:
-        from .acquisition.download import download_handler
-        from .acquisition.searches import enqueue_soulseek_search
-        from .acquisition.source import SoundCloudSource
-        from .acquisition.supplier import SoundCloudSupplier
-
-        supplier = SoundCloudSupplier(SoundCloudSource(config.soundcloud.oauth_token))
-        handlers["download"] = download_handler(
-            supplier,
-            Path(config.library.tracks_directory),
-            config.acquisition.cleanup,
-            # a failed SoundCloud download queues an automatic soulseek
-            # search so alternatives are ready when the operator looks
-            on_failure=enqueue_soulseek_search if slskd is not None else None,
-        )
+        handlers.update(_download_handlers(config, soulseek_fallback=slskd is not None))
         # Pace downloads under SoundCloud's request budget (issue 08).
         delays["download"] = config.acquisition.download_delay_secs
     else:
@@ -187,6 +176,28 @@ def _build_task_worker() -> "TaskWorker | None":
     if not handlers:
         return None
     return TaskWorker(SessionLocal, handlers, delays=delays)
+
+
+def _download_handlers(config: "Config", soulseek_fallback: bool) -> dict[str, "Handler"]:
+    """The SoundCloud `download` handler over the configured token."""
+    from .acquisition.download import download_handler
+    from .acquisition.searches import enqueue_soulseek_search
+    from .acquisition.source import SoundCloudSource
+    from .acquisition.supplier import SoundCloudSupplier
+
+    assert config.soundcloud.oauth_token is not None
+    assert config.library.tracks_directory is not None
+    supplier = SoundCloudSupplier(SoundCloudSource(config.soundcloud.oauth_token))
+    return {
+        "download": download_handler(
+            supplier,
+            Path(config.library.tracks_directory),
+            config.acquisition.cleanup,
+            # a failed SoundCloud download queues an automatic soulseek
+            # search so alternatives are ready when the operator looks
+            on_failure=enqueue_soulseek_search if soulseek_fallback else None,  # type: ignore[arg-type]
+        )
+    }
 
 
 def _soulseek_handlers(config: "Config") -> dict[str, "Handler"]:
@@ -217,6 +228,22 @@ def _on_soulseek_configured() -> None:
 
 
 soulseek_router.on_configured = _on_soulseek_configured
+
+
+def _on_soundcloud_connected() -> None:
+    """The SoundCloud guide stored a token mid-session (#290): register the
+    download handler on the live worker without a backend restart."""
+    from .config import get_config
+
+    config = get_config()
+    if _task_worker is not None and config.soundcloud.oauth_token and config.library.tracks_directory:
+        _task_worker.add_handlers(
+            _download_handlers(config, soulseek_fallback=config.soulseek.configured),
+            delays={"download": config.acquisition.download_delay_secs},
+        )
+
+
+soundcloud_connect_router.on_connected = _on_soundcloud_connected
 
 _task_worker: "TaskWorker | None" = None
 

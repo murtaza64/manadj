@@ -4,7 +4,7 @@ import os
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from backend.acquisition.classification import ClassificationConfig
 from backend.acquisition.cleanup import CleanupConfig
@@ -39,6 +39,9 @@ class LibraryConfig:
 class SoundCloudConfig:
     """SoundCloud Source configuration."""
     oauth_token: str | None = None
+    # where the token came from: secrets = the data root's .env (what the
+    # SoundCloud guide writes, #290); env = process environment only
+    token_source: Literal["secrets", "env", "config"] | None = None
 
 
 @dataclass
@@ -184,10 +187,19 @@ def _soulseek_config(data: dict[str, Any]) -> SoulseekConfig:
     return external
 
 
-def _soundcloud_token(data: dict[str, Any]) -> str | None:
-    """Token from the environment (or .env); config.toml fallback for convenience."""
+def _soundcloud_config(data: dict[str, Any]) -> SoundCloudConfig:
+    """SOUNDCLOUD_OAUTH_TOKEN (environment or the data root's .env — where
+    the SoundCloud guide stores it, #290), then [soundcloud] oauth_token."""
     section: dict[str, Any] = data.get("soundcloud", {})
-    return os.environ.get("SOUNDCLOUD_OAUTH_TOKEN") or section.get("oauth_token") or None
+    token = os.environ.get("SOUNDCLOUD_OAUTH_TOKEN")
+    if token:
+        from backend.settings_file import read_secrets
+
+        in_dotenv = read_secrets().get("SOUNDCLOUD_OAUTH_TOKEN") == token
+        return SoundCloudConfig(token, "secrets" if in_dotenv else "env")
+    if section.get("oauth_token"):
+        return SoundCloudConfig(section["oauth_token"], "config")
+    return SoundCloudConfig()
 
 
 def _tracks_directory_override() -> str | None:
@@ -249,7 +261,7 @@ def load_config() -> Config:
         library=LibraryConfig(
             tracks_directory=tracks_dir
         ),
-        soundcloud=SoundCloudConfig(oauth_token=_soundcloud_token(data)),
+        soundcloud=_soundcloud_config(data),
         soulseek=_soulseek_config(data),
         acquisition=AcquisitionConfig(
             classification=_classification_config(data),

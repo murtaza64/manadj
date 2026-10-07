@@ -134,3 +134,20 @@ def _dotenv_value(value: str) -> str:
         raise ValueError("secret values must be single-line")
     # load_config strips surrounding quotes; quote anything with spaces/#.
     return f'"{value}"' if any(c in value for c in " #'\"=") else value
+
+
+def read_secrets() -> dict[str, str]:
+    """KEY=VALUE pairs in the data root's .env, parsed like load_config does."""
+    from backend.data_root import dotenv_path
+
+    path = dotenv_path()
+    if not path.exists():
+        return {}
+    out: dict[str, str] = {}
+    for line in path.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        out[key.strip()] = value.strip().strip("'\"")
+    return out

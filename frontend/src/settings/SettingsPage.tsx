@@ -29,6 +29,7 @@ const JogSettings = lazy(() => import('../midi/JogTuningPage'));
 const MouseJogSettings = lazy(() => import('./MouseJogSettings'));
 const LibrarySettings = lazy(() => import('./LibrarySettings'));
 const SoulseekSettings = lazy(() => import('../setup/soulseek/SoulseekSettings'));
+const SoundCloudSettings = lazy(() => import('../setup/soundcloud/SoundCloudSettings'));
 const SECTIONS = [
   { id: 'filters', title: 'Filters', detail: 'Sound and sweep response' },
   { id: 'effects', title: 'Beat FX', detail: 'Echo, Reverb and Flanger' },
@@ -37,6 +38,7 @@ const SECTIONS = [
   { id: 'mouse-jog', title: 'Mouse jog', detail: 'Keyboard and mouse response' },
   { id: 'library', title: 'Library', detail: 'Folders, DJ software, export' },
   { id: 'tour', title: 'Tour', detail: 'Coach marks and guidance' },
+  { id: 'soundcloud', title: 'SoundCloud', detail: 'Likes for Acquisition' },
   { id: 'soulseek', title: 'Soulseek', detail: 'Bundled slskd connection' },
 ] as const;
 type Section = (typeof SECTIONS)[number]['id'];
@@ -416,6 +418,8 @@ export default function SettingsPage({ performance = false }: { performance?: bo
               <TourSettingsPanel />
             ) : section === 'soulseek' ? (
               <SoulseekSettings />
+            ) : section === 'soundcloud' ? (
+              <SoundCloudSettings />
             ) : (
               <MouseJogSettings performance={performance} />
             )}
