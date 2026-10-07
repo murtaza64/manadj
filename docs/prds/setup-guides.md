@@ -51,8 +51,11 @@ order/widths, filters, waveform styles, keylock, quantize, soft takeover,
 crossfader, follow flags/params, perf deck count/sections, playlist filter,
 track list sort, visualizer preset/params/cycle/hud/quality, perf keyboard
 hints, plus non-path `config.toml` values (classification, cleanup, download
-delay). `scripts/settings/snapshot_defaults.py` re-snapshots on demand
+delay). Overrides (shipped regardless of the snapshot): perf deck count = 2
+(#301). `scripts/settings/snapshot_defaults.py` re-snapshots on demand
 (reads the real DB read-only; human-run).
+
+Fresh installs open in PERFORM (#301); EXPORT lives in the ⋯ menu.
 
 ## Testing Decisions
 

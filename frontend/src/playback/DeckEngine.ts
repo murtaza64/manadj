@@ -20,6 +20,7 @@
 import { initialTransportState, isAudioRunning, reduceTransport } from './transport';
 import type { TransportContext, TransportEvent, TransportState } from './transport';
 import { isQuantizeOn } from './quantizeStore';
+import { getCueMode } from './cueModeStore';
 import { addBeats, beatPhaseTarget, crossDeckLaunchTarget } from './quantize';
 import type { LaunchReference } from './quantize';
 import { foldLoopPlayhead, projectLoopBeats } from './loop';
@@ -1149,6 +1150,7 @@ export class DeckEngine {
       beatTimes: this.beatTimes,
       launchReference: this.launchReference(),
       playRate: this.currentRate(),
+      cueMode: getCueMode(),
     };
   }
 

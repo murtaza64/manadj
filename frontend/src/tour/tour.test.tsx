@@ -176,6 +176,24 @@ describe('TourOverlay sequencing', () => {
     expect(popoverTitle()).toBe('One');
   });
 
+  it('a backdrop click closes instead of silently advancing', () => {
+    addAnchor('t.one'); addAnchor('t.two');
+    let done = 0;
+    mount(<TourOverlay section={SECTION} auto onDone={() => done++} onSkipAll={() => {}} />);
+    act(() => document.querySelector('.tour-overlay')!.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+    expect(done).toBe(1);
+    expect(popoverTitle()).toBe('One');
+  });
+
+  it('keeps the popover inside the viewport for a full-height anchor', () => {
+    const anchor = addAnchor('t.one');
+    anchor.getBoundingClientRect = () => ({ top: 0, left: 0, width: 200, height: window.innerHeight, bottom: window.innerHeight, right: 200 }) as DOMRect;
+    mount(<TourOverlay section={SECTION} auto onDone={() => {}} onSkipAll={() => {}} />);
+    const panel = document.querySelector<HTMLElement>('.tour-popover')!;
+    expect(Number.parseFloat(panel.style.top)).toBeGreaterThanOrEqual(8);
+    expect(panel.style.transform).toBe('');
+  });
+
   it('is a keyboard overlay: role=dialog silences deck hotkeys', () => {
     addAnchor('t.one');
     mount(<TourOverlay section={SECTION} auto onDone={() => {}} onSkipAll={() => {}} />);
@@ -271,5 +289,14 @@ describe('step data', () => {
       expect(section.steps.length).toBeGreaterThanOrEqual(2);
       expect(section.steps.length).toBeLessThanOrEqual(6);
     }
+  });
+
+  it('Perform comes first and carries the Modes step; no copy points at EXPORT in the top bar (#301)', () => {
+    expect(TOUR_SECTIONS[0].id).toBe('performance');
+    expect(TOUR_SECTIONS[0].steps[0].anchor).toBe('topbar.modes');
+    const modes = TOUR_SECTIONS[0].steps[0].body;
+    expect(modes).toContain('\u22ef holds EXPORT');
+    const library = TOUR_SECTIONS.find((s) => s.id === 'library')!;
+    expect(library.steps.map((s) => s.anchor)).not.toContain('topbar.modes');
   });
 });

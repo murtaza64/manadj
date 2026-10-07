@@ -18,6 +18,11 @@ export class SyncGroup {
   private tempo: number | null = null;
   private ratios = new Map<ChannelId, number>();
   private listeners = new Set<() => void>();
+  private matchListeners = new Set<(deck: ChannelId) => void>();
+  subscribeMatch = (listener: (deck: ChannelId) => void): (() => void) => {
+    this.matchListeners.add(listener);
+    return () => { this.matchListeners.delete(listener); };
+  };
   private applying = false;
   private snapshot: SyncSnapshot = {
     tempo: null, decks: { A: 'off', B: 'off', C: 'off', D: 'off' },
@@ -134,6 +139,7 @@ export class SyncGroup {
     if (result.kind === 'match') {
       this.setPitch(deck, result.pitchPercent);
       this.snap(deck, reference.deck);
+      this.matchListeners.forEach(listener => listener(deck));
     }
     return result;
   }

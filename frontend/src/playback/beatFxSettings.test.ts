@@ -42,6 +42,15 @@ describe('Beat FX settings', () => {
     expect(Object.isFrozen(settings)).toBe(true);
   });
 
+  it('defaults the Flanger length unit to bars and rejects unknown units', () => {
+    expect(DEFAULT_BEAT_FX_SETTINGS.flangerLengthUnit).toBe('bars');
+    expect(sanitizeBeatFxSettings({ flangerLengthUnit: 'beats' }).flangerLengthUnit).toBe('beats');
+    expect(sanitizeBeatFxSettings({ flangerLengthUnit: 'ms' }).flangerLengthUnit).toBe('bars');
+    // Pre-#331 persisted blobs have no unit: they read as bars.
+    localStorage.setItem(BEAT_FX_SETTINGS_KEY, JSON.stringify({ echoFeedback: 0.6 }));
+    expect(loadBeatFxSettings().flangerLengthUnit).toBe('bars');
+  });
+
   it('persists through the settings seam', () => {
     saveBeatFxSettings({ ...DEFAULT_BEAT_FX_SETTINGS, echoFeedback: 0.7 });
     expect(JSON.parse(localStorage.getItem(BEAT_FX_SETTINGS_KEY)!)).toMatchObject({ echoFeedback: 0.7 });

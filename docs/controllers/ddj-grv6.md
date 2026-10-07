@@ -60,7 +60,7 @@ knob (sweep filter), crossfader.
 | SELECT | Echo / Reverb / Flanger; other detents select none (section off) |
 | CH SELECT 1–4 / SP / MST | Beat FX target Deck A–D / sampler (silent) / master |
 | ON/OFF | section on/off |
-| BEAT ◄ ► | echo beat fraction halve / double |
+| BEAT ◄ ► | Beat FX length halve / double (beats; Flanger reads bars by default) |
 | LEVEL/DEPTH | depth (original ⟷ effect) |
 
 ## Browse (ch 7)
