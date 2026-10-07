@@ -5,6 +5,7 @@ versions follow [Semantic Versioning](https://semver.org/). Install: [docs/insta
 
 ## [Unreleased]
 
+- Background tasks now run in parallel lanes — SoundCloud downloads, Soulseek transfers, and local compute (waveforms, analysis, stems) no longer block each other (#224).
 - Shortened feature and installation copy on the public site (#341).
 - Added prerelease downloads and an install/Setup guide at https://manadj.murt.dev.
 
