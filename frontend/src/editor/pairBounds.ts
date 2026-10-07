@@ -3,7 +3,7 @@ import { DEFAULT_DETECTOR_PARAMS } from '../capture/events';
 import { channelFaderToGain, trimToGain } from '../playback/mixerMath';
 import {
   aContentSegments, bContentSegments, defaultLanePoints, jumpRepeatCount,
-  lanePoints, laneValuesAt, LANE_IDS, type Transition,
+  lanePoints, laneValuesAt, LANE_IDS, scratchEndSec, type Transition,
 } from './mixModel';
 
 export interface PairBounds {
@@ -20,6 +20,7 @@ export function outgoingAutomationStart(tr: Transition): number {
     for (const p of tr.lanes[id] ?? []) start = Math.min(start, tr.startSec + p.x * tr.durationSec);
   }
   for (const j of tr.jumpsA ?? []) start = Math.min(start, tr.startSec + j.x * tr.durationSec);
+  for (const c of tr.scratchesA ?? []) start = Math.min(start, tr.startSec + c.x * tr.durationSec);
   return Math.max(0, start);
 }
 
@@ -100,6 +101,8 @@ export function pairBounds(tr: Transition, durations: { a: number; b: number }, 
   for (const [jumps, rate] of [[tr.jumpsA, 1], [tr.jumps, rateB]] as const)
     for (const j of jumps ?? []) authoringEnd = Math.max(authoringEnd,
       tr.startSec + j.x * tr.durationSec + (jumpRepeatCount(j) - 1) * Math.max(0, -j.deltaSec) / rate);
+  for (const c of [...tr.scratchesA ?? [], ...tr.scratches ?? []])
+    authoringEnd = Math.max(authoringEnd, scratchEndSec(tr, c));
   return { handover, outgoingEnd, authoringEnd };
 }
 
@@ -117,6 +120,11 @@ export function normalizePairWindow(tr: Transition, bounds: PairBounds, rateB = 
       end = Math.max(end, tr.startSec + j.x * tr.durationSec
         + (jumpRepeatCount(j) - 1) * Math.max(0, -j.deltaSec) / rate);
     }
+  // Scratch clips (#352) are retained whole: the frame contains them.
+  for (const c of [...tr.scratchesA ?? [], ...tr.scratches ?? []]) {
+    start = Math.min(start, tr.startSec + c.x * tr.durationSec);
+    end = Math.max(end, scratchEndSec(tr, c));
+  }
   start = Math.max(0, start);
   // A hidden fader keeps its stash, but evaluates the default on startSec.
   // Keep that origin rather than moving the default or overwriting the stash.
@@ -138,6 +146,8 @@ export function normalizePairWindow(tr: Transition, bounds: PairBounds, rateB = 
     lanes,
     jumpsA: tr.jumpsA?.map((j) => ({ ...j, x: x(j.x) })),
     jumps: tr.jumps?.map((j) => ({ ...j, x: x(j.x) })),
+    ...(tr.scratchesA ? { scratchesA: tr.scratchesA.map((c) => ({ ...c, x: x(c.x) })) } : {}),
+    ...(tr.scratches ? { scratches: tr.scratches.map((c) => ({ ...c, x: x(c.x) })) } : {}),
   };
 }
 

@@ -60,15 +60,23 @@ export function isScratchMoveSample(e: EventInput): boolean {
 }
 
 /** Extract a slot's scratch clips from the slot-addressed beat-domain
- * recording. A bracket still open at the recording's end closes on its
- * last frame. */
-export function slotScratchClips(events: EventInput[], slot: number): RecordedScratchClip[] {
+ * recording.
+ *
+ * A clip runs until the deck is RUNNING again: a gesture released onto a
+ * stopped deck keeps the clip open through the stopped stretch (cue and
+ * hot-cue snaps while stopped become position frames) until the next play
+ * or gesture — a scratch routine on a paused record is one clip, and the
+ * transport between its gestures belongs to it. A clip still open at the
+ * recording's end closes on its last frame. */
+export function slotScratchClips(events: EventInput[], slot: number | string): RecordedScratchClip[] {
   const mine = events
     .filter((e) => e.slot === slot && (e.kind === 'transport' || e.kind === 'load') && num(e.beat) !== null)
     .sort((a, b) => (a.beat as number) - (b.beat as number));
   const clips: RecordedScratchClip[] = [];
   let playing: boolean | null = null;
-  let open: RecordedScratchClip | null = null;
+  let open = null as RecordedScratchClip | null;
+  /** A gesture is in progress (between begin and end) inside `open`. */
+  let held = false;
   // Transport state before the first transport event: inferred from the
   // first play/pause that follows (a pause means it was rolling).
   const firstToggle = mine.find((e) => e.action === 'play' || e.action === 'pause' || e.action === 'cue');
@@ -81,18 +89,35 @@ export function slotScratchClips(events: EventInput[], slot: number): RecordedSc
     return { beat, position, filter, playing: playing ?? initialPlaying,
       ...(audioTime !== null ? { audioTime } : {}) };
   };
-  const close = (landing: RecordedScratchFrame | null): void => {
+  const filterOf = (e: EventInput, fallback: { drive: number; rate: number }) => {
+    const filter = e.filter as { drive?: unknown; rate?: unknown } | undefined;
+    const drive = num(filter?.drive);
+    const rate = num(filter?.rate);
+    return drive !== null && rate !== null ? { drive, rate } : fallback;
+  };
+  const push = (f: RecordedScratchFrame | null): void => {
+    if (f && open) {
+      open.frames.push(f);
+      open.endBeat = f.beat;
+    }
+  };
+  const close = (): void => {
     if (!open) return;
     const last = open.frames[open.frames.length - 1];
-    const end = landing ?? { ...last, filter: null };
-    open.frames.push(end);
-    open.endBeat = end.beat;
+    if (last.filter) push({ ...last, filter: null });
     clips.push(open);
     open = null;
+    held = false;
+  };
+  const begin = (f: RecordedScratchFrame | null): void => {
+    if (!f) return;
+    if (open) push(f);
+    else open = { startBeat: f.beat, endBeat: f.beat, frames: [f] };
+    held = true;
   };
   for (const e of mine) {
     if (e.kind === 'load') {
-      close(null);
+      close();
       playing = null;
       continue;
     }
@@ -100,26 +125,26 @@ export function slotScratchClips(events: EventInput[], slot: number): RecordedSc
     if (action === 'play') playing = true;
     else if (action === 'pause' || action === 'cue') playing = false;
     if (action === 'scratchBegin') {
-      close(null);
-      const f = frameOf(e, { drive: 0, rate: 0 });
-      if (f) open = { startBeat: f.beat, endBeat: f.beat, frames: [f] };
-    } else if (action === 'scratchMove' && open) {
-      const filter = e.filter as { drive?: unknown; rate?: unknown } | undefined;
-      const drive = num(filter?.drive);
-      const rate = num(filter?.rate);
-      const prev = open.frames[open.frames.length - 1].filter ?? { drive: 0, rate: 0 };
-      const f = frameOf(e, drive !== null && rate !== null ? { drive, rate } : prev);
-      if (f) open.frames.push(f);
-    } else if (action === 'scratchEnd' && open) {
-      close(frameOf(e, null));
+      begin(frameOf(e, { drive: 0, rate: 0 }));
+    } else if (action === 'scratchMove') {
+      // No begin yet: a slice opening inside a held gesture (its
+      // scratchBegin fell before the recording) — the first move opens.
+      if (!held) begin(frameOf(e, filterOf(e, { drive: 0, rate: 0 })));
+      else push(frameOf(e, filterOf(e, open!.frames[open!.frames.length - 1].filter ?? { drive: 0, rate: 0 })));
+    } else if (action === 'scratchEnd' && held) {
+      held = false;
+      push(frameOf(e, null));
+      if (playing ?? initialPlaying) close();
     } else if (open && (action === 'play' || action === 'pause' || action === 'cue')) {
-      // Transport flips under the hand (stop while holding the platter).
-      const prev = open.frames[open.frames.length - 1];
-      const f = frameOf(e, prev.filter);
-      if (f) open.frames.push(f);
+      // Transport flips under the hand, or the stopped record starts.
+      push(frameOf(e, held ? open.frames[open.frames.length - 1].filter : null));
+      if (!held && action === 'play') close();
+    } else if (open && !held) {
+      // Cue/hot-cue/seek snaps on the stopped record between gestures.
+      push(frameOf(e, null));
     }
   }
-  close(null);
+  close();
   return clips;
 }
 

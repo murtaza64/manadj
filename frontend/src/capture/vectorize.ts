@@ -39,6 +39,8 @@
 import { jumpRepeatCount, tempoMatchRatio } from '../editor/mixModel';
 import type { JumpEvent, LaneId, LanePoint, Lanes, Transition } from '../editor/mixModel';
 import { channelFaderToGain, crossfaderGains } from '../playback/mixerMath';
+import type { TransitionScratch } from '../editor/mixModel';
+import { slotScratchClips, type RecordedScratchClip } from '../sets/routineScratch';
 import type { CaptureChannel, CaptureEvent, InitDeckState } from './events';
 
 const OTHER: Record<CaptureChannel, CaptureChannel> = { A: 'B', B: 'A' };
@@ -96,17 +98,38 @@ export function vectorizeTake(
   input: VectorizeInput,
   facts: VectorizeFacts
 ): VectorizedDraft | null {
-  // Vinyl and Slip-loop returns aren't representable by this vectorizer.
-  // Refuse rather than silently retaining only the loop's backward wraps.
+  // Slip-loop returns aren't representable by this vectorizer. Refuse
+  // rather than silently retaining only the loop's backward wraps.
   if (input.events.some((e) =>
-    (e.kind === 'transport' && e.action.startsWith('scratch')) ||
     (e.kind === 'loop' && e.slip) ||
-    (e.kind === 'init' && Object.values(e.decks).some((d) => d.scratching || d.slipLoopActive))
+    (e.kind === 'init' && Object.values(e.decks).some((d) => d.slipLoopActive))
   )) return null;
   const init = input.events.find((e) => e.kind === 'init');
   if (!init || init.kind !== 'init') return null;
   const out = init.outgoingChannel;
   const inc = OTHER[out];
+  // SCRATCH CLIPS (#352): Vinyl gestures are kept whole, as recorded
+  // frames the audio thread replays; position math sees only each
+  // gesture's net landing. A gesture straddling a window edge (the
+  // classic exit backspin as the fader closes) widens the window to
+  // contain it; gestures wholly in the padding stay out (the anchors
+  // absorb their landing, like inessential jumps).
+  const scratchClips = {} as Record<CaptureChannel, RecordedScratchClip[]>;
+  for (const ch of [out, inc]) {
+    scratchClips[ch] = slotScratchClips(
+      input.events.flatMap((e) => (e.kind === 'transport' || e.kind === 'load')
+        ? [{ ...e, slot: e.channel, beat: e.t } as Record<string, unknown>] : []),
+      ch
+    ).filter((c) => c.endBeat > input.windowStartS && c.startBeat < input.windowEndS);
+  }
+  const allClips = [...scratchClips[out], ...scratchClips[inc]];
+  if (allClips.length > 0) {
+    input = {
+      ...input,
+      windowStartS: Math.min(input.windowStartS, ...allClips.map((c) => c.startBeat)),
+      windowEndS: Math.max(input.windowEndS, ...allClips.map((c) => c.endBeat)),
+    };
+  }
   const { windowEndS } = input;
 
   // LOST BASELINE REPAIR (sets 166): slices captured before the recorder
@@ -142,7 +165,7 @@ export function vectorizeTake(
     for (const e of input.events) {
       if (e.kind === 'tick' && e.playheads[ch] !== undefined) {
         samples.push({ t: e.t, pos: e.playheads[ch]! });
-      } else if ((e.kind === 'transport' || e.kind === 'loop') && e.channel === ch) {
+      } else if ((e.kind === 'transport' || e.kind === 'loop') && e.channel === ch && !isScratchMove(e)) {
         samples.push({ t: e.t, pos: e.playhead });
       }
     }
@@ -262,6 +285,8 @@ export function vectorizeTake(
       if (e.kind !== 'transport' || e.channel !== ch) continue;
       if (e.action !== 'jumpBeats' && e.action !== 'hotCue') continue;
       if (e.t < windowStartS || e.t > windowEndS) continue;
+      // Inside a scratch clip the gesture's own frames carry the snap.
+      if (scratchClips[ch].some((c) => e.t >= c.startBeat && e.t <= c.endBeat)) continue;
       const pre = playheadStrictlyBefore(input.events, ch, e.t, rateAt);
       if (pre === null) continue;
       const deltaSec = e.playhead - pre;
@@ -273,8 +298,20 @@ export function vectorizeTake(
   };
   const jumps = jumpsFor(inc);
   const jumpsA = jumpsFor(out);
-  // Repeats each apply their delta (the model expands them back).
-  const jumpTotal = jumps.reduce((sum, j) => sum + j.deltaSec * jumpRepeatCount(j), 0);
+  // Scratch clips in the mix domain: mix time ≡ the outgoing's track time,
+  // so a wall second is rateOut mix seconds. The incoming's uninterrupted
+  // mix-domain rate is the promoted one (matched) or native (unmatched —
+  // the editor plays an unmatched B at pitch 0).
+  const rateOut = rateAt(out, windowStartS);
+  const rateIncMix = tempoMatchRequiredRatio(facts) ?? 1;
+  const toMixScratch = (clip: RecordedScratchClip, roleRate: number): TransitionScratch =>
+    transitionScratch(clip, windowStartS, windowLen, rateOut, roleRate);
+  const scratchesA = scratchClips[out].map((c) => toMixScratch(c, 1));
+  const scratches = scratchClips[inc].map((c) => toMixScratch(c, rateIncMix));
+  // Repeats each apply their delta (the model expands them back); scratch
+  // landings are displacement too (applied at each gesture's end).
+  const jumpTotal = jumps.reduce((sum, j) => sum + j.deltaSec * jumpRepeatCount(j), 0)
+    + scratches.reduce((sum, c) => sum + c.deltaSec, 0);
 
   // ALIGNMENT AT THE COMMIT POINT (PRD): the incoming's position is read
   // at the window END — after every Nudge/pitch correction has done its
@@ -308,7 +345,50 @@ export function vectorizeTake(
       lanes: windowLen > 0 ? buildLanes(win, init, out) : {},
       ...(jumps.length > 0 ? { jumps } : {}),
       ...(jumpsA.length > 0 ? { jumpsA } : {}),
+      ...(scratches.length > 0 ? { scratches } : {}),
+      ...(scratchesA.length > 0 ? { scratchesA } : {}),
     },
+  };
+}
+
+function isScratchMove(e: CaptureEvent): boolean {
+  return e.kind === 'transport' && e.action === 'scratchMove';
+}
+
+/** The matched incoming's mix-domain rate (bpmA/bpmB folded), or null. */
+function tempoMatchRequiredRatio(facts: VectorizeFacts): number | null {
+  return tempoMatchRatio(facts.bpmA, facts.bpmB);
+}
+
+const round5 = (v: number) => Math.round(v * 1e5) / 1e5;
+
+/** A recorded gesture (wall-clock capture seconds) as a Transition scratch
+ * clip (mix domain, start-relative). `roleRate` is the deck's
+ * uninterrupted mix-domain rate, so `deltaSec` is the landing measured
+ * against where plain play would have put it — the Jump convention. */
+function transitionScratch(
+  clip: RecordedScratchClip,
+  windowStartS: number,
+  windowLen: number,
+  rateOut: number,
+  roleRate: number
+): TransitionScratch {
+  const t0 = clip.startBeat;
+  const p0 = clip.frames[0].position;
+  const durationSec = (clip.endBeat - t0) * rateOut;
+  const landing = clip.frames[clip.frames.length - 1].position;
+  return {
+    x: windowLen > 0 ? (t0 - windowStartS) / windowLen : 0,
+    durationSec: round5(durationSec),
+    deltaSec: round5(landing - (p0 + durationSec * roleRate)),
+    frames: clip.frames.map((f) => [
+      round5((f.beat - t0) * rateOut),
+      round5(f.position - p0),
+      round5((f.filter?.drive ?? 0) / rateOut),
+      round5((f.filter?.rate ?? 0) / rateOut),
+      f.playing ? 1 : 0,
+      f.filter ? 1 : 0,
+    ]),
   };
 }
 
@@ -482,7 +562,7 @@ function playheadStrictlyBefore(
   for (const e of events) {
     if (e.t >= t) continue;
     if (e.kind === 'tick' && e.playheads[ch] !== undefined) ref = { t: e.t, pos: e.playheads[ch]! };
-    else if ((e.kind === 'transport' || e.kind === 'loop') && e.channel === ch) ref = { t: e.t, pos: e.playhead };
+    else if ((e.kind === 'transport' || e.kind === 'loop') && e.channel === ch && !isScratchMove(e)) ref = { t: e.t, pos: e.playhead };
   }
   return ref === null ? null : ref.pos + (t - ref.t) * rateAt(ch, ref.t);
 }

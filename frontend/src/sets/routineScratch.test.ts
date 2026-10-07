@@ -37,9 +37,15 @@ describe('slotScratchClips', () => {
     expect(slotScratchClips(gesture(), 0)).toEqual([]);
   });
 
-  it('a scratch from a paused deck releases paused', () => {
-    const clips = slotScratchClips([...gesture(), tr(30, 1, 'play', 1.8)], 1);
-    expect(clips[0].frames.every((f) => !f.playing)).toBe(true);
+  it('on a stopped record the clip holds until the deck runs, cue snaps included', () => {
+    const clips = slotScratchClips([...gesture(), tr(24, 1, 'hotCue', 1.5), ...gesture().map((e) =>
+      ({ ...e, beat: (e.beat as number) + 6 })), tr(30, 1, 'play', 1.8)], 1);
+    expect(clips).toHaveLength(1);
+    const [c] = clips;
+    expect(c).toMatchObject({ startBeat: 20, endBeat: 30 });
+    expect(c.frames.slice(0, -1).every((f) => !f.playing)).toBe(true);
+    expect(c.frames.find((f) => f.beat === 24)).toMatchObject({ position: 1.5, filter: null });
+    expect(c.frames.at(-1)).toMatchObject({ beat: 30, position: 1.8, filter: null, playing: true });
   });
 });
 

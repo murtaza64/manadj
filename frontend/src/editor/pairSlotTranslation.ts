@@ -10,9 +10,11 @@ import {
   LANE_IDS,
   defaultLanePoints,
   jumpRepeatCount,
+  scratchEndSec,
   tempoMatchPitch,
   type LaneId,
   type Transition,
+  type TransitionScratch,
 } from './mixModel';
 import { laneKey, type AuthoredJump, type RoutineEdits } from '../routines/routineDraft';
 import type { RoutineDetailWire } from '../api/client';
@@ -179,10 +181,52 @@ function syntheticEvents(
   rateB: number
 ): Record<string, unknown>[] {
   const aStart = aEntryPosition(tr);
-  const aEnd = aStart + 1 * durationBeats * secPerBeat;
   const bStart = tr.bInSec;
-  const bEnd = bStart + rateB * durationBeats * secPerBeat;
+  const endMix = tr.startSec + durationBeats * secPerBeat;
+  // Scratch clips (#352) ride the synthetic recording as gesture events;
+  // their landings displace everything after them (jumps, by contrast,
+  // apply later as authored edits).
+  const scratchEvents: Record<string, unknown>[] = [];
+  const landed = (slot: number, origin: number, rate: number, clips: TransitionScratch[] | undefined): number => {
+    let shift = 0;
+    for (const c of [...clips ?? []].sort((p, q) => p.x - q.x)) {
+      const startMix = tr.startSec + c.x * tr.durationSec;
+      const base = origin + (startMix - tr.startSec) * rate + shift;
+      let playing = true;
+      let held = false;
+      c.frames.forEach(([dt, dPos, drive, platterRate, run, hand]) => {
+        const mix = startMix + dt;
+        const at = { kind: 'transport', slot, beat: (mix - tr.startSec) / secPerBeat, playhead: base + dPos, audioTime: mix };
+        const flip = (run === 1) !== playing;
+        const emitFlip = () => {
+          if (!flip) return;
+          playing = run === 1;
+          scratchEvents.push({ ...at, action: playing ? 'play' : 'pause' });
+        };
+        if (hand === 1) {
+          if (!held) scratchEvents.push({ ...at, action: 'scratchBegin' });
+          scratchEvents.push({ ...at, action: 'scratchMove', filter: { drive, rate: platterRate } });
+          held = true;
+          emitFlip();
+        } else if (held) {
+          // Release: a flip into play lands first, so the release closes.
+          emitFlip();
+          scratchEvents.push({ ...at, action: 'scratchEnd' });
+          held = false;
+        } else if (flip) {
+          emitFlip();
+        } else {
+          scratchEvents.push({ ...at, action: 'seek' });
+        }
+      });
+      if (scratchEndSec(tr, c) <= endMix) shift += c.deltaSec;
+    }
+    return shift;
+  };
+  const aEnd = aStart + 1 * durationBeats * secPerBeat + landed(0, aStart, 1, tr.scratchesA);
+  const bEnd = bStart + rateB * durationBeats * secPerBeat + landed(1, bStart, rateB, tr.scratches);
   const events: Record<string, unknown>[] = [
+    ...scratchEvents,
     {
       kind: 'tick',
       beat: 0,

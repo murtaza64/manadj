@@ -85,15 +85,6 @@ describe('anchors', () => {
     input.events[0] = init('A', 100, { decks: { A: deck({ slipLoopActive: true }), B: deck({ trackId: 2 }) } });
     expect(vectorizeTake(input, facts)).toBeNull();
   });
-  it('refuses scratch events and a slice opening inside a held scratch', () => {
-    expect(vectorizeTake(baseInput(), facts)).not.toBeNull();
-    expect(vectorizeTake(baseInput([
-      { t: 105, kind: 'transport', channel: 'A', action: 'scratchMove', playhead: 65, deltaSeconds: -2, durationSeconds: 1 },
-    ]), facts)).toBeNull();
-    const input = baseInput();
-    input.events[0] = init('A', 100, { decks: { A: deck({ scratching: true }), B: deck({ trackId: 2 }) } });
-    expect(vectorizeTake(input, facts)).toBeNull();
-  });
   it('derives startSec/bInSec from playhead samples at the window start', () => {
     const draft = vectorizeTake(baseInput(), facts)!;
     expect(draft.outgoingChannel).toBe('A');
@@ -909,5 +900,52 @@ describe('window widening for essential pre-window outgoing jumps (issue 177)', 
     expect(tr.durationSec).toBeCloseTo(20);
     expect(tr.jumps).toBeUndefined();
     expect(tr.jumpsA).toBeUndefined();
+  });
+});
+
+describe('scratch clips (#352)', () => {
+  /** B scratches at 110–110.5: drags back 0.3 s, lands 0.4 s behind its
+   * uninterrupted path (8 + 10.5 = 18.5 → lands 18.1). */
+  const gesture = (ch: CaptureChannel, t0: number, p0: number): CaptureEvent[] => [
+    { t: t0, kind: 'transport', channel: ch, action: 'scratchBegin', playhead: p0 },
+    { t: t0 + 0.2, kind: 'transport', channel: ch, action: 'scratchMove', playhead: p0 - 0.3, filter: { drive: -6, rate: -1 } },
+    { t: t0 + 0.5, kind: 'transport', channel: ch, action: 'scratchEnd', playhead: p0 - 0.4 + 0.5 },
+  ];
+
+  it('keeps a mid-window gesture as a clip; the anchors fold its landing', () => {
+    const tr = vectorizeTake(baseInput([...gesture('B', 110, 18), tick(115, { A: 75, B: 22.6 })]), facts)!.transition;
+    expect(tr.scratches).toHaveLength(1);
+    const c = tr.scratches![0];
+    expect(c.x).toBeCloseTo(0.5);
+    expect(c.durationSec).toBeCloseTo(0.5);
+    expect(c.deltaSec).toBeCloseTo(-0.4);
+    expect(c.frames).toEqual([[0, 0, 0, 0, 1, 1], [0.2, -0.3, -6, -1, 1, 1], [0.5, 0.1, 0, 0, 1, 0]]);
+    // B's alignment is the PRE-gesture one: 8 at the window start.
+    expect(tr.bInSec).toBeCloseTo(8, 1);
+    expect(tr.scratchesA).toBeUndefined();
+  });
+
+  it('an exit backspin straddling the window end widens the window to contain it', () => {
+    const tr = vectorizeTake(baseInput([...gesture('A', 119.8, 79.8)]), facts)!.transition;
+    expect(tr.scratchesA).toHaveLength(1);
+    expect(tr.durationSec).toBeCloseTo(20.3);
+    expect(tr.scratchesA![0].x * tr.durationSec + tr.scratchesA![0].durationSec).toBeCloseTo(20.3);
+  });
+
+  it('a slice opening inside a held gesture opens the clip at its first move', () => {
+    const input = baseInput([
+      { t: 100.1, kind: 'transport', channel: 'A', action: 'scratchMove', playhead: 60, filter: { drive: 3, rate: 1 } },
+      { t: 100.4, kind: 'transport', channel: 'A', action: 'scratchEnd', playhead: 60.2 },
+    ]);
+    input.events[0] = init('A', 100, { decks: { A: deck({ scratching: true }), B: deck({ trackId: 2 }) } });
+    const tr = vectorizeTake(input, facts)!.transition;
+    expect(tr.scratchesA).toHaveLength(1);
+    expect(tr.scratchesA![0].frames[0]).toEqual([0, 0, 3, 1, 1, 1]);
+  });
+
+  it('gestures wholly in the padding stay out', () => {
+    const tr = vectorizeTake(baseInput([...gesture('B', 98.5, 6.5)]), facts)!.transition;
+    expect(tr.scratches).toBeUndefined();
+    expect(tr.durationSec).toBeCloseTo(20);
   });
 });

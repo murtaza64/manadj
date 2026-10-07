@@ -66,6 +66,33 @@ export interface JumpEvent {
   count?: number;
 }
 
+/** A recorded Vinyl gesture on one deck (#352): replayed whole by the
+ * deck's audio thread (DeckEngine.scheduleScratch), never edited as
+ * lanes. Position math sees only its net landing — a Jump of `deltaSec`
+ * at the gesture's END (start + durationSec) — and players stand off the
+ * deck while it runs. Frame positions are relative to wherever the
+ * arrangement puts the deck at the gesture's start, so slides and
+ * earlier jumps carry the gesture with its material. */
+export interface TransitionScratch {
+  /** Gesture start, 0..1 within the window (like JumpEvent.x). */
+  x: number;
+  /** Gesture length in mix seconds. */
+  durationSec: number;
+  /** Landing vs. uninterrupted play over the gesture, in the deck's OWN
+   * seconds (the Jump convention: + forward, − back). */
+  deltaSec: number;
+  /** [mix s from start, track s from the start position, platter drive,
+   * platter rate, transport running 0|1, under the hand 0|1]. A released
+   * frame (hand 0) snaps the position (cue presses on a stopped record);
+   * the last frame is the final release. */
+  frames: [number, number, number, number, number, number][];
+}
+
+/** A scratch's release instant on the mix axis. */
+export function scratchEndSec(tr: Pick<Transition, 'startSec' | 'durationSec'>, c: TransitionScratch): number {
+  return tr.startSec + c.x * tr.durationSec + c.durationSec;
+}
+
 /** Effective repeat count — the model boundary's backward-only validation:
  * a count on a forward (or zero) jump reads as 1. */
 export function jumpRepeatCount(j: JumpEvent): number {
@@ -95,6 +122,9 @@ export interface Transition {
    * A runs the full window width even when jumps repeat material (window
    * mix-duration ≠ outgoing-audio-span is the accepted asymmetry). */
   jumpsA?: JumpEvent[];
+  /** Recorded scratch gestures on the incoming / outgoing deck (#352). */
+  scratches?: TransitionScratch[];
+  scratchesA?: TransitionScratch[];
   /** Lanes removed from the editor (any lane is removable, defaults too).
    * Hidden lanes keep their drawn envelope in `lanes` — re-adding restores
    * it — but read as their DEFAULT value during playback (an invisible
@@ -252,7 +282,8 @@ export function jumpInstantSec(
 function expandJumpList(
   tr: Pick<Transition, 'startSec' | 'durationSec'>,
   jumps: JumpEvent[] | undefined,
-  rate: number
+  rate: number,
+  scratches?: TransitionScratch[]
 ): { tj: number; deltaSec: number }[] {
   const out: { tj: number; deltaSec: number }[] = [];
   for (const j of jumps ?? []) {
@@ -261,14 +292,16 @@ function expandJumpList(
     const period = rate > 0 ? -j.deltaSec / rate : 0;
     for (let i = 0; i < count; i++) out.push({ tj: tj + i * period, deltaSec: j.deltaSec });
   }
+  // Scratch landings (#352): the gesture's net displacement at release.
+  for (const c of scratches ?? []) out.push({ tj: scratchEndSec(tr, c), deltaSec: c.deltaSec });
   return out.sort((a, b) => a.tj - b.tj);
 }
 
 function expandedJumps(
-  tr: Pick<Transition, 'startSec' | 'durationSec' | 'jumps'>,
+  tr: Pick<Transition, 'startSec' | 'durationSec' | 'jumps' | 'scratches'>,
   rateB: number
 ): { tj: number; deltaSec: number }[] {
-  return expandJumpList(tr, tr.jumps, rateB);
+  return expandJumpList(tr, tr.jumps, rateB, tr.scratches);
 }
 
 /** The OUTGOING's jumps expanded onto the mix axis (issue 177). A plays
@@ -276,9 +309,9 @@ function expandedJumps(
  * backward jump's repeat period is exactly |deltaSec| mix-seconds. (Set
  * playback maps this axis through the outgoing deck's rate.) */
 function expandedJumpsA(
-  tr: Pick<Transition, 'startSec' | 'durationSec' | 'jumpsA'>
+  tr: Pick<Transition, 'startSec' | 'durationSec' | 'jumpsA' | 'scratchesA'>
 ): { tj: number; deltaSec: number }[] {
-  return expandJumpList(tr, tr.jumpsA, 1);
+  return expandJumpList(tr, tr.jumpsA, 1, tr.scratchesA);
 }
 
 /** A's track-time under the playhead at mix-time t (issue 177): mix time
