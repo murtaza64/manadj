@@ -280,6 +280,34 @@ function dispatchButton(target: ButtonAction['target'], edge: 'down' | 'up'): vo
       midiMixerControls()?.soloStem(target.channel, target.stem);
       return;
     }
+    case 'beat-fx-select': {
+      // SELECT swaps the live effect on the current target. Unsupported
+      // detents carry null, which disables the section instead of retaining
+      // the previously selected implementation.
+      if (edge !== 'down') return;
+      midiMixerControls()?.selectBeatFx(target.effect);
+      return;
+    }
+    case 'beat-fx-target': {
+      // GRV6 CH SELECT is hardware-radio state; only down edges select.
+      // SP is represented but silent until manadj has a sampler bus.
+      if (edge !== 'down') return;
+      midiMixerControls()?.selectBeatFxTarget(target.target);
+      return;
+    }
+    case 'beat-fx-on-off': {
+      // The hardware's one ON/OFF gates the whole section; per-channel
+      // assignment is on-screen because CH SELECT stays unbound.
+      if (edge !== 'down') return;
+      midiMixerControls()?.toggleBeatFxOn();
+      return;
+    }
+    case 'beat-fx-beats': {
+      // BEAT ◄ ► controls the section's one echo beat-fraction ladder.
+      if (edge !== 'down') return;
+      midiMixerControls()?.stepBeatFxBeats(target.change);
+      return;
+    }
     case 'loop-preset': {
       // Loops gesture class (ADR 0019, midi-performance-ops 02): dropped
       // where the audible surface registers no loops (e.g. the editor).
@@ -614,6 +642,20 @@ function routeAbsolute(target: AbsoluteAction['target'], value: number): Absolut
         value,
         current: mixer.getCueMix(),
         apply: (v) => mixer.setCueMix(v),
+      };
+    }
+    case 'beat-fx-level': {
+      // LEVEL/DEPTH: hardware unsigned throw → Mixer's bipolar balance
+      // coordinate, center snapped exactly to 0 like the other bipolar
+      // controls. One soft-takeover machine for the one physical knob.
+      const mixer = midiMixerControls();
+      if (!mixer) return null;
+      return {
+        key: takeoverKey.beatFxLevel(),
+        tolerance: BIPOLAR_PICKUP_TOLERANCE,
+        value: bipolar(value),
+        current: mixer.getBeatFxSection().depth,
+        apply: (v) => mixer.setBeatFxDepth(v),
       };
     }
   }

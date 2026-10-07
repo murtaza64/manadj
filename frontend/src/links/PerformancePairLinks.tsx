@@ -141,9 +141,7 @@ export function EdgePairLinks({ deckCount = 4 }: { deckCount?: DeckCount }) {
 }
 
 /**
- * The two diagonal-pair chips. Mount inside the mixer strip's wide
- * crossfader slot — they hang just right of it, clear of the fader's
- * centering flex math.
+ * The two diagonal-pair chips. Mounted between X-FADER and Beat FX.
  */
 export function DiagonalPairLinks() {
   const decks = useDecks();

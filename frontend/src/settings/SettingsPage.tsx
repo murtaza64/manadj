@@ -18,12 +18,18 @@ import { FilterResponse } from './FilterResponse';
 import './settings.css';
 import { CommittedNumberInput } from '../components/CommittedNumberInput';
 import { HFader } from '../components/performance/MixerStrip';
+import {
+  BEAT_FX_PARAMETER_RANGES,
+  DEFAULT_BEAT_FX_SETTINGS,
+  type BeatFxSettings,
+} from '../playback/beatFxSettings';
 
 const WaveformSettings = lazy(() => import('../waveform/StyleTuningPage'));
 const JogSettings = lazy(() => import('../midi/JogTuningPage'));
 const MouseJogSettings = lazy(() => import('./MouseJogSettings'));
 const SECTIONS = [
   { id: 'filters', title: 'Filters', detail: 'Sound and sweep response' },
+  { id: 'effects', title: 'Beat FX', detail: 'Echo, Reverb and Flanger' },
   { id: 'waveforms', title: 'Waveforms', detail: 'Color and rendering' },
   { id: 'jog', title: 'Jog calibration', detail: 'DDJ-GRV6 response' },
   { id: 'mouse-jog', title: 'Mouse jog', detail: 'Keyboard and mouse response' },
@@ -248,6 +254,107 @@ function TourSettingsPanel() {
   );
 }
 
+const EFFECT_GROUPS = [
+  {
+    name: 'Echo',
+    detail: 'Full-band beat delay. LEVEL/DEPTH remains on the mixer.',
+    fields: [
+      ['echoFeedback', 'Feedback', '%', 'Repeat regeneration. Higher values produce longer tails.'],
+      ['echoSaturation', 'Saturation', 'x', 'Safety soft clipping in the feedback path. Zero is linear.'],
+    ],
+  },
+  {
+    name: 'Reverb',
+    detail: 'Synthesized stereo convolution impulse.',
+    fields: [
+      ['reverbDecay', 'Decay', 's', 'Impulse length and exponential decay time.'],
+      ['reverbDampingHz', 'Damping', 'Hz', 'Low-pass cutoff applied while synthesizing the impulse.'],
+      ['reverbStereoWidth', 'Stereo width', '%', 'Zero is mono-correlated; 100% decorrelates both sides.'],
+    ],
+  },
+  {
+    name: 'Flanger',
+    detail: 'One sine-LFO cycle per selected Beat FX span.',
+    fields: [
+      ['flangerDelayMs', 'Center delay', 'ms', 'Center of the comb-filter delay sweep.'],
+      ['flangerWidthMs', 'Sweep width', 'ms', 'Peak-to-peak delay modulation range.'],
+      ['flangerFeedback', 'Feedback', '%', 'Regeneration around the short delay.'],
+    ],
+  },
+] as const;
+
+function BeatFxSettingsPanel() {
+  const mixer = useMixer();
+  const settings = useMixerValue((m) => m.getBeatFxSettings());
+  const [resetKey, setResetKey] = useState(0);
+  return (
+    <>
+      <div className="settings-section-heading">
+        <div>
+          <h2>Beat FX</h2>
+          <p>Sound tuning for the shared post-fader Beat FX section.</p>
+        </div>
+        <button
+          className="btn btn-secondary"
+          onClick={() => {
+            setResetKey((key) => key + 1);
+            mixer.setBeatFxSettings(DEFAULT_BEAT_FX_SETTINGS);
+          }}
+        >
+          Reset effect defaults
+        </button>
+      </div>
+      <div className="settings-effect-groups">
+        {EFFECT_GROUPS.map((group) => (
+          <section className="settings-effect-card" key={group.name}>
+            <h3>{group.name}</h3>
+            <p>{group.detail}</p>
+            {group.fields.map(([key, label, unit, note]) => {
+              const [min, max, step] = BEAT_FX_PARAMETER_RANGES[key];
+              const scale = unit === '%' ? 100 : 1;
+              const value = Number((settings[key] * scale).toFixed(4));
+              const set = (raw: number) => mixer.setBeatFxSettings({ [key]: raw / scale } as Partial<BeatFxSettings>);
+              return (
+                <div className="settings-field" key={key}>
+                  <span className="settings-field-label">{label}</span>
+                  <p>{note}</p>
+                  <div className="settings-field-inputs">
+                    <HFader
+                      id={`beat-fx-${key}`}
+                      ariaLabel={label}
+                      label={Number(value.toPrecision(6)).toString()}
+                      accent
+                      fill
+                      fillColor="var(--accent)"
+                      min={min * scale}
+                      max={max * scale}
+                      step={step * scale}
+                      value={value}
+                      defaultValue={DEFAULT_BEAT_FX_SETTINGS[key] * scale}
+                      onChange={set}
+                    />
+                    <CommittedNumberInput
+                      key={`${key}:${resetKey}`}
+                      aria-label={`${label} value`}
+                      min={min * scale}
+                      max={max * scale}
+                      step={step * scale}
+                      value={value}
+                      onCommit={set}
+                    />
+                    <span>{unit}</span>
+                  </div>
+                </div>
+              );
+            })}
+          </section>
+        ))}
+      </div>
+      <p className="settings-hint">Settings apply live and persist across launches.</p>
+    </>
+  );
+}
+
 export default function SettingsPage({ performance = false }: { performance?: boolean }) {
   const [section, setSection] = useState<Section>(() => {
     const requested = new URLSearchParams(location.search).get('section');
@@ -293,6 +400,8 @@ export default function SettingsPage({ performance = false }: { performance?: bo
           <Suspense fallback={<p role="status">Loading settings...</p>}>
             {section === 'filters' ? (
               <FilterSettingsPanel />
+            ) : section === 'effects' ? (
+              <BeatFxSettingsPanel />
             ) : section === 'waveforms' ? (
               <WaveformSettings />
             ) : section === 'jog' ? (

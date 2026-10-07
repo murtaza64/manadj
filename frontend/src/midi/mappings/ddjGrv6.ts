@@ -23,6 +23,15 @@ const PAD_BLOCK = {
   beatLoop: 96,
 } as const;
 
+/** Beat FX section MIDI channel (E1: 1-based channel 5). */
+const BEAT_FX_CHANNEL = 4;
+/** E1 SELECT detents 32–45. Unsupported effects explicitly select none so
+ * hardware rotation never leaves the previously implemented effect live. */
+const BEAT_FX_SELECT_EFFECTS = [
+  null, 'echo', null, null, null, 'reverb', 'flanger',
+  null, null, null, null, null, null, null,
+] as const;
+
 const LOOP_PRESETS = [0.25, 0.5, 1, 2, 4, 8, 16, 32] as const;
 const JUMP_DIVISORS = [8, 8, 4, 4, 2, 2, 1, 1] as const;
 
@@ -277,6 +286,27 @@ export const DDJ_GRV6: Mapping = {
     ...DECKS.map(({ deck }, index) =>
       absolute14(6, 23 + index, 55 + index, { control: 'filter', channel: deck })
     ),
+    // Beat FX section (gh#272), channel 5 per the E1 list (exact bytes in
+    // docs/research/ddj-grv6-hardware.md §Beat FX). The SELECT knob sends
+    // a distinct note per detent (14 effects); ECHO (33), REVERB (37) and
+    // FLANGER (38) select implementations; unsupported detents select none.
+    // CH SELECT is hardware-radio target selection. SP is the sampler bus
+    // (represented but silent: manadj has no sampler); MST processes the
+    // summed post-crossfader program. Shift-layer channel notes and release
+    // FX (note 67) stay unbound.
+    ...BEAT_FX_SELECT_EFFECTS.map((effect, index) =>
+      button(BEAT_FX_CHANNEL, 32 + index, { control: 'beat-fx-select', effect })
+    ),
+    button(BEAT_FX_CHANNEL, 16, { control: 'beat-fx-target', target: 'A' }),
+    button(BEAT_FX_CHANNEL, 17, { control: 'beat-fx-target', target: 'B' }),
+    button(BEAT_FX_CHANNEL, 18, { control: 'beat-fx-target', target: 'C' }),
+    button(BEAT_FX_CHANNEL, 19, { control: 'beat-fx-target', target: 'D' }),
+    button(BEAT_FX_CHANNEL, 22, { control: 'beat-fx-target', target: 'sampler' }),
+    button(BEAT_FX_CHANNEL, 20, { control: 'beat-fx-target', target: 'master' }),
+    button(BEAT_FX_CHANNEL, 71, { control: 'beat-fx-on-off' }),
+    button(BEAT_FX_CHANNEL, 74, { control: 'beat-fx-beats', change: 'halve' }),
+    button(BEAT_FX_CHANNEL, 75, { control: 'beat-fx-beats', change: 'double' }),
+    absolute14(BEAT_FX_CHANNEL, 2, 34, { control: 'beat-fx-level' }),
     absolute14(6, 31, 63, { control: 'crossfader' }),
     // MASTER LEVEL (CC 8/40) is deliberately UNBOUND (hardware-verified
     // 2026-07-17, master-headroom): the knob attenuates the GRV6's own
@@ -296,5 +326,23 @@ export const DDJ_GRV6: Mapping = {
     // Each fixed A–D channel meter on its own deck channel — the meter
     // follows only that channel's signal (channel isolation).
     meters: Object.fromEntries(DECKS.map((entry) => [entry.deck, meter(entry.channel)])),
+    // Beat FX ON/OFF lamp (gh#272): MIDI-OUT mirrors MIDI-IN (E1 94 47).
+    beatFx: led(BEAT_FX_CHANNEL, 71),
+    // E1 p.3 F9: Beat time-unit indicator, MIDI-OUT CC 100. 3/4 uses
+    // 0x21 (combined indicator pattern), unlike the sequential values.
+    beatFxBeat: {
+      channel: BEAT_FX_CHANNEL,
+      number: 100,
+      offValue: 0,
+      values: [
+        { beats: 0.25, value: 0x03 },
+        { beats: 0.5, value: 0x04 },
+        { beats: 0.75, value: 0x21 },
+        { beats: 1, value: 0x05 },
+        { beats: 2, value: 0x06 },
+        { beats: 4, value: 0x07 },
+        { beats: 8, value: 0x08 },
+      ],
+    },
   },
 };
