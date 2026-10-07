@@ -8,7 +8,11 @@
  * pattern.
  */
 
-import { DEFAULT_BEAT_FX_SETTINGS, type BeatFxSettings } from './beatFxSettings';
+import {
+  DEFAULT_BEAT_FX_SETTINGS,
+  type BeatFxSettings,
+  type FlangerLengthUnit,
+} from './beatFxSettings';
 
 export type BeatFxEffectId = 'echo' | 'reverb' | 'flanger';
 export const BEAT_FX_EFFECTS: readonly BeatFxEffectId[] = ['echo', 'reverb', 'flanger'];
@@ -42,6 +46,29 @@ export const ECHO_FEEDBACK = DEFAULT_BEAT_FX_SETTINGS.echoFeedback;
 /** DelayNode ceiling: 8 beats at ~50 BPM effective. */
 export const MAX_ECHO_DELAY_S = 10;
 const MIN_ECHO_DELAY_S = 0.01;
+
+/** Flanger length in bars (#331): no meter model yet — every bar is 4/4. */
+export const BEATS_PER_BAR = 4;
+
+/** Flanger LFO period in wall seconds. The shared BEAT ◄ ► value reads as
+ * bars ('bars': 1 = BEATS_PER_BAR beats) or beats. No DelayNode ceiling
+ * applies — the period only sets an oscillator rate. */
+export function flangerPeriodSeconds(
+  length: number,
+  beatSeconds: number,
+  unit: FlangerLengthUnit,
+): number {
+  const beat = Number.isFinite(beatSeconds) && beatSeconds > 0 ? beatSeconds : BEAT_SECONDS_DEFAULT;
+  return Math.max(MIN_ECHO_DELAY_S, length * (unit === 'bars' ? BEATS_PER_BAR : 1) * beat);
+}
+
+/** Unit the BEAT ◄ ► value is shown in for the selected effect. */
+export function beatFxLengthUnit(
+  selected: BeatFxEffectId | null,
+  flangerUnit: FlangerLengthUnit,
+): FlangerLengthUnit {
+  return selected === 'flanger' ? flangerUnit : 'beats';
+}
 
 /** 120 BPM stand-in until the channel's Deck reports a tempo. */
 export const BEAT_SECONDS_DEFAULT = 0.5;

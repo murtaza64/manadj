@@ -5,7 +5,7 @@ import {
   SB3_JOG_CALIBRATION,
 } from './jogCalibration';
 import type { JogCalibration, JogProfile } from './jogCalibration';
-import { removeSetting, writeSetting } from '../settings/persistedSettings';
+import { removeSetting, shippedDefault, writeSetting } from '../settings/persistedSettings';
 
 const STORAGE_KEY = 'manadj.grv6JogCalibration';
 const STORAGE_VERSION = 1;
@@ -38,16 +38,27 @@ export function sanitizeJogCalibration(
   };
 }
 
+function parseStored(raw: string | null): JogCalibration | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed?.version === STORAGE_VERSION ? sanitizeJogCalibration(parsed.calibration) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The GRV6 model default: the Shipped default (setup-guides #293) when
+ *  present, else the code constant. Reset returns here. */
+export function grv6DefaultCalibration(): JogCalibration {
+  return parseStored(shippedDefault(STORAGE_KEY)) ?? { ...GRV6_JOG_CALIBRATION };
+}
+
 function load(): JogCalibration {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return { ...GRV6_JOG_CALIBRATION };
-    const parsed = JSON.parse(raw);
-    return parsed?.version === STORAGE_VERSION
-      ? sanitizeJogCalibration(parsed.calibration)
-      : { ...GRV6_JOG_CALIBRATION };
+    return parseStored(localStorage.getItem(STORAGE_KEY)) ?? grv6DefaultCalibration();
   } catch {
-    return { ...GRV6_JOG_CALIBRATION };
+    return grv6DefaultCalibration();
   }
 }
 
@@ -71,7 +82,7 @@ export function setGrv6JogCalibration(patch: Partial<JogCalibration>): void {
 }
 
 export function resetGrv6JogCalibration(): void {
-  grv6Calibration = { ...GRV6_JOG_CALIBRATION };
+  grv6Calibration = grv6DefaultCalibration();
   removeSetting(STORAGE_KEY);
   for (const listener of listeners) listener();
 }

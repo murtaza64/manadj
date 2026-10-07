@@ -119,14 +119,31 @@ def get_or_create_empty_album_art(session: Session) -> int:
     return row.id
 
 
+class OtherDriveError(ValueError):
+    """The track is on a different drive than the Engine Library (Windows);
+    Engine stores library-relative paths, which can't cross drives."""
+
+
+def engine_relative_path(abs_path: Path, library_root: Path) -> str:
+    """The "/"-separated path Engine stores, relative to the library root.
+    Raises OtherDriveError when no relative path exists (#306)."""
+    try:
+        return Path(os.path.relpath(abs_path, library_root)).as_posix()
+    except ValueError as exc:  # Windows: "path is on mount 'D:', start on mount 'C:'"
+        raise OtherDriveError(
+            f"{abs_path} is not on the Engine Library drive ({library_root})"
+        ) from exc
+
+
 def insert_track(session: Session, spec: EngineTrackSpec, library_root: Path) -> int:
     """Insert one track row per the spike's minimal recipe. Returns the
-    new Engine track id. Caller owns the session/transaction."""
+    new Engine track id. Caller owns the session/transaction.
+    Raises OtherDriveError before writing anything for a cross-drive track."""
+    rel_path = engine_relative_path(spec.abs_path, library_root)
     info = session.query(Information).first()
     db_uuid = info.uuid if info else None
     stat = spec.abs_path.stat()
     now = int(time.time())
-    rel_path = Path(os.path.relpath(spec.abs_path, library_root)).as_posix()
 
     track = Track(
         path=rel_path,

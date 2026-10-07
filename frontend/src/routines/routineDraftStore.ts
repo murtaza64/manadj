@@ -9,6 +9,7 @@
  */
 import { useSyncExternalStore } from 'react';
 import type { RoutineLanePoint } from '../sets/routinePlan';
+import { addSlotsTo, removeSlotFrom, type SlotDrop } from './authoredMix';
 import { editsAreEmpty, emptyEdits, laneKey, type AuthoredJump, type AuthoredPause, type RoutineEdits, type RemovedRecordedJump, type RemovedRecordedPause } from './routineDraft';
 
 const UNDO_DEPTH = 100;
@@ -34,6 +35,9 @@ const clone = (e: RoutineEdits): RoutineEdits => ({
   entryOffsets: { ...e.entryOffsets },
   ...(e.playbackBounds ? { playbackBounds: { ...e.playbackBounds } } : {}),
   ...(e.startTrims ? { startTrims: { ...e.startTrims } } : {}),
+  ...(e.authored
+    ? { authored: { slots: e.authored.slots.map((s) => ({ ...s })), durationBeats: e.authored.durationBeats } }
+    : {}),
 });
 
 /** Rebase one slot's authored edits from a drag-start BASE by deltaBeats
@@ -440,6 +444,25 @@ export class RoutineDraftStore {
     this.endGesture();
   }
 
+  // ── Authored structure (ADR 0039, gh#325) ───────────────────────────
+
+  /** Drag-to-add: append slots at `beat` (snapped by the caller). One
+   * undo step. Returns the minted slot ids. */
+  addSlots(drops: SlotDrop[], beat: number): string[] {
+    let ids: string[] = [];
+    this.mutate(`slot-add:${this.version}`, (e) => {
+      ids = addSlotsTo(e, drops, beat);
+    });
+    this.endGesture();
+    return ids;
+  }
+
+  /** Remove an authored slot and its edits. One undo step. */
+  removeSlot(slotId: string): void {
+    this.mutate(`slot-remove:${slotId}`, (e) => removeSlotFrom(e, slotId));
+    this.endGesture();
+  }
+
   /** Seal the open gesture (pointer up): the next mutation with the same
    * key starts a FRESH undo entry. */
   endGesture(): void {
@@ -500,5 +523,10 @@ export function useRoutineDraft(store: RoutineDraftStore): RoutineDraftSnapshot 
 
 /** Persisted form: null when nothing is authored (clears the column). */
 export function editsForSave(edits: RoutineEdits): RoutineEdits | null {
-  return editsAreEmpty(edits) ? null : edits;
+  if (editsAreEmpty(edits)) return null;
+  // The authored structure persists as first-class fields, never here.
+  if (!edits.authored) return edits;
+  const { authored: _structure, ...rest } = edits;
+  void _structure;
+  return rest;
 }

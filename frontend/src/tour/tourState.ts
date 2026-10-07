@@ -105,7 +105,7 @@ export type TourArea = 'library' | 'performance' | 'edit' | 'sync' | 'history' |
 /** The Library's inner panes that are tour sections of their own. */
 export type LibrarySubview = 'sets' | 'sessions' | null;
 
-let baseArea: TourArea = 'library';
+let baseArea: TourArea = 'performance'; // fresh installs open in PERFORM (#301)
 let librarySubview: LibrarySubview = null;
 
 export function setTourArea(area: TourArea): void {
@@ -148,7 +148,7 @@ export function consumeTourRequest(): void {
 
 export function _resetTourStoresForTests(): void {
   progress = readProgress();
-  baseArea = 'library';
+  baseArea = 'performance';
   librarySubview = null;
   requested = null;
 }

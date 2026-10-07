@@ -2,6 +2,7 @@
 
 import os
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from alembic import command as alembic_command
 from alembic.config import Config as AlembicConfig
@@ -12,7 +13,13 @@ from .acquisition import models as acquisition_models  # noqa: F401  (registers 
 from .acquisition.router import router as acquisition_router
 from .tasks import models as task_models  # noqa: F401  (registers tables on Base)
 from .tasks.worker import TaskWorker
+from .soulseek import router as soulseek_router
+from .acquisition import connect_router as soundcloud_connect_router
 from .logging_config import setup_logging
+
+if TYPE_CHECKING:
+    from .config import Config
+    from .tasks.manager import Handler
 
 # Configure logging with colors and override uvicorn handlers
 setup_logging()
@@ -83,6 +90,8 @@ app.include_router(cameos.router, prefix="/api/cameos", tags=["cameos"])
 app.include_router(visualizer_ga.router, prefix="/api/ga", tags=["visualizer-ga"])
 app.include_router(settings.router, prefix="/api/settings", tags=["settings"])
 app.include_router(app_config.router, prefix="/api/config", tags=["app-config"])
+app.include_router(soulseek_router.router, prefix="/api/soulseek", tags=["soulseek"])
+app.include_router(soundcloud_connect_router.router, prefix="/api/soundcloud", tags=["soundcloud"])
 
 # Onboarding (#274): Rekordbox bulk import for first run.
 from .routers import onboarding as onboarding_router  # noqa: E402
@@ -168,20 +177,7 @@ def _build_task_worker() -> "TaskWorker | None":
         slskd = SlskdSupplier(config.soulseek.slskd_url, config.soulseek.api_key)
 
     if config.soundcloud.oauth_token and config.library.tracks_directory:
-        from .acquisition.download import download_handler
-        from .acquisition.searches import enqueue_soulseek_search
-        from .acquisition.source import SoundCloudSource
-        from .acquisition.supplier import SoundCloudSupplier
-
-        supplier = SoundCloudSupplier(SoundCloudSource(config.soundcloud.oauth_token))
-        handlers["download"] = download_handler(
-            supplier,
-            Path(config.library.tracks_directory),
-            config.acquisition.cleanup,
-            # a failed SoundCloud download queues an automatic soulseek
-            # search so alternatives are ready when the operator looks
-            on_failure=enqueue_soulseek_search if slskd is not None else None,
-        )
+        handlers.update(_download_handlers(config, soulseek_fallback=slskd is not None))
         # Pace downloads under SoundCloud's request budget (issue 08).
         delays["download"] = config.acquisition.download_delay_secs
     else:
@@ -190,15 +186,7 @@ def _build_task_worker() -> "TaskWorker | None":
         )
 
     if slskd is not None:
-        from .acquisition.download import SOULSEEK_TASK_TYPE, soulseek_download_handler
-        from .acquisition.searches import SOULSEEK_SEARCH_TASK_TYPE, soulseek_search_handler
-
-        handlers[SOULSEEK_TASK_TYPE] = soulseek_download_handler(
-            slskd, Path(config.library.tracks_directory), config.acquisition.cleanup
-        )
-        handlers[SOULSEEK_SEARCH_TASK_TYPE] = soulseek_search_handler(
-            slskd, config.acquisition.cleanup
-        )
+        handlers.update(_soulseek_handlers(config))
     else:
         logging.getLogger("backend.main").info(
             "soulseek download handler not registered: [soulseek]/SLSKD_API_KEY unset"
@@ -208,6 +196,73 @@ def _build_task_worker() -> "TaskWorker | None":
         return None
     return TaskWorker(SessionLocal, handlers, delays=delays)
 
+
+def _download_handlers(config: "Config", soulseek_fallback: bool) -> dict[str, "Handler"]:
+    """The SoundCloud `download` handler over the configured token."""
+    from .acquisition.download import download_handler
+    from .acquisition.searches import enqueue_soulseek_search
+    from .acquisition.source import SoundCloudSource
+    from .acquisition.supplier import SoundCloudSupplier
+
+    assert config.soundcloud.oauth_token is not None
+    assert config.library.tracks_directory is not None
+    supplier = SoundCloudSupplier(SoundCloudSource(config.soundcloud.oauth_token))
+    return {
+        "download": download_handler(
+            supplier,
+            Path(config.library.tracks_directory),
+            config.acquisition.cleanup,
+            # a failed SoundCloud download queues an automatic soulseek
+            # search so alternatives are ready when the operator looks
+            on_failure=enqueue_soulseek_search if soulseek_fallback else None,  # type: ignore[arg-type]
+        )
+    }
+
+
+def _soulseek_handlers(config: "Config") -> dict[str, "Handler"]:
+    """soulseek-download + soulseek-search handlers over the configured slskd."""
+    from .acquisition.download import SOULSEEK_TASK_TYPE, soulseek_download_handler
+    from .acquisition.searches import SOULSEEK_SEARCH_TASK_TYPE, soulseek_search_handler
+    from .acquisition.slskd import SlskdSupplier
+
+    assert config.soulseek.slskd_url is not None and config.soulseek.api_key is not None
+    assert config.library.tracks_directory is not None
+    slskd = SlskdSupplier(config.soulseek.slskd_url, config.soulseek.api_key)
+    return {
+        SOULSEEK_TASK_TYPE: soulseek_download_handler(
+            slskd, Path(config.library.tracks_directory), config.acquisition.cleanup
+        ),
+        SOULSEEK_SEARCH_TASK_TYPE: soulseek_search_handler(slskd, config.acquisition.cleanup),
+    }
+
+
+def _on_soulseek_configured() -> None:
+    """The Soulseek guide configured the managed slskd mid-session (#291):
+    give the live worker its handlers without a backend restart."""
+    from .config import get_config
+
+    config = get_config()
+    if _task_worker is not None and config.soulseek.configured and config.library.tracks_directory:
+        _task_worker.add_handlers(_soulseek_handlers(config))
+
+
+soulseek_router.on_configured = _on_soulseek_configured
+
+
+def _on_soundcloud_connected() -> None:
+    """The SoundCloud guide stored a token mid-session (#290): register the
+    download handler on the live worker without a backend restart."""
+    from .config import get_config
+
+    config = get_config()
+    if _task_worker is not None and config.soundcloud.oauth_token and config.library.tracks_directory:
+        _task_worker.add_handlers(
+            _download_handlers(config, soulseek_fallback=config.soulseek.configured),
+            delays={"download": config.acquisition.download_delay_secs},
+        )
+
+
+soundcloud_connect_router.on_connected = _on_soundcloud_connected
 
 _task_worker: "TaskWorker | None" = None
 
@@ -230,6 +285,14 @@ async def startup_event():
         logging.getLogger("backend.main").error(
             "%s — waveforms, analysis and stems will fail until it is installed", exc
         )
+
+    # Managed slskd (#291): before the worker, so Soulseek tasks find it up.
+    from .config import get_config as _get_config
+
+    if _get_config().soulseek.managed:
+        from .soulseek.supervisor import get_supervisor
+
+        get_supervisor().start()
     if os.getenv("DISABLE_TASK_WORKER", "").lower() not in ("true", "1", "yes"):
         _task_worker = _build_task_worker()
         if _task_worker is not None:
@@ -301,8 +364,20 @@ async def shutdown_event():
     """Stop background workers on server shutdown."""
     if _task_worker is not None:
         _task_worker.stop()
+    from .soulseek.supervisor import get_supervisor
+
+    get_supervisor().stop()
 
 
-@app.get("/")
-def root():
-    return {"message": "Music Library Manager API"}
+# Serve the built frontend when one exists (packaged app, ADR 0043). Mounted
+# after all API routers so the SPA catch-all loses to every /api route. In
+# dev there is normally no frontend/dist and the plain API root survives.
+from .spa import frontend_dist, mount_spa  # noqa: E402
+
+_dist = frontend_dist()
+if _dist is not None:
+    mount_spa(app, _dist)
+else:
+    @app.get("/")
+    def root():
+        return {"message": "Music Library Manager API"}

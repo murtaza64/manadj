@@ -13,6 +13,7 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 from sqlalchemy.sql import func
 
+from .. import shipped_defaults
 from ..database import get_db
 from ..models import AppSetting
 
@@ -31,6 +32,13 @@ class SettingsSeed(BaseModel):
 def list_settings(db: Session = Depends(get_db)) -> dict:
     rows = db.query(AppSetting).all()
     return {"settings": {row.key: row.value for row in rows}}
+
+
+@router.get("/defaults")
+def list_shipped_defaults() -> dict:
+    """Shipped defaults (setup-guides #293): key -> raw string, applied by the
+    frontend only to keys that are unset. Never written to the table here."""
+    return {"defaults": shipped_defaults.shipped_settings()}
 
 
 @router.put("/{key}")

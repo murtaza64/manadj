@@ -140,9 +140,12 @@ def decode_to_wav(source: Path, dest: Path) -> None:
 def _demucs_command(input_wav: Path, out_dir: Path, config: StemsConfig) -> list[str]:
     # sys.executable is the project venv's python; demucs is present because
     # `stems` is a default dependency group (pyproject [tool.uv]).
+    # "auto": omit -d; demucs picks cuda -> mps -> cpu itself, so the backend
+    # never imports torch to probe devices.
+    device = [] if config.device == "auto" else ["-d", config.device]
     return [
         sys.executable, "-m", "demucs.separate",
-        "-d", config.device,
+        *device,
         "-n", config.model,
         "--float32", "--clip-mode", "none",
         "-o", str(out_dir),
