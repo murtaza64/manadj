@@ -42,6 +42,7 @@ import {
   tenureHeld,
 } from './audibilityReducer';
 import type { AudibilityState, ReducerDeckState } from './audibilityReducer';
+import type { BeatFxSectionState } from '../playback/beatFx';
 import { DEFAULT_DETECTOR_PARAMS, DETECTOR_VERSION } from './events';
 import type {
   CaptureDeck,
@@ -251,7 +252,23 @@ function openEngagement(
     crossfader: s.crossfader,
     crossfaderEnabled: s.crossfaderEnabled,
     physicalDecks: { outgoing, incoming },
+    ...(s.beatFx ? { beatFx: roleBeatFx(s.beatFx, outgoing, incoming) } : {}),
   };
+}
+
+/** Beat FX section in a pair's ROLE frame (#351): a deck target maps to
+ * its role; a deck OUTSIDE the pair means "no FX on either role deck" —
+ * expressed as the silent 'sampler' target, switched off, so the slice
+ * keeps its A/B-only contract while still recording the FX leaving. */
+function roleBeatFx(
+  fx: BeatFxSectionState,
+  outgoing: CaptureDeck,
+  incoming: CaptureDeck
+): BeatFxSectionState {
+  if (fx.target === outgoing) return { ...fx, target: 'A' };
+  if (fx.target === incoming) return { ...fx, target: 'B' };
+  if (fx.target === 'master' || fx.target === 'sampler') return { ...fx };
+  return { ...fx, target: 'sampler', on: false };
 }
 
 /** Relabel one log event into a pair's ROLE frame (outgoing→'A',
@@ -288,8 +305,12 @@ function relabel(
       if (pi !== undefined) playheads.B = pi;
       return { ...ev, playheads };
     }
+    case 'beatFx': {
+      const { t, kind, ...section } = ev;
+      return { t, kind, ...roleBeatFx(section, outgoing, incoming) };
+    }
     default:
-      return ev; // tenure markers; init never rides the live log
+      return ev; // tenure markers, FX settings; init never rides the live log
   }
 }
 

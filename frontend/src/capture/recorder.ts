@@ -31,6 +31,8 @@ import { initialCaptureState, reduceCaptureInto } from './detector';
 import type { CaptureState } from './detector';
 import { SilenceSplitClock } from './sessionLifecycle';
 import type { CaptureControlId, CaptureEvent, DetectedTake } from './events';
+import type { BeatFxSectionState } from '../playback/beatFx';
+import type { BeatFxSettings } from '../playback/beatFxSettings';
 
 const TICK_MS = 1000;
 
@@ -41,6 +43,10 @@ export interface CaptureMixerSource {
   getCrossfaderAssignment(channel: ChannelId): CrossfaderAssignment;
   getCrossfaderEnabled(): boolean;
   getMaster(): number;
+  /** Beat FX section + voicing (#351). Optional: sources without a Beat FX
+   * section (narrow test fakes) log no FX events. */
+  getBeatFxSection?(): Readonly<BeatFxSectionState>;
+  getBeatFxSettings?(): Readonly<BeatFxSettings>;
   /** The changed-control hint is optional (capture spine 02): a hint-less
    * notify (test fakes, graph revival) diffs the whole surface. */
   subscribe(listener: (changed?: MixerChange) => void): () => void;
@@ -71,6 +77,8 @@ export class CaptureRecorder {
   private lastCrossfader: number;
   private lastCrossfaderEnabled: boolean;
   private lastMaster: number;
+  private lastBeatFx: Readonly<BeatFxSectionState> | null;
+  private lastBeatFxSettings: Readonly<BeatFxSettings> | null;
   private lastDeck: Record<ChannelId, DeckSnapshot>;
 
   private readonly mixer: CaptureMixerSource;
@@ -122,6 +130,8 @@ export class CaptureRecorder {
     this.lastCrossfader = mixer.getCrossfader();
     this.lastCrossfaderEnabled = mixer.getCrossfaderEnabled();
     this.lastMaster = mixer.getMaster();
+    this.lastBeatFx = mixer.getBeatFxSection?.() ?? null;
+    this.lastBeatFxSettings = mixer.getBeatFxSettings?.() ?? null;
     this.lastDeck = {
       A: engines.A.getSnapshot(),
       B: engines.B.getSnapshot(),
@@ -241,6 +251,9 @@ export class CaptureRecorder {
       value: this.mixer.getCrossfaderEnabled() ? 1 : 0,
     });
     this.feed({ t, kind: 'control', control: 'master', channel: null, value: this.mixer.getMaster() });
+    this.lastBeatFx = null;
+    this.lastBeatFxSettings = null;
+    this.diffBeatFx(t);
     for (const ch of CHANNEL_IDS) {
       const snap = this.engines[ch].getSnapshot();
       this.lastDeck[ch] = snap;
@@ -477,6 +490,28 @@ export class CaptureRecorder {
         this.lastMaster = master;
         this.feed({ t, kind: 'control', control: 'master', channel: null, value: master });
       }
+    }
+    if (changed === undefined || changed === 'beatFx' || changed === 'beatFxSettings') {
+      this.diffBeatFx(t);
+    }
+  }
+
+  /** Beat FX (#351): each change logs the WHOLE section (or settings) —
+   * one strip, one snapshot. Value-diffed: the Mixer replaces the section
+   * object even on a no-op depth write. */
+  private diffBeatFx(t: number): void {
+    const section = this.mixer.getBeatFxSection?.();
+    const prev = this.lastBeatFx;
+    if (section && (!prev || prev.selected !== section.selected || prev.target !== section.target
+      || prev.on !== section.on || prev.depth !== section.depth || prev.beats !== section.beats)) {
+      this.lastBeatFx = section;
+      const { selected, target, on, depth, beats } = section;
+      this.feed({ t, kind: 'beatFx', selected, target, on, depth, beats });
+    }
+    const settings = this.mixer.getBeatFxSettings?.();
+    if (settings && settings !== this.lastBeatFxSettings) {
+      this.lastBeatFxSettings = settings;
+      this.feed({ t, kind: 'beatFxSettings', settings: { ...settings } });
     }
   }
 

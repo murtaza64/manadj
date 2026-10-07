@@ -26,6 +26,8 @@ import type { ScratchMotion, ScratchFilter } from '../playback/worklet/scratchMo
 import { deckMasterGain, isDeckAudible, isDeckSounding } from './audibility';
 import { DEFAULT_DETECTOR_PARAMS } from './events';
 import type { CaptureDeck, CaptureEvent, DetectorParams } from './events';
+import type { BeatFxSectionState } from '../playback/beatFx';
+import type { BeatFxSettings } from '../playback/beatFxSettings';
 
 export const ALL_DECKS: CaptureDeck[] = ['A', 'B', 'C', 'D'];
 
@@ -69,6 +71,12 @@ export interface AudibilityState {
   /** The machine holding the shared surface (tenure marker, ADR 0033);
    * null while the shared surface itself is audible. */
   tenureHolder: string | null;
+  /** Beat FX section (#351): the last logged snapshot, or null = never
+   * logged (Sessions captured before #351 carry no FX evidence). Replaced,
+   * never mutated — retainers may share it. */
+  beatFx: BeatFxSectionState | null;
+  /** Beat FX voicing preferences at this moment (#351); null = unlogged. */
+  beatFxSettings: BeatFxSettings | null;
 }
 
 export function freshDeck(assignment: CrossfaderAssignment): ReducerDeckState {
@@ -111,6 +119,8 @@ export function initialAudibilityState(
     crossfader: 0,
     crossfaderEnabled: true,
     tenureHolder: null,
+    beatFx: null,
+    beatFxSettings: null,
   };
 }
 
@@ -220,6 +230,14 @@ export function applyEvent(s: AudibilityState, e: CaptureEvent): void {
       break;
     case 'tenure':
       s.tenureHolder = e.edge === 'start' ? e.holder : null;
+      break;
+    case 'beatFx': {
+      const { selected, target, on, depth, beats } = e;
+      s.beatFx = { selected, target, on, depth, beats };
+      break;
+    }
+    case 'beatFxSettings':
+      s.beatFxSettings = e.settings;
       break;
     default:
       break;

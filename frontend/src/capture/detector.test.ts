@@ -858,3 +858,41 @@ describe('pairwise machines across the four decks (4dp 10)', () => {
     expect(takes).toHaveLength(0);
   });
 });
+
+describe('Beat FX in the Take slice (#351)', () => {
+  const section = { selected: 'echo' as const, on: true, depth: 0.5, beats: 0.5 };
+  type Fx = Extract<CaptureEvent, { kind: 'beatFx' }>;
+
+  it('stamps the open FX state on init and relabels FX targets into the role frame', () => {
+    // B is the incumbent here, so the physical→role mapping is non-trivial:
+    // outgoing B → 'A', incoming A → 'B'.
+    const s = script().at(0).load('B', 1).load('A', 2).fader('A', 0).play('B');
+    const ev = s.events();
+    ev.push({ t: 0, kind: 'beatFx', ...section, target: 'B' });
+    s.advance(10).at(10).play('A');
+    ev.push({ t: 11, kind: 'beatFx', ...section, target: 'A' });
+    s.at(12).fader('A', 1).advance(3);
+    ev.push({ t: 15, kind: 'beatFx', ...section, target: 'C' });
+    ev.push({ t: 16, kind: 'beatFx', ...section, target: 'master' });
+    s.advance(4).at(20).fader('B', 0).advance(HORIZON + 1);
+    const { takes } = run(ev);
+    expect(takes).toHaveLength(1);
+    const head = takes[0].events[0];
+    if (head.kind !== 'init') throw new Error('no init head');
+    // Open state (window start 12): FX on the INCOMING deck (physical A).
+    expect(head.beatFx).toEqual({ ...section, target: 'B' });
+    const fx = takes[0].events.filter((e): e is Fx => e.kind === 'beatFx');
+    expect(fx.map(({ target, on }) => ({ target, on }))).toEqual([
+      { target: 'B', on: true },
+      { target: 'sampler', on: false },
+      { target: 'master', on: true },
+    ]);
+  });
+
+  it('omits beatFx from init when no FX state was ever logged', () => {
+    const s = incumbentA();
+    s.at(10).play('B').at(12).fader('B', 1).advance(8).at(20).fader('A', 0).advance(HORIZON + 1);
+    const head = run(s.events()).takes[0].events[0];
+    expect(head.kind === 'init' && 'beatFx' in head).toBe(false);
+  });
+});
