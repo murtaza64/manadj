@@ -131,9 +131,10 @@ function readout(label: string) {
 it('deep-links to Mouse jog with live ranges, stored values and derived targets', async () => {
   setMouseJogSettings({ sensitivity: 2, acceleration: 1.8, smoothingMs: 50, maxBendPercent: 25 });
   await render();
-  expect(container.querySelector('.settings-content')?.getAttribute('aria-label')).toBe('Mouse jog');
-  expect(container.querySelector('.settings-nav [aria-current="page"]')?.textContent).toBe('Mouse jogKeyboard and mouse response');
-  expect(container.querySelectorAll('.settings-nav button')).toHaveLength(9);
+  expect(container.querySelector('.settings-content')?.getAttribute('aria-label')).toBe('Keyboard + mouse');
+  expect(container.querySelector('#settings-section-mouse-jog')).not.toBeNull();
+  expect(container.querySelector('.settings-nav [aria-current="page"]')?.textContent).toBe('Keyboard + mouseMouse jog, shortcuts');
+  expect(container.querySelectorAll('.settings-nav button')).toHaveLength(7);
   expect(container.textContent).not.toContain('MOUSE / JOG TUNE');
   const ranges = [...container.querySelectorAll<HTMLElement>('.settings-fields [role="slider"]')];
   expect(container.querySelector('input[type="range"]')).toBeNull();
@@ -300,11 +301,11 @@ it('navigates lazy sections with canonical URLs without changing decks', async (
   await render();
   const buttons = [...container.querySelectorAll<HTMLButtonElement>('.settings-nav button')];
   expect(container.querySelector('[aria-label$="actual bend"]')).toBeNull();
-  await act(async () => buttons.find((b) => b.textContent?.startsWith('Mouse jog'))!.click());
-  expect(location.search).toBe('?view=performance&settings=1&section=mouse-jog');
+  await act(async () => buttons.find((b) => b.textContent?.startsWith('Keyboard + mouse'))!.click());
+  expect(location.search).toBe('?view=performance&settings=1&section=keyboard-mouse');
   expect(readout('Deck A actual bend')).toBe('+0.75%');
-  await act(async () => buttons.find((b) => b.textContent?.startsWith('Filters'))!.click());
-  expect(location.search).toBe('?view=performance&settings=1&section=filters');
+  await act(async () => buttons.find((b) => b.textContent?.startsWith('Performance'))!.click());
+  expect(location.search).toBe('?view=performance&settings=1&section=performance');
   expect(container.querySelector('[aria-label$="actual bend"]')).toBeNull();
   expect(Object.values(listeners).every((set) => set.size === 0)).toBe(true);
 });

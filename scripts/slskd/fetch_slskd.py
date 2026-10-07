@@ -8,8 +8,9 @@ Downloads the osx-arm64 release zip, verifies its sha256, and unpacks it
 into DEST (default: <repo>/vendor/slskd). The unpacked directory is the
 binary contract: DEST/slskd (executable) + DEST/wwwroot/ (web UI) +
 licence files. Dev resolves vendor/slskd/slskd; the packaged app (#280)
-runs this script with --dest <App>/Contents/Resources/slskd and launches
-the backend with MANADJ_SLSKD_BIN pointing at the binary.
+runs this script with --dest <App>/Contents/Resources/slskd, which the
+backend (Resources/backend/) finds as ../slskd/slskd. MANADJ_SLSKD_BIN
+overrides both.
 
 slskd is AGPL-3.0; manadj ships it unmodified as a separate process.
 Source: https://github.com/slskd/slskd/tree/<SLSKD_VERSION>

@@ -51,6 +51,7 @@
 }
 .sc-form input {
   flex: 0 1 420px;
+  min-width: 0;
   background: var(--base);
   color: var(--text);
   border: 1px solid var(--surface1);
@@ -63,6 +64,7 @@
 }
 .sc-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: var(--space-8);
 }
 .sc-footer {
@@ -91,6 +93,7 @@
   font-weight: bold;
 }
 .sc-shot-body {
+  overflow-x: auto;
   display: grid;
   grid-template-columns: 170px minmax(0, 1fr);
 }

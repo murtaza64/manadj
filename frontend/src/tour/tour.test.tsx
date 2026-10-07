@@ -245,6 +245,12 @@ describe('active section derivation', () => {
     setLibrarySubview(null);
     expect(activeTourSection()).toBe('library');
   });
+
+  it('Settings has no tour (#324)', () => {
+    setTourArea('settings');
+    expect(activeTourSection()).toBeNull();
+    expect(TOUR_SECTIONS.some((s) => (s.id as string) === 'settings')).toBe(false);
+  });
 });
 
 describe('step data', () => {
@@ -259,12 +265,20 @@ describe('step data', () => {
         'sets',
         'sessions',
         'history',
-        'settings',
       ])
     );
     for (const section of TOUR_SECTIONS) {
       expect(section.steps.length).toBeGreaterThanOrEqual(2);
       expect(section.steps.length).toBeLessThanOrEqual(6);
     }
+  });
+
+  it('Perform comes first and carries the Modes step; no copy points at EXPORT in the top bar (#301)', () => {
+    expect(TOUR_SECTIONS[0].id).toBe('performance');
+    expect(TOUR_SECTIONS[0].steps[0].anchor).toBe('topbar.modes');
+    const modes = TOUR_SECTIONS[0].steps[0].body;
+    expect(modes).toContain('\u22ef holds EXPORT');
+    const library = TOUR_SECTIONS.find((s) => s.id === 'library')!;
+    expect(library.steps.map((s) => s.anchor)).not.toContain('topbar.modes');
   });
 });

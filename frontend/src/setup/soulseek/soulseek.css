@@ -26,6 +26,7 @@
 .sk-form label {
   display: grid;
   grid-template-columns: 96px minmax(0, 280px);
+  min-width: 0;
   align-items: center;
   gap: var(--space-12);
 }
@@ -42,6 +43,7 @@
 }
 .sk-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: var(--space-8);
   justify-content: flex-end;
 }

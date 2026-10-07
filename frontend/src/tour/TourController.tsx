@@ -16,6 +16,7 @@ import { hasKeyboardOverlay } from '../components/performance/performanceKeys';
 import { tourSection } from './steps';
 import { visibleSteps } from './anchors';
 import { TourOverlay } from './TourOverlay';
+import { activeTutorial, lessonById, subscribeTutorial, tutorialVersion } from '../tutorials/tutorialState';
 import {
   activeTourSection,
   allToursSkipped,
@@ -34,12 +35,20 @@ function suppressed(): boolean {
 }
 
 export function TourController() {
+  const tutorial = useSyncExternalStore(subscribeTutorial, tutorialVersion);
   const version = useSyncExternalStore(subscribeTour, tourVersion);
   const [active, setActive] = useState<{ section: TourSectionId; auto: boolean } | null>(null);
   // A consumed replay request survives effect re-runs (the navigation it
   // triggers — mode switch, Settings toggle — bumps the store version and
   // would otherwise cancel the polling below mid-flight).
   const replayRef = useRef<TourSectionId | null>(null);
+  useEffect(() => {
+    const lesson = activeTutorial();
+    if (active?.auto && lesson && lessonById(lesson).area === active.section) {
+      markSectionSeen(active.section);
+      setActive(null);
+    }
+  }, [active, tutorial]);
 
   useEffect(() => {
     // Explicit replay beats everything, including a tour already open.
@@ -51,6 +60,9 @@ export function TourController() {
     const requested = replayRef.current;
     if (!requested && active) return;
     const candidate = requested ?? activeTourSection();
+    if (candidate === null) return;
+    // First entry teaches a real Transition. Coach marks remain explicit replay.
+    if (!requested && candidate === 'edit') return;
     if (!requested && (allToursSkipped() || isSectionSeen(candidate))) return;
     const section = tourSection(candidate);
     if (!section) return;
@@ -65,6 +77,8 @@ export function TourController() {
         return;
       }
       if (!requested && suppressed()) return;
+      const lesson = activeTutorial();
+      if (!requested && lesson && lessonById(lesson).area === candidate) return;
       if (requested && ++tries > 20) {
         replayRef.current = null;
         clearInterval(timer);
@@ -76,7 +90,7 @@ export function TourController() {
       setActive({ section: candidate, auto: !requested });
     }, 250);
     return () => clearInterval(timer);
-  }, [version, active]);
+  }, [version, active, tutorial]);
 
   if (!active) return null;
   const section = tourSection(active.section);

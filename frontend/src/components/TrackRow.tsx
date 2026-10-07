@@ -17,6 +17,7 @@ import {
   rowEvidenceTitle,
   type TransitionMark,
 } from './rowEvidence';
+import { fileBasename } from '../utils/pathDisplay';
 import './TrackRow.css';
 
 /** Saved-Transition mark state for one source deck (transition-library
@@ -145,7 +146,7 @@ const TrackRow = memo(function TrackRow({
   // row memo with object props.
   const deckEvidence = parseRowEvidence(evidence);
   // Extract just the filename from the full path
-  const filename = track.filename.split('/').pop() || track.filename;
+  const filename = fileBasename(track.filename);
   const holdingDecks =
     loadedOn === 'none'
       ? []

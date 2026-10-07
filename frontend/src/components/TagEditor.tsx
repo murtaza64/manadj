@@ -13,6 +13,7 @@ import TagManagementModal from './TagManagementModal';
 import { formatKeyDisplay } from '../utils/keyUtils';
 import { getKeyColor } from '../utils/displayColors';
 import { useViewActive } from '../contexts/viewActive';
+import { fileBasename } from '../utils/pathDisplay';
 import './TagEditor.css';
 
 interface Props {
@@ -222,7 +223,7 @@ const TagEditor = forwardRef<TagEditorHandle, Props>(({ track, onSave, onUpdate,
   }, [isEnergyEditMode, viewActive]);
 
   // Extract just the filename from the full path
-  const filename = track?.filename.split('/').pop() || 'No track selected';
+  const filename = (track && fileBasename(track.filename)) || 'No track selected';
 
   return (
     <div className={`tag-editor ${isDisabled ? 'tag-editor-disabled' : ''}`}>
