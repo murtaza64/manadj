@@ -67,6 +67,7 @@ import {
   type RoutineDeck,
 } from '../sets/routinePlan';
 import { useToast } from '../components/Toast';
+import { isTrackDrag, readTrackDragPayload } from '../selection/trackDrag';
 import { RoutinePlayer } from './RoutinePlayer';
 import { RoutineTimeline, type TrimRange } from './RoutineTimeline';
 import { consumeRoutineEdit, OPEN_ROUTINE_EVENT } from './openRoutine';
@@ -77,6 +78,16 @@ import { openCandidateInEditor, openRoutineTakeInEditor } from './openFlow';
 import { openRoutineSource } from './provenance';
 import { editsAreEmpty, emptyEdits, parseEdits } from './routineDraft';
 import { RoutineDraftStore, useRoutineDraft, editsForSave } from './routineDraftStore';
+import {
+  defaultEntryPos,
+  emptyStructure,
+  MIN_PERSIST_SLOTS,
+  snapEntryBeat,
+  structureForSave,
+  structureFromDetail,
+  structureKey,
+  structureToDetail,
+} from './authoredMix';
 import {
   beatLabel,
   buildEditorRoutine,
@@ -123,7 +134,11 @@ type OpenedMix =
    * Routine Take or miner candidate opened through the promotion PREVIEW
    * — editable, auditionable, discardable; NOTHING persists until the
    * explicit Promote (reverses #170's promote-on-open). */
-  | { kind: 'review'; source: 'routine-take' | 'candidate'; uuid: string };
+  | { kind: 'review'; source: 'routine-take' | 'candidate'; uuid: string }
+  /** A BLANK authored draft (ADR 0039, gh#325): kind-fluid, client-minted
+   * uuid, persists nothing below 3 slots. Its first persist mints the
+   * authored Routine under the same uuid and flips this to `routine`. */
+  | { kind: 'blank'; uuid: string };
 
 function restoreLastMix(): OpenedMix | null {
   try {
@@ -165,7 +180,8 @@ export default function RoutineEditorView() {
           D: decks.D.engine,
         },
         audible: () => isAudible('routine-editor'),
-        constrainToBounds: () => openedRef.current?.kind === 'routine',
+        constrainToBounds: () =>
+          openedRef.current?.kind === 'routine' || openedRef.current?.kind === 'blank',
         // The provider's one Load path (ADR 0022). Deck reuse (gh#170
         // pass 2) flips a deck's occupant mid-span — the player asks for
         // the incoming track the moment the occupancy opens.
@@ -225,7 +241,7 @@ export default function RoutineEditorView() {
       const cast = routineRowsRef.current.find((r) => r.uuid === o.uuid)?.cast;
       return cast && cast.length > 0 ? `r:${cast.join(',')}` : `ru:${o.uuid}`;
     }
-    return null; // review drafts: no pinnable move (yet)
+    return null; // review/blank drafts: no pinnable move (yet)
   }, []);
   /** Re-point the armed Set pin — only for opens INSIDE the armed move. */
   /** Request-initiated opens must not re-point the pin — only SWITCHES
@@ -244,6 +260,7 @@ export default function RoutineEditorView() {
     if (
       !opened ||
       opened.kind === 'review' ||
+      opened.kind === 'blank' ||
       (opened.kind === 'transition' && (opened.seed || opened.reviewTakeUuid))
     )
       return;
@@ -380,9 +397,35 @@ export default function RoutineEditorView() {
         case 'cameo':
           toast('Cameo editing on the slot surface lands in a later phase-2 round');
           return;
-        case 'new-blank':
-          toast('Blank kind-fluid drafts (ADR 0039) land with #198');
+        case 'new-blank': {
+          // Blank kind-fluid draft (ADR 0039, gh#325): nothing persists
+          // until 3 slots. Chip tracks seed the first slots (bar-staggered).
+          const uuid = crypto.randomUUID();
+          const seeds = ref.seedTrackIds ?? [];
+          let drops: { trackId: number; entryPos: number }[] = [];
+          if (seeds.length > 0) {
+            setOpenFlowBusy(true);
+            try {
+              const cues = await api.hotcues.getBulk(seeds);
+              drops = seeds.map((id) => ({ trackId: id, entryPos: defaultEntryPos(cues[id]) }));
+            } catch (err) {
+              toast(`Blank mix seeding failed: ${err instanceof Error ? err.message : String(err)}`);
+            } finally {
+              if (request === openRequestRef.current) setOpenFlowBusy(false);
+            }
+            if (request !== openRequestRef.current) return false;
+          }
+          draftStore.load(uuid, { ...emptyEdits(), authored: emptyStructure() });
+          if (drops.length > 0) {
+            draftStore.addSlots(drops, 64);
+            // Seeding is part of opening, not an undoable edit.
+            draftStore.load(uuid, draftStore.getSnapshot().edits);
+          }
+          loadedForRef.current = uuid;
+          versionAtLoadRef.current = draftStore.getSnapshot().version;
+          setOpened({ kind: 'blank', uuid });
           return;
+        }
         case 'routine-take':
           // Draft-everywhere (#205): open as a REVIEW DRAFT via the
           // promotion preview — no minting on open.
@@ -393,6 +436,7 @@ export default function RoutineEditorView() {
           return;
       }
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [queryClient, toast, followPin, moveKeyOf]
   );
 
@@ -590,12 +634,36 @@ export default function RoutineEditorView() {
     staleTime: Infinity,
   });
 
+  // ── The draft layer (gh#170 pass 2) ──────────────────────────────────
+  const [draftStore] = useState(() => new RoutineDraftStore());
+  const draft = useRoutineDraft(draftStore);
+
+  // Authored mixes (ADR 0039, gh#325): the structure lives in the draft
+  // (undo + autosave); the editor builds from a detail derived from it.
+  const authoredStruct =
+    opened && draft.routineUuid === opened.uuid ? draft.edits.authored : undefined;
+  const authoredKey = structureKey(authoredStruct);
+  const authoredDetail = useMemo(
+    () =>
+      authoredStruct && opened
+        ? structureToDetail(opened.uuid, routineDetail?.name ?? null, authoredStruct)
+        : undefined,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [authoredKey, opened?.uuid, routineDetail?.name]
+  );
+  const isAuthored =
+    opened?.kind === 'blank' || (opened?.kind === 'routine' && !!routineDetail?.authored);
+
   const detail: RoutineDetailWire | undefined =
     opened?.kind === 'transition'
       ? proj?.detail
       : opened?.kind === 'review'
         ? previewDetail
-        : routineDetail;
+        : isAuthored
+          ? authoredDetail
+          : routineDetail;
+  /** An authored draft with no slots yet — the blank canvas. */
+  const blankCanvas = isAuthored && !!authoredDetail && authoredDetail.cast.length === 0;
 
   // ── Cast tracks + waveforms ──────────────────────────────────────────
   const cast = useMemo(() => detail?.cast ?? [], [detail]);
@@ -696,15 +764,14 @@ export default function RoutineEditorView() {
   }, [detail]);
   const effectiveBpm = targetBpm ?? nativeBpm;
 
-  // ── The draft layer (gh#170 pass 2) ──────────────────────────────────
-  const [draftStore] = useState(() => new RoutineDraftStore());
-  const draft = useRoutineDraft(draftStore);
   // Load persisted edits when the open ARTIFACT changes — keyed on the
   // uuid, never the detail object: the autosave response updates the
   // query cache (new detail identity, same artifact), and reloading then
   // would reset undo history mid-session and clobber in-flight edits.
   const detailRef = useRef(detail);
   detailRef.current = detail;
+  const routineDetailRef = useRef(routineDetail);
+  routineDetailRef.current = routineDetail;
   // One load per opened artifact (#205): routines load their persisted
   // edits layer; pair projections load the PROJECTION's edits (drawn
   // lanes/jumps as authored edits) — the diff baseline for lossless save.
@@ -726,21 +793,33 @@ export default function RoutineEditorView() {
       const d = detailRef.current;
       if (!d || !d.uuid.startsWith('preview-')) return; // preview in flight
       draftStore.load(d.uuid, emptyEdits());
+    } else if (opened.kind === 'blank') {
+      return; // loaded by the open path itself
     } else {
-      const d = detailRef.current;
+      const d = routineDetailRef.current;
       if (!d || d.uuid !== opened.uuid) return; // detail still in flight
-      draftStore.load(d.uuid, parseEdits(d.edits));
+      draftStore.load(
+        d.uuid,
+        d.authored
+          ? { ...parseEdits(d.edits), authored: structureFromDetail(d) }
+          : parseEdits(d.edits)
+      );
     }
     loadedForRef.current = opened.uuid;
     versionAtLoadRef.current = draftStore.getSnapshot().version;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [opened, proj, detail?.uuid, draftStore]);
+  }, [opened, proj, detail?.uuid, routineDetail?.uuid, draftStore]);
 
   // Debounced autosave (the pairStore idiom): every draft change PUTs the
   // edits layer after a quiet moment. The response updates the query
   // cache silently — no refetch loop (the view builds from the LIVE
   // draft anyway).
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const authoredSaveChainRef = useRef<Promise<void>>(Promise.resolve());
+  /** Authored uuids known to exist server-side (create vs put). */
+  const authoredPersistedRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (routineDetail?.authored) authoredPersistedRef.current.add(routineDetail.uuid);
+  }, [routineDetail]);
   useEffect(() => {
     return draftStore.subscribe(() => {
       const snap = draftStore.getSnapshot();
@@ -820,6 +899,41 @@ export default function RoutineEditorView() {
             .catch((err) => console.error('transition autosave failed', err));
           return;
         }
+        if (edits.authored) {
+          // Authored mix (ADR 0039, gh#325): structure + edits in one
+          // write. Nothing persists below 3 slots (2-slot → Transition is
+          // #330); the first persist mints the Routine under the draft's
+          // uuid. Saves serialize so a create is never raced by a put.
+          if (o?.uuid !== uuid || (o.kind !== 'blank' && o.kind !== 'routine')) return;
+          if (edits.authored.slots.length < MIN_PERSIST_SLOTS) return;
+          if (version === versionAtLoadRef.current) return; // opened, not edited
+          const body = {
+            ...structureForSave(edits.authored),
+            edits: editsForSave(edits) as Record<string, unknown> | null,
+          };
+          authoredSaveChainRef.current = authoredSaveChainRef.current
+            .then(async () => {
+              const persisted = authoredPersistedRef.current.has(uuid);
+              const d = persisted
+                ? await api.routines.putStructure(uuid, body)
+                : await api.routines.createAuthored({ uuid, ...body });
+              authoredPersistedRef.current.add(uuid);
+              queryClient.setQueryData(['routine-detail', uuid], d);
+              queryClient.setQueryData(['routine', uuid], d);
+              // Cast/duration show in the picker and Set panes.
+              await queryClient.invalidateQueries({ queryKey: ['routines'] });
+              if (!persisted) {
+                setOpened((prev) =>
+                  prev?.kind === 'blank' && prev.uuid === uuid ? { kind: 'routine', uuid } : prev
+                );
+              }
+            })
+            .catch((err) => {
+              console.error('authored routine save failed', err);
+              toast(`Save failed: ${err instanceof Error ? err.message : String(err)}`);
+            });
+          return;
+        }
         void api.routines
           .saveEdits(uuid, editsForSave(edits) as Record<string, unknown> | null)
           .then((d) => {
@@ -832,7 +946,7 @@ export default function RoutineEditorView() {
           .catch((err) => console.error('routine edits autosave failed', err));
       }, 700);
     });
-  }, [draftStore, queryClient]);
+  }, [draftStore, queryClient, toast]);
   useEffect(
     () => () => {
       if (saveTimer.current) clearTimeout(saveTimer.current);
@@ -1253,7 +1367,7 @@ export default function RoutineEditorView() {
   );
 
   // Playback bounds share the draft's autosave and gesture undo history.
-  const trimEnabled = opened?.kind === 'routine';
+  const trimEnabled = opened?.kind === 'routine' || opened?.kind === 'blank';
   const trim = editor?.planned.playbackBounds ?? null;
   const playbackDurationBeats = trimEnabled && trim
     ? trim.endBeat - trim.startBeat
@@ -1271,6 +1385,53 @@ export default function RoutineEditorView() {
     else endBeat = Math.max(endBeat, startBeat + 8);
     draftStore.setPlaybackBounds({ startBeat, endBeat });
   }, [trimEnabled, editor, draftStore]);
+
+  // ── Authored structure (ADR 0039, gh#325) ────────────────────────────
+  /** Drag-to-add: library tracks land as slots at the drop beat (bar-
+   * snapped; shift = fine). Entry position = Hot Cue 1, else track start;
+   * tracks without a BPM are refused (the beat-domain build needs one). */
+  const dropTracks = useCallback(
+    async (trackIds: number[], beat: number, fine: boolean) => {
+      const o = openedRef.current;
+      const uuid = o?.uuid;
+      if (!uuid || !draftStore.getSnapshot().edits.authored) return;
+      const ids = [...new Set(trackIds)];
+      const known = await Promise.all(
+        ids.map((id) => trackByIdMap.get(id) ?? api.tracks.getById(id).catch(() => null))
+      );
+      const usable = ids.filter((_, i) => (known[i]?.bpm ?? 0) > 0);
+      if (usable.length < ids.length) {
+        toast(`${ids.length - usable.length} track(s) skipped — no BPM (analyze them first)`);
+      }
+      if (usable.length === 0) return;
+      let cues: Record<number, HotCue[]> = {};
+      try {
+        cues = await api.hotcues.getBulk(usable);
+      } catch {
+        // Hot Cue 1 is a default, not a requirement: fall back to track start.
+      }
+      if (openedRef.current?.uuid !== uuid) return; // switched mid-flight
+      draftStore.addSlots(
+        usable.map((id) => ({ trackId: id, entryPos: defaultEntryPos(cues[id]) })),
+        snapEntryBeat(beat, !fine)
+      );
+    },
+    [draftStore, trackByIdMap, toast]
+  );
+  const removeSlot = useCallback(
+    (slotId: string) => {
+      const s = draftStore.getSnapshot().edits.authored;
+      const o = openedRef.current;
+      if (!s || !o) return;
+      if (o.kind === 'routine' && s.slots.length <= MIN_PERSIST_SLOTS) {
+        toast('A saved Routine keeps ≥ 3 slots — converting to a Transition is #330. Add a slot first, or delete the Routine.');
+        return;
+      }
+      draftStore.removeSlot(slotId);
+    },
+    [draftStore, toast]
+  );
+  const [canvasOver, setCanvasOver] = useState(false);
 
   // ── Transport readout (rAF text — beats advance continuously) ────────
   const beatReadoutRef = useRef<HTMLSpanElement>(null);
@@ -1437,7 +1598,7 @@ export default function RoutineEditorView() {
   );
   // Scoped sibling cycling: within the current artifact's move.
   const cycle = useMemo(() => {
-    if (!opened || opened.kind === 'review') return null;
+    if (!opened || opened.kind === 'review' || opened.kind === 'blank') return null;
     if (opened.kind === 'transition') {
       if (opened.seed) return null; // unsaved drafts have no siblings yet
       return siblingCycle(
@@ -1465,8 +1626,11 @@ export default function RoutineEditorView() {
   // track-title idiom) — renames persist to the open artifact by kind.
   const currentName =
     opened?.kind === 'transition' ? pairRow?.name ?? '' : routineDetail?.name ?? '';
+  const authoredCount = authoredDetail?.cast.length ?? 0;
   const reviewLabel =
-    opened?.kind === 'review'
+    opened?.kind === 'blank'
+      ? `New mix — ${authoredCount === 0 ? 'blank canvas' : `${authoredCount} slot${authoredCount === 1 ? '' : 's'}, unsaved`}`
+      : opened?.kind === 'review'
       ? `${detail ? `${detail.cast.length}-track ` : ''}${opened.source === 'routine-take' ? 'Routine Take' : 'candidate'} — review draft`
       : opened?.kind === 'transition' && opened.reviewTakeUuid
         ? 'Take — review draft'
@@ -1479,7 +1643,7 @@ export default function RoutineEditorView() {
         : 'Routine';
   // Persisted artifacts rename; an unsaved seed has no row to rename yet.
   const canRename =
-    opened?.kind === 'review' ? false : opened?.kind === 'transition' ? !!pairRow : !!routineDetail;
+    opened?.kind === 'review' || opened?.kind === 'blank' ? false : opened?.kind === 'transition' ? !!pairRow : !!routineDetail;
   const currentTracks =
     opened?.kind === 'transition'
       ? `${entryTrack?.title || entryTrack?.filename || `#${opened.aTrackId}`} → ${exitTrack?.title || exitTrack?.filename || `#${opened.bTrackId}`}`
@@ -1522,7 +1686,9 @@ export default function RoutineEditorView() {
       ? `transition:${opened.uuid}`
       : opened.kind === 'review'
         ? `${opened.source}:${opened.uuid}`
-        : `routine:${opened.uuid}`;
+        : opened.kind === 'blank'
+          ? `blank:${opened.uuid}`
+          : `routine:${opened.uuid}`;
 
   return (
     <div className="routine-editor">
@@ -1536,7 +1702,11 @@ export default function RoutineEditorView() {
               ? opened.source === 'routine-take'
                 ? '◇ REVIEW'
                 : '⧉ REVIEW'
-              : '◆ ROUTINE'}
+              : opened?.kind === 'blank'
+                ? '+ NEW MIX'
+                : isAuthored
+                  ? '◆ ROUTINE · AUTHORED'
+                  : '◆ ROUTINE'}
         </span>
         {opened && (
           <span className="mp-current">
@@ -1569,6 +1739,16 @@ export default function RoutineEditorView() {
               </button>
             )}
             {currentTracks && <span className="mp-current-tracks">· {currentTracks}</span>}
+            {opened.kind === 'blank' && (
+              <span className="re-authored-hint" role="status">
+                {authoredCount < MIN_PERSIST_SLOTS
+                  ? `drag tracks from the library onto the canvas · saves as a Routine from ${MIN_PERSIST_SLOTS} slots${authoredCount === 2 ? ' (2-track: use + New Transition — #330)' : ''}`
+                  : 'saving…'}
+              </span>
+            )}
+            {opened.kind === 'routine' && isAuthored && (
+              <span className="re-authored-hint">drag tracks onto the timeline to add slots</span>
+            )}
           </span>
         )}
         {setCtx && (
@@ -1599,7 +1779,7 @@ export default function RoutineEditorView() {
             </button>
           </span>
         )}
-        {detail && (
+        {detail && detail.cast.length > 0 && (
           <>
             <span className="re-contract">
               enters with{' '}
@@ -1636,7 +1816,7 @@ export default function RoutineEditorView() {
         )}
       </div>
 
-      {detail && (
+      {detail && detail.cast.length > 0 && (
         <div className="re-transport" data-tour="edit.transport">
           <button
             className={`re-play${playing ? ' on' : ''}${armPending ? ' arming' : ''}`}
@@ -1771,6 +1951,41 @@ export default function RoutineEditorView() {
               Transitions, Cameos and Routines (⇄ Transitions open here through the pair↔slot
               translation, ADR 0037), or come in from a Set pin / the Transition history's ◆
               rows.
+              <div>
+                <button
+                  className="btn btn-mini re-newblank"
+                  onClick={() => void openMixRef({ kind: 'new-blank' })}
+                  title="Author a mix from scratch (ADR 0039): drag tracks from the library onto an empty canvas"
+                >
+                  + New blank mix
+                </button>
+              </div>
+            </div>
+          )}
+          {blankCanvas && (
+            <div
+              className={`re-blank-canvas${canvasOver ? ' over' : ''}`}
+              onDragOver={(e) => {
+                if (!isTrackDrag(e.dataTransfer)) return;
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'copy';
+                setCanvasOver(true);
+              }}
+              onDragLeave={() => setCanvasOver(false)}
+              onDrop={(e) => {
+                setCanvasOver(false);
+                if (!isTrackDrag(e.dataTransfer)) return;
+                e.preventDefault();
+                void dropTracks(readTrackDragPayload(e.dataTransfer), 64, e.shiftKey);
+              }}
+            >
+              <b>Blank canvas</b>
+              <span>Drag tracks from the library below and drop them here.</span>
+              <span>
+                The first track enters at beat 0. Drop the next ones on the timeline where they
+                should enter (snapped to the bar; hold shift for no snap).
+              </span>
+              <span>Saves as a Routine once it has {MIN_PERSIST_SLOTS} slots.</span>
             </div>
           )}
           {detail && missingBpm && (
@@ -1798,6 +2013,9 @@ export default function RoutineEditorView() {
               mode={editorMode}
               onModeHome={() => setEditorMode('select')}
               pairMode={opened?.kind === 'transition'}
+              authored={isAuthored}
+              onDropTracks={isAuthored ? (ids, beat, fine) => void dropTracks(ids, beat, fine) : undefined}
+              onRemoveSlot={isAuthored ? removeSlot : undefined}
             />
           )}
         </div>
