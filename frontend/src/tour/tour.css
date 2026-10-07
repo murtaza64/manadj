@@ -35,6 +35,11 @@
   gap: var(--space-8);
 }
 
+.tour-popover-kind {
+  color: var(--subtext0);
+  font-size: var(--font-small);
+}
+
 .tour-popover-title {
   color: var(--accent);
   font-size: var(--font-large);
@@ -55,26 +60,13 @@
 
 .tour-popover-actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--space-8);
 }
 
 .tour-popover-spacer {
   flex: 1;
-}
-
-.tour-skip {
-  background: none;
-  border: none;
-  padding: 0;
-  color: var(--overlay1);
-  font-size: var(--font-small);
-  cursor: pointer;
-}
-
-.tour-skip:hover {
-  color: var(--subtext1);
-  text-decoration: underline;
 }
 
 /* ── TopBar ? replay button ──────────────────────────────────────────── */

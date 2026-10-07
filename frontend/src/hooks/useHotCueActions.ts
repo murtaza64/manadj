@@ -5,6 +5,7 @@ import { useHotCues, useSetHotCue, useDeleteHotCue } from './useHotCues';
 import { snapToNearestBeat } from '../playback/quantize';
 import { isQuantizeOn } from '../playback/quantizeStore';
 import type { HotCue } from '../types';
+import { reportTutorialAction } from '../tutorials/engine';
 
 export interface HotCueActions {
   /** Hot cues by slot number for the given track. */
@@ -35,6 +36,8 @@ export interface HotCueSlotHandlers {
   trigger: (slot: number, timeSeconds: number) => void;
   /** Release, for hold-style triggers (absent = taps, e.g. editor gestures). */
   release?: (slot: number, timeSeconds: number) => void;
+  /** Confirmed placement only, not cue decoration or an optimistic cache write. */
+  onPlaced?: () => void;
 }
 
 /**
@@ -76,7 +79,7 @@ export function useHotCueSlots(
         trackId,
         slotNumber: slot,
         data: { time_seconds: time },
-      });
+      }, { onSuccess: handlers.onPlaced });
     } else {
       handlers.trigger(slot, cue.time_seconds);
     }
@@ -116,7 +119,7 @@ export function useHotCueSlots(
  * the Library don't re-render on every stab.
  */
 export function useHotCueActions(trackId: number | null): HotCueActions {
-  const { engine } = useDeck();
+  const { deck, engine } = useDeck();
   const ready = useDeckReady();
   const actions = useHotCueSlots(trackId, {
     enabled: ready,
@@ -124,6 +127,9 @@ export function useHotCueActions(trackId: number | null): HotCueActions {
     getPlayhead: () => engine.getPlayhead(),
     trigger: (slot, t) => engine.hotCueDown(slot, t),
     release: (slot, t) => engine.hotCueUp(slot, t),
+    onPlaced: () => {
+      if (engine.getSnapshot().trackId === trackId) reportTutorialAction({ type: 'hotcue-set', deck });
+    },
   });
   const stops = useMemo(
     () =>

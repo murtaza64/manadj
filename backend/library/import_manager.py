@@ -5,6 +5,7 @@ from collections.abc import Callable
 from pathlib import Path
 from sqlalchemy.orm import Session
 from ..models import Track
+from ..sync_common.matching import path_key
 from ..track_metadata import FileMetadataError, read_file_metadata
 from ..track_metadata.units import bpm_to_centibpm
 from .models import (
@@ -101,9 +102,10 @@ class LibraryImportManager:
         self.library_path = Path(library_path)
 
     def existing_paths(self) -> set[str]:
-        """Resolved paths of every Track, archived included (never re-proposed)."""
+        """``path_key``s of every Track's resolved path, archived included
+        (never re-proposed). Test membership with ``path_key(str(path))``."""
         rows = self.manadj_session.query(Track.filename).all()
-        return {str(Path(t.filename).resolve()) for t in rows}
+        return {path_key(str(Path(t.filename).resolve())) for t in rows}
 
     def get_import_candidates(
         self,
@@ -136,7 +138,7 @@ class LibraryImportManager:
             if progress is not None and (i % 25 == 0 or i == total):
                 progress(i, total)
             # Skip if already in database
-            if str(file_path) in existing_filenames:
+            if path_key(str(file_path)) in existing_filenames:
                 stats.already_in_db += 1
                 continue
 

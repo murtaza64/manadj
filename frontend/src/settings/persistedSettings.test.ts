@@ -12,6 +12,7 @@ import {
   hydratePersistedSettings,
   writeSetting,
   removeSetting,
+  shippedDefault,
 } from './persistedSettings';
 
 function fakeStorage(initial: Record<string, string> = {}): Storage {
@@ -108,6 +109,56 @@ describe('hydratePersistedSettings', () => {
 
     await expect(hydratePersistedSettings()).resolves.toBeUndefined();
     expect(localStorage.getItem('manadj-quantize')).toBe('false');
+  });
+});
+
+describe('shipped defaults (setup-guides #293)', () => {
+  const DEFAULTS = { 'manadj-quantize': 'true', 'manadj-keylock': '{"A":true}', trackListSort: '{"column":"bpm"}' };
+
+  function backend(rows: Record<string, string>) {
+    return mockFetch((url) => (url.endsWith('/defaults') ? { defaults: DEFAULTS } : url.endsWith('/seed') ? { seeded: true } : { settings: rows }));
+  }
+
+  it('fills only unset keys: DB rows and local values win', async () => {
+    localStorage.setItem('manadj-keylock', '{"A":false}');
+    backend({ trackListSort: '{"column":"title"}' });
+
+    await hydratePersistedSettings();
+
+    expect(localStorage.getItem('manadj-quantize')).toBe('true');
+    expect(localStorage.getItem('manadj-keylock')).toBe('{"A":false}');
+    expect(localStorage.getItem('trackListSort')).toBe('{"column":"title"}');
+    expect(shippedDefault('manadj-quantize')).toBe('true');
+  });
+
+  it('applies defaults on an empty DB without writing them to the DB', async () => {
+    const fetchMock = backend({});
+
+    await hydratePersistedSettings();
+    expect(localStorage.getItem('trackListSort')).toBe('{"column":"bpm"}');
+
+    // Next boot: DB still empty, cache now holds the defaults — not seeded.
+    await hydratePersistedSettings();
+    const writes = fetchMock.mock.calls.filter(([url, init]) => url.endsWith('/seed') || init?.method === 'PUT');
+    expect(writes).toEqual([]);
+  });
+
+  it('does not push local values equal to their default, but pushes real edits', async () => {
+    localStorage.setItem('manadj-quantize', 'true');
+    localStorage.setItem('trackListSort', '{"column":"key"}');
+    const fetchMock = backend({ 'manadj-keylock': '{}' });
+
+    await hydratePersistedSettings();
+    await vi.waitFor(() => {
+      expect(fetchMock.mock.calls.some(([url, init]) => init?.method === 'PUT' && url.endsWith('/trackListSort'))).toBe(true);
+    });
+    expect(fetchMock.mock.calls.some(([url, init]) => init?.method === 'PUT' && url.endsWith('/manadj-quantize'))).toBe(false);
+  });
+
+  it('ignores defaults for keys outside the inventory', async () => {
+    mockFetch((url) => (url.endsWith('/defaults') ? { defaults: { 'manadj-app-mode': 'perf' } } : { settings: {} }));
+    await hydratePersistedSettings();
+    expect(localStorage.getItem('manadj-app-mode')).toBeNull();
   });
 });
 

@@ -2,9 +2,7 @@ import { useEffect } from 'react';
 import { attachMidiController } from '../midi/adapter';
 import { markMidiActivity } from '../midi/activity';
 import { dispatchMidiAction, forgetHardwareState } from '../midi/dispatch';
-import { INPULSE_300_MK2 } from '../midi/mappings/inpulse300mk2';
-import { DDJ_GRV6 } from '../midi/mappings/ddjGrv6';
-import { DDJ_SB3 } from '../midi/mappings/ddjSb3';
+import { MAPPINGS } from '../midi/mappings';
 
 /**
  * Mounts the Controller layer once, above the view switch (PRD scope):
@@ -17,7 +15,7 @@ export function MidiControllerBridge() {
   useEffect(
     () =>
       attachMidiController({
-        mappings: [INPULSE_300_MK2, DDJ_GRV6, DDJ_SB3],
+        mappings: MAPPINGS,
         onActivity: markMidiActivity,
         onAction: dispatchMidiAction,
         // Unplug forgets the physical-hardware picture (midi-controller

@@ -83,6 +83,7 @@ import {
   createBeatFxInsert,
   echoDelaySeconds,
   stepEchoBeats,
+  flangerPeriodSeconds,
 } from './beatFx';
 import type { BeatFxEffectId, BeatFxSectionState, BeatFxTarget } from './beatFx';
 import {
@@ -1199,11 +1200,16 @@ export class Mixer {
     if ((Object.keys(next) as (keyof BeatFxSettings)[]).every(
       (key) => next[key] === this.beatFxSettings[key]
     )) return;
+    const unitChanged = next.flangerLengthUnit !== this.beatFxSettings.flangerLengthUnit;
     this.beatFxSettings = next;
     saveBeatFxSettings(next);
     if (this.liveGraph()) {
       for (const channel of CHANNEL_IDS) this.strips![channel].beatFx.updateSettings(next);
       this.masterBeatFx?.updateSettings(next);
+      if (unitChanged) {
+        for (const channel of CHANNEL_IDS) this.applyBeatFxTiming(channel);
+        this.applyMasterBeatFxTiming();
+      }
     }
     this.notify('beatFxSettings');
   }
@@ -1294,9 +1300,11 @@ export class Mixer {
 
   private applyBeatFxTiming(channel: ChannelId, immediate = false): void {
     if (!this.strips) return;
-    const period = echoDelaySeconds(this.beatFxSection.beats, this.channelBeatSeconds[channel]);
-    this.strips[channel].beatFx.setDelaySeconds(period, immediate);
-    this.strips[channel].beatFx.setFlangerPeriodSeconds(period, immediate);
+    const beatSeconds = this.channelBeatSeconds[channel];
+    this.strips[channel].beatFx.setDelaySeconds(
+      echoDelaySeconds(this.beatFxSection.beats, beatSeconds), immediate
+    );
+    this.strips[channel].beatFx.setFlangerPeriodSeconds(this.flangerPeriod(beatSeconds), immediate);
   }
 
   private applyBeatFx(channel: ChannelId, immediate = false): void {
@@ -1328,12 +1336,15 @@ export class Mixer {
   }
 
   private applyMasterBeatFxTiming(immediate = false): void {
-    const period = echoDelaySeconds(
-      this.beatFxSection.beats,
-      this.channelBeatSeconds[this.beatFxTempoChannel]
+    const beatSeconds = this.channelBeatSeconds[this.beatFxTempoChannel];
+    this.masterBeatFx?.setDelaySeconds(echoDelaySeconds(this.beatFxSection.beats, beatSeconds), immediate);
+    this.masterBeatFx?.setFlangerPeriodSeconds(this.flangerPeriod(beatSeconds), immediate);
+  }
+
+  private flangerPeriod(beatSeconds: number): number {
+    return flangerPeriodSeconds(
+      this.beatFxSection.beats, beatSeconds, this.beatFxSettings.flangerLengthUnit
     );
-    this.masterBeatFx?.setDelaySeconds(period, immediate);
-    this.masterBeatFx?.setFlangerPeriodSeconds(period, immediate);
   }
 
   getCueLevel(): number {

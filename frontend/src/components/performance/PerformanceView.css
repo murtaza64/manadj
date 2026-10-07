@@ -237,6 +237,8 @@
 }
 
 .perf-fx-targets {
+  gap: 0;
+  margin-left: var(--space-2);
   padding-left: var(--space-6);
   border-left: 1px solid var(--surface1);
 }
@@ -283,6 +285,9 @@
   border-color: var(--surface1);
   flex-shrink: 0;
 }
+/* CH SELECT is one joined segmented strip (#285 review). */
+.perf-fx-targets > .perf-fx-ch + .perf-fx-ch { border-left: 0; }
+.perf-fx-targets > .perf-fx-ch.on + .perf-fx-ch { border-left: 0; }
 .perf-fx-ch.deck-a { color: var(--deck-a); }
 .perf-fx-ch.deck-b { color: var(--deck-b); }
 .perf-fx-ch.deck-c { color: var(--deck-c); }
@@ -295,18 +300,64 @@
   border-color: var(--success);
 }
 
+/* BEAT ◄ ►: 1/2 · size · x2 as one segmented unit, styled like the
+   deck beatjump row (.deck-jumprow). */
+.perf-fx-size {
+  display: inline-flex;
+  align-items: stretch;
+  border: 1px solid var(--surface1);
+}
+.perf-fx-size:hover { border-color: var(--text); }
+.perf-fx-size > .player-button {
+  border: 0;
+  padding: 1px var(--space-4);
+  font-size: var(--font-micro);
+  font-weight: 800;
+  color: var(--subtext0);
+}
+.perf-fx-size > .player-button:hover:not(:disabled) { background: var(--surface0); color: var(--text); }
 .perf-fx-beats {
   box-sizing: border-box;
-  width: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   min-width: 26px;
-  max-width: 26px;
-  padding-left: 0;
-  padding-right: 0;
-  text-align: center;
+  padding: 0 var(--space-4);
+  border-left: 1px solid var(--surface2);
+  border-right: 1px solid var(--surface2);
+  color: var(--warning);
+  font-size: var(--font-micro);
+  font-weight: 800;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* Flanger length reads in bars (#331): unit tag + accent so 1 BAR never
+ * reads as 1 beat. */
+.perf-fx-beats.bars { color: var(--accent); }
+.perf-fx-unit {
+  margin-left: 2px;
+  font-size: 0.8em;
+  letter-spacing: 0;
+}
+
+/* Beat FX key hints: keycap corner like the deck controls. */
+.perf-fx-row .player-button { position: relative; }
+.perf-fx-row .player-button > .perf-kbd {
+  position: absolute;
+  bottom: -7px;
+  right: -3px;
+  z-index: 1;
+  padding: 0 2px;
+  line-height: 1;
+  letter-spacing: 0;
+  white-space: nowrap;
+  pointer-events: none;
 }
 
 .perf-deck-count { display: inline-flex; flex-shrink: 0; }
+.perf-kbd-toggle-group { display: inline-flex; flex-shrink: 0; }
+.perf-kbd-toggle-group .perf-strip-toggle + .perf-strip-toggle { border-left: 0; }
 
 @media (max-width: 1279px) {
   .perf-strip {
@@ -357,6 +408,7 @@
 .perf-section-toggles {
   display: contents;
 }
+
 
 /* The toggle hides every on-control key hint */
 .perf-root.kbd-hints-off .perf-kbd { display: none; }
@@ -660,6 +712,23 @@
   font-style: italic;
   color: var(--overlay0);
 }
+
+/* Footer hand-off to the full tag editor (TagManagementModal) */
+.perf-tagpop-manage {
+  align-self: flex-start;
+  padding: var(--space-4) var(--space-8);
+  font-size: var(--font-small);
+  background: transparent;
+  border: 1px solid var(--surface1);
+  color: var(--subtext1);
+  cursor: pointer;
+}
+.perf-tagpop-manage:hover {
+  background: var(--surface0);
+  border-color: var(--text);
+  color: var(--text);
+}
+.perf-tagpop-manage:active { background: var(--surface1); }
 
 /* Energy picker: five mini squares, the set one lit */
 .perf-energy-picker { display: flex; gap: var(--space-2); flex-shrink: 0; }
@@ -1384,8 +1453,8 @@
 .perf-kbd-inline .perf-kbd { position: static; border: 0; padding: 0; }
 
 /* Retain the character's advance; replace the font's narrow, low Shift glyph. */
-.perf-kbd-shift { position: relative; color: transparent; }
-.perf-kbd-shift > svg {
+.perf-kbd-shift, .perf-kbd-ctrl { position: relative; color: transparent; }
+.perf-kbd-shift > svg, .perf-kbd-ctrl > svg {
   position: absolute;
   width: 100%;
   height: 0.9em;
@@ -1502,32 +1571,3 @@
   background: var(--surface0);
   border-color: var(--surface1);
 }
-.perf-keyboard-help-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 10000;
-  display: grid;
-  place-items: center;
-  background: #000b;
-}
-.perf-keyboard-help {
-  width: min(540px, calc(100vw - 24px));
-  max-height: calc(100dvh - 24px);
-  overflow: auto;
-  box-sizing: border-box;
-  padding: 16px;
-  background: var(--mantle);
-  border: 1px solid var(--accent);
-  color: var(--text);
-  font-size: 12px;
-}
-.perf-keyboard-help header, .perf-keyboard-help dl > div {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-}
-.perf-keyboard-help dl > div { padding: 5px 0; border-bottom: 1px solid var(--surface0); }
-.perf-keyboard-help dt { flex: 0 0 44%; color: var(--accent); font-family: monospace; }
-.perf-keyboard-help dd { margin: 0; flex: 1; }
-.perf-keyboard-help p { color: var(--subtext0); line-height: 1.5; }
-.perf-keyboard-help button { background: var(--surface0); color: var(--text); border: 1px solid var(--surface1); cursor: pointer; }
