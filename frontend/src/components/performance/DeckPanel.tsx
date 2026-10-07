@@ -38,6 +38,8 @@ import { BpmControl } from '../deckControls/BpmControl';
 import { HFader, Knob } from './MixerStrip';
 import { PlayGuideMinimapMarks } from '../../performance/PlayGuideMinimapMarks';
 import { TagPopover } from './TagPopover';
+import TagManagementModal from '../TagManagementModal';
+import { createPortal } from 'react-dom';
 import { useDeckDropTarget } from '../../selection/deckDrop';
 import { DeckDropOverlay } from '../../selection/DeckDropOverlay';
 import { NUDGE_BEND_PERCENT, composeRate, effectiveBpm, keyDrifted } from '../../playback/tempo';
@@ -552,6 +554,7 @@ function TrackZone({ track }: { track: Track | null }) {
   const [tagsOpenFor, setTagsOpenFor] = useState<number | null>(null);
   const tagsOpen = track !== null && tagsOpenFor === track.id;
   const tagRowRef = useRef<HTMLDivElement>(null);
+  const [manageTagsOpen, setManageTagsOpen] = useState(false);
 
   const commitField = (field: 'title' | 'artist') => (value: string) => {
     const trimmed = value.trim();
@@ -613,8 +616,24 @@ function TrackZone({ track }: { track: Track | null }) {
             anchorRef={tagRowRef}
             commit={(tagIds) => edit.commit({ tag_ids: tagIds })}
             onClose={() => setTagsOpenFor(null)}
+            onManage={() => {
+              setTagsOpenFor(null);
+              setManageTagsOpen(true);
+            }}
           />
         )}
+        {manageTagsOpen &&
+          createPortal(
+            <TagManagementModal
+              isOpen
+              onClose={() => {
+                setManageTagsOpen(false);
+                // Back to tagging this track with the edited vocabulary.
+                if (track) setTagsOpenFor(track.id);
+              }}
+            />,
+            document.body
+          )}
       </div>
       <div className="perf-track-row" title="Energy">
         <span className="perf-row-icon">

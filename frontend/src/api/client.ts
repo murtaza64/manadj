@@ -345,6 +345,24 @@ export const api = {
       return response.json();
     },
 
+    createCategory: async (category: { name: string; display_order?: number; color?: string }) => {
+      const response = await fetch(`${API_BASE}/tags/categories`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(category),
+      });
+      if (!response.ok) {
+        const body = await response.json().catch(() => null);
+        throw new Error(body?.detail ?? 'Failed to create category');
+      }
+      return response.json();
+    },
+
+    deleteCategory: async (id: number) => {
+      const response = await fetch(`${API_BASE}/tags/categories/${id}`, { method: 'DELETE' });
+      if (!response.ok) throw new Error('Failed to delete category');
+    },
+
     listByCategory: async (categoryId: number) => {
       const response = await fetch(`${API_BASE}/tags/categories/${categoryId}/tags`);
       return response.json();

@@ -12,6 +12,10 @@
  * clicking outside the anchor row closes. Every toggle saves instantly
  * through the caller's commit (tag_ids PATCH + cache invalidation).
  *
+ * "Manage…" (footer) hands off to the full TagManagementModal via
+ * onManage — the host closes this popover and mounts the modal, whose
+ * .modal-overlay suspends the deck key hubs (hasKeyboardOverlay).
+ *
  * Remount with key={track.id}: the selected set seeds from the track once
  * per mount, then local toggles are the optimistic truth.
  */
@@ -27,12 +31,15 @@ export function TagPopover({
   anchorRef,
   commit,
   onClose,
+  onManage,
 }: {
   track: Track;
   /** The anchor row (contains this popover) — clicks inside it don't close. */
   anchorRef: RefObject<HTMLDivElement | null>;
   commit: (tagIds: number[]) => void;
   onClose: () => void;
+  /** Open the full tag editor (add/remove Tags and Tag Categories). */
+  onManage?: () => void;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState('');
@@ -171,6 +178,11 @@ export function TagPopover({
           <span className="perf-tagpop-empty">no tags match</span>
         )}
       </div>
+      {onManage && (
+        <button className="perf-tagpop-manage" onClick={onManage}>
+          Manage…
+        </button>
+      )}
     </div>
   );
 }
