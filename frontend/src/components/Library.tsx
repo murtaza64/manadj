@@ -82,6 +82,10 @@ import {
   type PlaylistSort,
   type PlaylistSortColumn,
 } from '../utils/trackSort';
+import FileDropOverlay from '../dropImport/FileDropOverlay';
+import {
+  useFileDropImport, useFileDropTarget, useSuppressStrayFileDrops,
+} from '../dropImport/useFileDropImport';
 
 /** Which selection instance a row menu acts on. */
 type MenuPane = 'main' | 'editLibrary';
@@ -764,6 +768,21 @@ export default function Library({
     }
   };
 
+  // ── Drop import (#297): OS files dropped onto the track table import in
+  // place; in playlist view they are also appended to that playlist.
+  const importDroppedFiles = useFileDropImport();
+  const tableDropPlaylistId = selectedView === 'playlist' ? selectedPlaylistId : null;
+  const handleTableFiles = useCallback(
+    (dt: DataTransfer) => { void importDroppedFiles(dt, tableDropPlaylistId); },
+    [importDroppedFiles, tableDropPlaylistId],
+  );
+  const tableFileDrop = useFileDropTarget(handleTableFiles);
+  useSuppressStrayFileDrops();
+  const handleSidebarFileDrop = useCallback(
+    (playlistId: number, dt: DataTransfer) => { void importDroppedFiles(dt, playlistId); },
+    [importDroppedFiles],
+  );
+
   // ── Track-row context menu (playlist-editing 03) ───────────────────────
   const { menu: rowMenu, openMenu: openRowMenu, closeMenu: closeRowMenu } =
     useContextMenuState<{ track: Track; pane: MenuPane }>();
@@ -1129,6 +1148,7 @@ export default function Library({
           }}
           onSelectPlaylist={(id) => openSidebarEntry({ kind: 'playlist', id })}
           onTrackDrop={handleTrackDrop}
+          onFileDrop={handleSidebarFileDrop}
           selectedSetId={selectedSetId}
           onSelectSet={(id) => openSidebarEntry({ kind: 'set', id })}
           focused={sidebarFocused}
@@ -1375,15 +1395,28 @@ export default function Library({
                   playlistPaneRef.current = selectedView === 'playlist' ? el : null;
                 }}
                 onScroll={handleBrowseScroll}
-                onDragOver={selectedView === 'playlist' ? handlePlaylistPaneDragOver : undefined}
-                onDragLeave={selectedView === 'playlist' ? handlePlaylistPaneDragLeave : undefined}
-                onDrop={selectedView === 'playlist' ? handlePlaylistPaneDrop : undefined}
+                onDragOver={(e) => {
+                  if (tableFileDrop.onDragOver(e)) return;
+                  if (selectedView === 'playlist') handlePlaylistPaneDragOver(e);
+                }}
+                onDragLeave={(e) => {
+                  tableFileDrop.onDragLeave(e);
+                  if (selectedView === 'playlist') handlePlaylistPaneDragLeave(e);
+                }}
+                onDrop={(e) => {
+                  if (tableFileDrop.onDrop(e)) return;
+                  if (selectedView === 'playlist') handlePlaylistPaneDrop(e);
+                }}
                 style={{
                   position: 'relative',
                   flex: 1,
                   overflow: 'auto'
                 }}
               >
+                <FileDropOverlay
+                  rect={tableFileDrop.rect}
+                  label={tableDropPlaylistId !== null ? 'Drop to import and add to playlist' : 'Drop to import'}
+                />
                 {selectedView === 'playlist' && dropIndicator && (
                   <div
                     style={{

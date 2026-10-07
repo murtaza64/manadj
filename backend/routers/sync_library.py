@@ -5,7 +5,9 @@ from sqlalchemy.orm import Session
 from ..database import get_db
 from ..config import get_config
 from ..library.import_manager import LibraryImportManager
+from ..library.drop_import import drop_import
 from ..library.models import (
+    DropImportRequest, DropImportResult,
     LibraryImportResult, LibraryImportRequest,
     LibraryImportExecutionResult
 )
@@ -59,3 +61,16 @@ def import_library_tracks(
         ]
 
     return manager.import_tracks(candidates)
+
+
+@router.post("/sync/library/drop-import", response_model=DropImportResult)
+def drop_import_tracks(request: DropImportRequest, db: Session = Depends(get_db)):
+    """Disk Import files/folders dropped from anywhere, in place (no copy).
+
+    Independent of tracks_directory. Optionally appends the imported Tracks
+    to `playlist_id`.
+    """
+    try:
+        return drop_import(db, request.paths, request.playlist_id)
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e))

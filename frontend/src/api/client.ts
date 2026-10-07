@@ -26,6 +26,8 @@ import type {
   LibraryImportResult,
   LibraryImportRequest,
   LibraryImportExecutionResult,
+  DropImportRequest,
+  DropImportResult,
   SourceItem,
   AcquisitionRefreshStats,
   Classification,
@@ -1037,6 +1039,17 @@ export const api = {
         body: JSON.stringify(request),
       });
       if (!response.ok) throw new Error('Failed to import tracks');
+      return response.json();
+    },
+
+    /** Drop import (#297): dropped files/folders, imported in place. */
+    dropImport: async (request: DropImportRequest): Promise<DropImportResult> => {
+      const response = await fetch(`${API_BASE}/sync/library/drop-import`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(request),
+      });
+      if (!response.ok) throw new Error('Drop import failed');
       return response.json();
     },
   },

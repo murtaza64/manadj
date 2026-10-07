@@ -16,3 +16,10 @@ contextBridge.exposeInMainWorld("manadjRecording", {
   save: (request) => ipcRenderer.invoke("recording:save", request),
   discard: (id) => ipcRenderer.invoke("recording:discard", id),
 });
+
+// Drop import (#297): absolute paths for files/folders dragged in from the
+// filesystem (File.path is gone since Electron 32).
+const { webUtils } = require("electron");
+contextBridge.exposeInMainWorld("manadjFiles", {
+  pathForFile: (file) => webUtils.getPathForFile(file),
+});

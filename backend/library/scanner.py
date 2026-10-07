@@ -3,7 +3,7 @@
 from pathlib import Path
 
 
-AUDIO_EXTENSIONS = {'.mp3', '.flac', '.m4a', '.wav', '.aac', '.ogg', '.aiff', '.alac'}
+AUDIO_EXTENSIONS = {'.mp3', '.flac', '.m4a', '.wav', '.aac', '.ogg', '.aiff', '.aif', '.alac'}
 
 
 def scan_directory(tracks_dir: Path, recursive: bool = False) -> list[Path]:
