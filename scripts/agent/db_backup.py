@@ -6,7 +6,8 @@
 """Real-DB backups: APFS-cheap, automatic, retained (editspace-migration 06).
 
 Backs up /Users/murtaza/manadj/data/library.db into data/backups/ as
-library-<UTC timestamp>.db via `cp -c` (APFS clone: instant, block-shared).
+library-<UTC timestamp>.db via backend/fs_clone.py (APFS clone: instant,
+block-shared; plain copy where CoW is unavailable).
 Fires automatically from:
   - backend startup, BEFORE alembic upgrade (backend/main.py)
   - lane_app.py ensure_sandbox_db (every lane-app start = a backup point)
@@ -37,11 +38,15 @@ from __future__ import annotations
 import argparse
 import os
 import re
-import subprocess
 import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+
+# Run as a script, sys.path[0] is scripts/agent; the clone helper lives in the
+# (stdlib-only) backend/fs_clone.py.
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from backend.fs_clone import clone_file
 
 # Default target: the real data root (MANADJ_DATA_DIR overrides, so the
 # script works against any data root — packaged-app #277). Automatic call
@@ -83,14 +88,11 @@ _WAL_SUFFIXES = ("-wal", "-shm")
 def _clone(src: Path, dest: Path) -> None:
     """APFS-clone `src` and its WAL sidecars to `dest` (+ matching suffixes)."""
     dest.parent.mkdir(parents=True, exist_ok=True)
-    subprocess.run(["cp", "-c", str(src), str(dest)], check=True)
+    clone_file(src, dest)
     for suffix in _WAL_SUFFIXES:
         sidecar = src.with_name(src.name + suffix)
         if sidecar.exists():
-            subprocess.run(
-                ["cp", "-c", str(sidecar), str(dest.with_name(dest.name + suffix))],
-                check=True,
-            )
+            clone_file(sidecar, dest.with_name(dest.name + suffix))
 
 
 def backup(

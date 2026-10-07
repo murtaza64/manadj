@@ -39,6 +39,14 @@ class TaskWorker:
         self._thread.start()
         logger.info("task worker started (types: %s)", sorted(self._handlers))
 
+    def add_handlers(self, handlers: dict[str, Handler], delays: dict[str, float] | None = None) -> None:
+        """Register handlers on a running worker (copy-on-write: the loop
+        may be iterating the current dict)."""
+        self._handlers = {**self._handlers, **handlers}
+        if delays:
+            self._delays = {**self._delays, **delays}
+        logger.info("task worker handlers added: %s", sorted(handlers))
+
     def stop(self) -> None:
         self._stop.set()
         if self._thread is not None:

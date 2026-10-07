@@ -8,6 +8,8 @@ import type { Root } from 'react-dom/client';
 import { RekordboxImportGuide } from './RekordboxImportGuide';
 import { FirstRunWelcome } from './FirstRunWelcome';
 import { guideStatus, registerGuide, SETUP_STATE_KEY } from '../setup/guides';
+vi.mock('../setup/allGuides', () => ({}));
+import './registerGuides';
 
 declare global {
   var IS_REACT_ACT_ENVIRONMENT: boolean | undefined;
