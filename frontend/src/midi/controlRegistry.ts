@@ -155,6 +155,8 @@ export interface MidiMixerControls {
   setCueMix(value: number): void;
   /** The one Beat FX section (gh#272), mirrored by GRV6 channel 5. */
   toggleBeatFxOn(): void;
+  /** Gate the section explicitly (no-op turning on with nothing selected). */
+  setBeatFxOn(on: boolean): void;
   selectBeatFx(effect: BeatFxEffectId | null): void;
   selectBeatFxTarget(target: BeatFxTarget): void;
   /** Bipolar balance coordinate: -1 original, 0 midpoint, +1 effect. */

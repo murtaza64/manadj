@@ -1,6 +1,7 @@
 import {
   DEFAULT_JOG_CALIBRATION,
   defaultJogCalibration,
+  isPioneerJog,
 } from './jogCalibration';
 import type { JogCalibration, JogProfile } from './jogCalibration';
 
@@ -281,7 +282,7 @@ export class JogController {
   ): void {
     this.syncState();
     if (!this.scratching && this.port.scratch?.isActive()) return;
-    if (profile === 'grv6') {
+    if (isPioneerJog(profile)) {
       if (!this.port.scratch?.vinylMode()) this.onTicks(ticks, nowMs, calibration, profile);
       else {
         // Finger never left: the scratch was ended by an engine override
@@ -309,8 +310,8 @@ export class JogController {
     this.syncState();
     if (!this.scratching && this.port.scratch?.isActive()) return;
     if (vinylOff && (this.scratching || this.suppressRimUntil > nowMs)) this.cancel();
-    if (profile === 'grv6' && !vinylOff && !this.scratching && nowMs < this.suppressRimUntil) return;
-    if (profile === 'grv6' && this.scratching) {
+    if (isPioneerJog(profile) && !vinylOff && !this.scratching && nowMs < this.suppressRimUntil) return;
+    if (isPioneerJog(profile) && this.scratching) {
       this.moveScratch(ticks, nowMs, calibration);
       return;
     }    this.foldRate(ticks, nowMs);

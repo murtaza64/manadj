@@ -96,6 +96,13 @@
   color: var(--danger);
 }
 
+/* Empty-state guidance (feature-tour #283) — the Takes/Sessions empty voice. */
+.track-table-empty {
+  color: var(--overlay1);
+  font-size: var(--font-large);
+  padding: 32px var(--space-16);
+}
+
 /* Fetching overlay */
 .track-table-fetching-overlay {
   position: absolute;

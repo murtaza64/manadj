@@ -135,7 +135,7 @@ beforeEach(() => {
     })(),
     setCrossfader: vi.fn(), setCrossfaderEnabled: vi.fn(),
     setCrossfaderAssignment: vi.fn(), setCueMix: vi.fn(),
-    toggleBeatFxOn: vi.fn(), selectBeatFx: vi.fn(), selectBeatFxTarget: vi.fn(),
+    toggleBeatFxOn: vi.fn(), setBeatFxOn: vi.fn(), selectBeatFx: vi.fn(), selectBeatFxTarget: vi.fn(),
     setBeatFxDepth: vi.fn(), stepBeatFxBeats: vi.fn(),
   } as unknown as Mixer;
   style = document.createElement('style');

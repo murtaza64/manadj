@@ -19,6 +19,7 @@ vi.mock('./MasterRecorderControl', () => ({ MasterRecorderControl: () => null })
 vi.mock('./VisualizerControlModal', () => ({ VisualizerControlModal: () => null }));
 vi.mock('../visualizer/windowControl', () => ({ isVisualizerOpen: () => false, toggleVisualizer: vi.fn() }));
 vi.mock('../settings/persistedSettings', () => ({ writeSetting: vi.fn() }));
+vi.mock('../settings/useAppConfig', () => ({ useAppConfig: () => ({ data: undefined }) }));
 vi.mock('./performance/DeckKeys', () => ({ DeckKeys: () => null }));
 vi.mock('../contexts/DeckContext', () => ({ DeckScope: ({ children }: { children: ReactNode }) => children }));
 vi.mock('../hooks/useDeck', () => ({ useDecks: () => ({}) }));

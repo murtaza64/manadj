@@ -155,7 +155,7 @@ describe('DDJ-GRV6 Mapping — official E1 message table', () => {
     expect(translate([press(0, 11), press(1, 12), press(2, 60), press(3, 88)])).toEqual([
       { kind: 'button', target: { control: 'transport', deck: 'A' }, edge: 'down' },
       { kind: 'button', target: { control: 'cue', deck: 'B' }, edge: 'down' },
-      { kind: 'button', target: { control: 'set-control-focus', deck: 'C' }, edge: 'down' },
+      { kind: 'button', target: { control: 'set-control-focus', deck: 'C', layered: ['pitch'] }, edge: 'down' },
       { kind: 'button', target: { control: 'sync', deck: 'D' }, edge: 'down' },
     ]);
   });
@@ -169,7 +169,7 @@ describe('DDJ-GRV6 Mapping — official E1 message table', () => {
 
   it('delivers deselected layer state even without an earlier selected message', () => {
     expect(translate([[0x92, 60, 0]])).toEqual([
-      { kind: 'button', target: { control: 'set-control-focus', deck: 'C' }, edge: 'up' },
+      { kind: 'button', target: { control: 'set-control-focus', deck: 'C', layered: ['pitch'] }, edge: 'up' },
     ]);
   });
 
