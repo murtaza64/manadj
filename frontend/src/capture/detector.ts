@@ -35,10 +35,12 @@
  */
 import {
   ALL_DECKS,
+  advanceClock,
   applyEvent,
   deckAudible,
   deckSounding,
   initialAudibilityState,
+  nextFxTailEnd,
   tenureHeld,
 } from './audibilityReducer';
 import type { AudibilityState, ReducerDeckState } from './audibilityReducer';
@@ -496,10 +498,23 @@ export function reduceCaptureBatch(state: CaptureState, events: CaptureEvent[]):
  * to it.
  */
 export function reduceCaptureInto(s: CaptureState, e: CaptureEvent): DetectedTake[] {
-  s.log.push(e);
   const takes: DetectedTake[] = [];
-  const now = e.t;
-
+  // Beat FX tails (#355) fall silent between events: evaluate each tail's
+  // end at its exact instant, so an echo-out's cessation is the tail end,
+  // not the next tick.
+  for (let end = nextFxTailEnd(s); end < e.t; end = nextFxTailEnd(s)) {
+    advanceClock(s, end);
+    evaluate(s, end, null, takes);
+  }
+  // A Load cuts a ringing tail on its deck (audibilityReducer): cease it
+  // BEFORE the Load's own handling, so an echo-out followed by a Load
+  // settles eagerly instead of reading as an abandoned blend.
+  if (e.kind === 'load' && s.decks[e.channel].fxTail !== null) {
+    advanceClock(s, e.t);
+    s.decks[e.channel].fxTail = null;
+    evaluate(s, e.t, null, takes);
+  }
+  s.log.push(e);
   // The shared audibility reducer (audibilityReducer.ts) applies the raw
   // event to deck/mixer/tenure state. Tenure markers (ADR 0033) move the
   // old recorder surface gate into the log: a machine holding the surface
@@ -509,7 +524,14 @@ export function reduceCaptureInto(s: CaptureState, e: CaptureEvent): DetectedTak
   // ignores — a stab does NOT count toward audibility/engagements
   // (deliberate; revisiting that is a follow-up grill, not this issue).
   applyEvent(s, e);
+  evaluate(s, e.t, e, takes);
+  return takes;
+}
 
+/** Post-apply verdict pass at `now`: caches, suspension, Load handling
+ * (`e` = the event just applied; null = a clock-only instant), audibility
+ * edges, settlement, log pruning. Appends settled Takes to `takes`. */
+function evaluate(s: CaptureState, now: number, e: CaptureEvent | null, takes: DetectedTake[]): void {
   // Sounding cache (#178) — the entry-onset backdating clock, kept current
   // on every event (suspension included; it carries no verdicts of its
   // own). Audible ⊆ sounding, so the audibility flip that opens an
@@ -563,7 +585,7 @@ export function reduceCaptureInto(s: CaptureState, e: CaptureEvent): DetectedTak
       }
     }
     pruneLog(s, now);
-    return takes;
+    return;
   }
 
   // A Load re-premises the deck: the track being traded no longer exists
@@ -577,7 +599,7 @@ export function reduceCaptureInto(s: CaptureState, e: CaptureEvent): DetectedTak
   // A Load onto a LIVE incumbent also resets incumbency — its audible run
   // ended by replacement, not by mix-out. Applied per machine whose pair
   // contains the loaded deck.
-  if (e.kind === 'load') {
+  if (e?.kind === 'load') {
     for (const key of PAIR_KEYS) {
       if (!PAIR_DECKS[key].includes(e.channel)) continue;
       const m = s.pairs[key];
@@ -655,8 +677,6 @@ export function reduceCaptureInto(s: CaptureState, e: CaptureEvent): DetectedTak
   }
 
   pruneLog(s, now);
-
-  return takes;
 }
 
 /** Prune the rolling log to the current retention horizon — the most

@@ -5,6 +5,7 @@ versions follow [Semantic Versioning](https://semver.org/). Install: [docs/insta
 
 ## [Unreleased]
 
+- Capture: Beat FX echo/reverb tails count as audible — an echo-out Take now ends where the tail dies out, not at the fader slam; Session timeline bands follow (#355).
 - Session timeline shows Beat FX: an effect-coloured band (echo yellow, reverb green, flanger red) on the targeted deck lane — Master FX bands every lane — with opacity following LEVEL/DEPTH; the scrub readout shows the FX state (#354).
 - Mix editor: Beat FX lanes — Takes recorded with Beat FX audition with their echo/reverb/flanger; edit FX steps (effect, target, length, on/off) and depth under the slots; FX replays in Set playback and carries through templates and Routine promotion (#353).
 - Replaced the README with prerelease installation notes and current-app screenshots (#340).

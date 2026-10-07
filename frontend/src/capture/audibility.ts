@@ -7,7 +7,9 @@
  * Audibility = running transport (or a moving scratch filter while touched)
  * AND not EQ-full-killed AND not filter-killed AND
  * Master-bus gain (trim × channel fader × crossfader) ≥ `audibleGain`.
- * PFL/cue is invisible — Master only.
+ * PFL/cue is invisible — Master only. Beat FX tails (#355) are
+ * time-bounded, so they live in the reducer (audibilityReducer.ts
+ * fxTailAudible), OR-ed onto this predicate there.
  */
 import {
   channelCrossfaderGain,

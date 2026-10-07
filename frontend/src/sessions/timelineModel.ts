@@ -22,12 +22,13 @@ import type { CrossfaderAssignment } from '../playback/crossfaderAssignmentStore
 import {
   ALL_DECKS,
   applyEvent,
-  advanceScratch,
+  advanceClock,
   cloneAudibilityState,
   deckPlayheadAt,
   deckScratchMotion,
   deckGain,
   initialAudibilityState,
+  nextFxTailEnd,
   sessionDeckAudible,
 } from '../capture/audibilityReducer';
 import type { AudibilityState } from '../capture/audibilityReducer';
@@ -321,6 +322,8 @@ export function deriveTimeline(
       expires = Math.min(expires, boundary.time, boundary.time < Infinity ? d.playheadAt + 0.004 : Infinity);
       if (boundary.wrap) wraps.set(ch, boundary.time);
     }
+    // A Beat FX tail falls silent between events (#355): end its band there.
+    expires = Math.min(expires, nextFxTailEnd(s));
     const e: CaptureEvent = expires <= next.t
       ? { t: expires, kind: 'tick', playheads: {} }
       : events[i++];
@@ -699,7 +702,7 @@ function snapshotState(
   before: number,
   total: number
 ): StateAtT {
-  advanceScratch(s, t);
+  advanceClock(s, t);
   const decks = Object.fromEntries(
     ALL_DECKS.map((ch) => {
       const d = s.decks[ch];

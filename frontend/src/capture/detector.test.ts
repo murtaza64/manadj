@@ -10,6 +10,7 @@ import { DEFAULT_DETECTOR_PARAMS, DETECTOR_VERSION } from './events';
 import type { CaptureDeck, CaptureEvent, DetectedTake } from './events';
 import { initialCaptureState, reduceCapture } from './detector';
 import type { CaptureState } from './detector';
+import { DEFAULT_BEAT_FX_SETTINGS } from '../playback/beatFxSettings';
 
 /** Tiny stream DSL: absolute-time cursor, 1 Hz ticks via advance(). */
 function script() {
@@ -894,5 +895,93 @@ describe('Beat FX in the Take slice (#351)', () => {
     s.at(10).play('B').at(12).fader('B', 1).advance(8).at(20).fader('A', 0).advance(HORIZON + 1);
     const head = run(s.events()).takes[0].events[0];
     expect(head.kind === 'init' && 'beatFx' in head).toBe(false);
+  });
+});
+
+describe('Beat FX tails count as audible (#355)', () => {
+  type Fx = Extract<CaptureEvent, { kind: 'beatFx' }>;
+  const echo = (t: number, patch: Partial<Fx> = {}): Fx => ({
+    t, kind: 'beatFx', selected: 'echo', target: 'A', on: true, depth: 0, beats: 2, ...patch,
+  });
+  // bpm 174 → 0.3448 s/beat; 2-beat echo = 0.6897 s delay; feedback 0.5 at
+  // wet 1 keeps 5 repeats above audibleGain 0.05 → tail 3.448 s.
+  const ECHO_TAIL = 5 * 2 * (60 / 174);
+
+  /** Incumbent A, B blended in at 12, A's fader slammed at 20 under `fx`. */
+  function echoOut(fx: (t: number) => CaptureEvent[], after: (s: ReturnType<typeof script>) => void = () => {}) {
+    const s = incumbentA();
+    s.at(10).play('B').at(12).fader('B', 1).advance(8);
+    const ev = s.events();
+    ev.push(...fx(19.5));
+    s.at(20).fader('A', 0);
+    after(s);
+    s.advance(HORIZON + 6);
+    return run([...ev].sort((x, y) => x.t - y.t)).takes;
+  }
+
+  it('an echo-out settles a Handover whose window ends at the tail end, not the fader slam', () => {
+    const takes = echoOut((t) => [echo(t)]);
+    expect(takes).toHaveLength(1);
+    expect(takes[0].outgoingTrackId).toBe(1);
+    expect(takes[0].incomingTrackId).toBe(2);
+    expect(takes[0].windowEndS).toBeCloseTo(20 + ECHO_TAIL, 9);
+    expect(takes[0].detectorVersion).toBe(DETECTOR_VERSION);
+  });
+
+  it('reverb tails decay over reverbDecay from the logged settings', () => {
+    const settings = { ...DEFAULT_BEAT_FX_SETTINGS, reverbDecay: 6 };
+    const takes = echoOut((t) => [
+      { t, kind: 'beatFxSettings', settings },
+      echo(t, { selected: 'reverb' }),
+    ]);
+    // -60 dB at 6 s; wet 1 falls to 0.05 at tau·ln(20).
+    expect(takes[0].windowEndS).toBeCloseTo(20 + (6 / Math.log(1000)) * Math.log(20), 9);
+  });
+
+  it('switching the FX off rings out from that instant, under the still-audible dry', () => {
+    // FX off at 19.5 → tail ends 19.5 + 3.448, past the slam at 20.
+    const s = incumbentA();
+    s.at(10).play('B').at(12).fader('B', 1).advance(8);
+    const ev = s.events();
+    ev.push(echo(19), echo(19.5, { on: false }));
+    s.at(20).fader('A', 0).advance(HORIZON + 6);
+    expect(run(ev).takes[0].windowEndS).toBeCloseTo(19.5 + ECHO_TAIL, 9);
+    // A tail long rung out before the slam leaves the slam as the end.
+    const early = echoOut((t) => [echo(t - 6), echo(t - 5.5, { on: false })]);
+    expect(early[0].windowEndS).toBe(20);
+  });
+
+  it('no tail when the FX is on another deck, flanger, or fully dry', () => {
+    for (const fx of [echo(0, { target: 'B' }), echo(0, { selected: 'flanger' }), echo(0, { depth: -1 })]) {
+      const takes = echoOut((t) => [{ ...fx, t }]);
+      expect(takes[0].windowEndS).toBe(20);
+    }
+  });
+
+  it('LEVEL/DEPTH to full dry silences a ringing tail', () => {
+    const takes = echoOut((t) => [echo(t)], (s) => {
+      s.events().push(echo(21, { depth: -1 }));
+    });
+    expect(takes[0].windowEndS).toBe(21);
+  });
+
+  it('the channel insert sits before the crossfader: a crossfader cut-out kills the tail', () => {
+    const s = incumbentA();
+    s.at(10).play('B').at(12).fader('B', 1).advance(8);
+    const ev = s.events();
+    ev.push(echo(20));
+    s.at(20).fader('A', 0).at(21).crossfader(1).advance(HORIZON + 6);
+    expect(run(ev).takes[0].windowEndS).toBe(21);
+  });
+
+  it('a Master-insert echo rings past a fader slam too', () => {
+    const takes = echoOut((t) => [echo(t, { target: 'master' })]);
+    expect(takes[0].windowEndS).toBeCloseTo(20 + ECHO_TAIL, 9);
+  });
+
+  it('a Load during the tail settles the echo-out eagerly at the Load', () => {
+    const takes = echoOut((t) => [echo(t)], (s) => { s.at(21).load('A', 3); });
+    expect(takes).toHaveLength(1);
+    expect(takes[0].windowEndS).toBe(21);
   });
 });
