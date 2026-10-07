@@ -2,10 +2,22 @@
 # Self-heal the electron binary install. npm's blocked/buggy postinstall
 # (allow-scripts; Node 26 install.js cache-hits then exits without
 # extracting) can leave node_modules/electron without path.txt or with a
-# partial dist/. Idempotent and fast when healthy. macOS arm64 only — this
-# is a dev-machine shell (README.md).
+# partial dist/. Idempotent and fast when healthy. The repair + branding
+# below are macOS arm64 only (README.md); elsewhere (gh#313) just rerun
+# electron's own installer when the binary is missing.
 set -eu
 cd "$(dirname "$0")/node_modules/electron"
+
+if [ "$(uname -s)" != "Darwin" ]; then
+  if [ -f path.txt ] && [ -e "dist/$(cat path.txt)" ]; then exit 0; fi
+  node install.js
+  [ -f path.txt ] && [ -e "dist/$(cat path.txt)" ] || {
+    echo "ensure-electron: electron install.js did not produce a binary" >&2
+    exit 1
+  }
+  echo "ensure-electron: installed electron binary"
+  exit 0
+fi
 
 rel="Electron.app/Contents/MacOS/Electron"
 plist="dist/Electron.app/Contents/Info.plist"

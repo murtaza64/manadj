@@ -43,7 +43,9 @@ export type MixArtifactRef =
   | { kind: 'routine-take'; uuid: string }
   | { kind: 'candidate'; uuid: string }
   | { kind: 'new-transition'; aTrackId: number; bTrackId: number }
-  | { kind: 'new-blank' };
+  /** A blank kind-fluid draft (ADR 0039, gh#325), optionally seeded with
+   * the picker's chip tracks as its first slots. */
+  | { kind: 'new-blank'; seedTrackIds?: number[] };
 
 export function refKey(ref: MixArtifactRef): string {
   switch (ref.kind) {
