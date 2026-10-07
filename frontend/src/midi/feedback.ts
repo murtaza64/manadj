@@ -3,6 +3,7 @@ import { CHANNEL_IDS, STEM_NAMES } from '../playback/mixer';
 import type { ChannelId, StemName } from '../playback/mixer';
 import { beatsBetween } from '../playback/quantize';
 import { encodeMeterValue } from './levelMeter';
+import type { BeatFxSectionState } from '../playback/beatFx';
 
 /**
  * The Feedback seam (midi-pad-leds PRD, ADR 0002): deck state in →
@@ -391,6 +392,23 @@ export function encodeBeatFxLed(
   return feedback.beatFx ? [encodeLed(feedback.beatFx, lit)] : [];
 }
 
+/** FX button lights (beat-fx-engage): a button is lit iff the section
+ * runs its effect on the button's scope (side's focused Deck, or master). */
+export function encodeBeatFxEngageLeds(
+  feedback: MappingFeedback,
+  section: Readonly<Pick<BeatFxSectionState, 'on' | 'selected' | 'target'>>,
+  focus: Readonly<Record<'left' | 'right', ChannelId>>
+): readonly MidiMessage[] {
+  return (feedback.beatFxEngage ?? []).map((lamp) =>
+    encodeLed(
+      lamp,
+      section.on &&
+        section.selected === lamp.effect &&
+        section.target === (lamp.scope === 'master' ? 'master' : focus[lamp.scope])
+    )
+  );
+}
+
 const CONTROL_CHANGE = 0xb;
 
 /** Current Beat FX fraction → the device's time-unit indicator CC. */
@@ -451,6 +469,7 @@ export function allOffMessages(feedback: MappingFeedback): readonly MidiMessage[
     }),
     ...encodeAssistantLed(feedback, false),
     ...encodeBeatFxLed(feedback, false),
+    ...(feedback.beatFxEngage ?? []).map((lamp) => encodeLed(lamp, false)),
     ...beatFxBeatOffMessage(feedback),
     ...CHANNEL_IDS.flatMap((channel) => {
       const meter = feedback.meters?.[channel];

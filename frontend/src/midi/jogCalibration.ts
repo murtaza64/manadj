@@ -1,4 +1,13 @@
-export type JogProfile = 'grv6';
+export type JogProfile = 'grv6' | 'ddj-sb3';
+
+/**
+ * Pioneer DDJ jog behavior (GRV6, SB3): touch-edge-started scratch, device
+ * vinyl-mode streams (platter CC 34 vinyl on / 35 vinyl off). Calibration
+ * differs per device; behavior does not.
+ */
+export function isPioneerJog(profile: JogProfile | undefined): boolean {
+  return profile === 'grv6' || profile === 'ddj-sb3';
+}
 
 export interface JogCalibration {
   bendPercentPerTick: number;
@@ -33,6 +42,14 @@ export const GRV6_JOG_CALIBRATION: JogCalibration = {
   fastSeekAccelTicksPerSecond: 50,
   fastSeekAccelMax: 100,
 };
+
+/**
+ * DDJ-SB3: UNMEASURED (no hardware). Same protocol family and same Mixxx
+ * constants (720 intervals/rev convention) as the GRV6, so start from the
+ * GRV6 values; recalibrate per docs/research/ddj-grv6-jog-calibration.md
+ * once the controller is in hand.
+ */
+export const SB3_JOG_CALIBRATION: JogCalibration = { ...GRV6_JOG_CALIBRATION };
 
 export function defaultJogCalibration(): JogCalibration {
   return { ...DEFAULT_JOG_CALIBRATION };
