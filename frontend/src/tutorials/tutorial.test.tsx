@@ -60,6 +60,19 @@ it('cannot skip required tasks with the bonus finish action', () => {
   expect(tutorialProgress('keyboard')?.status).toBe('active');
 });
 
+it('routes asynchronous save replies to the lesson artifact while Keyboard is active', () => {
+  startTutorial('transition');
+  for (const event of [
+    { type: 'transition-pick-a' }, { type: 'transition-pick-b' },
+    { type: 'transition-created', artifact: 'lesson' },
+    { type: 'transition-edited', artifact: 'lesson', version: 2 },
+  ]) acceptTutorialEvent(event);
+  startTutorial('keyboard');
+  acceptTutorialEvent({ type: 'transition-saved', artifact: 'lesson', version: 2 });
+  expect(tutorialProgress('transition')?.context.savedVersion).toBe(2);
+  expect(tutorialProgress('keyboard')?.step).toBe(0);
+});
+
 it('leaves shortcuts and targets usable; raw keys do not advance', () => {
   const host = document.createElement('div'); document.body.append(host);
   act(() => { root = createRoot(host); root.render(<TutorialController />); });

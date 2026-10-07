@@ -251,8 +251,8 @@ describe('Settings links and remembered modes', () => {
     ['?view=library', 'settings', 'library', false],
     ['?view=invalid', 'routine', 'routine', false],
     ['', 'performance', 'performance', false],
-    ['?settings=0', undefined, 'library', false],
-    ['', undefined, 'library', false],
+    ['?settings=0', undefined, 'performance', false],
+    ['', undefined, 'performance', false],
   ])('parses %s with stored %s', async (query, stored, expectedMode, open) => {
     await mount(query, stored);
     expect(mode()).toBe(expectedMode);

@@ -57,6 +57,7 @@ import { watchAuditionTakeover, watchDeckAuditionTakeover } from '../editor/audi
 import { armAudition } from '../editor/auditionArm';
 import { isGuardedKeyEvent, isTypingTarget } from '../components/performance/performanceKeys';
 import { useViewActive } from '../contexts/viewActive';
+import { reportTutorialAction } from '../tutorials/engine';
 import { useBrowseActive } from '../contexts/browseActive';
 import { decodeWaveformBlob, type DecodedWaveform } from '../waveform/blob';
 import { registerBrowseHost, sharedBrowseHandle } from '../components/browseHost';
@@ -808,6 +809,10 @@ export default function RoutineEditorView() {
     }
     loadedForRef.current = opened.uuid;
     versionAtLoadRef.current = draftStore.getSnapshot().version;
+    if (opened.kind === 'transition' && !opened.reviewTakeUuid) reportTutorialAction({
+      type: opened.seed ? 'transition-created' : 'transition-restored',
+      artifact: opened.uuid, version: versionAtLoadRef.current,
+    });
   }, [opened, proj, detail?.uuid, routineDetail?.uuid, draftStore]);
 
   // Debounced autosave (the pairStore idiom): every draft change PUTs the
@@ -832,8 +837,12 @@ export default function RoutineEditorView() {
       if (uuid.startsWith('preview-')) return;
       const edits = snap.edits;
       const version = snap.version;
+      if (openedRef.current?.kind === 'transition' && version !== versionAtLoadRef.current) {
+        reportTutorialAction({ type: 'transition-edited', artifact: uuid, version });
+      }
       saveTimer.current = setTimeout(() => {
         const o = openedRef.current;
+        if (o?.uuid !== uuid) return; // A stale pair timer must never fall through to Routine save.
         if (o?.kind === 'transition' && o.reviewTakeUuid) return; // review: Promote only
         if (o?.kind === 'transition' && o.uuid === uuid) {
           // Pair save (#205): project the CHANGED edits back onto the
@@ -883,6 +892,7 @@ export default function RoutineEditorView() {
           void api.transitions
             .replacePair(o.aTrackId, o.bTrackId, items)
             .then((rows: TransitionRowFull[]) => {
+              reportTutorialAction({ type: 'transition-saved', artifact: uuid, version });
               // Sync the pairStore SNAPSHOT (Set pane / suggestions /
               // Linked read it, not react-query — stale-until-reload bug).
               reconcilePairFromServer(`${o.aTrackId}:${o.bTrackId}`, rows);
@@ -897,7 +907,10 @@ export default function RoutineEditorView() {
               }
               return queryClient.invalidateQueries({ queryKey: ['transitions'] });
             })
-            .catch((err) => console.error('transition autosave failed', err));
+            .catch((err) => {
+              reportTutorialAction({ type: 'transition-save-failed', artifact: uuid, version });
+              console.error('transition autosave failed', err);
+            });
           return;
         }
         if (edits.authored) {
@@ -1108,6 +1121,16 @@ export default function RoutineEditorView() {
     trackLookupRef.current = tracks;
   }, [tracks]);
   const playerUuidRef = useRef<string | null>(null);
+  useEffect(() => {
+    let wasPlaying = player.isPlaying();
+    return player.subscribe(() => {
+      const playing = player.isPlaying();
+      if (playing && !wasPlaying && openedRef.current?.kind === 'transition' && playerUuidRef.current === openedRef.current.uuid) {
+        reportTutorialAction({ type: 'transition-audition', artifact: openedRef.current.uuid });
+      }
+      wasPlaying = playing;
+    });
+  }, [player]);
   useEffect(() => {
     if (!editor) {
       playerUuidRef.current = null;

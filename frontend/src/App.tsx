@@ -68,7 +68,8 @@ const MODE_IDS: AppMode[] = ['library', 'performance', 'transition', 'routine', 
 const MODE_KEY = 'manadj-app-mode';
 
 // Deep link: ?view=<mode> opens straight into that mode (beats the
-// remembered one); otherwise restore the last mode, defaulting to library.
+// remembered one); otherwise restore the last mode. Fresh installs open in
+// PERFORM (setup-guides #301).
 function initialMode(): AppMode | 'settings' {
   const requestedView = new URLSearchParams(window.location.search).get('view');
   const storedView = localStorage.getItem(MODE_KEY);
@@ -81,7 +82,7 @@ function initialMode(): AppMode | 'settings' {
     if (mode === 'transition' && !DEV_SURFACES) continue;
     if (MODE_IDS.includes(mode as AppMode)) return mode as AppMode;
   }
-  return 'library';
+  return 'performance';
 }
 
 function persistMode(mode: AppMode, settingsOpen = false) {
