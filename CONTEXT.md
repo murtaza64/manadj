@@ -530,14 +530,14 @@ _Avoid_: publish, push, write-to-files (that's Export to Disk)
 Any operation that brings tracks or track data into manadj. Two kinds: Disk Import and External Import.
 
 **Disk Import**:
-New audio files from the tracks directory becoming Tracks: a Scan discovers candidates, accepting a candidate creates a Track.
+New audio files becoming Tracks, always imported in place (the Track points at the file where it sits; nothing is copied). Two entry points: a Scan of the tracks directory discovers candidates and accepting one creates a Track; or files/folders dropped onto the Library from anywhere on disk (folders recurse, non-audio ignored, files already Tracks — archived included — skipped). Dropping onto a Playlist also appends the new Tracks to it.
 
 **External Import**:
 A Sync operation that pulls state from an external library into manadj, for data that originated downstream — keys/BPM analyzed in Engine, hot cues set at a gig, tracks added elsewhere first. Less common than Export but routine, not exceptional. The counterpart of Export.
 _Avoid_: pull, Library Import
 
 **Scan**:
-The discovery step of a Disk Import: finding audio files in the tracks directory that are not yet Tracks and proposing them as candidates.
+The discovery step of a tracks-directory Disk Import: finding audio files in the tracks directory that are not yet Tracks and proposing them as candidates. A drop needs no Scan — the dropped files are the selection.
 
 **Diverged**:
 A track field (title, artist, key, BPM, energy, Tag assignment, Hot Cues, Beatgrid, Main cue) whose value differs between the Library and another Surface. The default resolution is Export (manadj wins); Import is the explicit exception. Set-valued fields (Tag assignment, Hot Cues) compare as whole sets; a placeholder grid counts as absent, not as a value that can diverge.

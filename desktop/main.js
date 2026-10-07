@@ -111,8 +111,11 @@ function splashPageDataUrl(target) {
   <div class="status">
     <p class="loading">loading…</p>
     <div class="hint">
-      <p>not running at <code>${target}</code></p>
-      <p>start it with <code>make dev</code> — retrying every ${RETRY_INTERVAL_MS / 1000}s</p>
+      ${app.isPackaged
+        ? `<p>manaDJ could not start (nothing answering at <code>${target}</code>)</p>
+    <p>retrying every ${RETRY_INTERVAL_MS / 1000}s — if this persists, restart the app</p>`
+        : `<p>not running at <code>${target}</code></p>
+    <p>start it with <code>make dev</code> — retrying every ${RETRY_INTERVAL_MS / 1000}s</p>`}
     </div>
   </div>
 </div></body></html>`;
@@ -227,6 +230,9 @@ const CHANNEL_LABEL_ASSERTS = [{ name: "DDJ-GRV6", labels: "1,2,5,6" }];
 
 function assertChannelLabels() {
   if (process.platform !== "darwin") return;
+  // Dev-machine assumption (packaged-app #278): compiling the helper needs a
+  // Swift toolchain on PATH — never expected on an end user's Mac.
+  if (app.isPackaged) return;
   const helper = path.join(__dirname, "assert-channel-labels.swift");
   for (const { name, labels } of CHANNEL_LABEL_ASSERTS) {
     execFile("swift", [helper, name, labels], (err, stdout, stderr) => {
@@ -330,6 +336,21 @@ function registerVisualizerIpc() {
     if (!visualizerWindow) return { ok: false, reason: "visualizer window not open" };
     visualizerWindow.setFullScreen(false);
     return { ok: true };
+  });
+}
+
+// Settings → Library folder pickers (packaged-app #277): the web app cannot
+// open a native directory dialog, so the shell brokers one over IPC.
+function registerSettingsIpc() {
+  ipcMain.handle("settings:pick-folder", async (event, options) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    const result = await dialog.showOpenDialog(win, {
+      title: options?.title || "Choose a folder",
+      defaultPath: options?.defaultPath || undefined,
+      properties: ["openDirectory", "createDirectory"],
+    });
+    if (result.canceled || result.filePaths.length === 0) return null;
+    return result.filePaths[0];
   });
 }
 
@@ -458,6 +479,7 @@ app.whenReady().then(() => {
   const disposeRecordingIpc = registerRecordingIpc({ app, dialog, ipcMain });
   app.once("before-quit", disposeRecordingIpc);
   registerVisualizerIpc();
+  registerSettingsIpc();
   createWindow();
 });
 

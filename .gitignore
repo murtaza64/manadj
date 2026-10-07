@@ -13,3 +13,6 @@ node_modules/
 .editspace/
 .scratch/
 tmp/
+
+# backend rotating log (packaged-app #278)
+logs/

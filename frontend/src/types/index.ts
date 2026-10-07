@@ -377,6 +377,22 @@ export interface LibraryImportExecutionResult {
   skipped_no_metadata: number;
   errors: number;
   error_messages: string[];
+  track_ids: number[];
+}
+
+export interface DropImportRequest {
+  paths: string[];
+  playlist_id?: number | null;
+}
+
+export interface DropImportResult {
+  imported: number;
+  skipped: number;
+  failed: number;
+  ignored: number;
+  error_messages: string[];
+  track_ids: number[];
+  playlist_added: number;
 }
 
 export interface GridAnalysisResponse {
