@@ -8,7 +8,7 @@
     "manadj-follow-flags": "{\"A\":false,\"B\":false,\"C\":false,\"D\":false}",
     "manadj-follow-params": "{\"bpm\":true,\"bpmThresholdPercent\":5,\"knownOnly\":false,\"temperature\":0.18}",
     "manadj-keylock": "{\"A\":true,\"B\":true,\"C\":true,\"D\":true}",
-    "manadj-perf-deck-count": "4",
+    "manadj-perf-deck-count": "2",
     "manadj-perf-sections": "{\"waveforms\":true,\"decks\":true}",
     "manadj-playlist-filter-enabled": "[]",
     "manadj-quantize": "true",
