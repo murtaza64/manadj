@@ -7,7 +7,10 @@ import { createRoot } from 'react-dom/client';
 import type { Root } from 'react-dom/client';
 import { RekordboxImportGuide } from './RekordboxImportGuide';
 import { FirstRunWelcome } from './FirstRunWelcome';
-import { guideStatus, registerGuide, SETUP_STATE_KEY } from '../setup/guides';
+import { guideStatus, registerGuide, saveSetupJourney, setupJourney, SETUP_STATE_KEY } from '../setup/guides';
+// Isolate the host test from external guide registration in integration stacks.
+vi.mock('../setup/allGuides', () => ({}));
+import './registerGuides';
 
 declare global {
   var IS_REACT_ACT_ENVIRONMENT: boolean | undefined;
@@ -282,7 +285,21 @@ describe('FirstRunWelcome', () => {
     // Step 3: the test guide; finishing it ends First run.
     act(() => button('finish test guide').click());
     expect(guideStatus('test-guide')).toBe('done');
+    act(() => button('Open manaDJ').click());
     expect(guideStatus('welcome')).toBe('done');
     expect(container.querySelector('[data-testid=first-run-welcome]')).toBeNull();
+  });
+
+  it('resumes an interrupted sequence even when an import filled the Library', async () => {
+    saveSetupJourney({ ids: ['rekordbox-import', 'tracks-directory'], index: 1 });
+    installFetch({ libraryTotal: 10, found: true, statuses: [NONE], importBodies: [] });
+    act(() => root.render(<FirstRunWelcome />));
+    await flush();
+    act(() => button('Resume setup').click());
+    await flush();
+    expect(container.querySelector('[data-testid=tracks-directory-guide]')).not.toBeNull();
+    act(() => button('Finish later').click());
+    expect(guideStatus('welcome')).toBe('not-started');
+    expect(setupJourney()?.index).toBe(1);
   });
 });

@@ -3,7 +3,7 @@
 // Settings → Setup section (status list, single-guide relaunch, full
 // re-run). Guides are faked at the registry seam.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act } from 'react';
+import { act, lazy } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { Root } from 'react-dom/client';
 
@@ -12,8 +12,9 @@ vi.mock('../settings/persistedSettings', () => ({
   writeSetting: (k: string, v: string) => localStorage.setItem(k, v),
 }));
 
-import { guideStatus, registerGuide, type GuideProps, type SetupGuide } from './guides';
+import { guideStatus, registerGuide, saveSetupJourney, setupJourney, setGuideStatus, type GuideProps, type SetupGuide } from './guides';
 import { SetupSequence } from './SetupSequence';
+import { SetupOverlay } from './SetupOverlay';
 import SetupSettings from './SetupSettings';
 
 declare global {
@@ -73,17 +74,77 @@ function click(label: string) {
 }
 
 describe('SetupSequence', () => {
+  it('keeps Tab inside when a loading guide leaves only a header button', () => {
+    const guide = fakeGuide('loading', 1);
+    guide.Component = () => <p role="status">Loading</p>;
+    act(() => root.render(<SetupOverlay onClose={vi.fn()}><SetupSequence guides={[guide]} onFinish={vi.fn()} /></SetupOverlay>));
+    const body = container.querySelector<HTMLElement>('.setup-sequence-body')!;
+    body.focus();
+    act(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true })));
+    expect(document.activeElement?.textContent).toBe('Finish later');
+  });
+  it('keeps the six-step host visible while an external guide loads lazily', async () => {
+    let resolve: (value: { default: SetupGuide['Component'] }) => void = () => {};
+    const loading = new Promise<{ default: SetupGuide['Component'] }>((r) => { resolve = r; });
+    const ids = ['rekordbox-import', 'tracks-directory', 'cue-mode', 'soundcloud', 'soulseek', 'controller-check'];
+    const guides = ids.map((id, i) => fakeGuide(id, i));
+    guides[3] = { ...guides[3], Component: lazy(() => loading) };
+    act(() => root.render(<SetupSequence guides={guides} initialIndex={3} onFinish={vi.fn()} />));
+    expect(container.querySelectorAll('.setup-step')).toHaveLength(6);
+    expect(container.textContent).toContain('Step 4 of 6');
+    expect(container.textContent).toContain('Opening your next setup guide');
+    await act(async () => resolve({ default: fakeGuide('soundcloud', 4).Component }));
+    click('done soundcloud');
+    expect(container.textContent).toContain('Step 5 of 6');
+    click('skip soulseek');
+    expect(container.textContent).toContain('Step 6 of 6');
+    click('done controller-check');
+    expect(container.textContent).toContain('Ready when you are.');
+  });
+
+  it('preserves Done even when an external guide writes Skipped before its callback', () => {
+    setGuideStatus('self-writing', 'done');
+    const guide = fakeGuide('self-writing', 1);
+    guide.Component = ({ onSkip }) => <button onClick={() => { setGuideStatus(guide.id, 'skipped'); onSkip(); }}>external skip</button>;
+    act(() => root.render(<SetupSequence guides={[guide]} onFinish={vi.fn()} />));
+    click('external skip');
+    expect(guideStatus(guide.id)).toBe('done');
+  });
   it('advances on done/skip, records each status, then finishes', () => {
     const onFinish = vi.fn();
     const guides = [fakeGuide('a', 1), fakeGuide('b', 2)];
     act(() => root.render(<SetupSequence guides={guides} onFinish={onFinish} />));
-    expect(container.querySelector('[aria-current=step]')?.textContent).toBe('Guide a');
+    expect(container.querySelector('[aria-current=step]')?.textContent).toContain('Guide a');
     click('skip a');
     expect(guideStatus('a')).toBe('skipped');
     expect(container.querySelector('[data-testid=guide-b]')).not.toBeNull();
     click('done b');
     expect(guideStatus('b')).toBe('done');
+    expect(onFinish).not.toHaveBeenCalled();
+    click('Open manaDJ');
     expect(onFinish).toHaveBeenCalledTimes(1);
+  });
+
+  it('checkpoints progress and pauses without completing or losing statuses', () => {
+    const onPause = vi.fn();
+    const guides = [fakeGuide('resume-a', 1), fakeGuide('resume-b', 2)];
+    saveSetupJourney({ ids: guides.map((g) => g.id), index: 0 });
+    act(() => root.render(<SetupSequence guides={guides} persist onPause={onPause} onFinish={vi.fn()} />));
+    click('skip resume-a');
+    expect(setupJourney()?.index).toBe(1);
+    expect(container.querySelector('.setup-step.skipped')?.textContent).toContain('Skipped');
+    click('Finish later');
+    expect(onPause).toHaveBeenCalledOnce();
+    expect(guideStatus('resume-b')).toBe('not-started');
+    setGuideStatus('unrelated', 'done');
+    expect(setupJourney()?.index).toBe(1);
+  });
+
+  it('does not demote a done guide when skipping its replay', () => {
+    setGuideStatus('done-guide', 'done');
+    act(() => root.render(<SetupSequence guides={[fakeGuide('done-guide', 1)]} onFinish={vi.fn()} />));
+    click('skip done-guide');
+    expect(guideStatus('done-guide')).toBe('done');
   });
 
   it('Finish later leaves the remaining guides not started', () => {
@@ -128,6 +189,7 @@ describe('Settings → Setup', () => {
     expect(overlay?.hasAttribute('data-tour-suppress')).toBe(true);
     click('done x');
     click('skip y');
+    click('Open manaDJ');
     expect(container.querySelector('[data-testid=setup-relaunch]')).toBeNull();
     expect(guideStatus('x')).toBe('done');
     expect(guideStatus('y')).toBe('skipped');
