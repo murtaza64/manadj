@@ -7,7 +7,8 @@
  * (B or D). The map is mirrored per hand, not per physical Deck.
  *
  * Guards mirror the library hub: keys are ignored while an input/textarea/
- * contenteditable has focus or with ctrl/meta/alt held, except explicit Cmd chords.
+ * contenteditable has focus or with ctrl/meta/alt held, except explicit primary-
+ * modifier chords (Cmd on macOS, Ctrl elsewhere — utils/platform).
  * Hold-style keys suppress key repeat.
  */
 import { useEffect, useRef } from 'react';
@@ -16,6 +17,7 @@ import { useDeck } from '../../hooks/useDeck';
 import { useHotCueActions } from '../../hooks/useHotCueActions';
 import { useMixer } from '../../hooks/useMixer';
 import { doubleBeatjump, halveBeatjump } from '../../playback/beatjump';
+import { isPrimaryChord } from '../../utils/platform';
 import { MouseJogController } from './mouseJog';
 import { getMouseJogSettings, setMouseJogSpeed } from './mouseJogSettings';
 import { DECK_KEYS, hasKeyboardOverlay, isGuardedKeyEvent, isQuantizeShortcut, isTextEntryTarget, isTypingTarget } from './performanceKeys';
@@ -232,8 +234,7 @@ export function DeckKeys({ enabled = true }: { enabled?: boolean }) {
       const canPlay = snapshot.loadState === 'ready' || snapshot.loadState === 'fetching' || snapshot.loadState === 'decoding';
       const key = unshifted[event.key] ?? event.key.toLowerCase();
       const jumpKey = key === keys.jumpBack || key === keys.jumpForward;
-      if (event.metaKey && !event.ctrlKey && !event.altKey &&
-          (jumpKey || key === keys.fader)) {
+      if (isPrimaryChord(event) && (jumpKey || key === keys.fader)) {
         event.preventDefault();
         if (event.repeat) return;
         if (key === keys.fader) {

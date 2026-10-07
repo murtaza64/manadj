@@ -1,0 +1,89 @@
+/* Keyboard map (#285 review): no panel — a scrim, the keyboard and its
+   legends float directly over the app. */
+.keyboard-map-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  padding: var(--space-16);
+  background: rgb(0 0 0 / 0.78);
+  backdrop-filter: blur(6px);
+}
+.keyboard-map {
+  width: min(1400px, 100%);
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+}
+.keyboard-map > header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-16);
+  margin-bottom: var(--space-12);
+}
+.keyboard-map-title {
+  color: var(--accent);
+  font-size: var(--font-small);
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.keyboard-map > header nav { display: flex; gap: var(--space-2); }
+.keyboard-map > header nav button,
+.keyboard-map-close {
+  padding: 2px var(--space-8);
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: none;
+  color: var(--overlay1);
+  font: inherit;
+  font-size: var(--font-small);
+  font-weight: 700;
+  cursor: pointer;
+}
+.keyboard-map > header nav button:hover,
+.keyboard-map-close:hover { color: var(--text); }
+.keyboard-map > header nav button.selected { color: var(--text); border-bottom-color: var(--accent); }
+.keyboard-map-close {
+  margin-left: auto;
+  border: 1px solid rgb(255 255 255 / 0.18);
+  font-size: var(--font-micro);
+}
+.keyboard-map-board { min-width: 920px; }
+.keyboard-map-row { display: flex; gap: 4px; margin-top: 4px; }
+.keyboard-map-key {
+  flex: var(--key-width) 0 0;
+  min-width: 0;
+  height: 70px;
+  padding: 5px 6px;
+  border: 1px solid rgb(255 255 255 / 0.08);
+  border-radius: 3px;
+  background: rgb(255 255 255 / 0.03);
+  color: var(--overlay0);
+}
+.keyboard-map-key.mapped {
+  border-color: rgb(255 255 255 / 0.22);
+  background: rgb(255 255 255 / 0.07);
+  color: var(--text);
+}
+.keyboard-map-key kbd {
+  display: block;
+  font-family: inherit;
+  font-size: var(--font-small);
+  font-weight: 800;
+}
+.keyboard-map-key div { display: grid; gap: 2px; margin-top: 5px; }
+.keyboard-map-key span { font-size: 9px; line-height: 1.15; color: var(--subtext1); }
+.keyboard-map-key em {
+  display: inline-block;
+  margin-right: 3px;
+  padding: 0 2px;
+  color: var(--warning);
+  border: 1px solid rgb(255 255 255 / 0.2);
+  font-style: normal;
+}
+.keyboard-map > p { margin: var(--space-12) 0 0; color: var(--overlay1); font-size: var(--font-small); }
+@media (max-width: 800px) {
+  .keyboard-map-backdrop { padding: var(--space-8); place-items: stretch; }
+  .keyboard-map { max-height: 100vh; }
+}

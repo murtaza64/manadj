@@ -37,6 +37,7 @@ from pathlib import Path
 import numpy as np
 
 from backend.config import StemsConfig, get_config
+from backend.fs_retry import retry_locked
 
 logger = logging.getLogger(__name__)
 
@@ -83,7 +84,7 @@ def read_meta(track_id: int, config: StemsConfig | None = None) -> StemsMeta | N
     """The track's meta.json, or None if absent/unreadable (= no valid stems)."""
     path = stems_dir(track_id, config) / META_FILENAME
     try:
-        return StemsMeta.from_json(path.read_text())
+        return StemsMeta.from_json(path.read_text(encoding="utf-8"))
     except (OSError, ValueError, KeyError, TypeError):
         return None
 
@@ -139,9 +140,12 @@ def decode_to_wav(source: Path, dest: Path) -> None:
 def _demucs_command(input_wav: Path, out_dir: Path, config: StemsConfig) -> list[str]:
     # sys.executable is the project venv's python; demucs is present because
     # `stems` is a default dependency group (pyproject [tool.uv]).
+    # "auto": omit -d; demucs picks cuda -> mps -> cpu itself, so the backend
+    # never imports torch to probe devices.
+    device = [] if config.device == "auto" else ["-d", config.device]
     return [
         sys.executable, "-m", "demucs.separate",
-        "-d", config.device,
+        *device,
         "-n", config.model,
         "--float32", "--clip-mode", "none",
         "-o", str(out_dir),
@@ -198,11 +202,15 @@ def split_track(track_id: int, source: Path, config: StemsConfig | None = None) 
             source_mtime_ns=mtime_ns,
             source_size=size,
         )
-        (staging / META_FILENAME).write_text(meta.to_json())
+        (staging / META_FILENAME).write_text(meta.to_json(), encoding="utf-8")
 
         # Replace-in-place: clear any stale dir, then move the staging dir in.
+        # meta.json goes first, so a delete Windows refuses midway (a stem
+        # file open for streaming) leaves "no valid stems", never stale ones
+        # passing as current. Retries ride out the brief open-file window.
         if dest.exists():
-            shutil.rmtree(dest)
+            retry_locked(lambda: (dest / META_FILENAME).unlink(missing_ok=True))
+            retry_locked(lambda: shutil.rmtree(dest))
         dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(str(staging), str(dest))
     logger.info("split track %s -> %s", track_id, dest)

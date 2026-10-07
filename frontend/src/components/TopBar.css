@@ -60,6 +60,14 @@
   padding-left: 84px;
 }
 
+/* Windows/Linux (gh#313): no traffic lights; the native caption buttons
+   (titleBarOverlay, desktop/chrome.js) overlay the right edge. Inset past
+   them via the window-controls-overlay area; 138px = Windows' 3 x 46px. */
+.desktop-shell.platform-other .topbar {
+  padding-left: var(--space-12);
+  padding-right: calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, calc(100vw - 138px)) + var(--space-12));
+}
+
 /* Anything interactive in the bar must opt out of the drag region, including
    controls other features add later. The knob dials are draggable divs —
    without the opt-out, turning a gain knob would drag the window. */
