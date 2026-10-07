@@ -6,6 +6,7 @@ versions follow [Semantic Versioning](https://semver.org/). Install: [docs/insta
 ## [Unreleased]
 
 - Experimental direct Engine USB export: `scripts/engine_usb.py export/verify` builds a standalone Engine device library (tracks, playlists, cues, grids, optional donor analysis) in a target directory and verifies it against your library — behind the export toggle, and not yet wired to real USB drives (#267, #268).
+- Sessions are grouped by day with longest-first previews and mined-candidate counts; timelines gain live zoom redraws, progressive gridlines, and stable playback-start positioning (#263).
 - Background tasks now run in parallel lanes — SoundCloud downloads, Soulseek transfers, and local compute (waveforms, analysis, stems) no longer block each other (#224).
 - Shortened feature and installation copy on the public site (#341).
 - Added prerelease downloads and an install/Setup guide at https://manadj.murt.dev.

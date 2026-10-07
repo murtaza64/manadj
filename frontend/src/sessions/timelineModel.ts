@@ -147,7 +147,7 @@ export interface TimelineModel {
    * audibility span overlapped that Track's tenure on its deck). Repeated
    * audible plays count once; loaded-only, cue/PFL-only, and
    * tenure-masked Tracks are absent (audibleSpans already exclude them).
-   * The Sessions-list "Tracks" count. */
+   * Ordered by first audibility, for the Sessions-list count and preview. */
   audibleTrackIds: number[];
   eventCount: number;
 }
@@ -533,14 +533,15 @@ export function deriveTimeline(
 
   // Distinct Master-audible Tracks (the Sessions-list "Tracks" count): a
   // Track counts iff its tenure on a deck overlapped that deck's
-   // audibility (which already excludes PFL-only, loaded-silent, kills, and
+  // audibility (which already excludes PFL-only, loaded-silent, kills, and
   // tenure-masked stretches). One definition, reused — no divergence.
-  const audibleTrackIds = new Set<number>();
+  const firstAudible = new Map<number, number>();
   for (const ch of ALL_DECKS) {
     for (const span of trackSpans[ch]) {
-      if (audibleTrackIds.has(span.trackId)) continue;
-      if (audible[ch].spans.some((a) => a.start < span.end && a.end > span.start)) {
-        audibleTrackIds.add(span.trackId);
+      const heard = audible[ch].spans.find((a) => a.start < span.end && a.end > span.start);
+      if (heard) {
+        firstAudible.set(span.trackId, Math.min(firstAudible.get(span.trackId) ?? Infinity,
+          Math.max(span.start, heard.start)));
       }
     }
   }
@@ -557,7 +558,7 @@ export function deriveTimeline(
       .map(span => ({ start: span.start + IDLE_GRACE_S, end: span.end })),
     overlaps: overlap.spans,
     trackIds: [...trackIds],
-    audibleTrackIds: [...audibleTrackIds],
+    audibleTrackIds: [...firstAudible].sort((a, b) => a[1] - b[1]).map(([id]) => id),
     eventCount: events.length,
   };
 }
@@ -865,27 +866,35 @@ export function buildTimeAxis(
   const tToPx = (t: number): number => {
     if (segments.length === 0) return 0;
     if (t <= segments[0].start) return 0;
-    for (const seg of segments) {
-      if (t <= seg.end) {
-        if (seg.collapsed) return (seg.px0 + seg.px1) / 2;
-        const dur = seg.end - seg.start;
-        return dur <= 0 ? seg.px0 : seg.px0 + ((t - seg.start) / dur) * (seg.px1 - seg.px0);
-      }
+    let lo = 0;
+    let hi = segments.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (segments[mid].end < t) lo = mid + 1;
+      else hi = mid;
     }
-    return totalPx;
+    const seg = segments[lo];
+    if (!seg) return totalPx;
+    if (seg.collapsed) return (seg.px0 + seg.px1) / 2;
+    const dur = seg.end - seg.start;
+    return dur <= 0 ? seg.px0 : seg.px0 + ((t - seg.start) / dur) * (seg.px1 - seg.px0);
   };
 
   const pxToT = (xq: number): number => {
     if (segments.length === 0) return 0;
     if (xq <= 0) return segments[0].start;
-    for (const seg of segments) {
-      if (xq <= seg.px1) {
-        if (seg.collapsed) return seg.start;
-        const w = seg.px1 - seg.px0;
-        return w <= 0 ? seg.start : seg.start + ((xq - seg.px0) / w) * (seg.end - seg.start);
-      }
+    let lo = 0;
+    let hi = segments.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (segments[mid].px1 < xq) lo = mid + 1;
+      else hi = mid;
     }
-    return segments[segments.length - 1].end;
+    const seg = segments[lo];
+    if (!seg) return segments[segments.length - 1].end;
+    if (seg.collapsed) return seg.start;
+    const w = seg.px1 - seg.px0;
+    return w <= 0 ? seg.start : seg.start + ((xq - seg.px0) / w) * (seg.end - seg.start);
   };
 
   return { segments, tToPx, pxToT, totalPx, visibleDurationS, pxPerSec };
