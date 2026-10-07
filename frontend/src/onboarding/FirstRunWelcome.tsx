@@ -8,6 +8,7 @@ import { useEffect, useState } from 'react';
 import { getGuide, guideStatus, listGuides, saveSetupJourney, setGuideStatus, setupJourney, type SetupGuide } from '../setup/guides';
 import { SetupOverlay } from '../setup/SetupOverlay';
 import { SetupSequence } from '../setup/SetupSequence';
+import { guidePresentation } from '../setup/guidePresentation';
 import '../setup/allGuides';
 import { onboardingApi } from './api';
 import { WELCOME_GUIDE_ID } from './guideIds';
@@ -54,19 +55,32 @@ export function FirstRunWelcome() {
       setScreen('hidden');
     }}>
       {screen === 'welcome' && (
-        <div className="onboarding-guide">
-          <h1 className="onboarding-hero">Welcome to manadj</h1>
-          <p className="onboarding-muted">
-            Your Library is empty. A few short steps get you playing — every one can be skipped and
-            run again later from Settings → Setup.
-          </p>
-          <ol className="onboarding-plan">
-            {pending.map((g) => (
-              <li key={g.id}>{g.title}</li>
-            ))}
-          </ol>
+        <div className="onboarding-welcome">
+          <div className="onboarding-welcome-intro">
+            <div className="setup-eyebrow">Your first session</div>
+            <h1 className="onboarding-hero">{journey ? 'Welcome back.' : 'Welcome to manaDJ.'}</h1>
+            <p className="onboarding-lead">Your music.<br />Your way to play.</p>
+            <p className="onboarding-muted">{journey
+              ? 'Your progress is saved. Let’s pick up where you left off.'
+              : 'Bring in your music, choose how you play, and check your equipment.'}</p>
+            <div className="onboarding-reassurance">No need to do it all now.<br />Every step is optional.</div>
+          </div>
+          <div className="onboarding-welcome-plan">
+            <h2 className="onboarding-title">{journey ? 'Your setup so far' : 'Make yourself at home'}</h2>
+            <ol className="onboarding-plan">
+              {(journey ? sequenceGuides : pending).map((g, i) => (
+                <li key={g.id}>
+                  <span className="onboarding-plan-number">{String(i + 1).padStart(2, '0')}</span>
+                  <div><strong>{g.title}</strong><p>{journey && i < journey.index
+                    ? g.status() === 'done' ? 'Done' : 'Skipped — revisit any time'
+                    : guidePresentation(g.id).description}</p></div>
+                </li>
+              ))}
+            </ol>
+            <p className="onboarding-muted">You can revisit every guide in Settings → Setup.</p>
+          </div>
           <div className="onboarding-actions">
-            <button className="btn" onClick={() => finish('skipped')}>
+            <button className="btn btn-secondary" onClick={() => finish('skipped')}>
               Skip setup
             </button>
             <button

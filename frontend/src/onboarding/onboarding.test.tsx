@@ -7,7 +7,7 @@ import { createRoot } from 'react-dom/client';
 import type { Root } from 'react-dom/client';
 import { RekordboxImportGuide } from './RekordboxImportGuide';
 import { FirstRunWelcome } from './FirstRunWelcome';
-import { guideStatus, registerGuide, saveSetupJourney, setupJourney, SETUP_STATE_KEY } from '../setup/guides';
+import { guideStatus, registerGuide, saveSetupJourney, setGuideStatus, setupJourney, SETUP_STATE_KEY } from '../setup/guides';
 // Isolate the host test from external guide registration in integration stacks.
 vi.mock('../setup/allGuides', () => ({}));
 import './registerGuides';
@@ -67,6 +67,7 @@ interface Backend {
   found: boolean;
   statuses: unknown[]; // consumed in order; last one repeats
   importBodies: unknown[];
+  preview?: typeof PREVIEW;
 }
 
 function installFetch(b: Backend) {
@@ -77,7 +78,7 @@ function installFetch(b: Backend) {
       if (url.includes('/tracks/')) return ok({ library_total: b.libraryTotal, items: [] });
       if (url.endsWith('/rekordbox/detect'))
         return ok({ found: b.found, library_dir: b.found ? '/rb' : null });
-      if (url.endsWith('/rekordbox/preview')) return ok(PREVIEW);
+      if (url.endsWith('/rekordbox/preview')) return ok(b.preview ?? PREVIEW);
       if (url.endsWith('/rekordbox/import')) {
         b.importBodies.push(JSON.parse(String(init?.body)));
         return ok({ task_id: 1 });
@@ -137,6 +138,74 @@ function button(label: string): HTMLButtonElement {
 }
 
 describe('RekordboxImportGuide', () => {
+  it('offers a truthful fill-blanks action when all tracks are already imported', async () => {
+    installFetch({ libraryTotal: 10, found: true, statuses: [NONE], importBodies: [],
+      preview: { ...PREVIEW, tracks_already_imported: 10 } });
+    act(() => root.render(<RekordboxImportGuide onDone={vi.fn()} />));
+    await flush();
+    expect(container.textContent).not.toContain('Import 0');
+    expect(button('Fill in missing library details').disabled).toBe(false);
+    expect(container.textContent).toContain('your existing values won’t be replaced');
+  });
+
+  it('recovers a completed task summary after a reload before Done', async () => {
+    installFetch({ libraryTotal: 10, found: true, statuses: [{ state: 'done', summary: SUMMARY }], importBodies: [] });
+    act(() => root.render(<RekordboxImportGuide onDone={vi.fn()} />));
+    await flush();
+    expect(container.querySelector('[data-testid=import-summary]')).not.toBeNull();
+    expect(guideStatus('rekordbox-import')).toBe('done');
+  });
+
+  it('resuming on an acknowledged task still shows its summary until Continue advances the sequence', async () => {
+    setGuideStatus('rekordbox-import', 'done');
+    saveSetupJourney({ ids: ['rekordbox-import', 'tracks-directory'], index: 0 });
+    installFetch({ libraryTotal: 10, found: true, statuses: [{ state: 'done', summary: SUMMARY }], importBodies: [] });
+    act(() => root.render(<FirstRunWelcome />));
+    await flush();
+    act(() => button('Resume setup').click());
+    await flush();
+    expect(container.querySelector('[data-testid=import-summary]')).not.toBeNull();
+    act(() => button('Continue').click());
+    await flush();
+    expect(container.querySelector('[data-testid=tracks-directory-guide]')).not.toBeNull();
+  });
+
+  it('distinguishes a lost status connection from a failed import and retries monitoring', async () => {
+    installFetch({ libraryTotal: 0, found: true, statuses: [{ state: 'running', progress: null }], importBodies: [] });
+    const base = fetch;
+    let statusReads = 0;
+    vi.stubGlobal('fetch', vi.fn((url: string, init?: RequestInit) => {
+      if (url.endsWith('/rekordbox/status') && ++statusReads === 2) return Promise.reject(new Error('offline'));
+      return base(url, init);
+    }));
+    act(() => root.render(<RekordboxImportGuide onDone={vi.fn()} pollMs={5} />));
+    await flush();
+    await flush(30);
+    expect(container.querySelector('[role=alert]')?.textContent).toContain('may still be running');
+    act(() => button('Check progress').click());
+    await flush();
+    expect(container.querySelector('[data-testid=import-progress]')).not.toBeNull();
+  });
+
+  it('disables repeat submission while the import start request is pending', async () => {
+    const b: Backend = { libraryTotal: 0, found: true, statuses: [NONE], importBodies: [] };
+    installFetch(b);
+    const base = fetch;
+    let release: () => void = () => {};
+    const wait = new Promise<void>((resolve) => { release = resolve; });
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/rekordbox/import')) await wait;
+      return base(url, init);
+    }));
+    act(() => root.render(<RekordboxImportGuide onDone={vi.fn()} />));
+    await flush();
+    const startButton = button('Import 10');
+    act(() => { startButton.click(); startButton.click(); });
+    expect(container.textContent).toContain('Getting ready');
+    await act(async () => release());
+    expect(b.importBodies).toHaveLength(1);
+  });
+
   it('detect → preview → run with progress → summary → done', async () => {
     const b: Backend = {
       libraryTotal: 0,
@@ -152,7 +221,7 @@ describe('RekordboxImportGuide', () => {
     const onDone = vi.fn();
     act(() => root.render(<RekordboxImportGuide onDone={onDone} onSkip={() => {}} pollMs={5} />));
     await flush();
-    expect(container.textContent).toContain('Hot cues');
+    expect(container.textContent).toContain('Hot cue points');
     expect(container.textContent).toContain('Missing on disk: 2');
 
     // Genre toggle off is carried to the run request.
@@ -165,7 +234,7 @@ describe('RekordboxImportGuide', () => {
     await flush(50);
     const summary = container.querySelector('[data-testid=import-summary]');
     expect(summary?.textContent).toContain('Memory cues beyond the first: 7');
-    act(() => button('Done').click());
+    act(() => button('Continue').click());
     expect(onDone).toHaveBeenCalled();
   });
 

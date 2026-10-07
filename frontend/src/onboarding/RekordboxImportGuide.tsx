@@ -6,6 +6,7 @@
  * only; nothing is written to Rekordbox. */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { queryClient } from '../api/queryClient';
+import { guideStatus, setGuideStatus, setupJourney } from '../setup/guides';
 import {
   onboardingApi,
   type ImportProgress,
@@ -30,17 +31,18 @@ type Step =
   | { kind: 'not-found' }
   | { kind: 'previewing'; libraryDir: string }
   | { kind: 'options'; preview: RekordboxPreview }
+  | { kind: 'starting' }
   | { kind: 'running'; progress: ImportProgress | null }
   | { kind: 'summary'; summary: RekordboxImportSummary }
-  | { kind: 'error'; message: string };
+  | { kind: 'error'; message: string; connection?: boolean };
 
 const PHASE_LABELS: Record<string, string> = {
   tracks: 'Adding tracks',
-  performance: 'Hot cues, grids, keys',
-  tags: 'MyTags',
-  genre: 'Genres',
-  playlists: 'Playlists',
-  finalize: 'Queueing waveforms & analysis',
+  performance: 'Bringing in cues, beatgrids and keys',
+  tags: 'Adding your MyTags',
+  genre: 'Adding genre Tags',
+  playlists: 'Building your playlists',
+  finalize: 'Preparing waveforms',
 };
 const PHASES = Object.keys(PHASE_LABELS);
 
@@ -52,6 +54,11 @@ async function resolveInitialStep(onIntermediate: (step: Step) => void): Promise
     const status = await onboardingApi.status();
     if (status.state === 'pending' || status.state === 'running') {
       return { kind: 'running', progress: status.progress };
+    }
+    const journey = setupJourney();
+    const awaitingAcknowledgement = journey?.ids[journey.index] === 'rekordbox-import';
+    if (status.state === 'done' && status.summary && (awaitingAcknowledgement || guideStatus('rekordbox-import') !== 'done')) {
+      return { kind: 'summary', summary: status.summary };
     }
     const found = await onboardingApi.detect();
     if (!found.found || !found.library_dir) return { kind: 'not-found' };
@@ -73,6 +80,7 @@ export function RekordboxImportGuide({ onDone, onSkip, onBackground, pollMs = 10
   // stale detect (StrictMode double-run, a retry) resolving after the user
   // started the import must not drag the wizard back to the options step.
   const generation = useRef(0);
+  const starting = useRef(false);
   useEffect(
     () => () => {
       generation.current += 1; // unmount: drop every in-flight result
@@ -97,6 +105,9 @@ export function RekordboxImportGuide({ onDone, onSkip, onBackground, pollMs = 10
   }, []);
 
   useEffect(runDetect, [runDetect]);
+  useEffect(() => {
+    if (step.kind === 'summary') setGuideStatus('rekordbox-import', 'done');
+  }, [step.kind]);
   const retry = () => {
     setStep({ kind: 'detecting' });
     runDetect();
@@ -108,52 +119,72 @@ export function RekordboxImportGuide({ onDone, onSkip, onBackground, pollMs = 10
     if (!running) return;
     let ticks = 0;
     const gen = generation.current;
+    let disposed = false;
+    let polling = false;
     const id = window.setInterval(async () => {
+      if (disposed || polling) return;
+      polling = true;
       try {
         const status = await onboardingApi.status();
-        if (gen !== generation.current) return;
+        if (disposed || gen !== generation.current) return;
         ticks += 1;
         if (ticks % 5 === 0) void queryClient.invalidateQueries({ queryKey: ['tracks'] });
         if (status.state === 'done' && status.summary) {
+          disposed = true;
           void queryClient.invalidateQueries();
           setStep({ kind: 'summary', summary: status.summary });
         } else if (status.state === 'failed') {
+          disposed = true;
           setStep({ kind: 'error', message: status.error || 'Import failed' });
         } else {
           setStep({ kind: 'running', progress: status.progress });
         }
       } catch (e) {
-        fail(gen, e);
+        if (!disposed && gen === generation.current) {
+          disposed = true;
+          setStep({ kind: 'error', connection: true, message: e instanceof Error ? e.message : String(e) });
+        }
+      } finally {
+        polling = false;
       }
     }, pollMs);
-    return () => window.clearInterval(id);
+    return () => { disposed = true; window.clearInterval(id); };
   }, [running, pollMs]);
 
   const start = async () => {
+    if (starting.current) return;
+    starting.current = true;
     const gen = ++generation.current;
+    setStep({ kind: 'starting' });
     try {
       await onboardingApi.startImport(includeGenre);
       if (gen === generation.current) setStep({ kind: 'running', progress: null });
     } catch (e) {
       fail(gen, e);
+    } finally {
+      starting.current = false;
     }
   };
 
   const skipButton = onSkip ? (
-    <button className="btn" onClick={onSkip}>
-      Skip
+    <button className="btn btn-secondary" onClick={onSkip}>
+      Skip for now
     </button>
   ) : null;
 
   return (
     <div className="onboarding-guide" data-testid="rekordbox-import-guide">
-      <h2 className="onboarding-title">Import from Rekordbox</h2>
+      <h2 className="onboarding-title">{step.kind === 'summary' ? 'Your music is in.' : 'Bring your Rekordbox library'}</h2>
 
-      {step.kind === 'detecting' && <p className="onboarding-muted">Looking for your Rekordbox library…</p>}
+      {step.kind === 'detecting' && <p className="onboarding-loading" role="status">Looking for Rekordbox on this computer…</p>}
 
       {step.kind === 'not-found' && (
         <>
-          <p>No Rekordbox library was found on this machine.</p>
+          <div className="onboarding-notice">
+            <strong>No Rekordbox library was found on this computer.</strong>
+            <p>Don’t use Rekordbox? Skip this step and add a music folder next.</p>
+            <p>If you do, open Rekordbox once with your collection, then choose Look again.</p>
+          </div>
           <div className="onboarding-actions">
             <button className="btn" onClick={retry}>
               Look again
@@ -164,16 +195,15 @@ export function RekordboxImportGuide({ onDone, onSkip, onBackground, pollMs = 10
       )}
 
       {step.kind === 'previewing' && (
-        <p className="onboarding-muted">
-          Reading a snapshot of <code>{step.libraryDir}</code>…
+        <p className="onboarding-loading" role="status">
+          Reading your collection… Large libraries can take a moment. Nothing has been imported yet.
         </p>
       )}
 
       {step.kind === 'options' && (
         <>
           <p className="onboarding-muted">
-            From <code>{step.preview.library_dir}</code>. Rekordbox can stay open — nothing is written to it.
-            Files stay where they are.
+            Your music files stay where they are. Rekordbox stays untouched, and can remain open.
           </p>
           <PreviewCounts preview={step.preview} />
           <label className="onboarding-option">
@@ -182,31 +212,35 @@ export function RekordboxImportGuide({ onDone, onSkip, onBackground, pollMs = 10
               checked={includeGenre}
               onChange={(e) => setIncludeGenre(e.target.checked)}
             />
-            Import Genres as Tags (in a “Genre” category)
+            <span>Keep my genres<small>Add Rekordbox genres as Tags in a Genre category.</small></span>
           </label>
           <div className="onboarding-actions">
-            <button
+            {skipButton}
+            {step.preview.tracks_importable === 0 ? (
+              <button className="btn btn-primary" onClick={onDone}>Continue without importing</button>
+            ) : <button
               className="btn btn-primary"
               onClick={() => void start()}
-              disabled={step.preview.tracks_importable === 0}
             >
-              Import {n(step.preview.tracks_importable - step.preview.tracks_already_imported)} new tracks
+              {step.preview.tracks_importable > step.preview.tracks_already_imported
+                ? `Import ${n(step.preview.tracks_importable - step.preview.tracks_already_imported)} new tracks`
+                : 'Fill in missing library details'}
             </button>
-            {skipButton}
+            }
           </div>
         </>
       )}
 
-      {step.kind === 'running' && (
+      {(step.kind === 'starting' || step.kind === 'running') && (
         <>
-          <ImportProgressView progress={step.progress} />
-          <p className="onboarding-muted">You can keep using manadj while this runs.</p>
+          <ImportProgressView progress={step.kind === 'running' ? step.progress : null} />
+          <p className="onboarding-muted">Large libraries can take a few minutes. Keep manaDJ open while your music is imported.</p>
           {/* Inside First run / a relaunch (onSkip given): move on while the
               import task keeps running — it counts as done for the sequence. */}
-          {(onBackground || onSkip) && (
+          {step.kind === 'running' && (onBackground || onSkip) && (
             <div className="onboarding-actions">
               <button className="btn" onClick={onBackground ?? onDone}>
-                Continue in background
+                Continue setup while importing
               </button>
             </div>
           )}
@@ -218,7 +252,7 @@ export function RekordboxImportGuide({ onDone, onSkip, onBackground, pollMs = 10
           <ImportSummaryView summary={step.summary} />
           <div className="onboarding-actions">
             <button className="btn btn-primary" onClick={onDone}>
-              Done
+              Continue
             </button>
           </div>
         </>
@@ -226,10 +260,15 @@ export function RekordboxImportGuide({ onDone, onSkip, onBackground, pollMs = 10
 
       {step.kind === 'error' && (
         <>
-          <p className="onboarding-error">{step.message}</p>
+          <div className="onboarding-notice onboarding-error" role="alert">
+            <strong>{step.connection ? 'We lost touch with the import.' : 'We couldn’t finish this step.'}</strong>
+            <p>{step.connection ? 'The import may still be running. Check its progress before starting again.'
+              : 'Check that Rekordbox and your music drive are available, then try again. Any tracks already added are kept.'}</p>
+            <details><summary>Technical details</summary><p>{step.message}</p></details>
+          </div>
           <div className="onboarding-actions">
             <button className="btn" onClick={retry}>
-              Retry
+              {step.connection ? 'Check progress' : 'Try again'}
             </button>
             {skipButton}
           </div>
@@ -241,11 +280,11 @@ export function RekordboxImportGuide({ onDone, onSkip, onBackground, pollMs = 10
 
 function PreviewCounts({ preview: p }: { preview: RekordboxPreview }) {
   const rows: [string, string][] = [
-    ['Tracks', `${n(p.tracks_importable)}${p.tracks_already_imported ? ` (${n(p.tracks_already_imported)} already in manadj)` : ''}`],
-    ['Hot cues', n(p.hotcues)],
+    ['Tracks available', n(p.tracks_importable)],
+    ['Hot cue points', n(p.hotcues)],
     ['Beatgrids', n(p.grids)],
     ['Keys', n(p.keys)],
-    ['MyTags', `${n(p.tags)} in ${n(p.tag_categories)} categories · ${n(p.tag_assignments)} assignments`],
+    ['MyTags', `${n(p.tags)} in ${n(p.tag_categories)} categories`],
     ['Genres', n(p.genres)],
     ['Playlists', `${n(p.playlists)}${p.smart_playlists ? ` (${n(p.smart_playlists)} smart, as snapshots)` : ''}`],
   ];
@@ -257,6 +296,14 @@ function PreviewCounts({ preview: p }: { preview: RekordboxPreview }) {
   ];
   return (
     <div className="onboarding-counts">
+      <div className="onboarding-stats">
+        <div><strong>{n(Math.max(0, p.tracks_importable - p.tracks_already_imported))}</strong><span>new tracks</span></div>
+        <div><strong>{n(p.playlists)}</strong><span>playlists found</span></div>
+        <div><strong>{n(p.tags)}</strong><span>MyTags found</span></div>
+      </div>
+      {p.tracks_already_imported > 0 && <p className="onboarding-muted">{n(p.tracks_already_imported)} tracks are already in manaDJ. Missing cues, Tags and playlists can be added; your existing values won’t be replaced.</p>}
+      {p.tracks_importable === 0 && <p className="onboarding-notice">No local audio files are available to import. Connect the drive that holds your music, then reopen this guide.</p>}
+      <details className="onboarding-details"><summary>What comes across</summary>
       <table>
         <tbody>
           {rows.map(([label, value]) => (
@@ -267,9 +314,13 @@ function PreviewCounts({ preview: p }: { preview: RekordboxPreview }) {
           ))}
         </tbody>
       </table>
+      <p className="onboarding-muted">Hot Cues, beatgrids and keys come across where available. The first memory cue becomes the Main cue; other memory cues and saved loops stay in Rekordbox.</p>
+      <p className="onboarding-muted">Smart playlists become regular playlists using their saved tracks.</p>
+      <p className="onboarding-source">Library: <code>{p.library_dir}</code></p>
+      </details>
       {skipped.some(([, v]) => v > 0) && (
         <div className="onboarding-skipped">
-          <div className="onboarding-subhead">Won’t be imported</div>
+          <details><summary>Some items will stay in Rekordbox</summary>
           {skipped
             .filter(([, v]) => v > 0)
             .map(([label, v]) => (
@@ -277,6 +328,7 @@ function PreviewCounts({ preview: p }: { preview: RekordboxPreview }) {
                 {label}: {n(v)}
               </div>
             ))}
+          </details>
         </div>
       )}
     </div>
@@ -285,37 +337,33 @@ function PreviewCounts({ preview: p }: { preview: RekordboxPreview }) {
 
 function ImportProgressView({ progress }: { progress: ImportProgress | null }) {
   const current = progress ? PHASES.indexOf(progress.phase) : -1;
+  const pct = progress && progress.total > 0 ? Math.min(100, Math.round(100 * progress.done / progress.total)) : null;
   return (
-    <ol className="onboarding-phases" data-testid="import-progress">
+    <div className="onboarding-progress" data-testid="import-progress">
+      <p className="onboarding-progress-title" role="status">{progress ? PHASE_LABELS[progress.phase] ?? 'Importing your library' : 'Getting ready to import…'}</p>
+      <div className="onboarding-bar" role="progressbar" aria-label={progress ? PHASE_LABELS[progress.phase] : 'Preparing import'} aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct ?? undefined}>
+        <span className="onboarding-bar-fill" style={{ width: `${pct ?? 0}%` }} />
+      </div>
+      <p className="onboarding-muted">{progress && progress.total > 0 ? `${n(progress.done)} / ${n(progress.total)} in this step` : 'Waiting for the import task to start. You can continue setup.'}</p>
+    <ol className="onboarding-phases" aria-label="Import stages">
       {PHASES.map((phase, i) => {
         const state = i < current ? 'done' : i === current ? 'active' : 'todo';
-        const pct =
-          state === 'done' ? 100 : state === 'active' && progress && progress.total > 0
-            ? Math.round((100 * progress.done) / progress.total)
-            : 0;
         return (
           <li key={phase} className={`onboarding-phase ${state}`}>
-            <span className="onboarding-phase-label">{PHASE_LABELS[phase]}</span>
-            <span className="onboarding-bar">
-              <span className="onboarding-bar-fill" style={{ width: `${pct}%` }} />
-            </span>
-            {state === 'active' && progress && progress.total > 1 && (
-              <span className="onboarding-phase-count">
-                {n(progress.done)} / {n(progress.total)}
-              </span>
-            )}
+            <span>{i + 1}. {({ tracks: 'Tracks', performance: 'Cues & grids', tags: 'Tags', genre: 'Genres', playlists: 'Playlists', finalize: 'Finish' } as Record<string, string>)[phase]}</span>
           </li>
         );
       })}
     </ol>
+    </div>
   );
 }
 
 function ImportSummaryView({ summary: s }: { summary: RekordboxImportSummary }) {
   const imported: [string, number][] = [
     ['Tracks', s.tracks_imported],
-    ['Hot cue sets', s.hotcues_applied],
-    ['Beatgrids', s.beatgrids_applied],
+    ['Tracks with Hot Cues added', s.hotcues_applied],
+    ['Tracks with beatgrids added', s.beatgrids_applied],
     ['Main cues', s.maincues_applied],
     ['Keys', s.keys_applied],
     ['Tags', s.tags_created + s.genre_tags_created],
@@ -333,7 +381,12 @@ function ImportSummaryView({ summary: s }: { summary: RekordboxImportSummary }) 
   const unchanged = s.tracks_already_imported;
   return (
     <div className="onboarding-summary" data-testid="import-summary">
-      <div className="onboarding-subhead">Imported</div>
+      <div className="onboarding-stats">
+        <div><strong>{n(s.tracks_imported)}</strong><span>tracks added</span></div>
+        <div><strong>{n(s.playlists_created)}</strong><span>playlists added</span></div>
+      </div>
+      <p className="onboarding-muted">Waveforms and analysis may keep processing in the background. Your Library is ready to explore.</p>
+      <details className="onboarding-details"><summary>Import details</summary>
       <table>
         <tbody>
           {imported.map(([label, v]) => (
@@ -344,12 +397,13 @@ function ImportSummaryView({ summary: s }: { summary: RekordboxImportSummary }) 
           ))}
         </tbody>
       </table>
+      </details>
       {unchanged > 0 && (
-        <p className="onboarding-muted">{n(unchanged)} tracks were already in manadj — left as they are.</p>
+        <p className="onboarding-muted">{n(unchanged)} tracks were already in manaDJ — no duplicate tracks were added.</p>
       )}
       {dropped.some(([, v]) => v > 0) && (
         <div className="onboarding-skipped">
-          <div className="onboarding-subhead">Not imported</div>
+          <details><summary>Items not imported</summary>
           {dropped
             .filter(([, v]) => v > 0)
             .map(([label, v]) => (
@@ -357,9 +411,9 @@ function ImportSummaryView({ summary: s }: { summary: RekordboxImportSummary }) 
                 {label}: {n(v)}
               </div>
             ))}
+          </details>
         </div>
       )}
     </div>
   );
 }
-
