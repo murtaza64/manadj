@@ -65,6 +65,10 @@ export interface RoutinePlanInput {
    * time so the editor's audition and the set Conductor replay the same
    * result. Opaque here; parsed by routines/routineDraft. */
   edits?: import('../routines/routineDraft').RoutineEdits | null;
+  /** Authored from scratch (ADR 0039, gh#325): no recording — each
+   * slot's trace is SYNTHESIZED from (entry beat, entry position,
+   * beatmatched rate) instead of replayed from events. */
+  authored?: boolean;
 }
 
 export type RoutineEventInput = Record<string, unknown>;
@@ -430,6 +434,23 @@ export function traceStateAt(trace: RoutineTracePoint[], beat: number): TraceSta
   };
 }
 
+/** An authored slot's synthesized trace (ADR 0039): playing from its
+ * entry at the beatmatched rate through `horizonBeat` — the slot holds
+ * its deck to the routine end (exits are the author's fader work). */
+export function synthesizedSlotTrace(
+  entryBeat: number,
+  entryPos: number,
+  syncRate: number,
+  horizonBeat: number
+): RoutineTracePoint[] {
+  const head: RoutineTracePoint = { beat: entryBeat, pos: entryPos, jump: false, moving: true, ratePerBeat: syncRate };
+  if (horizonBeat <= entryBeat) return [head];
+  return [
+    head,
+    { beat: horizonBeat, pos: entryPos + (horizonBeat - entryBeat) * syncRate, jump: false, moving: true, ratePerBeat: syncRate },
+  ];
+}
+
 // ── Lane building ────────────────────────────────────────────────────────
 
 const LANE_CONTROLS = ['fader', 'trim', 'eqLow', 'eqMid', 'eqHigh', 'filter'] as const;
@@ -772,12 +793,19 @@ export function buildPlannedRoutine(
   const sourceExtended: boolean[] = [];
   const traces = castOrdered.map((_, slot) => {
     const slotId = slotIds[slot];
-    let raw = buildSlotTrace(
-      slotSamples(input.events, order[slot]),
-      60 / trackBpms[slot],
-      input.entryOffsetsBeats[order[slot]],
-      entryPositions[slot]
-    );
+    let raw = input.authored
+      ? synthesizedSlotTrace(
+          input.entryOffsetsBeats[order[slot]],
+          entryPositions[slot],
+          60 / trackBpms[slot],
+          editHorizon - entryDeltas[slot]
+        )
+      : buildSlotTrace(
+          slotSamples(input.events, order[slot]),
+          60 / trackBpms[slot],
+          input.entryOffsetsBeats[order[slot]],
+          entryPositions[slot]
+        );
     // Entry-offset override: the whole recorded trajectory shifts to the
     // new entry beat BEFORE the (absolute-beat) jump/pause edits apply.
     const delta = entryDeltas[slot];

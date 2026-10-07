@@ -1,9 +1,10 @@
 """Routines: saved n-track choreography (ADR 0035, routines 158).
 
 Read + rename + delete. Rows are minted by promotion
-(POST /api/routine-takes/{uuid}/promote) — there is no direct create:
-every Routine descends from a hand-confirmed Routine Take (v1; the
-Routine editor may add authoring later). The list returns metadata only;
+(POST /api/routine-takes/{uuid}/promote) or AUTHORED from scratch on the
+Mix editor's blank canvas (POST /api/routines, ADR 0039 — no origin
+take, empty recording; structure mutable via PUT /{uuid}/structure).
+The list returns metadata only;
 the slot-addressed beat-domain event replay rides the detail endpoint.
 """
 
@@ -30,8 +31,63 @@ def _row(r: models.Routine) -> schemas.RoutineRow:
         entry_positions=json.loads(r.entry_positions_json),
         duration_beats=r.duration_beats,
         origin_take_uuid=r.origin_take_uuid,
+        slot_ids=json.loads(r.slot_ids_json) if r.slot_ids_json else None,
+        authored=r.origin_take_uuid is None,
         created_at=r.created_at,
     )
+
+
+def _validated_structure(
+    payload: schemas.RoutineStructure, db: Session
+) -> tuple[list[int], list[str], list[float], list[float], float]:
+    """Validate an authored structure and return it re-sorted into entry
+    order (stable). 422 on any violation."""
+    n = len(payload.cast)
+    lists = (payload.slot_ids, payload.entry_offsets_beats, payload.entry_positions)
+    if any(len(xs) != n for xs in lists):
+        raise HTTPException(status_code=422, detail="per-slot lists must be parallel to cast")
+    if n < 3:
+        raise HTTPException(
+            status_code=422,
+            detail="a Routine needs ≥ 3 slots — a 2-cast mix is a Transition (ADR 0035/0039)",
+        )
+    if len(set(payload.slot_ids)) != n or any(not s for s in payload.slot_ids):
+        raise HTTPException(status_code=422, detail="slot ids must be unique and non-empty")
+    nums = [*payload.entry_offsets_beats, *payload.entry_positions, payload.duration_beats]
+    if any(x != x or x in (float("inf"), float("-inf")) for x in nums):
+        raise HTTPException(status_code=422, detail="non-finite number in structure")
+    found = {
+        t.id for t in db.query(models.Track.id).filter(models.Track.id.in_(payload.cast)).all()
+    }
+    missing = sorted(set(payload.cast) - found)
+    if missing:
+        raise HTTPException(status_code=422, detail=f"unknown cast tracks: {missing}")
+    order = sorted(range(n), key=lambda i: payload.entry_offsets_beats[i])
+    offsets = [payload.entry_offsets_beats[i] for i in order]
+    if payload.duration_beats <= offsets[-1]:
+        raise HTTPException(
+            status_code=422, detail="duration must extend past the last slot's entry"
+        )
+    return (
+        [payload.cast[i] for i in order],
+        [payload.slot_ids[i] for i in order],
+        offsets,
+        [payload.entry_positions[i] for i in order],
+        payload.duration_beats,
+    )
+
+
+def _apply_structure(r: models.Routine, payload: schemas.RoutineStructure, db: Session) -> None:
+    cast, slot_ids, offsets, positions, duration = _validated_structure(payload, db)
+    r.entry_track_id = cast[0]
+    r.exit_track_id = cast[-1]
+    r.cast_json = json.dumps(cast)
+    r.slot_ids_json = json.dumps(slot_ids)
+    r.entry_offsets_beats_json = json.dumps(offsets)
+    r.entry_positions_json = json.dumps(positions)
+    r.duration_beats = duration
+    if "edits" in payload.model_fields_set:
+        r.edits_json = json.dumps(payload.edits) if payload.edits else None
 
 
 @router.get("", response_model=list[schemas.RoutineRow])
@@ -58,6 +114,51 @@ def get_routine(uuid: str, db: Session = Depends(get_db)) -> schemas.RoutineDeta
     r = db.query(models.Routine).filter(models.Routine.uuid == uuid).first()
     if r is None:
         raise HTTPException(status_code=404, detail="routine not found")
+    return _detail(r)
+
+
+@router.post("", response_model=schemas.RoutineDetail, status_code=201)
+def create_authored_routine(
+    payload: schemas.RoutineAuthoredCreate, db: Session = Depends(get_db)
+) -> schemas.RoutineDetail:
+    """Mint an AUTHORED Routine (ADR 0039, gh#325): built on the Mix
+    editor's blank canvas, no origin take, empty recording. The client
+    mints the uuid (the draft already carries it) — a repeat POST with an
+    existing uuid is a 409, never a duplicate."""
+    if db.query(models.Routine).filter(models.Routine.uuid == payload.uuid).first():
+        raise HTTPException(status_code=409, detail="routine uuid already exists")
+    r = models.Routine(
+        uuid=payload.uuid,
+        name=payload.name,
+        events_json="[]",
+        origin_take_uuid=None,
+    )
+    _apply_structure(r, payload, db)
+    db.add(r)
+    db.commit()
+    db.refresh(r)
+    return _detail(r)
+
+
+@router.put("/{uuid}/structure", response_model=schemas.RoutineDetail)
+def put_routine_structure(
+    uuid: str, payload: schemas.RoutineStructure, db: Session = Depends(get_db)
+) -> schemas.RoutineDetail:
+    """Replace an authored Routine's structure — cast, slot ids, entry
+    offsets/positions, duration (ADR 0039: first-class mutable on
+    authored rows; promoted rows keep their baked promotion outputs and
+    get 409). Sending `edits` replaces the edits layer in the same write."""
+    r = db.query(models.Routine).filter(models.Routine.uuid == uuid).first()
+    if r is None:
+        raise HTTPException(status_code=404, detail="routine not found")
+    if r.origin_take_uuid is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="promoted routine — structure is baked; edit entry offsets via the edits layer",
+        )
+    _apply_structure(r, payload, db)
+    db.commit()
+    db.refresh(r)
     return _detail(r)
 
 
