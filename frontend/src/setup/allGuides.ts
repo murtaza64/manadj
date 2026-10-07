@@ -3,4 +3,5 @@
  * host, Settings Setup section) imports this once; each guide lane appends
  * its own line.
  */
+import './cueMode/register';
 import './controllerCheck/register';

@@ -5,6 +5,10 @@ versions follow [Semantic Versioning](https://semver.org/). Install: [docs/insta
 
 ## [Unreleased]
 
+### Added
+- Cue mode: Trigger makes a Hot Cue on a paused Deck jump and start playing (Gated hold-to-preview stays the default). Toggle with GATED in the Performance view mixer strip; also a Setup guide.
+- Controller check (Settings → Controllers; also a Setup guide): pick Master/Cue outputs with a test tone on each, see whether your MIDI controller has a Mapping, press any control to see it light up, and open jog calibration for the DDJ-GRV6.
+
 ## [0.1.0] - 2026-10-07
 
 First public release: a DJ library manager and performance app for Apple Silicon Macs.
