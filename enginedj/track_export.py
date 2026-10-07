@@ -20,8 +20,6 @@ from __future__ import annotations
 
 import logging
 import os
-import shutil
-import subprocess
 import time
 from dataclasses import dataclass
 from datetime import datetime
@@ -29,6 +27,8 @@ from pathlib import Path
 
 import psutil
 from sqlalchemy.orm import Session
+
+from backend.fs_clone import clone_tree
 
 from .models.album_art import AlbumArt
 from .models.information import Information
@@ -71,7 +71,7 @@ def ensure_engine_closed() -> None:
 def snapshot_database(database_dir: Path) -> Path | None:
     """Snapshot the Engine Database2 dir next to the library, once per
     process run. Returns the snapshot path, or None when this run already
-    has one. APFS clonefile (`cp -Rc`), plain copy fallback."""
+    has one. Copy-on-write clone where the filesystem supports it."""
     database_dir = Path(database_dir)
     if str(database_dir) in _snapshotted:
         return None
@@ -83,14 +83,7 @@ def snapshot_database(database_dir: Path) -> Path | None:
         / f"{stamp}-manadj-pre-write-db2"
     )
     dest.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        subprocess.run(
-            ["cp", "-Rc", str(database_dir), str(dest)],
-            check=True,
-            capture_output=True,
-        )
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        shutil.copytree(database_dir, dest)
+    clone_tree(database_dir, dest)
     _snapshotted.add(str(database_dir))
     logger.info("engine Database2 snapshot: %s", dest)
     return dest
