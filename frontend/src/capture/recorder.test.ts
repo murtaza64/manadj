@@ -18,7 +18,10 @@ import { SessionSink } from './sessionSink';
 import type { CaptureDeckSource, CaptureMixerSource } from './recorder';
 import { DEFAULT_DETECTOR_PARAMS } from './events';
 import type { CaptureEvent, DetectedTake } from './events';
-import type { ChannelId, ChannelState } from '../playback/mixer';
+import type { ChannelId, ChannelState, MixerChange } from '../playback/mixer';
+import type { BeatFxSectionState } from '../playback/beatFx';
+import { DEFAULT_BEAT_FX_SETTINGS } from '../playback/beatFxSettings';
+import type { BeatFxSettings } from '../playback/beatFxSettings';
 import { DEFAULT_CROSSFADER_ASSIGNMENTS } from '../playback/crossfaderAssignmentStore';
 import type { DeckSnapshot, DeckTransportGesture } from '../playback/DeckEngine';
 import {
@@ -66,7 +69,7 @@ class FakeMixerSource implements CaptureMixerSource {
     D: flatChannel(),
   };
   private crossfader = 0;
-  private listeners = new Set<() => void>();
+  private listeners = new Set<(changed?: MixerChange) => void>();
 
   getChannelState(ch: ChannelId): ChannelState {
     return this.channels[ch];
@@ -83,7 +86,7 @@ class FakeMixerSource implements CaptureMixerSource {
   getMaster(): number {
     return 1;
   }
-  subscribe(fn: () => void): () => void {
+  subscribe(fn: (changed?: MixerChange) => void): () => void {
     this.listeners.add(fn);
     return () => this.listeners.delete(fn);
   }
@@ -98,7 +101,28 @@ class FakeMixerSource implements CaptureMixerSource {
     this.channels[ch] = { ...prev, stems: { ...prev.stems, [stem]: false } };
     for (const fn of this.listeners) fn();
   }
+
+  private beatFx: BeatFxSectionState = { ...DEFAULT_SECTION };
+  private fxSettings: BeatFxSettings = { ...DEFAULT_BEAT_FX_SETTINGS };
+  getBeatFxSection(): Readonly<BeatFxSectionState> {
+    return this.beatFx;
+  }
+  getBeatFxSettings(): Readonly<BeatFxSettings> {
+    return this.fxSettings;
+  }
+  setBeatFx(patch: Partial<BeatFxSectionState>): void {
+    this.beatFx = { ...this.beatFx, ...patch };
+    for (const fn of this.listeners) fn('beatFx');
+  }
+  setFxSettings(patch: Partial<BeatFxSettings>): void {
+    this.fxSettings = { ...this.fxSettings, ...patch };
+    for (const fn of this.listeners) fn('beatFxSettings');
+  }
 }
+
+const DEFAULT_SECTION: BeatFxSectionState = {
+  selected: 'echo', target: 'A', on: false, depth: 0, beats: 0.5,
+};
 
 function emptySnapshot(): DeckSnapshot {
   return {
@@ -1231,6 +1255,63 @@ describe('stem kill capture (stems #212)', () => {
     );
     expect(kills).toHaveLength(1);
     expect(kills[0].channel).toBe('A');
+    r.recorder.dispose();
+  });
+});
+
+describe('Beat FX capture (#351)', () => {
+  type FxEvent = Extract<CaptureEvent, { kind: 'beatFx' }>;
+  type FxSettingsEvent = Extract<CaptureEvent, { kind: 'beatFxSettings' }>;
+  const fx = (logged: CaptureEvent[]) => logged.filter((e): e is FxEvent => e.kind === 'beatFx');
+
+  it('seeds the section state and settings', () => {
+    const r = rig();
+    r.recorder.start();
+    expect(fx(r.logged)).toEqual([
+      { t: expect.any(Number), kind: 'beatFx', ...DEFAULT_SECTION },
+    ]);
+    const settings = r.logged.filter((e): e is FxSettingsEvent => e.kind === 'beatFxSettings');
+    expect(settings).toEqual([
+      { t: expect.any(Number), kind: 'beatFxSettings', settings: DEFAULT_BEAT_FX_SETTINGS },
+    ]);
+    r.recorder.dispose();
+  });
+
+  it('logs every section change as a full snapshot', () => {
+    const r = rig();
+    r.recorder.start();
+    const before = r.logged.length;
+    r.mixer.setBeatFx({ target: 'B' });
+    r.mixer.setBeatFx({ on: true });
+    r.mixer.setBeatFx({ depth: 0.4 });
+    r.mixer.setBeatFx({ selected: 'reverb', beats: 1 });
+    expect(fx(r.logged.slice(before))).toEqual([
+      { t: expect.any(Number), kind: 'beatFx', ...DEFAULT_SECTION, target: 'B' },
+      { t: expect.any(Number), kind: 'beatFx', ...DEFAULT_SECTION, target: 'B', on: true },
+      { t: expect.any(Number), kind: 'beatFx', ...DEFAULT_SECTION, target: 'B', on: true, depth: 0.4 },
+      { t: expect.any(Number), kind: 'beatFx', target: 'B', on: true, depth: 0.4, selected: 'reverb', beats: 1 },
+    ]);
+    r.recorder.dispose();
+  });
+
+  it('an unrelated mixer notify logs no Beat FX event', () => {
+    const r = rig();
+    r.recorder.start();
+    const before = r.logged.length;
+    r.mixer.setFader('A', 0.5);
+    expect(fx(r.logged.slice(before))).toEqual([]);
+    r.recorder.dispose();
+  });
+
+  it('logs a settings change', () => {
+    const r = rig();
+    r.recorder.start();
+    const before = r.logged.length;
+    r.mixer.setFxSettings({ echoFeedback: 0.3 });
+    expect(r.logged.slice(before).filter((e) => e.kind === 'beatFxSettings')).toEqual([
+      { t: expect.any(Number), kind: 'beatFxSettings',
+        settings: { ...DEFAULT_BEAT_FX_SETTINGS, echoFeedback: 0.3 } },
+    ]);
     r.recorder.dispose();
   });
 });
