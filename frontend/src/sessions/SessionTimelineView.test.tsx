@@ -56,3 +56,36 @@ it('pinch overrides a pan latch, zooms faster than wheel and retains the cursor 
     vi.unstubAllGlobals();
   }
 });
+
+it('draws Beat FX bands on the targeted lane, Master across every lane (#354)', async () => {
+  vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
+  vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(1000);
+  vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(600);
+  vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null);
+  const session = { uuid: 'fx-test', started_at: '2026-10-07T12:00:00', ended_at: '2026-10-07T12:01:00', take_count: 0 };
+  const fx = { selected: 'echo', target: 'A', on: false, depth: 0, beats: 0.5 };
+  const client = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity, retry: false } } });
+  client.setQueryData(['session', session.uuid], { ...session, events: [
+    { t: 0, kind: 'beatFx', ...fx },
+    { t: 10, kind: 'beatFx', ...fx, on: true },
+    { t: 14, kind: 'beatFx', ...fx },
+    { t: 20, kind: 'beatFx', ...fx, selected: 'flanger', target: 'master', on: true },
+    { t: 30, kind: 'tick', playheads: {} },
+  ] });
+  for (const key of [['takes'], ['routine-takes'], ['routines'], ['routine-candidates', session.uuid]]) client.setQueryData(key, []);
+  const host = document.createElement('div');
+  document.body.append(host);
+  const root = createRoot(host);
+  try {
+    await act(async () => root.render(<QueryClientProvider client={client}><SessionTimelineView session={session} /></QueryClientProvider>));
+    expect(host.querySelectorAll('[data-testid="stl-fx-A-echo"]')).toHaveLength(1);
+    expect(host.querySelectorAll('[data-testid="stl-fx-master-flanger"]')).toHaveLength(4);
+    expect(host.querySelector('[data-testid="stl-fx-A-echo"] title')?.textContent).toContain('echo → A · 0:10–0:14 (4s)');
+  } finally {
+    act(() => root.unmount());
+    client.clear();
+    host.remove();
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  }
+});

@@ -5,6 +5,7 @@ versions follow [Semantic Versioning](https://semver.org/). Install: [docs/insta
 
 ## [Unreleased]
 
+- Session timeline shows Beat FX: an effect-coloured band (echo yellow, reverb green, flanger red) on the targeted deck lane — Master FX bands every lane — with opacity following LEVEL/DEPTH; the scrub readout shows the FX state (#354).
 - Mix editor: Beat FX lanes — Takes recorded with Beat FX audition with their echo/reverb/flanger; edit FX steps (effect, target, length, on/off) and depth under the slots; FX replays in Set playback and carries through templates and Routine promotion (#353).
 - Replaced the README with prerelease installation notes and current-app screenshots (#340).
 - Added website help pages and the offline in-app Help manual, linked from Settings, Tours and Setup guides (#295).

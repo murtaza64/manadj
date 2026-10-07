@@ -12,6 +12,8 @@
  * - tenure holds (a machine held the Audible surface: honest gaps;
  *   audibility is masked beneath them — the shared surface was displaced)
  * - idle stretches (no audible deck, no tenure) → collapse candidates
+ * - Beat FX spans (#354): the section ON with an effect selected, per
+ *   target, carrying a depth/length envelope
  * - a piecewise time axis that collapses idle to fixed-width markers
  * - state reconstruction at an arbitrary T (the scrub readout; the replay
  *   planner builds on the same reducer, sessions 05)
@@ -33,7 +35,10 @@ import { DEFAULT_DETECTOR_PARAMS } from '../capture/events';
 import type { CaptureDeck, CaptureEvent, DetectorParams } from '../capture/events';
 import { scratchBoundary } from '../playback/worklet/scratchMotion';
 import type { ScratchFilter } from '../playback/worklet/scratchMotion';
-import type { BeatFxSectionState } from '../playback/beatFx';
+import { beatFxLengthUnit } from '../playback/beatFx';
+import type { BeatFxEffectId, BeatFxSectionState, BeatFxTarget } from '../playback/beatFx';
+import { DEFAULT_BEAT_FX_SETTINGS } from '../playback/beatFxSettings';
+import type { FlangerLengthUnit } from '../playback/beatFxSettings';
 
 export { ALL_DECKS };
 
@@ -81,6 +86,29 @@ export interface GestureMark {
 export interface LoopSpan extends Span {
   /** The last region held (track seconds). */
   region: { start: number; end: number };
+  /** Unclosed at log end. */
+  open: boolean;
+}
+
+/** One step of a Beat FX span's envelope: from `t`, the section runs at
+ * this LEVEL/DEPTH (bipolar −1..1) and BEAT ◄ ► length. */
+export interface FxStep {
+  t: number;
+  depth: number;
+  beats: number;
+}
+
+/** Beat FX activity (#354): the section was ON with `effect` selected and
+ * assigned to `target`. A change of effect or target closes the span and
+ * opens a new one; depth/length moves extend the envelope. */
+export interface FxSpan extends Span {
+  target: BeatFxTarget;
+  effect: BeatFxEffectId;
+  /** Unit the steps' `beats` reads in (flanger may count bars), from the
+   * voicing prefs at span open. */
+  lengthUnit: FlangerLengthUnit;
+  /** Envelope steps, first at `start`, event-aligned, deduped. */
+  steps: FxStep[];
   /** Unclosed at log end. */
   open: boolean;
 }
@@ -142,6 +170,9 @@ export interface TimelineModel {
   idle: Span[];
   /** ≥2 decks simultaneously audible (trading material). */
   overlaps: Span[];
+  /** Beat FX activity spans (#354), time-ordered. Empty for logs that
+   * predate FX capture (#351). */
+  fxSpans: FxSpan[];
   /** Every trackId that appeared in a load event. */
   trackIds: number[];
   /** Distinct Tracks that became Master-audible during the Session (any
@@ -232,6 +263,13 @@ export function deriveTimeline(
       }
     }
   }
+
+  const fxSpans: FxSpan[] = [];
+  let openFx: FxSpan | null = null;
+  const closeFx = (t: number) => {
+    if (openFx && t > openFx.start) fxSpans.push({ ...openFx, end: t, open: false });
+    openFx = null;
+  };
 
   const tenures: TenureSpan[] = [];
   let openTenure: { holder: string; since: number } | null = null;
@@ -458,6 +496,34 @@ export function deriveTimeline(
       }
     }
 
+    // Beat FX spans (#354): ON with an effect selected, keyed by target.
+    if (e.kind === 'beatFx' && s.beatFx) {
+      const fx = s.beatFx;
+      const active = fx.on && fx.selected !== null;
+      if (openFx && (!active || openFx.target !== fx.target || openFx.effect !== fx.selected)) {
+        closeFx(e.t);
+      }
+      if (active && fx.selected !== null) {
+        if (!openFx) {
+          openFx = {
+            start: e.t,
+            end: e.t,
+            target: fx.target,
+            effect: fx.selected,
+            lengthUnit: beatFxLengthUnit(fx.selected, (s.beatFxSettings ?? DEFAULT_BEAT_FX_SETTINGS).flangerLengthUnit),
+            steps: [{ t: e.t, depth: fx.depth, beats: fx.beats }],
+            open: true,
+          };
+        } else {
+          const last = openFx.steps[openFx.steps.length - 1];
+          if (last.depth !== fx.depth || last.beats !== fx.beats) {
+            if (last.t === e.t) openFx.steps[openFx.steps.length - 1] = { t: e.t, depth: fx.depth, beats: fx.beats };
+            else openFx.steps.push({ t: e.t, depth: fx.depth, beats: fx.beats });
+          }
+        }
+      }
+    }
+
     // Tenure holds.
     if (e.kind === 'tenure') {
       if (e.edge === 'start' && openTenure === null) {
@@ -504,6 +570,10 @@ export function deriveTimeline(
   idle.close(end);
   if (openTenure !== null) {
     tenures.push({ start: openTenure.since, end, holder: openTenure.holder, open: true });
+  }
+  {
+    const fx = openFx as FxSpan | null;
+    if (fx && end > fx.start) fxSpans.push({ ...fx, end, open: true });
   }
 
   const decks = Object.fromEntries(
@@ -558,6 +628,7 @@ export function deriveTimeline(
       .filter(span => span.end - span.start > IDLE_GRACE_S)
       .map(span => ({ start: span.start + IDLE_GRACE_S, end: span.end })),
     overlaps: overlap.spans,
+    fxSpans,
     trackIds: [...trackIds],
     audibleTrackIds: [...firstAudible].sort((a, b) => a[1] - b[1]).map(([id]) => id),
     eventCount: events.length,

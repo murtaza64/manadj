@@ -587,6 +587,16 @@
   opacity: 0.8;
 }
 
+/* Beat FX band (#354): effect-coloured strip along the lane top. */
+.stl-fx-label {
+  font-size: var(--font-micro);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+.stl-inline-readout .stl-fx-readout {
+  font-weight: 700;
+}
+
 .stl-swatch-area {
   background: rgba(var(--deck-a-rgb), 0.18);
   border-bottom: 2px solid rgba(var(--deck-a-rgb), 0.5);
