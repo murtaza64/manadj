@@ -28,7 +28,13 @@ manadj as a downloadable macOS app for users other than the developer: one bundl
 _Avoid_: release build, native app
 
 **First run**:
-The state of a manadj with an empty Library. Offers the ways in — Import from Rekordbox, adding a tracks directory, or skipping — before anything else.
+The state of a manadj with an empty Library. Starts the Setup sequence before anything else.
+
+**Setup guide**:
+A short, skippable, independently re-runnable flow configuring one thing: Rekordbox import, tracks directory, Cue mode, SoundCloud, Soulseek, Controller check. First run chains them in order (the Setup sequence), then starts the Tour; Settings lists each with its status (done, skipped, not started) and relaunches any of them alone.
+
+**Shipped defaults**:
+The preference values a fresh install starts with — a deliberate snapshot of the developer's own preferences, excluding anything machine- or account-bound (device IDs, paths, tokens, Export enablement). A user's own setting always wins; re-snapshotting changes only what fresh or never-touched keys see.
 
 **Tour**:
 Per-section coach marks shown the first time a user enters each major area of the app, replayable on demand. Explains the UI; changes no Library state.
@@ -371,6 +377,9 @@ Sessions replay the recorded loop-exit landing, including from a mid-loop start.
 **Quantize**:
 An app-wide sticky toggle (default on) making beat-relative performance gestures grid-aligned: cue and Hot Cue placement snap to the nearest beat, auto-loop regions snap to the nearest beat, and Hot Cue jumps while playing are phase-preserving — a whole-beat displacement landing at the cue plus the playhead's intra-beat phase, so the groove never stumbles. Evaluated at gesture time; imports are not gestures and never snap. Gridless Tracks behave as if it were off. Beat jump (inherently whole-beat), cue return, paused-cue seeks, loop halve/double, and Transition-editor snapping are outside its authority.
 _Avoid_: snap (the Transition editor's separate affordance), quantization (the Analysis sense — see Quantized track)
+
+**Cue mode**:
+An app-wide preference for what pressing a Hot Cue does on a paused Deck. **Gated** (default): holding previews from the cue and releasing returns to it. **Trigger**: pressing jumps to the cue and starts playback, which continues after release. Hot Cues on a playing Deck jump in either mode; the Main cue keeps its CDJ hold behavior regardless.
 
 **Key Lock**:
 A sticky per-Deck setting (default on): playback-rate changes on that Deck (pitch fader, Nudge) do not shift the loaded Track's Key. Scratching bypasses it until release. Belongs to the Deck — not to the Track, not to the Mixer. Named tension: DJ-jargon *pitch* (the fader, the Deck's ±% rate) changes tempo; Key Lock keeps the *musical* pitch — the Key — constant while it does. Also known as master tempo (Pioneer).
