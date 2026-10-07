@@ -10,7 +10,7 @@ import unittest
 from html.parser import HTMLParser
 from pathlib import Path
 
-from build import SITE, render_pages, validate_pages
+from build import SITE, render_pages, validate_pages, validate_site
 
 
 class Page(HTMLParser):
@@ -74,18 +74,37 @@ class LinkValidationTests(unittest.TestCase):
 
     def test_missing_assets_in_all_supported_attributes(self):
         for element in ('<img src="missing.png">', '<video poster="missing.png"></video>', '<link href="missing.css">'):
-            with self.subTest(element=element), self.assertRaisesRegex(SystemExit, "missing asset"):
+            with self.subTest(element=element), self.assertRaisesRegex(SystemExit, "missing target/media"):
                 self.check({"install.html": element})
 
     def test_stale_output_cannot_hide_unbuilt_page(self):
         (self.root / "stale.html").write_text('<h1 id="setup">Old guide</h1>')
-        with self.assertRaisesRegex(SystemExit, "missing asset or page stale.html"):
+        with self.assertRaisesRegex(SystemExit, "missing target/media stale.html"):
             self.check({"index.html": '<a href="stale.html#setup">Old page</a>'})
 
     def test_root_relative_and_escaping_links_rejected(self):
         for href in ("/install.html", "/decoy.png", "../outside.png", "%2Fdecoy.png"):
-            with self.subTest(href=href), self.assertRaisesRegex(SystemExit, "stay relative"):
+            with self.subTest(href=href), self.assertRaisesRegex(SystemExit, "not subpath safe|escapes site"):
                 self.check({"index.html": f'<a href="{href}">Bad path</a>'})
+
+    def test_directory_urls_and_fragments_agree_between_validators(self):
+        pages = {
+            "index.html": '<a href="guide/?from=home#cue%2Dmode">Guide</a>',
+            "guide/index.html": '<h1 id="cue-mode">Cue</h1><a href="../#home">Home</a>',
+        }
+        for anchor in ("home", "other"):
+            rendered = {**pages, "index.html": pages["index.html"] + f'<h1 id="{anchor}"></h1>'}
+            for name, html in rendered.items():
+                path = self.root / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(html)
+            for validate in (lambda rendered=rendered: self.check(rendered), lambda: validate_site(self.root)):
+                with self.subTest(anchor=anchor, validate=validate):
+                    if anchor == "home":
+                        validate()
+                    else:
+                        with self.assertRaisesRegex(SystemExit, "missing anchor ../#home"):
+                            validate()
 
     def test_external_navigation_does_not_require_local_files(self):
         self.check({"index.html": '<a href="https://github.com/murtaza64/manadj/releases/latest">Release</a>'})
@@ -120,7 +139,8 @@ class InstallBuildTests(unittest.TestCase):
 
     def test_both_pages_offer_pinned_installers_and_distinct_release_links(self):
         releases = "https://github.com/murtaza64/manadj/releases"
-        for name, html in self.pages.items():
+        for name in ("index.html", "install.html"):
+            html = self.pages[name]
             with self.subTest(name=name):
                 page = Page(html)
                 for asset in ("manaDJ-0.1.0-rc.3-arm64.dmg", "manaDJ-0.1.0-rc.3-x64-setup.exe"):

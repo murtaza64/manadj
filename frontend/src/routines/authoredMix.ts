@@ -11,8 +11,9 @@
  * splits it back out into the Routine's first-class fields (PUT
  * /api/routines/{uuid}/structure) — `editsForSave` strips it.
  *
- * Kind-fluid (ADR 0039): the draft has no kind; it persists as a Routine
- * from 3 slots. The 2-slot → Transition save and 2↔3 crossings are #330.
+ * Kind-fluid (ADR 0039): the draft has no kind; 2 slots persist as a
+ * Transition, ≥ 3 as a Routine, converting on save at crossings
+ * (kindCrossing.ts, gh#330).
  */
 import type { RoutineDetailWire, RoutineStructureWire } from '../api/client';
 import type { HotCue } from '../types';
@@ -32,8 +33,10 @@ export interface AuthoredStructure {
   durationBeats: number;
 }
 
-/** A Routine needs ≥ 3 slots at rest (ADR 0035); below, nothing persists. */
-export const MIN_PERSIST_SLOTS = 3;
+/** A Routine needs ≥ 3 slots at rest (ADR 0035). */
+export const MIN_ROUTINE_SLOTS = 3;
+/** Below 2 slots nothing persists; 2 save as a Transition (ADR 0039). */
+export const MIN_PERSIST_SLOTS = 2;
 /** Material kept after the last entry when a slot lands (8 bars). */
 export const TAIL_BEATS = 32;
 /** Default stagger between slots added in one gesture (multi-track drag). */
@@ -146,7 +149,7 @@ function shiftBeats(e: RoutineEdits, delta: number): void {
 
 /** Re-anchor beat 0 on the entry slot and keep the duration past the
  * last entry. Mutates `e`. */
-function normalize(e: RoutineEdits): void {
+export function normalizeAuthored(e: RoutineEdits): void {
   const s = e.authored;
   if (!s || s.slots.length === 0) return;
   const entries = s.slots.map((slot) => effectiveEntry(e, slot));
@@ -184,7 +187,7 @@ export function addSlotsTo(e: RoutineEdits, drops: SlotDrop[], beat: number): st
     ids.push(slotId);
     s.slots.push({ slotId, trackId: d.trackId, entryBeat, entryPos: d.entryPos });
   });
-  normalize(e);
+  normalizeAuthored(e);
   // Fader steps AFTER normalization (beats final). The entry slot (beat
   // 0) sounds from the start — no step.
   for (const id of ids) {
@@ -214,7 +217,7 @@ export function removeSlotFrom(e: RoutineEdits, slotId: string): void {
   delete e.trims[slotId];
   delete e.entryOffsets[slotId];
   if (e.startTrims) delete e.startTrims[slotId];
-  normalize(e);
+  normalizeAuthored(e);
 }
 
 /** Stable key of the structure (memo dependency for the derived detail). */

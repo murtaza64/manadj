@@ -9,14 +9,18 @@
 
 Inputs:  site/content/ (copy), site/templates/ (layout),
          frontend/src/theme/{tokens,deckColors,routineColor}.ts (design tokens).
-Outputs: site/{index,install}.html, site/assets/tokens.css, site/assets/logo.png.
+Outputs: site/{index,install}.html, site/help/, site/assets/tokens.css, site/assets/logo.png.
+With --app-help: also frontend/public/manual/ (deployable files only).
+With --output DIR: write deployable files to DIR instead of site/.
 """
 
 from __future__ import annotations
 
-import posixpath
+import argparse
+import json
 import re
 import shutil
+import tempfile
 from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
@@ -100,11 +104,11 @@ def _frontmatter(path: Path) -> tuple[dict, str]:
 
 
 def _md(text: str) -> str:
-    return markdown.markdown(text, extensions=["attr_list"])
+    return markdown.markdown(text, extensions=["extra", "toc"])
 
 
-def load_content() -> dict:
-    content = SITE / "content"
+def load_content(site: Path = SITE) -> dict:
+    content = site / "content"
     home, home_body = _frontmatter(content / "home.md")
     home["body_html"] = _md(home_body)
 
@@ -128,64 +132,216 @@ def load_content() -> dict:
     return {"home": home, "install": install, "features": features}
 
 
-def validate_pages(pages: dict[str, str], root: Path = SITE) -> None:
-    """Validate in-memory pages together, including cross-page fragments."""
-    class Links(HTMLParser):
-        def __init__(self):
-            super().__init__()
-            self.ids = []
-            self.urls = []
+class Links(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.ids: list[str] = []
+        self.urls: list[str] = []
 
-        def handle_starttag(self, tag, attrs):
-            for key, value in attrs:
-                if key == "id":
-                    self.ids.append(value)
-                elif key in {"href", "src", "poster"} and value:
-                    self.urls.append(value)
+    def handle_starttag(self, tag, attrs):
+        for key, value in attrs:
+            if key == "id" and value:
+                self.ids.append(value)
+            elif key in {"href", "src", "poster"} and value:
+                self.urls.append(value)
 
-    parsed = {}
-    for name, html in pages.items():
+
+def load_help(site: Path) -> list[dict]:
+    articles = []
+    for path in sorted((site / "content" / "help").glob("*.md")):
+        meta, body = _frontmatter(path)
+        if meta.get("draft") is True:
+            continue
+        for key in ("slug", "title", "summary", "order", "related"):
+            if key not in meta:
+                raise SystemExit(f"{path}: frontmatter needs {key!r}")
+        if not isinstance(meta["slug"], str) or not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", meta["slug"]):
+            raise SystemExit(f"{path}: invalid help slug")
+        if not isinstance(meta["related"], list) or not all(isinstance(s, str) for s in meta["related"]):
+            raise SystemExit(f"{path}: related must be a list of slugs")
+        md = markdown.Markdown(extensions=["extra", "toc"])
+        meta["body_html"] = md.convert(body)
+        meta["toc_html"] = md.toc
+        articles.append(meta)
+    workflow = ["start", "acquire", "curate", "perform", "follow", "capture", "editor", "sets", "sync"]
+    articles.sort(key=lambda article: (
+        workflow.index(article["slug"]) if article["slug"] in workflow else len(workflow),
+        article["order"], article["slug"],
+    ))
+    by_slug = {a["slug"]: a for a in articles}
+    if len(by_slug) != len(articles):
+        raise SystemExit("duplicate help slugs")
+    for article in articles:
+        article["related_articles"] = [by_slug[slug] for slug in article["related"] if slug in by_slug]
+    return articles
+
+
+def _validate_pages(rendered: dict[Path, str], root: Path) -> dict[Path, Links]:
+    """One resolver for fresh in-memory pages and deployable files."""
+    pages = {}
+    for page, html in rendered.items():
         links = Links()
         links.feed(html)
         if len(links.ids) != len(set(links.ids)):
-            raise SystemExit(f"{name}: duplicate element IDs")
-        parsed[name] = links
-    for name, links in parsed.items():
+            raise SystemExit(f"{page.relative_to(root)}: duplicate element IDs")
+        pages[page] = links
+    for page, links in pages.items():
         for raw in links.urls:
             url = urlsplit(raw)
             if url.scheme or url.netloc:
                 continue
             path = unquote(url.path)
-            target = posixpath.normpath(posixpath.join(posixpath.dirname(name), path)) if path else name
-            if path.startswith("/") or target == ".." or target.startswith("../"):
-                raise SystemExit(f"{name}: link must stay relative to site root: {raw}")
-            if target not in parsed:
-                if target.endswith(".html") or not (root / target).is_file():
-                    raise SystemExit(f"{name}: missing asset or page {raw}")
-            elif url.fragment and unquote(url.fragment) not in parsed[target].ids:
-                raise SystemExit(f"{name}: missing anchor {raw}")
+            if path.startswith("/"):
+                raise SystemExit(f"{page.relative_to(root)}: root-absolute URL is not subpath safe: {raw}")
+            target = (page.parent / path).resolve() if path else page
+            if not target.is_relative_to(root):
+                raise SystemExit(f"{page.relative_to(root)}: link escapes site: {raw}")
+            if target / "index.html" in pages or target.is_dir():
+                target /= "index.html"
+            if target not in pages and (target.suffix == ".html" or not target.is_file()):
+                raise SystemExit(f"{page.relative_to(root)}: missing target/media {raw}")
+            if url.fragment and target in pages and unquote(url.fragment) not in pages[target].ids:
+                raise SystemExit(f"{page.relative_to(root)}: missing anchor {raw}")
+    return pages
 
 
-def render_pages() -> dict[str, str]:
+def validate_site(root: Path) -> dict[Path, Links]:
+    """Resolve links as a browser would, inside a deployable subpath."""
+    root = root.resolve()
+    pages = _validate_pages(
+        {page: page.read_text(encoding="utf-8") for page in root.rglob("*.html")}, root)
+    # Fonts and other CSS assets must also be available offline.
+    for css in root.rglob("*.css"):
+        for raw in re.findall(r"url\(['\"]?([^)'\"]+)['\"]?\)", css.read_text(encoding="utf-8")):
+            url = urlsplit(raw)
+            if url.scheme or url.netloc:
+                continue
+            target = (css.parent / unquote(url.path)).resolve()
+            if url.path.startswith("/") or not target.is_relative_to(root) or not target.is_file():
+                raise SystemExit(f"{css.relative_to(root)}: missing or nonportable CSS asset {raw}")
+    return pages
+
+
+DEPLOYABLE = ("index.html", "install.html", "CNAME", "help", "assets", "shots", "media")
+
+
+def copy_deployable(source: Path, destination: Path) -> None:
+    destination.mkdir(parents=True, exist_ok=True)
+    for name in DEPLOYABLE:
+        src, dest = source / name, destination / name
+        if src.is_dir():
+            shutil.copytree(src, dest, dirs_exist_ok=True)
+        elif src.is_file():
+            shutil.copyfile(src, dest)
+
+
+def replace_deployable(source: Path, destination: Path, site: Path, *, app_help: bool = False) -> None:
+    """Replace a dedicated generated tree, never an unclaimed directory.
+
+    The staging ownership marker is a sibling so it cannot enter the artifact.
+    frontend/public/manual is already a dedicated generated path.
+    """
+    destination = destination.absolute()
+    if any(p.is_symlink() for p in (destination, *destination.parents)):
+        raise SystemExit(f"refusing symlinked generated directory: {destination}")
+    destination = destination.resolve()
+    site = site.resolve()
+    if destination.is_relative_to(site) or site.is_relative_to(destination):
+        raise SystemExit(f"output overlaps site source: {destination}")
+    marker = destination.with_name(destination.name + ".site-build")
+    if not app_help:
+        if marker.is_symlink() or (marker.exists() and (
+            not marker.is_file() or marker.read_text(encoding="utf-8") != str(destination)
+        )):
+            raise SystemExit(f"invalid generated output marker: {marker}")
+        if destination.exists() and (
+            not destination.is_dir() or (any(destination.iterdir()) and not marker.exists())
+        ):
+            raise SystemExit(f"refusing non-generated output directory: {destination}")
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text(str(destination), encoding="utf-8")
+    if destination.exists():
+        shutil.rmtree(destination)
+    copy_deployable(source, destination)
+
+
+def render_pages(site: Path = SITE) -> dict[str, str]:
+    content = load_content(site)
+    articles = load_help(site)
+    help_slugs = {a["slug"] for a in articles}
+    for feature in content["features"]:
+        feature["help_url"] = f"help/{feature['slug']}/index.html" if feature["slug"] in help_slugs else None
     env = Environment(
-        loader=FileSystemLoader(SITE / "templates"),
+        loader=FileSystemLoader(site / "templates"),
         undefined=StrictUndefined,
         autoescape=False,
         trim_blocks=True,
         lstrip_blocks=True,
     )
-    content = load_content()
-    return {name: env.get_template(name).render(**content) for name in ("index.html", "install.html")}
+    pages = {name: env.get_template(name).render(**content) for name in ("index.html", "install.html")}
+    template = env.get_template("help.html")
+    pages["help/index.html"] = template.render(articles=articles, article=None, root="../")
+    for article in articles:
+        pages[f"help/{article['slug']}/index.html"] = template.render(
+            articles=articles, article=article, root="../../")
+    return pages
+
+
+def validate_pages(pages: dict[str, str], root: Path = SITE) -> None:
+    """Validate in-memory pages together, including cross-page fragments."""
+    root = root.resolve()
+    _validate_pages({root / name: html for name, html in pages.items()}, root)
+
+
+def build(site: Path = SITE, output: Path = SITE, app_public: Path | None = None) -> None:
+    if output.is_symlink():
+        raise SystemExit(f"refusing symlinked generated directory: {output}")
+    articles = load_help(site)
+    rendered = render_pages(site)
+    # Validate fresh output, never stale generated pages from a previous build.
+    with tempfile.TemporaryDirectory(prefix="manadj-help-") as tmp:
+        stage = Path(tmp).resolve()
+        for name in ("assets", "shots", "media"):
+            if (site / name).is_dir():
+                shutil.copytree(site / name, stage / name)
+        (stage / "assets").mkdir(exist_ok=True)
+        (stage / "assets" / "tokens.css").write_text(build_tokens(), encoding="utf-8")
+        shutil.copyfile(REPO / "frontend" / "public" / "logo.png", stage / "assets" / "logo.png")
+        if (site / "CNAME").is_file():
+            shutil.copyfile(site / "CNAME", stage / "CNAME")
+        for name, html in rendered.items():
+            page = stage / name
+            page.parent.mkdir(parents=True, exist_ok=True)
+            page.write_text(html, encoding="utf-8")
+        pages = validate_site(stage)
+        manifest = [{"slug": a["slug"], "title": a["title"],
+                     "anchors": pages[stage / "help" / a["slug"] / "index.html"].ids}
+                    for a in articles]
+        (stage / "help" / "manifest.json").write_text(
+            json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        if output.resolve() == site.resolve():
+            # Preview builds retain source content and assets.
+            if (output / "help").is_symlink():
+                raise SystemExit(f"refusing symlinked generated directory: {output / 'help'}")
+            if (output / "help").exists():
+                shutil.rmtree(output / "help")
+            copy_deployable(stage, output)
+        else:
+            replace_deployable(stage, output, site)
+        if app_public is not None:
+            replace_deployable(stage, app_public / "manual", site, app_help=True)
+    print(f"built {output / 'index.html'} and {len(articles)} help articles")
 
 
 def main() -> None:
-    (SITE / "assets" / "tokens.css").write_text(build_tokens(), encoding="utf-8")
-    shutil.copyfile(REPO / "frontend" / "public" / "logo.png", SITE / "assets" / "logo.png")
-    pages = render_pages()
-    validate_pages(pages)
-    for name, html in pages.items():
-        (SITE / name).write_text(html, encoding="utf-8")
-        print(f"built {SITE / name}")
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--app-help", action="store_true", help="also copy deployable site into frontend/public/manual/")
+    parser.add_argument("--output", type=Path, help="deployable-only staging directory (replaced on subsequent builds)")
+    args = parser.parse_args()
+    if args.output is not None and args.output.resolve() == SITE.resolve():
+        parser.error("--output must be a separate generated staging directory")
+    build(output=args.output if args.output is not None else SITE,
+          app_public=REPO / "frontend" / "public" if args.app_help else None)
 
 
 if __name__ == "__main__":

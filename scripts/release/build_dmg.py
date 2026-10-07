@@ -87,7 +87,7 @@ SHELL_FILES = [
 def pyproject_version() -> str:
     import re
 
-    m = re.search(r'^version\s*=\s*"([^"]+)"', (ROOT / "pyproject.toml").read_text(), re.M)
+    m = re.search(r'^version\s*=\s*"([^"]+)"', (ROOT / "pyproject.toml").read_text(), re.MULTILINE)
     if not m:
         sys.exit("no version in pyproject.toml")
     return m.group(1)
@@ -119,11 +119,13 @@ def build_frontend(version: str) -> None:
         run(["npm", "install", "--no-audit", "--no-fund"], cwd=fe)
     # Never bake an API URL; stamp the (possibly prerelease) version (#298).
     env = {**os.environ, "VITE_API_URL": "", "MANADJ_APP_VERSION": version}
-    # The `prebuild` hook (gen:keys) runs `uv run --project ..`, i.e. a full
+    # The `prebuild` hook runs `uv run --project ..`, i.e. a full
     # project sync — which fails on Windows (essentia, #302) and is wasted
     # work here. The generator only needs stdlib backend/key.py: run it
-    # project-less, then build with pre/post hooks skipped.
+    # project-less, and generate offline help via its isolated script deps,
+    # then build with pre/post hooks skipped. Shared with the Windows build.
     run(["uv", "run", "--no-project", "python", "scripts/export/gen_key_table.py"], cwd=ROOT)
+    run(["uv", "run", "site/build.py", "--app-help"], cwd=ROOT)
     run(["npm", "run", "build", "--ignore-scripts"], cwd=fe, env=env)
 
 

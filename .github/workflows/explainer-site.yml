@@ -31,10 +31,10 @@ jobs:
           python-version: '3.12'
       - uses: actions/configure-pages@v5
       - name: Build site
-        run: uv run site/build.py
+        run: uv run site/build.py --output .site-dist
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: site/
+          path: .site-dist/
 
   deploy:
     needs: build

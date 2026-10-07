@@ -1,22 +1,22 @@
-{# Shared building blocks — the pitch page and future help pages (#295) both use these. #}
+{# Shared pitch/manual blocks. root is the relative path back to the site root. #}
 
-{% macro shot(name, caption, label='') -%}
+{% macro shot(name, caption, label='', root='') -%}
 <figure class="shot">
   <figcaption class="shot-bar"><span class="shot-label">{{ label }}</span>{{ caption }}</figcaption>
-  <a href="shots/{{ name }}.webp" target="_blank" rel="noopener">
-    <img src="shots/{{ name }}.webp" alt="{{ caption }}" loading="lazy">
+  <a href="{{ root }}shots/{{ name }}.webp" target="_blank" rel="noopener">
+    <img src="{{ root }}shots/{{ name }}.webp" alt="{{ caption | e }}" loading="lazy">
   </a>
 </figure>
 {%- endmacro %}
 
-{% macro clip(name, poster, caption, label='') -%}
+{% macro clip(name, poster, caption, label='', root='') -%}
 <figure class="shot clip">
   <figcaption class="shot-bar" id="clip-{{ name }}-caption"><span class="shot-label">{{ label }}</span>{{ caption }}</figcaption>
-  <video controls muted playsinline loop preload="none" poster="shots/{{ poster }}.webp" width="1440" height="900" aria-describedby="clip-{{ name }}-caption">
-    <source src="media/{{ name }}.mp4" type="video/mp4">
-    <a href="media/{{ name }}.mp4">Watch the silent clip</a>
+  <video controls muted playsinline loop preload="none"{% if poster %} poster="{{ root }}shots/{{ poster }}.webp"{% endif %} width="1440" height="900" aria-describedby="clip-{{ name }}-caption">
+    <source src="{{ root }}media/{{ name }}.mp4" type="video/mp4">
+    <a href="{{ root }}media/{{ name }}.mp4">Watch the silent clip</a>
   </video>
-  <div class="clip-note">Silent recording · <a href="media/{{ name }}.mp4">Open full-size ↗</a></div>
+  <div class="clip-note">Silent recording · <a href="{{ root }}media/{{ name }}.mp4">Open full-size ↗</a></div>
 </figure>
 {%- endmacro %}
 
@@ -68,6 +68,7 @@
     <div class="prose">
       {{ f.body_html }}
       {% if f.get('visual') %}{{ visual(f.visual) }}{% endif %}
+      {% if f.get('help_url') %}<a class="btn btn-primary" href="{{ f.help_url }}">Read the {{ f.kicker | lower }} guide →</a>{% endif %}
     </div>
     {% if f.get('shot') %}
     <div class="shots">

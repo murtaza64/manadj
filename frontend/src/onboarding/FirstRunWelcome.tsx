@@ -12,6 +12,8 @@ import { guidePresentation } from '../setup/guidePresentation';
 import '../setup/allGuides';
 import { onboardingApi } from './api';
 import { WELCOME_GUIDE_ID } from './guideIds';
+import { HelpLink } from '../help/HelpLink';
+import { guideHelp } from '../help/contexts';
 import './onboarding.css';
 
 type Screen = 'hidden' | 'welcome' | 'sequence';
@@ -80,6 +82,7 @@ export function FirstRunWelcome() {
             <p className="onboarding-muted">You can revisit every guide in Settings → Setup.</p>
           </div>
           <div className="onboarding-actions">
+            <HelpLink {...guideHelp(WELCOME_GUIDE_ID)} label="Help: Welcome" />
             <button className="btn btn-secondary" onClick={() => finish('skipped')}>
               Skip setup
             </button>
