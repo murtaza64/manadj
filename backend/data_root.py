@@ -1,8 +1,11 @@
 """Data root resolution (packaged-app PRD; ADR 0043).
 
 All mutable state lives under one data root:
-  - packaged app: ~/Library/Application Support/manaDJ (MANADJ_PACKAGED=1,
-    or MANADJ_DATA_DIR set explicitly by the Electron shell)
+  - packaged app (MANADJ_PACKAGED=1, or MANADJ_DATA_DIR set explicitly by
+    the Electron shell), per OS (#309):
+      macOS    ~/Library/Application Support/manaDJ
+      Windows  %APPDATA%\manaDJ  (Electron's app.getPath("userData"))
+      Linux    $XDG_DATA_HOME/manaDJ (~/.local/share/manaDJ)
   - dev: the repo checkout (unchanged layout)
 
 Layout inside the root (uniform across dev and packaged):
@@ -20,11 +23,34 @@ time and by scripts.
 from __future__ import annotations
 
 import os
+import sys
+from collections.abc import Mapping
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
-PACKAGED_DEFAULT = Path.home() / "Library" / "Application Support" / "manaDJ"
+APP_DIRNAME = "manaDJ"
+
+
+def packaged_default(
+    platform: str = sys.platform,
+    env: Mapping[str, str] = os.environ,
+    home: Path | None = None,
+) -> Path:
+    """The packaged app's per-user data root on this OS."""
+    home = home if home is not None else Path.home()
+    if platform == "darwin":
+        return home / "Library" / "Application Support" / APP_DIRNAME
+    if platform == "win32":
+        appdata = env.get("APPDATA")
+        base = Path(appdata) if appdata else home / "AppData" / "Roaming"
+        return base / APP_DIRNAME
+    xdg = env.get("XDG_DATA_HOME")
+    base = Path(xdg) if xdg else home / ".local" / "share"
+    return base / APP_DIRNAME
+
+
+PACKAGED_DEFAULT = packaged_default()
 
 
 def data_root() -> Path:

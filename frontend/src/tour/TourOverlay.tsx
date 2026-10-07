@@ -12,7 +12,7 @@
  *   Nothing is focused (focus/noFocusRule stands); keys bind at document.
  */
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { findAnchor, visibleSteps } from './anchors';
 import type { TourSection, TourStep } from './steps';
 import './tour.css';
@@ -53,6 +53,16 @@ export function TourOverlay({
   const [idx, setIdx] = useState(0);
   const step: TourStep | undefined = steps[idx];
   const [rect, setRect] = useState<Rect | null>(() => (step ? measure(step.anchor) : null));
+  const popoverRef = useRef<HTMLDivElement>(null);
+  const [popoverHeight, setPopoverHeight] = useState(POPOVER_ESTIMATE);
+  const [viewport, setViewport] = useState({ width: window.innerWidth, height: window.innerHeight });
+  useEffect(() => {
+    const el = popoverRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(() => setPopoverHeight(el.getBoundingClientRect().height));
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
   // Nothing on this screen to point at — close without ceremony.
   useEffect(() => {
@@ -70,6 +80,8 @@ export function TourOverlay({
   useEffect(() => {
     if (!step) return;
     const update = () => {
+      setViewport(prev => prev.width === window.innerWidth && prev.height === window.innerHeight
+        ? prev : { width: window.innerWidth, height: window.innerHeight });
       const measured = measure(step.anchor);
       if (measured === null) {
         if (idx + 1 >= steps.length) onDone();
@@ -124,24 +136,31 @@ export function TourOverlay({
     width: rect.width + SPOTLIGHT_PAD * 2,
     height: rect.height + SPOTLIGHT_PAD * 2,
   };
-  const below = spotlight.top + spotlight.height + POPOVER_ESTIMATE < window.innerHeight;
+  const below = spotlight.top + spotlight.height + popoverHeight + 8 < viewport.height;
   const popLeft = Math.max(
     8,
-    Math.min(spotlight.left, window.innerWidth - POPOVER_WIDTH - 8)
+    Math.min(spotlight.left, viewport.width - POPOVER_WIDTH - 8)
   );
-  const popStyle: React.CSSProperties = below
-    ? { left: popLeft, top: spotlight.top + spotlight.height + 8 }
-    : { left: popLeft, top: Math.max(8, spotlight.top - 8), transform: 'translateY(-100%)' };
+  const popStyle: React.CSSProperties = {
+    left: popLeft,
+    top: Math.max(8, Math.min(viewport.height - popoverHeight - 8,
+      below ? spotlight.top + spotlight.height + 8 : spotlight.top - popoverHeight - 8)),
+    maxWidth: viewport.width - 16,
+    maxHeight: viewport.height - 16,
+    overflowY: 'auto',
+  };
 
   return (
     <div
       className="tour-overlay"
       role="dialog"
+      aria-modal="true"
       aria-label={`Tour: ${section.label}`}
-      onClick={next}
+      onClick={onDone}
     >
       <div className="tour-spotlight" style={spotlight} />
-      <div className="tour-popover" style={popStyle} onClick={(e) => e.stopPropagation()}>
+      <div ref={popoverRef} className="tour-popover" style={popStyle} onClick={(e) => e.stopPropagation()}>
+        <div className="tour-popover-kind">TOUR / {section.label} · look around</div>
         <div className="tour-popover-head">
           <span className="tour-popover-title">{step.title}</span>
           <span className="tour-popover-count">
@@ -150,11 +169,11 @@ export function TourOverlay({
         </div>
         <p className="tour-popover-body">{step.body}</p>
         <div className="tour-popover-actions">
-          <button className="tour-skip" onClick={onDone}>
-            Skip
+          <button className="btn btn-secondary" onClick={onDone}>
+            Close
           </button>
           {auto && (
-            <button className="tour-skip" onClick={onSkipAll}>
+            <button className="btn btn-secondary" onClick={onSkipAll}>
               Skip all tours
             </button>
           )}

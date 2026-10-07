@@ -120,8 +120,9 @@ export const ENERGY_COLORS: Record<number, string> = {
 // ── Typography (D1) ──────────────────────────────────────────────────────
 
 /** The app font. Declared once on body (styles/base.css); canvas code
- * builds ctx.font strings from this. Assumes local install; falls back to
- * generic monospace. */
+ * builds ctx.font strings from this. Bundled via @font-face
+ * (styles/fonts.css, preferring a local install); main.tsx awaits it before
+ * first render so canvas text never measures the fallback. */
 export const FONT_MONO = "'UbuntuMono Nerd Font', monospace";
 
 /** The 5-step scale + display (D1). 7/8/10/13px are abolished — rebucket

@@ -1,0 +1,37 @@
+/* App font, bundled (gh#312): renders without a local install (Windows/Linux,
+   outside macOS users). local() first, so an installed copy wins unchanged.
+   Files: public/fonts — Nerd Fonts v3.5.1 UbuntuMono (Ubuntu Font Licence),
+   subset to drop the Nerd icon PUA glyphs (the app uses none; 1 MB -> 80 KB
+   per face). Using icons later: re-subset keeping the needed codepoints. */
+@font-face {
+  font-family: 'UbuntuMono Nerd Font';
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+  src: local('UbuntuMono Nerd Font'), local('UbuntuMonoNF'),
+    url('/fonts/UbuntuMonoNerdFont-Regular.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'UbuntuMono Nerd Font';
+  font-style: normal;
+  font-weight: 700;
+  font-display: block;
+  src: local('UbuntuMono Nerd Font Bold'), local('UbuntuMonoNF-Bold'),
+    url('/fonts/UbuntuMonoNerdFont-Bold.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'UbuntuMono Nerd Font';
+  font-style: italic;
+  font-weight: 400;
+  font-display: block;
+  src: local('UbuntuMono Nerd Font Italic'), local('UbuntuMonoNF-Italic'),
+    url('/fonts/UbuntuMonoNerdFont-Italic.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'UbuntuMono Nerd Font';
+  font-style: italic;
+  font-weight: 700;
+  font-display: block;
+  src: local('UbuntuMono Nerd Font Bold Italic'), local('UbuntuMonoNF-BoldItalic'),
+    url('/fonts/UbuntuMonoNerdFont-BoldItalic.woff2') format('woff2');
+}

@@ -87,24 +87,30 @@ class RekordboxPerfExporter:
     # -- matching ----------------------------------------------------------
 
     def _content_for(self, filename: str):
-        """DjmdContent for a Library track, by absolute path first, then
-        unique basename (mirrors the sync-status path matching)."""
+        """DjmdContent for a Library track, by path first, then unique
+        basename — both compared as ``path_key``s (mirrors the sync-status
+        path matching; Rekordbox stores ``C:/...`` on Windows, #305)."""
         from pyrekordbox.db6.tables import DjmdContent
 
+        from backend.sync_common.matching import path_key
+
         session = self._db.session
-        exact = (
-            session.query(DjmdContent)
-            .filter(DjmdContent.FolderPath == str(filename))
-            .all()
-        )
+        # Fast path: verbatim or "/"-separated spelling, straight from SQL.
+        spellings = {str(filename), str(filename).replace("\\", "/")}
+        exact = session.query(DjmdContent).filter(DjmdContent.FolderPath.in_(spellings)).all()
         if len(exact) == 1:
             return exact[0]
-        name = Path(filename).name
-        candidates = [
-            c
+        key = path_key(str(filename))
+        contents = [
+            (path_key(c.FolderPath), c)
             for c in session.query(DjmdContent).all()
-            if c.FolderPath and Path(c.FolderPath).name == name
+            if c.FolderPath
         ]
+        exact = [c for k, c in contents if k == key]
+        if len(exact) == 1:
+            return exact[0]
+        name = key.rsplit("/", 1)[-1]
+        candidates = [c for k, c in contents if k.rsplit("/", 1)[-1] == name]
         if len(candidates) == 1:
             return candidates[0]
         raise TrackNotInRekordboxError(

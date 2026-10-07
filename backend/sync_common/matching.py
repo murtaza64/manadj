@@ -3,8 +3,11 @@
 Match associates a track with its counterpart in another library by file
 path, falling back to filename. Canonical semantics, defined once here:
 
-- two tiers: exact full-path match, then basename match
-- case-sensitive
+- two tiers: full-path match, then basename match
+- both tiers compare ``path_key``s: separators unified to ``/``, Unicode
+  NFC-normalized, and casefolded on Windows (case-insensitive NTFS; drive
+  letters). Otherwise case-sensitive. Rekordbox stores ``C:/...`` where
+  manadj stores backslash paths; macOS may hand back NFD spellings (#305).
 - rows without a path are excluded from the index (and never match)
 - duplicate paths: last row wins
 
@@ -24,18 +27,30 @@ These are pure and track/tag/playlist-agnostic; the field semantics ride in the
 caller's ``key_of`` / ``equal`` callables.
 """
 
+import sys
+import unicodedata
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
-from pathlib import Path
 from typing import TypeVar
 
 _K = TypeVar("_K")
 _V = TypeVar("_V")
 
 
+def path_key(path: str, platform: str = sys.platform) -> str:
+    """The identity a path is matched by (never used to open files)."""
+    key = unicodedata.normalize("NFC", path.replace("\\", "/"))
+    return key.casefold() if platform == "win32" else key
+
+
+def _basename(key: str) -> str:
+    return key.rsplit("/", 1)[-1]
+
+
 @dataclass(frozen=True)
 class TrackIndex[T]:
-    """An index of tracks supporting two-tier path matching."""
+    """An index of tracks supporting two-tier path matching (keys are
+    ``path_key``s)."""
 
     by_path: dict[str, T]
     by_filename: dict[str, T]
@@ -48,18 +63,20 @@ class TrackIndex[T]:
             path = path_of(track)
             if not path:
                 continue
-            by_path[path] = track
-            by_filename[Path(path).name] = track
+            key = path_key(path)
+            by_path[key] = track
+            by_filename[_basename(key)] = track
         return cls(by_path=by_path, by_filename=by_filename)
 
     def match(self, path: str | None) -> T | None:
         """Two-tier match: full path, then basename. None for no match."""
         if not path:
             return None
-        hit = self.by_path.get(path)
+        key = path_key(path)
+        hit = self.by_path.get(key)
         if hit is not None:
             return hit
-        return self.by_filename.get(Path(path).name)
+        return self.by_filename.get(_basename(key))
 
 
 def find_unmatched[T, U](
