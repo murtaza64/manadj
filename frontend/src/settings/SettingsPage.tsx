@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { useMixer, useMixerValue } from '../hooks/useMixer';
 import { TOUR_SECTIONS } from '../tour/steps';
+import { TutorialSettings } from '../tutorials/TutorialSettings';
 import {
   allToursSkipped,
   isSectionSeen,
@@ -29,6 +30,7 @@ const WaveformSettings = lazy(() => import('../waveform/StyleTuningPage'));
 const ControllerCalibrationSettings = lazy(() => import('./ControllerCalibrationSettings'));
 const MouseJogSettings = lazy(() => import('./MouseJogSettings'));
 const LibrarySettings = lazy(() => import('./LibrarySettings'));
+const ControllerCheckSettings = lazy(() => import('../setup/controllerCheck/ControllerCheckSettings'));
 const SoulseekSettings = lazy(() => import('../setup/soulseek/SoulseekSettings'));
 const PARAMS = [
   {
@@ -397,7 +399,7 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
     title: 'Controllers',
     detail: 'Controller check, jog calibration',
     sections: [
-      // slot: Controller check (#292) — goes first
+      { id: 'controller-check', title: 'Controller check', render: () => <ControllerCheckSettings /> },
       { id: 'jog', title: 'Jog calibration', render: () => <ControllerCalibrationSettings /> },
     ],
   },
@@ -430,7 +432,8 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
     sections: [
       // slot: Setup guides status/relaunch (#288) — goes first
       { id: 'tour', title: 'Tour', render: () => <TourSettingsPanel /> },
-      // slot: Tutorials (#322); version/licenses/about
+      { id: 'tutorials', title: 'Tutorials', render: () => <TutorialSettings /> },
+      // slot: version/licenses/about
     ],
   },
 ];

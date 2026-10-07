@@ -11,6 +11,7 @@ from typing import Any
 from backend.acquisition.classification import ClassificationConfig
 from backend.acquisition.cleanup import CleanupConfig
 from backend.data_root import dotenv_path, settings_file_path, stems_dir
+from backend.shipped_defaults import with_config_defaults
 
 def rekordbox_default_location(
     platform: str = sys.platform,
@@ -283,6 +284,8 @@ def load_config() -> Config:
     if config_path.exists():
         with open(config_path, "rb") as f:
             data = tomllib.load(f)
+    # Shipped defaults (setup-guides #293) fill unset non-path keys.
+    data = with_config_defaults(data)
 
     lib_config = data.get("library", {})
     tracks_dir = _tracks_directory_override() or lib_config.get("tracks_directory") or None

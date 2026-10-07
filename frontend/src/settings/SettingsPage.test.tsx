@@ -13,6 +13,11 @@ import { getJogCalibration, resetGrv6JogCalibration } from '../midi/jogCalibrati
 import { BEAT_FX_PARAMETER_RANGES, DEFAULT_BEAT_FX_SETTINGS } from '../playback/beatFxSettings';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+// Settings renders Controller check too; device discovery belongs to its own tests.
+vi.mock('../playback/audioDevices', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../playback/audioDevices')>(),
+  listAudioOutputs: vi.fn(async () => []),
+}));
 vi.hoisted(() => {
   const values = new Map<string, string>();
   globalThis.localStorage = {

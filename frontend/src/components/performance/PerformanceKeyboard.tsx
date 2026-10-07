@@ -10,6 +10,7 @@ import type { Track } from '../../types';
 import { sharedBrowseHandle } from '../browseHost';
 import { DeckKeys } from './DeckKeys';
 import { hasKeyboardOverlay, isQuantizeShortcut, isTypingTarget } from './performanceKeys';
+import { reportTutorialAction } from '../../tutorials/engine';
 
 const shortcuts = [
   ['Tab / Esc', 'Return to decks'],
@@ -48,6 +49,7 @@ export function PerformanceKeyboard({ deckCount, left, right, onLoad }: {
     if (library !== next) {
       for (const key of held.current) blocked.current.add(key);
       setLibrary(next);
+      if (next) reportTutorialAction({ type: 'browse' });
     }
     if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
   };

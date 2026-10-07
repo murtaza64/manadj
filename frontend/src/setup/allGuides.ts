@@ -4,4 +4,5 @@
  * its own line.
  */
 import './cueMode/register';
+import './controllerCheck/register';
 import './soulseek/register';
