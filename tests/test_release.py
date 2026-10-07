@@ -63,7 +63,7 @@ def test_roll_changelog():
 
 def test_prerelease_notes_use_base_section_and_install_doc():
     notes = release.release_notes(CHANGELOG, "# Installing\n\n1. Drag.\n", "0.1.0-rc.1")
-    assert "Prerelease 0.1.0-rc.1" in notes
+    assert "Preview build" in notes and "0.1.0-rc.1" in notes
     assert "First release." in notes
     assert "## Install\n\n1. Drag." in notes
     assert "# Installing" not in notes
@@ -73,3 +73,11 @@ def test_is_prerelease():
     assert release.is_prerelease("0.1.0-rc.1")
     assert not release.is_prerelease("0.1.0")
     assert release.base_version("0.1.0-rc.1") == "0.1.0"
+
+
+def test_prerelease_roll_and_notes():
+    rolled = release.roll_changelog(CHANGELOG, "0.2.0-rc.1", "2026-11-01")
+    assert release.changelog_section(rolled, "0.2.0-rc.1") == "### Added\n- Thing one."
+    notes = release.release_notes(rolled, "# I\n\nDrag.\n", "0.2.0-rc.1", "**Try:** stuff")
+    assert notes.index("Preview build") < notes.index("**Try:** stuff") < notes.index("## What's new in 0.2.0-rc.1")
+    assert "- Thing one." in notes and "First release." not in notes

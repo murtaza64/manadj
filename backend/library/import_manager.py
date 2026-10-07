@@ -1,6 +1,7 @@
 """Manager class for library track import operations."""
 
 import re
+from collections.abc import Callable
 from pathlib import Path
 from sqlalchemy.orm import Session
 from ..models import Track
@@ -106,12 +107,18 @@ class LibraryImportManager:
         rows = self.manadj_session.query(Track.filename).all()
         return {path_key(str(Path(t.filename).resolve())) for t in rows}
 
-    def get_import_candidates(self, recursive: bool = False) -> LibraryImportResult:
+    def get_import_candidates(
+        self,
+        recursive: bool = False,
+        progress: Callable[[int, int], None] | None = None,
+    ) -> LibraryImportResult:
         """
         Get list of tracks that can be imported.
 
         Args:
             recursive: Whether to scan subdirectories
+            progress: optional (files done, files total) callback — tag
+                reading is the slow part of a large first scan
 
         Returns:
             LibraryImportResult with candidates and stats
@@ -126,7 +133,10 @@ class LibraryImportManager:
 
         # Find new tracks and extract metadata
         candidates = []
-        for file_path in audio_files:
+        total = len(audio_files)
+        for i, file_path in enumerate(audio_files, start=1):
+            if progress is not None and (i % 25 == 0 or i == total):
+                progress(i, total)
             # Skip if already in database
             if path_key(str(file_path)) in existing_filenames:
                 stats.already_in_db += 1

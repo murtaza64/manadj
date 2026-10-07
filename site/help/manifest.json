@@ -1,0 +1,134 @@
+[
+  {
+    "slug": "curate",
+    "title": "Curate your Library",
+    "anchors": [
+      "main",
+      "importing",
+      "tags",
+      "playlists",
+      "archive"
+    ]
+  },
+  {
+    "slug": "perform",
+    "title": "Mix with Decks and Mixer",
+    "anchors": [
+      "main",
+      "clip-perform-caption",
+      "keyboard",
+      "loading",
+      "mixer",
+      "mouse-jog",
+      "stems"
+    ]
+  },
+  {
+    "slug": "follow",
+    "title": "Find the next Track with Follow",
+    "anchors": [
+      "main",
+      "suggestions",
+      "matching",
+      "temperature"
+    ]
+  },
+  {
+    "slug": "capture",
+    "title": "Review Sessions and Takes",
+    "anchors": [
+      "main",
+      "sessions",
+      "takes"
+    ]
+  },
+  {
+    "slug": "editor",
+    "title": "Edit and audition a mix",
+    "anchors": [
+      "main",
+      "clip-editor-caption",
+      "editing",
+      "audition",
+      "promote",
+      "blank-mix"
+    ]
+  },
+  {
+    "slug": "sets",
+    "title": "Plan and play a Set",
+    "anchors": [
+      "main",
+      "clip-set-caption",
+      "planning",
+      "playback",
+      "takeover"
+    ]
+  },
+  {
+    "slug": "analysis",
+    "title": "Analysis and waveforms",
+    "anchors": [
+      "main",
+      "analysis",
+      "waveforms"
+    ]
+  },
+  {
+    "slug": "sync",
+    "title": "Import and export",
+    "anchors": [
+      "main",
+      "import",
+      "export"
+    ]
+  },
+  {
+    "slug": "acquire",
+    "title": "Acquire tracks",
+    "anchors": [
+      "main",
+      "soundcloud",
+      "soulseek"
+    ]
+  },
+  {
+    "slug": "controllers",
+    "title": "Controllers",
+    "anchors": [
+      "main",
+      "check",
+      "jog-calibration"
+    ]
+  },
+  {
+    "slug": "start",
+    "title": "Get started",
+    "anchors": [
+      "main",
+      "setup",
+      "rekordbox",
+      "tracks-directory",
+      "tour",
+      "tutorials"
+    ]
+  },
+  {
+    "slug": "audio",
+    "title": "Audio and Cue mode",
+    "anchors": [
+      "main",
+      "outputs",
+      "cue-mode"
+    ]
+  },
+  {
+    "slug": "beat-fx",
+    "title": "Beat FX and filters",
+    "anchors": [
+      "main",
+      "effects",
+      "filters"
+    ]
+  }
+]

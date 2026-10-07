@@ -25,6 +25,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CameoRowWire, RoutineCandidateWire, RoutineRowWire, RoutineTakeRowWire, TakeRowWire } from '../api/client';
 import { subscribeChipFills } from './pickerChips';
+import { reportTutorialAction } from '../tutorials/engine';
 import type { ChannelId } from '../playback/mixer';
 import { DECK_COLORS } from '../theme/deckColors';
 import {
@@ -128,6 +129,7 @@ export function MixPicker(props: MixPickerProps) {
         else if (b === null) nextB = trackId;
         else nextB = trackId;
         if (nextA === nextB) return; // same track twice: no self-pairs
+        if (nextA !== a || nextB !== b) reportTutorialAction({ type: a === null ? 'transition-pick-a' : 'transition-pick-b' });
         setChipA(nextA);
         setChipB(nextB);
         setQuery('');
@@ -325,6 +327,7 @@ export function MixPicker(props: MixPickerProps) {
   const pickTrack = useCallback(
     (id: number) => {
       if (id === chipA || id === chipB) return;
+      reportTutorialAction({ type: chipA === null ? 'transition-pick-a' : 'transition-pick-b' });
       if (chipA === null) setChipA(id);
       else setChipB(id);
       setQuery('');
@@ -477,6 +480,7 @@ export function MixPicker(props: MixPickerProps) {
                 return (
                   <div
                     key={key}
+                    data-tutorial={row.ref.kind === 'new-transition' ? 'new-transition' : undefined}
                     className={`mp-row${flat === highlight ? ' hl' : ''}${isOpen ? ' open' : ''}`}
                     onMouseEnter={() => setHighlight(flat)}
                   onMouseDown={(e) => {

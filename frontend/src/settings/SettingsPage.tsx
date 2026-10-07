@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { useMixer, useMixerValue } from '../hooks/useMixer';
 import { TOUR_SECTIONS } from '../tour/steps';
+import { TutorialSettings } from '../tutorials/TutorialSettings';
 import {
   allToursSkipped,
   isSectionSeen,
@@ -17,6 +18,7 @@ import {
 import { FilterResponse } from './FilterResponse';
 import './settings.css';
 import { CommittedNumberInput } from '../components/CommittedNumberInput';
+import { openKeyboardHelp } from '../components/keyboardHelpStore';
 import { HFader } from '../components/performance/MixerStrip';
 import {
   BEAT_FX_PARAMETER_RANGES,
@@ -24,11 +26,18 @@ import {
   type BeatFxSettings,
 } from '../playback/beatFxSettings';
 import { APP_VERSION } from '../version';
+import { HelpLink } from '../help/HelpLink';
+import { HelpSettings } from '../help/HelpSettings';
+import { SETTINGS_HELP } from '../help/contexts';
 
 const WaveformSettings = lazy(() => import('../waveform/StyleTuningPage'));
 const ControllerCalibrationSettings = lazy(() => import('./ControllerCalibrationSettings'));
 const MouseJogSettings = lazy(() => import('./MouseJogSettings'));
 const LibrarySettings = lazy(() => import('./LibrarySettings'));
+const SetupSettings = lazy(() => import('../setup/SetupSettings'));
+const ControllerCheckSettings = lazy(() => import('../setup/controllerCheck/ControllerCheckSettings'));
+const SoulseekSettings = lazy(() => import('../setup/soulseek/SoulseekSettings'));
+const SoundCloudSettings = lazy(() => import('../setup/soundcloud/SoundCloudSettings'));
 const PARAMS = [
   {
     key: 'resonance',
@@ -221,6 +230,20 @@ function FilterSettingsPanel() {
 /** Tour reset (feature-tour #282, story 7): forget seen sections and the
  * skip-all flag, so every section's coach marks fire again on first entry.
  * Also the demo hook. Replays of single sections live in the TopBar ?. */
+function KeyboardShortcutsPanel() {
+  return (
+    <div className="settings-section-heading">
+      <div>
+        <h2>Keyboard shortcuts</h2>
+        <p>The full keyboard map for every area. Also opens with ? or F1 anywhere.</p>
+      </div>
+      <button className="btn btn-secondary" onClick={openKeyboardHelp}>
+        Open keyboard map
+      </button>
+    </div>
+  );
+}
+
 function TourSettingsPanel() {
   useSyncExternalStore(subscribeTour, tourVersion);
   const seenCount = TOUR_SECTIONS.filter((s) => isSectionSeen(s.id)).length;
@@ -230,8 +253,8 @@ function TourSettingsPanel() {
         <div>
           <h2>Tour</h2>
           <p>
-            Each area shows a short guided walkthrough the first time you enter
-            it. Replay any section from the ? button in the top bar.
+            Tours explain the interface. Tutorials teach through real actions.
+            Replay either from the ? button in the top bar.
           </p>
         </div>
         <button className="btn btn-secondary" onClick={resetTourProgress}>
@@ -267,7 +290,7 @@ const EFFECT_GROUPS = [
   },
   {
     name: 'Flanger',
-    detail: 'One sine-LFO cycle per selected Beat FX span.',
+    detail: 'One sine-LFO cycle per BEAT ◄ ► length (bars or beats).',
     fields: [
       ['flangerDelayMs', 'Center delay', 'ms', 'Center of the comb-filter delay sweep.'],
       ['flangerWidthMs', 'Sweep width', 'ms', 'Peak-to-peak delay modulation range.'],
@@ -340,6 +363,24 @@ function BeatFxSettingsPanel() {
                 </div>
               );
             })}
+            {group.name === 'Flanger' && (
+              <div className="settings-field">
+                <span className="settings-field-label">Length unit</span>
+                <p>How the BEAT ◄ ► length reads for the Flanger. 1 bar = 4 beats.</p>
+                <div className="settings-unit-toggle" role="group" aria-label="Flanger length unit">
+                  {(['bars', 'beats'] as const).map((unit) => (
+                    <button
+                      key={unit}
+                      className={`btn${settings.flangerLengthUnit === unit ? ' btn-selected' : ''}`}
+                      aria-pressed={settings.flangerLengthUnit === unit}
+                      onClick={() => mixer.setBeatFxSettings({ flangerLengthUnit: unit })}
+                    >
+                      {unit === 'bars' ? 'Bars' : 'Beats'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
           </section>
         ))}
       </div>
@@ -396,7 +437,7 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
     title: 'Controllers',
     detail: 'Controller check, jog calibration',
     sections: [
-      // slot: Controller check (#292) — goes first
+      { id: 'controller-check', title: 'Controller check', render: () => <ControllerCheckSettings /> },
       { id: 'jog', title: 'Jog calibration', render: () => <ControllerCalibrationSettings /> },
     ],
   },
@@ -410,7 +451,7 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
         title: 'Mouse jog',
         render: ({ performance }) => <MouseJogSettings performance={performance} />,
       },
-      // slot: keyboard shortcut map (#285)
+      { id: 'shortcuts', title: 'Keyboard shortcuts', render: () => <KeyboardShortcutsPanel /> },
     ],
   },
   {
@@ -418,8 +459,8 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
     title: 'Accounts',
     detail: 'SoundCloud, Soulseek',
     sections: [
-      // slot: SoundCloud (#290)
-      // slot: Soulseek (#291)
+      { id: 'soundcloud', title: 'SoundCloud', render: () => <SoundCloudSettings /> },
+      { id: 'soulseek', title: 'Soulseek', render: () => <SoulseekSettings /> },
     ],
   },
   {
@@ -427,9 +468,11 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
     title: 'Help',
     detail: 'Setup guides, tour, about',
     sections: [
-      // slot: Setup guides status/relaunch (#288) — goes first
+      { id: 'setup', title: 'Setup', render: () => <SetupSettings /> },
+      { id: 'manual', title: 'Manual', render: () => <HelpSettings /> },
       { id: 'tour', title: 'Tour', render: () => <TourSettingsPanel /> },
-      // slot: Tutorials (#322); version/licenses/about
+      { id: 'tutorials', title: 'Tutorials', render: () => <TutorialSettings /> },
+      // slot: version/licenses/about
     ],
   },
 ];
@@ -507,6 +550,7 @@ export default function SettingsPage({ performance = false }: { performance?: bo
               <Suspense fallback={<p role="status">Loading settings...</p>}>
                 {s.render({ performance })}
               </Suspense>
+              {SETTINGS_HELP[s.id] && <HelpLink {...SETTINGS_HELP[s.id]} label={`Help: ${s.title}`} />}
             </section>
           ))}
         </section>

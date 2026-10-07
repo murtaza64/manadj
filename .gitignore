@@ -19,3 +19,9 @@ build/
 
 # backend rotating log (packaged-app #278)
 logs/
+
+# slskd binary fetched by scripts/slskd/fetch_slskd.py
+vendor/
+
+# Generated offline help (site/build.py --app-help)
+frontend/public/manual/

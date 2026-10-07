@@ -19,6 +19,7 @@
     <div class="segments">
       {% for f in features %}<a class="segment" href="#{{ f.slug }}" data-target="{{ f.slug }}">{{ f.kicker }}</a>{% endfor %}
       <a class="segment" href="#words" data-target="words">WORDS</a>
+      <a class="segment" href="help/index.html">HELP</a>
     </div>
   </nav>
 
@@ -32,6 +33,7 @@
         <div class="actions">
           <a class="btn btn-primary" href="#{{ features[0].slug }}">Take the tour ↓</a>
           <a class="btn" href="{{ home.github }}">Source on GitHub</a>
+          <a class="btn" href="help/index.html">Help manual</a>
         </div>
       </div>
        <div class="hero-shot">{{ clip(home.hero_clip, home.hero_shot, home.hero_caption, 'PLAY') }}</div>

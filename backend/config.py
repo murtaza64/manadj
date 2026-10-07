@@ -6,11 +6,12 @@ import tomllib
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from backend.acquisition.classification import ClassificationConfig
 from backend.acquisition.cleanup import CleanupConfig
 from backend.data_root import dotenv_path, settings_file_path, stems_dir
+from backend.shipped_defaults import with_config_defaults
 
 def rekordbox_default_location(
     platform: str = sys.platform,
@@ -76,6 +77,9 @@ class LibraryConfig:
 class SoundCloudConfig:
     """SoundCloud Source configuration."""
     oauth_token: str | None = None
+    # where the token came from: secrets = the data root's .env (what the
+    # SoundCloud guide writes, #290); env = process environment only
+    token_source: Literal["secrets", "env", "config"] | None = None
 
 
 @dataclass
@@ -87,6 +91,9 @@ class SoulseekConfig:
     """
     slskd_url: str | None = None
     api_key: str | None = None
+    # True when the values point at manadj's own supervised slskd (#291)
+    # rather than a user-run daemon.
+    managed: bool = False
 
     @property
     def configured(self) -> bool:
@@ -200,18 +207,39 @@ def _stems_config(data: dict[str, Any]) -> StemsConfig:
 
 
 def _soulseek_config(data: dict[str, Any]) -> SoulseekConfig:
-    """[soulseek] slskd_url from config.toml; the API key from env/.env only."""
+    """[soulseek] slskd_url from config.toml; the API key from env/.env only.
+
+    Unset => fall back to the managed slskd (#291) when the Soulseek guide
+    stored credentials and the binary is shipped.
+    """
     section: dict[str, Any] = data.get("soulseek", {})
-    return SoulseekConfig(
+    external = SoulseekConfig(
         slskd_url=section.get("slskd_url") or None,
         api_key=os.environ.get("SLSKD_API_KEY") or None,
     )
+    if external.configured:
+        return external
+    from backend.soulseek.managed import get_store, resolve_binary
+
+    managed = get_store().load()
+    if managed is not None and resolve_binary() is not None:
+        return SoulseekConfig(slskd_url=managed.url, api_key=managed.api_key, managed=True)
+    return external
 
 
-def _soundcloud_token(data: dict[str, Any]) -> str | None:
-    """Token from the environment (or .env); config.toml fallback for convenience."""
+def _soundcloud_config(data: dict[str, Any]) -> SoundCloudConfig:
+    """SOUNDCLOUD_OAUTH_TOKEN (environment or the data root's .env — where
+    the SoundCloud guide stores it, #290), then [soundcloud] oauth_token."""
     section: dict[str, Any] = data.get("soundcloud", {})
-    return os.environ.get("SOUNDCLOUD_OAUTH_TOKEN") or section.get("oauth_token") or None
+    token = os.environ.get("SOUNDCLOUD_OAUTH_TOKEN")
+    if token:
+        from backend.settings_file import read_secrets
+
+        in_dotenv = read_secrets().get("SOUNDCLOUD_OAUTH_TOKEN") == token
+        return SoundCloudConfig(token, "secrets" if in_dotenv else "env")
+    if section.get("oauth_token"):
+        return SoundCloudConfig(section["oauth_token"], "config")
+    return SoundCloudConfig()
 
 
 def _tracks_directory_override() -> str | None:
@@ -268,6 +296,8 @@ def load_config() -> Config:
     if config_path.exists():
         with open(config_path, "rb") as f:
             data = tomllib.load(f)
+    # Shipped defaults (setup-guides #293) fill unset non-path keys.
+    data = with_config_defaults(data)
 
     lib_config = data.get("library", {})
     tracks_dir = _tracks_directory_override() or lib_config.get("tracks_directory") or None
@@ -277,7 +307,7 @@ def load_config() -> Config:
         library=LibraryConfig(
             tracks_directory=tracks_dir
         ),
-        soundcloud=SoundCloudConfig(oauth_token=_soundcloud_token(data)),
+        soundcloud=_soundcloud_config(data),
         soulseek=_soulseek_config(data),
         acquisition=AcquisitionConfig(
             classification=_classification_config(data),

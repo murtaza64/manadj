@@ -342,3 +342,8 @@
 .settings-controller-calibration {
   color: var(--subtext0);
 }
+
+.settings-unit-toggle {
+  display: inline-flex;
+  gap: var(--space-4);
+}

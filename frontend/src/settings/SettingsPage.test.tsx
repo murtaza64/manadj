@@ -4,7 +4,13 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { MixerContext } from '../hooks/useMixer';
 import { Mixer } from '../playback/mixer';
-import SettingsPage from './SettingsPage';
+import SettingsPage, { SETTINGS_GROUPS } from './SettingsPage';
+import { SETTINGS_HELP, GUIDE_HELP } from '../help/contexts';
+import { HELP_TOPICS, helpHref } from '../help/routes';
+import { HelpViewer } from '../help/HelpViewer';
+import { closeHelp } from '../help/helpStore';
+import { listGuides } from '../setup/guides';
+import '../setup/allGuides';
 import { describeSweepFilter } from '../playback/sweepFilter';
 import { DEFAULT_FILTER_SETTINGS, FILTER_PARAMETER_RANGES } from '../playback/filterSettings';
 import { defaultSlots, getSlot, getSlots, resetSlots } from '../waveform/styleSlots';
@@ -13,6 +19,11 @@ import { getJogCalibration, resetGrv6JogCalibration } from '../midi/jogCalibrati
 import { BEAT_FX_PARAMETER_RANGES, DEFAULT_BEAT_FX_SETTINGS } from '../playback/beatFxSettings';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+// Settings renders Controller check too; device discovery belongs to its own tests.
+vi.mock('../playback/audioDevices', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../playback/audioDevices')>(),
+  listAudioOutputs: vi.fn(async () => []),
+}));
 vi.hoisted(() => {
   const values = new Map<string, string>();
   globalThis.localStorage = {
@@ -84,6 +95,7 @@ function expectFaders(host: HTMLElement, count: number) {
 }
 
 afterEach(() => {
+  act(() => closeHelp());
   if (root) act(() => root!.unmount());
   root = undefined;
   document.body.innerHTML = '';
@@ -151,7 +163,7 @@ it('edits typed values only on commit, supports cancel/reset and does not create
   expect(input.value).toBe('16000');
   act(() => { input.focus(); input.blur(); });
   expect(mixer.getFilterSettings().hpMax).toBe(16000);
-  expect(host.querySelectorAll('.settings-nav button')).toHaveLength(6);
+  expect(host.querySelectorAll('.settings-nav button')).toHaveLength(7);
   expect(host.querySelector('[aria-label="Filter frequency response"] polyline')?.getAttribute('points')?.split(' ')).toHaveLength(180);
   expect(host.querySelector('input[type="search"], canvas')).toBeNull();
   expect(host.textContent).toContain('Target response at 48 kHz');
@@ -177,6 +189,14 @@ it('edits and resets persisted Beat FX sound parameters without creating audio',
   const decay = host.querySelector<HTMLElement>('#beat-fx-reverbDecay')!;
   press(decay, 'Home');
   expect(mixer.getBeatFxSettings().reverbDecay).toBe(0.5);
+
+  const unit = host.querySelector('[aria-label="Flanger length unit"]')!;
+  const bars = [...unit.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent === 'Bars')!;
+  const beats = [...unit.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent === 'Beats')!;
+  expect(bars.getAttribute('aria-pressed')).toBe('true');
+  act(() => beats.click());
+  expect(mixer.getBeatFxSettings().flangerLengthUnit).toBe('beats');
+  expect(beats.getAttribute('aria-pressed')).toBe('true');
 
   const reset = [...host.querySelectorAll<HTMLButtonElement>('button')]
     .find((button) => button.textContent === 'Reset effect defaults')!;
@@ -401,7 +421,7 @@ it('groups sections, hides empty groups and maps old section deep links to their
   await act(async () => root!.render(<SettingsPage />));
   await act(async () => { await vi.dynamicImportSettled(); });
   const nav = [...host.querySelectorAll('.settings-nav button strong')].map((n) => n.textContent);
-  expect(nav).toEqual(['Library', 'Performance', 'Display', 'Controllers', 'Keyboard + mouse', 'Help']);
+  expect(nav).toEqual(['Library', 'Performance', 'Display', 'Controllers', 'Keyboard + mouse', 'Accounts', 'Help']);
   expect(host.querySelector('.settings-content')?.getAttribute('aria-label')).toBe('Controllers');
   expect(host.querySelector('#settings-section-jog')).not.toBeNull();
   // Jog calibration is GRV6-only; the other known controllers say so.
@@ -421,4 +441,40 @@ it('opens a group by id and the Performance group stacks Filters and Beat FX', a
   await act(async () => root!.render(<MixerContext value={new Mixer()}><SettingsPage /></MixerContext>));
   const blocks = [...host.querySelectorAll('.settings-subsection')].map((n) => n.id);
   expect(blocks).toEqual(['settings-section-filters', 'settings-section-effects']);
+});
+
+it('provides a valid Help context for every existing Settings subsection and registered Setup guide', () => {
+  for (const section of SETTINGS_GROUPS.flatMap((group) => group.sections)) {
+    if (section.id === 'manual') continue;
+    const target = SETTINGS_HELP[section.id];
+    expect(target, section.id).toBeDefined();
+    expect(helpHref(target.topic, target.anchor), section.id).not.toBeNull();
+  }
+  for (const guide of listGuides()) {
+    const target = GUIDE_HELP[guide.id];
+    expect(target, guide.id).toBeDefined();
+    expect(helpHref(target.topic, target.anchor), guide.id).not.toBeNull();
+  }
+});
+
+it('opens contextual Help without changing the Settings group and exposes the manual as one Help entry', async () => {
+  history.replaceState(null, '', '/?section=performance');
+  const host = document.createElement('div');
+  document.body.append(host);
+  root = createRoot(host);
+  await act(async () => root!.render(<MixerContext value={new Mixer()}><SettingsPage /><HelpViewer /></MixerContext>));
+  const opener = host.querySelector<HTMLButtonElement>('[aria-label="Help: Filters"]')!;
+  act(() => opener.click());
+  expect(document.querySelector('iframe')?.getAttribute('src')).toBe('/manual/help/beat-fx/index.html#filters');
+  act(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+  expect(document.activeElement).toBe(opener);
+  expect(host.querySelector('.settings-content')?.getAttribute('aria-label')).toBe('Performance');
+  const help = [...host.querySelectorAll<HTMLButtonElement>('.settings-nav button')].find((b) => b.querySelector('strong')?.textContent === 'Help')!;
+  await act(async () => help.click());
+  await act(async () => { await vi.dynamicImportSettled(); });
+  const manual = host.querySelector('#settings-section-manual')!;
+  expect(manual.querySelectorAll('button')).toHaveLength(HELP_TOPICS.length + 1);
+  expect(SETTINGS_GROUPS.find((g) => g.id === 'help')!.sections.filter((s) => s.id === 'manual')).toHaveLength(1);
+  act(() => (manual.querySelector('button') as HTMLButtonElement).click());
+  expect(document.querySelector('iframe')?.getAttribute('src')).toBe('/manual/help/index.html');
 });

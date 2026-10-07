@@ -15,6 +15,12 @@
  *
  * Values are the raw localStorage strings — often JSON, sometimes bare
  * tokens ('true', a preset id). The seam does not interpret them.
+ *
+ * Shipped defaults (setup-guides #293): GET /defaults returns Murtaza's
+ * snapshotted preferences. Hydration writes one into the cache only when
+ * its key is unset (no DB row, no journaled edit, no local value). Applied
+ * defaults stay out of the DB: local values equal to their shipped default
+ * are never seeded/pushed, so a later re-snapshot still reaches unset keys.
  */
 
 // ── Inventory of persisted-preference keys ──────────────────────────────
@@ -65,6 +71,7 @@ export const PERSISTED_SETTING_KEYS: readonly string[] = [
   'manadj.grv6JogCalibration',
   // Coach-mark tour progress (feature-tour #282)
   'manadj-tour-state',
+  'manadj-tutorial-state',
   // Setup guides (guide status: done / skipped)
   'manadj-setup-state',
 ];
@@ -109,7 +116,39 @@ function isPersistedKey(key: string): boolean {
   );
 }
 
-/** All inventoried preference values currently in this origin's localStorage. */
+let shippedDefaults: Record<string, string> = {};
+
+/** Shipped default for a key (after hydration), or null. */
+export function shippedDefault(key: string): string | null {
+  return Object.prototype.hasOwnProperty.call(shippedDefaults, key) ? shippedDefaults[key] : null;
+}
+
+async function fetchShippedDefaults(): Promise<Record<string, string>> {
+  try {
+    const res = await fetch(`${API_BASE}/defaults`);
+    if (!res.ok) return {};
+    const body: unknown = (await res.json())?.defaults;
+    if (!body || typeof body !== 'object') return {};
+    return Object.fromEntries(
+      Object.entries(body).filter(([key, value]) => isPersistedKey(key) && typeof value === 'string'),
+    ) as Record<string, string>;
+  } catch {
+    return {};
+  }
+}
+
+/** Cache-only: fill unset keys with their shipped default. */
+function applyShippedDefaults(rows: Record<string, string>, pending: Record<string, string | null>): void {
+  for (const [key, value] of Object.entries(shippedDefaults)) {
+    if (key in rows || key in pending) continue;
+    try {
+      if (localStorage.getItem(key) === null) localStorage.setItem(key, value);
+    } catch { /* cache is best-effort */ }
+  }
+}
+
+/** All inventoried preference values currently in this origin's localStorage
+ *  (minus values that are just their shipped default). */
 function collectLocalSettings(): Record<string, string> {
   const out: Record<string, string> = {};
   try {
@@ -117,7 +156,7 @@ function collectLocalSettings(): Record<string, string> {
       const key = localStorage.key(i);
       if (key !== null && isPersistedKey(key)) {
         const value = localStorage.getItem(key);
-        if (value !== null) out[key] = value;
+        if (value !== null && value !== shippedDefault(key)) out[key] = value;
       }
     }
   } catch {
@@ -137,6 +176,7 @@ function collectLocalSettings(): Record<string, string> {
  */
 export async function hydratePersistedSettings(): Promise<void> {
   let rows: Record<string, string>;
+  const defaultsRequest = fetchShippedDefaults();
   try {
     const res = await fetch(API_BASE);
     if (!res.ok) return;
@@ -144,6 +184,7 @@ export async function hydratePersistedSettings(): Promise<void> {
   } catch {
     return; // offline/backend down — cache serves
   }
+  shippedDefaults = await defaultsRequest;
 
   const pending = readPending();
   for (const [key, value] of Object.entries(pending)) {
@@ -165,6 +206,7 @@ export async function hydratePersistedSettings(): Promise<void> {
       // best-effort; next boot retries
     }
     for (const [key, value] of Object.entries(pending)) queueSetting(key, value);
+    applyShippedDefaults(rows, pending);
     return;
   }
 
@@ -180,6 +222,7 @@ export async function hydratePersistedSettings(): Promise<void> {
     if (!(key in rows) && !(key in pending)) queueSetting(key, value);
   }
   for (const [key, value] of Object.entries(pending)) queueSetting(key, value);
+  applyShippedDefaults(rows, pending);
 }
 
 const pendingWrites = new Map<string, string | null>();

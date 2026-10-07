@@ -4,6 +4,9 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { visibleSteps } from './anchors';
 import { TourOverlay } from './TourOverlay';
+import { TourController } from './TourController';
+import { HelpViewer } from '../help/HelpViewer';
+import { closeHelp, isHelpOpen, openHelp } from '../help/helpStore';
 import type { TourSection } from './steps';
 import { TOUR_SECTIONS } from './steps';
 import {
@@ -109,8 +112,10 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  act(() => closeHelp());
   cleanups.splice(0).forEach((fn) => fn());
   document.body.innerHTML = '';
+  vi.useRealTimers();
 });
 
 describe('visibleSteps (story 5)', () => {
@@ -176,6 +181,24 @@ describe('TourOverlay sequencing', () => {
     expect(popoverTitle()).toBe('One');
   });
 
+  it('a backdrop click closes instead of silently advancing', () => {
+    addAnchor('t.one'); addAnchor('t.two');
+    let done = 0;
+    mount(<TourOverlay section={SECTION} auto onDone={() => done++} onSkipAll={() => {}} />);
+    act(() => document.querySelector('.tour-overlay')!.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+    expect(done).toBe(1);
+    expect(popoverTitle()).toBe('One');
+  });
+
+  it('keeps the popover inside the viewport for a full-height anchor', () => {
+    const anchor = addAnchor('t.one');
+    anchor.getBoundingClientRect = () => ({ top: 0, left: 0, width: 200, height: window.innerHeight, bottom: window.innerHeight, right: 200 }) as DOMRect;
+    mount(<TourOverlay section={SECTION} auto onDone={() => {}} onSkipAll={() => {}} />);
+    const panel = document.querySelector<HTMLElement>('.tour-popover')!;
+    expect(Number.parseFloat(panel.style.top)).toBeGreaterThanOrEqual(8);
+    expect(panel.style.transform).toBe('');
+  });
+
   it('is a keyboard overlay: role=dialog silences deck hotkeys', () => {
     addAnchor('t.one');
     mount(<TourOverlay section={SECTION} auto onDone={() => {}} onSkipAll={() => {}} />);
@@ -206,6 +229,69 @@ describe('TourOverlay sequencing', () => {
       window.dispatchEvent(new Event('resize'));
     });
     expect(popoverTitle()).toBe('Two');
+  });
+});
+
+describe('Tour Help integration', () => {
+  it.each(['parent', 'iframe'])('opens context help with Enter and resumes the same controller step after %s Escape', (source) => {
+    vi.useFakeTimers();
+    const section = TOUR_SECTIONS.find((s) => s.id === 'performance')!;
+    section.steps.forEach((step) => addAnchor(step.anchor));
+    mount(<><TourController /><HelpViewer /></>);
+    act(() => vi.advanceTimersByTime(250));
+    clickButton('Next');
+    expect(popoverTitle()).toBe('Start with your music');
+    const overlay = document.querySelector('.tour-overlay');
+    const opener = document.querySelector<HTMLButtonElement>('.tour-popover [data-help-link]')!;
+    opener.focus();
+    const enter = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+    act(() => opener.dispatchEvent(enter));
+    expect(enter.defaultPrevented).toBe(false);
+    expect(popoverTitle()).toBe('Start with your music');
+    // jsdom doesn't synthesize the native keyboard click.
+    act(() => opener.click());
+    expect(isHelpOpen()).toBe(true);
+    expect(document.querySelector('iframe')?.getAttribute('src')).toBe('/manual/help/perform/index.html#loading');
+    pressKey('ArrowRight');
+    pressKey('Enter');
+    pressKey('ArrowLeft');
+    act(() => vi.advanceTimersByTime(1000));
+    expect(document.querySelector('.tour-overlay')).toBe(overlay);
+    expect(popoverTitle()).toBe('Start with your music');
+    expect(isSectionSeen('performance')).toBe(false);
+    expect(allToursSkipped()).toBe(false);
+    expect(localStorage.getItem(TOUR_STATE_KEY)).toBeNull();
+    if (source === 'iframe') {
+      const frame = document.querySelector('iframe')!;
+      const doc = frame.contentDocument!;
+      doc.open();
+      doc.write('<html><body><a href="#main">Article</a></body></html>');
+      doc.close();
+      act(() => frame.dispatchEvent(new Event('load')));
+      doc.querySelector('a')!.focus();
+      act(() => doc.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })));
+    } else {
+      pressKey('Escape');
+    }
+    expect(isHelpOpen()).toBe(false);
+    expect(document.activeElement).toBe(opener);
+    expect(popoverTitle()).toBe('Start with your music');
+    expect(isSectionSeen('performance')).toBe(false);
+    pressKey('ArrowRight');
+    expect(popoverTitle()).toBe('Play a Track');
+  });
+
+  it('defers an unseen Tour until Help closes', () => {
+    vi.useFakeTimers();
+    addAnchor('performance.decks');
+    act(() => { openHelp(); });
+    mount(<><TourController /><HelpViewer /></>);
+    act(() => vi.advanceTimersByTime(1000));
+    expect(document.querySelector('.tour-overlay')).toBeNull();
+    act(() => closeHelp());
+    act(() => vi.advanceTimersByTime(250));
+    expect(popoverTitle()).toBe('Play a Track');
+    expect(isSectionSeen('performance')).toBe(false);
   });
 });
 
@@ -271,5 +357,14 @@ describe('step data', () => {
       expect(section.steps.length).toBeGreaterThanOrEqual(2);
       expect(section.steps.length).toBeLessThanOrEqual(6);
     }
+  });
+
+  it('Perform comes first and carries the Modes step; no copy points at EXPORT in the top bar (#301)', () => {
+    expect(TOUR_SECTIONS[0].id).toBe('performance');
+    expect(TOUR_SECTIONS[0].steps[0].anchor).toBe('topbar.modes');
+    const modes = TOUR_SECTIONS[0].steps[0].body;
+    expect(modes).toContain('\u22ef holds EXPORT');
+    const library = TOUR_SECTIONS.find((s) => s.id === 'library')!;
+    expect(library.steps.map((s) => s.anchor)).not.toContain('topbar.modes');
   });
 });

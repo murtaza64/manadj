@@ -19,10 +19,8 @@ desktop shell (desktop/main.js — managed mode, #279):
                                  torch, ...) — relocatable, no venv
     Resources/ffmpeg/            static arm64 ffmpeg + ffprobe
                                  (ffmpeg.martin-riedl.de release builds)
-    Resources/slskd/             RESERVED (#291, not yet landed): bundled
-                                 slskd arm64 binary supervised by manadj —
-                                 binary/path contract arrives as a comment
-                                 on #280 from the setup-guides lane
+    Resources/slskd/             slskd 0.26.0 osx-arm64, unmodified (AGPL;
+                                 #291 scripts/slskd/fetch_slskd.py)
     Resources/logo.png,
     Resources/manaDJ.icns        icon (generated from logo.png)
 
@@ -95,8 +93,13 @@ def pyproject_version() -> str:
 
 
 def run(cmd: list[str], **kwargs) -> subprocess.CompletedProcess:
-    print(f"  $ {' '.join(str(c) for c in cmd)}")
-    return subprocess.run([str(c) for c in cmd], check=True, **kwargs)
+    print(f"  $ {' '.join(str(c) for c in cmd)}", flush=True)
+    args = [str(c) for c in cmd]
+    # Windows: npm/npx are .cmd shims that CreateProcess can't run by bare name.
+    resolved = shutil.which(args[0])
+    if resolved:
+        args[0] = resolved
+    return subprocess.run(args, check=True, **kwargs)
 
 
 def step(name: str) -> None:
@@ -115,14 +118,23 @@ def build_frontend(version: str) -> None:
         run(["npm", "install", "--no-audit", "--no-fund"], cwd=fe)
     # Never bake an API URL; stamp the (possibly prerelease) version (#298).
     env = {**os.environ, "VITE_API_URL": "", "MANADJ_APP_VERSION": version}
-    run(["npm", "run", "build"], cwd=fe, env=env)
+    # The `prebuild` hook (gen:keys) runs `uv run --project ..`, i.e. a full
+    # project sync — which fails on Windows (essentia, #302) and is wasted
+    # work here. The generator only needs stdlib backend/key.py: run it
+    # project-less, then build with pre/post hooks skipped.
+    run(["uv", "run", "--no-project", "python", "scripts/export/gen_key_table.py"], cwd=ROOT)
+    run(["npm", "run", "build", "--ignore-scripts"], cwd=fe, env=env)
 
 
 # --- python runtime -------------------------------------------------------------
 
 
-def export_requirements() -> Path:
-    """Lock -> requirements for the bundle: no dev tools, stems included."""
+def export_requirements(exclude: tuple[str, ...] = ()) -> Path:
+    """Lock -> requirements for the bundle: no dev tools, stems included.
+
+    `exclude`: distribution names to drop (Windows drops essentia — no wheel
+    or sdist there, harness-only import; proper markers are #302's job).
+    """
     reqs = BUILD / "requirements.txt"
     run(
         [
@@ -131,6 +143,12 @@ def export_requirements() -> Path:
         ],
         cwd=ROOT,
     )
+    if exclude:
+        kept = [
+            line for line in reqs.read_text().splitlines()
+            if not any(line.split("==")[0].split(" @ ")[0].strip() == name for name in exclude)
+        ]
+        reqs.write_text("\n".join(kept) + "\n")
     return reqs
 
 
@@ -309,6 +327,11 @@ def assemble_app(python_runtime: Path, ffmpeg_dir: Path, icns: Path, version: st
     copytree_pyclean(ffmpeg_dir, resources / "ffmpeg")
     shutil.copy2(ROOT / "logo.png", resources / "logo.png")
     shutil.copy2(icns, resources / f"{APP_NAME}.icns")
+    # Bundled slskd (#291, AGPL, unmodified): Resources/slskd/slskd — the
+    # backend resolves it as ../slskd/slskd and the shell exports
+    # MANADJ_SLSKD_BIN. Signed by the --deep pass below.
+    run(["uv", "run", ROOT / "scripts" / "slskd" / "fetch_slskd.py",
+         "--dest", resources / "slskd", "--rid", "osx-arm64"])
 
     # Identity: rename the executable (app.isPackaged keys off its name) and
     # patch the plist. Helpers keep their Electron identities — fine unsigned.
@@ -336,11 +359,14 @@ def smoke_check(app: Path) -> None:
     step("bundle smoke check")
     res = app / "Contents" / "Resources"
     py = res / "python" / "bin" / "python3"
-    run([py, "-c", "import uvicorn, fastapi, sqlalchemy, alembic, madmom, demucs"])
+    # -B: runs after codesign; writing __pycache__ into the bundle would
+    # break the seal.
+    run([py, "-B", "-c", "import uvicorn, fastapi, sqlalchemy, alembic, madmom, demucs"])
     run([res / "ffmpeg" / "ffmpeg", "-version"],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     assert (res / "backend" / "frontend" / "dist" / "index.html").is_file()
     assert (res / "app" / "main.js").is_file()
+    assert (res / "slskd" / "slskd").is_file(), "bundled slskd missing (#291)"
     print("  ok")
 
 

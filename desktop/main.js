@@ -23,7 +23,11 @@ process.env.ELECTRON_DISABLE_SECURITY_WARNINGS = "true";
 
 const DEFAULT_URL = "http://localhost:5173";
 const RETRY_INTERVAL_MS = 2000;
-const STATE_FILE = path.join(__dirname, "window-state.json");
+// Packaged: never write inside the (signed, possibly read-only) bundle —
+// window state lives in userData. Dev keeps the gitignored repo file.
+const STATE_FILE = app.isPackaged
+  ? path.join(app.getPath("userData"), "window-state.json")
+  : path.join(__dirname, "window-state.json");
 const APP_NAME = "manaDJ";
 
 // Rename what CAN be renamed at runtime (desktop-shell 06). The macOS
@@ -635,11 +639,20 @@ app.whenReady().then(() => {
 // No hidden-but-playing state.
 app.on("window-all-closed", () => app.quit());
 
-// Managed mode owns the backend's lifetime: stop it on the way out
-// (SIGTERM first — uvicorn shuts down cleanly — SIGKILL if it lingers).
-app.on("before-quit", () => {
+// Managed mode owns the backend's lifetime: stop it on the way out —
+// graceful shutdown hook, process-tree kill if it lingers (#314). The quit
+// is held until the backend is gone so it can't outlive the app (Windows:
+// TerminateProcess would otherwise be its only fate, and only via orphan
+// cleanup).
+let backendStopped = false;
+app.on("before-quit", (event) => {
   quitting = true;
-  backend.stopBackend(backendHandle);
+  if (backendStopped || !backendHandle || backendHandle.exited) return;
+  event.preventDefault();
+  backend.stopBackend(backendHandle).finally(() => {
+    backendStopped = true;
+    app.quit();
+  });
 });
 
 // A clean-quit marker distinguishes "user closed the app" from "the log just

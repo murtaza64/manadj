@@ -31,15 +31,13 @@ export interface SetupGuide {
 
 export const SETUP_STATE_KEY = 'manadj-setup-state';
 
-type SetupState = Record<string, 'done' | 'skipped'>;
+type SetupState = Record<string, unknown>;
 
 function readState(): SetupState {
   try {
     const parsed: unknown = JSON.parse(localStorage.getItem(SETUP_STATE_KEY) ?? '{}');
     if (!parsed || typeof parsed !== 'object') return {};
-    return Object.fromEntries(
-      Object.entries(parsed).filter(([, v]) => v === 'done' || v === 'skipped')
-    ) as SetupState;
+    return parsed as SetupState;
   } catch {
     return {};
   }
@@ -49,7 +47,8 @@ const stateListeners = new Set<() => void>();
 
 /** Persisted status of a guide (not-started when never finished/skipped). */
 export function guideStatus(id: string): GuideStatus {
-  return readState()[id] ?? 'not-started';
+  const value = readState()[id];
+  return value === 'done' || value === 'skipped' ? value : 'not-started';
 }
 
 export function setGuideStatus(id: string, status: GuideStatus): void {
@@ -79,4 +78,25 @@ export function listGuides(): SetupGuide[] {
 
 export function getGuide(id: string): SetupGuide | undefined {
   return registry.get(id);
+}
+
+/** Checkpoint shares the existing persisted setting, not a browser-only key. */
+export interface SetupJourney {
+  ids: string[];
+  index: number;
+}
+
+export function setupJourney(): SetupJourney | null {
+  const value = readState().__journey as Partial<SetupJourney> | undefined;
+  if (!value || !Array.isArray(value.ids) || !value.ids.every((id) => typeof id === 'string') ||
+      !Number.isInteger(value.index) || value.index! < 0 || value.index! > value.ids.length) return null;
+  return value as SetupJourney;
+}
+
+export function saveSetupJourney(journey: SetupJourney | null): void {
+  const state = readState();
+  if (journey) state.__journey = journey;
+  else delete state.__journey;
+  writeSetting(SETUP_STATE_KEY, JSON.stringify(state));
+  for (const listener of stateListeners) listener();
 }

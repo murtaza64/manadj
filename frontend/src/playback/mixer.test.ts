@@ -742,6 +742,7 @@ describe('Beat FX insert (gh#272)', () => {
     const mixer = new Mixer();
     mixer.portFor('A').ensureAudio();
     const flanger = flangerNodesFor(Fake.instances[0], 0);
+    mixer.setBeatFxSettings({ flangerLengthUnit: 'beats' });
     mixer.selectBeatFx('flanger');
     mixer.toggleBeatFxOn();
     expect(flanger.send.gain.value).toBe(1);
@@ -749,6 +750,24 @@ describe('Beat FX insert (gh#272)', () => {
     expect(flanger.oscillator.frequency.value).toBeCloseTo(4, 9);
     mixer.stepBeatFxBeats('double'); // 3/4 beat = 0.375 seconds
     expect(flanger.oscillator.frequency.value).toBeCloseTo(1 / 0.375, 9);
+  });
+
+  it('reads the Flanger length in bars by default and retimes live on unit toggle', () => {
+    const Fake = withFakeAudio();
+    const mixer = new Mixer();
+    mixer.portFor('A').ensureAudio();
+    const flanger = flangerNodesFor(Fake.instances[0], 0);
+    const echoDelay = Fake.instances[0].delays.filter((node) => node.maxDelayTime > 1)[0];
+    mixer.selectBeatFx('flanger');
+    mixer.toggleBeatFxOn();
+    // Default 1/2 bar = 2 beats at 120 BPM = 1 second per LFO cycle.
+    expect(flanger.oscillator.frequency.value).toBeCloseTo(1, 9);
+    for (let i = 0; i < 5; i++) mixer.stepBeatFxBeats('double'); // top rung: 8
+    expect(flanger.oscillator.frequency.value).toBeCloseTo(1 / 16, 9); // 8 bars = 32 beats = 16 s
+    mixer.setBeatFxSettings({ flangerLengthUnit: 'beats' });
+    expect(flanger.oscillator.frequency.value).toBeCloseTo(1 / 4, 9); // 8 beats = 4 s
+    // Echo always reads beats.
+    expect(echoDelay.delayTime.value).toBeCloseTo(4, 9);
   });
 
   it('applies persisted effect tuning live without creating audio from settings alone', () => {

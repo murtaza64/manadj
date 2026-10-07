@@ -6,9 +6,10 @@
   "scripts": {
     "gen:keys": "uv run --project .. ../scripts/export/gen_key_table.py",
     "check:keys": "uv run --project .. ../scripts/export/gen_key_table.py --check",
-    "predev": "npm run gen:keys",
+    "gen:help": "uv run ../site/build.py --app-help",
+    "predev": "npm run gen:keys && npm run gen:help",
     "dev": "vite",
-    "prebuild": "npm run gen:keys",
+    "prebuild": "npm run gen:keys && npm run gen:help",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
