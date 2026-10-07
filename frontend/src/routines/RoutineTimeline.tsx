@@ -28,6 +28,7 @@
  */
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { Track, HotCue } from '../types';
+import { reportTutorialAction } from '../tutorials/engine';
 import type { DecodedWaveform } from '../waveform/blob';
 import type { ColumnModulation } from '../sets/ladderWaveStyle';
 import { drawStyledRuns } from '../sessions/waveformLanes';
@@ -690,6 +691,10 @@ export function RoutineTimeline({
         window.removeEventListener('pointermove', onMove);
         window.removeEventListener('pointerup', onUp);
         draftStore.endGesture();
+        const snap = draftStore.getSnapshot();
+        if (!moveMode && pairModeRef.current && slotIds.includes('1') && snap.edits.nudges['1'] !== edits0.nudges['1']) {
+          reportTutorialAction({ type: 'transition-slide', artifact: snap.routineUuid ?? undefined, version: snap.version });
+        }
         // A no-drag click was the SELECT itself (ADR 0038: click = focus
         // slot; seeks live on the background/ruler, not slot rows).
       };
@@ -1551,7 +1556,16 @@ export function RoutineTimeline({
           chopWall={laneDuration > 0 ? 0.1 / laneDuration : 0.01}
           windowLeftPx={laneStart * pxPerBeat}
           registerScrollDraw={scrollDrawFor(key)}
-          onChange={(next) => draftStore.setLane(slot.slotId, control, next.map(fromLanePoint))}
+          onChange={(next) => {
+            const points = next.map(fromLanePoint);
+            const before = draftStore.getSnapshot();
+            const changed = JSON.stringify(before.edits.lanes[key]) !== JSON.stringify(points);
+            draftStore.setLane(slot.slotId, control, points);
+            if (changed && pairModeRef.current) reportTutorialAction({
+              type: 'transition-automation', artifact: before.routineUuid ?? undefined,
+              version: draftStore.getSnapshot().version,
+            });
+          }}
           selected={laneSel?.key === key ? laneSel.indices : NO_SELECTION}
           onSelectedChange={(indices) =>
             setLaneSel(indices.length > 0 ? { key, indices } : null)
@@ -2051,7 +2065,7 @@ export function RoutineTimeline({
                 const h = authored && !collapsed ? STRIP_H_AUTHORED : STRIP_H;
                 const editable = control !== 'trim' || !pairMode;
                 return (
-                  <div className="rt-lanestrip" key={control} style={{ height: h }}>
+                  <div className="rt-lanestrip" data-tutorial-control={control} key={control} style={{ height: h }}>
                     {(!authored || collapsed) && (
                       <canvas
                         ref={(el) => {

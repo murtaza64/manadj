@@ -61,6 +61,8 @@ export function TourController() {
     if (!requested && active) return;
     const candidate = requested ?? activeTourSection();
     if (candidate === null) return;
+    // First entry teaches a real Transition. Coach marks remain explicit replay.
+    if (!requested && candidate === 'edit') return;
     if (!requested && (allToursSkipped() || isSectionSeen(candidate))) return;
     const section = tourSection(candidate);
     if (!section) return;

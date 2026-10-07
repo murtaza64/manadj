@@ -22,3 +22,4 @@
 .tutorial-target { outline: 2px solid var(--accent) !important; outline-offset: -2px; }
 .tutorial-settings-row { display: flex; align-items: center; gap: var(--space-12); margin: var(--space-12) 0; }
 .tutorial-left { right: auto; left: var(--space-12); }
+.tutorial-error { color: var(--danger); }
