@@ -358,6 +358,7 @@
   display: contents;
 }
 
+
 /* The toggle hides every on-control key hint */
 .perf-root.kbd-hints-off .perf-kbd { display: none; }
 

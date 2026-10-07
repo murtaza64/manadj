@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { useMixer, useMixerValue } from '../hooks/useMixer';
 import { TOUR_SECTIONS } from '../tour/steps';
+import { TutorialSettings } from '../tutorials/TutorialSettings';
 import {
   allToursSkipped,
   isSectionSeen,
@@ -29,6 +30,9 @@ const WaveformSettings = lazy(() => import('../waveform/StyleTuningPage'));
 const ControllerCalibrationSettings = lazy(() => import('./ControllerCalibrationSettings'));
 const MouseJogSettings = lazy(() => import('./MouseJogSettings'));
 const LibrarySettings = lazy(() => import('./LibrarySettings'));
+const ControllerCheckSettings = lazy(() => import('../setup/controllerCheck/ControllerCheckSettings'));
+const SoulseekSettings = lazy(() => import('../setup/soulseek/SoulseekSettings'));
+const SoundCloudSettings = lazy(() => import('../setup/soundcloud/SoundCloudSettings'));
 const PARAMS = [
   {
     key: 'resonance',
@@ -230,8 +234,8 @@ function TourSettingsPanel() {
         <div>
           <h2>Tour</h2>
           <p>
-            Each area shows a short guided walkthrough the first time you enter
-            it. Replay any section from the ? button in the top bar.
+            Tours explain the interface. Tutorials teach through real actions.
+            Replay either from the ? button in the top bar.
           </p>
         </div>
         <button className="btn btn-secondary" onClick={resetTourProgress}>
@@ -396,7 +400,7 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
     title: 'Controllers',
     detail: 'Controller check, jog calibration',
     sections: [
-      // slot: Controller check (#292) — goes first
+      { id: 'controller-check', title: 'Controller check', render: () => <ControllerCheckSettings /> },
       { id: 'jog', title: 'Jog calibration', render: () => <ControllerCalibrationSettings /> },
     ],
   },
@@ -418,8 +422,8 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
     title: 'Accounts',
     detail: 'SoundCloud, Soulseek',
     sections: [
-      // slot: SoundCloud (#290)
-      // slot: Soulseek (#291)
+      { id: 'soundcloud', title: 'SoundCloud', render: () => <SoundCloudSettings /> },
+      { id: 'soulseek', title: 'Soulseek', render: () => <SoulseekSettings /> },
     ],
   },
   {
@@ -429,7 +433,8 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
     sections: [
       // slot: Setup guides status/relaunch (#288) — goes first
       { id: 'tour', title: 'Tour', render: () => <TourSettingsPanel /> },
-      // slot: Tutorials (#322); version/licenses/about
+      { id: 'tutorials', title: 'Tutorials', render: () => <TutorialSettings /> },
+      // slot: version/licenses/about
     ],
   },
 ];

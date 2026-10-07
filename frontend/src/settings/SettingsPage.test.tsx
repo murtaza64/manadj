@@ -13,6 +13,11 @@ import { getJogCalibration, resetGrv6JogCalibration } from '../midi/jogCalibrati
 import { BEAT_FX_PARAMETER_RANGES, DEFAULT_BEAT_FX_SETTINGS } from '../playback/beatFxSettings';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+// Settings renders Controller check too; device discovery belongs to its own tests.
+vi.mock('../playback/audioDevices', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../playback/audioDevices')>(),
+  listAudioOutputs: vi.fn(async () => []),
+}));
 vi.hoisted(() => {
   const values = new Map<string, string>();
   globalThis.localStorage = {
@@ -151,7 +156,7 @@ it('edits typed values only on commit, supports cancel/reset and does not create
   expect(input.value).toBe('16000');
   act(() => { input.focus(); input.blur(); });
   expect(mixer.getFilterSettings().hpMax).toBe(16000);
-  expect(host.querySelectorAll('.settings-nav button')).toHaveLength(6);
+  expect(host.querySelectorAll('.settings-nav button')).toHaveLength(7);
   expect(host.querySelector('[aria-label="Filter frequency response"] polyline')?.getAttribute('points')?.split(' ')).toHaveLength(180);
   expect(host.querySelector('input[type="search"], canvas')).toBeNull();
   expect(host.textContent).toContain('Target response at 48 kHz');
@@ -401,7 +406,7 @@ it('groups sections, hides empty groups and maps old section deep links to their
   await act(async () => root!.render(<SettingsPage />));
   await act(async () => { await vi.dynamicImportSettled(); });
   const nav = [...host.querySelectorAll('.settings-nav button strong')].map((n) => n.textContent);
-  expect(nav).toEqual(['Library', 'Performance', 'Display', 'Controllers', 'Keyboard + mouse', 'Help']);
+  expect(nav).toEqual(['Library', 'Performance', 'Display', 'Controllers', 'Keyboard + mouse', 'Accounts', 'Help']);
   expect(host.querySelector('.settings-content')?.getAttribute('aria-label')).toBe('Controllers');
   expect(host.querySelector('#settings-section-jog')).not.toBeNull();
   // Jog calibration is GRV6-only; the other known controllers say so.

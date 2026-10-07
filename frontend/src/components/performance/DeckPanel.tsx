@@ -1161,6 +1161,7 @@ export function DeckPanel({
 
   return (
     <section
+      data-tutorial-deck={deck}
       className={`perf-deckpanel deck-${deck.toLowerCase()}${mirrored ? ' mirrored' : ''}${
         focused ? ' focused' : ''
       }`}
