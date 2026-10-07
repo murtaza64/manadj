@@ -69,8 +69,6 @@ export const PERSISTED_SETTING_KEYS: readonly string[] = [
   'manadj-beat-fx-settings',
   // Hardware calibration
   'manadj.grv6JogCalibration',
-  // Setup guides (guide status: done / skipped)
-  'manadj-setup-state',
   // Coach-mark tour progress (feature-tour #282)
   'manadj-tour-state',
   'manadj-tutorial-state',

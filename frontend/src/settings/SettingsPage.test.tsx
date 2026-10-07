@@ -183,6 +183,14 @@ it('edits and resets persisted Beat FX sound parameters without creating audio',
   press(decay, 'Home');
   expect(mixer.getBeatFxSettings().reverbDecay).toBe(0.5);
 
+  const unit = host.querySelector('[aria-label="Flanger length unit"]')!;
+  const bars = [...unit.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent === 'Bars')!;
+  const beats = [...unit.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent === 'Beats')!;
+  expect(bars.getAttribute('aria-pressed')).toBe('true');
+  act(() => beats.click());
+  expect(mixer.getBeatFxSettings().flangerLengthUnit).toBe('beats');
+  expect(beats.getAttribute('aria-pressed')).toBe('true');
+
   const reset = [...host.querySelectorAll<HTMLButtonElement>('button')]
     .find((button) => button.textContent === 'Reset effect defaults')!;
   act(() => reset.click());
