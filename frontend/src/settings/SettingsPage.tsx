@@ -1,5 +1,13 @@
-import { lazy, Suspense, useState } from 'react';
+import { lazy, Suspense, useState, useSyncExternalStore } from 'react';
 import { useMixer, useMixerValue } from '../hooks/useMixer';
+import { TOUR_SECTIONS } from '../tour/steps';
+import {
+  allToursSkipped,
+  isSectionSeen,
+  resetTourProgress,
+  subscribeTour,
+  tourVersion,
+} from '../tour/tourState';
 import {
   DEFAULT_FILTER_SETTINGS,
   FILTER_MODELS,
@@ -25,6 +33,7 @@ const SECTIONS = [
   { id: 'waveforms', title: 'Waveforms', detail: 'Color and rendering' },
   { id: 'jog', title: 'Jog calibration', detail: 'DDJ-GRV6 response' },
   { id: 'mouse-jog', title: 'Mouse jog', detail: 'Keyboard and mouse response' },
+  { id: 'tour', title: 'Tour', detail: 'Coach marks and guidance' },
 ] as const;
 type Section = (typeof SECTIONS)[number]['id'];
 const PARAMS = [
@@ -216,6 +225,35 @@ function FilterSettingsPanel() {
   );
 }
 
+/** Tour reset (feature-tour #282, story 7): forget seen sections and the
+ * skip-all flag, so every section's coach marks fire again on first entry.
+ * Also the demo hook. Replays of single sections live in the TopBar ?. */
+function TourSettingsPanel() {
+  useSyncExternalStore(subscribeTour, tourVersion);
+  const seenCount = TOUR_SECTIONS.filter((s) => isSectionSeen(s.id)).length;
+  return (
+    <>
+      <div className="settings-section-heading">
+        <div>
+          <h2>Tour</h2>
+          <p>
+            Each area shows a short guided walkthrough the first time you enter
+            it. Replay any section from the ? button in the top bar.
+          </p>
+        </div>
+        <button className="btn btn-secondary" onClick={resetTourProgress}>
+          Reset tour progress
+        </button>
+      </div>
+      <p className="settings-hint">
+        {allToursSkipped()
+          ? 'Tours are currently skipped — resetting turns them back on.'
+          : `${seenCount} of ${TOUR_SECTIONS.length} section tours seen. Resetting replays them on next visit.`}
+      </p>
+    </>
+  );
+}
+
 const EFFECT_GROUPS = [
   {
     name: 'Echo',
@@ -336,7 +374,7 @@ export default function SettingsPage({ performance = false }: { performance?: bo
         </p>
       </header>
       <div className="settings-layout">
-        <nav className="settings-nav" aria-label="Settings sections">
+        <nav className="settings-nav" data-tour="settings.nav" aria-label="Settings sections">
           {SECTIONS.map((s) => (
             <button
               key={s.id}
@@ -356,6 +394,7 @@ export default function SettingsPage({ performance = false }: { performance?: bo
         </nav>
         <section
           className="settings-content"
+          data-tour="settings.content"
           aria-label={SECTIONS.find((s) => s.id === section)!.title}
         >
           <Suspense fallback={<p role="status">Loading settings...</p>}>
@@ -367,6 +406,8 @@ export default function SettingsPage({ performance = false }: { performance?: bo
               <WaveformSettings />
             ) : section === 'jog' ? (
               <JogSettings />
+            ) : section === 'tour' ? (
+              <TourSettingsPanel />
             ) : (
               <MouseJogSettings performance={performance} />
             )}

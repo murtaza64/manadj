@@ -37,6 +37,19 @@ import { installNoFocusRule } from './focus/noFocusRule';
 import { useAnalysisPendingSync } from './hooks/useAnalysisPending';
 import { isTypingTarget } from './components/performance/performanceKeys';
 import { registerViewToggle } from './midi/controlRegistry';
+import { TourController } from './tour/TourController';
+import { setTourArea, type TourArea } from './tour/tourState';
+
+/** Where each mode lands in the tour's section map (feature-tour #282):
+ * the legacy pair editor counts as the mix editor's area. */
+const TOUR_AREA_BY_MODE: Record<AppMode, TourArea> = {
+  library: 'library',
+  performance: 'performance',
+  transition: 'edit',
+  routine: 'edit',
+  history: 'history',
+  sync: 'sync',
+};
 
 /** The one poller keeping track rows / Analyze buttons live against
  * background analysis (analysis-curation 03) — a bridge like the MIDI
@@ -98,6 +111,12 @@ function App() {
   // Keyboard-focus hygiene: buttons/checkboxes never take click-focus
   // (keyboard-focus 01) — one enforcement site for the whole app.
   useEffect(installNoFocusRule, []);
+
+  // Tour activity (feature-tour #282): tell the tour where the user is;
+  // TourController auto-starts unseen sections' coach marks from this.
+  useEffect(() => {
+    setTourArea(settingsOpen ? 'settings' : TOUR_AREA_BY_MODE[view]);
+  }, [view, settingsOpen]);
 
   // Performance ⟷ Library toggle (four-deck-performance 24/25): one
   // action, two handles — ` (backtick) app-wide, and the hardware VIEW
@@ -206,6 +225,9 @@ function App() {
         {/* Space → Conductor context (sets 34): plan assembly for the
             SELECTED Set — above the view switch, like the selection. */}
         <SetSpaceTransport />
+        {/* Coach-mark tour (feature-tour #282): above the view switch so
+            it can spotlight anchors in any mode. */}
+        <TourController />
         <FilterProvider>
           <div className="app-shell">
             <TopBar

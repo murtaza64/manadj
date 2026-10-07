@@ -151,7 +151,7 @@ it('edits typed values only on commit, supports cancel/reset and does not create
   expect(input.value).toBe('16000');
   act(() => { input.focus(); input.blur(); });
   expect(mixer.getFilterSettings().hpMax).toBe(16000);
-  expect(host.querySelectorAll('.settings-nav button')).toHaveLength(5);
+  expect(host.querySelectorAll('.settings-nav button')).toHaveLength(6);
   expect(host.querySelector('[aria-label="Filter frequency response"] polyline')?.getAttribute('points')?.split(' ')).toHaveLength(180);
   expect(host.querySelector('input[type="search"], canvas')).toBeNull();
   expect(host.textContent).toContain('Target response at 48 kHz');

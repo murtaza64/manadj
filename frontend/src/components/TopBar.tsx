@@ -20,6 +20,7 @@ import { MasterRecorderControl } from './MasterRecorderControl';
 import { isVisualizerOpen, toggleVisualizer } from '../visualizer/windowControl';
 import { VisualizerControlModal } from './VisualizerControlModal';
 import { hasKeyboardOverlay, isQuantizeShortcut, isTypingTarget } from './performance/performanceKeys';
+import { TourReplayButton } from '../tour/TourReplayButton';
 import './TopBar.css';
 
 export type AppMode = 'library' | 'performance' | 'transition' | 'routine' | 'history' | 'sync';
@@ -138,7 +139,7 @@ function ModeControl({
   }, [menu]);
 
   return (
-    <nav className="topbar-mode-control" aria-label="Mode">
+    <nav className="topbar-mode-control" aria-label="Mode" data-tour="topbar.modes">
       {PRIMARY_MODES.map((m) => (
         <button
           key={m.id}
@@ -253,6 +254,13 @@ export function TopBar({
           <AudioOwnershipChip mode={mode} onModeChange={onModeChange} />
           <MidiBadge />
         </div>
+        <span className="topbar-divider" />
+        {/* Tour replay (feature-tour #282): every section's coach marks. */}
+        <TourReplayButton
+          onModeChange={onModeChange}
+          settingsOpen={settingsOpen}
+          onSettingsToggle={onSettingsToggle}
+        />
       </div>
     </header>
   );

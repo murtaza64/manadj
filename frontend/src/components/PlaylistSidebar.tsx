@@ -290,7 +290,7 @@ export default function PlaylistSidebar({
 
   return (
     <>
-      <div data-browse-area="sidebar" data-browse-focused={focused} style={{
+      <div data-browse-area="sidebar" data-tour="library.sidebar" data-browse-focused={focused} style={{
         width: '200px',
         background: 'var(--crust)',
         borderRight: '1px solid var(--surface0)',
@@ -356,6 +356,7 @@ export default function PlaylistSidebar({
                 timeline. */}
             <div
               data-entry-key="view:session"
+              data-tour="library.sessions-row"
               onClick={() => onSelectView('session')}
               className={rowClass('view:session', selectedView === 'session')}
             >
@@ -399,6 +400,12 @@ export default function PlaylistSidebar({
             )}
             {isLoading ? (
               <div style={{ padding: '8px 12px', color: 'var(--subtext1)' }}>Loading...</div>
+            ) : playlists.length === 0 && !isCreating ? (
+              /* Empty-state guidance (feature-tour #283) */
+              <div style={{ padding: '8px 12px', color: 'var(--overlay1)' }}>
+                No playlists yet — create one with + New… below, or import from
+                rekordbox in SYNC.
+              </div>
             ) : (
               playlists.map((playlist: Playlist) => (
                 <div

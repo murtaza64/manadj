@@ -19,7 +19,7 @@ export function SyncView() {
 
   return (
     <div className="sync-view-container">
-      <div className="sync-view-tabs">
+      <div className="sync-view-tabs" data-tour="sync.tabs">
         {TABS.map((t) => (
           <button
             key={t.id}
