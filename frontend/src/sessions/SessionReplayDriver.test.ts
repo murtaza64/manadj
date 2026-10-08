@@ -9,6 +9,7 @@ import type { DeckEngine } from '../playback/DeckEngine';
 import type { ChannelId, Mixer } from '../playback/mixer';
 import { audibleHolder } from '../playback/audibleSurface';
 import type { CaptureEvent } from '../capture/events';
+import type { BeatFxSectionState } from '../playback/beatFx';
 import { planReplay } from './replayPlanner';
 import type { ReplayPlan } from './replayPlanner';
 import { SessionReplayDriver } from './SessionReplayDriver';
@@ -335,6 +336,15 @@ class FakeMixer {
   }
   getMaster(): number {
     return this.master;
+  }
+
+  beatFx: BeatFxSectionState = { selected: 'echo', target: 'A', on: false, depth: 0, beats: 0.5 };
+  getBeatFxSection(): BeatFxSectionState {
+    return this.beatFx;
+  }
+  setBeatFxSection(state: BeatFxSectionState): void {
+    this.beatFx = { ...state };
+    this.notify();
   }
 
   engageAutomation(): symbol {
@@ -1735,5 +1745,48 @@ describe('SessionReplayDriver — phase servo (sessions 20)', () => {
     const rel = r.engines.A.getPlayhead() - r.engines.B.getPlayhead();
     expect(Math.abs(rel - relTruth)).toBeLessThan(0.05);
     r.driver.stop();
+  });
+});
+
+describe('SessionReplayDriver — Beat FX (#351)', () => {
+  const LIVE: BeatFxSectionState = { selected: 'flanger', target: 'D', on: true, depth: -0.2, beats: 4 };
+  const ECHO_A: BeatFxSectionState = { selected: 'echo', target: 'A', on: true, depth: 0.3, beats: 0.5 };
+  function fxLog(): CaptureEvent[] {
+    const fx: CaptureEvent[] = [
+      { t: 1, kind: 'beatFx', ...ECHO_A },
+      { t: 7, kind: 'beatFx', ...ECHO_A, on: false },
+    ];
+    return [...simpleLog(), ...fx].sort((a, b) => a.t - b.t);
+  }
+
+  it('seeds the recorded section, fires FX cues, and restores the live section on stop', async () => {
+    const r = rig(planFor(fxLog(), 2));
+    r.mixer.beatFx = { ...LIVE };
+    await r.driver.start();
+    expect(r.mixer.beatFx).toEqual(ECHO_A);
+    r.advance(5.1); // t = 7.1
+    expect(r.mixer.beatFx).toEqual({ ...ECHO_A, on: false });
+    expect(r.stops).toEqual([]);
+    r.driver.stop();
+    expect(r.mixer.beatFx).toEqual(LIVE);
+  });
+
+  it('a log without FX evidence replays with FX off, and the live section returns at the end', async () => {
+    const r = rig(planFor(simpleLog(), 2));
+    r.mixer.beatFx = { ...LIVE };
+    await r.driver.start();
+    expect(r.mixer.beatFx).toEqual({ ...LIVE, on: false });
+    r.advance(9);
+    expect(r.stops).toEqual(['ended']);
+    expect(r.mixer.beatFx).toEqual(LIVE);
+  });
+
+  it('a human FX gesture takes over and keeps the section as the human left it', async () => {
+    const r = rig(planFor(fxLog(), 2));
+    r.mixer.beatFx = { ...LIVE };
+    await r.driver.start();
+    r.mixer.setBeatFxSection({ ...ECHO_A, depth: 0.9 });
+    expect(r.stops).toEqual(['takeover']);
+    expect(r.mixer.beatFx).toEqual({ ...ECHO_A, depth: 0.9 });
   });
 });

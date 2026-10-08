@@ -4,7 +4,11 @@ All notable changes to manaDJ. Format: [Keep a Changelog](https://keepachangelog
 versions follow [Semantic Versioning](https://semver.org/). Install: [docs/install.md](docs/install.md).
 
 ## [Unreleased]
+- Acquisition redesigned (Dig view, #342): one table with the lifecycle in the status cell, inline Soulseek candidates on failure, batch verbs, queue drawer, sort/filter; Spotify likes/playlists as browse-only feeds with want (#347); favorite feeds pour into "all sources"; app-wide restyled checkboxes.
 
+- Capture: Beat FX echo/reverb tails count as audible — an echo-out Take now ends where the tail dies out, not at the fader slam; Session timeline bands follow (#355).
+- Session timeline shows Beat FX: an effect-coloured band (echo yellow, reverb green, flanger red) on the targeted deck lane — Master FX bands every lane — with opacity following LEVEL/DEPTH; the scrub readout shows the FX state (#354).
+- Mix editor: Beat FX lanes — Takes recorded with Beat FX audition with their echo/reverb/flanger; edit FX steps (effect, target, length, on/off) and depth under the slots; FX replays in Set playback and carries through templates and Routine promotion (#353).
 - Replaced the README with prerelease installation notes and current-app screenshots (#340).
 - Added website help pages and the offline in-app Help manual, linked from Settings, Tours and Setup guides (#295).
 - Mix editor: author mixes from scratch with + New blank mix — drag tracks from the library onto the canvas/timeline. 2 tracks save as a Transition, 3 or more as a Routine; adding or removing a track across that line converts it on save (Set pins follow). Drop a track onto an open Transition to grow it into a Routine (#325, #330).

@@ -5,7 +5,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Keyboard DJing — manadj</title>
-  <meta name="description" content="Load Decks and use keyboard, mouse, or controller controls.">
+  <meta name="description" content="Choose a Deck, load a Track, and perform with the two-hand keyboard and mouse controls.">
   <link rel="icon" href="../../assets/logo.png">
   <link rel="preload" href="../../assets/fonts/UbuntuMono-Regular.ttf" as="font" type="font/ttf" crossorigin>
   <link rel="preload" href="../../assets/fonts/UbuntuMono-Bold.ttf" as="font" type="font/ttf" crossorigin>
@@ -29,10 +29,19 @@
         <summary>Help articles</summary>
         <nav aria-label="Help articles">
           <a href="../../help/index.html">All articles</a>
-          <a href="../../help/start/index.html">Getting started</a>
-          <a href="../../help/curate/index.html">Library &amp; tagging</a>
+          <a href="../../help/start/index.html">First run and returning to Setup</a>
+          <a href="../../help/acquire/index.html">Acquire Tracks</a>
+          <a href="../../help/curate/index.html">Curate the Library</a>
+          <a href="../../help/analysis/index.html">Analyze Tracks and set cues</a>
           <a href="../../help/perform/index.html" aria-current="page">Keyboard DJing</a>
+          <a href="../../help/controllers/index.html">Controllers</a>
+          <a href="../../help/audio/index.html">Audio and Cue mode</a>
+          <a href="../../help/beat-fx/index.html">Beat FX and filters</a>
+          <a href="../../help/follow/index.html">Follow loaded Tracks</a>
+          <a href="../../help/capture/index.html">Review Sessions and Takes</a>
           <a href="../../help/editor/index.html">Mix editor</a>
+          <a href="../../help/sets/index.html">Plan and play a Set</a>
+          <a href="../../help/sync/index.html">Compare and Sync libraries</a>
         </nav>
       </details>
     </aside>
@@ -41,7 +50,7 @@
         <header class="help-heading">
           <a class="kicker" href="../index.html">Help manual</a>
           <h1>Keyboard DJing</h1>
-          <p>Load Decks and use keyboard, mouse, or controller controls.</p>
+          <p>Choose a Deck, load a Track, and perform with the two-hand keyboard and mouse controls.</p>
         </header>
         <details class="help-toc" open>
           <summary>On this page</summary>
@@ -49,6 +58,7 @@
 <ul>
 <li><a href="#keyboard">Controls</a></li>
 <li><a href="#loading">Load</a></li>
+<li><a href="#cues">Cue, jumps and loops</a></li>
 <li><a href="#mixer">Mixer</a></li>
 <li><a href="#mouse-jog">Mouse jog</a></li>
 <li><a href="#stems">Stems</a></li>
@@ -65,48 +75,121 @@
   <div class="clip-note">Silent recording · <a href="../../media/perform.mp4">Open full-size ↗</a></div>
 </figure>
         <div class="prose help-prose"><h2 id="keyboard">Controls</h2>
-<p>Open <strong>PERFORM</strong>; use the keyboard, mouse, or a mapped controller. Configure controller and <a href="../../install.html#controller-check">audio outputs</a> in Setup.</p>
+<p>Open <strong>PERFORM</strong>. Its keyboard has two <em>hands</em>, not four separate Deck layouts: left-hand keys address the focused Deck A or C, right-hand keys address B or D. Click a Deck to focus it, or in <strong>4 DECKS</strong> press <strong>[</strong> to switch A/C and <strong>]</strong> to switch B/D. The focus indicator identifies the destination. <strong>2 DECKS</strong> keeps the two hands on A/B; it hides C/D without unloading them. A mapped <a href="../controllers/index.html#mapping">controller</a> can operate the same Decks and Mixer without pretending to be keyboard input.</p>
+<p><img alt="Loaded Deck A with transport, cue, loop and keyboard hints" src="../../shots/help-perform-deck-controls.webp" /></p>
+<p><strong>?</strong> or <strong>F1</strong> opens the current keyboard map. The <strong>KBD</strong> button toggles hints printed beside controls. Keys below apply with Deck keyboard focus, not while typing or when a dialog/menu owns the keys. On Windows/Linux, use <strong>Ctrl</strong> where the table says <strong>Cmd/Ctrl</strong>. <strong>Space does not play a Performance Deck</strong>: use D or K. With a Set selected, Space instead controls Set playback.</p>
 <table>
 <thead>
 <tr>
-<th>Left / right</th>
 <th>Action</th>
+<th>Left hand (A/C)</th>
+<th>Right hand (B/D)</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td>D / K</td>
 <td>Play/pause</td>
+<td>D</td>
+<td>K</td>
 </tr>
 <tr>
-<td>F / J</td>
-<td>Hold Cue</td>
+<td>Main Cue (hold)</td>
+<td>F</td>
+<td>J</td>
 </tr>
 <tr>
-<td>B / N</td>
-<td>Toggle loop</td>
+<td>Hot Cues 1–4</td>
+<td>Z X C V</td>
+<td>M , . /</td>
 </tr>
 <tr>
-<td>[ / ]</td>
-<td>Switch A/C or B/D focus</td>
+<td>Remove a Hot Cue</td>
+<td>Shift + pad</td>
+<td>Shift + pad</td>
+</tr>
+<tr>
+<td>Beatjump backward / forward</td>
+<td>A / S</td>
+<td>L / ;</td>
+</tr>
+<tr>
+<td>Halve / double beatjump size</td>
+<td>Shift+A / Shift+S</td>
+<td>Shift+L / Shift+;</td>
+</tr>
+<tr>
+<td>Auto-loop on/off</td>
+<td>B</td>
+<td>N</td>
+</tr>
+<tr>
+<td>Halve / double loop length</td>
+<td>Cmd/Ctrl+Shift+A / S</td>
+<td>Cmd/Ctrl+Shift+L / ;</td>
+</tr>
+<tr>
+<td>Previous / next Hot Cue while paused</td>
+<td>Cmd/Ctrl+A / S</td>
+<td>Cmd/Ctrl+L / ;</td>
+</tr>
+<tr>
+<td>Match tempo once</td>
+<td>Cmd/Ctrl+G</td>
+<td>Cmd/Ctrl+H</td>
+</tr>
+<tr>
+<td>Join / leave Sync</td>
+<td>Cmd/Ctrl+Shift+G</td>
+<td>Cmd/Ctrl+Shift+H</td>
+</tr>
+<tr>
+<td>Filter, high, mid, low EQ (hold + move mouse)</td>
+<td>Q W E R</td>
+<td>P O I U</td>
+</tr>
+<tr>
+<td>Channel volume (hold + move mouse)</td>
+<td>G</td>
+<td>H</td>
+</tr>
+<tr>
+<td>Jog (hold + move mouse sideways)</td>
+<td>T</td>
+<td>Y</td>
 </tr>
 </tbody>
 </table>
-<p>Check Deck focus. <strong>? / F1</strong> opens the keyboard map. Typing and dialogs suppress shortcuts.</p>
+<p>Pads 5–8 use the on-screen Deck controls. Plain <strong>=</strong> toggles app-wide <strong>QUANT</strong>; the number row controls <a href="../beat-fx/index.html#effects">Beat FX</a>, not Hot Cues in Performance. Keyboard mappings in the standalone Library view differ from these Performance keys.</p>
 <h2 id="loading">Load</h2>
-<p>Drag a Library track onto a Deck. Or <strong>Tab</strong>, browse with arrows, then <strong>A/B/C/D</strong> to load; C/D require four-Deck mode. <strong>Escape</strong> returns to Deck controls. Wait for loading.</p>
+<ol>
+<li>Pick <strong>2 DECKS</strong> or <strong>4 DECKS</strong>. In the browser below the Decks, search for a Track or select a Playlist. Hover a row to expose its <strong>A/B</strong> (and, in four-Deck mode, <strong>C/D</strong>) Load buttons; click the target, or drag the Track onto that Deck or its waveform.</li>
+<li>Alternatively, press <strong>Tab</strong> to hand the keyboard to the embedded browser. Use <strong>J/K</strong> or <strong>↓/↑</strong> to choose a row, <strong>H/L</strong> to move between sidebar and track areas, <strong>Enter</strong> to open a selected sidebar entry, and <strong>/</strong> to focus search. <strong>A/B/C/D</strong> load the selected Track to the named physical Deck; <strong>Shift+A/B/C/D</strong> toggles Follow for that Deck. In browse focus, Enter on a track row does <em>not</em> load it.</li>
+<li>Press <strong>Tab</strong> again or <strong>Escape</strong> to return to Deck keys. Release any held key before switching modes: the same press cannot acquire a different meaning midway. Wait for the Deck to show its loaded waveform before using cue, loops or pads. Play can be requested while loading.</li>
+</ol>
+<p><img alt="Search and hover-only Load buttons for the selected Track" src="../../shots/help-perform-browser-load.webp" /></p>
+<p>With Deck keyboard focus, <strong>↑/↓</strong> move the browser cursor; <strong>←</strong> or <strong>Enter</strong> load onto the focused <em>left</em> Deck, <strong>→</strong> onto the focused <em>right</em> Deck. Double-clicking a row targets the focused left Deck. A playing Deck refuses a replacement Load; pause it first. <strong>Cmd/Ctrl+F</strong> focuses browser search. Enter or Escape <em>inside</em> search exits the field without clearing the filter.</p>
+<p>With browser focus, <strong>Home/End</strong> jump to the first/last entry; <strong>PageUp/PageDown</strong> move a page, and <strong>Ctrl+U/D</strong> move half a page. Hold <strong>Shift</strong> with row navigation to extend selection; <strong>Cmd/Ctrl+A</strong> selects all visible rows. <strong>F</strong> opens Follow parameters, <strong>N</strong> toggles Known only. Browser focus belongs to the embedded Performance list; the standalone Library has a different shortcut map.</p>
+<h2 id="cues">Cue, jumps and loops</h2>
+<p><strong>Main Cue</strong> and the eight <strong>Hot Cues</strong> serve different purposes. While paused away from Main Cue, press F/J to place it; at Main Cue, hold to preview and release to return, unless Play takes over. While playing, Main Cue returns to its marker and pauses. An empty Hot Cue pad places a cue; an assigned pad jumps while playing. While paused, a pad either previews until released (<strong>GATED</strong>) or starts playback that continues after release (<strong>TRIGGER</strong>). Change this with <strong>GATED</strong> in the Performance strip; see <a href="../audio/index.html#cue-mode">Cue mode</a>. Walking Hot Cues with Cmd/Ctrl+A/S or L/; while paused also moves Main Cue.</p>
+<p>Beatjump moves by the Deck's selected jump size (initially 32 beats, 1–128); Shift+the jump key changes that size, not the loop length. A jump during a loop translates the loop instead of exiting it. <strong>B/N</strong> engages or releases an auto-loop of the selected length (initially 4 beats, ⅛–128). Change that length with Cmd/Ctrl+Shift+the jump keys. The loop needs a Beatgrid. Quantize snaps eligible cue placement and loop entry to beats; it does not change the jump-size keys.</p>
+<p><strong>MATCH</strong> applies a one-time tempo match to a playing reference. <strong>SYNC</strong> joins/leaves a shared tempo that you can ride with the pitch fader. With Quantize and suitable playing/gridded Decks, either can also align phase once; a pitch move or jog nudge does not repeatedly realign it. Sync entry needs a ready Track with BPM. These are independent of selecting a Deck for keyboard focus.</p>
 <h2 id="mixer">Mixer</h2>
-<p>Drag faders, EQ, filter, or crossfader. Hold <strong>G/H</strong> and move the mouse for left/right channel level; release to finish. If silent, check levels, crossfader assignment, kills, and audio outputs.</p>
+<p>Each Deck has trim, EQ, a sweep filter, channel level and PFL. The crossfader routes according to each Deck's assignment when <strong>XF</strong> is enabled; disabling XF passes channels at unity instead. To work the keyboard Mixer, hold <strong>Q/W/E/R</strong> (left) or <strong>P/O/I/U</strong> (right), then move the mouse up/right to increase or down/left to decrease. Hold <strong>G/H</strong> for channel level. Release to finish. This is a held-key pointer gesture, not clicking the knob. EQ and filter stop at their neutral center detent; pause briefly there, then move again to pass it. Double-tap the <em>key</em> while the mouse stays still to toggle an EQ between cut and neutral or a channel volume between cut and full; filter double-tap resets to center. Double-clicking the <em>on-screen</em> knob has its own reset (EQ neutral, volume full). If pointer lock is denied, click the app, release, and retry.</p>
+<p>For silent Master audio, check the channel level, EQ kills, filter, crossfader assignment and <strong>XF</strong>, then <a href="../audio/index.html#outputs">Master output</a>. For silent headphones, check PFL, CUE MIX and Cue output separately.</p>
 <h2 id="mouse-jog">Mouse jog</h2>
-<p>Hold <strong>T/Y</strong> and move horizontally to jog left/right. Configure sensitivity under <strong>Settings → Keyboard + mouse → Mouse jog</strong>.</p>
+<p>Hold <strong>T/Y</strong> and move horizontally. While playing this nudges the timing (pitch bend); while paused it seeks. With <strong>VINYL</strong> on, hold <strong>Shift+T/Y</strong> for platter contact and move horizontally to scratch; release Shift or the jog key to end the scratch. Vinyl off does not scratch. The on-screen jog also accepts mouse motion. Configure the keyboard/mouse response under <strong>Settings → Keyboard + mouse → Mouse jog</strong>; hardware jog calibration is a <a href="../controllers/index.html#jog-calibration">separate controller setting</a>.</p>
 <h2 id="stems">Stems</h2>
-<p>Choose <strong>EXTRACT STEMS</strong>, then <strong>STEMS READY — RELOAD</strong>. Click a part to kill/restore; <strong>Shift-click</strong> solos. Disabled buttons mean stems are not loaded.</p></div>
+<p>Choose <strong>EXTRACT STEMS</strong>, then <strong>STEMS READY — RELOAD</strong> when extraction finishes. Click a stem part to kill/restore it; <strong>Shift-click</strong> solos it. Disabled part buttons mean stems have not been loaded into this Deck. Stems processing and Deck loading are distinct operations.</p></div>
         <nav class="help-related" aria-label="Related articles">
           <h2>Related articles</h2>
           <ul class="help-cards">
-            <li><a href="../start/index.html"><strong>Getting started</strong><span>Run Setup, import tracks, and open Tours or Tutorials.</span></a></li>
-            <li><a href="../curate/index.html"><strong>Library &amp; tagging</strong><span>Browse tracks, assign Tags and Energy, and arrange Playlists.</span></a></li>
-            <li><a href="../editor/index.html"><strong>Mix editor</strong><span>Edit timelines, audition changes, and promote reviewed Takes.</span></a></li>
+            <li><a href="../start/index.html"><strong>First run and returning to Setup</strong><span>Complete or skip optional guides, resume later, and relaunch one guide without resetting the Library.</span></a></li>
+            <li><a href="../curate/index.html"><strong>Curate the Library</strong><span>Import Tracks, assign Tags and Energy, filter, build Playlists, and archive rejects.</span></a></li>
+            <li><a href="../controllers/index.html"><strong>Controllers</strong><span>Check a controller&#39;s mapped controls and audio outputs, then tune DDJ-GRV6 jog response if needed.</span></a></li>
+            <li><a href="../audio/index.html"><strong>Audio and Cue mode</strong><span>Route Master and headphone audio, check PFL, and choose how paused Hot Cues behave.</span></a></li>
+            <li><a href="../beat-fx/index.html"><strong>Beat FX and filters</strong><span>Apply Echo, Reverb, or Flanger to a Deck or Master, and tune the shared sweep-filter sound.</span></a></li>
+            <li><a href="../follow/index.html"><strong>Follow loaded Tracks</strong><span>Keep candidate next Tracks in the browse list while Decks change.</span></a></li>
+            <li><a href="../capture/index.html"><strong>Review Sessions and Takes</strong><span>Replay performance events, inspect detected handovers, and promote chosen evidence.</span></a></li>
           </ul>
         </nav>
       </article>

@@ -24,8 +24,14 @@ import type { CrossfaderAssignment } from '../playback/crossfaderAssignmentStore
 import { scratchPosition, scratchFilterAt, scratchSoundedBetween, effectiveScratchLoop } from '../playback/worklet/scratchMotion';
 import type { ScratchMotion, ScratchFilter } from '../playback/worklet/scratchMotion';
 import { deckMasterGain, isDeckAudible, isDeckSounding } from './audibility';
+import { channelCrossfaderGain } from '../playback/mixerMath';
+import { beatFxMixGains } from '../playback/beatFx';
+import { DEFAULT_BEAT_FX_SETTINGS } from '../playback/beatFxSettings';
+import { deckBeatSeconds, fxHasTail, fxTailSeconds } from './fxTail';
 import { DEFAULT_DETECTOR_PARAMS } from './events';
 import type { CaptureDeck, CaptureEvent, DetectorParams } from './events';
+import type { BeatFxSectionState } from '../playback/beatFx';
+import type { BeatFxSettings } from '../playback/beatFxSettings';
 
 export const ALL_DECKS: CaptureDeck[] = ['A', 'B', 'C', 'D'];
 
@@ -58,6 +64,21 @@ export interface ReducerDeckState {
   /** Last known playhead (track seconds) and the capture time we knew it. */
   playhead: number;
   playheadAt: number;
+  /** Track BPM from the last Load (null = unknown) — the echo tail's beat. */
+  bpm: number | null;
+  /** The Beat FX voicing exciting this deck right now (#355), or null. */
+  fxExcitedBy: FxExcitation | null;
+  /** A ringing Beat FX tail (#355): audible until `until` (capture time),
+   * crossfader-gated unless it rings on the Master insert. */
+  fxTail: { start: number; until: number; master: boolean } | null;
+}
+
+/** What is feeding a deck's tail-producing Beat FX (#355). */
+export interface FxExcitation {
+  effect: 'echo' | 'reverb';
+  beats: number;
+  /** Master-insert FX (post-crossfader) rather than the channel insert. */
+  master: boolean;
 }
 
 export interface AudibilityState {
@@ -69,6 +90,15 @@ export interface AudibilityState {
   /** The machine holding the shared surface (tenure marker, ADR 0033);
    * null while the shared surface itself is audible. */
   tenureHolder: string | null;
+  /** Beat FX section (#351): the last logged snapshot, or null = never
+   * logged (Sessions captured before #351 carry no FX evidence). Replaced,
+   * never mutated — retainers may share it. */
+  beatFx: BeatFxSectionState | null;
+  /** Beat FX voicing preferences at this moment (#351); null = unlogged. */
+  beatFxSettings: BeatFxSettings | null;
+  /** Capture time of the last applied event / clock advance — the instant
+   * the audibility reads answer for (Beat FX tails are time-bounded). */
+  now: number;
 }
 
 export function freshDeck(assignment: CrossfaderAssignment): ReducerDeckState {
@@ -92,6 +122,9 @@ export function freshDeck(assignment: CrossfaderAssignment): ReducerDeckState {
     pitch: 0,
     playhead: 0,
     playheadAt: 0,
+    bpm: null,
+    fxExcitedBy: null,
+    fxTail: null,
   };
 }
 
@@ -111,6 +144,9 @@ export function initialAudibilityState(
     crossfader: 0,
     crossfaderEnabled: true,
     tenureHolder: null,
+    beatFx: null,
+    beatFxSettings: null,
+    now: -Infinity,
   };
 }
 
@@ -134,7 +170,7 @@ function assignmentFromValue(value: number): CrossfaderAssignment {
 /** Apply one raw event to deck/mixer/tenure state (mutates `s`) —
  * everything else just rides the log as evidence. */
 export function applyEvent(s: AudibilityState, e: CaptureEvent): void {
-  advanceScratch(s, e.t);
+  advanceClock(s, e.t);
   switch (e.kind) {
     case 'control': {
       const d = e.channel ? s.decks[e.channel] : null;
@@ -189,7 +225,11 @@ export function applyEvent(s: AudibilityState, e: CaptureEvent): void {
     case 'load': {
       const d = s.decks[e.channel];
       d.trackId = e.trackId;
+      d.bpm = e.bpm;
       d.trackDuration = Infinity;
+      // A Load re-premises the deck: detection treats any ringing tail as
+      // ended here (the detector settles the outgoing at this instant).
+      d.fxTail = null;
       // NOT d.playing — transport-owned (see the header note).
       d.previewing = false;
       d.scratch = null;
@@ -221,9 +261,91 @@ export function applyEvent(s: AudibilityState, e: CaptureEvent): void {
     case 'tenure':
       s.tenureHolder = e.edge === 'start' ? e.holder : null;
       break;
+    case 'beatFx': {
+      const { selected, target, on, depth, beats } = e;
+      s.beatFx = { selected, target, on, depth, beats };
+      break;
+    }
+    case 'beatFxSettings':
+      s.beatFxSettings = e.settings;
+      break;
     default:
       break;
   }
+  updateFxTails(s, e.t);
+}
+
+/** Beat FX excitation of one deck (#355): a tail-producing effect is ON,
+ * routed to this deck's channel insert (pre-crossfader send) or the Master
+ * insert, its return audible, and the deck feeding it at an audible level.
+ * Excitation is transport-gated like Take detection (cue stabs excluded). */
+function fxExcitation(s: AudibilityState, ch: CaptureDeck): FxExcitation | null {
+  const fx = s.beatFx;
+  if (!fx || !fx.on || !fxHasTail(fx.selected)) return null;
+  const master = fx.target === 'master';
+  if (!master && fx.target !== ch) return null;
+  if (beatFxMixGains(fx.depth).wet < s.params.audibleGain) return null;
+  const d = s.decks[ch];
+  const feeding = master
+    ? isDeckAudible(d, mixerInputs(s), s.params)
+    : isDeckAudible({ ...d, assignment: 'thru' }, mixerInputs(s), s.params);
+  return feeding ? { effect: fx.selected, beats: fx.beats, master } : null;
+}
+
+/** Excitation edges → tails (#355). Excitation ending starts a tail sized
+ * by the voicing that was ringing and the LEVEL/DEPTH now; renewed
+ * excitation supersedes it; LEVEL/DEPTH to full dry silences it. */
+function updateFxTails(s: AudibilityState, t: number): void {
+  const fxLive = s.beatFx !== null && s.beatFx.on;
+  const wetDead = s.beatFx !== null && beatFxMixGains(s.beatFx.depth).wet < s.params.audibleGain;
+  for (const ch of ALL_DECKS) {
+    const d = s.decks[ch];
+    if (!fxLive && d.fxExcitedBy === null && (d.fxTail === null || !wetDead)) continue;
+    const excited = fxLive ? fxExcitation(s, ch) : null;
+    if (excited) {
+      d.fxTail = null;
+    } else if (d.fxExcitedBy) {
+      const ex = d.fxExcitedBy;
+      const seconds = fxTailSeconds(
+        ex.effect, ex.beats, s.beatFx?.depth ?? -1,
+        s.beatFxSettings ?? DEFAULT_BEAT_FX_SETTINGS,
+        deckBeatSeconds(d.bpm, d.pitch), s.params.audibleGain
+      );
+      d.fxTail = seconds > 0 ? { start: t, until: t + seconds, master: ex.master } : null;
+    } else if (d.fxTail && wetDead) {
+      d.fxTail = null;
+    }
+    d.fxExcitedBy = excited;
+  }
+}
+
+/** Advance the reducer clock to `t` (scratch motion + the instant
+ * time-bounded reads answer for). */
+export function advanceClock(s: AudibilityState, t: number): void {
+  advanceScratch(s, t);
+  if (t > s.now) s.now = t;
+}
+
+/** Is this deck's Beat FX tail audible at the reducer clock (#355)? */
+export function fxTailAudible(s: AudibilityState, ch: CaptureDeck): boolean {
+  const d = s.decks[ch];
+  const tail = d.fxTail;
+  if (!tail || s.now >= tail.until) return false;
+  if (tail.master) return true;
+  const xf = channelCrossfaderGain(d.assignment, s.crossfaderEnabled ? s.crossfader : 0);
+  return xf >= s.params.audibleGain;
+}
+
+/** The next instant a ringing tail falls silent after the reducer clock
+ * (Infinity = none) — consumers evaluate audibility there so a tail's end
+ * lands exactly, not at the next logged event. */
+export function nextFxTailEnd(s: AudibilityState): number {
+  let next = Infinity;
+  for (const ch of ALL_DECKS) {
+    const tail = s.decks[ch].fxTail;
+    if (tail && tail.until > s.now && tail.until < next) next = tail.until;
+  }
+  return next;
 }
 
 export function deckPlayheadAt(d: ReducerDeckState, t: number): number {
@@ -283,14 +405,14 @@ export function tenureHeld(s: AudibilityState): boolean {
  * state's params) — ignores tenure. The detector reads this: its machines
  * suspend as a whole under tenure, and the exit re-seed needs reality. */
 export function deckAudible(s: AudibilityState, ch: CaptureDeck): boolean {
-  return isDeckAudible(s.decks[ch], mixerInputs(s), s.params);
+  return isDeckAudible(s.decks[ch], mixerInputs(s), s.params) || fxTailAudible(s, ch);
 }
 
 /** Raw mixer "sounding" of one deck — audibility with a zero gain
  * threshold (any Master-bus signal at all; audibility.ts). The detector's
  * entry-onset backdating clock (#178) reads this. */
 export function deckSounding(s: AudibilityState, ch: CaptureDeck): boolean {
-  return isDeckSounding(s.decks[ch], mixerInputs(s), s.params);
+  return isDeckSounding(s.decks[ch], mixerInputs(s), s.params) || fxTailAudible(s, ch);
 }
 
 /** Master-audible under the shared surface: a machine tenure displaces the
@@ -305,7 +427,8 @@ export function maskedDeckAudible(s: AudibilityState, ch: CaptureDeck): boolean 
 export function sessionDeckAudible(s: AudibilityState, ch: CaptureDeck): boolean {
   if (tenureHeld(s)) return false;
   const d = s.decks[ch];
-  return isDeckAudible(d.previewing ? { ...d, playing: true } : d, mixerInputs(s), s.params);
+  return isDeckAudible(d.previewing ? { ...d, playing: true } : d, mixerInputs(s), s.params)
+    || fxTailAudible(s, ch);
 }
 
 /** This deck's Master-bus gain right now (kills/tenure NOT applied). */

@@ -144,3 +144,13 @@ def test_negative_window_total_rejected(client):
         "/api/transition-templates", json=template(before_beats=8, after_beats=-16)
     )
     assert resp.status_code == 422
+
+
+def test_beat_fx_round_trips_and_clears(client):
+    fx = {"steps": [{"x": 0.5, "on": True, "selected": "echo", "target": "A", "beats": 0.5},
+                    {"x": 1, "on": False, "selected": "echo", "target": "A", "beats": 0.5}],
+          "depth": [{"x": 0.5, "y": 0.9}]}
+    assert client.post("/api/transition-templates", json=template(beat_fx=fx)).json()["beat_fx"] == fx
+    assert client.get("/api/transition-templates").json()[0]["beat_fx"] == fx
+    resp = client.put("/api/transition-templates/t1", json=template())
+    assert resp.json()["beat_fx"] is None

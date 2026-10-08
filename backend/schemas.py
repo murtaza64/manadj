@@ -386,6 +386,8 @@ class TransitionTemplateItem(BaseModel):
     after_beats: int
     scalable: bool = False
     lanes: dict
+    # Beat FX track (#353; opaque TransitionBeatFx, normalized like lanes).
+    beat_fx: dict | None = None
 
     @model_validator(mode="after")
     def _window_total_non_negative(self) -> "TransitionTemplateItem":

@@ -835,7 +835,10 @@ describe('Beat FX insert (gh#272)', () => {
     mixer.toggleBeatFxOn();
     expect(fx.echoSend.gain.value).toBe(1);
     expect(fxNodesFor(Fake.instances[0], 0).echoSend.gain.value).toBe(0);
-    expect(fx.echoWet.gain.value).toBe(1); // center 0 = balance midpoint
+    expect(fx.echoWet.gain.value).toBe(0); // starts fully dry
+    expect(fx.dry.gain.value).toBe(1);
+    mixer.setBeatFxDepth(0); // balance midpoint: both at unity
+    expect(fx.echoWet.gain.value).toBe(1);
     expect(fx.dry.gain.value).toBe(1);
     mixer.setBeatFxDepth(1); // full-effect echo-out
     expect(fx.echoWet.gain.value).toBe(1);
@@ -849,6 +852,7 @@ describe('Beat FX insert (gh#272)', () => {
     mixer.portFor('A').ensureAudio();
     const fx = fxNodesFor(Fake.instances[0], 0);
     mixer.toggleBeatFxOn();
+    mixer.setBeatFxDepth(0);
     expect(fx.echoSend.gain.value).toBe(1);
     mixer.selectBeatFx('reverb');
     expect(fx.echoSend.gain.value).toBe(0);
@@ -885,6 +889,29 @@ describe('Beat FX insert (gh#272)', () => {
     expect(fx.echoSend.gain.value).toBe(0);
     expect(fx.echoWet.gain.value).toBe(1);
     expect(fx.dry.gain.value).toBe(1);
+  });
+
+  it('setBeatFxSection applies a whole recorded section in one write (#351)', () => {
+    const Fake = withFakeAudio();
+    const mixer = new Mixer();
+    mixer.portFor('A').ensureAudio();
+    const ctx = Fake.instances[0];
+    mixer.setChannelBeatSeconds('B', 0.5);
+    const notes: unknown[] = [];
+    mixer.subscribe((c) => notes.push(c));
+    mixer.setBeatFxSection({ selected: 'reverb', target: 'B', on: true, depth: 1, beats: 2 });
+    expect(mixer.getBeatFxSection()).toEqual({ selected: 'reverb', target: 'B', on: true, depth: 1, beats: 2 });
+    expect(notes).toEqual(['beatFx']);
+    const fxB = fxNodesFor(ctx, 1);
+    expect(fxB.reverbSend.gain.value).toBe(1);
+    expect(fxB.echoSend.gain.value).toBe(0);
+    expect(fxB.dry.gain.value).toBe(0);
+    expect(fxB.delay.delayTime.value).toBeCloseTo(1, 9); // 2 beats × 0.5 s
+    expect(fxNodesFor(ctx, 0).reverbSend.gain.value).toBe(0);
+    // A null SELECT can never stay ON (the selectBeatFx invariant).
+    mixer.setBeatFxSection({ selected: null, target: 'B', on: true, depth: 0, beats: 2 });
+    expect(mixer.getBeatFxSection().on).toBe(false);
+    expect(fxB.reverbSend.gain.value).toBe(0);
   });
 
   it('MST processes the summed program; SP is selectable but silent', () => {

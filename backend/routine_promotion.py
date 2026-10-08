@@ -367,6 +367,12 @@ def _readdress_event(
             return None
         out["playheads"] = mapped
         return out
+    if kind == "beatFx":
+        # Section-level (#353): no channel; the TARGET is the deck address.
+        out["target"] = _beat_fx_target(e.get("target"), residencies, t)
+        if out["target"] is None:
+            out["on"] = False
+        return out
     ch = e.get("channel")
     if ch is None:
         out["slot"] = None  # global control (crossfader, master, ...)
@@ -376,6 +382,35 @@ def _readdress_event(
         return None
     out["slot"] = slot
     return out
+
+
+def _beat_fx_target(
+    target: Any, residencies: Sequence[SlotResidency], t: float
+) -> int | str | None:
+    """Beat FX target, deck → slot (#353): a cast deck readdresses to its
+    slot index, 'master' stays, anything else (sampler, a non-cast deck)
+    is None — the section reads OFF in the slot frame."""
+    if target == "master":
+        return "master"
+    if isinstance(target, str) and target in ("A", "B", "C", "D"):
+        return _slot_at(residencies, target, t)
+    return None
+
+
+def _beat_fx_state_at(events: Sequence[dict[str, Any]], t_seed: float) -> dict[str, Any] | None:
+    """The Beat FX section at `t_seed` (#353): the latest logged snapshot
+    (init head or `beatFx` event) at or before it. None = never logged
+    (pre-#351 sessions)."""
+    state: dict[str, Any] | None = None
+    for e in events:  # caller pre-sorts by t
+        if float(e.get("t", 0)) > t_seed:
+            break
+        kind = e.get("kind")
+        if kind == "init" and isinstance(e.get("beatFx"), dict):
+            state = dict(e["beatFx"])
+        elif kind == "beatFx":
+            state = {k: e.get(k) for k in ("selected", "target", "on", "depth", "beats")}
+    return state
 
 
 # ── control-state seeding ───────────────────────────────────────────────
@@ -495,6 +530,17 @@ def promote(
                     "seeded": True,
                 }
             )
+    # Beat FX seed (#353): the section as it stood at the window open,
+    # target readdressed — an echo already running at the window start
+    # plays from beat 0. Same-beat real events sort after and win.
+    fx_seed = _beat_fx_state_at(events, window_start_s)
+    if fx_seed is not None:
+        seeded = _readdress_event(
+            {**fx_seed, "kind": "beatFx", "t": window_start_s}, residencies, beat_at
+        )
+        if seeded is not None:
+            seeded["seeded"] = True
+            out_events.append(seeded)
     dropped = 0
     for e in events:
         t = float(e.get("t", 0))

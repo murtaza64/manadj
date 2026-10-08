@@ -39,6 +39,7 @@ import {
 } from '../playback/audibleSurface';
 import type { DeckEngine, DeckSnapshot } from '../playback/DeckEngine';
 import type { Mixer } from '../playback/mixer';
+import { BeatFxOverride } from '../editor/beatFxLane';
 import {
   jumpCrossedDecks,
   planStateAt,
@@ -205,6 +206,10 @@ export class Conductor {
   /** This session's overlay owner token (sets 25); teardown passes it to
    * disengageAutomation, which ignores non-owners. */
   private automationToken: symbol | null = null;
+  /** Beat FX section borrow (#353): snapshot at engage, restored by
+   * stop/end; a takeover keeps the section as it sounds. */
+  private beatFx!: BeatFxOverride;
+  private keepBeatFx = false;
   private listeners = new Set<() => void>();
   /** Last evaluated activeEntryIndex (UI row highlight). */
   private activeEntryIndex = 0;
@@ -212,6 +217,7 @@ export class Conductor {
   constructor(plan: SetPlan, audio: ConductorAudio, hooks: ConductorHooks) {
     this._plan = plan;
     this.mixer = audio.mixer;
+    this.beatFx = new BeatFxOverride(audio.mixer);
     this.engines = audio.engines;
     this.hooks = hooks;
     this.driven = this.drivenDecks(plan);
@@ -503,6 +509,7 @@ export class Conductor {
     this.active = true;
     this.stoppedFired = false;
     this.automationToken = this.mixer.engageAutomation();
+    this.beatFx.engage();
     this.unsubs.push(
       this.watchMixer(),
       ...this.driven.map((deck) => this.watchEngine(deck)),
@@ -530,6 +537,10 @@ export class Conductor {
     if (opts.disengage && this.automationToken !== null) {
       this.mixer.disengageAutomation(this.automationToken);
     }
+    // Restore the live FX section while still holding the surface (the
+    // restore is not a performed gesture). Displacement leaves it to the
+    // new holder (disengage: false), like the overlay.
+    if (opts.disengage) this.beatFx.release({ keep: this.keepBeatFx });
     this.automationToken = null;
     if (opts.release && isAudible('conductor')) releaseAudible('conductor');
     unregisterSurface('conductor');
@@ -561,10 +572,12 @@ export class Conductor {
     cancelAnimationFrame(this.raf);
     this.self(() => this.syncBaseToAutomation(touched));
     this.suppressSilence = true;
+    this.keepBeatFx = true;
     try {
       this.teardown({ release: true, disengage: true });
     } finally {
       this.suppressSilence = false;
+      this.keepBeatFx = false;
     }
     this.fireStopped('takeover');
   }
@@ -797,6 +810,7 @@ export class Conductor {
         if (ready[deck]) this.syncDeck(deck, state, hardAll || jumped.includes(deck), p);
       }
       for (const deck of this.driven) this.mixer.setAutomation(deck, lanes[deck]);
+      this.beatFx.apply(state.beatFx ?? null);
     });
     this.lastLanes = lanes;
 
@@ -828,6 +842,7 @@ export class Conductor {
         engine.setPitch(state.decks[deck].pitchPercent);
       }
       for (const deck of this.driven) this.mixer.setAutomation(deck, state.lanes[deck]);
+      this.beatFx.apply(state.beatFx ?? null);
     });
     this.lastLanes = state.lanes;
     if (state.activeEntryIndex !== this.activeEntryIndex) {

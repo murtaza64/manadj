@@ -27,6 +27,12 @@ import type { DeckEngine, DeckSnapshot } from '../playback/DeckEngine';
 import { foldLoopPlayhead } from '../playback/loop';
 import type { ChannelId, Mixer } from '../playback/mixer';
 import type { AutomationChannelValues } from '../playback/mixer';
+import type { BeatFxSectionState } from '../playback/beatFx';
+
+function sameBeatFx(a: Readonly<BeatFxSectionState>, b: Readonly<BeatFxSectionState>): boolean {
+  return a.selected === b.selected && a.target === b.target && a.on === b.on
+    && a.depth === b.depth && a.beats === b.beats;
+}
 
 /** All-on stem default (stems #212): the state before any stem event. */
 function allStemsOn(): { vocals: boolean; drums: boolean; bass: boolean; other: boolean } {
@@ -232,6 +238,9 @@ export class SessionReplayDriver {
   /** Last lanes written — the takeover base-sync source (Conductor's
    * lastLanes idiom). */
   private lastLanes: Partial<Record<ChannelId, AutomationChannelValues>> = {};
+  /** The user's Beat FX section before replay touched it (#351) —
+   * restored on every exit except takeover. */
+  private liveBeatFx: BeatFxSectionState | null = null;
 
   constructor(plan: ReplayPlan, audio: ReplayAudio, hooks: ReplayHooks) {
     this.plan = plan;
@@ -284,6 +293,9 @@ export class SessionReplayDriver {
       return;
     }
     this.active = true;
+    // Beat FX is base mixer state (no automation overlay): replay writes the
+    // section directly and hands the live one back when it lets go (#351).
+    this.liveBeatFx = { ...this.mixer.getBeatFxSection() };
     this.status('loading');
     // The Conductor's mixer protocol: own the fader/EQ/filter nodes via
     // the overlay; the user's base state stays theirs (and stays visible
@@ -553,6 +565,10 @@ export class SessionReplayDriver {
     this.recCrossfader = seed.crossfader;
     this.recCrossfaderEnabled = seed.crossfaderEnabled;
     this.applyLanes(ALL_DECKS);
+    // No FX evidence in the log (pre-#351 capture) = no FX: the live
+    // section must not color a performance that never had it.
+    const live = this.liveBeatFx ?? this.mixer.getBeatFxSection();
+    this.mixer.setBeatFxSection(seed.beatFx ?? { ...live, on: false });
   }
 
   /** Compose the recorded state into overlay lanes: the recorded
@@ -613,6 +629,9 @@ export class SessionReplayDriver {
       if (applied !== null && applied > this.anchorAudioTime + cue.offsetS) return;
     }
     switch (cue.kind) {
+      case 'beatFx':
+        this.mixer.setBeatFxSection(cue.section);
+        break;
       case 'control': {
         const ch = cue.channel;
         const v = cue.value;
@@ -1082,6 +1101,7 @@ export class SessionReplayDriver {
       crossfader: this.mixer.getCrossfader(),
       crossfaderEnabled: this.mixer.getCrossfaderEnabled(),
       master: this.mixer.getMaster(),
+      beatFx: this.mixer.getBeatFxSection(),
     };
     return this.mixer.subscribe((changed) => {
       // Replay never writes base state during playback (overlay only) —
@@ -1130,6 +1150,14 @@ export class SessionReplayDriver {
         }
         last.master = master;
       }
+      if (all || changed === 'beatFx') {
+        const fx = this.mixer.getBeatFxSection();
+        if (!sameBeatFx(fx, last.beatFx)) {
+          touched.add('beatFx');
+          cause ??= 'beat fx';
+        }
+        last.beatFx = fx;
+      }
       if (this.selfOps > 0 || !this.active) return;
       if (cause) this.takeover(cause, touched);
     });
@@ -1151,7 +1179,7 @@ export class SessionReplayDriver {
     this.self(() => this.syncBaseToLanes(touched));
     this.suppressSilence = true;
     try {
-      this.teardown({ release: true });
+      this.teardown({ release: true, keepBeatFx: true });
     } finally {
       this.suppressSilence = false;
     }
@@ -1208,7 +1236,7 @@ export class SessionReplayDriver {
     this.silenceDecks();
   }
 
-  private teardown(opts: { release: boolean }): void {
+  private teardown(opts: { release: boolean; keepBeatFx?: boolean }): void {
     // Cancel only this driver's ownership. A human begin/move has already
     // replaced the token, and must survive the release back to capture.
     this.self(() => {
@@ -1226,6 +1254,11 @@ export class SessionReplayDriver {
       this.mixer.disengageAutomation(this.automationToken);
       this.automationToken = null;
     }
+    // Hand the live Beat FX section back while the surface is still
+    // ours, so capture never logs the restore as a performance.
+    const live = this.liveBeatFx;
+    this.liveBeatFx = null;
+    if (live && !opts.keepBeatFx) this.self(() => this.mixer.setBeatFxSection(live));
     if (opts.release && isAudible('replay')) releaseAudible('replay');
     unregisterSurface('replay');
   }

@@ -3,7 +3,7 @@ import { act, type ComponentProps } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { Knob } from './MixerStrip';
-import { AUTOMATION_COLORS, FILTER_LPF_COLOR } from '../../theme/automationColors';
+import { AUTOMATION_COLORS, FILTER_LPF_COLOR, FX_DEPTH_COLOR } from '../../theme/automationColors';
 import { strokeColorAt } from '../../editor/laneShade';
 import { resetSlots, setSlot } from '../../waveform/styleSlots';
 
@@ -114,6 +114,19 @@ it.each([-1, 1])('quickly colors a filter just off neutral on side %s without ex
   expect(shade(0, side * 0.001)).toBe(near);
   expect(shade(side, 0)).toBe(neutral);
   expect(render({ ...props, value: 0 }).fill!.style.background).toBe('none');
+});
+
+it('paints Beat FX depth as a level: grey at fully dry, wet color growing from the dry stop', () => {
+  const dry = render({ control: 'fxDepth', min: -1, max: 1, value: -1, defaultValue: -1 });
+  expect(dry.knob.style.getPropertyValue('--knob-color')).toBe(FX_DEPTH_COLOR);
+  expect(dry.knob.style.getPropertyValue('--knob-value-color')).toBe(strokeColorAt('fader', FX_DEPTH_COLOR, 0));
+  expect(dry.fill!.style.background).toBe('none');
+  const balanced = render({ control: 'fxDepth', min: -1, max: 1, value: 0, defaultValue: -1 });
+  expect(balanced.knob.style.getPropertyValue('--knob-value-color')).toBe(strokeColorAt('fader', FX_DEPTH_COLOR, 0.5));
+  expect(balanced.fill!.style.background).toContain('transparent 0deg 0deg');
+  expect(balanced.fill!.style.background).toContain('135deg');
+  const wet = render({ control: 'fxDepth', min: -1, max: 1, value: 1, defaultValue: -1 });
+  expect(wet.knob.style.getPropertyValue('--knob-value-color')).toBe(strokeColorAt('fader', FX_DEPTH_COLOR, 1));
 });
 
 it('uses center-anchored silver trim and clamps values to physical stops', () => {

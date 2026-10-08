@@ -13,6 +13,8 @@
  * so the format errs toward completeness — controls, transport, pitch,
  * loads, and coarse periodic playhead samples.
  */
+import type { BeatFxSectionState } from '../playback/beatFx';
+import type { BeatFxSettings } from '../playback/beatFxSettings';
 
 /**
  * The pair-machine ROLE channel: everything downstream of a Take (its
@@ -115,6 +117,15 @@ export type CaptureEvent =
       slip?: boolean;
     }
   | { t: number; kind: 'load'; channel: CaptureDeck; trackId: number | null; bpm: number | null }
+  /** Beat FX SECTION state (#351): one full snapshot per change — the
+   * section is a single shared strip (effect, radio target, ON, bipolar
+   * LEVEL/DEPTH, beat length), so the snapshot is the whole truth and
+   * replay applies it verbatim. Seeded like every other control. */
+  | ({ t: number; kind: 'beatFx' } & BeatFxSectionState)
+  /** Beat FX voicing preferences (#351): echo feedback, reverb decay, …
+   * Logged at seed and on change so replay can sound like the performance
+   * even after the preferences move. */
+  | { t: number; kind: 'beatFxSettings'; settings: BeatFxSettings }
   /** Coarse periodic sample (~1 Hz): keeps alignment reconstructible and
    * drives time-based settlement in the detector. */
   | { t: number; kind: 'tick'; playheads: Partial<Record<CaptureDeck, number>> }
@@ -139,6 +150,9 @@ export type CaptureEvent =
       crossfader: number;
       crossfaderEnabled: boolean;
       physicalDecks?: { outgoing: CaptureDeck; incoming: CaptureDeck };
+      /** Beat FX section at open, ROLE-relabeled (#351; detector.ts
+       * roleBeatFx). Absent when no FX state was logged yet (pre-#351). */
+      beatFx?: BeatFxSectionState;
     };
 
 /** One deck's state at engagement open (init event). */
@@ -182,7 +196,10 @@ export interface InitDeckState {
  * deck-sharing engagements share one uuid, so a triple's pairwise
  * offspring are a first-class group). */
 // v7 (#225): paused scratch motion is audible; touched stationary holds are not.
-export const DETECTOR_VERSION = 7;
+// v8 (#355): Beat FX echo/reverb tails keep a deck audible after its
+// excitation stops (fader close, kill, stop, FX off) — an echo-out's
+// window ends where the tail decays below `audibleGain` (capture/fxTail.ts).
+export const DETECTOR_VERSION = 8;
 
 export interface DetectorParams {
   /** Master-bus gain (trim × channel fader × crossfader) below which a

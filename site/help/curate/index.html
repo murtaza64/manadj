@@ -4,8 +4,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Library &amp; tagging — manadj</title>
-  <meta name="description" content="Browse tracks, assign Tags and Energy, and arrange Playlists.">
+  <title>Curate the Library — manadj</title>
+  <meta name="description" content="Import Tracks, assign Tags and Energy, filter, build Playlists, and archive rejects.">
   <link rel="icon" href="../../assets/logo.png">
   <link rel="preload" href="../../assets/fonts/UbuntuMono-Regular.ttf" as="font" type="font/ttf" crossorigin>
   <link rel="preload" href="../../assets/fonts/UbuntuMono-Bold.ttf" as="font" type="font/ttf" crossorigin>
@@ -29,10 +29,19 @@
         <summary>Help articles</summary>
         <nav aria-label="Help articles">
           <a href="../../help/index.html">All articles</a>
-          <a href="../../help/start/index.html">Getting started</a>
-          <a href="../../help/curate/index.html" aria-current="page">Library &amp; tagging</a>
+          <a href="../../help/start/index.html">First run and returning to Setup</a>
+          <a href="../../help/acquire/index.html">Acquire Tracks</a>
+          <a href="../../help/curate/index.html" aria-current="page">Curate the Library</a>
+          <a href="../../help/analysis/index.html">Analyze Tracks and set cues</a>
           <a href="../../help/perform/index.html">Keyboard DJing</a>
+          <a href="../../help/controllers/index.html">Controllers</a>
+          <a href="../../help/audio/index.html">Audio and Cue mode</a>
+          <a href="../../help/beat-fx/index.html">Beat FX and filters</a>
+          <a href="../../help/follow/index.html">Follow loaded Tracks</a>
+          <a href="../../help/capture/index.html">Review Sessions and Takes</a>
           <a href="../../help/editor/index.html">Mix editor</a>
+          <a href="../../help/sets/index.html">Plan and play a Set</a>
+          <a href="../../help/sync/index.html">Compare and Sync libraries</a>
         </nav>
       </details>
     </aside>
@@ -40,51 +49,106 @@
       <article>
         <header class="help-heading">
           <a class="kicker" href="../index.html">Help manual</a>
-          <h1>Library &amp; tagging</h1>
-          <p>Browse tracks, assign Tags and Energy, and arrange Playlists.</p>
+          <h1>Curate the Library</h1>
+          <p>Import Tracks, assign Tags and Energy, filter, build Playlists, and archive rejects.</p>
         </header>
         <details class="help-toc" open>
           <summary>On this page</summary>
           <nav aria-label="On this page"><div class="toc">
 <ul>
-<li><a href="#importing">Import and browse</a></li>
-<li><a href="#tags">Tags and filters</a></li>
-<li><a href="#playlists">Playlists</a></li>
-<li><a href="#archive">Archive</a></li>
+<li><a href="#importing">Bring Tracks into the Library</a></li>
+<li><a href="#edit-track">Curate a Track</a><ul>
+<li><a href="#tag-structure">Tag Categories and colors</a></li>
+<li><a href="#filters">Find the next curation batch</a></li>
+</ul>
+</li>
+<li><a href="#playlists">Build a Playlist</a></li>
+<li><a href="#archive">Archive a reject</a></li>
 </ul>
 </div>
 </nav>
         </details>
         <figure class="shot">
-  <figcaption class="shot-bar"><span class="shot-label">LOOK</span>The Library with Track metadata, Tags, and browsing filters.</figcaption>
+  <figcaption class="shot-bar"><span class="shot-label">LOOK</span>Library browse and loaded-Track curation.</figcaption>
   <a href="../../shots/library.webp" target="_blank" rel="noopener">
-    <img src="../../shots/library.webp" alt="The Library with Track metadata, Tags, and browsing filters." loading="lazy">
+    <img src="../../shots/library.webp" alt="Library browse and loaded-Track curation." loading="lazy">
   </a>
 </figure>
-        <div class="prose help-prose"><h2 id="importing">Import and browse</h2>
+        <div class="prose help-prose"><h2 id="importing">Bring Tracks into the Library</h2>
 <ol>
-<li><a href="../start/index.html#tracks-directory">Scan a tracks directory</a>, or drop files onto the Library in the Desktop shell.</li>
-<li>Browse sidebar lists or search by text. Select a track; check title, artist, BPM, and Key. Keep its music drive connected.</li>
+<li>In the desktop app, drop audio files or a folder onto the Library track table. Drop onto a Playlist in the sidebar to import <strong>new</strong> files and append them there. Music stays at its existing location; the drop does not make another copy. Already-known paths, including Archived Tracks, are skipped. Dropping a file already in the Library onto a Playlist does <strong>not</strong> add that existing Track to the Playlist.</li>
+<li>For a recurring music folder, set <strong>Settings → Library → Tracks directory</strong> and scan it. <strong>Sync → Tracks → Unimported files</strong> lists files in that directory not yet in the Library: select rows, choose <strong>Import N selected</strong>, then <strong>Apply</strong>. This is a different operation from dragging a file into the desktop window. A browser tab cannot supply filesystem paths for drop import; use the desktop app or the configured directory instead.</li>
+<li>For a Rekordbox library, use <strong>Sync → Rekordbox import</strong> to preview the import before choosing new Tracks or missing details. See <a href="../start/index.html#rekordbox">first run</a> and <a href="../sync/index.html#import-choices">Sync</a>.</li>
 </ol>
-<h2 id="tags">Tags and filters</h2>
+<p>Imports queue background analysis. <strong>TASKS</strong> in the top bar shows progress and failed work. A new Track is still a curation task: check its title, artist, Tags and Energy before using it downstream.</p>
+<h2 id="edit-track">Curate a Track</h2>
 <ol>
-<li>Click Tags to assign or remove them. Use tag management to edit Tags, Categories, and tag colors; assignments save immediately.</li>
-<li>With Library keyboard focus, press <strong>T</strong>, search, then <strong>Enter</strong> to assign a Tag; <strong>Escape</strong> exits. Press <strong>E</strong>, then <strong>1–5</strong>, for Energy, a separate attribute.</li>
-<li>Combine text, BPM, Key, Energy, and Tag filters. <strong>ANY</strong> matches any selected Tag; <strong>ALL</strong> requires every selected Tag. Clear filters if tracks disappear.</li>
+<li>Open <strong>EXPORT</strong> from the top bar’s <strong>⋯</strong> menu, or use the Library browse panel in <strong>PERFORM</strong>. Choose <strong>Unprocessed</strong> in the sidebar to work through Tracks missing Tags <strong>or</strong> Energy. This list does not check whether the title and artist have been cleaned up.</li>
+<li><strong>Load</strong> the Track onto a Deck (double-click a row or use its <strong>Load to Deck A/B</strong> control). The upper metadata and Tag panel edits the <strong>loaded</strong> Track, not merely the highlighted table row. Confirm the title in that panel before changing anything. In standalone Library, Enter loads the selected row on Deck A.</li>
+<li>Correct title/artist and other editable metadata in the loaded-Track panel. Click Tags to assign or unassign them; assignments save immediately. Press <strong>T</strong> to filter its Tags by name, then Enter to toggle the highlighted Tag. Click <strong>Energy 1–5</strong> for intensity; this is a separate Track field, not a Tag. Verify the row’s colored Energy number and Tag pills. <a href="../analysis/index.html">Analysis and cues</a> covers BPM, Key, Beatgrid and cue edits.</li>
 </ol>
-<h2 id="playlists">Playlists</h2>
+<p><img alt="Loaded-Track metadata and Tag controls" src="../../shots/library.webp" /></p>
+<p><span id="tags"></span></p>
+<h3 id="tag-structure">Tag Categories and colors</h3>
+<p>Use the loaded-Track panel’s <strong>Manage...</strong> button to change the vocabulary. Add a named Category (for example Genre, Vibe, or Role), then add Tags inside it. Each Tag belongs to one Category; the names are yours, not fixed genres. Choose a swatch, <strong>Randomize</strong>, <strong>Choose…</strong>, or enter a hex color. Tags can have their own colors; otherwise they inherit their Category color. Save Tag edits with <strong>Save Changes</strong>, or <strong>Cancel</strong> them. Category creation/deletion takes effect immediately; confirm a deletion only if you intend to remove that Category’s Tags from Tracks. Deleting one Tag likewise removes its assignments. Changing the structure is different from toggling a Tag on the loaded Track.</p>
+<p><img alt="Manage Tags with Category sections, Tag color swatches and Save Changes" src="../../shots/help-library-tags.webp" /></p>
+<h3 id="filters">Find the next curation batch</h3>
+<p>The filter bar applies the selected axes together. Use <strong>Clear All</strong> to reset search, Tags, Energy, Key, BPM and Follow; it does not reset a chosen column sort or Follow parameter preferences.</p>
+<p><img alt="Two selected Tags with ANY in the filter bar" src="../../shots/help-library-filters.webp" /></p>
+<table>
+<thead>
+<tr>
+<th>Control</th>
+<th>What to do</th>
+<th>What matches</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>search…</strong></td>
+<td>Type part of a title, artist or filename. <strong>Cmd/Ctrl-F</strong> focuses it; <strong>×</strong> clears.</td>
+<td>Case-insensitive substring. Search does not inspect Tag names. Enter or Escape in the field returns focus without clearing the query.</td>
+</tr>
+<tr>
+<td>Tag icon, pills, <strong>ANY / ALL</strong></td>
+<td>Expand Tags, select two or more, switch mode.</td>
+<td><strong>ANY</strong> matches at least one selected Tag; <strong>ALL</strong> requires every selected Tag. With no selected Tags, neither restricts the list.</td>
+</tr>
+<tr>
+<td><strong>Energy 1–5</strong></td>
+<td>Click one number or drag across a range.</td>
+<td>An inclusive range; narrowed ranges exclude Tracks with unset Energy. Full 1–5 does not exclude unset Energy.</td>
+</tr>
+<tr>
+<td><strong>Keys</strong></td>
+<td>Pick one or several keys on the circle; use <strong>Clear All</strong> in its popup.</td>
+<td>Any selected key. A Track without Key does not match an active Key filter.</td>
+</tr>
+<tr>
+<td><strong>BPM</strong></td>
+<td>Set <strong>Center BPM</strong> and <strong>Threshold (±N%)</strong>; use <strong>Clear</strong> in its popup.</td>
+<td>The center range plus half/double-time equivalents. A Track without BPM does not match an active BPM filter.</td>
+</tr>
+</tbody>
+</table>
+<p>Click a sortable column header to change display order; click again to reverse it. Filters narrow the visible rows, not the underlying Playlist membership. <a href="../follow/index.html">Follow</a> can further narrow the browse list against a loaded Track.</p>
+<h2 id="playlists">Build a Playlist</h2>
 <ol>
-<li>Choose <strong>+ New… → Playlist</strong>; drag tracks onto it.</li>
-<li>Sort by <strong># / Play order</strong>, clear filters, then drag rows to reorder. Other column sorts change only the view.</li>
+<li><strong>+ New… → Playlist</strong> in the sidebar; type its name and press Enter. Right-click the Playlist to rename, color, delete, or make a Set from it.</li>
+<li>Select one or several Tracks and drag them onto the Playlist in the sidebar, or use the Track menu’s <strong>Add to playlist</strong>. <strong>Split view</strong> places the Playlist above a full-Library pane so you can filter below and drag into the Playlist above. A Track appears only once; adding it again does not move it.</li>
+<li>In the Playlist, sort by <strong>#</strong> (Play order), clear filters, and drag rows to change the curated order. Sorting by title/BPM/Key changes only the display, <strong>not</strong> Play order; drops under another sort append. Delete/Backspace or <strong>Remove from playlist</strong> removes Playlist membership, not the Track from the Library.</li>
 </ol>
-<h2 id="archive">Archive</h2>
-<p>Right-click → <strong>Archive track</strong> retains audio and metadata but removes Playlist memberships. <strong>Archived → Unarchive</strong> does not restore those memberships.</p></div>
+<p>Playlist filters are off by default. Use the funnel on that Playlist to apply the shared filter bar; in split view, its filter bar belongs to the lower Library pane. Syncing this curated order to other libraries is a separate <a href="../sync/index.html#playlists">Sync operation</a>.</p>
+<h2 id="archive">Archive a reject</h2>
+<p>Right-click a Track, or select several, and choose <strong>Archive track(s)</strong>. Confirm if prompted about removal from Playlists: archiving takes it out of active Library lists and <strong>every Playlist</strong>. It does not delete the audio file, Track record, or source correspondence. <strong>Tracks → Archived</strong> shows archived rows; right-click one and <strong>Unarchive</strong> to return it to active lists. Unarchiving does <strong>not</strong> restore its former Playlist memberships. A later scan does not re-propose the archived path as a new Track.</p></div>
         <nav class="help-related" aria-label="Related articles">
           <h2>Related articles</h2>
           <ul class="help-cards">
-            <li><a href="../start/index.html"><strong>Getting started</strong><span>Run Setup, import tracks, and open Tours or Tutorials.</span></a></li>
-            <li><a href="../perform/index.html"><strong>Keyboard DJing</strong><span>Load Decks and use keyboard, mouse, or controller controls.</span></a></li>
-            <li><a href="../editor/index.html"><strong>Mix editor</strong><span>Edit timelines, audition changes, and promote reviewed Takes.</span></a></li>
+            <li><a href="../start/index.html"><strong>First run and returning to Setup</strong><span>Complete or skip optional guides, resume later, and relaunch one guide without resetting the Library.</span></a></li>
+            <li><a href="../acquire/index.html"><strong>Acquire Tracks</strong><span>Review SoundCloud likes, match existing Tracks, queue downloads, and inspect failures.</span></a></li>
+            <li><a href="../follow/index.html"><strong>Follow loaded Tracks</strong><span>Keep candidate next Tracks in the browse list while Decks change.</span></a></li>
+            <li><a href="../analysis/index.html"><strong>Analyze Tracks and set cues</strong><span>Inspect background analysis, correct Beatgrid and Key, and place Main and Hot Cues.</span></a></li>
+            <li><a href="../sync/index.html"><strong>Compare and Sync libraries</strong><span>Read Sync status, choose imports, and distinguish additive exports from replacements.</span></a></li>
           </ul>
         </nav>
       </article>

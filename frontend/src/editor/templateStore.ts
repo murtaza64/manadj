@@ -10,6 +10,7 @@
 import { api } from '../api/client';
 import type { TransitionTemplateWire } from '../api/client';
 import type { Lanes } from './mixModel';
+import { parseTransitionBeatFx } from './beatFxLane';
 import type { AnchorBase, TransitionTemplate } from './templateModel';
 
 let snapshot: TransitionTemplate[] = [];
@@ -26,6 +27,7 @@ function fromWire(w: TransitionTemplateWire): TransitionTemplate {
     afterBeats: w.after_beats,
     scalable: w.scalable,
     lanes: w.lanes as Lanes,
+    ...(w.beat_fx ? { beatFx: parseTransitionBeatFx(w.beat_fx) } : {}),
   };
 }
 
@@ -40,6 +42,8 @@ function toWire(t: TransitionTemplate): TransitionTemplateWire {
     after_beats: t.afterBeats,
     scalable: t.scalable,
     lanes: t.lanes as Record<string, unknown>,
+    beat_fx: t.beatFx && t.beatFx.steps.length > 0
+      ? (t.beatFx as unknown as Record<string, unknown>) : null,
   };
 }
 

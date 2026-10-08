@@ -1,39 +1,50 @@
 ---
 slug: sets
-draft: true
 title: Plan and play a Set
-summary: Arrange Tracks, choose the saved moves between them, and use the Conductor to play the plan or hand control back to you.
-order: 6
-related: [curate, editor, perform]
+summary: Arrange Tracks, pin moves, inspect the plan and hand off Conductor playback.
+order: 7
+related: [curate, editor, perform, capture]
 shot: set-motion
 clip: set
-caption: Set playback advances through the plan while the Conductor drives the shared Decks.
+caption: Conductor playback advances through a Set on the shared Decks and Mixer.
 ---
 
-## Arrange Tracks and pin moves {#planning}
+## Create and arrange {#planning}
 
-Click **+ New… → Set** in the sidebar and enter a name. Drag Library Tracks onto the Set, or right-click a Playlist and choose **New set from playlist** to copy its Play order. That copy is independent of later Playlist edits.
+In the Library sidebar choose **+ New… → Set**, enter a name and press **Enter** or **✓**. Drag Library Tracks onto the Set's sidebar row or into its detail pane. Existing entries are skipped. A Set is distinct from a Playlist: a Playlist preserves curatorial Play order for Export; a Set records playable handovers. A Set's context menu includes **Create playlist from set** when you need a Playlist copy.
 
-Open the Set and drag rows to arrange them. Each gap between neighboring Tracks is an adjacency. Open its pin picker to choose a saved Transition, a specific Take, or **Hard-cut**.
+Click the Set to open its ordered rows and the **Overview ladder**. Drag entries to reorder; click to select, Shift-click a range, Cmd/Ctrl-click to toggle, then Delete/Backspace to remove. The row menu also has **Move track(s)** → **Move here** and **Remove from set**. **+** between entries opens suggestions for insertion; **+ suggest a track** at the end appends. Suggestions change the order, not the pin for a boundary. A broken adjacency's pin goes dormant and returns if that ordered pair becomes adjacent again in the same Set.
 
-- **Unresolved** uses the pair's best saved Transition at plan time: Favorite first, otherwise most recently edited. Without one, it cuts.
-- **Auto-fill** freezes available auto-resolved Transition choices as pins. It does not choose Takes.
-- **Resolve from evidence** previews Take choices for remaining unresolved gaps; review the short Takes and remaining cuts before confirming.
+![Set order, pin chips and overview ladder.](../../shots/help-editor-set-pins.webp)
 
-A pin stays fixed when other Transitions are saved. Reordering keeps broken adjacency pins Dormant; restoring that ordered pair restores its pin. To edit a move, open it in the [Mix editor](../editor/index.html#editing).
+*Each boundary shows its current pin and evidence count; a Routine spans multiple consecutive entries.*
 
-For longer choreography, the picker can offer a Routine matching the next group of Tracks. A Cameo belongs to its host entry and brings in a guest without adding another step to the Set order.
+## Choose the move at each boundary {#pins}
 
-## Play and inspect the plan {#playback}
+Click an adjacency pin chip to open its picker. The chip shows the effective move and the evidence counts (**tr** saved Transitions, **tk** Takes). Hover warning marks to inspect plan problems.
 
-Click **Play set**. The **Conductor** loads Tracks and performs the pinned moves on the shared Decks and Mixer. The first Track starts at its beginning. A hard cut waits for the outgoing Track to end, then starts the incoming at Hot Cue 1, or its beginning if that cue is unset.
+| Picker choice | Plan effect |
+| --- | --- |
+| **Unpin (auto-resolve from the library)** | Use the pair's favorite saved Transition, otherwise the most recently edited; with none, hard-cut. New saved Transitions can change this choice. Takes never auto-resolve. |
+| Saved **Transition** | Pin this specific saved move, unaffected by saving another one for the pair. |
+| Specific **Take** | Deliberately pin the idealized interpretation of that evidence; it has not been promoted to a Transition. |
+| **✂ hard cut** | Force a cut even if Transitions exist. |
+| Matching **Routine** | Cover the matching consecutive cast entries rather than only a pair. The picker may also offer Routine evidence/candidates. |
 
-Click the **Overview ladder** to seek, including into a Transition. Use the Set transport to pause or resume; Stop pauses the Decks. Zoom or pan the ladder to inspect a handover, and hover warning badges for plan problems.
+**↳ pin** freezes an auto-resolved Transition. **Auto-fill** freezes available auto-resolved Transitions in bulk and does not pin Takes. **Resolve from evidence** previews suggested Take pins for unresolved gaps plus remaining hard cuts; inspect short **⚠ chop** Takes before **Pin N Takes**. An **unpracticed** marker means the pair has neither saved Transition nor Take, not necessarily that its pin is unresolved. A Cameo is a separate guest pin on a host Track entry; it does not add a step to the Set order.
 
-Choose **Riding** to let incoming Tracks ease back to native tempo between handovers, or **Fixed** to set one BPM for the Set. Overlapping handovers can shorten a departing Track with a Grace fade; inspect and listen to flagged overlaps.
+Use a boundary's **⋈** to open it in the [Mix editor](../editor/index.html#editing). **◉ Practice this handover** stops the Conductor and cues the pair on Decks A/B for a manual mix; pressing it again re-cues. Merely opening practice does not create a Take: a qualifying live handover must occur and settle.
 
-## Take over and pick up {#takeover}
+## Play and inspect {#playback}
 
-Move any live Deck or Mixer control to stop the Conductor's automation. The Decks keep playing, and you are mixing live. Take capture resumes at takeover; automated Set playback itself does not create Takes.
+Press **▶ Play set** to start the Conductor on the shared Decks and Mixer. Its **⏸ Playing** control pauses; **⏹** stops and pauses the Decks. A row's hover **▶** starts at that entry. Click the Overview ladder to seek, including into a handover: if idle this starts playback there; during a run it retains the current play/pause state. Horizontal wheel pans; vertical wheel zooms. **⌖** toggles follow-playback; manual scrolling disengages follow. **▤** hides the ladder without stopping playback.
 
-Click **Pick up** to resume the plan when the live Deck state matches it. If unavailable, hover for the reason. A misaligned blend may need its stray Deck faded out first. Pick up during an unfinished Handover abandons that in-flight capture rather than completing a Take by machine.
+![Conductor playing the first entry of a planned Set.](../../shots/help-editor-set-playback.webp)
+
+*Conductor playing from the Set; warning chips mark plan conditions to inspect.*
+
+The first Track starts at its beginning. Without an applicable Transition, a boundary cuts after the outgoing Track ends and starts the incoming at Hot Cue 1, or at its beginning. A pinned Take plays its vectorized rendition, not raw recorded events. The header **Riding** / **Fixed · N BPM** chip chooses tempo policy: Riding returns Tracks toward native tempo between handovers; Fixed uses the editable **Set tempo** for the whole Set. Review **⚠ N** and adjacency warning tooltips for collisions, shortened tails or other plan flags.
+
+## Manual takeover and Pickup {#takeover}
+
+Moving a Conductor-driven Deck or Mixer control stops automation and leaves the Decks sounding for live mixing. This differs from **⏹ Stop**, which also pauses them. Capture resumes after manual takeover; machine-controlled Set playback does not generate Takes. **⤴ Pick up** resumes the plan from live state only when it maps cleanly; hover an unlit control for the reason (for example a Track outside the Set or a misaligned blend). Fade a stray Deck before retrying. Current Pickup state matching is limited to A/B even though Conductor playback may use C/D; do not count on four-Deck Pickup. Changes to Set order, pins or Transition edits can re-plan an active run.

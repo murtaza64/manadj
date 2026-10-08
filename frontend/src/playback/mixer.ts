@@ -449,13 +449,14 @@ export class Mixer {
   private cueMix = CUE_MIX_DEFAULT; // 0 (cue only) .. 1 (master only)
   /** The one Beat FX section mirrored by the GRV6 controls: SELECT swaps
    * the live effect, CH SELECT picks one A–D/SP/MST target, ON/OFF gates it,
-   * LEVEL/DEPTH is a bipolar -1..1 balance coordinate (center 0), and the
-   * echo beat fraction is global. */
+   * LEVEL/DEPTH is a bipolar -1..1 balance coordinate (-1 = dry, 0 = balanced,
+   * +1 = wet; starts and resets fully dry), and the echo beat fraction is
+   * global. */
   private beatFxSection: BeatFxSectionState = {
     selected: 'echo',
     target: 'A',
     on: false,
-    depth: 0,
+    depth: -1,
     beats: ECHO_BEATS_DEFAULT,
   };
   /** MST has no Deck of its own; retain the last 1–4 target as its tempo
@@ -1267,6 +1268,27 @@ export class Mixer {
     this.ensure();
     for (const channel of CHANNEL_IDS) this.applyBeatFx(channel);
     this.applyMasterBeatFx();
+  }
+
+  /** Write the whole section at once (#351: Session replay applies logged
+   * snapshots verbatim). One notify; a null SELECT forces OFF. */
+  setBeatFxSection(state: Readonly<BeatFxSectionState>): void {
+    const next = { ...state, on: state.selected === null ? false : state.on };
+    const cur = this.beatFxSection;
+    if (cur.selected === next.selected && cur.target === next.target && cur.on === next.on
+      && cur.depth === next.depth && cur.beats === next.beats) return;
+    if (CHANNEL_IDS.includes(next.target as ChannelId)) {
+      this.beatFxTempoChannel = next.target as ChannelId;
+    }
+    this.beatFxSection = next;
+    this.notify('beatFx');
+    this.ensure();
+    for (const channel of CHANNEL_IDS) {
+      this.applyBeatFx(channel);
+      this.applyBeatFxTiming(channel);
+    }
+    this.applyMasterBeatFx();
+    this.applyMasterBeatFxTiming();
   }
 
   /** BEAT ◄ ► — walk the echo's beat-fraction ladder (beatFx.ts). */

@@ -152,7 +152,7 @@ it('drags, scrolls and double-click-resets the DEPTH knob', () => {
   act(() => dial.dispatchEvent(new PointerEvent('pointerup', { pointerId: 1, bubbles: true })));
   expect(setBeatFxDepth.mock.calls.at(-1)![0]).toBeGreaterThan(0);
   act(() => dial.dispatchEvent(new MouseEvent('dblclick', { bubbles: true })));
-  expect(setBeatFxDepth).toHaveBeenLastCalledWith(0);
+  expect(setBeatFxDepth).toHaveBeenLastCalledWith(-1);
 });
 
 it('labels the length in bars while the Flanger is selected (#331)', () => {

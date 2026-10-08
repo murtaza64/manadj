@@ -435,6 +435,7 @@ class TransitionTemplate(Base):
     after_beats = Column(Integer, nullable=False)
     scalable = Column(Boolean, nullable=False, default=False, server_default="0")
     lanes_json = Column(Text, nullable=False)  # sparse normalized lanes (opaque)
+    beat_fx_json = Column(Text, nullable=True)  # Beat FX track (#353; opaque)
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
 

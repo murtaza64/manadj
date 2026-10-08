@@ -25,6 +25,7 @@ import type {
 } from '../api/client';
 import { DEFAULT_DETECTOR_PARAMS, DETECTOR_VERSION } from '../capture/events';
 import { DECK_COLORS } from '../theme/deckColors';
+import { BEAT_FX_COLORS, fxDepthOpacity } from '../theme/fxColors';
 import { requestTakeReview } from '../capture/takeReview';
 import { pairEditorFallback, requestPairTakeEdit } from '../routines/openMix';
 import { useDecks } from '../hooks/useDeck';
@@ -54,7 +55,7 @@ import {
   takeSpanPair,
   traceWindow,
 } from './timelineModel';
-import type { CollapseCandidate, StateAtT, TakeSpanRef, TimeAxis, TimelineModel } from './timelineModel';
+import type { CollapseCandidate, FxSpan, StateAtT, TakeSpanRef, TimeAxis, TimelineModel } from './timelineModel';
 import { REARM_AFTER_MS, followScrollTarget } from './followScroll';
 import { useViewActive } from '../contexts/viewActive';
 import { getTimelineViewState, patchTimelineViewState } from './timelineViewState';
@@ -110,6 +111,10 @@ const CANVAS_MARGIN = 160;
 
 // ── Formatting ──────────────────────────────────────────────────────────
 
+/** Take replay (#351) starts this far before the window: the outgoing's
+ * lead-in, so the entry is heard in context. */
+const TAKE_REPLAY_LEAD_S = 4;
+
 function fmtClock(s: number): string {
   const abs = Math.abs(s);
   const h = Math.floor(abs / 3600);
@@ -123,6 +128,16 @@ function fmtClock(s: number): string {
 function fmtDur(s: number): string {
   if (s < 90) return `${Math.round(s)}s`;
   return `${Math.round(s / 60)}m`;
+}
+
+/** Beat FX length readout (MixerStrip parity): 0.5 → "1/2". */
+function fmtFxLength(beats: number, unit: 'beats' | 'bars' | null): string {
+  const frac: Record<number, string> = { 0.25: '1/4', 0.5: '1/2', 0.75: '3/4' };
+  return `${frac[beats] ?? String(beats)}${unit === 'bars' ? ' bar' : unit === 'beats' ? 'b' : ''}`;
+}
+
+function fmtFxDepth(depth: number): string {
+  return `${depth > 0 ? '+' : ''}${depth.toFixed(2)}`;
 }
 
 function fmtWhen(iso: string): string {
@@ -1125,6 +1140,16 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusFlash, f
         ) : null}
         {selection.kind === 'take' ? (
           <span className="stl-cluster">
+            {!replayHere ? (
+              <button
+                className="btn btn-success"
+                aria-label="Replay take"
+                title="Replay this Take exactly as performed (scratches, Beat FX) through the shared decks — any manual gesture takes over"
+                onClick={() => replayFrom(Math.max(0, selection.take.window_start_s - TAKE_REPLAY_LEAD_S))}
+              >
+                ▶ take
+              </button>
+            ) : null}
             <button
               className="btn btn-primary"
               onClick={() => {
@@ -2327,6 +2352,19 @@ function DeckLane({
           })()
         : null}
 
+      {/* Beat FX (#354): a thin effect-coloured band along the lane top
+          while the section was ON for this deck (or Master — Master FX
+          bands every lane). Opacity follows LEVEL/DEPTH step by step. */}
+      {model.fxSpans.map((sp, i) => {
+        if (sp.target !== deck && sp.target !== 'master') return null;
+        const x0 = X(sp.start);
+        const x1 = Math.max(X(sp.end), x0 + 2);
+        if (x1 < viewX0 || x0 > viewX1) return null;
+        return (
+          <FxBand key={`fx-${i}`} span={sp} y={y} X={X} x0={x0} x1={x1} showLabel={showDetailMarks && (sp.target !== 'master' || deck === LANE_ORDER[0])} />
+        );
+      })}
+
       {/* Held loops: a bracket bar along the lane top. Detail-gated with
           the other marks — sub-4px brackets at overview zoom are noise. */}
       {showDetailMarks
@@ -2361,6 +2399,60 @@ function DeckLane({
             );
             return points ? `M${points.replaceAll(' ', 'L')}` : '';
           }).join('')} /> : null}
+    </g>
+  );
+}
+
+const FX_BAND_H = 5;
+
+/** One Beat FX span on a lane: a rect per envelope step (opacity = depth)
+ * plus, at detail zoom, the effect + length at the span head. */
+function FxBand({
+  span,
+  y,
+  X,
+  x0,
+  x1,
+  showLabel,
+}: {
+  span: FxSpan;
+  y: number;
+  X(t: number): number;
+  x0: number;
+  x1: number;
+  showLabel: boolean;
+}) {
+  const color = BEAT_FX_COLORS[span.effect];
+  const head = span.steps[0];
+  const target = span.target === 'master' ? 'Master' : span.target;
+  return (
+    <g className="stl-fx" data-testid={`stl-fx-${span.target}-${span.effect}`}>
+      <title>
+        {`${span.effect} → ${target} · ${fmtClock(span.start)}–${fmtClock(span.end)} (${fmtDur(span.end - span.start)})${span.open ? ' · still on at log end' : ''}\n` +
+          span.steps.map((st) => `${fmtClock(st.t)} depth ${fmtFxDepth(st.depth)} · ${fmtFxLength(st.beats, span.lengthUnit)}`).join('\n')}
+      </title>
+      {span.steps.map((st, k) => {
+        const next = span.steps[k + 1];
+        const sx0 = k === 0 ? x0 : X(st.t);
+        const sx1 = next ? X(next.t) : x1;
+        return (
+          <rect
+            key={k}
+            x={sx0}
+            y={y + 1}
+            width={Math.max(sx1 - sx0, k === 0 ? 2 : 0)}
+            height={FX_BAND_H}
+            fill={color}
+            opacity={fxDepthOpacity(st.depth)}
+          />
+        );
+      })}
+      {showLabel && x1 - x0 > 28 ? (
+        <text x={x0 + 2} y={y + 15} fill={color} className="stl-fx-label">
+          {span.effect.toUpperCase()}
+          {span.target === 'master' ? ' MST' : ''} {fmtFxLength(head.beats, span.lengthUnit)}
+        </text>
+      ) : null}
     </g>
   );
 }
@@ -2428,6 +2520,19 @@ function InlineReadout({
           </span>
         );
       })}
+      {state.beatFx && state.beatFx.on && state.beatFx.selected !== null ? (
+        <span
+          className="stl-fx-readout"
+          style={{ color: BEAT_FX_COLORS[state.beatFx.selected] }}
+          title="Beat FX section at this moment: effect → target · LEVEL/DEPTH · length"
+        >
+          FX
+          <i>
+            {state.beatFx.selected} → {state.beatFx.target === 'master' ? 'MST' : state.beatFx.target} ·{' '}
+            {fmtFxDepth(state.beatFx.depth)} · {fmtFxLength(state.beatFx.beats, state.beatFx.selected === 'flanger' ? null : 'beats')}
+          </i>
+        </span>
+      ) : null}
       {state.tenureHolder ? <em>{state.tenureHolder} holds</em> : null}
     </span>
   );

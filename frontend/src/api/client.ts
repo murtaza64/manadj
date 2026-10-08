@@ -57,6 +57,8 @@ export interface TransitionTemplateWire {
   after_beats: number;
   scalable: boolean;
   lanes: Record<string, unknown>;
+  /** Beat FX track (#353; opaque TransitionBeatFx), null = none. */
+  beat_fx?: Record<string, unknown> | null;
 }
 
 // Backend URL: VITE_API_URL when set (scripts/dev.py injects it); dev/test

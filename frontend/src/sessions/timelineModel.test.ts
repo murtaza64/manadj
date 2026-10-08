@@ -6,6 +6,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import type { CaptureEvent } from '../capture/events';
+import type { BeatFxSectionState } from '../playback/beatFx';
 import {
   COLLAPSED_MARKER_PX,
   buildTimeAxis,
@@ -271,6 +272,47 @@ describe('deriveTimeline', () => {
     expect(m.eventCount).toBe(0);
     expect(m.decks.A.controlSteps.fader).toEqual([]);
     expect(m.decks.A.audibleSpans).toEqual([]);
+    expect(m.fxSpans).toEqual([]);
+  });
+});
+
+describe('deriveTimeline Beat FX spans (#354)', () => {
+  const off: BeatFxSectionState = { selected: 'echo', target: 'A', on: false, depth: 0, beats: 0.5 };
+  const fx = (t: number, patch: Partial<BeatFxSectionState>): CaptureEvent => ({ t, kind: 'beatFx', ...off, ...patch });
+
+  it('echo toggled on deck A for 4 s is a 4 s echo span on A', () => {
+    const m = deriveTimeline([...seed(0), fx(0, {}), fx(10, { on: true }), fx(14, {}), { t: 20, kind: 'tick', playheads: {} }]);
+    expect(m.fxSpans).toEqual([
+      { start: 10, end: 14, target: 'A', effect: 'echo', lengthUnit: 'beats', steps: [{ t: 10, depth: 0, beats: 0.5 }], open: false },
+    ]);
+  });
+
+  it('depth/length moves extend the envelope; effect or target changes split the span', () => {
+    const m = deriveTimeline([
+      ...seed(0),
+      fx(1, { on: true }),
+      fx(2, { on: true, depth: 0.5 }),
+      fx(2, { on: true, depth: 0.6 }),
+      fx(3, { on: true, depth: 0.6, beats: 1 }),
+      fx(4, { on: true, depth: 0.6, beats: 1, selected: 'reverb' }),
+      fx(5, { on: true, depth: 0.6, beats: 1, selected: 'reverb', target: 'master' }),
+      { t: 8, kind: 'tick', playheads: {} },
+    ]);
+    expect(m.fxSpans.map(({ start, end, target, effect, open }) => ({ start, end, target, effect, open }))).toEqual([
+      { start: 1, end: 4, target: 'A', effect: 'echo', open: false },
+      { start: 4, end: 5, target: 'A', effect: 'reverb', open: false },
+      { start: 5, end: 8, target: 'master', effect: 'reverb', open: true },
+    ]);
+    expect(m.fxSpans[0].steps).toEqual([
+      { t: 1, depth: 0, beats: 0.5 },
+      { t: 2, depth: 0.6, beats: 0.5 },
+      { t: 3, depth: 0.6, beats: 1 },
+    ]);
+  });
+
+  it('no span while ON with nothing selected, and none for pre-#351 logs', () => {
+    expect(deriveTimeline([...seed(0), fx(1, { on: true, selected: null }), fx(3, {})]).fxSpans).toEqual([]);
+    expect(deriveTimeline([...seed(0), { t: 9, kind: 'tick', playheads: {} }]).fxSpans).toEqual([]);
   });
 });
 

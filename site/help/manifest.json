@@ -1,25 +1,55 @@
 [
   {
     "slug": "start",
-    "title": "Getting started",
+    "title": "First run and returning to Setup",
     "anchors": [
       "main",
+      "welcome",
       "setup",
       "rekordbox",
       "tracks-directory",
+      "cue-mode",
+      "accounts",
+      "controller-check",
+      "relaunch",
       "tour",
       "tutorials"
     ]
   },
   {
+    "slug": "acquire",
+    "title": "Acquire Tracks",
+    "anchors": [
+      "main",
+      "prepare",
+      "soundcloud",
+      "review",
+      "download",
+      "soulseek"
+    ]
+  },
+  {
     "slug": "curate",
-    "title": "Library & tagging",
+    "title": "Curate the Library",
     "anchors": [
       "main",
       "importing",
+      "edit-track",
       "tags",
+      "tag-structure",
+      "filters",
       "playlists",
       "archive"
+    ]
+  },
+  {
+    "slug": "analysis",
+    "title": "Analyze Tracks and set cues",
+    "anchors": [
+      "main",
+      "automatic-analysis",
+      "reanalyze",
+      "cues"
     ]
   },
   {
@@ -30,9 +60,63 @@
       "clip-perform-caption",
       "keyboard",
       "loading",
+      "cues",
       "mixer",
       "mouse-jog",
       "stems"
+    ]
+  },
+  {
+    "slug": "controllers",
+    "title": "Controllers",
+    "anchors": [
+      "main",
+      "check",
+      "mapping",
+      "jog-calibration",
+      "troubleshooting"
+    ]
+  },
+  {
+    "slug": "audio",
+    "title": "Audio and Cue mode",
+    "anchors": [
+      "main",
+      "outputs",
+      "pfl",
+      "cue-mode"
+    ]
+  },
+  {
+    "slug": "beat-fx",
+    "title": "Beat FX and filters",
+    "anchors": [
+      "main",
+      "effects",
+      "controller-fx",
+      "filters"
+    ]
+  },
+  {
+    "slug": "follow",
+    "title": "Follow loaded Tracks",
+    "anchors": [
+      "main",
+      "start-follow",
+      "parameters",
+      "evidence",
+      "temperature"
+    ]
+  },
+  {
+    "slug": "capture",
+    "title": "Review Sessions and Takes",
+    "anchors": [
+      "main",
+      "sessions",
+      "timeline",
+      "takes",
+      "routine-evidence"
     ]
   },
   {
@@ -42,9 +126,36 @@
       "main",
       "clip-editor-caption",
       "editing",
+      "blank-mix",
+      "modes",
+      "automation",
       "audition",
       "promote",
-      "blank-mix"
+      "saving"
+    ]
+  },
+  {
+    "slug": "sets",
+    "title": "Plan and play a Set",
+    "anchors": [
+      "main",
+      "clip-set-caption",
+      "planning",
+      "pins",
+      "playback",
+      "takeover"
+    ]
+  },
+  {
+    "slug": "sync",
+    "title": "Compare and Sync libraries",
+    "anchors": [
+      "main",
+      "inspect",
+      "import-choices",
+      "performance-data",
+      "external-writes",
+      "playlists"
     ]
   }
 ]

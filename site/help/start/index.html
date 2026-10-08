@@ -4,8 +4,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Getting started — manadj</title>
-  <meta name="description" content="Run Setup, import tracks, and open Tours or Tutorials.">
+  <title>First run and returning to Setup — manadj</title>
+  <meta name="description" content="Complete or skip optional guides, resume later, and relaunch one guide without resetting the Library.">
   <link rel="icon" href="../../assets/logo.png">
   <link rel="preload" href="../../assets/fonts/UbuntuMono-Regular.ttf" as="font" type="font/ttf" crossorigin>
   <link rel="preload" href="../../assets/fonts/UbuntuMono-Bold.ttf" as="font" type="font/ttf" crossorigin>
@@ -29,10 +29,19 @@
         <summary>Help articles</summary>
         <nav aria-label="Help articles">
           <a href="../../help/index.html">All articles</a>
-          <a href="../../help/start/index.html" aria-current="page">Getting started</a>
-          <a href="../../help/curate/index.html">Library &amp; tagging</a>
+          <a href="../../help/start/index.html" aria-current="page">First run and returning to Setup</a>
+          <a href="../../help/acquire/index.html">Acquire Tracks</a>
+          <a href="../../help/curate/index.html">Curate the Library</a>
+          <a href="../../help/analysis/index.html">Analyze Tracks and set cues</a>
           <a href="../../help/perform/index.html">Keyboard DJing</a>
+          <a href="../../help/controllers/index.html">Controllers</a>
+          <a href="../../help/audio/index.html">Audio and Cue mode</a>
+          <a href="../../help/beat-fx/index.html">Beat FX and filters</a>
+          <a href="../../help/follow/index.html">Follow loaded Tracks</a>
+          <a href="../../help/capture/index.html">Review Sessions and Takes</a>
           <a href="../../help/editor/index.html">Mix editor</a>
+          <a href="../../help/sets/index.html">Plan and play a Set</a>
+          <a href="../../help/sync/index.html">Compare and Sync libraries</a>
         </nav>
       </details>
     </aside>
@@ -40,52 +49,92 @@
       <article>
         <header class="help-heading">
           <a class="kicker" href="../index.html">Help manual</a>
-          <h1>Getting started</h1>
-          <p>Run Setup, import tracks, and open Tours or Tutorials.</p>
+          <h1>First run and returning to Setup</h1>
+          <p>Complete or skip optional guides, resume later, and relaunch one guide without resetting the Library.</p>
         </header>
         <details class="help-toc" open>
           <summary>On this page</summary>
           <nav aria-label="On this page"><div class="toc">
 <ul>
-<li><a href="#setup">Setup</a></li>
-<li><a href="#rekordbox">Rekordbox</a></li>
-<li><a href="#tracks-directory">Tracks directory</a></li>
+<li><a href="#welcome">Welcome and progress</a><ul>
+<li><a href="#rekordbox">Rekordbox and the music folder</a></li>
+<li><a href="#cue-mode">Cue mode and accounts</a></li>
+<li><a href="#controller-check">Check the sound path</a></li>
+</ul>
+</li>
+<li><a href="#relaunch">Relaunch without wiping anything</a></li>
 <li><a href="#tour">Tours</a></li>
 <li><a href="#tutorials">Tutorials</a></li>
 </ul>
 </div>
 </nav>
         </details>
-        <div class="prose help-prose"><h2 id="setup">Setup</h2>
-<ol>
-<li>Install manaDJ using the <a href="../../install.html#macos">install guide</a>; follow its <a href="../../install.html#welcome">Setup steps</a> for accounts and audio.</li>
-<li>On first launch, choose <strong>Get started</strong>. Every step is optional.</li>
-<li><strong>Finish later</strong> saves progress. Resume under <strong>Settings → Help → Setup</strong>, or choose <strong>Run setup again</strong>.</li>
-</ol>
-<h2 id="rekordbox">Rekordbox</h2>
-<ol>
-<li>Open <strong>Rekordbox import</strong>, review the collection, then <strong>Import new tracks</strong>. <strong>Keep my genres</strong> imports genres as Tags.</li>
-<li>If nothing appears, open Rekordbox and <strong>Look again</strong>. Reconnect missing music drives. Keep manaDJ open during import.</li>
-</ol>
-<h2 id="tracks-directory">Tracks directory</h2>
-<ol>
-<li><strong>Choose folder…</strong>, then <strong>Save &amp; scan folder</strong>. In a browser, paste the full path. <strong>Use folder without scanning</strong> saves only the location.</li>
-</ol>
-<p>Audio stays in place; existing tracks are skipped. After a connection error, use <strong>Check progress</strong>.</p>
+        <div class="prose help-prose"><p>For downloads, operating-system opening instructions, updates and uninstall, use the <a href="../../install.html">install guide</a>. This page starts <strong>after launching</strong> manaDJ.</p>
+<h2 id="welcome">Welcome and progress</h2>
+<p><span id="setup"></span></p>
+<p>An empty Library with Welcome not yet completed or skipped opens <strong>Welcome</strong> on first run. <strong>Get started</strong> opens a sequence of optional guides; <strong>Skip setup</strong> closes it. Each guide offers <strong>Finish later</strong>, checkpointing progress. A partially completed first run shows <strong>Welcome back → Resume setup</strong> on return. Finishing the sequence with <strong>Open manaDJ</strong> closes Setup and lets the Tour start. The Tour points at UI; it does not import Tracks or configure accounts. A populated Library does not show first-run Welcome again just because you relaunch the app.</p>
+<table>
+<thead>
+<tr>
+<th>Guide, in order</th>
+<th>What to choose</th>
+<th>Later location</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Rekordbox import</strong></td>
+<td>Preview a local Rekordbox library; choose new Tracks or missing details, or skip.</td>
+<td>Sync → Rekordbox import</td>
+</tr>
+<tr>
+<td><strong>Tracks directory</strong></td>
+<td>Choose the music folder and scan it, use it without scanning, or skip.</td>
+<td>Settings → Library → Tracks directory</td>
+</tr>
+<tr>
+<td><strong>Cue mode</strong></td>
+<td>Gated or Trigger for paused-Deck Hot Cues.</td>
+<td>PERFORM → GATED/TRIGGER toggle</td>
+</tr>
+<tr>
+<td><strong>SoundCloud</strong></td>
+<td>Connect an account for the Acquisition tab.</td>
+<td>Settings → Accounts → SoundCloud</td>
+</tr>
+<tr>
+<td><strong>Soulseek</strong></td>
+<td>Optional download supplier connection.</td>
+<td>Settings → Accounts → Soulseek</td>
+</tr>
+<tr>
+<td><strong>Controller check</strong></td>
+<td>Check Master/Cue output pairs, test tones and controller mapping.</td>
+<td>Settings → Help → Setup</td>
+</tr>
+</tbody>
+</table>
+<h3 id="rekordbox">Rekordbox and the music folder</h3>
+<p><span id="tracks-directory"></span></p>
+<p>The Rekordbox guide previews Track/cue/grid/Key/MyTag/Genre/Playlist counts before import. <strong>Keep my genres</strong> is initially checked. Choose <strong>Import N new tracks</strong>, <strong>Fill in missing library details</strong>, <strong>Continue without importing</strong>, or <strong>Skip for now</strong> as offered by the preview. The import reads Rekordbox and creates/fills Library records in place; it does not move audio or write back to Rekordbox. Loops and some memory cues are not imported: read the skipped counts. Keep manaDJ running until progress completes; <strong>Continue setup while importing</strong> advances the guide without stopping its background job.</p>
+<p>In <strong>Tracks directory</strong>, choose a folder in the desktop app (or enter its full path in the browser). <strong>Save &amp; scan folder</strong> recursively adds supported audio without copying it; <strong>Use folder without scanning</strong> configures the folder for later scans and downloads. <strong>Continue setup while scanning</strong> advances while that scan runs; keep the app open. If you skipped both imports, you can still <a href="../curate/index.html#importing">drop files into the desktop Library</a> later.</p>
+<h3 id="cue-mode">Cue mode and accounts</h3>
+<p><strong>Gated</strong> (default): holding a Hot Cue on a paused Deck previews it; releasing stops and returns. <strong>Trigger</strong>: pressing starts playback and releasing continues. On a playing Deck, Hot Cues jump regardless of this setting. The Main Cue retains its own hold behavior. Change the choice later with the <strong>GATED/TRIGGER</strong> control in Performance.</p>
+<p id="accounts">To connect SoundCloud, sign in at soundcloud.com in a browser and copy the <strong>oauth_token</strong> cookie from developer tools (<strong>Application/Storage → Cookies → https://soundcloud.com</strong>). Paste it into the guide, choose <strong>Connect</strong>, check account/likes, then <strong>Done</strong>. It only establishes the account: choose <strong>↻ Refresh likes</strong> in <a href="../acquire/index.html#review">Acquisition</a> to fetch items. For the browser-specific cookie-opening keys and safety notes, use <a href="../../install.html#soundcloud">install → SoundCloud</a>. For Soulseek, enter username/password and <strong>Connect</strong>, wait for <strong>Connected to Soulseek</strong>, then <strong>Done</strong>; a new username creates an account on first login. Either account guide may be skipped.</p>
+<h3 id="controller-check">Check the sound path</h3>
+<p>Choose <strong>Master</strong> for speakers and optionally <strong>Cue</strong> for headphones (<strong>Off</strong> initially). Pick explicit output pairs when necessary; use each <strong>Test tone</strong> before relying on headphone cueing. Connect a MIDI controller and inspect its Mapping: <strong>No Mapping</strong> means it cannot control manaDJ. Test mapped controls; <strong>Calibrate jog wheels</strong> appears only for supported mappings. Choose <strong>Done</strong> or <strong>Skip</strong>. No hardware is required to finish Setup.</p>
+<h2 id="relaunch">Relaunch without wiping anything</h2>
+<p>Open <strong>Settings → Help → Setup</strong>. Each guide shows <strong>Done</strong>, <strong>Skipped</strong>, or <strong>Not started</strong>; <strong>Open/Start</strong> runs that guide on its own. <strong>Run setup again</strong> replays the sequence but keeps Library, accounts and settings; a previously Done guide is not demoted just because you skip its replay. <strong>Resume setup</strong> continues a saved first-run journey. There is no reset-to-empty-Library button. <strong>Settings → Help → Tour → Reset tour progress</strong> affects only the Tour, not Setup. For a specific import or Sync write after setup, use <a href="../sync/index.html">Sync</a> rather than replaying the whole sequence.</p>
 <h2 id="tour">Tours</h2>
-<ol>
-<li>Open <strong>? → Tours — look around</strong> to locate controls.</li>
-</ol>
+<p>Use <strong>? → Tours — look around</strong> for coach marks. These point out controls without changing Library state.</p>
 <h2 id="tutorials">Tutorials</h2>
-<ol>
-<li>Choose <strong>? → Tutorials — learn by doing</strong>; perform each requested action. Tutorial Library edits are real. Replay under <strong>Settings → Help → Tutorials</strong>.</li>
-</ol></div>
+<p>Use <strong>? → Tutorials — learn by doing</strong> for action-based lessons; the edits you make are real Library edits. Replay under <strong>Settings → Help → Tutorials</strong>.</p></div>
         <nav class="help-related" aria-label="Related articles">
           <h2>Related articles</h2>
           <ul class="help-cards">
-            <li><a href="../curate/index.html"><strong>Library &amp; tagging</strong><span>Browse tracks, assign Tags and Energy, and arrange Playlists.</span></a></li>
-            <li><a href="../perform/index.html"><strong>Keyboard DJing</strong><span>Load Decks and use keyboard, mouse, or controller controls.</span></a></li>
-            <li><a href="../editor/index.html"><strong>Mix editor</strong><span>Edit timelines, audition changes, and promote reviewed Takes.</span></a></li>
+            <li><a href="../curate/index.html"><strong>Curate the Library</strong><span>Import Tracks, assign Tags and Energy, filter, build Playlists, and archive rejects.</span></a></li>
+            <li><a href="../acquire/index.html"><strong>Acquire Tracks</strong><span>Review SoundCloud likes, match existing Tracks, queue downloads, and inspect failures.</span></a></li>
+            <li><a href="../perform/index.html"><strong>Keyboard DJing</strong><span>Choose a Deck, load a Track, and perform with the two-hand keyboard and mouse controls.</span></a></li>
           </ul>
         </nav>
       </article>

@@ -3,14 +3,17 @@
 Session audibility — running transport or preview (or filtered scratch motion
 while touched) AND not EQ-full-killed AND not
 filter-killed AND Master-bus gain (trim x channel fader x crossfader) at or
-above the audible threshold; PFL-only is invisible — ported
-from the frontend seam and replayed over a persisted Session event stream.
+above the audible threshold; PFL-only is invisible; OR a ringing Beat FX
+echo/reverb tail (#355) — ported from the frontend seam and replayed over a
+persisted Session event stream.
 
 KEPT IN LOCKSTEP with:
   - frontend/src/capture/audibility.ts (the definition)
   - frontend/src/playback/mixerMath.ts (the gain curves)
   - frontend/src/capture/detector.ts   (fresh-deck defaults, event replay)
   - frontend/src/capture/events.ts     (DEFAULT_DETECTOR_PARAMS thresholds)
+  - frontend/src/capture/fxTail.ts     (Beat FX tail length)
+  - frontend/src/capture/audibilityReducer.ts (Beat FX excitation/tails)
 
 Used by the sessions router to enforce the sessions-11 rule backend-side:
 no persisted Session whose event stream was 100% silent survives shutdown,
@@ -20,7 +23,7 @@ legacy/intermediate activation path opened on non-audible live events.
 """
 
 from collections.abc import Iterable
-from math import exp, expm1, isfinite
+from math import exp, expm1, floor, isfinite, log
 from typing import Any
 
 # DEFAULT_DETECTOR_PARAMS (events.ts) — the kill/audibility thresholds.
@@ -36,6 +39,13 @@ _TRIM_CENTER_DB = -6.0
 _TRIM_RANGE_DB = 12.0
 
 _ALL_DECKS = ("A", "B", "C", "D")
+
+# playback/beatFx.ts + beatFxSettings.ts defaults (Beat FX tails, #355).
+_BEAT_SECONDS_DEFAULT = 0.5
+_MIN_ECHO_DELAY_S = 0.01
+_MAX_ECHO_DELAY_S = 10.0
+_DEFAULT_ECHO_FEEDBACK = 0.5
+_DEFAULT_REVERB_DECAY = 2.5
 
 
 def _clamp01(v: float) -> float:
@@ -81,7 +91,44 @@ def _fresh_deck() -> dict[str, Any]:
         "eq_mid": 0.5,
         "eq_high": 0.5,
         "filter": 0.0,
+        "pitch": 0.0,
+        "bpm": None,
+        # Beat FX (#355): the exciting voicing (effect, beats, master) and a
+        # ringing tail (until, master).
+        "fx_excited": None,
+        "fx_tail": None,
     }
+
+
+def _beat_fx_wet(depth: float) -> float:
+    """beatFx.ts beatFxMixGains(...).wet."""
+    m = (max(-1.0, min(1.0, depth)) + 1) / 2
+    return min(1.0, 2 * m)
+
+
+def _deck_beat_seconds(bpm: Any, pitch: float) -> float:
+    """fxTail.ts deckBeatSeconds."""
+    if not isinstance(bpm, (int, float)) or not isfinite(bpm) or bpm <= 0:
+        return _BEAT_SECONDS_DEFAULT
+    rate = 1 + pitch / 100
+    return 60 / bpm / rate if rate > 0 else _BEAT_SECONDS_DEFAULT
+
+
+def _fx_tail_seconds(effect: str, beats: float, depth: float, settings: dict[str, Any],
+                     beat_seconds: float) -> float:
+    """fxTail.ts fxTailSeconds: echo = last repeat above the audible gain;
+    reverb = wet envelope (-60 dB at reverbDecay) crossing it."""
+    wet = _beat_fx_wet(depth)
+    if wet < AUDIBLE_GAIN or wet <= 0:
+        return 0.0
+    if effect == "echo":
+        delay = max(_MIN_ECHO_DELAY_S, min(_MAX_ECHO_DELAY_S, beats * beat_seconds))
+        fb = float(settings.get("echoFeedback", _DEFAULT_ECHO_FEEDBACK))
+        extra = floor(log(AUDIBLE_GAIN / wet) / log(fb)) if 0 < fb < 1 else 0
+        return (1 + max(0, extra)) * delay
+    decay = float(settings.get("reverbDecay", _DEFAULT_REVERB_DECAY))
+    tau = decay / log(1000)
+    return min(decay, tau * log(wet / AUDIBLE_GAIN))
 
 
 def _scratch_loop(deck: dict[str, Any]) -> dict[str, float] | None:
@@ -208,6 +255,51 @@ def events_contain_audible(events: Iterable[dict[str, Any]]) -> bool:
     crossfader = 0.0
     crossfader_enabled = True
     tenure_held = False
+    beat_fx: dict[str, Any] | None = None
+    beat_fx_settings: dict[str, Any] = {}
+
+    def fx_excitation(ch: str) -> tuple[str, float, bool] | None:
+        """audibilityReducer.ts fxExcitation (transport-gated, no previews)."""
+        fx = beat_fx
+        if not fx or not fx.get("on") or fx.get("selected") not in ("echo", "reverb"):
+            return None
+        master = fx.get("target") == "master"
+        if not master and fx.get("target") != ch:
+            return None
+        if _beat_fx_wet(float(fx.get("depth", 0))) < AUDIBLE_GAIN:
+            return None
+        deck = {**decks[ch], "previewing": False}
+        feeding = _deck_audible(deck, crossfader, crossfader_enabled,
+                                assignments[ch] if master else 0.0)
+        return (fx["selected"], float(fx.get("beats", 0.5)), master) if feeding else None
+
+    def update_fx_tails(t: float) -> None:
+        """audibilityReducer.ts updateFxTails."""
+        live = beat_fx is not None and bool(beat_fx.get("on"))
+        wet_dead = beat_fx is not None and _beat_fx_wet(float(beat_fx.get("depth", 0))) < AUDIBLE_GAIN
+        for ch, deck in decks.items():
+            excited = fx_excitation(ch) if live else None
+            if excited:
+                deck["fx_tail"] = None
+            elif deck["fx_excited"]:
+                effect, beats, master = deck["fx_excited"]
+                depth = float(beat_fx.get("depth", -1)) if beat_fx else -1.0
+                seconds = _fx_tail_seconds(effect, beats, depth, beat_fx_settings,
+                                           _deck_beat_seconds(deck["bpm"], deck["pitch"]))
+                deck["fx_tail"] = (t + seconds, master) if seconds > 0 else None
+            elif deck["fx_tail"] and wet_dead:
+                deck["fx_tail"] = None
+            deck["fx_excited"] = excited
+
+    def tail_audible(ch: str, t: float) -> bool:
+        """audibilityReducer.ts fxTailAudible."""
+        tail = decks[ch]["fx_tail"]
+        if tail is None or t >= tail[0]:
+            return False
+        if tail[1]:
+            return True
+        xf = _channel_crossfader_gain(assignments[ch], crossfader if crossfader_enabled else 0.0)
+        return xf >= AUDIBLE_GAIN
 
     for e in events:
         t = float(e.get("t", 0))
@@ -274,6 +366,8 @@ def events_contain_audible(events: Iterable[dict[str, Any]]) -> bool:
                     decks[channel]["scratch"] = None
                 # seek/jumpBeats/hotCue don't touch audibility inputs.
         elif kind == "load" and e.get("channel") in decks:
+            decks[e["channel"]]["bpm"] = e.get("bpm")
+            decks[e["channel"]]["fx_tail"] = None
             decks[e["channel"]]["previewing"] = False
             decks[e["channel"]]["scratch"] = None
             decks[e["channel"]]["track_duration"] = float("inf")
@@ -286,11 +380,19 @@ def events_contain_audible(events: Iterable[dict[str, Any]]) -> bool:
             for channel, position in e.get("playheads", {}).items():
                 if channel in decks and decks[channel]["scratch"] is None:
                     decks[channel]["position"] = float(position)
+        elif kind == "pitch" and e.get("channel") in decks:
+            decks[e["channel"]]["pitch"] = float(e.get("value", 0))
         elif kind == "tenure":
             tenure_held = e.get("edge") == "start" and e.get("holder") != "shared"
+        elif kind == "beatFx":
+            beat_fx = e
+        elif kind == "beatFxSettings":
+            beat_fx_settings = e.get("settings") or {}
+        update_fx_tails(t)
 
         if not tenure_held and any(
             _deck_audible(decks[ch], crossfader, crossfader_enabled, assignments[ch])
+            or tail_audible(ch, t)
             for ch in _ALL_DECKS
         ):
             return True

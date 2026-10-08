@@ -293,3 +293,29 @@ describe('planReplay — stabs (sessions 12)', () => {
     // skipped, the deck stays as seeded.
   });
 });
+
+describe('planReplay — Beat FX (#351)', () => {
+  const echoB = { selected: 'echo' as const, target: 'B' as const, on: true, depth: 0.5, beats: 1 };
+  const withFx = (): CaptureEvent[] => {
+    const fx: CaptureEvent[] = [
+      { t: 35, kind: 'beatFx', ...echoB },
+      { t: 50, kind: 'beatFx', ...echoB, on: false },
+      { t: 50, kind: 'beatFxSettings', settings: {} as never },
+    ];
+    return [...blendLog(), ...fx].sort((a, b) => a.t - b.t);
+  };
+
+  it('seeds the section at T and cues later snapshots; voicing never replays', () => {
+    const res = planReplay(withFx(), 42);
+    if (!res.ok) throw new Error(res.reason);
+    expect(res.plan.seed.beatFx).toEqual(echoB);
+    const fx = res.plan.cues.filter((c) => c.kind === 'beatFx' || c.kind === ('beatFxSettings' as string));
+    expect(fx).toEqual([{ offsetS: 8, kind: 'beatFx', section: { ...echoB, on: false } }]);
+  });
+
+  it('a log without FX evidence seeds null', () => {
+    const res = planReplay(blendLog(), 42);
+    if (!res.ok) throw new Error(res.reason);
+    expect(res.plan.seed.beatFx).toBeNull();
+  });
+});

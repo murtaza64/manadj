@@ -32,7 +32,7 @@ try {
     assert.deepEqual(await page.locator('.chapter[data-slug]').evaluateAll((els) => els.map((el) => el.dataset.slug)),
       ['acquire', 'curate', 'perform', 'follow', 'capture', 'editor', 'sets', 'sync']);
     assert.deepEqual(await page.locator('.segment').allTextContents(),
-      ['INSTALL', 'ACQUIRE', 'CURATE', 'PERFORM', 'FOLLOW', 'CAPTURE', 'EDIT', 'ARRANGE', 'SYNC']);
+      ['INSTALL', 'ACQUIRE', 'CURATE', 'PERFORM', 'FOLLOW', 'CAPTURE', 'EDIT', 'ARRANGE', 'SYNC', 'HELP']);
     assert.deepEqual(await page.locator('.loop-step').evaluateAll((els) => els.map((el) => el.getAttribute('href'))),
       ['#acquire', '#curate', '#perform', '#follow', '#capture', '#editor', '#sets', '#sync']);
     assert.equal(await page.locator('#words, .glossary, .chips, [id^="term-"], a[href="#words"], a[href^="#term-"]').count(), 0);
