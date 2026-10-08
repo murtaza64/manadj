@@ -25,7 +25,7 @@ import { scratchPosition, scratchFilterAt, scratchSoundedBetween, effectiveScrat
 import type { ScratchMotion, ScratchFilter } from '../playback/worklet/scratchMotion';
 import { deckMasterGain, isDeckAudible, isDeckSounding } from './audibility';
 import { channelCrossfaderGain } from '../playback/mixerMath';
-import { beatFxMixGains } from '../playback/beatFx';
+import { beatFxChannelEngaged, beatFxMixGains, beatFxSnapshot } from '../playback/beatFx';
 import { DEFAULT_BEAT_FX_SETTINGS } from '../playback/beatFxSettings';
 import { deckBeatSeconds, fxHasTail, fxTailSeconds } from './fxTail';
 import { DEFAULT_DETECTOR_PARAMS } from './events';
@@ -262,8 +262,7 @@ export function applyEvent(s: AudibilityState, e: CaptureEvent): void {
       s.tenureHolder = e.edge === 'start' ? e.holder : null;
       break;
     case 'beatFx': {
-      const { selected, target, on, depth, beats } = e;
-      s.beatFx = { selected, target, on, depth, beats };
+      s.beatFx = beatFxSnapshot(e);
       break;
     }
     case 'beatFxSettings':
@@ -281,9 +280,10 @@ export function applyEvent(s: AudibilityState, e: CaptureEvent): void {
  * Excitation is transport-gated like Take detection (cue stabs excluded). */
 function fxExcitation(s: AudibilityState, ch: CaptureDeck): FxExcitation | null {
   const fx = s.beatFx;
-  if (!fx || !fx.on || !fxHasTail(fx.selected)) return null;
-  const master = fx.target === 'master';
-  if (!master && fx.target !== ch) return null;
+  if (!fx || !fxHasTail(fx.selected)) return null;
+  // The section's target, or this deck's held paddle (#361).
+  const master = fx.on && fx.target === 'master';
+  if (!master && !beatFxChannelEngaged(fx, ch)) return null;
   if (beatFxMixGains(fx.depth).wet < s.params.audibleGain) return null;
   const d = s.decks[ch];
   const feeding = master
@@ -296,7 +296,7 @@ function fxExcitation(s: AudibilityState, ch: CaptureDeck): FxExcitation | null 
  * by the voicing that was ringing and the LEVEL/DEPTH now; renewed
  * excitation supersedes it; LEVEL/DEPTH to full dry silences it. */
 function updateFxTails(s: AudibilityState, t: number): void {
-  const fxLive = s.beatFx !== null && s.beatFx.on;
+  const fxLive = s.beatFx !== null && (s.beatFx.on || (s.beatFx.held?.length ?? 0) > 0);
   const wetDead = s.beatFx !== null && beatFxMixGains(s.beatFx.depth).wet < s.params.audibleGain;
   for (const ch of ALL_DECKS) {
     const d = s.decks[ch];

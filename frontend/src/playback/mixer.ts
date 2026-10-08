@@ -86,6 +86,7 @@ import {
   flangerPeriodSeconds,
   effectiveBeatFxState,
   isReplacementEffect,
+  beatFxChannelEngaged,
 } from './beatFx';
 import type { BeatFxEffectId, BeatFxSectionState, BeatFxTarget } from './beatFx';
 import {
@@ -1263,6 +1264,23 @@ export class Mixer {
     this.applyMasterBeatFx();
   }
 
+  /** Per-deck momentary (GRV6 DRUM RELEASE paddle, #361): while held the
+   * channel runs the SELECTED effect at the section depth, regardless of
+   * ON and CH SELECT, additive to the section (one insert per channel, so
+   * paddle + section on the same channel is simply engaged). Release
+   * closes the SEND: tails ring out as usual. */
+  setBeatFxHeld(channel: ChannelId, held: boolean): void {
+    const current = this.beatFxSection.held ?? [];
+    if (current.includes(channel) === held) return;
+    const next = held ? [...current, channel].sort() : current.filter((c) => c !== channel);
+    const { held: _drop, ...rest } = this.beatFxSection;
+    void _drop;
+    this.beatFxSection = next.length ? { ...rest, held: next } : rest;
+    this.notify('beatFx');
+    this.ensure();
+    this.applyBeatFx(channel);
+  }
+
   /** Single GRV6 LEVEL/DEPTH control. -1 = original, 0 = midpoint,
    * +1 = effect-only. */
   setBeatFxDepth(depth: number): void {
@@ -1278,8 +1296,10 @@ export class Mixer {
   setBeatFxSection(state: Readonly<BeatFxSectionState>): void {
     const next = { ...state, on: state.selected === null ? false : state.on };
     const cur = this.beatFxSection;
+    const sameHeld = (cur.held ?? []).join() === (next.held ?? []).join();
     if (cur.selected === next.selected && cur.target === next.target && cur.on === next.on
-      && cur.depth === next.depth && cur.beats === next.beats) return;
+      && cur.depth === next.depth && cur.beats === next.beats && sameHeld) return;
+    if (next.held && next.held.length === 0) delete next.held;
     if (CHANNEL_IDS.includes(next.target as ChannelId)) {
       this.beatFxTempoChannel = next.target as ChannelId;
     }
@@ -1339,8 +1359,8 @@ export class Mixer {
 
   private applyBeatFx(channel: ChannelId, immediate = false): void {
     if (!this.strips) return;
-    const { selected, on, target, depth, beats } = this.beatFxSection;
-    const engaged = on && target === channel;
+    const { selected, depth, beats } = this.beatFxSection;
+    const engaged = beatFxChannelEngaged(this.beatFxSection, channel);
     if (engaged && isReplacementEffect(selected)) this.pushBeatFxClock(channel);
     this.strips[channel].beatFx.update(effectiveBeatFxState(selected, engaged, depth, beats), immediate);
   }
@@ -1364,10 +1384,10 @@ export class Mixer {
    * insert it clocks. Cheap no-op otherwise; the kernel ignores jitter. */
   syncBeatFxClock(deck: ChannelId): void {
     if (!this.liveGraph() || !isReplacementEffect(this.beatFxSection.selected)) return;
-    if (!this.beatFxSection.on) return;
-    const target = this.beatFxSection.target;
-    if (target === deck) this.pushBeatFxClock(deck);
-    else if (target === 'master' && deck === this.beatFxTempoChannel) this.pushBeatFxClock('master');
+    if (beatFxChannelEngaged(this.beatFxSection, deck)) this.pushBeatFxClock(deck);
+    if (beatFxChannelEngaged(this.beatFxSection, 'master') && deck === this.beatFxTempoChannel) {
+      this.pushBeatFxClock('master');
+    }
   }
 
   private pushBeatFxClock(target: ChannelId | 'master'): void {

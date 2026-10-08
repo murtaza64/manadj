@@ -1077,3 +1077,42 @@ describe('LOW CUT ECHO, TRANS and ROLL (#360)', () => {
       .toMatchObject({ state: { mode: 'off' } });
   });
 });
+
+describe('DRUM RELEASE momentary hold (#361)', () => {
+  it('runs the SELECTED effect on a held channel regardless of ON and CH SELECT, additive to the section', () => {
+    const Fake = withFakeAudio();
+    const mixer = new Mixer();
+    mixer.portFor('A').ensureAudio();
+    const a = fxNodesFor(Fake.instances[0], 0);
+    const b = fxNodesFor(Fake.instances[0], 1);
+    mixer.selectBeatFx('echo');
+    mixer.selectBeatFxTarget('A');
+    mixer.setBeatFxDepth(0);
+    expect(a.echoSend.gain.value).toBe(0); // section OFF
+    mixer.setBeatFxHeld('B', true);
+    expect(b.echoSend.gain.value).toBe(1);
+    expect(a.echoSend.gain.value).toBe(0);
+    expect(mixer.getBeatFxSection().held).toEqual(['B']);
+    mixer.setBeatFxOn(true); // section on A + paddle on B
+    expect(a.echoSend.gain.value).toBe(1);
+    expect(b.echoSend.gain.value).toBe(1);
+    mixer.setBeatFxHeld('A', true); // same channel: still one engaged insert
+    expect(a.echoSend.gain.value).toBe(1);
+    mixer.setBeatFxHeld('A', false);
+    mixer.setBeatFxHeld('B', false);
+    expect(b.echoSend.gain.value).toBe(0); // SEND closes; the return stays for tails
+    expect(b.echoWet.gain.value).toBeGreaterThan(0);
+    expect(mixer.getBeatFxSection().held).toBeUndefined();
+  });
+
+  it('a held paddle does nothing with no effect selected', () => {
+    const Fake = withFakeAudio();
+    const mixer = new Mixer();
+    mixer.portFor('A').ensureAudio();
+    const c = fxNodesFor(Fake.instances[0], 2);
+    mixer.selectBeatFx(null);
+    mixer.setBeatFxHeld('C', true);
+    expect(c.echoSend.gain.value).toBe(0);
+    expect(c.reverbSend.gain.value).toBe(0);
+  });
+});

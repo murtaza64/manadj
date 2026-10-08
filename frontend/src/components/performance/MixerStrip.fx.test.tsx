@@ -168,3 +168,17 @@ it('labels the length in bars while the Flanger is selected (#331)', () => {
   expect(length.dataset.unit).toBe('bars');
   expect(length.className).toContain(' bars');
 });
+
+it('lights a paddle-held channel in a distinct momentary state (#361)', () => {
+  const heldSection = { ...section, held: ['B'] as const };
+  const heldMixer = { ...mixer, getBeatFxSection: () => heldSection } as unknown as Mixer;
+  act(() => root.render(
+    <MixerContext.Provider value={heldMixer}>
+      <MixerStrip deckCount={4} onToggleHints={() => undefined} />
+    </MixerContext.Provider>
+  ));
+  const b = container.querySelector<HTMLElement>('[aria-label="Beat FX target B"]')!;
+  expect(b.className).toContain(' held');
+  expect(b.className).not.toContain(' on');
+  expect(container.querySelector('[aria-label="Beat FX target A"]')!.className).not.toContain(' held');
+});

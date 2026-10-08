@@ -268,3 +268,11 @@ def test_low_cut_echo_rings_trans_and_roll_stop_dead():
     assert events_contain_audible(_crossfaded_out_echo([beat_fx(0.5, selected="lowCutEcho")])) is True
     for effect in ("trans", "roll"):
         assert events_contain_audible(_crossfaded_out_echo([beat_fx(0.5, selected=effect)])) is False
+
+
+def test_held_paddle_excites_a_tail_with_the_section_off():
+    """#361: a held DRUM RELEASE paddle runs the selected effect on its deck
+    regardless of ON / CH SELECT, so its echo tail counts as audible."""
+    held = {**beat_fx(0.5, target="B", on=False), "held": ["A"]}
+    assert events_contain_audible(_crossfaded_out_echo([held])) is True
+    assert events_contain_audible(_crossfaded_out_echo([beat_fx(0.5, target="B", on=False)])) is False

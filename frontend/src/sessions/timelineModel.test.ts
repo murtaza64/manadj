@@ -310,6 +310,22 @@ describe('deriveTimeline Beat FX spans (#354)', () => {
     ]);
   });
 
+  it('held paddles open momentary spans on their own decks alongside the section (#361)', () => {
+    const m = deriveTimeline([
+      ...seed(0),
+      fx(1, { held: ['B'] }),              // section OFF, paddle B
+      fx(2, { on: true, held: ['B'] }),    // + section on A
+      fx(3, { on: true, held: ['A', 'B'] }), // paddle on the section's deck: no extra span
+      fx(4, { on: true }),                 // paddles released
+      { t: 6, kind: 'tick', playheads: {} },
+    ]);
+    expect(m.fxSpans.map(({ start, end, target, momentary, open }) => ({ start, end, target, momentary, open })))
+      .toEqual([
+        { start: 1, end: 4, target: 'B', momentary: true, open: false },
+        { start: 2, end: 6, target: 'A', momentary: undefined, open: true },
+      ]);
+  });
+
   it('no span while ON with nothing selected, and none for pre-#351 logs', () => {
     expect(deriveTimeline([...seed(0), fx(1, { on: true, selected: null }), fx(3, {})]).fxSpans).toEqual([]);
     expect(deriveTimeline([...seed(0), { t: 9, kind: 'tick', playheads: {} }]).fxSpans).toEqual([]);

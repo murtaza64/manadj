@@ -373,13 +373,16 @@ function FxKbd({ k }: { k: string | null }) {
 function BeatFxTargetToggle({ target, label }: { target: BeatFxTarget; label: string }) {
   const mixer = useMixer();
   const selected = useMixerValue((m) => m.getBeatFxSection().target === target);
+  // DRUM RELEASE paddle hold (#361): the channel runs the effect momentarily.
+  const held = useMixerValue((m) => (m.getBeatFxSection().held ?? []).includes(target as ChannelId));
   const deckClass = CHANNEL_IDS.includes(target as ChannelId)
     ? ` deck-${target.toLowerCase()}`
     : '';
   const key = performanceFxTargetKey(target);
   return (
     <button
-      className={`player-button perf-strip-toggle perf-fx-ch${deckClass}${selected ? ' on' : ''}`}
+      className={`player-button perf-strip-toggle perf-fx-ch${deckClass}${selected ? ' on' : ''}${held ? ' held' : ''}`}
+      data-held={held || undefined}
       aria-pressed={selected}
       aria-label={`Beat FX target ${label}`}
       onClick={() => mixer.selectBeatFxTarget(target)}

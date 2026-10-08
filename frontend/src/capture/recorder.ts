@@ -31,7 +31,7 @@ import { initialCaptureState, reduceCaptureInto } from './detector';
 import type { CaptureState } from './detector';
 import { SilenceSplitClock } from './sessionLifecycle';
 import type { CaptureControlId, CaptureEvent, DetectedTake } from './events';
-import type { BeatFxSectionState } from '../playback/beatFx';
+import { beatFxSnapshot, sameBeatFxSection, type BeatFxSectionState } from '../playback/beatFx';
 import type { BeatFxSettings } from '../playback/beatFxSettings';
 
 const TICK_MS = 1000;
@@ -502,11 +502,9 @@ export class CaptureRecorder {
   private diffBeatFx(t: number): void {
     const section = this.mixer.getBeatFxSection?.();
     const prev = this.lastBeatFx;
-    if (section && (!prev || prev.selected !== section.selected || prev.target !== section.target
-      || prev.on !== section.on || prev.depth !== section.depth || prev.beats !== section.beats)) {
+    if (section && (!prev || !sameBeatFxSection(prev, section))) {
       this.lastBeatFx = section;
-      const { selected, target, on, depth, beats } = section;
-      this.feed({ t, kind: 'beatFx', selected, target, on, depth, beats });
+      this.feed({ t, kind: 'beatFx', ...beatFxSnapshot(section) });
     }
     const settings = this.mixer.getBeatFxSettings?.();
     if (settings && settings !== this.lastBeatFxSettings) {

@@ -25,6 +25,7 @@ versions follow [Semantic Versioning](https://semver.org/). Install: [docs/insta
 
 ### Added
 - Beat FX: LOW CUT ECHO, TRANS and ROLL — strip SELECT, keyboard 8/9 and the DDJ-GRV6 SELECT knob; Trans/Roll lock to the target Deck's beatgrid, BEAT ◄ ► now reaches 1/16 and 1/8, tuning in Settings → Performance → Beat FX (#360).
+- DDJ-GRV6: tilting a side's DRUM RELEASE paddle holds the selected Beat FX on that Deck (whatever ON and CH SELECT say); release lets it ring out. The held channel lights yellow in the mixer's FX target strip (#361).
 - New users start in PERFORM with 2 decks; EXPORT (the full library view) moved into the ⋯ menu next to HISTORY. Backtick and ?view=library still reach it.
 - Fresh installs start from sensible preference defaults (waveform styles, column layout, keylock, quantize, visualizer, GRV6 jog calibration); your own settings always win.
 - Cue mode: Trigger makes a Hot Cue on a paused Deck jump and start playing (Gated hold-to-preview stays the default). Toggle with GATED in the Performance view mixer strip; also a Setup guide.

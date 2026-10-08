@@ -60,6 +60,7 @@ knob (sweep filter), crossfader.
 | SELECT | ECHO / LOW CUT ECHO / REVERB / FLANGER / TRANS / ROLL; other detents select none (section off) |
 | CH SELECT 1–4 / SP / MST | Beat FX target Deck A–D / sampler (silent) / master |
 | ON/OFF | section on/off |
+| DRUM RELEASE (per side, tilt either way, SHIFT too) | hold = run the SELECTED effect on that side's Deck at current DEPTH, regardless of ON / CH SELECT; release = off, tails ring (#361) |
 | BEAT ◄ ► | Beat FX length halve / double, 1/16–8 (beats; Flanger reads bars by default) |
 | LEVEL/DEPTH | depth (original ⟷ effect) |
 
@@ -88,6 +89,6 @@ pads stay dark.
 
 - MASTER LEVEL, HEADPHONES LEVEL/MIX, MASTER CUE: act on the device's own
   audio hardware; binding would double-apply.
-- Groove Circuit GAIN, CAPTURE, DRUM ROLL, DRUM RELEASE; MEMORY; KEY SYNC;
+- Groove Circuit GAIN, CAPTURE, DRUM ROLL; MEMORY; KEY SYNC;
   PREVIEW; shifted rotate/press/LOAD; Pad FX, Sampler, Key Shift, Keyboard.
 - Beat FX: shift-layer CH SELECT notes, RELEASE FX.

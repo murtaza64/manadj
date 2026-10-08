@@ -267,10 +267,14 @@ function roleBeatFx(
   outgoing: CaptureDeck,
   incoming: CaptureDeck
 ): BeatFxSectionState {
-  if (fx.target === outgoing) return { ...fx, target: 'A' };
-  if (fx.target === incoming) return { ...fx, target: 'B' };
-  if (fx.target === 'master' || fx.target === 'sampler') return { ...fx };
-  return { ...fx, target: 'sampler', on: false };
+  // Held paddles (#361) relabel like the target; other decks' drop out.
+  const held = (fx.held ?? []).flatMap((ch) => (ch === outgoing ? ['A' as const] : ch === incoming ? ['B' as const] : []));
+  const base = { ...fx, ...(held.length ? { held } : {}) };
+  if (!held.length) delete base.held;
+  if (fx.target === outgoing) return { ...base, target: 'A' };
+  if (fx.target === incoming) return { ...base, target: 'B' };
+  if (fx.target === 'master' || fx.target === 'sampler') return base;
+  return { ...base, target: 'sampler', on: false };
 }
 
 /** Relabel one log event into a pair's ROLE frame (outgoing→'A',

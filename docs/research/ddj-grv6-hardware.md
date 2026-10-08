@@ -70,7 +70,7 @@ the track's drums, beat-synced; disabled in dual-deck mode. No manadj
 counterpart — the section is repurposed territory (CONTEXT.md, Mapping
 entry; see the mapping-design doc). E1 wire notes: DRUM SWAP 1–4 are notes
 0–3 on deck channels 1–4, +SHIFT notes 44–47 (GROOVE CIRCUIT block);
-CAPTURE note 36 (shift 38 = 4-beat, 39 = 8-beat); GAIN is CC 18/50
+CAPTURE note 8 (shift 43); DRUM ROLL 1–4 notes 4–7 (shift 48–51); DRUM RELEASE tilt forward/backward both note 36 (shift: forward 38, backward 39), no LED — E1 p.4, re-read 2026-10-07 for #361 (an earlier revision of this line gave CAPTURE 36/38/39, which are the DRUM RELEASE notes; hardware check pending); GAIN is CC 18/50
 14-bit (spontaneously re-reported on DECK 3/4 activation — unreliable).
 
 | Control | Official function |

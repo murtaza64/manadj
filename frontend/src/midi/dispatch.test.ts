@@ -205,6 +205,7 @@ function registerFakeMixerControls(): void {
       calls.push(`mixer:beatFxDepth:${value}`);
     },
     stepBeatFxBeats: (change) => calls.push(`mixer:beatFxBeats:${change}`),
+    setBeatFxHeld: (channel, held) => calls.push(`mixer:beatFxHeld:${channel}:${held}`),
   });
 }
 
@@ -1710,6 +1711,15 @@ describe('Beat FX (gh#272)', () => {
     kind: 'absolute',
     target: { control: 'beat-fx-level', side },
     value,
+  });
+
+  it('DRUM RELEASE hold engages on down and releases on up (#361)', () => {
+    registerFakeMixerControls();
+    const hold = (edge: 'down' | 'up'): MidiAction =>
+      ({ kind: 'button', edge, target: { control: 'beat-fx-hold', channel: 'C' } });
+    dispatchMidiAction(hold('down'));
+    dispatchMidiAction(hold('up'));
+    expect(calls).toEqual(['mixer:beatFxHeld:C:true', 'mixer:beatFxHeld:C:false']);
   });
 
   it('engage selects, retargets to the side focus, and turns on; same press again turns off', () => {

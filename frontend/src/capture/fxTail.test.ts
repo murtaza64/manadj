@@ -58,4 +58,17 @@ describe('Session audibility of tails (#355; mirrors tests/test_session_audibili
     expect(spans[0].start).toBe(2.5);
     expect(spans[0].end).toBeCloseTo(2 + 5 * (60 / 174), 9);
   });
+
+  it('a held DRUM RELEASE paddle (#361) excites a tail with the section OFF', () => {
+    const events: CaptureEvent[] = [
+      { t: 0, kind: 'load', channel: 'A', trackId: 1, bpm: 174 },
+      { t: 0, kind: 'control', control: 'crossfader', channel: null, value: 1 },
+      { t: 0.5, kind: 'beatFx', selected: 'echo', target: 'B', on: false, depth: 0, beats: 1, held: ['A'] },
+      { t: 1, kind: 'transport', channel: 'A', action: 'play', playhead: 0 },
+      { t: 2, kind: 'control', control: 'fader', channel: 'A', value: 0 },
+      { t: 2.5, kind: 'control', control: 'crossfader', channel: null, value: 0 },
+      { t: 10, kind: 'tick', playheads: {} },
+    ];
+    expect(deriveTimeline(events).decks.A.audibleSpans).toHaveLength(1);
+  });
 });

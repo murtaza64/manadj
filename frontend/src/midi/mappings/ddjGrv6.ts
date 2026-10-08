@@ -49,6 +49,9 @@ const JUMP_DIVISORS = [8, 8, 4, 4, 2, 2, 1, 1] as const;
  */
 const STEM_PADS: readonly StemName[] = STEM_NAMES;
 
+/** DRUM RELEASE tilt notes (E1 p.4: 36 both directions; SHIFT 38/39). */
+const DRUM_RELEASE_NOTES = [36, 38, 39] as const;
+
 const button = (
   channel: number,
   number: number,
@@ -223,6 +226,11 @@ function deckBindings({ deck, channel, padChannel, shiftedPadChannel }: DeckMidi
     ...STEM_PADS.map((stem, pad) =>
       button(channel, 44 + pad, { control: 'stem-solo', channel: deck, stem })
     ),
+    // DRUM RELEASE paddle → per-deck momentary Beat FX (#361). E1: tilt
+    // forward and backward both send note 36 on the deck channel (+SHIFT:
+    // 38 forward / 39 backward); OFF on return to center. No LED. Every
+    // tilt holds the SELECTED effect on this side's current Deck layer.
+    ...DRUM_RELEASE_NOTES.map((note) => button(channel, note, { control: 'beat-fx-hold', channel: deck })),
   ];
 }
 

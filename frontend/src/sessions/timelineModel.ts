@@ -112,6 +112,9 @@ export interface FxSpan extends Span {
   steps: FxStep[];
   /** Unclosed at log end. */
   open: boolean;
+  /** Held on by a per-deck momentary (DRUM RELEASE paddle, #361), not the
+   * section's ON + CH SELECT. */
+  momentary?: boolean;
 }
 
 /** One step of the audibility-gain series: from `t`, this deck contributes
@@ -266,10 +269,13 @@ export function deriveTimeline(
   }
 
   const fxSpans: FxSpan[] = [];
-  let openFx: FxSpan | null = null;
-  const closeFx = (t: number) => {
-    if (openFx && t > openFx.start) fxSpans.push({ ...openFx, end: t, open: false });
-    openFx = null;
+  // Open spans keyed by target: the section's, plus one per held paddle
+  // (#361) on a channel the section is not already on.
+  const openFx = new Map<string, FxSpan>();
+  const closeFx = (key: string, t: number) => {
+    const span = openFx.get(key);
+    if (span && t > span.start) fxSpans.push({ ...span, end: t, open: false });
+    openFx.delete(key);
   };
 
   const tenures: TenureSpan[] = [];
@@ -499,29 +505,39 @@ export function deriveTimeline(
       }
     }
 
-    // Beat FX spans (#354): ON with an effect selected, keyed by target.
+    // Beat FX spans (#354): ON with an effect selected, keyed by target;
+    // held paddles (#361) open momentary spans on their own channels.
     if (e.kind === 'beatFx' && s.beatFx) {
       const fx = s.beatFx;
-      const active = fx.on && fx.selected !== null;
-      if (openFx && (!active || openFx.target !== fx.target || openFx.effect !== fx.selected)) {
-        closeFx(e.t);
+      const wanted = new Map<string, { target: BeatFxTarget; momentary: boolean }>();
+      if (fx.selected !== null) {
+        if (fx.on) wanted.set(fx.target, { target: fx.target, momentary: false });
+        for (const ch of fx.held ?? []) {
+          if (!wanted.has(ch)) wanted.set(ch, { target: ch, momentary: true });
+        }
       }
-      if (active && fx.selected !== null) {
-        if (!openFx) {
-          openFx = {
+      for (const [key, span] of [...openFx]) {
+        const want = wanted.get(key);
+        if (!want || span.effect !== fx.selected || (span.momentary ?? false) !== want.momentary) closeFx(key, e.t);
+      }
+      for (const [key, want] of wanted) {
+        const span = openFx.get(key);
+        if (!span) {
+          openFx.set(key, {
             start: e.t,
             end: e.t,
-            target: fx.target,
-            effect: fx.selected,
+            target: want.target,
+            effect: fx.selected!,
             lengthUnit: beatFxLengthUnit(fx.selected, (s.beatFxSettings ?? DEFAULT_BEAT_FX_SETTINGS).flangerLengthUnit),
             steps: [{ t: e.t, depth: fx.depth, beats: fx.beats }],
             open: true,
-          };
+            ...(want.momentary ? { momentary: true } : {}),
+          });
         } else {
-          const last = openFx.steps[openFx.steps.length - 1];
+          const last = span.steps[span.steps.length - 1];
           if (last.depth !== fx.depth || last.beats !== fx.beats) {
-            if (last.t === e.t) openFx.steps[openFx.steps.length - 1] = { t: e.t, depth: fx.depth, beats: fx.beats };
-            else openFx.steps.push({ t: e.t, depth: fx.depth, beats: fx.beats });
+            if (last.t === e.t) span.steps[span.steps.length - 1] = { t: e.t, depth: fx.depth, beats: fx.beats };
+            else span.steps.push({ t: e.t, depth: fx.depth, beats: fx.beats });
           }
         }
       }
@@ -575,8 +591,9 @@ export function deriveTimeline(
     tenures.push({ start: openTenure.since, end, holder: openTenure.holder, open: true });
   }
   {
-    const fx = openFx as FxSpan | null;
-    if (fx && end > fx.start) fxSpans.push({ ...fx, end, open: true });
+    for (const fx of openFx.values()) {
+      if (end > fx.start) fxSpans.push({ ...fx, end, open: true });
+    }
   }
 
   const decks = Object.fromEntries(

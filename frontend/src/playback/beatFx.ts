@@ -50,6 +50,33 @@ export interface BeatFxSectionState {
   on: boolean;
   depth: number;
   beats: number;
+  /** Channels held on by a per-deck momentary (GRV6 DRUM RELEASE paddle,
+   * #361): each runs the SELECTED effect at this depth regardless of ON
+   * and CH SELECT. Absent = none (additive to the #351 snapshot shape). */
+  held?: readonly BeatFxChannel[];
+}
+
+export type BeatFxChannel = 'A' | 'B' | 'C' | 'D';
+
+/** A plain section snapshot (capture/replay): copies `held` only when
+ * non-empty, so pre-#361 shapes stay byte-identical. */
+export function beatFxSnapshot(section: Readonly<BeatFxSectionState>): BeatFxSectionState {
+  const { selected, target, on, depth, beats, held } = section;
+  return { selected, target, on, depth, beats, ...(held && held.length ? { held: [...held] } : {}) };
+}
+
+/** Value equality of two section snapshots, `held` included. */
+export function sameBeatFxSection(a: Readonly<BeatFxSectionState>, b: Readonly<BeatFxSectionState>): boolean {
+  return a.selected === b.selected && a.target === b.target && a.on === b.on
+    && a.depth === b.depth && a.beats === b.beats
+    && (a.held ?? []).join() === (b.held ?? []).join();
+}
+
+/** Is `channel` engaged: the section's ON + CH SELECT, or a held paddle. */
+export function beatFxChannelEngaged(section: Readonly<BeatFxSectionState>, channel: BeatFxTarget): boolean {
+  if (section.selected === null) return false;
+  if (section.on && section.target === channel) return true;
+  return channel !== 'master' && channel !== 'sampler' && (section.held?.includes(channel) ?? false);
 }
 
 /** The GRV6 BEAT ◄ ► ladder every effect's length quantizes to (#272;

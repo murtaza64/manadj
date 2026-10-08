@@ -313,6 +313,11 @@ function dispatchButton(target: ButtonAction['target'], edge: 'down' | 'up'): vo
       midiMixerControls()?.selectBeatFxTarget(target.target);
       return;
     }
+    case 'beat-fx-hold': {
+      // Momentary: down engages, up (note-off) disengages (#361).
+      midiMixerControls()?.setBeatFxHeld(target.channel, edge === 'down');
+      return;
+    }
     case 'beat-fx-on-off': {
       // The hardware's one ON/OFF gates the whole section; per-channel
       // assignment is on-screen because CH SELECT stays unbound.

@@ -265,10 +265,12 @@ def events_contain_audible(events: Iterable[dict[str, Any]]) -> bool:
     def fx_excitation(ch: str) -> tuple[str, float, bool] | None:
         """audibilityReducer.ts fxExcitation (transport-gated, no previews)."""
         fx = beat_fx
-        if not fx or not fx.get("on") or fx.get("selected") not in _FX_TAIL_EFFECTS:
+        if not fx or fx.get("selected") not in _FX_TAIL_EFFECTS:
             return None
-        master = fx.get("target") == "master"
-        if not master and fx.get("target") != ch:
+        # The section's target, or this deck's held DRUM RELEASE paddle (#361).
+        master = bool(fx.get("on")) and fx.get("target") == "master"
+        engaged = (bool(fx.get("on")) and fx.get("target") == ch) or ch in (fx.get("held") or [])
+        if not master and not engaged:
             return None
         if _beat_fx_wet(float(fx.get("depth", 0))) < AUDIBLE_GAIN:
             return None
@@ -279,7 +281,7 @@ def events_contain_audible(events: Iterable[dict[str, Any]]) -> bool:
 
     def update_fx_tails(t: float) -> None:
         """audibilityReducer.ts updateFxTails."""
-        live = beat_fx is not None and bool(beat_fx.get("on"))
+        live = beat_fx is not None and (bool(beat_fx.get("on")) or bool(beat_fx.get("held")))
         wet_dead = beat_fx is not None and _beat_fx_wet(float(beat_fx.get("depth", 0))) < AUDIBLE_GAIN
         for ch, deck in decks.items():
             excited = fx_excitation(ch) if live else None
