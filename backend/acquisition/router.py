@@ -166,6 +166,9 @@ class DownloadStatus(BaseModel):
     # (1-based) out of how many
     attempt: int | None = None
     attempts_total: int | None = None
+    # measured progress (gh#342): 0..1 and "4.2 / 9.0 MB"; null = unmeasured
+    progress: float | None = None
+    progress_label: str | None = None
 
 
 class BulkQueueRequest(BaseModel):
@@ -238,6 +241,8 @@ def _task_status(task: "Task") -> DownloadStatus:
         error=task.error,
         cooling_down_until=_cooling_down_until(task),
         via=_via(task),
+        progress=task.progress,
+        progress_label=task.progress_label,
     )
     if task.type == "soulseek-download":
         payload = task.payload
@@ -298,7 +303,7 @@ def _candidate_count_map(db: Session) -> dict[int, int]:
 def _fold_lifecycle(resp: SourceItemResponse) -> None:
     """Derive stage + error_kind from state and the latest download task."""
     task_state = resp.download.task_state if resp.download else None
-    resp.stage = derive_stage(resp.state, task_state)
+    resp.stage = derive_stage(resp.state, task_state, in_transfer=bool(resp.download and resp.download.progress is not None))
     if resp.download and resp.stage == "failed":
         resp.error_kind = classify_error(resp.download.error, resp.download.via)
 

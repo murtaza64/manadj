@@ -4,7 +4,7 @@ import json
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import DateTime, Integer, String, Text
+from sqlalchemy import DateTime, Float, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.sql import func
 
@@ -33,6 +33,11 @@ class Task(Base):
     started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     dismissed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # Progress (gh#342): 0..1 and a short label ("4.2 / 9.0 MB"), written by
+    # handlers that can measure their work; NULL = unmeasured. Survives a
+    # Deferred re-queue (a polling download keeps its bar between ticks).
+    progress: Mapped[float | None] = mapped_column(Float, nullable=True)
+    progress_label: Mapped[str | None] = mapped_column(String, nullable=True)
 
     @property
     def payload(self) -> dict[str, Any]:

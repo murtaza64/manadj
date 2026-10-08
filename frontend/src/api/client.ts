@@ -118,6 +118,16 @@ export const api = {
       return response.json();
     },
 
+    attention: async (): Promise<TaskRow[]> => {
+      const response = await fetch(`${API_BASE}/tasks/attention`);
+      if (!response.ok) throw new Error('Failed to fetch task worklist');
+      return response.json();
+    },
+    active: async (): Promise<TaskRow[]> => {
+      const response = await fetch(`${API_BASE}/tasks/active`);
+      if (!response.ok) throw new Error('Failed to fetch active tasks');
+      return response.json();
+    },
     list: async (filters?: {
       state?: TaskState;
       type?: string;

@@ -31,19 +31,22 @@ _PEER = re.compile(
 )
 
 
-def derive_stage(item_state: str, task_state: str | None) -> Stage:
+def derive_stage(item_state: str, task_state: str | None, in_transfer: bool = False) -> Stage:
     """Where an item is in its lifecycle, from its state + latest task state.
 
     A `queued` item without a task (the task row was cancelled or lost) is
     still `queued` from the persisted state's point of view — the queue
     endpoint is idempotent, so the UI's "get" simply re-creates the task.
+
+    `in_transfer`: the task has measured progress — a Soulseek download is a
+    pending task between polls, but bytes are moving, so it is downloading.
     """
     if item_state in ("fulfilled", "ignored"):
         return item_state  # type: ignore[return-value]
     if item_state == "new":
         return "new"
     # queued: the task decides
-    if task_state == "running":
+    if task_state == "running" or (task_state == "pending" and in_transfer):
         return "downloading"
     if task_state == "failed":
         return "failed"

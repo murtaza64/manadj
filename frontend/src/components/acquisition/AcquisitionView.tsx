@@ -13,7 +13,7 @@
 //
 // The combined SoundCloud+Soulseek search replaces the hero's Soulseek-only
 // search when it exists.
-import { Fragment, useCallback, useMemo, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../api/client';
 import type { Classification, SoulseekResult, SourceItem } from '../../types';
@@ -25,6 +25,7 @@ import { SoulseekCandidates } from './SoulseekCandidates';
 import { SpotifyFeedTable, SpotifyRow } from './SpotifyFeedTable';
 import { spotifyItemFor, useSpotifyItemIndex, useWant } from './spotifyFeeds';
 import { isFavoriteFeed, toggleFavoriteFeed, useFavoriteFeeds } from './favoriteFeeds';
+import { OPEN_ACQUISITION_EVENT, takePendingAcquisition } from './openAcquisition';
 import { StatusCell } from './StatusCell';
 import { defaultPanel, type Panel } from './panels';
 import { type Sortable, type SortKey, compareRows, matchesFilter, serverSort, sortGlyph, useSortFilter, useSortedFiltered } from './sortFilter';
@@ -94,6 +95,20 @@ export function AcquisitionView() {
   const [opened, setOpened] = useState<Map<number, Panel>>(new Map());
   const [drawer, setDrawer] = useState(true);
   const { sort, toggleSort, filter, setFilter } = useSortFilter();
+  // a task worklist deep link (gh#342): show that one item, whatever its stage
+  useEffect(() => {
+    const apply = () => {
+      const p = takePendingAcquisition();
+      if (!p) return;
+      setFeed(FEED_ALL);
+      setScope('all');
+      setFilter(p.search);
+      setClosed(new Set());
+    };
+    apply();
+    window.addEventListener(OPEN_ACQUISITION_EVENT, apply);
+    return () => window.removeEventListener(OPEN_ACQUISITION_EVENT, apply);
+  }, [setFilter]);
 
   const { data: items, isLoading, error } = useQuery({
     queryKey: ITEMS_KEY,

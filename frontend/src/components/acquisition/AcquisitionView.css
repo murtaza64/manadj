@@ -380,3 +380,11 @@ button.acq-cand:hover:not(:disabled) { border-color: var(--text); background: va
 .acq-cell-matchname { margin-left: var(--space-6); max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; vertical-align: middle; }
 .acq-cell-notit { color: var(--subtext0); margin-left: var(--space-4); border: 1px solid var(--surface1); line-height: 16px; }
 .acq-cell-notit:hover:not(:disabled) { color: var(--danger); }
+
+/* download progress in the status cell (gh#342) */
+.acq-cell-dl { display: inline-flex; align-items: center; gap: var(--space-6); }
+.acq-cell-bar { display: inline-block; width: 90px; height: 6px; background: var(--surface1); position: relative; overflow: hidden; }
+.acq-cell-bar span { display: block; height: 100%; background: var(--accent); }
+.acq-cell-bar-soulseek span { background: var(--routine-accent); }
+.acq-cell-bar-indeterminate::after { content: ''; position: absolute; left: 0; top: 0; height: 100%; width: 30%; background: var(--surface2); }
+.acq-cell-pct { color: var(--subtext0); font-size: var(--font-micro); white-space: nowrap; }

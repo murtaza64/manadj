@@ -546,6 +546,9 @@ export interface DownloadStatus {
   // hands-off soulseek downloads (gh#214): candidate being tried (1-based) / total
   attempt?: number | null;
   attempts_total?: number | null;
+  // measured progress (gh#342): 0..1 and "4.2 / 9.0 MB"; null = unmeasured
+  progress?: number | null;
+  progress_label?: string | null;
 }
 
 // Suppliers (see CONTEXT.md: Supplier / Direct Supplier / Search Supplier)
@@ -606,19 +609,38 @@ export interface AnalysisPendingItem {
 
 export type TaskState = 'pending' | 'running' | 'done' | 'failed';
 
+export interface TaskSubject {
+  kind: 'track' | 'source_item' | 'session' | string;
+  id: string;
+  label: string;
+  detail: string | null;
+}
+
 export interface TaskSummary {
   counts: Record<TaskState, number>;
-  running_task: { type: string; ref: string | null } | null;
+  /** failures that still need someone: newest task for their subject, undismissed */
+  attention: number;
+  attention_by_type: Record<string, number>;
+  running: TaskRow[];
+  pending_by_type: Record<string, number>;
   undismissed_failures: number;
 }
 
 export interface TaskRow {
   id: number;
   type: string;
+  type_label: string;
+  /** where a failure's next step lives: retry here | the Acquisition row | nowhere */
+  fix: 'retry' | 'acquisition' | 'none';
   ref: string | null;
+  subject: TaskSubject | null;
   state: TaskState;
   error: string | null;
   attempts: number;
+  progress: number | null;
+  progress_label: string | null;
+  /** a newer task exists for the same subject: history, not a worklist entry */
+  superseded: boolean;
   not_before: string | null;
   created_at: string | null;
   started_at: string | null;

@@ -4,6 +4,7 @@ All notable changes to manaDJ. Format: [Keep a Changelog](https://keepachangelog
 versions follow [Semantic Versioning](https://semver.org/). Install: [docs/install.md](docs/install.md).
 
 ## [Unreleased]
+- Download progress bars (SoundCloud bytes via yt-dlp, Soulseek transfer bytes) in Acquisition and the Tasks badge; Tasks drawer reworked as a worklist: named subjects, one entry per subject, next steps, deep links (#342).
 - Acquisition redesigned (Dig view, #342): one table with the lifecycle in the status cell, inline Soulseek candidates on failure, batch verbs, queue drawer, sort/filter; Spotify likes/playlists as browse-only feeds with want (#347); favorite feeds pour into "all sources"; app-wide restyled checkboxes.
 
 - Capture: Beat FX echo/reverb tails count as audible — an echo-out Take now ends where the tail dies out, not at the fader slam; Session timeline bands follow (#355).
