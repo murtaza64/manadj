@@ -180,7 +180,7 @@ it('edits and resets persisted Beat FX sound parameters without creating audio',
     .find((button) => button.textContent?.startsWith('Performance'))!;
   act(() => effects.click());
   expect([...host.querySelectorAll('.settings-effect-card h3')].map((node) => node.textContent))
-    .toEqual(['Echo', 'Reverb', 'Flanger']);
+    .toEqual(['Echo', 'Low Cut Echo', 'Reverb', 'Flanger', 'Trans', 'Roll']);
   expectFaders(host.querySelector<HTMLElement>('#settings-section-effects')!, Object.keys(BEAT_FX_PARAMETER_RANGES).length);
 
   const feedback = host.querySelector<HTMLElement>('#beat-fx-flangerFeedback')!;

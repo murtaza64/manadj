@@ -13,7 +13,7 @@ import {
   type RoutineBeatFx,
   type RoutineFxStep,
 } from '../editor/beatFxLane';
-import { BEAT_FX_EFFECTS, ECHO_BEATS_DEFAULT, stepEchoBeats, type BeatFxEffectId } from '../playback/beatFx';
+import { BEAT_FX_EFFECTS, BEAT_FX_LABELS, ECHO_BEATS_DEFAULT, stepEchoBeats, type BeatFxEffectId } from '../playback/beatFx';
 import type { PlannedRoutine } from '../sets/routinePlan';
 import type { RoutineDraftStore } from './routineDraftStore';
 import { slotAccent } from './routineEditorModel';
@@ -27,7 +27,7 @@ const DEPTH_H_AUTHORED = 56;
 /** A fresh FX track's default span (beats) — one echo-out phrase. */
 const NEW_FX_BEATS = 8;
 
-const EFFECT_LABEL: Record<BeatFxEffectId, string> = { echo: 'ECHO', reverb: 'REVERB', flanger: 'FLANGER' };
+const EFFECT_LABEL: Record<BeatFxEffectId, string> = BEAT_FX_LABELS;
 
 function fmtFxBeats(b: number): string {
   if (Math.abs(b - 0.25) < 1e-6) return '¼';

@@ -18,7 +18,15 @@ import { useMixer, useMixerValue } from '../../hooks/useMixer';
 import { useTakeoverHint } from '../../hooks/useTakeoverHint';
 import { takeoverKey, type TakeoverDirection } from '../../midi/takeoverFeedback';
 import { CHANNEL_IDS, CUE_MIX_DEFAULT } from '../../playback/mixer';
-import { beatFxLengthUnit, type BeatFxTarget } from '../../playback/beatFx';
+import {
+  BEAT_FX_EFFECTS,
+  BEAT_FX_LABELS,
+  BEAT_FX_SHORT_LABELS,
+  beatFxLengthUnit,
+  formatBeatFxLength,
+  type BeatFxEffectId,
+  type BeatFxTarget,
+} from '../../playback/beatFx';
 import { isQuantizeOn, setQuantize, subscribeQuantize } from '../../playback/quantizeStore';
 import type { ChannelId } from '../../playback/mixer';
 import { DiagonalPairLinks } from '../../links/PerformancePairLinks';
@@ -355,12 +363,6 @@ function XfAssign({ deck }: { deck: ChannelId }) {
 }
 
 /** 0.25 → "1/4", 0.75 → "3/4", 2 → "2" — the echo beats readout. */
-function formatEchoBeats(beats: number): string {
-  if (beats === 0.25) return '1/4';
-  if (beats === 0.5) return '1/2';
-  if (beats === 0.75) return '3/4';
-  return String(beats);
-}
 
 /** On-control key hint (hidden with KBD off, like the deck hints). */
 function FxKbd({ k }: { k: string | null }) {
@@ -420,14 +422,14 @@ function BeatFxRow({ deckCount }: { deckCount: DeckCount }) {
           value={section.selected ?? ''}
           onChange={(event) => {
             const value = event.currentTarget.value;
-            mixer.selectBeatFx(value === '' ? null : value as 'echo' | 'reverb' | 'flanger');
+            mixer.selectBeatFx(value === '' ? null : value as BeatFxEffectId);
           }}
           title="Beat FX SELECT; swaps the current target live"
       >
         <option value="">---</option>
-        <option value="echo">ECH</option>
-        <option value="reverb">RVB</option>
-        <option value="flanger">FLG</option>
+        {BEAT_FX_EFFECTS.map((effect) => (
+          <option key={effect} value={effect} title={BEAT_FX_LABELS[effect]}>{BEAT_FX_SHORT_LABELS[effect]}</option>
+        ))}
         </AutoBlurSelect>
         <div
           className="perf-fx-size"
@@ -450,7 +452,7 @@ function BeatFxRow({ deckCount }: { deckCount: DeckCount }) {
             data-unit={lengthUnit}
             title={`Beat FX length in ${lengthUnit} (scroll to change)`}
           >
-            {formatEchoBeats(section.beats)}
+            {formatBeatFxLength(section.beats)}
             {lengthUnit === 'bars' && <span className="perf-fx-unit">BAR</span>}
           </span>
           <button

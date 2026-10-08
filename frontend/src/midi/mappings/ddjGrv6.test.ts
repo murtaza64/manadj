@@ -91,8 +91,8 @@ describe('DDJ-GRV6 Mapping — official E1 message table', () => {
     // Every SELECT detent binds: unsupported algorithms explicitly select
     // none so the previous effect cannot remain live.
     const effects = [
-      null, 'echo', null, null, null, 'reverb', 'flanger',
-      null, null, null, null, null, null, null,
+      null, 'echo', 'lowCutEcho', null, null, 'reverb', 'flanger',
+      null, null, 'trans', null, 'roll', null, null,
     ] as const;
     expect(translate(effects.map((_, index) => press(4, 32 + index)))).toEqual(
       effects.map((effect) => ({

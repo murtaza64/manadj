@@ -261,3 +261,10 @@ def test_beat_fx_tail_expires_and_dry_depth_has_no_tail():
     assert events_contain_audible(late) is False
     assert events_contain_audible(_crossfaded_out_echo([beat_fx(0.5, depth=-1.0)])) is False
     assert events_contain_audible(_crossfaded_out_echo([beat_fx(0.5, selected="flanger")])) is False
+
+
+def test_low_cut_echo_rings_trans_and_roll_stop_dead():
+    """#360: LOW CUT ECHO tails like Echo; TRANS/ROLL replace the signal."""
+    assert events_contain_audible(_crossfaded_out_echo([beat_fx(0.5, selected="lowCutEcho")])) is True
+    for effect in ("trans", "roll"):
+        assert events_contain_audible(_crossfaded_out_echo([beat_fx(0.5, selected=effect)])) is False

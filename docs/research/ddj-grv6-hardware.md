@@ -114,7 +114,7 @@ Beat indicator CC 100 values (per the E1 details column): 0x03=1/4,
 0x09=16, 0x0A=32. manadj publishes the supported 1/4…8 ladder on connect
 and every BEAT change, and sends 0 on detach/all-off.
 
-manadj mapping (gh#272): ECHO/REVERB/FLANGER SELECT detents swap the one
+manadj mapping (gh#272, gh#360): ECHO/LOW CUT ECHO/REVERB/FLANGER/TRANS/ROLL SELECT detents swap the one
 section's effect live; every unsupported detent explicitly selects `---` and turns FX
 off rather than retaining the prior effect. CH SELECT 1/2/3/4 map mutually
 exclusively to A/B/C/D, SP selects the currently silent hardware-only sampler

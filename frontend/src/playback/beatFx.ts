@@ -13,9 +13,28 @@ import {
   type BeatFxSettings,
   type FlangerLengthUnit,
 } from './beatFxSettings';
+import { createBeatFxRepeatNode } from './worklet/beatFxRepeatNode';
+import type { BeatFxRepeatCommand } from './worklet/beatFxRepeatProtocol';
+import type { RepeatSettings, RepeatState } from './worklet/beatFxRepeatKernel';
 
-export type BeatFxEffectId = 'echo' | 'reverb' | 'flanger';
-export const BEAT_FX_EFFECTS: readonly BeatFxEffectId[] = ['echo', 'reverb', 'flanger'];
+export type BeatFxEffectId = 'echo' | 'lowCutEcho' | 'reverb' | 'flanger' | 'trans' | 'roll';
+/** GRV6 SELECT panel order (MIDI list E1 detents 33, 34, 37, 38, 41, 43). */
+export const BEAT_FX_EFFECTS: readonly BeatFxEffectId[] = [
+  'echo', 'lowCutEcho', 'reverb', 'flanger', 'trans', 'roll',
+];
+/** Strip SELECT / compact labels. */
+export const BEAT_FX_SHORT_LABELS: Readonly<Record<BeatFxEffectId, string>> = {
+  echo: 'ECH', lowCutEcho: 'LCE', reverb: 'RVB', flanger: 'FLG', trans: 'TRS', roll: 'ROL',
+};
+/** Full Pioneer names. */
+export const BEAT_FX_LABELS: Readonly<Record<BeatFxEffectId, string>> = {
+  echo: 'ECHO', lowCutEcho: 'LOW CUT ECHO', reverb: 'REVERB', flanger: 'FLANGER', trans: 'TRANS', roll: 'ROLL',
+};
+/** TRANS/ROLL replace the dry signal (worklet kernel); the rest are
+ * parallel returns over it. */
+export function isReplacementEffect(effect: BeatFxEffectId | null): effect is 'trans' | 'roll' {
+  return effect === 'trans' || effect === 'roll';
+}
 export type BeatFxTarget = 'A' | 'B' | 'C' | 'D' | 'sampler' | 'master';
 
 /**
@@ -33,8 +52,9 @@ export interface BeatFxSectionState {
   beats: number;
 }
 
-/** The GRV6 BEAT ◄ ► ladder the echo's delay quantizes to (issue #272). */
-export const ECHO_BEAT_LADDER: readonly number[] = [0.25, 0.5, 0.75, 1, 2, 4, 8];
+/** The GRV6 BEAT ◄ ► ladder every effect's length quantizes to (#272;
+ * 1/16 and 1/8 added for TRANS/ROLL, #360). */
+export const ECHO_BEAT_LADDER: readonly number[] = [0.0625, 0.125, 0.25, 0.5, 0.75, 1, 2, 4, 8];
 
 /** Classic Pioneer echo default: half-beat repeats. */
 export const ECHO_BEATS_DEFAULT = 0.5;
@@ -80,6 +100,12 @@ const RETARGET_S = 0.25;
 
 export const REVERB_SECONDS = DEFAULT_BEAT_FX_SETTINGS.reverbDecay;
 
+/** BEAT ◄ ► display: ladder fractions as n/d, else the number. */
+export function formatBeatFxLength(beats: number): string {
+  const frac: Record<number, string> = { 0.0625: '1/16', 0.125: '1/8', 0.25: '1/4', 0.5: '1/2', 0.75: '3/4' };
+  return frac[beats] ?? String(beats);
+}
+
 /** Walk the beat ladder one step (BEAT ◄ ► — 3/4 breaks pure doubling, so
  * the ladder is an ordered list, not arithmetic). Off-ladder inputs snap
  * to the nearest rung first. */
@@ -124,12 +150,45 @@ export function beatFxMixGains(depth: number): { dry: number; wet: number } {
   };
 }
 
+/** LEVEL/DEPTH law for the replacement effects (TRANS, ROLL, #360): a
+ * linear crossfade — -1 original only, 0 half/half (TRANS = half duck),
+ * +1 effect only. The parallel law above would double the level of a
+ * signal that is the dry itself. */
+export function replacementMixGains(depth: number): { dry: number; wet: number } {
+  const m = (Math.max(-1, Math.min(1, depth)) + 1) / 2;
+  return { dry: 1 - m, wet: m };
+}
+
 /** Effective state for one channel after section ON + assignment + SELECT. */
 export interface EffectiveBeatFxState {
   echo: boolean;
+  lowCutEcho?: boolean;
   reverb: boolean;
   flanger: boolean;
+  trans?: boolean;
+  roll?: boolean;
   depth: number;
+  /** Shared BEAT ◄ ► value (TRANS/ROLL cell length). */
+  beats?: number;
+}
+
+/** Beat clock for TRANS/ROLL phase lock: the Deck's beat coordinate at
+ * AudioContext time `time` (null = tempo only, no grid phase). */
+export interface BeatFxClock {
+  time: number;
+  beat: number | null;
+  beatSeconds: number;
+}
+
+/** Effect state from the section + one channel's engagement. */
+export function effectiveBeatFxState(
+  selected: BeatFxEffectId | null, engaged: boolean, depth: number, beats: number,
+): EffectiveBeatFxState {
+  const is = (effect: BeatFxEffectId) => engaged && selected === effect;
+  return {
+    echo: is('echo'), lowCutEcho: is('lowCutEcho'), reverb: is('reverb'), flanger: is('flanger'),
+    trans: is('trans'), roll: is('roll'), depth, beats,
+  };
 }
 
 /** Deterministic PRNG (mulberry32) — IR tests need reproducible noise. */
@@ -226,11 +285,18 @@ function reverbImpulseBuffer(ctx: BaseAudioContext, settings: Readonly<BeatFxSet
  * all-off settles to dry at unity (bit-transparent but for the pass-through
  * gain nodes).
  */
-export function createBeatFxInsert(ctx: BaseAudioContext) {
+export function createBeatFxInsert(
+  ctx: BaseAudioContext,
+  options: { repeatNode?: typeof createBeatFxRepeatNode } = {},
+) {
   const input = ctx.createGain();
   const output = ctx.createGain();
   const dry = ctx.createGain();
-  input.connect(dry).connect(output);
+  // TRANS/ROLL (#360) sit in series ahead of everything else: the worklet
+  // is spliced between `input` and `mid` once its module loads.
+  const mid = ctx.createGain();
+  input.connect(mid);
+  mid.connect(dry).connect(output);
 
   // Echo: send -> delay -> safety soft clip -> (feedback -> delay,
   // wet -> output). Normal Pioneer ECHO stays full-band: LOW CUT ECHO is a
@@ -247,9 +313,32 @@ export function createBeatFxInsert(ctx: BaseAudioContext) {
   feedback.gain.value = ECHO_FEEDBACK;
   const echoWet = ctx.createGain();
   echoWet.gain.value = 0;
-  input.connect(echoSend).connect(delay).connect(clip);
+  mid.connect(echoSend).connect(delay).connect(clip);
   clip.connect(feedback).connect(delay);
   clip.connect(echoWet).connect(output);
+
+  // LOW CUT ECHO (#360): the echo loop with a high-pass ahead of the delay
+  // on both the send and the feedback, so repeat k has passed it k times —
+  // the low end thins out repeat by repeat and the kick never piles up.
+  // Feedback/saturation are Echo's.
+  const lceSend = ctx.createGain();
+  lceSend.gain.value = 0;
+  const lceCut = ctx.createBiquadFilter();
+  lceCut.type = 'highpass';
+  lceCut.Q.value = Math.SQRT1_2;
+  lceCut.frequency.value = DEFAULT_BEAT_FX_SETTINGS.lowCutEchoHz;
+  const lceDelay = ctx.createDelay(MAX_ECHO_DELAY_S);
+  lceDelay.delayTime.value = echoDelaySeconds(ECHO_BEATS_DEFAULT, BEAT_SECONDS_DEFAULT);
+  const lceClip = ctx.createWaveShaper();
+  lceClip.curve = echoClipCurve(DEFAULT_BEAT_FX_SETTINGS.echoSaturation);
+  lceClip.oversample = '2x';
+  const lceFeedback = ctx.createGain();
+  lceFeedback.gain.value = ECHO_FEEDBACK;
+  const lceWet = ctx.createGain();
+  lceWet.gain.value = 0;
+  mid.connect(lceSend).connect(lceCut).connect(lceDelay).connect(lceClip);
+  lceClip.connect(lceFeedback).connect(lceCut);
+  lceClip.connect(lceWet).connect(output);
 
   // Reverb: send -> convolver (shared synthesized stereo IR) -> wet.
   const reverbSend = ctx.createGain();
@@ -258,7 +347,7 @@ export function createBeatFxInsert(ctx: BaseAudioContext) {
   convolver.buffer = reverbImpulseBuffer(ctx, DEFAULT_BEAT_FX_SETTINGS);
   const reverbWet = ctx.createGain();
   reverbWet.gain.value = 0;
-  input.connect(reverbSend).connect(convolver).connect(reverbWet).connect(output);
+  mid.connect(reverbSend).connect(convolver).connect(reverbWet).connect(output);
 
   // Flanger: short delay swept by a beat-synchronized sine LFO, with
   // regeneration. Pioneer documents one LFO cycle per selected beat span;
@@ -272,20 +361,37 @@ export function createBeatFxInsert(ctx: BaseAudioContext) {
   const flangerLfo = ctx.createOscillator();
   flangerLfo.type = 'sine';
   const flangerLfoDepth = ctx.createGain();
-  input.connect(flangerSend).connect(flangerDelay);
+  mid.connect(flangerSend).connect(flangerDelay);
   flangerDelay.connect(flangerFeedback).connect(flangerDelay);
   flangerDelay.connect(flangerWet).connect(output);
   flangerLfo.connect(flangerLfoDepth).connect(flangerDelay.delayTime);
   flangerLfo.start();
 
   const nodes: AudioNode[] = [
-    input, output, dry,
+    input, output, dry, mid,
     echoSend, delay, clip, feedback, echoWet,
+    lceSend, lceCut, lceDelay, lceClip, lceFeedback, lceWet,
     reverbSend, convolver, reverbWet,
     flangerSend, flangerDelay, flangerFeedback, flangerWet,
     flangerLfo, flangerLfoDepth,
   ];
   let disposed = false;
+
+  // TRANS/ROLL worklet: the last state/clock/settings are replayed once it
+  // loads (commands before that have nothing to drive).
+  let repeat: { node: AudioNode; post: (command: BeatFxRepeatCommand) => void } | null = null;
+  let repeatState: RepeatState = { mode: 'off', beats: ECHO_BEATS_DEFAULT, dry: 1, wet: 0 };
+  let repeatClock: BeatFxClock | null = null;
+  let repeatSettings: RepeatSettings = repeatSettingsOf(DEFAULT_BEAT_FX_SETTINGS);
+  void (options.repeatNode ?? createBeatFxRepeatNode)(ctx).then((created) => {
+    if (!created || disposed) return;
+    repeat = created;
+    input.disconnect(mid);
+    input.connect(created.node).connect(mid);
+    created.post({ type: 'settings', settings: repeatSettings });
+    if (repeatClock) created.post({ type: 'clock', ...repeatClock });
+    created.post({ type: 'state', state: repeatState, time: ctx.currentTime });
+  }).catch(() => { /* stays pass-through */ });
 
   function ramp(param: AudioParam, target: number, immediate: boolean, seconds: number): void {
     if (immediate) {
@@ -303,13 +409,18 @@ export function createBeatFxInsert(ctx: BaseAudioContext) {
 
   function updateSettings(settings: Readonly<BeatFxSettings>, immediate = false): void {
     ramp(feedback.gain, settings.echoFeedback, immediate, DECLICK_S);
+    ramp(lceFeedback.gain, settings.echoFeedback, immediate, DECLICK_S);
     clip.curve = echoClipCurve(settings.echoSaturation);
+    lceClip.curve = echoClipCurve(settings.echoSaturation);
+    ramp(lceCut.frequency, settings.lowCutEchoHz, immediate, DECLICK_S);
     convolver.buffer = reverbImpulseBuffer(ctx, settings);
     const center = settings.flangerDelayMs / 1000;
     const amplitude = Math.min(settings.flangerWidthMs / 2000, Math.max(0, center - 0.0001));
     ramp(flangerDelay.delayTime, center, immediate, DECLICK_S);
     ramp(flangerLfoDepth.gain, amplitude, immediate, DECLICK_S);
     ramp(flangerFeedback.gain, settings.flangerFeedback, immediate, DECLICK_S);
+    repeatSettings = repeatSettingsOf(settings);
+    repeat?.post({ type: 'settings', settings: repeatSettings });
   }
 
   updateSettings(DEFAULT_BEAT_FX_SETTINGS, true);
@@ -319,17 +430,32 @@ export function createBeatFxInsert(ctx: BaseAudioContext) {
     output,
     /** Apply the channel's effective section state. SEND gating preserves
      * existing tails: closing the channel fader or section/channel ON state
-     * stops excitation without disconnecting the return. */
+     * stops excitation without disconnecting the return. TRANS/ROLL have no
+     * tail: their kernel ramps straight back to the live program. */
     update(state: EffectiveBeatFxState, immediate = false): void {
       if (disposed) return;
       const mix = beatFxMixGains(state.depth);
+      const parallel = state.echo || state.lowCutEcho || state.reverb || state.flanger;
       ramp(echoSend.gain, state.echo ? 1 : 0, immediate, DECLICK_S);
       ramp(echoWet.gain, mix.wet, immediate, DECLICK_S);
+      ramp(lceSend.gain, state.lowCutEcho ? 1 : 0, immediate, DECLICK_S);
+      ramp(lceWet.gain, mix.wet, immediate, DECLICK_S);
       ramp(reverbSend.gain, state.reverb ? 1 : 0, immediate, DECLICK_S);
       ramp(reverbWet.gain, mix.wet, immediate, DECLICK_S);
       ramp(flangerSend.gain, state.flanger ? 1 : 0, immediate, DECLICK_S);
       ramp(flangerWet.gain, mix.wet, immediate, DECLICK_S);
-      ramp(dry.gain, state.echo || state.reverb || state.flanger ? mix.dry : 1, immediate, DECLICK_S);
+      ramp(dry.gain, parallel ? mix.dry : 1, immediate, DECLICK_S);
+      const replace = replacementMixGains(state.depth);
+      const next: RepeatState = {
+        mode: state.trans ? 'trans' : state.roll ? 'roll' : 'off',
+        beats: state.beats ?? repeatState.beats,
+        dry: replace.dry,
+        wet: replace.wet,
+      };
+      if (next.mode === repeatState.mode && next.beats === repeatState.beats
+        && next.dry === repeatState.dry && next.wet === repeatState.wet) return;
+      repeatState = next;
+      repeat?.post({ type: 'state', state: next, time: ctx.currentTime });
     },
     updateSettings,
     /** Retarget the echo's delay time (ramped — beat grid/BPM changes
@@ -337,16 +463,36 @@ export function createBeatFxInsert(ctx: BaseAudioContext) {
     setDelaySeconds(seconds: number, immediate = false): void {
       if (disposed) return;
       ramp(delay.delayTime, seconds, immediate, RETARGET_S);
+      ramp(lceDelay.delayTime, seconds, immediate, RETARGET_S);
     },
     setFlangerPeriodSeconds(seconds: number, immediate = false): void {
       if (disposed) return;
       ramp(flangerLfo.frequency, 1 / Math.max(0.01, seconds), immediate, RETARGET_S);
+    },
+    /** TRANS/ROLL phase source (the tempo Deck's beat clock). */
+    setClock(clock: BeatFxClock): void {
+      if (disposed) return;
+      repeatClock = clock;
+      repeat?.post({ type: 'clock', ...clock });
+    },
+    /** Kernel-facing state, for tests and diagnostics. */
+    getRepeatState(): Readonly<RepeatState> {
+      return repeatState;
     },
     dispose(): void {
       if (disposed) return;
       disposed = true;
       flangerLfo.stop();
       for (const node of nodes) node.disconnect();
+      repeat?.node.disconnect();
     },
+  };
+}
+
+function repeatSettingsOf(settings: Readonly<BeatFxSettings>): RepeatSettings {
+  return {
+    transDuty: settings.transDuty,
+    transSlopeMs: settings.transSlopeMs,
+    rollFadeMs: settings.rollFadeMs,
   };
 }

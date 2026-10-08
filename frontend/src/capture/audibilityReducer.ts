@@ -75,7 +75,7 @@ export interface ReducerDeckState {
 
 /** What is feeding a deck's tail-producing Beat FX (#355). */
 export interface FxExcitation {
-  effect: 'echo' | 'reverb';
+  effect: 'echo' | 'lowCutEcho' | 'reverb';
   beats: number;
   /** Master-insert FX (post-crossfader) rather than the channel insert. */
   master: boolean;

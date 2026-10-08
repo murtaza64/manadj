@@ -24,14 +24,13 @@ describe('Performance Beat FX keyboard map', () => {
 
   it('cycles the effect type with 8/9, wrapping and starting from ---', () => {
     const mixer = rig('echo');
-    dispatchPerformanceFxKey('9', mixer as never, 4);
-    dispatchPerformanceFxKey('9', mixer as never, 4);
-    dispatchPerformanceFxKey('9', mixer as never, 4);
+    for (let i = 0; i < 6; i++) dispatchPerformanceFxKey('9', mixer as never, 4);
     dispatchPerformanceFxKey('8', mixer as never, 4);
-    expect(mixer.selectBeatFx.mock.calls).toEqual([['reverb'], ['flanger'], ['echo'], ['flanger']]);
+    expect(mixer.selectBeatFx.mock.calls.map(([e]) => e))
+      .toEqual(['lowCutEcho', 'reverb', 'flanger', 'trans', 'roll', 'echo', 'roll']);
     const none = rig(null);
     dispatchPerformanceFxKey('8', none as never, 4);
-    expect(none.selectBeatFx).toHaveBeenLastCalledWith('flanger');
+    expect(none.selectBeatFx).toHaveBeenLastCalledWith('roll');
   });
 
   it('leaves 0 (held knob), = and hidden C/D targets to other owners', () => {

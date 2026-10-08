@@ -25,11 +25,14 @@ const PAD_BLOCK = {
 
 /** Beat FX section MIDI channel (E1: 1-based channel 5). */
 const BEAT_FX_CHANNEL = 4;
-/** E1 SELECT detents 32–45. Unsupported effects explicitly select none so
- * hardware rotation never leaves the previously implemented effect live. */
+/** E1 SELECT detents 32–45: 32 DELAY, 33 ECHO, 34 LOW CUT ECHO, 35 SPIRAL,
+ * 36 HELIX, 37 REVERB, 38 FLANGER, 39 PHASER, 40 FILTER, 41 TRANS,
+ * 42 PITCH, 43 ROLL, 44 MOBIUS SAW, 45 MOBIUS TRI (MIDI Message List E1;
+ * docs/research/ddj-grv6-hardware.md). Unsupported effects explicitly
+ * select none so hardware rotation never leaves the previous effect live. */
 const BEAT_FX_SELECT_EFFECTS = [
-  null, 'echo', null, null, null, 'reverb', 'flanger',
-  null, null, null, null, null, null, null,
+  null, 'echo', 'lowCutEcho', null, null, 'reverb', 'flanger',
+  null, null, 'trans', null, 'roll', null, null,
 ] as const;
 
 const LOOP_PRESETS = [0.25, 0.5, 1, 2, 4, 8, 16, 32] as const;
@@ -290,8 +293,9 @@ export const DDJ_GRV6: Mapping = {
     ),
     // Beat FX section (gh#272), channel 5 per the E1 list (exact bytes in
     // docs/research/ddj-grv6-hardware.md §Beat FX). The SELECT knob sends
-    // a distinct note per detent (14 effects); ECHO (33), REVERB (37) and
-    // FLANGER (38) select implementations; unsupported detents select none.
+    // a distinct note per detent (14 effects); ECHO (33), LOW CUT ECHO (34),
+    // REVERB (37), FLANGER (38), TRANS (41) and ROLL (43) select
+    // implementations; unsupported detents select none.
     // CH SELECT is hardware-radio target selection. SP is the sampler bus
     // (represented but silent: manadj has no sampler); MST processes the
     // summed post-crossfader program. Shift-layer channel notes and release

@@ -16,17 +16,17 @@ describe('echo beat ladder (BEAT ◄ ►)', () => {
       beats = stepEchoBeats(beats, 'double');
       up.push(beats);
     }
-    expect(up).toEqual([0.5, 0.75, 1, 2, 4, 8]);
+    expect(up).toEqual([0.125, 0.25, 0.5, 0.75, 1, 2, 4, 8]);
     const down: number[] = [];
     for (let i = 0; i < ECHO_BEAT_LADDER.length - 1; i++) {
       beats = stepEchoBeats(beats, 'halve');
       down.push(beats);
     }
-    expect(down).toEqual([4, 2, 1, 0.75, 0.5, 0.25]);
+    expect(down).toEqual([4, 2, 1, 0.75, 0.5, 0.25, 0.125, 0.0625]);
   });
 
   it('clamps at the ladder ends', () => {
-    expect(stepEchoBeats(0.25, 'halve')).toBe(0.25);
+    expect(stepEchoBeats(0.0625, 'halve')).toBe(0.0625);
     expect(stepEchoBeats(8, 'double')).toBe(8);
   });
 

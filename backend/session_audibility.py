@@ -114,6 +114,10 @@ def _deck_beat_seconds(bpm: Any, pitch: float) -> float:
     return 60 / bpm / rate if rate > 0 else _BEAT_SECONDS_DEFAULT
 
 
+# fxTail.ts fxHasTail: TRANS/ROLL stop dead; LOW CUT ECHO rings like Echo (#360).
+_FX_TAIL_EFFECTS = ("echo", "lowCutEcho", "reverb")
+
+
 def _fx_tail_seconds(effect: str, beats: float, depth: float, settings: dict[str, Any],
                      beat_seconds: float) -> float:
     """fxTail.ts fxTailSeconds: echo = last repeat above the audible gain;
@@ -121,7 +125,7 @@ def _fx_tail_seconds(effect: str, beats: float, depth: float, settings: dict[str
     wet = _beat_fx_wet(depth)
     if wet < AUDIBLE_GAIN or wet <= 0:
         return 0.0
-    if effect == "echo":
+    if effect in ("echo", "lowCutEcho"):
         delay = max(_MIN_ECHO_DELAY_S, min(_MAX_ECHO_DELAY_S, beats * beat_seconds))
         fb = float(settings.get("echoFeedback", _DEFAULT_ECHO_FEEDBACK))
         extra = floor(log(AUDIBLE_GAIN / wet) / log(fb)) if 0 < fb < 1 else 0
@@ -261,7 +265,7 @@ def events_contain_audible(events: Iterable[dict[str, Any]]) -> bool:
     def fx_excitation(ch: str) -> tuple[str, float, bool] | None:
         """audibilityReducer.ts fxExcitation (transport-gated, no previews)."""
         fx = beat_fx
-        if not fx or not fx.get("on") or fx.get("selected") not in ("echo", "reverb"):
+        if not fx or not fx.get("on") or fx.get("selected") not in _FX_TAIL_EFFECTS:
             return None
         master = fx.get("target") == "master"
         if not master and fx.get("target") != ch:

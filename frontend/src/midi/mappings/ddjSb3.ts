@@ -1,6 +1,9 @@
 import type { ChannelId, StemName } from '../../playback/mixer';
 import { STEM_NAMES } from '../../playback/mixer';
-import { BEAT_FX_EFFECTS } from '../../playback/beatFx';
+import type { BeatFxEffectId } from '../../playback/beatFx';
+
+/** SB3 FX-1/2/3: three buttons, the original three effects. */
+const BEAT_FX_EFFECTS: readonly BeatFxEffectId[] = ['echo', 'reverb', 'flanger'];
 import type { LayeredControl } from '../actions';
 import type {
   BeatFxEngageLamp,

@@ -281,6 +281,13 @@ const EFFECT_GROUPS = [
     ],
   },
   {
+    name: 'Low Cut Echo',
+    detail: 'Echo whose repeats lose more low end each pass. Feedback and saturation are Echo\'s.',
+    fields: [
+      ['lowCutEchoHz', 'Low cut', 'Hz', 'High-pass corner in the echo loop; each repeat passes it again.'],
+    ],
+  },
+  {
     name: 'Reverb',
     detail: 'Synthesized stereo convolution impulse.',
     fields: [
@@ -296,6 +303,21 @@ const EFFECT_GROUPS = [
       ['flangerDelayMs', 'Center delay', 'ms', 'Center of the comb-filter delay sweep.'],
       ['flangerWidthMs', 'Sweep width', 'ms', 'Peak-to-peak delay modulation range.'],
       ['flangerFeedback', 'Feedback', '%', 'Regeneration around the short delay.'],
+    ],
+  },
+  {
+    name: 'Trans',
+    detail: 'Beat-locked gate, one cycle per BEAT ◄ ► length. Partial depth = partial duck.',
+    fields: [
+      ['transDuty', 'Open share', '%', 'Share of each cycle the gate is open.'],
+      ['transSlopeMs', 'Edge slope', 'ms', 'Fade on each gate edge. Lower is harder.'],
+    ],
+  },
+  {
+    name: 'Roll',
+    detail: 'Loops the last BEAT ◄ ► length on the grid while on; no tail on release.',
+    fields: [
+      ['rollFadeMs', 'Seam fade', 'ms', 'Crossfade at each loop wrap, on entry and on length changes.'],
     ],
   },
 ] as const;

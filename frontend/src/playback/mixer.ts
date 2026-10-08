@@ -84,6 +84,8 @@ import {
   echoDelaySeconds,
   stepEchoBeats,
   flangerPeriodSeconds,
+  effectiveBeatFxState,
+  isReplacementEffect,
 } from './beatFx';
 import type { BeatFxEffectId, BeatFxSectionState, BeatFxTarget } from './beatFx';
 import {
@@ -327,7 +329,7 @@ class ChannelStrip {
 
     this.sweep = createSweepFilter(ctx);
     this.beatFx = createBeatFxInsert(ctx);
-    this.beatFx.update({ echo: false, reverb: false, flanger: false, depth: 0 }, true);
+    this.beatFx.update(effectiveBeatFxState(null, false, 0, ECHO_BEATS_DEFAULT), true);
 
     this.faderGain = ctx.createGain();
     this.faderGain.gain.value = channelFaderToGain(state.fader);
@@ -462,6 +464,7 @@ export class Mixer {
   /** MST has no Deck of its own; retain the last 1–4 target as its tempo
    * source, matching a hardware section whose BPM survives CH SELECT. */
   private beatFxTempoChannel: ChannelId = 'A';
+  private beatClock: ((deck: ChannelId) => { beat: number; beatSeconds: number } | null) | null = null;
   /** Wall seconds per musical beat, per channel (gh#272): the echo's beat
    * clock, pushed by each Deck's tempo bridge (DeckContext). Survives
    * graph rebuilds like the rest of the control state. */
@@ -485,7 +488,7 @@ export class Mixer {
         D: new ChannelStrip(ctx, this.channels.D),
       };
       const masterBeatFx = createBeatFxInsert(ctx);
-      masterBeatFx.update({ echo: false, reverb: false, flanger: false, depth: 0 }, true);
+      masterBeatFx.update(effectiveBeatFxState(null, false, 0, ECHO_BEATS_DEFAULT), true);
       const masterGain = ctx.createGain();
       masterGain.gain.value = masterValueToGain(this.master);
 
@@ -1298,8 +1301,12 @@ export class Mixer {
     this.beatFxSection = { ...this.beatFxSection, beats };
     this.notify('beatFx');
     this.ensure();
-    for (const channel of CHANNEL_IDS) this.applyBeatFxTiming(channel);
+    for (const channel of CHANNEL_IDS) {
+      this.applyBeatFxTiming(channel);
+      this.applyBeatFx(channel);
+    }
     this.applyMasterBeatFxTiming();
+    this.applyMasterBeatFx();
   }
 
   /**
@@ -1317,6 +1324,7 @@ export class Mixer {
     if (this.liveGraph()) {
       this.applyBeatFxTiming(channel);
       if (channel === this.beatFxTempoChannel) this.applyMasterBeatFxTiming();
+      this.syncBeatFxClock(channel);
     }
   }
 
@@ -1331,30 +1339,49 @@ export class Mixer {
 
   private applyBeatFx(channel: ChannelId, immediate = false): void {
     if (!this.strips) return;
-    const engaged = this.beatFxSection.on && this.beatFxSection.target === channel;
-    this.strips[channel].beatFx.update(
-      {
-        echo: engaged && this.beatFxSection.selected === 'echo',
-        reverb: engaged && this.beatFxSection.selected === 'reverb',
-        flanger: engaged && this.beatFxSection.selected === 'flanger',
-        depth: this.beatFxSection.depth,
-      },
-      immediate
-    );
+    const { selected, on, target, depth, beats } = this.beatFxSection;
+    const engaged = on && target === channel;
+    if (engaged && isReplacementEffect(selected)) this.pushBeatFxClock(channel);
+    this.strips[channel].beatFx.update(effectiveBeatFxState(selected, engaged, depth, beats), immediate);
   }
 
   private applyMasterBeatFx(immediate = false): void {
     if (!this.masterBeatFx) return;
-    const engaged = this.beatFxSection.on && this.beatFxSection.target === 'master';
-    this.masterBeatFx.update(
-      {
-        echo: engaged && this.beatFxSection.selected === 'echo',
-        reverb: engaged && this.beatFxSection.selected === 'reverb',
-        flanger: engaged && this.beatFxSection.selected === 'flanger',
-        depth: this.beatFxSection.depth,
-      },
-      immediate
-    );
+    const { selected, on, target, depth, beats } = this.beatFxSection;
+    const engaged = on && target === 'master';
+    if (engaged && isReplacementEffect(selected)) this.pushBeatFxClock('master');
+    this.masterBeatFx.update(effectiveBeatFxState(selected, engaged, depth, beats), immediate);
+  }
+
+  /** TRANS/ROLL phase lock (#360): the Deck beat-clock provider (DeckContext
+   * registers it) gives the beat coordinate now; MST follows the tempo
+   * Deck. Without a provider/grid the insert keeps its own tempo-only clock. */
+  registerBeatClock(provider: ((deck: ChannelId) => { beat: number; beatSeconds: number } | null) | null): void {
+    this.beatClock = provider;
+  }
+
+  /** A Deck's engine moved (frame, seek, tempo): re-anchor any TRANS/ROLL
+   * insert it clocks. Cheap no-op otherwise; the kernel ignores jitter. */
+  syncBeatFxClock(deck: ChannelId): void {
+    if (!this.liveGraph() || !isReplacementEffect(this.beatFxSection.selected)) return;
+    if (!this.beatFxSection.on) return;
+    const target = this.beatFxSection.target;
+    if (target === deck) this.pushBeatFxClock(deck);
+    else if (target === 'master' && deck === this.beatFxTempoChannel) this.pushBeatFxClock('master');
+  }
+
+  private pushBeatFxClock(target: ChannelId | 'master'): void {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    const deck = target === 'master' ? this.beatFxTempoChannel : target;
+    const insert = target === 'master' ? this.masterBeatFx : this.strips?.[target].beatFx;
+    if (!insert) return;
+    const live = this.beatClock?.(deck) ?? null;
+    insert.setClock({
+      time: ctx.currentTime,
+      beat: live ? live.beat : null,
+      beatSeconds: live?.beatSeconds ?? this.channelBeatSeconds[deck],
+    });
   }
 
   private applyMasterBeatFxTiming(immediate = false): void {

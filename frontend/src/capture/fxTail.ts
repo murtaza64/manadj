@@ -13,9 +13,12 @@ import type { BeatFxEffectId } from '../playback/beatFx';
 import type { BeatFxSettings } from '../playback/beatFxSettings';
 
 /** Effects whose return outlives its input. Flanger regenerates over a
- * few milliseconds only: no tail worth modelling. */
-export function fxHasTail(effect: BeatFxEffectId | null): effect is 'echo' | 'reverb' {
-  return effect === 'echo' || effect === 'reverb';
+ * few milliseconds only: no tail worth modelling. TRANS and ROLL (#360)
+ * replace the signal and stop dead on release. LOW CUT ECHO rings like
+ * Echo (same feedback; its high-pass only shortens the audible tail, so
+ * the Echo model is a safe upper bound). */
+export function fxHasTail(effect: BeatFxEffectId | null): effect is 'echo' | 'lowCutEcho' | 'reverb' {
+  return effect === 'echo' || effect === 'lowCutEcho' || effect === 'reverb';
 }
 
 /** Wall seconds per beat for a deck: the Track's BPM at its varispeed;
@@ -36,7 +39,7 @@ export function deckBeatSeconds(bpm: number | null, pitchPercent: number): numbe
  *   ends where wet × envelope crosses `audibleGain` (capped at the IR).
  */
 export function fxTailSeconds(
-  effect: 'echo' | 'reverb',
+  effect: 'echo' | 'lowCutEcho' | 'reverb',
   beats: number,
   depth: number,
   settings: Readonly<Pick<BeatFxSettings, 'echoFeedback' | 'reverbDecay'>>,
@@ -45,7 +48,7 @@ export function fxTailSeconds(
 ): number {
   const { wet } = beatFxMixGains(depth);
   if (wet < audibleGain || wet <= 0) return 0;
-  if (effect === 'echo') {
+  if (effect === 'echo' || effect === 'lowCutEcho') {
     const delay = echoDelaySeconds(beats, beatSeconds);
     const fb = settings.echoFeedback;
     const extra = fb > 0 && fb < 1 ? Math.floor(Math.log(audibleGain / wet) / Math.log(fb)) : 0;

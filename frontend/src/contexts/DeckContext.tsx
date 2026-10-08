@@ -111,13 +111,19 @@ export function DeckProvider({ children }: { children: ReactNode }) {
   // playback frames); the Mixer dedupes and ramps, so this stays cheap and
   // the delay glides instead of stepping.
   useEffect(() => {
-    const push = (deck: ChannelId) =>
+    const push = (deck: ChannelId) => {
       mixer.setChannelBeatSeconds(deck, engines[deck].echoBeatSeconds());
+      mixer.syncBeatFxClock(deck);
+    };
+    mixer.registerBeatClock((deck) => engines[deck].beatFxClock());
     const unsubscribes = CHANNEL_IDS.map((deck) => {
       push(deck);
       return engines[deck].subscribe(() => push(deck));
     });
-    return () => unsubscribes.forEach((unsubscribe) => unsubscribe());
+    return () => {
+      unsubscribes.forEach((unsubscribe) => unsubscribe());
+      mixer.registerBeatClock(null);
+    };
   }, [engines, mixer]);
 
   // Synced launches reference a locked member, never an unrelated playing Deck.

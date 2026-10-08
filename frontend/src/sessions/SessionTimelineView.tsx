@@ -12,6 +12,7 @@
  * click = moment (and SEEK while a replay is rolling), space =
  * pause/resume replay. A moving playhead tracks session replay.
  */
+import { formatBeatFxLength } from '../playback/beatFx';
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { ReactNode } from 'react';
 import { flushSync } from 'react-dom';
@@ -132,8 +133,7 @@ function fmtDur(s: number): string {
 
 /** Beat FX length readout (MixerStrip parity): 0.5 → "1/2". */
 function fmtFxLength(beats: number, unit: 'beats' | 'bars' | null): string {
-  const frac: Record<number, string> = { 0.25: '1/4', 0.5: '1/2', 0.75: '3/4' };
-  return `${frac[beats] ?? String(beats)}${unit === 'bars' ? ' bar' : unit === 'beats' ? 'b' : ''}`;
+  return `${formatBeatFxLength(beats)}${unit === 'bars' ? ' bar' : unit === 'beats' ? 'b' : ''}`;
 }
 
 function fmtFxDepth(depth: number): string {

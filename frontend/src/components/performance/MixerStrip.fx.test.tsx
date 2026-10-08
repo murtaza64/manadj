@@ -114,7 +114,7 @@ it('routes MST to the master target', () => {
 
 it('offers --- and dispatches null for unsupported effects', () => {
   const selector = container.querySelector<HTMLSelectElement>('[aria-label="Beat FX effect"]')!;
-  expect([...selector.options].map((option) => option.textContent)).toEqual(['---', 'ECH', 'RVB', 'FLG']);
+  expect([...selector.options].map((option) => option.textContent)).toEqual(['---', 'ECH', 'LCE', 'RVB', 'FLG', 'TRS', 'ROL']);
   act(() => {
     selector.value = '';
     selector.dispatchEvent(new Event('change', { bubbles: true }));

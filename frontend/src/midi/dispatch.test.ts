@@ -35,6 +35,7 @@ import {
 } from './dispatch';
 import { _resetTakeoverFeedbackForTests, takeoverHint, takeoverKey } from './takeoverFeedback';
 import { setSoftTakeoverEnabled } from './softTakeoverStore';
+import type { BeatFxEffectId } from '../playback/beatFx';
 import {
   _resetControlFocusForTests,
   getControlFocus,
@@ -75,7 +76,7 @@ interface FakeMixerState {
   cueLevel: number;
   cueMix: number;
   beatFxSection: {
-    selected: 'echo' | 'reverb' | 'flanger' | null;
+    selected: BeatFxEffectId | null;
     target: 'A' | 'B' | 'C' | 'D' | 'sampler' | 'master';
     on: boolean;
     depth: number;

@@ -57,10 +57,10 @@ knob (sweep filter), crossfader.
 
 | Control | Action |
 |---|---|
-| SELECT | Echo / Reverb / Flanger; other detents select none (section off) |
+| SELECT | ECHO / LOW CUT ECHO / REVERB / FLANGER / TRANS / ROLL; other detents select none (section off) |
 | CH SELECT 1–4 / SP / MST | Beat FX target Deck A–D / sampler (silent) / master |
 | ON/OFF | section on/off |
-| BEAT ◄ ► | Beat FX length halve / double (beats; Flanger reads bars by default) |
+| BEAT ◄ ► | Beat FX length halve / double, 1/16–8 (beats; Flanger reads bars by default) |
 | LEVEL/DEPTH | depth (original ⟷ effect) |
 
 ## Browse (ch 7)

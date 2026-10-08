@@ -7,8 +7,11 @@ import type { BeatFxEffectId } from '../playback/beatFx';
 
 export const BEAT_FX_COLORS: Record<BeatFxEffectId, string> = {
   echo: '#ffe600',
+  lowCutEcho: '#b8ff00',
   reverb: '#39ff14',
   flanger: '#ff1f1f',
+  trans: '#0050ff',
+  roll: '#ff00f2',
 };
 
 /** LEVEL/DEPTH (bipolar −1..1) → band opacity: the wet share, squared for

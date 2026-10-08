@@ -1,11 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_BEAT_FX_SETTINGS } from '../playback/beatFxSettings';
 import { BEAT_SECONDS_DEFAULT } from '../playback/beatFx';
-import { deckBeatSeconds, fxTailSeconds } from './fxTail';
+import { deckBeatSeconds, fxHasTail, fxTailSeconds } from './fxTail';
 import type { CaptureEvent } from './events';
 import { deriveTimeline } from '../sessions/timelineModel';
 
 const G = 0.05;
+
+describe('fxHasTail (#360)', () => {
+  it('LOW CUT ECHO rings like Echo; TRANS and ROLL stop dead', () => {
+    expect(fxHasTail('lowCutEcho')).toBe(true);
+    expect(fxHasTail('trans')).toBe(false);
+    expect(fxHasTail('roll')).toBe(false);
+  });
+});
 
 describe('fxTailSeconds (#355)', () => {
   it('echo: last repeat above audibleGain at the beat-synced delay', () => {
