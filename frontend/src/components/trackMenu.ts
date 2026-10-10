@@ -40,6 +40,9 @@ export interface TrackMenuInput {
   /** Verdict callbacks receive the per-track subset, not all targets. */
   archive: (trackIds: number[]) => void;
   unarchive: (trackIds: number[]) => void;
+  /** Open the single target's stems folder in the OS file manager. Omitted
+   * (or multi-select) hides the item; a target without stems disables it. */
+  revealStems?: (trackId: number) => void;
 }
 
 const plural = (n: number) => (n === 1 ? 'track' : 'tracks');
@@ -116,6 +119,17 @@ export function trackMenuItems(input: TrackMenuInput): MenuItem[] {
   );
 
   items.push(...(input.surfaceItems ?? []));
+
+  if (input.revealStems && !multi) {
+    const only = tracks[0];
+    items.push({
+      label: 'Reveal stems folder',
+      disabled: !only.has_stems,
+      title: only.has_stems ? undefined : 'No stems for this track',
+      separatorBefore: items.length > 0,
+      onSelect: () => input.revealStems!(only.id),
+    });
+  }
 
   // Archived (CONTEXT.md): per-track verdict, replacing Library's old
   // view-level switch. Stable order beats state-dependent reordering:
