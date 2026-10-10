@@ -261,3 +261,14 @@ describe('scratch quality regressions', () => {
     expect(maximumError).toBeLessThan(0.00001);
   });
 });
+
+it('keeps slow scratches at full level; only a stopping platter fades (gain knee)', async () => {
+  const { scratchGain, SCRATCH_FULL_GAIN_RATE, SCRATCH_SILENT_RATE } = await import('./scratchMotion');
+  expect(scratchGain(1)).toBe(1);
+  expect(scratchGain(-0.5)).toBe(1);
+  expect(scratchGain(0.1)).toBe(1); // a slow baby scratch is not attenuated
+  expect(scratchGain(SCRATCH_FULL_GAIN_RATE)).toBe(1);
+  expect(scratchGain((SCRATCH_FULL_GAIN_RATE + SCRATCH_SILENT_RATE) / 2)).toBeCloseTo(0.5, 6);
+  expect(scratchGain(SCRATCH_SILENT_RATE)).toBe(0);
+  expect(scratchGain(0)).toBe(0);
+});
