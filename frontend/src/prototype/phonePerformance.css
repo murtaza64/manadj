@@ -1,0 +1,144 @@
+/* Throwaway phone instrument; all paint and type follow DESIGN.md tokens. */
+.phone-prototype {
+  height: 100%; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain;
+  background: var(--base); color: var(--text); font-size: var(--font-body);
+  padding: env(safe-area-inset-top) var(--space-8) calc(168px + env(safe-area-inset-bottom));
+}
+.phone-prototype .btn { min-height: 44px; font-weight: 700; border-radius: var(--radius); touch-action: manipulation; }
+.phone-prototype button:focus-visible, .phone-prototype input:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
+.phone-prototype h1, .phone-prototype h2 { font-size: var(--font-title); }
+.phone-header { display: flex; justify-content: space-between; align-items: center; gap: var(--space-8); padding: var(--space-12) var(--space-4); border-bottom: 1px solid var(--surface1); background: var(--crust); }
+.phone-header h1 { line-height: 1; margin-top: var(--space-4); }
+.phone-header h1 span { color: var(--subtext0); font-size: var(--font-small); }
+.phone-kicker { color: var(--accent); font-size: var(--font-small); font-weight: 700; }
+.phone-badge { flex-shrink: 0; color: var(--overlay2); font-size: var(--font-small); text-align: right; }
+.phone-warning { color: var(--subtext1); background: var(--mantle); border-left: 2px solid var(--warning); padding: var(--space-8); font-size: var(--font-small); line-height: 1.3; }
+.phone-stack, .phone-focus, .phone-mixer-first { max-width: 1080px; margin: 0 auto; }
+.phone-deck, .phone-satellite, .phone-mini-decks > section, .phone-pad-bank, .phone-channel { --deck-color: var(--deck-a); min-width: 0; background: var(--mantle); border: 1px solid var(--surface1); border-top: 2px solid var(--deck-color); padding: var(--space-8); }
+.phone-prototype .side-B { --deck-color: var(--deck-b); }
+.phone-deck + .phone-deck, .phone-focus > .phone-channel + .phone-channel { border-top-width: 2px; }
+.phone-deck-head { display: flex; align-items: center; gap: var(--space-8); min-width: 0; }
+.phone-deck-id { display: grid; place-items: center; flex: none; width: 38px; height: 38px; color: var(--deck-color); border: 1px solid var(--deck-color); font-size: var(--font-display); line-height: 1; }
+.phone-title { min-width: 0; flex: 1; }
+.phone-title b, .phone-title small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.phone-title b { font-size: var(--font-large); }
+.phone-title small { color: var(--subtext0); font-size: var(--font-small); margin-top: var(--space-2); }
+.phone-prototype .phone-load { min-height: 44px; padding: 0 var(--space-8); }
+.phone-wave { position: relative; margin: var(--space-8) 0; }
+.phone-wave-caption { display: flex; justify-content: space-between; gap: var(--space-4); margin-bottom: var(--space-4); color: var(--overlay2); font-size: var(--font-micro); font-weight: 700; }
+.phone-wave-caption span:first-child { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.phone-wave-well { position: relative; height: 68px; overflow: hidden; background: var(--void); border: 1px solid var(--surface0); }
+.phone-wave-bars { position: absolute; inset: 0 var(--space-4); display: flex; justify-content: space-between; align-items: flex-end; pointer-events: none; }
+.phone-wave-bars i { width: 1px; height: var(--space-8); background: var(--surface1); }
+.phone-wave-bars i.major { height: var(--space-16); background: var(--overlay0); }
+.phone-wave input { position: absolute; top: 20px; left: 0; width: 100%; height: 68px; opacity: 0.01; cursor: crosshair; touch-action: none; }
+.phone-playhead, .phone-main-cue, .phone-hot-marker { position: absolute; top: 0; bottom: 0; width: 2px; pointer-events: none; }
+.phone-playhead { z-index: 4; background: var(--playhead); }
+.phone-main-cue { z-index: 2; background: var(--orange); }
+.phone-main-cue::after { content: ''; position: absolute; bottom: 0; left: -5px; border: 6px solid transparent; border-bottom-color: var(--orange); }
+.phone-hot-marker { z-index: 3; background: var(--cue-color); }
+.phone-hot-marker span { display: grid; place-items: center; position: absolute; top: 0; left: 2px; width: 16px; height: 16px; background: var(--cue-color); color: var(--crust); font-size: var(--font-micro); font-weight: 700; }
+.phone-wave-time { display: flex; justify-content: space-between; padding-top: var(--space-4); color: var(--subtext1); font-size: var(--font-small); font-variant-numeric: tabular-nums; }
+.phone-transport { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-4); margin: var(--space-8) 0; }
+.phone-prototype .phone-transport .btn { min-height: 52px; padding: 0 var(--space-4); font-size: var(--font-large); }
+.phone-prototype .phone-cue { color: var(--orange); border-color: var(--orange); touch-action: none; user-select: none; }
+.phone-prototype .phone-cue:hover:not(:disabled) { border-color: var(--orange); }
+.phone-prototype .phone-cue.engaged, .phone-prototype .phone-cue.engaged:hover { background: var(--orange); color: var(--base); border-color: var(--orange); }
+.phone-prototype .phone-play { color: var(--success); border-color: var(--success); }
+.phone-prototype .phone-play:hover:not(:disabled) { border-color: var(--success); }
+.phone-prototype .phone-play.engaged, .phone-prototype .phone-play.engaged:hover { background: var(--success); color: var(--base); border-color: var(--success); }
+.phone-section-label { display: flex; justify-content: space-between; gap: var(--space-4); padding: var(--space-8) 0 var(--space-4); border-top: 1px solid var(--surface0); font-size: var(--font-small); font-weight: 700; }
+.phone-section-label span { color: var(--overlay2); font-size: var(--font-micro); }
+.phone-slider { display: grid; grid-template-columns: 64px minmax(0, 1fr) 64px; align-items: center; gap: var(--space-4); min-height: 44px; color: var(--subtext1); font-size: var(--font-body); }
+.phone-slider input { width: 100%; min-width: 0; height: 44px; margin: 0; accent-color: var(--accent); touch-action: none; }
+.phone-prototype input[type='range'] { appearance: none; -webkit-appearance: none; background: transparent; border: 0; cursor: ew-resize; }
+.phone-prototype input[type='range']::-webkit-slider-runnable-track { height: 2px; background: var(--surface2); border: 0; }
+.phone-prototype input[type='range']::-webkit-slider-thumb { appearance: none; -webkit-appearance: none; width: 16px; height: 20px; margin-top: -9px; background: var(--accent); border: 1px solid var(--accent); border-radius: var(--radius); }
+.phone-prototype input[type='range']::-moz-range-track { height: 2px; background: var(--surface2); border: 0; }
+.phone-prototype input[type='range']::-moz-range-thumb { width: 16px; height: 20px; background: var(--accent); border: 1px solid var(--accent); border-radius: var(--radius); }
+.phone-slider b { text-align: right; color: var(--text); font-size: var(--font-body); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.phone-pitch { display: flex; align-items: center; gap: var(--space-4); }
+.phone-pitch .phone-slider { flex: 1; }
+.phone-pitch .btn { flex: none; padding: 0 var(--space-6); }
+.phone-pad-tabs, .phone-selector, .phone-jumps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-4); margin: var(--space-4) 0; }
+.phone-selector, .phone-jumps { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.phone-pad-tabs .btn, .phone-selector .btn, .phone-jumps .btn { min-width: 0; padding: 0 var(--space-4); }
+.phone-pads { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--space-4); }
+.phone-prototype .phone-pad { min-width: 0; min-height: 56px; padding: var(--space-4) var(--space-2); }
+.phone-pad span, .phone-pad small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.phone-pad small { color: var(--subtext0); font-size: var(--font-small); }
+.phone-prototype .phone-pad.set { color: var(--cue-color); border-color: var(--cue-color); }
+.phone-prototype .phone-pad:not(.set) { color: var(--overlay2); }
+.phone-prototype .phone-pad.set:active { background: var(--cue-color); color: var(--base); }
+.phone-prototype .phone-pad.set:active small { color: inherit; }
+.phone-prototype .phone-pad.loop-on { background: var(--success); border-color: var(--success); color: var(--base); }
+.phone-mixer { background: var(--crust); border-top: 1px solid var(--surface1); padding: var(--space-8); }
+.phone-mixer .phone-section-label { border: 0; padding: var(--space-4) 0 var(--space-8); }
+.phone-mixer-channels { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-4); }
+.phone-channel { padding: var(--space-6); border-top-width: 1px; }
+.phone-channel strong { display: block; color: var(--subtext1); font-size: var(--font-small); padding-bottom: var(--space-4); border-bottom: 1px solid var(--surface0); }
+.phone-channel strong span { color: var(--deck-color); }
+.phone-channel .phone-slider { grid-template-columns: minmax(0, 1fr) 46px; column-gap: var(--space-2); min-height: 52px; }
+.phone-channel .phone-slider span { grid-column: 1 / -1; font-size: var(--font-small); }
+.phone-channel .phone-slider input { height: 30px; }
+.phone-channel .phone-slider b { font-size: var(--font-small); }
+.phone-focus > .phone-selector { background: var(--crust); margin: 0; padding: var(--space-4); }
+.phone-focus > .phone-deck { border-top-width: 2px; }
+.phone-satellite { background: var(--crust); }
+.phone-satellite .phone-wave-well { height: 42px; }
+.phone-satellite .phone-wave input { height: 42px; }
+.phone-satellite > .btn { display: block; width: 100%; }
+.phone-mini-decks { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-4); background: var(--crust); }
+.phone-mini-decks > section { padding: var(--space-6); }
+.phone-mini-decks .phone-deck-head { flex-wrap: wrap; }
+.phone-mini-decks .phone-title { flex: 1 1 calc(100% - 52px); }
+.phone-mini-decks .phone-load { width: 100%; }
+.phone-mini-decks .phone-wave-well { height: 42px; }
+.phone-mini-decks .phone-wave input { height: 42px; }
+.phone-mini-decks .phone-transport { grid-template-columns: 1fr; }
+.phone-mini-decks .phone-transport .btn { min-height: 44px; font-size: var(--font-body); }
+.phone-pad-bank { padding: var(--space-8); }
+.phone-pad-bank .phone-selector { margin: 0 0 var(--space-8); }
+.phone-future { max-width: 1080px; margin: var(--space-12) auto 0; background: var(--crust); border: 1px solid var(--surface1); padding: var(--space-8); color: var(--subtext1); font-size: var(--font-body); }
+.phone-future summary { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); min-height: 44px; color: var(--accent); font-weight: 700; cursor: pointer; list-style: none; }
+.phone-future summary::-webkit-details-marker { display: none; }
+.phone-future summary span { color: var(--overlay2); font-size: var(--font-small); }
+.phone-future-body { border-top: 1px solid var(--surface1); padding-top: var(--space-8); }
+.phone-future h2 { color: var(--orange); font-size: var(--font-large); margin-bottom: var(--space-4); }
+.phone-session-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-4); margin: var(--space-8) 0; }
+.phone-session-actions .btn { min-width: 0; padding: 0 var(--space-4); font-size: var(--font-small); }
+.phone-event-list { max-height: 90px; overflow: auto; font-size: var(--font-small); color: var(--subtext0); }
+.phone-bus { position: fixed; z-index: var(--z-sticky); left: 0; right: 0; bottom: calc(48px + env(safe-area-inset-bottom)); background: var(--crust); border-top: 1px solid var(--surface2); padding: var(--space-2) var(--space-8); }
+.phone-status { text-align: center; color: var(--subtext1); font-size: var(--font-small); white-space: nowrap; overflow: hidden; font-variant-numeric: tabular-nums; }
+.phone-bus-controls { display: grid; grid-template-columns: 44px 44px minmax(0, 1.6fr) minmax(0, 1fr); gap: var(--space-4); align-items: center; }
+.phone-prototype .phone-bus-deck { min-width: 44px; padding: 0; color: var(--deck-color); border-color: var(--deck-color); }
+.phone-bus-deck.side-A { --deck-color: var(--deck-a); }
+.phone-prototype .phone-bus-deck.engaged { background: var(--deck-color); color: var(--base); }
+.phone-bus .phone-slider { grid-template-columns: 24px minmax(0, 1fr) 28px; gap: var(--space-2); font-size: var(--font-small); }
+.phone-bus .phone-slider b { font-size: var(--font-small); }
+.phone-switcher { position: fixed; z-index: var(--z-sticky); bottom: env(safe-area-inset-bottom); left: 0; right: 0; display: flex; align-items: center; justify-content: center; gap: var(--space-4); height: 48px; padding: var(--space-2) var(--space-8); background: var(--mantle); border-top: 1px solid var(--surface1); }
+.phone-switcher .btn { width: 44px; min-width: 44px; padding: 0; }
+.phone-switcher span { flex: 1; max-width: 256px; text-align: center; font-size: var(--font-small); font-weight: 700; }
+@media (max-width: 350px) {
+  .phone-header h1 span, .phone-badge { display: none; }
+  .phone-slider { grid-template-columns: 52px minmax(0, 1fr) 60px; }
+  .phone-mini-decks .phone-deck-id { width: 32px; height: 32px; font-size: var(--font-title); }
+  .phone-bus-controls { grid-template-columns: 44px 44px minmax(0, 1.4fr) minmax(0, 1fr); gap: var(--space-2); }
+  .phone-bus .phone-slider { grid-template-columns: 20px minmax(0, 1fr); }
+  .phone-bus .phone-slider b { display: none; }
+}
+@media (min-width: 650px) and (orientation: landscape) {
+  .phone-stack { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .phone-stack .phone-mixer { grid-column: 1 / -1; }
+  .phone-focus { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); }
+  .phone-focus > .phone-selector { grid-column: 1 / -1; }
+  .phone-focus > .phone-satellite { position: static; }
+  .phone-focus > .phone-channel { grid-column: span 1; }
+  .phone-mixer-first { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .phone-mini-decks { grid-column: 1; grid-template-columns: 1fr; }
+  .phone-mixer-first .phone-mixer { grid-column: 2; grid-row: 1; }
+  .phone-mixer-first .phone-pad-bank { grid-column: 1 / -1; }
+  .phone-mini-decks .phone-deck-head { flex-wrap: nowrap; }
+  .phone-mini-decks .phone-load { width: auto; }
+  .phone-mini-decks .phone-transport { grid-template-columns: 1fr 1fr; }
+}

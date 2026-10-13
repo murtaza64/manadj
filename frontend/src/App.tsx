@@ -9,6 +9,7 @@ const SettingsPage = lazy(() => import('./settings/SettingsPage'));
 const MidiInspectorPage = lazy(() => import('./midi/MidiInspectorPage'));
 const VisualizerApp = lazy(() => import('./visualizer/VisualizerApp'));
 const ArenaApp = lazy(() => import('./visualizer/ArenaApp'));
+const PhonePerformancePrototype = lazy(() => import('./prototype/PhonePerformancePrototype'));
 import { BrowsePanel } from './components/BrowsePanel';
 import { isBrowseMode } from './components/browseHost';
 import { SyncView } from './components/SyncView';
@@ -216,6 +217,9 @@ function App() {
   }, []);
 
   // Dev-only surface (packaged-app #278): hand-typed path, dev builds only.
+  if (DEV_SURFACES && window.location.pathname === '/prototype/phone-performance') {
+    return <Suspense fallback={null}><PhonePerformancePrototype /></Suspense>;
+  }
   if (DEV_SURFACES && window.location.pathname === '/midi-inspect') {
     return (
       <Suspense fallback={null}>
