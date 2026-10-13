@@ -1,0 +1,519 @@
+{
+  "start": 100,
+  "end": 220,
+  "decks": {
+    "A": {
+      "deck": "A",
+      "trackSpans": [
+        {
+          "start": 100,
+          "end": 184,
+          "trackId": 101
+        },
+        {
+          "start": 184,
+          "end": 220,
+          "trackId": 105
+        }
+      ],
+      "playingSpans": [
+        {
+          "start": 100,
+          "end": 152
+        },
+        {
+          "start": 184,
+          "end": 220
+        }
+      ],
+      "audibleSpans": [
+        {
+          "start": 100,
+          "end": 152
+        },
+        {
+          "start": 154,
+          "end": 156
+        },
+        {
+          "start": 184,
+          "end": 220
+        }
+      ],
+      "traces": [
+        [
+          {
+            "t": 154,
+            "playhead": 20
+          },
+          {
+            "t": 156,
+            "playhead": 20
+          }
+        ]
+      ],
+      "gestures": [
+        {
+          "t": 128,
+          "action": "jumpBeats",
+          "playhead": 80,
+          "detail": 32
+        },
+        {
+          "t": 154,
+          "action": "cue",
+          "playhead": 20
+        }
+      ],
+      "loops": [],
+      "gainSteps": [
+        {
+          "t": 100,
+          "gain": 0.5011872336272722
+        },
+        {
+          "t": 152,
+          "gain": 0
+        },
+        {
+          "t": 154,
+          "gain": 0.5011872336272722
+        },
+        {
+          "t": 156,
+          "gain": 0
+        },
+        {
+          "t": 184,
+          "gain": 0.5011872336272722
+        }
+      ],
+      "controlSteps": {
+        "fader": [
+          {
+            "t": 100,
+            "gain": 1
+          }
+        ],
+        "trim": [
+          {
+            "t": 100,
+            "gain": 0.5
+          }
+        ],
+        "eqLow": [
+          {
+            "t": 100,
+            "gain": 0.5
+          }
+        ],
+        "eqMid": [
+          {
+            "t": 100,
+            "gain": 0.5
+          }
+        ],
+        "eqHigh": [
+          {
+            "t": 100,
+            "gain": 0.5
+          }
+        ]
+      },
+      "maxPlayhead": 20
+    },
+    "B": {
+      "deck": "B",
+      "trackSpans": [
+        {
+          "start": 100,
+          "end": 188,
+          "trackId": 102
+        },
+        {
+          "start": 188,
+          "end": 204,
+          "trackId": 106
+        }
+      ],
+      "playingSpans": [
+        {
+          "start": 108,
+          "end": 160
+        },
+        {
+          "start": 188,
+          "end": 204
+        }
+      ],
+      "audibleSpans": [
+        {
+          "start": 108,
+          "end": 136
+        },
+        {
+          "start": 144,
+          "end": 160
+        },
+        {
+          "start": 188,
+          "end": 204
+        }
+      ],
+      "traces": [
+        [
+          {
+            "t": 200,
+            "playhead": 12
+          },
+          {
+            "t": 204,
+            "playhead": 16
+          }
+        ]
+      ],
+      "gestures": [
+        {
+          "t": 160,
+          "action": "cue",
+          "playhead": 16
+        }
+      ],
+      "loops": [],
+      "gainSteps": [
+        {
+          "t": 108,
+          "gain": 0.5011872336272722
+        },
+        {
+          "t": 136,
+          "gain": 0
+        },
+        {
+          "t": 144,
+          "gain": 0.5011872336272722
+        },
+        {
+          "t": 160,
+          "gain": 0
+        },
+        {
+          "t": 188,
+          "gain": 0.5011872336272722
+        },
+        {
+          "t": 204,
+          "gain": 0
+        }
+      ],
+      "controlSteps": {
+        "fader": [
+          {
+            "t": 100,
+            "gain": 1
+          },
+          {
+            "t": 136,
+            "gain": 0.3
+          },
+          {
+            "t": 144,
+            "gain": 1
+          }
+        ],
+        "trim": [
+          {
+            "t": 100,
+            "gain": 0.5
+          }
+        ],
+        "eqLow": [
+          {
+            "t": 100,
+            "gain": 0.5
+          }
+        ],
+        "eqMid": [
+          {
+            "t": 100,
+            "gain": 0.5
+          }
+        ],
+        "eqHigh": [
+          {
+            "t": 100,
+            "gain": 0.5
+          }
+        ]
+      },
+      "maxPlayhead": 16
+    },
+    "C": {
+      "deck": "C",
+      "trackSpans": [
+        {
+          "start": 100,
+          "end": 192,
+          "trackId": 103
+        },
+        {
+          "start": 192,
+          "end": 220,
+          "trackId": 107
+        }
+      ],
+      "playingSpans": [
+        {
+          "start": 116,
+          "end": 172
+        },
+        {
+          "start": 192,
+          "end": 220
+        }
+      ],
+      "audibleSpans": [
+        {
+          "start": 116,
+          "end": 164
+        },
+        {
+          "start": 168,
+          "end": 172
+        },
+        {
+          "start": 192,
+          "end": 220
+        }
+      ],
+      "traces": [],
+      "gestures": [],
+      "loops": [
+        {
+          "start": 132,
+          "end": 148,
+          "region": {
+            "start": 24,
+            "end": 28
+          },
+          "open": false
+        }
+      ],
+      "gainSteps": [
+        {
+          "t": 116,
+          "gain": 0.5011872336272722
+        },
+        {
+          "t": 164,
+          "gain": 0
+        },
+        {
+          "t": 168,
+          "gain": 0.5011872336272722
+        },
+        {
+          "t": 172,
+          "gain": 0
+        },
+        {
+          "t": 192,
+          "gain": 0.5011872336272722
+        }
+      ],
+      "controlSteps": {
+        "fader": [
+          {
+            "t": 100,
+            "gain": 1
+          }
+        ],
+        "trim": [
+          {
+            "t": 100,
+            "gain": 0.5
+          }
+        ],
+        "eqLow": [
+          {
+            "t": 100,
+            "gain": 0.5
+          }
+        ],
+        "eqMid": [
+          {
+            "t": 100,
+            "gain": 0.5
+          }
+        ],
+        "eqHigh": [
+          {
+            "t": 100,
+            "gain": 0.5
+          }
+        ]
+      },
+      "maxPlayhead": 1
+    },
+    "D": {
+      "deck": "D",
+      "trackSpans": [
+        {
+          "start": 100,
+          "end": 196,
+          "trackId": 104
+        },
+        {
+          "start": 196,
+          "end": 220,
+          "trackId": 108
+        }
+      ],
+      "playingSpans": [
+        {
+          "start": 124,
+          "end": 176
+        },
+        {
+          "start": 196,
+          "end": 220
+        }
+      ],
+      "audibleSpans": [
+        {
+          "start": 124,
+          "end": 176
+        },
+        {
+          "start": 196,
+          "end": 208
+        },
+        {
+          "start": 212,
+          "end": 220
+        }
+      ],
+      "traces": [
+        [
+          {
+            "t": 196,
+            "playhead": 0
+          },
+          {
+            "t": 200,
+            "playhead": 4
+          }
+        ]
+      ],
+      "gestures": [
+        {
+          "t": 140,
+          "action": "hotCue",
+          "playhead": 64,
+          "detail": 3
+        }
+      ],
+      "loops": [],
+      "gainSteps": [
+        {
+          "t": 124,
+          "gain": 0.5011872336272722
+        },
+        {
+          "t": 176,
+          "gain": 0
+        },
+        {
+          "t": 196,
+          "gain": 0.5011872336272722
+        },
+        {
+          "t": 208,
+          "gain": 0
+        },
+        {
+          "t": 212,
+          "gain": 0.5011872336272722
+        }
+      ],
+      "controlSteps": {
+        "fader": [
+          {
+            "t": 100,
+            "gain": 1
+          }
+        ],
+        "trim": [
+          {
+            "t": 100,
+            "gain": 0.5
+          }
+        ],
+        "eqLow": [
+          {
+            "t": 100,
+            "gain": 0.5
+          }
+        ],
+        "eqMid": [
+          {
+            "t": 100,
+            "gain": 0.5
+          }
+        ],
+        "eqHigh": [
+          {
+            "t": 100,
+            "gain": 0.5
+          }
+        ]
+      },
+      "maxPlayhead": 4
+    }
+  },
+  "tenures": [
+    {
+      "start": 178,
+      "end": 184,
+      "holder": "conductor",
+      "open": false
+    }
+  ],
+  "idle": [],
+  "overlaps": [
+    {
+      "start": 108,
+      "end": 164
+    },
+    {
+      "start": 168,
+      "end": 172
+    },
+    {
+      "start": 188,
+      "end": 220
+    }
+  ],
+  "fxSpans": [],
+  "trackIds": [
+    101,
+    102,
+    103,
+    104,
+    105,
+    106,
+    107,
+    108
+  ],
+  "audibleTrackIds": [
+    101,
+    102,
+    103,
+    104,
+    105,
+    106,
+    107,
+    108
+  ],
+  "eventCount": 39
+}
