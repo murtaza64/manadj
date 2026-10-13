@@ -11,6 +11,8 @@
 /** The worklet's two modes (ADR 0018): resample = varispeed (Key Lock off,
  * bit-perfect at rate 1); stretch = time-stretch without transpose (Key
  * Lock on — tempo changes leave the Track's Key unchanged). */
+import type { ScratchMotion, ScheduledScratchFrame } from './scratchMotion';
+
 export type SourceMode = 'resample' | 'stretch';
 
 /** Active loop region in TRACK FRAMES (looping 03) — the audio-thread
@@ -20,14 +22,31 @@ export interface LoopFrames {
   endFrames: number;
 }
 
+/** The stem order every stems payload uses (stems #209; matches the
+ * backend's STEM_NAMES and the serving endpoint). */
+export const STEM_NAMES = ['vocals', 'drums', 'bass', 'other'] as const;
+export type StemName = (typeof STEM_NAMES)[number];
+
 export type DeckSourceCommand =
+  | { type: 'scratch-schedule'; frames: ScheduledScratchFrame[] }
+  | { type: 'scratch-cancel' }
+  | { type: 'scratch'; motion: ScratchMotion }
   /** Hand over a track's decoded samples (channel data, transferred copies). */
   | { type: 'load'; channels: Float32Array[]; sampleRate: number }
+  /** Hand over a track's decoded STEMS — `stems[s]` is one stem's channel
+   * data (transferred copies), STEM_NAMES order. The kernel mixes them with
+   * per-stem gains at the read layer, before the stretch stage; gains reset
+   * to unity on load (kill state is per-Track, #210). */
+  | { type: 'load-stems'; stems: Float32Array[][]; sampleRate: number }
+  /** Target per-stem gains (STEM_NAMES order, 0..1). Applied as a declick
+   * ramp anchored at the live voice's position — knob-rate messages, not
+   * sample-accurate automation (#150). */
+  | { type: 'stem-gains'; gains: number[] }
   /** (Re)start playback at a track frame. Restart-while-running is an
    * internal declick splice (old voice fades while the new fades in). */
-  | { type: 'start'; positionFrames: number; startId: number }
+  | { type: 'start'; positionFrames: number; startId: number; when?: number; preserveSchedule?: boolean }
   /** Declick-fade to silence. Idempotent. */
-  | { type: 'stop' }
+  | { type: 'stop'; preserveSchedule?: boolean }
   /** Key Lock: switch modes. Mid-play this is an internal crossfade at the
    * audible position — no click, no position jump. */
   | { type: 'mode'; mode: SourceMode }

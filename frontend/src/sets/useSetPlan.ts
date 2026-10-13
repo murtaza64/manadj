@@ -19,15 +19,19 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { useQueries, useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
+import type { CaptureEvent } from '../capture/events';
 import type { VectorizeInput } from '../capture/vectorize';
 import type { Transition } from '../editor/mixModel';
+import { cameoSourceFromData, cameoSourceFromTake, type CameoPlanSource } from './cameoPlan';
 import {
   initTransitionStore,
   snapshotPairStore,
   subscribePairStore,
 } from '../editor/pairStore';
 import type { HotCue, Track } from '../types';
+import { parseEdits } from '../routines/routineDraft';
 import { resolvePlanPins } from './adjacency';
+import { getRoutineCast, primeRoutineCasts } from './routineCasts';
 
 /** Hot Cue 1 in track seconds, null when slot 1 is unset — THE home of
  * the cue-slot convention's "slot 1 = first buildup" lookup (the plan's
@@ -77,6 +81,68 @@ import {
 import { useSetSettings } from './setSettings';
 import type { SetEntryLocal } from './setStore';
 
+/**
+ * Routine-pin replay resolution (sets #161, the #159↔#160 seam): each
+ * entry pinning a Routine (`kind: 'routine'`) fetches the full artifact
+ * and feeds the plan's routines channel at its head index — the planner
+ * validates the cast against the next-n entries (degrading invalid pins
+ * with a `routine-invalid` warning) and builds the slot-remapped,
+ * beat-rebased replay; covered adjacencies defer to the span. A failed
+ * fetch degrades that pin to a hard cut (dangling-reference rule).
+ * Replaced #159's temporary `manadj.devRoutineReplay` localStorage seam.
+ */
+function useRoutinePinReplay(entries: SetEntryLocal[] | undefined): {
+  routines: PlanInput['routines'] | undefined;
+  isLoading: boolean;
+} {
+  const pins = useMemo(
+    () =>
+      (entries ?? []).flatMap((e, i) =>
+        e.pin?.kind === 'routine' ? [{ startEntryIndex: i, uuid: e.pin.uuid }] : []
+      ),
+    [entries]
+  );
+  const { details, isLoading } = useQueries({
+    queries: pins.map((p) => ({
+      queryKey: ['routine', p.uuid],
+      queryFn: () => api.routines.get(p.uuid),
+      staleTime: Infinity,
+      retry: false,
+    })),
+    combine: (results) => ({
+      details: results.map((q) => q.data),
+      isLoading: results.some((q) => q.isLoading),
+    }),
+  });
+  // Stable identity: recompute only when a pin moves or a fetch lands
+  // (plan identity feeds useMemo chains downstream).
+  const routines = useMemo(() => {
+    if (pins.length === 0) return undefined;
+    const out: NonNullable<PlanInput['routines']> = [];
+    pins.forEach((p, i) => {
+      const d = details[i];
+      if (!d) return; // failed → dangling → the head plans as a hard cut
+      out.push({
+        startEntryIndex: p.startEntryIndex,
+        routine: {
+          cast: d.cast,
+          slotIds: d.slot_ids ?? undefined,
+          authored: d.authored ?? false,
+          entryOffsetsBeats: d.entry_offsets_beats,
+          entryPositions: d.entry_positions,
+          durationBeats: d.duration_beats,
+          events: d.events,
+          // The Routine editor's authored edits (gh#170 pass 2) ride
+          // into set replay too — one build, every consumer.
+          edits: d.edits ? parseEdits(d.edits) : null,
+        },
+      });
+    });
+    return out.length > 0 ? out : undefined;
+  }, [pins, details]);
+  return { routines, isLoading };
+}
+
 export function useSetPlan(
   entries: SetEntryLocal[] | undefined,
   trackMap: Map<number, Track> | undefined,
@@ -104,6 +170,8 @@ export function useSetPlanParts(
 ): { input: PlanInput | undefined; plan: SetPlan | undefined } {
   const { tempoReturnSecPerPercent, graceHeadroomSec, graceFadeSec } = useSetSettings();
   const pairStore = useSyncExternalStore(subscribePairStore, snapshotPairStore);
+  const { routines: pinnedRoutines, isLoading: routineDetailsLoading } =
+    useRoutinePinReplay(entries);
 
   // Never plan against an unloaded pair store: pinned Transitions would
   // transiently degrade to hard cuts — and a "Play set" pressed in that
@@ -123,6 +191,23 @@ export function useSetPlanParts(
     e.pin?.kind === 'take' ? [e.pin.uuid] : []
   );
   const takeUuidsKey = takeUuids.join(',');
+
+  // Routine pins (sets 160): coverage needs the casts — fetch the
+  // Routine list (metadata only) exactly when a routine pin is in play,
+  // and prime the module cache dormancy reconciliation reads.
+  const routineUuidsKey = (entries ?? [])
+    .flatMap((e) => (e.pin?.kind === 'routine' ? [e.pin.uuid] : []))
+    .join(',');
+  const routinesNeeded = routineUuidsKey.length > 0;
+  const { data: routineRows, isLoading: routinesQueryLoading } = useQuery({
+    queryKey: ['routines'],
+    queryFn: api.routines.list,
+    enabled: routinesNeeded,
+  });
+  const routinesLoading = (routinesNeeded && routinesQueryLoading) || routineDetailsLoading;
+  useEffect(() => {
+    if (routineRows) primeRoutineCasts(routineRows);
+  }, [routineRows]);
   const takeQueries = useQueries({
     queries: takeUuids.map((uuid) => ({
       queryKey: ['take', uuid],
@@ -132,6 +217,33 @@ export function useSetPlanParts(
     })),
   });
   const takesLoading = takeQueries.some((q) => q.isLoading);
+
+  // Cameo pins (#140): saved Cameos resolve from the cameos list (their
+  // authored payload), Cameo Takes from their raw slices — both reduced
+  // to CameoPlanSource here; a failed fetch dangles (plays nothing).
+  const cameoUuidsKey = (entries ?? [])
+    .flatMap((e) => (e.cameoPins ?? []).filter((p) => p.kind === 'cameo').map((p) => p.uuid))
+    .join(',');
+  const cameoTakeUuids = (entries ?? []).flatMap((e) =>
+    (e.cameoPins ?? []).filter((p) => p.kind === 'cameo-take').map((p) => p.uuid)
+  );
+  const cameosNeeded = cameoUuidsKey.length > 0;
+  const { data: cameoRows, isLoading: cameosQueryLoading } = useQuery({
+    queryKey: ['cameos'],
+    queryFn: api.cameos.list,
+    enabled: cameosNeeded,
+  });
+  const cameoTakeQueries = useQueries({
+    queries: cameoTakeUuids.map((uuid) => ({
+      queryKey: ['take', uuid],
+      queryFn: () => api.takes.get(uuid),
+      staleTime: Infinity,
+      retry: false,
+    })),
+  });
+  const cameosLoading =
+    (cameosNeeded && cameosQueryLoading) || cameoTakeQueries.some((q) => q.isLoading);
+  const cameoTakeUuidsKey = cameoTakeUuids.join(',');
 
   // Hot Cue 1 per track — the hard-cut entry anchor (sets 19). One bulk
   // query for the whole set (issue 43); cue mutations invalidate the
@@ -149,7 +261,9 @@ export function useSetPlanParts(
 
   const input = useMemo<PlanInput | undefined>(() => {
     if (!entries || entries.length === 0) return undefined;
-    if (!transitionsReady || takesLoading || hotCuesLoading) return undefined;
+    if (!transitionsReady || takesLoading || hotCuesLoading || routinesLoading || cameosLoading) {
+      return undefined;
+    }
     if (!trackMap || entries.some((e) => !trackMap.has(e.trackId))) return undefined;
 
     const tracks: PlanInput['tracks'] = {};
@@ -166,13 +280,19 @@ export function useSetPlanParts(
     // (via ConductorPlanFeed), and practice all play the same choice the
     // badges show. Pins pass through untouched; PlanInput's shape is
     // unchanged (replan grafting keeps matching pins by uuid).
-    const resolved = resolvePlanPins(entries, (a, b) =>
-      (pairStore[`${a}:${b}`]?.items ?? []).map((it) => ({
-        uuid: it.uuid,
-        name: it.name,
-        favorite: it.favorite,
-        updatedAtMs: it.updatedAtMs,
-      }))
+    const resolved = resolvePlanPins(
+      entries,
+      (a, b) =>
+        (pairStore[`${a}:${b}`]?.items ?? []).map((it) => ({
+          uuid: it.uuid,
+          name: it.name,
+          favorite: it.favorite,
+          updatedAtMs: it.updatedAtMs,
+        })),
+      // Routine coverage (sets 160): fresh rows first, cache fallback —
+      // covered interior adjacencies defer to the Routine span (sets
+      // #159's replay, fed via the routines channel below).
+      (uuid) => routineRows?.find((r) => r.uuid === uuid)?.cast ?? getRoutineCast(uuid)
     );
 
     // Full Transition payloads for each adjacency's ordered pair, keyed by
@@ -196,6 +316,25 @@ export function useSetPlanParts(
       };
     });
 
+    // Cameo geometry per pin uuid (#140): unreadable payloads/slices
+    // dangle (a Cameo pin plays nothing rather than guessing).
+    const cameoSourcesByUuid: Record<string, CameoPlanSource> = {};
+    for (const row of cameoRows ?? []) {
+      const source = cameoSourceFromData(row.guest_track_id, row.data);
+      if (source) cameoSourcesByUuid[row.uuid] = source;
+    }
+    cameoTakeUuids.forEach((uuid, i) => {
+      const detail = cameoTakeQueries[i]?.data;
+      if (!detail || detail.kind !== 'guest') return;
+      const source = cameoSourceFromTake({
+        guestTrackId: detail.b_track_id,
+        windowStartS: detail.window_start_s,
+        windowEndS: detail.window_end_s,
+        events: detail.events as unknown as CaptureEvent[],
+      });
+      if (source) cameoSourcesByUuid[uuid] = source;
+    });
+
     const tempoInput: TempoPolicyInput =
       tempo?.policy === 'fixed'
         ? { policy: 'fixed', setTempoBpm: tempo.setTempoBpm }
@@ -206,8 +345,10 @@ export function useSetPlanParts(
       tracks,
       transitionsByUuid,
       takesByUuid,
+      cameoSourcesByUuid,
       tempo: tempoInput,
       grace: { headroomSec: graceHeadroomSec, fadeSec: graceFadeSec },
+      routines: pinnedRoutines,
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
@@ -217,13 +358,21 @@ export function useSetPlanParts(
     transitionsReady,
     takesLoading,
     hotCuesLoading,
+    routinesLoading,
+    cameosLoading,
+    routineRows,
+    cameoRows,
     hotCue1Signature,
     takeUuidsKey,
+    routineUuidsKey,
+    cameoUuidsKey,
+    cameoTakeUuidsKey,
     tempo?.policy,
     tempo?.setTempoBpm,
     tempoReturnSecPerPercent,
     graceHeadroomSec,
     graceFadeSec,
+    pinnedRoutines,
   ]);
   const plan = useMemo(() => (input ? planSet(input) : undefined), [input]);
   return { input, plan };

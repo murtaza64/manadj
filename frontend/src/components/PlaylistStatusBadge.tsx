@@ -8,8 +8,8 @@ interface PlaylistStatusBadgeProps {
 
 export function PlaylistStatusBadge({ status }: PlaylistStatusBadgeProps) {
   const config = {
-    synced: { color: 'var(--green)', label: 'Synced' },
-    unsynced: { color: 'var(--red)', label: 'Unsynced' },
+    synced: { color: 'var(--success)', label: 'Synced' },
+    unsynced: { color: 'var(--danger)', label: 'Unsynced' },
     partial: { color: 'var(--energy-2)', label: 'Partial' }
   }[status];
 

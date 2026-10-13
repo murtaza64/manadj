@@ -84,7 +84,7 @@ export function nearestPlayingTempoReference(
 }
 
 /**
- * BPM match (tempo only — phase stays a hand skill): the pitch that makes
+ * BPM match pitch calculation (phase alignment belongs to the caller): the pitch that makes
  * this deck's tempo equal the other deck's *effective* BPM, or its
  * double/half-time feel. Candidates {other, other×2, other/2}; a candidate
  * is reachable when the required pitch is within ±PITCH_RANGE_PERCENT.

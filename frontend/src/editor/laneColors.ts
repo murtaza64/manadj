@@ -3,15 +3,17 @@
  * design language; shared by the lane canvases, strip labels, and the
  * per-deck lane toggle chips (mix-editor 32).
  *
- * Deck hue families (CONTEXT.md: Deck color): each deck's lanes form ONE
- * spectrum ramp along the strip display order — FILTER → HIGH → MID →
- * LOW → FADER in uniform −80/−60/−40/−20/0° hue offsets from the deck
- * anchor — so a fully-enabled deck reads as a smooth gradient ending at
- * the deck color at the waveform seam, with LOW next to the fader
- * (review nits 2026-07-06, replacing the grill's scattered-offset
- * table). The fader lanes ARE the Deck colors (theme/deckColors stays
- * the single source for the anchors); every hue keeps its anchor's
- * channel floor (A pure, B's 0x2d).
+ * Deck hue families (CONTEXT.md: Deck color): fader lanes ARE the Deck
+ * colors (theme/deckColors stays the single source for the anchors);
+ * filters wear the mix-editor 32 family's old LOW hues (−20° off the
+ * deck anchor — closest to the anchor, so the filter still reads as
+ * "the deck's own color, shifted").
+ *
+ * EQ lanes (mix-editor 39 experiment): the three bands are an RGB triad —
+ * LOW red, MID green, HIGH blue — the same triad on both decks, hue-
+ * rotated ~25° BLUEWARD for deck A and REDWARD for deck B so the decks
+ * stay tellable apart at a glance. Bright, fully saturated per the
+ * project's design language (B keeps its 0x2d channel floor).
  */
 import { DECK_COLORS } from '../theme/deckColors';
 import type { LaneId } from './mixModel';
@@ -19,14 +21,14 @@ import type { LaneId } from './mixModel';
 export const LANE_COLORS: Record<LaneId, string> = {
   faderA: DECK_COLORS.A, // #00e5ff — anchor 186°
   faderB: DECK_COLORS.B, // #ff2d95 — anchor 330°
-  eqLowA: '#00ffc4',
-  eqLowB: '#ff2ddb',
-  eqMidA: '#00ff6f',
-  eqMidB: '#dd2dff',
-  eqHighA: '#00ff1a',
-  eqHighB: '#972dff',
-  filterA: '#3bff00',
-  filterB: '#512dff',
+  eqLowA: '#ff0066', // red, blueward (335°)
+  eqLowB: '#ff2d2d', // red (0°)
+  eqMidA: '#00ff6a', // green, blueward (145°)
+  eqMidB: '#95ff2d', // green, redward (95°)
+  eqHighA: '#3399ff', // blue, cyanward (210°)
+  eqHighB: '#5c2dff', // blue-violet (254°)
+  filterA: '#00ffc4', // the 32-family LOW hue (−20° off the anchor)
+  filterB: '#ff2ddb', // the 32-family LOW hue (−20° off the anchor)
 };
 
 /** Terse display names (mix-editor 32): what strip labels and toggle chips

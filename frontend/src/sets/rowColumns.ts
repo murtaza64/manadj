@@ -24,6 +24,7 @@
  *   the delta scale is green→yellow→orange→red, no deck hues.
  */
 import type { CSSProperties } from 'react';
+import { TRIM_DB_PER_UNIT } from '../playback/mixerMath';
 import {
   fmtSec,
   isNeverAudible,
@@ -58,6 +59,9 @@ export const ENERGY_COL_W = 22;
 export const IN_TIME_COL_W = 40;
 /** "play" column — the audible span as `play/total` ("12:34/12:34"). */
 export const PLAY_TIME_COL_W = 76;
+/** Trim column (sets #164) — the entry's trim offset in dB ("−12.0" is
+ * the widest), drag-editable; sits in the right band before play-time. */
+export const TRIM_COL_W = 52; // number + the dB unit label (#161)
 /** ✕ remove glyph column. */
 export const REMOVE_COL_W = 24;
 
@@ -126,10 +130,10 @@ export function bpmDeltaPercent(
 export function bpmDeltaColor(deltaPercent: number | null): string | null {
   if (deltaPercent === null) return null;
   const mag = Math.abs(deltaPercent);
-  if (mag <= 2) return 'var(--green)';
-  if (mag <= 4) return 'var(--yellow)';
+  if (mag <= 2) return 'var(--success)';
+  if (mag <= 4) return 'var(--warning)';
   if (mag <= 8) return '#ff9500'; // --peach is scoped to .set-header; same value
-  return 'var(--red)';
+  return 'var(--danger)';
 }
 
 /** The BPM cell's tooltip: absolute text stays in the cell, the delta
@@ -177,6 +181,47 @@ export function fmtPlayTime(
 ): string {
   if (!planned || !durationSec || isNeverAudible(planned)) return '';
   return `${fmtSec(Math.max(planned.exitSec - planned.entrySec, 0))}/${fmtSec(durationSec)}`;
+}
+
+// ── Trim cell (sets #164) ────────────────────────────────────────────────
+
+/** Trim offset (knob units, 0 = neutral) → its dB reading. */
+export function trimOffsetDb(trim: number): number {
+  return trim * TRIM_DB_PER_UNIT;
+}
+
+/** dB reading → trim offset in knob units (the drag writes dB). */
+export function trimOffsetFromDb(db: number): number {
+  return db / TRIM_DB_PER_UNIT;
+}
+
+/** Trim drag geometry (sets #183): pixels of vertical travel per dB.
+ * 20 px/dB puts the full ±12 dB throw at ~480px and a typical ±3 dB
+ * ride within a comfortable wrist move. */
+export const TRIM_DRAG_PX_PER_DB = 20;
+/** The drag's dB granularity (sets #183): values land on 0.1 dB ticks —
+ * exactly the display resolution, so the readout advances one tick per
+ * 2px and never wobbles between roundings. */
+export const TRIM_DRAG_DB_STEP = 0.1;
+
+/** Dragged trim value (knob units) from the TOTAL pointer delta since
+ * pointer-down (sets #183): deterministic — the same pixel always reads
+ * the same value within a drag; no per-event accumulation to drift.
+ * `dyPx` is positive for upward travel (louder). Quantized to
+ * TRIM_DRAG_DB_STEP ticks. */
+export function trimDragValue(startTrim: number, dyPx: number): number {
+  const db = trimOffsetDb(startTrim) + dyPx / TRIM_DRAG_PX_PER_DB;
+  const stepped = Math.round(db / TRIM_DRAG_DB_STEP) * TRIM_DRAG_DB_STEP;
+  return trimOffsetFromDb(stepped);
+}
+
+/** Trim cell text: the offset in dB, signed when non-neutral ("+2.4",
+ * "−12.0"); neutral reads "0.0" (rendered dim by the cell). */
+export function fmtTrimDb(trim: number): string {
+  const db = trimOffsetDb(trim);
+  const rounded = Math.round(db * 10) / 10;
+  if (rounded === 0) return '0.0';
+  return `${rounded > 0 ? '+' : '−'}${Math.abs(rounded).toFixed(1)}`;
 }
 
 /** Overlap cell (sets 32): how long the handover overlaps — the planned

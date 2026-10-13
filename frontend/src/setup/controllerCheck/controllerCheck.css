@@ -1,0 +1,105 @@
+.cc-guide {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-16);
+  color: var(--text);
+}
+.cc-guide p {
+  color: var(--subtext0);
+  font-size: var(--font-body);
+  line-height: 1.5;
+  margin: var(--space-6) 0 0;
+}
+.cc-section {
+  border: 1px solid var(--surface1);
+  padding: var(--space-16);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-12);
+}
+.cc-section h3 {
+  margin: 0;
+  font-size: var(--font-large);
+}
+.cc-output {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-12);
+}
+.cc-output-bus {
+  font-weight: bold;
+  color: var(--accent);
+}
+.cc-output select {
+  min-width: 0;
+  max-width: 420px;
+  background: var(--base);
+  color: var(--text);
+  border: 1px solid var(--surface1);
+  padding: var(--space-6) var(--space-8);
+  font: inherit;
+}
+.cc-output-result {
+  grid-column: 2 / -1;
+  font-size: var(--font-small);
+  color: var(--subtext0);
+}
+.cc-good { color: var(--success); font-weight: bold; }
+.cc-warn { color: var(--warning); }
+.cc-bad { color: var(--danger); }
+.cc-guide p.cc-bad { color: var(--danger); }
+.cc-devices {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-12);
+}
+.cc-device {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  padding: var(--space-12);
+  background: var(--base);
+}
+.cc-device-head {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-12);
+}
+.cc-press {
+  padding: var(--space-16);
+  border: 2px solid var(--surface1);
+  font-size: var(--font-title);
+  text-align: center;
+  color: var(--subtext0);
+}
+.cc-press-hit {
+  border-color: var(--success);
+  color: var(--text);
+  animation: cc-flash 600ms ease-out;
+}
+.cc-press-miss {
+  border-color: var(--warning);
+  color: var(--warning);
+}
+@keyframes cc-flash {
+  from { background: rgba(var(--success-rgb), 0.45); }
+  to { background: transparent; }
+}
+.cc-device-count {
+  font-size: var(--font-small);
+  color: var(--subtext0);
+}
+.cc-jog {
+  border-top: 1px solid var(--surface1);
+  padding-top: var(--space-12);
+}
+.cc-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-8);
+}
+.cc-output-result:empty { display: none; }

@@ -15,7 +15,10 @@
  *   `settleHorizonS`; returns within it fold (cross-cuts), and incoming
  *   silences shorter than the horizon fold too (tease continues).
  * - A tease where the incoming stays silent past the horizon while the
- *   outgoing plays on dissolves with no Take.
+ *   outgoing plays on settles the SECOND verdict (#140, survivor rule):
+ *   a GUEST ENGAGEMENT — the outgoing survives as current — emitting a
+ *   Cameo Take (kind 'guest'; outgoing role = host, incoming = guest,
+ *   window = the whole engagement). One engagement, exactly one verdict.
  *
  * ONE pair machine runs per unordered physical deck pair (six machines,
  * 4dp 10) — the glossary Handover rule applies per ordered pair,
@@ -32,12 +35,16 @@
  */
 import {
   ALL_DECKS,
+  advanceClock,
   applyEvent,
   deckAudible,
+  deckSounding,
   initialAudibilityState,
+  nextFxTailEnd,
   tenureHeld,
 } from './audibilityReducer';
 import type { AudibilityState, ReducerDeckState } from './audibilityReducer';
+import type { BeatFxSectionState } from '../playback/beatFx';
 import { DEFAULT_DETECTOR_PARAMS, DETECTOR_VERSION } from './events';
 import type {
   CaptureDeck,
@@ -52,6 +59,13 @@ interface DeckCapture extends ReducerDeckState {
   audible: boolean;
   /** Time of the last audibility flip. */
   since: number;
+  /** Sounding = emitting ANY Master-bus signal (audibility with a zero
+   * gain threshold; audibility.ts). Audible ⊆ sounding. */
+  sounding: boolean;
+  /** Time of the last sounding flip — the entry-onset backdating clock
+   * (#178): an overlap engagement's window starts here (capped), not at
+   * the `audibleGain` crossing. */
+  soundingSince: number;
 }
 
 /** The six unordered physical pairs — one Handover machine each. */
@@ -83,10 +97,28 @@ export interface PairMachine {
    * snapshots this, so a Load onto the stopped deck within the cut gap
    * can't mis-attribute the outgoing Track. */
   outTrackAtCessation: number | null;
+  /** For a zero-overlap hard cut ONLY: the incoming's audibility onset. A
+   * cut engages AT the outgoing's cessation (so overlap is zero and the
+   * naive window collapses); the incoming arrives shortly after within the
+   * cut gap. The Take window then spans the cut ramp — cessation → this
+   * onset — instead of degenerating to a single instant (issue #138 defect
+   * 1; Take 960 was window_start == window_end). null for overlap
+   * engagements, whose window end is the outgoing's own final cessation. */
+  cutIncomingOnset: number | null;
+  /** The last (outgoing, incoming, windowEnd) this machine emitted — the
+   * per-engagement dedup guard (issue #138 defect 2). One physical pair
+   * flickering across the settle horizon must not settle the SAME ordered
+   * pair twice; a re-emit whose window end lands within `settleHorizonS` of
+   * the previous one is the same Handover and is suppressed. */
+  lastEmit: { outgoingTrackId: number; incomingTrackId: number; windowEndS: number } | null;
   /** Engagement-open snapshot, stamped into the Take slice as its `init`
    * event — ROLE-shaped (outgoing='A', incoming='B') with the physical
    * decks recorded on it. */
   openSnapshot: Extract<CaptureEvent, { kind: 'init' }> | null;
+  /** Engagement identity (#140): minted at open, or ADOPTED from another
+   * machine's open engagement sharing a physical deck — a triple's
+   * pairwise verdicts carry one uuid. Cleared on dissolve. */
+  engagementUuid: string | null;
 }
 
 /** The detector's state IS the shared audibility reducer's state (deck/
@@ -118,7 +150,10 @@ function freshMachine(): PairMachine {
     incomingSilentSince: null,
     outSilentSince: null,
     outTrackAtCessation: null,
+    cutIncomingOnset: null,
     openSnapshot: null,
+    engagementUuid: null,
+    lastEmit: null,
   };
 }
 
@@ -128,7 +163,10 @@ export function initialCaptureState(params: DetectorParams = DEFAULT_DETECTOR_PA
     ...base,
     log: [],
     decks: Object.fromEntries(
-      ALL_DECKS.map((ch) => [ch, { ...base.decks[ch], audible: false, since: 0 }])
+      ALL_DECKS.map((ch) => [
+        ch,
+        { ...base.decks[ch], audible: false, since: 0, sounding: false, soundingSince: 0 },
+      ])
     ) as Record<CaptureDeck, DeckCapture>,
     suspended: false,
     pairs: Object.fromEntries(PAIR_KEYS.map((k) => [k, freshMachine()])) as Record<
@@ -151,27 +189,60 @@ function dissolve(m: PairMachine): void {
   m.incomingSilentSince = null;
   m.outSilentSince = null;
   m.outTrackAtCessation = null;
+  m.cutIncomingOnset = null;
   m.openSnapshot = null;
+  m.engagementUuid = null;
+  // NOTE: lastEmit deliberately survives a dissolve — it guards the NEXT
+  // engagement (a flicker re-opening the same ordered pair; issue #138).
 }
 
-function openEngagement(s: CaptureState, m: PairMachine, key: PairKey, at: number): void {
+/** The engagement identity for a machine opening now (#140): adopt any
+ * OTHER machine's open engagement sharing a physical deck with this pair
+ * (a chained double / triple is ONE move — its pairwise verdicts group),
+ * else mint. */
+function engagementUuidFor(s: CaptureState, key: PairKey): string {
+  const [x, y] = PAIR_DECKS[key];
+  for (const other of PAIR_KEYS) {
+    if (other === key) continue;
+    const om = s.pairs[other];
+    if (om.engagedSince === null || om.engagementUuid === null) continue;
+    const [ox, oy] = PAIR_DECKS[other];
+    if (ox === x || ox === y || oy === x || oy === y) return om.engagementUuid;
+  }
+  return crypto.randomUUID();
+}
+
+function openEngagement(
+  s: CaptureState,
+  m: PairMachine,
+  key: PairKey,
+  at: number,
+  cutIncomingOnset: number | null = null
+): void {
   const outgoing = m.incumbent!;
   const incoming = mate(key, outgoing);
   m.engagedSince = at;
+  m.engagementUuid = engagementUuidFor(s, key);
   // Hard-cut path: the incumbent already ceased — its Track was
   // snapshotted then, so a Load within the cut gap can't mis-attribute.
   m.outgoingTrackId = m.outTrackAtCessation ?? s.decks[outgoing].trackId;
   m.incomingTrackId = s.decks[incoming].trackId;
   m.incomingSilentSince = null;
+  // A cut engages AT the outgoing's cessation; remember the incoming's
+  // onset so the Take window spans the cut ramp, not one instant (#138).
+  m.cutIncomingOnset = cutIncomingOnset;
   const snapDeck = (d: DeckCapture) => ({
     trackId: d.trackId,
     playing: d.playing,
+    scratching: d.scratch !== null,
+    slipLoopActive: d.slipLoopActive,
     fader: d.fader,
     trim: d.trim,
     eq: { ...d.eq },
     filter: d.filter,
     pitch: d.pitch,
     assignment: d.assignment,
+    stems: { ...d.stems },
   });
   // ROLE-shaped init (ADR 0032 via 4dp 10/12): 'A' is the outgoing role,
   // 'B' the incoming, whatever the physical decks — which are stamped.
@@ -183,7 +254,23 @@ function openEngagement(s: CaptureState, m: PairMachine, key: PairKey, at: numbe
     crossfader: s.crossfader,
     crossfaderEnabled: s.crossfaderEnabled,
     physicalDecks: { outgoing, incoming },
+    ...(s.beatFx ? { beatFx: roleBeatFx(s.beatFx, outgoing, incoming) } : {}),
   };
+}
+
+/** Beat FX section in a pair's ROLE frame (#351): a deck target maps to
+ * its role; a deck OUTSIDE the pair means "no FX on either role deck" —
+ * expressed as the silent 'sampler' target, switched off, so the slice
+ * keeps its A/B-only contract while still recording the FX leaving. */
+function roleBeatFx(
+  fx: BeatFxSectionState,
+  outgoing: CaptureDeck,
+  incoming: CaptureDeck
+): BeatFxSectionState {
+  if (fx.target === outgoing) return { ...fx, target: 'A' };
+  if (fx.target === incoming) return { ...fx, target: 'B' };
+  if (fx.target === 'master' || fx.target === 'sampler') return { ...fx };
+  return { ...fx, target: 'sampler', on: false };
 }
 
 /** Relabel one log event into a pair's ROLE frame (outgoing→'A',
@@ -220,22 +307,53 @@ function relabel(
       if (pi !== undefined) playheads.B = pi;
       return { ...ev, playheads };
     }
+    case 'beatFx': {
+      const { t, kind, ...section } = ev;
+      return { t, kind, ...roleBeatFx(section, outgoing, incoming) };
+    }
     default:
-      return ev; // tenure markers; init never rides the live log
+      return ev; // tenure markers, FX settings; init never rides the live log
   }
 }
 
 function emitTake(s: CaptureState, m: PairMachine, key: PairKey): DetectedTake | null {
   if (m.outgoingTrackId === null || m.incomingTrackId === null) return null;
   const windowStartS = m.engagedSince!;
-  const windowEndS = m.outSilentSince!;
+  // A zero-overlap hard cut engages at the outgoing's cessation, so the
+  // outgoing's own silence instant (outSilentSince) equals the window
+  // start — degenerate. The window then spans the cut ramp: cessation →
+  // the incoming's onset (#138 defect 1). An overlap engagement keeps the
+  // outgoing's final cessation as its end (the glossary window: the
+  // contiguous period the two tracks trade, ending at the outgoing's
+  // cessation).
+  const windowEndS =
+    m.cutIncomingOnset !== null ? Math.max(m.outSilentSince!, m.cutIncomingOnset) : m.outSilentSince!;
   const outgoing = m.incumbent!;
   const incoming = mate(key, outgoing);
   const overlap = windowEndS - windowStartS;
+  // One engagement, at most one Take per ordered pair (#138 defect 2): a
+  // physical pair can flicker across the settle horizon and re-open the
+  // same ordered pair; a re-emit whose window end lands within the settle
+  // horizon of the previous emit is the same Handover, suppressed.
+  if (
+    m.lastEmit !== null &&
+    m.lastEmit.outgoingTrackId === m.outgoingTrackId &&
+    m.lastEmit.incomingTrackId === m.incomingTrackId &&
+    windowEndS - m.lastEmit.windowEndS <= s.params.settleHorizonS
+  ) {
+    return null;
+  }
   const confidence = !s.decks[incoming].audible ? 0.5 : overlap < 1 ? 0.7 : 0.9;
   const lo = windowStartS - s.params.padS;
   const hi = windowEndS + s.params.padS;
+  m.lastEmit = {
+    outgoingTrackId: m.outgoingTrackId,
+    incomingTrackId: m.incomingTrackId,
+    windowEndS,
+  };
   return {
+    kind: 'handover',
+    engagementUuid: m.engagementUuid ?? crypto.randomUUID(),
     outgoingTrackId: m.outgoingTrackId,
     incomingTrackId: m.incomingTrackId,
     outgoingDeck: outgoing,
@@ -254,6 +372,43 @@ function emitTake(s: CaptureState, m: PairMachine, key: PairKey): DetectedTake |
     // Single pass over the log (capture spine 02): relabel yields fresh
     // per-event copies, so the slice stays immutable evidence.
     events: sliceTake(s.log, lo, hi, outgoing, incoming, m.openSnapshot),
+  };
+}
+
+/** The Guest-engagement verdict (#140, glossary): the incoming became
+ * audible while the outgoing was, then went silent while the outgoing
+ * SURVIVES as current — emit a Cameo Take. Roles hold through the same
+ * relabeling as a Handover (host = the outgoing role = 'A', guest = the
+ * incoming = 'B' — the PRD's host-as-A presentation). Window = the whole
+ * engagement: open → the guest's final cessation. The machine's incumbent
+ * survives the settle (the host never stopped being *the* track). */
+function emitGuestTake(s: CaptureState, m: PairMachine, key: PairKey): DetectedTake | null {
+  if (m.outgoingTrackId === null || m.incomingTrackId === null) return null;
+  // The host must still be current at settle time (survivor rule): a mix
+  // that collapsed entirely settles through the Handover clock, not here.
+  if (m.outSilentSince !== null) return null;
+  const windowStartS = m.engagedSince!;
+  const windowEndS = m.incomingSilentSince!;
+  const host = m.incumbent!;
+  const guest = mate(key, host);
+  const overlap = windowEndS - windowStartS;
+  // Same crude tiers as Handovers: a sub-second blip is weak evidence.
+  const confidence = overlap < 1 ? 0.7 : 0.9;
+  const lo = windowStartS - s.params.padS;
+  const hi = windowEndS + s.params.padS;
+  return {
+    kind: 'guest',
+    engagementUuid: m.engagementUuid ?? crypto.randomUUID(),
+    outgoingTrackId: m.outgoingTrackId,
+    incomingTrackId: m.incomingTrackId,
+    outgoingDeck: host,
+    incomingDeck: guest,
+    windowStartS,
+    windowEndS,
+    confidence,
+    detectorVersion: DETECTOR_VERSION,
+    params: s.params,
+    events: sliceTake(s.log, lo, hi, host, guest, m.openSnapshot),
   };
 }
 
@@ -287,10 +442,10 @@ function cloneCaptureState(state: CaptureState): CaptureState {
   return {
     ...state,
     decks: {
-      A: { ...state.decks.A, eq: { ...state.decks.A.eq } },
-      B: { ...state.decks.B, eq: { ...state.decks.B.eq } },
-      C: { ...state.decks.C, eq: { ...state.decks.C.eq } },
-      D: { ...state.decks.D, eq: { ...state.decks.D.eq } },
+      A: { ...state.decks.A, eq: { ...state.decks.A.eq }, stems: { ...state.decks.A.stems } },
+      B: { ...state.decks.B, eq: { ...state.decks.B.eq }, stems: { ...state.decks.B.stems } },
+      C: { ...state.decks.C, eq: { ...state.decks.C.eq }, stems: { ...state.decks.C.stems } },
+      D: { ...state.decks.D, eq: { ...state.decks.D.eq }, stems: { ...state.decks.D.stems } },
     },
     pairs: Object.fromEntries(
       PAIR_KEYS.map((k) => [k, { ...state.pairs[k] }])
@@ -343,10 +498,23 @@ export function reduceCaptureBatch(state: CaptureState, events: CaptureEvent[]):
  * to it.
  */
 export function reduceCaptureInto(s: CaptureState, e: CaptureEvent): DetectedTake[] {
-  s.log.push(e);
   const takes: DetectedTake[] = [];
-  const now = e.t;
-
+  // Beat FX tails (#355) fall silent between events: evaluate each tail's
+  // end at its exact instant, so an echo-out's cessation is the tail end,
+  // not the next tick.
+  for (let end = nextFxTailEnd(s); end < e.t; end = nextFxTailEnd(s)) {
+    advanceClock(s, end);
+    evaluate(s, end, null, takes);
+  }
+  // A Load cuts a ringing tail on its deck (audibilityReducer): cease it
+  // BEFORE the Load's own handling, so an echo-out followed by a Load
+  // settles eagerly instead of reading as an abandoned blend.
+  if (e.kind === 'load' && s.decks[e.channel].fxTail !== null) {
+    advanceClock(s, e.t);
+    s.decks[e.channel].fxTail = null;
+    evaluate(s, e.t, null, takes);
+  }
+  s.log.push(e);
   // The shared audibility reducer (audibilityReducer.ts) applies the raw
   // event to deck/mixer/tenure state. Tenure markers (ADR 0033) move the
   // old recorder surface gate into the log: a machine holding the surface
@@ -356,6 +524,27 @@ export function reduceCaptureInto(s: CaptureState, e: CaptureEvent): DetectedTak
   // ignores — a stab does NOT count toward audibility/engagements
   // (deliberate; revisiting that is a follow-up grill, not this issue).
   applyEvent(s, e);
+  evaluate(s, e.t, e, takes);
+  return takes;
+}
+
+/** Post-apply verdict pass at `now`: caches, suspension, Load handling
+ * (`e` = the event just applied; null = a clock-only instant), audibility
+ * edges, settlement, log pruning. Appends settled Takes to `takes`. */
+function evaluate(s: CaptureState, now: number, e: CaptureEvent | null, takes: DetectedTake[]): void {
+  // Sounding cache (#178) — the entry-onset backdating clock, kept current
+  // on every event (suspension included; it carries no verdicts of its
+  // own). Audible ⊆ sounding, so the audibility flip that opens an
+  // engagement below always sees this deck's soundingSince already
+  // stamped — for a hot entry both flip on this very event and the
+  // backdate is zero by construction.
+  for (const ch of ALL_DECKS) {
+    const sounding = deckSounding(s, ch);
+    if (sounding !== s.decks[ch].sounding) {
+      s.decks[ch].sounding = sounding;
+      s.decks[ch].soundingSince = now;
+    }
+  }
 
   // Suspension edge — tenure ONLY (4dp 37; the one rule, shared with the
   // timeline and recorder). Entering discards in-flight engagements and
@@ -396,7 +585,7 @@ export function reduceCaptureInto(s: CaptureState, e: CaptureEvent): DetectedTak
       }
     }
     pruneLog(s, now);
-    return takes;
+    return;
   }
 
   // A Load re-premises the deck: the track being traded no longer exists
@@ -410,7 +599,7 @@ export function reduceCaptureInto(s: CaptureState, e: CaptureEvent): DetectedTak
   // A Load onto a LIVE incumbent also resets incumbency — its audible run
   // ended by replacement, not by mix-out. Applied per machine whose pair
   // contains the loaded deck.
-  if (e.kind === 'load') {
+  if (e?.kind === 'load') {
     for (const key of PAIR_KEYS) {
       if (!PAIR_DECKS[key].includes(e.channel)) continue;
       const m = s.pairs[key];
@@ -420,6 +609,13 @@ export function reduceCaptureInto(s: CaptureState, e: CaptureEvent): DetectedTak
           if (take) takes.push(take);
           const incoming = mate(key, m.incumbent!);
           m.incumbent = s.decks[incoming].audible ? incoming : null;
+        } else if (m.incomingSilentSince !== null) {
+          // The tease already ended (guest silent, host current) and a
+          // Load re-premises a deck — the guest's comeback is now
+          // impossible on it, so settle the Guest engagement eagerly
+          // (#140; the sibling of the eager Handover settle above).
+          const take = emitGuestTake(s, m, key);
+          if (take) takes.push(take);
         }
         dissolve(m);
       }
@@ -470,14 +666,17 @@ export function reduceCaptureInto(s: CaptureState, e: CaptureEvent): DetectedTak
       m.incomingSilentSince !== null &&
       now - m.incomingSilentSince >= s.params.settleHorizonS
     ) {
-      // Tease-and-bail: the outgoing survived; no Take.
+      // The outgoing survived the incoming's cessation: a GUEST
+      // ENGAGEMENT (#140) — emit a Cameo Take (was: dissolve with no
+      // Take). The incumbent rides on — the host never stopped being
+      // *the* track.
+      const take = emitGuestTake(s, m, key);
+      if (take) takes.push(take);
       dissolve(m);
     }
   }
 
   pruneLog(s, now);
-
-  return takes;
 }
 
 /** Prune the rolling log to the current retention horizon — the most
@@ -529,12 +728,27 @@ function onEdge(
       if (m.engagedSince !== null) {
         m.incomingSilentSince = null; // fold a tease gap
       } else if (s.decks[incumbent].audible) {
-        openEngagement(s, m, key, now); // overlap onset
+        // Overlap onset (#178): the window starts where the incoming first
+        // SOUNDED, not where its rising gain crossed `audibleGain` — a
+        // play-then-fader-slam entry loses its first beats otherwise.
+        // Bounded by `entryBackdateMaxS` (a residual whisper-level fader
+        // can hold the sounding clock open for minutes) and by the
+        // incumbent's own audibility (an overlap cannot predate its
+        // incumbent).
+        const onset = Math.max(
+          s.decks[ch].soundingSince,
+          now - s.params.entryBackdateMaxS,
+          s.decks[incumbent].since
+        );
+        openEngagement(s, m, key, onset);
       } else if (
         m.outSilentSince !== null &&
         now - m.outSilentSince <= s.params.cutGapMaxS
       ) {
-        openEngagement(s, m, key, m.outSilentSince); // hard cut: window is the cut instant
+        // Hard cut: engage AT the cessation (window start), and record the
+        // incoming's onset (window end) so the slice spans the cut ramp
+        // instead of collapsing to a single instant (#138 defect 1).
+        openEngagement(s, m, key, m.outSilentSince, now);
       } else {
         // Incumbent long gone: fresh incumbency, no Handover.
         m.incumbent = ch;

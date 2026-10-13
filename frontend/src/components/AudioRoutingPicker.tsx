@@ -17,7 +17,6 @@
 import { useSyncExternalStore } from 'react';
 import {
   getRoutingSnapshot,
-  forceRefreshRouting,
   refreshRouting,
   setCueDevice,
   setMasterDevice,
@@ -25,6 +24,11 @@ import {
 } from '../playback/routingStore';
 import { outputPairOptions, sameOutputChoice } from '../playback/routing';
 import type { SavedDevice } from '../playback/routing';
+import { useMixer, useMixerValue } from '../hooks/useMixer';
+import { useTakeoverHint } from '../hooks/useTakeoverHint';
+import { takeoverKey } from '../midi/takeoverFeedback';
+import { CUE_LEVEL_DEFAULT, MASTER_LEVEL_DEFAULT } from '../playback/mixer';
+import { Knob } from './performance/MixerStrip';
 import { AutoBlurSelect } from './AutoBlurSelect';
 
 function BusSelect({
@@ -58,7 +62,6 @@ function BusSelect({
           : `${label} output device`
       }
     >
-      <span className="topbar-routing-label">{label}</span>
       <AutoBlurSelect
         value={saved === null ? '' : savedIndex >= 0 ? String(savedIndex) : 'saved'}
         onPointerDown={() => void refreshRouting()}
@@ -90,35 +93,59 @@ export function AudioRoutingPicker() {
     subscribeRouting,
     getRoutingSnapshot
   );
+  // Bus gains (gh#66): MASTER and PHONES moved out of the mixer strip —
+  // each bus reads [gain knob][device select], deck-MIX-zone style (label
+  // under the dial). Same Mixer subscription as the strip, so hardware
+  // knob moves repaint these live (midi-controller 09/18).
+  const mixer = useMixer();
+  const master = useMixerValue((m) => m.getMaster());
+  const cueLevel = useMixerValue((m) => m.getCueLevel());
+  const masterTakeover = useTakeoverHint(takeoverKey.master());
+  const cueLevelTakeover = useTakeoverHint(takeoverKey.cueLevel());
   return (
     <div className="topbar-routing">
-      <BusSelect
-        label="MASTER"
-        noneLabel="System default"
-        saved={prefs.master}
-        missing={resolved.masterMissing}
-        needsPair={resolved.masterNeedsPair}
-        options={outputPairOptions(devices)}
-        onPick={setMasterDevice}
-      />
-      <BusSelect
-        label="CUE"
-        noneLabel="Off"
-        saved={prefs.cue}
-        missing={resolved.cueMissing}
-        needsPair={resolved.cueNeedsPair}
-        options={outputPairOptions(devices)}
-        onPick={setCueDevice}
-      />
-      <button
-        type="button"
-        className="topbar-routing-refresh"
-        title="Force refresh audio devices and output-channel probes"
-        aria-label="Refresh audio devices"
-        onClick={() => void forceRefreshRouting()}
-      >
-        ↻
-      </button>
+      <div className="topbar-routing-bus-group">
+        <Knob
+          label="MASTER"
+          min={0}
+          max={1}
+          value={master}
+          defaultValue={MASTER_LEVEL_DEFAULT}
+          onChange={(v) => mixer.setMaster(v)}
+          title="Master volume (double-click = 0 dB; upper half boosts to +6 dB)"
+          takeover={masterTakeover}
+        />
+        <BusSelect
+          label="MASTER"
+          noneLabel="System default"
+          saved={prefs.master}
+          missing={resolved.masterMissing}
+          needsPair={resolved.masterNeedsPair}
+          options={outputPairOptions(devices)}
+          onPick={setMasterDevice}
+        />
+      </div>
+      <div className="topbar-routing-bus-group">
+        <Knob
+          label="CUE"
+          min={0}
+          max={1}
+          value={cueLevel}
+          defaultValue={CUE_LEVEL_DEFAULT}
+          onChange={(v) => mixer.setCueLevel(v)}
+          title="Headphone (cue) level"
+          takeover={cueLevelTakeover}
+        />
+        <BusSelect
+          label="CUE"
+          noneLabel="Off"
+          saved={prefs.cue}
+          missing={resolved.cueMissing}
+          needsPair={resolved.cueNeedsPair}
+          options={outputPairOptions(devices)}
+          onPick={setCueDevice}
+        />
+      </div>
     </div>
   );
 }

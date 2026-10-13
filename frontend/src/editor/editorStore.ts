@@ -54,7 +54,7 @@ export interface EditorSnapshot {
 /** Persistence seam (defaults to the transition store / pairStore). */
 export interface EditorPersistence {
   load(pairKey: string): PairEntry | undefined;
-  save(pairKey: string, entry: PairEntry | null): void;
+  save(pairKey: string, entry: PairEntry | null): void | Promise<boolean>;
 }
 
 const SAVE_DEBOUNCE_MS = 300;
@@ -75,6 +75,7 @@ export class EditorStore {
   private readonly listeners = new Set<() => void>();
   private saveTimer: ReturnType<typeof setTimeout> | null = null;
   private savePending = false;
+  private reviewGeneration = 0;
   private onTransitionLoaded: ((t: Transition) => void) | null = null;
 
   constructor(persist?: Partial<EditorPersistence>) {
@@ -128,7 +129,7 @@ export class EditorStore {
 
   /** Write the pending session to the pair store NOW (debounce cancelled).
    * No-op unless a mutation armed it. */
-  flush(): void {
+  flush(): void | Promise<boolean> {
     if (this.saveTimer) {
       clearTimeout(this.saveTimer);
       this.saveTimer = null;
@@ -142,7 +143,7 @@ export class EditorStore {
     const items = draftUuid === null ? live : live.filter((it) => it.uuid !== draftUuid);
     const activeItem = live[this.state.session.active];
     const active = Math.max(0, items.indexOf(activeItem));
-    this.persist.save(this.state.pairKey, toStoredEntry(items, active));
+    return this.persist.save(this.state.pairKey, toStoredEntry(items, active));
   }
 
   /** Unmount: don't lose the last ≤300ms of edits. */
@@ -159,6 +160,7 @@ export class EditorStore {
    * armed, so merely opening a pair can never write (or delete) it. */
   loadPair(pairKey: string): void {
     if (pairKey === this.state.pairKey) return;
+    this.reviewGeneration++;
     this.flush();
     const entry = this.persist.load(pairKey);
     const items = entry ? structuredClone(entry.items) : [freshTransition([])];
@@ -178,6 +180,7 @@ export class EditorStore {
    * EMIT ONLY — no save is armed; the draft stays out of every persist
    * until promoted (see flush). */
   stampTakeDraft(takeUuid: string, transition: Transition): void {
+    this.reviewGeneration++;
     // Re-opening a Take on the already-loaded pair: the previous draft is
     // REPLACED, never orphaned (an orphan named "Take" is non-pristine and
     // would ride the next armed save — the bug this filter closes).
@@ -202,12 +205,24 @@ export class EditorStore {
 
   /** The explicit promotion act: the draft becomes an ordinary saved
    * Transition (normal persistence path) and the caller gets the pair of
-   * identifiers to record on the Take. Null when nothing is under review. */
-  promoteTakeDraft(): { takeUuid: string; transitionUuid: string } | null {
+   * identifiers only after persistence completes. Null when nothing is under review. */
+  async promoteTakeDraft(): Promise<{ takeUuid: string; transitionUuid: string } | null> {
     const draft = this.state.takeDraft;
     if (!draft) return null;
+    const pairKey = this.state.pairKey;
+    const generation = this.reviewGeneration;
     this.touch({ takeDraft: null });
-    this.flush();
+    try {
+      if (await this.flush() === false) throw new Error('Transition save failed');
+    } catch (err) {
+      // A failed save must not resurrect a review the user has left or replaced.
+      if (this.state.pairKey === pairKey && this.reviewGeneration === generation &&
+          this.state.takeDraft === null &&
+          this.state.session.items[this.state.session.active]?.uuid === draft.itemUuid) {
+        this.emit({ takeDraft: draft });
+      }
+      throw err;
+    }
     return { takeUuid: draft.takeUuid, transitionUuid: draft.itemUuid };
   }
 
@@ -245,11 +260,20 @@ export class EditorStore {
   }
 
   /** Point the session at a saved Transition by uuid — selection only,
-   * never a mutation (jumping from the history's promoted mark). */
+   * never a mutation (jumping from the history's promoted mark; the
+   * evidence cycler, gh#167). Leaving a pristine item evaporates it
+   * (navigateTransition's rule) — cycling the unified evidence list must
+   * not strand untouched sketches as chips. Emit-only: pristine items
+   * never persist, so the evaporation needs no save. */
   selectTransition(uuid: string): void {
-    const items = this.liveItems();
-    const index = items.findIndex((it) => it.uuid === uuid);
+    let items = this.liveItems();
+    const cur = items[this.state.session.active];
+    let index = items.findIndex((it) => it.uuid === uuid);
     if (index < 0 || index === this.state.session.active) return;
+    if (cur && isPristine(cur) && items.length > 1) {
+      items = items.filter((it) => it !== cur);
+      index = items.findIndex((it) => it.uuid === uuid);
+    }
     this.emit({
       session: { items, active: index },
       mix: { ...this.state.mix, transition: structuredClone(items[index].transition) },
@@ -309,39 +333,45 @@ export class EditorStore {
     }));
   }
 
-  // ── Jump events (transition-takes 01) ───────────────────────────────
+  // ── Jump events (transition-takes 01; both roles since issue 177) ────
   // Array order is INSERTION order, never re-sorted: the UI addresses
   // jumps by index across x drags (the math is order-insensitive).
+  // `role` picks the deck: 'B' = incoming (`jumps`), 'A' = outgoing
+  // (`jumpsA` — mix time ≡ A's elapsed play). Default 'B' keeps the
+  // pre-177 call sites unchanged.
 
   /** Add a Jump event at normalized window position x (clamped 0..1),
    * with no distance yet — the marker's editor sets deltaSec. */
-  addJump(x: number): void {
+  addJump(x: number, role: 'A' | 'B' = 'B'): void {
+    const key = role === 'A' ? 'jumpsA' : 'jumps';
     const jump = { x: Math.max(0, Math.min(1, x)), deltaSec: 0 };
     this.updateMix((m) => ({
       ...m,
-      transition: { ...m.transition, jumps: [...(m.transition.jumps ?? []), jump] },
+      transition: { ...m.transition, [key]: [...(m.transition[key] ?? []), jump] },
     }));
   }
 
   /** Patch one Jump event (marker drags patch `x`, the Δ editor patches
    * `deltaSec`) — addressed by insertion index, stable across x drags. */
-  updateJump(index: number, patch: Partial<JumpEvent>): void {
+  updateJump(index: number, patch: Partial<JumpEvent>, role: 'A' | 'B' = 'B'): void {
+    const key = role === 'A' ? 'jumpsA' : 'jumps';
     this.updateMix((m) => ({
       ...m,
       transition: {
         ...m.transition,
-        jumps: (m.transition.jumps ?? []).map((j, i) => (i === index ? { ...j, ...patch } : j)),
+        [key]: (m.transition[key] ?? []).map((j, i) => (i === index ? { ...j, ...patch } : j)),
       },
     }));
   }
 
   /** Delete one Jump event by insertion index. */
-  removeJump(index: number): void {
+  removeJump(index: number, role: 'A' | 'B' = 'B'): void {
+    const key = role === 'A' ? 'jumpsA' : 'jumps';
     this.updateMix((m) => ({
       ...m,
       transition: {
         ...m.transition,
-        jumps: (m.transition.jumps ?? []).filter((_, i) => i !== index),
+        [key]: (m.transition[key] ?? []).filter((_, i) => i !== index),
       },
     }));
   }

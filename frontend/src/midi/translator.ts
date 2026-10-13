@@ -89,8 +89,35 @@ export function translateMidiMessage(
       // Note-on with velocity 0 is note-off by MIDI convention.
       const isDown = kind === NOTE_ON && value > 0;
       const key = controlKey(channel, number);
-      if (isDown === state.heldButtons.has(key)) return silence;
-      const heldButtons = new Set(state.heldButtons);
+      const touch = binding.target.control === 'jog-touch-edge';
+      const selector = binding.target.control === 'beat-fx-select';
+      // Rotary SELECT detents are note-addressed radio positions, not held
+      // buttons. Some firmware paths omit the previous detent's note-off;
+      // clear every peer before dedupe so returning to a detent always emits.
+      let heldForDedupe = state.heldButtons;
+      if (selector && isDown) {
+        const withoutSelector = new Set(state.heldButtons);
+        for (const peer of mapping.bindings) {
+          if (peer.controlType === 'button' && peer.target.control === 'beat-fx-select') {
+            withoutSelector.delete(controlKey(peer.match.channel, peer.match.number));
+          }
+        }
+        heldForDedupe = withoutSelector;
+      }
+      // SHIFT can change the release address mid-touch. Always deliver
+      // touch/layer releases, even if their matching down was never seen.
+      const releaseState = touch || binding.target.control === 'set-control-focus';
+      if ((isDown || !releaseState) && isDown === heldForDedupe.has(key)) return silence;
+      const heldButtons = new Set(heldForDedupe);
+      if (binding.target.control === 'jog-touch-edge'
+          || (binding.target.control === 'set-control-focus' && !isDown)) {
+        for (const peer of mapping.bindings) {
+          if (peer.controlType === 'button' && peer.target.control === 'jog-touch-edge'
+              && peer.target.deck === binding.target.deck) {
+            heldButtons.delete(controlKey(peer.match.channel, peer.match.number));
+          }
+        }
+      }
       if (isDown) heldButtons.add(key);
       else heldButtons.delete(key);
       return {

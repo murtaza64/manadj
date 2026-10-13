@@ -30,6 +30,7 @@ def _row(t: models.TransitionTemplate) -> schemas.TransitionTemplateRow:
         after_beats=t.after_beats,
         scalable=t.scalable,
         lanes=json.loads(t.lanes_json),
+        beat_fx=json.loads(t.beat_fx_json) if t.beat_fx_json else None,
     )
 
 
@@ -70,6 +71,7 @@ def create_template(payload: schemas.TransitionTemplateItem, db: Session = Depen
         after_beats=payload.after_beats,
         scalable=payload.scalable,
         lanes_json=json.dumps(payload.lanes),
+        beat_fx_json=json.dumps(payload.beat_fx) if payload.beat_fx else None,
     )
     db.add(row)
     db.commit()
@@ -93,6 +95,7 @@ def update_template(
     row.after_beats = payload.after_beats
     row.scalable = payload.scalable
     row.lanes_json = json.dumps(payload.lanes)
+    row.beat_fx_json = json.dumps(payload.beat_fx) if payload.beat_fx else None
     db.commit()
     db.refresh(row)
     return _row(row)

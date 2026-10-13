@@ -4,6 +4,7 @@ import { api } from '../api/client';
 import type { UnifiedPlaylist, Track, SyncResult } from '../types';
 import { formatKeyDisplay } from '../utils/keyUtils';
 import { PlaylistFullExportModal } from './PlaylistFullExportModal';
+import { useExportEnabled } from '../settings/useAppConfig';
 import './PlaylistDetailView.css';
 
 interface PlaylistDetailViewProps {
@@ -16,6 +17,9 @@ export function PlaylistDetailView({ playlist, onBack }: PlaylistDetailViewProps
   const [syncError, setSyncError] = useState<string | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
   const queryClient = useQueryClient();
+  // Export gate (ADR 0043): with export off, syncing only imports INTO
+  // manadj (target pinned to 'manadj'); external-write verbs hide.
+  const exportEnabled = useExportEnabled();
   // Collect all manadj track IDs
   const manadjTrackIds = (playlist.manadj || [])
     .map(entry => entry.track_id)
@@ -59,7 +63,8 @@ export function PlaylistDetailView({ playlist, onBack }: PlaylistDetailViewProps
     mutationFn: async ({ source, ignoreMissing }: { source: string, ignoreMissing: boolean }) => {
       return api.playlistSync.sync(playlist.name, {
         source,
-        target: null,  // Sync to all targets
+        // All targets when export is on; import-only into manadj otherwise.
+        target: exportEnabled ? null : 'manadj',
         ignore_missing_tracks: ignoreMissing,
         dry_run: false,
       });
@@ -113,8 +118,8 @@ export function PlaylistDetailView({ playlist, onBack }: PlaylistDetailViewProps
         </div>
         <div className="playlist-detail-actions">
           <div className="sync-buttons">
-            <span className="sync-label">Sync from:</span>
-            {hasManadj && (
+            <span className="sync-label">{exportEnabled ? 'Sync from:' : 'Import from:'}</span>
+            {hasManadj && exportEnabled && (
               <button
                 onClick={() => handleSync('manadj')}
                 disabled={syncMutation.isPending}
@@ -141,7 +146,7 @@ export function PlaylistDetailView({ playlist, onBack }: PlaylistDetailViewProps
                 Rekordbox
               </button>
             )}
-            {hasManadj && (
+            {hasManadj && exportEnabled && (
               <button
                 onClick={() => setExportOpen(true)}
                 className="sync-button playlist-full-export-button"

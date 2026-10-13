@@ -1,0 +1,31 @@
+.help-host .modal-overlay {
+  z-index: calc(var(--z-modal) + 1);
+}
+
+.modal-panel.help-panel {
+  width: 1120px;
+  height: calc(100vh - 48px);
+  min-height: 0;
+}
+
+.help-toolbar {
+  display: flex;
+  gap: var(--space-8);
+  margin-bottom: var(--space-12);
+}
+
+.help-frame {
+  width: 100%;
+  flex: 1;
+  min-height: 0;
+  border: 1px solid var(--surface0);
+  background: var(--mantle);
+}
+
+.help-topics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-8);
+  list-style: none;
+  padding: 0;
+}

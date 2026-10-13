@@ -4,14 +4,17 @@
  * ONE format shared by the live tap (recorder) and the Handover detector —
  * synthetic streams in tests are the same shape as real capture, so the
  * detector's tests exercise the real seam. Events are timestamped on a
- * monotonic seconds clock (performance.now()/1000 in the recorder; the
- * audio clock is unusable — it freezes while the surface is displaced).
+ * monotonic capture clock: audio time during an active audio epoch, wall
+ * time through suspended/gated intervals. Epochs are anchored once, not
+ * individually fitted to event callback arrival times.
  *
  * The raw slice stored on a Take is a window of these events: the
  * evidence, not the verdict. Vectorization (issue 03) re-derives from it,
  * so the format errs toward completeness — controls, transport, pitch,
  * loads, and coarse periodic playhead samples.
  */
+import type { BeatFxSectionState } from '../playback/beatFx';
+import type { BeatFxSettings } from '../playback/beatFxSettings';
 
 /**
  * The pair-machine ROLE channel: everything downstream of a Take (its
@@ -43,10 +46,19 @@ export type CaptureControlId =
   | 'filter'
   | 'fader'
   | 'pfl'
+  | 'slipMode'
+  | 'vinylMode'
   | 'crossfaderAssignment'
   | 'crossfader'
   | 'crossfaderEnabled'
-  | 'master';
+  | 'master'
+  /** Stem kill switches (stems #212): booleans as 0/1, per channel. A
+   * Session is the whole event log — a kill the log omits makes replay
+   * lie, so these are recorded from v1 of the stems surface. */
+  | 'stemVocals'
+  | 'stemDrums'
+  | 'stemBass'
+  | 'stemOther';
 
 export type CaptureEvent =
   | {
@@ -72,12 +84,22 @@ export type CaptureEvent =
        * (deliberate; a follow-up grill revisits it). A hot-cue stab ALSO
        * logs its launch `hotCue` gesture (handler tap, after the start
        * edge). */
-      action: 'play' | 'pause' | 'seek' | 'jumpBeats' | 'hotCue' | 'cue' | 'previewStart' | 'previewEnd';
+      action: 'play' | 'pause' | 'seek' | 'jumpBeats' | 'hotCue' | 'cue' | 'previewStart' | 'previewEnd' | 'scratchBegin' | 'scratchMove' | 'scratchEnd';
       /** Deck track-time after the action (s). */
       playhead: number;
       /** Action-specific: beats for jumpBeats, slot for hotCue, slot for a
        * hot-cue stab's previewStart (absent on a main-cue stab). */
       detail?: number;
+      /** Input displacement/interval are evidence, not a finite trajectory.
+       * Filter is the complete post-input state (also present on seeds).
+       * scratchEnd.playhead is the resolved landing, including Slip. */
+      deltaSeconds?: number;
+      durationSeconds?: number;
+      filter?: import('../playback/worklet/scratchMotion').ScratchFilter;
+      /** Finite source boundary for scratch turning-point clipping. */
+      trackDuration?: number;
+      /** Authoritative snapshot instant; t maps it into the capture epoch. */
+      audioTime?: number;
     }
   | { t: number; kind: 'pitch' | 'bend'; channel: CaptureDeck; value: number }
   /** Active-loop state change (looping 06): engage/resize carry the new
@@ -91,8 +113,19 @@ export type CaptureEvent =
       playhead: number;
       /** The region after the change (track seconds), or null. */
       region: { start: number; end: number } | null;
+      /** Entry-latched Slip, distinct from the current Slip preference. */
+      slip?: boolean;
     }
   | { t: number; kind: 'load'; channel: CaptureDeck; trackId: number | null; bpm: number | null }
+  /** Beat FX SECTION state (#351): one full snapshot per change — the
+   * section is a single shared strip (effect, radio target, ON, bipolar
+   * LEVEL/DEPTH, beat length), so the snapshot is the whole truth and
+   * replay applies it verbatim. Seeded like every other control. */
+  | ({ t: number; kind: 'beatFx' } & BeatFxSectionState)
+  /** Beat FX voicing preferences (#351): echo feedback, reverb decay, …
+   * Logged at seed and on change so replay can sound like the performance
+   * even after the preferences move. */
+  | { t: number; kind: 'beatFxSettings'; settings: BeatFxSettings }
   /** Coarse periodic sample (~1 Hz): keeps alignment reconstructible and
    * drives time-based settlement in the detector. */
   | { t: number; kind: 'tick'; playheads: Partial<Record<CaptureDeck, number>> }
@@ -117,12 +150,17 @@ export type CaptureEvent =
       crossfader: number;
       crossfaderEnabled: boolean;
       physicalDecks?: { outgoing: CaptureDeck; incoming: CaptureDeck };
+      /** Beat FX section at open, ROLE-relabeled (#351; detector.ts
+       * roleBeatFx). Absent when no FX state was logged yet (pre-#351). */
+      beatFx?: BeatFxSectionState;
     };
 
 /** One deck's state at engagement open (init event). */
 export interface InitDeckState {
   trackId: number | null;
   playing: boolean;
+  scratching?: boolean;
+  slipLoopActive?: boolean;
   fader: number;
   trim: number;
   eq: { low: number; mid: number; high: number };
@@ -132,6 +170,9 @@ export interface InitDeckState {
    * arbitrary sides, so lane composition can't assume A-left/B-right.
    * Absent on takes detected before 4dp 39 (legacy default applies). */
   assignment?: 'left' | 'thru' | 'right';
+  /** Per-stem enables at open (stems #212). Absent on takes detected
+   * before stems (legacy default: all on). */
+  stems?: { vocals: boolean; drums: boolean; bass: boolean; other: boolean };
 }
 
 // ── Detection parameters (versioned — stamped on every Take) ────────────
@@ -139,8 +180,26 @@ export interface InitDeckState {
 /** Bump whenever detection semantics or defaults change: old Takes stay
  * attributable to the detector that produced them (issue 05 tuning).
  * v2 (4dp 37 + 10): the >2-audible self-gate is gone and one pair machine
- * runs per unordered physical pair, emitting role-relabeled slices. */
-export const DETECTOR_VERSION = 2;
+ * runs per unordered physical pair, emitting role-relabeled slices.
+ * v3 (#138): zero-overlap hard-cut windows span the cut ramp (cessation →
+ * incoming onset) instead of collapsing to one instant, and one engagement
+ * emits at most one Take per ordered pair (a flicker across the settle
+ * horizon no longer settles a duplicate).
+ * v4 (#178): overlap-engagement onsets backdate to the incoming's first
+ * SOUND (playing ∧ gain > 0, capped at `entryBackdateMaxS`) — a
+ * play-then-fader-slam entry's window begins at the entry gesture, not at
+ * the mid-ramp `audibleGain` crossing that clipped its first beats.
+ * v5 (#140): the survivor rule's SECOND verdict — a tease where the
+ * outgoing survives as current settles a Guest engagement and emits a
+ * Cameo Take (kind 'guest'; tease-and-bail no longer dissolves silently) —
+ * and every capture carries its engagement identity (concurrent
+ * deck-sharing engagements share one uuid, so a triple's pairwise
+ * offspring are a first-class group). */
+// v7 (#225): paused scratch motion is audible; touched stationary holds are not.
+// v8 (#355): Beat FX echo/reverb tails keep a deck audible after its
+// excitation stops (fader close, kill, stop, FX off) — an echo-out's
+// window ends where the tail decays below `audibleGain` (capture/fxTail.ts).
+export const DETECTOR_VERSION = 8;
 
 export interface DetectorParams {
   /** Master-bus gain (trim × channel fader × crossfader) below which a
@@ -156,6 +215,11 @@ export interface DetectorParams {
   /** Settle horizon: the outgoing must stay silent this long before the
    * Handover completes; returns within it fold (cross-cuts). */
   settleHorizonS: number;
+  /** Entry-onset backdating cap (#178): an overlap engagement's window
+   * starts at the incoming's first sound (playing, gain > 0), at most
+   * this far before its `audibleGain` crossing — a residual whisper-level
+   * fader could otherwise hold the sounding clock open for minutes. */
+  entryBackdateMaxS: number;
   /** Raw-slice padding either side of the Take window. */
   padS: number;
   /** Rolling-log retention while no engagement is open. */
@@ -168,16 +232,27 @@ export const DEFAULT_DETECTOR_PARAMS: DetectorParams = {
   filterKillBeyond: 0.97,
   cutGapMaxS: 2,
   settleHorizonS: 8,
+  entryBackdateMaxS: 2,
   padS: 2,
   idleKeepS: 30,
 };
 
 // ── Detected Takes ───────────────────────────────────────────────────────
 
-/** A settled Handover, ready to persist. Times are on the capture clock;
+/** A settled verdict, ready to persist. Times are on the capture clock;
  * the window is the engagement (glossary), the events its padded slice —
- * role-relabeled (outgoing='A', incoming='B'; 4dp 10). */
+ * role-relabeled (outgoing='A', incoming='B'; 4dp 10).
+ *
+ * `kind` is the survivor rule's verdict (#140): 'handover' (outgoing →
+ * incoming — a Take) or 'guest' (the outgoing SURVIVES as current — a
+ * Cameo Take: the outgoing role is the host, the incoming the guest;
+ * host-as-A holds through the same relabeling). */
 export interface DetectedTake {
+  kind: 'handover' | 'guest';
+  /** The engagement this verdict settled from (#140): concurrent
+   * deck-sharing engagements share it — a double/triple's pairwise
+   * offspring group by it in the Transition history. */
+  engagementUuid: string;
   outgoingTrackId: number;
   incomingTrackId: number;
   /** The physical decks the Handover traded on (also stamped on the

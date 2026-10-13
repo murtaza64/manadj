@@ -47,6 +47,12 @@ class FakeEngine {
     this.playing = true;
   }
 
+  /** Machine-grade positioned start (#173): exact seek + start. */
+  playAt(t: number): void {
+    this.seek(t);
+    this.play();
+  }
+
   pause(): void {
     this.calls.push('pause');
     this.playing = false;

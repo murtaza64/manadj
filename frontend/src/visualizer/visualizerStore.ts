@@ -5,6 +5,7 @@
  * and is written from the window itself (the one writer).
  */
 
+import { removeSetting, writeSetting } from '../settings/persistedSettings';
 import { DEFAULT_PRESET_ID, presetById } from './presets';
 import { isCandidateId } from './presets/gen';
 import type { VisualizerPreset } from './presets/types';
@@ -30,11 +31,7 @@ function load(): string {
 }
 
 function save(id: string): void {
-  try {
-    localStorage.setItem(STORAGE_KEY, id);
-  } catch {
-    // persistence is best-effort; the session keeps its setting
-  }
+  writeSetting(STORAGE_KEY, id);
 }
 
 let presetId = load();
@@ -106,22 +103,14 @@ export function setParamValue(presetId: string, paramId: string, value: number):
     paramCache.get(presetId) ?? (curated.id === presetId ? resolveParams(curated) : {});
   const next = { ...base, [paramId]: value };
   paramCache.set(presetId, next);
-  try {
-    localStorage.setItem(PARAMS_KEY_PREFIX + presetId, JSON.stringify(next));
-  } catch {
-    // persistence is best-effort
-  }
+  writeSetting(PARAMS_KEY_PREFIX + presetId, JSON.stringify(next));
   for (const listener of paramListeners) listener();
 }
 
 export function resetParams(presetId: string): void {
   const id = normalizeId(presetId);
   paramCache.delete(id);
-  try {
-    localStorage.removeItem(PARAMS_KEY_PREFIX + id);
-  } catch {
-    // best-effort
-  }
+  removeSetting(PARAMS_KEY_PREFIX + id);
   for (const listener of paramListeners) listener();
 }
 
@@ -161,11 +150,7 @@ export function getRenderQuality(): RenderQuality {
 export function setRenderQuality(quality: RenderQuality): void {
   if (quality === renderQuality) return;
   renderQuality = quality;
-  try {
-    localStorage.setItem(QUALITY_KEY, quality);
-  } catch {
-    // best-effort
-  }
+  writeSetting(QUALITY_KEY, quality);
   for (const listener of qualityListeners) listener();
 }
 

@@ -5,6 +5,8 @@ import { createRoot } from 'react-dom/client';
 import type { Root } from 'react-dom/client';
 import { FilterProvider, useFilters } from '../contexts/FilterContext';
 import { isFindChord, shouldClearSearch, useSearchKeys } from './searchKeys';
+import { BrowseActiveContext } from '../contexts/browseActive';
+import { ViewActiveContext } from '../contexts/viewActive';
 
 declare global {
   var IS_REACT_ACT_ENVIRONMENT: boolean | undefined;
@@ -99,17 +101,21 @@ describe('useSearchKeys (mounted through FilterProvider)', () => {
     const container = document.createElement('div');
     document.body.appendChild(container);
     let root: Root;
+    const render = (browse = true, view = true) => root.render(
+      <ViewActiveContext value={view}>
+        <BrowseActiveContext value={browse}>
+          <FilterProvider><Probe /></FilterProvider>
+        </BrowseActiveContext>
+      </ViewActiveContext>
+    );
     act(() => {
       root = createRoot(container);
-      root.render(
-        <FilterProvider>
-          <Probe />
-        </FilterProvider>
-      );
+      render();
     });
     return {
       filtersRef,
       inputRef,
+      setVisibility: (browse: boolean, view = true) => act(() => render(browse, view)),
       unmount: () => {
         act(() => root.unmount());
         container.remove();
@@ -130,6 +136,22 @@ describe('useSearchKeys (mounted through FilterProvider)', () => {
     });
     expect(document.activeElement).toBe(inputRef.current);
     expect(event.defaultPrevented).toBe(true);
+    unmount();
+  });
+
+  it.each(['browse', 'view'])('leaves hidden search unchanged when %s is inactive', reason => {
+    const { filtersRef, inputRef, setVisibility, unmount } = renderHarness();
+    act(() => filtersRef.current.setFilters(prev => ({ ...prev, search: 'amen' })));
+    setVisibility(reason !== 'browse', reason !== 'view');
+    let event!: KeyboardEvent;
+    act(() => { event = keydown({ key: 'f', metaKey: true }); keydown({ key: 'Escape' }); });
+    expect(event.defaultPrevented).toBe(false);
+    expect(document.activeElement).not.toBe(inputRef.current);
+    expect(filtersRef.current.filters.search).toBe('amen');
+    setVisibility(true, true);
+    act(() => { event = keydown({ key: 'f', metaKey: true }); });
+    expect(event.defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(inputRef.current);
     unmount();
   });
 

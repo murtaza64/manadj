@@ -19,7 +19,10 @@ import type { AudibleSurfaceId } from '../playback/audibleSurface';
 
 export type ChipFace =
   | { kind: 'set'; setId: number; playing: boolean }
-  | { kind: 'audition' }
+  /** An editor audition holds — `editor` says WHICH surface (#205 bug
+   * report: the Mix editor's 'routine-editor' claim rendered as muted
+   * DECKS, hiding the audition from the chrome). Click navigates there. */
+  | { kind: 'audition'; editor: 'editor' | 'routine-editor' }
   | { kind: 'replay' }
   | { kind: 'decks' };
 
@@ -32,7 +35,13 @@ export function resolveChipFace(
   holder: AudibleSurfaceId,
   conductor: ConductorSnapshot
 ): ChipFace {
-  if (holder === 'editor') return { kind: 'audition' };
+  // Both editor surfaces audition: the pair editor ('editor') and the Mix
+  // editor ('routine-editor' — missed when the routine editor grew its own
+  // surface; the chip showed DECKS during its auditions). The face carries
+  // WHICH surface so the chip click navigates to the right editor.
+  if (holder === 'editor' || holder === 'routine-editor') {
+    return { kind: 'audition', editor: holder };
+  }
   if (holder === 'replay') return { kind: 'replay' };
   if (holder === 'conductor' && conductor.setId !== null && conductor.status !== 'idle') {
     return { kind: 'set', setId: conductor.setId, playing: conductor.status === 'playing' };

@@ -18,6 +18,7 @@
 import processorUrl from './deckSourceProcessor?worker&url';
 import { DECLICK_ATTACK_S, DECLICK_S } from '../graph';
 import { DECK_SOURCE_PROCESSOR, RATE_PARAM } from './protocol';
+import type { ScratchMotion, ScheduledScratchFrame } from './scratchMotion';
 import type {
   DeckSourceCommand,
   DeckSourceEvent,
@@ -50,6 +51,7 @@ export class DeckSourceNode {
 
   private readonly node: AudioWorkletNode;
   private readonly rate: AudioParam;
+  preserveScratchSchedule = false;
 
   private constructor(ctx: AudioContext) {
     this.ctx = ctx;
@@ -89,12 +91,49 @@ export class DeckSourceNode {
     );
   }
 
-  start(positionFrames: number, startId: number): void {
-    this.post({ type: 'start', positionFrames, startId });
+  /** Hand a track's decoded stems over (stems #209): STEM_NAMES order,
+   * same copy-then-transfer contract as loadTrack, ×N stems. */
+  loadStems(buffers: AudioBuffer[]): void {
+    const stems: Float32Array[][] = buffers.map((buffer) => {
+      const channels: Float32Array[] = [];
+      for (let c = 0; c < buffer.numberOfChannels; c++) {
+        channels.push(buffer.getChannelData(c).slice());
+      }
+      return channels;
+    });
+    this.post(
+      { type: 'load-stems', stems, sampleRate: buffers[0]?.sampleRate ?? this.ctx.sampleRate },
+      stems.flatMap((channels) => channels.map((channel) => channel.buffer))
+    );
+  }
+
+  /** Target per-stem gains (STEM_NAMES order); worklet declick-ramps them. */
+  setStemGains(gains: number[]): void {
+    this.post({ type: 'stem-gains', gains });
+  }
+
+  start(positionFrames: number, startId: number, when?: number): void {
+    this.post({ type: 'start', positionFrames, startId, when, preserveSchedule: this.preserveScratchSchedule });
   }
 
   stop(): void {
-    this.post({ type: 'stop' });
+    this.post({ type: 'stop', preserveSchedule: this.preserveScratchSchedule });
+  }
+
+  setScratch(motion: ScratchMotion): void {
+    this.post({ type: 'scratch', motion });
+  }
+
+  scheduleScratch(frames: ScheduledScratchFrame[]): void {
+    this.post({ type: 'scratch-schedule', frames });
+    for (const frame of frames) {
+      if (!frame.motion) this.rate.setValueAtTime(frame.rate, frame.time);
+    }
+  }
+
+  cancelScratchSchedule(): void {
+    this.post({ type: 'scratch-cancel' });
+    this.rate.cancelScheduledValues(this.ctx.currentTime);
   }
 
   /** Key Lock: mid-play this is a worklet-internal crossfade splice. */

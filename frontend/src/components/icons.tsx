@@ -7,6 +7,13 @@ interface IconProps {
   className?: string;
 }
 
+export const WaveformIcon = ({ width = 16, height = 16, opacity = 0.7, className }: IconProps) => (
+  <svg width={width} height={height} viewBox="0 0 16 16" fill="none" className={className} aria-hidden="true">
+    <path d="M2 7v2M4 5v6M6 2v12M8 4v8M10 3v10M12 6v4M14 7v2"
+          stroke="currentColor" strokeWidth="1.5" opacity={opacity} />
+  </svg>
+);
+
 export const MusicIcon = ({ width = 16, height = 16, opacity = 0.7, className }: IconProps) => (
   <svg width={width} height={height} viewBox="0 0 16 16" fill="none" className={className}>
     <path d="M14 2v9c0 1.1-.9 2-2 2s-2-.9-2-2 .9-2 2-2c.4 0 .7.1 1 .3V4H7v7c0 1.1-.9 2-2 2s-2-.9-2-2 .9-2 2-2c.4 0 .7.1 1 .3V2h8z"

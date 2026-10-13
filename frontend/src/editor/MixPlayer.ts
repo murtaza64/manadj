@@ -24,6 +24,7 @@
 import type { DeckEngine } from '../playback/DeckEngine';
 import type { Mixer } from '../playback/mixer';
 import type { EditorMix } from './mixModel';
+import { BeatFxOverride, fxSection, pairFxAt } from './beatFxLane';
 import {
   arrangementAt,
   jumpInstantSec,
@@ -72,6 +73,8 @@ export class MixPlayer {
   /** Deck mutes override the drawn fader lanes (applyLanes runs per tick,
    * so a plain one-shot fader write would be overwritten next frame). */
   private muted = { A: false, B: false };
+  /** Beat FX section borrow (#353): snapshot on play, restore on pause. */
+  private readonly beatFx: BeatFxOverride;
 
   private playing = false;
   /** Previous tick's mix time — jump-crossing detection (see tick). */
@@ -97,6 +100,7 @@ export class MixPlayer {
   constructor(mix: EditorMix, audio: MixPlayerAudio) {
     this.mix = mix;
     this.mixer = audio.mixer;
+    this.beatFx = new BeatFxOverride(audio.mixer);
     this.engineA = audio.engineA;
     this.engineB = audio.engineB;
     this.audible = audio.audible ?? (() => true);
@@ -207,6 +211,7 @@ export class MixPlayer {
     this.playing = true;
     this.anchorAudioTime = this.mixer.now();
     this.applyPitch();
+    this.beatFx.engage();
     // Apply lane values before audio starts so mid-transition playback
     // begins at the drawn gains, not the previous ones.
     this.applyLanes(this.getMixTime());
@@ -225,6 +230,22 @@ export class MixPlayer {
     cancelAnimationFrame(this.raf);
     this.engineA.pause();
     this.engineB.pause();
+    // The live Beat FX section returns (a ringing tail keeps ringing).
+    this.beatFx.release();
+    this.emit();
+  }
+
+  /** Takeover stand-down (gh#186): stop conducting WITHOUT touching the
+   * decks — they keep sounding as they are (the Conductor's takeover
+   * contract, via auditionTakeover). pause() is the arbiter/UI path and
+   * pauses the engines; this one leaves them to the user. */
+  standDown(): void {
+    if (!this.playing) return;
+    this.mixTimeAtAnchor = this.getMixTime();
+    this.playing = false;
+    cancelAnimationFrame(this.raf);
+    // Takeover: the FX section stays as it sounds.
+    this.beatFx.release({ keep: true });
     this.emit();
   }
 
@@ -288,12 +309,14 @@ export class MixPlayer {
       this.pause();
       return;
     }
-    // Jump events (transition-takes 01): crossing an instant makes B's
-    // arrangement position discontinuous. The drift corrector would catch
-    // deltas past its tolerance anyway; the explicit crossing check makes
-    // sub-tolerance jumps land too, exactly one hard sync per crossing.
+    // Jump events (transition-takes 01; both roles since issue 177):
+    // crossing an instant makes that deck's arrangement position
+    // discontinuous. The drift corrector would catch deltas past its
+    // tolerance anyway; the explicit crossing check makes sub-tolerance
+    // jumps land too, exactly one hard sync per crossing — syncDecks
+    // hard-syncs BOTH decks, so one check covers either array.
     const tr = this.mix.transition;
-    const crossed = (tr.jumps ?? []).some((j) => {
+    const crossed = [...(tr.jumps ?? []), ...(tr.jumpsA ?? [])].some((j) => {
       const tj = jumpInstantSec(tr, j);
       return tj > this.lastTickT && tj <= t;
     });
@@ -323,8 +346,11 @@ export class MixPlayer {
       return;
     }
     if (!snap.playing) {
-      engine.seek(trackTime);
-      engine.play();
+      // Machine-grade join (#173): exact positioned start — the performer
+      // seek+play path routed a paused deck through the cross-deck
+      // quantized launch, so each audition's B entry rode A's live beat
+      // phase at the gesture instant (run-to-run alignment variance).
+      engine.playAt(trackTime);
       return;
     }
     const drift = engine.getPlayhead() - trackTime;
@@ -341,7 +367,8 @@ export class MixPlayer {
    * sounding mix. */
   private applyLanes(t: number): void {
     if (!this.audible()) return;
-    const v = laneValuesAt(this.mix.transition, t);
+    const tr = this.mix.transition;
+    const v = laneValuesAt(tr, t);
     this.mixer.setAutomation('A', {
       fader: this.muted.A ? 0 : v.faderA,
       eq: { low: v.eqLowA, mid: v.eqMidA, high: v.eqHighA },
@@ -352,15 +379,21 @@ export class MixPlayer {
       eq: { low: v.eqLowB, mid: v.eqMidB, high: v.eqHighB },
       filter: v.filterB * 2 - 1,
     });
+    // Beat FX (#353): physical decks = roles in the editor.
+    const fx = this.mix.transition.beatFx;
+    const x = tr.durationSec > 0 ? (t - tr.startSec) / tr.durationSec : t < tr.startSec ? 0 : 1;
+    this.beatFx.apply(fx ? fxSection(pairFxAt(fx, x), (r) => r) : null);
   }
 
   private applyPitch(): void {
     // Not audible → not ours to pitch (sets 21). play() re-applies on the
     // audition that claims, so the editor's tempo match is never stale.
     if (!this.audible()) return;
-    // Sketch origin invariant: A's track time is mix time, so A must run at
-    // native rate. A persisted Performance pitch would drift against the
-    // arrangement until the safety corrector audibly re-seeks it.
+    // Sketch origin invariant: mix time is A's elapsed play (track time ≡
+    // mix time between jumps — issue 177), so A must run at native rate;
+    // jumpsA are discontinuities, not rate changes. A persisted
+    // Performance pitch would drift against the arrangement until the
+    // safety corrector audibly re-seeks it.
     this.engineA.setPitch(0);
     this.engineB.setPitch(
       this.mix.transition.tempoMatch ? tempoMatchPitch(this.bpm.a, this.bpm.b) : 0

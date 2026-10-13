@@ -8,7 +8,24 @@ waveform_tests/
 .claude/
 node_modules/
 .lane-app/
+.lane-tmp/
 
 .editspace/
 .scratch/
 tmp/
+
+# release builds (scripts/release/build_dmg.py)
+build/
+
+# backend rotating log (packaged-app #278)
+logs/
+
+# slskd binary fetched by scripts/slskd/fetch_slskd.py
+vendor/
+
+# Generated offline help (site/build.py --app-help)
+frontend/public/manual/
+
+# Generated Pages staging and ownership marker (site/build.py --output)
+/.site-dist/
+/.site-dist.site-build

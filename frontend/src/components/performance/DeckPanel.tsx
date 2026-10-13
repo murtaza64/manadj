@@ -16,8 +16,7 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../api/client';
-import { useDeck, useDeckReady, useDecks, useDeckSnapshot } from '../../hooks/useDeck';
-import { useMatchAction } from '../../hooks/useMatchAction';
+import { useDeck, useDeckReady, useDecks, useDeckSnapshot, useDeckSyncStatus, deckReadyNow, useBeatjumpBeats } from '../../hooks/useDeck';
 import { useAutomationGhost, useMixer, useMixerValue } from '../../hooks/useMixer';
 import { useTakeoverHint } from '../../hooks/useTakeoverHint';
 import { takeoverKey } from '../../midi/takeoverFeedback';
@@ -25,6 +24,9 @@ import { useScrubTransport } from '../../hooks/useScrubTransport';
 import { useViewActive } from '../../contexts/viewActive';
 import WebGLWaveform from '../WebGLWaveform';
 import WaveformMinimap from '../WaveformMinimap';
+import { useStemWaveforms } from '../../waveform/useStemWaveform';
+import { ALL_ON, stemMaskHistoryFor } from '../../performance/stemMaskHistory';
+import type { StemMask } from '../../performance/stemMaskHistory';
 import TagPill from '../TagPill';
 import { TransportPair } from '../deckControls/TransportPair';
 import { HotCuePads } from '../deckControls/HotCuePads';
@@ -36,8 +38,13 @@ import { BpmControl } from '../deckControls/BpmControl';
 import { HFader, Knob } from './MixerStrip';
 import { PlayGuideMinimapMarks } from '../../performance/PlayGuideMinimapMarks';
 import { TagPopover } from './TagPopover';
+import TagManagementModal from '../TagManagementModal';
+import { createPortal } from 'react-dom';
+import { useDeckDropTarget } from '../../selection/deckDrop';
+import { DeckDropOverlay } from '../../selection/DeckDropOverlay';
 import { NUDGE_BEND_PERCENT, composeRate, effectiveBpm, keyDrifted } from '../../playback/tempo';
 import { DECK_COLORS, hexToRgbTriplet } from '../../theme/deckColors';
+import { AUDIBILITY_FILL_ALPHA } from '../../theme/markers';
 import { PLAY_MARKER_FRACTION, trackWindowSeconds } from '../../utils/waveformZoom';
 import { channelFaderToGain, trimToGain } from '../../playback/mixerMath';
 import { createStripHistory } from '../../performance/stripHistory';
@@ -49,7 +56,18 @@ import { formatKeyDisplay } from '../../utils/keyUtils';
 import { getBpmColor, getKeyColor } from '../../utils/displayColors';
 import { setKeyLockFlag } from '../../playback/keyLockStore';
 import { DECK_KEYS } from './performanceKeys';
-import { CHANNEL_IDS } from '../../playback/mixer';
+import { CHANNEL_IDS, STEM_NAMES } from '../../playback/mixer';
+import type { ChannelId, StemName } from '../../playback/mixer';
+import { presentationOf } from '../../utils/presentationStore';
+import { primaryModGlyph, primaryModName } from '../../utils/platform';
+
+/** Stem kill-switch labels (stems #210): compact, hardware-ish. */
+const STEM_LABELS: Record<StemName, string> = {
+  vocals: 'VOC',
+  drums: 'DRM',
+  bass: 'BAS',
+  other: 'OTH',
+};
 import type { EqBand } from '../../playback/graph';
 import type { Track } from '../../types';
 
@@ -62,6 +80,102 @@ const MATCH_HINT_MS = 2000;
  * panel reads through the query cache (seeded with the loaded snapshot) and
  * edits invalidate ['track', id].
  */
+/** Stem-row affordance (stems review): for a loaded stem-less track, a
+ * hover swaps the disabled kill buttons for EXTRACT STEMS — enqueues a
+ * stem-split task, polls has_stems, then offers a one-click reload of
+ * this deck (the Load is what flips it onto the stems path). */
+function useStemRowState(
+  loadedTrack: Track | null,
+  stemsLoaded: boolean,
+  loadTrack: (track: Track) => void
+) {
+  const [hovered, setHovered] = useState(false);
+  const [extracting, setExtracting] = useState<number | null>(null);
+  const [ready, setReady] = useState<Track | null>(null);
+  const trackId = loadedTrack?.id ?? null;
+
+  // New load resets the affordance.
+  useEffect(() => {
+    setExtracting(null);
+    setReady(null);
+  }, [trackId]);
+
+  // Poll while a split is in flight (the task takes ~20-40s).
+  useEffect(() => {
+    if (extracting === null) return;
+    const timer = setInterval(async () => {
+      try {
+        const fresh = await api.tracks.getById(extracting);
+        if (fresh.has_stems) {
+          setReady(fresh);
+          setExtracting(null);
+        }
+      } catch {
+        /* keep polling */
+      }
+    }, 4000);
+    return () => clearInterval(timer);
+  }, [extracting]);
+
+  const wantsAffordance = trackId !== null && !stemsLoaded;
+  let action: { label: string; title: string; disabled: boolean; run: () => void } | null = null;
+  if (wantsAffordance && ready) {
+    action = {
+      label: 'STEMS READY — RELOAD',
+      title: 'Stems extracted; reload the track to use them',
+      disabled: false,
+      run: () => loadTrack(ready),
+    };
+  } else if (wantsAffordance && extracting !== null) {
+    action = {
+      label: 'SPLITTING…',
+      title: 'Stem separation running (~30s)',
+      disabled: true,
+      run: () => {},
+    };
+  } else if (wantsAffordance && hovered) {
+    action = {
+      label: 'EXTRACT STEMS',
+      title: 'Split this track into stems (background task)',
+      disabled: false,
+      run: () => {
+        if (trackId === null) return;
+        setExtracting(trackId);
+        api.tracks.extractStems(trackId).catch(() => setExtracting(null));
+      },
+    };
+  }
+  return {
+    action,
+    onHover: () => setHovered(true),
+    onLeave: () => setHovered(false),
+  };
+}
+
+/** The EFFECTIVE live stem mask (stems #213): an automation lane that
+ * holds stems wins (ADR 0022), else the user's kill state. Returns a
+ * stable-when-unchanged callback for per-frame sampling. */
+function useLiveStemMask(deck: ChannelId): () => StemMask {
+  const mixer = useMixer();
+  const cache = useRef<{ src: unknown; mask: StemMask }>({ src: null, mask: ALL_ON });
+  return useCallback(() => {
+    const stems =
+      mixer.getAutomation(deck)?.stems ?? mixer.getChannelState(deck).stems;
+    if (stems !== cache.current.src) {
+      cache.current = {
+        src: stems,
+        mask: [
+          stems.vocals ? 1 : 0,
+          stems.drums ? 1 : 0,
+          stems.bass ? 1 : 0,
+          stems.other ? 1 : 0,
+        ],
+      };
+    }
+    return cache.current.mask;
+  }, [mixer, deck]);
+}
+
 function useDeckTrack(): Track | null {
   const { loadedTrack } = useDeck();
   const { data } = useQuery<Track>({
@@ -101,7 +215,8 @@ export function DeckWaveform({
   visibleSeconds: number;
   onVisibleSecondsChange: (seconds: number) => void;
 }) {
-  const { deck, engine, loadedTrack, beatjumpBeats } = useDeck();
+  const { deck, engine, loadedTrack, beatjump } = useDeck();
+  const beatjumpBeats = useBeatjumpBeats(beatjump);
   const controlFocus = useControlFocus();
   const focused = controlFocus.left === deck || controlFocus.right === deck;
   const ready = useDeckReady();
@@ -111,17 +226,41 @@ export function DeckWaveform({
   // instantly at play (performance-hardening 01) — same set usePlayGuides
   // treats as "moving".
   const advancing = useDeckSnapshot(
-    (s) => s.playing || s.pendingPlay || s.previewing || s.hotCuePreviewSlot !== null,
+    (s) => s.playing || s.pendingPlay || s.previewing || s.hotCuePreviewSlot !== null || s.scratching,
   );
 
   const transport = useScrubTransport();
   const mixer = useMixer();
+  // Stem waveforms (stems #213): per-stem textures + a per-column mask
+  // sampled per frame — history behind the playhead (what was actually
+  // heard, the EQ-modulation idiom), the live kill state ahead. Toggles
+  // touch nothing heavy: no recomposite, no texture churn.
+  const stemsLoaded = useDeckSnapshot((s) => s.stemsLoaded);
+  const stemWaveforms = useStemWaveforms(loadedTrack?.id ?? null, stemsLoaded);
+  const liveStemMask = useLiveStemMask(deck);
+  const stemHistory = stemMaskHistoryFor(deck);
+  useEffect(() => {
+    stemHistory.clear();
+  }, [stemHistory, loadedTrack?.id]);
+  const stemMaskAt = useCallback(
+    (t: number) => stemHistory.at(t, liveStemMask()),
+    [stemHistory, liveStemMask]
+  );
   const viewActive = useViewActive();
   // The deck's channel state (replaced immutably on every mixer move):
   // wakes the idle waveform loop so a PAUSED deck retints instantly on
   // fader/EQ moves, and restarts the fill recorder loop below
   // (performance-hardening 01 × performance-mode 09).
   const channelState = useMixerValue((m) => m.getChannelState(deck));
+
+  // Per-gesture wake (#155): every transport gesture — notably paused MIDI
+  // jog seeks, which arrive sparser than 60fps — pulls an idle-parked
+  // render loop forward to the next frame. Without this the loop re-parks
+  // on its 250ms poll between jog ticks and paused scrubbing jitters.
+  const subscribeWake = useCallback(
+    (cb: () => void) => engine.addTransportEventListener(cb),
+    [engine],
+  );
 
   // Live mixer → waveform modulation (performance-mode 09, the sessions-19
   // semantics applied live): EQ dims/removes its band group; trim scales
@@ -175,6 +314,7 @@ export function DeckWaveform({
     (t: number) => historyRef.current.at(t, liveStrip()),
     [liveStrip]
   );
+  const getSlipReturnPlayhead = useCallback(() => engine.getSlipReturnPlayhead(), [engine]);
 
   // Effective-BPM zoom (performance-mode 06): the renderer consumes TRACK
   // seconds, so scale the shared wall-clock window by this deck's rate —
@@ -209,7 +349,12 @@ export function DeckWaveform({
     let raf = 0;
     let idleTimer = 0;
     let lastDrawKey = '';
-    const fillCss = `rgba(${hexToRgbTriplet(DECK_COLORS[deck])}, 0.12)`;
+    // UNDERLAY (performance-mode 09 review): the GL strip renders a
+    // transparent background, so the fill sits BELOW the waveform — deck
+    // identity without tinting the body. Slightly above the shared
+    // audibility-fill wash (gh#201): an underlay must carry through the
+    // strip's dark background where an overlay tint rode the content.
+    const fillCss = `rgba(${hexToRgbTriplet(DECK_COLORS[deck])}, ${AUDIBILITY_FILL_ALPHA + 0.06})`;
     const schedule = (active: boolean) => {
       if (active) raf = requestAnimationFrame(loop);
       else idleTimer = window.setTimeout(loop, 250);
@@ -217,9 +362,11 @@ export function DeckWaveform({
     const loop = () => {
       const snap = engine.getSnapshot();
       const playhead = engine.getPlayhead();
+      const slip = engine.getSlipReturnPlayhead();
       const live = liveStrip();
       const advancing = snap.playing || snap.previewing;
       historyRef.current.record(playhead, advancing, live);
+      stemHistory.record(playhead, advancing, liveStemMask());
 
       const canvas = fillCanvasRef.current;
       let didDraw = false;
@@ -228,7 +375,7 @@ export function DeckWaveform({
         const h = canvas.clientHeight;
         const { span, hasTrack } = fillViewRef.current;
         const drawKey =
-          `${playhead}:${span}:${hasTrack}:${w}x${h}:` +
+          `${playhead}:${slip}:${span}:${hasTrack}:${w}x${h}:` +
           `${live.gain}:${live.low}:${live.mid}:${live.high}:${live.fader}`;
         didDraw = drawKey !== lastDrawKey;
         if (didDraw) {
@@ -245,20 +392,24 @@ export function DeckWaveform({
               const bar = channelFaderToGain(live.fader) * h;
               ctx.fillRect(0, h - bar, w, bar);
             } else {
-              const start = playhead - span * PLAY_MARKER_FRACTION;
               const step = 2; // px per column — a translucent wash, not a plot
-              for (let x = 0; x < w; x += step) {
-                const t = start + ((x + step / 2) / w) * span;
-                if (t < 0 || t > snap.duration) continue;
-                const v = historyRef.current.at(t, live);
-                const bar = channelFaderToGain(v.fader) * h;
-                if (bar > 0) ctx.fillRect(x, h - bar, step, bar);
+              const views = slip === null ? [[playhead, 0, h]] : [[playhead, 0, h / 2], [slip, h / 2, h]];
+              for (const [position, y0, y1] of views) {
+                const start = position - span * PLAY_MARKER_FRACTION;
+                for (let x = 0; x < w; x += step) {
+                  const t = start + ((x + step / 2) / w) * span;
+                  if (t < 0 || t > snap.duration) continue;
+                  const v = historyRef.current.at(t, live);
+                  const bar = channelFaderToGain(v.fader) * h;
+                  const top = Math.max(y0, h - bar);
+                  if (top < y1) ctx.fillRect(x, top, step, y1 - top);
+                }
               }
             }
           }
         }
       }
-      schedule(advancing || didDraw);
+      schedule(advancing || snap.scratching || didDraw);
     };
     raf = requestAnimationFrame(loop);
     return () => {
@@ -275,13 +426,22 @@ export function DeckWaveform({
   const automationGhost = useAutomationGhost(deck);
   const machineHeld = automationGhost !== null;
   const showFocus = focused && !machineHeld;
+  const { dropState, dropHandlers } = useDeckDropTarget(deck);
 
   return (
     <div
       className={`perf-wave-row deck-${deck.toLowerCase()}${showFocus ? ' focused' : ''}${machineHeld ? ' machine' : ''}`}
+      {...dropHandlers}
     >
+      {/* Fader area fill UNDERLAY (see fillCss note): the GL strip has a
+          transparent background, so the fill shows through background
+          pixels only — the waveform body is never tinted. */}
+      <canvas ref={fillCanvasRef} className="perf-wave-fader-fill" />
       <WebGLWaveform
         trackId={loadedTrack?.id ?? null}
+        stemWaveforms={stemWaveforms}
+        stemMaskAt={stemMaskAt}
+        transparentBackground
         clock={engine}
         cuePoint={cuePoint}
         loop={loop}
@@ -290,22 +450,36 @@ export function DeckWaveform({
         beatjumpBeats={beatjumpBeats}
         playing={advancing}
         wakeKey={channelState}
+        subscribeWake={subscribeWake}
         visibleSeconds={trackWindowSeconds(visibleSeconds, rate)}
         onVisibleSecondsChange={(seconds) => onVisibleSecondsChange(seconds / rate)}
         modulation={modulation}
         modulationSplit
+        getSlipReturnPlayhead={getSlipReturnPlayhead}
       />
-      {/* Translucent overlay (the GL canvas is opaque — nothing shows
-          "behind" it); no filters over canvas layers (compositor leak). */}
-      <canvas ref={fillCanvasRef} className="perf-wave-fader-fill" />
       {showFocus ? <div className="perf-wave-focus-frame" /> : null}
+      <DeckDropOverlay deck={deck} state={dropState} />
     </div>
   );
 }
 
 /** On-control hint for this deck's key (from the shared map — can't drift). */
-function Kbd({ k }: { k: string }) {
-  return <kbd className="perf-kbd">{k.toUpperCase()}</kbd>;
+function Kbd({ k, offset = false }: { k: string; offset?: boolean }) {
+  return <kbd className={`perf-kbd${offset ? ' perf-kbd-offset' : ''}`} aria-hidden="true">
+    {Array.from(k.toUpperCase(), (character, index) => character === '\u21e7'
+      ? <span className="perf-kbd-shift" key={index}>{character}
+          <svg viewBox="0 0 12 14" aria-hidden="true">
+            <path d="M6 1 11 6H8V13H4V6H1Z" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+          </svg>
+        </span>
+      : character === '\u2303'
+        ? <span className="perf-kbd-ctrl" key={index}>{character}
+            <svg viewBox="0 0 12 14" aria-hidden="true">
+              <path d="M1.5 8 6 3.5 10.5 8" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" strokeLinecap="round" />
+            </svg>
+          </span>
+        : character)}
+  </kbd>;
 }
 
 // ── TRACK zone (persistent — curation class) ─────────────────────────────
@@ -380,6 +554,7 @@ function TrackZone({ track }: { track: Track | null }) {
   const [tagsOpenFor, setTagsOpenFor] = useState<number | null>(null);
   const tagsOpen = track !== null && tagsOpenFor === track.id;
   const tagRowRef = useRef<HTMLDivElement>(null);
+  const [manageTagsOpen, setManageTagsOpen] = useState(false);
 
   const commitField = (field: 'title' | 'artist') => (value: string) => {
     const trimmed = value.trim();
@@ -441,8 +616,24 @@ function TrackZone({ track }: { track: Track | null }) {
             anchorRef={tagRowRef}
             commit={(tagIds) => edit.commit({ tag_ids: tagIds })}
             onClose={() => setTagsOpenFor(null)}
+            onManage={() => {
+              setTagsOpenFor(null);
+              setManageTagsOpen(true);
+            }}
           />
         )}
+        {manageTagsOpen &&
+          createPortal(
+            <TagManagementModal
+              isOpen
+              onClose={() => {
+                setManageTagsOpen(false);
+                // Back to tagging this track with the edited vocabulary.
+                if (track) setTagsOpenFor(track.id);
+              }}
+            />,
+            document.body
+          )}
       </div>
       <div className="perf-track-row" title="Energy">
         <span className="perf-row-icon">
@@ -473,7 +664,8 @@ function TrackZone({ track }: { track: Track | null }) {
           disabled={!tempoEnabled}
           onSave={saveBpm}
           onCommitted={(bpm) => track && engine.setTrackBpm(track.id, bpm)}
-          grid={{ getPlayhead: () => engine.getPlayhead(), disabled: !tempoEnabled }}
+          grid={{ getPlayhead: () => deckReadyNow(engine, track?.id ?? null) ? engine.getPlayhead() : null,
+            disabled: !tempoEnabled }}
         />
       </div>
     </div>
@@ -487,7 +679,17 @@ function TrackZone({ track }: { track: Track | null }) {
 //   <pads bot>
 
 function PlayZone() {
-  const { deck, engine } = useDeck();
+  const { deck, engine, loadedTrack, loadTrack } = useDeck();
+  // Stem kill switches (stems #210): under the hotcue pads, INSIDE the
+  // fixed-height pad band (5th row, all rows squashed — deck height never
+  // changes; the row is ALWAYS present so decks match). Mixer state —
+  // hardware toggles repaint, capture records (#212); worklet
+  // declick-ramps every flip. Stem-less tracks: buttons disabled; hovering
+  // offers EXTRACT STEMS (enqueues a stem-split task, #195's machinery).
+  const stemsLoaded = useDeckSnapshot((s) => s.stemsLoaded);
+  const mixer = useMixer();
+  const stems = useMixerValue((m) => m.getChannelState(deck).stems);
+  const stemRow = useStemRowState(loadedTrack, stemsLoaded, loadTrack);
   // Hand hints by side: left-side Decks (A/C) show the left-hand ('A')
   // keys, right-side (B/D) the right-hand ('B') keys.
   const keys = DECK_KEYS[deck === 'A' || deck === 'C' ? 'A' : 'B'];
@@ -495,7 +697,7 @@ function PlayZone() {
   const bend = useDeckSnapshot((s) => s.bendPercent);
 
   const bendStart = (sign: 1 | -1) => (e: React.PointerEvent<HTMLButtonElement>) => {
-    if (!ready) return;
+    if (!deckReadyNow(engine, loadedTrack?.id ?? null)) return;
     e.currentTarget.setPointerCapture(e.pointerId);
     engine.setBend(sign * NUDGE_BEND_PERCENT);
   };
@@ -504,16 +706,64 @@ function PlayZone() {
   return (
     <div className="perf-zone perf-zone-play">
       <div className="perf-play-inner">
-        <div className="perf-padcol">
+        <div className="perf-padcol has-stems">
           <BeatjumpRow
             backKbd={<Kbd k={keys.jumpBack} />}
             forwardKbd={<Kbd k={keys.jumpForward} />}
+            halveKbd={<Kbd k={`\u21e7${keys.jumpBack}`} offset />}
+            doubleKbd={<Kbd k={`\u21e7${keys.jumpForward}`} offset />}
+            halveTitleSuffix={` (Shift+${keys.jumpBack.toUpperCase()})`}
+            doubleTitleSuffix={` (Shift+${keys.jumpForward.toUpperCase()})`}
           />
-          <LoopRow kbd={<Kbd k={keys.loop} />} />
+          <LoopRow
+            kbd={<Kbd k={keys.loop} />}
+            halveKbd={<Kbd k={`${primaryModGlyph()}\u21e7${keys.jumpBack}`} offset />}
+            doubleKbd={<Kbd k={`${primaryModGlyph()}\u21e7${keys.jumpForward}`} offset />}
+            halveTitleSuffix={` (${primaryModName()}+Shift+${keys.jumpBack.toUpperCase()})`}
+            doubleTitleSuffix={` (${primaryModName()}+Shift+${keys.jumpForward.toUpperCase()})`}
+          />
           <div className="perf-pads">
             <HotCuePads
               padKbd={(slot) => (slot <= 4 ? <Kbd k={keys.pads[slot - 1]} /> : null)}
             />
+          </div>
+          <div
+            className="perf-stemrow"
+            onMouseEnter={stemRow.onHover}
+            onMouseLeave={stemRow.onLeave}
+          >
+            {stemRow.action ? (
+              <button
+                className="player-button perf-stem perf-stem-action"
+                disabled={stemRow.action.disabled}
+                onClick={stemRow.action.run}
+                title={stemRow.action.title}
+              >
+                {stemRow.action.label}
+              </button>
+            ) : (
+              STEM_NAMES.map((stem) => (
+                <button
+                  key={stem}
+                  className={`player-button perf-stem perf-stem-${stem}${
+                    stemsLoaded && stems[stem] ? ' on' : ''
+                  }`}
+                  disabled={!stemsLoaded}
+                  onClick={(e) =>
+                    e.shiftKey
+                      ? mixer.soloStem(deck, stem)
+                      : mixer.setStemEnabled(deck, stem, !stems[stem])
+                  }
+                  title={
+                    stemsLoaded
+                      ? `${stems[stem] ? 'Kill' : 'Restore'} ${stem} — shift-click to solo`
+                      : 'No stems for this track'
+                  }
+                >
+                  {STEM_LABELS[stem]}
+                </button>
+              ))
+            )}
           </div>
         </div>
         <div className="perf-transport-col">
@@ -521,27 +771,29 @@ function PlayZone() {
             <button
               className={`player-button${bend < 0 ? ' perf-nudge-held' : ''}`}
               disabled={!ready}
-              title="Nudge slower (hold)"
+              title={`Nudge slower (hold); hold ${keys.jog.toUpperCase()} and move mouse left to bend/seek; Shift arms scratch when Vinyl is on, movement grabs the platter`}
               onPointerDown={bendStart(-1)}
               onPointerUp={bendEnd}
               onPointerCancel={bendEnd}
             >
               ◀◀
-              <Kbd k={keys.nudgeBack} />
             </button>
+            <Kbd k={keys.jog} />
             <button
               className={`player-button${bend > 0 ? ' perf-nudge-held' : ''}`}
               disabled={!ready}
-              title="Nudge faster (hold)"
+              title={`Nudge faster (hold); hold ${keys.jog.toUpperCase()} and move mouse right to bend/seek; Shift arms scratch when Vinyl is on, movement grabs the platter`}
               onPointerDown={bendStart(1)}
               onPointerUp={bendEnd}
               onPointerCancel={bendEnd}
             >
               ▶▶
-              <Kbd k={keys.nudgeForward} />
             </button>
           </div>
-          <CueWalkButtons />
+          <CueWalkButtons
+            prevKbd={<Kbd k={`${primaryModGlyph()}${keys.jumpBack}`} />}
+            nextKbd={<Kbd k={`${primaryModGlyph()}${keys.jumpForward}`} />}
+          />
           <TransportPair cueKbd={<Kbd k={keys.cue} />} playKbd={<Kbd k={keys.play} />} />
         </div>
       </div>
@@ -552,7 +804,10 @@ function PlayZone() {
 // ── MIX zone: knobs / pitch / vol / readouts + MATCH/nudge ───────────────
 
 function MixZone({ track }: { track: Track | null }) {
-  const { deck, engine } = useDeck();
+  const { deck, engine, syncGroup } = useDeck();
+  const syncStatus = useDeckSyncStatus();
+  const left = deck === 'A' || deck === 'C';
+  const keys = DECK_KEYS[left ? 'A' : 'B'];
   const decks = useDecks();
   const ready = useDeckReady();
 
@@ -568,6 +823,9 @@ function MixZone({ track }: { track: Track | null }) {
 
   const pitch = useDeckSnapshot((s) => s.pitchPercent);
   const keyLock = useDeckSnapshot((s) => s.keyLock);
+  const slipMode = useDeckSnapshot((s) => s.slipMode);
+  const vinylMode = useDeckSnapshot((s) => s.vinylMode);
+  const scratching = useDeckSnapshot((s) => s.scratching);
 
   // Soft-takeover hints (midi-controller 18): pulse the control a
   // mismatched hardware fader/knob is reaching for. Read per control —
@@ -587,7 +845,7 @@ function MixZone({ track }: { track: Track | null }) {
   // mid-beatmatch (same reasoning as the zoom window, performance-mode 06).
   const effective = track?.bpm ? effectiveBpm(track.bpm, pitch) : null;
 
-  const [hint, setHint] = useState(false);
+  const [hint, setHint] = useState<'match' | 'sync' | null>(null);
   const hintTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => {
     if (hintTimer.current) clearTimeout(hintTimer.current);
@@ -596,7 +854,7 @@ function MixZone({ track }: { track: Track | null }) {
   const subscribeMatchTargets = useCallback(
     (listener: () => void) => {
       const unsubs = CHANNEL_IDS.filter((candidate) => candidate !== deck).map((candidate) =>
-        decks[candidate].engine.subscribe(listener)
+        presentationOf(decks[candidate].engine).subscribe(listener)
       );
       return () => unsubs.forEach((unsubscribe) => unsubscribe());
     },
@@ -607,8 +865,8 @@ function MixZone({ track }: { track: Track | null }) {
       CHANNEL_IDS.some(
         (candidate) =>
           candidate !== deck &&
-          decks[candidate].engine.getSnapshot().playing &&
-          !!decks[candidate].engine.getSnapshot().bpm
+          presentationOf(decks[candidate].engine).getSnapshot().playing &&
+          !!presentationOf(decks[candidate].engine).getSnapshot().bpm
       ),
     [deck, decks]
   );
@@ -617,20 +875,22 @@ function MixZone({ track }: { track: Track | null }) {
     getHasPlayingReference
   );
 
-  // Shared with the hardware SYNC button (useMatchAction applies the pitch);
-  // only the out-of-reach hint is on-screen-specific.
-  const matchAction = useMatchAction();
-  const onMatch = () => {
-    if (matchAction()?.kind === 'out-of-reach') {
-      setHint(true);
+  const onTempoAction = (action: 'match' | 'sync') => {
+    const result = action === 'match' ? syncGroup.match(deck) : syncGroup.toggle(deck);
+    if (result?.kind === 'out-of-reach') {
+      setHint(action);
       if (hintTimer.current) clearTimeout(hintTimer.current);
-      hintTimer.current = setTimeout(() => setHint(false), MATCH_HINT_MS);
-    }
+      hintTimer.current = setTimeout(() => setHint(null), MATCH_HINT_MS);
+    } else setHint(null);
   };
 
   const eqKnob = (band: EqBand, label: string) => (
     <Knob
+      key={band}
+      control={band === 'low' ? 'eqLow' : band === 'mid' ? 'eqMid' : 'eqHigh'}
       label={label}
+      kbd={keys.knobs[band].toUpperCase()}
+      title={`Hold ${keys.knobs[band].toUpperCase()} and move mouse right/up to increase, left/down to decrease; double-tap key: cut/neutral (double-click to reset)`}
       min={0}
       max={1}
       defaultValue={0.5}
@@ -641,13 +901,34 @@ function MixZone({ track }: { track: Track | null }) {
     />
   );
 
+  const filterKnob = (
+    <Knob
+      label="FLT"
+      control="filter"
+      kbd={keys.knobs.filter.toUpperCase()}
+      title={`Hold ${keys.knobs.filter.toUpperCase()} and move mouse horizontally/vertically; double-tap key: reset to center (double-click to center)`}
+      min={-1}
+      max={1}
+      defaultValue={0}
+      value={channel.filter}
+      onChange={(v) => mixer.setFilter(deck, v)}
+      ghost={auto ? auto.filter : null}
+      takeover={filterTakeover}
+      className="perf-knob-filter"
+    />
+  );
+
   return (
     <div className="perf-zone perf-zone-mix">
       <div className="perf-knobrow">
         {/* TRIM/EQ/FLT and PFL spread evenly across the row; PFL at the
             right end on every Deck */}
+        {/* TRIM runs smaller than the EQ knobs (set-and-forget gain, not a
+            performance control); FLT wears a double outer ring — the one
+            knob whose sweep is bipolar LPF↔HPF. */}
         <Knob
           label="TRIM"
+          control="trim"
           min={0}
           max={1}
           defaultValue={0.5}
@@ -655,20 +936,12 @@ function MixZone({ track }: { track: Track | null }) {
           onChange={(v) => mixer.setTrim(deck, v)}
           takeover={trimTakeover}
           ghost={auto && auto.trim !== undefined ? auto.trim : null}
+          className="perf-knob-small"
         />
-        {eqKnob('low', 'LOW')}
-        {eqKnob('mid', 'MID')}
-        {eqKnob('high', 'HI')}
-        <Knob
-          label="FLT"
-          min={-1}
-          max={1}
-          defaultValue={0}
-          value={channel.filter}
-          onChange={(v) => mixer.setFilter(deck, v)}
-          ghost={auto ? auto.filter : null}
-          takeover={filterTakeover}
-        />
+        {left && filterKnob}
+        {(left ? ['high', 'mid', 'low'] as const : ['low', 'mid', 'high'] as const)
+          .map((band) => eqKnob(band, band === 'high' ? 'HI' : band.toUpperCase()))}
+        {!left && filterKnob}
         {/* PFL (headphone-cue 02): mixer state, so it works with no track
             loaded and repaints from hardware toggles (note 0x0C). Headphone
             glyph like the hardware button; "PFL" stays in the tooltip. */}
@@ -697,6 +970,7 @@ function MixZone({ track }: { track: Track | null }) {
       </div>
       <HFader
         label="VOL"
+        kbd={keys.fader.toUpperCase()}
         fill
         fillColor={`var(--deck-${deck.toLowerCase()})`}
         min={0}
@@ -704,7 +978,7 @@ function MixZone({ track }: { track: Track | null }) {
         value={channel.fader}
         defaultValue={1}
         onChange={(v) => mixer.setFader(deck, v)}
-        title="Channel volume (double-click = full)"
+        title={`Channel volume: hold ${keys.fader.toUpperCase()} and move mouse right/up to increase, left/down to decrease; double-tap key: cut/full (double-click = full)`}
         ghost={auto ? auto.fader : null}
         takeover={faderTakeover}
       />
@@ -712,26 +986,47 @@ function MixZone({ track }: { track: Track | null }) {
           fader's hardware polarity died with the vertical fader). */}
       <HFader
         label="PITCH"
-        accent
+        accent={pitch !== 0}
         detent
         min={-8}
         max={8}
         value={pitch}
         defaultValue={0}
-        onChange={(v) => engine.setPitch(Math.round(v * 10) / 10)}
+        onChange={(v) => syncGroup.setPitch(deck, Math.round(v * 10) / 10)}
         disabled={!ready}
         title="Pitch (right = faster; double-click resets)"
         takeover={pitchTakeover}
       />
       <div className="perf-mix-foot">
+        <div className="perf-mode-stack" role="group" aria-label="Deck modes">
+          <button
+            className={`player-button perf-mini perf-vinyl${vinylMode ? ' on' : ''}${scratching ? ' scratching' : ''}`}
+            onClick={() => engine.setVinylMode(!engine.getSnapshot().vinylMode)}
+            aria-pressed={vinylMode}
+            aria-label="Vinyl mode"
+            title="Vinyl: platter touch holds and scratches; off uses pitch bend (GRV6: Shift + Slip)"
+          >
+            VINYL
+          </button>
+          <button
+            className={`player-button perf-mini perf-slip${slipMode ? ' on' : ''}`}
+            onClick={() => engine.setSlipMode(!engine.getSnapshot().slipMode)}
+            aria-pressed={slipMode}
+            aria-label="Slip mode"
+            title="Slip: return to the continuing timeline after a scratch, spinback, or loop. Off cancels the pending return; on applies to the next gesture."
+          >
+            SLIP
+          </button>
+        </div>
         {/* Key Lock (key-lock 03): Deck setting — works with no track
             loaded, sticky per Deck (engine holds live state, store
             persists). Lit while tempo changes leave the Key unchanged. */}
         <button
           className={`player-button perf-mini perf-keylock${keyLock ? ' on' : ''}`}
           onClick={() => {
-            engine.setKeyLock(!keyLock);
-            setKeyLockFlag(deck, !keyLock);
+            const next = !engine.getSnapshot().keyLock;
+            engine.setKeyLock(next);
+            setKeyLockFlag(deck, next);
           }}
           aria-pressed={keyLock}
           aria-label="Key Lock"
@@ -792,17 +1087,35 @@ function MixZone({ track }: { track: Track | null }) {
             {pitch.toFixed(1)}%
           </span>
         </span>
-        {/* MATCH as an equals glyph: = matches the other deck's tempo;
-            ≠ flashes red while the target is out of pitch-fader reach. */}
-        <button
-          className={`player-button perf-mini perf-match${hint ? ' perf-match-hint' : ''}`}
-          disabled={!ready || !track?.bpm || !hasPlayingReference}
-          onClick={onMatch}
-          aria-label="Match tempo"
-          title="Match the nearest playing Deck's tempo (half/double-aware)"
-        >
-          {hint ? '\u2260' : '='}
-        </button>
+        <div className="perf-tempo-buttons" role="group" aria-label="Tempo sync">
+          <button
+            className={`player-button perf-mini perf-sync${syncStatus !== 'off' ? ' on' : ''}${hint === 'sync' || syncStatus === 'out-of-lock' || syncStatus === 'waiting' ? ' perf-match-hint' : ''}`}
+            disabled={syncStatus === 'off' && (!ready || !track?.bpm)}
+            onClick={() => onTempoAction('sync')}
+            aria-label="Sync tempo"
+            aria-pressed={syncStatus !== 'off'}
+            title={syncStatus === 'out-of-lock'
+              ? 'SYNC: out of lock at pitch limit; recovers when group tempo returns in range'
+              : syncStatus === 'waiting'
+                ? 'SYNC: waiting for a ready Track with BPM'
+                : 'SYNC: join/leave shared tempo; ride any member pitch fader. Quantize snaps beats once on entry.'}
+          >
+            <span className="perf-sync-label">{hint === 'sync' || syncStatus === 'out-of-lock' ? 'SYNC!' : 'SYNC'}</span>
+            <Kbd k={`${primaryModGlyph()}\u21e7${keys.fader}`} />
+          </button>
+          {/* MATCH as an equals glyph: = matches the other deck's tempo;
+              ≠ flashes red while the target is out of pitch-fader reach. */}
+          <button
+            className={`player-button perf-mini perf-match${hint === 'match' ? ' perf-match-hint' : ''}`}
+            disabled={!ready || !track?.bpm || !hasPlayingReference}
+            onClick={() => onTempoAction('match')}
+            aria-label="Match tempo"
+            title="MATCH: nearest playing Deck's tempo; align beats once with Quantize on (Shift + BEAT SYNC)"
+          >
+            {hint === 'match' ? '\u2260' : '='}
+            <Kbd k={`${primaryModGlyph()}${keys.fader}`} offset />
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -821,6 +1134,7 @@ export function DeckPanel({
   const { deck, engine } = useDeck();
   const controlFocus = useControlFocus();
   const focused = controlFocus.left === deck || controlFocus.right === deck;
+  const { dropState, dropHandlers } = useDeckDropTarget(deck);
   const ready = useDeckReady();
   const cuePoint = useDeckSnapshot((s) => s.cuePoint);
   const loop = useDeckSnapshot((s) => s.loop);
@@ -829,13 +1143,30 @@ export function DeckPanel({
     (s) => s.playing || s.pendingPlay || s.previewing || s.hotCuePreviewSlot !== null,
   );
   const track = useDeckTrack();
+  // Stem waveforms (stems #213) — same textures/mask history as the strip.
+  const stemsLoaded = useDeckSnapshot((s) => s.stemsLoaded);
+  const stemWaveforms = useStemWaveforms(track?.id ?? null, stemsLoaded);
+  const liveStemMask = useLiveStemMask(deck);
+  const stemMaskAt = useCallback(
+    (t: number) => stemMaskHistoryFor(deck).at(t, liveStemMask()),
+    [deck, liveStemMask]
+  );
+  const minimapWake = useMixerValue((m) => m.getChannelState(deck).stems);
+  // Per-gesture wake (#155): paused seeks repaint the minimap playhead on
+  // the next frame instead of the 250ms idle poll.
+  const subscribeWake = useCallback(
+    (cb: () => void) => engine.addTransportEventListener(cb),
+    [engine],
+  );
 
   return (
     <section
+      data-tutorial-deck={deck}
       className={`perf-deckpanel deck-${deck.toLowerCase()}${mirrored ? ' mirrored' : ''}${
         focused ? ' focused' : ''
       }`}
       onPointerDownCapture={() => focusDeck(deck)}
+      {...dropHandlers}
     >
       <div className="perf-deck-minimap">
         <span className={`perf-decktag deck-${deck.toLowerCase()}`}>{deck}</span>
@@ -843,12 +1174,16 @@ export function DeckPanel({
         <div className="perf-minimap-wrap">
           <WaveformMinimap
             trackId={track?.id ?? null}
+            stemWaveforms={stemWaveforms}
+            stemMaskAt={stemMaskAt}
+            wakeKey={minimapWake}
             clock={engine}
             cuePoint={cuePoint}
             loop={loop}
-            onSeek={(t) => ready && engine.seek(t)}
+          onSeek={(t) => { if (deckReadyNow(engine, track?.id ?? null)) engine.seek(t); }}
             dimmed={track !== null && !ready}
             playing={advancing}
+            subscribeWake={subscribeWake}
           />
           {/* Play guides at track scale (play-guides PRD): how far out is
               the press moment. Shows only while this Deck is outgoing. */}
@@ -860,6 +1195,7 @@ export function DeckPanel({
         <PlayZone />
         <MixZone track={track} />
       </div>
+      <DeckDropOverlay deck={deck} state={dropState} />
     </section>
   );
 }

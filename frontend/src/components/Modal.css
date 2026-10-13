@@ -1,0 +1,83 @@
+/* The Modal primitive's chrome (see Modal.tsx). Panels override sizing
+   and looks via `.modal-panel.<local-class>` selectors in their own CSS —
+   never by redefining these blocks. */
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal);
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Anchored dialect: light wash + radial darkening around the panel.
+   Radial darkening, NOT backdrop-filter blur: any filter over the app's
+   canvas layers arms a permanent macOS compositor region leak that
+   crashes the renderer after days of uptime (stability/01). */
+.modal-overlay-anchored {
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.modal-overlay-anchored::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(
+    circle at var(--blur-center-x, 50%) var(--blur-center-y, 50%),
+    rgba(0, 0, 0, 0.55) 0%,
+    rgba(0, 0, 0, 0.55) 200px,
+    transparent 600px
+  );
+}
+
+.modal-panel {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  background: var(--mantle);
+  border: 1px solid var(--surface0);
+  padding: var(--space-16);
+  max-width: calc(100vw - 48px);
+  max-height: calc(100vh - 48px);
+}
+
+.modal-titlebar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-12);
+  margin-bottom: var(--space-12);
+  flex-shrink: 0;
+}
+
+.modal-title {
+  font-size: var(--font-title);
+  font-weight: bold;
+  color: var(--text);
+}
+
+.modal-title h2 {
+  margin: 0;
+  font-size: var(--font-title);
+  color: var(--text);
+}
+
+.modal-x {
+  background: none;
+  border: none;
+  color: var(--text);
+  font-size: var(--font-display);
+  cursor: pointer;
+  padding: 0;
+  width: 24px;
+  height: 24px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.modal-x:hover {
+  color: var(--danger);
+}

@@ -20,18 +20,17 @@
   position: sticky;
   top: 0;
   background: var(--mantle);
-  z-index: 10;
+  z-index: 2;
 }
 
 /* Sortable header base styles. Unified vocabulary: hover = bg tint
    (headers are borderless — the tint IS the feedback); sorted = mauve
    accent text (an inverted fill would overweight a table header). */
 .sortable-header {
-  padding: 6px 6px;
+  padding: var(--space-6) var(--space-6);
   cursor: pointer;
   user-select: none;
   color: var(--text);
-  transition: background 0.1s ease;
 }
 
 .sortable-header:hover {
@@ -43,13 +42,13 @@
 }
 
 .sortable-header.sorted {
-  color: var(--mauve);
+  color: var(--accent);
 }
 
 .sortable-header-content {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-4);
 }
 
 .sortable-header-content.align-center {
@@ -61,17 +60,17 @@
 }
 
 .sort-indicator {
-  font-size: 10px;
+  font-size: var(--font-micro);
 }
 
 /* Generic sticky column styles. Header z-index sits ABOVE the resize
-   handles (z 12): a non-sticky header sliding under a pinned one must
+   handles (z 2): a non-sticky header sliding under a pinned one must
    take its divider handle with it (the handles otherwise paint over the
    pinned headers during horizontal scroll). */
 .sticky-col-header {
   position: sticky;
   background: var(--mantle);
-  z-index: 13;
+  z-index: 3;
 }
 
 .sticky-col-cell {
@@ -86,7 +85,7 @@
 
 /* Loading/error states */
 .track-table-message {
-  padding: 20px;
+  padding: var(--space-16);
 }
 
 .track-table-loading {
@@ -94,7 +93,14 @@
 }
 
 .track-table-error {
-  color: var(--red);
+  color: var(--danger);
+}
+
+/* Empty-state guidance (feature-tour #283) — the Takes/Sessions empty voice. */
+.track-table-empty {
+  color: var(--overlay1);
+  font-size: var(--font-large);
+  padding: 32px var(--space-16);
 }
 
 /* Fetching overlay */
@@ -115,18 +121,35 @@
 .track-table-fetching-message {
   background: var(--surface0);
   color: var(--text);
-  padding: 8px 16px;
+  padding: var(--space-8) var(--space-16);
   border: 1px solid var(--surface1);
-  font-size: 13px;
+  font-size: var(--font-body);
 }
 
 /* Column resize handles */
 /* NOTE: sticky headers are already positioned (position: sticky) — do not
    override them to relative or they stop sticking */
-.sortable-header:not(.sticky-col-header), .tags-header { position: relative; }
+.sortable-header:not(.sticky-col-header) { position: relative; }
+.track-column-header { cursor: pointer; }
+body.column-dragging,
+body.column-dragging * { cursor: grabbing !important; }
+.track-column-header.column-drop-before::after,
+.track-column-header.column-drop-after::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--accent);
+  z-index: 4;
+  pointer-events: none;
+}
+.track-column-header.column-drop-before::after { left: 0; }
+.track-column-header.column-drop-after::after { right: 0; }
+.track-column-header.tags-header { padding: var(--space-6) var(--space-12); }
 .col-resize-handle {
   position: absolute; top: 0; right: -4px; width: 9px; height: 100%;
-  cursor: col-resize; z-index: 12;
+  cursor: col-resize; z-index: 2;
   /* visible 1px line centered in the hit area */
   background: linear-gradient(
     to right,
@@ -136,7 +159,7 @@
 .col-resize-handle:hover, body.col-resizing .col-resize-handle {
   background: linear-gradient(
     to right,
-    transparent 3px, var(--blue) 3px, var(--blue) 6px, transparent 6px
+    transparent 3px, var(--accent) 3px, var(--accent) 6px, transparent 6px
   );
 }
 body.col-resizing { cursor: col-resize; user-select: none; }
@@ -149,12 +172,12 @@ body.col-resizing { cursor: col-resize; user-select: none; }
      row geometry (virtualRows.ROW_HEIGHT) holds for the one indexed
      stream — headers and rows window as a unit. */
   height: 28px;
-  padding: 0 12px;
+  padding: 0 var(--space-12);
   /* One shade lighter than the track rows (--crust): the section
      boundary reads at a glance. */
   background: var(--mantle);
-  color: var(--green);
-  font-size: 11px;
+  color: var(--success);
+  font-size: var(--font-small);
   font-weight: bold;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -168,7 +191,10 @@ body.col-resizing { cursor: col-resize; user-select: none; }
 .track-tier-header .track-tier-label {
   position: sticky;
   left: 12px;
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-12);
+  white-space: nowrap;
 }
 
 .track-tier-header .track-tier-count {
@@ -177,11 +203,63 @@ body.col-resizing { cursor: col-resize; user-select: none; }
   letter-spacing: normal;
 }
 
+.follow-temperature-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-6);
+  color: var(--subtext0);
+  font-weight: normal;
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.follow-temperature-fader {
+  width: 112px;
+}
+
+.follow-temperature-fader:focus:not(:focus-visible),
+.follow-temperature-fader[data-pointer-focus="true"]:focus {
+  outline: none;
+}
+
+.follow-temperature-fader:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.follow-temperature-controls output {
+  font-variant-numeric: tabular-nums;
+}
+
+.follow-temperature-controls button {
+  height: 22px;
+  padding: 0 var(--space-6);
+  border: 1px solid var(--surface1);
+  background: var(--surface0);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.follow-temperature-controls button:hover:not(:disabled) {
+  border-color: var(--success);
+}
+
+.follow-temperature-controls :disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+@media (max-width: 600px) {
+  /* Let narrow panes scroll the entire toolbar into view. */
+  .track-tier-header .track-tier-label { position: static; }
+}
+
 /* Match score in the marks column (match-score PRD, tuning 2026-07-10):
    Compatible rows show their score where Known rows show their evidence
    marks — one column, two vocabularies (score vs marks). */
 .track-match-score {
-  font-size: 10px;
+  font-size: var(--font-micro);
   color: var(--subtext0);
   text-align: center;
   font-variant-numeric: tabular-nums;

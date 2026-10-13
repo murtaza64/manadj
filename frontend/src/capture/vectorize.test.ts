@@ -68,6 +68,32 @@ function baseInput(events: CaptureEvent[] = []) {
 const facts = { bpmA: 174, bpmB: 174 };
 
 describe('anchors', () => {
+  it('uses a loop phase-correction anchor without needing a later tick', () => {
+    const input = baseInput([
+      { t: 119.8, kind: 'loop', channel: 'B', playhead: 28, region: { start: 28, end: 30 } },
+    ]);
+    const tr = vectorizeTake(input, facts)!.transition;
+    expect(tr.bInSec).toBeCloseTo(8.2);
+    expect(tr.jumps).toBeUndefined();
+  });
+  it('refuses Slip-loop Takes rather than dropping the return jump', () => {
+    expect(vectorizeTake(baseInput([
+      { t: 105, kind: 'loop', channel: 'A', playhead: 65, region: { start: 65, end: 67 }, slip: true },
+      { t: 110, kind: 'loop', channel: 'A', playhead: 70, region: null },
+    ]), facts)).toBeNull();
+    const input = baseInput();
+    input.events[0] = init('A', 100, { decks: { A: deck({ slipLoopActive: true }), B: deck({ trackId: 2 }) } });
+    expect(vectorizeTake(input, facts)).toBeNull();
+  });
+  it('refuses scratch events and a slice opening inside a held scratch', () => {
+    expect(vectorizeTake(baseInput(), facts)).not.toBeNull();
+    expect(vectorizeTake(baseInput([
+      { t: 105, kind: 'transport', channel: 'A', action: 'scratchMove', playhead: 65, deltaSeconds: -2, durationSeconds: 1 },
+    ]), facts)).toBeNull();
+    const input = baseInput();
+    input.events[0] = init('A', 100, { decks: { A: deck({ scratching: true }), B: deck({ trackId: 2 }) } });
+    expect(vectorizeTake(input, facts)).toBeNull();
+  });
   it('derives startSec/bInSec from playhead samples at the window start', () => {
     const draft = vectorizeTake(baseInput(), facts)!;
     expect(draft.outgoingChannel).toBe('A');
@@ -123,6 +149,27 @@ describe('anchors', () => {
     ]);
     const tr = vectorizeTake(input, facts)!.transition;
     expect(tr.bInSec).toBeCloseTo(8.2);
+  });
+
+  it('a repaired (backdated) entry window lands B at its true first-audible position (#178)', () => {
+    // Play-then-slam entry: B starts from its top at 99.5, the detector
+    // (v4) backdates the window start to the first sound at 100 — the
+    // back-projection must land B 0.5s in (its true position at the
+    // window start), not beats later.
+    const input = {
+      events: [
+        init('A', 100, { decks: { A: deck(), B: deck({ trackId: 2, fader: 0 }) } }),
+        { t: 99.5, kind: 'transport', channel: 'B', action: 'play', playhead: 0 } as CaptureEvent,
+        tick(100, { A: 60 }),
+        control(100, 'fader', 'B', 0.01),
+        control(100.6, 'fader', 'B', 1),
+        tick(110, { A: 70, B: 10.5 }),
+      ],
+      windowStartS: 100,
+      windowEndS: 120,
+    };
+    const tr = vectorizeTake(input, facts)!.transition;
+    expect(tr.bInSec).toBeCloseTo(0.5);
   });
 
   it('returns null without an init head', () => {
@@ -241,11 +288,14 @@ describe('discrete gestures become Jump events (issue 04)', () => {
     expect(tr.jumps).toEqual([{ x: 0.5, deltaSec: expect.closeTo(46) }]);
   });
 
-  it('outgoing-deck jumps are dropped (incoming-only, ADR 0020) but stay in the slice', () => {
+  it('outgoing-deck jumps become jumpsA (issue 177) with anchors untouched', () => {
+    // A rolling from 60; at mix 110 (x 0.5) expected 70, landed 40.
     const input = baseInput([transport(110, 'A', 'jumpBeats', 40, -32)]);
     const draft = vectorizeTake(input, facts)!;
+    expect(draft.transition.jumpsA).toEqual([{ x: 0.5, deltaSec: expect.closeTo(-30) }]);
     expect(draft.transition.jumps).toBeUndefined();
-    expect(draft.transition.startSec).toBeCloseTo(60); // anchor unaffected
+    expect(draft.transition.startSec).toBeCloseTo(60); // track-time anchor unaffected
+    expect(draft.transition.durationSec).toBeCloseTo(20); // elapsed-play width unaffected
   });
 
   it('chained jumps compute each delta against the post-previous-jump path', () => {
@@ -332,12 +382,20 @@ describe('loop engagements collapse to repeated Jump events (looping 06)', () =>
     expect(vectorizeTake(input, facts)!.transition.jumps).toBeUndefined();
   });
 
-  it('outgoing-deck loops are dropped (incoming-only, ADR 0020)', () => {
+  it('outgoing-deck loops collapse to a repeated Jump on jumpsA (issue 177)', () => {
+    // A rolling from 60; loop [65, 67) engaged at 105 (playhead 65),
+    // released at 115 — unwrapped 75, so 5 wraps of 2s.
     const input = baseInput([
       loop(105, 'A', 65, { start: 65, end: 67 }),
       loop(115, 'A', 66, null),
     ]);
-    expect(vectorizeTake(input, facts)!.transition.jumps).toBeUndefined();
+    const tr = vectorizeTake(input, facts)!.transition;
+    expect(tr.jumps).toBeUndefined();
+    expect(tr.jumpsA).toHaveLength(1);
+    const j = tr.jumpsA![0];
+    expect(j.x).toBeCloseTo(0.35); // first wrap at t 107
+    expect(j.deltaSec).toBeCloseTo(-2);
+    expect(j.count).toBe(5);
   });
 
   it('loop wraps and ordinary jumps coexist in the same Take', () => {
@@ -467,6 +525,248 @@ describe('mix-domain alignment (4dp 39)', () => {
   });
 });
 
+// ── Octave-equivalent tempo-match (grid-octave 168) ──────────────────────
+// The field bug: Nebula (track 959) gridded at 87.51 but ridden at 175
+// against 172-gridded Want It (take 1fae90e2): required read +96.6% and
+// could never fire. Half/double grids are first-class in the library
+// (dyadic-fold doctrine), so the grid ratio's dyadic folds 2r and r/2 are
+// octave-equivalent matches; the fold nearest the performed ride is tested.
+describe('octave-equivalent tempo-match (grid-octave 168)', () => {
+  /** Both decks riding recorded pitches over window 100..(100+len);
+   * ticks agree with the recorded baseline (no repair in play). */
+  function riddenInput(pitchA: number, pitchB: number, len = 50) {
+    const decks = { A: deck({ pitch: pitchA }), B: deck({ trackId: 2, pitch: pitchB }) };
+    const rA = 1 + pitchA / 100;
+    const rB = 1 + pitchB / 100;
+    const events: CaptureEvent[] = [init('A', 100, { decks })];
+    for (let t = 100; t <= 100 + len; t += 5) {
+      events.push(tick(t, { A: 60 + (t - 100) * rA, B: 8 + (t - 100) * rB }));
+    }
+    return { events, windowStartS: 100, windowEndS: 100 + len };
+  }
+
+  it('a half-gridded INCOMING matches at the r/2 fold (track 959 field shape)', () => {
+    // Nebula gridded 87.51, true 175: raw required +96.6%; the performed
+    // renorm −1.73% sits on the r/2 fold's −1.72% — matched.
+    const draft = vectorizeTake(riddenInput(1.78, 0.02, 55), { bpmA: 172, bpmB: 87.5069 })!;
+    expect(draft.transition.tempoMatch).toBe(true);
+    expect(draft.transition.bInSec).toBeCloseTo(8, 1);
+    // Back-projection runs at the FOLDED ratio (≈0.983), not the raw grid
+    // ratio (≈1.966): the commit point lands on B's performed end.
+    const modelEnd =
+      draft.transition.bInSec + draft.transition.durationSec * (0.5 * (172 / 87.5069));
+    expect(modelEnd).toBeCloseTo(8 + 55 * 1.0002, 1);
+  });
+
+  it('a half-gridded OUTGOING matches at the 2r fold (track 821 field shape)', () => {
+    // Everyday VIP gridded 87, ridden ~174 into 175-gridded FREE (take
+    // c722e43d): raw required −50.3%; renorm −0.58% ≈ the 2r fold.
+    const draft = vectorizeTake(riddenInput(2.36, 1.77, 90), { bpmA: 87, bpmB: 175.0056 })!;
+    expect(draft.transition.tempoMatch).toBe(true);
+  });
+
+  it('a ride matching NO fold stays unmatched (folds are not a loophole)', () => {
+    // r = 174/116 = 1.5: the canonical fold (r/2) still requires −25% —
+    // a flat 0% ride is no octave-equivalent match.
+    const draft = vectorizeTake(riddenInput(0, 0), { bpmA: 174, bpmB: 116 })!;
+    expect(draft.transition.tempoMatch).toBe(false);
+  });
+
+  it('the drift bound reads B at the folded (fastest) BPM — no half-time discount', () => {
+    // Under the r/2 fold B's true beat is DOUBLE the grid's: a 0.25%
+    // residual over 50s (0.125s drift) passes a quarter-beat of the 87.5
+    // grid (0.171s) but NOT of the true 175 (0.086s) — unmatched.
+    const draft = vectorizeTake(riddenInput(0, -1.464), { bpmA: 172, bpmB: 87.5 })!;
+    expect(draft.transition.tempoMatch).toBe(false);
+  });
+});
+
+describe('lost pitch baseline repair (sets 166)', () => {
+  // Slices captured before the recorder seeded pitch explicitly (the
+  // sessions-18 fix) carry a FALSE zero baseline for any deck pitched
+  // before the seed — the DJ rides sets at an elevated tempo, so the
+  // standing pitch of BOTH decks is invisible to the slice. The playhead
+  // samples are direct observations of the actual rate: when they
+  // contradict the recorded baseline, the measurement wins.
+  const RATE_A = 1.0172; // outgoing 175 ridden at ~178 (pitch never logged)
+  const RATE_B = 1.023; // incoming 174 matched to it (pitch never logged)
+
+  /** Damaged slice: init pitch 0/0 (the lie), ticks riding the performed
+   * rates. Window 100..160; A at 60s, B at 8s at the open. */
+  function damagedInput(over: { events?: CaptureEvent[]; endS?: number } = {}) {
+    const endS = over.endS ?? 160;
+    const events: CaptureEvent[] = [init('A', 100)];
+    for (let t = 100; t <= endS; t += 1) {
+      events.push(tick(t, { A: 60 + (t - 100) * RATE_A, B: 8 + (t - 100) * RATE_B }));
+    }
+    events.push(...(over.events ?? []));
+    return { events, windowStartS: 100, windowEndS: endS };
+  }
+
+  it('repairs a false zero baseline from the playhead samples', () => {
+    // required = 175/174 − 1 = +0.575%; performed ride = RATE_B/RATE_A −
+    // 1 = +0.570%. With the recorded (false) baseline this read as a
+    // 0.575% residual over 60s — unmatched, and the entry back-projected
+    // ~1.4s late (4 beats). The measured rates restore the match.
+    const draft = vectorizeTake(damagedInput(), { bpmA: 175, bpmB: 174 })!;
+    expect(draft.transition.tempoMatch).toBe(true);
+    expect(draft.transition.bInSec).toBeCloseTo(8, 1);
+    // The window spans the outgoing's PERFORMED track seconds.
+    expect(draft.transition.durationSec).toBeCloseTo(60 * RATE_A, 1);
+  });
+
+  it('trusts the recorded pitch when the samples agree (exactness kept)', () => {
+    const decks = { A: deck({ pitch: 1.72 }), B: deck({ trackId: 2, pitch: 2.3 }) };
+    const events: CaptureEvent[] = [init('A', 100, { decks })];
+    for (let t = 100; t <= 160; t += 1) {
+      events.push(tick(t, { A: 60 + (t - 100) * 1.0172, B: 8 + (t - 100) * 1.023 }));
+    }
+    const draft = vectorizeTake(
+      { events, windowStartS: 100, windowEndS: 160 },
+      { bpmA: 175, bpmB: 174 }
+    )!;
+    expect(draft.transition.tempoMatch).toBe(true);
+    // durationSec computed from the RECORDED pitch, bit-exact.
+    expect(draft.transition.durationSec).toBe(60 * 1.0172);
+  });
+
+  it('keeps the recorded baseline when samples are too sparse to measure', () => {
+    // One tick = no pairs: the false baseline is unmeasurable — the
+    // verdict stays what the recorded evidence says (unmatched here).
+    const events: CaptureEvent[] = [
+      init('A', 100),
+      tick(100, { A: 60, B: 8 }),
+      tick(160, { A: 60 + 60 * RATE_A, B: 8 + 60 * RATE_B }),
+    ];
+    const draft = vectorizeTake(
+      { events, windowStartS: 100, windowEndS: 160 },
+      { bpmA: 175, bpmB: 174 }
+    )!;
+    expect(draft.transition.tempoMatch).toBe(false);
+  });
+
+  it('measures the baseline only up to the first pitch event of the channel', () => {
+    // The DJ corrects B's pitch mid-window: the recorded value governs
+    // from the event on; the measured baseline covers the span before it.
+    const draft = vectorizeTake(
+      damagedInput({ events: [pitch(130, 'B', 2.3)] }),
+      { bpmA: 175, bpmB: 174 }
+    )!;
+    expect(draft.transition.tempoMatch).toBe(true);
+    expect(draft.transition.bInSec).toBeCloseTo(8, 1);
+  });
+
+  it('a discontinuity (jump) does not poison the measurement', () => {
+    // A backward beat-jump mid-window: the pair spanning it is an
+    // outlier; the median slope still reads the true rate.
+    const events: CaptureEvent[] = [init('A', 100)];
+    for (let t = 100; t <= 160; t += 1) {
+      const jumped = t > 130 ? -5.517 : 0; // 16 beats at 174
+      events.push(tick(t, { A: 60 + (t - 100) * RATE_A, B: 8 + (t - 100) * RATE_B + jumped }));
+    }
+    events.push({
+      t: 130.5,
+      kind: 'transport',
+      channel: 'B',
+      action: 'jumpBeats',
+      playhead: 8 + 30.5 * RATE_B - 5.517,
+      detail: -16,
+    });
+    const draft = vectorizeTake(
+      { events, windowStartS: 100, windowEndS: 160 },
+      { bpmA: 175, bpmB: 174 }
+    )!;
+    expect(draft.transition.tempoMatch).toBe(true);
+  });
+});
+
+describe('rate-relative tempo-match (sets 169)', () => {
+  // The Tap Ho (172) → Alone (174) family: takes performed at an ELEVATED
+  // standing tempo (~177) read as unmatched despite a perfect ride. The
+  // settled-pitch gate mixes a repaired (tick-measured, capture-clock
+  // skewed) baseline with a recorded (audio-clock) one — a ~0.1% phantom
+  // residual the quarter-beat drift bound amplifies into a false negative
+  // on any window past ~45s. The measured cruise-slope RATIO cancels the
+  // skew: tempoMatch ⇔ rateOut·bpmA ≈ rateInc·bpmB.
+  it('an elevated-standing-tempo ride reads as matched with correct alignment (take 641 shape)', () => {
+    // bpm 172→174, required = 172/174 − 1 = −1.149%. A's standing pitch
+    // recorded (+2.9017); B's LOST (the sets-166 family). Capture-clock
+    // cruise slopes ride the EXACT required ratio, but sit ~0.13% under
+    // A's recorded pitch (clock skew) — inside the repair threshold, so
+    // A keeps the recorded value while B gets the measured one: the
+    // settled ratio carries a phantom 0.13% and the old bound killed it.
+    const RATE_A = 1.0277;
+    const RATE_B = RATE_A * (172 / 174);
+    const decks = { A: deck({ pitch: 2.9017 }), B: deck({ trackId: 2 }) };
+    const events: CaptureEvent[] = [init('A', 100, { decks })];
+    for (let t = 100; t <= 180; t += 1) {
+      events.push(tick(t, { A: 60 + (t - 100) * RATE_A, B: 8 + (t - 100) * RATE_B }));
+    }
+    const draft = vectorizeTake(
+      { events, windowStartS: 100, windowEndS: 180 },
+      { bpmA: 172, bpmB: 174 }
+    )!;
+    expect(draft.transition.tempoMatch).toBe(true);
+    // Matched back-projection against the OUTGOING's actual rate: the
+    // entry lands where the performance entered (well under half a beat).
+    expect(Math.abs(draft.transition.bInSec - 8)).toBeLessThan(0.15);
+  });
+
+  it('a hair-hot corrected ride on a long window stays matched (take 941 shape)', () => {
+    // Both baselines recorded truthfully; B settled 0.148% hot of the
+    // required ratio over a 108s window — the DJ absorbed the residual
+    // with bends. Quarter-beat settled bound rejects it (0.16s > 0.086s);
+    // the measured gate's half-beat bound accepts what was audibly held.
+    const RATE_A = 1.0232;
+    const RATE_B = 1.012955; // required would be 1.0232·172/174 = 1.011467
+    const decks = { A: deck({ pitch: 2.32 }), B: deck({ trackId: 2, pitch: 1.2955 }) };
+    const events: CaptureEvent[] = [init('A', 100, { decks })];
+    for (let t = 100; t <= 208; t += 1) {
+      events.push(tick(t, { A: 60 + (t - 100) * RATE_A, B: 8 + (t - 100) * RATE_B }));
+    }
+    const draft = vectorizeTake(
+      { events, windowStartS: 100, windowEndS: 208 },
+      { bpmA: 172, bpmB: 174 }
+    )!;
+    expect(draft.transition.tempoMatch).toBe(true);
+  });
+
+  it('a native-rate take is unchanged (anchors bit-exact from recorded pitch)', () => {
+    // Healthy slice, A native: the measured gate must not perturb the
+    // recorded-evidence output.
+    const decks = { A: deck(), B: deck({ trackId: 2, pitch: 0.575 }) };
+    const events: CaptureEvent[] = [init('A', 100, { decks })];
+    for (let t = 100; t <= 160; t += 1) {
+      events.push(tick(t, { A: 60 + (t - 100), B: 8 + (t - 100) * 1.00575 }));
+    }
+    const draft = vectorizeTake(
+      { events, windowStartS: 100, windowEndS: 160 },
+      { bpmA: 175, bpmB: 174 }
+    )!;
+    expect(draft.transition.tempoMatch).toBe(true);
+    expect(draft.transition.durationSec).toBe(60);
+    expect(draft.transition.startSec).toBe(60);
+  });
+
+  it('a genuinely unmatched ride on a close-BPM pair still reads false', () => {
+    // 172 vs 174 with NO adjustment at all: within the 1.5% settled
+    // tolerance, but the measured ratio reads the full BPM gap (1.15% ≫
+    // 0.25%) and the settled drift bound rejects the 80s window — the
+    // performance drifted a beat every ~30s and must replay that way.
+    const events: CaptureEvent[] = [init('A', 100)];
+    for (let t = 100; t <= 180; t += 1) {
+      events.push(tick(t, { A: 60 + (t - 100), B: 8 + (t - 100) }));
+    }
+    const draft = vectorizeTake(
+      { events, windowStartS: 100, windowEndS: 180 },
+      { bpmA: 172, bpmB: 174 }
+    )!;
+    expect(draft.transition.tempoMatch).toBe(false);
+    // Unmatched = start-anchored: the performed entry survives.
+    expect(draft.transition.bInSec).toBeCloseTo(8, 1);
+  });
+});
+
 describe('assignment-aware fader lanes (4dp 39)', () => {
   it('a right-side outgoing deck composes the RIGHT crossfader gain', () => {
     // Relabeled pair: physical B→D, both on the crossfader's right half.
@@ -508,5 +808,106 @@ describe('assignment-aware fader lanes (4dp 39)', () => {
     // faderA never moved: no lane emitted for it at all (untouched + at
     // its resting default).
     expect(draft.transition.lanes.faderA).toBeUndefined();
+  });
+});
+
+describe('window widening for essential pre-window outgoing jumps (issue 177)', () => {
+  const transport = (
+    t: number,
+    channel: CaptureChannel,
+    action: 'jumpBeats' | 'hotCue',
+    playhead: number
+  ): CaptureEvent => ({ t, kind: 'transport', channel, action, playhead });
+
+  const loop = (
+    t: number,
+    channel: CaptureChannel,
+    playhead: number,
+    region: { start: number; end: number } | null
+  ): CaptureEvent => ({ t, kind: 'loop', channel, playhead, region });
+
+  it('a backward outgoing jump mid-replay at the window start widens the window to contain it', () => {
+    // A jumps 55 → 25 at t95 (Δ −30); its replay is still in progress
+    // when the window opens at 100 → the window widens to 95 and the
+    // jump lands at x = 0 with the PRE-jump track-time anchor.
+    const input = {
+      events: [
+        init('A', 90),
+        tick(90, { A: 50 }),
+        transport(95, 'A', 'jumpBeats', 25),
+        tick(100, { A: 30, B: 8 }),
+      ],
+      windowStartS: 100,
+      windowEndS: 120,
+    };
+    const tr = vectorizeTake(input, facts)!.transition;
+    expect(tr.startSec).toBeCloseTo(55); // pre-jump anchor at the widened start
+    expect(tr.durationSec).toBeCloseTo(25); // 95..120 in outgoing seconds
+    expect(tr.jumpsA).toEqual([{ x: expect.closeTo(0), deltaSec: expect.closeTo(-30) }]);
+    // B's entry alignment re-reads at the widened start: 8 at t100 → 3 at t95.
+    expect(tr.bInSec).toBeCloseTo(3);
+  });
+
+  it('a completed pre-window replay is inessential — absorbed by the anchor, never admitted', () => {
+    // A jumps 52 → 49 at t92 (Δ −3); the 3s replay completes by t95,
+    // well before the window opens → no widening, no jumpsA.
+    const input = {
+      events: [
+        init('A', 90),
+        tick(90, { A: 50 }),
+        transport(92, 'A', 'jumpBeats', 49),
+        tick(100, { A: 57, B: 8 }),
+      ],
+      windowStartS: 100,
+      windowEndS: 120,
+    };
+    const tr = vectorizeTake(input, facts)!.transition;
+    expect(tr.startSec).toBeCloseTo(57); // post-jump path, absorbed
+    expect(tr.durationSec).toBeCloseTo(20);
+    expect(tr.jumpsA).toBeUndefined();
+  });
+
+  it('an outgoing loop straddling the window start widens to its first wrap', () => {
+    // Loop [56, 58) engaged at t96 (playhead 56): first wrap at t98,
+    // still open at the window start (100), released at t108 — 6 wraps.
+    const input = {
+      events: [
+        init('A', 90),
+        tick(90, { A: 50 }),
+        loop(96, 'A', 56, { start: 56, end: 58 }),
+        tick(100, { B: 8 }),
+        loop(108, 'A', 57, null),
+      ],
+      windowStartS: 100,
+      windowEndS: 120,
+    };
+    const tr = vectorizeTake(input, facts)!.transition;
+    expect(tr.startSec).toBeCloseTo(58); // the loop's end edge, about to wrap
+    expect(tr.durationSec).toBeCloseTo(22); // 98..120
+    expect(tr.jumpsA).toHaveLength(1);
+    const j = tr.jumpsA![0];
+    expect(j.x).toBeCloseTo(0);
+    expect(j.deltaSec).toBeCloseTo(-2);
+    expect(j.count).toBe(6);
+  });
+
+  it('pre-window INCOMING jumps never widen the window', () => {
+    // The incoming's pre-window jump is ordinary scrub history — its
+    // alignment is what the commit-point back-projection reads anyway.
+    const input = {
+      events: [
+        init('A', 90),
+        tick(90, { A: 50, B: 40 }),
+        transport(95, 'B', 'jumpBeats', 3),
+        tick(100, { A: 60, B: 8 }),
+      ],
+      windowStartS: 100,
+      windowEndS: 120,
+    };
+    const tr = vectorizeTake(input, facts)!.transition;
+    expect(tr.startSec).toBeCloseTo(60);
+    expect(tr.durationSec).toBeCloseTo(20);
+    expect(tr.jumps).toBeUndefined();
+    expect(tr.jumpsA).toBeUndefined();
   });
 });

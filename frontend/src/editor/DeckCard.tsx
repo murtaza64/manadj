@@ -16,7 +16,7 @@ import { SpeedIcon } from '../components/icons';
 import { JumpBackIcon, JumpForwardIcon } from '../components/icons/JumpIcons';
 import { LockIcon } from '../components/icons/LockIcon';
 import { MuteIcon } from '../components/icons/MuteIcon';
-import { useDecks } from '../hooks/useDeck';
+import { useDecks, useBeatjumpBeats } from '../hooks/useDeck';
 import { useHotCueSlots } from '../hooks/useHotCueActions';
 import { doubleBeatjump, halveBeatjump } from '../playback/beatjump';
 import { getBpmColor, getKeyColor } from '../utils/displayColors';
@@ -64,8 +64,8 @@ export function DeckCard({
   // modes — deck-controls 04/05; adjust it here or in the Performance
   // view, it's the same N).
   const deckScope = useDecks()[deck];
-  const gestureBeats = deckScope.beatjumpBeats;
-  const setGestureBeats = deckScope.setBeatjumpBeats;
+  const gestureBeats = useBeatjumpBeats(deckScope.beatjump);
+  const setGestureBeats = deckScope.beatjump.set;
 
   // Hot-cue curation (set-empty / delete) is the shared implementation;
   // the TRIGGER is this card's gesture (slide B / jump A) — tap, no hold.

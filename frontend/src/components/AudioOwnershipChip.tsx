@@ -41,7 +41,7 @@ export function AudioOwnershipChip({
   const set = face.kind === 'set' ? sets.find((s) => s.id === face.setId) : undefined;
   const tooltip = chipTooltip(face, {
     setName: set?.name ?? null,
-    editorMounted: mode === 'transition',
+    editorMounted: mode === 'transition' || mode === 'routine',
     setSelected: selectedSetId !== null,
   });
 
@@ -50,7 +50,9 @@ export function AudioOwnershipChip({
       requestSetNavigate(face.setId);
       onModeChange('library');
     } else if (face.kind === 'audition') {
-      onModeChange('transition');
+      // Navigate to WHICHEVER editor holds (the Mix editor claims
+      // 'routine-editor'; the pair editor 'editor' until phase 5's cut).
+      onModeChange(face.editor === 'routine-editor' ? 'routine' : 'transition');
     } else if (face.kind === 'replay') {
       // Jump INTO the replay (sessions 16): the replayed Session's
       // timeline, centered on the live playhead, at most 15 minutes
@@ -77,18 +79,33 @@ export function AudioOwnershipChip({
       disabled={face.kind === 'decks'}
       style={set?.color ? { borderLeft: `3px solid ${set.color}` } : undefined}
     >
+      {/* Who drives: a metronome while the machine performs (SET, REPLAY,
+          AUDITION — auditions are machine playback too), the vinyl glyph
+          (◉ — same as the Practice verb) while the decks are in human hands
+          (DECKS). SET keeps its ▶/⏸ next to the metronome — the paused
+          claim (ADR 0024) stays legible. */}
       {face.kind === 'set' ? (
         <>
+          <span className="topbar-ownership-icon">{'\u{F07DA}'}</span>
           <span className="topbar-ownership-icon">{face.playing ? '▶' : '⏸'}</span>
           <span className="topbar-ownership-kind">SET</span>
           <span className="topbar-ownership-name">{set?.name ?? `#${face.setId}`}</span>
         </>
       ) : face.kind === 'audition' ? (
-        <span className="topbar-ownership-kind">AUDITION</span>
+        <>
+          <span className="topbar-ownership-icon">{'\u{F07DA}'}</span>
+          <span className="topbar-ownership-kind">AUDITION</span>
+        </>
       ) : face.kind === 'replay' ? (
-        <span className="topbar-ownership-kind">REPLAY</span>
+        <>
+          <span className="topbar-ownership-icon">{'\u{F07DA}'}</span>
+          <span className="topbar-ownership-kind">REPLAY</span>
+        </>
       ) : (
-        <span className="topbar-ownership-kind">DECKS</span>
+        <>
+          <span className="topbar-ownership-icon">◉</span>
+          <span className="topbar-ownership-kind">DECKS</span>
+        </>
       )}
     </button>
   );

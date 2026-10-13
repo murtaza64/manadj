@@ -36,6 +36,19 @@ describe('indicesInRect', () => {
   it('returns empty for a rect over empty space', () => {
     expect(indicesInRect(pts, { x0: 0.3, y0: 0.05, x1: 0.4, y1: 0.1 })).toEqual([]);
   });
+
+  it.each([
+    { x0: 0, y0: 0.4, x1: 1, y1: 0.8 },
+    { x0: 1, y0: 0.4, x1: 0, y1: 0.8 },
+    { x0: 0, y0: 0.8, x1: 1, y1: 0.4 },
+    { x0: 1, y0: 0.8, x1: 0, y1: 0.4 },
+  ])('excludes values outside the rectangle for corners %o', (rect) => {
+    expect(indicesInRect(pts, rect)).toEqual([1, 2]);
+  });
+
+  it('includes only matching values in a zero-height rectangle', () => {
+    expect(indicesInRect(pts, { x0: 0, y0: 0.5, x1: 1, y1: 0.5 })).toEqual([2]);
+  });
 });
 
 describe('toggleIndex', () => {

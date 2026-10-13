@@ -65,6 +65,15 @@ class TrackCreate(TrackBase):
     """bpm is float BPM; conversion to the storage unit happens in crud.create_track."""
 
 
+class TrackFileRelocation(BaseModel):
+    track_id: int
+    destination: str
+
+
+class TrackFileRelocationRequest(BaseModel):
+    relocations: list[TrackFileRelocation]
+
+
 class TrackProvenance(BaseModel):
     """Audio Provenance summary for track list responses."""
     label: str
@@ -81,6 +90,8 @@ class Track(TrackBase):
     key_provenance: str | None = None
     # Worklist flag (ADR 0024): analysis bailed and no saved grid yet
     needs_attention: bool = False
+    # Current stems on disk (stems #118; stale = absent per #149)
+    has_stems: bool = False
     tags: list[Tag] = []
     provenance: TrackProvenance | None = None
     # One served BPM (ADR 0027): the grid-first projection
@@ -300,6 +311,40 @@ class TransitionRow(BaseModel):
     updated_at: datetime | None = None
 
 
+# Cameo Schemas (cameos PRD, #140 — client-authoritative pair-replace,
+# mirroring Transitions ADR 0011)
+
+class CameoItem(BaseModel):
+    """One saved Cameo as the client materializes it.
+
+    `uuid` is the client-generated identity; `data` is the opaque payload
+    (two-edged window in host track seconds, guest alignment, optional
+    guest→host tempo-match, role lanes, Jumps on both roles) — never
+    queried. Position is NOT in the payload: it is the item's index.
+    """
+    uuid: str
+    name: str
+    favorite: bool = False
+    data: dict
+
+
+class CameoPairReplace(BaseModel):
+    """Full replacement of an ordered (host, guest) pair's Cameo set."""
+    items: list[CameoItem]
+
+
+class CameoRow(BaseModel):
+    """A persisted Cameo (GET response)."""
+    host_track_id: int
+    guest_track_id: int
+    uuid: str
+    position: int
+    name: str
+    favorite: bool
+    data: dict
+    updated_at: datetime | None = None
+
+
 # Track-link Schemas (linked-pairs PRD — symmetric Linked pairs)
 
 class TrackLinkRow(BaseModel):
@@ -341,6 +386,8 @@ class TransitionTemplateItem(BaseModel):
     after_beats: int
     scalable: bool = False
     lanes: dict
+    # Beat FX track (#353; opaque TransitionBeatFx, normalized like lanes).
+    beat_fx: dict | None = None
 
     @model_validator(mode="after")
     def _window_total_non_negative(self) -> "TransitionTemplateItem":
@@ -377,6 +424,12 @@ class TakeCreate(BaseModel):
     events: list[dict]
     session_uuid: str | None = None
     origin: str = "detected"
+    # Survivor-rule verdict (#140): "handover" (a = outgoing, b = incoming)
+    # or "guest" (a Cameo Take: a = surviving host, b = visiting guest).
+    kind: str = Field(default="handover", pattern=r"^(handover|guest)$")
+    # The engagement this capture settled from (#140): pairwise offspring
+    # of one multi-deck engagement share it (history groups by it).
+    engagement_uuid: str | None = None
 
 
 class TakeRow(BaseModel):
@@ -392,6 +445,8 @@ class TakeRow(BaseModel):
     promoted_transition_uuid: str | None = None
     session_uuid: str | None = None
     origin: str = "detected"
+    kind: str = "handover"
+    engagement_uuid: str | None = None
 
 
 class TakeDetail(TakeRow):
@@ -447,6 +502,164 @@ class SessionDetail(SessionRow):
     events: list[dict]
 
 
+class RoutineCandidateRow(BaseModel):
+    """A miner-suggested Routine span (ADR 0035, routines 157). `cast` is
+    entry-ordered track ids (slot order); the window is capture-clock
+    seconds on the owning Session; `entry_offsets` gives each slot's entry
+    as seconds from window start (slot 0 = 0.0)."""
+    uuid: str
+    session_uuid: str
+    cast: list[int]
+    window_start_s: float
+    window_end_s: float
+    entry_offsets: list[float]
+    evidence: dict[str, int]
+    miner_version: int
+    created_at: datetime | None = None
+
+
+class RoutineCandidateQuery(BaseModel):
+    """Cast-prefix query (the pin picker's "Routines available" hint):
+    `track_ids` is the Set's upcoming entries in order, starting with the
+    adjacency's outgoing track."""
+    track_ids: list[int]
+
+
+# Routine Take + Routine Schemas (ADR 0035, routines 158)
+
+
+class RoutineTakeCreate(BaseModel):
+    """Confirm a candidate span into a Routine Take (with boundary trim).
+
+    The client sends the FINAL window (trimmed on the Session timeline)
+    plus the effective cast and per-slot entry offsets (seconds from the
+    trimmed window start; slot 0 = 0.0). n ≥ 3 is enforced here — a
+    2-cast confirm is a hand-cut Take and routes to POST /api/takes.
+    `origin_candidate_uuid` is provenance only (candidate uuids dangle
+    after a re-mine)."""
+    uuid: str
+    session_uuid: str
+    window_start_s: float
+    window_end_s: float
+    cast: list[int]
+    entry_offsets: list[float]
+    origin_candidate_uuid: str | None = None
+
+    @model_validator(mode="after")
+    def _validate(self) -> "RoutineTakeCreate":
+        if len(self.cast) < 3:
+            raise ValueError(
+                "n >= 3 — a 2-cast routine is a Transition; cut a hand-cut Take instead (ADR 0035)"
+            )
+        if len(self.entry_offsets) != len(self.cast):
+            raise ValueError("entry_offsets must match the cast, slot for slot")
+        if self.window_end_s <= self.window_start_s:
+            raise ValueError("empty window")
+        return self
+
+
+class RoutineTakeRow(BaseModel):
+    """Transition-history metadata for a Routine Take."""
+    uuid: str
+    session_uuid: str
+    cast: list[int]
+    window_start_s: float
+    window_end_s: float
+    entry_offsets: list[float]
+    origin_candidate_uuid: str | None = None
+    promoted_routine_uuid: str | None = None
+    confirmed_at: datetime
+
+
+class RoutineRow(BaseModel):
+    """A saved Routine — list metadata (no event payload)."""
+    uuid: str
+    name: str | None = None
+    cast: list[int]
+    entry_offsets_beats: list[float]
+    entry_positions: list[float]
+    duration_beats: float
+    origin_take_uuid: str | None = None
+    # Stable slot ids parallel to cast (ADR 0039); null = promoted
+    # (slot id = String(index)).
+    slot_ids: list[str] | None = None
+    # Authored from scratch (ADR 0039, gh#325): no recording — replay
+    # synthesizes each slot's trace from (entry beat, entry position,
+    # beatmatched rate). Promotion previews are never authored.
+    authored: bool = False
+    created_at: datetime | None = None
+
+
+class RoutineStructure(BaseModel):
+    """An authored Routine's first-class structure (ADR 0039, gh#325):
+    parallel per-slot lists. The server re-sorts slots into entry order
+    (slot index = entry order, ADR 0035). n ≥ 3 — a 2-cast mix is a
+    Transition."""
+    cast: list[int]
+    slot_ids: list[str]
+    entry_offsets_beats: list[float]
+    entry_positions: list[float]
+    duration_beats: float
+    # Optional: replace the edits layer in the same write (slot removal
+    # prunes the removed slot's edits atomically).
+    edits: dict | None = None
+
+
+class RoutineAuthoredCreate(RoutineStructure):
+    """Mint an authored Routine (the blank draft's first persist)."""
+    uuid: str
+    name: str | None = None
+
+
+class RoutineToTransition(BaseModel):
+    """Convert an AUTHORED Routine edited down to 2 slots into a
+    Transition (ADR 0039 kind-fluid convert-on-save, gh#330). The client
+    projects the slot form onto the seconds-anchored pair payload."""
+    transition_uuid: str
+    a_track_id: int
+    b_track_id: int
+    name: str
+    data: dict
+
+
+class KindConversion(BaseModel):
+    """Result of a 2↔3 kind crossing: the minted artifact's uuid/kind and
+    how many Set pins re-pointed onto it (the rest degraded/dropped)."""
+    kind: str
+    uuid: str
+    repointed_pins: int
+    dropped_pins: int
+
+
+class RoutineDetail(RoutineRow):
+    """One Routine with its slot-addressed, beat-domain event replay and
+    the editor's authored edits layer (gh#170 pass 2; null = unedited)."""
+    events: list[dict]
+    edits: dict | None = None
+
+
+class RoutineEditsPut(BaseModel):
+    """Replace a Routine's authored edits (gh#170 pass 2): slot-indexed
+    lane envelopes + Jump events, beat-domain. Stored opaquely (the
+    events_json posture — the frontend's routineDraft parses tolerantly);
+    null clears every edit."""
+    edits: dict | None = None
+
+
+class RoutinePatch(BaseModel):
+    """Rename a Routine (the only mutable field pre-editor)."""
+    name: str | None = None
+
+
+class RoutineRetrim(BaseModel):
+    """Boundary trim + re-promotion (gh#170): beat amounts to move either
+    edge of the origin take's window, on the Routine clock (the editor's
+    axis). Positive narrows; NEGATIVE WIDENS outward (gh#170 follow-up —
+    bounded server-side by the origin session slice's extent)."""
+    trim_start_beats: float
+    trim_end_beats: float
+
+
 # Set Schemas (sets PRD, issue 01 — client-authoritative entry replace)
 
 
@@ -484,6 +697,22 @@ class SetRow(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class CameoPinItem(BaseModel):
+    """One Cameo pin (#140): a saved Cameo or — manually — a Cameo Take
+    hosted by the carrying entry's Track. Always manual, never auto-filled
+    (an ornament resolves to nothing); the uuid is stored as asserted
+    (dangling pins are DROPPED by the deletion paths — there is no
+    Unresolved to degrade to)."""
+    pin_kind: str = Field(pattern=r"^(cameo|cameo-take)$")
+    pin_uuid: str
+
+
+class SetDormantCameoPinItem(CameoPinItem):
+    """A Dormant Cameo pin (#140): kept while its host Track is out of the
+    Set — Cameo dormancy keys on the host Track per Set, not on a pair."""
+    host_track_id: int
+
+
 class SetEntryItem(BaseModel):
     """One entry of a wholesale entries replace (PUT payload).
 
@@ -491,15 +720,25 @@ class SetEntryItem(BaseModel):
     track_id is the entry identity (a Track at most once per Set).
 
     The pin (sets 02) describes the adjacency this entry heads: a
-    Transition uuid, a Take uuid, an explicit Hard-cut (sets 26 — no
+    Transition uuid, a Take uuid, a Routine uuid (sets 160, ADR 0035 —
+    pinned on the adjacency leaving the Routine's first cast track,
+    covering the following adjacencies; covered entries keep their own
+    pins here, shadowed client-side), an explicit Hard-cut (sets 26 — no
     uuid: it references nothing), or nothing (Unresolved). Kind and uuid
-    travel together for transition/take; the uuid is stored as asserted
-    (never validated against the transitions/takes tables — dangling
+    travel together for transition/take/routine; the uuid is stored as
+    asserted (never validated against the referenced tables — dangling
     degrades client-side).
     """
     track_id: int
-    pin_kind: str | None = Field(default=None, pattern=r"^(transition|take|hardcut)$")
+    pin_kind: str | None = Field(default=None, pattern=r"^(transition|take|hardcut|routine)$")
     pin_uuid: str | None = None
+    # Per-entry trim (sets #164): an OFFSET from neutral in mixer-knob
+    # units (0 = neutral, ±0.5 spans the knob) — composes with track
+    # Autogain when that lands (ADR 0034), never an absolute level.
+    trim: float = Field(default=0.0, ge=-0.5, le=0.5)
+    # Cameo pins (#140): ordered guest ornaments hosted by this entry's
+    # Track. Adjacency-independent — reordering never touches them.
+    cameo_pins: list[CameoPinItem] = []
 
     @model_validator(mode="after")
     def _pin_fields_travel_together(self) -> "SetEntryItem":
@@ -515,12 +754,15 @@ class SetDormantPinItem(BaseModel):
     """One Dormant pin (sets 07): a broken pin remembered per ORDERED
     track pair, per Set. Unlike an entry pin it always carries a pin —
     a memory of nothing is nothing (a Hard-cut pin IS a pin: dormancy
-    round-trips it, sets 26). The uuid is stored as asserted (dangling
-    memories are DROPPED by the deletion paths, degrade_pins).
+    round-trips it, sets 26). A Routine pin's memory is keyed by its
+    BOUNDARY tracks (entry, exit — sets 160): it restores when the cast
+    is the next n entries again, not on plain pair adjacency. The uuid
+    is stored as asserted (dangling memories are DROPPED by the deletion
+    paths, degrade_pins).
     """
     a_track_id: int
     b_track_id: int
-    pin_kind: str = Field(pattern=r"^(transition|take|hardcut)$")
+    pin_kind: str = Field(pattern=r"^(transition|take|hardcut|routine)$")
     pin_uuid: str | None = None
 
     @model_validator(mode="after")
@@ -529,16 +771,18 @@ class SetDormantPinItem(BaseModel):
             if self.pin_uuid is not None:
                 raise ValueError("a hardcut pin carries no pin_uuid")
         elif self.pin_uuid is None:
-            raise ValueError("a transition/take pin requires a pin_uuid")
+            raise ValueError("a transition/take/routine pin requires a pin_uuid")
         return self
 
 
 class SetEntriesReplace(BaseModel):
     """Full replacement of a Set's ordered entry list (ADR 0011 pattern),
-    plus its Dormant pins (sets 07) — both client-authoritative, both
-    replaced wholesale in the same PUT (dormancy is Set state)."""
+    plus its Dormant pins (sets 07) and Dormant Cameo pins (#140) — all
+    client-authoritative, all replaced wholesale in the same PUT
+    (dormancy is Set state)."""
     items: list[SetEntryItem]
     dormant: list[SetDormantPinItem] = []
+    dormant_cameos: list[SetDormantCameoPinItem] = []
 
 
 class SetEntryRow(BaseModel):
@@ -547,6 +791,8 @@ class SetEntryRow(BaseModel):
     position: int
     pin_kind: str | None
     pin_uuid: str | None
+    trim: float
+    cameo_pins: list[CameoPinItem] = []
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -562,12 +808,15 @@ class SetDormantPinRow(BaseModel):
 
 
 class SetWithEntries(SetRow):
-    """A Set with its ordered entries and Dormant pins (sets 07)."""
+    """A Set with its ordered entries, Dormant pins (sets 07), and
+    Dormant Cameo pins (#140). Entries carry their active Cameo pins
+    (attached by the router — the storage keys on (set, host track))."""
     entries: list[SetEntryRow] = []
     # The ORM relationship is named dormant_pins; the wire field is dormant.
     dormant: list[SetDormantPinRow] = Field(
         default=[], validation_alias=AliasChoices("dormant", "dormant_pins")
     )
+    dormant_cameos: list[SetDormantCameoPinItem] = []
 
 
 class SetOrderItem(BaseModel):

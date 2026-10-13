@@ -2,12 +2,14 @@
 // Needs-attention worklist (ADR 0024, native-analysis-accuracy 12) at the
 // view seam: the row badge renders exactly when the server flags the track,
 // and the library query asks the backend for the worklist view.
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { Root } from 'react-dom/client';
 import TrackRow from './TrackRow';
 import type { Track } from '../types';
+
+vi.mock('./TrackWaveformPreview', () => ({ TrackWaveformPreview: () => null }));
 
 declare global {
   var IS_REACT_ACT_ENVIRONMENT: boolean | undefined;

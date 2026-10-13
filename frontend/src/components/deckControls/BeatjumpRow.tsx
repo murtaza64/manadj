@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { useDeck, useDeckReady } from '../../hooks/useDeck';
+import { useDeck, useDeckReady, deckReadyNow, useBeatjumpBeats } from '../../hooks/useDeck';
 import { doubleBeatjump, halveBeatjump, jumpWindow } from '../../playback/beatjump';
 import { JumpBackIcon, JumpForwardIcon } from '../icons/JumpIcons';
 import './deckControls.css';
@@ -16,17 +16,29 @@ import './deckControls.css';
 export function BeatjumpRow({
   backKbd,
   forwardKbd,
+  halveKbd,
+  doubleKbd,
+  halveTitleSuffix = '',
+  doubleTitleSuffix = '',
   backTitleSuffix = '',
   forwardTitleSuffix = '',
 }: {
   /** On-control keyboard hint slots (Performance view). */
   backKbd?: ReactNode;
   forwardKbd?: ReactNode;
+  halveKbd?: ReactNode;
+  doubleKbd?: ReactNode;
   /** Title-only key hints (library view, e.g. " (A)"). */
   backTitleSuffix?: string;
   forwardTitleSuffix?: string;
+  halveTitleSuffix?: string;
+  doubleTitleSuffix?: string;
 }) {
-  const { engine, beatjumpBeats, setBeatjumpBeats } = useDeck();
+  const { engine, beatjump, loadedTrack } = useDeck();
+  const beatjumpBeats = useBeatjumpBeats(beatjump);
+  const jump = (beats: number) => {
+    if (deckReadyNow(engine, loadedTrack?.id ?? null)) engine.jumpBeats(beats);
+  };
   const ready = useDeckReady();
   const window = jumpWindow(beatjumpBeats);
 
@@ -35,7 +47,7 @@ export function BeatjumpRow({
       <button
         className="player-button"
         disabled={!ready}
-        onClick={() => engine.jumpBeats(-beatjumpBeats)}
+        onClick={() => jump(-beatjumpBeats)}
         title={`Jump back ${beatjumpBeats} beats${backTitleSuffix}`}
       >
         <JumpBackIcon />
@@ -43,10 +55,11 @@ export function BeatjumpRow({
       </button>
       <button
         className="player-button"
-        onClick={() => setBeatjumpBeats(halveBeatjump(beatjumpBeats))}
-        title="Halve beatjump size"
+        onClick={() => beatjump.set(halveBeatjump(beatjumpBeats))}
+        title={`Halve beatjump size${halveTitleSuffix}`}
       >
         1/2
+        {halveKbd}
       </button>
       <details className="deck-jumpsize deck-jumpwindow-menu">
         <summary title="Beatjump size and pad window">{beatjumpBeats}</summary>
@@ -56,7 +69,7 @@ export function BeatjumpRow({
               key={`back-${beats}`}
               className="player-button"
               disabled={!ready}
-              onClick={() => engine.jumpBeats(-beats)}
+              onClick={() => jump(-beats)}
               title={`Jump back ${beats} beats`}
             >
               ◀ {beats}
@@ -65,7 +78,7 @@ export function BeatjumpRow({
               key={`forward-${beats}`}
               className="player-button"
               disabled={!ready}
-              onClick={() => engine.jumpBeats(beats)}
+              onClick={() => jump(beats)}
               title={`Jump forward ${beats} beats`}
             >
               {beats} ▶
@@ -75,15 +88,16 @@ export function BeatjumpRow({
       </details>
       <button
         className="player-button"
-        onClick={() => setBeatjumpBeats(doubleBeatjump(beatjumpBeats))}
-        title="Double beatjump size"
+        onClick={() => beatjump.set(doubleBeatjump(beatjumpBeats))}
+        title={`Double beatjump size${doubleTitleSuffix}`}
       >
         x2
+        {doubleKbd}
       </button>
       <button
         className="player-button"
         disabled={!ready}
-        onClick={() => engine.jumpBeats(beatjumpBeats)}
+        onClick={() => jump(beatjumpBeats)}
         title={`Jump forward ${beatjumpBeats} beats${forwardTitleSuffix}`}
       >
         <JumpForwardIcon />

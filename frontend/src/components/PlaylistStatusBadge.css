@@ -1,7 +1,7 @@
 .status-badge {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-8);
 }
 
 .status-dot {
@@ -11,6 +11,6 @@
 }
 
 .status-label {
-  font-size: 13px;
+  font-size: var(--font-body);
   color: var(--text);
 }

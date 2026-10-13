@@ -6,9 +6,12 @@
  */
 import { describe, expect, it } from 'vitest';
 import type { CaptureEvent } from '../capture/events';
+import type { BeatFxSectionState } from '../playback/beatFx';
 import {
   COLLAPSED_MARKER_PX,
   buildTimeAxis,
+  candidateDupesTake,
+  castSpanRefs,
   collapseCandidates,
   createStateIndex,
   deriveTimeline,
@@ -37,6 +40,75 @@ function seed(t: number): CaptureEvent[] {
 }
 
 describe('deriveTimeline', () => {
+  it('does not classify repeated audible cue stabs as idle', () => {
+    const events: CaptureEvent[] = [
+      ...seed(0),
+      { t: 0, kind: 'load', channel: 'A', trackId: 7, bpm: 174 },
+      { t: 0, kind: 'transport', channel: 'A', action: 'previewStart', playhead: 10 },
+      { t: 1, kind: 'transport', channel: 'A', action: 'previewEnd', playhead: 11 },
+      { t: 4, kind: 'transport', channel: 'A', action: 'previewStart', playhead: 10 },
+      { t: 5, kind: 'transport', channel: 'A', action: 'previewEnd', playhead: 11 },
+      { t: 8, kind: 'transport', channel: 'A', action: 'previewStart', playhead: 10 },
+      { t: 9, kind: 'transport', channel: 'A', action: 'previewEnd', playhead: 11 },
+      { t: 10, kind: 'tick', playheads: {} },
+    ];
+    expect(deriveTimeline(events).idle).toEqual([]);
+    expect(deriveTimeline(events).decks.A.audibleSpans).toEqual([
+      { start: 0, end: 1 }, { start: 4, end: 5 }, { start: 8, end: 9 },
+    ]);
+  });
+
+  it('starts idle only after five seconds of continuous silence, without needing ticks', () => {
+    const events: CaptureEvent[] = [
+      ...seed(0),
+      { t: 0, kind: 'load', channel: 'A', trackId: 7, bpm: 174 },
+      { t: 0, kind: 'transport', channel: 'A', action: 'play', playhead: 0 },
+      { t: 10, kind: 'transport', channel: 'A', action: 'pause', playhead: 10 },
+      { t: 50, kind: 'transport', channel: 'A', action: 'play', playhead: 10 },
+    ];
+    expect(deriveTimeline(events).idle).toEqual([{ start: 15, end: 50 }]);
+  });
+
+  it('ends idle immediately on a stab and restarts grace after its release', () => {
+    const events: CaptureEvent[] = [
+      ...seed(0),
+      { t: 0, kind: 'load', channel: 'D', trackId: 7, bpm: 174 },
+      { t: 10, kind: 'transport', channel: 'D', action: 'previewStart', playhead: 10, detail: 2 },
+      { t: 10.1, kind: 'transport', channel: 'D', action: 'previewEnd', playhead: 10 },
+      { t: 20, kind: 'tick', playheads: {} },
+    ];
+    expect(deriveTimeline(events).idle).toEqual([{ start: 5, end: 10 }, { start: 15.1, end: 20 }]);
+  });
+
+  it('muted previews stay idle and tenure resets the grace', () => {
+    const events: CaptureEvent[] = [
+      ...seed(0),
+      { t: 0, kind: 'control', control: 'fader', channel: 'A', value: 0 },
+      { t: 0, kind: 'load', channel: 'A', trackId: 7, bpm: 174 },
+      { t: 2, kind: 'transport', channel: 'A', action: 'previewStart', playhead: 10 },
+      { t: 10, kind: 'transport', channel: 'A', action: 'previewEnd', playhead: 10 },
+      { t: 20, kind: 'tenure', edge: 'start', holder: 'editor' },
+      { t: 30, kind: 'tenure', edge: 'end', holder: 'shared' },
+      { t: 40, kind: 'tick', playheads: {} },
+    ];
+    expect(deriveTimeline(events).idle).toEqual([{ start: 5, end: 20 }, { start: 35, end: 40 }]);
+  });
+
+  it('breaks the waveform trace at a resolved Slip loop return', () => {
+    const events: CaptureEvent[] = [
+      { t: 0, kind: 'load', channel: 'A', trackId: 7, bpm: 120 },
+      { t: 0, kind: 'transport', channel: 'A', action: 'play', playhead: 10 },
+      { t: 1, kind: 'loop', channel: 'A', playhead: 11, region: { start: 11, end: 13 } },
+      { t: 4, kind: 'tick', playheads: { A: 12 } },
+      { t: 4.5, kind: 'loop', channel: 'A', playhead: 14.5, region: null },
+      { t: 5, kind: 'tick', playheads: { A: 15 } },
+    ];
+    const model = deriveTimeline(events);
+    expect(model.decks.A.traces.some(trace => trace.some(p => p.t === 4.5 && p.playhead === 12.5))).toBe(true);
+    expect(model.decks.A.traces.some(trace => trace[0].t === 4.5 && trace[0].playhead === 14.5)).toBe(true);
+    expect(stateAt(events, 4.75).decks.A.playhead).toBe(14.75);
+  });
+
   it('audibility follows the fader, not just transport', () => {
     const events: CaptureEvent[] = [
       ...seed(0),
@@ -66,7 +138,7 @@ describe('deriveTimeline', () => {
       { start: 2, end: 5 },
       { start: 15, end: 30 },
     ]);
-    expect(m.idle).toEqual([{ start: 0, end: 2 }]);
+    expect(m.idle).toEqual([]);
   });
 
   it('an unclosed tenure at log end is marked open', () => {
@@ -79,7 +151,7 @@ describe('deriveTimeline', () => {
     expect(m.tenures).toEqual([{ start: 5, end: 20, holder: 'conductor', open: true }]);
   });
 
-  it('idle spans open when nothing is audible and close on resume', () => {
+  it('idle spans open after the silence grace and close on resume', () => {
     const events: CaptureEvent[] = [
       ...seed(0),
       { t: 1, kind: 'load', channel: 'A', trackId: 7, bpm: 174 },
@@ -90,8 +162,7 @@ describe('deriveTimeline', () => {
     ];
     const m = deriveTimeline(events);
     expect(m.idle).toEqual([
-      { start: 0, end: 2 },
-      { start: 10, end: 500 },
+      { start: 15, end: 500 },
     ]);
   });
 
@@ -172,6 +243,28 @@ describe('deriveTimeline', () => {
     ).toEqual({ from: null, to: 'B' });
   });
 
+  it('takeDeckPair follows the audible copy when a track is loaded on two decks (gh#184)', () => {
+    // Track 9 sits loaded on A (silent — never played) AND on D, where it
+    // actually plays through the take window. Deck-order-first matching
+    // used to attribute the chip to A.
+    const events: CaptureEvent[] = [
+      ...seed(0),
+      { t: 1, kind: 'load', channel: 'A', trackId: 9, bpm: 172 }, // silent copy
+      { t: 1, kind: 'load', channel: 'B', trackId: 7, bpm: 174 },
+      { t: 2, kind: 'transport', channel: 'B', action: 'play', playhead: 0 },
+      { t: 5, kind: 'load', channel: 'D', trackId: 9, bpm: 172 },
+      { t: 6, kind: 'transport', channel: 'D', action: 'play', playhead: 0 },
+      { t: 30, kind: 'transport', channel: 'B', action: 'pause', playhead: 28 },
+      { t: 40, kind: 'transport', channel: 'D', action: 'pause', playhead: 34 },
+    ];
+    const m = deriveTimeline(events);
+    const take = { a_track_id: 7, b_track_id: 9, window_start_s: 8, window_end_s: 25 };
+    expect(takeDeckPair(m, take)).toEqual({ from: 'B', to: 'D' });
+    // Both copies silent in the window: still resolves (first-found fallback).
+    const early = { a_track_id: 7, b_track_id: 9, window_start_s: 1, window_end_s: 1.5 };
+    expect(takeDeckPair(m, early).to).not.toBeNull();
+  });
+
   it('an empty log derives an empty, zero-span model', () => {
     const m = deriveTimeline([]);
     expect(m.start).toBe(0);
@@ -179,6 +272,47 @@ describe('deriveTimeline', () => {
     expect(m.eventCount).toBe(0);
     expect(m.decks.A.controlSteps.fader).toEqual([]);
     expect(m.decks.A.audibleSpans).toEqual([]);
+    expect(m.fxSpans).toEqual([]);
+  });
+});
+
+describe('deriveTimeline Beat FX spans (#354)', () => {
+  const off: BeatFxSectionState = { selected: 'echo', target: 'A', on: false, depth: 0, beats: 0.5 };
+  const fx = (t: number, patch: Partial<BeatFxSectionState>): CaptureEvent => ({ t, kind: 'beatFx', ...off, ...patch });
+
+  it('echo toggled on deck A for 4 s is a 4 s echo span on A', () => {
+    const m = deriveTimeline([...seed(0), fx(0, {}), fx(10, { on: true }), fx(14, {}), { t: 20, kind: 'tick', playheads: {} }]);
+    expect(m.fxSpans).toEqual([
+      { start: 10, end: 14, target: 'A', effect: 'echo', lengthUnit: 'beats', steps: [{ t: 10, depth: 0, beats: 0.5 }], open: false },
+    ]);
+  });
+
+  it('depth/length moves extend the envelope; effect or target changes split the span', () => {
+    const m = deriveTimeline([
+      ...seed(0),
+      fx(1, { on: true }),
+      fx(2, { on: true, depth: 0.5 }),
+      fx(2, { on: true, depth: 0.6 }),
+      fx(3, { on: true, depth: 0.6, beats: 1 }),
+      fx(4, { on: true, depth: 0.6, beats: 1, selected: 'reverb' }),
+      fx(5, { on: true, depth: 0.6, beats: 1, selected: 'reverb', target: 'master' }),
+      { t: 8, kind: 'tick', playheads: {} },
+    ]);
+    expect(m.fxSpans.map(({ start, end, target, effect, open }) => ({ start, end, target, effect, open }))).toEqual([
+      { start: 1, end: 4, target: 'A', effect: 'echo', open: false },
+      { start: 4, end: 5, target: 'A', effect: 'reverb', open: false },
+      { start: 5, end: 8, target: 'master', effect: 'reverb', open: true },
+    ]);
+    expect(m.fxSpans[0].steps).toEqual([
+      { t: 1, depth: 0, beats: 0.5 },
+      { t: 2, depth: 0.6, beats: 0.5 },
+      { t: 3, depth: 0.6, beats: 1 },
+    ]);
+  });
+
+  it('no span while ON with nothing selected, and none for pre-#351 logs', () => {
+    expect(deriveTimeline([...seed(0), fx(1, { on: true, selected: null }), fx(3, {})]).fxSpans).toEqual([]);
+    expect(deriveTimeline([...seed(0), { t: 9, kind: 'tick', playheads: {} }]).fxSpans).toEqual([]);
   });
 });
 
@@ -197,11 +331,11 @@ describe('buildTimeAxis (idle collapse)', () => {
     const axis = buildTimeAxis(m, { collapseIdle: true, thresholdS: 45, pxPerSec: 2 });
     const collapsed = axis.segments.filter((s) => s.collapsed);
     expect(collapsed).toHaveLength(1);
-    expect(collapsed[0].start).toBe(100);
+    expect(collapsed[0].start).toBe(105);
     expect(collapsed[0].end).toBe(1000);
     expect(collapsed[0].px1 - collapsed[0].px0).toBe(COLLAPSED_MARKER_PX);
-    // 200s visible at 2 px/s + one marker.
-    expect(axis.totalPx).toBeCloseTo(200 * 2 + COLLAPSED_MARKER_PX, 5);
+    // The five-second grace stays visible beside the collapsed marker.
+    expect(axis.totalPx).toBeCloseTo(205 * 2 + COLLAPSED_MARKER_PX, 5);
     for (const t of [2, 50, 99, 1001, 1099]) {
       expect(axis.pxToT(axis.tToPx(t))).toBeCloseTo(t, 3);
     }
@@ -229,7 +363,7 @@ describe('buildTimeAxis (idle collapse)', () => {
   it('respects the expanded set and the collapse toggle', () => {
     const off = buildTimeAxis(m, { collapseIdle: false, thresholdS: 45, pxPerSec: 2 });
     expect(off.segments.every((s) => !s.collapsed)).toBe(true);
-    const idx = m.idle.findIndex((sp) => sp.start === 100);
+    const idx = m.idle.findIndex((sp) => sp.start === 105);
     const expanded = buildTimeAxis(m, {
       collapseIdle: true,
       thresholdS: 45,
@@ -716,7 +850,7 @@ describe('tenure collapse (sessions 14)', () => {
     const tenure = c.find((sp) => sp.kind === 'tenure');
     const idles = c.filter((sp) => sp.kind === 'idle');
     expect(tenure).toMatchObject({ start: 100, end: 1000, holder: 'replay' });
-    expect(idles.some((sp) => sp.start === 1100 && sp.end === 1600)).toBe(true);
+    expect(idles.some((sp) => sp.start === 1105 && sp.end === 1600)).toBe(true);
     for (let i = 1; i < c.length; i++) expect(c[i].start).toBeGreaterThanOrEqual(c[i - 1].start);
   });
 
@@ -747,7 +881,7 @@ describe('tenure collapse (sessions 14)', () => {
     const collapsed = axis.segments.filter((s) => s.collapsed);
     expect(collapsed).toHaveLength(1);
     expect(collapsed[0].kind).toBe('idle');
-    expect(collapsed[0].start).toBe(1100);
+    expect(collapsed[0].start).toBe(1105);
   });
 
   it('an open tenure at log end collapses too', () => {
@@ -765,5 +899,68 @@ describe('tenure collapse (sessions 14)', () => {
     });
     const seg = axis.segments.find((s) => s.collapsed && s.kind === 'tenure');
     expect(seg).toMatchObject({ start: 10, end: 500, holder: 'conductor' });
+  });
+});
+
+describe('castSpanRefs (routine hover spotlight, gh#187)', () => {
+  const events: CaptureEvent[] = [
+    ...seed(0),
+    { t: 1, kind: 'load', channel: 'A', trackId: 7, bpm: 174 },
+    { t: 2, kind: 'transport', channel: 'A', action: 'play', playhead: 0 },
+    { t: 5, kind: 'load', channel: 'B', trackId: 8, bpm: 172 },
+    { t: 6, kind: 'transport', channel: 'B', action: 'play', playhead: 0 },
+    { t: 10, kind: 'load', channel: 'C', trackId: 9, bpm: 170 },
+    { t: 11, kind: 'transport', channel: 'C', action: 'play', playhead: 0 },
+    { t: 40, kind: 'transport', channel: 'A', action: 'pause', playhead: 38 },
+    { t: 41, kind: 'transport', channel: 'B', action: 'pause', playhead: 35 },
+    { t: 42, kind: 'transport', channel: 'C', action: 'pause', playhead: 31 },
+  ];
+  const m = deriveTimeline(events);
+
+  it('resolves each cast track to its deck span within the window', () => {
+    const refs = castSpanRefs(m, [7, 8, 9], 5, 35);
+    expect(refs).toEqual([
+      { deck: 'A', start: 1, end: 42 },
+      { deck: 'B', start: 5, end: 42 },
+      { deck: 'C', start: 10, end: 42 },
+    ]);
+  });
+
+  it('skips cast tracks the log does not show in the window', () => {
+    const refs = castSpanRefs(m, [7, 999], 5, 35);
+    expect(refs).toEqual([{ deck: 'A', start: 1, end: 42 }]);
+  });
+});
+
+describe('candidateDupesTake (re-mined twin dedupe, gh#187)', () => {
+  const take = { window_start_s: 30, window_end_s: 80, cast: [1, 2, 3] };
+
+  it('heavy overlap + shared cast = duplicate', () => {
+    // The re-mined twin: same cast, near-same window (bounds shifted).
+    expect(
+      candidateDupesTake({ window_start_s: 27, window_end_s: 83, cast: [1, 2, 3] }, take)
+    ).toBe(true);
+    // A trimmed confirm: the take window sits inside the candidate's.
+    expect(
+      candidateDupesTake({ window_start_s: 20, window_end_s: 90, cast: [1, 2, 3, 4] }, take)
+    ).toBe(true);
+  });
+
+  it('no time overlap = distinct', () => {
+    expect(
+      candidateDupesTake({ window_start_s: 100, window_end_s: 150, cast: [1, 2, 3] }, take)
+    ).toBe(false);
+  });
+
+  it('adjacent candidate sharing only the handover track survives', () => {
+    expect(
+      candidateDupesTake({ window_start_s: 28, window_end_s: 82, cast: [3, 4, 5] }, take)
+    ).toBe(false);
+  });
+
+  it('shallow overlap survives even with a shared cast', () => {
+    expect(
+      candidateDupesTake({ window_start_s: 75, window_end_s: 200, cast: [1, 2, 3] }, take)
+    ).toBe(false);
   });
 });

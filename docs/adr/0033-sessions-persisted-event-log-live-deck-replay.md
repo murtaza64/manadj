@@ -46,7 +46,8 @@ Core decisions:
   heuristics / one per recorder lifetime" decision, which left an app parked
   overnight recording one giant Session). Audibility is the one shared
   definition (playing, channel controls, crossfader routing, kill thresholds;
-  PFL and CUE-stab preview invisible); machine tenure is non-performance and
+   PFL-only invisible; audible CUE-stab previews count, amended 2026-09-12);
+   machine tenure is non-performance and
   counts toward the ten minutes. The split flushes and closes exactly one row
   (the observed idle tail stays in its append-only log; the timeline already
   collapses idle), resets all Session-scoped recorder/detector state — no
@@ -59,7 +60,16 @@ Core decisions:
   pre-audibility context. Backend-side, ending a silent row deletes it
   (shutdown and the split end through the same route) and recovery sweeps
   every silent row, legacy ones included — enforced by a Python port of the
-  audibility definition kept in lockstep with the frontend seam.
+   audibility definition kept in lockstep with the frontend seam.
+
+### Session audibility amendment (2026-09-12)
+
+- Master-audible main-cue and hot-cue previews count for Session activation,
+  retention, timeline audibility, and resetting the ten-minute silence clock.
+  Take detection and Played-track accounting still exclude previews.
+- Timeline idle starts five seconds after continuous silence begins, never
+  backdated to the pause. Any audible burst resets this grace; machine tenure
+  stays separate. Gap-collapse thresholds apply to the remaining idle span.
 
 ## Considered options
 

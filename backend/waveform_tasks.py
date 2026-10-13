@@ -4,9 +4,8 @@ Replaces the ad-hoc polling daemon (`waveform_worker.py`): Track creation sites
 enqueue a `waveform` task, and a startup sweep enqueues tasks for any Track
 still missing Waveform data (including pre-v2 rows whose blob column is NULL).
 
-Two generation paths, until the legacy renderer dies (issues 04/06):
-- no waveform row at all → full generation (legacy JSON/PNG + v2 blob)
-- row exists, `data_blob` NULL → v2 blob backfill only (fast path, no librosa)
+Missing full data is generated from audio together with its bounded preview.
+Preview-only backfill reads stored full data, never the audio file.
 """
 
 import logging
@@ -19,14 +18,13 @@ from sqlalchemy.orm import Session
 from . import crud, models
 from .tasks.manager import create_task
 from .tasks.models import Task
-from .waveform_data import generate_blob
+from .waveform_data import build_preview_blob, generate_blob
 
 logger = logging.getLogger(__name__)
 
 WAVEFORM_TASK_TYPE = "waveform"
 
-# The full-generation callable is an injectable seam (ADR-0002: audio analysis
-# is a fakeable seam — the legacy path drags librosa).
+# The full-generation callable is an injectable audio analysis seam (ADR-0002).
 FullGenerate = Callable[[Session, int, str], Any]
 
 
@@ -47,24 +45,47 @@ def make_waveform_handler(full_generate: FullGenerate | None = None):
             full = full_generate if full_generate is not None else crud.create_waveform
             full(db, track_id, track.filename)
         else:
-            has_blob = (
-                db.query(models.Waveform.data_blob)
+            has_blob, has_preview = (
+                db.query(
+                    models.Waveform.data_blob.is_not(None),
+                    models.Waveform.preview_blob.is_not(None),
+                )
                 .filter(models.Waveform.track_id == track_id)
-                .scalar()
-                is not None
+                .one()
             )
+            if has_blob and has_preview:
+                return
             if not has_blob:
                 blob = generate_blob(track.filename)
-                db.query(models.Waveform).filter(
-                    models.Waveform.track_id == track_id
-                ).update({"data_blob": blob})
-                db.commit()
+            else:
+                blob = waveform.data_blob
+            values = {"preview_blob": build_preview_blob(blob)}
+            if not has_blob:
+                values["data_blob"] = blob
+            db.query(models.Waveform).filter(
+                models.Waveform.track_id == track_id
+            ).update(values)
+            db.commit()
 
     return handle
 
 
 def enqueue_waveform_task(db: Session, track_id: int) -> Task | None:
-    """Enqueue generation for one Track; no-op if one is already queued/running."""
+    """Enqueue missing artifacts; no-op when complete or already queued/running.
+
+    Boolean projections keep this safe for request-time use, including archived
+    tracks displayed outside the active Library.
+    """
+    artifacts = (
+        db.query(
+            models.Waveform.data_blob.is_not(None),
+            models.Waveform.preview_blob.is_not(None),
+        )
+        .filter(models.Waveform.track_id == track_id)
+        .first()
+    )
+    if artifacts is not None and all(artifacts):
+        return None
     existing = (
         db.query(Task)
         .filter(
@@ -91,7 +112,11 @@ def enqueue_missing_waveforms(db: Session) -> int:
         .outerjoin(models.Waveform, models.Waveform.track_id == models.Track.id)
         .filter(
             models.Track.is_active,
-            or_(models.Waveform.id.is_(None), models.Waveform.data_blob.is_(None)),
+            or_(
+                models.Waveform.id.is_(None),
+                models.Waveform.data_blob.is_(None),
+                models.Waveform.preview_blob.is_(None),
+            ),
         )
         .all()
     )

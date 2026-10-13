@@ -1,3 +1,4 @@
+import { writeSetting } from '../settings/persistedSettings';
 import type { ChannelId } from './mixer';
 
 export const CROSSFADER_ASSIGNMENTS = ['left', 'thru', 'right'] as const;
@@ -36,11 +37,8 @@ export function loadCrossfaderAssignments(): CrossfaderAssignments {
 }
 
 export function saveCrossfaderAssignments(assignments: CrossfaderAssignments): void {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(assignments));
-  } catch {
-    // Persistence is best-effort; the Mixer keeps the session state.
-  }
+  // Write-through (settings #176): DB + localStorage cache, best-effort.
+  writeSetting(STORAGE_KEY, JSON.stringify(assignments));
 }
 
 export function loadCrossfaderPosition(): number {
@@ -71,9 +69,6 @@ export function loadCrossfaderEnabled(): boolean {
 }
 
 export function saveCrossfaderEnabled(enabled: boolean): void {
-  try {
-    localStorage.setItem(ENABLED_STORAGE_KEY, String(enabled));
-  } catch {
-    // Persistence is best-effort; the Mixer keeps the session state.
-  }
+  // Write-through (settings #176): DB + localStorage cache, best-effort.
+  writeSetting(ENABLED_STORAGE_KEY, String(enabled));
 }

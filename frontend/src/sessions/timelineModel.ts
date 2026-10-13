@@ -6,13 +6,14 @@
  *
  * - per-Deck track spans (loads), playing spans (transport), audibility
  *   spans (via the SHARED audibility reducer, capture/audibilityReducer —
- *   the very reducer the detector runs, same params, so the bands are
- *   what the detector heard by construction), playhead traces (ticks +
+ *   same mixer thresholds as the detector, including previews), playhead traces (ticks +
  *   transport, broken at discontinuities — these also map session time to
  *   track time for waveform rendering)
  * - tenure holds (a machine held the Audible surface: honest gaps;
  *   audibility is masked beneath them — the shared surface was displaced)
  * - idle stretches (no audible deck, no tenure) → collapse candidates
+ * - Beat FX spans (#354): the section ON with an effect selected, per
+ *   target, carrying a depth/length envelope
  * - a piecewise time axis that collapses idle to fixed-width markers
  * - state reconstruction at an arbitrary T (the scrub readout; the replay
  *   planner builds on the same reducer, sessions 05)
@@ -21,14 +22,24 @@ import type { CrossfaderAssignment } from '../playback/crossfaderAssignmentStore
 import {
   ALL_DECKS,
   applyEvent,
+  advanceClock,
   cloneAudibilityState,
+  deckPlayheadAt,
+  deckScratchMotion,
   deckGain,
   initialAudibilityState,
-  maskedDeckAudible,
+  nextFxTailEnd,
+  sessionDeckAudible,
 } from '../capture/audibilityReducer';
 import type { AudibilityState } from '../capture/audibilityReducer';
 import { DEFAULT_DETECTOR_PARAMS } from '../capture/events';
 import type { CaptureDeck, CaptureEvent, DetectorParams } from '../capture/events';
+import { scratchBoundary } from '../playback/worklet/scratchMotion';
+import type { ScratchFilter } from '../playback/worklet/scratchMotion';
+import { beatFxLengthUnit } from '../playback/beatFx';
+import type { BeatFxEffectId, BeatFxSectionState, BeatFxTarget } from '../playback/beatFx';
+import { DEFAULT_BEAT_FX_SETTINGS } from '../playback/beatFxSettings';
+import type { FlangerLengthUnit } from '../playback/beatFxSettings';
 
 export { ALL_DECKS };
 
@@ -40,6 +51,7 @@ const JOG_SEEK_MAX_S = 2;
 /** Minimum spacing between kept jog-trace samples (~20 Hz): rim ticks can
  * fire many times per frame; decimating bounds the point count. */
 const JOG_DECIMATE_S = 0.05;
+const IDLE_GRACE_S = 5;
 
 export interface Span {
   start: number;
@@ -75,6 +87,29 @@ export interface GestureMark {
 export interface LoopSpan extends Span {
   /** The last region held (track seconds). */
   region: { start: number; end: number };
+  /** Unclosed at log end. */
+  open: boolean;
+}
+
+/** One step of a Beat FX span's envelope: from `t`, the section runs at
+ * this LEVEL/DEPTH (bipolar −1..1) and BEAT ◄ ► length. */
+export interface FxStep {
+  t: number;
+  depth: number;
+  beats: number;
+}
+
+/** Beat FX activity (#354): the section was ON with `effect` selected and
+ * assigned to `target`. A change of effect or target closes the span and
+ * opens a new one; depth/length moves extend the envelope. */
+export interface FxSpan extends Span {
+  target: BeatFxTarget;
+  effect: BeatFxEffectId;
+  /** Unit the steps' `beats` reads in (flanger may count bars), from the
+   * voicing prefs at span open. */
+  lengthUnit: FlangerLengthUnit;
+  /** Envelope steps, first at `start`, event-aligned, deduped. */
+  steps: FxStep[];
   /** Unclosed at log end. */
   open: boolean;
 }
@@ -136,13 +171,16 @@ export interface TimelineModel {
   idle: Span[];
   /** ≥2 decks simultaneously audible (trading material). */
   overlaps: Span[];
+  /** Beat FX activity spans (#354), time-ordered. Empty for logs that
+   * predate FX capture (#351). */
+  fxSpans: FxSpan[];
   /** Every trackId that appeared in a load event. */
   trackIds: number[];
   /** Distinct Tracks that became Master-audible during the Session (any
    * audibility span overlapped that Track's tenure on its deck). Repeated
    * audible plays count once; loaded-only, cue/PFL-only, and
    * tenure-masked Tracks are absent (audibleSpans already exclude them).
-   * The Sessions-list "Tracks" count. */
+   * Ordered by first audibility, for the Sessions-list count and preview. */
   audibleTrackIds: number[];
   eventCount: number;
 }
@@ -227,6 +265,13 @@ export function deriveTimeline(
     }
   }
 
+  const fxSpans: FxSpan[] = [];
+  let openFx: FxSpan | null = null;
+  const closeFx = (t: number) => {
+    if (openFx && t > openFx.start) fxSpans.push({ ...openFx, end: t, open: false });
+    openFx = null;
+  };
+
   const tenures: TenureSpan[] = [];
   let openTenure: { holder: string; since: number } | null = null;
 
@@ -237,7 +282,7 @@ export function deriveTimeline(
     if (tr && tr.length >= 2) traces[ch].push(tr);
     openTrace[ch] = null;
   };
-  const sampleTrace = (ch: CaptureDeck, t: number, playhead: number, jog = false) => {
+  const sampleTrace = (ch: CaptureDeck, t: number, playhead: number, jog = false, scratch = false) => {
     let tr = openTrace[ch];
     if (tr && tr.length > 0) {
       const last = tr[tr.length - 1];
@@ -253,7 +298,7 @@ export function deriveTimeline(
         return;
       }
       // Discontinuity: jumped (seek/hot cue) or reversed or a long silence.
-      if (dp < -0.75 || Math.abs(dp - dt) > Math.max(2, dt * 0.5) || dt > 4) {
+      if (!scratch && (dp < -0.75 || Math.abs(dp - dt) > Math.max(2, dt * 0.5) || dt > 4)) {
         breakTrace(ch);
         tr = null;
       }
@@ -265,7 +310,35 @@ export function deriveTimeline(
     tr.push({ t, playhead });
   };
 
-  for (const e of events) {
+  for (let i = 0; i < events.length;) {
+    // Resolve filter rest, reversal, and loop edges without a raw tick.
+    const next = events[i];
+    const wraps = new Map<CaptureDeck, number>();
+    let expires = Infinity;
+    for (const ch of ALL_DECKS) {
+      const d = s.decks[ch];
+      if (!d.scratch) continue;
+      const boundary = scratchBoundary(deckScratchMotion(d));
+      expires = Math.min(expires, boundary.time, boundary.time < Infinity ? d.playheadAt + 0.004 : Infinity);
+      if (boundary.wrap) wraps.set(ch, boundary.time);
+    }
+    // A Beat FX tail falls silent between events (#355): end its band there.
+    expires = Math.min(expires, nextFxTailEnd(s));
+    const e: CaptureEvent = expires <= next.t
+      ? { t: expires, kind: 'tick', playheads: {} }
+      : events[i++];
+    for (const ch of ALL_DECKS) {
+      const d = s.decks[ch];
+      if (d.scratch) {
+        const loop = deckScratchMotion(d).loop;
+        if (wraps.get(ch) === e.t && loop) {
+          const forward = (d.scratch.rate || d.scratch.drive) > 0;
+          sampleTrace(ch, e.t, forward ? loop.end : loop.start, false, true);
+          breakTrace(ch);
+          sampleTrace(ch, e.t, forward ? loop.start : loop.end, false, true);
+        } else sampleTrace(ch, e.t, deckPlayheadAt(d, e.t), false, true);
+      }
+    }
     // Pre-event playhead for the affected deck: seek-class gestures must
     // CLOSE the old trace at the jump instant (extrapolated), not at the
     // last tick — otherwise every jump leaves an up-to-1s waveform gap.
@@ -278,12 +351,12 @@ export function deriveTimeline(
     // is common and must not emit thousands of markers).
     let jogRef: number | null = null;
     if (
-      e.kind === 'transport' &&
-      (e.action === 'seek' || e.action === 'jumpBeats' || e.action === 'hotCue')
+      e.kind === 'loop' || (e.kind === 'transport' &&
+      (e.action === 'seek' || e.action === 'jumpBeats' || e.action === 'hotCue'))
     ) {
       const d = s.decks[e.channel];
-      if (d.playing || d.previewing) {
-        preJump = d.playhead + (e.t - d.playheadAt) * (1 + d.pitch / 100);
+      if (d.playing || d.previewing || d.scratch) {
+        preJump = deckPlayheadAt(d, e.t);
         jogRef = preJump;
       } else {
         jogRef = d.playhead;
@@ -327,12 +400,27 @@ export function deriveTimeline(
     if (e.kind === 'tick') {
       for (const ch of ALL_DECKS) {
         const p = e.playheads[ch];
-        if (p !== undefined && (s.decks[ch].playing || s.decks[ch].previewing)) {
-          sampleTrace(ch, e.t, p);
+        if (p !== undefined && (s.decks[ch].playing || s.decks[ch].previewing || s.decks[ch].scratch)) {
+          sampleTrace(ch, e.t, s.decks[ch].scratch ? deckPlayheadAt(s.decks[ch], e.t) : p,
+            false, s.decks[ch].scratch !== null);
         }
       }
+    } else if (e.kind === 'loop') {
+      if (preJump !== null && Math.abs(e.playhead - preJump) > 1e-6) {
+        sampleTrace(e.channel, e.t, preJump);
+        breakTrace(e.channel);
+      }
+      if (s.decks[e.channel].playing || s.decks[e.channel].previewing) {
+        sampleTrace(e.channel, e.t, e.playhead);
+      }
     } else if (e.kind === 'transport') {
-      if (e.action === 'play' || e.action === 'previewStart') {
+      if (e.action === 'scratchBegin' || e.action === 'scratchMove') {
+        sampleTrace(e.channel, e.t, e.playhead, false, true);
+      } else if (e.action === 'scratchEnd') {
+        // The resolved slip landing is a discontinuity, not forward motion.
+        breakTrace(e.channel);
+        if (s.decks[e.channel].playing) sampleTrace(e.channel, e.t, e.playhead);
+      } else if (e.action === 'play' || e.action === 'previewStart') {
         sampleTrace(e.channel, e.t, e.playhead);
         // Cue-press marker (sessions 11): a main-cue stab launch IS a CUE
         // press — mark it like return-to-cue (▲). Hot-cue stabs already get
@@ -411,6 +499,34 @@ export function deriveTimeline(
       }
     }
 
+    // Beat FX spans (#354): ON with an effect selected, keyed by target.
+    if (e.kind === 'beatFx' && s.beatFx) {
+      const fx = s.beatFx;
+      const active = fx.on && fx.selected !== null;
+      if (openFx && (!active || openFx.target !== fx.target || openFx.effect !== fx.selected)) {
+        closeFx(e.t);
+      }
+      if (active && fx.selected !== null) {
+        if (!openFx) {
+          openFx = {
+            start: e.t,
+            end: e.t,
+            target: fx.target,
+            effect: fx.selected,
+            lengthUnit: beatFxLengthUnit(fx.selected, (s.beatFxSettings ?? DEFAULT_BEAT_FX_SETTINGS).flangerLengthUnit),
+            steps: [{ t: e.t, depth: fx.depth, beats: fx.beats }],
+            open: true,
+          };
+        } else {
+          const last = openFx.steps[openFx.steps.length - 1];
+          if (last.depth !== fx.depth || last.beats !== fx.beats) {
+            if (last.t === e.t) openFx.steps[openFx.steps.length - 1] = { t: e.t, depth: fx.depth, beats: fx.beats };
+            else openFx.steps.push({ t: e.t, depth: fx.depth, beats: fx.beats });
+          }
+        }
+      }
+    }
+
     // Tenure holds.
     if (e.kind === 'tenure') {
       if (e.edge === 'start' && openTenure === null) {
@@ -427,7 +543,7 @@ export function deriveTimeline(
     // suspends identically — one gate, audibilityReducer.ts).
     let audibleCount = 0;
     for (const ch of ALL_DECKS) {
-      const a = maskedDeckAudible(s, ch);
+      const a = sessionDeckAudible(s, ch);
       if (a) audibleCount += 1;
       audible[ch].set(a, e.t);
       playing[ch].set(s.decks[ch].playing, e.t);
@@ -458,6 +574,10 @@ export function deriveTimeline(
   if (openTenure !== null) {
     tenures.push({ start: openTenure.since, end, holder: openTenure.holder, open: true });
   }
+  {
+    const fx = openFx as FxSpan | null;
+    if (fx && end > fx.start) fxSpans.push({ ...fx, end, open: true });
+  }
 
   const decks = Object.fromEntries(
     ALL_DECKS.map((ch) => {
@@ -487,14 +607,15 @@ export function deriveTimeline(
 
   // Distinct Master-audible Tracks (the Sessions-list "Tracks" count): a
   // Track counts iff its tenure on a deck overlapped that deck's
-  // audibility (which already excludes cue/PFL, loaded-silent, kills, and
+  // audibility (which already excludes PFL-only, loaded-silent, kills, and
   // tenure-masked stretches). One definition, reused — no divergence.
-  const audibleTrackIds = new Set<number>();
+  const firstAudible = new Map<number, number>();
   for (const ch of ALL_DECKS) {
     for (const span of trackSpans[ch]) {
-      if (audibleTrackIds.has(span.trackId)) continue;
-      if (audible[ch].spans.some((a) => a.start < span.end && a.end > span.start)) {
-        audibleTrackIds.add(span.trackId);
+      const heard = audible[ch].spans.find((a) => a.start < span.end && a.end > span.start);
+      if (heard) {
+        firstAudible.set(span.trackId, Math.min(firstAudible.get(span.trackId) ?? Infinity,
+          Math.max(span.start, heard.start)));
       }
     }
   }
@@ -504,10 +625,15 @@ export function deriveTimeline(
     end,
     decks,
     tenures,
-    idle: idle.spans,
+    // Keep the grace on the visible timeline, rather than backdating idle
+    // to the pause once the grace expires. Works for sparse logs too.
+    idle: idle.spans
+      .filter(span => span.end - span.start > IDLE_GRACE_S)
+      .map(span => ({ start: span.start + IDLE_GRACE_S, end: span.end })),
     overlaps: overlap.spans,
+    fxSpans,
     trackIds: [...trackIds],
-    audibleTrackIds: [...audibleTrackIds],
+    audibleTrackIds: [...firstAudible].sort((a, b) => a[1] - b[1]).map(([id]) => id),
     eventCount: events.length,
   };
 }
@@ -517,6 +643,11 @@ export function deriveTimeline(
 export interface DeckStateAtT {
   trackId: number | null;
   playing: boolean;
+  scratching: boolean;
+  scratch: ScratchFilter | null;
+  slipMode: boolean;
+  vinylMode: boolean;
+  loop: { start: number; end: number } | null;
   audible: boolean;
   /** Master-bus gain right now. */
   gain: number;
@@ -527,6 +658,8 @@ export interface DeckStateAtT {
   eq: { low: number; mid: number; high: number };
   filter: number;
   assignment: CrossfaderAssignment;
+  /** Per-stem enables (stems #212); all-on before any stem event. */
+  stems: { vocals: boolean; drums: boolean; bass: boolean; other: boolean };
   pitch: number;
 }
 
@@ -536,6 +669,8 @@ export interface StateAtT {
   crossfader: number;
   crossfaderEnabled: boolean;
   tenureHolder: string | null;
+  /** Beat FX section at T (#351); null = the log carries no FX evidence. */
+  beatFx: BeatFxSectionState | null;
   /** Events at or before T / strictly after T (replay fires the latter). */
   eventsBefore: number;
   eventsAfter: number;
@@ -567,6 +702,7 @@ function snapshotState(
   before: number,
   total: number
 ): StateAtT {
+  advanceClock(s, t);
   const decks = Object.fromEntries(
     ALL_DECKS.map((ch) => {
       const d = s.decks[ch];
@@ -574,14 +710,18 @@ function snapshotState(
       // per wall-sec. Rate-blind extrapolation seeded replays with a
       // per-deck phase error ∝ (T − last tick) × pitch — the "blend isn't
       // beatmatched, differently every time" bug.
-      const rate = 1 + d.pitch / 100;
-      const extrapolated = d.playing ? d.playhead + (t - d.playheadAt) * rate : d.playhead;
+      const extrapolated = deckPlayheadAt(d, t);
       return [
         ch,
         {
           trackId: d.trackId,
           playing: d.playing,
-          audible: maskedDeckAudible(s, ch),
+          scratching: d.scratch !== null,
+          scratch: d.scratch ? { ...d.scratch } : null,
+          slipMode: d.slipMode,
+          vinylMode: d.vinylMode,
+          loop: d.loop ? { ...d.loop } : null,
+          audible: sessionDeckAudible(s, ch),
           gain: deckGain(s, ch),
           playhead: Math.max(0, extrapolated),
           fader: d.fader,
@@ -590,6 +730,7 @@ function snapshotState(
           filter: d.filter,
           assignment: d.assignment,
           pitch: d.pitch,
+          stems: { ...d.stems },
         },
       ];
     })
@@ -600,6 +741,7 @@ function snapshotState(
     crossfader: s.crossfader,
     crossfaderEnabled: s.crossfaderEnabled,
     tenureHolder: s.tenureHolder,
+    beatFx: s.beatFx,
     eventsBefore: before,
     eventsAfter: total - before,
   };
@@ -802,27 +944,35 @@ export function buildTimeAxis(
   const tToPx = (t: number): number => {
     if (segments.length === 0) return 0;
     if (t <= segments[0].start) return 0;
-    for (const seg of segments) {
-      if (t <= seg.end) {
-        if (seg.collapsed) return (seg.px0 + seg.px1) / 2;
-        const dur = seg.end - seg.start;
-        return dur <= 0 ? seg.px0 : seg.px0 + ((t - seg.start) / dur) * (seg.px1 - seg.px0);
-      }
+    let lo = 0;
+    let hi = segments.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (segments[mid].end < t) lo = mid + 1;
+      else hi = mid;
     }
-    return totalPx;
+    const seg = segments[lo];
+    if (!seg) return totalPx;
+    if (seg.collapsed) return (seg.px0 + seg.px1) / 2;
+    const dur = seg.end - seg.start;
+    return dur <= 0 ? seg.px0 : seg.px0 + ((t - seg.start) / dur) * (seg.px1 - seg.px0);
   };
 
   const pxToT = (xq: number): number => {
     if (segments.length === 0) return 0;
     if (xq <= 0) return segments[0].start;
-    for (const seg of segments) {
-      if (xq <= seg.px1) {
-        if (seg.collapsed) return seg.start;
-        const w = seg.px1 - seg.px0;
-        return w <= 0 ? seg.start : seg.start + ((xq - seg.px0) / w) * (seg.end - seg.start);
-      }
+    let lo = 0;
+    let hi = segments.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (segments[mid].px1 < xq) lo = mid + 1;
+      else hi = mid;
     }
-    return segments[segments.length - 1].end;
+    const seg = segments[lo];
+    if (!seg) return segments[segments.length - 1].end;
+    if (seg.collapsed) return seg.start;
+    const w = seg.px1 - seg.px0;
+    return w <= 0 ? seg.start : seg.start + ((xq - seg.px0) / w) * (seg.end - seg.start);
   };
 
   return { segments, tToPx, pxToT, totalPx, visibleDurationS, pxPerSec };
@@ -847,27 +997,102 @@ interface TakeWindow {
 
 /** The track spans a Take's outgoing (a) and incoming (b) Tracks occupied
  * during its window — chip coloring + hover spotlight (sessions 22). A
- * Track is matched by its tenure overlapping the window; null when the
- * log doesn't show it (e.g. a manual Take against a truncated log). */
+ * Track is matched by its tenure overlapping the window; when the same
+ * Track sits loaded on multiple decks (one copy silent), the AUDIBLE
+ * copy wins — the deck the Take's events actually rode, not whichever
+ * deck happens first in A–D order (gh#184). Null when the log doesn't
+ * show it (e.g. a manual Take against a truncated log). */
 export function takeSpanPair(
   model: TimelineModel,
   take: TakeWindow
 ): { from: TakeSpanRef | null; to: TakeSpanRef | null } {
-  const find = (trackId: number): TakeSpanRef | null => {
-    for (const ch of ALL_DECKS) {
-      for (const span of model.decks[ch].trackSpans) {
-        if (
-          span.trackId === trackId &&
-          span.start < take.window_end_s &&
-          span.end > take.window_start_s
-        ) {
-          return { deck: ch, start: span.start, end: span.end };
+  return {
+    from: trackSpanRef(model, take.a_track_id, take.window_start_s, take.window_end_s),
+    to: trackSpanRef(model, take.b_track_id, take.window_start_s, take.window_end_s),
+  };
+}
+
+/** The track span (deck tenure) that carried `trackId` during a window —
+ * the audible-copy-wins rule shared by Take chips and Routine casts
+ * (gh#184). Null when the log doesn't show the track in the window. */
+function trackSpanRef(
+  model: TimelineModel,
+  trackId: number,
+  windowStartS: number,
+  windowEndS: number
+): TakeSpanRef | null {
+  let best: TakeSpanRef | null = null;
+  let bestAudible = -1;
+  for (const ch of ALL_DECKS) {
+    for (const span of model.decks[ch].trackSpans) {
+      if (span.trackId === trackId && span.start < windowEndS && span.end > windowStartS) {
+        // Audible seconds this copy contributed inside the window ∩ span:
+        // the copy that actually sounded through the transition wins.
+        const w0 = Math.max(span.start, windowStartS);
+        const w1 = Math.min(span.end, windowEndS);
+        let audible = 0;
+        for (const a of model.decks[ch].audibleSpans) {
+          audible += Math.max(0, Math.min(a.end, w1) - Math.max(a.start, w0));
+        }
+        if (audible > bestAudible) {
+          bestAudible = audible;
+          best = { deck: ch, start: span.start, end: span.end };
         }
       }
     }
-    return null;
-  };
-  return { from: find(take.a_track_id), to: find(take.b_track_id) };
+  }
+  return best;
+}
+
+/** The track spans a Routine cast occupied during its window — one ref
+ * per resolvable cast track (gh#187: the routine-band hover spotlight,
+ * parity with `takeSpanPair`). Unresolvable tracks are skipped. */
+export function castSpanRefs(
+  model: TimelineModel,
+  cast: readonly number[],
+  windowStartS: number,
+  windowEndS: number
+): TakeSpanRef[] {
+  const out: TakeSpanRef[] = [];
+  for (const trackId of cast) {
+    const ref = trackSpanRef(model, trackId, windowStartS, windowEndS);
+    if (ref) out.push(ref);
+  }
+  return out;
+}
+
+// ── Candidate ↔ Routine Take dedupe (gh#187) ─────────────────────────────
+
+interface RoutineWindow {
+  window_start_s: number;
+  window_end_s: number;
+  cast: readonly number[];
+}
+
+/** Does a mined candidate duplicate a confirmed Routine Take's span?
+ *
+ * Re-mining replaces a Session's candidate rows wholesale with FRESH
+ * uuids, so a confirmed take's `origin_candidate_uuid` dangles and the
+ * uuid-based "already confirmed" filter misses the re-mined twin — it
+ * stacked as a dashed ⧉ band under the confirmed ◆ (gh#187). Identity is
+ * therefore span-shaped: heavy time overlap (≥50% of the shorter window
+ * — confirms trim inside the miner window, and re-mines shift bounds)
+ * plus ≥2 shared cast tracks (adjacent DISTINCT candidates share at most
+ * the one handover track, so they survive). */
+export function candidateDupesTake(candidate: RoutineWindow, take: RoutineWindow): boolean {
+  const overlap =
+    Math.min(candidate.window_end_s, take.window_end_s) -
+    Math.max(candidate.window_start_s, take.window_start_s);
+  if (overlap <= 0) return false;
+  const shorter = Math.min(
+    candidate.window_end_s - candidate.window_start_s,
+    take.window_end_s - take.window_start_s
+  );
+  if (overlap < 0.5 * shorter) return false;
+  const takeCast = new Set(take.cast);
+  let shared = 0;
+  for (const id of candidate.cast) if (takeCast.has(id)) shared++;
+  return shared >= 2;
 }
 
 /** Deck-only view of `takeSpanPair` (the chip gradient's endpoints). */

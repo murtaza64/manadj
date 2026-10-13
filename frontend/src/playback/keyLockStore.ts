@@ -8,6 +8,7 @@
  * mode); this store is the persistence + boot-restore face. DeckContext
  * applies it at engine creation; the MixZone toggle writes both.
  */
+import { writeSetting } from '../settings/persistedSettings';
 import type { ChannelId } from './mixer';
 
 export type KeyLockFlags = Record<ChannelId, boolean>;
@@ -27,11 +28,8 @@ function loadFlags(): KeyLockFlags {
 }
 
 function saveFlags(next: KeyLockFlags): void {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-  } catch {
-    // persistence is best-effort; the session keeps its setting
-  }
+  // Write-through (settings #176): DB + localStorage cache, best-effort.
+  writeSetting(STORAGE_KEY, JSON.stringify(next));
 }
 
 let flags: KeyLockFlags = loadFlags();

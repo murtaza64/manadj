@@ -1,8 +1,8 @@
 .track-discrepancy-container {
   display: flex;
   flex-direction: column;
-  gap: 24px;
-  padding: 20px;
+  gap: var(--space-24);
+  padding: var(--space-16);
   overflow-y: auto;
   flex: 1;
   min-height: 0;
@@ -11,24 +11,24 @@
 .discrepancy-section {
   background: var(--mantle);
   border: 1px solid var(--surface0);
-  padding: 16px;
+  padding: var(--space-16);
 }
 
 .discrepancy-section h3 {
-  margin: 0 0 8px 0;
+  margin: 0 0 var(--space-8) 0;
   color: var(--text);
-  font-size: var(--font-md);
+  font-size: var(--font-title);
 }
 
 .discrepancy-subtitle {
   color: var(--subtext1);
-  font-size: var(--font-xs);
-  margin-bottom: 16px;
+  font-size: var(--font-body);
+  margin-bottom: var(--space-16);
 }
 
 .empty-state {
   color: var(--overlay1);
-  font-size: var(--font-sm);
+  font-size: var(--font-large);
   padding: 40px;
   text-align: center;
   background: var(--base);
@@ -39,7 +39,7 @@
   width: 100%;
   border-collapse: collapse;
   background: var(--base);
-  font-size: var(--font-xs);
+  font-size: var(--font-body);
 }
 
 .discrepancy-table thead {
@@ -50,7 +50,7 @@
 }
 
 .discrepancy-table th {
-  padding: 10px 12px;
+  padding: var(--space-8) var(--space-12);
   text-align: left;
   color: var(--subtext1);
   font-weight: 600;
@@ -66,13 +66,12 @@
 }
 
 .discrepancy-table td {
-  padding: 10px 12px;
+  padding: var(--space-8) var(--space-12);
   color: var(--text);
 }
 
 .discrepancy-table td.filename {
-  font-family: 'UbuntuMono Nerd Font', monospace;
-  color: var(--blue);
+  color: var(--accent);
   max-width: 400px;
   overflow: hidden;
   text-overflow: ellipsis;

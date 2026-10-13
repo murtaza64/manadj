@@ -75,6 +75,20 @@ Requires new manadj functionality: browse-area focus ring and a
 sidebar browse surface (navigate/activate) — the sidebar is pointer-only
 today.
 
+## Decided — Groove Circuit: DRUM SWAP pads (2026-10-06)
+
+Repurposed to the stems gesture class (stems #210): DRUM SWAP 1–4 =
+STEM_NAMES order (vocals, drums, bass, other) per deck side.
+
+- Pad press toggles the stem (kill/restore); Shift+pad solos it
+  (soloing the already-soloed stem restores all-on — `stem-solo`
+  action, mixer.soloStem).
+- Feedback: pads mirror the effective stem mask (automation lane wins),
+  dark when the Track has no stems; the shift layer mirrors the base.
+- Section scope note: the pads are channel-fixed to their deck side like
+  the mixer strips — no control-focus retargeting.
+- GAIN, CAPTURE, DRUM ROLL 1–4, DRUM RELEASE stay reserved.
+
 ## Track linking — candidates, decide on hardware
 
 Linked semantics per the linked-pairs PRD (symmetric, unordered, toggle;
@@ -105,10 +119,10 @@ Linked; the favorited-but-unlinked hint stays screen-only.
 
 ## Open questions
 
-- Groove Circuit: entire section open. Proposed but undecided: DRUM RELEASE
-  lever → Nudge (gesture shapes match exactly: spring-loaded momentary,
-  auto-restore). GAIN, DRUM SWAP 1–4, CAPTURE, DRUM ROLL 1–4 lean
-  reserved — candidate future home for phase-4 Set playback controls
+- Groove Circuit: DRUM SWAP 1–4 bound to stems (see Decided above).
+  Still open: DRUM RELEASE lever → Nudge (gesture shapes match exactly:
+  spring-loaded momentary, auto-restore). GAIN, CAPTURE, DRUM ROLL 1–4
+  lean reserved — candidate future home for phase-4 Set playback controls
   (Pickup wants a lit button).
 - Beat FX section (SELECT, CH SELECT, LEVEL/DEPTH, ON/OFF, BEAT ◄ ►);
   Sound Color FX ON/OFF button.

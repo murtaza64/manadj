@@ -1,10 +1,23 @@
 const { contextBridge, ipcRenderer } = require("electron");
 
+contextBridge.exposeInMainWorld("manadjFeedback", {
+  captureScreenshot: () => ipcRenderer.invoke("feedback:capture"),
+});
+
 contextBridge.exposeInMainWorld("manadjVisualizer", {
   displays: () => ipcRenderer.invoke("visualizer:displays"),
   fullscreenOn: (displayId) => ipcRenderer.invoke("visualizer:fullscreen", displayId),
   windowed: () => ipcRenderer.invoke("visualizer:windowed"),
   toggleFullscreen: () => ipcRenderer.invoke("visualizer:toggle-fullscreen"),
+});
+
+contextBridge.exposeInMainWorld("manadjSettings", {
+  // Settings → Library folder pickers (packaged-app #277). Resolves to the
+  // chosen absolute path, or null when cancelled.
+  pickFolder: (options) => ipcRenderer.invoke("settings:pick-folder", options),
+  // Open an https URL in the system browser (Spotify sign-in #347: the
+  // user's browser already holds their Spotify session).
+  openExternal: (url) => ipcRenderer.invoke("settings:open-external", url),
 });
 
 contextBridge.exposeInMainWorld("manadjRecording", {
@@ -15,4 +28,11 @@ contextBridge.exposeInMainWorld("manadjRecording", {
   stop: (id) => ipcRenderer.invoke("recording:stop", id),
   save: (request) => ipcRenderer.invoke("recording:save", request),
   discard: (id) => ipcRenderer.invoke("recording:discard", id),
+});
+
+// Drop import (#297): absolute paths for files/folders dragged in from the
+// filesystem (File.path is gone since Electron 32).
+const { webUtils } = require("electron");
+contextBridge.exposeInMainWorld("manadjFiles", {
+  pathForFile: (file) => webUtils.getPathForFile(file),
 });

@@ -10,6 +10,7 @@ import { DEFAULT_DETECTOR_PARAMS, DETECTOR_VERSION } from './events';
 import type { CaptureDeck, CaptureEvent, DetectedTake } from './events';
 import { initialCaptureState, reduceCapture } from './detector';
 import type { CaptureState } from './detector';
+import { DEFAULT_BEAT_FX_SETTINGS } from '../playback/beatFxSettings';
 
 /** Tiny stream DSL: absolute-time cursor, 1 Hz ticks via advance(). */
 function script() {
@@ -136,26 +137,100 @@ describe('clean blend', () => {
   });
 });
 
+describe('entry onset (#178): the window starts at the entry gesture', () => {
+  it('hot entry — fader standing, transport start later: onset at the play event', () => {
+    const s = incumbentA();
+    s.at(10).fader('B', 1); // fader standing, deck not yet playing
+    s.at(13).play('B').advance(10).at(25).fader('A', 0).advance(HORIZON + 1);
+    const { takes } = run(s.events());
+    expect(takes).toHaveLength(1);
+    expect(takes[0].windowStartS).toBe(13);
+    expect(takes[0].windowEndS).toBe(25);
+  });
+
+  it('play-then-slam: backdates to the first sound, not the audibleGain crossing', () => {
+    const s = incumbentA();
+    // B starts silent (fader 0), then the fader slams up in steps: first
+    // sound at 12 (gain ~5e-5), the audibleGain crossing at 12.6. The
+    // Reflexion→Higher defect: windows opened at the crossing, clipping
+    // the incoming's first 1–2 beats.
+    s.at(11).play('B');
+    s.at(12).fader('B', 0.01).at(12.3).fader('B', 0.2).at(12.6).fader('B', 0.5);
+    s.advance(8).at(21).fader('A', 0).advance(HORIZON + 1);
+    const { takes } = run(s.events());
+    expect(takes).toHaveLength(1);
+    expect(takes[0].windowStartS).toBe(12);
+    expect(takes[0].windowEndS).toBe(21);
+  });
+
+  it('the backdate is capped at entryBackdateMaxS', () => {
+    const s = incumbentA();
+    // B whispers far below audibleGain for 10s (sounding clock open),
+    // then slams to full: the window may reach back only the cap.
+    s.at(10).play('B').fader('B', 0.05);
+    s.advance(9);
+    s.at(20).fader('B', 1).advance(5).at(26).fader('A', 0).advance(HORIZON + 1);
+    const { takes } = run(s.events());
+    expect(takes).toHaveLength(1);
+    expect(takes[0].windowStartS).toBe(20 - DEFAULT_DETECTOR_PARAMS.entryBackdateMaxS);
+  });
+
+  it('crossfader-driven entry backdates to the crossfader gesture start', () => {
+    const s = incumbentA();
+    s.at(5).crossfader(-1); // hard left: B's side fully killed
+    s.at(10).fader('B', 1).play('B'); // playing, fader up — still silent
+    s.at(15).crossfader(-0.99); // the ride begins: first sound
+    s.at(16).crossfader(0); // gain crosses audibleGain mid-ride
+    s.advance(5).at(22).fader('A', 0).advance(HORIZON + 1);
+    const { takes } = run(s.events());
+    expect(takes).toHaveLength(1);
+    expect(takes[0].windowStartS).toBe(15);
+    expect(takes[0].windowEndS).toBe(22);
+  });
+
+  it('an overlap cannot predate the incumbent\'s own audibility', () => {
+    // Both decks rise together out of silence: the incumbent (first to
+    // cross) bounds the backdate.
+    const s = script()
+      .at(0).load('A', 1).load('B', 2)
+      .fader('A', 0).fader('B', 0)
+      .play('A').play('B').advance(3);
+    s.at(10).fader('A', 0.01).fader('B', 0.01); // both first sound at 10
+    s.at(11).fader('A', 1); // A crosses first: incumbent since 11
+    s.at(12).fader('B', 1); // B crosses: onset floored at the incumbent's 11
+    s.advance(5).at(18).fader('A', 0).advance(HORIZON + 1);
+    const { takes } = run(s.events());
+    expect(takes).toHaveLength(1);
+    expect(takes[0].windowStartS).toBe(11);
+  });
+});
+
 describe('hard cut', () => {
-  it('a crossfader flick (zero overlap) is a Handover', () => {
+  it('a crossfader flick (zero overlap, same instant) is a Handover', () => {
     const s = incumbentA();
     s.at(5).crossfader(-1); // full A
     s.at(10).fader('B', 1); // B faded up but crossfader-killed, not yet playing
     s.at(20).crossfader(1).play('B'); // the flick: A killed, B in — same instant
     const { takes } = run(s.at(20).advance(HORIZON + 1).events());
     expect(takes).toHaveLength(1);
+    // Cessation and onset coincide, so the window is that instant — the one
+    // legitimately degenerate case (a literal same-frame flick).
     expect(takes[0].windowStartS).toBe(20);
     expect(takes[0].windowEndS).toBe(20);
     expect(takes[0].confidence).toBe(0.7);
   });
 
-  it('cessation-then-onset within the cut gap is one Handover, anchored at the cut', () => {
+  it('cessation-then-onset within the cut gap spans the cut ramp, never zero-length (#138)', () => {
+    // The Take-960 defect: a fader chop drops the outgoing, the incoming
+    // arrives a beat later. The window must span the cut ramp (cessation →
+    // incoming onset), not collapse to a single instant.
     const s = incumbentA();
     s.at(20).fader('A', 0).at(21).play('B').fader('B', 1).advance(HORIZON + 1);
     const { takes } = run(s.events());
     expect(takes).toHaveLength(1);
-    expect(takes[0].windowStartS).toBe(20);
-    expect(takes[0].windowEndS).toBe(20);
+    expect(takes[0].windowStartS).toBe(20); // outgoing cessation
+    expect(takes[0].windowEndS).toBe(21); // incoming onset
+    expect(takes[0].windowEndS).toBeGreaterThan(takes[0].windowStartS);
   });
 
   it('a gap longer than the cut gap is silence between tracks, not a Handover', () => {
@@ -163,6 +238,76 @@ describe('hard cut', () => {
     s.at(20).fader('A', 0).at(26).play('B').fader('B', 1).advance(HORIZON + 1);
     const { takes } = run(s.events());
     expect(takes).toHaveLength(0);
+  });
+});
+
+describe('cut-window hygiene (#138 defect 1: never zero-length)', () => {
+  it('a fader chop then the incoming a fraction later spans the ramp, not a point', () => {
+    // The real repro (Take 960, session 19 @72572.5): the outgoing is
+    // fader-chopped to silence, the incoming ramps up ~0.3s later. The
+    // window must span that cut ramp.
+    const s = incumbentA();
+    s.at(20).fader('A', 0); // outgoing cessation
+    s.at(20.3).play('B').fader('B', 1); // incoming onset within the cut gap
+    s.advance(HORIZON + 1);
+    const { takes } = run(s.events());
+    expect(takes).toHaveLength(1);
+    expect(takes[0].windowStartS).toBe(20);
+    expect(takes[0].windowEndS).toBeCloseTo(20.3, 6);
+    expect(takes[0].windowEndS).toBeGreaterThan(takes[0].windowStartS);
+    expect(takes[0].confidence).toBe(0.7); // sub-second overlap tier
+  });
+
+  it('a deck-agnostic cut (B out, D in) also gets a non-degenerate window', () => {
+    // Take 960 traded on B→D, not A→B — the fix is per unordered pair.
+    const s = script().at(0).load('B', 191).load('D', 597).fader('D', 0).play('B').advance(10);
+    s.at(20).fader('B', 0); // Under the Waves out
+    s.at(20.3).play('D').fader('D', 1); // Sovereign in
+    s.advance(HORIZON + 1);
+    const { takes } = run(s.events());
+    expect(takes).toHaveLength(1);
+    expect(takes[0].outgoingTrackId).toBe(191);
+    expect(takes[0].incomingTrackId).toBe(597);
+    expect(takes[0].outgoingDeck).toBe('B');
+    expect(takes[0].incomingDeck).toBe('D');
+    expect(takes[0].windowEndS).toBeGreaterThan(takes[0].windowStartS);
+  });
+});
+
+describe('one engagement, one Take per ordered pair (#138 defect 2)', () => {
+  it('an outgoing flicker across the horizon settles the pair once, not twice', () => {
+    // The real repro (session 19, Bangarang→Full Send twice): the outgoing
+    // briefly re-departs and returns while the incoming stays; the machine
+    // must not settle the same ordered pair a second time.
+    const s = incumbentA();
+    s.at(10).play('B').fader('B', 1); // engagement 1→2 opens
+    s.at(20).fader('A', 0); // outgoing dips out...
+    s.at(23).fader('A', 1); // ...and returns within the horizon (folds)
+    s.at(30).fader('A', 0); // final cessation
+    s.advance(HORIZON + 1);
+    const { takes } = run(s.events());
+    expect(takes).toHaveLength(1);
+    expect(takes[0].outgoingTrackId).toBe(1);
+    expect(takes[0].incomingTrackId).toBe(2);
+    expect(takes[0].windowStartS).toBe(10);
+    expect(takes[0].windowEndS).toBe(30);
+  });
+
+  it('a genuinely separate later re-mix of the same pair is NOT suppressed', () => {
+    // The guard is horizon-scoped: a real second mix of the same ordered
+    // pair, well past the settle horizon, is its own Handover.
+    const s = incumbentA();
+    // Take 1→2 #1: B mixes in, A out.
+    s.at(10).play('B').fader('B', 1).at(20).fader('A', 0).advance(HORIZON + 1);
+    // Re-establish track 1 as the floor: A fades back in, B out — a 2→1
+    // Handover well past the horizon.
+    s.at(60).fader('A', 1).at(70).fader('B', 0).advance(HORIZON + 1);
+    // Take 1→2 #2: B mixes in again, A out.
+    s.at(100).fader('B', 1).at(110).fader('A', 0).advance(HORIZON + 1);
+    const { takes } = run(s.events());
+    const oneToTwo = takes.filter((t) => t.outgoingTrackId === 1 && t.incomingTrackId === 2);
+    expect(oneToTwo).toHaveLength(2);
+    expect(oneToTwo[1].windowEndS - oneToTwo[0].windowEndS).toBeGreaterThan(HORIZON);
   });
 });
 
@@ -179,12 +324,19 @@ describe('cross-cuts fold (dnb teases, double drops)', () => {
     expect(takes[0].windowEndS).toBe(20);
   });
 
-  it('a tease where the outgoing survives is no Handover at all', () => {
+  it('a tease where the outgoing survives is no Handover — it is a GUEST engagement (#140)', () => {
     const s = incumbentA();
-    // B in for 3s, bailed back out; A plays on.
+    // B in for 3s, bailed back out; A plays on: the survivor rule's
+    // second verdict — a Cameo Take, not silence.
     s.at(10).play('B').fader('B', 1).at(13).fader('B', 0).advance(HORIZON + 2);
     const { state, takes } = run(s.events());
-    expect(takes).toHaveLength(0);
+    expect(takes).toHaveLength(1);
+    const take = takes[0];
+    expect(take.kind).toBe('guest');
+    expect(take.outgoingTrackId).toBe(1); // host = the survivor
+    expect(take.incomingTrackId).toBe(2); // guest = the visitor
+    expect(take.windowStartS).toBe(10); // engagement open
+    expect(take.windowEndS).toBe(13); // the guest's final cessation
     expect(state.pairs.AB.incumbent).toBe('A'); // A still owns the floor
   });
 
@@ -197,6 +349,98 @@ describe('cross-cuts fold (dnb teases, double drops)', () => {
     expect(takes).toHaveLength(1);
     expect(takes[0].windowStartS).toBe(10);
     expect(takes[0].windowEndS).toBe(24);
+  });
+});
+
+describe('the Guest-engagement verdict (#140 — Cameo Takes)', () => {
+  it('two teases of the same pair are two engagements, two Cameo Takes', () => {
+    const s = incumbentA();
+    s.at(10).fader('B', 1).play('B').at(13).fader('B', 0); // tease 1
+    s.advance(HORIZON + 2); // settles as guest
+    s.at(30).fader('B', 1).at(35).fader('B', 0); // tease 2 (B still playing)
+    s.advance(HORIZON + 2);
+    const { takes } = run(s.events());
+    expect(takes.map((t) => t.kind)).toEqual(['guest', 'guest']);
+    expect(takes[0].windowStartS).toBe(10);
+    expect(takes[0].windowEndS).toBe(13);
+    expect(takes[1].windowStartS).toBe(30);
+    expect(takes[1].windowEndS).toBe(35);
+    // Distinct engagements — distinct identities.
+    expect(takes[0].engagementUuid).not.toBe(takes[1].engagementUuid);
+  });
+
+  it('guest cross-cut gaps fold into ONE Cameo Take (dnb tease in and out)', () => {
+    const s = incumbentA();
+    s.at(10).play('B').fader('B', 1); // in
+    s.at(13).fader('B', 0); // out (gap < horizon)
+    s.at(16).fader('B', 1); // back — folds
+    s.at(20).fader('B', 0).advance(HORIZON + 2); // final out
+    const { takes } = run(s.events());
+    expect(takes).toHaveLength(1);
+    expect(takes[0].kind).toBe('guest');
+    expect(takes[0].windowStartS).toBe(10);
+    expect(takes[0].windowEndS).toBe(20); // the guest's FINAL cessation
+  });
+
+  it('a Load after the tease ends settles the Guest engagement eagerly', () => {
+    const s = incumbentA();
+    s.at(10).play('B').fader('B', 1).at(13).fader('B', 0);
+    s.at(15).load('B', 5); // next tune onto the guest deck, inside the horizon
+    s.advance(1);
+    const { state, takes } = run(s.events());
+    expect(takes).toHaveLength(1);
+    expect(takes[0].kind).toBe('guest');
+    expect(takes[0].incomingTrackId).toBe(2); // the traded track, not the fresh load
+    expect(takes[0].windowEndS).toBe(13);
+    expect(state.pairs.AB.incumbent).toBe('A');
+  });
+
+  it('a mix that collapses entirely is NOT a Guest engagement', () => {
+    // Guest out at 13, host dies at 15 (inside the guest horizon): the
+    // host did not survive as current — no verdict from the guest clock.
+    const s = incumbentA();
+    s.at(10).play('B').fader('B', 1).at(13).fader('B', 0);
+    s.at(15).fader('A', 0).advance(HORIZON + 2);
+    const { takes } = run(s.events());
+    expect(takes.filter((t) => t.kind === 'guest')).toHaveLength(0);
+  });
+
+  it('a self-double against the same track settles a guest verdict', () => {
+    const s = script().at(0).load('A', 1).load('B', 1).fader('B', 0).play('A').advance(10);
+    s.at(10).play('B').fader('B', 1).at(18).fader('B', 0).advance(HORIZON + 2);
+    const { takes } = run(s.events());
+    expect(takes).toHaveLength(1);
+    expect(takes[0].kind).toBe('guest');
+    expect(takes[0].outgoingTrackId).toBe(1);
+    expect(takes[0].incomingTrackId).toBe(1);
+  });
+
+  it('PFL stays invisible: a cue-only audition settles nothing', () => {
+    const s = incumbentA();
+    s.at(10).pfl('B', true).at(20).pfl('B', false).advance(HORIZON + 2);
+    const { takes } = run(s.events());
+    expect(takes).toHaveLength(0);
+  });
+
+  it('a chained double half-swap shares ONE engagement uuid across its verdicts', () => {
+    // A+D double; B drops in; A leaves — A→B and A→D Handovers (4dp 10)
+    // carry the same engagement identity (#140: a triple is a first-class
+    // group, not timestamp inference).
+    const s = script()
+      .at(0)
+      .load('A', 1)
+      .load('B', 2)
+      .load('D', 7)
+      .fader('B', 0)
+      .play('A')
+      .advance(5);
+    s.at(5).play('D').advance(20);
+    s.at(25).play('B').fader('B', 1).advance(2);
+    s.at(27).fader('A', 0).advance(HORIZON + 1);
+    const { takes } = run(s.events());
+    expect(takes.length).toBeGreaterThanOrEqual(2);
+    const uuids = new Set(takes.map((t) => t.engagementUuid));
+    expect(uuids.size).toBe(1);
   });
 });
 
@@ -410,6 +654,10 @@ describe('third-deck audibility does not gate the pair machine (4dp 37)', () => 
 
   it('a layer entering AND leaving mid-blend leaves the engagement intact', () => {
     // The accent-over-blend case: C stabs in for 3s inside an A→B blend.
+    // The blend settles its Handover; the stab settles a GUEST verdict on
+    // the surviving pair (B hosts C — #140; the A/C pair yields nothing:
+    // A did not survive as current past C's cessation). All verdicts of
+    // the deck-sharing engagements carry ONE engagement uuid.
     const s = script()
       .at(0)
       .load('A', 1)
@@ -422,9 +670,15 @@ describe('third-deck audibility does not gate the pair machine (4dp 37)', () => 
     s.at(12).play('C').advance(3).at(15).pause('C'); // the layer
     s.at(16).fader('A', 0).advance(HORIZON + 1);
     const { takes } = run(s.events());
-    expect(takes).toHaveLength(1);
-    expect(takes[0].outgoingTrackId).toBe(1);
-    expect(takes[0].incomingTrackId).toBe(2);
+    const handovers = takes.filter((t) => t.kind === 'handover');
+    const guests = takes.filter((t) => t.kind === 'guest');
+    expect(handovers).toHaveLength(1);
+    expect(handovers[0].outgoingTrackId).toBe(1);
+    expect(handovers[0].incomingTrackId).toBe(2);
+    expect(guests).toHaveLength(1);
+    expect(guests[0].outgoingTrackId).toBe(2); // host = the surviving B
+    expect(guests[0].incomingTrackId).toBe(3); // guest = the stab
+    expect(guests[0].engagementUuid).toBe(handovers[0].engagementUuid);
   });
 
   it('keeps every deck in the log; three audible does not suspend', () => {
@@ -545,8 +799,10 @@ describe('pairwise machines across the four decks (4dp 10)', () => {
     }
   });
 
-  it('a double collapsing back to its host emits nothing (the 76% case)', () => {
-    // A hosts; D layers in for 30s and fades back out; A plays on.
+  it('a double collapsing back to its host emits a Cameo Take (was: nothing — the 76% case)', () => {
+    // A hosts; D layers in for 30s and fades back out; A plays on. The
+    // survivor rule (#140): the host survives as current, so the double
+    // finally leaves evidence — a guest verdict, window = the engagement.
     const s = script()
       .at(0)
       .load('A', 1)
@@ -557,7 +813,14 @@ describe('pairwise machines across the four decks (4dp 10)', () => {
     s.at(10).play('D').fader('D', 1).advance(30);
     s.at(40).fader('D', 0).advance(HORIZON + 2); // layer out; A persists
     const { takes } = run(s.events());
-    expect(takes).toHaveLength(0);
+    expect(takes).toHaveLength(1);
+    expect(takes[0].kind).toBe('guest');
+    expect(takes[0].outgoingTrackId).toBe(1);
+    expect(takes[0].incomingTrackId).toBe(7);
+    expect(takes[0].windowStartS).toBe(10);
+    expect(takes[0].windowEndS).toBe(40);
+    expect(takes[0].outgoingDeck).toBe('A');
+    expect(takes[0].incomingDeck).toBe('D');
   });
 
   it('a chained-double half-swap emits both ordered-pair verdicts (A→B and A→D)', () => {
@@ -594,5 +857,131 @@ describe('pairwise machines across the four decks (4dp 10)', () => {
     s.at(20).tenure('end');
     const { takes } = run(s.events());
     expect(takes).toHaveLength(0);
+  });
+});
+
+describe('Beat FX in the Take slice (#351)', () => {
+  const section = { selected: 'echo' as const, on: true, depth: 0.5, beats: 0.5 };
+  type Fx = Extract<CaptureEvent, { kind: 'beatFx' }>;
+
+  it('stamps the open FX state on init and relabels FX targets into the role frame', () => {
+    // B is the incumbent here, so the physical→role mapping is non-trivial:
+    // outgoing B → 'A', incoming A → 'B'.
+    const s = script().at(0).load('B', 1).load('A', 2).fader('A', 0).play('B');
+    const ev = s.events();
+    ev.push({ t: 0, kind: 'beatFx', ...section, target: 'B' });
+    s.advance(10).at(10).play('A');
+    ev.push({ t: 11, kind: 'beatFx', ...section, target: 'A' });
+    s.at(12).fader('A', 1).advance(3);
+    ev.push({ t: 15, kind: 'beatFx', ...section, target: 'C' });
+    ev.push({ t: 16, kind: 'beatFx', ...section, target: 'master' });
+    s.advance(4).at(20).fader('B', 0).advance(HORIZON + 1);
+    const { takes } = run(ev);
+    expect(takes).toHaveLength(1);
+    const head = takes[0].events[0];
+    if (head.kind !== 'init') throw new Error('no init head');
+    // Open state (window start 12): FX on the INCOMING deck (physical A).
+    expect(head.beatFx).toEqual({ ...section, target: 'B' });
+    const fx = takes[0].events.filter((e): e is Fx => e.kind === 'beatFx');
+    expect(fx.map(({ target, on }) => ({ target, on }))).toEqual([
+      { target: 'B', on: true },
+      { target: 'sampler', on: false },
+      { target: 'master', on: true },
+    ]);
+  });
+
+  it('omits beatFx from init when no FX state was ever logged', () => {
+    const s = incumbentA();
+    s.at(10).play('B').at(12).fader('B', 1).advance(8).at(20).fader('A', 0).advance(HORIZON + 1);
+    const head = run(s.events()).takes[0].events[0];
+    expect(head.kind === 'init' && 'beatFx' in head).toBe(false);
+  });
+});
+
+describe('Beat FX tails count as audible (#355)', () => {
+  type Fx = Extract<CaptureEvent, { kind: 'beatFx' }>;
+  const echo = (t: number, patch: Partial<Fx> = {}): Fx => ({
+    t, kind: 'beatFx', selected: 'echo', target: 'A', on: true, depth: 0, beats: 2, ...patch,
+  });
+  // bpm 174 → 0.3448 s/beat; 2-beat echo = 0.6897 s delay; feedback 0.5 at
+  // wet 1 keeps 5 repeats above audibleGain 0.05 → tail 3.448 s.
+  const ECHO_TAIL = 5 * 2 * (60 / 174);
+
+  /** Incumbent A, B blended in at 12, A's fader slammed at 20 under `fx`. */
+  function echoOut(fx: (t: number) => CaptureEvent[], after: (s: ReturnType<typeof script>) => void = () => {}) {
+    const s = incumbentA();
+    s.at(10).play('B').at(12).fader('B', 1).advance(8);
+    const ev = s.events();
+    ev.push(...fx(19.5));
+    s.at(20).fader('A', 0);
+    after(s);
+    s.advance(HORIZON + 6);
+    return run([...ev].sort((x, y) => x.t - y.t)).takes;
+  }
+
+  it('an echo-out settles a Handover whose window ends at the tail end, not the fader slam', () => {
+    const takes = echoOut((t) => [echo(t)]);
+    expect(takes).toHaveLength(1);
+    expect(takes[0].outgoingTrackId).toBe(1);
+    expect(takes[0].incomingTrackId).toBe(2);
+    expect(takes[0].windowEndS).toBeCloseTo(20 + ECHO_TAIL, 9);
+    expect(takes[0].detectorVersion).toBe(DETECTOR_VERSION);
+  });
+
+  it('reverb tails decay over reverbDecay from the logged settings', () => {
+    const settings = { ...DEFAULT_BEAT_FX_SETTINGS, reverbDecay: 6 };
+    const takes = echoOut((t) => [
+      { t, kind: 'beatFxSettings', settings },
+      echo(t, { selected: 'reverb' }),
+    ]);
+    // -60 dB at 6 s; wet 1 falls to 0.05 at tau·ln(20).
+    expect(takes[0].windowEndS).toBeCloseTo(20 + (6 / Math.log(1000)) * Math.log(20), 9);
+  });
+
+  it('switching the FX off rings out from that instant, under the still-audible dry', () => {
+    // FX off at 19.5 → tail ends 19.5 + 3.448, past the slam at 20.
+    const s = incumbentA();
+    s.at(10).play('B').at(12).fader('B', 1).advance(8);
+    const ev = s.events();
+    ev.push(echo(19), echo(19.5, { on: false }));
+    s.at(20).fader('A', 0).advance(HORIZON + 6);
+    expect(run(ev).takes[0].windowEndS).toBeCloseTo(19.5 + ECHO_TAIL, 9);
+    // A tail long rung out before the slam leaves the slam as the end.
+    const early = echoOut((t) => [echo(t - 6), echo(t - 5.5, { on: false })]);
+    expect(early[0].windowEndS).toBe(20);
+  });
+
+  it('no tail when the FX is on another deck, flanger, or fully dry', () => {
+    for (const fx of [echo(0, { target: 'B' }), echo(0, { selected: 'flanger' }), echo(0, { depth: -1 })]) {
+      const takes = echoOut((t) => [{ ...fx, t }]);
+      expect(takes[0].windowEndS).toBe(20);
+    }
+  });
+
+  it('LEVEL/DEPTH to full dry silences a ringing tail', () => {
+    const takes = echoOut((t) => [echo(t)], (s) => {
+      s.events().push(echo(21, { depth: -1 }));
+    });
+    expect(takes[0].windowEndS).toBe(21);
+  });
+
+  it('the channel insert sits before the crossfader: a crossfader cut-out kills the tail', () => {
+    const s = incumbentA();
+    s.at(10).play('B').at(12).fader('B', 1).advance(8);
+    const ev = s.events();
+    ev.push(echo(20));
+    s.at(20).fader('A', 0).at(21).crossfader(1).advance(HORIZON + 6);
+    expect(run(ev).takes[0].windowEndS).toBe(21);
+  });
+
+  it('a Master-insert echo rings past a fader slam too', () => {
+    const takes = echoOut((t) => [echo(t, { target: 'master' })]);
+    expect(takes[0].windowEndS).toBeCloseTo(20 + ECHO_TAIL, 9);
+  });
+
+  it('a Load during the tail settles the echo-out eagerly at the Load', () => {
+    const takes = echoOut((t) => [echo(t)], (s) => { s.at(21).load('A', 3); });
+    expect(takes).toHaveLength(1);
+    expect(takes[0].windowEndS).toBe(21);
   });
 });

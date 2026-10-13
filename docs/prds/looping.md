@@ -82,7 +82,7 @@ Good tests here assert external behavior at pure seams — state in, state/effec
 ## Out of Scope
 
 - **Manual loop in/out** (press in, press out, gridless loops) — a later pass; it introduces a pending-loop transport state deliberately deferred.
-- **Loop rolls** (slip-behind stutter loops) — a different feature with slip semantics.
+- **Loop rolls**: Slip loops were added separately in #253; dedicated momentary Roll pads remain out of scope.
 - **Saved loops** — persisted per-Track loop slots, their UI, and Sync with Engine DJ's `loops` performance blob (import/export). Planned concept stubbed in CONTEXT.md; the shaded-region renderer and repeatable Jump events are the groundwork.
 - **Controller loop-section Mapping and Feedback** — the gesture class exists, but mapping the hardware loop encoder/pads is follow-up work in the MIDI feature.
 - **Keyboard halve/double** and a Quantize keyboard binding.

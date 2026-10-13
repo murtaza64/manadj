@@ -1,0 +1,19 @@
+.sp-copy {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  max-width: 560px;
+}
+.sp-copy code {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  background: var(--base);
+  border: 1px solid var(--surface1);
+  padding: var(--space-6) var(--space-8);
+  color: var(--accent);
+}
+.sc-steps .sp-hint {
+  display: block;
+  color: var(--subtext0);
+}

@@ -1,5 +1,7 @@
 import { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { OPEN_LIBRARY_TRACK_EVENT, takePendingLibrarySearch } from '../library/openTrack';
 import type { ReactNode } from 'react';
+import { writeSetting } from '../settings/persistedSettings';
 
 interface FilterState {
   search: string;
@@ -53,12 +55,23 @@ export function FilterProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (filters.sortColumn) {
-      localStorage.setItem('trackListSort', JSON.stringify({
+      // Write-through (settings #176): DB + localStorage cache, best-effort.
+      writeSetting('trackListSort', JSON.stringify({
         column: filters.sortColumn,
         direction: filters.sortDirection
       }));
     }
   }, [filters.sortColumn, filters.sortDirection]);
+
+  // A task-worklist "open in Library" (gh#342): the pending search lands here.
+  useEffect(() => {
+    const apply = () => {
+      const search = takePendingLibrarySearch();
+      if (search != null) setFilters((prev) => ({ ...prev, search }));
+    };
+    window.addEventListener(OPEN_LIBRARY_TRACK_EVENT, apply);
+    return () => window.removeEventListener(OPEN_LIBRARY_TRACK_EVENT, apply);
+  }, []);
 
   const clearSearch = useCallback(() => {
     setFilters((prev) => (prev.search === '' ? prev : { ...prev, search: '' }));

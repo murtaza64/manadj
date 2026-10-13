@@ -1,15 +1,22 @@
 /**
  * The sidebar's Sets section (sets 01): Sets are sidebar siblings of
- * Playlists — own section, own colors, "+ new set". Rendered by
- * PlaylistSidebar under the playlist list; selecting a Set swaps the
- * browse surface's main pane to the Set detail view.
+ * Playlists — own collapsible section (gh#174), own colors. Rendered by
+ * PlaylistSidebar inside the fluid section list; selecting a Set swaps the
+ * browse surface's main pane to the Set detail view. Creation starts from
+ * the sidebar's unified create popup (the parent owns the flag); the
+ * inline name form lives here.
  */
-import { useState } from 'react';
+import { useState, useSyncExternalStore } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { SetRowWire } from '../api/client';
 import { isTrackDrag, readTrackDragPayload } from '../selection/trackDrag';
 import ContextMenu, { useContextMenuState, type MenuItem } from '../components/ContextMenu';
+import SidebarSectionHeader from '../components/SidebarSectionHeader';
+import {
+  isSidebarSectionCollapsed,
+  subscribeSidebarSections,
+} from '../components/sidebarSectionsStore';
 import { useToast } from '../components/Toast';
 import { addTracksToSet, dropSetLocalState } from './setStore';
 import { createPlaylistFromSet } from './playlistFlows';
@@ -38,6 +45,10 @@ interface SetsSidebarSectionProps {
   /** The sidebar navigation cursor's entry key (`set:<id>` rows here) —
    * four-deck-performance 24. Null when the sidebar is unfocused. */
   cursorKey?: string | null;
+  /** Inline new-set form open? Owned by the parent: creation starts from
+   * the sidebar's unified create popup (gh#174). */
+  creating: boolean;
+  onStopCreating: () => void;
 }
 
 export default function SetsSidebarSection({
@@ -45,22 +56,26 @@ export default function SetsSidebarSection({
   onSelectSet,
   onSelectedSetDeleted,
   cursorKey = null,
+  creating,
+  onStopCreating,
 }: SetsSidebarSectionProps) {
   const queryClient = useQueryClient();
   const showToast = useToast();
-  const [isCreating, setIsCreating] = useState(false);
   const [newName, setNewName] = useState('');
+  const collapsed = useSyncExternalStore(subscribeSidebarSections, () =>
+    isSidebarSectionCollapsed('sets')
+  );
   const [renamingId, setRenamingId] = useState<number | null>(null);
   const [renameDraft, setRenameDraft] = useState('');
   const [dragOverSetId, setDragOverSetId] = useState<number | null>(null);
 
-  const { data: sets = [] } = useQuery({ queryKey: ['sets'], queryFn: api.sets.list });
+  const { data: sets = [], isLoading } = useQuery({ queryKey: ['sets'], queryFn: api.sets.list });
 
   const createMutation = useMutation({
     mutationFn: (name: string) => api.sets.create({ name }),
     onSuccess: (created) => {
       queryClient.invalidateQueries({ queryKey: ['sets'] });
-      setIsCreating(false);
+      onStopCreating();
       setNewName('');
       onSelectSet(created.id);
     },
@@ -152,19 +167,17 @@ export default function SetsSidebarSection({
 
   return (
     <>
-      <div style={{ borderTop: '1px solid var(--surface0)' }}>
-        <div
-          style={{
-            padding: '6px 12px 2px',
-            fontSize: '11px',
-            textTransform: 'uppercase',
-            letterSpacing: '0.08em',
-            color: 'var(--subtext0)',
-          }}
-        >
-          Sets
-        </div>
-        {sets.map((set) => (
+      <div data-tour="sets.sidebar">
+        <SidebarSectionHeader id="sets" label="Sets" />
+        {/* Empty-state guidance (feature-tour #283) */}
+        {!collapsed && !isLoading && sets.length === 0 && !creating && (
+          <div style={{ padding: '8px 12px', color: 'var(--overlay1)' }}>
+            No Sets yet — a Set is a planned running order. Start one with +
+            New… below.
+          </div>
+        )}
+        {!collapsed &&
+          sets.map((set) => (
           <div
             key={set.id}
             data-set-row
@@ -215,43 +228,38 @@ export default function SetsSidebarSection({
               </span>
             )}
           </div>
-        ))}
+          ))}
 
-        <div style={{ padding: '4px 8px 8px' }}>
-          {isCreating ? (
-            <div style={{ display: 'flex', gap: '4px' }}>
-              <input
-                type="text"
-                value={newName}
-                onChange={(e) => setNewName(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') commitCreate();
-                  if (e.key === 'Escape') {
-                    setIsCreating(false);
-                    setNewName('');
-                  }
-                }}
-                placeholder="Set name"
-                autoFocus
-                style={{
-                  flex: 1,
-                  minWidth: 0,
-                  padding: '4px 8px',
-                  background: 'var(--surface0)',
-                  border: '1px solid var(--surface1)',
-                  color: 'var(--text)',
-                }}
-              />
-              <button className="sets-sidebar-ok" onClick={commitCreate}>
-                ✓
-              </button>
-            </div>
-          ) : (
-            <button className="sets-sidebar-new" onClick={() => setIsCreating(true)}>
-              + New Set
+        {/* Inline new-set form (started from the unified create popup) */}
+        {creating && (
+          <div style={{ padding: '4px 8px 8px', display: 'flex', gap: '4px' }}>
+            <input
+              type="text"
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') commitCreate();
+                if (e.key === 'Escape') {
+                  onStopCreating();
+                  setNewName('');
+                }
+              }}
+              placeholder="Set name"
+              autoFocus
+              style={{
+                flex: 1,
+                minWidth: 0,
+                padding: '4px 8px',
+                background: 'var(--surface0)',
+                border: '1px solid var(--surface1)',
+                color: 'var(--text)',
+              }}
+            />
+            <button className="sets-sidebar-ok" onClick={commitCreate}>
+              ✓
             </button>
-          )}
-        </div>
+          </div>
+        )}
       </div>
 
       {menu && <ContextMenu x={menu.x} y={menu.y} items={menuItems} onClose={closeMenu} />}

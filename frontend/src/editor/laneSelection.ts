@@ -18,7 +18,7 @@ export interface SelectRect {
 
 const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
 
-/** Indices of the nodes inside the rect (border-inclusive), ascending. */
+/** Indices of nodes inside the marquee, border-inclusive and ascending. */
 export function indicesInRect(points: LanePoint[], rect: SelectRect): number[] {
   const xLo = Math.min(rect.x0, rect.x1);
   const xHi = Math.max(rect.x0, rect.x1);

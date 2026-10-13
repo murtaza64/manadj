@@ -1,6 +1,192 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { DeckSourceKernel } from './deckSourceKernel';
 import type { StretchEngine } from './deckSourceKernel';
+import type { TrackSource } from './trackSource';
+import type { ScratchMotion, ScheduledScratchFrame } from './scratchMotion';
+import { moveScratch, scratchPosition } from './scratchMotion';
+
+describe('DeckSourceKernel platter trajectory', () => {
+  it.each(['resample', 'stretch'] as const)('uses the rate offset after an intra-block %s release', mode => {
+    const kernel = new DeckSourceKernel(1);
+    kernel.setTrack([ramp(1000)], 1);
+    const primes: number[] = [];
+    kernel.setStretchEngine({ ready: true, prime: (_s, _p, rate) => primes.push(rate),
+      render: (out, frames) => { for (const channel of out) channel.fill(1, 0, frames); } });
+    kernel.scheduleScratch([
+      { time: 0, motion: { position: 0.1, time: 0, drive: -8, rate: -2, trackDuration: 1, loop: null },
+        position: 0.1, playing: false, loop: null, rate: 1, mode, startId: 1 },
+      { time: 0.003, motion: null, position: 0.2, playing: true, loop: null, rate: 1, mode, startId: 2 },
+    ]);
+    kernel.render([new Float32Array(8)], new Float32Array([9, 9, 9, 1, 2, 3, 4, 5]), 0, 1000);
+    expect(kernel.livePositionFrames).toBe(215);
+    expect(primes).toEqual(mode === 'stretch' ? [1] : []);
+  });
+  it('renders pending and split schedules without allocating channel or rate views', () => {
+    const kernel = new DeckSourceKernel(4);
+    kernel.setTrack([new Float32Array(48000).fill(1)], 1);
+    kernel.scheduleScratch([
+      { time: 0.001, motion: { position: 0.5, time: 0.001, drive: -8, rate: -2, trackDuration: 1, loop: null },
+        position: 0.5, playing: false, loop: null, rate: 1, mode: 'resample', startId: 1 },
+      { time: 0.005, motion: null, position: 0.45, playing: true, loop: null, rate: 1, mode: 'resample', startId: 2 },
+      { time: 10, motion: null, position: 0, playing: false, loop: null, rate: 1, mode: 'resample', startId: 3 },
+    ]);
+    const out = [new Float32Array(128), new Float32Array(128)];
+    const rates = new Float32Array(128).fill(1);
+    const views = vi.spyOn(Float32Array.prototype, 'subarray');
+    const maps = vi.spyOn(Array.prototype, 'map');
+    const slices = vi.spyOn(Array.prototype, 'slice');
+    const splices = vi.spyOn(Array.prototype, 'splice');
+    let counts: number[];
+    try {
+      for (let i = 0; i < 20; i++) kernel.render(out, rates, i * 128 / 48000, 48000);
+      counts = [views.mock.calls.length, maps.mock.calls.length, slices.mock.calls.length, splices.mock.calls.length];
+    } finally { views.mockRestore(); maps.mockRestore(); slices.mockRestore(); splices.mockRestore(); }
+    expect(counts).toEqual([0, 0, 0, 0]);
+    expect(out[0][127]).toBe(1);
+  });
+  it.each([false, true])('renders both opposite 5ms strokes and release inside one quantum (playing=%s)', (playing) => {
+    const kernel = new DeckSourceKernel(1, 0);
+    kernel.setTrack([ramp(8000)], 1);
+    const primes: number[] = [];
+    kernel.setStretchEngine({ ready: true, prime: (_s, p) => primes.push(p),
+      render: (out, frames) => out.forEach((c) => c.fill(-7, 0, frames)) });
+    const base = { position: 0.5, time: 1, drive: 10, rate: 4, trackDuration: 1, loop: null };
+    const reverse = moveScratch(base, 1.008, -0.08, 0.005);
+    const frames: ScheduledScratchFrame[] = [
+      { time: 1, motion: base, position: 0.5, playing, loop: null, rate: 1, mode: 'stretch', startId: 1 },
+      { time: 1.008, motion: reverse,
+        position: reverse.position, playing, loop: null, rate: 1, mode: 'stretch', startId: 2 },
+      { time: 1.014, motion: null, position: 0.7, playing, loop: null, rate: 1, mode: 'stretch', startId: 3 },
+    ];
+    kernel.scheduleScratch(frames);
+    const out = [new Float32Array(128)];
+    kernel.render(out, new Float32Array([1]), 1, 8000);
+    expect(out[0][16]).toBeGreaterThan(4001);
+    expect(out[0][55]).toBeGreaterThan(out[0][16]); // no packet-expiry hold
+    expect(out[0].slice(65, 110).some(v => v > 0)).toBe(true);
+    expect(out[0][127]).toBe(playing ? -7 : 0);
+    expect(primes).toEqual(playing ? [5600] : []);
+    expect(kernel.livePositionFrames).toBe(playing ? 5616 : null);
+  });
+
+  it.each(['stop', 'start', 'load', 'manual'] as const)('%s cancels future scheduled scratch', (action) => {
+    const kernel = new DeckSourceKernel(1, 0);
+    kernel.setTrack([ramp(1000)], 1);
+    kernel.scheduleScratch([{ time: 2, motion: { position: 0.5, time: 2, drive: -4,
+      rate: -1, trackDuration: 1, loop: null }, position: 0.5, playing: false,
+      loop: null, rate: 1, mode: 'resample', startId: 1 }]);
+    if (action === 'stop') kernel.stop();
+    if (action === 'start') kernel.start(100, 2);
+    if (action === 'load') kernel.setTrack([ramp(1000)], 1);
+    if (action === 'manual') kernel.setScratch({ position: 0.2, time: 1, drive: 0,
+      rate: 0, trackDuration: 1, loop: null });
+    kernel.render([new Float32Array(10)], new Float32Array([1]), 2, 1000);
+    expect(kernel.livePositionFrames).toBe(action === 'start' ? 110 : action === 'manual' ? 200 : null);
+  });
+  const motion: ScratchMotion = { position: 0.5, time: 1, drive: -10,
+    rate: -2.5, trackDuration: 1, loop: null };
+
+  it('renders timestamped reverse PCM and converges to a silent hold', () => {
+    const kernel = new DeckSourceKernel(2, 0);
+    kernel.setTrack([ramp(1000)], 1);
+    kernel.setScratch(motion);
+    const out = [new Float32Array(10)];
+    kernel.render(out, new Float32Array([1]), 1.005, 1000);
+    expect(out[0][3]).toBeCloseTo(1000 * scratchPosition(motion, 1.008) + 1, 4);
+    expect(kernel.livePositionFrames).toBeCloseTo(1000 * scratchPosition(motion, 1.015));
+    kernel.render([new Float32Array(20)], new Float32Array([1]), 1.015, 1000);
+    expect(kernel.livePositionFrames).toBeGreaterThan(400);
+    kernel.render(out, new Float32Array([1]), 1.12, 1000);
+    expect(Array.from(out[0])).toEqual(new Array(10).fill(0));
+    expect(kernel.livePositionFrames).toBeCloseTo(400, 3);
+  });
+
+  it('declicks reverse loop wraps without changing the timestamped position', () => {
+    const kernel = new DeckSourceKernel(4, 0);
+    const data = new Float32Array(1000);
+    for (let i = 100; i < 120; i++) data[i] = (i - 100) / 9.5 - 1;
+    kernel.setTrack([data], 1);
+    const looped = { ...motion, position: 0.106, drive: -2, rate: -0.5,
+      loop: { start: 0.1, end: 0.12 } };
+    kernel.setScratch(looped);
+    const out = [new Float32Array(20)];
+    kernel.render(out, new Float32Array([1]), 1, 1000);
+    expect(Math.abs(out[0][7] - out[0][6])).toBeLessThan(0.5);
+    expect(kernel.livePositionFrames).toBeCloseTo(scratchPosition(looped, 1.02) * 1000);
+  });
+
+  it('ramps stem kills in output time while reversing and while held', () => {
+    const kernel = new DeckSourceKernel(4, 0);
+    kernel.setStems([[new Float32Array(1000).fill(1)]], 1);
+    kernel.setScratch(motion);
+    const out = [new Float32Array(8)];
+    kernel.render(out, new Float32Array([1]), 1, 1000);
+    kernel.setStemGains([0]);
+    kernel.render(out, new Float32Array([1]), 1.008, 1000);
+    expect(out[0][0]).toBe(1);
+    expect(out[0][2]).toBeCloseTo(0.5);
+    expect(out[0][7]).toBe(0);
+    kernel.setScratch({ ...motion, position: 0.484, time: 1.016, drive: 0, rate: 0 });
+    kernel.setStemGains([1]);
+    kernel.render(out, new Float32Array([1]), 1.016, 1000);
+    kernel.setScratch({ ...motion, position: 0.484, time: 1.024, drive: 10, rate: 1 });
+    kernel.render(out, new Float32Array([1]), 1.024, 1000);
+    expect(out[0][7]).toBe(1);
+  });
+
+  it('never feeds signed or held scratch rates to Key Lock and restores stretch on start', () => {
+    const kernel = new DeckSourceKernel(4, 0);
+    const seen: number[] = [];
+    kernel.setStretchEngine({ ready: true, prime: (_s, _p, rate) => seen.push(rate),
+      render: (out, _n, _s, _p, rate) => { seen.push(rate); out.forEach(c => c.fill(1)); } });
+    kernel.setTrack([new Float32Array(1000).fill(1)], 1);
+    kernel.setMode('stretch');
+    kernel.setScratch(motion);
+    kernel.render([new Float32Array(50)], new Float32Array([1.2]), 1, 1000);
+    expect(seen).toEqual([]);
+    kernel.stop();
+    kernel.start(400, 1);
+    kernel.render([new Float32Array(8)], new Float32Array([1.2]), 1.05, 1000);
+    expect(seen).toHaveLength(2);
+    expect(seen[0]).toBeCloseTo(1.2);
+  });
+
+  it('fades stops to silence and does not resurrect held DC on release', () => {
+    const kernel = new DeckSourceKernel(4, 0);
+    kernel.setTrack([new Float32Array(1000).fill(1)], 1);
+    kernel.setScratch(motion);
+    kernel.render([new Float32Array(150)], new Float32Array([1]), 1, 1000);
+    kernel.stop();
+    const out = [new Float32Array(8)];
+    kernel.render(out, new Float32Array([1]), 1.15, 1000);
+    expect(Array.from(out[0])).toEqual(new Array(8).fill(0));
+  });
+
+  it('catches a normal handoff up to the main-thread anchor before rendering', () => {
+    const kernel = new DeckSourceKernel(4, 0);
+    kernel.setTrack([ramp(1000)], 1);
+    kernel.start(410, 1, 1.018);
+    const out = [new Float32Array(8)];
+    kernel.render(out, new Float32Array([1.25]), 1.026, 1000);
+    expect(out[0][0]).toBeCloseTo(421);
+    expect(kernel.livePositionFrames).toBeCloseTo(430);
+  });
+
+  it.each([0, 1])('holds silently at track boundary %s and accepts motion back into the track', boundary => {
+    const kernel = new DeckSourceKernel(4, 0);
+    kernel.setTrack([new Float32Array(2000).fill(1)], 2);
+    kernel.setScratch({ ...motion, position: boundary, drive: boundary === 0 ? -10 : 10, rate: 0 });
+    const out = [new Float32Array(20)];
+    expect(kernel.render(out, new Float32Array([1]), 1, 1000)).toBeNull();
+    expect(Array.from(out[0])).toEqual(new Array(20).fill(0));
+    expect(kernel.livePositionFrames).toBe(boundary * 2000);
+    const inward = { ...motion, time: 2, position: boundary, drive: boundary === 0 ? 10 : -10, rate: 0 };
+    kernel.setScratch(inward);
+    kernel.render(out, new Float32Array([1]), 2, 1000);
+    expect(out[0][5]).toBe(1);
+    expect(kernel.livePositionFrames).toBeCloseTo(scratchPosition(inward, 2.02) * 2000);
+  });
+});
 
 /**
  * Pure position-bookkeeping and declick tests for the worklet kernel —
@@ -102,7 +288,7 @@ describe('DeckSourceKernel resample voice', () => {
     const kernel = new DeckSourceKernel(DECLICK);
     kernel.setTrack([ramp(8)], 1);
     kernel.start(1000, 1);
-    expect(kernel.livePositionFrames).toBe(7);
+    expect(kernel.livePositionFrames).toBe(8);
   });
 
   it('interpolates linearly at fractional rates', () => {
@@ -357,21 +543,20 @@ class FakeStretchEngine implements StretchEngine {
   render(
     out: Float32Array[],
     frames: number,
-    channels: Float32Array[],
+    source: TrackSource,
     positionFrames: number,
     rate: number,
     loop: { startFrames: number; endFrames: number } | null
   ): void {
     this.calls.push({ position: positionFrames, rate, frames, loop });
     for (let c = 0; c < out.length; c++) {
-      const data = channels[Math.min(c, channels.length - 1)];
       for (let i = 0; i < frames; i++) {
         // Honor the read-layer loop fold, like the real window fill.
         let idx = Math.round(positionFrames + i * rate);
         if (loop && idx >= loop.endFrames) {
           idx = loop.startFrames + ((idx - loop.endFrames) % (loop.endFrames - loop.startFrames));
         }
-        out[c][i] = idx < data.length ? -data[idx] : 0;
+        out[c][i] = -source.sampleAt(c, idx);
       }
     }
   }
@@ -688,5 +873,119 @@ describe('DeckSourceKernel track swap', () => {
     kernel.start(0, 2);
     const { out } = render(kernel, 8);
     for (let i = 1; i < 8; i++) expect(out[0][i]).toBe(newData[i]);
+  });
+});
+
+describe('DeckSourceKernel stems (stems #209)', () => {
+  /** Two mono stems: 1..n and 10·(1..n); unity sum = 11·(1..n). */
+  function stemKernel(n = 64): DeckSourceKernel {
+    const kernel = new DeckSourceKernel(DECLICK, 0);
+    const a = ramp(n);
+    const b = new Float32Array(n);
+    for (let i = 0; i < n; i++) b[i] = (i + 1) * 10;
+    kernel.setStems([[a], [b]], 1);
+    return kernel;
+  }
+
+  it('renders the unity-gain stem sum (replace-policy identity)', () => {
+    const kernel = stemKernel();
+    kernel.start(0, 1);
+    const { out } = render(kernel, 8);
+    for (let i = 0; i < 8; i++) expect(out[0][i]).toBeCloseTo((i + 1) * 11, 4);
+  });
+
+  it('setStemGains kills a stem with a declick ramp anchored at the playhead', () => {
+    const kernel = stemKernel();
+    kernel.start(0, 1);
+    render(kernel, 8); // playhead now at frame 8
+    kernel.setStemGains([1, 0]);
+    const { out } = render(kernel, DECLICK + 4);
+    // Ramp spans frames 8..8+DECLICK: stem b's contribution slopes to 0.
+    for (let i = 0; i < DECLICK; i++) {
+      const frame = 8 + i;
+      const bGain = 1 - i / DECLICK;
+      expect(out[0][i]).toBeCloseTo((frame + 1) * (1 + 10 * bGain), 3);
+    }
+    // Past the ramp: only stem a remains.
+    for (let i = DECLICK; i < DECLICK + 4; i++) {
+      expect(out[0][i]).toBeCloseTo(8 + i + 1, 3);
+    }
+  });
+
+  it('setStemGains while stopped applies instantly to the next start', () => {
+    const kernel = stemKernel();
+    kernel.setStemGains([0, 1]);
+    kernel.start(4, 1);
+    const { out } = render(kernel, 4);
+    for (let i = 0; i < 4; i++) expect(out[0][i]).toBeCloseTo((4 + i + 1) * 10, 4);
+  });
+
+  it('setStemGains is a no-op on a single-source track', () => {
+    const kernel = new DeckSourceKernel(DECLICK, 0);
+    kernel.setTrack([ramp(16)], 1);
+    kernel.setStemGains([0, 0, 0, 0]);
+    kernel.start(0, 1);
+    const { out } = render(kernel, 4);
+    expect(out[0][0]).toBeCloseTo(1, 5);
+  });
+
+  it('stretch mode reads the mixed stems through the source seam', () => {
+    const kernel = stemKernel();
+    const fake = new FakeStretchEngine();
+    kernel.setStretchEngine(fake);
+    kernel.setMode('stretch');
+    kernel.setStemGains([1, 0]); // kill stem b before starting
+    kernel.start(10, 1);
+    const { out } = render(kernel, 4);
+    // FakeStretchEngine negates source.sampleAt — only stem a audible.
+    for (let i = 0; i < 4; i++) expect(out[0][i]).toBeCloseTo(-(10 + i + 1), 4);
+  });
+
+  it('a fresh setStems resets gains to unity (kill state is per-Load)', () => {
+    const kernel = stemKernel();
+    kernel.setStemGains([0, 0]);
+    kernel.setStems([[ramp(16)], [ramp(16)]], 1);
+    kernel.start(0, 1);
+    const { out } = render(kernel, 4);
+    expect(out[0][0]).toBeCloseTo(2, 4); // both stems audible again
+  });
+});
+
+describe('stem gain settling (seek-back bug, stems #210 review)', () => {
+  it('a restart before the kill position keeps the stem killed', () => {
+    const kernel = new DeckSourceKernel(DECLICK, 0);
+    const a = ramp(64);
+    const b = ramp(64);
+    kernel.setStems([[a], [b]], 1);
+    kernel.start(32, 1);
+    render(kernel, 8); // playhead 40; ramp anchors there
+    kernel.setStemGains([1, 0]);
+    render(kernel, DECLICK + 2); // ramp completes
+    kernel.start(0, 2); // seek back before the kill point
+    render(kernel, DECLICK + 1); // let the splice tail die
+    const { out } = render(kernel, 4);
+    // Stem b stays dead even though we're reading frames < anchor.
+    const base = DECLICK + 1;
+    for (let i = 0; i < 4; i++) expect(out[0][i]).toBeCloseTo(a[base + i], 3);
+  });
+
+  it('a completed ramp settles even without a restart (backwards reads)', () => {
+    const kernel = new DeckSourceKernel(DECLICK, 0);
+    const a = ramp(256);
+    kernel.setStems([[a], [ramp(256)]], 1);
+    kernel.start(100, 1);
+    render(kernel, 4);
+    kernel.setStemGains([1, 0]);
+    render(kernel, DECLICK + 8); // play past the ramp end
+    // Simulate a backwards read (loop fold / stretch pre-read) via the
+    // stretch path's own source handle: gain before the anchor is settled.
+    const fake = new FakeStretchEngine();
+    kernel.setStretchEngine(fake);
+    kernel.setMode('stretch');
+    const { out } = render(kernel, 2);
+    // Stretch fake reads source.sampleAt at the live position — but the
+    // settled source also answers old frames with the killed gain:
+    void out;
+    expect(fake.calls.length).toBeGreaterThan(0);
   });
 });

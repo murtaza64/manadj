@@ -26,11 +26,16 @@ import type {
   LibraryImportResult,
   LibraryImportRequest,
   LibraryImportExecutionResult,
+  DropImportRequest,
+  DropImportResult,
   SourceItem,
+  BulkResult,
+  AutoBulkResult,
   AcquisitionRefreshStats,
   Classification,
   SupplierInfo,
   SoulseekResult,
+  AdhocSoulseekDownload,
   SoulseekSearchResponse,
   AnalysisPendingItem,
   AnalysisTaskStatus,
@@ -52,10 +57,16 @@ export interface TransitionTemplateWire {
   after_beats: number;
   scalable: boolean;
   lanes: Record<string, unknown>;
+  /** Beat FX track (#353; opaque TransitionBeatFx), null = none. */
+  beat_fx?: Record<string, unknown> | null;
 }
 
-// Backend URL configuration - can be overridden with VITE_API_URL env var
-const BACKEND_URL = import.meta.env.VITE_API_URL || 'http://localhost:8127';
+// Backend URL: VITE_API_URL when set (scripts/dev.py injects it); dev/test
+// fallback :8127. Production builds default to '' — same-origin relative
+// URLs, for when the backend itself serves the built frontend (packaged
+// app, ADR 0043 / #279).
+const BACKEND_URL =
+  import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://localhost:8127' : '');
 const API_BASE = `${BACKEND_URL}/api`;
 
 // Export for use in other components (e.g., for static file URLs)
@@ -107,6 +118,16 @@ export const api = {
       return response.json();
     },
 
+    attention: async (): Promise<TaskRow[]> => {
+      const response = await fetch(`${API_BASE}/tasks/attention`);
+      if (!response.ok) throw new Error('Failed to fetch task worklist');
+      return response.json();
+    },
+    active: async (): Promise<TaskRow[]> => {
+      const response = await fetch(`${API_BASE}/tasks/active`);
+      if (!response.ok) throw new Error('Failed to fetch active tasks');
+      return response.json();
+    },
     list: async (filters?: {
       state?: TaskState;
       type?: string;
@@ -164,6 +185,24 @@ export const api = {
 
     /** URL of a track's audio stream (for audio elements / direct fetch). */
     audioUrl: (id: number) => `${API_BASE}/tracks/${id}/audio`,
+
+    /** URL of one stem (vocals/drums/bass/other) — 404 unless the track has
+     * current stems (Track.has_stems; stems #118). */
+    stemUrl: (id: number, stem: 'vocals' | 'drums' | 'bass' | 'other') =>
+      `${API_BASE}/tracks/${id}/stems/${stem}`,
+
+    /** Enqueue a stem-split task ("extract stems" button). Dedup rides the
+     * task queue; returns { queued, has_stems }. */
+    /** Show the track's stems folder in the OS file manager (404 without stems). */
+    revealStems: async (id: number): Promise<void> => {
+      const res = await fetch(`${API_BASE}/tracks/${id}/stems/reveal`, { method: 'POST' });
+      if (!res.ok) throw new Error(`reveal stems: ${res.status}`);
+    },
+    extractStems: async (id: number): Promise<{ queued: boolean; has_stems: boolean }> => {
+      const res = await fetch(`${API_BASE}/tracks/${id}/stems/split`, { method: 'POST' });
+      if (!res.ok) throw new Error('Failed to request stem split');
+      return res.json();
+    },
 
     list: async (
       page: number = 1,
@@ -329,6 +368,24 @@ export const api = {
       return response.json();
     },
 
+    createCategory: async (category: { name: string; display_order?: number; color?: string }) => {
+      const response = await fetch(`${API_BASE}/tags/categories`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(category),
+      });
+      if (!response.ok) {
+        const body = await response.json().catch(() => null);
+        throw new Error(body?.detail ?? 'Failed to create category');
+      }
+      return response.json();
+    },
+
+    deleteCategory: async (id: number) => {
+      const response = await fetch(`${API_BASE}/tags/categories/${id}`, { method: 'DELETE' });
+      if (!response.ok) throw new Error('Failed to delete category');
+    },
+
     listByCategory: async (categoryId: number) => {
       const response = await fetch(`${API_BASE}/tags/categories/${categoryId}/tags`);
       return response.json();
@@ -377,6 +434,18 @@ export const api = {
   },
 
   waveforms: {
+    /** Bounded preview substrate; 202 means the waveform worker is preparing it. */
+    getPreview: async (trackId: number): Promise<{ blob: ArrayBuffer; etag: string } | null> => {
+      const response = await fetch(`${API_BASE}/waveforms/${trackId}/preview`);
+      if (response.status === 202) return null;
+      if (!response.ok) {
+        throw Object.assign(new Error(`Failed to fetch waveform preview (${response.status})`), { status: response.status });
+      }
+      const etag = response.headers.get('ETag');
+      if (!etag) throw new Error('Waveform preview response missing ETag');
+      return { blob: await response.arrayBuffer(), etag };
+    },
+
     /** Waveform data v2 blob (ADR 0014): binary, immutable once generated. */
     getData: async (trackId: number): Promise<ArrayBuffer> => {
       const response = await fetch(`${API_BASE}/waveforms/${trackId}/data`);
@@ -690,8 +759,7 @@ export const api = {
     },
 
     sync: async (playlistName: string, request: SyncPlaylistRequest): Promise<SyncResult | SyncResult[]> => {
-      const encodedName = encodeURIComponent(playlistName);
-      const res = await fetch(`${API_BASE}/sync/playlists/${encodedName}/sync`, {
+      const res = await fetch(`${API_BASE}/sync/playlists/sync?playlist=${encodeURIComponent(playlistName)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(request),
@@ -707,8 +775,7 @@ export const api = {
       playlistName: string,
       targets: PlaylistExportTarget[],
     ): Promise<PlaylistFullExportReport> => {
-      const encodedName = encodeURIComponent(playlistName);
-      const res = await fetch(`${API_BASE}/sync/export/playlists/${encodedName}/performance`, {
+      const res = await fetch(`${API_BASE}/sync/export/playlists/performance?playlist=${encodeURIComponent(playlistName)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ targets }),
@@ -723,9 +790,8 @@ export const api = {
     previewExportPerformance: async (
       playlistName: string,
     ): Promise<PlaylistFullExportPreview> => {
-      const encodedName = encodeURIComponent(playlistName);
       const res = await fetch(
-        `${API_BASE}/sync/export/playlists/${encodedName}/performance/preview`,
+        `${API_BASE}/sync/export/playlists/performance/preview?playlist=${encodeURIComponent(playlistName)}`,
       );
       if (!res.ok) {
         const detail = (await res.json().catch(() => null))?.detail;
@@ -1016,6 +1082,17 @@ export const api = {
       if (!response.ok) throw new Error('Failed to import tracks');
       return response.json();
     },
+
+    /** Drop import (#297): dropped files/folders, imported in place. */
+    dropImport: async (request: DropImportRequest): Promise<DropImportResult> => {
+      const response = await fetch(`${API_BASE}/sync/library/drop-import`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(request),
+      });
+      if (!response.ok) throw new Error('Drop import failed');
+      return response.json();
+    },
   },
 
   acquisition: {
@@ -1066,6 +1143,38 @@ export const api = {
       return res.json();
     },
 
+    ignoreBulk: async (itemIds: number[]): Promise<BulkResult> => {
+      const res = await fetch(`${API_BASE}/acquisition/items/ignore-bulk`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ item_ids: itemIds }),
+      });
+      if (!res.ok) throw new Error('Failed to ignore items');
+      return res.json();
+    },
+    acceptMatchBulk: async (itemIds: number[]): Promise<BulkResult> => {
+      const res = await fetch(`${API_BASE}/acquisition/items/accept-match-bulk`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ item_ids: itemIds }),
+      });
+      if (!res.ok) throw new Error('Failed to accept matches');
+      return res.json();
+    },
+    soulseekAutoBulk: async (itemIds: number[]): Promise<AutoBulkResult> => {
+      const res = await fetch(`${API_BASE}/acquisition/items/soulseek/auto-bulk`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ item_ids: itemIds }),
+      });
+      if (!res.ok) throw new Error((await res.json()).detail ?? 'Failed to start downloads');
+      return res.json();
+    },
+    cancelDownload: async (itemId: number): Promise<SourceItem> => {
+      const res = await fetch(`${API_BASE}/acquisition/items/${itemId}/cancel`, { method: 'POST' });
+      if (!res.ok) throw new Error((await res.json()).detail ?? 'Failed to cancel');
+      return res.json();
+    },
     ignoreItem: async (itemId: number): Promise<SourceItem> => {
       const res = await fetch(`${API_BASE}/acquisition/items/${itemId}/ignore`, { method: 'POST' });
       if (!res.ok) {
@@ -1124,6 +1233,13 @@ export const api = {
       return res.json();
     },
 
+    // The remembered search for an item (gh#216), or null if never searched.
+    soulseekRemembered: async (itemId: number): Promise<SoulseekSearchResponse | null> => {
+      const res = await fetch(`${API_BASE}/acquisition/items/${itemId}/soulseek/search`);
+      if (!res.ok) throw new Error('Failed to fetch remembered soulseek search');
+      return res.json();
+    },
+
     soulseekSearch: async (itemId: number, query: string): Promise<SoulseekSearchResponse> => {
       const res = await fetch(`${API_BASE}/acquisition/items/${itemId}/soulseek/search`, {
         method: 'POST',
@@ -1133,6 +1249,56 @@ export const api = {
       if (!res.ok) {
         const error = await res.json().catch(() => ({}));
         throw new Error(detailToMessage(error.detail, 'Soulseek search failed'));
+      }
+      return res.json();
+    },
+
+    // Standalone search (gh#217): no Source Item, no deltas, not remembered.
+    soulseekGlobalSearch: async (query: string): Promise<SoulseekSearchResponse> => {
+      const res = await fetch(`${API_BASE}/acquisition/soulseek/search`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query }),
+      });
+      if (!res.ok) {
+        const error = await res.json().catch(() => ({}));
+        throw new Error(detailToMessage(error.detail, 'Soulseek search failed'));
+      }
+      return res.json();
+    },
+
+    soulseekAdhocDownload: async (
+      result: SoulseekResult,
+      artist?: string,
+      title?: string,
+    ): Promise<AdhocSoulseekDownload> => {
+      const res = await fetch(`${API_BASE}/acquisition/soulseek/download`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ result, artist: artist || null, title: title || null }),
+      });
+      if (!res.ok) {
+        const error = await res.json().catch(() => ({}));
+        throw new Error(detailToMessage(error.detail, 'Soulseek download failed'));
+      }
+      return res.json();
+    },
+
+    soulseekAdhocDownloads: async (): Promise<AdhocSoulseekDownload[]> => {
+      const res = await fetch(`${API_BASE}/acquisition/soulseek/downloads`);
+      if (!res.ok) throw new Error('Failed to fetch soulseek downloads');
+      return res.json();
+    },
+
+    // Hands-off download (gh#214): auto-pick a high-quality mp3 and retry
+    // across peers server-side. 409 = nothing auto-pickable.
+    soulseekAuto: async (itemId: number): Promise<SourceItem> => {
+      const res = await fetch(`${API_BASE}/acquisition/items/${itemId}/soulseek/auto`, {
+        method: 'POST',
+      });
+      if (!res.ok) {
+        const error = await res.json().catch(() => ({}));
+        throw new Error(detailToMessage(error.detail, 'Soulseek auto-download failed'));
       }
       return res.json();
     },
@@ -1186,6 +1352,33 @@ export const api = {
         method: 'DELETE',
       });
       if (!res.ok) throw new Error(`Failed to delete transition template (${res.status})`);
+    },
+  },
+
+  cameos: {
+    /** All saved Cameos (boot/plan load; #140). Ordered (host, guest)
+     * pair, then position — the Cameo sibling of transitions.list. */
+    list: async (): Promise<CameoRowWire[]> => {
+      const res = await fetch(`${API_BASE}/cameos`);
+      if (!res.ok) throw new Error('Failed to fetch cameos');
+      return res.json();
+    },
+
+    /** Client-authoritative pair-replace (ADR 0011 pattern): the server
+     * reconciles the ordered (host, guest) pair by uuid. An empty items
+     * list deletes the pair. Deleted Cameos DROP Set Cameo pins. */
+    replacePair: async (
+      hostTrackId: number,
+      guestTrackId: number,
+      items: { uuid: string; name: string; favorite: boolean; data: Record<string, unknown> }[]
+    ): Promise<CameoRowWire[]> => {
+      const res = await fetch(`${API_BASE}/cameos/pair/${hostTrackId}/${guestTrackId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items }),
+      });
+      if (!res.ok) throw new Error(`Failed to save cameos (${res.status})`);
+      return res.json();
     },
   },
 
@@ -1249,7 +1442,233 @@ export const api = {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ promoted_transition_uuid: transitionUuid }),
       });
-      if (!res.ok) throw new Error(`Failed to set take promotion (${res.status})`);
+      if (!res.ok) {
+        const detail = (await res.json().catch(() => null))?.detail;
+        throw new Error(detailToMessage(detail, `Failed to set take promotion (${res.status})`));
+      }
+      return res.json();
+    },
+  },
+
+  routineCandidates: {
+    /** Promotion PREVIEW for a candidate (#205): browsing must not mint. */
+    preview: async (uuid: string): Promise<RoutineDetailWire> => {
+      const res = await fetch(`${API_BASE}/routine-candidates/${uuid}/preview`);
+      if (!res.ok) throw new Error(`Failed to preview candidate (${res.status})`);
+      return res.json();
+    },
+    /** ALL miner-suggested candidate spans (sets #161): the Set pane
+     * matches casts against adjacencies client-side for the row-level
+     * "routines detected" highlight (the picker still queries per head). */
+    list: async (): Promise<RoutineCandidateWire[]> => {
+      const res = await fetch(`${API_BASE}/routine-candidates`);
+      if (!res.ok) throw new Error(`Failed to fetch routine candidates (${res.status})`);
+      return res.json();
+    },
+
+    /** A Session's miner-suggested Routine spans, timeline order (ADR
+     * 0035, routines 157) — the confirm surface reads this. */
+    forSession: async (sessionUuid: string): Promise<RoutineCandidateWire[]> => {
+      const res = await fetch(
+        `${API_BASE}/routine-candidates?session_uuid=${encodeURIComponent(sessionUuid)}`
+      );
+      if (!res.ok) throw new Error(`Failed to fetch routine candidates (${res.status})`);
+      return res.json();
+    },
+
+    /** Cast-prefix match (routines 157): candidates whose cast covers
+     * exactly the given ordered list's next len(cast) entries, entering
+     * on the first and exiting at the last — the pin picker's lowest
+     * trust tier (sets 160). Strongest evidence first. */
+    query: async (trackIds: number[]): Promise<RoutineCandidateWire[]> => {
+      const res = await fetch(`${API_BASE}/routine-candidates/query`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ track_ids: trackIds }),
+      });
+      if (!res.ok) throw new Error(`Failed to query routine candidates (${res.status})`);
+      return res.json();
+    },
+  },
+
+  routineTakes: {
+    /** Routine Takes, newest first (the Transition history reads this
+     * alongside takes.list; ADR 0035, routines 158). */
+    list: async (): Promise<RoutineTakeRowWire[]> => {
+      const res = await fetch(`${API_BASE}/routine-takes`);
+      if (!res.ok) throw new Error('Failed to fetch routine takes');
+      return res.json();
+    },
+
+    /** Confirm a candidate span (with boundary trim) into a Routine Take.
+     * n ≥ 3 — a 2-cast confirm is a hand-cut Take (POST /api/takes). */
+    create: async (payload: RoutineTakeCreateWire): Promise<RoutineTakeRowWire> => {
+      const res = await fetch(`${API_BASE}/routine-takes`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) throw new Error(`Failed to confirm routine take (${res.status})`);
+      return res.json();
+    },
+
+    /** Mechanical promotion: deck→slot re-addressing + beat-domain rebase
+     * via the cast Beatgrids → a saved Routine. */
+    /** Promotion PREVIEW (#205 draft-everywhere): the geometry promote
+     * would mint, persisted nowhere — review drafts open through this. */
+    preview: async (uuid: string): Promise<RoutineDetailWire> => {
+      const res = await fetch(`${API_BASE}/routine-takes/${uuid}/preview`);
+      if (!res.ok) throw new Error(`Failed to preview routine take (${res.status})`);
+      return res.json();
+    },
+
+    promote: async (uuid: string): Promise<RoutineRowWire> => {
+      const res = await fetch(`${API_BASE}/routine-takes/${uuid}/promote`, { method: 'POST' });
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.detail ?? `Failed to promote routine take (${res.status})`);
+      }
+      return res.json();
+    },
+
+    delete: async (uuid: string): Promise<void> => {
+      const res = await fetch(`${API_BASE}/routine-takes/${uuid}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error(`Failed to delete routine take (${res.status})`);
+    },
+  },
+
+  routines: {
+    /** All saved Routines, newest first — metadata only. */
+    list: async (): Promise<RoutineRowWire[]> => {
+      const res = await fetch(`${API_BASE}/routines`);
+      if (!res.ok) throw new Error('Failed to fetch routines');
+      return res.json();
+    },
+
+    /** One Routine with its slot-addressed, beat-domain event replay. */
+    get: async (uuid: string): Promise<RoutineDetailWire> => {
+      const res = await fetch(`${API_BASE}/routines/${uuid}`);
+      if (!res.ok) throw new Error(`Failed to fetch routine (${res.status})`);
+      return res.json();
+    },
+
+    rename: async (uuid: string, name: string | null): Promise<RoutineRowWire> => {
+      const res = await fetch(`${API_BASE}/routines/${uuid}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name }),
+      });
+      if (!res.ok) throw new Error(`Failed to rename routine (${res.status})`);
+      return res.json();
+    },
+
+    delete: async (uuid: string): Promise<void> => {
+      const res = await fetch(`${API_BASE}/routines/${uuid}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error(`Failed to delete routine (${res.status})`);
+    },
+
+    /** Replace the authored edits layer (gh#170 pass 2): the Routine
+     * editor's draft — lane envelopes + Jumps, beat-domain. Null clears.
+     * The recording itself never changes (evidence doctrine). */
+    saveEdits: async (
+      uuid: string,
+      edits: Record<string, unknown> | null
+    ): Promise<RoutineDetailWire> => {
+      const res = await fetch(`${API_BASE}/routines/${uuid}/edits`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ edits }),
+      });
+      if (!res.ok) throw new Error(`Failed to save routine edits (${res.status})`);
+      return res.json();
+    },
+
+    /** Mint an AUTHORED Routine (ADR 0039, gh#325) — the blank draft's
+     * first persist (≥ 3 slots). The draft's client-minted uuid. */
+    createAuthored: async (
+      body: RoutineStructureWire & { uuid: string; name?: string | null }
+    ): Promise<RoutineDetailWire> => {
+      const res = await fetch(`${API_BASE}/routines`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const detail = await res.json().then((d) => d.detail).catch(() => null);
+        throw new Error(detail || `Failed to create routine (${res.status})`);
+      }
+      return res.json();
+    },
+
+    /** 2→3 kind crossing (ADR 0039, gh#330): a Transition grown to ≥ 3
+     * slots becomes an authored Routine; Set pins re-point, the
+     * Transition row goes. */
+    fromTransition: async (
+      transitionUuid: string,
+      body: RoutineStructureWire & { uuid: string; name?: string | null }
+    ): Promise<KindConversionWire> => {
+      const res = await fetch(`${API_BASE}/routines/from-transition/${transitionUuid}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const detail = await res.json().then((d) => d.detail).catch(() => null);
+        throw new Error(detail || `Failed to convert to a Routine (${res.status})`);
+      }
+      return res.json();
+    },
+
+    /** 3→2 kind crossing (ADR 0039, gh#330): an authored Routine edited
+     * down to 2 slots saves as a Transition; Set pins re-point. */
+    toTransition: async (
+      uuid: string,
+      body: { transition_uuid: string; a_track_id: number; b_track_id: number; name: string; data: Record<string, unknown> }
+    ): Promise<KindConversionWire> => {
+      const res = await fetch(`${API_BASE}/routines/${uuid}/to-transition`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const detail = await res.json().then((d) => d.detail).catch(() => null);
+        throw new Error(detail || `Failed to convert to a Transition (${res.status})`);
+      }
+      return res.json();
+    },
+
+    /** Replace an authored Routine's structure (cast/slot ids/entry
+     * offsets/positions/duration; optional edits in the same write). */
+    putStructure: async (uuid: string, body: RoutineStructureWire): Promise<RoutineDetailWire> => {
+      const res = await fetch(`${API_BASE}/routines/${uuid}/structure`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const detail = await res.json().then((d) => d.detail).catch(() => null);
+        throw new Error(detail || `Failed to save routine structure (${res.status})`);
+      }
+      return res.json();
+    },
+
+    /** Boundary trim + mechanical re-promotion (gh#170): re-run promotion
+     * over the origin Routine Take with the window narrowed by beat
+     * amounts from either edge; the Routine row updates IN PLACE (same
+     * uuid — Set pins survive), the raw Take is untouched. */
+    retrim: async (
+      uuid: string,
+      body: { trim_start_beats: number; trim_end_beats: number }
+    ): Promise<RoutineDetailWire> => {
+      const res = await fetch(`${API_BASE}/routines/${uuid}/retrim`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const detail = await res.json().then((d) => d.detail).catch(() => null);
+        throw new Error(detail || `Failed to re-promote routine (${res.status})`);
+      }
       return res.json();
     },
   },
@@ -1376,22 +1795,82 @@ export const api = {
 
     /** Client-authoritative wholesale replace of the ordered entry list
      * (ADR 0011 pattern): the server reconciles by track_id. Dormant
-     * pins (sets 07) are Set state and ride the same PUT wholesale. */
+     * pins (sets 07) and Dormant Cameo pins (#140) are Set state and
+     * ride the same PUT wholesale. */
     replaceEntries: async (
       id: number,
       items: SetEntryItemWire[],
-      dormant: SetDormantPinWire[] = []
+      dormant: SetDormantPinWire[] = [],
+      dormantCameos: SetDormantCameoPinWire[] = []
     ): Promise<SetWithEntriesWire> => {
       const res = await fetch(`${API_BASE}/sets/${id}/entries`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ items, dormant }),
+        body: JSON.stringify({ items, dormant, dormant_cameos: dormantCameos }),
       });
       if (!res.ok) throw new Error(`Failed to save set entries (${res.status})`);
       return res.json();
     },
   },
+
+  // ── App configuration (packaged-app #277): the settings file, not the
+  // DB settings table. Settings → Library edits these.
+  appConfig: {
+    get: async (): Promise<AppConfigWire> => {
+      const res = await fetch(`${API_BASE}/config`);
+      if (!res.ok) throw new Error(`Failed to load app config (${res.status})`);
+      return res.json();
+    },
+
+    update: async (changes: AppConfigUpdateWire): Promise<AppConfigWire> => {
+      const res = await fetch(`${API_BASE}/config`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(changes),
+      });
+      if (!res.ok) throw new Error(`Failed to save app config (${res.status})`);
+      return res.json();
+    },
+
+    /** Show the settings file in Finder. */
+    reveal: async (): Promise<void> => {
+      const res = await fetch(`${API_BASE}/config/reveal`, { method: 'POST' });
+      if (!res.ok) throw new Error(`Failed to reveal settings file (${res.status})`);
+    },
+
+    /** Open the backend log folder in Finder (packaged-app #278). */
+    revealLogs: async (): Promise<void> => {
+      const res = await fetch(`${API_BASE}/config/reveal-logs`, { method: 'POST' });
+      if (!res.ok) throw new Error(`Failed to reveal logs (${res.status})`);
+    },
+  },
 };
+
+// ── App config wire types (packaged-app #277) ──────────────────────────
+
+export interface AppConfigWire {
+  tracks_directory: string | null;
+  rekordbox_path: string | null;
+  /** True when rekordbox_path came from auto-detection, not the settings file. */
+  rekordbox_autodetected: boolean;
+  rekordbox_detected_path: string | null;
+  engine_dj_path: string | null;
+  /** True when engine_dj_path came from auto-detection (#309). */
+  engine_autodetected: boolean;
+  engine_detected_path: string | null;
+  export_enabled: boolean;
+  settings_file: string;
+  /** Live PATH check (packaged-app #278): false => waveforms/analysis/stems broken. */
+  ffmpeg_available: boolean;
+}
+
+export interface AppConfigUpdateWire {
+  /** Path fields: '' clears the key (Rekordbox/Engine return to auto-detect). */
+  tracks_directory?: string;
+  rekordbox_path?: string;
+  engine_dj_path?: string;
+  export_enabled?: boolean;
+}
 
 // ── Take wire types (transition-takes 02) ───────────────────────────────
 
@@ -1410,6 +1889,12 @@ export interface TakeRowWire {
   session_uuid: string | null;
   /** How the Take came to be: 'detected' or 'manual' (issue 06). */
   origin: string;
+  /** Survivor-rule verdict (#140): 'handover', or 'guest' — a CAMEO TAKE
+   * (a = the surviving host, b = the visiting guest). */
+  kind: 'handover' | 'guest';
+  /** Engagement identity (#140): pairwise offspring of one multi-deck
+   * engagement share it (the history groups by it). Null pre-#140. */
+  engagement_uuid: string | null;
 }
 
 export interface TakeDetailWire extends TakeRowWire {
@@ -1433,6 +1918,96 @@ export interface TakeCreateWire {
   session_uuid?: string | null;
   /** 'detected' (default) or 'manual' (hand-cut, issue 06). */
   origin?: string;
+  /** Survivor-rule verdict (#140); absent = 'handover'. */
+  kind?: 'handover' | 'guest';
+  /** Engagement identity (#140); absent/null for hand cuts without one. */
+  engagement_uuid?: string | null;
+}
+
+// ── Routine wire types (ADR 0035, routines 157/158) ─────────────────────
+
+export interface RoutineCandidateWire {
+  uuid: string;
+  session_uuid: string;
+  /** Entry-ordered cast (track ids = slot order). */
+  cast: number[];
+  /** Capture-clock window on the owning Session. */
+  window_start_s: number;
+  window_end_s: number;
+  /** Per slot, seconds from window start (slot 0 = 0.0). */
+  entry_offsets: number[];
+  evidence: Record<string, number>;
+  miner_version: number;
+  created_at: string | null;
+}
+
+export interface RoutineTakeCreateWire {
+  uuid: string;
+  session_uuid: string;
+  window_start_s: number;
+  window_end_s: number;
+  cast: number[];
+  entry_offsets: number[];
+  origin_candidate_uuid?: string | null;
+}
+
+export interface RoutineTakeRowWire {
+  uuid: string;
+  session_uuid: string;
+  cast: number[];
+  window_start_s: number;
+  window_end_s: number;
+  entry_offsets: number[];
+  origin_candidate_uuid: string | null;
+  promoted_routine_uuid: string | null;
+  confirmed_at: string;
+}
+
+export interface RoutineRowWire {
+  uuid: string;
+  name: string | null;
+  cast: number[];
+  /** Per slot, beats from Routine start. */
+  entry_offsets_beats: number[];
+  /** Per slot, track position (seconds) at its entry. */
+  entry_positions: number[];
+  duration_beats: number;
+  origin_take_uuid: string | null;
+  /** Stable slot ids parallel to cast (ADR 0039); null/absent = promoted
+   * (slot id = String(index)). */
+  slot_ids?: string[] | null;
+  /** Authored from scratch (ADR 0039, gh#325): no recording; replay
+   * synthesizes traces. Absent = false. */
+  authored?: boolean;
+  created_at: string | null;
+}
+
+/** A 2↔3 kind crossing's result (ADR 0039, gh#330). */
+export interface KindConversionWire {
+  kind: 'routine' | 'transition';
+  uuid: string;
+  repointed_pins: number;
+  dropped_pins: number;
+}
+
+/** An authored Routine's mutable structure (ADR 0039, gh#325). */
+export interface RoutineStructureWire {
+  cast: number[];
+  slot_ids: string[];
+  entry_offsets_beats: number[];
+  entry_positions: number[];
+  duration_beats: number;
+  /** Present = replace the edits layer in the same write. */
+  edits?: Record<string, unknown> | null;
+}
+
+export interface RoutineDetailWire extends RoutineRowWire {
+  /** Slot-addressed, beat-domain mechanical replay (each event carries
+   * `beat` + `slot`; global controls carry slot null). */
+  events: Record<string, unknown>[];
+  /** Authored edits layer (gh#170 pass 2; routines/routineDraft parses
+   * tolerantly). Null/absent = unedited. */
+  edits?: Record<string, unknown> | null;
 }
 
 // ── Session wire types (Sessions PRD, ADR 0033) ─────────────────────────
@@ -1450,6 +2025,22 @@ export interface SessionDetailWire extends SessionRowWire {
   events: CaptureEventWire[];
 }
 
+// ── Cameo wire types (cameos PRD, #140) ─────────────────────────────────
+
+export interface CameoRowWire {
+  host_track_id: number;
+  guest_track_id: number;
+  uuid: string;
+  position: number;
+  name: string;
+  favorite: boolean;
+  /** Opaque payload: two-edged window in host track seconds, guest
+   * alignment, optional guest→host tempo-match, role lanes, Jumps on
+   * both roles. The client owns the shape (see sets/cameoPlan.ts). */
+  data: Record<string, unknown>;
+  updated_at: string | null;
+}
+
 // ── Set wire types (sets 01) ────────────────────────────────────────────
 
 export interface SetRowWire {
@@ -1465,31 +2056,60 @@ export interface SetRowWire {
   has_archived_tracks: boolean;
 }
 
+/** One Cameo pin (#140): a guest ornament on a Set entry — a saved Cameo
+ * or, manually, a Cameo Take hosted by that entry's Track. Always manual;
+ * never auto-filled. */
+export interface CameoPinWire {
+  pin_kind: 'cameo' | 'cameo-take';
+  pin_uuid: string;
+}
+
+/** A Dormant Cameo pin (#140): kept while its host Track is out of the
+ * Set (Cameo dormancy keys on the host Track per Set, not on a pair). */
+export interface SetDormantCameoPinWire extends CameoPinWire {
+  host_track_id: number;
+}
+
 export interface SetEntryItemWire {
   track_id: number;
   /** Adjacency pin (sets 02): kind and uuid travel together for
-   * transition/take; a Hard-cut pin (sets 26) carries no uuid. */
-  pin_kind?: 'transition' | 'take' | 'hardcut' | null;
+   * transition/take/routine (sets 160); a Hard-cut pin (sets 26)
+   * carries no uuid. */
+  pin_kind?: 'transition' | 'take' | 'hardcut' | 'routine' | null;
   pin_uuid?: string | null;
+  /** Per-entry trim (sets #164): an OFFSET from neutral in mixer-knob
+   * units (0 = neutral, ±0.5 spans the knob) — composes with track
+   * Autogain when that lands (ADR 0034). Absent = neutral. */
+  trim?: number;
+  /** Cameo pins (#140): ordered guest ornaments hosted by this entry's
+   * Track. Adjacency-independent. Absent = none. */
+  cameo_pins?: CameoPinWire[];
 }
 
 export interface SetEntryRowWire {
   track_id: number;
   position: number;
-  pin_kind: 'transition' | 'take' | 'hardcut' | null;
+  pin_kind: 'transition' | 'take' | 'hardcut' | 'routine' | null;
   pin_uuid: string | null;
+  /** Trim offset from neutral, knob units (sets #164). */
+  trim: number;
+  /** Cameo pins (#140), in pin order. */
+  cameo_pins: CameoPinWire[];
 }
 
 /** A Dormant pin (sets 07): a broken pin remembered per ORDERED track
- * pair, per Set — same shape on PUT and GET. */
+ * pair, per Set — same shape on PUT and GET. A routine memory (sets
+ * 160) is keyed by its BOUNDARY tracks (entry, exit). */
 export interface SetDormantPinWire {
   a_track_id: number;
   b_track_id: number;
-  pin_kind: 'transition' | 'take' | 'hardcut';
+  pin_kind: 'transition' | 'take' | 'hardcut' | 'routine';
   pin_uuid: string | null;
 }
 
 export interface SetWithEntriesWire extends SetRowWire {
   entries: SetEntryRowWire[];
   dormant: SetDormantPinWire[];
+  /** Dormant Cameo pins (#140): host-track-keyed memories. */
+  dormant_cameos: SetDormantCameoPinWire[];
 }

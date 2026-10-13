@@ -7,14 +7,63 @@ import { describe, expect, it } from 'vitest';
 import { channelFaderToGain, trimToGain } from '../playback/mixerMath';
 import { eqValueToGain } from '../playback/graph';
 import type { CaptureEvent } from '../capture/events';
-import type { DeckControlSteps } from './timelineModel';
+import type { DeckControlSteps, TimeAxis } from './timelineModel';
 import { buildTimeAxis, deriveTimeline } from './timelineModel';
 import {
   columnModulation,
+  createColumnModulator,
   createMonotonicPxToT,
   createMonotonicTToPx,
+  decimatePlayheadTrace,
+  drawGridlines,
+  drawAudibilityArea,
   tracePolylinePoints,
+  traceRuns,
 } from './waveformLanes';
+import type { DeckTimeline } from './timelineModel';
+import { BEAT_TIER_DIM, beatTierStyle } from '../theme/markers';
+import { ACCENT } from '../theme/tokens';
+
+it('draws one stepped audibility silhouette without per-column seams across collapsed gaps', () => {
+  const axis = makeCollapsedAxis();
+  const points: number[][] = [];
+  const ctx = { fillStyle: '', beginPath() {}, fill() {}, closePath() {},
+    moveTo(...args: number[]) { points.push(args); }, lineTo(...args: number[]) { points.push(args); } };
+  const steps = [{ t: 0, gain: 0.5 }, { t: 20, gain: 0 }, { t: 200, gain: 0.25 }];
+  drawAudibilityArea(ctx as unknown as CanvasRenderingContext2D, steps, axis, ACCENT,
+    { width: axis.totalPx, x0: 0, x1: axis.totalPx, height: 40, yOffset: 10 });
+  expect(points.length).toBeLessThanOrEqual(9);
+  for (let x = 0; x < axis.totalPx; x++) {
+    const t = axis.pxToT(x);
+    const gain = steps.filter(step => step.t <= t).at(-1)?.gain ?? 0;
+    const top = points.find((p, i) => points[i + 1]?.[1] === p[1] && x >= p[0] && x < points[i + 1][0]);
+    expect(50 - top![1]).toBe(gain / 0.5 * 40);
+  }
+});
+
+it('progressively re-thins metric gridlines as lower levels disappear', () => {
+  const beats = Array.from({ length: 129 }, (_, i) => i * 0.5);
+  const downs = beats.filter((_, i) => i % 4 === 0);
+  const ladder = { tierBars: [1, 2, 4, 8, 16], downs: new Map(downs.map((t, i) => [t,
+    { tier: i % 16 === 0 ? 4 : i % 8 === 0 ? 3 : i % 4 === 0 ? 2 : i % 2 === 0 ? 1 : 0,
+      parenthetical: i === 16 }])) };
+  for (const [pxPerSec, baseTier] of [[1, 4], [2, 3], [4, 2], [8, 1], [16, 0], [24, -1]]) {
+    const calls: { x: number; width: number; color: string }[] = [];
+    const ctx = { fillStyle: '', fillRect(x: number, _y: number, width: number) {
+      calls.push({ x, width, color: this.fillStyle });
+    } };
+    const axis: TimeAxis = { pxPerSec, totalPx: 64 * pxPerSec, visibleDurationS: 64,
+      segments: [{ start: 0, end: 64, px0: 0, px1: 64 * pxPerSec, collapsed: false }],
+      tToPx: t => t * pxPerSec, pxToT: x => x / pxPerSec };
+    drawGridlines(ctx as unknown as CanvasRenderingContext2D, beats, downs,
+      [{ t0: 0, t1: 64, ph0: 0, ph1: 64 }], axis,
+      { width: axis.totalPx, yOffset: 0, height: 40, x0: 0, x1: axis.totalPx }, ladder);
+    expect(calls.find(c => c.x === 0)?.width).toBe(beatTierStyle(4 - baseTier, BEAT_TIER_DIM).width);
+    expect(Math.min(...calls.map(c => c.width))).toBe(BEAT_TIER_DIM.weakWidth);
+    expect(calls.find(c => c.x === 32 * pxPerSec)?.color).toContain('255, 209, 102');
+    expect(calls.some(c => c.x === 0.5 * pxPerSec)).toBe(baseTier === -1);
+  }
+});
 
 const controls = (patch: Partial<DeckControlSteps> = {}): DeckControlSteps => ({
   fader: [{ t: 0, gain: 1 }],
@@ -126,6 +175,117 @@ describe('createMonotonicPxToT / createMonotonicTToPx', () => {
     const cursor = createMonotonicPxToT(axis);
     cursor(axis.totalPx - 1);
     expect(cursor(1)).toBeCloseTo(axis.pxToT(1), 9);
+  });
+
+  it('tToPx answers px0 at the first segment start when px0 ≠ 0 (gh#220)', () => {
+    // The routine editor's drawSlotWave axis starts wherever the earliest
+    // run sits on screen — including NEGATIVE px when scrolled. The old
+    // hardcoded `return 0` pinned that run's left edge to the viewport,
+    // stretching its content against a fixed right edge, re-proportioned
+    // every scroll step.
+    const axis: TimeAxis = {
+      segments: [{ start: -16, end: 1280, px0: -300, px1: 900, collapsed: false }],
+      tToPx: (t) => -300 + ((t + 16) / 1296) * 1200,
+      pxToT: (x) => -16 + ((x + 300) / 1200) * 1296,
+      totalPx: 900,
+      visibleDurationS: 1296,
+      pxPerSec: 1200 / 1296,
+    };
+    const cursor = createMonotonicTToPx(axis);
+    expect(cursor(-16)).toBeCloseTo(-300, 9); // was 0 — the shear
+    expect(cursor(-20)).toBeCloseTo(-300, 9); // before-start clamps to px0
+    for (let t = -16; t <= 1280; t += 37) {
+      expect(cursor(t)).toBeCloseTo(axis.tToPx(t), 9);
+    }
+  });
+});
+
+// ── Zoom-adaptive run decimation (low-zoom repaint stalls) ───────────────
+
+const deckWithTrace = (trace: { t: number; playhead: number }[]): DeckTimeline =>
+  ({ traces: [trace] }) as unknown as DeckTimeline;
+
+describe('traceRuns decimation', () => {
+  /** 1 Hz samples whose rate wiggles ±0.1 every second — a jog-heavy
+   * trace that cuts into one run PER SAMPLE at the default tolerance. */
+  const jitteryTrace = () => {
+    const trace: { t: number; playhead: number }[] = [{ t: 0, playhead: 0 }];
+    for (let i = 1; i <= 100; i++) {
+      trace.push({ t: i, playhead: trace[i - 1].playhead + (i % 2 === 0 ? 1.1 : 0.9) });
+    }
+    return trace;
+  };
+
+  it('minDtS collapses sub-sample rate wiggles into few runs', () => {
+    const deck = deckWithTrace(jitteryTrace());
+    const fine = traceRuns(deck);
+    const coarse = traceRuns(deck, undefined, 8);
+    expect(fine.length).toBeGreaterThan(50);
+    expect(coarse.length).toBeLessThan(fine.length / 5);
+    // Endpoints survive decimation exactly.
+    expect(coarse[0].t0).toBe(0);
+    expect(coarse[coarse.length - 1].t1).toBe(100);
+    expect(coarse[coarse.length - 1].ph1).toBeCloseTo(100, 9);
+  });
+
+  it('minDtS = 0 is the identity (default behavior unchanged)', () => {
+    const deck = deckWithTrace(jitteryTrace());
+    expect(traceRuns(deck, undefined, 0)).toEqual(traceRuns(deck));
+  });
+
+  it('short traces pass through untouched', () => {
+    const deck = deckWithTrace([
+      { t: 0, playhead: 0 },
+      { t: 1, playhead: 1 },
+    ]);
+    expect(traceRuns(deck, undefined, 30)).toEqual([{ t0: 0, t1: 1, ph0: 0, ph1: 1 }]);
+  });
+
+  it('a seek inside the decimation window survives (minPh)', () => {
+    // Steady playback, then a big seek at t=10, then steady again.
+    const trace: { t: number; playhead: number }[] = [];
+    for (let i = 0; i <= 20; i++) {
+      trace.push({ t: i, playhead: i < 10 ? i : i + 120 });
+    }
+    const thin = decimatePlayheadTrace(trace, 30, 60);
+    // Endpoints + the seek landing point survive.
+    expect(thin[0]).toEqual({ t: 0, playhead: 0 });
+    expect(thin.some((p) => p.playhead >= 130 && p.t <= 11)).toBe(true);
+    // Without minPh the seek would vanish into one straight run.
+    expect(decimatePlayheadTrace(trace, 30)).toHaveLength(2);
+  });
+});
+
+describe('createColumnModulator', () => {
+  it('agrees with columnModulation over a monotonic sweep and after rewind', () => {
+    const c = controls({
+      fader: [
+        { t: 0, gain: 1 },
+        { t: 5, gain: 0.5 },
+        { t: 9, gain: 0 },
+      ],
+      eqLow: [
+        { t: 0, gain: 0.5 },
+        { t: 6, gain: 0 },
+      ],
+      trim: [
+        { t: 0, gain: 0.5 },
+        { t: 7, gain: 1 },
+      ],
+    });
+    const mod = createColumnModulator(c);
+    for (let t = -1; t <= 12; t += 0.25) {
+      expect(mod(t)).toEqual(columnModulation(c, t));
+    }
+    // Defensive rewind: a backward step still matches.
+    expect(mod(2)).toEqual(columnModulation(c, 2));
+  });
+
+  it('empty series fall back to strip defaults', () => {
+    const empty = { fader: [], trim: [], eqLow: [], eqMid: [], eqHigh: [] };
+    const mod = createColumnModulator(empty);
+    expect(mod(5)).toEqual(columnModulation(empty, 5));
+    expect(mod(5).eq).toEqual([1, 1, 1]);
   });
 });
 

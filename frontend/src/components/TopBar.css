@@ -1,5 +1,12 @@
-/* Persistent top bar. Design language: library player — square 1px-border
-   bold buttons, catppuccin vars. */
+/* Persistent top bar — mode-first (gh#66). Design language: library
+   player — square 1px-border bold buttons, catppuccin vars.
+
+   Consistency contract (the gh#66 verdict's type/size pass):
+   - every control is 24px tall;
+   - one type scale: 13px icons / 10px 800 0.08em control labels /
+     9px 800 0.1em micro field labels;
+   - one chrome: transparent background, 1px var(--overlay0) border,
+     square corners; active = filled with the control's accent. */
 
 /* App shell: top bar + mode surface filling the rest of the viewport. */
 .app-shell {
@@ -9,18 +16,36 @@
   overflow: hidden;
 }
 
+/* Mode top panels stack over the ONE shared bottom browse panel (gh#165);
+   position anchors the perf cursor-suppression overlay. */
 .app-main {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
+/* The shared browse panel: every remaining pixel under the active mode's
+   top panel (the whole surface in library mode). Lock-dim classes on it are
+   styled in PerformanceView.css (perf load-lock domain). */
+.app-browse {
   flex: 1;
   min-height: 0;
   overflow: hidden;
 }
 
+.app-browse > div {
+  height: 100%;
+}
+
 .topbar {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: var(--space-12);
   height: 40px;
-  padding: 0 10px;
+  padding: 0 var(--space-12);
   background: var(--crust);
   border-bottom: 1px solid var(--surface1);
   flex-shrink: 0;
@@ -35,9 +60,18 @@
   padding-left: 84px;
 }
 
+/* Windows/Linux (gh#313): no traffic lights; the native caption buttons
+   (titleBarOverlay, desktop/chrome.js) overlay the right edge. Inset past
+   them via the window-controls-overlay area; 138px = Windows' 3 x 46px. */
+.desktop-shell.platform-other .topbar {
+  padding-left: var(--space-12);
+  padding-right: calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, calc(100vw - 138px)) + var(--space-12));
+}
+
 /* Anything interactive in the bar must opt out of the drag region, including
-   controls other features add later. */
-.desktop-shell .topbar :is(button, a, input, select, [role='button']) {
+   controls other features add later. The knob dials are draggable divs —
+   without the opt-out, turning a gain knob would drag the window. */
+.desktop-shell .topbar :is(button, a, input, select, [role='button'], .perf-knob-dial) {
   -webkit-app-region: no-drag;
 }
 
@@ -47,52 +81,367 @@
   object-fit: contain;
 }
 
-.topbar-modes {
-  display: flex;
-  gap: 6px;
-}
+/* ── Grouping helpers ──────────────────────────────────────────────── */
 
-.topbar-mode {
-  width: 30px;
-  padding: 3px 0;
-  background: transparent;
-  border: 1px solid var(--overlay0);
-  color: var(--subtext0);
-  font-size: 14px;
-  font-weight: 700;
-  line-height: 1;
-  cursor: pointer;
-  transition: background 0.15s, color 0.15s, border-color 0.15s;
-}
-
-.topbar-mode:hover {
-  border-color: var(--blue);
-  color: var(--blue);
-}
-
-.topbar-mode.active {
-  background: var(--blue);
-  border-color: var(--blue);
-  color: var(--base);
-}
-
-.topbar-title {
-  margin: 0;
-  font-size: 13px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--text);
-}
-
-/* MIDI Controller badge: leads the right cluster. */
-.topbar-midi {
+/* Global status dock: pinned right, stable across modes. */
+.topbar-status {
   margin-left: auto;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  font-size: 11px;
+  gap: var(--space-8);
+}
+
+@media (max-width: 1400px) {
+  .topbar { height: auto; min-height: 40px; flex-wrap: wrap; padding-block: var(--space-6); }
+  .topbar-status { flex-wrap: wrap; min-width: 0; }
+}
+
+.topbar-group {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-8);
+}
+
+.topbar-divider {
+  width: 1px;
+  height: 20px;
+  background: var(--surface1);
+  flex-shrink: 0;
+}
+
+/* ── Mode control: labeled segments + overflow ─────────────────────── */
+
+.topbar-mode-control {
+  position: relative;
+  display: flex;
+}
+
+.topbar-segment {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-6);
+  height: 24px;
+  padding: 0 var(--space-12);
+  background: transparent;
+  border: 1px solid var(--overlay0);
+  border-right-width: 0;
+  color: var(--subtext0);
+  cursor: pointer;
+}
+
+.topbar-segment:last-of-type {
+  border-right-width: 1px;
+}
+
+.topbar-segment-icon {
+  font-size: var(--font-body);
   font-weight: 700;
+  line-height: 1;
+}
+
+.topbar-segment-label {
+  font-size: var(--font-micro);
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  line-height: 1;
+}
+
+@media (max-width: 600px) {
+  .topbar-mode-control [aria-label='Settings'] .topbar-segment-label {
+    display: none;
+  }
+}
+
+.topbar-segment:hover {
+  color: var(--accent);
+}
+
+.topbar-segment.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--base);
+}
+
+/* Overflow trigger: a quiet ⋯ segment until an overflow mode is active,
+   then it wears that mode's icon + label (kept narrow either way). */
+.topbar-segment-overflow {
+  padding: 0 var(--space-8);
+}
+
+.topbar-segment-overflow.open:not(.active) {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.topbar-mode-menu-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-overlay);
+}
+
+.topbar-mode-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: calc(var(--z-overlay) + 1);
+  display: flex;
+  flex-direction: column;
+  min-width: 200px;
+  background: var(--mantle);
+  border: 1px solid var(--surface1);
+  box-shadow: 0 10px 26px rgb(0 0 0 / 45%);
+}
+
+.topbar-mode-menu-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  height: 30px;
+  padding: 0 var(--space-12);
+  background: transparent;
+  border: 0;
+  color: var(--subtext0);
+  text-align: left;
+  cursor: pointer;
+}
+
+.topbar-mode-menu-item:hover {
+  background: var(--surface0);
+  color: var(--text);
+}
+
+.topbar-mode-menu-item.active {
+  background: var(--accent);
+  color: var(--base);
+}
+
+.topbar-mode-menu-item .topbar-segment-label {
+  min-width: 52px;
+}
+
+.topbar-mode-menu-title {
+  font-size: var(--font-micro);
+  font-weight: 600;
+  color: var(--overlay1);
+  white-space: nowrap;
+}
+
+.topbar-mode-menu-item:hover .topbar-mode-menu-title {
+  color: inherit;
+}
+
+.topbar-mode-menu-item.active .topbar-mode-menu-title {
+  color: inherit;
+}
+
+/* ── Recording ─────────────────────────────────────────────────────── */
+
+/* One joined control: the format select and the REC/stop button share an
+   edge (the save-error face separates them again — see below). */
+.topbar-recorder {
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+  height: 24px;
+}
+
+.topbar-recorder select,
+.topbar-recorder button {
+  height: 24px;
+  padding: 0 var(--space-6);
+  background: transparent;
+  border: 1px solid var(--overlay0);
+  color: var(--subtext0);
+  font-family: inherit;
+  font-size: var(--font-micro);
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  line-height: 1;
+}
+
+.topbar-recorder select { width: 66px; border-right-width: 0; }
+.topbar-recorder button { cursor: pointer; }
+.topbar-recorder button:disabled { cursor: wait; opacity: 0.65; }
+
+.topbar-recorder button:hover:not(:disabled) {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.topbar-record-dot,
+.topbar-record-square {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  background: var(--danger);
+}
+
+.topbar-record-dot { border-radius: 50%; }
+.topbar-recorder.recording .topbar-record-stop {
+  min-width: 58px;
+  background: var(--danger);
+  border-color: var(--danger);
+  color: var(--base);
+}
+.topbar-recorder.recording .topbar-record-stop:hover {
+  background: color-mix(in srgb, var(--danger) 80%, var(--base));
+  color: var(--base);
+}
+.topbar-recorder.recording .topbar-record-square { background: var(--base); }
+
+/* Save-error face (select · ! · SAVE · ×): the error glyph splits the
+   joined pair; SAVE and × join instead. */
+.topbar-recorder.ready select { border-right-width: 1px; }
+.topbar-recorder.ready .topbar-record-retry {
+  border-color: var(--warning);
+  color: var(--warning);
+}
+.topbar-recorder.ready .topbar-record-retry:hover:not(:disabled) {
+  border-color: var(--warning);
+  color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 15%, transparent);
+}
+.topbar-recorder.ready .topbar-record-retry + button { border-left-width: 0; }
+.topbar-record-error {
+  margin: 0 var(--space-6);
+  color: var(--danger);
+  font-size: var(--font-body);
+  font-weight: 900;
+  line-height: 1;
+}
+
+/* ── Audio: routing · deck ownership · MIDI ────────────────────────── */
+
+/* Audio-ownership chip (sets 40): who owns the decks, always present in
+   the same slot. Muted while the shared decks hold; the muted→colored
+   flip is the takeover/stand-down signal. Fixed height/typography across
+   faces. */
+.topbar-ownership {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-6);
+  height: 24px;
+  padding: 0 var(--space-8);
+  background: transparent;
+  border: 1px solid var(--overlay0);
+  color: var(--overlay0);
+  font-size: var(--font-micro);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+/* Muted DECKS: the shared default — glanceable, not clickable. */
+.topbar-ownership.decks {
+  cursor: default;
+}
+
+.topbar-ownership.set-playing {
+  background: var(--success);
+  border-color: var(--success);
+  color: var(--base);
+}
+
+/* Paused Conductor STILL holds the claim (ADR 0024) — never hide it.
+   Yellow: the one state people would otherwise misread as "free". */
+.topbar-ownership.set-paused {
+  background: var(--warning);
+  border-color: var(--warning);
+  color: var(--base);
+}
+
+.topbar-ownership.audition {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--base);
+}
+
+/* REPLAY is an ACTIVE state (sessions 16) — the machine is performing on
+   the decks right now; green like a playing set, click = jump to the
+   replayed Session's playhead. */
+.topbar-ownership.replay {
+  background: var(--success);
+  border-color: var(--success);
+  color: var(--base);
+}
+
+/* Driver glyph: metronome (nerd font) while the machine performs (SET,
+   REPLAY, AUDITION), the vinyl glyph (◉, same as the Practice verb) while
+   the decks are in human hands (DECKS). */
+.topbar-ownership-icon {
+  font-size: var(--font-body);
+  line-height: 1;
+}
+
+.topbar-ownership-name {
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 800;
+}
+
+/* Output routing (headphone-cue 04): MASTER/CUE device selects, inline.
+   Wider gap between the buses so knob→select pairing reads unambiguously. */
+.topbar-routing {
+  display: flex;
+  align-items: center;
+  gap: var(--space-16);
+}
+
+/* Topbar knobs run a notch smaller than the deck MIX-zone ones. */
+.topbar-routing .perf-knob-dial {
+  width: 18px;
+  height: 18px;
+}
+
+.topbar-routing .perf-knob-pointer::after {
+  height: 6px;
+}
+
+/* One bus: [gain knob][device select], the knob's under-label (deck MIX
+   zone style) naming the bus. */
+.topbar-routing-bus-group {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.topbar-routing-bus {
+  display: inline-flex;
+  align-items: center;
+}
+
+.topbar-routing-bus select {
+  max-width: 150px;
+  height: 24px;
+  box-sizing: border-box;
+  padding: 0 var(--space-4);
+  background: transparent;
+  border: 1px solid var(--overlay0);
+  color: var(--subtext0);
+  /* base.css inherits the app font into button/input but not select */
+  font-family: inherit;
+  font-size: var(--font-micro);
+  font-weight: 700;
+  text-overflow: ellipsis;
+}
+
+.topbar-routing-bus.missing select {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+/* MIDI Controller badge: passive status, lit while a mapped controller is
+   attached. */
+.topbar-midi {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-6);
+  height: 24px;
+  font-size: var(--font-micro);
+  font-weight: 800;
   letter-spacing: 0.08em;
   color: var(--overlay0);
   cursor: default;
@@ -103,250 +452,88 @@
   width: 8px;
   height: 8px;
   background: var(--surface2);
-  transition: background 0.15s, box-shadow 0.15s;
 }
 
 .topbar-midi.on {
-  color: var(--green);
+  color: var(--success);
 }
 
 .topbar-midi.on .topbar-midi-dot {
-  background: var(--green);
-  box-shadow: 0 0 6px var(--green);
+  background: var(--success);
+  box-shadow: 0 0 6px var(--success);
 }
 
-.topbar-recorder {
+/* ── Visualizer (realtime-visualization 01/02) ─────────────────────── */
+
+/* One joined control: window toggle + settings share an edge. */
+.topbar-visualizer-cluster {
+  display: inline-flex;
+  gap: 0;
+}
+
+.topbar-visualizer {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-4);
   height: 24px;
-}
-
-.topbar-recorder select,
-.topbar-recorder button {
-  height: 24px;
-  padding: 0 6px;
+  padding: 0 var(--space-8);
   background: transparent;
   border: 1px solid var(--overlay0);
   color: var(--subtext0);
-  font: 800 9px/1 monospace;
-}
-
-.topbar-recorder select { width: 62px; }
-.topbar-recorder button { cursor: pointer; }
-.topbar-recorder button:disabled { cursor: wait; opacity: 0.65; }
-
-.topbar-record-dot,
-.topbar-record-square {
-  display: inline-block;
-  width: 7px;
-  height: 7px;
-  background: var(--red);
-}
-
-.topbar-record-dot { border-radius: 50%; }
-.topbar-recorder.recording .topbar-record-stop {
-  min-width: 58px;
-  background: var(--red);
-  border-color: var(--red);
-  color: var(--base);
-}
-.topbar-recorder.recording .topbar-record-square { background: var(--base); }
-.topbar-recorder.ready .topbar-record-retry {
-  border-color: var(--yellow);
-  color: var(--yellow);
-}
-.topbar-record-error { color: var(--red); font: 900 12px/1 monospace; }
-
-/* Quantize toggle (looping 01): app-wide, lit green while gestures snap. */
-.topbar-quantize {
-  width: 24px;
-  padding: 3px 0;
-  background: transparent;
-  border: 1px solid var(--overlay0);
-  color: var(--overlay0);
-  font-size: 12px;
+  font-size: var(--font-micro);
   font-weight: 800;
+  letter-spacing: 0.08em;
   line-height: 1;
   cursor: pointer;
-  transition: background 0.15s, color 0.15s, border-color 0.15s;
 }
 
-.topbar-quantize:hover {
-  border-color: var(--green);
-  color: var(--green);
-}
-
-.topbar-quantize.on {
-  background: var(--green);
-  border-color: var(--green);
-  color: var(--base);
-}
-
-/* Visualizer window opener (realtime-visualization 01): same square
-   1px-border language as the Quantize toggle. */
-.topbar-visualizer {
-  width: 24px;
-  padding: 3px 0;
-  background: transparent;
-  border: 1px solid var(--overlay0);
-  color: var(--overlay0);
-  font-size: 12px;
-  font-weight: 800;
+.topbar-visualizer-icon {
+  font-size: var(--font-body);
   line-height: 1;
-  cursor: pointer;
-  transition: color 0.15s, border-color 0.15s;
 }
 
 .topbar-visualizer:hover {
-  border-color: var(--mauve);
-  color: var(--mauve);
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
 .topbar-visualizer.on {
-  background: var(--mauve);
-  border-color: var(--mauve);
+  background: var(--accent);
+  border-color: var(--accent);
   color: var(--base);
-}
-
-.topbar-visualizer-cluster {
-  display: inline-flex;
-  gap: 2px;
 }
 
 .topbar-visualizer-caret {
-  width: 16px;
-  padding: 3px 0;
-  background: transparent;
-  border: 1px solid var(--overlay0);
-  color: var(--overlay0);
-  font-size: 10px;
-  line-height: 1;
-  cursor: pointer;
-  transition: color 0.15s, border-color 0.15s;
-}
-
-.topbar-visualizer-caret:hover {
-  border-color: var(--mauve);
-  color: var(--mauve);
-}
-
-/* Audio-ownership chip (sets 40): who owns the decks, always present in
-   the same slot. Muted while the shared decks hold; the muted→colored
-   flip is the takeover/stand-down signal. Fixed height/typography across
-   faces. */
-.topbar-ownership {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 24px;
-  padding: 0 8px;
-  background: transparent;
-  border: 1px solid var(--overlay0);
-  color: var(--overlay0);
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  line-height: 1;
-  white-space: nowrap;
-  cursor: pointer;
-  transition: background 0.15s, color 0.15s, border-color 0.15s;
-}
-
-/* Muted DECKS: the shared default — glanceable, not clickable. */
-.topbar-ownership.decks {
-  cursor: default;
-}
-
-.topbar-ownership.set-playing {
-  background: var(--green);
-  border-color: var(--green);
-  color: var(--base);
-}
-
-/* Paused Conductor STILL holds the claim (ADR 0024) — never hide it.
-   Yellow: the one state people would otherwise misread as "free". */
-.topbar-ownership.set-paused {
-  background: var(--yellow);
-  border-color: var(--yellow);
-  color: var(--base);
-}
-
-.topbar-ownership.audition {
-  background: var(--mauve);
-  border-color: var(--mauve);
-  color: var(--base);
-}
-
-/* REPLAY is an ACTIVE state (sessions 16) — the machine is performing on
-   the decks right now; green like a playing set, click = jump to the
-   replayed Session's playhead. */
-.topbar-ownership.replay {
-  background: var(--green);
-  border-color: var(--green);
-  color: var(--base);
-}
-
-.topbar-ownership-icon {
-  font-size: 10px;
-}
-
-.topbar-ownership-name {
-  max-width: 200px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-weight: 800;
-}
-
-/* Output routing (headphone-cue 04): MASTER/CUE device selects, inline. */
-.topbar-routing {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.topbar-routing-bus {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-}
-
-.topbar-routing-label {
-  font-size: 9px;
-  font-weight: 800;
-  letter-spacing: 0.1em;
-  color: var(--overlay0);
-}
-
-.topbar-routing-bus select {
-  max-width: 150px;
-  padding: 2px 4px;
-  background: var(--crust);
-  border: 1px solid var(--surface1);
-  color: var(--text);
-  /* base.css inherits the app font into button/input but not select */
-  font-family: inherit;
-  font-size: 11px;
-  text-overflow: ellipsis;
-}
-
-.topbar-routing-bus.missing select {
-  border-color: var(--red);
-  color: var(--red);
-}
-
-.topbar-routing-refresh {
-  width: 24px;
+  width: 22px;
   height: 24px;
   padding: 0;
   background: transparent;
-  border: 1px solid var(--surface1);
-  color: var(--overlay1);
-  font: inherit;
+  border: 1px solid var(--overlay0);
+  border-left-width: 0;
+  color: var(--subtext0);
+  font-size: var(--font-body);
+  line-height: 1;
   cursor: pointer;
 }
 
-.topbar-routing-refresh:hover {
-  border-color: var(--text);
-  color: var(--text);
+.topbar-visualizer-caret:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* ffmpeg health warning (packaged-app #278): rendered only when ffmpeg is
+   missing from PATH — an app-level error state, not a transient toast. */
+.topbar-ffmpeg-warning {
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  padding: 0 var(--space-8);
+  font-size: var(--font-micro);
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: var(--danger);
+  border: 1px solid var(--danger);
+  border-radius: var(--radius);
+  cursor: help;
+  user-select: none;
 }

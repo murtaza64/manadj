@@ -12,25 +12,35 @@
  *   POSITIONS (the lane domain — MixPlayer re-applies the fader taper).
  *   Trim stays out: gain staging, not the move.
  * - CONTINUOUS GESTURES COLLAPSE: pitch riding and Nudges (bends) never
- *   become lanes; the settled incoming pitch against the BPM ratio decides
- *   the single static tempo-match.
+ *   become lanes; the single static tempo-match is decided rate-relatively
+ *   (sets 169) — by the settled B-vs-A rate ratio against the BPM ratio,
+ *   or by the measured cruise-slope ratio when the ticks prove the ride —
+ *   octave-equivalently (grid-octave 168): the required ride is the grid
+ *   ratio's dyadic fold nearest 1.
  * - SPARSE LANES: dense drag streams simplify (RDP) to editable
  *   breakpoints; untouched controls stay out of `lanes` entirely — except
  *   the incoming fader lane, always drawn: its model default (a 2s fade-in
  *   ramp) would lie about a deck that was already up.
- * - DISCRETE GESTURES PRESERVED (issue 04): incoming-deck beat jumps and
- *   hot-cue presses become Jump events; outgoing-deck ones are dropped
- *   (incoming-only, ADR 0020). Plain seeks are scrubbing — not gestures:
- *   a mid-window seek simply shifts the commit-point alignment, i.e. the
- *   final (post-seek) alignment wins, per the idealization rule.
+ * - DISCRETE GESTURES PRESERVED (issue 04, both decks since issue 177):
+ *   beat jumps and hot-cue presses become Jump events — incoming-deck ones
+ *   on `jumps`, outgoing-deck ones on `jumpsA` (the doctrine's pre-planned
+ *   relaxation: mix time ≡ the outgoing's elapsed play). Jumps are
+ *   window-scoped; an ESSENTIAL pre-window outgoing jump — a backward
+ *   jump/loop whose replayed stretch is still in progress when the
+ *   incoming enters — WIDENS the window to contain it (pre-window jumps
+ *   are never admitted; inessential ones are absorbed by the anchors).
+ *   Plain seeks are scrubbing — not gestures: a mid-window seek simply
+ *   shifts the commit-point alignment, i.e. the final (post-seek)
+ *   alignment wins, per the idealization rule.
  *
  * The editor's deck roles are track-based: editor A = the outgoing deck,
  * whichever physical channel it was on.
  */
-import { jumpRepeatCount } from '../editor/mixModel';
+import { jumpRepeatCount, tempoMatchRatio } from '../editor/mixModel';
 import type { JumpEvent, LaneId, LanePoint, Lanes, Transition } from '../editor/mixModel';
 import { channelFaderToGain, crossfaderGains } from '../playback/mixerMath';
 import type { CaptureChannel, CaptureEvent, InitDeckState } from './events';
+import { deriveTransitionBeatFx } from '../editor/beatFxLane';
 
 const OTHER: Record<CaptureChannel, CaptureChannel> = { A: 'B', B: 'A' };
 
@@ -40,11 +50,29 @@ const STEP_EPS = 0.002;
 const SIMPLIFY_EPS = 0.015;
 /** Constant-lane inclusion thresholds. */
 const VARIES_EPS = 0.005;
-const OFF_DEFAULT_EPS = 0.02;
+/** Exported for the editor's lane shading (mix-editor 39): "renders as
+ * neutral" and "vectorizes as untouched" must be the same epsilon. */
+export const OFF_DEFAULT_EPS = 0.02;
 /** Performed-vs-required pitch gap (percent) still reading as "matched". */
 const TEMPO_MATCH_TOLERANCE_PERCENT = 1.5;
+/** Measured-ride gap (percent) reading as "matched" (sets 169). The
+ * cruise-slope RATIO cancels capture-clock skew, so it is an order more
+ * precise than the settled-pitch evidence: real rides in the library
+ * measure ≤0.15% off required; a no-touch pair reads the full BPM gap. */
+const MEASURED_RIDE_TOLERANCE_PERCENT = 0.25;
 /** Discontinuities smaller than this are sample jitter, not gestures. */
 const MIN_JUMP_SEC = 0.1;
+/** Baseline repair (sets 166): the measured rate replaces the recorded
+ * pitch baseline only past this disagreement — tick-slope jitter on a
+ * healthy slice is ~0.05%; a lost baseline is ≥ the ride itself. */
+const BASELINE_REPAIR_TOLERANCE_PERCENT = 0.2;
+/** Minimum consecutive-tick pairs for a trustworthy rate measurement. */
+const MIN_RATE_PAIRS = 3;
+/** Self-consistency bound: the pairs must agree (median absolute
+ * deviation, rate units) or the span is ambiguous — heavy nudging over
+ * few samples — and the recorded baseline stands. Real ~1 Hz ticks carry
+ * ~0.15% sampling jitter; ambiguity reads an order louder. */
+const MAX_RATE_MAD = 0.005;
 
 export interface VectorizeInput {
   /** The Take's raw slice, starting with its `init` head. */
@@ -69,15 +97,40 @@ export function vectorizeTake(
   input: VectorizeInput,
   facts: VectorizeFacts
 ): VectorizedDraft | null {
+  // Vinyl and Slip-loop returns aren't representable by this vectorizer.
+  // Refuse rather than silently retaining only the loop's backward wraps.
+  if (input.events.some((e) =>
+    (e.kind === 'transport' && e.action.startsWith('scratch')) ||
+    (e.kind === 'loop' && e.slip) ||
+    (e.kind === 'init' && Object.values(e.decks).some((d) => d.scratching || d.slipLoopActive))
+  )) return null;
   const init = input.events.find((e) => e.kind === 'init');
   if (!init || init.kind !== 'init') return null;
   const out = init.outgoingChannel;
   const inc = OTHER[out];
-  const { windowStartS, windowEndS } = input;
-  const windowLen = Math.max(0, windowEndS - windowStartS);
+  const { windowEndS } = input;
+
+  // LOST BASELINE REPAIR (sets 166): slices captured before the recorder
+  // seeded pitch explicitly (the sessions-18 fix) carry a false zero
+  // baseline for any deck pitched before the seed — the whole damaged-era
+  // library replays unmatched and out of phase. The playhead samples ARE
+  // direct observations of the actual rate: when the measured baseline
+  // contradicts the recorded one beyond jitter, the measurement wins.
+  // Post-fix slices agree within jitter and keep their exact recorded
+  // values (bit-identical output).
+  const baseline: Partial<Record<CaptureChannel, number>> = {};
+  for (const ch of Object.keys(init.decks) as CaptureChannel[]) {
+    const measured = measuredPitchBaseline(input.events, ch, input.windowStartS, windowEndS);
+    if (
+      measured !== null &&
+      Math.abs(measured - init.decks[ch].pitch) > BASELINE_REPAIR_TOLERANCE_PERCENT
+    ) {
+      baseline[ch] = measured;
+    }
+  }
 
   const pitchAt = (ch: CaptureChannel, t: number): number => {
-    let p = init.decks[ch].pitch;
+    let p = baseline[ch] ?? init.decks[ch].pitch;
     for (const e of input.events) {
       if (e.kind === 'pitch' && e.channel === ch && e.t <= t) p = e.value;
     }
@@ -90,7 +143,7 @@ export function vectorizeTake(
     for (const e of input.events) {
       if (e.kind === 'tick' && e.playheads[ch] !== undefined) {
         samples.push({ t: e.t, pos: e.playheads[ch]! });
-      } else if (e.kind === 'transport' && e.channel === ch) {
+      } else if ((e.kind === 'transport' || e.kind === 'loop') && e.channel === ch) {
         samples.push({ t: e.t, pos: e.playhead });
       }
     }
@@ -104,7 +157,32 @@ export function vectorizeTake(
     return ref.pos + (t - ref.t) * rateAt(ch, ref.t);
   };
 
-  const startSec = playheadAt(out, windowStartS);
+  // WINDOW WIDENING (issue 177): an essential pre-window outgoing jump —
+  // a backward jump or loop whose replayed stretch is still in progress
+  // at the window start (the double's setup: jump back, then bring the
+  // incoming in over the repeated material) — widens the window to
+  // contain it, landing the jump at x=0. Iterated to a fixpoint: an even
+  // earlier jump may be essential relative to the widened start.
+  // Inessential pre-window jumps (forward, or replay already completed)
+  // are absorbed by the track-time anchors and never admitted.
+  let windowStartS = input.windowStartS;
+  for (let pass = 0; pass < 8; pass++) {
+    const t = essentialPreWindowJumpInstant(input.events, out, windowStartS, rateAt);
+    if (t === null || t >= windowStartS) break;
+    windowStartS = t;
+  }
+  const widened = windowStartS < input.windowStartS;
+  const win: VectorizeInput = { events: input.events, windowStartS, windowEndS };
+  const windowLen = Math.max(0, windowEndS - windowStartS);
+
+  // A widened start IS a jump instant: the anchor must be the PRE-jump
+  // position (the model applies the delta AT the instant), so extrapolate
+  // from the latest sample strictly before it. Unwidened keeps the exact
+  // legacy read (samples at the boundary included).
+  const startSec = widened
+    ? (playheadStrictlyBefore(input.events, out, windowStartS, rateAt) ??
+      playheadAt(out, windowStartS))
+    : playheadAt(out, windowStartS);
   const durationSec = windowLen * rateAt(out, windowStartS);
 
   // Static tempo-match from the settled incoming pitch (idealization),
@@ -113,42 +191,89 @@ export function vectorizeTake(
   // pitch — is what must read as matched. A DJ who matched B to a PITCHED
   // A (both decks −0.7%-ish) performed a perfect match that absolute
   // comparison misses.
-  const required =
-    facts.bpmA && facts.bpmB ? (facts.bpmA / facts.bpmB - 1) * 100 : null;
   const renormPct = (rateAt(inc, windowEndS) / rateAt(out, windowEndS) - 1) * 100;
+  // OCTAVE-AWARE REQUIRED (grid-octave 168): half/double-BPM beatgrids
+  // are first-class in this library (DnB gridded at 87 and ridden at 174;
+  // the browse gate already folds dyadically — crud.get_tracks). Against
+  // a half-gridded track the raw grid ratio reads +~100%/−~50% required:
+  // unmatchable, every real match lost (track 959 field evidence). The
+  // required ride is the CANONICAL octave fold (tempoMatchRatio — the
+  // dyadic fold of the grid ratio nearest 1), the same fold the model
+  // replays a matched draft at, so the verdict and the playback agree.
+  // Folds sit ≥ 33% apart across the library's BPM range while the
+  // tolerance is 1.5% — folding cannot flip a healthy verdict.
+  const gridRatio = facts.bpmA && facts.bpmB ? facts.bpmA / facts.bpmB : null;
+  const matchRatio = tempoMatchRatio(facts.bpmA, facts.bpmB);
+  const fold = gridRatio !== null && matchRatio !== null ? matchRatio / gridRatio : null;
+  const required = matchRatio !== null ? (matchRatio - 1) * 100 : null;
   // Beat-domain drift bound (4dp 39): a pitch-domain tolerance alone lets
   // the accumulated back-projection error grow with the window — 1% over
   // a 145-beat double is 1.5 beats. Match only when the residual drift
-  // over the whole window stays under a quarter-beat of B.
-  const driftBoundS = facts.bpmB ? 0.25 * (60 / facts.bpmB) : null;
-  const tempoMatch =
+  // over the whole window stays under a quarter-beat of B. Under a fold
+  // B's true beat is ambiguous (B half-gridded vs A double-gridded), so
+  // read the bound at the FASTEST interpretation of B's BPM — the
+  // conservative bound, never looser than the grid's own.
+  const driftBoundS =
+    facts.bpmB && fold !== null
+      ? 0.25 * (60 / (facts.bpmB * Math.max(1, 1 / fold)))
+      : null;
+  const settledMatch =
     required !== null &&
     driftBoundS !== null &&
     Math.abs(renormPct - required) <= TEMPO_MATCH_TOLERANCE_PERCENT &&
     (Math.abs(renormPct - required) / 100) * durationSec <= driftBoundS;
+  // MEASURED-RIDE evidence (sets 169): the settled-pitch verdict leans on
+  // recorded/repaired baselines, and mixing a repaired deck with a
+  // recorded one injects capture-clock skew (~0.1%) into the ratio —
+  // which the quarter-beat drift bound amplifies into false negatives on
+  // any window past ~45s (elevated standing tempo reads as unmatched).
+  // The Transition doctrine's reference is the outgoing's ACTUAL rate, so
+  // measure the ride directly: each deck's cruise slope from the slice's
+  // own ticks, ratioed — the shared capture clock cancels out. tempoMatch
+  // ⇔ rateOut·bpmA ≈ rateInc·bpmB. A bend-corrected ride never
+  // accumulates its residual as phase error (the DJ absorbed it), so this
+  // gate carries a looser HALF-beat bound: enough to keep a genuinely
+  // sloppy uncorrected cruise on a long window out.
+  const cruiseOut = medianTickSlopePct(input.events, out, windowStartS, windowEndS);
+  const cruiseInc = medianTickSlopePct(input.events, inc, windowStartS, windowEndS);
+  const measuredPct =
+    cruiseOut !== null && cruiseInc !== null
+      ? ((100 + cruiseInc) / (100 + cruiseOut) - 1) * 100
+      : null;
+  const measuredMatch =
+    required !== null &&
+    driftBoundS !== null &&
+    measuredPct !== null &&
+    Math.abs(measuredPct - required) <= MEASURED_RIDE_TOLERANCE_PERCENT &&
+    (Math.abs(measuredPct - required) / 100) * durationSec <= 2 * driftBoundS;
+  const tempoMatch = settledMatch || measuredMatch;
 
-  // DISCRETE GESTURES → JUMP EVENTS (issue 04, ADR 0020's line): beat
-  // jumps and hot-cue presses on the INCOMING deck are intentional
-  // structure, preserved; the outgoing deck's are dropped at vectorization
-  // (incoming-only — the raw slice keeps them for a later both-decks
-  // extension). Each delta measures the landing against the pre-jump
-  // path — extrapolated from the latest sample strictly before the
-  // gesture, so chained jumps compose correctly. Plain seeks are
-  // scrubbing, not gestures.
-  const jumps: JumpEvent[] = [];
-  if (windowLen > 0) {
+  // DISCRETE GESTURES → JUMP EVENTS (issue 04, ADR 0020's line; both
+  // decks since issue 177): beat jumps and hot-cue presses are intentional
+  // structure, preserved — incoming-deck ones as `jumps`, outgoing-deck
+  // ones as `jumpsA` (window-scoped; essential pre-window ones already
+  // pulled in by the widening above). Each delta measures the landing
+  // against the pre-jump path — extrapolated from the latest sample
+  // strictly before the gesture, so chained jumps compose correctly.
+  // Plain seeks are scrubbing, not gestures.
+  const jumpsFor = (ch: CaptureChannel): JumpEvent[] => {
+    const js: JumpEvent[] = [];
+    if (windowLen <= 0) return js;
     for (const e of input.events) {
-      if (e.kind !== 'transport' || e.channel !== inc) continue;
+      if (e.kind !== 'transport' || e.channel !== ch) continue;
       if (e.action !== 'jumpBeats' && e.action !== 'hotCue') continue;
       if (e.t < windowStartS || e.t > windowEndS) continue;
-      const pre = playheadStrictlyBefore(input.events, inc, e.t, rateAt);
+      const pre = playheadStrictlyBefore(input.events, ch, e.t, rateAt);
       if (pre === null) continue;
       const deltaSec = e.playhead - pre;
       if (Math.abs(deltaSec) < MIN_JUMP_SEC) continue;
-      jumps.push({ x: (e.t - windowStartS) / windowLen, deltaSec });
+      js.push({ x: (e.t - windowStartS) / windowLen, deltaSec });
     }
-    jumps.push(...loopJumps(input, inc, rateAt));
-  }
+    js.push(...loopJumps(win, ch, rateAt));
+    return js;
+  };
+  const jumps = jumpsFor(inc);
+  const jumpsA = jumpsFor(out);
   // Repeats each apply their delta (the model expands them back).
   const jumpTotal = jumps.reduce((sum, j) => sum + j.deltaSec * jumpRepeatCount(j), 0);
 
@@ -181,26 +306,93 @@ export function vectorizeTake(
       durationSec,
       bInSec,
       tempoMatch,
-      lanes: windowLen > 0 ? buildLanes(input, init, out) : {},
+      lanes: windowLen > 0 ? buildLanes(win, init, out) : {},
       ...(jumps.length > 0 ? { jumps } : {}),
+      ...(jumpsA.length > 0 ? { jumpsA } : {}),
+      // Beat FX (#353): window-scoped section steps + depth, x on the
+      // (possibly widened) window.
+      ...withBeatFx(deriveTransitionBeatFx(input.events, windowStartS, windowEndS, out)),
     },
   };
 }
 
+function withBeatFx(beatFx: Transition['beatFx']): { beatFx?: Transition['beatFx'] } {
+  return beatFx ? { beatFx } : {};
+}
+
+/**
+ * A channel's measured pitch baseline (percent), from the slice's own
+ * tick playheads (sets 166): the cruise slope over the span before the
+ * channel's first pitch event (from the event on, the recorded value
+ * governs).
+ */
+function measuredPitchBaseline(
+  events: CaptureEvent[],
+  ch: CaptureChannel,
+  windowStartS: number,
+  windowEndS: number
+): number | null {
+  const firstPitchT = events.find((e) => e.kind === 'pitch' && e.channel === ch)?.t ?? Infinity;
+  return medianTickSlopePct(events, ch, windowStartS, Math.min(windowEndS, firstPitchT));
+}
+
+/**
+ * A channel's measured cruise rate as a pitch percent: median slope of
+ * consecutive tick pairs over [spanStart, spanEnd], with the sets-166
+ * guards (≥ MIN_RATE_PAIRS pairs, slopes in the plausible playing range,
+ * pair self-consistency MAD ≤ MAX_RATE_MAD). The median rejects isolated
+ * discontinuities — jumps, seeks, momentary bends. Null when the span is
+ * unmeasurable or ambiguous. Note: slopes live in the CAPTURE clock; the
+ * absolute value carries the clock's skew, but a RATIO of two channels'
+ * slopes cancels it (sets 169).
+ */
+function medianTickSlopePct(
+  events: CaptureEvent[],
+  ch: CaptureChannel,
+  spanStart: number,
+  spanEnd: number
+): number | null {
+  const samples: { t: number; pos: number }[] = [];
+  for (const e of events) {
+    if (e.kind !== 'tick' || e.t < spanStart || e.t > spanEnd) continue;
+    const pos = e.playheads[ch];
+    if (pos !== undefined) samples.push({ t: e.t, pos });
+  }
+  samples.sort((a, b) => a.t - b.t);
+  const slopes: number[] = [];
+  for (let i = 1; i < samples.length; i++) {
+    const dt = samples[i].t - samples[i - 1].t;
+    if (dt <= 0) continue;
+    const slope = (samples[i].pos - samples[i - 1].pos) / dt;
+    if (slope > 0.5 && slope < 2) slopes.push(slope);
+  }
+  if (slopes.length < MIN_RATE_PAIRS) return null;
+  const median = medianOf(slopes);
+  const mad = medianOf(slopes.map((s) => Math.abs(s - median)));
+  if (mad > MAX_RATE_MAD) return null;
+  return (median - 1) * 100;
+}
+
+function medianOf(xs: number[]): number {
+  const sorted = [...xs].sort((a, b) => a - b);
+  const mid = sorted.length >> 1;
+  return sorted.length % 2 === 1 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+}
+
 /**
  * LOOP ENGAGEMENTS → REPEATED JUMP EVENTS (looping 06, extending ADR
- * 0020's discrete-gesture rule): a held loop on the incoming deck
+ * 0020's discrete-gesture rule; both decks since issue 177): a held loop
  * collapses to ONE backward Jump — displacement = the loop length, count
  * = the number of wraps — rather than k separate jumps. Wraps are pure
  * derivation (region + engage playhead + rate), never guessed from the
  * coarse ticks: the deck crosses the end edge every `len` track-seconds
  * once it reaches it. Each loop event (engage/resize/translate/release)
  * closes the previous segment; a loop still open at the window end counts
- * wraps up to the end. Outgoing-deck loops are dropped (incoming-only).
+ * wraps up to the end.
  */
 function loopJumps(
   input: VectorizeInput,
-  inc: CaptureChannel,
+  ch: CaptureChannel,
   rateAt: (ch: CaptureChannel, t: number) => number
 ): JumpEvent[] {
   const { windowStartS, windowEndS } = input;
@@ -214,7 +406,7 @@ function loopJumps(
     open = null;
     const len = end - start;
     if (len <= 0 || tEnd <= t0) return;
-    const rate = rateAt(inc, t0);
+    const rate = rateAt(ch, t0);
     const clampedEnd = Math.min(tEnd, windowEndS);
     const unwrapped = p0 + (clampedEnd - t0) * rate;
     const count = Math.floor((unwrapped - end) / len) + 1;
@@ -226,7 +418,7 @@ function loopJumps(
   };
 
   for (const e of input.events) {
-    if (e.kind !== 'loop' || e.channel !== inc || e.t > windowEndS) continue;
+    if (e.kind !== 'loop' || e.channel !== ch || e.t > windowEndS) continue;
     close(e.t);
     if (e.region) {
       open = { t: e.t, playhead: e.playhead, start: e.region.start, end: e.region.end };
@@ -234,6 +426,56 @@ function loopJumps(
   }
   close(windowEndS);
   return out;
+}
+
+/**
+ * The earliest ESSENTIAL outgoing jump instant strictly before the window
+ * start, or null (issue 177's widening rule). Essential = the replayed
+ * material is still in progress when the incoming enters:
+ * - a discrete BACKWARD jump (beat jump / hot cue) whose replay hasn't
+ *   re-reached the pre-jump position by `startS` (measured on the actual
+ *   sampled path, so later gestures are respected);
+ * - a loop engagement still open at `startS` whose first wrap precedes it
+ *   (the wraps continue into the window; the collapsed repeated Jump must
+ *   sit inside it).
+ * Forward jumps and completed replays are inessential — the track-time
+ * anchors absorb them.
+ */
+function essentialPreWindowJumpInstant(
+  events: CaptureEvent[],
+  ch: CaptureChannel,
+  startS: number,
+  rateAt: (ch: CaptureChannel, t: number) => number
+): number | null {
+  const candidates: number[] = [];
+
+  const atStart = playheadStrictlyBefore(events, ch, startS, rateAt);
+  if (atStart !== null) {
+    for (const e of events) {
+      if (e.kind !== 'transport' || e.channel !== ch || e.t >= startS) continue;
+      if (e.action !== 'jumpBeats' && e.action !== 'hotCue') continue;
+      const pre = playheadStrictlyBefore(events, ch, e.t, rateAt);
+      if (pre === null) continue;
+      const deltaSec = e.playhead - pre;
+      if (deltaSec > -MIN_JUMP_SEC) continue; // forward or jitter
+      if (atStart < pre) candidates.push(e.t); // replay still in progress
+    }
+  }
+
+  let open: { t: number; playhead: number; start: number; end: number } | null = null;
+  for (const e of events) {
+    if (e.kind !== 'loop' || e.channel !== ch || e.t >= startS) continue;
+    open = e.region
+      ? { t: e.t, playhead: e.playhead, start: e.region.start, end: e.region.end }
+      : null;
+  }
+  if (open && open.end - open.start > 0) {
+    const rate = rateAt(ch, open.t);
+    const tw = open.t + (open.end - open.playhead) / rate;
+    if (tw >= open.t && tw < startS) candidates.push(tw);
+  }
+
+  return candidates.length > 0 ? Math.min(...candidates) : null;
 }
 
 /** Playhead extrapolated from the latest sample STRICTLY before t (null
@@ -248,7 +490,7 @@ function playheadStrictlyBefore(
   for (const e of events) {
     if (e.t >= t) continue;
     if (e.kind === 'tick' && e.playheads[ch] !== undefined) ref = { t: e.t, pos: e.playheads[ch]! };
-    else if (e.kind === 'transport' && e.channel === ch) ref = { t: e.t, pos: e.playhead };
+    else if ((e.kind === 'transport' || e.kind === 'loop') && e.channel === ch) ref = { t: e.t, pos: e.playhead };
   }
   return ref === null ? null : ref.pos + (t - ref.t) * rateAt(ch, ref.t);
 }

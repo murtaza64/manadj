@@ -184,7 +184,7 @@ describe('followSummary — the FilterBar indicator text (follow-mode 05)', () =
 
   it('renders the BPM gate only — retired axes never appear (match-score PRD)', () => {
     expect(
-      followSummary(reference, { bpm: true, bpmThresholdPercent: 4, knownOnly: false })
+      followSummary(reference, { ...DEFAULT_FOLLOW_PARAMS, bpmThresholdPercent: 4 })
     ).toBe('128±4%');
   });
 
@@ -196,6 +196,13 @@ describe('followSummary — the FilterBar indicator text (follow-mode 05)', () =
 
   it('skips axes the reference has no data for; nothing enabled renders a dash', () => {
     expect(followSummary(track({}), DEFAULT_FOLLOW_PARAMS)).toBe('—');
+  });
+
+  it('shows temperature only when Compatible candidates are included', () => {
+    expect(followSummary(reference, { ...DEFAULT_FOLLOW_PARAMS, temperature: 0.5 }))
+      .toBe('128±5%·T0.50');
+    expect(followSummary(reference, { ...DEFAULT_FOLLOW_PARAMS, temperature: 0.5, knownOnly: true }))
+      .toBe('128±5%·◆🔗only');
   });
 });
 

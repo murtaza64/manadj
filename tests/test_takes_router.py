@@ -12,13 +12,14 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from backend.database import get_db
-from backend.routers import takes
+from backend.routers import takes, transitions
 
 
 @pytest.fixture
 def client(db_session: Session) -> TestClient:
     app = FastAPI()
     app.include_router(takes.router, prefix="/api/takes")
+    app.include_router(transitions.router, prefix="/api/transitions")
     app.dependency_overrides[get_db] = lambda: db_session
     return TestClient(app)
 
@@ -108,6 +109,10 @@ def test_delete(client, make_track):
 def test_promote_reference(client, make_track):
     a, b = make_track(), make_track()
     client.post("/api/takes", json=take_payload("t1", a.id, b.id))
+    saved = client.put(f"/api/transitions/pair/{a.id}/{b.id}", json={
+        "items": [{"uuid": "tr-9", "name": "Reviewed", "data": {}}],
+    })
+    assert saved.status_code == 200, saved.text
     resp = client.patch("/api/takes/t1/promoted", json={"promoted_transition_uuid": "tr-9"})
     assert resp.status_code == 200
     assert client.get("/api/takes").json()[0]["promoted_transition_uuid"] == "tr-9"

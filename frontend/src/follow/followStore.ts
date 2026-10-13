@@ -16,6 +16,8 @@ import { reduceFollow } from './model';
 import type { FollowEvent, FollowFlags } from './model';
 import { CHANNEL_IDS } from '../playback/mixer';
 import type { ChannelId } from '../playback/mixer';
+import { writeSetting } from '../settings/persistedSettings';
+import { presentationOf } from '../utils/presentationStore';
 
 export type { FollowFlags };
 
@@ -38,11 +40,8 @@ function loadFlags(): FollowFlags {
 }
 
 function saveFlags(flags: FollowFlags): void {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(flags));
-  } catch {
-    // persistence is best-effort; the session still follows
-  }
+  // Write-through (settings #176): DB + localStorage cache, best-effort.
+  writeSetting(STORAGE_KEY, JSON.stringify(flags));
 }
 
 let flags: FollowFlags = loadFlags();
@@ -71,6 +70,8 @@ export function dispatchFollow(event: FollowEvent): void {
   notify();
 }
 
+const presentation = presentationOf({ subscribe: subscribeFollow, getSnapshot: getFollowFlags });
+
 export function useFollowFlags(): FollowFlags {
-  return useSyncExternalStore(subscribeFollow, getFollowFlags);
+  return useSyncExternalStore(presentation.subscribe, presentation.getSnapshot);
 }

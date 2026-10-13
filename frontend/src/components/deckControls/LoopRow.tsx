@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { useDeck, useDeckReady, useDeckSnapshot } from '../../hooks/useDeck';
+import { useDeck, useDeckReady, useDeckSnapshot, deckReadyNow } from '../../hooks/useDeck';
 import { formatLoopBeats } from '../../playback/loop';
 import './deckControls.css';
 
@@ -38,14 +38,22 @@ function LoopIcon() {
 
 export function LoopRow({
   kbd,
+  halveKbd,
+  doubleKbd,
+  halveTitleSuffix = '',
+  doubleTitleSuffix = '',
   titleSuffix = '',
 }: {
   /** On-control keyboard hint slot (Performance view). */
   kbd?: ReactNode;
+  halveKbd?: ReactNode;
+  doubleKbd?: ReactNode;
   /** Title-only key hint (library view, e.g. " (R)"). */
   titleSuffix?: string;
+  halveTitleSuffix?: string;
+  doubleTitleSuffix?: string;
 }) {
-  const { engine } = useDeck();
+  const { engine, loadedTrack } = useDeck();
   const ready = useDeckReady();
   const loop = useDeckSnapshot((s) => s.loop);
   const loopBeatsLabel = useDeckSnapshot((s) => s.loopBeatsLabel);
@@ -68,14 +76,17 @@ export function LoopRow({
       <button
         className="player-button"
         onClick={() => engine.resizeLoop('halve')}
-        title={loop ? 'Halve the loop' : 'Halve loop size'}
+        title={`${loop ? 'Halve the loop' : 'Halve loop size'}${halveTitleSuffix}`}
       >
         1/2
+        {halveKbd}
       </button>
       <button
         className={`player-button deck-loop-toggle${loop ? ' active' : ''}`}
         disabled={!ready || !hasBeatgrid}
-        onClick={() => engine.toggleLoop()}
+        onClick={() => {
+          if (deckReadyNow(engine, loadedTrack?.id ?? null)) engine.toggleLoop();
+        }}
         title={title}
         aria-label={`Loop ${label}`}
       >
@@ -86,9 +97,10 @@ export function LoopRow({
       <button
         className="player-button"
         onClick={() => engine.resizeLoop('double')}
-        title={loop ? 'Double the loop' : 'Double loop size'}
+        title={`${loop ? 'Double the loop' : 'Double loop size'}${doubleTitleSuffix}`}
       >
         x2
+        {doubleKbd}
       </button>
     </div>
   );

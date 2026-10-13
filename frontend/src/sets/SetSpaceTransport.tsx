@@ -41,7 +41,7 @@ function Adapter({ setId }: { setId: number }): null {
   // Same query keys as SetDetailPane/ConductorPlanFeed (shared caches).
   const { data: sets = [] } = useQuery({ queryKey: ['sets'], queryFn: api.sets.list });
   const set = sets.find((s) => s.id === setId);
-  const trackIds = (entries ?? []).map((e) => e.trackId);
+  const trackIds = (entries ?? []).map((e) => e.trackId).sort((a, b) => a - b);
   const { data: trackMap } = useQuery({
     queryKey: ['tracks', 'set-rows', setId, trackIds.join(',')],
     enabled: trackIds.length > 0,
@@ -71,7 +71,14 @@ function Adapter({ setId }: { setId: number }): null {
   useEffect(() => {
     const audio = () => ({
       mixer: ctx.current.mixer,
-      engines: { A: ctx.current.decks.A.engine, B: ctx.current.decks.B.engine },
+      // All four engines: Routine slots allocate across A→B→C→D
+      // (routines 159).
+      engines: {
+        A: ctx.current.decks.A.engine,
+        B: ctx.current.decks.B.engine,
+        C: ctx.current.decks.C.engine,
+        D: ctx.current.decks.D.engine,
+      },
     });
     // The deck provider's one Load path (ADR 0022), SetDetailPane's idiom.
     const loadTrackOnDeck = (deck: ChannelId, trackId: number) => {

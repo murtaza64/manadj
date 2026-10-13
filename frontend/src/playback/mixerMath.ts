@@ -8,6 +8,11 @@ const TRIM_RANGE_DB = 12;
 /** Center leaves 6 dB per-channel headroom for two unity channels to sum.
  * The physical throw remains 24 dB wide: -18 dB .. +6 dB. */
 export const TRIM_CENTER_DB = -6;
+/** The trim knob's neutral position (= TRIM_CENTER_DB). */
+export const TRIM_NEUTRAL = 0.5;
+/** dB per full knob unit — a trim OFFSET in knob units (sets #164:
+ * per-entry trim stores offsets from neutral) reads as offset·this dB. */
+export const TRIM_DB_PER_UNIT = 2 * TRIM_RANGE_DB;
 /** Master reserves its upper half for make-up gain. */
 export const MASTER_UNITY_VALUE = 0.5;
 export const MASTER_MAX_DB = 6;

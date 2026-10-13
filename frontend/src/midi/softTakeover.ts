@@ -47,6 +47,9 @@ export class SoftTakeover {
   private latched = false;
   private lastHardware: number | null = null;
   private lastApplied: number | null = null;
+  /** First-touch grace is a fresh-boot allowance; consumed by the first
+   * sample and revoked by invalidate(). */
+  private graceAvailable = true;
   private readonly tolerance: number;
   private readonly firstTouchGrace: number;
 
@@ -77,8 +80,10 @@ export class SoftTakeover {
     }
     const previous = this.lastHardware;
     this.lastHardware = hardware;
+    const grace = this.graceAvailable;
+    this.graceAvailable = false;
     if (!this.latched) {
-      const window = previous === null ? this.firstTouchGrace : this.tolerance;
+      const window = previous === null && grace ? this.firstTouchGrace : this.tolerance;
       const matched = Math.abs(hardware - software) <= window;
       const crossed =
         previous !== null &&
@@ -89,5 +94,19 @@ export class SoftTakeover {
     }
     this.lastApplied = hardware;
     return true;
+  }
+
+  /**
+   * The physical control stopped reporting for this target — a hardware
+   * layer switch moved it to another Deck (DDJ DECK buttons). Whatever it
+   * did meanwhile is unknown, so drop the latch and the previous sample
+   * (no crossing judged across the gap) and withhold first-touch grace:
+   * the hand is genuinely elsewhere, the tight tolerance is the point.
+   */
+  invalidate(): void {
+    this.latched = false;
+    this.lastHardware = null;
+    this.lastApplied = null;
+    this.graceAvailable = false;
   }
 }

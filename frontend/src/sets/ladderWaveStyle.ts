@@ -22,16 +22,19 @@
 // - No modulation pass (u_modTex — ladder clips are static previews).
 // - The mirrored-lane layout supplies orientation; the style/slot anchor
 //   is ignored (ladder layout wins — issue 30 constraint).
-// - Body brightness matches the GL minimap's 0.55x dim (MINIMAP_BRIGHTNESS
-//   below): the ladder renders the minimap slot, and full brightness read
-//   as oversaturated next to the deck minimaps (review feedback 2026-07-05).
+// - Body brightness matches the GL minimap's dim (MINIMAP_BRIGHTNESS,
+//   theme/markers.ts): the ladder renders the minimap slot, and full
+//   brightness read as oversaturated next to the deck minimaps (review
+//   feedback 2026-07-05).
 
 import type { DecodedWaveform, LodPack } from '../waveform/blob';
 import type { RGB, StyleParams } from '../waveform/styles';
 import { getStyle } from '../waveform/styles';
+import { MINIMAP_BRIGHTNESS, WAVE_BG_GL } from '../theme/markers';
 
-/** Shader background (BODY_PRELUDE's BG). */
-const BG: RGB = [0.03, 0.03, 0.05];
+/** Shader background (BODY_PRELUDE's BG) — derived from --void, same as the
+ * GL renderer's shader constant. */
+const BG: RGB = WAVE_BG_GL;
 
 /** One constant-color vertical run of a column; y in amplitude coords
  * (0 = baseline at the center line, 1 = full lane height). */
@@ -103,10 +106,10 @@ interface Sampler {
  * one decoded blob + one parameter set. */
 function createSampler(d: DecodedWaveform, params: StyleParams): Sampler {
   const { sampleRate, peakHop, bandHop, stftWindow, gamma } = d.header;
-  const invGamma = 1 / gamma;
+  const exponent = params.displayGamma / gamma;
   const smooth = params.smooth ? 1 : 0;
   /** De-quantize + display gamma (shader amp()). v in 0..1. */
-  const amp = (v: number) => Math.pow(Math.pow(v, invGamma), params.displayGamma);
+  const amp = (v: number) => Math.pow(v, exponent);
 
   const peakColumn = (t0: number, t1: number): number => {
     const pps = sampleRate / peakHop;
@@ -240,6 +243,9 @@ interface ColumnCtx {
 }
 
 interface StylePainter {
+  /** Color depends only on which groups/peak cover the current height. */
+  fixedPalette?: boolean;
+  wantsPeak?: boolean;
   /** Height thresholds between which the color is constant. */
   cuts(c: ColumnCtx): number[];
   /** styleColor() twin: color at amplitude coordinate yA. */
@@ -267,7 +273,7 @@ function additiveRgb(yA: number, c: ColumnCtx): RGB {
 const groupCuts = (c: ColumnCtx) => [c.g[0], c.g[1], c.g[2]];
 
 const STYLE_PAINTERS: Record<string, StylePainter> = {
-  'additive-rgb': { cuts: groupCuts, color: additiveRgb },
+  'additive-rgb': { cuts: groupCuts, color: additiveRgb, fixedPalette: true },
 
   'additive-soft': {
     cuts: groupCuts,
@@ -305,6 +311,7 @@ const STYLE_PAINTERS: Record<string, StylePainter> = {
   },
 
   'additive-screen': {
+    fixedPalette: true,
     cuts: groupCuts,
     color: (yA, c) => {
       let r = 0;
@@ -322,6 +329,8 @@ const STYLE_PAINTERS: Record<string, StylePainter> = {
   },
 
   'layered-opaque': {
+    wantsPeak: true,
+    fixedPalette: true,
     cuts: (c) => [c.p, c.g[0], c.g[1], c.g[2]],
     color: (yA, c) => {
       let out: RGB = BG;
@@ -334,6 +343,7 @@ const STYLE_PAINTERS: Record<string, StylePainter> = {
   },
 
   'dominant-band': {
+    wantsPeak: true,
     cuts: (c) => [c.p],
     color: (yA, c) => {
       if (yA >= c.p) return BG;
@@ -349,6 +359,7 @@ const STYLE_PAINTERS: Record<string, StylePainter> = {
   },
 
   'spectral-hue': {
+    wantsPeak: true,
     cuts: (c) => [c.p],
     color: (yA, c) => {
       if (yA >= c.p) return BG;
@@ -377,6 +388,7 @@ const STYLE_PAINTERS: Record<string, StylePainter> = {
   },
 
   'additive-ticks': {
+    wantsPeak: true,
     wantsPrevPeak: true,
     cuts: (c) => [c.g[0], c.g[1], c.g[2], c.p],
     color: (yA, c) => {
@@ -469,6 +481,8 @@ export function createStyledColumnRenderer(
   const sampler = createSampler(data, params);
   const b = new Float64Array(8);
   const gsScratch = new Float64Array(8);
+  let paletteBrightness: number | null = null;
+  let palette: (string | null)[] | null = null;
 
   const render = (
     t0: number,
@@ -478,6 +492,15 @@ export function createStyledColumnRenderer(
     modulate?: (x: number) => ColumnModulation,
   ): StyledColumn[] => {
     const px = Math.max(t1 - t0, 0.001) / cols;
+    // These styles have only 16 coverage combinations, independent of amplitude.
+    if (painter.fixedPalette && paletteBrightness !== brightness) {
+      paletteBrightness = brightness;
+      palette = Array.from({ length: 16 }, (_, mask) => {
+        const g: [number, number, number] = [mask & 1 ? 1 : 0, mask & 2 ? 1 : 0, mask & 4 ? 1 : 0];
+        const rgb = painter.color(0.5, { p: mask & 8 ? 1 : 0, g, b, pPrev: 0, gs: g, flux: 0, colors, params });
+        return isBg(rgb) ? null : toCss(rgb, brightness);
+      });
+    }
 
     const out: StyledColumn[] = [];
     let pPrev = painter.wantsPrevPeak
@@ -495,7 +518,8 @@ export function createStyledColumnRenderer(
         continue;
       }
       const mod = modulate ? modulate(x) : undefined;
-      const p = clamp01(sampler.peakColumn(tc, tc + px) * params.master * (mod ? mod.scale : 1));
+      const p = painter.wantsPeak
+        ? clamp01(sampler.peakColumn(tc, tc + px) * params.master * (mod ? mod.scale : 1)) : 0;
       sampler.bands8Column(tc, tc + px, b);
       if (mod) modulateBands(b, mod, params);
       const gRaw = sampler.groupAmps(b);
@@ -531,8 +555,17 @@ export function createStyledColumnRenderer(
       let y = 0;
       for (const cut of cuts) {
         if (cut - y < 1e-5) continue;
-        const rgb = painter.color((y + cut) / 2, ctx);
-        if (!isBg(rgb)) segments.push({ y0: y, y1: cut, css: toCss(rgb, brightness) });
+        const mid = (y + cut) / 2;
+        let css: string | null;
+        if (palette) {
+          const mask = (mid < g[0] ? 1 : 0) | (mid < g[1] ? 2 : 0) |
+            (mid < g[2] ? 4 : 0) | (mid < p ? 8 : 0);
+          css = palette[mask];
+        } else {
+          const rgb = painter.color(mid, ctx);
+          css = isBg(rgb) ? null : toCss(rgb, brightness);
+        }
+        if (css) segments.push({ y0: y, y1: cut, css });
         y = cut;
       }
       out.push({ outOfTrack: false, segments });
@@ -543,10 +576,11 @@ export function createStyledColumnRenderer(
   return { render };
 }
 
-/** The GL minimap's body dim (WaveformRendererV2 constructor: minimap mode
- * multiplies body brightness by 0.65 — markers stay full). The ladder
- * renders the same minimap slot, so it dims identically. */
-export const MINIMAP_BRIGHTNESS = 0.65;
+/** The GL minimap's body dim (theme/markers.ts: minimap mode multiplies body
+ * brightness by MINIMAP_BRIGHTNESS — markers stay full). The ladder renders
+ * the same minimap slot, so it dims identically. Re-exported for the ladder's
+ * existing import path. */
+export { MINIMAP_BRIGHTNESS };
 
 /** Canvas background matching the shader's BG. */
 export const WAVE_BG_CSS = toCss(BG, 1);
@@ -555,33 +589,62 @@ const OUT_OF_TRACK_CSS = `rgb(${Math.round(BG[0] * 0.6 * 255)},${Math.round(
 )},${Math.round(BG[2] * 0.6 * 255)})`;
 
 /**
- * Draw one clip's styled waveform into a 2D context. `dir` is the ladder's
- * mirrored-lane orientation: 'up' grows from the bottom edge (deck A,
- * above the center line), 'down' hangs from the top edge (deck B).
+ * Draw one clip's styled waveform into a 2D context. `dir` orients the
+ * render: 'up' grows from the bottom edge, 'down' hangs from the top,
+ * 'bipolar' mirrors every band symmetrically around the vertical center
+ * (the classic waveform read — the ladder uses this on every lane,
+ * #161: lane MIRRORING lives in the stack geometry, never in how a
+ * lane's own content is drawn).
  */
 export function drawStyledWave(
   ctx: CanvasRenderingContext2D,
   data: DecodedWaveform,
   styleId: string,
   params: StyleParams,
-  opts: { width: number; height: number; dir: 'up' | 'down'; range: [number, number]; brightness?: number },
+  opts: {
+    width: number;
+    height: number;
+    dir: 'up' | 'down' | 'bipolar';
+    range: [number, number];
+    brightness?: number;
+    /** Leave the surrounding row visible behind a static tracklist preview. */
+    transparent?: boolean;
+    /** Per-column fader/EQ modulation (sets #171) — same contract the
+     * session timeline's drawStyledRuns threads through. */
+    modulate?: (x: number) => ColumnModulation;
+  },
 ): void {
   const { width: w, height: h, dir } = opts;
   const [t0, t1] = opts.range;
-  ctx.fillStyle = WAVE_BG_CSS;
-  ctx.fillRect(0, 0, w, h);
-  const columns = computeStyledColumns(data, styleId, params, t0, t1, w, opts.brightness ?? 1);
+  if (opts.transparent) {
+    ctx.clearRect(0, 0, w, h);
+  } else {
+    ctx.fillStyle = WAVE_BG_CSS;
+    ctx.fillRect(0, 0, w, h);
+  }
+  const columns = computeStyledColumns(data, styleId, params, t0, t1, w, opts.brightness ?? 1, opts.modulate);
   for (let x = 0; x < w; x++) {
     const col = columns[x];
     if (col.outOfTrack) {
-      ctx.fillStyle = OUT_OF_TRACK_CSS;
-      ctx.fillRect(x, 0, 1, h);
+      if (!opts.transparent) {
+        ctx.fillStyle = OUT_OF_TRACK_CSS;
+        ctx.fillRect(x, 0, 1, h);
+      }
       continue;
     }
     for (const seg of col.segments) {
       ctx.fillStyle = seg.css;
-      const hgt = (seg.y1 - seg.y0) * h;
-      ctx.fillRect(x, dir === 'up' ? h - seg.y1 * h : seg.y0 * h, 1, hgt);
+      if (dir === 'bipolar') {
+        // Each band mirrors around the centerline at half amplitude —
+        // full dynamic range still spans the lane.
+        const yTop = (h - seg.y1 * h) / 2;
+        const hgt = Math.max(1, ((seg.y1 - seg.y0) * h) / 2);
+        ctx.fillRect(x, yTop, 1, hgt);
+        ctx.fillRect(x, h - yTop - hgt, 1, hgt);
+      } else {
+        const hgt = (seg.y1 - seg.y0) * h;
+        ctx.fillRect(x, dir === 'up' ? h - seg.y1 * h : seg.y0 * h, 1, hgt);
+      }
     }
   }
 }

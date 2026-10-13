@@ -36,8 +36,8 @@ export function GridEditButtons({
   disabledTitle,
 }: {
   trackId: number | null;
-  /** Playhead source for "set downbeat at playhead". */
-  getPlayhead: () => number;
+  /** Live playhead, or null when this mode cannot edit the track now. */
+  getPlayhead: () => number | null;
   /** The mode's editability gate (e.g. library's isBeatgridEditable). */
   disabled?: boolean;
   /** Mode-specific tooltip while gated (e.g. "Load this track…"). */
@@ -54,7 +54,7 @@ export function GridEditButtons({
   const title = (active: string) => (gated && disabledTitle ? disabledTitle : active);
 
   const nudge = (offsetMs: number) => {
-    if (trackId === null) return;
+    if (trackId === null || getPlayhead() === null) return;
     nudgeGrid.mutate({ trackId, offsetMs });
   };
 
@@ -65,14 +65,16 @@ export function GridEditButtons({
   const marks = ladder?.reset_marks ?? [];
 
   const markReset = () => {
-    if (trackId === null || downbeats.length === 0) return;
-    const snapped = downbeats[nearestDownbeatOrdinal(downbeats, getPlayhead())];
+    const playhead = getPlayhead();
+    if (trackId === null || playhead === null || downbeats.length === 0) return;
+    const snapped = downbeats[nearestDownbeatOrdinal(downbeats, playhead)];
     putLadder.mutate({ trackId, resetMarks: [...marks, snapped] });
   };
 
   const deleteNearestMark = () => {
-    if (trackId === null) return;
-    const nearest = nearestMark(marks, getPlayhead());
+    const playhead = getPlayhead();
+    if (trackId === null || playhead === null) return;
+    const nearest = nearestMark(marks, playhead);
     if (nearest === null) return;
     putLadder.mutate({ trackId, resetMarks: marks.filter((m) => m !== nearest) });
   };
@@ -91,8 +93,9 @@ export function GridEditButtons({
         className="player-button deck-downbeat"
         disabled={gated || setDownbeat.isPending}
         onClick={() => {
-          if (trackId === null) return;
-          setDownbeat.mutate({ trackId, downbeatTime: getPlayhead() });
+          const playhead = getPlayhead();
+          if (trackId === null || playhead === null) return;
+          setDownbeat.mutate({ trackId, downbeatTime: playhead });
         }}
         title={title('Set downbeat at playhead (anchors the grid)')}
       >
@@ -102,8 +105,9 @@ export function GridEditButtons({
         className="player-button"
         disabled={gated || dropAnchor.isPending}
         onClick={() => {
-          if (trackId === null) return;
-          dropAnchor.mutate({ trackId, dropTime: getPlayhead() });
+          const playhead = getPlayhead();
+          if (trackId === null || playhead === null) return;
+          dropAnchor.mutate({ trackId, dropTime: playhead });
         }}
         title={title('Anchor drop at playhead (grid, ladder, and cue ladder)')}
       >
@@ -150,7 +154,7 @@ export function GridEditButtons({
 
 /** Grid config the BpmControl threads through to its embedded buttons. */
 export interface GridEditConfig {
-  getPlayhead: () => number;
+  getPlayhead: () => number | null;
   disabled?: boolean;
   disabledTitle?: string;
 }

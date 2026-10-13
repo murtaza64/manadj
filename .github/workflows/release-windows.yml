@@ -1,0 +1,73 @@
+# Windows x64 installer build (cross-platform #317, ADR 0043 amendment).
+#
+# UNTESTED ON WINDOWS HARDWARE (#316): CI smoke-tests the bundle on a
+# windows-latest VM (imports, backend boot, launch/quit), but audio, MIDI,
+# stems and the installer UX have not been validated on a real Windows box.
+#
+# Triggered by scripts/release/release.py pushing `release/v<version>` at the
+# release commit (the macOS DMG is built locally; this builds the Windows
+# installer from the exact same commit and attaches it to the GitHub
+# release for v<version> when one exists). Manual: workflow_dispatch with a
+# version, or push any `release/**` branch.
+name: release-windows
+on:
+  push:
+    branches: ["release/**"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "version to stamp (X.Y.Z or X.Y.Z-rc.N); default from branch / pyproject"
+        required: false
+
+permissions:
+  contents: write # attach the installer to the release
+
+concurrency:
+  group: release-windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+    env:
+      PYTHONUTF8: "1"
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: version
+        id: v
+        run: |
+          v="${{ inputs.version }}"
+          if [ -z "$v" ] && [[ "$GITHUB_REF_NAME" == release/v* ]]; then v="${GITHUB_REF_NAME#release/v}"; fi
+          if [ -z "$v" ]; then v=$(sed -nE 's/^version *= *"([^"]+)".*/\1/p' pyproject.toml | head -1); fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "## manaDJ $v (Windows x64) — untested on Windows hardware (#316)" >> "$GITHUB_STEP_SUMMARY"
+      - name: Inno Setup
+        run: |
+          if [ ! -f "/c/Program Files (x86)/Inno Setup 6/ISCC.exe" ]; then choco install innosetup -y --no-progress; fi
+      - name: build installer
+        run: uv run scripts/release/build_windows.py --version "${{ steps.v.outputs.version }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: manaDJ-${{ steps.v.outputs.version }}-windows-x64
+          path: build/release/out/*.exe
+          compression-level: 0
+          retention-days: 14
+      - name: attach to release
+        run: |
+          tag="v${{ steps.v.outputs.version }}"
+          if gh release view "$tag" > /dev/null 2>&1; then
+            gh release upload "$tag" build/release/out/*.exe --clobber
+            echo "attached to $tag" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "no release $tag yet — installer is in the workflow artifact" >> "$GITHUB_STEP_SUMMARY"
+          fi

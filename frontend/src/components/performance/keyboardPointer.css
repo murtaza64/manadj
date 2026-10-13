@@ -1,0 +1,88 @@
+.keyboard-pointer-feedback,
+.keyboard-pointer-feedback * {
+  pointer-events: none;
+}
+
+.keyboard-pointer-feedback {
+  position: fixed;
+  /* Center the first 36px glyph: subtract its border, padding and half-size. */
+  transform: translate(-31px, -27px);
+  z-index: 10000;
+  width: max-content;
+  max-width: calc(100vw - 16px);
+  max-height: calc(100vh - 16px);
+  overflow: hidden;
+  color: var(--text);
+  font-size: var(--font-small);
+  line-height: 1.35;
+}
+
+.keyboard-pointer-row,
+.keyboard-pointer-status:not(:empty) {
+  margin-bottom: 4px;
+  padding: 8px 10px;
+  border: 1px solid var(--surface1);
+  background: var(--mantle);
+  box-shadow: 0 3px 12px #0008;
+}
+
+.keyboard-pointer-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-left: 3px solid var(--keyboard-pointer-color);
+}
+
+.keyboard-pointer-row svg {
+  width: 36px;
+  height: 36px;
+  flex: 0 0 36px;
+  color: var(--keyboard-pointer-color);
+}
+
+.keyboard-pointer-row .keyboard-pointer-knob {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  flex: 0 0 36px;
+}
+
+.keyboard-pointer-knob .perf-knob-dial { transform: scale(1.45); }
+
+.keyboard-pointer-row strong,
+.keyboard-pointer-row span {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.keyboard-pointer-row strong {
+  color: var(--keyboard-pointer-color);
+}
+
+.keyboard-pointer-row span {
+  font-variant-numeric: tabular-nums;
+}
+
+.keyboard-pointer-track {
+  fill: var(--surface0);
+  stroke: currentColor;
+  stroke-width: 2;
+}
+
+.keyboard-pointer-groove {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1;
+}
+
+.keyboard-pointer-indicator {
+  fill: currentColor;
+  stroke: currentColor;
+  stroke-width: 3;
+  stroke-linecap: round;
+}
+
+.keyboard-pointer-status:not(:empty) {
+  border-color: var(--warning);
+}

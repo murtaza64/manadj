@@ -5,6 +5,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   addBeats,
+  beatPhaseTarget,
   crossDeckLaunchTarget,
   phasePreservingJumpTarget,
   snapToNearestBeat,
@@ -12,6 +13,34 @@ import {
 
 // A 120 BPM grid starting at 0.25s: beats every 0.5s.
 const GRID = [0.25, 0.75, 1.25, 1.75, 2.25];
+
+describe('beatPhaseTarget', () => {
+  it('aligns phase across offset grids by the shortest signed correction', () => {
+    expect(beatPhaseTarget(1.35, GRID, { beatTimes: [0, 0.5, 1], playhead: 4.2 }, 1))
+      .toBeCloseTo(1.45);
+    expect(beatPhaseTarget(1.7, GRID, { beatTimes: [0, 0.5, 1], playhead: 4.1 }, 1))
+      .toBeCloseTo(1.85);
+  });
+  it('folds fast and slow grids without requiring bar alignment', () => {
+    expect(beatPhaseTarget(10.1, [0, 0.25, 0.5], { beatTimes: [0, 0.5, 1], playhead: 20.2 }, 2))
+      .toBeCloseTo(10.2);
+    // The slow Deck may align to an odd fast beat, not just even beats.
+    expect(beatPhaseTarget(10.1, [0, 0.5, 1], { beatTimes: [0, 0.25, 0.5], playhead: 20.35 }, 0.5))
+      .toBeCloseTo(10.1);
+    expect(beatPhaseTarget(10.1, [0, 0.5, 1], { beatTimes: [0, 0.25, 0.5], playhead: 20.2 }, 0.5))
+      .toBeCloseTo(10.2);
+  });
+  it('does not invent phase without an interval on both grids', () => {
+    expect(beatPhaseTarget(1.1, [0], { beatTimes: GRID, playhead: 2 }, 1)).toBe(1.1);
+    expect(beatPhaseTarget(1.1, GRID, { beatTimes: [], playhead: 2 }, 1)).toBe(1.1);
+  });
+  it('converts reference audio time to wall time for pitched quantized launches', () => {
+    expect(crossDeckLaunchTarget(10, 1.08, { beatTimes: [0, 0.5, 1], playhead: 0.4, playRate: 1.08 }).delaySeconds)
+      .toBeCloseTo(0.1 / 1.08);
+    expect(crossDeckLaunchTarget(10, 1.08, { beatTimes: [0, 0.5, 1], playhead: 0.6, playRate: 1.08 }).at)
+      .toBeCloseTo(10.1);
+  });
+});
 
 describe('snapToNearestBeat', () => {
   it('snaps down to the nearest earlier beat', () => {

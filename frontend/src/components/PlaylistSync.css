@@ -8,7 +8,7 @@
 
 /* Stats bar */
 .playlist-sync-stats-bar {
-  margin-bottom: var(--space-md);
+  margin-bottom: var(--space-12);
 }
 
 /* Loading & Error States */
@@ -18,38 +18,38 @@
   align-items: center;
   justify-content: center;
   height: 100%;
-  font-size: var(--font-lg);
+  font-size: var(--font-title);
   color: var(--subtext1);
 }
 
 .playlist-sync-error {
-  color: var(--red);
+  color: var(--danger);
 }
 
 /* Header */
 .playlist-sync-header {
   background: var(--mantle);
-  padding: var(--space-lg);
+  padding: var(--space-16);
   border: 1px solid var(--surface0);
 }
 
 .playlist-sync-header h1 {
-  font-size: var(--font-lg);
-  margin: 0 0 var(--space-md) 0;
+  font-size: var(--font-title);
+  margin: 0 0 var(--space-12) 0;
   color: var(--text);
 }
 
 .sync-stats {
   display: flex;
-  gap: var(--space-md);
+  gap: var(--space-12);
   align-items: center;
-  font-size: var(--font-sm);
+  font-size: var(--font-large);
   color: var(--subtext1);
 }
 
 .sync-stat {
   display: flex;
-  gap: var(--space-xs);
+  gap: var(--space-4);
 }
 
 .sync-stat-label {
@@ -90,9 +90,9 @@
 }
 
 .playlist-sync-header-row th {
-  padding: var(--space-md);
+  padding: var(--space-12);
   text-align: left;
-  font-size: var(--font-sm);
+  font-size: var(--font-large);
   font-weight: 600;
   color: var(--subtext1);
   border-bottom: 2px solid var(--surface1);

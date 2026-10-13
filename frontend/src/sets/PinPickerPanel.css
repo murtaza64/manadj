@@ -1,0 +1,176 @@
+/* Pin picker panel (sets 160, prototype variant P). Routine family =
+   the routine accent (--routine-accent), matching the Session timeline's candidate
+   chips; the three trust tiers are visually distinct (solid border >
+   dimmer solid > dashed). */
+
+.ppp-panel {
+  position: fixed;
+  z-index: var(--z-overlay);
+  min-width: 320px;
+  max-width: 440px;
+  max-height: 70vh;
+  overflow-y: auto;
+  padding: var(--space-8) var(--space-12) var(--space-12);
+  background: var(--mantle);
+  border: 1px solid var(--surface1);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.55);
+  font-size: var(--font-body);
+  color: var(--text);
+}
+
+.ppp-title {
+  font-size: var(--font-small);
+  font-weight: 900;
+  color: var(--accent);
+  margin-bottom: var(--space-6);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ppp-section {
+  font-size: var(--font-small);
+  font-weight: 800;
+  margin: var(--space-8) 0 var(--space-2);
+}
+.ppp-section small {
+  color: var(--subtext0);
+  font-weight: 500;
+}
+.ppp-section.ppp-routine {
+  color: var(--routine-accent);
+}
+.ppp-section.ppp-transitions {
+  color: var(--success);
+}
+.ppp-section.ppp-takes {
+  color: var(--accent);
+}
+.ppp-section.ppp-cameos {
+  color: var(--orange);
+}
+
+.ppp-opt {
+  cursor: pointer;
+  padding: var(--space-4) var(--space-8);
+  border-radius: var(--radius);
+}
+.ppp-opt:hover {
+  background: var(--surface0);
+}
+.ppp-opt.current {
+  font-weight: 700;
+}
+.ppp-none {
+  color: var(--subtext0);
+  padding: var(--space-2) var(--space-8);
+}
+
+.ppp-transition-opt {
+  color: var(--success);
+}
+.ppp-take-opt {
+  color: var(--accent);
+}
+.ppp-cameo-opt {
+  color: var(--orange);
+}
+.ppp-hardcut {
+  color: var(--danger);
+  font-weight: 800;
+  margin-top: var(--space-6);
+  border-top: 1px solid var(--surface1);
+  border-radius: var(--radius);
+  padding-top: var(--space-6);
+}
+.ppp-unpin {
+  color: var(--subtext1);
+}
+
+/* Routine tier cards */
+.ppp-routine-opt {
+  position: relative;
+  border: 1px solid var(--routine-accent);
+  border-radius: var(--radius);
+  margin: var(--space-4) 0;
+  padding: var(--space-4) var(--space-8);
+}
+
+/* Provenance ▦ (gh#170 deep-link): floats at the card's right edge. */
+.ppp-source {
+  position: absolute;
+  right: 8px;
+  top: 6px;
+  background: transparent;
+  border: 1px solid rgba(var(--routine-accent-rgb), 0.5);
+  border-radius: var(--radius);
+  color: var(--routine-accent);
+  font-size: var(--font-small);
+  padding: 0 var(--space-4);
+  cursor: pointer;
+}
+.ppp-source:hover {
+  background: rgba(var(--routine-accent-rgb), 0.15);
+}
+.ppp-routine-opt b {
+  color: var(--routine-accent);
+}
+.ppp-routine-opt small {
+  color: var(--subtext0);
+  margin-left: var(--space-6);
+}
+.ppp-routine-opt.tier-take {
+  border-color: rgba(var(--routine-accent-rgb), 0.55);
+}
+.ppp-routine-opt.tier-take b {
+  color: rgba(var(--routine-accent-rgb), 0.85);
+}
+.ppp-routine-opt.tier-candidate {
+  border-style: dashed;
+  border-color: rgba(var(--routine-accent-rgb), 0.55);
+}
+.ppp-routine-opt.tier-candidate b {
+  color: rgba(var(--routine-accent-rgb), 0.85);
+  font-weight: 600;
+}
+.ppp-routine-opt.current {
+  background: rgba(var(--routine-accent-rgb), 0.08);
+}
+
+/* Entry-offset mini gantt */
+.ppp-lanes {
+  margin-top: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.ppp-lane {
+  display: flex;
+  align-items: center;
+  gap: var(--space-6);
+}
+.ppp-lane-label {
+  width: 132px;
+  flex-shrink: 0;
+  font-size: var(--font-micro);
+  color: var(--subtext1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: right;
+}
+.ppp-lane-track {
+  position: relative;
+  flex: 1;
+  height: 7px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.ppp-lane-track i {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: rgba(var(--routine-accent-rgb), 0.6);
+  border-radius: var(--radius);
+}

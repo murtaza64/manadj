@@ -7,6 +7,8 @@
  * Consumers read it at gesture time (placement snapping, quantized
  * triggers); the TopBar `Q` button is the one writer.
  */
+import { writeSetting } from '../settings/persistedSettings';
+
 const STORAGE_KEY = 'manadj-quantize';
 
 function load(): boolean {
@@ -19,11 +21,8 @@ function load(): boolean {
 }
 
 function save(on: boolean): void {
-  try {
-    localStorage.setItem(STORAGE_KEY, String(on));
-  } catch {
-    // persistence is best-effort; the session keeps its setting
-  }
+  // Write-through (settings #176): DB + localStorage cache, best-effort.
+  writeSetting(STORAGE_KEY, String(on));
 }
 
 let quantizeOn = load();

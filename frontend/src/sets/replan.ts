@@ -123,6 +123,11 @@ export function evaluateReplan(
     const idx = state.activeEntryIndex;
     const entry = oldExecPlan.entries[idx];
     if (!entry) return { ok: false, reason: 'unmappable', anchorTrackId: null };
+    if (entry.deck !== 'A' && entry.deck !== 'B') {
+      // A Routine slot on C/D anchors nothing the pair machine can map
+      // (routines 159): stand down rather than jump a sounding deck.
+      return { ok: false, reason: 'unmappable', anchorTrackId: null };
+    }
     anchor = entry.deck;
     const d = state.decks[entry.deck];
     if (d.entryIndex === idx && d.trackId !== null) {
@@ -198,7 +203,7 @@ export const soundingWindowKey = (w: SoundingWindow | null): string | null =>
 export function soundingWindowAt(execPlan: SetPlan, mixTime: number): SoundingWindow | null {
   let found: SoundingWindow | null = null;
   execPlan.adjacencies.forEach((adj, i) => {
-    if (adj.kind === 'hardcut') return;
+    if (adj.kind !== 'transition' && adj.kind !== 'take') return;
     if (mixTime < adj.mixStartSec || mixTime >= adj.mixEndSec) return;
     found = {
       adjacencyIndex: i,
@@ -236,16 +241,15 @@ export function authoredPlayheadAt(
   transitionUuid: string
 ): number | null {
   const i = execPlan.adjacencies.findIndex(
-    (a) => a.kind !== 'hardcut' && a.pinUuid === transitionUuid
+    (a) => (a.kind === 'transition' || a.kind === 'take') && a.pinUuid === transitionUuid
   );
   if (i < 0) return null;
   const adj = execPlan.adjacencies[i];
-  if (adj.kind === 'hardcut') return null; // unreachable; narrows the type
+  if (adj.kind !== 'transition' && adj.kind !== 'take') return null; // unreachable; narrows
   if (mixTime >= adj.mixStartSec && mixTime < adj.mixEndSec) {
     const authored =
       adj.transition.startSec + (mixTime - adj.mixStartSec) * adj.rateOutgoing;
-    const f = (authored - adj.transition.startSec) / adj.transition.durationSec;
-    return f >= 0 && f < 1 ? authored : null;
+    return authored;
   }
   // Outside the window: the pair's deck must actually be sounding at the
   // pair's entry (ping-pong reuses decks — a later entry on the same deck
@@ -270,7 +274,8 @@ const sameGeometry = (a: Transition, b: Transition): boolean =>
   a.durationSec === b.durationSec &&
   a.bInSec === b.bInSec &&
   a.tempoMatch === b.tempoMatch &&
-  jumpsEqual(a.jumps, b.jumps);
+  jumpsEqual(a.jumps, b.jumps) &&
+  jumpsEqual(a.jumpsA, b.jumpsA);
 
 /**
  * Defer the sounding window's geometry: a PlanInput whose adjacency for
@@ -306,6 +311,7 @@ export function graftSoundingWindow(
         bInSec: old.bInSec,
         tempoMatch: old.tempoMatch,
         jumps: old.jumps,
+        jumpsA: old.jumpsA,
       };
       return {
         ...input,

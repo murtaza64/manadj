@@ -47,6 +47,12 @@ list: `docs/agents/parallel-work.md` (ADRs 0012, 0026, 0028).
 
 ### Spawning sessions
 
+Standing area lanes retain context across tasks; prefer the existing area's
+session before spawning. Areas, designation, and exclusive-ownership policy:
+`docs/agents/parallel-work.md#standing-area-lanes`. They are provisioned on
+demand, not inferred from lane names. One owning session per lane, including
+between tasks; parallel work uses a separate lane.
+
 `es agent spawn --agent lane [--handoff <path>] --title "<slug>: <focus>"
 --task "..."` — fresh lane, owner stamped, opus by default. Revive with
 `es agent resume`. Handoffs live in the sidecar (`.editspace/handoffs/`).

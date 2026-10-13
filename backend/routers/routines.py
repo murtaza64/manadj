@@ -1,0 +1,615 @@
+"""Routines: saved n-track choreography (ADR 0035, routines 158).
+
+Read + rename + delete. Rows are minted by promotion
+(POST /api/routine-takes/{uuid}/promote) or AUTHORED from scratch on the
+Mix editor's blank canvas (POST /api/routines, ADR 0039 — no origin
+take, empty recording; structure mutable via PUT /{uuid}/structure).
+The list returns metadata only;
+the slot-addressed beat-domain event replay rides the detail endpoint.
+"""
+
+import json
+from typing import Any
+
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
+
+from backend import models, schemas
+from backend.beatgrid_utils import constant_tempo_changes
+from backend.database import get_db
+from backend.routers.sets import degrade_pins
+from backend.routine_promotion import PromotionError, retrim
+
+router = APIRouter()
+
+
+def _row(r: models.Routine) -> schemas.RoutineRow:
+    return schemas.RoutineRow(
+        uuid=r.uuid,
+        name=r.name,
+        cast=json.loads(r.cast_json),
+        entry_offsets_beats=json.loads(r.entry_offsets_beats_json),
+        entry_positions=json.loads(r.entry_positions_json),
+        duration_beats=r.duration_beats,
+        origin_take_uuid=r.origin_take_uuid,
+        slot_ids=json.loads(r.slot_ids_json) if r.slot_ids_json else None,
+        authored=r.origin_take_uuid is None,
+        created_at=r.created_at,
+    )
+
+
+def _validated_structure(
+    payload: schemas.RoutineStructure, db: Session
+) -> tuple[list[int], list[str], list[float], list[float], float]:
+    """Validate an authored structure and return it re-sorted into entry
+    order (stable). 422 on any violation."""
+    n = len(payload.cast)
+    lists = (payload.slot_ids, payload.entry_offsets_beats, payload.entry_positions)
+    if any(len(xs) != n for xs in lists):
+        raise HTTPException(status_code=422, detail="per-slot lists must be parallel to cast")
+    if n < 3:
+        raise HTTPException(
+            status_code=422,
+            detail="a Routine needs ≥ 3 slots — a 2-cast mix is a Transition (ADR 0035/0039)",
+        )
+    if len(set(payload.slot_ids)) != n or any(not s for s in payload.slot_ids):
+        raise HTTPException(status_code=422, detail="slot ids must be unique and non-empty")
+    nums = [*payload.entry_offsets_beats, *payload.entry_positions, payload.duration_beats]
+    if any(x != x or x in (float("inf"), float("-inf")) for x in nums):
+        raise HTTPException(status_code=422, detail="non-finite number in structure")
+    found = {
+        t.id for t in db.query(models.Track.id).filter(models.Track.id.in_(payload.cast)).all()
+    }
+    missing = sorted(set(payload.cast) - found)
+    if missing:
+        raise HTTPException(status_code=422, detail=f"unknown cast tracks: {missing}")
+    order = sorted(range(n), key=lambda i: payload.entry_offsets_beats[i])
+    offsets = [payload.entry_offsets_beats[i] for i in order]
+    if payload.duration_beats <= offsets[-1]:
+        raise HTTPException(
+            status_code=422, detail="duration must extend past the last slot's entry"
+        )
+    return (
+        [payload.cast[i] for i in order],
+        [payload.slot_ids[i] for i in order],
+        offsets,
+        [payload.entry_positions[i] for i in order],
+        payload.duration_beats,
+    )
+
+
+def _apply_structure(r: models.Routine, payload: schemas.RoutineStructure, db: Session) -> None:
+    cast, slot_ids, offsets, positions, duration = _validated_structure(payload, db)
+    r.entry_track_id = cast[0]
+    r.exit_track_id = cast[-1]
+    r.cast_json = json.dumps(cast)
+    r.slot_ids_json = json.dumps(slot_ids)
+    r.entry_offsets_beats_json = json.dumps(offsets)
+    r.entry_positions_json = json.dumps(positions)
+    r.duration_beats = duration
+    if "edits" in payload.model_fields_set:
+        r.edits_json = json.dumps(payload.edits) if payload.edits else None
+
+
+@router.get("", response_model=list[schemas.RoutineRow])
+def list_routines(db: Session = Depends(get_db)) -> list[schemas.RoutineRow]:
+    """All Routines, newest first."""
+    rows = (
+        db.query(models.Routine)
+        .order_by(models.Routine.created_at.desc(), models.Routine.id.desc())
+        .all()
+    )
+    return [_row(r) for r in rows]
+
+
+def _detail(r: models.Routine) -> schemas.RoutineDetail:
+    return schemas.RoutineDetail(
+        **_row(r).model_dump(),
+        events=json.loads(r.events_json),
+        edits=json.loads(r.edits_json) if r.edits_json else None,
+    )
+
+
+@router.get("/{uuid}", response_model=schemas.RoutineDetail)
+def get_routine(uuid: str, db: Session = Depends(get_db)) -> schemas.RoutineDetail:
+    r = db.query(models.Routine).filter(models.Routine.uuid == uuid).first()
+    if r is None:
+        raise HTTPException(status_code=404, detail="routine not found")
+    return _detail(r)
+
+
+@router.post("", response_model=schemas.RoutineDetail, status_code=201)
+def create_authored_routine(
+    payload: schemas.RoutineAuthoredCreate, db: Session = Depends(get_db)
+) -> schemas.RoutineDetail:
+    """Mint an AUTHORED Routine (ADR 0039, gh#325): built on the Mix
+    editor's blank canvas, no origin take, empty recording. The client
+    mints the uuid (the draft already carries it) — a repeat POST with an
+    existing uuid is a 409, never a duplicate."""
+    if db.query(models.Routine).filter(models.Routine.uuid == payload.uuid).first():
+        raise HTTPException(status_code=409, detail="routine uuid already exists")
+    r = models.Routine(
+        uuid=payload.uuid,
+        name=payload.name,
+        events_json="[]",
+        origin_take_uuid=None,
+    )
+    _apply_structure(r, payload, db)
+    db.add(r)
+    db.commit()
+    db.refresh(r)
+    return _detail(r)
+
+
+def _repoint_pins(
+    db: Session,
+    from_kind: str,
+    from_uuid: str,
+    to_kind: str,
+    to_uuid: str,
+    head_track_id: int,
+    second_track_id: int,
+) -> tuple[int, int]:
+    """Re-point Set pins across a kind crossing (ADR 0039, gh#330) — the
+    Take-promotion idiom. An active pin moves only when it heads the new
+    artifact's adjacency (its entry IS the new first track); any other
+    becomes Unresolved. A Dormant memory moves only when it remembers the
+    new artifact's first pair; any other is dropped. Returns (repointed,
+    dropped). The caller commits."""
+    repointed = dropped = 0
+    for e in (
+        db.query(models.SetEntry)
+        .filter(models.SetEntry.pin_kind == from_kind, models.SetEntry.pin_uuid == from_uuid)
+        .all()
+    ):
+        if e.track_id == head_track_id:
+            e.pin_kind, e.pin_uuid = to_kind, to_uuid
+            repointed += 1
+        else:
+            e.pin_kind = e.pin_uuid = None
+            dropped += 1
+    for d in (
+        db.query(models.SetDormantPin)
+        .filter(
+            models.SetDormantPin.pin_kind == from_kind,
+            models.SetDormantPin.pin_uuid == from_uuid,
+        )
+        .all()
+    ):
+        if (d.a_track_id, d.b_track_id) == (head_track_id, second_track_id):
+            d.pin_kind, d.pin_uuid = to_kind, to_uuid
+            repointed += 1
+        else:
+            db.delete(d)
+            dropped += 1
+    return repointed, dropped
+
+
+@router.post("/from-transition/{transition_uuid}", response_model=schemas.KindConversion)
+def convert_transition_to_routine(
+    transition_uuid: str,
+    payload: schemas.RoutineAuthoredCreate,
+    db: Session = Depends(get_db),
+) -> schemas.KindConversion:
+    """2→3 crossing (ADR 0039, gh#330): a Transition grown to ≥ 3 slots in
+    the Mix editor becomes an AUTHORED Routine. One transaction: mint the
+    Routine, re-point the Transition's Set pins onto it, clear any Take's
+    promoted mark (the evidence survives, re-promotable), delete the
+    Transition."""
+    t = db.query(models.Transition).filter(models.Transition.uuid == transition_uuid).first()
+    if t is None:
+        raise HTTPException(status_code=404, detail="transition not found")
+    if db.query(models.Routine).filter(models.Routine.uuid == payload.uuid).first():
+        raise HTTPException(status_code=409, detail="routine uuid already exists")
+    r = models.Routine(
+        uuid=payload.uuid, name=payload.name, events_json="[]", origin_take_uuid=None
+    )
+    _apply_structure(r, payload, db)
+    db.add(r)
+    cast = json.loads(r.cast_json)
+    repointed, dropped = _repoint_pins(
+        db, "transition", transition_uuid, "routine", r.uuid, cast[0], cast[1]
+    )
+    db.query(models.Take).filter(models.Take.promoted_transition_uuid == transition_uuid).update(
+        {models.Take.promoted_transition_uuid: None}, synchronize_session=False
+    )
+    db.delete(t)
+    db.commit()
+    return schemas.KindConversion(
+        kind="routine", uuid=r.uuid, repointed_pins=repointed, dropped_pins=dropped
+    )
+
+
+@router.post("/{uuid}/to-transition", response_model=schemas.KindConversion)
+def convert_routine_to_transition(
+    uuid: str, payload: schemas.RoutineToTransition, db: Session = Depends(get_db)
+) -> schemas.KindConversion:
+    """3→2 crossing (ADR 0039, gh#330): an AUTHORED Routine edited down to
+    2 slots saves as a Transition (a 2-cast Routine is forbidden at rest).
+    One transaction: append the Transition to its ordered pair, re-point
+    the Routine's Set pins onto it, delete the Routine. Promoted Routines
+    never cross (their cast is baked evidence) — 409."""
+    r = db.query(models.Routine).filter(models.Routine.uuid == uuid).first()
+    if r is None:
+        raise HTTPException(status_code=404, detail="routine not found")
+    if r.origin_take_uuid is not None:
+        raise HTTPException(status_code=409, detail="promoted routine — cannot convert")
+    if payload.a_track_id == payload.b_track_id:
+        raise HTTPException(status_code=422, detail="a Transition needs two distinct tracks")
+    for tid in (payload.a_track_id, payload.b_track_id):
+        if db.query(models.Track.id).filter(models.Track.id == tid).first() is None:
+            raise HTTPException(status_code=422, detail=f"unknown track {tid}")
+    if db.query(models.Transition).filter(
+        models.Transition.uuid == payload.transition_uuid
+    ).first():
+        raise HTTPException(status_code=409, detail="transition uuid already exists")
+    pair = db.query(models.Transition).filter(
+        models.Transition.a_track_id == payload.a_track_id,
+        models.Transition.b_track_id == payload.b_track_id,
+    )
+    position = max([t.position for t in pair.all()], default=-1) + 1
+    db.add(
+        models.Transition(
+            a_track_id=payload.a_track_id,
+            b_track_id=payload.b_track_id,
+            uuid=payload.transition_uuid,
+            position=position,
+            name=payload.name,
+            favorite=False,
+            data_json=json.dumps(payload.data),
+        )
+    )
+    repointed, dropped = _repoint_pins(
+        db,
+        "routine",
+        uuid,
+        "transition",
+        payload.transition_uuid,
+        payload.a_track_id,
+        payload.b_track_id,
+    )
+    db.delete(r)
+    db.commit()
+    return schemas.KindConversion(
+        kind="transition",
+        uuid=payload.transition_uuid,
+        repointed_pins=repointed,
+        dropped_pins=dropped,
+    )
+
+
+@router.put("/{uuid}/structure", response_model=schemas.RoutineDetail)
+def put_routine_structure(
+    uuid: str, payload: schemas.RoutineStructure, db: Session = Depends(get_db)
+) -> schemas.RoutineDetail:
+    """Replace an authored Routine's structure — cast, slot ids, entry
+    offsets/positions, duration (ADR 0039: first-class mutable on
+    authored rows; promoted rows keep their baked promotion outputs and
+    get 409). Sending `edits` replaces the edits layer in the same write."""
+    r = db.query(models.Routine).filter(models.Routine.uuid == uuid).first()
+    if r is None:
+        raise HTTPException(status_code=404, detail="routine not found")
+    if r.origin_take_uuid is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="promoted routine — structure is baked; edit entry offsets via the edits layer",
+        )
+    _apply_structure(r, payload, db)
+    db.commit()
+    db.refresh(r)
+    return _detail(r)
+
+
+@router.put("/{uuid}/edits", response_model=schemas.RoutineDetail)
+def put_routine_edits(
+    uuid: str, payload: schemas.RoutineEditsPut, db: Session = Depends(get_db)
+) -> schemas.RoutineDetail:
+    """Replace the authored edits layer (gh#170 pass 2). The recording
+    (events_json) is evidence and never changes; edits are the Routine
+    editor's draft — lane envelopes + Jumps, beat-domain — applied at
+    replay-build time by every consumer (editor audition AND set
+    Conductor). Null clears."""
+    r = db.query(models.Routine).filter(models.Routine.uuid == uuid).first()
+    if r is None:
+        raise HTTPException(status_code=404, detail="routine not found")
+    r.edits_json = json.dumps(payload.edits) if payload.edits else None
+    db.commit()
+    db.refresh(r)
+    return _detail(r)
+
+
+@router.patch("/{uuid}", response_model=schemas.RoutineRow)
+def patch_routine(
+    uuid: str, payload: schemas.RoutinePatch, db: Session = Depends(get_db)
+) -> schemas.RoutineRow:
+    """Rename — the only mutable field before the Routine editor exists."""
+    r = db.query(models.Routine).filter(models.Routine.uuid == uuid).first()
+    if r is None:
+        raise HTTPException(status_code=404, detail="routine not found")
+    r.name = payload.name
+    db.commit()
+    db.refresh(r)
+    return _row(r)
+
+
+@router.post("/{uuid}/retrim", response_model=schemas.RoutineDetail)
+def retrim_routine(
+    uuid: str, payload: schemas.RoutineRetrim, db: Session = Depends(get_db)
+) -> schemas.RoutineDetail:
+    """Boundary trim + mechanical re-promotion (gh#170, the v1 review
+    affordance promised at confirm time): re-run promotion over the origin
+    Routine Take with the window moved by beat amounts from either edge
+    (positive narrows, negative widens — gh#170 follow-up). The amounts
+    are relative to the routine's CURRENT window (gh#190: the editor's
+    axis is the current routine clock, so a second trim must not measure
+    against the take's original bounds), which is stored on the Routine
+    and updated here; pre-#190 rows fall back to the take window once.
+    The Routine row updates IN PLACE (same uuid — Set pins keep their
+    reference and re-validate against the new cast/boundaries at plan
+    time); the raw take is untouched. 422 when the origin take or its
+    Session is gone, or when the trim breaks n ≥ 3."""
+    r = db.query(models.Routine).filter(models.Routine.uuid == uuid).first()
+    if r is None:
+        raise HTTPException(status_code=404, detail="routine not found")
+    if r.origin_take_uuid is None:
+        raise HTTPException(
+            status_code=422, detail="routine has no origin take — boundaries are baked"
+        )
+    rt = (
+        db.query(models.RoutineTake)
+        .filter(models.RoutineTake.uuid == r.origin_take_uuid)
+        .first()
+    )
+    if rt is None:
+        raise HTTPException(
+            status_code=422, detail="the origin Routine Take is gone — cannot re-promote"
+        )
+    s = db.query(models.Session).filter(models.Session.uuid == rt.session_uuid).first()
+    if s is None:
+        raise HTTPException(
+            status_code=422,
+            detail="the take's Session is gone — its event slice reference cannot be read",
+        )
+    events: list[dict] = []
+    for chunk in s.chunks:
+        events.extend(json.loads(chunk.events_json))
+
+    # Measure against the routine's CURRENT window (gh#190). The cast is
+    # the routine's current cast — a prefix of the take's (end trims drop
+    # a suffix; start trims never drop). Entry instants are fixed session
+    # evidence, so current-window offsets re-derive from the take's:
+    # clamped at 0 for slots whose true entry precedes the current start
+    # (the narrow-rebase rule).
+    cur_s0 = r.window_start_s if r.window_start_s is not None else rt.window_start_s
+    cur_s1 = r.window_end_s if r.window_end_s is not None else rt.window_end_s
+    take_offsets = json.loads(rt.entry_offsets_json)
+    cast = json.loads(r.cast_json)
+    if len(cast) > len(take_offsets) or cast != json.loads(rt.cast_json)[: len(cast)]:
+        raise HTTPException(
+            status_code=422,
+            detail="routine cast no longer derives from the origin take — cannot re-promote",
+        )
+    offsets = [
+        max(0.0, rt.window_start_s + take_offsets[i] - cur_s0) for i in range(len(cast))
+    ]
+    grids: dict[int, list[dict]] = {}
+    for tid in cast:
+        bg = db.query(models.Beatgrid).filter(models.Beatgrid.track_id == tid).first()
+        if bg is not None:
+            grids[tid] = json.loads(bg.tempo_changes_json)
+            continue
+        track = db.query(models.Track).filter(models.Track.id == tid).first()
+        bpm = track.bpm_projected if track is not None else None
+        if bpm is None or bpm <= 0:
+            raise HTTPException(
+                status_code=422, detail=f"cast track {tid} has no beatgrid or BPM"
+            )
+        grids[tid] = constant_tempo_changes(bpm)
+
+    try:
+        result = retrim(
+            events,
+            cast,
+            cur_s0,
+            cur_s1,
+            offsets,
+            grids,
+            payload.trim_start_beats,
+            payload.trim_end_beats,
+        )
+    except PromotionError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+    r.entry_track_id = result.cast[0]
+    r.exit_track_id = result.cast[-1]
+    r.cast_json = json.dumps(result.cast)
+    r.entry_offsets_beats_json = json.dumps(result.entry_offsets_beats)
+    r.entry_positions_json = json.dumps(result.entry_positions)
+    r.duration_beats = result.duration_beats
+    r.events_json = json.dumps(result.events)
+    r.window_start_s = result.window_start_s
+    r.window_end_s = result.window_end_s
+    # Authored edits ride the trim (gh#170 pass 2): beats rebase by the
+    # start trim; entries falling outside the new span (or on dropped
+    # slots) drop. Best-effort — removed-recorded-jump matches may
+    # resurface if the rebased clock lands off their tolerance.
+    if r.edits_json:
+        shifted = _shift_edits(
+            json.loads(r.edits_json),
+            payload.trim_start_beats,
+            result.duration_beats,
+            len(result.cast),
+        )
+        r.edits_json = json.dumps(shifted) if shifted else None
+    db.commit()
+    db.refresh(r)
+    return _detail(r)
+
+
+def _shift_edits(
+    edits: dict, shift_beats: float, new_duration: float, kept_slots: int
+) -> dict | None:
+    """Rebase an edits layer onto a retrimmed Routine's clock.
+
+    Slot addressing is by stable slot id (ADR 0039): `slotId` strings on
+    events, slotId-keyed maps/lane keys. On promoted routines (the only
+    retrimmable kind) slot ids are index strings from the lossless
+    migration, so the kept-slots check parses them as ints; legacy
+    `slot` int fields still read (pre-migration rows).
+    """
+
+    def slot_index(item: dict) -> int | None:
+        """The slot's baked index, from slotId (index-string on promoted
+        routines) or the legacy `slot` int. None = unaddressable."""
+        sid = item.get("slotId")
+        if isinstance(sid, str):
+            try:
+                return int(sid)
+            except ValueError:
+                return None
+        slot = item.get("slot")
+        return slot if isinstance(slot, int) else None
+
+    lanes: dict = {}
+    for key, pts in (edits.get("lanes") or {}).items():
+        try:
+            slot = int(str(key).split(":")[0])
+        except ValueError:
+            continue
+        if slot >= kept_slots or not isinstance(pts, list):
+            continue
+        shifted = [
+            {**p, "beat": p["beat"] - shift_beats}
+            for p in pts
+            if isinstance(p, dict) and isinstance(p.get("beat"), (int, float))
+        ]
+        shifted = [p for p in shifted if -1e-6 <= p["beat"] <= new_duration + 1e-6]
+        if shifted:
+            lanes[key] = shifted
+    def rebase(items: list, needs_delta: bool) -> list:
+        out = []
+        for j in items or []:
+            if not isinstance(j, dict):
+                continue
+            slot = slot_index(j)
+            beat = j.get("beat")
+            if slot is None or slot >= kept_slots:
+                continue
+            if not isinstance(beat, (int, float)):
+                continue
+            if needs_delta and not isinstance(j.get("deltaSec"), (int, float)):
+                continue
+            nb = beat - shift_beats
+            if nb < 0 or nb > new_duration:
+                continue
+            out.append({**j, "beat": nb})
+        return out
+    jumps = rebase(edits.get("jumps") or [], needs_delta=True)
+    removed = rebase(edits.get("removedRecordedJumps") or [], needs_delta=False)
+    pauses = rebase(edits.get("pauses") or [], needs_delta=False)
+    removed_pauses = rebase(edits.get("removedRecordedPauses") or [], needs_delta=False)
+    # Alignment nudges (gh#190 item 6) are beat-free track-time slides —
+    # they ride the trim untouched, minus dropped slots.
+    def slot_map(key_name: str, keep) -> dict:
+        out = {}
+        for key, val in (edits.get(key_name) or {}).items():
+            try:
+                slot = int(str(key))
+            except ValueError:
+                continue
+            if slot < kept_slots and isinstance(val, (int, float)) and keep(val):
+                out[str(slot)] = val
+        return out
+
+    nudges = slot_map("nudges", lambda v: bool(v))
+    trims = slot_map("trims", lambda v: v != 0.5)
+    # Entry-offset overrides (ADR 0039, #207 slice 2) are routine beats —
+    # they rebase like beats and drop when they fall off the new span.
+    entry_offsets = {}
+    for key, val in (edits.get("entryOffsets") or {}).items():
+        try:
+            slot = int(str(key))
+        except ValueError:
+            continue
+        if slot >= kept_slots or not isinstance(val, (int, float)):
+            continue
+        nb = val - shift_beats
+        if 0 <= nb <= new_duration:
+            entry_offsets[str(slot)] = nb
+    beat_fx = _shift_beat_fx(edits.get("beatFx"), shift_beats, new_duration, kept_slots)
+    if not any(
+        [lanes, jumps, removed, nudges, trims, pauses, removed_pauses, entry_offsets, beat_fx]
+    ):
+        return None
+    return {
+        **({"beatFx": beat_fx} if beat_fx else {}),
+        "lanes": lanes,
+        "jumps": jumps,
+        "removedRecordedJumps": removed,
+        "pauses": pauses,
+        "removedRecordedPauses": removed_pauses,
+        "nudges": nudges,
+        "trims": trims,
+        "entryOffsets": entry_offsets,
+    }
+
+
+def _shift_beat_fx(
+    fx: Any, shift_beats: float, new_duration: float, kept_slots: int
+) -> dict | None:
+    """Rebase an authored Beat FX track (#353) onto a retrimmed clock.
+
+    Steps/depth points shift by `shift_beats`; the last step/point before
+    the new start pins at beat 0 (the state there keeps sounding); points
+    past the new end drop. Steps targeting a dropped slot read OFF.
+    """
+    if not isinstance(fx, dict):
+        return None
+
+    def rebase(items: Any, keep_fields) -> list:
+        pts = [
+            {**p, "beat": p["beat"] - shift_beats}
+            for p in (items if isinstance(items, list) else [])
+            if isinstance(p, dict) and isinstance(p.get("beat"), (int, float)) and keep_fields(p)
+        ]
+        pts.sort(key=lambda p: p["beat"])
+        before = [p for p in pts if p["beat"] < 0]
+        inside = [p for p in pts if 0 <= p["beat"] <= new_duration + 1e-6]
+        if before and not (inside and inside[0]["beat"] <= 1e-9):
+            inside.insert(0, {**before[-1], "beat": 0.0})
+        return inside
+
+    def target_ok(step: dict) -> dict:
+        target = step.get("target")
+        if target == "master":
+            return step
+        try:
+            if int(str(target)) < kept_slots:
+                return step
+        except ValueError:
+            pass
+        return {**step, "on": False}
+
+    steps = [target_ok(s) for s in rebase(fx.get("steps"), lambda p: isinstance(p.get("on"), bool))]
+    depth = rebase(fx.get("depth"), lambda p: isinstance(p.get("value"), (int, float)))
+    if not steps:
+        return None
+    return {"steps": steps, "depth": depth}
+
+
+@router.delete("/{uuid}")
+def delete_routine(uuid: str, db: Session = Depends(get_db)) -> dict:
+    """Delete a Routine and clear the promoted mark on its origin take —
+    the evidence survives and may be re-promoted. Set pins referencing
+    it degrade to Unresolved; Dormant memories of it are dropped
+    (sets 12 rule, extended to routine pins in sets 160)."""
+    r = db.query(models.Routine).filter(models.Routine.uuid == uuid).first()
+    if r is None:
+        raise HTTPException(status_code=404, detail="routine not found")
+    db.query(models.RoutineTake).filter(
+        models.RoutineTake.promoted_routine_uuid == uuid
+    ).update({models.RoutineTake.promoted_routine_uuid: None}, synchronize_session=False)
+    degrade_pins(db, "routine", {uuid})
+    db.delete(r)
+    db.commit()
+    return {"ok": True}

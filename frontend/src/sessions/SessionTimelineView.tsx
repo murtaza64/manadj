@@ -12,19 +12,31 @@
  * click = moment (and SEEK while a replay is rolling), space =
  * pause/resume replay. A moving playhead tracks session replay.
  */
-import { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { ReactNode } from 'react';
 import { flushSync } from 'react-dom';
-import { useQueries, useQuery } from '@tanstack/react-query';
+import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
-import type { SessionRowWire, TakeRowWire } from '../api/client';
+import type {
+  RoutineCandidateWire,
+  RoutineTakeRowWire,
+  SessionRowWire,
+  TakeRowWire,
+} from '../api/client';
+import { DEFAULT_DETECTOR_PARAMS, DETECTOR_VERSION } from '../capture/events';
 import { DECK_COLORS } from '../theme/deckColors';
+import { BEAT_FX_COLORS, fxDepthOpacity } from '../theme/fxColors';
 import { requestTakeReview } from '../capture/takeReview';
+import { pairEditorFallback, requestPairTakeEdit } from '../routines/openMix';
 import { useDecks } from '../hooks/useDeck';
 import { useMixer } from '../hooks/useMixer';
 import { useToast } from '../components/Toast';
+import { openCandidateInEditor, openRoutineTakeInEditor } from '../routines/openFlow';
+import { requestRoutineEdit } from '../routines/openRoutine';
 import { isTypingTarget } from '../components/performance/performanceKeys';
 import { beatgridQueryOptions } from '../hooks/useBeatgridData';
+import { metricLadderQueryOptions } from '../hooks/useMetricLadderData';
+import { resolveLadder } from '../meter/ladder';
 import type { BeatgridResponse } from '../types';
 import type { CaptureDeck, CaptureEvent } from '../capture/events';
 import { decodeWaveformBlob } from '../waveform/blob';
@@ -34,6 +46,8 @@ import {
   ALL_DECKS,
   COLLAPSED_MARKER_PX,
   buildTimeAxis,
+  candidateDupesTake,
+  castSpanRefs,
   collapseCandidates,
   createStateIndex,
   deriveTimeline,
@@ -41,21 +55,24 @@ import {
   takeSpanPair,
   traceWindow,
 } from './timelineModel';
-import type { CollapseCandidate, StateAtT, TakeSpanRef, TimeAxis, TimelineModel } from './timelineModel';
+import type { CollapseCandidate, FxSpan, StateAtT, TakeSpanRef, TimeAxis, TimelineModel } from './timelineModel';
 import { REARM_AFTER_MS, followScrollTarget } from './followScroll';
 import { useViewActive } from '../contexts/viewActive';
 import { getTimelineViewState, patchTimelineViewState } from './timelineViewState';
 import { staggerRows } from './labelStagger';
+import { layoutTrackLabels } from './trackLabelLayout';
 import {
   createMonotonicTToPx,
+  decimatePlayheadTrace,
   drawAudibilityArea,
   drawGridlines,
   drawStyledRuns,
   tracePolylinePoints,
   traceRuns,
 } from './waveformLanes';
-import type { TraceRun } from './waveformLanes';
+import type { LaneLadder, TraceRun } from './waveformLanes';
 import { planReplay } from './replayPlanner';
+import { headerTakeCount } from './headerTakeCount';
 import type { ServoDeckActivity } from './replayStore';
 import {
   replayNowT,
@@ -90,9 +107,13 @@ const MAX_PX_PER_SEC = 60;
 const DETAIL_MARKS_MAX_VISIBLE_S = 600;
 /** Canvas draws this much beyond the viewport each side, so native
  * scrolling never outruns the painted window between re-centers. */
-const CANVAS_MARGIN = 400;
+const CANVAS_MARGIN = 160;
 
 // ── Formatting ──────────────────────────────────────────────────────────
+
+/** Take replay (#351) starts this far before the window: the outgoing's
+ * lead-in, so the entry is heard in context. */
+const TAKE_REPLAY_LEAD_S = 4;
 
 function fmtClock(s: number): string {
   const abs = Math.abs(s);
@@ -109,6 +130,16 @@ function fmtDur(s: number): string {
   return `${Math.round(s / 60)}m`;
 }
 
+/** Beat FX length readout (MixerStrip parity): 0.5 → "1/2". */
+function fmtFxLength(beats: number, unit: 'beats' | 'bars' | null): string {
+  const frac: Record<number, string> = { 0.25: '1/4', 0.5: '1/2', 0.75: '3/4' };
+  return `${frac[beats] ?? String(beats)}${unit === 'bars' ? ' bar' : unit === 'beats' ? 'b' : ''}`;
+}
+
+function fmtFxDepth(depth: number): string {
+  return `${depth > 0 ? '+' : ''}${depth.toFixed(2)}`;
+}
+
 function fmtWhen(iso: string): string {
   const d = new Date(iso.endsWith('Z') || iso.includes('+') ? iso : `${iso}Z`);
   return d.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
@@ -117,7 +148,37 @@ function fmtWhen(iso: string): string {
 type Selection =
   | { kind: 'none' }
   | { kind: 'moment'; t: number }
-  | { kind: 'take'; take: TakeRowWire };
+  | { kind: 'take'; take: TakeRowWire }
+  | { kind: 'candidate'; candidate: RoutineCandidateWire }
+  | { kind: 'routineTake'; take: RoutineTakeRowWire };
+
+/** A hovered routine band/chip (gh#187): the cast + window driving the
+ * hover-dim spotlight (take-chip parity, any tier — ◆/◇/⧉). */
+interface HoverCast {
+  cast: number[];
+  start: number;
+  end: number;
+}
+
+/** The trim-adjusted confirm payload pieces: slots whose entry survives
+ * the trimmed window, offsets re-based onto the new start (clamped ≥ 0 —
+ * a slot already playing at the trimmed start enters at 0). Mechanical:
+ * trimming the end before a slot's entry drops it from the cast (that is
+ * how a candidate can shrink to n=2 and route to the hand-cut Take flow). */
+function effectiveCast(
+  candidate: RoutineCandidateWire,
+  trim: { start: number; end: number }
+): { cast: number[]; offsets: number[] } {
+  const cast: number[] = [];
+  const offsets: number[] = [];
+  candidate.cast.forEach((tid, i) => {
+    const entryAbs = candidate.window_start_s + candidate.entry_offsets[i];
+    if (entryAbs >= trim.end) return;
+    cast.push(tid);
+    offsets.push(Math.max(0, entryAbs - trim.start));
+  });
+  return { cast, offsets };
+}
 
 interface Props {
   session: SessionRowWire;
@@ -126,6 +187,8 @@ interface Props {
   /** Deep-link zoom (sessions 16): show at most this many seconds around
    * the focus moment (never zooms below fit; short sessions keep fit). */
   focusSpanS?: number | null;
+  /** Momentary source-region highlight (gh#170 provenance deep-link). */
+  focusFlash?: { start: number; end: number } | null;
   /** Bumps per deep-link request (perf-layout 09): a kept-alive view must
    * re-apply focus when a NEW request arrives, not only on mount. */
   focusVersion?: number;
@@ -134,7 +197,7 @@ interface Props {
   onBack?: () => void;
 }
 
-export function SessionTimelineView({ session, focusS, focusSpanS, focusVersion, onBack }: Props) {
+export function SessionTimelineView({ session, focusS, focusSpanS, focusFlash, focusVersion, onBack }: Props) {
   // Keep-alive (perf-layout 09): sleep the per-frame work while hidden.
   const viewActive = useViewActive();
   // Responsive vertical budget: lanes scale, chrome sheds when tight.
@@ -172,10 +235,17 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusVersion,
   );
   const [scrubT, setScrubT] = useState<number | null>(null);
   const [selection, setSelection] = useState<Selection>({ kind: 'none' });
+  // Boundary trim for the selected candidate (routines 158): seeded to the
+  // candidate's window on select, dragged via the overlay's edge handles,
+  // clamped inside the miner window (trim only — no expansion).
+  const [trim, setTrim] = useState<{ start: number; end: number } | null>(null);
   // Hovered take chip (sessions 22): spotlight state lives HERE and renders
   // in the per-frame overlay — the memoized scene must not re-render per
   // hover, so it only receives the stable callback.
   const [hoverTake, setHoverTake] = useState<TakeRowWire | null>(null);
+  // Hovered routine band/chip (◆/◇/⧉, gh#187): the cast-track spotlight —
+  // exact parity with the take-chip hover, generalized to n cast tracks.
+  const [hoverCast, setHoverCast] = useState<HoverCast | null>(null);
   const [pxPerSec, setPxPerSec] = useState<number | null>(
     () => getTimelineViewState(session.uuid)?.pxPerSec ?? null
   ); // null = fit
@@ -190,12 +260,40 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusVersion,
     gcTime: 60_000,
   });
   const { data: allTakes } = useQuery({ queryKey: ['takes'], queryFn: api.takes.list });
+  // Routine confirm flow (ADR 0035, routines 158): miner candidates for
+  // this Session + already-confirmed Routine Takes.
+  const { data: allRoutineCandidates } = useQuery({
+    queryKey: ['routine-candidates', session.uuid],
+    queryFn: () => api.routineCandidates.forSession(session.uuid),
+  });
+  const { data: allRoutineTakes } = useQuery({
+    queryKey: ['routine-takes'],
+    queryFn: api.routineTakes.list,
+  });
 
   const events = detail?.events as CaptureEvent[] | undefined;
   const takes = useMemo(
     () => (allTakes ?? []).filter((t) => t.session_uuid === session.uuid),
     [allTakes, session.uuid]
   );
+  const routineTakes = useMemo(
+    () => (allRoutineTakes ?? []).filter((t) => t.session_uuid === session.uuid),
+    [allRoutineTakes, session.uuid]
+  );
+  // A confirmed candidate stops highlighting — its Routine Take chip is
+  // the surviving surface. The uuid check alone leaks after a re-mine
+  // (candidate rows are replaced with fresh uuids — the origin uuid
+  // dangles by design), so a span-shaped dedupe backs it up: a candidate
+  // duplicating a confirmed take's span collapses instead of stacking a
+  // dashed ⧉ band under the ◆ (gh#187).
+  const routineCandidates = useMemo(() => {
+    const confirmed = new Set(
+      (allRoutineTakes ?? []).map((t) => t.origin_candidate_uuid).filter(Boolean)
+    );
+    return (allRoutineCandidates ?? []).filter(
+      (c) => !confirmed.has(c.uuid) && !routineTakes.some((rt) => candidateDupesTake(c, rt))
+    );
+  }, [allRoutineCandidates, allRoutineTakes, routineTakes]);
 
   const model: TimelineModel | null = useMemo(
     () => (events ? deriveTimeline(events) : null),
@@ -211,6 +309,8 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusVersion,
       wanted.add(t.a_track_id);
       wanted.add(t.b_track_id);
     }
+    for (const c of routineCandidates) for (const id of c.cast) wanted.add(id);
+    for (const rt of routineTakes) for (const id of rt.cast) wanted.add(id);
     const missing = [...wanted].filter((id) => trackNames[id] === undefined);
     if (missing.length === 0) return;
     Promise.all(
@@ -222,7 +322,7 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusVersion,
       )
     ).then((pairs) => setTrackNames((prev) => ({ ...prev, ...Object.fromEntries(pairs) })));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [model, takes]);
+  }, [model, takes, routineCandidates, routineTakes]);
 
   // Collapse geometry pre-pass (pxPerSec-independent): what the fit zoom
   // and the axis both need.
@@ -332,10 +432,10 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusVersion,
         pxPerSec: next,
       });
       const newW = Math.max(ctx.viewportW, Math.ceil(newAxis.totalPx));
-      const newScroll = Math.max(
+      const newScroll = Math.round(Math.max(
         0,
         Math.min(newAxis.tToPx(tCursor) - cursorX, newW - ctx.viewportW)
-      );
+      ));
       // Commit zoom + the matching scroll WINDOW in one synchronous render
       // (the DawTimeline flushSync idiom): the new width, the canvas
       // window, and the DOM scroll all land in the same frame — no torn
@@ -352,7 +452,7 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusVersion,
       const now = performance.now();
       const latch = wheelGestureRef.current;
       const gestureAxis =
-        latch && now - latch.last < 150
+        e.ctrlKey || e.metaKey ? 'zoom' : latch && now - latch.last < 150
           ? latch.axis
           : Math.abs(e.deltaX) > Math.abs(e.deltaY)
             ? ('pan' as const)
@@ -364,7 +464,7 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusVersion,
       }
       const pending = pendingZoomRef.current;
       pendingZoomRef.current = {
-        factor: (pending?.factor ?? 1) * Math.pow(1.0015, -e.deltaY * unit),
+        factor: (pending?.factor ?? 1) * Math.exp(-e.deltaY * unit * (e.ctrlKey || e.metaKey ? 0.01 : 0.0015)),
         clientX: e.clientX,
       };
       if (!raf) raf = requestAnimationFrame(applyZoom);
@@ -461,7 +561,17 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusVersion,
     setSelection({ kind: 'moment', t: focusS });
     const el = scrollRef.current;
     if (el) setScrollLeft(el, Math.max(0, axis.tToPx(focusS) - el.clientWidth / 2));
-  }, [focusS, focusSpanS, focusVersion, model, axis, width, fitPx, viewportW, setScrollLeft]);
+    // A repeated deep-link restarts the temporary source-region highlight.
+    if (focusFlash) setFlash({ ...focusFlash, key: focusVersion ?? 0 });
+  }, [focusS, focusSpanS, focusFlash, focusVersion, model, axis, width, fitPx, viewportW, setScrollLeft]);
+
+  // Momentary region highlight.
+  const [flash, setFlash] = useState<{ start: number; end: number; key: number } | null>(null);
+  useEffect(() => {
+    if (!flash) return;
+    const t = setTimeout(() => setFlash(null), 2600);
+    return () => clearTimeout(t);
+  }, [flash]);
 
   // Checkpointed scrub lookups: hover fires per mousemove — reducing the
   // whole 100k-event log each time froze large Sessions (issue 13).
@@ -645,11 +755,69 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusVersion,
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [model, gridsReadyKey]);
 
+  // Per-track Metric ladders (gh#201): the lane gridlines render tier-aware
+  // (DESIGN.md D11 — dropping hypermeter silently is a bug), so fetch each
+  // track's persisted ladder and resolve it onto its downbeat lattice.
+  const ladderQueries = useQueries({
+    queries: (model?.trackIds ?? []).map((id) => metricLadderQueryOptions(id)),
+  });
+  const laddersReadyKey = ladderQueries.map((q) => (q.data ? '1' : '0')).join('');
+  const laddersByTrack = useMemo(() => {
+    const out: Record<number, LaneLadder> = {};
+    (model?.trackIds ?? []).forEach((id, i) => {
+      const grid = gridsByTrack[id]?.data ?? null;
+      const persisted = ladderQueries[i]?.data ?? null;
+      const proj = resolveLadder(grid, persisted);
+      if (!grid || !proj) return;
+      const downs = new Map<number, { tier: number; parenthetical: boolean }>();
+      for (let k = 0; k < proj.tiers.length; k++) {
+        downs.set(grid.downbeat_times[k], {
+          tier: proj.tiers[k],
+          parenthetical: proj.parentheticals[k],
+        });
+      }
+      out[id] = { downs, tierBars: proj.tierBars };
+    });
+    return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [model, gridsByTrack, laddersReadyKey]);
+
+  // Zoom-adaptive run decimation (this issue): at low zoom a jog/pitch-
+  // heavy session cut into thousands of SUB-PIXEL runs, and the per-run
+  // fixed cost made every canvas repaint a main-thread stall. Thin trace
+  // samples to ~¾px of session time before run-cutting — position error
+  // stays sub-pixel by construction. Quantized to powers of two so the
+  // memo only recomputes when zoom crosses a bucket, not per wheel frame.
+  const runMinDtSRaw = 0.75 / effPx;
+  const runMinDtS = runMinDtSRaw <= 1 ? 0 : 2 ** Math.floor(Math.log2(runMinDtSRaw));
   const runsByDeck = useMemo(() => {
     const out = {} as Record<CaptureDeck, TraceRun[]>;
-    for (const d of ALL_DECKS) out[d] = model ? traceRuns(model.decks[d]) : [];
+    for (const d of ALL_DECKS) out[d] = model ? traceRuns(model.decks[d], undefined, runMinDtS) : [];
     return out;
-  }, [model]);
+  }, [model, runMinDtS]);
+
+  const spanRunsByDeck = useMemo(() => Object.fromEntries(ALL_DECKS.map(deck => [deck,
+    model?.decks[deck].trackSpans.map(span => ({ ...span,
+      runs: runsByDeck[deck].filter(run => run.t0 >= span.start && run.t1 <= span.end),
+    })) ?? [],
+  ])) as Record<CaptureDeck, { trackId: number; start: number; end: number; runs: TraceRun[] }[]>,
+  [model, runsByDeck]);
+
+  // Scene copies of the traces, thinned to the SAME zoom bucket (this
+  // issue, part 2): the trace polylines walked every raw sample per scene
+  // render — at low zoom that's the whole multi-hour trace × 4 decks on
+  // every zoom frame / scroll-quantum crossing. Points that can't move
+  // ≥1px horizontally are dropped up front; a seek that jumps the lane
+  // vertically (≥ ~1px of playhead scale) always survives.
+  const sceneTracesByDeck = useMemo(() => {
+    const out = {} as Record<CaptureDeck, { t: number; playhead: number }[][]>;
+    for (const d of ALL_DECKS) {
+      const dt = model?.decks[d];
+      const minPh = dt && dt.maxPlayhead > 0 ? dt.maxPlayhead / Math.max(1, laneH - 24) : Infinity;
+      out[d] = dt ? dt.traces.map((tr) => decimatePlayheadTrace(tr, runMinDtS, minPh)) : [];
+    }
+    return out;
+  }, [model, runMinDtS, laneH]);
 
   const slot = useStyleSlot('full');
 
@@ -663,7 +831,7 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusVersion,
   // window is quantized: native scroll carries the canvas smoothly (it
   // lives in the scrolled content); the redraw only re-centers when the
   // scroll crosses a quantum, so edges never blank within the margin.
-  const canvasWinStart = Math.max(0, Math.floor((scrollX - CANVAS_MARGIN) / 300) * 300);
+  const canvasWinStart = Math.max(0, Math.floor((scrollX - CANVAS_MARGIN) / 100) * 100);
   // The SVG scene windows on the SAME quantum: scrollX changes every
   // scroll frame, but the memoized scene only re-renders when the scroll
   // crosses a quantum (issue 13 — reconciling thousands of un-windowed
@@ -671,15 +839,15 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusVersion,
   const sceneX0 = canvasWinStart;
   const sceneX1 = Math.min(width, canvasWinStart + viewportW + 2 * CANVAS_MARGIN);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  useEffect(() => {
+  useLayoutEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || !model || !axis) return;
     const dpr = window.devicePixelRatio || 1;
     const x0 = Math.max(0, Math.floor(canvasWinStart));
     const x1 = Math.min(width, x0 + viewportW + 2 * CANVAS_MARGIN);
     const winW = Math.max(1, x1 - x0);
-    canvas.width = winW * dpr;
-    canvas.height = svgH * dpr;
+    if (canvas.width !== Math.ceil(winW * dpr)) canvas.width = Math.ceil(winW * dpr);
+    if (canvas.height !== Math.ceil(svgH * dpr)) canvas.height = Math.ceil(svgH * dpr);
     canvas.style.transform = `translateX(${x0}px)`;
     canvas.style.width = `${winW}px`;
     const ctx = canvas.getContext('2d');
@@ -687,6 +855,8 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusVersion,
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, winW, svgH);
     ctx.translate(-x0, 0); // helpers draw in timeline coordinates
+    const startT = axis.pxToT(x0);
+    const endT = axis.pxToT(x1);
     for (const deck of LANE_ORDER) {
       const geo = { width, yOffset: laneY(deck), height: laneH, x0, x1 };
       const dt = model.decks[deck];
@@ -695,9 +865,10 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusVersion,
       // 2. Full-color styled waveform per track span's runs, modulated by
       // the recorded mixer state (sessions 19: EQ kills drop their band,
       // fader/trim shrink the waveform).
-      for (const span of dt.trackSpans) {
+      for (const span of spanRunsByDeck[deck]) {
+        if (span.end < startT || span.start > endT) continue;
         const wave = wavesByTrack[span.trackId];
-        const spanRuns = runsByDeck[deck].filter((r) => r.t0 >= span.start && r.t1 <= span.end);
+        const spanRuns = span.runs;
         if (wave) {
           drawStyledRuns(ctx, wave, slot.styleId, slot.params, spanRuns, axis, geo, dt.controlSteps);
           // 3. Beat gridlines over the waveform (jump/pitch-aware).
@@ -709,19 +880,38 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusVersion,
               grid.data.downbeat_times ?? [],
               spanRuns,
               axis,
-              geo
+              geo,
+              laddersByTrack[span.trackId] ?? null
             );
           }
         }
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [model, axis, width, svgH, canvasWinStart, viewportW, wavesByTrack, gridsByTrack, runsByDeck, slot]);
+  }, [model, axis, width, svgH, canvasWinStart, viewportW, wavesByTrack, gridsByTrack, laddersByTrack, spanRunsByDeck, slot]);
 
   // Stable scene callbacks (the scene is memoized — inline closures would
   // defeat it every render).
   const onTakeClick = useCallback((take: TakeRowWire) => setSelection({ kind: 'take', take }), []);
   const onTakeHover = useCallback((take: TakeRowWire | null) => setHoverTake(take), []);
+  const onCastHover = useCallback((hover: HoverCast | null) => setHoverCast(hover), []);
+  const trimBoundsRef = useRef<{ lo: number; hi: number } | null>(null);
+  const onCandidateClick = useCallback((c: RoutineCandidateWire) => {
+    setSelection({ kind: 'candidate', candidate: c });
+    setTrim({ start: c.window_start_s, end: c.window_end_s });
+    // Trim bounds reach the WHOLE session (gh#170 follow-up: outward trim
+    // — the miner under-sizes dwell-shaped windows, #181's WYGFM case),
+    // not just the miner's window; confirm re-derives from the session
+    // slice either way.
+    const segs = axisRef.current?.segments;
+    const hi = segs && segs.length > 0 ? segs[segs.length - 1].end : c.window_end_s;
+    trimBoundsRef.current = { lo: 0, hi: Math.max(hi, c.window_end_s) };
+  }, []);
+  const onRoutineTakeClick = useCallback(
+    (rt: RoutineTakeRowWire) => setSelection({ kind: 'routineTake', take: rt }),
+    []
+  );
+
   const onGapToggle = useCallback(
     (idx: number) =>
       setExpandedGaps((prev) => {
@@ -740,8 +930,165 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusVersion,
     return Math.min(rect.width, Math.max(0, clientX - rect.left));
   };
 
+  // ── Candidate confirm flow (ADR 0035, routines 158) ──────────────────
+  const queryClient = useQueryClient();
+
+  // Region → Routine editor (gh#170 pass 2 directive 4): the ✎ button on
+  // a detected region runs its tier's open flow (candidate: confirm +
+  // promote — the deliberate act; take: promote if needed) and the app
+  // flips to the editor.
+  const onOpenCandidateInEditor = useCallback(
+    async (c: RoutineCandidateWire) => {
+      try {
+        await openCandidateInEditor(c);
+        void queryClient.invalidateQueries({ queryKey: ['routine-takes'] });
+        void queryClient.invalidateQueries({ queryKey: ['routines'] });
+        void queryClient.invalidateQueries({ queryKey: ['routine-candidates', session.uuid] });
+      } catch (err) {
+        toast(`Open failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    },
+    [queryClient, session.uuid, toast]
+  );
+  const onOpenRoutineTakeInEditor = useCallback(
+    async (rt: RoutineTakeRowWire) => {
+      try {
+        await openRoutineTakeInEditor(rt);
+        void queryClient.invalidateQueries({ queryKey: ['routine-takes'] });
+        void queryClient.invalidateQueries({ queryKey: ['routines'] });
+      } catch (err) {
+        toast(`Open failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    },
+    [queryClient, toast]
+  );
+  // Persisted tier (gh#170 follow-up): the ◆ region's ✎ opens directly.
+  const onOpenRoutine = useCallback((routineUuid: string) => {
+    requestRoutineEdit({ routineUuid });
+  }, []);
+  // Names for ◆ region labels (metadata only; cheap and cached).
+  const { data: routineRows } = useQuery({ queryKey: ['routines'], queryFn: api.routines.list });
+  const routineNames = useMemo(
+    () => Object.fromEntries((routineRows ?? []).map((r) => [r.uuid, r.name])),
+    [routineRows]
+  );
+  const axisRef = useRef(axis);
+  axisRef.current = axis;
+  const trimDraggedRef = useRef(false);
+  /** Drag a trim boundary: window-level listeners for the gesture, time
+   * clamped inside the miner window and 2s off the opposite edge. */
+  const onTrimHandleDown = useCallback((edge: 'start' | 'end', e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const move = (ev: MouseEvent) => {
+      const ax = axisRef.current;
+      const rect = svgRef.current?.getBoundingClientRect();
+      if (!ax || !rect) return;
+      trimDraggedRef.current = true;
+      const t = ax.pxToT(Math.min(rect.width, Math.max(0, ev.clientX - rect.left)));
+      const b = trimBoundsRef.current;
+      setTrim((prev) => {
+        if (!prev) return prev;
+        if (edge === 'start') {
+          return { ...prev, start: Math.min(Math.max(t, b?.lo ?? -Infinity), prev.end - 2) };
+        }
+        return { ...prev, end: Math.max(Math.min(t, b?.hi ?? Infinity), prev.start + 2) };
+      });
+    };
+    const up = () => {
+      window.removeEventListener('mousemove', move);
+      window.removeEventListener('mouseup', up);
+    };
+    window.addEventListener('mousemove', move);
+    window.addEventListener('mouseup', up);
+  }, []);
+
+  const confirmCandidate = async () => {
+    if (selection.kind !== 'candidate' || !trim) return;
+    const { cast, offsets } = effectiveCast(selection.candidate, trim);
+    if (cast.length < 3) return;
+    try {
+      const row = await api.routineTakes.create({
+        uuid: crypto.randomUUID(),
+        session_uuid: session.uuid,
+        window_start_s: trim.start,
+        window_end_s: trim.end,
+        cast,
+        entry_offsets: offsets,
+        origin_candidate_uuid: selection.candidate.uuid,
+      });
+      await queryClient.invalidateQueries({ queryKey: ['routine-takes'] });
+      setSelection({ kind: 'routineTake', take: row });
+      toast(`Routine Take confirmed — ${cast.length} tracks · ${fmtDur(trim.end - trim.start)}.`);
+    } catch (err) {
+      toast(String(err));
+    }
+  };
+
+  /** n=2 route (ADR 0035): a 2-cast confirm is a Transition — cut a
+   * hand-cut Take (origin 'manual') with the trimmed slice copied in. */
+  const cutTakeInstead = async () => {
+    if (selection.kind !== 'candidate' || !trim || !events) return;
+    const { cast } = effectiveCast(selection.candidate, trim);
+    if (cast.length !== 2) return;
+    const pad = 2;
+    const slice = events.filter((e) => e.t >= trim.start - pad && e.t <= trim.end + pad);
+    try {
+      await api.takes.create({
+        uuid: crypto.randomUUID(),
+        a_track_id: cast[0],
+        b_track_id: cast[1],
+        window_start_s: trim.start,
+        window_end_s: trim.end,
+        confidence: 1,
+        detector_version: DETECTOR_VERSION,
+        params: DEFAULT_DETECTOR_PARAMS,
+        events: slice,
+        session_uuid: session.uuid,
+        origin: 'manual',
+      });
+      await queryClient.invalidateQueries({ queryKey: ['takes'] });
+      setSelection({ kind: 'none' });
+      toast('Hand-cut Take created — a 2-cast span is a Transition, not a Routine.');
+    } catch (err) {
+      toast(String(err));
+    }
+  };
+
+  const promoteRoutineTake = async (rt: RoutineTakeRowWire) => {
+    try {
+      const routine = await api.routineTakes.promote(rt.uuid);
+      await queryClient.invalidateQueries({ queryKey: ['routine-takes'] });
+      await queryClient.invalidateQueries({ queryKey: ['routines'] });
+      setSelection({
+        kind: 'routineTake',
+        take: { ...rt, promoted_routine_uuid: routine.uuid },
+      });
+      toast(
+        `Promoted — Routine saved: ${routine.cast.length} slots · ${Math.round(routine.duration_beats)} beats.`
+      );
+    } catch (err) {
+      toast(String(err));
+    }
+  };
+
+  const deleteRoutineTake = async (rt: RoutineTakeRowWire) => {
+    try {
+      await api.routineTakes.delete(rt.uuid);
+      await queryClient.invalidateQueries({ queryKey: ['routine-takes'] });
+      setSelection({ kind: 'none' });
+    } catch (err) {
+      toast(String(err));
+    }
+  };
+
   const onTimelineClick = (clientX: number) => {
     if (!axis || !events) return;
+    // The click that lands after a trim drag must not move the selection.
+    if (trimDraggedRef.current) {
+      trimDraggedRef.current = false;
+      return;
+    }
     const t = axis.pxToT(pxAt(clientX));
     setSelection({ kind: 'moment', t });
     // Click during playback = seek (the deck-jog idiom: position gestures
@@ -757,13 +1104,13 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusVersion,
     <div className="session-timeline" ref={rootRef}>
       <div className="stl-controls">
         {onBack ? (
-          <button className="stl-back" onClick={onBack}>
+          <button className="btn btn-secondary" onClick={onBack}>
             ‹ Sessions
           </button>
         ) : null}
         <span className="stl-title">
           {fmtWhen(session.started_at)}
-          {model ? ` · ${fmtDur(model.end - model.start)} · ${takes.length} takes` : ''}
+          {model ? ` · ${fmtDur(model.end - model.start)} · ${headerTakeCount(allTakes ? takes : undefined, session.take_count)} takes` : ''}
         </span>
 
         {/* Replay transport: present whenever THIS session is rolling —
@@ -774,17 +1121,17 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusVersion,
         {replayHere ? (
           <span className="stl-cluster">
             {replay.status !== 'loading' ? (
-              <button className="stl-replay" onClick={toggleReplayPause}>
+              <button className="btn btn-success" aria-label={replay.status === 'paused' ? 'Resume replay' : 'Pause replay'} onClick={toggleReplayPause}>
                 {replay.status === 'paused' ? '▶' : '⏸'}
               </button>
             ) : null}
-            <button className="stl-replay stop" onClick={stopReplay}>
+            <button className="btn btn-danger" aria-label="Stop replay" onClick={stopReplay}>
               {replay.status === 'loading' ? 'loading…' : '■'}
             </button>
           </span>
         ) : selection.kind === 'moment' ? (
           <button
-            className="stl-replay"
+            className="btn btn-success"
             title="Replay through the shared live decks from this moment — any manual gesture takes over"
             onClick={() => replayFrom(selection.t)}
           >
@@ -793,15 +1140,130 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusVersion,
         ) : null}
         {selection.kind === 'take' ? (
           <span className="stl-cluster">
+            {!replayHere ? (
+              <button
+                className="btn btn-success"
+                aria-label="Replay take"
+                title="Replay this Take exactly as performed (scratches, Beat FX) through the shared decks — any manual gesture takes over"
+                onClick={() => replayFrom(Math.max(0, selection.take.window_start_s - TAKE_REPLAY_LEAD_S))}
+              >
+                ▶ take
+              </button>
+            ) : null}
             <button
-              className="stl-open-editor"
-              onClick={() => requestTakeReview(selection.take.uuid)}
+              className="btn btn-primary"
+              onClick={() => {
+                // #221: handover takes review on the Mix editor; Cameo
+                // (guest) takes keep the legacy path until the kind-aware
+                // Cameo editor lands.
+                if (selection.take.kind === 'guest' || pairEditorFallback()) {
+                  requestTakeReview(selection.take.uuid);
+                } else {
+                  requestPairTakeEdit(selection.take);
+                }
+              }}
             >
-              Take {trackNames[selection.take.a_track_id] ?? selection.take.a_track_id} →{' '}
-              {trackNames[selection.take.b_track_id] ?? selection.take.b_track_id} · open in
-              editor
+              {selection.take.kind === 'guest' ? (
+                <>
+                  ◐ Cameo {trackNames[selection.take.b_track_id] ?? selection.take.b_track_id}{' '}
+                  over {trackNames[selection.take.a_track_id] ?? selection.take.a_track_id}
+                </>
+              ) : (
+                <>
+                  Take {trackNames[selection.take.a_track_id] ?? selection.take.a_track_id} →{' '}
+                  {trackNames[selection.take.b_track_id] ?? selection.take.b_track_id}
+                </>
+              )}{' '}
+              · open in editor
             </button>
-            <button className="stl-clear" onClick={() => setSelection({ kind: 'none' })}>
+            <button className="btn btn-secondary" aria-label="Clear selection" onClick={() => setSelection({ kind: 'none' })}>
+              ✕
+            </button>
+          </span>
+        ) : null}
+
+        {/* Candidate confirm cluster (routines 158): trim on the timeline,
+            confirm here. Trimming the cast to 2 flips the button to the
+            hand-cut-Take route (a 2-cast span is a Transition, ADR 0035). */}
+        {selection.kind === 'candidate' && trim
+          ? (() => {
+              const eff = effectiveCast(selection.candidate, trim);
+              const chain = eff.cast.map((id) => trackNames[id] ?? `#${id}`).join(' → ');
+              return (
+                <span className="stl-cluster stl-cand-cluster">
+                  <span className="stl-cand-title" title={chain}>
+                    ⧉ candidate · {eff.cast.length} tracks · {fmtDur(trim.end - trim.start)}
+                  </span>
+                  {eff.cast.length >= 3 ? (
+                    <button
+                      className="btn btn-primary"
+                      title={`Confirm this span as a Routine Take\n${chain}`}
+                      onClick={() => void confirmCandidate()}
+                    >
+                      ✓ Confirm Routine Take
+                    </button>
+                  ) : eff.cast.length === 2 ? (
+                    <button
+                      className="btn btn-success"
+                      title="A 2-cast span is a Transition — this cuts a hand-cut Take instead (ADR 0035)"
+                      onClick={() => void cutTakeInstead()}
+                    >
+                      n=2 → Cut Take instead
+                    </button>
+                  ) : (
+                    <span className="stl-cand-title">window too tight</span>
+                  )}
+                  <button
+                    className="btn btn-secondary"
+                    title="Reset trim to the miner's window"
+                    onClick={() =>
+                      setTrim({
+                        start: selection.candidate.window_start_s,
+                        end: selection.candidate.window_end_s,
+                      })
+                    }
+                  >
+                    ↺
+                  </button>
+                  <button className="btn btn-secondary" aria-label="Clear selection" onClick={() => setSelection({ kind: 'none' })}>
+                    ✕
+                  </button>
+                </span>
+              );
+            })()
+          : null}
+
+        {/* Routine Take cluster: promote (mechanical deck→slot + beat
+            rebase) or delete; the raw take is never altered by promotion. */}
+        {selection.kind === 'routineTake' ? (
+          <span className="stl-cluster stl-cand-cluster">
+            <span
+              className="stl-cand-title"
+              title={selection.take.cast.map((id) => trackNames[id] ?? `#${id}`).join(' → ')}
+            >
+              ◆ Routine Take · {selection.take.cast.length} tracks
+            </span>
+            {selection.take.promoted_routine_uuid ? (
+              <span className="stl-cand-title" title="Promoted to a saved Routine">
+                ★ promoted
+              </span>
+            ) : (
+              <button
+                className="btn btn-primary"
+                title="Mechanically promote: deck→slot re-addressing + beat-domain rebase via the cast Beatgrids"
+                onClick={() => void promoteRoutineTake(selection.take)}
+              >
+                ↑ Promote to Routine
+              </button>
+            )}
+            <button
+              className="btn btn-danger"
+              title="Delete this Routine Take"
+              onClick={() => void deleteRoutineTake(selection.take)}
+            >
+              ✕ delete
+            </button>
+            <button className="btn btn-secondary" aria-label="Clear selection" onClick={() => setSelection({ kind: 'none' })}>
               ✕
             </button>
           </span>
@@ -823,6 +1285,7 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusVersion,
           gaps ≥
         </label>
         <select
+          aria-label="Collapse gaps longer than"
           value={thresholdS}
           onChange={(e) => setThresholdS(Number(e.target.value))}
           disabled={!collapseIdle}
@@ -841,7 +1304,7 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusVersion,
           traces
         </label>
         <span className="stl-zoom">
-          <button title="Zoom to fit" onClick={() => setPxPerSec(null)}>
+          <button className={`btn btn-secondary${pxPerSec === null ? ' btn-selected' : ''}`} title="Zoom to fit" onClick={() => setPxPerSec(null)}>
             fit
           </button>
         </span>
@@ -878,8 +1341,17 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusVersion,
                   laneH={laneH}
                   lanesTop={lanesTop}
                   takes={takes}
+                  routineCandidates={routineCandidates}
+                  routineTakes={routineTakes}
                   trackNames={trackNames}
                   selectedTakeUuid={selection.kind === 'take' ? selection.take.uuid : null}
+                  selectedCandidateUuid={
+                    selection.kind === 'candidate' ? selection.candidate.uuid : null
+                  }
+                  selectedRoutineTakeUuid={
+                    selection.kind === 'routineTake' ? selection.take.uuid : null
+                  }
+                  tracesByDeck={sceneTracesByDeck}
                   showTraces={showTraces}
                   showDetailMarks={showDetailMarks}
                   candidates={candidates}
@@ -888,6 +1360,13 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusVersion,
                   expandedGaps={expandedGaps}
                   onTakeClick={onTakeClick}
                   onTakeHover={onTakeHover}
+                  onCastHover={onCastHover}
+                  onCandidateClick={onCandidateClick}
+                  onRoutineTakeClick={onRoutineTakeClick}
+                  onOpenCandidateInEditor={onOpenCandidateInEditor}
+                  onOpenRoutineTakeInEditor={onOpenRoutineTakeInEditor}
+                  onOpenRoutine={onOpenRoutine}
+                  routineNames={routineNames}
                   onGapToggle={onGapToggle}
                 />
                 <SceneOverlay
@@ -903,6 +1382,10 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusVersion,
                   replayPaused={replay.status === 'paused'}
                   selection={selection}
                   hoverTake={hoverTake}
+                  hoverCast={hoverCast}
+                  trim={selection.kind === 'candidate' ? trim : null}
+                  onTrimHandleDown={onTrimHandleDown}
+                  flash={flash}
                 />
               </svg>
             </div>
@@ -936,8 +1419,17 @@ interface SceneProps {
   laneH: number;
   lanesTop: number;
   takes: TakeRowWire[];
+  /** Miner-suggested Routine spans (unconfirmed) + confirmed Routine
+   * Takes (routines 158) — chips in the same strip as Take chips. */
+  routineCandidates: RoutineCandidateWire[];
+  routineTakes: RoutineTakeRowWire[];
   trackNames: Record<number, string>;
   selectedTakeUuid: string | null;
+  selectedCandidateUuid: string | null;
+  selectedRoutineTakeUuid: string | null;
+  /** Zoom-bucket-decimated traces for the polylines (identity changes
+   * only when the bucket does — not per zoom frame). */
+  tracesByDeck: Record<CaptureDeck, { t: number; playhead: number }[][]>;
   showTraces: boolean;
   showDetailMarks: boolean;
   /** Collapse candidates (idle + tenure, sessions 14) — indices key the
@@ -948,6 +1440,16 @@ interface SceneProps {
   expandedGaps: ReadonlySet<number>;
   onTakeClick(take: TakeRowWire): void;
   onTakeHover(take: TakeRowWire | null): void;
+  /** Routine band/chip hover (gh#187): the cast-track spotlight. */
+  onCastHover(hover: HoverCast | null): void;
+  onCandidateClick(candidate: RoutineCandidateWire): void;
+  onRoutineTakeClick(take: RoutineTakeRowWire): void;
+  onOpenCandidateInEditor(candidate: RoutineCandidateWire): void | Promise<void>;
+  onOpenRoutineTakeInEditor(take: RoutineTakeRowWire): void | Promise<void>;
+  /** Direct open — persisted tier (gh#170 follow-up). */
+  onOpenRoutine(routineUuid: string): void;
+  /** Persisted Routine names keyed by uuid (labels for the ◆ tier). */
+  routineNames: Record<string, string | null>;
   onGapToggle(idx: number): void;
 }
 
@@ -960,8 +1462,13 @@ const TimelineScene = memo(function TimelineScene({
   laneH,
   lanesTop,
   takes,
+  routineCandidates,
+  routineTakes,
   trackNames,
   selectedTakeUuid,
+  selectedCandidateUuid,
+  selectedRoutineTakeUuid,
+  tracesByDeck,
   showTraces,
   showDetailMarks,
   candidates,
@@ -970,6 +1477,13 @@ const TimelineScene = memo(function TimelineScene({
   expandedGaps,
   onTakeClick,
   onTakeHover,
+  onCastHover,
+  onCandidateClick,
+  onRoutineTakeClick,
+  onOpenCandidateInEditor,
+  onOpenRoutineTakeInEditor,
+  onOpenRoutine,
+  routineNames,
   onGapToggle,
 }: SceneProps) {
   const X = (t: number) => axis.tToPx(t);
@@ -1019,16 +1533,25 @@ const TimelineScene = memo(function TimelineScene({
   // cluster shrinks only as much as IT needs (rows = max row used within
   // the cluster), so a lone pair keeps half-height chips while a 4-deep
   // pile drops to quarter height. Isolated chips keep the full strip.
+  // Routine-take + candidate chips (routines 158) share the strip and the
+  // stagger: indices run takes, then routineTakes, then candidates.
+  const chipWindows = [
+    ...takes.map((t) => ({ start: t.window_start_s, end: t.window_end_s })),
+    ...routineTakes.map((t) => ({ start: t.window_start_s, end: t.window_end_s })),
+    ...routineCandidates.map((c) => ({ start: c.window_start_s, end: c.window_end_s })),
+  ];
+  const rtakeChipBase = takes.length;
+  const candChipBase = takes.length + routineTakes.length;
   const chipLayout = (() => {
-    const order = takes
+    const order = chipWindows
       .map((_, i) => i)
-      .sort((a, b) => takes[a].window_start_s - takes[b].window_start_s);
+      .sort((a, b) => chipWindows[a].start - chipWindows[b].start);
     const items = order.map((i) => {
-      const x0 = X(takes[i].window_start_s);
-      return { x0, x1: Math.max(X(takes[i].window_end_s), x0 + 12) };
+      const x0 = X(chipWindows[i].start);
+      return { x0, x1: Math.max(X(chipWindows[i].end), x0 + 12) };
     });
     const rows = staggerRows(items, 4);
-    const layout = new Array<{ row: number; rows: number }>(takes.length);
+    const layout = new Array<{ row: number; rows: number }>(chipWindows.length);
     let clusterStart = 0;
     let clusterEnd = items.length > 0 ? items[0].x1 : 0;
     const closeCluster = (k: number) => {
@@ -1061,14 +1584,6 @@ const TimelineScene = memo(function TimelineScene({
   return (
     <g>
       <defs>
-        {/* Track-label backing: newer titles obscure older ones, with a
-            soft fade-in so the covered title dissolves instead of
-            colliding (text-stacking illegibility fix). */}
-        <linearGradient id="stl-label-fade" x1="0" y1="0" x2="1" y2="0">
-          <stop offset="0%" stopColor="var(--mantle, #181818)" stopOpacity="0" />
-          <stop offset="12%" stopColor="var(--mantle, #181818)" stopOpacity="0.92" />
-          <stop offset="100%" stopColor="var(--mantle, #181818)" stopOpacity="0.92" />
-        </linearGradient>
         {/* Take chip gradients: outgoing deck color → incoming deck color. */}
         {gradientPairs.map((key) => {
           const [from, to] = key.split('-') as [CaptureDeck, CaptureDeck];
@@ -1102,6 +1617,7 @@ const TimelineScene = memo(function TimelineScene({
           tView0={tView0}
           tView1={tView1}
           h={laneH}
+          traces={tracesByDeck[deck]}
           showTraces={showTraces}
           showDetailMarks={showDetailMarks}
         />
@@ -1197,30 +1713,39 @@ const TimelineScene = memo(function TimelineScene({
       })}
 
       {/* Take chips (deck-pair gradient fill; boundary whiskers are
-          detail marks — hidden past the 10-min line, sessions 22). */}
+          detail marks — hidden past the 10-min line, sessions 22).
+          Cameo Takes (kind 'guest', #140) carry the guest family's
+          identity — orange ◐, "guest over host" — instead of the
+          generic transition gradient (gh#185). */}
       {takes.map((t, ti) => {
         const x0 = X(t.window_start_s);
         const x1 = Math.max(X(t.window_end_s), x0 + 12);
         if (x1 < viewX0 || x0 > viewX1) return null;
-        const label = `${trackNames[t.a_track_id] ?? t.a_track_id} → ${
-          trackNames[t.b_track_id] ?? t.b_track_id
-        }`;
+        const cameo = t.kind === 'guest';
+        const label = cameo
+          ? `${trackNames[t.b_track_id] ?? t.b_track_id} over ${
+              trackNames[t.a_track_id] ?? t.a_track_id
+            }`
+          : `${trackNames[t.a_track_id] ?? t.a_track_id} → ${
+              trackNames[t.b_track_id] ?? t.b_track_id
+            }`;
         const pair = takePairs[ti];
         const grad =
-          pair.from !== null && pair.to !== null
+          !cameo && pair.from !== null && pair.to !== null
             ? `url(#stl-take-grad-${pair.from}-${pair.to})`
             : null;
         const { row, rows } = chipLayout[ti];
         const chipH = (CHIP_STRIP_H - 6) / rows;
         const chipY = RULER_H + 2 + row * chipH;
-        const textY = chipY + chipH / 2 + 3;
-        // 2 rows: smaller text; 3-4 rows: chips too thin for text at all
-        // (the hover title still carries the label).
+        const textY = chipY + chipH / 2 + (rows >= 3 ? 2.5 : 3);
+        // 2 rows: smaller text; 3-4 rows: no room for the label — but the
+        // kind glyph stays (gh#185: stacked chips must still tell their
+        // kind apart). The hover title carries the label.
         const sizeClass = rows >= 3 ? ' micro' : rows === 2 ? ' slim' : '';
         return (
           <g
             key={t.uuid}
-            className={`stl-take-chip${selectedTakeUuid === t.uuid ? ' selected' : ''}${sizeClass}`}
+            className={`stl-take-chip${cameo ? ' cameo' : ''}${selectedTakeUuid === t.uuid ? ' selected' : ''}${sizeClass}`}
             onClick={(e) => {
               e.stopPropagation();
               onTakeClick(t);
@@ -1228,24 +1753,22 @@ const TimelineScene = memo(function TimelineScene({
             onMouseEnter={() => onTakeHover(t)}
             onMouseLeave={() => onTakeHover(null)}
           >
-            <title>{`${label} · confidence ${t.confidence.toFixed(2)}`}</title>
+            <title>{`${cameo ? 'Cameo Take (#140) · ' : ''}${label} · confidence ${t.confidence.toFixed(2)}`}</title>
             <rect
               x={x0}
               y={chipY}
               width={x1 - x0}
               height={chipH}
-              rx={rows === 1 ? 5 : rows === 2 ? 4 : 2}
               style={grad ? { fill: grad } : undefined}
             />
+            <text x={x0 + 4} y={textY} className="stl-chip-glyph">
+              {cameo ? '◐' : '●'}
+            </text>
             {x1 - x0 > 90 ? (
-              <text x={x0 + 5} y={textY}>
-                ● {label.slice(0, Math.floor((x1 - x0) / 7))}
+              <text x={x0 + 15} y={textY} className="stl-chip-label">
+                {label.slice(0, Math.floor((x1 - x0) / 7))}
               </text>
-            ) : (
-              <text x={x0 + 4} y={textY}>
-                ●
-              </text>
-            )}
+            ) : null}
             {showDetailMarks ? (
               <>
                 <line
@@ -1266,6 +1789,151 @@ const TimelineScene = memo(function TimelineScene({
                 />
               </>
             ) : null}
+          </g>
+        );
+      })}
+
+      {/* Candidate highlights (routines 158): a translucent band down the
+          lanes marks each miner-suggested Routine span; the chip in the
+          strip is the click target (confirm flow). */}
+      {routineCandidates.map((c, i) => {
+        const x0 = X(c.window_start_s);
+        const x1 = Math.max(X(c.window_end_s), x0 + 12);
+        if (x1 < viewX0 || x0 > viewX1) return null;
+        const chain = c.cast.map((id) => trackNames[id] ?? `#${id}`).join(' → ');
+        const { row, rows } = chipLayout[candChipBase + i];
+        const chipH = (CHIP_STRIP_H - 6) / rows;
+        const chipY = RULER_H + 2 + row * chipH;
+        const textY = chipY + chipH / 2 + (rows >= 3 ? 2.5 : 3);
+        const sizeClass = rows >= 3 ? ' micro' : rows === 2 ? ' slim' : '';
+        const selected = selectedCandidateUuid === c.uuid;
+        return (
+          <g
+            key={c.uuid}
+            className={`stl-cand-chip${selected ? ' selected' : ''}${sizeClass}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              onCandidateClick(c);
+            }}
+            onMouseEnter={() =>
+              onCastHover({ cast: c.cast, start: c.window_start_s, end: c.window_end_s })
+            }
+            onMouseLeave={() => onCastHover(null)}
+          >
+            <title>{`Routine candidate · ${chain} · returns ${c.evidence.returns ?? 0}, triples ${c.evidence.triples ?? 0} — click to confirm (with trim), ✎ to open in the Routine editor`}</title>
+            <rect x={x0} y={lanesTop} width={x1 - x0} height={lanesBottom - lanesTop} className="stl-cand-band" />
+            <rect x={x0} y={chipY} width={x1 - x0} height={chipH} className="stl-cand-chip-rect" />
+            <text x={x0 + 4} y={textY} className="stl-chip-glyph">
+              ⧉
+            </text>
+            {x1 - x0 > 90 ? (
+              <text x={x0 + 15} y={textY} className="stl-chip-label">
+                {`${c.cast.length}× ${chain}`.slice(0, Math.floor((x1 - x0) / 7))}
+              </text>
+            ) : null}
+            {/* Per-region editor open (gh#170 pass 2 directive 4):
+                confirm-then-promote-then-open — the deliberate act. */}
+            {x1 - x0 > 40 && (
+              <g
+                className="stl-region-edit"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void onOpenCandidateInEditor(c);
+                }}
+              >
+                <title>Open in the Routine editor (confirms this candidate + promotes)</title>
+                <rect x={x1 - 18} y={chipY + 1} width={16} height={chipH - 2} />
+                <text x={x1 - 10} y={textY} textAnchor="middle">
+                  ✎
+                </text>
+              </g>
+            )}
+          </g>
+        );
+      })}
+
+      {/* Routine Take + persisted Routine regions (gh#170 follow-up):
+          always-on region guides for ALL tiers, matching the pin
+          picker's ladder — solid ◆ persisted > dimmed ◆ Routine Take >
+          dashed ⧉ candidate. A promoted take renders as its ROUTINE
+          (highest tier wins — no stacked duplicates; confirmed
+          candidates are already filtered upstream the same way). */}
+      {routineTakes.map((rt, i) => {
+        const x0 = X(rt.window_start_s);
+        const x1 = Math.max(X(rt.window_end_s), x0 + 12);
+        if (x1 < viewX0 || x0 > viewX1) return null;
+        const chain = rt.cast.map((id) => trackNames[id] ?? `#${id}`).join(' → ');
+        const { row, rows } = chipLayout[rtakeChipBase + i];
+        const chipH = (CHIP_STRIP_H - 6) / rows;
+        const chipY = RULER_H + 2 + row * chipH;
+        const textY = chipY + chipH / 2 + (rows >= 3 ? 2.5 : 3);
+        const sizeClass = rows >= 3 ? ' micro' : rows === 2 ? ' slim' : '';
+        const selected = selectedRoutineTakeUuid === rt.uuid;
+        const routineUuid = rt.promoted_routine_uuid;
+        const persisted = routineUuid !== null;
+        const label = persisted
+          ? routineNames[routineUuid!] || chain
+          : chain;
+        return (
+          <g
+            key={rt.uuid}
+            className={`${persisted ? 'stl-routine-chip' : 'stl-rtake-chip'}${selected ? ' selected' : ''}${sizeClass}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              onRoutineTakeClick(rt);
+            }}
+            onMouseEnter={() =>
+              onCastHover({ cast: rt.cast, start: rt.window_start_s, end: rt.window_end_s })
+            }
+            onMouseLeave={() => onCastHover(null)}
+          >
+            <title>
+              {persisted
+                ? `Routine · ${label} — ✎ opens the Routine editor`
+                : `Routine Take (unpromoted) · ${chain} — ✎ promotes + opens the Routine editor`}
+            </title>
+            <rect
+              x={x0}
+              y={lanesTop}
+              width={x1 - x0}
+              height={lanesBottom - lanesTop}
+              className={persisted ? 'stl-routine-band' : 'stl-rtake-band'}
+            />
+            <rect
+              x={x0}
+              y={chipY}
+              width={x1 - x0}
+              height={chipH}
+              className="stl-rtake-chip-rect"
+            />
+            <text x={x0 + 4} y={textY} className="stl-chip-glyph">
+              {persisted ? '◆' : '◇'}
+            </text>
+            {x1 - x0 > 90 ? (
+              <text x={x0 + 15} y={textY} className="stl-chip-label">
+                {label.slice(0, Math.floor((x1 - x0) / 7))}
+              </text>
+            ) : null}
+            {x1 - x0 > 40 && (
+              <g
+                className="stl-region-edit dark"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (persisted) onOpenRoutine(routineUuid!);
+                  else void onOpenRoutineTakeInEditor(rt);
+                }}
+              >
+                <title>
+                  {persisted
+                    ? 'Open this Routine in the Routine editor'
+                    : 'Promote + open in the Routine editor (review)'}
+                </title>
+                <rect x={x1 - 18} y={chipY + 1} width={16} height={chipH - 2} />
+                <text x={x1 - 10} y={textY} textAnchor="middle">
+                  ✎
+                </text>
+              </g>
+            )}
           </g>
         );
       })}
@@ -1294,6 +1962,10 @@ function SceneOverlay({
   replayPaused,
   selection,
   hoverTake,
+  hoverCast,
+  trim,
+  onTrimHandleDown,
+  flash,
 }: {
   model: TimelineModel;
   axis: ReturnType<typeof buildTimeAxis>;
@@ -1307,13 +1979,34 @@ function SceneOverlay({
   replayPaused: boolean;
   selection: Selection;
   hoverTake: TakeRowWire | null;
+  /** Hovered routine band/chip (gh#187): cast-track spotlight. */
+  hoverCast: HoverCast | null;
+  /** Provenance flash (gh#170): a source region pulsing once. */
+  flash?: { start: number; end: number; key: number } | null;
+  /** Boundary trim of the selected candidate (routines 158): the span
+   * rendered with draggable edge handles; null unless a candidate is
+   * selected. */
+  trim: { start: number; end: number } | null;
+  onTrimHandleDown(edge: 'start' | 'end', e: React.MouseEvent): void;
 }) {
   const X = (t: number) => axis.tToPx(t);
   const lanesBottom = laneYOf('D', lanesTop, laneH) + laneH;
-  const viewX1 = scrollX + viewportW;
 
   return (
     <g>
+      {/* Provenance flash (gh#170 deep-link): the routine's source region
+          pulses once on arrival. Keyed per request so a repeat re-runs
+          the CSS animation. */}
+      {flash && (
+        <rect
+          key={flash.key}
+          className="stl-flash-region"
+          x={X(flash.start)}
+          y={lanesTop}
+          width={Math.max(X(flash.end) - X(flash.start), 8)}
+          height={lanesBottom - lanesTop}
+        />
+      )}
       {/* Track labels: the LOAD bar itself is in the (windowed, memoized)
           lane; the label hangs here because it STICKS to the viewport's
           left edge while its span covers it — an exact-scrollX behavior.
@@ -1321,67 +2014,64 @@ function SceneOverlay({
       {LANE_ORDER.map((deck) => {
         const y = laneYOf(deck, lanesTop, laneH);
         const color = DECK_COLORS[deck];
+        const labels = layoutTrackLabels(
+          model.decks[deck].trackSpans, axis, trackNames, scrollX, viewportW,
+          Math.max(1, Math.floor((laneH - 8) / 16)),
+        );
         return (
           <g key={`labels-${deck}`}>
-            {model.decks[deck].trackSpans.map((sp, i) => {
-              const label = trackNames[sp.trackId] ?? `#${sp.trackId}`;
-              const mx = X(sp.start);
-              const estW = label.length * 6.4;
-              // Loads often happen DURING idle (load, then play) — snap the
-              // label anchor out of the collapsed marker so the track's
-              // start stays readable.
-              const idleSeg = axis.segments.find(
-                (g) => g.collapsed && sp.start >= g.start && sp.start <= g.end
-              );
-              const anchor = idleSeg ? idleSeg.px1 + 4 : mx;
-              const spanEnd = X(sp.end);
-              if (spanEnd < scrollX - 50 || anchor > viewX1 + 50) return null;
-              // If THIS span covers the viewport's left edge, the label
-              // sticks to the edge — pushed out by its own span end as the
-              // next load approaches. Chronological order keeps newer
-              // labels on top; the faded backing dissolves what they cover.
-              const covering = anchor < scrollX && spanEnd > scrollX;
-              const lx = covering
-                ? Math.max(anchor, Math.min(scrollX + 6, spanEnd - estW - 8))
-                : anchor;
-              // A long label must not poke out behind the NEXT load's
-              // label (sessions 22): truncate at the next span's start.
-              const next = model.decks[deck].trackSpans[i + 1];
-              const availPx = next ? X(next.start) - 8 - (lx + 3) : Infinity;
-              let shown = label;
-              if (estW > availPx) {
-                const maxChars = Math.floor(availPx / 6.4) - 1;
-                if (maxChars < 3) return null; // no room — the load bar still marks it
-                shown = `${label.slice(0, maxChars)}…`;
-              }
-              const shownW = shown.length * 6.4;
+            {labels.filter(label => label.shown && label.row > 0).map(({ index, markerX, x, row }) => (
+              <path
+                key={`loadleader-${index}`}
+                d={`M ${markerX} ${y + 2} V ${y + row * 16 + 10} H ${x + 6}`}
+                stroke={color} strokeWidth={1} fill="none" opacity={0.7}
+              />
+            ))}
+            {labels.filter(label => label.shown).map(({ index, start, label, shown, x: lx, width: shownW, row }) => {
+              const labelY = y + row * 16;
               return (
-                <g key={`trklabel-${i}`}>
-                  <rect
-                    x={lx - 12}
-                    y={y + 3}
-                    width={shownW + 18}
-                    height={14}
-                    fill="url(#stl-label-fade)"
-                  />
-                  <text x={lx + 3} y={y + 14} className="stl-track-label" fill={color}>
-                    {shown}
-                  </text>
+                <g key={`trklabel-${index}`} className="stl-track-load" data-load-time={start}>
+                  <title>{`${label} (loaded ${fmtClock(start)})`}</title>
+                  {shown && (
+                    <>
+                      <rect
+                        x={lx}
+                        y={labelY + 3}
+                        width={shownW + 12}
+                        height={14}
+                        fill="var(--mantle)"
+                        opacity={0.92}
+                      />
+                      <text x={lx + 8} y={labelY + 14} className="stl-track-label" fill={color}>
+                        {shown}
+                      </text>
+                    </>
+                  )}
                 </g>
               );
             })}
+            {/* Paint load flags last so no title backing can cover them. */}
+            {labels.map(({ index, start, label, markerX }) => (
+              <g key={`loadflag-${index}`} className="stl-load-flag">
+                <title>{`${label} (loaded ${fmtClock(start)})`}</title>
+                <path d={`M ${markerX} ${y + 1} v 8 l 5 -4 Z`} fill={color} />
+              </g>
+            ))}
           </g>
         );
       })}
 
-      {/* Take hover spotlight (sessions 22): dim every lane stretch that
-          is NOT the hovered Take's two tracks, and show its boundary
-          whiskers regardless of the detail-marks zoom gate. Lives here
-          (per-frame layer), so hovering never re-renders the scene. */}
-      {hoverTake
+      {/* Hover spotlight (sessions 22; routines gh#187): dim every lane
+          stretch that is NOT the hovered chip's tracks — a Take's two, or
+          a routine band's whole cast — and show boundary whiskers
+          regardless of the detail-marks zoom gate. Lives here (per-frame
+          layer), so hovering never re-renders the scene. */}
+      {hoverTake || hoverCast
         ? (() => {
-            const pair = takeSpanPair(model, hoverTake);
-            const spans = [pair.from, pair.to].filter((s): s is TakeSpanRef => s !== null);
+            const pair = hoverTake ? takeSpanPair(model, hoverTake) : null;
+            const spans = pair
+              ? [pair.from, pair.to].filter((s): s is TakeSpanRef => s !== null)
+              : castSpanRefs(model, hoverCast!.cast, hoverCast!.start, hoverCast!.end);
             const dims: ReactNode[] = [];
             for (const deck of LANE_ORDER) {
               const y = laneYOf(deck, lanesTop, laneH);
@@ -1405,8 +2095,16 @@ function SceneOverlay({
                 }
               }
             }
-            const wx0 = X(hoverTake.window_start_s);
-            const wx1 = X(hoverTake.window_end_s);
+            const wx0 = X(hoverTake ? hoverTake.window_start_s : hoverCast!.start);
+            const wx1 = X(hoverTake ? hoverTake.window_end_s : hoverCast!.end);
+            // Take whiskers carry the deck colors; routine whiskers the
+            // routine family's accent.
+            const c0 = pair
+              ? pair.from && { stroke: DECK_COLORS[pair.from.deck] }
+              : { stroke: 'var(--routine-accent)' };
+            const c1 = pair
+              ? pair.to && { stroke: DECK_COLORS[pair.to.deck] }
+              : { stroke: 'var(--routine-accent)' };
             return (
               <g style={{ pointerEvents: 'none' }}>
                 {dims}
@@ -1416,7 +2114,7 @@ function SceneOverlay({
                   x2={wx0}
                   y2={lanesBottom}
                   className="stl-take-whisker hover"
-                  style={pair.from ? { stroke: DECK_COLORS[pair.from.deck] } : undefined}
+                  style={c0 || undefined}
                 />
                 <line
                   x1={wx1}
@@ -1424,9 +2122,72 @@ function SceneOverlay({
                   x2={wx1}
                   y2={lanesBottom}
                   className="stl-take-whisker hover"
-                  style={pair.to ? { stroke: DECK_COLORS[pair.to.deck] } : undefined}
+                  style={c1 || undefined}
                 />
               </g>
+            );
+          })()
+        : null}
+
+      {/* Selected candidate: trimmed span + draggable boundary handles +
+          per-slot entry marks (routines 158). The handles are the only
+          interactive nodes in this per-frame layer. */}
+      {selection.kind === 'candidate' && trim
+        ? (() => {
+            const c = selection.candidate;
+            const x0 = X(trim.start);
+            const x1 = X(trim.end);
+            return (
+              <g className="stl-trim">
+                <rect
+                  x={x0}
+                  y={RULER_H}
+                  width={Math.max(x1 - x0, 2)}
+                  height={lanesBottom - RULER_H}
+                  className="stl-trim-span"
+                />
+                {c.cast.map((tid, i) => {
+                  const entryAbs = c.window_start_s + c.entry_offsets[i];
+                  if (entryAbs >= trim.end) return null;
+                  const ex = X(Math.max(entryAbs, trim.start));
+                  return (
+                    <g key={`entry-${i}`} className="stl-trim-entry">
+                      <title>{`slot ${i} · ${trackNames[tid] ?? `#${tid}`}`}</title>
+                      <line x1={ex} y1={lanesTop} x2={ex} y2={lanesTop + 10} />
+                      <text x={ex + 2} y={lanesTop + 9}>{i}</text>
+                    </g>
+                  );
+                })}
+                {(['start', 'end'] as const).map((edge) => {
+                  const hx = edge === 'start' ? x0 : x1;
+                  return (
+                    <g key={edge} className="stl-trim-handle" onMouseDown={(e) => onTrimHandleDown(edge, e)}>
+                      <rect x={hx - 5} y={RULER_H} width={10} height={lanesBottom - RULER_H} />
+                      <line x1={hx} y1={RULER_H} x2={hx} y2={lanesBottom} />
+                      <circle cx={hx} cy={RULER_H + 8} r={5} />
+                    </g>
+                  );
+                })}
+              </g>
+            );
+          })()
+        : null}
+
+      {/* Selected Routine Take: static span highlight (no handles — the
+          confirm already fixed the boundary). */}
+      {selection.kind === 'routineTake'
+        ? (() => {
+            const x0 = X(selection.take.window_start_s);
+            const x1 = X(selection.take.window_end_s);
+            return (
+              <rect
+                x={x0}
+                y={RULER_H}
+                width={Math.max(x1 - x0, 2)}
+                height={lanesBottom - RULER_H}
+                className="stl-trim-span confirmed"
+                style={{ pointerEvents: 'none' }}
+              />
             );
           })()
         : null}
@@ -1477,6 +2238,7 @@ function DeckLane({
   tView0,
   tView1,
   h,
+  traces,
   showTraces,
   showDetailMarks,
 }: {
@@ -1493,6 +2255,8 @@ function DeckLane({
   tView0: number;
   tView1: number;
   h: number;
+  /** Zoom-bucket-decimated traces (parent memo) for the polylines. */
+  traces: { t: number; playhead: number }[][];
   showTraces: boolean;
   showDetailMarks: boolean;
 }) {
@@ -1522,56 +2286,39 @@ function DeckLane({
       {/* LOAD bars (the labels ride the SceneOverlay — they stick to the
           viewport edge, an exact-scrollX behavior this memoized lane must
           not re-render for). */}
-      {dt.trackSpans.map((sp, i) => {
+      <path stroke={color} className="stl-load-bar" d={dt.trackSpans.map(sp => {
         const mx = X(sp.start);
-        if (mx < viewX0 || mx > viewX1) return null;
-        return (
-          <line
-            key={`trk-${i}`}
-            x1={mx}
-            y1={y}
-            x2={mx}
-            y2={y + h}
-            stroke={color}
-            className="stl-load-bar"
-          />
-        );
-      })}
+        return mx < viewX0 || mx > viewX1 ? '' : `M${mx},${y}v${h}`;
+      }).join('')} />
 
       {/* Playing-but-silent underline (audibility itself is the area fill). */}
-      {dt.playingSpans.map((sp, i) => {
+      <path fill={color} opacity={0.4} d={dt.playingSpans.map(sp => {
         const x0 = X(sp.start);
         const x1 = X(sp.end);
-        if (x1 < viewX0 || x0 > viewX1) return null;
-        return (
-          <rect
-            key={`play-${i}`}
-            x={x0}
-            y={y + h - 3}
-            width={Math.max(x1 - x0, 2)}
-            height={3}
-            fill={color}
-            opacity={0.4}
-          />
-        );
-      })}
+        return x1 < viewX0 || x0 > viewX1 ? '' : `M${x0},${y + h - 3}h${Math.max(x1 - x0, 2)}v3H${x0}Z`;
+      }).join('')} />
 
-      {/* Play/pause markers at the playing-span boundaries. */}
-      {dt.playingSpans.map((sp, i) => {
-        const x0 = X(sp.start);
-        const x1 = X(sp.end);
-        if (x1 < viewX0 || x0 > viewX1) return null;
-        return (
-          <g key={`pp-${i}`} className="stl-transport-mark">
-            <text x={x0 + 1} y={y + h - 8} fill={color}>
-              ▶
-            </text>
-            <text x={x1 + 1} y={y + h - 8} fill={color}>
-              ▪
-            </text>
-          </g>
-        );
-      })}
+      {/* Play/pause markers at the playing-span boundaries. Detail-gated
+          (this issue): past ~10 visible minutes they're overlapping glyph
+          confetti, and hundreds of <text> nodes made every low-zoom scene
+          render/paint expensive. */}
+      {showDetailMarks
+        ? dt.playingSpans.map((sp, i) => {
+            const x0 = X(sp.start);
+            const x1 = X(sp.end);
+            if (x1 < viewX0 || x0 > viewX1) return null;
+            return (
+              <g key={`pp-${i}`} className="stl-transport-mark">
+                <text x={x0 + 1} y={y + h - 8} fill={color}>
+                  ▶
+                </text>
+                <text x={x1 + 1} y={y + h - 8} fill={color}>
+                  ▪
+                </text>
+              </g>
+            );
+          })
+        : null}
 
       {/* Jump/cue gesture markers (sessions 04 iteration), labels
           staggered onto rows so a cluster (stab run, repeated jumps)
@@ -1605,43 +2352,107 @@ function DeckLane({
           })()
         : null}
 
-      {/* Held loops: a bracket bar along the lane top. */}
-      {dt.loops.map((lp, i) => {
-        const x0 = X(lp.start);
-        const x1 = Math.max(X(lp.end), x0 + 4);
+      {/* Beat FX (#354): a thin effect-coloured band along the lane top
+          while the section was ON for this deck (or Master — Master FX
+          bands every lane). Opacity follows LEVEL/DEPTH step by step. */}
+      {model.fxSpans.map((sp, i) => {
+        if (sp.target !== deck && sp.target !== 'master') return null;
+        const x0 = X(sp.start);
+        const x1 = Math.max(X(sp.end), x0 + 2);
         if (x1 < viewX0 || x0 > viewX1) return null;
         return (
-          <g key={`loop-${i}`} className="stl-loop" >
-            <title>{`loop ${fmtClock(lp.region.start)}–${fmtClock(lp.region.end)}${lp.open ? ' (unreleased)' : ''}`}</title>
-            <line x1={x0} y1={y + 18} x2={x1} y2={y + 18} stroke={color} />
-            <line x1={x0} y1={y + 18} x2={x0} y2={y + 23} stroke={color} />
-            <line x1={x1} y1={y + 18} x2={x1} y2={y + 23} stroke={color} />
-          </g>
+          <FxBand key={`fx-${i}`} span={sp} y={y} X={X} x0={x0} x1={x1} showLabel={showDetailMarks && (sp.target !== 'master' || deck === LANE_ORDER[0])} />
         );
       })}
+
+      {/* Held loops: a bracket bar along the lane top. Detail-gated with
+          the other marks — sub-4px brackets at overview zoom are noise. */}
+      {showDetailMarks
+        ? dt.loops.map((lp, i) => {
+            const x0 = X(lp.start);
+            const x1 = Math.max(X(lp.end), x0 + 4);
+            if (x1 < viewX0 || x0 > viewX1) return null;
+            return (
+              <g key={`loop-${i}`} className="stl-loop" >
+                <title>{`loop ${fmtClock(lp.region.start)}–${fmtClock(lp.region.end)}${lp.open ? ' (unreleased)' : ''}`}</title>
+                <line x1={x0} y1={y + 18} x2={x1} y2={y + 18} stroke={color} />
+                <line x1={x0} y1={y + 18} x2={x0} y2={y + 23} stroke={color} />
+                <line x1={x1} y1={y + 18} x2={x1} y2={y + 23} stroke={color} />
+              </g>
+            );
+          })
+        : null}
 
       {/* Playhead traces (position-in-track reading), sliced to the
           window and decimated to pixel resolution (sessions 22) — at low
           zoom the slice is the whole trace, and full-precision per-point
-          tToPx + stringification dominated the scene render. */}
-      {showTraces
-        ? dt.traces.map((trace, i) => {
+          tToPx + stringification dominated the scene render. The traces
+          arrive pre-thinned to the zoom bucket (this issue), so a scene
+          render walks ~px-resolution points, not every raw sample. */}
+      {showTraces ? <path className="stl-trace" stroke={color} d={traces.map(trace => {
             const win = traceWindow(trace, tView0, tView1);
-            if (!win) return null;
-            return (
-              <polyline
-                key={`trace-${i}`}
-                points={tracePolylinePoints(
+            if (!win) return '';
+            const points = tracePolylinePoints(
                   win,
                   createMonotonicTToPx(axis),
                   (ph) => y + 18 + (1 - ph / maxPlayhead) * (h - 24)
-                )}
-                className="stl-trace"
-                stroke={color}
-              />
             );
-          })
-        : null}
+            return points ? `M${points.replaceAll(' ', 'L')}` : '';
+          }).join('')} /> : null}
+    </g>
+  );
+}
+
+const FX_BAND_H = 5;
+
+/** One Beat FX span on a lane: a rect per envelope step (opacity = depth)
+ * plus, at detail zoom, the effect + length at the span head. */
+function FxBand({
+  span,
+  y,
+  X,
+  x0,
+  x1,
+  showLabel,
+}: {
+  span: FxSpan;
+  y: number;
+  X(t: number): number;
+  x0: number;
+  x1: number;
+  showLabel: boolean;
+}) {
+  const color = BEAT_FX_COLORS[span.effect];
+  const head = span.steps[0];
+  const target = span.target === 'master' ? 'Master' : span.target;
+  return (
+    <g className="stl-fx" data-testid={`stl-fx-${span.target}-${span.effect}`}>
+      <title>
+        {`${span.effect} → ${target} · ${fmtClock(span.start)}–${fmtClock(span.end)} (${fmtDur(span.end - span.start)})${span.open ? ' · still on at log end' : ''}\n` +
+          span.steps.map((st) => `${fmtClock(st.t)} depth ${fmtFxDepth(st.depth)} · ${fmtFxLength(st.beats, span.lengthUnit)}`).join('\n')}
+      </title>
+      {span.steps.map((st, k) => {
+        const next = span.steps[k + 1];
+        const sx0 = k === 0 ? x0 : X(st.t);
+        const sx1 = next ? X(next.t) : x1;
+        return (
+          <rect
+            key={k}
+            x={sx0}
+            y={y + 1}
+            width={Math.max(sx1 - sx0, k === 0 ? 2 : 0)}
+            height={FX_BAND_H}
+            fill={color}
+            opacity={fxDepthOpacity(st.depth)}
+          />
+        );
+      })}
+      {showLabel && x1 - x0 > 28 ? (
+        <text x={x0 + 2} y={y + 15} fill={color} className="stl-fx-label">
+          {span.effect.toUpperCase()}
+          {span.target === 'master' ? ' MST' : ''} {fmtFxLength(head.beats, span.lengthUnit)}
+        </text>
+      ) : null}
     </g>
   );
 }
@@ -1709,6 +2520,19 @@ function InlineReadout({
           </span>
         );
       })}
+      {state.beatFx && state.beatFx.on && state.beatFx.selected !== null ? (
+        <span
+          className="stl-fx-readout"
+          style={{ color: BEAT_FX_COLORS[state.beatFx.selected] }}
+          title="Beat FX section at this moment: effect → target · LEVEL/DEPTH · length"
+        >
+          FX
+          <i>
+            {state.beatFx.selected} → {state.beatFx.target === 'master' ? 'MST' : state.beatFx.target} ·{' '}
+            {fmtFxDepth(state.beatFx.depth)} · {fmtFxLength(state.beatFx.beats, state.beatFx.selected === 'flanger' ? null : 'beats')}
+          </i>
+        </span>
+      ) : null}
       {state.tenureHolder ? <em>{state.tenureHolder} holds</em> : null}
     </span>
   );

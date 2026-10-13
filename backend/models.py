@@ -127,6 +127,19 @@ class Track(Base):
                 return dominant_bpm(tempo_changes, duration)
         return centibpm_to_bpm(self.bpm)
 
+    @property
+    def has_stems(self) -> bool:
+        """Whether *current* stems exist on disk for this Track (stems #118).
+
+        Filesystem is the source of truth (#149: no DB rows for stems);
+        this is a meta.json read + a source stat per call — cheap enough
+        for paginated listings. schemas.Track.has_stems reads this."""
+        # Lazy import: stems reads config; keep model import light.
+        from pathlib import Path as _Path
+
+        from .stems import is_current
+        return is_current(self.id, _Path(self.filename))
+
 
 class Waveform(Base):
     """Waveform data (ADR 0014): one style-agnostic analysis blob per Track."""
@@ -141,6 +154,7 @@ class Waveform(Base):
     # Waveform data v2 blob (ADR 0014). Deferred: multi-hundred-KB per row —
     # never load it via relationship traversal (see the 21s sync-status incident).
     data_blob = deferred(Column(LargeBinary, nullable=True))
+    preview_blob = deferred(Column(LargeBinary, nullable=True))
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
 
@@ -347,6 +361,53 @@ class Transition(Base):
     )
 
 
+class Cameo(Base):
+    """A saved Cameo (cameos PRD, issue #140): a guest Track's bounded
+    appearance inside a host Track's play — the guest becomes audible and
+    silent entirely within the host's play, and the host remains current.
+
+    The survivor rule is the boundary with Transition: whoever remains
+    current classifies the move. Mirrors the Transition storage pattern
+    (ADR 0011): identity is the client-generated `uuid`, `position` is
+    cosmetic append order within the ordered (host, guest) pair, and the
+    payload — two-edged window in host track seconds, guest alignment,
+    optional guest→host tempo-match, role-addressed lanes, Jumps on both
+    roles — is opaque JSON under a client-authoritative pair-replace.
+    A Track may Cameo over itself (host == guest is legal).
+    """
+
+    __tablename__ = "cameos"
+
+    id = Column(Integer, primary_key=True, index=True)
+    host_track_id = Column(Integer, ForeignKey("tracks.id", ondelete="CASCADE"), nullable=False)
+    guest_track_id = Column(Integer, ForeignKey("tracks.id", ondelete="CASCADE"), nullable=False)
+    uuid = Column(String, nullable=False)
+    position = Column(Integer, nullable=False)
+    name = Column(String, nullable=False)
+    favorite = Column(Boolean, nullable=False, default=False, server_default="0")
+    data_json = Column(Text, nullable=False)  # window + alignment + lanes (opaque)
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+
+    # ORM-level cascade, as on Transition (SQLite FK PRAGMA is off).
+    host_track = relationship(
+        "Track",
+        foreign_keys=[host_track_id],
+        backref=backref("cameos_hosted", cascade="all, delete-orphan"),
+    )
+    guest_track = relationship(
+        "Track",
+        foreign_keys=[guest_track_id],
+        backref=backref("cameos_guesting", cascade="all, delete-orphan"),
+    )
+
+    __table_args__ = (
+        Index("idx_cameos_host", "host_track_id"),
+        Index("idx_cameos_guest", "guest_track_id"),
+        Index("idx_cameos_pair_uuid", "host_track_id", "guest_track_id", "uuid", unique=True),
+    )
+
+
 class TransitionTemplate(Base):
     """A saved Transition template (mix-editor issues 03 + 28).
 
@@ -374,6 +435,7 @@ class TransitionTemplate(Base):
     after_beats = Column(Integer, nullable=False)
     scalable = Column(Boolean, nullable=False, default=False, server_default="0")
     lanes_json = Column(Text, nullable=False)  # sparse normalized lanes (opaque)
+    beat_fx_json = Column(Text, nullable=True)  # Beat FX track (#353; opaque)
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
 
@@ -405,6 +467,10 @@ class Session(Base):
     uuid = Column(String, nullable=False)
     started_at = Column(DateTime, nullable=False, default=func.now())
     ended_at = Column(DateTime, nullable=True)
+    # Routine-miner currency marker (routines 157): the MINER_VERSION whose
+    # suggestion rows this Session currently carries. NULL = never mined;
+    # != routine_miner.MINER_VERSION = stale, the startup sweep re-enqueues.
+    routine_miner_version = Column(Integer, nullable=True)
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
 
@@ -446,6 +512,51 @@ class SessionChunk(Base):
     )
 
 
+class RoutineCandidate(Base):
+    """A miner-suggested Routine span on a Session's timeline (ADR 0035,
+    routines 157).
+
+    Suggestion, not evidence: the miner marks candidate spans and a human
+    confirms one into a Routine Take — rows here count for nothing until
+    confirmed. Recomputable at will: rows are keyed by `miner_version` and
+    a version bump invalidates + re-mines (the Session carries the
+    currency marker). `cast_json` is the entry-ordered cast (track ids,
+    slot order); `entry_offsets_json` gives each slot's entry as seconds
+    from `window_start_s` (slot 0 is always 0.0); the window is
+    capture-clock seconds on the owning Session. `session_uuid` matches
+    the Take posture (provenance string, not FK), but unlike Takes these
+    rows die with their Session — a suggestion without its timeline is
+    meaningless. No track FKs: casts live in JSON, and stale suggestions
+    simply stop matching.
+
+    `entry_track_id`/`exit_track_id` denormalize the boundary tracks for
+    the cast-prefix query (the pin picker's "Routines available" hint:
+    match candidates whose cast covers the Set's next-n entries, entering
+    and exiting on the right tracks).
+    """
+
+    __tablename__ = "routine_candidates"
+
+    id = Column(Integer, primary_key=True, index=True)
+    uuid = Column(String, nullable=False)
+    session_uuid = Column(String, nullable=False)
+    entry_track_id = Column(Integer, nullable=False)
+    exit_track_id = Column(Integer, nullable=False)
+    cast_json = Column(Text, nullable=False)  # JSON list of track ids, entry order
+    window_start_s = Column(Float, nullable=False)  # capture-clock seconds
+    window_end_s = Column(Float, nullable=False)
+    entry_offsets_json = Column(Text, nullable=False)  # JSON list, per slot
+    evidence_json = Column(Text, nullable=False)  # {"returns": n, "triples": n}
+    miner_version = Column(Integer, nullable=False)
+    created_at = Column(DateTime, default=func.now())
+
+    __table_args__ = (
+        Index("idx_routine_candidates_uuid", "uuid", unique=True),
+        Index("idx_routine_candidates_session", "session_uuid"),
+        Index("idx_routine_candidates_entry", "entry_track_id"),
+    )
+
+
 class Take(Base):
     """A detected Handover captured during live playback (ADR 0020,
     transition-takes 02).
@@ -463,6 +574,14 @@ class Take(Base):
     mark (`detected` for the detector's verdicts, `manual` for hand-cut
     Takes, issue 06). Pre-Sessions Takes are sessionless (`session_uuid`
     NULL) and count as `detected`.
+
+    Cameos (#140): `kind` records the detector's settle verdict by the
+    survivor rule — `handover` (a = outgoing, b = incoming) or `guest`
+    (a CAMEO TAKE: a = the surviving host, b = the visiting guest).
+    `engagement_uuid` stamps every capture from one engagement (the
+    pairwise offspring of a multi-deck double/triple are a first-class
+    group — the Transition history groups by it, never by timestamp
+    inference). Pre-#140 rows backfill kind='handover', engagement NULL.
     """
 
     __tablename__ = "takes"
@@ -485,6 +604,12 @@ class Take(Base):
     # How the Take came to be: "detected" (the detector) or "manual"
     # (hand-cut, issue 06). Never NULL for new rows; the migration backfills.
     origin = Column(String, nullable=False, default="detected")
+    # Survivor-rule verdict (#140): "handover" or "guest" (a Cameo Take).
+    kind = Column(String, nullable=False, default="handover", server_default="handover")
+    # The engagement this capture settled from (#140) — shared by every
+    # pairwise Take/Cameo Take one multi-deck engagement emits. Nullable:
+    # pre-#140 rows and hand-cut Takes without one.
+    engagement_uuid = Column(String, nullable=True)
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
 
@@ -506,6 +631,112 @@ class Take(Base):
         Index("idx_takes_b", "b_track_id"),
         Index("idx_takes_detected_at", "detected_at"),
         Index("idx_takes_session", "session_uuid"),
+        Index("idx_takes_engagement", "engagement_uuid"),
+    )
+
+
+class RoutineTake(Base):
+    """A hand-confirmed span of a Session — deck-literal, unreviewed
+    evidence (ADR 0035, routines 158).
+
+    The captured sibling of a Routine, minted only by a human confirming a
+    miner-suggested candidate on the Session timeline (suggestion-first: no
+    liberal auto-minting). Unlike a Take, the event slice is a REFERENCE
+    (`session_uuid` + window on the capture clock), not a copy — the span is
+    read from the Session's chunks at promotion/replay time. The row itself
+    survives Session deletion (it is confirmed evidence and lives in the
+    Transition history), but loses replay/promotion once its timeline is
+    gone. `cast_json` is the entry-ordered cast (track ids = slot order,
+    n ≥ 3 enforced at confirm — a 2-cast confirm is a hand-cut Take);
+    `entry_offsets_json` gives each slot's entry as seconds from
+    `window_start_s` (slot 0 = 0.0). `origin_candidate_uuid` is provenance
+    only — candidate rows are recomputable and their uuids dangle after a
+    re-mine. `promoted_routine_uuid` mirrors Take.promoted_transition_uuid:
+    promotion never mutates the raw confirm (evidence doctrine).
+
+    `entry_track_id`/`exit_track_id` denormalize the boundary tracks for
+    cast-prefix queries (pin-picker parity with routine_candidates).
+    """
+
+    __tablename__ = "routine_takes"
+
+    id = Column(Integer, primary_key=True, index=True)
+    uuid = Column(String, nullable=False)
+    session_uuid = Column(String, nullable=False)
+    entry_track_id = Column(Integer, nullable=False)
+    exit_track_id = Column(Integer, nullable=False)
+    cast_json = Column(Text, nullable=False)  # JSON list of track ids, entry order
+    window_start_s = Column(Float, nullable=False)  # capture-clock seconds
+    window_end_s = Column(Float, nullable=False)
+    entry_offsets_json = Column(Text, nullable=False)  # JSON list, per slot, seconds
+    origin_candidate_uuid = Column(String, nullable=True)
+    promoted_routine_uuid = Column(String, nullable=True)
+    confirmed_at = Column(DateTime, nullable=False, default=func.now())
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        Index("idx_routine_takes_uuid", "uuid", unique=True),
+        Index("idx_routine_takes_session", "session_uuid"),
+        Index("idx_routine_takes_entry", "entry_track_id"),
+    )
+
+
+class Routine(Base):
+    """A saved n-track choreography (ADR 0035; CONTEXT.md "Routine").
+
+    Promoted mechanically from a Routine Take: events re-addressed from
+    physical Decks to entry-ordered CAST SLOTS (slot 0 = entry track,
+    slot n−1 = exit track), and the clock rebased from capture seconds to
+    beats via the cast Tracks' Beatgrids — so the Routine replays under any
+    Set tempo policy. No gesture idealization (v1 is slot-remapped,
+    beat-rebased raw replay; lane vectorization arrives with the Routine
+    editor). `events_json` is the slot-addressed, beat-domain event list
+    (each event carries `beat` + `slot`; global controls carry slot null);
+    `entry_offsets_beats_json` gives each slot's entry in beats from
+    Routine start; `entry_positions_json` gives each slot's track position
+    (track-seconds) at its entry — together with the events this makes the
+    Routine self-contained for replay. `origin_take_uuid` is provenance
+    (the raw Routine Take stays untouched — evidence doctrine).
+    """
+
+    __tablename__ = "routines"
+
+    id = Column(Integer, primary_key=True, index=True)
+    uuid = Column(String, nullable=False)
+    name = Column(String, nullable=True)
+    entry_track_id = Column(Integer, nullable=False)
+    exit_track_id = Column(Integer, nullable=False)
+    cast_json = Column(Text, nullable=False)  # JSON list of track ids, slot order
+    entry_offsets_beats_json = Column(Text, nullable=False)  # JSON list, per slot
+    entry_positions_json = Column(Text, nullable=False)  # JSON list, track-seconds
+    duration_beats = Column(Float, nullable=False)
+    events_json = Column(Text, nullable=False)  # slot-addressed, beat-domain (opaque)
+    # Authored EDITS over the recording (gh#170 pass 2 — the Routine
+    # editor's draft layer): slot-indexed lane envelopes + Jump events on
+    # any slot, beat-domain. Opaque JSON (the events_json posture); the
+    # recording above stays evidence and never changes. Null = unedited.
+    edits_json = Column(Text, nullable=True)
+    # Stable slot ids, parallel to cast_json (ADR 0039, gh#325). Null =
+    # promoted (slot id = String(index)); authored Routines always set it.
+    slot_ids_json = Column(Text, nullable=True)
+    # Null = an AUTHORED Routine (ADR 0039): built from scratch, no
+    # recording; cast/entry offsets/positions are first-class mutable.
+    origin_take_uuid = Column(String, nullable=True)
+    # The CURRENT capture-clock window this Routine was promoted over
+    # (gh#190): equals the origin take's window at promote time, then
+    # tracks every retrim — the take's own window is immutable evidence,
+    # so without this a second retrim would misapply against the original
+    # bounds. Null on pre-#190 rows (retrim falls back to the take window
+    # and self-heals).
+    window_start_s = Column(Float, nullable=True)
+    window_end_s = Column(Float, nullable=True)
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        Index("idx_routines_uuid", "uuid", unique=True),
+        Index("idx_routines_entry", "entry_track_id"),
     )
 
 
@@ -600,6 +831,14 @@ class Set(Base):
         cascade="all, delete-orphan",
         order_by="SetDormantPin.id",
     )
+    # Cameo pins (#140): per-entry guest ornaments, keyed on host track
+    # (active and dormant rows in one table — see SetCameoPin).
+    cameo_pins = relationship(
+        "SetCameoPin",
+        back_populates="set",
+        cascade="all, delete-orphan",
+        order_by="SetCameoPin.position",
+    )
 
 
 class SetEntry(Base):
@@ -625,6 +864,12 @@ class SetEntry(Base):
     position = Column(Integer, nullable=False)
     pin_kind = Column(String, nullable=True)  # "transition" | "take" | "hardcut" | NULL
     pin_uuid = Column(String, nullable=True)  # NULL for hardcut (references nothing)
+    # Per-entry trim (sets #164): an OFFSET from neutral in mixer-knob
+    # units (0 = neutral; ±0.5 spans the knob), never an absolute level —
+    # track Autogain (#35–#40, ADR 0034) composes with it when it lands
+    # (effective knob = autogain + offset), so its arrival changes nothing
+    # here. The Conductor applies it at Deck load for the entry's tenure.
+    trim = Column(Float, nullable=False, default=0.0, server_default=text("0"))
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
 
@@ -673,3 +918,58 @@ class SetDormantPin(Base):
             "uq_set_dormant_pins_set_pair", "set_id", "a_track_id", "b_track_id", unique=True
         ),
     )
+
+
+
+class SetCameoPin(Base):
+    """A Cameo pin on a Set entry (cameos PRD, #140): zero or more saved
+    Cameos — or, manually, Cameo Takes — hosted by that entry's Track.
+    Always manual (an ornament resolves to nothing: no Unresolved state,
+    never auto-filled) and adjacency-independent (reordering never touches
+    them).
+
+    Keyed on (set, host track), NOT on the entry row: the entry identity
+    is its track_id anyway, and Cameo-pin dormancy keys on the host Track
+    per Set (glossary "Dormant pin") — `dormant` rows are the memory kept
+    while the host Track is out of the Set, restored when it returns.
+    Like every pin, pin_uuid is deliberately NOT a foreign key (the
+    backend stores what the client asserts); the deletion paths DROP
+    rows referencing deleted artifacts (degrade_cameo_pins — there is no
+    Unresolved to degrade to). Wholesale-replaced with the entries PUT.
+    """
+
+    __tablename__ = "set_cameo_pins"
+
+    id = Column(Integer, primary_key=True, index=True)
+    set_id = Column(Integer, ForeignKey("sets.id", ondelete="CASCADE"), nullable=False)
+    host_track_id = Column(Integer, ForeignKey("tracks.id", ondelete="CASCADE"), nullable=False)
+    position = Column(Integer, nullable=False)  # order within the entry's pins
+    pin_kind = Column(String, nullable=False)  # "cameo" | "cameo-take"
+    pin_uuid = Column(String, nullable=False)
+    # Dormant (sets 07 extended, #140): the host Track left the Set; the
+    # pin restores when it returns. Keyed on host Track per Set.
+    dormant = Column(Boolean, nullable=False, default=False, server_default="0")
+    created_at = Column(DateTime, default=func.now())
+
+    set = relationship("Set", back_populates="cameo_pins")
+
+    __table_args__ = (
+        Index("idx_set_cameo_pins_set", "set_id"),
+        Index("idx_set_cameo_pins_host", "set_id", "host_track_id"),
+    )
+
+
+class AppSetting(Base):
+    """A persisted UI preference (settings, #176): key -> the raw string the
+    frontend previously kept in localStorage (often JSON, sometimes a bare
+    token like "true" or a preset id). The DB is the source of truth so
+    sandbox clones inherit the real app's preferences; each origin's
+    localStorage is just a write-through cache. The backend stores what the
+    client asserts — no value interpretation.
+    """
+
+    __tablename__ = "settings"
+
+    key = Column(String, primary_key=True)
+    value = Column(Text, nullable=False)
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())

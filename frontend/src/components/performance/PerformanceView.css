@@ -1,35 +1,38 @@
 /* Performance view — ultra-flat layout (perf-layout 01). Design language:
    library player — square 1px-border buttons, hot-cue squares, palette from
-   styles/variables.css. Deck = minimap header + one dense band in three
+   theme/tokens.ts (DESIGN.md). Deck = minimap header + one dense band in three
    zones (TRACK / PLAY / MIX), outer → inner; X-FADER + MASTER strip between
-   the waveforms and the decks; the surface is content-sized and the
-   embedded library takes every remaining pixel. */
+   the waveforms and the decks. The view is the content-sized TOP PANEL only
+   (gh#165) — the shared App-level browse panel takes every remaining pixel. */
 
 .perf-root {
   position: relative;
-  height: 100%;
+  flex-shrink: 0;
   display: flex;
   flex-direction: column;
   background: var(--base);
   color: var(--text);
   overflow: hidden;
-  font-size: 12px;
+  font-size: var(--font-body);
 }
 
-.perf-root.midi-cursor-hidden,
-.perf-root.midi-cursor-hidden :not(input):not(textarea):not(select):not([contenteditable="true"]):not([role="menu"]):not([role="menuitem"]) {
+/* Cursor suppression blankets the whole app surface (top panel + shared
+   browse panel below) — the class stays on .perf-root (the hook's target,
+   armed only while the view is active), :has() lifts the scope. */
+.app-main:has(.perf-root.midi-cursor-hidden),
+.app-main:has(.perf-root.midi-cursor-hidden) :not(input):not(textarea):not(select):not([contenteditable="true"]):not([role="menu"]):not([role="menuitem"]) {
   cursor: none !important;
 }
 
-.perf-root.midi-cursor-hidden :is(input, textarea, select, [contenteditable="true"], [role="menu"], [role="menuitem"], [data-cursor-normal]) {
+.app-main:has(.perf-root.midi-cursor-hidden) :is(input, textarea, select, [contenteditable="true"], [role="menu"], [role="menuitem"], [data-cursor-normal]) {
   cursor: auto !important;
 }
 
-.perf-root.midi-cursor-hidden::after {
+.app-main:has(.perf-root.midi-cursor-hidden)::after {
   content: "";
   position: absolute;
   inset: 0;
-  z-index: 1000;
+  z-index: var(--z-overlay);
   cursor: none;
 }
 
@@ -43,6 +46,12 @@
   border-bottom: 2px solid var(--surface1);
 }
 
+/* Keep the mixer usable on narrow screens rather than overlapping controls. */
+@media (max-width: 1279px) {
+  .perf-root { overflow-x: auto; }
+  .perf-surface { min-width: 1280px; }
+}
+
 /* Stacked flush rows; position anchors the play-guide overlay (whose
  * chips straddle the row boundary). */
 .perf-waves {
@@ -53,6 +62,11 @@
 }
 .perf-waves .waveform-container,
 .perf-waves .waveform-container canvas { height: 52px; }
+
+/* Display-only deck count: preserve panels, canvases and their local state. */
+.perf-root[data-deck-count="2"] :is(.perf-wave-row, .perf-deckpanel):is(.deck-c, .deck-d) {
+  display: none;
+}
 
 .perf-wave-row {
   position: relative;
@@ -76,7 +90,6 @@
   background: var(--wave-deck-color);
   opacity: 0.2;
   pointer-events: none;
-  transition: opacity 120ms ease;
 }
 
 .perf-wave-row::before { left: 0; }
@@ -96,10 +109,6 @@
   pointer-events: none;
 }
 
-.perf-wave-row .waveform-container {
-  transition: opacity 120ms ease;
-}
-
 /* Fader area fill (performance-mode 09): the timeline's audibility-fill
    idiom live — a solid DECK-COLORED wash rising from the bottom edge, its
    height the fader's audio-taper gain. Alpha in the background (not
@@ -109,10 +118,21 @@
 .perf-wave-fader-fill {
   position: absolute;
   inset: 0 4px;
-  z-index: 3;
+  /* UNDERLAY (performance-mode 09 review): below the transparent-bg GL
+     canvas — deck-color fill without tinting the waveform body. */
+  z-index: 0;
   width: calc(100% - 8px);
   height: 100%;
   pointer-events: none;
+}
+/* The GL strip paints alpha-0 background pixels; the row supplies the BG
+   color the shader used to paint (vec3(0.03,0.03,0.05)). */
+.perf-wave-row {
+  background: rgb(8, 8, 13);
+}
+.perf-wave-row canvas:not(.perf-wave-fader-fill) {
+  position: relative;
+  z-index: 1;
 }
 
 /* De-emphasis is OPACITY ONLY — never `filter` (or `backdrop-filter`) over
@@ -138,43 +158,232 @@
 /* ── Mixer strip: X-FADER centered, MASTER on the right ───────── */
 
 .perf-strip {
-  display: grid;
-  grid-template-columns: 1fr auto 1fr;
-  align-items: center;
-  padding: 3px 12px;
+  position: relative;
+  min-height: 36px;
+  padding: var(--space-4) var(--space-12);
   border-top: 1px solid var(--surface0);
   border-bottom: 1px solid var(--surface0);
   background: var(--mantle);
 }
 
-.perf-strip-slot { width: 130px; justify-self: end; }
-
-.perf-strip-slot.wide {
-  width: auto;
-  justify-self: center;
+/* Right cell: all volume faders together (CUE MIX / PHONES / MASTER). */
+.perf-strip-slot {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-8);
 }
 
-/* Fixed fader width (the slot is content-sized now that the assignment
-   segments ride it); symmetric flanks keep its center on the deck
-   divider axis. */
-.perf-strip-slot.wide .perf-fader { width: 170px; flex-shrink: 0; }
+.perf-strip-slot .perf-fader { width: 130px; flex-shrink: 0; }
+
+.perf-xf-tools,
+.perf-xf-fader,
+.perf-xf-right {
+  position: absolute;
+  top: 50%;
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  transform: translateY(-50%);
+}
+
+.perf-xf-tools { right: calc(50% + 93px); }
+.perf-xf-fader {
+  left: 50%;
+  width: 170px;
+  transform: translate(-50%, -50%);
+}
+.perf-xf-fader .perf-fader { width: 170px; flex-shrink: 0; }
+.perf-xf-right { left: calc(50% + 93px); }
 
 .perf-strip-left {
-  justify-self: start;
+  position: absolute;
+  left: var(--space-12);
+  top: 50%;
   display: flex;
   align-items: center;
-  gap: 8px;
+  flex-wrap: nowrap;
+  gap: var(--space-6);
+  row-gap: 2px;
+  transform: translateY(-50%);
 }
 
-/* Cue controls ride the strip's left cell (headphone-cue 03) */
-.perf-strip-left .perf-fader { width: 110px; flex-shrink: 0; }
+.perf-strip-right {
+  position: absolute;
+  left: calc(50% + 150px);
+  right: var(--space-12);
+  top: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  transform: translateY(-50%);
+}
+
+.perf-strip-right > .pairlink-strip {
+  margin: 0 var(--space-8);
+}
+
+.perf-fx-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-6);
+  white-space: nowrap;
+}
+
+.perf-fx-controls,
+.perf-fx-targets {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.perf-fx-targets {
+  gap: 0;
+  margin-left: var(--space-2);
+  padding-left: var(--space-6);
+  border-left: 1px solid var(--surface1);
+}
+
+.perf-fx-select {
+  appearance: none;
+  box-sizing: border-box;
+  width: 40px;
+  height: 13px;
+  padding: 0 12px 0 var(--space-4);
+  border: 1px solid var(--surface1);
+  border-radius: 0;
+  background-color: transparent;
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--overlay0) 50%),
+    linear-gradient(135deg, var(--overlay0) 50%, transparent 50%);
+  background-position:
+    calc(100% - 8px) 4px,
+    calc(100% - 5px) 4px;
+  background-size: 3px 3px;
+  background-repeat: no-repeat;
+  color: var(--subtext0);
+  font-size: var(--font-micro);
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+
+.perf-fx-select:hover,
+.perf-fx-select:focus-visible {
+  border-color: var(--overlay0);
+  color: var(--text);
+  outline: none;
+}
+
+.perf-fx-depth .perf-knob-dial { margin: 0; }
+
+/* Per-channel Beat FX assignment: deck identity while off, active green
+   while assigned. This is an actual on/off, not an address selector. */
+.perf-fx-ch {
+  padding: 1px var(--space-6);
+  font-size: var(--font-micro);
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  border-color: var(--surface1);
+  flex-shrink: 0;
+}
+/* CH SELECT is one joined segmented strip (#285 review). */
+.perf-fx-targets > .perf-fx-ch + .perf-fx-ch { border-left: 0; }
+.perf-fx-targets > .perf-fx-ch.on + .perf-fx-ch { border-left: 0; }
+.perf-fx-ch.deck-a { color: var(--deck-a); }
+.perf-fx-ch.deck-b { color: var(--deck-b); }
+.perf-fx-ch.deck-c { color: var(--deck-c); }
+.perf-fx-ch.deck-d { color: var(--deck-d); }
+.perf-fx-ch.on,
+.perf-fx-ch.on:hover:not(:disabled),
+.perf-fx-ch.on:active:not(:disabled) {
+  background: var(--success);
+  color: var(--base);
+  border-color: var(--success);
+}
+
+/* BEAT ◄ ►: 1/2 · size · x2 as one segmented unit, styled like the
+   deck beatjump row (.deck-jumprow). */
+.perf-fx-size {
+  display: inline-flex;
+  align-items: stretch;
+  border: 1px solid var(--surface1);
+}
+.perf-fx-size:hover { border-color: var(--text); }
+.perf-fx-size > .player-button {
+  border: 0;
+  padding: 1px var(--space-4);
+  font-size: var(--font-micro);
+  font-weight: 800;
+  color: var(--subtext0);
+}
+.perf-fx-size > .player-button:hover:not(:disabled) { background: var(--surface0); color: var(--text); }
+.perf-fx-beats {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 26px;
+  padding: 0 var(--space-4);
+  border-left: 1px solid var(--surface2);
+  border-right: 1px solid var(--surface2);
+  color: var(--warning);
+  font-size: var(--font-micro);
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* Flanger length reads in bars (#331): unit tag + accent so 1 BAR never
+ * reads as 1 beat. */
+.perf-fx-beats.bars { color: var(--accent); }
+.perf-fx-unit {
+  margin-left: 2px;
+  font-size: 0.8em;
+  letter-spacing: 0;
+}
+
+/* Beat FX key hints: keycap corner like the deck controls. */
+.perf-fx-row .player-button { position: relative; }
+.perf-fx-row .player-button > .perf-kbd {
+  position: absolute;
+  bottom: -7px;
+  right: -3px;
+  z-index: 1;
+  padding: 0 2px;
+  line-height: 1;
+  letter-spacing: 0;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.perf-deck-count { display: inline-flex; flex-shrink: 0; }
+.perf-kbd-toggle-group { display: inline-flex; flex-shrink: 0; }
+.perf-kbd-toggle-group .perf-strip-toggle + .perf-strip-toggle { border-left: 0; }
+
+@media (max-width: 1279px) {
+  .perf-strip {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-8) var(--space-12);
+  }
+  .perf-strip-left,
+  .perf-xf-tools,
+  .perf-xf-fader,
+  .perf-xf-right,
+  .perf-strip-right {
+    position: static;
+    transform: none;
+  }
+  .perf-strip-left { flex-wrap: wrap; }
+  .perf-strip-right {
+    width: 100%;
+    flex-wrap: wrap;
+    gap: var(--space-8);
+  }
+}
 
 .perf-strip-toggle {
-  padding: 1px 6px;
-  font-size: 9px;
+  padding: 1px var(--space-6);
+  font-size: var(--font-micro);
   font-weight: 800;
   letter-spacing: 0.08em;
   color: var(--overlay0);
@@ -185,12 +394,21 @@
 .perf-strip-toggle.on,
 .perf-strip-toggle.on:hover:not(:disabled),
 .perf-strip-toggle.on:active:not(:disabled) {
-  background: var(--green);
+  background: var(--success);
   color: var(--base);
-  border-color: var(--green);
+  border-color: var(--success);
 }
 
 .perf-strip-ghost { visibility: hidden; }
+
+/* Waveform/deck section toggles (perf-layout 12 / gh#68): WAVE / DECK next
+   to KBD, same .perf-strip-toggle language (lit green while shown). The
+   grouping span dissolves so the buttons ride the strip cell's own flex
+   gap — KBD↔WAVE↔DECK spacing stays uniform. */
+.perf-section-toggles {
+  display: contents;
+}
+
 
 /* The toggle hides every on-control key hint */
 .perf-root.kbd-hints-off .perf-kbd { display: none; }
@@ -201,21 +419,21 @@
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 0;
-  padding: 6px 0 8px;
+  padding: var(--space-6) 0 var(--space-8);
   position: relative;
 }
 
 /* A/B on the first row, C/D on the second. */
-.perf-decks > .perf-deckpanel:nth-of-type(n + 3) {
+.perf-decks > .perf-deckpanel:is(.deck-c, .deck-d) {
   border-top: 1px solid var(--surface1);
 }
 
 .perf-deckpanel {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--space-6);
   min-width: 0;
-  padding: 5px 12px 6px;
+  padding: var(--space-4) var(--space-12) var(--space-6);
   position: relative;
   --focus-color: var(--text);
 }
@@ -236,7 +454,7 @@
   left: 50%;
   transform: translateX(-50%);
   color: var(--focus-color);
-  font-size: 8px;
+  font-size: var(--font-micro);
   font-weight: 900;
   letter-spacing: 0.16em;
   pointer-events: none;
@@ -244,6 +462,7 @@
 
 .perf-deckpanel:is(.deck-a, .deck-c).focused::after { content: 'CONTROL  ['; }
 .perf-deckpanel:is(.deck-b, .deck-d).focused::after { content: 'CONTROL  ]'; }
+.perf-root[data-deck-count="2"] .perf-deckpanel.focused::after { content: 'CONTROL'; }
 
 /* Only the focused Deck on each side owns that hand's keyboard map. */
 .perf-deckpanel:not(.focused) .perf-kbd { display: none; }
@@ -261,7 +480,7 @@
 .perf-deck-minimap {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-8);
 }
 
 .perf-deck-minimap .minimap-container { flex: 1; }
@@ -269,11 +488,11 @@
 .perf-deckpanel.mirrored .perf-deck-minimap { flex-direction: row-reverse; }
 
 .perf-decktag {
-  font-size: 15px;
+  font-size: var(--font-title);
   font-weight: 800;
   color: var(--text);
   border: 1px solid var(--text);
-  padding: 0 7px;
+  padding: 0 var(--space-8);
   flex-shrink: 0;
 }
 
@@ -303,7 +522,7 @@
 .perf-deck-band {
   display: flex;
   align-items: stretch;
-  gap: 22px;
+  gap: var(--space-24);
   min-height: 0;
 }
 
@@ -314,7 +533,7 @@
 .perf-zone {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--space-4);
   min-width: 0;
 }
 
@@ -326,7 +545,7 @@
   position: relative; /* anchors the tag popover */
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-6);
 }
 
 .perf-row-icon {
@@ -351,14 +570,14 @@
   background: transparent;
   border: 1px solid transparent;
   color: var(--subtext1);
-  font-size: 11px;
-  padding: 0 4px;
+  font-size: var(--font-small);
+  padding: 0 var(--space-4);
   margin: 0 -5px;
   min-width: 0;
 }
 
 .perf-inline-edit:hover:not(:disabled) { border-color: var(--surface1); }
-.perf-inline-edit.perf-title { font-weight: 700; font-size: 12px; color: var(--text); }
+.perf-inline-edit.perf-title { font-weight: 700; font-size: var(--font-body); color: var(--text); }
 
 .perf-deckpanel.mirrored .perf-inline-edit { text-align: right; }
 
@@ -366,14 +585,14 @@
 .perf-tagrow {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-8);
   min-width: 0;
 }
 
 .perf-tagrow-pills {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-8);
   min-width: 0;
   overflow: hidden;
 }
@@ -384,7 +603,7 @@
   background: transparent;
   border: 1px solid var(--surface1);
   color: var(--overlay0);
-  font-size: 10px;
+  font-size: var(--font-micro);
   width: 16px;
   height: 16px;
   padding: 0;
@@ -403,7 +622,15 @@
   color: var(--text);
 }
 
-/* Tag popover (perf-layout 02): anchored under the tag row */
+/* Tag popover (perf-layout 02): anchored under the tag row.
+   The popover extends past the content-sized top panel's bottom edge into
+   the shared browse panel below — .perf-root's overflow:hidden was clipping
+   it at that boundary (bottom-row decks lost most of the editor; it read as
+   "obscured by the library"). Lift the clip only while a popover is open;
+   its z-index (above the library's sticky headers, z 100) handles paint
+   order once unclipped — no ancestor creates a stacking context. */
+.perf-root:has(.perf-tagpop) { overflow: visible; }
+
 .perf-tagpop {
   position: absolute;
   top: calc(100% + 4px);
@@ -413,8 +640,8 @@
   max-width: 90%;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 8px;
+  gap: var(--space-8);
+  padding: var(--space-8);
   background: var(--mantle);
   border: 1px solid var(--overlay1);
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.55);
@@ -427,18 +654,17 @@
   background: var(--base);
   border: 1px solid var(--surface1);
   color: var(--text);
-  font-size: 12px;
-  font-family: inherit;
-  padding: 4px 8px;
+  font-size: var(--font-body);
+  padding: var(--space-4) var(--space-8);
   outline: none;
 }
 
-.perf-tagpop-search:focus { border-color: var(--lavender); }
+.perf-tagpop-search:focus { border-color: var(--accent); }
 
 .perf-tagpop-groups {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--space-8);
   max-height: 260px;
   overflow-y: auto;
 }
@@ -446,11 +672,11 @@
 .perf-tagpop-group {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--space-4);
 }
 
 .perf-tagpop-cat {
-  font-size: 9px;
+  font-size: var(--font-micro);
   font-weight: 800;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -460,12 +686,12 @@
 .perf-tagpop-tags {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
+  gap: var(--space-4);
 }
 
 .perf-tagpop-tag {
-  padding: 3px 8px;
-  font-size: 11px;
+  padding: var(--space-4) var(--space-8);
+  font-size: var(--font-small);
   background: transparent;
   border: 1px solid var(--surface1);
   color: var(--subtext1);
@@ -482,13 +708,30 @@
 .perf-tagpop-tag:active { background: var(--surface1); }
 
 .perf-tagpop-empty {
-  font-size: 11px;
+  font-size: var(--font-small);
   font-style: italic;
   color: var(--overlay0);
 }
 
+/* Footer hand-off to the full tag editor (TagManagementModal) */
+.perf-tagpop-manage {
+  align-self: flex-start;
+  padding: var(--space-4) var(--space-8);
+  font-size: var(--font-small);
+  background: transparent;
+  border: 1px solid var(--surface1);
+  color: var(--subtext1);
+  cursor: pointer;
+}
+.perf-tagpop-manage:hover {
+  background: var(--surface0);
+  border-color: var(--text);
+  color: var(--text);
+}
+.perf-tagpop-manage:active { background: var(--surface1); }
+
 /* Energy picker: five mini squares, the set one lit */
-.perf-energy-picker { display: flex; gap: 2px; flex-shrink: 0; }
+.perf-energy-picker { display: flex; gap: var(--space-2); flex-shrink: 0; }
 
 .perf-energy {
   width: 16px;
@@ -497,7 +740,7 @@
   align-items: center;
   justify-content: center;
   font-weight: 700;
-  font-size: 9px;
+  font-size: var(--font-micro);
   border: 1px solid var(--surface1);
   background: transparent;
   color: var(--overlay0);
@@ -526,9 +769,9 @@
 /* Consolidated tempo/grid cluster, shrunk: never drives the zone width */
 .perf-zone-track .deck-bpm { height: 20px; }
 /* Width stays the shared 4.5ch/34px (deckControls.css) — no local width. */
-.perf-zone-track .deck-bpm-input { font-size: 11px; padding: 1px 4px; }
-.perf-zone-track .deck-bpm > .player-button { min-width: 20px; padding: 1px 4px; }
-.perf-zone-track .deck-bpm-steps .player-button { min-width: 18px; padding: 0 3px; }
+.perf-zone-track .deck-bpm-input { font-size: var(--font-small); padding: 1px var(--space-4); }
+.perf-zone-track .deck-bpm > .player-button { min-width: 20px; padding: 1px var(--space-4); }
+.perf-zone-track .deck-bpm-steps .player-button { min-width: 18px; padding: 0 var(--space-4); }
 .perf-zone-track .deck-bpm-steps .player-button svg,
 .perf-zone-track .deck-bpm > .player-button svg { transform: scale(0.85); }
 
@@ -545,7 +788,7 @@
   flex: 1;
   display: flex;
   align-items: stretch;
-  gap: 6px;
+  gap: var(--space-6);
 }
 
 .perf-deckpanel.mirrored .perf-play-inner { flex-direction: row-reverse; }
@@ -556,8 +799,32 @@
 .perf-padcol {
   display: grid;
   grid-template-columns: repeat(4, 36px);
-  grid-template-rows: repeat(4, 1fr);
-  gap: 4px;
+  /* Fixed band height (stems #210): 4 rows at the measured 21.75px +
+     3 gaps — pinned so the stem row can join WITHOUT growing the deck.
+     minmax(0) lets rows compress below button min-content. */
+  height: 99px;
+  grid-template-rows: repeat(4, minmax(0, 1fr));
+  gap: var(--space-4);
+}
+
+/* Stems loaded: a 5th row (the stem kill switches) squashes all rows
+   above into the same 99px band — deck height never changes. */
+.perf-padcol.has-stems {
+  grid-template-rows: repeat(5, minmax(0, 1fr));
+}
+.perf-padcol.has-stems .player-button,
+.perf-padcol.has-stems .hot-cue {
+  min-height: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+.perf-padcol .perf-stemrow {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--space-4);
+  min-height: 0;
 }
 
 .perf-padcol .deck-jumprow { grid-column: 1 / -1; }
@@ -573,12 +840,12 @@
      lets rows compress below button min-content — the added cue-walk row
      must never grow the deck band. */
   grid-template-rows: repeat(4, minmax(0, 1fr));
-  gap: 4px;
+  gap: var(--space-4);
   width: 56px;
 }
 
 .perf-transport-col .player-button {
-  font-size: 12px;
+  font-size: var(--font-body);
   min-width: 0;
   padding: 0;
   position: relative;
@@ -586,6 +853,7 @@
 
 /* Nudge pair as one segmented unit (same idiom as .deck-bpm/.deck-jumprow) */
 .perf-nudge {
+  position: relative;
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 0;
@@ -595,14 +863,14 @@
 
 .perf-nudge .player-button {
   border: none;
-  font-size: 9px;
+  font-size: var(--font-micro);
   min-width: 0;
   padding: 0;
   position: relative;
 }
 
-.perf-nudge > .player-button + .player-button {
-  border-left: 1px solid var(--surface2, #585b70);
+.perf-nudge > .player-button ~ .player-button {
+  border-left: 1px solid var(--surface2);
 }
 
 .perf-nudge:hover {
@@ -610,10 +878,10 @@
 }
 
 .perf-nudge .player-button:hover:not(:disabled) {
-  background: var(--surface0, #313244);
+  background: var(--surface0);
   color: var(--text);
   /* Pin the divider (see .deck-bpm hover note) */
-  border-color: var(--surface2, #585b70);
+  border-color: var(--surface2);
 }
 
 .perf-pads .hot-cue {
@@ -630,8 +898,8 @@
 .perf-pad-wrap .hot-cue { flex: 1; }
 
 /* Beatjump/loop row styles are shared: components/deckControls/deckControls.css */
-.perf-padcol .deck-jumprow .player-button { padding: 2px 4px; }
-.perf-padcol .deck-looprow .player-button { padding: 2px 4px; }
+.perf-padcol .deck-jumprow .player-button { padding: var(--space-2) var(--space-4); }
+.perf-padcol .deck-looprow .player-button { padding: var(--space-2) var(--space-4); }
 
 /* ── MIX zone (inner): knobs / pitch / vol / readouts + match ──── */
 
@@ -645,7 +913,7 @@
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 4px;
+  gap: var(--space-4);
 }
 
 .perf-knob {
@@ -653,7 +921,7 @@
   flex-direction: column;
   align-items: center;
   gap: 1px;
-  font-size: 8px;
+  font-size: var(--font-micro);
   color: var(--subtext0);
 }
 
@@ -673,6 +941,41 @@
   inset: 0;
 }
 
+/* Size variant: TRIM (set-and-forget gain) runs smaller than the EQ knobs;
+   vertical margins keep its under-label on the row's shared baseline. */
+.perf-knob-small .perf-knob-dial {
+  width: 18px;
+  height: 18px;
+  margin: var(--space-2) 0;
+}
+
+.perf-knob-small .perf-knob-pointer::after {
+  height: 6px;
+}
+
+/* Ring variant: FLT wears a full inner ring and an outer value arc (the
+   LPF↔HPF sweep). The dial shrinks so the OUTER arc lands on the EQ
+   knobs' 22px footprint; margins keep the under-label on the row
+   baseline. Display only — never intercepts the drag. */
+.perf-knob-filter .perf-knob-dial {
+  width: 18px;
+  height: 18px;
+  margin: var(--space-2) 0;
+}
+
+.perf-knob-filter .perf-knob-pointer::after {
+  height: 6px;
+}
+
+.perf-knob-filter .perf-knob-dial::before {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border: 1px solid var(--overlay1);
+  border-radius: 50%;
+  pointer-events: none;
+}
+
 .perf-knob-pointer::after {
   content: '';
   position: absolute;
@@ -684,14 +987,52 @@
   transform: translateX(-50%);
 }
 
+.perf-knob-colored { color: var(--knob-value-color); }
+
+.perf-knob-colored .perf-knob-dial {
+  border-color: transparent;
+  background: transparent;
+  filter: var(--knob-glow, none);
+}
+
+.perf-knob-colored .perf-knob-pointer::after {
+  background: var(--knob-value-color);
+}
+
+/* A fixed 270-degree track; the audible portion uses one value-dependent color. */
+.perf-knob-ring {
+  position: absolute;
+  inset: -1px;
+  border-radius: 50%;
+  mask-image: radial-gradient(closest-side, transparent calc(100% - 2.5px), #000 calc(100% - 2px));
+  pointer-events: none;
+}
+
+.perf-knob-ring-track {
+  background: conic-gradient(from 225deg, var(--surface2) 0deg 270deg, transparent 270deg);
+}
+
+.perf-knob-filter .perf-knob-ring { inset: -3px; }
+
+.perf-knob-detent {
+  position: absolute;
+  top: -2px;
+  left: calc(50% - 0.5px);
+  width: 1px;
+  height: 3px;
+  background: var(--subtext0);
+  pointer-events: none;
+}
+
+.perf-knob-filter .perf-knob-detent { top: -4px; }
+
 /* Automation ghost (sets 15): second, translucent DAW-style pointer at the
    live automation value while an overlay is engaged (Conductor / editor
    audition). The real pointer stays at base state — the takeover target.
-   Shared ghost color: saturated orange, distinct from every deck/level
-   color in the strip. */
-.perf-knob-ghost::after,
+   The orange ghost stays separate from the parameter-colored position ring. */
+.perf-knob .perf-knob-ghost::after,
 .perf-fader-ghost {
-  background: var(--orange, #ff8000);
+  background: var(--orange);
   opacity: 0.65;
 }
 
@@ -714,62 +1055,29 @@
    same side on every Deck) */
 .perf-knobrow .perf-pfl { align-self: flex-start; }
 
-/* Crossfader assignment segments (four-deck 08): deck-labeled L/T/R on
-   the strip's center row, flanking the X-FADER. */
+/* Compact natural-side crossfader assignment toggles. */
 .perf-xf-assign {
-  display: flex;
-  align-items: stretch;
-  border: 1px solid var(--surface1);
+  width: 20px;
+  min-width: 20px;
+  height: 15px;
+  padding: 0;
+  border-color: var(--surface1);
+  font-size: var(--font-micro);
+  font-weight: 800;
   flex-shrink: 0;
 }
 
-/* XF bypassed: the topology is moot — dim like the fader itself. */
-.perf-xf-assign.disabled { opacity: 0.4; }
-.perf-xf-assign.disabled .player-button { cursor: default; }
+.perf-xf-assign.deck-a { color: var(--deck-a); }
+.perf-xf-assign.deck-b { color: var(--deck-b); }
+.perf-xf-assign.deck-c { color: var(--deck-c); }
+.perf-xf-assign.deck-d { color: var(--deck-d); }
 
-.perf-xf-assign-deck {
-  display: flex;
-  align-items: center;
-  padding: 0 4px;
-  font-size: 9px;
-  font-weight: 800;
-  color: var(--text);
-  border-right: 1px solid var(--surface1);
-}
-
-/* Deck colors (CONTEXT.md: Deck color) — identity, never state. */
-.perf-xf-assign-deck.deck-a { color: var(--deck-a); }
-.perf-xf-assign-deck.deck-b { color: var(--deck-b); }
-.perf-xf-assign-deck.deck-c { color: var(--deck-c); }
-.perf-xf-assign-deck.deck-d { color: var(--deck-d); }
-
-.perf-xf-assign .player-button {
-  width: 14px;
-  min-width: 0;
-  height: 15px;
-  padding: 0;
-  border: 0;
-  color: var(--overlay0);
-  font-size: 8px;
-  font-weight: 800;
-}
-
-.perf-xf-assign .player-button + .player-button { border-left: 1px solid var(--surface1); }
-
-.perf-xf-assign .player-button.on,
-.perf-xf-assign .player-button.on:hover:not(:disabled),
-.perf-xf-assign .player-button.on:active:not(:disabled) {
-  background: var(--green);
+.perf-xf-assign.on,
+.perf-xf-assign.on:hover:not(:disabled),
+.perf-xf-assign.on:active:not(:disabled) {
+  background: var(--success);
   color: var(--base);
-}
-
-/* Thru engaged reads neutral: the channel is deliberately OUT of the
-   crossfader topology — grey, not the active green. */
-.perf-xf-assign .player-button.thru.on,
-.perf-xf-assign .player-button.thru.on:hover:not(:disabled),
-.perf-xf-assign .player-button.thru.on:active:not(:disabled) {
-  background: var(--overlay1);
-  color: var(--base);
+  border-color: var(--success);
 }
 
 /* Custom horizontal faders: the label rides the handle (no label column).
@@ -784,6 +1092,11 @@
 }
 
 .perf-fader.disabled { opacity: 0.4; cursor: default; }
+
+.perf-fader[role='slider']:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: var(--space-2);
+}
 
 .perf-fader-track {
   position: absolute;
@@ -804,16 +1117,7 @@
   left: 0;
   height: 2px;
   transform: translateY(-50%);
-  background: var(--green);
-}
-
-/* Crossfader end labels: flex siblings of the fader (never over the
-   track), text-colored — the fills carry the Deck colors. */
-.perf-xfade-end {
-  font-size: 10px;
-  font-weight: 800;
-  color: var(--text);
-  flex-shrink: 0;
+  background: var(--success);
 }
 
 .perf-fader-detent {
@@ -842,8 +1146,8 @@
   position: absolute;
   top: 50%;
   /* transform set inline: translate(-X%, -50%) — bounded thumb */
-  padding: 1px 5px;
-  font-size: 7px;
+  padding: 1px var(--space-4);
+  font-size: var(--font-micro);
   font-weight: 800;
   letter-spacing: 0.08em;
   color: var(--subtext1);
@@ -853,8 +1157,8 @@
 }
 
 .perf-fader.accent .perf-fader-handle {
-  color: var(--blue);
-  border-color: var(--blue);
+  color: var(--accent);
+  border-color: var(--accent);
 }
 
 /* Soft-takeover hint (midi-controller 18): a mismatched hardware fader/
@@ -874,8 +1178,8 @@
 }
 
 .perf-fader.perf-takeover .perf-fader-handle {
-  color: var(--orange, #ff8000);
-  border-color: var(--orange, #ff8000);
+  color: var(--orange);
+  border-color: var(--orange);
   animation: takeover-pulse 0.8s ease-in-out infinite;
 }
 
@@ -889,20 +1193,20 @@
 }
 
 .perf-knob.perf-takeover .perf-knob-dial {
-  border-color: var(--orange, #ff8000);
+  border-color: var(--orange);
   animation: takeover-pulse 0.8s ease-in-out infinite;
 }
 .perf-knob.perf-takeover .perf-knob-pointer::after {
-  background: var(--orange, #ff8000);
+  background: var(--orange);
 }
 /* Turn direction beside the knob label: clockwise raises, counter lowers. */
 .perf-knob.perf-takeover-up > span::after {
   content: ' ↻';
-  color: var(--orange, #ff8000);
+  color: var(--orange);
 }
 .perf-knob.perf-takeover-down > span::after {
   content: ' ↺';
-  color: var(--orange, #ff8000);
+  color: var(--orange);
 }
 
 /* Static highlight still reads without motion; only the pulse goes. */
@@ -913,11 +1217,11 @@
   }
 }
 
-/* Foot: prominent playback readouts beside MATCH + nudge */
+/* One-row footer: infrequent modes stack; tempo actions share an edge. */
 .perf-mix-foot {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-2);
 }
 
 .perf-mix-spacer { flex: 1; }
@@ -925,50 +1229,83 @@
 .perf-readout {
   display: inline-flex;
   align-items: baseline;
-  gap: 3px;
+  gap: var(--space-4);
   flex-shrink: 0;
 }
 
 .perf-readout-val {
-  font-size: 16px;
+  font-size: var(--font-title);
   font-weight: 800;
-  color: var(--sapphire);
+  color: var(--accent);
   font-variant-numeric: tabular-nums;
 }
 
-.perf-readout-key { color: var(--mauve); }
+.perf-readout-key { color: var(--accent); }
 
 /* Pitch % — secondary readout riding the effective BPM */
 .perf-readout-sub {
-  font-size: 10px;
+  font-size: var(--font-micro);
   font-weight: 700;
-  color: var(--blue);
+  color: var(--accent);
   font-variant-numeric: tabular-nums;
 }
 
 .perf-mini {
-  padding: 2px 6px;
+  padding: var(--space-2) var(--space-6);
   min-width: 26px;
-  font-size: 11px;
+  font-size: var(--font-small);
   height: 24px;
 }
 
 .perf-mix-foot .player-button.perf-mini {
   min-width: 0;
-  padding: 2px 5px;
-  font-size: 9px;
+  padding: var(--space-2) var(--space-4);
+  font-size: var(--font-micro);
   height: 22px;
   position: relative;
+}
+
+.perf-mode-stack {
+  display: grid;
+  grid-template-rows: repeat(2, 1fr);
+  flex-shrink: 0;
+  height: 22px;
+}
+
+.perf-mode-stack .player-button.perf-mini {
+  height: 11px;
+  padding: 0 var(--space-2);
+  line-height: 9px;
+}
+
+.perf-tempo-buttons {
+  display: inline-flex;
+  flex-shrink: 0;
+}
+
+.perf-tempo-buttons .perf-sync {
+  width: calc(5ch + 2 * var(--space-4) + 2px);
+  z-index: 1;
+}
+
+.perf-tempo-buttons .perf-match {
+  margin-left: -1px;
 }
 
 /* MATCH glyph: = (match) / ≠ (out of pitch-fader reach) */
 .perf-mix-foot .player-button.perf-mini.perf-match {
   flex-shrink: 0;
-  font-size: 14px;
+  font-size: var(--font-large);
   line-height: 1;
-  padding: 2px 7px;
+  padding: var(--space-2) var(--space-4);
 }
-.perf-match-hint { color: var(--red); border-color: var(--red); }
+.perf-match-hint { color: var(--danger); border-color: var(--danger); }
+
+.perf-mix-foot .perf-sync.perf-match-hint {
+  --perf-active-fill: var(--danger);
+  color: var(--danger);
+  border-color: currentColor;
+}
 
 /* PFL toggle (headphone glyph) — lit green while the channel feeds the Cue bus */
 .perf-pfl {
@@ -987,9 +1324,70 @@
 .perf-pfl.on,
 .perf-pfl.on:hover:not(:disabled),
 .perf-pfl.on:active:not(:disabled) {
-  background: var(--green);
+  background: var(--success);
   color: var(--base);
-  border-color: var(--green);
+  border-color: var(--success);
+}
+
+/* Stem kill switches (stems #210) — the hot-cue set/unset idiom: audible
+   stem = colored outline + tinted fill + colored text (like a set pad);
+   killed = grey outline, dim text (like an unset pad). Colors are the
+   --stem-* tokens (theme/tokens.ts). */
+.perf-stem-vocals { --stem-color: var(--stem-vocals); }
+.perf-stem-drums { --stem-color: var(--stem-drums); }
+.perf-stem-bass { --stem-color: var(--stem-bass); }
+.perf-stem-other { --stem-color: var(--stem-other); }
+
+.perf-stemrow .player-button.perf-stem {
+  min-width: 0;
+  font-size: 9px;
+  letter-spacing: 0.05em;
+  border: 1px solid var(--surface0);
+  color: var(--overlay0);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+.perf-stemrow .player-button.perf-stem.on {
+  border-color: var(--stem-color);
+  background: color-mix(in srgb, var(--stem-color) 12%, transparent);
+  color: var(--stem-color);
+}
+.perf-stemrow .player-button.perf-stem.on:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--stem-color) 25%, transparent);
+  border-color: var(--stem-color);
+  color: var(--stem-color);
+}
+.perf-stemrow .player-button.perf-stem:not(.on):hover:not(:disabled) {
+  background: var(--surface0);
+  border-color: var(--stem-color);
+  color: var(--overlay0);
+}
+
+/* Extract-stems affordance (stems review): the row swaps to one spanning
+   action button for stem-less tracks — offer on hover, progress while the
+   split task runs, reload when done. */
+.perf-stemrow .player-button.perf-stem-action {
+  grid-column: 1 / -1; /* the row is a 4-column grid; the action spans it */
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  font-size: 9px;
+  letter-spacing: 0.05em;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  padding: 0;
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+.perf-stemrow .player-button.perf-stem-action:disabled {
+  border-color: var(--surface1);
+  color: var(--overlay0);
+  background: none;
 }
 
 /* Key Lock toggle (key-lock 03) — padlock glyph leading the foot row,
@@ -1006,67 +1404,170 @@
   display: block;
 }
 
+.perf-mix-foot .perf-vinyl.scratching {
+  --perf-active-fill: var(--warning);
+}
+
 /* Drift marker (key-lock 04): the readout dims while the sounding key has
    drifted from the Track's Key (Key Lock off, |pitch| ≥ threshold). The ~
    is always laid out, transparent until drifted, so the width never jumps. */
 .perf-readout-val.perf-key-drift { opacity: 0.5; }
 .perf-key-tilde { opacity: 0; }
 .perf-key-drift .perf-key-tilde { opacity: 1; }
-.perf-keylock.on,
-.perf-keylock.on:hover:not(:disabled),
-.perf-keylock.on:active:not(:disabled) {
-  background: var(--green);
+/* All engaged footer toggles share Key Lock's filled state, including hover/press. */
+.perf-mix-foot .player-button.on,
+.perf-mix-foot .player-button.on:hover:not(:disabled),
+.perf-mix-foot .player-button.on:active:not(:disabled) {
+  background: var(--perf-active-fill, var(--success));
   color: var(--base);
-  border-color: var(--green);
+  border-color: var(--perf-active-fill, var(--success));
 }
 
 /* Held nudge = solid inverted fill (held IS the press) */
 .perf-nudge-held,
 .perf-nudge .player-button.perf-nudge-held:hover:not(:disabled),
 .perf-nudge .player-button.perf-nudge-held:active:not(:disabled) {
-  background: var(--yellow);
+  background: var(--warning);
   color: var(--base);
 }
 
 /* ── On-control key hints (shared map — performanceKeys.ts) ────── */
 
 .perf-kbd {
+  --perf-kbd-ink: var(--text);
   position: absolute;
   bottom: -6px;
   right: -4px;
-  font-size: 8px;
+  font-size: var(--font-micro);
   background: var(--surface1);
-  color: var(--text);
-  padding: 0 3px;
+  color: var(--perf-kbd-ink);
+  padding: 0 var(--space-4);
   font-weight: 700;
   border: 1px solid var(--overlay0);
 }
 
+.perf-kbd-inline {
+  position: static;
+  margin-left: var(--space-4);
+}
+.perf-kbd-inline .perf-kbd { position: static; border: 0; padding: 0; }
+
+/* Retain the character's advance; replace the font's narrow, low Shift glyph. */
+.perf-kbd-shift, .perf-kbd-ctrl { position: relative; color: transparent; }
+.perf-kbd-shift > svg, .perf-kbd-ctrl > svg {
+  position: absolute;
+  width: 100%;
+  height: 0.9em;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--perf-kbd-ink);
+}
+
+/* Hints never participate in button sizing. Keep the keycap treatment. */
+.perf-deckpanel .player-button > .perf-kbd,
+.perf-pad-wrap > .perf-kbd,
+.perf-nudge > .perf-kbd {
+  position: absolute;
+  padding: 0 2px;
+  line-height: 1;
+  letter-spacing: 0;
+  white-space: nowrap;
+  pointer-events: none;
+}
+/* Reserve label space only while this deck's hints are visible. */
+:where(.perf-root:not(.kbd-hints-off)) .perf-deckpanel.focused .perf-transport-col > .player-button,
+:where(.perf-root:not(.kbd-hints-off)) .perf-deckpanel.focused .perf-padcol .deck-loop-toggle {
+  padding-right: 14px;
+}
+:where(.perf-root:not(.kbd-hints-off)) .perf-deckpanel.focused .deck-jumprow > .player-button:has(> .perf-kbd:not(.perf-kbd-offset)) {
+  padding-left: 2px;
+  padding-right: 14px;
+}
+:where(.perf-root:not(.kbd-hints-off)) .perf-deckpanel.focused .perf-pad-wrap:has(> .perf-kbd) .hot-cue { padding-right: 12px; }
+.perf-pad-wrap > .perf-kbd,
+.perf-transport-col > .player-button > .perf-kbd,
+.perf-padcol .deck-loop-toggle > .perf-kbd,
+.perf-padcol .deck-jumprow > .player-button > .perf-kbd:not(.perf-kbd-offset) {
+  top: 50%;
+  right: 2px;
+  bottom: auto;
+  transform: translateY(-50%);
+}
+:where(.perf-root:not(.kbd-hints-off)) .perf-deckpanel.focused .deck-cuewalk > .player-button {
+  /* Glyph row + hint space + borders must fit the existing 22px button. */
+  font-size: 8px;
+  padding-top: 0;
+  line-height: 7px;
+  padding-bottom: 13px;
+}
+.perf-deckpanel .deck-cuewalk .perf-kbd,
+.perf-deckpanel .perf-sync > .perf-kbd {
+  left: 50%;
+  right: auto;
+  bottom: 1px;
+  transform: translateX(-50%);
+}
+:where(.perf-root:not(.kbd-hints-off)) .perf-deckpanel.focused .perf-sync-label {
+  display: inline-block;
+  font-size: 8px;
+  transform: translateY(-6px);
+}
+.perf-deckpanel .perf-kbd-offset { z-index: 2; }
+.perf-nudge > .perf-kbd {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  right: auto;
+  bottom: auto;
+  transform: translate(-50%, -50%);
+  z-index: 1;
+}
+
 /* Load-lock refusal hint on the deck panel (view policy, issue 04) */
 .perf-lock-hint {
-  color: var(--red);
-  border: 1px solid var(--red);
-  font-size: 10px;
+  color: var(--danger);
+  border: 1px solid var(--danger);
+  font-size: var(--font-micro);
   font-weight: 800;
-  padding: 1px 6px;
+  padding: 1px var(--space-6);
   flex-shrink: 0;
 }
 
-/* ── Library below ────────────────────────────────────────────── */
+/* ── Shared browse panel below (layout in TopBar.css) ─────────── */
 
-.perf-library {
-  flex: 1;
-  min-height: 0;
-  overflow: hidden;
+/* Row affordances dim while their deck is locked (audibly running);
+   BrowsePanel applies the lock classes only in performance mode. */
+.app-main:has(.perf-root[data-view-active="true"][data-deck-count="2"])
+  .app-browse :is(.track-load-button-C, .track-load-button-D) {
+  display: none;
 }
 
-.perf-library > div { height: 100%; }
-
-/* Row affordances dim while their deck is locked (audibly running) */
-.perf-library.lock-A .track-load-button-A,
-.perf-library.lock-B .track-load-button-B,
-.perf-library.lock-C .track-load-button-C,
-.perf-library.lock-D .track-load-button-D {
+.app-browse.lock-A .track-load-button-A,
+.app-browse.lock-B .track-load-button-B,
+.app-browse.lock-C .track-load-button-C,
+.app-browse.lock-D .track-load-button-D {
   opacity: 0.35;
   cursor: not-allowed;
+}
+
+@media (max-width: 1100px) {
+  .perf-root { overflow: auto; max-height: 70dvh; }
+  .perf-surface { min-width: 1100px; }
+}
+.perf-keyboard-scope { display: contents; }
+.app-browse [data-browse-area] { position: relative; }
+.app-main:has(.perf-root[data-view-active="true"] .perf-keyboard-scope[data-library-focus="true"]) [data-browse-focused="true"]::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  border: 3px solid var(--accent);
+  box-shadow: inset 0 0 12px color-mix(in srgb, var(--accent) 25%, transparent);
+  pointer-events: none;
+}
+.perf-root:has(.perf-keyboard-scope[data-library-focus="true"]) .perf-kbd {
+  --perf-kbd-ink: var(--overlay1);
+  background: var(--surface0);
+  border-color: var(--surface1);
 }

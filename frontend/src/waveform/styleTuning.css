@@ -1,127 +1,71 @@
-/* Dev-only waveform style tuning page. */
-
 .tune-page {
-  min-height: 100vh;
-  background: #07070c;
-  color: #e8e8f0;
-  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
-  padding: 16px 20px 40px;
-  box-sizing: border-box;
+  min-width: 0;
 }
-
-.tune-page h1 {
-  font-size: 15px;
-  margin: 0 0 12px;
-  color: #00ffcc;
-}
-
-.tune-page h1 .tune-tag {
-  color: #ff2288;
-  margin-left: 8px;
-}
-
-.tune-toolbar {
-  display: flex;
-  gap: 12px;
-  align-items: center;
-  flex-wrap: wrap;
-  margin-bottom: 12px;
-  font-size: 12px;
-}
-
-.tune-toolbar select,
-.tune-controls select {
-  background: #14141f;
-  color: #e8e8f0;
-  border: 1px solid #333;
-  padding: 4px 8px;
-  font: inherit;
-  max-width: 480px;
-}
-
-.tune-play,
-.tune-reset {
-  background: #14141f;
-  color: #00ffcc;
-  border: 1px solid #00ffcc;
-  padding: 4px 12px;
-  font: inherit;
-  cursor: pointer;
-}
-
-.tune-reset {
-  color: #ff2288;
-  border-color: #ff2288;
-}
-
-.tune-play:disabled {
-  color: #555;
-  border-color: #333;
-  cursor: default;
-}
-
-.tune-preview-label {
-  font-size: 11px;
-  color: #8888aa;
-  margin: 10px 0 4px;
-}
-
-.tune-main-preview .waveform-container,
-.tune-main-preview .waveform-canvas {
-  height: 220px;
-}
-
-.tune-minimap-preview .minimap-container,
-.tune-minimap-preview .minimap-canvas {
-  height: 64px;
-}
-
 .tune-controls {
-  margin-top: 16px;
-  padding: 12px;
-  background: #0d0d16;
-  border: 1px solid #1e1e2e;
+  margin-top: var(--space-24);
+  padding-top: var(--space-16);
+  border-top: 1px solid var(--surface1);
 }
-
 .tune-slot-row {
   display: flex;
-  gap: 16px;
+  gap: var(--space-16);
   align-items: center;
   flex-wrap: wrap;
-  font-size: 12px;
-  margin-bottom: 12px;
-  color: #aaaacc;
+  font-size: var(--font-body);
+  margin-bottom: var(--space-16);
 }
-
-.tune-slot-row input {
-  accent-color: #00ffcc;
+.tune-slot-row label {
+  display: inline-flex;
+  gap: var(--space-6);
+  align-items: center;
 }
-
 .tune-sliders {
-  display: flex;
-  gap: 24px;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-16) var(--space-24);
 }
-
 .tune-slider {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  font-size: 11px;
-  color: #aaaacc;
-  min-width: 130px;
+  gap: var(--space-8);
+  font-size: var(--font-body);
+  color: var(--subtext0);
 }
-
 .tune-slider input {
-  accent-color: #00ffcc;
+  accent-color: var(--accent);
 }
-
-.tune-slider .val {
-  color: #ffffff;
+.tune-slider > .perf-fader {
+  width: 100%;
+  flex-shrink: 0;
 }
-
+.tune-band-gain > span::before {
+  content: '';
+  display: inline-block;
+  width: var(--space-8);
+  height: var(--space-8);
+  margin-right: var(--space-8);
+  background: var(--waveform-band);
+}
+.tune-band-gain > .perf-fader {
+  --accent: var(--waveform-band);
+}
+.tune-slider input[type='color'] {
+  width: 100%;
+  height: 32px;
+  padding: var(--space-2);
+}
 .tune-hint {
-  margin-top: 10px;
-  font-size: 11px;
-  color: #666688;
+  margin-top: var(--space-16);
+  font-size: var(--font-small);
+  color: var(--subtext0);
+}
+@media (max-width: 800px) {
+  .tune-sliders {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 480px) {
+  .tune-sliders {
+    grid-template-columns: 1fr;
+  }
 }

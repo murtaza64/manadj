@@ -1,5 +1,6 @@
 import type { AbsoluteTarget, ButtonTarget, RelativeTarget } from './actions';
 import type { ChannelId } from '../playback/mixer';
+import type { BeatFxEffectId } from '../playback/beatFx';
 import type { JogProfile } from './jogCalibration';
 
 /**
@@ -72,6 +73,18 @@ export interface DeckFeedback {
   /** The channel's PFL button light (headphone-cue 05). */
   pfl: LedAddress;
   /**
+   * Stem kill pads (stems #210), when a Mapping binds a pad block to the
+   * stems gesture: pad i mirrors STEM_NAMES[i] — lit while the stem is
+   * audible, dark while killed or when the Track has no stems. Optional:
+   * devices without a stem pad block omit it and are never written.
+   */
+  stemPads?: readonly LedAddress[];
+  /**
+   * The stem pads' SHIFT layer (solo): mirrors the same enabled state so
+   * pads stay lit while SHIFT is held, like the hot-cue shift layer.
+   */
+  stemPadsShifted?: readonly LedAddress[];
+  /**
    * Pads 1..8 by index, HOTCUE base-layer addresses ONLY — pad modes are
    * note-isolated on this class of device, and Feedback writes only the
    * modes the app maps (HOTCUE here, the grid-edit SAMPLER layer below);
@@ -102,8 +115,11 @@ export interface DeckFeedback {
    * always agree.
    */
   quantize: LedAddress;
+  sync?: LedAddress;
   /** Dedicated base-layer Key Lock / Master Tempo lamp, when present. */
   keyLock?: LedAddress;
+  slipMode?: LedAddress;
+  vinylMode?: LedAddress;
   /**
    * The SHIFT-layer Q address (channel+3, same note) — a PROBE
    * (midi-performance-ops 07): if the hardware drives a lamp there, it
@@ -149,6 +165,19 @@ export interface MeterAddress {
   peakValue: number;
 }
 
+/** Device-specific CC encoding for a Beat FX time-unit indicator. */
+export interface BeatFxBeatAddress {
+  channel: number;
+  number: number;
+  offValue: number;
+  values: readonly { beats: number; value: number }[];
+}
+
+export type BeatFxEngageLamp = LedAddress & {
+  scope: 'left' | 'right' | 'master';
+  effect: BeatFxEffectId;
+};
+
 /** Device knowledge for Feedback: every light the app writes, per deck. */
 export interface MappingFeedback {
   /** A two-Deck Controller may omit C/D; layered four-Deck devices provide all. */
@@ -159,6 +188,18 @@ export interface MappingFeedback {
    * the decks. Optional: absent until the address is hardware-learned.
    */
   assistant?: LedAddress;
+  /**
+   * The Beat FX ON/OFF light (gh#272) — mirrors the one section's master
+   * gate. Optional: devices without a Beat FX section omit it.
+   */
+  beatFx?: LedAddress;
+  /** Beat FX time-unit indicator (GRV6 CC output), if host-driven. */
+  beatFxBeat?: BeatFxBeatAddress;
+  /**
+   * FX button lights (beat-fx-engage, DDJ-SB3): lit iff the section is on
+   * with `effect` targeting the lamp's scope (side's focused Deck / master).
+   */
+  beatFxEngage?: readonly BeatFxEngageLamp[];
   /**
    * Per-channel level-meter output addresses (four-deck-performance 36).
    * A four-channel device provides all of A–D; a device without host-driven

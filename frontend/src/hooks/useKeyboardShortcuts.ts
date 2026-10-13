@@ -1,9 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { useBrowseActive } from '../contexts/browseActive';
+import { useViewActive } from '../contexts/viewActive';
 import type { Track } from '../types';
 import { isTypingTarget } from '../components/performance/performanceKeys';
 import { dispatchSetSpace } from '../sets/spaceTransport';
 import { GRID_NUDGE_MS } from './useBeatgridData';
-import { useDeck, useDeckReady, useDeckSnapshot } from './useDeck';
+import { useDeck, deckReadyNow } from './useDeck';
 import { useScrubLoop } from './useScrubLoop';
 import { activeScrollers, scrollerFor } from '../components/virtualRows';
 
@@ -69,18 +71,33 @@ export function useKeyboardShortcuts({
   onHotCueDelete,
   isEnergyEditMode
 }: UseKeyboardShortcutsProps) {
+  const viewActive = useViewActive();
+  const browseActive = useBrowseActive();
   // a/s jump by the deck's shared beatjump size (deck-controls PRD: one
   // per-deck N across modes — set it in any view, these keys use it).
-  const { engine, beatjumpBeats } = useDeck();
-  const deckReady = useDeckReady();
-  // Space is allowed while loading — the engine latches play intent.
-  const deckCanPlay = useDeckSnapshot(
-    (s) => s.loadState === 'ready' || s.loadState === 'fetching' || s.loadState === 'decoding'
-  );
+  const { engine, beatjump, loadedTrack } = useDeck();
+  const trackId = loadedTrack?.id ?? null;
   const [scrubDirection, setScrubDirection] = useState<number>(0); // -1, 0, or 1
+  // Keep each release paired with its press, even across focus/modifier
+  // changes and callback refreshes. Opening Settings is not a deck reset.
+  const held = useRef(new Map<string, () => void>());
+  useEffect(() => {
+    const releases = held.current;
+    const releaseAll = () => {
+      for (const release of releases.values()) release();
+      releases.clear();
+    };
+    window.addEventListener('blur', releaseAll);
+    return () => {
+      window.removeEventListener('blur', releaseAll);
+      releaseAll();
+    };
+  }, [viewActive]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
+      if (!viewActive || event.defaultPrevented) return;
+      if (event.target instanceof Element && event.target.closest('.settings-page')) return;
       // Conflict prevention: ignore while typing or using certain modifiers.
       // Shared guard (keyboard-focus 01): only text-entry targets silence
       // the hub — a focused checkbox/button must not kill transport keys.
@@ -89,6 +106,7 @@ export function useKeyboardShortcuts({
 
       // Select all: Cmd/Ctrl-A (before the modifier guard below drops it)
       if (
+        browseActive &&
         !isInputFocused &&
         (event.metaKey || event.ctrlKey) &&
         !event.altKey &&
@@ -105,6 +123,9 @@ export function useKeyboardShortcuts({
       }
 
       const key = event.key.toLowerCase();
+      const loadState = engine.getSnapshot().loadState;
+      const deckCanPlay = loadState === 'ready' || loadState === 'fetching' || loadState === 'decoding';
+      const deckReady = deckReadyNow(engine, trackId);
 
       // Prevent key repeat for F key (cue button)
       if (key === 'f' && event.repeat) {
@@ -113,36 +134,36 @@ export function useKeyboardShortcuts({
       }
 
       // Navigation: j/k or arrows (selection-scoped; collapses a multi-selection)
-      if (key === 'j' || key === 'k' || event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      if (browseActive && (key === 'j' || key === 'k' || event.key === 'ArrowDown' || event.key === 'ArrowUp')) {
         event.preventDefault();
         onNavigate(key === 'j' || event.key === 'ArrowDown' ? 1 : -1);
       }
 
       // Remove from playlist: Delete/Backspace (selection-scoped, no confirm)
-      if ((event.key === 'Delete' || event.key === 'Backspace') && onRemoveSelected) {
+      if (browseActive && (event.key === 'Delete' || event.key === 'Backspace') && onRemoveSelected) {
         event.preventDefault();
         onRemoveSelected();
       }
 
       // Area focus: Tab/Shift+Tab walk the browse-area ring (sidebar and
       // track panes — four-deck-performance 24).
-      if (event.key === 'Tab' && onAreaMove) {
+      if (browseActive && event.key === 'Tab' && onAreaMove) {
         event.preventDefault();
         onAreaMove(event.shiftKey ? -1 : 1);
       }
 
       // Coarse navigation on the focused area (four-deck-performance 24).
-      if ((event.key === 'PageDown' || event.key === 'PageUp') && onNavigatePage) {
+      if (browseActive && (event.key === 'PageDown' || event.key === 'PageUp') && onNavigatePage) {
         event.preventDefault();
         onNavigatePage(event.key === 'PageDown' ? 1 : -1);
       }
-      if ((event.key === 'End' || event.key === 'Home') && onNavigateEnd) {
+      if (browseActive && (event.key === 'End' || event.key === 'Home') && onNavigateEnd) {
         event.preventDefault();
         onNavigateEnd(event.key === 'End' ? 1 : -1);
       }
 
       // Split view: V toggles the playlist edit split (playlist views only).
-      if (key === 'v' && onToggleSplitView) {
+      if (browseActive && key === 'v' && onToggleSplitView) {
         event.preventDefault();
         onToggleSplitView();
       }
@@ -151,7 +172,7 @@ export function useKeyboardShortcuts({
       // selection on the Deck (the browse -> Deck bridge). Skip when a
       // button has focus (e.g. after clicking a player control) — Enter
       // there should not surprise-load the selection.
-      if (event.key === 'Enter') {
+      if (browseActive && event.key === 'Enter') {
         if (onActivate) {
           event.preventDefault();
           onActivate();
@@ -171,7 +192,7 @@ export function useKeyboardShortcuts({
         // Space with a Set selected in the browse view drives the
         // CONDUCTOR's mix-level transport (sets 34): the set wins over
         // the focused deck. Per-deck keys below keep their deck verbs.
-        if (key === ' ' && dispatchSetSpace()) return;
+        if (browseActive && key === ' ' && dispatchSetSpace()) return;
 
         // Space latches play intent during a load; the rest need audio.
         if (key === ' ' ? !deckCanPlay : !deckReady) return;
@@ -179,10 +200,11 @@ export function useKeyboardShortcuts({
         if (key === ' ') {
           engine.togglePlay();
         } else if (key === 'a') {
-          engine.jumpBeats(-beatjumpBeats);
+          engine.jumpBeats(-beatjump.getSnapshot());
         } else if (key === 's') {
-          engine.jumpBeats(beatjumpBeats);
+          engine.jumpBeats(beatjump.getSnapshot());
         } else if (key === 'f') {
+          held.current.set('f', () => engine.cueUp());
           engine.cueDown();
         }
       }
@@ -219,7 +241,7 @@ export function useKeyboardShortcuts({
       }
 
       // Tag editing mode: T (selection-scoped)
-      if (key === 't') {
+      if (browseActive && key === 't') {
         if (!selectedTrack) return;
 
         event.preventDefault();
@@ -230,7 +252,7 @@ export function useKeyboardShortcuts({
       }
 
       // Energy editing mode: E (selection-scoped)
-      if (key === 'e') {
+      if (browseActive && key === 'e') {
         if (!selectedTrack) return;
 
         event.preventDefault();
@@ -245,6 +267,7 @@ export function useKeyboardShortcuts({
         if (!deckReady) return;
 
         event.preventDefault();
+        held.current.set(key, () => setScrubDirection(0));
 
         if (key === 'h') {
           setScrubDirection(-1);  // Scrub backward
@@ -270,6 +293,7 @@ export function useKeyboardShortcuts({
         // Extract digit from 'Digit1' -> 1
         const slotNumber = parseInt(event.code.slice(-1), 10);
         if (onHotCueDown) {
+          held.current.set(event.code, () => onHotCueUp?.(slotNumber));
           onHotCueDown(slotNumber);
         }
       }
@@ -295,39 +319,11 @@ export function useKeyboardShortcuts({
     };
 
     const handleKeyUp = (event: KeyboardEvent) => {
-      // Typing-target focus is the ONLY keyup guard (releases must land
-      // even if a modifier went down mid-hold — see performanceKeys.ts).
-      if (isTypingTarget(event)) {
-        return;
-      }
-
-      const key = event.key.toLowerCase();
-
-      // Release cue on F key up
-      if (key === 'f') {
-        if (!deckReady) return;
-        event.preventDefault();
-        engine.cueUp();
-      }
-
-      // Stop scrub on H/L key up (only if not holding Shift)
-      if ((key === 'h' || key === 'l') && !event.shiftKey) {
-        event.preventDefault();
-        setScrubDirection(0);
-      }
-
-      // Hot cue key up: 1-8 (only for non-Shift, since Shift deletes)
-      if (/^Digit[1-8]$/.test(event.code) && !event.shiftKey) {
-        if (!deckReady || isEnergyEditMode) return;
-
-        event.preventDefault();
-
-        // Extract digit from 'Digit1' -> 1
-        const slotNumber = parseInt(event.code.slice(-1), 10);
-        if (onHotCueUp) {
-          onHotCueUp(slotNumber);
-        }
-      }
+      const key = /^Digit[1-8]$/.test(event.code) ? event.code : event.key.toLowerCase();
+      const release = held.current.get(key);
+      if (!release) return;
+      held.current.delete(key);
+      release();
     };
 
     document.addEventListener('keydown', handleKeyDown);
@@ -337,6 +333,8 @@ export function useKeyboardShortcuts({
       document.removeEventListener('keyup', handleKeyUp);
     };
   }, [
+    viewActive,
+    browseActive,
     selectedTrack,
     onNavigate,
     onSelectAll,
@@ -356,9 +354,8 @@ export function useKeyboardShortcuts({
     onHotCueDelete,
     isEnergyEditMode,
     engine,
-    beatjumpBeats,
-    deckReady,
-    deckCanPlay,
+    beatjump,
+    trackId,
   ]);
 
   // Continuous scrub while h/l is held

@@ -1,7 +1,7 @@
 .midi-inspector {
   min-height: 100vh;
-  padding: 24px;
-  background: radial-gradient(circle at top left, rgba(0, 184, 212, 0.18), transparent 32%),
+  padding: var(--space-24);
+  background: radial-gradient(circle at top left, rgba(var(--accent-rgb), 0.18), transparent 32%),
     linear-gradient(135deg, var(--crust), var(--base));
   color: var(--text);
 }
@@ -10,8 +10,8 @@
   display: flex;
   align-items: flex-end;
   justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 20px;
+  gap: var(--space-16);
+  margin-bottom: var(--space-16);
 }
 
 .midi-inspector h1,
@@ -21,13 +21,13 @@
 }
 
 .midi-inspector h1 {
-  font-size: 32px;
+  font-size: var(--font-display);
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
 
 .midi-inspector__subtitle {
-  margin: 6px 0 0;
+  margin: var(--space-6) 0 0;
   color: var(--subtext0);
 }
 
@@ -35,7 +35,7 @@
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
-  gap: 8px;
+  gap: var(--space-8);
 }
 
 .midi-inspector button,
@@ -48,12 +48,12 @@
 }
 
 .midi-inspector button {
-  padding: 8px 12px;
+  padding: var(--space-8) var(--space-12);
   cursor: pointer;
 }
 
 .midi-inspector button:hover:not(:disabled) {
-  border-color: var(--sapphire);
+  border-color: var(--accent);
 }
 
 .midi-inspector button:disabled {
@@ -62,55 +62,55 @@
 }
 
 .midi-inspector select {
-  padding: 7px 10px;
+  padding: var(--space-8) var(--space-8);
 }
 
 .midi-inspector__primary {
-  border-color: var(--sapphire) !important;
-  background: var(--sapphire) !important;
+  border-color: var(--accent) !important;
+  background: var(--accent) !important;
   color: var(--crust) !important;
   font-weight: 700 !important;
 }
 
 .midi-inspector__danger {
-  border-color: var(--red) !important;
-  color: var(--red) !important;
+  border-color: var(--danger) !important;
+  color: var(--danger) !important;
 }
 
 .midi-inspector__grid {
   display: grid;
   grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
-  gap: 16px;
+  gap: var(--space-16);
 }
 
 .midi-inspector__panel {
   border: 1px solid var(--surface1);
-  background: rgba(24, 24, 24, 0.88);
-  box-shadow: 0 0 0 1px rgba(0, 184, 212, 0.08);
+  background: var(--mantle);
+  box-shadow: 0 0 0 1px rgba(var(--accent-rgb), 0.08);
 }
 
 .midi-inspector__panel-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 12px 14px;
+  gap: var(--space-12);
+  padding: var(--space-12) var(--space-12);
   border-bottom: 1px solid var(--surface1);
 }
 
 .midi-inspector__panel-body {
-  padding: 14px;
+  padding: var(--space-12);
 }
 
 .midi-inspector__ports {
   display: grid;
-  gap: 8px;
+  gap: var(--space-8);
 }
 
 .midi-inspector__port {
   display: grid;
-  gap: 4px;
-  padding: 10px;
+  gap: var(--space-4);
+  padding: var(--space-8);
   border: 1px solid var(--surface1);
   background: var(--surface0);
 }
@@ -126,52 +126,52 @@
 .midi-inspector__status {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-8);
   color: var(--subtext0);
-  font-size: var(--font-sm);
+  font-size: var(--font-large);
 }
 
 .midi-inspector__status::before {
   content: '';
   width: 9px;
   height: 9px;
-  background: var(--red);
+  background: var(--danger);
 }
 
 .midi-inspector__status--ready::before {
-  background: var(--green);
+  background: var(--success);
 }
 
 .midi-inspector__learn {
   display: grid;
-  gap: 12px;
+  gap: var(--space-12);
 }
 
 .midi-inspector__prompt {
-  border-left: 4px solid var(--sapphire);
-  padding: 12px;
-  background: rgba(0, 184, 212, 0.12);
+  border-left: 4px solid var(--accent);
+  padding: var(--space-12);
+  background: rgba(var(--accent-rgb), 0.12);
 }
 
 .midi-inspector__prompt-title {
-  font-size: 22px;
+  font-size: var(--font-display);
   font-weight: 800;
 }
 
 .midi-inspector__prompt-meta {
-  margin-top: 4px;
+  margin-top: var(--space-4);
   color: var(--subtext0);
 }
 
 .midi-inspector__learn-controls {
   display: grid;
   grid-template-columns: 1fr;
-  gap: 8px;
+  gap: var(--space-8);
 }
 
 .midi-inspector__learn-row {
   display: flex;
-  gap: 8px;
+  gap: var(--space-8);
 }
 
 .midi-inspector__learn-row > button,
@@ -181,42 +181,40 @@
 
 .midi-inspector__captures {
   display: grid;
-  gap: 6px;
+  gap: var(--space-6);
   max-height: 260px;
   overflow: auto;
 }
 
 .midi-inspector__capture {
   display: grid;
-  gap: 3px;
-  padding: 8px;
+  gap: var(--space-4);
+  padding: var(--space-8);
   border: 1px solid var(--surface1);
-  background: rgba(49, 49, 54, 0.7);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
-  font-size: var(--font-xs);
+  background: var(--surface0);
+  font-size: var(--font-body);
 }
 
 .midi-inspector__log {
   display: grid;
-  gap: 4px;
+  gap: var(--space-4);
   max-height: 440px;
   overflow: auto;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
-  font-size: var(--font-xs);
+  font-size: var(--font-body);
 }
 
 .midi-inspector__log-row {
   display: grid;
   grid-template-columns: 92px minmax(180px, 1fr) 120px 120px 80px minmax(180px, 1.5fr);
-  gap: 8px;
+  gap: var(--space-8);
   align-items: center;
-  padding: 7px 8px;
+  padding: var(--space-8) var(--space-8);
   border-left: 3px solid var(--surface2);
-  background: rgba(49, 49, 54, 0.72);
+  background: var(--surface0);
 }
 
 .midi-inspector__log-row--learned {
-  border-left-color: var(--green);
+  border-left-color: var(--success);
 }
 
 .midi-inspector__log-header {
@@ -230,19 +228,18 @@
   max-height: 520px;
   overflow: auto;
   margin: 0;
-  padding: 14px;
+  padding: var(--space-12);
   border: 1px solid var(--surface1);
   background: var(--crust);
-  color: var(--green);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
-  font-size: var(--font-xs);
+  color: var(--success);
+  font-size: var(--font-body);
   line-height: 1.45;
   white-space: pre-wrap;
 }
 
 @media (max-width: 960px) {
   .midi-inspector {
-    padding: 14px;
+    padding: var(--space-12);
   }
 
   .midi-inspector__header,

@@ -40,6 +40,9 @@ export interface Track {
   key_provenance?: string | null;
   /** Worklist flag (ADR 0024): grid analysis bailed and no saved grid yet */
   needs_attention?: boolean;
+  /** Current stems on disk (stems #118; stale = absent). Gates the stem
+   * load path — no probing per stem. */
+  has_stems?: boolean;
   /** One served BPM (ADR 0027): the grid-first projection — the
    * Beatgrid's dominant tempo when a real grid exists, else the stored
    * value. Float BPM; there is no second field to prefer. */
@@ -316,6 +319,11 @@ export interface EngineTrackExportResult {
   target: 'engine';
   exported_to_target: number;
   skipped_file_not_found: number;
+  /** Tracks not on the Engine Library's drive (Windows, #306). */
+  skipped_other_drive: number;
+  skipped_other_drive_paths: string[];
+  /** Library root -> tracks written there (per-drive libraries, #307). */
+  exported_by_library: Record<string, number>;
   playlist_name: string | null;
   playlist_created: boolean;
 }
@@ -374,6 +382,22 @@ export interface LibraryImportExecutionResult {
   skipped_no_metadata: number;
   errors: number;
   error_messages: string[];
+  track_ids: number[];
+}
+
+export interface DropImportRequest {
+  paths: string[];
+  playlist_id?: number | null;
+}
+
+export interface DropImportResult {
+  imported: number;
+  skipped: number;
+  failed: number;
+  ignored: number;
+  error_messages: string[];
+  track_ids: number[];
+  playlist_added: number;
 }
 
 export interface GridAnalysisResponse {
@@ -484,6 +508,25 @@ export interface SourceItem {
   provenance: ProvenanceInfo | null;
   // Cleanup-derived default query for Search Supplier pickers
   search_query: string | null;
+  // the lifecycle on the wire (gh#342): state + latest task state folded
+  stage: SourceItemStage;
+  error_kind: ErrorKind | null;
+  // remembered Soulseek candidates, if a search ran
+  candidate_count: number | null;
+}
+
+export type SourceItemStage = 'new' | 'queued' | 'downloading' | 'failed' | 'fulfilled' | 'ignored';
+export type ErrorKind = 'drm' | 'gone' | 'ratelimit' | 'peer' | 'other';
+
+export interface BulkResult {
+  done: number;
+  skipped: number;
+}
+
+export interface AutoBulkResult {
+  started: number;
+  skipped: number;
+  reasons: Record<string, string>;
 }
 
 export interface ProvenanceInfo {
@@ -500,6 +543,12 @@ export interface DownloadStatus {
   cooling_down_until?: string | null;
   // which Supplier is delivering the audio
   via: 'soundcloud' | 'soulseek';
+  // hands-off soulseek downloads (gh#214): candidate being tried (1-based) / total
+  attempt?: number | null;
+  attempts_total?: number | null;
+  // measured progress (gh#342): 0..1 and "4.2 / 9.0 MB"; null = unmeasured
+  progress?: number | null;
+  progress_label?: string | null;
 }
 
 // Suppliers (see CONTEXT.md: Supplier / Direct Supplier / Search Supplier)
@@ -517,14 +566,29 @@ export interface SoulseekResult {
   duration_ms: number | null;
   queue_length: number | null;
   has_free_slot: boolean | null;
+  // the peer offering the file
+  username?: string | null;
   // derived server-side vs the item's duration; results arrive sorted
   // exact-duration-lossless first (issue 04)
   duration_delta_ms: number | null;
 }
 
+// A standalone (Source-Item-less) soulseek download (gh#217)
+export interface AdhocSoulseekDownload {
+  task_id: number;
+  filename: string;
+  artist: string | null;
+  title: string;
+  task_state: 'pending' | 'running' | 'done' | 'failed';
+  error: string | null;
+  created_at: string | null;
+}
+
 export interface SoulseekSearchResponse {
   query: string;
   results: SoulseekResult[];
+  // ISO-8601 UTC when this search ran (remembered searches, gh#216)
+  searched_at?: string | null;
 }
 
 // State of a track's latest analysis task (task-system 01): the Analyze
@@ -545,19 +609,38 @@ export interface AnalysisPendingItem {
 
 export type TaskState = 'pending' | 'running' | 'done' | 'failed';
 
+export interface TaskSubject {
+  kind: 'track' | 'source_item' | 'session' | string;
+  id: string;
+  label: string;
+  detail: string | null;
+}
+
 export interface TaskSummary {
   counts: Record<TaskState, number>;
-  running_task: { type: string; ref: string | null } | null;
+  /** failures that still need someone: newest task for their subject, undismissed */
+  attention: number;
+  attention_by_type: Record<string, number>;
+  running: TaskRow[];
+  pending_by_type: Record<string, number>;
   undismissed_failures: number;
 }
 
 export interface TaskRow {
   id: number;
   type: string;
+  type_label: string;
+  /** where a failure's next step lives: retry here | the Acquisition row | nowhere */
+  fix: 'retry' | 'acquisition' | 'none';
   ref: string | null;
+  subject: TaskSubject | null;
   state: TaskState;
   error: string | null;
   attempts: number;
+  progress: number | null;
+  progress_label: string | null;
+  /** a newer task exists for the same subject: history, not a worklist entry */
+  superseded: boolean;
   not_before: string | null;
   created_at: string | null;
   started_at: string | null;

@@ -103,6 +103,19 @@ export function sampleParamValues(
   return values;
 }
 
+/**
+ * Score adjustment for a MANUAL skip, weighted by watch time (human,
+ * 2026-08-22: "more watch time = better"; a skip is "not as bad as a
+ * manual 'bad' but still counts against"). Quick skip = half a dislike;
+ * a long watch before skipping is mild positive evidence.
+ */
+export function skipAdjustment(watchedS: number): number {
+  if (watchedS < 10) return -0.5;
+  if (watchedS < 45) return -0.25;
+  if (watchedS < 120) return 0;
+  return 0.25;
+}
+
 export type CycleMode = 'off' | 'timer' | 'drop';
 
 export interface CycleState {
@@ -162,12 +175,23 @@ export function stepCycle(
     }
     return { state: next, advance: false };
   }
-  // drop mode: rising edge arms a delayed advance N beats out.
+  // drop mode: a rising edge arms a delayed advance N beats out. If ANOTHER
+  // drop lands before that window ends, advance IMMEDIATELY at the new drop
+  // (human note: resetting/ignoring meant drop-to-drop sections never
+  // advanced) — the refractory only guards against the same drop refiring.
   const rising = excitement >= dropThreshold && state.prevExcitement < dropThreshold;
-  if (rising && nowMs >= state.armedAfter && state.dueAt === null) {
-    const beatMs = 60000 / (bpm && bpm > 40 ? bpm : 128);
-    next.dueAt = nowMs + beatsAfterDrop * beatMs;
-    next.armedAfter = nowMs + refractoryS * 1000;
+  if (rising && nowMs >= state.armedAfter) {
+    if (state.dueAt === null) {
+      const beatMs = 60000 / (bpm && bpm > 40 ? bpm : 128);
+      next.dueAt = nowMs + beatsAfterDrop * beatMs;
+      next.armedAfter = nowMs + refractoryS * 1000;
+    } else {
+      // Second drop inside the pending window: cut to the next preset NOW.
+      next.dueAt = null;
+      next.lastAdvanceAt = nowMs;
+      next.armedAfter = nowMs + refractoryS * 1000;
+      return { state: next, advance: true };
+    }
   }
   if (next.dueAt !== null && nowMs >= next.dueAt) {
     next.dueAt = null;

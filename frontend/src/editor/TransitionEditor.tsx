@@ -8,6 +8,8 @@
  * .scratch/mix-editor/NOTES.md).
  */
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { registerDiagnostics } from '../feedback/diagnostics';
 import { api } from '../api/client';
 import { useBeatgridData } from '../hooks/useBeatgridData';
 import { gridFirstBpm } from '../components/deckControls/bpmCommit';
@@ -15,11 +17,12 @@ import { useHotCueSlots } from '../hooks/useHotCueActions';
 import { useHotCues } from '../hooks/useHotCues';
 import { JogController } from '../midi/jog';
 import { getJogCalibration } from '../midi/jogCalibrationStore';
-import Library from '../components/Library';
-import type { LibraryBrowseHandle } from '../components/Library';
+import { registerBrowseHost, sharedBrowseHandle } from '../components/browseHost';
 import { isGuardedKeyEvent } from '../components/performance/performanceKeys';
-import { DeckScope } from '../contexts/DeckContext';
+import { useViewActive } from '../contexts/viewActive';
+import { useBrowseActive } from '../contexts/browseActive';
 import { useDecks } from '../hooks/useDeck';
+import { presentationOf } from '../utils/presentationStore';
 import {
   claimAudible,
   isAudible,
@@ -31,17 +34,25 @@ import {
 import { useMixer } from '../hooks/useMixer';
 import { prefetchTrackBuffer } from '../sets/prefetch';
 import { armAudition } from './auditionArm';
+import { watchAuditionTakeover } from './auditionTakeover';
 import { MixPlayer } from './MixPlayer';
 import { DawTimeline } from './DawTimeline';
 import { DeckCard } from './DeckCard';
-import { TransitionSwitcher } from './TransitionSwitcher';
+import { EvidenceSwitcher } from './EvidenceSwitcher';
+import {
+  activeEvidenceRef,
+  buildEvidenceCycle,
+  findEvidenceIndex,
+  pinFollowUpdate,
+} from './evidence';
+import type { EvidenceItem, EvidenceRef, PairTake, SetEditContext } from './evidence';
 import { TemplatesDropdown } from './TemplatesDropdown';
 import { SaveTemplateModal } from './SaveTemplateModal';
 import type { SaveTemplateResult } from './SaveTemplateModal';
 import { barBeatLabel, bEntryLabel, lengthBeatsLabel } from './beatReadout';
 import { beatsToSeconds, slideBeatsToSeconds } from './gestureMath';
 import { EditorStore, useEditorSelector } from './editorStore';
-import { LAST_PAIR_KEY, initTransitionStore } from './pairStore';
+import { LAST_PAIR_KEY, initTransitionStore, isPristine } from './pairStore';
 import { applyTemplate, stripTemplateLanes } from './templateModel';
 import { vectorizeTake } from '../capture/vectorize';
 import { trackEffectiveBpm } from '../sets/planner';
@@ -58,7 +69,13 @@ import {
 import { EDITOR_PITCH_RANGE_PERCENT, defaultMix, tempoMatchPitch } from './mixModel';
 import type { Transition } from './mixModel';
 import { LinkToggle } from '../links/LinkToggle';
-import { repointTakePinsLocal } from '../sets/setStore';
+import {
+  ensureSetEntriesLoaded,
+  repointTakePinsLocal,
+  setAdjacencyPin,
+  useSetEntries,
+} from '../sets/setStore';
+import type { AdjacencyPin } from '../sets/adjacency';
 import type { Track } from '../types';
 import './transitionEditor.css';
 
@@ -123,8 +140,8 @@ function TransitionEditorInner() {
     const rerender = () => bump((n) => n + 1);
     const subs = [
       player.subscribe(rerender),
-      player.engineA.subscribe(rerender),
-      player.engineB.subscribe(rerender),
+      presentationOf(player.engineA).subscribe(rerender),
+      presentationOf(player.engineB).subscribe(rerender),
     ];
     return () => subs.forEach((u) => u());
   }, [player]);
@@ -174,6 +191,44 @@ function TransitionEditorInner() {
   }, [player, bpmA, bpmB]);
 
   const pairKey = trackA && trackB ? `${trackA.id}:${trackB.id}` : null;
+
+  // ── From-Set context (gh#167) ────────────────────────────────────────
+  // Set by the adjacency click-through (openPair below); DORMANT the
+  // moment the loaded pair stops matching (manual re-assign, deck swap,
+  // another artifact open) — the pairKey guard, not teardown choreography.
+  // While active, the evidence cycler follows switches with the Set pin.
+  const [setCtx, setSetCtx] = useState<SetEditContext | null>(null);
+  const setCtxRef = useRef(setCtx);
+  useEffect(() => {
+    setCtxRef.current = setCtx;
+  });
+  const activeSetCtx = setCtx && setCtx.pairKey === pairKey ? setCtx : null;
+  useEffect(() => {
+    if (activeSetCtx) void ensureSetEntriesLoaded(activeSetCtx.setId);
+  }, [activeSetCtx]);
+  // The adjacency's LIVE pin — the pinned mark follows it (ordering doesn't:
+  // the cycle is anchored to the evidence the adjacency opened with).
+  const ctxEntries = useSetEntries(activeSetCtx?.setId ?? -1);
+  const livePin: AdjacencyPin | null = activeSetCtx
+    ? (ctxEntries?.find((e) => e.trackId === activeSetCtx.headTrackId)?.pin ?? null)
+    : null;
+
+  // The pair's Takes for the evidence cycle (recent-first from the API;
+  // the builder re-sorts defensively and drops promoted ones).
+  const { data: allTakes = [] } = useQuery({ queryKey: ['takes'], queryFn: api.takes.list });
+  const pairTakes: PairTake[] = useMemo(
+    () =>
+      trackA && trackB
+        ? allTakes
+            .filter((t) => t.a_track_id === trackA.id && t.b_track_id === trackB.id)
+            .map((t) => ({
+              uuid: t.uuid,
+              detectedAt: t.detected_at,
+              promotedTransitionUuid: t.promoted_transition_uuid,
+            }))
+        : [],
+    [allTakes, trackA, trackB]
+  );
 
   /** Bumped whenever a Transition loads/switches: the timeline re-frames
    * around the window and the playhead parks at the window start. The park
@@ -226,6 +281,10 @@ function TransitionEditorInner() {
    * The stored function is the cancel — any other transport gesture,
    * displacement, or pair supersession calls it; fulfilment nulls it. */
   const pendingAuditionRef = useRef<(() => void) | null>(null);
+  /** Per-side flag: has ANY session assignment landed yet? Consulted only
+   * by the mount-time last-pair fallback (#188) so its late-resolving
+   * fetch can never clobber a pair an artifact open assigned meanwhile. */
+  const sessionSeededRef = useRef<{ A: boolean; B: boolean }>({ A: false, B: false });
   const [auditionPending, setAuditionPending] = useState(false);
   const cancelPendingAudition = useCallback(() => {
     if (!pendingAuditionRef.current) return;
@@ -243,6 +302,7 @@ function TransitionEditorInner() {
    * another surface). */
   const assignSession = useCallback(
     (deck: 'A' | 'B', track: Track) => {
+      sessionSeededRef.current[deck] = true;
       cancelPendingAudition();
       if (player.isPlaying()) player.pause();
       if (deck === 'A') setTrackA(track);
@@ -278,7 +338,7 @@ function TransitionEditorInner() {
       const decks = sharedDecksRef.current;
       for (const t of tracks) {
         if (decks.A.loadedTrack?.id === t.id || decks.B.loadedTrack?.id === t.id) continue;
-        prefetchTrackBuffer(mixer, t.id).catch((err) =>
+        prefetchTrackBuffer(mixer, t.id, false).catch((err) =>
           console.warn('editor open: decode-cache warm failed', t.id, err)
         );
       }
@@ -443,11 +503,12 @@ function TransitionEditorInner() {
     ensureEditorAudible();
     if (!isAudible('editor')) return; // claim refused — arm nothing
     const cancel = armAudition({
-      engines: { A: player.engineA, B: player.engineB },
-      targets: { A: a.id, B: b.id },
       // Deck loads through the provider's one load path (ADR 0022) —
       // issued only for decks that don't already hold their target.
-      load: (deck) => sharedDecksRef.current[deck].loadTrack(deck === 'A' ? a : b),
+      targets: [
+        { engine: player.engineA, trackId: a.id, load: () => sharedDecksRef.current.A.loadTrack(a) },
+        { engine: player.engineB, trackId: b.id, load: () => sharedDecksRef.current.B.loadTrack(b) },
+      ],
       onReady: () => {
         // Clear the arm BEFORE the park's seek below — the seek tap
         // cancels pending arms (subscribeSeek), not this fulfilment.
@@ -501,7 +562,7 @@ function TransitionEditorInner() {
           const { bpmA: a, bpmB: b, slideDeckB: slide } = midiGestures.current;
           const bpm = deck === 'A' ? a : b;
           if (!bpm || bpm <= 0) return; // same gate as the on-screen cluster
-          const beats = sharedDecksRef.current[deck].beatjumpBeats;
+          const beats = sharedDecksRef.current[deck].beatjump.getSnapshot();
           const n = direction === 'back' ? -beats : beats;
           if (deck === 'A') player.seek(player.getMixTime() + beatsToSeconds(n, bpm));
           // Apparent-motion polarity (mix-editor 32): ▶ slides B's drawn
@@ -574,6 +635,29 @@ function TransitionEditorInner() {
     };
   }, [player, mixer, midiJogA, midiJogB, auditionTogglePlay, cancelPendingAudition]);
 
+  // Deck-control takeover (gh#186): a hand on a mixer control while the
+  // editor holds audibility gets the Conductor's answer — the audition
+  // stands down, the decks keep sounding, the sounding values land in
+  // base state, and the borrow unwinds (release + disengage). The pitch
+  // checkpoint is dropped, not restored: the user keeps the running
+  // decks, tempo-match rate and all.
+  useEffect(
+    () =>
+      watchAuditionTakeover({
+        mixer,
+        surface: 'editor',
+        standDown: () => player.standDown(),
+        cancelArm: cancelPendingAudition,
+        takeToken: () => {
+          const token = automationTokenRef.current;
+          automationTokenRef.current = null;
+          pitchCheckpointRef.current = null;
+          return token;
+        },
+      }),
+    [player, mixer, cancelPendingAudition]
+  );
+
   // Adopt tracks on entry, per slot: the shared deck's loaded track wins
   // (mode switches carry the pair), else the saved last pair (refresh
   // straight into the editor — provider restore may still be in flight);
@@ -592,17 +676,70 @@ function TransitionEditorInner() {
       if (shared) {
         assignSession(deck, shared);
       } else if (fallbackId !== undefined && fallbackId !== null && !Number.isNaN(fallbackId)) {
-        api.tracks.getById(fallbackId).then((t: Track) => assignSession(deck, t)).catch(() => undefined);
+        api.tracks.getById(fallbackId).then((t: Track) => {
+          // Stale-resolution guard (#188): an artifact open (openTake /
+          // openPair) can land while this fetch is in flight — its
+          // assignment must win. Without this check the last-pair fallback
+          // silently clobbers the just-opened pair and the next audition
+          // plays an unrelated track. (Same race DeckContext's restore
+          // fallback already guards.)
+          if (sessionSeededRef.current[deck]) return;
+          assignSession(deck, t);
+        }).catch(() => undefined);
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  /** Open a Take for review on the ALREADY-LOADED pair (the tracks are
+   * the caller's — trackRef for user gestures, the freshly fetched pair
+   * for artifact opens). Unpromoted → vectorize into an unsaved draft
+   * (store.stampTakeDraft; review-via-Vectorization, transition-takes
+   * 03); already-promoted → just select its Transition. Returns whether
+   * the Take is now the loaded evidence (pin-follow gates on it). */
+  const reviewTake = useCallback(
+    async (uuid: string, a: Track, b: Track): Promise<boolean> => {
+      try {
+        const detail = await api.takes.get(uuid);
+        if (detail.a_track_id !== a.id || detail.b_track_id !== b.id) return false;
+        if (detail.promoted_transition_uuid) {
+          store.selectTransition(detail.promoted_transition_uuid);
+          return true;
+        }
+        // Re-selecting the Take already under review: keep its draft item
+        // (and any edits) instead of re-vectorizing over them.
+        const draft = store.getSnapshot().takeDraft;
+        if (draft?.takeUuid === uuid) {
+          store.selectTransition(draft.itemUuid);
+          return true;
+        }
+        const vectorized = vectorizeTake(
+          {
+            events: detail.events,
+            windowStartS: detail.window_start_s,
+            windowEndS: detail.window_end_s,
+          },
+          // Grid-first (ADR 0016): same authority the plan-time
+          // vectorization uses — the bpm column can be a stale projection.
+          { bpmA: trackEffectiveBpm(a), bpmB: trackEffectiveBpm(b) }
+        );
+        if (!vectorized) {
+          console.error('take review: unsupported transport or missing init head', uuid);
+          return false;
+        }
+        store.stampTakeDraft(uuid, vectorized.transition);
+        return true;
+      } catch (err) {
+        console.error('take review: open failed', err);
+        return false;
+      }
+    },
+    [store]
+  );
+
   // Take review (transition-takes 03): a Transition-history row opens its
   // Take here. Tracks are assigned by ROLE — outgoing → editor A, whatever
-  // physical deck it played on. An unpromoted Take vectorizes into an
-  // unsaved draft (store.stampTakeDraft); an already-promoted one just
-  // selects its Transition.
+  // physical deck it played on.
   const openTake = useCallback(
     async (uuid: string) => {
       // SESSION-ONLY open (sets 37, same contract as openPair below): no
@@ -619,27 +756,13 @@ function TransitionEditorInner() {
         const pk = `${a.id}:${b.id}`;
         localStorage.setItem(LAST_PAIR_KEY, pk);
         store.loadPair(pk);
-        if (detail.promoted_transition_uuid) {
-          store.selectTransition(detail.promoted_transition_uuid);
-          return;
-        }
-        const draft = vectorizeTake(
-          {
-            events: detail.events,
-            windowStartS: detail.window_start_s,
-            windowEndS: detail.window_end_s,
-          },
-          // Grid-first (ADR 0016): same authority the plan-time
-          // vectorization uses — the bpm column can be a stale projection.
-          { bpmA: trackEffectiveBpm(a), bpmB: trackEffectiveBpm(b) }
-        );
-        if (draft) store.stampTakeDraft(uuid, draft.transition);
-        else console.error('take review: slice has no init head — cannot vectorize', uuid);
+        setSetCtx(null); // history opens carry no Set adjacency
+        await reviewTake(uuid, a, b);
       } catch (err) {
         console.error('take review: open failed', err);
       }
     },
-    [assignSession, warmPair, store]
+    [assignSession, warmPair, store, reviewTake]
   );
   useEffect(() => {
     const consume = () => {
@@ -678,13 +801,25 @@ function TransitionEditorInner() {
         const pk = `${a.id}:${b.id}`;
         localStorage.setItem(LAST_PAIR_KEY, pk);
         store.loadPair(pk);
-        if (req.transitionUuid) store.selectTransition(req.transitionUuid);
-        else store.startBlankSketch();
+        // The opened evidence anchors the cycle's front (gh#167): the
+        // ordering freezes for the visit — only the pinned mark follows the
+        // live pin, so cycling never re-sorts under the user's feet.
+        let anchor: EvidenceRef | null = null;
+        if (req.takeUuid) {
+          const ok = await reviewTake(req.takeUuid, a, b);
+          if (ok) anchor = { kind: 'take', uuid: req.takeUuid };
+        } else if (req.transitionUuid) {
+          store.selectTransition(req.transitionUuid);
+          anchor = { kind: 'transition', uuid: req.transitionUuid };
+        } else {
+          store.startBlankSketch();
+        }
+        setSetCtx(req.setContext ? { ...req.setContext, pairKey: pk, anchor } : null);
       } catch (err) {
         console.error('adjacency edit: open failed', err);
       }
     },
-    [assignSession, warmPair, store]
+    [assignSession, warmPair, store, reviewTake]
   );
   useEffect(() => {
     const consume = () => {
@@ -696,25 +831,57 @@ function TransitionEditorInner() {
     return () => window.removeEventListener(OPEN_PAIR_EVENT, consume);
   }, [openPair]);
 
-  // Selection/navigation handle into the embedded library panel.
-  const libraryRef = useRef<LibraryBrowseHandle>(null);
+  // Evidence switch (gh#167): the cycler's one gesture. Saved Transition
+  // → select; Take → review-via-Vectorization on the loaded pair. In set
+  // context THE SWITCH IS THE DELIBERATE ACT: the Set pin follows through
+  // the existing pin plumbing (setAdjacencyPin) — live replan rides the
+  // set store notify for free (ConductorPlanFeed; lane values live,
+  // geometry deferred under the sounding-window graft). Outside set
+  // context pinFollowUpdate returns null — no Set is ever touched.
+  const selectEvidence = useCallback(
+    async (item: EvidenceItem) => {
+      const { A: a, B: b } = trackRef.current;
+      if (!a || !b) return;
+      if (item.kind === 'transition') {
+        store.selectTransition(item.uuid);
+      } else {
+        const ok = await reviewTake(item.uuid, a, b);
+        if (!ok) return; // failed opens never move the pin
+      }
+      const upd = pinFollowUpdate(setCtxRef.current, `${a.id}:${b.id}`, item);
+      if (upd) setAdjacencyPin(upd.setId, upd.headTrackId, upd.pin);
+    },
+    [store, reviewTake]
+  );
 
-  // Memoized element: the editor re-renders on every player/engine emit
-  // (transport, loads) — a stable element identity lets React skip the
-  // embedded library table on those renders (issue 10: re-diffing the
-  // table right as a deck started was visible as playback-start jitter).
-  const browsePanel = useMemo(
-    () => (
-      <DeckScope deck="A">
-        <Library
-          browseOnly
-          onLoadToDeck={(deck, track) => {
-            if (deck === 'A' || deck === 'B') assignTrack(deck, track);
-          }}
-          browseRef={libraryRef}
-        />
-      </DeckScope>
-    ),
+  /** ▶ past the last chip: a fresh pristine Transition — never a pin
+   * (pristine items have no persisted uuid to point at). */
+  const newSketch = useCallback(() => store.startBlankSketch(), [store]);
+
+  // Keep-alive: the editor stays mounted while hidden — its document keys
+  // drive the SHARED browse panel (gh#165), so they bind only while this
+  // view is the visible one.
+  const viewActive = useViewActive();
+  useEffect(() => {
+    if (!viewActive) return;
+    return registerDiagnostics('editor', () => {
+      const s = store.getSnapshot();
+      return { surface: 'pair', pair_key: s.pairKey, active_index: s.session.active,
+        uuid: s.session.items[s.session.active]?.uuid ?? null, snap: s.snap,
+        locked_window: s.lockedWindow, take_uuid: s.takeDraft?.takeUuid ?? null };
+    });
+  }, [viewActive, store]);
+  const browseActive = useBrowseActive();
+
+  // This editor's load policy for the shared browse panel: row buttons /
+  // double-click assign onto the editor's A/B session sides only.
+  useEffect(
+    () =>
+      registerBrowseHost('transition', {
+        onLoadToDeck: (deck, track) => {
+          if (deck === 'A' || deck === 'B') assignTrack(deck, track);
+        },
+      }),
     [assignTrack]
   );
 
@@ -724,10 +891,14 @@ function TransitionEditorInner() {
 
   // Keyboard: space = editor play/pause (capture + stopPropagation so no
   // other surface sees it); table keys match the Performance view — ↑/↓
-  // browse, ← / → load selection to A / B, Enter loads A.
+  // browse, ← / → load selection to A / B, Enter loads A. Bound only while
+  // this view is visible (shared browse handle; hidden copies stay inert).
   useEffect(() => {
+    if (!viewActive) return;
     const onKey = (e: KeyboardEvent) => {
       if (isGuardedKeyEvent(e)) return;
+      if (e.target instanceof Element && e.target.closest('.settings-page')) return;
+      if (!browseActive && e.key !== ' ') return;
       // The editor's selects (saved-Transition dropdown) keep their
       // native arrow/space behavior.
       if ((e.target as HTMLElement | null)?.tagName === 'SELECT') return;
@@ -740,18 +911,18 @@ function TransitionEditorInner() {
         case 'ArrowDown':
         case 'ArrowUp':
           e.preventDefault();
-          libraryRef.current?.navigate(e.key === 'ArrowDown' ? 1 : -1);
+          sharedBrowseHandle.current?.navigate(e.key === 'ArrowDown' ? 1 : -1);
           break;
         case 'ArrowLeft':
         case 'ArrowRight': {
           e.preventDefault();
-          const sel = libraryRef.current?.getSelectedTrack();
+          const sel = sharedBrowseHandle.current?.getSelectedTrack();
           if (sel) assignTrack(e.key === 'ArrowLeft' ? 'A' : 'B', sel);
           break;
         }
         case 'Enter': {
           if ((e.target as HTMLElement | null)?.tagName === 'BUTTON') break;
-          const sel = libraryRef.current?.getSelectedTrack();
+          const sel = sharedBrowseHandle.current?.getSelectedTrack();
           if (sel) assignTrack('A', sel);
           break;
         }
@@ -760,10 +931,10 @@ function TransitionEditorInner() {
     document.addEventListener('keydown', onKey, { capture: true });
     return () => document.removeEventListener('keydown', onKey, { capture: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [player, auditionTogglePlay]);
+  }, [player, auditionTogglePlay, viewActive, browseActive]);
 
-  const snapA = player.engineA.getSnapshot();
-  const snapB = player.engineB.getSnapshot();
+  const snapA = presentationOf(player.engineA).getSnapshot();
+  const snapB = presentationOf(player.engineB).getSnapshot();
   // Deck-card load state, track-aware (sets 37): under a deferred open the
   // engines may hold ANOTHER surface's tracks — show the session side as
   // 'deferred' (play loads it) instead of the foreign track's state.
@@ -772,7 +943,8 @@ function TransitionEditorInner() {
 
   return (
     <div className="editor-root">
-      {/* Top panel: the transition editor (sibling of Library / Performance) */}
+      {/* The transition-editor TOP PANEL; the browse surface below is the
+          shared App-level BrowsePanel (gh#165). */}
       <div className="editor-top">
         <div className="editor-arranger">
           <DawTimeline
@@ -827,6 +999,11 @@ function TransitionEditorInner() {
               pairLoaded={pairKey !== null}
               onSwapDecks={swapDecks}
               canSwapDecks={trackA !== null && trackB !== null}
+              pairTakes={pairTakes}
+              evidenceAnchor={activeSetCtx?.anchor ?? null}
+              livePin={livePin}
+              onSelectEvidence={(item) => void selectEvidence(item)}
+              onNewSketch={newSketch}
             />
 
             <DeckCard
@@ -852,10 +1029,6 @@ function TransitionEditorInner() {
         </div>
       </div>
 
-      {/* Bottom panel: the shared library browse surface (scoped to deck
-          A). Load affordances match the Performance view: hover row
-          buttons, double-click → A, arrow keys. */}
-      <div className="editor-library">{browsePanel}</div>
     </div>
   );
 }
@@ -906,6 +1079,11 @@ function EditorCenterPanel({
   pairLoaded,
   onSwapDecks,
   canSwapDecks,
+  pairTakes,
+  evidenceAnchor,
+  livePin,
+  onSelectEvidence,
+  onNewSketch,
 }: {
   store: EditorStore;
   player: MixPlayer;
@@ -928,6 +1106,19 @@ function EditorCenterPanel({
   /** Swap the loaded pair A ⇄ B (issue 29 — shell owns track assignment). */
   onSwapDecks: () => void;
   canSwapDecks: boolean;
+  /** The loaded pair's Takes — the evidence cycle's second section
+   * (gh#167). */
+  pairTakes: PairTake[];
+  /** Set context (gh#167): the evidence the adjacency opened with (frozen
+   * sort anchor) and the adjacency's live pin (the pinned mark). Null/null
+   * outside set context. */
+  evidenceAnchor: EvidenceRef | null;
+  livePin: AdjacencyPin | null;
+  /** Switch the loaded evidence (the shell owns Take vectorization and
+   * pin-follow). */
+  onSelectEvidence: (item: EvidenceItem) => void;
+  /** ▶ past the last chip: fresh pristine Transition. */
+  onNewSketch: () => void;
 }) {
   // Play-button state rides player/engine emits (transport, loads).
   const [, bump] = useState(0);
@@ -935,8 +1126,8 @@ function EditorCenterPanel({
     const rerender = () => bump((n) => n + 1);
     const subs = [
       player.subscribe(rerender),
-      player.engineA.subscribe(rerender),
-      player.engineB.subscribe(rerender),
+      presentationOf(player.engineA).subscribe(rerender),
+      presentationOf(player.engineB).subscribe(rerender),
     ];
     return () => subs.forEach((u) => u());
   }, [player]);
@@ -948,15 +1139,17 @@ function EditorCenterPanel({
   // Take review (transition-takes 03): the banner lives in the center
   // panel's spare bottom row — the top of the editor is timeline space.
   const takeDraft = useEditorSelector(store, (s) => s.takeDraft);
-  const promoteTake = useCallback(() => {
-    const ref = store.promoteTakeDraft();
-    if (!ref) return;
-    void api.takes
-      .setPromoted(ref.takeUuid, ref.transitionUuid)
+  const promoteTake = useCallback(async () => {
+    try {
+      const ref = await store.promoteTakeDraft();
+      if (!ref) return;
+      await api.takes.setPromoted(ref.takeUuid, ref.transitionUuid);
       // The endpoint re-pointed Set pins server-side (sets 08); mirror it
       // in loaded Sets so client-authoritative entries stay in sync.
-      .then(() => repointTakePinsLocal(ref.takeUuid, ref.transitionUuid))
-      .catch((err) => console.error('take review: promoted-reference write failed', err));
+      repointTakePinsLocal(ref.takeUuid, ref.transitionUuid);
+    } catch (err) {
+      console.error('take review: promotion failed', err);
+    }
   }, [store]);
   const tr = mix.transition;
 
@@ -1015,6 +1208,7 @@ function EditorCenterPanel({
         afterBeats: result.afterBeats,
         scalable: result.scalable,
         lanes: structuredClone(stripTemplateLanes(tr)),
+        ...(tr.beatFx && tr.beatFx.steps.length > 0 ? { beatFx: structuredClone(tr.beatFx) } : {}),
       });
       setSaveModalOpen(false);
     },
@@ -1028,6 +1222,22 @@ function EditorCenterPanel({
   const canSaveTemplate = pairLoaded && sideA.beatgrid !== null && sideB.beatgrid !== null;
   const saveDisabledReason = !pairLoaded ? 'Load two tracks first' : 'Both tracks need beatgrids';
   const activeItemName = session.items[session.active]?.name;
+
+  // The unified evidence cycle (gh#167): saved Transitions (favorites
+  // lead) then unpromoted Takes recent-first; in set context the opened
+  // evidence anchors the front and `pinned` tracks the live pin. Rebuilt per
+  // render — this panel already re-renders on every session/mix change.
+  const liveItems = store.liveItems();
+  const evidence = buildEvidenceCycle({
+    saved: liveItems,
+    takes: pairTakes,
+    takeDraft,
+    anchor: evidenceAnchor,
+    livePin,
+  });
+  const activeEvidenceIndex = findEvidenceIndex(evidence, activeEvidenceRef(session, takeDraft));
+  const activeItem = liveItems[session.active];
+  const activeIsDraft = !!takeDraft && activeItem?.uuid === takeDraft.itemUuid;
 
   return (
     <div className="editor-center">
@@ -1087,12 +1297,14 @@ function EditorCenterPanel({
           SNAP
         </button>
       </div>
-      {/* Row 2: Transition selection + templates + pair-link. */}
+      {/* Row 2: evidence cycler (gh#167) + templates + pair-link. */}
       <div className="editor-center-row">
-        <TransitionSwitcher
-          items={store.liveItems()}
-          active={session.active}
-          onNavigate={(dir) => store.navigateTransition(dir)}
+        <EvidenceSwitcher
+          items={evidence}
+          activeIndex={activeEvidenceIndex}
+          canNew={activeItem ? !isPristine(activeItem) : false}
+          onSelect={onSelectEvidence}
+          onNew={onNewSketch}
           onRename={(name) => store.renameActive(name)}
           onToggleFavorite={() => store.toggleFavorite()}
           onDelete={() => store.deleteActive()}
@@ -1140,17 +1352,24 @@ function EditorCenterPanel({
           seconds={tr.bInSec}
         />
       </div>
-      {takeDraft && (
-        <div className="editor-center-row editor-take-banner">
-          <span>Reviewing a Take — unsaved until promoted</span>
-          <button className="editor-take-promote" onClick={promoteTake}>
-            Promote to library
-          </button>
-          <button className="editor-take-discard" onClick={() => store.discardTakeDraft()}>
-            Discard
-          </button>
-        </div>
-      )}
+      {/* Take-review row: SPACE ALWAYS RESERVED (gh#167 feedback — the
+          banner appearing must never shove the rows around); content shows
+          only while the draft IS the loaded evidence, so the cycler can
+          move off an unpromoted draft without stranding the banner over an
+          unrelated Transition. visibility (not conditional mount) keeps
+          the hidden buttons inert AND the geometry fixed. */}
+      <div
+        className={`editor-center-row editor-take-banner${activeIsDraft ? '' : ' hidden'}`}
+        aria-hidden={!activeIsDraft}
+      >
+        <span>Reviewing a Take — unsaved until promoted</span>
+        <button className="editor-take-promote" onClick={promoteTake}>
+          Promote to library
+        </button>
+        <button className="editor-take-discard" onClick={() => store.discardTakeDraft()}>
+          Discard
+        </button>
+      </div>
 
       {saveModalOpen && canSaveTemplate && (
         <SaveTemplateModal

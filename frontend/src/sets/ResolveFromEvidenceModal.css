@@ -1,0 +1,106 @@
+/* Resolve from evidence — preview/confirm modal (sets #163). Bright,
+   saturated accents per the project palette (no pastels). */
+
+.rfe-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  z-index: var(--z-modal);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.rfe-modal {
+  background: var(--base);
+  border: 1px solid var(--surface1);
+  width: 560px;
+  max-height: 72vh;
+  display: flex;
+  flex-direction: column;
+  padding: var(--space-12) var(--space-16);
+  gap: var(--space-12);
+}
+
+.rfe-title {
+  font-size: var(--font-large);
+  font-weight: 700;
+}
+
+.rfe-summary {
+  font-size: var(--font-body);
+  color: var(--subtext0);
+}
+
+.rfe-count {
+  font-weight: 700;
+}
+
+.rfe-count-pin {
+  color: var(--accent);
+}
+
+.rfe-count-chop {
+  color: var(--warning);
+}
+
+.rfe-count-cut {
+  color: var(--danger);
+}
+
+.rfe-list {
+  overflow-y: auto;
+  border-top: 1px solid var(--surface0);
+  border-bottom: 1px solid var(--surface0);
+  min-height: 0;
+}
+
+.rfe-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-8);
+  padding: var(--space-4) var(--space-2);
+  font-size: var(--font-body);
+  border-bottom: 1px solid var(--surface0);
+}
+
+.rfe-row:last-child {
+  border-bottom: none;
+}
+
+.rfe-pair {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rfe-arrow {
+  color: var(--subtext0);
+}
+
+.rfe-take {
+  color: var(--accent);
+  white-space: nowrap;
+}
+
+.rfe-row-cut .rfe-take {
+  color: var(--danger);
+}
+
+.rfe-row-cut .rfe-pair {
+  color: var(--subtext0);
+}
+
+.rfe-chop-flag {
+  color: var(--warning);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.rfe-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-8);
+}

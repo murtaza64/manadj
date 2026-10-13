@@ -3,7 +3,7 @@
 from pathlib import Path
 
 
-AUDIO_EXTENSIONS = {'.mp3', '.flac', '.m4a', '.wav', '.aac', '.ogg', '.aiff', '.alac'}
+AUDIO_EXTENSIONS = {'.mp3', '.flac', '.m4a', '.wav', '.aac', '.ogg', '.aiff', '.aif', '.alac'}
 
 
 def scan_directory(tracks_dir: Path, recursive: bool = False) -> list[Path]:
@@ -17,16 +17,12 @@ def scan_directory(tracks_dir: Path, recursive: bool = False) -> list[Path]:
     Returns:
         List of audio file paths
     """
-    audio_files = []
-
-    if recursive:
-        # Recursive scan
-        for ext in AUDIO_EXTENSIONS:
-            audio_files.extend(tracks_dir.rglob(f'*{ext}'))
-    else:
-        # Single directory scan
-        for ext in AUDIO_EXTENSIONS:
-            audio_files.extend(tracks_dir.glob(f'*{ext}'))
+    # Match extensions case-insensitively on every OS (`*.mp3` globbing is
+    # case-sensitive on POSIX, so `.MP3` files were skipped).
+    entries = tracks_dir.rglob('*') if recursive else tracks_dir.iterdir()
+    audio_files = [
+        f for f in entries if f.suffix.lower() in AUDIO_EXTENSIONS and f.is_file()
+    ]
 
     # Convert to absolute paths and sort
     audio_files = [f.resolve() for f in audio_files]

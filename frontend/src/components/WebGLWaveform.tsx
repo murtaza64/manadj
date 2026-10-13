@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useWaveformBlob } from '../waveform/useWaveformBlob';
+import type { DecodedWaveform } from '../waveform/blob';
 import { useWaveformRendererV2 } from '../waveform/useWaveformRendererV2';
 import { useViewActive } from '../contexts/viewActive';
 import { loopOverlayRegions } from '../waveform/loopOverlay';
@@ -23,6 +24,14 @@ export interface ScrubTransport {
 
 interface WebGLWaveformProps {
   trackId: number | null;
+  /** Per-stem waveforms (stems #213): GPU-side mask compositing — ahead
+   * of the playhead the top lobe shows the live-mask composite and the
+   * bottom the raw mix; behind it, what was actually heard. */
+  stemWaveforms?: DecodedWaveform[] | null;
+  /** Per-column mask source (track time → 4 gains); stable identity. */
+  stemMaskAt?: ((t: number) => readonly number[]) | null;
+  /** Transparent GL background (underlay fills show through). */
+  transparentBackground?: boolean;
   clock: PlaybackClock;
   cuePoint: number | null;
   transport: ScrubTransport;
@@ -57,6 +66,10 @@ interface WebGLWaveformProps {
   /** Identity-change wake for frame inputs the renderer can't see (the
    * mixer channel state feeding `modulation`) — performance-hardening 01. */
   wakeKey?: unknown;
+  /** Event-driven wake (#155): the deck's transport gesture stream, so
+   * paused seeks from ANY producer (MIDI jog, beatjump, hot cues) repaint
+   * on the next frame instead of the 250ms idle poll. Must be stable. */
+  subscribeWake?: (cb: () => void) => () => void;
   /** Per-column amplitude modulation (renderer passthrough): the editor
    * feeds automation curves; the performance decks feed LIVE mixer state
    * (performance-mode 09 — the modTex is resampled every frame, so a
@@ -65,10 +78,15 @@ interface WebGLWaveformProps {
   /** Split mode (performance-mode 10): modulation reshapes only the top
    * lobe of the mirrored body; bottom lobe stays ground truth. */
   modulationSplit?: boolean;
+  /** Active Slip return timeline for the lower lobe; null rejoins the top. */
+  getSlipReturnPlayhead?: (() => number | null) | null;
 }
 
 export default function WebGLWaveform({
   trackId,
+  stemWaveforms = null,
+  stemMaskAt = null,
+  transparentBackground = false,
   clock,
   cuePoint,
   transport,
@@ -83,8 +101,10 @@ export default function WebGLWaveform({
   timeReadoutOffset,
   playing = false,
   wakeKey,
+  subscribeWake,
   modulation = null,
   modulationSplit = false,
+  getSlipReturnPlayhead = null,
 }: WebGLWaveformProps) {
   const { data: waveformData, isLoading, error: fetchError } = useWaveformBlob(trackId);
   const { data: beatgridData } = useBeatgridData(trackId);
@@ -98,8 +118,11 @@ export default function WebGLWaveform({
   const { canvasRef, rendererRef, initError } = useWaveformRendererV2({
     clock,
     waveformData,
+    stemWaveforms,
+    stemMaskAt,
     config: {
       isMinimapMode: false,
+      transparentBackground,
       playMarkerPosition: playMarkerFraction,
       showTimeReadout: true,
       timeReadoutAnchor,
@@ -115,6 +138,7 @@ export default function WebGLWaveform({
     active: viewActive,
     playing,
     wakeKey,
+    subscribeWake,
   });
 
   // Apply the shared time-zoom (also after re-init when new data lands).
@@ -128,7 +152,8 @@ export default function WebGLWaveform({
   useEffect(() => {
     rendererRef.current?.setModulation(modulation);
     rendererRef.current?.setModulationSplit(modulationSplit);
-  }, [modulation, modulationSplit, waveformData, rendererRef]);
+    rendererRef.current?.setSlipReturnPlayhead(getSlipReturnPlayhead);
+  }, [modulation, modulationSplit, getSlipReturnPlayhead, waveformData, rendererRef]);
 
   // Drag-to-scrub: REAL seeks per pointer move (silent — the deck pauses
   // for the drag's duration). The playhead is then always where the view

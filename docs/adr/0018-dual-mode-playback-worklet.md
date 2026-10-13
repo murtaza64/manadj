@@ -42,4 +42,47 @@ instant, and "Playhead = what is sounding" holds without compensation.
   matters most, so the follow-up may force revisiting the private-surface
   decision (noted in .scratch/key-lock/). *(Resolved 2026-07-05 by ADR
   0022: the private surface is retired — the editor plays through the
-  shared Decks and their sticky Key Lock.)*
+   shared Decks and their sticky Key Lock.)*
+
+## Platter motion (#225)
+
+- Scratch input is calibrated displacement over decoded PCM, not repeated seeks
+  or reversed buffers. Two cascaded 8 ms velocity filters reconstruct continuous
+  motion; their analytic integral is the playhead. The worklet evaluates the same
+  model at sample time, independently of callback gaps. Filter states are capped
+  at 16x; saturated input is discarded rather than accumulated as release debt.
+- Gain follows speed with a 1 ms slew. Packet-expiry fades are forbidden: the
+  first implementation amplitude-modulated even perfectly uniform jog input.
+  True stops, edges, and transport handovers retain de-click fades.
+- `scratchMotion.ts` is shared by the engine clock, worklet, and capture
+  reconstruction. It folds loops in either direction and clamps track edges.
+  The ordinary rate AudioParam remains the pitch/bend path.
+- Key Lock is bypassed during scratching without changing its stored setting.
+  Stem gain ramps use output time while scratching, not reversible track time.
+- Slip latches on touch-down. Its hidden timeline follows normal pitch/bend and
+  loops; release records the resolved landing position.
+- Slip loops (#253) latch separately on loop entry and keep an unlooped clock.
+  Nested scratches keep their loop-local return; loop exit uses the outer clock.
+  Capture records the loop latch and resolved exit. Replay preserves loop/Play/
+  Pause ordering alongside scratches on the audio clock when vinyl is present.
+- Switching Slip off cancels both loop and scratch returns immediately, without
+  moving playback or ending the gesture. Switching it on arms future gestures only.
+- Ordinary hand-up resumes the prior transport synchronously with a 5 ms audio
+  crossfade. A fresh reverse throw below -2x keeps the same gesture and Slip
+  latch; real rotation extends a 12 ms coast timeout. Retouch cancels the timeout.
+  Residual rim ticks are suppressed from bending for 80 ms after release. These
+  controller thresholds are provisional until GRV6 listening verification.
+- Sessions record scratch begin/move/end and Slip/Vinyl settings. Replay queues
+  timestamped trajectories and releases on the worklet, splitting render blocks
+  at command boundaries. Applying several historical jog increments on one
+  animation frame would erase reversals. Replay prepares sources and uses a
+  50 ms startup preroll; ownership tokens cancel queues on transport takeover.
+- Scratch snapshots carry both filter states, finite track duration and the
+  audio instant. Capture uses a shared audio-to-capture epoch, not callback
+  spacing. Effective scratch loops are clipped to the track. Replay splits use
+  offsets into output buffers; scheduled transitions are prepared off the render
+  path, without per-quantum array/view allocation.
+- Scratch-bearing Take/Routine promotion is refused until those artifacts can
+  represent continuous signed motion. Session replay retains the raw gesture.
+- Slip-loop Take/Routine promotion is likewise refused until vectorization
+  preserves the compensating return jump, not only backward wraps.

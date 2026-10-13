@@ -4,9 +4,12 @@
  * timeline agree by construction: the bands the timeline draws are exactly
  * what the detector heard.
  *
- * Audibility = playing AND not EQ-full-killed AND not filter-killed AND
+ * Audibility = running transport (or a moving scratch filter while touched)
+ * AND not EQ-full-killed AND not filter-killed AND
  * Master-bus gain (trim × channel fader × crossfader) ≥ `audibleGain`.
- * PFL/cue is invisible — Master only.
+ * PFL/cue is invisible — Master only. Beat FX tails (#355) are
+ * time-bounded, so they live in the reducer (audibilityReducer.ts
+ * fxTailAudible), OR-ed onto this predicate there.
  */
 import {
   channelCrossfaderGain,
@@ -15,11 +18,18 @@ import {
 } from '../playback/mixerMath';
 import type { CrossfaderAssignment } from '../playback/crossfaderAssignmentStore';
 import type { DetectorParams } from './events';
+import { scratchIsSounding } from '../playback/worklet/scratchMotion';
+import type { ScratchFilter } from '../playback/worklet/scratchMotion';
 
 /** The mixer inputs audibility reads — a structural subset of the
  * detector's DeckCapture and the timeline's deck state. */
 export interface AudibleDeckInputs {
   playing: boolean;
+  /** Non-null while touched, including the silent hold after motion. */
+  scratch?: ScratchFilter | null;
+  playhead?: number;
+  trackDuration?: number;
+  loop?: { start: number; end: number } | null;
   fader: number;
   trim: number;
   eq: { low: number; mid: number; high: number };
@@ -47,11 +57,28 @@ export function isDeckAudible(
   mixer: AudibleMixerInputs,
   params: Pick<DetectorParams, 'audibleGain' | 'eqKillBelow' | 'filterKillBeyond'>
 ): boolean {
-  if (!d.playing) return false;
+  if (d.scratch ? !scratchIsSounding(d.scratch, d.playhead ?? 0, d.trackDuration ?? Infinity, d.loop ?? null) : !d.playing) return false;
   // Kill-style mix-outs never touch the fader: an EQ full-kill or a sweep
   // filter ridden to an end silences the deck just as finally.
   const { eqKillBelow, filterKillBeyond } = params;
   if (d.eq.low <= eqKillBelow && d.eq.mid <= eqKillBelow && d.eq.high <= eqKillBelow) return false;
   if (Math.abs(d.filter) >= filterKillBeyond) return false;
   return deckMasterGain(d, mixer) >= params.audibleGain;
+}
+
+/** Is this deck emitting ANY Master-bus signal — audibility with a zero
+ * gain threshold? The detector's entry-onset backdating clock (#178) keys
+ * on this: a play-then-fader-slam entry's window must start where the
+ * deck first SOUNDED, not where its rising gain happened to cross
+ * `audibleGain` (mid-ramp, 1–2 beats late). Audible ⊆ sounding. */
+export function isDeckSounding(
+  d: AudibleDeckInputs,
+  mixer: AudibleMixerInputs,
+  params: Pick<DetectorParams, 'eqKillBelow' | 'filterKillBeyond'>
+): boolean {
+  if (d.scratch ? !scratchIsSounding(d.scratch, d.playhead ?? 0, d.trackDuration ?? Infinity, d.loop ?? null) : !d.playing) return false;
+  const { eqKillBelow, filterKillBeyond } = params;
+  if (d.eq.low <= eqKillBelow && d.eq.mid <= eqKillBelow && d.eq.high <= eqKillBelow) return false;
+  if (Math.abs(d.filter) >= filterKillBeyond) return false;
+  return deckMasterGain(d, mixer) > 0;
 }

@@ -1,10 +1,10 @@
 .playlist-export-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 1000;
+  z-index: var(--z-modal);
   display: grid;
   place-items: center;
-  padding: 24px;
+  padding: var(--space-24);
   background: rgb(0 0 0 / 72%);
 }
 
@@ -22,8 +22,8 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  padding: 16px 20px;
+  gap: var(--space-16);
+  padding: var(--space-16);
 }
 
 .playlist-export-modal > header {
@@ -31,13 +31,13 @@
 }
 
 .playlist-export-modal h2 {
-  margin: 2px 0 0;
-  font-size: 22px;
+  margin: var(--space-2) 0 0;
+  font-size: var(--font-title);
 }
 
 .playlist-export-kicker {
-  color: var(--yellow);
-  font-size: 10px;
+  color: var(--warning);
+  font-size: var(--font-micro);
   font-weight: 800;
   letter-spacing: .18em;
 }
@@ -46,46 +46,46 @@
   color: var(--text);
   background: transparent;
   border: 0;
-  font-size: 28px;
+  font-size: var(--font-display);
   cursor: pointer;
 }
 
 .playlist-export-warning,
 .playlist-export-error {
-  margin: 16px 20px;
-  padding: 12px;
+  margin: var(--space-16);
+  padding: var(--space-12);
   line-height: 1.4;
   background: var(--base);
-  border-left: 4px solid var(--yellow);
+  border-left: 4px solid var(--warning);
 }
 
 .playlist-export-error {
-  border-color: var(--red);
-  color: var(--red);
+  border-color: var(--danger);
+  color: var(--danger);
 }
 
 .playlist-export-targets {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 10px;
-  margin: 0 20px 16px;
+  gap: var(--space-12);
+  margin: 0 var(--space-16) var(--space-16);
   border: 0;
   padding: 0;
 }
 
 .playlist-export-targets legend {
   grid-column: 1 / -1;
-  margin-bottom: 8px;
+  margin-bottom: var(--space-8);
   color: var(--subtext0);
-  font-size: 11px;
+  font-size: var(--font-small);
   text-transform: uppercase;
 }
 
 .playlist-export-targets label {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 12px;
+  gap: var(--space-12);
+  padding: var(--space-12);
   background: var(--base);
   border: 1px solid var(--surface0);
   cursor: pointer;
@@ -100,21 +100,21 @@
 .target-info {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: var(--space-2);
 }
 
 .target-plan {
   color: var(--subtext0);
-  font-size: 11px;
+  font-size: var(--font-small);
   line-height: 1.4;
 }
 
 .target-plan .plan-unmatched {
-  color: var(--yellow);
+  color: var(--warning);
 }
 
 .target-plan.plan-unavailable {
-  color: var(--red);
+  color: var(--danger);
 }
 
 .target-mark-rb { background: #ff00a8; }
@@ -122,31 +122,31 @@
 
 .playlist-export-report {
   display: grid;
-  gap: 10px;
-  padding: 0 20px 8px;
+  gap: var(--space-12);
+  padding: 0 var(--space-16) var(--space-8);
 }
 
 .playlist-export-result {
-  padding: 12px;
+  padding: var(--space-12);
   background: var(--base);
-  border-left: 4px solid var(--green);
+  border-left: 4px solid var(--success);
 }
 
-.playlist-export-result.result-partial { border-color: var(--yellow); }
-.playlist-export-result.result-failed { border-color: var(--red); }
+.playlist-export-result.result-partial { border-color: var(--warning); }
+.playlist-export-result.result-failed { border-color: var(--danger); }
 
 .playlist-export-result h3,
-.playlist-export-result p { margin: 0 0 8px; }
+.playlist-export-result p { margin: 0 0 var(--space-8); }
 
 .playlist-export-result details {
-  margin-top: 8px;
+  margin-top: var(--space-8);
   color: var(--subtext1);
 }
 
 .playlist-export-result dl div {
   display: grid;
   grid-template-columns: 100px 1fr;
-  gap: 8px;
+  gap: var(--space-8);
 }
 
 .playlist-export-result dt { color: var(--subtext0); }
@@ -163,12 +163,12 @@
    hover feedback. */
 .playlist-export-cancel,
 .playlist-export-submit {
-  padding: 4px 12px;
+  padding: var(--space-4) var(--space-12);
   color: var(--text);
   background: transparent;
   border: 1px solid var(--surface1);
   cursor: pointer;
-  font-size: 12px;
+  font-size: var(--font-body);
   font-weight: bold;
 }
 
@@ -184,12 +184,12 @@
 }
 
 .playlist-export-submit {
-  color: var(--yellow);
-  border-color: var(--yellow);
+  color: var(--warning);
+  border-color: var(--warning);
 }
 
 .playlist-export-submit:hover:not(:disabled) {
-  border-color: var(--yellow);
+  border-color: var(--warning);
 }
 
 .playlist-export-submit:disabled {
@@ -198,7 +198,7 @@
 }
 
 @media (max-width: 600px) {
-  .playlist-export-backdrop { padding: 10px; }
+  .playlist-export-backdrop { padding: var(--space-8); }
   .playlist-export-modal { max-height: calc(100vh - 20px); }
   .playlist-export-targets { grid-template-columns: 1fr; }
 }

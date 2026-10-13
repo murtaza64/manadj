@@ -29,16 +29,25 @@ function fakeMixer(fail: { master?: string; cue?: string } = {}) {
 function stubBrowserSeams(initialDeviceIds: string[]) {
   const storage = new Map<string, string>();
   let deviceIds = initialDeviceIds;
+  let labelsLocked = false;
+  let permissionState = 'prompt';
   let deviceChange: (() => void) | null = null;
+  const stopCapture = vi.fn();
+  const getUserMedia = vi.fn(async () => {
+    labelsLocked = false;
+    return { getTracks: () => [{ stop: stopCapture }] };
+  });
   vi.stubGlobal('localStorage', {
     getItem: (k: string) => storage.get(k) ?? null,
     setItem: (k: string, v: string) => void storage.set(k, v),
     removeItem: (k: string) => void storage.delete(k),
   } as unknown as Storage);
   vi.stubGlobal('navigator', {
+    permissions: { query: async () => ({ state: permissionState }) },
     mediaDevices: {
+      getUserMedia,
       enumerateDevices: async () =>
-        deviceIds.map((deviceId) => ({ kind: 'audiooutput', deviceId, label: deviceId })),
+        deviceIds.map((deviceId) => ({ kind: 'audiooutput', deviceId, label: labelsLocked ? '' : deviceId })),
       addEventListener: (_event: string, listener: () => void) => {
         deviceChange = listener;
       },
@@ -56,6 +65,10 @@ function stubBrowserSeams(initialDeviceIds: string[]) {
     }
   );
   return {
+    getUserMedia,
+    stopCapture,
+    lockLabels() { labelsLocked = true; },
+    setPermission(state: string) { permissionState = state; },
     setDeviceIds(next: string[]) {
       deviceIds = next;
     },
@@ -77,6 +90,38 @@ afterEach(() => {
 });
 
 describe('routingStore — sink application', () => {
+  it('does not open a microphone prompt at startup or hotplug; opening the picker can unlock labels', async () => {
+    const { store, browser } = await loadStore(['saved-output']);
+    store.setMasterDevice({ deviceId: 'saved-output', label: 'Saved output' });
+    browser.lockLabels();
+    const dispose = store.initAudioRouting(fakeMixer() as never);
+    try {
+      await vi.waitFor(() => expect(store.getRoutingSnapshot().devices).toHaveLength(1));
+      expect(browser.getUserMedia).not.toHaveBeenCalled();
+      browser.setDeviceIds(['saved-output', 'new-output']);
+      browser.fireDeviceChange();
+      await vi.waitFor(() => expect(store.getRoutingSnapshot().devices).toHaveLength(2));
+      expect(browser.getUserMedia).not.toHaveBeenCalled();
+      await store.refreshRouting();
+      expect(browser.getUserMedia).toHaveBeenCalledTimes(1);
+      expect(browser.stopCapture).toHaveBeenCalledTimes(1);
+      expect(store.getRoutingSnapshot().devices.every(device => device.label !== '')).toBe(true);
+    } finally { dispose(); }
+  });
+
+  it('still unlocks saved outputs automatically when microphone permission is already granted', async () => {
+    const { store, browser } = await loadStore(['saved-output']);
+    store.setMasterDevice({ deviceId: 'saved-output', label: 'Saved output' });
+    browser.lockLabels();
+    browser.setPermission('granted');
+    const dispose = store.initAudioRouting(fakeMixer() as never);
+    try {
+      await vi.waitFor(() => expect(store.getRoutingSnapshot().devices[0]?.label).toBe('saved-output'));
+      expect(browser.getUserMedia).toHaveBeenCalledTimes(1);
+      expect(browser.stopCapture).toHaveBeenCalledTimes(1);
+    } finally { dispose(); }
+  });
+
   it('applies the resolved master and cue sinks to the Mixer', async () => {
     const { store } = await loadStore(['dev-speakers', 'dev-phones']);
     const primary = fakeMixer();

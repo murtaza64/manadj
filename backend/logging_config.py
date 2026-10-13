@@ -107,6 +107,30 @@ def setup_logging():
     console_handler.setLevel(logging.INFO)
     logging.root.addHandler(console_handler)
 
+    # Rotating file handler in the data root (packaged-app #278): the
+    # packaged app has no terminal, so logs/backend.log is the only record.
+    # Plain (uncolored) format with full dates; 5 MB x 3 generations.
+    # Best-effort — an unwritable logs dir must never block startup.
+    try:
+        from logging.handlers import RotatingFileHandler
+
+        from backend.data_root import logs_dir
+
+        log_dir = logs_dir()
+        log_dir.mkdir(parents=True, exist_ok=True)
+        file_handler = RotatingFileHandler(
+            log_dir / "backend.log", maxBytes=5 * 1024 * 1024, backupCount=3
+        )
+        file_handler.setFormatter(
+            ColoredFormatter(
+                log_format, datefmt="%Y-%m-%d %H:%M:%S", use_colors=False
+            )
+        )
+        file_handler.setLevel(logging.INFO)
+        logging.root.addHandler(file_handler)
+    except OSError:
+        logging.getLogger(__name__).warning("backend.log unavailable; logging to stdout only")
+
     # Override uvicorn's loggers to use our formatter
     # See: https://github.com/fastapi/fastapi/discussions/7457
     for logger_name in ["uvicorn", "uvicorn.access", "uvicorn.error"]:

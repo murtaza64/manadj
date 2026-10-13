@@ -27,6 +27,8 @@ import {
   zoomWindow,
 } from '../utils/perfDiffOverlay';
 import { STEP_RATIO } from '../utils/waveformZoom';
+import { CUE_FLAG_FULL_SIZE, CUE_FLAG_INK, CUE_FLAG_POLE_W } from '../theme/markers';
+import { FONT_MONO } from '../theme/tokens';
 import './PerfDiffViewer.css';
 
 // bright, fully saturated (repo preference) — Library cyan; external
@@ -106,6 +108,8 @@ function Viewer({ blob, savedMaincue, sides, onImport }: {
   } = useWaveformRendererV2({
     clock: staticClock,
     waveformData: blob,
+    // playMarkerPosition 0: documented override of PLAY_MARKER_FRACTION
+    // (theme/markers) — a static comparison view; no playhead renders.
     config: { playMarkerPosition: 0, showTimeReadout: false },
     driven: true,
     slot: 'full',
@@ -181,27 +185,36 @@ function Viewer({ blob, savedMaincue, sides, onImport }: {
     sides.externals.forEach((ext, i) =>
       drawGrid(externalMarkers[i], ext.color, false, 1 - 0.35 * i));
 
-    // ---- hot cues (Library flags above, external flags below)
+    // ---- hot cues (Library flags above, external flags below). Shared
+    // 'full' cue-flag geometry (theme/markers, gh#201) — but coloring stays
+    // SOURCE-BASED (raw stored color per side): this is a diagnostic diff
+    // surface, so what's stored is what shows (the D11 exception).
     const drawCue = (cue: HotCueVal, above: boolean, fallback: string, row = 0) => {
       const x = xOf(cue.time);
       if (x < -20 || x > width + 20) return;
       const color = cue.color || fallback;
       const y = above ? waveTop - 4 : waveBottom + 4 + row * 18;
+      const size = CUE_FLAG_FULL_SIZE;
       ctx.fillStyle = color;
       ctx.strokeStyle = color;
-      ctx.lineWidth = 1.5;
+      ctx.lineWidth = CUE_FLAG_POLE_W;
       ctx.beginPath();
       ctx.moveTo(x, above ? waveTop : waveBottom);
       ctx.lineTo(x, y + (above ? -12 : 12));
       ctx.stroke();
-      ctx.fillRect(x, above ? y - 16 : y, 14, 12);
-      ctx.fillStyle = '#000';
-      ctx.font = 'bold 9px monospace';
-      ctx.fillText(String(cue.slot), x + 4, above ? y - 7 : y + 9);
+      const flagY = above ? y - size : y;
+      ctx.fillRect(x, flagY, size, size);
+      ctx.fillStyle = CUE_FLAG_INK;
+      ctx.font = `bold ${size * 0.75}px ${FONT_MONO}`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(String(cue.slot), x + size / 2, flagY + size / 2);
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'alphabetic';
       if (cue.label) {
         ctx.fillStyle = color;
-        ctx.font = '9px monospace';
-        ctx.fillText(cue.label.slice(0, 24), x + 17, above ? y - 7 : y + 9);
+        ctx.font = `9px ${FONT_MONO}`;
+        ctx.fillText(cue.label.slice(0, 24), x + size + 3, flagY + size / 2 + 3);
       }
     };
     sides.libraryCues.forEach((c) => drawCue(c, true, LIBRARY_COLOR));

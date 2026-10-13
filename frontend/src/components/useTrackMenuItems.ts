@@ -125,5 +125,6 @@ export function useTrackMenuItems(opts: UseTrackMenuItemsOpts): MenuItem[] {
     addToSet: addToSetWithToast,
     archive: (trackIds) => void archiveWithConfirm(trackIds),
     unarchive: (trackIds) => unarchiveMutation.mutate(trackIds),
+    revealStems: (trackId) => void api.tracks.revealStems(trackId).catch(() => showToast('Could not open the stems folder')),
   });
 }

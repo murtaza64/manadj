@@ -1,0 +1,33 @@
+# Performance Keyboard
+
+| Action | Left (A/C) | Right (B/D) |
+|---|---|---|
+| Play/pause | D | K |
+| Hold cue | F | J |
+| Hotcues 1-4 | Z X C V | M , . / |
+| Unset hotcue | Shift + pad key | Shift + pad key |
+| Toggle loop | B | N |
+| Jump back/forward | A / S | L / ; |
+| Halve/double jump size | Shift+A / S | Shift+L / ; |
+| Halve/double loop size | Cmd+Shift+A / S | Cmd+Shift+L / ; |
+| Walk cues while paused | Cmd+A / S | Cmd+L / ; |
+| Match tempo | Cmd+G | Cmd+H |
+| Toggle Sync | Cmd+Shift+G | Cmd+Shift+H |
+| Filter/high/mid/low, hold + mouse | Q W E R | P O I U |
+| Channel fader, hold + mouse | G | H |
+| Jog, hold + horizontal mouse | T | Y |
+| Scratch with Vinyl on | Shift+T + mouse | Shift+Y + mouse |
+| Switch focused deck | [ | ] |
+
+| Beat FX action | Key |
+|---|---|
+| Target A / B / C / D / MST | 1 / 2 / 3 / 4 / 5 |
+| Length halve / double (Flanger: bars by default) | 6 / 7 |
+| Previous / next effect type | 8 / 9 |
+| LEVEL/DEPTH (hold + mouse; double-tap = center) | 0 |
+| Beat FX on/off | - |
+
+- `=` toggles global Quantize. `?` and `F1` open the app-wide keyboard map.
+- `Tab` switches deck/library keyboard focus; `Escape` returns from library focus.
+- Typing and open dialogs suppress deck shortcuts. Size changes, loop toggles, MATCH, Sync and cue deletion ignore key repeat.
+- Sync entry requires a ready track with BPM. Engaged Sync can always be switched off, including while waiting for a track.

@@ -8,7 +8,14 @@
  */
 
 import { PING_TIMEOUT_MS, VISUALIZER_CHANNEL } from './channel';
-import type { VisualizerMessage, VisualizerSetParam, VisualizerSetPreset } from './channel';
+import type {
+  VisualizerMessage,
+  VisualizerSetCycle,
+  VisualizerSetParam,
+  VisualizerSetPreset,
+  VisualizerSoloCommand,
+} from './channel';
+import type { CycleMode, SoloVerdict } from './soloReview';
 
 export interface VisualizerRemoteState {
   /** A viz window pinged within the timeout. */
@@ -17,9 +24,11 @@ export interface VisualizerRemoteState {
   presetId: string | null;
   /** The active preset's param values as last reported (null = unknown). */
   params: Record<string, number> | null;
+  /** The viz window's auto-cycle mode as last reported (null = unknown). */
+  cycleMode: CycleMode | null;
 }
 
-let state: VisualizerRemoteState = { open: false, presetId: null, params: null };
+let state: VisualizerRemoteState = { open: false, presetId: null, params: null, cycleMode: null };
 let lastPingAt = -Infinity;
 let channel: BroadcastChannel | null = null;
 let staleTimer: ReturnType<typeof setInterval> | null = null;
@@ -37,6 +46,7 @@ function update(next: VisualizerRemoteState): void {
   if (
     next.open === state.open &&
     next.presetId === state.presetId &&
+    next.cycleMode === state.cycleMode &&
     sameParams(next.params, state.params)
   ) {
     return;
@@ -55,11 +65,12 @@ function ensureChannel(): BroadcastChannel {
         open: true,
         presetId: event.data.presetId ?? state.presetId,
         params: event.data.params ?? state.params,
+        cycleMode: event.data.cycleMode ?? state.cycleMode,
       });
     };
     staleTimer = setInterval(() => {
       if (state.open && performance.now() - lastPingAt > PING_TIMEOUT_MS) {
-        update({ open: false, presetId: null, params: null });
+        update({ open: false, presetId: null, params: null, cycleMode: null });
       }
     }, 500);
     void staleTimer;
@@ -86,5 +97,18 @@ export function sendVisualizerPreset(presetId: string): void {
 /** Tweak a param on the viz window's preset from the laptop. */
 export function sendVisualizerParam(presetId: string, paramId: string, value: number): void {
   const message: VisualizerSetParam = { type: 'set-param', presetId, paramId, value };
+  ensureChannel().postMessage(message);
+}
+
+/** Solo-review action (like/dislike/neutral/next) from the laptop — the
+ * viz window executes it with its own solo-flow logic. */
+export function sendVisualizerSolo(action: SoloVerdict | 'next'): void {
+  const message: VisualizerSoloCommand = { type: 'solo-command', action };
+  ensureChannel().postMessage(message);
+}
+
+/** Set the viz window's auto-cycle mode from the laptop. */
+export function sendVisualizerCycle(mode: CycleMode): void {
+  const message: VisualizerSetCycle = { type: 'set-cycle', mode };
   ensureChannel().postMessage(message);
 }

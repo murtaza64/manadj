@@ -15,8 +15,9 @@ export const DEFAULT_VISIBLE_SECONDS = 20;
 
 /** Where scrolling waveforms pin the playhead, as a fraction of the canvas
  * width (the renderer's playMarkerPosition). One constant — the play-guide
- * overlay projects against the same fraction the waveforms render with. */
-export const PLAY_MARKER_FRACTION = 0.25;
+ * overlay projects against the same fraction the waveforms render with.
+ * Value lives in theme/markers.ts (the marker system's registry). */
+export { PLAY_MARKER_FRACTION } from '../theme/markers';
 
 /** Wheel step ratio per notch — THE zoom sensitivity, shared by the
  * linked Performance zoom, the library deck renderer, and the sync

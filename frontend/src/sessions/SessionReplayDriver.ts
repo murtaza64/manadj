@@ -24,8 +24,20 @@
  *   resumes on release
  */
 import type { DeckEngine, DeckSnapshot } from '../playback/DeckEngine';
+import { foldLoopPlayhead } from '../playback/loop';
 import type { ChannelId, Mixer } from '../playback/mixer';
 import type { AutomationChannelValues } from '../playback/mixer';
+import type { BeatFxSectionState } from '../playback/beatFx';
+
+function sameBeatFx(a: Readonly<BeatFxSectionState>, b: Readonly<BeatFxSectionState>): boolean {
+  return a.selected === b.selected && a.target === b.target && a.on === b.on
+    && a.depth === b.depth && a.beats === b.beats;
+}
+
+/** All-on stem default (stems #212): the state before any stem event. */
+function allStemsOn(): { vocals: boolean; drums: boolean; bass: boolean; other: boolean } {
+  return { vocals: true, drums: true, bass: true, other: true };
+}
 import { channelCrossfaderGain } from '../playback/mixerMath';
 import type { CrossfaderAssignment } from '../playback/crossfaderAssignmentStore';
 import {
@@ -40,6 +52,8 @@ import {
 import type { CaptureDeck } from '../capture/events';
 import { ALL_DECKS } from './timelineModel';
 import type { ReplayCue, ReplayPlan } from './replayPlanner';
+import type { ScratchFrame } from '../playback/worklet/scratchMotion';
+import { effectiveScratchLoop } from '../playback/worklet/scratchMotion';
 
 export type ReplayStopReason =
   | 'ended'
@@ -138,6 +152,7 @@ function median(xs: readonly number[]): number {
 }
 /** Seed loads must become ready within this budget. */
 const LOAD_TIMEOUT_MS = 20000;
+const SCRATCH_PREROLL_S = 0.05;
 /** Natural end-of-track detection window (the Conductor's). */
 const NATURAL_END_TOLERANCE_S = 1.5;
 
@@ -148,6 +163,7 @@ export class SessionReplayDriver {
   private readonly hooks: ReplayHooks;
 
   private active = false;
+  private loading = true;
   private started = false;
   private stoppedFired = false;
   private suppressSilence = false;
@@ -160,6 +176,13 @@ export class SessionReplayDriver {
   /** Paused (space): session time freezes; decks that were rolling wait. */
   private pausedAtOffset: number | null = null;
   private pausedDecks: ChannelId[] = [];
+  private scratchOwners: Partial<Record<ChannelId, symbol>> = {};
+  private parkedFrames: Partial<Record<ChannelId, ScratchFrame>> = {};
+
+  private get scheduledReplay(): boolean {
+    return ALL_DECKS.some((d) => this.plan.seed.decks[d].scratch !== null)
+      || this.plan.scratchSchedules.some((s) => s.frames.length > 0);
+  }
   /** A seekTo's async load is in flight. Pause/resume are refused during
    * it: a pause landing between seekTo's pause-state snapshot and its
    * completion left `pausedAtOffset` set under status 'playing' — a
@@ -195,12 +218,19 @@ export class SessionReplayDriver {
    * overlay lanes — never written to base during playback. */
   private recDecks: Record<
     ChannelId,
-    { fader: number; trim: number; eq: { low: number; mid: number; high: number }; filter: number; assignment: CrossfaderAssignment }
+    {
+      fader: number;
+      trim: number;
+      eq: { low: number; mid: number; high: number };
+      filter: number;
+      assignment: CrossfaderAssignment;
+      stems: { vocals: boolean; drums: boolean; bass: boolean; other: boolean };
+    }
   > = {
-    A: { fader: 1, trim: 0.5, eq: { low: 0.5, mid: 0.5, high: 0.5 }, filter: 0, assignment: 'left' },
-    B: { fader: 1, trim: 0.5, eq: { low: 0.5, mid: 0.5, high: 0.5 }, filter: 0, assignment: 'right' },
-    C: { fader: 1, trim: 0.5, eq: { low: 0.5, mid: 0.5, high: 0.5 }, filter: 0, assignment: 'left' },
-    D: { fader: 1, trim: 0.5, eq: { low: 0.5, mid: 0.5, high: 0.5 }, filter: 0, assignment: 'right' },
+    A: { fader: 1, trim: 0.5, eq: { low: 0.5, mid: 0.5, high: 0.5 }, filter: 0, assignment: 'left', stems: allStemsOn() },
+    B: { fader: 1, trim: 0.5, eq: { low: 0.5, mid: 0.5, high: 0.5 }, filter: 0, assignment: 'right', stems: allStemsOn() },
+    C: { fader: 1, trim: 0.5, eq: { low: 0.5, mid: 0.5, high: 0.5 }, filter: 0, assignment: 'left', stems: allStemsOn() },
+    D: { fader: 1, trim: 0.5, eq: { low: 0.5, mid: 0.5, high: 0.5 }, filter: 0, assignment: 'right', stems: allStemsOn() },
   };
   private recCrossfader = 0;
   private recCrossfaderEnabled = true;
@@ -208,6 +238,9 @@ export class SessionReplayDriver {
   /** Last lanes written — the takeover base-sync source (Conductor's
    * lastLanes idiom). */
   private lastLanes: Partial<Record<ChannelId, AutomationChannelValues>> = {};
+  /** The user's Beat FX section before replay touched it (#351) —
+   * restored on every exit except takeover. */
+  private liveBeatFx: BeatFxSectionState | null = null;
 
   constructor(plan: ReplayPlan, audio: ReplayAudio, hooks: ReplayHooks) {
     this.plan = plan;
@@ -220,8 +253,11 @@ export class SessionReplayDriver {
    * drives the timeline's moving playhead. */
   nowT(): number | null {
     if (!this.active) return null;
+    // Loading has no running clock yet; following a stale anchor moves
+    // both the timeline playhead and viewport away from the requested cue.
+    if (this.loading || this.seeking) return this.plan.startT;
     const offset = this.pausedAtOffset ?? this.elapsed();
-    return this.plan.startT + Math.min(offset, this.plan.endT - this.plan.startT);
+    return this.plan.startT + Math.max(0, Math.min(offset, this.plan.endT - this.plan.startT));
   }
 
   /** Live per-deck servo activity — absent when idle. */
@@ -257,6 +293,9 @@ export class SessionReplayDriver {
       return;
     }
     this.active = true;
+    // Beat FX is base mixer state (no automation overlay): replay writes the
+    // section directly and hands the live one back when it lets go (#351).
+    this.liveBeatFx = { ...this.mixer.getBeatFxSection() };
     this.status('loading');
     // The Conductor's mixer protocol: own the fader/EQ/filter nodes via
     // the overlay; the user's base state stays theirs (and stays visible
@@ -283,7 +322,11 @@ export class SessionReplayDriver {
         this.loadRequested[d] = id;
         const ok = await this.hooks.loadTrack(d, id);
         if (!ok) return false;
-        return this.waitReady(d, id);
+        const ready = await this.waitReady(d, id);
+        if (ready && this.scheduledReplay) {
+          try { await this.engines[d].prepareScratchReplay(); } catch { return false; }
+        }
+        return ready;
       })
     );
     if (!this.active) return; // displaced while loading
@@ -295,7 +338,11 @@ export class SessionReplayDriver {
 
     // Seed decks + mixer, then start the clock and watchers.
     this.self(() => this.applySeed());
-    this.anchorAudioTime = this.mixer.now();
+    this.anchorAudioTime = this.mixer.now() + (this.scheduledReplay ? SCRATCH_PREROLL_S : 0);
+    this.loading = false;
+    if (this.scheduledReplay) this.self(() => {
+      for (const d of seedLoads) this.queueScratchDeck(d, 0, this.parkedFrames[d]);
+    });
     this.cueIndex = 0;
     this.unsubs.push(
       this.watchMixer(),
@@ -311,7 +358,7 @@ export class SessionReplayDriver {
     if (!this.active) return;
     cancelAnimationFrame(this.raf);
     this.self(() => {
-      for (const d of ALL_DECKS) this.engines[d].pause();
+      this.silenceDecks();
     });
     this.teardown({ release: true });
     this.fireStopped('stopped');
@@ -322,10 +369,10 @@ export class SessionReplayDriver {
   pauseReplay(): void {
     if (!this.active || this.seeking || this.pausedAtOffset !== null) return;
     cancelAnimationFrame(this.raf);
-    this.pausedAtOffset = this.elapsed();
+    this.pausedAtOffset = Math.max(0, this.elapsed());
     this.pausedDecks = ALL_DECKS.filter((d) => this.engines[d].getSnapshot().playing);
     this.self(() => {
-      for (const d of this.pausedDecks) this.engines[d].pause();
+      this.parkDecks();
     });
     this.status('paused');
   }
@@ -333,9 +380,14 @@ export class SessionReplayDriver {
   /** Space again: re-anchor the clock and resume the parked decks. */
   resumeReplay(): void {
     if (!this.active || this.seeking || this.pausedAtOffset === null) return;
-    this.anchorAudioTime = this.mixer.now() - this.pausedAtOffset;
+    const offset = this.pausedAtOffset;
+    this.anchorAudioTime = this.mixer.now() - offset + (this.scheduledReplay ? SCRATCH_PREROLL_S : 0);
     this.pausedAtOffset = null;
     this.self(() => {
+      if (this.scheduledReplay) {
+        for (const d of ALL_DECKS) this.queueScratchDeck(d, offset, this.parkedFrames[d]);
+        return;
+      }
       for (const d of this.pausedDecks) this.engines[d].play();
     });
     this.pausedDecks = [];
@@ -357,7 +409,7 @@ export class SessionReplayDriver {
     this.pausedAtOffset = null;
     this.pausedDecks = [];
     this.self(() => {
-      for (const d of ALL_DECKS) this.engines[d].pause();
+      this.silenceDecks();
     });
     this.plan = plan;
     this.cueIndex = 0;
@@ -375,6 +427,8 @@ export class SessionReplayDriver {
           return ok ? this.waitReady(d, id) : false;
         })
       );
+      if (this.scheduledReplay) await Promise.all(ALL_DECKS.filter((d) => plan.seed.decks[d].trackId !== null)
+        .map((d) => this.engines[d].prepareScratchReplay()));
       // Superseded by a newer seek: ITS continuation owns the restart —
       // finishing here too double-started the tick loop.
       if (gen !== this.seekGen) return;
@@ -390,14 +444,24 @@ export class SessionReplayDriver {
         this.pausedAtOffset = 0;
         this.pausedDecks = ALL_DECKS.filter((d) => plan.seed.decks[d].playing);
         this.self(() => {
-          for (const d of this.pausedDecks) this.engines[d].pause();
+          if (!this.scheduledReplay) this.parkDecks();
         });
         this.status('paused');
         return;
       }
-      this.anchorAudioTime = this.mixer.now();
+      this.anchorAudioTime = this.mixer.now() + (this.scheduledReplay ? SCRATCH_PREROLL_S : 0);
+      if (this.scheduledReplay) this.self(() => {
+        for (const d of ALL_DECKS) this.queueScratchDeck(d, 0, this.parkedFrames[d]);
+      });
       this.status('playing');
       this.raf = requestAnimationFrame(this.tick);
+    } catch (err) {
+      if (this.active && gen === this.seekGen) {
+        this.self(() => this.silenceDecks());
+        this.teardown({ release: true });
+        this.fireStopped('load-failed');
+        console.error('[session-replay] seek source unavailable', err);
+      }
     } finally {
       if (gen === this.seekGen) this.seeking = false;
     }
@@ -410,11 +474,19 @@ export class SessionReplayDriver {
   }
 
   private tick = (): void => {
-    if (!this.active) return;
+    if (!this.active || this.pausedAtOffset !== null || this.seeking) return;
     const elapsed = this.elapsed();
+    if (elapsed < 0) {
+      this.raf = requestAnimationFrame(this.tick);
+      return;
+    }
     const cues = this.plan.cues;
     try {
+      this.self(() => {
+        for (const d of ALL_DECKS) this.engines[d].syncScheduledScratch(true);
+      });
       while (this.cueIndex < cues.length && cues[this.cueIndex].offsetS <= elapsed) {
+        // Scratch audio is already queued. rAF only advances UI/bookkeeping.
         this.self(() => this.applyCue(cues[this.cueIndex]));
         this.cueIndex += 1;
       }
@@ -425,7 +497,7 @@ export class SessionReplayDriver {
       // LOUDLY instead: decks pause, surface releases, capture resumes.
       console.error('[session-replay] cue application failed — stopping replay', err);
       this.self(() => {
-        for (const d of ALL_DECKS) this.engines[d].pause();
+        this.silenceDecks();
       });
       this.teardown({ release: true });
       this.fireStopped('stopped', `internal error: ${err}`);
@@ -434,7 +506,7 @@ export class SessionReplayDriver {
     if (this.cueIndex >= cues.length && elapsed >= this.plan.endT - this.plan.startT) {
       // The log ran out: the night ended here.
       this.self(() => {
-        for (const d of ALL_DECKS) this.engines[d].pause();
+        this.silenceDecks();
       });
       this.teardown({ release: true });
       this.fireStopped('ended');
@@ -454,33 +526,49 @@ export class SessionReplayDriver {
     this.servo = {};
     this.servoActivity = {};
     this.unsettled = {};
+    this.parkedFrames = {};
     for (const d of ALL_DECKS) {
       if (this.plan.seed.decks[d].playing) this.unsettled[d] = true;
     }
     for (const d of ALL_DECKS) {
       const s = seed.decks[d];
       const engine = this.engines[d];
+      if (engine.getSnapshot().scratching) engine.endScratch(engine.getPlayhead());
+      engine.setSlipMode(s.slipMode);
+      engine.setVinylMode(s.vinylMode);
       this.recDecks[d] = {
         fader: s.fader,
         trim: s.trim,
         eq: { ...s.eq },
         filter: s.filter,
         assignment: s.assignment,
+        stems: { ...s.stems },
       };
       if (s.trackId !== null) {
         engine.setPitch(s.pitch);
         engine.seek(s.playhead);
-        if (s.playing) {
+        engine.setLoopRegion(s.loop);
+        if (s.playing && !this.scheduledReplay) {
           engine.play();
           this.anchors[d] = { offset: 0, playhead: s.playhead, rate: 1 + s.pitch / 100 };
         } else {
           engine.pause();
         }
+        this.parkedFrames[d] = { time: 0, position: s.playhead, playing: s.playing,
+          loop: s.loop, rate: 1 + s.pitch / 100,
+          motion: s.scratch ? { ...s.scratch, position: s.playhead, time: 0,
+            trackDuration: engine.getSnapshot().duration, loop: effectiveScratchLoop(s.loop, engine.getSnapshot().duration) } : null };
+      } else {
+        engine.pause();
       }
     }
     this.recCrossfader = seed.crossfader;
     this.recCrossfaderEnabled = seed.crossfaderEnabled;
     this.applyLanes(ALL_DECKS);
+    // No FX evidence in the log (pre-#351 capture) = no FX: the live
+    // section must not color a performance that never had it.
+    const live = this.liveBeatFx ?? this.mixer.getBeatFxSection();
+    this.mixer.setBeatFxSection(seed.beatFx ?? { ...live, on: false });
   }
 
   /** Compose the recorded state into overlay lanes: the recorded
@@ -499,6 +587,9 @@ export class SessionReplayDriver {
         trim: r.trim,
         eq: { ...r.eq },
         filter: r.filter,
+        // Stems ride the lane (stems #212): replay reproduces recorded
+        // kills; disengage hands the live user's stems back.
+        stems: { ...r.stems },
       };
       this.lastLanes[d] = lane;
       this.mixer.setAutomation(d, lane);
@@ -514,7 +605,7 @@ export class SessionReplayDriver {
       if (!a) continue;
       const engine = this.engines[d];
       const snap = engine.getSnapshot();
-      if (!snap.playing || snap.loadState !== 'ready') continue;
+      if (!snap.playing || snap.scratching || snap.loop || snap.loadState !== 'ready') continue;
       // Where the deck SHOULD be, projected from its anchor at the deck's
       // own rate. A seek only fires on a GROSS desync — normal engine
       // playback jitter (and the recorded-tick↔audio-clock skew) never
@@ -530,7 +621,17 @@ export class SessionReplayDriver {
   }
 
   private applyCue(cue: ReplayCue): void {
+    if ('channel' in cue && cue.channel && cue.kind !== 'control' && cue.kind !== 'load'
+        && !cue.kind.startsWith('scratch')) {
+      // A stalled UI must not overwrite a later, already-rendered trajectory
+      // with a historical play/seek/pitch command from before its bracket.
+      const applied = this.engines[cue.channel].syncScheduledScratch();
+      if (applied !== null && applied > this.anchorAudioTime + cue.offsetS) return;
+    }
     switch (cue.kind) {
+      case 'beatFx':
+        this.mixer.setBeatFxSection(cue.section);
+        break;
       case 'control': {
         const ch = cue.channel;
         const v = cue.value;
@@ -539,7 +640,11 @@ export class SessionReplayDriver {
         // performance control, so a replay without it is audibly wrong).
         // PFL/master/cue stay the LIVE user's; crossfader moves recompose
         // every lane (its gain is folded in).
-        if (cue.control === 'trim' && ch) {
+        if (cue.control === 'slipMode' && ch) {
+          this.engines[ch].setSlipMode(v !== 0);
+        } else if (cue.control === 'vinylMode' && ch) {
+          this.engines[ch].setVinylMode(v !== 0);
+        } else if (cue.control === 'trim' && ch) {
           this.recDecks[ch].trim = v;
           this.applyLanes([ch]);
         } else if (cue.control === 'fader' && ch) {
@@ -557,6 +662,18 @@ export class SessionReplayDriver {
         } else if (cue.control === 'filter' && ch) {
           this.recDecks[ch].filter = v;
           this.applyLanes([ch]);
+        } else if (cue.control === 'stemVocals' && ch) {
+          this.recDecks[ch].stems = { ...this.recDecks[ch].stems, vocals: v !== 0 };
+          this.applyLanes([ch]);
+        } else if (cue.control === 'stemDrums' && ch) {
+          this.recDecks[ch].stems = { ...this.recDecks[ch].stems, drums: v !== 0 };
+          this.applyLanes([ch]);
+        } else if (cue.control === 'stemBass' && ch) {
+          this.recDecks[ch].stems = { ...this.recDecks[ch].stems, bass: v !== 0 };
+          this.applyLanes([ch]);
+        } else if (cue.control === 'stemOther' && ch) {
+          this.recDecks[ch].stems = { ...this.recDecks[ch].stems, other: v !== 0 };
+          this.applyLanes([ch]);
         } else if (cue.control === 'crossfaderAssignment' && ch) {
           this.recDecks[ch].assignment = v < 0 ? 'left' : v > 0 ? 'right' : 'thru';
           this.applyLanes([ch]);
@@ -569,10 +686,55 @@ export class SessionReplayDriver {
         }
         break;
       }
+      case 'scratchBegin': {
+        const d = cue.channel;
+        delete this.anchors[d];
+        delete this.rateBuf[d];
+        delete this.servo[d];
+        delete this.servoActivity[d];
+        delete this.unsettled[d];
+        this.syncDrift[d] = [];
+        break;
+      }
+      case 'scratchMove':
+        break;
+      case 'scratchEnd': {
+        const d = cue.channel;
+        const engine = this.engines[d];
+        // Explicit position bypasses the current slip preference and its
+        // replay-clock shadow; capture already resolved the audible landing.
+        engine.syncScheduledScratch();
+        if (engine.getSnapshot().playing) {
+          this.anchors[d] = { offset: cue.offsetS, playhead: cue.playhead, rate: 1 + engine.getSnapshot().pitchPercent / 100 };
+        }
+        break;
+      }
+      case 'loop': {
+        const d = cue.channel;
+        const engine = this.engines[d];
+        // Capture resolved the landing (including Slip); never re-latch it
+        // from the replay deck's preference or its folded audible clock.
+        // With vinyl in the plan, loop frames share the audio-clock queue
+        // so equal-timestamp loop/scratch events retain capture order.
+        if (!this.scheduledReplay) engine.setLoopRegion(cue.region, cue.playhead);
+        delete this.anchors[d];
+        delete this.rateBuf[d];
+        delete this.servo[d];
+        delete this.servoActivity[d];
+        delete this.unsettled[d];
+        this.syncDrift[d] = [];
+        if (engine.getSnapshot().playing && !engine.getSnapshot().scratching) {
+          this.anchors[d] = { offset: cue.offsetS, playhead: cue.playhead,
+            rate: 1 + engine.getSnapshot().pitchPercent / 100 };
+        }
+        break;
+      }
       case 'play': {
         const engine = this.engines[cue.channel];
-        engine.seek(cue.playhead);
-        engine.play();
+        if (!this.scheduledReplay) {
+          engine.setLoopRegion(engine.getSnapshot().loop, cue.playhead);
+          engine.play();
+        }
         this.syncDrift[cue.channel] = [];
         delete this.rateBuf[cue.channel];
         this.unsettled[cue.channel] = true;
@@ -586,8 +748,10 @@ export class SessionReplayDriver {
       }
       case 'pause': {
         const engine = this.engines[cue.channel];
-        engine.pause();
-        engine.seek(cue.playhead);
+        if (!this.scheduledReplay) {
+          engine.pause();
+          engine.setLoopRegion(engine.getSnapshot().loop, cue.playhead);
+        }
         delete this.anchors[cue.channel];
         this.syncDrift[cue.channel] = [];
         delete this.rateBuf[cue.channel];
@@ -656,7 +820,35 @@ export class SessionReplayDriver {
           // Fire and forget — the played night's own timing gave the
           // decode time before the deck sounds; a slow load self-heals at
           // the next sync cue.
-          void this.hooks.loadTrack(cue.channel, cue.trackId);
+           const trackId = cue.trackId;
+           const gen = this.seekGen;
+           void (async () => {
+             const ok = await this.hooks.loadTrack(cue.channel, trackId);
+             if (!ok || !await this.waitReady(cue.channel, trackId)) throw new Error('replay load failed');
+             if (!this.scheduledReplay) return;
+             await this.engines[cue.channel].prepareScratchReplay();
+             if (!this.active || gen !== this.seekGen || this.loadRequested[cue.channel] !== trackId) return;
+             if (this.pausedAtOffset !== null) return;
+             const entry = this.plan.scratchSchedules.find((s) => s.channel === cue.channel && s.loadOffset === cue.offsetS);
+             const offset = this.elapsed();
+              const past = entry?.frames.filter(f => f.time <= offset) ?? [];
+              if (past.some(f => f.motion)) throw new Error('load missed scratch schedule');
+              const last = past.at(-1);
+              let initial: ScratchFrame | undefined;
+              if (last) {
+                let position = last.position + (last.playing ? (offset - last.time) * last.rate : 0);
+                if (last.loop && last.playing) position = foldLoopPlayhead(position, last.loop.start,
+                  Math.min(last.loop.end, this.engines[cue.channel].getSnapshot().duration), last.position);
+                initial = { ...last, time: offset, position };
+              }
+              this.self(() => this.queueScratchDeck(cue.channel, offset, initial));
+           })().catch((err) => {
+             if (!this.active || gen !== this.seekGen || this.loadRequested[cue.channel] !== trackId) return;
+             this.self(() => this.silenceDecks());
+             this.teardown({ release: true });
+             this.fireStopped('load-failed');
+             console.error('[session-replay] scratch schedule unavailable', err);
+           });
         }
         break;
       case 'sync': {
@@ -675,6 +867,9 @@ export class SessionReplayDriver {
         //    seeks (a stalled decode).
         const ticked: { d: ChannelId; ph: number }[] = [];
         for (const d of ALL_DECKS) {
+          const applied = this.engines[d].syncScheduledScratch();
+          if (applied !== null && applied > this.anchorAudioTime + cue.offsetS) continue;
+          if (this.engines[d].getSnapshot().scratching || this.engines[d].getSnapshot().loop) continue;
           const ph = cue.playheads[d as CaptureDeck];
           if (ph === undefined) continue;
           const a = this.anchors[d];
@@ -820,7 +1015,8 @@ export class SessionReplayDriver {
   private self<T>(fn: () => T): T {
     this.selfOps += 1;
     try {
-      return fn();
+      return this.engines.A.withScratchSchedule(() => this.engines.B.withScratchSchedule(() =>
+        this.engines.C.withScratchSchedule(() => this.engines.D.withScratchSchedule(fn))));
     } finally {
       this.selfOps -= 1;
     }
@@ -848,11 +1044,19 @@ export class SessionReplayDriver {
         }
         return;
       }
+      if (snap.loop?.start !== before.loop?.start || snap.loop?.end !== before.loop?.end
+        || snap.pendingLoopBeats !== before.pendingLoopBeats) {
+        this.takeover(`${deck} loop changed`);
+        return;
+      }
       if (
         snap.playing !== before.playing ||
         snap.pitchPercent !== before.pitchPercent ||
         snap.bendPercent !== before.bendPercent ||
         snap.previewing !== before.previewing ||
+        snap.slipMode !== before.slipMode ||
+        snap.vinylMode !== before.vinylMode ||
+        snap.scratching !== before.scratching ||
         snap.keyLock !== before.keyLock
       ) {
         // Natural end-of-track is the deck's own doing, not a gesture.
@@ -864,7 +1068,7 @@ export class SessionReplayDriver {
           snap.keyLock === before.keyLock &&
           engine.getPlayhead() >= snap.duration - NATURAL_END_TOLERANCE_S;
         if (naturalEnd) return;
-        const field = (['playing', 'pitchPercent', 'bendPercent', 'previewing', 'keyLock'] as const).find(
+        const field = (['playing', 'pitchPercent', 'bendPercent', 'previewing', 'keyLock', 'slipMode', 'vinylMode', 'scratching'] as const).find(
           (k) => snap[k] !== before[k]
         );
         this.takeover(`${deck} ${field ?? 'transport'} changed`);
@@ -897,6 +1101,7 @@ export class SessionReplayDriver {
       crossfader: this.mixer.getCrossfader(),
       crossfaderEnabled: this.mixer.getCrossfaderEnabled(),
       master: this.mixer.getMaster(),
+      beatFx: this.mixer.getBeatFxSection(),
     };
     return this.mixer.subscribe((changed) => {
       // Replay never writes base state during playback (overlay only) —
@@ -945,6 +1150,14 @@ export class SessionReplayDriver {
         }
         last.master = master;
       }
+      if (all || changed === 'beatFx') {
+        const fx = this.mixer.getBeatFxSection();
+        if (!sameBeatFx(fx, last.beatFx)) {
+          touched.add('beatFx');
+          cause ??= 'beat fx';
+        }
+        last.beatFx = fx;
+      }
       if (this.selfOps > 0 || !this.active) return;
       if (cause) this.takeover(cause, touched);
     });
@@ -966,7 +1179,7 @@ export class SessionReplayDriver {
     this.self(() => this.syncBaseToLanes(touched));
     this.suppressSilence = true;
     try {
-      this.teardown({ release: true });
+      this.teardown({ release: true, keepBeatFx: true });
     } finally {
       this.suppressSilence = false;
     }
@@ -993,11 +1206,46 @@ export class SessionReplayDriver {
     cancelAnimationFrame(this.raf);
     if (this.suppressSilence) return;
     this.self(() => {
-      for (const d of ALL_DECKS) this.engines[d].pause();
+      this.silenceDecks();
     });
   }
 
-  private teardown(opts: { release: boolean }): void {
+  private silenceDecks(): void {
+    for (const d of ALL_DECKS) {
+      const engine = this.engines[d];
+      const owner = this.scratchOwners[d];
+      if (owner) engine.cancelScheduledScratch(owner);
+      delete this.scratchOwners[d];
+      if (engine.getSnapshot().scratching) engine.endScratch(engine.getPlayhead());
+      engine.pause();
+    }
+  }
+
+  private parkDecks(): void {
+    for (const d of ALL_DECKS) {
+      const engine = this.engines[d];
+      const snap = engine.getSnapshot();
+      const motion = engine.getScratchState();
+      if (this.elapsed() >= 0) this.parkedFrames[d] = {
+        time: this.pausedAtOffset ?? 0, playing: snap.playing, position: engine.getPlayhead(),
+        rate: 1 + snap.pitchPercent / 100, loop: snap.loop ? { start: snap.loop.start, end: snap.loop.end } : null,
+        motion: motion ? { ...motion, position: engine.getPlayhead(), time: this.pausedAtOffset ?? 0,
+          trackDuration: snap.duration, loop: effectiveScratchLoop(snap.loop, snap.duration) } : null,
+      };
+    }
+    this.silenceDecks();
+  }
+
+  private teardown(opts: { release: boolean; keepBeatFx?: boolean }): void {
+    // Cancel only this driver's ownership. A human begin/move has already
+    // replaced the token, and must survive the release back to capture.
+    this.self(() => {
+      for (const d of ALL_DECKS) {
+        const owner = this.scratchOwners[d];
+        if (owner) this.engines[d].cancelScheduledScratch(owner);
+      }
+    });
+    this.scratchOwners = {};
     for (const u of this.unsubs) u();
     this.unsubs = [];
     this.active = false;
@@ -1006,8 +1254,28 @@ export class SessionReplayDriver {
       this.mixer.disengageAutomation(this.automationToken);
       this.automationToken = null;
     }
+    // Hand the live Beat FX section back while the surface is still
+    // ours, so capture never logs the restore as a performance.
+    const live = this.liveBeatFx;
+    this.liveBeatFx = null;
+    if (live && !opts.keepBeatFx) this.self(() => this.mixer.setBeatFxSection(live));
     if (opts.release && isAudible('replay')) releaseAudible('replay');
     unregisterSurface('replay');
+  }
+
+  private queueScratchDeck(d: ChannelId, offset: number, initial?: ScratchFrame): void {
+    const engine = this.engines[d];
+    const entries = this.plan.scratchSchedules.filter((s) => s.channel === d);
+    const entry = [...entries].reverse().find((s) => s.loadOffset <= offset);
+    if (!entry || entry.trackId !== engine.getSnapshot().trackId || engine.getSnapshot().loadState !== 'ready') return;
+    const frames = entry.frames.filter((f) => f.time > offset);
+    if (initial) frames.unshift({ ...initial, time: offset,
+      motion: initial.motion ? { ...initial.motion, time: offset } : null });
+    if (frames.length === 0) return;
+    if (entry.endFrame) frames.push(entry.endFrame);
+    const mapped = frames.map((f) => ({ ...f, time: this.anchorAudioTime + f.time,
+      motion: f.motion ? { ...f.motion, time: this.anchorAudioTime + f.motion.time } : null }));
+    this.scratchOwners[d] = engine.scheduleScratch(mapped);
   }
 
   private fireStopped(reason: ReplayStopReason, cause?: string): void {

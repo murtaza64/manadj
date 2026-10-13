@@ -18,7 +18,9 @@ import {
   keyRelation,
   matchScore,
   matchedSignals,
+  orderByRank,
   passesAffinityFloor,
+  pinKnownStrata,
   rankAgainst,
   tagContribution,
   WEIGHTS,
@@ -275,5 +277,72 @@ describe('rankAgainst + compareRanks (the one total edge order)', () => {
     expect([weak, favorited, strong, saved].sort(compareRanks).map((r) => r.score)).toEqual([
       0, 100, 80, 20,
     ]);
+  });
+});
+
+describe('Follow temperature ordering', () => {
+  const references = [{
+    track: track({ id: 100, key: 19, bpm: 174, energy: 1 }),
+    knownStrength: (id: number) => id >= 90 && id <= 92 ? id - 90 : null,
+  }];
+  const candidates = Array.from({ length: 30 }, (_, i) =>
+    track({ id: i + 1, key: i % 2 ? 19 : 17, bpm: 174 })
+  );
+  const ids = (tracks: Track[]) => tracks.map((t) => t.id);
+
+  it('zero preserves exact score order and incoming ties, independent of seed', () => {
+    const expected = [
+      ...candidates.filter((t) => t.key === 19),
+      ...candidates.filter((t) => t.key === 17),
+    ];
+    expect(orderByRank(candidates, references)).toEqual(expected);
+    for (const seed of [0, 1, 12345]) {
+      expect(orderByRank(candidates, references, 5, { temperature: 0, seed })).toEqual(expected);
+    }
+  });
+
+  it('keeps draws stable across repeats, input order, filtering and reference order', () => {
+    const refs = [...references, { ...references[0], track: track({ id: 200, key: 19 }) }];
+    const options = { temperature: 0.5, seed: 123 };
+    const ordered = orderByRank(candidates, refs, 5, options);
+    expect(orderByRank(candidates, refs, 5, options)).toEqual(ordered);
+    expect(orderByRank([...candidates].reverse(), [...refs].reverse(), 5, options)).toEqual(ordered);
+    expect(orderByRank(candidates.filter((t) => t.id % 3), refs, 5, options))
+      .toEqual(ordered.filter((t) => t.id % 3));
+    expect(orderByRank(candidates, [...refs, refs[0]], 5, options)).toEqual(ordered);
+    expect(new Set(ids(ordered)).size).toBe(candidates.length);
+  });
+
+  it('rerolls and new followed tracks produce different draws', () => {
+    const ordered = orderByRank(candidates, references, 5, { temperature: 1, seed: 0 });
+    expect(orderByRank(candidates, references, 5, { temperature: 1, seed: 1 })).not.toEqual(ordered);
+    const otherRef = [{ ...references[0], track: { ...references[0].track, id: 200 } }];
+    expect(orderByRank(candidates, otherRef, 5, { temperature: 1, seed: 0 })).not.toEqual(ordered);
+  });
+
+  it('leaves Known ordering, candidate membership and factual scores unchanged', () => {
+    const known = [track({ id: 92 }), track({ id: 90 }), track({ id: 91 })];
+    const input = [...candidates, ...known];
+    const originalRanks = input.map((t) => rankAgainst(t, references));
+    const ordered = orderByRank(input, references, 5, { temperature: 1, seed: 42 });
+    expect(ids(ordered.slice(0, 3))).toEqual([90, 91, 92]);
+    expect(ids(ordered).sort((a, b) => a - b)).toEqual(ids(input).sort((a, b) => a - b));
+    expect(input.map((t) => rankAgainst(t, references))).toEqual(originalRanks);
+    expect(input).toEqual([...candidates, ...known]);
+    expect(pinKnownStrata(input, references).slice(3)).toEqual(candidates);
+  });
+
+  it('higher temperature explores more while still favoring stronger scores', () => {
+    const strong = track({ id: 1, key: 19, bpm: 174, energy: 1 }); // 50
+    const weak = track({ id: 2, key: 17, bpm: 174 }); // 25
+    let coldWins = 0;
+    let hotWins = 0;
+    for (let seed = 0; seed < 1000; seed++) {
+      if (orderByRank([strong, weak], references, 5, { temperature: 0.1, seed })[0].id === 1) coldWins++;
+      if (orderByRank([strong, weak], references, 5, { temperature: 1, seed })[0].id === 1) hotWins++;
+    }
+    expect(coldWins).toBeGreaterThan(980);
+    expect(hotWins).toBeGreaterThan(600);
+    expect(hotWins).toBeLessThan(800);
   });
 });

@@ -7,6 +7,7 @@
  * choice survives restarts.
  */
 import { useSyncExternalStore } from 'react';
+import { writeSetting } from '../settings/persistedSettings';
 
 const STORAGE_KEY = 'manadj-playlist-filter-enabled';
 
@@ -23,11 +24,8 @@ function load(): ReadonlySet<number> {
 }
 
 function save(ids: ReadonlySet<number>): void {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify([...ids]));
-  } catch {
-    // persistence is best-effort; the session still filters
-  }
+  // Write-through (settings #176): DB + localStorage cache, best-effort.
+  writeSetting(STORAGE_KEY, JSON.stringify([...ids]));
 }
 
 let enabledIds: ReadonlySet<number> = load();

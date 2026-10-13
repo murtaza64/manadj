@@ -118,6 +118,30 @@ describe('WaveformRendererV2 render-loop gating', () => {
     expect(h.renders()).toBe(before + 2);
   });
 
+  it('sparse paused seeks paint per gesture when each wakes the loop (#155 jog contract)', () => {
+    // Paused MIDI jog: seeks arrive sparser than 60fps (here every ~48ms),
+    // so between ticks the loop parks on its 250ms idle timer. The
+    // transport-gesture wake (subscribeWake → markDirty per seek) must pull
+    // every tick forward to the next frame — without it, painting collapses
+    // to poll cadence (the regression: chunky 250ms scrolls while jogging).
+    const h = makeHarness();
+    h.renderer.startRenderLoop(h.clock);
+    h.frame(); // consume the dirty-cascade bonus frame
+    h.frame(); // settle into idle
+    const before = h.renders();
+    for (let i = 0; i < 5; i++) {
+      // One jog tick: the engine seeks, the gesture listener marks dirty.
+      h.clock.playhead += 0.05;
+      h.renderer.markDirty();
+      h.frame(); // tick paints on the very next frame …
+      h.frame(); // … then the loop re-parks (no tick this frame)
+    }
+    // 5 gesture paints + 5 motion-cascade frames (the frame after a moved
+    // paint re-renders once before parking) — and zero 250ms waits: total
+    // elapsed is 10 frames ≈ 160ms < IDLE_TICK_MS.
+    expect(h.renders()).toBeGreaterThanOrEqual(before + 5);
+  });
+
   it('markDirty wakes an idle-parked loop on the next frame, not the next poll', () => {
     const h = makeHarness();
     h.renderer.startRenderLoop(h.clock);

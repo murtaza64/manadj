@@ -401,6 +401,61 @@ describe('hot-cue-up', () => {
   });
 });
 
+describe('Cue mode: Trigger (#289)', () => {
+  const trigger: TransportContext = { quantize: false, beatTimes: null, cueMode: 'trigger' };
+
+  it('jumps to the hot cue and starts the deck on a paused press', () => {
+    const s = state({ playhead: 50, loop: { start: 40, end: 42, lengthBeats: 4 } });
+    const [next, effects] = reduceTransport(s, { type: 'hot-cue-down', slot: 2, time: 32 }, trigger);
+    expect(next.playing).toBe(true);
+    expect(next.hotCuePreviewSlot).toBeNull();
+    expect(next.playhead).toBe(32);
+    expect(next.loop).toBeNull();
+    expect(effects).toEqual([{ type: 'start', at: 32 }]);
+  });
+
+  it('keeps playing after release', () => {
+    const [down] = reduceTransport(state({ playhead: 50 }), { type: 'hot-cue-down', slot: 2, time: 32 }, trigger);
+    const [next, effects] = reduceTransport(down, { type: 'hot-cue-up', slot: 2, time: 32 }, trigger);
+    expect(next).toBe(down);
+    expect(next.playing).toBe(true);
+    expect(effects).toEqual([]);
+  });
+
+  it('jumps (quantized) while playing, same as Gated', () => {
+    const ctx: TransportContext = { ...quantized(), cueMode: 'trigger' };
+    const [next] = reduceTransport(state({ playing: true, playhead: 1.4 }), { type: 'hot-cue-down', slot: 1, time: 0.75 }, ctx);
+    expect(next.playhead).toBeCloseTo(0.9, 10);
+  });
+
+  it('cross-deck quantizes the paused launch against a playing peer', () => {
+    const ctx: TransportContext = {
+      quantize: true,
+      beatTimes: null,
+      cueMode: 'trigger',
+      launchReference: { beatTimes: [0, 0.5, 1, 1.5, 2], playhead: 1.1 },
+    };
+    const [next, effects] = reduceTransport(state({ playhead: 50 }), { type: 'hot-cue-down', slot: 1, time: 10 }, ctx);
+    expect(next.playing).toBe(true);
+    expect(effects).toHaveLength(1);
+    expect(effects[0].type).toBe('start');
+    expect(effects[0]).not.toEqual({ type: 'start', at: 10 });
+  });
+
+  it('leaves the Main cue hold behavior unchanged', () => {
+    const s = state({ cuePoint: 10, playhead: 10 });
+    const [next] = reduceTransport(s, { type: 'cue-down' }, trigger);
+    expect(next.previewing).toBe(true);
+    expect(next.playing).toBe(false);
+  });
+
+  it('Gated (explicit) still previews', () => {
+    const [next] = reduceTransport(state({ playhead: 50 }), { type: 'hot-cue-down', slot: 2, time: 32 }, { quantize: false, beatTimes: null, cueMode: 'gated' });
+    expect(next.playing).toBe(false);
+    expect(next.hotCuePreviewSlot).toBe(2);
+  });
+});
+
 describe('loop-toggle', () => {
   it('engages a pending-size loop snapped to the nearest beat with Quantize on', () => {
     const s = state({ playing: true, playhead: 0.9 });

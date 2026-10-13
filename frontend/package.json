@@ -6,9 +6,10 @@
   "scripts": {
     "gen:keys": "uv run --project .. ../scripts/export/gen_key_table.py",
     "check:keys": "uv run --project .. ../scripts/export/gen_key_table.py --check",
-    "predev": "npm run gen:keys",
+    "gen:help": "uv run ../site/build.py --app-help",
+    "predev": "npm run gen:keys && npm run gen:help",
     "dev": "vite",
-    "prebuild": "npm run gen:keys",
+    "prebuild": "npm run gen:keys && npm run gen:help",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
@@ -17,6 +18,7 @@
   },
   "dependencies": {
     "@tanstack/react-query": "^5.90.11",
+    "html-to-image": "^1.11.13",
     "react": "^19.2.0",
     "react-dom": "^19.2.0"
   },
@@ -36,5 +38,9 @@
     "typescript-eslint": "^8.46.4",
     "vite": "^7.2.4",
     "vitest": "^4.1.9"
+  },
+  "allowScripts": {
+    "esbuild@0.25.12": true,
+    "esbuild@0.28.2": true
   }
 }

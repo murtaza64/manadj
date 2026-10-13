@@ -3,7 +3,7 @@
  *
  * Signal chain per channel:
  *   deck envelopes -> channel input -> trim -> 3-band isolator EQ ->
- *   sweep filter -> channel fader -> crossfader gain -> master gain ->
+ *   sweep filter -> channel fader -> Beat FX -> crossfader gain -> master gain ->
  *   -2 dBFS sample ceiling (always on) -> destination
  *
  * Cue bus (headphone-cue, ADR 0017), all in the same graph/clock:
@@ -46,9 +46,7 @@
 
 import {
   BUTTERWORTH_Q_DB,
-  SWEEP_BYPASS_HZ,
   eqValueToGain,
-  sweepPositionToFilter,
 } from './graph';
 import type { EqBand } from './graph';
 import { CueBridge, attachSinkKeepalive } from './cueBridge';
@@ -76,6 +74,24 @@ import {
   trimToGain,
 } from './mixerMath';
 import { samplePeakCeilingCurve } from './gainStaging';
+import { loadFilterSettings, sanitizeFilterSettings, saveFilterSettings } from './filterSettings';
+import type { FilterSettings } from './filterSettings';
+import { createSweepFilter } from './sweepFilter';
+import {
+  BEAT_SECONDS_DEFAULT,
+  ECHO_BEATS_DEFAULT,
+  createBeatFxInsert,
+  echoDelaySeconds,
+  stepEchoBeats,
+  flangerPeriodSeconds,
+} from './beatFx';
+import type { BeatFxEffectId, BeatFxSectionState, BeatFxTarget } from './beatFx';
+import {
+  loadBeatFxSettings,
+  sanitizeBeatFxSettings,
+  saveBeatFxSettings,
+  type BeatFxSettings,
+} from './beatFxSettings';
 
 export const CHANNEL_IDS = ['A', 'B', 'C', 'D'] as const;
 export type ChannelId = (typeof CHANNEL_IDS)[number];
@@ -94,6 +110,9 @@ export type MixerChange =
   | 'crossfaderEnabled'
   | 'master'
   | 'cue'
+  | 'beatFx'
+  | 'beatFxSettings'
+  | 'filterSettings'
   | 'routing';
 
 /** What a deck needs from the audio layer: a live context and its channel input. */
@@ -131,6 +150,11 @@ export interface MasterWaveform {
   sampleRate: number;
 }
 
+/** Stem kill-switch state (stems #210): v1 is enable/disable only (#150);
+ * the deck worklet applies these as declick-ramped 0/1 gains. */
+export type StemName = 'vocals' | 'drums' | 'bass' | 'other';
+export const STEM_NAMES: readonly StemName[] = ['vocals', 'drums', 'bass', 'other'];
+
 /** Per-channel control state, [0,1] except filter [-1,1] and pfl (bool). */
 export interface ChannelState {
   trim: number;
@@ -139,6 +163,11 @@ export interface ChannelState {
   fader: number;
   /** PFL (glossary): this channel feeds the Cue bus, pre-fader. */
   pfl: boolean;
+  /** Per-stem enables (stems #210). Mixer-owned state (MIDI, capture,
+   * automation all assume mixer ownership); the audio application lives in
+   * the deck worklet — DeckContext forwards these as gains. Inert (all on)
+   * for tracks without stems. */
+  stems: Record<StemName, boolean>;
 }
 
 /**
@@ -156,6 +185,9 @@ export interface AutomationChannelValues {
   filter: number;
   /** Absent = the base (live user) trim applies. */
   trim?: number;
+  /** Per-stem enables (stems #212, trim precedent): absent = the live
+   * user's stem kills stay in charge during the machine tenure. */
+  stems?: Record<StemName, boolean>;
 }
 
 const FLAT_CHANNEL: ChannelState = {
@@ -164,14 +196,12 @@ const FLAT_CHANNEL: ChannelState = {
   filter: 0,
   fader: 1,
   pfl: false, // session default: off (PRD)
+  stems: { vocals: true, drums: true, bass: true, other: true },
 };
 
 /** Crossover frequencies — tweak by ear. */
 const CROSSOVER_LOW_MID_HZ = 250;
 const CROSSOVER_MID_HIGH_HZ = 2500;
-
-/** Time constant for filter parameter smoothing (zipper-noise avoidance). */
-const PARAM_SMOOTHING_S = 0.015;
 
 /** Linear ramp length for gain moves (reaches the target exactly). */
 const GAIN_RAMP_S = 0.05;
@@ -233,15 +263,17 @@ function rampGain(ctx: AudioContext, param: AudioParam, target: number): void {
   param.linearRampToValueAtTime(target, now + GAIN_RAMP_S);
 }
 
-/** One channel strip: input -> trim -> isolator EQ -> sweep -> fader -> crossfader gain.
+/** One channel strip: input -> trim -> isolator EQ -> sweep -> fader -> Beat FX -> crossfader.
  * The PFL tap (headphone-cue 02) hangs off the sweep output — post-EQ/filter,
- * pre-fader/crossfader, so a cued channel is heard fully shaped with its
- * fader down. */
+ * pre-fader/Beat-FX/crossfader. Beat FX is POST-FADER so closing the fader
+ * stops new excitation while the processor's existing tail returns downstream. */
 class ChannelStrip {
   readonly input: GainNode;
   readonly trimGain: GainNode;
   readonly bandGains: Record<EqBand, GainNode>;
-  readonly sweep: BiquadFilterNode;
+  readonly sweep: ReturnType<typeof createSweepFilter>;
+  /** Beat FX processor (gh#272): post-fader, before crossfader/program. */
+  readonly beatFx: ReturnType<typeof createBeatFxInsert>;
   readonly faderGain: GainNode;
   readonly crossfadeGain: GainNode;
   readonly pflGain: GainNode;
@@ -293,10 +325,9 @@ class ChannelStrip {
       this.bandGains[band].gain.value = eqValueToGain(state.eq[band]);
     }
 
-    this.sweep = ctx.createBiquadFilter();
-    this.sweep.type = 'lowpass';
-    this.sweep.frequency.value = SWEEP_BYPASS_HZ;
-    this.sweep.Q.value = BUTTERWORTH_Q_DB;
+    this.sweep = createSweepFilter(ctx);
+    this.beatFx = createBeatFxInsert(ctx);
+    this.beatFx.update({ echo: false, reverb: false, flanger: false, depth: 0 }, true);
 
     this.faderGain = ctx.createGain();
     this.faderGain.gain.value = channelFaderToGain(state.fader);
@@ -310,11 +341,12 @@ class ChannelStrip {
     this.meterAnalyser.fftSize = 1024;
     this.meterBuffer = new Float32Array(new ArrayBuffer(this.meterAnalyser.fftSize * 4));
 
-    sum.connect(this.sweep);
-    this.sweep.connect(this.faderGain);
-    this.sweep.connect(this.pflGain);
-    this.sweep.connect(this.meterAnalyser);
-    this.faderGain.connect(this.crossfadeGain);
+    sum.connect(this.sweep.input);
+    this.sweep.output.connect(this.faderGain);
+    this.sweep.output.connect(this.pflGain);
+    this.sweep.output.connect(this.meterAnalyser);
+    this.faderGain.connect(this.beatFx.input);
+    this.beatFx.output.connect(this.crossfadeGain);
   }
 
   /** Mean absolute sample over the analyser window. This matches Mixxx's
@@ -336,6 +368,8 @@ class ChannelStrip {
 export class Mixer {
   private ctx: AudioContext | null = null;
   private strips: Record<ChannelId, ChannelStrip> | null = null;
+  /** MST target: summed post-crossfader program processor, pre-Master. */
+  private masterBeatFx: ReturnType<typeof createBeatFxInsert> | null = null;
   private masterGain: GainNode | null = null;
   /** Stable post-ceiling fan-out. Routing rewires this node. */
   private masterOutput: GainNode | null = null;
@@ -382,6 +416,8 @@ export class Mixer {
   /** Crossfader bypass: while false the fader position is kept but both
    * channels run at unity (as if centered) — an accidental-kill guard. */
   private crossfaderEnabled = loadCrossfaderEnabled();
+  private filterSettings = loadFilterSettings();
+  private beatFxSettings = loadBeatFxSettings();
   /**
    * Automation overlay (ADR 0022): while non-null, drawn automation owns
    * the lane-driven node params (AutomationChannelValues) with REPLACEMENT
@@ -411,6 +447,30 @@ export class Mixer {
   private cuePair: OutputPair | null = null;
   private cueLevel = CUE_LEVEL_DEFAULT; // 0..1, session-scoped like the rest
   private cueMix = CUE_MIX_DEFAULT; // 0 (cue only) .. 1 (master only)
+  /** The one Beat FX section mirrored by the GRV6 controls: SELECT swaps
+   * the live effect, CH SELECT picks one A–D/SP/MST target, ON/OFF gates it,
+   * LEVEL/DEPTH is a bipolar -1..1 balance coordinate (-1 = dry, 0 = balanced,
+   * +1 = wet; starts and resets fully dry), and the echo beat fraction is
+   * global. */
+  private beatFxSection: BeatFxSectionState = {
+    selected: 'echo',
+    target: 'A',
+    on: false,
+    depth: -1,
+    beats: ECHO_BEATS_DEFAULT,
+  };
+  /** MST has no Deck of its own; retain the last 1–4 target as its tempo
+   * source, matching a hardware section whose BPM survives CH SELECT. */
+  private beatFxTempoChannel: ChannelId = 'A';
+  /** Wall seconds per musical beat, per channel (gh#272): the echo's beat
+   * clock, pushed by each Deck's tempo bridge (DeckContext). Survives
+   * graph rebuilds like the rest of the control state. */
+  private channelBeatSeconds: Record<ChannelId, number> = {
+    A: BEAT_SECONDS_DEFAULT,
+    B: BEAT_SECONDS_DEFAULT,
+    C: BEAT_SECONDS_DEFAULT,
+    D: BEAT_SECONDS_DEFAULT,
+  };
 
   /** Get (lazily creating / reviving) the live context and graph. */
   private ensure(): { ctx: AudioContext; strips: Record<ChannelId, ChannelStrip> } {
@@ -424,6 +484,8 @@ export class Mixer {
         C: new ChannelStrip(ctx, this.channels.C),
         D: new ChannelStrip(ctx, this.channels.D),
       };
+      const masterBeatFx = createBeatFxInsert(ctx);
+      masterBeatFx.update({ echo: false, reverb: false, flanger: false, depth: 0 }, true);
       const masterGain = ctx.createGain();
       masterGain.gain.value = masterValueToGain(this.master);
 
@@ -438,8 +500,9 @@ export class Mixer {
       // blend taps it here so the master fader never changes the headphones.
       const program = ctx.createGain();
       for (const channel of CHANNEL_IDS) strips[channel].crossfadeGain.connect(program);
-      program.connect(recordingCeiling);
-      program.connect(masterGain);
+      program.connect(masterBeatFx.input);
+      masterBeatFx.output.connect(recordingCeiling);
+      masterBeatFx.output.connect(masterGain);
       masterGain.connect(masterCeiling);
 
       // Cue bus (headphone-cue 02/03, ADR 0017): PFL taps and the master
@@ -457,7 +520,7 @@ export class Mixer {
       const cueCeiling = makeSamplePeakCeiling(ctx);
       const cueBridge = new CueBridge(ctx);
       cueSum.connect(blendCueGain);
-      program.connect(blendMasterGain);
+      masterBeatFx.output.connect(blendMasterGain);
       blendCueGain.connect(cueGain);
       blendMasterGain.connect(cueGain);
       cueGain.connect(cueCeiling);
@@ -494,6 +557,7 @@ export class Mixer {
 
       this.ctx = ctx;
       this.strips = strips;
+      this.masterBeatFx = masterBeatFx;
       this.masterGain = masterGain;
       this.masterOutput = masterOutput;
       this.recordingCeiling = recordingCeiling;
@@ -516,7 +580,15 @@ export class Mixer {
       // automation-aware: a revival while the overlay is engaged restores
       // automation ownership (ADR 0022), not base state.
       this.applyCrossfader(false);
-      for (const channel of CHANNEL_IDS) this.applyFilter(channel);
+      for (const channel of CHANNEL_IDS) this.applyFilter(channel, true);
+      for (const channel of CHANNEL_IDS) {
+        strips[channel].beatFx.updateSettings(this.beatFxSettings, true);
+        this.applyBeatFx(channel, true);
+        this.applyBeatFxTiming(channel, true);
+      }
+      masterBeatFx.updateSettings(this.beatFxSettings, true);
+      this.applyMasterBeatFx(true);
+      this.applyMasterBeatFxTiming(true);
       if (this.automation) {
         for (const channel of CHANNEL_IDS) {
           const v = this.automation[channel];
@@ -603,6 +675,9 @@ export class Mixer {
     }
     this.automationOwner = null;
     this.automation = null;
+    // Stems land base state regardless of the audio graph (the applier
+    // bridge talks to deck engines, not strip nodes).
+    for (const channel of CHANNEL_IDS) this.applyStems(channel);
     const live = this.liveGraph();
     if (!live) return;
     const { ctx, strips } = live;
@@ -646,7 +721,15 @@ export class Mixer {
       return;
     }
     const prevTrim = this.automation[channel]?.trim;
+    const prevStems = this.automation[channel]?.stems;
     this.automation[channel] = values;
+    // Stems ride the lane only when present (stems #212, trim precedent):
+    // apply on change, hand back to base when a lane DROPS its stems. The
+    // applier bridge is graph-independent, so this sits before the
+    // liveGraph gate.
+    if (values.stems !== undefined || prevStems !== undefined) {
+      this.applyStems(channel);
+    }
     const live = this.liveGraph();
     if (!live) return;
     const { ctx, strips } = live;
@@ -783,6 +866,19 @@ export class Mixer {
 
   getMaster(): number {
     return this.master;
+  }
+
+  getFilterSettings(): Readonly<FilterSettings> {
+    return this.filterSettings;
+  }
+
+  setFilterSettings(patch: Partial<FilterSettings>): void {
+    const next = sanitizeFilterSettings({ ...this.filterSettings, ...patch });
+    if (Object.keys(next).every(key => next[key as keyof FilterSettings] === this.filterSettings[key as keyof FilterSettings])) return;
+    this.filterSettings = next;
+    saveFilterSettings(next);
+    if (this.liveGraph()) for (const channel of CHANNEL_IDS) this.applyFilter(channel);
+    this.notify('filterSettings');
   }
 
   setTrim(channel: ChannelId, value: number): void {
@@ -1012,8 +1108,265 @@ export class Mixer {
     rampGain(ctx, strips[channel].pflGain.gain, on ? 1 : 0);
   }
 
+  /** The stems audio applier (stems #210/#212): the mixer owns stem STATE,
+   * but the audio lives in the deck worklet, which the mixer can't reach —
+   * DeckContext registers the bridge to the engines here. Like the strip
+   * nodes, the applier receives the EFFECTIVE stems: an automation lane
+   * that carries stems owns them (ADR 0022); base reapplies on disengage. */
+  private stemApplier: ((channel: ChannelId, stems: Record<StemName, boolean>) => void) | null =
+    null;
+
+  registerStemApplier(
+    applier: (channel: ChannelId, stems: Record<StemName, boolean>) => void
+  ): () => void {
+    this.stemApplier = applier;
+    // Assert current effective state so a late-registering bridge converges.
+    for (const channel of CHANNEL_IDS) this.applyStems(channel);
+    return () => {
+      if (this.stemApplier === applier) this.stemApplier = null;
+    };
+  }
+
+  /** Push the effective stems (automation lane if it holds them, else base)
+   * to the audio bridge. */
+  private applyStems(channel: ChannelId): void {
+    const effective = this.automation?.[channel]?.stems ?? this.channels[channel].stems;
+    this.stemApplier?.(channel, effective);
+  }
+
+  /** Stem kill switch (stems #210): mixer-owned state; the deck worklet
+   * applies it (via the registered stem applier). */
+  setStemEnabled(channel: ChannelId, stem: StemName, on: boolean): void {
+    const ch = this.channels[channel];
+    if (ch.stems[stem] === on) return;
+    this.channels[channel] = { ...ch, stems: { ...ch.stems, [stem]: on } };
+    this.notify(channel);
+    // Per-CHANNEL-LANE guard like trim (sessions 15): only a lane that
+    // actually holds stems owns the worklet; base lands on disengage.
+    if (this.automation?.[channel]?.stems !== undefined) return;
+    this.applyStems(channel);
+  }
+
+  /** Hardware toggle (MidiMixerControls, like togglePfl). */
+  toggleStem(channel: ChannelId, stem: StemName): void {
+    this.setStemEnabled(channel, stem, !this.channels[channel].stems[stem]);
+  }
+
+  /** Solo a stem (shift-click / a future hardware chord): only it plays.
+   * Soloing the already-soloed stem un-solos (back to all-on). One state
+   * replacement + one notify, so capture logs the whole move atomically. */
+  soloStem(channel: ChannelId, stem: StemName): void {
+    const ch = this.channels[channel];
+    const soloed = STEM_NAMES.every((name) => ch.stems[name] === (name === stem));
+    const next = Object.fromEntries(
+      STEM_NAMES.map((name) => [name, soloed || name === stem])
+    ) as Record<StemName, boolean>;
+    this.channels[channel] = { ...ch, stems: next };
+    this.notify(channel);
+    if (this.automation?.[channel]?.stems !== undefined) return;
+    this.applyStems(channel);
+  }
+
+  /** All stems back on — a new Load's kill state is clean (#210). */
+  resetStems(channel: ChannelId): void {
+    const ch = this.channels[channel];
+    if (STEM_NAMES.every((stem) => ch.stems[stem])) return;
+    this.channels[channel] = {
+      ...ch,
+      stems: { vocals: true, drums: true, bass: true, other: true },
+    };
+    this.notify(channel);
+    if (this.automation?.[channel]?.stems !== undefined) return;
+    this.applyStems(channel);
+  }
+
   togglePfl(channel: ChannelId): void {
     this.setPfl(channel, !this.channels[channel].pfl);
+  }
+
+  // ── Beat FX (gh#272) ─────────────────────────────────────────────────
+  // Live user controls like trim/PFL: the automation overlay never owns
+  // these nodes, so setters apply unconditionally.
+
+  getBeatFxSection(): Readonly<BeatFxSectionState> {
+    return this.beatFxSection;
+  }
+
+  getBeatFxSettings(): Readonly<BeatFxSettings> {
+    return this.beatFxSettings;
+  }
+
+  setBeatFxSettings(patch: Partial<BeatFxSettings>): void {
+    const next = sanitizeBeatFxSettings({ ...this.beatFxSettings, ...patch });
+    if ((Object.keys(next) as (keyof BeatFxSettings)[]).every(
+      (key) => next[key] === this.beatFxSettings[key]
+    )) return;
+    const unitChanged = next.flangerLengthUnit !== this.beatFxSettings.flangerLengthUnit;
+    this.beatFxSettings = next;
+    saveBeatFxSettings(next);
+    if (this.liveGraph()) {
+      for (const channel of CHANNEL_IDS) this.strips![channel].beatFx.updateSettings(next);
+      this.masterBeatFx?.updateSettings(next);
+      if (unitChanged) {
+        for (const channel of CHANNEL_IDS) this.applyBeatFxTiming(channel);
+        this.applyMasterBeatFxTiming();
+      }
+    }
+    this.notify('beatFxSettings');
+  }
+
+  /** CH SELECT is one radio target. SP records the hardware selection but
+   * is silent because manadj has no sampler bus. */
+  selectBeatFxTarget(target: BeatFxTarget): void {
+    if (this.beatFxSection.target === target) return;
+    if (CHANNEL_IDS.includes(target as ChannelId)) {
+      this.beatFxTempoChannel = target as ChannelId;
+    }
+    this.beatFxSection = { ...this.beatFxSection, target };
+    this.notify('beatFx');
+    this.ensure();
+    for (const channel of CHANNEL_IDS) this.applyBeatFx(channel);
+    this.applyMasterBeatFx();
+    if (target === 'master') this.applyMasterBeatFxTiming();
+  }
+
+  setBeatFxOn(on: boolean): void {
+    if (on && this.beatFxSection.selected === null) return;
+    if (this.beatFxSection.on === on) return;
+    this.beatFxSection = { ...this.beatFxSection, on };
+    this.notify('beatFx');
+    this.ensure();
+    for (const channel of CHANNEL_IDS) this.applyBeatFx(channel);
+    this.applyMasterBeatFx();
+  }
+
+  toggleBeatFxOn(): void {
+    this.setBeatFxOn(!this.beatFxSection.on);
+  }
+
+  /** SELECT swaps the live effect on every assigned channel. The old
+   * branch's SEND closes but its return remains connected, so tails ring. */
+  selectBeatFx(effect: BeatFxEffectId | null): void {
+    if (this.beatFxSection.selected === effect && (effect !== null || !this.beatFxSection.on)) return;
+    this.beatFxSection = {
+      ...this.beatFxSection,
+      selected: effect,
+      // Unsupported SELECT detents must not leave the previous effect live.
+      ...(effect === null ? { on: false } : {}),
+    };
+    this.notify('beatFx');
+    this.ensure();
+    for (const channel of CHANNEL_IDS) this.applyBeatFx(channel);
+    this.applyMasterBeatFx();
+  }
+
+  /** Single GRV6 LEVEL/DEPTH control. -1 = original, 0 = midpoint,
+   * +1 = effect-only. */
+  setBeatFxDepth(depth: number): void {
+    this.beatFxSection = { ...this.beatFxSection, depth };
+    this.notify('beatFx');
+    this.ensure();
+    for (const channel of CHANNEL_IDS) this.applyBeatFx(channel);
+    this.applyMasterBeatFx();
+  }
+
+  /** Write the whole section at once (#351: Session replay applies logged
+   * snapshots verbatim). One notify; a null SELECT forces OFF. */
+  setBeatFxSection(state: Readonly<BeatFxSectionState>): void {
+    const next = { ...state, on: state.selected === null ? false : state.on };
+    const cur = this.beatFxSection;
+    if (cur.selected === next.selected && cur.target === next.target && cur.on === next.on
+      && cur.depth === next.depth && cur.beats === next.beats) return;
+    if (CHANNEL_IDS.includes(next.target as ChannelId)) {
+      this.beatFxTempoChannel = next.target as ChannelId;
+    }
+    this.beatFxSection = next;
+    this.notify('beatFx');
+    this.ensure();
+    for (const channel of CHANNEL_IDS) {
+      this.applyBeatFx(channel);
+      this.applyBeatFxTiming(channel);
+    }
+    this.applyMasterBeatFx();
+    this.applyMasterBeatFxTiming();
+  }
+
+  /** BEAT ◄ ► — walk the echo's beat-fraction ladder (beatFx.ts). */
+  stepBeatFxBeats(change: 'halve' | 'double'): void {
+    const beats = stepEchoBeats(this.beatFxSection.beats, change);
+    if (beats === this.beatFxSection.beats) return;
+    this.beatFxSection = { ...this.beatFxSection, beats };
+    this.notify('beatFx');
+    this.ensure();
+    for (const channel of CHANNEL_IDS) this.applyBeatFxTiming(channel);
+    this.applyMasterBeatFxTiming();
+  }
+
+  /**
+   * The channel's beat clock (wall seconds per beat) from its Deck's tempo
+   * bridge — grid-projected and rate-composed upstream. null = no tempo
+   * knowledge (keep the last known clock; a stopped deck's echo tail
+   * should not snap to the 120 BPM default). Applies to a LIVE graph only
+   * (a background tempo push must not force-create a context) and never
+   * notifies — it is not a control move.
+   */
+  setChannelBeatSeconds(channel: ChannelId, seconds: number | null): void {
+    if (seconds === null || !Number.isFinite(seconds) || seconds <= 0) return;
+    if (Math.abs(seconds - this.channelBeatSeconds[channel]) < 1e-3) return;
+    this.channelBeatSeconds[channel] = seconds;
+    if (this.liveGraph()) {
+      this.applyBeatFxTiming(channel);
+      if (channel === this.beatFxTempoChannel) this.applyMasterBeatFxTiming();
+    }
+  }
+
+  private applyBeatFxTiming(channel: ChannelId, immediate = false): void {
+    if (!this.strips) return;
+    const beatSeconds = this.channelBeatSeconds[channel];
+    this.strips[channel].beatFx.setDelaySeconds(
+      echoDelaySeconds(this.beatFxSection.beats, beatSeconds), immediate
+    );
+    this.strips[channel].beatFx.setFlangerPeriodSeconds(this.flangerPeriod(beatSeconds), immediate);
+  }
+
+  private applyBeatFx(channel: ChannelId, immediate = false): void {
+    if (!this.strips) return;
+    const engaged = this.beatFxSection.on && this.beatFxSection.target === channel;
+    this.strips[channel].beatFx.update(
+      {
+        echo: engaged && this.beatFxSection.selected === 'echo',
+        reverb: engaged && this.beatFxSection.selected === 'reverb',
+        flanger: engaged && this.beatFxSection.selected === 'flanger',
+        depth: this.beatFxSection.depth,
+      },
+      immediate
+    );
+  }
+
+  private applyMasterBeatFx(immediate = false): void {
+    if (!this.masterBeatFx) return;
+    const engaged = this.beatFxSection.on && this.beatFxSection.target === 'master';
+    this.masterBeatFx.update(
+      {
+        echo: engaged && this.beatFxSection.selected === 'echo',
+        reverb: engaged && this.beatFxSection.selected === 'reverb',
+        flanger: engaged && this.beatFxSection.selected === 'flanger',
+        depth: this.beatFxSection.depth,
+      },
+      immediate
+    );
+  }
+
+  private applyMasterBeatFxTiming(immediate = false): void {
+    const beatSeconds = this.channelBeatSeconds[this.beatFxTempoChannel];
+    this.masterBeatFx?.setDelaySeconds(echoDelaySeconds(this.beatFxSection.beats, beatSeconds), immediate);
+    this.masterBeatFx?.setFlangerPeriodSeconds(this.flangerPeriod(beatSeconds), immediate);
+  }
+
+  private flangerPeriod(beatSeconds: number): number {
+    return flangerPeriodSeconds(
+      this.beatFxSection.beats, beatSeconds, this.beatFxSettings.flangerLengthUnit
+    );
   }
 
   getCueLevel(): number {
@@ -1087,9 +1440,17 @@ export class Mixer {
   /** Tear down. Safe to keep using — the graph revives on demand. */
   dispose(): void {
     this.cueBridge?.stop();
+    if (this.strips) {
+      for (const channel of CHANNEL_IDS) {
+        this.strips[channel].sweep.dispose();
+        this.strips[channel].beatFx.dispose();
+      }
+    }
+    this.masterBeatFx?.dispose();
     if (this.ctx && this.ctx.state !== 'closed') void this.ctx.close();
     this.ctx = null;
     this.strips = null;
+    this.masterBeatFx = null;
     this.masterGain = null;
     this.masterOutput = null;
     this.recordingCeiling = null;
@@ -1124,27 +1485,13 @@ export class Mixer {
 
   /** Apply the EFFECTIVE filter position: a written automation value while
    * the overlay is engaged, base state otherwise. */
-  private applyFilter(channel: ChannelId): void {
+  private applyFilter(channel: ChannelId, immediate = false): void {
     const auto = this.automation?.[channel];
-    this.applyFilterPosition(channel, auto ? auto.filter : this.channels[channel].filter);
+    this.applyFilterPosition(channel, auto ? auto.filter : this.channels[channel].filter, immediate);
   }
 
-  private applyFilterPosition(channel: ChannelId, position: number): void {
+  private applyFilterPosition(channel: ChannelId, position: number, immediate = false): void {
     if (!this.ctx || !this.strips) return;
-    const sweep = this.strips[channel].sweep;
-    const { type, frequency, qDb } = sweepPositionToFilter(position);
-    const now = this.ctx.currentTime;
-    if (sweep.type !== type) {
-      // `type` is not an AudioParam and flips instantaneously. Make the new
-      // filter transparent at the flip, then ramp — avoids a pop mid-sweep.
-      sweep.type = type;
-      const transparentHz = type === 'lowpass' ? SWEEP_BYPASS_HZ : 20;
-      sweep.frequency.cancelScheduledValues(now);
-      sweep.frequency.setValueAtTime(transparentHz, now);
-      sweep.Q.cancelScheduledValues(now);
-      sweep.Q.setValueAtTime(BUTTERWORTH_Q_DB, now);
-    }
-    sweep.frequency.setTargetAtTime(frequency, now, PARAM_SMOOTHING_S);
-    sweep.Q.setTargetAtTime(qDb, now, PARAM_SMOOTHING_S);
+    this.strips[channel].sweep.update(this.filterSettings, position, immediate);
   }
 }

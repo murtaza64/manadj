@@ -1,4 +1,5 @@
-import type { ChannelId } from '../../playback/mixer';
+import type { ChannelId, StemName } from '../../playback/mixer';
+import { STEM_NAMES } from '../../playback/mixer';
 import type { Binding, DeckFeedback, LedAddress, Mapping, MeterAddress } from '../mapping';
 
 interface DeckMidi {
@@ -22,8 +23,28 @@ const PAD_BLOCK = {
   beatLoop: 96,
 } as const;
 
+/** Beat FX section MIDI channel (E1: 1-based channel 5). */
+const BEAT_FX_CHANNEL = 4;
+/** E1 SELECT detents 32–45. Unsupported effects explicitly select none so
+ * hardware rotation never leaves the previously implemented effect live. */
+const BEAT_FX_SELECT_EFFECTS = [
+  null, 'echo', null, null, null, 'reverb', 'flanger',
+  null, null, null, null, null, null, null,
+] as const;
+
 const LOOP_PRESETS = [0.25, 0.5, 1, 2, 4, 8, 16, 32] as const;
 const JUMP_DIVISORS = [8, 8, 4, 4, 2, 2, 1, 1] as const;
+
+/**
+ * Groove Circuit DRUM SWAP 1–4 (E1, hardware-verified notes 0–3 / shift
+ * 44–47 on deck channels): repurposed as the stem kill block (CONTEXT.md
+ * Mapping entry — the section's official drum-remix engine has no manadj
+ * counterpart, so the pad shape is free real estate). Pad n toggles the
+ * matching STEM_NAMES stem; SHIFT+pad solos it. Only four pads, eight
+ * stems — pads address the four STEM_NAMES in order; the rest stay
+ * screen-only on this device.
+ */
+const STEM_PADS: readonly StemName[] = STEM_NAMES;
 
 const button = (
   channel: number,
@@ -76,13 +97,19 @@ function deckBindings({ deck, channel, padChannel, shiftedPadChannel }: DeckMidi
     button(channel, 12, { control: 'cue', deck }),
     button(channel, 53, { control: 'quantize' }),
     button(channel, 26, { control: 'key-lock', deck }),
-    // Hardware BEAT SYNC is manadj's established one-shot MATCH gesture;
-    // continuous sync remains deliberately absent.
-    button(channel, 88, { control: 'match', deck }),
+    button(channel, 54, { control: 'jog-touch-edge', deck, shifted: false }),
+    button(channel, 103, { control: 'jog-touch-edge', deck, shifted: true }),
+    button(channel, 64, { control: 'slip-mode', deck }),
+    button(channel, 23, { control: 'vinyl-mode', deck }),
+    // E1 D19: BEAT SYNC toggles membership; shifted note 92 is one-shot MATCH.
+    button(channel, 88, { control: 'sync', deck }),
+    button(channel, 92, { control: 'match', deck }),
     button(channel, 84, { control: 'pfl', channel: deck }),
     // The controller reports selected logical Deck state on note 60:
-    // velocity 0x7f for selected, 0 for the displaced layer.
-    button(channel, 60, { control: 'set-control-focus', deck }),
+    // velocity 0x7f for selected, 0 for the displaced layer. Only the
+    // TEMPO fader is layered (the mixer is four fixed strips): its pickup
+    // re-arms for the pair on every switch.
+    button(channel, 60, { control: 'set-control-focus', deck, layered: ['pitch'] }),
     button(channel, 16, { control: 'beatjump', deck, direction: 'back' }),
     button(channel, 17, { control: 'beatjump', deck, direction: 'forward' }),
     button(channel, 76, { control: 'loop-or-jump-size', deck, change: 'halve' }),
@@ -106,10 +133,7 @@ function deckBindings({ deck, channel, padChannel, shiftedPadChannel }: DeckMidi
       encoding: 'offset-64',
       jogProfile: 'grv6',
     },
-    // Platter ROTATION streams differ by Vinyl mode. Vinyl-on rotation uses
-    // the existing touch-stream behavior: fine seek while paused, ignored
-    // while playing because scratch remains unsupported. The separate touch
-    // note has no manadj action and stays unmapped. Vinyl-off nudges/seeks.
+    // E1 p2 D4/D5: rotation is mode-specific; touch notes are not.
     {
       match: { message: 'cc', channel, number: 34 },
       controlType: 'relative',
@@ -120,7 +144,7 @@ function deckBindings({ deck, channel, padChannel, shiftedPadChannel }: DeckMidi
     {
       match: { message: 'cc', channel, number: 35 },
       controlType: 'relative',
-      target: { control: 'jog', deck },
+      target: { control: 'jog-vinyl-off', deck },
       encoding: 'offset-64',
       jogProfile: 'grv6',
     },
@@ -189,6 +213,13 @@ function deckBindings({ deck, channel, padChannel, shiftedPadChannel }: DeckMidi
     }),
     button(padChannel, PAD_BLOCK.grid + 6, { control: 'grid-reset-mark', deck }),
     button(padChannel, PAD_BLOCK.grid + 7, { control: 'grid-reset-delete', deck }),
+    // DRUM SWAP 1–4 → stem kill/solo block (see STEM_PADS note above).
+    ...STEM_PADS.map((stem, pad) =>
+      button(channel, pad, { control: 'stem', channel: deck, stem })
+    ),
+    ...STEM_PADS.map((stem, pad) =>
+      button(channel, 44 + pad, { control: 'stem-solo', channel: deck, stem })
+    ),
   ];
 }
 
@@ -203,12 +234,17 @@ function deckFeedback({ channel, padChannel, shiftedPadChannel }: DeckMidi): Dec
     gridPads: Array.from({ length: 8 }, (_, pad) => led(padChannel, PAD_BLOCK.grid + pad)),
     gridPadMapped: Array.from({ length: 8 }, () => true),
     quantize: led(channel, 53),
+    sync: led(channel, 88),
     keyLock: led(channel, 26),
+    slipMode: led(channel, 64),
+    vinylMode: led(channel, 23),
     loopPads: LOOP_PRESETS.map((beats, pad) => ({
       ...led(shiftedPadChannel, PAD_BLOCK.beatLoop + pad),
       beats,
     })),
     loopPadsShifted: [],
+    stemPads: STEM_PADS.map((_, pad) => led(channel, pad)),
+    stemPadsShifted: STEM_PADS.map((_, pad) => led(channel, 44 + pad)),
   };
 }
 
@@ -252,6 +288,27 @@ export const DDJ_GRV6: Mapping = {
     ...DECKS.map(({ deck }, index) =>
       absolute14(6, 23 + index, 55 + index, { control: 'filter', channel: deck })
     ),
+    // Beat FX section (gh#272), channel 5 per the E1 list (exact bytes in
+    // docs/research/ddj-grv6-hardware.md §Beat FX). The SELECT knob sends
+    // a distinct note per detent (14 effects); ECHO (33), REVERB (37) and
+    // FLANGER (38) select implementations; unsupported detents select none.
+    // CH SELECT is hardware-radio target selection. SP is the sampler bus
+    // (represented but silent: manadj has no sampler); MST processes the
+    // summed post-crossfader program. Shift-layer channel notes and release
+    // FX (note 67) stay unbound.
+    ...BEAT_FX_SELECT_EFFECTS.map((effect, index) =>
+      button(BEAT_FX_CHANNEL, 32 + index, { control: 'beat-fx-select', effect })
+    ),
+    button(BEAT_FX_CHANNEL, 16, { control: 'beat-fx-target', target: 'A' }),
+    button(BEAT_FX_CHANNEL, 17, { control: 'beat-fx-target', target: 'B' }),
+    button(BEAT_FX_CHANNEL, 18, { control: 'beat-fx-target', target: 'C' }),
+    button(BEAT_FX_CHANNEL, 19, { control: 'beat-fx-target', target: 'D' }),
+    button(BEAT_FX_CHANNEL, 22, { control: 'beat-fx-target', target: 'sampler' }),
+    button(BEAT_FX_CHANNEL, 20, { control: 'beat-fx-target', target: 'master' }),
+    button(BEAT_FX_CHANNEL, 71, { control: 'beat-fx-on-off' }),
+    button(BEAT_FX_CHANNEL, 74, { control: 'beat-fx-beats', change: 'halve' }),
+    button(BEAT_FX_CHANNEL, 75, { control: 'beat-fx-beats', change: 'double' }),
+    absolute14(BEAT_FX_CHANNEL, 2, 34, { control: 'beat-fx-level' }),
     absolute14(6, 31, 63, { control: 'crossfader' }),
     // MASTER LEVEL (CC 8/40) is deliberately UNBOUND (hardware-verified
     // 2026-07-17, master-headroom): the knob attenuates the GRV6's own
@@ -271,5 +328,23 @@ export const DDJ_GRV6: Mapping = {
     // Each fixed A–D channel meter on its own deck channel — the meter
     // follows only that channel's signal (channel isolation).
     meters: Object.fromEntries(DECKS.map((entry) => [entry.deck, meter(entry.channel)])),
+    // Beat FX ON/OFF lamp (gh#272): MIDI-OUT mirrors MIDI-IN (E1 94 47).
+    beatFx: led(BEAT_FX_CHANNEL, 71),
+    // E1 p.3 F9: Beat time-unit indicator, MIDI-OUT CC 100. 3/4 uses
+    // 0x21 (combined indicator pattern), unlike the sequential values.
+    beatFxBeat: {
+      channel: BEAT_FX_CHANNEL,
+      number: 100,
+      offValue: 0,
+      values: [
+        { beats: 0.25, value: 0x03 },
+        { beats: 0.5, value: 0x04 },
+        { beats: 0.75, value: 0x21 },
+        { beats: 1, value: 0x05 },
+        { beats: 2, value: 0x06 },
+        { beats: 4, value: 0x07 },
+        { beats: 8, value: 0x08 },
+      ],
+    },
   },
 };

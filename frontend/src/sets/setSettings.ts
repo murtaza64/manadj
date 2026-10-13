@@ -6,6 +6,7 @@
  * Edits apply live: the next plan recompute reads the new values.
  */
 import { useSyncExternalStore } from 'react';
+import { writeSetting } from '../settings/persistedSettings';
 import { DEFAULT_PICKUP_RAMP_SEC, DEFAULT_PICKUP_TOLERANCE_S } from './pickup';
 import {
   DEFAULT_GRACE_FADE_SEC,
@@ -79,11 +80,8 @@ export function getSetSettings(): SetPlaybackSettings {
 /** Merge-update; effective on the next plan recompute (no Apply). */
 export function setSetSettings(update: Partial<SetPlaybackSettings>): void {
   settings = { ...settings, ...update };
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
-  } catch {
-    // Preference persistence is best-effort.
-  }
+  // Write-through (settings #176): DB + localStorage cache, best-effort.
+  writeSetting(STORAGE_KEY, JSON.stringify(settings));
   for (const fn of listeners) fn();
 }
 

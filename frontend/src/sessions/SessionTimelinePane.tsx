@@ -11,7 +11,15 @@ import { SessionTimelineView } from './SessionTimelineView';
 import { OPEN_SESSION_EVENT, peekSessionFocus } from './openSession';
 import type { SessionFocus } from './openSession';
 
-export function SessionTimelinePane({ sessionUuid }: { sessionUuid: string }) {
+export function SessionTimelinePane({
+  sessionUuid,
+  onBack,
+}: {
+  sessionUuid: string;
+  /** Back to the session LIST (gh#170 follow-up — scroll retained by the
+   * list itself). */
+  onBack?: () => void;
+}) {
   const { data: rows } = useQuery({ queryKey: ['sessions'], queryFn: api.sessions.list });
   // Deep-link focus: peeked on mount AND re-peeked on every session-open
   // request — keep-alive panes stay mounted, so a mount-only read would
@@ -39,7 +47,9 @@ export function SessionTimelinePane({ sessionUuid }: { sessionUuid: string }) {
       session={session}
       focusS={focus.atS}
       focusSpanS={focus.spanS}
+      focusFlash={focus.flash}
       focusVersion={focus.version}
+      onBack={onBack}
     />
   );
 }

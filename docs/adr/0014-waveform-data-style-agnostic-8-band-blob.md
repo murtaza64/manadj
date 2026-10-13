@@ -23,3 +23,9 @@ Any 3-band DJ palette (rekordbox 3Band, additive RGB, dominant-band) is a groupi
 - **Full spectrogram tier**: much bigger; the 8-band pooling covers the render styles we care about.
 
 Changing the format later means regenerating all waveform data — cheap for one library after the pipeline speedup, but the versioned header exists so readers can survive a transition.
+
+## Amendment: bounded tracklist preview (#241)
+
+Permit one stored, style-independent preview alongside the full blob: 256 max-peak bins and 256 mean-band frames in the same MWF layout (2388 bytes). Band means use quantized bytes, matching client LOD pooling. Equal-duration bins retain source frame alignment; empty band bins use the nearest frame. A synthetic sample-rate/hop ratio maps all 256 bins to the source duration at sample precision, with band centers halfway through each bin. Colors and minimap style remain client-side.
+
+Generate both artifacts atomically; backfill previews from stored full blobs in the waveform worker without decoding audio. The preview endpoint reads only the deferred preview column, returns 202 while pending (404 for absent tracks), and uses private revalidated ETags, not immutable caching. This exception does not introduce stored LOD pyramids or replace the full waveform format.

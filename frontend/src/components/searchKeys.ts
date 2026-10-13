@@ -23,6 +23,8 @@ import { useEffect } from 'react';
 import type { RefObject } from 'react';
 import { useFilters } from '../contexts/FilterContext';
 import { isTextEntryTarget } from './performance/performanceKeys';
+import { useBrowseActive } from '../contexts/browseActive';
+import { useViewActive } from '../contexts/viewActive';
 
 /** Cmd/Ctrl+F — the find chord, claimed for the library search. */
 export function isFindChord(event: KeyboardEvent): boolean {
@@ -50,10 +52,13 @@ export function shouldClearSearch(event: KeyboardEvent, activeSearch: string): b
 /** Mount the search keys on the document (bubble phase — everything that
  * must beat the staged clear stops propagation before it gets here). */
 export function useSearchKeys(inputRef: RefObject<HTMLInputElement | null>) {
+  const browseActive = useBrowseActive();
+  const viewActive = useViewActive();
   const { filters, clearSearch } = useFilters();
   const activeSearch = filters.search;
 
   useEffect(() => {
+    if (!browseActive || !viewActive) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (isFindChord(event)) {
         event.preventDefault(); // no browser find bar
@@ -65,5 +70,5 @@ export function useSearchKeys(inputRef: RefObject<HTMLInputElement | null>) {
     };
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
-  }, [inputRef, activeSearch, clearSearch]);
+  }, [inputRef, activeSearch, clearSearch, browseActive, viewActive]);
 }

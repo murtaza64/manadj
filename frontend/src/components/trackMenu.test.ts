@@ -224,3 +224,18 @@ describe('surface-append point', () => {
     ]);
   });
 });
+
+describe('Reveal stems folder', () => {
+  it('appears for one track, enabled only when it has stems, and never on multi-select', () => {
+    const revealStems = vi.fn();
+    const find = (items: ReturnType<typeof trackMenuItems>) => items.find((i) => i.label === 'Reveal stems folder');
+    const withStems = find(trackMenuItems(input({ tracks: [track({ id: 7, has_stems: true })], revealStems })));
+    expect(withStems?.disabled).toBeFalsy();
+    withStems!.onSelect!();
+    expect(revealStems).toHaveBeenCalledWith(7);
+    const without = find(trackMenuItems(input({ tracks: [track({ id: 8, has_stems: false })], revealStems })));
+    expect(without?.disabled).toBe(true);
+    expect(find(trackMenuItems(input({ tracks: [live(1), live(2)], revealStems })))).toBeUndefined();
+    expect(find(trackMenuItems(input({ tracks: [track({ id: 7, has_stems: true })] })))).toBeUndefined();
+  });
+});

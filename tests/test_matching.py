@@ -6,11 +6,13 @@ established by file path, falling back to filename. These tests pin the
 canonical semantics that five duplicated implementations used to disagree on.
 """
 
+import sys
+import unicodedata
 from dataclasses import dataclass
 
 import pytest
 
-from backend.sync_common.matching import TrackIndex, find_unmatched
+from backend.sync_common.matching import TrackIndex, find_unmatched, path_key
 
 
 @dataclass
@@ -53,10 +55,24 @@ class TestMatch:
     def test_no_match(self, index):
         assert index.match("/music/zzz.wav") is None
 
+    @pytest.mark.skipif(sys.platform == "win32", reason="Windows paths are case-insensitive")
     def test_case_sensitive(self, index):
-        """Canonical semantics: case-sensitive (the dead gen-1 matcher was
-        case-insensitive; that fork dies here)."""
+        """Canonical semantics: case-sensitive off Windows (the dead gen-1
+        matcher was case-insensitive; that fork dies here)."""
         assert index.match("/music/A.MP3") is None
+
+    def test_unicode_normalization_insensitive(self):
+        """macOS can hand back NFD spellings of an NFC-stored path (#305)."""
+        nfc = unicodedata.normalize("NFC", "/m/Anaïs - Empire.m4a")
+        nfd = unicodedata.normalize("NFD", nfc)
+        idx = TrackIndex.build([Row(nfc, "a"), Row("/m/x/Anaïs.m4a", "b")], path_of)
+        assert idx.match(nfd).label == "a"
+        assert idx.match(unicodedata.normalize("NFD", "/other/Anaïs.m4a")).label == "b"
+
+    def test_separator_insensitive(self):
+        """Rekordbox stores C:/... while manadj stores C:\\... on Windows."""
+        idx = TrackIndex.build([Row("C:/Music/dup/t.mp3", "rb"), Row("C:/Music/t.mp3", "other")], path_of)
+        assert idx.match("C:\\Music\\dup\\t.mp3").label == "rb"
 
     def test_pathless_rows_skipped(self, index):
         # the None-path row is silently excluded from both tiers
@@ -80,3 +96,17 @@ class TestFindUnmatched:
     def test_pathless_source_rows_are_unmatched(self, index):
         rows = [Row(None, "pathless")]
         assert [r.label for r in find_unmatched(rows, path_of, index)] == ["pathless"]
+
+
+class TestPathKey:
+    def test_separators_and_nfc(self):
+        nfd = unicodedata.normalize("NFD", "C:\\Music\\Anaïs.m4a")
+        assert path_key(nfd, platform="darwin") == unicodedata.normalize("NFC", "C:/Music/Anaïs.m4a")
+
+    def test_windows_casefolds_drive_and_names(self):
+        assert path_key("c:\\Music\\A.MP3", platform="win32") == path_key(
+            "C:/music/a.mp3", platform="win32"
+        )
+
+    def test_posix_keeps_case(self):
+        assert path_key("/Music/A.mp3", platform="linux") != path_key("/music/a.mp3", platform="linux")

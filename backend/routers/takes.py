@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 
 from backend import models, schemas
 from backend.database import get_db
-from backend.routers.sets import degrade_pins
+from backend.routers.sets import degrade_cameo_pins, degrade_pins
 
 router = APIRouter()
 
@@ -32,6 +32,8 @@ def _row(t: models.Take) -> schemas.TakeRow:
         promoted_transition_uuid=t.promoted_transition_uuid,
         session_uuid=t.session_uuid,
         origin=t.origin,
+        kind=t.kind,
+        engagement_uuid=t.engagement_uuid,
     )
 
 
@@ -77,6 +79,8 @@ def create_take(payload: schemas.TakeCreate, db: Session = Depends(get_db)) -> s
         events_json=json.dumps(payload.events),
         session_uuid=payload.session_uuid,
         origin=payload.origin,
+        kind=payload.kind,
+        engagement_uuid=payload.engagement_uuid,
     )
     db.add(t)
     db.commit()
@@ -91,17 +95,33 @@ def set_promoted(
     """Record (or clear) which Transition this Take was promoted into —
     the only mutable field on an otherwise immutable audit row (issue 03).
 
-    Promotion also re-points Set pins (sets 08, ADR 0023): every
-    set_entries pin referencing this Take is rewritten to the resulting
-    Transition's uuid, right here at promotion time — a one-time
-    migration, never query-time indirection. Dormant pins (sets 07)
-    referencing the Take are rewritten the same way — the memory
-    restores the Transition. Clearing (null) rewrites nothing:
+    Promotion also re-points every adjacency Take pin referencing this UUID
+    (sets 08, ADR 0023), including Dormant pins (sets 07). This is a
+    one-time migration, never query-time indirection. Cameo ornaments keep
+    referencing the original evidence. Clearing (null) rewrites nothing:
     already-migrated pins stay on the Transition.
     """
     t = db.query(models.Take).filter(models.Take.uuid == uuid).first()
     if t is None:
         raise HTTPException(status_code=404, detail="take not found")
+    if payload.promoted_transition_uuid is not None:
+        # Recorded kind is evidence; the saved target expresses authored intent.
+        targets = db.query(models.Transition).filter(
+            models.Transition.uuid == payload.promoted_transition_uuid,
+        )
+        if targets.filter(
+            models.Transition.a_track_id == t.a_track_id,
+            models.Transition.b_track_id == t.b_track_id,
+        ).first() is None:
+            if targets.first() is None:
+                raise HTTPException(status_code=404, detail="promoted Transition not found")
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"promoted Transition {payload.promoted_transition_uuid} must match "
+                    f"Take's ordered track pair {t.a_track_id} -> {t.b_track_id}"
+                ),
+            )
     t.promoted_transition_uuid = payload.promoted_transition_uuid
     if payload.promoted_transition_uuid is not None:
         db.query(models.SetEntry).filter(
@@ -138,5 +158,8 @@ def delete_take(uuid: str, db: Session = Depends(get_db)) -> dict:
         raise HTTPException(status_code=404, detail="take not found")
     db.delete(t)
     degrade_pins(db, "take", {uuid})
+    # A guest Take may be pinned as a Cameo Take on Set entries (#140);
+    # ornament pins are dropped outright (no Unresolved to degrade to).
+    degrade_cameo_pins(db, "cameo-take", {uuid})
     db.commit()
     return {"ok": True}

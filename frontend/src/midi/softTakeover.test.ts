@@ -66,6 +66,23 @@ describe('SoftTakeover', () => {
     expect(t.feed(2.35, 2.3)).toBe(true); // crossed: picked up
   });
 
+  it('invalidate (layer switch): drops the latch, withholds grace, never crosses across the gap', () => {
+    const t = new SoftTakeover(TOLERANCE);
+    expect(t.feed(2, 2)).toBe(true); // latched
+    t.invalidate();
+    // Software unchanged, but the control reported elsewhere meanwhile:
+    // a sample inside the grace window still needs pickup.
+    expect(t.feed(2.3, 2)).toBe(false);
+    expect(t.feed(1.5, 2)).toBe(true); // crossed 2 between post-gap samples
+  });
+
+  it('invalidate on a never-fed machine withholds first-touch grace', () => {
+    const t = new SoftTakeover(TOLERANCE);
+    t.invalidate();
+    expect(t.feed(0.3, 0)).toBe(false); // within grace, but no grace
+    expect(t.feed(0.05, 0)).toBe(true); // tight tolerance match
+  });
+
   it('external software change unlatches; movement stays suppressed until re-pickup', () => {
     const t = new SoftTakeover(TOLERANCE);
     expect(t.feed(0, 0)).toBe(true); // latched at 0

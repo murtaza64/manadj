@@ -1,16 +1,9 @@
-"""Waveform generation on the task system (waveform-overhaul issue 02).
-
-Real internals per ADR-0002: real task manager over in-memory SQLite, real
-blob generation (ffmpeg) for the backfill path. The *legacy* full-generation
-path (JSON/PNG, librosa) is behind the injectable seam in
-`make_waveform_handler` — audio analysis is a listed fakeable seam, and the
-heavy-dep guards forbid librosa in the suite's import chain.
-"""
+"""Waveform tasks: real SQLite/ffmpeg, with an injectable audio analysis seam."""
 
 from backend import models
 from backend.tasks.manager import list_tasks, run_pending
 from backend.tasks.models import Task
-from backend.waveform_data import SAMPLE_RATE, PEAK_HOP, decode_blob
+from backend.waveform_data import PEAK_HOP, SAMPLE_RATE, build_preview_blob, decode_blob
 from backend.waveform_tasks import (
     WAVEFORM_TASK_TYPE,
     enqueue_missing_waveforms,
@@ -19,7 +12,7 @@ from backend.waveform_tasks import (
 )
 
 
-def _seed_waveform_row(db, track, blob=None):
+def _seed_waveform_row(db, track, blob=None, preview=None):
     db.add(
         models.Waveform(
             track_id=track.id,
@@ -27,6 +20,7 @@ def _seed_waveform_row(db, track, blob=None):
             duration=2.0,
             samples_per_peak=PEAK_HOP,
             data_blob=blob,
+            preview_blob=preview,
         )
     )
     db.commit()
@@ -57,11 +51,15 @@ def test_sweep_enqueues_only_tracks_missing_waveform_data(db, make_track, audio_
     null_blob = make_track()
     _seed_waveform_row(db, null_blob, blob=None)
     has_blob = make_track()
-    _seed_waveform_row(db, has_blob, blob=b"MWF1-fake")
+    _seed_waveform_row(db, has_blob, blob=b"MWF1-fake", preview=b"preview-fake")
+    missing_preview = make_track()
+    _seed_waveform_row(db, missing_preview, blob=b"MWF1-fake")
 
-    assert enqueue_missing_waveforms(db) == 2
+    assert enqueue_missing_waveforms(db) == 3
     refs = {t.ref for t in list_tasks(db, state="pending")}
-    assert refs == {f"track:{missing_row.id}", f"track:{null_blob.id}"}
+    assert refs == {
+        f"track:{missing_row.id}", f"track:{null_blob.id}", f"track:{missing_preview.id}",
+    }
 
     # Sweep is idempotent while tasks are pending.
     assert enqueue_missing_waveforms(db) == 0
@@ -102,6 +100,8 @@ def test_blob_backfill_path_generates_real_blob(db, make_track, audio_file):
     blob = _blob_of(db, track.id)
     assert blob is not None
     assert decode_blob(blob)["duration"] > 0
+    preview = db.query(models.Waveform.preview_blob).filter_by(track_id=track.id).scalar()
+    assert preview == build_preview_blob(blob)
 
 
 def test_full_generation_path_uses_injected_seam(db, make_track):
@@ -120,8 +120,8 @@ def test_full_generation_path_uses_injected_seam(db, make_track):
 
 def test_handler_skips_track_that_already_has_blob(db, make_track):
     track = make_track()
-    _seed_waveform_row(db, track, blob=b"MWF1-fake")
     enqueue_waveform_task(db, track.id)
+    _seed_waveform_row(db, track, blob=b"MWF1-fake", preview=b"preview-fake")
 
     def exploding_full_generate(session, track_id, filename):
         raise AssertionError("full generation must not run")

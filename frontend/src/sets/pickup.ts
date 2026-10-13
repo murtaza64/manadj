@@ -22,12 +22,16 @@
  * every instant, track, and Transition stays exactly as pinned.
  */
 import { DEFAULT_DETECTOR_PARAMS } from '../capture/events';
-import { bContentSegments, bTrackTimeAt } from '../editor/mixModel';
+import { aContentSegments, aTrackTimeAt, bTrackTimeAt } from '../editor/mixModel';
+import { outgoingAutomationStart } from '../editor/pairBounds';
 import { audibleHolder, type AudibleSurfaceId } from '../playback/audibleSurface';
 import { channelFaderToGain, crossfaderGains, trimToGain } from '../playback/mixerMath';
 import type { PlanAutomation, PlannedAdjacency, PlannedEntry, SetPlan } from './planner';
+import { incomingMixTimeAt } from './planner';
 
-type PlanDeck = PlannedEntry['deck'];
+/** The pair-machine decks: Pickup adopts the shared A/B pair (a Routine's
+ * C/D allocations are Conductor territory — routines 159). */
+type PlanDeck = 'A' | 'B';
 
 /** Default alignment tolerance for the two-deck blend case: the
  * Conductor's drift tolerance (issue 16). Tunable — but raising it past
@@ -150,14 +154,18 @@ export function readPickupSnapshot(
   };
 }
 
-// ── Audibility (Master-bus model, paused decks count) ───────────────────
+// ── Audibility (Master-bus model, transport-gated) ──────────────────────
 
 const { audibleGain, eqKillBelow, filterKillBeyond } = DEFAULT_DETECTOR_PARAMS;
 
-/** detector.ts's deckAudible without the transport gate: would this
- * channel be audible on the Master bus if its deck ran? */
+/** detector.ts's deckAudible: is this channel audible on the Master bus
+ * RIGHT NOW? A paused deck is silent regardless of its fader (#161: a
+ * paused deck B with fader up used to block Pickup as a phantom anchor —
+ * lowering the fader "fixed" it). Silent decks are reconcilable, never
+ * anchors. */
 function channelAudible(snap: PickupSnapshot, ch: PlanDeck): boolean {
   if (snap.decks[ch].trackId === null) return false;
+  if (!snap.decks[ch].playing) return false;
   const c = snap.channels[ch];
   if (c.eq.low <= eqKillBelow && c.eq.mid <= eqKillBelow && c.eq.high <= eqKillBelow) {
     return false;
@@ -181,7 +189,7 @@ function channelGain(snap: PickupSnapshot, ch: PlanDeck): number {
 type Windowed = Extract<PlannedAdjacency, { kind: 'transition' | 'take' }>;
 
 const isWindowed = (adj: PlannedAdjacency | undefined): adj is Windowed =>
-  adj !== undefined && adj.kind !== 'hardcut';
+  adj?.kind === 'transition' || adj?.kind === 'take';
 
 /** Authored window axis → global mix time (inverse of authoredLocalAt). */
 function mixFromAuthored(adj: Windowed, authored: number): number {
@@ -190,37 +198,58 @@ function mixFromAuthored(adj: Windowed, authored: number): number {
 
 /**
  * The mix instant at which entry `idx` plays track time `tau`, or null
- * when no such instant exists inside the entry's audible span (outside
- * [entrySec, exitSec], or content a Jump skips over). Piecewise inverse
- * of the planner's playingTrackTimeAt: the entry window's segment walk,
- * the Tempo return quadratic, else the solo anchor.
+ * when no such instant exists inside the entry's audible span. Inverts
+ * routine traces, pair-window segments, the Tempo return quadratic,
+ * or the solo anchor.
  */
 export function mixTimeForTrackTime(plan: SetPlan, idx: number, tau: number): number | null {
   const entry = plan.entries[idx];
   if (!entry) return null;
-  if (tau < entry.entrySec - SPAN_EPS || tau > entry.exitSec + SPAN_EPS) return null;
   const clampSpan = (t: number) =>
     Math.min(Math.max(t, entry.entryMixSec), entry.exitMixSec - SPAN_EPS);
 
-  const entryAdj = idx > 0 ? plan.adjacencies[idx - 1] : undefined;
-  if (isWindowed(entryAdj)) {
-    const w = entryAdj;
-    const tr = w.transition;
-    // Inside the entry window: B advances at rateIncoming between Jump
-    // events — invert per content segment (durB unbounded: the entry's
-    // own exitSec already bounds tau).
-    for (const seg of bContentSegments(tr, Number.POSITIVE_INFINITY, w.rateIncoming)) {
-      const authored = seg.mixStartSec + (tau - seg.bStartSec) / w.rateIncoming;
-      if (authored < seg.mixStartSec - SPAN_EPS || authored >= seg.mixEndSec) continue;
-      const t = mixFromAuthored(w, authored);
-      if (t < w.mixStartSec - SPAN_EPS || t >= w.mixEndSec) continue;
+  // Routine positions follow recorded traces, not a pair window or the
+  // solo anchor. Walk before the endpoint bounds: jumps can revisit
+  // content outside [entrySec, exitSec]. Repeats map to their first pass.
+  const routines = plan.routines.filter(
+    (r) => idx >= r.startEntryIndex && idx < r.startEntryIndex + r.slots.length
+  );
+  for (const routine of routines) {
+    const slot = routine.slots[idx - routine.startEntryIndex];
+    if (slot.deck === null || tau < 0) continue;
+    for (let i = 0; i < slot.trace.length; i++) {
+      const point = slot.trace[i];
+      if (!point.moving || point.ratePerBeat <= 0) continue;
+      const beat = point.beat + (tau - point.pos) / point.ratePerBeat;
+      if (beat < point.beat || beat >= (slot.trace[i + 1]?.beat ?? Infinity)) continue;
+      const t = routine.beatOriginMixSec + beat * routine.secPerBeat;
+      if (t < Math.max(routine.mixStartSec, slot.entryMixSec, slot.occupyFromMixSec, entry.entryMixSec)) continue;
+      if (t >= Math.min(routine.mixEndSec, slot.releaseMixSec, entry.exitMixSec)) continue;
       return clampSpan(t);
     }
+  }
+  const entryAdj = idx > 0 ? plan.adjacencies[idx - 1] : undefined;
+  const exitAdj = plan.adjacencies[idx];
+  const outgoingFrom = isWindowed(exitAdj)
+    ? exitAdj.mixStartSec + (outgoingAutomationStart(exitAdj.transition) - exitAdj.transition.startSec) / exitAdj.rateOutgoing
+    : entryAdj?.tempoReturnEndSec ?? entry.entryMixSec;
+  const minTau = Math.min(entry.entrySec, entryAdj?.incomingTrackSecAtWindowEnd ?? entry.entrySec);
+  if (tau < minTau - SPAN_EPS || tau > entry.exitSec + SPAN_EPS) return null;
+
+  if (isWindowed(entryAdj)) {
+    const t = incomingMixTimeAt(entryAdj, tau, entry.rate, {
+      until: Math.min(entry.exitMixSec, isWindowed(exitAdj) ? outgoingFrom : Infinity),
+    });
+    if (t !== null) return clampSpan(t);
+  }
+  if (entryAdj?.kind === 'routine') {
+    const w = entryAdj;
     // Through the Tempo return: trackTime = b + r·x + (1−r)x²/(2d).
     const d = w.tempoReturnEndSec - w.mixEndSec;
     if (d > 0) {
       const r = w.rateIncoming;
-      const b = bTrackTimeAt(tr, tr.startSec + tr.durationSec, r);
+      const b = w.incomingTrackSecAtWindowEnd;
+      if (b === undefined) return null;
       const endTau = b + r * d + ((1 - r) * d) / 2; // trackTime at ramp end
       if (tau >= b - SPAN_EPS && tau < endTau) {
         const a = (1 - r) / (2 * d);
@@ -237,12 +266,31 @@ export function mixTimeForTrackTime(plan: SetPlan, idx: number, tau: number): nu
       }
     }
   }
-  // Solo anchor (also the outgoing's regime inside its EXIT window — the
-  // authored axis is its own track time at its solo rate).
+  // The outgoing's regime inside its EXIT window with outgoing jumps
+  // (issue 177): invert per audible segment of A's jumped walk — replayed
+  // content maps to its FIRST landing, like B's entry-window inversion.
+  if (isWindowed(exitAdj) && exitAdj.transition.jumpsA?.length) {
+    for (const seg of aContentSegments(exitAdj.transition, Number.POSITIVE_INFINITY)) {
+      const authored = seg.mixStartSec + (tau - seg.bStartSec);
+      if (authored < seg.mixStartSec - SPAN_EPS || authored >= seg.mixEndSec) continue;
+      const t = mixFromAuthored(exitAdj, authored);
+      const soloFrom = isWindowed(entryAdj) ? outgoingFrom : entryAdj?.tempoReturnEndSec ?? entry.entryMixSec;
+      if (t < soloFrom - SPAN_EPS) continue;
+      return clampSpan(t);
+    }
+    // tau isn't on the jumped path (e.g. skipped-over content): no clean map.
+    return null;
+  }
+
+  // Solo anchor (also the outgoing's regime inside its EXIT window when
+  // the outgoing has no jumps — the authored axis is its own track time
+  // at its solo rate).
   const t = entry.mixOffsetSec + tau / entry.rate;
-  const soloFrom = isWindowed(entryAdj) ? entryAdj.tempoReturnEndSec : entry.entryMixSec;
+  const soloFrom = isWindowed(entryAdj) ? outgoingFrom : entryAdj?.tempoReturnEndSec ?? entry.entryMixSec;
   if (t < soloFrom - SPAN_EPS) return null;
-  return clampSpan(t);
+  const clamped = clampSpan(t);
+  if (routines.some((r) => clamped >= r.mixStartSec && clamped < r.mixEndSec)) return null;
+  return clamped;
 }
 
 // ── The predicate ────────────────────────────────────────────────────────
@@ -391,7 +439,12 @@ function twoDeckPickup(
     const offDeck = dom === inDeck ? outDeck : inDeck;
     const expected =
       offDeck === outDeck
-        ? (t - outEntry.mixOffsetSec) * outEntry.rate
+        ? // Through the outgoing's jumps (issue 177): identity when
+          // jumpsA is empty — the old (t − mixOffset)·rate.
+          aTrackTimeAt(
+            adj.transition,
+            adj.transition.startSec + (t - adj.mixStartSec) * adj.rateOutgoing
+          )
         : bTrackTimeAt(
             adj.transition,
             adj.transition.startSec + (t - adj.mixStartSec) * adj.rateOutgoing,
@@ -420,11 +473,25 @@ function twoDeckPickup(
 
 // ── Execution helpers (pure; the runtime applies them) ──────────────────
 
-/** Mirror a plan's physical deck assignment (A↔B). planStateAt derives
- * decks and lanes from entry.deck alone, so this transform is complete. */
+/** Mirror a plan's physical deck assignment (A↔B; a Routine's C/D
+ * allocations stay put). planStateAt derives decks and lanes from
+ * entry.deck and the routine slots' decks, so this transform is
+ * complete. */
 export function flipPlanDecks(plan: SetPlan): SetPlan {
-  const flip = (d: PlannedEntry['deck']): PlannedEntry['deck'] => (d === 'A' ? 'B' : 'A');
-  return { ...plan, entries: plan.entries.map((e) => ({ ...e, deck: flip(e.deck) })) };
+  const flip = (d: PlannedEntry['deck']): PlannedEntry['deck'] =>
+    d === 'A' ? 'B' : d === 'B' ? 'A' : d;
+  return {
+    ...plan,
+    entries: plan.entries.map((e) => ({ ...e, deck: flip(e.deck) })),
+    routines: plan.routines.map((r) => ({
+      ...r,
+      slots: r.slots.map((s) => ({ ...s, deck: s.deck === null ? null : flip(s.deck) })),
+      exit: { ...r.exit, deck: flip(r.exit.deck) },
+    })),
+    // Cameos (#140) borrow decks relative to the same assignment — flip
+    // with it so a guest never lands on its flipped host's deck.
+    cameos: plan.cameos.map((c) => ({ ...c, deck: flip(c.deck) })),
+  };
 }
 
 /**
@@ -440,6 +507,10 @@ export function pickupStartLanes(snap: PickupSnapshot): Record<PlanDeck, PlanAut
       fader: c.fader * Math.sqrt(xfGain(snap, ch)),
       eq: { ...c.eq },
       filter: c.filter,
+      // Adopt the live trim (sets #164): engaging is inaudible, and the
+      // ramp converges onto the plan's entry trim (or hands the node
+      // back to base at ramp end when the plan carries none).
+      trim: c.trim,
     };
   };
   return { A: lane('A'), B: lane('B') };

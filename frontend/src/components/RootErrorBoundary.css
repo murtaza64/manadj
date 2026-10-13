@@ -1,0 +1,79 @@
+/* Crash panel (gh#191). Bright saturated red on the app's dark base —
+   unmissable, geometric (radius 0 per theme). */
+.crash-panel {
+  position: fixed;
+  inset: 0;
+  z-index: 99999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--crust);
+  padding: var(--space-24);
+  overflow: auto;
+}
+
+.crash-panel-inner {
+  max-width: 900px;
+  width: 100%;
+  max-height: 100%;
+  overflow: auto;
+  background: var(--base);
+  border: 3px solid var(--danger);
+  padding: var(--space-24);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-12);
+}
+
+.crash-panel-title {
+  color: var(--danger);
+  font-size: var(--font-display);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.crash-panel-message {
+  color: var(--text);
+  font-size: var(--font-title);
+  background: var(--surface0);
+  border-left: 4px solid var(--danger);
+  padding: var(--space-8) var(--space-12);
+  word-break: break-word;
+}
+
+.crash-panel-label {
+  color: var(--warning);
+  font-size: var(--font-body);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.crash-panel-stack {
+  margin: 0;
+  color: var(--subtext0);
+  font-size: var(--font-body);
+  background: var(--mantle);
+  padding: var(--space-12);
+  overflow: auto;
+  max-height: 240px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.crash-panel-reload {
+  align-self: flex-start;
+  background: var(--danger);
+  color: var(--crust);
+  border: none;
+  border-radius: var(--radius);
+  font-size: var(--font-title);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  padding: var(--space-8) var(--space-24);
+  cursor: pointer;
+}
+
+.crash-panel-reload:hover {
+  filter: brightness(1.15);
+}

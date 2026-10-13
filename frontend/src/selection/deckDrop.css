@@ -1,0 +1,33 @@
+/* Drag-to-Load drop highlight (gh#296): deck color = deck identity;
+   a refused (playing) Deck shows --danger. */
+.deck-drop-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  --deck-drop-color: var(--text);
+  --deck-drop-rgb: 255, 255, 255;
+  border: 2px solid var(--deck-drop-color);
+  background: rgba(var(--deck-drop-rgb), 0.18);
+}
+.deck-drop-overlay.deck-a { --deck-drop-color: var(--deck-a); --deck-drop-rgb: var(--deck-a-rgb); }
+.deck-drop-overlay.deck-b { --deck-drop-color: var(--deck-b); --deck-drop-rgb: var(--deck-b-rgb); }
+.deck-drop-overlay.deck-c { --deck-drop-color: var(--deck-c); --deck-drop-rgb: var(--deck-c-rgb); }
+.deck-drop-overlay.deck-d { --deck-drop-color: var(--deck-d); --deck-drop-rgb: var(--deck-d-rgb); }
+.deck-drop-overlay[data-state='refused'] {
+  --deck-drop-color: var(--danger);
+  --deck-drop-rgb: var(--danger-rgb);
+  border-style: dashed;
+}
+
+.deck-drop-label {
+  color: var(--deck-drop-color);
+  background: var(--crust);
+  border: 1px solid var(--deck-drop-color);
+  font-size: var(--font-micro);
+  font-weight: 800;
+  padding: 1px var(--space-6);
+}

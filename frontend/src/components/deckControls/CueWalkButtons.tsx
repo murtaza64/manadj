@@ -8,9 +8,11 @@ import './deckControls.css';
 export function CueWalkButton({
   direction,
   className,
+  kbd,
 }: {
   direction: 'prev' | 'next';
   className?: string;
+  kbd?: ReactNode;
 }) {
   const { loadedTrack } = useDeck();
   const actions = useHotCueActions(loadedTrack?.id ?? null);
@@ -29,16 +31,18 @@ export function CueWalkButton({
       }
     >
       {direction === 'prev' ? '|◀' : '▶|'}
+      {kbd}
     </button>
   );
 }
 
 /** The side-by-side pair (Performance transport column). */
-export function CueWalkButtons() {
+export function CueWalkButtons({ prevKbd, nextKbd }: { prevKbd?: ReactNode; nextKbd?: ReactNode }) {
   return (
     <div className="deck-cuewalk">
-      <CueWalkButton direction="prev" />
-      <CueWalkButton direction="next" />
+      <CueWalkButton direction="prev" kbd={prevKbd} />
+      <CueWalkButton direction="next" kbd={nextKbd} />
     </div>
   );
 }
+import type { ReactNode } from 'react';

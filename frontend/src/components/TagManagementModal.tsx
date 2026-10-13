@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { Tag, TagCategory } from '../types';
@@ -128,6 +128,55 @@ export default function TagManagementModal({ isOpen, onClose }: Props) {
     });
   }, [isOpen, categories]);
 
+  // Renames/deletes change what every loaded Track shows (deck panels hold
+  // ['track', id]; tables hold ['tracks'] / ['playlist']).
+  const invalidateTagViews = () => {
+    queryClient.invalidateQueries({ queryKey: ['tags'] });
+    queryClient.invalidateQueries({ queryKey: ['track'] });
+    queryClient.invalidateQueries({ queryKey: ['tracks'] });
+    queryClient.invalidateQueries({ queryKey: ['playlist'] });
+  };
+
+  // Tag Categories save immediately (not part of the tag batch).
+  const [newCategoryName, setNewCategoryName] = useState('');
+  const [categoryError, setCategoryError] = useState<string | null>(null);
+
+  const createCategoryMutation = useMutation({
+    mutationFn: (name: string) =>
+      api.tags.createCategory({
+        name,
+        display_order: Math.max(0, ...(categories ?? []).map((c: TagCategory) => c.display_order + 1)),
+      }),
+    onSuccess: () => {
+      setNewCategoryName('');
+      setCategoryError(null);
+      queryClient.invalidateQueries({ queryKey: ['tag-categories'] });
+    },
+    onError: (err: Error) => setCategoryError(err.message),
+  });
+
+  const deleteCategoryMutation = useMutation({
+    mutationFn: (id: number) => api.tags.deleteCategory(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['tag-categories'] });
+      invalidateTagViews();
+    },
+  });
+
+  const handleAddCategory = () => {
+    const name = newCategoryName.trim();
+    if (!name || createCategoryMutation.isPending) return;
+    createCategoryMutation.mutate(name);
+  };
+
+  const handleDeleteCategory = (category: TagCategory) => {
+    const count = allTags?.filter((t: Tag) => t.category_id === category.id).length ?? 0;
+    const message = count
+      ? `Delete category "${category.name}" and its ${count} tag${count === 1 ? '' : 's'}? They will be removed from all tracks.`
+      : `Delete category "${category.name}"?`;
+    if (confirm(message)) deleteCategoryMutation.mutate(category.id);
+  };
+
   // Batch save mutation - handles creates, updates, and deletes
   const batchSaveMutation = useMutation({
     mutationFn: async ({
@@ -158,7 +207,7 @@ export default function TagManagementModal({ isOpen, onClose }: Props) {
       ]);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['tags'] });
+      invalidateTagViews();
       setHasChanges(false);
       setActiveColorPicker(null);
       setNewTagDrafts((prev) => {
@@ -386,6 +435,24 @@ export default function TagManagementModal({ isOpen, onClose }: Props) {
     onClose();
   };
 
+  // Escape = the close button. Capture + stopPropagation so it beats the
+  // staged search-clear and the view key hubs (as BpmModal does).
+  const requestCloseRef = useRef(handleRequestClose);
+  useEffect(() => {
+    requestCloseRef.current = handleRequestClose;
+  });
+  useEffect(() => {
+    if (!isOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      e.stopPropagation();
+      e.preventDefault();
+      requestCloseRef.current();
+    };
+    document.addEventListener('keydown', onKeyDown, { capture: true });
+    return () => document.removeEventListener('keydown', onKeyDown, { capture: true });
+  }, [isOpen]);
+
   if (!isOpen) return null;
 
   // Group edited tags by category (including deleted ones, we'll style them differently)
@@ -423,7 +490,18 @@ export default function TagManagementModal({ isOpen, onClose }: Props) {
         <div className="modal-body">
           {categories?.map((category: TagCategory) => (
             <div key={category.id} className="category-section">
-              <h3 className="category-title">{category.name}</h3>
+              <div className="category-header">
+                <h3 className="category-title">{category.name}</h3>
+                <button
+                  onClick={() => handleDeleteCategory(category)}
+                  className="btn-delete-small"
+                  disabled={hasChanges || deleteCategoryMutation.isPending}
+                  title={hasChanges ? 'Save or cancel tag changes first' : 'Delete category'}
+                  aria-label={`Delete category ${category.name}`}
+                >
+                  ×
+                </button>
+              </div>
 
               {/* Tag Grid - 3 columns */}
               <div className="tag-grid">
@@ -587,6 +665,32 @@ export default function TagManagementModal({ isOpen, onClose }: Props) {
               </div>
             </div>
           ))}
+
+          <div className="category-add-row">
+            <input
+              type="text"
+              value={newCategoryName}
+              onChange={(e) => {
+                setNewCategoryName(e.target.value);
+                setCategoryError(null);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleAddCategory();
+              }}
+              className="tag-name-input"
+              placeholder="new category"
+              aria-label="New category name"
+            />
+            <button
+              onClick={handleAddCategory}
+              className="btn-create-small"
+              disabled={!newCategoryName.trim() || createCategoryMutation.isPending}
+              title="Create category"
+            >
+              {createCategoryMutation.isPending ? '…' : '+'}
+            </button>
+            {categoryError && <span className="hex-error">{categoryError}</span>}
+          </div>
         </div>
 
         {activeColorPicker && (

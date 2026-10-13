@@ -14,6 +14,10 @@ import {
   fmtInTime,
   fmtOverlapTime,
   fmtPlayTime,
+  fmtTrimDb,
+  trimDragValue,
+  trimOffsetDb,
+  trimOffsetFromDb,
   REMOVE_COL_W,
   ROW_GAP,
   TITLE_X,
@@ -28,6 +32,7 @@ const entry = (over: Partial<PlannedEntry> = {}): PlannedEntry => ({
   exitSec: 180,
   entryMixSec: 0,
   exitMixSec: 180,
+  trim: 0,
   ...over,
 });
 
@@ -69,15 +74,15 @@ describe('bpmDeltaPercent', () => {
 
 describe('bpmDeltaColor', () => {
   it('bands by delta magnitude, sign-agnostic', () => {
-    expect(bpmDeltaColor(0)).toBe('var(--green)');
-    expect(bpmDeltaColor(2)).toBe('var(--green)');
-    expect(bpmDeltaColor(-2)).toBe('var(--green)');
-    expect(bpmDeltaColor(2.1)).toBe('var(--yellow)');
-    expect(bpmDeltaColor(-4)).toBe('var(--yellow)');
+    expect(bpmDeltaColor(0)).toBe('var(--success)');
+    expect(bpmDeltaColor(2)).toBe('var(--success)');
+    expect(bpmDeltaColor(-2)).toBe('var(--success)');
+    expect(bpmDeltaColor(2.1)).toBe('var(--warning)');
+    expect(bpmDeltaColor(-4)).toBe('var(--warning)');
     expect(bpmDeltaColor(4.1)).toBe('#ff9500');
     expect(bpmDeltaColor(-8)).toBe('#ff9500');
-    expect(bpmDeltaColor(8.1)).toBe('var(--red)');
-    expect(bpmDeltaColor(-25)).toBe('var(--red)');
+    expect(bpmDeltaColor(8.1)).toBe('var(--danger)');
+    expect(bpmDeltaColor(-25)).toBe('var(--danger)');
   });
 
   it('never uses the deck identity colors (glossary: identity ≠ state)', () => {
@@ -148,5 +153,53 @@ describe('fmtOverlapTime (sets 32)', () => {
     expect(
       fmtOverlapTime({ kind: 'transition', mixStartSec: 100, mixEndSec: 99 })
     ).toBe('0:00');
+  });
+});
+
+describe('trim cell (sets #164)', () => {
+  it('reads the offset in dB: knob units × 24 dB, signed when non-neutral', () => {
+    expect(fmtTrimDb(0)).toBe('0.0');
+    expect(fmtTrimDb(0.1)).toBe('+2.4');
+    expect(fmtTrimDb(-0.2)).toBe('−4.8');
+    expect(fmtTrimDb(0.5)).toBe('+12.0');
+    expect(fmtTrimDb(-0.5)).toBe('−12.0');
+  });
+
+  it('offset↔dB round-trips', () => {
+    expect(trimOffsetDb(0.25)).toBeCloseTo(6);
+    expect(trimOffsetFromDb(6)).toBeCloseTo(0.25);
+    expect(trimOffsetFromDb(trimOffsetDb(-0.31))).toBeCloseTo(-0.31);
+  });
+
+  it('sub-0.05dB residue reads neutral (a reset never shows −0.0)', () => {
+    expect(fmtTrimDb(0.001)).toBe('0.0');
+    expect(fmtTrimDb(-0.001)).toBe('0.0');
+  });
+});
+
+describe('trim drag (sets #183)', () => {
+  it('20px of travel = 1 dB, up is louder', () => {
+    expect(trimOffsetDb(trimDragValue(0, 20))).toBeCloseTo(1);
+    expect(trimOffsetDb(trimDragValue(0, -20))).toBeCloseTo(-1);
+  });
+
+  it('quantizes to 0.1 dB ticks — one tick per 2px', () => {
+    expect(trimOffsetDb(trimDragValue(0, 2))).toBeCloseTo(0.1);
+    expect(trimOffsetDb(trimDragValue(0, 4))).toBeCloseTo(0.2);
+    // Between ticks the value holds one of the neighbours, never a
+    // fractional-tick reading.
+    const between = trimOffsetDb(trimDragValue(0, 3));
+    expect(Math.abs(Math.round(between / 0.1) * 0.1 - between)).toBeLessThan(1e-9);
+  });
+
+  it('is deterministic: same total delta = same value, regardless of path', () => {
+    expect(trimDragValue(0.2, 37)).toBe(trimDragValue(0.2, 37));
+    // Retracing to the start pixel reads the start value (on-grid start).
+    expect(trimOffsetDb(trimDragValue(0.25, 0))).toBeCloseTo(6);
+  });
+
+  it('offsets from the drag-start trim', () => {
+    // +6 dB start, 20px up → +7 dB.
+    expect(trimOffsetDb(trimDragValue(0.25, 20))).toBeCloseTo(7);
   });
 });
