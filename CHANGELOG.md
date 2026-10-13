@@ -4,6 +4,7 @@ All notable changes to manaDJ. Format: [Keep a Changelog](https://keepachangelog
 versions follow [Semantic Versioning](https://semver.org/). Install: [docs/install.md](docs/install.md).
 
 ## [Unreleased]
+- Windows: the backend no longer fails to start on the FEEDBACK lock (POSIX-only `fcntl`), which blocked the 0.1.0-rc.4 Windows installer.
 
 ## [0.1.0-rc.4] - 2026-10-13
 - Beat FX: LOW CUT ECHO, TRANS and ROLL — strip SELECT, keyboard 8/9 and the DDJ-GRV6 SELECT knob; Trans/Roll lock to the target Deck's beatgrid, BEAT ◄ ► now reaches 1/16 and 1/8, tuning in Settings → Performance → Beat FX (#360).
