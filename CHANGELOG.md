@@ -4,6 +4,8 @@ All notable changes to manaDJ. Format: [Keep a Changelog](https://keepachangelog
 versions follow [Semantic Versioning](https://semver.org/). Install: [docs/install.md](docs/install.md).
 
 ## [Unreleased]
+
+## [0.1.0-rc.4] - 2026-10-13
 - Beat FX: LOW CUT ECHO, TRANS and ROLL — strip SELECT, keyboard 8/9 and the DDJ-GRV6 SELECT knob; Trans/Roll lock to the target Deck's beatgrid, BEAT ◄ ► now reaches 1/16 and 1/8, tuning in Settings → Performance → Beat FX (#360).
 - DDJ-GRV6: tilting a side's DRUM RELEASE paddle holds the selected Beat FX on that Deck (whatever ON and CH SELECT say); release lets it ring out. The held channel lights yellow in the mixer's FX target strip (#361).
 - Keyboard map: new Track browsing tab listing the Perform browse-panel keys (deck focus and library focus after Tab); opens there when the library has the keyboard. The EXPORT view's tab is now labeled Export (#337).
@@ -90,6 +92,7 @@ First public release: a DJ library manager and performance app for Apple Silicon
 - No auto-update: download new versions from GitHub Releases.
 - The first launch takes longer than later ones while manaDJ prepares its database and analysis engine.
 
-[Unreleased]: https://github.com/murtaza64/manadj/compare/v0.1.0-rc.3...HEAD
+[Unreleased]: https://github.com/murtaza64/manadj/compare/v0.1.0-rc.4...HEAD
+[0.1.0-rc.4]: https://github.com/murtaza64/manadj/releases/tag/v0.1.0-rc.4
 [0.1.0-rc.3]: https://github.com/murtaza64/manadj/releases/tag/v0.1.0-rc.3
 [0.1.0]: https://github.com/murtaza64/manadj/releases/tag/v0.1.0
