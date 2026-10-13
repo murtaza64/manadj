@@ -4,6 +4,8 @@ All notable changes to manaDJ. Format: [Keep a Changelog](https://keepachangelog
 versions follow [Semantic Versioning](https://semver.org/). Install: [docs/install.md](docs/install.md).
 
 ## [Unreleased]
+
+## [0.1.0-rc.5] - 2026-10-13
 - Windows: the backend no longer fails to start on the FEEDBACK lock (POSIX-only `fcntl`), which blocked the 0.1.0-rc.4 Windows installer.
 
 ## [0.1.0-rc.4] - 2026-10-13
@@ -93,7 +95,8 @@ First public release: a DJ library manager and performance app for Apple Silicon
 - No auto-update: download new versions from GitHub Releases.
 - The first launch takes longer than later ones while manaDJ prepares its database and analysis engine.
 
-[Unreleased]: https://github.com/murtaza64/manadj/compare/v0.1.0-rc.4...HEAD
+[Unreleased]: https://github.com/murtaza64/manadj/compare/v0.1.0-rc.5...HEAD
+[0.1.0-rc.5]: https://github.com/murtaza64/manadj/releases/tag/v0.1.0-rc.5
 [0.1.0-rc.4]: https://github.com/murtaza64/manadj/releases/tag/v0.1.0-rc.4
 [0.1.0-rc.3]: https://github.com/murtaza64/manadj/releases/tag/v0.1.0-rc.3
 [0.1.0]: https://github.com/murtaza64/manadj/releases/tag/v0.1.0
