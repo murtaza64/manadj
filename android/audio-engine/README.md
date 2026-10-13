@@ -1,0 +1,9 @@
+# Native audio module (#370)
+
+Android library path `android/audio-engine`, namespace `dev.manadj.audio`. The app owns the root Gradle files: add `include(":audio-engine")` to settings and `implementation(project(":audio-engine"))` to app dependencies. Oboe 1.11.0 is pinned to its [official release](https://github.com/google/oboe/releases/tag/1.11.0).
+
+`AudioEngine.load(deck, sourceId, descriptor)` duplicates the caller-owned descriptor and returns an accepted command receipt; decode happens on a per-deck worker. `submit(AudioCommand)` is the same seam for UI, Session replay and future Conductor. `snapshot()` is the output-frame/audio epoch and per-deck source position; Compose interpolation is not a playback clock. `appliedCommandId` changes on the callback. Call `close()` off the main thread. Unsupported EQ/FX/stems/scratch/loops/key-lock/sync/PFL are absent from `supportedCapabilities`.
+
+Four 65536-frame stereo float rings cap resident PCM at 2 MiB plus codec/extractor buffers; compressed tracks are decoded incrementally, not expanded into whole-track float arrays. Source data stays under the engine-owned duplicate descriptor, released after workers retire. The realtime callback only reads prefetched PCM and bounded commands, mixes with one stream and writes float stereo. `starvedDeckFrames` counts frames that could not be rendered from a playing deck; `outputXruns` reports stream XRuns separately. Stream error is surfaced; recovery/reopening after device disconnect is a later gate.
+
+Run standalone native mixer tests: `clang++ -std=c++17 -O2 -pthread android/audio-engine/src/main/cpp/Engine.cpp android/audio-engine/src/test/cpp/EngineTest.cpp -o /tmp/manadj-engine-test && /tmp/manadj-engine-test`. App-side Android picker/URI-grant and physical-phone latency checks are outside this module. No latency target is inferred from requesting Oboe LowLatency.
