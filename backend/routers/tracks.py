@@ -294,6 +294,22 @@ def get_track_stem(track_id: int, stem: str, db: Session = Depends(get_db)):
     )
 
 
+@router.post("/{track_id}/stems/reveal")
+def reveal_stems_folder(track_id: int, db: Session = Depends(get_db)):
+    """Open the track's stems folder in the OS file manager (Library row menu)."""
+    from backend.stems import read_meta, stems_dir
+
+    from .app_config import _reveal
+
+    track = crud.get_track(db, track_id)
+    if not track:
+        raise HTTPException(status_code=404, detail="Track not found")
+    folder = stems_dir(track_id)
+    if read_meta(track_id) is None or not folder.is_dir():
+        raise HTTPException(status_code=404, detail="Track has no stems")
+    return _reveal(folder, select=False)
+
+
 @router.post("/{track_id}/stems/split")
 def request_stem_split(track_id: int, db: Session = Depends(get_db)):
     """Enqueue a stem-split task for one track (stems UI's "extract stems").

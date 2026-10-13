@@ -37,6 +37,13 @@ RESPONSES_GRACE_SECS = 5.0
 _FAILED_FLAGS = ("errored", "cancelled", "rejected", "timedout", "aborted")
 
 
+def _int_or_none(value: Any) -> int | None:
+    try:
+        return int(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
 class SlskdSupplier:
     """Search Supplier over slskd's REST API (localhost daemon)."""
 
@@ -149,7 +156,11 @@ class SlskdSupplier:
         if any(flag in state for flag in _FAILED_FLAGS):
             return TransferStatus(state=TransferState.FAILED)
         if "inprogress" in state:
-            return TransferStatus(state=TransferState.IN_PROGRESS)
+            return TransferStatus(
+                state=TransferState.IN_PROGRESS,
+                bytes_done=_int_or_none(entry.get("bytesTransferred")),
+                bytes_total=_int_or_none(entry.get("size")),
+            )
         return TransferStatus(state=TransferState.QUEUED)
 
     def cancel(self, transfer_id: str) -> None:

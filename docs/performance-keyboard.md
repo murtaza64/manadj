@@ -27,7 +27,7 @@
 | LEVEL/DEPTH (hold + mouse; double-tap = center) | 0 |
 | Beat FX on/off | - |
 
-- `=` toggles global Quantize. `?` and `F1` open the app-wide keyboard map.
+- `=` toggles global Quantize. `?` and `F1` open the app-wide keyboard map; its Track browsing tab lists the browse-panel keys (deck and library focus).
 - `Tab` switches deck/library keyboard focus; `Escape` returns from library focus.
 - Typing and open dialogs suppress deck shortcuts. Size changes, loop toggles, MATCH, Sync and cue deletion ignore key repeat.
 - Sync entry requires a ready track with BPM. Engaged Sync can always be switched off, including while waiting for a track.

@@ -175,3 +175,18 @@ def test_extract_stems_noop_when_current(
 ) -> None:
     res = client.post(f"/api/tracks/{track_with_stems.id}/stems/split").json()
     assert res == {"queued": False, "has_stems": True}
+
+
+def test_reveal_stems_folder(client: TestClient, track_with_stems, make_track, tmp_path: Path, monkeypatch, stems_config) -> None:
+    """Library row menu → Reveal stems folder: opens the folder; 404 without stems."""
+    opened: list[tuple[Path, bool]] = []
+    monkeypatch.setattr(
+        "backend.routers.app_config._reveal",
+        lambda path, select: opened.append((path, select)) or {"revealed": str(path)},
+    )
+    res = client.post(f"/api/tracks/{track_with_stems.id}/stems/reveal")
+    assert res.status_code == 200, res.text
+    assert opened == [(stems_dir(track_with_stems.id, stems_config), False)]
+    bare = make_track(filename=str(tmp_path / "bare.mp3"))
+    assert client.post(f"/api/tracks/{bare.id}/stems/reveal").status_code == 404
+    assert client.post("/api/tracks/999999/stems/reveal").status_code == 404

@@ -118,6 +118,16 @@ export const api = {
       return response.json();
     },
 
+    attention: async (): Promise<TaskRow[]> => {
+      const response = await fetch(`${API_BASE}/tasks/attention`);
+      if (!response.ok) throw new Error('Failed to fetch task worklist');
+      return response.json();
+    },
+    active: async (): Promise<TaskRow[]> => {
+      const response = await fetch(`${API_BASE}/tasks/active`);
+      if (!response.ok) throw new Error('Failed to fetch active tasks');
+      return response.json();
+    },
     list: async (filters?: {
       state?: TaskState;
       type?: string;
@@ -183,6 +193,11 @@ export const api = {
 
     /** Enqueue a stem-split task ("extract stems" button). Dedup rides the
      * task queue; returns { queued, has_stems }. */
+    /** Show the track's stems folder in the OS file manager (404 without stems). */
+    revealStems: async (id: number): Promise<void> => {
+      const res = await fetch(`${API_BASE}/tracks/${id}/stems/reveal`, { method: 'POST' });
+      if (!res.ok) throw new Error(`reveal stems: ${res.status}`);
+    },
     extractStems: async (id: number): Promise<{ queued: boolean; has_stems: boolean }> => {
       const res = await fetch(`${API_BASE}/tracks/${id}/stems/split`, { method: 'POST' });
       if (!res.ok) throw new Error('Failed to request stem split');

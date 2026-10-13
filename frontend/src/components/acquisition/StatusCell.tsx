@@ -71,9 +71,21 @@ export function StatusCell({
         </>
       )}
       {i.stage === 'downloading' && (
-        <span className={`acq-badge acq-badge-downloading acq-via-${dl?.via}`}>
-          ⇣ {dl?.via}
-          {dl?.attempt != null && dl.attempts_total != null && dl.attempts_total > 1 && ` · ${dl.attempt}/${dl.attempts_total}`}
+        <span className="acq-cell-dl" title={`${dl?.via}${dl?.progress_label ? ` · ${dl.progress_label}` : ''}`}>
+          <span className={`acq-badge acq-badge-downloading acq-via-${dl?.via}`}>
+            ⇣ {dl?.via}
+            {dl?.attempt != null && dl.attempts_total != null && dl.attempts_total > 1 && ` · ${dl.attempt}/${dl.attempts_total}`}
+          </span>
+          {dl?.progress != null ? (
+            <>
+              <span className={`acq-cell-bar acq-cell-bar-${dl.via}`}>
+                <span style={{ width: `${Math.round(dl.progress * 100)}%` }} />
+              </span>
+              {!compact && <span className="acq-cell-pct">{dl.progress_label ?? `${Math.round(dl.progress * 100)}%`}</span>}
+            </>
+          ) : (
+            <span className={`acq-cell-bar acq-cell-bar-${dl?.via} acq-cell-bar-indeterminate`} title="no byte count from this supplier yet" />
+          )}
         </span>
       )}
       {i.stage === 'failed' && dl?.cooling_down_until && (
