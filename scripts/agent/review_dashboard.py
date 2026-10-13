@@ -13,6 +13,7 @@ import subprocess
 import threading
 import time
 import uuid
+from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, quote, urlsplit
@@ -88,7 +89,8 @@ def lane_rows(sidecar: Path) -> list[dict]:
                 pass
         rows.append({**data, 'lane': lane, 'revision': revision if SHA_RE.fullmatch(revision) else '',
                      'change': change, 'summary': summary, 'preview': preview,
-                     'route': route, 'prototype': summary.startswith('tmp:') or data.get('kind') == 'prototype'})
+                     'route': route, 'prototype': summary.startswith('tmp:') or data.get('kind') == 'prototype',
+                     'record_updated': record.stat().st_mtime, 'workspace': str(workspace)})
     return rows
 
 
@@ -103,6 +105,72 @@ def mail(sidecar: Path) -> list[dict]:
     answered = {m.get('in_reply_to') for m in messages}
     return sorted([{**m, 'open': m.get('kind') == 'question' and m.get('id') not in answered}
                    for m in messages], key=lambda m: m.get('ts', ''), reverse=True)
+
+
+def grouped_work(rows: list[dict], issues: list[dict], messages: list[dict]) -> list[dict]:
+    """One queue item per canonical issue; only a verified claimant can lead multi-lane work."""
+    by_issue = {str(issue['number']): issue for issue in issues}
+    groups: dict[str, list[dict]] = {}
+    for row in rows:
+        raw = str(row.get('issue', '')).strip()
+        match = re.fullmatch(r'#?(\d+)', raw)
+        key = match[1] if match else f"lane:{row['lane']}"
+        groups.setdefault(key, []).append(row)
+    result = []
+    for key, participants in groups.items():
+        issue = by_issue.get(key, {})
+        labels = set(issue.get('labels') or [])
+        claimants = [r for r in participants if r.get('claim-label') and r['claim-label'] in labels]
+        if not claimants and not issue:
+            claimants = [r for r in participants if r.get('claim-label')]
+        if len(claimants) == 1:
+            primary = claimants[0]
+        elif len(participants) == 1:
+            primary = participants[0]
+        else:
+            primary = None
+        if primary:
+            participants = [primary, *(r for r in participants if r['lane'] != primary['lane'])]
+        lanes = {r['lane'] for r in participants}
+        related = [m for m in messages if m.get('from') in lanes or m.get('to') in lanes]
+        questions = [m for m in related if m.get('open') and m.get('from') in lanes]
+        is_blocked = bool(labels & {'flagged', 'needs-info'})
+        if not primary or questions or is_blocked:
+            section = 'Needs you'
+        elif primary.get('status') in ('parked', 'ready-for-human'):
+            section = 'Ready to test'
+        else:
+            section = 'In progress'
+        result.append({'key': f'issue-{key}' if key.isdigit() else key, 'issue': issue,
+                       'number': key if key.isdigit() else '', 'participants': participants,
+                       'primary': primary, 'messages': related, 'questions': questions,
+                       'section': section, 'blocked': is_blocked})
+    return result
+
+
+def age(timestamp: float) -> str:
+    elapsed = max(0, int(time.time() - timestamp))
+    if elapsed < 60:
+        return 'now'
+    if elapsed < 3600:
+        return f'{elapsed // 60}m ago'
+    if elapsed < 86400:
+        return f'{elapsed // 3600}h ago'
+    return f'{elapsed // 86400}d ago'
+
+
+def activity_line(row: dict, messages: list[dict]) -> tuple[str, str]:
+    newest = next((m for m in messages if m.get('from') == row['lane'] and m.get('text')), None)
+    try:
+        mail_at = datetime.fromisoformat(newest['ts'].replace('Z', '+00:00')).timestamp() if newest else 0
+        record_at = datetime.fromisoformat(row.get('activity-at', '').replace('Z', '+00:00')).timestamp() if row.get('activity-at') else 0
+    except ValueError:
+        mail_at, record_at = 0, 0
+    if mail_at > record_at:
+        return newest['text'].splitlines()[0][:150], age(mail_at)
+    if row.get('activity'):
+        return row['activity'][:150], age(record_at or row.get('record_updated', 0))
+    return 'No current activity note', f"record updated {age(row.get('record_updated', 0))}"
 
 
 class Desk:
@@ -136,6 +204,7 @@ class Desk:
         self.issue_error = ''
         self.issue_at = 0.0
         self.dashboard_url = ''
+        self.runtime_cache: dict[str, tuple[float, str]] = {}
         self.walkthroughs: dict[str, tuple[float, list[str]]] = {}
         cache = directory / 'issues.json'
         self.issue_cache = cache
@@ -177,6 +246,30 @@ class Desk:
         except (OSError, ValueError, subprocess.SubprocessError):
             return cached[1] if cached else []
         return self.walkthroughs[number][1]
+
+    def runtime(self, row: dict) -> str:
+        owner = str(row.get('owner', '')).removeprefix('opencode:')
+        directory = row.get('workspace', '')
+        if not SESSION_RE.fullmatch(owner) or not directory:
+            return 'Unknown'
+        cached = self.runtime_cache.get(owner)
+        if cached and time.time() - cached[0] < 8:
+            return cached[1]
+        query = f'?directory={quote(directory)}'
+        try:
+            with urlopen(f'http://127.0.0.1:4096/session/{owner}{query}', timeout=1) as response:
+                session = json.load(response)
+            if session.get('id') != owner or Path(session.get('directory', '')).resolve() != Path(directory).resolve():
+                raise ValueError('session mismatch')
+            with urlopen(f'http://127.0.0.1:4096/session/status{query}', timeout=1) as response:
+                statuses = json.load(response)
+            status = statuses.get(owner) or 'idle'
+            kind = status.get('type', '') if isinstance(status, dict) else status
+            live = {'busy': 'Running', 'idle': 'Idle', 'retry': 'Waiting'}.get(kind, 'Unknown')
+        except (OSError, ValueError, KeyError):
+            live = 'Unavailable'
+        self.runtime_cache[owner] = (time.time(), live)
+        return live
 
     def enqueue(self, lane: str, kind: str, text: str, key: str, revision: str = '') -> dict:
         if not isinstance(key, str) or not re.fullmatch(r'[A-Za-z0-9-]{8,100}', key):
@@ -376,59 +469,83 @@ class Desk:
 
 def page(desk: Desk) -> str:
     rows, issues, messages = lane_rows(desk.sidecar), desk.issue_rows(), mail(desk.sidecar)
+    work = grouped_work(rows, issues, messages)
     actions = desk.actions()
     esc = html.escape
-    issue_by_number = {str(i['number']): i for i in issues}
     sections = {'Needs you': [], 'Ready to test': [], 'In progress': []}
     details = []
-    for row in rows:
+    for item in work:
+        row = item['primary'] or item['participants'][0]
         lane = row['lane']
-        issue = issue_by_number.get(row.get('issue', '').lstrip('#'), {})
-        related = [m for m in messages if m.get('from') == lane or m.get('to') == lane or m.get('id', '').startswith(lane + '#')]
-        open_questions = [m for m in related if m['open'] and m.get('from') == lane]
-        history = [a for a in actions if a['lane'] == lane]
-        section = 'Needs you' if open_questions else 'Ready to test' if row.get('status') in ('parked', 'ready-for-human') else 'In progress'
+        issue = item['issue']
+        related = item['messages']
+        open_questions = item['questions']
+        history = [a for a in actions if a['lane'] in {p['lane'] for p in item['participants']}]
+        section = item['section']
         title = issue.get('title') or row['summary'] or lane
         short_title = title.split(': ', 1)[1] if ': ' in title else title
         marker = 'question' if open_questions else 'parked' if section == 'Ready to test' else ''
-        issue_number = row.get('issue', '').lstrip('#')
+        issue_number = item['number']
         issue_link = (f'<a href="https://github.com/murtaza64/manadj/issues/{esc(issue_number)}" target="_blank" rel="noopener">#{esc(issue_number)}</a>'
-                      if issue_number.isdigit() else '<span>untracked</span>')
-        sections[section].append(f'''<button class="work-row" type="button" data-lane="{esc(lane)}" aria-pressed="false">
-          <span class="row-top"><span class="row-title">{esc(short_title)}</span><span class="status-mark {marker}">{'?' + str(len(open_questions)) if open_questions else 'READY' if marker else 'ACTIVE'}</span></span>
-          <span class="row-meta"><span class="activity">{esc(row.get('activity') or row['summary'] or lane)}</span><span class="signal">{esc(row.get('issue', ''))}</span></span></button>''')
-        preview = (f'<a class="btn btn-primary" href="{esc(row["preview"])}" target="_blank" rel="noopener">Open preview ↗</a>'
-                   if row['preview'] else '<button class="btn btn-primary" data-kind="preview">Start preview ↗</button>')
-        approval = '' if row['prototype'] or section != 'Ready to test' or not row['revision'] else (
-            f'<button class="btn btn-success" data-kind="approve" data-rev="{esc(row["revision"])}">Approve landing</button>')
+                       if issue_number.isdigit() else '<span>untracked</span>')
+        activity, activity_age = activity_line(row, messages) if item['primary'] else ('Claimed owner unresolved', '')
+        live = desk.runtime(row) if item['primary'] else 'Unknown'
+        sections[section].append(f'''<button class="work-row" type="button" data-lane="{esc(item['key'])}" aria-pressed="false">
+          <span class="row-top"><span class="row-title">{esc(short_title)}</span><span class="status-mark {marker}">{'?' + str(len(open_questions)) if open_questions or not item['primary'] else 'READY' if marker else 'ACTIVE'}</span></span>
+          <span class="row-meta"><span class="activity">{esc(activity)}</span></span>
+          <span class="row-footer"><span>{esc(activity_age)}</span><span class="runtime">{esc(live)}</span>
+            <span class="signal">{esc('#' + issue_number) if issue_number else 'LANE'} · {len(item['participants'])} lane{'s' if len(item['participants']) != 1 else ''}</span></span></button>''')
+        can_approve = bool(item['primary'] and not row['prototype'] and section == 'Ready to test' and row['revision'])
+        target_options = ''.join(
+            f'<option value="{esc(p["lane"])}" data-preview="{esc(p["preview"])}" data-revision="{esc(p["revision"])}" '
+            f'data-can-approve="{str(can_approve and p["lane"] == lane).lower()}" '
+            f'{"selected" if item["primary"] and p["lane"] == lane else ""}>{esc(p["lane"])} '
+            f'({"owner" if item["primary"] and p["lane"] == lane else "support"})</option>'
+            for p in item['participants'])
+        if not item['primary']:
+            target_options = '<option value="" selected>Select a lane to contact</option>' + target_options
+        participants = ''.join(
+            f'<li><span class="status">{"OWNER" if item["primary"] and p["lane"] == lane else "SUPPORT"}</span>'
+            f'<span class="body"><b>{esc(p["lane"])}</b> · {esc(p.get("status", "unknown"))} '
+            f'· {esc(desk.runtime(p))} · {esc(activity_line(p, messages)[1])}'
+            f'<br>session {esc(p.get("owner", "unknown"))} · {esc(activity_line(p, messages)[0])}</span></li>'
+            for p in item['participants'])
         questions = ''.join(f'<li>{esc(m.get("text", "")[:800])}</li>' for m in open_questions[:5])
-        question_section = (f'<section class="detail-section"><h2 class="section-label">Needs your answer · {len(open_questions)}</h2><ul class="question-list">{questions}</ul></section>'
-                            if open_questions else '')
-        walkthroughs = desk.walkthrough(row.get('issue', '')) if section == 'Ready to test' else []
+        question_section = (f'<section class="detail-section"><h2 class="section-label">Needs your answer · {len(open_questions)}</h2><ul class="question-list">{questions}</ul></section>' if open_questions else '')
+        walkthroughs = desk.walkthrough(issue_number) if section == 'Ready to test' else []
         evidence = ''.join(f'<li><span class="status">WALKTHROUGH</span><span class="body">{esc(text)}</span></li>' for text in walkthroughs)
         evidence += ''.join(f'<li><span class="status">{esc(m.get("kind", "MAIL").upper())}</span><span class="body">{esc(m.get("text", "")[:500])}</span></li>' for m in related[:5])
         audit = ''.join(
             f'<li><span class="status {esc(a["state"])}">{esc(a["kind"])} · {esc(a["state"])}</span>'
-            f'<span class="body {"stale" if a["kind"] == "approve" and a["revision"] != row["revision"] else ""}">'
-            f'{"REVIEWED REVISION CHANGED · " if a["kind"] == "approve" and a["revision"] != row["revision"] else ""}'
+            f'<span class="body {"stale" if a["kind"] == "approve" and a["state"] != "completed" and a["revision"] != next((p["revision"] for p in item["participants"] if p["lane"] == a["lane"]), "") else ""}">'
+            f'{"REVIEWED REVISION CHANGED · " if a["kind"] == "approve" and a["state"] != "completed" and a["revision"] != next((p["revision"] for p in item["participants"] if p["lane"] == a["lane"]), "") else ""}'
             f'{esc(a["text"][:200] or a["revision"][:12] or a["mail_id"])} {esc(a["error"])} {esc(a["result"][:250])}</span>'
             + (f'<button class="btn btn-small" data-retry="{esc(a["id"])}">Retry</button>' if a['state'] == 'failed' else '')
             + (f'<button class="btn btn-small" data-wake="{esc(a["id"])}">Retry wake</button>' if a['state'] == 'dispatched' and a['error'] else '')
             + '</li>' for a in history[:12])
-        details.append(f'''<article class="detail" data-lane="{esc(lane)}">
-          <div class="detail-head"><div class="trail">{issue_link}<span>/</span><span>{esc(lane)}</span></div>
-            <h1>{esc(short_title)}</h1><span class="state {marker}">{esc(row.get('status', '') or 'active')}{' · question' if open_questions else ''}</span>
+        details.append(f'''<article class="detail" data-lane="{esc(item['key'])}">
+          <div class="detail-head"><div class="trail">{issue_link}<span>/</span><span>{esc(lane if item['primary'] else 'owner unresolved')}</span></div>
+            <h1>{esc(short_title)}</h1><span class="state {marker}">{esc(section)}{' · question' if open_questions else ''}</span>
           </div><div class="detail-inner">{question_section}
+            <section class="detail-section"><h2 class="section-label">Latest owner update · {esc(activity_age)} · {esc(live)}</h2>
+              <p class="scope">{esc(activity)}</p></section>
             <section class="detail-section"><h2 class="section-label">Scope</h2>
               <p class="scope">{esc(issue.get('body', '') or row['summary'] or 'No issue summary available.')}</p></section>
+            <section class="detail-section"><h2 class="section-label">Participating lanes · {len(item['participants'])}</h2>
+              <ul class="history-list">{participants}</ul></section>
             <section class="detail-section"><h2 class="section-label">Working copy</h2><div class="facts">
-              <span>LANE <b>{esc(lane)}</b></span><span>CHANGE <b>{esc(row['change'])}</b></span>
-              <span>REV <b>{esc(row['revision'][:12] or 'unavailable')}</b></span>
-              <span>TYPE <b>{'prototype · feedback only' if row['prototype'] else 'landable'}</b></span>
+              <span>OWNER <b>{esc(lane if item['primary'] else 'unresolved')}</b></span>
+              <span>CHANGE <b>{esc(row['change'] if item['primary'] else '—')}</b></span>
+              <span>REV <b>{esc(row['revision'][:12] if item['primary'] and row['revision'] else 'unavailable')}</b></span>
+              <span>TYPE <b>{'prototype · feedback only' if row['prototype'] else 'landable' if item['primary'] else 'unverified'}</b></span>
             </div></section>
             <section class="detail-section"><h2 class="section-label">Review actions</h2>
-              <div class="action-strip">{preview}{approval}</div>
-              <p class="action-note">{'Prototype — never lands.' if row['prototype'] else 'Landing approval pins the exact revision above; the orchestrator performs the gate.'}</p></section>
+              <label class="target-label" for="target-{esc(item['key'])}">Route to</label>
+              <select class="target-lane" id="target-{esc(item['key'])}">{target_options}</select>
+              <div class="action-strip"><a class="btn btn-primary preview-open" href="#" target="_blank" rel="noopener" hidden>Open preview ↗</a>
+                <button class="btn btn-primary preview-start" data-kind="preview" hidden>Start preview ↗</button>
+                <button class="btn btn-success approval" data-kind="approve" hidden>Approve landing</button></div>
+              <p class="action-note">{'Prototype — never lands.' if row['prototype'] else 'Landing approval pins the selected owner revision; the orchestrator performs the gate.'}</p></section>
             <section class="detail-section"><h2 class="section-label">Feedback to owning lane</h2>
               <div class="feedback-form"><textarea placeholder="What should change? Draft stays here during refresh."></textarea>
               <button class="btn btn-primary submit" data-kind="feedback">Send feedback →</button></div></section>
@@ -462,7 +579,7 @@ def page(desk: Desk) -> str:
       <details class="mobile-feature-menu"><summary>Features · {len(features)} tracked</summary><div class="feature-list">{feature_links}</div></details>
       <main class="shell"><aside class="feature-pane"><div class="pane-heading"><h2>Features</h2><small>{len(features)} tracked</small></div>
         <div class="feature-list">{f'<p class="issue-error">{esc(desk.issue_error)}</p>' if desk.issue_error else ''}{feature_links}</div></aside>
-        <section class="queue-pane" aria-label="Lane queue"><div class="pane-heading"><h2>Lane queue</h2><small>{len(rows)} live</small></div>{groups}</section>
+        <section class="queue-pane" aria-label="Work queue"><div class="pane-heading"><h2>Work queue</h2><small>{len(work)} work · {len(rows)} lanes</small></div>{groups}</section>
         <section class="detail-pane" aria-label="Review detail">{''.join(details) or '<div class="pane-heading">No active lanes</div>'}</section>
       </main><div class="notice" id="notice" role="status"></div></body></html>'''
 

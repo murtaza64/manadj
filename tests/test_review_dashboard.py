@@ -208,6 +208,59 @@ class ReviewDeskTests(unittest.TestCase):
         self.assertEqual(rejected.exception.code, 403)
         self.assertEqual(self.desk.actions(), [])
 
+    def test_claimed_issue_is_one_active_item_despite_parked_support(self):
+        author = {'lane': 'phone-author', 'issue': '#365', 'claim-label': 'agent:phone-author',
+                  'status': 'active', 'prototype': True}
+        critique = {'lane': 'phone-critique', 'issue': '365', 'status': 'parked', 'kind': 'prototype'}
+        design = {'lane': 'phone-design', 'issue': '365', 'support-for': 'phone-author', 'status': 'parked'}
+        issue = {'number': 365, 'title': 'Android phone', 'labels': ['agent:phone-author']}
+        items = dashboard.grouped_work([critique, author, design], [issue], [])
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]['section'], 'In progress')
+        self.assertEqual(items[0]['primary']['lane'], 'phone-author')
+        self.assertEqual(len(items[0]['participants']), 3)
+        author['status'] = 'parked'
+        self.assertEqual(dashboard.grouped_work([critique, author, design], [issue], [])[0]['section'], 'Ready to test')
+        issue['labels'].append('flagged')
+        self.assertEqual(dashboard.grouped_work([critique, author, design], [issue], [])[0]['section'], 'Needs you')
+
+    def test_unclaimed_multi_lane_issue_requires_explicit_target_and_untracked_lane_stays_separate(self):
+        rows = [{'lane': 'support-a', 'issue': '365', 'status': 'parked'},
+                {'lane': 'support-b', 'issue': '#365', 'status': 'parked'},
+                {'lane': 'scratch', 'issue': '', 'status': 'active'}]
+        items = dashboard.grouped_work(rows, [{'number': 365, 'labels': []}], [])
+        self.assertEqual(len(items), 2)
+        grouped = next(item for item in items if item['number'] == '365')
+        self.assertIsNone(grouped['primary'])
+        self.assertEqual(grouped['section'], 'Needs you')
+        self.assertEqual(next(item for item in items if not item['number'])['primary']['lane'], 'scratch')
+
+    def test_runtime_distinguishes_running_idle_and_unavailable(self):
+        row = {'owner': 'ses_fixture123', 'workspace': str(self.root)}
+        class Response:
+            def __init__(self, data):
+                self.data = data
+            def __enter__(self):
+                return self
+            def __exit__(self, *_):
+                return None
+            def read(self, *_):
+                return json.dumps(self.data).encode()
+        def live(url, timeout):
+            if '/session/status?' in url:
+                return Response({'ses_fixture123': {'type': 'busy'}})
+            return Response({'id': 'ses_fixture123', 'directory': str(self.root)})
+        with patch.object(dashboard, 'urlopen', side_effect=live):
+            self.assertEqual(self.desk.runtime(row), 'Running')
+        self.desk.runtime_cache.clear()
+        with patch.object(dashboard, 'urlopen', side_effect=lambda url, timeout: Response(
+            {} if '/session/status?' in url else {'id': 'ses_fixture123', 'directory': str(self.root)}
+        )):
+            self.assertEqual(self.desk.runtime(row), 'Idle')
+        self.desk.runtime_cache.clear()
+        with patch.object(dashboard, 'urlopen', side_effect=OSError('daemon offline')):
+            self.assertEqual(self.desk.runtime(row), 'Unavailable')
+
 
 if __name__ == '__main__':
     unittest.main()
