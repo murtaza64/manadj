@@ -81,7 +81,7 @@ import dev.manadj.audio.DeckId
     val clock = remember(ui.id) { SmoothClock() }
     // Engine output-timestamp clock (what is heard now), eased by SmoothClock; raw snapshot when no timestamp.
     // Only read model.output while moving: it changes every engine tick and would redraw idle waves at 30 fps.
-    fun heard(now: Long): Double { if (now == 0L) return position(ui); val out = model.output; return if (out != null && ui.source?.id == ui.snapshot?.sourceId) out.audibleSeconds(ui.id, now) else position(ui) }
+    fun heard(now: Long): Double { ux.seekPreview[ui.id]?.let { return it }; if (now == 0L) return position(ui); val out = model.output; return if (out != null && ui.source?.id == ui.snapshot?.sourceId) out.audibleSeconds(ui.id, now) else position(ui) }
     WaveView(wave, { clock.at(frame.value, heard(frame.value), moving && frame.value != 0L, playbackRate(ui)) }, ui.durationSeconds, marksOf(ui), modifier.semantics { contentDescription = "${ui.id} detail wave" }.pinchZoom(ux),
         vertical = vertical, windowSeconds = ux.waveSeconds * tempoRate(ui), live = { ux.strip(ui) }, history = e.history, accent = deckColor(ui.id),
         status = when { ui.source == null -> "${ui.id} · no track"; wave == null -> if (ux.waveSource[ui.source?.id] == "failed") "no waveform" else "analysing…"; !wave.complete -> "analysing ${(100 * wave.frames * wave.bandHop / wave.sampleRate / (ui.durationSeconds ?: 1.0)).toInt().coerceIn(0, 99)}%"; else -> null })
@@ -180,9 +180,9 @@ fun mixOf(model: PlayerModel, ux: UiModel, id: DeckId): DeckMix {
             }
             // Minimaps flank the centre BROWSE key.
             Row(pad.fillMaxWidth().height(if (tight) 36.dp else 44.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                Minimap(a, model, ux.waves[a.source?.id ?: ""], Modifier.weight(1f).fillMaxHeight())
+                Minimap(a, model, ux.waves[a.source?.id ?: ""], Modifier.weight(1f).fillMaxHeight(), preview = ux.seekPreview)
                 BrowseKey(model, ux, Modifier.width(84.dp).fillMaxHeight())
-                Minimap(b, model, ux.waves[b.source?.id ?: ""], Modifier.weight(1f).fillMaxHeight())
+                Minimap(b, model, ux.waves[b.source?.id ?: ""], Modifier.weight(1f).fillMaxHeight(), preview = ux.seekPreview)
             }
             Row(pad.fillMaxWidth().height(28.dp), horizontalArrangement = Arrangement.spacedBy(DeckGap)) { for (ui in listOf(a, b)) StemsStrip(ui, ux, model, Modifier.weight(1f).fillMaxHeight()) }
             Row(pad.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(DeckGap)) { for (ui in listOf(a, b)) Pads(ui, model, ux, Modifier.weight(1f), 4, if (tight) 46.dp else PadRow) }
@@ -236,7 +236,7 @@ fun mixOf(model: PlayerModel, ux: UiModel, id: DeckId): DeckMix {
     Box(modifier) {
         Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(5.dp)) {
             DeckInfo(ui, model, Modifier.fillMaxWidth().height(38.dp).screenSafe(), compact = true)
-            Minimap(ui, model, ux.waves[ui.source?.id ?: ""], Modifier.fillMaxWidth().height(40.dp).screenSafe())
+            Minimap(ui, model, ux.waves[ui.source?.id ?: ""], Modifier.fillMaxWidth().height(40.dp).screenSafe(), preview = ux.seekPreview)
             Pads(ui, model, ux, Modifier.fillMaxWidth().weight(1f).screenSafe(), 4, Dp.Unspecified)
             StemsStrip(ui, ux, model, Modifier.fillMaxWidth().height(26.dp).screenSafe())
             LoopStrip(ui, ux, model, Modifier.fillMaxWidth().height(40.dp).screenSafe())

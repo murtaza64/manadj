@@ -90,6 +90,8 @@ class UiModel(application: Application) : AndroidViewModel(application) {
         private set
     val library: LibrarySource get() = synced ?: FixtureLibrary
     fun sync() = viewModelScope.launch { repo.sync() }
+    /** Minimap drag position per deck (detail waves follow it live). */
+    val seekPreview = mutableStateMapOf<DeckId, Double>()
     /** Library track ids played this session (browser dims them). */
     val played = mutableStateListOf<Long>()
     /** Monotonic load time per deck (landscape BROWSE picks the least recently loaded as outgoing). */
