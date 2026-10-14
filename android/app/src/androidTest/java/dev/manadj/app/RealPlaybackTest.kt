@@ -70,10 +70,10 @@ class RealPlaybackTest {
 
     @Test fun twoRealTracksKeepTheirAudioClockAcrossEveryLayout() {
         load(DeckId.A, tone(220.0)); load(DeckId.B, tone(330.0))
-        onMain { model.submit(AudioCommand.Play(DeckId.A)); model.submit(AudioCommand.Play(DeckId.B)) }
+        onMain { DeckId.entries.take(2).forEach { model.updateFader(it, 0.0); model.submit(AudioCommand.Play(it)) } } // Silent on the test host.
         await("A/B output advances") { model.output!!.decks.values.filter { it.playing }.size == 2 && model.decks.getValue(DeckId.A).snapshot!!.sourceFrame > 1000 }
         val epoch = model.output!!.epoch
-        for (layout in 0..2) {
+        for (layout in Layout.entries) {
             val before = model.output!!.outputFrames
             onMain { model.chooseLayout(layout) }
             await("layout $layout preserves output") { model.layout == layout && model.output!!.outputFrames > before }
@@ -103,7 +103,7 @@ class RealPlaybackTest {
         assertEquals(.4, model.output!!.decks.getValue(DeckId.A).fader, .0001)
         assertEquals(.6, model.output!!.decks.getValue(DeckId.A).trim, .0001)
         assertEquals(4.0, model.output!!.decks.getValue(DeckId.A).pitchPercent, .0001)
-        assertEquals(.2, model.output!!.crossfade, .0001)
+        assertEquals(-.6, model.output!!.crossfade, .0001) // Fader throw .2 => engine -1..1.
         onMain { model.updateBend(DeckId.A, 2.0); model.cancelGestures(); model.updateBend(DeckId.A, 0.0) }
         assertEquals(0.0, model.decks.getValue(DeckId.A).bend, 0.0)
     }

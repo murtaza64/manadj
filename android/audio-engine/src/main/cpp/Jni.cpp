@@ -2,45 +2,82 @@
 #include <jni.h>
 #include <oboe/Oboe.h>
 #include <memory>
+#include <mutex>
 #include <vector>
 
 namespace {
+constexpr int kHeader = 13;
+constexpr int kDeckFields = 20 + manadj::kHotCues;
+constexpr int kSnapshotSize = kHeader + manadj::kDeckCount * kDeckFields;
+
+/*
+ * One output stream feeding one Engine. The engine (queue, rings, clocks)
+ * outlives any stream: after a disconnect (route change, BT drop) Oboe closes
+ * the stream and onErrorAfterClose opens a replacement on Oboe's error thread.
+ * streamMutex_ is never taken on the audio callback.
+ */
 struct Output final : oboe::AudioStreamDataCallback, oboe::AudioStreamErrorCallback {
     manadj::Engine engine;
+    std::mutex streamMutex;
     std::shared_ptr<oboe::AudioStream> stream;
-    std::atomic<int> streamError{0};
+    std::atomic<bool> closing{false};
+    std::atomic<int> lastError{0};
+    std::atomic<int> reopenCount{0};
+    std::atomic<int64_t> xruns{0};
+    std::atomic<int64_t> xrunBase{0};
+    int callbacks = 0;
 
-    int start() {
+    int openLocked() {
         oboe::AudioStreamBuilder builder;
         builder.setDirection(oboe::Direction::Output)
             ->setFormat(oboe::AudioFormat::Float)
             ->setChannelCount(2)
             ->setSharingMode(oboe::SharingMode::Shared)
             ->setPerformanceMode(oboe::PerformanceMode::LowLatency)
+            ->setUsage(oboe::Usage::Media)
+            ->setContentType(oboe::ContentType::Music)
             ->setDataCallback(this)
             ->setErrorCallback(this);
-        const auto result = builder.openStream(stream);
-        if (result != oboe::Result::OK) return static_cast<int>(result);
-        engine.setOutputRate(stream->getSampleRate());
-        const auto started = stream->requestStart();
+        std::shared_ptr<oboe::AudioStream> opened;
+        const auto result = builder.openStream(opened);
+        if (result != oboe::Result::OK) { lastError.store(static_cast<int>(result)); return static_cast<int>(result); }
+        engine.setOutputRate(opened->getSampleRate());
+        const auto started = opened->requestStart();
         if (started != oboe::Result::OK) {
-            stream->close();
-            stream.reset();
+            opened->close();
+            lastError.store(static_cast<int>(started));
             return static_cast<int>(started);
         }
+        stream = opened;
+        lastError.store(0);
         return 0;
     }
 
-    oboe::DataCallbackResult onAudioReady(oboe::AudioStream*, void* buffer, int32_t frames) override {
+    int open() { std::lock_guard<std::mutex> lock(streamMutex); return stream ? 0 : openLocked(); }
+
+    oboe::DataCallbackResult onAudioReady(oboe::AudioStream* s, void* buffer, int32_t frames) override {
         engine.render(static_cast<float*>(buffer), frames);
+        if ((++callbacks & 63) == 0) {
+            const auto count = s->getXRunCount();
+            if (count) xruns.store(xrunBase.load(std::memory_order_relaxed) + count.value(), std::memory_order_relaxed);
+        }
         return oboe::DataCallbackResult::Continue;
     }
 
     void onErrorAfterClose(oboe::AudioStream*, oboe::Result error) override {
-        streamError.store(static_cast<int>(error));
+        std::lock_guard<std::mutex> lock(streamMutex);
+        lastError.store(static_cast<int>(error));
+        stream.reset();
+        xrunBase.store(xruns.load());
+        if (closing.load()) return;
+        // Oboe permits reopening from this callback; a failure leaves outputOpen
+        // false and the app may retry via nativeReopen.
+        if (openLocked() == 0) reopenCount.fetch_add(1);
     }
 
     void stop() {
+        closing.store(true);
+        std::lock_guard<std::mutex> lock(streamMutex);
         if (stream) {
             stream->requestStop();
             stream->close();
@@ -55,8 +92,18 @@ Output* output(jlong handle) { return reinterpret_cast<Output*>(handle); }
 extern "C" JNIEXPORT jlong JNICALL
 Java_dev_manadj_audio_AudioEngine_nativeOpen(JNIEnv*, jobject, jboolean offline) {
     auto sink = std::make_unique<Output>();
-    if (!offline && sink->start() != 0) return 0;
+    if (!offline && sink->open() != 0) return 0;
     return reinterpret_cast<jlong>(sink.release());
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_dev_manadj_audio_AudioEngine_nativeReopen(JNIEnv*, jobject, jlong handle) {
+    return output(handle)->open();
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_dev_manadj_audio_AudioEngine_nativeStop(JNIEnv*, jobject, jlong handle) {
+    output(handle)->stop();
 }
 
 extern "C" JNIEXPORT void JNICALL
@@ -67,56 +114,101 @@ Java_dev_manadj_audio_AudioEngine_nativeClose(JNIEnv*, jobject, jlong handle) {
 
 extern "C" JNIEXPORT jlong JNICALL
 Java_dev_manadj_audio_AudioEngine_nativeSubmit(JNIEnv*, jobject, jlong handle, jint op, jint deck,
-                                                  jdouble value, jlong generation, jint rate, jint channels) {
-    if (op < 0 || op > static_cast<int>(manadj::Op::End)) return 0;
-    return output(handle)->engine.submit(static_cast<manadj::Op>(op), deck, value, generation, rate, channels);
+                                                  jdouble value, jlong load, jint slot) {
+    if (op < 0 || op > static_cast<int>(manadj::Op::Bend)) return 0;
+    return static_cast<jlong>(output(handle)->engine.submit(static_cast<manadj::Op>(op), deck, value,
+                                                            static_cast<uint64_t>(load), slot));
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_dev_manadj_audio_AudioEngine_nativeTransport(JNIEnv* env, jobject, jlong handle, jint deck, jdoubleArray out) {
+    if (deck < 0 || deck >= manadj::kDeckCount || env->GetArrayLength(out) < 3) return;
+    const auto& d = output(handle)->engine.deck(deck);
+    const double values[3] = {static_cast<double>(d.loadId.load()), static_cast<double>(d.transport.load()), d.target.load()};
+    env->SetDoubleArrayRegion(out, 0, 3, values);
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_dev_manadj_audio_AudioEngine_nativeClaim(JNIEnv*, jobject, jlong handle, jint deck, jlong load,
+                                                 jlong transport, jint rate, jdouble start) {
+    return output(handle)->engine.claim(deck, static_cast<uint64_t>(load), static_cast<uint64_t>(transport), rate, start);
 }
 
 extern "C" JNIEXPORT jint JNICALL
-Java_dev_manadj_audio_AudioEngine_nativeOffer(JNIEnv* env, jobject, jlong handle, jint deck,
-                                                 jlong generation, jfloatArray samples, jint frames) {
-    if (frames < 1 || static_cast<jsize>(frames * 2) > env->GetArrayLength(samples)) return 0;
-    jfloat* pcm = env->GetFloatArrayElements(samples, nullptr);
-    if (!pcm) return 0;
-    const int count = output(handle)->engine.offer(deck, generation, pcm, frames);
-    env->ReleaseFloatArrayElements(samples, pcm, JNI_ABORT);
-    return count;
+Java_dev_manadj_audio_AudioEngine_nativeOffer(JNIEnv* env, jobject, jlong handle, jint deck, jlong transport,
+                                                 jfloatArray samples, jint offsetFrames, jint frames) {
+    constexpr int kChunk = 1024;
+    if (frames < 1 || offsetFrames < 0 ||
+        static_cast<jlong>(offsetFrames + frames) * 2 > env->GetArrayLength(samples)) return -1;
+    float chunk[kChunk * 2];
+    int total = 0;
+    while (total < frames) {
+        const int n = std::min(kChunk, frames - total);
+        env->GetFloatArrayRegion(samples, (offsetFrames + total) * 2, n * 2, chunk);
+        const int accepted = output(handle)->engine.offer(deck, static_cast<uint64_t>(transport), chunk, n);
+        if (accepted < 0) return total ? total : -1;
+        total += accepted;
+        if (accepted < n) break;
+    }
+    return total;
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_dev_manadj_audio_AudioEngine_nativePublish(JNIEnv*, jobject, jlong handle, jint deck, jlong load,
+                                                   jlong transport, jboolean eof) {
+    return output(handle)->engine.publish(deck, static_cast<uint64_t>(load), static_cast<uint64_t>(transport), eof);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_dev_manadj_audio_AudioEngine_nativeFail(JNIEnv*, jobject, jlong handle, jint deck, jlong load) {
+    output(handle)->engine.fail(deck, static_cast<uint64_t>(load));
 }
 
 extern "C" JNIEXPORT jdoubleArray JNICALL
 Java_dev_manadj_audio_AudioEngine_nativeSnapshot(JNIEnv* env, jobject, jlong handle) {
     auto* sink = output(handle);
     const auto& e = sink->engine;
-    // Header: frames, rate, output channels, epoch, starved frames, xrun count,
-    // stream error, last accepted, last applied, crossfade. Decks: state, generation,
-    // source seconds, source rate, playing, preview, cue, applied, buffered,
-    // fader, trim, pitch, bend.
-    double data[11 + 4 * 13] = {
-        static_cast<double>(e.outputFrames()), static_cast<double>(e.outputRate()), 2, 1,
-        static_cast<double>(e.starvedFrames()),
-        sink->stream ? static_cast<double>(sink->stream->getXRunCount().value()) : 0,
-        static_cast<double>(sink->streamError.load()), static_cast<double>(e.accepted()),
-        static_cast<double>(e.applied()), e.crossfade(), sink->stream ? 1.0 : 0.0
-    };
-    for (int i = 0; i < 4; ++i) {
-        const auto& d = sink->engine.deck(i);
-        const int n = 11 + i * 13;
-        data[n] = d.state.load();
-        data[n + 1] = static_cast<double>(d.generation.load());
-        data[n + 2] = d.position.load();
-        data[n + 3] = d.sampleRate.load();
-        data[n + 4] = d.playing.load();
-        data[n + 5] = d.preview.load();
-        data[n + 6] = d.cue.load();
-        data[n + 7] = static_cast<double>(d.applied.load());
-        data[n + 8] = static_cast<double>(d.write.load() - d.read.load());
-        data[n + 9] = d.fader.load();
-        data[n + 10] = d.trim.load();
-        data[n + 11] = d.pitch.load();
-        data[n + 12] = d.bend.load();
+    bool open;
+    {
+        std::lock_guard<std::mutex> lock(sink->streamMutex);
+        open = sink->stream && sink->stream->getState() == oboe::StreamState::Started;
     }
-    auto result = env->NewDoubleArray(63);
-    if (result) env->SetDoubleArrayRegion(result, 0, 63, data);
+    double data[kSnapshotSize] = {
+        static_cast<double>(e.outputFrames()), static_cast<double>(e.outputRate()), 2, 1,
+        static_cast<double>(e.starvedFrames()), static_cast<double>(sink->xruns.load()),
+        static_cast<double>(sink->lastError.load()), static_cast<double>(e.accepted()),
+        static_cast<double>(e.applied()), e.crossfade(), open ? 1.0 : 0.0,
+        static_cast<double>(sink->reopenCount.load()), 0,
+    };
+    for (int i = 0; i < manadj::kDeckCount; ++i) {
+        const auto& d = e.deck(i);
+        const int n = kHeader + i * kDeckFields;
+        const auto status = d.status.load();
+        const auto transport = d.transport.load();
+        data[n] = static_cast<double>(status & 3);
+        data[n + 1] = static_cast<double>(status >> 2);
+        data[n + 2] = static_cast<double>(d.loadId.load());
+        data[n + 3] = static_cast<double>(transport);
+        data[n + 4] = d.ring.load() == transport ? 1 : 0;
+        data[n + 5] = d.eof.load() == transport ? 1 : 0;
+        data[n + 6] = d.position.load();
+        data[n + 7] = d.sampleRate.load();
+        data[n + 8] = d.playing.load();
+        data[n + 9] = d.preview.load();
+        data[n + 10] = d.previewSlot.load();
+        data[n + 11] = d.cue.load();
+        data[n + 12] = static_cast<double>(d.applied.load());
+        data[n + 13] = static_cast<double>(d.write.load() - d.read.load());
+        data[n + 14] = d.fader.load();
+        data[n + 15] = d.trim.load();
+        data[n + 16] = d.pitch.load();
+        data[n + 17] = d.bend.load();
+        data[n + 18] = 0;
+        data[n + 19] = 0;
+        for (int h = 0; h < manadj::kHotCues; ++h) data[n + 20 + h] = d.hotcues[h].load();
+    }
+    auto result = env->NewDoubleArray(kSnapshotSize);
+    if (result) env->SetDoubleArrayRegion(result, 0, kSnapshotSize, data);
     return result;
 }
 

@@ -1,66 +1,222 @@
+// Standalone mixer/transport tests (no Android): see android/audio-engine/README.md.
 #include "../../main/cpp/Engine.h"
-#include <cassert>
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
+#include <memory>
 #include <vector>
 
-using manadj::Engine;
-using manadj::Op;
+using namespace manadj;
+
+#define CHECK(cond) do { if (!(cond)) { std::fprintf(stderr, "%s:%d CHECK failed: %s\n", __FILE__, __LINE__, #cond); std::exit(1); } } while (0)
+
+namespace {
+std::vector<float> out(48000 * 2);
+
+void tick(Engine& e, int frames = 1) { e.render(out.data(), frames); }
+
+// Emulates the decode worker: refill the current transport with constant PCM.
+void feed(Engine& e, int deck, uint64_t load, float value, int frames, bool eof = false) {
+    auto& d = e.deck(deck);
+    const auto transport = d.transport.load();
+    CHECK(e.claim(deck, load, transport, 48000, d.target.load()));
+    std::vector<float> pcm(static_cast<size_t>(frames) * 2, value);
+    CHECK(e.offer(deck, transport, pcm.data(), frames) == frames);
+    CHECK(e.publish(deck, load, transport, eof));
+}
+
+State state(Engine& e, int deck) { return static_cast<State>(e.deck(deck).status.load() & 3); }
+
+void loadDeck(Engine& e, int deck, uint64_t load, float value, int frames = 48000) {
+    e.submit(Op::Prepare, deck, 0, load);
+    tick(e);
+    CHECK(state(e, deck) == kLoading);
+    feed(e, deck, load, value, frames);
+    CHECK(state(e, deck) == kReady);
+}
+} // namespace
 
 int main() {
-    Engine engine(48000);
-    std::vector<float> out(48000 * 2);
-    std::vector<float> tone(48000 * 2, .5f);
-    for (int deck = 0; deck < 2; ++deck) {
-        const auto prepare = engine.submit(Op::Prepare, deck, 0, 1, 48000, 2);
-        engine.render(out.data(), 1);
-        assert(engine.deck(deck).applied.load() == prepare);
-        assert(engine.offer(deck, 0, tone.data(), 100) == 0);
-        assert(engine.offer(deck, 1, tone.data(), 48000) == 48000);
-        engine.submit(Op::Ready, deck, 0, 1);
-        engine.submit(Op::Play, deck);
-    }
-    engine.render(out.data(), 4096);
-    const auto neutral = .5f * 2 * std::pow(10.f, -6.f / 20.f);
-    assert(std::abs(out[8190] - neutral) < .001);
-    assert(engine.outputFrames() == 4098);
-    assert(engine.deck(0).position.load() > .08);
-    const auto a = engine.deck(0).position.load();
-    engine.submit(Op::Crossfade, 0, 1);
-    engine.render(out.data(), 4096);
-    assert(std::abs(out[8190] - neutral / 2) < .001);
-    engine.submit(Op::Fader, 1, .5);
-    engine.render(out.data(), 4096);
-    assert(std::abs(out[8190] - neutral / 8) < .001);
-    engine.submit(Op::Pause, 0);
-    engine.submit(Op::Pause, 1);
-    engine.render(out.data(), 1024);
-    assert(out[2046] == 0);
-    assert(engine.deck(0).position.load() > a);
-    engine.submit(Op::Seek, 0, 6., 2, 48000, 2);
-    engine.render(out.data(), 1);
-    assert(engine.offer(0, 1, tone.data(), 128) == 0);
-    assert(std::abs(engine.deck(0).position.load() - 6.) < .000001);
-    assert(engine.deck(0).state.load() == 1);
-    engine.offer(0, 2, tone.data(), 8192);
-    engine.submit(Op::Ready, 0, 0, 2);
-    engine.submit(Op::CueDown, 0);
-    engine.render(out.data(), 1);
-    assert(engine.deck(0).cue.load() == 6);
-    engine.submit(Op::CueDown, 0);
-    engine.render(out.data(), 1024);
-    assert(engine.deck(0).preview.load());
-    assert(engine.deck(0).position.load() > 6);
-    engine.submit(Op::CueUp, 0);
-    engine.render(out.data(), 100);
-    assert(!engine.deck(0).preview.load());
-    const auto parked = engine.deck(0).position.load();
-    engine.render(out.data(), 100);
-    assert(engine.deck(0).position.load() == parked);
+    const float unity = std::pow(10.f, -6.f / 20.f); // trim .5 => -6 dB headroom.
 
-    engine.submit(Op::Pitch, 0, 25);
-    engine.submit(Op::Bend, 0, 8);
-    engine.submit(Op::Play, 0);
-    engine.render(out.data(), 480);
-    assert(engine.deck(0).position.load() - parked > .013);
-    assert(engine.starvedFrames() == 0);
+    { // Two decks mix; crossfade -1..1; fader law.
+        auto owned = std::make_unique<Engine>(48000);
+        Engine& e = *owned;
+        loadDeck(e, 0, 1, .25f);
+        loadDeck(e, 1, 2, .25f);
+        e.submit(Op::Play, 0);
+        e.submit(Op::Play, 1);
+        tick(e, 4096);
+        CHECK(std::abs(out[8190] - .5f * unity) < .001);
+        CHECK(e.deck(0).position.load() > .08);
+        e.submit(Op::Crossfade, 0, -1);
+        tick(e, 4096);
+        CHECK(std::abs(out[8190] - .25f * unity) < .001);
+        e.submit(Op::Crossfade, 0, 0);
+        e.submit(Op::Fader, 1, .5);
+        tick(e, 4096);
+        CHECK(std::abs(out[8190] - (.25f + .25f / 4) * unity) < .001);
+        CHECK(e.starvedFrames() == 0);
+    }
+
+    { // Relocation hides old PCM until the worker refills; stale offers are refused.
+        auto owned = std::make_unique<Engine>(48000);
+        Engine& e = *owned;
+        loadDeck(e, 0, 1, .25f);
+        e.submit(Op::Play, 0);
+        tick(e, 256);
+        const auto old = e.deck(0).transport.load();
+        e.submit(Op::Seek, 0, 0.5);
+        tick(e, 256);
+        CHECK(out[510] == 0);                        // silent while refilling
+        CHECK(e.deck(0).playing.load());             // intent kept
+        CHECK(e.deck(0).position.load() == 0.5);     // clock held at target
+        float pcm[64] = {};
+        CHECK(e.offer(0, old, pcm, 32) == -1);
+        CHECK(!e.claim(0, 1, old, 48000, 0));
+        CHECK(e.starvedFrames() == 0);
+        feed(e, 0, 1, -.25f, 4096);
+        tick(e, 512);
+        CHECK(out[1022] < -.2f * unity);
+    }
+
+    { // A superseded load cannot become READY or ERROR.
+        auto owned = std::make_unique<Engine>(48000);
+        Engine& e = *owned;
+        e.submit(Op::Prepare, 0, 0, 1);
+        tick(e);
+        e.submit(Op::Prepare, 0, 0, 2);
+        tick(e);
+        const auto t = e.deck(0).transport.load();
+        CHECK(!e.claim(0, 1, t, 48000, 0));
+        e.publish(0, 1, t, false);
+        CHECK(state(e, 0) == kLoading);
+        e.fail(0, 1);
+        CHECK(state(e, 0) == kLoading);
+        e.fail(0, 2);
+        CHECK(state(e, 0) == kError);
+        e.submit(Op::Play, 0);
+        tick(e);
+        CHECK(!e.deck(0).playing.load());
+    }
+
+    { // Main cue: desktop transport.ts semantics.
+        auto owned = std::make_unique<Engine>(48000);
+        Engine& e = *owned;
+        loadDeck(e, 0, 1, .25f);
+        CHECK(e.deck(0).cue.load() == 0);
+        e.submit(Op::CueDown, 0);                     // paused at cue: preview
+        tick(e, 480);
+        CHECK(e.deck(0).preview.load());
+        CHECK(e.deck(0).position.load() > .009);
+        e.submit(Op::CueUp, 0);                       // release: back to cue, paused
+        tick(e);
+        CHECK(!e.deck(0).preview.load());
+        CHECK(e.deck(0).position.load() == 0);
+        feed(e, 0, 1, .25f, 48000);
+        e.submit(Op::Seek, 0, 2.0);
+        tick(e);
+        feed(e, 0, 1, .25f, 48000);
+        e.submit(Op::CueDown, 0);                     // paused off cue: set cue, no preview
+        tick(e, 64);
+        CHECK(e.deck(0).cue.load() == 2.0);
+        CHECK(!e.deck(0).preview.load());
+        e.submit(Op::CueUp, 0);
+        e.submit(Op::Play, 0);
+        tick(e, 4800);
+        e.submit(Op::CueDown, 0);                     // playing: return to cue and pause
+        tick(e);
+        CHECK(!e.deck(0).playing.load());
+        CHECK(e.deck(0).position.load() == 2.0);
+        feed(e, 0, 1, .25f, 48000);
+        e.submit(Op::CueDown, 0);                     // hold preview, press play, release: keeps playing
+        e.submit(Op::Play, 0);
+        e.submit(Op::CueUp, 0);
+        tick(e, 480);
+        CHECK(e.deck(0).playing.load());
+        CHECK(e.deck(0).position.load() > 2.0);
+    }
+
+    { // Hot cues: set captures the applied position; gated preview; jump while playing.
+        auto owned = std::make_unique<Engine>(48000);
+        Engine& e = *owned;
+        loadDeck(e, 0, 1, .25f);
+        e.submit(Op::HotCueDown, 0, 0, 0, 3);        // empty slot: no effect
+        tick(e);
+        CHECK(e.deck(0).previewSlot.load() == -1);
+        e.submit(Op::Seek, 0, 1.5);
+        tick(e);
+        feed(e, 0, 1, .25f, 48000);
+        e.submit(Op::HotCueSet, 0, 0, 0, 3);
+        e.submit(Op::Seek, 0, 4.0);
+        tick(e);
+        CHECK(e.deck(0).hotcues[3].load() == 1.5);
+        feed(e, 0, 1, .25f, 48000);
+        e.submit(Op::HotCueDown, 0, 0, 0, 3);        // paused: jump + gated preview after refill
+        tick(e, 64);
+        CHECK(e.deck(0).previewSlot.load() == 3);
+        CHECK(out[126] == 0);
+        feed(e, 0, 1, .25f, 48000);
+        tick(e, 480);
+        CHECK(out[958] > 0);
+        e.submit(Op::HotCueUp, 0, 0, 0, 2);          // other slot's release: ignored
+        tick(e);
+        CHECK(e.deck(0).preview.load());
+        e.submit(Op::HotCueUp, 0, 0, 0, 3);
+        tick(e);
+        CHECK(!e.deck(0).preview.load());
+        CHECK(e.deck(0).position.load() == 1.5);
+        feed(e, 0, 1, .25f, 48000);
+        e.submit(Op::Seek, 0, 6.0);
+        e.submit(Op::Play, 0);
+        tick(e);
+        feed(e, 0, 1, .25f, 48000);
+        e.submit(Op::HotCueDown, 0, 0, 0, 3);        // playing: jump, keep playing
+        tick(e);
+        CHECK(e.deck(0).playing.load());
+        CHECK(e.deck(0).position.load() == 1.5);
+    }
+
+    { // End of stream stops the deck instead of erroring; pause fades without moving the clock.
+        auto owned = std::make_unique<Engine>(48000);
+        Engine& e = *owned;
+        loadDeck(e, 0, 1, .25f);
+        e.submit(Op::Seek, 0, 10.0);
+        e.submit(Op::Play, 0);
+        tick(e);
+        feed(e, 0, 1, .25f, 1000, true);
+        tick(e, 2048);
+        CHECK(!e.deck(0).playing.load());
+        CHECK(state(e, 0) == kReady);
+        CHECK(e.starvedFrames() == 0);
+        e.submit(Op::Seek, 0, 0.0);
+        e.submit(Op::Play, 0);
+        tick(e);
+        feed(e, 0, 1, .25f, 48000);
+        tick(e, 4800);
+        e.submit(Op::Pause, 0);
+        tick(e, 1);
+        const double parked = e.deck(0).position.load();
+        tick(e, 120);
+        CHECK(out[2 * 60] > 0);                       // still fading out
+        CHECK(e.deck(0).position.load() == parked);
+        tick(e, 512);
+        CHECK(out[1022] == 0);
+        CHECK(e.deck(0).position.load() == parked);
+    }
+
+    { // Varispeed/bend advance the source clock; starvation is counted only while audible.
+        auto owned = std::make_unique<Engine>(48000);
+        Engine& e = *owned;
+        loadDeck(e, 0, 1, .25f, 2048);
+        e.submit(Op::Pitch, 0, 25);
+        e.submit(Op::Bend, 0, 8);
+        e.submit(Op::Play, 0);
+        tick(e, 480);
+        CHECK(std::abs(e.deck(0).position.load() - .01 * 1.25 * 1.08) < .0005);
+        tick(e, 4096);
+        CHECK(e.starvedFrames() > 0);
+        CHECK(e.deck(0).playing.load());
+    }
+    std::puts("engine tests passed");
 }

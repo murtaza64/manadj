@@ -7,8 +7,8 @@ android {
     namespace = "dev.manadj.app"
     compileSdk = 35
     defaultConfig {
-        // Keep the installed development application's update identity.
-        applicationId = "dev.manadj.phonelab"
+        // Distinct from the #365 prototype (dev.manadj.phonelab) so both can be installed.
+        applicationId = "dev.manadj.app"
         minSdk = 26
         targetSdk = 35
         versionCode = 4

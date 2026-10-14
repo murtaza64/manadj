@@ -21,6 +21,7 @@ class PlaybackService : Service() {
         private set
     @Volatile private var destroyed = false
     private var foreground = false
+    private var closedSince = 0L
     private var hasFocus = false
     private val sourceMetadata = mutableMapOf<String, LocalSource>()
     private lateinit var audioManager: AudioManager
@@ -110,6 +111,12 @@ class PlaybackService : Service() {
         override fun run() {
             if (destroyed) return
             val state = snapshot()
+            // Oboe reopens after a disconnect on its own; if that failed, retry here off the main thread.
+            if (state != null && !state.outputOpen) {
+                val now = SystemClock.uptimeMillis()
+                if (closedSince == 0L) closedSince = now
+                else if (now - closedSince >= 2000) { closedSince = now; lifetime.execute { engine?.reopen() } }
+            } else closedSince = 0L
             if (foreground && state != null && state.appliedCommandId >= state.acceptedCommandId && state.decks.values.none { it.playing || it.previewing }) {
                 stopForeground(STOP_FOREGROUND_REMOVE); foreground = false; stopSelf()
                 audioManager.abandonAudioFocusRequest(focusRequest); hasFocus = false

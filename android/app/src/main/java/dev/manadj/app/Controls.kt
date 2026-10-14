@@ -174,24 +174,26 @@ fun clock(seconds: Double) = "%d:%02d".format(seconds.toInt() / 60, seconds.toIn
     }, contentAlignment = Alignment.Center) { Text("${ui.id} CUE", color = if (ready) Ink.warning else Ink.muted, bold = true) }
 }
 
+/** Empty pad: store a hot cue at the engine's applied position. Set pad: gated trigger (desktop semantics). */
 @Composable fun Hotcue(ui: DeckUi, slot: Int, model: PlayerModel, modifier: Modifier) {
     val ready by remember(ui) { derivedStateOf { ui.ready && model.supports("hot-cue-gate") } }
     val currentReady by rememberUpdatedState(ready)
+    val stored = ui.hotCues[slot]
     var held by remember { mutableStateOf(false) }
-    Box(modifier.border(1.5.dp, if (ready) Ink.cues[slot] else Ink.edge).background(if (held) Ink.cues[slot].copy(alpha = .3f) else Ink.panel).semantics { contentDescription = "${ui.id} hotcue ${slot + 1}"; if (!ready) disabled() }.pointerInput(ui.id, slot) {
+    Box(modifier.border(1.5.dp, if (ready) Ink.cues[slot] else Ink.edge).background(if (held || ui.snapshot?.previewSlot == slot) Ink.cues[slot].copy(alpha = .3f) else Ink.panel).semantics { contentDescription = "${ui.id} hotcue ${slot + 1}"; if (!ready) disabled() }.pointerInput(ui.id, slot) {
         awaitEachGesture {
             val down = awaitFirstDown(requireUnconsumed = false)
             if (!currentReady) return@awaitEachGesture
             down.consume(); held = true
-            val at = ui.hotcues[slot]
-            val id = model.beginGesture(ui.id, "HOTCUE$slot") { if (at != null) model.submit(AudioCommand.HotCueUp(ui.id, it)) }
-            if (at == null) ui.hotcues[slot] = ui.snapshot?.sourceSeconds else model.submit(AudioCommand.HotCueDown(ui.id, at, id))
+            val set = ui.hotCues[slot] != null
+            val id = model.beginGesture(ui.id, "HOTCUE$slot") { if (set) model.submit(AudioCommand.HotCueUp(ui.id, slot, it)) }
+            model.submit(if (set) AudioCommand.HotCueDown(ui.id, slot, id) else AudioCommand.SetHotCue(ui.id, slot, id))
             var cancelled = false
             try { while (true) { val change = awaitPointerEvent().changes.firstOrNull { it.id == down.id }; if (change == null || (!change.pressed && change.isConsumed)) cancelled = true; if (change?.pressed != true || !model.gestureActive(id)) break } }
             catch (cancel: CancellationException) { cancelled = true; throw cancel }
-            finally { held = false; if (!cancelled && at != null && model.gestureActive(id)) model.submit(AudioCommand.HotCueUp(ui.id, id)); model.finishGesture(id, cancelled) }
+            finally { held = false; if (!cancelled && set && model.gestureActive(id)) model.submit(AudioCommand.HotCueUp(ui.id, slot, id)); model.finishGesture(id, cancelled) }
         }
-    }, contentAlignment = Alignment.Center) { Text("${slot + 1}${if (ui.hotcues[slot] == null) " +" else ""}", color = if (ready) Ink.cues[slot] else Ink.muted, size = 16, bold = true) }
+    }, contentAlignment = Alignment.Center) { Text("${slot + 1}${if (stored == null) " +" else ""}", color = if (ready) Ink.cues[slot] else Ink.muted, size = 16, bold = true) }
 }
 
 @Composable fun Bend(ui: DeckUi, model: PlayerModel, modifier: Modifier) {

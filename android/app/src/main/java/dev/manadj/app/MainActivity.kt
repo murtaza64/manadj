@@ -85,7 +85,7 @@ class MainActivity : ComponentActivity() {
                 }
             } else drawRect(deckColor(ui.id).copy(alpha = .15f), size = Size(at, size.height))
             drawLine(Ink.playhead, if (vertical) Offset(0f, at) else Offset(at, 0f), if (vertical) Offset(size.width, at) else Offset(at, size.height), 3.dp.toPx())
-            ui.hotcues.forEachIndexed { index, seconds -> seconds?.let { cue ->
+            ui.hotCues.forEachIndexed { index, seconds -> seconds?.let { cue ->
                 val p = ((cue - start) / span * axis).toFloat()
                 if (p in 0f..axis) drawLine(Ink.cues[index], if (vertical) Offset(0f, p) else Offset(p, 0f), if (vertical) Offset(size.width, p) else Offset(p, size.height), 2.dp.toPx())
             } }
@@ -101,12 +101,14 @@ class MainActivity : ComponentActivity() {
         ui.error != null -> ui.error!!
         ui.snapshot?.loadState == LoadState.ERROR -> ui.snapshot?.error ?: "Decode failed"
         ui.snapshot?.loadState == LoadState.LOADING -> "Decoding…"
+        ui.ready && ui.snapshot?.atEnd == true && ui.snapshot?.playing != true -> "END"
+        ui.ready && ui.snapshot?.filling == true -> "Buffering…"
         ui.ready -> if (ui.source?.persistentGrant == true) "LOCAL" else "SESSION URI"
         else -> "Choose a track"
     } } }
     Column(modifier.border(2.dp, deckColor(ui.id).copy(alpha = if (model.selected == ui.id) 1f else .35f))) {
-        Column(Modifier.fillMaxWidth().height(if (dense) 24.dp else 40.dp).clickable { model.chooseDeck(ui.id) }.semantics { contentDescription = "Select ${ui.id}" }) {
-            if (dense) Row(Modifier.fillMaxWidth()) { if (navigation) Key("3/3", Modifier.width(40.dp).fillMaxHeight()) { model.chooseLayout(0) }; Text("${ui.id} ${ui.source?.title ?: "Load a track"}", Modifier.weight(1f), deckColor(ui.id), 13, true); Text(time, size = 12) }
+        Column(Modifier.fillMaxWidth().height(if (dense) 24.dp else 40.dp).clickable { model.chooseDeck(ui.id) }.semantics { contentDescription = "Select ${ui.id}" }.padding(horizontal = 4.dp)) {
+            if (dense) Row(Modifier.fillMaxWidth()) { if (navigation) Key(Layout.DENSE.label, Modifier.width(40.dp).fillMaxHeight(), description = "Layout ${Layout.DENSE.label}, switch") { model.chooseLayout(Layout.PORTRAIT) }; Text("${ui.id} ${ui.source?.title ?: "Load a track"}", Modifier.weight(1f), deckColor(ui.id), 13, true); Text(time, size = 12) }
             else { Text("${ui.id} ${ui.source?.title ?: "Load a track"}", color = deckColor(ui.id), size = 14, bold = true); Text("$time · $status", color = if (ui.error != null || ui.snapshot?.loadState == LoadState.ERROR) Ink.warning else Ink.muted, size = 11) }
         }
         SourceRuler(ui, model, Modifier.weight(1f).fillMaxWidth())
@@ -219,11 +221,14 @@ class MainActivity : ComponentActivity() {
 @Composable fun PerformanceApp(model: PlayerModel, pick: (DeckId) -> Unit) {
     BoxWithConstraints(Modifier.fillMaxSize().background(Ink.background).windowInsetsPadding(WindowInsets.displayCutout)) {
         val landscape = maxWidth > maxHeight
-        val dense = model.layout == 2 && landscape && maxWidth >= 760.dp && maxHeight >= 360.dp
+        val denseFits = landscape && maxWidth >= 760.dp && maxHeight >= 360.dp
+        val dense = model.layout == Layout.DENSE && denseFits
+        val next = if (model.layout == Layout.PORTRAIT) Layout.DENSE else Layout.PORTRAIT
         Column(Modifier.fillMaxSize().padding(horizontal = 4.dp)) {
             if (!dense) Row(Modifier.fillMaxWidth().height(24.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("${model.selected} · ${if (model.output != null) "NATIVE ${model.output!!.outputSampleRate}Hz" else "OPENING AUDIO"}", Modifier.weight(1f), deckColor(model.selected), 11, true)
-                Key("${model.layout + 1}/3", Modifier.width(48.dp).fillMaxHeight()) { model.chooseLayout((model.layout + 1) % 3) }
+                val audio = model.output
+                Text("${model.selected} · ${when { audio == null -> "OPENING AUDIO"; !audio.outputOpen -> "OUTPUT CLOSED"; else -> "NATIVE ${audio.outputSampleRate}Hz" }}", Modifier.weight(1f), deckColor(model.selected), 11, true)
+                Key(model.layout.label, Modifier.width(48.dp).fillMaxHeight(), description = "Layout ${model.layout.label}, switch to ${next.label}") { model.chooseLayout(next) }
             }
             Row(Modifier.fillMaxWidth().height(if (landscape) 72.dp else 88.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) { for (id in model.visibleDecks) SourceHeader(model.decks.getValue(id), model, Modifier.weight(1f).fillMaxHeight(), landscape, dense && id == DeckId.A) }
             if (dense) Box(Modifier.weight(1f).fillMaxWidth()) {
@@ -231,18 +236,14 @@ class MainActivity : ComponentActivity() {
                 if (model.browser != null) SourcesPanel(model, Modifier.fillMaxSize().padding(bottom = 96.dp), pick)
                 if (model.pitchDrawer != null) PitchPanel(model, Modifier.fillMaxSize().padding(bottom = 96.dp))
             } else {
+                if (model.layout == Layout.DENSE) Text("L3 needs landscape ≥760×360dp · showing L1", Modifier.fillMaxWidth().height(20.dp), Ink.warning, 12)
                 Box(Modifier.weight(1f).fillMaxWidth()) {
-                    when (model.layout) {
-                        0 -> Workspace(model, Modifier.fillMaxSize(), landscape)
-                        1 -> if (landscape) Row(Modifier.fillMaxSize()) { Mixer(model, Modifier.weight(1f).fillMaxHeight(), true); Pads(model.decks.getValue(model.selected), model, Modifier.weight(1f).fillMaxHeight()) }
-                            else Column(Modifier.fillMaxSize()) { Mixer(model, Modifier.fillMaxWidth().height(240.dp), true); Pads(model.decks.getValue(model.selected), model, Modifier.weight(1f).fillMaxWidth()) }
-                        else -> Column(Modifier.fillMaxSize()) { Text("DENSE · ROTATE / 760×360dp", color = Ink.warning, size = 16); Mixer(model, Modifier.weight(1f).fillMaxWidth(), true) }
-                    }
+                    Workspace(model, Modifier.fillMaxSize(), landscape)
                     if (model.browser != null) SourcesPanel(model, Modifier.fillMaxSize(), pick)
                     if (model.pitchDrawer != null) PitchPanel(model, Modifier.fillMaxSize())
                 }
                 Row(Modifier.fillMaxWidth().height(if (landscape) 96.dp else 144.dp)) {
-                    for (id in if (model.layout == 1) listOf(model.selected) else model.visibleDecks) Column(Modifier.weight(1f).fillMaxHeight()) {
+                    for (id in model.visibleDecks) Column(Modifier.weight(1f).fillMaxHeight()) {
                         val ui = model.decks.getValue(id)
                         if (!landscape) Bend(ui, model, Modifier.fillMaxWidth().height(48.dp))
                         Transport(ui, model, Modifier.weight(1f).fillMaxWidth())

@@ -22,20 +22,24 @@ class DeckUi(val id: DeckId) {
     var trim by mutableDoubleStateOf(.5)
     var pitch by mutableDoubleStateOf(0.0)
     var bend by mutableDoubleStateOf(0.0)
-    val hotcues = mutableStateListOf<Double?>(null, null, null, null, null, null, null, null)
     val generation = AtomicLong()
     var pendingLoadCommandId: Long? = null
     val pendingControls = mutableMapOf<String, Long>()
     val durationSeconds get() = snapshot?.durationSeconds?.takeIf { snapshot?.sourceId == source?.id } ?: source?.durationSeconds
     val ready get() = pendingLoadCommandId == null && snapshot?.loadState == LoadState.READY && source?.id == snapshot?.sourceId
+    /** Hot cues live in the engine (captured at apply time); empty when the snapshot is for another source. */
+    val hotCues: List<Double?> get() = snapshot?.takeIf { it.sourceId == source?.id }?.hotCues ?: List(AudioEngine.HOT_CUES) { null }
 }
+
+/** v1 performance layouts (layout 2, the mirrored dual mixer, is deprecated). */
+enum class Layout(val label: String) { PORTRAIT("L1"), DENSE("L3") }
 
 class PlayerModel(application: Application) : AndroidViewModel(application) {
     val decks = DeckId.entries.associateWith(::DeckUi)
     val visibleDecks = listOf(DeckId.A, DeckId.B)
     var selected by mutableStateOf(DeckId.A)
         private set
-    var layout by mutableIntStateOf(0)
+    var layout by mutableStateOf(Layout.PORTRAIT)
         private set
     var workspace by mutableStateOf("PADS")
     var browser by mutableStateOf<DeckId?>(null)
@@ -55,7 +59,9 @@ class PlayerModel(application: Application) : AndroidViewModel(application) {
     private var bound = false
     private val releases = linkedMapOf<String, () -> Unit>()
     private var pendingSelection: DeckId? = null
-    private var pendingLayout: Int? = null
+    private var pendingLayout: Layout? = null
+    private var lastOutputError = 0
+    private var outputWasOpen = true
     private var gestureSequence = 0L
     private val clientId = UUID.randomUUID().toString()
     private var cancelledGesture = false
@@ -75,7 +81,7 @@ class PlayerModel(application: Application) : AndroidViewModel(application) {
                 val state = audio?.snapshot()
                 if (state != null) {
                     output = state
-                    if (pendingCrossfade == null || state.appliedCommandId >= pendingCrossfade!!) { crossfade = state.crossfade; pendingCrossfade = null }
+                    if (pendingCrossfade == null || state.appliedCommandId >= pendingCrossfade!!) { crossfade = (state.crossfade + 1) / 2; pendingCrossfade = null }
                     state.decks.forEach { (id, snapshot) ->
                         val ui = decks.getValue(id)
                         ui.snapshot = snapshot
@@ -83,7 +89,6 @@ class PlayerModel(application: Application) : AndroidViewModel(application) {
                         if (load != null && state.appliedCommandId >= load && snapshot.sourceId == ui.source?.id && snapshot.loadState in listOf(LoadState.READY, LoadState.ERROR)) ui.pendingLoadCommandId = null
                         if (ui.pendingLoadCommandId == null && !ui.importing && snapshot.sourceId != ui.source?.id) {
                             ui.source = audio?.source(snapshot.sourceId) ?: sources.firstOrNull { it.id == snapshot.sourceId }
-                            ui.hotcues.indices.forEach { ui.hotcues[it] = null }
                         }
                         fun applied(control: String, update: () -> Unit) {
                             val pending = ui.pendingControls[control]
@@ -94,7 +99,9 @@ class PlayerModel(application: Application) : AndroidViewModel(application) {
                         applied("pitch") { ui.pitch = snapshot.pitchPercent }
                         applied("bend") { ui.bend = snapshot.bendPercent }
                     }
-                    if (state.outputError != 0) failure = "Native output error ${state.outputError}"
+                    // Latch on change so OK dismisses until something new happens.
+                    if (state.outputError != lastOutputError) { lastOutputError = state.outputError; if (state.outputError != 0 && !state.outputOpen) failure = "Audio output error ${state.outputError}: reconnecting" }
+                    if (state.outputOpen != outputWasOpen) { outputWasOpen = state.outputOpen; failure = if (state.outputOpen) null else "Audio output disconnected: reconnecting" }
                 }
                 audio?.failure?.let { failure = it }
                 delay(33)
@@ -103,7 +110,7 @@ class PlayerModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun chooseDeck(id: DeckId) { if (releases.isEmpty()) selected = id else pendingSelection = id }
-    fun chooseLayout(value: Int) { if (releases.isEmpty()) layout = value else pendingLayout = value }
+    fun chooseLayout(value: Layout) { if (releases.isEmpty()) layout = value else pendingLayout = value }
     fun supports(capability: String) = output?.let { it.outputOpen && it.outputError == 0 && capability in it.supportedCapabilities } == true
     fun submit(command: AudioCommand): CommandReceipt {
         val receipt = service?.submit(command) ?: CommandReceipt(0, false, failure ?: "Audio output is starting")
@@ -158,7 +165,7 @@ class PlayerModel(application: Application) : AndroidViewModel(application) {
                             val receipt = service?.load(deck, metadata, descriptor) ?: CommandReceipt(0, false, "Audio output unavailable")
                             lastReceipt = receipt
                             if (!receipt.accepted) throw IllegalStateException(receipt.reason)
-                            ui.source = metadata; ui.pendingLoadCommandId = receipt.id; ui.hotcues.indices.forEach { ui.hotcues[it] = null }
+                            ui.source = metadata; ui.pendingLoadCommandId = receipt.id
                             sources.removeAll { it.id == metadata.id }; sources.add(0, metadata); catalog.remember(sources)
                             browser = null
                         }
@@ -178,8 +185,9 @@ class PlayerModel(application: Application) : AndroidViewModel(application) {
     fun updateTrim(deck: DeckId, value: Double, gesture: String? = null) = control(deck, "trim", AudioCommand.SetTrim(deck, value, gesture)) { it.trim = value }
     fun updatePitch(deck: DeckId, value: Double, gesture: String? = null) = control(deck, "pitch", AudioCommand.SetPitch(deck, value, gesture)) { it.pitch = value }
     fun updateBend(deck: DeckId, value: Double, gesture: String? = null) = control(deck, "bend", AudioCommand.SetBend(deck, value, gesture)) { it.bend = value }
+    /** [value] is the fader throw 0 (A) .. 1 (B); the engine takes -1..1. */
     fun updateCrossfade(value: Double, gesture: String? = null) {
-        val receipt = submit(AudioCommand.SetCrossfade(value, gesture))
+        val receipt = submit(AudioCommand.SetCrossfade(value * 2 - 1, gesture))
         if (receipt.accepted) { crossfade = value; pendingCrossfade = receipt.id }
     }
 

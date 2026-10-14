@@ -1,157 +1,269 @@
 package dev.manadj.audio
 
+import android.media.MediaCodec
+import android.media.MediaCodecInfo
+import android.media.MediaFormat
+import android.media.MediaMuxer
 import android.os.ParcelFileDescriptor
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import java.io.File
-import java.io.RandomAccessFile
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
+import kotlin.math.PI
+import kotlin.math.sin
+import org.junit.After
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
 
+/** Generated decoy media only; files are deleted after each test. */
 @RunWith(AndroidJUnit4::class)
 class AudioEngineTest {
-    private fun wav(name: String, value: Short): File {
-        val file = File(InstrumentationRegistry.getInstrumentation().targetContext.cacheDir, name)
-        RandomAccessFile(file, "rw").use { out ->
-            val frames = 48000 * 5
-            val size = frames * 4
-            out.setLength(0)
-            out.writeBytes("RIFF")
-            out.writeInt(Integer.reverseBytes(36 + size))
-            out.writeBytes("WAVEfmt ")
-            out.writeInt(Integer.reverseBytes(16))
-            out.writeShort(java.lang.Short.reverseBytes(1.toShort()).toInt())
-            out.writeShort(java.lang.Short.reverseBytes(2.toShort()).toInt())
-            out.writeInt(Integer.reverseBytes(48000))
-            out.writeInt(Integer.reverseBytes(48000 * 4))
-            out.writeShort(java.lang.Short.reverseBytes(4.toShort()).toInt())
-            out.writeShort(java.lang.Short.reverseBytes(16.toShort()).toInt())
-            out.writeBytes("data")
-            out.writeInt(Integer.reverseBytes(size))
-            val little = java.lang.Short.reverseBytes(value).toInt()
-            repeat(frames) { out.writeShort(little); out.writeShort(little) }
+    private val files = mutableListOf<File>()
+    private val cache get() = InstrumentationRegistry.getInstrumentation().targetContext.cacheDir
+
+    @After fun removeDecoys() { files.forEach { it.delete() } }
+
+    private fun wav(name: String, value: Double, seconds: Int = 5, rate: Int = 48000, bits: Int = 16): File {
+        val file = File(cache, name).also { files.add(it) }
+        val bytes = bits / 8
+        val frames = rate * seconds
+        val size = frames * 2 * bytes
+        val b = ByteBuffer.allocate(44 + size).order(ByteOrder.LITTLE_ENDIAN)
+        b.put("RIFF".toByteArray()).putInt(36 + size).put("WAVEfmt ".toByteArray()).putInt(16)
+        b.putShort(1).putShort(2).putInt(rate).putInt(rate * 2 * bytes).putShort((2 * bytes).toShort()).putShort(bits.toShort())
+        b.put("data".toByteArray()).putInt(size)
+        val full = (1 shl (bits - 1)) - 1
+        val v = (value * full).toInt()
+        repeat(frames * 2) {
+            if (bits == 16) b.putShort(v.toShort()) else { b.put(v.toByte()); b.put((v shr 8).toByte()); b.put((v shr 16).toByte()) }
         }
+        file.writeBytes(b.array())
         return file
     }
 
-    private fun awaitReady(engine: AudioEngine, vararg decks: DeckId) {
-        repeat(2000) {
-            if (engine.snapshot().decks.filterKeys { it in decks }.values.all { it.loadState == LoadState.READY }) return
-            engine.renderOfflineForTest(256)
-            Thread.sleep(2)
+    /** AAC-in-MP4 decoy produced by the platform encoder: exercises the MediaCodec path. */
+    private fun m4a(name: String, hz: Double, seconds: Int): File {
+        val file = File(cache, name).also { files.add(it) }
+        val rate = 44100
+        val format = MediaFormat.createAudioFormat(MediaFormat.MIMETYPE_AUDIO_AAC, rate, 2).apply {
+            setInteger(MediaFormat.KEY_AAC_PROFILE, MediaCodecInfo.CodecProfileLevel.AACObjectLC)
+            setInteger(MediaFormat.KEY_BIT_RATE, 128_000)
         }
-        fail("Decode failed: ${engine.snapshot().decks}")
+        val encoder = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_AUDIO_AAC)
+        encoder.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+        encoder.start()
+        val muxer = MediaMuxer(file.path, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+        val info = MediaCodec.BufferInfo()
+        val total = rate * seconds
+        var frame = 0
+        var track = -1
+        var done = false
+        while (!done) {
+            val input = encoder.dequeueInputBuffer(10_000)
+            if (input >= 0) {
+                val buffer = encoder.getInputBuffer(input)!!.order(ByteOrder.LITTLE_ENDIAN)
+                buffer.clear()
+                if (frame >= total) encoder.queueInputBuffer(input, 0, 0, frame * 1_000_000L / rate, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                else {
+                    val n = minOf(buffer.capacity() / 4, total - frame, 1024)
+                    repeat(n) { i -> val s = (sin((frame + i) * hz * 2 * PI / rate) * 8000).toInt().toShort(); buffer.putShort(s).putShort(s) }
+                    encoder.queueInputBuffer(input, 0, n * 4, frame * 1_000_000L / rate, 0)
+                    frame += n
+                }
+            }
+            val output = encoder.dequeueOutputBuffer(info, 10_000)
+            if (output == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) { track = muxer.addTrack(encoder.outputFormat); muxer.start() }
+            else if (output >= 0) {
+                if ((info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) == 0 && info.size > 0) muxer.writeSampleData(track, encoder.getOutputBuffer(output)!!, info)
+                encoder.releaseOutputBuffer(output, false)
+                done = (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0
+            }
+        }
+        encoder.stop(); encoder.release(); muxer.stop(); muxer.release()
+        return file
     }
 
-    @Test fun decodedLocalWavMixSeekGateAndCeiling() {
-        val a = wav("engine-a.wav", 8192)
-        val b = wav("engine-b.wav", (-8192).toShort())
-        try {
-            AudioEngine(offline = true).use { engine ->
-                ParcelFileDescriptor.open(a, ParcelFileDescriptor.MODE_READ_ONLY).use {
-                    assertTrue(engine.load(DeckId.A, "generated-a", it).accepted)
-                }
-                ParcelFileDescriptor.open(b, ParcelFileDescriptor.MODE_READ_ONLY).use {
-                    assertTrue(engine.load(DeckId.B, "generated-b", it).accepted)
-                }
-                awaitReady(engine, DeckId.A, DeckId.B)
-                assertEquals("generated-a", engine.snapshot().decks.getValue(DeckId.A).sourceId)
-                assertEquals(48000, engine.snapshot().decks.getValue(DeckId.A).sampleRate)
-                assertFalse(engine.snapshot().outputOpen)
-                assertTrue(engine.submit(AudioCommand.Play(DeckId.A)).accepted)
-                assertTrue(engine.submit(AudioCommand.Play(DeckId.B)).accepted)
-                val both = engine.renderOfflineForTest(4096)
-                assertEquals(0f, both[8190], .005f)
-                assertTrue(engine.snapshot().decks.getValue(DeckId.A).sourceFrame > 3000)
+    private fun AudioEngine.load(deck: DeckId, id: String, file: File) =
+        ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY).use { load(deck, id, it) }
 
-                val fade = engine.submit(AudioCommand.SetCrossfade(-1.0))
-                engine.renderOfflineForTest(4096)
-                val left = engine.renderOfflineForTest(512)
-                assertEquals(.25f * Math.pow(10.0, -6.0 / 20.0).toFloat(), left[1022], .004f)
-                assertTrue(engine.snapshot().appliedCommandId >= fade.id)
-                assertEquals(-1.0, engine.snapshot().crossfade, 0.0)
-                assertTrue(engine.submit(AudioCommand.Seek(DeckId.A, 2.0)).accepted)
-                awaitReady(engine, DeckId.A)
-                assertEquals(2.0, engine.snapshot().decks.getValue(DeckId.A).sourceSeconds, .02)
-                engine.submit(AudioCommand.CueDown(DeckId.A)) // While playing: pause, park at cue if set.
-                engine.renderOfflineForTest(128)
-                assertFalse(engine.snapshot().decks.getValue(DeckId.A).playing)
-                engine.submit(AudioCommand.CueDown(DeckId.A)) // Place main cue at current source position.
-                engine.renderOfflineForTest(128)
-                engine.submit(AudioCommand.CueDown(DeckId.A)) // Hold preview.
-                val preview = engine.renderOfflineForTest(512)
-                assertTrue(preview[1022] > 0)
-                assertTrue(engine.snapshot().decks.getValue(DeckId.A).previewing)
-                engine.submit(AudioCommand.CueUp(DeckId.A))
-                awaitReady(engine, DeckId.A)
-                assertFalse(engine.snapshot().decks.getValue(DeckId.A).previewing)
+    private fun AudioEngine.deck(deck: DeckId) = snapshot().decks.getValue(deck)
+
+    /** Drives the offline callback until [condition] holds. */
+    private fun AudioEngine.until(what: String, condition: AudioEngine.() -> Boolean) {
+        repeat(3000) {
+            if (condition()) return
+            renderOfflineForTest(256)
+            Thread.sleep(2)
+        }
+        fail("Timed out: $what; ${snapshot().decks}")
+    }
+
+    private fun AudioEngine.settled(vararg decks: DeckId) = until("settled ${decks.toList()}") {
+        decks.all { deck(it).let { d -> d.loadState == LoadState.READY && !d.filling } }
+    }
+
+    @Test fun decodedLocalWavMixSeekAndDesktopCueSemantics() {
+        val a = wav("engine-a.wav", .25)
+        val b = wav("engine-b.wav", -.25)
+        AudioEngine(offline = true).use { engine ->
+            assertTrue(engine.load(DeckId.A, "generated-a", a).accepted)
+            assertTrue(engine.load(DeckId.B, "generated-b", b).accepted)
+            engine.settled(DeckId.A, DeckId.B)
+            assertEquals("generated-a", engine.deck(DeckId.A).sourceId)
+            assertEquals(48000, engine.deck(DeckId.A).sampleRate)
+            assertEquals(5.0, engine.deck(DeckId.A).durationSeconds!!, .01)
+            assertFalse(engine.snapshot().outputOpen)
+            assertTrue(engine.submit(AudioCommand.Play(DeckId.A)).accepted)
+            assertTrue(engine.submit(AudioCommand.Play(DeckId.B)).accepted)
+            val both = engine.renderOfflineForTest(4096)
+            assertEquals(0f, both[8190], .005f)
+            assertTrue(engine.deck(DeckId.A).sourceFrame > 3000)
+
+            val fade = engine.submit(AudioCommand.SetCrossfade(-1.0))
+            engine.renderOfflineForTest(4096)
+            val left = engine.renderOfflineForTest(512)
+            assertEquals(.25f * Math.pow(10.0, -6.0 / 20.0).toFloat(), left[1022], .004f)
+            assertTrue(engine.snapshot().appliedCommandId >= fade.id)
+            assertEquals(-1.0, engine.snapshot().crossfade, 0.0)
+
+            assertTrue(engine.submit(AudioCommand.Seek(DeckId.A, 2.0)).accepted)
+            engine.until("seek applied") { deck(DeckId.A).sourceSeconds == 2.0 || deck(DeckId.A).sourceSeconds > 2.0 }
+            engine.settled(DeckId.A)
+            assertTrue(engine.deck(DeckId.A).playing)
+            assertEquals(2.0, engine.deck(DeckId.A).sourceSeconds, .1)
+            engine.submit(AudioCommand.CueDown(DeckId.A)) // Playing: return to cue (track start) and pause.
+            engine.renderOfflineForTest(64)
+            assertFalse(engine.deck(DeckId.A).playing)
+            assertEquals(0.0, engine.deck(DeckId.A).sourceSeconds, 0.0)
+            engine.submit(AudioCommand.CueUp(DeckId.A))
+            engine.settled(DeckId.A)
+            engine.submit(AudioCommand.Seek(DeckId.A, 1.0))
+            engine.renderOfflineForTest(64)
+            engine.settled(DeckId.A)
+            engine.submit(AudioCommand.CueDown(DeckId.A)) // Paused off cue: move the cue here.
+            engine.submit(AudioCommand.CueUp(DeckId.A))
+            engine.renderOfflineForTest(64)
+            assertEquals(1.0, engine.deck(DeckId.A).cueSeconds!!, .03)
+            engine.submit(AudioCommand.CueDown(DeckId.A)) // At cue: hold preview.
+            val preview = engine.renderOfflineForTest(512)
+            assertTrue(preview[1022] > 0)
+            assertEquals(AudioEngine.MAIN_CUE, engine.deck(DeckId.A).previewSlot)
+            engine.submit(AudioCommand.CueUp(DeckId.A))
+            engine.renderOfflineForTest(64)
+            assertFalse(engine.deck(DeckId.A).previewing)
+            assertEquals(engine.deck(DeckId.A).cueSeconds!!, engine.deck(DeckId.A).sourceSeconds, 0.0)
+        }
+    }
+
+    @Test fun hotCueSetGateAndSeekPastEnd() {
+        val a = wav("engine-hot.wav", .25, seconds = 3)
+        AudioEngine(offline = true).use { engine ->
+            engine.load(DeckId.A, "hot", a)
+            engine.settled(DeckId.A)
+            engine.submit(AudioCommand.Seek(DeckId.A, 1.5))
+            engine.renderOfflineForTest(64)
+            engine.settled(DeckId.A)
+            engine.submit(AudioCommand.SetHotCue(DeckId.A, 2))
+            engine.renderOfflineForTest(64)
+            assertEquals(1.5, engine.deck(DeckId.A).hotCues[2]!!, .01)
+            engine.submit(AudioCommand.Seek(DeckId.A, 0.2))
+            engine.renderOfflineForTest(64)
+            engine.settled(DeckId.A)
+            engine.submit(AudioCommand.HotCueDown(DeckId.A, 2, "g1"))
+            engine.renderOfflineForTest(64)
+            engine.settled(DeckId.A)
+            assertEquals(2, engine.deck(DeckId.A).previewSlot)
+            assertTrue(engine.renderOfflineForTest(512)[1022] > 0)
+            engine.submit(AudioCommand.HotCueUp(DeckId.A, 2, "g1"))
+            engine.renderOfflineForTest(64)
+            assertFalse(engine.deck(DeckId.A).previewing)
+            assertEquals(engine.deck(DeckId.A).hotCues[2]!!, engine.deck(DeckId.A).sourceSeconds, 0.0)
+
+            engine.submit(AudioCommand.Seek(DeckId.A, 3.0))
+            engine.submit(AudioCommand.Play(DeckId.A))
+            engine.until("parked at end") { deck(DeckId.A).let { it.atEnd && !it.filling && !it.playing } }
+            assertEquals(LoadState.READY, engine.deck(DeckId.A).loadState)
+            assertNull(engine.deck(DeckId.A).error)
+        }
+    }
+
+    @Test fun aacDecodesSeeksInPlaceAnd24BitWav() {
+        val aac = m4a("engine-aac.m4a", 440.0, 4)
+        val deep = wav("engine-24.wav", .5, seconds = 2, rate = 44100, bits = 24)
+        AudioEngine(offline = true).use { engine ->
+            engine.load(DeckId.A, "aac", aac)
+            engine.load(DeckId.B, "deep", deep)
+            engine.settled(DeckId.A, DeckId.B)
+            assertEquals(44100, engine.deck(DeckId.A).sampleRate)
+            engine.submit(AudioCommand.SetCrossfade(-1.0))
+            engine.submit(AudioCommand.Play(DeckId.A))
+            var peak = 0f
+            repeat(8) { engine.renderOfflineForTest(1024).forEach { peak = maxOf(peak, it) } }
+            assertTrue("AAC rendered silence", peak > .05f)
+            for (target in listOf(3.0, 0.5, 2.25)) {
+                engine.submit(AudioCommand.Seek(DeckId.A, target))
+                engine.renderOfflineForTest(64)
+                engine.settled(DeckId.A)
+                assertEquals(target, engine.deck(DeckId.A).sourceSeconds, .05)
             }
-        } finally { a.delete(); b.delete() }
+            assertNull(engine.deck(DeckId.A).error)
+            engine.submit(AudioCommand.Pause(DeckId.A))
+            engine.submit(AudioCommand.SetCrossfade(1.0))
+            engine.submit(AudioCommand.Play(DeckId.B))
+            engine.renderOfflineForTest(2048)
+            val out = engine.renderOfflineForTest(512)
+            assertEquals(.5f * Math.pow(10.0, -6.0 / 20.0).toFloat(), out[1022], .01f)
+        }
     }
 
     @Test fun oboeOpensAndRendersFramesOnDevice() {
-        val media = wav("engine-oboe.wav", 8192)
-        try {
+        val media = wav("engine-oboe.wav", .25)
         AudioEngine().use { engine ->
             val started = engine.snapshot()
             assertTrue(started.outputOpen)
             assertEquals(2, started.outputChannels)
             assertTrue(started.outputSampleRate > 0)
-            ParcelFileDescriptor.open(media, ParcelFileDescriptor.MODE_READ_ONLY).use {
-                engine.load(DeckId.A, "sink-fixture", it)
-            }
-            for (attempt in 0 until 100) {
-                if (engine.snapshot().decks.getValue(DeckId.A).loadState == LoadState.READY) break
+            engine.load(DeckId.A, "sink-fixture", media)
+            for (attempt in 0 until 200) {
+                if (engine.deck(DeckId.A).let { it.loadState == LoadState.READY && !it.filling }) break
                 Thread.sleep(10)
             }
-            assertEquals(LoadState.READY, engine.snapshot().decks.getValue(DeckId.A).loadState)
+            assertEquals(LoadState.READY, engine.deck(DeckId.A).loadState)
+            assertTrue(engine.submit(AudioCommand.SetFader(DeckId.A, 0.0)).accepted) // Silent on the test host.
             assertTrue(engine.submit(AudioCommand.Play(DeckId.A)).accepted)
-            val sourceAtStart = engine.snapshot().decks.getValue(DeckId.A).sourceFrame
+            Thread.sleep(50)
+            val sourceAtStart = engine.deck(DeckId.A).sourceFrame
             Thread.sleep(250)
             val rendered = engine.snapshot()
             assertTrue("No native callbacks: $rendered", rendered.outputFrames > started.outputFrames)
-            assertTrue("Decoded source not consumed by stream: $rendered",
-                rendered.decks.getValue(DeckId.A).sourceFrame > sourceAtStart)
+            assertTrue("Decoded source not consumed by stream: $rendered", rendered.decks.getValue(DeckId.A).sourceFrame > sourceAtStart)
             assertEquals(0, rendered.outputError)
             assertTrue(rendered.outputXruns >= 0)
         }
-        } finally { media.delete() }
     }
 
     @Test fun replacementRetiresOldDecodeAndReportsUnsupportedAsError() {
-        val a = wav("engine-replace-a.wav", 8192)
-        val b = wav("engine-replace-b.wav", (-8192).toShort())
-        val bad = File(InstrumentationRegistry.getInstrumentation().targetContext.cacheDir, "unsupported.bin")
-        bad.writeBytes(byteArrayOf(1, 2, 3, 4, 5))
-        try {
-            AudioEngine(offline = true).use { engine ->
-                ParcelFileDescriptor.open(a, ParcelFileDescriptor.MODE_READ_ONLY).use {
-                    engine.load(DeckId.A, "old", it)
-                }
-                ParcelFileDescriptor.open(b, ParcelFileDescriptor.MODE_READ_ONLY).use {
-                    engine.load(DeckId.A, "new", it)
-                }
-                awaitReady(engine, DeckId.A)
-                val current = engine.snapshot().decks.getValue(DeckId.A)
-                assertEquals("new", current.sourceId)
-                assertNull(current.error)
-                engine.submit(AudioCommand.Play(DeckId.A))
-                val pcm = engine.renderOfflineForTest(4096)
-                assertTrue(pcm[8190] < -.1f)
-                ParcelFileDescriptor.open(bad, ParcelFileDescriptor.MODE_READ_ONLY).use {
-                    engine.load(DeckId.A, "unsupported", it)
-                }
-                for (attempt in 0 until 1000) {
-                    engine.renderOfflineForTest(256)
-                    if (engine.snapshot().decks.getValue(DeckId.A).loadState == LoadState.ERROR) break
-                    Thread.sleep(2)
-                }
-                val failed = engine.snapshot().decks.getValue(DeckId.A)
-                assertEquals(LoadState.ERROR, failed.loadState)
-                assertNotNull(failed.error)
-                assertFalse(failed.playing)
-            }
-        } finally { a.delete(); b.delete(); bad.delete() }
+        val a = wav("engine-replace-a.wav", .25)
+        val b = wav("engine-replace-b.wav", -.25)
+        val bad = File(cache, "unsupported.bin").also { files.add(it); it.writeBytes(byteArrayOf(1, 2, 3, 4, 5)) }
+        AudioEngine(offline = true).use { engine ->
+            engine.load(DeckId.A, "old", a)
+            engine.load(DeckId.A, "new", b)
+            engine.settled(DeckId.A)
+            val current = engine.deck(DeckId.A)
+            assertEquals("new", current.sourceId)
+            assertNull(current.error)
+            engine.submit(AudioCommand.Play(DeckId.A))
+            val pcm = engine.renderOfflineForTest(4096)
+            assertTrue(pcm[8190] < -.1f)
+            engine.load(DeckId.A, "unsupported", bad)
+            engine.until("unsupported errors") { deck(DeckId.A).loadState == LoadState.ERROR }
+            val failed = engine.deck(DeckId.A)
+            assertEquals("unsupported", failed.sourceId)
+            assertNotNull(failed.error)
+            assertFalse(failed.playing)
+        }
     }
 }

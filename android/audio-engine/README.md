@@ -1,9 +1,27 @@
 # Native audio module (#370)
 
-Android library path `android/audio-engine`, namespace `dev.manadj.audio`. The app owns the root Gradle files: add `include(":audio-engine")` to settings and `implementation(project(":audio-engine"))` to app dependencies. Oboe 1.11.0 is pinned to its [official release](https://github.com/google/oboe/releases/tag/1.11.0).
+Android library `android/audio-engine`, namespace `dev.manadj.audio`, included by the root `android/` build. Oboe 1.11.0 ([release](https://github.com/google/oboe/releases/tag/1.11.0)), NDK `27.0.12077973`.
 
-`AudioEngine.load(deck, sourceId, descriptor)` duplicates the caller-owned descriptor and returns an accepted command receipt; decode happens on a per-deck worker. `submit(AudioCommand)` is the same seam for UI, Session replay and future Conductor. `snapshot()` is the output-frame/audio epoch and per-deck source position; Compose interpolation is not a playback clock. `appliedCommandId` changes on the callback. Call `close()` off the main thread. Unsupported EQ/FX/stems/scratch/loops/key-lock/sync/PFL are absent from `supportedCapabilities`.
+## API
 
-Four 65536-frame stereo float rings cap resident PCM at 2 MiB plus codec/extractor buffers; compressed tracks are decoded incrementally, not expanded into whole-track float arrays. Source data stays under the engine-owned duplicate descriptor, released after workers retire. The realtime callback only reads prefetched PCM and bounded commands, mixes with one stream and writes float stereo. `starvedDeckFrames` counts frames that could not be rendered from a playing deck; `outputXruns` reports stream XRuns separately. Stream error is surfaced; recovery/reopening after device disconnect is a later gate.
+- `load(deck, sourceId, descriptor)`: duplicates the caller's descriptor (must be seekable), queues `Prepare`, starts the deck's decode worker. Receipt = queued.
+- `submit(AudioCommand)`: one seam for UI, Session replay and future Conductor. Cue/hot-cue gating and relocations are decided on the audio callback against authoritative deck state (desktop `transport.ts` semantics); receipts mean queued, `appliedCommandId` means applied.
+- `snapshot()`: output-frame clock and per-deck source position, cue, hot cues, `filling` (relocation refill in progress: silent, clock held), `atEnd`. Compose does not advance playback time.
+- `SetCrossfade`: -1 = A only, 0 = both unity, +1 = B only.
+- `close()` off the main thread. Unsupported EQ/FX/stems/scratch/loops/key-lock/sync/PFL are absent from `supportedCapabilities`.
 
-Run standalone native mixer tests: `clang++ -std=c++17 -O2 -pthread android/audio-engine/src/main/cpp/Engine.cpp android/audio-engine/src/test/cpp/EngineTest.cpp -o /tmp/manadj-engine-test && /tmp/manadj-engine-test`. App-side Android picker/URI-grant and physical-phone latency checks are outside this module. No latency target is inferred from requesting Oboe LowLatency.
+## Model
+
+- Four 65536-frame stereo float rings (2 MiB). Sources decode incrementally (MediaExtractor + MediaCodec, float output when the decoder allows; raw 8/16/24/32-bit/float WAV).
+- Every relocation (load, seek, cue return, hot-cue jump) bumps the deck's `transport` on the callback. The deck worker seeks its decoder in place (extractor seek + codec flush), resets the ring (worker-owned indices), refills and publishes; the callback renders only `ring == transport`, so stale PCM is never audible.
+- Load status is `(loadId << 2) | state`; READY/ERROR are CASes a superseded load cannot win.
+- Callback: no locks, allocation or I/O. ~5 ms fade-in on every start, fade-out on pause/cue stop. Relocation while playing cuts (no fade).
+- Output disconnect: Oboe closes the stream; `onErrorAfterClose` opens a replacement (engine state survives). `reopen()` retries a failed recovery; the app service calls it every 2 s while `outputOpen` is false.
+- Seeking past the end parks the deck (`atEnd`), not an error.
+
+## Tests
+
+- Native transport/mixer: `clang++ -std=c++17 -O1 -fsanitize=address,undefined android/audio-engine/src/main/cpp/Engine.cpp android/audio-engine/src/test/cpp/EngineTest.cpp -o /tmp/manadj-engine-test && /tmp/manadj-engine-test`
+- Device/emulator: `./gradlew :audio-engine:connectedDebugAndroidTest` from `android/` (generated WAV/AAC decoys only).
+
+Not verified: physical-device latency, real disconnect recovery (emulator has no route changes). No latency target is inferred from requesting Oboe LowLatency.
