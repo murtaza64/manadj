@@ -92,14 +92,30 @@ import dev.manadj.audio.QuantizeMode
     // Only read model.output while moving: it changes every engine tick and would redraw idle waves at 30 fps.
     // HEARD quantize (#382): draw at the calibrated heard position — audibleSeconds already backs off Android's
     // reported latency; shift by the remainder (calibrated − reported) at the deck's speed.
+    // Display = heard time (#111.5): audibleSeconds backs off Android's reported latency; HEARD shifts the rest
+    // (calibrated − reported) at the deck's speed. Always sampled at System.nanoTime(): the frame clock holds a
+    // stale vsync time for the first frame after a start, which drew a second jump on every stab (#110).
+    // Uncompensated starts (no Heard compensation: Grid, or nothing else playing — #112) hold at the start
+    // position until it is heard, instead of stepping back by L.
+    val hold = remember(ui.id) { doubleArrayOf(Double.NaN, 0.0) } // [floor, wasMoving]
     fun heard(now: Long): Double {
-        ux.seekPreview[ui.id]?.let { return it }; if (now == 0L) return position(ui)
+        ux.seekPreview[ui.id]?.let { return it }
+        val wasMoving = hold[1] != 0.0; hold[1] = if (moving) 1.0 else 0.0
+        if (!moving) { hold[0] = Double.NaN; return position(ui) }
         val out = model.output ?: return position(ui)
         if (ui.source?.id != ui.snapshot?.sourceId) return position(ui)
-        val extra = if (out.quantizeMode == QuantizeMode.HEARD) out.heardLatencySeconds - (out.reportedLatencySeconds() ?: 0.0) else 0.0
-        return out.audibleSeconds(ui.id, now) - if (moving) extra * playbackRate(ui) else 0.0
+        val heardMode = out.quantizeMode == QuantizeMode.HEARD
+        if (!wasMoving) {
+            val others = model.visibleDecks.any { it != ui.id && model.decks.getValue(it).snapshot?.playing == true }
+            hold[0] = if (heardMode && others) Double.NaN else position(ui)
+        }
+        val extra = if (heardMode) out.heardLatencySeconds - (out.reportedLatencySeconds() ?: 0.0) else 0.0
+        val raw = out.audibleSeconds(ui.id, now) - extra * playbackRate(ui)
+        val floor = hold[0]
+        if (!floor.isNaN()) { if (raw < floor && playbackRate(ui) > 0) return floor; hold[0] = Double.NaN }
+        return raw
     }
-    WaveView(wave, { clock.at(frame.value, heard(frame.value), moving && frame.value != 0L, playbackRate(ui)) }, ui.durationSeconds, marksOf(ui), modifier.semantics { contentDescription = "${ui.id} detail wave" }.waveTouch(ui, model, ux, vertical),
+    WaveView(wave, { frame.value; val now = System.nanoTime(); clock.at(now, heard(now), moving, playbackRate(ui)) }, ui.durationSeconds, marksOf(ui), modifier.semantics { contentDescription = "${ui.id} detail wave" }.waveTouch(ui, model, ux, vertical),
         vertical = vertical, windowSeconds = ux.waveSeconds * tempoRate(ui), live = { ux.strip(ui) }, history = e.history, accent = deckColor(ui.id),
         stemWave = { mask -> val id = ui.source?.id; if (wave == null || id == null) null else ux.stemWave(id, wave, mask) },
         status = when { ui.source == null -> "${ui.id} · no track"; wave == null -> if (ux.waveSource[ui.source?.id] == "failed") "no waveform" else "analysing…"; !wave.complete -> "analysing ${(100 * wave.frames * wave.bandHop / wave.sampleRate / (ui.durationSeconds ?: 1.0)).toInt().coerceIn(0, 99)}%"; else -> null })
