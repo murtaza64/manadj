@@ -54,8 +54,9 @@ val ControlRow = 44.dp
 }
 
 /** Hot cue pads stay rectangles. All feedback is drawn inside the pad's own bounds (fixes stuck borders). */
-@Composable fun Pads(ui: DeckUi, model: PlayerModel, ux: UiModel, modifier: Modifier, columns: Int = 4, rowHeight: Dp = PadRow) {
-    Column(modifier) { repeat(8 / columns) { row -> Row(Modifier.fillMaxWidth().then(if (rowHeight == Dp.Unspecified) Modifier.weight(1f) else Modifier.height(rowHeight))) { repeat(columns) { col -> Hotcue(ui, row * columns + col, model, ux, Modifier.weight(1f).fillMaxHeight()) } } } }
+/** [perCellSafe]: landscape — only a pad that overlaps the camera hole is trimmed; the grid keeps its edge (#62). */
+@Composable fun Pads(ui: DeckUi, model: PlayerModel, ux: UiModel, modifier: Modifier, columns: Int = 4, rowHeight: Dp = PadRow, perCellSafe: Boolean = false) {
+    Column(modifier) { repeat(8 / columns) { row -> Row(Modifier.fillMaxWidth().then(if (rowHeight == Dp.Unspecified) Modifier.weight(1f) else Modifier.height(rowHeight))) { repeat(columns) { col -> Hotcue(ui, row * columns + col, model, ux, Modifier.weight(1f).fillMaxHeight().then(if (perCellSafe) Modifier.screenSafe(2.dp) else Modifier)) } } } }
 }
 
 /** Hot cue pad. With SHIFT active a stored pad shows DEL and a tap deletes it (UNDO chip follows). */

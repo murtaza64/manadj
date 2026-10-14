@@ -8,6 +8,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.input.pointer.pointerInput
@@ -204,31 +206,50 @@ fun mixOf(model: PlayerModel, ux: UiModel, id: DeckId): DeckMix {
 
 /**
  * Landscape: each deck's side (info, minimap, pads, stems, loop, jump, transport, bend + pitch) flanks the
- * mixer. The centre detail waves run from the top edge; deck popups stay over their own side.
+ * mixer. BROWSE slides the whole strip sideways (#65): the strip is [browser][A][mixer][B][browser], one deck
+ * wider than the screen on each side and centred; the outgoing deck (coveredDeck) moves toward the centre with
+ * the mixer, the load-target deck slides off, the browser slides in. One translation via graphicsLayer (no
+ * relayout per frame), interruptible and reversible.
  */
 @Composable private fun Landscape(model: PlayerModel, ux: UiModel, pick: (DeckId) -> Unit, modifier: Modifier) {
     val a = model.decks.getValue(DeckId.A); val b = model.decks.getValue(DeckId.B)
-    Row(modifier.padding(horizontal = 6.dp)) {
-        DeckSide(a, model, ux, pick, Modifier.weight(1f).fillMaxHeight())
-        Column(Modifier.width(372.dp).fillMaxHeight().padding(horizontal = DeckGap), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Row(Modifier.fillMaxWidth().weight(1f)) {
-                KnobColumn(a, ux, model, Modifier.width(54.dp).fillMaxHeight().padding(top = 4.dp), 34.dp)
-                ChannelFader(a, model, Modifier.width(48.dp).fillMaxHeight())
-                Row(Modifier.weight(1f).fillMaxHeight().padding(horizontal = 3.dp), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-                    for (ui in listOf(a, b)) DetailWave(ui, model, ux, Modifier.weight(1f).fillMaxHeight(), vertical = true)
+    BoxWithConstraints(modifier.clipToBounds()) {
+        val mixerWidth = 372.dp
+        val screen = maxWidth
+        val side = (screen - mixerWidth - 12.dp) / 2
+        val sidePx = with(LocalDensity.current) { side.toPx() }
+        // Outgoing A stays: strip moves right (+side); outgoing B: left (−side); closed: centred.
+        val target = when (model.browser) { DeckId.A -> sidePx; DeckId.B -> -sidePx; else -> 0f }
+        val shift = remember { androidx.compose.animation.core.Animatable(0f) }
+        LaunchedEffect(target) { shift.animateTo(target, androidx.compose.animation.core.spring(dampingRatio = 1f, stiffness = 500f)) }
+        // Which browser slot is (or was, while animating out) on screen.
+        val browserSlot = when { model.browser != null -> model.browser; shift.value > 1f -> DeckId.A; shift.value < -1f -> DeckId.B; else -> null }
+        Row(Modifier.wrapContentWidth(unbounded = true).requiredWidth(screen + side * 2).fillMaxHeight().graphicsLayer { translationX = shift.value }) {
+            Box(Modifier.width(side).fillMaxHeight()) { if (browserSlot == DeckId.A) LibraryPanel(model, ux, Modifier.fillMaxSize().padding(start = 6.dp).screenSafe(), pick, tapTarget = DeckId.B) }
+            Row(Modifier.width(screen).fillMaxHeight().padding(horizontal = 6.dp)) {
+                DeckSide(a, model, ux, pick, Modifier.weight(1f).fillMaxHeight())
+                Column(Modifier.width(mixerWidth).fillMaxHeight().padding(horizontal = DeckGap), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(Modifier.fillMaxWidth().weight(1f)) {
+                        KnobColumn(a, ux, model, Modifier.width(54.dp).fillMaxHeight().padding(top = 4.dp), 34.dp)
+                        ChannelFader(a, model, Modifier.width(48.dp).fillMaxHeight())
+                        Row(Modifier.weight(1f).fillMaxHeight().padding(horizontal = 3.dp), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                            for (ui in listOf(a, b)) DetailWave(ui, model, ux, Modifier.weight(1f).fillMaxHeight(), vertical = true)
+                        }
+                        ChannelFader(b, model, Modifier.width(48.dp).fillMaxHeight())
+                        KnobColumn(b, ux, model, Modifier.width(54.dp).fillMaxHeight().padding(top = 4.dp), 34.dp)
+                    }
+                    // Symmetric flanks keep the crossfader centred on the screen.
+                    Row(Modifier.fillMaxWidth().height(44.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        BrowseKey(model, ux, Modifier.width(76.dp).height(40.dp))
+                        Crossfader(model, ux, Modifier.weight(1f).fillMaxHeight())
+                        Row(Modifier.width(76.dp), verticalAlignment = Alignment.CenterVertically) { QuantizeKey(model, ux, Modifier.weight(1f).height(32.dp)); SettingsKey(ux, Modifier.size(38.dp)) }
+                    }
+                    FxSection(ux, model, Modifier.fillMaxWidth().height(54.dp).padding(bottom = 4.dp), horizontal = true)
                 }
-                ChannelFader(b, model, Modifier.width(48.dp).fillMaxHeight())
-                KnobColumn(b, ux, model, Modifier.width(54.dp).fillMaxHeight().padding(top = 4.dp), 34.dp)
+                DeckSide(b, model, ux, pick, Modifier.weight(1f).fillMaxHeight())
             }
-            // Symmetric flanks keep the crossfader centred on the screen.
-            Row(Modifier.fillMaxWidth().height(44.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                BrowseKey(model, ux, Modifier.width(76.dp).height(40.dp))
-                Crossfader(model, ux, Modifier.weight(1f).fillMaxHeight())
-                Row(Modifier.width(76.dp), verticalAlignment = Alignment.CenterVertically) { QuantizeKey(model, ux, Modifier.weight(1f).height(32.dp)); SettingsKey(ux, Modifier.size(38.dp)) }
-            }
-            FxSection(ux, model, Modifier.fillMaxWidth().height(54.dp).padding(bottom = 4.dp), horizontal = true)
+            Box(Modifier.width(side).fillMaxHeight()) { if (browserSlot == DeckId.B) LibraryPanel(model, ux, Modifier.fillMaxSize().padding(end = 6.dp).screenSafe(), pick, tapTarget = DeckId.A) }
         }
-        DeckSide(b, model, ux, pick, Modifier.weight(1f).fillMaxHeight())
     }
 }
 
@@ -237,7 +258,7 @@ fun mixOf(model: PlayerModel, ux: UiModel, id: DeckId): DeckMix {
         Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(5.dp)) {
             DeckInfo(ui, model, Modifier.fillMaxWidth().height(38.dp).screenSafe(), compact = true)
             Minimap(ui, model, ux.waves[ui.source?.id ?: ""], Modifier.fillMaxWidth().height(40.dp).screenSafe(), preview = ux.seekPreview)
-            Pads(ui, model, ux, Modifier.fillMaxWidth().weight(1f).screenSafe(), 4, Dp.Unspecified)
+            Pads(ui, model, ux, Modifier.fillMaxWidth().weight(1f), 4, Dp.Unspecified, perCellSafe = true)
             StemsStrip(ui, ux, model, Modifier.fillMaxWidth().height(26.dp).screenSafe())
             LoopStrip(ui, ux, model, Modifier.fillMaxWidth().height(40.dp).screenSafe())
             JumpStrip(ui, ux, model, Modifier.fillMaxWidth().height(40.dp).screenSafe())
@@ -245,8 +266,6 @@ fun mixOf(model: PlayerModel, ux: UiModel, id: DeckId): DeckMix {
             Row(Modifier.fillMaxWidth().height(42.dp).screenSafe()) { BendStrip(ui, model, Modifier.weight(1f).fillMaxHeight()); PitchKey(ui, model, ux, Modifier.weight(1.6f).fillMaxHeight()) }
         }
         // Deck popups are confined to this deck's side: they never cover the mixer.
-        // The browser replaces this side's controls below the deck info (the centre waves stay visible).
-        if (model.browser == ui.id) LibraryPanel(model, ux, Modifier.fillMaxSize().padding(top = 43.dp).background(Ink.background).screenSafe(), pick, tapTarget = other(ui.id))
         AnimatedVisibility(model.pitchDrawer == ui.id, Modifier.align(Alignment.BottomCenter).padding(bottom = 40.dp), enter = fadeIn(tween(150)) + scaleIn(initialScale = .92f), exit = fadeOut(tween(120))) {
             PitchPopup(model, ux, Modifier.widthIn(max = 380.dp).fillMaxWidth())
         }
