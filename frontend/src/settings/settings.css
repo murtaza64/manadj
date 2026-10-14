@@ -346,3 +346,19 @@
   display: inline-flex;
   gap: var(--space-4);
 }
+
+/* Phone sync (#373): addresses + pairing code, monospace and copyable. */
+.settings-phone-pairing {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-8);
+}
+.settings-phone-pairing code {
+  user-select: all;
+}
+.settings-phone-code {
+  font-size: 1.4em;
+  letter-spacing: 0.12em;
+  color: var(--accent);
+}

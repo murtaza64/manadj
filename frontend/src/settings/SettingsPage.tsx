@@ -34,6 +34,7 @@ const WaveformSettings = lazy(() => import('../waveform/StyleTuningPage'));
 const ControllerCalibrationSettings = lazy(() => import('./ControllerCalibrationSettings'));
 const MouseJogSettings = lazy(() => import('./MouseJogSettings'));
 const LibrarySettings = lazy(() => import('./LibrarySettings'));
+const PhoneSyncSettings = lazy(() => import('./PhoneSyncSettings'));
 const SetupSettings = lazy(() => import('../setup/SetupSettings'));
 const ControllerCheckSettings = lazy(() => import('../setup/controllerCheck/ControllerCheckSettings'));
 const SoulseekSettings = lazy(() => import('../setup/soulseek/SoulseekSettings'));
@@ -437,7 +438,10 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
     id: 'library',
     title: 'Library',
     detail: 'Folders, DJ software, export',
-    sections: [{ id: 'library', title: 'Library', render: () => <LibrarySettings /> }],
+    sections: [
+      { id: 'library', title: 'Library', render: () => <LibrarySettings /> },
+      { id: 'phone-sync', title: 'Phone sync', render: () => <PhoneSyncSettings /> },
+    ],
   },
   {
     id: 'performance',
