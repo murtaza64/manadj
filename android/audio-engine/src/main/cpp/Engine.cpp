@@ -39,7 +39,8 @@ bool Engine::claim(int index, uint64_t load, uint64_t transport, int sampleRate,
     // worker may reset the indices and correct the position.
     d.read.store(d.write.load(kRelaxed), kRelease);
     d.sampleRate.store(sampleRate, kRelease);
-    d.position.store(startSeconds, kRelease);
+    d.claimedStart.store(startSeconds, kRelease);
+    d.claimedTransport.store(transport, kRelease);
     return d.transport.load(kAcquire) == transport;
 }
 
@@ -80,19 +81,101 @@ void Engine::fail(int index, uint64_t load) {
     }
 }
 
-void Engine::relocate(Deck& d, double seconds) noexcept {
+bool Engine::headBegin(int index, int slot) {
+    if (index < 0 || index >= kDeckCount || slot < 0 || slot >= kHeadSlots) return false;
+    auto& h = decks_[index].heads[slot];
+    auto st = h.state.load(kAcquire);
+    while (!(st & kHeadBusy)) {
+        if (h.state.compare_exchange_weak(st, kHeadWriting, std::memory_order_acq_rel)) return true;
+    }
+    return false;
+}
+
+int Engine::headWrite(int index, int slot, int offsetFrames, const float* samples, int frames) {
+    if (index < 0 || index >= kDeckCount || slot < 0 || slot >= kHeadSlots || offsetFrames < 0) return 0;
+    auto& h = decks_[index].heads[slot];
+    const int n = std::max(0, std::min(frames, kHeadFrames - offsetFrames));
+    std::copy(samples, samples + n * 2, h.pcm.begin() + offsetFrames * 2);
+    return n;
+}
+
+void Engine::headCommit(int index, int slot, uint64_t load, double seconds, int frames) {
+    if (index < 0 || index >= kDeckCount || slot < 0 || slot >= kHeadSlots) return;
+    auto& h = decks_[index].heads[slot];
+    h.load.store(load, kRelaxed);
+    h.seconds.store(seconds, kRelaxed);
+    h.frames.store(std::clamp(frames, 0, kHeadFrames), kRelaxed);
+    h.state.store(frames > 1 ? kHeadReady : kHeadEmpty, kRelease);
+}
+
+void Engine::headAbort(int index, int slot) {
+    if (index < 0 || index >= kDeckCount || slot < 0 || slot >= kHeadSlots) return;
+    decks_[index].heads[slot].state.store(kHeadEmpty, kRelease);
+}
+
+void Engine::releaseHead(Deck& d) noexcept {
+    const int slot = d.headSlot.load(kRelaxed);
+    if (slot >= 0) d.heads[slot].state.fetch_and(~static_cast<uint32_t>(kHeadBusy), kRelease);
+    d.headSlot.store(-1, kRelaxed);
+}
+
+void Engine::captureTail(Deck& d) noexcept {
+    // Only audio that is actually being heard gets a fade-out tail.
+    if (!ready(d) || !(d.playing.load(kRelaxed) || d.preview.load(kRelaxed)) || d.envelope <= 0) return;
+    const int slot = d.headSlot.load(kRelaxed);
+    const auto transport = d.transport.load(kRelaxed);
+    int n = 0;
+    if (slot >= 0) {
+        const auto& h = d.heads[slot];
+        const int from = static_cast<int>(d.headPos);
+        n = std::clamp(h.frames.load(kRelaxed) - from, 0, kTailFrames);
+        std::copy(h.pcm.begin() + from * 2, h.pcm.begin() + (from + n) * 2, d.tail.begin());
+    } else if (d.ring.load(kAcquire) == transport) {
+        const auto read = d.read.load(kRelaxed);
+        n = static_cast<int>(std::min<uint64_t>(kTailFrames, d.write.load(kAcquire) - read));
+        for (int i = 0; i < n; ++i) {
+            const auto o = ((read + i) % kRingFrames) * 2;
+            d.tail[i * 2] = d.pcm[o];
+            d.tail[i * 2 + 1] = d.pcm[o + 1];
+        }
+    }
+    if (n < 2) return;
+    const double outRate = outputRate_.load(kRelaxed);
+    d.tailAvail = n;
+    d.tailPos = slot >= 0 ? d.headPos - static_cast<int>(d.headPos) : d.fractional;
+    d.tailRatio = (d.sampleRate.load(kRelaxed) / outRate) * (1 + d.pitch.load(kRelaxed) / 100.) * (1 + d.bend.load(kRelaxed) / 100.);
+    d.tailGain = d.gain * d.envelope;
+    d.tailLeft = kFadeFrames;
+}
+
+void Engine::relocate(Deck& d, double seconds, int slot) noexcept {
+    captureTail(d);
+    releaseHead(d);
     const auto t = std::max(0.0, seconds);
+    int offset = 0;
+    if (slot >= 0 && slot < kHeadSlots) {
+        auto& h = d.heads[slot];
+        uint32_t expected = kHeadReady;
+        if (h.load.load(kRelaxed) == d.loadId.load(kRelaxed) && h.seconds.load(kRelaxed) == t &&
+            h.state.compare_exchange_strong(expected, kHeadReady | kHeadBusy, std::memory_order_acq_rel)) {
+            if (h.load.load(kRelaxed) == d.loadId.load(kRelaxed) && h.seconds.load(kRelaxed) == t) {
+                d.headSlot.store(slot, kRelaxed);
+                offset = h.frames.load(kRelaxed) - 1;
+            } else h.state.fetch_and(~static_cast<uint32_t>(kHeadBusy), kRelease);
+        }
+    }
+    d.ringOffset.store(offset, kRelaxed);
+    d.headPos = 0;
     d.target.store(t, kRelaxed);
     d.position.store(t, kRelaxed);
     d.fractional = 0;
     d.envelope = 0;
-    d.fadeOut = 0;
     d.transport.store(d.transport.load(kRelaxed) + 1, kRelease);
 }
 
 void Engine::stop(Deck& d) noexcept {
-    const bool audible = d.playing.load(kRelaxed) || d.preview.load(kRelaxed);
-    if (audible && d.ring.load(kAcquire) == d.transport.load(kRelaxed)) d.fadeOut = kFadeFrames;
+    captureTail(d);
+    d.envelope = 0;
     d.playing.store(false, kRelaxed);
     d.preview.store(false, kRelaxed);
     d.previewSlot.store(-1, kRelaxed);
@@ -111,6 +194,7 @@ void Engine::apply(const Command& c) noexcept {
             d.previewSlot.store(-1);
             d.cue.store(0);
             for (auto& h : d.hotcues) h.store(-1);
+            d.tailLeft = 0;
             relocate(d, 0);
             break;
         case Op::Play:
@@ -120,7 +204,7 @@ void Engine::apply(const Command& c) noexcept {
         case Op::CueDown: {
             if (!isReady) break;
             const double cue = d.cue.load();
-            if (d.playing.load()) { stop(d); relocate(d, cue); }
+            if (d.playing.load()) { stop(d); relocate(d, cue, kMainCueSlot); }
             else if (std::abs(position - cue) < kAtCueEpsilon) { d.preview.store(true); d.previewSlot.store(kMainCueSlot); }
             else d.cue.store(position);
             break;
@@ -128,19 +212,19 @@ void Engine::apply(const Command& c) noexcept {
         case Op::CueUp:
             if (d.previewSlot.load() != kMainCueSlot) break;
             if (d.playing.load()) { d.preview.store(false); d.previewSlot.store(-1); }
-            else { stop(d); relocate(d, d.cue.load()); }
+            else { stop(d); relocate(d, d.cue.load(), kMainCueSlot); }
             break;
         case Op::HotCueDown: {
             const double at = d.hotcues[c.slot].load();
             if (!isReady || at < 0) break;
-            relocate(d, at);
+            relocate(d, at, c.slot);
             if (!d.playing.load()) { d.preview.store(true); d.previewSlot.store(c.slot); }
             break;
         }
         case Op::HotCueUp:
             if (d.previewSlot.load() != c.slot) break;
             if (d.playing.load()) { d.preview.store(false); d.previewSlot.store(-1); }
-            else { stop(d); relocate(d, d.hotcues[c.slot].load()); }
+            else { stop(d); relocate(d, d.hotcues[c.slot].load(), c.slot); }
             break;
         case Op::HotCueSet: if (isReady) d.hotcues[c.slot].store(position); break;
         case Op::HotCueClear: d.hotcues[c.slot].store(-1); break;
@@ -181,58 +265,87 @@ void Engine::render(float* output, int frames) noexcept {
     const double outRate = outputRate_.load(kRelaxed);
     for (int j = 0; j < kDeckCount; ++j) {
         auto& d = decks_[j];
+        // Crossfade tail of whatever was heard before the last relocation/stop.
+        for (int i = 0; i < frames && d.tailLeft > 0; ++i) {
+            const int k = static_cast<int>(d.tailPos);
+            if (k + 1 >= d.tailAvail) { d.tailLeft = 0; break; }
+            const float f = static_cast<float>(d.tailPos - k);
+            const float g = d.tailGain * static_cast<float>(d.tailLeft--) / kFadeFrames;
+            output[i * 2] += (d.tail[k * 2] + (d.tail[k * 2 + 2] - d.tail[k * 2]) * f) * g;
+            output[i * 2 + 1] += (d.tail[k * 2 + 1] + (d.tail[k * 2 + 3] - d.tail[k * 2 + 1]) * f) * g;
+            d.tailPos += d.tailRatio;
+        }
         if (!ready(d)) {
             if ((d.status.load(kAcquire) & 3) == kError) { d.playing.store(false); d.preview.store(false); d.previewSlot.store(-1); }
-            d.fadeOut = 0;
             continue;
         }
-        const bool audible = d.playing.load(kRelaxed) || d.preview.load(kRelaxed);
-        if (audible) d.fadeOut = 0;
-        else if (d.fadeOut == 0) { d.envelope = 0; continue; }
         const auto transport = d.transport.load(kRelaxed);
-        if (d.ring.load(kAcquire) != transport) continue; // Refill in progress: silent, clock held.
+        const bool ringLive = d.ring.load(kAcquire) == transport;
+        if (ringLive && d.positionTransport != transport) {
+            // First audible frame of a claimed ring: adopt the decoder's actual start.
+            if (d.headSlot.load(kRelaxed) < 0 && d.ringOffset.load(kRelaxed) == 0 && d.claimedTransport.load(kAcquire) == transport)
+                d.position.store(d.claimedStart.load(kAcquire), kRelease);
+            d.positionTransport = transport;
+        }
+        if (!(d.playing.load(kRelaxed) || d.preview.load(kRelaxed))) { d.envelope = 0; continue; }
+        int slot = d.headSlot.load(kRelaxed);
+        if (slot < 0 && !ringLive) continue; // Refill in progress: silent, clock held.
         const auto sampleRate = d.sampleRate.load(kAcquire);
         const double ratio = (sampleRate / outRate) * (1 + d.pitch.load(kRelaxed) / 100.) * (1 + d.bend.load(kRelaxed) / 100.);
+        if (d.envelope == 0) d.gain = d.targetGain; // Envelope owns the onset.
         auto read = d.read.load(kRelaxed);
         auto write = d.write.load(kAcquire);
-        if (audible && d.envelope == 0) d.gain = d.targetGain; // Envelope owns the onset.
-        double fractional = d.fractional;
+        double fractional = slot >= 0 ? d.headPos : d.fractional;
         uint64_t consumedTotal = 0;
         for (int i = 0; i < frames; ++i) {
-            const auto need = static_cast<uint64_t>(fractional + ratio) + 2;
-            if (write - read < need) {
-                write = d.write.load(kAcquire);
-                if (write - read < need) {
-                    if (!audible) { d.fadeOut = 0; break; }
-                    if (d.eof.load(kAcquire) == transport && d.write.load(kAcquire) - read < need) {
-                        d.playing.store(false); d.preview.store(false); d.previewSlot.store(-1);
-                    } else starvedFrames_.fetch_add(frames - i, kRelaxed);
-                    break;
+            const float* a;
+            const float* b;
+            if (slot >= 0) {
+                const auto& h = d.heads[slot];
+                const int last = h.frames.load(kRelaxed) - 1;
+                int k = static_cast<int>(fractional);
+                if (k >= last) {
+                    // Head exhausted: continue in the ring, whose frame 0 is head frame `last`.
+                    if (!ringLive) { starvedFrames_.fetch_add(frames - i, kRelaxed); break; }
+                    read = d.read.load(kRelaxed) + static_cast<uint64_t>(k - last);
+                    write = d.write.load(kAcquire);
+                    fractional -= k;
+                    releaseHead(d);
+                    slot = -1;
+                } else {
+                    a = &h.pcm[k * 2];
+                    b = &h.pcm[(k + 1) * 2];
                 }
             }
-            if (!audible) {
-                if (d.fadeOut == 0) break;
-                d.envelope = static_cast<float>(d.fadeOut--) / kFadeFrames;
-            } else d.envelope = std::min(1.f, d.envelope + 1.f / kFadeFrames);
+            if (slot < 0) {
+                const auto need = static_cast<uint64_t>(fractional + ratio) + 2;
+                if (write - read < need) {
+                    write = d.write.load(kAcquire);
+                    if (write - read < need) {
+                        if (d.eof.load(kAcquire) == transport && d.write.load(kAcquire) - read < need) {
+                            d.playing.store(false); d.preview.store(false); d.previewSlot.store(-1);
+                        } else starvedFrames_.fetch_add(frames - i, kRelaxed);
+                        break;
+                    }
+                }
+                a = &d.pcm[(read % kRingFrames) * 2];
+                b = &d.pcm[((read + 1) % kRingFrames) * 2];
+            }
+            d.envelope = std::min(1.f, d.envelope + 1.f / kFadeFrames);
             d.gain += (d.targetGain - d.gain) * .002f;
             const float g = d.gain * d.envelope;
-            const auto a = (read % kRingFrames) * 2;
-            const auto b = ((read + 1) % kRingFrames) * 2;
-            const float f = static_cast<float>(fractional);
-            output[i * 2] += (d.pcm[a] + (d.pcm[b] - d.pcm[a]) * f) * g;
-            output[i * 2 + 1] += (d.pcm[a + 1] + (d.pcm[b + 1] - d.pcm[a + 1]) * f) * g;
+            const float f = static_cast<float>(fractional - static_cast<int>(fractional));
+            output[i * 2] += (a[0] + (b[0] - a[0]) * f) * g;
+            output[i * 2 + 1] += (a[1] + (b[1] - a[1]) * f) * g;
+            const auto before = static_cast<uint64_t>(fractional);
             fractional += ratio;
-            const auto consumed = static_cast<uint64_t>(fractional);
-            fractional -= consumed;
-            read += consumed;
+            const auto consumed = static_cast<uint64_t>(fractional) - before;
             consumedTotal += consumed;
+            if (slot < 0) { read += consumed; fractional -= static_cast<uint64_t>(fractional); }
         }
-        // A fade-out reads ahead on a local cursor so the paused position is the stop point.
-        if (audible) {
-            d.fractional = fractional;
-            d.read.store(read, kRelease);
-            d.position.store(d.position.load(kRelaxed) + consumedTotal / static_cast<double>(sampleRate), kRelease);
-        }
+        if (slot >= 0) d.headPos = fractional;
+        else { d.fractional = fractional; d.read.store(read, kRelease); }
+        d.position.store(d.position.load(kRelaxed) + consumedTotal / static_cast<double>(sampleRate), kRelease);
     }
     for (int i = 0; i < frames * 2; ++i) output[i] = ceiling(output[i]);
     outputFrames_.fetch_add(frames, kRelease);

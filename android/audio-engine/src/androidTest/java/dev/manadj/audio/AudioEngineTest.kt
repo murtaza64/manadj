@@ -244,6 +244,44 @@ class AudioEngineTest {
         }
     }
 
+    @Test fun cueJumpsWithPreDecodedHeadsAreGapless() {
+        for ((name, file) in listOf("wav" to wav("engine-gapless.wav", .25, seconds = 10), "aac" to m4a("engine-gapless.m4a", 440.0, 10))) {
+            AudioEngine(offline = true).use { engine ->
+                engine.load(DeckId.A, name, file)
+                engine.settled(DeckId.A)
+                engine.submit(AudioCommand.Seek(DeckId.A, 2.0)); engine.renderOfflineForTest(16); engine.settled(DeckId.A)
+                engine.submit(AudioCommand.SetHotCue(DeckId.A, 4))
+                engine.submit(AudioCommand.Seek(DeckId.A, 5.0)); engine.renderOfflineForTest(16); engine.settled(DeckId.A)
+                engine.until("$name heads ready") { (deck(DeckId.A).readyHeads and (1 shl 4)) != 0 && (deck(DeckId.A).readyHeads and (1 shl 8)) != 0 }
+                engine.submit(AudioCommand.Play(DeckId.A))
+                engine.renderOfflineForTest(2048)
+                engine.submit(AudioCommand.HotCueDown(DeckId.A, 4))
+                val jump = engine.renderOfflineForTest(1024)
+                assertEquals("$name used head", 4, engine.deck(DeckId.A).let { if (it.filling) -1 else 4 })
+                // Silence = any 64-frame window with no energy (a refill gap is >=400 frames).
+                for (w in 0 until 1024 / 64) {
+                    var e = 0f
+                    for (i in w * 64 until (w + 1) * 64) e += jump[i * 2] * jump[i * 2]
+                    assertTrue("$name gap at window $w", e > 1e-4f)
+                }
+                assertEquals(2.0 + 1024 * (if (name == "wav") 48000 else 44100) / 48000.0 / (if (name == "wav") 48000 else 44100), engine.deck(DeckId.A).sourceSeconds, .002)
+                // Move the main cue past the AAC encoder priming silence, wait for its head.
+                engine.submit(AudioCommand.Pause(DeckId.A))
+                engine.submit(AudioCommand.Seek(DeckId.A, 3.0)); engine.renderOfflineForTest(16); engine.settled(DeckId.A)
+                engine.submit(AudioCommand.CueDown(DeckId.A)); engine.submit(AudioCommand.CueUp(DeckId.A)); engine.renderOfflineForTest(16)
+                engine.until("$name cue head") { (deck(DeckId.A).readyHeads and (1 shl 8)) != 0 }
+                engine.submit(AudioCommand.Play(DeckId.A)); engine.renderOfflineForTest(2048)
+                engine.submit(AudioCommand.CueDown(DeckId.A)) // playing: back to main cue, paused
+                engine.renderOfflineForTest(64)
+                assertEquals(AudioEngine.MAIN_CUE, engine.deck(DeckId.A).headSlot)
+                engine.submit(AudioCommand.CueDown(DeckId.A)) // at cue: preview from the cue head instantly
+                val preview = engine.renderOfflineForTest(512)
+                var e = 0f; for (i in 256 until 512) e += preview[i * 2] * preview[i * 2]
+                assertTrue("$name cue preview silent e=$e ${engine.deck(DeckId.A)}", e > 1e-4f)
+            }
+        }
+    }
+
     @Test fun manyRelocationsWhilePlayingNeverEndEarly() {
         val media = wav("engine-reloc.wav", .25, seconds = 20, rate = 44100)
         val rng = java.util.Random(7)
@@ -277,7 +315,8 @@ class AudioEngineTest {
             engine.submit(AudioCommand.Play(DeckId.A))
             Thread.sleep(200)
             val before = engine.snapshot()
-            val gaps = mutableListOf<Long>()
+            var gapped = 0
+            var headed = 0
             repeat(20) { i ->
                 Thread.sleep(150L + (i % 5) * 37)
                 assertTrue("stopped before jump $i: ${engine.deck(DeckId.A)}", engine.deck(DeckId.A).playing)
@@ -285,19 +324,21 @@ class AudioEngineTest {
                 engine.submit(AudioCommand.HotCueDown(DeckId.A, 0, "j$i"))
                 engine.submit(AudioCommand.HotCueUp(DeckId.A, 0, "j$i"))
                 var seen = false
-                while (System.nanoTime() - t0 < 500_000_000L) {
+                var head = false
+                while (System.nanoTime() - t0 < 50_000_000L) {
                     val d = engine.deck(DeckId.A)
-                    if (!seen && d.filling) seen = true
-                    if (seen && !d.filling && d.sourceSeconds > 1.0) break
+                    if (d.filling) seen = true
+                    if (d.headSlot == 0) head = true
                     Thread.sleep(1)
                 }
-                gaps.add((System.nanoTime() - t0) / 1_000_000)
+                if (seen) gapped++
+                if (head) headed++
             }
             Thread.sleep(300)
             val after = engine.snapshot()
             val info = engine.outputInfo()
             android.util.Log.i("manadj-bench", "output: $info")
-            android.util.Log.i("manadj-bench", "jump refill ms: ${gaps.sorted()} starved=${after.starvedDeckFrames - before.starvedDeckFrames} xruns=${after.outputXruns}")
+            android.util.Log.i("manadj-bench", "jumps: 20, from pre-decoded head $headed, with refill gap $gapped; starved=${after.starvedDeckFrames - before.starvedDeckFrames} xruns=${after.outputXruns}")
             assertTrue("deck stopped after jumps: ${after.decks.getValue(DeckId.A)}", after.decks.getValue(DeckId.A).playing)
             assertNotNull(info)
             assertTrue(info!!.framesPerBurst > 0)

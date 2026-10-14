@@ -13,7 +13,10 @@ constexpr int kHotCues = 8;
 constexpr int kMainCueSlot = kHotCues; // previewSlot value for a main-cue preview.
 constexpr uint32_t kRingFrames = 65536; // ~0.5 MiB/deck, 2 MiB total at stereo float.
 constexpr int kQueueSize = 256;
-constexpr int kFadeFrames = 240;        // ~5 ms transport envelope at 48 kHz.
+constexpr int kFadeFrames = 240;        // ~5 ms transport envelope / relocation crossfade at 48 kHz.
+constexpr int kHeadSlots = kHotCues + 1; // Hot cues 0..7 + main cue.
+constexpr int kHeadFrames = 8192;       // Pre-decoded audio at each cue (~170 ms at 48 kHz).
+constexpr int kTailFrames = 2048;       // Old audio captured for a crossfade (240 frames at <=8x ratio).
 constexpr double kAtCueEpsilon = 0.01;  // Desktop transport.ts AT_CUE_EPSILON.
 
 static_assert(std::atomic<double>::is_always_lock_free, "callback needs lock-free double atomics");
@@ -24,6 +27,23 @@ static_assert(std::atomic<uint64_t>::is_always_lock_free, "callback needs lock-f
 // READY/ERROR transition a CAS that a superseded load can never win.
 enum State : uint64_t { kEmpty = 0, kLoading = 1, kReady = 2, kError = 3 };
 inline uint64_t status(uint64_t load, State state) { return (load << 2) | state; }
+
+// Head state word: low bits state, kHeadBusy while the callback plays from it.
+enum HeadState : uint32_t { kHeadEmpty = 0, kHeadWriting = 1, kHeadReady = 2, kHeadBusy = 4 };
+
+/*
+ * Pre-decoded audio at a cue point. The worker writes it only while it is not
+ * busy (CAS Ready->Writing fails once the callback has set kHeadBusy); the
+ * callback plays from it only when tagged with the current load and the exact
+ * relocation target, so a jump to a cue starts instantly while the ring refills.
+ */
+struct Head {
+    std::array<float, kHeadFrames * 2> pcm{};
+    std::atomic<uint32_t> state{kHeadEmpty};
+    std::atomic<uint64_t> load{0};
+    std::atomic<double> seconds{-1};
+    std::atomic<int> frames{0};
+};
 
 enum class Op : int { Prepare, Play, Pause, CueDown, CueUp, HotCueDown, HotCueUp,
                        HotCueSet, HotCueClear, Seek, Fader, Trim, Crossfade, Pitch, Bend };
@@ -68,12 +88,27 @@ struct Deck {
     std::atomic<float> trim{.5f};
     std::atomic<float> pitch{0};
     std::atomic<float> bend{0};
+    std::array<Head, kHeadSlots> heads{};
+    // Head being played (-1 none) and the ring offset (source frames) the worker must start at.
+    std::atomic<int> headSlot{-1};
+    std::atomic<int> ringOffset{0};
+    // Actual start of the claimed ring (decoder PTS), applied by the callback on first render.
+    std::atomic<double> claimedStart{0};
+    std::atomic<uint64_t> claimedTransport{0};
     // Callback-private.
     double fractional = 0;
+    double headPos = 0;
+    uint64_t positionTransport = 0;
     float gain = 0;
     float targetGain = 0;
     float envelope = 0;
-    int fadeOut = 0;
+    // Crossfade tail: old audio copied at relocation/stop, faded out independently.
+    std::array<float, kTailFrames * 2> tail{};
+    int tailAvail = 0;
+    int tailLeft = 0;
+    double tailPos = 0;
+    double tailRatio = 1;
+    float tailGain = 0;
 };
 
 class Engine {
@@ -91,6 +126,11 @@ public:
     // Makes the claimed transport audible; marks the load READY on first publish.
     bool publish(int deck, uint64_t load, uint64_t transport, bool endOfStream);
     void fail(int deck, uint64_t load);
+    // Head fill (worker): begin fails while the callback plays from the slot.
+    bool headBegin(int deck, int slot);
+    int headWrite(int deck, int slot, int offsetFrames, const float* samples, int frames);
+    void headCommit(int deck, int slot, uint64_t load, double seconds, int frames);
+    void headAbort(int deck, int slot);
 
     void render(float* output, int frames) noexcept;
     Deck& deck(int index) { return decks_[index]; }
@@ -113,8 +153,10 @@ private:
     std::atomic<float> crossfade_{0};
     static float ceiling(float value) noexcept;
     void updateGain(int index) noexcept;
-    void relocate(Deck& d, double seconds) noexcept;
+    void relocate(Deck& d, double seconds, int slot = -1) noexcept;
     void stop(Deck& d) noexcept;
+    void captureTail(Deck& d) noexcept;
+    void releaseHead(Deck& d) noexcept;
     void apply(const Command& command) noexcept;
 };
 } // namespace manadj

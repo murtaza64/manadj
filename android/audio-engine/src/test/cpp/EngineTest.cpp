@@ -218,5 +218,57 @@ int main() {
         CHECK(e.starvedFrames() > 0);
         CHECK(e.deck(0).playing.load());
     }
+    { // Pre-decoded head: hot-cue jump while playing is gapless, crossfaded, and hands off to the ring.
+        auto owned = std::make_unique<Engine>(48000);
+        Engine& e = *owned;
+        loadDeck(e, 0, 1, .25f);
+        e.submit(Op::Seek, 0, 2.0);
+        tick(e);
+        feed(e, 0, 1, .25f, 48000);
+        e.submit(Op::HotCueSet, 0, 0, 0, 1);
+        e.submit(Op::Seek, 0, 6.0);
+        tick(e);
+        CHECK(e.deck(0).hotcues[1].load() == 2.0);
+        std::vector<float> head(kHeadFrames * 2, .5f);
+        CHECK(e.headBegin(0, 1));
+        CHECK(e.headWrite(0, 1, 0, head.data(), kHeadFrames) == kHeadFrames);
+        e.headCommit(0, 1, 1, 2.0, kHeadFrames);
+        feed(e, 0, 1, .25f, 48000);
+        e.submit(Op::Play, 0);
+        tick(e, 1024);
+        e.submit(Op::HotCueDown, 0, 0, 0, 1);
+        tick(e, 512);
+        CHECK(e.deck(0).headSlot.load() == 1);
+        CHECK(!e.headBegin(0, 1));                    // busy: worker cannot overwrite
+        float lo = 1, hi = 0;
+        for (int i = 0; i < 512; ++i) { lo = std::min(lo, out[i * 2]); hi = std::max(hi, out[i * 2]); }
+        CHECK(lo > .2f * unity);                      // no gap, no dip below the old level
+        CHECK(std::abs(out[1022] - .5f * unity) < .002);
+        CHECK(std::abs(out[0] - .25f * unity) < .02); // starts at the old level (crossfade)
+        // Ring for the jump starts at head frame kHeadFrames-1.
+        CHECK(e.deck(0).ringOffset.load() == kHeadFrames - 1);
+        feed(e, 0, 1, -.5f, 48000);
+        CHECK(std::abs(e.deck(0).position.load() - (2.0 + 512 / 48000.)) < 1e-6);
+        tick(e, kHeadFrames);
+        CHECK(e.deck(0).headSlot.load() == -1);
+        CHECK(out[kHeadFrames * 2 - 2] < -.4f * unity);
+        CHECK(std::abs(e.deck(0).position.load() - (2.0 + (512 + kHeadFrames) / 48000.)) < 1e-6);
+        CHECK(e.headBegin(0, 1));                     // released after hand-off
+        e.headAbort(0, 1);
+        CHECK(e.starvedFrames() == 0);
+    }
+
+    { // Relocation without a head fades the old audio out instead of cutting.
+        auto owned = std::make_unique<Engine>(48000);
+        Engine& e = *owned;
+        loadDeck(e, 0, 1, .25f);
+        e.submit(Op::Play, 0);
+        tick(e, 1024);
+        e.submit(Op::Seek, 0, 3.0);
+        tick(e, kFadeFrames + 16);
+        CHECK(out[0] > .2f * unity);
+        CHECK(out[kFadeFrames] > 0 && out[kFadeFrames] < .15f * unity);
+        CHECK(out[(kFadeFrames + 8) * 2] == 0);
+    }
     std::puts("engine tests passed");
 }

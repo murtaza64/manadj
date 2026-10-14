@@ -126,10 +126,16 @@ Java_dev_manadj_audio_AudioEngine_nativeSubmit(JNIEnv*, jobject, jlong handle, j
 
 extern "C" JNIEXPORT void JNICALL
 Java_dev_manadj_audio_AudioEngine_nativeTransport(JNIEnv* env, jobject, jlong handle, jint deck, jdoubleArray out) {
-    if (deck < 0 || deck >= manadj::kDeckCount || env->GetArrayLength(out) < 3) return;
+    if (deck < 0 || deck >= manadj::kDeckCount || env->GetArrayLength(out) < 4 + manadj::kHeadSlots) return;
     const auto& d = output(handle)->engine.deck(deck);
-    const double values[3] = {static_cast<double>(d.loadId.load()), static_cast<double>(d.transport.load()), d.target.load()};
-    env->SetDoubleArrayRegion(out, 0, 3, values);
+    // Transport is read before target/offset (release-ordered by the callback).
+    const auto load = d.loadId.load();
+    const auto transport = d.transport.load();
+    double values[4 + manadj::kHeadSlots] = {static_cast<double>(load), static_cast<double>(transport), d.target.load(),
+                                             static_cast<double>(d.ringOffset.load())};
+    for (int h = 0; h < manadj::kHotCues; ++h) values[4 + h] = d.hotcues[h].load();
+    values[4 + manadj::kMainCueSlot] = d.cue.load();
+    env->SetDoubleArrayRegion(out, 0, 4 + manadj::kHeadSlots, values);
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
@@ -155,6 +161,28 @@ Java_dev_manadj_audio_AudioEngine_nativeOffer(JNIEnv* env, jobject, jlong handle
         if (accepted < n) break;
     }
     return total;
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_dev_manadj_audio_AudioEngine_nativeHeadBegin(JNIEnv*, jobject, jlong handle, jint deck, jint slot) {
+    return output(handle)->engine.headBegin(deck, slot);
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_dev_manadj_audio_AudioEngine_nativeHeadWrite(JNIEnv* env, jobject, jlong handle, jint deck, jint slot,
+                                                     jint at, jfloatArray samples, jint frames) {
+    const int n = std::max(0, std::min<int>(frames, manadj::kHeadFrames - at));
+    if (n == 0 || env->GetArrayLength(samples) < n * 2) return 0;
+    std::vector<float> copy(static_cast<size_t>(n) * 2); // Worker thread; allocation is fine here.
+    env->GetFloatArrayRegion(samples, 0, n * 2, copy.data());
+    return output(handle)->engine.headWrite(deck, slot, at, copy.data(), n);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_dev_manadj_audio_AudioEngine_nativeHeadCommit(JNIEnv*, jobject, jlong handle, jint deck, jint slot,
+                                                      jlong load, jdouble seconds, jint frames) {
+    if (frames > 0) output(handle)->engine.headCommit(deck, slot, static_cast<uint64_t>(load), seconds, frames);
+    else output(handle)->engine.headAbort(deck, slot);
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
@@ -207,8 +235,12 @@ Java_dev_manadj_audio_AudioEngine_nativeSnapshot(JNIEnv* env, jobject, jlong han
         data[n + 15] = d.trim.load();
         data[n + 16] = d.pitch.load();
         data[n + 17] = d.bend.load();
-        data[n + 18] = 0;
-        data[n + 19] = 0;
+        data[n + 18] = d.headSlot.load();
+        int heads = 0;
+        for (int h = 0; h < manadj::kHeadSlots; ++h)
+            if ((d.heads[h].state.load() & 3) == manadj::kHeadReady && d.heads[h].load.load() == d.loadId.load() &&
+                d.heads[h].seconds.load() == (h == manadj::kMainCueSlot ? d.cue.load() : d.hotcues[h].load())) heads |= 1 << h;
+        data[n + 19] = heads;
         for (int h = 0; h < manadj::kHotCues; ++h) data[n + 20 + h] = d.hotcues[h].load();
     }
     auto result = env->NewDoubleArray(kSnapshotSize);

@@ -51,6 +51,10 @@ data class DeckSnapshot(
     val cueSeconds: Double?, val hotCues: List<Double?>,
     /** A relocation is refilling: audio is held silent and the clock does not advance. */
     val filling: Boolean, val atEnd: Boolean,
+    /** Bitmask of cue slots (hot cues 0..7, main cue 8) with pre-decoded audio ready for instant jumps. */
+    val readyHeads: Int,
+    /** Cue slot whose pre-decoded audio is playing (-1 none). */
+    val headSlot: Int,
     val appliedCommandId: Long, val bufferedFrames: Long,
 )
 data class EngineSnapshot(
@@ -96,6 +100,8 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
         const val HOT_CUES = 8
         val CAPABILITIES = setOf("play", "pause", "cue-gate", "hot-cue-gate", "hot-cue-set", "seek", "fader", "trim", "crossfade", "varispeed", "bend")
         private const val PRIME_FRAMES = 2048
+        private const val HEAD_SLOTS = HOT_CUES + 1
+        private const val HEAD_FRAMES = 8192
         private const val HEADER = 13
         private const val DECK_FIELDS = 20 + HOT_CUES
         private enum class Op { PREPARE, PLAY, PAUSE, CUE_DOWN, CUE_UP, HOT_CUE_DOWN, HOT_CUE_UP, HOT_CUE_SET, HOT_CUE_CLEAR, SEEK, FADER, TRIM, CROSSFADE, PITCH, BEND }
@@ -197,7 +203,9 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
                 previewSlot = data[p + 10].toInt().takeIf { current && it >= 0 },
                 cueSeconds = data[p + 11].takeIf { current && state == LoadState.READY },
                 hotCues = List(HOT_CUES) { h -> data[p + 20 + h].takeIf { current && it >= 0 } },
-                filling = current && state == LoadState.READY && data[p + 4] == 0.0,
+                filling = current && state == LoadState.READY && data[p + 4] == 0.0 && data[p + 18] < 0,
+                readyHeads = if (current) data[p + 19].toInt() else 0,
+                headSlot = if (current) data[p + 18].toInt() else -1,
                 atEnd = current && data[p + 5] != 0.0,
                 appliedCommandId = data[p + 12].toLong(), bufferedFrames = data[p + 13].toLong(),
             )
@@ -220,11 +228,13 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
      */
     private fun decode(deck: Int, source: Source) {
         if (!current(deck, source)) return
+        var heads: HeadFiller? = null
         try {
             ParcelFileDescriptor.dup(source.fd.fileDescriptor).use { fd ->
                 PcmReader.open(fd.fileDescriptor).use { reader ->
                     reader.durationSeconds?.let { durations.set(deck, source.load to it) }
-                    pump(deck, source, reader)
+                    heads = HeadFiller(deck, source)
+                    pump(deck, source, reader, heads!!)
                 }
             }
         } catch (_: InterruptedException) {
@@ -233,11 +243,52 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
                 errors.set(deck, source.load to (e.message ?: e.javaClass.simpleName))
                 nativeFail(handle, deck, source.load)
             }
+        } finally { heads?.close() }
+    }
+
+    /**
+     * Keeps pre-decoded audio at the deck's cue points (hot cues + main cue) with
+     * a second decoder, so cue jumps start without waiting for the ring refill.
+     */
+    private inner class HeadFiller(private val deck: Int, private val source: Source) : AutoCloseable {
+        private var fd: ParcelFileDescriptor? = null
+        private var reader: PcmReader? = null
+        private val filled = DoubleArray(HEAD_SLOTS) { Double.NaN }
+
+        /** Fills at most one stale slot; true if it did work. */
+        fun fillOne(targets: DoubleArray): Boolean {
+            for (slot in 0 until HEAD_SLOTS) {
+                val at = targets[4 + slot]
+                if (at < 0 || at == filled[slot]) continue
+                if (!nativeHeadBegin(handle, deck, slot)) continue // Being played; retry later.
+                var frames = 0
+                try {
+                    val r = reader ?: run {
+                        val dup = ParcelFileDescriptor.dup(source.fd.fileDescriptor).also { fd = it }
+                        PcmReader.open(dup.fileDescriptor).also { reader = it }
+                    }
+                    r.seek(at)
+                    while (frames < HEAD_FRAMES && current(deck, source)) {
+                        val n = r.read()
+                        if (n < 0) break
+                        if (n == 0) continue
+                        frames += nativeHeadWrite(handle, deck, slot, frames, r.samples, n)
+                    }
+                } finally { nativeHeadCommit(handle, deck, slot, source.load, at, frames) }
+                filled[slot] = at
+                return true
+            }
+            return false
+        }
+
+        override fun close() {
+            runCatching { reader?.close() }
+            runCatching { fd?.close() }
         }
     }
 
-    private fun pump(deck: Int, source: Source, reader: PcmReader) {
-        val transportState = DoubleArray(3)
+    private fun pump(deck: Int, source: Source, reader: PcmReader, heads: HeadFiller) {
+        val transportState = DoubleArray(4 + HEAD_SLOTS)
         var following = -1L      // Transport the reader is positioned for.
         var claimed = false      // Ring reset + rate/start recorded for `following`.
         var published = false
@@ -259,12 +310,14 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
             val transport = transportState[1].toLong()
             if (transport != following) {
                 target = transportState[2]
-                reader.seek(target)
+                // After a pre-decoded head the ring continues at the head's last frame.
+                val offset = transportState[3].toInt()
+                reader.seek(if (offset > 0) target + offset.toDouble() / reader.sampleRate else target)
                 following = transport
                 claimed = false; published = false; ended = false
                 chunk = 0; cursor = 0; offered = 0
             }
-            if (ended) { Thread.sleep(10); continue }
+            if (ended) { if (!heads.fillOne(transportState)) Thread.sleep(10); continue }
             if (cursor >= chunk) {
                 val frames = reader.read()
                 if (frames < 0) {
@@ -291,7 +344,7 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
                 nativePublish(handle, deck, source.load, transport, false)
                 published = true; everPublished = true
             }
-            if (accepted == 0) Thread.sleep(10) // Ring full (~1.3 s ahead).
+            if (accepted == 0 && !heads.fillOne(transportState)) Thread.sleep(10) // Ring full (~1.3 s ahead).
         }
     }
 
@@ -321,6 +374,9 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
     private external fun nativeTransport(handle: Long, deck: Int, out: DoubleArray)
     private external fun nativeClaim(handle: Long, deck: Int, load: Long, transport: Long, rate: Int, start: Double): Boolean
     private external fun nativeOffer(handle: Long, deck: Int, transport: Long, pcm: FloatArray, offsetFrames: Int, frames: Int): Int
+    private external fun nativeHeadBegin(handle: Long, deck: Int, slot: Int): Boolean
+    private external fun nativeHeadWrite(handle: Long, deck: Int, slot: Int, at: Int, pcm: FloatArray, frames: Int): Int
+    private external fun nativeHeadCommit(handle: Long, deck: Int, slot: Int, load: Long, seconds: Double, frames: Int)
     private external fun nativePublish(handle: Long, deck: Int, load: Long, transport: Long, eof: Boolean): Boolean
     private external fun nativeFail(handle: Long, deck: Int, load: Long)
     private external fun nativeOutputInfo(handle: Long): DoubleArray
