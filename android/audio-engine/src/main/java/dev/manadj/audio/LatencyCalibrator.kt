@@ -51,6 +51,9 @@ class LatencyCalibrator(private val context: Context) {
                         .takeIf { it.state == AudioRecord.STATE_INITIALIZED }
                 }.getOrNull()
             } ?: return Result(null, emptyList(), 0.0, "Microphone unavailable")
+        // The phone's own mic: a Bluetooth headset mic would pull the route into SCO and silence A2DP output.
+        context.getSystemService(android.media.AudioManager::class.java).getDevices(android.media.AudioManager.GET_DEVICES_INPUTS)
+            .firstOrNull { it.type == android.media.AudioDeviceInfo.TYPE_BUILTIN_MIC }?.let { record.setPreferredDevice(it) }
         val total = ((PRE_ROLL + .1 + (count + 1) * intervalSeconds) * rate).toInt()
         val mic = FloatArray(total)
         val stamp = AudioTimestamp()

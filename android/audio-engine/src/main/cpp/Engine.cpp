@@ -474,15 +474,16 @@ void Engine::launch(int index, double at, int slot) noexcept {
     const double refPosition = r.position.load(kRelaxed);
     const double refRate = (1 + r.pitch.load(kRelaxed) / 100.) * (1 + r.bend.load(kRelaxed) / 100.);
     const double rate = (1 + d.pitch.load(kRelaxed) / 100.) * (1 + d.bend.load(kRelaxed) / 100.);
-    // Grid: the reference's nearest beat to its render position. Heard: the nearest bar to what the DJ heard
-    // (L before the render position); the launch then lands in engine time, already aligned at the speaker.
-    double target = snapToBeat(r, refPosition);
-    if (heard_.load(kRelaxed)) {
-        const double bar = 4 * 60 / r.bpm.load(kRelaxed), anchor = r.gridAnchor.load(kRelaxed);
-        const double heardAt = refPosition - heardLatency_.load(kRelaxed) * refRate;
-        target = anchor + std::round((heardAt - anchor) / bar) * bar;
-    }
+    // Grid: the reference's nearest beat to its render position. Heard: the nearest beat to what the DJ heard
+    // (L before the render position) — the press is read as made L earlier, so the launch enters ~L·rate past
+    // its cue, already aligned at the speaker. (A bar snap deferred presses on beats 3-4 to the next bar.)
+    const double heardAt = refPosition - (heard_.load(kRelaxed) ? heardLatency_.load(kRelaxed) * refRate : 0);
+    const double target = snapToBeat(r, heardAt);
     const double delta = (target - refPosition) / refRate;
+    const double diag[9] = {lastLaunch[0].load(kRelaxed) + 1, static_cast<double>(index), static_cast<double>(ref),
+                            heard_.load(kRelaxed) ? heardLatency_.load(kRelaxed) : 0, refPosition, heardAt, target, delta,
+                            delta > 0 ? at : at - delta * rate};
+    for (int k = 8; k >= 0; --k) lastLaunch[k].store(diag[k], kRelaxed);
     if (!(delta > 0)) {
         const double entry = at - delta * rate;
         if (entry != at) relocate(d, entry);

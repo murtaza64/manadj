@@ -74,12 +74,23 @@ class PlaybackService : Service() {
 
     fun filterResponseDb(settings: FilterSettings, position: Double, frequencies: DoubleArray): DoubleArray? =
         if (destroyed) null else try { engine?.filterResponseDb(settings, position, frequencies) } catch (_: IllegalStateException) { null }
+    /** Closes and reopens the output (same routing/device), off the main thread; result via [onDone] on main. */
+    fun restartOutput(onDone: (Int) -> Unit) {
+        lifetime.execute {
+            val result = if (destroyed) -1 else try { engine?.restartOutput() ?: -1 } catch (_: IllegalStateException) { -1 }
+            main.post { onDone(result) }
+        }
+    }
+
     /** Mic-loopback output latency (#382) off the main thread; result via [onDone] on main. */
     fun calibrateLatency(onDone: (LatencyCalibrator.Result) -> Unit) {
         Thread({
             val audio = engine
             val result = if (destroyed || audio == null) LatencyCalibrator.Result(null, emptyList(), 0.0, "Audio engine not running")
                 else try { LatencyCalibrator(this).measure(audio) } catch (e: Exception) { LatencyCalibrator.Result(null, emptyList(), 0.0, e.message ?: "Calibration failed") }
+                    // Opening the mic can re-route/suspend a Bluetooth A2DP (MMAP) output without a disconnect
+                    // callback (human: silence after calibrating on BT headphones): always reopen the output.
+                    .also { if (!destroyed) runCatching { audio?.restartOutput() } }
             main.post { onDone(result) }
         }, "manadj-latency-calibration").start()
     }
@@ -158,9 +169,17 @@ class PlaybackService : Service() {
                 }
                 if (cost != null) android.util.Log.i("manadj-bench", "callback max %.0f us mean %.0f us n=%d nearMiss=%d xruns=%d [%s]".format(cost.maxMicros, cost.meanMicros, cost.callbacks, cost.nearMisses, state.outputXruns, decks))
             }
+            // Each quantized launch (adb logcat -s manadj-launch): Heard sign/latency verification on the phone.
+            val launch = try { engine?.lastLaunch() } catch (_: IllegalStateException) { null }
+            if (launch != null && launch[0] != lastLaunchLogged) {
+                lastLaunchLogged = launch[0]
+                android.util.Log.i("manadj-launch", "deck %d ref %d mode %s L %.0f ms refRender %.4f heard %.4f targetBeat %.4f delta %+.1f ms entry %.4f".format(
+                    launch[1].toInt(), launch[2].toInt(), state?.quantizeMode, launch[3] * 1000, launch[4], launch[5], launch[6], launch[7] * 1000, launch[8]))
+            }
             main.postDelayed(this, 500)
         }
     }
+    private var lastLaunchLogged = 0.0
 
     override fun onDestroy() {
         destroyed = true

@@ -533,6 +533,9 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
         return if (id != 0L) CommandReceipt(id, true) else rejected("Command queue full")
     }
 
+    /** Last quantized launch for diagnostics: count, deck, reference, L, ref render s, heard s, target beat s, delta s, entry s. */
+    @Synchronized fun lastLaunch(): DoubleArray = if (closed) DoubleArray(9) else nativeLastLaunch(handle)
+
     @Synchronized fun clickNanos(): LongArray = if (closed) LongArray(0) else nativeClickNanos(handle)
 
     /** Drops every pending scheduled op tagged [tag] (ops scheduled after this call are kept). */
@@ -583,6 +586,9 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
 
     /** Reopens the output after a failed automatic recovery. Returns 0 or an Oboe error. */
     @Synchronized fun reopen(): Int = if (closed || offline) -1 else nativeReopen(handle)
+
+    /** Closes and reopens the output stream (same routing/device; decks keep playing). Returns 0 or an Oboe error. */
+    @Synchronized fun restartOutput(): Int = if (closed || offline) -1 else nativeRestart(handle)
 
     @Synchronized fun snapshot(): EngineSnapshot {
         check(!closed) { "Engine closed" }
@@ -944,11 +950,13 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
     private fun rejected(reason: String) = CommandReceipt(0, false, reason)
     private external fun nativeOpen(offline: Boolean): Long
     private external fun nativeReopen(handle: Long): Int
+    private external fun nativeRestart(handle: Long): Int
     private external fun nativeStop(handle: Long)
     private external fun nativeClose(handle: Long)
     private external fun nativeSubmit(handle: Long, op: Int, deck: Int, value: Double, load: Long, slot: Int): Long
     private external fun nativeSetSchedule(frame: Long, tag: Long)
     private external fun nativeClickNanos(handle: Long): LongArray
+    private external fun nativeLastLaunch(handle: Long): DoubleArray
     private external fun nativeCancelScheduled(handle: Long, tag: Long): Long
     private external fun nativeSetGrid(handle: Long, deck: Int, bpm: Double, anchor: Double): Long
     private external fun nativeSubmitBeatFx(handle: Long, effect: Int, target: Int, on: Boolean, depth: Double, beats: Double, held: Int): Long

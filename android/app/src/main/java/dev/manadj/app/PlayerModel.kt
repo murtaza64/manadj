@@ -320,6 +320,8 @@ class PlayerModel(application: Application) : AndroidViewModel(application) {
         heardLatencyCalibrated = key != null
         sendHeardLatency(seconds)
     }
+    /** Recovery: closes and reopens the audio output (same routing/device); decks keep their state. */
+    fun restartOutput() { service?.restartOutput { if (it != 0) failure = "Audio output restart failed ($it)" } }
     /** Mic-loopback calibration in progress; last result (null seconds = failed, see reason). */
     var calibrating by mutableStateOf(false)
         private set

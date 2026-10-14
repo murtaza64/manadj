@@ -286,6 +286,8 @@ public:
     static double clickSample(double t) noexcept;
     int64_t clickNanos(int k) const { return k >= 0 && k < kMaxClicks ? clickNanos_[k].load() : 0; }
     double heardLatency() const { return heardLatency_.load(); }
+    // Last quantized launch (diagnostics): count, deck, reference, L, reference render pos, heard pos, target beat, delta s, entry.
+    std::array<std::atomic<double>, 9> lastLaunch{};
     Deck& deck(int index) { return decks_[index]; }
     const Deck& deck(int index) const { return decks_[index]; }
     int outputRate() const { return outputRate_.load(); }
