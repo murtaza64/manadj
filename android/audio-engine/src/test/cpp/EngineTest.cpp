@@ -744,6 +744,61 @@ int main() {
         }
     }
 
+    { // Key-locked bend (desktop: one stretch rate = pitch x bend): ±8% bend held keeps the pitch within a few
+      // cents; bend→audible: a burst lands where the integrated position says, key lock on or off.
+        auto freqOf = [](const std::vector<float>& x) {   // interpolated zero-crossing frequency
+            double first = -1, last = -1; int n = 0;
+            for (size_t i = 1; i < x.size(); ++i) if ((x[i - 1] < 0) != (x[i] < 0)) {
+                const double t = (i - 1) + x[i - 1] / (x[i - 1] - x[i]);
+                if (first < 0) first = t; last = t; ++n;
+            }
+            return (n - 1) / 2.0 / ((last - first) / 48000);
+        };
+        auto owned = std::make_unique<Engine>(48000);
+        Engine& e = *owned;
+        const int frames = 48000 * 30;
+        std::vector<float> tone(static_cast<size_t>(frames) * 2);
+        for (int i = 0; i < frames; ++i) tone[i * 2] = tone[i * 2 + 1] = static_cast<float>(.25 * std::sin(2 * 3.14159265358979 * 440 * i / 48000));
+        loadPcm(e, 0, 1, std::vector<float>(tone.begin(), tone.begin() + 48000 * 2));
+        fillTrack(e, 0, 1, tone);
+        e.submit(Op::KeyLock, 0, 1);
+        e.submit(Op::Seek, 0, 2.0);
+        e.submit(Op::Play, 0);
+        capture(e, 9600);
+        for (double bend : {8.0, -8.0, 0.0}) {
+            e.submit(Op::Bend, 0, bend);
+            capture(e, 9600);
+            const double before = e.deck(0).position.load();
+            const auto x = capture(e, 48000);
+            const double rate = 1 + static_cast<double>(static_cast<float>(bend)) / 100;
+            CHECK(std::abs(e.deck(0).position.load() - before - rate) < 1e-6);   // tempo follows the bend
+            const double cents = 1200 * std::log2(freqOf(x) / 440);
+            std::fprintf(stderr, "key-locked bend %+.0f%%: pitch %+.2f cents\n", bend, cents);
+            CHECK(std::abs(cents) < 3);
+            CHECK(e.deck(0).stretching.load());
+        }
+        // Bend latency: a 1 kHz burst at 3.0 s; bend +8% at 2.2 s; onset must sound where the clock says.
+        std::vector<float> pcm = burst(48000 * 10, 48000 * 3, 48000 * 3 + 4800);
+        for (bool keyLock : {false, true}) {
+            auto o2 = std::make_unique<Engine>(48000);
+            Engine& f = *o2;
+            loadPcm(f, 0, 1, std::vector<float>(pcm.begin(), pcm.begin() + 48000 * 2));
+            fillTrack(f, 0, 1, pcm);
+            f.submit(Op::KeyLock, 0, keyLock ? 1 : 0);
+            f.submit(Op::Seek, 0, 2.0);
+            f.submit(Op::Play, 0);
+            capture(f, 9600);                                   // → 2.2 s
+            f.submit(Op::Bend, 0, 8);
+            const auto x = capture(f, 48000);
+            int onset = -1;
+            for (int i = 0; i < 48000 && onset < 0; ++i) if (std::abs(x[i]) > .05) onset = i;
+            const double expected = (3.0 - 2.2) / (1 + static_cast<double>(8.f) / 100) * 48000;
+            const double ms = (onset - expected) / 48.0;
+            std::fprintf(stderr, "bend latency (key lock %s): burst onset %+.2f ms vs the clock\n", keyLock ? "on" : "off", ms);
+            CHECK(onset > 0 && std::abs(ms) < 6);
+        }
+    }
+
     { // PhaseAlign (desktop alignBeatPhase): nearest phase-aligned micro-seek, half/double projected, loop kept.
         auto owned = std::make_unique<Engine>(48000);
         Engine& e = *owned;
