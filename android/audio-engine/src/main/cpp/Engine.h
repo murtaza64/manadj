@@ -18,6 +18,14 @@ constexpr int kHeadSlots = kHotCues + 1; // Hot cues 0..7 + main cue.
 constexpr int kHeadFrames = 8192;       // Pre-decoded audio at each cue (~170 ms at 48 kHz).
 constexpr int kTailFrames = 2048;       // Old audio captured for a crossfade (240 frames at <=8x ratio).
 constexpr double kAtCueEpsilon = 0.01;  // Desktop transport.ts AT_CUE_EPSILON.
+constexpr int kBlockFrames = 1024;      // Bus scratch size; longer callbacks render in blocks.
+
+// Output stage: how the master and cue (PFL) buses map onto device channels.
+enum class Routing : int {
+    Stereo = 0,     // master L/R; cue bus not output
+    SplitMono = 1,  // L = mono master, R = mono cue (single stereo jack + splitter cable)
+    Quad = 2,       // ch1/2 master, ch3/4 cue (needs a >=4-channel device; stereo master otherwise)
+};
 
 static_assert(std::atomic<double>::is_always_lock_free, "callback needs lock-free double atomics");
 static_assert(std::atomic<float>::is_always_lock_free, "callback needs lock-free float atomics");
@@ -46,7 +54,7 @@ struct Head {
 };
 
 enum class Op : int { Prepare, Play, Pause, CueDown, CueUp, HotCueDown, HotCueUp,
-                       HotCueSet, HotCueClear, Seek, Fader, Trim, Crossfade, Pitch, Bend };
+                       HotCueSet, HotCueClear, Seek, Fader, Trim, Crossfade, Pitch, Bend, Pfl, CueMix };
 struct Command {
     Op op;
     int deck;
@@ -88,6 +96,7 @@ struct Deck {
     std::atomic<float> trim{.5f};
     std::atomic<float> pitch{0};
     std::atomic<float> bend{0};
+    std::atomic<bool> pfl{false};
     std::array<Head, kHeadSlots> heads{};
     // Head being played (-1 none) and the ring offset (source frames) the worker must start at.
     std::atomic<int> headSlot{-1};
@@ -99,8 +108,10 @@ struct Deck {
     double fractional = 0;
     double headPos = 0;
     uint64_t positionTransport = 0;
-    float gain = 0;
+    float gain = 0;          // master: trim x fader law x crossfader (smoothed)
     float targetGain = 0;
+    float cueGain = 0;       // cue bus: trim only, pre-fader, 0 when PFL is off (smoothed)
+    float targetCueGain = 0;
     float envelope = 0;
     // Crossfade tail: old audio copied at relocation/stop, faded out independently.
     std::array<float, kTailFrames * 2> tail{};
@@ -109,6 +120,7 @@ struct Deck {
     double tailPos = 0;
     double tailRatio = 1;
     float tailGain = 0;
+    float tailCueGain = 0;
 };
 
 class Engine {
@@ -132,7 +144,11 @@ public:
     void headCommit(int deck, int slot, uint64_t load, double seconds, int frames);
     void headAbort(int deck, int slot);
 
-    void render(float* output, int frames) noexcept;
+    // Renders `frames` interleaved frames of `channels` channels through the current routing.
+    void render(float* output, int frames, int channels = 2) noexcept;
+    void setRouting(Routing routing) { routing_.store(static_cast<int>(routing)); }
+    Routing routing() const { return static_cast<Routing>(routing_.load()); }
+    float cueMix() const { return cueMix_.load(); }
     Deck& deck(int index) { return decks_[index]; }
     const Deck& deck(int index) const { return decks_[index]; }
     int outputRate() const { return outputRate_.load(); }
@@ -151,6 +167,11 @@ private:
     std::atomic<uint64_t> accepted_{0}, applied_{0}, outputFrames_{0}, starvedFrames_{0};
     std::atomic<int> outputRate_;
     std::atomic<float> crossfade_{0};
+    std::atomic<float> cueMix_{0};  // Headphone blend: 0 = cue bus only, 1 = master only.
+    std::atomic<int> routing_{0};
+    std::array<float, kBlockFrames * 2> master_{};
+    std::array<float, kBlockFrames * 2> cue_{};
+    void renderBuses(int frames) noexcept;
     static float ceiling(float value) noexcept;
     void updateGain(int index) noexcept;
     void relocate(Deck& d, double seconds, int slot = -1) noexcept;

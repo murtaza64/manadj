@@ -7,8 +7,8 @@ android {
     namespace = "dev.manadj.app"
     compileSdk = 35
     defaultConfig {
-        // Distinct from the #365 prototype (dev.manadj.phonelab) so both can be installed.
-        applicationId = "dev.manadj.app"
+        // Project domain manadj.murt.dev; distinct from the #365 prototype (dev.manadj.phonelab).
+        applicationId = "dev.murt.manadj"
         minSdk = 26
         targetSdk = 35
         versionCode = 4

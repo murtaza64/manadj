@@ -145,6 +145,7 @@ void Engine::captureTail(Deck& d) noexcept {
     d.tailPos = slot >= 0 ? d.headPos - static_cast<int>(d.headPos) : d.fractional;
     d.tailRatio = (d.sampleRate.load(kRelaxed) / outRate) * (1 + d.pitch.load(kRelaxed) / 100.) * (1 + d.bend.load(kRelaxed) / 100.);
     d.tailGain = d.gain * d.envelope;
+    d.tailCueGain = d.cueGain * d.envelope;
     d.tailLeft = kFadeFrames;
 }
 
@@ -237,6 +238,8 @@ void Engine::apply(const Command& c) noexcept {
             break;
         case Op::Pitch: d.pitch = std::clamp(static_cast<float>(c.value), -25.f, 25.f); break;
         case Op::Bend: d.bend = std::clamp(static_cast<float>(c.value), -8.f, 8.f); break;
+        case Op::Pfl: d.pfl.store(c.value != 0); updateGain(c.deck); break;
+        case Op::CueMix: cueMix_.store(std::clamp(static_cast<float>(c.value), 0.f, 1.f)); break;
     }
     d.applied.store(c.seq, kRelease);
     applied_.store(c.seq, kRelease);
@@ -247,7 +250,9 @@ void Engine::updateGain(int index) noexcept {
     // Crossfade -1 = full A, +1 = full B, 0 = both at unity.
     const float x = crossfade_.load();
     const float fade = index == 0 ? std::min(1.f, 1.f - x) : index == 1 ? std::min(1.f, 1.f + x) : 1.f;
-    d.targetGain = d.fader.load() * d.fader.load() * std::pow(10.f, (-6.f + (d.trim.load() - .5f) * 24.f) / 20.f) * fade;
+    const float trim = std::pow(10.f, (-6.f + (d.trim.load() - .5f) * 24.f) / 20.f);
+    d.targetGain = d.fader.load() * d.fader.load() * trim * fade;
+    d.targetCueGain = d.pfl.load() ? trim : 0.f;
 }
 
 float Engine::ceiling(float x) noexcept {
@@ -255,13 +260,44 @@ float Engine::ceiling(float x) noexcept {
     return std::clamp(x, -.7943282f, .7943282f);
 }
 
-void Engine::render(float* output, int frames) noexcept {
+void Engine::render(float* output, int frames, int channels) noexcept {
     while (queueRead_.load(kRelaxed) != queueWrite_.load(kAcquire)) {
         const auto read = queueRead_.load(kRelaxed);
         apply(commands_[read % kQueueSize]);
         queueRead_.store(read + 1, kRelease);
     }
+    const auto routing = static_cast<Routing>(routing_.load(kRelaxed));
+    const float mix = cueMix_.load(kRelaxed);
+    for (int done = 0; done < frames;) {
+        const int n = std::min(kBlockFrames, frames - done);
+        renderBuses(n);
+        float* out = output + static_cast<size_t>(done) * channels;
+        for (int i = 0; i < n; ++i, out += channels) {
+            const float mL = master_[i * 2], mR = master_[i * 2 + 1];
+            // Headphone feed: cue bus blended toward master by the cue-mix knob.
+            const float cL = cue_[i * 2] * (1 - mix) + mL * mix, cR = cue_[i * 2 + 1] * (1 - mix) + mR * mix;
+            for (int c = 0; c < channels; ++c) out[c] = 0;
+            if (routing == Routing::SplitMono && channels >= 2) {
+                out[0] = ceiling((mL + mR) * .5f);
+                out[1] = ceiling((cL + cR) * .5f);
+            } else if (routing == Routing::Quad && channels >= 4) {
+                out[0] = ceiling(mL); out[1] = ceiling(mR);
+                out[2] = ceiling(cL); out[3] = ceiling(cR);
+            } else {
+                out[0] = ceiling(mL);
+                if (channels >= 2) out[1] = ceiling(mR);
+            }
+        }
+        done += n;
+    }
+    outputFrames_.fetch_add(frames, kRelease);
+}
+
+void Engine::renderBuses(int frames) noexcept {
+    float* output = master_.data();
+    float* cue = cue_.data();
     std::fill(output, output + frames * 2, 0.f);
+    std::fill(cue, cue + frames * 2, 0.f);
     const double outRate = outputRate_.load(kRelaxed);
     for (int j = 0; j < kDeckCount; ++j) {
         auto& d = decks_[j];
@@ -270,9 +306,13 @@ void Engine::render(float* output, int frames) noexcept {
             const int k = static_cast<int>(d.tailPos);
             if (k + 1 >= d.tailAvail) { d.tailLeft = 0; break; }
             const float f = static_cast<float>(d.tailPos - k);
-            const float g = d.tailGain * static_cast<float>(d.tailLeft--) / kFadeFrames;
-            output[i * 2] += (d.tail[k * 2] + (d.tail[k * 2 + 2] - d.tail[k * 2]) * f) * g;
-            output[i * 2 + 1] += (d.tail[k * 2 + 1] + (d.tail[k * 2 + 3] - d.tail[k * 2 + 1]) * f) * g;
+            const float ramp = static_cast<float>(d.tailLeft--) / kFadeFrames;
+            const float l = d.tail[k * 2] + (d.tail[k * 2 + 2] - d.tail[k * 2]) * f;
+            const float r = d.tail[k * 2 + 1] + (d.tail[k * 2 + 3] - d.tail[k * 2 + 1]) * f;
+            output[i * 2] += l * d.tailGain * ramp;
+            output[i * 2 + 1] += r * d.tailGain * ramp;
+            cue[i * 2] += l * d.tailCueGain * ramp;
+            cue[i * 2 + 1] += r * d.tailCueGain * ramp;
             d.tailPos += d.tailRatio;
         }
         if (!ready(d)) {
@@ -292,7 +332,7 @@ void Engine::render(float* output, int frames) noexcept {
         if (slot < 0 && !ringLive) continue; // Refill in progress: silent, clock held.
         const auto sampleRate = d.sampleRate.load(kAcquire);
         const double ratio = (sampleRate / outRate) * (1 + d.pitch.load(kRelaxed) / 100.) * (1 + d.bend.load(kRelaxed) / 100.);
-        if (d.envelope == 0) d.gain = d.targetGain; // Envelope owns the onset.
+        if (d.envelope == 0) { d.gain = d.targetGain; d.cueGain = d.targetCueGain; } // Envelope owns the onset.
         auto read = d.read.load(kRelaxed);
         auto write = d.write.load(kAcquire);
         double fractional = slot >= 0 ? d.headPos : d.fractional;
@@ -333,10 +373,14 @@ void Engine::render(float* output, int frames) noexcept {
             }
             d.envelope = std::min(1.f, d.envelope + 1.f / kFadeFrames);
             d.gain += (d.targetGain - d.gain) * .002f;
-            const float g = d.gain * d.envelope;
+            d.cueGain += (d.targetCueGain - d.cueGain) * .002f;
             const float f = static_cast<float>(fractional - static_cast<int>(fractional));
-            output[i * 2] += (a[0] + (b[0] - a[0]) * f) * g;
-            output[i * 2 + 1] += (a[1] + (b[1] - a[1]) * f) * g;
+            const float l = (a[0] + (b[0] - a[0]) * f) * d.envelope;
+            const float r = (a[1] + (b[1] - a[1]) * f) * d.envelope;
+            output[i * 2] += l * d.gain;
+            output[i * 2 + 1] += r * d.gain;
+            cue[i * 2] += l * d.cueGain;
+            cue[i * 2 + 1] += r * d.cueGain;
             const auto before = static_cast<uint64_t>(fractional);
             fractional += ratio;
             const auto consumed = static_cast<uint64_t>(fractional) - before;
@@ -347,7 +391,5 @@ void Engine::render(float* output, int frames) noexcept {
         else { d.fractional = fractional; d.read.store(read, kRelease); }
         d.position.store(d.position.load(kRelaxed) + consumedTotal / static_cast<double>(sampleRate), kRelease);
     }
-    for (int i = 0; i < frames * 2; ++i) output[i] = ceiling(output[i]);
-    outputFrames_.fetch_add(frames, kRelease);
 }
 } // namespace manadj

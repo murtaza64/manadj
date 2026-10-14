@@ -1,6 +1,6 @@
 # manadj Android (#369)
 
-Native Compose app (`:app`, id `dev.manadj.app`; installs alongside the #365 prototype `dev.manadj.phonelab`) over the shared native engine (`:audio-engine`, see its README). ADR 0044.
+Native Compose app (`:app`, id `dev.murt.manadj`; installs alongside the #365 prototype `dev.manadj.phonelab`) over the shared native engine (`:audio-engine`, see its README). ADR 0044.
 
 ## Build
 

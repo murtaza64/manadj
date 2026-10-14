@@ -11,6 +11,13 @@ import java.util.concurrent.atomic.AtomicReferenceArray
 enum class DeckId { A, B, C, D }
 enum class LoadState { EMPTY, LOADING, READY, ERROR }
 
+/** Output stage mapping of the master and cue (PFL) buses. Ordinals match native `Routing`. */
+enum class Routing(val label: String) {
+    STEREO("Stereo master"),
+    SPLIT_MONO("Split: L master / R cue"),
+    QUAD("4-ch: 1/2 master, 3/4 cue"),
+}
+
 /**
  * Transport/mixer intents. Decisions (cue/hot-cue gating, relocation) are made
  * on the audio callback against the authoritative deck state, so a receipt
@@ -33,6 +40,12 @@ sealed interface AudioCommand {
     data class SetTrim(override val deck: DeckId, val value: Double, override val gestureId: String? = null) : AudioCommand
     data class SetPitch(override val deck: DeckId, val percent: Double, override val gestureId: String? = null) : AudioCommand
     data class SetBend(override val deck: DeckId, val percent: Double, override val gestureId: String? = null) : AudioCommand
+    /** Pre-fader listen: sends the deck (post-trim) to the cue bus. */
+    data class SetPfl(override val deck: DeckId, val on: Boolean, override val gestureId: String? = null) : AudioCommand
+    /** Headphone feed: 0 = cue bus only, 1 = master only. */
+    data class SetCueMix(val value: Double, override val gestureId: String? = null) : AudioCommand {
+        override val deck = DeckId.A // Global.
+    }
     /** -1 = deck A only, 0 = both at unity, +1 = deck B only. */
     data class SetCrossfade(val value: Double, override val gestureId: String? = null) : AudioCommand {
         override val deck = DeckId.A // Global mixer command, not assigned to a deck's audio.
@@ -45,7 +58,7 @@ data class DeckSnapshot(
     val sourceSeconds: Double, val sourceFrame: Long, val sampleRate: Int,
     val durationSeconds: Double?, val fader: Double, val trim: Double,
     val pitchPercent: Double, val bendPercent: Double,
-    val playing: Boolean, val previewing: Boolean,
+    val playing: Boolean, val previewing: Boolean, val pfl: Boolean,
     /** Held gate: null, a hot-cue slot 0..7, or [AudioEngine.MAIN_CUE]. */
     val previewSlot: Int?,
     val cueSeconds: Double?, val hotCues: List<Double?>,
@@ -60,6 +73,7 @@ data class DeckSnapshot(
 data class EngineSnapshot(
     val outputFrames: Long, val outputSampleRate: Int, val outputChannels: Int,
     val epoch: Long, val outputOpen: Boolean, val reopenCount: Int, val crossfade: Double,
+    val routing: Routing, val cueMix: Double,
     val starvedDeckFrames: Long, val outputXruns: Long,
     val outputError: Int, val acceptedCommandId: Long, val appliedCommandId: Long,
     val decks: Map<DeckId, DeckSnapshot>, val supportedCapabilities: Set<String>,
@@ -98,13 +112,13 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
         init { System.loadLibrary("manadj_audio") }
         const val MAIN_CUE = 8
         const val HOT_CUES = 8
-        val CAPABILITIES = setOf("play", "pause", "cue-gate", "hot-cue-gate", "hot-cue-set", "seek", "fader", "trim", "crossfade", "varispeed", "bend")
+        val CAPABILITIES = setOf("play", "pause", "cue-gate", "hot-cue-gate", "hot-cue-set", "seek", "fader", "trim", "crossfade", "varispeed", "bend", "pfl", "cue-mix", "routing")
         private const val PRIME_FRAMES = 2048
         private const val HEAD_SLOTS = HOT_CUES + 1
         private const val HEAD_FRAMES = 8192
-        private const val HEADER = 13
-        private const val DECK_FIELDS = 20 + HOT_CUES
-        private enum class Op { PREPARE, PLAY, PAUSE, CUE_DOWN, CUE_UP, HOT_CUE_DOWN, HOT_CUE_UP, HOT_CUE_SET, HOT_CUE_CLEAR, SEEK, FADER, TRIM, CROSSFADE, PITCH, BEND }
+        private const val HEADER = 16
+        private const val DECK_FIELDS = 24 + HOT_CUES
+        private enum class Op { PREPARE, PLAY, PAUSE, CUE_DOWN, CUE_UP, HOT_CUE_DOWN, HOT_CUE_UP, HOT_CUE_SET, HOT_CUE_CLEAR, SEEK, FADER, TRIM, CROSSFADE, PITCH, BEND, PFL, CUE_MIX }
     }
 
     /** The caller retains/closes descriptor; the engine duplicates it for its own lifetime. */
@@ -154,6 +168,8 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
             is AudioCommand.SetCrossfade -> Op.CROSSFADE to command.value
             is AudioCommand.SetPitch -> Op.PITCH to command.percent
             is AudioCommand.SetBend -> Op.BEND to command.percent
+            is AudioCommand.SetPfl -> Op.PFL to if (command.on) 1.0 else 0.0
+            is AudioCommand.SetCueMix -> Op.CUE_MIX to command.value
         }
         if (slot !in 0 until HOT_CUES) return rejected("Invalid hot cue slot")
         if (!value.isFinite()) return rejected("Non-finite control")
@@ -174,6 +190,14 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
             minCallbackFrames = d[11].toInt(), maxCallbackFrames = d[12].toInt(),
         )
     }
+
+    /**
+     * Selects the bus routing and output device (0 = system default). QUAD reopens the
+     * stream with 4 channels; callers must only offer it for devices reporting >= 4.
+     * Returns 0 or an Oboe error (the stream is then closed; [reopen] retries).
+     */
+    @Synchronized fun configureOutput(routing: Routing, deviceId: Int = 0): Int =
+        if (closed) -1 else nativeConfigure(handle, routing.ordinal, deviceId, offline)
 
     /** Reopens the output after a failed automatic recovery. Returns 0 or an Oboe error. */
     @Synchronized fun reopen(): Int = if (closed || offline) -1 else nativeReopen(handle)
@@ -199,10 +223,10 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
                 sourceSeconds = seconds, sourceFrame = (seconds * rate).toLong(), sampleRate = rate,
                 durationSeconds = durations.get(i)?.takeIf { it.first == source?.load }?.second,
                 fader = data[p + 14], trim = data[p + 15], pitchPercent = data[p + 16], bendPercent = data[p + 17],
-                playing = current && data[p + 8] != 0.0, previewing = current && data[p + 9] != 0.0,
+                playing = current && data[p + 8] != 0.0, previewing = current && data[p + 9] != 0.0, pfl = data[p + 20] != 0.0,
                 previewSlot = data[p + 10].toInt().takeIf { current && it >= 0 },
                 cueSeconds = data[p + 11].takeIf { current && state == LoadState.READY },
-                hotCues = List(HOT_CUES) { h -> data[p + 20 + h].takeIf { current && it >= 0 } },
+                hotCues = List(HOT_CUES) { h -> data[p + 24 + h].takeIf { current && it >= 0 } },
                 filling = current && state == LoadState.READY && data[p + 4] == 0.0 && data[p + 18] < 0,
                 readyHeads = if (current) data[p + 19].toInt() else 0,
                 headSlot = if (current) data[p + 18].toInt() else -1,
@@ -211,7 +235,8 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
             )
         }
         return EngineSnapshot(
-            outputFrames = data[0].toLong(), outputSampleRate = data[1].toInt(), outputChannels = data[2].toInt(),
+            outputFrames = data[0].toLong(), outputSampleRate = data[1].toInt(), outputChannels = data[13].toInt(),
+            routing = Routing.entries[data[12].toInt().coerceIn(0, 2)], cueMix = data[14],
             epoch = data[3].toLong(), outputOpen = data[10] != 0.0, reopenCount = data[11].toInt(), crossfade = data[9],
             starvedDeckFrames = data[4].toLong(), outputXruns = data[5].toLong(), outputError = data[6].toInt(),
             acceptedCommandId = data[7].toLong(), appliedCommandId = data[8].toLong(),
@@ -360,9 +385,9 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
     }
 
     /** Test-only sink: exercises the same decoder, command queue and mixer without a device. */
-    fun renderOfflineForTest(frames: Int): FloatArray {
+    fun renderOfflineForTest(frames: Int, channels: Int = 2): FloatArray {
         check(offline && !closed)
-        return nativeRenderOffline(handle, frames)
+        return nativeRenderOffline(handle, frames, channels)
     }
 
     private fun rejected(reason: String) = CommandReceipt(0, false, reason)
@@ -381,5 +406,6 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
     private external fun nativeFail(handle: Long, deck: Int, load: Long)
     private external fun nativeOutputInfo(handle: Long): DoubleArray
     private external fun nativeSnapshot(handle: Long): DoubleArray
-    private external fun nativeRenderOffline(handle: Long, frames: Int): FloatArray
+    private external fun nativeRenderOffline(handle: Long, frames: Int, channels: Int): FloatArray
+    private external fun nativeConfigure(handle: Long, routing: Int, device: Int, offline: Boolean): Int
 }

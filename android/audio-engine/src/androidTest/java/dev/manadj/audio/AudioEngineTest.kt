@@ -282,6 +282,47 @@ class AudioEngineTest {
         }
     }
 
+    @Test fun pflCueBusAndRoutingModes() {
+        val a = wav("engine-pfl-a.wav", .2)
+        val b = wav("engine-pfl-b.wav", .1)
+        AudioEngine(offline = true).use { engine ->
+            engine.load(DeckId.A, "a", a); engine.load(DeckId.B, "b", b)
+            engine.settled(DeckId.A, DeckId.B)
+            engine.submit(AudioCommand.SetFader(DeckId.A, 0.0))
+            engine.submit(AudioCommand.SetPfl(DeckId.A, true))
+            engine.submit(AudioCommand.Play(DeckId.A)); engine.submit(AudioCommand.Play(DeckId.B))
+            assertEquals(0, engine.configureOutput(Routing.QUAD))
+            engine.renderOfflineForTest(4096, 4)
+            val quad = engine.renderOfflineForTest(256, 4)
+            val u = Math.pow(10.0, -6.0 / 20.0).toFloat()
+            assertEquals(.1f * u, quad[255 * 4], .003f)     // master: B (A faded out)
+            assertEquals(.2f * u, quad[255 * 4 + 2], .003f) // cue: A pre-fader
+            assertTrue(engine.deck(DeckId.A).pfl)
+            assertEquals(Routing.QUAD, engine.snapshot().routing)
+            engine.configureOutput(Routing.SPLIT_MONO)
+            val split = engine.renderOfflineForTest(256)
+            assertEquals(.1f * u, split[510], .003f)
+            assertEquals(.2f * u, split[511], .003f)
+        }
+    }
+
+    @Test fun deviceOutputsEnumerateAndStereoRoutingReopens() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val am = context.getSystemService(android.media.AudioManager::class.java)
+        val outputs = am.getDevices(android.media.AudioManager.GET_DEVICES_OUTPUTS)
+        android.util.Log.i("manadj-bench", "outputs: " + outputs.joinToString { "#${it.id} type=${it.type} ${it.productName} ch=${it.channelCounts.toList()} rates=${it.sampleRates.toList()}" })
+        assertTrue(outputs.isNotEmpty())
+        AudioEngine().use { engine ->
+            val before = engine.snapshot().outputFrames
+            assertEquals(0, engine.configureOutput(Routing.SPLIT_MONO, 0))
+            Thread.sleep(200)
+            val s = engine.snapshot()
+            assertTrue(s.outputOpen); assertEquals(2, s.outputChannels); assertEquals(Routing.SPLIT_MONO, s.routing)
+            assertTrue(s.outputFrames > before)
+            android.util.Log.i("manadj-bench", "split-mono stream: ${engine.outputInfo()}")
+        }
+    }
+
     @Test fun manyRelocationsWhilePlayingNeverEndEarly() {
         val media = wav("engine-reloc.wav", .25, seconds = 20, rate = 44100)
         val rng = java.util.Random(7)

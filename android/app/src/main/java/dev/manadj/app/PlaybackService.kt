@@ -64,6 +64,14 @@ class PlaybackService : Service() {
         return try { engine?.snapshot() } catch (error: IllegalStateException) { failure = error.message; null }
     }
 
+    /** Reopens the stream off the main thread when channels/device change; result via [onDone] on main. */
+    fun configureOutput(routing: Routing, deviceId: Int, onDone: (Int) -> Unit) {
+        lifetime.execute {
+            val result = engine?.configureOutput(routing, deviceId) ?: -1
+            main.post { onDone(result) }
+        }
+    }
+
     fun outputInfo(): OutputInfo? = if (destroyed) null else try { engine?.outputInfo() } catch (_: IllegalStateException) { null }
 
     fun source(id: String?): LocalSource? = sourceMetadata[id]

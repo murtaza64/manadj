@@ -35,7 +35,7 @@ class MainActivity : ComponentActivity() {
         window.attributes = window.attributes.apply { layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES }
         immerse()
         setContent {
-            BackHandler(model.browser != null || model.pitchDrawer != null || model.replace != null) { model.browser = null; model.pitchDrawer = null; model.replace = null }
+            BackHandler(model.browser != null || model.pitchDrawer != null || model.replace != null || model.outputPanel) { model.browser = null; model.pitchDrawer = null; model.replace = null; model.outputPanel = false }
             PerformanceApp(model) { deck -> model.pickerTarget = deck; picker.launch(arrayOf("audio/*")) }
         }
     }
@@ -147,6 +147,7 @@ class MainActivity : ComponentActivity() {
         if (mirrored) PhysicalFader("VOL", ui.fader, model, ui.id, Modifier.width(48.dp).fillMaxHeight(), model.supports("fader")) { value, id -> model.updateFader(ui.id, value, id) }
         Column(Modifier.width(48.dp).fillMaxHeight()) {
             TrimKnob(ui, model, Modifier.fillMaxWidth().height(48.dp))
+            Key("CUE", Modifier.fillMaxWidth().height(40.dp), deckColor(ui.id), model.supports("pfl"), ui.snapshot?.pfl == true, "${ui.id} headphone cue") { model.togglePfl(ui.id) }
             Pending("EQ /\nFILTER\nPENDING", Modifier.weight(1f).fillMaxWidth())
         }
         if (!mirrored) PhysicalFader("VOL", ui.fader, model, ui.id, Modifier.width(48.dp).fillMaxHeight(), model.supports("fader")) { value, id -> model.updateFader(ui.id, value, id) }
@@ -227,7 +228,7 @@ class MainActivity : ComponentActivity() {
         Column(Modifier.fillMaxSize().padding(horizontal = 4.dp)) {
             if (!dense) Row(Modifier.fillMaxWidth().height(24.dp), verticalAlignment = Alignment.CenterVertically) {
                 val audio = model.output
-                Text("${model.selected} · ${when { audio == null -> "OPENING AUDIO"; !audio.outputOpen -> "OUTPUT CLOSED"; else -> model.outputInfo?.let { "${it.api} ${it.sampleRate / 1000}k buf ${"%.1f".format(it.bufferMillis)}ms ~${it.latencyMillis?.let { l -> "%.0f".format(l) } ?: "?"}ms xr ${it.xruns}" } ?: "NATIVE ${audio.outputSampleRate}Hz" }}", Modifier.weight(1f), deckColor(model.selected), 11, true)
+                Text("${model.selected} · ${when { audio == null -> "OPENING AUDIO"; !audio.outputOpen -> "OUTPUT CLOSED"; else -> model.outputInfo?.let { "${it.api} ${it.sampleRate / 1000}k buf ${"%.1f".format(it.bufferMillis)}ms ~${it.latencyMillis?.let { l -> "%.0f".format(l) } ?: "?"}ms xr ${it.xruns}" } ?: "NATIVE ${audio.outputSampleRate}Hz" }}", Modifier.weight(1f).clickable { model.outputPanel = true }, deckColor(model.selected), 11, true)
                 Key(model.layout.label, Modifier.width(48.dp).fillMaxHeight(), description = "Layout ${model.layout.label}, switch to ${next.label}") { model.chooseLayout(next) }
             }
             Row(Modifier.fillMaxWidth().height(if (landscape) 72.dp else 88.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) { for (id in model.visibleDecks) SourceHeader(model.decks.getValue(id), model, Modifier.weight(1f).fillMaxHeight(), landscape, dense && id == DeckId.A) }
@@ -235,12 +236,14 @@ class MainActivity : ComponentActivity() {
                 Dense(model, Modifier.fillMaxSize())
                 if (model.browser != null) SourcesPanel(model, Modifier.fillMaxSize().padding(bottom = 96.dp), pick)
                 if (model.pitchDrawer != null) PitchPanel(model, Modifier.fillMaxSize().padding(bottom = 96.dp))
+                if (model.outputPanel) OutputPanel(model, Modifier.fillMaxSize())
             } else {
                 if (model.layout == Layout.DENSE) Text("L3 needs landscape ≥760×360dp · showing L1", Modifier.fillMaxWidth().height(20.dp), Ink.warning, 12)
                 Box(Modifier.weight(1f).fillMaxWidth()) {
                     Workspace(model, Modifier.fillMaxSize(), landscape)
                     if (model.browser != null) SourcesPanel(model, Modifier.fillMaxSize(), pick)
                     if (model.pitchDrawer != null) PitchPanel(model, Modifier.fillMaxSize())
+                    if (model.outputPanel) OutputPanel(model, Modifier.fillMaxSize())
                 }
                 Row(Modifier.fillMaxWidth().height(if (landscape) 96.dp else 144.dp)) {
                     for (id in model.visibleDecks) Column(Modifier.weight(1f).fillMaxHeight()) {

@@ -270,5 +270,41 @@ int main() {
         CHECK(out[kFadeFrames] > 0 && out[kFadeFrames] < .15f * unity);
         CHECK(out[(kFadeFrames + 8) * 2] == 0);
     }
+    { // Master + cue buses: PFL is pre-fader; routing maps buses to device channels.
+        auto owned = std::make_unique<Engine>(48000);
+        Engine& e = *owned;
+        loadDeck(e, 0, 1, .2f);
+        loadDeck(e, 1, 2, .1f);
+        e.submit(Op::Play, 0);
+        e.submit(Op::Play, 1);
+        e.submit(Op::Fader, 0, 0);                    // A silent on master...
+        e.submit(Op::Pfl, 0, 1);                      // ...but cued
+        std::vector<float> quad(4096 * 4);
+        e.setRouting(Routing::Quad);
+        e.render(quad.data(), 4096, 4);
+        const float* f = &quad[4095 * 4];
+        CHECK(std::abs(f[0] - .1f * unity) < .002 && std::abs(f[1] - .1f * unity) < .002); // master = B only
+        CHECK(std::abs(f[2] - .2f * unity) < .002 && std::abs(f[3] - .2f * unity) < .002); // cue = A pre-fader
+        e.setRouting(Routing::SplitMono);
+        e.render(quad.data(), 512, 2);
+        CHECK(std::abs(quad[1022] - .1f * unity) < .002);  // L = mono master
+        CHECK(std::abs(quad[1023] - .2f * unity) < .002);  // R = mono cue
+        e.submit(Op::CueMix, 0, 1);                   // headphones = master
+        e.render(quad.data(), 512, 2);
+        CHECK(std::abs(quad[1023] - .1f * unity) < .002);
+        e.setRouting(Routing::Stereo);
+        e.render(quad.data(), 512, 2);
+        CHECK(std::abs(quad[1022] - .1f * unity) < .002 && std::abs(quad[1023] - .1f * unity) < .002);
+        e.setRouting(Routing::Quad);                  // Quad on a stereo stream falls back to master
+        e.render(quad.data(), 512, 2);
+        CHECK(std::abs(quad[1023] - .1f * unity) < .002);
+        e.submit(Op::CueMix, 0, 0);
+        e.submit(Op::Pfl, 0, 0);
+        e.render(quad.data(), 8192 / 4, 4);
+        CHECK(std::abs(quad[(2047) * 4 + 2]) < .002);  // PFL off: cue bus empty (smoothed)
+        std::vector<float> big(5000 * 2);             // longer than one bus block
+        e.render(big.data(), 5000, 2);
+        CHECK(std::abs(big[9998] - .1f * unity) < .002);
+    }
     std::puts("engine tests passed");
 }

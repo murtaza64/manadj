@@ -53,6 +53,14 @@ class PlayerModel(application: Application) : AndroidViewModel(application) {
     var outputInfo by mutableStateOf<OutputInfo?>(null)
         private set
     var crossfade by mutableDoubleStateOf(.5)
+    var cueMix by mutableDoubleStateOf(0.0)
+    private var pendingCueMix: Long? = null
+    /** Output devices (hot-plug aware) and the device the stream targets (0 = system default). */
+    val devices = mutableStateListOf<OutputDevice>()
+    var routingDevice by mutableIntStateOf(0)
+        private set
+    var outputPanel by mutableStateOf(false)
+    private val outputDevices = OutputDevices(application) { devices.clear(); devices.addAll(it) }
     var lastReceipt by mutableStateOf<CommandReceipt?>(null)
         private set
     val sources = mutableStateListOf<LocalSource>()
@@ -75,6 +83,7 @@ class PlayerModel(application: Application) : AndroidViewModel(application) {
 
     init {
         sources.addAll(catalog.remembered())
+        devices.addAll(outputDevices.list())
         bound = application.bindService(Intent(application, PlaybackService::class.java), connection, Context.BIND_AUTO_CREATE)
         if (!bound) failure = "Cannot bind the audio service"
         viewModelScope.launch {
@@ -86,6 +95,7 @@ class PlayerModel(application: Application) : AndroidViewModel(application) {
                 if (state != null) {
                     output = state
                     if (pendingCrossfade == null || state.appliedCommandId >= pendingCrossfade!!) { crossfade = (state.crossfade + 1) / 2; pendingCrossfade = null }
+                    if (pendingCueMix == null || state.appliedCommandId >= pendingCueMix!!) { cueMix = state.cueMix; pendingCueMix = null }
                     state.decks.forEach { (id, snapshot) ->
                         val ui = decks.getValue(id)
                         ui.snapshot = snapshot
@@ -196,7 +206,22 @@ class PlayerModel(application: Application) : AndroidViewModel(application) {
         if (receipt.accepted) { crossfade = value; pendingCrossfade = receipt.id }
     }
 
+    fun updateCueMix(value: Double, gesture: String? = null) {
+        val receipt = submit(AudioCommand.SetCueMix(value, gesture))
+        if (receipt.accepted) { cueMix = value; pendingCueMix = receipt.id }
+    }
+    fun togglePfl(deck: DeckId) { submit(AudioCommand.SetPfl(deck, decks.getValue(deck).snapshot?.pfl != true)) }
+    /** Bus routing + device; QUAD only for devices reporting >= 4 channels (the UI gates it). */
+    fun configureOutput(routing: Routing, deviceId: Int) {
+        val audio = service ?: run { failure = "Audio output is starting"; return }
+        audio.configureOutput(routing, deviceId) { result ->
+            if (result == 0) routingDevice = deviceId else failure = "Output reconfigure failed ($result); reverting to stereo default"
+            if (result != 0) audio.configureOutput(Routing.STEREO, 0) { routingDevice = 0 }
+        }
+    }
+
     override fun onCleared() {
+        outputDevices.close()
         cancelGestures()
         if (bound) getApplication<Application>().unbindService(connection)
         super.onCleared()
