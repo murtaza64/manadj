@@ -6,7 +6,7 @@ Native Compose app (`:app`, id `dev.murt.manadj`; installs alongside the #365 pr
 
 - JDK 17, Android SDK platform 35. AGP installs the pinned NDK/CMake on first build.
 - `JAVA_HOME=<jdk17> ANDROID_HOME=<sdk> ./gradlew assembleDebug` → `app/build/outputs/apk/debug/app-debug.apk`
-- Debug signing uses `../.lane-tmp/android-user/debug.keystore` when present (gitignored), else the SDK default. A different key requires uninstall before install.
+- Debug signing: `MANADJ_ANDROID_KEYSTORE` (shared identity; password `android`, alias `androiddebugkey`), else `../.lane-tmp/android-user/debug.keystore` (gitignored), else the SDK default. A different key requires uninstall before install.
 - Tests: `./gradlew connectedDebugAndroidTest` (emulator or device; generated decoy media only).
 
 ## Use

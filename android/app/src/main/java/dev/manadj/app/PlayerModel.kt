@@ -171,26 +171,50 @@ class PlayerModel(application: Application) : AndroidViewModel(application) {
     fun confirmReplacement() { replace?.let { importSource(it.first, it.second) }; replace = null }
     fun pickerResult(uri: Uri?) { val target = pickerTarget; pickerTarget = null; if (target != null && uri != null) requestImport(target, uri) }
 
-    private fun importSource(deck: DeckId, uri: Uri) {
+    private fun importSource(deck: DeckId, uri: Uri) = loadInto(
+        deck, metadata = { catalog.readMetadata(uri) },
+        open = { getApplication<Application>().contentResolver.openFileDescriptor(uri, "r") },
+        // Grid until a library beatgrid exists: tagged BPM anchored at 0 s (or gridless).
+        grid = { it.bpm?.let { bpm -> bpm to 0.0 } }, remember = true,
+    )
+
+    /**
+     * Library load (#372): a cached regular file plus library metadata and grid. Loads
+     * immediately (no replace-while-playing confirmation; the caller's UI decides).
+     * [sourceId] must be stable per audio revision, e.g. "library:<trackId>:<audioRev>".
+     */
+    fun load(
+        deck: DeckId, file: java.io.File, sourceId: String, title: String, artist: String,
+        durationSeconds: Double?, bpm: Double? = null, firstBeatSeconds: Double? = null,
+    ) = loadInto(
+        deck, metadata = { LocalSource(sourceId, Uri.fromFile(file), title, artist, durationSeconds, persistentGrant = false, bpm = bpm) },
+        open = { android.os.ParcelFileDescriptor.open(file, android.os.ParcelFileDescriptor.MODE_READ_ONLY) },
+        grid = { bpm?.takeIf { it > 0 }?.let { it to (firstBeatSeconds ?: 0.0) } }, remember = false,
+    )
+
+    private fun loadInto(
+        deck: DeckId, metadata: () -> LocalSource, open: () -> android.os.ParcelFileDescriptor?,
+        grid: (LocalSource) -> Pair<Double, Double>?, remember: Boolean,
+    ) {
         releases.keys.filter { it.startsWith("${deck.name}:") }.forEach { id -> releases.remove(id)?.invoke() }
         val ui = decks.getValue(deck)
         val generation = ui.generation.incrementAndGet()
         ui.importing = true; ui.error = null
         viewModelScope.launch {
             try {
-                val metadata = withContext(Dispatchers.IO) { catalog.readMetadata(uri) }
+                val source = withContext(Dispatchers.IO) { metadata() }
                 if (ui.generation.get() != generation) return@launch
                 withContext(Dispatchers.IO) {
-                    getApplication<Application>().contentResolver.openFileDescriptor(uri, "r")?.use { descriptor ->
+                    open()?.use { descriptor ->
                         withContext(Dispatchers.Main.immediate) applyLoad@{
                             if (ui.generation.get() != generation) return@applyLoad
-                            val receipt = service?.load(deck, metadata, descriptor) ?: CommandReceipt(0, false, "Audio output unavailable")
+                            val receipt = service?.load(deck, source, descriptor) ?: CommandReceipt(0, false, "Audio output unavailable")
                             lastReceipt = receipt
                             if (!receipt.accepted) throw IllegalStateException(receipt.reason)
-                            ui.source = metadata; ui.pendingLoadCommandId = receipt.id
-                            // Grid until a library beatgrid exists: tagged BPM anchored at 0 s (or gridless).
-                            submit(AudioCommand.SetGrid(deck, metadata.bpm ?: 0.0, 0.0))
-                            sources.removeAll { it.id == metadata.id }; sources.add(0, metadata); catalog.remember(sources)
+                            ui.source = source; ui.pendingLoadCommandId = receipt.id
+                            val (bpm, anchor) = grid(source) ?: (0.0 to 0.0)
+                            submit(AudioCommand.SetGrid(deck, bpm, anchor)) // After Prepare, which clears the grid.
+                            if (remember) { sources.removeAll { it.id == source.id }; sources.add(0, source); catalog.remember(sources) }
                             browser = null
                         }
                     } ?: throw IllegalStateException("The document provider did not open this track")

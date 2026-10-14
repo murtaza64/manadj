@@ -98,6 +98,17 @@ class RealPlaybackTest {
         assertTrue(model.output!!.decks.getValue(DeckId.B).playing)
     }
 
+    @Test fun libraryLoadCarriesMetadataAndGrid() {
+        val file = tone(330.0)
+        onMain { model.load(DeckId.B, file, "library:42:1", "Library title", "Artist", 8.0, bpm = 126.0, firstBeatSeconds = .25) }
+        await("library track ready with grid") {
+            val ui = model.decks.getValue(DeckId.B)
+            ui.ready && ui.snapshot?.sourceId == "library:42:1" && ui.snapshot?.bpm == 126.0 && ui.snapshot?.gridAnchorSeconds == .25
+        }
+        assertEquals("Library title", model.decks.getValue(DeckId.B).source?.title)
+        assertTrue(model.sources.none { it.id == "library:42:1" }) // not added to the local-file list
+    }
+
     @Test fun id3TempoTagsParse() {
         fun tag(version: Int, bpm: String): ByteArray {
             val text = byteArrayOf(0) + bpm.toByteArray(Charsets.ISO_8859_1)

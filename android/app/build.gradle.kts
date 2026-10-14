@@ -18,9 +18,13 @@ android {
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
     kotlinOptions { jvmTarget = "17" }
     buildFeatures { compose = true }
+    // One debug identity across lanes/machines so installs update in place:
+    // MANADJ_ANDROID_KEYSTORE (path, password "android", alias androiddebugkey), else a
+    // lane-local ../.lane-tmp/android-user/debug.keystore, else the SDK default key.
     signingConfigs.getByName("debug") {
+        val shared = System.getenv("MANADJ_ANDROID_KEYSTORE")?.let { file(it) }
         val retained = rootProject.file("../.lane-tmp/android-user/debug.keystore")
-        if (retained.isFile) storeFile = retained
+        (shared?.takeIf { it.isFile } ?: retained.takeIf { it.isFile })?.let { storeFile = it }
     }
 }
 dependencies {
