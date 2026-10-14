@@ -355,9 +355,12 @@ class PlayerModel(application: Application) : AndroidViewModel(application) {
     var reactionPrePass by mutableStateOf(false)
         private set
     private var tapCalibrator: TapCalibrator? = null
+        set(value) { field = value; tapCalibrating = value != null }
+    /** Snapshot state (Compose sees every start/stop). */
+    var tapCalibrating by mutableStateOf(false)
+        private set
     private var tapStarted = 0L
     private val reactionTaps = mutableListOf<Long>()
-    val tapCalibrating get() = tapCalibrator != null
     /** Coarse L for the wrap: [coarseSource] says where it came from ("mic" / "reaction" / "Android"). */
     val coarseLatency: Double get() = (if (heardLatencyCalibrated) heardLatency else null) ?: reactionCoarse ?: output?.reportedLatencySeconds() ?: heardLatency
     val coarseSource: String get() = if (heardLatencyCalibrated) "calibrated" else if (reactionCoarse != null) "reaction" else "Android"
