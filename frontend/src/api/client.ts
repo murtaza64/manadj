@@ -97,7 +97,7 @@ export interface DeviceSyncChangeRow {
   device_id: string;
   device_name: string | null;
   direction: 'to_desktop' | 'to_phone';
-  track_id: number;
+  track_id: number | null;
   track_title: string | null;
   field: string;
   /** Tag name for tag:<id> fields. */

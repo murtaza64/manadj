@@ -6,6 +6,28 @@ import { api, type DeviceSyncChangeRow } from '../api/client';
  * value back on the desktop as a new logged change; the phone picks it up on
  * its next sync. */
 
+const SETTING_LABELS: Record<string, string> = {
+  'manadj.waveformStyles': 'Waveform style',
+  'manadj-filter-settings': 'Filter',
+};
+
+function flatten(value: unknown, prefix = '', out: Record<string, string> = {}): Record<string, string> {
+  if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
+    for (const [k, v] of Object.entries(value)) flatten(v, prefix ? `${prefix}.${k}` : k, out);
+  } else out[prefix] = JSON.stringify(value);
+  return out;
+}
+
+/** Synced setting rows: the changed leaves, `path a → b`. */
+export function settingDiff(old: unknown, next: unknown): string {
+  const a = flatten(old);
+  const b = flatten(next);
+  const changed = [...new Set([...Object.keys(a), ...Object.keys(b)])].filter((k) => a[k] !== b[k]);
+  if (changed.length === 0) return 'no change';
+  const shown = changed.slice(0, 4).map((k) => `${k} ${a[k] ?? '—'} → ${b[k] ?? '—'}`);
+  return shown.join(', ') + (changed.length > 4 ? ` +${changed.length - 4} more` : '');
+}
+
 function show(field: string, value: unknown): string {
   if (value === null || value === undefined) return '—';
   if (field.startsWith('hot_cue:') && typeof value === 'object') {
@@ -18,6 +40,7 @@ function show(field: string, value: unknown): string {
 }
 
 function fieldLabel(field: string, tagName?: string | null): string {
+  if (field.startsWith('setting:')) return SETTING_LABELS[field.slice(8)] ?? field.slice(8);
   if (field.startsWith('hot_cue:')) return `Hot cue ${field.slice(8)}`;
   if (field.startsWith('tag:')) return `Tag ${tagName ?? `#${field.slice(4)}`}`;
   return { main_cue: 'Main cue', title: 'Title', artist: 'Artist', energy: 'Energy', key: 'Key' }[field] ?? field;
@@ -69,10 +92,12 @@ export function DeviceChangeLog() {
               <tbody>
                 {rows.map((r) => (
                   <tr key={r.id} className={r.outcome !== 'applied' || r.reverted_by_id ? 'is-inactive' : undefined}>
-                    <td>{r.track_title ?? `Track ${r.track_id}`}</td>
+                    <td>{r.track_id === null ? 'Settings' : (r.track_title ?? `Track ${r.track_id}`)}</td>
                     <td>{fieldLabel(r.field, r.tag_name)}</td>
                     <td>
-                      {show(r.field, r.old)} → {show(r.field, r.new)}
+                      {r.field.startsWith('setting:')
+                        ? settingDiff(r.old, r.new)
+                        : `${show(r.field, r.old)} → ${show(r.field, r.new)}`}
                     </td>
                     <td>{r.reverted_by_id ? 'reverted' : r.outcome}</td>
                     <td>

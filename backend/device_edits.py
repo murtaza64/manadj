@@ -12,6 +12,8 @@ Field vocabulary and JSON values:
   title, artist  str | null
   energy         int 1-5 | null
   key            Engine DJ key id 0-23 | null
+  setting:<key>  JSON object (a synced performance setting, device_sync
+                 SYNCED_SETTINGS; track_id null) — the whole persisted value
 """
 
 from __future__ import annotations
@@ -24,7 +26,9 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from .models import DeviceSyncChange, HotCue, Tag, Track, TrackTag
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+
+from .models import AppSetting, DeviceSyncChange, HotCue, Tag, Track, TrackTag
 from .track_metadata.manager import apply_update
 from .track_metadata.models import TrackChanges
 
@@ -38,6 +42,21 @@ class FieldError(ValueError):
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+SETTING_PREFIX = "setting:"
+
+
+def setting_key(field: str) -> str | None:
+    """The settings key of a `setting:<key>` field (validated), else None."""
+    if not field.startswith(SETTING_PREFIX):
+        return None
+    from .routers.device_sync import SYNCED_SETTINGS
+
+    key = field[len(SETTING_PREFIX):]
+    if key not in SYNCED_SETTINGS:
+        raise FieldError(f"setting not synced: {key}")
+    return key
 
 
 def _parse_field(field: str) -> tuple[str, int | None]:
@@ -119,13 +138,48 @@ def write_field(db: Session, track: Track, field: str, value: Any) -> None:
     apply_update(db, track, TrackChanges(**{kind: value}))
 
 
+def read_setting(db: Session, key: str) -> tuple[Any, datetime | None]:
+    """(current value — the user's, else the shipped default; when the user last set it)."""
+    from .routers.device_sync import synced_settings
+
+    entry = synced_settings(db)[key]
+    row = db.get(AppSetting, key)
+    return entry["value"], (row.updated_at if row is not None and entry["updated_at"] else None)
+
+
+def write_setting(db: Session, key: str, value: Any) -> None:
+    """Upsert the persisted value (the desktop frontend hydrates it on load). Caller commits."""
+    if not isinstance(value, dict):
+        raise FieldError(f"bad value for setting {key}: {value!r}")
+    raw = json.dumps(value, separators=(",", ":"))
+    stmt = sqlite_insert(AppSetting).values(key=key, value=raw)
+    db.execute(stmt.on_conflict_do_update(index_elements=[AppSetting.key], set_={"value": raw, "updated_at": _utcnow()}))
+
+
+def read_any(db: Session, track: Track | None, field: str) -> tuple[Any, datetime | None]:
+    key = setting_key(field)
+    if key is not None:
+        return read_setting(db, key)
+    if track is None or track.archived_at is not None:
+        raise FieldError("track not in library")
+    return read_field(db, track, field)
+
+
+def write_any(db: Session, track: Track | None, field: str, value: Any) -> None:
+    key = setting_key(field)
+    if key is not None:
+        write_setting(db, key, value)
+    elif track is not None:
+        write_field(db, track, field, value)
+
+
 # ── Push (phone → desktop) ─────────────────────────────────────────────
 
 
 @dataclass
 class PushedEdit:
     uuid: str
-    track_id: int
+    track_id: int | None
     field: str
     old: Any
     new: Any
@@ -151,26 +205,25 @@ def apply_edits(
             outcomes[edit.uuid] = prior.outcome
             continue
         edited_at = min(datetime.fromtimestamp(edit.edited_at_ms / 1000, timezone.utc).replace(tzinfo=None), now)
-        track = db.get(Track, edit.track_id)
+        track = db.get(Track, edit.track_id) if edit.track_id is not None else None
         outcome = "rejected"
         old_logged = edit.old
+        is_setting = edit.field.startswith(SETTING_PREFIX)
         try:
-            if track is None or track.archived_at is not None:
-                raise FieldError("track not in library")
-            current, changed_at = read_field(db, track, edit.field)
+            current, changed_at = read_any(db, track, edit.field)
             old_logged = current
             if current == edit.new:
                 outcome = "applied"  # already so
             elif current != edit.old and changed_at is not None and changed_at > edited_at:
                 outcome = "superseded"  # the desktop changed it later: newest wins
             else:
-                write_field(db, track, edit.field, edit.new)
+                write_any(db, track, edit.field, edit.new)
                 outcome = "applied"
         except FieldError:
             outcome = "rejected"
         db.add(DeviceSyncChange(
             batch_id=batch_id, device_id=device_id, device_name=device_name, direction="to_desktop",
-            track_id=edit.track_id, field=edit.field, old_json=_dump(old_logged), new_json=_dump(edit.new),
+            track_id=None if is_setting else edit.track_id, field=edit.field, old_json=_dump(old_logged), new_json=_dump(edit.new),
             edit_uuid=edit.uuid, edited_at=edited_at, synced_at=now, outcome=outcome,
         ))
         db.commit()
@@ -183,10 +236,12 @@ def log_received(db: Session, device_id: str, device_name: str | None, changes: 
     batch_id = uuid.uuid4().hex
     now = _utcnow()
     for c in changes:
-        _parse_field(c["field"])
+        is_setting = setting_key(c["field"]) is not None
+        if not is_setting:
+            _parse_field(c["field"])
         db.add(DeviceSyncChange(
             batch_id=batch_id, device_id=device_id, device_name=device_name, direction="to_phone",
-            track_id=int(c["track_id"]), field=c["field"], old_json=_dump(c.get("old")),
+            track_id=None if is_setting else int(c["track_id"]), field=c["field"], old_json=_dump(c.get("old")),
             new_json=_dump(c.get("new")), synced_at=now, outcome="applied",
         ))
     db.commit()
@@ -215,7 +270,7 @@ def list_changes(db: Session, limit: int = 300, device_id: str | None = None) ->
     if device_id:
         q = q.filter(DeviceSyncChange.device_id == device_id)
     rows = q.order_by(DeviceSyncChange.id.desc()).limit(limit).all()
-    ids = {r.track_id for r in rows}
+    ids = {r.track_id for r in rows if r.track_id is not None}
     titles = {t.id: t.title or t.filename for t in db.query(Track).filter(Track.id.in_(ids))} if ids else {}
     tag_ids = {int(r.field[4:]) for r in rows if r.field.startswith("tag:")}
     tag_names = {t.id: t.name for t in db.query(Tag).filter(Tag.id.in_(tag_ids))} if tag_ids else {}
@@ -237,12 +292,15 @@ def revert(db: Session, change_ids: list[int]) -> list[DeviceSyncChange]:
     for c in rows:
         if c.outcome != "applied" or c.reverted_by_id is not None or c.reverts_id is not None:
             continue
-        track = db.get(Track, c.track_id)
-        if track is None:
+        track = db.get(Track, c.track_id) if c.track_id is not None else None
+        if track is None and not c.field.startswith(SETTING_PREFIX):
             continue
         old = json.loads(c.old_json) if c.old_json else None
-        current, _ = read_field(db, track, c.field)
-        write_field(db, track, c.field, old)
+        try:
+            current, _ = read_any(db, track, c.field)
+            write_any(db, track, c.field, old)
+        except FieldError:
+            continue
         r = DeviceSyncChange(
             batch_id=batch_id, device_id=DESKTOP, device_name="Revert", direction="to_desktop",
             track_id=c.track_id, field=c.field, old_json=_dump(current), new_json=_dump(old),
@@ -263,5 +321,5 @@ def revert_batch(db: Session, batch_id: str) -> list[DeviceSyncChange]:
 
 __all__ = [
     "PushedEdit", "apply_edits", "log_received", "list_changes", "revert", "revert_batch",
-    "read_field", "write_field", "FieldError",
+    "read_field", "write_field", "read_setting", "write_setting", "FieldError",
 ]
