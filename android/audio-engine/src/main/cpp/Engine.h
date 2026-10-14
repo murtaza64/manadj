@@ -80,8 +80,10 @@ struct Track {
 
 enum class Op : int { Prepare, Play, Pause, CueDown, CueUp, HotCueDown, HotCueUp,
                        HotCueSet, HotCueClear, Seek, Fader, Trim, Crossfade, Pitch, Bend, Pfl, CueMix, Eq, Filter,
-                       SetGrid, BeatJump, LoopToggle, LoopResize, LoopPreset, Quantize, CueSetAt, HotCueSetAt, BeatFx, KeyLock, PhaseAlign, ScratchBegin, ScratchMove, ScratchEnd, LoopSet };
+                       SetGrid, BeatJump, LoopToggle, LoopResize, LoopPreset, Quantize, CueSetAt, HotCueSetAt, BeatFx, KeyLock, PhaseAlign, ScratchBegin, ScratchMove, ScratchEnd,
+                       LoopSet, CancelScheduled };
 // LoopSet: value = start (< 0 clears), aux = {end, playhead (NaN keeps the position)}; machine replay (Session).
+// CancelScheduled (never scheduled itself): load = tag; drops every pending scheduled op with that tag.
 // ScratchMove: value = platter displacement in track seconds.
 // PhaseAlign: deck = the aligning deck, slot = reference deck, value = own/peer half-double ratio.
 // BeatFx (deck ignored): slot = effect (-1 none), value = depth, aux = {target, on, beats, held deck mask}.
@@ -94,6 +96,7 @@ struct Command {
     double value;
     int slot;
     uint64_t at;   // engine output frame to apply at (0 = next callback); applied mid-callback, exactly
+    uint64_t tag;  // scheduled ops: CancelScheduled(tag) drops them while pending (0 = untagged)
     double aux[5]; // Filter: pass (0 low/1 high), cutoff Hz, wet, resonance dB, compensation gain
 };
 
@@ -210,9 +213,18 @@ public:
     explicit Engine(int outputRate = 48000);
     // Any thread; one producer lock, never taken on the callback. Returns 0 if full.
     uint64_t submit(Op op, int deck, double value = 0, uint64_t load = 0, int slot = 0, const double* aux = nullptr);
-    // Frame stamp for the next submits from this control thread (0 = immediate). Every op type can be
-    // scheduled; the callback splits its buffer at the frame and applies the op exactly there.
-    void setSubmitFrame(uint64_t frame) { submitFrame_.store(frame); }
+    // Frame stamp (engine output frame, same counter as outputFrames) and cancel tag for the next submits
+    // from the calling thread (0 = immediate). Every op type can be scheduled, including submitFilter /
+    // BeatFx / SetGrid; the callback splits its buffer at the frame and applies the op exactly there,
+    // ordered by (frame, submission). A frame already rendered applies at the next callback start and
+    // counts in lateOps. Thread-local: set, submit, reset on one thread (see ScheduleScope).
+    static void setSubmitFrame(uint64_t frame, uint64_t tag = 0) noexcept;
+    struct ScheduleScope {
+        ScheduleScope(uint64_t frame, uint64_t tag = 0) noexcept { setSubmitFrame(frame, tag); }
+        ~ScheduleScope() { setSubmitFrame(0, 0); }
+    };
+    // Drops pending scheduled ops carrying `tag` (applied in submission order: ops submitted before it go).
+    uint64_t cancelScheduled(uint64_t tag);
     uint64_t lateOps() const { return lateOps_.load(); }
     int scheduledOps() const { return scheduleCount_.load(); }
     // Control thread: computes the desktop sweep-filter target (not realtime-safe) and queues it.
@@ -273,11 +285,12 @@ public:
 private:
     std::array<Deck, kDeckCount> decks_{};
     std::array<Command, kQueueSize> commands_{};
-    std::atomic<uint64_t> submitFrame_{0}, lateOps_{0};
+    std::atomic<uint64_t> lateOps_{0};
     std::array<Command, kScheduleSize> schedule_{}; // callback-private, sorted by `at` (stable)
     int scheduleHead_ = 0;
     std::atomic<int> scheduleCount_{0};
     void enqueueScheduled(const Command& c) noexcept;
+    void cancelScheduledNow(const Command& c) noexcept;
     std::mutex submitMutex_;
     std::atomic<uint64_t> queueWrite_{0}, queueRead_{0};
     std::atomic<uint64_t> accepted_{0}, applied_{0}, outputFrames_{0}, starvedFrames_{0};
@@ -293,7 +306,7 @@ private:
     int fxTempoDeck_ = 0; // MST follows the last deck target (desktop beatFxTempoChannel).
     void applyBeatFx(bool immediate) noexcept;
     void clockBeatFx(int64_t frame) noexcept;
-    static constexpr int kFilterSlots = 64;
+    static constexpr int kFilterSlots = kQueueSize + kScheduleSize; // a scheduled Filter keeps its target until due
     std::mutex filterMutex_;                       // control side only
     dsp::FilterSettings filterSettings_;
     std::array<double, kDeckCount> filterPosition_{};

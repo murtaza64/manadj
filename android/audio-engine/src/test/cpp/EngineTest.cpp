@@ -834,9 +834,7 @@ int main() {
         fillTrack(e, 0, 1, pcm);
         tick(e, 100);
         const uint64_t at = e.outputFrames() + 333;
-        e.setSubmitFrame(at);
-        e.submit(Op::Play, 0);
-        e.setSubmitFrame(0);
+        { Engine::ScheduleScope s(at); e.submit(Op::Play, 0); }
         tick(e, 1000);                                   // one callback spanning the event
         CHECK(std::abs(out[332 * 2]) < 1e-6 && std::abs(out[333 * 2]) > 0);   // silent until exactly frame 333
         CHECK(std::abs(e.deck(0).position.load() - 667 / 48000.) < 1e-9);
@@ -856,7 +854,7 @@ int main() {
             grid120(e, d);
         }
         tick(e, 64);
-        struct Model { bool playing = false; double pos = 0, pitch = 0; bool loop = false; double ls = 0, le = 0; };
+        struct Model { bool playing = false; double pos = 0, pitch = 0; bool loop = false; double ls = 0, le = 0, pending = 4; };
         Model m[4];
         struct Ev { uint64_t at; int deck; Op op; double value; };
         std::vector<Ev> evs;
@@ -879,8 +877,7 @@ int main() {
             evs.push_back(ev);
             if (deck == 0) evs.push_back({ev.at, 3, ev.op, ev.value});
         }
-        for (const auto& ev : evs) { e.setSubmitFrame(ev.at); CHECK(e.submit(ev.op, ev.deck, ev.value) != 0); }
-        e.setSubmitFrame(0);
+        for (const auto& ev : evs) { Engine::ScheduleScope s(ev.at); CHECK(e.submit(ev.op, ev.deck, ev.value) != 0); }
         // Analytic model, stepped event to event.
         auto advance = [&](Model& md, double seconds) {
             if (!md.playing) return;
@@ -902,12 +899,14 @@ int main() {
                 case Op::LoopPreset:
                     if (ev.op == Op::LoopPreset && md.loop) {
                         const double len = md.le - md.ls, beats = len / .5;
+                        md.pending = ev.value;
                         if (std::abs(beats - ev.value) < 1e-9) md.loop = false;
                         else { md.le = md.ls + len * (ev.value / beats);
                                if (md.pos - md.ls >= md.le - md.ls && md.pos < md.ls + len) md.pos = md.ls + std::fmod(md.pos - md.ls, md.le - md.ls); }
                         break;
                     }
-                    md.ls = md.pos; md.le = md.pos + (ev.op == Op::LoopPreset ? ev.value : 4) * .5; md.loop = true; break;
+                    if (ev.op == Op::LoopPreset) md.pending = ev.value;
+                    md.ls = md.pos; md.le = md.pos + md.pending * .5; md.loop = true; break;
                 default: break;
             }
         };
@@ -938,6 +937,63 @@ int main() {
             if (now > sorted.back().at + 48000 * 2 && checks >= 400) break;
         }
         CHECK(e.lateOps() == 0 && e.starvedFrames() == 0);
+    }
+
+    { // Scheduled ops: tag cancel drops only that tag; past frames apply at the next callback and count as late;
+      // scheduled filter moves past the old 64-slot target ring keep their own targets.
+        auto owned = std::make_unique<Engine>(48000);
+        Engine& e = *owned;
+        std::vector<float> pcm(48000 * 4 * 2, .25f);
+        loadPcm(e, 0, 1, std::vector<float>(pcm.begin(), pcm.begin() + 48000 * 2));
+        fillTrack(e, 0, 1, pcm);
+        loadPcm(e, 1, 2, std::vector<float>(pcm.begin(), pcm.begin() + 48000 * 2));
+        fillTrack(e, 1, 2, pcm);
+        tick(e, 64);
+        const uint64_t t = e.outputFrames();
+        { Engine::ScheduleScope s(t + 1000, 7); e.submit(Op::Play, 0); }
+        { Engine::ScheduleScope s(t + 1000, 8); e.submit(Op::Play, 1); }
+        tick(e, 10);
+        CHECK(e.scheduledOps() == 2);
+        CHECK(e.cancelScheduled(7) != 0);
+        tick(e, 2000);
+        CHECK(!e.deck(0).playing.load() && e.deck(1).playing.load() && e.scheduledOps() == 0);
+        { Engine::ScheduleScope s(e.outputFrames() - 5); e.submit(Op::Play, 0); }
+        tick(e, 1);
+        CHECK(e.deck(0).playing.load() && e.lateOps() == 1);
+        const uint64_t f = e.outputFrames() + 100;
+        for (int k = 0; k < 200; ++k) { Engine::ScheduleScope s(f + k * 10); CHECK(e.submitFilter(0, k == 199 ? -.6 : .6) != 0); }
+        tick(e, 2100);
+        CHECK(std::abs(e.deck(0).filter.load() + .6f) < 1e-6);
+        CHECK(e.scheduledOps() == 0 && e.lateOps() == 1);
+    }
+
+    { // 10-minute two-deck phase lock: 120 BPM deck at pitch 0 and a 125 BPM deck at -4% pitch, both in
+      // 4-beat loops, started by frame-stamped Play; their beat phases stay equal within 1 output sample.
+        auto owned = std::make_unique<Engine>(48000);
+        Engine& e = *owned;
+        std::vector<float> pcm(48000 * 20 * 2, .2f);
+        for (int d = 0; d < 2; ++d) { loadPcm(e, d, d + 1, std::vector<float>(pcm.begin(), pcm.begin() + 48000 * 2)); fillTrack(e, d, d + 1, pcm); }
+        const double a0[5] = {.25, 0, 0, 0, 0}, a1[5] = {.1, 0, 0, 0, 0};
+        e.submit(Op::SetGrid, 0, 120, 0, 0, a0);
+        e.submit(Op::SetGrid, 1, 125, 0, 0, a1);
+        e.submit(Op::Seek, 0, 2.25);           // beat 4 of deck 0
+        e.submit(Op::Seek, 1, .1 + 8 * .48);   // beat 8 of deck 1
+        e.submit(Op::Pitch, 1, -4);
+        tick(e, 64);
+        const uint64_t start = e.outputFrames() + 777;
+        for (int d = 0; d < 2; ++d) { Engine::ScheduleScope s(start); e.submit(Op::Play, d); e.submit(Op::LoopPreset, d, 4); }
+        const float rate1 = 1 + static_cast<float>(-4) / 100.f;
+        double worst = 0;
+        for (int second = 0; second < 600; ++second) {
+            for (int k = 0; k < 48; ++k) tick(e, 1000);
+            const double p0 = (e.deck(0).position.load() - .25) * 2, p1 = (e.deck(1).position.load() - .1) * 125 / 60;
+            double diff = std::fmod(p0 - p1 + 400, 4.0);
+            if (diff > 2) diff -= 4;
+            worst = std::max(worst, std::abs(diff) * .5 * 48000);   // beats -> output samples at 120 BPM
+        }
+        std::fprintf(stderr, "phase lock: worst %.4f samples (deck 1 rate %.9f)\n", worst, static_cast<double>(rate1));
+        CHECK(worst < 1);
+        CHECK(e.lateOps() == 0);
     }
 
     { // Beat FX ECHO on A: beat-synced repeats at beats x beatSeconds, feedback .5, tails ring after OFF.

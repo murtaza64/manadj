@@ -149,6 +149,18 @@ uint64_t Engine::submitFilterSettings(const dsp::FilterSettings& settings) {
     return last;
 }
 
+namespace {
+thread_local uint64_t tlsSubmitFrame = 0, tlsSubmitTag = 0;
+}
+
+void Engine::setSubmitFrame(uint64_t frame, uint64_t tag) noexcept { tlsSubmitFrame = frame; tlsSubmitTag = tag; }
+
+uint64_t Engine::cancelScheduled(uint64_t tag) {
+    if (tag == 0) return 0;
+    ScheduleScope immediate(0, 0);
+    return submit(Op::CancelScheduled, 0, 0, tag);
+}
+
 uint64_t Engine::submit(Op op, int deck, double value, uint64_t load, int slot, const double* aux) {
     if (deck < 0 || deck >= kDeckCount || !std::isfinite(value)) return 0;
     if ((op == Op::HotCueDown || op == Op::HotCueUp || op == Op::HotCueSet || op == Op::HotCueClear || op == Op::HotCueSetAt) &&
@@ -160,7 +172,7 @@ uint64_t Engine::submit(Op op, int deck, double value, uint64_t load, int slot, 
     if (write - queueRead_.load(kAcquire) >= kQueueSize) return 0;
     const auto seq = accepted_.fetch_add(1) + 1;
     auto& c = commands_[write % kQueueSize];
-    c = {op, deck, seq, load, value, slot, submitFrame_.load(kRelaxed), {}};
+    c = {op, deck, seq, load, value, slot, tlsSubmitFrame, tlsSubmitTag, {}};
     if (aux) std::copy(aux, aux + 5, c.aux);
     queueWrite_.store(write + 1, kRelease);
     return seq;
@@ -633,6 +645,7 @@ void Engine::apply(const Command& c) noexcept {
             if (std::isfinite(c.aux[1]) && std::abs(c.aux[1] - position) > 1e-4) relocate(d, std::max(0.0, c.aux[1]));
             break;
         }
+        case Op::CancelScheduled: cancelScheduledNow(c); break;
         case Op::CueMix: cueMix_.store(std::clamp(static_cast<float>(c.value), 0.f, 1.f)); break;
         case Op::BeatFx: {
             const int target = static_cast<int>(c.aux[0]);
@@ -692,14 +705,28 @@ void Engine::enqueueScheduled(const Command& c) noexcept {
     scheduleCount_.store(count + 1, kRelaxed);
 }
 
+void Engine::cancelScheduledNow(const Command& c) noexcept {
+    int kept = 0;
+    const int count = scheduleCount_.load(kRelaxed);
+    for (int i = 0; i < count; ++i) {
+        const Command& op = schedule_[(scheduleHead_ + i) % kScheduleSize];
+        if (op.tag == c.load) continue;
+        if (kept != i) schedule_[(scheduleHead_ + kept) % kScheduleSize] = op;
+        ++kept;
+    }
+    scheduleCount_.store(kept, kRelaxed);
+    applied_.store(c.seq, kRelease);
+}
+
 void Engine::render(float* output, int frames, int channels) noexcept {
     const auto start = outputFrames_.load(kRelaxed);
     renderFrame_ = static_cast<int64_t>(start);
     while (queueRead_.load(kRelaxed) != queueWrite_.load(kAcquire)) {
         const auto read = queueRead_.load(kRelaxed);
         const Command& c = commands_[read % kQueueSize];
-        if (c.at > start) enqueueScheduled(c);
-        else { if (c.at != 0 && c.at < start) lateOps_.fetch_add(1, kRelaxed); apply(c); }
+        if (c.op == Op::CancelScheduled) cancelScheduledNow(c);
+        else if (c.at == 0) apply(c);
+        else { if (c.at < start) lateOps_.fetch_add(1, kRelaxed); enqueueScheduled(c); } // due ones apply below, in frame order
         queueRead_.store(read + 1, kRelease);
     }
     const auto routing = static_cast<Routing>(routing_.load(kRelaxed));

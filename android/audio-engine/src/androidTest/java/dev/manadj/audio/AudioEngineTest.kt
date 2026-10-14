@@ -104,6 +104,38 @@ class AudioEngineTest {
         decks.all { deck(it).let { d -> d.loadState == LoadState.READY && !d.filling } }
     }
 
+    @Test fun scheduledOpsApplyOnTheirExactFrame() {
+        val a = wav("engine-sched-a.wav", .25)
+        val b = wav("engine-sched-b.wav", .25)
+        AudioEngine(offline = true).use { engine ->
+            engine.load(DeckId.A, "a", a); engine.load(DeckId.B, "b", b)
+            engine.settled(DeckId.A, DeckId.B)
+            engine.until("decoded") { deck(DeckId.A).fullyDecoded && deck(DeckId.B).fullyDecoded }
+            assertTrue(engine.submit(AudioCommand.SetCrossfade(-1.0)).accepted) // only A audible
+            engine.renderOfflineForTest(64)
+            val t = engine.snapshot().outputFrames
+            val receipts = engine.schedule(listOf(
+                ScheduledCommand(t + 301, AudioCommand.Play(DeckId.A)),
+                ScheduledCommand(t + 301, AudioCommand.Play(DeckId.B)),
+                ScheduledCommand(t + 2301, AudioCommand.Seek(DeckId.B, 1.0)),
+            ), tag = 1)
+            assertTrue(receipts.all { it.accepted })
+            assertTrue(engine.schedule(t + 1301, AudioCommand.Pause(DeckId.B), tag = 2).accepted)
+            assertTrue(engine.cancelScheduled(2).accepted)
+            assertFalse(engine.schedule(t, AudioCommand.SetFilterSettings(FilterSettings.SHIPPED)).accepted)
+            val out = engine.renderOfflineForTest(4000)
+            assertEquals(0f, out[300 * 2], 1e-6f)            // silent until exactly frame 301
+            assertTrue(out[301 * 2] != 0f)
+            val s = engine.snapshot()
+            assertEquals(0L, s.lateOps)
+            assertEquals(0, s.scheduledOps)
+            assertEquals((4000 - 301) / 48000.0, s.decks.getValue(DeckId.A).sourceSeconds, 1e-9)
+            assertEquals(1.0 + (4000 - 2301) / 48000.0, s.decks.getValue(DeckId.B).sourceSeconds, 1e-9)
+            assertTrue(s.decks.getValue(DeckId.B).playing)   // the cancelled Pause never ran
+            assertTrue("schedule" in s.supportedCapabilities)
+        }
+    }
+
     @Test fun decodedLocalWavMixSeekAndDesktopCueSemantics() {
         val a = wav("engine-a.wav", .25)
         val b = wav("engine-b.wav", -.25)

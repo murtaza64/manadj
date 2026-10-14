@@ -6,6 +6,7 @@ Android library `android/audio-engine`, namespace `dev.manadj.audio`, included b
 
 - `load(deck, sourceId, descriptor)`: duplicates the caller's descriptor (must be seekable), queues `Prepare`, starts the deck's decode worker. Receipt = queued.
 - `submit(AudioCommand)`: one seam for UI, Session replay and future Conductor. Cue/hot-cue gating and relocations are decided on the audio callback against authoritative deck state (desktop `transport.ts` semantics); receipts mean queued, `appliedCommandId` means applied.
+- `schedule(atFrame, command, tag)` (+ batch forms, `cancelScheduled(tag)`, capability `schedule`): applies the op at engine output frame `atFrame` (`EngineSnapshot.outputFrames` counter). The callback splits its buffer at every due frame and applies in (frame, submission) order, so the op lands on that sample; deck positions integrate exactly between ops (error < 1 frame). Past frames apply at the next callback start and count in `EngineSnapshot.lateOps`; `scheduledOps` = pending. Queue 4096, pending 8192; scheduled `SetFilter` keeps its own target. Sample-exact relocations need the in-memory track (`fullyDecoded`).
 - `snapshot()`: output-frame clock and per-deck source position, cue, hot cues, `filling` (relocation refill in progress: silent, clock held), `atEnd`. Compose does not advance playback time.
 - `SetCrossfade`: -1 = A only, 0 = both unity, +1 = B only.
 - `close()` off the main thread. Unsupported stems/scratch/key-lock/sync are absent from `supportedCapabilities`.

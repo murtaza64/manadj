@@ -7,7 +7,7 @@
 #include <vector>
 
 namespace {
-constexpr int kHeader = 27;
+constexpr int kHeader = 29;
 constexpr int kDeckFields = 40 + manadj::kHotCues;
 constexpr int kSnapshotSize = kHeader + manadj::kDeckCount * kDeckFields;
 
@@ -166,6 +166,17 @@ Java_dev_manadj_audio_AudioEngine_nativeSubmit(JNIEnv*, jobject, jlong handle, j
     if (op == static_cast<int>(manadj::Op::SetGrid)) return 0; // nativeSetGrid carries the anchor.
     return static_cast<jlong>(output(handle)->engine.submit(static_cast<manadj::Op>(op), deck, value,
                                                             static_cast<uint64_t>(load), slot));
+}
+
+// Frame stamp + cancel tag for the following submits on this thread (0, 0 = immediate).
+extern "C" JNIEXPORT void JNICALL
+Java_dev_manadj_audio_AudioEngine_nativeSetSchedule(JNIEnv*, jobject, jlong frame, jlong tag) {
+    manadj::Engine::setSubmitFrame(static_cast<uint64_t>(frame), static_cast<uint64_t>(tag));
+}
+
+extern "C" JNIEXPORT jlong JNICALL
+Java_dev_manadj_audio_AudioEngine_nativeCancelScheduled(JNIEnv*, jobject, jlong handle, jlong tag) {
+    return static_cast<jlong>(output(handle)->engine.cancelScheduled(static_cast<uint64_t>(tag)));
 }
 
 extern "C" JNIEXPORT jlong JNICALL
@@ -361,6 +372,7 @@ Java_dev_manadj_audio_AudioEngine_nativeSnapshot(JNIEnv* env, jobject, jlong han
         static_cast<double>(e.fxEffect()), static_cast<double>(e.fxTarget()), e.fxOn() ? 1.0 : 0.0,
         e.fxDepth(), e.fxBeats(), static_cast<double>(e.fxHeld()), static_cast<double>(e.fxAudible()),
         0, presentedFrame, presentedNanos, 0,
+        static_cast<double>(e.lateOps()), static_cast<double>(e.scheduledOps()),
     };
     // Deck positions are sampled at engine frame data[23]; retry if a callback ran mid-read.
     for (int attempt = 0; attempt < 4; ++attempt) {
