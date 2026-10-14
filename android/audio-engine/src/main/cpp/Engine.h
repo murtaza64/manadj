@@ -375,7 +375,7 @@ private:
     void applyLoopResize(Deck& d, double beats) noexcept;
     void stop(Deck& d) noexcept;
     int launchReference(int index) const noexcept;
-    void launch(int index, double at, int slot) noexcept;
+    bool launch(int index, double at, int slot) noexcept;
     int syncMembers_ = 0, syncSynced_ = 0; // callback-private (SetSyncMembers)
     void captureTail(Deck& d) noexcept;
     void releaseHead(Deck& d) noexcept;

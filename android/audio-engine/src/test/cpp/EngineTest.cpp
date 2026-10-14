@@ -1427,6 +1427,53 @@ int main() {
         }
     }
 
+    { // Heard stabs at random phases (174 BPM; L = 350 ms ≈ 1 beat, 180 ms ≈ half a beat, 0): Play, CUE-hold
+      // and hot-cue-hold take the same callback path; every launch matches the definition — target = beat
+      // nearest the heard position (render − L), immediate entry (target − render) ahead of the cue when the
+      // target has passed, else a wait of exactly that; the deck relocates at most once per stab.
+        unsigned seed = 99;
+        auto rnd = [&] { seed = seed * 1103515245u + 12345u; return ((seed >> 8) & 0xffff) / 65536.0; };
+        const double beat = 60 / 174.;
+        for (double L : {.35, .18, 0.0}) {
+            for (int k = 0; k < 20; ++k) {
+                auto owned = std::make_unique<Engine>(48000);
+                Engine& e = *owned;
+                std::vector<float> pcm(48000 * 20 * 2, .2f);
+                for (int d = 0; d < 2; ++d) { loadPcm(e, d, d + 1, std::vector<float>(pcm.begin(), pcm.begin() + 48000 * 2)); fillTrack(e, d, d + 1, pcm); }
+                const double g[5] = {};
+                e.submit(Op::SetGrid, 0, 174, 0, 0, g);
+                e.submit(Op::SetGrid, 1, 174, 0, 0, g);
+                e.submit(Op::Quantize, 0, 2);
+                e.submit(Op::HeardLatency, 0, L);
+                const double render = 20 * beat + rnd() * 4 * beat, cue = 8 * beat;
+                const int gesture = k % 3;                       // 0 Play, 1 CUE-hold at cue, 2 hot-cue-hold
+                e.submit(Op::Seek, 0, render);
+                e.submit(Op::Seek, 1, gesture == 2 ? 3.0 : cue);
+                e.submit(Op::CueSetAt, 1, cue);
+                e.submit(Op::HotCueSetAt, 1, cue, 0, 0);
+                tick(e, 16);
+                const auto transportBefore = e.deck(1).transport.load();
+                e.submit(Op::Play, 0);
+                e.submit(gesture == 0 ? Op::Play : gesture == 1 ? Op::CueDown : Op::HotCueDown, 1);
+                tick(e, 1);
+                const double heard = render - L, target = std::round(heard / beat) * beat;
+                const double ahead = render - target;            // > 0: the target beat already passed (in engine time)
+                const auto relocations = e.deck(1).transport.load() - transportBefore;
+                CHECK(relocations <= 1u);                        // one jump per stab (hot cue: straight to the entry)
+                if (ahead >= 0) {
+                    CHECK(e.deck(1).launchAt.load() == 0);
+                    CHECK(std::abs(e.deck(1).position.load() - (cue + ahead + 1 / 48000.)) < 1e-6);
+                } else {
+                    CHECK(e.deck(1).launchAt.load() != 0 && -ahead < beat / 2 + 1e-9);   // waits < half a beat, never L
+                    tick(e, 48000);
+                }
+                tick(e, 4800);
+                const double play = e.deck(0).position.load(), cued = e.deck(1).position.load();
+                CHECK(std::abs((cued - cue) - (play - target)) < 1 / 48000.);  // in phase at the speaker
+            }
+        }
+    }
+
     { // Beat FX ECHO on A: beat-synced repeats at beats x beatSeconds, feedback .5, tails ring after OFF.
         auto owned = std::make_unique<Engine>(48000);
         Engine& e = *owned;
