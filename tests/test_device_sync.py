@@ -215,3 +215,26 @@ def test_snapshot_synced_settings_user_value_else_shipped_default(client, db):
     assert got["manadj.waveformStyles"]["value"] == mine
     assert got["manadj.waveformStyles"]["updated_at"] is not None
     assert got["manadj-filter-settings"] == {"value": shipped["manadj-filter-settings"], "updated_at": None}
+
+
+def test_sessions_list_and_detail_for_phone_replay(client, db):
+    """#378: the phone lists Sessions and pulls one event log on demand."""
+    from backend.models import Session as SessionRow, SessionChunk
+
+    s = SessionRow(uuid="s-1", started_at=datetime(2026, 10, 1, 20, 0), ended_at=datetime(2026, 10, 1, 21, 0))
+    db.add(s)
+    db.flush()
+    events = [{"t": 1.0, "kind": "load", "channel": "A", "trackId": 7, "bpm": 128},
+              {"t": 2.0, "kind": "transport", "channel": "A", "action": "play", "playhead": 0}]
+    scratch = {"t": 1.5, "kind": "transport", "channel": "A", "action": "scratchMove", "playhead": 0}
+    db.add(SessionChunk(session_id=s.id, seq=0, events_json=json.dumps(events[:1] + [scratch])))
+    db.add(SessionChunk(session_id=s.id, seq=1, events_json=json.dumps(events[1:])))
+    db.commit()
+
+    rows = client.get("/api/device-sync/sessions").json()
+    assert [r["uuid"] for r in rows] == ["s-1"]
+    assert rows[0]["take_count"] == 0 and rows[0]["ended_at"].startswith("2026-10-01T21:00")
+
+    detail = client.get("/api/device-sync/sessions/s-1").json()
+    assert detail["events"] == events
+    assert client.get("/api/device-sync/sessions/missing").status_code == 404

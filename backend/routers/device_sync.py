@@ -350,3 +350,32 @@ def get_audio(track_id: int, db: Session = Depends(get_db)):
 
 
 __all__ = ["router", "build_snapshot", "pack_previews", "audio_rev"]
+
+
+# ── Sessions (#378): the phone replays desktop Sessions ───────────────
+
+
+@router.get("/sessions")
+def list_device_sessions(db: Session = Depends(get_db)):
+    """Session headers, newest first (the desktop Sessions list). Event logs
+    are fetched per Session on demand: they are large and immutable once
+    ended, so the phone caches them by uuid."""
+    from . import sessions as sessions_router
+
+    return [row.model_dump(mode="json") for row in sessions_router.list_sessions(db)]
+
+
+@router.get("/sessions/{uuid}")
+def get_device_session(uuid: str, db: Session = Depends(get_db)):
+    """One Session's capture-event log (SessionDetail) for replay. scratchMove
+    samples are dropped: the phone has no scratch engine (scratchBegin/End
+    stay as landings), and they are most of a scratch-heavy log's bytes
+    (81 MB -> 3 MB on a real Session)."""
+    from . import sessions as sessions_router
+
+    detail = sessions_router.get_session(uuid, db).model_dump(mode="json")
+    detail["events"] = [
+        e for e in detail["events"]
+        if not (e.get("kind") == "transport" and e.get("action") == "scratchMove")
+    ]
+    return detail
