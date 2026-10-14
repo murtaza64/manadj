@@ -25,9 +25,6 @@ EDITABLE_FIELDS: dict[str, tuple[str, str]] = {
     "rekordbox_path": ("database", "rekordbox_path"),
     "engine_dj_path": ("database", "engine_dj_path"),
     "export_enabled": ("export", "enabled"),
-    # Phone sync LAN listener (#373, backend/device_listener.py).
-    "device_sync_enabled": ("device_sync", "enabled"),
-    "device_sync_port": ("device_sync", "port"),
 }
 
 _FRESH_TEMPLATE = """\
@@ -79,10 +76,8 @@ def update_settings_file(changes: dict[str, Any]) -> None:
     for field, value in changes.items():
         section, key = EDITABLE_FIELDS[field]
         table = _ensure_table(doc, section)
-        if field in ("export_enabled", "device_sync_enabled"):
+        if field == "export_enabled":
             table[key] = bool(value)
-        elif field == "device_sync_port":
-            table[key] = int(value)
         elif value:
             table[key] = str(value)
         elif key in table:

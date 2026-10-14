@@ -29,15 +29,8 @@ def get_status():
 
 @router.put("")
 def update(changes: ListenerUpdate):
-    from ..settings_file import update_settings_file
-
-    edits = {}
-    if changes.enabled is not None:
-        edits["device_sync_enabled"] = changes.enabled
-    if changes.port is not None:
-        edits["device_sync_port"] = changes.port
-    if edits:
-        update_settings_file(edits)
+    if changes.enabled is not None or changes.port is not None:
+        device_listener.write_settings(enabled=changes.enabled, port=changes.port)
     device_listener.apply_settings()
     return asdict(device_listener.status())
 

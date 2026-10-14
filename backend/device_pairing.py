@@ -10,7 +10,8 @@ Flow (all over the LAN listener, backend/device_listener.py):
    its per-device token exactly once and stores it. From then on it sends
    `X-Manadj-Device-Token`.
 
-Paired devices live in <data root>/paired_devices.json (mode 0600), which
+Paired devices live in <data root>/data/paired_devices.json (mode 0600; the
+data dir, never the repo checkout — in dev the data root IS the repo), which
 stores sha256 hashes of the tokens, never the tokens themselves. Revoking a
 device deletes its entry. The typed pairing code (#373) remains as a fallback.
 """
@@ -45,6 +46,13 @@ def _hash(token: str) -> str:
 def registry_path() -> Path:
     from .data_root import data_root
 
+    return Path(data_root()) / "data" / "paired_devices.json"
+
+
+def legacy_registry_path() -> Path:
+    """Where #374 first wrote it: the data root itself (= the repo in dev)."""
+    from .data_root import data_root
+
     return Path(data_root()) / "paired_devices.json"
 
 
@@ -65,12 +73,27 @@ class PairedDevice:
 class DeviceRegistry:
     """Paired devices, persisted as JSON. Thread-safe; file rewritten atomically."""
 
-    def __init__(self, path_fn=registry_path) -> None:
+    def __init__(self, path_fn=registry_path, legacy_fn=None) -> None:
         self._path_fn = path_fn
+        self._legacy_fn = legacy_fn if legacy_fn is not None else (legacy_registry_path if path_fn is registry_path else None)
         self._lock = threading.Lock()
+
+    def _migrate(self, path: Path) -> None:
+        """Move a registry left in the legacy location (repo root in dev) into the data dir."""
+        legacy = self._legacy_fn() if self._legacy_fn else None
+        if legacy is None or not legacy.exists():
+            return
+        if not path.exists():
+            path.parent.mkdir(parents=True, exist_ok=True)
+            legacy.replace(path)
+            if os.name == "posix":
+                path.chmod(0o600)
+        else:
+            legacy.unlink()
 
     def _load(self) -> list[PairedDevice]:
         path = self._path_fn()
+        self._migrate(path)
         if not path.exists():
             return []
         try:
