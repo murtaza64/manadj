@@ -101,12 +101,13 @@ val ControlRow = 44.dp
             held = true; haptic.performHapticFeedback(HapticFeedbackType.VirtualKey)
             val set = ui.hotCues[slot] != null
             previewHold = set && ui.snapshot?.playing != true
+            if (previewHold) slideVisual.hold(scope)
             val id = model.beginGesture(ui.id, "HOTCUE$slot") { if (set) model.submit(AudioCommand.HotCueUp(ui.id, slot, it)) }
             model.submit(if (set) AudioCommand.HotCueDown(ui.id, slot, id) else AudioCommand.SetHotCue(ui.id, slot, id))
             if (!set) ux.journalCueWhenSet(model, ui.id, slot)
-            ;{ cancelled -> held = false; previewHold = false; if (!cancelled && set && model.gestureActive(id)) model.submit(AudioCommand.HotCueUp(ui.id, slot, id)); model.finishGesture(id, cancelled) }
+            ;{ cancelled -> held = false; previewHold = false; slideVisual.release(); if (!cancelled && set && model.gestureActive(id)) model.submit(AudioCommand.HotCueUp(ui.id, slot, id)); model.finishGesture(id, cancelled) }
         }
-    }.padding(3.dp).graphicsLayer { scaleX = scale; scaleY = scale }.background(Ink.panel).background(tint.copy(alpha = if (stored != null) .1f + .5f * lit else .5f * lit)).slideLockDraw(slideVisual).border(if (stored != null) 1.5.dp else 1.dp, tint.copy(alpha = if (stored != null) 1f else .45f)), contentAlignment = Alignment.Center) {
+    }.padding(3.dp).graphicsLayer { scaleX = scale; scaleY = scale }.background(Ink.panel).background(tint.copy(alpha = if (stored != null) .1f + .5f * lit else .5f * lit)).slideLockDraw(slideVisual, idle = ready && stored != null && !shift).border(if (stored != null) 1.5.dp else 1.dp, tint.copy(alpha = if (stored != null) 1f else .45f)), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text("${slot + 1}", color = if (lit > .5f) Ink.text else tint, size = 15, bold = true)
             if (shift && stored != null) Text("DEL", color = Ink.warning, size = 9, bold = true)
@@ -135,10 +136,10 @@ val ControlRow = 44.dp
     Box(modifier.halo(Ink.warning, heat * .9f, 7.dp, round = true).semantics { contentDescription = "${ui.id} CUE"; if (!ready) disabled() }.pointerInput(ui.id) {
         momentaryPresses({ currentReady }, slide) {
             val id = model.beginGesture(ui.id, "CUE") { model.submit(AudioCommand.CueUp(ui.id, it)) }
-            held = true; haptic.performHapticFeedback(HapticFeedbackType.VirtualKey); model.submit(AudioCommand.CueDown(ui.id, id))
-            ;{ cancelled -> held = false; if (!cancelled && model.gestureActive(id)) model.submit(AudioCommand.CueUp(ui.id, id)); model.finishGesture(id, cancelled) }
+            held = true; haptic.performHapticFeedback(HapticFeedbackType.VirtualKey); model.submit(AudioCommand.CueDown(ui.id, id)); slideVisual.hold(scope)
+            ;{ cancelled -> held = false; slideVisual.release(); if (!cancelled && model.gestureActive(id)) model.submit(AudioCommand.CueUp(ui.id, id)); model.finishGesture(id, cancelled) }
         }
-    }.padding(4.dp).graphicsLayer { scaleX = scale; scaleY = scale }.clip(shape).background(Ink.panel).background(Ink.warning.copy(alpha = .9f * heat)).slideLockDraw(slideVisual, shape).border(2.dp, tint, shape), contentAlignment = Alignment.Center) {
+    }.padding(4.dp).graphicsLayer { scaleX = scale; scaleY = scale }.clip(shape).background(Ink.panel).background(Ink.warning.copy(alpha = .9f * heat)).slideLockDraw(slideVisual, shape, idle = ready).border(2.dp, tint, shape), contentAlignment = Alignment.Center) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
             // Same metrics as PLAY (Key: icon textSize+3, label textSize 15).
             GlyphIcon(Glyph.Cue, if (held) Color.Black else tint, 18.dp)
@@ -370,9 +371,23 @@ class SlideLockVisual {
     var progress by mutableFloatStateOf(0f)
     /** 1 → 0 flash after a lock. */
     val flash = Animatable(0f)
+    /** Hold hint: chevrons fade in after 150 ms of hold (quick stabs stay clean); [phase] runs the trail. */
+    var hint by mutableFloatStateOf(0f)
+    var phase by mutableFloatStateOf(0f)
+    private var job: kotlinx.coroutines.Job? = null
+    fun hold(scope: kotlinx.coroutines.CoroutineScope) {
+        job?.cancel()
+        job = scope.launch {
+            kotlinx.coroutines.delay(150)
+            val start = withFrameNanos { it }
+            while (true) withFrameNanos { t -> val e = (t - start) / 1e9f; hint = (e / .15f).coerceAtMost(1f); phase = (e * 1.4f) % 1f }
+        }
+    }
+    fun release() { job?.cancel(); job = null; hint = 0f }
 }
-fun Modifier.slideLockDraw(v: SlideLockVisual, shape: androidx.compose.ui.graphics.Shape? = null): Modifier = drawWithContent {
-    val p = v.progress; val f = v.flash.value
+/** [idle]: a faint static › on the right edge says the hold can slide (stored cue / ready CUE). */
+fun Modifier.slideLockDraw(v: SlideLockVisual, shape: androidx.compose.ui.graphics.Shape? = null, idle: Boolean = false): Modifier = drawWithContent {
+    val p = v.progress; val f = v.flash.value; val hint = v.hint
     if (p > 0f || f > 0f) {
         val play = Ink.play
         val outline = shape?.createOutline(size, layoutDirection, this)
@@ -384,8 +399,20 @@ fun Modifier.slideLockDraw(v: SlideLockVisual, shape: androidx.compose.ui.graphi
     }
     // The label rides the finger a little (rubber band), then the target ▶ at the far edge fills in.
     translate(left = 14.dp.toPx() * p) { this@drawWithContent.drawContent() }
+    val h = size.height; val w = size.width; val cy = h / 2
+    val c = minOf(h * .16f, 6.dp.toPx())
+    fun chevron(x: Float, alpha: Float) = drawPath(Path().apply { moveTo(x - c * .6f, cy - c); lineTo(x + c * .4f, cy); lineTo(x - c * .6f, cy + c) }, Color.White.copy(alpha = alpha), style = Stroke(1.6.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round, join = androidx.compose.ui.graphics.StrokeJoin.Round))
+    if (hint > 0f && p < 1f) {
+        // ››› trail toward the lock target: a highlight travels left → right through three chevrons.
+        for (i in 0..2) {
+            val x = w * (.6f + .1f * i)
+            val d = ((v.phase * 3 - i) % 3 + 3) % 3
+            val wave = if (d < 1f) 1f - d else 0f
+            chevron(x, hint * (1 - p) * (.18f + .55f * wave))
+        }
+    } else if (idle && p == 0f && f == 0f) chevron(w - 6.dp.toPx() - c, .22f)
     if (p > 0f) {
-        val h = size.height; val w = size.width; val s = minOf(h * .32f, 12.dp.toPx()); val cx = w - s - 6.dp.toPx(); val cy = h / 2
+        val s = minOf(h * .32f, 12.dp.toPx()); val cx = w - s - 6.dp.toPx()
         val tri = Path().apply { moveTo(cx - s * .6f, cy - s); lineTo(cx + s, cy); lineTo(cx - s * .6f, cy + s); close() }
         if (p >= 1f) drawPath(tri, Ink.play) else drawPath(tri, Ink.play.copy(alpha = .4f + .6f * p), style = Stroke(2.dp.toPx()))
     }

@@ -115,16 +115,19 @@ import dev.manadj.audio.QuantizeMode
 
 @Composable private fun SettingsKey(ux: UiModel, modifier: Modifier = Modifier.size(40.dp)) = Key("", modifier, Ink.muted, description = "Settings", icon = Glyph.Gear, style = KeyStyle.BARE) { ux.settings = true }
 
-/** Portrait centre: BROWSE + crossfader enable in one floating group (#58; BROWSE swapped in from the minimap row, #94). */
+/** Portrait centre: app-level toggles in one floating group (#58) — QUANTIZE, crossfader enable, SETTINGS. */
 @Composable private fun GlobalControls(model: PlayerModel, ux: UiModel, modifier: Modifier) {
+    val mode by remember { derivedStateOf { model.output?.quantizeMode ?: ux.quantizeMode } }
+    val q = mode != QuantizeMode.OFF
     // One row of compact keys; the group centres in whatever height the mixer leaves.
     Box(modifier, contentAlignment = Alignment.Center) {
         Row(Modifier.fillMaxWidth().height(40.dp).clip(androidx.compose.foundation.shape.RoundedCornerShape(10.dp)).border(1.dp, Ink.surface, androidx.compose.foundation.shape.RoundedCornerShape(10.dp)).padding(3.dp), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-            BrowseKey(model, ux, Modifier.weight(1.4f).fillMaxHeight())
+            Key(if (mode == QuantizeMode.HEARD) "QUANT·H" else "QUANT", Modifier.weight(1.2f).fillMaxHeight(), Ink.accent, model.supports("quantize"), q, if (q) "Quantize on" else "Quantize off", style = KeyStyle.PILL, textSize = 10, longPress = { ux.setQuantize(model, on = true, heard = !ux.quantizeHeard) }) { ux.setQuantize(model, on = !q) }
             Key("XF", Modifier.weight(.8f).fillMaxHeight(), Ink.accent, engaged = ux.crossfaderEnabled, description = "Crossfader enable", style = KeyStyle.PILL, textSize = 10) {
                 ux.crossfaderEnabled = !ux.crossfaderEnabled
                 if (!ux.crossfaderEnabled) model.updateCrossfade(.5)
             }
+            Key("", Modifier.weight(.7f).fillMaxHeight(), Ink.muted, description = "Settings", icon = Glyph.Gear, style = KeyStyle.PILL, textSize = 12) { ux.settings = true }
         }
     }
 }
@@ -202,10 +205,10 @@ fun mixOf(model: PlayerModel, ux: UiModel, id: DeckId): DeckMix {
                 ChannelFader(b, model, Modifier.width(54.dp).fillMaxHeight())
                 KnobColumn(b, ux, model, Modifier.width(58.dp).fillMaxHeight())
             }
-            // Minimaps flank QUANT + settings (swapped with BROWSE, #94).
+            // Minimaps flank the centre BROWSE key (the #94 swap is landscape-only, #101).
             Row(pad.fillMaxWidth().height(if (tight) 36.dp else 44.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                 Minimap(a, model, ux.waves[a.source?.id ?: ""], Modifier.weight(1f).fillMaxHeight(), preview = ux.seekPreview)
-                Row(Modifier.width(84.dp).fillMaxHeight(), verticalAlignment = Alignment.CenterVertically) { QuantizeKey(model, ux, Modifier.weight(1f).fillMaxHeight()); SettingsKey(ux, Modifier.size(36.dp)) }
+                BrowseKey(model, ux, Modifier.width(84.dp).fillMaxHeight())
                 Minimap(b, model, ux.waves[b.source?.id ?: ""], Modifier.weight(1f).fillMaxHeight(), preview = ux.seekPreview)
             }
             Row(pad.fillMaxWidth().height(28.dp), horizontalArrangement = Arrangement.spacedBy(DeckGap)) { for (ui in listOf(a, b)) StemsStrip(ui, ux, model, Modifier.weight(1f).fillMaxHeight()) }
