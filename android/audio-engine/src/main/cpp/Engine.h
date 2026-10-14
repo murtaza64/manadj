@@ -8,6 +8,7 @@
 #include <memory>
 #include <mutex>
 #include "BeatFx.h"
+#include "signalsmith-stretch/signalsmith-stretch.h"
 #include "Dsp.h"
 
 namespace manadj {
@@ -24,7 +25,8 @@ constexpr double kGridlessBpm = 120;     // desktop jumpBeats fallback for BPM-l
 constexpr int kHeadFrames = 8192;       // Pre-decoded audio at each cue (~170 ms at 48 kHz).
 constexpr int kTailFrames = 2048;       // Old audio captured for a crossfade (240 frames at <=8x ratio).
 constexpr double kAtCueEpsilon = 0.01;  // Desktop transport.ts AT_CUE_EPSILON.
-constexpr int kBlockFrames = 1024;      // Bus scratch size; longer callbacks render in blocks.
+constexpr int kBlockFrames = 1024;
+constexpr double kTrackMarginSeconds = 2;  // decoded audio required ahead before the in-memory track serves      // Bus scratch size; longer callbacks render in blocks.
 
 // Output stage: how the master and cue (PFL) buses map onto device channels.
 enum class Routing : int {
@@ -77,7 +79,7 @@ struct Track {
 
 enum class Op : int { Prepare, Play, Pause, CueDown, CueUp, HotCueDown, HotCueUp,
                        HotCueSet, HotCueClear, Seek, Fader, Trim, Crossfade, Pitch, Bend, Pfl, CueMix, Eq, Filter,
-                       SetGrid, BeatJump, LoopToggle, LoopResize, LoopPreset, Quantize, CueSetAt, HotCueSetAt, BeatFx };
+                       SetGrid, BeatJump, LoopToggle, LoopResize, LoopPreset, Quantize, CueSetAt, HotCueSetAt, BeatFx, KeyLock };
 // BeatFx (deck ignored): slot = effect (-1 none), value = depth, aux = {target, on, beats, held deck mask}.
 // LoopResize slot: 0 halve, 1 double, 2 set to value beats.
 struct Command {
@@ -153,6 +155,14 @@ struct Deck {
     bool stripWarm = false;
     std::array<Head, kHeadSlots> heads{};
     Track track;
+    // Key lock (desktop: Signalsmith Stretch, window model of deckSourceProcessor.ts). Stretch mode
+    // renders from the in-memory track only; elsewhere the deck resamples (pitch follows tempo).
+    std::atomic<bool> keyLock{false};
+    std::atomic<bool> stretching{false};
+    std::unique_ptr<signalsmith::stretch::SignalsmithStretch<float>> stretch;
+    std::vector<float> stretchIn[2], stretchOut[2]; // window / block scratch (allocated with the stretcher)
+    uint64_t stretchTransport = ~0ull;              // transport the stretcher was primed for
+    double stretchTranspose = 0;
     std::atomic<bool> inTrack{false};   // callback renders from the in-memory track (snapshot)
     std::atomic<bool> trackEnd{false};  // reached the end of a complete in-memory track
     // Head being played (-1 none) and the ring offset (source frames) the worker must start at.
@@ -224,7 +234,8 @@ public:
     Deck& deck(int index) { return decks_[index]; }
     const Deck& deck(int index) const { return decks_[index]; }
     int outputRate() const { return outputRate_.load(); }
-    void setOutputRate(int rate) { outputRate_.store(rate); }
+    // Control thread, while no stream renders (before start / after close): reconfigures stretchers.
+    void setOutputRate(int rate);
     uint64_t outputFrames() const { return outputFrames_.load(); }
     uint64_t accepted() const { return accepted_.load(); }
     uint64_t applied() const { return applied_.load(); }
@@ -274,6 +285,9 @@ private:
     bool renderTail(Deck& d, float* strip, int frames) noexcept;
     int renderSegment(Deck& d, float* strip, int frames, bool& active) noexcept;
     int renderTrack(Deck& d, float* strip, int frames, bool& active) noexcept;
+    int renderStretch(Deck& d, float* strip, int frames, bool& active) noexcept;
+    void stretchBlock(Deck& d, double frame, double rate, int frames, float* outL, float* outR) noexcept;
+    void configureStretch(Deck& d, int rate);
 
     void designEq(Deck& d, double rate) noexcept;
     void resetStrip(Deck& d) noexcept;

@@ -87,6 +87,12 @@ data class FilterSettings(
 
     companion object {
         const val KEY = "manadj-filter-settings"
+        /**
+         * The desktop's shipped value (backend/shipped_defaults.json) — what a desktop without a
+         * customized filter runs. The no-arg constructor is the TS code fallback (DEFAULT_FILTER_SETTINGS,
+         * 17 dB resonance / 0.85 compensation: ~12 dB quieter off-center), used only per-field by fromJson.
+         */
+        val SHIPPED = FilterSettings(resonance = 10.5, compensation = .1)
         val KEYS = listOf("resonance", "compensation", "curve", "deadzone", "lpMin", "hpMax", "spread", "drive", "trim", "smoothing")
         /** FILTER_PARAMETER_RANGES: min, max, step. */
         val RANGES: Map<String, Triple<Double, Double, Double>> = mapOf(
@@ -160,6 +166,8 @@ sealed interface AudioCommand {
     data class SetQuantize(val on: Boolean, override val gestureId: String? = null) : AudioCommand {
         override val deck = DeckId.A
     }
+    /** Key lock (desktop Signalsmith Stretch): pitch/bend change tempo without changing key. */
+    data class SetKeyLock(override val deck: DeckId, val on: Boolean, override val gestureId: String? = null) : AudioCommand
     /** Pre-fader listen: sends the deck (post-trim) to the cue bus. */
     data class SetPfl(override val deck: DeckId, val on: Boolean, override val gestureId: String? = null) : AudioCommand
     /** Headphone feed: 0 = cue bus only, 1 = master only. */
@@ -208,6 +216,8 @@ data class DeckSnapshot(
     val appliedCommandId: Long, val bufferedFrames: Long,
     /** Whole-track decode progress (source seconds held in memory); complete; playing from memory (exact jumps). */
     val decodedSeconds: Double = 0.0, val fullyDecoded: Boolean = false, val fromMemory: Boolean = false,
+    /** Key lock requested; and actually time-stretching (needs the in-memory track at the playhead, else pitch follows tempo). */
+    val keyLock: Boolean = false, val keyLockActive: Boolean = false,
 )
 data class EngineSnapshot(
     val outputFrames: Long, val outputSampleRate: Int, val outputChannels: Int,
@@ -279,7 +289,7 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
         init { System.loadLibrary("manadj_audio") }
         const val MAIN_CUE = 8
         const val HOT_CUES = 8
-        val CAPABILITIES = setOf("play", "pause", "cue-gate", "hot-cue-gate", "hot-cue-set", "seek", "fader", "trim", "crossfade", "varispeed", "bend", "pfl", "cue-mix", "routing", "eq", "filter", "grid", "beat-jump", "loop", "quantize", "beat-fx", "filter-settings")
+        val CAPABILITIES = setOf("play", "pause", "cue-gate", "hot-cue-gate", "hot-cue-set", "seek", "fader", "trim", "crossfade", "varispeed", "bend", "pfl", "cue-mix", "routing", "eq", "filter", "grid", "beat-jump", "loop", "quantize", "beat-fx", "filter-settings", "key-lock")
         private const val PRIME_FRAMES = 2048
         private const val MEMORY_RESERVE_BYTES = 768L shl 20
         private const val HEAD_PRIORITY_FRAMES = 16384 // ~340 ms buffered before a head fill may interrupt the ring
@@ -288,8 +298,8 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
         private val FILL_ORDER = listOf(MAIN_CUE, MAIN_CUE + 1) + (0 until HOT_CUES)
         private const val HEAD_FRAMES = 8192
         private const val HEADER = 27
-        private const val DECK_FIELDS = 36 + HOT_CUES
-        private enum class Op { PREPARE, PLAY, PAUSE, CUE_DOWN, CUE_UP, HOT_CUE_DOWN, HOT_CUE_UP, HOT_CUE_SET, HOT_CUE_CLEAR, SEEK, FADER, TRIM, CROSSFADE, PITCH, BEND, PFL, CUE_MIX, EQ, FILTER, SET_GRID, BEAT_JUMP, LOOP_TOGGLE, LOOP_RESIZE, LOOP_PRESET, QUANTIZE, CUE_SET_AT, HOT_CUE_SET_AT }
+        private const val DECK_FIELDS = 40 + HOT_CUES
+        private enum class Op { PREPARE, PLAY, PAUSE, CUE_DOWN, CUE_UP, HOT_CUE_DOWN, HOT_CUE_UP, HOT_CUE_SET, HOT_CUE_CLEAR, SEEK, FADER, TRIM, CROSSFADE, PITCH, BEND, PFL, CUE_MIX, EQ, FILTER, SET_GRID, BEAT_JUMP, LOOP_TOGGLE, LOOP_RESIZE, LOOP_PRESET, QUANTIZE, CUE_SET_AT, HOT_CUE_SET_AT, BEAT_FX, KEY_LOCK }
     }
 
     /** The caller retains/closes descriptor; the engine duplicates it for its own lifetime. */
@@ -358,6 +368,7 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
             is AudioCommand.LoopPreset -> Op.LOOP_PRESET to command.beats
             is AudioCommand.LoopResize -> { slot = command.change.ordinal; Op.LOOP_RESIZE to command.beats }
             is AudioCommand.SetQuantize -> Op.QUANTIZE to if (command.on) 1.0 else 0.0
+            is AudioCommand.SetKeyLock -> Op.KEY_LOCK to if (command.on) 1.0 else 0.0
             is AudioCommand.SetFilterSettings -> {
                 val s = command.settings.sanitized()
                 val id = nativeSetFilterSettings(handle, s.model.ordinal, s.params())
@@ -383,12 +394,20 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
     }
 
     /** Settings last applied via [AudioCommand.SetFilterSettings]. */
-    @Volatile var filterSettings = FilterSettings()
+    @Volatile var filterSettings = FilterSettings.SHIPPED
         private set
 
     /** Desktop sweepResponseDb: magnitude response (dB) of [settings] at knob [position] for [frequencies] (Settings graph). */
     fun filterResponseDb(settings: FilterSettings, position: Double, frequencies: DoubleArray, sampleRate: Double = 48000.0): DoubleArray =
         settings.sanitized().let { nativeFilterResponse(it.model.ordinal, it.params(), position, frequencies, sampleRate) }
+
+    /** Audio-callback render cost since the previous call (resets): max µs, mean µs, callbacks, callbacks over half their period. */
+    data class RenderCost(val maxMicros: Double, val meanMicros: Double, val callbacks: Long, val nearMisses: Long)
+    @Synchronized fun renderCost(): RenderCost? {
+        if (closed || offline) return null
+        val d = nativeRenderCost(handle)
+        return RenderCost(d[0], d[1], d[2].toLong(), d[3].toLong())
+    }
 
     @Synchronized fun outputInfo(): OutputInfo? {
         if (closed) return null
@@ -443,7 +462,7 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
                 pendingLoopBeats = data[p + 31],
                 previewSlot = data[p + 10].toInt().takeIf { current && it >= 0 },
                 cueSeconds = data[p + 11].takeIf { current && state == LoadState.READY },
-                hotCues = List(HOT_CUES) { h -> data[p + 36 + h].takeIf { current && it >= 0 } },
+                hotCues = List(HOT_CUES) { h -> data[p + 40 + h].takeIf { current && it >= 0 } },
                 filling = current && state == LoadState.READY && data[p + 4] == 0.0 && data[p + 18] < 0 && data[p + 34] == 0.0 && data[p + 35] == 0.0,
                 readyHeads = if (current) data[p + 19].toInt() else 0,
                 headSlot = if (current) data[p + 18].toInt() else -1,
@@ -451,6 +470,7 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
                 appliedCommandId = data[p + 12].toLong(), bufferedFrames = data[p + 13].toLong(),
                 decodedSeconds = if (current) data[p + 32] else 0.0, fullyDecoded = current && data[p + 33] != 0.0,
                 fromMemory = current && data[p + 34] != 0.0,
+                keyLock = data[p + 36] != 0.0, keyLockActive = current && data[p + 37] != 0.0,
             )
         }
         return EngineSnapshot(
@@ -482,7 +502,7 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
         if (!current(deck, source)) return
         var heads: HeadFiller? = null
         try {
-            ParcelFileDescriptor.dup(source.fd.fileDescriptor).use { fd ->
+            independent(source.fd).use { fd ->
                 PcmReader.open(fd.fileDescriptor).use { reader ->
                     reader.durationSeconds?.let { durations.set(deck, source.load to it) }
                     heads = HeadFiller(deck, source)
@@ -516,7 +536,7 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
                 var frames = 0
                 try {
                     val r = reader ?: run {
-                        val dup = ParcelFileDescriptor.dup(source.fd.fileDescriptor).also { fd = it }
+                        val dup = independent(source.fd).also { fd = it }
                         PcmReader.open(dup.fileDescriptor).also { reader = it }
                     }
                     r.seek(at)
@@ -554,7 +574,14 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
                 if (applied > source.load) return
                 Thread.sleep(2)
             }
-            ParcelFileDescriptor.dup(source.fd.fileDescriptor).use { fd ->
+            // Start after the streaming path is up (instant start first), on an independent descriptor.
+            while (current(deck, source)) {
+                val status = nativeSnapshotStatus(deck)
+                if (status == LoadState.READY) break
+                if (status == LoadState.ERROR) return
+                Thread.sleep(5)
+            }
+            independent(source.fd).use { fd ->
                 PcmReader.open(fd.fileDescriptor).use { reader ->
                     val duration = reader.durationSeconds ?: return
                     var started = false
@@ -576,6 +603,17 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
         } catch (_: InterruptedException) {
         } catch (_: Exception) { /* The streaming path still plays the track. */ }
     }
+
+    /** Load state of [deck]'s current load as the callback sees it. */
+    private fun nativeSnapshotStatus(deck: Int): LoadState = snapshot().decks.getValue(DeckId.entries[deck]).loadState
+
+    /**
+     * A descriptor with its own file offset. `dup` shares the offset, and MediaExtractor instances
+     * opening dup'ed descriptors concurrently can misread the container ("No audio track").
+     */
+    private fun independent(fd: ParcelFileDescriptor): ParcelFileDescriptor =
+        runCatching { ParcelFileDescriptor.open(java.io.File("/proc/self/fd/${fd.fd}"), ParcelFileDescriptor.MODE_READ_ONLY) }
+            .getOrElse { ParcelFileDescriptor.dup(fd.fileDescriptor) }
 
     /** Keeps [MEMORY_RESERVE_BYTES] of system memory available after the allocation. */
     private fun memoryAllows(bytes: Long): Boolean {
@@ -691,6 +729,7 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
     private external fun nativePublish(handle: Long, deck: Int, load: Long, transport: Long, eof: Boolean): Boolean
     private external fun nativeFail(handle: Long, deck: Int, load: Long)
     private external fun nativeOutputInfo(handle: Long): DoubleArray
+    private external fun nativeRenderCost(handle: Long): DoubleArray
     private external fun nativeSnapshot(handle: Long): DoubleArray
     private external fun nativeRenderOffline(handle: Long, frames: Int, channels: Int): FloatArray
     private external fun nativeConfigure(handle: Long, routing: Int, device: Int, offline: Boolean): Int

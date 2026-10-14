@@ -58,9 +58,9 @@ void loadPcm(Engine& e, int deck, uint64_t load, const std::vector<float>& pcm) 
 }
 
 // Emulates the full-decode worker: the whole track in memory.
-void fillTrack(Engine& e, int deck, uint64_t load, const std::vector<float>& pcm) {
+void fillTrack(Engine& e, int deck, uint64_t load, const std::vector<float>& pcm, int rate = 48000) {
     const int frames = static_cast<int>(pcm.size() / 2);
-    CHECK(e.trackBegin(deck, load, frames, 48000, 0));
+    CHECK(e.trackBegin(deck, load, frames, rate, 0));
     for (int at = 0; at < frames; at += 4096) CHECK(e.trackWrite(deck, load, pcm.data() + at * 2, std::min(4096, frames - at)) > 0);
     e.trackFinish(deck, load);
 }
@@ -405,7 +405,7 @@ int main() {
         CHECK(db(measure(200, [](Engine& e) { e.submitFilter(0, 1); })) < -40);             // HP fully swept (16 kHz)
         CHECK(std::abs(db(measure(100, [](Engine& e) { e.submitFilter(0, .5); }))) > 6);    // mid HP sweep cuts 100 Hz
         // ...and passes 5 kHz at the desktop's resonance-compensated passband level.
-        CHECK(std::abs(db(measure(5000, [](Engine& e) { e.submitFilter(0, .5); })) - db(static_cast<float>(std::pow(10.0, dsp::describeFilter(.5, 48000).gainDb / 20)))) < 1);
+        CHECK(std::abs(db(measure(5000, [](Engine& e) { e.submitFilter(0, .5); })) - db(static_cast<float>(std::pow(10.0, dsp::describeFilter(.5, 48000, [] { dsp::FilterSettings f; f.resonance = 10.5; f.compensation = .1; return f; }()).gainDb / 20)))) < 1);
         const auto t = dsp::describeFilter(-1, 48000);
         CHECK(t.pass == dsp::Pass::Low && std::abs(t.frequency - 40) < .01 && t.wet == 1 && t.gainDb < 0);
         const auto h = dsp::describeFilter(1, 48000);
@@ -454,6 +454,27 @@ int main() {
                     if (std::abs(got - want) > 1) std::fprintf(stderr, "strip model %d pos %g hz %g: %f vs %f\n", (int)s->model, pos, hz, got, want);
                     CHECK(std::abs(got - want) < 1);
                 }
+    }
+
+    { // Phone default = desktop shipped setting: level vs knob across the sweep matches desktop within 1 dB.
+        dsp::FilterSettings shipped; shipped.resonance = 10.5; shipped.compensation = .1;
+        for (double pos : {-.5, -.3, -.15, -.06, -.02, .02, .06, .15, .3}) {
+            for (double hz : {300.0, 1000.0}) {
+                auto owned = std::make_unique<Engine>(48000);
+                Engine& e = *owned;                 // no submitFilterSettings: the engine default
+                e.submitFilter(0, pos);
+                e.submit(Op::Prepare, 0, 0, 1);
+                tick(e);
+                feedTone(e, 0, 1, hz);
+                e.submit(Op::Play, 0);
+                const double got = 20 * std::log10(toneRms(e, 12000, 12000) / (.25f / std::sqrt(2.f) * unity));
+                const double want = dsp::sweepResponseDb(shipped, pos, hz, 48000);
+                if (want < -30) continue;
+                if (std::abs(got - want) > 1) std::fprintf(stderr, "default pos %g hz %g: %f vs desktop %f\n", pos, hz, got, want);
+                CHECK(std::abs(got - want) < 1);
+                if (std::abs(pos) <= .15) CHECK(got > -1.5); // no big level drop just off center
+            }
+        }
     }
 
     { // Live settings changes (model swap, resonance, trim) are click-free.
@@ -649,6 +670,58 @@ int main() {
         e.submit(Op::HotCueDown, 0, 0, 0, 2);
         tick(e);
         CHECK(std::abs(e.deck(0).position.load() - (5.5 + 1 / 48000.)) < 1e-9);
+    }
+
+    { // Key lock: tempo changes, pitch stays (zero-crossing pitch estimate), incl. a 44.1 kHz source.
+        for (int rate : {48000, 44100}) {
+            auto owned = std::make_unique<Engine>(48000);
+            Engine& e = *owned;
+            const int frames = rate * 20;
+            std::vector<float> tone(static_cast<size_t>(frames) * 2);
+            for (int i = 0; i < frames; ++i) tone[i * 2] = tone[i * 2 + 1] = static_cast<float>(.25 * std::sin(2 * 3.14159265358979 * 440 * i / rate));
+            e.submit(Op::Prepare, 0, 0, 1);
+            tick(e);
+            auto& d = e.deck(0);
+            const auto transport = d.transport.load();
+            CHECK(e.claim(0, 1, transport, rate, 0));
+            CHECK(e.offer(0, transport, tone.data(), 4096) == 4096);
+            CHECK(e.publish(0, 1, transport, false));
+            fillTrack(e, 0, 1, tone, rate);
+            e.submit(Op::Seek, 0, 2.0);
+            e.submit(Op::Pitch, 0, 8);
+            auto pitchOf = [&](bool keyLock) {
+                e.submit(Op::KeyLock, 0, keyLock ? 1 : 0);
+                e.submit(Op::Play, 0);
+                capture(e, 9600);                       // settle (prime, fade, filters)
+                const double before = d.position.load();
+                auto x = capture(e, 48000);
+                const double advanced = d.position.load() - before;
+                CHECK(std::abs(advanced - 1.08) < .002);  // tempo follows pitch either way
+                int crossings = 0;
+                for (int i = 1; i < 48000; ++i) if ((x[i - 1] < 0) != (x[i] < 0)) ++crossings;
+                return crossings / 2.0;                     // Hz over one second
+            };
+            const double locked = pitchOf(true);
+            if (std::abs(locked - 440) > 3) std::fprintf(stderr, "rate %d locked pitch %f\n", rate, locked);
+            CHECK(std::abs(locked - 440) < 3);
+            CHECK(d.stretching.load());
+            const double free = pitchOf(false);
+            CHECK(std::abs(free - 440 * 1.08) < 3);        // resample path: pitch follows tempo
+            CHECK(!d.stretching.load());
+            // Key-locked jumps stay gapless.
+            e.submit(Op::KeyLock, 0, 1);
+            const double grid[5] = {0, 0, 0, 0, 0};
+            e.submit(Op::SetGrid, 0, 120, 0, 0, grid);
+            capture(e, 4800);
+            for (double j : {4.0, -4.0, 1.0}) {
+                e.submit(Op::BeatJump, 0, j);
+                auto x = capture(e, 4800);
+                double rmsMin = 1;
+                for (int w = 0; w + 480 <= 4800; w += 480) rmsMin = std::min(rmsMin, rms(x, w, w + 480));
+                if (rmsMin <= .03) std::fprintf(stderr, "rate %d jump %g rmsMin %f\n", rate, j, rmsMin);
+                CHECK(rmsMin > .03);
+            }
+        }
     }
 
     { // Beat FX ECHO on A: beat-synced repeats at beats x beatSeconds, feedback .5, tails ring after OFF.

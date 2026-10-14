@@ -87,7 +87,7 @@ class PlayerModel(application: Application) : AndroidViewModel(application) {
         private set
     private var pendingBeatFx: Long? = null
     /** Desktop sweep-filter settings (synced `manadj-filter-settings`); re-sent until the engine accepts them. */
-    var filterSettings by mutableStateOf(FilterSettings())
+    var filterSettings by mutableStateOf(FilterSettings.SHIPPED)
         private set
     private var filterSettingsUnsent = false
     private val connection = object : ServiceConnection {
@@ -256,6 +256,8 @@ class PlayerModel(application: Application) : AndroidViewModel(application) {
     fun toggleLoop(deck: DeckId) = submit(AudioCommand.LoopToggle(deck))
     fun resizeLoop(deck: DeckId, change: LoopChange) = submit(AudioCommand.LoopResize(deck, change))
     fun setQuantize(on: Boolean) = submit(AudioCommand.SetQuantize(on))
+    /** Key lock per deck; DeckSnapshot.keyLock / keyLockActive report it. */
+    fun setKeyLock(deck: DeckId, on: Boolean) = submit(AudioCommand.SetKeyLock(deck, on))
 
     fun updateEq(deck: DeckId, band: Int, value: Double, gesture: String? = null) = control(deck, "eq$band", AudioCommand.SetEq(deck, band, value, gesture)) { it.eq[band] = value }
     fun updateFilter(deck: DeckId, position: Double, gesture: String? = null) = control(deck, "filter", AudioCommand.SetFilter(deck, position, gesture)) { it.filter = position }

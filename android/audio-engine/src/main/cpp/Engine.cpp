@@ -28,9 +28,30 @@ Engine::Engine(int outputRate) : outputRate_(outputRate) {
     for (auto& d : decks_) { for (auto& h : d.hotcues) h.store(-1); for (auto& e : d.eq) e.store(.5f); }
     for (int i = 0; i < kDeckCount; ++i) updateGain(i);
     for (auto& insert : fx_) insert = std::make_unique<fx::Insert>();
+    for (auto& d : decks_) { d.stretch = std::make_unique<signalsmith::stretch::SignalsmithStretch<float>>(); configureStretch(d, outputRate); }
     for (int i = 0; i < 16385; ++i) driveCurve_[i] = static_cast<float>(std::tanh(4 * (2.0 * i / 16384 - 1)));
+    // Until the app applies the synced desktop setting: the desktop's shipped default
+    // (backend/shipped_defaults.json), not the TS code fallback (17 dB / 0.85 compensation, ~12 dB quieter).
+    filterSettings_.resonance = 10.5;
+    filterSettings_.compensation = .1;
     for (int i = 0; i < kDeckCount; ++i) submitFilter(i, 0);
     applyBeatFx(true);
+}
+
+void Engine::configureStretch(Deck& d, int rate) {
+    // presetDefault like the desktop, with split computation: the work of each 30 ms spectral step is
+    // spread over the step instead of landing in one callback (phone callbacks are 2 ms).
+    d.stretch->presetDefault(2, static_cast<float>(rate), true);
+    const int window = d.stretch->inputLatency() + d.stretch->outputLatency();
+    for (int c = 0; c < 2; ++c) { d.stretchIn[c].assign(window, 0.f); d.stretchOut[c].assign(kBlockFrames, 0.f); }
+    d.stretchTransport = ~0ull;
+    d.stretchTranspose = 0;
+}
+
+void Engine::setOutputRate(int rate) {
+    if (rate == outputRate_.load()) return;
+    outputRate_.store(rate);
+    for (auto& d : decks_) configureStretch(d, rate);
 }
 
 uint64_t Engine::submitBeatFx(int effect, int target, bool on, double depth, double beats, int heldMask) {
@@ -301,10 +322,13 @@ void Engine::relocate(Deck& d, double seconds, int slot, double overshootFrames)
     releaseHead(d);
     const auto t = std::max(0.0, seconds);
     d.trackEnd.store(false, kRelaxed);
-    if (trackCovers(d, t, 0)) {
+    // Jump into memory only with a margin ahead of a still-running decode, so playback never
+    // catches the decode front (that would force a ring resync gap); otherwise heads/ring serve.
+    if (trackCovers(d, t, kTrackMarginSeconds * d.track.sampleRate.load(kRelaxed))) {
         // In-memory track: the jump is exact and immediate (overshoot carried, no refill). The
         // ring still follows the new transport in case playback later leaves the decoded region.
         d.ringOffset.store(0, kRelaxed);
+        d.inTrack.store(true, kRelaxed); // render from memory next (no re-entry margin check)
         d.headPos = 0;
         d.target.store(t, kRelaxed);
         d.position.store(t + overshootFrames / d.track.sampleRate.load(kRelaxed), kRelaxed);
@@ -496,6 +520,17 @@ void Engine::apply(const Command& c) noexcept {
             d.driveMixTarget = t.model == dsp::FilterModel::Current ? 0.f : static_cast<float>(t.driveMix);
             break;
         }
+        case Op::KeyLock: {
+            const bool on = c.value != 0;
+            if (on != d.keyLock.load()) {
+                // Mode switch while audible: crossfade from the old path (desktop mode toggle declick).
+                captureTail(d);
+                d.envelope = 0;
+                d.keyLock.store(on);
+                d.stretchTransport = ~0ull;
+            }
+            break;
+        }
         case Op::CueMix: cueMix_.store(std::clamp(static_cast<float>(c.value), 0.f, 1.f)); break;
         case Op::BeatFx: {
             const int target = static_cast<int>(c.aux[0]);
@@ -625,10 +660,12 @@ int Engine::renderSegment(Deck& d, float* strip, int frames, bool& active) noexc
                 d.position.store(d.claimedStart.load(kAcquire), kRelease);
             d.positionTransport = transport;
         }
-        if (!(d.playing.load(kRelaxed) || d.preview.load(kRelaxed))) { d.envelope = 0; return -1; }
+        if (!(d.playing.load(kRelaxed) || d.preview.load(kRelaxed))) { d.envelope = 0; d.stretching.store(false, kRelaxed); return -1; }
         {
             const double span = frames * 8.0 * d.track.sampleRate.load(kRelaxed) / outRate; // max ratio margin
-            if (trackCovers(d, d.position.load(kRelaxed), span)) return renderTrack(d, strip, frames, active);
+            // Enter memory mode with a margin; once in it, stay while the block itself is covered.
+            const double need = d.inTrack.load(kRelaxed) ? span : span + kTrackMarginSeconds * d.track.sampleRate.load(kRelaxed);
+            if (trackCovers(d, d.position.load(kRelaxed), need)) return renderTrack(d, strip, frames, active);
             if (d.inTrack.load(kRelaxed)) {
                 // Left the decoded region (only while the track is still decoding): resync the ring.
                 relocate(d, d.position.load(kRelaxed));
@@ -716,6 +753,8 @@ int Engine::renderTrack(Deck& d, float* strip, int frames, bool& active) noexcep
                          (1 + d.pitch.load(kRelaxed) / 100.) * (1 + d.bend.load(kRelaxed) / 100.);
     if (!d.inTrack.load(kRelaxed)) { releaseHead(d); d.inTrack.store(true, kRelaxed); }
     d.positionTransport = d.transport.load(kRelaxed); // the ring's claimed start must not move us
+    if (d.keyLock.load(kRelaxed)) return renderStretch(d, strip, frames, active);
+    d.stretching.store(false, kRelaxed);
     if (d.envelope == 0 && d.tailLeft == 0) { d.gain = d.targetGain; d.cueGain = d.targetCueGain; d.xf = d.targetXf; }
     const double start = t.startSeconds.load(kRelaxed);
     const auto avail = t.frames.load(kAcquire);
@@ -748,6 +787,94 @@ int Engine::renderTrack(Deck& d, float* strip, int frames, bool& active) noexcep
         }
     }
     d.position.store(start + frame / rate, kRelease);
+    return -1;
+}
+
+// One stretcher block (desktop SignalsmithEngine.render): refill the whole input window so it ends at
+// frame + rate x outputLatency + inputLatency (the algorithmic latency becomes read-ahead, so the
+// output sounds `frame` now), seek, then process `frames` of output. Reads past an active loop's end
+// fold back to its start; outside the decoded track reads as silence.
+void Engine::stretchBlock(Deck& d, double frame, double rate, int frames, float* outL, float* outR) noexcept {
+    auto& st = *d.stretch;
+    const auto& t = d.track;
+    const int window = static_cast<int>(d.stretchIn[0].size());
+    const auto end = static_cast<int64_t>(std::llround(frame + rate * st.outputLatency() + st.inputLatency()));
+    const int64_t first = end - window;
+    const auto avail = static_cast<int64_t>(t.frames.load(kAcquire));
+    const int src = t.sampleRate.load(kRelaxed);
+    const double start = t.startSeconds.load(kRelaxed);
+    const bool looping = d.loopActive.load(kRelaxed);
+    const auto loopStart = static_cast<int64_t>(std::llround((d.loopStart.load(kRelaxed) - start) * src));
+    const auto loopEnd = static_cast<int64_t>(std::llround((d.loopEnd.load(kRelaxed) - start) * src));
+    const int64_t loopLength = loopEnd - loopStart;
+    const int16_t* pcm = t.pcm.get();
+    float* inL = d.stretchIn[0].data();
+    float* inR = d.stretchIn[1].data();
+    for (int i = 0; i < window; ++i) {
+        int64_t f = first + i;
+        if (looping && loopLength > 0 && f >= loopEnd) f = loopStart + (f - loopStart) % loopLength;
+        if (f >= 0 && f < avail) { inL[i] = pcm[f * 2] * (1.f / 32768); inR[i] = pcm[f * 2 + 1] * (1.f / 32768); }
+        else inL[i] = inR[i] = 0;
+    }
+    float* ins[2] = {inL, inR};
+    float* outs[2] = {outL, outR};
+    st.seek(ins, window, rate);
+    st.process(ins, 0, outs, frames);
+}
+
+int Engine::renderStretch(Deck& d, float* strip, int frames, bool& active) noexcept {
+    const auto& t = d.track;
+    const int src = t.sampleRate.load(kRelaxed);
+    const double out = outputRate_.load(kRelaxed);
+    const double speed = (1 + d.pitch.load(kRelaxed) / 100.) * (1 + d.bend.load(kRelaxed) / 100.);
+    const double rate = speed * src / out;   // input frames per output frame
+    const double transpose = src / out;      // input is read at the output rate: undo that pitch shift
+    const double start = t.startSeconds.load(kRelaxed);
+    const auto avail = static_cast<double>(t.frames.load(kAcquire));
+    double frame = (d.position.load(kRelaxed) - start) * src;
+    auto& st = *d.stretch;
+    float* outL = d.stretchOut[0].data();
+    float* outR = d.stretchOut[1].data();
+    const auto transport = d.transport.load(kRelaxed);
+    if (!d.stretching.load(kRelaxed) || d.stretchTransport != transport) {
+        // Warm-primed reset (desktop prime): render and discard inputLatency of the track's own
+        // history ending at the start, in 128-frame blocks, so the first output is not hollow.
+        st.reset();
+        st.setTransposeFactor(static_cast<float>(transpose), static_cast<float>(8000 / out));
+        d.stretchTranspose = transpose;
+        int warm = st.inputLatency();
+        double at = frame - warm * rate;
+        while (warm > 0) {
+            const int n = std::min(128, warm);
+            stretchBlock(d, at, rate, n, outL, outR);
+            at += n * rate;
+            warm -= n;
+        }
+        d.stretchTransport = transport;
+        d.stretching.store(true, kRelaxed);
+    } else if (transpose != d.stretchTranspose) {
+        st.setTransposeFactor(static_cast<float>(transpose), static_cast<float>(8000 / out));
+        d.stretchTranspose = transpose;
+    }
+    if (d.envelope == 0 && d.tailLeft == 0) { d.gain = d.targetGain; d.cueGain = d.targetCueGain; d.xf = d.targetXf; }
+    stretchBlock(d, frame, rate, frames, outL, outR);
+    for (int i = 0; i < frames; ++i) {
+        d.envelope = std::min(1.f, d.envelope + 1.f / kFadeFrames);
+        strip[i * 2] += outL[i] * d.envelope;
+        strip[i * 2 + 1] += outR[i] * d.envelope;
+    }
+    active = true;
+    frame += frames * rate;
+    if (d.loopActive.load(kRelaxed)) {
+        const double ls = (d.loopStart.load(kRelaxed) - start) * src, le = (d.loopEnd.load(kRelaxed) - start) * src;
+        // The stretcher already heard the wrap (folded window): only the playhead folds.
+        if (le > ls && frame >= le && frame - frames * rate < le) frame = ls + std::fmod(frame - ls, le - ls);
+    }
+    if (frame + 1 >= avail && t.complete.load(kAcquire)) {
+        d.playing.store(false); d.preview.store(false); d.previewSlot.store(-1); d.trackEnd.store(true);
+        d.stretching.store(false, kRelaxed);
+    }
+    d.position.store(start + frame / src, kRelease);
     return -1;
 }
 

@@ -126,6 +126,7 @@ class PlaybackService : Service() {
             .setContentIntent(open).setOngoing(true).addAction(Notification.Action.Builder(null, "Stop", stop).build()).build()
     }
 
+    private var ticks = 0
     private val monitor = object : Runnable {
         override fun run() {
             if (destroyed) return
@@ -139,6 +140,14 @@ class PlaybackService : Service() {
             if (foreground && state != null && state.appliedCommandId >= state.acceptedCommandId && state.decks.values.none { it.playing || it.previewing }) {
                 stopForeground(STOP_FOREGROUND_REMOVE); foreground = false; stopSelf()
                 audioManager.abandonAudioFocusRequest(focusRequest); hasFocus = false
+            }
+            // Every 10 s while playing: callback cost + deck modes, readable via `adb logcat -s manadj-bench`.
+            if (state != null && ++ticks % 20 == 0 && state.decks.values.any { it.playing || it.previewing }) {
+                val cost = try { engine?.renderCost() } catch (_: IllegalStateException) { null }
+                val decks = state.decks.filterValues { it.playing || it.previewing }.entries.joinToString(" ") { (id, d) ->
+                    "$id:${if (d.keyLockActive) "KL" else if (d.keyLock) "kl(wait)" else "rs"}${if (d.fromMemory) "/mem" else ""}"
+                }
+                if (cost != null) android.util.Log.i("manadj-bench", "callback max %.0f us mean %.0f us n=%d nearMiss=%d xruns=%d [%s]".format(cost.maxMicros, cost.meanMicros, cost.callbacks, cost.nearMisses, state.outputXruns, decks))
             }
             main.postDelayed(this, 500)
         }

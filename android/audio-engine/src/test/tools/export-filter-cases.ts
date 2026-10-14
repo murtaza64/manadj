@@ -2,6 +2,8 @@ import { sweepResponseDb } from '../../../../../frontend/src/playback/sweepFilte
 import { DEFAULT_FILTER_SETTINGS } from '../../../../../frontend/src/playback/filterSettings';
 const cases = [
   { name: 'default', s: { ...DEFAULT_FILTER_SETTINGS } },
+  // backend/shipped_defaults.json manadj-filter-settings (what the desktop actually runs with).
+  { name: 'shipped', s: { ...DEFAULT_FILTER_SETTINGS, resonance: 10.5, compensation: 0.1 } },
   { name: 'current', s: { ...DEFAULT_FILTER_SETTINGS, model: 'current', trim: -3 } },
   { name: 'res12', s: { ...DEFAULT_FILTER_SETTINGS, model: 'res12', resonance: 6, compensation: .5, curve: 1.5 } },
   { name: 'res48', s: { ...DEFAULT_FILTER_SETTINGS, model: 'res48', resonance: 12, lpMin: 100, hpMax: 8000, trim: 2 } },
