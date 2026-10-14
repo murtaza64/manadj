@@ -257,7 +257,10 @@ fun mixOf(model: PlayerModel, ux: UiModel, id: DeckId): DeckMix {
 @Composable private fun DeckSide(ui: DeckUi, model: PlayerModel, ux: UiModel, pick: (DeckId) -> Unit, modifier: Modifier) {
     Box(modifier) {
         Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-            DeckInfo(ui, model, Modifier.fillMaxWidth().height(38.dp).screenSafe(), compact = true)
+            // Mirrored toward the mixer (UH1): A right-aligned, B left-aligned.
+            CompositionLocalProvider(androidx.compose.ui.platform.LocalLayoutDirection provides if (ui.id == DeckId.A) androidx.compose.ui.unit.LayoutDirection.Rtl else androidx.compose.ui.unit.LayoutDirection.Ltr) {
+                DeckInfo(ui, model, Modifier.fillMaxWidth().height(38.dp).screenSafe(), compact = true)
+            }
             Minimap(ui, model, ux.waves[ui.source?.id ?: ""], Modifier.fillMaxWidth().height(40.dp).screenSafe(), preview = ux.seekPreview)
             Pads(ui, model, ux, Modifier.fillMaxWidth().weight(1f), 4, Dp.Unspecified, perCellSafe = true)
             StemsStrip(ui, ux, model, Modifier.fillMaxWidth().height(26.dp).screenSafe())

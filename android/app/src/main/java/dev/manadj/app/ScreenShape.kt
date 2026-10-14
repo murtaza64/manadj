@@ -3,7 +3,7 @@ package dev.manadj.app
 import android.os.Build
 import android.view.RoundedCorner
 import android.view.View
-import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.absolutePadding
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
@@ -71,5 +71,5 @@ fun Modifier.screenSafe(margin: Dp = 4.dp): Modifier = composed {
     var bounds by remember { mutableStateOf<Rect?>(null) }
     val (l, r) = bounds?.let { shape.keepOut(it, with(density) { margin.toPx() }) } ?: (0f to 0f)
     onGloballyPositioned { val p = it.positionInWindow(); val nb = Rect(p.x, p.y, p.x + it.size.width, p.y + it.size.height); if (nb != bounds) { android.util.Log.d("ScreenSafe", "bounds $bounds -> $nb"); bounds = nb } }
-        .padding(start = with(density) { l.toDp() }, end = with(density) { r.toDp() })
+        .absolutePadding(left = with(density) { l.toDp() }, right = with(density) { r.toDp() })
 }
