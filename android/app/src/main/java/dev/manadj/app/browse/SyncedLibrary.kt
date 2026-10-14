@@ -1,5 +1,7 @@
 package dev.manadj.app.browse
 
+import dev.manadj.app.toOpenKey
+
 import dev.manadj.library.AudioState
 import dev.manadj.library.FollowParams
 import dev.manadj.library.Library
@@ -12,7 +14,7 @@ class SyncedLibrary(val lib: Library, private val repo: LibraryRepository) : Lib
     private val rows by lazy {
         lib.tracks.map { t ->
             LibraryTrack(
-                t.id.toLong(), t.title, t.artist.orEmpty(), t.bpm, t.keyCamelot,
+                t.id.toLong(), t.title, t.artist.orEmpty(), t.bpm, t.keyOpenKey ?: toOpenKey(t.keyCamelot),
                 lib.tagsOf(t).map { TrackTag(it.name, it.categoryName, it.argb ?: 0xff7f849c.toInt()) },
                 t.dateAdded?.atZone(ZoneId.systemDefault())?.toLocalDate(), t.durationSecs, t.energy, null, null,
             )

@@ -35,6 +35,11 @@ import dev.manadj.audio.DeckId
     // Engine starts with quantize off; push the persisted preference once it can take it.
     val canQuantize = model.supports("quantize")
     LaunchedEffect(canQuantize) { if (canQuantize) model.setQuantize(ux.quantize) }
+    // Played-this-session: a library deck that starts playing.
+    for (id in model.visibleDecks) {
+        val playingTrack = if (model.decks.getValue(id).snapshot?.playing == true) dev.manadj.app.library.LibraryHolder.trackOn(model, id)?.toLong() else null
+        LaunchedEffect(playingTrack) { if (playingTrack != null && playingTrack !in ux.played) ux.played.add(playingTrack) }
+    }
     // Record what was heard (strip per source position) so the waveform behind the playhead keeps it.
     val anyPlaying = model.visibleDecks.any { model.decks.getValue(it).snapshot?.playing == true }
     LaunchedEffect(anyPlaying) {
