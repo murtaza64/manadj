@@ -28,7 +28,8 @@ class DeckUi(val id: DeckId) {
     /** Beat-jump size (desktop beatjump.ts: 1..128, default 32); a UI preference, not engine state. */
     var jumpBeats by mutableDoubleStateOf(32.0)
     val generation = AtomicLong()
-    var pendingLoadCommandId: Long? = null
+    /** Observable: `ready` derives from it, and it can clear on a tick whose snapshot is structurally unchanged. */
+    var pendingLoadCommandId by mutableStateOf<Long?>(null)
     val pendingControls = mutableMapOf<String, Long>()
     val durationSeconds get() = snapshot?.durationSeconds?.takeIf { snapshot?.sourceId == source?.id } ?: source?.durationSeconds
     val ready get() = pendingLoadCommandId == null && snapshot?.loadState == LoadState.READY && source?.id == snapshot?.sourceId
@@ -133,7 +134,9 @@ class PlayerModel(application: Application) : AndroidViewModel(application) {
 
     fun chooseDeck(id: DeckId) { if (releases.isEmpty()) selected = id else pendingSelection = id }
     fun chooseLayout(value: Layout) { if (releases.isEmpty()) layout = value else pendingLayout = value }
-    fun supports(capability: String) = output?.let { it.outputOpen && it.outputError == 0 && capability in it.supportedCapabilities } == true
+    /** Derived so readers recompose only when capabilities change, not on every 33 ms snapshot tick. */
+    private val capabilities by derivedStateOf { output?.takeIf { it.outputOpen && it.outputError == 0 }?.supportedCapabilities ?: emptySet() }
+    fun supports(capability: String) = capability in capabilities
     fun submit(command: AudioCommand): CommandReceipt {
         val receipt = service?.submit(command) ?: CommandReceipt(0, false, failure ?: "Audio output is starting")
         lastReceipt = receipt
