@@ -11,6 +11,8 @@ import java.util.concurrent.atomic.AtomicReferenceArray
 enum class DeckId { A, B, C, D }
 enum class LoadState { EMPTY, LOADING, READY, ERROR }
 enum class LoopChange { HALVE, DOUBLE, SET }
+/** Quantize mode (Heard: alignment gestures read at the heard instant, [EngineSnapshot.heardLatencySeconds] ago). Ordinals = native. */
+enum class QuantizeMode { OFF, GRID, HEARD }
 
 /** Active loop region in source seconds (desktop LoopRegion). */
 data class LoopRegion(val start: Double, val end: Double, val beats: Double)
@@ -174,6 +176,19 @@ sealed interface AudioCommand {
     data class SetSyncMembers(val members: Set<DeckId>, val synced: Set<DeckId>, override val gestureId: String? = null) : AudioCommand {
         override val deck = DeckId.A // Global.
     }
+    /**
+     * Quantize mode. HEARD (#382): launches (Play / Cue-hold / Hot-cue-hold against a playing reference)
+     * align to the reference's bar nearest what was heard, auto-loop engages at the heard beat, hot-cue SET
+     * while playing marks the heard position — all [SetHeardLatency] before the render position, then
+     * applied in engine time (aligned at the speaker). Beat jump / Sync are latency-neutral.
+     */
+    data class SetQuantizeMode(val mode: QuantizeMode, override val gestureId: String? = null) : AudioCommand {
+        override val deck = DeckId.A // Global.
+    }
+    /** Output latency L (render → speaker) for HEARD quantize, seconds (0..2). */
+    data class SetHeardLatency(val seconds: Double, override val gestureId: String? = null) : AudioCommand {
+        override val deck = DeckId.A // Global.
+    }
     /** Global quantize (snaps loop engage to the nearest beat). */
     data class SetQuantize(val on: Boolean, override val gestureId: String? = null) : AudioCommand {
         override val deck = DeckId.A
@@ -267,7 +282,21 @@ data class EngineSnapshot(
     val presentedFrame: Long? = null, val presentedNanos: Long? = null,
     /** Scheduled ops that arrived after their frame (applied at the next callback start); ops waiting for their frame. */
     val lateOps: Long = 0, val scheduledOps: Int = 0,
+    val quantizeMode: QuantizeMode = if (quantize) QuantizeMode.GRID else QuantizeMode.OFF, val heardLatencySeconds: Double = 0.0,
+    /** System.nanoTime when the snapshot was read (pairs with [clockFrame]). */
+    val snapshotNanos: Long = 0,
 ) {
+    /**
+     * Output latency as Android reports it (render position − the frame heard now, via the Oboe
+     * timestamp): the default for HEARD before calibration. Bluetooth stacks often under-report.
+     */
+    fun reportedLatencySeconds(): Double? {
+        val frame = presentedFrame ?: return null
+        val at = presentedNanos ?: return null
+        val heard = frame + (snapshotNanos - at) * outputSampleRate / 1e9
+        return ((clockFrame - heard) / outputSampleRate).takeIf { it.isFinite() && it >= 0 }
+    }
+
     /**
      * The deck position being heard at [nanoTime] (System.nanoTime), extrapolated from the output
      * timestamp: render position minus output latency, advanced at the deck's speed. Use this for
@@ -327,7 +356,8 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
         const val HOT_CUES = 8
         /** Pre-roll bound (desktop MAX_LEAD_IN_SECONDS): seeks/jumps may park the playhead this far before 0. */
         const val MAX_LEAD_IN_SECONDS = 30.0
-        val CAPABILITIES = setOf("play", "pause", "cue-gate", "hot-cue-gate", "hot-cue-set", "seek", "fader", "trim", "crossfade", "varispeed", "bend", "pfl", "cue-mix", "routing", "eq", "filter", "grid", "beat-jump", "loop", "quantize", "beat-fx", "filter-settings", "key-lock", "sync", "scratch", "loop-region", "schedule")
+        const val MAX_CLICKS = 32
+        val CAPABILITIES = setOf("play", "pause", "cue-gate", "hot-cue-gate", "hot-cue-set", "seek", "fader", "trim", "crossfade", "varispeed", "bend", "pfl", "cue-mix", "routing", "eq", "filter", "grid", "beat-jump", "loop", "quantize", "beat-fx", "filter-settings", "key-lock", "sync", "scratch", "loop-region", "schedule", "heard-quantize")
         private const val PRIME_FRAMES = 2048
         private const val MEMORY_RESERVE_BYTES = 768L shl 20
         private const val HEAD_PRIORITY_FRAMES = 16384 // ~340 ms buffered before a head fill may interrupt the ring
@@ -335,9 +365,9 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
         /** Main cue first (CUE stabs), then the loop start, then hot cues. */
         private val FILL_ORDER = listOf(MAIN_CUE, MAIN_CUE + 1) + (0 until HOT_CUES)
         private const val HEAD_FRAMES = 8192
-        private const val HEADER = 29
+        private const val HEADER = 31
         private const val DECK_FIELDS = 40 + HOT_CUES
-        private enum class Op { PREPARE, PLAY, PAUSE, CUE_DOWN, CUE_UP, HOT_CUE_DOWN, HOT_CUE_UP, HOT_CUE_SET, HOT_CUE_CLEAR, SEEK, FADER, TRIM, CROSSFADE, PITCH, BEND, PFL, CUE_MIX, EQ, FILTER, SET_GRID, BEAT_JUMP, LOOP_TOGGLE, LOOP_RESIZE, LOOP_PRESET, QUANTIZE, CUE_SET_AT, HOT_CUE_SET_AT, BEAT_FX, KEY_LOCK, PHASE_ALIGN, SCRATCH_BEGIN, SCRATCH_MOVE, SCRATCH_END, LOOP_SET, CANCEL_SCHEDULED, SET_SYNC_MEMBERS }
+        private enum class Op { PREPARE, PLAY, PAUSE, CUE_DOWN, CUE_UP, HOT_CUE_DOWN, HOT_CUE_UP, HOT_CUE_SET, HOT_CUE_CLEAR, SEEK, FADER, TRIM, CROSSFADE, PITCH, BEND, PFL, CUE_MIX, EQ, FILTER, SET_GRID, BEAT_JUMP, LOOP_TOGGLE, LOOP_RESIZE, LOOP_PRESET, QUANTIZE, CUE_SET_AT, HOT_CUE_SET_AT, BEAT_FX, KEY_LOCK, PHASE_ALIGN, SCRATCH_BEGIN, SCRATCH_MOVE, SCRATCH_END, LOOP_SET, CANCEL_SCHEDULED, SET_SYNC_MEMBERS, LAUNCH_START, HEARD_LATENCY, CLICKS }
     }
 
     /** The caller retains/closes descriptor; the engine duplicates it for its own lifetime. */
@@ -406,6 +436,8 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
             is AudioCommand.LoopPreset -> Op.LOOP_PRESET to command.beats
             is AudioCommand.LoopResize -> { slot = command.change.ordinal; Op.LOOP_RESIZE to command.beats }
             is AudioCommand.SetQuantize -> Op.QUANTIZE to if (command.on) 1.0 else 0.0
+            is AudioCommand.SetQuantizeMode -> Op.QUANTIZE to command.mode.ordinal.toDouble()
+            is AudioCommand.SetHeardLatency -> Op.HEARD_LATENCY to command.seconds
             is AudioCommand.SetKeyLock -> Op.KEY_LOCK to if (command.on) 1.0 else 0.0
             is AudioCommand.ScratchBegin -> Op.SCRATCH_BEGIN to 0.0
             is AudioCommand.ScratchMove -> Op.SCRATCH_MOVE to command.deltaSeconds
@@ -470,6 +502,20 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
     @Synchronized fun schedule(commands: List<ScheduledCommand>, tag: Long = 0): List<CommandReceipt> =
         commands.map { schedule(it.atFrame, it.command, tag) }
 
+    /**
+     * Latency calibration (#382): [count] chirps ([CalibrationClick]) on every output
+     * channel, the first ~0.1 s after the next callback, then every [intervalSeconds]. [clickNanos] reports
+     * each one's render instant (System.nanoTime domain; 0 = not yet rendered).
+     */
+    @Synchronized fun startCalibrationClicks(count: Int, intervalSeconds: Double): CommandReceipt {
+        if (closed) return rejected("Engine closed")
+        if (count !in 1..MAX_CLICKS || !(intervalSeconds >= .05)) return rejected("Invalid clicks")
+        val id = nativeSubmit(handle, Op.CLICKS.ordinal, 0, intervalSeconds, 0, count)
+        return if (id != 0L) CommandReceipt(id, true) else rejected("Command queue full")
+    }
+
+    @Synchronized fun clickNanos(): LongArray = if (closed) LongArray(0) else nativeClickNanos(handle)
+
     /** Drops every pending scheduled op tagged [tag] (ops scheduled after this call are kept). */
     @Synchronized fun cancelScheduled(tag: Long): CommandReceipt {
         if (closed) return rejected("Engine closed")
@@ -522,6 +568,7 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
     @Synchronized fun snapshot(): EngineSnapshot {
         check(!closed) { "Engine closed" }
         val data = nativeSnapshot(handle)
+        val nanos = System.nanoTime()
         val decks = DeckId.entries.associateWith { deck ->
             val i = deck.ordinal
             val p = HEADER + i * DECK_FIELDS
@@ -568,6 +615,7 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
             acceptedCommandId = data[7].toLong(), appliedCommandId = data[8].toLong(),
             decks = decks, supportedCapabilities = CAPABILITIES,
             clockFrame = data[23].toLong(), lateOps = data[27].toLong(), scheduledOps = data[28].toInt(),
+            quantizeMode = QuantizeMode.entries[data[29].toInt().coerceIn(0, 2)], heardLatencySeconds = data[30], snapshotNanos = nanos,
             presentedFrame = data[24].takeIf { it >= 0 }?.toLong(), presentedNanos = data[25].takeIf { it >= 0 }?.toLong(),
             beatFx = BeatFxState(
                 effect = BeatFxEffect.entries.getOrNull(data[16].toInt()), target = BeatFxTarget.entries[data[17].toInt().coerceIn(0, 4)],
@@ -800,6 +848,7 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
     private external fun nativeClose(handle: Long)
     private external fun nativeSubmit(handle: Long, op: Int, deck: Int, value: Double, load: Long, slot: Int): Long
     private external fun nativeSetSchedule(frame: Long, tag: Long)
+    private external fun nativeClickNanos(handle: Long): LongArray
     private external fun nativeCancelScheduled(handle: Long, tag: Long): Long
     private external fun nativeSetGrid(handle: Long, deck: Int, bpm: Double, anchor: Double): Long
     private external fun nativeSubmitBeatFx(handle: Long, effect: Int, target: Int, on: Boolean, depth: Double, beats: Double, held: Int): Long

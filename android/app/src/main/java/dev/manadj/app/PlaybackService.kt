@@ -74,6 +74,15 @@ class PlaybackService : Service() {
 
     fun filterResponseDb(settings: FilterSettings, position: Double, frequencies: DoubleArray): DoubleArray? =
         if (destroyed) null else try { engine?.filterResponseDb(settings, position, frequencies) } catch (_: IllegalStateException) { null }
+    /** Mic-loopback output latency (#382) off the main thread; result via [onDone] on main. */
+    fun calibrateLatency(onDone: (LatencyCalibrator.Result) -> Unit) {
+        Thread({
+            val audio = engine
+            val result = if (destroyed || audio == null) LatencyCalibrator.Result(null, emptyList(), 0.0, "Audio engine not running")
+                else try { LatencyCalibrator(this).measure(audio) } catch (e: Exception) { LatencyCalibrator.Result(null, emptyList(), 0.0, e.message ?: "Calibration failed") }
+            main.post { onDone(result) }
+        }, "manadj-latency-calibration").start()
+    }
     fun outputInfo(): OutputInfo? = if (destroyed) null else try { engine?.outputInfo() } catch (_: IllegalStateException) { null }
 
     fun source(id: String?): LocalSource? = sourceMetadata[id]

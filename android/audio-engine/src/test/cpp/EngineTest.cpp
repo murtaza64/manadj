@@ -25,6 +25,16 @@ void feed(Engine& e, int deck, uint64_t load, float value, int frames, bool eof 
     CHECK(e.publish(deck, load, transport, eof));
 }
 
+// feed() whose decoder claims a (frame-quantized) start of its own.
+void feedFrom(Engine& e, int deck, uint64_t load, double start) {
+    auto& d = e.deck(deck);
+    const auto transport = d.transport.load();
+    CHECK(e.claim(deck, load, transport, 48000, start));
+    std::vector<float> pcm(4096 * 2, .1f);
+    CHECK(e.offer(deck, transport, pcm.data(), 4096) == 4096);
+    CHECK(e.publish(deck, load, transport, false));
+}
+
 // Same as feed() with a sine (amplitude .25) for strip DSP tests.
 void feedTone(Engine& e, int deck, uint64_t load, double hz, int frames = 48000) {
     auto& d = e.deck(deck);
@@ -894,6 +904,20 @@ int main() {
         CHECK(std::abs(out[332 * 2]) < 1e-6 && std::abs(out[333 * 2]) > 0);   // silent until exactly frame 333
         CHECK(std::abs(e.deck(0).position.load() - 667 / 48000.) < 1e-9);
         CHECK(e.lateOps() == 0);
+        // #378: a parked in-memory relocation keeps its exact position when the ring worker later claims the
+        // transport with a frame-quantized start (it used to overwrite the position while paused), and
+        // LoopSet relocates even for sub-0.1 ms moves.
+        e.submit(Op::Pause, 0);
+        const double exact[5] = {0, 1.23456789, 0, 0, 0};
+        e.submit(Op::LoopSet, 0, -1, 0, 0, exact);
+        tick(e, 10);
+        feedFrom(e, 0, 1, 1.2345);
+        tick(e, 100);
+        CHECK(e.deck(0).position.load() == 1.23456789);
+        const double nudge[5] = {0, 1.23456789 + 2e-5, 0, 0, 0};
+        e.submit(Op::LoopSet, 0, -1, 0, 0, nudge);
+        tick(e, 10);
+        CHECK(e.deck(0).position.load() == 1.23456789 + 2e-5);
     }
 
     { // Replay exactness: 4 decks, random frame-stamped seeks/jumps/pitch/play/pause/loops; every deck's
@@ -1258,6 +1282,72 @@ int main() {
         tick(e, 2400);
         CHECK(out[2399 * 2] != 0);
         CHECK(std::abs(e.deck(0).position.load() - .05) < 2 / 48000.);
+    }
+
+    { // Heard quantize (L = 350 ms): a launch on the heard downbeat lands its bar on the reference's bar at the
+      // speaker (engine time = speaker time minus the shared L); Grid picks the render position's nearest beat.
+        auto make = [](int mode) {
+            auto owned = std::make_unique<Engine>(48000);
+            Engine& e = *owned;
+            std::vector<float> pcm(48000 * 40 * 2, .2f);
+            for (int d = 0; d < 2; ++d) { loadPcm(e, d, d + 1, std::vector<float>(pcm.begin(), pcm.begin() + 48000 * 2)); fillTrack(e, d, d + 1, pcm); }
+            grid120(e, 0);
+            grid120(e, 1);
+            e.submit(Op::Quantize, 0, mode);
+            e.submit(Op::HeardLatency, 0, .35);
+            e.submit(Op::Seek, 0, 10.37);                // heard: 10.02 — just after the bar line at 10.0
+            e.submit(Op::Seek, 1, 8.0);                  // B cued on its bar
+            tick(e, 16);
+            e.submit(Op::Play, 0);
+            return owned;
+        };
+        {
+            auto o = make(2); Engine& e = *o;
+            CHECK(e.heard() && e.heardLatency() == .35);
+            e.submit(Op::Play, 1);
+            tick(e, 4800);
+            const double a = e.deck(0).position.load(), b = e.deck(1).position.load();
+            CHECK(std::abs((b - 8.0) - (a - 10.0)) < 1 / 48000.);   // bars coincide (engine = speaker - L)
+        }
+        {
+            auto o = make(1); Engine& e = *o;                         // Grid: nearest beat to 10.37 is 10.5
+            e.submit(Op::Play, 1);
+            tick(e, 48000);
+            const double a = e.deck(0).position.load(), b = e.deck(1).position.load();
+            CHECK(std::abs((b - 8.0) - (a - 10.5)) < 1 / 48000.);
+        }
+        { // Heard auto-loop engages at the heard beat; a region already passed wraps the playhead in.
+            auto o = make(2); Engine& e = *o;
+            e.submit(Op::LoopPreset, 0, .5);              // heard 10.02 → loop [10.0, 10.25); render 10.37 wraps
+            tick(e, 1);
+            CHECK(e.deck(0).loopStart.load() == 10.0 && e.deck(0).loopEnd.load() == 10.25);
+            CHECK(std::abs(e.deck(0).position.load() - (10.0 + std::fmod(.37, .25) + 1 / 48000.)) < 1e-9);
+            e.submit(Op::HotCueSet, 0, 0, 0, 1);          // set while playing: at the heard position, snapped
+            tick(e, 1);
+            CHECK(e.deck(0).hotcues[1].load() == 10.0);   // heard ≈ 9.77 → nearest beat 10.0 (render 10.12 would snap 10.0 too;
+            e.submit(Op::Quantize, 0, 1);                 //  Grid at render 10.37+ → 10.5)
+            e.submit(Op::LoopToggle, 0);
+            e.submit(Op::Seek, 0, 10.37);
+            e.submit(Op::HotCueSet, 0, 0, 0, 2);
+            tick(e, 1);
+            CHECK(e.deck(0).hotcues[2].load() == 10.5);
+        }
+    }
+
+    { // Calibration clicks: chirps on every channel at 0.1 s + k x interval; render instants recorded.
+        auto owned = std::make_unique<Engine>(48000);
+        Engine& e = *owned;
+        tick(e, 100);
+        e.submit(Op::Clicks, 0, .25, 0, 3);
+        e.setCallbackNanos(1'000'000'000);
+        std::vector<float> left = capture(e, 48000);   // capture renders 4096-frame callbacks; nanos are per-callback
+        for (int k = 0; k < 3; ++k) {
+            const int at = 4800 + k * 12000;
+            CHECK(left[at - 1] == 0 && std::abs(left[at + 96] - static_cast<float>(Engine::clickSample(96 / 48000.))) < 1e-6);
+            CHECK(e.clickNanos(k) != 0);
+        }
+        CHECK(e.clickNanos(3) == 0);
+        CHECK(e.clickNanos(0) == 1'000'000'000 + static_cast<int64_t>(4800 % 4096 * 1e9 / 48000));
     }
 
     { // Beat FX ECHO on A: beat-synced repeats at beats x beatSeconds, feedback .5, tails ring after OFF.

@@ -111,7 +111,7 @@ class PlayerModel(application: Application) : AndroidViewModel(application) {
     private var filterSettingsUnsent = false
     private val connection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, binder: IBinder?) { service = (binder as PlaybackService.LocalBinder).service }
-        override fun onServiceDisconnected(name: ComponentName?) { service = null; output = null; sentSyncMembers = null; failure = "Audio service disconnected" }
+        override fun onServiceDisconnected(name: ComponentName?) { service = null; output = null; sentSyncMembers = null; routeFollowed = false; failure = "Audio service disconnected" }
     }
 
     init {
@@ -131,6 +131,7 @@ class PlayerModel(application: Application) : AndroidViewModel(application) {
                     if (pendingCueMix == null || state.appliedCommandId >= pendingCueMix!!) { cueMix = state.cueMix; pendingCueMix = null }
                     if (pendingBeatFx == null || state.appliedCommandId >= pendingBeatFx!!) { beatFx = state.beatFx; pendingBeatFx = null }
                     quantizeOn = state.quantize
+                    if (tick % 30 == 1) followRoute(outputInfo, state)
                     sync.update(state.decks.mapValues { SyncDeck.of(it.value) }); publishSync()
                     if (filterSettingsUnsent && audio?.submit(AudioCommand.SetFilterSettings(filterSettings))?.accepted == true) filterSettingsUnsent = false
                     state.decks.forEach { (id, snapshot) ->
@@ -284,6 +285,64 @@ class PlayerModel(application: Application) : AndroidViewModel(application) {
     fun toggleLoop(deck: DeckId) = submit(AudioCommand.LoopToggle(deck))
     fun resizeLoop(deck: DeckId, change: LoopChange) = submit(AudioCommand.LoopResize(deck, change))
     fun setQuantize(on: Boolean) = submit(AudioCommand.SetQuantize(on)).also { if (it.accepted) quantizeOn = on }
+    /** OFF / GRID / HEARD (#382); [EngineSnapshot.quantizeMode] reports it. HEARD uses [heardLatency]. */
+    fun setQuantizeMode(mode: QuantizeMode) = submit(AudioCommand.SetQuantizeMode(mode)).also { if (it.accepted) quantizeOn = mode != QuantizeMode.OFF }
+    /**
+     * Output latency L of the current route (seconds) for HEARD quantize and the visual offset: the route's
+     * remembered value, else Android's reported latency. [heardLatencyCalibrated] = remembered.
+     */
+    var heardLatency by mutableDoubleStateOf(0.0)
+        private set
+    var heardLatencyCalibrated by mutableStateOf(false)
+        private set
+    /** Product name of the route [heardLatency] belongs to. */
+    var heardRoute by mutableStateOf<String?>(null)
+        private set
+    private val routeLatency = RouteLatency(application)
+    private var routeKey: String? = null
+    private var routeFollowed = false
+    /** Sets (and remembers for this route) L; null forgets the route's value (back to the reported latency). */
+    fun setHeardLatency(seconds: Double?) {
+        val key = routeKey
+        if (seconds == null) { key?.let(routeLatency::clear); heardLatencyCalibrated = false; output?.reportedLatencySeconds()?.let(::sendHeardLatency); return }
+        if (!seconds.isFinite()) return
+        key?.let { routeLatency[it] = seconds }
+        heardLatencyCalibrated = key != null
+        sendHeardLatency(seconds)
+    }
+    /** Mic-loopback calibration in progress; last result (null seconds = failed, see reason). */
+    var calibrating by mutableStateOf(false)
+        private set
+    var lastCalibration by mutableStateOf<LatencyCalibrator.Result?>(null)
+        private set
+    /**
+     * Plays ~6 chirps and measures their arrival at the mic (needs RECORD_AUDIO granted; the UI asks).
+     * Success remembers the result as this route's L.
+     */
+    fun calibrateLatency() {
+        val audio = service ?: return
+        if (calibrating) return
+        calibrating = true
+        audio.calibrateLatency { result ->
+            calibrating = false
+            lastCalibration = result
+            result.seconds?.let(::setHeardLatency)
+        }
+    }
+    private fun sendHeardLatency(seconds: Double) {
+        if (service?.submit(AudioCommand.SetHeardLatency(seconds.coerceIn(0.0, 2.0)))?.accepted == true) heardLatency = seconds.coerceIn(0.0, 2.0)
+    }
+    /** Re-reads L when the stream's actual output device changes. */
+    private fun followRoute(info: OutputInfo?, state: EngineSnapshot) {
+        val key = info?.deviceId?.let(routeLatency::key)
+        if (routeFollowed && key == routeKey) return
+        routeFollowed = true
+        routeKey = key
+        heardRoute = info?.deviceId?.let(routeLatency::label)
+        val remembered = key?.let { routeLatency[it] }
+        heardLatencyCalibrated = remembered != null
+        (remembered ?: state.reportedLatencySeconds())?.let(::sendHeardLatency)
+    }
     /** Key lock per deck; DeckSnapshot.keyLock / keyLockActive report it. */
     fun setKeyLock(deck: DeckId, on: Boolean) = submit(AudioCommand.SetKeyLock(deck, on))
     /** Waveform touch scratch: begin on touch-down, move by signed track seconds per drag event, end on release. */

@@ -385,6 +385,9 @@ void Engine::relocate(Deck& d, double seconds, int slot, double overshootFrames)
         d.fractional = 0;
         d.envelope = 0;
         d.transport.store(d.transport.load(kRelaxed) + 1, kRelease);
+        // The exact position stands: the ring's claimed (frame-quantized) start must not replace it, even
+        // while paused (renderTrack, which also guards this, only runs when sounding).
+        d.positionTransport = d.transport.load(kRelaxed);
         return;
     }
     int offset = 0;
@@ -443,7 +446,15 @@ void Engine::launch(int index, double at, int slot) noexcept {
     const double refPosition = r.position.load(kRelaxed);
     const double refRate = (1 + r.pitch.load(kRelaxed) / 100.) * (1 + r.bend.load(kRelaxed) / 100.);
     const double rate = (1 + d.pitch.load(kRelaxed) / 100.) * (1 + d.bend.load(kRelaxed) / 100.);
-    const double delta = (snapToBeat(r, refPosition) - refPosition) / refRate;
+    // Grid: the reference's nearest beat to its render position. Heard: the nearest bar to what the DJ heard
+    // (L before the render position); the launch then lands in engine time, already aligned at the speaker.
+    double target = snapToBeat(r, refPosition);
+    if (heard_.load(kRelaxed)) {
+        const double bar = 4 * 60 / r.bpm.load(kRelaxed), anchor = r.gridAnchor.load(kRelaxed);
+        const double heardAt = refPosition - heardLatency_.load(kRelaxed) * refRate;
+        target = anchor + std::round((heardAt - anchor) / bar) * bar;
+    }
+    const double delta = (target - refPosition) / refRate;
     if (!(delta > 0)) {
         const double entry = at - delta * rate;
         if (entry != at) relocate(d, entry);
@@ -461,6 +472,33 @@ void Engine::launch(int index, double at, int slot) noexcept {
     start.deck = index;
     start.at = frame;
     enqueueScheduled(start);
+}
+
+double Engine::clickSample(double t) noexcept {
+    if (t < 0 || t >= kClickSeconds) return 0;
+    constexpr double f0 = 500, f1 = 8000, pi = 3.14159265358979;
+    const double window = .5 - .5 * std::cos(2 * pi * t / kClickSeconds);
+    return .5 * window * std::sin(2 * pi * (f0 * t + (f1 - f0) * t * t / (2 * kClickSeconds)));
+}
+
+// Calibration clicks over the finished output (after the ceiling: the clicks are the loudest thing).
+void Engine::renderClicks(float* output, int frames, int channels, uint64_t start) noexcept {
+    const double rate = outputRate_.load(kRelaxed);
+    const auto length = static_cast<uint64_t>(kClickSeconds * rate);
+    for (int i = 0; i < frames && clicksLeft_ > 0; ++i) {
+        const uint64_t f = start + static_cast<uint64_t>(i);
+        if (f < clickNext_) continue;
+        if (f == clickNext_ && clickIndex_ < kMaxClicks) clickNanos_[clickIndex_].store(callbackNanos_ + static_cast<int64_t>(i * 1e9 / rate));
+        const float v = static_cast<float>(clickSample((f - clickNext_) / rate));
+        for (int ch = 0; ch < channels; ++ch) output[i * channels + ch] = std::clamp(output[i * channels + ch] + v, -1.f, 1.f);
+        if (f + 1 >= clickNext_ + length) { --clicksLeft_; ++clickIndex_; clickNext_ += clickInterval_; }
+    }
+}
+
+// Deck seconds between the render position and what is heard at the speaker (Heard mode; else 0).
+double Engine::heardLead(const Deck& d) const noexcept {
+    if (!heard_.load(kRelaxed)) return 0;
+    return heardLatency_.load(kRelaxed) * (1 + d.pitch.load(kRelaxed) / 100.) * (1 + d.bend.load(kRelaxed) / 100.);
 }
 
 void Engine::stop(Deck& d) noexcept {
@@ -535,7 +573,12 @@ void Engine::apply(const Command& c) noexcept {
             if (d.playing.load()) { d.preview.store(false); d.previewSlot.store(-1); }
             else { stop(d); relocate(d, d.hotcues[c.slot].load(), c.slot); }
             break;
-        case Op::HotCueSet: if (isReady) d.hotcues[c.slot].store(std::max(0.0, quantize_.load() ? snapToBeat(d, position) : position)); break;
+        case Op::HotCueSet: {
+            if (!isReady) break;
+            const double heardAt = position - (d.playing.load() ? heardLead(d) : 0); // Heard: what the DJ heard
+            d.hotcues[c.slot].store(std::max(0.0, quantize_.load() ? snapToBeat(d, heardAt) : heardAt));
+            break;
+        }
         case Op::HotCueClear: d.hotcues[c.slot].store(-1); break;
         case Op::Seek: if (isReady) { d.loopActive.store(false); relocate(d, c.value); } break;
         case Op::SetGrid:
@@ -572,12 +615,16 @@ void Engine::apply(const Command& c) noexcept {
             const double bpm = d.bpm.load();
             if (!isReady || bpm <= 0) break;
             const double beat = 60 / bpm, anchor = d.gridAnchor.load();
-            const double start = quantize_.load() ? anchor + std::round((position - anchor) / beat) * beat : position;
+            // Heard: engaged at the heard playhead (L ago); a region already passed wraps the playhead in now.
+            const double heardAt = position - (d.playing.load() ? heardLead(d) : 0);
+            const double start = std::max(0.0, quantize_.load() ? anchor + std::round((heardAt - anchor) / beat) * beat : heardAt);
             const double beats = d.pendingLoopBeats.load();
-            d.loopStart.store(std::max(0.0, start));
-            d.loopEnd.store(std::max(0.0, start) + beats * beat);
+            d.loopStart.store(start);
+            d.loopEnd.store(start + beats * beat);
             d.loopBeats.store(beats);
             d.loopActive.store(true);
+            // (Grid, desktop: the playhead never moves on engage.)
+            if (heardAt != position && position >= start + beats * beat) relocate(d, start + std::fmod(position - start, beats * beat));
             break;
         }
         case Op::LoopResize: {
@@ -587,7 +634,15 @@ void Engine::apply(const Command& c) noexcept {
             else applyLoopResize(d, beats);
             break;
         }
-        case Op::Quantize: quantize_.store(c.value != 0); break;
+        case Op::Quantize: quantize_.store(c.value != 0); heard_.store(c.value == 2); break;
+        case Op::HeardLatency: heardLatency_.store(std::clamp(c.value, 0.0, 2.0)); break;
+        case Op::Clicks:
+            for (auto& n : clickNanos_) n.store(0);
+            clicksLeft_ = std::clamp(c.slot, 0, kMaxClicks);
+            clickIndex_ = 0;
+            clickInterval_ = static_cast<uint64_t>(std::max(.05, c.value) * outputRate_.load(kRelaxed));
+            clickNext_ = static_cast<uint64_t>(renderFrame_) + outputRate_.load(kRelaxed) / 10;
+            break;
         // Stored cues from a library (applied after Prepare, which resets them).
         // Like the desktop load path, a stopped deck parks at the stored main cue.
         case Op::CueSetAt:
@@ -706,7 +761,7 @@ void Engine::apply(const Command& c) noexcept {
                 d.loopBeats.store(bpm > 0 ? (c.aux[0] - c.value) * bpm / 60 : 0);
                 d.loopActive.store(true);
             }
-            if (std::isfinite(c.aux[1]) && std::abs(c.aux[1] - position) > 1e-4) relocate(d, std::max(0.0, c.aux[1]));
+            if (std::isfinite(c.aux[1]) && c.aux[1] != position) relocate(d, std::max(0.0, c.aux[1]));
             break;
         }
         case Op::CancelScheduled: cancelScheduledNow(c); break;
@@ -831,6 +886,7 @@ void Engine::render(float* output, int frames, int channels) noexcept {
         }
         done += n;
     }
+    if (clicksLeft_ > 0) renderClicks(output, frames, channels, start);
     outputFrames_.fetch_add(frames, kRelease);
 }
 

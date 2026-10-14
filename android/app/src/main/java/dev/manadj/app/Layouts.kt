@@ -22,6 +22,7 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import dev.manadj.audio.DeckId
+import dev.manadj.audio.QuantizeMode
 
 /** Device orientation picks the layout: portrait one-screen, landscape dense. No manual view switch. */
 @Composable fun PerformanceApp(model: PlayerModel, ux: UiModel, pick: (DeckId) -> Unit) {
@@ -36,7 +37,7 @@ import dev.manadj.audio.DeckId
     LaunchedEffect(canKeyLock) { if (canKeyLock) for (d in model.visibleDecks) if (model.decks.getValue(d).snapshot?.keyLock != true) model.setKeyLock(d, true) }
     // Engine starts with quantize off; push the persisted preference once it can take it.
     val canQuantize = model.supports("quantize")
-    LaunchedEffect(canQuantize) { if (canQuantize) model.setQuantize(ux.quantize) }
+    LaunchedEffect(canQuantize) { if (canQuantize) ux.setQuantize(model) }
     // Played-this-session: a library deck that starts playing.
     for (id in model.visibleDecks) {
         val playingTrack = if (model.decks.getValue(id).snapshot?.playing == true) dev.manadj.app.library.LibraryHolder.trackOn(model, id)?.toLong() else null
@@ -84,7 +85,15 @@ import dev.manadj.audio.DeckId
     val clock = remember(ui.id) { SmoothClock() }
     // Engine output-timestamp clock (what is heard now), eased by SmoothClock; raw snapshot when no timestamp.
     // Only read model.output while moving: it changes every engine tick and would redraw idle waves at 30 fps.
-    fun heard(now: Long): Double { ux.seekPreview[ui.id]?.let { return it }; if (now == 0L) return position(ui); val out = model.output; return if (out != null && ui.source?.id == ui.snapshot?.sourceId) out.audibleSeconds(ui.id, now) else position(ui) }
+    // HEARD quantize (#382): draw at the calibrated heard position — audibleSeconds already backs off Android's
+    // reported latency; shift by the remainder (calibrated − reported) at the deck's speed.
+    fun heard(now: Long): Double {
+        ux.seekPreview[ui.id]?.let { return it }; if (now == 0L) return position(ui)
+        val out = model.output ?: return position(ui)
+        if (ui.source?.id != ui.snapshot?.sourceId) return position(ui)
+        val extra = if (out.quantizeMode == QuantizeMode.HEARD) out.heardLatencySeconds - (out.reportedLatencySeconds() ?: 0.0) else 0.0
+        return out.audibleSeconds(ui.id, now) - if (moving) extra * playbackRate(ui) else 0.0
+    }
     WaveView(wave, { clock.at(frame.value, heard(frame.value), moving && frame.value != 0L, playbackRate(ui)) }, ui.durationSeconds, marksOf(ui), modifier.semantics { contentDescription = "${ui.id} detail wave" }.waveTouch(ui, model, ux, vertical),
         vertical = vertical, windowSeconds = ux.waveSeconds * tempoRate(ui), live = { ux.strip(ui) }, history = e.history, accent = deckColor(ui.id),
         status = when { ui.source == null -> "${ui.id} · no track"; wave == null -> if (ux.waveSource[ui.source?.id] == "failed") "no waveform" else "analysing…"; !wave.complete -> "analysing ${(100 * wave.frames * wave.bandHop / wave.sampleRate / (ui.durationSeconds ?: 1.0)).toInt().coerceIn(0, 99)}%"; else -> null })
@@ -103,11 +112,12 @@ import dev.manadj.audio.DeckId
 
 /** Portrait centre: app-level toggles in one floating group (#58) — QUANTIZE, crossfader enable, SETTINGS. */
 @Composable private fun GlobalControls(model: PlayerModel, ux: UiModel, modifier: Modifier) {
-    val q by remember { derivedStateOf { model.output?.quantize ?: ux.quantize } }
+    val mode by remember { derivedStateOf { model.output?.quantizeMode ?: ux.quantizeMode } }
+    val q = mode != QuantizeMode.OFF
     // One row of compact keys; the group centres in whatever height the mixer leaves.
     Box(modifier, contentAlignment = Alignment.Center) {
         Row(Modifier.fillMaxWidth().height(40.dp).clip(androidx.compose.foundation.shape.RoundedCornerShape(10.dp)).border(1.dp, Ink.surface, androidx.compose.foundation.shape.RoundedCornerShape(10.dp)).padding(3.dp), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-            Key("QUANT", Modifier.weight(1.2f).fillMaxHeight(), Ink.accent, model.supports("quantize"), q, if (q) "Quantize on" else "Quantize off", style = KeyStyle.PILL, textSize = 10) { ux.quantize = !q; model.setQuantize(!q) }
+            Key(if (mode == QuantizeMode.HEARD) "QUANT·H" else "QUANT", Modifier.weight(1.2f).fillMaxHeight(), Ink.accent, model.supports("quantize"), q, if (q) "Quantize on" else "Quantize off", style = KeyStyle.PILL, textSize = 10, longPress = { ux.setQuantize(model, on = true, heard = !ux.quantizeHeard) }) { ux.setQuantize(model, on = !q) }
             Key("XF", Modifier.weight(.8f).fillMaxHeight(), Ink.accent, engaged = ux.crossfaderEnabled, description = "Crossfader enable", style = KeyStyle.PILL, textSize = 10) {
                 ux.crossfaderEnabled = !ux.crossfaderEnabled
                 if (!ux.crossfaderEnabled) model.updateCrossfade(.5)
@@ -117,10 +127,11 @@ import dev.manadj.audio.DeckId
     }
 }
 
-/** Quantize quick toggle + indicator (Settings has the same switch). */
+/** Quantize quick toggle + indicator (Settings has the same switch); long-press flips GRID / HEARD ("Q·H"). */
 @Composable private fun QuantizeKey(model: PlayerModel, ux: UiModel, modifier: Modifier) {
-    val on by remember { derivedStateOf { model.output?.quantize ?: ux.quantize } }
-    Key("Q", modifier, Ink.accent, model.supports("quantize"), on, if (on) "Quantize on" else "Quantize off", style = KeyStyle.PILL, textSize = 12) { ux.quantize = !on; model.setQuantize(!on) }
+    val mode by remember { derivedStateOf { model.output?.quantizeMode ?: ux.quantizeMode } }
+    val on = mode != QuantizeMode.OFF
+    Key(if (mode == QuantizeMode.HEARD) "Q·H" else "Q", modifier, Ink.accent, model.supports("quantize"), on, if (on) "Quantize on" else "Quantize off", style = KeyStyle.PILL, textSize = 12, longPress = { ux.setQuantize(model, on = true, heard = !ux.quantizeHeard) }) { ux.setQuantize(model, on = !on) }
 }
 
 /**

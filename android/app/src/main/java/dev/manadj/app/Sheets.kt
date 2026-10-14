@@ -13,6 +13,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import dev.manadj.audio.DeckId
+import dev.manadj.audio.QuantizeMode
 
 /** Floating card chrome shared by popups: rounded, glowing edge in [color], swallows touches. */
 @Composable fun Card(color: Color, modifier: Modifier, content: @Composable ColumnScope.() -> Unit) {
@@ -107,8 +108,10 @@ import dev.manadj.audio.DeckId
                     }
                 }
             }
-            val quantize = model.output?.quantize ?: ux.quantize
-            Toggle("Quantize", "Snap cues, loops and jumps to the beat grid.", quantize, !model.supports("quantize")) { ux.quantize = !quantize; if (model.supports("quantize")) model.setQuantize(!quantize) }
+            val mode = model.output?.quantizeMode ?: ux.quantizeMode
+            Toggle("Quantize", "Snap cues, loops and jumps to the beat grid.", mode != QuantizeMode.OFF, !model.supports("quantize")) { ux.setQuantize(model, on = mode == QuantizeMode.OFF) }
+            Toggle("Heard quantize", "Align to the beat you hear (output latency below), not the one being rendered. Long-press Q.", ux.quantizeHeard) { ux.setQuantize(model, heard = !ux.quantizeHeard) }
+            if (ux.quantizeHeard) HeardLatency(model)
             Toggle("Crossfader", "Off hides the crossfader (both decks play through).", ux.crossfaderEnabled) {
                 ux.crossfaderEnabled = !ux.crossfaderEnabled
                 if (!ux.crossfaderEnabled) model.updateCrossfade(.5)
@@ -252,5 +255,78 @@ fun visibleOther(id: DeckId) = if (id == DeckId.A) DeckId.B else DeckId.A
         }
         if (plan != null && !plan.fits) Text("Not enough space: needs ${dev.manadj.library.formatBytes(plan.remainingBytes)}, ${dev.manadj.library.formatBytes(plan.freeBytes)} free", color = Ink.warning, size = 10)
         if (bulk.finished && bulk.playlistId == playlistId && bulk.failed > 0) Text("${bulk.failed} tracks could not be downloaded", color = Ink.warning, size = 10)
+    }
+}
+
+/**
+ * Output latency L for HEARD quantize (#382), per route: Android-reported until calibrated. Nudge by ms,
+ * mic-loopback CALIBRATE (6 chirps), or TAP along to a playing gridded deck; FORGET returns to reported.
+ */
+@Composable fun HeardLatency(model: PlayerModel) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val mic = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) { if (it) model.calibrateLatency() }
+    val ms = model.heardLatency * 1000
+    // Beats at the playing deck's tempo: how far off a quantized launch would land uncorrected.
+    val deck = model.visibleDecks.map { model.decks.getValue(it) }.firstOrNull { it.snapshot?.playing == true && it.snapshot?.bpm != null }
+    val beats = deck?.snapshot?.bpm?.let { model.heardLatency * it * tempoRate(deck) / 60 }
+    Column(Modifier.fillMaxWidth().border(1.dp, Ink.surface, RoundedCornerShape(8.dp)).padding(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("OUTPUT LATENCY", Modifier.weight(1f), Ink.muted, 10, true)
+            Text(model.heardRoute ?: "this output", color = Ink.muted, size = 10)
+        }
+        Row(verticalAlignment = Alignment.Bottom) {
+            Text("%.0f ms".format(ms), color = Ink.text, size = 22, bold = true)
+            Spacer(Modifier.width(8.dp))
+            Text((if (model.heardLatencyCalibrated) "calibrated" else "Android-reported") + (beats?.let { " · %.2f beats".format(it) } ?: ""), Modifier.padding(bottom = 3.dp), if (model.heardLatencyCalibrated) Ink.play else Ink.muted, 11)
+        }
+        Row(Modifier.fillMaxWidth().height(36.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            for (step in listOf(-10, -1, 1, 10)) Key((if (step > 0) "+" else "−") + "${kotlin.math.abs(step)}", Modifier.weight(1f).fillMaxHeight(), Ink.accent, description = "Latency ${step} ms", textSize = 11, style = KeyStyle.PILL) {
+                model.setHeardLatency((model.heardLatency + step / 1000.0).coerceIn(0.0, 2.0))
+            }
+            Key("FORGET", Modifier.weight(1.4f).fillMaxHeight(), Ink.warning, model.heardLatencyCalibrated, textSize = 10, style = KeyStyle.PILL) { model.setHeardLatency(null) }
+        }
+        Row(Modifier.fillMaxWidth().height(40.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            Key(if (model.calibrating) "LISTENING…" else "CALIBRATE", Modifier.weight(1f).fillMaxHeight(), Ink.play, !model.calibrating, engaged = model.calibrating, description = "Calibrate latency with the microphone", textSize = 11, style = KeyStyle.PILL) {
+                if (context.checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) model.calibrateLatency()
+                else mic.launch(android.Manifest.permission.RECORD_AUDIO)
+            }
+            TapAlong(model, deck, Modifier.weight(1f).fillMaxHeight())
+        }
+        val last = model.lastCalibration
+        Text(when {
+            model.calibrating -> "Volume up, quiet room: 6 chirps at full level (~7 s)."
+            last?.seconds != null -> "Measured %.0f ms (spread %.1f ms, %d chirps).".format(last.seconds!! * 1000, last.spreadMillis, last.samples.size)
+            last != null -> "Calibration failed: ${last.reason ?: "no clear chirps"}."
+            deck == null -> "CALIBRATE uses the mic. TAP needs a playing deck with a beat grid."
+            else -> "TAP along to the beat you hear on deck ${deck.id} (8+ taps)."
+        }, color = if (last != null && last.seconds == null && !model.calibrating) Ink.warning else Ink.muted, size = 11, lines = 2)
+    }
+}
+
+/**
+ * Tap-along fallback: each tap reads the render position at the tap instant; the heard beat was rendered L
+ * earlier, so L = (render position − anchor) mod beat ÷ speed. Median of 8+ taps (first dropped) is applied.
+ */
+@Composable private fun TapAlong(model: PlayerModel, deck: DeckUi?, modifier: Modifier) {
+    val taps = remember { mutableStateListOf<Double>() }
+    LaunchedEffect(deck?.id) { taps.clear() }
+    // Abandon a run after 3 s without a tap.
+    LaunchedEffect(taps.size) { if (taps.isNotEmpty()) { kotlinx.coroutines.delay(3000); taps.clear() } }
+    Key(if (taps.isEmpty()) "TAP" else "TAP ${taps.size}", modifier, Ink.accent, deck != null, engaged = taps.isNotEmpty(), description = "Tap along to the beat", textSize = 11, style = KeyStyle.PILL) {
+        val now = System.nanoTime()
+        val out = model.output ?: return@Key
+        val d = deck?.let { out.decks[it.id] } ?: return@Key
+        val bpm = d.bpm ?: return@Key
+        if (!d.playing) return@Key
+        val speed = (1 + d.pitchPercent / 100) * (1 + d.bendPercent / 100)
+        val render = d.sourceSeconds + (now - out.snapshotNanos) / 1e9 * speed
+        val beat = 60.0 / bpm
+        val phase = ((render - d.gridAnchorSeconds) % beat + beat) % beat
+        taps.add(phase / speed)
+        if (taps.size >= 9) {
+            val sorted = taps.drop(1).sorted()
+            model.setHeardLatency(sorted[sorted.size / 2])
+            taps.clear()
+        }
     }
 }

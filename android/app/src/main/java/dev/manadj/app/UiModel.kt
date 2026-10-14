@@ -50,6 +50,15 @@ class UiModel(application: Application) : AndroidViewModel(application) {
 
     private val _quantize = flag("quantize", true)
     var quantize: Boolean get() = _quantize.value; set(v) { _quantize.value = v; store("quantize", v) }
+    private val _heard = flag("quantize-heard", false)
+    /** Quantize reads the heard instant (#382 HEARD) instead of the render position (GRID). */
+    var quantizeHeard: Boolean get() = _heard.value; set(v) { _heard.value = v; store("quantize-heard", v) }
+    val quantizeMode get() = if (!quantize) dev.manadj.audio.QuantizeMode.OFF else if (quantizeHeard) dev.manadj.audio.QuantizeMode.HEARD else dev.manadj.audio.QuantizeMode.GRID
+    /** Persist + push the quantize preference ([on] / [heard]; null keeps the current value). */
+    fun setQuantize(model: PlayerModel, on: Boolean? = null, heard: Boolean? = null) {
+        on?.let { quantize = it }; heard?.let { quantizeHeard = it }
+        if (model.supports("quantize")) model.setQuantizeMode(quantizeMode)
+    }
     private val _xf = flag("crossfader", true)
     var crossfaderEnabled: Boolean get() = _xf.value; set(v) { _xf.value = v; store("crossfader", v) }
     private val _preview = flag("preview-pending", false)

@@ -82,7 +82,9 @@ struct Track {
 enum class Op : int { Prepare, Play, Pause, CueDown, CueUp, HotCueDown, HotCueUp,
                        HotCueSet, HotCueClear, Seek, Fader, Trim, Crossfade, Pitch, Bend, Pfl, CueMix, Eq, Filter,
                        SetGrid, BeatJump, LoopToggle, LoopResize, LoopPreset, Quantize, CueSetAt, HotCueSetAt, BeatFx, KeyLock, PhaseAlign, ScratchBegin, ScratchMove, ScratchEnd,
-                       LoopSet, CancelScheduled, SetSyncMembers, LaunchStart };
+                       LoopSet, CancelScheduled, SetSyncMembers, LaunchStart, HeardLatency, Clicks };
+// Clicks (global): slot = count, value = interval seconds; calibration chirps on every output channel (see clickSample).
+// Quantize: value 0 off, 1 Grid, 2 Heard. HeardLatency (global): value = output latency L in seconds (Heard mode).
 // SetSyncMembers (global): value = Sync Group member mask, slot = SYNCED (in-lock) mask; scopes the launch reference.
 // LaunchStart: internal (callback-scheduled end of a deferred quantized launch); never submitted.
 // LoopSet: value = start (< 0 clears), aux = {end, playhead (NaN keeps the position)}; machine replay (Session).
@@ -266,6 +268,16 @@ public:
     Routing routing() const { return static_cast<Routing>(routing_.load()); }
     float cueMix() const { return cueMix_.load(); }
     bool quantize() const { return quantize_.load(); }
+    bool heard() const { return heard_.load(); }
+    // Latency calibration (#382): CLOCK_MONOTONIC ns of the current callback's start (set before render);
+    // each calibration click's render instant is recorded (ns, 0 = not yet rendered).
+    void setCallbackNanos(int64_t ns) noexcept { callbackNanos_ = ns; }
+    static constexpr int kMaxClicks = 32;
+    static constexpr double kClickSeconds = .004;
+    // Hann-windowed linear chirp 500 Hz → 8 kHz over kClickSeconds, peak .5 (the mic matched filter's template).
+    static double clickSample(double t) noexcept;
+    int64_t clickNanos(int k) const { return k >= 0 && k < kMaxClicks ? clickNanos_[k].load() : 0; }
+    double heardLatency() const { return heardLatency_.load(); }
     Deck& deck(int index) { return decks_[index]; }
     const Deck& deck(int index) const { return decks_[index]; }
     int outputRate() const { return outputRate_.load(); }
@@ -305,6 +317,15 @@ private:
     std::atomic<float> cueMix_{0};  // Headphone blend: 0 = cue bus only, 1 = master only.
     std::atomic<int> routing_{0};
     std::atomic<bool> quantize_{false};
+    // Heard quantize: alignment gestures are read at the heard instant (L before the render position).
+    std::atomic<bool> heard_{false};
+    int64_t callbackNanos_ = 0;
+    uint64_t clickNext_ = 0, clickInterval_ = 0;
+    int clicksLeft_ = 0, clickIndex_ = 0;
+    std::array<std::atomic<int64_t>, kMaxClicks> clickNanos_{};
+    void renderClicks(float* output, int frames, int channels, uint64_t start) noexcept;
+    std::atomic<double> heardLatency_{0};
+    double heardLead(const Deck& d) const noexcept;
     std::array<std::unique_ptr<fx::Insert>, fx::kTargetCount> fx_;
     std::atomic<int> fxEffect_{fx::kEcho}, fxTarget_{fx::kTargetA}, fxHeld_{0}, fxAudible_{0};
     std::atomic<bool> fxOn_{false};

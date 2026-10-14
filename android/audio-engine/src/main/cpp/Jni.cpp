@@ -7,7 +7,7 @@
 #include <vector>
 
 namespace {
-constexpr int kHeader = 29;
+constexpr int kHeader = 31;
 constexpr int kDeckFields = 40 + manadj::kHotCues;
 constexpr int kSnapshotSize = kHeader + manadj::kDeckCount * kDeckFields;
 
@@ -88,6 +88,7 @@ struct Output final : oboe::AudioStreamDataCallback, oboe::AudioStreamErrorCallb
 
     oboe::DataCallbackResult onAudioReady(oboe::AudioStream* s, void* buffer, int32_t frames) override {
         const auto t0 = std::chrono::steady_clock::now();
+        engine.setCallbackNanos(std::chrono::duration_cast<std::chrono::nanoseconds>(t0.time_since_epoch()).count());
         engine.render(static_cast<float*>(buffer), frames, channels.load(std::memory_order_relaxed));
         const int64_t ns = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - t0).count();
         if (ns > costMaxNs.load(std::memory_order_relaxed)) costMaxNs.store(ns, std::memory_order_relaxed);
@@ -163,7 +164,7 @@ extern "C" JNIEXPORT jlong JNICALL
 Java_dev_manadj_audio_AudioEngine_nativeSubmit(JNIEnv*, jobject, jlong handle, jint op, jint deck,
                                                   jdouble value, jlong load, jint slot) {
     using manadj::Op;
-    if (op < 0 || op > static_cast<int>(Op::SetSyncMembers) || op == static_cast<int>(Op::Filter) || op == static_cast<int>(Op::BeatFx) ||
+    if (op < 0 || op > static_cast<int>(Op::Clicks) || op == static_cast<int>(Op::LaunchStart) || op == static_cast<int>(Op::Filter) || op == static_cast<int>(Op::BeatFx) ||
         op == static_cast<int>(Op::LoopSet) || op == static_cast<int>(Op::CancelScheduled)) return 0; // dedicated entry points
     if (op == static_cast<int>(manadj::Op::SetGrid)) return 0; // nativeSetGrid carries the anchor.
     return static_cast<jlong>(output(handle)->engine.submit(static_cast<manadj::Op>(op), deck, value,
@@ -174,6 +175,15 @@ Java_dev_manadj_audio_AudioEngine_nativeSubmit(JNIEnv*, jobject, jlong handle, j
 extern "C" JNIEXPORT void JNICALL
 Java_dev_manadj_audio_AudioEngine_nativeSetSchedule(JNIEnv*, jobject, jlong frame, jlong tag) {
     manadj::Engine::setSubmitFrame(static_cast<uint64_t>(frame), static_cast<uint64_t>(tag));
+}
+
+extern "C" JNIEXPORT jlongArray JNICALL
+Java_dev_manadj_audio_AudioEngine_nativeClickNanos(JNIEnv* env, jobject, jlong handle) {
+    jlong v[manadj::Engine::kMaxClicks];
+    for (int k = 0; k < manadj::Engine::kMaxClicks; ++k) v[k] = output(handle)->engine.clickNanos(k);
+    auto array = env->NewLongArray(manadj::Engine::kMaxClicks);
+    env->SetLongArrayRegion(array, 0, manadj::Engine::kMaxClicks, v);
+    return array;
 }
 
 extern "C" JNIEXPORT jlong JNICALL
@@ -375,6 +385,7 @@ Java_dev_manadj_audio_AudioEngine_nativeSnapshot(JNIEnv* env, jobject, jlong han
         e.fxDepth(), e.fxBeats(), static_cast<double>(e.fxHeld()), static_cast<double>(e.fxAudible()),
         0, presentedFrame, presentedNanos, 0,
         static_cast<double>(e.lateOps()), static_cast<double>(e.scheduledOps()),
+        e.heard() ? 2.0 : e.quantize() ? 1.0 : 0.0, e.heardLatency(),
     };
     // Deck positions are sampled at engine frame data[23]; retry if a callback ran mid-read.
     for (int attempt = 0; attempt < 4; ++attempt) {
@@ -484,6 +495,7 @@ extern "C" JNIEXPORT jfloatArray JNICALL
 Java_dev_manadj_audio_AudioEngine_nativeRenderOffline(JNIEnv* env, jobject, jlong handle, jint frames, jint channels) {
     if (frames < 0 || frames > 8192 || channels < 1 || channels > 8) return nullptr;
     std::vector<float> pcm(static_cast<size_t>(frames) * channels);
+    output(handle)->engine.setCallbackNanos(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count());
     output(handle)->engine.render(pcm.data(), frames, channels);
     auto array = env->NewFloatArray(frames * channels);
     if (array) env->SetFloatArrayRegion(array, 0, frames * channels, pcm.data());
