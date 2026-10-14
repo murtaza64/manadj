@@ -1,13 +1,14 @@
 #include "Engine.h"
 #include <jni.h>
 #include <oboe/Oboe.h>
+#include <chrono>
 #include <memory>
 #include <mutex>
 #include <vector>
 
 namespace {
 constexpr int kHeader = 27;
-constexpr int kDeckFields = 36 + manadj::kHotCues;
+constexpr int kDeckFields = 40 + manadj::kHotCues;
 constexpr int kSnapshotSize = kHeader + manadj::kDeckCount * kDeckFields;
 
 /*
@@ -28,6 +29,8 @@ struct Output final : oboe::AudioStreamDataCallback, oboe::AudioStreamErrorCallb
     int callbacks = 0;
     std::atomic<int> minCallbackFrames{1 << 30};
     std::atomic<int> maxCallbackFrames{0};
+    // Render cost since the last stats read (callback-written, relaxed).
+    std::atomic<int64_t> costMaxNs{0}, costSumNs{0}, costCount{0}, costOverNs{0};
     // Requested output: channel count (2, or 4 for Quad routing) and device (0 = system default).
     std::atomic<int> wantChannels{2};
     std::atomic<int> wantDevice{0};
@@ -84,7 +87,14 @@ struct Output final : oboe::AudioStreamDataCallback, oboe::AudioStreamErrorCallb
     }
 
     oboe::DataCallbackResult onAudioReady(oboe::AudioStream* s, void* buffer, int32_t frames) override {
+        const auto t0 = std::chrono::steady_clock::now();
         engine.render(static_cast<float*>(buffer), frames, channels.load(std::memory_order_relaxed));
+        const int64_t ns = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - t0).count();
+        if (ns > costMaxNs.load(std::memory_order_relaxed)) costMaxNs.store(ns, std::memory_order_relaxed);
+        costSumNs.fetch_add(ns, std::memory_order_relaxed);
+        costCount.fetch_add(1, std::memory_order_relaxed);
+        // Over half the callback period counts as a near-miss.
+        if (ns * 2 > static_cast<int64_t>(frames) * 1000000000LL / std::max(1, engine.outputRate())) costOverNs.fetch_add(1, std::memory_order_relaxed);
         if (frames < minCallbackFrames.load(std::memory_order_relaxed)) minCallbackFrames.store(frames, std::memory_order_relaxed);
         if (frames > maxCallbackFrames.load(std::memory_order_relaxed)) maxCallbackFrames.store(frames, std::memory_order_relaxed);
         if ((++callbacks & 63) == 0) {
@@ -152,7 +162,7 @@ Java_dev_manadj_audio_AudioEngine_nativeClose(JNIEnv*, jobject, jlong handle) {
 extern "C" JNIEXPORT jlong JNICALL
 Java_dev_manadj_audio_AudioEngine_nativeSubmit(JNIEnv*, jobject, jlong handle, jint op, jint deck,
                                                   jdouble value, jlong load, jint slot) {
-    if (op < 0 || op > static_cast<int>(manadj::Op::HotCueSetAt) || op == static_cast<int>(manadj::Op::Filter)) return 0; // Filter: nativeSubmitFilter.
+    if (op < 0 || op > static_cast<int>(manadj::Op::PhaseAlign) || op == static_cast<int>(manadj::Op::Filter) || op == static_cast<int>(manadj::Op::BeatFx)) return 0; // Filter/BeatFx: dedicated entry points.
     if (op == static_cast<int>(manadj::Op::SetGrid)) return 0; // nativeSetGrid carries the anchor.
     return static_cast<jlong>(output(handle)->engine.submit(static_cast<manadj::Op>(op), deck, value,
                                                             static_cast<uint64_t>(load), slot));
@@ -394,7 +404,9 @@ Java_dev_manadj_audio_AudioEngine_nativeSnapshot(JNIEnv* env, jobject, jlong han
         data[n + 34] = d.inTrack.load() ? 1 : 0;
         data[n + 35] = e.trackCovers(d, d.position.load(), 0) ? 1 : 0;
         if (d.trackEnd.load()) data[n + 5] = 1;
-        for (int h = 0; h < manadj::kHotCues; ++h) data[n + 36 + h] = d.hotcues[h].load();
+        data[n + 36] = d.keyLock.load() ? 1 : 0;
+        data[n + 37] = d.stretching.load() ? 1 : 0;
+        for (int h = 0; h < manadj::kHotCues; ++h) data[n + 40 + h] = d.hotcues[h].load();
     }
     if (e.outputFrames() == clockFrame) break;
     }
@@ -430,6 +442,18 @@ Java_dev_manadj_audio_AudioEngine_nativeOutputInfo(JNIEnv* env, jobject, jlong h
     }
     auto result = env->NewDoubleArray(n);
     if (result && n) env->SetDoubleArrayRegion(result, 0, n, data);
+    return result;
+}
+
+// Render cost since the previous call: max us, mean us, callbacks, callbacks over half their period. Resets.
+extern "C" JNIEXPORT jdoubleArray JNICALL
+Java_dev_manadj_audio_AudioEngine_nativeRenderCost(JNIEnv* env, jobject, jlong handle) {
+    auto* sink = output(handle);
+    const double count = static_cast<double>(sink->costCount.exchange(0));
+    const double data[4] = {sink->costMaxNs.exchange(0) / 1e3, count > 0 ? sink->costSumNs.exchange(0) / 1e3 / count : 0,
+                            count, static_cast<double>(sink->costOverNs.exchange(0))};
+    auto result = env->NewDoubleArray(4);
+    if (result) env->SetDoubleArrayRegion(result, 0, 4, data);
     return result;
 }
 

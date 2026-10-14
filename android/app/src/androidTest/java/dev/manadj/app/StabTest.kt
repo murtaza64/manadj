@@ -37,30 +37,32 @@ class StabTest {
     private fun receipts() = model.lastReceipt?.id ?: 0L
 
     @Test fun eightCueStabsInOneSecondSendEightDownsAndUps() {
-        val before = rule.runOnIdle { receipts() }
+        val before = receipts()
         rule.onNodeWithContentDescription("A CUE").performTouchInput { repeat(8) { down(center); advanceEventTime(40); up(); advanceEventTime(85) } }
-        rule.waitForIdle()
-        assertEquals("CueDown + CueUp per stab", 16L, rule.runOnIdle { receipts() } - before)
+        Thread.sleep(500)
+        assertEquals("CueDown + CueUp per stab", 16L, receipts() - before)
     }
 
     @Test fun alternatingFingersEachPress() {
-        val before = rule.runOnIdle { receipts() }
+        val before = receipts()
         rule.onNodeWithContentDescription("A CUE").performTouchInput {
             down(0, center); advanceEventTime(40)
             repeat(7) { i -> val next = (i + 1) % 2; down(next, center + androidx.compose.ui.geometry.Offset(4f * next, 0f)); advanceEventTime(30); up(1 - next); advanceEventTime(60) }
             up((7) % 2)
         }
-        rule.waitForIdle()
-        assertEquals("8 presses, each released", 16L, rule.runOnIdle { receipts() } - before)
+        Thread.sleep(500)
+        val snap = model.decks.getValue(DeckId.A).snapshot
+        assertEquals("8 presses, each released", 16L, receipts() - before)
+        assertFalse("deck left previewing/playing: previewing=${snap?.previewing} playing=${snap?.playing} receipts=${receipts() - before}", snap?.previewing == true || snap?.playing == true)
     }
 
     @Test fun hotCueStabsAfterSetEachPreview() {
         val pad = rule.onNodeWithContentDescription("A hotcue 1")
         pad.performTouchInput { down(center); advanceEventTime(40); up() } // SET (one op, no up)
         rule.waitUntil(5_000) { model.decks.getValue(DeckId.A).hotCues[0] != null }
-        val before = rule.runOnIdle { receipts() }
+        val before = receipts()
         pad.performTouchInput { repeat(8) { down(center); advanceEventTime(40); up(); advanceEventTime(85) } }
-        rule.waitForIdle()
-        assertEquals("HotCueDown + HotCueUp per stab", 16L, rule.runOnIdle { receipts() } - before)
+        Thread.sleep(500)
+        assertEquals("HotCueDown + HotCueUp per stab", 16L, receipts() - before)
     }
 }

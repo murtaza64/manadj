@@ -117,9 +117,10 @@ val ControlRow = 44.dp
             ;{ cancelled -> held = false; if (!cancelled && model.gestureActive(id)) model.submit(AudioCommand.CueUp(ui.id, id)); model.finishGesture(id, cancelled) }
         }
     }.padding(4.dp).graphicsLayer { scaleX = scale; scaleY = scale }.clip(shape).background(Ink.panel).background(Ink.warning.copy(alpha = .9f * heat)).border(2.dp, tint, shape), contentAlignment = Alignment.Center) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+            // Same metrics as PLAY (Key: icon textSize+3, label textSize 15).
             GlyphIcon(Glyph.Cue, if (held) Color.Black else tint, 18.dp)
-            Text("CUE", color = if (held) Color.Black else tint, size = 16, bold = true)
+            Text("CUE", color = if (held) Color.Black else tint, size = 15, bold = true)
         }
     }
 }
@@ -145,6 +146,9 @@ val ControlRow = 44.dp
 private fun nearest(choices: List<Double>, v: Double) = choices.indices.minBy { kotlin.math.abs(kotlin.math.ln(choices[it] / v)) }
 
 /** Beat jump (engine): arrows jump by the hold-wheel size; needs a grid (BPM). */
+/** End-segment width shared by the loop and jump strips so their columns line up. */
+val StripEnd = 48.dp
+
 @Composable fun JumpStrip(ui: DeckUi, ux: UiModel, model: PlayerModel, modifier: Modifier) {
     val live = model.supports("beat-jump")
     val gridded = ui.snapshot?.bpm != null
@@ -152,17 +156,17 @@ private fun nearest(choices: List<Double>, v: Double) = choices.indices.minBy { 
     val color = if (live) deckColor(ui.id) else Ink.surface2
     Box(modifier) {
         Segmented(Modifier.fillMaxSize(), color) {
-            Key("", Modifier.width(48.dp).fillMaxHeight(), color, usable, description = "${ui.id} jump backward", icon = Glyph.Back, style = KeyStyle.BARE) { model.jump(ui.id, -1) }
+            Key("", Modifier.width(StripEnd).fillMaxHeight(), color, usable, description = "${ui.id} jump backward", icon = Glyph.Back, style = KeyStyle.BARE) { model.jump(ui.id, -1) }
             Divider(color)
             ValueWheel("${ui.id} jump size", BEAT_CHOICES.map(::beatText), nearest(BEAT_CHOICES, ui.jumpBeats), ux, model, ui.id, Modifier.weight(1f).fillMaxHeight(), color, if (live && !gridded && ui.ready) "NO BPM" else "${beatText(ui.jumpBeats)} BEATS", live = live, bare = true) { ui.jumpBeats = BEAT_CHOICES[it] }
             Divider(color)
-            Key("", Modifier.width(48.dp).fillMaxHeight(), color, usable, description = "${ui.id} jump forward", icon = Glyph.Forward, style = KeyStyle.BARE) { model.jump(ui.id, 1) }
+            Key("", Modifier.width(StripEnd).fillMaxHeight(), color, usable, description = "${ui.id} jump forward", icon = Glyph.Forward, style = KeyStyle.BARE) { model.jump(ui.id, 1) }
         }
         if (!live) PendingTag(Modifier.align(Alignment.TopCenter))
     }
 }
 
-/** Loop (engine): tap toggles, hold-wheel sets length, ½ / ×2 resize. Pulses while looping. */
+/** Loop (engine): tap toggles, hold-wheel sets length, ÷2 / ×2 resize (same segment widths as the jump strip). Pulses while looping. */
 @Composable fun LoopStrip(ui: DeckUi, ux: UiModel, model: PlayerModel, modifier: Modifier) {
     val live = model.supports("loop")
     val snap = ui.snapshot
@@ -175,13 +179,13 @@ private fun nearest(choices: List<Double>, v: Double) = choices.indices.minBy { 
     val pulse = if (active) (1 - beatPhase(position(ui) - (snap?.gridAnchorSeconds ?: 0.0), snap?.bpm)) * .3f else 0f
     Box(modifier) {
         Segmented(Modifier.fillMaxSize(), color) {
-            Key("½", Modifier.width(44.dp).fillMaxHeight(), base, live, description = "${ui.id} halve loop", style = KeyStyle.BARE, textSize = 16) { model.resizeLoop(ui.id, LoopChange.HALVE) }
+            Key("÷2", Modifier.width(StripEnd).fillMaxHeight(), base, live, description = "${ui.id} halve loop", style = KeyStyle.BARE, textSize = 15) { model.resizeLoop(ui.id, LoopChange.HALVE) }
             Divider(base)
             ValueWheel("${ui.id} loop size", LOOP_CHOICES.map(::beatText), nearest(LOOP_CHOICES, beats), ux, model, ui.id, Modifier.weight(1f).fillMaxHeight(), color,
                 if (live && !gridded && ui.ready) "NO BPM" else "LOOP ${beatText(beats)}", icon = Glyph.Loop, live = live, bare = true, pulse = pulse,
                 onTap = { if (usable) model.toggleLoop(ui.id) }) { model.submit(AudioCommand.LoopResize(ui.id, LoopChange.SET, LOOP_CHOICES[it])) }
             Divider(base)
-            Key("×2", Modifier.width(44.dp).fillMaxHeight(), base, live, description = "${ui.id} double loop", style = KeyStyle.BARE, textSize = 15) { model.resizeLoop(ui.id, LoopChange.DOUBLE) }
+            Key("×2", Modifier.width(StripEnd).fillMaxHeight(), base, live, description = "${ui.id} double loop", style = KeyStyle.BARE, textSize = 15) { model.resizeLoop(ui.id, LoopChange.DOUBLE) }
         }
         if (!live) PendingTag(Modifier.align(Alignment.TopCenter))
     }
@@ -199,7 +203,7 @@ private fun nearest(choices: List<Double>, v: Double) = choices.indices.minBy { 
             Spacer(Modifier.weight(1f))
             Column(horizontalAlignment = Alignment.End) {
                 Text(ui.snapshot?.bpm?.let { "%.1f".format(it * (1 + (ui.pitch + ui.bend) / 100)) } ?: "— BPM", color = if (ui.snapshot?.bpm != null) Ink.text else Ink.muted, size = 12, bold = true)
-                Row(verticalAlignment = Alignment.CenterVertically) { if (e.keyLock) GlyphIcon(Glyph.Lock, color, 9.dp); Text(" KEY —", color = Ink.muted, size = 10) }
+                Row(verticalAlignment = Alignment.CenterVertically) { if (ui.snapshot?.keyLock == true || (e.keyLock && !model.supports("key-lock"))) GlyphIcon(Glyph.Lock, color, 9.dp); Text(" KEY —", color = Ink.muted, size = 10) }
             }
         }
     }

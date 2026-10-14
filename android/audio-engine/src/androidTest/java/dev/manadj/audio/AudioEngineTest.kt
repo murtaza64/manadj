@@ -111,6 +111,7 @@ class AudioEngineTest {
             assertTrue(engine.load(DeckId.A, "generated-a", a).accepted)
             assertTrue(engine.load(DeckId.B, "generated-b", b).accepted)
             engine.settled(DeckId.A, DeckId.B)
+            engine.until("decoded") { deck(DeckId.A).fullyDecoded && deck(DeckId.B).fullyDecoded }
             assertEquals("generated-a", engine.deck(DeckId.A).sourceId)
             assertEquals(48000, engine.deck(DeckId.A).sampleRate)
             assertEquals(5.0, engine.deck(DeckId.A).durationSeconds!!, .01)
@@ -196,6 +197,8 @@ class AudioEngineTest {
             engine.load(DeckId.A, "aac", aac)
             engine.load(DeckId.B, "deep", deep)
             engine.settled(DeckId.A, DeckId.B)
+            // Offline renders outrun the streaming decoder; render from the in-memory track.
+            engine.until("decoded") { deck(DeckId.A).fullyDecoded && deck(DeckId.B).fullyDecoded }
             assertEquals(44100, engine.deck(DeckId.A).sampleRate)
             engine.submit(AudioCommand.SetCrossfade(-1.0))
             engine.submit(AudioCommand.Play(DeckId.A))
@@ -262,7 +265,7 @@ class AudioEngineTest {
                 for (w in 0 until 1024 / 64) {
                     var e = 0f
                     for (i in w * 64 until (w + 1) * 64) e += jump[i * 2] * jump[i * 2]
-                    assertTrue("$name gap at window $w", e > 1e-4f)
+                    assertTrue("$name gap at window $w e=$e ${engine.deck(DeckId.A)}", e > 1e-4f)
                 }
                 assertEquals(2.0 + 1024 * (if (name == "wav") 48000 else 44100) / 48000.0 / (if (name == "wav") 48000 else 44100), engine.deck(DeckId.A).sourceSeconds, .002)
                 // Move the main cue past the AAC encoder priming silence, wait for its head.
@@ -437,6 +440,46 @@ class AudioEngineTest {
             engine.renderOfflineForTest(4096)
             assertEquals(s, engine.filterSettings)
             assertTrue("filter-settings" in engine.snapshot().supportedCapabilities)
+        }
+    }
+
+    @Test fun keyLockKeepsPitchAcrossTempoAndFitsTheCallback() {
+        val tone = m4a("engine-keylock.m4a", 440.0, 30) // 44.1 kHz source: exercises the rate-transpose path
+        AudioEngine(offline = true).use { engine ->
+            assertTrue("key-lock" in engine.snapshot().supportedCapabilities)
+            engine.load(DeckId.A, "kl", tone)
+            engine.settled(DeckId.A)
+            engine.until("decoded") { deck(DeckId.A).fullyDecoded }
+            engine.submit(AudioCommand.Seek(DeckId.A, 5.0))
+            engine.submit(AudioCommand.SetPitch(DeckId.A, 8.0))
+            fun pitch(lock: Boolean): Double {
+                engine.submit(AudioCommand.SetKeyLock(DeckId.A, lock))
+                engine.submit(AudioCommand.Play(DeckId.A))
+                repeat(3) { engine.renderOfflineForTest(4000) }
+                var crossings = 0
+                var last = 0f
+                repeat(12) { engine.renderOfflineForTest(4000).let { pcm -> for (i in 0 until 4000) { val v = pcm[i * 2]; if ((v < 0) != (last < 0)) crossings++; last = v } } }
+                return crossings / 2.0 // 48000 frames = 1 s
+            }
+            val locked = pitch(true)
+            assertTrue(engine.deck(DeckId.A).keyLock && engine.deck(DeckId.A).keyLockActive)
+            assertEquals("locked pitch", 440.0, locked, 4.0)
+            assertEquals("free pitch", 440.0 * 1.08, pitch(false), 4.0)
+            // Cost: 4 key-locked decks (plus a key-locked relocation, which re-primes).
+            engine.submit(AudioCommand.SetKeyLock(DeckId.A, true))
+            for (deck in DeckId.entries.drop(1)) engine.load(deck, "kl-$deck", tone)
+            engine.settled(*DeckId.entries.toTypedArray())
+            engine.until("all decoded") { DeckId.entries.all { deck(it).fullyDecoded } }
+            for (deck in DeckId.entries) { engine.submit(AudioCommand.SetKeyLock(deck, true)); engine.submit(AudioCommand.SetPitch(deck, 5.0)); engine.submit(AudioCommand.Play(deck)) }
+            engine.renderOfflineForTest(4096)
+            val times = LongArray(3000)
+            repeat(3000) { i -> val t0 = System.nanoTime(); engine.renderOfflineForTest(96); times[i] = System.nanoTime() - t0 }
+            times.sort()
+            val t0 = System.nanoTime()
+            engine.submit(AudioCommand.Seek(DeckId.A, 12.0)); engine.renderOfflineForTest(96)
+            val prime = (System.nanoTime() - t0) / 1000.0
+            android.util.Log.i("manadj-bench", "4 decks key-locked: p50 %.0f p99 %.0f max %.0f us per 96-frame render; relocation re-prime %.0f us".format(times[1500] / 1e3, times[2970] / 1e3, times.last() / 1e3, prime))
+            assertTrue("render too slow p50 ${times[1500] / 1e3} us", times[1500] < 1_000_000)
         }
     }
 

@@ -41,7 +41,7 @@ import dev.manadj.audio.*
  * One central Beat FX section, inline: effect / target / beats are hold-wheels (like jump size), DEPTH a knob,
  * ON a lit pill in the effect's identity color (pulses while an insert is audible, incl. tails).
  */
-@Composable fun FxSection(ux: UiModel, model: PlayerModel, modifier: Modifier, horizontal: Boolean = false) {
+@Composable fun FxSection(ux: UiModel, model: PlayerModel, modifier: Modifier, horizontal: Boolean = false, compact: Boolean = false) {
     val fx = ux.fx
     val live = model.supports("beat-fx")
     val usable = live || ux.previewPending
@@ -62,6 +62,10 @@ import dev.manadj.audio.*
     val card = Modifier.clip(RoundedCornerShape(10.dp)).background(Brush.verticalGradient(listOf(tone.copy(alpha = if (usable) .10f else .03f), Color.Transparent))).border(1.dp, color.copy(alpha = .35f), RoundedCornerShape(10.dp))
     if (horizontal) Row(modifier.then(card).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
         On(Modifier.width(64.dp).fillMaxHeight()); Effect(Modifier.weight(1f).fillMaxHeight()); Target(Modifier.width(72.dp).fillMaxHeight()); Beats(Modifier.width(76.dp).fillMaxHeight()); Depth(Modifier.width(56.dp).fillMaxHeight())
+    } else if (compact) Column(modifier.then(card).padding(4.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        // Portrait (#58): two inline rows — effect + target, then beats + depth + ON.
+        Row(Modifier.fillMaxWidth().height(40.dp)) { Effect(Modifier.weight(1.4f).fillMaxHeight()); Target(Modifier.weight(1f).fillMaxHeight()) }
+        Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically) { Beats(Modifier.weight(1f).fillMaxHeight()); Depth(Modifier.width(44.dp).fillMaxHeight()); On(Modifier.width(56.dp).height(40.dp)) }
     } else Column(modifier.then(card).padding(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) { Text("BEAT FX", Modifier.weight(1f), color, 11, true); if (!live) PendingTag() }
         Effect(Modifier.fillMaxWidth().height(44.dp))

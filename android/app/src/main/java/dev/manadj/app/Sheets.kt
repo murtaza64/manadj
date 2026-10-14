@@ -54,7 +54,10 @@ import dev.manadj.audio.DeckId
         val other = model.decks.getValue(visibleOther(target))
         val otherBpm = other.snapshot?.bpm?.let { it * (1 + other.pitch / 100) }
         Row(Modifier.fillMaxWidth().height(40.dp)) {
-            Key("KEY LOCK", Modifier.weight(1f).fillMaxHeight(), color, keyLock || ux.previewPending, e.keyLock, icon = Glyph.Lock, textSize = 12, pending = !keyLock) { if (keyLock || ux.previewPending) e.keyLock = !e.keyLock else ux.pending("Key lock") }
+            // Engine key lock: requested state from the snapshot; label says WAIT until the whole track is decoded.
+            val requested = if (keyLock) ui.snapshot?.keyLock == true else e.keyLock
+            val waiting = keyLock && requested && ui.snapshot?.keyLockActive != true && ui.ready
+            Key(if (waiting) "KEY LOCK…" else "KEY LOCK", Modifier.weight(1f).fillMaxHeight(), color, keyLock || ux.previewPending, requested, icon = Glyph.Lock, textSize = 12, pending = !keyLock) { if (keyLock) model.setKeyLock(ui.id, !requested) else if (ux.previewPending) e.keyLock = !e.keyLock else ux.pending("Key lock") }
             // Tempo match through varispeed (engine-backed); phase sync stays pending.
             Key("MATCH ${visibleOther(target)}", Modifier.weight(1f).fillMaxHeight(), color, varispeed && bpm != null && otherBpm != null, textSize = 12) { model.updatePitch(target, ((otherBpm!! / bpm!! - 1) * 100).coerceIn(-8.0, 8.0)) }
         }

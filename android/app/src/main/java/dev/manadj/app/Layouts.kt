@@ -8,6 +8,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.semantics.contentDescription
@@ -28,6 +29,9 @@ import dev.manadj.audio.DeckId
     }
     // Desktop filter tuning synced through the library (edits journal back from FilterSettingsPanel).
     LaunchedEffect(ux.synced) { ux.synced?.lib?.settingJson(dev.manadj.library.PerformanceSettings.FILTER)?.let { model.updateFilterSettings(dev.manadj.audio.FilterSettings.fromJson(it)) } }
+    // Key lock defaults on per deck (desktop manadj-keylock default); the pitch panel toggles it after that.
+    val canKeyLock = model.supports("key-lock")
+    LaunchedEffect(canKeyLock) { if (canKeyLock) for (d in model.visibleDecks) if (model.decks.getValue(d).snapshot?.keyLock != true) model.setKeyLock(d, true) }
     // Engine starts with quantize off; push the persisted preference once it can take it.
     val canQuantize = model.supports("quantize")
     LaunchedEffect(canQuantize) { if (canQuantize) model.setQuantize(ux.quantize) }
@@ -89,6 +93,22 @@ import dev.manadj.audio.DeckId
 
 @Composable private fun SettingsKey(ux: UiModel, modifier: Modifier = Modifier.size(40.dp)) = Key("", modifier, Ink.muted, description = "Settings", icon = Glyph.Gear, style = KeyStyle.BARE) { ux.settings = true }
 
+/** Portrait centre: app-level toggles in one floating group (#58) — QUANTIZE, crossfader enable, SETTINGS. */
+@Composable private fun GlobalControls(model: PlayerModel, ux: UiModel, modifier: Modifier) {
+    val q by remember { derivedStateOf { model.output?.quantize ?: ux.quantize } }
+    // One row of compact keys; the group centres in whatever height the mixer leaves.
+    Box(modifier, contentAlignment = Alignment.Center) {
+        Row(Modifier.fillMaxWidth().height(40.dp).clip(androidx.compose.foundation.shape.RoundedCornerShape(10.dp)).border(1.dp, Ink.surface, androidx.compose.foundation.shape.RoundedCornerShape(10.dp)).padding(3.dp), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+            Key("QUANT", Modifier.weight(1.2f).fillMaxHeight(), Ink.accent, model.supports("quantize"), q, if (q) "Quantize on" else "Quantize off", style = KeyStyle.PILL, textSize = 10) { ux.quantize = !q; model.setQuantize(!q) }
+            Key("XF", Modifier.weight(.8f).fillMaxHeight(), Ink.accent, engaged = ux.crossfaderEnabled, description = "Crossfader enable", style = KeyStyle.PILL, textSize = 10) {
+                ux.crossfaderEnabled = !ux.crossfaderEnabled
+                if (!ux.crossfaderEnabled) model.updateCrossfade(.5)
+            }
+            Key("", Modifier.weight(.7f).fillMaxHeight(), Ink.muted, description = "Settings", icon = Glyph.Gear, style = KeyStyle.PILL, textSize = 12) { ux.settings = true }
+        }
+    }
+}
+
 /** Quantize quick toggle + indicator (Settings has the same switch). */
 @Composable private fun QuantizeKey(model: PlayerModel, ux: UiModel, modifier: Modifier) {
     val on by remember { derivedStateOf { model.output?.quantize ?: ux.quantize } }
@@ -125,7 +145,7 @@ fun mixOf(model: PlayerModel, ux: UiModel, id: DeckId): DeckMix {
     val gap = if (tight) 5.dp else Gap
     val a = model.decks.getValue(DeckId.A); val b = model.decks.getValue(DeckId.B)
     val bottomBlock = ControlRow * 3 + TransportRow + 40.dp + gap * 4
-    val waveHeight = if (tight) 52.dp else 72.dp
+    val waveHeight = if (tight) 50.dp else 66.dp
     val pad = Modifier.padding(horizontal = Gap)
     Box(modifier) {
         Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(gap)) {
@@ -146,17 +166,17 @@ fun mixOf(model: PlayerModel, ux: UiModel, id: DeckId): DeckMix {
                 KnobColumn(a, ux, model, Modifier.width(58.dp).fillMaxHeight())
                 ChannelFader(a, model, Modifier.width(54.dp).fillMaxHeight())
                 Column(Modifier.weight(1f).fillMaxHeight().padding(horizontal = 4.dp), verticalArrangement = Arrangement.spacedBy(gap)) {
-                    FxSection(ux, model, Modifier.fillMaxWidth().weight(1f))
+                    FxSection(ux, model, Modifier.fillMaxWidth(), compact = true)
+                    GlobalControls(model, ux, Modifier.fillMaxWidth().weight(1f))
                     Crossfader(model, ux, Modifier.fillMaxWidth().height(48.dp))
                 }
                 ChannelFader(b, model, Modifier.width(54.dp).fillMaxHeight())
                 KnobColumn(b, ux, model, Modifier.width(58.dp).fillMaxHeight())
             }
-            // Minimaps flank the centre BROWSE + settings keys.
+            // Minimaps flank the centre BROWSE key.
             Row(pad.fillMaxWidth().height(if (tight) 36.dp else 44.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                 Minimap(a, model, ux.waves[a.source?.id ?: ""], Modifier.weight(1f).fillMaxHeight())
-                BrowseKey(model, ux, Modifier.width(72.dp).fillMaxHeight())
-                Column(Modifier.width(36.dp).fillMaxHeight()) { QuantizeKey(model, ux, Modifier.fillMaxWidth().weight(1f)); SettingsKey(ux, Modifier.fillMaxWidth().weight(1f)) }
+                BrowseKey(model, ux, Modifier.width(84.dp).fillMaxHeight())
                 Minimap(b, model, ux.waves[b.source?.id ?: ""], Modifier.weight(1f).fillMaxHeight())
             }
             Row(pad.fillMaxWidth().height(28.dp), horizontalArrangement = Arrangement.spacedBy(DeckGap)) { for (ui in listOf(a, b)) StemsStrip(ui, ux, model, Modifier.weight(1f).fillMaxHeight()) }
