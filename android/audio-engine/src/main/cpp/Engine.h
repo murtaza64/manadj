@@ -79,7 +79,8 @@ struct Track {
 
 enum class Op : int { Prepare, Play, Pause, CueDown, CueUp, HotCueDown, HotCueUp,
                        HotCueSet, HotCueClear, Seek, Fader, Trim, Crossfade, Pitch, Bend, Pfl, CueMix, Eq, Filter,
-                       SetGrid, BeatJump, LoopToggle, LoopResize, LoopPreset, Quantize, CueSetAt, HotCueSetAt, BeatFx, KeyLock, PhaseAlign };
+                       SetGrid, BeatJump, LoopToggle, LoopResize, LoopPreset, Quantize, CueSetAt, HotCueSetAt, BeatFx, KeyLock, PhaseAlign, ScratchBegin, ScratchMove, ScratchEnd };
+// ScratchMove: value = platter displacement in track seconds.
 // PhaseAlign: deck = the aligning deck, slot = reference deck, value = own/peer half-double ratio.
 // BeatFx (deck ignored): slot = effect (-1 none), value = depth, aux = {target, on, beats, held deck mask}.
 // LoopResize slot: 0 halve, 1 double, 2 set to value beats.
@@ -164,6 +165,13 @@ struct Deck {
     std::vector<float> stretchIn[2], stretchOut[2]; // window / block scratch (allocated with the stretcher)
     uint64_t stretchTransport = ~0ull;              // transport the stretcher was primed for
     double stretchTranspose = 0;
+    // Scratch (desktop scratchMotion.ts): impulse-driven platter. Motion state at output frame
+    // scratchTime: position (track s), drive/rate (track s per output s); rendered from the in-memory track.
+    std::atomic<bool> scratching{false};
+    bool scratchRunning = false;
+    double scratchPos = 0, scratchDrive = 0, scratchRate = 0, scratchTime = 0;
+    double scratchStart = 0, scratchLoopStart = 0, scratchLoopEnd = 0;
+    bool scratchLoop = false;
     std::atomic<bool> inTrack{false};   // callback renders from the in-memory track (snapshot)
     std::atomic<bool> trackEnd{false};  // reached the end of a complete in-memory track
     // Head being played (-1 none) and the ring offset (source frames) the worker must start at.
@@ -287,6 +295,9 @@ private:
     int renderSegment(Deck& d, float* strip, int frames, bool& active) noexcept;
     int renderTrack(Deck& d, float* strip, int frames, bool& active) noexcept;
     int renderStretch(Deck& d, float* strip, int frames, bool& active) noexcept;
+    void renderScratch(Deck& d, float* strip, int frames, int64_t frame, bool& active) noexcept;
+    double scratchPositionAt(const Deck& d, double frame) const noexcept;
+    int64_t renderFrame_ = 0; // output frame of the block being rendered
     void stretchBlock(Deck& d, double frame, double rate, int frames, float* outL, float* outR) noexcept;
     void configureStretch(Deck& d, int rate);
 

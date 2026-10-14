@@ -275,6 +275,10 @@ class PlayerModel(application: Application) : AndroidViewModel(application) {
     fun setQuantize(on: Boolean) = submit(AudioCommand.SetQuantize(on)).also { if (it.accepted) quantizeOn = on }
     /** Key lock per deck; DeckSnapshot.keyLock / keyLockActive report it. */
     fun setKeyLock(deck: DeckId, on: Boolean) = submit(AudioCommand.SetKeyLock(deck, on))
+    /** Waveform touch scratch: begin on touch-down, move by signed track seconds per drag event, end on release. */
+    fun scratchBegin(deck: DeckId) = submit(AudioCommand.ScratchBegin(deck))
+    fun scratchMove(deck: DeckId, deltaSeconds: Double) { if (deltaSeconds != 0.0 && deltaSeconds.isFinite()) submit(AudioCommand.ScratchMove(deck, deltaSeconds)) }
+    fun scratchEnd(deck: DeckId) = submit(AudioCommand.ScratchEnd(deck))
 
     fun updateEq(deck: DeckId, band: Int, value: Double, gesture: String? = null) = control(deck, "eq$band", AudioCommand.SetEq(deck, band, value, gesture)) { it.eq[band] = value }
     fun updateFilter(deck: DeckId, position: Double, gesture: String? = null) = control(deck, "filter", AudioCommand.SetFilter(deck, position, gesture)) { it.filter = position }

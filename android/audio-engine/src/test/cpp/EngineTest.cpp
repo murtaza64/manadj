@@ -762,6 +762,50 @@ int main() {
         CHECK(std::abs(e.deck(0).position.load() - (10.4 + 1 / 48000.)) < 1e-3);
     }
 
+    { // Scratch (desktop scratchMotion): displacement impulses move the platter by exactly that much,
+      // forwards and backwards; a still platter is silent; release resumes play at the platter position.
+        auto owned = std::make_unique<Engine>(48000);
+        Engine& e = *owned;
+        std::vector<float> pcm(48000 * 20 * 2);
+        for (int i = 0; i < 48000 * 20; ++i) pcm[i * 2] = pcm[i * 2 + 1] = static_cast<float>(.25 * std::sin(2 * 3.14159265358979 * 440 * i / 48000));
+        loadPcm(e, 0, 1, std::vector<float>(pcm.begin(), pcm.begin() + 48000 * 2));
+        fillTrack(e, 0, 1, pcm);
+        e.submit(Op::Seek, 0, 5.0);
+        e.submit(Op::Play, 0);
+        tick(e, 4800);
+        const double before = e.deck(0).position.load();
+        e.submit(Op::ScratchBegin, 0);
+        tick(e, 96);
+        CHECK(e.deck(0).scratching.load() && !e.deck(0).playing.load());
+        tick(e, 9600);
+        auto still = capture(e, 4800);
+        CHECK(rms(still, 0, 4800) < 1e-4);                         // platter held: silent
+        CHECK(std::abs(e.deck(0).position.load() - (before)) < 1e-3);
+        for (int k = 0; k < 50; ++k) { e.submit(Op::ScratchMove, 0, .01); tick(e, 96); } // drag forward 0.5 s at 5x (desktop clamps at 16x)
+        auto fwd = capture(e, 9600);
+        CHECK(rms(fwd, 0, 2000) > .02);                              // audible while moving
+        if (std::abs(e.deck(0).position.load() - (before + .5)) >= 1e-3) std::fprintf(stderr, "fwd pos %f before %f\n", e.deck(0).position.load(), before);
+        CHECK(std::abs(e.deck(0).position.load() - (before + .5)) < 1e-3);
+        for (int k = 0; k < 100; ++k) { e.submit(Op::ScratchMove, 0, -.01); tick(e, 96); } // back 1 s
+        capture(e, 9600);
+        CHECK(std::abs(e.deck(0).position.load() - (before - .5)) < 1e-3);
+        e.submit(Op::ScratchEnd, 0);
+        tick(e, 4800);
+        CHECK(!e.deck(0).scratching.load() && e.deck(0).playing.load());   // was running: resumes
+        CHECK(e.deck(0).position.load() > before - .5);
+        // Clamped at the track start: no hidden travel to repay.
+        e.submit(Op::Seek, 0, .05);
+        e.submit(Op::ScratchBegin, 0);
+        tick(e);
+        for (int k = 0; k < 20; ++k) { e.submit(Op::ScratchMove, 0, -.01); tick(e, 96); }
+        capture(e, 9600);
+        CHECK(e.deck(0).position.load() == 0);
+        e.submit(Op::ScratchMove, 0, .1); tick(e, 96);
+        capture(e, 9600);
+        CHECK(std::abs(e.deck(0).position.load() - .1) < 1e-3);
+        CHECK(e.starvedFrames() == 0);
+    }
+
     { // Beat FX ECHO on A: beat-synced repeats at beats x beatSeconds, feedback .5, tails ring after OFF.
         auto owned = std::make_unique<Engine>(48000);
         Engine& e = *owned;
@@ -832,6 +876,22 @@ int main() {
         beatFx(e, fx::kReverb, fx::kTargetA, false, 1, .5);  // an engaged insert never idles
         capture(e, 48000 * 6);
         CHECK(e.fxAudible() == 0);
+    }
+
+    { // REVERB level = desktop: unit-energy IR rescaled by Web Audio's ConvolverNode normalization
+      // (normalize=true): impulse-response energy (1/rms(ir) x -58 dB x 44100/rate)^2, ~-8 dB at 48 kHz.
+        for (double rate : {48000.0, 44100.0}) {
+            fx::Reverb r;
+            fx::Settings s;
+            r.prepare(rate, s);
+            const float wa = fx::Reverb::webAudioNormalization(rate, 2.5);
+            r.setScale(fx::Reverb::scale() * wa);
+            double energy = 0;
+            for (int i = 0; i < static_cast<int>(rate * 4); ++i) { float l, rr; r.process(i == 0, 0, l, rr); energy += double(l) * l; }
+            const double expected = double(wa) * wa;
+            CHECK(std::abs(10 * std::log10(energy / expected)) < .5);
+            CHECK(wa > .38f && wa < .43f);
+        }
     }
 
     { // FLANGER: a swept comb on a tone (LFO = beats in bars: 1/2 bar = 1 s at 120 BPM).

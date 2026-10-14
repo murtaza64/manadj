@@ -163,6 +163,7 @@ class AudioEngineTest {
         AudioEngine(offline = true).use { engine ->
             engine.load(DeckId.A, "hot", a)
             engine.settled(DeckId.A)
+            engine.until("decoded") { deck(DeckId.A).fullyDecoded } // offline renders outrun the streaming decoder
             engine.submit(AudioCommand.Seek(DeckId.A, 1.5))
             engine.renderOfflineForTest(64)
             engine.settled(DeckId.A)
@@ -480,6 +481,26 @@ class AudioEngineTest {
             val prime = (System.nanoTime() - t0) / 1000.0
             android.util.Log.i("manadj-bench", "4 decks key-locked: p50 %.0f p99 %.0f max %.0f us per 96-frame render; relocation re-prime %.0f us".format(times[1500] / 1e3, times[2970] / 1e3, times.last() / 1e3, prime))
             assertTrue("render too slow p50 ${times[1500] / 1e3} us", times[1500] < 1_000_000)
+        }
+    }
+
+    @Test fun scratchMovesThePlatterAndReleaseResumes() {
+        val tone = wav("engine-scratch.wav", .25, seconds = 10)
+        AudioEngine(offline = true).use { engine ->
+            assertTrue("scratch" in engine.snapshot().supportedCapabilities)
+            engine.load(DeckId.A, "s", tone)
+            engine.settled(DeckId.A)
+            engine.until("decoded") { deck(DeckId.A).fullyDecoded }
+            engine.submit(AudioCommand.Seek(DeckId.A, 4.0)); engine.submit(AudioCommand.Play(DeckId.A))
+            engine.renderOfflineForTest(960)
+            engine.submit(AudioCommand.ScratchBegin(DeckId.A)); engine.renderOfflineForTest(96)
+            val held = engine.deck(DeckId.A)
+            assertTrue(held.scratching && !held.playing)
+            repeat(30) { engine.submit(AudioCommand.ScratchMove(DeckId.A, -.01)); engine.renderOfflineForTest(96) }
+            engine.renderOfflineForTest(4800)
+            assertEquals(held.sourceSeconds - .3, engine.deck(DeckId.A).sourceSeconds, 2e-3)
+            engine.submit(AudioCommand.ScratchEnd(DeckId.A)); engine.renderOfflineForTest(96)
+            engine.deck(DeckId.A).let { assertTrue("$it", !it.scratching && it.playing) }
         }
     }
 
