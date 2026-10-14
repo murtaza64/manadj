@@ -33,6 +33,7 @@ class SyncTest {
     @Volatile private var deskMinimapMaster = 1.16
     @Volatile private var snapshotRequests = 0
     @Volatile private var twoWay = true
+    private val stemRequests = java.util.Collections.synchronizedList(mutableListOf<String>())
     @Volatile private var dropAudioAfter: Int? = null
     @Volatile private var onAudioRequest: () -> Unit = {}
     private val ranges = mutableListOf<String?>()
@@ -44,7 +45,7 @@ class SyncTest {
          "tracks":[
           {"id":10,"title":"$deskTitle","artist":"Synth","file_name":"decoy.mp3","bpm":174.0,"key":15,"key_openkey":"8m","key_camelot":"3A",
            "energy":4,"duration_secs":300.0,"date_added":"2026-10-01T00:00:00","main_cue":0.5,"codec":"mp3","filesize_bytes":200000,
-           "audio_rev":"r1","preview_rev":"$previewRev","waveform_rev":"w1","tag_ids":[7],"hot_cues":[{"slot":1,"time":12.5,"label":null,"color":"#00ff00"}],
+           "audio_rev":"r1","preview_rev":"$previewRev","waveform_rev":"w1","stems_rev":"s1","tag_ids":[7],"hot_cues":[{"slot":1,"time":12.5,"label":null,"color":"#00ff00"}],
            "grid":{"origin":"analyzed","anchor_time":0.5,"tempo_changes":[{"start_time":0.5,"bpm":174.0,"time_signature_num":4,"bar_position":1}]}},
           {"id":11,"title":null,"artist":null,"file_name":"untitled.flac","bpm":null,"key":null,"key_openkey":null,"key_camelot":null,
            "energy":null,"duration_secs":null,"date_added":null,"main_cue":null,"codec":null,"filesize_bytes":null,
@@ -104,8 +105,13 @@ class SyncTest {
             }
         }
         server.createContext("/api/device-sync/tracks/") { ex ->
-            val id = ex.requestURI.path.split("/")[4].toInt()
-            if (ex.requestURI.path.endsWith("/waveform") && id == 10) {
+            val path = ex.requestURI.path
+            val id = path.split("/")[4].toInt()
+            if ("/stems/" in path && id == 10) {
+                stemRequests += path.substringAfter("/stems/")
+                val body = if (path.endsWith("/waveform")) mwf1(ByteArray(500) { 9 }) else ByteArray(3000) { path.length.toByte() }
+                ex.sendResponseHeaders(200, body.size.toLong()); ex.responseBody.use { it.write(body) }
+            } else if (path.endsWith("/waveform") && id == 10) {
                 waveformRequests++
                 val body = mwf1(ByteArray(2000) { (it % 200).toByte() }, duration = 5.8)
                 ex.responseHeaders.add("X-Waveform-Rev", "w1")
@@ -400,6 +406,29 @@ class SyncTest {
         assertEquals(5, library.track(10)!!.energy) // edit kept locally, still journaled
         assertEquals(1, repo.state.value.pendingEdits)
         assertEquals(null, repo.state.value.error)
+    }
+
+    @Test fun stemsDownloadOnceCachedOfflineAndInBulk() = runBlocking {
+        val repo = repo()
+        repo.sync().getOrThrow()
+        val files = repo.stemFiles(10)!!
+        assertEquals(STEM_NAMES, files.keys.toList())
+        assertTrue(files.values.all { it.length() == 3000L })
+        assertEquals(null, repo.stemFiles(11)) // no stems on the desktop
+        repo.stemFiles(10)
+        assertEquals(4, stemRequests.size)
+        assertEquals(500, repo.stemWaveform(10, "drums")!!.bins)
+        assertEquals(500, repo.stemWaveform(10, "drums")!!.bins)
+        assertEquals(5, stemRequests.size)
+
+        repo.clearStems()
+        assertTrue(!repo.hasLocalStems(repo.library.value!!.track(10)!!))
+        assertEquals(listOf(10), repo.bulkPlan(null, stems = true).tracks.map { it.id })
+        repo.downloadAll(null, stems = true).getOrThrow()
+        assertTrue(repo.hasLocalStems(repo.library.value!!.track(10)!!))
+
+        server.stop(0)
+        assertEquals(STEM_NAMES, repo().also { it.open() }.stemFiles(10)!!.keys.toList()) // offline from cache
     }
 
     @Test fun presyncAudio() = runBlocking {

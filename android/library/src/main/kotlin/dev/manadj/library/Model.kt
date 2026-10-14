@@ -54,6 +54,8 @@ data class LibraryTrack(
     val previewRev: String?,
     /** Revision of the full detail waveform (MWF1) the desktop renders; null = not generated. */
     val waveformRev: String? = null,
+    /** Revision of the desktop's current stems (vocals/drums/bass/other); null = none. */
+    val stemsRev: String? = null,
     val tagIds: List<Int>,
     val hotCues: List<HotCue>,
     val grid: Beatgrid?,

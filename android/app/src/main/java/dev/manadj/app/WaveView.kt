@@ -22,6 +22,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import dev.manadj.audio.AudioCommand
+import dev.manadj.audio.AudioEngine
 import dev.manadj.audio.DeckId
 import kotlinx.coroutines.CancellationException
 import kotlin.math.*
@@ -232,7 +233,8 @@ fun marksOf(ui: DeckUi) = ui.snapshot.let { s -> WaveMarks(s?.cueSeconds, ui.hot
                     drawContext.canvas.nativeCanvas.drawText("${slot + 1}", x + flag * .22f, y + flag * .82f, ink)
                 }
             } }
-            line(pos, Ink.playhead, (if (overview) 2 else 3).dp.toPx())
+            // Overview pins a pre-roll playhead (pos < 0) to the start edge.
+            line(if (overview) pos.coerceIn(0.0, dur) else pos, Ink.playhead, (if (overview) 2 else 3).dp.toPx())
             if (data == null || !data.complete) {
                 // Analysis still filling: hairline axis so the lane never reads as silence.
                 if (data == null) drawLine(accent.copy(alpha = .35f), if (vertical) Offset(size.width / 2, 0f) else Offset(0f, size.height / 2), if (vertical) Offset(size.width / 2, size.height) else Offset(size.width, size.height / 2), 1.dp.toPx())
@@ -286,7 +288,8 @@ private fun renderOverview(data: WaveformData, size: IntSize2, duration: Double,
             val duration = ui.durationSeconds
             if (!currentReady || duration == null || duration <= 0) return@awaitEachGesture
             val id = model.beginGesture(ui.id, "SEEK") { seekPreview = null }
-            fun preview(p: Offset) { seekPreview = ((if (vertical) p.y / size.height else p.x / size.width) * duration).coerceIn(0.0, duration) }
+            // Pre-roll: dragging past the start edge parks the playhead before 0 (engine bound).
+            fun preview(p: Offset) { seekPreview = ((if (vertical) p.y / size.height else p.x / size.width) * duration).coerceIn(-AudioEngine.MAX_LEAD_IN_SECONDS, duration) }
             preview(down.position); down.consume()
             var cancelled = false
             try {

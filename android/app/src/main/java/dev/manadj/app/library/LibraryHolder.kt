@@ -159,9 +159,21 @@ object LibraryHolder {
      * `repository(context).bulk`; size/space preview: `bulkPlan(playlistId)`.
      * Android 13+: request POST_NOTIFICATIONS first or the progress notification is hidden.
      */
-    fun downloadAll(context: Context, playlistId: Int? = null) = LibraryDownloadService.start(context, playlistId)
+    fun downloadAll(context: Context, playlistId: Int? = null, stems: Boolean = false) = LibraryDownloadService.start(context, playlistId, stems)
 
     fun cancelDownloadAll(context: Context) = repository(context).cancelBulk()
+
+    /**
+     * The desktop's current stems for a library track (vocals/drums/bass/other → m4a,
+     * aligned with the track audio): cached, else downloaded now. Null when the desktop
+     * has none (track.stemsRev == null). Progress: `repository(ctx).stemDownloads`.
+     */
+    suspend fun stemFiles(context: Context, trackId: Int): Map<String, java.io.File>? =
+        repository(context).stemFiles(trackId)
+
+    /** A stem's desktop MWF1 waveform (for the stem lanes of the detail wave). */
+    suspend fun stemWaveform(context: Context, trackId: Int, stem: String): dev.manadj.library.DetailWaveform? =
+        repository(context).stemWaveform(trackId, stem)
 
     /** The desktop's detail waveform for a library track (offline cache, else fetched); null if none. */
     suspend fun detailWaveform(context: Context, trackId: Int): dev.manadj.library.DetailWaveform? =

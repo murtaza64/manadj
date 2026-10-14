@@ -57,7 +57,8 @@ object Ink {
 }
 
 fun deckColor(id: DeckId) = when (id) { DeckId.A -> Color(0xff00e5ff); DeckId.B -> Color(0xffff2d95); DeckId.C -> Ink.warning; DeckId.D -> Ink.play }
-fun clock(seconds: Double) = "%d:%02d".format(seconds.toInt() / 60, seconds.toInt() % 60)
+/** m:ss; pre-roll (negative) reads "-m:ss". */
+fun clock(seconds: Double): String { val s = kotlin.math.abs(seconds).toInt(); return (if (seconds <= -1) "-" else "") + "%d:%02d".format(s / 60, s % 60) }
 
 val Mono = FontFamily(Font(R.font.ubuntu_mono_regular), Font(R.font.ubuntu_mono_bold, FontWeight.Bold))
 val Gap = 8.dp

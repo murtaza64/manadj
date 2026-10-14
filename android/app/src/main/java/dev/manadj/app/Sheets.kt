@@ -10,6 +10,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import dev.manadj.audio.DeckId
 
@@ -226,21 +227,29 @@ fun visibleOther(id: DeckId) = if (id == DeckId.A) DeckId.B else DeckId.A
     val context = androidx.compose.ui.platform.LocalContext.current
     val bulk by ux.repo.bulk.collectAsState()
     val mine = bulk.running && bulk.playlistId == playlistId
-    val notify = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) { dev.manadj.app.library.LibraryHolder.downloadAll(context, playlistId) }
+    // "with stems": also fetch the four stems (audio + waveforms) for tracks the desktop has separated.
+    var stems by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
+    val notify = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) { dev.manadj.app.library.LibraryHolder.downloadAll(context, playlistId, stems) }
     fun start() {
         if (android.os.Build.VERSION.SDK_INT >= 33 && context.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) notify.launch(android.Manifest.permission.POST_NOTIFICATIONS)
-        else dev.manadj.app.library.LibraryHolder.downloadAll(context, playlistId)
+        else dev.manadj.app.library.LibraryHolder.downloadAll(context, playlistId, stems)
     }
+    val height = if (compact) 30.dp else 36.dp
     if (mine) {
-        Row(Modifier.fillMaxWidth().height(if (compact) 30.dp else 36.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth().height(height), verticalAlignment = Alignment.CenterVertically) {
             Text("${bulk.tracksDone}/${bulk.tracksTotal} · ${dev.manadj.library.formatBytes(bulk.bytesDone)}/${dev.manadj.library.formatBytes(bulk.bytesTotal)}" + (bulk.current?.let { " · $it" } ?: ""), Modifier.weight(1f), Ink.muted, 10)
             Key("CANCEL", Modifier.width(76.dp).fillMaxHeight(), Ink.warning, textSize = 10, style = KeyStyle.PILL) { dev.manadj.app.library.LibraryHolder.cancelDownloadAll(context) }
         }
         Box(Modifier.fillMaxWidth().height(3.dp).background(Ink.surface)) { Box(Modifier.fillMaxWidth(bulk.progress ?: 0f).fillMaxHeight().background(Ink.play)) }
     } else {
-        val plan = remember(playlistId, ux.synced, ux.downloads) { runCatching { ux.repo.bulkPlan(playlistId) }.getOrNull() }
-        val label = plan?.let { if (it.remainingBytes <= 0) "ALL ON PHONE" else "DOWNLOAD ${if (playlistId == null) "LIBRARY" else "PLAYLIST"} · ${dev.manadj.library.formatBytes(it.remainingBytes)}" } ?: "DOWNLOAD"
-        Key(label, Modifier.fillMaxWidth().height(if (compact) 30.dp else 36.dp), Ink.play, plan != null && plan.remainingBytes > 0 && plan.fits && !bulk.running, textSize = 10, style = KeyStyle.PILL) { start() }
+        val plan = remember(playlistId, stems, ux.synced, ux.downloads) { runCatching { ux.repo.bulkPlan(playlistId, stems) }.getOrNull() }
+        val todo = plan != null && plan.tracks.isNotEmpty()
+        // Stem sizes aren't in the snapshot: the byte figure covers full mixes only.
+        val label = plan?.let { if (!todo) "ALL ON PHONE" else "DOWNLOAD ${if (playlistId == null) "LIBRARY" else "PLAYLIST"}" + (if (it.remainingBytes > 0) " · ${dev.manadj.library.formatBytes(it.remainingBytes)}" else "") + if (stems) " + STEMS" else "" } ?: "DOWNLOAD"
+        Row(Modifier.fillMaxWidth().height(height), verticalAlignment = Alignment.CenterVertically) {
+            Key(label, Modifier.weight(1f).fillMaxHeight(), Ink.play, todo && plan!!.fits && !bulk.running, textSize = 10, style = KeyStyle.PILL) { start() }
+            Key("STEMS", Modifier.width(76.dp).fillMaxHeight().testTag("bulk-stems"), Ink.accent, engaged = stems, description = "download with stems", textSize = 10, style = KeyStyle.PILL) { stems = !stems }
+        }
         if (plan != null && !plan.fits) Text("Not enough space: needs ${dev.manadj.library.formatBytes(plan.remainingBytes)}, ${dev.manadj.library.formatBytes(plan.freeBytes)} free", color = Ink.warning, size = 10)
         if (bulk.finished && bulk.playlistId == playlistId && bulk.failed > 0) Text("${bulk.failed} tracks could not be downloaded", color = Ink.warning, size = 10)
     }

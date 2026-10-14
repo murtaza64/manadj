@@ -131,8 +131,13 @@ val ControlRow = 44.dp
     val ready by remember(ui) { derivedStateOf { ui.ready } }
     // Breathes on the beat when the deck has a grid.
     val bpm = ui.snapshot?.bpm
-    val pulse = if (playing && bpm != null) (1 - beatPhase(position(ui) - (ui.snapshot?.gridAnchorSeconds ?: 0.0), bpm)).let { it * it } * .35f else 0f
-    Key(if (playing) "PAUSE" else "PLAY", modifier, Ink.play, ready || playing, playing, "${ui.id} play pause", if (playing) Glyph.Pause else Glyph.Play, KeyStyle.PILL, pulse, 15) {
+    // Quantized launch: armed but silent until the reference beat — PLAY blinks (desktop pending-play, 250 ms).
+    val launching by remember(ui) { derivedStateOf { ui.snapshot?.launchFrame != null } }
+    var blink by remember { mutableStateOf(true) }
+    LaunchedEffect(launching) { blink = true; while (launching) { kotlinx.coroutines.delay(250); blink = !blink } }
+    val pulse = if (launching) 0f else if (playing && bpm != null) (1 - beatPhase(position(ui) - (ui.snapshot?.gridAnchorSeconds ?: 0.0), bpm)).let { it * it } * .35f else 0f
+    val lit = if (launching) blink else playing
+    Key(if (playing && !launching) "PAUSE" else "PLAY", modifier, Ink.play, ready || playing, lit, "${ui.id} play pause", if (playing && !launching) Glyph.Pause else Glyph.Play, KeyStyle.PILL, pulse, 15) {
         model.submit(if (playing) AudioCommand.Pause(ui.id) else AudioCommand.Play(ui.id))
     }
 }

@@ -25,6 +25,7 @@ constexpr double kLoopMinBeats = 0.125, kLoopMaxBeats = 128, kLoopDefaultBeats =
 constexpr double kGridlessBpm = 120;     // desktop jumpBeats fallback for BPM-less tracks
 constexpr int kHeadFrames = 8192;       // Pre-decoded audio at each cue (~170 ms at 48 kHz).
 constexpr int kTailFrames = 2048;       // Old audio captured for a crossfade (240 frames at <=8x ratio).
+constexpr double kMaxLeadInSeconds = 30; // desktop MAX_LEAD_IN_SECONDS: pre-roll bound
 constexpr double kAtCueEpsilon = 0.01;  // Desktop transport.ts AT_CUE_EPSILON.
 constexpr int kBlockFrames = 1024;
 constexpr double kTrackMarginSeconds = 2;  // decoded audio required ahead before the in-memory track serves      // Bus scratch size; longer callbacks render in blocks.

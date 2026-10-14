@@ -15,7 +15,7 @@ double snapToBeat(const Deck& d, double t) {
     const double beat = 60 / bpm, anchor = d.gridAnchor.load(std::memory_order_relaxed);
     const double k = (t - anchor) / beat, lo = std::floor(k);
     const double snapped = anchor + (k - lo <= .5 ? lo : lo + 1) * beat;
-    return snapped < 0 ? snapped + beat : snapped;
+    return snapped < 0 && t >= 0 ? snapped + beat : snapped; // pre-roll (t < 0): the grid extends backwards
 }
 
 bool ready(const Deck& d) {
@@ -366,7 +366,11 @@ void Engine::relocate(Deck& d, double seconds, int slot, double overshootFrames)
     d.launchAt.store(0, kRelaxed);
     captureTail(d);
     releaseHead(d);
-    const auto t = std::max(0.0, seconds);
+    // Pre-roll (desktop clampPlayhead, issue 07): the playhead may sit up to kMaxLeadInSeconds before the
+    // track; decoders prepare frame 0 and the callback runs a silent lead-in clock into it.
+    const double lead = std::max(-kMaxLeadInSeconds, seconds);
+    const auto t = std::max(0.0, lead);
+    if (lead < 0) { slot = -1; overshootFrames = 0; }
     d.trackEnd.store(false, kRelaxed);
     // Jump into memory only with a margin ahead of a still-running decode, so playback never
     // catches the decode front (that would force a ring resync gap); otherwise heads/ring serve.
@@ -377,7 +381,7 @@ void Engine::relocate(Deck& d, double seconds, int slot, double overshootFrames)
         d.inTrack.store(true, kRelaxed); // render from memory next (no re-entry margin check)
         d.headPos = 0;
         d.target.store(t, kRelaxed);
-        d.position.store(t + overshootFrames / d.track.sampleRate.load(kRelaxed), kRelaxed);
+        d.position.store(lead < 0 ? lead : t + overshootFrames / d.track.sampleRate.load(kRelaxed), kRelaxed);
         d.fractional = 0;
         d.envelope = 0;
         d.transport.store(d.transport.load(kRelaxed) + 1, kRelease);
@@ -399,7 +403,7 @@ void Engine::relocate(Deck& d, double seconds, int slot, double overshootFrames)
     // A loop wrap keeps its sub-frame overshoot when playing from the head (no drift across wraps).
     d.headPos = offset > 0 ? std::min(overshootFrames, static_cast<double>(offset - 1)) : 0;
     d.target.store(t, kRelaxed);
-    d.position.store(t + (offset > 0 ? d.headPos / d.sampleRate.load(kRelaxed) : 0), kRelaxed);
+    d.position.store(lead < 0 ? lead : t + (offset > 0 ? d.headPos / d.sampleRate.load(kRelaxed) : 0), kRelaxed);
     d.fractional = 0;
     d.envelope = 0;
     d.transport.store(d.transport.load(kRelaxed) + 1, kRelease);
@@ -504,7 +508,7 @@ void Engine::apply(const Command& c) noexcept {
             else if (std::abs(position - cue) < kAtCueEpsilon) { d.preview.store(true); d.previewSlot.store(kMainCueSlot); if (c.at == 0) launch(c.deck, cue, kMainCueSlot); }
             else {
                 // Placement: Quantize snaps the cue, and the parked playhead moves with it.
-                const double at = quantize_.load() ? snapToBeat(d, position) : position;
+                const double at = std::max(0.0, quantize_.load() ? snapToBeat(d, position) : position);
                 d.cue.store(at);
                 if (at != position) relocate(d, at, kMainCueSlot);
             }
@@ -531,7 +535,7 @@ void Engine::apply(const Command& c) noexcept {
             if (d.playing.load()) { d.preview.store(false); d.previewSlot.store(-1); }
             else { stop(d); relocate(d, d.hotcues[c.slot].load(), c.slot); }
             break;
-        case Op::HotCueSet: if (isReady) d.hotcues[c.slot].store(quantize_.load() ? snapToBeat(d, position) : position); break;
+        case Op::HotCueSet: if (isReady) d.hotcues[c.slot].store(std::max(0.0, quantize_.load() ? snapToBeat(d, position) : position)); break;
         case Op::HotCueClear: d.hotcues[c.slot].store(-1); break;
         case Op::Seek: if (isReady) { d.loopActive.store(false); relocate(d, c.value); } break;
         case Op::SetGrid:
@@ -542,7 +546,7 @@ void Engine::apply(const Command& c) noexcept {
             // Relative displacement (desktop jumpBeats): an active loop translates with the playhead.
             if (!isReady) break;
             const double bpm = d.bpm.load() > 0 ? d.bpm.load() : kGridlessBpm;
-            const double target = std::max(0.0, position + c.value * 60 / bpm);
+            const double target = std::max(-kMaxLeadInSeconds, position + c.value * 60 / bpm);
             if (d.loopActive.load()) {
                 const double start = std::max(0.0, d.loopStart.load() + (target - position));
                 d.loopEnd.store(start + (d.loopEnd.load() - d.loopStart.load()));
@@ -687,7 +691,7 @@ void Engine::apply(const Command& c) noexcept {
                 const double ls = d.loopStart.load(), length = d.loopEnd.load() - ls;
                 if (length > 0) target = ls + std::fmod(std::fmod(target - ls, length) + length, length);
             }
-            target = std::max(0.0, target);
+            target = std::max(-kMaxLeadInSeconds, target);
             if (std::abs(target - position) >= 1e-7) relocate(d, target);
             break;
         }
@@ -871,6 +875,19 @@ int Engine::renderSegment(Deck& d, float* strip, int frames, bool& active) noexc
         if (!ready(d)) {
             if ((d.status.load(kAcquire) & 3) == kError) { d.playing.store(false); d.preview.store(false); d.previewSlot.store(-1); }
             return -1;
+        }
+        if (const double pos = d.position.load(kRelaxed); pos < 0) {
+            // Pre-roll lead-in: silent; the clock runs at the deck rate and enters the track on the frame
+            // it crosses 0 (sub-frame remainder carried from memory; the ring adopts its decoded start).
+            d.envelope = 0;
+            const double step = (1 + d.pitch.load(kRelaxed) / 100.) * (1 + d.bend.load(kRelaxed) / 100.) / outRate;
+            if (!(d.playing.load(kRelaxed) || d.preview.load(kRelaxed)) || d.launchAt.load(kRelaxed) != 0 || !(step > 0)) return -1;
+            const double toZero = -pos / step;
+            if (toZero >= frames) { d.position.store(pos + frames * step, kRelaxed); return -1; }
+            const int n = std::max(1, static_cast<int>(std::ceil(toZero - 1e-9)));
+            d.position.store(std::max(0.0, pos + n * step), kRelaxed);
+            active |= renderTail(d, strip, n);
+            return n;
         }
         const auto transport = d.transport.load(kRelaxed);
         const bool ringLive = d.ring.load(kAcquire) == transport;
