@@ -186,15 +186,17 @@ class PlayerModel(application: Application) : AndroidViewModel(application) {
     fun load(
         deck: DeckId, file: java.io.File, sourceId: String, title: String, artist: String,
         durationSeconds: Double?, bpm: Double? = null, firstBeatSeconds: Double? = null,
+        mainCueSeconds: Double? = null, hotCues: Map<Int, Double> = emptyMap(),
     ) = loadInto(
         deck, metadata = { LocalSource(sourceId, Uri.fromFile(file), title, artist, durationSeconds, persistentGrant = false, bpm = bpm) },
         open = { android.os.ParcelFileDescriptor.open(file, android.os.ParcelFileDescriptor.MODE_READ_ONLY) },
         grid = { bpm?.takeIf { it > 0 }?.let { it to (firstBeatSeconds ?: 0.0) } }, remember = false,
+        cues = { d -> mainCueSeconds?.let { submit(AudioCommand.SetCueAt(d, it)) }; hotCues.forEach { (slot, at) -> submit(AudioCommand.SetHotCueAt(d, slot, at)) } },
     )
 
     private fun loadInto(
         deck: DeckId, metadata: () -> LocalSource, open: () -> android.os.ParcelFileDescriptor?,
-        grid: (LocalSource) -> Pair<Double, Double>?, remember: Boolean,
+        grid: (LocalSource) -> Pair<Double, Double>?, remember: Boolean, cues: (DeckId) -> Unit = {},
     ) {
         releases.keys.filter { it.startsWith("${deck.name}:") }.forEach { id -> releases.remove(id)?.invoke() }
         val ui = decks.getValue(deck)
@@ -213,7 +215,8 @@ class PlayerModel(application: Application) : AndroidViewModel(application) {
                             if (!receipt.accepted) throw IllegalStateException(receipt.reason)
                             ui.source = source; ui.pendingLoadCommandId = receipt.id
                             val (bpm, anchor) = grid(source) ?: (0.0 to 0.0)
-                            submit(AudioCommand.SetGrid(deck, bpm, anchor)) // After Prepare, which clears the grid.
+                            submit(AudioCommand.SetGrid(deck, bpm, anchor)) // After Prepare, which clears grid and cues.
+                            cues(deck)
                             if (remember) { sources.removeAll { it.id == source.id }; sources.add(0, source); catalog.remember(sources) }
                             browser = null
                         }

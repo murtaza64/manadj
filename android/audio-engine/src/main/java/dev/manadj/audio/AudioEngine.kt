@@ -38,6 +38,9 @@ sealed interface AudioCommand {
     data class HotCueUp(override val deck: DeckId, val slot: Int, override val gestureId: String? = null) : AudioCommand
     /** Stores the deck's position at apply time (callback clock, not a UI estimate). */
     data class SetHotCue(override val deck: DeckId, val slot: Int, override val gestureId: String? = null) : AudioCommand
+    /** Stored cue points (library tracks): main cue (a stopped deck parks there) / hot cue at [seconds]. */
+    data class SetCueAt(override val deck: DeckId, val seconds: Double, override val gestureId: String? = null) : AudioCommand
+    data class SetHotCueAt(override val deck: DeckId, val slot: Int, val seconds: Double, override val gestureId: String? = null) : AudioCommand
     data class ClearHotCue(override val deck: DeckId, val slot: Int, override val gestureId: String? = null) : AudioCommand
     data class Seek(override val deck: DeckId, val seconds: Double, override val gestureId: String? = null) : AudioCommand
     data class SetFader(override val deck: DeckId, val value: Double, override val gestureId: String? = null) : AudioCommand
@@ -144,7 +147,7 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
         private const val HEAD_FRAMES = 8192
         private const val HEADER = 16
         private const val DECK_FIELDS = 36 + HOT_CUES
-        private enum class Op { PREPARE, PLAY, PAUSE, CUE_DOWN, CUE_UP, HOT_CUE_DOWN, HOT_CUE_UP, HOT_CUE_SET, HOT_CUE_CLEAR, SEEK, FADER, TRIM, CROSSFADE, PITCH, BEND, PFL, CUE_MIX, EQ, FILTER, SET_GRID, BEAT_JUMP, LOOP_TOGGLE, LOOP_RESIZE, LOOP_PRESET, QUANTIZE }
+        private enum class Op { PREPARE, PLAY, PAUSE, CUE_DOWN, CUE_UP, HOT_CUE_DOWN, HOT_CUE_UP, HOT_CUE_SET, HOT_CUE_CLEAR, SEEK, FADER, TRIM, CROSSFADE, PITCH, BEND, PFL, CUE_MIX, EQ, FILTER, SET_GRID, BEAT_JUMP, LOOP_TOGGLE, LOOP_RESIZE, LOOP_PRESET, QUANTIZE, CUE_SET_AT, HOT_CUE_SET_AT }
     }
 
     /** The caller retains/closes descriptor; the engine duplicates it for its own lifetime. */
@@ -183,6 +186,8 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
             is AudioCommand.HotCueDown -> { slot = command.slot; Op.HOT_CUE_DOWN to 0.0 }
             is AudioCommand.HotCueUp -> { slot = command.slot; Op.HOT_CUE_UP to 0.0 }
             is AudioCommand.SetHotCue -> { slot = command.slot; Op.HOT_CUE_SET to 0.0 }
+            is AudioCommand.SetCueAt -> Op.CUE_SET_AT to command.seconds
+            is AudioCommand.SetHotCueAt -> { slot = command.slot; Op.HOT_CUE_SET_AT to command.seconds }
             is AudioCommand.ClearHotCue -> { slot = command.slot; Op.HOT_CUE_CLEAR to 0.0 }
             is AudioCommand.Seek -> {
                 if (!command.seconds.isFinite() || command.seconds < 0) return rejected("Invalid seek target")

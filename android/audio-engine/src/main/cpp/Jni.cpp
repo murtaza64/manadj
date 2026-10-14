@@ -149,7 +149,7 @@ Java_dev_manadj_audio_AudioEngine_nativeClose(JNIEnv*, jobject, jlong handle) {
 extern "C" JNIEXPORT jlong JNICALL
 Java_dev_manadj_audio_AudioEngine_nativeSubmit(JNIEnv*, jobject, jlong handle, jint op, jint deck,
                                                   jdouble value, jlong load, jint slot) {
-    if (op < 0 || op > static_cast<int>(manadj::Op::Quantize) || op == static_cast<int>(manadj::Op::Filter)) return 0; // Filter: nativeSubmitFilter.
+    if (op < 0 || op > static_cast<int>(manadj::Op::HotCueSetAt) || op == static_cast<int>(manadj::Op::Filter)) return 0; // Filter: nativeSubmitFilter.
     if (op == static_cast<int>(manadj::Op::SetGrid)) return 0; // nativeSetGrid carries the anchor.
     return static_cast<jlong>(output(handle)->engine.submit(static_cast<manadj::Op>(op), deck, value,
                                                             static_cast<uint64_t>(load), slot));

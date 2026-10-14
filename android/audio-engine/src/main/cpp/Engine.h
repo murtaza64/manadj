@@ -59,7 +59,7 @@ struct Head {
 
 enum class Op : int { Prepare, Play, Pause, CueDown, CueUp, HotCueDown, HotCueUp,
                        HotCueSet, HotCueClear, Seek, Fader, Trim, Crossfade, Pitch, Bend, Pfl, CueMix, Eq, Filter,
-                       SetGrid, BeatJump, LoopToggle, LoopResize, LoopPreset, Quantize };
+                       SetGrid, BeatJump, LoopToggle, LoopResize, LoopPreset, Quantize, CueSetAt, HotCueSetAt };
 // LoopResize slot: 0 halve, 1 double, 2 set to value beats.
 struct Command {
     Op op;

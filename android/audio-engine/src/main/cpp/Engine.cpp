@@ -27,7 +27,7 @@ uint64_t Engine::submitFilter(int deck, double position) {
 
 uint64_t Engine::submit(Op op, int deck, double value, uint64_t load, int slot, const double* aux) {
     if (deck < 0 || deck >= kDeckCount || !std::isfinite(value)) return 0;
-    if ((op == Op::HotCueDown || op == Op::HotCueUp || op == Op::HotCueSet || op == Op::HotCueClear) &&
+    if ((op == Op::HotCueDown || op == Op::HotCueUp || op == Op::HotCueSet || op == Op::HotCueClear || op == Op::HotCueSetAt) &&
         (slot < 0 || slot >= kHotCues)) return 0;
     if (op == Op::Eq && (slot < 0 || slot > 2)) return 0;
     if (op == Op::Filter && !aux) return 0;
@@ -294,6 +294,13 @@ void Engine::apply(const Command& c) noexcept {
             break;
         }
         case Op::Quantize: quantize_.store(c.value != 0); break;
+        // Stored cues from a library (applied after Prepare, which resets them).
+        // Like the desktop load path, a stopped deck parks at the stored main cue.
+        case Op::CueSetAt:
+            d.cue.store(std::max(0.0, c.value));
+            if (!d.playing.load() && !d.preview.load()) relocate(d, d.cue.load(), kMainCueSlot);
+            break;
+        case Op::HotCueSetAt: d.hotcues[c.slot].store(c.value < 0 ? -1 : c.value); break;
         case Op::Fader: d.fader = std::clamp(static_cast<float>(c.value), 0.f, 1.f); updateGain(c.deck); break;
         case Op::Trim: d.trim = std::clamp(static_cast<float>(c.value), 0.f, 1.f); updateGain(c.deck); break;
         case Op::Crossfade:
