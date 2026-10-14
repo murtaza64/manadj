@@ -68,6 +68,7 @@ private val ADDED = DateTimeFormatter.ofPattern("dd MMM")
             Key("FILTER", Modifier.width(84.dp).fillMaxHeight(), Ink.accent, engaged = ux.filtersOpen || ux.filter.tags.isNotEmpty() || ux.filter.bpmCenter != null, textSize = 12, style = KeyStyle.PILL) { ux.filtersOpen = !ux.filtersOpen }
         }
         PlaylistNav(ux)
+        ux.filter.playlist?.let { if (ux.synced != null) BulkDownload(ux, it.toInt(), compact = true) }
         if (ux.filtersOpen) FilterControls(ux, model)
         FollowControls(model, ux, follow != null)
         // Local files: the only rows the engine can load today.
@@ -77,7 +78,7 @@ private val ADDED = DateTimeFormatter.ofPattern("dd MMM")
             for (id in model.visibleDecks) { Spacer(Modifier.width(4.dp)); Key(id.name, Modifier.width(52.dp).fillMaxHeight(), deckColor(id), model.supports("play"), description = "Choose audio file for $id", style = KeyStyle.PILL) { pick(id) } }
         }
         LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
-            items(model.sources, key = { "local:" + it.id }) { source ->
+            items(model.sources, key = { "local:" + it.id }, contentType = { "local" }) { source ->
                 SwipeToLoad(source.title, Modifier.fillMaxWidth(), { model.requestImport(it, source.uri) }) {
                     Row(Modifier.fillMaxWidth().height(48.dp).then(if (tapTarget != null) Modifier.clickable { model.requestImport(tapTarget, source.uri) } else Modifier).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                         Box(Modifier.size(6.dp).clip(RoundedCornerShape(50)).background(Ink.warning)); Spacer(Modifier.width(8.dp))
@@ -89,7 +90,7 @@ private val ADDED = DateTimeFormatter.ofPattern("dd MMM")
                 val scope = ux.filter.playlist?.let { id -> ux.library.playlists().firstOrNull { it.id == id }?.name } ?: "COLLECTION"
                 Row(Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 4.dp)) { Text("$scope · ${ux.library.label}", Modifier.weight(1f), Ink.muted, 10, true); Text("${rows.size} TRACKS · ${ux.filter.sort.label}", color = Ink.muted, size = 10) }
             }
-            items(rows, key = { "lib:" + it.id }) { track ->
+            items(rows, key = { "lib:" + it.id }, contentType = { "track" }) { track ->
                 val order = ux.filter.playlist?.let { id -> ux.library.playlists().firstOrNull { it.id == id }?.trackIds?.indexOf(track.id)?.plus(1) }
                 SwipeToLoad(track.title, Modifier.fillMaxWidth(), { ux.loadRow(model, it, track.id) }) { TrackRow(track, follow?.get(track.id), ux, order) { if (tapTarget != null) ux.loadRow(model, tapTarget, track.id) else ux.selectedRow = track.id } }
             }
@@ -173,27 +174,34 @@ private fun tierColor(t: EvidenceTier) = when (t) { EvidenceTier.KNOWN -> Ink.pl
                 c.matchScore?.let { Text("${it.toInt()} ", color = Ink.accent, size = 9, bold = true) }
             }
             Text(track.dateAdded?.format(ADDED) ?: "", color = Ink.muted, size = 9)
-            ux.downloads.let { ux.library.audioLabel(track.id) }?.let { Text(" $it", color = if (it == "ON PHONE") Ink.play else Ink.warning, size = 9, bold = true) }
+            remember(track.id, ux.downloads) { ux.library.audioLabel(track.id) }?.let { Text(" $it", color = if (it == "ON PHONE") Ink.play else Ink.warning, size = 9, bold = true) }
         }
     }
 }
 
-/** Desktop preview strip: additive low/mid/high, bottom-anchored. */
+/**
+ * Desktop preview strip (minimap style, bottom-anchored), pre-rendered off the main thread into a cached
+ * bitmap (LRU by preview + style + size) so scrolling only blits.
+ */
 @Composable fun PreviewWave(p: WaveformPreview, modifier: Modifier) {
-    Canvas(modifier.background(Ink.crust)) {
-        val step = size.width / p.bins
-        for (i in 0 until p.bins) {
-            val x = i * step + step / 2
-            val g = floatArrayOf(p.low[i], p.mid[i], p.high[i])
-            val order = intArrayOf(0, 1, 2).sortedByDescending { g[it] }
-            for (level in 0..2) {
-                val h = g[order[level]]
-                var r = 0f; var gr = 0f; var b = 0f
-                for (k in 0..2) if (g[k] >= h) { r += Ink.bands[k].red; gr += Ink.bands[k].green; b += Ink.bands[k].blue }
-                drawLine(Color(r.coerceAtMost(1f), gr.coerceAtMost(1f), b.coerceAtMost(1f)), Offset(x, size.height), Offset(x, size.height * (1 - h)), step)
-            }
+    BoxWithConstraints(modifier.background(Ink.crust)) {
+        val density = androidx.compose.ui.platform.LocalDensity.current
+        val w = with(density) { maxWidth.roundToPx() }; val h = with(density) { maxHeight.roundToPx() }
+        val style = WaveStyle.minimap ?: WaveStyle.MINIMAP
+        val key = Triple(p, style, w * 100_000 + h)
+        val bitmap by produceState(PreviewBitmaps.get(key), key) {
+            if (value == null && w > 0 && h > 0) value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { renderPreview(p, w, h, style) }.also { PreviewBitmaps.put(key, it) }
         }
+        bitmap?.let { androidx.compose.foundation.Image(it, null, Modifier.fillMaxSize()) }
     }
+}
+
+private object PreviewBitmaps {
+    private val lru = object : LinkedHashMap<Any, androidx.compose.ui.graphics.ImageBitmap>(128, .75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Any, androidx.compose.ui.graphics.ImageBitmap>) = size > 600
+    }
+    @Synchronized fun get(k: Any) = lru[k]
+    @Synchronized fun put(k: Any, v: androidx.compose.ui.graphics.ImageBitmap) { lru[k] = v }
 }
 
 /** Collection or a Playlist (folders open in place). Entering a Playlist defaults to Play order. */

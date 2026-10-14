@@ -47,6 +47,7 @@ private val SORTS = listOf(SortColumn.DATE_ADDED, SortColumn.TITLE, SortColumn.A
     val library by repo.library.collectAsState()
     val state by repo.state.collectAsState()
     val downloads by repo.downloads.collectAsState()
+    val bulk by repo.bulk.collectAsState()
     val scope = rememberCoroutineScope()
     var search by remember { mutableStateOf("") }
     var tagIds by remember { mutableStateOf(emptySet<Int>()) }
@@ -105,9 +106,14 @@ private val SORTS = listOf(SortColumn.DATE_ADDED, SortColumn.TITLE, SortColumn.A
             Field(url, Modifier.fillMaxWidth().height(40.dp)) { url = it; LibraryHolder.setUrl(context, it) }
             Text("Pairing code", color = Ink.muted, size = 11)
             Field(pair, Modifier.fillMaxWidth().height(40.dp), placeholder = "XXXXX-XXXXX") { pair = it; LibraryHolder.setPairCode(context, it) }
+            val plan = remember(lib, playlistId, bulk.running, state.audioCount) { repo.bulkPlan(playlistId) }
+            Text(bulkLine(bulk, plan, lib?.let { l -> playlistId?.let(l::playlist)?.name }), color = if (bulk.error != null || !plan.fits) Ink.warning else Ink.muted, size = 11, lines = 2)
             Row(Modifier.fillMaxWidth().height(48.dp)) {
-                Key("SYNC + ALL AUDIO", Modifier.weight(1f).fillMaxHeight(), Ink.play, !state.running) { scope.launch { repo.sync(audio = true) } }
-                Key("CLEAR AUDIO", Modifier.weight(1f).fillMaxHeight(), Ink.warning, !state.running) { scope.launch { repo.clearAudio() } }
+                if (bulk.running) Key("CANCEL DOWNLOAD", Modifier.weight(1f).fillMaxHeight(), Ink.warning) { LibraryHolder.cancelDownloadAll(context) }
+                else Key(if (playlistId != null) "DOWNLOAD PLAYLIST" else "DOWNLOAD ALL", Modifier.weight(1f).fillMaxHeight(), Ink.play, plan.tracks.isNotEmpty() && plan.fits) {
+                    LibraryHolder.downloadAll(context, playlistId)
+                }
+                Key("CLEAR AUDIO", Modifier.weight(1f).fillMaxHeight(), Ink.warning, !state.running && !bulk.running) { scope.launch { repo.clearAudio() } }
             }
         }
         Row(Modifier.fillMaxWidth().height(44.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -246,4 +252,12 @@ private fun evidence(row: FollowRow) = when (row.tier) {
     EvidenceTier.KNOWN -> row.known!!.label
     EvidenceTier.OBSERVED -> "Observed ×${row.observedTakes}"
     EvidenceTier.COMPATIBLE -> "Match ${row.score.toInt()}" + (if (row.keyMatched) " · key" else "") + (if (row.sharedArtist) " · artist" else "")
+}
+
+private fun bulkLine(bulk: BulkState, plan: BulkPlan, playlist: String?): String = when {
+    bulk.running -> "Downloading ${bulk.tracksDone}/${bulk.tracksTotal} · ${formatBytes(bulk.bytesDone)} / ${formatBytes(bulk.bytesTotal)}${bulk.current?.let { " · $it" }.orEmpty()}"
+    bulk.error != null -> bulk.error!!
+    plan.tracks.isEmpty() -> "Offline: ${playlist ?: "whole library"} downloaded"
+    !plan.fits -> "Offline: needs ${formatBytes(plan.remainingBytes)}, ${formatBytes(plan.freeBytes)} free"
+    else -> "Offline: ${plan.tracks.size} tracks to download (${formatBytes(plan.remainingBytes)}) · ${playlist ?: "whole library"}"
 }

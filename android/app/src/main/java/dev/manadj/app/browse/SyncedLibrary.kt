@@ -22,9 +22,15 @@ class SyncedLibrary(val lib: Library, private val repo: LibraryRepository) : Lib
     /** Desktop preview bins grouped low/mid/high, decimated for a row-sized strip. */
     fun preview(id: Long): WaveformPreview? = previews.getOrPut(id) {
         val wf = lib.track(id.toInt())?.let(lib::preview) ?: return@getOrPut null
-        val n = minOf(96, wf.low.size).coerceAtLeast(1)
+        // Desktop preview path: per-frame groupAmps of the 'minimap' style (gains, soft limit, master), max-decimated.
+        val style = lib.waveformStyles.minimap
+        val frames = wf.bandFrames
+        if (frames == 0) return@getOrPut null
+        val g = Array(3) { FloatArray(frames) }
+        for (f in 0 until frames) style.groupHeights(wf.bandsAt(f)).forEachIndexed { k, v -> g[k][f] = v }
+        val n = minOf(110, frames).coerceAtLeast(1)
         fun dec(a: FloatArray) = FloatArray(n) { i -> val from = i * a.size / n; val to = maxOf(from + 1, (i + 1) * a.size / n); (from until to).maxOf { a[it] } }
-        WaveformPreview(n, dec(wf.low), dec(wf.mid), dec(wf.high))
+        WaveformPreview(n, dec(g[0]), dec(g[1]), dec(g[2]))
     }
     override fun tracks() = rows
     override fun allTags() = lib.tags.map { TrackTag(it.name, it.categoryName, it.argb ?: 0xff7f849c.toInt()) }

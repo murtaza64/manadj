@@ -105,6 +105,7 @@ import dev.manadj.audio.DeckId
             Row(Modifier.fillMaxWidth().height(40.dp)) { for (s in listOf(6.0, 8.0, 12.0, 16.0, 24.0)) Key("${s.toInt()}s", Modifier.weight(1f).fillMaxHeight(), Ink.accent, engaged = kotlin.math.abs(ux.waveSeconds - s) < .5, textSize = 12) { ux.chooseWaveSeconds(s) } }
             Key("OUTPUT / ROUTING", Modifier.fillMaxWidth().height(44.dp), Ink.accent, icon = Glyph.Headphones) { ux.settings = false; model.outputPanel = true }
             LibrarySync(ux)
+            FilterSettingsPanel(model)
             Text("manadj Android · UI #371 · engine #369/#370", color = Ink.muted, size = 10)
         }
     }
@@ -138,11 +139,23 @@ import dev.manadj.audio.DeckId
 
 fun visibleOther(id: DeckId) = if (id == DeckId.A) DeckId.B else DeckId.A
 
-/** Desktop library sync (#372/#373): URL + pairing code from desktop Settings › Library › Phone sync, + status. */
+/**
+ * Desktop library (#372-#376): zero-typing pairing (DNS-SD discovery → approve on the desktop, match code shown
+ * big), manual address as a collapsed fallback, SYNC (dot = unsynced phone edits), bulk offline download.
+ */
 @Composable private fun LibrarySync(ux: UiModel) {
     val context = androidx.compose.ui.platform.LocalContext.current
+    val holder = dev.manadj.app.library.LibraryHolder
     var url by remember { mutableStateOf(ux.repo.baseUrl) }
-    var pair by remember { mutableStateOf(dev.manadj.app.library.LibraryHolder.pairCode(context)) }
+    var pair by remember { mutableStateOf(holder.pairCode(context)) }
+    var manual by remember { mutableStateOf(false) }
+    var paired by remember { mutableStateOf(holder.isPaired(context)) }
+    var pairing by remember { mutableStateOf<dev.manadj.library.PairingState>(dev.manadj.library.PairingState.Idle) }
+    val discovery = remember { dev.manadj.app.library.DesktopDiscovery(context) }
+    DisposableEffect(Unit) { discovery.start(); onDispose { discovery.stop() } }
+    val found by discovery.found.collectAsState()
+    val searching by discovery.searching.collectAsState()
+    val bulk by ux.repo.bulk.collectAsState()
     val st = ux.syncState
     @Composable fun Field(value: String, hint: String, m: Modifier, onChange: (String) -> Unit) =
         Box(m.fillMaxHeight().clip(RoundedCornerShape(50)).background(Ink.crust).border(1.dp, Ink.surface, RoundedCornerShape(50)).padding(horizontal = 12.dp), contentAlignment = Alignment.CenterStart) {
@@ -150,19 +163,71 @@ fun visibleOther(id: DeckId) = if (id == DeckId.A) DeckId.B else DeckId.A
             androidx.compose.foundation.text.BasicTextField(value, onChange, Modifier.fillMaxWidth(), singleLine = true, textStyle = androidx.compose.ui.text.TextStyle(color = Ink.text, fontSize = androidx.compose.ui.unit.TextUnit(13f, androidx.compose.ui.unit.TextUnitType.Sp), fontFamily = Mono), cursorBrush = androidx.compose.ui.graphics.SolidColor(Ink.accent))
         }
     Text("Desktop library", bold = true)
-    Text("Desktop › Settings › Library › Phone sync shows the URL (http://<ip>:48127) and pairing code. Over USB: adb reverse tcp:8127 → http://127.0.0.1:8127.", color = Ink.muted, size = 11, lines = 3)
-    Row(Modifier.fillMaxWidth().height(40.dp), verticalAlignment = Alignment.CenterVertically) {
-        Field(url, "http://<desktop ip>:48127", Modifier.weight(1f)) { url = it; dev.manadj.app.library.LibraryHolder.setUrl(context, it) }
+    when (val p = pairing) {
+        is dev.manadj.library.PairingState.AwaitingApproval -> {
+            Text("Check that ${p.desktop} shows", color = Ink.muted, size = 12)
+            Text(p.matchCode, color = Ink.warning, size = 40, bold = true)
+            Text("then approve there.", color = Ink.muted, size = 12)
+        }
+        is dev.manadj.library.PairingState.Requesting -> Text("Asking the desktop…", color = Ink.muted, size = 12)
+        is dev.manadj.library.PairingState.Failed -> Text(p.reason, color = Ink.warning, size = 12, lines = 2)
+        is dev.manadj.library.PairingState.Paired -> Text("Paired with ${p.desktop}", color = Ink.play, size = 12, bold = true)
+        else -> {}
     }
-    Row(Modifier.fillMaxWidth().height(40.dp), verticalAlignment = Alignment.CenterVertically) {
-        Field(pair, "Pairing code", Modifier.weight(1f)) { pair = it; dev.manadj.app.library.LibraryHolder.setPairCode(context, it) }
-        Spacer(Modifier.width(8.dp))
-        Key(if (st.running) "SYNCING" else "SYNC", Modifier.width(96.dp).fillMaxHeight(), Ink.accent, !st.running, st.running, style = KeyStyle.PILL) { ux.sync() }
+    if (paired) Row(Modifier.fillMaxWidth().height(36.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text("Paired · ${ux.repo.baseUrl}", Modifier.weight(1f), Ink.play, 12, true)
+        Key("UNPAIR", Modifier.width(84.dp).fillMaxHeight(), Ink.muted, textSize = 11, style = KeyStyle.PILL) { holder.unpair(context); paired = false; pairing = dev.manadj.library.PairingState.Idle }
+    } else {
+        Text(if (found.isEmpty()) (if (searching) "Looking for manadj desktops on this network…" else "No desktop found — open manadj on the desktop (same Wi-Fi).") else "Desktops on this network:", color = Ink.muted, size = 11, lines = 2)
+        for (d in found) Row(Modifier.fillMaxWidth().height(40.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) { Text(d.name, bold = true); Text(d.url, color = Ink.muted, size = 10) }
+            Key("PAIR", Modifier.width(84.dp).fillMaxHeight(), Ink.accent, pairing !is dev.manadj.library.PairingState.Requesting, style = KeyStyle.PILL, textSize = 12) {
+                holder.pair(context, d) { s -> pairing = s; if (s is dev.manadj.library.PairingState.Paired) { paired = true; url = d.url } }
+            }
+        }
+    }
+    Row(Modifier.fillMaxWidth().height(36.dp), verticalAlignment = Alignment.CenterVertically) {
+        Key(if (manual) "▾ Enter address manually" else "▸ Enter address manually", Modifier.weight(1f).fillMaxHeight(), Ink.muted, textSize = 11, style = KeyStyle.BARE) { manual = !manual }
+        Box {
+            Key(if (st.running) "SYNCING" else "SYNC", Modifier.width(96.dp).height(36.dp), Ink.accent, !st.running, st.running, style = KeyStyle.PILL) { ux.sync() }
+            if (st.pendingEdits > 0) Box(Modifier.align(Alignment.TopEnd).size(10.dp).clip(RoundedCornerShape(50)).background(Ink.warning))
+        }
+    }
+    if (manual) {
+        Text("Desktop › Settings › Library › Phone sync shows the URL and pairing code. Over USB: adb reverse tcp:8127 → http://127.0.0.1:8127.", color = Ink.muted, size = 11, lines = 3)
+        Row(Modifier.fillMaxWidth().height(40.dp)) { Field(url, "http://<desktop ip>:48127", Modifier.weight(1f)) { url = it; holder.setUrl(context, it) } }
+        Row(Modifier.fillMaxWidth().height(40.dp)) { Field(pair, "Pairing code", Modifier.weight(1f)) { pair = it; holder.setPairCode(context, it) } }
     }
     Text(when {
         st.running -> "${st.phase ?: "Syncing"} ${st.progress?.let { "${(it * 100).toInt()}%" } ?: ""}"
         st.error != null -> "Error: ${st.error}"
-        st.lastSynced != null -> "${st.trackCount} tracks · ${st.previewCount} waveforms · ${st.audioCount} on phone"
+        st.lastSynced != null -> "${st.trackCount} tracks · ${st.previewCount} waveforms · ${st.audioCount} on phone" + if (st.pendingEdits > 0) " · ${st.pendingEdits} edits to sync" else ""
         else -> "Not synced — the track list shows a fixture."
     }, color = if (st.error != null) Ink.warning else Ink.muted, size = 11, lines = 2)
+    if (ux.synced != null) BulkDownload(ux, null)
+}
+
+/** Bulk offline download for the whole library ([playlistId] null) or one playlist; progress + cancel. */
+@Composable fun BulkDownload(ux: UiModel, playlistId: Int?, compact: Boolean = false) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val bulk by ux.repo.bulk.collectAsState()
+    val mine = bulk.running && bulk.playlistId == playlistId
+    val notify = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) { dev.manadj.app.library.LibraryHolder.downloadAll(context, playlistId) }
+    fun start() {
+        if (android.os.Build.VERSION.SDK_INT >= 33 && context.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) notify.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+        else dev.manadj.app.library.LibraryHolder.downloadAll(context, playlistId)
+    }
+    if (mine) {
+        Row(Modifier.fillMaxWidth().height(if (compact) 30.dp else 36.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("${bulk.tracksDone}/${bulk.tracksTotal} · ${dev.manadj.library.formatBytes(bulk.bytesDone)}/${dev.manadj.library.formatBytes(bulk.bytesTotal)}" + (bulk.current?.let { " · $it" } ?: ""), Modifier.weight(1f), Ink.muted, 10)
+            Key("CANCEL", Modifier.width(76.dp).fillMaxHeight(), Ink.warning, textSize = 10, style = KeyStyle.PILL) { dev.manadj.app.library.LibraryHolder.cancelDownloadAll(context) }
+        }
+        Box(Modifier.fillMaxWidth().height(3.dp).background(Ink.surface)) { Box(Modifier.fillMaxWidth(bulk.progress ?: 0f).fillMaxHeight().background(Ink.play)) }
+    } else {
+        val plan = remember(playlistId, ux.synced, ux.downloads) { runCatching { ux.repo.bulkPlan(playlistId) }.getOrNull() }
+        val label = plan?.let { if (it.remainingBytes <= 0) "ALL ON PHONE" else "DOWNLOAD ${if (playlistId == null) "LIBRARY" else "PLAYLIST"} · ${dev.manadj.library.formatBytes(it.remainingBytes)}" } ?: "DOWNLOAD"
+        Key(label, Modifier.fillMaxWidth().height(if (compact) 30.dp else 36.dp), Ink.play, plan != null && plan.remainingBytes > 0 && plan.fits && !bulk.running, textSize = 10, style = KeyStyle.PILL) { start() }
+        if (plan != null && !plan.fits) Text("Not enough space: needs ${dev.manadj.library.formatBytes(plan.remainingBytes)}, ${dev.manadj.library.formatBytes(plan.freeBytes)} free", color = Ink.warning, size = 10)
+        if (bulk.finished && bulk.playlistId == playlistId && bulk.failed > 0) Text("${bulk.failed} tracks could not be downloaded", color = Ink.warning, size = 10)
+    }
 }

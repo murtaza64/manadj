@@ -24,8 +24,13 @@ import dev.manadj.audio.DeckId
 @Composable fun PerformanceApp(model: PlayerModel, ux: UiModel, pick: (DeckId) -> Unit) {
     for (id in model.visibleDecks) {
         val ui = model.decks.getValue(id)
-        LaunchedEffect(ui.source?.id) { ux.ensureWave(ui.source); ux.extras.getValue(id).history.clear(); if (ui.source != null) ux.loadedAt[id] = System.nanoTime() else ux.loadedAt.remove(id) }
+        LaunchedEffect(ui.source?.id) { ux.ensureWave(ui.source, model.visibleDecks.mapNotNull { model.decks.getValue(it).source?.id }.toSet()); ux.extras.getValue(id).history.clear(); if (ui.source != null) ux.loadedAt[id] = System.nanoTime() else ux.loadedAt.remove(id) }
     }
+    // Desktop filter tuning synced through the library (edits journal back from FilterSettingsPanel).
+    LaunchedEffect(ux.synced) { ux.synced?.lib?.settingJson(dev.manadj.library.PerformanceSettings.FILTER)?.let { model.updateFilterSettings(dev.manadj.audio.FilterSettings.fromJson(it)) } }
+    // Engine starts with quantize off; push the persisted preference once it can take it.
+    val canQuantize = model.supports("quantize")
+    LaunchedEffect(canQuantize) { if (canQuantize) model.setQuantize(ux.quantize) }
     // Record what was heard (strip per source position) so the waveform behind the playhead keeps it.
     val anyPlaying = model.visibleDecks.any { model.decks.getValue(it).snapshot?.playing == true }
     LaunchedEffect(anyPlaying) {
@@ -59,15 +64,18 @@ import dev.manadj.audio.DeckId
     }
 }
 
-@Composable private fun DetailWave(ui: DeckUi, ux: UiModel, modifier: Modifier, vertical: Boolean = false) {
+@Composable private fun DetailWave(ui: DeckUi, model: PlayerModel, ux: UiModel, modifier: Modifier, vertical: Boolean = false) {
     val wave = ux.waves[ui.source?.id ?: ""]
     val e = ux.extras.getValue(ui.id)
     val moving = ui.snapshot.let { it?.playing == true || it?.previewing == true }
     val frame = frameNanos(moving)
     val clock = remember(ui.id) { SmoothClock() }
-    WaveView(wave, { clock.at(frame.value, position(ui), moving && frame.value != 0L, 1 + (ui.pitch + ui.bend) / 100) }, ui.durationSeconds, marksOf(ui), modifier.semantics { contentDescription = "${ui.id} detail wave" }.pinchZoom(ux),
-        vertical = vertical, windowSeconds = ux.waveSeconds, live = { ux.strip(ui) }, history = e.history, accent = deckColor(ui.id),
-        status = when { ui.source == null -> "${ui.id} · no track"; wave == null -> "analysing…"; !wave.complete -> "analysing ${(100 * wave.frames * wave.bandHop / wave.sampleRate / (ui.durationSeconds ?: 1.0)).toInt().coerceIn(0, 99)}%"; else -> null })
+    // Engine output-timestamp clock (what is heard now), eased by SmoothClock; raw snapshot when no timestamp.
+    // Only read model.output while moving: it changes every engine tick and would redraw idle waves at 30 fps.
+    fun heard(now: Long): Double { if (now == 0L) return position(ui); val out = model.output; return if (out != null && ui.source?.id == ui.snapshot?.sourceId) out.audibleSeconds(ui.id, now) else position(ui) }
+    WaveView(wave, { clock.at(frame.value, heard(frame.value), moving && frame.value != 0L, playbackRate(ui)) }, ui.durationSeconds, marksOf(ui), modifier.semantics { contentDescription = "${ui.id} detail wave" }.pinchZoom(ux),
+        vertical = vertical, windowSeconds = ux.waveSeconds * playbackRate(ui), live = { ux.strip(ui) }, history = e.history, accent = deckColor(ui.id),
+        status = when { ui.source == null -> "${ui.id} · no track"; wave == null -> if (ux.waveSource[ui.source?.id] == "failed") "no waveform" else "analysing…"; !wave.complete -> "analysing ${(100 * wave.frames * wave.bandHop / wave.sampleRate / (ui.durationSeconds ?: 1.0)).toInt().coerceIn(0, 99)}%"; else -> null })
 }
 
 /** Deck info in the camera band (A left of the hole, B right); each half dodges the hole and corner arcs. */
@@ -80,6 +88,12 @@ import dev.manadj.audio.DeckId
 }
 
 @Composable private fun SettingsKey(ux: UiModel, modifier: Modifier = Modifier.size(40.dp)) = Key("", modifier, Ink.muted, description = "Settings", icon = Glyph.Gear, style = KeyStyle.BARE) { ux.settings = true }
+
+/** Quantize quick toggle + indicator (Settings has the same switch). */
+@Composable private fun QuantizeKey(model: PlayerModel, ux: UiModel, modifier: Modifier) {
+    val on by remember { derivedStateOf { model.output?.quantize ?: ux.quantize } }
+    Key("Q", modifier, Ink.accent, model.supports("quantize"), on, if (on) "Quantize on" else "Quantize off", style = KeyStyle.PILL, textSize = 12) { ux.quantize = !on; model.setQuantize(!on) }
+}
 
 /**
  * The one BROWSE button: swaps controls for the browser and back. `model.browser` = the deck whose controls
@@ -118,7 +132,7 @@ fun mixOf(model: PlayerModel, ux: UiModel, id: DeckId): DeckMix {
             TopBar(model, pad.fillMaxWidth().height(maxOf(band, 44.dp)))
             if (ux.outputDebug) Box(pad) { OutputLine(model) }
             Column(pad, verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                for (ui in listOf(a, b)) DetailWave(ui, ux, Modifier.fillMaxWidth().height(waveHeight))
+                for (ui in listOf(a, b)) DetailWave(ui, model, ux, Modifier.fillMaxWidth().height(waveHeight))
             }
             // The browser replaces the controls region (full-bleed); waves above and CUE/PLAY below stay.
             if (model.browser != null) {
@@ -142,7 +156,7 @@ fun mixOf(model: PlayerModel, ux: UiModel, id: DeckId): DeckMix {
             Row(pad.fillMaxWidth().height(if (tight) 36.dp else 44.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                 Minimap(a, model, ux.waves[a.source?.id ?: ""], Modifier.weight(1f).fillMaxHeight())
                 BrowseKey(model, ux, Modifier.width(72.dp).fillMaxHeight())
-                SettingsKey(ux, Modifier.width(36.dp).fillMaxHeight())
+                Column(Modifier.width(36.dp).fillMaxHeight()) { QuantizeKey(model, ux, Modifier.fillMaxWidth().weight(1f)); SettingsKey(ux, Modifier.fillMaxWidth().weight(1f)) }
                 Minimap(b, model, ux.waves[b.source?.id ?: ""], Modifier.weight(1f).fillMaxHeight())
             }
             Row(pad.fillMaxWidth().height(28.dp), horizontalArrangement = Arrangement.spacedBy(DeckGap)) { for (ui in listOf(a, b)) StemsStrip(ui, ux, model, Modifier.weight(1f).fillMaxHeight()) }
@@ -176,7 +190,7 @@ fun mixOf(model: PlayerModel, ux: UiModel, id: DeckId): DeckMix {
                 KnobColumn(a, ux, model, Modifier.width(54.dp).fillMaxHeight().padding(top = 4.dp), 34.dp)
                 ChannelFader(a, model, Modifier.width(48.dp).fillMaxHeight())
                 Row(Modifier.weight(1f).fillMaxHeight().padding(horizontal = 3.dp), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-                    for (ui in listOf(a, b)) DetailWave(ui, ux, Modifier.weight(1f).fillMaxHeight(), vertical = true)
+                    for (ui in listOf(a, b)) DetailWave(ui, model, ux, Modifier.weight(1f).fillMaxHeight(), vertical = true)
                 }
                 ChannelFader(b, model, Modifier.width(48.dp).fillMaxHeight())
                 KnobColumn(b, ux, model, Modifier.width(54.dp).fillMaxHeight().padding(top = 4.dp), 34.dp)
@@ -185,7 +199,7 @@ fun mixOf(model: PlayerModel, ux: UiModel, id: DeckId): DeckMix {
             Row(Modifier.fillMaxWidth().height(44.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 BrowseKey(model, ux, Modifier.width(76.dp).height(40.dp))
                 Crossfader(model, ux, Modifier.weight(1f).fillMaxHeight())
-                Box(Modifier.width(76.dp), contentAlignment = Alignment.Center) { SettingsKey(ux) }
+                Row(Modifier.width(76.dp), verticalAlignment = Alignment.CenterVertically) { QuantizeKey(model, ux, Modifier.weight(1f).height(32.dp)); SettingsKey(ux, Modifier.size(38.dp)) }
             }
             FxSection(ux, model, Modifier.fillMaxWidth().height(54.dp).padding(bottom = 4.dp), horizontal = true)
         }
@@ -235,4 +249,15 @@ private fun Modifier.pinchZoom(ux: UiModel): Modifier = pointerInput(Unit) {
         }
         if (zooming) ux.chooseWaveSeconds(ux.waveSeconds)
     }
+}
+
+/**
+ * One wall-clock timescale for every detail wave (desktop): a deck's track-time window = zoom × its actual
+ * playback rate (tempo × bend), so synced decks show equal beat spacing and scroll at the same px/s. The
+ * playhead stays at a fixed fraction, so rate changes rescale around it without a jump.
+ */
+fun playbackRate(ui: DeckUi): Double {
+    val s = ui.snapshot
+    val pitch = s?.pitchPercent ?: ui.pitch; val bend = s?.bendPercent ?: ui.bend
+    return ((1 + pitch / 100) * (1 + bend / 100)).coerceIn(.25, 4.0)
 }

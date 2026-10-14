@@ -29,6 +29,11 @@ class SyncTest {
     private val pushed = mutableListOf<String>()
     private val received = mutableListOf<String>()
     @Volatile private var deskTitle = "Decoy"
+    @Volatile private var waveformRequests = 0
+    @Volatile private var deskMinimapMaster = 1.16
+    @Volatile private var dropAudioAfter: Int? = null
+    @Volatile private var onAudioRequest: () -> Unit = {}
+    private val ranges = mutableListOf<String?>()
 
     private fun snapshotJson() = """
         {"version":1,"generated_at":"2026-10-14T12:00:00+00:00",
@@ -37,14 +42,17 @@ class SyncTest {
          "tracks":[
           {"id":10,"title":"$deskTitle","artist":"Synth","file_name":"decoy.mp3","bpm":174.0,"key":15,"key_openkey":"8m","key_camelot":"3A",
            "energy":4,"duration_secs":300.0,"date_added":"2026-10-01T00:00:00","main_cue":0.5,"codec":"mp3","filesize_bytes":200000,
-           "audio_rev":"r1","preview_rev":"$previewRev","tag_ids":[7],"hot_cues":[{"slot":1,"time":12.5,"label":null,"color":"#00ff00"}],
+           "audio_rev":"r1","preview_rev":"$previewRev","waveform_rev":"w1","tag_ids":[7],"hot_cues":[{"slot":1,"time":12.5,"label":null,"color":"#00ff00"}],
            "grid":{"origin":"analyzed","anchor_time":0.5,"tempo_changes":[{"start_time":0.5,"bpm":174.0,"time_signature_num":4,"bar_position":1}]}},
           {"id":11,"title":null,"artist":null,"file_name":"untitled.flac","bpm":null,"key":null,"key_openkey":null,"key_camelot":null,
            "energy":null,"duration_secs":null,"date_added":null,"main_cue":null,"codec":null,"filesize_bytes":null,
            "audio_rev":null,"preview_rev":null,"tag_ids":[],"hot_cues":[],"grid":null}],
          "playlists":[{"id":3,"name":"Set","color":null,"display_order":0,"track_ids":[11,10]}],
          "links":[[10,11]],"transitions":[{"a":10,"b":11,"count":2,"favorite":true}],
-         "cameos":[],"takes":[{"a":11,"b":10,"count":2,"last_at":"2026-10-02T00:00:00"}]}
+         "cameos":[],"takes":[{"a":11,"b":10,"count":2,"last_at":"2026-10-02T00:00:00"}],
+         "settings":{
+          "manadj.waveformStyles":{"value":{"version":1,"full":{"styleId":"additive-soft","params":{"master":1}},"minimap":{"styleId":"additive-soft","params":{"master":$deskMinimapMaster}}},"updated_at":"2026-10-14T12:00:00"},
+          "manadj-filter-settings":{"value":{"model":"res48","resonance":99,"drive":"x"},"updated_at":null}}}
     """.trimIndent()
 
     @BeforeTest fun start() {
@@ -75,7 +83,32 @@ class SyncTest {
         }
         server.createContext("/api/device-sync/tracks/10/audio") { ex ->
             audioRequests++
-            ex.sendResponseHeaders(200, audio.size.toLong()); ex.responseBody.use { it.write(audio) }
+            ranges += ex.requestHeaders.getFirst("Range")
+            onAudioRequest()
+            val from = ex.requestHeaders.getFirst("Range")?.let { Regex("bytes=(\\d+)-").find(it)!!.groupValues[1].toInt() }
+            val body = if (from != null) audio.copyOfRange(from, audio.size) else audio
+            ex.responseHeaders.add("Accept-Ranges", "bytes")
+            ex.sendResponseHeaders(if (from != null) 206 else 200, body.size.toLong())
+            try {
+                ex.responseBody.use { out ->
+                    if (dropAudioAfter != null) {
+                        out.write(body, 0, dropAudioAfter!!); out.flush()
+                        dropAudioAfter = null
+                        ex.close() // connection drops mid-file
+                    } else out.write(body)
+                }
+            } catch (_: java.io.IOException) {
+            }
+        }
+        server.createContext("/api/device-sync/tracks/") { ex ->
+            val id = ex.requestURI.path.split("/")[4].toInt()
+            if (ex.requestURI.path.endsWith("/waveform") && id == 10) {
+                waveformRequests++
+                val body = mwf1(ByteArray(2000) { (it % 200).toByte() }, duration = 5.8)
+                ex.sendResponseHeaders(200, body.size.toLong()); ex.responseBody.use { it.write(body) }
+            } else {
+                ex.sendResponseHeaders(404, -1); ex.close()
+            }
         }
         server.createContext("/api/device-sync/edits") { ex ->
             val body = ex.requestBody.readBytes().decodeToString()
@@ -121,6 +154,9 @@ class SyncTest {
         assertEquals(RowMarks(TransitionMark.FAVORITED, true), library.marks(10, 11))
         assertEquals(1, repo.state.value.previewCount)
         assertEquals(listOf(11, 10), library.playlistTracks(3).map { it.id })
+        assertEquals("additive-soft", library.waveformStyles.full.styleId)
+        assertEquals(1.16f, library.waveformStyles.minimap.master)
+        assertEquals(99, org.json.JSONObject(library.settingJson(PerformanceSettings.FILTER)!!).getInt("resonance")) // raw: the engine sanitizes
 
         server.stop(0) // desktop gone: a fresh repository opens the cache
         val offline = repo()
@@ -208,6 +244,112 @@ class SyncTest {
         assertEquals(1, received.size) // the desktop's title change reached the phone
         assertTrue(received[0].contains("\"field\":\"title\"") && !received[0].contains("hot_cue"))
         assertEquals(false, repo.edit(10, TrackEdit.Title("Decoy (desk edit)"))) // no-op edit
+    }
+
+    @Test fun detailWaveformFetchedOnceAndCachedOffline() = runBlocking {
+        val repo = repo()
+        repo.sync().getOrThrow()
+        val wf = repo.detailWaveform(10)!!
+        assertEquals(2000, wf.bins)
+        assertEquals(128.0 / 44100, wf.secondsPerPeak)
+        assertEquals(512.0 / 44100, wf.secondsPerBand)
+        assertEquals(2048, wf.stftWindow)
+        assertEquals(wf, repo.detailWaveform(10))
+        assertEquals(null, repo.detailWaveform(11)) // no waveform_rev
+        repo.audioFile(10) // the offline unit: waveform already stored, not refetched
+        assertEquals(1, waveformRequests)
+
+        server.stop(0)
+        val offline = repo().also { it.open() }
+        assertEquals(2000, offline.detailWaveform(10)!!.bins)
+    }
+
+    @Test fun audioDownloadResumesWithRange() = runBlocking {
+        val repo = repo()
+        repo.sync().getOrThrow()
+        dropAudioAfter = 70_000
+        assertTrue(runCatching { repo.audioFile(10) }.isFailure)
+        val part = partFile(repo.store.audioFile(repo.library.value!!.track(10)!!)!!)
+        val partLen = part.length()
+        assertTrue(partLen in 1..70_000)
+        val file = repo.audioFile(10)
+        assertTrue(file.readBytes().contentEquals(audio))
+        assertEquals(2, ranges.size)
+        assertEquals(null, ranges[0])
+        assertEquals("bytes=$partLen-", ranges[1])
+        assertTrue(!part.exists())
+    }
+
+    @Test fun bulkDownloadsMissingAudioAndWaveforms() = runBlocking {
+        val repo = repo()
+        repo.sync().getOrThrow()
+        val plan = repo.bulkPlan(3)
+        assertEquals(listOf(10), plan.tracks.map { it.id })
+        assertEquals(200_000, plan.bytes)
+        val done = repo.downloadAll(3).getOrThrow()
+        assertEquals(1, done.tracksDone)
+        assertEquals(200_000, done.bytesDone)
+        assertTrue(done.finished && !done.running)
+        assertEquals("Set", done.scopeName)
+        assertTrue(repo.store.hasWaveform(repo.library.value!!.track(10)!!))
+        assertEquals(1, repo.state.value.audioCount)
+        assertEquals(emptyList(), repo.bulkPlan(null).tracks) // everything cached: a re-run is a no-op
+        assertEquals(0, repo.downloadAll().getOrThrow().tracksTotal)
+        assertEquals(1, audioRequests)
+    }
+
+    @Test fun bulkCancelKeepsPartialForResume() = runBlocking {
+        val repo = repo()
+        repo.sync().getOrThrow()
+        onAudioRequest = { repo.cancelBulk() }
+        val stopped = repo.downloadAll().getOrThrow()
+        assertTrue(stopped.cancelled && !stopped.finished)
+        assertEquals(0, stopped.tracksDone)
+        onAudioRequest = {}
+        val done = repo.downloadAll().getOrThrow()
+        assertEquals(1, done.tracksDone)
+        assertEquals(1, repo.state.value.audioCount)
+    }
+
+    @Test fun bulkPlanRefusesWhenSpaceShort() {
+        val plan = BulkPlan(emptyList(), bytes = 10L shl 30, remainingBytes = 10L shl 30, freeBytes = 4L shl 30)
+        assertTrue(!plan.fits)
+        assertTrue(BulkPlan(emptyList(), 0, 0, LibraryRepository.SPACE_MARGIN_BYTES).fits)
+    }
+
+    @Test fun settingsEditsOverlayPushAndReceivedDiff() = runBlocking {
+        val repo = repo()
+        repo.sync().getOrThrow()
+        val filterKey = PerformanceSettings.FILTER
+        fun filter(r: LibraryRepository) = org.json.JSONObject(r.library.value!!.settingJson(filterKey)!!)
+        val edited = filter(repo).put("resonance", 12.0)
+        assertTrue(repo.editSetting(filterKey, edited))
+        assertEquals(false, repo.editSetting(filterKey, org.json.JSONObject(edited.toString()))) // no-op
+        assertEquals(12.0, filter(repo).getDouble("resonance"))
+        assertEquals("res48", filter(repo).getString("model"))
+        val styles = repo.library.value!!.waveformStyles
+        assertTrue(repo.editWaveformStyles(styles.copy(full = styles.full.copy(coreWhite = 0.32f))))
+        assertEquals(0.32f, repo.library.value!!.waveformStyles.full.coreWhite)
+        assertEquals(2, repo.state.value.pendingEdits)
+        assertEquals(12.0, filter(repo().also { it.open() }).getDouble("resonance")) // survives restart
+
+        repo.sync().getOrThrow()
+        val push = org.json.JSONObject(pushed.single()).getJSONArray("edits")
+        val edits = (0 until push.length()).map(push::getJSONObject).associateBy { it.getString("field") }
+        val filter = edits.getValue("setting:manadj-filter-settings")
+        assertTrue(filter.isNull("track_id"))
+        assertEquals(12.0, filter.getJSONObject("new").getDouble("resonance"))
+        assertEquals("x", filter.getJSONObject("new").get("drive")) // untouched raw values round-trip
+        val full = edits.getValue("setting:manadj.waveformStyles").getJSONObject("new").getJSONObject("full").getJSONObject("params")
+        assertEquals("0.32", full.get("coreWhite").toString())
+        assertTrue(!full.has("gains")) // unchanged fields not invented
+        assertEquals(0, repo.state.value.pendingEdits)
+        assertTrue(received.isEmpty())
+
+        deskMinimapMaster = 2.5 // the desktop changes a setting: reported as received
+        repo.sync().getOrThrow()
+        assertTrue(received.single().contains("setting:manadj.waveformStyles"))
+        assertEquals(2.5f, repo.library.value!!.waveformStyles.minimap.master)
     }
 
     @Test fun presyncAudio() = runBlocking {

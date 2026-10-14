@@ -39,7 +39,7 @@ import dev.manadj.audio.*
 
 /**
  * One central Beat FX section, inline: effect / target / beats are hold-wheels (like jump size), DEPTH a knob,
- * ON a lit pill in the effect's identity color. Audio pending in the engine.
+ * ON a lit pill in the effect's identity color (pulses while an insert is audible, incl. tails).
  */
 @Composable fun FxSection(ux: UiModel, model: PlayerModel, modifier: Modifier, horizontal: Boolean = false) {
     val fx = ux.fx
@@ -48,11 +48,17 @@ import dev.manadj.audio.*
     val tone = Color(fx.effect.color)
     val color = if (usable) tone else Ink.surface2
     val targetColor = when (fx.target) { 0 -> deckColor(DeckId.A); 1 -> deckColor(DeckId.B); else -> Ink.accent }
+    // The UI section is the single writer: every change sends the whole section (engine SetBeatFx contract).
+    if (live) LaunchedEffect(Unit) {
+        snapshotFlow { dev.manadj.audio.BeatFxState(dev.manadj.audio.BeatFxEffect.entries[fx.effect.ordinal], listOf(dev.manadj.audio.BeatFxTarget.A, dev.manadj.audio.BeatFxTarget.B, dev.manadj.audio.BeatFxTarget.MASTER)[fx.target], fx.on, fx.depth * 2 - 1, FX_BEATS[fx.beats]) }
+            .collect { model.updateBeatFx(it) }
+    }
+    val audible by remember { derivedStateOf { model.output?.beatFxAudible?.isNotEmpty() == true } }
     @Composable fun Effect(m: Modifier) = ValueWheel("FX effect", FxEffect.entries.map { it.label }, fx.effect.ordinal, ux, model, DeckId.A, m, color, if (horizontal) fx.effect.short else fx.effect.label, Glyph.Fx, live, tagPending = false, onTap = { if (usable) fx.effect = FxEffect.entries[(fx.effect.ordinal + 1) % FxEffect.entries.size] }) { fx.effect = FxEffect.entries[it] }
     @Composable fun Target(m: Modifier) = ValueWheel("FX target", FX_TARGETS, fx.target, ux, model, DeckId.A, m, if (usable) targetColor else Ink.surface2, "→ ${FX_TARGETS[fx.target]}", live = live, tagPending = false, onTap = { if (usable) fx.target = (fx.target + 1) % FX_TARGETS.size }) { fx.target = it }
-    @Composable fun Beats(m: Modifier) = ValueWheel("FX beats", FX_BEATS.map(::beatText), fx.beats, ux, model, DeckId.A, m, color, if (fx.effect == FxEffect.REVERB) "∞" else "${beatText(FX_BEATS[fx.beats])} BT", live = live, tagPending = false) { fx.beats = it }
+    @Composable fun Beats(m: Modifier) = ValueWheel("FX beats", FX_BEATS.map(::beatText), fx.beats, ux, model, DeckId.A, m, color, if (fx.effect == FxEffect.REVERB) "∞" else "${beatText(FX_BEATS[fx.beats])} ${if (fx.effect == FxEffect.FLANGER) "BAR" else "BT"}", live = live, tagPending = false) { fx.beats = it }
     @Composable fun Depth(m: Modifier) = Knob("DEPTH", KnobKind.FX_DEPTH, fx.depth, ux, model, DeckId.A, m, live, 40.dp, tagPending = false) { v, _ -> fx.depth = v }
-    @Composable fun On(m: Modifier) = Key(if (fx.on) "ON" else "OFF", m, color, usable, fx.on && usable, if (fx.on) "FX ON" else "FX OFF", style = KeyStyle.PILL, pulse = if (fx.on && usable) .3f else 0f, textSize = 15) { if (usable) fx.on = !fx.on else ux.pending("Beat FX") }
+    @Composable fun On(m: Modifier) = Key(if (fx.on) "ON" else "OFF", m, color, usable, fx.on && usable, if (fx.on) "FX ON" else "FX OFF", style = KeyStyle.PILL, pulse = if (audible || (fx.on && !live && usable)) .3f else 0f, textSize = 15) { if (usable) fx.on = !fx.on else ux.pending("Beat FX") }
     val card = Modifier.clip(RoundedCornerShape(10.dp)).background(Brush.verticalGradient(listOf(tone.copy(alpha = if (usable) .10f else .03f), Color.Transparent))).border(1.dp, color.copy(alpha = .35f), RoundedCornerShape(10.dp))
     if (horizontal) Row(modifier.then(card).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
         On(Modifier.width(64.dp).fillMaxHeight()); Effect(Modifier.weight(1f).fillMaxHeight()); Target(Modifier.width(72.dp).fillMaxHeight()); Beats(Modifier.width(76.dp).fillMaxHeight()); Depth(Modifier.width(56.dp).fillMaxHeight())

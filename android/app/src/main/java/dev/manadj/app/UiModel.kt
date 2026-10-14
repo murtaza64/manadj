@@ -105,6 +105,7 @@ class UiModel(application: Application) : AndroidViewModel(application) {
     fun deleteCue(model: PlayerModel, deck: DeckId, slot: Int) {
         val at = model.decks.getValue(deck).hotCues[slot] ?: return
         model.submit(dev.manadj.audio.AudioCommand.ClearHotCue(deck, slot))
+        journalCue(model, deck, slot, null)
         shiftLatched[deck] = false
         undoCue = Triple(deck, slot, at)
         undoJob?.cancel(); undoJob = viewModelScope.launch { delay(5000); undoCue = null }
@@ -112,7 +113,21 @@ class UiModel(application: Application) : AndroidViewModel(application) {
     fun undoDelete(model: PlayerModel) {
         val (deck, slot, at) = undoCue ?: return
         model.submit(dev.manadj.audio.AudioCommand.SetHotCueAt(deck, slot, at))
+        journalCue(model, deck, slot, at)
         undoCue = null; undoJob?.cancel()
+    }
+
+    /**
+     * Phone hot-cue edits on library decks go through the library edit journal (#375: applied locally, pushed
+     * on sync, newest-wins on the desktop). Local-file decks stay engine-only. Slots: UI 0..7, library 1..8.
+     */
+    fun journalCue(model: PlayerModel, deck: DeckId, slot: Int, time: Double?) {
+        val id = dev.manadj.app.library.LibraryHolder.trackOn(model, deck) ?: return
+        dev.manadj.app.library.LibraryHolder.edit(getApplication(), id, dev.manadj.library.TrackEdit.HotCueSet(slot + 1, time))
+    }
+    /** A pad SET places the cue engine-side (quantized); journal it once the snapshot shows where. */
+    fun journalCueWhenSet(model: PlayerModel, deck: DeckId, slot: Int) = viewModelScope.launch {
+        repeat(40) { model.decks.getValue(deck).hotCues[slot]?.let { journalCue(model, deck, slot, it); return@launch }; delay(25) }
     }
 
     /** Library row waiting for "replace the playing deck?" confirmation. */
@@ -135,7 +150,10 @@ class UiModel(application: Application) : AndroidViewModel(application) {
     var filtersOpen by mutableStateOf(false)
 
     init {
-        viewModelScope.launch { repo.library.collect { lib -> synced = lib?.let { SyncedLibrary(it, repo) } } }
+        viewModelScope.launch { repo.library.collect { lib ->
+            synced = lib?.let { SyncedLibrary(it, repo) }
+            lib?.waveformStyles?.let { WaveStyle.full = WaveStyle.of(it.full); WaveStyle.minimap = WaveStyle.of(it.minimap) }
+        } }
         viewModelScope.launch { repo.state.collect { syncState = it } }
         viewModelScope.launch { repo.downloads.collect { downloads++ } }
     }
@@ -143,14 +161,31 @@ class UiModel(application: Application) : AndroidViewModel(application) {
     // Waveform analysis cache by source id.
     val waves = mutableStateMapOf<String, WaveformData>()
     private val analysing = mutableMapOf<String, Job>()
-    fun ensureWave(source: LocalSource?) {
+    /**
+     * Waveform for a deck's source, owned by the ViewModel (survives rotation / browser): the desktop detail
+     * waveform for library tracks (cache/sync, bounded wait), else phone analysis. Failures are retried on the
+     * next call; sources on a deck are never evicted.
+     */
+    fun ensureWave(source: LocalSource?, onDecks: Set<String> = emptySet()) {
         if (source == null || waves[source.id]?.complete == true || analysing[source.id]?.isActive == true) return
         analysing[source.id] = viewModelScope.launch(Dispatchers.Default) {
-            WaveformAnalyzer.analyze(getApplication(), source.uri, source.durationSeconds, { !isActive }) { data -> viewModelScope.launch(Dispatchers.Main) { waves[source.id] = data } }
+            val trackId = source.id.takeIf { it.startsWith("library:") }?.removePrefix("library:")?.substringBefore(':')?.toIntOrNull()
+            val desktop = trackId?.let { withTimeoutOrNull(4000) { runCatching { dev.manadj.app.library.LibraryHolder.detailWaveform(getApplication(), it) }.getOrNull() } }
+            if (desktop != null && desktop.sampleRate > 0 && desktop.bandHop > 0 && desktop.nBands == 8 && desktop.bands.isNotEmpty()) {
+                val data = WaveformData(desktop.sampleRate, desktop.durationSecs, desktop.peakHop, desktop.bandHop, desktop.stftWindow, desktop.peaks, desktop.bands, desktop.bands.size / 8)
+                withContext(Dispatchers.Main) { waves[source.id] = data; waveSource[source.id] = "desktop" }
+                return@launch
+            }
+            val t0 = System.nanoTime()
+            val result = WaveformAnalyzer.analyze(getApplication(), source.uri, source.durationSeconds, { !isActive }) { data -> viewModelScope.launch(Dispatchers.Main) { waves[source.id] = data } }
+            android.util.Log.i("ManadjWave", "${source.id}: phone analysis ${if (result == null) "FAILED" else "ok"} in ${(System.nanoTime() - t0) / 1_000_000} ms (desktop waveform ${if (trackId == null) "n/a" else "missing"})")
+            withContext(Dispatchers.Main) { waveSource[source.id] = if (result == null) "failed" else "phone" }
         }
-        // Keep at most the four most recent analyses in memory.
-        while (waves.size > 4) waves.remove(waves.keys.first())
+        val keep = onDecks + source.id
+        while (waves.size > 6) { val victim = waves.keys.firstOrNull { it !in keep } ?: break; waves.remove(victim) }
     }
+    /** Where each wave came from (desktop / phone / failed) — diagnostics. */
+    val waveSource = mutableStateMapOf<String, String>()
 
     /** Live strip for the waveform: engine EQ when the engine applies it, else the preview values. */
     fun strip(deck: DeckUi, engineEq: Boolean = deck.snapshot != null): Strip {

@@ -105,6 +105,38 @@ object LibraryHolder {
         scope.launch { repo.edit(trackId, edit) }
     }
 
+    /**
+     * Change a synced setting on the phone (#375), e.g. the DJ filter:
+     * `editSetting(ctx, PerformanceSettings.FILTER, audioFilterSettings.toJson())`.
+     * Applies now (`library.settingJson`), syncs back to the desktop.
+     */
+    fun editSetting(context: Context, key: String, json: org.json.JSONObject) {
+        val repo = repository(context)
+        scope.launch { repo.editSetting(key, json) }
+    }
+
+    /** Change the Waveform style slots on the phone (#375): applies now, syncs back to the desktop. */
+    fun editWaveformStyles(context: Context, styles: dev.manadj.library.WaveformStyles) {
+        val repo = repository(context)
+        scope.launch { repo.editWaveformStyles(styles) }
+    }
+
+    // ── Offline (bulk) download ──
+
+    /**
+     * Download audio + detail waveforms for every uncached track of
+     * [playlistId] (null = whole Library) in a foreground service. Progress:
+     * `repository(context).bulk`; size/space preview: `bulkPlan(playlistId)`.
+     * Android 13+: request POST_NOTIFICATIONS first or the progress notification is hidden.
+     */
+    fun downloadAll(context: Context, playlistId: Int? = null) = LibraryDownloadService.start(context, playlistId)
+
+    fun cancelDownloadAll(context: Context) = repository(context).cancelBulk()
+
+    /** The desktop's detail waveform for a library track (offline cache, else fetched); null if none. */
+    suspend fun detailWaveform(context: Context, trackId: Int): dev.manadj.library.DetailWaveform? =
+        repository(context).detailWaveform(trackId)
+
     /** The library Track id a deck holds, when it was loaded from the Library. */
     fun trackOn(model: PlayerModel, deck: DeckId): Int? =
         model.decks.getValue(deck).source?.id?.takeIf { it.startsWith(SOURCE_PREFIX) }

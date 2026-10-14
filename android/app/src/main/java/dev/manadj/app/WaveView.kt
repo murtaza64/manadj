@@ -37,6 +37,10 @@ private fun softLimit(x: Float) = if (x <= .6f) x else .6f + .4f * (1 - exp(-(x 
  */
 class WaveStyle(val colors: Array<FloatArray>, val coreWhite: Float, val coreBloom: Float, val master: Float) {
     companion object {
+        /** Desktop manadj.waveformStyles from the synced library (slots 'full' / 'minimap'); shipped defaults until synced. */
+        var full by mutableStateOf<WaveStyle?>(null)
+        var minimap by mutableStateOf<WaveStyle?>(null)
+        fun of(s: dev.manadj.library.WaveformStyle) = WaveStyle(s.colors.map { floatArrayOf(it.r, it.g, it.b) }.toTypedArray(), s.coreWhite, s.coreBloom, s.master)
         val FULL = WaveStyle(arrayOf(floatArrayOf(.7804f, .0588f, .0588f), floatArrayOf(.2353f, .6863f, .0706f), floatArrayOf(.0588f, .5922f, 1f)), .32f, .3f, 1f)
         val MINIMAP = WaveStyle(arrayOf(floatArrayOf(.8039f, .0157f, .0157f), floatArrayOf(.0196f, .6392f, .1765f), floatArrayOf(.1333f, .6235f, .9255f)), .12f, .42f, 1.16f)
     }
@@ -94,7 +98,7 @@ private fun columnGroups(data: WaveformData, t0: Double, t1: Double, out: FloatA
  * Batched painter: segments bucketed per (nesting level, style color) so a column's outer bands draw first
  * and the whole lane costs a few drawLines calls.
  */
-private class Lines(private val style: WaveStyle) {
+private class Lines(val style: WaveStyle) {
     private class Bucket(var buf: FloatArray, var count: Int = 0)
     private val levels = Array(3) { LinkedHashMap<Int, Bucket>() }
     fun reset() { for (l in levels) for (b in l.values) b.count = 0 }
@@ -138,6 +142,7 @@ fun marksOf(ui: DeckUi) = ui.snapshot.let { s -> WaveMarks(s?.cueSeconds, ui.hot
     val columns = remember { ColumnCache() }
     // Overview body depends only on data + size: cache it as a bitmap, overlay markers per frame.
     var cache by remember { mutableStateOf<Triple<WaveformData, IntSize2, ImageBitmap>?>(null) }
+    var overviewStyle by remember { mutableStateOf<WaveStyle?>(null) }
     Box(modifier.clipToBounds().background(Ink.background)) {
         Canvas(Modifier.fillMaxSize()) {
             val along = if (vertical) size.height else size.width
@@ -153,7 +158,8 @@ fun marksOf(ui: DeckUi) = ui.snapshot.let { s -> WaveMarks(s?.cueSeconds, ui.hot
                 if (overview) {
                     val key = IntSize2(size.width.toInt(), size.height.toInt())
                     val c = cache
-                    val image = if (c != null && c.first === data && c.second == key) c.third else renderOverview(data, key, dur, vertical).also { cache = Triple(data, key, it) }
+                    val style = WaveStyle.minimap ?: WaveStyle.MINIMAP
+                    val image = if (c != null && c.first === data && c.second == key && overviewStyle === style) c.third else renderOverview(data, key, dur, vertical, style).also { cache = Triple(data, key, it); overviewStyle = style }
                     drawImage(image)
                     val p = at(pos).coerceIn(0f, along)
                     drawRect(Color.Black.copy(alpha = .5f), Offset.Zero, if (vertical) Size(size.width, p) else Size(p, size.height))
@@ -162,7 +168,8 @@ fun marksOf(ui: DeckUi) = ui.snapshot.let { s -> WaveMarks(s?.cueSeconds, ui.hot
                     // the body translates by a whole-pixel offset: pixel-consistent scrolling, no resampling.
                     val step = 2
                     val count = (along / step).toInt() + 2
-                    val l = lines ?: Lines(WaveStyle.FULL).also { lines = it }
+                    val style = WaveStyle.full ?: WaveStyle.FULL
+                    val l = lines?.takeIf { it.style === style } ?: Lines(style).also { lines = it }
                     l.reset()
                     val g = FloatArray(3); val top = FloatArray(3)
                     val liveStrip = live()
@@ -236,16 +243,16 @@ fun marksOf(ui: DeckUi) = ui.snapshot.let { s -> WaveMarks(s?.cueSeconds, ui.hot
 private data class IntSize2(val w: Int, val h: Int)
 
 /** Bottom-anchored minimap body (desktop minimap mode), drawn once into a bitmap. */
-private fun renderOverview(data: WaveformData, size: IntSize2, duration: Double, vertical: Boolean): ImageBitmap {
+private fun renderOverview(data: WaveformData, size: IntSize2, duration: Double, vertical: Boolean, style: WaveStyle): ImageBitmap {
     val bitmap = Bitmap.createBitmap(max(1, size.w), max(1, size.h), Bitmap.Config.ARGB_8888)
     val canvas = android.graphics.Canvas(bitmap)
     val paint = Paint().apply { strokeWidth = 1f }
     val along = if (vertical) size.h else size.w; val across = if (vertical) size.w else size.h
-    val l = Lines(WaveStyle.MINIMAP); val g = FloatArray(3)
+    val l = Lines(style); val g = FloatArray(3)
     val dur = duration.coerceAtLeast(1.0)
     for (p in 0 until along) {
         columnGroups(data, p.toDouble() / along * dur, (p + 1.0) / along * dur, g)
-        for (j in 0..2) g[j] = (g[j] * WaveStyle.MINIMAP.master).coerceAtMost(1f)
+        for (j in 0..2) g[j] = (g[j] * style.master).coerceAtMost(1f)
         l.column(g) { level, mask, h -> val e = h * across; if (vertical) l.add(level, mask, 0f, p + .5f, e, p + .5f) else l.add(level, mask, p + .5f, across.toFloat(), p + .5f, across - e) }
     }
     l.draw(canvas, paint)
@@ -331,3 +338,18 @@ class SmoothClock {
 
 /** Display-frame time while [active] (0 otherwise); read it in a draw lambda to redraw every frame. */
 @Composable fun frameNanos(active: Boolean): State<Long> = produceState(0L, active) { while (active) withFrameNanos { value = it } }
+
+/** Browser row preview: group heights per bin, bottom-anchored, in the given style. */
+fun renderPreview(p: dev.manadj.app.browse.WaveformPreview, w: Int, h: Int, style: WaveStyle): ImageBitmap {
+    val bitmap = Bitmap.createBitmap(max(1, w), max(1, h), Bitmap.Config.ARGB_8888)
+    val canvas = android.graphics.Canvas(bitmap)
+    val paint = Paint().apply { strokeWidth = 1f }
+    val l = Lines(style); val g = FloatArray(3)
+    for (x in 0 until w) {
+        val i = (x.toLong() * p.bins / w).toInt().coerceIn(0, p.bins - 1)
+        g[0] = p.low[i].coerceIn(0f, 1f); g[1] = p.mid[i].coerceIn(0f, 1f); g[2] = p.high[i].coerceIn(0f, 1f)
+        l.column(g) { level, color, e -> l.add(level, color, x + .5f, h.toFloat(), x + .5f, h - e * h) }
+    }
+    l.draw(canvas, paint)
+    return bitmap.asImageBitmap()
+}

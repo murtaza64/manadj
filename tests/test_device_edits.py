@@ -147,3 +147,34 @@ def test_endpoints_push_received_list_revert(client, make_track):
     reverted = client.post(f"/api/device-listener/batches/{pushed['batch_id']}/revert").json()
     assert reverted[0]["new"] == "A"
     assert client.post(f"/api/device-listener/changes/{changes[1]['id']}/revert").status_code == 409
+
+
+def test_synced_setting_edits_newest_wins_logged_and_revertable(db):
+    from backend.device_edits import read_setting
+    from backend.models import AppSetting
+
+    key = "manadj-filter-settings"
+    default, _ = read_setting(db, key)
+    mine = {**default, "resonance": 12.0}
+    batch, outcomes = apply_edits(db, "phone-1", "Pixel", [
+        PushedEdit("s1", None, f"setting:{key}", default, mine, ms(NOW - timedelta(seconds=5))),
+        PushedEdit("s2", None, "setting:manadj-quantize", None, {"x": 1}, ms(NOW)),  # not synced
+    ])
+    assert outcomes == {"s1": "applied", "s2": "rejected"}
+    assert read_setting(db, key)[0] == mine
+    row = db.query(DeviceSyncChange).filter_by(edit_uuid="s1").one()
+    assert row.track_id is None and row.field == f"setting:{key}"
+
+    # The desktop changes it after an older phone edit: newest wins.
+    later = {**default, "resonance": 20.0}
+    db.get(AppSetting, key).value = '{"model":"res24","resonance":20.0}'
+    db.commit()
+    _, outcomes = apply_edits(db, "phone-1", "Pixel", [
+        PushedEdit("s3", None, f"setting:{key}", default, later, ms(NOW - timedelta(hours=1))),
+    ])
+    assert outcomes == {"s3": "superseded"}
+
+    revert(db, [row.id])
+    assert read_setting(db, key)[0] == default
+    changes = list_changes(db)
+    assert changes[0]["field"] == f"setting:{key}" and changes[0]["track_title"] is None

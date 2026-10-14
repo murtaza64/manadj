@@ -17,10 +17,12 @@ class LibraryStore(val root: File) {
     private val snapshotFile = File(root, "snapshot.json")
     val previewDir = File(root, "previews")
     val audioDir = File(root, "audio")
+    val waveformDir = File(root, "waveforms")
 
     init {
         previewDir.mkdirs()
         audioDir.mkdirs()
+        waveformDir.mkdirs()
     }
 
     fun readSnapshotText(): String? = snapshotFile.takeIf { it.isFile }?.readText()
@@ -40,6 +42,20 @@ class LibraryStore(val root: File) {
         return try { PreviewWaveform.parse(file.readBytes()) } catch (_: IllegalArgumentException) { null }
     }
 
+    fun waveformFile(track: LibraryTrack): File? = track.waveformRev?.let { File(waveformDir, "${track.id}-$it.mwf") }
+
+    fun hasWaveform(track: LibraryTrack) = waveformFile(track)?.isFile == true
+
+    fun writeWaveform(track: LibraryTrack, blob: ByteArray) {
+        atomicWrite(waveformFile(track) ?: return, blob)
+    }
+
+    /** The cached detail waveform; null when missing or unreadable (a corrupt file is deleted). */
+    fun readWaveform(track: LibraryTrack): DetailWaveform? {
+        val file = waveformFile(track)?.takeIf { it.isFile } ?: return null
+        return try { PreviewWaveform.parse(file.readBytes()) } catch (_: RuntimeException) { file.delete(); null }
+    }
+
     fun audioFile(track: LibraryTrack): File? {
         val rev = track.audioRev ?: return null
         val name = track.fileName.replace('/', '_').replace('\\', '_').takeIf { it.isNotBlank() && !it.startsWith(".") } ?: "audio"
@@ -54,7 +70,9 @@ class LibraryStore(val root: File) {
     fun prune(snapshot: Snapshot) {
         val previews = snapshot.tracks.mapNotNullTo(HashSet()) { previewFile(it)?.name }
         val audio = snapshot.tracks.mapNotNullTo(HashSet()) { audioFile(it)?.parentFile?.name }
+        val waveforms = snapshot.tracks.mapNotNullTo(HashSet()) { waveformFile(it)?.name }
         previewDir.listFiles()?.forEach { if (it.name !in previews) it.delete() }
+        waveformDir.listFiles()?.forEach { if (it.name !in waveforms) it.delete() }
         audioDir.listFiles()?.forEach { if (it.name !in audio) it.deleteRecursively() }
     }
 

@@ -88,6 +88,7 @@ val ControlRow = 44.dp
             val set = ui.hotCues[slot] != null
             val id = model.beginGesture(ui.id, "HOTCUE$slot") { if (set) model.submit(AudioCommand.HotCueUp(ui.id, slot, it)) }
             model.submit(if (set) AudioCommand.HotCueDown(ui.id, slot, id) else AudioCommand.SetHotCue(ui.id, slot, id))
+            if (!set) ux.journalCueWhenSet(model, ui.id, slot)
             ;{ cancelled -> held = false; if (!cancelled && set && model.gestureActive(id)) model.submit(AudioCommand.HotCueUp(ui.id, slot, id)); model.finishGesture(id, cancelled) }
         }
     }.padding(3.dp).graphicsLayer { scaleX = scale; scaleY = scale }.background(Ink.panel).background(tint.copy(alpha = if (stored != null) .1f + .5f * lit else .5f * lit)).border(if (stored != null) 1.5.dp else 1.dp, tint.copy(alpha = if (stored != null) 1f else .45f)), contentAlignment = Alignment.Center) {
