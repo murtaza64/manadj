@@ -193,3 +193,20 @@ def test_detail_waveform_served_with_rev(client, db, make_track):
     assert r.status_code == 200 and r.content == b"MWF1full"
     assert r.headers["X-Waveform-Rev"] == rows[track.id]["waveform_rev"]
     assert client.get(f"/api/device-sync/tracks/{bare.id}/waveform").status_code == 404
+
+
+def test_snapshot_waveform_styles_user_value_else_shipped_default(client, db):
+    from backend.models import AppSetting
+    from backend.shipped_defaults import shipped_settings
+
+    shipped = json.loads(shipped_settings()["manadj.waveformStyles"])
+    assert client.get("/api/device-sync/snapshot").json()["waveform_styles"] == shipped
+
+    mine = {"version": 1, "full": {"styleId": "additive-rgb", "params": {"master": 0.5}}, "minimap": {"styleId": "additive-rgb", "params": {}}}
+    db.add(AppSetting(key="manadj.waveformStyles", value=json.dumps(mine)))
+    db.commit()
+    assert client.get("/api/device-sync/snapshot").json()["waveform_styles"] == mine
+
+    db.get(AppSetting, "manadj.waveformStyles").value = "not json"
+    db.commit()
+    assert client.get("/api/device-sync/snapshot").json()["waveform_styles"] == shipped

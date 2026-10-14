@@ -10,6 +10,10 @@ prefix so a future LAN listener can expose it alone.
 - GET  /tracks/{id}/audio     the audio file (Range-capable)
 - GET  /tracks/{id}/waveform  the full detail waveform (MWF1), with `waveform_rev`
 
+The snapshot also carries `waveform_styles`: the desktop's Waveform style
+slots ('full', 'minimap' — style id + params) so the phone draws with the
+same palette.
+
 Revisions let the device skip unchanged artifacts: `audio_rev` changes when
 the file's path/size/mtime does; `preview_rev` when the preview blob does.
 Follow evidence ships as raw aggregated edges — the device ranks locally
@@ -32,9 +36,11 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload, undefer
 
+from .. import shipped_defaults
 from ..database import get_db
 from ..key import Key
 from ..models import (
+    AppSetting,
     Beatgrid,
     Cameo,
     HotCue,
@@ -103,6 +109,28 @@ def _waveform_revs(db: Session) -> dict[int, str]:
         track_id: hashlib.sha1(f"{wid}:{updated.isoformat() if updated else ''}".encode()).hexdigest()[:16]
         for track_id, wid, updated in rows
     }
+
+
+WAVEFORM_STYLES_KEY = "manadj.waveformStyles"
+
+
+def _parse_styles(raw: str | None) -> dict | None:
+    try:
+        value = json.loads(raw) if raw else None
+    except ValueError:
+        return None
+    if not isinstance(value, dict) or not isinstance(value.get("full"), dict):
+        return None
+    return value
+
+
+def waveform_styles(db: Session) -> dict | None:
+    """The user's Waveform style slots (settings #176 key), else the shipped
+    default; the raw versioned shape styleSlots.ts persists."""
+    row = db.get(AppSetting, WAVEFORM_STYLES_KEY)
+    return _parse_styles(row.value if row else None) or _parse_styles(
+        shipped_defaults.shipped_settings().get(WAVEFORM_STYLES_KEY)
+    )
 
 
 def build_snapshot(db: Session) -> dict:
@@ -244,6 +272,7 @@ def build_snapshot(db: Session) -> dict:
         "transitions": transitions,
         "cameos": cameos,
         "takes": takes,
+        "waveform_styles": waveform_styles(db),
     }
 
 
