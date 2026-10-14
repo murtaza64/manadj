@@ -531,6 +531,27 @@ void Engine::apply(const Command& c) noexcept {
             }
             break;
         }
+        case Op::PhaseAlign: {
+            // Desktop alignBeatPhase/beatPhaseTarget on constant grids: a one-shot micro-seek to the
+            // nearest phase-aligned position (half/double projected), loop-wrapped; playing decks only.
+            if (c.slot < 0 || c.slot >= kDeckCount || c.slot == c.deck || !(c.value > 0)) break;
+            const auto& peer = decks_[c.slot];
+            const double bpm = d.bpm.load(), peerBpm = peer.bpm.load();
+            if (!isReady || !d.playing.load() || bpm <= 0 || !ready(peer) || !peer.playing.load() || peerBpm <= 0) break;
+            const double beat = 60 / bpm;
+            const double ownBeat = (position - d.gridAnchor.load()) / beat;
+            const double peerBeat = (peer.position.load() - peer.gridAnchor.load()) * peerBpm / 60;
+            const double delta = peerBeat * c.value - ownBeat;
+            const double period = std::min(1.0, c.value);
+            double target = position + (delta - std::floor(delta / period + .5) * period) * beat;
+            if (d.loopActive.load()) {
+                const double ls = d.loopStart.load(), length = d.loopEnd.load() - ls;
+                if (length > 0) target = ls + std::fmod(std::fmod(target - ls, length) + length, length);
+            }
+            target = std::max(0.0, target);
+            if (std::abs(target - position) >= 1e-7) relocate(d, target);
+            break;
+        }
         case Op::CueMix: cueMix_.store(std::clamp(static_cast<float>(c.value), 0.f, 1.f)); break;
         case Op::BeatFx: {
             const int target = static_cast<int>(c.aux[0]);

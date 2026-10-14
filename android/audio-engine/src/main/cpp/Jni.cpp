@@ -162,7 +162,7 @@ Java_dev_manadj_audio_AudioEngine_nativeClose(JNIEnv*, jobject, jlong handle) {
 extern "C" JNIEXPORT jlong JNICALL
 Java_dev_manadj_audio_AudioEngine_nativeSubmit(JNIEnv*, jobject, jlong handle, jint op, jint deck,
                                                   jdouble value, jlong load, jint slot) {
-    if (op < 0 || op > static_cast<int>(manadj::Op::KeyLock) || op == static_cast<int>(manadj::Op::Filter) || op == static_cast<int>(manadj::Op::BeatFx)) return 0; // Filter/BeatFx: dedicated entry points.
+    if (op < 0 || op > static_cast<int>(manadj::Op::PhaseAlign) || op == static_cast<int>(manadj::Op::Filter) || op == static_cast<int>(manadj::Op::BeatFx)) return 0; // Filter/BeatFx: dedicated entry points.
     if (op == static_cast<int>(manadj::Op::SetGrid)) return 0; // nativeSetGrid carries the anchor.
     return static_cast<jlong>(output(handle)->engine.submit(static_cast<manadj::Op>(op), deck, value,
                                                             static_cast<uint64_t>(load), slot));

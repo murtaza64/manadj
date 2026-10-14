@@ -86,6 +86,16 @@ class PlayerModel(application: Application) : AndroidViewModel(application) {
     var beatFx by mutableStateOf(BeatFx.DEFAULT)
         private set
     private var pendingBeatFx: Long? = null
+    private var quantizeOn = false
+    /** Desktop Sync Group: SYNC/MATCH and pitch rides go through it. */
+    private val sync = SyncGroup(object : SyncGroup.Actuator {
+        override fun setPitch(deck: DeckId, percent: Double) = control(deck, "pitch", AudioCommand.SetPitch(deck, percent)) { it.pitch = percent }
+        override fun alignPhase(deck: DeckId, reference: DeckId, ratio: Double) { submit(AudioCommand.PhaseAlign(deck, reference, ratio)) }
+        override val quantize get() = quantizeOn
+    })
+    /** Group Tempo + per-deck OFF / SYNCED / OUT_OF_LOCK / WAITING. */
+    var syncState by mutableStateOf(SyncState.NONE)
+        private set
     /** Desktop sweep-filter settings (synced `manadj-filter-settings`); re-sent until the engine accepts them. */
     var filterSettings by mutableStateOf(FilterSettings.SHIPPED)
         private set
@@ -111,6 +121,8 @@ class PlayerModel(application: Application) : AndroidViewModel(application) {
                     if (pendingCrossfade == null || state.appliedCommandId >= pendingCrossfade!!) { crossfade = (state.crossfade + 1) / 2; pendingCrossfade = null }
                     if (pendingCueMix == null || state.appliedCommandId >= pendingCueMix!!) { cueMix = state.cueMix; pendingCueMix = null }
                     if (pendingBeatFx == null || state.appliedCommandId >= pendingBeatFx!!) { beatFx = state.beatFx; pendingBeatFx = null }
+                    quantizeOn = state.quantize
+                    sync.update(state.decks.mapValues { SyncDeck.of(it.value) }); syncState = sync.state
                     if (filterSettingsUnsent && audio?.submit(AudioCommand.SetFilterSettings(filterSettings))?.accepted == true) filterSettingsUnsent = false
                     state.decks.forEach { (id, snapshot) ->
                         val ui = decks.getValue(id)
@@ -247,7 +259,12 @@ class PlayerModel(application: Application) : AndroidViewModel(application) {
     }
     fun updateFader(deck: DeckId, value: Double, gesture: String? = null) = control(deck, "fader", AudioCommand.SetFader(deck, value, gesture)) { it.fader = value }
     fun updateTrim(deck: DeckId, value: Double, gesture: String? = null) = control(deck, "trim", AudioCommand.SetTrim(deck, value, gesture)) { it.trim = value }
-    fun updatePitch(deck: DeckId, value: Double, gesture: String? = null) = control(deck, "pitch", AudioCommand.SetPitch(deck, value, gesture)) { it.pitch = value }
+    /** Pitch fader: rides the Group Tempo when [deck] is synced (all members follow), plain pitch otherwise. */
+    fun updatePitch(deck: DeckId, value: Double, gesture: String? = null) { sync.setPitch(deck, value); syncState = sync.state }
+    /** SYNC: join/leave the Sync Group. Returns OutOfReach when the group tempo is past ±8 % (join refused), null when n/a. */
+    fun toggleSync(deck: DeckId): BpmMatch? = sync.toggle(deck).also { syncState = sync.state }
+    /** MATCH: one-shot tempo capture of the nearest playing deck (phase too with Quantize on). */
+    fun match(deck: DeckId): BpmMatch? = sync.match(deck).also { syncState = sync.state }
     fun updateBend(deck: DeckId, value: Double, gesture: String? = null) = control(deck, "bend", AudioCommand.SetBend(deck, value, gesture)) { it.bend = value }
     /** Grid source for library tracks (#372): constant tempo + first-beat anchor; bpm <= 0 clears. */
     fun setGrid(deck: DeckId, bpm: Double, anchorSeconds: Double) = submit(AudioCommand.SetGrid(deck, bpm, anchorSeconds))
@@ -255,7 +272,7 @@ class PlayerModel(application: Application) : AndroidViewModel(application) {
     fun resizeJump(deck: DeckId, factor: Double) { decks.getValue(deck).let { it.jumpBeats = (it.jumpBeats * factor).coerceIn(1.0, 128.0) } }
     fun toggleLoop(deck: DeckId) = submit(AudioCommand.LoopToggle(deck))
     fun resizeLoop(deck: DeckId, change: LoopChange) = submit(AudioCommand.LoopResize(deck, change))
-    fun setQuantize(on: Boolean) = submit(AudioCommand.SetQuantize(on))
+    fun setQuantize(on: Boolean) = submit(AudioCommand.SetQuantize(on)).also { if (it.accepted) quantizeOn = on }
     /** Key lock per deck; DeckSnapshot.keyLock / keyLockActive report it. */
     fun setKeyLock(deck: DeckId, on: Boolean) = submit(AudioCommand.SetKeyLock(deck, on))
 

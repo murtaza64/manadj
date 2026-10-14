@@ -168,6 +168,8 @@ sealed interface AudioCommand {
     }
     /** Key lock (desktop Signalsmith Stretch): pitch/bend change tempo without changing key. */
     data class SetKeyLock(override val deck: DeckId, val on: Boolean, override val gestureId: String? = null) : AudioCommand
+    /** One-shot beat-phase micro-seek of a playing [deck] against playing [reference] (constant grids; loop kept). [ratio] = own beats per reference beat. */
+    data class PhaseAlign(override val deck: DeckId, val reference: DeckId, val ratio: Double, override val gestureId: String? = null) : AudioCommand
     /** Pre-fader listen: sends the deck (post-trim) to the cue bus. */
     data class SetPfl(override val deck: DeckId, val on: Boolean, override val gestureId: String? = null) : AudioCommand
     /** Headphone feed: 0 = cue bus only, 1 = master only. */
@@ -289,7 +291,7 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
         init { System.loadLibrary("manadj_audio") }
         const val MAIN_CUE = 8
         const val HOT_CUES = 8
-        val CAPABILITIES = setOf("play", "pause", "cue-gate", "hot-cue-gate", "hot-cue-set", "seek", "fader", "trim", "crossfade", "varispeed", "bend", "pfl", "cue-mix", "routing", "eq", "filter", "grid", "beat-jump", "loop", "quantize", "beat-fx", "filter-settings", "key-lock")
+        val CAPABILITIES = setOf("play", "pause", "cue-gate", "hot-cue-gate", "hot-cue-set", "seek", "fader", "trim", "crossfade", "varispeed", "bend", "pfl", "cue-mix", "routing", "eq", "filter", "grid", "beat-jump", "loop", "quantize", "beat-fx", "filter-settings", "key-lock", "sync")
         private const val PRIME_FRAMES = 2048
         private const val MEMORY_RESERVE_BYTES = 768L shl 20
         private const val HEAD_PRIORITY_FRAMES = 16384 // ~340 ms buffered before a head fill may interrupt the ring
@@ -299,7 +301,7 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
         private const val HEAD_FRAMES = 8192
         private const val HEADER = 27
         private const val DECK_FIELDS = 40 + HOT_CUES
-        private enum class Op { PREPARE, PLAY, PAUSE, CUE_DOWN, CUE_UP, HOT_CUE_DOWN, HOT_CUE_UP, HOT_CUE_SET, HOT_CUE_CLEAR, SEEK, FADER, TRIM, CROSSFADE, PITCH, BEND, PFL, CUE_MIX, EQ, FILTER, SET_GRID, BEAT_JUMP, LOOP_TOGGLE, LOOP_RESIZE, LOOP_PRESET, QUANTIZE, CUE_SET_AT, HOT_CUE_SET_AT, BEAT_FX, KEY_LOCK }
+        private enum class Op { PREPARE, PLAY, PAUSE, CUE_DOWN, CUE_UP, HOT_CUE_DOWN, HOT_CUE_UP, HOT_CUE_SET, HOT_CUE_CLEAR, SEEK, FADER, TRIM, CROSSFADE, PITCH, BEND, PFL, CUE_MIX, EQ, FILTER, SET_GRID, BEAT_JUMP, LOOP_TOGGLE, LOOP_RESIZE, LOOP_PRESET, QUANTIZE, CUE_SET_AT, HOT_CUE_SET_AT, BEAT_FX, KEY_LOCK, PHASE_ALIGN }
     }
 
     /** The caller retains/closes descriptor; the engine duplicates it for its own lifetime. */
@@ -369,6 +371,7 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
             is AudioCommand.LoopResize -> { slot = command.change.ordinal; Op.LOOP_RESIZE to command.beats }
             is AudioCommand.SetQuantize -> Op.QUANTIZE to if (command.on) 1.0 else 0.0
             is AudioCommand.SetKeyLock -> Op.KEY_LOCK to if (command.on) 1.0 else 0.0
+            is AudioCommand.PhaseAlign -> { slot = command.reference.ordinal; Op.PHASE_ALIGN to command.ratio }
             is AudioCommand.SetFilterSettings -> {
                 val s = command.settings.sanitized()
                 val id = nativeSetFilterSettings(handle, s.model.ordinal, s.params())

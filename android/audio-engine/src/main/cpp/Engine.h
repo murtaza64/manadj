@@ -79,7 +79,8 @@ struct Track {
 
 enum class Op : int { Prepare, Play, Pause, CueDown, CueUp, HotCueDown, HotCueUp,
                        HotCueSet, HotCueClear, Seek, Fader, Trim, Crossfade, Pitch, Bend, Pfl, CueMix, Eq, Filter,
-                       SetGrid, BeatJump, LoopToggle, LoopResize, LoopPreset, Quantize, CueSetAt, HotCueSetAt, BeatFx, KeyLock };
+                       SetGrid, BeatJump, LoopToggle, LoopResize, LoopPreset, Quantize, CueSetAt, HotCueSetAt, BeatFx, KeyLock, PhaseAlign };
+// PhaseAlign: deck = the aligning deck, slot = reference deck, value = own/peer half-double ratio.
 // BeatFx (deck ignored): slot = effect (-1 none), value = depth, aux = {target, on, beats, held deck mask}.
 // LoopResize slot: 0 halve, 1 double, 2 set to value beats.
 struct Command {

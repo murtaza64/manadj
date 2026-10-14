@@ -724,6 +724,44 @@ int main() {
         }
     }
 
+    { // PhaseAlign (desktop alignBeatPhase): nearest phase-aligned micro-seek, half/double projected, loop kept.
+        auto owned = std::make_unique<Engine>(48000);
+        Engine& e = *owned;
+        std::vector<float> pcm(48000 * 40 * 2, .25f);
+        for (int d = 0; d < 3; ++d) {
+            loadPcm(e, d, d + 1, std::vector<float>(pcm.begin(), pcm.begin() + 48000 * 2));
+            fillTrack(e, d, d + 1, pcm);
+        }
+        const double g[5] = {};
+        e.submit(Op::SetGrid, 0, 120, 0, 0, g);
+        e.submit(Op::SetGrid, 1, 120, 0, 0, g);
+        e.submit(Op::SetGrid, 2, 240, 0, 0, g);
+        e.submit(Op::Seek, 0, 10.1); e.submit(Op::Seek, 1, 20.2); e.submit(Op::Seek, 2, 10.1);
+        e.submit(Op::PhaseAlign, 0, 1, 0, 1);            // paused: no-op
+        tick(e);
+        CHECK(e.deck(0).position.load() == 10.1);
+        e.submit(Op::Play, 0); e.submit(Op::Play, 1);
+        e.submit(Op::PhaseAlign, 0, 1, 0, 1);
+        tick(e);
+        CHECK(std::abs(e.deck(0).position.load() - (10.2 + 1 / 48000.)) < 1e-6);
+        // 240 BPM deck against the 120 BPM peer at ratio 2 (own beats per peer beat).
+        e.submit(Op::Play, 2);
+        e.submit(Op::PhaseAlign, 2, 2, 0, 1);
+        tick(e);
+        const double p2 = e.deck(2).position.load(), p1 = e.deck(1).position.load();
+        const double off = (p2 * 4) - (p1 * 2) * 2;        // own beat - 2 x peer beat, in own beats
+        CHECK(std::abs(off - std::round(off)) < 1e-3);
+        // Loop kept and the landing wraps into it.
+        e.submit(Op::Seek, 0, 10.0);
+        e.submit(Op::LoopPreset, 0, 1);
+        tick(e);
+        e.submit(Op::Seek, 1, 20.4); tick(e);
+        e.submit(Op::PhaseAlign, 0, 1, 0, 1);
+        tick(e);
+        CHECK(e.deck(0).loopActive.load());
+        CHECK(std::abs(e.deck(0).position.load() - (10.4 + 1 / 48000.)) < 1e-3);
+    }
+
     { // Beat FX ECHO on A: beat-synced repeats at beats x beatSeconds, feedback .5, tails ring after OFF.
         auto owned = std::make_unique<Engine>(48000);
         Engine& e = *owned;
