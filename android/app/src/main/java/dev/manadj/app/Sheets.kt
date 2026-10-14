@@ -218,15 +218,10 @@ fun visibleOther(id: DeckId) = if (id == DeckId.A) DeckId.B else DeckId.A
     val context = androidx.compose.ui.platform.LocalContext.current
     val mic = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) { if (it) model.calibrateLatency() }
     val ms = model.heardLatency * 1000
-    // Mic loopback only works when the phone mic can hear the output (speaker, external speakers). On headphones
-    // it can't — and opening the mic on a Bluetooth headset can stall the output stream (human, 22:3xZ).
-    val deviceId = model.outputInfo?.deviceId
-    val headphones = remember(deviceId) {
-        val am = context.getSystemService(android.media.AudioManager::class.java)
-        val type = am.getDevices(android.media.AudioManager.GET_DEVICES_OUTPUTS).firstOrNull { it.id == deviceId }?.type
-        // Only explicit headphone types; classic A2DP may be a speaker (#100) — never guess.
-        type in setOf(android.media.AudioDeviceInfo.TYPE_BLE_HEADSET, android.media.AudioDeviceInfo.TYPE_WIRED_HEADPHONES, android.media.AudioDeviceInfo.TYPE_WIRED_HEADSET, android.media.AudioDeviceInfo.TYPE_USB_HEADSET)
-    }
+    // Route kind (#100, engine classification + per-route override): only HEADPHONES hints; UNKNOWN never blocks.
+    val kind = model.routeKind
+    val headphones = kind == dev.manadj.audio.RouteKind.HEADPHONES
+    val btPermission = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) { model.refreshRoute() }
     // Beats at the playing deck's tempo: how far off a quantized launch would land uncorrected.
     val deck = model.visibleDecks.map { model.decks.getValue(it) }.firstOrNull { it.snapshot?.playing == true && it.snapshot?.bpm != null }
     val beats = deck?.snapshot?.bpm?.let { model.heardLatency * it * tempoRate(deck) / 60 }
@@ -235,6 +230,19 @@ fun visibleOther(id: DeckId) = if (id == DeckId.A) DeckId.B else DeckId.A
             Text("OUTPUT LATENCY", Modifier.weight(1f), Ink.muted, 10, true)
             Text(model.heardRoute ?: "this output", color = Ink.muted, size = 10)
         }
+        // Speaker / Headphones: one-tap override remembered per route (tap the lit one again for automatic).
+        Row(Modifier.fillMaxWidth().height(32.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(when { model.routeKindOverridden -> "set by you"; kind == dev.manadj.audio.RouteKind.UNKNOWN -> "type unknown"; else -> "detected" }, Modifier.weight(1f), Ink.muted, 10)
+            for ((k, label) in listOf(dev.manadj.audio.RouteKind.SPEAKER to "SPEAKER", dev.manadj.audio.RouteKind.HEADPHONES to "HEADPHONES"))
+                Key(label, Modifier.width(96.dp).fillMaxHeight(), Ink.accent, engaged = kind == k, description = "This output is a $label", textSize = 10, style = KeyStyle.PILL) {
+                    model.overrideRouteKind(if (kind == k && model.routeKindOverridden) null else k)
+                }
+        }
+        if (model.routeKindNeedsBluetoothPermission && kind == dev.manadj.audio.RouteKind.UNKNOWN && !model.routeKindOverridden && android.os.Build.VERSION.SDK_INT >= 31)
+            Row(Modifier.fillMaxWidth().height(32.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("Allow Bluetooth access to tell speakers from headphones.", Modifier.weight(1f), Ink.muted, 10, lines = 2)
+                Key("ALLOW", Modifier.width(72.dp).fillMaxHeight(), Ink.accent, description = "Allow Bluetooth access", textSize = 10, style = KeyStyle.PILL) { btPermission.launch(android.Manifest.permission.BLUETOOTH_CONNECT) }
+            }
         Row(verticalAlignment = Alignment.Bottom) {
             Text("%.0f ms".format(ms), color = Ink.text, size = 22, bold = true)
             Spacer(Modifier.width(8.dp))
@@ -260,7 +268,7 @@ fun visibleOther(id: DeckId) = if (id == DeckId.A) DeckId.B else DeckId.A
         }
         Text(when {
             model.calibrating -> "Volume up, quiet room: 6 chirps at full level (~7 s)."
-            headphones && last == null -> "Headphones: the phone mic likely can't hear them — TAP along instead."
+            headphones && last == null -> "Headphones: the phone mic can't hear them — TAP along instead (CALIBRATE still allowed)."
             last?.seconds != null -> "Measured %.0f ms (spread %.1f ms, %d chirps).".format(last.seconds!! * 1000, last.spreadMillis, last.samples.size)
             last != null -> "Calibration failed: ${last.reason ?: "no clear chirps"}."
             deck == null -> "CALIBRATE uses the mic. TAP needs a playing deck with a beat grid."

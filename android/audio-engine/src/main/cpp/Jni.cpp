@@ -69,6 +69,19 @@ struct Output final : oboe::AudioStreamDataCallback, oboe::AudioStreamErrorCallb
 
     int open() { std::lock_guard<std::mutex> lock(streamMutex); return stream ? 0 : openLocked(); }
 
+    // Closes and reopens the stream with the same settings (engine state survives): recovers a route the
+    // system silenced without a disconnect callback.
+    int restart() {
+        std::lock_guard<std::mutex> lock(streamMutex);
+        if (stream) {
+            stream->requestStop();
+            stream->close();
+            stream.reset();
+            xrunBase.store(xruns.load());
+        }
+        return openLocked();
+    }
+
     // Replaces the stream (engine state survives) when the channel count or device changes.
     int configure(int routing, int device) {
         std::lock_guard<std::mutex> lock(streamMutex);
@@ -143,6 +156,11 @@ Java_dev_manadj_audio_AudioEngine_nativeReopen(JNIEnv*, jobject, jlong handle) {
 }
 
 extern "C" JNIEXPORT jint JNICALL
+Java_dev_manadj_audio_AudioEngine_nativeRestart(JNIEnv*, jobject, jlong handle) {
+    return output(handle)->restart();
+}
+
+extern "C" JNIEXPORT jint JNICALL
 Java_dev_manadj_audio_AudioEngine_nativeConfigure(JNIEnv*, jobject, jlong handle, jint routing, jint device, jboolean offline) {
     if (routing < 0 || routing > 2) return -1;
     if (offline) { output(handle)->engine.setRouting(static_cast<manadj::Routing>(routing)); return 0; }
@@ -175,6 +193,15 @@ Java_dev_manadj_audio_AudioEngine_nativeSubmit(JNIEnv*, jobject, jlong handle, j
 extern "C" JNIEXPORT void JNICALL
 Java_dev_manadj_audio_AudioEngine_nativeSetSchedule(JNIEnv*, jobject, jlong frame, jlong tag) {
     manadj::Engine::setSubmitFrame(static_cast<uint64_t>(frame), static_cast<uint64_t>(tag));
+}
+
+extern "C" JNIEXPORT jdoubleArray JNICALL
+Java_dev_manadj_audio_AudioEngine_nativeLastLaunch(JNIEnv* env, jobject, jlong handle) {
+    double v[9];
+    for (int k = 0; k < 9; ++k) v[k] = output(handle)->engine.lastLaunch[k].load();
+    auto array = env->NewDoubleArray(9);
+    env->SetDoubleArrayRegion(array, 0, 9, v);
+    return array;
 }
 
 extern "C" JNIEXPORT jlongArray JNICALL

@@ -466,33 +466,35 @@ int Engine::launchReference(int index) const noexcept {
 // (Play, Cue-hold, Hot-cue-hold) at `at`: Δ = reference's nearest beat − its playhead, in real seconds.
 // Δ > 0: hold, then enter exactly on `at` when the reference beat sounds (frame-exact: the start frame
 // rounds up and the entry advances by the sub-frame remainder). Δ ≤ 0: start now, |Δ|·rate ahead of `at`.
-void Engine::launch(int index, double at, int slot) noexcept {
+// Positions the deck itself (one relocation at most); false = no reference (caller lands on `at` as usual).
+bool Engine::launch(int index, double at, int slot) noexcept {
     const int ref = launchReference(index);
-    if (ref < 0) return;
+    if (ref < 0) return false;
     auto& d = decks_[index];
     const auto& r = decks_[ref];
     const double refPosition = r.position.load(kRelaxed);
     const double refRate = (1 + r.pitch.load(kRelaxed) / 100.) * (1 + r.bend.load(kRelaxed) / 100.);
     const double rate = (1 + d.pitch.load(kRelaxed) / 100.) * (1 + d.bend.load(kRelaxed) / 100.);
-    // Grid: the reference's nearest beat to its render position. Heard: the nearest bar to what the DJ heard
-    // (L before the render position); the launch then lands in engine time, already aligned at the speaker.
-    double target = snapToBeat(r, refPosition);
-    if (heard_.load(kRelaxed)) {
-        const double bar = 4 * 60 / r.bpm.load(kRelaxed), anchor = r.gridAnchor.load(kRelaxed);
-        const double heardAt = refPosition - heardLatency_.load(kRelaxed) * refRate;
-        target = anchor + std::round((heardAt - anchor) / bar) * bar;
-    }
+    // Grid: the reference's nearest beat to its render position. Heard: the nearest beat to what the DJ heard
+    // (L before the render position) — the press is read as made L earlier, so the launch enters ~L·rate past
+    // its cue, already aligned at the speaker. (A bar snap deferred presses on beats 3-4 to the next bar.)
+    const double heardAt = refPosition - (heard_.load(kRelaxed) ? heardLatency_.load(kRelaxed) * refRate : 0);
+    const double target = snapToBeat(r, heardAt);
     const double delta = (target - refPosition) / refRate;
+    const double diag[9] = {lastLaunch[0].load(kRelaxed) + 1, static_cast<double>(index), static_cast<double>(ref),
+                            heard_.load(kRelaxed) ? heardLatency_.load(kRelaxed) : 0, refPosition, heardAt, target, delta,
+                            delta > 0 ? at : at - delta * rate};
+    for (int k = 8; k >= 0; --k) lastLaunch[k].store(diag[k], kRelaxed);
     if (!(delta > 0)) {
         const double entry = at - delta * rate;
-        if (entry != at) relocate(d, entry);
-        return;
+        if (entry != d.position.load(kRelaxed)) relocate(d, entry, entry == at ? slot : -1);
+        return true;
     }
     const double out = outputRate_.load(kRelaxed), exact = delta * out;
     const auto wait = static_cast<uint64_t>(std::ceil(exact - 1e-6)); // float noise must not cost a frame
     const double entry = at + std::max(0.0, static_cast<double>(wait) - exact) / out * rate;
-    if (std::abs(entry - d.position.load(kRelaxed)) > 1e-12 || entry != at) relocate(d, entry, entry == at ? slot : -1);
-    if (wait == 0) return;
+    if (entry != d.position.load(kRelaxed)) relocate(d, entry, entry == at ? slot : -1);
+    if (wait == 0) return true;
     const uint64_t frame = static_cast<uint64_t>(renderFrame_) + wait;
     d.launchAt.store(frame, kRelaxed);
     Command start{};
@@ -500,6 +502,7 @@ void Engine::launch(int index, double at, int slot) noexcept {
     start.deck = index;
     start.at = frame;
     enqueueScheduled(start);
+    return true;
 }
 
 double Engine::clickSample(double t) noexcept {
@@ -593,8 +596,10 @@ void Engine::apply(const Command& c) noexcept {
             // Playing + Quantize: phase-preserving whole-beat jump (desktop phasePreservingJumpTarget);
             // paused triggers land exactly.
             const bool snap = quantize_.load() && d.playing.load() && d.bpm.load() > 0;
-            relocate(d, snap ? snapToBeat(d, at) + (position - snapToBeat(d, position)) : at, snap ? -1 : c.slot);
-            if (!d.playing.load()) { d.preview.store(true); d.previewSlot.store(c.slot); if (c.at == 0) launch(c.deck, at, c.slot); }
+            if (d.playing.load()) { relocate(d, snap ? snapToBeat(d, at) + (position - snapToBeat(d, position)) : at, snap ? -1 : c.slot); break; }
+            // Paused: one relocation — straight to the quantized launch entry, else exactly the cue.
+            d.preview.store(true); d.previewSlot.store(c.slot);
+            if (!(c.at == 0 && launch(c.deck, at, c.slot))) relocate(d, at, c.slot);
             break;
         }
         case Op::HotCueUp:

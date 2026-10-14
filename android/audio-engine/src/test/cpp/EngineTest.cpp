@@ -1316,6 +1316,16 @@ int main() {
             const double a = e.deck(0).position.load(), b = e.deck(1).position.load();
             CHECK(std::abs((b - 8.0) - (a - 10.5)) < 1 / 48000.);
         }
+        { // Heard: a press on heard beat 3 of a bar enters L past the cue (never defers to the next bar).
+            auto o = make(2); Engine& e = *o;
+            e.submit(Op::Seek, 0, 11.37);                // heard 11.02: just after beat 3 (11.0) of the bar at 10.0
+            tick(e, 1);
+            e.submit(Op::Play, 1);
+            tick(e, 1);
+            CHECK(e.deck(1).launchAt.load() == 0 && e.deck(1).position.load() > 8.0 + .35);
+            const double a = e.deck(0).position.load(), b = e.deck(1).position.load();
+            CHECK(std::abs((b - 8.0) - (a - 11.0)) < 1 / 48000.);
+        }
         { // Heard auto-loop engages at the heard beat; a region already passed wraps the playhead in.
             auto o = make(2); Engine& e = *o;
             e.submit(Op::LoopPreset, 0, .5);              // heard 10.02 → loop [10.0, 10.25); render 10.37 wraps
@@ -1379,6 +1389,89 @@ int main() {
         e.submit(Op::Prepare, 0, 0, 2);
         tick(e);
         CHECK(e.deck(0).stemTarget[1].load() == 1.f && e.deck(0).stemGain[1] == 1.f);
+    }
+
+    { // Heard quantize sign (174 BPM, L = 350 / 700 ms): the DJ hears the playing deck's downbeat — the engine is
+      // already L·rate past it — and presses PLAY exactly then. The cued deck must start at once, entered L·rate
+      // past its cue, so at the speaker (engine + L) its downbeat coincides with the playing downbeat. A flipped
+      // sign (heard = render + L) picks a beat ~2L ahead and waits instead: launchAt != 0 and the phase check fails.
+        for (double L : {.35, .7, 0.0}) {
+            for (int mode : {2, 1}) {
+                if (mode == 1 && L != 0) continue;            // (b) Grid with L = 0 must equal Heard with L = 0
+                auto owned = std::make_unique<Engine>(48000);
+                Engine& e = *owned;
+                std::vector<float> pcm(48000 * 30 * 2, .2f);
+                for (int d = 0; d < 2; ++d) { loadPcm(e, d, d + 1, std::vector<float>(pcm.begin(), pcm.begin() + 48000 * 2)); fillTrack(e, d, d + 1, pcm); }
+                const double g[5] = {};
+                e.submit(Op::SetGrid, 0, 174, 0, 0, g);
+                e.submit(Op::SetGrid, 1, 174, 0, 0, g);
+                e.submit(Op::Quantize, 0, mode);
+                e.submit(Op::HeardLatency, 0, L);
+                const double beat = 60 / 174., downbeat = 16 * beat, cue = 32 * beat;
+                e.submit(Op::Seek, 0, downbeat + L);          // render position at the press: heard = the downbeat
+                e.submit(Op::Seek, 1, cue);
+                tick(e, 16);
+                e.submit(Op::Play, 0);
+                e.submit(Op::Play, 1);                         // same callback: the press lands at render = downbeat + L
+                tick(e, 1);
+                CHECK(e.deck(1).launchAt.load() == 0);         // never waits
+                tick(e, 47999);
+                const double play = e.deck(0).position.load(), cued = e.deck(1).position.load();
+                // Speaker time T heard = engine positions at T - L; both decks share L, so equal offsets from
+                // their downbeats in engine time = coincident downbeats at the speaker.
+                const double errMs = ((cued - cue) - (play - downbeat)) * 1000;
+                if (std::abs(errMs) >= 1) std::fprintf(stderr, "heard sign L %.2f mode %d: error %.3f ms\n", L, mode, errMs);
+                CHECK(std::abs(errMs) < 1);
+                CHECK(cued - cue >= L - 1e-9);                 // entered ahead by the elapsed L (+ the second played)
+            }
+        }
+    }
+
+    { // Heard stabs at random phases (174 BPM; L = 350 ms ≈ 1 beat, 180 ms ≈ half a beat, 0): Play, CUE-hold
+      // and hot-cue-hold take the same callback path; every launch matches the definition — target = beat
+      // nearest the heard position (render − L), immediate entry (target − render) ahead of the cue when the
+      // target has passed, else a wait of exactly that; the deck relocates at most once per stab.
+        unsigned seed = 99;
+        auto rnd = [&] { seed = seed * 1103515245u + 12345u; return ((seed >> 8) & 0xffff) / 65536.0; };
+        const double beat = 60 / 174.;
+        for (double L : {.35, .18, 0.0}) {
+            for (int k = 0; k < 20; ++k) {
+                auto owned = std::make_unique<Engine>(48000);
+                Engine& e = *owned;
+                std::vector<float> pcm(48000 * 20 * 2, .2f);
+                for (int d = 0; d < 2; ++d) { loadPcm(e, d, d + 1, std::vector<float>(pcm.begin(), pcm.begin() + 48000 * 2)); fillTrack(e, d, d + 1, pcm); }
+                const double g[5] = {};
+                e.submit(Op::SetGrid, 0, 174, 0, 0, g);
+                e.submit(Op::SetGrid, 1, 174, 0, 0, g);
+                e.submit(Op::Quantize, 0, 2);
+                e.submit(Op::HeardLatency, 0, L);
+                const double render = 20 * beat + rnd() * 4 * beat, cue = 8 * beat;
+                const int gesture = k % 3;                       // 0 Play, 1 CUE-hold at cue, 2 hot-cue-hold
+                e.submit(Op::Seek, 0, render);
+                e.submit(Op::Seek, 1, gesture == 2 ? 3.0 : cue);
+                e.submit(Op::CueSetAt, 1, cue);
+                e.submit(Op::HotCueSetAt, 1, cue, 0, 0);
+                tick(e, 16);
+                const auto transportBefore = e.deck(1).transport.load();
+                e.submit(Op::Play, 0);
+                e.submit(gesture == 0 ? Op::Play : gesture == 1 ? Op::CueDown : Op::HotCueDown, 1);
+                tick(e, 1);
+                const double heard = render - L, target = std::round(heard / beat) * beat;
+                const double ahead = render - target;            // > 0: the target beat already passed (in engine time)
+                const auto relocations = e.deck(1).transport.load() - transportBefore;
+                CHECK(relocations <= 1u);                        // one jump per stab (hot cue: straight to the entry)
+                if (ahead >= 0) {
+                    CHECK(e.deck(1).launchAt.load() == 0);
+                    CHECK(std::abs(e.deck(1).position.load() - (cue + ahead + 1 / 48000.)) < 1e-6);
+                } else {
+                    CHECK(e.deck(1).launchAt.load() != 0 && -ahead < beat / 2 + 1e-9);   // waits < half a beat, never L
+                    tick(e, 48000);
+                }
+                tick(e, 4800);
+                const double play = e.deck(0).position.load(), cued = e.deck(1).position.load();
+                CHECK(std::abs((cued - cue) - (play - target)) < 1 / 48000.);  // in phase at the speaker
+            }
+        }
     }
 
     { // Beat FX ECHO on A: beat-synced repeats at beats x beatSeconds, feedback .5, tails ring after OFF.
