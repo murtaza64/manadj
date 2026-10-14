@@ -30,6 +30,7 @@ class SyncTest {
     private val received = mutableListOf<String>()
     @Volatile private var deskTitle = "Decoy"
     @Volatile private var waveformRequests = 0
+    @Volatile private var deskMinimapMaster = 1.16
     @Volatile private var dropAudioAfter: Int? = null
     @Volatile private var onAudioRequest: () -> Unit = {}
     private val ranges = mutableListOf<String?>()
@@ -50,7 +51,7 @@ class SyncTest {
          "links":[[10,11]],"transitions":[{"a":10,"b":11,"count":2,"favorite":true}],
          "cameos":[],"takes":[{"a":11,"b":10,"count":2,"last_at":"2026-10-02T00:00:00"}],
          "settings":{
-          "manadj.waveformStyles":{"value":{"version":1,"full":{"styleId":"additive-soft","params":{"master":1}},"minimap":{"styleId":"additive-soft","params":{"master":1.16}}},"updated_at":"2026-10-14T12:00:00"},
+          "manadj.waveformStyles":{"value":{"version":1,"full":{"styleId":"additive-soft","params":{"master":1}},"minimap":{"styleId":"additive-soft","params":{"master":$deskMinimapMaster}}},"updated_at":"2026-10-14T12:00:00"},
           "manadj-filter-settings":{"value":{"model":"res48","resonance":99,"drive":"x"},"updated_at":null}}}
     """.trimIndent()
 
@@ -155,7 +156,7 @@ class SyncTest {
         assertEquals(listOf(11, 10), library.playlistTracks(3).map { it.id })
         assertEquals("additive-soft", library.waveformStyles.full.styleId)
         assertEquals(1.16f, library.waveformStyles.minimap.master)
-        assertEquals(FilterSettings(model = "res48", resonance = 24.0), library.filterSettings) // clamped; bad drive → default
+        assertEquals(99, org.json.JSONObject(library.settingJson(PerformanceSettings.FILTER)!!).getInt("resonance")) // raw: the engine sanitizes
 
         server.stop(0) // desktop gone: a fresh repository opens the cache
         val offline = repo()
@@ -314,6 +315,41 @@ class SyncTest {
         val plan = BulkPlan(emptyList(), bytes = 10L shl 30, remainingBytes = 10L shl 30, freeBytes = 4L shl 30)
         assertTrue(!plan.fits)
         assertTrue(BulkPlan(emptyList(), 0, 0, LibraryRepository.SPACE_MARGIN_BYTES).fits)
+    }
+
+    @Test fun settingsEditsOverlayPushAndReceivedDiff() = runBlocking {
+        val repo = repo()
+        repo.sync().getOrThrow()
+        val filterKey = PerformanceSettings.FILTER
+        fun filter(r: LibraryRepository) = org.json.JSONObject(r.library.value!!.settingJson(filterKey)!!)
+        val edited = filter(repo).put("resonance", 12.0)
+        assertTrue(repo.editSetting(filterKey, edited))
+        assertEquals(false, repo.editSetting(filterKey, org.json.JSONObject(edited.toString()))) // no-op
+        assertEquals(12.0, filter(repo).getDouble("resonance"))
+        assertEquals("res48", filter(repo).getString("model"))
+        val styles = repo.library.value!!.waveformStyles
+        assertTrue(repo.editWaveformStyles(styles.copy(full = styles.full.copy(coreWhite = 0.32f))))
+        assertEquals(0.32f, repo.library.value!!.waveformStyles.full.coreWhite)
+        assertEquals(2, repo.state.value.pendingEdits)
+        assertEquals(12.0, filter(repo().also { it.open() }).getDouble("resonance")) // survives restart
+
+        repo.sync().getOrThrow()
+        val push = org.json.JSONObject(pushed.single()).getJSONArray("edits")
+        val edits = (0 until push.length()).map(push::getJSONObject).associateBy { it.getString("field") }
+        val filter = edits.getValue("setting:manadj-filter-settings")
+        assertTrue(filter.isNull("track_id"))
+        assertEquals(12.0, filter.getJSONObject("new").getDouble("resonance"))
+        assertEquals("x", filter.getJSONObject("new").get("drive")) // untouched raw values round-trip
+        val full = edits.getValue("setting:manadj.waveformStyles").getJSONObject("new").getJSONObject("full").getJSONObject("params")
+        assertEquals("0.32", full.get("coreWhite").toString())
+        assertTrue(!full.has("gains")) // unchanged fields not invented
+        assertEquals(0, repo.state.value.pendingEdits)
+        assertTrue(received.isEmpty())
+
+        deskMinimapMaster = 2.5 // the desktop changes a setting: reported as received
+        repo.sync().getOrThrow()
+        assertTrue(received.single().contains("setting:manadj.waveformStyles"))
+        assertEquals(2.5f, repo.library.value!!.waveformStyles.minimap.master)
     }
 
     @Test fun presyncAudio() = runBlocking {

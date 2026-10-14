@@ -37,6 +37,29 @@ data class WaveformStyle(
     /** Low/mid/high colors; null = the style's own defaults ([colors] resolves). */
     val customColors: List<Rgb>? = null,
 ) {
+    /**
+     * The persisted slot JSON (styleSlots.ts shape) over [base]: only fields
+     * that differ from [base]'s parsed values are rewritten, so untouched
+     * values (and unknown keys) round-trip exactly.
+     */
+    fun toJson(base: JSONObject? = null, fallback: WaveformStyle = WaveformStyle()): JSONObject {
+        val was = parse(base, fallback)
+        val out = JSONObject(base?.toString() ?: "{}")
+        val params = out.optJSONObject("params") ?: JSONObject()
+        fun <T> put(key: String, now: T, then: T, wire: (T) -> Any) { if (base == null || now != then) params.put(key, wire(now)) }
+        put("displayGamma", displayGamma, was.displayGamma) { it.wire() }
+        put("master", master, was.master) { it.wire() }
+        put("gains", gains, was.gains) { g -> JSONArray(g.map { it.wire() }) }
+        put("b1", b1, was.b1) { it }
+        put("b2", b2, was.b2) { it }
+        put("smooth", smooth, was.smooth) { it }
+        put("coreWhite", coreWhite, was.coreWhite) { it.wire() }
+        put("coreBloom", coreBloom, was.coreBloom) { it.wire() }
+        put("colors", customColors, was.customColors) { c -> c?.let { JSONArray(it.map { rgb -> JSONArray(listOf(rgb.r.wire(), rgb.g.wire(), rgb.b.wire())) }) } ?: JSONObject.NULL }
+        if (base == null || styleId != was.styleId) out.put("styleId", styleId)
+        return out.put("params", params)
+    }
+
     /** Low/mid/high group colors to draw with. */
     val colors: List<Rgb> get() = customColors ?: STYLE_DEFAULT_COLORS[styleId] ?: ADDITIVE_COLORS
 
@@ -177,6 +200,13 @@ data class WaveformStyle(
 
 /** The desktop's two Waveform style slots: [full] (decks, detail waveforms) and [minimap] (overview strips, previews). */
 data class WaveformStyles(val full: WaveformStyle, val minimap: WaveformStyle) {
+    /** The persisted `manadj.waveformStyles` JSON, keeping unknown keys of [base]. */
+    fun toJson(base: JSONObject? = null): JSONObject {
+        val out = JSONObject(base?.toString() ?: "{}").put("version", 1)
+        return out.put("full", full.toJson(out.optJSONObject("full"), DEFAULT.full))
+            .put("minimap", minimap.toJson(out.optJSONObject("minimap"), DEFAULT.minimap))
+    }
+
     companion object {
         /** styleSlots.ts defaultSlots(): used when the desktop sent none. */
         val DEFAULT = WaveformStyles(WaveformStyle(), WaveformStyle(master = 2f))
@@ -190,6 +220,9 @@ data class WaveformStyles(val full: WaveformStyle, val minimap: WaveformStyle) {
         }
     }
 }
+
+/** Float → the shortest Double that prints the same (0.32f → 0.32, not 0.3199999928). */
+private fun Float.wire(): Double = toString().toDouble()
 
 private data class V3(val r: Float, val g: Float, val b: Float) {
     constructor(c: Rgb) : this(c.r, c.g, c.b)

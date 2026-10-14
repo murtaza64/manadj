@@ -357,7 +357,7 @@ __all__ = ["router", "build_snapshot", "pack_previews", "audio_rev"]
 
 class EditIn(BaseModel):
     uuid: str
-    track_id: int
+    track_id: int | None = None  # null for setting:<key>
     field: str
     old: object = None
     new: object = None

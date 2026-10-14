@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import org.json.JSONObject
 import java.io.File
 import java.time.Instant
 import java.util.concurrent.ConcurrentHashMap
@@ -122,6 +123,29 @@ class LibraryRepository(
     }
 
     /**
+     * Change a synced performance setting on the phone (#375): the whole JSON
+     * value for [key] (PerformanceSettings.WAVEFORM_STYLES / FILTER), journaled
+     * and applied now, pushed on the next sync (newest wins on the desktop).
+     * Filter: `editSetting(PerformanceSettings.FILTER, audioFilterSettings.toJson())`.
+     */
+    suspend fun editSetting(key: String, value: JSONObject): Boolean = withContext(io) {
+        val base = pulled ?: return@withContext false
+        val view = _library.value?.snapshot ?: return@withContext false
+        val old = view.settings[key]?.json?.let(::JSONObject)
+        if (TrackFields.same(old, value)) return@withContext false
+        journal.append(EditJournal.newEdit(null, SETTING_PREFIX + key, old, value))
+        _library.value = build(base)
+        _state.update { it.copy(pendingEdits = journal.all().size) }
+        true
+    }
+
+    /** Change the Waveform style slots (synced back to the desktop). */
+    suspend fun editWaveformStyles(styles: WaveformStyles): Boolean =
+        editSetting(PerformanceSettings.WAVEFORM_STYLES, styles.toJson(currentSetting(PerformanceSettings.WAVEFORM_STYLES)))
+
+    private fun currentSetting(key: String): JSONObject? = _library.value?.snapshot?.settings?.get(key)?.json?.let(::JSONObject)
+
+    /**
      * Pull the snapshot and missing preview waveforms. The cached library
      * stays usable on failure. With [audio] = true, also pre-syncs audio for
      * every track (otherwise audio downloads on first load).
@@ -132,7 +156,7 @@ class LibraryRepository(
             try {
                 // Push first: the desktop applies newest-wins and logs; answered edits leave the journal.
                 val pending = journal.all()
-                val pushedFields = HashSet<Pair<Int, String>>()
+                val pushedFields = HashSet<Pair<Int?, String>>()
                 if (pending.isNotEmpty()) {
                     running("Edits ${pending.size}", null)
                     val outcomes = client.pushEdits(pending)

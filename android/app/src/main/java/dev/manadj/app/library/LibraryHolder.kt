@@ -105,6 +105,22 @@ object LibraryHolder {
         scope.launch { repo.edit(trackId, edit) }
     }
 
+    /**
+     * Change a synced setting on the phone (#375), e.g. the DJ filter:
+     * `editSetting(ctx, PerformanceSettings.FILTER, audioFilterSettings.toJson())`.
+     * Applies now (`library.settingJson`), syncs back to the desktop.
+     */
+    fun editSetting(context: Context, key: String, json: org.json.JSONObject) {
+        val repo = repository(context)
+        scope.launch { repo.editSetting(key, json) }
+    }
+
+    /** Change the Waveform style slots on the phone (#375): applies now, syncs back to the desktop. */
+    fun editWaveformStyles(context: Context, styles: dev.manadj.library.WaveformStyles) {
+        val repo = repository(context)
+        scope.launch { repo.editWaveformStyles(styles) }
+    }
+
     // ── Offline (bulk) download ──
 
     /**

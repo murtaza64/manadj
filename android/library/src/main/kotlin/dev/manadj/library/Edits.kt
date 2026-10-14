@@ -23,20 +23,28 @@ sealed interface TrackEdit {
     data class Key(val engineId: Int?) : TrackEdit
 }
 
-/** One journaled edit, in the desktop's field vocabulary (backend/device_edits.py). */
-data class JournaledEdit(val uuid: String, val trackId: Int, val field: String, val old: Any?, val new: Any?, val editedAtMs: Long) {
+/**
+ * One journaled edit, in the desktop's field vocabulary (backend/device_edits.py).
+ * Synced performance settings are `setting:<key>` with [trackId] null and the
+ * whole setting JSON object as old/new.
+ */
+data class JournaledEdit(val uuid: String, val trackId: Int?, val field: String, val old: Any?, val new: Any?, val editedAtMs: Long) {
+    val settingKey: String? get() = this.field.takeIf { it.startsWith(SETTING_PREFIX) }?.removePrefix(SETTING_PREFIX)
+
     fun toJson(): JSONObject = JSONObject()
-        .put("uuid", uuid).put("track_id", trackId).put("field", field)
+        .put("uuid", uuid).put("track_id", trackId ?: JSONObject.NULL).put("field", field)
         .put("old", old ?: JSONObject.NULL).put("new", new ?: JSONObject.NULL).put("edited_at_ms", editedAtMs)
 
     companion object {
         fun fromJson(o: JSONObject) = JournaledEdit(
-            o.getString("uuid"), o.getInt("track_id"), o.getString("field"),
+            o.getString("uuid"), if (o.isNull("track_id")) null else o.getInt("track_id"), o.getString("field"),
             o.opt("old").takeUnless { it == JSONObject.NULL }, o.opt("new").takeUnless { it == JSONObject.NULL },
             o.getLong("edited_at_ms"),
         )
     }
 }
+
+const val SETTING_PREFIX = "setting:"
 
 /** Engine DJ key id → (OpenKey, Camelot); mirrors backend/key.py. */
 internal val KEY_TABLE: Map<Int, Pair<String, String>> = listOf(
@@ -88,10 +96,12 @@ object TrackFields {
         (1..8).map { "hot_cue:$it" } + listOf("main_cue", "title", "artist", "energy", "key") +
             (a.tagIds + b.tagIds).toSortedSet().map { "tag:$it" }
 
+    /** Value equality in wire form (JSON objects deep, numbers by value). */
     fun same(x: Any?, y: Any?): Boolean = when {
-        x is JSONObject && y is JSONObject -> x.optDouble("time") == y.optDouble("time") &&
-            x.opt("label") == y.opt("label") && x.opt("color") == y.opt("color")
+        x is JSONObject && y is JSONObject -> x.length() == y.length() && x.keys().asSequence().all { y.has(it) && same(x.opt(it), y.opt(it)) }
+        x is JSONArray && y is JSONArray -> x.length() == y.length() && (0 until x.length()).all { same(x.opt(it), y.opt(it)) }
         x is Number && y is Number -> x.toDouble() == y.toDouble()
+        x == JSONObject.NULL || y == JSONObject.NULL -> (x ?: JSONObject.NULL) == (y ?: JSONObject.NULL)
         else -> x == y
     }
 
@@ -124,8 +134,14 @@ object TrackFields {
 
     fun overlay(snapshot: Snapshot, edits: List<JournaledEdit>): Snapshot {
         if (edits.isEmpty()) return snapshot
-        val byTrack = edits.groupBy { it.trackId }
-        return snapshot.copy(tracks = snapshot.tracks.map { t -> byTrack[t.id]?.fold(t, ::apply) ?: t })
+        val byTrack = edits.filter { it.trackId != null }.groupBy { it.trackId }
+        val settings = edits.mapNotNull { e -> e.settingKey?.let { it to e } }
+        return snapshot.copy(
+            tracks = snapshot.tracks.map { t -> byTrack[t.id]?.fold(t, ::apply) ?: t },
+            settings = if (settings.isEmpty()) snapshot.settings else snapshot.settings + settings.map { (key, e) ->
+                key to SyncedSetting((e.new as? JSONObject)?.toString(), java.time.Instant.ofEpochMilli(e.editedAtMs))
+            },
+        )
     }
 }
 
@@ -147,7 +163,7 @@ class EditJournal(private val file: File) {
     }
 
     companion object {
-        fun newEdit(trackId: Int, field: String, old: Any?, new: Any?, now: Long = System.currentTimeMillis()) =
+        fun newEdit(trackId: Int?, field: String, old: Any?, new: Any?, now: Long = System.currentTimeMillis()) =
             JournaledEdit(UUID.randomUUID().toString(), trackId, field, old, new, now)
     }
 }
@@ -160,7 +176,7 @@ internal object FieldsOverlay {
 
 /** Desktop → phone changes a pull brings, per synced field (#375). */
 object SnapshotDiff {
-    fun received(before: Snapshot, after: Snapshot, exclude: Set<Pair<Int, String>> = emptySet()): List<JSONObject> {
+    fun received(before: Snapshot, after: Snapshot, exclude: Set<Pair<Int?, String>> = emptySet()): List<JSONObject> {
         val old = before.tracks.associateBy { it.id }
         val out = ArrayList<JSONObject>()
         for (t in after.tracks) {
@@ -172,6 +188,15 @@ object SnapshotDiff {
                 if (!TrackFields.same(a, b)) {
                     out += JSONObject().put("track_id", t.id).put("field", field).put("old", a ?: JSONObject.NULL).put("new", b ?: JSONObject.NULL)
                 }
+            }
+        }
+        for (key in (before.settings.keys + after.settings.keys).toSortedSet()) {
+            val field = SETTING_PREFIX + key
+            if ((null to field) in exclude) continue
+            val a = before.settings[key]?.json?.let(::JSONObject)
+            val b = after.settings[key]?.json?.let(::JSONObject)
+            if (!TrackFields.same(a, b)) {
+                out += JSONObject().put("track_id", JSONObject.NULL).put("field", field).put("old", a ?: JSONObject.NULL).put("new", b ?: JSONObject.NULL)
             }
         }
         return out
