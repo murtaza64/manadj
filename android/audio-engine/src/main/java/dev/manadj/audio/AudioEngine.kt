@@ -284,7 +284,7 @@ data class EngineSnapshot(
         val seconds = d.sourceSeconds + (if (d.launchFrame != null) maxOf(0.0, heard - from) else heard - from) / outputSampleRate * speed
         val loop = d.loop
         return if (loop != null && seconds >= loop.end && d.sourceSeconds < loop.end) loop.start + (seconds - loop.end) % (loop.end - loop.start)
-        else seconds.coerceAtLeast(0.0)
+        else seconds.coerceAtLeast(-AudioEngine.MAX_LEAD_IN_SECONDS)
     }
 }
 
@@ -325,6 +325,8 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
         init { System.loadLibrary("manadj_audio") }
         const val MAIN_CUE = 8
         const val HOT_CUES = 8
+        /** Pre-roll bound (desktop MAX_LEAD_IN_SECONDS): seeks/jumps may park the playhead this far before 0. */
+        const val MAX_LEAD_IN_SECONDS = 30.0
         val CAPABILITIES = setOf("play", "pause", "cue-gate", "hot-cue-gate", "hot-cue-set", "seek", "fader", "trim", "crossfade", "varispeed", "bend", "pfl", "cue-mix", "routing", "eq", "filter", "grid", "beat-jump", "loop", "quantize", "beat-fx", "filter-settings", "key-lock", "sync", "scratch", "loop-region", "schedule")
         private const val PRIME_FRAMES = 2048
         private const val MEMORY_RESERVE_BYTES = 768L shl 20
@@ -379,7 +381,7 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
             is AudioCommand.SetHotCueAt -> { slot = command.slot; Op.HOT_CUE_SET_AT to command.seconds }
             is AudioCommand.ClearHotCue -> { slot = command.slot; Op.HOT_CUE_CLEAR to 0.0 }
             is AudioCommand.Seek -> {
-                if (!command.seconds.isFinite() || command.seconds < 0) return rejected("Invalid seek target")
+                if (!command.seconds.isFinite()) return rejected("Invalid seek target") // < 0: pre-roll, clamped to -MAX_LEAD_IN_SECONDS
                 if (sources[deck] == null) return rejected("No source")
                 Op.SEEK to command.seconds
             }
