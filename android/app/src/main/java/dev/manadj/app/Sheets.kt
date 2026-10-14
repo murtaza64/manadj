@@ -115,8 +115,13 @@ import dev.manadj.audio.QuantizeMode
             // Landscape BROWSE parity: which deck stays on screen next to the browser.
             Text("Browse beside (landscape)", bold = true)
             Row(Modifier.fillMaxWidth().height(40.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                Key("LOADING DECK", Modifier.weight(1f).fillMaxHeight(), Ink.accent, engaged = ux.browseBesideLoading, description = "Browse beside: Loading deck", textSize = 11, style = KeyStyle.PILL) { ux.browseBesideLoading = true }
-                Key("PLAYING DECK", Modifier.weight(1f).fillMaxHeight(), Ink.accent, engaged = !ux.browseBesideLoading, description = "Browse beside: Playing deck", textSize = 11, style = KeyStyle.PILL) { ux.browseBesideLoading = false }
+                for ((mode, label) in listOf(BrowseBeside.LOADING to "LOADING DECK", BrowseBeside.PLAYING to "PLAYING DECK", BrowseBeside.BOTH to "BOTH DECKS"))
+                    Key(label, Modifier.weight(1f).fillMaxHeight(), Ink.accent, engaged = ux.browseBeside == mode, description = "Browse beside: $label", textSize = 10, style = KeyStyle.PILL) { ux.browseBeside = mode }
+            }
+            if (ux.browseBeside == BrowseBeside.BOTH) Row(Modifier.fillMaxWidth().height(36.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("Browser side · swipe rows to A / B", Modifier.weight(1f), Ink.muted, 11)
+                Key("LEFT", Modifier.width(72.dp).fillMaxHeight(), Ink.accent, engaged = !ux.browseBothRight, description = "Browser on the left", textSize = 10, style = KeyStyle.PILL) { ux.browseBothRight = false }
+                Key("RIGHT", Modifier.width(72.dp).fillMaxHeight(), Ink.accent, engaged = ux.browseBothRight, description = "Browser on the right", textSize = 10, style = KeyStyle.PILL) { ux.browseBothRight = true }
             }
             Toggle("Crossfader", "Off hides the crossfader (both decks play through).", ux.crossfaderEnabled) {
                 ux.crossfaderEnabled = !ux.crossfaderEnabled
@@ -272,6 +277,15 @@ fun visibleOther(id: DeckId) = if (id == DeckId.A) DeckId.B else DeckId.A
     val context = androidx.compose.ui.platform.LocalContext.current
     val mic = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) { if (it) model.calibrateLatency() }
     val ms = model.heardLatency * 1000
+    // Mic loopback only works when the phone mic can hear the output (speaker, external speakers). On headphones
+    // it can't — and opening the mic on a Bluetooth headset can stall the output stream (human, 22:3xZ).
+    val deviceId = model.outputInfo?.deviceId
+    val headphones = remember(deviceId) {
+        val am = context.getSystemService(android.media.AudioManager::class.java)
+        val type = am.getDevices(android.media.AudioManager.GET_DEVICES_OUTPUTS).firstOrNull { it.id == deviceId }?.type
+        type in setOf(android.media.AudioDeviceInfo.TYPE_BLUETOOTH_A2DP, android.media.AudioDeviceInfo.TYPE_BLUETOOTH_SCO, android.media.AudioDeviceInfo.TYPE_BLE_HEADSET,
+            android.media.AudioDeviceInfo.TYPE_WIRED_HEADPHONES, android.media.AudioDeviceInfo.TYPE_WIRED_HEADSET, android.media.AudioDeviceInfo.TYPE_USB_HEADSET)
+    }
     // Beats at the playing deck's tempo: how far off a quantized launch would land uncorrected.
     val deck = model.visibleDecks.map { model.decks.getValue(it) }.firstOrNull { it.snapshot?.playing == true && it.snapshot?.bpm != null }
     val beats = deck?.snapshot?.bpm?.let { model.heardLatency * it * tempoRate(deck) / 60 }
@@ -292,15 +306,20 @@ fun visibleOther(id: DeckId) = if (id == DeckId.A) DeckId.B else DeckId.A
             Key("FORGET", Modifier.weight(1.4f).fillMaxHeight(), Ink.warning, model.heardLatencyCalibrated, textSize = 10, style = KeyStyle.PILL) { model.setHeardLatency(null) }
         }
         Row(Modifier.fillMaxWidth().height(40.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            Key(if (model.calibrating) "LISTENING…" else "CALIBRATE", Modifier.weight(1f).fillMaxHeight(), Ink.play, !model.calibrating, engaged = model.calibrating, description = "Calibrate latency with the microphone", textSize = 11, style = KeyStyle.PILL) {
+            Key(if (model.calibrating) "LISTENING…" else "CALIBRATE", Modifier.weight(1f).fillMaxHeight(), Ink.play, !model.calibrating && !headphones, engaged = model.calibrating, description = "Calibrate latency with the microphone", textSize = 11, style = KeyStyle.PILL) {
                 if (context.checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) model.calibrateLatency()
                 else mic.launch(android.Manifest.permission.RECORD_AUDIO)
             }
             TapAlong(model, deck, Modifier.weight(1f).fillMaxHeight())
         }
         val last = model.lastCalibration
+        // Recovery: reopen the output stream (a calibration on a Bluetooth route could leave it silent).
+        if (last != null) Key("RESTART AUDIO OUTPUT", Modifier.fillMaxWidth().height(36.dp), Ink.warning, !model.calibrating, description = "Restart audio output", textSize = 10, style = KeyStyle.PILL) {
+            model.configureOutput(model.output?.routing ?: dev.manadj.audio.Routing.STEREO, model.routingDevice)
+        }
         Text(when {
             model.calibrating -> "Volume up, quiet room: 6 chirps at full level (~7 s)."
+            headphones -> "Headphones: the phone mic can't hear them — use TAP along, or nudge."
             last?.seconds != null -> "Measured %.0f ms (spread %.1f ms, %d chirps).".format(last.seconds!! * 1000, last.spreadMillis, last.samples.size)
             last != null -> "Calibration failed: ${last.reason ?: "no clear chirps"}."
             deck == null -> "CALIBRATE uses the mic. TAP needs a playing deck with a beat grid."

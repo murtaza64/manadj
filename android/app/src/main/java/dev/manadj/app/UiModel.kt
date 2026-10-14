@@ -43,6 +43,13 @@ data class WheelFeedback(val label: String, val choices: List<String>, val index
 /** Enlarged knob next to the finger while a knob is held (fine mode). */
 data class KnobPopup(val label: String, val kind: KnobKind, val value: Double, val color: androidx.compose.ui.graphics.Color, val fingerX: Float, val fingerY: Float, val reset: () -> Unit, val resetVersion: Int = 0)
 
+/**
+ * Landscape BROWSE: LOADING = the load-target deck stays beside the browser; PLAYING = the outgoing deck and mixer
+ * stay, the browser replaces the target's side; BOTH = the browser covers both decks from a fixed side, only the
+ * mixer stays, loads are explicit swipes.
+ */
+enum class BrowseBeside { LOADING, PLAYING, BOTH }
+
 class UiModel(application: Application) : AndroidViewModel(application) {
     private val prefs = application.getSharedPreferences("ui-settings", Context.MODE_PRIVATE)
     private fun flag(key: String, default: Boolean) = mutableStateOf(prefs.getBoolean(key, default))
@@ -50,9 +57,12 @@ class UiModel(application: Application) : AndroidViewModel(application) {
 
     private val _quantize = flag("quantize", true)
     var quantize: Boolean get() = _quantize.value; set(v) { _quantize.value = v; store("quantize", v) }
-    private val _beside = flag("browse-beside-loading", true)
-    /** Landscape BROWSE: true = the loading (target) deck stays beside the browser; false = the playing (outgoing) deck. */
-    var browseBesideLoading: Boolean get() = _beside.value; set(v) { _beside.value = v; store("browse-beside-loading", v) }
+    private val _beside = mutableStateOf(runCatching { BrowseBeside.valueOf(prefs.getString("browse-beside", null) ?: "") }.getOrDefault(BrowseBeside.LOADING))
+    /** Landscape BROWSE layout (#93/#94). */
+    var browseBeside: BrowseBeside get() = _beside.value; set(v) { _beside.value = v; prefs.edit().putString("browse-beside", v.name).apply() }
+    private val _bothRight = flag("browse-both-right", true)
+    /** [BrowseBeside.BOTH]: the browser's fixed side (right by default). */
+    var browseBothRight: Boolean get() = _bothRight.value; set(v) { _bothRight.value = v; store("browse-both-right", v) }
     private val _heard = flag("quantize-heard", false)
     /** Quantize reads the heard instant (#382 HEARD) instead of the render position (GRID). */
     var quantizeHeard: Boolean get() = _heard.value; set(v) { _heard.value = v; store("quantize-heard", v) }

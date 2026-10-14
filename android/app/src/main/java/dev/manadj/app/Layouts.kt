@@ -115,19 +115,16 @@ import dev.manadj.audio.QuantizeMode
 
 @Composable private fun SettingsKey(ux: UiModel, modifier: Modifier = Modifier.size(40.dp)) = Key("", modifier, Ink.muted, description = "Settings", icon = Glyph.Gear, style = KeyStyle.BARE) { ux.settings = true }
 
-/** Portrait centre: app-level toggles in one floating group (#58) — QUANTIZE, crossfader enable, SETTINGS. */
+/** Portrait centre: BROWSE + crossfader enable in one floating group (#58; BROWSE swapped in from the minimap row, #94). */
 @Composable private fun GlobalControls(model: PlayerModel, ux: UiModel, modifier: Modifier) {
-    val mode by remember { derivedStateOf { model.output?.quantizeMode ?: ux.quantizeMode } }
-    val q = mode != QuantizeMode.OFF
     // One row of compact keys; the group centres in whatever height the mixer leaves.
     Box(modifier, contentAlignment = Alignment.Center) {
         Row(Modifier.fillMaxWidth().height(40.dp).clip(androidx.compose.foundation.shape.RoundedCornerShape(10.dp)).border(1.dp, Ink.surface, androidx.compose.foundation.shape.RoundedCornerShape(10.dp)).padding(3.dp), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-            Key(if (mode == QuantizeMode.HEARD) "QUANT·H" else "QUANT", Modifier.weight(1.2f).fillMaxHeight(), Ink.accent, model.supports("quantize"), q, if (q) "Quantize on" else "Quantize off", style = KeyStyle.PILL, textSize = 10, longPress = { ux.setQuantize(model, on = true, heard = !ux.quantizeHeard) }) { ux.setQuantize(model, on = !q) }
+            BrowseKey(model, ux, Modifier.weight(1.4f).fillMaxHeight())
             Key("XF", Modifier.weight(.8f).fillMaxHeight(), Ink.accent, engaged = ux.crossfaderEnabled, description = "Crossfader enable", style = KeyStyle.PILL, textSize = 10) {
                 ux.crossfaderEnabled = !ux.crossfaderEnabled
                 if (!ux.crossfaderEnabled) model.updateCrossfade(.5)
             }
-            Key("", Modifier.weight(.7f).fillMaxHeight(), Ink.muted, description = "Settings", icon = Glyph.Gear, style = KeyStyle.PILL, textSize = 12) { ux.settings = true }
         }
     }
 }
@@ -205,10 +202,10 @@ fun mixOf(model: PlayerModel, ux: UiModel, id: DeckId): DeckMix {
                 ChannelFader(b, model, Modifier.width(54.dp).fillMaxHeight())
                 KnobColumn(b, ux, model, Modifier.width(58.dp).fillMaxHeight())
             }
-            // Minimaps flank the centre BROWSE key.
+            // Minimaps flank QUANT + settings (swapped with BROWSE, #94).
             Row(pad.fillMaxWidth().height(if (tight) 36.dp else 44.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                 Minimap(a, model, ux.waves[a.source?.id ?: ""], Modifier.weight(1f).fillMaxHeight(), preview = ux.seekPreview)
-                BrowseKey(model, ux, Modifier.width(84.dp).fillMaxHeight())
+                Row(Modifier.width(84.dp).fillMaxHeight(), verticalAlignment = Alignment.CenterVertically) { QuantizeKey(model, ux, Modifier.weight(1f).fillMaxHeight()); SettingsKey(ux, Modifier.size(36.dp)) }
                 Minimap(b, model, ux.waves[b.source?.id ?: ""], Modifier.weight(1f).fillMaxHeight(), preview = ux.seekPreview)
             }
             Row(pad.fillMaxWidth().height(28.dp), horizontalArrangement = Arrangement.spacedBy(DeckGap)) { for (ui in listOf(a, b)) StemsStrip(ui, ux, model, Modifier.weight(1f).fillMaxHeight()) }
@@ -229,13 +226,16 @@ fun mixOf(model: PlayerModel, ux: UiModel, id: DeckId): DeckMix {
     }
 }
 
+/** Where the landscape browser pane sits: beside one deck (slot) or over both decks from a fixed side. */
+private enum class PaneKind { LEFT_SLOT, RIGHT_SLOT, BOTH_LEFT, BOTH_RIGHT }
+
 /**
  * Landscape: each deck's side (info, minimap, pads, stems, loop, jump, transport, bend + pitch) flanks the
- * mixer. BROWSE slides the whole strip sideways (#65): the strip is [browser][A][mixer][B][browser], one deck
- * wider than the screen on each side and centred. The load-target deck stays on screen with the mixer and the
- * browser appears beside it; the outgoing deck (coveredDeck) slides off. Rigid: everything is laid out once at
- * full size and only translated (graphicsLayer); the browser pane stays composed after its first open, and
- * screenSafe insets are computed at rest ([LocalSafeFrame]) so nothing re-lays out mid-slide.
+ * mixer. BROWSE slides the whole strip sideways (#65): the strip is [A][mixer][B], centred, with a browser pane
+ * entering from an edge. Settings › Browse beside ([BrowseBeside]): LOADING keeps the load target beside the
+ * browser, PLAYING keeps the outgoing deck, BOTH moves the mixer to the far edge and the pane covers both decks.
+ * Rigid: everything is laid out once at full size and only translated (graphicsLayer); the pane stays composed
+ * after its first open, and screenSafe insets are computed at rest ([LocalSafeFrame]) — no relayout mid-slide.
  */
 @Composable private fun Landscape(model: PlayerModel, ux: UiModel, pick: (DeckId) -> Unit, modifier: Modifier) {
     val a = model.decks.getValue(DeckId.A); val b = model.decks.getValue(DeckId.B)
@@ -243,56 +243,69 @@ fun mixOf(model: PlayerModel, ux: UiModel, id: DeckId): DeckMix {
         val mixerWidth = 372.dp
         val screen = maxWidth
         val side = (screen - mixerWidth - 12.dp) / 2
-        val sidePx = with(LocalDensity.current) { side.toPx() }
-        val screenPx = with(LocalDensity.current) { screen.toPx() }
-        // The deck kept on screen: the loading target (default) or the playing/outgoing deck (Settings).
-        // Kept A: strip moves right (+side) so the left browser slot sits beside A; kept B: left.
+        val bothWidth = side * 2 + 6.dp
+        val density = LocalDensity.current
+        val sidePx = with(density) { side.toPx() }
+        val screenPx = with(density) { screen.toPx() }
+        val bothPx = with(density) { bothWidth.toPx() }
         val targetDeck = model.browser?.let(::other)
-        val kept = if (ux.browseBesideLoading) targetDeck else model.browser
-        val goal = when (kept) { DeckId.A -> sidePx; DeckId.B -> -sidePx; else -> 0f }
+        val kind = when {
+            model.browser == null -> null
+            ux.browseBeside == BrowseBeside.BOTH -> if (ux.browseBothRight) PaneKind.BOTH_RIGHT else PaneKind.BOTH_LEFT
+            // The deck kept on screen: the loading target or the outgoing (playing) deck; the pane sits on its outer side.
+            (if (ux.browseBeside == BrowseBeside.LOADING) targetDeck else model.browser) == DeckId.A -> PaneKind.LEFT_SLOT
+            else -> PaneKind.RIGHT_SLOT
+        }
+        // Strip translation at rest per kind: browser left → strip right (+side), browser right → strip left.
+        fun goalOf(k: PaneKind?) = when (k) { PaneKind.LEFT_SLOT, PaneKind.BOTH_LEFT -> sidePx; PaneKind.RIGHT_SLOT, PaneKind.BOTH_RIGHT -> -sidePx; null -> 0f }
+        // Pane translation for strip shift [s]: slots ride with the strip; the wide pane travels its own width
+        // over the same slide (off-screen at s = 0, flush against the mixer at rest).
+        fun paneX(k: PaneKind, s: Float) = when (k) {
+            PaneKind.LEFT_SLOT -> s - sidePx
+            PaneKind.RIGHT_SLOT -> s + screenPx
+            PaneKind.BOTH_LEFT -> (s - sidePx) * bothPx / sidePx
+            PaneKind.BOTH_RIGHT -> screenPx - bothPx + (s + sidePx) * bothPx / sidePx
+        }
         val shift = remember { androidx.compose.animation.core.Animatable(0f) }
-        LaunchedEffect(goal) { shift.animateTo(goal, androidx.compose.animation.core.spring(dampingRatio = 1f, stiffness = 1200f)) }
-        // The pane keeps its last side while sliding out; composed once opened, then kept (no first-frame build).
-        var paneSide by remember { mutableStateOf<DeckId?>(null) }
-        var paneTarget by remember { mutableStateOf(DeckId.A) }
-        LaunchedEffect(kept, targetDeck) { if (kept != null && targetDeck != null) { paneSide = kept; paneTarget = targetDeck } }
-        val stripFrame = remember(shift) { SafeFrame({ shift.value }, 0f) }
+        LaunchedEffect(kind, sidePx) { shift.animateTo(goalOf(kind), androidx.compose.animation.core.spring(dampingRatio = 1f, stiffness = 1200f)) }
+        // The pane keeps its kind/target while sliding out; composed once opened, then kept (no build on press).
+        var pane by remember { mutableStateOf<PaneKind?>(null) }
+        var paneTarget by remember { mutableStateOf<DeckId?>(null) }
+        LaunchedEffect(kind, targetDeck) { if (kind != null) { pane = kind; paneTarget = if (kind == PaneKind.BOTH_LEFT || kind == PaneKind.BOTH_RIGHT) null else targetDeck } }
+        val stripFrame = remember(shift) { SafeFrame { shift.value } }
         CompositionLocalProvider(LocalSafeFrame provides stripFrame) {
-            Row(Modifier.wrapContentWidth(unbounded = true).requiredWidth(screen + side * 2).fillMaxHeight().graphicsLayer { translationX = shift.value }) {
-                Spacer(Modifier.width(side))
-                Row(Modifier.width(screen).fillMaxHeight().padding(horizontal = 6.dp)) {
-                    DeckSide(a, model, ux, pick, Modifier.weight(1f).fillMaxHeight())
-                    Column(Modifier.width(mixerWidth).fillMaxHeight().padding(horizontal = DeckGap), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Row(Modifier.fillMaxWidth().weight(1f)) {
-                            KnobColumn(a, ux, model, Modifier.width(54.dp).fillMaxHeight().padding(top = 4.dp), 34.dp)
-                            ChannelFader(a, model, Modifier.width(48.dp).fillMaxHeight())
-                            Row(Modifier.weight(1f).fillMaxHeight().padding(horizontal = 3.dp), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-                                for (ui in listOf(a, b)) DetailWave(ui, model, ux, Modifier.weight(1f).fillMaxHeight(), vertical = true)
-                            }
-                            ChannelFader(b, model, Modifier.width(48.dp).fillMaxHeight())
-                            KnobColumn(b, ux, model, Modifier.width(54.dp).fillMaxHeight().padding(top = 4.dp), 34.dp)
+            Row(Modifier.width(screen).fillMaxHeight().graphicsLayer { translationX = shift.value }.padding(horizontal = 6.dp)) {
+                DeckSide(a, model, ux, pick, Modifier.weight(1f).fillMaxHeight())
+                Column(Modifier.width(mixerWidth).fillMaxHeight().padding(horizontal = DeckGap), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(Modifier.fillMaxWidth().weight(1f)) {
+                        KnobColumn(a, ux, model, Modifier.width(54.dp).fillMaxHeight().padding(top = 4.dp), 34.dp)
+                        ChannelFader(a, model, Modifier.width(48.dp).fillMaxHeight())
+                        Row(Modifier.weight(1f).fillMaxHeight().padding(horizontal = 3.dp), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                            for (ui in listOf(a, b)) DetailWave(ui, model, ux, Modifier.weight(1f).fillMaxHeight(), vertical = true)
                         }
-                        // Symmetric flanks keep the crossfader centred on the screen.
-                        Row(Modifier.fillMaxWidth().height(44.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            BrowseKey(model, ux, Modifier.width(76.dp).height(40.dp))
-                            Crossfader(model, ux, Modifier.weight(1f).fillMaxHeight())
-                            Row(Modifier.width(76.dp), verticalAlignment = Alignment.CenterVertically) { QuantizeKey(model, ux, Modifier.weight(1f).height(32.dp)); SettingsKey(ux, Modifier.size(38.dp)) }
-                        }
-                        FxSection(ux, model, Modifier.fillMaxWidth().height(54.dp).padding(bottom = 4.dp), horizontal = true)
+                        ChannelFader(b, model, Modifier.width(48.dp).fillMaxHeight())
+                        KnobColumn(b, ux, model, Modifier.width(54.dp).fillMaxHeight().padding(top = 4.dp), 34.dp)
                     }
-                    DeckSide(b, model, ux, pick, Modifier.weight(1f).fillMaxHeight())
+                    // Symmetric flanks keep the crossfader centred; QUANT/settings left, BROWSE right (#94 swap).
+                    Row(Modifier.fillMaxWidth().height(44.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Row(Modifier.width(76.dp), verticalAlignment = Alignment.CenterVertically) { QuantizeKey(model, ux, Modifier.weight(1f).height(32.dp)); SettingsKey(ux, Modifier.size(38.dp)) }
+                        Crossfader(model, ux, Modifier.weight(1f).fillMaxHeight())
+                        BrowseKey(model, ux, Modifier.width(76.dp).height(40.dp))
+                    }
+                    FxSection(ux, model, Modifier.fillMaxWidth().height(54.dp).padding(bottom = 4.dp), horizontal = true)
                 }
-                Spacer(Modifier.width(side))
+                DeckSide(b, model, ux, pick, Modifier.weight(1f).fillMaxHeight())
             }
         }
-        val pane = paneSide
-        if (pane != null) {
-            // Left slot (target A) rests at x 0 when shift = +side; right slot (target B) at screen − side.
-            val base = if (pane == DeckId.A) -sidePx else screenPx
-            val paneFrame = remember(shift, pane, sidePx) { SafeFrame({ shift.value }, if (pane == DeckId.A) sidePx else -sidePx) }
+        val k = pane
+        if (k != null) {
+            val wide = k == PaneKind.BOTH_LEFT || k == PaneKind.BOTH_RIGHT
+            val left = k == PaneKind.LEFT_SLOT || k == PaneKind.BOTH_LEFT
+            val rest = paneX(k, goalOf(k))
+            val paneFrame = remember(shift, k, sidePx, screenPx) { SafeFrame { paneX(k, shift.value) - rest } }
             CompositionLocalProvider(LocalSafeFrame provides paneFrame) {
-                Box(Modifier.width(side).fillMaxHeight().graphicsLayer { translationX = shift.value + base }) {
-                    LibraryPanel(model, ux, Modifier.fillMaxSize().padding(start = if (pane == DeckId.A) 6.dp else 0.dp, end = if (pane == DeckId.B) 6.dp else 0.dp).screenSafe(), pick, tapTarget = paneTarget)
+                Box(Modifier.width(if (wide) bothWidth else side).fillMaxHeight().graphicsLayer { translationX = paneX(k, shift.value) }.background(Ink.background)) {
+                    LibraryPanel(model, ux, Modifier.fillMaxSize().padding(start = if (left) 6.dp else 0.dp, end = if (left) 0.dp else 6.dp).screenSafe(), pick, tapTarget = paneTarget)
                 }
             }
         }
