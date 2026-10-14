@@ -23,6 +23,7 @@ class SyncTest {
     private var previewRequests = 0
     private var audioRequests = 0
     @Volatile private var previewRev = "p1"
+    @Volatile private var requiredCode: String? = null
 
     private fun snapshotJson() = """
         {"version":1,"generated_at":"2026-10-14T12:00:00+00:00",
@@ -45,6 +46,9 @@ class SyncTest {
         root = Files.createTempDirectory("library-sync").toFile()
         server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
         server.createContext("/api/device-sync/snapshot") { ex ->
+            if (requiredCode != null && ex.requestHeaders.getFirst(PAIR_HEADER) != requiredCode) {
+                ex.sendResponseHeaders(401, -1); ex.close(); return@createContext
+            }
             val body = snapshotJson().toByteArray()
             ex.sendResponseHeaders(200, body.size.toLong()); ex.responseBody.use { it.write(body) }
         }
@@ -123,6 +127,15 @@ class SyncTest {
         assertEquals(AudioState.Cached, repo.audioState(track))
         assertEquals(AudioState.Unavailable, repo.audioState(repo.library.value!!.track(11)!!))
         assertTrue(runCatching { repo.audioFile(11) }.isFailure)
+    }
+
+    @Test fun pairingCodeSentToLanListener() = runBlocking {
+        requiredCode = "ABCDE-FGHJK"
+        val repo = repo()
+        assertTrue(repo.sync().isFailure)
+        assertTrue(repo.state.value.error!!.startsWith("Pairing code"))
+        repo.pairCode = "ABCDE-FGHJK"
+        assertEquals(2, repo.sync().getOrThrow().tracks.size)
     }
 
     @Test fun presyncAudio() = runBlocking {

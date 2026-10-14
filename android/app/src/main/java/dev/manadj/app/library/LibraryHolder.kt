@@ -24,7 +24,7 @@ object LibraryHolder {
         instance ?: run {
             val app = context.applicationContext
             val prefs = app.getSharedPreferences("library", Context.MODE_PRIVATE)
-            LibraryRepository(File(app.filesDir, "library"), prefs.getString("url", DEFAULT_URL)!!).also { repo ->
+            LibraryRepository(File(app.filesDir, "library"), prefs.getString("url", DEFAULT_URL)!!, prefs.getString("pair", null)).also { repo ->
                 instance = repo
                 scope.launch { repo.open() }
             }
@@ -37,6 +37,14 @@ object LibraryHolder {
     }
 
     fun sourceId(track: LibraryTrack) = "$SOURCE_PREFIX${track.id}:${track.audioRev}"
+
+    /** Pairing code shown in desktop Settings › Library › Phone sync (LAN listener, #373). */
+    fun setPairCode(context: Context, code: String) {
+        repository(context).pairCode = code.trim().ifEmpty { null }
+        context.applicationContext.getSharedPreferences("library", Context.MODE_PRIVATE).edit().putString("pair", code.trim()).apply()
+    }
+
+    fun pairCode(context: Context): String = repository(context).pairCode.orEmpty()
 
     /** The library Track id a deck holds, when it was loaded from the Library. */
     fun trackOn(model: PlayerModel, deck: DeckId): Int? =

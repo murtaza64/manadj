@@ -7,8 +7,11 @@ import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
 
-/** HTTP client for the desktop's /api/device-sync endpoints. Blocking; call off the main thread. */
-class SyncClient(baseUrl: String, private val timeoutMs: Int = 15_000) {
+/**
+ * HTTP client for the desktop's /api/device-sync endpoints. Blocking; call off the main thread.
+ * [pairCode] is required by the desktop's LAN listener (#373); loopback (adb reverse) ignores it.
+ */
+class SyncClient(baseUrl: String, private val pairCode: String? = null, private val timeoutMs: Int = 15_000) {
     val baseUrl: String = baseUrl.trimEnd('/')
 
     private fun open(path: String, method: String = "GET"): HttpURLConnection =
@@ -16,10 +19,15 @@ class SyncClient(baseUrl: String, private val timeoutMs: Int = 15_000) {
             requestMethod = method
             connectTimeout = timeoutMs
             readTimeout = timeoutMs * 4
+            pairCode?.takeIf { it.isNotBlank() }?.let { setRequestProperty(PAIR_HEADER, it.trim()) }
         }
 
     private fun HttpURLConnection.checked(): HttpURLConnection {
         val code = responseCode
+        if (code == 401) {
+            disconnect()
+            throw SyncException("Pairing code missing or wrong — enter the code from desktop Settings › Library › Phone sync")
+        }
         if (code !in 200..299) {
             val detail = errorStream?.use { it.readBytes().decodeToString().take(200) }.orEmpty()
             disconnect()
@@ -74,5 +82,7 @@ class SyncClient(baseUrl: String, private val timeoutMs: Int = 15_000) {
         throw SyncException("Desktop unreachable at $baseUrl (${e.message ?: e.javaClass.simpleName})", e)
     }
 }
+
+const val PAIR_HEADER = "X-Manadj-Pair"
 
 class SyncException(message: String, cause: Throwable? = null) : Exception(message, cause)

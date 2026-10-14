@@ -42,6 +42,8 @@ sealed interface AudioState {
 class LibraryRepository(
     root: File,
     @Volatile var baseUrl: String,
+    /** Desktop LAN listener pairing code (#373); unused over loopback. */
+    @Volatile var pairCode: String? = null,
     private val io: CoroutineDispatcher = Dispatchers.IO,
 ) {
     val store = LibraryStore(root)
@@ -57,7 +59,7 @@ class LibraryRepository(
     private val audioLocks = ConcurrentHashMap<Int, Mutex>()
     private val previewCache = ConcurrentHashMap<String, PreviewWaveform>()
 
-    private fun client() = SyncClient(baseUrl)
+    private fun client() = SyncClient(baseUrl, pairCode)
 
     private fun build(snapshot: Snapshot) = Library(snapshot) { track ->
         val key = "${track.id}-${track.previewRev ?: return@Library null}"

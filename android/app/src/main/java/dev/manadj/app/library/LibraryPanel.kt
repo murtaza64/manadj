@@ -56,6 +56,7 @@ private val SORTS = listOf(SortColumn.DATE_ADDED, SortColumn.TITLE, SortColumn.A
     var knownOnly by remember { mutableStateOf(false) }
     var settings by remember { mutableStateOf(false) }
     var url by remember { mutableStateOf(repo.baseUrl) }
+    var pair by remember { mutableStateOf(repo.pairCode.orEmpty()) }
     var error by remember { mutableStateOf<String?>(null) }
     /** Track awaiting a second tap because the target deck is playing. */
     var confirm by remember { mutableStateOf<Int?>(null) }
@@ -84,8 +85,10 @@ private val SORTS = listOf(SortColumn.DATE_ADDED, SortColumn.TITLE, SortColumn.A
             Key("CLOSE", Modifier.width(64.dp).fillMaxHeight()) { model.browser = null }
         }
         if (settings) Column(Modifier.fillMaxWidth().border(1.dp, Ink.edge).padding(6.dp)) {
-            Text("Desktop URL (adb reverse tcp:8127 tcp:<backend port>)", color = Ink.muted, size = 11)
+            Text("Desktop URL: http://<desktop ip>:<port> from desktop Settings › Library › Phone sync (or 127.0.0.1:8127 over adb reverse)", color = Ink.muted, size = 11, lines = 2)
             Field(url, Modifier.fillMaxWidth().height(40.dp)) { url = it; LibraryHolder.setUrl(context, it) }
+            Text("Pairing code", color = Ink.muted, size = 11)
+            Field(pair, Modifier.fillMaxWidth().height(40.dp), placeholder = "XXXXX-XXXXX") { pair = it; LibraryHolder.setPairCode(context, it) }
             Row(Modifier.fillMaxWidth().height(48.dp)) {
                 Key("SYNC + ALL AUDIO", Modifier.weight(1f).fillMaxHeight(), Ink.play, !state.running) { scope.launch { repo.sync(audio = true) } }
                 Key("CLEAR AUDIO", Modifier.weight(1f).fillMaxHeight(), Ink.warning, !state.running) { scope.launch { repo.clearAudio() } }

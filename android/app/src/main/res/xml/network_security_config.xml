@@ -1,10 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Library sync (#372) pulls from the desktop over plain HTTP. Loopback only
-     (adb reverse); a LAN listener with pairing is a follow-up. -->
+<!-- Library sync pulls from the desktop over plain HTTP: loopback (adb reverse,
+     #372) or the desktop's opt-in LAN listener (#373), whose LAN address is
+     not known at build time. The app talks to no other HTTP host; requests to
+     the LAN listener carry the pairing code. -->
 <network-security-config>
-    <base-config cleartextTrafficPermitted="false" />
-    <domain-config cleartextTrafficPermitted="true">
-        <domain includeSubdomains="false">127.0.0.1</domain>
-        <domain includeSubdomains="false">localhost</domain>
-    </domain-config>
+    <base-config cleartextTrafficPermitted="true" />
 </network-security-config>

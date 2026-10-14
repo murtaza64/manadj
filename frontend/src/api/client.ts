@@ -69,6 +69,16 @@ const BACKEND_URL =
   import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://localhost:8127' : '');
 const API_BASE = `${BACKEND_URL}/api`;
 
+/** Phone sync LAN listener (#373, backend/device_listener.py). */
+export interface DeviceListenerStatus {
+  enabled: boolean;
+  running: boolean;
+  port: number;
+  pair_code: string | null;
+  addresses: string[];
+  error: string | null;
+}
+
 // Export for use in other components (e.g., for static file URLs)
 export { BACKEND_URL };
 
@@ -1815,6 +1825,28 @@ export const api = {
 
   // ── App configuration (packaged-app #277): the settings file, not the
   // DB settings table. Settings → Library edits these.
+  deviceListener: {
+    get: async (): Promise<DeviceListenerStatus> => {
+      const res = await fetch(`${API_BASE}/device-listener`);
+      if (!res.ok) throw new Error(`Failed to load phone sync (${res.status})`);
+      return res.json();
+    },
+    update: async (changes: { enabled?: boolean; port?: number }): Promise<DeviceListenerStatus> => {
+      const res = await fetch(`${API_BASE}/device-listener`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(changes),
+      });
+      if (!res.ok) throw new Error(`Failed to update phone sync (${res.status})`);
+      return res.json();
+    },
+    rotate: async (): Promise<DeviceListenerStatus> => {
+      const res = await fetch(`${API_BASE}/device-listener/rotate`, { method: 'POST' });
+      if (!res.ok) throw new Error(`Failed to rotate pairing code (${res.status})`);
+      return res.json();
+    },
+  },
+
   appConfig: {
     get: async (): Promise<AppConfigWire> => {
       const res = await fetch(`${API_BASE}/config`);

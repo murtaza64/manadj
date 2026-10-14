@@ -23,7 +23,7 @@ Native Compose app (`:app`, id `dev.murt.manadj`; installs alongside the #365 pr
 
 Pull-only from the desktop backend (`/api/device-sync/*`, `backend/routers/device_sync.py`); offline after a sync.
 
-- Reachability: loopback only for now — `adb -s <device> reverse tcp:8127 tcp:<backend port>`; the app's default URL is `http://127.0.0.1:8127` (⚙ to change; cleartext allowed for loopback only, `res/xml/network_security_config.xml`).
+- Reachability: desktop Settings › Library › Phone sync (#373) opens an opt-in LAN listener (default port 48127) serving only `/api/device-sync/*`, gated by a pairing code (`X-Manadj-Pair`; `backend/device_listener.py`). Enter `http://<desktop ip>:<port>` + the code in the app. Without it: `adb -s <device> reverse tcp:8127 tcp:<backend port>` and the default URL `http://127.0.0.1:8127` (loopback needs no code). Plain HTTP (`res/xml/network_security_config.xml`).
 - SYNC pulls the snapshot (Tracks, Tags, Playlists in Play order, cues, saved grids, Follow evidence edges) and missing preview waveforms (MWF1, by revision). Audio downloads on first load, or all at once via ⚙ → SYNC + ALL AUDIO. Cache: `filesDir/library` (`LibraryStore`).
 - `:library` (`dev.manadj.library`, pure Kotlin/JVM): `LibraryRepository` (sync, cache, `audioFile(id)`), `Library` (`query(LibraryQuery)`, `follow(refs, FollowParams, within)`, `marks(deckTrack, id)`, `playlistTracks(id)`, `preview(track)`). Filter semantics mirror the desktop FilterState; Follow ranking ports `frontend/src/follow/matchScore.ts` (Known > Observed > Compatible).
 - Load: `app/.../library/LibraryHolder.load` → `PlayerModel.load` (snapshot title/artist, first grid segment, main cue, hot cues; source id `library:<trackId>:<audioRev>`).
