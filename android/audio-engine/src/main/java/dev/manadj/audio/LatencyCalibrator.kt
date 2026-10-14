@@ -82,6 +82,33 @@ class LatencyCalibrator(private val context: Context) {
 
     companion object {
         const val MIC_RATE = 48000
+        /** Tap-along: the engine's chirps every [TAP_INTERVAL] s (track-independent, distinct timbre); ≥ [MIN_TAPS] taps. */
+        const val TAP_INTERVAL = 1.5
+        const val TAP_CLICKS = 16
+        const val MIN_TAPS = 8
+        private const val TAP_SPREAD = .03
+
+        /**
+         * Tap-along latency (#382 fallback): each tap (System.nanoTime) minus the latest click render instant before
+         * it, folded into one click period; the period ambiguity is resolved toward [reportedSeconds] (Oboe) when
+         * given. Needs ≥ [MIN_TAPS] taps whose median-absolute deviation is under 30 ms, else rejected.
+         */
+        fun fromTaps(tapNanos: List<Long>, clickNanos: LongArray, reportedSeconds: Double?, interval: Double = TAP_INTERVAL): Result {
+            val clicks = clickNanos.filter { it > 0 }.sorted()
+            if (clicks.isEmpty()) return Result(null, emptyList(), 0.0, "No clicks played")
+            val raw = tapNanos.mapNotNull { tap -> clicks.lastOrNull { it <= tap }?.let { (tap - it) / 1e9 } }
+            if (raw.size < MIN_TAPS) return Result(null, raw, 0.0, "Tap at least $MIN_TAPS times, on each click you hear")
+            // Fold to [0, interval) then pick the wrap of the circular median nearest the reported latency.
+            val folded = raw.map { ((it % interval) + interval) % interval }
+            val center = folded.minBy { c -> folded.sumOf { val d = abs(it - c); minOf(d, interval - d) } }
+            val unwrapped = folded.map { val d = it - center; center + d - interval * kotlin.math.round(d / interval) }
+            val median = unwrapped.sorted()[unwrapped.size / 2]
+            val spread = unwrapped.map { abs(it - median) }.sorted()[unwrapped.size / 2]
+            if (spread > TAP_SPREAD) return Result(null, raw, spread * 1000, "Taps inconsistent (±${(spread * 1000).toInt()} ms); try again")
+            val candidates = (-1..1).map { median + it * interval }.filter { it >= 0 }
+            val seconds = candidates.minBy { abs(it - (reportedSeconds ?: median)) }
+            return Result(seconds, raw, spread * 1000)
+        }
         private const val PRE_ROLL = .3
 
         /**

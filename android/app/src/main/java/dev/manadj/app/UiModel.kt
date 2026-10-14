@@ -50,6 +50,9 @@ data class KnobPopup(val label: String, val kind: KnobKind, val value: Double, v
  */
 enum class BrowseBeside { LOADING, PLAYING, BOTH }
 
+val dev.manadj.audio.QuantizeMode.quantized get() = this == dev.manadj.audio.QuantizeMode.GRID || this == dev.manadj.audio.QuantizeMode.HEARD
+val dev.manadj.audio.QuantizeMode.heard get() = this == dev.manadj.audio.QuantizeMode.HEARD || this == dev.manadj.audio.QuantizeMode.HEARD_UNQUANTIZED
+
 class UiModel(application: Application) : AndroidViewModel(application) {
     private val prefs = application.getSharedPreferences("ui-settings", Context.MODE_PRIVATE)
     private fun flag(key: String, default: Boolean) = mutableStateOf(prefs.getBoolean(key, default))
@@ -69,7 +72,8 @@ class UiModel(application: Application) : AndroidViewModel(application) {
     private val _heard = flag("quantize-heard", false)
     /** Quantize reads the heard instant (#382 HEARD) instead of the render position (GRID). */
     var quantizeHeard: Boolean get() = _heard.value; set(v) { _heard.value = v; store("quantize-heard", v) }
-    val quantizeMode get() = if (!quantize) dev.manadj.audio.QuantizeMode.OFF else if (quantizeHeard) dev.manadj.audio.QuantizeMode.HEARD else dev.manadj.audio.QuantizeMode.GRID
+    /** (quantize, heard) → engine mode; lag compensation is independent of quantize (#122). */
+    val quantizeMode get() = when { quantize && quantizeHeard -> dev.manadj.audio.QuantizeMode.HEARD; quantize -> dev.manadj.audio.QuantizeMode.GRID; quantizeHeard -> dev.manadj.audio.QuantizeMode.HEARD_UNQUANTIZED; else -> dev.manadj.audio.QuantizeMode.OFF }
     /** Persist + push the quantize preference ([on] / [heard]; null keeps the current value). */
     fun setQuantize(model: PlayerModel, on: Boolean? = null, heard: Boolean? = null) {
         on?.let { quantize = it }; heard?.let { quantizeHeard = it }

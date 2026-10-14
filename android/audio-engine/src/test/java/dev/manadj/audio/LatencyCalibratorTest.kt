@@ -36,6 +36,21 @@ class LatencyCalibratorTest {
         assertEquals(6, r.samples.size)
     }
 
+    @Test fun tapAlongRecoversLatencyWithoutBeatAmbiguity() {
+        val clicks = LongArray(LatencyCalibrator.TAP_CLICKS) { 1_000_000_000L + (it * LatencyCalibrator.TAP_INTERVAL * 1e9).toLong() }
+        val random = Random(3)
+        for (latency in listOf(.2, .4, .7, 1.0, 1.2)) {
+            val taps = clicks.drop(1).take(10).map { it + ((latency + (random.nextDouble() - .5) * .03) * 1e9).toLong() }
+            // Oboe under-reports Bluetooth; only used to pick among candidates 1.5 s apart.
+            val r = LatencyCalibrator.fromTaps(taps, clicks, reportedSeconds = latency * .6)
+            assertNull(r.toString(), r.reason)
+            assertEquals("latency $latency", latency, r.seconds!!, .01)
+        }
+        assertNotNull(LatencyCalibrator.fromTaps(clicks.take(5).map { it + 300_000_000L }, clicks, .3).reason)       // too few
+        val sloppy = clicks.take(10).mapIndexed { i, c -> c + ((.3 + (i % 3) * .2) * 1e9).toLong() }
+        assertNotNull(LatencyCalibrator.fromTaps(sloppy, clicks, .3).reason)                                          // inconsistent
+    }
+
     @Test fun shortWiredLatency() {
         val r = LatencyCalibrator.analyze(mic(renders, .021), rate, stampFrame, stampNanos, renders.toLongArray(), .76)
         assertNull(r.toString(), r.reason)

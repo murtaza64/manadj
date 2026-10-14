@@ -444,7 +444,7 @@ void Engine::relocate(Deck& d, double seconds, int slot, double overshootFrames)
 // playing with a grid whose effective tempo (half/double folded) is nearest this deck's; a Sync Group
 // member only references in-lock members. -1 = none (the launch is immediate).
 int Engine::launchReference(int index) const noexcept {
-    if (!quantize_.load(kRelaxed)) return -1;
+    if (!quantize_.load(kRelaxed) && !heard_.load(kRelaxed)) return -1;
     const auto& own = decks_[index];
     const double ownBpm = own.bpm.load(kRelaxed) * (1 + own.pitch.load(kRelaxed) / 100.);
     if (!(ownBpm > 0)) return -1;
@@ -475,6 +475,19 @@ bool Engine::launch(int index, double at, int slot) noexcept {
     const double refPosition = r.position.load(kRelaxed);
     const double refRate = (1 + r.pitch.load(kRelaxed) / 100.) * (1 + r.bend.load(kRelaxed) / 100.);
     const double rate = (1 + d.pitch.load(kRelaxed) / 100.) * (1 + d.bend.load(kRelaxed) / 100.);
+    // Heard semantics (human, #60): the press is treated as made L earlier (t_v = now − L). Unquantized: the deck
+    // virtually started at X then, so it starts now at X + L·r. Quantized: the desktop launch decision runs against
+    // the reference at t_v (its position now − L·r_ref) → delay d / entry e; translated to now that is a wait of
+    // d − L at X when d ≥ L, else an immediate start at e + (L − d)·r — which is exactly the engine-time decision
+    // below against the target picked at t_v. Grid = the same with L = 0.
+    if (!quantize_.load(kRelaxed)) {
+        const double L = heardLatency_.load(kRelaxed), entry = at + L * rate;
+        const double diag[9] = {lastLaunch[0].load(kRelaxed) + 1, static_cast<double>(index), static_cast<double>(ref), L,
+                                r.position.load(kRelaxed), r.position.load(kRelaxed) - L * refRate, -1, 0, entry};
+        for (int k = 8; k >= 0; --k) lastLaunch[k].store(diag[k], kRelaxed);
+        if (entry != d.position.load(kRelaxed)) relocate(d, entry, entry == at ? slot : -1);
+        return true;
+    }
     // Grid: the reference's nearest beat to its render position. Heard: the nearest beat to what the DJ heard
     // (L before the render position) — the press is read as made L earlier, so the launch enters ~L·rate past
     // its cue, already aligned at the speaker. (A bar snap deferred presses on beats 3-4 to the next bar.)
@@ -668,7 +681,7 @@ void Engine::apply(const Command& c) noexcept {
             else applyLoopResize(d, beats);
             break;
         }
-        case Op::Quantize: quantize_.store(c.value != 0); heard_.store(c.value == 2); break;
+        case Op::Quantize: quantize_.store(c.value == 1 || c.value == 2); heard_.store(c.value >= 2); break; // 3 = Heard, unquantized
         case Op::StemGain:
             if (c.slot >= 0 && c.slot < kStems) d.stemTarget[c.slot].store(static_cast<float>(std::clamp(c.value, 0.0, 1.0)));
             break;
@@ -694,7 +707,7 @@ void Engine::apply(const Command& c) noexcept {
             for (int i = 0; i < kDeckCount; ++i) updateGain(i);
             break;
         case Op::Pitch: d.pitch = std::clamp(static_cast<float>(c.value), -25.f, 25.f); break;
-        case Op::Bend: d.bend = std::clamp(static_cast<float>(c.value), -8.f, 8.f); break;
+        case Op::Bend: d.bend = std::clamp(static_cast<float>(c.value), -25.f, 25.f); break; // desktop jogCalibration GRV6 bendMaxPercent
         case Op::Pfl: d.pfl.store(c.value != 0); updateGain(c.deck); break;
         case Op::Eq:
             d.eq[c.slot].store(static_cast<float>(std::clamp(c.value, 0.0, 1.0)));

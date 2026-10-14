@@ -10,6 +10,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import dev.manadj.audio.DeckId
@@ -44,8 +49,8 @@ import dev.manadj.audio.QuantizeMode
                 }
             }
             val mode = model.output?.quantizeMode ?: ux.quantizeMode
-            Toggle("Quantize", "Snap cues, loops and jumps to the beat grid.", mode != QuantizeMode.OFF, !model.supports("quantize")) { ux.setQuantize(model, on = mode == QuantizeMode.OFF) }
-            Toggle("Heard quantize", "Align to the beat you hear (output latency below), not the one being rendered. Long-press Q.", ux.quantizeHeard) { ux.setQuantize(model, heard = !ux.quantizeHeard) }
+            Toggle("Quantize", "Snap cues, loops and jumps to the beat grid.", mode.quantized, !model.supports("quantize")) { ux.setQuantize(model, on = !mode.quantized) }
+            Toggle("Heard (lag compensation)", "Cues and launches line up with what you hear, offset by the output latency below. Works with Quantize on or off. Long-press Q.", ux.quantizeHeard) { ux.setQuantize(model, heard = !ux.quantizeHeard) }
             if (ux.quantizeHeard) HeardLatency(model)
             // Landscape BROWSE parity: which deck stays on screen next to the browser.
             Text("Browse beside (landscape)", bold = true)
@@ -259,8 +264,9 @@ fun visibleOther(id: DeckId) = if (id == DeckId.A) DeckId.B else DeckId.A
                 if (context.checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) model.calibrateLatency()
                 else mic.launch(android.Manifest.permission.RECORD_AUDIO)
             }
-            TapAlong(model, deck, Modifier.weight(1f).fillMaxHeight())
+            Key(if (model.tapCalibrating) "TAPPING…" else "TAP ALONG", Modifier.weight(1f).fillMaxHeight(), Ink.accent, !model.calibrating && !model.tapCalibrating, engaged = model.tapCalibrating, description = "Tap along to calibration chirps", textSize = 11, style = KeyStyle.PILL) { model.startTapCalibration() }
         }
+        if (model.tapCalibrating) TapPad(model)
         val last = model.lastCalibration
         // Recovery: reopen the output stream (a calibration on a Bluetooth route could leave it silent).
         if (last != null) Key("RESTART AUDIO OUTPUT", Modifier.fillMaxWidth().height(36.dp), Ink.warning, !model.calibrating, description = "Restart audio output", textSize = 10, style = KeyStyle.PILL) {
@@ -269,38 +275,41 @@ fun visibleOther(id: DeckId) = if (id == DeckId.A) DeckId.B else DeckId.A
         Text(when {
             model.calibrating -> "Volume up, quiet room: 6 chirps at full level (~7 s)."
             headphones -> "Headphones: the phone mic can't hear them — TAP along instead (wrong? set SPEAKER above)."
-            last?.seconds != null -> "Measured %.0f ms (spread %.1f ms, %d chirps).".format(last.seconds!! * 1000, last.spreadMillis, last.samples.size)
-            last != null -> "Calibration failed: ${last.reason ?: "no clear chirps"}."
-            deck == null -> "CALIBRATE uses the mic. TAP needs a playing deck with a beat grid."
-            else -> "TAP along to the beat you hear on deck ${deck.id} (8+ taps)."
+            model.tapCalibrating -> "A chirp plays every 1.5 s — tap exactly when you hear it."
+            last?.seconds != null -> "Measured %.0f ms (spread %.1f ms, %d samples).".format(last.seconds!! * 1000, last.spreadMillis, last.samples.size)
+            last != null -> "Calibration failed: ${last.reason ?: "no clear chirps"}${if (!headphones) " — try TAP ALONG" else ""}."
+            else -> "CALIBRATE listens with the mic (speakers). TAP ALONG works on any output."
         }, color = if (last != null && last.seconds == null && !model.calibrating) Ink.warning else Ink.muted, size = 11, lines = 2)
     }
 }
 
 /**
- * Tap-along fallback: each tap reads the render position at the tap instant; the heard beat was rendered L
- * earlier, so L = (render position − anchor) mod beat ÷ speed. Median of 8+ taps (first dropped) is applied.
+ * Tap-along calibration (#117, engine API): a distinct chirp every 1.5 s (not the track); tap the big pad on every
+ * chirp you hear (pointer-down time), DONE after 8+ → the engine computes L (ms) and saves it for the route.
  */
-@Composable private fun TapAlong(model: PlayerModel, deck: DeckUi?, modifier: Modifier) {
-    val taps = remember { mutableStateListOf<Double>() }
-    LaunchedEffect(deck?.id) { taps.clear() }
-    // Abandon a run after 3 s without a tap.
-    LaunchedEffect(taps.size) { if (taps.isNotEmpty()) { kotlinx.coroutines.delay(3000); taps.clear() } }
-    Key(if (taps.isEmpty()) "TAP" else "TAP ${taps.size}", modifier, Ink.accent, deck != null, engaged = taps.isNotEmpty(), description = "Tap along to the beat", textSize = 11, style = KeyStyle.PILL) {
-        val now = System.nanoTime()
-        val out = model.output ?: return@Key
-        val d = deck?.let { out.decks[it.id] } ?: return@Key
-        val bpm = d.bpm ?: return@Key
-        if (!d.playing) return@Key
-        val speed = (1 + d.pitchPercent / 100) * (1 + d.bendPercent / 100)
-        val render = d.sourceSeconds + (now - out.snapshotNanos) / 1e9 * speed
-        val beat = 60.0 / bpm
-        val phase = ((render - d.gridAnchorSeconds) % beat + beat) % beat
-        taps.add(phase / speed)
-        if (taps.size >= 9) {
-            val sorted = taps.drop(1).sorted()
-            model.setHeardLatency(sorted[sorted.size / 2])
-            taps.clear()
+@Composable private fun TapPad(model: PlayerModel) {
+    var count by remember { mutableIntStateOf(0) }
+    LaunchedEffect(model.tapCalibrating) { if (model.tapCalibrating) count = 0 }
+    val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Box(Modifier.fillMaxWidth().height(110.dp).clip(RoundedCornerShape(10.dp)).background(Ink.accent.copy(alpha = .18f)).border(2.dp, Ink.accent, RoundedCornerShape(10.dp))
+            .semantics { contentDescription = "Tap on each chirp" }
+            .pointerInput(Unit) {
+                awaitEachGesture {
+                    awaitFirstDown(requireUnconsumed = false, pass = androidx.compose.ui.input.pointer.PointerEventPass.Initial)
+                    model.tap(System.nanoTime()); count++
+                    haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
+                }
+            }, contentAlignment = Alignment.Center) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("TAP", color = Ink.accent, size = 28, bold = true)
+                Text("on every chirp · $count${if (count < 8) " / 8" else ""}", color = Ink.muted, size = 11)
+            }
+        }
+        Row(Modifier.fillMaxWidth().height(36.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            // Under 8 taps the engine refuses the result (nothing saved), so finishing early is a cancel.
+            if (count < 8) Key("CANCEL", Modifier.weight(1f).fillMaxHeight(), Ink.warning, description = "Cancel tap calibration", textSize = 11, style = KeyStyle.PILL) { model.finishTapCalibration() }
+            Key("DONE", Modifier.weight(1f).fillMaxHeight(), Ink.play, count >= 8, description = "Finish tap calibration", textSize = 11, style = KeyStyle.PILL) { model.finishTapCalibration() }
         }
     }
 }

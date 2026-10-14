@@ -104,7 +104,7 @@ import dev.manadj.audio.QuantizeMode
         if (!moving) { hold[0] = Double.NaN; return position(ui) }
         val out = model.output ?: return position(ui)
         if (ui.source?.id != ui.snapshot?.sourceId) return position(ui)
-        val heardMode = out.quantizeMode == QuantizeMode.HEARD
+        val heardMode = out.quantizeMode.heard
         if (!wasMoving) {
             val others = model.visibleDecks.any { it != ui.id && model.decks.getValue(it).snapshot?.playing == true }
             hold[0] = if (heardMode && others) Double.NaN else position(ui)
@@ -135,11 +135,11 @@ import dev.manadj.audio.QuantizeMode
 /** Portrait centre: app-level toggles in one floating group (#58) — QUANTIZE, crossfader enable, SETTINGS. */
 @Composable private fun GlobalControls(model: PlayerModel, ux: UiModel, modifier: Modifier) {
     val mode by remember { derivedStateOf { model.output?.quantizeMode ?: ux.quantizeMode } }
-    val q = mode != QuantizeMode.OFF
+    val q = mode.quantized
     // One row of compact keys; the group centres in whatever height the mixer leaves.
     Box(modifier, contentAlignment = Alignment.Center) {
         Row(Modifier.fillMaxWidth().height(40.dp).clip(androidx.compose.foundation.shape.RoundedCornerShape(10.dp)).border(1.dp, Ink.surface, androidx.compose.foundation.shape.RoundedCornerShape(10.dp)).padding(3.dp), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-            Key(if (mode == QuantizeMode.HEARD) "QUANT·H" else "QUANT", Modifier.weight(1.2f).fillMaxHeight(), Ink.accent, model.supports("quantize"), q, if (q) "Quantize on" else "Quantize off", style = KeyStyle.PILL, textSize = 10, longPress = { ux.setQuantize(model, on = true, heard = !ux.quantizeHeard) }) { ux.setQuantize(model, on = !q) }
+            Key(if (mode.heard) "QUANT·H" else "QUANT", Modifier.weight(1.2f).fillMaxHeight(), Ink.accent, model.supports("quantize"), q, if (q) "Quantize on" else "Quantize off", style = KeyStyle.PILL, textSize = 10, longPress = { ux.setQuantize(model, heard = !ux.quantizeHeard) }) { ux.setQuantize(model, on = !q) }
             Key("XF", Modifier.weight(.8f).fillMaxHeight(), Ink.accent, engaged = ux.crossfaderEnabled, description = "Crossfader enable", style = KeyStyle.PILL, textSize = 10) {
                 ux.crossfaderEnabled = !ux.crossfaderEnabled
                 if (!ux.crossfaderEnabled) model.updateCrossfade(.5)
@@ -152,8 +152,8 @@ import dev.manadj.audio.QuantizeMode
 /** Quantize quick toggle + indicator (Settings has the same switch); long-press flips GRID / HEARD ("Q·H"). */
 @Composable private fun QuantizeKey(model: PlayerModel, ux: UiModel, modifier: Modifier) {
     val mode by remember { derivedStateOf { model.output?.quantizeMode ?: ux.quantizeMode } }
-    val on = mode != QuantizeMode.OFF
-    Key(if (mode == QuantizeMode.HEARD) "Q·H" else "Q", modifier, Ink.accent, model.supports("quantize"), on, if (on) "Quantize on" else "Quantize off", style = KeyStyle.PILL, textSize = 12, longPress = { ux.setQuantize(model, on = true, heard = !ux.quantizeHeard) }) { ux.setQuantize(model, on = !on) }
+    val on = mode.quantized
+    Key(if (mode.heard) "Q·H" else "Q", modifier, Ink.accent, model.supports("quantize"), on, if (on) "Quantize on" else "Quantize off", style = KeyStyle.PILL, textSize = 12, longPress = { ux.setQuantize(model, heard = !ux.quantizeHeard) }) { ux.setQuantize(model, on = !on) }
 }
 
 /**
