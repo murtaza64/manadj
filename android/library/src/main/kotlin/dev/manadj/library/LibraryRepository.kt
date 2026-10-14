@@ -27,6 +27,8 @@ data class SyncState(
     val error: String? = null,
     /** Local edits not yet pushed to the desktop (#375). */
     val pendingEdits: Int = 0,
+    /** The cached snapshot predates fields this app needs (e.g. detail waveform revs); a sync fixes it. */
+    val cacheStale: Boolean = false,
 )
 
 /** Per-track audio availability for the list / load buttons. */
@@ -87,6 +89,7 @@ class LibraryRepository(
             previewCount = snapshot.tracks.count(store::hasPreview),
             audioCount = snapshot.tracks.count(store::hasAudio),
             lastSynced = snapshot.generatedAt,
+            cacheStale = snapshot.schemaStale,
         )
     }
 
@@ -159,9 +162,14 @@ class LibraryRepository(
                 val pushedFields = HashSet<Pair<Int?, String>>()
                 if (pending.isNotEmpty()) {
                     running("Edits ${pending.size}", null)
-                    val outcomes = client.pushEdits(pending)
-                    journal.remove(outcomes.keys)
-                    pending.filter { outcomes[it.uuid] == "applied" }.forEach { pushedFields += it.trackId to it.field }
+                    try {
+                        val outcomes = client.pushEdits(pending)
+                        journal.remove(outcomes.keys)
+                        pending.filter { outcomes[it.uuid] == "applied" }.forEach { pushedFields += it.trackId to it.field }
+                    } catch (e: SyncException) {
+                        // A desktop without two-way sync (#375) yet: keep the journal, still pull.
+                        if (e.status != 404 && e.status != 405) throw e
+                    }
                 }
                 running("Snapshot", null)
                 val text = client.snapshotText()
@@ -169,7 +177,8 @@ class LibraryRepository(
                 // Report what this pull changes on the phone (minus our own pushed edits).
                 pulled?.let { before ->
                     val received = SnapshotDiff.received(before, snapshot, pushedFields)
-                    if (received.isNotEmpty()) client.reportReceived(received)
+                    // Best-effort log entry on the desktop; never fails the pull (older desktops lack /received).
+                    if (received.isNotEmpty()) try { client.reportReceived(received) } catch (e: SyncException) { if (e.unpaired) throw e }
                 }
                 val missing = snapshot.tracks.filter { it.previewRev != null && !store.hasPreview(it) }
                 var done = 0
@@ -195,12 +204,49 @@ class LibraryRepository(
                     counts(snapshot)
                 }
                 _state.update { it.copy(running = false, phase = null, progress = null, error = null, pendingEdits = journal.all().size) }
+                lastSuccessMs = System.currentTimeMillis()
                 Result.success(library)
             } catch (e: Exception) {
                 _state.update { it.copy(running = false, phase = null, progress = null, error = e.message ?: e.toString()) }
                 Result.failure(e)
             }
         }
+    }
+
+    @Volatile private var lastSuccessMs = 0L
+
+    /**
+     * Background sync for app start / return to foreground: no-op while a
+     * sync runs or within [minIntervalMs] of the last success (a stale or
+     * missing cache always syncs). An unreachable desktop is not an error
+     * here (the cached library stays, the header keeps its last-synced time).
+     */
+    suspend fun autoSync(minIntervalMs: Long = AUTO_SYNC_INTERVAL_MS): Boolean {
+        if (syncLock.isLocked || bulkLock.isLocked || !autoRunning.compareAndSet(false, true)) return false
+        try {
+            return autoSyncOnce(minIntervalMs)
+        } finally {
+            autoRunning.set(false)
+        }
+    }
+
+    private val autoRunning = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    private suspend fun autoSyncOnce(minIntervalMs: Long): Boolean {
+        val cached = pulled
+        val fresh = cached != null && !cached.schemaStale && lastSuccessMs != 0L &&
+            System.currentTimeMillis() - lastSuccessMs < minIntervalMs
+        if (fresh) return false
+        val before = _state.value.error
+        val result = sync()
+        val e = result.exceptionOrNull()
+        if (e is SyncException && e.unreachable) _state.update { it.copy(error = before) }
+        return result.isSuccess
+    }
+
+    /** Start fetching [trackId]'s detail waveform now (track picked in the browser, before load). */
+    suspend fun prefetchWaveform(trackId: Int) {
+        detailWaveform(trackId)
     }
 
     private fun running(phase: String, progress: Float?) =
@@ -257,14 +303,28 @@ class LibraryRepository(
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, DetailWaveform>) = size > WAVEFORM_CACHE
     }
 
-    /** Fetch + store the detail waveform when missing; failures are swallowed (the deck can draw without it). */
-    private fun fetchWaveform(client: SyncClient, track: LibraryTrack) {
-        if (track.waveformRev == null || store.hasWaveform(track)) return
-        try {
-            client.downloadWaveform(track.id)?.let { store.writeWaveform(track, it) }
+    /**
+     * Fetch + store the detail waveform when missing; failures are swallowed
+     * (the deck can draw without it). Also tried when the snapshot has no
+     * waveform_rev (stale cache, or generated since): the response names the rev.
+     * Returns the parsed waveform when it fetched one.
+     */
+    private fun fetchWaveform(client: SyncClient, track: LibraryTrack): DetailWaveform? {
+        if (store.hasWaveform(track)) return null
+        return try {
+            val blob = client.downloadWaveform(track.id) ?: return null
+            val rev = track.waveformRev ?: blob.rev
+            store.writeWaveform(track, blob.bytes, rev)
+            PreviewWaveform.parse(blob.bytes).also { wf -> rev?.let { r -> synchronized(waveformCache) { waveformCache["${track.id}-$r"] = wf; revFetched[track.id] = r } } }
         } catch (_: SyncException) {
+            null
+        } catch (_: RuntimeException) {
+            null // unparseable blob
         }
     }
+
+    /** Revs learned from the endpoint for tracks whose snapshot lacks waveform_rev. */
+    private val revFetched = HashMap<Int, String>()
 
     /**
      * The full-resolution detail waveform the desktop renders for [trackId]
@@ -274,12 +334,11 @@ class LibraryRepository(
      */
     suspend fun detailWaveform(trackId: Int): DetailWaveform? = withContext(io) {
         val track = _library.value?.track(trackId) ?: return@withContext null
-        val key = "${track.id}-${track.waveformRev ?: return@withContext null}"
-        synchronized(waveformCache) { waveformCache[key] }?.let { return@withContext it }
-        val waveform = store.readWaveform(track) ?: run {
-            fetchWaveform(client(), track)
-            store.readWaveform(track)
-        } ?: return@withContext null
+        val rev = track.waveformRev ?: synchronized(waveformCache) { revFetched[track.id] }
+        if (rev != null) synchronized(waveformCache) { waveformCache["${track.id}-$rev"] }?.let { return@withContext it }
+        if (track.waveformRev == null) return@withContext fetchWaveform(client(), track) // desktop may have it anyway
+        val key = "${track.id}-${track.waveformRev}"
+        val waveform = store.readWaveform(track) ?: fetchWaveform(client(), track) ?: store.readWaveform(track) ?: return@withContext null
         synchronized(waveformCache) { waveformCache[key] = waveform }
         waveform
     }
@@ -377,6 +436,7 @@ class LibraryRepository(
     companion object {
         const val PREVIEW_BATCH = 500
         const val WAVEFORM_CACHE = 6
+        const val AUTO_SYNC_INTERVAL_MS = 60_000L
         /** Kept free on the device after a bulk download. */
         const val SPACE_MARGIN_BYTES = 256L * 1024 * 1024
     }

@@ -78,7 +78,7 @@ import dev.manadj.audio.DeckId
     // Only read model.output while moving: it changes every engine tick and would redraw idle waves at 30 fps.
     fun heard(now: Long): Double { if (now == 0L) return position(ui); val out = model.output; return if (out != null && ui.source?.id == ui.snapshot?.sourceId) out.audibleSeconds(ui.id, now) else position(ui) }
     WaveView(wave, { clock.at(frame.value, heard(frame.value), moving && frame.value != 0L, playbackRate(ui)) }, ui.durationSeconds, marksOf(ui), modifier.semantics { contentDescription = "${ui.id} detail wave" }.pinchZoom(ux),
-        vertical = vertical, windowSeconds = ux.waveSeconds * playbackRate(ui), live = { ux.strip(ui) }, history = e.history, accent = deckColor(ui.id),
+        vertical = vertical, windowSeconds = ux.waveSeconds * tempoRate(ui), live = { ux.strip(ui) }, history = e.history, accent = deckColor(ui.id),
         status = when { ui.source == null -> "${ui.id} · no track"; wave == null -> if (ux.waveSource[ui.source?.id] == "failed") "no waveform" else "analysing…"; !wave.complete -> "analysing ${(100 * wave.frames * wave.bandHop / wave.sampleRate / (ui.durationSeconds ?: 1.0)).toInt().coerceIn(0, 99)}%"; else -> null })
 }
 
@@ -272,8 +272,8 @@ private fun Modifier.pinchZoom(ux: UiModel): Modifier = pointerInput(Unit) {
 }
 
 /**
- * One wall-clock timescale for every detail wave (desktop): a deck's track-time window = zoom × its actual
- * playback rate (tempo × bend), so synced decks show equal beat spacing and scroll at the same px/s. The
+ * One wall-clock timescale for every detail wave (desktop): a deck's track-time window = zoom × its tempo
+ * rate (see tempoRate; bend excluded), so synced decks show equal beat spacing and scroll at the same px/s. The
  * playhead stays at a fixed fraction, so rate changes rescale around it without a jump.
  */
 fun playbackRate(ui: DeckUi): Double {
@@ -281,3 +281,6 @@ fun playbackRate(ui: DeckUi): Double {
     val pitch = s?.pitchPercent ?: ui.pitch; val bend = s?.bendPercent ?: ui.bend
     return ((1 + pitch / 100) * (1 + bend / 100)).coerceIn(.25, 4.0)
 }
+
+/** Tempo rate (fader / Sync) only — the waveform SCALE ignores momentary bend (#60); bend still moves position. */
+fun tempoRate(ui: DeckUi): Double = (1 + (ui.snapshot?.pitchPercent ?: ui.pitch) / 100).coerceIn(.25, 4.0)

@@ -127,7 +127,7 @@ data class WaveMarks(val cue: Double?, val hotCues: List<Double?>, val loop: Clo
 fun marksOf(ui: DeckUi) = ui.snapshot.let { s -> WaveMarks(s?.cueSeconds, ui.hotCues, s?.loop?.let { it.start..it.end }, s?.bpm, s?.gridAnchorSeconds ?: 0.0) }
 
 /**
- * Detail (scrolling, playhead at [playheadAt]) or overview waveform. [vertical] runs time downward.
+ * Detail (scrolling, playhead at [playheadAt]; vertical: 18% from the top) or overview waveform. [vertical] runs time downward.
  * Detail split mode (desktop performance-mode 10): ahead of the playhead the top lobe shows the live strip
  * and the bottom lobe the raw track; behind it both show the strip as it was heard.
  */
@@ -149,11 +149,12 @@ fun marksOf(ui: DeckUi) = ui.snapshot.let { s -> WaveMarks(s?.cueSeconds, ui.hot
             val across = if (vertical) size.width else size.height
             val dur = duration ?: data?.duration ?: 0.0
             val pos = position()
-            val start = if (overview) 0.0 else pos - windowSeconds * playheadAt
+            // Vertical detail (human, #371): time runs downward — incoming audio enters at the BOTTOM and moves
+            // UP past a playhead ~18% from the top; the past scrolls off the top.
+            val head = if (vertical && !overview) .18f else playheadAt
+            val start = if (overview) 0.0 else pos - windowSeconds * head
             val span = if (overview) dur.coerceAtLeast(1.0) else windowSeconds
-            // Vertical detail runs future-up (playhead low), like a deck's vertical waveform.
-            val flip = vertical && !overview
-            fun at(t: Double) = ((t - start) / span * along).toFloat().let { if (flip) along - it else it }
+            fun at(t: Double) = ((t - start) / span * along).toFloat()
             if (data != null) {
                 if (overview) {
                     val key = IntSize2(size.width.toInt(), size.height.toInt())
@@ -183,7 +184,7 @@ fun marksOf(ui: DeckUi) = ui.snapshot.let { s -> WaveMarks(s?.cueSeconds, ui.hot
                         val t0 = k * colSeconds; val t1 = t0 + colSeconds
                         if (t1 < 0 || t0 > dur) continue
                         val q = offset + i * step
-                        val p = if (flip) along - q - step else q
+                        val p = q
                         columns.groups(data, k, t0, t1, g)
                         for (j in 0..2) g[j] = (g[j] * columns.fill).coerceAtMost(1f)
                         val behind = t0 < pos
@@ -339,16 +340,19 @@ class SmoothClock {
 /** Display-frame time while [active] (0 otherwise); read it in a draw lambda to redraw every frame. */
 @Composable fun frameNanos(active: Boolean): State<Long> = produceState(0L, active) { while (active) withFrameNanos { value = it } }
 
-/** Browser row preview: group heights per bin, bottom-anchored, in the given style. */
+/** Browser row preview (desktop previewImage.ts): bins linearly sampled per pixel, bipolar — each band mirrors around the centre at half amplitude. */
 fun renderPreview(p: dev.manadj.app.browse.WaveformPreview, w: Int, h: Int, style: WaveStyle): ImageBitmap {
     val bitmap = Bitmap.createBitmap(max(1, w), max(1, h), Bitmap.Config.ARGB_8888)
     val canvas = android.graphics.Canvas(bitmap)
     val paint = Paint().apply { strokeWidth = 1f }
     val l = Lines(style); val g = FloatArray(3)
     for (x in 0 until w) {
-        val i = (x.toLong() * p.bins / w).toInt().coerceIn(0, p.bins - 1)
-        g[0] = p.low[i].coerceIn(0f, 1f); g[1] = p.mid[i].coerceIn(0f, 1f); g[2] = p.high[i].coerceIn(0f, 1f)
-        l.column(g) { level, color, e -> l.add(level, color, x + .5f, h.toFloat(), x + .5f, h - e * h) }
+        val f = ((x + .5f) * p.bins / w - .5f).coerceIn(0f, (p.bins - 1).toFloat())
+        val i0 = f.toInt(); val i1 = min(i0 + 1, p.bins - 1); val fr = f - i0
+        fun at(a: FloatArray) = (a[i0] + (a[i1] - a[i0]) * fr).coerceIn(0f, 1f)
+        g[0] = at(p.low); g[1] = at(p.mid); g[2] = at(p.high)
+        val mid = h / 2f
+        l.column(g) { level, color, e -> l.add(level, color, x + .5f, mid - e * mid, x + .5f, mid + e * mid) }
     }
     l.draw(canvas, paint)
     return bitmap.asImageBitmap()

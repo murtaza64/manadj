@@ -35,6 +35,7 @@ private val ADDED = DateTimeFormatter.ofPattern("dd MMM")
 @Composable fun LibraryPanel(model: PlayerModel, ux: UiModel, modifier: Modifier, pick: (DeckId) -> Unit, tapTarget: DeckId? = null) {
     if (model.browser == null) return
     val color = Ink.accent
+    val ctx = androidx.compose.ui.platform.LocalContext.current
     val follow by remember { derivedStateOf {
         val refs = model.visibleDecks.filter { ux.following[it] == true }.mapNotNull { d -> if (ux.synced != null) dev.manadj.app.library.LibraryHolder.trackOn(model, d)?.toLong() else ux.followRef[d] }.toSet()
         if (refs.isEmpty()) null else ux.library.follow(refs, ux.knownOnly).associateBy { it.trackId }
@@ -88,11 +89,11 @@ private val ADDED = DateTimeFormatter.ofPattern("dd MMM")
             }
             item {
                 val scope = ux.filter.playlist?.let { id -> ux.library.playlists().firstOrNull { it.id == id }?.name } ?: "COLLECTION"
-                Row(Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 4.dp)) { Text("$scope · ${ux.library.label}", Modifier.weight(1f), Ink.muted, 10, true); Text("${rows.size} TRACKS · ${ux.filter.sort.label}", color = Ink.muted, size = 10) }
+                Row(Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 4.dp)) { Text("$scope · ${ux.library.label}" + when { ux.syncState.running || ux.syncState.cacheStale -> " · syncing…"; ux.syncState.lastSynced != null -> " · " + java.time.format.DateTimeFormatter.ofPattern("HH:mm").withZone(java.time.ZoneId.systemDefault()).format(ux.syncState.lastSynced); else -> "" }, Modifier.weight(1f), Ink.muted, 10, true); Text("${rows.size} TRACKS · ${ux.filter.sort.label}", color = Ink.muted, size = 10) }
             }
             items(rows, key = { "lib:" + it.id }, contentType = { "track" }) { track ->
                 val order = ux.filter.playlist?.let { id -> ux.library.playlists().firstOrNull { it.id == id }?.trackIds?.indexOf(track.id)?.plus(1) }
-                SwipeToLoad(track.title, Modifier.fillMaxWidth(), { ux.loadRow(model, it, track.id) }) { TrackRow(track, follow?.get(track.id), ux, order) { if (tapTarget != null) ux.loadRow(model, tapTarget, track.id) else ux.selectedRow = track.id } }
+                SwipeToLoad(track.title, Modifier.fillMaxWidth(), { ux.loadRow(model, it, track.id) }) { TrackRow(track, follow?.get(track.id), ux, order) { dev.manadj.app.library.LibraryHolder.prefetch(ctx, track.id.toInt()); if (tapTarget != null) ux.loadRow(model, tapTarget, track.id) else ux.selectedRow = track.id } }
             }
         }
     }

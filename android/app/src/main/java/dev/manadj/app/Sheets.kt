@@ -58,8 +58,18 @@ import dev.manadj.audio.DeckId
             val requested = if (keyLock) ui.snapshot?.keyLock == true else e.keyLock
             val waiting = keyLock && requested && ui.snapshot?.keyLockActive != true && ui.ready
             Key(if (waiting) "KEY LOCK…" else "KEY LOCK", Modifier.weight(1f).fillMaxHeight(), color, keyLock || ux.previewPending, requested, icon = Glyph.Lock, textSize = 12, pending = !keyLock) { if (keyLock) model.setKeyLock(ui.id, !requested) else if (ux.previewPending) e.keyLock = !e.keyLock else ux.pending("Key lock") }
-            // Tempo match through varispeed (engine-backed); phase sync stays pending.
-            Key("MATCH ${visibleOther(target)}", Modifier.weight(1f).fillMaxHeight(), color, varispeed && bpm != null && otherBpm != null, textSize = 12) { model.updatePitch(target, ((otherBpm!! / bpm!! - 1) * 100).coerceIn(-8.0, 8.0)) }
+        }
+        // Sync (desktop performance-sync.md via the engine's SyncGroup): SYNC joins/leaves the group, MATCH is one-shot.
+        val canSync = model.supports("sync")
+        val status = model.syncState.decks[target] ?: dev.manadj.audio.SyncStatus.OFF
+        var refused by remember(target) { mutableStateOf(false) }
+        Row(Modifier.fillMaxWidth().height(40.dp)) {
+            val label = when (status) { dev.manadj.audio.SyncStatus.SYNCED -> "SYNC ●"; dev.manadj.audio.SyncStatus.OUT_OF_LOCK -> "SYNC ⚠"; dev.manadj.audio.SyncStatus.WAITING -> "SYNC …"; else -> if (refused) "OUT OF REACH" else "SYNC" }
+            Key(label, Modifier.weight(1f).fillMaxHeight(), if (status == dev.manadj.audio.SyncStatus.OUT_OF_LOCK || refused) Ink.warning else color, canSync && bpm != null, status != dev.manadj.audio.SyncStatus.OFF, description = "$target sync", textSize = 12, pending = !canSync) {
+                refused = model.toggleSync(target) == dev.manadj.audio.BpmMatch.OutOfReach
+            }
+            if (canSync) Key("MATCH", Modifier.weight(1f).fillMaxHeight(), color, bpm != null, description = "$target match", textSize = 12) { refused = model.match(target) == dev.manadj.audio.BpmMatch.OutOfReach }
+            else Key("MATCH ${visibleOther(target)}", Modifier.weight(1f).fillMaxHeight(), color, varispeed && bpm != null && otherBpm != null, textSize = 12) { model.updatePitch(target, ((otherBpm!! / bpm!! - 1) * 100).coerceIn(-8.0, 8.0)) }
         }
         val grid = model.supports("grid") && ui.ready
         val anchor = ui.snapshot?.gridAnchorSeconds ?: 0.0

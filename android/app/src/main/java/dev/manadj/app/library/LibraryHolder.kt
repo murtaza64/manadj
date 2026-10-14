@@ -35,9 +35,39 @@ object LibraryHolder {
                 instance = repo
                 repo.deviceId = deviceId(app)
                 repo.deviceName = deviceName()
-                scope.launch { repo.open() }
+                scope.launch { repo.open(); repo.autoSync() }
+                watchForeground(app, repo)
             }
         }
+    }
+
+    /** Auto-sync whenever the app returns to the foreground (no activity started → one started). */
+    private fun watchForeground(app: Context, repo: LibraryRepository) {
+        val application = app as? android.app.Application ?: return
+        application.registerActivityLifecycleCallbacks(object : android.app.Application.ActivityLifecycleCallbacks {
+            private var started = 0
+            override fun onActivityStarted(activity: android.app.Activity) {
+                if (started++ == 0) scope.launch { repo.autoSync() }
+            }
+            override fun onActivityStopped(activity: android.app.Activity) { started = maxOf(0, started - 1) }
+            override fun onActivityCreated(activity: android.app.Activity, savedInstanceState: android.os.Bundle?) {}
+            override fun onActivityResumed(activity: android.app.Activity) {}
+            override fun onActivityPaused(activity: android.app.Activity) {}
+            override fun onActivitySaveInstanceState(activity: android.app.Activity, outState: android.os.Bundle) {}
+            override fun onActivityDestroyed(activity: android.app.Activity) {}
+        })
+    }
+
+    /** Pull-to-refresh / SYNC: a full sync now (errors surface in `state`). */
+    fun refresh(context: Context) {
+        val repo = repository(context)
+        scope.launch { repo.sync() }
+    }
+
+    /** Track picked in the browser: fetch its detail waveform before it's loaded. */
+    fun prefetch(context: Context, trackId: Int) {
+        val repo = repository(context)
+        scope.launch { repo.prefetchWaveform(trackId) }
     }
 
     fun setUrl(context: Context, url: String) {
@@ -148,6 +178,7 @@ object LibraryHolder {
      */
     fun load(context: Context, model: PlayerModel, deck: DeckId, track: LibraryTrack, onError: (String) -> Unit) {
         val repo = repository(context)
+        scope.launch { repo.prefetchWaveform(track.id) } // in parallel with the audio
         scope.launch {
             try {
                 val file = repo.audioFile(track.id)

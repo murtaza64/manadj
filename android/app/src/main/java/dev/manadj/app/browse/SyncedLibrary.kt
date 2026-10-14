@@ -28,9 +28,8 @@ class SyncedLibrary(val lib: Library, private val repo: LibraryRepository) : Lib
         if (frames == 0) return@getOrPut null
         val g = Array(3) { FloatArray(frames) }
         for (f in 0 until frames) style.groupHeights(wf.bandsAt(f)).forEachIndexed { k, v -> g[k][f] = v }
-        val n = minOf(110, frames).coerceAtLeast(1)
-        fun dec(a: FloatArray) = FloatArray(n) { i -> val from = i * a.size / n; val to = maxOf(from + 1, (i + 1) * a.size / n); (from until to).maxOf { a[it] } }
-        WaveformPreview(n, dec(g[0]), dec(g[1]), dec(g[2]))
+        // Full resolution (the preview blob is ~256 frames): no max-decimation, which inflated peaks.
+        WaveformPreview(frames, g[0], g[1], g[2])
     }
     override fun tracks() = rows
     override fun allTags() = lib.tags.map { TrackTag(it.name, it.categoryName, it.argb ?: 0xff7f849c.toInt()) }

@@ -202,7 +202,13 @@ val StripEnd = 48.dp
             Text("%+.2f%%".format(ui.pitch), color = if (ui.pitch == 0.0) Ink.text else color, size = 14, bold = true)
             Spacer(Modifier.weight(1f))
             Column(horizontalAlignment = Alignment.End) {
-                Text(ui.snapshot?.bpm?.let { "%.1f".format(it * (1 + (ui.pitch + ui.bend) / 100)) } ?: "— BPM", color = if (ui.snapshot?.bpm != null) Ink.text else Ink.muted, size = 12, bold = true)
+                // Synced: lit SYNC tag and the Group Tempo; out of lock / waiting flagged.
+                val sync = model.syncState.decks[ui.id] ?: dev.manadj.audio.SyncStatus.OFF
+                val groupTempo = model.syncState.tempo.takeIf { sync == dev.manadj.audio.SyncStatus.SYNCED }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (sync != dev.manadj.audio.SyncStatus.OFF) Text(when (sync) { dev.manadj.audio.SyncStatus.SYNCED -> "SYNC "; dev.manadj.audio.SyncStatus.OUT_OF_LOCK -> "SYNC⚠ "; else -> "SYNC… " }, color = if (sync == dev.manadj.audio.SyncStatus.SYNCED) Ink.play else Ink.warning, size = 9, bold = true)
+                    Text(groupTempo?.let { "%.1f".format(it) } ?: ui.snapshot?.bpm?.let { "%.1f".format(it * (1 + (ui.pitch + ui.bend) / 100)) } ?: "— BPM", color = if (ui.snapshot?.bpm != null) Ink.text else Ink.muted, size = 12, bold = true)
+                }
                 Row(verticalAlignment = Alignment.CenterVertically) { if (ui.snapshot?.keyLock == true || (e.keyLock && !model.supports("key-lock"))) GlyphIcon(Glyph.Lock, color, 9.dp); Text(" KEY —", color = Ink.muted, size = 10) }
             }
         }
