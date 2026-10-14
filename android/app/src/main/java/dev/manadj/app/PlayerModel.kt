@@ -41,6 +41,7 @@ class DeckUi(val id: DeckId) {
 enum class Layout(val label: String) { PORTRAIT("L1"), DENSE("L3") }
 
 class PlayerModel(application: Application) : AndroidViewModel(application) {
+    companion object { const val EAR_PERIOD = .6 }
     val decks = DeckId.entries.associateWith(::DeckUi)
     val visibleDecks = listOf(DeckId.A, DeckId.B)
     var selected by mutableStateOf(DeckId.A)
@@ -348,21 +349,71 @@ class PlayerModel(application: Application) : AndroidViewModel(application) {
     /** Recovery: closes and reopens the audio output (same routing/device); decks keep their state. */
     fun restartOutput() { service?.restartOutput { if (it != 0) failure = "Audio output restart failed ($it)" } }
     /**
-     * Tap-along calibration (#382 fallback; mic chirps stay primary): [startTapCalibration] plays a slow chirp
-     * every 1.5 s (track-independent); call [tap] with System.nanoTime() on every chirp heard (≥ 8), then
-     * [finishTapCalibration] → [lastCalibration]; success saves L for the route.
+     * Tap-along calibration (#382 fallback; mic chirps stay primary). Optional [startReactionPrePass] first
+     * (4 slow clicks; tap each) when no mic estimate exists. [startTapCalibration] then plays accented clicks at
+     * ≈110 BPM; call [tap] (System.nanoTime) on every click heard; [tapState] is the live "locking in" meter.
+     * It finishes by itself when 6 accepted taps agree within ±20 ms (or [finishTapCalibration] / 30 s) and
+     * saves L for the route. Wrap resolution: mic-calibrated L, else the pre-pass, else Android-reported.
      */
-    var tapCalibrating by mutableStateOf(false)
+    var tapState by mutableStateOf<TapCalibrator.State?>(null)
         private set
-    private val taps = mutableListOf<Long>()
-    fun startTapCalibration() { taps.clear(); tapCalibrating = service?.startTapClicks() == true }
-    fun tap(nanoTime: Long = System.nanoTime()) { if (tapCalibrating) taps += nanoTime }
+    var reactionCoarse by mutableStateOf<Double?>(null)
+        private set
+    var reactionPrePass by mutableStateOf(false)
+        private set
+    private var tapCalibrator: TapCalibrator? = null
+    private var tapStarted = 0L
+    private val reactionTaps = mutableListOf<Long>()
+    val tapCalibrating get() = tapCalibrator != null
+    /** Coarse L for the wrap: [coarseSource] says where it came from ("mic" / "reaction" / "Android"). */
+    val coarseLatency: Double get() = (if (heardLatencyCalibrated) heardLatency else null) ?: reactionCoarse ?: output?.reportedLatencySeconds() ?: heardLatency
+    val coarseSource: String get() = if (heardLatencyCalibrated) "calibrated" else if (reactionCoarse != null) "reaction" else "Android"
+    fun startReactionPrePass() {
+        reactionTaps.clear(); reactionCoarse = null
+        reactionPrePass = service?.startClicks(LatencyCalibrator.REACTION_CLICKS, LatencyCalibrator.REACTION_PERIOD, accent = false) == true
+    }
+    fun startTapCalibration() {
+        service?.stopClicks()
+        reactionPrePass = false
+        if (service?.startClicks(null, LatencyCalibrator.TAP_PERIOD, accent = true) != true) return
+        tapCalibrator = TapCalibrator(coarseLatency).also { tapState = it.state }
+        tapStarted = System.nanoTime()
+    }
+    fun tap(nanoTime: Long = System.nanoTime()) {
+        val clicks = service?.clickNanos() ?: return
+        if (reactionPrePass) {
+            reactionTaps += nanoTime
+            LatencyCalibrator.reactionCoarse(reactionTaps, clicks)?.let { if (reactionTaps.size >= 3) { reactionCoarse = it; reactionPrePass = false } }
+            return
+        }
+        val calibrator = tapCalibrator ?: return
+        tapState = calibrator.add(nanoTime, clicks)
+        if (tapState?.locked == true || (nanoTime - tapStarted) / 1e9 > TapCalibrator.MAX_SECONDS) finishTapCalibration()
+    }
+    /** Stops the clicks; saves the estimate when 6+ taps were accepted (locked or not). */
     fun finishTapCalibration() {
-        if (!tapCalibrating) return
-        tapCalibrating = false
-        val result = LatencyCalibrator.fromTaps(taps.toList(), service?.clickNanos() ?: LongArray(0), output?.reportedLatencySeconds())
-        lastCalibration = result
-        result.seconds?.let(::setHeardLatency)
+        val calibrator = tapCalibrator ?: return
+        tapCalibrator = null
+        service?.stopClicks()
+        val s = calibrator.state
+        val seconds = s.candidateSeconds
+        lastCalibration = LatencyCalibrator.Result(seconds, emptyList(), s.spreadMillis ?: 0.0,
+            if (seconds == null) "Not enough consistent taps (${s.accepted} accepted); try Align by ear" else null)
+        seconds?.let(::setHeardLatency)
+    }
+    /**
+     * Align by ear: accented clicks loop (every 0.6 s) while the UI flashes at each click's render instant
+     * ([clickNanos]) + the slider offset; the user slides until flash and sound coincide, then [finishEarAlign].
+     */
+    var earAligning by mutableStateOf(false)
+        private set
+    fun startEarAlign() { earAligning = service?.startClicks(null, EAR_PERIOD, accent = true) == true }
+    /** Render instants (System.nanoTime) of the clicks so far, for flash scheduling. */
+    fun clickNanos(): LongArray = service?.clickNanos() ?: LongArray(0)
+    fun finishEarAlign(offsetSeconds: Double?) {
+        earAligning = false
+        service?.stopClicks()
+        offsetSeconds?.let { setHeardLatency(it); lastCalibration = LatencyCalibrator.Result(it, emptyList(), 0.0) }
     }
     /** Mic-loopback calibration in progress; last result (null seconds = failed, see reason). */
     var calibrating by mutableStateOf(false)

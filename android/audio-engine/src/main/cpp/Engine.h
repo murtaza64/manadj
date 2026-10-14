@@ -280,11 +280,15 @@ public:
     // Latency calibration (#382): CLOCK_MONOTONIC ns of the current callback's start (set before render);
     // each calibration click's render instant is recorded (ns, 0 = not yet rendered).
     void setCallbackNanos(int64_t ns) noexcept { callbackNanos_ = ns; }
-    static constexpr int kMaxClicks = 32;
-    static constexpr double kClickSeconds = .004;
-    // Hann-windowed linear chirp 500 Hz → 8 kHz over kClickSeconds, peak .5 (the mic matched filter's template).
+    static constexpr int kMaxClicks = 128;          // render-instant ring (click k at k % kMaxClicks)
+    static constexpr int kClicksForever = 0xFFFF;  // Clicks count: until a Clicks op with count 0
+    static constexpr int kClicksAccent = 1 << 16; // Clicks slot flag: every 4th click full level, others 45 %
+    static constexpr double kClickSeconds = .012;
+    // Hann-windowed linear chirp 400 Hz → 6 kHz over kClickSeconds, peak .7 (the mic matched filter's template).
     static double clickSample(double t) noexcept;
     int64_t clickNanos(int k) const { return k >= 0 && k < kMaxClicks ? clickNanos_[k].load() : 0; }
+    // Clicks rendered since the last Clicks op (index of the next one).
+    int clicksRendered() const { return clicksRendered_.load(); }
     double heardLatency() const { return heardLatency_.load(); }
     // Last quantized launch (diagnostics): count, deck, reference, L, reference render pos, heard pos, target beat, delta s, entry.
     std::array<std::atomic<double>, 9> lastLaunch{};
@@ -332,6 +336,8 @@ private:
     int64_t callbackNanos_ = 0;
     uint64_t clickNext_ = 0, clickInterval_ = 0;
     int clicksLeft_ = 0, clickIndex_ = 0;
+    bool clickAccent_ = false;
+    std::atomic<int> clicksRendered_{0};
     std::array<std::atomic<int64_t>, kMaxClicks> clickNanos_{};
     void renderClicks(float* output, int frames, int channels, uint64_t start) noexcept;
     std::atomic<double> heardLatency_{0};

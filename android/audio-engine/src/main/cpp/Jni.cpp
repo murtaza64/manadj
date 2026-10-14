@@ -206,10 +206,12 @@ Java_dev_manadj_audio_AudioEngine_nativeLastLaunch(JNIEnv* env, jobject, jlong h
 
 extern "C" JNIEXPORT jlongArray JNICALL
 Java_dev_manadj_audio_AudioEngine_nativeClickNanos(JNIEnv* env, jobject, jlong handle) {
-    jlong v[manadj::Engine::kMaxClicks];
-    for (int k = 0; k < manadj::Engine::kMaxClicks; ++k) v[k] = output(handle)->engine.clickNanos(k);
-    auto array = env->NewLongArray(manadj::Engine::kMaxClicks);
-    env->SetLongArrayRegion(array, 0, manadj::Engine::kMaxClicks, v);
+    // [0] = clicks rendered (n); [1 + k % kMaxClicks] = render instant of click k.
+    jlong v[manadj::Engine::kMaxClicks + 1];
+    v[0] = output(handle)->engine.clicksRendered();
+    for (int k = 0; k < manadj::Engine::kMaxClicks; ++k) v[1 + k] = output(handle)->engine.clickNanos(k);
+    auto array = env->NewLongArray(manadj::Engine::kMaxClicks + 1);
+    env->SetLongArrayRegion(array, 0, manadj::Engine::kMaxClicks + 1, v);
     return array;
 }
 

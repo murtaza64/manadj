@@ -82,40 +82,29 @@ import dev.manadj.audio.QuantizeMode
     val wave = ux.waves[ui.source?.id ?: ""]
     val e = ux.extras.getValue(ui.id)
     val moving = ui.snapshot.let { it?.playing == true || it?.previewing == true }
-    val frame = frameNanos(moving)
-    val clock = remember(ui.id) { SmoothClock() }
+    val display = remember(ui.id) { HeardDisplay() }
+    // Keep drawing through a stop's heard tail (HeardDisplay), then settle on the engine position.
+    var tail by remember(ui.id) { mutableStateOf(false) }
+    LaunchedEffect(moving) { if (!moving) { tail = true; repeat(3) { withFrameNanos { } }; while (display.inTail(System.nanoTime())) withFrameNanos { }; tail = false } }
+    val frame = frameNanos(moving || tail)
     // Stem bank loaded: fetch the desktop stem waveforms for the masked composite.
     val stems by remember(ui) { derivedStateOf { ui.snapshot?.stems == true } }
     val track = if (stems) dev.manadj.app.library.LibraryHolder.trackOn(model, ui.id) else null
     LaunchedEffect(track, ui.source?.id) { val id = ui.source?.id; if (track != null && id != null) ux.ensureStemWaves(id, track) }
-    // Engine output-timestamp clock (what is heard now), eased by SmoothClock; raw snapshot when no timestamp.
-    // Only read model.output while moving: it changes every engine tick and would redraw idle waves at 30 fps.
-    // HEARD quantize (#382): draw at the calibrated heard position — audibleSeconds already backs off Android's
-    // reported latency; shift by the remainder (calibrated − reported) at the deck's speed.
     // Display = heard time (#111.5): audibleSeconds backs off Android's reported latency; HEARD shifts the rest
-    // (calibrated − reported) at the deck's speed. Always sampled at System.nanoTime(): the frame clock holds a
-    // stale vsync time for the first frame after a start, which drew a second jump on every stab (#110).
-    // Uncompensated starts (no Heard compensation: Grid, or nothing else playing — #112) hold at the start
-    // position until it is heard, instead of stepping back by L.
-    val hold = remember(ui.id) { doubleArrayOf(Double.NaN, 0.0) } // [floor, wasMoving]
+    // (calibrated − reported) at the deck's speed. Sampled at System.nanoTime(), not the frame clock (#110).
+    // Only read model.output while moving or in a stop tail: it changes every engine tick.
+    // Heard display (#137/#138): HeardDisplay holds at the launch point until heard and draws the stop's tail.
     fun heard(now: Long): Double {
         ux.seekPreview[ui.id]?.let { return it }
-        val wasMoving = hold[1] != 0.0; hold[1] = if (moving) 1.0 else 0.0
-        if (!moving) { hold[0] = Double.NaN; return position(ui) }
-        val out = model.output ?: return position(ui)
-        if (ui.source?.id != ui.snapshot?.sourceId) return position(ui)
-        val heardMode = out.quantizeMode.heard
-        if (!wasMoving) {
-            val others = model.visibleDecks.any { it != ui.id && model.decks.getValue(it).snapshot?.playing == true }
-            hold[0] = if (heardMode && others) Double.NaN else position(ui)
-        }
-        val extra = if (heardMode) out.heardLatencySeconds - (out.reportedLatencySeconds() ?: 0.0) else 0.0
-        val raw = out.audibleSeconds(ui.id, now) - extra * playbackRate(ui)
-        val floor = hold[0]
-        if (!floor.isNaN()) { if (raw < floor && playbackRate(ui) > 0) return floor; hold[0] = Double.NaN }
-        return raw
+        val rate = playbackRate(ui)
+        val out = if (moving || tail) model.output else null
+        if (out == null || ui.source?.id != ui.snapshot?.sourceId) return display.at(now, moving, { position(ui) }, position(ui), rate, 0.0)
+        val reported = out.reportedLatencySeconds() ?: 0.0
+        val extra = if (out.quantizeMode.heard) out.heardLatencySeconds - reported else 0.0
+        return display.at(now, moving, { out.audibleSeconds(ui.id, now) - extra * rate }, position(ui), rate, reported + extra)
     }
-    WaveView(wave, { frame.value; val now = System.nanoTime(); clock.at(now, heard(now), moving, playbackRate(ui)) }, ui.durationSeconds, marksOf(ui), modifier.semantics { contentDescription = "${ui.id} detail wave" }.waveTouch(ui, model, ux, vertical),
+    WaveView(wave, { frame.value; tail; heard(System.nanoTime()) }, ui.durationSeconds, marksOf(ui), modifier.semantics { contentDescription = "${ui.id} detail wave" }.waveTouch(ui, model, ux, vertical),
         vertical = vertical, windowSeconds = ux.waveSeconds * tempoRate(ui), live = { ux.strip(ui) }, history = e.history, accent = deckColor(ui.id),
         stemWave = { mask -> val id = ui.source?.id; if (wave == null || id == null) null else ux.stemWave(id, wave, mask) },
         status = when { ui.source == null -> "${ui.id} · no track"; wave == null -> if (ux.waveSource[ui.source?.id] == "failed") "no waveform" else "analysing…"; !wave.complete -> "analysing ${(100 * wave.frames * wave.bandHop / wave.sampleRate / (ui.durationSeconds ?: 1.0)).toInt().coerceIn(0, 99)}%"; else -> null })

@@ -82,8 +82,9 @@ class PlaybackService : Service() {
         }
     }
 
-    /** Tap-along calibration clicks (#382): engine chirps every LatencyCalibrator.TAP_INTERVAL s. */
-    fun startTapClicks(): Boolean = !destroyed && try { engine?.startCalibrationClicks(LatencyCalibrator.TAP_CLICKS, LatencyCalibrator.TAP_INTERVAL)?.accepted == true } catch (_: IllegalStateException) { false }
+    /** Calibration clicks (#382): [count] (null = until [stopClicks]) every [interval] s, accented every 4th if [accent]. */
+    fun startClicks(count: Int?, interval: Double, accent: Boolean): Boolean = !destroyed && try { engine?.startCalibrationClicks(count, interval, accent)?.accepted == true } catch (_: IllegalStateException) { false }
+    fun stopClicks() { if (!destroyed) try { engine?.stopCalibrationClicks() } catch (_: IllegalStateException) {} }
     fun clickNanos(): LongArray = if (destroyed) LongArray(0) else try { engine?.clickNanos() ?: LongArray(0) } catch (_: IllegalStateException) { LongArray(0) }
 
     /** Mic-loopback output latency (#382) off the main thread; result via [onDone] on main. */
@@ -95,6 +96,8 @@ class PlaybackService : Service() {
                     // Opening the mic can re-route/suspend a Bluetooth A2DP (MMAP) output without a disconnect
                     // callback (human: silence after calibrating on BT headphones): always reopen the output.
                     .also { if (!destroyed) runCatching { audio?.restartOutput() } }
+                    .also { r -> android.util.Log.i("manadj-calib", "mic: L=%s spread=%.1f ms samples=%s snr=%s reason=%s".format(
+                        r.seconds?.let { "%.1f ms".format(it * 1000) }, r.spreadMillis, r.samples.map { "%.1f".format(it * 1000) }, r.snr.map { "%.1f".format(it) }, r.reason)) }
             main.post { onDone(result) }
         }, "manadj-latency-calibration").start()
     }

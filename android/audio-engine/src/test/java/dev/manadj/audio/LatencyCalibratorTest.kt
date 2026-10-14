@@ -36,19 +36,50 @@ class LatencyCalibratorTest {
         assertEquals(6, r.samples.size)
     }
 
-    @Test fun tapAlongRecoversLatencyWithoutBeatAmbiguity() {
-        val clicks = LongArray(LatencyCalibrator.TAP_CLICKS) { 1_000_000_000L + (it * LatencyCalibrator.TAP_INTERVAL * 1e9).toLong() }
+    @Test fun tapAlongLocksInAndResolvesTheWrap() {
+        val period = LatencyCalibrator.TAP_PERIOD
+        val clicks = LongArray(60) { 1_000_000_000L + (it * period * 1e9).toLong() }
         val random = Random(3)
         for (latency in listOf(.2, .4, .7, 1.0, 1.2)) {
-            val taps = clicks.drop(1).take(10).map { it + ((latency + (random.nextDouble() - .5) * .03) * 1e9).toLong() }
-            // Oboe under-reports Bluetooth; only used to pick among candidates 1.5 s apart.
-            val r = LatencyCalibrator.fromTaps(taps, clicks, reportedSeconds = latency * .6)
-            assertNull(r.toString(), r.reason)
-            assertEquals("latency $latency", latency, r.seconds!!, .01)
+            // Coarse estimates within ±period/2: Oboe under-reporting Bluetooth or a reaction pre-pass.
+            val tap = TapCalibrator(coarseSeconds = latency + (random.nextDouble() - .5) * .4)
+            var state = tap.state
+            for (k in 0 until 40) {
+                val jitter = (random.nextDouble() - .5) * .024
+                val outlier = if (k == 5 || k == 11) .2 else 0.0   // a few bad taps never fail the run
+                state = tap.add(clicks[k] + ((latency + jitter + outlier) * 1e9).toLong(), clicks)
+                if (state.locked) break
+            }
+            assertTrue("latency $latency: $state", state.locked)
+            assertEquals("latency $latency", latency, state.candidateSeconds!!, .01)
         }
-        assertNotNull(LatencyCalibrator.fromTaps(clicks.take(5).map { it + 300_000_000L }, clicks, .3).reason)       // too few
-        val sloppy = clicks.take(10).mapIndexed { i, c -> c + ((.3 + (i % 3) * .2) * 1e9).toLong() }
-        assertNotNull(LatencyCalibrator.fromTaps(sloppy, clicks, .3).reason)                                          // inconsistent
+    }
+
+    @Test fun tapAlongIgnoresTheFirstTwoTapsAndDoesNotLockWhenSloppy() {
+        val period = LatencyCalibrator.TAP_PERIOD
+        val clicks = LongArray(40) { 1_000_000_000L + (it * period * 1e9).toLong() }
+        val tap = TapCalibrator(.3)
+        tap.add(clicks[0] + 100_000_000L, clicks); tap.add(clicks[1] + 400_000_000L, clicks)
+        assertEquals(0, tap.state.accepted)
+        var state = tap.state
+        for (k in 2 until 30) state = tap.add(clicks[k] + ((.3 + (k % 3 - 1) * .035) * 1e9).toLong(), clicks)
+        assertFalse(state.locked)                              // ±35 ms scatter: meter shows, never locks
+        assertNotNull(state.spreadMillis)
+    }
+
+    @Test fun reactionPrePassGivesACoarseEstimate() {
+        val clicks = LongArray(4) { 1_000_000_000L + (it * LatencyCalibrator.REACTION_PERIOD * 1e9).toLong() }
+        val taps = clicks.map { it + ((.45 + .18) * 1e9).toLong() }
+        assertEquals(.45, LatencyCalibrator.reactionCoarse(taps, clicks)!!, .001)
+        assertNull(LatencyCalibrator.reactionCoarse(taps.take(2), clicks))
+    }
+
+    @Test fun quietClicksUnderNoiseStillFound() {
+        // Clicks at the noise floor's level (a speaker across a room with fans/music): the 12 ms chirp's gain does it.
+        val r = LatencyCalibrator.analyze(mic(renders, .24, gain = .02, noise = .02), rate, stampFrame, stampNanos, renders.toLongArray(), .76)
+        assertNull(r.toString(), r.reason)
+        assertEquals(.24, r.seconds!!, .001)
+        assertTrue(r.snr.all { it > LatencyCalibrator.MIN_SNR })
     }
 
     @Test fun shortWiredLatency() {

@@ -101,7 +101,10 @@ class UiModel(application: Application) : AndroidViewModel(application) {
     var sessions by mutableStateOf(false)
     var stemsFor by mutableStateOf<DeckId?>(null)
     var wheel by mutableStateOf<WheelFeedback?>(null)
-    var knob by mutableStateOf<KnobPopup?>(null)
+    /** Held knobs' popups, one per pointer/knob (#126): a second touch never closes or steals the first. */
+    val knobs = mutableStateMapOf<String, KnobPopup>()
+    /** The first held knob's popup (tests / single-touch readers). */
+    val knob: KnobPopup? get() = knobs.values.firstOrNull()
     var notice by mutableStateOf<String?>(null)
         private set
     private var noticeJob: Job? = null

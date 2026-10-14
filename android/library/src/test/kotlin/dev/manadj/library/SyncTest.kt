@@ -431,6 +431,20 @@ class SyncTest {
         assertEquals(STEM_NAMES, repo().also { it.open() }.stemFiles(10)!!.keys.toList()) // offline from cache
     }
 
+    @Test fun downloadedOnlyAndTagTree() = runBlocking {
+        val repo = repo()
+        repo.sync().getOrThrow()
+        assertEquals(emptyList(), repo.library.value!!.query(LibraryQuery(downloadedOnly = true)))
+        repo.audioFile(10)
+        assertEquals(listOf(10), repo.library.value!!.query(LibraryQuery(downloadedOnly = true)).map { it.id })
+        val tree = repo.library.value!!.tagTree()
+        assertEquals("Genre", tree.single().category.name)
+        assertEquals(1, tree.single().count)
+        assertEquals(listOf("Neuro" to 1), tree.single().tags.map { it.tag.name to it.count })
+        assertEquals(listOf(10), repo.library.value!!.tracksWithTag(7).map { it.id })
+        assertEquals(0, repo.library.value!!.tagTree(LibraryQuery(search = "untitled")).single().count)
+    }
+
     @Test fun presyncAudio() = runBlocking {
         val repo = repo()
         repo.sync(audio = true).getOrThrow()

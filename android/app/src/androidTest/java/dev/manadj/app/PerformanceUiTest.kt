@@ -55,6 +55,21 @@ class PerformanceUiTest {
         assertNull(ux.knob)
     }
 
+    @Test fun twoHeldKnobsKeepTheirOwnPopups() {
+        rule.waitUntil(20_000) { model.supports("eq") && model.supports("filter") }
+        rule.waitForIdle()
+        val low = box("A LOW control").center; val filter = box("B FILTER control").center
+        rule.onRoot().performTouchInput { down(0, low); down(1, filter) }
+        rule.waitForIdle()
+        assertEquals(setOf("A LOW", "B FILTER"), rule.runOnIdle { ux.knobs.keys.toSet() })
+        rule.onRoot().performTouchInput { up(1) }
+        rule.waitForIdle()
+        assertEquals("lifting B keeps A's popup", setOf("A LOW"), rule.runOnIdle { ux.knobs.keys.toSet() })
+        rule.onRoot().performTouchInput { up(0) }
+        rule.waitForIdle()
+        assertTrue(rule.runOnIdle { ux.knobs.isEmpty() })
+    }
+
     @Test fun crossfaderDoubleTapRecentres() {
         rule.waitUntil(20_000) { model.supports("crossfade") }
         rule.runOnIdle { model.updateCrossfade(.9) }

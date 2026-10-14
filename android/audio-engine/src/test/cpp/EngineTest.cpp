@@ -1356,8 +1356,20 @@ int main() {
             CHECK(left[at - 1] == 0 && std::abs(left[at + 96] - static_cast<float>(Engine::clickSample(96 / 48000.))) < 1e-6);
             CHECK(e.clickNanos(k) != 0);
         }
-        CHECK(e.clickNanos(3) == 0);
+        CHECK(e.clickNanos(3) == 0 && e.clicksRendered() == 3);
         CHECK(e.clickNanos(0) == 1'000'000'000 + static_cast<int64_t>(4800 % 4096 * 1e9 / 48000));
+        // Tap mode: continuous, accent every 4th (others 45 %), until a Clicks op with count 0.
+        e.submit(Op::Clicks, 0, .1, 0, Engine::kClicksForever | Engine::kClicksAccent);
+        left = capture(e, 48000);
+        const int base = 4800;
+        for (int k = 0; k < 5; ++k) {
+            const float want = (k % 4 == 0 ? 1.f : .45f) * static_cast<float>(Engine::clickSample(96 / 48000.));
+            CHECK(std::abs(left[base + k * 4800 + 96] - want) < 1e-6);
+        }
+        CHECK(e.clicksRendered() == 9);
+        e.submit(Op::Clicks, 0, .1, 0, 0);
+        left = capture(e, 48000);
+        for (float x : left) CHECK(x == 0);
     }
 
     { // Stems (desktop StemTrackSource): unity sums the stems; a kill ramps over the 5 ms declick to the rest;

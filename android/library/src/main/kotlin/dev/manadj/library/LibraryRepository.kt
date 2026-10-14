@@ -78,10 +78,10 @@ class LibraryRepository(
     /** Library view = pulled snapshot + unsynced local edits. */
     private fun build(pulled: Snapshot) = buildView(FieldsOverlay.of(pulled, journal.all()))
 
-    private fun buildView(snapshot: Snapshot) = Library(snapshot) { track ->
+    private fun buildView(snapshot: Snapshot) = Library(snapshot, previews = { track ->
         val key = "${track.id}-${track.previewRev ?: return@Library null}"
         previewCache[key] ?: store.readPreview(track)?.also { previewCache[key] = it }
-    }
+    }, isDownloaded = store::hasAudio)
 
     private fun counts(snapshot: Snapshot) = _state.update {
         it.copy(

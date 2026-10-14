@@ -277,7 +277,7 @@ fun visibleOther(id: DeckId) = if (id == DeckId.A) DeckId.B else DeckId.A
             headphones -> "Headphones: the phone mic can't hear them — TAP along instead (wrong? set SPEAKER above)."
             model.tapCalibrating -> "A chirp plays every 1.5 s — tap exactly when you hear it."
             last?.seconds != null -> "Measured %.0f ms (spread %.1f ms, %d samples).".format(last.seconds!! * 1000, last.spreadMillis, last.samples.size)
-            last != null -> "Calibration failed: ${last.reason ?: "no clear chirps"}${if (!headphones) " — try TAP ALONG" else ""}."
+            last != null -> (last.reason ?: "no clear chirps").let { r -> "Calibration failed: $r" + if (!headphones && !r.contains("tap", ignoreCase = true)) " — try TAP ALONG." else "" }
             else -> "CALIBRATE listens with the mic (speakers). TAP ALONG works on any output."
         }, color = if (last != null && last.seconds == null && !model.calibrating) Ink.warning else Ink.muted, size = 11, lines = 2)
     }
