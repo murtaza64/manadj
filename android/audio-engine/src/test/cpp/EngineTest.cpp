@@ -1260,6 +1260,56 @@ int main() {
         CHECK(std::abs(e.deck(0).position.load() - .05) < 2 / 48000.);
     }
 
+    { // Heard quantize (L = 350 ms): a launch on the heard downbeat lands its bar on the reference's bar at the
+      // speaker (engine time = speaker time minus the shared L); Grid picks the render position's nearest beat.
+        auto make = [](int mode) {
+            auto owned = std::make_unique<Engine>(48000);
+            Engine& e = *owned;
+            std::vector<float> pcm(48000 * 40 * 2, .2f);
+            for (int d = 0; d < 2; ++d) { loadPcm(e, d, d + 1, std::vector<float>(pcm.begin(), pcm.begin() + 48000 * 2)); fillTrack(e, d, d + 1, pcm); }
+            grid120(e, 0);
+            grid120(e, 1);
+            e.submit(Op::Quantize, 0, mode);
+            e.submit(Op::HeardLatency, 0, .35);
+            e.submit(Op::Seek, 0, 10.37);                // heard: 10.02 — just after the bar line at 10.0
+            e.submit(Op::Seek, 1, 8.0);                  // B cued on its bar
+            tick(e, 16);
+            e.submit(Op::Play, 0);
+            return owned;
+        };
+        {
+            auto o = make(2); Engine& e = *o;
+            CHECK(e.heard() && e.heardLatency() == .35);
+            e.submit(Op::Play, 1);
+            tick(e, 4800);
+            const double a = e.deck(0).position.load(), b = e.deck(1).position.load();
+            CHECK(std::abs((b - 8.0) - (a - 10.0)) < 1 / 48000.);   // bars coincide (engine = speaker - L)
+        }
+        {
+            auto o = make(1); Engine& e = *o;                         // Grid: nearest beat to 10.37 is 10.5
+            e.submit(Op::Play, 1);
+            tick(e, 48000);
+            const double a = e.deck(0).position.load(), b = e.deck(1).position.load();
+            CHECK(std::abs((b - 8.0) - (a - 10.5)) < 1 / 48000.);
+        }
+        { // Heard auto-loop engages at the heard beat; a region already passed wraps the playhead in.
+            auto o = make(2); Engine& e = *o;
+            e.submit(Op::LoopPreset, 0, .5);              // heard 10.02 → loop [10.0, 10.25); render 10.37 wraps
+            tick(e, 1);
+            CHECK(e.deck(0).loopStart.load() == 10.0 && e.deck(0).loopEnd.load() == 10.25);
+            CHECK(std::abs(e.deck(0).position.load() - (10.0 + std::fmod(.37, .25) + 1 / 48000.)) < 1e-9);
+            e.submit(Op::HotCueSet, 0, 0, 0, 1);          // set while playing: at the heard position, snapped
+            tick(e, 1);
+            CHECK(e.deck(0).hotcues[1].load() == 10.0);   // heard ≈ 9.77 → nearest beat 10.0 (render 10.12 would snap 10.0 too;
+            e.submit(Op::Quantize, 0, 1);                 //  Grid at render 10.37+ → 10.5)
+            e.submit(Op::LoopToggle, 0);
+            e.submit(Op::Seek, 0, 10.37);
+            e.submit(Op::HotCueSet, 0, 0, 0, 2);
+            tick(e, 1);
+            CHECK(e.deck(0).hotcues[2].load() == 10.5);
+        }
+    }
+
     { // Beat FX ECHO on A: beat-synced repeats at beats x beatSeconds, feedback .5, tails ring after OFF.
         auto owned = std::make_unique<Engine>(48000);
         Engine& e = *owned;

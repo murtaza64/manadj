@@ -443,7 +443,15 @@ void Engine::launch(int index, double at, int slot) noexcept {
     const double refPosition = r.position.load(kRelaxed);
     const double refRate = (1 + r.pitch.load(kRelaxed) / 100.) * (1 + r.bend.load(kRelaxed) / 100.);
     const double rate = (1 + d.pitch.load(kRelaxed) / 100.) * (1 + d.bend.load(kRelaxed) / 100.);
-    const double delta = (snapToBeat(r, refPosition) - refPosition) / refRate;
+    // Grid: the reference's nearest beat to its render position. Heard: the nearest bar to what the DJ heard
+    // (L before the render position); the launch then lands in engine time, already aligned at the speaker.
+    double target = snapToBeat(r, refPosition);
+    if (heard_.load(kRelaxed)) {
+        const double bar = 4 * 60 / r.bpm.load(kRelaxed), anchor = r.gridAnchor.load(kRelaxed);
+        const double heardAt = refPosition - heardLatency_.load(kRelaxed) * refRate;
+        target = anchor + std::round((heardAt - anchor) / bar) * bar;
+    }
+    const double delta = (target - refPosition) / refRate;
     if (!(delta > 0)) {
         const double entry = at - delta * rate;
         if (entry != at) relocate(d, entry);
@@ -461,6 +469,12 @@ void Engine::launch(int index, double at, int slot) noexcept {
     start.deck = index;
     start.at = frame;
     enqueueScheduled(start);
+}
+
+// Deck seconds between the render position and what is heard at the speaker (Heard mode; else 0).
+double Engine::heardLead(const Deck& d) const noexcept {
+    if (!heard_.load(kRelaxed)) return 0;
+    return heardLatency_.load(kRelaxed) * (1 + d.pitch.load(kRelaxed) / 100.) * (1 + d.bend.load(kRelaxed) / 100.);
 }
 
 void Engine::stop(Deck& d) noexcept {
@@ -535,7 +549,12 @@ void Engine::apply(const Command& c) noexcept {
             if (d.playing.load()) { d.preview.store(false); d.previewSlot.store(-1); }
             else { stop(d); relocate(d, d.hotcues[c.slot].load(), c.slot); }
             break;
-        case Op::HotCueSet: if (isReady) d.hotcues[c.slot].store(std::max(0.0, quantize_.load() ? snapToBeat(d, position) : position)); break;
+        case Op::HotCueSet: {
+            if (!isReady) break;
+            const double heardAt = position - (d.playing.load() ? heardLead(d) : 0); // Heard: what the DJ heard
+            d.hotcues[c.slot].store(std::max(0.0, quantize_.load() ? snapToBeat(d, heardAt) : heardAt));
+            break;
+        }
         case Op::HotCueClear: d.hotcues[c.slot].store(-1); break;
         case Op::Seek: if (isReady) { d.loopActive.store(false); relocate(d, c.value); } break;
         case Op::SetGrid:
@@ -572,12 +591,16 @@ void Engine::apply(const Command& c) noexcept {
             const double bpm = d.bpm.load();
             if (!isReady || bpm <= 0) break;
             const double beat = 60 / bpm, anchor = d.gridAnchor.load();
-            const double start = quantize_.load() ? anchor + std::round((position - anchor) / beat) * beat : position;
+            // Heard: engaged at the heard playhead (L ago); a region already passed wraps the playhead in now.
+            const double heardAt = position - (d.playing.load() ? heardLead(d) : 0);
+            const double start = std::max(0.0, quantize_.load() ? anchor + std::round((heardAt - anchor) / beat) * beat : heardAt);
             const double beats = d.pendingLoopBeats.load();
-            d.loopStart.store(std::max(0.0, start));
-            d.loopEnd.store(std::max(0.0, start) + beats * beat);
+            d.loopStart.store(start);
+            d.loopEnd.store(start + beats * beat);
             d.loopBeats.store(beats);
             d.loopActive.store(true);
+            // (Grid, desktop: the playhead never moves on engage.)
+            if (heardAt != position && position >= start + beats * beat) relocate(d, start + std::fmod(position - start, beats * beat));
             break;
         }
         case Op::LoopResize: {
@@ -587,7 +610,8 @@ void Engine::apply(const Command& c) noexcept {
             else applyLoopResize(d, beats);
             break;
         }
-        case Op::Quantize: quantize_.store(c.value != 0); break;
+        case Op::Quantize: quantize_.store(c.value != 0); heard_.store(c.value == 2); break;
+        case Op::HeardLatency: heardLatency_.store(std::clamp(c.value, 0.0, 2.0)); break;
         // Stored cues from a library (applied after Prepare, which resets them).
         // Like the desktop load path, a stopped deck parks at the stored main cue.
         case Op::CueSetAt:

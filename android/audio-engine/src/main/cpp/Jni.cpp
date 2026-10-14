@@ -7,7 +7,7 @@
 #include <vector>
 
 namespace {
-constexpr int kHeader = 29;
+constexpr int kHeader = 31;
 constexpr int kDeckFields = 40 + manadj::kHotCues;
 constexpr int kSnapshotSize = kHeader + manadj::kDeckCount * kDeckFields;
 
@@ -163,7 +163,7 @@ extern "C" JNIEXPORT jlong JNICALL
 Java_dev_manadj_audio_AudioEngine_nativeSubmit(JNIEnv*, jobject, jlong handle, jint op, jint deck,
                                                   jdouble value, jlong load, jint slot) {
     using manadj::Op;
-    if (op < 0 || op > static_cast<int>(Op::SetSyncMembers) || op == static_cast<int>(Op::Filter) || op == static_cast<int>(Op::BeatFx) ||
+    if (op < 0 || op > static_cast<int>(Op::HeardLatency) || op == static_cast<int>(Op::LaunchStart) || op == static_cast<int>(Op::Filter) || op == static_cast<int>(Op::BeatFx) ||
         op == static_cast<int>(Op::LoopSet) || op == static_cast<int>(Op::CancelScheduled)) return 0; // dedicated entry points
     if (op == static_cast<int>(manadj::Op::SetGrid)) return 0; // nativeSetGrid carries the anchor.
     return static_cast<jlong>(output(handle)->engine.submit(static_cast<manadj::Op>(op), deck, value,
@@ -375,6 +375,7 @@ Java_dev_manadj_audio_AudioEngine_nativeSnapshot(JNIEnv* env, jobject, jlong han
         e.fxDepth(), e.fxBeats(), static_cast<double>(e.fxHeld()), static_cast<double>(e.fxAudible()),
         0, presentedFrame, presentedNanos, 0,
         static_cast<double>(e.lateOps()), static_cast<double>(e.scheduledOps()),
+        e.heard() ? 2.0 : e.quantize() ? 1.0 : 0.0, e.heardLatency(),
     };
     // Deck positions are sampled at engine frame data[23]; retry if a callback ran mid-read.
     for (int attempt = 0; attempt < 4; ++attempt) {

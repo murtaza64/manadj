@@ -82,7 +82,8 @@ struct Track {
 enum class Op : int { Prepare, Play, Pause, CueDown, CueUp, HotCueDown, HotCueUp,
                        HotCueSet, HotCueClear, Seek, Fader, Trim, Crossfade, Pitch, Bend, Pfl, CueMix, Eq, Filter,
                        SetGrid, BeatJump, LoopToggle, LoopResize, LoopPreset, Quantize, CueSetAt, HotCueSetAt, BeatFx, KeyLock, PhaseAlign, ScratchBegin, ScratchMove, ScratchEnd,
-                       LoopSet, CancelScheduled, SetSyncMembers, LaunchStart };
+                       LoopSet, CancelScheduled, SetSyncMembers, LaunchStart, HeardLatency };
+// Quantize: value 0 off, 1 Grid, 2 Heard. HeardLatency (global): value = output latency L in seconds (Heard mode).
 // SetSyncMembers (global): value = Sync Group member mask, slot = SYNCED (in-lock) mask; scopes the launch reference.
 // LaunchStart: internal (callback-scheduled end of a deferred quantized launch); never submitted.
 // LoopSet: value = start (< 0 clears), aux = {end, playhead (NaN keeps the position)}; machine replay (Session).
@@ -266,6 +267,8 @@ public:
     Routing routing() const { return static_cast<Routing>(routing_.load()); }
     float cueMix() const { return cueMix_.load(); }
     bool quantize() const { return quantize_.load(); }
+    bool heard() const { return heard_.load(); }
+    double heardLatency() const { return heardLatency_.load(); }
     Deck& deck(int index) { return decks_[index]; }
     const Deck& deck(int index) const { return decks_[index]; }
     int outputRate() const { return outputRate_.load(); }
@@ -305,6 +308,10 @@ private:
     std::atomic<float> cueMix_{0};  // Headphone blend: 0 = cue bus only, 1 = master only.
     std::atomic<int> routing_{0};
     std::atomic<bool> quantize_{false};
+    // Heard quantize: alignment gestures are read at the heard instant (L before the render position).
+    std::atomic<bool> heard_{false};
+    std::atomic<double> heardLatency_{0};
+    double heardLead(const Deck& d) const noexcept;
     std::array<std::unique_ptr<fx::Insert>, fx::kTargetCount> fx_;
     std::atomic<int> fxEffect_{fx::kEcho}, fxTarget_{fx::kTargetA}, fxHeld_{0}, fxAudible_{0};
     std::atomic<bool> fxOn_{false};
