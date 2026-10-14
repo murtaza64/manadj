@@ -11,6 +11,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.addOutline
+import androidx.compose.ui.graphics.drawscope.clipPath
+import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
@@ -25,6 +30,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import dev.manadj.audio.*
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
 
 val PadRow = 52.dp
 val TransportRow = 54.dp
@@ -74,24 +80,33 @@ val ControlRow = 44.dp
     val scale by animateFloatAsState(if (held) .92f else 1f, if (held) tween(0) else spring(dampingRatio = .4f, stiffness = 800f), label = "bounce")
     val ring = remember { Animatable(1f) }
     LaunchedEffect(held) { if (held) { ring.snapTo(0f); ring.animateTo(1f, tween(360, easing = LinearOutSlowInEasing)) } }
+    // Slide to lock: while previewing a stored cue, drag right to latch playback (no second finger on PLAY).
+    val slideVisual = rememberSlideLockVisual()
+    var previewHold by remember(ui.id, slot) { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    val slide = remember(ui.id, slot) { SlideLock({ previewHold }, { slideVisual.progress = it }) {
+        haptic.performHapticFeedback(HapticFeedbackType.LongPress); model.submit(AudioCommand.Play(ui.id))
+        scope.launch { slideVisual.flash.snapTo(1f); slideVisual.flash.animateTo(0f, tween(420)) }
+    } }
     Box(modifier.drawBehind {
         // Expanding ring lives in the 3dp margin between pads — still inside this node.
         val r = ring.value
         if (r < 1f) { val m = 3.dp.toPx() * (1 - r); drawRect(cue.copy(alpha = (1 - r) * .9f), Offset(m, m), Size(size.width - 2 * m, size.height - 2 * m), style = Stroke(2.dp.toPx())) }
     }.semantics { contentDescription = "${ui.id} hotcue ${slot + 1}"; if (!ready) disabled() }.pointerInput(ui.id, slot) {
-        momentaryPresses({ currentReady }) {
+        momentaryPresses({ currentReady }, slide) {
             if (currentShift) {
                 if (ui.hotCues[slot] != null) { haptic.performHapticFeedback(HapticFeedbackType.LongPress); ux.deleteCue(model, ui.id, slot) }
                 return@momentaryPresses { }
             }
             held = true; haptic.performHapticFeedback(HapticFeedbackType.VirtualKey)
             val set = ui.hotCues[slot] != null
+            previewHold = set && ui.snapshot?.playing != true
             val id = model.beginGesture(ui.id, "HOTCUE$slot") { if (set) model.submit(AudioCommand.HotCueUp(ui.id, slot, it)) }
             model.submit(if (set) AudioCommand.HotCueDown(ui.id, slot, id) else AudioCommand.SetHotCue(ui.id, slot, id))
             if (!set) ux.journalCueWhenSet(model, ui.id, slot)
-            ;{ cancelled -> held = false; if (!cancelled && set && model.gestureActive(id)) model.submit(AudioCommand.HotCueUp(ui.id, slot, id)); model.finishGesture(id, cancelled) }
+            ;{ cancelled -> held = false; previewHold = false; if (!cancelled && set && model.gestureActive(id)) model.submit(AudioCommand.HotCueUp(ui.id, slot, id)); model.finishGesture(id, cancelled) }
         }
-    }.padding(3.dp).graphicsLayer { scaleX = scale; scaleY = scale }.background(Ink.panel).background(tint.copy(alpha = if (stored != null) .1f + .5f * lit else .5f * lit)).border(if (stored != null) 1.5.dp else 1.dp, tint.copy(alpha = if (stored != null) 1f else .45f)), contentAlignment = Alignment.Center) {
+    }.padding(3.dp).graphicsLayer { scaleX = scale; scaleY = scale }.background(Ink.panel).background(tint.copy(alpha = if (stored != null) .1f + .5f * lit else .5f * lit)).slideLockDraw(slideVisual).border(if (stored != null) 1.5.dp else 1.dp, tint.copy(alpha = if (stored != null) 1f else .45f)), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text("${slot + 1}", color = if (lit > .5f) Ink.text else tint, size = 15, bold = true)
             if (shift && stored != null) Text("DEL", color = Ink.warning, size = 9, bold = true)
@@ -110,13 +125,20 @@ val ControlRow = 44.dp
     val scale by animateFloatAsState(if (held) .93f else 1f, if (held) tween(0) else spring(dampingRatio = .4f, stiffness = 900f), label = "cue press")
     val tint = if (ready) Ink.warning else Ink.edge
     val shape = RoundedCornerShape(50)
+    // Slide to lock: holding CUE (preview), drag right to latch playback.
+    val slideVisual = rememberSlideLockVisual()
+    val scope = rememberCoroutineScope()
+    val slide = remember(ui.id) { SlideLock({ held }, { slideVisual.progress = it }) {
+        haptic.performHapticFeedback(HapticFeedbackType.LongPress); model.submit(AudioCommand.Play(ui.id))
+        scope.launch { slideVisual.flash.snapTo(1f); slideVisual.flash.animateTo(0f, tween(420)) }
+    } }
     Box(modifier.halo(Ink.warning, heat * .9f, 7.dp, round = true).semantics { contentDescription = "${ui.id} CUE"; if (!ready) disabled() }.pointerInput(ui.id) {
-        momentaryPresses({ currentReady }) {
+        momentaryPresses({ currentReady }, slide) {
             val id = model.beginGesture(ui.id, "CUE") { model.submit(AudioCommand.CueUp(ui.id, it)) }
             held = true; haptic.performHapticFeedback(HapticFeedbackType.VirtualKey); model.submit(AudioCommand.CueDown(ui.id, id))
             ;{ cancelled -> held = false; if (!cancelled && model.gestureActive(id)) model.submit(AudioCommand.CueUp(ui.id, id)); model.finishGesture(id, cancelled) }
         }
-    }.padding(4.dp).graphicsLayer { scaleX = scale; scaleY = scale }.clip(shape).background(Ink.panel).background(Ink.warning.copy(alpha = .9f * heat)).border(2.dp, tint, shape), contentAlignment = Alignment.Center) {
+    }.padding(4.dp).graphicsLayer { scaleX = scale; scaleY = scale }.clip(shape).background(Ink.panel).background(Ink.warning.copy(alpha = .9f * heat)).slideLockDraw(slideVisual, shape).border(2.dp, tint, shape), contentAlignment = Alignment.Center) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
             // Same metrics as PLAY (Key: icon textSize+3, label textSize 15).
             GlyphIcon(Glyph.Cue, if (held) Color.Black else tint, 18.dp)
@@ -300,26 +322,71 @@ val StripEnd = 48.dp
  * alternating fingers. A new finger releases the previous press first; [press] returns its release
  * (`cancelled` = the gesture was torn down rather than lifted).
  */
-suspend fun androidx.compose.ui.input.pointer.PointerInputScope.momentaryPresses(enabled: () -> Boolean, press: () -> (Boolean) -> Unit) {
+suspend fun androidx.compose.ui.input.pointer.PointerInputScope.momentaryPresses(enabled: () -> Boolean, slide: SlideLock? = null, press: () -> (Boolean) -> Unit) {
     awaitEachGesture {
         val first = awaitFirstDown(requireUnconsumed = false)
         if (!enabled()) return@awaitEachGesture
         first.consume()
         var current = first.id
+        var startX = first.position.x
+        var locked = false
         var release: ((Boolean) -> Unit)? = press()
+        fun resetSlide() { if (slide != null) { locked = false; slide.progress(0f) } }
         try {
             while (true) {
                 val event = awaitPointerEvent()
                 event.changes.firstOrNull { it.changedToDownIgnoreConsumed() && it.id != current }?.let { fresh ->
-                    fresh.consume(); release?.invoke(false); current = fresh.id
+                    fresh.consume(); release?.invoke(false); current = fresh.id; startX = fresh.position.x; resetSlide()
                     release = if (enabled()) press() else null
                 }
                 val c = event.changes.firstOrNull { it.id == current }
-                if (release != null && (c == null || !c.pressed)) { release!!.invoke(c == null); release = null }
+                // Slide to lock: dragging the held finger right past the threshold latches playback.
+                if (slide != null && release != null && c != null && c.pressed && !locked && slide.active()) {
+                    val dx = c.position.x - startX
+                    val t = slide.threshold(size.width.toFloat())
+                    slide.progress((dx / t).coerceIn(0f, 1f))
+                    if (dx >= t) { locked = true; slide.lock() }
+                }
+                if (release != null && (c == null || !c.pressed)) { release!!.invoke(c == null); release = null; resetSlide() }
                 event.changes.forEach { if (it.pressed) it.consume() }
                 if (event.changes.none { it.pressed }) break
             }
         } catch (cancel: CancellationException) { release?.invoke(true); release = null; throw cancel }
-        finally { release?.invoke(true) }
+        finally { release?.invoke(true); resetSlide() }
+    }
+}
+
+/**
+ * Slide-to-lock on a held cue (chat-app voice-record lock): [progress] 0..1 while the held finger drags right,
+ * [lock] once it passes [threshold] (px for a key [width]); only while [active] (a preview hold).
+ */
+class SlideLock(val active: () -> Boolean, val progress: (Float) -> Unit, val lock: () -> Unit) {
+    fun threshold(width: Float) = (width * .55f).coerceIn(80f, 220f)
+}
+
+/** Slide-to-lock feedback, drawn inside the key: a fill sweeping right, a ▶ target and the label riding the finger. */
+@Composable fun rememberSlideLockVisual(): SlideLockVisual = remember { SlideLockVisual() }
+class SlideLockVisual {
+    var progress by mutableFloatStateOf(0f)
+    /** 1 → 0 flash after a lock. */
+    val flash = Animatable(0f)
+}
+fun Modifier.slideLockDraw(v: SlideLockVisual, shape: androidx.compose.ui.graphics.Shape? = null): Modifier = drawWithContent {
+    val p = v.progress; val f = v.flash.value
+    if (p > 0f || f > 0f) {
+        val play = Ink.play
+        val outline = shape?.createOutline(size, layoutDirection, this)
+        val clipPath = Path().apply { if (outline != null) addOutline(outline) else addRect(androidx.compose.ui.geometry.Rect(Offset.Zero, size)) }
+        clipPath(clipPath) {
+            drawRect(play.copy(alpha = .22f + .35f * p), size = Size(size.width * p, size.height))
+            if (f > 0f) drawRect(play.copy(alpha = .75f * f))
+        }
+    }
+    // The label rides the finger a little (rubber band), then the target ▶ at the far edge fills in.
+    translate(left = 14.dp.toPx() * p) { this@drawWithContent.drawContent() }
+    if (p > 0f) {
+        val h = size.height; val w = size.width; val s = minOf(h * .32f, 12.dp.toPx()); val cx = w - s - 6.dp.toPx(); val cy = h / 2
+        val tri = Path().apply { moveTo(cx - s * .6f, cy - s); lineTo(cx + s, cy); lineTo(cx - s * .6f, cy + s); close() }
+        if (p >= 1f) drawPath(tri, Ink.play) else drawPath(tri, Ink.play.copy(alpha = .4f + .6f * p), style = Stroke(2.dp.toPx()))
     }
 }
