@@ -1,0 +1,267 @@
+"""Device sync, phone → desktop (ADR 0045, #375).
+
+A Paired device pushes journaled field edits; each is applied newest-wins and
+written to the Device change log (`DeviceSyncChange`). The phone also reports
+what a pull changed on its side (`to_phone` rows). The desktop reverts an
+entry or a batch by writing the old value back as a new logged change.
+
+Field vocabulary and JSON values:
+  hot_cue:<1-8>  {"time": float, "label": str|null, "color": str|null} | null
+  main_cue       float | null
+  tag:<id>       bool (assigned)
+  title, artist  str | null
+  energy         int 1-5 | null
+  key            Engine DJ key id 0-23 | null
+"""
+
+from __future__ import annotations
+
+import json
+import uuid
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from typing import Any
+
+from sqlalchemy.orm import Session
+
+from .models import DeviceSyncChange, HotCue, Tag, Track, TrackTag
+from .track_metadata.manager import apply_update
+from .track_metadata.models import TrackChanges
+
+SCALAR_FIELDS = ("title", "artist", "energy", "key", "main_cue")
+DESKTOP = "desktop"
+
+
+class FieldError(ValueError):
+    pass
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def _parse_field(field: str) -> tuple[str, int | None]:
+    if field in SCALAR_FIELDS:
+        return field, None
+    kind, _, arg = field.partition(":")
+    if kind in ("hot_cue", "tag") and arg.isdigit():
+        n = int(arg)
+        if kind == "hot_cue" and not 1 <= n <= 8:
+            raise FieldError(f"hot cue slot out of range: {field}")
+        return kind, n
+    raise FieldError(f"unsupported field: {field}")
+
+
+# ── Read / write one field on the desktop ─────────────────────────────
+
+
+def read_field(db: Session, track: Track, field: str) -> tuple[Any, datetime | None]:
+    """(current value, when the desktop last changed it — best known)."""
+    kind, n = _parse_field(field)
+    if kind == "hot_cue":
+        cue = db.query(HotCue).filter_by(track_id=track.id, slot_number=n).one_or_none()
+        if cue is None:
+            return None, track.updated_at
+        return {"time": cue.time_seconds, "label": cue.label, "color": cue.color}, cue.updated_at
+    if kind == "tag":
+        tt = db.query(TrackTag).filter_by(track_id=track.id, tag_id=n).one_or_none()
+        return (tt is not None), (tt.created_at if tt is not None else track.updated_at)
+    if kind == "main_cue":
+        return track.cue_point_time, track.updated_at
+    return getattr(track, kind), track.updated_at
+
+
+def _validate(kind: str, value: Any) -> None:
+    ok = {
+        "hot_cue": value is None or (isinstance(value, dict) and isinstance(value.get("time"), (int, float))),
+        "tag": isinstance(value, bool),
+        "main_cue": value is None or isinstance(value, (int, float)),
+        "title": value is None or isinstance(value, str),
+        "artist": value is None or isinstance(value, str),
+        "energy": value is None or (isinstance(value, int) and 1 <= value <= 5),
+        "key": value is None or (isinstance(value, int) and 0 <= value <= 23),
+    }[kind]
+    if not ok:
+        raise FieldError(f"bad value for {kind}: {value!r}")
+
+
+def write_field(db: Session, track: Track, field: str, value: Any) -> None:
+    """Write through the same paths desktop edits use. Caller commits."""
+    kind, n = _parse_field(field)
+    _validate(kind, value)
+    if kind == "hot_cue":
+        cue = db.query(HotCue).filter_by(track_id=track.id, slot_number=n).one_or_none()
+        if value is None:
+            if cue is not None:
+                db.delete(cue)
+        else:
+            if cue is None:
+                cue = HotCue(track_id=track.id, slot_number=n, time_seconds=float(value["time"]))
+                db.add(cue)
+            cue.time_seconds = float(value["time"])
+            cue.label = value.get("label")
+            cue.color = value.get("color")
+        return
+    if kind == "tag":
+        if db.get(Tag, n) is None:
+            raise FieldError(f"unknown tag {n}")
+        current = {tt.tag_id for tt in db.query(TrackTag).filter_by(track_id=track.id)}
+        wanted = (current | {n}) if value else (current - {n})
+        if wanted != current:
+            apply_update(db, track, TrackChanges(tag_ids=sorted(wanted)))
+        return
+    if kind == "main_cue":
+        track.cue_point_time = None if value is None else float(value)
+        return
+    if value is None:
+        setattr(track, kind, None)  # TrackChanges cannot clear; plain column write
+        return
+    apply_update(db, track, TrackChanges(**{kind: value}))
+
+
+# ── Push (phone → desktop) ─────────────────────────────────────────────
+
+
+@dataclass
+class PushedEdit:
+    uuid: str
+    track_id: int
+    field: str
+    old: Any
+    new: Any
+    edited_at_ms: int
+
+
+def _dump(value: Any) -> str:
+    return json.dumps(value)
+
+
+def apply_edits(
+    db: Session, device_id: str, device_name: str | None, edits: list[PushedEdit]
+) -> tuple[str, dict[str, str]]:
+    """Apply a pushed batch, oldest edit first. Returns (batch_id, uuid → outcome).
+    Re-pushing an already-logged edit uuid is a no-op that reports the
+    original outcome (the phone retries after a lost response)."""
+    batch_id = uuid.uuid4().hex
+    now = _utcnow()
+    outcomes: dict[str, str] = {}
+    for edit in sorted(edits, key=lambda e: e.edited_at_ms):
+        prior = db.query(DeviceSyncChange).filter_by(edit_uuid=edit.uuid, direction="to_desktop").first()
+        if prior is not None:
+            outcomes[edit.uuid] = prior.outcome
+            continue
+        edited_at = min(datetime.fromtimestamp(edit.edited_at_ms / 1000, timezone.utc).replace(tzinfo=None), now)
+        track = db.get(Track, edit.track_id)
+        outcome = "rejected"
+        old_logged = edit.old
+        try:
+            if track is None or track.archived_at is not None:
+                raise FieldError("track not in library")
+            current, changed_at = read_field(db, track, edit.field)
+            old_logged = current
+            if current == edit.new:
+                outcome = "applied"  # already so
+            elif current != edit.old and changed_at is not None and changed_at > edited_at:
+                outcome = "superseded"  # the desktop changed it later: newest wins
+            else:
+                write_field(db, track, edit.field, edit.new)
+                outcome = "applied"
+        except FieldError:
+            outcome = "rejected"
+        db.add(DeviceSyncChange(
+            batch_id=batch_id, device_id=device_id, device_name=device_name, direction="to_desktop",
+            track_id=edit.track_id, field=edit.field, old_json=_dump(old_logged), new_json=_dump(edit.new),
+            edit_uuid=edit.uuid, edited_at=edited_at, synced_at=now, outcome=outcome,
+        ))
+        db.commit()
+        outcomes[edit.uuid] = outcome
+    return batch_id, outcomes
+
+
+def log_received(db: Session, device_id: str, device_name: str | None, changes: list[dict]) -> str:
+    """Record what a pull changed on the phone (direction to_phone)."""
+    batch_id = uuid.uuid4().hex
+    now = _utcnow()
+    for c in changes:
+        _parse_field(c["field"])
+        db.add(DeviceSyncChange(
+            batch_id=batch_id, device_id=device_id, device_name=device_name, direction="to_phone",
+            track_id=int(c["track_id"]), field=c["field"], old_json=_dump(c.get("old")),
+            new_json=_dump(c.get("new")), synced_at=now, outcome="applied",
+        ))
+    db.commit()
+    return batch_id
+
+
+# ── Review + revert (desktop) ──────────────────────────────────────────
+
+
+def change_row(c: DeviceSyncChange, titles: dict[int, str] | None = None) -> dict:
+    return {
+        "id": c.id, "batch_id": c.batch_id, "device_id": c.device_id, "device_name": c.device_name,
+        "direction": c.direction, "track_id": c.track_id,
+        "track_title": (titles or {}).get(c.track_id),
+        "field": c.field, "old": json.loads(c.old_json) if c.old_json else None,
+        "new": json.loads(c.new_json) if c.new_json else None,
+        "edited_at": c.edited_at.isoformat() if c.edited_at else None,
+        "synced_at": c.synced_at.isoformat(), "outcome": c.outcome,
+        "reverts_id": c.reverts_id, "reverted_by_id": c.reverted_by_id,
+        "revertable": c.outcome == "applied" and c.reverted_by_id is None and c.reverts_id is None,
+    }
+
+
+def list_changes(db: Session, limit: int = 300, device_id: str | None = None) -> list[dict]:
+    q = db.query(DeviceSyncChange)
+    if device_id:
+        q = q.filter(DeviceSyncChange.device_id == device_id)
+    rows = q.order_by(DeviceSyncChange.id.desc()).limit(limit).all()
+    ids = {r.track_id for r in rows}
+    titles = {t.id: t.title or t.filename for t in db.query(Track).filter(Track.id.in_(ids))} if ids else {}
+    tag_ids = {int(r.field[4:]) for r in rows if r.field.startswith("tag:")}
+    tag_names = {t.id: t.name for t in db.query(Tag).filter(Tag.id.in_(tag_ids))} if tag_ids else {}
+    out = []
+    for r in rows:
+        row = change_row(r, titles)
+        if r.field.startswith("tag:"):
+            row["tag_name"] = tag_names.get(int(r.field[4:]))
+        out.append(row)
+    return out
+
+
+def revert(db: Session, change_ids: list[int]) -> list[DeviceSyncChange]:
+    """Write each change's old value back on the desktop (newest first) and log it."""
+    batch_id = uuid.uuid4().hex
+    now = _utcnow()
+    made = []
+    rows = db.query(DeviceSyncChange).filter(DeviceSyncChange.id.in_(change_ids)).order_by(DeviceSyncChange.id.desc()).all()
+    for c in rows:
+        if c.outcome != "applied" or c.reverted_by_id is not None or c.reverts_id is not None:
+            continue
+        track = db.get(Track, c.track_id)
+        if track is None:
+            continue
+        old = json.loads(c.old_json) if c.old_json else None
+        current, _ = read_field(db, track, c.field)
+        write_field(db, track, c.field, old)
+        r = DeviceSyncChange(
+            batch_id=batch_id, device_id=DESKTOP, device_name="Revert", direction="to_desktop",
+            track_id=c.track_id, field=c.field, old_json=_dump(current), new_json=_dump(old),
+            edited_at=now, synced_at=now, outcome="applied", reverts_id=c.id,
+        )
+        db.add(r)
+        db.flush()
+        c.reverted_by_id = r.id
+        made.append(r)
+    db.commit()
+    return made
+
+
+def revert_batch(db: Session, batch_id: str) -> list[DeviceSyncChange]:
+    ids = [c.id for c in db.query(DeviceSyncChange.id).filter(DeviceSyncChange.batch_id == batch_id)]
+    return revert(db, ids)
+
+
+__all__ = [
+    "PushedEdit", "apply_edits", "log_received", "list_changes", "revert", "revert_batch",
+    "read_field", "write_field", "FieldError",
+]

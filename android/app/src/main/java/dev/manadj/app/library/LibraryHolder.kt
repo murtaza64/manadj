@@ -33,6 +33,8 @@ object LibraryHolder {
                 deviceToken = prefs.getString("token", null),
             ).also { repo ->
                 instance = repo
+                repo.deviceId = deviceId(app)
+                repo.deviceName = deviceName()
                 scope.launch { repo.open() }
             }
         }
@@ -92,6 +94,15 @@ object LibraryHolder {
             prefs(context).edit().putString("token", token).apply()
             repo.sync()
         }
+    }
+
+    /**
+     * Edit a library track on the phone (#375): applies now, syncs back to the
+     * desktop on the next sync. Hot cue slots here are 1..8.
+     */
+    fun edit(context: Context, trackId: Int, edit: dev.manadj.library.TrackEdit) {
+        val repo = repository(context)
+        scope.launch { repo.edit(trackId, edit) }
     }
 
     /** The library Track id a deck holds, when it was loaded from the Library. */

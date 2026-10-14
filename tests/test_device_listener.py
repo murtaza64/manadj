@@ -187,3 +187,16 @@ def test_control_lists_approves_and_revokes(data_root, monkeypatch, pairing):
     assert device["name"] == "Pixel" and "token_sha256" not in device
     assert client.delete("/api/device-listener/devices/phone-abcdef").status_code == 200
     assert client.get("/api/device-listener/devices").json() == []
+
+
+def test_paired_device_identity_reaches_change_log(paired_client, pairing, make_track, db):
+    from backend.device_pairing import TOKEN_HEADER
+    from backend.models import DeviceSyncChange
+
+    track = make_track(title="A")
+    token = pairing.registry.add("phone-identity", "Pixel 9")
+    body = {"edits": [{"uuid": "u1", "track_id": track.id, "field": "title", "old": "A", "new": "B", "edited_at_ms": 0}]}
+    r = paired_client.post("/api/device-sync/edits", json=body, headers={TOKEN_HEADER: token})
+    assert r.json()["outcomes"] == {"u1": "applied"}
+    row = db.query(DeviceSyncChange).one()
+    assert (row.device_id, row.device_name) == ("phone-identity", "Pixel 9")

@@ -24,6 +24,8 @@ data class SyncState(
     val previewCount: Int = 0,
     val audioCount: Int = 0,
     val error: String? = null,
+    /** Local edits not yet pushed to the desktop (#375). */
+    val pendingEdits: Int = 0,
 )
 
 /** Per-track audio availability for the list / load buttons. */
@@ -47,6 +49,9 @@ class LibraryRepository(
     /** Per-device token from approve-on-desktop pairing (#374). */
     @Volatile var deviceToken: String? = null,
     private val io: CoroutineDispatcher = Dispatchers.IO,
+    /** Names this phone in the desktop's Device change log (#375). */
+    @Volatile var deviceId: String? = null,
+    @Volatile var deviceName: String? = null,
 ) {
     val store = LibraryStore(root)
     private val _library = MutableStateFlow<Library?>(null)
@@ -61,9 +66,16 @@ class LibraryRepository(
     private val audioLocks = ConcurrentHashMap<Int, Mutex>()
     private val previewCache = ConcurrentHashMap<String, PreviewWaveform>()
 
-    private fun client() = SyncClient(baseUrl, pairCode, deviceToken = deviceToken)
+    private fun client() = SyncClient(baseUrl, pairCode, deviceToken = deviceToken, deviceId = deviceId, deviceName = deviceName)
 
-    private fun build(snapshot: Snapshot) = Library(snapshot) { track ->
+    val journal = EditJournal(File(root, "edits.jsonl"))
+    /** The last pulled snapshot, without local edits (the diff base for /received). */
+    @Volatile private var pulled: Snapshot? = null
+
+    /** Library view = pulled snapshot + unsynced local edits. */
+    private fun build(pulled: Snapshot) = buildView(FieldsOverlay.of(pulled, journal.all()))
+
+    private fun buildView(snapshot: Snapshot) = Library(snapshot) { track ->
         val key = "${track.id}-${track.previewRev ?: return@Library null}"
         previewCache[key] ?: store.readPreview(track)?.also { previewCache[key] = it }
     }
@@ -84,8 +96,29 @@ class LibraryRepository(
             _state.update { it.copy(error = "Cached library unreadable: ${e.message}") }
             return@withContext null
         }
+        pulled = snapshot
         counts(snapshot)
         build(snapshot).also { _library.value = it }
+    }
+
+    /** Unsynced local edits (pushed on the next [sync]). */
+    val pendingEdits: Int get() = journal.all().size
+
+    /**
+     * Edit a track on the phone (#375): journaled, applied to [library] now,
+     * pushed to the desktop on the next sync (newest edit wins there).
+     * Returns false when the track is unknown or the edit changes nothing.
+     */
+    suspend fun edit(trackId: Int, edit: TrackEdit): Boolean = withContext(io) {
+        val base = pulled ?: return@withContext false
+        val track = _library.value?.track(trackId) ?: return@withContext false
+        val (field, old) = TrackFields.current(track, edit)
+        val new = TrackFields.newValue(edit)
+        if (TrackFields.same(old, new)) return@withContext false
+        journal.append(EditJournal.newEdit(trackId, field, old, new))
+        _library.value = build(base)
+        _state.update { it.copy(pendingEdits = journal.all().size) }
+        true
     }
 
     /**
@@ -97,9 +130,23 @@ class LibraryRepository(
         withContext(io) {
             val client = client()
             try {
+                // Push first: the desktop applies newest-wins and logs; answered edits leave the journal.
+                val pending = journal.all()
+                val pushedFields = HashSet<Pair<Int, String>>()
+                if (pending.isNotEmpty()) {
+                    running("Edits ${pending.size}", null)
+                    val outcomes = client.pushEdits(pending)
+                    journal.remove(outcomes.keys)
+                    pending.filter { outcomes[it.uuid] == "applied" }.forEach { pushedFields += it.trackId to it.field }
+                }
                 running("Snapshot", null)
                 val text = client.snapshotText()
                 val snapshot = SnapshotJson.parse(text)
+                // Report what this pull changes on the phone (minus our own pushed edits).
+                pulled?.let { before ->
+                    val received = SnapshotDiff.received(before, snapshot, pushedFields)
+                    if (received.isNotEmpty()) client.reportReceived(received)
+                }
                 val missing = snapshot.tracks.filter { it.previewRev != null && !store.hasPreview(it) }
                 var done = 0
                 for (batch in missing.chunked(PREVIEW_BATCH)) {
@@ -109,6 +156,7 @@ class LibraryRepository(
                     done += batch.size
                 }
                 store.writeSnapshotText(text)
+                pulled = snapshot
                 store.prune(snapshot)
                 previewCache.keys.retainAll(snapshot.tracks.mapNotNullTo(HashSet()) { t -> t.previewRev?.let { "${t.id}-$it" } })
                 val library = build(snapshot)
@@ -122,7 +170,7 @@ class LibraryRepository(
                     }
                     counts(snapshot)
                 }
-                _state.update { it.copy(running = false, phase = null, progress = null, error = null) }
+                _state.update { it.copy(running = false, phase = null, progress = null, error = null, pendingEdits = journal.all().size) }
                 Result.success(library)
             } catch (e: Exception) {
                 _state.update { it.copy(running = false, phase = null, progress = null, error = e.message ?: e.toString()) }

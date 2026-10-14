@@ -17,6 +17,9 @@ class SyncClient(
     private val timeoutMs: Int = 15_000,
     /** Per-device token from approve-on-desktop pairing (#374); preferred over [pairCode]. */
     private val deviceToken: String? = null,
+    /** Names this phone in the desktop's Device change log over loopback (#375). */
+    private val deviceId: String? = null,
+    private val deviceName: String? = null,
 ) {
     val baseUrl: String = baseUrl.trimEnd('/')
 
@@ -25,6 +28,8 @@ class SyncClient(
             requestMethod = method
             connectTimeout = timeoutMs
             readTimeout = timeoutMs * 4
+            deviceId?.let { setRequestProperty("X-Manadj-Device-Id", it) }
+            deviceName?.let { setRequestProperty("X-Manadj-Device-Name", it) }
             val token = deviceToken?.takeIf { it.isNotBlank() }
             if (token != null) setRequestProperty(DEVICE_TOKEN_HEADER, token)
             else pairCode?.takeIf { it.isNotBlank() }?.let { setRequestProperty(PAIR_HEADER, it.trim()) }
@@ -60,6 +65,28 @@ class SyncClient(
         val bytes = conn.inputStream.use { it.readBytes() }
         conn.disconnect()
         PreviewPack.parse(bytes)
+    }
+
+    private fun postJson(path: String, body: JSONObject): JSONObject = io {
+        val conn = open(path, "POST")
+        conn.doOutput = true
+        conn.setRequestProperty("Content-Type", "application/json")
+        conn.outputStream.use { it.write(body.toString().toByteArray()) }
+        conn.checked()
+        val text = conn.inputStream.use { it.readBytes().decodeToString() }
+        conn.disconnect()
+        JSONObject(text)
+    }
+
+    /** Push journaled edits (#375); returns uuid → applied | superseded | rejected. */
+    fun pushEdits(edits: List<JournaledEdit>): Map<String, String> {
+        val outcomes = postJson("/edits", editsBody(edits)).getJSONObject("outcomes")
+        return outcomes.keys().asSequence().associateWith { outcomes.getString(it) }
+    }
+
+    /** Report what a pull changed on this phone (desktop logs it as to_phone). */
+    fun reportReceived(changes: List<JSONObject>) {
+        postJson("/received", JSONObject().put("changes", JSONArray(changes)))
     }
 
     /** Download a Track's audio to [target] (atomically), reporting (bytes, total?). */

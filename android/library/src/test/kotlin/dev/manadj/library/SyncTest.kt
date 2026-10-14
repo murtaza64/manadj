@@ -26,13 +26,16 @@ class SyncTest {
     @Volatile private var requiredCode: String? = null
     @Volatile private var deviceToken: String? = null
     @Volatile private var pairPolls = 0
+    private val pushed = mutableListOf<String>()
+    private val received = mutableListOf<String>()
+    @Volatile private var deskTitle = "Decoy"
 
     private fun snapshotJson() = """
         {"version":1,"generated_at":"2026-10-14T12:00:00+00:00",
          "tag_categories":[{"id":1,"name":"Genre","display_order":0,"color":"#ff0000"}],
          "tags":[{"id":7,"name":"Neuro","category_id":1,"display_order":0,"color":null}],
          "tracks":[
-          {"id":10,"title":"Decoy","artist":"Synth","file_name":"decoy.mp3","bpm":174.0,"key":15,"key_openkey":"8m","key_camelot":"3A",
+          {"id":10,"title":"$deskTitle","artist":"Synth","file_name":"decoy.mp3","bpm":174.0,"key":15,"key_openkey":"8m","key_camelot":"3A",
            "energy":4,"duration_secs":300.0,"date_added":"2026-10-01T00:00:00","main_cue":0.5,"codec":"mp3","filesize_bytes":200000,
            "audio_rev":"r1","preview_rev":"$previewRev","tag_ids":[7],"hot_cues":[{"slot":1,"time":12.5,"label":null,"color":"#00ff00"}],
            "grid":{"origin":"analyzed","anchor_time":0.5,"tempo_changes":[{"start_time":0.5,"bpm":174.0,"time_signature_num":4,"bar_position":1}]}},
@@ -73,6 +76,18 @@ class SyncTest {
         server.createContext("/api/device-sync/tracks/10/audio") { ex ->
             audioRequests++
             ex.sendResponseHeaders(200, audio.size.toLong()); ex.responseBody.use { it.write(audio) }
+        }
+        server.createContext("/api/device-sync/edits") { ex ->
+            val body = ex.requestBody.readBytes().decodeToString()
+            pushed += body
+            val uuids = Regex("\"uuid\":\"([^\"]+)\"").findAll(body).map { it.groupValues[1] }.toList()
+            val out = """{"batch_id":"b","outcomes":{${uuids.joinToString(",") { "\"$it\":\"applied\"" }}}}""".toByteArray()
+            ex.sendResponseHeaders(200, out.size.toLong()); ex.responseBody.use { it.write(out) }
+        }
+        server.createContext("/api/device-sync/received") { ex ->
+            received += ex.requestBody.readBytes().decodeToString()
+            val out = """{"batch_id":"r"}""".toByteArray()
+            ex.sendResponseHeaders(200, out.size.toLong()); ex.responseBody.use { it.write(out) }
         }
         server.createContext("/api/device-pair/request") { ex ->
             val body = if (ex.requestMethod == "POST") {
@@ -166,6 +181,33 @@ class SyncTest {
         repo.deviceToken = "revoked"
         assertTrue(repo.sync().isFailure)
         assertTrue(repo.state.value.error!!.contains("unpaired"))
+    }
+
+    @Test fun editsApplyLocallyPushThenReceivedDiff() = runBlocking {
+        val repo = repo()
+        repo.deviceId = "phone-x"
+        repo.sync().getOrThrow()
+        assertTrue(repo.edit(10, TrackEdit.HotCueSet(2, 30.5, "drop")))
+        assertTrue(repo.edit(10, TrackEdit.TagSet(7, false)))
+        assertTrue(repo.edit(10, TrackEdit.Key(1)))
+        val local = repo.library.value!!.track(10)!!
+        assertEquals(listOf(1, 2), local.hotCues.map { it.slot })
+        assertEquals(emptyList(), local.tagIds)
+        assertEquals("8A", local.keyCamelot)
+        assertEquals(3, repo.state.value.pendingEdits)
+
+        // Offline restart keeps the overlay.
+        val reopened = repo().also { it.open() }
+        assertEquals(listOf(1, 2), reopened.library.value!!.track(10)!!.hotCues.map { it.slot })
+
+        deskTitle = "Decoy (desk edit)"
+        repo.sync().getOrThrow()
+        assertEquals(1, pushed.size)
+        assertTrue(pushed[0].contains("\"field\":\"hot_cue:2\""))
+        assertEquals(0, repo.journal.all().size)
+        assertEquals(1, received.size) // the desktop's title change reached the phone
+        assertTrue(received[0].contains("\"field\":\"title\"") && !received[0].contains("hot_cue"))
+        assertEquals(false, repo.edit(10, TrackEdit.Title("Decoy (desk edit)"))) // no-op edit
     }
 
     @Test fun presyncAudio() = runBlocking {

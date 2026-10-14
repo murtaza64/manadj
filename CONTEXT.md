@@ -553,6 +553,16 @@ _Avoid_: discrepancy (implementation term)
 **Match**:
 The association between a Track and its counterpart in an external library, established during a Sync operation by file path, falling back to filename. Paths compare by identity, not spelling: `/` and `\` separators are equal, Unicode is NFC-normalized, and on Windows case is ignored. Recomputed each run; not persisted.
 
+**Device sync**:
+Moving Library data between the desktop and a Paired device (the manaDJ phone app). The phone pulls the Library snapshot, preview waveforms and audio. Phone edits to hot cues, main cue, Tag assignment, title, artist, energy and key flow back to the desktop. The newest edit wins per field, and every change is written to the Device change log (ADR 0045). Not a Sync operation: Sync means external libraries and Surfaces.
+_Avoid_: phone sync in code (the Settings label is fine), mobile Export
+
+**Paired device**:
+A phone the desktop approved, by matching a short code shown on both screens, to Device sync over the LAN. It holds a per-device token, and the desktop can unpair it at any time.
+
+**Device change log**:
+The durable record of every Device sync change in both directions: device, track, field, old → new, edit time, sync time and outcome (applied, superseded, rejected, reverted). From it the desktop reverts one entry or a whole sync batch, by writing the old value back as a new change.
+
 **Sync inbox**:
 The default unified-sync presentation: every attention-worthy track appears exactly once, in the highest-priority section that applies. Answers "what should I deal with, in what order" — a triage view, not a query.
 
