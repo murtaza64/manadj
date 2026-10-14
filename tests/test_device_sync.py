@@ -238,3 +238,32 @@ def test_sessions_list_and_detail_for_phone_replay(client, db):
     detail = client.get("/api/device-sync/sessions/s-1").json()
     assert detail["events"] == events
     assert client.get("/api/device-sync/sessions/missing").status_code == 404
+
+
+def test_stems_rev_and_stem_endpoints(client, make_track, tmp_path, monkeypatch):
+    from backend import config as config_module
+    from backend.config import StemsConfig
+    from tests.test_stems_router import materialize_stems
+
+    stems = StemsConfig(directory=str(tmp_path / "stems"))
+    monkeypatch.setattr(config_module.get_config(), "stems", stems)
+    source = tmp_path / "a.mp3"
+    source.write_bytes(b"x" * 500)
+    track = make_track(filename=str(source))
+    bare = make_track(filename=str(tmp_path / "missing.mp3"))
+    materialize_stems(track.id, source, stems)
+
+    rows = {t["id"]: t for t in client.get("/api/device-sync/snapshot").json()["tracks"]}
+    rev = rows[track.id]["stems_rev"]
+    assert rev and rows[bare.id]["stems_rev"] is None
+
+    r = client.get(f"/api/device-sync/tracks/{track.id}/stems/drums")
+    assert r.status_code == 200 and r.headers["x-stems-rev"] == rev
+    assert client.get(f"/api/device-sync/tracks/{track.id}/stems/drums", headers={"Range": "bytes=0-9"}).status_code == 206
+    assert client.get(f"/api/device-sync/tracks/{track.id}/stems/guitar").status_code == 404
+    assert client.get(f"/api/device-sync/tracks/{bare.id}/stems/drums").status_code == 404
+
+    source.write_bytes(b"y" * 600)  # replaced audio: stems are stale = absent
+    rows = {t["id"]: t for t in client.get("/api/device-sync/snapshot").json()["tracks"]}
+    assert rows[track.id]["stems_rev"] is None
+    assert client.get(f"/api/device-sync/tracks/{track.id}/stems/drums").status_code == 404
