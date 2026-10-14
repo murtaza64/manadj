@@ -707,7 +707,7 @@ void Engine::apply(const Command& c) noexcept {
             for (int i = 0; i < kDeckCount; ++i) updateGain(i);
             break;
         case Op::Pitch: d.pitch = std::clamp(static_cast<float>(c.value), -25.f, 25.f); break;
-        case Op::Bend: d.bend = std::clamp(static_cast<float>(c.value), -8.f, 8.f); break;
+        case Op::Bend: d.bend = std::clamp(static_cast<float>(c.value), -25.f, 25.f); break; // desktop jogCalibration GRV6 bendMaxPercent
         case Op::Pfl: d.pfl.store(c.value != 0); updateGain(c.deck); break;
         case Op::Eq:
             d.eq[c.slot].store(static_cast<float>(std::clamp(c.value, 0.0, 1.0)));
