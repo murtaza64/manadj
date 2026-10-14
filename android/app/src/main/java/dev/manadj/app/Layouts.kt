@@ -83,6 +83,10 @@ import dev.manadj.audio.QuantizeMode
     val moving = ui.snapshot.let { it?.playing == true || it?.previewing == true }
     val frame = frameNanos(moving)
     val clock = remember(ui.id) { SmoothClock() }
+    // Stem bank loaded: fetch the desktop stem waveforms for the masked composite.
+    val stems by remember(ui) { derivedStateOf { ui.snapshot?.stems == true } }
+    val track = if (stems) dev.manadj.app.library.LibraryHolder.trackOn(model, ui.id) else null
+    LaunchedEffect(track, ui.source?.id) { val id = ui.source?.id; if (track != null && id != null) ux.ensureStemWaves(id, track) }
     // Engine output-timestamp clock (what is heard now), eased by SmoothClock; raw snapshot when no timestamp.
     // Only read model.output while moving: it changes every engine tick and would redraw idle waves at 30 fps.
     // HEARD quantize (#382): draw at the calibrated heard position — audibleSeconds already backs off Android's
@@ -96,6 +100,7 @@ import dev.manadj.audio.QuantizeMode
     }
     WaveView(wave, { clock.at(frame.value, heard(frame.value), moving && frame.value != 0L, playbackRate(ui)) }, ui.durationSeconds, marksOf(ui), modifier.semantics { contentDescription = "${ui.id} detail wave" }.waveTouch(ui, model, ux, vertical),
         vertical = vertical, windowSeconds = ux.waveSeconds * tempoRate(ui), live = { ux.strip(ui) }, history = e.history, accent = deckColor(ui.id),
+        stemWave = { mask -> val id = ui.source?.id; if (wave == null || id == null) null else ux.stemWave(id, wave, mask) },
         status = when { ui.source == null -> "${ui.id} · no track"; wave == null -> if (ux.waveSource[ui.source?.id] == "failed") "no waveform" else "analysing…"; !wave.complete -> "analysing ${(100 * wave.frames * wave.bandHop / wave.sampleRate / (ui.durationSeconds ?: 1.0)).toInt().coerceIn(0, 99)}%"; else -> null })
 }
 

@@ -227,6 +227,30 @@ class UiModel(application: Application) : AndroidViewModel(application) {
     fun strip(deck: DeckUi, engineEq: Boolean = deck.snapshot != null): Strip {
         val e = extras.getValue(deck.id)
         val (lo, mid, hi) = if (engineEq) Triple(deck.eq[0], deck.eq[1], deck.eq[2]) else Triple(e.eqLow, e.eqMid, e.eqHigh)
-        return Strip(trimToRelativeGain(deck.trim), eqValueToGain(lo), eqValueToGain(mid), eqValueToGain(hi))
+        val s = deck.snapshot
+        val stems = if (s?.stems == true) s.stemGains.foldIndexed(0) { i, m, g -> if (g > .5) m or (1 shl i) else m } else ALL_STEMS
+        return Strip(trimToRelativeGain(deck.trim), eqValueToGain(lo), eqValueToGain(mid), eqValueToGain(hi), stems)
+    }
+
+    /** Desktop stem waveforms per source (4, STEM_NAMES order), fetched once the deck has a stem bank. */
+    val stemWaves = mutableStateMapOf<String, List<WaveformData>>()
+    private val stemFetches = HashMap<String, Job>()
+    private val composites = HashMap<Pair<String, Int>, WaveformData?>()
+    fun ensureStemWaves(sourceId: String, trackId: Int) {
+        if (sourceId in stemWaves || stemFetches[sourceId]?.isActive == true) return
+        stemFetches[sourceId] = viewModelScope.launch(Dispatchers.Default) {
+            val waves = dev.manadj.audio.AudioEngine.STEM_NAMES.map { name ->
+                val d = runCatching { dev.manadj.app.library.LibraryHolder.stemWaveform(getApplication(), trackId, name) }.getOrNull() ?: return@launch
+                if (d.nBands != 8 || d.bandHop <= 0) return@launch
+                WaveformData(d.sampleRate, d.durationSecs, d.peakHop, d.bandHop, d.stftWindow, d.peaks, d.bands, d.bands.size / 8)
+            }
+            withContext(Dispatchers.Main) { stemWaves[sourceId] = waves; while (stemWaves.size > 4) stemWaves.remove(stemWaves.keys.first { it != sourceId }) }
+        }
+    }
+    /** The mix as heard with stem [mask] (cached per source + mask); null = draw the plain mix. */
+    fun stemWave(sourceId: String, mix: WaveformData, mask: Int): WaveformData? {
+        if (mask == ALL_STEMS) return null
+        val stems = stemWaves[sourceId] ?: return null
+        return composites.getOrPut(sourceId to mask) { if (composites.size > 24) composites.clear(); stemComposite(mix, stems, mask) }
     }
 }

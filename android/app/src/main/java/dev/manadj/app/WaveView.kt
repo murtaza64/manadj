@@ -137,11 +137,14 @@ fun marksOf(ui: DeckUi) = ui.snapshot.let { s -> WaveMarks(s?.cueSeconds, ui.hot
     data: WaveformData?, position: () -> Double, duration: Double?, marks: WaveMarks, modifier: Modifier,
     overview: Boolean = false, vertical: Boolean = false, windowSeconds: Double = 16.0, playheadAt: Float = .3f,
     live: () -> Strip = { Strip() }, history: StripHistory? = null, accent: Color = Ink.accent, status: String? = null,
+    stemWave: ((Int) -> WaveformData?)? = null,
 ) {
     val paint = remember { Paint().apply { strokeWidth = 2f; isAntiAlias = false } }
     val ink = remember { Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = Typeface.MONOSPACE; isFakeBoldText = true } }
     var lines by remember { mutableStateOf<Lines?>(null) }
     val columns = remember { ColumnCache() }
+    // Stem composites (one column cache per audible-stem mask; scaled by the mix's fill so kills read quieter).
+    val stemColumns = remember { HashMap<Int, ColumnCache>() }
     // Overview body depends only on data + size: cache it as a bitmap, overlay markers per frame.
     var cache by remember { mutableStateOf<Triple<WaveformData, IntSize2, ImageBitmap>?>(null) }
     var overviewStyle by remember { mutableStateOf<WaveStyle?>(null) }
@@ -191,7 +194,15 @@ fun marksOf(ui: DeckUi) = ui.snapshot.let { s -> WaveMarks(s?.cueSeconds, ui.hot
                         for (j in 0..2) g[j] = (g[j] * columns.fill).coerceAtMost(1f)
                         val behind = t0 < pos
                         val strip = if (behind) history?.at(t0, liveStrip) ?: liveStrip else liveStrip
-                        top[0] = (g[0] * strip.low * strip.gain).coerceIn(0f, 1f); top[1] = (g[1] * strip.mid * strip.gain).coerceIn(0f, 1f); top[2] = (g[2] * strip.high * strip.gain).coerceIn(0f, 1f)
+                        // Stems (desktop #213): the top lobe (and the heard past) shows the audible stems' composite.
+                        val stemData = if (strip.stems != ALL_STEMS) stemWave?.invoke(strip.stems) else null
+                        val src = if (stemData != null) {
+                            val c = stemColumns.getOrPut(strip.stems) { ColumnCache() }
+                            c.prepare(stemData, colSeconds); c.groups(stemData, k, t0, t1, top)
+                            for (j in 0..2) top[j] = (top[j] * columns.fill).coerceAtMost(1f)
+                            top
+                        } else g
+                        top[0] = (src[0] * strip.low * strip.gain).coerceIn(0f, 1f); top[1] = (src[1] * strip.mid * strip.gain).coerceIn(0f, 1f); top[2] = (src[2] * strip.high * strip.gain).coerceIn(0f, 1f)
                         val bottom = if (behind) top else g
                         l.column(top) { level, mask, h -> if (vertical) l.add(level, mask, half, p, half - h * half, p) else l.add(level, mask, p, half, p, half - h * half) }
                         l.column(bottom) { level, mask, h -> if (vertical) l.add(level, mask, half, p, half + h * half, p) else l.add(level, mask, p, half, p, half + h * half) }
