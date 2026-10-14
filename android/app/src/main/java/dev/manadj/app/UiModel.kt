@@ -85,6 +85,8 @@ class UiModel(application: Application) : AndroidViewModel(application) {
     private val _debug = flag("output-debug", false)
     var outputDebug: Boolean get() = _debug.value; set(v) { _debug.value = v; store("output-debug", v) }
     /** Detail-wave window (shared by both decks). Pinch writes it live; chooseWaveSeconds persists. */
+    /** VINYL per deck (pitch panel): one-finger waveform drag scratches instead of scrubbing (#107). */
+    val vinyl = mutableStateMapOf<DeckId, Boolean>()
     var waveSeconds by mutableDoubleStateOf(prefs.getFloat("wave-seconds", 12f).toDouble())
     fun chooseWaveSeconds(v: Double) { waveSeconds = v; prefs.edit().putFloat("wave-seconds", v.toFloat()).apply() }
 

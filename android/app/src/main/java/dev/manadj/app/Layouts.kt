@@ -21,6 +21,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import dev.manadj.audio.AudioCommand
 import dev.manadj.audio.DeckId
 import dev.manadj.audio.QuantizeMode
 
@@ -339,43 +340,71 @@ private enum class PaneKind { LEFT_SLOT, RIGHT_SLOT, BOTH_LEFT, BOTH_RIGHT }
 }
 
 /**
- * Detail-wave touch (#35/#67): one finger scratches — drag the waveform toward the past (left / up) to advance,
- * mapped px → track seconds at the current window; a second finger ends the scratch where it is (no jump) and
- * pinches the shared zoom (both decks, persisted on release).
+ * Detail-wave touch (#35/#67/#107). One finger: with VINYL on (or the deck paused — same rule as the scratch
+ * surface) it scratches; otherwise it scrubs like desktop (WebGLWaveform drag): a playing deck pauses, the
+ * content follows the finger (drag toward the past = later), the seek lands on release and playback resumes.
+ * A second finger cancels the one-finger action where it stands and pinches the shared zoom from its first
+ * frame (no threshold), both decks, persisted on release.
  */
 private fun Modifier.waveTouch(ui: DeckUi, model: PlayerModel, ux: UiModel, vertical: Boolean): Modifier = pointerInput(ui.id, vertical) {
     awaitEachGesture {
         val first = awaitFirstDown(requireUnconsumed = false)
-        val canScratch = model.supports("scratch") && ui.ready
+        val playing = ui.snapshot?.playing == true
+        val scratchMode = model.supports("scratch") && ui.ready && (ux.vinyl[ui.id] == true || !playing)
+        val canScrub = ui.ready && model.supports("seek")
         var scratching = false
+        var scrubbing = false; var resume = false; var scrubFrom = 0.0; var scrubTo = 0.0
         var last = first.position
         var d0 = 0f; var s0 = ux.waveSeconds; var zooming = false
+        val along = if (vertical) size.height else size.width
         fun endScratch() { if (scratching) { scratching = false; model.scratchEnd(ui.id) } }
+        fun endScrub(commit: Boolean) {
+            if (!scrubbing) return
+            scrubbing = false
+            if (commit) model.submit(AudioCommand.Seek(ui.id, scrubTo))
+            if (resume) model.submit(AudioCommand.Play(ui.id))
+            ux.seekPreview.remove(ui.id)
+        }
         try {
             while (true) {
                 val event = awaitPointerEvent()
                 val down = event.changes.filter { it.pressed }
                 if (down.isEmpty()) break
                 if (down.size >= 2) {
-                    endScratch()
+                    endScratch(); endScrub(commit = false)
                     val d = (down[0].position - down[1].position).getDistance()
-                    if (!zooming) { zooming = true; d0 = d; s0 = ux.waveSeconds }
-                    else if (d > 8f) ux.waveSeconds = (s0 * d0 / d).coerceIn(3.0, 48.0)
+                    if (!zooming) { zooming = true; d0 = d.coerceAtLeast(1f); s0 = ux.waveSeconds }
+                    else ux.waveSeconds = (s0 * d0 / d.coerceAtLeast(1f)).coerceIn(WAVE_MIN_SECONDS, WAVE_MAX_SECONDS)
                     down.forEach { it.consume() }
-                } else if (!zooming && canScratch) {
+                } else if (!zooming) {
                     val c = down.firstOrNull { it.id == first.id } ?: continue
                     val delta = c.position - last; last = c.position
-                    val along = if (vertical) size.height else size.width
                     val px = if (vertical) delta.y else delta.x
-                    if (!scratching && kotlin.math.abs(px) > 0f) { scratching = true; model.scratchBegin(ui.id) }
                     // Content moving toward the past = track advances.
-                    if (scratching) model.scratchMove(ui.id, -px / along * ux.waveSeconds * tempoRate(ui))
+                    val seconds = -px / along * ux.waveSeconds * tempoRate(ui)
+                    if (scratchMode) {
+                        if (!scratching && px != 0f) { scratching = true; model.scratchBegin(ui.id) }
+                        if (scratching) model.scratchMove(ui.id, seconds)
+                    } else if (canScrub && px != 0f) {
+                        if (!scrubbing) {
+                            scrubbing = true; scrubFrom = position(ui); scrubTo = scrubFrom
+                            resume = ui.snapshot?.playing == true
+                            if (resume) model.submit(AudioCommand.Pause(ui.id))
+                        }
+                        scrubTo = (scrubTo + seconds).coerceIn(-dev.manadj.audio.AudioEngine.MAX_LEAD_IN_SECONDS, ui.durationSeconds ?: Double.MAX_VALUE)
+                        ux.seekPreview[ui.id] = scrubTo
+                    }
                     c.consume()
                 }
             }
-        } finally { endScratch(); if (zooming) ux.chooseWaveSeconds(ux.waveSeconds) }
+            endScrub(commit = true)
+        } finally { endScratch(); endScrub(commit = false); if (zooming) ux.chooseWaveSeconds(ux.waveSeconds) }
     }
 }
+
+/** Detail-wave zoom range (window seconds): 4x the previous zoom-in (#107, ~1 ms/px on a phone). */
+const val WAVE_MIN_SECONDS = .75
+const val WAVE_MAX_SECONDS = 48.0
 
 /**
  * One wall-clock timescale for every detail wave (desktop): a deck's track-time window = zoom × its tempo
