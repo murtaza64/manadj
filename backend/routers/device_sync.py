@@ -10,9 +10,9 @@ prefix so a future LAN listener can expose it alone.
 - GET  /tracks/{id}/audio     the audio file (Range-capable)
 - GET  /tracks/{id}/waveform  the full detail waveform (MWF1), with `waveform_rev`
 
-The snapshot also carries `waveform_styles`: the desktop's Waveform style
-slots ('full', 'minimap' — style id + params) so the phone draws with the
-same palette.
+The snapshot also carries `settings`: synced performance settings
+(SYNCED_SETTINGS: Waveform style slots, filter) so the phone plays with the
+desktop's palette and filter.
 
 Revisions let the device skip unchanged artifacts: `audio_rev` changes when
 the file's path/size/mtime does; `preview_rev` when the preview blob does.
@@ -111,26 +111,33 @@ def _waveform_revs(db: Session) -> dict[int, str]:
     }
 
 
-WAVEFORM_STYLES_KEY = "manadj.waveformStyles"
+# Synced performance settings (settings #176 keys): the phone plays with the
+# desktop's look and feel. Values are the parsed JSON the frontend persists.
+SYNCED_SETTINGS: tuple[str, ...] = ("manadj.waveformStyles", "manadj-filter-settings")
 
 
-def _parse_styles(raw: str | None) -> dict | None:
+def _json_object(raw: str | None) -> dict | None:
     try:
         value = json.loads(raw) if raw else None
     except ValueError:
         return None
-    if not isinstance(value, dict) or not isinstance(value.get("full"), dict):
-        return None
-    return value
+    return value if isinstance(value, dict) else None
 
 
-def waveform_styles(db: Session) -> dict | None:
-    """The user's Waveform style slots (settings #176 key), else the shipped
-    default; the raw versioned shape styleSlots.ts persists."""
-    row = db.get(AppSetting, WAVEFORM_STYLES_KEY)
-    return _parse_styles(row.value if row else None) or _parse_styles(
-        shipped_defaults.shipped_settings().get(WAVEFORM_STYLES_KEY)
-    )
+def synced_settings(db: Session) -> dict[str, dict]:
+    """key -> {value, updated_at}: the user's value, else the shipped default
+    (updated_at null). An unparseable user value falls back to the default."""
+    rows = {r.key: r for r in db.query(AppSetting).filter(AppSetting.key.in_(SYNCED_SETTINGS))}
+    shipped = shipped_defaults.shipped_settings()
+    out: dict[str, dict] = {}
+    for key in SYNCED_SETTINGS:
+        row = rows.get(key)
+        value = _json_object(row.value) if row else None
+        if value is not None:
+            out[key] = {"value": value, "updated_at": _iso(row.updated_at)}
+        else:
+            out[key] = {"value": _json_object(shipped.get(key)), "updated_at": None}
+    return out
 
 
 def build_snapshot(db: Session) -> dict:
@@ -272,7 +279,7 @@ def build_snapshot(db: Session) -> dict:
         "transitions": transitions,
         "cameos": cameos,
         "takes": takes,
-        "waveform_styles": waveform_styles(db),
+        "settings": synced_settings(db),
     }
 
 

@@ -195,18 +195,23 @@ def test_detail_waveform_served_with_rev(client, db, make_track):
     assert client.get(f"/api/device-sync/tracks/{bare.id}/waveform").status_code == 404
 
 
-def test_snapshot_waveform_styles_user_value_else_shipped_default(client, db):
+def test_snapshot_synced_settings_user_value_else_shipped_default(client, db):
     from backend.models import AppSetting
     from backend.shipped_defaults import shipped_settings
 
-    shipped = json.loads(shipped_settings()["manadj.waveformStyles"])
-    assert client.get("/api/device-sync/snapshot").json()["waveform_styles"] == shipped
+    def settings():
+        return client.get("/api/device-sync/snapshot").json()["settings"]
+
+    shipped = {k: json.loads(shipped_settings()[k]) for k in ("manadj.waveformStyles", "manadj-filter-settings")}
+    assert settings() == {k: {"value": v, "updated_at": None} for k, v in shipped.items()}
 
     mine = {"version": 1, "full": {"styleId": "additive-rgb", "params": {"master": 0.5}}, "minimap": {"styleId": "additive-rgb", "params": {}}}
     db.add(AppSetting(key="manadj.waveformStyles", value=json.dumps(mine)))
+    db.add(AppSetting(key="manadj-filter-settings", value="not json"))
+    db.add(AppSetting(key="manadj-quantize", value="true"))  # not synced
     db.commit()
-    assert client.get("/api/device-sync/snapshot").json()["waveform_styles"] == mine
-
-    db.get(AppSetting, "manadj.waveformStyles").value = "not json"
-    db.commit()
-    assert client.get("/api/device-sync/snapshot").json()["waveform_styles"] == shipped
+    got = settings()
+    assert set(got) == {"manadj.waveformStyles", "manadj-filter-settings"}
+    assert got["manadj.waveformStyles"]["value"] == mine
+    assert got["manadj.waveformStyles"]["updated_at"] is not None
+    assert got["manadj-filter-settings"] == {"value": shipped["manadj-filter-settings"], "updated_at": None}
