@@ -139,6 +139,8 @@ data class DeckSnapshot(
     /** Cue slot whose pre-decoded audio is playing (-1 none). */
     val headSlot: Int,
     val appliedCommandId: Long, val bufferedFrames: Long,
+    /** Whole-track decode progress (source seconds held in memory); complete; playing from memory (exact jumps). */
+    val decodedSeconds: Double = 0.0, val fullyDecoded: Boolean = false, val fromMemory: Boolean = false,
 )
 data class EngineSnapshot(
     val outputFrames: Long, val outputSampleRate: Int, val outputChannels: Int,
@@ -149,7 +151,29 @@ data class EngineSnapshot(
     val starvedDeckFrames: Long, val outputXruns: Long,
     val outputError: Int, val acceptedCommandId: Long, val appliedCommandId: Long,
     val decks: Map<DeckId, DeckSnapshot>, val supportedCapabilities: Set<String>,
-)
+    /** Engine output frame at which the deck positions were sampled. */
+    val clockFrame: Long = 0,
+    /** Engine frame heard at CLOCK_MONOTONIC [presentedNanos] (System.nanoTime domain); null offline / before the first timestamp. */
+    val presentedFrame: Long? = null, val presentedNanos: Long? = null,
+) {
+    /**
+     * The deck position being heard at [nanoTime] (System.nanoTime), extrapolated from the output
+     * timestamp: render position minus output latency, advanced at the deck's speed. Use this for
+     * smooth playheads/waveforms instead of interpolating raw snapshots. Extrapolation is capped at
+     * 250 ms past the snapshot; without a timestamp it returns the render position.
+     */
+    fun audibleSeconds(deck: DeckId, nanoTime: Long = System.nanoTime()): Double {
+        val d = decks.getValue(deck)
+        val frame = presentedFrame ?: return d.sourceSeconds
+        val at = presentedNanos ?: return d.sourceSeconds
+        val heard = frame + (nanoTime - at).coerceIn(-250_000_000L, 250_000_000L) * outputSampleRate / 1e9
+        val speed = if (d.playing || d.previewing) (1 + d.pitchPercent / 100) * (1 + d.bendPercent / 100) else 0.0
+        val seconds = d.sourceSeconds + (heard - clockFrame) / outputSampleRate * speed
+        val loop = d.loop
+        return if (loop != null && seconds >= loop.end && d.sourceSeconds < loop.end) loop.start + (seconds - loop.end) % (loop.end - loop.start)
+        else seconds.coerceAtLeast(0.0)
+    }
+}
 
 /** Negotiated Oboe output; enum fields are Oboe ordinals rendered as names. */
 data class OutputInfo(
@@ -173,6 +197,10 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
             Thread({ Process.setThreadPriority(Process.THREAD_PRIORITY_AUDIO); task.run() }, "manadj-decode-${DeckId.entries[deck]}")
         }
     }
+    /** Whole-track decoders: fill native memory front-to-back so jumps are exact and gapless. */
+    private val trackExecutors: Array<ExecutorService> = Array(4) { deck ->
+        Executors.newSingleThreadExecutor { task -> Thread(task, "manadj-track-${DeckId.entries[deck]}") }
+    }
     private val loads = Array(4) { AtomicLong() }
     private val sources = arrayOfNulls<Source>(4) // Guarded by this.
     private val errors = AtomicReferenceArray<Pair<Long, String>?>(4)
@@ -186,9 +214,13 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
         const val HOT_CUES = 8
         val CAPABILITIES = setOf("play", "pause", "cue-gate", "hot-cue-gate", "hot-cue-set", "seek", "fader", "trim", "crossfade", "varispeed", "bend", "pfl", "cue-mix", "routing", "eq", "filter", "grid", "beat-jump", "loop", "quantize", "beat-fx")
         private const val PRIME_FRAMES = 2048
+        private const val MEMORY_RESERVE_BYTES = 768L shl 20
+        private const val HEAD_PRIORITY_FRAMES = 16384 // ~340 ms buffered before a head fill may interrupt the ring
         private const val HEAD_SLOTS = HOT_CUES + 2
+        /** Main cue first (CUE stabs), then the loop start, then hot cues. */
+        private val FILL_ORDER = listOf(MAIN_CUE, MAIN_CUE + 1) + (0 until HOT_CUES)
         private const val HEAD_FRAMES = 8192
-        private const val HEADER = 23
+        private const val HEADER = 27
         private const val DECK_FIELDS = 36 + HOT_CUES
         private enum class Op { PREPARE, PLAY, PAUSE, CUE_DOWN, CUE_UP, HOT_CUE_DOWN, HOT_CUE_UP, HOT_CUE_SET, HOT_CUE_CLEAR, SEEK, FADER, TRIM, CROSSFADE, PITCH, BEND, PFL, CUE_MIX, EQ, FILTER, SET_GRID, BEAT_JUMP, LOOP_TOGGLE, LOOP_RESIZE, LOOP_PRESET, QUANTIZE, CUE_SET_AT, HOT_CUE_SET_AT }
     }
@@ -214,6 +246,7 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
             runCatching { previous?.fd?.close() }
             decode(index, source)
         }
+        trackExecutors[index].execute { decodeWholeTrack(index, source) }
         return CommandReceipt(id, true)
     }
 
@@ -330,11 +363,13 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
                 previewSlot = data[p + 10].toInt().takeIf { current && it >= 0 },
                 cueSeconds = data[p + 11].takeIf { current && state == LoadState.READY },
                 hotCues = List(HOT_CUES) { h -> data[p + 36 + h].takeIf { current && it >= 0 } },
-                filling = current && state == LoadState.READY && data[p + 4] == 0.0 && data[p + 18] < 0,
+                filling = current && state == LoadState.READY && data[p + 4] == 0.0 && data[p + 18] < 0 && data[p + 34] == 0.0 && data[p + 35] == 0.0,
                 readyHeads = if (current) data[p + 19].toInt() else 0,
                 headSlot = if (current) data[p + 18].toInt() else -1,
                 atEnd = current && data[p + 5] != 0.0,
                 appliedCommandId = data[p + 12].toLong(), bufferedFrames = data[p + 13].toLong(),
+                decodedSeconds = if (current) data[p + 32] else 0.0, fullyDecoded = current && data[p + 33] != 0.0,
+                fromMemory = current && data[p + 34] != 0.0,
             )
         }
         return EngineSnapshot(
@@ -344,6 +379,8 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
             starvedDeckFrames = data[4].toLong(), outputXruns = data[5].toLong(), outputError = data[6].toInt(),
             acceptedCommandId = data[7].toLong(), appliedCommandId = data[8].toLong(),
             decks = decks, supportedCapabilities = CAPABILITIES,
+            clockFrame = data[23].toLong(),
+            presentedFrame = data[24].takeIf { it >= 0 }?.toLong(), presentedNanos = data[25].takeIf { it >= 0 }?.toLong(),
             beatFx = BeatFxState(
                 effect = BeatFxEffect.entries.getOrNull(data[16].toInt()), target = BeatFxTarget.entries[data[17].toInt().coerceIn(0, 4)],
                 on = data[18] != 0.0, depth = data[19], beats = data[20],
@@ -391,7 +428,7 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
 
         /** Fills at most one stale slot; true if it did work. */
         fun fillOne(targets: DoubleArray): Boolean {
-            for (slot in 0 until HEAD_SLOTS) {
+            for (slot in FILL_ORDER) {
                 val at = targets[4 + slot]
                 if (at < 0 || at == filled[slot]) continue
                 if (!nativeHeadBegin(handle, deck, slot)) continue // Being played; retry later.
@@ -421,8 +458,54 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
         }
     }
 
+    /**
+     * Decodes the whole source into native memory (int16, ~10 MB per stereo minute at 44.1 kHz)
+     * when the device has room, so every relocation inside it is exact and needs no refill.
+     * Until a region is decoded the streaming ring serves it.
+     */
+    private fun decodeWholeTrack(deck: Int, source: Source) {
+        val state = DoubleArray(5 + HEAD_SLOTS)
+        try {
+            while (current(deck, source)) { // Prepare(load) must apply first (older tracks are then unread).
+                nativeTransport(handle, deck, state)
+                val applied = state[0].toLong()
+                if (applied == source.load) break
+                if (applied > source.load) return
+                Thread.sleep(2)
+            }
+            ParcelFileDescriptor.dup(source.fd.fileDescriptor).use { fd ->
+                PcmReader.open(fd.fileDescriptor).use { reader ->
+                    val duration = reader.durationSeconds ?: return
+                    var started = false
+                    while (current(deck, source)) {
+                        val n = reader.read()
+                        if (n < 0) break
+                        if (n == 0) continue
+                        if (!started) {
+                            val capacity = ((duration + 2) * reader.sampleRate).toLong()
+                            if (!memoryAllows(capacity * 4)) return
+                            if (!nativeTrackBegin(handle, deck, source.load, capacity, reader.sampleRate, reader.chunkStartSeconds)) return
+                            started = true
+                        }
+                        if (nativeTrackWrite(handle, deck, source.load, reader.samples, n) < n) return // Superseded or full.
+                    }
+                    if (started && current(deck, source)) nativeTrackFinish(handle, deck, source.load)
+                }
+            }
+        } catch (_: InterruptedException) {
+        } catch (_: Exception) { /* The streaming path still plays the track. */ }
+    }
+
+    /** Keeps [MEMORY_RESERVE_BYTES] of system memory available after the allocation. */
+    private fun memoryAllows(bytes: Long): Boolean {
+        val availableKb = runCatching {
+            java.io.File("/proc/meminfo").readLines().first { it.startsWith("MemAvailable:") }.split(Regex("\\s+"))[1].toLong()
+        }.getOrNull() ?: return false
+        return availableKb * 1024 - bytes > MEMORY_RESERVE_BYTES
+    }
+
     private fun pump(deck: Int, source: Source, reader: PcmReader, heads: HeadFiller) {
-        val transportState = DoubleArray(4 + HEAD_SLOTS)
+        val transportState = DoubleArray(5 + HEAD_SLOTS) // ..., heads, buffered frames
         var following = -1L      // Transport the reader is positioned for.
         var claimed = false      // Ring reset + rate/start recorded for `following`.
         var published = false
@@ -479,13 +562,18 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
                 published = true; everPublished = true
             }
             if (accepted == 0 && !heads.fillOne(transportState)) Thread.sleep(10) // Ring full (~1.3 s ahead).
+            // Cue heads take priority over topping up the ring once it holds a safe margin: rapid
+            // CUE / hot-cue stabs relocate (and restart the ring fill) faster than it can fill up,
+            // so waiting for a full ring would leave every stab on the slow refill path.
+            else if (published && transportState[4 + HEAD_SLOTS] >= HEAD_PRIORITY_FRAMES) heads.fillOne(transportState)
         }
     }
 
     override fun close() {
         synchronized(this) { if (closed) return; closed = true }
         executors.forEach { it.shutdownNow() }
-        val stopped = executors.all { it.awaitTermination(3, TimeUnit.SECONDS) }
+        trackExecutors.forEach { it.shutdownNow() }
+        val stopped = executors.all { it.awaitTermination(3, TimeUnit.SECONDS) } && trackExecutors.all { it.awaitTermination(3, TimeUnit.SECONDS) }
         synchronized(this) {
             sources.forEach { runCatching { it?.fd?.close() } }
             // A worker stuck in a provider read keeps native memory alive (leak, not use-after-free).
@@ -514,6 +602,9 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
     private external fun nativeHeadBegin(handle: Long, deck: Int, slot: Int): Boolean
     private external fun nativeHeadWrite(handle: Long, deck: Int, slot: Int, at: Int, pcm: FloatArray, frames: Int): Int
     private external fun nativeHeadCommit(handle: Long, deck: Int, slot: Int, load: Long, seconds: Double, frames: Int)
+    private external fun nativeTrackBegin(handle: Long, deck: Int, load: Long, capacity: Long, rate: Int, start: Double): Boolean
+    private external fun nativeTrackWrite(handle: Long, deck: Int, load: Long, pcm: FloatArray, frames: Int): Int
+    private external fun nativeTrackFinish(handle: Long, deck: Int, load: Long)
     private external fun nativePublish(handle: Long, deck: Int, load: Long, transport: Long, eof: Boolean): Boolean
     private external fun nativeFail(handle: Long, deck: Int, load: Long)
     private external fun nativeOutputInfo(handle: Long): DoubleArray

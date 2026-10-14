@@ -6,7 +6,7 @@
 #include <vector>
 
 namespace {
-constexpr int kHeader = 23;
+constexpr int kHeader = 27;
 constexpr int kDeckFields = 36 + manadj::kHotCues;
 constexpr int kSnapshotSize = kHeader + manadj::kDeckCount * kDeckFields;
 
@@ -32,6 +32,8 @@ struct Output final : oboe::AudioStreamDataCallback, oboe::AudioStreamErrorCallb
     std::atomic<int> wantChannels{2};
     std::atomic<int> wantDevice{0};
     std::atomic<int> channels{2};
+    // Engine output frame at the open stream's frame 0 (set before start; the callback is not running).
+    std::atomic<int64_t> streamBase{0};
 
     int openLocked() {
         oboe::AudioStreamBuilder builder;
@@ -50,6 +52,7 @@ struct Output final : oboe::AudioStreamDataCallback, oboe::AudioStreamErrorCallb
         if (result != oboe::Result::OK) { lastError.store(static_cast<int>(result)); return static_cast<int>(result); }
         engine.setOutputRate(opened->getSampleRate());
         channels.store(opened->getChannelCount());
+        streamBase.store(static_cast<int64_t>(engine.outputFrames()));
         const auto started = opened->requestStart();
         if (started != oboe::Result::OK) {
             opened->close();
@@ -176,7 +179,7 @@ Java_dev_manadj_audio_AudioEngine_nativeSubmitBeatFx(JNIEnv*, jobject, jlong han
 
 extern "C" JNIEXPORT void JNICALL
 Java_dev_manadj_audio_AudioEngine_nativeTransport(JNIEnv* env, jobject, jlong handle, jint deck, jdoubleArray out) {
-    if (deck < 0 || deck >= manadj::kDeckCount || env->GetArrayLength(out) < 4 + manadj::kHeadSlots) return;
+    if (deck < 0 || deck >= manadj::kDeckCount || env->GetArrayLength(out) < 5 + manadj::kHeadSlots) return;
     const auto& d = output(handle)->engine.deck(deck);
     // Transport is read before target/offset (release-ordered by the callback).
     const auto load = d.loadId.load();
@@ -187,6 +190,9 @@ Java_dev_manadj_audio_AudioEngine_nativeTransport(JNIEnv* env, jobject, jlong ha
     values[4 + manadj::kMainCueSlot] = d.cue.load();
     values[4 + manadj::kLoopSlot] = d.loopActive.load() ? d.loopStart.load() : -1;
     env->SetDoubleArrayRegion(out, 0, 4 + manadj::kHeadSlots, values);
+    // Frames buffered ahead of the playhead (meaningful once the current transport is published).
+    const double buffered = static_cast<double>(d.write.load() - d.read.load());
+    env->SetDoubleArrayRegion(out, 4 + manadj::kHeadSlots, 1, &buffered);
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
@@ -237,6 +243,36 @@ Java_dev_manadj_audio_AudioEngine_nativeHeadCommit(JNIEnv*, jobject, jlong handl
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
+Java_dev_manadj_audio_AudioEngine_nativeTrackBegin(JNIEnv*, jobject, jlong handle, jint deck, jlong load, jlong capacity,
+                                                      jint rate, jdouble start) {
+    if (capacity <= 0) return false;
+    return output(handle)->engine.trackBegin(deck, static_cast<uint64_t>(load), static_cast<uint64_t>(capacity), rate, start);
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_dev_manadj_audio_AudioEngine_nativeTrackWrite(JNIEnv* env, jobject, jlong handle, jint deck, jlong load,
+                                                      jfloatArray samples, jint frames) {
+    constexpr int kChunk = 2048;
+    if (frames < 1 || static_cast<jlong>(frames) * 2 > env->GetArrayLength(samples)) return -1;
+    float chunk[kChunk * 2];
+    int total = 0;
+    while (total < frames) {
+        const int n = std::min(kChunk, frames - total);
+        env->GetFloatArrayRegion(samples, total * 2, n * 2, chunk);
+        const int written = output(handle)->engine.trackWrite(deck, static_cast<uint64_t>(load), chunk, n);
+        if (written < 0) return total ? total : -1;
+        total += written;
+        if (written < n) break;
+    }
+    return total;
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_dev_manadj_audio_AudioEngine_nativeTrackFinish(JNIEnv*, jobject, jlong handle, jint deck, jlong load) {
+    output(handle)->engine.trackFinish(deck, static_cast<uint64_t>(load));
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
 Java_dev_manadj_audio_AudioEngine_nativePublish(JNIEnv*, jobject, jlong handle, jint deck, jlong load,
                                                    jlong transport, jboolean eof) {
     return output(handle)->engine.publish(deck, static_cast<uint64_t>(load), static_cast<uint64_t>(transport), eof);
@@ -252,9 +288,19 @@ Java_dev_manadj_audio_AudioEngine_nativeSnapshot(JNIEnv* env, jobject, jlong han
     auto* sink = output(handle);
     const auto& e = sink->engine;
     bool open;
+    // Output clock: the engine frame heard at CLOCK_MONOTONIC `presentedNanos` (Oboe timestamp,
+    // mapped from stream frames to engine frames via framesWritten). -1 when unavailable.
+    double presentedFrame = -1, presentedNanos = -1;
     {
         std::lock_guard<std::mutex> lock(sink->streamMutex);
         open = sink->stream && sink->stream->getState() == oboe::StreamState::Started;
+        if (open) {
+            const auto ts = sink->stream->getTimestamp(CLOCK_MONOTONIC);
+            if (ts && ts.value().position > 0) {
+                presentedFrame = static_cast<double>(sink->streamBase.load() + ts.value().position);
+                presentedNanos = static_cast<double>(ts.value().timestamp);
+            }
+        }
     }
     double data[kSnapshotSize] = {
         static_cast<double>(e.outputFrames()), static_cast<double>(e.outputRate()), 2, 1,
@@ -265,7 +311,12 @@ Java_dev_manadj_audio_AudioEngine_nativeSnapshot(JNIEnv* env, jobject, jlong han
         static_cast<double>(sink->channels.load()), e.cueMix(), e.quantize() ? 1.0 : 0.0,
         static_cast<double>(e.fxEffect()), static_cast<double>(e.fxTarget()), e.fxOn() ? 1.0 : 0.0,
         e.fxDepth(), e.fxBeats(), static_cast<double>(e.fxHeld()), static_cast<double>(e.fxAudible()),
+        0, presentedFrame, presentedNanos, 0,
     };
+    // Deck positions are sampled at engine frame data[23]; retry if a callback ran mid-read.
+    for (int attempt = 0; attempt < 4; ++attempt) {
+    const auto clockFrame = e.outputFrames();
+    data[23] = static_cast<double>(clockFrame);
     for (int i = 0; i < manadj::kDeckCount; ++i) {
         const auto& d = e.deck(i);
         const int n = kHeader + i * kDeckFields;
@@ -305,7 +356,15 @@ Java_dev_manadj_audio_AudioEngine_nativeSnapshot(JNIEnv* env, jobject, jlong han
         data[n + 29] = d.loopEnd.load();
         data[n + 30] = d.loopBeats.load();
         data[n + 31] = d.pendingLoopBeats.load();
+        const bool tracked = d.track.load.load() == d.loadId.load() && d.track.load.load() != 0;
+        data[n + 32] = tracked && d.track.sampleRate.load() > 0 ? d.track.startSeconds.load() + d.track.frames.load() / static_cast<double>(d.track.sampleRate.load()) : 0;
+        data[n + 33] = tracked && d.track.complete.load() ? 1 : 0;
+        data[n + 34] = d.inTrack.load() ? 1 : 0;
+        data[n + 35] = e.trackCovers(d, d.position.load(), 0) ? 1 : 0;
+        if (d.trackEnd.load()) data[n + 5] = 1;
         for (int h = 0; h < manadj::kHotCues; ++h) data[n + 36 + h] = d.hotcues[h].load();
+    }
+    if (e.outputFrames() == clockFrame) break;
     }
     auto result = env->NewDoubleArray(kSnapshotSize);
     if (result) env->SetDoubleArrayRegion(result, 0, kSnapshotSize, data);

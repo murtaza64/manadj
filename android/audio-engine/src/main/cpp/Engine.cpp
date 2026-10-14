@@ -7,6 +7,17 @@ constexpr auto kAcquire = std::memory_order_acquire;
 constexpr auto kRelease = std::memory_order_release;
 constexpr auto kRelaxed = std::memory_order_relaxed;
 
+// Nearest gridline (desktop snapToNearestBeat on a constant grid; ties toward the earlier beat).
+// Gridless: exact.
+double snapToBeat(const Deck& d, double t) {
+    const double bpm = d.bpm.load(std::memory_order_relaxed);
+    if (bpm <= 0) return t;
+    const double beat = 60 / bpm, anchor = d.gridAnchor.load(std::memory_order_relaxed);
+    const double k = (t - anchor) / beat, lo = std::floor(k);
+    const double snapped = anchor + (k - lo <= .5 ? lo : lo + 1) * beat;
+    return snapped < 0 ? snapped + beat : snapped;
+}
+
 bool ready(const Deck& d) {
     const auto st = d.status.load(kAcquire);
     return (st & 3) == kReady && (st >> 2) == d.loadId.load(kRelaxed);
@@ -166,6 +177,57 @@ void Engine::headAbort(int index, int slot) {
     decks_[index].heads[slot].state.store(kHeadEmpty, kRelease);
 }
 
+bool Engine::trackBegin(int index, uint64_t load, uint64_t capacity, int sampleRate, double startSeconds) {
+    if (index < 0 || index >= kDeckCount || capacity == 0 || sampleRate <= 0) return false;
+    auto& d = decks_[index];
+    auto& t = d.track;
+    if (d.loadId.load(kAcquire) != load) return false; // Prepare(load) not applied, or superseded.
+    // No callback reads an untagged/older track once Prepare(load) applied: safe to reallocate.
+    t.load.store(0, kRelease);
+    t.frames.store(0, kRelease);
+    t.complete.store(false, kRelease);
+    if (!t.pcm || t.capacity < capacity || t.capacity > capacity * 2) {
+        t.pcm.reset();
+        t.capacity = 0;
+        t.pcm.reset(new (std::nothrow) int16_t[capacity * 2]);
+        if (!t.pcm) return false;
+        t.capacity = capacity;
+    }
+    t.sampleRate.store(sampleRate, kRelease);
+    t.startSeconds.store(startSeconds, kRelease);
+    t.load.store(load, kRelease);
+    return d.loadId.load(kAcquire) == load;
+}
+
+int Engine::trackWrite(int index, uint64_t load, const float* samples, int frames) {
+    if (index < 0 || index >= kDeckCount || frames <= 0 || !samples) return -1;
+    auto& d = decks_[index];
+    auto& t = d.track;
+    if (t.load.load(kAcquire) != load || d.loadId.load(kAcquire) != load) return -1;
+    const auto at = t.frames.load(kRelaxed);
+    const int n = static_cast<int>(std::min<uint64_t>(frames, t.capacity - at));
+    int16_t* out = t.pcm.get() + at * 2;
+    for (int i = 0; i < n * 2; ++i)
+        out[i] = static_cast<int16_t>(std::lrint(std::clamp(samples[i], -1.f, 32767.f / 32768) * 32768));
+    t.frames.store(at + n, kRelease);
+    return n;
+}
+
+void Engine::trackFinish(int index, uint64_t load) {
+    if (index < 0 || index >= kDeckCount) return;
+    auto& t = decks_[index].track;
+    if (t.load.load(kAcquire) == load) t.complete.store(true, kRelease);
+}
+
+bool Engine::trackCovers(const Deck& d, double seconds, double spanFrames) const noexcept {
+    const auto& t = d.track;
+    if (t.load.load(kAcquire) != d.loadId.load(kRelaxed) || t.load.load(kRelaxed) == 0) return false;
+    const double f = (seconds - t.startSeconds.load(kRelaxed)) * t.sampleRate.load(kRelaxed);
+    if (f < 0) return false;
+    const auto avail = static_cast<double>(t.frames.load(kAcquire));
+    return f + spanFrames + 2 < avail || (t.complete.load(kAcquire) && f + 1 < avail);
+}
+
 void Engine::releaseHead(Deck& d) noexcept {
     const int slot = d.headSlot.load(kRelaxed);
     if (slot >= 0) d.heads[slot].state.fetch_and(~static_cast<uint32_t>(kHeadBusy), kRelease);
@@ -178,6 +240,22 @@ void Engine::captureTail(Deck& d) noexcept {
     const int slot = d.headSlot.load(kRelaxed);
     const auto transport = d.transport.load(kRelaxed);
     int n = 0;
+    if (d.inTrack.load(kRelaxed) && trackCovers(d, d.position.load(kRelaxed), 0)) {
+        const auto& t = d.track;
+        const int rate = t.sampleRate.load(kRelaxed);
+        const double frame = (d.position.load(kRelaxed) - t.startSeconds.load(kRelaxed)) * rate;
+        const auto from = static_cast<uint64_t>(frame);
+        n = static_cast<int>(std::min<uint64_t>(kTailFrames, t.frames.load(kAcquire) - from));
+        const int16_t* pcm = t.pcm.get() + from * 2;
+        for (int i = 0; i < n * 2; ++i) d.tail[i] = pcm[i] * (1.f / 32768);
+        if (n < 2) return;
+        d.tailAvail = n;
+        d.tailPos = frame - static_cast<double>(from);
+        d.tailRatio = (rate / static_cast<double>(outputRate_.load(kRelaxed))) * (1 + d.pitch.load(kRelaxed) / 100.) * (1 + d.bend.load(kRelaxed) / 100.);
+        d.tailGain = d.envelope;
+        d.tailLeft = kFadeFrames;
+        return;
+    }
     if (slot >= 0) {
         const auto& h = d.heads[slot];
         const int from = static_cast<int>(d.headPos);
@@ -205,6 +283,19 @@ void Engine::relocate(Deck& d, double seconds, int slot, double overshootFrames)
     captureTail(d);
     releaseHead(d);
     const auto t = std::max(0.0, seconds);
+    d.trackEnd.store(false, kRelaxed);
+    if (trackCovers(d, t, 0)) {
+        // In-memory track: the jump is exact and immediate (overshoot carried, no refill). The
+        // ring still follows the new transport in case playback later leaves the decoded region.
+        d.ringOffset.store(0, kRelaxed);
+        d.headPos = 0;
+        d.target.store(t, kRelaxed);
+        d.position.store(t + overshootFrames / d.track.sampleRate.load(kRelaxed), kRelaxed);
+        d.fractional = 0;
+        d.envelope = 0;
+        d.transport.store(d.transport.load(kRelaxed) + 1, kRelease);
+        return;
+    }
     int offset = 0;
     if (slot >= 0 && slot < kHeadSlots) {
         auto& h = d.heads[slot];
@@ -251,6 +342,8 @@ void Engine::apply(const Command& c) noexcept {
             d.loopActive.store(false);
             d.bpm.store(0);
             d.tailLeft = 0;
+            d.inTrack.store(false);
+            d.trackEnd.store(false);
             relocate(d, 0);
             break;
         case Op::Play:
@@ -262,7 +355,12 @@ void Engine::apply(const Command& c) noexcept {
             const double cue = d.cue.load();
             if (d.playing.load()) { stop(d); d.loopActive.store(false); relocate(d, cue, kMainCueSlot); }
             else if (std::abs(position - cue) < kAtCueEpsilon) { d.preview.store(true); d.previewSlot.store(kMainCueSlot); }
-            else d.cue.store(position);
+            else {
+                // Placement: Quantize snaps the cue, and the parked playhead moves with it.
+                const double at = quantize_.load() ? snapToBeat(d, position) : position;
+                d.cue.store(at);
+                if (at != position) relocate(d, at, kMainCueSlot);
+            }
             break;
         }
         case Op::CueUp:
@@ -274,7 +372,10 @@ void Engine::apply(const Command& c) noexcept {
             const double at = d.hotcues[c.slot].load();
             if (!isReady || at < 0) break;
             d.loopActive.store(false);
-            relocate(d, at, c.slot);
+            // Playing + Quantize: phase-preserving whole-beat jump (desktop phasePreservingJumpTarget);
+            // paused triggers land exactly.
+            const bool snap = quantize_.load() && d.playing.load() && d.bpm.load() > 0;
+            relocate(d, snap ? snapToBeat(d, at) + (position - snapToBeat(d, position)) : at, snap ? -1 : c.slot);
             if (!d.playing.load()) { d.preview.store(true); d.previewSlot.store(c.slot); }
             break;
         }
@@ -283,7 +384,7 @@ void Engine::apply(const Command& c) noexcept {
             if (d.playing.load()) { d.preview.store(false); d.previewSlot.store(-1); }
             else { stop(d); relocate(d, d.hotcues[c.slot].load(), c.slot); }
             break;
-        case Op::HotCueSet: if (isReady) d.hotcues[c.slot].store(position); break;
+        case Op::HotCueSet: if (isReady) d.hotcues[c.slot].store(quantize_.load() ? snapToBeat(d, position) : position); break;
         case Op::HotCueClear: d.hotcues[c.slot].store(-1); break;
         case Op::Seek: if (isReady) { d.loopActive.store(false); relocate(d, c.value); } break;
         case Op::SetGrid:
@@ -498,6 +599,16 @@ int Engine::renderSegment(Deck& d, float* strip, int frames, bool& active) noexc
             d.positionTransport = transport;
         }
         if (!(d.playing.load(kRelaxed) || d.preview.load(kRelaxed))) { d.envelope = 0; return -1; }
+        {
+            const double span = frames * 8.0 * d.track.sampleRate.load(kRelaxed) / outRate; // max ratio margin
+            if (trackCovers(d, d.position.load(kRelaxed), span)) return renderTrack(d, strip, frames, active);
+            if (d.inTrack.load(kRelaxed)) {
+                // Left the decoded region (only while the track is still decoding): resync the ring.
+                relocate(d, d.position.load(kRelaxed));
+                d.inTrack.store(false, kRelaxed);
+                return -1;
+            }
+        }
         int slot = d.headSlot.load(kRelaxed);
         if (slot < 0 && !ringLive) return -1; // Refill in progress: silent, clock held.
         const auto sampleRate = d.sampleRate.load(kAcquire);
@@ -567,6 +678,49 @@ int Engine::renderSegment(Deck& d, float* strip, int frames, bool& active) noexc
         else { d.fractional = fractional; d.read.store(read, kRelease); }
         d.position.store(d.position.load(kRelaxed) + consumedTotal / static_cast<double>(sampleRate), kRelease);
     }
+    return -1;
+}
+
+// Renders from the in-memory track: like renderSegment, without ring/head bookkeeping.
+int Engine::renderTrack(Deck& d, float* strip, int frames, bool& active) noexcept {
+    const auto& t = d.track;
+    const int rate = t.sampleRate.load(kRelaxed);
+    const double ratio = (rate / static_cast<double>(outputRate_.load(kRelaxed))) *
+                         (1 + d.pitch.load(kRelaxed) / 100.) * (1 + d.bend.load(kRelaxed) / 100.);
+    if (!d.inTrack.load(kRelaxed)) { releaseHead(d); d.inTrack.store(true, kRelaxed); }
+    d.positionTransport = d.transport.load(kRelaxed); // the ring's claimed start must not move us
+    if (d.envelope == 0 && d.tailLeft == 0) { d.gain = d.targetGain; d.cueGain = d.targetCueGain; d.xf = d.targetXf; }
+    const double start = t.startSeconds.load(kRelaxed);
+    const auto avail = t.frames.load(kAcquire);
+    const bool complete = t.complete.load(kAcquire);
+    const double startPosition = d.position.load(kRelaxed);
+    double frame = (startPosition - start) * rate;
+    const bool looping = d.loopActive.load(kRelaxed) && startPosition < d.loopEnd.load(kRelaxed);
+    const double loopEndFrame = looping ? (d.loopEnd.load(kRelaxed) - start) * rate : 0;
+    const int16_t* pcm = t.pcm.get();
+    constexpr float kScale = 1.f / 32768;
+    for (int i = 0; i < frames; ++i) {
+        const auto k = static_cast<uint64_t>(frame);
+        if (k + 1 >= avail) {
+            if (complete) { d.playing.store(false); d.preview.store(false); d.previewSlot.store(-1); d.trackEnd.store(true); }
+            else starvedFrames_.fetch_add(frames - i, kRelaxed);
+            break;
+        }
+        const int16_t* a = pcm + k * 2;
+        const float f = static_cast<float>(frame - static_cast<double>(k));
+        d.envelope = std::min(1.f, d.envelope + 1.f / kFadeFrames);
+        strip[i * 2] += (a[0] + (a[2] - a[0]) * f) * kScale * d.envelope;
+        strip[i * 2 + 1] += (a[1] + (a[3] - a[1]) * f) * kScale * d.envelope;
+        active = true;
+        frame += ratio;
+        if (looping && frame >= loopEndFrame) {
+            d.position.store(start + frame / rate, kRelaxed); // tail continues past the end
+            renderTail(d, strip, i + 1);
+            relocate(d, d.loopStart.load(kRelaxed), kLoopSlot, frame - loopEndFrame);
+            return i + 1;
+        }
+    }
+    d.position.store(start + frame / rate, kRelease);
     return -1;
 }
 

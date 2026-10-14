@@ -59,6 +59,22 @@ struct Head {
     std::atomic<int> frames{0};
 };
 
+/*
+ * The whole decoded track (int16 stereo), appended front-to-back by a worker after the
+ * deck's Prepare has applied. The callback reads it only while `load` equals the deck's
+ * current load, and only below `frames`; once Prepare(load) has applied no callback reads
+ * an older tag, so the worker may free and reallocate before tagging the new load.
+ */
+struct Track {
+    std::unique_ptr<int16_t[]> pcm; // worker-owned allocation
+    uint64_t capacity = 0;          // frames (worker-owned)
+    std::atomic<uint64_t> load{0};
+    std::atomic<uint64_t> frames{0};
+    std::atomic<int> sampleRate{0};
+    std::atomic<double> startSeconds{0}; // source time of frame 0
+    std::atomic<bool> complete{false};
+};
+
 enum class Op : int { Prepare, Play, Pause, CueDown, CueUp, HotCueDown, HotCueUp,
                        HotCueSet, HotCueClear, Seek, Fader, Trim, Crossfade, Pitch, Bend, Pfl, CueMix, Eq, Filter,
                        SetGrid, BeatJump, LoopToggle, LoopResize, LoopPreset, Quantize, CueSetAt, HotCueSetAt, BeatFx };
@@ -130,6 +146,9 @@ struct Deck {
     float dry = 1, dryTarget = 1;
     bool stripWarm = false;
     std::array<Head, kHeadSlots> heads{};
+    Track track;
+    std::atomic<bool> inTrack{false};   // callback renders from the in-memory track (snapshot)
+    std::atomic<bool> trackEnd{false};  // reached the end of a complete in-memory track
     // Head being played (-1 none) and the ring offset (source frames) the worker must start at.
     std::atomic<int> headSlot{-1};
     std::atomic<int> ringOffset{0};
@@ -182,6 +201,10 @@ public:
     int headWrite(int deck, int slot, int offsetFrames, const float* samples, int frames);
     void headCommit(int deck, int slot, uint64_t load, double seconds, int frames);
     void headAbort(int deck, int slot);
+    // Whole-track fill (worker, after Prepare(load) applied). False/-1 once superseded or full.
+    bool trackBegin(int deck, uint64_t load, uint64_t capacityFrames, int sampleRate, double startSeconds);
+    int trackWrite(int deck, uint64_t load, const float* samples, int frames);
+    void trackFinish(int deck, uint64_t load);
 
     // Renders `frames` interleaved frames of `channels` channels through the current routing.
     void render(float* output, int frames, int channels = 2) noexcept;
@@ -207,6 +230,8 @@ public:
     int fxHeld() const { return fxHeld_.load(); }
     int fxAudible() const { return fxAudible_.load(); }
     const fx::Insert& insert(int target) const { return *fx_[target]; }
+    // Whether the in-memory track holds [seconds, seconds + spanFrames] (any thread).
+    bool trackCovers(const Deck& d, double seconds, double spanFrames) const noexcept;
 
 private:
     std::array<Deck, kDeckCount> decks_{};
@@ -232,6 +257,8 @@ private:
     bool renderSource(Deck& d, float* strip, int frames) noexcept;
     bool renderTail(Deck& d, float* strip, int frames) noexcept;
     int renderSegment(Deck& d, float* strip, int frames, bool& active) noexcept;
+    int renderTrack(Deck& d, float* strip, int frames, bool& active) noexcept;
+
     void designEq(Deck& d, double rate) noexcept;
     void resetStrip(Deck& d) noexcept;
     static constexpr int kSweepBlock = 32;

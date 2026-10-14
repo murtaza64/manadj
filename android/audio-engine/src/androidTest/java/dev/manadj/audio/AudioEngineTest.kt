@@ -273,7 +273,7 @@ class AudioEngineTest {
                 engine.submit(AudioCommand.Play(DeckId.A)); engine.renderOfflineForTest(2048)
                 engine.submit(AudioCommand.CueDown(DeckId.A)) // playing: back to main cue, paused
                 engine.renderOfflineForTest(64)
-                assertEquals(AudioEngine.MAIN_CUE, engine.deck(DeckId.A).headSlot)
+                engine.deck(DeckId.A).let { assertTrue("$it", it.headSlot == AudioEngine.MAIN_CUE || it.fromMemory) }
                 engine.submit(AudioCommand.CueDown(DeckId.A)) // at cue: preview from the cue head instantly
                 val preview = engine.renderOfflineForTest(512)
                 var e = 0f; for (i in 256 until 512) e += preview[i * 2] * preview[i * 2]
@@ -381,6 +381,67 @@ class AudioEngineTest {
                 android.util.Log.i("manadj-bench", "4 decks + $effect on 5 inserts: %.1f us per 96-frame render (budget 2000 us)".format(perCallbackUs))
                 assertTrue("render too slow: $perCallbackUs us", perCallbackUs < 1000)
             }
+        }
+    }
+
+    @Test fun wholeTrackInMemoryMakesBeatJumpsExactAndKeepsDecksInPhase() {
+        val tone = m4a("engine-mem.m4a", 440.0, 30)
+        AudioEngine(offline = true).use { engine ->
+            for (deck in listOf(DeckId.A, DeckId.B)) {
+                engine.load(deck, "mem-$deck", tone)
+                engine.submit(AudioCommand.SetGrid(deck, 120.0, 0.0))
+            }
+            engine.settled(DeckId.A, DeckId.B)
+            engine.until("fully decoded") { listOf(DeckId.A, DeckId.B).all { deck(it).fullyDecoded } }
+            assertTrue(engine.deck(DeckId.A).decodedSeconds > 29.0)
+            for (deck in listOf(DeckId.A, DeckId.B)) engine.submit(AudioCommand.Seek(deck, 20.0))
+            engine.renderOfflineForTest(16)
+            assertEquals(20.0, engine.deck(DeckId.A).sourceSeconds, 0.0) // no refill: exact and immediate
+            assertFalse(engine.deck(DeckId.A).filling)
+            for (deck in listOf(DeckId.A, DeckId.B)) engine.submit(AudioCommand.Play(deck))
+            engine.renderOfflineForTest(1024)
+            assertTrue(engine.deck(DeckId.A).fromMemory)
+            var expected = 0.0
+            for (beats in listOf(1.0, -4.0, 16.0, -16.0, .25, 4.0, -1.0)) {
+                engine.submit(AudioCommand.BeatJump(DeckId.A, beats)); expected += beats
+                var quiet = 0
+                repeat(20) { engine.renderOfflineForTest(96).let { pcm -> for (i in 0 until 96) if (kotlin.math.abs(pcm[i * 2]) + kotlin.math.abs(pcm[i * 2 + 1]) < 1e-6f) quiet++ } }
+                val s = engine.snapshot()
+                val offset = (s.decks.getValue(DeckId.A).sourceSeconds - s.decks.getValue(DeckId.B).sourceSeconds) / .5
+                assertEquals("phase after $beats", expected, offset, 1e-9)
+                assertTrue("silent frames after jump $beats: $quiet", quiet < 4)
+            }
+            assertEquals(0L, engine.snapshot().starvedDeckFrames)
+        }
+    }
+
+    @Test fun outputTimestampGivesASmoothAudiblePosition() {
+        val media = wav("engine-clock.wav", .25, seconds = 10)
+        AudioEngine().use { engine ->
+            engine.load(DeckId.A, "clock", media)
+            for (attempt in 0 until 300) { if (engine.deck(DeckId.A).let { it.loadState == LoadState.READY && !it.filling }) break; Thread.sleep(10) }
+            engine.submit(AudioCommand.SetFader(DeckId.A, 0.0)) // Silent on the test host.
+            engine.submit(AudioCommand.Play(DeckId.A))
+            Thread.sleep(500)
+            val s = engine.snapshot()
+            assertNotNull(s.presentedFrame); assertNotNull(s.presentedNanos)
+            val now = System.nanoTime()
+            val audible = s.audibleSeconds(DeckId.A, now)
+            val lag = s.decks.getValue(DeckId.A).sourceSeconds - audible
+            android.util.Log.i("manadj-bench", "clock: render ${s.decks.getValue(DeckId.A).sourceSeconds} audible $audible lag ${lag * 1000} ms")
+            assertTrue("audible lag $lag s", lag > -0.01 && lag < 0.3)
+            // Monotonic across snapshots.
+            // Monotonic across snapshots (emulator timestamps are coarse: 20 ms bursts).
+            var last = audible
+            var worst = 0.0
+            repeat(40) {
+                Thread.sleep(7)
+                val next = engine.snapshot().audibleSeconds(DeckId.A)
+                worst = maxOf(worst, last - next)
+                last = next
+            }
+            android.util.Log.i("manadj-bench", "clock: worst backward step ${worst * 1000} ms over 40 snapshots")
+            assertTrue("went backwards ${worst * 1000} ms", worst < 0.025)
         }
     }
 

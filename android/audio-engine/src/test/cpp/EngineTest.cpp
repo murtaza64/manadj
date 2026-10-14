@@ -57,6 +57,14 @@ void loadPcm(Engine& e, int deck, uint64_t load, const std::vector<float>& pcm) 
     CHECK(e.publish(deck, load, transport, true));
 }
 
+// Emulates the full-decode worker: the whole track in memory.
+void fillTrack(Engine& e, int deck, uint64_t load, const std::vector<float>& pcm) {
+    const int frames = static_cast<int>(pcm.size() / 2);
+    CHECK(e.trackBegin(deck, load, frames, 48000, 0));
+    for (int at = 0; at < frames; at += 4096) CHECK(e.trackWrite(deck, load, pcm.data() + at * 2, std::min(4096, frames - at)) > 0);
+    e.trackFinish(deck, load);
+}
+
 // Renders `frames` and returns the left channel.
 std::vector<float> capture(Engine& e, int frames) {
     std::vector<float> left(frames);
@@ -483,6 +491,102 @@ int main() {
         CHECK(!e.deck(0).loopActive.load());
         CHECK(e.deck(0).pendingLoopBeats.load() == 8);
     }
+    { // CUE stabs while stopped at the cue: every DOWN previews from the cue head, every UP returns.
+        auto owned = std::make_unique<Engine>(48000);
+        Engine& e = *owned;
+        loadDeck(e, 0, 1, .25f);
+        std::vector<float> head(kHeadFrames * 2, .25f);
+        CHECK(e.headBegin(0, kMainCueSlot));
+        e.headWrite(0, kMainCueSlot, 0, head.data(), kHeadFrames);
+        e.headCommit(0, kMainCueSlot, 1, 0.0, kHeadFrames);
+        for (int stab = 0; stab < 20; ++stab) {
+            const int len = 480 + (stab % 4) * 480; // 10..40 ms presses
+            e.submit(Op::CueDown, 0);
+            tick(e, len);
+            float peak = 0;
+            for (int i = 0; i < len; ++i) peak = std::max(peak, std::abs(out[i * 2]));
+            if (!(peak > .2f * unity)) std::fprintf(stderr, "stab %d len %d peak %f preview %d head %d pos %f\n", stab, len, peak, (int)e.deck(0).preview.load(), e.deck(0).headSlot.load(), e.deck(0).position.load());
+            CHECK(peak > .2f * unity);
+            e.submit(Op::CueUp, 0);
+            tick(e, 480);
+            CHECK(!e.deck(0).preview.load() && e.deck(0).position.load() == 0.0);
+        }
+    }
+
+    { // In-memory tracks: beat jumps are sample-exact and gapless; equal-BPM decks keep phase.
+        auto owned = std::make_unique<Engine>(48000);
+        Engine& e = *owned;
+        const int frames = 48000 * 60;
+        std::vector<float> ramp(static_cast<size_t>(frames) * 2);
+        // Distinct per-frame content (a slow ramp + tone) so the playing frame is identifiable.
+        for (int i = 0; i < frames; ++i) ramp[i * 2] = ramp[i * 2 + 1] = static_cast<float>(.2 + .1 * std::sin(i * .01));
+        for (int d = 0; d < 2; ++d) {
+            loadPcm(e, d, d + 1, std::vector<float>(ramp.begin(), ramp.begin() + 48000 * 2)); // ring: first second only
+            fillTrack(e, d, d + 1, ramp);
+            grid120(e, d);
+            e.submit(Op::Seek, d, 20.0);
+        }
+        tick(e);
+        CHECK(e.deck(0).position.load() == 20.0 && e.deck(1).position.load() == 20.0); // outside the ring: exact
+        e.submit(Op::Play, 0); e.submit(Op::Play, 1);
+        tick(e, 4800);
+        CHECK(e.deck(0).inTrack.load() && e.deck(1).inTrack.load());
+        const double beat = .5;
+        const double jumps[] = {1, -1, 4, -4, 16, -16, .25, -.25, 16, 4, -1};
+        double expected = 0;
+        for (double j : jumps) {
+            e.submit(Op::BeatJump, 0, j);
+            expected += j;
+            float minAbs = 1;
+            for (int k = 0; k < 10; ++k) { tick(e, 96); for (int i = 0; i < 96; ++i) minAbs = std::min(minAbs, std::abs(out[i * 2])); }
+            CHECK(minAbs > .05f);                                  // no silent frames across the jump
+            const double offset = (e.deck(0).position.load() - e.deck(1).position.load()) / beat;
+            CHECK(std::abs(offset - expected) < 1e-9);              // displaced by exactly the jumped beats
+        }
+        CHECK(e.starvedFrames() == 0);
+        // Hot cue jumps and loop wraps are exact too.
+        e.submit(Op::HotCueSetAt, 0, 30.0, 0, 3);
+        e.submit(Op::HotCueDown, 0, 0, 0, 3);
+        tick(e);
+        CHECK(std::abs(e.deck(0).position.load() - (30.0 + 1 / 48000.)) < 1e-9);
+        e.submit(Op::HotCueUp, 0, 0, 0, 3);
+        e.submit(Op::LoopPreset, 0, 1);                            // 1 beat at the playhead
+        tick(e);
+        const double ls = e.deck(0).loopStart.load();
+        for (int k = 0; k < 3; ++k) tick(e, 48000);                  // 6 wraps
+        const double p = e.deck(0).position.load();
+        CHECK(p >= ls && p < ls + .5);
+        CHECK(std::abs((p - ls) - std::fmod(3.0 + 1 / 48000., .5)) < 1e-6);
+        CHECK(e.starvedFrames() == 0);
+    }
+
+    { // Quantize: cue/hot-cue placement snaps; playing hot-cue trigger keeps the beat phase.
+        auto owned = std::make_unique<Engine>(48000);
+        Engine& e = *owned;
+        std::vector<float> pcm(48000 * 20 * 2, .25f);
+        loadPcm(e, 0, 1, std::vector<float>(pcm.begin(), pcm.begin() + 48000 * 2));
+        fillTrack(e, 0, 1, pcm);
+        grid120(e, 0);
+        e.submit(Op::Quantize, 0, 1);
+        e.submit(Op::Seek, 0, 3.1);
+        e.submit(Op::CueDown, 0);                      // stopped, not at cue: set (snapped to 3.0)
+        tick(e);
+        CHECK(e.deck(0).cue.load() == 3.0 && e.deck(0).position.load() == 3.0);
+        e.submit(Op::Seek, 0, 5.3);
+        e.submit(Op::HotCueSet, 0, 0, 0, 2);
+        tick(e);
+        CHECK(e.deck(0).hotcues[2].load() == 5.5);
+        e.submit(Op::Seek, 0, 8.1);                     // 0.1 s after a beat
+        e.submit(Op::Play, 0);
+        e.submit(Op::HotCueDown, 0, 0, 0, 2);
+        tick(e);
+        CHECK(std::abs(e.deck(0).position.load() - (5.6 + 1 / 48000.)) < 1e-9);
+        e.submit(Op::Quantize, 0, 0);
+        e.submit(Op::HotCueDown, 0, 0, 0, 2);
+        tick(e);
+        CHECK(std::abs(e.deck(0).position.load() - (5.5 + 1 / 48000.)) < 1e-9);
+    }
+
     { // Beat FX ECHO on A: beat-synced repeats at beats x beatSeconds, feedback .5, tails ring after OFF.
         auto owned = std::make_unique<Engine>(48000);
         Engine& e = *owned;
