@@ -296,7 +296,7 @@ class PlayerModel(application: Application) : AndroidViewModel(application) {
     fun resizeLoop(deck: DeckId, change: LoopChange) = submit(AudioCommand.LoopResize(deck, change))
     fun setQuantize(on: Boolean) = submit(AudioCommand.SetQuantize(on)).also { if (it.accepted) quantizeOn = on }
     /** OFF / GRID / HEARD (#382); [EngineSnapshot.quantizeMode] reports it. HEARD uses [heardLatency]. */
-    fun setQuantizeMode(mode: QuantizeMode) = submit(AudioCommand.SetQuantizeMode(mode)).also { if (it.accepted) quantizeOn = mode != QuantizeMode.OFF }
+    fun setQuantizeMode(mode: QuantizeMode) = submit(AudioCommand.SetQuantizeMode(mode)).also { if (it.accepted) quantizeOn = mode == QuantizeMode.GRID || mode == QuantizeMode.HEARD }
     /**
      * Output latency L of the current route (seconds) for HEARD quantize and the visual offset: the route's
      * remembered value, else Android's reported latency. [heardLatencyCalibrated] = remembered.
@@ -340,6 +340,23 @@ class PlayerModel(application: Application) : AndroidViewModel(application) {
     }
     /** Recovery: closes and reopens the audio output (same routing/device); decks keep their state. */
     fun restartOutput() { service?.restartOutput { if (it != 0) failure = "Audio output restart failed ($it)" } }
+    /**
+     * Tap-along calibration (#382 fallback; mic chirps stay primary): [startTapCalibration] plays a slow chirp
+     * every 1.5 s (track-independent); call [tap] with System.nanoTime() on every chirp heard (≥ 8), then
+     * [finishTapCalibration] → [lastCalibration]; success saves L for the route.
+     */
+    var tapCalibrating by mutableStateOf(false)
+        private set
+    private val taps = mutableListOf<Long>()
+    fun startTapCalibration() { taps.clear(); tapCalibrating = service?.startTapClicks() == true }
+    fun tap(nanoTime: Long = System.nanoTime()) { if (tapCalibrating) taps += nanoTime }
+    fun finishTapCalibration() {
+        if (!tapCalibrating) return
+        tapCalibrating = false
+        val result = LatencyCalibrator.fromTaps(taps.toList(), service?.clickNanos() ?: LongArray(0), output?.reportedLatencySeconds())
+        lastCalibration = result
+        result.seconds?.let(::setHeardLatency)
+    }
     /** Mic-loopback calibration in progress; last result (null seconds = failed, see reason). */
     var calibrating by mutableStateOf(false)
         private set

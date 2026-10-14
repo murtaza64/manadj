@@ -11,8 +11,12 @@ import java.util.concurrent.atomic.AtomicReferenceArray
 enum class DeckId { A, B, C, D }
 enum class LoadState { EMPTY, LOADING, READY, ERROR }
 enum class LoopChange { HALVE, DOUBLE, SET }
-/** Quantize mode (Heard: alignment gestures read at the heard instant, [EngineSnapshot.heardLatencySeconds] ago). Ordinals = native. */
-enum class QuantizeMode { OFF, GRID, HEARD }
+/**
+ * Quantize mode. HEARD / HEARD_UNQUANTIZED add lag compensation (#382, human semantics): a launch (PLAY, CUE-hold,
+ * hot-cue-hold) while another deck is audible is treated as pressed [EngineSnapshot.heardLatencySeconds] earlier —
+ * unquantized it starts at X + L·rate, quantized it runs the launch decision at that virtual time. Ordinals = native.
+ */
+enum class QuantizeMode { OFF, GRID, HEARD, HEARD_UNQUANTIZED }
 
 /** Active loop region in source seconds (desktop LoopRegion). */
 data class LoopRegion(val start: Double, val end: Double, val beats: Double)
@@ -642,7 +646,7 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
             acceptedCommandId = data[7].toLong(), appliedCommandId = data[8].toLong(),
             decks = decks, supportedCapabilities = CAPABILITIES,
             clockFrame = data[23].toLong(), lateOps = data[27].toLong(), scheduledOps = data[28].toInt(),
-            quantizeMode = QuantizeMode.entries[data[29].toInt().coerceIn(0, 2)], heardLatencySeconds = data[30], snapshotNanos = nanos,
+            quantizeMode = QuantizeMode.entries[data[29].toInt().coerceIn(0, 3)], heardLatencySeconds = data[30], snapshotNanos = nanos,
             presentedFrame = data[24].takeIf { it >= 0 }?.toLong(), presentedNanos = data[25].takeIf { it >= 0 }?.toLong(),
             beatFx = BeatFxState(
                 effect = BeatFxEffect.entries.getOrNull(data[16].toInt()), target = BeatFxTarget.entries[data[17].toInt().coerceIn(0, 4)],

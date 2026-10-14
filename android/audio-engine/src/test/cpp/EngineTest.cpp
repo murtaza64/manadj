@@ -1474,6 +1474,65 @@ int main() {
         }
     }
 
+    { // Heard semantics (human #60/#61): press at t is treated as made at t − L. For L in {0, 120, 350, 700} ms,
+      // rates .92 / 1 / 1.08, 50 random phases, quantize on and off, and every launch gesture: the cued deck's
+      // SPEAKER-time position (engine position L ago, extrapolated: engine − L·r) at the press equals X unquantized,
+      // and quantized it is in phase with the playing deck's beat chosen at t − L. Single deck: plain launch at X.
+        unsigned seed = 4242;
+        auto rnd = [&] { seed = seed * 1103515245u + 12345u; return ((seed >> 8) & 0xffff) / 65536.0; };
+        const double beat = 60 / 174.;
+        int launches = 0;
+        for (double L : {0.0, .12, .35, .7}) for (double pitch : {-8.0, 0.0, 8.0}) for (int k = 0; k < 50; ++k) {
+            const bool quantized = k % 2 == 0, single = k % 10 == 9;
+            const int gesture = (k / 2) % 3;                 // 0 PLAY, 1 CUE-hold, 2 hot-cue-hold
+            auto owned = std::make_unique<Engine>(48000);
+            Engine& e = *owned;
+            static const std::vector<float> pcm(48000 * 11 * 2, .2f);
+            for (int d = 0; d < 2; ++d) { loadPcm(e, d, d + 1, std::vector<float>(pcm.begin(), pcm.begin() + 48000 * 2)); fillTrack(e, d, d + 1, pcm); }
+            const double g[5] = {};
+            e.submit(Op::SetGrid, 0, 174, 0, 0, g);
+            e.submit(Op::SetGrid, 1, 174, 0, 0, g);
+            e.submit(Op::Quantize, 0, quantized ? 2 : 3);
+            e.submit(Op::HeardLatency, 0, L);
+            e.submit(Op::Pitch, 0, -pitch / 2);
+            e.submit(Op::Pitch, 1, pitch);
+            const double render = 20 * beat + rnd() * 4 * beat, X = 8 * beat;
+            e.submit(Op::Seek, 0, render);
+            e.submit(Op::Seek, 1, gesture == 2 ? 3.0 : X);
+            e.submit(Op::CueSetAt, 1, X);
+            e.submit(Op::HotCueSetAt, 1, X, 0, 0);
+            tick(e, 16);
+            const auto transportBefore = e.deck(1).transport.load();
+            if (!single) e.submit(Op::Play, 0);
+            e.submit(gesture == 0 ? Op::Play : gesture == 1 ? Op::CueDown : Op::HotCueDown, 1);
+            tick(e, 1);
+            CHECK(e.deck(1).transport.load() - transportBefore <= 1u);     // one jump per stab
+            const double r = 1 + static_cast<double>(static_cast<float>(pitch)) / 100;
+            const double rRef = 1 + static_cast<double>(static_cast<float>(-pitch / 2)) / 100;
+            const double cued = e.deck(1).position.load() - 1 / 48000. * r; // engine position at the press frame
+            if (single) { CHECK(std::abs(cued - X) < 1e-9 && e.deck(1).launchAt.load() == 0); ++launches; continue; }
+            if (!quantized) {
+                CHECK(e.deck(1).launchAt.load() == 0);
+                CHECK(std::abs((cued - L * r) - X) * 1000 / r < 1);       // speaker-time position at the press = X
+            } else {
+                // Desktop crossDeckLaunchTarget at t_v against the reference at t_v.
+                const double refAtTv = render - L * rRef, target = std::round(refAtTv / beat) * beat;
+                const double d = std::max(0.0, (target - refAtTv) / rRef);
+                if (d >= L && d > 0) {
+                    CHECK(e.deck(1).launchAt.load() != 0);
+                    const double wait = (d - L) * 48000;
+                    CHECK(std::abs(static_cast<double>(e.deck(1).launchAt.load()) - (e.outputFrames() - 1 + std::ceil(wait - 1e-6))) < 1.5);
+                    tick(e, 48000);
+                } else CHECK(e.deck(1).launchAt.load() == 0);
+                tick(e, 4800);
+                const double play = e.deck(0).position.load(), b = e.deck(1).position.load();
+                CHECK(std::abs((b - X) / r - (play - target) / rRef) * 1000 < 1);   // in phase at the speaker (time)
+            }
+            ++launches;
+        }
+        CHECK(launches == 600);
+    }
+
     { // Beat FX ECHO on A: beat-synced repeats at beats x beatSeconds, feedback .5, tails ring after OFF.
         auto owned = std::make_unique<Engine>(48000);
         Engine& e = *owned;

@@ -82,6 +82,10 @@ class PlaybackService : Service() {
         }
     }
 
+    /** Tap-along calibration clicks (#382): engine chirps every LatencyCalibrator.TAP_INTERVAL s. */
+    fun startTapClicks(): Boolean = !destroyed && try { engine?.startCalibrationClicks(LatencyCalibrator.TAP_CLICKS, LatencyCalibrator.TAP_INTERVAL)?.accepted == true } catch (_: IllegalStateException) { false }
+    fun clickNanos(): LongArray = if (destroyed) LongArray(0) else try { engine?.clickNanos() ?: LongArray(0) } catch (_: IllegalStateException) { LongArray(0) }
+
     /** Mic-loopback output latency (#382) off the main thread; result via [onDone] on main. */
     fun calibrateLatency(onDone: (LatencyCalibrator.Result) -> Unit) {
         Thread({

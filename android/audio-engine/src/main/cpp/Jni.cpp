@@ -414,7 +414,7 @@ Java_dev_manadj_audio_AudioEngine_nativeSnapshot(JNIEnv* env, jobject, jlong han
         e.fxDepth(), e.fxBeats(), static_cast<double>(e.fxHeld()), static_cast<double>(e.fxAudible()),
         0, presentedFrame, presentedNanos, 0,
         static_cast<double>(e.lateOps()), static_cast<double>(e.scheduledOps()),
-        e.heard() ? 2.0 : e.quantize() ? 1.0 : 0.0, e.heardLatency(),
+        e.heard() ? (e.quantize() ? 2.0 : 3.0) : e.quantize() ? 1.0 : 0.0, e.heardLatency(),
     };
     // Deck positions are sampled at engine frame data[23]; retry if a callback ran mid-read.
     for (int attempt = 0; attempt < 4; ++attempt) {
