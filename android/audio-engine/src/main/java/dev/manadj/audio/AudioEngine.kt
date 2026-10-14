@@ -162,6 +162,11 @@ sealed interface AudioCommand {
     data class LoopPreset(override val deck: DeckId, val beats: Double, override val gestureId: String? = null) : AudioCommand
     /** Halve/double (or set) the active loop, anchored at its start; idle = pending size. 1/8..128 beats. */
     data class LoopResize(override val deck: DeckId, val change: LoopChange, val beats: Double = 0.0, override val gestureId: String? = null) : AudioCommand
+    /**
+     * Explicit loop region in source seconds (desktop setLoopRegion; Session replay): null [start] clears.
+     * [playhead] (when given) relocates in the same callback, so the region and position land together.
+     */
+    data class SetLoopRegion(override val deck: DeckId, val start: Double?, val end: Double = 0.0, val playhead: Double? = null, override val gestureId: String? = null) : AudioCommand
     /** Global quantize (snaps loop engage to the nearest beat). */
     data class SetQuantize(val on: Boolean, override val gestureId: String? = null) : AudioCommand {
         override val deck = DeckId.A
@@ -170,6 +175,15 @@ sealed interface AudioCommand {
     data class SetKeyLock(override val deck: DeckId, val on: Boolean, override val gestureId: String? = null) : AudioCommand
     /** One-shot beat-phase micro-seek of a playing [deck] against playing [reference] (constant grids; loop kept). [ratio] = own beats per reference beat. */
     data class PhaseAlign(override val deck: DeckId, val reference: DeckId, val ratio: Double, override val gestureId: String? = null) : AudioCommand
+    /**
+     * Scratch (desktop scratchMotion): touch-down grabs the platter (the deck stops; needs the in-memory
+     * track, else ignored), each move pushes it by [ScratchMove.deltaSeconds] of track time (signed;
+     * map finger travel to track seconds; speed clamps at 16x), release resumes play at the platter
+     * position if the deck was running. Key lock is bypassed while scratching.
+     */
+    data class ScratchBegin(override val deck: DeckId, override val gestureId: String? = null) : AudioCommand
+    data class ScratchMove(override val deck: DeckId, val deltaSeconds: Double, override val gestureId: String? = null) : AudioCommand
+    data class ScratchEnd(override val deck: DeckId, override val gestureId: String? = null) : AudioCommand
     /** Pre-fader listen: sends the deck (post-trim) to the cue bus. */
     data class SetPfl(override val deck: DeckId, val on: Boolean, override val gestureId: String? = null) : AudioCommand
     /** Headphone feed: 0 = cue bus only, 1 = master only. */
@@ -220,6 +234,8 @@ data class DeckSnapshot(
     val decodedSeconds: Double = 0.0, val fullyDecoded: Boolean = false, val fromMemory: Boolean = false,
     /** Key lock requested; and actually time-stretching (needs the in-memory track at the playhead, else pitch follows tempo). */
     val keyLock: Boolean = false, val keyLockActive: Boolean = false,
+    /** The platter is held (scratch in progress). */
+    val scratching: Boolean = false,
 )
 data class EngineSnapshot(
     val outputFrames: Long, val outputSampleRate: Int, val outputChannels: Int,
@@ -291,7 +307,7 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
         init { System.loadLibrary("manadj_audio") }
         const val MAIN_CUE = 8
         const val HOT_CUES = 8
-        val CAPABILITIES = setOf("play", "pause", "cue-gate", "hot-cue-gate", "hot-cue-set", "seek", "fader", "trim", "crossfade", "varispeed", "bend", "pfl", "cue-mix", "routing", "eq", "filter", "grid", "beat-jump", "loop", "quantize", "beat-fx", "filter-settings", "key-lock", "sync")
+        val CAPABILITIES = setOf("play", "pause", "cue-gate", "hot-cue-gate", "hot-cue-set", "seek", "fader", "trim", "crossfade", "varispeed", "bend", "pfl", "cue-mix", "routing", "eq", "filter", "grid", "beat-jump", "loop", "quantize", "beat-fx", "filter-settings", "key-lock", "sync", "scratch", "loop-region")
         private const val PRIME_FRAMES = 2048
         private const val MEMORY_RESERVE_BYTES = 768L shl 20
         private const val HEAD_PRIORITY_FRAMES = 16384 // ~340 ms buffered before a head fill may interrupt the ring
@@ -301,7 +317,7 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
         private const val HEAD_FRAMES = 8192
         private const val HEADER = 27
         private const val DECK_FIELDS = 40 + HOT_CUES
-        private enum class Op { PREPARE, PLAY, PAUSE, CUE_DOWN, CUE_UP, HOT_CUE_DOWN, HOT_CUE_UP, HOT_CUE_SET, HOT_CUE_CLEAR, SEEK, FADER, TRIM, CROSSFADE, PITCH, BEND, PFL, CUE_MIX, EQ, FILTER, SET_GRID, BEAT_JUMP, LOOP_TOGGLE, LOOP_RESIZE, LOOP_PRESET, QUANTIZE, CUE_SET_AT, HOT_CUE_SET_AT, BEAT_FX, KEY_LOCK, PHASE_ALIGN }
+        private enum class Op { PREPARE, PLAY, PAUSE, CUE_DOWN, CUE_UP, HOT_CUE_DOWN, HOT_CUE_UP, HOT_CUE_SET, HOT_CUE_CLEAR, SEEK, FADER, TRIM, CROSSFADE, PITCH, BEND, PFL, CUE_MIX, EQ, FILTER, SET_GRID, BEAT_JUMP, LOOP_TOGGLE, LOOP_RESIZE, LOOP_PRESET, QUANTIZE, CUE_SET_AT, HOT_CUE_SET_AT, BEAT_FX, KEY_LOCK, PHASE_ALIGN, SCRATCH_BEGIN, SCRATCH_MOVE, SCRATCH_END, LOOP_SET }
     }
 
     /** The caller retains/closes descriptor; the engine duplicates it for its own lifetime. */
@@ -371,6 +387,9 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
             is AudioCommand.LoopResize -> { slot = command.change.ordinal; Op.LOOP_RESIZE to command.beats }
             is AudioCommand.SetQuantize -> Op.QUANTIZE to if (command.on) 1.0 else 0.0
             is AudioCommand.SetKeyLock -> Op.KEY_LOCK to if (command.on) 1.0 else 0.0
+            is AudioCommand.ScratchBegin -> Op.SCRATCH_BEGIN to 0.0
+            is AudioCommand.ScratchMove -> Op.SCRATCH_MOVE to command.deltaSeconds
+            is AudioCommand.ScratchEnd -> Op.SCRATCH_END to 0.0
             is AudioCommand.PhaseAlign -> { slot = command.reference.ordinal; Op.PHASE_ALIGN to command.ratio }
             is AudioCommand.SetFilterSettings -> {
                 val s = command.settings.sanitized()
@@ -382,6 +401,12 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
                 if (!command.depth.isFinite() || !command.beats.isFinite() || command.beats <= 0) return rejected("Non-finite control")
                 val held = command.held.fold(0) { mask, d -> mask or (1 shl d.ordinal) }
                 val id = nativeSubmitBeatFx(handle, command.effect?.ordinal ?: -1, command.target.ordinal, command.on, command.depth, command.beats, held)
+                return if (id != 0L) CommandReceipt(id, true) else rejected("Command queue full")
+            }
+            is AudioCommand.SetLoopRegion -> {
+                val start = command.start ?: -1.0
+                if (!start.isFinite() || !command.end.isFinite() || command.playhead?.isFinite() == false) return rejected("Non-finite loop")
+                val id = nativeSetLoop(handle, deck, start, command.end, command.playhead ?: Double.NaN)
                 return if (id != 0L) CommandReceipt(id, true) else rejected("Command queue full")
             }
             is AudioCommand.SetFilter -> {
@@ -474,6 +499,7 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
                 decodedSeconds = if (current) data[p + 32] else 0.0, fullyDecoded = current && data[p + 33] != 0.0,
                 fromMemory = current && data[p + 34] != 0.0,
                 keyLock = data[p + 36] != 0.0, keyLockActive = current && data[p + 37] != 0.0,
+                scratching = current && data[p + 38] != 0.0,
             )
         }
         return EngineSnapshot(
@@ -719,6 +745,7 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
     private external fun nativeSubmitBeatFx(handle: Long, effect: Int, target: Int, on: Boolean, depth: Double, beats: Double, held: Int): Long
     private external fun nativeSetFilterSettings(handle: Long, model: Int, params: DoubleArray): Long
     private external fun nativeFilterResponse(model: Int, params: DoubleArray, position: Double, freqs: DoubleArray, rate: Double): DoubleArray
+    private external fun nativeSetLoop(handle: Long, deck: Int, start: Double, end: Double, playhead: Double): Long
     private external fun nativeSubmitFilter(handle: Long, deck: Int, position: Double): Long
     private external fun nativeTransport(handle: Long, deck: Int, out: DoubleArray)
     private external fun nativeClaim(handle: Long, deck: Int, load: Long, transport: Long, rate: Int, start: Double): Boolean

@@ -60,6 +60,7 @@ import dev.manadj.audio.DeckId
             SettingsSheet(model, ux, Modifier.widthIn(max = 460.dp).fillMaxWidth().heightIn(max = screenHeight - band - 16.dp))
         }
         if (model.outputPanel) OutputPanel(model, Modifier.fillMaxSize())
+        if (ux.sessions) dev.manadj.app.session.SessionScreen(model, ux, Modifier.fillMaxSize().padding(top = band))
         ReplaceDialog(model, ux)
         KnobPopupOverlay(ux)
         WheelOverlay(ux)

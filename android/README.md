@@ -28,3 +28,13 @@ Pull-only from the desktop backend (`/api/device-sync/*`, `backend/routers/devic
 - `:library` (`dev.manadj.library`, pure Kotlin/JVM): `LibraryRepository` (sync, cache, `audioFile(id)`), `Library` (`query(LibraryQuery)`, `follow(refs, FollowParams, within)`, `marks(deckTrack, id)`, `playlistTracks(id)`, `preview(track)`). Filter semantics mirror the desktop FilterState; Follow ranking ports `frontend/src/follow/matchScore.ts` (Known > Observed > Compatible).
 - Load: `app/.../library/LibraryHolder.load` → `PlayerModel.load` (snapshot title/artist, first grid segment, main cue, hot cues; source id `library:<trackId>:<audioRev>`).
 - Decoy data for checks: `uv run scripts/android/seed_decoy_library.py http://127.0.0.1:<port> <dir>` against an `--empty-db` lane app.
+
+## Session replay (#378)
+
+Settings › SESSIONS · REPLAY: desktop Sessions replayed on all four decks through the shared engine.
+
+- Data: `GET /api/device-sync/sessions` (headers) and `/sessions/{uuid}` (SessionDetail, `scratchMove` samples dropped), pulled on demand and cached in `filesDir/sessions-cache` (ended Sessions are immutable). Track ids are library ids; audio via the Library download path.
+- `:library` `dev.manadj.library.session`: `SessionLog` (streaming parse; desktop `stateAt` reducer, golden parity against desktop fixtures), `cuesAfter` (desktop `planReplay` cues), `SessionReplayer` (pure director: seed/loads, event-timed cues, tick drift corrector with start snap + bend servo, pre-roll for jumps before the track start), `SessionStore`.
+- App: `session/SessionModel` executes ops; the Session clock is the engine output clock (`outputFrames`). Recorded crossfader folds into the faders (engine crossfader centred, restored on stop); trim/PFL stay the listener's. Engine op `SetLoopRegion` replays explicit loops.
+- Not reproduced (listed on screen): scratch (landings only), stem mutes, unknown kinds/controls. Leaving the screen stops replay.
+- Real-data check: `MANADJ_SESSION_DIR=<dir of SessionDetail dumps> ./gradlew :library:test --tests '*RealSessionsTest'`.

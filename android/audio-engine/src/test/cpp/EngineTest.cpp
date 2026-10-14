@@ -517,6 +517,26 @@ int main() {
         CHECK(e.deck(0).position.load() == 0);
     }
 
+    { // LoopSet (Session replay): explicit region without grid/quantize, optional relocation, clear.
+        auto owned = std::make_unique<Engine>(48000);
+        Engine& e = *owned;
+        loadDeck(e, 0, 1, .25f);
+        const double region[5] = {1.5, 1.25, 0, 0, 0};
+        e.submit(Op::LoopSet, 0, 1.0, 0, 0, region);  // gridless: still engages
+        tick(e);
+        CHECK(e.deck(0).loopActive.load());
+        CHECK(e.deck(0).loopStart.load() == 1.0 && e.deck(0).loopEnd.load() == 1.5);
+        CHECK(std::abs(e.deck(0).position.load() - 1.25) < 1e-9);
+        feed(e, 0, 1, .25f, 48000);
+        e.submit(Op::Play, 0);
+        tick(e, 24000);                               // 0.5 s from 1.25 wraps once
+        CHECK(e.deck(0).position.load() >= 1.0 && e.deck(0).position.load() < 1.5);
+        const double clear[5] = {0, NAN, 0, 0, 0};
+        e.submit(Op::LoopSet, 0, -1, 0, 0, clear);
+        tick(e);
+        CHECK(!e.deck(0).loopActive.load());
+    }
+
     { // Loops: quantized engage, sample-accurate wrap from the loop head, resize, release.
         auto owned = std::make_unique<Engine>(48000);
         Engine& e = *owned;
@@ -762,6 +782,164 @@ int main() {
         CHECK(std::abs(e.deck(0).position.load() - (10.4 + 1 / 48000.)) < 1e-3);
     }
 
+    { // Scratch (desktop scratchMotion): displacement impulses move the platter by exactly that much,
+      // forwards and backwards; a still platter is silent; release resumes play at the platter position.
+        auto owned = std::make_unique<Engine>(48000);
+        Engine& e = *owned;
+        std::vector<float> pcm(48000 * 20 * 2);
+        for (int i = 0; i < 48000 * 20; ++i) pcm[i * 2] = pcm[i * 2 + 1] = static_cast<float>(.25 * std::sin(2 * 3.14159265358979 * 440 * i / 48000));
+        loadPcm(e, 0, 1, std::vector<float>(pcm.begin(), pcm.begin() + 48000 * 2));
+        fillTrack(e, 0, 1, pcm);
+        e.submit(Op::Seek, 0, 5.0);
+        e.submit(Op::Play, 0);
+        tick(e, 4800);
+        const double before = e.deck(0).position.load();
+        e.submit(Op::ScratchBegin, 0);
+        tick(e, 96);
+        CHECK(e.deck(0).scratching.load() && !e.deck(0).playing.load());
+        tick(e, 9600);
+        auto still = capture(e, 4800);
+        CHECK(rms(still, 0, 4800) < 1e-4);                         // platter held: silent
+        CHECK(std::abs(e.deck(0).position.load() - (before)) < 1e-3);
+        for (int k = 0; k < 50; ++k) { e.submit(Op::ScratchMove, 0, .01); tick(e, 96); } // drag forward 0.5 s at 5x (desktop clamps at 16x)
+        auto fwd = capture(e, 9600);
+        CHECK(rms(fwd, 0, 2000) > .02);                              // audible while moving
+        if (std::abs(e.deck(0).position.load() - (before + .5)) >= 1e-3) std::fprintf(stderr, "fwd pos %f before %f\n", e.deck(0).position.load(), before);
+        CHECK(std::abs(e.deck(0).position.load() - (before + .5)) < 1e-3);
+        for (int k = 0; k < 100; ++k) { e.submit(Op::ScratchMove, 0, -.01); tick(e, 96); } // back 1 s
+        capture(e, 9600);
+        CHECK(std::abs(e.deck(0).position.load() - (before - .5)) < 1e-3);
+        e.submit(Op::ScratchEnd, 0);
+        tick(e, 4800);
+        CHECK(!e.deck(0).scratching.load() && e.deck(0).playing.load());   // was running: resumes
+        CHECK(e.deck(0).position.load() > before - .5);
+        // Clamped at the track start: no hidden travel to repay.
+        e.submit(Op::Seek, 0, .05);
+        e.submit(Op::ScratchBegin, 0);
+        tick(e);
+        for (int k = 0; k < 20; ++k) { e.submit(Op::ScratchMove, 0, -.01); tick(e, 96); }
+        capture(e, 9600);
+        CHECK(e.deck(0).position.load() == 0);
+        e.submit(Op::ScratchMove, 0, .1); tick(e, 96);
+        capture(e, 9600);
+        CHECK(std::abs(e.deck(0).position.load() - .1) < 1e-3);
+        CHECK(e.starvedFrames() == 0);
+    }
+
+    { // Frame-stamped ops: applied at exactly their frame inside a callback (buffer split there).
+        auto owned = std::make_unique<Engine>(48000);
+        Engine& e = *owned;
+        std::vector<float> pcm(48000 * 10 * 2, .25f);
+        loadPcm(e, 0, 1, std::vector<float>(pcm.begin(), pcm.begin() + 48000 * 2));
+        fillTrack(e, 0, 1, pcm);
+        tick(e, 100);
+        const uint64_t at = e.outputFrames() + 333;
+        e.setSubmitFrame(at);
+        e.submit(Op::Play, 0);
+        e.setSubmitFrame(0);
+        tick(e, 1000);                                   // one callback spanning the event
+        CHECK(std::abs(out[332 * 2]) < 1e-6 && std::abs(out[333 * 2]) > 0);   // silent until exactly frame 333
+        CHECK(std::abs(e.deck(0).position.load() - 667 / 48000.) < 1e-9);
+        CHECK(e.lateOps() == 0);
+    }
+
+    { // Replay exactness: 4 decks, random frame-stamped seeks/jumps/pitch/play/pause/loops; every deck's
+      // playhead equals the analytic trajectory (desktop stateAt semantics) within 1 sample at 400 instants,
+      // and two decks driven identically stay sample-locked.
+        auto owned = std::make_unique<Engine>(48000);
+        Engine& e = *owned;
+        const int frames = 48000 * 120;
+        std::vector<float> pcm(static_cast<size_t>(frames) * 2, .2f);
+        for (int d = 0; d < 4; ++d) {
+            loadPcm(e, d, d + 1, std::vector<float>(pcm.begin(), pcm.begin() + 48000 * 2));
+            fillTrack(e, d, d + 1, pcm);
+            grid120(e, d);
+        }
+        tick(e, 64);
+        struct Model { bool playing = false; double pos = 0, pitch = 0; bool loop = false; double ls = 0, le = 0; };
+        Model m[4];
+        struct Ev { uint64_t at; int deck; Op op; double value; };
+        std::vector<Ev> evs;
+        uint64_t t0 = e.outputFrames() + 1000;
+        unsigned seed = 12345;
+        auto rnd = [&] { seed = seed * 1103515245u + 12345u; return (seed >> 8) & 0xffff; };
+        const double pitches[] = {0, 2.5, -3.75, 1.25, 6, -8};
+        uint64_t t = t0;
+        for (int k = 0; k < 160; ++k) {
+            t += 2000 + rnd() % 30000;
+            const int deck = k % 3;                       // deck 3 mirrors deck 0 exactly
+            const int kind = rnd() % 6;
+            Ev ev{t, deck, Op::Play, 0};
+            if (kind == 0) ev = {t, deck, Op::Seek, 5 + (rnd() % 8000) / 100.0};
+            else if (kind == 1) ev = {t, deck, Op::BeatJump, (rnd() % 2 ? 1.0 : -1.0) * (1 << (rnd() % 4))};
+            else if (kind == 2) ev = {t, deck, Op::Pitch, pitches[rnd() % 6]};
+            else if (kind == 3) ev = {t, deck, rnd() % 3 ? Op::Play : Op::Pause, 0};
+            else if (kind == 4) ev = {t, deck, Op::LoopPreset, static_cast<double>(1 << (rnd() % 3))};
+            else ev = {t, deck, Op::LoopToggle, 0};
+            evs.push_back(ev);
+            if (deck == 0) evs.push_back({ev.at, 3, ev.op, ev.value});
+        }
+        for (const auto& ev : evs) { e.setSubmitFrame(ev.at); CHECK(e.submit(ev.op, ev.deck, ev.value) != 0); }
+        e.setSubmitFrame(0);
+        // Analytic model, stepped event to event.
+        auto advance = [&](Model& md, double seconds) {
+            if (!md.playing) return;
+            md.pos += seconds * static_cast<double>(1 + static_cast<float>(md.pitch) / 100.f);
+            if (md.loop && md.pos >= md.le) md.pos = md.ls + std::fmod(md.pos - md.ls, md.le - md.ls);
+        };
+        auto applyEv = [&](Model& md, const Ev& ev) {
+            switch (ev.op) {
+                case Op::Seek: md.loop = false; md.pos = ev.value; break;
+                case Op::BeatJump: {
+                    const double target = std::max(0.0, md.pos + ev.value * .5);
+                    if (md.loop) { const double ns = std::max(0.0, md.ls + (target - md.pos)); md.le = ns + (md.le - md.ls); md.ls = ns; }
+                    md.pos = target; break;
+                }
+                case Op::Pitch: md.pitch = ev.value; break;
+                case Op::Play: md.playing = true; break;
+                case Op::Pause: md.playing = false; break;
+                case Op::LoopToggle: if (md.loop) { md.loop = false; break; } [[fallthrough]];
+                case Op::LoopPreset:
+                    if (ev.op == Op::LoopPreset && md.loop) {
+                        const double len = md.le - md.ls, beats = len / .5;
+                        if (std::abs(beats - ev.value) < 1e-9) md.loop = false;
+                        else { md.le = md.ls + len * (ev.value / beats);
+                               if (md.pos - md.ls >= md.le - md.ls && md.pos < md.ls + len) md.pos = md.ls + std::fmod(md.pos - md.ls, md.le - md.ls); }
+                        break;
+                    }
+                    md.ls = md.pos; md.le = md.pos + (ev.op == Op::LoopPreset ? ev.value : 4) * .5; md.loop = true; break;
+                default: break;
+            }
+        };
+        std::vector<Ev> sorted = evs;
+        std::stable_sort(sorted.begin(), sorted.end(), [](const Ev& a, const Ev& b) { return a.at < b.at; });
+        size_t next = 0;
+        uint64_t modelFrame = e.outputFrames();
+        int checks = 0;
+        while (next < sorted.size() || checks < 400) {
+            const int chunk = 500 + rnd() % 3000;
+            tick(e, chunk);
+            const uint64_t now = e.outputFrames();
+            while (next < sorted.size() && sorted[next].at <= now) {
+                for (auto& md : m) advance(md, (sorted[next].at - modelFrame) / 48000.0);
+                modelFrame = sorted[next].at;
+                const uint64_t at = sorted[next].at;
+                while (next < sorted.size() && sorted[next].at == at) { applyEv(m[sorted[next].deck], sorted[next]); ++next; }
+            }
+            for (auto& md : m) advance(md, (now - modelFrame) / 48000.0);
+            modelFrame = now;
+            for (int d = 0; d < 4; ++d) {
+                const double got = e.deck(d).position.load();
+                if (std::abs(got - m[d].pos) > 1.0 / 48000 + 1e-9) std::fprintf(stderr, "deck %d frame %llu got %.9f want %.9f\n", d, (unsigned long long)now, got, m[d].pos);
+                CHECK(std::abs(got - m[d].pos) <= 1.0 / 48000 + 1e-9);
+            }
+            CHECK(e.deck(3).position.load() == e.deck(0).position.load()); // mirrored decks: identical to the sample
+            ++checks;
+            if (now > sorted.back().at + 48000 * 2 && checks >= 400) break;
+        }
+        CHECK(e.lateOps() == 0 && e.starvedFrames() == 0);
+    }
+
     { // Beat FX ECHO on A: beat-synced repeats at beats x beatSeconds, feedback .5, tails ring after OFF.
         auto owned = std::make_unique<Engine>(48000);
         Engine& e = *owned;
@@ -832,6 +1010,22 @@ int main() {
         beatFx(e, fx::kReverb, fx::kTargetA, false, 1, .5);  // an engaged insert never idles
         capture(e, 48000 * 6);
         CHECK(e.fxAudible() == 0);
+    }
+
+    { // REVERB level = desktop: unit-energy IR rescaled by Web Audio's ConvolverNode normalization
+      // (normalize=true): impulse-response energy (1/rms(ir) x -58 dB x 44100/rate)^2, ~-8 dB at 48 kHz.
+        for (double rate : {48000.0, 44100.0}) {
+            fx::Reverb r;
+            fx::Settings s;
+            r.prepare(rate, s);
+            const float wa = fx::Reverb::webAudioNormalization(rate, 2.5);
+            r.setScale(fx::Reverb::scale() * wa);
+            double energy = 0;
+            for (int i = 0; i < static_cast<int>(rate * 4); ++i) { float l, rr; r.process(i == 0, 0, l, rr); energy += double(l) * l; }
+            const double expected = double(wa) * wa;
+            CHECK(std::abs(10 * std::log10(energy / expected)) < .5);
+            CHECK(wa > .38f && wa < .43f);
+        }
     }
 
     { // FLANGER: a swept comb on a tone (LFO = beats in bars: 1/2 bar = 1 s at 120 BPM).

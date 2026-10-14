@@ -16,7 +16,8 @@ constexpr int kDeckCount = 4;
 constexpr int kHotCues = 8;
 constexpr int kMainCueSlot = kHotCues; // previewSlot value for a main-cue preview.
 constexpr uint32_t kRingFrames = 65536; // ~0.5 MiB/deck, 2 MiB total at stereo float.
-constexpr int kQueueSize = 256;
+constexpr int kQueueSize = 4096;     // replay schedules ahead; ~400 KB
+constexpr int kScheduleSize = 8192;  // ops waiting for their frame
 constexpr int kFadeFrames = 240;        // ~5 ms transport envelope / relocation crossfade at 48 kHz.
 constexpr int kLoopSlot = kHotCues + 1;   // Head slot holding the active loop's start.
 constexpr int kHeadSlots = kHotCues + 2;  // Hot cues 0..7 + main cue + loop start.
@@ -79,7 +80,9 @@ struct Track {
 
 enum class Op : int { Prepare, Play, Pause, CueDown, CueUp, HotCueDown, HotCueUp,
                        HotCueSet, HotCueClear, Seek, Fader, Trim, Crossfade, Pitch, Bend, Pfl, CueMix, Eq, Filter,
-                       SetGrid, BeatJump, LoopToggle, LoopResize, LoopPreset, Quantize, CueSetAt, HotCueSetAt, BeatFx, KeyLock, PhaseAlign };
+                       SetGrid, BeatJump, LoopToggle, LoopResize, LoopPreset, Quantize, CueSetAt, HotCueSetAt, BeatFx, KeyLock, PhaseAlign, ScratchBegin, ScratchMove, ScratchEnd, LoopSet };
+// LoopSet: value = start (< 0 clears), aux = {end, playhead (NaN keeps the position)}; machine replay (Session).
+// ScratchMove: value = platter displacement in track seconds.
 // PhaseAlign: deck = the aligning deck, slot = reference deck, value = own/peer half-double ratio.
 // BeatFx (deck ignored): slot = effect (-1 none), value = depth, aux = {target, on, beats, held deck mask}.
 // LoopResize slot: 0 halve, 1 double, 2 set to value beats.
@@ -90,6 +93,7 @@ struct Command {
     uint64_t load;
     double value;
     int slot;
+    uint64_t at;   // engine output frame to apply at (0 = next callback); applied mid-callback, exactly
     double aux[5]; // Filter: pass (0 low/1 high), cutoff Hz, wet, resonance dB, compensation gain
 };
 
@@ -164,6 +168,13 @@ struct Deck {
     std::vector<float> stretchIn[2], stretchOut[2]; // window / block scratch (allocated with the stretcher)
     uint64_t stretchTransport = ~0ull;              // transport the stretcher was primed for
     double stretchTranspose = 0;
+    // Scratch (desktop scratchMotion.ts): impulse-driven platter. Motion state at output frame
+    // scratchTime: position (track s), drive/rate (track s per output s); rendered from the in-memory track.
+    std::atomic<bool> scratching{false};
+    bool scratchRunning = false;
+    double scratchPos = 0, scratchDrive = 0, scratchRate = 0, scratchTime = 0;
+    double scratchStart = 0, scratchLoopStart = 0, scratchLoopEnd = 0;
+    bool scratchLoop = false;
     std::atomic<bool> inTrack{false};   // callback renders from the in-memory track (snapshot)
     std::atomic<bool> trackEnd{false};  // reached the end of a complete in-memory track
     // Head being played (-1 none) and the ring offset (source frames) the worker must start at.
@@ -199,6 +210,11 @@ public:
     explicit Engine(int outputRate = 48000);
     // Any thread; one producer lock, never taken on the callback. Returns 0 if full.
     uint64_t submit(Op op, int deck, double value = 0, uint64_t load = 0, int slot = 0, const double* aux = nullptr);
+    // Frame stamp for the next submits from this control thread (0 = immediate). Every op type can be
+    // scheduled; the callback splits its buffer at the frame and applies the op exactly there.
+    void setSubmitFrame(uint64_t frame) { submitFrame_.store(frame); }
+    uint64_t lateOps() const { return lateOps_.load(); }
+    int scheduledOps() const { return scheduleCount_.load(); }
     // Control thread: computes the desktop sweep-filter target (not realtime-safe) and queues it.
     uint64_t submitFilter(int deck, double position);
     // Desktop FilterSettings for every deck (click-free); re-targets each deck at its last knob position.
@@ -257,6 +273,11 @@ public:
 private:
     std::array<Deck, kDeckCount> decks_{};
     std::array<Command, kQueueSize> commands_{};
+    std::atomic<uint64_t> submitFrame_{0}, lateOps_{0};
+    std::array<Command, kScheduleSize> schedule_{}; // callback-private, sorted by `at` (stable)
+    int scheduleHead_ = 0;
+    std::atomic<int> scheduleCount_{0};
+    void enqueueScheduled(const Command& c) noexcept;
     std::mutex submitMutex_;
     std::atomic<uint64_t> queueWrite_{0}, queueRead_{0};
     std::atomic<uint64_t> accepted_{0}, applied_{0}, outputFrames_{0}, starvedFrames_{0};
@@ -287,6 +308,9 @@ private:
     int renderSegment(Deck& d, float* strip, int frames, bool& active) noexcept;
     int renderTrack(Deck& d, float* strip, int frames, bool& active) noexcept;
     int renderStretch(Deck& d, float* strip, int frames, bool& active) noexcept;
+    void renderScratch(Deck& d, float* strip, int frames, int64_t frame, bool& active) noexcept;
+    double scratchPositionAt(const Deck& d, double frame) const noexcept;
+    int64_t renderFrame_ = 0; // output frame of the block being rendered
     void stretchBlock(Deck& d, double frame, double rate, int frames, float* outL, float* outR) noexcept;
     void configureStretch(Deck& d, int rate);
 

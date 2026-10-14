@@ -117,6 +117,7 @@ import dev.manadj.audio.DeckId
             Text("Waveform zoom (or pinch a waveform)", bold = true)
             Row(Modifier.fillMaxWidth().height(40.dp)) { for (s in listOf(6.0, 8.0, 12.0, 16.0, 24.0)) Key("${s.toInt()}s", Modifier.weight(1f).fillMaxHeight(), Ink.accent, engaged = kotlin.math.abs(ux.waveSeconds - s) < .5, textSize = 12) { ux.chooseWaveSeconds(s) } }
             Key("OUTPUT / ROUTING", Modifier.fillMaxWidth().height(44.dp), Ink.accent, icon = Glyph.Headphones) { ux.settings = false; model.outputPanel = true }
+            Key("SESSIONS · REPLAY", Modifier.fillMaxWidth().height(44.dp), Ink.accent, icon = Glyph.Play) { ux.settings = false; ux.sessions = true }
             LibrarySync(ux)
             FilterSettingsPanel(model)
             Text("manadj Android · UI #371 · engine #369/#370", color = Ink.muted, size = 10)

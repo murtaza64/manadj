@@ -66,6 +66,8 @@ class UiModel(application: Application) : AndroidViewModel(application) {
     val extras = DeckId.entries.associateWith { DeckExtras() }
     val fx = FxUi()
     var settings by mutableStateOf(false)
+    /** Session replay screen (#378) open. */
+    var sessions by mutableStateOf(false)
     var stemsFor by mutableStateOf<DeckId?>(null)
     var wheel by mutableStateOf<WheelFeedback?>(null)
     var knob by mutableStateOf<KnobPopup?>(null)

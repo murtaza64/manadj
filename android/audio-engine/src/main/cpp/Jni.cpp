@@ -162,7 +162,7 @@ Java_dev_manadj_audio_AudioEngine_nativeClose(JNIEnv*, jobject, jlong handle) {
 extern "C" JNIEXPORT jlong JNICALL
 Java_dev_manadj_audio_AudioEngine_nativeSubmit(JNIEnv*, jobject, jlong handle, jint op, jint deck,
                                                   jdouble value, jlong load, jint slot) {
-    if (op < 0 || op > static_cast<int>(manadj::Op::PhaseAlign) || op == static_cast<int>(manadj::Op::Filter) || op == static_cast<int>(manadj::Op::BeatFx)) return 0; // Filter/BeatFx: dedicated entry points.
+    if (op < 0 || op > static_cast<int>(manadj::Op::ScratchEnd) || op == static_cast<int>(manadj::Op::Filter) || op == static_cast<int>(manadj::Op::BeatFx)) return 0; // Filter/BeatFx: dedicated entry points.
     if (op == static_cast<int>(manadj::Op::SetGrid)) return 0; // nativeSetGrid carries the anchor.
     return static_cast<jlong>(output(handle)->engine.submit(static_cast<manadj::Op>(op), deck, value,
                                                             static_cast<uint64_t>(load), slot));
@@ -173,6 +173,13 @@ Java_dev_manadj_audio_AudioEngine_nativeSetGrid(JNIEnv*, jobject, jlong handle, 
     if (!std::isfinite(bpm) || !std::isfinite(anchor)) return 0;
     const double aux[5] = {anchor, 0, 0, 0, 0};
     return static_cast<jlong>(output(handle)->engine.submit(manadj::Op::SetGrid, deck, bpm, 0, 0, aux));
+}
+
+extern "C" JNIEXPORT jlong JNICALL
+Java_dev_manadj_audio_AudioEngine_nativeSetLoop(JNIEnv*, jobject, jlong handle, jint deck, jdouble start, jdouble end, jdouble playhead) {
+    if (!std::isfinite(start) || !std::isfinite(end)) return 0;
+    const double aux[5] = {end, playhead, 0, 0, 0};
+    return static_cast<jlong>(output(handle)->engine.submit(manadj::Op::LoopSet, deck, start, 0, 0, aux));
 }
 
 extern "C" JNIEXPORT jlong JNICALL
@@ -406,6 +413,7 @@ Java_dev_manadj_audio_AudioEngine_nativeSnapshot(JNIEnv* env, jobject, jlong han
         if (d.trackEnd.load()) data[n + 5] = 1;
         data[n + 36] = d.keyLock.load() ? 1 : 0;
         data[n + 37] = d.stretching.load() ? 1 : 0;
+        data[n + 38] = d.scratching.load() ? 1 : 0;
         for (int h = 0; h < manadj::kHotCues; ++h) data[n + 40 + h] = d.hotcues[h].load();
     }
     if (e.outputFrames() == clockFrame) break;

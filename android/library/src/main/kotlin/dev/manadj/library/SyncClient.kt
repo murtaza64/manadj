@@ -55,6 +55,19 @@ class SyncClient(
 
     fun snapshotText(): String = io { open("/snapshot").checked().run { inputStream.use { it.readBytes().decodeToString() }.also { disconnect() } } }
 
+    /** Session headers, newest first (#378). */
+    fun sessionsText(): String = io { open("/sessions").checked().run { inputStream.use { it.readBytes().decodeToString() }.also { disconnect() } } }
+
+    /** One Session with its capture-event log (SessionDetail, #378), streamed to [target]. */
+    fun downloadSession(uuid: String, target: File): Unit = io {
+        val conn = open("/sessions/${java.net.URLEncoder.encode(uuid, "UTF-8")}").checked()
+        target.parentFile?.mkdirs()
+        val tmp = File(target.parentFile, ".${target.name}.part")
+        conn.inputStream.use { input -> tmp.outputStream().use { input.copyTo(it, 1 shl 16) } }
+        conn.disconnect()
+        if (!tmp.renameTo(target)) { target.delete(); check(tmp.renameTo(target)) { "Cannot store ${target.name}" } }
+    }
+
     fun previews(trackIds: Collection<Int>): Map<Int, ByteArray> = io {
         val conn = open("/previews", "POST")
         conn.doOutput = true
