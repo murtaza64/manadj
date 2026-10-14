@@ -45,8 +45,12 @@ object SnapshotJson {
         val takes = root.getJSONArray("takes").objects().map {
             TakeEdge(it.getInt("a"), it.getInt("b"), it.getInt("count"), instant(it.str("last_at")))
         }
+        val trackArray = root.getJSONArray("tracks")
+        // Older desktop/cached snapshots lack fields this app relies on (waveform_rev, settings): stale, resync.
+        val stale = !root.has("settings") || (0 until trackArray.length()).any { !trackArray.getJSONObject(it).has("waveform_rev") }
         return Snapshot(
             version, instant(root.str("generated_at")), categories, tags, tracks, playlists, links, transitions, cameos, takes,
+            schemaStale = stale,
             settings = root.optJSONObject("settings")?.let { o ->
                 o.keys().asSequence().associateWith { k ->
                     val entry = o.getJSONObject(k)

@@ -46,8 +46,8 @@ class LibraryStore(val root: File) {
 
     fun hasWaveform(track: LibraryTrack) = waveformFile(track)?.isFile == true
 
-    fun writeWaveform(track: LibraryTrack, blob: ByteArray) {
-        atomicWrite(waveformFile(track) ?: return, blob)
+    fun writeWaveform(track: LibraryTrack, blob: ByteArray, rev: String? = track.waveformRev) {
+        atomicWrite(File(waveformDir, "${track.id}-${rev ?: return}.mwf"), blob)
     }
 
     /** The cached detail waveform; null when missing or unreadable (a corrupt file is deleted). */

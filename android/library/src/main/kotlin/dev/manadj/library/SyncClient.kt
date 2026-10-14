@@ -89,15 +89,16 @@ class SyncClient(
         postJson("/received", JSONObject().put("changes", JSONArray(changes)))
     }
 
-    /** The full detail waveform (MWF1) the desktop renders; null when not generated there (404). */
-    fun downloadWaveform(trackId: Int): ByteArray? = io {
+    /** The full detail waveform (MWF1) the desktop renders, with its rev; null when not generated there (404). */
+    fun downloadWaveform(trackId: Int): WaveformBlob? = io {
         val conn = open("/tracks/$trackId/waveform")
         if (conn.responseCode == 404) {
             conn.disconnect()
             return@io null
         }
         conn.checked()
-        conn.inputStream.use { it.readBytes() }.also { conn.disconnect() }
+        val rev = conn.getHeaderField("X-Waveform-Rev")
+        WaveformBlob(conn.inputStream.use { it.readBytes() }, rev).also { conn.disconnect() }
     }
 
     /**
@@ -164,7 +165,12 @@ class SyncException(
     val unpaired: Boolean = false,
     /** HTTP status when the desktop answered with an error (null: unreachable / local failure). */
     val status: Int? = null,
-) : Exception(message, cause)
+) : Exception(message, cause) {
+    /** The desktop couldn't be reached at all (offline / not on its network). */
+    val unreachable: Boolean get() = cause is IOException
+}
+
+class WaveformBlob(val bytes: ByteArray, val rev: String?)
 
 /** A download stopped by its cancel flag; the `.part` file stays for resume. */
 class DownloadCancelled : Exception("cancelled")

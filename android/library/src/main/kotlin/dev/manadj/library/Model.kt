@@ -84,6 +84,8 @@ data class Snapshot(
     val transitions: List<TransitionEdge>,
     val cameos: List<CameoEdge>,
     val takes: List<TakeEdge>,
+    /** Parsed from an older snapshot schema (fields missing): resync before trusting it. */
+    val schemaStale: Boolean = false,
     /** Synced performance settings (desktop settings key → value); see [PerformanceSettings]. */
     val settings: Map<String, SyncedSetting> = emptyMap(),
 ) {

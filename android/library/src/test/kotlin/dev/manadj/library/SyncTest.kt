@@ -31,6 +31,8 @@ class SyncTest {
     @Volatile private var deskTitle = "Decoy"
     @Volatile private var waveformRequests = 0
     @Volatile private var deskMinimapMaster = 1.16
+    @Volatile private var snapshotRequests = 0
+    @Volatile private var twoWay = true
     @Volatile private var dropAudioAfter: Int? = null
     @Volatile private var onAudioRequest: () -> Unit = {}
     private val ranges = mutableListOf<String?>()
@@ -46,7 +48,7 @@ class SyncTest {
            "grid":{"origin":"analyzed","anchor_time":0.5,"tempo_changes":[{"start_time":0.5,"bpm":174.0,"time_signature_num":4,"bar_position":1}]}},
           {"id":11,"title":null,"artist":null,"file_name":"untitled.flac","bpm":null,"key":null,"key_openkey":null,"key_camelot":null,
            "energy":null,"duration_secs":null,"date_added":null,"main_cue":null,"codec":null,"filesize_bytes":null,
-           "audio_rev":null,"preview_rev":null,"tag_ids":[],"hot_cues":[],"grid":null}],
+           "audio_rev":null,"preview_rev":null,"waveform_rev":null,"tag_ids":[],"hot_cues":[],"grid":null}],
          "playlists":[{"id":3,"name":"Set","color":null,"display_order":0,"track_ids":[11,10]}],
          "links":[[10,11]],"transitions":[{"a":10,"b":11,"count":2,"favorite":true}],
          "cameos":[],"takes":[{"a":11,"b":10,"count":2,"last_at":"2026-10-02T00:00:00"}],
@@ -63,6 +65,7 @@ class SyncTest {
             if (requiredCode != null && !tokenOk && ex.requestHeaders.getFirst(PAIR_HEADER) != requiredCode) {
                 ex.sendResponseHeaders(401, -1); ex.close(); return@createContext
             }
+            snapshotRequests++
             val body = snapshotJson().toByteArray()
             ex.sendResponseHeaders(200, body.size.toLong()); ex.responseBody.use { it.write(body) }
         }
@@ -105,12 +108,14 @@ class SyncTest {
             if (ex.requestURI.path.endsWith("/waveform") && id == 10) {
                 waveformRequests++
                 val body = mwf1(ByteArray(2000) { (it % 200).toByte() }, duration = 5.8)
+                ex.responseHeaders.add("X-Waveform-Rev", "w1")
                 ex.sendResponseHeaders(200, body.size.toLong()); ex.responseBody.use { it.write(body) }
             } else {
                 ex.sendResponseHeaders(404, -1); ex.close()
             }
         }
         server.createContext("/api/device-sync/edits") { ex ->
+            if (!twoWay) { ex.sendResponseHeaders(404, -1); ex.close(); return@createContext }
             val body = ex.requestBody.readBytes().decodeToString()
             pushed += body
             val uuids = Regex("\"uuid\":\"([^\"]+)\"").findAll(body).map { it.groupValues[1] }.toList()
@@ -118,6 +123,7 @@ class SyncTest {
             ex.sendResponseHeaders(200, out.size.toLong()); ex.responseBody.use { it.write(out) }
         }
         server.createContext("/api/device-sync/received") { ex ->
+            if (!twoWay) { ex.sendResponseHeaders(404, -1); ex.close(); return@createContext }
             received += ex.requestBody.readBytes().decodeToString()
             val out = """{"batch_id":"r"}""".toByteArray()
             ex.sendResponseHeaders(200, out.size.toLong()); ex.responseBody.use { it.write(out) }
@@ -350,6 +356,50 @@ class SyncTest {
         repo.sync().getOrThrow()
         assertTrue(received.single().contains("setting:manadj.waveformStyles"))
         assertEquals(2.5f, repo.library.value!!.waveformStyles.minimap.master)
+    }
+
+    @Test fun staleCachedSnapshotAutoSyncsAndWaveformFetchedWithoutRev() = runBlocking {
+        // A snapshot cached before the desktop served waveform_rev/settings (the 16:25Z phone bug).
+        val old = org.json.JSONObject(snapshotJson()).apply {
+            remove("settings")
+            val tracks = getJSONArray("tracks")
+            for (k in 0 until tracks.length()) tracks.getJSONObject(k).remove("waveform_rev")
+        }.toString()
+        repo().store.writeSnapshotText(old)
+        val repo = repo()
+        repo.open()!!
+        assertTrue(repo.state.value.cacheStale)
+        assertEquals(null, repo.library.value!!.track(10)!!.waveformRev)
+        // Desktop reachable: the endpoint is tried even without a rev.
+        assertEquals(2000, repo.detailWaveform(10)!!.bins)
+        assertEquals(1, waveformRequests)
+        assertEquals(2000, repo.detailWaveform(10)!!.bins) // cached by the served rev
+        assertEquals(1, waveformRequests)
+
+        assertTrue(repo.autoSync())
+        assertTrue(!repo.state.value.cacheStale)
+        assertEquals("w1", repo.library.value!!.track(10)!!.waveformRev)
+        assertEquals(false, repo.autoSync()) // fresh: throttled
+        assertEquals(1, snapshotRequests)
+        assertEquals(2000, repo.detailWaveform(10)!!.bins)
+        assertEquals(1, waveformRequests) // the file stored under w1 is reused
+
+        server.stop(0) // away from the desktop: auto-sync stays quiet
+        assertEquals(false, repo.autoSync(minIntervalMs = 0))
+        assertEquals(null, repo.state.value.error)
+    }
+
+    @Test fun pullWorksAgainstDesktopWithoutTwoWaySync() = runBlocking {
+        twoWay = false // desktop on a build without /edits and /received (#375)
+        val repo = repo()
+        repo.sync().getOrThrow()
+        assertTrue(repo.edit(10, TrackEdit.Energy(5)))
+        deskTitle = "Changed on desk"
+        val library = repo.sync().getOrThrow()
+        assertEquals("Changed on desk", library.track(10)!!.title)
+        assertEquals(5, library.track(10)!!.energy) // edit kept locally, still journaled
+        assertEquals(1, repo.state.value.pendingEdits)
+        assertEquals(null, repo.state.value.error)
     }
 
     @Test fun presyncAudio() = runBlocking {
