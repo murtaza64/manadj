@@ -255,7 +255,7 @@ fun visibleOther(id: DeckId) = if (id == DeckId.A) DeckId.B else DeckId.A
             Key("FORGET", Modifier.weight(1.4f).fillMaxHeight(), Ink.warning, model.heardLatencyCalibrated, textSize = 10, style = KeyStyle.PILL) { model.setHeardLatency(null) }
         }
         Row(Modifier.fillMaxWidth().height(40.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            Key(if (model.calibrating) "LISTENING…" else "CALIBRATE", Modifier.weight(1f).fillMaxHeight(), Ink.play, !model.calibrating, engaged = model.calibrating, description = "Calibrate latency with the microphone", textSize = 11, style = KeyStyle.PILL) {
+            Key(if (model.calibrating) "LISTENING…" else "CALIBRATE", Modifier.weight(1f).fillMaxHeight(), Ink.play, !model.calibrating && !headphones, engaged = model.calibrating, description = "Calibrate latency with the microphone", textSize = 11, style = KeyStyle.PILL) {
                 if (context.checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) model.calibrateLatency()
                 else mic.launch(android.Manifest.permission.RECORD_AUDIO)
             }
@@ -264,11 +264,11 @@ fun visibleOther(id: DeckId) = if (id == DeckId.A) DeckId.B else DeckId.A
         val last = model.lastCalibration
         // Recovery: reopen the output stream (a calibration on a Bluetooth route could leave it silent).
         if (last != null) Key("RESTART AUDIO OUTPUT", Modifier.fillMaxWidth().height(36.dp), Ink.warning, !model.calibrating, description = "Restart audio output", textSize = 10, style = KeyStyle.PILL) {
-            model.configureOutput(model.output?.routing ?: dev.manadj.audio.Routing.STEREO, model.routingDevice)
+            model.restartOutput()
         }
         Text(when {
             model.calibrating -> "Volume up, quiet room: 6 chirps at full level (~7 s)."
-            headphones && last == null -> "Headphones: the phone mic can't hear them — TAP along instead (CALIBRATE still allowed)."
+            headphones -> "Headphones: the phone mic can't hear them — TAP along instead (wrong? set SPEAKER above)."
             last?.seconds != null -> "Measured %.0f ms (spread %.1f ms, %d chirps).".format(last.seconds!! * 1000, last.spreadMillis, last.samples.size)
             last != null -> "Calibration failed: ${last.reason ?: "no clear chirps"}."
             deck == null -> "CALIBRATE uses the mic. TAP needs a playing deck with a beat grid."

@@ -41,7 +41,7 @@ class FxUi {
 /** Hold-wheel feedback: the value strip floating above the held control. */
 data class WheelFeedback(val label: String, val choices: List<String>, val index: Int, val anchorX: Float, val anchorY: Float, val color: androidx.compose.ui.graphics.Color)
 /** Enlarged knob next to the finger while a knob is held (fine mode). */
-data class KnobPopup(val label: String, val kind: KnobKind, val value: Double, val color: androidx.compose.ui.graphics.Color, val fingerX: Float, val fingerY: Float, val reset: () -> Unit, val resetVersion: Int = 0)
+data class KnobPopup(val label: String, val kind: KnobKind, val value: Double, val color: androidx.compose.ui.graphics.Color, val fingerX: Float, val fingerY: Float, val reset: () -> Unit, val resetVersion: Int = 0, val anchorR: Float = 0f, val fine: Boolean = false)
 
 /**
  * Landscape BROWSE: LOADING = the load-target deck stays beside the browser; PLAYING = the outgoing deck and mixer

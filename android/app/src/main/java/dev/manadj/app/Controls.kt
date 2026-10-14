@@ -189,8 +189,9 @@ fun DrawScope.drawKnob(kind: KnobKind, value: Double, r: Float, enabled: Boolean
 }
 
 /**
- * Relative-drag rotary (vertical travel, desktop feel): notch at neutral, double-tap reset, hold still 350ms
- * for fine mode with an enlarged copy beside the finger ([UiModel.knob]).
+ * Relative-drag rotary (desktop feel): notch at neutral, double-tap reset. The enlarged copy ([UiModel.knob])
+ * shows on touch-down, anchored beside the knob (#114). Full range ≈ 1.5× the popup height of drag (#115);
+ * a second finger resting on the knob is the explicit fine modifier (3.5× slower).
  */
 @Composable fun Knob(
     label: String, kind: KnobKind, value: Double, ui: UiModel, model: PlayerModel, deck: DeckId, modifier: Modifier,
@@ -206,72 +207,59 @@ fun DrawScope.drawKnob(kind: KnobKind, value: Double, r: Float, enabled: Boolean
     val tag = "${deck.name} $label"
     Box(modifier.onGloballyPositioned { root = it.positionInRoot() }.semantics { contentDescription = "$tag control"; stateDescription = "${(value * 100).roundToInt()}%"; if (!live) disabled() }.pointerInput(tag, interactive) {
         if (!interactive) { awaitEachGesture { awaitFirstDown(); ui.pending(label) }; return@pointerInput }
-        val scope = CoroutineScope(currentCoroutineContext())
         var lastTap = -1000L
         awaitEachGesture {
             val down = awaitFirstDown(requireUnconsumed = false)
             val first = current
             val id = model.beginGesture(deck, label) { setter(first, it) }
             held = true; down.consume()
+            // Popup immediately, fixed beside the knob for the whole drag.
+            ui.knob = KnobPopup(tag, kind, current, if (live) knobColor(kind, current) else Ink.pending, root.x + this.size.width / 2f, root.y + this.size.height / 2f, { setter(kind.neutral, id) }, anchorR = this.size.width / 2f)
             // Relative drag on a 2D axis (#109): up or right = increase. The axis commits after a small slop
             // (whichever of dx / dy dominates); coordinate c grows in the decrease direction (down / left).
             var axisH: Boolean? = null
             fun coord(p: Offset) = if (axisH == true) -p.x else p.y
-            var baseline = first; var baseY = 0f; var lastPos = down.position; var holdPos = down.position
+            var baseline = first; var baseY = 0f
             var moved = false; var fine = false; var cancelled = false
             var notch = abs(first - kind.neutral) < .001; var notchY = 0f; var previous = first
-            var popupResets = 0
-            val hold = scope.launch {
-                delay(350)
-                if (!moved) {
-                    fine = true; baseline = current; holdPos = lastPos
-                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                    ui.knob = KnobPopup(tag, kind, current, if (live) knobColor(kind, current) else Ink.pending, root.x + down.position.x, root.y + lastPos.y, { setter(kind.neutral, id) })
-                }
-            }
             try {
                 while (true) {
-                    val change = awaitPointerEvent().changes.firstOrNull { it.id == down.id }
+                    val event = awaitPointerEvent()
+                    val change = event.changes.firstOrNull { it.id == down.id }
                     if (change == null || (!change.pressed && change.isConsumed)) { cancelled = true; break }
                     if (!change.pressed) {
-                        if (!moved && !fine && change.uptimeMillis - down.uptimeMillis < 250) {
+                        if (!moved && change.uptimeMillis - down.uptimeMillis < 250) {
                             if (down.uptimeMillis - lastTap < 320) { setter(kind.neutral, id); haptic.performHapticFeedback(HapticFeedbackType.LongPress); lastTap = -1000 } else lastTap = change.uptimeMillis
                         }
                         break
                     }
                     if (!model.gestureActive(id)) break
-                    val p = change.position; lastPos = p
+                    val p = change.position
                     if (axisH == null) {
-                        val from = if (fine) holdPos else down.position
-                        val d = p - from
-                        if (d.getDistance() > (if (fine) 2.dp else 6.dp).toPx()) {
-                            axisH = abs(d.x) > abs(d.y)
-                            if (!fine) { moved = true; hold.cancel() }
-                            baseY = coord(from); notchY = baseY
-                        } else continue
+                        val d = p - down.position
+                        if (d.getDistance() > 6.dp.toPx()) { axisH = abs(d.x) > abs(d.y); moved = true; baseY = coord(down.position); notchY = baseY } else continue
                     }
                     val y = coord(p)
-                    val popup = ui.knob
-                    if (fine && popup != null && popup.label == tag && popup.resetVersion != popupResets) { popupResets = popup.resetVersion; baseline = kind.neutral; baseY = y; notch = true; notchY = y }
-                    if (moved || fine) {
-                        val span = 180.dp.toPx() * (if (fine) 3.5f else 1f)
-                        var next = (baseline - (y - baseY) / span).coerceIn(0.0, 1.0)
-                        val escape = (if (fine) 2.dp else 6.dp).toPx()
-                        if (notch) {
-                            val travel = y - notchY
-                            if (abs(travel) <= escape) next = kind.neutral
-                            else { notch = false; baseline = kind.neutral; baseY = notchY + sign(travel) * escape; next = (kind.neutral - (y - baseY) / span).coerceIn(0.0, 1.0) }
-                        } else if (kind.neutral in 0.01..0.99 && previous != kind.neutral && (previous - kind.neutral) * (next - kind.neutral) <= 0) {
-                            next = kind.neutral; notch = true; notchY = y; haptic.performHapticFeedback(HapticFeedbackType.SegmentTick)
-                        }
-                        previous = next
-                        setter(next, id)
-                        if (fine) ui.knob = ui.knob?.copy(value = next, color = if (live) knobColor(kind, next) else Ink.pending, fingerY = root.y + p.y)
-                        change.consume()
+                    // Fine modifier: another finger resting on the knob; rebase so switching never jumps.
+                    val nowFine = event.changes.any { it.id != down.id && it.pressed }
+                    if (nowFine != fine) { fine = nowFine; baseline = current; baseY = y; if (notch) notchY = y; haptic.performHapticFeedback(HapticFeedbackType.SegmentTick) }
+                    val span = 264.dp.toPx() * (if (fine) 3.5f else 1f)
+                    var next = (baseline - (y - baseY) / span).coerceIn(0.0, 1.0)
+                    val escape = (if (fine) 2.dp else 6.dp).toPx()
+                    if (notch) {
+                        val travel = y - notchY
+                        if (abs(travel) <= escape) next = kind.neutral
+                        else { notch = false; baseline = kind.neutral; baseY = notchY + sign(travel) * escape; next = (kind.neutral - (y - baseY) / span).coerceIn(0.0, 1.0) }
+                    } else if (kind.neutral in 0.01..0.99 && previous != kind.neutral && (previous - kind.neutral) * (next - kind.neutral) <= 0) {
+                        next = kind.neutral; notch = true; notchY = y; haptic.performHapticFeedback(HapticFeedbackType.SegmentTick)
                     }
+                    previous = next
+                    setter(next, id)
+                    ui.knob = ui.knob?.copy(value = next, color = if (live) knobColor(kind, next) else Ink.pending, fine = fine)
+                    event.changes.forEach { if (it.pressed) it.consume() }
                 }
             } catch (cancel: CancellationException) { cancelled = true; throw cancel }
-            finally { hold.cancel(); held = false; if (ui.knob?.label == tag) ui.knob = null; model.finishGesture(id, cancelled) }
+            finally { held = false; if (ui.knob?.label == tag) ui.knob = null; model.finishGesture(id, cancelled) }
         }
     }, contentAlignment = Alignment.Center) {
         // Label sits in the arc's open bottom, so it can only belong to this knob.
@@ -285,22 +273,28 @@ fun DrawScope.drawKnob(kind: KnobKind, value: Double, r: Float, enabled: Boolean
 
 /** The enlarged knob beside the finger while a knob is held still (fine mode). */
 @Composable fun KnobPopupOverlay(ui: UiModel) {
-    val popup = ui.knob ?: return
+    // Keep the last popup through a short fade-out after release.
+    var last by remember { mutableStateOf<KnobPopup?>(null) }
+    ui.knob?.let { last = it }
+    val popup = last ?: return
     val density = androidx.compose.ui.platform.LocalDensity.current
-    val reveal = remember(popup.label) { Animatable(0f) }
-    LaunchedEffect(popup.label) { reveal.animateTo(1f, spring(dampingRatio = .6f, stiffness = 500f)) }
-    BoxWithConstraints(Modifier.fillMaxSize()) {
-        val w = 150.dp; val h = 176.dp
-        val fx = with(density) { popup.fingerX.toDp() }; val fy = with(density) { popup.fingerY.toDp() }
-        // Beside the finger, on the side with more room, never under it.
-        val x = if (fx < maxWidth / 2) (fx + 44.dp).coerceAtMost(maxWidth - w) else (fx - 44.dp - w).coerceAtLeast(0.dp)
-        val y = (fy - h / 2).coerceIn(0.dp, (maxHeight - h).coerceAtLeast(0.dp))
-        Column(Modifier.offset(x, y).size(w, h).graphicsLayer { alpha = reveal.value; scaleX = .85f + .15f * reveal.value; scaleY = scaleX }
-            .halo(popup.color, .5f, 8.dp).padding(8.dp).clip(RoundedCornerShape(10.dp)).background(Ink.panel).border(1.5.dp, popup.color, RoundedCornerShape(10.dp)).padding(6.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(popup.label + " · FINE", color = popup.color.copy(alpha = 1f), size = 11, bold = true)
-            Canvas(Modifier.size(96.dp)) { drawKnob(popup.kind, popup.value, size.minDimension / 2 - 4.dp.toPx(), true) }
-            Text(knobReadout(popup.kind, popup.value), size = 14, bold = true)
-            Key("RESET", Modifier.fillMaxWidth().height(30.dp), popup.color.copy(alpha = 1f), textSize = 11) { popup.reset(); ui.knob = popup.copy(value = popup.kind.neutral, resetVersion = popup.resetVersion + 1) }
+    val shape = LocalScreenShape.current
+    androidx.compose.animation.AnimatedVisibility(ui.knob != null, enter = androidx.compose.animation.fadeIn(tween(70)), exit = androidx.compose.animation.fadeOut(tween(150))) {
+        BoxWithConstraints(Modifier.fillMaxSize()) {
+            val w = 132.dp; val h = 150.dp
+            val cx = with(density) { popup.fingerX.toDp() }; val cy = with(density) { popup.fingerY.toDp() }; val r = with(density) { popup.anchorR.toDp() }
+            // Beside the knob on the side with more room (never over it), vertically centred, kept on screen
+            // and clear of the camera cutout.
+            var x = if (cx < maxWidth / 2) cx + r + 10.dp else cx - r - 10.dp - w
+            x = x.coerceIn(4.dp, (maxWidth - w - 4.dp).coerceAtLeast(4.dp))
+            var y = (cy - h / 2).coerceIn(4.dp, (maxHeight - h - 4.dp).coerceAtLeast(4.dp))
+            val box = with(density) { androidx.compose.ui.geometry.Rect(x.toPx(), y.toPx(), (x + w).toPx(), (y + h).toPx()) }
+            shape.cutouts.firstOrNull { it.overlaps(box) }?.let { k -> y = with(density) { (k.bottom + 4.dp.toPx()).toDp() }.coerceAtMost((maxHeight - h).coerceAtLeast(0.dp)) }
+            Column(Modifier.offset(x, y).size(w, h).halo(popup.color, .5f, 8.dp).padding(8.dp).clip(RoundedCornerShape(10.dp)).background(Ink.panel).border(1.5.dp, popup.color, RoundedCornerShape(10.dp)).padding(6.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(popup.label + if (popup.fine) " · FINE" else "", color = popup.color.copy(alpha = 1f), size = 11, bold = true)
+                Canvas(Modifier.size(84.dp)) { drawKnob(popup.kind, popup.value, size.minDimension / 2 - 4.dp.toPx(), true) }
+                Text(knobReadout(popup.kind, popup.value), size = 14, bold = true)
+            }
         }
     }
 }
