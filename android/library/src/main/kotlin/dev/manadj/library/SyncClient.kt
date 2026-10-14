@@ -11,7 +11,13 @@ import java.net.URL
  * HTTP client for the desktop's /api/device-sync endpoints. Blocking; call off the main thread.
  * [pairCode] is required by the desktop's LAN listener (#373); loopback (adb reverse) ignores it.
  */
-class SyncClient(baseUrl: String, private val pairCode: String? = null, private val timeoutMs: Int = 15_000) {
+class SyncClient(
+    baseUrl: String,
+    private val pairCode: String? = null,
+    private val timeoutMs: Int = 15_000,
+    /** Per-device token from approve-on-desktop pairing (#374); preferred over [pairCode]. */
+    private val deviceToken: String? = null,
+) {
     val baseUrl: String = baseUrl.trimEnd('/')
 
     private fun open(path: String, method: String = "GET"): HttpURLConnection =
@@ -19,14 +25,20 @@ class SyncClient(baseUrl: String, private val pairCode: String? = null, private 
             requestMethod = method
             connectTimeout = timeoutMs
             readTimeout = timeoutMs * 4
-            pairCode?.takeIf { it.isNotBlank() }?.let { setRequestProperty(PAIR_HEADER, it.trim()) }
+            val token = deviceToken?.takeIf { it.isNotBlank() }
+            if (token != null) setRequestProperty(DEVICE_TOKEN_HEADER, token)
+            else pairCode?.takeIf { it.isNotBlank() }?.let { setRequestProperty(PAIR_HEADER, it.trim()) }
         }
 
     private fun HttpURLConnection.checked(): HttpURLConnection {
         val code = responseCode
         if (code == 401) {
             disconnect()
-            throw SyncException("Pairing code missing or wrong — enter the code from desktop Settings › Library › Phone sync")
+            throw SyncException(
+                if (deviceToken.isNullOrBlank()) "Not paired — pair with the desktop (or enter the code from desktop Settings › Library › Phone sync)"
+                else "This phone was unpaired on the desktop — pair again",
+                unpaired = !deviceToken.isNullOrBlank(),
+            )
         }
         if (code !in 200..299) {
             val detail = errorStream?.use { it.readBytes().decodeToString().take(200) }.orEmpty()
@@ -84,5 +96,6 @@ class SyncClient(baseUrl: String, private val pairCode: String? = null, private 
 }
 
 const val PAIR_HEADER = "X-Manadj-Pair"
+const val DEVICE_TOKEN_HEADER = "X-Manadj-Device-Token"
 
-class SyncException(message: String, cause: Throwable? = null) : Exception(message, cause)
+class SyncException(message: String, cause: Throwable? = null, val unpaired: Boolean = false) : Exception(message, cause)

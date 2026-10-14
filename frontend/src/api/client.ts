@@ -79,6 +79,24 @@ export interface DeviceListenerStatus {
   error: string | null;
 }
 
+/** A phone asking to pair (#374); the desktop approves after matching the code. */
+export interface PhonePairRequest {
+  id: string;
+  device_id: string;
+  device_name: string;
+  match_code: string;
+  client: string;
+  status: string;
+  age_s: number;
+}
+
+export interface PairedPhone {
+  device_id: string;
+  name: string;
+  paired_at: string;
+  last_seen: string | null;
+}
+
 // Export for use in other components (e.g., for static file URLs)
 export { BACKEND_URL };
 
@@ -1839,6 +1857,25 @@ export const api = {
       });
       if (!res.ok) throw new Error(`Failed to update phone sync (${res.status})`);
       return res.json();
+    },
+    pairRequests: async (): Promise<PhonePairRequest[]> => {
+      const res = await fetch(`${API_BASE}/device-listener/pair-requests`);
+      if (!res.ok) throw new Error(`Failed to load pairing requests (${res.status})`);
+      return res.json();
+    },
+    decide: async (id: string, decision: 'approve' | 'deny'): Promise<PhonePairRequest> => {
+      const res = await fetch(`${API_BASE}/device-listener/pair-requests/${id}/${decision}`, { method: 'POST' });
+      if (!res.ok) throw new Error(`Pairing request is gone (${res.status})`);
+      return res.json();
+    },
+    devices: async (): Promise<PairedPhone[]> => {
+      const res = await fetch(`${API_BASE}/device-listener/devices`);
+      if (!res.ok) throw new Error(`Failed to load paired phones (${res.status})`);
+      return res.json();
+    },
+    revoke: async (deviceId: string): Promise<void> => {
+      const res = await fetch(`${API_BASE}/device-listener/devices/${encodeURIComponent(deviceId)}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error(`Failed to unpair (${res.status})`);
     },
     rotate: async (): Promise<DeviceListenerStatus> => {
       const res = await fetch(`${API_BASE}/device-listener/rotate`, { method: 'POST' });

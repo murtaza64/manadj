@@ -57,6 +57,10 @@ private val SORTS = listOf(SortColumn.DATE_ADDED, SortColumn.TITLE, SortColumn.A
     var settings by remember { mutableStateOf(false) }
     var url by remember { mutableStateOf(repo.baseUrl) }
     var pair by remember { mutableStateOf(repo.pairCode.orEmpty()) }
+    val discovery = remember { DesktopDiscovery(context) }
+    val found by discovery.found.collectAsState()
+    var pairing by remember { mutableStateOf<PairingState>(PairingState.Idle) }
+    DisposableEffect(settings) { if (settings) discovery.start(); onDispose { discovery.stop() } }
     var error by remember { mutableStateOf<String?>(null) }
     /** Track awaiting a second tap because the target deck is playing. */
     var confirm by remember { mutableStateOf<Int?>(null) }
@@ -85,6 +89,18 @@ private val SORTS = listOf(SortColumn.DATE_ADDED, SortColumn.TITLE, SortColumn.A
             Key("CLOSE", Modifier.width(64.dp).fillMaxHeight()) { model.browser = null }
         }
         if (settings) Column(Modifier.fillMaxWidth().border(1.dp, Ink.edge).padding(6.dp)) {
+            Text(if (LibraryHolder.isPaired(context)) "Paired · ${repo.baseUrl}" else "Desktops on this network (Phone sync on)", color = Ink.muted, size = 11)
+            for (desktop in found) Row(Modifier.fillMaxWidth().height(44.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("${desktop.name}  ${desktop.host}:${desktop.port}", Modifier.weight(1f), Ink.text, 12)
+                Key("PAIR", Modifier.width(72.dp).fillMaxHeight(), Ink.play) { LibraryHolder.pair(context, desktop) { pairing = it } }
+            }
+            when (val p = pairing) {
+                is PairingState.AwaitingApproval -> Text("Approve on ${p.desktop} — code ${p.matchCode}", color = Ink.warning, size = 16, bold = true)
+                is PairingState.Paired -> Text("Paired with ${p.desktop}", color = Ink.play, size = 12)
+                is PairingState.Failed -> Text(p.reason, color = Ink.warning, size = 12)
+                PairingState.Requesting -> Text("Asking…", color = Ink.muted, size = 12)
+                PairingState.Idle -> {}
+            }
             Text("Desktop URL: http://<desktop ip>:<port> from desktop Settings › Library › Phone sync (or 127.0.0.1:8127 over adb reverse)", color = Ink.muted, size = 11, lines = 2)
             Field(url, Modifier.fillMaxWidth().height(40.dp)) { url = it; LibraryHolder.setUrl(context, it) }
             Text("Pairing code", color = Ink.muted, size = 11)

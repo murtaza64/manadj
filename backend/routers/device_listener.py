@@ -47,3 +47,34 @@ def rotate():
         raise HTTPException(status_code=409, detail="Phone sync is off")
     device_listener.rotate_pair_code()
     return asdict(device_listener.status())
+
+
+# ── Zero-typing pairing (#374): the desktop side of approve-on-desktop ──
+
+
+@router.get("/pair-requests")
+def pair_requests():
+    """Pending phone pairing requests (the app-wide approve prompt polls this)."""
+    return [r.public() for r in device_listener.pairing.pending()]
+
+
+@router.post("/pair-requests/{request_id}/{decision}")
+def decide(request_id: str, decision: str):
+    if decision not in ("approve", "deny"):
+        raise HTTPException(status_code=404, detail="Unknown decision")
+    req = device_listener.pairing.decide(request_id, decision == "approve")
+    if req is None:
+        raise HTTPException(status_code=404, detail="No such pending request")
+    return req.public()
+
+
+@router.get("/devices")
+def devices():
+    return [d.public() for d in device_listener.registry.list()]
+
+
+@router.delete("/devices/{device_id}")
+def revoke(device_id: str):
+    if not device_listener.registry.revoke(device_id):
+        raise HTTPException(status_code=404, detail="No such device")
+    return {"revoked": device_id}

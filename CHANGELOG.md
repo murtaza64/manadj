@@ -4,6 +4,7 @@ All notable changes to manaDJ. Format: [Keep a Changelog](https://keepachangelog
 versions follow [Semantic Versioning](https://semver.org/). Install: [docs/install.md](docs/install.md).
 
 ## [Unreleased]
+- Phone sync (desktop side): Settings → Library → Phone sync opens an opt-in LAN port that serves only the library snapshot, preview waveforms and audio to the manaDJ Android app, behind a pairing code (#372, #373).
 
 ## [0.1.0-rc.5] - 2026-10-13
 - Windows: the backend no longer fails to start on the FEEDBACK lock (POSIX-only `fcntl`), which blocked the 0.1.0-rc.4 Windows installer.

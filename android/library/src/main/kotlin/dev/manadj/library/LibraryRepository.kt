@@ -44,6 +44,8 @@ class LibraryRepository(
     @Volatile var baseUrl: String,
     /** Desktop LAN listener pairing code (#373); unused over loopback. */
     @Volatile var pairCode: String? = null,
+    /** Per-device token from approve-on-desktop pairing (#374). */
+    @Volatile var deviceToken: String? = null,
     private val io: CoroutineDispatcher = Dispatchers.IO,
 ) {
     val store = LibraryStore(root)
@@ -59,7 +61,7 @@ class LibraryRepository(
     private val audioLocks = ConcurrentHashMap<Int, Mutex>()
     private val previewCache = ConcurrentHashMap<String, PreviewWaveform>()
 
-    private fun client() = SyncClient(baseUrl, pairCode)
+    private fun client() = SyncClient(baseUrl, pairCode, deviceToken = deviceToken)
 
     private fun build(snapshot: Snapshot) = Library(snapshot) { track ->
         val key = "${track.id}-${track.previewRev ?: return@Library null}"

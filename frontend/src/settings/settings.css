@@ -362,3 +362,8 @@
   letter-spacing: 0.12em;
   color: var(--accent);
 }
+.settings-phone-device {
+  display: flex;
+  align-items: center;
+  gap: var(--space-12);
+}

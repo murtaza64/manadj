@@ -24,6 +24,8 @@ class SyncTest {
     private var audioRequests = 0
     @Volatile private var previewRev = "p1"
     @Volatile private var requiredCode: String? = null
+    @Volatile private var deviceToken: String? = null
+    @Volatile private var pairPolls = 0
 
     private fun snapshotJson() = """
         {"version":1,"generated_at":"2026-10-14T12:00:00+00:00",
@@ -46,7 +48,8 @@ class SyncTest {
         root = Files.createTempDirectory("library-sync").toFile()
         server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
         server.createContext("/api/device-sync/snapshot") { ex ->
-            if (requiredCode != null && ex.requestHeaders.getFirst(PAIR_HEADER) != requiredCode) {
+            val tokenOk = deviceToken != null && ex.requestHeaders.getFirst(DEVICE_TOKEN_HEADER) == deviceToken
+            if (requiredCode != null && !tokenOk && ex.requestHeaders.getFirst(PAIR_HEADER) != requiredCode) {
                 ex.sendResponseHeaders(401, -1); ex.close(); return@createContext
             }
             val body = snapshotJson().toByteArray()
@@ -70,6 +73,16 @@ class SyncTest {
         server.createContext("/api/device-sync/tracks/10/audio") { ex ->
             audioRequests++
             ex.sendResponseHeaders(200, audio.size.toLong()); ex.responseBody.use { it.write(audio) }
+        }
+        server.createContext("/api/device-pair/request") { ex ->
+            val body = if (ex.requestMethod == "POST") {
+                assertTrue(ex.requestBody.readBytes().decodeToString().contains("\"device_name\":\"Pixel\""))
+                """{"id":"t1","match_code":"0427","expires_s":30}"""
+            } else {
+                pairPolls++
+                if (pairPolls < 2) """{"status":"pending"}""" else """{"status":"approved","token":"tok-1"}"""
+            }.toByteArray()
+            ex.sendResponseHeaders(200, body.size.toLong()); ex.responseBody.use { it.write(body) }
         }
         server.start()
     }
@@ -133,9 +146,26 @@ class SyncTest {
         requiredCode = "ABCDE-FGHJK"
         val repo = repo()
         assertTrue(repo.sync().isFailure)
-        assertTrue(repo.state.value.error!!.startsWith("Pairing code"))
+        assertTrue(repo.state.value.error!!.startsWith("Not paired"))
         repo.pairCode = "ABCDE-FGHJK"
         assertEquals(2, repo.sync().getOrThrow().tracks.size)
+    }
+
+    @Test fun approveOnDesktopPairing() = runBlocking {
+        requiredCode = "ABCDE-FGHJK"
+        deviceToken = "tok-1"
+        val states = mutableListOf<PairingState>()
+        val url = "http://127.0.0.1:${server.address.port}"
+        val token = PairingClient(url).pair("device-0001", "Pixel", "manaDJ on desk", pollMs = 10) { states += it }
+        assertEquals("tok-1", token)
+        assertEquals(PairingState.AwaitingApproval("manaDJ on desk", "0427"), states[1])
+        assertEquals(PairingState.Paired("manaDJ on desk"), states.last())
+        val repo = repo()
+        repo.deviceToken = token
+        assertEquals(2, repo.sync().getOrThrow().tracks.size) // token alone suffices, no typed code
+        repo.deviceToken = "revoked"
+        assertTrue(repo.sync().isFailure)
+        assertTrue(repo.state.value.error!!.contains("unpaired"))
     }
 
     @Test fun presyncAudio() = runBlocking {

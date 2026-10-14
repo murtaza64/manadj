@@ -3,12 +3,16 @@ package dev.manadj.app.library
 import android.content.Context
 import dev.manadj.app.PlayerModel
 import dev.manadj.audio.DeckId
+import dev.manadj.library.FoundDesktop
 import dev.manadj.library.LibraryRepository
+import dev.manadj.library.PairingClient
+import dev.manadj.library.PairingState
 import dev.manadj.library.LibraryTrack
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 
 /** App-scoped Library (#372): the synced desktop Library cache and load-to-deck. */
@@ -24,7 +28,10 @@ object LibraryHolder {
         instance ?: run {
             val app = context.applicationContext
             val prefs = app.getSharedPreferences("library", Context.MODE_PRIVATE)
-            LibraryRepository(File(app.filesDir, "library"), prefs.getString("url", DEFAULT_URL)!!, prefs.getString("pair", null)).also { repo ->
+            LibraryRepository(
+                File(app.filesDir, "library"), prefs.getString("url", DEFAULT_URL)!!, prefs.getString("pair", null),
+                deviceToken = prefs.getString("token", null),
+            ).also { repo ->
                 instance = repo
                 scope.launch { repo.open() }
             }
@@ -45,6 +52,47 @@ object LibraryHolder {
     }
 
     fun pairCode(context: Context): String = repository(context).pairCode.orEmpty()
+
+    // ── Zero-typing pairing (#374) ──
+
+    private fun prefs(context: Context) = context.applicationContext.getSharedPreferences("library", Context.MODE_PRIVATE)
+
+    /** Stable random id for this install; the desktop lists and revokes by it. */
+    fun deviceId(context: Context): String = prefs(context).getString("device_id", null)
+        ?: java.util.UUID.randomUUID().toString().also { prefs(context).edit().putString("device_id", it).apply() }
+
+    /** Name the desktop shows in its approve prompt and paired-phones list. */
+    fun deviceName(): String = listOf(android.os.Build.MANUFACTURER, android.os.Build.MODEL)
+        .filter { it.isNotBlank() }.distinct().joinToString(" ").ifBlank { "Android phone" }
+
+    /** Paired with a device token (vs. the typed-code fallback / loopback). */
+    fun isPaired(context: Context) = !repository(context).deviceToken.isNullOrBlank()
+
+    /** Forget the device token (e.g. after the desktop unpaired this phone). */
+    fun unpair(context: Context) {
+        repository(context).deviceToken = null
+        prefs(context).edit().remove("token").apply()
+    }
+
+    /**
+     * Pair with [desktop] (found by [DesktopDiscovery] or typed): requests
+     * pairing, reports [onState] (show AwaitingApproval.matchCode big), and on
+     * approval stores the URL + device token and runs a first sync.
+     */
+    fun pair(context: Context, desktop: FoundDesktop, onState: (PairingState) -> Unit) {
+        val repo = repository(context)
+        scope.launch {
+            val token = withContext(Dispatchers.IO) {
+                PairingClient(desktop.url).pair(deviceId(context), deviceName(), desktop.name) { state ->
+                    scope.launch { onState(state) }
+                }
+            } ?: return@launch
+            setUrl(context, desktop.url)
+            repo.deviceToken = token
+            prefs(context).edit().putString("token", token).apply()
+            repo.sync()
+        }
+    }
 
     /** The library Track id a deck holds, when it was loaded from the Library. */
     fun trackOn(model: PlayerModel, deck: DeckId): Int? =
