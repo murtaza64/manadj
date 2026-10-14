@@ -98,6 +98,31 @@ class RealPlaybackTest {
         assertTrue(model.output!!.decks.getValue(DeckId.B).playing)
     }
 
+    @Test fun id3TempoTagsParse() {
+        fun tag(version: Int, bpm: String): ByteArray {
+            val text = byteArrayOf(0) + bpm.toByteArray(Charsets.ISO_8859_1)
+            val size = text.size
+            val frame = "TBPM".toByteArray() + (if (version == 4) byteArrayOf(0, 0, 0, size.toByte()) else byteArrayOf(0, 0, 0, size.toByte())) + byteArrayOf(0, 0) + text
+            val header = "ID3".toByteArray() + byteArrayOf(version.toByte(), 0, 0, 0, 0, 0, frame.size.toByte())
+            return header + frame + ByteArray(64)
+        }
+        assertEquals(128.0, id3Bpm(tag(3, "128").inputStream())!!, 0.0)
+        assertEquals(124.5, id3Bpm(tag(4, "124.5").inputStream())!!, 0.0)
+        assertNull(id3Bpm("RIFF....WAVE".toByteArray().inputStream()))
+    }
+
+    @Test fun beatJumpAndLoopThroughTheModel() {
+        load(DeckId.A, tone(220.0))
+        onMain { model.setGrid(DeckId.A, 120.0, 0.0); model.submit(AudioCommand.Seek(DeckId.A, 2.0)) }
+        await("grid applied") { model.decks.getValue(DeckId.A).snapshot?.bpm == 120.0 && model.decks.getValue(DeckId.A).ready }
+        onMain { model.decks.getValue(DeckId.A).jumpBeats = 4.0; model.jump(DeckId.A, 1) }
+        await("jumped 2 s") { (model.decks.getValue(DeckId.A).snapshot?.sourceSeconds ?: 0.0) in 3.99..4.01 }
+        onMain { model.toggleLoop(DeckId.A) }
+        await("loop engaged") { model.decks.getValue(DeckId.A).snapshot?.loop?.beats == 4.0 }
+        onMain { model.resizeLoop(DeckId.A, LoopChange.HALVE) }
+        await("loop halved") { model.decks.getValue(DeckId.A).snapshot?.loop?.beats == 2.0 }
+    }
+
     @Test fun replacementGenerationAndFailuresRemainVisible() {
         val first = tone(180.0)
         val second = tone(420.0)

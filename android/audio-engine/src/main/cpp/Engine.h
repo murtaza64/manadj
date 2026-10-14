@@ -15,7 +15,10 @@ constexpr int kMainCueSlot = kHotCues; // previewSlot value for a main-cue previ
 constexpr uint32_t kRingFrames = 65536; // ~0.5 MiB/deck, 2 MiB total at stereo float.
 constexpr int kQueueSize = 256;
 constexpr int kFadeFrames = 240;        // ~5 ms transport envelope / relocation crossfade at 48 kHz.
-constexpr int kHeadSlots = kHotCues + 1; // Hot cues 0..7 + main cue.
+constexpr int kLoopSlot = kHotCues + 1;   // Head slot holding the active loop's start.
+constexpr int kHeadSlots = kHotCues + 2;  // Hot cues 0..7 + main cue + loop start.
+constexpr double kLoopMinBeats = 0.125, kLoopMaxBeats = 128, kLoopDefaultBeats = 4; // desktop loop.ts
+constexpr double kGridlessBpm = 120;     // desktop jumpBeats fallback for BPM-less tracks
 constexpr int kHeadFrames = 8192;       // Pre-decoded audio at each cue (~170 ms at 48 kHz).
 constexpr int kTailFrames = 2048;       // Old audio captured for a crossfade (240 frames at <=8x ratio).
 constexpr double kAtCueEpsilon = 0.01;  // Desktop transport.ts AT_CUE_EPSILON.
@@ -55,7 +58,9 @@ struct Head {
 };
 
 enum class Op : int { Prepare, Play, Pause, CueDown, CueUp, HotCueDown, HotCueUp,
-                       HotCueSet, HotCueClear, Seek, Fader, Trim, Crossfade, Pitch, Bend, Pfl, CueMix, Eq, Filter };
+                       HotCueSet, HotCueClear, Seek, Fader, Trim, Crossfade, Pitch, Bend, Pfl, CueMix, Eq, Filter,
+                       SetGrid, BeatJump, LoopToggle, LoopResize, LoopPreset, Quantize };
+// LoopResize slot: 0 halve, 1 double, 2 set to value beats.
 struct Command {
     Op op;
     int deck;
@@ -111,6 +116,10 @@ struct Deck {
     std::atomic<bool> pfl{false};
     std::array<std::atomic<float>, 3> eq{};  // knob values 0..1 (low, mid, high), for snapshots
     std::atomic<float> filter{0};             // knob -1..1
+    // Beat grid (constant tempo; bpm <= 0 = none) and the active loop (seconds, desktop LoopRegion).
+    std::atomic<double> bpm{0}, gridAnchor{0};
+    std::atomic<bool> loopActive{false};
+    std::atomic<double> loopStart{0}, loopEnd{0}, loopBeats{kLoopDefaultBeats}, pendingLoopBeats{kLoopDefaultBeats};
     // Strip DSP (callback-private): LR4 isolator EQ, sweep filter.
     dsp::Biquad eqLow[2], eqMidHp[2], eqMidLp[2], eqHigh[2];
     float eqGain[3] = {1, 1, 1}, eqTarget[3] = {1, 1, 1};
@@ -171,6 +180,7 @@ public:
     void setRouting(Routing routing) { routing_.store(static_cast<int>(routing)); }
     Routing routing() const { return static_cast<Routing>(routing_.load()); }
     float cueMix() const { return cueMix_.load(); }
+    bool quantize() const { return quantize_.load(); }
     Deck& deck(int index) { return decks_[index]; }
     const Deck& deck(int index) const { return decks_[index]; }
     int outputRate() const { return outputRate_.load(); }
@@ -191,10 +201,13 @@ private:
     std::atomic<float> crossfade_{0};
     std::atomic<float> cueMix_{0};  // Headphone blend: 0 = cue bus only, 1 = master only.
     std::atomic<int> routing_{0};
+    std::atomic<bool> quantize_{false};
     std::array<float, kBlockFrames * 2> master_{};
     std::array<float, kBlockFrames * 2> cue_{};
     void renderBuses(int frames) noexcept;
     bool renderSource(Deck& d, float* strip, int frames) noexcept;
+    bool renderTail(Deck& d, float* strip, int frames) noexcept;
+    int renderSegment(Deck& d, float* strip, int frames, bool& active) noexcept;
     void designEq(Deck& d, double rate) noexcept;
     void resetStrip(Deck& d) noexcept;
     static constexpr int kSweepBlock = 32;
@@ -202,7 +215,8 @@ private:
     double stripRate_ = 0;
     static float ceiling(float value) noexcept;
     void updateGain(int index) noexcept;
-    void relocate(Deck& d, double seconds, int slot = -1) noexcept;
+    void relocate(Deck& d, double seconds, int slot = -1, double overshootFrames = 0) noexcept;
+    void applyLoopResize(Deck& d, double beats) noexcept;
     void stop(Deck& d) noexcept;
     void captureTail(Deck& d) noexcept;
     void releaseHead(Deck& d) noexcept;

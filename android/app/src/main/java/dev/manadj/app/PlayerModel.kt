@@ -25,6 +25,8 @@ class DeckUi(val id: DeckId) {
     /** EQ knobs 0..1 (low, mid, high) and filter -1..1: optimistic until the callback applies them. */
     val eq = mutableStateListOf(.5, .5, .5)
     var filter by mutableDoubleStateOf(0.0)
+    /** Beat-jump size (desktop beatjump.ts: 1..128, default 32); a UI preference, not engine state. */
+    var jumpBeats by mutableDoubleStateOf(32.0)
     val generation = AtomicLong()
     var pendingLoadCommandId: Long? = null
     val pendingControls = mutableMapOf<String, Long>()
@@ -186,6 +188,8 @@ class PlayerModel(application: Application) : AndroidViewModel(application) {
                             lastReceipt = receipt
                             if (!receipt.accepted) throw IllegalStateException(receipt.reason)
                             ui.source = metadata; ui.pendingLoadCommandId = receipt.id
+                            // Grid until a library beatgrid exists: tagged BPM anchored at 0 s (or gridless).
+                            submit(AudioCommand.SetGrid(deck, metadata.bpm ?: 0.0, 0.0))
                             sources.removeAll { it.id == metadata.id }; sources.add(0, metadata); catalog.remember(sources)
                             browser = null
                         }
@@ -205,6 +209,14 @@ class PlayerModel(application: Application) : AndroidViewModel(application) {
     fun updateTrim(deck: DeckId, value: Double, gesture: String? = null) = control(deck, "trim", AudioCommand.SetTrim(deck, value, gesture)) { it.trim = value }
     fun updatePitch(deck: DeckId, value: Double, gesture: String? = null) = control(deck, "pitch", AudioCommand.SetPitch(deck, value, gesture)) { it.pitch = value }
     fun updateBend(deck: DeckId, value: Double, gesture: String? = null) = control(deck, "bend", AudioCommand.SetBend(deck, value, gesture)) { it.bend = value }
+    /** Grid source for library tracks (#372): constant tempo + first-beat anchor; bpm <= 0 clears. */
+    fun setGrid(deck: DeckId, bpm: Double, anchorSeconds: Double) = submit(AudioCommand.SetGrid(deck, bpm, anchorSeconds))
+    fun jump(deck: DeckId, direction: Int) = submit(AudioCommand.BeatJump(deck, direction * decks.getValue(deck).jumpBeats))
+    fun resizeJump(deck: DeckId, factor: Double) { decks.getValue(deck).let { it.jumpBeats = (it.jumpBeats * factor).coerceIn(1.0, 128.0) } }
+    fun toggleLoop(deck: DeckId) = submit(AudioCommand.LoopToggle(deck))
+    fun resizeLoop(deck: DeckId, change: LoopChange) = submit(AudioCommand.LoopResize(deck, change))
+    fun setQuantize(on: Boolean) = submit(AudioCommand.SetQuantize(on))
+
     fun updateEq(deck: DeckId, band: Int, value: Double, gesture: String? = null) = control(deck, "eq$band", AudioCommand.SetEq(deck, band, value, gesture)) { it.eq[band] = value }
     fun updateFilter(deck: DeckId, position: Double, gesture: String? = null) = control(deck, "filter", AudioCommand.SetFilter(deck, position, gesture)) { it.filter = position }
     /** [value] is the fader throw 0 (A) .. 1 (B); the engine takes -1..1. */

@@ -175,7 +175,7 @@ class MainActivity : ComponentActivity() {
         Row(Modifier.fillMaxWidth().height(48.dp)) { for (tab in listOf("PADS", "MIX")) Key(tab, Modifier.weight(1f).fillMaxHeight(), engaged = model.workspace == tab) { model.workspace = tab }; Pending("BEAT FX\nPENDING", Modifier.weight(1f).fillMaxHeight()) }
         if (model.workspace == "MIX") Mixer(model, Modifier.weight(1f).fillMaxWidth())
         else Row(Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            for (id in model.visibleDecks) Column(Modifier.weight(1f).fillMaxHeight()) { Pads(model.decks.getValue(id), model, Modifier.weight(1f).fillMaxWidth(), if (landscape) 4 else 2); if (!landscape) Pending("BEAT JUMPS / LOOPS · GRID PENDING", Modifier.fillMaxWidth().height(48.dp)) }
+            for (id in model.visibleDecks) Column(Modifier.weight(1f).fillMaxHeight()) { Pads(model.decks.getValue(id), model, Modifier.weight(1f).fillMaxWidth(), if (landscape) 4 else 2); if (!landscape) JumpLoopRow(model.decks.getValue(id), model, Modifier.fillMaxWidth().height(96.dp)) }
         }
     }
 }
@@ -195,7 +195,7 @@ class MainActivity : ComponentActivity() {
                 Pending("CENTRAL BEAT FX · DSP PENDING", Modifier.fillMaxWidth().height(48.dp))
             } else {
                 val ui = model.decks.getValue(if (part == 0) DeckId.A else DeckId.B)
-                Column(Modifier.weight(1f).fillMaxHeight()) { Pads(ui, model, Modifier.weight(1f).fillMaxWidth()); Pending("LOOP / GRID PENDING", Modifier.fillMaxWidth().height(48.dp)); Bend(ui, model, Modifier.fillMaxWidth().height(48.dp)); Transport(ui, model, Modifier.fillMaxWidth().height(96.dp)) }
+                Column(Modifier.weight(1f).fillMaxHeight()) { Pads(ui, model, Modifier.weight(1f).fillMaxWidth()); JumpLoopRow(ui, model, Modifier.fillMaxWidth().height(48.dp)); Bend(ui, model, Modifier.fillMaxWidth().height(48.dp)); Transport(ui, model, Modifier.fillMaxWidth().height(96.dp)) }
             }
         }
     }

@@ -7,7 +7,7 @@
 
 namespace {
 constexpr int kHeader = 16;
-constexpr int kDeckFields = 28 + manadj::kHotCues;
+constexpr int kDeckFields = 36 + manadj::kHotCues;
 constexpr int kSnapshotSize = kHeader + manadj::kDeckCount * kDeckFields;
 
 /*
@@ -149,9 +149,17 @@ Java_dev_manadj_audio_AudioEngine_nativeClose(JNIEnv*, jobject, jlong handle) {
 extern "C" JNIEXPORT jlong JNICALL
 Java_dev_manadj_audio_AudioEngine_nativeSubmit(JNIEnv*, jobject, jlong handle, jint op, jint deck,
                                                   jdouble value, jlong load, jint slot) {
-    if (op < 0 || op > static_cast<int>(manadj::Op::Eq)) return 0; // Filter goes through nativeSubmitFilter.
+    if (op < 0 || op > static_cast<int>(manadj::Op::Quantize) || op == static_cast<int>(manadj::Op::Filter)) return 0; // Filter: nativeSubmitFilter.
+    if (op == static_cast<int>(manadj::Op::SetGrid)) return 0; // nativeSetGrid carries the anchor.
     return static_cast<jlong>(output(handle)->engine.submit(static_cast<manadj::Op>(op), deck, value,
                                                             static_cast<uint64_t>(load), slot));
+}
+
+extern "C" JNIEXPORT jlong JNICALL
+Java_dev_manadj_audio_AudioEngine_nativeSetGrid(JNIEnv*, jobject, jlong handle, jint deck, jdouble bpm, jdouble anchor) {
+    if (!std::isfinite(bpm) || !std::isfinite(anchor)) return 0;
+    const double aux[5] = {anchor, 0, 0, 0, 0};
+    return static_cast<jlong>(output(handle)->engine.submit(manadj::Op::SetGrid, deck, bpm, 0, 0, aux));
 }
 
 extern "C" JNIEXPORT jlong JNICALL
@@ -171,6 +179,7 @@ Java_dev_manadj_audio_AudioEngine_nativeTransport(JNIEnv* env, jobject, jlong ha
                                              static_cast<double>(d.ringOffset.load())};
     for (int h = 0; h < manadj::kHotCues; ++h) values[4 + h] = d.hotcues[h].load();
     values[4 + manadj::kMainCueSlot] = d.cue.load();
+    values[4 + manadj::kLoopSlot] = d.loopActive.load() ? d.loopStart.load() : -1;
     env->SetDoubleArrayRegion(out, 0, 4 + manadj::kHeadSlots, values);
 }
 
@@ -247,7 +256,7 @@ Java_dev_manadj_audio_AudioEngine_nativeSnapshot(JNIEnv* env, jobject, jlong han
         static_cast<double>(sink->lastError.load()), static_cast<double>(e.accepted()),
         static_cast<double>(e.applied()), e.crossfade(), open ? 1.0 : 0.0,
         static_cast<double>(sink->reopenCount.load()), static_cast<double>(static_cast<int>(e.routing())),
-        static_cast<double>(sink->channels.load()), e.cueMix(), 0,
+        static_cast<double>(sink->channels.load()), e.cueMix(), e.quantize() ? 1.0 : 0.0,
     };
     for (int i = 0; i < manadj::kDeckCount; ++i) {
         const auto& d = e.deck(i);
@@ -276,12 +285,19 @@ Java_dev_manadj_audio_AudioEngine_nativeSnapshot(JNIEnv* env, jobject, jlong han
         int heads = 0;
         for (int h = 0; h < manadj::kHeadSlots; ++h)
             if ((d.heads[h].state.load() & 3) == manadj::kHeadReady && d.heads[h].load.load() == d.loadId.load() &&
-                d.heads[h].seconds.load() == (h == manadj::kMainCueSlot ? d.cue.load() : d.hotcues[h].load())) heads |= 1 << h;
+                d.heads[h].seconds.load() == (h == manadj::kMainCueSlot ? d.cue.load() : h == manadj::kLoopSlot ? d.loopStart.load() : d.hotcues[h].load())) heads |= 1 << h;
         data[n + 19] = heads;
         data[n + 20] = d.pfl.load() ? 1 : 0;
         for (int b = 0; b < 3; ++b) data[n + 21 + b] = d.eq[b].load();
         data[n + 24] = d.filter.load();
-        for (int h = 0; h < manadj::kHotCues; ++h) data[n + 28 + h] = d.hotcues[h].load();
+        data[n + 25] = d.bpm.load();
+        data[n + 26] = d.gridAnchor.load();
+        data[n + 27] = d.loopActive.load() ? 1 : 0;
+        data[n + 28] = d.loopStart.load();
+        data[n + 29] = d.loopEnd.load();
+        data[n + 30] = d.loopBeats.load();
+        data[n + 31] = d.pendingLoopBeats.load();
+        for (int h = 0; h < manadj::kHotCues; ++h) data[n + 36 + h] = d.hotcues[h].load();
     }
     auto result = env->NewDoubleArray(kSnapshotSize);
     if (result) env->SetDoubleArrayRegion(result, 0, kSnapshotSize, data);

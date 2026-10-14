@@ -15,4 +15,5 @@ Native Compose app (`:app`, id `dev.murt.manadj`; installs alongside the #365 pr
 - Layout key (top right): L1 portrait workspace (PADS / MIX tabs, transports at the bottom); L3 dense landscape (both decks' pads + transport, central mixer, vertical detail rulers; needs ≥760×360 dp).
 - CUE / hot cues: desktop semantics. Empty pad stores a hot cue at the current position; set pad is a gated trigger (hold to preview when paused, jump when playing).
 - Ruler: drag to seek. BEND: hold left/right half, slide. Pitch key: varispeed ±8 %.
-- Marked PENDING: EQ/filter, Beat FX, loops/jumps/grid, waveforms, key lock, sync, scratch, headphone cue.
+- Jumps/loops (PADS tab, under the pads): ◀n / n▶ jump by n beats (÷ × change n, 1..128); ½ ⟳n 2× loop (needs a BPM: ID3 TBPM tag on local files, else NO BPM). MIX tab: EQ HI/MID/LOW, FILTER, CUE (headphone PFL). Header status line → output routing panel.
+- Marked PENDING: Beat FX, waveforms (ported by #371), key lock, sync, scratch.

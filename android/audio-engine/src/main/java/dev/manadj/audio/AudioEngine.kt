@@ -10,6 +10,10 @@ import java.util.concurrent.atomic.AtomicReferenceArray
 
 enum class DeckId { A, B, C, D }
 enum class LoadState { EMPTY, LOADING, READY, ERROR }
+enum class LoopChange { HALVE, DOUBLE, SET }
+
+/** Active loop region in source seconds (desktop LoopRegion). */
+data class LoopRegion(val start: Double, val end: Double, val beats: Double)
 
 /** Output stage mapping of the master and cue (PFL) buses. Ordinals match native `Routing`. */
 enum class Routing(val label: String) {
@@ -44,6 +48,20 @@ sealed interface AudioCommand {
     data class SetEq(override val deck: DeckId, val band: Int, val value: Double, override val gestureId: String? = null) : AudioCommand
     /** Sweep filter -1 (LPF) .. 0 (bypass, deadzone ±0.03) .. +1 (HPF). */
     data class SetFilter(override val deck: DeckId, val position: Double, override val gestureId: String? = null) : AudioCommand
+    /** Constant-tempo beat grid (bpm <= 0 clears): beat k at anchorSeconds + k * 60 / bpm. */
+    data class SetGrid(override val deck: DeckId, val bpm: Double, val anchorSeconds: Double, override val gestureId: String? = null) : AudioCommand
+    /** Relative jump by signed beats (gridless: 120 BPM); an active loop moves with it. */
+    data class BeatJump(override val deck: DeckId, val beats: Double, override val gestureId: String? = null) : AudioCommand
+    /** Engage at the playhead (snapped under quantize) with the pending size, or release. Inert without a grid. */
+    data class LoopToggle(override val deck: DeckId, override val gestureId: String? = null) : AudioCommand
+    /** Preset pad: engage at [beats]; same size while looping releases; other size resizes in place. */
+    data class LoopPreset(override val deck: DeckId, val beats: Double, override val gestureId: String? = null) : AudioCommand
+    /** Halve/double (or set) the active loop, anchored at its start; idle = pending size. 1/8..128 beats. */
+    data class LoopResize(override val deck: DeckId, val change: LoopChange, val beats: Double = 0.0, override val gestureId: String? = null) : AudioCommand
+    /** Global quantize (snaps loop engage to the nearest beat). */
+    data class SetQuantize(val on: Boolean, override val gestureId: String? = null) : AudioCommand {
+        override val deck = DeckId.A
+    }
     /** Pre-fader listen: sends the deck (post-trim) to the cue bus. */
     data class SetPfl(override val deck: DeckId, val on: Boolean, override val gestureId: String? = null) : AudioCommand
     /** Headphone feed: 0 = cue bus only, 1 = master only. */
@@ -65,12 +83,14 @@ data class DeckSnapshot(
     val playing: Boolean, val previewing: Boolean, val pfl: Boolean,
     /** EQ knobs (low, mid, high) 0..1 and filter -1..1 as applied by the callback. */
     val eq: List<Double>, val filter: Double,
+    /** Grid tempo (null = gridless) and first-beat anchor; active loop; size the next engage uses. */
+    val bpm: Double?, val gridAnchorSeconds: Double, val loop: LoopRegion?, val pendingLoopBeats: Double,
     /** Held gate: null, a hot-cue slot 0..7, or [AudioEngine.MAIN_CUE]. */
     val previewSlot: Int?,
     val cueSeconds: Double?, val hotCues: List<Double?>,
     /** A relocation is refilling: audio is held silent and the clock does not advance. */
     val filling: Boolean, val atEnd: Boolean,
-    /** Bitmask of cue slots (hot cues 0..7, main cue 8) with pre-decoded audio ready for instant jumps. */
+    /** Bitmask of cue slots (hot cues 0..7, main cue 8, loop start 9) with pre-decoded audio ready for instant jumps. */
     val readyHeads: Int,
     /** Cue slot whose pre-decoded audio is playing (-1 none). */
     val headSlot: Int,
@@ -79,7 +99,7 @@ data class DeckSnapshot(
 data class EngineSnapshot(
     val outputFrames: Long, val outputSampleRate: Int, val outputChannels: Int,
     val epoch: Long, val outputOpen: Boolean, val reopenCount: Int, val crossfade: Double,
-    val routing: Routing, val cueMix: Double,
+    val routing: Routing, val cueMix: Double, val quantize: Boolean,
     val starvedDeckFrames: Long, val outputXruns: Long,
     val outputError: Int, val acceptedCommandId: Long, val appliedCommandId: Long,
     val decks: Map<DeckId, DeckSnapshot>, val supportedCapabilities: Set<String>,
@@ -118,13 +138,13 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
         init { System.loadLibrary("manadj_audio") }
         const val MAIN_CUE = 8
         const val HOT_CUES = 8
-        val CAPABILITIES = setOf("play", "pause", "cue-gate", "hot-cue-gate", "hot-cue-set", "seek", "fader", "trim", "crossfade", "varispeed", "bend", "pfl", "cue-mix", "routing", "eq", "filter")
+        val CAPABILITIES = setOf("play", "pause", "cue-gate", "hot-cue-gate", "hot-cue-set", "seek", "fader", "trim", "crossfade", "varispeed", "bend", "pfl", "cue-mix", "routing", "eq", "filter", "grid", "beat-jump", "loop", "quantize")
         private const val PRIME_FRAMES = 2048
-        private const val HEAD_SLOTS = HOT_CUES + 1
+        private const val HEAD_SLOTS = HOT_CUES + 2
         private const val HEAD_FRAMES = 8192
         private const val HEADER = 16
-        private const val DECK_FIELDS = 28 + HOT_CUES
-        private enum class Op { PREPARE, PLAY, PAUSE, CUE_DOWN, CUE_UP, HOT_CUE_DOWN, HOT_CUE_UP, HOT_CUE_SET, HOT_CUE_CLEAR, SEEK, FADER, TRIM, CROSSFADE, PITCH, BEND, PFL, CUE_MIX, EQ, FILTER }
+        private const val DECK_FIELDS = 36 + HOT_CUES
+        private enum class Op { PREPARE, PLAY, PAUSE, CUE_DOWN, CUE_UP, HOT_CUE_DOWN, HOT_CUE_UP, HOT_CUE_SET, HOT_CUE_CLEAR, SEEK, FADER, TRIM, CROSSFADE, PITCH, BEND, PFL, CUE_MIX, EQ, FILTER, SET_GRID, BEAT_JUMP, LOOP_TOGGLE, LOOP_RESIZE, LOOP_PRESET, QUANTIZE }
     }
 
     /** The caller retains/closes descriptor; the engine duplicates it for its own lifetime. */
@@ -180,6 +200,16 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
                 if (command.band !in 0..2) return rejected("Invalid EQ band")
                 slot = command.band; Op.EQ to command.value
             }
+            is AudioCommand.SetGrid -> {
+                if (!command.bpm.isFinite() || !command.anchorSeconds.isFinite()) return rejected("Non-finite grid")
+                val id = nativeSetGrid(handle, deck, command.bpm, command.anchorSeconds)
+                return if (id != 0L) CommandReceipt(id, true) else rejected("Command queue full")
+            }
+            is AudioCommand.BeatJump -> Op.BEAT_JUMP to command.beats
+            is AudioCommand.LoopToggle -> Op.LOOP_TOGGLE to 0.0
+            is AudioCommand.LoopPreset -> Op.LOOP_PRESET to command.beats
+            is AudioCommand.LoopResize -> { slot = command.change.ordinal; Op.LOOP_RESIZE to command.beats }
+            is AudioCommand.SetQuantize -> Op.QUANTIZE to if (command.on) 1.0 else 0.0
             is AudioCommand.SetFilter -> {
                 if (!command.position.isFinite()) return rejected("Non-finite control")
                 val id = nativeSubmitFilter(handle, deck, command.position)
@@ -240,9 +270,12 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
                 fader = data[p + 14], trim = data[p + 15], pitchPercent = data[p + 16], bendPercent = data[p + 17],
                 playing = current && data[p + 8] != 0.0, previewing = current && data[p + 9] != 0.0, pfl = data[p + 20] != 0.0,
                 eq = listOf(data[p + 21], data[p + 22], data[p + 23]), filter = data[p + 24],
+                bpm = data[p + 25].takeIf { current && it > 0 }, gridAnchorSeconds = data[p + 26],
+                loop = if (current && data[p + 27] != 0.0) LoopRegion(data[p + 28], data[p + 29], data[p + 30]) else null,
+                pendingLoopBeats = data[p + 31],
                 previewSlot = data[p + 10].toInt().takeIf { current && it >= 0 },
                 cueSeconds = data[p + 11].takeIf { current && state == LoadState.READY },
-                hotCues = List(HOT_CUES) { h -> data[p + 28 + h].takeIf { current && it >= 0 } },
+                hotCues = List(HOT_CUES) { h -> data[p + 36 + h].takeIf { current && it >= 0 } },
                 filling = current && state == LoadState.READY && data[p + 4] == 0.0 && data[p + 18] < 0,
                 readyHeads = if (current) data[p + 19].toInt() else 0,
                 headSlot = if (current) data[p + 18].toInt() else -1,
@@ -252,7 +285,7 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
         }
         return EngineSnapshot(
             outputFrames = data[0].toLong(), outputSampleRate = data[1].toInt(), outputChannels = data[13].toInt(),
-            routing = Routing.entries[data[12].toInt().coerceIn(0, 2)], cueMix = data[14],
+            routing = Routing.entries[data[12].toInt().coerceIn(0, 2)], cueMix = data[14], quantize = data[15] != 0.0,
             epoch = data[3].toLong(), outputOpen = data[10] != 0.0, reopenCount = data[11].toInt(), crossfade = data[9],
             starvedDeckFrames = data[4].toLong(), outputXruns = data[5].toLong(), outputError = data[6].toInt(),
             acceptedCommandId = data[7].toLong(), appliedCommandId = data[8].toLong(),
@@ -412,6 +445,7 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
     private external fun nativeStop(handle: Long)
     private external fun nativeClose(handle: Long)
     private external fun nativeSubmit(handle: Long, op: Int, deck: Int, value: Double, load: Long, slot: Int): Long
+    private external fun nativeSetGrid(handle: Long, deck: Int, bpm: Double, anchor: Double): Long
     private external fun nativeSubmitFilter(handle: Long, deck: Int, position: Double): Long
     private external fun nativeTransport(handle: Long, deck: Int, out: DoubleArray)
     private external fun nativeClaim(handle: Long, deck: Int, load: Long, transport: Long, rate: Int, start: Double): Boolean

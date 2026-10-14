@@ -358,5 +358,84 @@ int main() {
         CHECK(h.pass == dsp::Pass::High && std::abs(h.frequency - 16000) < .01);
         CHECK(dsp::describeFilter(.03, 48000).wet == 0);
     }
+    { // Beat jump (desktop jumpBeats): grid tempo, gridless 120 BPM fallback, loop translates.
+        auto owned = std::make_unique<Engine>(48000);
+        Engine& e = *owned;
+        loadDeck(e, 0, 1, .25f);
+        e.submit(Op::Seek, 0, 10.0);
+        tick(e);
+        feed(e, 0, 1, .25f, 48000);
+        e.submit(Op::BeatJump, 0, 4);                 // gridless: 4 beats @120 = 2 s
+        tick(e);
+        CHECK(std::abs(e.deck(0).position.load() - 12.0) < 1e-9);
+        const double grid[5] = {0.1, 0, 0, 0, 0};
+        e.submit(Op::SetGrid, 0, 125, 0, 0, grid);    // 0.48 s beats
+        e.submit(Op::BeatJump, 0, -8);
+        tick(e);
+        CHECK(std::abs(e.deck(0).position.load() - (12.0 - 8 * .48)) < 1e-9);
+        e.submit(Op::BeatJump, 0, -100);              // clamps at track start
+        tick(e);
+        CHECK(e.deck(0).position.load() == 0);
+    }
+
+    { // Loops: quantized engage, sample-accurate wrap from the loop head, resize, release.
+        auto owned = std::make_unique<Engine>(48000);
+        Engine& e = *owned;
+        loadDeck(e, 0, 1, .25f);
+        const double grid[5] = {0.0, 0, 0, 0, 0};
+        e.submit(Op::SetGrid, 0, 120, 0, 0, grid);    // 0.5 s beats
+        e.submit(Op::Quantize, 0, 1);
+        e.submit(Op::Seek, 0, 2.02);
+        tick(e);
+        feed(e, 0, 1, .25f, 48000);
+        e.submit(Op::LoopPreset, 0, 1);               // 1 beat, snapped to 2.0
+        tick(e);
+        CHECK(e.deck(0).loopActive.load());
+        CHECK(e.deck(0).loopStart.load() == 2.0 && e.deck(0).loopEnd.load() == 2.5);
+        // Worker emulation: loop-start head (8192 frames > 1 beat at 48 kHz? no: 24000) + ring.
+        std::vector<float> head(kHeadFrames * 2, .5f);
+        CHECK(e.headBegin(0, kLoopSlot));
+        e.headWrite(0, kLoopSlot, 0, head.data(), kHeadFrames);
+        e.headCommit(0, kLoopSlot, 1, 2.0, kHeadFrames);
+        e.submit(Op::Play, 0);
+        tick(e, 24000 - 960);                         // 0.48 s from 2.02 -> 2.5 = exactly the wrap
+        tick(e, 1);
+        CHECK(e.deck(0).headSlot.load() == kLoopSlot);
+        CHECK(std::abs(e.deck(0).position.load() - 2.0) < 2.0 / 48000);
+        tick(e, 2048);
+        CHECK(std::abs(out[4094] - .5f * unity) < .002); // playing the loop start
+        CHECK(e.starvedFrames() == 0);
+        // Many wraps keep phase: after the ring takes over, wraps continue without drift.
+        feed(e, 0, 1, .5f, 30000);
+        for (int k = 0; k < 20; ++k) {
+            tick(e, 4096);
+            if (e.deck(0).headSlot.load() < 0 && e.deck(0).ring.load() != e.deck(0).transport.load()) feed(e, 0, 1, .5f, 30000);
+        }
+        CHECK(e.deck(0).position.load() >= 2.0 && e.deck(0).position.load() < 2.5);
+        e.submit(Op::LoopResize, 0, 0, 0, 0);         // halve -> 1/2 beat
+        tick(e);
+        CHECK(e.deck(0).loopBeats.load() == .5 && e.deck(0).loopEnd.load() == 2.25);
+        CHECK(e.deck(0).position.load() < 2.25);      // stranded playhead pulled back in
+        e.submit(Op::LoopToggle, 0);                  // release
+        tick(e);
+        CHECK(!e.deck(0).loopActive.load());
+        e.submit(Op::LoopToggle, 0);                  // re-engage with the remembered size
+        tick(e);
+        CHECK(e.deck(0).loopActive.load() && e.deck(0).loopBeats.load() == .5);
+        e.submit(Op::Seek, 0, 5.0);                   // absolute relocation cancels the loop
+        tick(e);
+        CHECK(!e.deck(0).loopActive.load());
+    }
+
+    { // Gridless tracks: loop engage is inert (never guess), pending size still changes.
+        auto owned = std::make_unique<Engine>(48000);
+        Engine& e = *owned;
+        loadDeck(e, 0, 1, .25f);
+        e.submit(Op::LoopToggle, 0);
+        e.submit(Op::LoopResize, 0, 0, 0, 1);
+        tick(e);
+        CHECK(!e.deck(0).loopActive.load());
+        CHECK(e.deck(0).pendingLoopBeats.load() == 8);
+    }
     std::puts("engine tests passed");
 }

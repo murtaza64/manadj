@@ -159,7 +159,7 @@ void Engine::captureTail(Deck& d) noexcept {
     d.tailLeft = kFadeFrames;
 }
 
-void Engine::relocate(Deck& d, double seconds, int slot) noexcept {
+void Engine::relocate(Deck& d, double seconds, int slot, double overshootFrames) noexcept {
     captureTail(d);
     releaseHead(d);
     const auto t = std::max(0.0, seconds);
@@ -176,9 +176,10 @@ void Engine::relocate(Deck& d, double seconds, int slot) noexcept {
         }
     }
     d.ringOffset.store(offset, kRelaxed);
-    d.headPos = 0;
+    // A loop wrap keeps its sub-frame overshoot when playing from the head (no drift across wraps).
+    d.headPos = offset > 0 ? std::min(overshootFrames, static_cast<double>(offset - 1)) : 0;
     d.target.store(t, kRelaxed);
-    d.position.store(t, kRelaxed);
+    d.position.store(t + (offset > 0 ? d.headPos / d.sampleRate.load(kRelaxed) : 0), kRelaxed);
     d.fractional = 0;
     d.envelope = 0;
     d.transport.store(d.transport.load(kRelaxed) + 1, kRelease);
@@ -205,6 +206,8 @@ void Engine::apply(const Command& c) noexcept {
             d.previewSlot.store(-1);
             d.cue.store(0);
             for (auto& h : d.hotcues) h.store(-1);
+            d.loopActive.store(false);
+            d.bpm.store(0);
             d.tailLeft = 0;
             relocate(d, 0);
             break;
@@ -215,7 +218,7 @@ void Engine::apply(const Command& c) noexcept {
         case Op::CueDown: {
             if (!isReady) break;
             const double cue = d.cue.load();
-            if (d.playing.load()) { stop(d); relocate(d, cue, kMainCueSlot); }
+            if (d.playing.load()) { stop(d); d.loopActive.store(false); relocate(d, cue, kMainCueSlot); }
             else if (std::abs(position - cue) < kAtCueEpsilon) { d.preview.store(true); d.previewSlot.store(kMainCueSlot); }
             else d.cue.store(position);
             break;
@@ -223,11 +226,12 @@ void Engine::apply(const Command& c) noexcept {
         case Op::CueUp:
             if (d.previewSlot.load() != kMainCueSlot) break;
             if (d.playing.load()) { d.preview.store(false); d.previewSlot.store(-1); }
-            else { stop(d); relocate(d, d.cue.load(), kMainCueSlot); }
+            else { stop(d); d.loopActive.store(false); relocate(d, d.cue.load(), kMainCueSlot); }
             break;
         case Op::HotCueDown: {
             const double at = d.hotcues[c.slot].load();
             if (!isReady || at < 0) break;
+            d.loopActive.store(false);
             relocate(d, at, c.slot);
             if (!d.playing.load()) { d.preview.store(true); d.previewSlot.store(c.slot); }
             break;
@@ -239,7 +243,57 @@ void Engine::apply(const Command& c) noexcept {
             break;
         case Op::HotCueSet: if (isReady) d.hotcues[c.slot].store(position); break;
         case Op::HotCueClear: d.hotcues[c.slot].store(-1); break;
-        case Op::Seek: if (isReady) relocate(d, c.value); break;
+        case Op::Seek: if (isReady) { d.loopActive.store(false); relocate(d, c.value); } break;
+        case Op::SetGrid:
+            d.bpm.store(c.value > 0 && std::isfinite(c.value) ? c.value : 0);
+            d.gridAnchor.store(c.aux[0]);
+            break;
+        case Op::BeatJump: {
+            // Relative displacement (desktop jumpBeats): an active loop translates with the playhead.
+            if (!isReady) break;
+            const double bpm = d.bpm.load() > 0 ? d.bpm.load() : kGridlessBpm;
+            const double target = std::max(0.0, position + c.value * 60 / bpm);
+            if (d.loopActive.load()) {
+                const double start = std::max(0.0, d.loopStart.load() + (target - position));
+                d.loopEnd.store(start + (d.loopEnd.load() - d.loopStart.load()));
+                d.loopStart.store(start);
+            }
+            relocate(d, target);
+            break;
+        }
+        case Op::LoopToggle:
+            if (d.loopActive.load()) { d.loopActive.store(false); break; } // Release: play flows past the end.
+            [[fallthrough]];
+        case Op::LoopPreset: {
+            if (c.op == Op::LoopPreset) {
+                const double beats = std::clamp(c.value, kLoopMinBeats, kLoopMaxBeats);
+                if (d.loopActive.load()) {
+                    if (d.loopBeats.load() == beats) d.loopActive.store(false); // the lit preset releases
+                    else applyLoopResize(d, beats);
+                    break;
+                }
+                d.pendingLoopBeats.store(beats);
+            }
+            // Engage at the playhead, snapped to the nearest beat under Quantize; gridless: inert.
+            const double bpm = d.bpm.load();
+            if (!isReady || bpm <= 0) break;
+            const double beat = 60 / bpm, anchor = d.gridAnchor.load();
+            const double start = quantize_.load() ? anchor + std::round((position - anchor) / beat) * beat : position;
+            const double beats = d.pendingLoopBeats.load();
+            d.loopStart.store(std::max(0.0, start));
+            d.loopEnd.store(std::max(0.0, start) + beats * beat);
+            d.loopBeats.store(beats);
+            d.loopActive.store(true);
+            break;
+        }
+        case Op::LoopResize: {
+            const double current = d.loopActive.load() ? d.loopBeats.load() : d.pendingLoopBeats.load();
+            const double beats = std::clamp(c.slot == 0 ? current / 2 : c.slot == 1 ? current * 2 : c.value, kLoopMinBeats, kLoopMaxBeats);
+            if (!d.loopActive.load()) d.pendingLoopBeats.store(beats);
+            else applyLoopResize(d, beats);
+            break;
+        }
+        case Op::Quantize: quantize_.store(c.value != 0); break;
         case Op::Fader: d.fader = std::clamp(static_cast<float>(c.value), 0.f, 1.f); updateGain(c.deck); break;
         case Op::Trim: d.trim = std::clamp(static_cast<float>(c.value), 0.f, 1.f); updateGain(c.deck); break;
         case Op::Crossfade:
@@ -269,6 +323,18 @@ void Engine::apply(const Command& c) noexcept {
     }
     d.applied.store(c.seq, kRelease);
     applied_.store(c.seq, kRelease);
+}
+
+void Engine::applyLoopResize(Deck& d, double beats) noexcept {
+    // Anchored at the start edge, pure seconds scaling (desktop loop-resize, ADR 0027 §6).
+    const double start = d.loopStart.load(), oldEnd = d.loopEnd.load();
+    const double end = start + (oldEnd - start) * (beats / d.loopBeats.load());
+    d.loopEnd.store(end);
+    d.loopBeats.store(beats);
+    d.pendingLoopBeats.store(beats);
+    // A shrink that strands the playhead pulls it back in at its phase modulo the new length.
+    const double length = end - start, position = d.position.load(), offset = position - start;
+    if (length > 0 && offset >= length && position < oldEnd) relocate(d, start + std::fmod(offset, length));
 }
 
 void Engine::updateGain(int index) noexcept {
@@ -319,28 +385,47 @@ void Engine::render(float* output, int frames, int channels) noexcept {
     outputFrames_.fetch_add(frames, kRelease);
 }
 
-// Writes the deck's pre-strip signal (source x envelope + crossfade tail) into `strip`.
-// Returns whether anything was written.
-bool Engine::renderSource(Deck& d, float* strip, int frames) noexcept {
-    const double outRate = outputRate_.load(kRelaxed);
+// Crossfade tail of whatever was heard before the last relocation/stop. Returns whether it wrote.
+bool Engine::renderTail(Deck& d, float* strip, int frames) noexcept {
     bool active = false;
+    for (int i = 0; i < frames && d.tailLeft > 0; ++i) {
+        const int k = static_cast<int>(d.tailPos);
+        if (k + 1 >= d.tailAvail) { d.tailLeft = 0; break; }
+        const float f = static_cast<float>(d.tailPos - k);
+        const float ramp = static_cast<float>(d.tailLeft--) / kFadeFrames;
+        const float l = d.tail[k * 2] + (d.tail[k * 2 + 2] - d.tail[k * 2]) * f;
+        const float r = d.tail[k * 2 + 1] + (d.tail[k * 2 + 3] - d.tail[k * 2 + 1]) * f;
+        strip[i * 2] += l * d.tailGain * ramp;
+        strip[i * 2 + 1] += r * d.tailGain * ramp;
+        d.tailPos += d.tailRatio;
+        active = true;
+    }
+    return active;
+}
+
+// Writes the deck's pre-strip signal (source x envelope + crossfade tail) into `strip`.
+// A loop wrap splits the block: the old tail is flushed up to the wrap, then the deck
+// relocates to the loop start (from its pre-decoded head) and rendering continues.
+bool Engine::renderSource(Deck& d, float* strip, int frames) noexcept {
+    bool active = false;
+    for (int done = 0; done < frames;) {
+        bool wrote = false;
+        const int n = renderSegment(d, strip + done * 2, frames - done, wrote);
+        active |= wrote;
+        if (n < 0) { active |= renderTail(d, strip + done * 2, frames - done); break; }
+        done += n;
+    }
+    return active;
+}
+
+// Renders up to `frames`; returns -1 if it covered the whole span, else the frames rendered
+// before a loop wrap (tail already flushed over them and the relocation applied).
+int Engine::renderSegment(Deck& d, float* strip, int frames, bool& active) noexcept {
+    const double outRate = outputRate_.load(kRelaxed);
     {
-        // Crossfade tail of whatever was heard before the last relocation/stop.
-        for (int i = 0; i < frames && d.tailLeft > 0; ++i) {
-            const int k = static_cast<int>(d.tailPos);
-            if (k + 1 >= d.tailAvail) { d.tailLeft = 0; break; }
-            const float f = static_cast<float>(d.tailPos - k);
-            const float ramp = static_cast<float>(d.tailLeft--) / kFadeFrames;
-            const float l = d.tail[k * 2] + (d.tail[k * 2 + 2] - d.tail[k * 2]) * f;
-            const float r = d.tail[k * 2 + 1] + (d.tail[k * 2 + 3] - d.tail[k * 2 + 1]) * f;
-            strip[i * 2] += l * d.tailGain * ramp;
-            strip[i * 2 + 1] += r * d.tailGain * ramp;
-            d.tailPos += d.tailRatio;
-            active = true;
-        }
         if (!ready(d)) {
             if ((d.status.load(kAcquire) & 3) == kError) { d.playing.store(false); d.preview.store(false); d.previewSlot.store(-1); }
-            return active;
+            return -1;
         }
         const auto transport = d.transport.load(kRelaxed);
         const bool ringLive = d.ring.load(kAcquire) == transport;
@@ -350,9 +435,9 @@ bool Engine::renderSource(Deck& d, float* strip, int frames) noexcept {
                 d.position.store(d.claimedStart.load(kAcquire), kRelease);
             d.positionTransport = transport;
         }
-        if (!(d.playing.load(kRelaxed) || d.preview.load(kRelaxed))) { d.envelope = 0; return active; }
+        if (!(d.playing.load(kRelaxed) || d.preview.load(kRelaxed))) { d.envelope = 0; return -1; }
         int slot = d.headSlot.load(kRelaxed);
-        if (slot < 0 && !ringLive) return active; // Refill in progress: silent, clock held.
+        if (slot < 0 && !ringLive) return -1; // Refill in progress: silent, clock held.
         const auto sampleRate = d.sampleRate.load(kAcquire);
         const double ratio = (sampleRate / outRate) * (1 + d.pitch.load(kRelaxed) / 100.) * (1 + d.bend.load(kRelaxed) / 100.);
         if (d.envelope == 0 && d.tailLeft == 0) { d.gain = d.targetGain; d.cueGain = d.targetCueGain; } // Envelope owns the onset.
@@ -360,6 +445,10 @@ bool Engine::renderSource(Deck& d, float* strip, int frames) noexcept {
         auto write = d.write.load(kAcquire);
         double fractional = slot >= 0 ? d.headPos : d.fractional;
         uint64_t consumedTotal = 0;
+        // Loop wrap point in source frames from here (desktop foldLoopPlayhead: never re-enter from beyond).
+        const double startPosition = d.position.load(kRelaxed);
+        const bool looping = d.loopActive.load(kRelaxed) && startPosition < d.loopEnd.load(kRelaxed);
+        const double untilEnd = looping ? (d.loopEnd.load(kRelaxed) - startPosition) * sampleRate : 0;
         for (int i = 0; i < frames; ++i) {
             const float* a;
             const float* b;
@@ -404,12 +493,19 @@ bool Engine::renderSource(Deck& d, float* strip, int frames) noexcept {
             const auto consumed = static_cast<uint64_t>(fractional) - before;
             consumedTotal += consumed;
             if (slot < 0) { read += consumed; fractional -= static_cast<uint64_t>(fractional); }
+            if (looping && consumedTotal >= untilEnd) {
+                if (slot >= 0) d.headPos = fractional;
+                else { d.fractional = fractional; d.read.store(read, kRelease); }
+                renderTail(d, strip, i + 1);
+                relocate(d, d.loopStart.load(kRelaxed), kLoopSlot, consumedTotal - untilEnd);
+                return i + 1;
+            }
         }
         if (slot >= 0) d.headPos = fractional;
         else { d.fractional = fractional; d.read.store(read, kRelease); }
         d.position.store(d.position.load(kRelaxed) + consumedTotal / static_cast<double>(sampleRate), kRelease);
     }
-    return active;
+    return -1;
 }
 
 void Engine::designEq(Deck& d, double rate) noexcept {

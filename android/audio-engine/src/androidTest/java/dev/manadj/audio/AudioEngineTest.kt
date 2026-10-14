@@ -346,6 +346,45 @@ class AudioEngineTest {
         }
     }
 
+    @Test fun loopsWrapGaplessFromTheLoopHeadAndBeatJumpsMoveThem() {
+        val media = wav("engine-loop.wav", .25, seconds = 20)
+        AudioEngine(offline = true).use { engine ->
+            engine.load(DeckId.A, "loop", media)
+            engine.submit(AudioCommand.SetGrid(DeckId.A, 120.0, 0.0))
+            engine.settled(DeckId.A)
+            engine.submit(AudioCommand.SetQuantize(true))
+            engine.submit(AudioCommand.Seek(DeckId.A, 4.01)); engine.renderOfflineForTest(16); engine.settled(DeckId.A)
+            engine.submit(AudioCommand.LoopPreset(DeckId.A, 0.5)) // 1/2 beat = 250 ms, snapped to 4.0
+            engine.renderOfflineForTest(16)
+            assertEquals(LoopRegion(4.0, 4.25, .5), engine.deck(DeckId.A).loop)
+            engine.until("loop head") { (deck(DeckId.A).readyHeads and (1 shl 9)) != 0 }
+            engine.submit(AudioCommand.Play(DeckId.A))
+            var wraps = 0
+            var last = 0.0
+            repeat(120) { // 120 x 1024 frames = 2.56 s ≈ 10 wraps
+                val pcm = engine.renderOfflineForTest(1024)
+                for (w in 0 until 1024 / 64) {
+                    var e = 0f
+                    for (i in w * 64 until (w + 1) * 64) e += pcm[i * 2] * pcm[i * 2]
+                    assertTrue("gap at render $it window $w: ${engine.deck(DeckId.A)}", e > 1e-4f)
+                }
+                val at = engine.deck(DeckId.A).sourceSeconds
+                assertTrue("escaped the loop: $at", at >= 4.0 && at < 4.25 + 1e-3)
+                if (at < last) wraps++
+                last = at
+                Thread.sleep(1)
+            }
+            assertTrue("wraps=$wraps", wraps >= 8)
+            engine.submit(AudioCommand.BeatJump(DeckId.A, 4.0)) // +2 s: loop moves with the playhead
+            engine.renderOfflineForTest(16)
+            val moved = engine.deck(DeckId.A).loop!!
+            assertEquals(6.0, moved.start, 1e-9); assertEquals(6.25, moved.end, 1e-9)
+            engine.submit(AudioCommand.LoopToggle(DeckId.A))
+            engine.renderOfflineForTest(16)
+            assertNull(engine.deck(DeckId.A).loop)
+        }
+    }
+
     @Test fun manyRelocationsWhilePlayingNeverEndEarly() {
         val media = wav("engine-reloc.wav", .25, seconds = 20, rate = 44100)
         val rng = java.util.Random(7)
