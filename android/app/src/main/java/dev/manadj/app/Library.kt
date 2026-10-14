@@ -34,7 +34,6 @@ private val ADDED = DateTimeFormatter.ofPattern("dd MMM")
  */
 /** [tapTarget]: landscape loads a tapped row into this (visible) deck; swipe stays an explicit A/B override. */
 @Composable fun LibraryPanel(model: PlayerModel, ux: UiModel, modifier: Modifier, pick: (DeckId) -> Unit, tapTarget: DeckId? = null) {
-    if (model.browser == null) return
     val color = Ink.accent
     val ctx = androidx.compose.ui.platform.LocalContext.current
     val follow by remember { derivedStateOf {

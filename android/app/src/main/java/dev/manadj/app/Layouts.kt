@@ -143,10 +143,18 @@ import dev.manadj.audio.QuantizeMode
  * The one BROWSE button: swaps controls for the browser and back. `model.browser` = the deck whose controls
  * the browser covers — in landscape the outgoing deck (coveredDeck, decided once on open); portrait covers all.
  */
-@Composable fun BrowseKey(model: PlayerModel, ux: UiModel, modifier: Modifier) =
-    Key("BROWSE", modifier, Ink.warning, engaged = model.browser != null, textSize = 12, style = KeyStyle.PILL) {
-        model.browser = if (model.browser != null) null else coveredDeck(mixOf(model, ux, DeckId.A), mixOf(model, ux, DeckId.B))
-    }
+@Composable fun BrowseKey(model: PlayerModel, ux: UiModel, modifier: Modifier) {
+    fun toggle() { model.browser = if (model.browser != null) null else coveredDeck(mixOf(model, ux, DeckId.A), mixOf(model, ux, DeckId.B)) }
+    // Toggles on pointer-down (the slide starts with the press); the click only covers accessibility actions.
+    var downToggled by remember { mutableStateOf(false) }
+    Key("BROWSE", modifier.pointerInput(Unit) {
+        awaitEachGesture { awaitFirstDown(requireUnconsumed = false, pass = androidx.compose.ui.input.pointer.PointerEventPass.Initial); downToggled = true; toggle()
+            // A press that never clicks (dragged off) must not swallow the next accessibility click.
+            do { val e = awaitPointerEvent(androidx.compose.ui.input.pointer.PointerEventPass.Final) } while (e.changes.any { it.pressed })
+            downToggled = false
+        }
+    }, Ink.warning, engaged = model.browser != null, textSize = 12, style = KeyStyle.PILL) { if (downToggled) downToggled = false else toggle() }
+}
 
 fun mixOf(model: PlayerModel, ux: UiModel, id: DeckId): DeckMix {
     val ui = model.decks.getValue(id)
@@ -224,9 +232,10 @@ fun mixOf(model: PlayerModel, ux: UiModel, id: DeckId): DeckMix {
 /**
  * Landscape: each deck's side (info, minimap, pads, stems, loop, jump, transport, bend + pitch) flanks the
  * mixer. BROWSE slides the whole strip sideways (#65): the strip is [browser][A][mixer][B][browser], one deck
- * wider than the screen on each side and centred; the outgoing deck (coveredDeck) moves toward the centre with
- * the mixer, the load-target deck slides off, the browser slides in. One translation via graphicsLayer (no
- * relayout per frame), interruptible and reversible.
+ * wider than the screen on each side and centred. The load-target deck stays on screen with the mixer and the
+ * browser appears beside it; the outgoing deck (coveredDeck) slides off. Rigid: everything is laid out once at
+ * full size and only translated (graphicsLayer); the browser pane stays composed after its first open, and
+ * screenSafe insets are computed at rest ([LocalSafeFrame]) so nothing re-lays out mid-slide.
  */
 @Composable private fun Landscape(model: PlayerModel, ux: UiModel, pick: (DeckId) -> Unit, modifier: Modifier) {
     val a = model.decks.getValue(DeckId.A); val b = model.decks.getValue(DeckId.B)
@@ -235,37 +244,54 @@ fun mixOf(model: PlayerModel, ux: UiModel, id: DeckId): DeckMix {
         val screen = maxWidth
         val side = (screen - mixerWidth - 12.dp) / 2
         val sidePx = with(LocalDensity.current) { side.toPx() }
-        // Outgoing A stays: strip moves right (+side); outgoing B: left (−side); closed: centred.
-        val target = when (model.browser) { DeckId.A -> sidePx; DeckId.B -> -sidePx; else -> 0f }
+        val screenPx = with(LocalDensity.current) { screen.toPx() }
+        // Target A: strip moves right (+side) so the left browser slot sits beside A; target B: left.
+        val targetDeck = model.browser?.let(::other)
+        val goal = when (targetDeck) { DeckId.A -> sidePx; DeckId.B -> -sidePx; else -> 0f }
         val shift = remember { androidx.compose.animation.core.Animatable(0f) }
-        LaunchedEffect(target) { shift.animateTo(target, androidx.compose.animation.core.spring(dampingRatio = 1f, stiffness = 500f)) }
-        // Which browser slot is (or was, while animating out) on screen.
-        val browserSlot = when { model.browser != null -> model.browser; shift.value > 1f -> DeckId.A; shift.value < -1f -> DeckId.B; else -> null }
-        Row(Modifier.wrapContentWidth(unbounded = true).requiredWidth(screen + side * 2).fillMaxHeight().graphicsLayer { translationX = shift.value }) {
-            Box(Modifier.width(side).fillMaxHeight()) { if (browserSlot == DeckId.A) LibraryPanel(model, ux, Modifier.fillMaxSize().padding(start = 6.dp).screenSafe(), pick, tapTarget = DeckId.B) }
-            Row(Modifier.width(screen).fillMaxHeight().padding(horizontal = 6.dp)) {
-                DeckSide(a, model, ux, pick, Modifier.weight(1f).fillMaxHeight())
-                Column(Modifier.width(mixerWidth).fillMaxHeight().padding(horizontal = DeckGap), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Row(Modifier.fillMaxWidth().weight(1f)) {
-                        KnobColumn(a, ux, model, Modifier.width(54.dp).fillMaxHeight().padding(top = 4.dp), 34.dp)
-                        ChannelFader(a, model, Modifier.width(48.dp).fillMaxHeight())
-                        Row(Modifier.weight(1f).fillMaxHeight().padding(horizontal = 3.dp), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-                            for (ui in listOf(a, b)) DetailWave(ui, model, ux, Modifier.weight(1f).fillMaxHeight(), vertical = true)
+        LaunchedEffect(goal) { shift.animateTo(goal, androidx.compose.animation.core.spring(dampingRatio = 1f, stiffness = 1200f)) }
+        // The pane keeps its last side while sliding out; composed once opened, then kept (no first-frame build).
+        var paneSide by remember { mutableStateOf<DeckId?>(null) }
+        LaunchedEffect(targetDeck) { if (targetDeck != null) paneSide = targetDeck }
+        val stripFrame = remember(shift) { SafeFrame({ shift.value }, 0f) }
+        CompositionLocalProvider(LocalSafeFrame provides stripFrame) {
+            Row(Modifier.wrapContentWidth(unbounded = true).requiredWidth(screen + side * 2).fillMaxHeight().graphicsLayer { translationX = shift.value }) {
+                Spacer(Modifier.width(side))
+                Row(Modifier.width(screen).fillMaxHeight().padding(horizontal = 6.dp)) {
+                    DeckSide(a, model, ux, pick, Modifier.weight(1f).fillMaxHeight())
+                    Column(Modifier.width(mixerWidth).fillMaxHeight().padding(horizontal = DeckGap), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Row(Modifier.fillMaxWidth().weight(1f)) {
+                            KnobColumn(a, ux, model, Modifier.width(54.dp).fillMaxHeight().padding(top = 4.dp), 34.dp)
+                            ChannelFader(a, model, Modifier.width(48.dp).fillMaxHeight())
+                            Row(Modifier.weight(1f).fillMaxHeight().padding(horizontal = 3.dp), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                                for (ui in listOf(a, b)) DetailWave(ui, model, ux, Modifier.weight(1f).fillMaxHeight(), vertical = true)
+                            }
+                            ChannelFader(b, model, Modifier.width(48.dp).fillMaxHeight())
+                            KnobColumn(b, ux, model, Modifier.width(54.dp).fillMaxHeight().padding(top = 4.dp), 34.dp)
                         }
-                        ChannelFader(b, model, Modifier.width(48.dp).fillMaxHeight())
-                        KnobColumn(b, ux, model, Modifier.width(54.dp).fillMaxHeight().padding(top = 4.dp), 34.dp)
+                        // Symmetric flanks keep the crossfader centred on the screen.
+                        Row(Modifier.fillMaxWidth().height(44.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            BrowseKey(model, ux, Modifier.width(76.dp).height(40.dp))
+                            Crossfader(model, ux, Modifier.weight(1f).fillMaxHeight())
+                            Row(Modifier.width(76.dp), verticalAlignment = Alignment.CenterVertically) { QuantizeKey(model, ux, Modifier.weight(1f).height(32.dp)); SettingsKey(ux, Modifier.size(38.dp)) }
+                        }
+                        FxSection(ux, model, Modifier.fillMaxWidth().height(54.dp).padding(bottom = 4.dp), horizontal = true)
                     }
-                    // Symmetric flanks keep the crossfader centred on the screen.
-                    Row(Modifier.fillMaxWidth().height(44.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        BrowseKey(model, ux, Modifier.width(76.dp).height(40.dp))
-                        Crossfader(model, ux, Modifier.weight(1f).fillMaxHeight())
-                        Row(Modifier.width(76.dp), verticalAlignment = Alignment.CenterVertically) { QuantizeKey(model, ux, Modifier.weight(1f).height(32.dp)); SettingsKey(ux, Modifier.size(38.dp)) }
-                    }
-                    FxSection(ux, model, Modifier.fillMaxWidth().height(54.dp).padding(bottom = 4.dp), horizontal = true)
+                    DeckSide(b, model, ux, pick, Modifier.weight(1f).fillMaxHeight())
                 }
-                DeckSide(b, model, ux, pick, Modifier.weight(1f).fillMaxHeight())
+                Spacer(Modifier.width(side))
             }
-            Box(Modifier.width(side).fillMaxHeight()) { if (browserSlot == DeckId.B) LibraryPanel(model, ux, Modifier.fillMaxSize().padding(end = 6.dp).screenSafe(), pick, tapTarget = DeckId.A) }
+        }
+        val pane = paneSide
+        if (pane != null) {
+            // Left slot (target A) rests at x 0 when shift = +side; right slot (target B) at screen − side.
+            val base = if (pane == DeckId.A) -sidePx else screenPx
+            val paneFrame = remember(shift, pane, sidePx) { SafeFrame({ shift.value }, if (pane == DeckId.A) sidePx else -sidePx) }
+            CompositionLocalProvider(LocalSafeFrame provides paneFrame) {
+                Box(Modifier.width(side).fillMaxHeight().graphicsLayer { translationX = shift.value + base }) {
+                    LibraryPanel(model, ux, Modifier.fillMaxSize().padding(start = if (pane == DeckId.A) 6.dp else 0.dp, end = if (pane == DeckId.B) 6.dp else 0.dp).screenSafe(), pick, tapTarget = pane)
+                }
+            }
         }
     }
 }
@@ -278,7 +304,8 @@ fun mixOf(model: PlayerModel, ux: UiModel, id: DeckId): DeckMix {
                 DeckInfo(ui, model, Modifier.fillMaxWidth().height(38.dp).screenSafe(), compact = true)
             }
             Minimap(ui, model, ux.waves[ui.source?.id ?: ""], Modifier.fillMaxWidth().height(40.dp).screenSafe(), preview = ux.seekPreview)
-            Pads(ui, model, ux, Modifier.fillMaxWidth().weight(1f), 4, Dp.Unspecified, perCellSafe = true)
+            // Pads stay identical; the camera hole simply obscures part of one (touch still works around it).
+            Pads(ui, model, ux, Modifier.fillMaxWidth().weight(1f), 4, Dp.Unspecified)
             StemsStrip(ui, ux, model, Modifier.fillMaxWidth().height(26.dp).screenSafe())
             LoopStrip(ui, ux, model, Modifier.fillMaxWidth().height(40.dp).screenSafe())
             JumpStrip(ui, ux, model, Modifier.fillMaxWidth().height(40.dp).screenSafe())
