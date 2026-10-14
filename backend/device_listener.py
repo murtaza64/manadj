@@ -99,7 +99,9 @@ def build_app(get_code, pairing: PairingRequests | None = None) -> FastAPI:
             return JSONResponse({"detail": "Too many pairing attempts; wait a minute"}, status_code=429)
         token = request.headers.get(TOKEN_HEADER, "")
         if token and pairing is not None:
-            if pairing.registry.authenticate(token) is not None:
+            device = pairing.registry.authenticate(token)
+            if device is not None:
+                request.state.device = (device.device_id, device.name)
                 return await call_next(request)
             failures.record(client, now)
             return JSONResponse({"detail": "Device not paired (revoked?)"}, status_code=401)
