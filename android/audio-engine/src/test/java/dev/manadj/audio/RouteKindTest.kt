@@ -15,6 +15,10 @@ class RouteKindTest {
         assertEquals(RouteKind.SPEAKER, RouteLatency.kindOfBluetoothClass(BluetoothClass.Device.AUDIO_VIDEO_LOUDSPEAKER))
         assertEquals(RouteKind.SPEAKER, RouteLatency.kindOfBluetoothClass(BluetoothClass.Device.AUDIO_VIDEO_PORTABLE_AUDIO))
         assertEquals(RouteKind.HEADPHONES, RouteLatency.kindOfBluetoothClass(BluetoothClass.Device.AUDIO_VIDEO_HEADPHONES))
-        assertEquals(RouteKind.UNKNOWN, RouteLatency.kindOfBluetoothClass(BluetoothClass.Device.AUDIO_VIDEO_UNCATEGORIZED))
+        // Receivers / set-top boxes / uncategorised AV (the human's "AV Receiver") are speakers.
+        assertEquals(RouteKind.SPEAKER, RouteLatency.kindOfBluetoothClass(BluetoothClass.Device.AUDIO_VIDEO_UNCATEGORIZED))
+        assertEquals(RouteKind.SPEAKER, RouteLatency.kindOfBluetoothClass(BluetoothClass.Device.AUDIO_VIDEO_SET_TOP_BOX))
+        assertEquals(RouteKind.HEADPHONES, RouteLatency.kindOfBluetoothClass(BluetoothClass.Device.AUDIO_VIDEO_WEARABLE_HEADSET))
+        assertEquals(RouteKind.UNKNOWN, RouteLatency.kindOfBluetoothClass(BluetoothClass.Device.PHONE_SMART))
     }
 }

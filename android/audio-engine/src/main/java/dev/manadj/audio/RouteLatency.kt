@@ -61,8 +61,8 @@ class RouteLatency(private val context: Context) {
         if (byType != null) return byType
         if (device.type != AudioDeviceInfo.TYPE_BLUETOOTH_A2DP || bluetoothPermissionMissing) return RouteKind.UNKNOWN
         val adapter = context.getSystemService(BluetoothManager::class.java)?.adapter ?: return RouteKind.UNKNOWN
-        val major = runCatching { adapter.getRemoteDevice(device.address).bluetoothClass?.deviceClass }.getOrNull() ?: return RouteKind.UNKNOWN
-        return kindOfBluetoothClass(major)
+        val cls = runCatching { adapter.getRemoteDevice(device.address).bluetoothClass }.getOrNull() ?: return RouteKind.UNKNOWN
+        return kindOfBluetoothClass(cls.deviceClass, cls.majorDeviceClass)
     }
 
     companion object {
@@ -77,13 +77,16 @@ class RouteLatency(private val context: Context) {
             else -> RouteKind.UNKNOWN
         }
 
-        /** BluetoothClass.getDeviceClass() of a classic A2DP sink. */
-        fun kindOfBluetoothClass(deviceClass: Int): RouteKind = when (deviceClass) {
+        /**
+         * A classic A2DP sink by BluetoothClass: wearable/headset classes are HEADPHONES; any other AUDIO_VIDEO
+         * device (loudspeaker, hi-fi, car, receivers / set-top boxes / uncategorised) is a SPEAKER; else UNKNOWN.
+         */
+        fun kindOfBluetoothClass(deviceClass: Int, majorClass: Int = deviceClass and 0x1F00): RouteKind = when (deviceClass) {
             BluetoothClass.Device.AUDIO_VIDEO_LOUDSPEAKER, BluetoothClass.Device.AUDIO_VIDEO_PORTABLE_AUDIO,
             BluetoothClass.Device.AUDIO_VIDEO_HIFI_AUDIO, BluetoothClass.Device.AUDIO_VIDEO_CAR_AUDIO -> RouteKind.SPEAKER
             BluetoothClass.Device.AUDIO_VIDEO_HEADPHONES, BluetoothClass.Device.AUDIO_VIDEO_WEARABLE_HEADSET,
             BluetoothClass.Device.AUDIO_VIDEO_HANDSFREE -> RouteKind.HEADPHONES
-            else -> RouteKind.UNKNOWN
+            else -> if (majorClass == BluetoothClass.Device.Major.AUDIO_VIDEO) RouteKind.SPEAKER else RouteKind.UNKNOWN
         }
     }
 }
