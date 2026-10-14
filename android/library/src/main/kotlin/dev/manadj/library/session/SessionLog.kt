@@ -14,7 +14,8 @@ data class BeatFxSection(val selected: String?, val target: String, val on: Bool
 sealed interface CaptureEvent {
     val t: Double
     data class Load(override val t: Double, val deck: Int, val trackId: Int?, val bpm: Double?) : CaptureEvent
-    data class Transport(override val t: Double, val deck: Int, val action: String, val playhead: Double) : CaptureEvent
+    /** [detail]: beats for jumpBeats, slot for hotCue / a hot-cue stab previewStart. */
+    data class Transport(override val t: Double, val deck: Int, val action: String, val playhead: Double, val delta: Double? = null, val detail: Double? = null) : CaptureEvent
     data class Pitch(override val t: Double, val deck: Int, val value: Double) : CaptureEvent
     data class Bend(override val t: Double, val deck: Int, val value: Double) : CaptureEvent
     data class Loop(override val t: Double, val deck: Int, val playhead: Double, val region: LoopSpan?) : CaptureEvent
@@ -33,6 +34,8 @@ data class DeckState(
     var trackId: Int? = null, var bpm: Double? = null,
     var playing: Boolean = false, var previewing: Boolean = false, var scratching: Boolean = false,
     var playhead: Double = 0.0, var playheadAt: Double = 0.0, var pitch: Double = 0.0,
+    /** Momentary bend %, integrated only by the replay reference ([SessionLog.replayAt]); desktop stateAt ignores it. */
+    var bend: Double = 0.0,
     var loop: LoopSpan? = null,
     var fader: Double = 1.0, var trim: Double = .5, var low: Double = .5, var mid: Double = .5, var high: Double = .5,
     var filter: Double = 0.0,
@@ -41,10 +44,12 @@ data class DeckState(
     var stems: Int = 0b1111,
 ) {
     val sounding get() = playing || previewing
+    /** Playback rate (engine semantics): (1 + pitch/100)(1 + bend/100). */
+    val rate get() = (1 + pitch / 100) * (1 + bend / 100)
     /** Desktop deckPlayheadAt: pitch-aware extrapolation, folded into an entered loop. Scratch is held. */
     fun playheadAt(t: Double): Double {
         val dt = max(0.0, t - playheadAt)
-        val p = playhead + if (sounding && !scratching) dt * (1 + pitch / 100) else 0.0
+        val p = playhead + if (sounding && !scratching) dt * rate else 0.0
         val l = loop
         return if (l != null && playhead >= l.start && playhead < l.end && p >= l.end) l.start + (p - l.start) % (l.end - l.start) else p
     }
@@ -101,6 +106,65 @@ class SessionLog(
     private val times = DoubleArray(events.size) { events[it].t }
     /** State after events[0 until k * STRIDE]. */
     private val checkpoints: List<SessionState>
+    /**
+     * Events as the replay reference reads them: each position anchor (a transport or loop event that leaves
+     * the deck sounding) shifted by the constant offset the ticks after it agree on. Desktop records some
+     * anchors at the gesture, not where the audio actually landed (quantized launches, phase-preserving hot
+     * cues: tens of ms on real Sessions), while ticks are precise audio-clock samples. The correction lands on
+     * the anchor itself, so replay still never seeks at a tick.
+     */
+    val replayEvents: List<CaptureEvent> by lazy { refineAnchors() }
+
+    /** Same as [checkpoints], reduced as the replay reference over [replayEvents]. */
+    private val replayCheckpoints: List<SessionState> by lazy {
+        val s = SessionState()
+        ArrayList<SessionState>(events.size / STRIDE + 1).also { cps ->
+            replayEvents.forEachIndexed { i, e -> if (i % STRIDE == 0) cps.add(s.copy()); reduce(s, e, replay = true) }
+        }
+    }
+
+    private fun refineAnchors(): List<CaptureEvent> {
+        val out = events.toMutableList()
+        val s = SessionState()
+        val anchor = IntArray(4) { -1 }
+        val residuals = List(4) { ArrayList<Double>() }
+        fun close(d: Int) {
+            val k = anchor[d]
+            val r = residuals[d]
+            anchor[d] = -1
+            if (k < 0 || r.size < 2) { r.clear(); return }
+            val sorted = r.sorted()
+            val shift = sorted[sorted.size / 2]
+            if (sorted.last() - sorted.first() <= ANCHOR_SPREAD && abs(shift) >= ANCHOR_MIN) out[k] = when (val e = out[k]) {
+                is CaptureEvent.Transport -> e.copy(playhead = e.playhead + shift)
+                is CaptureEvent.Loop -> e.copy(playhead = e.playhead + shift)
+                else -> e
+            }
+            r.clear()
+        }
+        events.forEachIndexed { i, e ->
+            when (e) {
+                is CaptureEvent.Tick -> for ((d, recorded) in e.playheads) {
+                    val deck = s.decks[d]
+                    if (anchor[d] < 0 || residuals[d].size >= ANCHOR_TICKS || deck.trackId == null || !deck.sounding || deck.scratching || deck.loop != null) continue
+                    val at = deck.playheadAt(e.t)
+                    if (at >= 0) residuals[d] += recorded - at
+                }
+                is CaptureEvent.Transport, is CaptureEvent.Loop, is CaptureEvent.Load -> {
+                    val d = when (e) { is CaptureEvent.Transport -> e.deck; is CaptureEvent.Loop -> e.deck; else -> (e as CaptureEvent.Load).deck }
+                    if (e is CaptureEvent.Transport && e.action == "scratchMove") return@forEachIndexed reduce(s, e, replay = true)
+                    close(d)
+                    reduce(s, e, replay = true)
+                    if (e !is CaptureEvent.Load && s.decks[d].sounding && !s.decks[d].scratching) anchor[d] = i
+                    return@forEachIndexed
+                }
+                else -> {}
+            }
+            reduce(s, e, replay = true)
+        }
+        for (d in 0..3) close(d)
+        return out
+    }
     val appearances: List<Appearance>
     /** Where the performance starts: the first recorded sound (minus a lead-in). Logs can carry hours of idle ticks before it. */
     val activeStart: Double
@@ -134,18 +198,55 @@ class SessionLog(
     }
 
     /** Desktop stateAt: every event at or before [t] applied, playheads extrapolated to [t]. */
-    fun at(t: Double): SessionState {
+    fun at(t: Double): SessionState = reconstruct(t, checkpoints, replay = false)
+
+    /**
+     * Replay reference (what the engine is driven to reproduce, sample-exactly): stateAt semantics except
+     * ticks never re-anchor playheads (they are evidence: see [tickDivergence]) and bend integrates into the
+     * rate. Playheads may be negative (pre-roll before the track start).
+     */
+    fun replayAt(t: Double): SessionState = reconstruct(t, replayCheckpoints, replay = true)
+
+    private fun reconstruct(t: Double, cps: List<SessionState>, replay: Boolean): SessionState {
         val n = indexAfter(t)
-        val k = n / STRIDE
-        val s = if (checkpoints.isEmpty()) SessionState() else checkpoints[minOf(k, checkpoints.size - 1)].copy()
-        for (i in minOf(k, checkpoints.size - 1).coerceAtLeast(0) * STRIDE until n) reduce(s, events[i])
-        for (d in s.decks) { d.playhead = max(0.0, d.playheadAt(t)); d.playheadAt = t }
+        val k = minOf(n / STRIDE, cps.size - 1)
+        val s = if (cps.isEmpty()) SessionState() else cps[k].copy()
+        val source = if (replay) replayEvents else events
+        for (i in k.coerceAtLeast(0) * STRIDE until n) reduce(s, source[i], replay)
+        for (d in s.decks) { d.playhead = d.playheadAt(t).let { if (replay) it else max(0.0, it) }; d.playheadAt = t }
         return s
+    }
+
+    /** A recorded tick that disagrees with the replay reference by more than [threshold] seconds (bad recording data). */
+    data class Divergence(val t: Double, val deck: Int, val seconds: Double)
+
+    /**
+     * Ticks (recorded playhead samples) vs the replay reference, for sounding, unscratched, loop-free decks.
+     * Replay never corrects toward ticks; this only reports where the recording is internally inconsistent.
+     */
+    fun tickDivergence(threshold: Double = DIVERGENCE_SECONDS): List<Divergence> {
+        val s = SessionState()
+        val out = ArrayList<Divergence>()
+        for (e in replayEvents) {
+            if (e is CaptureEvent.Tick) for ((d, recorded) in e.playheads) {
+                val deck = s.decks[d]
+                if (deck.trackId == null || !deck.sounding || deck.scratching || deck.loop != null) continue
+                val diff = deck.playheadAt(e.t) - recorded
+                if (abs(diff) > threshold) out += Divergence(e.t, d, diff)
+            }
+            reduce(s, e, replay = true)
+        }
+        return out
     }
 
     companion object {
         private const val STRIDE = 32
         const val LEAD_IN = 2.0
+        const val DIVERGENCE_SECONDS = .005
+        /** Anchor refinement: 2..ANCHOR_TICKS ticks after an anchor, agreeing within the spread, shift it when the offset is at least the minimum. */
+        const val ANCHOR_TICKS = 3
+        const val ANCHOR_SPREAD = .002
+        const val ANCHOR_MIN = .0005
 
         private val CONTROLS = setOf("trim", "eqLow", "eqMid", "eqHigh", "filter", "fader", "pfl", "slipMode", "vinylMode",
             "crossfaderAssignment", "crossfader", "crossfaderEnabled", "master", "stemVocals", "stemDrums", "stemBass", "stemOther")
@@ -153,8 +254,11 @@ class SessionLog(
             "scratchBegin", "scratchMove", "scratchEnd")
         private val STEMS = listOf("stemVocals", "stemDrums", "stemBass", "stemOther")
 
-        /** Desktop applyEvent (audibilityReducer.ts) minus scratch motion and FX tails. */
-        fun reduce(s: SessionState, e: CaptureEvent) {
+        /**
+         * Desktop applyEvent (audibilityReducer.ts) minus scratch motion and FX tails. [replay]: the replay
+         * reference variant (ticks evidence only, bend integrated).
+         */
+        fun reduce(s: SessionState, e: CaptureEvent, replay: Boolean = false) {
             when (e) {
                 is CaptureEvent.Load -> s.decks[e.deck].apply {
                     trackId = e.trackId; bpm = e.bpm; previewing = false; scratching = false; loop = null; playhead = 0.0; playheadAt = e.t
@@ -172,7 +276,8 @@ class SessionLog(
                 }
                 is CaptureEvent.Pitch -> s.decks[e.deck].apply { playhead = playheadAt(e.t); playheadAt = e.t; pitch = e.value }
                 is CaptureEvent.Loop -> s.decks[e.deck].apply { loop = e.region; playhead = e.playhead; playheadAt = e.t }
-                is CaptureEvent.Tick -> e.playheads.forEach { (d, p) -> s.decks[d].apply { if (!scratching) { playhead = p; playheadAt = e.t } } }
+                is CaptureEvent.Tick -> if (!replay) e.playheads.forEach { (d, p) -> s.decks[d].apply { if (!scratching) { playhead = p; playheadAt = e.t } } }
+                is CaptureEvent.Bend -> if (replay) s.decks[e.deck].apply { playhead = playheadAt(e.t); playheadAt = e.t; bend = e.value }
                 is CaptureEvent.Tenure -> s.tenure = if (e.start) e.holder else null
                 is CaptureEvent.BeatFx -> s.beatFx = e.section
                 is CaptureEvent.Control -> {
@@ -191,7 +296,7 @@ class SessionLog(
                         in STEMS -> d?.let { val bit = 1 shl STEMS.indexOf(e.control); it.stems = if (v != 0.0) it.stems or bit else it.stems and bit.inv() }
                     }
                 }
-                is CaptureEvent.Bend, is CaptureEvent.Other -> {}
+                is CaptureEvent.Other -> {}
             }
         }
 
@@ -241,7 +346,7 @@ class SessionLog(
                     if (action !in TRANSPORT) { issues.add(ReplayIssue(t, d, "transport $action")); CaptureEvent.Other(t, "transport:$action") }
                     else {
                         if (action == "scratchBegin") issues.add(ReplayIssue(t, d, "scratch (replayed as its landing position)"))
-                        CaptureEvent.Transport(t, d, action, num("playhead"))
+                        CaptureEvent.Transport(t, d, action, num("playhead"), optNum("deltaSeconds"), optNum("detail"))
                     }
                 }
                 "pitch" -> CaptureEvent.Pitch(t, deck(), num("value"))

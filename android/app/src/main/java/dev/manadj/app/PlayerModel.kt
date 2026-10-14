@@ -178,6 +178,13 @@ class PlayerModel(application: Application) : AndroidViewModel(application) {
     fun dismissFailure() { failure = null }
     /** Fresh engine snapshot (not the 33 ms UI poll): Session replay reads its clock from it. */
     fun engineSnapshot(): EngineSnapshot? = service?.snapshot()
+    /** Frame-stamped commands (Session replay); UI pending/receipt state is not involved. */
+    fun schedule(atFrame: Long, commands: List<AudioCommand>, tag: Long): Boolean {
+        val receipts = service?.schedule(atFrame, commands, tag) ?: return false
+        receipts.firstOrNull { !it.accepted }?.let { failure = it.reason; return false }
+        return true
+    }
+    fun cancelScheduled(tag: Long) { service?.cancelScheduled(tag) }
 
     fun beginGesture(deck: DeckId, kind: String, cancel: (String) -> Unit): String {
         val id = "${deck.name}:$clientId:$kind:${++gestureSequence}"

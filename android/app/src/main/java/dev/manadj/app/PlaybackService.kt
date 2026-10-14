@@ -98,18 +98,33 @@ class PlaybackService : Service() {
         if (destroyed) return CommandReceipt(0, false, "Audio service closed")
         val audio = engine ?: return CommandReceipt(0, false, failure ?: "Audio output is starting")
         if (command is AudioCommand.Play || command is AudioCommand.CueDown || command is AudioCommand.HotCueDown) {
-            if (snapshot()?.outputOpen != true) return CommandReceipt(0, false, "Audio output unavailable")
-            if (!hasFocus) hasFocus = audioManager.requestAudioFocus(focusRequest) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
-            if (!hasFocus) return CommandReceipt(0, false, "Android denied audio focus")
-            try {
-                if (!foreground) {
-                    ContextCompat.startForegroundService(this, Intent(this, PlaybackService::class.java))
-                    startForeground(1, notification())
-                    foreground = true
-                }
-            } catch (error: RuntimeException) { return CommandReceipt(0, false, "Cannot start foreground playback: ${error.message}") }
+            startingPlayback()?.let { return CommandReceipt(0, false, it) }
         }
         return audio.submit(command)
+    }
+
+    /** Frame-stamped commands (Session replay): see [AudioEngine.schedule]. */
+    fun schedule(atFrame: Long, commands: List<AudioCommand>, tag: Long): List<CommandReceipt> {
+        val audio = engine.takeIf { !destroyed } ?: return commands.map { CommandReceipt(0, false, failure ?: "Audio output unavailable") }
+        if (commands.any { it is AudioCommand.Play }) startingPlayback()?.let { reason -> return commands.map { CommandReceipt(0, false, reason) } }
+        return audio.schedule(atFrame, commands, tag)
+    }
+
+    fun cancelScheduled(tag: Long) { if (!destroyed) engine?.cancelScheduled(tag) }
+
+    /** Output open, audio focus, foreground service before anything starts sounding; null = ok, else why not. */
+    private fun startingPlayback(): String? {
+        if (snapshot()?.outputOpen != true) return "Audio output unavailable"
+        if (!hasFocus) hasFocus = audioManager.requestAudioFocus(focusRequest) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+        if (!hasFocus) return "Android denied audio focus"
+        try {
+            if (!foreground) {
+                ContextCompat.startForegroundService(this, Intent(this, PlaybackService::class.java))
+                startForeground(1, notification())
+                foreground = true
+            }
+        } catch (error: RuntimeException) { return "Cannot start foreground playback: ${error.message}" }
+        return null
     }
 
     /** Last system-initiated pause, surfaced by the UI so stops are never silent. */

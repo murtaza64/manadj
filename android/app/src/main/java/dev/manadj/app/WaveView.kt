@@ -71,7 +71,7 @@ class WaveStyle(val colors: Array<FloatArray>, val coreWhite: Float, val coreBlo
 }
 
 /** One column's group heights (0..1): desktop groupAmps over the column's box-filtered band frames. */
-private fun columnGroups(data: WaveformData, t0: Double, t1: Double, out: FloatArray) {
+internal fun columnGroups(data: WaveformData, t0: Double, t1: Double, out: FloatArray) {
     val fps = data.framesPerSecond
     val x0 = t0 * fps - data.stftWindow * .5 / data.bandHop
     val x1 = t1 * fps - data.stftWindow * .5 / data.bandHop
@@ -117,7 +117,7 @@ private fun dim(color: Int, k: Float): Int {
     return android.graphics.Color.argb(android.graphics.Color.alpha(color), ch(android.graphics.Color.red(color), 0), ch(android.graphics.Color.green(color), 1), ch(android.graphics.Color.blue(color), 2))
 }
 
-private class Lines(val style: WaveStyle, val brightness: Float = 1f) {
+internal class Lines(val style: WaveStyle, val brightness: Float = 1f) {
     private class Bucket(var buf: FloatArray, var count: Int = 0)
     private val levels = Array(3) { LinkedHashMap<Int, Bucket>() }
     fun reset() { for (l in levels) for (b in l.values) b.count = 0 }
@@ -341,7 +341,7 @@ private fun renderOverview(data: WaveformData, size: IntSize2, duration: Double,
 fun position(ui: DeckUi) = if (ui.source?.id == ui.snapshot?.sourceId) ui.snapshot?.sourceSeconds ?: 0.0 else 0.0
 
 /** Per-column band groups for one (waveform, zoom): column k is computed once while its frames are analysed. */
-private class ColumnCache {
+internal class ColumnCache {
     private var data: WaveformData? = null
     private var colSeconds = 0.0
     private val cache = HashMap<Long, FloatArray>()
@@ -352,7 +352,7 @@ private class ColumnCache {
         if (d !== data || seconds != colSeconds) { data = d; colSeconds = seconds; cache.clear() }
         if (d.frames != fillFrames && (d.complete || d.frames - fillFrames > d.framesPerSecond * 20)) { fillFrames = d.frames; fill = fillGain(d) }
     }
-    private fun fillGain(d: WaveformData): Float {
+    fun fillGain(d: WaveformData): Float {
         val dur = d.frames / d.framesPerSecond
         if (dur <= 0) return 1f
         val n = 1500; val g = FloatArray(3); val peaks = FloatArray(n)
