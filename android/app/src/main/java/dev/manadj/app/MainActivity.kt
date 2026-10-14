@@ -227,7 +227,7 @@ class MainActivity : ComponentActivity() {
         Column(Modifier.fillMaxSize().padding(horizontal = 4.dp)) {
             if (!dense) Row(Modifier.fillMaxWidth().height(24.dp), verticalAlignment = Alignment.CenterVertically) {
                 val audio = model.output
-                Text("${model.selected} · ${when { audio == null -> "OPENING AUDIO"; !audio.outputOpen -> "OUTPUT CLOSED"; else -> "NATIVE ${audio.outputSampleRate}Hz" }}", Modifier.weight(1f), deckColor(model.selected), 11, true)
+                Text("${model.selected} · ${when { audio == null -> "OPENING AUDIO"; !audio.outputOpen -> "OUTPUT CLOSED"; else -> model.outputInfo?.let { "${it.api} ${it.sampleRate / 1000}k buf ${"%.1f".format(it.bufferMillis)}ms ~${it.latencyMillis?.let { l -> "%.0f".format(l) } ?: "?"}ms xr ${it.xruns}" } ?: "NATIVE ${audio.outputSampleRate}Hz" }}", Modifier.weight(1f), deckColor(model.selected), 11, true)
                 Key(model.layout.label, Modifier.width(48.dp).fillMaxHeight(), description = "Layout ${model.layout.label}, switch to ${next.label}") { model.chooseLayout(next) }
             }
             Row(Modifier.fillMaxWidth().height(if (landscape) 72.dp else 88.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) { for (id in model.visibleDecks) SourceHeader(model.decks.getValue(id), model, Modifier.weight(1f).fillMaxHeight(), landscape, dense && id == DeckId.A) }

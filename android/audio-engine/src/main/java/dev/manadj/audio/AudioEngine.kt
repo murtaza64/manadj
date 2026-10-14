@@ -61,6 +61,18 @@ data class EngineSnapshot(
     val decks: Map<DeckId, DeckSnapshot>, val supportedCapabilities: Set<String>,
 )
 
+/** Negotiated Oboe output; enum fields are Oboe ordinals rendered as names. */
+data class OutputInfo(
+    val api: String, val sharing: String, val performance: String, val sampleRate: Int, val channels: Int,
+    val framesPerBurst: Int, val bufferFrames: Int, val capacityFrames: Int, val latencyMillis: Double?,
+    val deviceId: Int, val xruns: Long, val minCallbackFrames: Int, val maxCallbackFrames: Int,
+) {
+    val bufferMillis get() = bufferFrames * 1000.0 / sampleRate
+    override fun toString() = "$api/$sharing/$performance ${sampleRate}Hz ${channels}ch burst=$framesPerBurst " +
+        "buffer=$bufferFrames (${"%.1f".format(bufferMillis)} ms) cap=$capacityFrames latency=${latencyMillis?.let { "%.1f ms".format(it) } ?: "?"} " +
+        "device=$deviceId xruns=$xruns callback=$minCallbackFrames..$maxCallbackFrames"
+}
+
 /** One shared Oboe output. Call close off the UI thread after disabling new app commands. */
 class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
     private class Source(val id: String, val fd: ParcelFileDescriptor, val load: Long)
@@ -141,6 +153,20 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
         if (!value.isFinite()) return rejected("Non-finite control")
         val id = nativeSubmit(handle, op.ordinal, deck, value, 0, slot)
         return if (id != 0L) CommandReceipt(id, true) else rejected("Command queue full")
+    }
+
+    @Synchronized fun outputInfo(): OutputInfo? {
+        if (closed) return null
+        val d = nativeOutputInfo(handle)
+        if (d.size < 13) return null
+        return OutputInfo(
+            api = listOf("Unspecified", "OpenSLES", "AAudio").getOrElse(d[0].toInt()) { "?" },
+            sharing = listOf("Exclusive", "Shared").getOrElse(d[1].toInt()) { "?" },
+            performance = when (d[2].toInt()) { 10 -> "None"; 11 -> "PowerSaving"; 12 -> "LowLatency"; 13 -> "PowerSavingOffloaded"; else -> "?" },
+            sampleRate = d[3].toInt(), channels = d[4].toInt(), framesPerBurst = d[5].toInt(), bufferFrames = d[6].toInt(),
+            capacityFrames = d[7].toInt(), latencyMillis = d[8].takeIf { it >= 0 }, deviceId = d[9].toInt(), xruns = d[10].toLong(),
+            minCallbackFrames = d[11].toInt(), maxCallbackFrames = d[12].toInt(),
+        )
     }
 
     /** Reopens the output after a failed automatic recovery. Returns 0 or an Oboe error. */
@@ -297,6 +323,7 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
     private external fun nativeOffer(handle: Long, deck: Int, transport: Long, pcm: FloatArray, offsetFrames: Int, frames: Int): Int
     private external fun nativePublish(handle: Long, deck: Int, load: Long, transport: Long, eof: Boolean): Boolean
     private external fun nativeFail(handle: Long, deck: Int, load: Long)
+    private external fun nativeOutputInfo(handle: Long): DoubleArray
     private external fun nativeSnapshot(handle: Long): DoubleArray
     private external fun nativeRenderOffline(handle: Long, frames: Int): FloatArray
 }

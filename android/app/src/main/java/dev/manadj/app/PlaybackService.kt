@@ -30,11 +30,11 @@ class PlaybackService : Service() {
         AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN).setAudioAttributes(attributes)
             .setOnAudioFocusChangeListener({ change ->
                 hasFocus = change == AudioManager.AUDIOFOCUS_GAIN
-                if (!hasFocus) pauseAll()
+                if (!hasFocus) pauseAll("Paused: another app took audio focus ($change)")
             }, main).build()
     }
     private val noisy = object : BroadcastReceiver() {
-        override fun onReceive(context: Context?, intent: Intent?) { if (intent?.action == AudioManager.ACTION_AUDIO_BECOMING_NOISY) pauseAll() }
+        override fun onReceive(context: Context?, intent: Intent?) { if (intent?.action == AudioManager.ACTION_AUDIO_BECOMING_NOISY) pauseAll("Paused: audio output became noisy (headphones unplugged)") }
     }
 
     override fun onCreate() {
@@ -54,7 +54,7 @@ class PlaybackService : Service() {
 
     override fun onBind(intent: Intent?): IBinder = binder
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action == "STOP") { pauseAll(); stopForeground(STOP_FOREGROUND_REMOVE); foreground = false; stopSelf() }
+        if (intent?.action == "STOP") { pauseAll("Stopped from the notification"); stopForeground(STOP_FOREGROUND_REMOVE); foreground = false; stopSelf() }
         else if (!foreground) { startForeground(1, notification()); foreground = true }
         return START_NOT_STICKY
     }
@@ -63,6 +63,8 @@ class PlaybackService : Service() {
         if (destroyed) return null
         return try { engine?.snapshot() } catch (error: IllegalStateException) { failure = error.message; null }
     }
+
+    fun outputInfo(): OutputInfo? = if (destroyed) null else try { engine?.outputInfo() } catch (_: IllegalStateException) { null }
 
     fun source(id: String?): LocalSource? = sourceMetadata[id]
 
@@ -91,8 +93,15 @@ class PlaybackService : Service() {
         return audio.submit(command)
     }
 
-    fun pauseAll() {
+    /** Last system-initiated pause, surfaced by the UI so stops are never silent. */
+    @Volatile var pauseReason: String? = null
+
+    fun pauseAll(reason: String) {
         val audio = engine ?: return
+        if (DeckId.entries.any { snapshot()?.decks?.get(it)?.let { d -> d.playing || d.previewing } == true }) {
+            pauseReason = reason
+            android.util.Log.i("manadj", reason)
+        }
         DeckId.entries.forEach { deck ->
             audio.submit(AudioCommand.SetBend(deck, 0.0))
             audio.submit(AudioCommand.Pause(deck))

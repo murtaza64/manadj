@@ -244,6 +244,66 @@ class AudioEngineTest {
         }
     }
 
+    @Test fun manyRelocationsWhilePlayingNeverEndEarly() {
+        val media = wav("engine-reloc.wav", .25, seconds = 20, rate = 44100)
+        val rng = java.util.Random(7)
+        AudioEngine(offline = true).use { engine ->
+            engine.load(DeckId.A, "reloc", media)
+            engine.settled(DeckId.A)
+            engine.submit(AudioCommand.Play(DeckId.A))
+            repeat(150) { i ->
+                val target = rng.nextDouble() * 18
+                if (i % 2 == 0) { engine.submit(AudioCommand.Seek(DeckId.A, target)); engine.renderOfflineForTest(16) }
+                else { engine.submit(AudioCommand.SetHotCue(DeckId.A, 1)); engine.submit(AudioCommand.HotCueDown(DeckId.A, 1)); engine.submit(AudioCommand.HotCueUp(DeckId.A, 1)) }
+                engine.renderOfflineForTest(16)
+                engine.settled(DeckId.A)
+                engine.renderOfflineForTest(rng.nextInt(4096) + 1)
+                val d = engine.deck(DeckId.A)
+                assertTrue("stopped after relocation $i to $target: $d", d.playing && !d.atEnd)
+            }
+        }
+    }
+
+    /** Physical-output baseline: logs negotiated Oboe config; hot-cue jumps while playing must keep playing. */
+    @Test fun deviceOutputStatsAndJumpsKeepPlaying() {
+        val media = wav("engine-bench.wav", .25, seconds = 30)
+        AudioEngine().use { engine ->
+            engine.load(DeckId.A, "bench", media)
+            for (attempt in 0 until 300) { if (engine.deck(DeckId.A).let { it.loadState == LoadState.READY && !it.filling }) break; Thread.sleep(10) }
+            engine.submit(AudioCommand.SetFader(DeckId.A, 0.0)) // Silent on the test host.
+            engine.submit(AudioCommand.Seek(DeckId.A, 1.0))
+            Thread.sleep(100)
+            engine.submit(AudioCommand.SetHotCue(DeckId.A, 0))
+            engine.submit(AudioCommand.Play(DeckId.A))
+            Thread.sleep(200)
+            val before = engine.snapshot()
+            val gaps = mutableListOf<Long>()
+            repeat(20) { i ->
+                Thread.sleep(150L + (i % 5) * 37)
+                assertTrue("stopped before jump $i: ${engine.deck(DeckId.A)}", engine.deck(DeckId.A).playing)
+                val t0 = System.nanoTime()
+                engine.submit(AudioCommand.HotCueDown(DeckId.A, 0, "j$i"))
+                engine.submit(AudioCommand.HotCueUp(DeckId.A, 0, "j$i"))
+                var seen = false
+                while (System.nanoTime() - t0 < 500_000_000L) {
+                    val d = engine.deck(DeckId.A)
+                    if (!seen && d.filling) seen = true
+                    if (seen && !d.filling && d.sourceSeconds > 1.0) break
+                    Thread.sleep(1)
+                }
+                gaps.add((System.nanoTime() - t0) / 1_000_000)
+            }
+            Thread.sleep(300)
+            val after = engine.snapshot()
+            val info = engine.outputInfo()
+            android.util.Log.i("manadj-bench", "output: $info")
+            android.util.Log.i("manadj-bench", "jump refill ms: ${gaps.sorted()} starved=${after.starvedDeckFrames - before.starvedDeckFrames} xruns=${after.outputXruns}")
+            assertTrue("deck stopped after jumps: ${after.decks.getValue(DeckId.A)}", after.decks.getValue(DeckId.A).playing)
+            assertNotNull(info)
+            assertTrue(info!!.framesPerBurst > 0)
+        }
+    }
+
     @Test fun replacementRetiresOldDecodeAndReportsUnsupportedAsError() {
         val a = wav("engine-replace-a.wav", .25)
         val b = wav("engine-replace-b.wav", -.25)

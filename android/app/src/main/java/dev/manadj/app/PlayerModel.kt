@@ -50,6 +50,8 @@ class PlayerModel(application: Application) : AndroidViewModel(application) {
         private set
     var failure by mutableStateOf<String?>(null)
         private set
+    var outputInfo by mutableStateOf<OutputInfo?>(null)
+        private set
     var crossfade by mutableDoubleStateOf(.5)
     var lastReceipt by mutableStateOf<CommandReceipt?>(null)
         private set
@@ -76,8 +78,10 @@ class PlayerModel(application: Application) : AndroidViewModel(application) {
         bound = application.bindService(Intent(application, PlaybackService::class.java), connection, Context.BIND_AUTO_CREATE)
         if (!bound) failure = "Cannot bind the audio service"
         viewModelScope.launch {
+            var tick = 0
             while (isActive) {
                 val audio = service
+                if (tick++ % 30 == 0) outputInfo = audio?.outputInfo()
                 val state = audio?.snapshot()
                 if (state != null) {
                     output = state
@@ -104,6 +108,7 @@ class PlayerModel(application: Application) : AndroidViewModel(application) {
                     if (state.outputOpen != outputWasOpen) { outputWasOpen = state.outputOpen; failure = if (state.outputOpen) null else "Audio output disconnected: reconnecting" }
                 }
                 audio?.failure?.let { failure = it }
+                audio?.pauseReason?.let { failure = it; audio.pauseReason = null }
                 delay(33)
             }
         }

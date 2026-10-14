@@ -83,6 +83,21 @@ class RealPlaybackTest {
         }
     }
 
+    /** Repro attempt for the unexplained emulator deck-A stop: set + trigger a hot cue while playing, switch layouts. */
+    @Test fun hotCueJumpWhilePlayingKeepsPlayingAcrossLayouts() {
+        load(DeckId.A, tone(220.0)); load(DeckId.B, tone(330.0))
+        onMain { DeckId.entries.take(2).forEach { model.updateFader(it, 0.0); model.submit(AudioCommand.Play(it)) } }
+        await("A past 1 s") { model.decks.getValue(DeckId.A).snapshot!!.sourceSeconds > 1.0 }
+        onMain { model.submit(AudioCommand.SetHotCue(DeckId.A, 0)) }
+        await("hot cue stored") { model.decks.getValue(DeckId.A).hotCues[0] != null }
+        Thread.sleep(1500)
+        onMain { model.submit(AudioCommand.HotCueDown(DeckId.A, 0, "t")); model.submit(AudioCommand.HotCueUp(DeckId.A, 0, "t")) }
+        for (layout in Layout.entries + Layout.entries) { onMain { model.chooseLayout(layout) }; Thread.sleep(700) }
+        val a = model.output!!.decks.getValue(DeckId.A)
+        assertTrue("A stopped: $a failure=${model.failure}", a.playing)
+        assertTrue(model.output!!.decks.getValue(DeckId.B).playing)
+    }
+
     @Test fun replacementGenerationAndFailuresRemainVisible() {
         val first = tone(180.0)
         val second = tone(420.0)

@@ -26,6 +26,8 @@ struct Output final : oboe::AudioStreamDataCallback, oboe::AudioStreamErrorCallb
     std::atomic<int64_t> xruns{0};
     std::atomic<int64_t> xrunBase{0};
     int callbacks = 0;
+    std::atomic<int> minCallbackFrames{1 << 30};
+    std::atomic<int> maxCallbackFrames{0};
 
     int openLocked() {
         oboe::AudioStreamBuilder builder;
@@ -57,6 +59,8 @@ struct Output final : oboe::AudioStreamDataCallback, oboe::AudioStreamErrorCallb
 
     oboe::DataCallbackResult onAudioReady(oboe::AudioStream* s, void* buffer, int32_t frames) override {
         engine.render(static_cast<float*>(buffer), frames);
+        if (frames < minCallbackFrames.load(std::memory_order_relaxed)) minCallbackFrames.store(frames, std::memory_order_relaxed);
+        if (frames > maxCallbackFrames.load(std::memory_order_relaxed)) maxCallbackFrames.store(frames, std::memory_order_relaxed);
         if ((++callbacks & 63) == 0) {
             const auto count = s->getXRunCount();
             if (count) xruns.store(xrunBase.load(std::memory_order_relaxed) + count.value(), std::memory_order_relaxed);
@@ -209,6 +213,36 @@ Java_dev_manadj_audio_AudioEngine_nativeSnapshot(JNIEnv* env, jobject, jlong han
     }
     auto result = env->NewDoubleArray(kSnapshotSize);
     if (result) env->SetDoubleArrayRegion(result, 0, kSnapshotSize, data);
+    return result;
+}
+
+// Output configuration as negotiated: api, sharing, performance mode, rate, channels,
+// frames per burst, buffer size, buffer capacity, estimated latency ms (-1 unknown),
+// device id, xruns, min/max callback frames. Empty when no stream is open.
+extern "C" JNIEXPORT jdoubleArray JNICALL
+Java_dev_manadj_audio_AudioEngine_nativeOutputInfo(JNIEnv* env, jobject, jlong handle) {
+    auto* sink = output(handle);
+    double data[13] = {};
+    int n = 0;
+    {
+        std::lock_guard<std::mutex> lock(sink->streamMutex);
+        if (auto& s = sink->stream) {
+            const auto latency = s->calculateLatencyMillis();
+            const double values[13] = {
+                static_cast<double>(s->getAudioApi()), static_cast<double>(s->getSharingMode()),
+                static_cast<double>(s->getPerformanceMode()), static_cast<double>(s->getSampleRate()),
+                static_cast<double>(s->getChannelCount()), static_cast<double>(s->getFramesPerBurst()),
+                static_cast<double>(s->getBufferSizeInFrames()), static_cast<double>(s->getBufferCapacityInFrames()),
+                latency ? latency.value() : -1.0, static_cast<double>(s->getDeviceId()),
+                static_cast<double>(sink->xruns.load()), static_cast<double>(sink->minCallbackFrames.load()),
+                static_cast<double>(sink->maxCallbackFrames.load()),
+            };
+            std::copy(values, values + 13, data);
+            n = 13;
+        }
+    }
+    auto result = env->NewDoubleArray(n);
+    if (result && n) env->SetDoubleArrayRegion(result, 0, n, data);
     return result;
 }
 
