@@ -363,6 +363,7 @@ void Engine::captureTail(Deck& d) noexcept {
 }
 
 void Engine::relocate(Deck& d, double seconds, int slot, double overshootFrames) noexcept {
+    d.launchAt.store(0, kRelaxed);
     captureTail(d);
     releaseHead(d);
     const auto t = std::max(0.0, seconds);
@@ -404,7 +405,62 @@ void Engine::relocate(Deck& d, double seconds, int slot, double overshootFrames)
     d.transport.store(d.transport.load(kRelaxed) + 1, kRelease);
 }
 
+// Desktop SyncGroup.launchReference / nearestPlayingTempoReference: with Quantize on, the other deck
+// playing with a grid whose effective tempo (half/double folded) is nearest this deck's; a Sync Group
+// member only references in-lock members. -1 = none (the launch is immediate).
+int Engine::launchReference(int index) const noexcept {
+    if (!quantize_.load(kRelaxed)) return -1;
+    const auto& own = decks_[index];
+    const double ownBpm = own.bpm.load(kRelaxed) * (1 + own.pitch.load(kRelaxed) / 100.);
+    if (!(ownBpm > 0)) return -1;
+    const bool grouped = (syncMembers_ >> index) & 1;
+    int best = -1;
+    double bestDistance = 0;
+    for (int i = 0; i < kDeckCount; ++i) {
+        const auto& d = decks_[i];
+        if (i == index || !ready(d) || !d.playing.load(kRelaxed) || d.scratching.load(kRelaxed) || d.launchAt.load(kRelaxed) != 0) continue;
+        if (!(d.bpm.load(kRelaxed) > 0) || (grouped && !((syncSynced_ >> i) & 1))) continue;
+        const double e = d.bpm.load(kRelaxed) * (1 + d.pitch.load(kRelaxed) / 100.);
+        const double distance = std::min({std::abs(e - ownBpm), std::abs(e * 2 - ownBpm), std::abs(e / 2 - ownBpm)});
+        if (best < 0 || distance < bestDistance) { best = i; bestDistance = distance; }
+    }
+    return best;
+}
+
+// Desktop transport.ts launchStart + quantize.ts crossDeckLaunchTarget for a paused deck's launch
+// (Play, Cue-hold, Hot-cue-hold) at `at`: Δ = reference's nearest beat − its playhead, in real seconds.
+// Δ > 0: hold, then enter exactly on `at` when the reference beat sounds (frame-exact: the start frame
+// rounds up and the entry advances by the sub-frame remainder). Δ ≤ 0: start now, |Δ|·rate ahead of `at`.
+void Engine::launch(int index, double at, int slot) noexcept {
+    const int ref = launchReference(index);
+    if (ref < 0) return;
+    auto& d = decks_[index];
+    const auto& r = decks_[ref];
+    const double refPosition = r.position.load(kRelaxed);
+    const double refRate = (1 + r.pitch.load(kRelaxed) / 100.) * (1 + r.bend.load(kRelaxed) / 100.);
+    const double rate = (1 + d.pitch.load(kRelaxed) / 100.) * (1 + d.bend.load(kRelaxed) / 100.);
+    const double delta = (snapToBeat(r, refPosition) - refPosition) / refRate;
+    if (!(delta > 0)) {
+        const double entry = at - delta * rate;
+        if (entry != at) relocate(d, entry);
+        return;
+    }
+    const double out = outputRate_.load(kRelaxed), exact = delta * out;
+    const auto wait = static_cast<uint64_t>(std::ceil(exact - 1e-6)); // float noise must not cost a frame
+    const double entry = at + std::max(0.0, static_cast<double>(wait) - exact) / out * rate;
+    if (std::abs(entry - d.position.load(kRelaxed)) > 1e-12 || entry != at) relocate(d, entry, entry == at ? slot : -1);
+    if (wait == 0) return;
+    const uint64_t frame = static_cast<uint64_t>(renderFrame_) + wait;
+    d.launchAt.store(frame, kRelaxed);
+    Command start{};
+    start.op = Op::LaunchStart;
+    start.deck = index;
+    start.at = frame;
+    enqueueScheduled(start);
+}
+
 void Engine::stop(Deck& d) noexcept {
+    d.launchAt.store(0, kRelaxed);
     captureTail(d);
     d.envelope = 0;
     d.playing.store(false, kRelaxed);
@@ -433,15 +489,19 @@ void Engine::apply(const Command& c) noexcept {
             d.trackEnd.store(false);
             relocate(d, 0);
             break;
-        case Op::Play:
-            if (isReady) { d.playing.store(true); d.preview.store(false); d.previewSlot.store(-1); }
+        case Op::Play: {
+            if (!isReady) break;
+            const bool running = d.playing.load() || d.preview.load(); // a running preview is taken over seamlessly
+            d.playing.store(true); d.preview.store(false); d.previewSlot.store(-1);
+            if (!running && c.at == 0) launch(c.deck, position, -1); // frame-stamped (machine) launches are exact
             break;
+        }
         case Op::Pause: stop(d); break;
         case Op::CueDown: {
             if (!isReady) break;
             const double cue = d.cue.load();
             if (d.playing.load()) { stop(d); d.loopActive.store(false); relocate(d, cue, kMainCueSlot); }
-            else if (std::abs(position - cue) < kAtCueEpsilon) { d.preview.store(true); d.previewSlot.store(kMainCueSlot); }
+            else if (std::abs(position - cue) < kAtCueEpsilon) { d.preview.store(true); d.previewSlot.store(kMainCueSlot); if (c.at == 0) launch(c.deck, cue, kMainCueSlot); }
             else {
                 // Placement: Quantize snaps the cue, and the parked playhead moves with it.
                 const double at = quantize_.load() ? snapToBeat(d, position) : position;
@@ -463,7 +523,7 @@ void Engine::apply(const Command& c) noexcept {
             // paused triggers land exactly.
             const bool snap = quantize_.load() && d.playing.load() && d.bpm.load() > 0;
             relocate(d, snap ? snapToBeat(d, at) + (position - snapToBeat(d, position)) : at, snap ? -1 : c.slot);
-            if (!d.playing.load()) { d.preview.store(true); d.previewSlot.store(c.slot); }
+            if (!d.playing.load()) { d.preview.store(true); d.previewSlot.store(c.slot); if (c.at == 0) launch(c.deck, at, c.slot); }
             break;
         }
         case Op::HotCueUp:
@@ -646,6 +706,10 @@ void Engine::apply(const Command& c) noexcept {
             break;
         }
         case Op::CancelScheduled: cancelScheduledNow(c); break;
+        case Op::SetSyncMembers: syncMembers_ = static_cast<int>(c.value) & 15; syncSynced_ = c.slot & 15; break;
+        case Op::LaunchStart:
+            if (d.launchAt.load() == c.at) d.launchAt.store(0);
+            return; // internal: no receipt
         case Op::CueMix: cueMix_.store(std::clamp(static_cast<float>(c.value), 0.f, 1.f)); break;
         case Op::BeatFx: {
             const int target = static_cast<int>(c.aux[0]);
@@ -816,7 +880,7 @@ int Engine::renderSegment(Deck& d, float* strip, int frames, bool& active) noexc
                 d.position.store(d.claimedStart.load(kAcquire), kRelease);
             d.positionTransport = transport;
         }
-        if (!(d.playing.load(kRelaxed) || d.preview.load(kRelaxed))) { d.envelope = 0; d.stretching.store(false, kRelaxed); return -1; }
+        if (!(d.playing.load(kRelaxed) || d.preview.load(kRelaxed)) || d.launchAt.load(kRelaxed) != 0) { d.envelope = 0; d.stretching.store(false, kRelaxed); return -1; }
         {
             const double span = frames * 8.0 * d.track.sampleRate.load(kRelaxed) / outRate; // max ratio margin
             // Enter memory mode with a margin; once in it, stay while the block itself is covered.

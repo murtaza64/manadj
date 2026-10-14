@@ -136,6 +136,30 @@ class AudioEngineTest {
         }
     }
 
+    @Test fun quantizedPlayLaunchesOnTheReferenceBeat() {
+        val a = wav("engine-q-a.wav", .25)
+        val b = wav("engine-q-b.wav", .25)
+        AudioEngine(offline = true).use { engine ->
+            engine.load(DeckId.A, "a", a); engine.load(DeckId.B, "b", b)
+            engine.settled(DeckId.A, DeckId.B)
+            engine.until("decoded") { deck(DeckId.A).fullyDecoded && deck(DeckId.B).fullyDecoded }
+            listOf(AudioCommand.SetGrid(DeckId.A, 120.0, .25), AudioCommand.SetGrid(DeckId.B, 120.0, 0.0), AudioCommand.SetQuantize(true),
+                AudioCommand.Seek(DeckId.A, 1.1), AudioCommand.Seek(DeckId.B, 2.0), AudioCommand.SetCrossfade(1.0),
+                AudioCommand.Play(DeckId.A), AudioCommand.Play(DeckId.B)).forEach { assertTrue(engine.submit(it).accepted) }
+            val start = engine.snapshot().outputFrames
+            engine.renderOfflineForTest(100)
+            val waiting = engine.deck(DeckId.B)
+            assertTrue(waiting.playing)
+            assertEquals(start + 7200, waiting.launchFrame)                  // A reaches its beat at 1.25 s
+            assertEquals(2.0, waiting.sourceSeconds, 0.0)
+            val out = engine.renderOfflineForTest(7200)
+            assertEquals(0f, out[(7099) * 2], 0f)
+            assertTrue(out[7100 * 2] != 0f)
+            assertNull(engine.deck(DeckId.B).launchFrame)
+            assertEquals(2.0 + 100 / 48000.0, engine.deck(DeckId.B).sourceSeconds, 1e-9)
+        }
+    }
+
     @Test fun decodedLocalWavMixSeekAndDesktopCueSemantics() {
         val a = wav("engine-a.wav", .25)
         val b = wav("engine-b.wav", -.25)

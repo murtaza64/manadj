@@ -81,7 +81,9 @@ struct Track {
 enum class Op : int { Prepare, Play, Pause, CueDown, CueUp, HotCueDown, HotCueUp,
                        HotCueSet, HotCueClear, Seek, Fader, Trim, Crossfade, Pitch, Bend, Pfl, CueMix, Eq, Filter,
                        SetGrid, BeatJump, LoopToggle, LoopResize, LoopPreset, Quantize, CueSetAt, HotCueSetAt, BeatFx, KeyLock, PhaseAlign, ScratchBegin, ScratchMove, ScratchEnd,
-                       LoopSet, CancelScheduled };
+                       LoopSet, CancelScheduled, SetSyncMembers, LaunchStart };
+// SetSyncMembers (global): value = Sync Group member mask, slot = SYNCED (in-lock) mask; scopes the launch reference.
+// LaunchStart: internal (callback-scheduled end of a deferred quantized launch); never submitted.
 // LoopSet: value = start (< 0 clears), aux = {end, playhead (NaN keeps the position)}; machine replay (Session).
 // CancelScheduled (never scheduled itself): load = tag; drops every pending scheduled op with that tag.
 // ScratchMove: value = platter displacement in track seconds.
@@ -174,6 +176,9 @@ struct Deck {
     // Scratch (desktop scratchMotion.ts): impulse-driven platter. Motion state at output frame
     // scratchTime: position (track s), drive/rate (track s per output s); rendered from the in-memory track.
     std::atomic<bool> scratching{false};
+    // Deferred quantized launch: engine frame the deck starts sounding at (0 = none). Playing/preview is
+    // already set; until then the deck renders silence and its playhead holds at the entry point.
+    std::atomic<uint64_t> launchAt{0};
     bool scratchRunning = false;
     double scratchPos = 0, scratchDrive = 0, scratchRate = 0, scratchTime = 0;
     double scratchStart = 0, scratchLoopStart = 0, scratchLoopEnd = 0;
@@ -337,6 +342,9 @@ private:
     void relocate(Deck& d, double seconds, int slot = -1, double overshootFrames = 0) noexcept;
     void applyLoopResize(Deck& d, double beats) noexcept;
     void stop(Deck& d) noexcept;
+    int launchReference(int index) const noexcept;
+    void launch(int index, double at, int slot) noexcept;
+    int syncMembers_ = 0, syncSynced_ = 0; // callback-private (SetSyncMembers)
     void captureTail(Deck& d) noexcept;
     void releaseHead(Deck& d) noexcept;
     void apply(const Command& command) noexcept;

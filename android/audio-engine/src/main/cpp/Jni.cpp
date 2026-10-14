@@ -162,7 +162,9 @@ Java_dev_manadj_audio_AudioEngine_nativeClose(JNIEnv*, jobject, jlong handle) {
 extern "C" JNIEXPORT jlong JNICALL
 Java_dev_manadj_audio_AudioEngine_nativeSubmit(JNIEnv*, jobject, jlong handle, jint op, jint deck,
                                                   jdouble value, jlong load, jint slot) {
-    if (op < 0 || op > static_cast<int>(manadj::Op::ScratchEnd) || op == static_cast<int>(manadj::Op::Filter) || op == static_cast<int>(manadj::Op::BeatFx)) return 0; // Filter/BeatFx: dedicated entry points.
+    using manadj::Op;
+    if (op < 0 || op > static_cast<int>(Op::SetSyncMembers) || op == static_cast<int>(Op::Filter) || op == static_cast<int>(Op::BeatFx) ||
+        op == static_cast<int>(Op::LoopSet) || op == static_cast<int>(Op::CancelScheduled)) return 0; // dedicated entry points
     if (op == static_cast<int>(manadj::Op::SetGrid)) return 0; // nativeSetGrid carries the anchor.
     return static_cast<jlong>(output(handle)->engine.submit(static_cast<manadj::Op>(op), deck, value,
                                                             static_cast<uint64_t>(load), slot));
@@ -426,6 +428,7 @@ Java_dev_manadj_audio_AudioEngine_nativeSnapshot(JNIEnv* env, jobject, jlong han
         data[n + 36] = d.keyLock.load() ? 1 : 0;
         data[n + 37] = d.stretching.load() ? 1 : 0;
         data[n + 38] = d.scratching.load() ? 1 : 0;
+        data[n + 39] = static_cast<double>(d.launchAt.load());
         for (int h = 0; h < manadj::kHotCues; ++h) data[n + 40 + h] = d.hotcues[h].load();
     }
     if (e.outputFrames() == clockFrame) break;

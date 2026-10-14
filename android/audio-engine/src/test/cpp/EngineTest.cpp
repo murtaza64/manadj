@@ -996,6 +996,144 @@ int main() {
         CHECK(e.lateOps() == 0);
     }
 
+    { // Quantized launch (desktop transport.test.ts "cross-deck paused-launch quantization" + quantize.test.ts
+      // crossDeckLaunchTarget): a paused deck's Play / Cue-hold / Hot-cue-hold aligns to the playing reference's
+      // nearest beat. Reference grid: 120 BPM from 0.25 s (beats every 0.5 s).
+        struct Setup { std::unique_ptr<Engine> owned; Engine& e; };
+        auto make = [](double refPlayhead, double ownPlayhead, double refPitch = 0, double ownPitch = 0, bool quantize = true) {
+            auto owned = std::make_unique<Engine>(48000);
+            Engine& e = *owned;
+            std::vector<float> pcm(48000 * 40 * 2, .2f);
+            for (int d = 0; d < 2; ++d) { loadPcm(e, d, d + 1, std::vector<float>(pcm.begin(), pcm.begin() + 48000 * 2)); fillTrack(e, d, d + 1, pcm); }
+            const double ref[5] = {.25, 0, 0, 0, 0}, own[5] = {0, 0, 0, 0, 0};
+            e.submit(Op::SetGrid, 0, 120, 0, 0, ref);
+            e.submit(Op::SetGrid, 1, 120, 0, 0, own);
+            e.submit(Op::Quantize, 0, quantize ? 1 : 0);
+            e.submit(Op::Crossfade, 0, 1);              // only the launching deck (B) is audible
+            e.submit(Op::Pitch, 0, refPitch);
+            e.submit(Op::Pitch, 1, ownPitch);
+            e.submit(Op::Seek, 0, refPlayhead);
+            e.submit(Op::Seek, 1, ownPlayhead);
+            tick(e, 16);
+            e.submit(Op::Play, 0);                       // the reference starts at refPlayhead in the same callback
+            return owned;
+        };
+        auto pos = [](Engine& e, int d) { return e.deck(d).position.load(); };
+        { // play: defers to the reference's next beat (Δ +0.15 s), then enters exactly on the playhead
+            auto o = make(1.1, 12.5); Engine& e = *o;
+            e.submit(Op::Play, 1);
+            tick(e, 7200);                               // frames S..S+7199: the reference reaches 1.25 at S+7200
+            CHECK(e.deck(1).playing.load() && pos(e, 1) == 12.5 && e.deck(1).launchAt.load() != 0);
+            CHECK(out[7199 * 2] == 0);                   // silent while waiting
+            tick(e, 1);
+            CHECK(out[0] != 0);                          // sounds on the reference beat's frame
+            tick(e, 4800);
+            CHECK(std::abs(pos(e, 1) - (12.5 + 4801 / 48000.)) < 1e-9);
+            CHECK(e.deck(1).launchAt.load() == 0);
+            // ...phase-locked: own beat phase == reference beat phase
+            CHECK(std::abs(std::fmod(pos(e, 1), .5) - std::fmod(pos(e, 0) - .25, .5)) < 1e-9);
+        }
+        { // play: the reference beat just passed (Δ -0.15 s): start now, entering 0.15 s ahead
+            auto o = make(1.4, 12.5); Engine& e = *o;
+            e.submit(Op::Play, 1);
+            tick(e, 1);
+            CHECK(std::abs(pos(e, 1) - (12.65 + 1 / 48000.)) < 1e-9 && e.deck(1).launchAt.load() == 0);
+        }
+        { // Quantize off: immediate
+            auto o = make(1.1, 12.5, 0, 0, false); Engine& e = *o;
+            e.submit(Op::Play, 1);
+            tick(e, 48);
+            CHECK(std::abs(pos(e, 1) - (12.5 + 48 / 48000.)) < 1e-9);
+        }
+        { // no playing reference: immediate
+            auto o = make(1.1, 12.5); Engine& e = *o;
+            e.submit(Op::Pause, 0);
+            e.submit(Op::Play, 1);
+            tick(e, 48);
+            CHECK(std::abs(pos(e, 1) - (12.5 + 48 / 48000.)) < 1e-9);
+        }
+        { // gridless launching deck: no reference (desktop nearestPlayingTempoReference needs own tempo)
+            auto o = make(1.1, 12.5); Engine& e = *o;
+            const double none[5] = {};
+            e.submit(Op::SetGrid, 1, 0, 0, 0, none);
+            e.submit(Op::Play, 1);
+            tick(e, 48);
+            CHECK(std::abs(pos(e, 1) - (12.5 + 48 / 48000.)) < 1e-9);
+        }
+        { // cue-down hold-to-preview from the cue point: deferred; release while waiting cancels
+            auto o = make(1.1, 20); Engine& e = *o;
+            e.submit(Op::CueSetAt, 1, 20);
+            e.submit(Op::CueDown, 1);
+            tick(e, 7200 + 480);
+            CHECK(e.deck(1).preview.load() && std::abs(pos(e, 1) - (20 + .01)) < 1e-9);
+            e.submit(Op::CueUp, 1);
+            tick(e, 16);
+            e.submit(Op::Seek, 0, 1.1);
+            e.submit(Op::CueDown, 1);
+            tick(e, 100);
+            e.submit(Op::CueUp, 1);
+            tick(e, 8000);
+            CHECK(!e.deck(1).preview.load() && pos(e, 1) == 20 && e.deck(1).launchAt.load() == 0);
+        }
+        { // hot-cue-down hold-to-preview: deferred from the hot cue; just-passed beat enters ahead
+            auto o = make(1.1, 5); Engine& e = *o;
+            e.submit(Op::HotCueSetAt, 1, 30, 0, 2);
+            e.submit(Op::HotCueDown, 1, 0, 0, 2);
+            tick(e, 7200);
+            CHECK(pos(e, 1) == 30 && e.deck(1).preview.load());
+            tick(e, 480);
+            CHECK(std::abs(pos(e, 1) - 30.01) < 1e-9);
+            auto o2 = make(1.4, 5); Engine& e2 = *o2;
+            e2.submit(Op::HotCueSetAt, 1, 30, 0, 2);
+            e2.submit(Op::HotCueDown, 1, 0, 0, 2);
+            tick(e2, 1);
+            CHECK(std::abs(pos(e2, 1) - (30.15 + 1 / 48000.)) < 1e-9);
+        }
+        { // takeover of a running preview: no launch quantize
+            auto o = make(1.1, 20); Engine& e = *o;
+            e.submit(Op::CueSetAt, 1, 20);
+            e.submit(Op::CueDown, 1);
+            tick(e, 7200 + 48);
+            e.submit(Op::Play, 1);
+            tick(e, 48);
+            CHECK(std::abs(pos(e, 1) - (20 + 96 / 48000.)) < 1e-9);
+        }
+        { // pitched reference: Δ is in real time (audio Δ / refRate); ahead-entry scales by the own rate
+            const double rate = 1 + static_cast<double>(static_cast<float>(8)) / 100;
+            auto o = make(.25 + 1.1 - .25, 10, 8, 8); Engine& e = *o;  // ref 1.1 → next beat 1.25, Δ = .15/1.08
+            e.submit(Op::Play, 1);
+            const double wait = .15 / rate * 48000;
+            const int frames = static_cast<int>(std::ceil(wait));
+            tick(e, frames - 1);
+            CHECK(pos(e, 1) == 10 + (frames - wait) / 48000 * rate || std::abs(pos(e, 1) - (10 + (frames - wait) / 48000 * rate)) < 1e-12);
+            tick(e, 1001);
+            CHECK(std::abs(pos(e, 1) - (10 + (frames - wait) / 48000 * rate + 1000 / 48000. * rate)) < 1e-9);
+            auto o2 = make(1.35, 10, 8, 8); Engine& e2 = *o2;          // Δ = -.1/1.08 → enter .1 ahead
+            e2.submit(Op::Play, 1);
+            tick(e2, 1);
+            CHECK(std::abs(pos(e2, 1) - (10 + .1 + rate / 48000)) < 1e-9);
+        }
+        { // Sync Group member references only in-lock members
+            auto o = make(1.1, 12.5); Engine& e = *o;
+            e.submit(Op::SetSyncMembers, 0, 2, 0, 2);       // deck 1 member, synced; deck 0 not a member
+            e.submit(Op::Play, 1);
+            tick(e, 48);
+            CHECK(std::abs(pos(e, 1) - (12.5 + 48 / 48000.)) < 1e-9);
+            auto o2 = make(1.1, 12.5); Engine& e2 = *o2;
+            e2.submit(Op::SetSyncMembers, 0, 3, 0, 3);
+            e2.submit(Op::Play, 1);
+            tick(e2, 48);
+            CHECK(pos(e2, 1) == 12.5);
+        }
+        { // frame-stamped (machine/replay) Play is exact: no launch quantize
+            auto o = make(1.1, 12.5); Engine& e = *o;
+            const uint64_t at = e.outputFrames() + 10;
+            { Engine::ScheduleScope s(at); e.submit(Op::Play, 1); }
+            tick(e, 58);
+            CHECK(std::abs(pos(e, 1) - (12.5 + 48 / 48000.)) < 1e-9);
+        }
+    }
+
     { // Beat FX ECHO on A: beat-synced repeats at beats x beatSeconds, feedback .5, tails ring after OFF.
         auto owned = std::make_unique<Engine>(48000);
         Engine& e = *owned;

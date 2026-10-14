@@ -167,6 +167,13 @@ sealed interface AudioCommand {
      * [playhead] (when given) relocates in the same callback, so the region and position land together.
      */
     data class SetLoopRegion(override val deck: DeckId, val start: Double?, val end: Double = 0.0, val playhead: Double? = null, override val gestureId: String? = null) : AudioCommand
+    /**
+     * Sync Group membership for the quantized launch reference (desktop SyncGroup.launchReference): a
+     * [members] deck launching with Quantize on aligns only to playing [synced] (in-lock) decks.
+     */
+    data class SetSyncMembers(val members: Set<DeckId>, val synced: Set<DeckId>, override val gestureId: String? = null) : AudioCommand {
+        override val deck = DeckId.A // Global.
+    }
     /** Global quantize (snaps loop engage to the nearest beat). */
     data class SetQuantize(val on: Boolean, override val gestureId: String? = null) : AudioCommand {
         override val deck = DeckId.A
@@ -239,6 +246,11 @@ data class DeckSnapshot(
     val keyLock: Boolean = false, val keyLockActive: Boolean = false,
     /** The platter is held (scratch in progress). */
     val scratching: Boolean = false,
+    /**
+     * Quantized launch waiting for the reference beat: engine frame the deck starts sounding at
+     * (`playing`/`previewing` are already set; the position holds until then). Null = none.
+     */
+    val launchFrame: Long? = null,
 )
 data class EngineSnapshot(
     val outputFrames: Long, val outputSampleRate: Int, val outputChannels: Int,
@@ -268,7 +280,8 @@ data class EngineSnapshot(
         val at = presentedNanos ?: return d.sourceSeconds
         val heard = frame + (nanoTime - at).coerceIn(-250_000_000L, 250_000_000L) * outputSampleRate / 1e9
         val speed = if (d.playing || d.previewing) (1 + d.pitchPercent / 100) * (1 + d.bendPercent / 100) else 0.0
-        val seconds = d.sourceSeconds + (heard - clockFrame) / outputSampleRate * speed
+        val from = d.launchFrame?.let { maxOf(clockFrame.toDouble(), it.toDouble()) } ?: clockFrame.toDouble()
+        val seconds = d.sourceSeconds + (if (d.launchFrame != null) maxOf(0.0, heard - from) else heard - from) / outputSampleRate * speed
         val loop = d.loop
         return if (loop != null && seconds >= loop.end && d.sourceSeconds < loop.end) loop.start + (seconds - loop.end) % (loop.end - loop.start)
         else seconds.coerceAtLeast(0.0)
@@ -322,7 +335,7 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
         private const val HEAD_FRAMES = 8192
         private const val HEADER = 29
         private const val DECK_FIELDS = 40 + HOT_CUES
-        private enum class Op { PREPARE, PLAY, PAUSE, CUE_DOWN, CUE_UP, HOT_CUE_DOWN, HOT_CUE_UP, HOT_CUE_SET, HOT_CUE_CLEAR, SEEK, FADER, TRIM, CROSSFADE, PITCH, BEND, PFL, CUE_MIX, EQ, FILTER, SET_GRID, BEAT_JUMP, LOOP_TOGGLE, LOOP_RESIZE, LOOP_PRESET, QUANTIZE, CUE_SET_AT, HOT_CUE_SET_AT, BEAT_FX, KEY_LOCK, PHASE_ALIGN, SCRATCH_BEGIN, SCRATCH_MOVE, SCRATCH_END, LOOP_SET, CANCEL_SCHEDULED }
+        private enum class Op { PREPARE, PLAY, PAUSE, CUE_DOWN, CUE_UP, HOT_CUE_DOWN, HOT_CUE_UP, HOT_CUE_SET, HOT_CUE_CLEAR, SEEK, FADER, TRIM, CROSSFADE, PITCH, BEND, PFL, CUE_MIX, EQ, FILTER, SET_GRID, BEAT_JUMP, LOOP_TOGGLE, LOOP_RESIZE, LOOP_PRESET, QUANTIZE, CUE_SET_AT, HOT_CUE_SET_AT, BEAT_FX, KEY_LOCK, PHASE_ALIGN, SCRATCH_BEGIN, SCRATCH_MOVE, SCRATCH_END, LOOP_SET, CANCEL_SCHEDULED, SET_SYNC_MEMBERS }
     }
 
     /** The caller retains/closes descriptor; the engine duplicates it for its own lifetime. */
@@ -396,6 +409,11 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
             is AudioCommand.ScratchMove -> Op.SCRATCH_MOVE to command.deltaSeconds
             is AudioCommand.ScratchEnd -> Op.SCRATCH_END to 0.0
             is AudioCommand.PhaseAlign -> { slot = command.reference.ordinal; Op.PHASE_ALIGN to command.ratio }
+            is AudioCommand.SetSyncMembers -> {
+                fun mask(decks: Set<DeckId>) = decks.fold(0) { m, d -> m or (1 shl d.ordinal) }
+                val id = nativeSubmit(handle, Op.SET_SYNC_MEMBERS.ordinal, 0, mask(command.members).toDouble(), 0, mask(command.synced))
+                return if (id != 0L) CommandReceipt(id, true) else rejected("Command queue full")
+            }
             is AudioCommand.SetFilterSettings -> {
                 val s = command.settings.sanitized()
                 val id = nativeSetFilterSettings(handle, s.model.ordinal, s.params())
@@ -537,6 +555,7 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
                 fromMemory = current && data[p + 34] != 0.0,
                 keyLock = data[p + 36] != 0.0, keyLockActive = current && data[p + 37] != 0.0,
                 scratching = current && data[p + 38] != 0.0,
+                launchFrame = data[p + 39].toLong().takeIf { current && it > 0 },
             )
         }
         return EngineSnapshot(
