@@ -44,6 +44,7 @@ from ..models import (
     Beatgrid,
     Cameo,
     HotCue,
+    MetricLadder,
     Playlist,
     PlaylistTrack,
     Tag,
@@ -159,6 +160,10 @@ def build_snapshot(db: Session) -> dict:
 
     previews = _preview_revs(db)
     waveforms = _waveform_revs(db)
+    ladders = {
+        lad.track_id: {"arities": json.loads(lad.arities_json), "reset_marks": json.loads(lad.reset_marks_json)}
+        for lad in db.query(MetricLadder)
+    }
 
     track_rows = []
     for t in tracks:
@@ -190,6 +195,7 @@ def build_snapshot(db: Session) -> dict:
                 "tag_ids": sorted(tt.tag_id for tt in t.track_tags),
                 "hot_cues": cues.get(t.id, []),
                 "grid": grid,
+                "metric_ladder": ladders.get(t.id),
             }
         )
 

@@ -178,3 +178,53 @@ def test_synced_setting_edits_newest_wins_logged_and_revertable(db):
     assert read_setting(db, key)[0] == default
     changes = list_changes(db)
     assert changes[0]["field"] == f"setting:{key}" and changes[0]["track_title"] is None
+
+
+def test_grid_and_reset_marks_edits(db, make_track):
+    from backend.models import Beatgrid, MetricLadder
+
+    track = make_track()
+    grid = {"anchor_time": 0.5, "tempo_changes": [
+        {"start_time": 0.5, "bpm": 174, "time_signature_num": 4, "time_signature_den": 4, "bar_position": 1}]}
+    _, outcomes = apply_edits(db, "phone-1", "Pixel", [
+        edit(track, "grid", None, grid, uid="g1"),
+        edit(track, "reset_marks", [], [64.2, 32.1], uid="r1"),
+    ])
+    assert outcomes == {"g1": "applied", "r1": "applied"}
+    bg = db.query(Beatgrid).filter_by(track_id=track.id).one()
+    assert bg.origin == "edited" and bg.anchor_time == 0.5
+    assert read_field(db, track, "grid")[0]["tempo_changes"][0]["bpm"] == 174.0
+    db.refresh(track)
+    assert track.bpm_projected == 174.0
+    assert read_field(db, track, "reset_marks")[0] == [32.1, 64.2]
+
+    # Re-push of the same values is a no-op "applied"; bad grids are rejected.
+    _, outcomes = apply_edits(db, "phone-1", "Pixel", [
+        edit(track, "grid", grid, {"anchor_time": None, "tempo_changes": []}, uid="g2"),
+        edit(track, "reset_marks", [32.1, 64.2], [-1], uid="r2"),
+    ])
+    assert outcomes == {"g2": "rejected", "r2": "rejected"}
+
+    # Clearing: grid null deletes the saved grid; [] marks drop the ladder row.
+    rows = {r.edit_uuid: r for r in db.query(DeviceSyncChange)}
+    _, outcomes = apply_edits(db, "phone-1", "Pixel", [
+        edit(track, "grid", grid, None, uid="g3"),
+        edit(track, "reset_marks", [32.1, 64.2], [], uid="r3"),
+    ])
+    assert outcomes == {"g3": "applied", "r3": "applied"}
+    assert db.query(Beatgrid).filter_by(track_id=track.id).count() == 0
+    assert db.query(MetricLadder).filter_by(track_id=track.id).count() == 0
+    revert(db, [rows["g1"].id])
+    assert db.query(Beatgrid).filter_by(track_id=track.id).count() == 0  # g1 old was null
+
+
+def test_snapshot_carries_metric_ladder(db, make_track):
+    from backend.crud import upsert_metric_ladder
+    from backend.routers.device_sync import build_snapshot
+
+    a = make_track()
+    b = make_track()
+    upsert_metric_ladder(db, a.id, [16.0])
+    tracks = {t["id"]: t for t in build_snapshot(db)["tracks"]}
+    assert tracks[a.id]["metric_ladder"] == {"arities": [2, 2, 2, 2], "reset_marks": [16.0]}
+    assert tracks[b.id]["metric_ladder"] is None
