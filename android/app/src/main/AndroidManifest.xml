@@ -2,6 +2,8 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- Heard-quantize latency calibration (#382): records the engine's chirps; asked at calibration time. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- Speaker vs headphones for a Bluetooth route (#382 calibration gating); asked when needed. -->
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />

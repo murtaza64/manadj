@@ -309,6 +309,24 @@ class PlayerModel(application: Application) : AndroidViewModel(application) {
     var heardRoute by mutableStateOf<String?>(null)
         private set
     private val routeLatency = RouteLatency(application)
+    /**
+     * Speaker / headphones / unknown for the current route (override, else device type / Bluetooth class).
+     * Gate mic calibration only on HEADPHONES; UNKNOWN never blocks. [overrideRouteKind] sets it; [routeKindNeedsBluetoothPermission]: A2DP
+     * stays UNKNOWN until BLUETOOTH_CONNECT is granted (UI asks, then calls [refreshRoute]).
+     */
+    var routeKind by mutableStateOf(RouteKind.UNKNOWN)
+        private set
+    var routeKindOverridden by mutableStateOf(false)
+        private set
+    val routeKindNeedsBluetoothPermission get() = routeLatency.bluetoothPermissionMissing
+    /** One-tap Speaker / Headphones override for the current route (null = automatic), remembered per route. */
+    fun overrideRouteKind(kind: RouteKind?) { routeKey?.let { routeLatency.setKindOverride(it, kind) }; refreshRoute() }
+    /** Re-reads the route kind (after a permission grant or override). */
+    fun refreshRoute() {
+        val id = outputInfo?.deviceId ?: return
+        routeKind = routeLatency.kind(id)
+        routeKindOverridden = routeKey?.let { routeLatency.kindOverride(it) } != null
+    }
     private var routeKey: String? = null
     private var routeFollowed = false
     /** Sets (and remembers for this route) L; null forgets the route's value (back to the reported latency). */
@@ -351,6 +369,7 @@ class PlayerModel(application: Application) : AndroidViewModel(application) {
         routeFollowed = true
         routeKey = key
         heardRoute = info?.deviceId?.let(routeLatency::label)
+        refreshRoute()
         val remembered = key?.let { routeLatency[it] }
         heardLatencyCalibrated = remembered != null
         (remembered ?: state.reportedLatencySeconds())?.let(::sendHeardLatency)
