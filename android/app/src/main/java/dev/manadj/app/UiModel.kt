@@ -85,6 +85,7 @@ class UiModel(application: Application) : AndroidViewModel(application) {
     private var noticeJob: Job? = null
 
     /** A tap on a control the engine cannot honour yet: say so instead of silently doing nothing. */
+    fun say(text: String) { notice = text; noticeJob?.cancel(); noticeJob = viewModelScope.launch { delay(2600); notice = null } }
     fun pending(what: String) {
         notice = "$what — engine pending (#370). Settings › Preview pending controls to try the UI."
         noticeJob?.cancel(); noticeJob = viewModelScope.launch { delay(2600); notice = null }

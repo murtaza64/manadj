@@ -222,13 +222,39 @@ val StripEnd = 48.dp
     }
 }
 
-/** Stems surface (vocals / drums / bass / other). Separation is pending in the engine; rendered and marked. */
+/**
+ * Stems surface (vocals / drums / bass / other; desktop kill switches): live once the deck loaded its stem
+ * bank (DeckSnapshot.stems) — tap = gain 0 / 1. A synced track whose stems aren't on the phone offers ↓ STEMS.
+ */
 @Composable fun StemsStrip(ui: DeckUi, ux: UiModel, model: PlayerModel, modifier: Modifier) {
-    val live = model.supports("stems")
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val live by remember(ui) { derivedStateOf { ui.snapshot?.stems == true } }
+    val gains by remember(ui) { derivedStateOf { ui.snapshot?.stemGains } }
     val e = ux.extras.getValue(ui.id)
     val undo = ux.undoCue?.takeIf { it.first == ui.id }
+    // Library track on the deck whose desktop stems aren't loaded: download state for the tag.
+    val trackId = if (live) null else dev.manadj.app.library.LibraryHolder.trackOn(model, ui.id)
+    val track = trackId?.let { ux.synced?.lib?.track(it) }
+    val downloads by ux.repo.stemDownloads.collectAsState()
+    val fetchable = track?.stemsRev != null
+    val local = remember(track, downloads) { track != null && fetchable && ux.repo.hasLocalStems(track) }
+    val playing by remember(ui) { derivedStateOf { ui.snapshot?.playing == true } }
     // Mirrored between decks: SHIFT sits on the outer edge (A left, B right).
     val outerRight = ui.id == DeckId.B
+    @Composable fun Tag() {
+        when {
+            live -> {}
+            fetchable && trackId in downloads -> Text("↓ ${downloads[trackId]?.let { "${(it * 100).toInt()}%" } ?: "…"}", Modifier.padding(horizontal = 4.dp), Ink.muted, 9, true)
+            local && playing -> Text("STEMS NEXT LOAD", Modifier.padding(horizontal = 4.dp), Ink.muted, 9, true)
+            local -> Key("LOAD STEMS", Modifier.width(72.dp).fillMaxHeight(), Ink.accent, description = "${ui.id} reload with stems", style = KeyStyle.PILL, textSize = 9) {
+                dev.manadj.app.library.LibraryHolder.load(context, model, ui.id, track!!) { ux.say("Load failed: $it") }
+            }
+            fetchable -> Key("↓ STEMS", Modifier.width(64.dp).fillMaxHeight(), Ink.accent, description = "${ui.id} download stems", style = KeyStyle.PILL, textSize = 9) {
+                dev.manadj.app.library.LibraryHolder.fetchStems(context, model, ui.id, trackId!!) { ux.say("Stems download failed: $it") }
+            }
+            ui.source != null && !ux.previewPending -> Text("NO STEMS", Modifier.padding(horizontal = 4.dp), Ink.surface2, 9, true)
+        }
+    }
     Row(modifier, verticalAlignment = Alignment.CenterVertically) {
         if (!outerRight) { ShiftKey(ui.id, ux, Modifier.width(50.dp).fillMaxHeight()); Spacer(Modifier.width(2.dp)) }
         if (undo != null) {
@@ -236,12 +262,15 @@ val StripEnd = 48.dp
             Text("CUE ${undo.second + 1} DELETED", Modifier.weight(1f).padding(horizontal = 4.dp), Ink.muted, 10, true)
             if (!outerRight) Key("UNDO", Modifier.width(72.dp).fillMaxHeight(), Ink.warning, style = KeyStyle.PILL, textSize = 11) { ux.undoDelete(model) }
         } else {
-            if (!live && outerRight) PendingTag()
+            if (outerRight) Tag()
             listOf("VOC", "DRM", "BAS", "OTH").forEachIndexed { i, name ->
-                val on = e.stems[i]
-                Key(name, Modifier.weight(1f).fillMaxHeight(), Ink.stems[i], live || ux.previewPending, on && (live || ux.previewPending), "${ui.id} stem $name", style = KeyStyle.BARE, textSize = 10) { if (live || ux.previewPending) e.stems[i] = !on else ux.pending("Stems") }
+                val on = if (live) (gains?.getOrNull(i) ?: 1.0) > .5 else e.stems[i]
+                val enabled = live || ux.previewPending
+                Key(name, Modifier.weight(1f).fillMaxHeight(), Ink.stems[i], enabled, on && enabled, "${ui.id} stem $name", style = KeyStyle.BARE, textSize = 10) {
+                    if (live) model.setStemGain(ui.id, i, if (on) 0.0 else 1.0) else if (ux.previewPending) e.stems[i] = !on
+                }
             }
-            if (!live && !outerRight) PendingTag()
+            if (!outerRight) Tag()
         }
         if (outerRight) { Spacer(Modifier.width(2.dp)); ShiftKey(ui.id, ux, Modifier.width(50.dp).fillMaxHeight()) }
     }

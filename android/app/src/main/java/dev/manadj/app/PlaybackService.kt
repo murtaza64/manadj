@@ -87,9 +87,9 @@ class PlaybackService : Service() {
 
     fun source(id: String?): LocalSource? = sourceMetadata[id]
 
-    fun load(deck: DeckId, source: LocalSource, descriptor: ParcelFileDescriptor): CommandReceipt {
+    fun load(deck: DeckId, source: LocalSource, descriptor: ParcelFileDescriptor, stems: List<ParcelFileDescriptor>? = null): CommandReceipt {
         if (snapshot()?.outputOpen != true) return CommandReceipt(0, false, failure ?: "Audio output unavailable")
-        val receipt = engine?.load(deck, source.id, descriptor) ?: CommandReceipt(0, false, failure ?: "Audio output is starting")
+        val receipt = engine?.load(deck, source.id, descriptor, stems) ?: CommandReceipt(0, false, failure ?: "Audio output is starting")
         if (receipt.accepted) sourceMetadata[source.id] = source
         return receipt
     }

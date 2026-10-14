@@ -1350,6 +1350,37 @@ int main() {
         CHECK(e.clickNanos(0) == 1'000'000'000 + static_cast<int64_t>(4800 % 4096 * 1e9 / 48000));
     }
 
+    { // Stems (desktop StemTrackSource): unity sums the stems; a kill ramps over the 5 ms declick to the rest;
+      // Prepare restores unity. Key-locked and scratch reads mix the same way.
+        auto owned = std::make_unique<Engine>(48000);
+        Engine& e = *owned;
+        const float level[kStems] = {.1f, .2f, .15f, .05f};
+        const int frames = 48000 * 4;
+        loadPcm(e, 0, 1, std::vector<float>(48000 * 2, .5f));
+        std::vector<float> stems(static_cast<size_t>(frames) * 2 * kStems);
+        for (int i = 0; i < frames; ++i) for (int s = 0; s < kStems; ++s) stems[(i * kStems + s) * 2] = stems[(i * kStems + s) * 2 + 1] = level[s];
+        CHECK(e.trackBegin(0, 1, frames, 48000, 0, kStems));
+        for (int at = 0; at < frames; at += 4096) CHECK(e.trackWrite(0, 1, stems.data() + static_cast<size_t>(at) * 2 * kStems, std::min(4096, frames - at)) > 0);
+        e.trackFinish(0, 1);
+        e.submit(Op::Seek, 0, .5);
+        e.submit(Op::Play, 0);
+        auto x = capture(e, 4800);
+        const float trim = x[4799] / .5f;                      // strip gain (trim/fader) relative to the summed stems
+        CHECK(std::abs(x[4799] - .5f * trim) < 1e-6 && trim > 0);
+        e.submit(Op::StemGain, 0, 0, 0, 1);                     // kill drums
+        x = capture(e, 4800);
+        CHECK(std::abs(x[0] - .5f * trim) < .01f);              // ramps, no step
+        for (int i = 1; i < 480; ++i) if (!(x[i] <= x[i - 1] + 5e-4f && x[i - 1] - x[i] < .002f)) { std::fprintf(stderr, "i %d %f %f\n", i, x[i - 1], x[i]); CHECK(false); }
+        CHECK(std::abs(x[4799] - .3f * trim) < 1e-4);
+        e.submit(Op::KeyLock, 0, 1);
+        x = capture(e, 9600);
+        CHECK(std::abs(x[9599] - .3f * trim) < .01f);           // stretch path reads the same mix
+        e.submit(Op::KeyLock, 0, 0);
+        e.submit(Op::Prepare, 0, 0, 2);
+        tick(e);
+        CHECK(e.deck(0).stemTarget[1].load() == 1.f && e.deck(0).stemGain[1] == 1.f);
+    }
+
     { // Beat FX ECHO on A: beat-synced repeats at beats x beatSeconds, feedback .5, tails ring after OFF.
         auto owned = std::make_unique<Engine>(48000);
         Engine& e = *owned;

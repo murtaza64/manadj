@@ -194,6 +194,10 @@ object LibraryHolder {
         scope.launch {
             try {
                 val file = repo.audioFile(track.id)
+                // Stems ride along when already on the phone (never block a load on a 4-file download).
+                val stems = if (track.stemsRev != null && repo.hasLocalStems(track))
+                    runCatching { repo.stemFiles(track.id) }.getOrNull()?.let { m -> dev.manadj.audio.AudioEngine.STEM_NAMES.map { m.getValue(it) } }
+                else null
                 val segment = track.grid?.tempoChanges?.firstOrNull()
                 model.load(
                     deck, file, sourceId(track), track.title, track.artist.orEmpty(), track.durationSecs,
@@ -201,7 +205,26 @@ object LibraryHolder {
                     firstBeatSeconds = segment?.startTime ?: 0.0,
                     mainCueSeconds = track.mainCue,
                     hotCues = track.hotCues.filter { it.slot in 1..8 }.associate { it.slot - 1 to it.time },
+                    stems = stems,
                 )
+            } catch (e: Exception) {
+                onError(e.message ?: e.toString())
+            }
+        }
+    }
+
+    /**
+     * Download [trackId]'s stems; when done, reload it onto [deck] with them if the deck still holds it and
+     * is not sounding (a playing deck picks them up on its next load).
+     */
+    fun fetchStems(context: Context, model: PlayerModel, deck: DeckId, trackId: Int, onError: (String) -> Unit) {
+        val repo = repository(context)
+        scope.launch {
+            try {
+                repo.stemFiles(trackId) ?: return@launch
+                val s = model.decks.getValue(deck).snapshot
+                val track = repo.library.value?.track(trackId) ?: return@launch
+                if (trackOn(model, deck) == trackId && s?.playing != true && s?.previewing != true) load(context, model, deck, track, onError)
             } catch (e: Exception) {
                 onError(e.message ?: e.toString())
             }
