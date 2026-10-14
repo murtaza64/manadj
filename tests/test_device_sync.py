@@ -178,3 +178,18 @@ def test_snapshot_playlists_in_play_order(client, db, make_track):
         "id": second.id, "name": "Warmup", "color": "#00ff00", "display_order": 1,
         "track_ids": [b.id, a.id],  # Play order; archived member dropped
     }
+
+
+def test_detail_waveform_served_with_rev(client, db, make_track):
+    track, bare = make_track(), make_track()
+    db.add(Waveform(track_id=track.id, sample_rate=44100, duration=1.0, samples_per_peak=128,
+                    data_blob=b"MWF1full", preview_blob=b"MWF1prev"))
+    db.commit()
+
+    rows = {t["id"]: t for t in client.get("/api/device-sync/snapshot").json()["tracks"]}
+    assert rows[track.id]["waveform_rev"] and rows[bare.id]["waveform_rev"] is None
+
+    r = client.get(f"/api/device-sync/tracks/{track.id}/waveform")
+    assert r.status_code == 200 and r.content == b"MWF1full"
+    assert r.headers["X-Waveform-Rev"] == rows[track.id]["waveform_rev"]
+    assert client.get(f"/api/device-sync/tracks/{bare.id}/waveform").status_code == 404
