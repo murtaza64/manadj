@@ -16,6 +16,48 @@ bool ready(const Deck& d) {
 Engine::Engine(int outputRate) : outputRate_(outputRate) {
     for (auto& d : decks_) { for (auto& h : d.hotcues) h.store(-1); for (auto& e : d.eq) e.store(.5f); }
     for (int i = 0; i < kDeckCount; ++i) updateGain(i);
+    for (auto& insert : fx_) insert = std::make_unique<fx::Insert>();
+    applyBeatFx(true);
+}
+
+uint64_t Engine::submitBeatFx(int effect, int target, bool on, double depth, double beats, int heldMask) {
+    if (effect < -1 || effect >= fx::kEffectCount || target < 0 || target >= fx::kTargetCount) return 0;
+    if (!std::isfinite(depth) || !std::isfinite(beats) || beats <= 0) return 0;
+    const double aux[5] = {static_cast<double>(target), on ? 1.0 : 0.0, beats, static_cast<double>(heldMask & 15), 0};
+    return submit(Op::BeatFx, 0, depth, 0, effect, aux);
+}
+
+// Each insert's effective state: the section's ON + CH SELECT, or a held per-deck paddle
+// (desktop beatFxChannelEngaged); MST ignores paddles.
+void Engine::applyBeatFx(bool immediate) noexcept {
+    const int effect = fxEffect_.load(kRelaxed), target = fxTarget_.load(kRelaxed), held = fxHeld_.load(kRelaxed);
+    const bool on = fxOn_.load(kRelaxed);
+    for (int t = 0; t < fx::kTargetCount; ++t) {
+        const bool engaged = effect >= 0 && ((on && target == t) || (t < kDeckCount && (held >> t & 1)));
+        fx_[t]->update(engaged ? effect : -1, fxDepth_.load(kRelaxed), fxBeats_.load(kRelaxed), immediate);
+    }
+}
+
+// Per block, before rendering: echo/flanger timing from each deck's tempo (grid x play rate;
+// gridless keeps the last known), and the TRANS/ROLL phase from a playing deck's grid.
+void Engine::clockBeatFx(int64_t frame) noexcept {
+    for (int i = 0; i < kDeckCount; ++i) {
+        auto& d = decks_[i];
+        const double bpm = d.bpm.load(kRelaxed);
+        const double rate = (1 + d.pitch.load(kRelaxed) / 100.) * (1 + d.bend.load(kRelaxed) / 100.);
+        if (bpm > 0 && rate > 0) d.beatSeconds = 60 / bpm / rate;
+        fx_[i]->setBeatSeconds(d.beatSeconds);
+    }
+    fx_[fx::kTargetMaster]->setBeatSeconds(decks_[fxTempoDeck_].beatSeconds);
+    for (int t = 0; t < fx::kTargetCount; ++t) {
+        auto& insert = *fx_[t];
+        if (insert.effect() < fx::kTrans) continue;
+        const auto& d = decks_[t < kDeckCount ? t : fxTempoDeck_];
+        if (!ready(d) || !d.playing.load(kRelaxed)) continue; // A stopped deck leaves the kernel freewheeling.
+        const double bpm = d.bpm.load(kRelaxed);
+        if (bpm > 0) insert.setClock(static_cast<double>(frame), true, (d.position.load(kRelaxed) - d.gridAnchor.load(kRelaxed)) * bpm / 60, d.beatSeconds);
+        else insert.setClock(static_cast<double>(frame), false, 0, d.beatSeconds);
+    }
 }
 
 uint64_t Engine::submitFilter(int deck, double position) {
@@ -30,7 +72,7 @@ uint64_t Engine::submit(Op op, int deck, double value, uint64_t load, int slot, 
     if ((op == Op::HotCueDown || op == Op::HotCueUp || op == Op::HotCueSet || op == Op::HotCueClear || op == Op::HotCueSetAt) &&
         (slot < 0 || slot >= kHotCues)) return 0;
     if (op == Op::Eq && (slot < 0 || slot > 2)) return 0;
-    if (op == Op::Filter && !aux) return 0;
+    if ((op == Op::Filter || op == Op::BeatFx) && !aux) return 0;
     std::lock_guard<std::mutex> lock(submitMutex_);
     const auto write = queueWrite_.load(kRelaxed);
     if (write - queueRead_.load(kAcquire) >= kQueueSize) return 0;
@@ -327,6 +369,18 @@ void Engine::apply(const Command& c) noexcept {
             break;
         }
         case Op::CueMix: cueMix_.store(std::clamp(static_cast<float>(c.value), 0.f, 1.f)); break;
+        case Op::BeatFx: {
+            const int target = static_cast<int>(c.aux[0]);
+            fxEffect_.store(c.slot);
+            fxTarget_.store(target);
+            fxOn_.store(c.aux[1] != 0 && c.slot >= 0); // A null SELECT forces OFF.
+            fxDepth_.store(std::clamp(c.value, -1.0, 1.0));
+            fxBeats_.store(fx::snapBeats(c.aux[2]));
+            fxHeld_.store(static_cast<int>(c.aux[3]) & 15);
+            if (target < kDeckCount) fxTempoDeck_ = target;
+            applyBeatFx(false);
+            break;
+        }
     }
     d.applied.store(c.seq, kRelease);
     applied_.store(c.seq, kRelease);
@@ -350,7 +404,8 @@ void Engine::updateGain(int index) noexcept {
     const float x = crossfade_.load();
     const float fade = index == 0 ? std::min(1.f, 1.f - x) : index == 1 ? std::min(1.f, 1.f + x) : 1.f;
     const float trim = std::pow(10.f, (-6.f + (d.trim.load() - .5f) * 24.f) / 20.f);
-    d.targetGain = d.fader.load() * d.fader.load() * trim * fade;
+    d.targetGain = d.fader.load() * d.fader.load() * trim;
+    d.targetXf = fade;
     d.targetCueGain = d.pfl.load() ? trim : 0.f;
 }
 
@@ -369,7 +424,7 @@ void Engine::render(float* output, int frames, int channels) noexcept {
     const float mix = cueMix_.load(kRelaxed);
     for (int done = 0; done < frames;) {
         const int n = std::min(kBlockFrames, frames - done);
-        renderBuses(n);
+        renderBuses(n, static_cast<int64_t>(outputFrames_.load(kRelaxed)) + done);
         float* out = output + static_cast<size_t>(done) * channels;
         for (int i = 0; i < n; ++i, out += channels) {
             const float mL = master_[i * 2], mR = master_[i * 2 + 1];
@@ -447,7 +502,7 @@ int Engine::renderSegment(Deck& d, float* strip, int frames, bool& active) noexc
         if (slot < 0 && !ringLive) return -1; // Refill in progress: silent, clock held.
         const auto sampleRate = d.sampleRate.load(kAcquire);
         const double ratio = (sampleRate / outRate) * (1 + d.pitch.load(kRelaxed) / 100.) * (1 + d.bend.load(kRelaxed) / 100.);
-        if (d.envelope == 0 && d.tailLeft == 0) { d.gain = d.targetGain; d.cueGain = d.targetCueGain; } // Envelope owns the onset.
+        if (d.envelope == 0 && d.tailLeft == 0) { d.gain = d.targetGain; d.cueGain = d.targetCueGain; d.xf = d.targetXf; } // Envelope owns the onset.
         auto read = d.read.load(kRelaxed);
         auto write = d.write.load(kAcquire);
         double fractional = slot >= 0 ? d.headPos : d.fractional;
@@ -531,7 +586,7 @@ void Engine::resetStrip(Deck& d) noexcept {
     }
 }
 
-void Engine::renderBuses(int frames) noexcept {
+void Engine::renderBuses(int frames, int64_t frame) noexcept {
     float* output = master_.data();
     float* cue = cue_.data();
     float* strip = strip_.data();
@@ -541,12 +596,18 @@ void Engine::renderBuses(int frames) noexcept {
     if (rate != stripRate_) {
         stripRate_ = rate;
         for (auto& d : decks_) { designEq(d, rate); for (auto& b : d.branch) b.designed = false; }
+        for (auto& insert : fx_) insert->prepare(rate);
+        applyBeatFx(true);
     }
+    clockBeatFx(frame);
     // Per-sample one-pole smoothing: EQ ~ desktop 50 ms ramp, filter gains ~35 ms, cutoff/Q 20 ms.
     const float kEq = static_cast<float>(1 - std::exp(-1 / (.017 * rate)));
     const float kMix = static_cast<float>(1 - std::exp(-1 / (.012 * rate)));
     const double kSweep = 1 - std::exp(-static_cast<double>(kSweepBlock) / (.020 * rate));
-    for (auto& d : decks_) {
+    int audible = 0;
+    for (int index = 0; index < kDeckCount; ++index) {
+        auto& d = decks_[index];
+        auto& insert = *fx_[index];
         std::fill(strip, strip + frames * 2, 0.f);
         if (!renderSource(d, strip, frames)) {
             if (d.stripWarm) { resetStrip(d); d.stripWarm = false; }
@@ -554,6 +615,13 @@ void Engine::renderBuses(int frames) noexcept {
             for (int b = 0; b < 3; ++b) d.eqGain[b] = d.eqTarget[b];
             d.dry = d.dryTarget;
             for (auto& br : d.branch) { br.gain = br.gainTarget; br.logHz = std::log(br.hzTarget); br.qDb = br.qTarget; br.designed = false; }
+            d.xf = d.targetXf;
+            // A stopped deck's insert still rings out its tail (and the ROLL ring keeps recording).
+            insert.process(strip, frames, frame);
+            if (insert.audible()) {
+                audible |= 1 << index;
+                for (int i = 0; i < frames * 2; ++i) output[i] += strip[i] * d.xf;
+            }
             continue;
         }
         d.stripWarm = true;
@@ -595,10 +663,21 @@ void Engine::renderBuses(int frames) noexcept {
                 float y = e * d.dry;
                 for (auto& br : d.branch)
                     if (br.gain != 0) y += br.stages[1].process(ch, br.stages[0].process(ch, e)) * br.gain;
-                output[i * 2 + ch] += y * d.gain;
+                strip[i * 2 + ch] = y * d.gain; // post-fader, into the Beat FX insert
                 cue[i * 2 + ch] += y * d.cueGain;
             }
         }
+        insert.process(strip, frames, frame);
+        if (insert.audible()) audible |= 1 << index;
+        for (int i = 0; i < frames; ++i) {
+            d.xf += (d.targetXf - d.xf) * .002f;
+            output[i * 2] += strip[i * 2] * d.xf;
+            output[i * 2 + 1] += strip[i * 2 + 1] * d.xf;
+        }
     }
+    auto& masterInsert = *fx_[fx::kTargetMaster];
+    masterInsert.process(output, frames, frame);
+    if (masterInsert.audible()) audible |= 1 << fx::kTargetMaster;
+    fxAudible_.store(audible, kRelaxed);
 }
 } // namespace manadj

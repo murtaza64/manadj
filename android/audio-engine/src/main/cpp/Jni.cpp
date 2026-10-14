@@ -6,7 +6,7 @@
 #include <vector>
 
 namespace {
-constexpr int kHeader = 16;
+constexpr int kHeader = 23;
 constexpr int kDeckFields = 36 + manadj::kHotCues;
 constexpr int kSnapshotSize = kHeader + manadj::kDeckCount * kDeckFields;
 
@@ -168,6 +168,12 @@ Java_dev_manadj_audio_AudioEngine_nativeSubmitFilter(JNIEnv*, jobject, jlong han
     return static_cast<jlong>(output(handle)->engine.submitFilter(deck, position));
 }
 
+extern "C" JNIEXPORT jlong JNICALL
+Java_dev_manadj_audio_AudioEngine_nativeSubmitBeatFx(JNIEnv*, jobject, jlong handle, jint effect, jint target, jboolean on,
+                                                        jdouble depth, jdouble beats, jint held) {
+    return static_cast<jlong>(output(handle)->engine.submitBeatFx(effect, target, on, depth, beats, held));
+}
+
 extern "C" JNIEXPORT void JNICALL
 Java_dev_manadj_audio_AudioEngine_nativeTransport(JNIEnv* env, jobject, jlong handle, jint deck, jdoubleArray out) {
     if (deck < 0 || deck >= manadj::kDeckCount || env->GetArrayLength(out) < 4 + manadj::kHeadSlots) return;
@@ -257,6 +263,8 @@ Java_dev_manadj_audio_AudioEngine_nativeSnapshot(JNIEnv* env, jobject, jlong han
         static_cast<double>(e.applied()), e.crossfade(), open ? 1.0 : 0.0,
         static_cast<double>(sink->reopenCount.load()), static_cast<double>(static_cast<int>(e.routing())),
         static_cast<double>(sink->channels.load()), e.cueMix(), e.quantize() ? 1.0 : 0.0,
+        static_cast<double>(e.fxEffect()), static_cast<double>(e.fxTarget()), e.fxOn() ? 1.0 : 0.0,
+        e.fxDepth(), e.fxBeats(), static_cast<double>(e.fxHeld()), static_cast<double>(e.fxAudible()),
     };
     for (int i = 0; i < manadj::kDeckCount; ++i) {
         const auto& d = e.deck(i);

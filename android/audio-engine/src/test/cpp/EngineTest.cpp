@@ -45,6 +45,52 @@ float toneRms(Engine& e, int settle, int frames) {
     return static_cast<float>(std::sqrt(sum / frames));
 }
 
+// Loads `pcm` (interleaved stereo, 48 kHz) as the whole track; eof so the deck stops at its end.
+void loadPcm(Engine& e, int deck, uint64_t load, const std::vector<float>& pcm) {
+    e.submit(Op::Prepare, deck, 0, load);
+    tick(e);
+    auto& d = e.deck(deck);
+    const auto transport = d.transport.load();
+    CHECK(e.claim(deck, load, transport, 48000, 0));
+    const int frames = static_cast<int>(pcm.size() / 2);
+    CHECK(e.offer(deck, transport, pcm.data(), frames) == frames);
+    CHECK(e.publish(deck, load, transport, true));
+}
+
+// Renders `frames` and returns the left channel.
+std::vector<float> capture(Engine& e, int frames) {
+    std::vector<float> left(frames);
+    for (int done = 0; done < frames;) {
+        const int n = std::min(4096, frames - done);
+        tick(e, n);
+        for (int i = 0; i < n; ++i) left[done + i] = out[i * 2];
+        done += n;
+    }
+    return left;
+}
+
+double rms(const std::vector<float>& x, int from, int to) {
+    double sum = 0;
+    for (int i = from; i < to; ++i) sum += static_cast<double>(x[i]) * x[i];
+    return std::sqrt(sum / std::max(1, to - from));
+}
+
+// 1 kHz tone (amplitude .25) over [from, to) frames of a `frames`-long silent track.
+std::vector<float> burst(int frames, int from, int to) {
+    std::vector<float> pcm(static_cast<size_t>(frames) * 2, 0.f);
+    for (int i = from; i < to; ++i) pcm[i * 2] = pcm[i * 2 + 1] = static_cast<float>(.25 * std::sin(2 * 3.14159265358979 * 1000 * i / 48000));
+    return pcm;
+}
+
+void beatFx(Engine& e, int effect, int target, bool on, double depth, double beats, int held = 0) {
+    CHECK(e.submitBeatFx(effect, target, on, depth, beats, held) != 0);
+}
+
+void grid120(Engine& e, int deck) {
+    const double anchor[5] = {0, 0, 0, 0, 0};
+    e.submit(Op::SetGrid, deck, 120, 0, 0, anchor);
+}
+
 State state(Engine& e, int deck) { return static_cast<State>(e.deck(deck).status.load() & 3); }
 
 void loadDeck(Engine& e, int deck, uint64_t load, float value, int frames = 48000) {
@@ -437,5 +483,136 @@ int main() {
         CHECK(!e.deck(0).loopActive.load());
         CHECK(e.deck(0).pendingLoopBeats.load() == 8);
     }
+    { // Beat FX ECHO on A: beat-synced repeats at beats x beatSeconds, feedback .5, tails ring after OFF.
+        auto owned = std::make_unique<Engine>(48000);
+        Engine& e = *owned;
+        loadPcm(e, 0, 1, burst(48000, 4800, 7200));
+        grid120(e, 0);
+        beatFx(e, fx::kEcho, fx::kTargetA, true, 0, .5);  // depth 0: dry 1, wet 1; 1/2 beat = 12000 frames
+        e.submit(Op::Play, 0);
+        auto x = capture(e, 4800 + 48000);
+        const double dry = rms(x, 5000, 7000);
+        CHECK(dry > .05);
+        CHECK(rms(x, 9000, 16000) < dry * .01);              // nothing between burst and first repeat
+        const double first = rms(x, 17000, 19000), second = rms(x, 29000, 31000);
+        CHECK(first > dry * .9 && first < dry * 1.6);        // tanh-normalized clip lifts small signals
+        CHECK(second > first * .4 && second < first * .9);   // feedback .5 through the clip
+        CHECK(e.fxAudible() == 1);
+        beatFx(e, fx::kEcho, fx::kTargetA, false, 0, .5);   // OFF: send closes, return still rings
+        x = capture(e, 12000);
+        CHECK(rms(x, 0, 12000) > dry * .05);
+        capture(e, 48000 * 6);
+        CHECK(e.fxAudible() == 0);                           // tail rang out: insert idle
+        CHECK(e.starvedFrames() == 0);
+    }
+
+    { // Depth -1 is dry only; a B target leaves A untouched; held paddle engages regardless of ON.
+        for (int variant = 0; variant < 3; ++variant) {
+            auto owned = std::make_unique<Engine>(48000);
+            Engine& e = *owned;
+            loadPcm(e, 0, 1, burst(48000, 4800, 7200));
+            grid120(e, 0);
+            if (variant == 0) beatFx(e, fx::kEcho, fx::kTargetA, true, -1, .5);
+            if (variant == 1) beatFx(e, fx::kEcho, fx::kTargetB, true, 0, .5);
+            if (variant == 2) beatFx(e, fx::kEcho, fx::kTargetB, false, 0, .5, 1); // paddle on A
+            e.submit(Op::Play, 0);
+            auto x = capture(e, 24000);
+            const double echo = rms(x, 17000, 19000);
+            if (variant < 2) CHECK(echo < 1e-4); else CHECK(echo > rms(x, 5000, 7000) * .9);
+        }
+    }
+
+    { // MST target follows the last deck target's tempo; deck pitch scales the delay.
+        auto owned = std::make_unique<Engine>(48000);
+        Engine& e = *owned;
+        loadPcm(e, 0, 1, burst(48000, 4800, 7200));
+        grid120(e, 0);
+        e.submit(Op::Pitch, 0, 25);                          // 1.25x: beat = 0.4 s, 1/2 beat = 9600 frames
+        beatFx(e, fx::kEcho, fx::kTargetMaster, true, 0, .5);
+        e.submit(Op::Play, 0);
+        auto x = capture(e, 24000);
+        // Burst plays at 1.25x: source 4800..7200 -> output 3840..5760; echo at +9600.
+        const double dry = rms(x, 4000, 5600);
+        CHECK(rms(x, 13600, 15200) > dry * .9);
+        CHECK(rms(x, 16000, 17000) < dry * .05);
+        CHECK(e.fxAudible() == 1 << fx::kTargetMaster);
+    }
+
+    { // REVERB: beatless tail of ~2.5 s RT60 at about the dry level, decays to idle.
+        auto owned = std::make_unique<Engine>(48000);
+        Engine& e = *owned;
+        loadPcm(e, 0, 1, burst(48000, 4800, 24000));
+        beatFx(e, fx::kReverb, fx::kTargetA, true, 1, .5);  // depth +1: effect only
+        e.submit(Op::Play, 0);
+        auto x = capture(e, 48000 * 2);
+        const double wet = rms(x, 12000, 24000);
+        CHECK(wet > .02 && wet < .3);                        // dry is ~.088 rms here
+        const double t1 = rms(x, 26000, 30800), t2 = rms(x, 26000 + 24000, 30800 + 24000);
+        // 0.5 s later: -12 dB for a 2.5 s RT60 (60 dB / 2.5 s x 0.5 s), allow wide slack.
+        CHECK(t1 > 0 && t2 < t1 * .5 && t2 > t1 * .08);
+        beatFx(e, fx::kReverb, fx::kTargetA, false, 1, .5);  // an engaged insert never idles
+        capture(e, 48000 * 6);
+        CHECK(e.fxAudible() == 0);
+    }
+
+    { // FLANGER: a swept comb on a tone (LFO = beats in bars: 1/2 bar = 1 s at 120 BPM).
+        auto owned = std::make_unique<Engine>(48000);
+        Engine& e = *owned;
+        loadPcm(e, 0, 1, burst(48000, 0, 48000));
+        grid120(e, 0);
+        beatFx(e, fx::kFlanger, fx::kTargetA, true, 0, .5);
+        e.submit(Op::Play, 0);
+        auto x = capture(e, 48000);
+        CHECK(std::abs(e.insert(fx::kTargetA).lfoHz() - 1.0) < 1e-9);
+        double lo = 1e9, hi = 0;
+        for (int w = 4800; w + 2400 <= 48000; w += 2400) { const double r = rms(x, w, w + 2400); lo = std::min(lo, r); hi = std::max(hi, r); }
+        CHECK(hi > lo * 1.3);                                // the comb moves over the tone
+    }
+
+    { // TRANS: grid-locked gate, duty .5 of each 1/2-beat cell; depth +1 mutes the off half.
+        auto owned = std::make_unique<Engine>(48000);
+        Engine& e = *owned;
+        loadPcm(e, 0, 1, burst(48000, 0, 48000));
+        grid120(e, 0);
+        beatFx(e, fx::kTrans, fx::kTargetA, true, 1, .5);    // cell 12000 frames
+        e.submit(Op::Play, 0);
+        auto x = capture(e, 48000);
+        const double on = rms(x, 12000 + 1000, 12000 + 5000), off = rms(x, 12000 + 7000, 12000 + 11000);
+        CHECK(on > .05);
+        CHECK(off < on * .01);
+        CHECK(rms(x, 36000 + 1000, 36000 + 5000) > on * .9); // still phase-locked three cells later
+    }
+
+    { // ROLL: loops the last complete cell (repeats are identical while the source moves on).
+        auto owned = std::make_unique<Engine>(48000);
+        Engine& e = *owned;
+        std::vector<float> ramp(48000 * 2);
+        for (int i = 0; i < 48000; ++i) ramp[i * 2] = ramp[i * 2 + 1] = static_cast<float>(.5 * i / 48000);
+        loadPcm(e, 0, 1, ramp);
+        grid120(e, 0);
+        e.submit(Op::Play, 0);
+        capture(e, 13000);                                    // past the 1/4-beat boundary at 12000
+        beatFx(e, fx::kRoll, fx::kTargetA, true, 1, .25);     // cell 6000 frames: loops [6000, 12000)
+        auto x = capture(e, 24000);
+        CHECK(e.insert(fx::kTargetA).repeat().rolling());
+        CHECK(std::abs(e.insert(fx::kTargetA).repeat().rollLength() - 6000) < 1);
+        double worst = 0;
+        for (int i = 2000; i < 8000; ++i) worst = std::max(worst, static_cast<double>(std::abs(x[i] - x[i + 6000])));
+        CHECK(worst < 1e-3);                                  // periodic at the cell length
+        CHECK(std::abs(x[2000] - x[2000 + 12000]) < 1e-3);
+        beatFx(e, fx::kRoll, fx::kTargetA, false, 1, .25);    // release: back to the live ramp
+        x = capture(e, 4800);
+        CHECK(x[4000] > x[1000]);
+    }
+
+    { // Callback cost: echo on all four decks + reverb on master, 96-frame callbacks (informational).
+        auto owned = std::make_unique<Engine>(48000);
+        Engine& e = *owned;
+        for (int d = 0; d < 4; ++d) { loadPcm(e, d, d + 1, burst(48000, 0, 48000)); e.submit(Op::Play, d); }
+        beatFx(e, fx::kReverb, fx::kTargetMaster, true, 0, .5, 15); // paddles: echo->reverb on all
+        tick(e, 4800);
+        CHECK(e.fxAudible() == 31);
+    }
+
     std::puts("engine tests passed");
 }

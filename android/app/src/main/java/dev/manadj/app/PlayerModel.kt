@@ -82,6 +82,10 @@ class PlayerModel(application: Application) : AndroidViewModel(application) {
     private val clientId = UUID.randomUUID().toString()
     private var cancelledGesture = false
     private var pendingCrossfade: Long? = null
+    /** Central Beat FX section (engine-applied, or the last accepted write until it applies). */
+    var beatFx by mutableStateOf(BeatFx.DEFAULT)
+        private set
+    private var pendingBeatFx: Long? = null
     private val connection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, binder: IBinder?) { service = (binder as PlaybackService.LocalBinder).service }
         override fun onServiceDisconnected(name: ComponentName?) { service = null; output = null; failure = "Audio service disconnected" }
@@ -102,6 +106,7 @@ class PlayerModel(application: Application) : AndroidViewModel(application) {
                     output = state
                     if (pendingCrossfade == null || state.appliedCommandId >= pendingCrossfade!!) { crossfade = (state.crossfade + 1) / 2; pendingCrossfade = null }
                     if (pendingCueMix == null || state.appliedCommandId >= pendingCueMix!!) { cueMix = state.cueMix; pendingCueMix = null }
+                    if (pendingBeatFx == null || state.appliedCommandId >= pendingBeatFx!!) { beatFx = state.beatFx; pendingBeatFx = null }
                     state.decks.forEach { (id, snapshot) ->
                         val ui = decks.getValue(id)
                         ui.snapshot = snapshot
@@ -258,6 +263,11 @@ class PlayerModel(application: Application) : AndroidViewModel(application) {
     fun updateCueMix(value: Double, gesture: String? = null) {
         val receipt = submit(AudioCommand.SetCueMix(value, gesture))
         if (receipt.accepted) { cueMix = value; pendingCueMix = receipt.id }
+    }
+    /** Writes the whole Beat FX section; e.g. `updateBeatFx(beatFx.copy(on = true))`. */
+    fun updateBeatFx(state: BeatFxState, gesture: String? = null) {
+        val receipt = submit(AudioCommand.SetBeatFx(state, gesture))
+        if (receipt.accepted) { beatFx = state; pendingBeatFx = receipt.id }
     }
     fun togglePfl(deck: DeckId) { submit(AudioCommand.SetPfl(deck, decks.getValue(deck).snapshot?.pfl != true)) }
     /** Bus routing + device; QUAD only for devices reporting >= 4 channels (the UI gates it). */

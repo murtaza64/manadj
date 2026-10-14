@@ -15,6 +15,38 @@ enum class LoopChange { HALVE, DOUBLE, SET }
 /** Active loop region in source seconds (desktop LoopRegion). */
 data class LoopRegion(val start: Double, val end: Double, val beats: Double)
 
+/** Desktop BEAT_FX_EFFECTS in GRV6 SELECT order. Ordinals match native `fx::Effect`. */
+enum class BeatFxEffect(val label: String, val short: String) {
+    ECHO("ECHO", "ECH"), LOW_CUT_ECHO("LOW CUT ECHO", "LCE"), REVERB("REVERB", "RVB"),
+    FLANGER("FLANGER", "FLG"), TRANS("TRANS", "TRS"), ROLL("ROLL", "ROL"),
+}
+
+/** Beat FX CH SELECT. MASTER follows the tempo of the last deck target. Ordinals match native `fx::Target`. */
+enum class BeatFxTarget { A, B, C, D, MASTER }
+
+/**
+ * The central Beat FX section (desktop BeatFxSectionState). [depth]: -1 original only, 0 both at unity,
+ * +1 effect only. [beats]: one of [BeatFx.LADDER] (FLANGER reads it as bars). [held]: per-deck
+ * momentary paddles, engaged regardless of [on] / [target]. A null [effect] forces [on] off.
+ */
+data class BeatFxState(
+    val effect: BeatFxEffect?, val target: BeatFxTarget, val on: Boolean,
+    val depth: Double, val beats: Double, val held: Set<DeckId> = emptySet(),
+)
+
+object BeatFx {
+    /** GRV6 BEAT ◄ ► ladder. */
+    val LADDER = listOf(.0625, .125, .25, .5, .75, 1.0, 2.0, 4.0, 8.0)
+    /** Desktop initial section: ECHO on A, off, fully dry, 1/2 beat. */
+    val DEFAULT = BeatFxState(BeatFxEffect.ECHO, BeatFxTarget.A, false, -1.0, .5)
+    fun snap(beats: Double): Double = LADDER.minBy { kotlin.math.abs(it - beats) }
+    /** BEAT ◄ ► one rung (desktop stepEchoBeats). */
+    fun step(beats: Double, double: Boolean): Double {
+        val i = LADDER.indexOf(snap(beats)) + if (double) 1 else -1
+        return LADDER[i.coerceIn(0, LADDER.lastIndex)]
+    }
+}
+
 /** Output stage mapping of the master and cue (PFL) buses. Ordinals match native `Routing`. */
 enum class Routing(val label: String) {
     STEREO("Stereo master"),
@@ -75,6 +107,15 @@ sealed interface AudioCommand {
     data class SetCrossfade(val value: Double, override val gestureId: String? = null) : AudioCommand {
         override val deck = DeckId.A // Global mixer command, not assigned to a deck's audio.
     }
+    /** Writes the whole Beat FX section (send the full state on every change). */
+    data class SetBeatFx(
+        val effect: BeatFxEffect?, val target: BeatFxTarget, val on: Boolean, val depth: Double, val beats: Double,
+        val held: Set<DeckId> = emptySet(), override val gestureId: String? = null,
+    ) : AudioCommand {
+        override val deck = DeckId.A // Global.
+        constructor(state: BeatFxState, gestureId: String? = null) :
+            this(state.effect, state.target, state.on, state.depth, state.beats, state.held, gestureId)
+    }
 }
 
 data class CommandReceipt(val id: Long, val accepted: Boolean, val reason: String? = null)
@@ -103,6 +144,8 @@ data class EngineSnapshot(
     val outputFrames: Long, val outputSampleRate: Int, val outputChannels: Int,
     val epoch: Long, val outputOpen: Boolean, val reopenCount: Int, val crossfade: Double,
     val routing: Routing, val cueMix: Double, val quantize: Boolean,
+    /** Beat FX section as applied, and the inserts currently sounding (engaged or ringing out a tail). */
+    val beatFx: BeatFxState, val beatFxAudible: Set<BeatFxTarget>,
     val starvedDeckFrames: Long, val outputXruns: Long,
     val outputError: Int, val acceptedCommandId: Long, val appliedCommandId: Long,
     val decks: Map<DeckId, DeckSnapshot>, val supportedCapabilities: Set<String>,
@@ -141,11 +184,11 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
         init { System.loadLibrary("manadj_audio") }
         const val MAIN_CUE = 8
         const val HOT_CUES = 8
-        val CAPABILITIES = setOf("play", "pause", "cue-gate", "hot-cue-gate", "hot-cue-set", "seek", "fader", "trim", "crossfade", "varispeed", "bend", "pfl", "cue-mix", "routing", "eq", "filter", "grid", "beat-jump", "loop", "quantize")
+        val CAPABILITIES = setOf("play", "pause", "cue-gate", "hot-cue-gate", "hot-cue-set", "seek", "fader", "trim", "crossfade", "varispeed", "bend", "pfl", "cue-mix", "routing", "eq", "filter", "grid", "beat-jump", "loop", "quantize", "beat-fx")
         private const val PRIME_FRAMES = 2048
         private const val HEAD_SLOTS = HOT_CUES + 2
         private const val HEAD_FRAMES = 8192
-        private const val HEADER = 16
+        private const val HEADER = 23
         private const val DECK_FIELDS = 36 + HOT_CUES
         private enum class Op { PREPARE, PLAY, PAUSE, CUE_DOWN, CUE_UP, HOT_CUE_DOWN, HOT_CUE_UP, HOT_CUE_SET, HOT_CUE_CLEAR, SEEK, FADER, TRIM, CROSSFADE, PITCH, BEND, PFL, CUE_MIX, EQ, FILTER, SET_GRID, BEAT_JUMP, LOOP_TOGGLE, LOOP_RESIZE, LOOP_PRESET, QUANTIZE, CUE_SET_AT, HOT_CUE_SET_AT }
     }
@@ -215,6 +258,12 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
             is AudioCommand.LoopPreset -> Op.LOOP_PRESET to command.beats
             is AudioCommand.LoopResize -> { slot = command.change.ordinal; Op.LOOP_RESIZE to command.beats }
             is AudioCommand.SetQuantize -> Op.QUANTIZE to if (command.on) 1.0 else 0.0
+            is AudioCommand.SetBeatFx -> {
+                if (!command.depth.isFinite() || !command.beats.isFinite() || command.beats <= 0) return rejected("Non-finite control")
+                val held = command.held.fold(0) { mask, d -> mask or (1 shl d.ordinal) }
+                val id = nativeSubmitBeatFx(handle, command.effect?.ordinal ?: -1, command.target.ordinal, command.on, command.depth, command.beats, held)
+                return if (id != 0L) CommandReceipt(id, true) else rejected("Command queue full")
+            }
             is AudioCommand.SetFilter -> {
                 if (!command.position.isFinite()) return rejected("Non-finite control")
                 val id = nativeSubmitFilter(handle, deck, command.position)
@@ -295,6 +344,12 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
             starvedDeckFrames = data[4].toLong(), outputXruns = data[5].toLong(), outputError = data[6].toInt(),
             acceptedCommandId = data[7].toLong(), appliedCommandId = data[8].toLong(),
             decks = decks, supportedCapabilities = CAPABILITIES,
+            beatFx = BeatFxState(
+                effect = BeatFxEffect.entries.getOrNull(data[16].toInt()), target = BeatFxTarget.entries[data[17].toInt().coerceIn(0, 4)],
+                on = data[18] != 0.0, depth = data[19], beats = data[20],
+                held = DeckId.entries.filter { (data[21].toInt() shr it.ordinal) and 1 == 1 }.toSet(),
+            ),
+            beatFxAudible = BeatFxTarget.entries.filter { (data[22].toInt() shr it.ordinal) and 1 == 1 }.toSet(),
         )
     }
 
@@ -451,6 +506,7 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
     private external fun nativeClose(handle: Long)
     private external fun nativeSubmit(handle: Long, op: Int, deck: Int, value: Double, load: Long, slot: Int): Long
     private external fun nativeSetGrid(handle: Long, deck: Int, bpm: Double, anchor: Double): Long
+    private external fun nativeSubmitBeatFx(handle: Long, effect: Int, target: Int, on: Boolean, depth: Double, beats: Double, held: Int): Long
     private external fun nativeSubmitFilter(handle: Long, deck: Int, position: Double): Long
     private external fun nativeTransport(handle: Long, deck: Int, out: DoubleArray)
     private external fun nativeClaim(handle: Long, deck: Int, load: Long, transport: Long, rate: Int, start: Double): Boolean

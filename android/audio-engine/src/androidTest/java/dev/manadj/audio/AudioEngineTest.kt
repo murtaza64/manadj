@@ -346,6 +346,44 @@ class AudioEngineTest {
         }
     }
 
+    @Test fun beatFxSectionAppliesTailsRingAndCostFitsTheCallback() {
+        val tone = m4a("engine-fx.m4a", 440.0, 10)
+        AudioEngine(offline = true).use { engine ->
+            assertTrue("beat-fx" in engine.snapshot().supportedCapabilities)
+            assertEquals(BeatFx.DEFAULT, engine.snapshot().beatFx)
+            for (deck in DeckId.entries) engine.load(deck, "fx-$deck", tone)
+            engine.submit(AudioCommand.SetGrid(DeckId.A, 120.0, 0.0))
+            engine.settled(*DeckId.entries.toTypedArray())
+            engine.submit(AudioCommand.Play(DeckId.A))
+            val echo = BeatFxState(BeatFxEffect.ECHO, BeatFxTarget.A, true, 0.0, .75)
+            assertTrue(engine.submit(AudioCommand.SetBeatFx(echo)).accepted)
+            repeat(9) { engine.renderOfflineForTest(4000); Thread.sleep(2) }
+            val s = engine.snapshot()
+            assertEquals(echo, s.beatFx)
+            assertEquals(setOf(BeatFxTarget.A), s.beatFxAudible)
+            // Pausing the deck leaves the echo tail ringing (3/4 beat = 375 ms repeats); without FX it is silent.
+            engine.submit(AudioCommand.Pause(DeckId.A))
+            engine.renderOfflineForTest(4800)
+            var tail = 0f
+            repeat(4) { engine.renderOfflineForTest(4800).forEach { tail = maxOf(tail, kotlin.math.abs(it)) } }
+            assertTrue("no echo tail: $tail", tail > .01f)
+            assertEquals(.75, BeatFx.step(.5, true), 0.0); assertEquals(.0625, BeatFx.step(.0625, false), 0.0)
+            // Cost: 4 decks playing, echo then reverb on every insert (paddles A-D + MST target).
+            for (deck in DeckId.entries) engine.submit(AudioCommand.Play(deck))
+            for (effect in listOf(BeatFxEffect.ECHO, BeatFxEffect.REVERB, BeatFxEffect.ROLL)) {
+                engine.submit(AudioCommand.SetBeatFx(effect, BeatFxTarget.MASTER, true, 0.0, .5, DeckId.entries.toSet()))
+                engine.renderOfflineForTest(4096)
+                assertEquals(BeatFxTarget.entries.toSet(), engine.snapshot().beatFxAudible)
+                val n = 2000
+                val t0 = System.nanoTime()
+                repeat(n) { engine.renderOfflineForTest(96) }
+                val perCallbackUs = (System.nanoTime() - t0) / 1000.0 / n
+                android.util.Log.i("manadj-bench", "4 decks + $effect on 5 inserts: %.1f us per 96-frame render (budget 2000 us)".format(perCallbackUs))
+                assertTrue("render too slow: $perCallbackUs us", perCallbackUs < 1000)
+            }
+        }
+    }
+
     @Test fun loopsWrapGaplessFromTheLoopHeadAndBeatJumpsMoveThem() {
         val media = wav("engine-loop.wav", .25, seconds = 20)
         AudioEngine(offline = true).use { engine ->

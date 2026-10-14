@@ -5,7 +5,9 @@
 #include <atomic>
 #include <cmath>
 #include <cstdint>
+#include <memory>
 #include <mutex>
+#include "BeatFx.h"
 #include "Dsp.h"
 
 namespace manadj {
@@ -59,7 +61,8 @@ struct Head {
 
 enum class Op : int { Prepare, Play, Pause, CueDown, CueUp, HotCueDown, HotCueUp,
                        HotCueSet, HotCueClear, Seek, Fader, Trim, Crossfade, Pitch, Bend, Pfl, CueMix, Eq, Filter,
-                       SetGrid, BeatJump, LoopToggle, LoopResize, LoopPreset, Quantize, CueSetAt, HotCueSetAt };
+                       SetGrid, BeatJump, LoopToggle, LoopResize, LoopPreset, Quantize, CueSetAt, HotCueSetAt, BeatFx };
+// BeatFx (deck ignored): slot = effect (-1 none), value = depth, aux = {target, on, beats, held deck mask}.
 // LoopResize slot: 0 halve, 1 double, 2 set to value beats.
 struct Command {
     Op op;
@@ -137,8 +140,11 @@ struct Deck {
     double fractional = 0;
     double headPos = 0;
     uint64_t positionTransport = 0;
-    float gain = 0;          // master: trim x fader law x crossfader (smoothed)
+    float gain = 0;          // post-fader: trim x fader law (smoothed); Beat FX insert sits after it
     float targetGain = 0;
+    float xf = 1;            // crossfader gain after the insert (smoothed)
+    float targetXf = 1;
+    double beatSeconds = fx::kBeatSecondsDefault; // last known wall seconds per beat (Beat FX clock)
     float cueGain = 0;       // cue bus: trim only, pre-fader, 0 when PFL is off (smoothed)
     float targetCueGain = 0;
     float envelope = 0;
@@ -159,6 +165,8 @@ public:
     uint64_t submit(Op op, int deck, double value = 0, uint64_t load = 0, int slot = 0, const double* aux = nullptr);
     // Control thread: computes the desktop sweep-filter target (not realtime-safe) and queues it.
     uint64_t submitFilter(int deck, double position);
+    // Whole Beat FX section (desktop setBeatFxSection). effect -1 = none; target fx::Target.
+    uint64_t submitBeatFx(int effect, int target, bool on, double depth, double beats, int heldMask);
 
     // Decode worker API (one worker thread per deck at a time).
     // Starts filling `transport` if it is current: discards ring contents and
@@ -190,6 +198,15 @@ public:
     uint64_t applied() const { return applied_.load(); }
     uint64_t starvedFrames() const { return starvedFrames_.load(); }
     float crossfade() const { return crossfade_.load(); }
+    // Beat FX section as applied, and a bitmask of inserts (fx::Target) currently sounding.
+    int fxEffect() const { return fxEffect_.load(); }
+    int fxTarget() const { return fxTarget_.load(); }
+    bool fxOn() const { return fxOn_.load(); }
+    double fxDepth() const { return fxDepth_.load(); }
+    double fxBeats() const { return fxBeats_.load(); }
+    int fxHeld() const { return fxHeld_.load(); }
+    int fxAudible() const { return fxAudible_.load(); }
+    const fx::Insert& insert(int target) const { return *fx_[target]; }
 
 private:
     std::array<Deck, kDeckCount> decks_{};
@@ -202,9 +219,16 @@ private:
     std::atomic<float> cueMix_{0};  // Headphone blend: 0 = cue bus only, 1 = master only.
     std::atomic<int> routing_{0};
     std::atomic<bool> quantize_{false};
+    std::array<std::unique_ptr<fx::Insert>, fx::kTargetCount> fx_;
+    std::atomic<int> fxEffect_{fx::kEcho}, fxTarget_{fx::kTargetA}, fxHeld_{0}, fxAudible_{0};
+    std::atomic<bool> fxOn_{false};
+    std::atomic<double> fxDepth_{-1}, fxBeats_{fx::kBeatsDefault};
+    int fxTempoDeck_ = 0; // MST follows the last deck target (desktop beatFxTempoChannel).
+    void applyBeatFx(bool immediate) noexcept;
+    void clockBeatFx(int64_t frame) noexcept;
     std::array<float, kBlockFrames * 2> master_{};
     std::array<float, kBlockFrames * 2> cue_{};
-    void renderBuses(int frames) noexcept;
+    void renderBuses(int frames, int64_t frame) noexcept;
     bool renderSource(Deck& d, float* strip, int frames) noexcept;
     bool renderTail(Deck& d, float* strip, int frames) noexcept;
     int renderSegment(Deck& d, float* strip, int frames, bool& active) noexcept;
