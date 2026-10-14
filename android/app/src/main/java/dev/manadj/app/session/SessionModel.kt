@@ -60,6 +60,24 @@ class SessionModel(application: Application) : AndroidViewModel(application) {
     var viewStart by mutableDoubleStateOf(0.0)
     var viewWidth by mutableDoubleStateOf(1.0)
     var follow by mutableStateOf(true)
+    /** Narrowest window the timeline allows (its max zoom, set from its width). */
+    var minViewWidth = 8.0
+    /** A manual pan holds follow-scroll off until this nanoTime (desktop: 20 s). */
+    var followHeldUntil by mutableLongStateOf(0L)
+    /** Timeline model (waveform runs, mix, marks) of the open Session. */
+    var timeline by mutableStateOf<SessionTimeline?>(null)
+        private set
+    /** Timeline waveforms per library track (desktop detail waveform + display fill gain). */
+    val waves = mutableStateMapOf<Int, TimelineWave>()
+    /** Session clock extrapolated to the display frame (smooth playhead + follow at the display rate). */
+    var displayTime by mutableDoubleStateOf(0.0)
+        private set
+    private var timeNanos = 0L
+    /** Track occurrence spotlighted by a label tap, until [focusUntil] (nanoTime). */
+    var focus by mutableStateOf<Appearance?>(null)
+        private set
+    var focusUntil = 0L
+        private set
 
     private var player: PlayerModel? = null
     private var loop: Job? = null
@@ -94,9 +112,11 @@ class SessionModel(application: Application) : AndroidViewModel(application) {
                 require(parsed.events.isNotEmpty() && parsed.duration > 0) { "Session has no recorded duration" }
                 stop()
                 val drift = withContext(Dispatchers.Default) { parsed.tickDivergence() }
-                header = h; log = parsed; driver = null; recordingDrift = drift
+                val tl = withContext(Dispatchers.Default) { SessionTimeline(parsed) }
+                header = h; log = parsed; driver = null; recordingDrift = drift; timeline = tl; focus = null
+                loadWaves(parsed)
                 if (drift.isNotEmpty()) android.util.Log.w(TAG, "recording drift: ${drift.size} ticks > 5 ms, worst %.1f ms".format(drift.maxOf { abs(it.seconds) } * 1000))
-                time = parsed.activeStart; fit()
+                moveClock(parsed.activeStart); fit()
                 deckErrors.indices.forEach { deckErrors[it] = null }
             } catch (e: CancellationException) { throw e }
             catch (e: Exception) { notice = "Open failed: ${e.message ?: e}" }
@@ -104,7 +124,51 @@ class SessionModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun close() { stop(); log = null; header = null; driver = null; recordingDrift = emptyList() }
+    fun close() { stop(); log = null; header = null; driver = null; recordingDrift = emptyList(); timeline = null; focus = null; wavesJob?.cancel() }
+
+    private var wavesJob: Job? = null
+    /** Fetch every Session track's detail waveform (cache first), two at a time. */
+    private fun loadWaves(l: SessionLog) {
+        wavesJob?.cancel()
+        val ids = l.appearances.sortedBy { it.firstSound ?: Double.MAX_VALUE }.map { it.trackId }.distinct().filter { it !in waves }
+        wavesJob = viewModelScope.launch {
+            val gate = kotlinx.coroutines.sync.Semaphore(2)
+            ids.map { id -> launch(Dispatchers.Default) { gate.acquire(); try {
+                val w = runCatching { LibraryHolder.detailWaveform(getApplication(), id) }.onFailure { android.util.Log.w(TAG, "timeline waveform $id: $it") }.getOrNull()
+                if (w == null) android.util.Log.w(TAG, "timeline waveform $id: none")
+                if (w != null && w.sampleRate > 0 && w.bandHop > 0 && w.nBands == 8 && w.bands.isNotEmpty()) {
+                    val data = dev.manadj.app.WaveformData(w.sampleRate, w.durationSecs, w.peakHop, w.bandHop, w.stftWindow, w.peaks, w.bands, w.bands.size / 8)
+                    val wave = TimelineWave(data, dev.manadj.app.ColumnCache().fillGain(data))
+                    withContext(Dispatchers.Main) { waves[id] = wave }
+                }
+            } finally { gate.release() } } }
+        }
+    }
+
+    private fun moveClock(t: Double) { time = t; timeNanos = System.nanoTime(); displayTime = t }
+
+    /** Per display frame (timeline): extrapolate the clock, advance follow-scroll, expire the spotlight. */
+    fun frame(nanos: Long) {
+        val l = log ?: return
+        displayTime = if (playing) (time + (nanos - timeNanos) / 1e9).coerceIn(time, minOf(l.end, time + .1)) else time
+        if (focus != null && nanos > focusUntil) focus = null
+        if (follow && playing && System.nanoTime() > followHeldUntil) {
+            val maxStart = maxOf(l.activeStart, l.end - viewWidth)
+            viewStart = if (displayTime < viewStart) (displayTime - viewWidth * .1).coerceIn(l.activeStart, maxStart)
+                else TimelineLayout.follow(viewStart, viewWidth, displayTime, maxStart)
+        }
+    }
+
+    /** Tap on a track label: zoom to that occurrence and spotlight it. */
+    fun focusOn(a: Appearance) {
+        val l = log ?: return
+        val (heardFrom, heardTo) = timeline?.playedSpan(a) ?: ((a.firstSound ?: a.start) to a.end)
+        val from = maxOf(heardFrom, l.activeStart); val to = minOf(heardTo, l.end)
+        val w = ((to - from) * 1.1).coerceIn(minViewWidth, (l.end - l.activeStart).coerceAtLeast(minViewWidth))
+        setView(from - (w - (to - from)) / 2, w)
+        holdFollow()
+        focus = a; focusUntil = System.nanoTime() + 2_600_000_000L
+    }
 
     /** Leaving the Session screen: replay stops, decks keep what they hold. */
     fun leave() = stop()
@@ -120,7 +184,7 @@ class SessionModel(application: Application) : AndroidViewModel(application) {
     fun play(player: PlayerModel) {
         val l = log ?: return
         val r = driver(player) ?: return
-        if (time >= l.end) time = l.activeStart
+        if (time >= l.end) moveClock(l.activeStart)
         if (userCrossfade == null) userCrossfade = player.crossfade
         // Recorded crossfader folds into the faders; the engine crossfader stays centred while replaying.
         player.submit(AudioCommand.SetCrossfade(0.0))
@@ -136,7 +200,7 @@ class SessionModel(application: Application) : AndroidViewModel(application) {
     fun stop() {
         loop?.cancel(); loop = null
         driver?.stop()
-        playing = false; preparing = false
+        playing = false; preparing = false; displayTime = time
         engineOffsetMs.indices.forEach { engineOffsetMs[it] = null }
         userCrossfade?.let { player?.updateCrossfade(it) }
         userCrossfade = null
@@ -146,7 +210,7 @@ class SessionModel(application: Application) : AndroidViewModel(application) {
     fun seek(t: Double, player: PlayerModel) {
         val l = log ?: return
         val r = driver(player) ?: return
-        time = t.coerceIn(l.start, l.end)
+        moveClock(t.coerceIn(l.start, l.end))
         reveal()
         if (playing || preparing) { r.prepare(time); sync(r) } else r.park(time)
     }
@@ -156,8 +220,7 @@ class SessionModel(application: Application) : AndroidViewModel(application) {
             val now = r.tick(System.nanoTime() / 1e9)
             sync(r)
             if (now != null) {
-                time = now
-                if (follow) reveal()
+                moveClock(now)
                 if (now - lastMeasure >= MEASURE_SECONDS || now < lastMeasure) { lastMeasure = now; measure(player, r) }
             }
             if (!r.playing && !r.preparing) { stop(); return }
@@ -247,20 +310,36 @@ class SessionModel(application: Application) : AndroidViewModel(application) {
     companion object {
         private const val TAG = "ManadjSession"
         const val MEASURE_SECONDS = 2.0
+        const val FOLLOW_HOLD_NANOS = 20_000_000_000L
     }
 
-    // ── Timeline view ──
-    fun fit() { val l = log ?: return; viewStart = l.activeStart; viewWidth = (l.end - l.activeStart).coerceAtLeast(1.0); follow = true }
-    fun zoom(factor: Double, anchor: Double = .5) {
+    // ── Timeline view (window over activeStart..end: max zoom [minViewWidth], min zoom = fit) ──
+    private val span get() = log?.let { (it.end - it.activeStart).coerceAtLeast(1.0) } ?: 1.0
+    /** Fit spans the performance: first sound to the last audio (logs can idle for long after it). */
+    fun fit() {
         val l = log ?: return
-        val next = (viewWidth / factor).coerceIn(minOf(8.0, l.duration), l.duration.coerceAtLeast(1.0))
-        viewStart = (viewStart + anchor * (viewWidth - next)).coerceIn(l.start, maxOf(l.start, l.end - next)); viewWidth = next
+        val last = timeline?.activeEnd?.let { minOf(l.end, it + SessionLog.LEAD_IN) } ?: l.end
+        viewStart = l.activeStart; viewWidth = (last - l.activeStart).coerceIn(minOf(minViewWidth, span), span); follow = true; followHeldUntil = 0L
     }
-    fun pan(fraction: Double) { val l = log ?: return; follow = false; viewStart = (viewStart + fraction * viewWidth).coerceIn(l.start, maxOf(l.start, l.end - viewWidth)) }
-    private fun reveal() {
+    fun setView(start: Double, width: Double) {
         val l = log ?: return
-        if (time < viewStart || time > viewStart + viewWidth) viewStart = (time - viewWidth * .25).coerceIn(l.start, maxOf(l.start, l.end - viewWidth))
+        viewWidth = width.coerceIn(minOf(minViewWidth, span), span)
+        viewStart = start.coerceIn(l.activeStart, maxOf(l.activeStart, l.end - viewWidth))
+    }
+    /** Zoom by [factor] keeping the time under [anchor] (fraction of the width) fixed. */
+    fun zoom(factor: Double, anchor: Double = .5) {
+        val at = viewStart + anchor * viewWidth
+        val next = (viewWidth / factor).coerceIn(minOf(minViewWidth, span), span)
+        setView(at - anchor * next, next)
+    }
+    fun pan(fraction: Double) { setView(viewStart + fraction * viewWidth, viewWidth); holdFollow() }
+    fun holdFollow() { followHeldUntil = System.nanoTime() + FOLLOW_HOLD_NANOS }
+    private fun reveal() {
+        if (time < viewStart || time > viewStart + viewWidth) setView(time - viewWidth * .25, viewWidth)
     }
 
     override fun onCleared() { stop(); super.onCleared() }
 }
+
+/** A Session track's detail waveform for the timeline, with its display fill gain (loud passages reach the lane edge). */
+class TimelineWave(val data: dev.manadj.app.WaveformData, val fill: Float)

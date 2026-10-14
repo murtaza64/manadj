@@ -14,7 +14,8 @@ data class BeatFxSection(val selected: String?, val target: String, val on: Bool
 sealed interface CaptureEvent {
     val t: Double
     data class Load(override val t: Double, val deck: Int, val trackId: Int?, val bpm: Double?) : CaptureEvent
-    data class Transport(override val t: Double, val deck: Int, val action: String, val playhead: Double, val delta: Double? = null) : CaptureEvent
+    /** [detail]: beats for jumpBeats, slot for hotCue / a hot-cue stab previewStart. */
+    data class Transport(override val t: Double, val deck: Int, val action: String, val playhead: Double, val delta: Double? = null, val detail: Double? = null) : CaptureEvent
     data class Pitch(override val t: Double, val deck: Int, val value: Double) : CaptureEvent
     data class Bend(override val t: Double, val deck: Int, val value: Double) : CaptureEvent
     data class Loop(override val t: Double, val deck: Int, val playhead: Double, val region: LoopSpan?) : CaptureEvent
@@ -345,7 +346,7 @@ class SessionLog(
                     if (action !in TRANSPORT) { issues.add(ReplayIssue(t, d, "transport $action")); CaptureEvent.Other(t, "transport:$action") }
                     else {
                         if (action == "scratchBegin") issues.add(ReplayIssue(t, d, "scratch (replayed as its landing position)"))
-                        CaptureEvent.Transport(t, d, action, num("playhead"), optNum("deltaSeconds"))
+                        CaptureEvent.Transport(t, d, action, num("playhead"), optNum("deltaSeconds"), optNum("detail"))
                     }
                 }
                 "pitch" -> CaptureEvent.Pitch(t, deck(), num("value"))
