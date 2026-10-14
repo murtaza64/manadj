@@ -36,8 +36,8 @@ class SyncedLibrary(val lib: Library, private val repo: LibraryRepository) : Lib
     override fun tracks() = rows
     override fun allTags() = lib.tags.map { TrackTag(it.name, it.categoryName, it.argb ?: 0xff7f849c.toInt()) }
     override fun playlists() = lib.playlists.map { LibraryPlaylist(it.id.toLong(), it.name, null, false, it.trackIds.map(Int::toLong)) }
-    override fun follow(references: Set<Long>, knownOnly: Boolean) =
-        lib.follow(references.map(Long::toInt), FollowParams(knownOnly = knownOnly)).map { r ->
+    override fun follow(references: Set<Long>, knownOnly: Boolean, playlist: Long?) =
+        lib.follow(references.map(Long::toInt), FollowParams(knownOnly = knownOnly), playlist?.let { dev.manadj.library.LibraryQuery(playlistId = it.toInt()) }).map { r ->
             val marks = references.map { lib.marks(it.toInt(), r.track.id) }
             FollowCandidate(
                 r.track.id.toLong(), EvidenceTier.valueOf(r.tier.name), r.score, linked = marks.any { it.linked },

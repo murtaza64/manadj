@@ -41,7 +41,7 @@ object FixtureLibrary : LibrarySource {
     override fun playlists() = lists
     override fun tracks() = rows
     override fun allTags() = tagSet
-    override fun follow(references: Set<Long>, knownOnly: Boolean): List<FollowCandidate> {
+    override fun follow(references: Set<Long>, knownOnly: Boolean, playlist: Long?): List<FollowCandidate> {
         if (references.isEmpty()) return emptyList()
         val best = mutableMapOf<Long, FollowCandidate>()
         for (ref in references) {

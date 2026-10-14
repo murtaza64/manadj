@@ -39,7 +39,7 @@ private val ADDED = DateTimeFormatter.ofPattern("dd MMM")
     val ctx = androidx.compose.ui.platform.LocalContext.current
     val follow by remember { derivedStateOf {
         val refs = model.visibleDecks.filter { ux.following[it] == true }.mapNotNull { d -> if (ux.synced != null) dev.manadj.app.library.LibraryHolder.trackOn(model, d)?.toLong() else ux.followRef[d] }.toSet()
-        if (refs.isEmpty()) null else ux.library.follow(refs, ux.knownOnly).associateBy { it.trackId }
+        if (refs.isEmpty()) null else ux.library.follow(refs, ux.knownOnly, ux.filter.playlist).associateBy { it.trackId }
     } }
     val rows = remember(ux.library, ux.filter, follow) { ux.library.query(ux.filter, follow) }
     Column(modifier.background(Ink.background).clickable(interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }, indication = null) {}.padding(horizontal = 8.dp)) {

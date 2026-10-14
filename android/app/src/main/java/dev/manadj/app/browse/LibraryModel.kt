@@ -43,7 +43,8 @@ interface LibrarySource {
     fun allTags(): List<TrackTag>
     fun playlists(): List<LibraryPlaylist>
     /** Candidates for the loaded reference Tracks (Follow mode); union across references, best tier wins. */
-    fun follow(references: Set<Long>, knownOnly: Boolean): List<FollowCandidate>
+    /** [playlist]: rank only within that playlist (desktop Follow `within=`; rows are filtered after anyway). */
+    fun follow(references: Set<Long>, knownOnly: Boolean, playlist: Long? = null): List<FollowCandidate>
     /** Row availability on this phone (null = nothing to say). */
     fun audioLabel(id: Long): String? = null
 }
