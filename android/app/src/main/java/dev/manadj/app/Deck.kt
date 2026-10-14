@@ -54,8 +54,9 @@ val ControlRow = 44.dp
 }
 
 /** Hot cue pads stay rectangles. All feedback is drawn inside the pad's own bounds (fixes stuck borders). */
-@Composable fun Pads(ui: DeckUi, model: PlayerModel, ux: UiModel, modifier: Modifier, columns: Int = 4, rowHeight: Dp = PadRow) {
-    Column(modifier) { repeat(8 / columns) { row -> Row(Modifier.fillMaxWidth().then(if (rowHeight == Dp.Unspecified) Modifier.weight(1f) else Modifier.height(rowHeight))) { repeat(columns) { col -> Hotcue(ui, row * columns + col, model, ux, Modifier.weight(1f).fillMaxHeight()) } } } }
+/** [perCellSafe]: landscape — only a pad that overlaps the camera hole is trimmed; the grid keeps its edge (#62). */
+@Composable fun Pads(ui: DeckUi, model: PlayerModel, ux: UiModel, modifier: Modifier, columns: Int = 4, rowHeight: Dp = PadRow, perCellSafe: Boolean = false) {
+    Column(modifier) { repeat(8 / columns) { row -> Row(Modifier.fillMaxWidth().then(if (rowHeight == Dp.Unspecified) Modifier.weight(1f) else Modifier.height(rowHeight))) { repeat(columns) { col -> Hotcue(ui, row * columns + col, model, ux, Modifier.weight(1f).fillMaxHeight().then(if (perCellSafe) Modifier.screenSafe(2.dp) else Modifier)) } } } }
 }
 
 /** Hot cue pad. With SHIFT active a stored pad shows DEL and a tap deletes it (UNDO chip follows). */
@@ -158,7 +159,7 @@ val StripEnd = 48.dp
         Segmented(Modifier.fillMaxSize(), color) {
             Key("", Modifier.width(StripEnd).fillMaxHeight(), color, usable, description = "${ui.id} jump backward", icon = Glyph.Back, style = KeyStyle.BARE) { model.jump(ui.id, -1) }
             Divider(color)
-            ValueWheel("${ui.id} jump size", BEAT_CHOICES.map(::beatText), nearest(BEAT_CHOICES, ui.jumpBeats), ux, model, ui.id, Modifier.weight(1f).fillMaxHeight(), color, if (live && !gridded && ui.ready) "NO BPM" else "${beatText(ui.jumpBeats)} BEATS", live = live, bare = true) { ui.jumpBeats = BEAT_CHOICES[it] }
+            ValueWheel("${ui.id} jump size", BEAT_CHOICES.map(::beatText), nearest(BEAT_CHOICES, ui.jumpBeats), ux, model, ui.id, Modifier.weight(1f).fillMaxHeight(), color, if (live && !gridded && ui.ready) "NO BPM" else "JUMP ${beatText(ui.jumpBeats)}", live = live, bare = true) { ui.jumpBeats = BEAT_CHOICES[it] }
             Divider(color)
             Key("", Modifier.width(StripEnd).fillMaxHeight(), color, usable, description = "${ui.id} jump forward", icon = Glyph.Forward, style = KeyStyle.BARE) { model.jump(ui.id, 1) }
         }
@@ -207,9 +208,10 @@ val StripEnd = 48.dp
                 val groupTempo = model.syncState.tempo.takeIf { sync == dev.manadj.audio.SyncStatus.SYNCED }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     if (sync != dev.manadj.audio.SyncStatus.OFF) Text(when (sync) { dev.manadj.audio.SyncStatus.SYNCED -> "SYNC "; dev.manadj.audio.SyncStatus.OUT_OF_LOCK -> "SYNC⚠ "; else -> "SYNC… " }, color = if (sync == dev.manadj.audio.SyncStatus.SYNCED) Ink.play else Ink.warning, size = 9, bold = true)
-                    Text(groupTempo?.let { "%.1f".format(it) } ?: ui.snapshot?.bpm?.let { "%.1f".format(it * (1 + (ui.pitch + ui.bend) / 100)) } ?: "— BPM", color = if (ui.snapshot?.bpm != null) Ink.text else Ink.muted, size = 12, bold = true)
+                    Text(groupTempo?.let { "%.1f".format(it) } ?: ui.snapshot?.bpm?.let { "%.1f".format(it * (1 + (ui.pitch + ui.bend) / 100)) } ?: "— BPM", color = bpmColor(groupTempo ?: ui.snapshot?.bpm?.let { it * (1 + ui.pitch / 100) }) ?: Ink.muted, size = 12, bold = true)
                 }
-                Row(verticalAlignment = Alignment.CenterVertically) { if (ui.snapshot?.keyLock == true || (e.keyLock && !model.supports("key-lock"))) GlyphIcon(Glyph.Lock, color, 9.dp); Text(" KEY —", color = Ink.muted, size = 10) }
+                Row(verticalAlignment = Alignment.CenterVertically) { if (ui.snapshot?.keyLock == true || (e.keyLock && !model.supports("key-lock"))) GlyphIcon(Glyph.Lock, color, 9.dp); val key = remember(ui.source?.id, ux.library) { dev.manadj.app.library.LibraryHolder.trackOn(model, ui.id)?.toLong()?.let { id -> toOpenKey(ux.library.tracks().firstOrNull { it.id == id }?.key) } }
+                    Text(" KEY ${key ?: "—"}", color = keyColor(key) ?: Ink.muted, size = 10, bold = key != null) }
             }
         }
     }

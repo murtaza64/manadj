@@ -25,6 +25,16 @@ void feed(Engine& e, int deck, uint64_t load, float value, int frames, bool eof 
     CHECK(e.publish(deck, load, transport, eof));
 }
 
+// feed() whose decoder claims a (frame-quantized) start of its own.
+void feedFrom(Engine& e, int deck, uint64_t load, double start) {
+    auto& d = e.deck(deck);
+    const auto transport = d.transport.load();
+    CHECK(e.claim(deck, load, transport, 48000, start));
+    std::vector<float> pcm(4096 * 2, .1f);
+    CHECK(e.offer(deck, transport, pcm.data(), 4096) == 4096);
+    CHECK(e.publish(deck, load, transport, false));
+}
+
 // Same as feed() with a sine (amplitude .25) for strip DSP tests.
 void feedTone(Engine& e, int deck, uint64_t load, double hz, int frames = 48000) {
     auto& d = e.deck(deck);
@@ -839,6 +849,20 @@ int main() {
         CHECK(std::abs(out[332 * 2]) < 1e-6 && std::abs(out[333 * 2]) > 0);   // silent until exactly frame 333
         CHECK(std::abs(e.deck(0).position.load() - 667 / 48000.) < 1e-9);
         CHECK(e.lateOps() == 0);
+        // #378: a parked in-memory relocation keeps its exact position when the ring worker later claims the
+        // transport with a frame-quantized start (it used to overwrite the position while paused), and
+        // LoopSet relocates even for sub-0.1 ms moves.
+        e.submit(Op::Pause, 0);
+        const double exact[5] = {0, 1.23456789, 0, 0, 0};
+        e.submit(Op::LoopSet, 0, -1, 0, 0, exact);
+        tick(e, 10);
+        feedFrom(e, 0, 1, 1.2345);
+        tick(e, 100);
+        CHECK(e.deck(0).position.load() == 1.23456789);
+        const double nudge[5] = {0, 1.23456789 + 2e-5, 0, 0, 0};
+        e.submit(Op::LoopSet, 0, -1, 0, 0, nudge);
+        tick(e, 10);
+        CHECK(e.deck(0).position.load() == 1.23456789 + 2e-5);
     }
 
     { // Replay exactness: 4 decks, random frame-stamped seeks/jumps/pitch/play/pause/loops; every deck's

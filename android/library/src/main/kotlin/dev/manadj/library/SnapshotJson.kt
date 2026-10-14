@@ -89,6 +89,7 @@ object SnapshotJson {
             audioRev = it.str("audio_rev"),
             previewRev = it.str("preview_rev"),
             waveformRev = it.str("waveform_rev"),
+            stemsRev = it.str("stems_rev"),
             tagIds = it.getJSONArray("tag_ids").let { a -> (0 until a.length()).map(a::getInt) },
             hotCues = it.getJSONArray("hot_cues").objects().map { c ->
                 HotCue(c.getInt("slot"), c.getDouble("time"), c.str("label"), c.str("color"))

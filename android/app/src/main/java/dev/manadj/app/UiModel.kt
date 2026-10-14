@@ -92,6 +92,10 @@ class UiModel(application: Application) : AndroidViewModel(application) {
         private set
     val library: LibrarySource get() = synced ?: FixtureLibrary
     fun sync() = viewModelScope.launch { repo.sync() }
+    /** Minimap drag position per deck (detail waves follow it live). */
+    val seekPreview = mutableStateMapOf<DeckId, Double>()
+    /** Library track ids played this session (browser dims them). */
+    val played = mutableStateListOf<Long>()
     /** Monotonic load time per deck (landscape BROWSE picks the least recently loaded as outgoing). */
     val loadedAt = mutableMapOf<DeckId, Long>()
     /** SHIFT per deck: held = momentary, short tap = latched for one pad press. */
@@ -143,12 +147,32 @@ class UiModel(application: Application) : AndroidViewModel(application) {
         confirmLoad = null
         dev.manadj.app.library.LibraryHolder.load(getApplication(), model, deck, track) { pending("Load failed: $it") }
     }
-    var filter by mutableStateOf(LibraryFilter())
+    /** Browser view state (#55): filter/source/search/sort, highlighted row and per-source scroll, persisted. */
+    private val browsePrefs = application.getSharedPreferences("browse", Context.MODE_PRIVATE)
+    var filter by mutableStateOf(loadFilter())
+    private fun loadFilter(): LibraryFilter = runCatching {
+        val o = org.json.JSONObject(browsePrefs.getString("filter", null) ?: return LibraryFilter())
+        LibraryFilter(
+            text = o.optString("text"), tags = o.optJSONArray("tags")?.let { a -> (0 until a.length()).map { a.getString(it) }.toSet() } ?: emptySet(),
+            bpmCenter = o.optDouble("bpm").takeIf { it.isFinite() }, bpmTolerance = o.optDouble("tol", 6.0),
+            sort = runCatching { LibrarySort.valueOf(o.optString("sort")) }.getOrDefault(LibrarySort.DATE_ADDED),
+            playlist = if (o.has("playlist")) o.getLong("playlist") else null,
+        )
+    }.getOrDefault(LibraryFilter())
+    fun saveBrowse() {
+        val f = filter
+        val o = org.json.JSONObject().put("text", f.text).put("tags", org.json.JSONArray(f.tags.toList())).put("tol", f.bpmTolerance).put("sort", f.sort.name)
+        f.bpmCenter?.let { o.put("bpm", it) }; f.playlist?.let { o.put("playlist", it) }
+        browsePrefs.edit().putString("filter", o.toString()).putLong("row", selectedRow ?: -1).apply()
+    }
+    /** Scroll anchor per source (Collection / playlist id): first visible row key + offset (falls back to its index). */
+    fun scrollAnchor(source: String): Triple<String?, Int, Int> = Triple(browsePrefs.getString("scroll-key-$source", null), browsePrefs.getInt("scroll-index-$source", 0), browsePrefs.getInt("scroll-offset-$source", 0))
+    fun saveScroll(source: String, key: String?, index: Int, offset: Int) { browsePrefs.edit().putString("scroll-key-$source", key).putInt("scroll-index-$source", index).putInt("scroll-offset-$source", offset).apply() }
     val following = mutableStateMapOf<DeckId, Boolean>()
     /** Follow reference per deck: a library Track id (fixture rows until #372 maps loaded files to Tracks). */
     val followRef = mutableStateMapOf<DeckId, Long>()
     var knownOnly by mutableStateOf(false)
-    var selectedRow by mutableStateOf<Long?>(null)
+    var selectedRow by mutableStateOf(browsePrefs.getLong("row", -1).takeIf { it >= 0 })
     var filtersOpen by mutableStateOf(false)
 
     init {

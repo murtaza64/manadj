@@ -8,6 +8,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.input.pointer.pointerInput
@@ -35,6 +37,11 @@ import dev.manadj.audio.DeckId
     // Engine starts with quantize off; push the persisted preference once it can take it.
     val canQuantize = model.supports("quantize")
     LaunchedEffect(canQuantize) { if (canQuantize) model.setQuantize(ux.quantize) }
+    // Played-this-session: a library deck that starts playing.
+    for (id in model.visibleDecks) {
+        val playingTrack = if (model.decks.getValue(id).snapshot?.playing == true) dev.manadj.app.library.LibraryHolder.trackOn(model, id)?.toLong() else null
+        LaunchedEffect(playingTrack) { if (playingTrack != null && playingTrack !in ux.played) ux.played.add(playingTrack) }
+    }
     // Record what was heard (strip per source position) so the waveform behind the playhead keeps it.
     val anyPlaying = model.visibleDecks.any { model.decks.getValue(it).snapshot?.playing == true }
     LaunchedEffect(anyPlaying) {
@@ -77,8 +84,8 @@ import dev.manadj.audio.DeckId
     val clock = remember(ui.id) { SmoothClock() }
     // Engine output-timestamp clock (what is heard now), eased by SmoothClock; raw snapshot when no timestamp.
     // Only read model.output while moving: it changes every engine tick and would redraw idle waves at 30 fps.
-    fun heard(now: Long): Double { if (now == 0L) return position(ui); val out = model.output; return if (out != null && ui.source?.id == ui.snapshot?.sourceId) out.audibleSeconds(ui.id, now) else position(ui) }
-    WaveView(wave, { clock.at(frame.value, heard(frame.value), moving && frame.value != 0L, playbackRate(ui)) }, ui.durationSeconds, marksOf(ui), modifier.semantics { contentDescription = "${ui.id} detail wave" }.pinchZoom(ux),
+    fun heard(now: Long): Double { ux.seekPreview[ui.id]?.let { return it }; if (now == 0L) return position(ui); val out = model.output; return if (out != null && ui.source?.id == ui.snapshot?.sourceId) out.audibleSeconds(ui.id, now) else position(ui) }
+    WaveView(wave, { clock.at(frame.value, heard(frame.value), moving && frame.value != 0L, playbackRate(ui)) }, ui.durationSeconds, marksOf(ui), modifier.semantics { contentDescription = "${ui.id} detail wave" }.waveTouch(ui, model, ux, vertical),
         vertical = vertical, windowSeconds = ux.waveSeconds * tempoRate(ui), live = { ux.strip(ui) }, history = e.history, accent = deckColor(ui.id),
         status = when { ui.source == null -> "${ui.id} · no track"; wave == null -> if (ux.waveSource[ui.source?.id] == "failed") "no waveform" else "analysing…"; !wave.complete -> "analysing ${(100 * wave.frames * wave.bandHop / wave.sampleRate / (ui.durationSeconds ?: 1.0)).toInt().coerceIn(0, 99)}%"; else -> null })
 }
@@ -176,9 +183,9 @@ fun mixOf(model: PlayerModel, ux: UiModel, id: DeckId): DeckMix {
             }
             // Minimaps flank the centre BROWSE key.
             Row(pad.fillMaxWidth().height(if (tight) 36.dp else 44.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                Minimap(a, model, ux.waves[a.source?.id ?: ""], Modifier.weight(1f).fillMaxHeight())
+                Minimap(a, model, ux.waves[a.source?.id ?: ""], Modifier.weight(1f).fillMaxHeight(), preview = ux.seekPreview)
                 BrowseKey(model, ux, Modifier.width(84.dp).fillMaxHeight())
-                Minimap(b, model, ux.waves[b.source?.id ?: ""], Modifier.weight(1f).fillMaxHeight())
+                Minimap(b, model, ux.waves[b.source?.id ?: ""], Modifier.weight(1f).fillMaxHeight(), preview = ux.seekPreview)
             }
             Row(pad.fillMaxWidth().height(28.dp), horizontalArrangement = Arrangement.spacedBy(DeckGap)) { for (ui in listOf(a, b)) StemsStrip(ui, ux, model, Modifier.weight(1f).fillMaxHeight()) }
             Row(pad.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(DeckGap)) { for (ui in listOf(a, b)) Pads(ui, model, ux, Modifier.weight(1f), 4, if (tight) 46.dp else PadRow) }
@@ -200,40 +207,62 @@ fun mixOf(model: PlayerModel, ux: UiModel, id: DeckId): DeckMix {
 
 /**
  * Landscape: each deck's side (info, minimap, pads, stems, loop, jump, transport, bend + pitch) flanks the
- * mixer. The centre detail waves run from the top edge; deck popups stay over their own side.
+ * mixer. BROWSE slides the whole strip sideways (#65): the strip is [browser][A][mixer][B][browser], one deck
+ * wider than the screen on each side and centred; the outgoing deck (coveredDeck) moves toward the centre with
+ * the mixer, the load-target deck slides off, the browser slides in. One translation via graphicsLayer (no
+ * relayout per frame), interruptible and reversible.
  */
 @Composable private fun Landscape(model: PlayerModel, ux: UiModel, pick: (DeckId) -> Unit, modifier: Modifier) {
     val a = model.decks.getValue(DeckId.A); val b = model.decks.getValue(DeckId.B)
-    Row(modifier.padding(horizontal = 6.dp)) {
-        DeckSide(a, model, ux, pick, Modifier.weight(1f).fillMaxHeight())
-        Column(Modifier.width(372.dp).fillMaxHeight().padding(horizontal = DeckGap), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Row(Modifier.fillMaxWidth().weight(1f)) {
-                KnobColumn(a, ux, model, Modifier.width(54.dp).fillMaxHeight().padding(top = 4.dp), 34.dp)
-                ChannelFader(a, model, Modifier.width(48.dp).fillMaxHeight())
-                Row(Modifier.weight(1f).fillMaxHeight().padding(horizontal = 3.dp), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-                    for (ui in listOf(a, b)) DetailWave(ui, model, ux, Modifier.weight(1f).fillMaxHeight(), vertical = true)
+    BoxWithConstraints(modifier.clipToBounds()) {
+        val mixerWidth = 372.dp
+        val screen = maxWidth
+        val side = (screen - mixerWidth - 12.dp) / 2
+        val sidePx = with(LocalDensity.current) { side.toPx() }
+        // Outgoing A stays: strip moves right (+side); outgoing B: left (−side); closed: centred.
+        val target = when (model.browser) { DeckId.A -> sidePx; DeckId.B -> -sidePx; else -> 0f }
+        val shift = remember { androidx.compose.animation.core.Animatable(0f) }
+        LaunchedEffect(target) { shift.animateTo(target, androidx.compose.animation.core.spring(dampingRatio = 1f, stiffness = 500f)) }
+        // Which browser slot is (or was, while animating out) on screen.
+        val browserSlot = when { model.browser != null -> model.browser; shift.value > 1f -> DeckId.A; shift.value < -1f -> DeckId.B; else -> null }
+        Row(Modifier.wrapContentWidth(unbounded = true).requiredWidth(screen + side * 2).fillMaxHeight().graphicsLayer { translationX = shift.value }) {
+            Box(Modifier.width(side).fillMaxHeight()) { if (browserSlot == DeckId.A) LibraryPanel(model, ux, Modifier.fillMaxSize().padding(start = 6.dp).screenSafe(), pick, tapTarget = DeckId.B) }
+            Row(Modifier.width(screen).fillMaxHeight().padding(horizontal = 6.dp)) {
+                DeckSide(a, model, ux, pick, Modifier.weight(1f).fillMaxHeight())
+                Column(Modifier.width(mixerWidth).fillMaxHeight().padding(horizontal = DeckGap), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(Modifier.fillMaxWidth().weight(1f)) {
+                        KnobColumn(a, ux, model, Modifier.width(54.dp).fillMaxHeight().padding(top = 4.dp), 34.dp)
+                        ChannelFader(a, model, Modifier.width(48.dp).fillMaxHeight())
+                        Row(Modifier.weight(1f).fillMaxHeight().padding(horizontal = 3.dp), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                            for (ui in listOf(a, b)) DetailWave(ui, model, ux, Modifier.weight(1f).fillMaxHeight(), vertical = true)
+                        }
+                        ChannelFader(b, model, Modifier.width(48.dp).fillMaxHeight())
+                        KnobColumn(b, ux, model, Modifier.width(54.dp).fillMaxHeight().padding(top = 4.dp), 34.dp)
+                    }
+                    // Symmetric flanks keep the crossfader centred on the screen.
+                    Row(Modifier.fillMaxWidth().height(44.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        BrowseKey(model, ux, Modifier.width(76.dp).height(40.dp))
+                        Crossfader(model, ux, Modifier.weight(1f).fillMaxHeight())
+                        Row(Modifier.width(76.dp), verticalAlignment = Alignment.CenterVertically) { QuantizeKey(model, ux, Modifier.weight(1f).height(32.dp)); SettingsKey(ux, Modifier.size(38.dp)) }
+                    }
+                    FxSection(ux, model, Modifier.fillMaxWidth().height(54.dp).padding(bottom = 4.dp), horizontal = true)
                 }
-                ChannelFader(b, model, Modifier.width(48.dp).fillMaxHeight())
-                KnobColumn(b, ux, model, Modifier.width(54.dp).fillMaxHeight().padding(top = 4.dp), 34.dp)
+                DeckSide(b, model, ux, pick, Modifier.weight(1f).fillMaxHeight())
             }
-            // Symmetric flanks keep the crossfader centred on the screen.
-            Row(Modifier.fillMaxWidth().height(44.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                BrowseKey(model, ux, Modifier.width(76.dp).height(40.dp))
-                Crossfader(model, ux, Modifier.weight(1f).fillMaxHeight())
-                Row(Modifier.width(76.dp), verticalAlignment = Alignment.CenterVertically) { QuantizeKey(model, ux, Modifier.weight(1f).height(32.dp)); SettingsKey(ux, Modifier.size(38.dp)) }
-            }
-            FxSection(ux, model, Modifier.fillMaxWidth().height(54.dp).padding(bottom = 4.dp), horizontal = true)
+            Box(Modifier.width(side).fillMaxHeight()) { if (browserSlot == DeckId.B) LibraryPanel(model, ux, Modifier.fillMaxSize().padding(end = 6.dp).screenSafe(), pick, tapTarget = DeckId.A) }
         }
-        DeckSide(b, model, ux, pick, Modifier.weight(1f).fillMaxHeight())
     }
 }
 
 @Composable private fun DeckSide(ui: DeckUi, model: PlayerModel, ux: UiModel, pick: (DeckId) -> Unit, modifier: Modifier) {
     Box(modifier) {
         Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-            DeckInfo(ui, model, Modifier.fillMaxWidth().height(38.dp).screenSafe(), compact = true)
-            Minimap(ui, model, ux.waves[ui.source?.id ?: ""], Modifier.fillMaxWidth().height(40.dp).screenSafe())
-            Pads(ui, model, ux, Modifier.fillMaxWidth().weight(1f).screenSafe(), 4, Dp.Unspecified)
+            // Mirrored toward the mixer (UH1): A right-aligned, B left-aligned.
+            CompositionLocalProvider(androidx.compose.ui.platform.LocalLayoutDirection provides if (ui.id == DeckId.A) androidx.compose.ui.unit.LayoutDirection.Rtl else androidx.compose.ui.unit.LayoutDirection.Ltr) {
+                DeckInfo(ui, model, Modifier.fillMaxWidth().height(38.dp).screenSafe(), compact = true)
+            }
+            Minimap(ui, model, ux.waves[ui.source?.id ?: ""], Modifier.fillMaxWidth().height(40.dp).screenSafe(), preview = ux.seekPreview)
+            Pads(ui, model, ux, Modifier.fillMaxWidth().weight(1f), 4, Dp.Unspecified, perCellSafe = true)
             StemsStrip(ui, ux, model, Modifier.fillMaxWidth().height(26.dp).screenSafe())
             LoopStrip(ui, ux, model, Modifier.fillMaxWidth().height(40.dp).screenSafe())
             JumpStrip(ui, ux, model, Modifier.fillMaxWidth().height(40.dp).screenSafe())
@@ -241,8 +270,6 @@ fun mixOf(model: PlayerModel, ux: UiModel, id: DeckId): DeckMix {
             Row(Modifier.fillMaxWidth().height(42.dp).screenSafe()) { BendStrip(ui, model, Modifier.weight(1f).fillMaxHeight()); PitchKey(ui, model, ux, Modifier.weight(1.6f).fillMaxHeight()) }
         }
         // Deck popups are confined to this deck's side: they never cover the mixer.
-        // The browser replaces this side's controls below the deck info (the centre waves stay visible).
-        if (model.browser == ui.id) LibraryPanel(model, ux, Modifier.fillMaxSize().padding(top = 43.dp).background(Ink.background).screenSafe(), pick, tapTarget = other(ui.id))
         AnimatedVisibility(model.pitchDrawer == ui.id, Modifier.align(Alignment.BottomCenter).padding(bottom = 40.dp), enter = fadeIn(tween(150)) + scaleIn(initialScale = .92f), exit = fadeOut(tween(120))) {
             PitchPopup(model, ux, Modifier.widthIn(max = 380.dp).fillMaxWidth())
         }
@@ -250,25 +277,41 @@ fun mixOf(model: PlayerModel, ux: UiModel, id: DeckId): DeckMix {
 }
 
 /**
- * Two-finger pinch on a detail wave zooms both decks' waves (shared ux.waveSeconds, so beats line up),
- * anchored on the playhead; persisted on release. One finger is left alone.
+ * Detail-wave touch (#35/#67): one finger scratches — drag the waveform toward the past (left / up) to advance,
+ * mapped px → track seconds at the current window; a second finger ends the scratch where it is (no jump) and
+ * pinches the shared zoom (both decks, persisted on release).
  */
-private fun Modifier.pinchZoom(ux: UiModel): Modifier = pointerInput(Unit) {
+private fun Modifier.waveTouch(ui: DeckUi, model: PlayerModel, ux: UiModel, vertical: Boolean): Modifier = pointerInput(ui.id, vertical) {
     awaitEachGesture {
-        awaitFirstDown(requireUnconsumed = false)
+        val first = awaitFirstDown(requireUnconsumed = false)
+        val canScratch = model.supports("scratch") && ui.ready
+        var scratching = false
+        var last = first.position
         var d0 = 0f; var s0 = ux.waveSeconds; var zooming = false
-        while (true) {
-            val event = awaitPointerEvent()
-            val down = event.changes.filter { it.pressed }
-            if (down.isEmpty()) break
-            if (down.size >= 2) {
-                val d = (down[0].position - down[1].position).getDistance()
-                if (!zooming) { zooming = true; d0 = d; s0 = ux.waveSeconds }
-                else if (d > 8f) ux.waveSeconds = (s0 * d0 / d).coerceIn(3.0, 48.0)
-                down.forEach { it.consume() }
-            } else if (zooming) { zooming = false; ux.chooseWaveSeconds(ux.waveSeconds) }
-        }
-        if (zooming) ux.chooseWaveSeconds(ux.waveSeconds)
+        fun endScratch() { if (scratching) { scratching = false; model.scratchEnd(ui.id) } }
+        try {
+            while (true) {
+                val event = awaitPointerEvent()
+                val down = event.changes.filter { it.pressed }
+                if (down.isEmpty()) break
+                if (down.size >= 2) {
+                    endScratch()
+                    val d = (down[0].position - down[1].position).getDistance()
+                    if (!zooming) { zooming = true; d0 = d; s0 = ux.waveSeconds }
+                    else if (d > 8f) ux.waveSeconds = (s0 * d0 / d).coerceIn(3.0, 48.0)
+                    down.forEach { it.consume() }
+                } else if (!zooming && canScratch) {
+                    val c = down.firstOrNull { it.id == first.id } ?: continue
+                    val delta = c.position - last; last = c.position
+                    val along = if (vertical) size.height else size.width
+                    val px = if (vertical) delta.y else delta.x
+                    if (!scratching && kotlin.math.abs(px) > 0f) { scratching = true; model.scratchBegin(ui.id) }
+                    // Content moving toward the past = track advances.
+                    if (scratching) model.scratchMove(ui.id, -px / along * ux.waveSeconds * tempoRate(ui))
+                    c.consume()
+                }
+            }
+        } finally { endScratch(); if (zooming) ux.chooseWaveSeconds(ux.waveSeconds) }
     }
 }
 

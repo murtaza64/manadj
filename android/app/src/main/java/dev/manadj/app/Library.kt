@@ -1,6 +1,7 @@
 package dev.manadj.app
 
 import androidx.compose.foundation.*
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.semantics.customActions
@@ -40,7 +41,7 @@ private val ADDED = DateTimeFormatter.ofPattern("dd MMM")
         val refs = model.visibleDecks.filter { ux.following[it] == true }.mapNotNull { d -> if (ux.synced != null) dev.manadj.app.library.LibraryHolder.trackOn(model, d)?.toLong() else ux.followRef[d] }.toSet()
         if (refs.isEmpty()) null else ux.library.follow(refs, ux.knownOnly).associateBy { it.trackId }
     } }
-    val rows = remember(ux.filter, follow) { ux.library.query(ux.filter, follow) }
+    val rows = remember(ux.library, ux.filter, follow) { ux.library.query(ux.filter, follow) }
     Column(modifier.background(Ink.background).clickable(interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }, indication = null) {}.padding(horizontal = 8.dp)) {
         Row(Modifier.fillMaxWidth().height(40.dp), verticalAlignment = Alignment.CenterVertically) {
             if (tapTarget != null) {
@@ -78,7 +79,31 @@ private val ADDED = DateTimeFormatter.ofPattern("dd MMM")
             Text("FILE →", color = Ink.muted, size = 10, bold = true)
             for (id in model.visibleDecks) { Spacer(Modifier.width(4.dp)); Key(id.name, Modifier.width(52.dp).fillMaxHeight(), deckColor(id), model.supports("play"), description = "Choose audio file for $id", style = KeyStyle.PILL) { pick(id) } }
         }
-        LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
+        // Remember the view per source (#55): restore by row key (nearest index when the row is gone).
+        val source = ux.filter.playlist?.toString() ?: "collection"
+        val listState = key(source) {
+            val (k, idx, off) = remember { ux.scrollAnchor(source) }
+            val restored = k?.removePrefix("lib:")?.toLongOrNull()?.let { id -> rows.indexOfFirst { it.id == id }.takeIf { it >= 0 }?.let { it + model.sources.size + 1 } } ?: idx
+            androidx.compose.foundation.lazy.rememberLazyListState(restored.coerceAtLeast(0), off)
+        }
+        LaunchedEffect(listState, source) {
+            snapshotFlow { listState.isScrollInProgress }.collect { scrolling ->
+                if (!scrolling) { val first = listState.layoutInfo.visibleItemsInfo.firstOrNull(); ux.saveScroll(source, first?.key as? String, listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset) }
+            }
+        }
+        LaunchedEffect(ux.filter, ux.selectedRow) { ux.saveBrowse() }
+        // Play-order numbers precomputed once per list (not an indexOf per row while scrolling).
+        // Row decorations from a small state map (not per-frame): which deck holds each track, playing, played.
+        val onDecks by remember { derivedStateOf {
+            model.visibleDecks.mapNotNull { d -> dev.manadj.app.library.LibraryHolder.trackOn(model, d)?.toLong()?.let { it to (d to audible(mixOf(model, ux, d))) } }.toMap()
+        } }
+        val reference by remember { derivedStateOf {
+            val loaded = model.visibleDecks.filter { dev.manadj.app.library.LibraryHolder.trackOn(model, it) != null }
+            val from = if (loaded.size == 2) coveredDeck(mixOf(model, ux, DeckId.A), mixOf(model, ux, DeckId.B)) else loaded.firstOrNull()
+            from?.let { d -> dev.manadj.app.library.LibraryHolder.trackOn(model, d)?.toLong()?.let { id -> ux.library.tracks().firstOrNull { it.id == id }?.key } }
+        } }
+        val playOrder = remember(ux.library, ux.filter.playlist) { ux.filter.playlist?.let { id -> ux.library.playlists().firstOrNull { it.id == id }?.trackIds?.withIndex()?.associate { (i, t) -> t to i + 1 } } }
+        LazyColumn(Modifier.weight(1f).fillMaxWidth(), state = listState) {
             items(model.sources, key = { "local:" + it.id }, contentType = { "local" }) { source ->
                 SwipeToLoad(source.title, Modifier.fillMaxWidth(), { model.requestImport(it, source.uri) }) {
                     Row(Modifier.fillMaxWidth().height(48.dp).then(if (tapTarget != null) Modifier.clickable { model.requestImport(tapTarget, source.uri) } else Modifier).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -87,13 +112,13 @@ private val ADDED = DateTimeFormatter.ofPattern("dd MMM")
                     }
                 }
             }
-            item {
+            item(key = "header", contentType = "header") {
                 val scope = ux.filter.playlist?.let { id -> ux.library.playlists().firstOrNull { it.id == id }?.name } ?: "COLLECTION"
                 Row(Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 4.dp)) { Text("$scope · ${ux.library.label}" + when { ux.syncState.running || ux.syncState.cacheStale -> " · syncing…"; ux.syncState.lastSynced != null -> " · " + java.time.format.DateTimeFormatter.ofPattern("HH:mm").withZone(java.time.ZoneId.systemDefault()).format(ux.syncState.lastSynced); else -> "" }, Modifier.weight(1f), Ink.muted, 10, true); Text("${rows.size} TRACKS · ${ux.filter.sort.label}", color = Ink.muted, size = 10) }
             }
             items(rows, key = { "lib:" + it.id }, contentType = { "track" }) { track ->
-                val order = ux.filter.playlist?.let { id -> ux.library.playlists().firstOrNull { it.id == id }?.trackIds?.indexOf(track.id)?.plus(1) }
-                SwipeToLoad(track.title, Modifier.fillMaxWidth(), { ux.loadRow(model, it, track.id) }) { TrackRow(track, follow?.get(track.id), ux, order) { dev.manadj.app.library.LibraryHolder.prefetch(ctx, track.id.toInt()); if (tapTarget != null) ux.loadRow(model, tapTarget, track.id) else ux.selectedRow = track.id } }
+                val order = playOrder?.get(track.id)
+                SwipeToLoad(track.title, Modifier.fillMaxWidth(), { ux.loadRow(model, it, track.id) }) { TrackRow(track, follow?.get(track.id), ux, order, onDecks[track.id], track.id in ux.played, keyRelation(reference, toOpenKey(track.key))) { dev.manadj.app.library.LibraryHolder.prefetch(ctx, track.id.toInt()); if (tapTarget != null) ux.loadRow(model, tapTarget, track.id) else ux.selectedRow = track.id } }
             }
         }
     }
@@ -145,23 +170,30 @@ private val ADDED = DateTimeFormatter.ofPattern("dd MMM")
 
 private fun tierColor(t: EvidenceTier) = when (t) { EvidenceTier.KNOWN -> Ink.play; EvidenceTier.OBSERVED -> Ink.warning; EvidenceTier.COMPATIBLE -> Ink.accent }
 
-@Composable private fun TrackRow(track: LibraryTrack, follow: FollowCandidate?, ux: UiModel, playIndex: Int? = null, tap: () -> Unit) {
+/** [deck]: the deck holding this track and whether it is audible; [played]: played this session; [relation]: key vs the mix-from deck. */
+@Composable private fun TrackRow(track: LibraryTrack, follow: FollowCandidate?, ux: UiModel, playIndex: Int? = null, deck: Pair<DeckId, Boolean>? = null, played: Boolean = false, relation: KeyRelation = KeyRelation.OTHER, tap: () -> Unit) {
     val selected = ux.selectedRow == track.id
     Column(Modifier.fillMaxWidth().background(if (selected) Ink.accent.copy(alpha = .08f) else Ink.panel).clickable(onClick = tap).padding(vertical = 5.dp, horizontal = 4.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
+            deck?.let { (d, live) -> DeckBadge(d, live); Spacer(Modifier.width(6.dp)) }
             playIndex?.let { Text("%02d".format(it), Modifier.width(26.dp), Ink.muted, 11, true) }
             follow?.let { c ->
                 Text(c.tier.label, Modifier.width(62.dp).clip(RoundedCornerShape(3.dp)).background(tierColor(c.tier).copy(alpha = .2f)).padding(horizontal = 3.dp), tierColor(c.tier), 9, true)
                 Spacer(Modifier.width(4.dp))
             }
-            Column(Modifier.weight(1f)) { Text(track.title, bold = true, size = 14); Text(track.artist, color = Ink.muted, size = 11) }
+            Column(Modifier.weight(1f)) {
+                Text((if (played && deck == null) "✓ " else "") + track.title, color = if (played && deck == null) Ink.muted else Ink.text, bold = true, size = 14)
+                Text(track.artist, color = Ink.muted, size = 11)
+            }
             Column(horizontalAlignment = Alignment.End) {
-                Text(track.bpm?.let { "%.1f".format(it) } ?: "—", color = Ink.text, size = 13, bold = true)
-                Text(track.key ?: "—", color = Ink.muted, size = 11, bold = true)
+                Text(track.bpm?.let { "%.1f".format(it) } ?: "—", color = bpmColor(track.bpm) ?: Ink.muted, size = 13, bold = true)
+                val ok = toOpenKey(track.key)
+                // Harmonic match vs the mix-from deck: chip strength by relation (exact strongest).
+                Text(ok ?: "—", Modifier.clip(RoundedCornerShape(3.dp)).background(Ink.play.copy(alpha = .45f * relation.strength)).padding(horizontal = 4.dp), keyColor(ok) ?: Ink.muted, 11, true)
             }
         }
         Row(Modifier.fillMaxWidth().height(22.dp).padding(top = 3.dp), verticalAlignment = Alignment.CenterVertically) {
-            (ux.synced?.preview(track.id) ?: track.preview)?.let { PreviewWave(it, Modifier.width(110.dp).fillMaxHeight()) }
+            (ux.synced?.preview(track.id) ?: track.preview)?.let { PreviewWave(it, Modifier) }
             Spacer(Modifier.width(6.dp))
             Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
                 for (tag in track.tags) Text(tag.name, Modifier.clip(RoundedCornerShape(3.dp)).background(Color(tag.color).copy(alpha = .18f)).padding(horizontal = 4.dp), Color(tag.color), 9, true)
@@ -184,10 +216,11 @@ private fun tierColor(t: EvidenceTier) = when (t) { EvidenceTier.KNOWN -> Ink.pl
  * Desktop preview strip (minimap style, bottom-anchored), pre-rendered off the main thread into a cached
  * bitmap (LRU by preview + style + size) so scrolling only blits.
  */
-@Composable fun PreviewWave(p: WaveformPreview, modifier: Modifier) {
-    BoxWithConstraints(modifier.background(Ink.crust)) {
+@Composable fun PreviewWave(p: WaveformPreview, modifier: Modifier, width: androidx.compose.ui.unit.Dp = 110.dp, height: androidx.compose.ui.unit.Dp = 19.dp) {
+    // Fixed size (no BoxWithConstraints subcomposition per row).
+    Box(modifier.size(width, height).background(Ink.crust)) {
         val density = androidx.compose.ui.platform.LocalDensity.current
-        val w = with(density) { maxWidth.roundToPx() }; val h = with(density) { maxHeight.roundToPx() }
+        val w = with(density) { width.roundToPx() }; val h = with(density) { height.roundToPx() }
         val style = WaveStyle.minimap ?: WaveStyle.MINIMAP
         val key = Triple(p, style, w * 100_000 + h)
         val bitmap by produceState(PreviewBitmaps.get(key), key) {
@@ -237,7 +270,7 @@ private object PreviewBitmaps {
     val deck = if (dx < 0) DeckId.A else DeckId.B
     val armed = kotlin.math.abs(dx) >= threshold
     val current by rememberUpdatedState(load)
-    Box(modifier.height(IntrinsicSize.Min).semantics {
+    Box(modifier.semantics {
         contentDescription = "Track $title"
         customActions = listOf(androidx.compose.ui.semantics.CustomAccessibilityAction("Load to A") { current(DeckId.A); true }, androidx.compose.ui.semantics.CustomAccessibilityAction("Load to B") { current(DeckId.B); true })
     }) {
@@ -260,5 +293,13 @@ private object PreviewBitmaps {
                 if (now != wasArmed) { wasArmed = now; haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress) }
             }
         }) { content() }
+    }
+}
+
+/** Deck letter in its color; pulses while that deck is audible. */
+@Composable private fun DeckBadge(deck: DeckId, live: Boolean) {
+    val pulse = if (live) androidx.compose.animation.core.rememberInfiniteTransition(label = "badge").animateFloat(.35f, 1f, androidx.compose.animation.core.infiniteRepeatable(androidx.compose.animation.core.tween(600), androidx.compose.animation.core.RepeatMode.Reverse), label = "badge").value else .6f
+    Box(Modifier.size(22.dp).clip(RoundedCornerShape(4.dp)).background(deckColor(deck).copy(alpha = if (live) pulse else .25f)), contentAlignment = Alignment.Center) {
+        Text(deck.name, color = if (live) Color.Black else deckColor(deck), size = 12, bold = true)
     }
 }

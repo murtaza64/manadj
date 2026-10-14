@@ -16,7 +16,8 @@ import kotlin.math.abs
 
 /**
  * Session replay (#378): desktop Sessions (device sync) replayed through the shared engine on all four decks.
- * The Session clock is the engine's output clock; [SessionReplayer] decides, this model executes.
+ * Sample-exact: [ReplayScript] turns the log into ops stamped with Session time; one [ReplayEpoch] maps them
+ * to engine output frames and the callback applies each at its frame. Nothing here chases positions.
  */
 class SessionModel(application: Application) : AndroidViewModel(application) {
     private val repo = LibraryHolder.repository(application)
@@ -36,19 +37,25 @@ class SessionModel(application: Application) : AndroidViewModel(application) {
         private set
     var log by mutableStateOf<SessionLog?>(null)
         private set
-    var replayer: SessionReplayer? = null
+    private var driver: ReplayDriver? = null
+    /** Recorded ticks the replay reference disagrees with by > 5 ms: bad recording data, shown, never corrected. */
+    var recordingDrift by mutableStateOf<List<SessionLog.Divergence>>(emptyList())
         private set
     /** Session clock (capture seconds). */
     var time by mutableDoubleStateOf(0.0)
         private set
     var playing by mutableStateOf(false)
         private set
-    /** Seed loads in flight before the clock may start. */
+    /** Tracks loading/decoding before the clock may start. */
     var preparing by mutableStateOf(false)
         private set
     var notice by mutableStateOf<String?>(null)
     /** Per-deck load failure (track missing from the Library, download failed). */
     val deckErrors = mutableStateListOf<String?>(null, null, null, null)
+    /** Last measured engine − reference offset per deck (ms; null = not sounding), and late frame-stamped ops. */
+    val engineOffsetMs = mutableStateListOf<Double?>(null, null, null, null)
+    var lateOps by mutableLongStateOf(0L)
+        private set
     /** Timeline view window (capture seconds). */
     var viewStart by mutableDoubleStateOf(0.0)
     var viewWidth by mutableDoubleStateOf(1.0)
@@ -56,10 +63,9 @@ class SessionModel(application: Application) : AndroidViewModel(application) {
 
     private var player: PlayerModel? = null
     private var loop: Job? = null
-    private var anchorT = 0.0
-    private var anchorFrame = 0L
-    private val expectedSource = arrayOfNulls<String>(4)
     private var userCrossfade: Double? = null
+    /** Load failures reported by the library path (download/missing), per deck. */
+    private val loadFailure = arrayOfNulls<String>(4)
 
     fun track(id: Int?): LibraryTrack? = id?.let { repo.library.value?.track(it) }
 
@@ -87,7 +93,9 @@ class SessionModel(application: Application) : AndroidViewModel(application) {
                 val parsed = store.log(h)
                 require(parsed.events.isNotEmpty() && parsed.duration > 0) { "Session has no recorded duration" }
                 stop()
-                header = h; log = parsed; replayer = SessionReplayer(parsed)
+                val drift = withContext(Dispatchers.Default) { parsed.tickDivergence() }
+                header = h; log = parsed; driver = null; recordingDrift = drift
+                if (drift.isNotEmpty()) android.util.Log.w(TAG, "recording drift: ${drift.size} ticks > 5 ms, worst %.1f ms".format(drift.maxOf { abs(it.seconds) } * 1000))
                 time = parsed.activeStart; fit()
                 deckErrors.indices.forEach { deckErrors[it] = null }
             } catch (e: CancellationException) { throw e }
@@ -96,168 +104,149 @@ class SessionModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun close() { stop(); log = null; header = null; replayer = null }
+    fun close() { stop(); log = null; header = null; driver = null; recordingDrift = emptyList() }
 
     /** Leaving the Session screen: replay stops, decks keep what they hold. */
     fun leave() = stop()
 
     fun toggle(player: PlayerModel) { if (playing || preparing) stop() else play(player) }
 
-    fun play(player: PlayerModel) {
-        val r = replayer ?: return
-        val l = log ?: return
+    private fun driver(player: PlayerModel): ReplayDriver? {
+        val l = log ?: return null
         this.player = player
+        return driver ?: ReplayDriver(l, engine(player)) { notice = it }.also { driver = it }
+    }
+
+    fun play(player: PlayerModel) {
+        val l = log ?: return
+        val r = driver(player) ?: return
         if (time >= l.end) time = l.activeStart
         if (userCrossfade == null) userCrossfade = player.crossfade
         // Recorded crossfader folds into the faders; the engine crossfader stays centred while replaying.
         player.submit(AudioCommand.SetCrossfade(0.0))
-        val held = held(player)
-        val needs = (0..3).any { d -> l.at(time).decks[d].trackId.let { it != null && it != held[d] } }
-        if (needs) {
-            preparing = true
-            execute(player, r.seek(time, held, play = false))
-        } else start(player)
+        prefetch(l)
+        loadFailure.fill(null)
+        lateBase = player.engineSnapshot()?.lateOps ?: 0L; lateOps = 0
+        r.prepare(time)
+        sync(r)
         loop?.cancel()
-        loop = viewModelScope.launch { run(player) }
-    }
-
-    private fun start(player: PlayerModel) {
-        val r = replayer ?: return
-        preparing = false
-        execute(player, r.seek(time, held(player), play = true))
-        val snap = player.engineSnapshot()
-        anchorT = time; anchorFrame = snap?.outputFrames ?: 0L
-        playing = true
+        loop = viewModelScope.launch { run(player, r) }
     }
 
     fun stop() {
         loop?.cancel(); loop = null
-        val p = player
-        val r = replayer
-        if (p != null && r != null && (playing || preparing)) { execute(p, r.pause()); DeckId.entries.forEach { p.submit(AudioCommand.SetBend(it, 0.0)) } }
+        driver?.stop()
         playing = false; preparing = false
-        userCrossfade?.let { p?.updateCrossfade(it) }
+        engineOffsetMs.indices.forEach { engineOffsetMs[it] = null }
+        userCrossfade?.let { player?.updateCrossfade(it) }
         userCrossfade = null
     }
 
     /** Relocate the Session clock; decks follow (parked while paused). */
     fun seek(t: Double, player: PlayerModel) {
         val l = log ?: return
-        val r = replayer ?: return
-        this.player = player
+        val r = driver(player) ?: return
         time = t.coerceIn(l.start, l.end)
         reveal()
-        if (playing) {
-            val held = held(player)
-            if ((0..3).any { d -> l.at(time).decks[d].trackId.let { it != null && it != held[d] } }) { playing = false; play(player) }
-            else { execute(player, r.seek(time, held, play = true)); anchorT = time; anchorFrame = player.engineSnapshot()?.outputFrames ?: anchorFrame }
-        } else if (!preparing) execute(player, r.seek(time, held(player), play = false))
+        if (playing || preparing) { r.prepare(time); sync(r) } else r.park(time)
     }
 
-    private suspend fun run(player: PlayerModel) {
-        val r = replayer ?: return
+    private suspend fun run(player: PlayerModel, r: ReplayDriver) {
         while (currentCoroutineContext().isActive) {
-            pollLoads(player, r)
-            if (preparing) {
-                if ((0..3).none(r::isLoading)) start(player)
-            } else if (playing) {
-                val snap = player.engineSnapshot()
-                if (snap != null && snap.outputSampleRate > 0 && snap.outputOpen) {
-                    val t = anchorT + (snap.outputFrames - anchorFrame).toDouble() / snap.outputSampleRate
-                    val positions = DeckId.entries.map { id -> snap.decks[id]?.takeIf { it.loadState == LoadState.READY && !it.filling }?.sourceSeconds }
-                    if (t - lastDriftLog >= 2) { lastDriftLog = t; logDrift(t, positions) }
-                    execute(player, r.advance(t, positions))
-                    time = t.coerceAtMost(log?.end ?: t)
-                    if (follow) reveal()
-                    if (!r.playing) { playing = false; stop(); return }
-                }
-            } else return
-            delay(8)
-        }
-    }
-
-    private var lastDriftLog = Double.NEGATIVE_INFINITY
-
-    /** Engine vs recorded position per sounding deck (logcat ManadjSession): replay sync diagnostics. */
-    private fun logDrift(t: Double, positions: List<Double?>) {
-        val state = log?.at(t) ?: return
-        val parts = (0..3).mapNotNull { d ->
-            val s = state.decks[d]; val at = positions[d]
-            if (!s.sounding || at == null || replayer?.isLoading(d) != false) null else "${DECKS[d]} %+.0fms".format((at - s.playhead) * 1000)
-        }
-        if (parts.isNotEmpty()) android.util.Log.i("ManadjSession", "t=%.1f ".format(t - (log?.activeStart ?: 0.0)) + parts.joinToString(" "))
-    }
-
-    private fun pollLoads(player: PlayerModel, r: SessionReplayer) {
-        for (d in 0..3) {
-            if (!r.isLoading(d)) continue
-            val ui = player.decks.getValue(DeckId.entries[d])
-            val want = expectedSource[d] ?: continue
-            if (ui.ready && ui.source?.id == want) execute(player, r.deckReady(d))
-            else if (ui.snapshot?.loadState == LoadState.ERROR && ui.snapshot?.sourceId == want) { r.deckFailed(d); deckErrors[d] = ui.snapshot?.error ?: "decode failed" }
-        }
-    }
-
-    /** Tracks the engine decks hold and are ready with (library source ids). */
-    private fun held(player: PlayerModel): List<Int?> = DeckId.entries.map { id ->
-        val ui = player.decks.getValue(id)
-        if (ui.ready) LibraryHolder.trackOn(player, id) else null
-    }
-
-    private fun execute(player: PlayerModel, ops: List<ReplayOp>) {
-        if (ops.isEmpty()) return
-        val snap = player.engineSnapshot()
-        for (op in ops) {
-            val deck = op.deck?.let { DeckId.entries[it] }
-            when (op) {
-                is ReplayOp.Load -> load(player, op.deck, op.trackId)
-                is ReplayOp.Seek -> player.submit(AudioCommand.Seek(deck!!, op.seconds.coerceAtLeast(0.0)))
-                is ReplayOp.Play -> player.submit(AudioCommand.Play(deck!!))
-                is ReplayOp.Pause -> player.submit(AudioCommand.Pause(deck!!))
-                is ReplayOp.Pitch -> player.submit(AudioCommand.SetPitch(deck!!, op.percent))
-                is ReplayOp.Bend -> player.submit(AudioCommand.SetBend(deck!!, op.percent))
-                is ReplayOp.Fader -> player.submit(AudioCommand.SetFader(deck!!, op.value))
-                is ReplayOp.Eq -> player.submit(AudioCommand.SetEq(deck!!, op.band, op.value))
-                is ReplayOp.Filter -> player.submit(AudioCommand.SetFilter(deck!!, op.position))
-                is ReplayOp.Loop -> {
-                    val region = op.region
-                    // Relocate only when the engine is not already there (a recorded engage lands on the playing deck).
-                    val at = snap?.decks?.get(deck!!)?.sourceSeconds
-                    val playhead = op.playhead?.takeIf { region == null || at == null || abs(at - it) > .05 || at < region.start || at >= region.end }
-                    if (region == null) player.submit(AudioCommand.SetLoopRegion(deck!!, null, 0.0, playhead))
-                    else player.submit(AudioCommand.SetLoopRegion(deck!!, region.start, region.end, playhead))
-                }
-                is ReplayOp.BeatFx -> player.updateBeatFx(beatFx(op.section))
+            val now = r.tick(System.nanoTime() / 1e9)
+            sync(r)
+            if (now != null) {
+                time = now
+                if (follow) reveal()
+                if (now - lastMeasure >= MEASURE_SECONDS || now < lastMeasure) { lastMeasure = now; measure(player, r) }
             }
+            if (!r.playing && !r.preparing) { stop(); return }
+            delay(16)
         }
     }
 
-    private fun load(player: PlayerModel, deck: Int, trackId: Int?) {
-        val id = DeckId.entries[deck]
-        deckErrors[deck] = null
-        if (trackId == null) { expectedSource[deck] = null; return }
+    private fun sync(r: ReplayDriver) {
+        playing = r.playing; preparing = r.preparing
+        for (d in 0..3) { val e = r.errors[d] ?: loadFailure[d]; if (deckErrors[d] != e) deckErrors[d] = e }
+    }
+
+    private var lastMeasure = Double.NEGATIVE_INFINITY
+
+    /**
+     * Engine vs reference at the snapshot's sampling frame, per sounding deck (logcat ManadjSession): the
+     * on-device check that replay is sample-exact (expected |offset| < 0.03 ms, i.e. under one sample).
+     */
+    private fun measure(player: PlayerModel, r: ReplayDriver) {
+        val l = log ?: return
+        val e = r.epoch ?: return
+        val snap = player.engineSnapshot() ?: return
+        val at = e.timeAt(snap.clockFrame)
+        val ref = l.replayAt(at)
+        val parts = ArrayList<String>()
+        for (d in 0..3) {
+            val want = ref.decks[d]
+            val got = snap.decks[DeckId.entries[d]]
+            val offset = if (!r.exact(d, snap.clockFrame) || want.trackId == null || !want.sounding || want.scratching || want.playhead < 0 || got == null) null
+                else (got.sourceSeconds - want.playhead) * 1000
+            engineOffsetMs[d] = offset
+            if (offset != null) parts += "${DECKS[d]} %+.3fms".format(offset)
+        }
+        lateOps = snap.lateOps - lateBase
+        val sounding = engineOffsetMs.filterNotNull()
+        val spread = if (sounding.size >= 2) " inter-deck %.3fms".format(sounding.max() - sounding.min()) else ""
+        if (parts.isNotEmpty()) android.util.Log.i(TAG, "t=%.1f ".format(at - l.activeStart) + parts.joinToString(" ") + spread + " late=$lateOps")
+    }
+    private var lateBase = 0L
+
+    private fun engine(player: PlayerModel) = object : ReplayDriver.Engine {
+        private var rate = 48000
+        override val sampleRate get() = rate
+        override fun outputFrames(): Long? = player.engineSnapshot()?.takeIf { it.outputOpen && it.outputSampleRate > 0 }?.also { rate = it.outputSampleRate }?.outputFrames
+        override fun schedule(frame: Long, commands: List<AudioCommand>, tag: Long) = player.schedule(frame, commands, tag)
+        override fun cancel(tag: Long) = player.cancelScheduled(tag)
+        override fun submit(command: AudioCommand) { player.submit(command) }
+        override fun holds(deck: Int): Int? = held(player, deck)
+        override fun startLoad(deck: Int, trackId: Int) = issueLoad(player, deck, trackId)
+        override fun load(deck: Int, trackId: Int): ReplayDriver.Load {
+            loadFailure[deck]?.let { return ReplayDriver.Load.Failed(it) }
+            val t = track(trackId) ?: return ReplayDriver.Load.Failed("Track #$trackId not in the synced Library")
+            val want = LibraryHolder.sourceId(t)
+            val ui = player.decks.getValue(DeckId.entries[deck])
+            val snap = ui.snapshot
+            if (snap?.loadState == LoadState.ERROR && snap.sourceId == want) return ReplayDriver.Load.Failed(snap.error ?: "decode failed")
+            if (!(ui.ready && ui.source?.id == want)) return ReplayDriver.Load.Pending
+            return if (snap?.fullyDecoded == true) ReplayDriver.Load.Ready else ReplayDriver.Load.Partial
+        }
+    }
+
+    private fun issueLoad(player: PlayerModel, deck: Int, trackId: Int) {
+        loadFailure[deck] = null
         val track = track(trackId)
         if (track == null || track.audioRev == null) {
-            expectedSource[deck] = null
-            replayer?.deckFailed(deck)
-            deckErrors[deck] = if (track == null) "Track #$trackId not in the synced Library" else "No audio file on the desktop"
+            loadFailure[deck] = if (track == null) "Track #$trackId not in the synced Library" else "No audio file on the desktop"
             return
         }
-        expectedSource[deck] = LibraryHolder.sourceId(track)
-        LibraryHolder.load(getApplication(), player, id, track) { error ->
-            replayer?.deckFailed(deck)
-            deckErrors[deck] = error
-        }
+        LibraryHolder.load(getApplication(), player, DeckId.entries[deck], track) { error -> loadFailure[deck] = error }
     }
 
-    private fun beatFx(s: BeatFxSection?): BeatFxState {
-        if (s == null) return BeatFxState(null, BeatFxTarget.MASTER, false, -1.0, 1.0)
-        val effect = when (s.selected) {
-            "echo" -> BeatFxEffect.ECHO; "lowCutEcho" -> BeatFxEffect.LOW_CUT_ECHO; "reverb" -> BeatFxEffect.REVERB
-            "flanger" -> BeatFxEffect.FLANGER; "trans" -> BeatFxEffect.TRANS; "roll" -> BeatFxEffect.ROLL; else -> null
-        }
-        val target = when (s.target.uppercase()) { "A" -> BeatFxTarget.A; "B" -> BeatFxTarget.B; "C" -> BeatFxTarget.C; "D" -> BeatFxTarget.D; else -> BeatFxTarget.MASTER }
-        return BeatFxState(effect, target, s.on, s.depth, BeatFx.snap(s.beats), s.held.map { DeckId.entries[it] }.toSet())
+    /** Download every track the Session loads, ahead of its load (mid-session loads then only decode). */
+    private fun prefetch(l: SessionLog) {
+        val ids = l.appearances.filter { it.end > time }.map { it.trackId }.distinct()
+        viewModelScope.launch(Dispatchers.IO) { for (id in ids) runCatching { repo.audioFile(id) } }
+    }
+
+    /** Library track the engine deck holds and is ready with (null = other/none). */
+    private fun held(player: PlayerModel, d: Int): Int? {
+        val ui = player.decks.getValue(DeckId.entries[d])
+        return if (ui.ready) LibraryHolder.trackOn(player, DeckId.entries[d]) else null
+    }
+
+    /** Whether replay is waiting on [deck]'s track (UI). */
+    fun isLoading(deck: Int) = driver?.decks?.get(deck) == ReplayDriver.Deck.LOADING
+
+    companion object {
+        private const val TAG = "ManadjSession"
+        const val MEASURE_SECONDS = 2.0
     }
 
     // ── Timeline view ──

@@ -22,6 +22,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import dev.manadj.audio.AudioCommand
+import dev.manadj.audio.DeckId
 import kotlinx.coroutines.CancellationException
 import kotlin.math.*
 import kotlin.math.roundToInt
@@ -260,9 +261,23 @@ private fun renderOverview(data: WaveformData, size: IntSize2, duration: Double,
     return bitmap.asImageBitmap()
 }
 
-/** Overview with tap/drag seek: preview while held, one Seek on release (engine contract). */
-@Composable fun Minimap(ui: DeckUi, model: PlayerModel, wave: WaveformData?, modifier: Modifier, vertical: Boolean = false) {
+/**
+ * Overview with tap/drag seek (desktop: seek on click). While dragging, [preview] holds the finger's track
+ * position so this deck's detail wave follows live; the audio seeks once, where the finger lifts. A second
+ * finger cancels (no seek).
+ */
+@Composable fun Minimap(ui: DeckUi, model: PlayerModel, wave: WaveformData?, modifier: Modifier, vertical: Boolean = false, preview: MutableMap<DeckId, Double>? = null) {
     var seekPreview by remember(ui.id) { mutableStateOf<Double?>(null) }
+    LaunchedEffect(seekPreview) {
+        val p = seekPreview
+        if (preview == null) return@LaunchedEffect
+        if (p != null) { preview[ui.id] = p; return@LaunchedEffect }
+        // Released: hold the detail wave at the drop point until the engine reports the seek (no flash back).
+        val target = preview[ui.id] ?: return@LaunchedEffect
+        val until = System.nanoTime() + 400_000_000L
+        while (System.nanoTime() < until && kotlin.math.abs(position(ui) - target) > .15) kotlinx.coroutines.delay(16)
+        preview.remove(ui.id)
+    }
     val ready by remember(ui) { derivedStateOf { ui.ready } }
     val currentReady by rememberUpdatedState(ready)
     WaveView(wave, { seekPreview ?: position(ui) }, ui.durationSeconds, marksOf(ui), modifier.semantics { contentDescription = "${ui.id} minimap seek" }.pointerInput(ui.id, vertical) {
@@ -276,14 +291,16 @@ private fun renderOverview(data: WaveformData, size: IntSize2, duration: Double,
             var cancelled = false
             try {
                 while (true) {
-                    val change = awaitPointerEvent().changes.firstOrNull { it.id == down.id }
+                    val event = awaitPointerEvent()
+                    if (event.changes.count { it.pressed } > 1) { cancelled = true; break }
+                    val change = event.changes.firstOrNull { it.id == down.id }
                     if (change == null || (!change.pressed && change.isConsumed)) { cancelled = true; break }
                     if (!change.pressed || !model.gestureActive(id)) break
                     preview(change.position); change.consume()
                 }
                 if (!cancelled && model.gestureActive(id)) seekPreview?.let { model.submit(AudioCommand.Seek(ui.id, it, id)) }
             } catch (cancel: CancellationException) { cancelled = true; throw cancel }
-            finally { seekPreview = null; model.finishGesture(id, cancelled) }
+            finally { if (cancelled) preview?.remove(ui.id); seekPreview = null; model.finishGesture(id, cancelled) }
         }
     }, overview = true, vertical = vertical, accent = deckColor(ui.id), status = if (!ui.ready) null else if (wave == null) "analysing…" else null)
 }

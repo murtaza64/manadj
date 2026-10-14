@@ -95,6 +95,12 @@ private fun sessionLength(h: SessionHeader): String? = runCatching {
             if (issuesOpen) log.issues.take(12).forEach { Text("${hms(it.t - log.activeStart)} ${it.deck?.let(DECKS::get) ?: "–"} ${it.what}", color = Ink.muted, size = 10) }
         }
     }
+    val drift = model.recordingDrift
+    if (drift.isNotEmpty()) {
+        // Bad recording data, not a replay fault: replay follows the recorded rates and never corrects toward ticks.
+        Text("RECORDING DRIFT: ${drift.size} tick${if (drift.size == 1) "" else "s"} off by > 5 ms (worst %.0f ms) · not corrected".format(drift.maxOf { kotlin.math.abs(it.seconds) } * 1000),
+            Modifier.fillMaxWidth().background(Ink.crust).padding(horizontal = 12.dp, vertical = 4.dp).testTag("session-drift"), Ink.warning, 10)
+    }
     for (d in 0..3) DeckStrip(d, model, player, ux, frame, log)
     Row(Modifier.fillMaxWidth().height(40.dp).padding(start = 12.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
         Text("TIMELINE", Modifier.weight(1f), Ink.muted, 11, bold = true)
@@ -130,6 +136,13 @@ private fun sessionLength(h: SessionHeader): String? = runCatching {
     }
     Row(Modifier.fillMaxWidth().height(26.dp).background(Ink.crust).padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(hms(model.time - log.activeStart), Modifier.weight(1f).testTag("session-time"), Ink.playhead, 15, true)
+        val offsets = model.engineOffsetMs.filterNotNull()
+        if (model.playing && offsets.isNotEmpty()) {
+            val worst = offsets.maxOf { kotlin.math.abs(it) }
+            // Engine vs reference: sample-exact replay keeps this under one sample (0.02 ms at 48 kHz).
+            Text("SYNC %.2f ms%s  ".format(worst, if (model.lateOps > 0) " · ${model.lateOps} late" else ""), Modifier.testTag("session-sync"),
+                if (worst < .05 && model.lateOps == 0L) Ink.muted else Ink.warning, 10)
+        }
         Text(when {
             model.preparing -> "LOADING DECKS…"
             frame.tenure != null && frame.tenure != "shared" -> "GAP · ${frame.tenure}"
@@ -162,7 +175,7 @@ private fun sessionLength(h: SessionHeader): String? = runCatching {
         s.trackId == null -> "EMPTY"
         model.deckErrors[d] != null -> "FAILED"
         download is AudioState.Downloading -> "↓ ${download.fraction?.let { "${(it * 100).toInt()}%" } ?: "…"}"
-        (model.playing || model.preparing) && !engineHolds -> "LOADING"
+        (model.playing || model.preparing) && (!engineHolds || model.isLoading(d)) -> if (ui.snapshot?.fullyDecoded == false && engineHolds) "DECODING" else "LOADING"
         ui.snapshot?.loadState == LoadState.LOADING -> "DECODING"
         s.loop != null && s.playhead >= s.loop!!.start && s.playhead < s.loop!!.end -> "LOOP"
         s.previewing -> "PREVIEW"
