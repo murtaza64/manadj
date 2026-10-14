@@ -30,7 +30,7 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy import func, select
@@ -379,3 +379,61 @@ def get_device_session(uuid: str, db: Session = Depends(get_db)):
         if not (e.get("kind") == "transport" and e.get("action") == "scratchMove")
     ]
     return detail
+
+
+# ── Phone → desktop (ADR 0045, #375) ──────────────────────────────────
+
+
+class EditIn(BaseModel):
+    uuid: str
+    track_id: int | None = None  # null for setting:<key>
+    field: str
+    old: object = None
+    new: object = None
+    edited_at_ms: int
+
+
+class EditsIn(BaseModel):
+    edits: list[EditIn]
+
+
+class ReceivedIn(BaseModel):
+    changes: list[dict]
+
+
+def _device(request: Request) -> tuple[str, str | None]:
+    """The Paired device (LAN listener sets it); over loopback (adb reverse)
+    the phone names itself via headers."""
+    device = getattr(request.state, "device", None)
+    if device is not None:
+        return device
+    return (
+        request.headers.get("X-Manadj-Device-Id") or "loopback",
+        request.headers.get("X-Manadj-Device-Name"),
+    )
+
+
+@router.post("/edits")
+def push_edits(body: EditsIn, request: Request, db: Session = Depends(get_db)):
+    """Apply journaled phone edits newest-wins; one Device change log batch."""
+    from ..device_edits import PushedEdit, apply_edits
+
+    device_id, name = _device(request)
+    batch, outcomes = apply_edits(
+        db, device_id, name,
+        [PushedEdit(e.uuid, e.track_id, e.field, e.old, e.new, e.edited_at_ms) for e in body.edits],
+    )
+    return {"batch_id": batch, "outcomes": outcomes}
+
+
+@router.post("/received")
+def report_received(body: ReceivedIn, request: Request, db: Session = Depends(get_db)):
+    """The phone's diff after a pull: what desktop changes reached it."""
+    from ..device_edits import FieldError, log_received
+
+    device_id, name = _device(request)
+    try:
+        batch = log_received(db, device_id, name, body.changes) if body.changes else None
+    except (FieldError, KeyError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    return {"batch_id": batch}

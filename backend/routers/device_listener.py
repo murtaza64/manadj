@@ -6,7 +6,10 @@ but /api/device-sync/* (backend/device_listener.py).
 
 from dataclasses import asdict
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
+
+from ..database import get_db
 from pydantic import BaseModel, Field
 
 from .. import device_listener
@@ -47,3 +50,30 @@ def rotate():
         raise HTTPException(status_code=409, detail="Phone sync is off")
     device_listener.rotate_pair_code()
     return asdict(device_listener.status())
+
+
+# ── Device change log (ADR 0045, #375) ──
+
+
+@router.get("/changes")
+def changes(limit: int = 300, device: str | None = None, db: Session = Depends(get_db)):
+    from ..device_edits import list_changes
+
+    return list_changes(db, min(limit, 2000), device)
+
+
+@router.post("/changes/{change_id}/revert")
+def revert_change(change_id: int, db: Session = Depends(get_db)):
+    from ..device_edits import change_row, revert
+
+    made = revert(db, [change_id])
+    if not made:
+        raise HTTPException(status_code=409, detail="Not revertable (already reverted, or not applied)")
+    return [change_row(r) for r in made]
+
+
+@router.post("/batches/{batch_id}/revert")
+def revert_batch_route(batch_id: str, db: Session = Depends(get_db)):
+    from ..device_edits import change_row, revert_batch
+
+    return [change_row(r) for r in revert_batch(db, batch_id)]
