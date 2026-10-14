@@ -178,3 +178,40 @@ def test_snapshot_playlists_in_play_order(client, db, make_track):
         "id": second.id, "name": "Warmup", "color": "#00ff00", "display_order": 1,
         "track_ids": [b.id, a.id],  # Play order; archived member dropped
     }
+
+
+def test_detail_waveform_served_with_rev(client, db, make_track):
+    track, bare = make_track(), make_track()
+    db.add(Waveform(track_id=track.id, sample_rate=44100, duration=1.0, samples_per_peak=128,
+                    data_blob=b"MWF1full", preview_blob=b"MWF1prev"))
+    db.commit()
+
+    rows = {t["id"]: t for t in client.get("/api/device-sync/snapshot").json()["tracks"]}
+    assert rows[track.id]["waveform_rev"] and rows[bare.id]["waveform_rev"] is None
+
+    r = client.get(f"/api/device-sync/tracks/{track.id}/waveform")
+    assert r.status_code == 200 and r.content == b"MWF1full"
+    assert r.headers["X-Waveform-Rev"] == rows[track.id]["waveform_rev"]
+    assert client.get(f"/api/device-sync/tracks/{bare.id}/waveform").status_code == 404
+
+
+def test_snapshot_synced_settings_user_value_else_shipped_default(client, db):
+    from backend.models import AppSetting
+    from backend.shipped_defaults import shipped_settings
+
+    def settings():
+        return client.get("/api/device-sync/snapshot").json()["settings"]
+
+    shipped = {k: json.loads(shipped_settings()[k]) for k in ("manadj.waveformStyles", "manadj-filter-settings")}
+    assert settings() == {k: {"value": v, "updated_at": None} for k, v in shipped.items()}
+
+    mine = {"version": 1, "full": {"styleId": "additive-rgb", "params": {"master": 0.5}}, "minimap": {"styleId": "additive-rgb", "params": {}}}
+    db.add(AppSetting(key="manadj.waveformStyles", value=json.dumps(mine)))
+    db.add(AppSetting(key="manadj-filter-settings", value="not json"))
+    db.add(AppSetting(key="manadj-quantize", value="true"))  # not synced
+    db.commit()
+    got = settings()
+    assert set(got) == {"manadj.waveformStyles", "manadj-filter-settings"}
+    assert got["manadj.waveformStyles"]["value"] == mine
+    assert got["manadj.waveformStyles"]["updated_at"] is not None
+    assert got["manadj-filter-settings"] == {"value": shipped["manadj-filter-settings"], "updated_at": None}

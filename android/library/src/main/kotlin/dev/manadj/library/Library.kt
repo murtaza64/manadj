@@ -28,6 +28,12 @@ class Library(
     fun playlistTracks(id: Int): List<LibraryTrack> = playlistsById[id]?.trackIds?.mapNotNull(byId::get).orEmpty()
     fun tagsOf(track: LibraryTrack): List<LibraryTag> = track.tagIds.mapNotNull(tagsById::get)
 
+    /** The desktop's Waveform styles: draw detail waveforms with [WaveformStyles.full], previews/overviews with [WaveformStyles.minimap]. */
+    val waveformStyles: WaveformStyles get() = snapshot.performance.waveformStyles
+
+    /** The desktop's DJ filter tuning (apply to the engine's filter). */
+    val filterSettings: FilterSettings get() = snapshot.performance.filter
+
     /** The 256-bin desktop preview waveform, or null when not synced. */
     fun preview(track: LibraryTrack): PreviewWaveform? = previews(track)
 

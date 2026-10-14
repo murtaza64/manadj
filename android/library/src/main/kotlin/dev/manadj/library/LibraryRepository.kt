@@ -202,14 +202,22 @@ class LibraryRepository(
         target
     }
 
-    private suspend fun fetchAudio(client: SyncClient, track: LibraryTrack) {
+    /** Download a track's audio plus its detail waveform (best-effort) — the offline unit. */
+    private suspend fun fetchAudio(
+        client: SyncClient,
+        track: LibraryTrack,
+        cancelled: () -> Boolean = { false },
+        onBytes: (Long) -> Unit = {},
+    ) {
+        fetchWaveform(client, track)
         val target = store.audioFile(track) ?: return
         audioLocks.getOrPut(track.id) { Mutex() }.withLock {
             if (target.isFile) return
             setAudio(track.id, AudioState.Downloading(null))
             try {
-                client.downloadAudio(track.id, target) { done, total ->
+                client.downloadAudio(track.id, target, cancelled) { done, total ->
                     setAudio(track.id, AudioState.Downloading(total?.let { done.toFloat() / it }))
+                    onBytes(done)
                 }
             } finally {
                 _audio.update { it - track.id }
@@ -219,6 +227,123 @@ class LibraryRepository(
 
     private fun setAudio(id: Int, state: AudioState) = _audio.update { it + (id to state) }
 
+    // --- Detail waveforms (the desktop's full MWF1; the phone never re-analyzes synced tracks) ---
+
+    private val waveformCache = object : LinkedHashMap<String, DetailWaveform>(8, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, DetailWaveform>) = size > WAVEFORM_CACHE
+    }
+
+    /** Fetch + store the detail waveform when missing; failures are swallowed (the deck can draw without it). */
+    private fun fetchWaveform(client: SyncClient, track: LibraryTrack) {
+        if (track.waveformRev == null || store.hasWaveform(track)) return
+        try {
+            client.downloadWaveform(track.id)?.let { store.writeWaveform(track, it) }
+        } catch (_: SyncException) {
+        }
+    }
+
+    /**
+     * The full-resolution detail waveform the desktop renders for [trackId]
+     * (44.1 kHz / 128-sample peaks, 512-sample 8-band frames): from the
+     * offline cache, else fetched now. Null when the desktop hasn't
+     * generated one or it's unreachable and not cached.
+     */
+    suspend fun detailWaveform(trackId: Int): DetailWaveform? = withContext(io) {
+        val track = _library.value?.track(trackId) ?: return@withContext null
+        val key = "${track.id}-${track.waveformRev ?: return@withContext null}"
+        synchronized(waveformCache) { waveformCache[key] }?.let { return@withContext it }
+        val waveform = store.readWaveform(track) ?: run {
+            fetchWaveform(client(), track)
+            store.readWaveform(track)
+        } ?: return@withContext null
+        synchronized(waveformCache) { waveformCache[key] = waveform }
+        waveform
+    }
+
+    // --- Bulk offline download ---
+
+    private val _bulk = MutableStateFlow(BulkState())
+    /** Progress of [downloadAll] (drives the foreground-service notification and Settings). */
+    val bulk: StateFlow<BulkState> = _bulk.asStateFlow()
+    private val bulkLock = Mutex()
+    @Volatile private var bulkCancel = false
+
+    /** What [downloadAll] would fetch for [playlistId] (null = whole Library) and whether it fits. */
+    fun bulkPlan(playlistId: Int? = null): BulkPlan {
+        val library = _library.value ?: return BulkPlan(emptyList(), 0, 0, store.root.usableSpace)
+        val scope = playlistId?.let(library::playlistTracks) ?: library.tracks
+        val missingAudio = { t: LibraryTrack -> t.audioRev != null && !store.hasAudio(t) }
+        val wanted = scope.filter { missingAudio(it) || (it.waveformRev != null && !store.hasWaveform(it)) }
+        val audio = wanted.filter(missingAudio)
+        val total = audio.sumOf { it.fileSizeBytes ?: 0L }
+        val partial = audio.sumOf { t -> store.audioFile(t)?.let(::partFile)?.takeIf { it.isFile }?.length() ?: 0L }
+        return BulkPlan(wanted, total, (total - partial).coerceAtLeast(0), store.root.usableSpace)
+    }
+
+    /** Ask a running [downloadAll] to stop after the current chunk (the partial file is kept for resume). */
+    fun cancelBulk() {
+        bulkCancel = true
+    }
+
+    /**
+     * Download audio + detail waveforms for every uncached track of
+     * [playlistId] (null = the whole Library), resumably, skipping cached ones.
+     * Refuses up front when the device lacks space. A track the desktop can't
+     * serve (4xx) is counted in [BulkState.failed] and skipped; losing the
+     * desktop stops the run with [BulkState.error]. Cached tracks from a
+     * stopped run stay; re-running continues where it left off.
+     */
+    suspend fun downloadAll(playlistId: Int? = null): Result<BulkState> {
+        if (!bulkLock.tryLock()) return Result.failure(SyncException("A download is already running"))
+        try {
+            return withContext(io) {
+                bulkCancel = false
+                val name = playlistId?.let { _library.value?.playlist(it)?.name }
+                val plan = bulkPlan(playlistId)
+                var state = BulkState(running = true, playlistId = playlistId, scopeName = name, tracksTotal = plan.tracks.size, bytesTotal = plan.bytes)
+                _bulk.value = state
+                if (!plan.fits) {
+                    state = state.copy(running = false, error = "Not enough space: needs ${formatBytes(plan.remainingBytes)}, ${formatBytes(plan.freeBytes)} free")
+                    _bulk.value = state
+                    return@withContext Result.failure(SyncException(state.error!!))
+                }
+                val client = client()
+                var bytesBefore = 0L
+                for (track in plan.tracks) {
+                    if (bulkCancel) break
+                    val needsAudio = track.audioRev != null && !store.hasAudio(track)
+                    state = state.copy(current = track.title)
+                    _bulk.value = state
+                    try {
+                        fetchAudio(client, track, { bulkCancel }) { done ->
+                            _bulk.value = state.copy(bytesDone = bytesBefore + done)
+                        }
+                        state = state.copy(tracksDone = state.tracksDone + 1)
+                    } catch (_: DownloadCancelled) {
+                        break
+                    } catch (e: SyncException) {
+                        if (e.status == null || e.status !in 400..499 || e.unpaired) {
+                            state = state.copy(running = false, current = null, error = e.message, bytesDone = _bulk.value.bytesDone)
+                            _bulk.value = state
+                            _library.value?.snapshot?.let(::counts)
+                            return@withContext Result.failure(e)
+                        }
+                        state = state.copy(failed = state.failed + 1)
+                    }
+                    if (needsAudio) bytesBefore += track.fileSizeBytes ?: 0L
+                    state = state.copy(bytesDone = bytesBefore)
+                    _bulk.value = state
+                }
+                state = state.copy(running = false, current = null, cancelled = bulkCancel, finished = !bulkCancel)
+                _bulk.value = state
+                _library.value?.snapshot?.let(::counts)
+                Result.success(state)
+            }
+        } finally {
+            bulkLock.unlock()
+        }
+    }
+
     /** Remove all cached audio (snapshot and waveforms stay). */
     suspend fun clearAudio() = withContext(io) {
         store.audioDir.listFiles()?.forEach { it.deleteRecursively() }
@@ -227,5 +352,44 @@ class LibraryRepository(
 
     companion object {
         const val PREVIEW_BATCH = 500
+        const val WAVEFORM_CACHE = 6
+        /** Kept free on the device after a bulk download. */
+        const val SPACE_MARGIN_BYTES = 256L * 1024 * 1024
     }
+}
+
+/**
+ * A bulk download's scope: [tracks] missing audio and/or their detail waveform,
+ * their audio size ([bytes]; [remainingBytes] after resumable partials), and
+ * the device's [freeBytes].
+ */
+data class BulkPlan(val tracks: List<LibraryTrack>, val bytes: Long, val remainingBytes: Long, val freeBytes: Long) {
+    val fits: Boolean get() = remainingBytes + LibraryRepository.SPACE_MARGIN_BYTES <= freeBytes
+}
+
+/** Progress of [LibraryRepository.downloadAll]. */
+data class BulkState(
+    val running: Boolean = false,
+    /** Null = whole Library. */
+    val playlistId: Int? = null,
+    val scopeName: String? = null,
+    val tracksDone: Int = 0,
+    val tracksTotal: Int = 0,
+    /** Tracks the desktop couldn't serve (skipped). */
+    val failed: Int = 0,
+    val bytesDone: Long = 0,
+    val bytesTotal: Long = 0,
+    /** Title of the track downloading now. */
+    val current: String? = null,
+    val error: String? = null,
+    val cancelled: Boolean = false,
+    val finished: Boolean = false,
+) {
+    val progress: Float? get() = if (bytesTotal > 0) (bytesDone.toFloat() / bytesTotal).coerceIn(0f, 1f) else if (tracksTotal > 0) tracksDone.toFloat() / tracksTotal else null
+}
+
+fun formatBytes(bytes: Long): String = when {
+    bytes >= 1L shl 30 -> "%.1f GB".format(bytes / (1L shl 30).toDouble())
+    bytes >= 1L shl 20 -> "%.0f MB".format(bytes / (1L shl 20).toDouble())
+    else -> "${bytes / 1024} KB"
 }

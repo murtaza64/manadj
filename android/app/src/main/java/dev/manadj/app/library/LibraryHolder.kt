@@ -105,6 +105,22 @@ object LibraryHolder {
         scope.launch { repo.edit(trackId, edit) }
     }
 
+    // ── Offline (bulk) download ──
+
+    /**
+     * Download audio + detail waveforms for every uncached track of
+     * [playlistId] (null = whole Library) in a foreground service. Progress:
+     * `repository(context).bulk`; size/space preview: `bulkPlan(playlistId)`.
+     * Android 13+: request POST_NOTIFICATIONS first or the progress notification is hidden.
+     */
+    fun downloadAll(context: Context, playlistId: Int? = null) = LibraryDownloadService.start(context, playlistId)
+
+    fun cancelDownloadAll(context: Context) = repository(context).cancelBulk()
+
+    /** The desktop's detail waveform for a library track (offline cache, else fetched); null if none. */
+    suspend fun detailWaveform(context: Context, trackId: Int): dev.manadj.library.DetailWaveform? =
+        repository(context).detailWaveform(trackId)
+
     /** The library Track id a deck holds, when it was loaded from the Library. */
     fun trackOn(model: PlayerModel, deck: DeckId): Int? =
         model.decks.getValue(deck).source?.id?.takeIf { it.startsWith(SOURCE_PREFIX) }

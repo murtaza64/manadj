@@ -8,6 +8,11 @@ prefix so a future LAN listener can expose it alone.
 - GET  /snapshot              Tracks, Tags, Playlists, cues, grids, Follow evidence edges
 - POST /previews              bulk preview-waveform pack (MPK1, see below)
 - GET  /tracks/{id}/audio     the audio file (Range-capable)
+- GET  /tracks/{id}/waveform  the full detail waveform (MWF1), with `waveform_rev`
+
+The snapshot also carries `settings`: synced performance settings
+(SYNCED_SETTINGS: Waveform style slots, filter) so the phone plays with the
+desktop's palette and filter.
 
 Revisions let the device skip unchanged artifacts: `audio_rev` changes when
 the file's path/size/mtime does; `preview_rev` when the preview blob does.
@@ -31,9 +36,11 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload, undefer
 
+from .. import shipped_defaults
 from ..database import get_db
 from ..key import Key
 from ..models import (
+    AppSetting,
     Beatgrid,
     Cameo,
     HotCue,
@@ -92,6 +99,47 @@ def _preview_revs(db: Session) -> dict[int, str]:
     return {track_id: preview_rev(blob) for track_id, blob in rows}
 
 
+def _waveform_revs(db: Session) -> dict[int, str]:
+    """Full detail waveform (MWF1 data blob) revisions, without reading blobs:
+    the row id + updated_at change whenever the blob is regenerated."""
+    rows = db.execute(
+        select(Waveform.track_id, Waveform.id, Waveform.updated_at).where(Waveform.data_blob.is_not(None))
+    ).all()
+    return {
+        track_id: hashlib.sha1(f"{wid}:{updated.isoformat() if updated else ''}".encode()).hexdigest()[:16]
+        for track_id, wid, updated in rows
+    }
+
+
+# Synced performance settings (settings #176 keys): the phone plays with the
+# desktop's look and feel. Values are the parsed JSON the frontend persists.
+SYNCED_SETTINGS: tuple[str, ...] = ("manadj.waveformStyles", "manadj-filter-settings")
+
+
+def _json_object(raw: str | None) -> dict | None:
+    try:
+        value = json.loads(raw) if raw else None
+    except ValueError:
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def synced_settings(db: Session) -> dict[str, dict]:
+    """key -> {value, updated_at}: the user's value, else the shipped default
+    (updated_at null). An unparseable user value falls back to the default."""
+    rows = {r.key: r for r in db.query(AppSetting).filter(AppSetting.key.in_(SYNCED_SETTINGS))}
+    shipped = shipped_defaults.shipped_settings()
+    out: dict[str, dict] = {}
+    for key in SYNCED_SETTINGS:
+        row = rows.get(key)
+        value = _json_object(row.value) if row else None
+        if value is not None:
+            out[key] = {"value": value, "updated_at": _iso(row.updated_at)}
+        else:
+            out[key] = {"value": _json_object(shipped.get(key)), "updated_at": None}
+    return out
+
+
 def build_snapshot(db: Session) -> dict:
     tracks = (
         db.query(Track)
@@ -110,6 +158,7 @@ def build_snapshot(db: Session) -> dict:
             )
 
     previews = _preview_revs(db)
+    waveforms = _waveform_revs(db)
 
     track_rows = []
     for t in tracks:
@@ -137,6 +186,7 @@ def build_snapshot(db: Session) -> dict:
                 "filesize_bytes": t.filesize_bytes,
                 "audio_rev": audio_rev(t.filename),
                 "preview_rev": previews.get(t.id),
+                "waveform_rev": waveforms.get(t.id),
                 "tag_ids": sorted(tt.tag_id for tt in t.track_tags),
                 "hot_cues": cues.get(t.id, []),
                 "grid": grid,
@@ -229,6 +279,7 @@ def build_snapshot(db: Session) -> dict:
         "transitions": transitions,
         "cameos": cameos,
         "takes": takes,
+        "settings": synced_settings(db),
     }
 
 
@@ -267,6 +318,19 @@ def get_previews(request: PreviewRequest, db: Session = Depends(get_db)):
         )
         entries = [(track_id, wf.preview_blob) for track_id, wf in rows]
     return Response(content=pack_previews(entries), media_type="application/octet-stream")
+
+
+@router.get("/tracks/{track_id}/waveform")
+def get_detail_waveform(track_id: int, db: Session = Depends(get_db)):
+    """The full detail waveform the desktop renders (MWF1 data blob, ADR 0014),
+    so the phone never re-analyzes synced tracks. 404 until generated."""
+    row = db.execute(
+        select(Waveform.id, Waveform.updated_at, Waveform.data_blob).where(Waveform.track_id == track_id)
+    ).first()
+    if row is None or row.data_blob is None:
+        raise HTTPException(status_code=404, detail="Waveform not generated yet")
+    rev = hashlib.sha1(f"{row.id}:{row.updated_at.isoformat() if row.updated_at else ''}".encode()).hexdigest()[:16]
+    return Response(content=row.data_blob, media_type="application/octet-stream", headers={"X-Waveform-Rev": rev})
 
 
 @router.get("/tracks/{track_id}/audio")

@@ -52,6 +52,8 @@ data class LibraryTrack(
     val fileSizeBytes: Long?,
     val audioRev: String?,
     val previewRev: String?,
+    /** Revision of the full detail waveform (MWF1) the desktop renders; null = not generated. */
+    val waveformRev: String? = null,
     val tagIds: List<Int>,
     val hotCues: List<HotCue>,
     val grid: Beatgrid?,
@@ -82,4 +84,8 @@ data class Snapshot(
     val transitions: List<TransitionEdge>,
     val cameos: List<CameoEdge>,
     val takes: List<TakeEdge>,
-)
+    /** Synced performance settings (desktop settings key → value); see [PerformanceSettings]. */
+    val settings: Map<String, SyncedSetting> = emptyMap(),
+) {
+    val performance: PerformanceSettings by lazy { PerformanceSettings.of(settings) }
+}

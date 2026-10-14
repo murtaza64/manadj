@@ -48,7 +48,7 @@ class SyncClient(
         if (code !in 200..299) {
             val detail = errorStream?.use { it.readBytes().decodeToString().take(200) }.orEmpty()
             disconnect()
-            throw SyncException("HTTP $code from ${url.path}${if (detail.isNotEmpty()) ": $detail" else ""}")
+            throw SyncException("HTTP $code from ${url.path}${if (detail.isNotEmpty()) ": $detail" else ""}", status = code)
         }
         return this
     }
@@ -89,18 +89,52 @@ class SyncClient(
         postJson("/received", JSONObject().put("changes", JSONArray(changes)))
     }
 
-    /** Download a Track's audio to [target] (atomically), reporting (bytes, total?). */
-    fun downloadAudio(trackId: Int, target: File, onProgress: (Long, Long?) -> Unit = { _, _ -> }) = io {
-        val conn = open("/tracks/$trackId/audio").checked()
-        val total = conn.contentLengthLong.takeIf { it >= 0 }
+    /** The full detail waveform (MWF1) the desktop renders; null when not generated there (404). */
+    fun downloadWaveform(trackId: Int): ByteArray? = io {
+        val conn = open("/tracks/$trackId/waveform")
+        if (conn.responseCode == 404) {
+            conn.disconnect()
+            return@io null
+        }
+        conn.checked()
+        conn.inputStream.use { it.readBytes() }.also { conn.disconnect() }
+    }
+
+    /**
+     * Download a Track's audio to [target] (atomically), reporting (bytes, total?).
+     * Resumable: a failed download leaves `.<name>.part`; the next call asks for
+     * the rest with `Range` and appends on 206 (restarts on a full 200).
+     * [cancelled] is polled per chunk; cancelling keeps the partial file.
+     */
+    fun downloadAudio(
+        trackId: Int,
+        target: File,
+        cancelled: () -> Boolean = { false },
+        onProgress: (Long, Long?) -> Unit = { _, _ -> },
+    ): Unit = io {
         target.parentFile?.mkdirs()
-        val tmp = File(target.parentFile, ".${target.name}.part")
+        val tmp = partFile(target)
+        val have = if (tmp.isFile) tmp.length() else 0L
+        val conn = open("/tracks/$trackId/audio")
+        if (have > 0) conn.setRequestProperty("Range", "bytes=$have-")
+        if (conn.responseCode == 416) {
+            // Partial is already complete (or stale beyond the file): start over.
+            conn.disconnect()
+            tmp.delete()
+            return@io downloadAudio(trackId, target, cancelled, onProgress)
+        }
+        conn.checked()
+        val resumed = conn.responseCode == 206
+        val start = if (resumed) have else 0L
+        val total = conn.contentLengthLong.takeIf { it >= 0 }?.let { it + start }
         try {
             conn.inputStream.use { input ->
-                tmp.outputStream().use { output ->
+                java.io.FileOutputStream(tmp, resumed).use { output ->
                     val buffer = ByteArray(64 * 1024)
-                    var done = 0L
+                    var done = start
+                    onProgress(done, total)
                     while (true) {
+                        if (cancelled()) throw DownloadCancelled()
                         val n = input.read(buffer)
                         if (n < 0) break
                         output.write(buffer, 0, n)
@@ -112,7 +146,6 @@ class SyncClient(
             }
             if (!tmp.renameTo(target)) throw SyncException("could not store $target")
         } finally {
-            tmp.delete()
             conn.disconnect()
         }
     }
@@ -125,4 +158,16 @@ class SyncClient(
 const val PAIR_HEADER = "X-Manadj-Pair"
 const val DEVICE_TOKEN_HEADER = "X-Manadj-Device-Token"
 
-class SyncException(message: String, cause: Throwable? = null, val unpaired: Boolean = false) : Exception(message, cause)
+class SyncException(
+    message: String,
+    cause: Throwable? = null,
+    val unpaired: Boolean = false,
+    /** HTTP status when the desktop answered with an error (null: unreachable / local failure). */
+    val status: Int? = null,
+) : Exception(message, cause)
+
+/** A download stopped by its cancel flag; the `.part` file stays for resume. */
+class DownloadCancelled : Exception("cancelled")
+
+/** Where an in-progress (resumable) audio download accumulates. */
+fun partFile(target: File) = File(target.parentFile, ".${target.name}.part")

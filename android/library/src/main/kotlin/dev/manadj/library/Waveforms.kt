@@ -6,6 +6,9 @@ import kotlin.math.min
 import kotlin.math.pow
 import kotlin.math.sqrt
 
+/** The full detail waveform (same MWF1 class, desktop resolution: 128-sample peaks, 512-sample bands). */
+typealias DetailWaveform = PreviewWaveform
+
 /**
  * A desktop MWF1 waveform blob (backend/waveform_data.py, ADR 0014), as
  * served for the 256-bin library preview. Values are quantized
@@ -19,7 +22,17 @@ class PreviewWaveform(
     val peaks: ByteArray,
     /** Frame-major bins × nBands. */
     val bands: ByteArray,
+    /** Header timing (detail blobs: 44100 / 128 / 512): bin i covers i*peakHop/sampleRate seconds. */
+    val sampleRate: Int = 0,
+    val peakHop: Int = 0,
+    val bandHop: Int = 0,
+    /** STFT window (samples): band frame f is centered at (f*bandHop + stftWindow/2)/sampleRate s. */
+    val stftWindow: Int = 0,
 ) {
+    /** Seconds per peak bin / band frame (from the header; falls back to duration/bins). */
+    val secondsPerPeak: Double get() = if (sampleRate > 0 && peakHop > 0) peakHop.toDouble() / sampleRate else durationSecs / maxOf(1, bins)
+    val secondsPerBand: Double get() = if (sampleRate > 0 && bandHop > 0) bandHop.toDouble() / sampleRate else durationSecs / maxOf(1, bandFrames)
+
     val bins: Int get() = peaks.size
     val bandFrames: Int get() = if (nBands == 0) 0 else bands.size / nBands
 
@@ -30,6 +43,9 @@ class PreviewWaveform(
 
     /** Amplitude 0..1 of band [b] (0 = lowest) at [frame]. */
     fun band(frame: Int, b: Int): Float = dequant(bands[frame * nBands + b])
+
+    /** All band amplitudes 0..1 at [frame] (feed [WaveformStyle.groupHeights]). */
+    fun bandsAt(frame: Int): FloatArray = FloatArray(nBands) { band(frame, it) }
 
     /**
      * Desktop's low/mid/high grouping (bands [0,3), [3,5), [5,8), RMS-combined)
@@ -65,7 +81,11 @@ class PreviewWaveform(
             require(magic == "MWF1") { "waveform blob: bad magic $magic" }
             val version = buf.getShort(4).toInt()
             require(version == 1 || version == 2) { "waveform blob: unsupported version $version" }
+            val sampleRate = buf.getInt(8)
             val duration = buf.getDouble(12)
+            val peakHop = buf.getInt(20)
+            val bandHop = buf.getInt(24)
+            val stftWindow = buf.getInt(28)
             val nBands = blob[32].toInt() and 0xff
             val gamma = buf.getFloat(36)
             var off = HEADER_BYTES + (nBands + 1) * 4
@@ -75,7 +95,7 @@ class PreviewWaveform(
             val peaks = blob.copyOfRange(off, off + peakCount)
             off += peakCount
             val bands = blob.copyOfRange(off, off + bandCount * nBands)
-            return PreviewWaveform(duration, gamma, nBands, peaks, bands)
+            return PreviewWaveform(duration, gamma, nBands, peaks, bands, sampleRate, peakHop, bandHop, stftWindow)
         }
     }
 }

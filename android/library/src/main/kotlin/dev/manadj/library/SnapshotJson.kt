@@ -45,7 +45,15 @@ object SnapshotJson {
         val takes = root.getJSONArray("takes").objects().map {
             TakeEdge(it.getInt("a"), it.getInt("b"), it.getInt("count"), instant(it.str("last_at")))
         }
-        return Snapshot(version, instant(root.str("generated_at")), categories, tags, tracks, playlists, links, transitions, cameos, takes)
+        return Snapshot(
+            version, instant(root.str("generated_at")), categories, tags, tracks, playlists, links, transitions, cameos, takes,
+            settings = root.optJSONObject("settings")?.let { o ->
+                o.keys().asSequence().associateWith { k ->
+                    val entry = o.getJSONObject(k)
+                    SyncedSetting(entry.optJSONObject("value")?.toString(), instant(entry.str("updated_at")))
+                }
+            }.orEmpty(),
+        )
     }
 
     private fun track(it: JSONObject): LibraryTrack {
@@ -76,6 +84,7 @@ object SnapshotJson {
             fileSizeBytes = if (it.isNull("filesize_bytes")) null else it.getLong("filesize_bytes"),
             audioRev = it.str("audio_rev"),
             previewRev = it.str("preview_rev"),
+            waveformRev = it.str("waveform_rev"),
             tagIds = it.getJSONArray("tag_ids").let { a -> (0 until a.length()).map(a::getInt) },
             hotCues = it.getJSONArray("hot_cues").objects().map { c ->
                 HotCue(c.getInt("slot"), c.getDouble("time"), c.str("label"), c.str("color"))
