@@ -367,7 +367,7 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
         /** Desktop STEM_NAMES order. */
         val STEM_NAMES = listOf("vocals", "drums", "bass", "other")
         const val STEMS = 4
-        const val MAX_CLICKS = 32
+        const val MAX_CLICKS = 128
         val CAPABILITIES = setOf("play", "pause", "cue-gate", "hot-cue-gate", "hot-cue-set", "seek", "fader", "trim", "crossfade", "varispeed", "bend", "pfl", "cue-mix", "routing", "eq", "filter", "grid", "beat-jump", "loop", "quantize", "beat-fx", "filter-settings", "key-lock", "sync", "scratch", "loop-region", "schedule", "heard-quantize")
         private const val PRIME_FRAMES = 2048
         private const val MEMORY_RESERVE_BYTES = 768L shl 20
@@ -526,21 +526,35 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
         commands.map { schedule(it.atFrame, it.command, tag) }
 
     /**
-     * Latency calibration (#382): [count] chirps ([CalibrationClick]) on every output
-     * channel, the first ~0.1 s after the next callback, then every [intervalSeconds]. [clickNanos] reports
-     * each one's render instant (System.nanoTime domain; 0 = not yet rendered).
+     * Latency calibration (#382): [count] chirps ([CalibrationClick]; null = until [stopCalibrationClicks]) on
+     * every output channel, the first ~0.1 s after the next callback, then every [intervalSeconds]. [accent]:
+     * every 4th click full level, the others 45 % (tap-along / align-by-ear). [clickNanos] reports render instants.
      */
-    @Synchronized fun startCalibrationClicks(count: Int, intervalSeconds: Double): CommandReceipt {
+    @Synchronized fun startCalibrationClicks(count: Int?, intervalSeconds: Double, accent: Boolean = false): CommandReceipt {
         if (closed) return rejected("Engine closed")
-        if (count !in 1..MAX_CLICKS || !(intervalSeconds >= .05)) return rejected("Invalid clicks")
-        val id = nativeSubmit(handle, Op.CLICKS.ordinal, 0, intervalSeconds, 0, count)
+        if ((count != null && count !in 1..MAX_CLICKS) || !(intervalSeconds >= .05)) return rejected("Invalid clicks")
+        val slot = (count ?: 0xFFFF) or (if (accent) 1 shl 16 else 0)
+        val id = nativeSubmit(handle, Op.CLICKS.ordinal, 0, intervalSeconds, 0, slot)
+        return if (id != 0L) CommandReceipt(id, true) else rejected("Command queue full")
+    }
+
+    @Synchronized fun stopCalibrationClicks(): CommandReceipt {
+        if (closed) return rejected("Engine closed")
+        val id = nativeSubmit(handle, Op.CLICKS.ordinal, 0, 1.0, 0, 0)
         return if (id != 0L) CommandReceipt(id, true) else rejected("Command queue full")
     }
 
     /** Last quantized launch for diagnostics: count, deck, reference, L, ref render s, heard s, target beat s, delta s, entry s. */
     @Synchronized fun lastLaunch(): DoubleArray = if (closed) DoubleArray(9) else nativeLastLaunch(handle)
 
-    @Synchronized fun clickNanos(): LongArray = if (closed) LongArray(0) else nativeClickNanos(handle)
+    /** Render instants (System.nanoTime domain) of the clicks rendered since the last start, oldest first (last [MAX_CLICKS]). */
+    @Synchronized fun clickNanos(): LongArray {
+        if (closed) return LongArray(0)
+        val raw = nativeClickNanos(handle)
+        val n = raw[0].toInt()
+        val from = maxOf(0, n - MAX_CLICKS)
+        return LongArray(n - from) { raw[1 + (from + it) % MAX_CLICKS] }
+    }
 
     /** Drops every pending scheduled op tagged [tag] (ops scheduled after this call are kept). */
     @Synchronized fun cancelScheduled(tag: Long): CommandReceipt {

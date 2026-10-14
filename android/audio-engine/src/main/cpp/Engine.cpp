@@ -520,9 +520,9 @@ bool Engine::launch(int index, double at, int slot) noexcept {
 
 double Engine::clickSample(double t) noexcept {
     if (t < 0 || t >= kClickSeconds) return 0;
-    constexpr double f0 = 500, f1 = 8000, pi = 3.14159265358979;
+    constexpr double f0 = 400, f1 = 6000, pi = 3.14159265358979;
     const double window = .5 - .5 * std::cos(2 * pi * t / kClickSeconds);
-    return .5 * window * std::sin(2 * pi * (f0 * t + (f1 - f0) * t * t / (2 * kClickSeconds)));
+    return .7 * window * std::sin(2 * pi * (f0 * t + (f1 - f0) * t * t / (2 * kClickSeconds)));
 }
 
 // Calibration clicks over the finished output (after the ceiling: the clicks are the loudest thing).
@@ -532,10 +532,16 @@ void Engine::renderClicks(float* output, int frames, int channels, uint64_t star
     for (int i = 0; i < frames && clicksLeft_ > 0; ++i) {
         const uint64_t f = start + static_cast<uint64_t>(i);
         if (f < clickNext_) continue;
-        if (f == clickNext_ && clickIndex_ < kMaxClicks) clickNanos_[clickIndex_].store(callbackNanos_ + static_cast<int64_t>(i * 1e9 / rate));
-        const float v = static_cast<float>(clickSample((f - clickNext_) / rate));
+        if (f == clickNext_) clickNanos_[clickIndex_ % kMaxClicks].store(callbackNanos_ + static_cast<int64_t>(i * 1e9 / rate));
+        const float level = !clickAccent_ || clickIndex_ % 4 == 0 ? 1.f : .45f;
+        const float v = level * static_cast<float>(clickSample((f - clickNext_) / rate));
         for (int ch = 0; ch < channels; ++ch) output[i * channels + ch] = std::clamp(output[i * channels + ch] + v, -1.f, 1.f);
-        if (f + 1 >= clickNext_ + length) { --clicksLeft_; ++clickIndex_; clickNext_ += clickInterval_; }
+        if (f + 1 >= clickNext_ + length) {
+            if (clicksLeft_ != kClicksForever) --clicksLeft_;
+            ++clickIndex_;
+            clicksRendered_.store(clickIndex_, kRelaxed);
+            clickNext_ += clickInterval_;
+        }
     }
 }
 
@@ -688,8 +694,10 @@ void Engine::apply(const Command& c) noexcept {
         case Op::HeardLatency: heardLatency_.store(std::clamp(c.value, 0.0, 2.0)); break;
         case Op::Clicks:
             for (auto& n : clickNanos_) n.store(0);
-            clicksLeft_ = std::clamp(c.slot, 0, kMaxClicks);
+            clicksLeft_ = (c.slot & 0xFFFF) == kClicksForever ? kClicksForever : std::clamp(c.slot & 0xFFFF, 0, kMaxClicks);
+            clickAccent_ = (c.slot & kClicksAccent) != 0;
             clickIndex_ = 0;
+            clicksRendered_.store(0, kRelaxed);
             clickInterval_ = static_cast<uint64_t>(std::max(.05, c.value) * outputRate_.load(kRelaxed));
             clickNext_ = static_cast<uint64_t>(renderFrame_) + outputRate_.load(kRelaxed) / 10;
             break;
