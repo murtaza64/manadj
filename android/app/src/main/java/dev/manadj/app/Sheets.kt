@@ -112,6 +112,12 @@ import dev.manadj.audio.QuantizeMode
             Toggle("Quantize", "Snap cues, loops and jumps to the beat grid.", mode != QuantizeMode.OFF, !model.supports("quantize")) { ux.setQuantize(model, on = mode == QuantizeMode.OFF) }
             Toggle("Heard quantize", "Align to the beat you hear (output latency below), not the one being rendered. Long-press Q.", ux.quantizeHeard) { ux.setQuantize(model, heard = !ux.quantizeHeard) }
             if (ux.quantizeHeard) HeardLatency(model)
+            // Landscape BROWSE parity: which deck stays on screen next to the browser.
+            Text("Browse beside (landscape)", bold = true)
+            Row(Modifier.fillMaxWidth().height(40.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                Key("LOADING DECK", Modifier.weight(1f).fillMaxHeight(), Ink.accent, engaged = ux.browseBesideLoading, description = "Browse beside: Loading deck", textSize = 11, style = KeyStyle.PILL) { ux.browseBesideLoading = true }
+                Key("PLAYING DECK", Modifier.weight(1f).fillMaxHeight(), Ink.accent, engaged = !ux.browseBesideLoading, description = "Browse beside: Playing deck", textSize = 11, style = KeyStyle.PILL) { ux.browseBesideLoading = false }
+            }
             Toggle("Crossfader", "Off hides the crossfader (both decks play through).", ux.crossfaderEnabled) {
                 ux.crossfaderEnabled = !ux.crossfaderEnabled
                 if (!ux.crossfaderEnabled) model.updateCrossfade(.5)

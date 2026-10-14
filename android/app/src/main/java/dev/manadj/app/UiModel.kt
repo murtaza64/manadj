@@ -50,6 +50,9 @@ class UiModel(application: Application) : AndroidViewModel(application) {
 
     private val _quantize = flag("quantize", true)
     var quantize: Boolean get() = _quantize.value; set(v) { _quantize.value = v; store("quantize", v) }
+    private val _beside = flag("browse-beside-loading", true)
+    /** Landscape BROWSE: true = the loading (target) deck stays beside the browser; false = the playing (outgoing) deck. */
+    var browseBesideLoading: Boolean get() = _beside.value; set(v) { _beside.value = v; store("browse-beside-loading", v) }
     private val _heard = flag("quantize-heard", false)
     /** Quantize reads the heard instant (#382 HEARD) instead of the render position (GRID). */
     var quantizeHeard: Boolean get() = _heard.value; set(v) { _heard.value = v; store("quantize-heard", v) }

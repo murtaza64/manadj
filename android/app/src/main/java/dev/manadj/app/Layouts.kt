@@ -245,14 +245,17 @@ fun mixOf(model: PlayerModel, ux: UiModel, id: DeckId): DeckMix {
         val side = (screen - mixerWidth - 12.dp) / 2
         val sidePx = with(LocalDensity.current) { side.toPx() }
         val screenPx = with(LocalDensity.current) { screen.toPx() }
-        // Target A: strip moves right (+side) so the left browser slot sits beside A; target B: left.
+        // The deck kept on screen: the loading target (default) or the playing/outgoing deck (Settings).
+        // Kept A: strip moves right (+side) so the left browser slot sits beside A; kept B: left.
         val targetDeck = model.browser?.let(::other)
-        val goal = when (targetDeck) { DeckId.A -> sidePx; DeckId.B -> -sidePx; else -> 0f }
+        val kept = if (ux.browseBesideLoading) targetDeck else model.browser
+        val goal = when (kept) { DeckId.A -> sidePx; DeckId.B -> -sidePx; else -> 0f }
         val shift = remember { androidx.compose.animation.core.Animatable(0f) }
         LaunchedEffect(goal) { shift.animateTo(goal, androidx.compose.animation.core.spring(dampingRatio = 1f, stiffness = 1200f)) }
         // The pane keeps its last side while sliding out; composed once opened, then kept (no first-frame build).
         var paneSide by remember { mutableStateOf<DeckId?>(null) }
-        LaunchedEffect(targetDeck) { if (targetDeck != null) paneSide = targetDeck }
+        var paneTarget by remember { mutableStateOf(DeckId.A) }
+        LaunchedEffect(kept, targetDeck) { if (kept != null && targetDeck != null) { paneSide = kept; paneTarget = targetDeck } }
         val stripFrame = remember(shift) { SafeFrame({ shift.value }, 0f) }
         CompositionLocalProvider(LocalSafeFrame provides stripFrame) {
             Row(Modifier.wrapContentWidth(unbounded = true).requiredWidth(screen + side * 2).fillMaxHeight().graphicsLayer { translationX = shift.value }) {
@@ -289,7 +292,7 @@ fun mixOf(model: PlayerModel, ux: UiModel, id: DeckId): DeckMix {
             val paneFrame = remember(shift, pane, sidePx) { SafeFrame({ shift.value }, if (pane == DeckId.A) sidePx else -sidePx) }
             CompositionLocalProvider(LocalSafeFrame provides paneFrame) {
                 Box(Modifier.width(side).fillMaxHeight().graphicsLayer { translationX = shift.value + base }) {
-                    LibraryPanel(model, ux, Modifier.fillMaxSize().padding(start = if (pane == DeckId.A) 6.dp else 0.dp, end = if (pane == DeckId.B) 6.dp else 0.dp).screenSafe(), pick, tapTarget = pane)
+                    LibraryPanel(model, ux, Modifier.fillMaxSize().padding(start = if (pane == DeckId.A) 6.dp else 0.dp, end = if (pane == DeckId.B) 6.dp else 0.dp).screenSafe(), pick, tapTarget = paneTarget)
                 }
             }
         }
