@@ -26,7 +26,9 @@ from dataclasses import dataclass
 import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
 
+from .device_pairing import REQUEST_TTL_S, TOKEN_HEADER, DeviceRegistry, PairingRequests
 from .routers import device_sync
 
 log = logging.getLogger(__name__)
@@ -67,17 +69,42 @@ class _Failures:
             self._by_client[client].append(now)
 
 
-def build_app(get_code) -> FastAPI:
-    """The LAN-facing app: device-sync only, pairing required everywhere."""
+PAIR_PREFIX = "/api/device-pair/"
+
+
+class PairAsk(BaseModel):
+    device_id: str = Field(min_length=8, max_length=64)
+    device_name: str = Field(default="", max_length=60)
+
+
+def build_app(get_code, pairing: PairingRequests | None = None) -> FastAPI:
+    """The LAN-facing app: device-sync only, behind a device token (#374) or
+    the typed pairing code (#373). /api/device-pair/* is the only
+    unauthenticated surface (request + poll), and it is rate-limited."""
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     failures = _Failures()
+    pair_calls = _Failures()
 
     @app.middleware("http")
     async def require_pairing(request: Request, call_next):
         client = request.client.host if request.client else "?"
         now = time.monotonic()
+        if pairing is not None and request.url.path.startswith(PAIR_PREFIX):
+            if pair_calls.blocked(client, now):
+                return JSONResponse({"detail": "Too many pairing requests; wait a minute"}, status_code=429)
+            if request.method == "POST":
+                pair_calls.record(client, now)
+            return await call_next(request)
         if failures.blocked(client, now):
             return JSONResponse({"detail": "Too many pairing attempts; wait a minute"}, status_code=429)
+        token = request.headers.get(TOKEN_HEADER, "")
+        if token and pairing is not None:
+            device = pairing.registry.authenticate(token)
+            if device is not None:
+                request.state.device = (device.device_id, device.name)
+                return await call_next(request)
+            failures.record(client, now)
+            return JSONResponse({"detail": "Device not paired (revoked?)"}, status_code=401)
         expected = get_code()
         supplied = request.headers.get(PAIR_HEADER, "")
         if not expected or not hmac.compare_digest(normalize_code(supplied), normalize_code(expected)):
@@ -86,7 +113,35 @@ def build_app(get_code) -> FastAPI:
         return await call_next(request)
 
     app.include_router(device_sync.router, prefix="/api/device-sync")
+    if pairing is not None:
+        app.include_router(_pair_router(pairing), prefix="/api/device-pair")
     return app
+
+
+def _pair_router(pairing: PairingRequests):
+    from fastapi import APIRouter, HTTPException
+
+    router = APIRouter()
+
+    @router.post("/request")
+    def request_pairing(body: PairAsk, request: Request):
+        client = request.client.host if request.client else "?"
+        req = pairing.create(body.device_id, body.device_name, client)
+        if req is None:
+            raise HTTPException(status_code=429, detail="Too many pending pairing requests")
+        return {"id": req.id, "match_code": req.match_code, "expires_s": int(REQUEST_TTL_S)}
+
+    @router.get("/request/{request_id}")
+    def poll(request_id: str):
+        req = pairing.poll(request_id)
+        if req is None:
+            raise HTTPException(status_code=404, detail="Unknown or finished pairing request")
+        out = {"status": req.status}
+        if req.token:
+            out["token"] = req.token
+        return out
+
+    return router
 
 
 def lan_addresses() -> list[str]:
@@ -124,8 +179,10 @@ class ListenerStatus:
 class DeviceListener:
     """One background uvicorn server; start/stop are idempotent."""
 
-    def __init__(self, host: str = "0.0.0.0") -> None:
+    def __init__(self, host: str = "0.0.0.0", advertise: bool = True) -> None:
         self.host = host
+        self.advertise = advertise
+        self._advert: "Advertisement | None" = None
         self._server: uvicorn.Server | None = None
         self._thread: threading.Thread | None = None
         self._port: int | None = None
@@ -136,14 +193,14 @@ class DeviceListener:
     def running(self) -> bool:
         return self._thread is not None and self._thread.is_alive() and self._server is not None and self._server.started
 
-    def start(self, port: int, get_code) -> None:
+    def start(self, port: int, get_code, pairing: PairingRequests | None = None) -> None:
         with self._lock:
             if self._thread is not None and self._thread.is_alive():
                 if self._port == port:
                     return
                 self._stop_locked()
             self.error = None
-            config = uvicorn.Config(build_app(get_code), host=self.host, port=port, log_level="warning", access_log=False)
+            config = uvicorn.Config(build_app(get_code, pairing), host=self.host, port=port, log_level="warning", access_log=False)
             server = uvicorn.Server(config)
             server.install_signal_handlers = lambda: None  # type: ignore[method-assign]  # not the main thread
             thread = threading.Thread(target=self._run, args=(server,), name="device-listener", daemon=True)
@@ -155,6 +212,8 @@ class DeviceListener:
             if not server.started:
                 self.error = self.error or f"Could not listen on port {port}"
                 log.error("device listener: %s", self.error)
+            elif self.advertise:
+                self._advert = Advertisement.start(port)
 
     def _run(self, server: uvicorn.Server) -> None:
         try:
@@ -170,6 +229,9 @@ class DeviceListener:
             self._stop_locked()
 
     def _stop_locked(self) -> None:
+        if self._advert is not None:
+            self._advert.stop()
+            self._advert = None
         if self._server is not None:
             self._server.should_exit = True
         if self._thread is not None:
@@ -177,9 +239,53 @@ class DeviceListener:
         self._server = self._thread = self._port = None
 
 
+SERVICE_TYPE = "_manadj._tcp.local."
+
+
+class Advertisement:
+    """DNS-SD advert of the listener (#374): phones find it with NsdManager.
+    Best effort — a failure only costs discovery; typed URLs still work."""
+
+    def __init__(self, zc, info) -> None:
+        self._zc, self._info = zc, info
+
+    @classmethod
+    def start(cls, port: int) -> "Advertisement | None":
+        try:
+            from zeroconf import ServiceInfo, Zeroconf
+
+            host = socket.gethostname().split(".")[0] or "desktop"
+            addresses = [socket.inet_aton(a) for a in lan_addresses()]
+            if not addresses:
+                return None
+            info = ServiceInfo(
+                SERVICE_TYPE,
+                f"manaDJ on {host}.{SERVICE_TYPE}",
+                addresses=addresses,
+                port=port,
+                properties={"v": "1", "host": host},
+                server=f"{host}-manadj.local.",
+            )
+            zc = Zeroconf()
+            zc.register_service(info, allow_name_change=True)
+            return cls(zc, info)
+        except Exception as exc:  # pragma: no cover - network-dependent
+            log.warning("device listener: DNS-SD advertisement failed: %s", exc)
+            return None
+
+    def stop(self) -> None:
+        try:
+            self._zc.unregister_service(self._info)
+            self._zc.close()
+        except Exception:  # pragma: no cover
+            pass
+
+
 # ── Settings-backed singleton ──────────────────────────────────────────
 
 _listener = DeviceListener()
+registry = DeviceRegistry()
+pairing = PairingRequests(registry)
 
 
 def read_settings() -> tuple[bool, int]:
@@ -224,7 +330,7 @@ def apply_settings() -> None:
     enabled, port = read_settings()
     if enabled:
         ensure_pair_code()
-        _listener.start(port, pair_code)
+        _listener.start(port, pair_code, pairing)
     else:
         _listener.stop()
 

@@ -27,6 +27,7 @@ dependencies = [
     "types-requests>=2.33.0.20260518",
     "uvicorn>=0.38.0",
     "yt-dlp>=2026.8.19",
+    "zeroconf>=0.151.5",
 ]
 
 [project.optional-dependencies]
