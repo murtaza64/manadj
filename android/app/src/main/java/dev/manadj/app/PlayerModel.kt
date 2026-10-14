@@ -310,6 +310,25 @@ class PlayerModel(application: Application) : AndroidViewModel(application) {
         heardLatencyCalibrated = key != null
         sendHeardLatency(seconds)
     }
+    /** Mic-loopback calibration in progress; last result (null seconds = failed, see reason). */
+    var calibrating by mutableStateOf(false)
+        private set
+    var lastCalibration by mutableStateOf<LatencyCalibrator.Result?>(null)
+        private set
+    /**
+     * Plays ~6 chirps and measures their arrival at the mic (needs RECORD_AUDIO granted; the UI asks).
+     * Success remembers the result as this route's L.
+     */
+    fun calibrateLatency() {
+        val audio = service ?: return
+        if (calibrating) return
+        calibrating = true
+        audio.calibrateLatency { result ->
+            calibrating = false
+            lastCalibration = result
+            result.seconds?.let(::setHeardLatency)
+        }
+    }
     private fun sendHeardLatency(seconds: Double) {
         if (service?.submit(AudioCommand.SetHeardLatency(seconds.coerceIn(0.0, 2.0)))?.accepted == true) heardLatency = seconds.coerceIn(0.0, 2.0)
     }

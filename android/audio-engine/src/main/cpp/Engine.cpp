@@ -474,6 +474,27 @@ void Engine::launch(int index, double at, int slot) noexcept {
     enqueueScheduled(start);
 }
 
+double Engine::clickSample(double t) noexcept {
+    if (t < 0 || t >= kClickSeconds) return 0;
+    constexpr double f0 = 500, f1 = 8000, pi = 3.14159265358979;
+    const double window = .5 - .5 * std::cos(2 * pi * t / kClickSeconds);
+    return .5 * window * std::sin(2 * pi * (f0 * t + (f1 - f0) * t * t / (2 * kClickSeconds)));
+}
+
+// Calibration clicks over the finished output (after the ceiling: the clicks are the loudest thing).
+void Engine::renderClicks(float* output, int frames, int channels, uint64_t start) noexcept {
+    const double rate = outputRate_.load(kRelaxed);
+    const auto length = static_cast<uint64_t>(kClickSeconds * rate);
+    for (int i = 0; i < frames && clicksLeft_ > 0; ++i) {
+        const uint64_t f = start + static_cast<uint64_t>(i);
+        if (f < clickNext_) continue;
+        if (f == clickNext_ && clickIndex_ < kMaxClicks) clickNanos_[clickIndex_].store(callbackNanos_ + static_cast<int64_t>(i * 1e9 / rate));
+        const float v = static_cast<float>(clickSample((f - clickNext_) / rate));
+        for (int ch = 0; ch < channels; ++ch) output[i * channels + ch] = std::clamp(output[i * channels + ch] + v, -1.f, 1.f);
+        if (f + 1 >= clickNext_ + length) { --clicksLeft_; ++clickIndex_; clickNext_ += clickInterval_; }
+    }
+}
+
 // Deck seconds between the render position and what is heard at the speaker (Heard mode; else 0).
 double Engine::heardLead(const Deck& d) const noexcept {
     if (!heard_.load(kRelaxed)) return 0;
@@ -615,6 +636,13 @@ void Engine::apply(const Command& c) noexcept {
         }
         case Op::Quantize: quantize_.store(c.value != 0); heard_.store(c.value == 2); break;
         case Op::HeardLatency: heardLatency_.store(std::clamp(c.value, 0.0, 2.0)); break;
+        case Op::Clicks:
+            for (auto& n : clickNanos_) n.store(0);
+            clicksLeft_ = std::clamp(c.slot, 0, kMaxClicks);
+            clickIndex_ = 0;
+            clickInterval_ = static_cast<uint64_t>(std::max(.05, c.value) * outputRate_.load(kRelaxed));
+            clickNext_ = static_cast<uint64_t>(renderFrame_) + outputRate_.load(kRelaxed) / 10;
+            break;
         // Stored cues from a library (applied after Prepare, which resets them).
         // Like the desktop load path, a stopped deck parks at the stored main cue.
         case Op::CueSetAt:
@@ -858,6 +886,7 @@ void Engine::render(float* output, int frames, int channels) noexcept {
         }
         done += n;
     }
+    if (clicksLeft_ > 0) renderClicks(output, frames, channels, start);
     outputFrames_.fetch_add(frames, kRelease);
 }
 

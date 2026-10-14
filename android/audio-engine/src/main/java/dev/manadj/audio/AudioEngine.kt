@@ -356,6 +356,7 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
         const val HOT_CUES = 8
         /** Pre-roll bound (desktop MAX_LEAD_IN_SECONDS): seeks/jumps may park the playhead this far before 0. */
         const val MAX_LEAD_IN_SECONDS = 30.0
+        const val MAX_CLICKS = 32
         val CAPABILITIES = setOf("play", "pause", "cue-gate", "hot-cue-gate", "hot-cue-set", "seek", "fader", "trim", "crossfade", "varispeed", "bend", "pfl", "cue-mix", "routing", "eq", "filter", "grid", "beat-jump", "loop", "quantize", "beat-fx", "filter-settings", "key-lock", "sync", "scratch", "loop-region", "schedule", "heard-quantize")
         private const val PRIME_FRAMES = 2048
         private const val MEMORY_RESERVE_BYTES = 768L shl 20
@@ -366,7 +367,7 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
         private const val HEAD_FRAMES = 8192
         private const val HEADER = 31
         private const val DECK_FIELDS = 40 + HOT_CUES
-        private enum class Op { PREPARE, PLAY, PAUSE, CUE_DOWN, CUE_UP, HOT_CUE_DOWN, HOT_CUE_UP, HOT_CUE_SET, HOT_CUE_CLEAR, SEEK, FADER, TRIM, CROSSFADE, PITCH, BEND, PFL, CUE_MIX, EQ, FILTER, SET_GRID, BEAT_JUMP, LOOP_TOGGLE, LOOP_RESIZE, LOOP_PRESET, QUANTIZE, CUE_SET_AT, HOT_CUE_SET_AT, BEAT_FX, KEY_LOCK, PHASE_ALIGN, SCRATCH_BEGIN, SCRATCH_MOVE, SCRATCH_END, LOOP_SET, CANCEL_SCHEDULED, SET_SYNC_MEMBERS, LAUNCH_START, HEARD_LATENCY }
+        private enum class Op { PREPARE, PLAY, PAUSE, CUE_DOWN, CUE_UP, HOT_CUE_DOWN, HOT_CUE_UP, HOT_CUE_SET, HOT_CUE_CLEAR, SEEK, FADER, TRIM, CROSSFADE, PITCH, BEND, PFL, CUE_MIX, EQ, FILTER, SET_GRID, BEAT_JUMP, LOOP_TOGGLE, LOOP_RESIZE, LOOP_PRESET, QUANTIZE, CUE_SET_AT, HOT_CUE_SET_AT, BEAT_FX, KEY_LOCK, PHASE_ALIGN, SCRATCH_BEGIN, SCRATCH_MOVE, SCRATCH_END, LOOP_SET, CANCEL_SCHEDULED, SET_SYNC_MEMBERS, LAUNCH_START, HEARD_LATENCY, CLICKS }
     }
 
     /** The caller retains/closes descriptor; the engine duplicates it for its own lifetime. */
@@ -500,6 +501,20 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
     /** [schedule] for a batch (any frame order; same-frame ops keep list order), under one lock. */
     @Synchronized fun schedule(commands: List<ScheduledCommand>, tag: Long = 0): List<CommandReceipt> =
         commands.map { schedule(it.atFrame, it.command, tag) }
+
+    /**
+     * Latency calibration (#382): [count] chirps ([CalibrationClick]) on every output
+     * channel, the first ~0.1 s after the next callback, then every [intervalSeconds]. [clickNanos] reports
+     * each one's render instant (System.nanoTime domain; 0 = not yet rendered).
+     */
+    @Synchronized fun startCalibrationClicks(count: Int, intervalSeconds: Double): CommandReceipt {
+        if (closed) return rejected("Engine closed")
+        if (count !in 1..MAX_CLICKS || !(intervalSeconds >= .05)) return rejected("Invalid clicks")
+        val id = nativeSubmit(handle, Op.CLICKS.ordinal, 0, intervalSeconds, 0, count)
+        return if (id != 0L) CommandReceipt(id, true) else rejected("Command queue full")
+    }
+
+    @Synchronized fun clickNanos(): LongArray = if (closed) LongArray(0) else nativeClickNanos(handle)
 
     /** Drops every pending scheduled op tagged [tag] (ops scheduled after this call are kept). */
     @Synchronized fun cancelScheduled(tag: Long): CommandReceipt {
@@ -833,6 +848,7 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
     private external fun nativeClose(handle: Long)
     private external fun nativeSubmit(handle: Long, op: Int, deck: Int, value: Double, load: Long, slot: Int): Long
     private external fun nativeSetSchedule(frame: Long, tag: Long)
+    private external fun nativeClickNanos(handle: Long): LongArray
     private external fun nativeCancelScheduled(handle: Long, tag: Long): Long
     private external fun nativeSetGrid(handle: Long, deck: Int, bpm: Double, anchor: Double): Long
     private external fun nativeSubmitBeatFx(handle: Long, effect: Int, target: Int, on: Boolean, depth: Double, beats: Double, held: Int): Long

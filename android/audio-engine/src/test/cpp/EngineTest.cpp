@@ -1334,6 +1334,22 @@ int main() {
         }
     }
 
+    { // Calibration clicks: chirps on every channel at 0.1 s + k x interval; render instants recorded.
+        auto owned = std::make_unique<Engine>(48000);
+        Engine& e = *owned;
+        tick(e, 100);
+        e.submit(Op::Clicks, 0, .25, 0, 3);
+        e.setCallbackNanos(1'000'000'000);
+        std::vector<float> left = capture(e, 48000);   // capture renders 4096-frame callbacks; nanos are per-callback
+        for (int k = 0; k < 3; ++k) {
+            const int at = 4800 + k * 12000;
+            CHECK(left[at - 1] == 0 && std::abs(left[at + 96] - static_cast<float>(Engine::clickSample(96 / 48000.))) < 1e-6);
+            CHECK(e.clickNanos(k) != 0);
+        }
+        CHECK(e.clickNanos(3) == 0);
+        CHECK(e.clickNanos(0) == 1'000'000'000 + static_cast<int64_t>(4800 % 4096 * 1e9 / 48000));
+    }
+
     { // Beat FX ECHO on A: beat-synced repeats at beats x beatSeconds, feedback .5, tails ring after OFF.
         auto owned = std::make_unique<Engine>(48000);
         Engine& e = *owned;
