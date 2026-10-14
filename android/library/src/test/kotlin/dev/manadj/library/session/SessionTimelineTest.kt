@@ -64,6 +64,25 @@ class SessionTimelineTest {
         assertEquals(70.0, tl.activeEnd)
     }
 
+    @Test fun reachNextSoundAndEarlyLoadsForReplayScheduling() {
+        val log = log(
+            ev(0.0, "load", "A").put("trackId", 1),
+            ev(0.0, "transport", "A").put("action", "play").put("playhead", 10.0),
+            ev(30.0, "transport", "A").put("action", "pause").put("playhead", 40.0),
+            ev(31.0, "transport", "A").put("action", "seek").put("playhead", 0.0),
+            ev(100.0, "load", "A").put("trackId", 2),
+            ev(101.0, "transport", "A").put("action", "play").put("playhead", 5.0),
+            ev(120.0, "load", "B").put("trackId", 3),
+            ev(200.0, "tick").put("playheads", JSONObject()),
+        )
+        val tl = SessionTimeline(log)
+        assertEquals(25.0, tl.reach(0, 5.0, 15.0)!!, 1e-9)
+        assertNull(tl.reach(0, 40.0, 90.0))
+        assertEquals(101.0, tl.nextSound(0, 35.0))
+        assertNull(tl.nextSound(1, 0.0))
+        assertEquals(listOf(SessionTimeline.EarlyLoad(0.0, 0, 1, 0.0), SessionTimeline.EarlyLoad(100.0, 0, 2, 30.0), SessionTimeline.EarlyLoad(120.0, 1, 3, 0.0)), tl.earlyLoads)
+    }
+
     @Test fun gesturesSkipJogsAndLabelLikeDesktop() {
         val tl = SessionTimeline(log(
             ev(0.0, "load", "B").put("trackId", 2),

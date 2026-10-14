@@ -78,10 +78,10 @@ class LibraryRepository(
     /** Library view = pulled snapshot + unsynced local edits. */
     private fun build(pulled: Snapshot) = buildView(FieldsOverlay.of(pulled, journal.all()))
 
-    private fun buildView(snapshot: Snapshot) = Library(snapshot) { track ->
+    private fun buildView(snapshot: Snapshot) = Library(snapshot, previews = { track ->
         val key = "${track.id}-${track.previewRev ?: return@Library null}"
         previewCache[key] ?: store.readPreview(track)?.also { previewCache[key] = it }
-    }
+    }, isDownloaded = store::hasAudio)
 
     private fun counts(snapshot: Snapshot) = _state.update {
         it.copy(
@@ -145,6 +145,24 @@ class LibraryRepository(
     /** Change the Waveform style slots (synced back to the desktop). */
     suspend fun editWaveformStyles(styles: WaveformStyles): Boolean =
         editSetting(PerformanceSettings.WAVEFORM_STYLES, styles.toJson(currentSetting(PerformanceSettings.WAVEFORM_STYLES)))
+
+    /** Change the Follow parameters (synced back to the desktop's manadj-follow-params). */
+    suspend fun editFollowParams(params: FollowParams): Boolean =
+        editSetting(PerformanceSettings.FOLLOW, PerformanceSettings.followJson(params, currentSetting(PerformanceSettings.FOLLOW)))
+
+    private val _followSeed = MutableStateFlow((Math.random() * 4294967296.0).toLong())
+    /** Session-only Temperature draw seed (desktop paramsStore): random at start, +1 per [rerollFollow]. */
+    val followSeed: StateFlow<Long> = _followSeed.asStateFlow()
+
+    /** Reroll: a new Temperature draw over the Compatible rows (Known stays pinned). */
+    fun rerollFollow() = _followSeed.update { (it + 1) and 0xffffffffL }
+
+    /** Desktop Follow for the followed [referenceIds] with the synced params and current seed, within the manual filters. */
+    fun follow(referenceIds: List<Int>, within: LibraryQuery? = null, params: FollowParams? = null): List<FollowRow> {
+        val library = _library.value ?: return emptyList()
+        val p = (params ?: library.followParams).copy(seed = _followSeed.value)
+        return library.follow(referenceIds, p, within)
+    }
 
     private fun currentSetting(key: String): JSONObject? = _library.value?.snapshot?.settings?.get(key)?.json?.let(::JSONObject)
 

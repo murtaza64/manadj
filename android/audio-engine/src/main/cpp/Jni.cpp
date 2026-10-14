@@ -7,8 +7,8 @@
 #include <vector>
 
 namespace {
-constexpr int kHeader = 29;
-constexpr int kDeckFields = 40 + manadj::kHotCues;
+constexpr int kHeader = 31;
+constexpr int kDeckFields = 40 + manadj::kHotCues + 1 + manadj::kStems; // + stems, stem gains
 constexpr int kSnapshotSize = kHeader + manadj::kDeckCount * kDeckFields;
 
 /*
@@ -69,6 +69,19 @@ struct Output final : oboe::AudioStreamDataCallback, oboe::AudioStreamErrorCallb
 
     int open() { std::lock_guard<std::mutex> lock(streamMutex); return stream ? 0 : openLocked(); }
 
+    // Closes and reopens the stream with the same settings (engine state survives): recovers a route the
+    // system silenced without a disconnect callback.
+    int restart() {
+        std::lock_guard<std::mutex> lock(streamMutex);
+        if (stream) {
+            stream->requestStop();
+            stream->close();
+            stream.reset();
+            xrunBase.store(xruns.load());
+        }
+        return openLocked();
+    }
+
     // Replaces the stream (engine state survives) when the channel count or device changes.
     int configure(int routing, int device) {
         std::lock_guard<std::mutex> lock(streamMutex);
@@ -88,6 +101,7 @@ struct Output final : oboe::AudioStreamDataCallback, oboe::AudioStreamErrorCallb
 
     oboe::DataCallbackResult onAudioReady(oboe::AudioStream* s, void* buffer, int32_t frames) override {
         const auto t0 = std::chrono::steady_clock::now();
+        engine.setCallbackNanos(std::chrono::duration_cast<std::chrono::nanoseconds>(t0.time_since_epoch()).count());
         engine.render(static_cast<float*>(buffer), frames, channels.load(std::memory_order_relaxed));
         const int64_t ns = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - t0).count();
         if (ns > costMaxNs.load(std::memory_order_relaxed)) costMaxNs.store(ns, std::memory_order_relaxed);
@@ -142,6 +156,11 @@ Java_dev_manadj_audio_AudioEngine_nativeReopen(JNIEnv*, jobject, jlong handle) {
 }
 
 extern "C" JNIEXPORT jint JNICALL
+Java_dev_manadj_audio_AudioEngine_nativeRestart(JNIEnv*, jobject, jlong handle) {
+    return output(handle)->restart();
+}
+
+extern "C" JNIEXPORT jint JNICALL
 Java_dev_manadj_audio_AudioEngine_nativeConfigure(JNIEnv*, jobject, jlong handle, jint routing, jint device, jboolean offline) {
     if (routing < 0 || routing > 2) return -1;
     if (offline) { output(handle)->engine.setRouting(static_cast<manadj::Routing>(routing)); return 0; }
@@ -163,7 +182,7 @@ extern "C" JNIEXPORT jlong JNICALL
 Java_dev_manadj_audio_AudioEngine_nativeSubmit(JNIEnv*, jobject, jlong handle, jint op, jint deck,
                                                   jdouble value, jlong load, jint slot) {
     using manadj::Op;
-    if (op < 0 || op > static_cast<int>(Op::SetSyncMembers) || op == static_cast<int>(Op::Filter) || op == static_cast<int>(Op::BeatFx) ||
+    if (op < 0 || op > static_cast<int>(Op::StemGain) || op == static_cast<int>(Op::LaunchStart) || op == static_cast<int>(Op::Filter) || op == static_cast<int>(Op::BeatFx) ||
         op == static_cast<int>(Op::LoopSet) || op == static_cast<int>(Op::CancelScheduled)) return 0; // dedicated entry points
     if (op == static_cast<int>(manadj::Op::SetGrid)) return 0; // nativeSetGrid carries the anchor.
     return static_cast<jlong>(output(handle)->engine.submit(static_cast<manadj::Op>(op), deck, value,
@@ -174,6 +193,26 @@ Java_dev_manadj_audio_AudioEngine_nativeSubmit(JNIEnv*, jobject, jlong handle, j
 extern "C" JNIEXPORT void JNICALL
 Java_dev_manadj_audio_AudioEngine_nativeSetSchedule(JNIEnv*, jobject, jlong frame, jlong tag) {
     manadj::Engine::setSubmitFrame(static_cast<uint64_t>(frame), static_cast<uint64_t>(tag));
+}
+
+extern "C" JNIEXPORT jdoubleArray JNICALL
+Java_dev_manadj_audio_AudioEngine_nativeLastLaunch(JNIEnv* env, jobject, jlong handle) {
+    double v[9];
+    for (int k = 0; k < 9; ++k) v[k] = output(handle)->engine.lastLaunch[k].load();
+    auto array = env->NewDoubleArray(9);
+    env->SetDoubleArrayRegion(array, 0, 9, v);
+    return array;
+}
+
+extern "C" JNIEXPORT jlongArray JNICALL
+Java_dev_manadj_audio_AudioEngine_nativeClickNanos(JNIEnv* env, jobject, jlong handle) {
+    // [0] = clicks rendered (n); [1 + k % kMaxClicks] = render instant of click k.
+    jlong v[manadj::Engine::kMaxClicks + 1];
+    v[0] = output(handle)->engine.clicksRendered();
+    for (int k = 0; k < manadj::Engine::kMaxClicks; ++k) v[1 + k] = output(handle)->engine.clickNanos(k);
+    auto array = env->NewLongArray(manadj::Engine::kMaxClicks + 1);
+    env->SetLongArrayRegion(array, 0, manadj::Engine::kMaxClicks + 1, v);
+    return array;
 }
 
 extern "C" JNIEXPORT jlong JNICALL
@@ -306,21 +345,23 @@ Java_dev_manadj_audio_AudioEngine_nativeHeadCommit(JNIEnv*, jobject, jlong handl
 
 extern "C" JNIEXPORT jboolean JNICALL
 Java_dev_manadj_audio_AudioEngine_nativeTrackBegin(JNIEnv*, jobject, jlong handle, jint deck, jlong load, jlong capacity,
-                                                      jint rate, jdouble start) {
+                                                      jint rate, jdouble start, jint stems) {
     if (capacity <= 0) return false;
-    return output(handle)->engine.trackBegin(deck, static_cast<uint64_t>(load), static_cast<uint64_t>(capacity), rate, start);
+    return output(handle)->engine.trackBegin(deck, static_cast<uint64_t>(load), static_cast<uint64_t>(capacity), rate, start, stems);
 }
 
 extern "C" JNIEXPORT jint JNICALL
 Java_dev_manadj_audio_AudioEngine_nativeTrackWrite(JNIEnv* env, jobject, jlong handle, jint deck, jlong load,
-                                                      jfloatArray samples, jint frames) {
-    constexpr int kChunk = 2048;
-    if (frames < 1 || static_cast<jlong>(frames) * 2 > env->GetArrayLength(samples)) return -1;
-    float chunk[kChunk * 2];
+                                                      jfloatArray samples, jint frames, jint stems) {
+    constexpr int kChunk = 1024;
+    if (stems != 1 && stems != manadj::kStems) return -1;
+    const int width = 2 * stems;
+    if (frames < 1 || static_cast<jlong>(frames) * width > env->GetArrayLength(samples)) return -1;
+    float chunk[kChunk * 2 * manadj::kStems];
     int total = 0;
     while (total < frames) {
         const int n = std::min(kChunk, frames - total);
-        env->GetFloatArrayRegion(samples, total * 2, n * 2, chunk);
+        env->GetFloatArrayRegion(samples, total * width, n * width, chunk);
         const int written = output(handle)->engine.trackWrite(deck, static_cast<uint64_t>(load), chunk, n);
         if (written < 0) return total ? total : -1;
         total += written;
@@ -375,6 +416,7 @@ Java_dev_manadj_audio_AudioEngine_nativeSnapshot(JNIEnv* env, jobject, jlong han
         e.fxDepth(), e.fxBeats(), static_cast<double>(e.fxHeld()), static_cast<double>(e.fxAudible()),
         0, presentedFrame, presentedNanos, 0,
         static_cast<double>(e.lateOps()), static_cast<double>(e.scheduledOps()),
+        e.heard() ? (e.quantize() ? 2.0 : 3.0) : e.quantize() ? 1.0 : 0.0, e.heardLatency(),
     };
     // Deck positions are sampled at engine frame data[23]; retry if a callback ran mid-read.
     for (int attempt = 0; attempt < 4; ++attempt) {
@@ -430,6 +472,8 @@ Java_dev_manadj_audio_AudioEngine_nativeSnapshot(JNIEnv* env, jobject, jlong han
         data[n + 38] = d.scratching.load() ? 1 : 0;
         data[n + 39] = static_cast<double>(d.launchAt.load());
         for (int h = 0; h < manadj::kHotCues; ++h) data[n + 40 + h] = d.hotcues[h].load();
+        data[n + 40 + manadj::kHotCues] = d.track.load.load() == d.loadId.load() && d.track.load.load() != 0 ? d.track.stems.load() : 0;
+        for (int s = 0; s < manadj::kStems; ++s) data[n + 41 + manadj::kHotCues + s] = d.stemTarget[s].load();
     }
     if (e.outputFrames() == clockFrame) break;
     }
@@ -484,6 +528,7 @@ extern "C" JNIEXPORT jfloatArray JNICALL
 Java_dev_manadj_audio_AudioEngine_nativeRenderOffline(JNIEnv* env, jobject, jlong handle, jint frames, jint channels) {
     if (frames < 0 || frames > 8192 || channels < 1 || channels > 8) return nullptr;
     std::vector<float> pcm(static_cast<size_t>(frames) * channels);
+    output(handle)->engine.setCallbackNanos(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count());
     output(handle)->engine.render(pcm.data(), frames, channels);
     auto array = env->NewFloatArray(frames * channels);
     if (array) env->SetFloatArrayRegion(array, 0, frames * channels, pcm.data());

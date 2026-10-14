@@ -40,7 +40,9 @@ private fun hms(seconds: Double): String { val s = seconds.coerceAtLeast(0.0).to
     val close = { model.leave(); ux.sessions = false }
     BackHandler { if (model.log != null) model.close() else close() }
     LaunchedEffect(Unit) { if (model.headers.isEmpty() || model.listError == null) model.refresh() }
-    DisposableEffect(Unit) { onDispose { model.leave() } }
+    // Leaving the screen stops replay; a configuration change (rotation, layout switch) must not: the
+    // replay lives in the ViewModel and this composition is only rebuilt.
+    DisposableEffect(Unit) { onDispose { if (!activity.isChangingConfigurations) model.leave() } }
     Column(modifier.background(Ink.background).testTag("session-screen")) {
         val log = model.log
         Row(Modifier.fillMaxWidth().height(48.dp).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -90,12 +92,16 @@ private fun sessionLength(h: SessionHeader): String? = runCatching {
     var issuesOpen by remember(log) { mutableStateOf(false) }
     val drift = model.recordingDrift
     // One warning line (space): not-reproduced vocabulary + recording drift; tap for the issue list.
-    if (log.issues.isNotEmpty() || drift.isNotEmpty()) {
+    val decode = model.decodeOffsets.filterKeys { id -> log.appearances.any { it.trackId == id } }.values.mapNotNull { it.engineOffsetMs }
+    if (log.issues.isNotEmpty() || drift.isNotEmpty() || decode.any { kotlin.math.abs(it) > .5 }) {
         val counts = log.issues.groupingBy { it.what.substringBefore(" (") }.eachCount()
         Column(Modifier.fillMaxWidth().background(Ink.crust).clickable { issuesOpen = !issuesOpen }.padding(horizontal = 12.dp, vertical = 3.dp)) {
             Row {
                 if (counts.isNotEmpty()) Text("NOT REPRODUCED: " + counts.entries.joinToString(" · ") { "${it.key} ×${it.value}" } + "   ", color = Ink.warning, size = 10, lines = if (issuesOpen) 4 else 1)
                 // Bad recording data, not a replay fault: replay follows the recorded rates and never corrects toward ticks.
+                // Decoder vs desktop placement of the audio (encoder delay / priming): decks would flam by the difference.
+                if (decode.any { kotlin.math.abs(it) > .5 }) Text("DECODE vs DESKTOP: %d/%d tracks off, worst %+.1f ms   ".format(decode.count { kotlin.math.abs(it) > .5 }, decode.size, decode.maxBy { kotlin.math.abs(it) }),
+                    Modifier.testTag("session-decode"), Ink.warning, 10)
                 if (drift.isNotEmpty()) Text("RECORDING DRIFT: ${drift.size} tick${if (drift.size == 1) "" else "s"} > 5 ms (worst %.0f ms) · not corrected".format(drift.maxOf { kotlin.math.abs(it.seconds) } * 1000),
                     Modifier.testTag("session-drift"), Ink.warning, 10)
             }

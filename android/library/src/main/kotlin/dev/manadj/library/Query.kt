@@ -26,10 +26,14 @@ data class LibraryQuery(
     val keysOpenKey: Set<String> = emptySet(),
     val sort: SortColumn = SortColumn.DATE_ADDED,
     val descending: Boolean = true,
+    /** Only tracks whose audio is cached on the phone (playable offline). */
+    val downloadedOnly: Boolean = false,
 )
 
 object LibraryFilter {
-    fun matches(track: LibraryTrack, query: LibraryQuery): Boolean {
+    /** [downloaded]: is the track's audio cached on the phone (for [LibraryQuery.downloadedOnly]). */
+    fun matches(track: LibraryTrack, query: LibraryQuery, downloaded: (LibraryTrack) -> Boolean = { true }): Boolean {
+        if (query.downloadedOnly && !downloaded(track)) return false
         val needle = query.search.trim().lowercase()
         if (needle.isNotEmpty()) {
             val hit = listOfNotNull(track.title, track.artist, track.fileName).any { it.lowercase().contains(needle) }
@@ -58,16 +62,16 @@ object LibraryFilter {
             bpm >= fold - threshold && bpm <= fold + threshold
         }
 
-    fun apply(tracks: List<LibraryTrack>, query: LibraryQuery): List<LibraryTrack> =
-        tracks.filter { matches(it, query) }.sortedWith(comparator(query.sort, query.descending))
+    fun apply(tracks: List<LibraryTrack>, query: LibraryQuery, downloaded: (LibraryTrack) -> Boolean = { true }): List<LibraryTrack> =
+        tracks.filter { matches(it, query, downloaded) }.sortedWith(comparator(query.sort, query.descending))
 
     /**
      * Filter + sort within a Playlist's members ([members] in Play order).
      * PLAY_ORDER keeps the curated order (descending reverses it); any other
      * sort only changes the view, never the Play order.
      */
-    fun applyInPlaylist(members: List<LibraryTrack>, query: LibraryQuery): List<LibraryTrack> {
-        val kept = members.filter { matches(it, query) }
+    fun applyInPlaylist(members: List<LibraryTrack>, query: LibraryQuery, downloaded: (LibraryTrack) -> Boolean = { true }): List<LibraryTrack> {
+        val kept = members.filter { matches(it, query, downloaded) }
         return when (query.sort) {
             SortColumn.PLAY_ORDER -> if (query.descending) kept.asReversed() else kept
             else -> kept.sortedWith(comparator(query.sort, query.descending))

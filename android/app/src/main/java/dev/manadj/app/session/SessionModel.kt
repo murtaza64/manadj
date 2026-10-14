@@ -38,6 +38,8 @@ class SessionModel(application: Application) : AndroidViewModel(application) {
     var log by mutableStateOf<SessionLog?>(null)
         private set
     private var driver: ReplayDriver? = null
+    /** The running replay's epoch (identity changes only when replay restarts: seek, play). */
+    val replayEpoch get() = driver?.epoch
     /** Recorded ticks the replay reference disagrees with by > 5 ms: bad recording data, shown, never corrected. */
     var recordingDrift by mutableStateOf<List<SessionLog.Divergence>>(emptyList())
         private set
@@ -108,21 +110,26 @@ class SessionModel(application: Application) : AndroidViewModel(application) {
         opening = h.uuid
         viewModelScope.launch {
             try {
-                val parsed = store.log(h)
-                require(parsed.events.isNotEmpty() && parsed.duration > 0) { "Session has no recorded duration" }
-                stop()
-                val timelineJob = async(Dispatchers.Default) { SessionTimeline(parsed) }
-                val drift = withContext(Dispatchers.Default) { parsed.tickDivergence() }
-                val tl = timelineJob.await()
-                header = h; log = parsed; driver = null; recordingDrift = drift; timeline = tl; focus = null
-                loadWaves(parsed)
-                if (drift.isNotEmpty()) android.util.Log.w(TAG, "recording drift: ${drift.size} ticks > 5 ms, worst %.1f ms".format(drift.maxOf { abs(it.seconds) } * 1000))
-                moveClock(parsed.activeStart); fit()
-                deckErrors.indices.forEach { deckErrors[it] = null }
+                show(h, store.log(h))
             } catch (e: CancellationException) { throw e }
             catch (e: Exception) { notice = "Open failed: ${e.message ?: e}" }
             finally { opening = null }
         }
+    }
+
+    /** Make [parsed] the open Session (also the test entry: no desktop needed). */
+    suspend fun show(h: SessionHeader, parsed: SessionLog) = coroutineScope {
+        require(parsed.events.isNotEmpty() && parsed.duration > 0) { "Session has no recorded duration" }
+        stop()
+        val timelineJob = async(Dispatchers.Default) { SessionTimeline(parsed) }
+        val drift = withContext(Dispatchers.Default) { parsed.tickDivergence() }
+        val tl = timelineJob.await()
+        header = h; log = parsed; driver = null; recordingDrift = drift; timeline = tl; focus = null
+        loadWaves(parsed)
+        for (id in parsed.appearances.map { it.trackId }.distinct()) track(id)?.let { if (repo.audioState(it) == dev.manadj.library.AudioState.Cached) probe(id) }
+        if (drift.isNotEmpty()) android.util.Log.w(TAG, "recording drift: ${drift.size} ticks > 5 ms, worst %.1f ms".format(drift.maxOf { abs(it.seconds) } * 1000))
+        moveClock(parsed.activeStart); fit()
+        deckErrors.indices.forEach { deckErrors[it] = null }
     }
 
     fun close() { stop(); log = null; header = null; driver = null; recordingDrift = emptyList(); timeline = null; focus = null; wavesJob?.cancel() }
@@ -179,7 +186,7 @@ class SessionModel(application: Application) : AndroidViewModel(application) {
     private fun driver(player: PlayerModel): ReplayDriver? {
         val l = log ?: return null
         this.player = player
-        return driver ?: ReplayDriver(l, engine(player)) { notice = it }.also { driver = it }
+        return driver ?: ReplayDriver(l, engine(player), { notice = it }, timeline ?: SessionTimeline(l)).also { driver = it }
     }
 
     fun play(player: PlayerModel) {
@@ -191,7 +198,7 @@ class SessionModel(application: Application) : AndroidViewModel(application) {
         player.submit(AudioCommand.SetCrossfade(0.0))
         prefetch(l)
         loadFailure.fill(null)
-        lateBase = player.engineSnapshot()?.lateOps ?: 0L; lateOps = 0
+        lateBase = player.engineSnapshot()?.lateOps ?: 0L; lateOps = 0; reopenBase = -1
         r.prepare(time)
         sync(r)
         loop?.cancel()
@@ -218,8 +225,17 @@ class SessionModel(application: Application) : AndroidViewModel(application) {
 
     private suspend fun run(player: PlayerModel, r: ReplayDriver) {
         while (currentCoroutineContext().isActive) {
-            val now = r.tick(System.nanoTime() / 1e9)
+            val wall = System.nanoTime() / 1e9
+            val now = r.tick(wall)
             sync(r)
+            if (now != null && lastTick != null) {
+                val (t, w) = lastTick!!
+                if (kotlin.math.abs((now - t) - (wall - w)) > .25) {
+                    val snap = player.engineSnapshot()
+                    android.util.Log.w(TAG, "clock jump: session %+.3f s over %.3f s wall; output frames=%d rate=%d open=%s".format(now - t, wall - w, snap?.outputFrames, snap?.outputSampleRate, snap?.outputOpen))
+                }
+            }
+            lastTick = now?.let { it to wall }
             if (now != null) {
                 moveClock(now)
                 if (now - lastMeasure >= MEASURE_SECONDS || now < lastMeasure) { lastMeasure = now; measure(player, r) }
@@ -235,6 +251,7 @@ class SessionModel(application: Application) : AndroidViewModel(application) {
     }
 
     private var lastMeasure = Double.NEGATIVE_INFINITY
+    private var lastTick: Pair<Double, Double>? = null
 
     /**
      * Engine vs reference at the snapshot's sampling frame, per sounding deck (logcat ManadjSession): the
@@ -253,14 +270,26 @@ class SessionModel(application: Application) : AndroidViewModel(application) {
             val offset = if (!r.exact(d, snap.clockFrame) || want.trackId == null || !want.sounding || want.scratching || want.playhead < 0 || got == null) null
                 else (got.sourceSeconds - want.playhead) * 1000
             engineOffsetMs[d] = offset
-            if (offset != null) parts += "${DECKS[d]} %+.3fms".format(offset)
+            if (offset != null) parts += "${DECKS[d]} %+.3fms".format(offset) + (if (got?.keyLockActive == true) "(kl)" else "") + (if (got?.fullyDecoded == false) "(dec %.0fs)".format(got.decodedSeconds) else "")
         }
         lateOps = snap.lateOps - lateBase
         val sounding = engineOffsetMs.filterNotNull()
         val spread = if (sounding.size >= 2) " inter-deck %.3fms".format(sounding.max() - sounding.min()) else ""
-        if (parts.isNotEmpty()) android.util.Log.i(TAG, "t=%.1f ".format(at - l.activeStart) + parts.joinToString(" ") + spread + " late=$lateOps")
+        if (reopenBase < 0) reopenBase = snap.reopenCount
+        val reopened = snap.reopenCount - reopenBase
+        if (reopened > 0) {
+            // The output restarted (route change, device switch): its frame counter and scheduled ops do not carry
+            // over. Re-place every deck on a fresh epoch from here (exact again) instead of drifting.
+            android.util.Log.w(TAG, "output reopened during replay: re-placing decks at t=%.3f".format(at))
+            reopenBase = snap.reopenCount
+            r.prepare(at); sync(r)
+            return
+        }
+        if (parts.isNotEmpty()) android.util.Log.i(TAG, "t=%.1f ".format(at - l.activeStart) + parts.joinToString(" ") + spread +
+            " late=$lateOps sched=${snap.scheduledOps} reopen=$reopened xruns=${snap.outputXruns} starved=${snap.starvedDeckFrames} rate=${snap.outputSampleRate}")
     }
     private var lateBase = 0L
+    private var reopenBase = -1
 
     private fun engine(player: PlayerModel) = object : ReplayDriver.Engine {
         private var rate = 48000
@@ -279,7 +308,7 @@ class SessionModel(application: Application) : AndroidViewModel(application) {
             val snap = ui.snapshot
             if (snap?.loadState == LoadState.ERROR && snap.sourceId == want) return ReplayDriver.Load.Failed(snap.error ?: "decode failed")
             if (!(ui.ready && ui.source?.id == want)) return ReplayDriver.Load.Pending
-            return if (snap?.fullyDecoded == true) ReplayDriver.Load.Ready else ReplayDriver.Load.Partial
+            return if (snap?.fullyDecoded == true) ReplayDriver.Load.Ready else ReplayDriver.Load.Partial(snap?.decodedSeconds ?: 0.0)
         }
     }
 
@@ -296,7 +325,25 @@ class SessionModel(application: Application) : AndroidViewModel(application) {
     /** Download every track the Session loads, ahead of its load (mid-session loads then only decode). */
     private fun prefetch(l: SessionLog) {
         val ids = l.appearances.filter { it.end > time }.map { it.trackId }.distinct()
-        viewModelScope.launch(Dispatchers.IO) { for (id in ids) runCatching { repo.audioFile(id) } }
+        viewModelScope.launch(Dispatchers.IO) { for (id in ids) runCatching { repo.audioFile(id); probe(id) } }
+    }
+
+    /** Per track: this phone's decode vs the desktop's, in ms (> 0 = phone late). See [DecodeProbe]. */
+    val decodeOffsets = mutableStateMapOf<Int, DecodeProbe.Result>()
+    private val probed = HashSet<Int>()
+    private val probeDispatcher = Dispatchers.Default.limitedParallelism(1)
+    private fun probe(id: Int) {
+        if (!probed.add(id)) return
+        viewModelScope.launch(probeDispatcher) {
+            val t = track(id) ?: return@launch
+            val r = runCatching {
+                val wave = repo.detailWaveform(id) ?: error("no desktop waveform")
+                DecodeProbe.run(repo.audioFile(id), wave)
+            }.onFailure { android.util.Log.w(TAG, "decode-probe #$id ${t.title}: $it") }.getOrNull() ?: return@launch
+            android.util.Log.i(TAG, "decode-probe #$id %s rate=%d delay=%s pad=%s firstPts=%dus raw=%s engine=%s score=%.3f · %s".format(
+                r.mime, r.sampleRate, r.encoderDelay, r.encoderPadding, r.firstPtsUs, r.offsetMs?.let { "%+.2fms".format(it) } ?: "?", r.engineOffsetMs?.let { "%+.2fms".format(it) } ?: "?", r.score, t.title))
+            withContext(Dispatchers.Main) { decodeOffsets[id] = r }
+        }
     }
 
     /** Library track the engine deck holds and is ready with (null = other/none). */
@@ -310,7 +357,7 @@ class SessionModel(application: Application) : AndroidViewModel(application) {
 
     companion object {
         private const val TAG = "ManadjSession"
-        const val MEASURE_SECONDS = 2.0
+        const val MEASURE_SECONDS = 1.0
         const val FOLLOW_HOLD_NANOS = 20_000_000_000L
     }
 

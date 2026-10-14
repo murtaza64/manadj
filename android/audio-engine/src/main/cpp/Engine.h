@@ -25,6 +25,7 @@ constexpr double kLoopMinBeats = 0.125, kLoopMaxBeats = 128, kLoopDefaultBeats =
 constexpr double kGridlessBpm = 120;     // desktop jumpBeats fallback for BPM-less tracks
 constexpr int kHeadFrames = 8192;       // Pre-decoded audio at each cue (~170 ms at 48 kHz).
 constexpr int kTailFrames = 2048;       // Old audio captured for a crossfade (240 frames at <=8x ratio).
+constexpr int kStems = 4;
 constexpr double kMaxLeadInSeconds = 30; // desktop MAX_LEAD_IN_SECONDS: pre-roll bound
 constexpr double kAtCueEpsilon = 0.01;  // Desktop transport.ts AT_CUE_EPSILON.
 constexpr int kBlockFrames = 1024;
@@ -70,8 +71,10 @@ struct Head {
  * an older tag, so the worker may free and reallocate before tagging the new load.
  */
 struct Track {
-    std::unique_ptr<int16_t[]> pcm; // worker-owned allocation
+    std::unique_ptr<int16_t[]> pcm; // worker-owned allocation; frame-major: stems x stereo int16 per frame
     uint64_t capacity = 0;          // frames (worker-owned)
+    uint64_t allocated = 0;         // int16 samples (worker-owned)
+    std::atomic<int> stems{1};      // 1 = the track itself; kStems = vocals, drums, bass, other (desktop STEM_NAMES)
     std::atomic<uint64_t> load{0};
     std::atomic<uint64_t> frames{0};
     std::atomic<int> sampleRate{0};
@@ -82,7 +85,10 @@ struct Track {
 enum class Op : int { Prepare, Play, Pause, CueDown, CueUp, HotCueDown, HotCueUp,
                        HotCueSet, HotCueClear, Seek, Fader, Trim, Crossfade, Pitch, Bend, Pfl, CueMix, Eq, Filter,
                        SetGrid, BeatJump, LoopToggle, LoopResize, LoopPreset, Quantize, CueSetAt, HotCueSetAt, BeatFx, KeyLock, PhaseAlign, ScratchBegin, ScratchMove, ScratchEnd,
-                       LoopSet, CancelScheduled, SetSyncMembers, LaunchStart };
+                       LoopSet, CancelScheduled, SetSyncMembers, LaunchStart, HeardLatency, Clicks, StemGain };
+// StemGain: slot = stem (desktop STEM_NAMES order), value = 0..1 (declick-ramped; unity on Prepare).
+// Clicks (global): slot = count, value = interval seconds; calibration chirps on every output channel (see clickSample).
+// Quantize: value 0 off, 1 Grid, 2 Heard. HeardLatency (global): value = output latency L in seconds (Heard mode).
 // SetSyncMembers (global): value = Sync Group member mask, slot = SYNCED (in-lock) mask; scopes the launch reference.
 // LaunchStart: internal (callback-scheduled end of a deferred quantized launch); never submitted.
 // LoopSet: value = start (< 0 clears), aux = {end, playhead (NaN keeps the position)}; machine replay (Session).
@@ -180,6 +186,9 @@ struct Deck {
     // Deferred quantized launch: engine frame the deck starts sounding at (0 = none). Playing/preview is
     // already set; until then the deck renders silence and its playhead holds at the entry point.
     std::atomic<uint64_t> launchAt{0};
+    // Stem gains (stems #210 kill switches): target from StemGain; applied ramps over kFadeFrames (callback).
+    std::array<std::atomic<float>, kStems> stemTarget{1.f, 1.f, 1.f, 1.f};
+    std::array<float, kStems> stemGain{1.f, 1.f, 1.f, 1.f};
     bool scratchRunning = false;
     double scratchPos = 0, scratchDrive = 0, scratchRate = 0, scratchTime = 0;
     double scratchStart = 0, scratchLoopStart = 0, scratchLoopEnd = 0;
@@ -256,7 +265,8 @@ public:
     void headCommit(int deck, int slot, uint64_t load, double seconds, int frames);
     void headAbort(int deck, int slot);
     // Whole-track fill (worker, after Prepare(load) applied). False/-1 once superseded or full.
-    bool trackBegin(int deck, uint64_t load, uint64_t capacityFrames, int sampleRate, double startSeconds);
+    // stems: 1 (the track) or kStems (trackWrite then takes kStems x stereo per frame, STEM_NAMES order).
+    bool trackBegin(int deck, uint64_t load, uint64_t capacityFrames, int sampleRate, double startSeconds, int stems = 1);
     int trackWrite(int deck, uint64_t load, const float* samples, int frames);
     void trackFinish(int deck, uint64_t load);
 
@@ -266,6 +276,22 @@ public:
     Routing routing() const { return static_cast<Routing>(routing_.load()); }
     float cueMix() const { return cueMix_.load(); }
     bool quantize() const { return quantize_.load(); }
+    bool heard() const { return heard_.load(); }
+    // Latency calibration (#382): CLOCK_MONOTONIC ns of the current callback's start (set before render);
+    // each calibration click's render instant is recorded (ns, 0 = not yet rendered).
+    void setCallbackNanos(int64_t ns) noexcept { callbackNanos_ = ns; }
+    static constexpr int kMaxClicks = 128;          // render-instant ring (click k at k % kMaxClicks)
+    static constexpr int kClicksForever = 0xFFFF;  // Clicks count: until a Clicks op with count 0
+    static constexpr int kClicksAccent = 1 << 16; // Clicks slot flag: every 4th click full level, others 45 %
+    static constexpr double kClickSeconds = .012;
+    // Hann-windowed linear chirp 400 Hz → 6 kHz over kClickSeconds, peak .7 (the mic matched filter's template).
+    static double clickSample(double t) noexcept;
+    int64_t clickNanos(int k) const { return k >= 0 && k < kMaxClicks ? clickNanos_[k].load() : 0; }
+    // Clicks rendered since the last Clicks op (index of the next one).
+    int clicksRendered() const { return clicksRendered_.load(); }
+    double heardLatency() const { return heardLatency_.load(); }
+    // Last quantized launch (diagnostics): count, deck, reference, L, reference render pos, heard pos, target beat, delta s, entry.
+    std::array<std::atomic<double>, 9> lastLaunch{};
     Deck& deck(int index) { return decks_[index]; }
     const Deck& deck(int index) const { return decks_[index]; }
     int outputRate() const { return outputRate_.load(); }
@@ -305,6 +331,17 @@ private:
     std::atomic<float> cueMix_{0};  // Headphone blend: 0 = cue bus only, 1 = master only.
     std::atomic<int> routing_{0};
     std::atomic<bool> quantize_{false};
+    // Heard quantize: alignment gestures are read at the heard instant (L before the render position).
+    std::atomic<bool> heard_{false};
+    int64_t callbackNanos_ = 0;
+    uint64_t clickNext_ = 0, clickInterval_ = 0;
+    int clicksLeft_ = 0, clickIndex_ = 0;
+    bool clickAccent_ = false;
+    std::atomic<int> clicksRendered_{0};
+    std::array<std::atomic<int64_t>, kMaxClicks> clickNanos_{};
+    void renderClicks(float* output, int frames, int channels, uint64_t start) noexcept;
+    std::atomic<double> heardLatency_{0};
+    double heardLead(const Deck& d) const noexcept;
     std::array<std::unique_ptr<fx::Insert>, fx::kTargetCount> fx_;
     std::atomic<int> fxEffect_{fx::kEcho}, fxTarget_{fx::kTargetA}, fxHeld_{0}, fxAudible_{0};
     std::atomic<bool> fxOn_{false};
@@ -344,7 +381,7 @@ private:
     void applyLoopResize(Deck& d, double beats) noexcept;
     void stop(Deck& d) noexcept;
     int launchReference(int index) const noexcept;
-    void launch(int index, double at, int slot) noexcept;
+    bool launch(int index, double at, int slot) noexcept;
     int syncMembers_ = 0, syncSynced_ = 0; // callback-private (SetSyncMembers)
     void captureTail(Deck& d) noexcept;
     void releaseHead(Deck& d) noexcept;

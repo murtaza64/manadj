@@ -63,7 +63,7 @@ class SessionReplayEngineTest {
                 d.sourceId != "t$trackId" || d.loadState == LoadState.LOADING -> ReplayDriver.Load.Pending
                 d.loadState == LoadState.ERROR -> ReplayDriver.Load.Failed(d.error ?: "error")
                 d.fullyDecoded -> ReplayDriver.Load.Ready
-                else -> ReplayDriver.Load.Partial
+                else -> ReplayDriver.Load.Partial(d.decodedSeconds)
             }
         }
     }

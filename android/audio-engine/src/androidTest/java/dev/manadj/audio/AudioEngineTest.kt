@@ -160,6 +160,70 @@ class AudioEngineTest {
         }
     }
 
+    @Test fun stemsReplaceTheTrackInMemoryAndGainsApply() {
+        val track = wav("engine-stems-mix.wav", .5)
+        val stems = listOf(.1, .2, .15, .05).mapIndexed { i, v -> wav("engine-stem-$i.wav", v, rate = 44100) }
+        AudioEngine(offline = true).use { engine ->
+            val fds = stems.map { ParcelFileDescriptor.open(it, ParcelFileDescriptor.MODE_READ_ONLY) }
+            try { ParcelFileDescriptor.open(track, ParcelFileDescriptor.MODE_READ_ONLY).use { assertTrue(engine.load(DeckId.A, "s", it, fds).accepted) } }
+            finally { fds.forEach { it.close() } }
+            engine.settled(DeckId.A)
+            engine.until("stems decoded") { deck(DeckId.A).let { it.fullyDecoded && it.stems } }
+            assertTrue(engine.submit(AudioCommand.Play(DeckId.A)).accepted)
+            engine.renderOfflineForTest(4800)
+            val unity = engine.renderOfflineForTest(480)[958]
+            assertTrue(engine.submit(AudioCommand.SetStemGain(DeckId.A, 1, 0.0)).accepted)
+            engine.renderOfflineForTest(4800)
+            val killed = engine.renderOfflineForTest(480)[958]
+            assertEquals(.5 / .3, (unity / killed).toDouble(), .01)        // .5 summed → .3 without drums
+            assertEquals(listOf(1.0, 0.0, 1.0, 1.0), engine.deck(DeckId.A).stemGains)
+            assertFalse(engine.submit(AudioCommand.SetStemGain(DeckId.A, 4, 0.0)).accepted)
+        }
+    }
+
+    /**
+     * Codec priming (encoder delay) like desktop/ffmpeg: AAC (ffmpeg aac and Apple aac_at, MP4 edit list) and MP3
+     * (LAME gapless header) decoys of the same WAV must put the burst at the same source time as the WAV (onset at
+     * 1.000 s, 44.1 kHz), via PcmReader (streaming + whole-track decode) — not 1024/2112/1105 frames late.
+     */
+    @Test fun codecPrimingMatchesTheWav() {
+        val context = InstrumentationRegistry.getInstrumentation().context
+        fun asset(name: String) = File(cache, name).also { files.add(it); it.writeBytes(context.assets.open(name).readBytes()) }
+        val onsets = mutableMapOf<String, Double>()
+        val seekOnsets = mutableMapOf<String, Double>()
+        for (name in listOf("priming.wav", "priming-aac.m4a", "priming-aacat.m4a", "priming.mp3", "priming-noxing.mp3", "priming-short.mp3")) {
+            ParcelFileDescriptor.open(asset(name), ParcelFileDescriptor.MODE_READ_ONLY).use { fd ->
+                PcmReader.open(fd.fileDescriptor).use { r ->
+                    var onset: Double? = null
+                    while (onset == null) {
+                        val n = r.read()
+                        if (n < 0) break
+                        for (i in 0 until n) if (kotlin.math.abs(r.samples[i * 2]) > .1f) { onset = r.chunkStartSeconds + i.toDouble() / r.sampleRate; break }
+                    }
+                    onsets[name] = onset ?: Double.NaN
+                }
+                // After a seek (decoder flush + extractor seek): the second burst (2.5 s) at the same offset.
+                PcmReader.open(fd.fileDescriptor).use { r ->
+                    r.seek(2.0)
+                    var onset: Double? = null
+                    while (onset == null) {
+                        val n = r.read()
+                        if (n < 0) break
+                        for (i in 0 until n) if (kotlin.math.abs(r.samples[i * 2]) > .1f) { onset = r.chunkStartSeconds + i.toDouble() / r.sampleRate; break }
+                    }
+                    seekOnsets[name] = (onset ?: Double.NaN) - 1.5
+                }
+            }
+        }
+        android.util.Log.i("manadj-priming", "after seek: " + seekOnsets.entries.joinToString { (k, v) -> "%s %+.1f frames".format(k, (v - onsets.getValue("priming.wav")) * 44100) })
+        android.util.Log.i("manadj-priming", onsets.entries.joinToString { (k, v) -> "%s %.6f s (%+.1f frames)".format(k, v, (v - onsets.getValue("priming.wav")) * 44100) })
+        // Desktop reference (Chrome decodeAudioData, measured on these files): every file aligns with the WAV except
+        // the header-less MP3, which desktop leaves 1105 frames late (encoder 576 + decoder 529 delay untrimmed).
+        val wav = onsets.getValue("priming.wav")
+        assertEquals(44101 / 44100.0, wav, 1.5 / 44100)
+        for ((name, at) in onsets) assertEquals("$name onset vs desktop (frames)", if (name == "priming-noxing.mp3") 1105.0 else 0.0, (at - wav) * 44100, 2.0)
+    }
+
     @Test fun decodedLocalWavMixSeekAndDesktopCueSemantics() {
         val a = wav("engine-a.wav", .25)
         val b = wav("engine-b.wav", -.25)

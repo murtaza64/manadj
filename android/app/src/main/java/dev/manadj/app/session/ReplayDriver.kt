@@ -11,14 +11,19 @@ import dev.manadj.library.session.ReplayEpoch
 import dev.manadj.library.session.ReplayOp
 import dev.manadj.library.session.ReplayScript
 import dev.manadj.library.session.SessionLog
+import dev.manadj.library.session.SessionTimeline
 import dev.manadj.library.session.TimedOp
 
 /**
  * Executes a [ReplayScript] on the engine from one [ReplayEpoch]: keeps [LOOKAHEAD] seconds of ops
- * frame-stamped ahead of the output clock, issues loads when due, and places a deck once its track is fully
- * decoded. Never measures-and-corrects. The host calls [tick] periodically (and renders, offline).
+ * frame-stamped ahead of the output clock and places a deck once the part of its track it is about to play
+ * is decoded. Never measures-and-corrects, never starts a deck at an unstamped frame: a deck that is not
+ * ready joins later at a stamped frame with the reference position for that frame.
+ * Decode time is hidden: PLAY waits only for decks that sound within [START_HORIZON]; a Session Load is
+ * issued as soon as its deck goes silent before it ([SessionTimeline.earlyLoads]), not when the Load happens.
+ * The host calls [tick] periodically (and renders, offline).
  */
-class ReplayDriver(val log: SessionLog, private val engine: Engine, private val onNotice: (String) -> Unit = {}) {
+class ReplayDriver(val log: SessionLog, private val engine: Engine, private val onNotice: (String) -> Unit = {}, val timeline: SessionTimeline = SessionTimeline(log)) {
     interface Engine {
         /** Engine output frame counter now (null = output not running). */
         fun outputFrames(): Long?
@@ -34,8 +39,8 @@ class ReplayDriver(val log: SessionLog, private val engine: Engine, private val 
     }
     sealed interface Load {
         data object Pending : Load
-        /** Playable, but not all of it is in memory yet (relocations may not be exact). */
-        data object Partial : Load
+        /** Playable, decoded from the start up to [decodedSeconds] (relocations past it are not exact). */
+        data class Partial(val decodedSeconds: Double) : Load
         data object Ready : Load
         data class Failed(val reason: String) : Load
     }
@@ -60,6 +65,11 @@ class ReplayDriver(val log: SessionLog, private val engine: Engine, private val 
     private val dueLoads = ArrayList<Triple<Double, Int, Int?>>()
     /** Engine frame from which a LIVE deck follows the reference (its placement frame). */
     private val liveFrom = LongArray(4)
+    /** A deck loaded early is placed no earlier than its Session Load time. */
+    private val notBefore = DoubleArray(4) { Double.NEGATIVE_INFINITY }
+    /** Session Loads still ahead of the clock, and those already issued early (by Load time + deck). */
+    private val pendingEarly = ArrayList<SessionTimeline.EarlyLoad>()
+    private val earlyIssued = HashSet<Pair<Double, Int>>()
     private var tag = 0L
     private var scheduledUntil = 0.0
 
@@ -76,14 +86,20 @@ class ReplayDriver(val log: SessionLog, private val engine: Engine, private val 
             track[d] = id
             loadDueAt[d] = startTime
             partialSince[d] = Double.NaN
+            notBefore[d] = Double.NEGATIVE_INFINITY
             decks[d] = when {
                 id == null -> Deck.EMPTY
                 engine.holds(d) == id -> Deck.LOADING
                 else -> { engine.submit(AudioCommand.Pause(DeckId.entries[d])); engine.startLoad(d, id); Deck.LOADING }
             }
         }
+        pendingEarly.clear(); earlyIssued.clear()
+        pendingEarly += timeline.earlyLoads.filter { it.t > startTime }
         preparing = true
     }
+
+    /** Whether PLAY must wait for [d]: it sounds within [START_HORIZON] of the start. */
+    private fun neededAtStart(d: Int) = timeline.nextSound(d, startTime)?.let { it <= startTime + START_HORIZON } == true
 
     fun stop() {
         if (playing || preparing) {
@@ -98,12 +114,13 @@ class ReplayDriver(val log: SessionLog, private val engine: Engine, private val 
     fun tick(wallSeconds: Double): Double? {
         pollLoads(wallSeconds)
         if (preparing) {
-            if ((0..3).none { decks[it] == Deck.LOADING }) start()
+            if ((0..3).none { decks[it] == Deck.LOADING && neededAtStart(it) }) start()
             return null
         }
         if (!playing) return null
         val e = epoch ?: return null
         val now = e.timeAt(engine.outputFrames() ?: return null)
+        issueEarlyLoads(now)
         issueDueLoads(now)
         pump(now)
         if (now >= log.end) stop()
@@ -144,6 +161,7 @@ class ReplayDriver(val log: SessionLog, private val engine: Engine, private val 
             val d = op.deck
             if (only != null && d != only) continue
             if (op is ReplayOp.Load) {
+                if (earlyIssued.contains(t to op.deck)) continue
                 decks[op.deck] = Deck.LOADING; track[op.deck] = op.trackId; loadDueAt[op.deck] = t; partialSince[op.deck] = Double.NaN
                 dueLoads += Triple(t, op.deck, op.trackId)
                 continue
@@ -167,8 +185,31 @@ class ReplayDriver(val log: SessionLog, private val engine: Engine, private val 
         if (due.isEmpty()) return
         dueLoads.removeAll(due.toSet())
         for ((_, d, id) in due) {
-            if (id == null) { decks[d] = Deck.EMPTY; engine.submit(AudioCommand.Pause(DeckId.entries[d])) } else engine.startLoad(d, id)
+            if (id == null) { decks[d] = Deck.EMPTY; engine.submit(AudioCommand.Pause(DeckId.entries[d])) }
+            else if (engine.holds(d) != id) engine.startLoad(d, id)
         }
+    }
+
+    /** Session Loads whose deck has gone silent: start them now; the deck is placed at the Load time. */
+    private fun issueEarlyLoads(now: Double) {
+        val due = pendingEarly.filter { it.from <= now }
+        if (due.isEmpty()) return
+        pendingEarly.removeAll(due.toSet())
+        for (l in due) {
+            if (l.t <= now) continue // reached by the op stream already
+            earlyIssued += l.t to l.deck
+            dueLoads.removeAll { it.second == l.deck && it.first <= l.t }
+            decks[l.deck] = Deck.LOADING; track[l.deck] = l.trackId; loadDueAt[l.deck] = l.t; partialSince[l.deck] = Double.NaN
+            notBefore[l.deck] = l.t
+            if (engine.holds(l.deck) != l.trackId) engine.startLoad(l.deck, l.trackId)
+        }
+    }
+
+    /** [state] covers what deck [d] plays from [at] for the next [READY_HORIZON] (plus margin). */
+    private fun ready(d: Int, state: Load, at: Double): Boolean = when (state) {
+        Load.Ready -> true
+        is Load.Partial -> state.decodedSeconds >= (timeline.reach(d, at, at + READY_HORIZON) ?: log.replayAt(at).decks[d].playhead).coerceAtLeast(0.0) + READY_MARGIN
+        else -> false
     }
 
     /** LOADING decks become LIVE once fully decoded; mid-replay they are placed at a frame [JOIN_LEAD] ahead. */
@@ -180,16 +221,21 @@ class ReplayDriver(val log: SessionLog, private val engine: Engine, private val 
             when (val state = engine.load(d, id)) {
                 Load.Pending -> continue
                 is Load.Failed -> { decks[d] = Deck.FAILED; errors[d] = state.reason; continue }
-                Load.Partial -> {
-                    if (partialSince[d].isNaN()) partialSince[d] = wall
-                    if (wall - partialSince[d] < DECODE_GRACE) continue
-                    onNotice("Deck ${"ABCD"[d]}: track not fully decoded — seeks on it may not be sample-exact")
+                is Load.Partial -> {
+                    val at = epoch?.let { e -> engine.outputFrames()?.let { e.timeAt(it) + JOIN_LEAD } } ?: startTime
+                    if (!ready(d, state, maxOf(at, notBefore[d]))) {
+                        if (partialSince[d].isNaN()) partialSince[d] = wall
+                        if (wall - partialSince[d] < DECODE_GRACE) continue
+                        onNotice("Deck ${"ABCD"[d]}: track not decoded far enough — relocations on it may not be sample-exact")
+                    }
                 }
                 Load.Ready -> {}
             }
             val e = epoch
             if (preparing || e == null) { decks[d] = Deck.LIVE; continue }
-            val join = e.timeAt(engine.outputFrames() ?: continue) + JOIN_LEAD
+            val now = e.timeAt(engine.outputFrames() ?: continue)
+            if (notBefore[d] > now + LOOKAHEAD) continue // loaded early: placed once its Load is within the lookahead
+            val join = maxOf(now + JOIN_LEAD, notBefore[d])
             decks[d] = Deck.LIVE
             liveFrom[d] = e.frameOf(join)
             submit(liveFrom[d], script.place(join, d))
@@ -219,6 +265,11 @@ class ReplayDriver(val log: SessionLog, private val engine: Engine, private val 
         const val START_LEAD = .25
         const val JOIN_LEAD = .15
         const val DECODE_GRACE = 20.0
+        /** PLAY waits only for decks that sound this soon after the start; the rest join when ready. */
+        const val START_HORIZON = 8.0
+        /** A partially decoded deck is ready when it covers what it plays over this horizon (+ margin). */
+        const val READY_HORIZON = 10.0
+        const val READY_MARGIN = 2.0
 
         fun command(op: ReplayOp): AudioCommand? {
             val deck = op.deck?.let { DeckId.entries[it] }

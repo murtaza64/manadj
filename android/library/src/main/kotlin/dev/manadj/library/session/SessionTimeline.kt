@@ -12,7 +12,7 @@ import kotlin.math.pow
  * Session time to track time (the waveform segments), [mix] steps (audibility fill + waveform modulation),
  * gesture marks, loops, Beat FX spans and machine holds.
  */
-class SessionTimeline(log: SessionLog) {
+class SessionTimeline(private val log: SessionLog) {
     /** Track [trackId] playing from [p0] at [rate] over Session time [t0, t1). */
     data class Run(val t0: Double, val t1: Double, val p0: Double, val rate: Double, val trackId: Int) {
         fun at(t: Double) = p0 + (t - t0) * rate
@@ -146,6 +146,43 @@ class SessionTimeline(log: SessionLog) {
 
     /** Where the last audio stops (end of the last run on any deck; the log end when nothing played). */
     val activeEnd: Double = runs.mapNotNull { it.lastOrNull()?.t1 }.maxOrNull() ?: end
+
+    /** Furthest track position deck [deck] plays over Session [from, to] (null = it plays nothing then). */
+    fun reach(deck: Int, from: Double, to: Double): Double? {
+        val list = runs[deck]
+        var i = runIndex(deck, from)
+        var best: Double? = null
+        while (i < list.size && list[i].t0 < to) {
+            val r = list[i]
+            val p = max(r.at(max(r.t0, from)), r.at(min(r.t1, to)))
+            best = max(best ?: p, p); i++
+        }
+        return best
+    }
+
+    /** When deck [deck] next makes sound at or after [t] (null = never again). */
+    fun nextSound(deck: Int, t: Double): Double? = runs[deck].getOrNull(runIndex(deck, t))?.let { max(it.t0, t) }
+
+    /**
+     * A Session Load replay can issue early: deck [deck] is silent from [from] (its previous track's last
+     * sound) until the Load at [t], so the track can be decoding all that time instead of from [t].
+     */
+    data class EarlyLoad(val t: Double, val deck: Int, val trackId: Int, val from: Double)
+    val earlyLoads: List<EarlyLoad> by lazy {
+        val out = ArrayList<EarlyLoad>()
+        val lastScratch = DoubleArray(4) { Double.NEGATIVE_INFINITY }
+        for (e in log.replayEvents) {
+            if (e is CaptureEvent.Transport && e.action.startsWith("scratch")) lastScratch[e.deck] = e.t
+            if (e is CaptureEvent.Load && e.trackId != null) {
+                val list = runs[e.deck]
+                val i = runIndex(e.deck, e.t)
+                val covering = list.getOrNull(i)?.takeIf { it.t0 < e.t }
+                val lastEnd = if (covering != null) e.t else list.getOrNull(i - 1)?.t1 ?: start
+                out += EarlyLoad(e.t, e.deck, e.trackId, min(e.t, max(lastEnd, lastScratch[e.deck])))
+            }
+        }
+        out
+    }
 
     /** Session time the occurrence's audio actually ran (first to last run on its deck within the load), or null if it never played. */
     fun playedSpan(a: Appearance): Pair<Double, Double>? {

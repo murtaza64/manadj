@@ -74,13 +74,40 @@ class PlaybackService : Service() {
 
     fun filterResponseDb(settings: FilterSettings, position: Double, frequencies: DoubleArray): DoubleArray? =
         if (destroyed) null else try { engine?.filterResponseDb(settings, position, frequencies) } catch (_: IllegalStateException) { null }
+    /** Closes and reopens the output (same routing/device), off the main thread; result via [onDone] on main. */
+    fun restartOutput(onDone: (Int) -> Unit) {
+        lifetime.execute {
+            val result = if (destroyed) -1 else try { engine?.restartOutput() ?: -1 } catch (_: IllegalStateException) { -1 }
+            main.post { onDone(result) }
+        }
+    }
+
+    /** Calibration clicks (#382): [count] (null = until [stopClicks]) every [interval] s, accented every 4th if [accent]. */
+    fun startClicks(count: Int?, interval: Double, accent: Boolean): Boolean = !destroyed && try { engine?.startCalibrationClicks(count, interval, accent)?.accepted == true } catch (_: IllegalStateException) { false }
+    fun stopClicks() { if (!destroyed) try { engine?.stopCalibrationClicks() } catch (_: IllegalStateException) {} }
+    fun clickNanos(): LongArray = if (destroyed) LongArray(0) else try { engine?.clickNanos() ?: LongArray(0) } catch (_: IllegalStateException) { LongArray(0) }
+
+    /** Mic-loopback output latency (#382) off the main thread; result via [onDone] on main. */
+    fun calibrateLatency(onDone: (LatencyCalibrator.Result) -> Unit) {
+        Thread({
+            val audio = engine
+            val result = if (destroyed || audio == null) LatencyCalibrator.Result(null, emptyList(), 0.0, "Audio engine not running")
+                else try { LatencyCalibrator(this).measure(audio) } catch (e: Exception) { LatencyCalibrator.Result(null, emptyList(), 0.0, e.message ?: "Calibration failed") }
+                    // Opening the mic can re-route/suspend a Bluetooth A2DP (MMAP) output without a disconnect
+                    // callback (human: silence after calibrating on BT headphones): always reopen the output.
+                    .also { if (!destroyed) runCatching { audio?.restartOutput() } }
+                    .also { r -> android.util.Log.i("manadj-calib", "mic: L=%s spread=%.1f ms samples=%s snr=%s reason=%s".format(
+                        r.seconds?.let { "%.1f ms".format(it * 1000) }, r.spreadMillis, r.samples.map { "%.1f".format(it * 1000) }, r.snr.map { "%.1f".format(it) }, r.reason)) }
+            main.post { onDone(result) }
+        }, "manadj-latency-calibration").start()
+    }
     fun outputInfo(): OutputInfo? = if (destroyed) null else try { engine?.outputInfo() } catch (_: IllegalStateException) { null }
 
     fun source(id: String?): LocalSource? = sourceMetadata[id]
 
-    fun load(deck: DeckId, source: LocalSource, descriptor: ParcelFileDescriptor): CommandReceipt {
+    fun load(deck: DeckId, source: LocalSource, descriptor: ParcelFileDescriptor, stems: List<ParcelFileDescriptor>? = null): CommandReceipt {
         if (snapshot()?.outputOpen != true) return CommandReceipt(0, false, failure ?: "Audio output unavailable")
-        val receipt = engine?.load(deck, source.id, descriptor) ?: CommandReceipt(0, false, failure ?: "Audio output is starting")
+        val receipt = engine?.load(deck, source.id, descriptor, stems) ?: CommandReceipt(0, false, failure ?: "Audio output is starting")
         if (receipt.accepted) sourceMetadata[source.id] = source
         return receipt
     }
@@ -164,9 +191,17 @@ class PlaybackService : Service() {
                 }
                 if (cost != null) android.util.Log.i("manadj-bench", "callback max %.0f us mean %.0f us n=%d nearMiss=%d xruns=%d [%s]".format(cost.maxMicros, cost.meanMicros, cost.callbacks, cost.nearMisses, state.outputXruns, decks))
             }
+            // Each quantized launch (adb logcat -s manadj-launch): Heard sign/latency verification on the phone.
+            val launch = try { engine?.lastLaunch() } catch (_: IllegalStateException) { null }
+            if (launch != null && launch[0] != lastLaunchLogged) {
+                lastLaunchLogged = launch[0]
+                android.util.Log.i("manadj-launch", "deck %d ref %d mode %s L %.0f ms refRender %.4f heard %.4f targetBeat %.4f delta %+.1f ms entry %.4f".format(
+                    launch[1].toInt(), launch[2].toInt(), state?.quantizeMode, launch[3] * 1000, launch[4], launch[5], launch[6], launch[7] * 1000, launch[8]))
+            }
             main.postDelayed(this, 500)
         }
     }
+    private var lastLaunchLogged = 0.0
 
     override fun onDestroy() {
         destroyed = true

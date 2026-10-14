@@ -754,6 +754,61 @@ int main() {
         }
     }
 
+    { // Key-locked bend (desktop: one stretch rate = pitch x bend): ±8% bend held keeps the pitch within a few
+      // cents; bend→audible: a burst lands where the integrated position says, key lock on or off.
+        auto freqOf = [](const std::vector<float>& x) {   // interpolated zero-crossing frequency
+            double first = -1, last = -1; int n = 0;
+            for (size_t i = 1; i < x.size(); ++i) if ((x[i - 1] < 0) != (x[i] < 0)) {
+                const double t = (i - 1) + x[i - 1] / (x[i - 1] - x[i]);
+                if (first < 0) first = t; last = t; ++n;
+            }
+            return (n - 1) / 2.0 / ((last - first) / 48000);
+        };
+        auto owned = std::make_unique<Engine>(48000);
+        Engine& e = *owned;
+        const int frames = 48000 * 30;
+        std::vector<float> tone(static_cast<size_t>(frames) * 2);
+        for (int i = 0; i < frames; ++i) tone[i * 2] = tone[i * 2 + 1] = static_cast<float>(.25 * std::sin(2 * 3.14159265358979 * 440 * i / 48000));
+        loadPcm(e, 0, 1, std::vector<float>(tone.begin(), tone.begin() + 48000 * 2));
+        fillTrack(e, 0, 1, tone);
+        e.submit(Op::KeyLock, 0, 1);
+        e.submit(Op::Seek, 0, 2.0);
+        e.submit(Op::Play, 0);
+        capture(e, 9600);
+        for (double bend : {8.0, -8.0, 0.0}) {
+            e.submit(Op::Bend, 0, bend);
+            capture(e, 9600);
+            const double before = e.deck(0).position.load();
+            const auto x = capture(e, 48000);
+            const double rate = 1 + static_cast<double>(static_cast<float>(bend)) / 100;
+            CHECK(std::abs(e.deck(0).position.load() - before - rate) < 1e-6);   // tempo follows the bend
+            const double cents = 1200 * std::log2(freqOf(x) / 440);
+            std::fprintf(stderr, "key-locked bend %+.0f%%: pitch %+.2f cents\n", bend, cents);
+            CHECK(std::abs(cents) < 3);
+            CHECK(e.deck(0).stretching.load());
+        }
+        // Bend latency: a 1 kHz burst at 3.0 s; bend +8% at 2.2 s; onset must sound where the clock says.
+        std::vector<float> pcm = burst(48000 * 10, 48000 * 3, 48000 * 3 + 4800);
+        for (bool keyLock : {false, true}) {
+            auto o2 = std::make_unique<Engine>(48000);
+            Engine& f = *o2;
+            loadPcm(f, 0, 1, std::vector<float>(pcm.begin(), pcm.begin() + 48000 * 2));
+            fillTrack(f, 0, 1, pcm);
+            f.submit(Op::KeyLock, 0, keyLock ? 1 : 0);
+            f.submit(Op::Seek, 0, 2.0);
+            f.submit(Op::Play, 0);
+            capture(f, 9600);                                   // → 2.2 s
+            f.submit(Op::Bend, 0, 8);
+            const auto x = capture(f, 48000);
+            int onset = -1;
+            for (int i = 0; i < 48000 && onset < 0; ++i) if (std::abs(x[i]) > .05) onset = i;
+            const double expected = (3.0 - 2.2) / (1 + static_cast<double>(8.f) / 100) * 48000;
+            const double ms = (onset - expected) / 48.0;
+            std::fprintf(stderr, "bend latency (key lock %s): burst onset %+.2f ms vs the clock\n", keyLock ? "on" : "off", ms);
+            CHECK(onset > 0 && std::abs(ms) < 6);
+        }
+    }
+
     { // PhaseAlign (desktop alignBeatPhase): nearest phase-aligned micro-seek, half/double projected, loop kept.
         auto owned = std::make_unique<Engine>(48000);
         Engine& e = *owned;
@@ -1227,6 +1282,298 @@ int main() {
         tick(e, 2400);
         CHECK(out[2399 * 2] != 0);
         CHECK(std::abs(e.deck(0).position.load() - .05) < 2 / 48000.);
+    }
+
+    { // Heard quantize (L = 350 ms): a launch on the heard downbeat lands its bar on the reference's bar at the
+      // speaker (engine time = speaker time minus the shared L); Grid picks the render position's nearest beat.
+        auto make = [](int mode) {
+            auto owned = std::make_unique<Engine>(48000);
+            Engine& e = *owned;
+            std::vector<float> pcm(48000 * 40 * 2, .2f);
+            for (int d = 0; d < 2; ++d) { loadPcm(e, d, d + 1, std::vector<float>(pcm.begin(), pcm.begin() + 48000 * 2)); fillTrack(e, d, d + 1, pcm); }
+            grid120(e, 0);
+            grid120(e, 1);
+            e.submit(Op::Quantize, 0, mode);
+            e.submit(Op::HeardLatency, 0, .35);
+            e.submit(Op::Seek, 0, 10.37);                // heard: 10.02 — just after the bar line at 10.0
+            e.submit(Op::Seek, 1, 8.0);                  // B cued on its bar
+            tick(e, 16);
+            e.submit(Op::Play, 0);
+            return owned;
+        };
+        {
+            auto o = make(2); Engine& e = *o;
+            CHECK(e.heard() && e.heardLatency() == .35);
+            e.submit(Op::Play, 1);
+            tick(e, 4800);
+            const double a = e.deck(0).position.load(), b = e.deck(1).position.load();
+            CHECK(std::abs((b - 8.0) - (a - 10.0)) < 1 / 48000.);   // bars coincide (engine = speaker - L)
+        }
+        {
+            auto o = make(1); Engine& e = *o;                         // Grid: nearest beat to 10.37 is 10.5
+            e.submit(Op::Play, 1);
+            tick(e, 48000);
+            const double a = e.deck(0).position.load(), b = e.deck(1).position.load();
+            CHECK(std::abs((b - 8.0) - (a - 10.5)) < 1 / 48000.);
+        }
+        { // Heard: a press on heard beat 3 of a bar enters L past the cue (never defers to the next bar).
+            auto o = make(2); Engine& e = *o;
+            e.submit(Op::Seek, 0, 11.37);                // heard 11.02: just after beat 3 (11.0) of the bar at 10.0
+            tick(e, 1);
+            e.submit(Op::Play, 1);
+            tick(e, 1);
+            CHECK(e.deck(1).launchAt.load() == 0 && e.deck(1).position.load() > 8.0 + .35);
+            const double a = e.deck(0).position.load(), b = e.deck(1).position.load();
+            CHECK(std::abs((b - 8.0) - (a - 11.0)) < 1 / 48000.);
+        }
+        { // Heard auto-loop engages at the heard beat; a region already passed wraps the playhead in.
+            auto o = make(2); Engine& e = *o;
+            e.submit(Op::LoopPreset, 0, .5);              // heard 10.02 → loop [10.0, 10.25); render 10.37 wraps
+            tick(e, 1);
+            CHECK(e.deck(0).loopStart.load() == 10.0 && e.deck(0).loopEnd.load() == 10.25);
+            CHECK(std::abs(e.deck(0).position.load() - (10.0 + std::fmod(.37, .25) + 1 / 48000.)) < 1e-9);
+            e.submit(Op::HotCueSet, 0, 0, 0, 1);          // set while playing: at the heard position, snapped
+            tick(e, 1);
+            CHECK(e.deck(0).hotcues[1].load() == 10.0);   // heard ≈ 9.77 → nearest beat 10.0 (render 10.12 would snap 10.0 too;
+            e.submit(Op::Quantize, 0, 1);                 //  Grid at render 10.37+ → 10.5)
+            e.submit(Op::LoopToggle, 0);
+            e.submit(Op::Seek, 0, 10.37);
+            e.submit(Op::HotCueSet, 0, 0, 0, 2);
+            tick(e, 1);
+            CHECK(e.deck(0).hotcues[2].load() == 10.5);
+        }
+    }
+
+    { // Calibration clicks: chirps on every channel at 0.1 s + k x interval; render instants recorded.
+        auto owned = std::make_unique<Engine>(48000);
+        Engine& e = *owned;
+        tick(e, 100);
+        e.submit(Op::Clicks, 0, .25, 0, 3);
+        e.setCallbackNanos(1'000'000'000);
+        std::vector<float> left = capture(e, 48000);   // capture renders 4096-frame callbacks; nanos are per-callback
+        for (int k = 0; k < 3; ++k) {
+            const int at = 4800 + k * 12000;
+            CHECK(left[at - 1] == 0 && std::abs(left[at + 96] - static_cast<float>(Engine::clickSample(96 / 48000.))) < 1e-6);
+            CHECK(e.clickNanos(k) != 0);
+        }
+        CHECK(e.clickNanos(3) == 0 && e.clicksRendered() == 3);
+        CHECK(e.clickNanos(0) == 1'000'000'000 + static_cast<int64_t>(4800 % 4096 * 1e9 / 48000));
+        // Tap mode: continuous, accent every 4th (others 45 %), until a Clicks op with count 0.
+        e.submit(Op::Clicks, 0, .1, 0, Engine::kClicksForever | Engine::kClicksAccent);
+        left = capture(e, 48000);
+        const int base = 4800;
+        for (int k = 0; k < 5; ++k) {
+            const float want = (k % 4 == 0 ? 1.f : .45f) * static_cast<float>(Engine::clickSample(96 / 48000.));
+            CHECK(std::abs(left[base + k * 4800 + 96] - want) < 1e-6);
+        }
+        CHECK(e.clicksRendered() == 9);
+        e.submit(Op::Clicks, 0, .1, 0, 0);
+        left = capture(e, 48000);
+        for (float x : left) CHECK(x == 0);
+    }
+
+    { // Stems (desktop StemTrackSource): unity sums the stems; a kill ramps over the 5 ms declick to the rest;
+      // Prepare restores unity. Key-locked and scratch reads mix the same way.
+        auto owned = std::make_unique<Engine>(48000);
+        Engine& e = *owned;
+        const float level[kStems] = {.1f, .2f, .15f, .05f};
+        const int frames = 48000 * 4;
+        loadPcm(e, 0, 1, std::vector<float>(48000 * 2, .5f));
+        std::vector<float> stems(static_cast<size_t>(frames) * 2 * kStems);
+        for (int i = 0; i < frames; ++i) for (int s = 0; s < kStems; ++s) stems[(i * kStems + s) * 2] = stems[(i * kStems + s) * 2 + 1] = level[s];
+        CHECK(e.trackBegin(0, 1, frames, 48000, 0, kStems));
+        for (int at = 0; at < frames; at += 4096) CHECK(e.trackWrite(0, 1, stems.data() + static_cast<size_t>(at) * 2 * kStems, std::min(4096, frames - at)) > 0);
+        e.trackFinish(0, 1);
+        e.submit(Op::Seek, 0, .5);
+        e.submit(Op::Play, 0);
+        auto x = capture(e, 4800);
+        const float trim = x[4799] / .5f;                      // strip gain (trim/fader) relative to the summed stems
+        CHECK(std::abs(x[4799] - .5f * trim) < 1e-6 && trim > 0);
+        e.submit(Op::StemGain, 0, 0, 0, 1);                     // kill drums
+        x = capture(e, 4800);
+        CHECK(std::abs(x[0] - .5f * trim) < .01f);              // ramps, no step
+        for (int i = 1; i < 480; ++i) if (!(x[i] <= x[i - 1] + 5e-4f && x[i - 1] - x[i] < .002f)) { std::fprintf(stderr, "i %d %f %f\n", i, x[i - 1], x[i]); CHECK(false); }
+        CHECK(std::abs(x[4799] - .3f * trim) < 1e-4);
+        e.submit(Op::KeyLock, 0, 1);
+        x = capture(e, 9600);
+        CHECK(std::abs(x[9599] - .3f * trim) < .01f);           // stretch path reads the same mix
+        e.submit(Op::KeyLock, 0, 0);
+        e.submit(Op::Prepare, 0, 0, 2);
+        tick(e);
+        CHECK(e.deck(0).stemTarget[1].load() == 1.f && e.deck(0).stemGain[1] == 1.f);
+    }
+
+    { // Heard quantize sign (174 BPM, L = 350 / 700 ms): the DJ hears the playing deck's downbeat — the engine is
+      // already L·rate past it — and presses PLAY exactly then. The cued deck must start at once, entered L·rate
+      // past its cue, so at the speaker (engine + L) its downbeat coincides with the playing downbeat. A flipped
+      // sign (heard = render + L) picks a beat ~2L ahead and waits instead: launchAt != 0 and the phase check fails.
+        for (double L : {.35, .7, 0.0}) {
+            for (int mode : {2, 1}) {
+                if (mode == 1 && L != 0) continue;            // (b) Grid with L = 0 must equal Heard with L = 0
+                auto owned = std::make_unique<Engine>(48000);
+                Engine& e = *owned;
+                std::vector<float> pcm(48000 * 30 * 2, .2f);
+                for (int d = 0; d < 2; ++d) { loadPcm(e, d, d + 1, std::vector<float>(pcm.begin(), pcm.begin() + 48000 * 2)); fillTrack(e, d, d + 1, pcm); }
+                const double g[5] = {};
+                e.submit(Op::SetGrid, 0, 174, 0, 0, g);
+                e.submit(Op::SetGrid, 1, 174, 0, 0, g);
+                e.submit(Op::Quantize, 0, mode);
+                e.submit(Op::HeardLatency, 0, L);
+                const double beat = 60 / 174., downbeat = 16 * beat, cue = 32 * beat;
+                e.submit(Op::Seek, 0, downbeat + L);          // render position at the press: heard = the downbeat
+                e.submit(Op::Seek, 1, cue);
+                tick(e, 16);
+                e.submit(Op::Play, 0);
+                e.submit(Op::Play, 1);                         // same callback: the press lands at render = downbeat + L
+                tick(e, 1);
+                CHECK(e.deck(1).launchAt.load() == 0);         // never waits
+                tick(e, 47999);
+                const double play = e.deck(0).position.load(), cued = e.deck(1).position.load();
+                // Speaker time T heard = engine positions at T - L; both decks share L, so equal offsets from
+                // their downbeats in engine time = coincident downbeats at the speaker.
+                const double errMs = ((cued - cue) - (play - downbeat)) * 1000;
+                if (std::abs(errMs) >= 1) std::fprintf(stderr, "heard sign L %.2f mode %d: error %.3f ms\n", L, mode, errMs);
+                CHECK(std::abs(errMs) < 1);
+                CHECK(cued - cue >= L - 1e-9);                 // entered ahead by the elapsed L (+ the second played)
+            }
+        }
+    }
+
+    { // Heard stabs at random phases (174 BPM; L = 350 ms ≈ 1 beat, 180 ms ≈ half a beat, 0): Play, CUE-hold
+      // and hot-cue-hold take the same callback path; every launch matches the definition — target = beat
+      // nearest the heard position (render − L), immediate entry (target − render) ahead of the cue when the
+      // target has passed, else a wait of exactly that; the deck relocates at most once per stab.
+        unsigned seed = 99;
+        auto rnd = [&] { seed = seed * 1103515245u + 12345u; return ((seed >> 8) & 0xffff) / 65536.0; };
+        const double beat = 60 / 174.;
+        for (double L : {.35, .18, 0.0}) {
+            for (int k = 0; k < 20; ++k) {
+                auto owned = std::make_unique<Engine>(48000);
+                Engine& e = *owned;
+                std::vector<float> pcm(48000 * 20 * 2, .2f);
+                for (int d = 0; d < 2; ++d) { loadPcm(e, d, d + 1, std::vector<float>(pcm.begin(), pcm.begin() + 48000 * 2)); fillTrack(e, d, d + 1, pcm); }
+                const double g[5] = {};
+                e.submit(Op::SetGrid, 0, 174, 0, 0, g);
+                e.submit(Op::SetGrid, 1, 174, 0, 0, g);
+                e.submit(Op::Quantize, 0, 2);
+                e.submit(Op::HeardLatency, 0, L);
+                const double render = 20 * beat + rnd() * 4 * beat, cue = 8 * beat;
+                const int gesture = k % 3;                       // 0 Play, 1 CUE-hold at cue, 2 hot-cue-hold
+                e.submit(Op::Seek, 0, render);
+                e.submit(Op::Seek, 1, gesture == 2 ? 3.0 : cue);
+                e.submit(Op::CueSetAt, 1, cue);
+                e.submit(Op::HotCueSetAt, 1, cue, 0, 0);
+                tick(e, 16);
+                const auto transportBefore = e.deck(1).transport.load();
+                e.submit(Op::Play, 0);
+                e.submit(gesture == 0 ? Op::Play : gesture == 1 ? Op::CueDown : Op::HotCueDown, 1);
+                tick(e, 1);
+                const double heard = render - L, target = std::round(heard / beat) * beat;
+                const double ahead = render - target;            // > 0: the target beat already passed (in engine time)
+                const auto relocations = e.deck(1).transport.load() - transportBefore;
+                CHECK(relocations <= 1u);                        // one jump per stab (hot cue: straight to the entry)
+                if (ahead >= 0) {
+                    CHECK(e.deck(1).launchAt.load() == 0);
+                    CHECK(std::abs(e.deck(1).position.load() - (cue + ahead + 1 / 48000.)) < 1e-6);
+                } else {
+                    CHECK(e.deck(1).launchAt.load() != 0 && -ahead < beat / 2 + 1e-9);   // waits < half a beat, never L
+                    tick(e, 48000);
+                }
+                tick(e, 4800);
+                const double play = e.deck(0).position.load(), cued = e.deck(1).position.load();
+                CHECK(std::abs((cued - cue) - (play - target)) < 1 / 48000.);  // in phase at the speaker
+            }
+        }
+    }
+
+    { // Heard semantics (human #60/#61): press at t is treated as made at t − L. For L in {0, 120, 350, 700} ms,
+      // rates .92 / 1 / 1.08, 50 random phases, quantize on and off, and every launch gesture: the cued deck's
+      // SPEAKER-time position (engine position L ago, extrapolated: engine − L·r) at the press equals X unquantized,
+      // and quantized it is in phase with the playing deck's beat chosen at t − L. Single deck: plain launch at X.
+        unsigned seed = 4242;
+        auto rnd = [&] { seed = seed * 1103515245u + 12345u; return ((seed >> 8) & 0xffff) / 65536.0; };
+        const double beat = 60 / 174.;
+        int launches = 0;
+        for (double L : {0.0, .12, .35, .7}) for (double pitch : {-8.0, 0.0, 8.0}) for (int k = 0; k < 50; ++k) {
+            const bool quantized = k % 2 == 0, single = k % 10 == 9;
+            const int gesture = (k / 2) % 3;                 // 0 PLAY, 1 CUE-hold, 2 hot-cue-hold
+            auto owned = std::make_unique<Engine>(48000);
+            Engine& e = *owned;
+            static const std::vector<float> pcm(48000 * 11 * 2, .2f);
+            for (int d = 0; d < 2; ++d) { loadPcm(e, d, d + 1, std::vector<float>(pcm.begin(), pcm.begin() + 48000 * 2)); fillTrack(e, d, d + 1, pcm); }
+            const double g[5] = {};
+            e.submit(Op::SetGrid, 0, 174, 0, 0, g);
+            e.submit(Op::SetGrid, 1, 174, 0, 0, g);
+            e.submit(Op::Quantize, 0, quantized ? 2 : 3);
+            e.submit(Op::HeardLatency, 0, L);
+            e.submit(Op::Pitch, 0, -pitch / 2);
+            e.submit(Op::Pitch, 1, pitch);
+            const double render = 20 * beat + rnd() * 4 * beat, X = 8 * beat;
+            e.submit(Op::Seek, 0, render);
+            e.submit(Op::Seek, 1, gesture == 2 ? 3.0 : X);
+            e.submit(Op::CueSetAt, 1, X);
+            e.submit(Op::HotCueSetAt, 1, X, 0, 0);
+            tick(e, 16);
+            const auto transportBefore = e.deck(1).transport.load();
+            if (!single) e.submit(Op::Play, 0);
+            e.submit(gesture == 0 ? Op::Play : gesture == 1 ? Op::CueDown : Op::HotCueDown, 1);
+            tick(e, 1);
+            CHECK(e.deck(1).transport.load() - transportBefore <= 1u);     // one jump per stab
+            const double r = 1 + static_cast<double>(static_cast<float>(pitch)) / 100;
+            const double rRef = 1 + static_cast<double>(static_cast<float>(-pitch / 2)) / 100;
+            const double cued = e.deck(1).position.load() - 1 / 48000. * r; // engine position at the press frame
+            if (single) { CHECK(std::abs(cued - X) < 1e-9 && e.deck(1).launchAt.load() == 0); ++launches; continue; }
+            if (!quantized) {
+                CHECK(e.deck(1).launchAt.load() == 0);
+                CHECK(std::abs((cued - L * r) - X) * 1000 / r < 1);       // speaker-time position at the press = X
+            } else {
+                // Desktop crossDeckLaunchTarget at t_v against the reference at t_v.
+                const double refAtTv = render - L * rRef, target = std::round(refAtTv / beat) * beat;
+                const double d = std::max(0.0, (target - refAtTv) / rRef);
+                if (d >= L && d > 0) {
+                    CHECK(e.deck(1).launchAt.load() != 0);
+                    const double wait = (d - L) * 48000;
+                    CHECK(std::abs(static_cast<double>(e.deck(1).launchAt.load()) - (e.outputFrames() - 1 + std::ceil(wait - 1e-6))) < 1.5);
+                    tick(e, 48000);
+                } else CHECK(e.deck(1).launchAt.load() == 0);
+                tick(e, 4800);
+                const double play = e.deck(0).position.load(), b = e.deck(1).position.load();
+                CHECK(std::abs((b - X) / r - (play - target) / rRef) * 1000 < 1);   // in phase at the speaker (time)
+            }
+            ++launches;
+        }
+        CHECK(launches == 600);
+    }
+
+    { // Heard on, both decks paused: 20 CUE stabs launch plain at X (no lag shift, no wait); the playhead moves
+      // continuously while held and the only discontinuity is the return to X on release.
+        auto owned = std::make_unique<Engine>(48000);
+        Engine& e = *owned;
+        std::vector<float> pcm(48000 * 20 * 2, .2f);
+        for (int d = 0; d < 2; ++d) { loadPcm(e, d, d + 1, std::vector<float>(pcm.begin(), pcm.begin() + 48000 * 2)); fillTrack(e, d, d + 1, pcm); grid120(e, d); }
+        e.submit(Op::Quantize, 0, 2);
+        e.submit(Op::HeardLatency, 0, .35);
+        const double X = 4.0;
+        e.submit(Op::Seek, 0, X);
+        e.submit(Op::CueSetAt, 0, X);
+        tick(e, 16);
+        for (int k = 0; k < 20; ++k) {
+            const auto transport = e.deck(0).transport.load();
+            e.submit(Op::CueDown, 0);
+            const int held = 480 + k * 960;
+            double last = e.deck(0).position.load();
+            CHECK(last == X);
+            for (int done = 0; done < held; done += 96) {
+                tick(e, 96);
+                const double now = e.deck(0).position.load();
+                CHECK(std::abs(now - last - 96 / 48000.) < 1e-9);   // continuous from X, no jump
+                last = now;
+            }
+            CHECK(e.deck(0).transport.load() == transport && e.deck(0).launchAt.load() == 0);
+            e.submit(Op::CueUp, 0);
+            tick(e, 96);
+            CHECK(e.deck(0).position.load() == X && e.deck(0).transport.load() == transport + 1);  // one return to X
+        }
     }
 
     { // Beat FX ECHO on A: beat-synced repeats at beats x beatSeconds, feedback .5, tails ring after OFF.

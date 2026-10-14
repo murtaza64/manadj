@@ -127,6 +127,8 @@ private class RawReader(extractor: MediaExtractor, format: MediaFormat) : PcmRea
     override fun close() = extractor.release()
 }
 
+private const val MP3_DECODER_DELAY = 529
+
 private class CodecReader(extractor: MediaExtractor, format: MediaFormat, mime: String) : PcmReader(extractor, format) {
     private val codec = MediaCodec.createDecoderByType(mime)
     private val info = MediaCodec.BufferInfo()
@@ -135,6 +137,23 @@ private class CodecReader(extractor: MediaExtractor, format: MediaFormat, mime: 
     private var outputDone = false
     private var queuedInput = false
     private var outputSeen = false
+    private var seeked = false
+    /**
+     * MP3 timing vs desktop (Chrome decodeAudioData = ffmpeg gapless), measured on Android 15/16 (emulator API 35,
+     * Nothing phone API 36; AudioEngineTest.codecPrimingMatchesTheWav): with a LAME/Xing header the platform output
+     * from the start is late by encoder delay + padding while desktop trims to the exact WAV alignment; without a
+     * header the platform drops the 529-frame decoder delay that desktop keeps. AAC (MP4 edit list) needs nothing
+     * (the extractor's negative PTS already trims the priming). After a seek the MP3 extractor's TOC-estimated PTS
+     * is only approximate (tens of ms); the whole-track decode (from the start) is the exact path.
+     */
+    private val mp3ShiftUs: Long = if (mime != MediaFormat.MIMETYPE_AUDIO_MPEG) 0 else {
+        val rate = format.getInteger(MediaFormat.KEY_SAMPLE_RATE).toLong()
+        if (format.containsKey(MediaFormat.KEY_ENCODER_DELAY)) {
+            val delay = format.getInteger(MediaFormat.KEY_ENCODER_DELAY)
+            val padding = if (format.containsKey(MediaFormat.KEY_ENCODER_PADDING)) format.getInteger(MediaFormat.KEY_ENCODER_PADDING) else 0
+            -(delay + padding) * 1_000_000L / rate
+        } else MP3_DECODER_DELAY * 1_000_000L / rate
+    }
 
     init {
         try {
@@ -163,6 +182,7 @@ private class CodecReader(extractor: MediaExtractor, format: MediaFormat, mime: 
 
     override fun seek(seconds: Double) {
         super.seek(seconds)
+        seeked = true
         if (queuedInput) {
             codec.flush()
             // A flush before the first output drops codec-specific data; resubmit it.
@@ -205,7 +225,9 @@ private class CodecReader(extractor: MediaExtractor, format: MediaFormat, mime: 
                         val buffer = codec.getOutputBuffer(output) ?: error("Missing codec output")
                         buffer.position(info.offset)
                         buffer.limit(info.offset + info.size)
-                        if (info.size > 0) convert(buffer, info.presentationTimeUs) else 0
+                        // The header shift is a from-the-start property; after a seek only the decoder-delay one holds.
+                        val shift = if (seeked && mp3ShiftUs < 0) 0 else mp3ShiftUs
+                        if (info.size > 0) convert(buffer, info.presentationTimeUs + shift) else 0
                     } finally { codec.releaseOutputBuffer(output, false) }
                     if ((info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) outputDone = true
                     if (frames > 0) return frames
