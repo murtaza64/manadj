@@ -148,7 +148,11 @@ class MainActivity : ComponentActivity() {
         Column(Modifier.width(48.dp).fillMaxHeight()) {
             TrimKnob(ui, model, Modifier.fillMaxWidth().height(48.dp))
             Key("CUE", Modifier.fillMaxWidth().height(40.dp), deckColor(ui.id), model.supports("pfl"), ui.snapshot?.pfl == true, "${ui.id} headphone cue") { model.togglePfl(ui.id) }
-            Pending("EQ /\nFILTER\nPENDING", Modifier.weight(1f).fillMaxWidth())
+            Column(Modifier.weight(1f).fillMaxWidth(), verticalArrangement = Arrangement.SpaceEvenly) {
+                for ((band, label) in listOf("HI", "MID", "LOW").withIndex().map { (i, l) -> (2 - i) to l })
+                    Knob(ui, model, label, ui.eq[band], model.supports("eq"), Modifier.fillMaxWidth().weight(1f)) { v, id -> model.updateEq(ui.id, band, v, id) }
+                Knob(ui, model, "FILTER", (ui.filter + 1) / 2, model.supports("filter"), Modifier.fillMaxWidth().weight(1f)) { v, id -> model.updateFilter(ui.id, v * 2 - 1, id) }
+            }
         }
         if (!mirrored) PhysicalFader("VOL", ui.fader, model, ui.id, Modifier.width(48.dp).fillMaxHeight(), model.supports("fader")) { value, id -> model.updateFader(ui.id, value, id) }
     }

@@ -101,17 +101,21 @@ fun clock(seconds: Double) = "%d:%02d".format(seconds.toInt() / 60, seconds.toIn
     }
 }
 
-@Composable fun TrimKnob(ui: DeckUi, model: PlayerModel, modifier: Modifier) {
-    val enabled = model.supports("trim")
-    val current by rememberUpdatedState(ui.trim)
+@Composable fun TrimKnob(ui: DeckUi, model: PlayerModel, modifier: Modifier) =
+    Knob(ui, model, "TRIM", ui.trim, model.supports("trim"), modifier) { v, id -> model.updateTrim(ui.id, v, id) }
+
+/** Relative-drag knob 0..1 with a sticky haptic notch at .5 and double-tap reset. */
+@Composable fun Knob(ui: DeckUi, model: PlayerModel, label: String, value: Double, enabled: Boolean, modifier: Modifier, set: (Double, String?) -> Unit) {
+    val current by rememberUpdatedState(value)
+    val setter by rememberUpdatedState(set)
     val haptic = LocalHapticFeedback.current
-    Box(modifier.semantics { contentDescription = "${ui.id} TRIM"; if (!enabled) disabled() }.pointerInput(ui.id, enabled) {
+    Box(modifier.semantics { contentDescription = "${ui.id} $label"; if (!enabled) disabled() }.pointerInput(ui.id, label, enabled) {
         if (!enabled) return@pointerInput
         var lastTap = -1000L
         awaitEachGesture {
             val down = awaitFirstDown(requireUnconsumed = false)
             val start = current
-            val id = model.beginGesture(ui.id, "TRIM") { model.updateTrim(ui.id, start, it) }
+            val id = model.beginGesture(ui.id, label) { setter(start, it) }
             var moved = false
             var cancelled = false
             var notch = abs(start - .5) < .001
@@ -126,7 +130,7 @@ fun clock(seconds: Double) = "%d:%02d".format(seconds.toInt() / 60, seconds.toIn
                     if (change == null || (!change.pressed && change.isConsumed)) { cancelled = true; break }
                     if (!change.pressed) {
                         if (!moved && change.uptimeMillis - down.uptimeMillis < 250) {
-                            if (down.uptimeMillis - lastTap < 300) { model.updateTrim(ui.id, .5, id); lastTap = -1000; haptic.performHapticFeedback(HapticFeedbackType.LongPress) }
+                            if (down.uptimeMillis - lastTap < 300) { setter(.5, id); lastTap = -1000; haptic.performHapticFeedback(HapticFeedbackType.LongPress) }
                             else lastTap = change.uptimeMillis
                         }
                         break
@@ -140,17 +144,17 @@ fun clock(seconds: Double) = "%d:%02d".format(seconds.toInt() / 60, seconds.toIn
                         if (abs(distance) < 6.dp.toPx()) next = .5
                         else { notch = false; baselineY = notchY + sign(distance) * 6.dp.toPx(); baseline = .5; next = (.5 - (change.position.y - baselineY) / 180.dp.toPx()).coerceIn(0.0, 1.0) }
                     } else if (last != .5 && (last - .5) * (next - .5) <= 0) { notch = true; notchY = change.position.y; next = .5; haptic.performHapticFeedback(HapticFeedbackType.SegmentTick) }
-                    last = next; model.updateTrim(ui.id, next, id); change.consume()
+                    last = next; setter(next, id); change.consume()
                 }
             } catch (cancel: CancellationException) { cancelled = true; throw cancel }
             finally { model.finishGesture(id, cancelled) }
         }
     }, contentAlignment = Alignment.Center) {
-        Text("TRIM", Modifier.offset(y = (-17).dp), if (enabled) deckColor(ui.id) else Ink.muted, 10, true)
+        Text(label, Modifier.offset(y = (-17).dp), if (enabled) deckColor(ui.id) else Ink.muted, 10, true)
         Canvas(Modifier.size(30.dp).offset(y = 6.dp)) {
             val r = size.minDimension * .4f
             drawArc(Ink.edge, 135f, 270f, false, center - Offset(r, r), Size(r * 2, r * 2), style = Stroke(2.dp.toPx()))
-            val angle = Math.toRadians(135 + ui.trim * 270)
+            val angle = Math.toRadians(135 + value * 270)
             drawLine(if (enabled) deckColor(ui.id) else Ink.muted, center, center + Offset(cos(angle).toFloat(), sin(angle).toFloat()) * r, 2.dp.toPx())
         }
     }

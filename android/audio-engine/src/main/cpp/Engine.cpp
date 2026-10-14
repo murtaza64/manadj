@@ -14,19 +14,30 @@ bool ready(const Deck& d) {
 } // namespace
 
 Engine::Engine(int outputRate) : outputRate_(outputRate) {
-    for (auto& d : decks_) for (auto& h : d.hotcues) h.store(-1);
+    for (auto& d : decks_) { for (auto& h : d.hotcues) h.store(-1); for (auto& e : d.eq) e.store(.5f); }
     for (int i = 0; i < kDeckCount; ++i) updateGain(i);
 }
 
-uint64_t Engine::submit(Op op, int deck, double value, uint64_t load, int slot) {
+uint64_t Engine::submitFilter(int deck, double position) {
+    const dsp::FilterSettings settings;
+    const auto t = dsp::describeFilter(position, outputRate_.load(), settings);
+    const double aux[5] = {t.pass == dsp::Pass::Low ? 0.0 : 1.0, t.frequency, t.wet, settings.resonance, t.gain};
+    return submit(Op::Filter, deck, position, 0, 0, aux);
+}
+
+uint64_t Engine::submit(Op op, int deck, double value, uint64_t load, int slot, const double* aux) {
     if (deck < 0 || deck >= kDeckCount || !std::isfinite(value)) return 0;
     if ((op == Op::HotCueDown || op == Op::HotCueUp || op == Op::HotCueSet || op == Op::HotCueClear) &&
         (slot < 0 || slot >= kHotCues)) return 0;
+    if (op == Op::Eq && (slot < 0 || slot > 2)) return 0;
+    if (op == Op::Filter && !aux) return 0;
     std::lock_guard<std::mutex> lock(submitMutex_);
     const auto write = queueWrite_.load(kRelaxed);
     if (write - queueRead_.load(kAcquire) >= kQueueSize) return 0;
     const auto seq = accepted_.fetch_add(1) + 1;
-    commands_[write % kQueueSize] = {op, deck, seq, load, value, slot};
+    auto& c = commands_[write % kQueueSize];
+    c = {op, deck, seq, load, value, slot, {}};
+    if (aux) std::copy(aux, aux + 5, c.aux);
     queueWrite_.store(write + 1, kRelease);
     return seq;
 }
@@ -144,8 +155,7 @@ void Engine::captureTail(Deck& d) noexcept {
     d.tailAvail = n;
     d.tailPos = slot >= 0 ? d.headPos - static_cast<int>(d.headPos) : d.fractional;
     d.tailRatio = (d.sampleRate.load(kRelaxed) / outRate) * (1 + d.pitch.load(kRelaxed) / 100.) * (1 + d.bend.load(kRelaxed) / 100.);
-    d.tailGain = d.gain * d.envelope;
-    d.tailCueGain = d.cueGain * d.envelope;
+    d.tailGain = d.envelope;
     d.tailLeft = kFadeFrames;
 }
 
@@ -239,6 +249,22 @@ void Engine::apply(const Command& c) noexcept {
         case Op::Pitch: d.pitch = std::clamp(static_cast<float>(c.value), -25.f, 25.f); break;
         case Op::Bend: d.bend = std::clamp(static_cast<float>(c.value), -8.f, 8.f); break;
         case Op::Pfl: d.pfl.store(c.value != 0); updateGain(c.deck); break;
+        case Op::Eq:
+            d.eq[c.slot].store(static_cast<float>(std::clamp(c.value, 0.0, 1.0)));
+            d.eqTarget[c.slot] = dsp::eqValueToGain(c.value);
+            break;
+        case Op::Filter: {
+            d.filter.store(static_cast<float>(std::clamp(c.value, -1.0, 1.0)));
+            const bool low = c.aux[0] == 0;
+            const float wet = static_cast<float>(c.aux[2]);
+            d.dryTarget = 1 - wet;
+            auto& selected = d.branch[low ? 0 : 1];
+            selected.hzTarget = c.aux[1];
+            selected.qTarget = c.aux[3];
+            selected.gainTarget = wet * static_cast<float>(c.aux[4]);
+            d.branch[low ? 1 : 0].gainTarget = 0;
+            break;
+        }
         case Op::CueMix: cueMix_.store(std::clamp(static_cast<float>(c.value), 0.f, 1.f)); break;
     }
     d.applied.store(c.seq, kRelease);
@@ -293,14 +319,12 @@ void Engine::render(float* output, int frames, int channels) noexcept {
     outputFrames_.fetch_add(frames, kRelease);
 }
 
-void Engine::renderBuses(int frames) noexcept {
-    float* output = master_.data();
-    float* cue = cue_.data();
-    std::fill(output, output + frames * 2, 0.f);
-    std::fill(cue, cue + frames * 2, 0.f);
+// Writes the deck's pre-strip signal (source x envelope + crossfade tail) into `strip`.
+// Returns whether anything was written.
+bool Engine::renderSource(Deck& d, float* strip, int frames) noexcept {
     const double outRate = outputRate_.load(kRelaxed);
-    for (int j = 0; j < kDeckCount; ++j) {
-        auto& d = decks_[j];
+    bool active = false;
+    {
         // Crossfade tail of whatever was heard before the last relocation/stop.
         for (int i = 0; i < frames && d.tailLeft > 0; ++i) {
             const int k = static_cast<int>(d.tailPos);
@@ -309,15 +333,14 @@ void Engine::renderBuses(int frames) noexcept {
             const float ramp = static_cast<float>(d.tailLeft--) / kFadeFrames;
             const float l = d.tail[k * 2] + (d.tail[k * 2 + 2] - d.tail[k * 2]) * f;
             const float r = d.tail[k * 2 + 1] + (d.tail[k * 2 + 3] - d.tail[k * 2 + 1]) * f;
-            output[i * 2] += l * d.tailGain * ramp;
-            output[i * 2 + 1] += r * d.tailGain * ramp;
-            cue[i * 2] += l * d.tailCueGain * ramp;
-            cue[i * 2 + 1] += r * d.tailCueGain * ramp;
+            strip[i * 2] += l * d.tailGain * ramp;
+            strip[i * 2 + 1] += r * d.tailGain * ramp;
             d.tailPos += d.tailRatio;
+            active = true;
         }
         if (!ready(d)) {
             if ((d.status.load(kAcquire) & 3) == kError) { d.playing.store(false); d.preview.store(false); d.previewSlot.store(-1); }
-            continue;
+            return active;
         }
         const auto transport = d.transport.load(kRelaxed);
         const bool ringLive = d.ring.load(kAcquire) == transport;
@@ -327,12 +350,12 @@ void Engine::renderBuses(int frames) noexcept {
                 d.position.store(d.claimedStart.load(kAcquire), kRelease);
             d.positionTransport = transport;
         }
-        if (!(d.playing.load(kRelaxed) || d.preview.load(kRelaxed))) { d.envelope = 0; continue; }
+        if (!(d.playing.load(kRelaxed) || d.preview.load(kRelaxed))) { d.envelope = 0; return active; }
         int slot = d.headSlot.load(kRelaxed);
-        if (slot < 0 && !ringLive) continue; // Refill in progress: silent, clock held.
+        if (slot < 0 && !ringLive) return active; // Refill in progress: silent, clock held.
         const auto sampleRate = d.sampleRate.load(kAcquire);
         const double ratio = (sampleRate / outRate) * (1 + d.pitch.load(kRelaxed) / 100.) * (1 + d.bend.load(kRelaxed) / 100.);
-        if (d.envelope == 0) { d.gain = d.targetGain; d.cueGain = d.targetCueGain; } // Envelope owns the onset.
+        if (d.envelope == 0 && d.tailLeft == 0) { d.gain = d.targetGain; d.cueGain = d.targetCueGain; } // Envelope owns the onset.
         auto read = d.read.load(kRelaxed);
         auto write = d.write.load(kAcquire);
         double fractional = slot >= 0 ? d.headPos : d.fractional;
@@ -372,15 +395,10 @@ void Engine::renderBuses(int frames) noexcept {
                 b = &d.pcm[((read + 1) % kRingFrames) * 2];
             }
             d.envelope = std::min(1.f, d.envelope + 1.f / kFadeFrames);
-            d.gain += (d.targetGain - d.gain) * .002f;
-            d.cueGain += (d.targetCueGain - d.cueGain) * .002f;
             const float f = static_cast<float>(fractional - static_cast<int>(fractional));
-            const float l = (a[0] + (b[0] - a[0]) * f) * d.envelope;
-            const float r = (a[1] + (b[1] - a[1]) * f) * d.envelope;
-            output[i * 2] += l * d.gain;
-            output[i * 2 + 1] += r * d.gain;
-            cue[i * 2] += l * d.cueGain;
-            cue[i * 2 + 1] += r * d.cueGain;
+            strip[i * 2] += (a[0] + (b[0] - a[0]) * f) * d.envelope;
+            strip[i * 2 + 1] += (a[1] + (b[1] - a[1]) * f) * d.envelope;
+            active = true;
             const auto before = static_cast<uint64_t>(fractional);
             fractional += ratio;
             const auto consumed = static_cast<uint64_t>(fractional) - before;
@@ -390,6 +408,94 @@ void Engine::renderBuses(int frames) noexcept {
         if (slot >= 0) d.headPos = fractional;
         else { d.fractional = fractional; d.read.store(read, kRelease); }
         d.position.store(d.position.load(kRelaxed) + consumedTotal / static_cast<double>(sampleRate), kRelease);
+    }
+    return active;
+}
+
+void Engine::designEq(Deck& d, double rate) noexcept {
+    for (int i = 0; i < 2; ++i) {
+        d.eqLow[i].design(dsp::Pass::Low, dsp::kCrossoverLowMidHz, dsp::kButterworthQDb, rate);
+        d.eqMidHp[i].design(dsp::Pass::High, dsp::kCrossoverLowMidHz, dsp::kButterworthQDb, rate);
+        d.eqMidLp[i].design(dsp::Pass::Low, dsp::kCrossoverMidHighHz, dsp::kButterworthQDb, rate);
+        d.eqHigh[i].design(dsp::Pass::High, dsp::kCrossoverMidHighHz, dsp::kButterworthQDb, rate);
+    }
+}
+
+void Engine::resetStrip(Deck& d) noexcept {
+    for (int i = 0; i < 2; ++i) {
+        d.eqLow[i].reset(); d.eqMidHp[i].reset(); d.eqMidLp[i].reset(); d.eqHigh[i].reset();
+        for (auto& b : d.branch) b.stages[i].reset();
+    }
+}
+
+void Engine::renderBuses(int frames) noexcept {
+    float* output = master_.data();
+    float* cue = cue_.data();
+    float* strip = strip_.data();
+    std::fill(output, output + frames * 2, 0.f);
+    std::fill(cue, cue + frames * 2, 0.f);
+    const double rate = outputRate_.load(kRelaxed);
+    if (rate != stripRate_) {
+        stripRate_ = rate;
+        for (auto& d : decks_) { designEq(d, rate); for (auto& b : d.branch) b.designed = false; }
+    }
+    // Per-sample one-pole smoothing: EQ ~ desktop 50 ms ramp, filter gains ~35 ms, cutoff/Q 20 ms.
+    const float kEq = static_cast<float>(1 - std::exp(-1 / (.017 * rate)));
+    const float kMix = static_cast<float>(1 - std::exp(-1 / (.012 * rate)));
+    const double kSweep = 1 - std::exp(-static_cast<double>(kSweepBlock) / (.020 * rate));
+    for (auto& d : decks_) {
+        std::fill(strip, strip + frames * 2, 0.f);
+        if (!renderSource(d, strip, frames)) {
+            if (d.stripWarm) { resetStrip(d); d.stripWarm = false; }
+            // Silent strip: settle smoothed values so the next onset starts at its targets.
+            for (int b = 0; b < 3; ++b) d.eqGain[b] = d.eqTarget[b];
+            d.dry = d.dryTarget;
+            for (auto& br : d.branch) { br.gain = br.gainTarget; br.logHz = std::log(br.hzTarget); br.qDb = br.qTarget; br.designed = false; }
+            continue;
+        }
+        d.stripWarm = true;
+        for (int i = 0; i < frames; ++i) {
+            if (i % kSweepBlock == 0) {
+                for (auto& br : d.branch) {
+                    if (br.gain == 0 && br.gainTarget == 0) continue;
+                    if (br.gain == 0) { // Waking a silent branch: start at its target (sweepFilter.ts).
+                        br.logHz = std::log(br.hzTarget); br.qDb = br.qTarget; br.designed = false;
+                        br.stages[0].reset(); br.stages[1].reset();
+                    }
+                    const double logTarget = std::log(br.hzTarget);
+                    if (!br.designed || std::abs(br.logHz - logTarget) > 1e-4 || std::abs(br.qDb - br.qTarget) > 1e-3) {
+                        br.logHz += (logTarget - br.logHz) * kSweep;
+                        br.qDb += (br.qTarget - br.qDb) * kSweep;
+                        for (int k = 0; k < 2; ++k)
+                            br.stages[k].design(br.pass, std::exp(br.logHz), dsp::kRes24QDb[k] + (k == 1 ? br.qDb : 0), rate);
+                        br.designed = true;
+                    }
+                }
+            }
+            for (int b = 0; b < 3; ++b) {
+                d.eqGain[b] += (d.eqTarget[b] - d.eqGain[b]) * kEq;
+                if (std::abs(d.eqGain[b] - d.eqTarget[b]) < 1e-6f) d.eqGain[b] = d.eqTarget[b];
+            }
+            d.dry += (d.dryTarget - d.dry) * kMix;
+            for (auto& br : d.branch) {
+                br.gain += (br.gainTarget - br.gain) * kMix;
+                if (std::abs(br.gain - br.gainTarget) < 1e-6f) br.gain = br.gainTarget;
+            }
+            d.gain += (d.targetGain - d.gain) * .002f;
+            d.cueGain += (d.targetCueGain - d.cueGain) * .002f;
+            for (int ch = 0; ch < 2; ++ch) {
+                const float x = strip[i * 2 + ch];
+                const float low = d.eqLow[1].process(ch, d.eqLow[0].process(ch, x));
+                const float mid = d.eqMidLp[1].process(ch, d.eqMidLp[0].process(ch, d.eqMidHp[1].process(ch, d.eqMidHp[0].process(ch, x))));
+                const float high = d.eqHigh[1].process(ch, d.eqHigh[0].process(ch, x));
+                const float e = low * d.eqGain[0] + mid * d.eqGain[1] + high * d.eqGain[2];
+                float y = e * d.dry;
+                for (auto& br : d.branch)
+                    if (br.gain != 0) y += br.stages[1].process(ch, br.stages[0].process(ch, e)) * br.gain;
+                output[i * 2 + ch] += y * d.gain;
+                cue[i * 2 + ch] += y * d.cueGain;
+            }
+        }
     }
 }
 } // namespace manadj

@@ -25,6 +25,26 @@ void feed(Engine& e, int deck, uint64_t load, float value, int frames, bool eof 
     CHECK(e.publish(deck, load, transport, eof));
 }
 
+// Same as feed() with a sine (amplitude .25) for strip DSP tests.
+void feedTone(Engine& e, int deck, uint64_t load, double hz, int frames = 48000) {
+    auto& d = e.deck(deck);
+    const auto transport = d.transport.load();
+    CHECK(e.claim(deck, load, transport, 48000, d.target.load()));
+    std::vector<float> pcm(static_cast<size_t>(frames) * 2);
+    for (int i = 0; i < frames; ++i) pcm[i * 2] = pcm[i * 2 + 1] = static_cast<float>(.25 * std::sin(2 * 3.14159265358979 * hz * i / 48000));
+    CHECK(e.offer(deck, transport, pcm.data(), frames) == frames);
+    CHECK(e.publish(deck, load, transport, false));
+}
+
+// RMS of the left channel over the last `frames` rendered, after `settle` frames.
+float toneRms(Engine& e, int settle, int frames) {
+    tick(e, settle);
+    tick(e, frames);
+    double sum = 0;
+    for (int i = 0; i < frames; ++i) sum += out[i * 2] * out[i * 2];
+    return static_cast<float>(std::sqrt(sum / frames));
+}
+
 State state(Engine& e, int deck) { return static_cast<State>(e.deck(deck).status.load() & 3); }
 
 void loadDeck(Engine& e, int deck, uint64_t load, float value, int frames = 48000) {
@@ -67,8 +87,8 @@ int main() {
         tick(e, 256);
         const auto old = e.deck(0).transport.load();
         e.submit(Op::Seek, 0, 0.5);
-        tick(e, 256);
-        CHECK(out[510] == 0);                        // silent while refilling
+        tick(e, 2048);
+        CHECK(std::abs(out[4094]) < 1e-4f);          // silent while refilling (after fade + EQ decay)
         CHECK(e.deck(0).playing.load());             // intent kept
         CHECK(e.deck(0).position.load() == 0.5);     // clock held at target
         float pcm[64] = {};
@@ -155,7 +175,7 @@ int main() {
         e.submit(Op::HotCueDown, 0, 0, 0, 3);        // paused: jump + gated preview after refill
         tick(e, 64);
         CHECK(e.deck(0).previewSlot.load() == 3);
-        CHECK(out[126] == 0);
+        CHECK(std::abs(out[126]) < 1e-3f);
         feed(e, 0, 1, .25f, 48000);
         tick(e, 480);
         CHECK(out[958] > 0);
@@ -201,7 +221,7 @@ int main() {
         CHECK(out[2 * 60] > 0);                       // still fading out
         CHECK(e.deck(0).position.load() == parked);
         tick(e, 512);
-        CHECK(out[1022] == 0);
+        CHECK(std::abs(out[1022]) < 1e-3f);
         CHECK(e.deck(0).position.load() == parked);
     }
 
@@ -265,10 +285,11 @@ int main() {
         e.submit(Op::Play, 0);
         tick(e, 1024);
         e.submit(Op::Seek, 0, 3.0);
-        tick(e, kFadeFrames + 16);
-        CHECK(out[0] > .2f * unity);
-        CHECK(out[kFadeFrames] > 0 && out[kFadeFrames] < .15f * unity);
-        CHECK(out[(kFadeFrames + 8) * 2] == 0);
+        tick(e, 4096);
+        CHECK(out[0] > .2f * unity);                  // no instant cut
+        float prev = out[0];
+        for (int i = 1; i < 2048; ++i) { CHECK(std::abs(out[i * 2] - prev) < .005f); prev = out[i * 2]; } // no step (click)
+        CHECK(std::abs(out[8190]) < 1e-4f);
     }
     { // Master + cue buses: PFL is pre-fader; routing maps buses to device channels.
         auto owned = std::make_unique<Engine>(48000);
@@ -305,6 +326,37 @@ int main() {
         std::vector<float> big(5000 * 2);             // longer than one bus block
         e.render(big.data(), 5000, 2);
         CHECK(std::abs(big[9998] - .1f * unity) < .002);
+    }
+    { // Strip DSP parity: LR4 isolator EQ (250 / 2500 Hz), res24 sweep filter with deadzone.
+        const float ref = .25f / std::sqrt(2.f) * unity;
+        auto measure = [&](double hz, auto&& configure) {
+            auto owned = std::make_unique<Engine>(48000);
+            Engine& e = *owned;
+            e.submit(Op::Prepare, 0, 0, 1);
+            tick(e);
+            feedTone(e, 0, 1, hz);
+            configure(e);
+            e.submit(Op::Play, 0);
+            return toneRms(e, 4800, 4800) / ref;
+        };
+        auto db = [](float g) { return 20 * std::log10(std::max(g, 1e-9f)); };
+        for (double hz : {60.0, 1000.0, 8000.0})
+            CHECK(std::abs(db(measure(hz, [](Engine&) {}))) < 1.0);           // neutral strip ~flat
+        CHECK(db(measure(60, [](Engine& e) { e.submit(Op::Eq, 0, 0, 0, 0); })) < -24);    // low kill
+        CHECK(db(measure(1000, [](Engine& e) { e.submit(Op::Eq, 0, 0, 0, 1); })) < -18);  // mid kill
+        CHECK(db(measure(8000, [](Engine& e) { e.submit(Op::Eq, 0, 0, 0, 2); })) < -24);  // high kill
+        CHECK(std::abs(db(measure(60, [](Engine& e) { e.submit(Op::Eq, 0, 1, 0, 0); })) - 6) < 1); // +6 dB boost
+        CHECK(std::abs(db(measure(1000, [](Engine& e) { e.submitFilter(0, .02); }))) < .5);  // deadzone = bypass
+        CHECK(db(measure(5000, [](Engine& e) { e.submitFilter(0, -1); })) < -40);           // LP fully swept (40 Hz)
+        CHECK(db(measure(200, [](Engine& e) { e.submitFilter(0, 1); })) < -40);             // HP fully swept (16 kHz)
+        CHECK(std::abs(db(measure(100, [](Engine& e) { e.submitFilter(0, .5); }))) > 6);    // mid HP sweep cuts 100 Hz
+        // ...and passes 5 kHz at the desktop's resonance-compensated passband level.
+        CHECK(std::abs(db(measure(5000, [](Engine& e) { e.submitFilter(0, .5); })) - db(static_cast<float>(dsp::describeFilter(.5, 48000).gain))) < 1);
+        const auto t = dsp::describeFilter(-1, 48000);
+        CHECK(t.pass == dsp::Pass::Low && std::abs(t.frequency - 40) < .01 && t.wet == 1 && t.gain < 1);
+        const auto h = dsp::describeFilter(1, 48000);
+        CHECK(h.pass == dsp::Pass::High && std::abs(h.frequency - 16000) < .01);
+        CHECK(dsp::describeFilter(.03, 48000).wet == 0);
     }
     std::puts("engine tests passed");
 }

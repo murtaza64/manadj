@@ -40,6 +40,10 @@ sealed interface AudioCommand {
     data class SetTrim(override val deck: DeckId, val value: Double, override val gestureId: String? = null) : AudioCommand
     data class SetPitch(override val deck: DeckId, val percent: Double, override val gestureId: String? = null) : AudioCommand
     data class SetBend(override val deck: DeckId, val percent: Double, override val gestureId: String? = null) : AudioCommand
+    /** Isolator EQ knob 0..1 (0 = kill, .5 = 0 dB, 1 = +6 dB); band 0 low, 1 mid, 2 high. */
+    data class SetEq(override val deck: DeckId, val band: Int, val value: Double, override val gestureId: String? = null) : AudioCommand
+    /** Sweep filter -1 (LPF) .. 0 (bypass, deadzone ±0.03) .. +1 (HPF). */
+    data class SetFilter(override val deck: DeckId, val position: Double, override val gestureId: String? = null) : AudioCommand
     /** Pre-fader listen: sends the deck (post-trim) to the cue bus. */
     data class SetPfl(override val deck: DeckId, val on: Boolean, override val gestureId: String? = null) : AudioCommand
     /** Headphone feed: 0 = cue bus only, 1 = master only. */
@@ -59,6 +63,8 @@ data class DeckSnapshot(
     val durationSeconds: Double?, val fader: Double, val trim: Double,
     val pitchPercent: Double, val bendPercent: Double,
     val playing: Boolean, val previewing: Boolean, val pfl: Boolean,
+    /** EQ knobs (low, mid, high) 0..1 and filter -1..1 as applied by the callback. */
+    val eq: List<Double>, val filter: Double,
     /** Held gate: null, a hot-cue slot 0..7, or [AudioEngine.MAIN_CUE]. */
     val previewSlot: Int?,
     val cueSeconds: Double?, val hotCues: List<Double?>,
@@ -112,13 +118,13 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
         init { System.loadLibrary("manadj_audio") }
         const val MAIN_CUE = 8
         const val HOT_CUES = 8
-        val CAPABILITIES = setOf("play", "pause", "cue-gate", "hot-cue-gate", "hot-cue-set", "seek", "fader", "trim", "crossfade", "varispeed", "bend", "pfl", "cue-mix", "routing")
+        val CAPABILITIES = setOf("play", "pause", "cue-gate", "hot-cue-gate", "hot-cue-set", "seek", "fader", "trim", "crossfade", "varispeed", "bend", "pfl", "cue-mix", "routing", "eq", "filter")
         private const val PRIME_FRAMES = 2048
         private const val HEAD_SLOTS = HOT_CUES + 1
         private const val HEAD_FRAMES = 8192
         private const val HEADER = 16
-        private const val DECK_FIELDS = 24 + HOT_CUES
-        private enum class Op { PREPARE, PLAY, PAUSE, CUE_DOWN, CUE_UP, HOT_CUE_DOWN, HOT_CUE_UP, HOT_CUE_SET, HOT_CUE_CLEAR, SEEK, FADER, TRIM, CROSSFADE, PITCH, BEND, PFL, CUE_MIX }
+        private const val DECK_FIELDS = 28 + HOT_CUES
+        private enum class Op { PREPARE, PLAY, PAUSE, CUE_DOWN, CUE_UP, HOT_CUE_DOWN, HOT_CUE_UP, HOT_CUE_SET, HOT_CUE_CLEAR, SEEK, FADER, TRIM, CROSSFADE, PITCH, BEND, PFL, CUE_MIX, EQ, FILTER }
     }
 
     /** The caller retains/closes descriptor; the engine duplicates it for its own lifetime. */
@@ -170,6 +176,15 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
             is AudioCommand.SetBend -> Op.BEND to command.percent
             is AudioCommand.SetPfl -> Op.PFL to if (command.on) 1.0 else 0.0
             is AudioCommand.SetCueMix -> Op.CUE_MIX to command.value
+            is AudioCommand.SetEq -> {
+                if (command.band !in 0..2) return rejected("Invalid EQ band")
+                slot = command.band; Op.EQ to command.value
+            }
+            is AudioCommand.SetFilter -> {
+                if (!command.position.isFinite()) return rejected("Non-finite control")
+                val id = nativeSubmitFilter(handle, deck, command.position)
+                return if (id != 0L) CommandReceipt(id, true) else rejected("Command queue full")
+            }
         }
         if (slot !in 0 until HOT_CUES) return rejected("Invalid hot cue slot")
         if (!value.isFinite()) return rejected("Non-finite control")
@@ -224,9 +239,10 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
                 durationSeconds = durations.get(i)?.takeIf { it.first == source?.load }?.second,
                 fader = data[p + 14], trim = data[p + 15], pitchPercent = data[p + 16], bendPercent = data[p + 17],
                 playing = current && data[p + 8] != 0.0, previewing = current && data[p + 9] != 0.0, pfl = data[p + 20] != 0.0,
+                eq = listOf(data[p + 21], data[p + 22], data[p + 23]), filter = data[p + 24],
                 previewSlot = data[p + 10].toInt().takeIf { current && it >= 0 },
                 cueSeconds = data[p + 11].takeIf { current && state == LoadState.READY },
-                hotCues = List(HOT_CUES) { h -> data[p + 24 + h].takeIf { current && it >= 0 } },
+                hotCues = List(HOT_CUES) { h -> data[p + 28 + h].takeIf { current && it >= 0 } },
                 filling = current && state == LoadState.READY && data[p + 4] == 0.0 && data[p + 18] < 0,
                 readyHeads = if (current) data[p + 19].toInt() else 0,
                 headSlot = if (current) data[p + 18].toInt() else -1,
@@ -396,6 +412,7 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
     private external fun nativeStop(handle: Long)
     private external fun nativeClose(handle: Long)
     private external fun nativeSubmit(handle: Long, op: Int, deck: Int, value: Double, load: Long, slot: Int): Long
+    private external fun nativeSubmitFilter(handle: Long, deck: Int, position: Double): Long
     private external fun nativeTransport(handle: Long, deck: Int, out: DoubleArray)
     private external fun nativeClaim(handle: Long, deck: Int, load: Long, transport: Long, rate: Int, start: Double): Boolean
     private external fun nativeOffer(handle: Long, deck: Int, transport: Long, pcm: FloatArray, offsetFrames: Int, frames: Int): Int

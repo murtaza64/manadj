@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstdint>
 #include <mutex>
+#include "Dsp.h"
 
 namespace manadj {
 constexpr int kDeckCount = 4;
@@ -54,7 +55,7 @@ struct Head {
 };
 
 enum class Op : int { Prepare, Play, Pause, CueDown, CueUp, HotCueDown, HotCueUp,
-                       HotCueSet, HotCueClear, Seek, Fader, Trim, Crossfade, Pitch, Bend, Pfl, CueMix };
+                       HotCueSet, HotCueClear, Seek, Fader, Trim, Crossfade, Pitch, Bend, Pfl, CueMix, Eq, Filter };
 struct Command {
     Op op;
     int deck;
@@ -62,6 +63,17 @@ struct Command {
     uint64_t load;
     double value;
     int slot;
+    double aux[5]; // Filter: pass (0 low/1 high), cutoff Hz, wet, resonance dB, compensation gain
+};
+
+/** One sweep-filter branch (res24 cascade); LP and HP run in parallel like the desktop graph. */
+struct FilterBranch {
+    dsp::Pass pass;
+    dsp::Biquad stages[2];
+    double logHz = std::log(20000.0), hzTarget = 20000;
+    double qDb = 0, qTarget = 0;
+    float gain = 0, gainTarget = 0;
+    bool designed = false;
 };
 
 /*
@@ -97,6 +109,14 @@ struct Deck {
     std::atomic<float> pitch{0};
     std::atomic<float> bend{0};
     std::atomic<bool> pfl{false};
+    std::array<std::atomic<float>, 3> eq{};  // knob values 0..1 (low, mid, high), for snapshots
+    std::atomic<float> filter{0};             // knob -1..1
+    // Strip DSP (callback-private): LR4 isolator EQ, sweep filter.
+    dsp::Biquad eqLow[2], eqMidHp[2], eqMidLp[2], eqHigh[2];
+    float eqGain[3] = {1, 1, 1}, eqTarget[3] = {1, 1, 1};
+    FilterBranch branch[2] = {{dsp::Pass::Low}, {dsp::Pass::High}};
+    float dry = 1, dryTarget = 1;
+    bool stripWarm = false;
     std::array<Head, kHeadSlots> heads{};
     // Head being played (-1 none) and the ring offset (source frames) the worker must start at.
     std::atomic<int> headSlot{-1};
@@ -127,7 +147,9 @@ class Engine {
 public:
     explicit Engine(int outputRate = 48000);
     // Any thread; one producer lock, never taken on the callback. Returns 0 if full.
-    uint64_t submit(Op op, int deck, double value = 0, uint64_t load = 0, int slot = 0);
+    uint64_t submit(Op op, int deck, double value = 0, uint64_t load = 0, int slot = 0, const double* aux = nullptr);
+    // Control thread: computes the desktop sweep-filter target (not realtime-safe) and queues it.
+    uint64_t submitFilter(int deck, double position);
 
     // Decode worker API (one worker thread per deck at a time).
     // Starts filling `transport` if it is current: discards ring contents and
@@ -172,6 +194,12 @@ private:
     std::array<float, kBlockFrames * 2> master_{};
     std::array<float, kBlockFrames * 2> cue_{};
     void renderBuses(int frames) noexcept;
+    bool renderSource(Deck& d, float* strip, int frames) noexcept;
+    void designEq(Deck& d, double rate) noexcept;
+    void resetStrip(Deck& d) noexcept;
+    static constexpr int kSweepBlock = 32;
+    std::array<float, kBlockFrames * 2> strip_{};
+    double stripRate_ = 0;
     static float ceiling(float value) noexcept;
     void updateGain(int index) noexcept;
     void relocate(Deck& d, double seconds, int slot = -1) noexcept;

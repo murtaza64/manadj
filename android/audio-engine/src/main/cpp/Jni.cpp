@@ -7,7 +7,7 @@
 
 namespace {
 constexpr int kHeader = 16;
-constexpr int kDeckFields = 24 + manadj::kHotCues;
+constexpr int kDeckFields = 28 + manadj::kHotCues;
 constexpr int kSnapshotSize = kHeader + manadj::kDeckCount * kDeckFields;
 
 /*
@@ -149,9 +149,15 @@ Java_dev_manadj_audio_AudioEngine_nativeClose(JNIEnv*, jobject, jlong handle) {
 extern "C" JNIEXPORT jlong JNICALL
 Java_dev_manadj_audio_AudioEngine_nativeSubmit(JNIEnv*, jobject, jlong handle, jint op, jint deck,
                                                   jdouble value, jlong load, jint slot) {
-    if (op < 0 || op > static_cast<int>(manadj::Op::CueMix)) return 0;
+    if (op < 0 || op > static_cast<int>(manadj::Op::Eq)) return 0; // Filter goes through nativeSubmitFilter.
     return static_cast<jlong>(output(handle)->engine.submit(static_cast<manadj::Op>(op), deck, value,
                                                             static_cast<uint64_t>(load), slot));
+}
+
+extern "C" JNIEXPORT jlong JNICALL
+Java_dev_manadj_audio_AudioEngine_nativeSubmitFilter(JNIEnv*, jobject, jlong handle, jint deck, jdouble position) {
+    if (!std::isfinite(position)) return 0;
+    return static_cast<jlong>(output(handle)->engine.submitFilter(deck, position));
 }
 
 extern "C" JNIEXPORT void JNICALL
@@ -273,7 +279,9 @@ Java_dev_manadj_audio_AudioEngine_nativeSnapshot(JNIEnv* env, jobject, jlong han
                 d.heads[h].seconds.load() == (h == manadj::kMainCueSlot ? d.cue.load() : d.hotcues[h].load())) heads |= 1 << h;
         data[n + 19] = heads;
         data[n + 20] = d.pfl.load() ? 1 : 0;
-        for (int h = 0; h < manadj::kHotCues; ++h) data[n + 24 + h] = d.hotcues[h].load();
+        for (int b = 0; b < 3; ++b) data[n + 21 + b] = d.eq[b].load();
+        data[n + 24] = d.filter.load();
+        for (int h = 0; h < manadj::kHotCues; ++h) data[n + 28 + h] = d.hotcues[h].load();
     }
     auto result = env->NewDoubleArray(kSnapshotSize);
     if (result) env->SetDoubleArrayRegion(result, 0, kSnapshotSize, data);

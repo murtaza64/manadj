@@ -323,6 +323,29 @@ class AudioEngineTest {
         }
     }
 
+    @Test fun eqFilterApplyAndRenderCostFitsTheCallback() {
+        val tone = m4a("engine-cost.m4a", 440.0, 10)
+        AudioEngine(offline = true).use { engine ->
+            for (deck in DeckId.entries) engine.load(deck, "cost-$deck", tone)
+            engine.settled(*DeckId.entries.toTypedArray())
+            for (deck in DeckId.entries) {
+                engine.submit(AudioCommand.SetEq(deck, 0, 0.0)); engine.submit(AudioCommand.SetEq(deck, 2, .8))
+                engine.submit(AudioCommand.SetFilter(deck, if (deck.ordinal % 2 == 0) -.6 else .6))
+                engine.submit(AudioCommand.Play(deck))
+            }
+            engine.renderOfflineForTest(512)
+            val a = engine.deck(DeckId.A)
+            assertEquals(0.0, a.eq[0], 1e-6); assertEquals(.8, a.eq[2], 1e-6); assertEquals(-.6, a.filter, 1e-6)
+            // Phone callbacks are 96 frames every 2 ms; time the full 4-deck strip path (+JNI/alloc overhead).
+            val n = 2000
+            val t0 = System.nanoTime()
+            repeat(n) { engine.renderOfflineForTest(96) }
+            val perCallbackUs = (System.nanoTime() - t0) / 1000.0 / n
+            android.util.Log.i("manadj-bench", "4 decks EQ+filter: %.1f us per 96-frame render (budget 2000 us)".format(perCallbackUs))
+            assertTrue("render too slow: $perCallbackUs us", perCallbackUs < 1000)
+        }
+    }
+
     @Test fun manyRelocationsWhilePlayingNeverEndEarly() {
         val media = wav("engine-reloc.wav", .25, seconds = 20, rate = 44100)
         val rng = java.util.Random(7)

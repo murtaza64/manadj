@@ -22,6 +22,9 @@ class DeckUi(val id: DeckId) {
     var trim by mutableDoubleStateOf(.5)
     var pitch by mutableDoubleStateOf(0.0)
     var bend by mutableDoubleStateOf(0.0)
+    /** EQ knobs 0..1 (low, mid, high) and filter -1..1: optimistic until the callback applies them. */
+    val eq = mutableStateListOf(.5, .5, .5)
+    var filter by mutableDoubleStateOf(0.0)
     val generation = AtomicLong()
     var pendingLoadCommandId: Long? = null
     val pendingControls = mutableMapOf<String, Long>()
@@ -112,6 +115,8 @@ class PlayerModel(application: Application) : AndroidViewModel(application) {
                         applied("trim") { ui.trim = snapshot.trim }
                         applied("pitch") { ui.pitch = snapshot.pitchPercent }
                         applied("bend") { ui.bend = snapshot.bendPercent }
+                        for (band in 0..2) applied("eq$band") { ui.eq[band] = snapshot.eq[band] }
+                        applied("filter") { ui.filter = snapshot.filter }
                     }
                     // Latch on change so OK dismisses until something new happens.
                     if (state.outputError != lastOutputError) { lastOutputError = state.outputError; if (state.outputError != 0 && !state.outputOpen) failure = "Audio output error ${state.outputError}: reconnecting" }
@@ -200,6 +205,8 @@ class PlayerModel(application: Application) : AndroidViewModel(application) {
     fun updateTrim(deck: DeckId, value: Double, gesture: String? = null) = control(deck, "trim", AudioCommand.SetTrim(deck, value, gesture)) { it.trim = value }
     fun updatePitch(deck: DeckId, value: Double, gesture: String? = null) = control(deck, "pitch", AudioCommand.SetPitch(deck, value, gesture)) { it.pitch = value }
     fun updateBend(deck: DeckId, value: Double, gesture: String? = null) = control(deck, "bend", AudioCommand.SetBend(deck, value, gesture)) { it.bend = value }
+    fun updateEq(deck: DeckId, band: Int, value: Double, gesture: String? = null) = control(deck, "eq$band", AudioCommand.SetEq(deck, band, value, gesture)) { it.eq[band] = value }
+    fun updateFilter(deck: DeckId, position: Double, gesture: String? = null) = control(deck, "filter", AudioCommand.SetFilter(deck, position, gesture)) { it.filter = position }
     /** [value] is the fader throw 0 (A) .. 1 (B); the engine takes -1..1. */
     fun updateCrossfade(value: Double, gesture: String? = null) {
         val receipt = submit(AudioCommand.SetCrossfade(value * 2 - 1, gesture))
