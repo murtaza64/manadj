@@ -29,3 +29,6 @@ frontend/public/manual/
 # Generated Pages staging and ownership marker (site/build.py --output)
 /.site-dist/
 /.site-dist.site-build
+
+# Routine video exports (#377)
+exports/

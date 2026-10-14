@@ -26,7 +26,7 @@ import { hasKeyboardOverlay, isQuantizeShortcut, isTypingTarget } from './perfor
 import { TourReplayButton } from '../tour/TourReplayButton';
 import './TopBar.css';
 
-export type AppMode = 'library' | 'performance' | 'transition' | 'routine' | 'history' | 'sync';
+export type AppMode = 'library' | 'performance' | 'transition' | 'routine' | 'history' | 'sync' | 'clip';
 
 type ModeMeta = { id: AppMode; icon: string; label: string; title: string };
 
@@ -49,6 +49,7 @@ const PRIMARY_MODES: ModeMeta[] = [
 const OVERFLOW_MODES: ModeMeta[] = [
   { id: 'library', icon: '≡', label: 'EXPORT', title: 'Export' },
   { id: 'history', icon: '↻', label: 'HISTORY', title: 'Transition history' },
+  { id: 'clip', icon: '▯', label: 'CLIP', title: 'Clip editor: portrait video of a mix' },
 ];
 
 /** The retired pair editor — overflow-reachable only under the dev
@@ -192,7 +193,7 @@ function ModeControl({
         title={
           activeOverflow
             ? `${activeOverflow.title} — more modes`
-            : 'More modes (Export, Transition history)'
+            : 'More modes (Export, Transition history, Clip)'
         }
         onClick={() => setMenu((v) => !v)}
       >

@@ -85,6 +85,7 @@ import {
   subscribeReplay,
   toggleReplayPause,
 } from './replayStore';
+import { openClipEditor } from '../export/clipEvents';
 import './sessionTimeline.css';
 
 // ── Layout ──────────────────────────────────────────────────────────────
@@ -150,7 +151,10 @@ type Selection =
   | { kind: 'moment'; t: number }
   | { kind: 'take'; take: TakeRowWire }
   | { kind: 'candidate'; candidate: RoutineCandidateWire }
-  | { kind: 'routineTake'; take: RoutineTakeRowWire };
+  | { kind: 'routineTake'; take: RoutineTakeRowWire }
+  /** A drag-selected time span (#377): act on an arbitrary stretch of the
+   * Session — make a clip of it (saving a Routine from it comes later). */
+  | { kind: 'span'; start: number; end: number };
 
 /** A hovered routine band/chip (gh#187): the cast + window driving the
  * hover-dim spotlight (take-chip parity, any tier — ◆/◇/⧉). */
@@ -1082,11 +1086,37 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusFlash, f
     }
   };
 
+  /** Drag on the timeline = select a span; a plain click stays a moment.
+   * Window listeners carry the gesture past the svg's edge. */
+  const spanDraggedRef = useRef(false);
+  const onTimelineMouseDown = (e: React.MouseEvent) => {
+    if (e.button !== 0 || !axis) return;
+    const x0 = e.clientX;
+    const t0 = axis.pxToT(pxAt(x0));
+    let dragging = false;
+    const move = (ev: MouseEvent) => {
+      const ax = axisRef.current;
+      if (!ax) return;
+      if (!dragging && Math.abs(ev.clientX - x0) < 5) return;
+      dragging = true;
+      spanDraggedRef.current = true;
+      const t1 = ax.pxToT(pxAt(ev.clientX));
+      setSelection({ kind: 'span', start: Math.min(t0, t1), end: Math.max(t0, t1) });
+    };
+    const up = () => {
+      window.removeEventListener('mousemove', move);
+      window.removeEventListener('mouseup', up);
+    };
+    window.addEventListener('mousemove', move);
+    window.addEventListener('mouseup', up);
+  };
+
   const onTimelineClick = (clientX: number) => {
     if (!axis || !events) return;
-    // The click that lands after a trim drag must not move the selection.
-    if (trimDraggedRef.current) {
+    // The click that lands after a trim/span drag must not move the selection.
+    if (trimDraggedRef.current || spanDraggedRef.current) {
       trimDraggedRef.current = false;
+      spanDraggedRef.current = false;
       return;
     }
     const t = axis.pxToT(pxAt(clientX));
@@ -1137,6 +1167,28 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusFlash, f
           >
             ▶ {fmtClock(selection.t)}
           </button>
+        ) : null}
+        {selection.kind === 'span' ? (
+          <span className="stl-cluster stl-cand-cluster">
+            <span className="stl-cand-title">
+              ⟷ {fmtClock(selection.start)}–{fmtClock(selection.end)} · {fmtDur(selection.end - selection.start)}
+            </span>
+            {!replayHere ? (
+              <button className="btn btn-success" title="Replay from the span's start" onClick={() => replayFrom(selection.start)}>
+                ▶ span
+              </button>
+            ) : null}
+            <button
+              className="btn btn-primary"
+              title="Open this span in CLIP mode: portrait video of exactly this stretch, rendered through the real mixer"
+              onClick={() => openClipEditor({ kind: 'session', uuid: session.uuid, startS: Math.round(selection.start * 10) / 10, endS: Math.round(selection.end * 10) / 10 })}
+            >
+              ⇥ clip
+            </button>
+            <button className="btn btn-secondary" aria-label="Clear selection" onClick={() => setSelection({ kind: 'none' })}>
+              ✕
+            </button>
+          </span>
         ) : null}
         {selection.kind === 'take' ? (
           <span className="stl-cluster">
@@ -1312,7 +1364,7 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusFlash, f
           className="stl-hint"
           title="waveform = audio that played · background fill = audibility (height = Master gain) · ◆N hot cue · ↷N/↶N beat jump · ↕ seek · ▶/▪ play/pause · ⌐¬ loop · dashes = machine tenure · wheel = zoom, trackpad = pan"
         >
-          hover=scrub · click=moment/seek · space=pause · ⓘ
+          hover=scrub · click=moment/seek · drag=select span · space=pause · ⓘ
         </span>
       </div>
 
@@ -1330,6 +1382,7 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusFlash, f
                 className="stl-svg"
                 onMouseMove={(e) => axis && setScrubT(axis.pxToT(pxAt(e.clientX)))}
                 onMouseLeave={() => setScrubT(null)}
+                onMouseDown={onTimelineMouseDown}
                 onClick={(e) => onTimelineClick(e.clientX)}
               >
                 <TimelineScene
@@ -2191,6 +2244,17 @@ function SceneOverlay({
             );
           })()
         : null}
+
+      {/* Drag-selected span (#377). */}
+      {selection.kind === 'span' ? (
+        <rect
+          x={X(selection.start)}
+          y={RULER_H}
+          width={Math.max(X(selection.end) - X(selection.start), 2)}
+          height={lanesBottom - RULER_H}
+          className="stl-span-select"
+        />
+      ) : null}
 
       {/* Moment selection anchor — hidden while the replay head is the
           one cursor (it follows current time; clicks seek it). */}

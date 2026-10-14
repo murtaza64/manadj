@@ -695,3 +695,11 @@
   opacity: 0.85;
   margin-left: var(--space-2);
 }
+
+/* Drag-selected span (#377): the accent marquee family. */
+.stl-span-select {
+  fill: rgba(var(--accent-rgb), 0.12);
+  stroke: var(--accent);
+  stroke-width: 1;
+  pointer-events: none;
+}

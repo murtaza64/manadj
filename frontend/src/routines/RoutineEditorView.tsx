@@ -121,6 +121,7 @@ import {
   type EditorMode,
 } from './editorMode';
 import { primaryChordLabel } from '../utils/platform';
+import { openClipEditor } from '../export/clipEvents';
 import './routineEditor.css';
 
 const LAST_ROUTINE_KEY = 'manadj-last-routine';
@@ -1969,6 +1970,15 @@ export default function RoutineEditorView() {
                 }
               >
                 ▦ source
+              </button>
+            )}
+            {(opened?.kind === 'routine' || opened?.kind === 'transition') && (
+              <button
+                className="btn btn-mini"
+                title="Open the clip editor: portrait MP4 (1080×1920) of this mix with its rendered audio, visualizer programme and look (#377)"
+                onClick={() => openClipEditor({ kind: opened.kind, uuid: opened.uuid })}
+              >
+                ⇥ clip
               </button>
             )}
           </>

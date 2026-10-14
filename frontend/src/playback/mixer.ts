@@ -193,7 +193,7 @@ export interface AutomationChannelValues {
   stems?: Record<StemName, boolean>;
 }
 
-const FLAT_CHANNEL: ChannelState = {
+export const FLAT_CHANNEL: ChannelState = {
   trim: 0.5,
   eq: { low: 0.5, mid: 0.5, high: 0.5 },
   filter: 0,
@@ -221,7 +221,7 @@ export const CUE_MIX_DEFAULT = 0;
 export const MASTER_LEVEL_DEFAULT = MASTER_UNITY_VALUE;
 
 function makeFilter(
-  ctx: AudioContext,
+  ctx: BaseAudioContext,
   type: 'lowpass' | 'highpass',
   frequency: number
 ): BiquadFilterNode {
@@ -242,7 +242,7 @@ const LIVE_CEILING_CURVE = samplePeakCeilingCurve();
  * DynamicsCompressorNode added makeup gain, compressed ordinary mixes, and
  * still overshot above 0 dBFS. Neutral trim now provides summing headroom;
  * this node only bounds mistakes/transients at -2 dBFS. */
-function makeSamplePeakCeiling(ctx: AudioContext): WaveShaperNode {
+export function makeSamplePeakCeiling(ctx: BaseAudioContext): WaveShaperNode {
   const ceiling = ctx.createWaveShaper();
   ceiling.curve = LIVE_CEILING_CURVE;
   ceiling.oversample = 'none';
@@ -258,7 +258,7 @@ function makeSamplePeakCeiling(ctx: AudioContext): WaveShaperNode {
  * (audible as fuzz). Linear ramp so targets are actually reached (kill =
  * true zero, not a setTargetAtTime asymptote).
  */
-function rampGain(ctx: AudioContext, param: AudioParam, target: number): void {
+export function rampGain(ctx: BaseAudioContext, param: AudioParam, target: number): void {
   const current = param.value; // computed value, including in-flight ramp progress
   const now = ctx.currentTime;
   param.cancelScheduledValues(now);
@@ -270,7 +270,7 @@ function rampGain(ctx: AudioContext, param: AudioParam, target: number): void {
  * The PFL tap (headphone-cue 02) hangs off the sweep output — post-EQ/filter,
  * pre-fader/Beat-FX/crossfader. Beat FX is POST-FADER so closing the fader
  * stops new excitation while the processor's existing tail returns downstream. */
-class ChannelStrip {
+export class ChannelStrip {
   readonly input: GainNode;
   readonly trimGain: GainNode;
   readonly bandGains: Record<EqBand, GainNode>;
@@ -288,7 +288,7 @@ class ChannelStrip {
   readonly meterAnalyser: AnalyserNode;
   private readonly meterBuffer: Float32Array<ArrayBuffer>;
 
-  constructor(ctx: AudioContext, state: ChannelState) {
+  constructor(ctx: BaseAudioContext, state: ChannelState) {
     this.input = ctx.createGain();
     this.trimGain = ctx.createGain();
     this.trimGain.gain.value = trimToGain(state.trim);
