@@ -58,3 +58,6 @@ slskd_url = "http://localhost:5030"
 #   SLSKD_API_KEY=...
 # It must match the primary API key slskd is started with (SLSKD_API_KEY in
 # slskd's launchd env). A real environment variable takes precedence over .env.
+
+[device_sync]
+enabled = true

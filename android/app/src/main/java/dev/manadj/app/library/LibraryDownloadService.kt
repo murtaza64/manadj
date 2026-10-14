@@ -48,6 +48,7 @@ class LibraryDownloadService : Service() {
         startInForeground(notification(repo.bulk.value.copy(running = true)))
         if (run?.isActive == true) return START_NOT_STICKY
         val playlistId = intent?.getIntExtra(EXTRA_PLAYLIST, -1)?.takeIf { it >= 0 }
+        val stems = intent?.getBooleanExtra(EXTRA_STEMS, false) == true
         run = scope.launch {
             val ticker = launch {
                 while (true) {
@@ -55,7 +56,7 @@ class LibraryDownloadService : Service() {
                     delay(1000)
                 }
             }
-            repo.downloadAll(playlistId)
+            repo.downloadAll(playlistId, stems)
             ticker.cancel()
             stopForeground(STOP_FOREGROUND_DETACH)
             notify(notification(repo.bulk.value))
@@ -115,9 +116,10 @@ class LibraryDownloadService : Service() {
         private const val NOTIFICATION_ID = 2
         private const val ACTION_CANCEL = "dev.manadj.app.library.CANCEL_DOWNLOAD"
         private const val EXTRA_PLAYLIST = "playlist"
+        private const val EXTRA_STEMS = "stems"
 
-        fun start(context: Context, playlistId: Int?) {
-            val intent = Intent(context, LibraryDownloadService::class.java).putExtra(EXTRA_PLAYLIST, playlistId ?: -1)
+        fun start(context: Context, playlistId: Int?, stems: Boolean = false) {
+            val intent = Intent(context, LibraryDownloadService::class.java).putExtra(EXTRA_PLAYLIST, playlistId ?: -1).putExtra(EXTRA_STEMS, stems)
             ContextCompat.startForegroundService(context, intent)
         }
 

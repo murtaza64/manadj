@@ -47,7 +47,7 @@ object SnapshotJson {
         }
         val trackArray = root.getJSONArray("tracks")
         // Older desktop/cached snapshots lack fields this app relies on (waveform_rev, settings): stale, resync.
-        val stale = !root.has("settings") || (0 until trackArray.length()).any { !trackArray.getJSONObject(it).has("waveform_rev") }
+        val stale = !root.has("settings") || (0 until trackArray.length()).any { i -> trackArray.getJSONObject(i).let { !it.has("waveform_rev") || !it.has("bpm_centi") } }
         return Snapshot(
             version, instant(root.str("generated_at")), categories, tags, tracks, playlists, links, transitions, cameos, takes,
             schemaStale = stale,
@@ -67,7 +67,7 @@ object SnapshotJson {
                 origin = g.getString("origin"),
                 anchorTime = g.dbl("anchor_time"),
                 tempoChanges = g.getJSONArray("tempo_changes").objects().map { tc ->
-                    TempoChange(tc.getDouble("start_time"), tc.getDouble("bpm"), tc.optInt("time_signature_num", 4), tc.optInt("bar_position", 1))
+                    TempoChange(tc.getDouble("start_time"), tc.getDouble("bpm"), tc.optInt("time_signature_num", 4), tc.optInt("bar_position", 1), tc.optInt("time_signature_den", 4))
                 },
             )
         }
@@ -89,11 +89,24 @@ object SnapshotJson {
             audioRev = it.str("audio_rev"),
             previewRev = it.str("preview_rev"),
             waveformRev = it.str("waveform_rev"),
+            stemsRev = it.str("stems_rev"),
+            // Older desktops: approximate the gate column from the served bpm.
+            bpmCenti = when {
+                !it.has("bpm_centi") -> if (it.isNull("bpm")) null else Math.round(it.getDouble("bpm") * 100)
+                it.isNull("bpm_centi") -> null
+                else -> it.getLong("bpm_centi")
+            },
             tagIds = it.getJSONArray("tag_ids").let { a -> (0 until a.length()).map(a::getInt) },
             hotCues = it.getJSONArray("hot_cues").objects().map { c ->
                 HotCue(c.getInt("slot"), c.getDouble("time"), c.str("label"), c.str("color"))
             },
             grid = grid,
+            ladder = it.optJSONObject("metric_ladder")?.let { m ->
+                MetricLadder(
+                    m.optJSONArray("arities")?.let { a -> (0 until a.length()).map(a::getInt) }.orEmpty(),
+                    m.optJSONArray("reset_marks")?.let { a -> (0 until a.length()).map(a::getDouble) }.orEmpty(),
+                )
+            },
         )
     }
 

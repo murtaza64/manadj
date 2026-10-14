@@ -22,6 +22,8 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import dev.manadj.audio.AudioCommand
+import dev.manadj.audio.AudioEngine
+import dev.manadj.audio.DeckId
 import kotlinx.coroutines.CancellationException
 import kotlin.math.*
 import kotlin.math.roundToInt
@@ -69,7 +71,7 @@ class WaveStyle(val colors: Array<FloatArray>, val coreWhite: Float, val coreBlo
 }
 
 /** One column's group heights (0..1): desktop groupAmps over the column's box-filtered band frames. */
-private fun columnGroups(data: WaveformData, t0: Double, t1: Double, out: FloatArray) {
+internal fun columnGroups(data: WaveformData, t0: Double, t1: Double, out: FloatArray) {
     val fps = data.framesPerSecond
     val x0 = t0 * fps - data.stftWindow * .5 / data.bandHop
     val x1 = t1 * fps - data.stftWindow * .5 / data.bandHop
@@ -98,7 +100,24 @@ private fun columnGroups(data: WaveformData, t0: Double, t1: Double, out: FloatA
  * Batched painter: segments bucketed per (nesting level, style color) so a column's outer bands draw first
  * and the whole lane costs a few drawLines calls.
  */
-private class Lines(val style: WaveStyle) {
+/**
+ * Overview brightness (minimap + browser previews). Desktop dims minimap-mode bodies toward the wave background
+ * (theme/markers MINIMAP_BRIGHTNESS = 0.65, VOID #0b0b0f; ladderWaveStyle toCss); [phone] is the extra
+ * mobile-only Settings factor (OLED at high brightness), applied the same way so shape/clipping stay faithful.
+ */
+object OverviewDim {
+    const val DESKTOP = .65f
+    var phone by mutableFloatStateOf(.8f)
+    val factor get() = DESKTOP * phone
+}
+private val WAVE_BG = floatArrayOf(11 / 255f, 11 / 255f, 15 / 255f)
+private fun dim(color: Int, k: Float): Int {
+    if (k >= 1f) return color
+    fun ch(v: Int, i: Int) = ((WAVE_BG[i] + (v / 255f - WAVE_BG[i]) * k).coerceIn(0f, 1f) * 255 + .5f).toInt()
+    return android.graphics.Color.argb(android.graphics.Color.alpha(color), ch(android.graphics.Color.red(color), 0), ch(android.graphics.Color.green(color), 1), ch(android.graphics.Color.blue(color), 2))
+}
+
+internal class Lines(val style: WaveStyle, val brightness: Float = 1f) {
     private class Bucket(var buf: FloatArray, var count: Int = 0)
     private val levels = Array(3) { LinkedHashMap<Int, Bucket>() }
     fun reset() { for (l in levels) for (b in l.values) b.count = 0 }
@@ -118,7 +137,7 @@ private class Lines(val style: WaveStyle) {
         b.buf[b.count] = x0; b.buf[b.count + 1] = y0; b.buf[b.count + 2] = x1; b.buf[b.count + 3] = y1; b.count += 4
     }
     fun draw(canvas: android.graphics.Canvas, paint: Paint) {
-        for (l in levels) for ((color, b) in l) if (b.count > 0) { paint.color = color; canvas.drawLines(b.buf, 0, b.count, paint) }
+        for (l in levels) for ((color, b) in l) if (b.count > 0) { paint.color = dim(color, brightness); canvas.drawLines(b.buf, 0, b.count, paint) }
     }
 }
 
@@ -135,14 +154,18 @@ fun marksOf(ui: DeckUi) = ui.snapshot.let { s -> WaveMarks(s?.cueSeconds, ui.hot
     data: WaveformData?, position: () -> Double, duration: Double?, marks: WaveMarks, modifier: Modifier,
     overview: Boolean = false, vertical: Boolean = false, windowSeconds: Double = 16.0, playheadAt: Float = .3f,
     live: () -> Strip = { Strip() }, history: StripHistory? = null, accent: Color = Ink.accent, status: String? = null,
+    stemWave: ((Int) -> WaveformData?)? = null,
 ) {
     val paint = remember { Paint().apply { strokeWidth = 2f; isAntiAlias = false } }
     val ink = remember { Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = Typeface.MONOSPACE; isFakeBoldText = true } }
     var lines by remember { mutableStateOf<Lines?>(null) }
     val columns = remember { ColumnCache() }
+    // Stem composites (one column cache per audible-stem mask; scaled by the mix's fill so kills read quieter).
+    val stemColumns = remember { HashMap<Int, ColumnCache>() }
     // Overview body depends only on data + size: cache it as a bitmap, overlay markers per frame.
     var cache by remember { mutableStateOf<Triple<WaveformData, IntSize2, ImageBitmap>?>(null) }
     var overviewStyle by remember { mutableStateOf<WaveStyle?>(null) }
+    var overviewDim by remember { mutableFloatStateOf(-1f) }
     Box(modifier.clipToBounds().background(Ink.background)) {
         Canvas(Modifier.fillMaxSize()) {
             val along = if (vertical) size.height else size.width
@@ -160,7 +183,8 @@ fun marksOf(ui: DeckUi) = ui.snapshot.let { s -> WaveMarks(s?.cueSeconds, ui.hot
                     val key = IntSize2(size.width.toInt(), size.height.toInt())
                     val c = cache
                     val style = WaveStyle.minimap ?: WaveStyle.MINIMAP
-                    val image = if (c != null && c.first === data && c.second == key && overviewStyle === style) c.third else renderOverview(data, key, dur, vertical, style).also { cache = Triple(data, key, it); overviewStyle = style }
+                    val k = OverviewDim.factor
+                    val image = if (c != null && c.first === data && c.second == key && overviewStyle === style && overviewDim == k) c.third else renderOverview(data, key, dur, vertical, style, k).also { cache = Triple(data, key, it); overviewStyle = style; overviewDim = k }
                     drawImage(image)
                     val p = at(pos).coerceIn(0f, along)
                     drawRect(Color.Black.copy(alpha = .5f), Offset.Zero, if (vertical) Size(size.width, p) else Size(p, size.height))
@@ -189,7 +213,15 @@ fun marksOf(ui: DeckUi) = ui.snapshot.let { s -> WaveMarks(s?.cueSeconds, ui.hot
                         for (j in 0..2) g[j] = (g[j] * columns.fill).coerceAtMost(1f)
                         val behind = t0 < pos
                         val strip = if (behind) history?.at(t0, liveStrip) ?: liveStrip else liveStrip
-                        top[0] = (g[0] * strip.low * strip.gain).coerceIn(0f, 1f); top[1] = (g[1] * strip.mid * strip.gain).coerceIn(0f, 1f); top[2] = (g[2] * strip.high * strip.gain).coerceIn(0f, 1f)
+                        // Stems (desktop #213): the top lobe (and the heard past) shows the audible stems' composite.
+                        val stemData = if (strip.stems != ALL_STEMS) stemWave?.invoke(strip.stems) else null
+                        val src = if (stemData != null) {
+                            val c = stemColumns.getOrPut(strip.stems) { ColumnCache() }
+                            c.prepare(stemData, colSeconds); c.groups(stemData, k, t0, t1, top)
+                            for (j in 0..2) top[j] = (top[j] * columns.fill).coerceAtMost(1f)
+                            top
+                        } else g
+                        top[0] = (src[0] * strip.low * strip.gain).coerceIn(0f, 1f); top[1] = (src[1] * strip.mid * strip.gain).coerceIn(0f, 1f); top[2] = (src[2] * strip.high * strip.gain).coerceIn(0f, 1f)
                         val bottom = if (behind) top else g
                         l.column(top) { level, mask, h -> if (vertical) l.add(level, mask, half, p, half - h * half, p) else l.add(level, mask, p, half, p, half - h * half) }
                         l.column(bottom) { level, mask, h -> if (vertical) l.add(level, mask, half, p, half + h * half, p) else l.add(level, mask, p, half, p, half + h * half) }
@@ -231,7 +263,8 @@ fun marksOf(ui: DeckUi) = ui.snapshot.let { s -> WaveMarks(s?.cueSeconds, ui.hot
                     drawContext.canvas.nativeCanvas.drawText("${slot + 1}", x + flag * .22f, y + flag * .82f, ink)
                 }
             } }
-            line(pos, Ink.playhead, (if (overview) 2 else 3).dp.toPx())
+            // Overview pins a pre-roll playhead (pos < 0) to the start edge.
+            line(if (overview) pos.coerceIn(0.0, dur) else pos, Ink.playhead, (if (overview) 2 else 3).dp.toPx())
             if (data == null || !data.complete) {
                 // Analysis still filling: hairline axis so the lane never reads as silence.
                 if (data == null) drawLine(accent.copy(alpha = .35f), if (vertical) Offset(size.width / 2, 0f) else Offset(0f, size.height / 2), if (vertical) Offset(size.width / 2, size.height) else Offset(size.width, size.height / 2), 1.dp.toPx())
@@ -244,12 +277,12 @@ fun marksOf(ui: DeckUi) = ui.snapshot.let { s -> WaveMarks(s?.cueSeconds, ui.hot
 private data class IntSize2(val w: Int, val h: Int)
 
 /** Bottom-anchored minimap body (desktop minimap mode), drawn once into a bitmap. */
-private fun renderOverview(data: WaveformData, size: IntSize2, duration: Double, vertical: Boolean, style: WaveStyle): ImageBitmap {
+private fun renderOverview(data: WaveformData, size: IntSize2, duration: Double, vertical: Boolean, style: WaveStyle, brightness: Float): ImageBitmap {
     val bitmap = Bitmap.createBitmap(max(1, size.w), max(1, size.h), Bitmap.Config.ARGB_8888)
     val canvas = android.graphics.Canvas(bitmap)
     val paint = Paint().apply { strokeWidth = 1f }
     val along = if (vertical) size.h else size.w; val across = if (vertical) size.w else size.h
-    val l = Lines(style); val g = FloatArray(3)
+    val l = Lines(style, brightness); val g = FloatArray(3)
     val dur = duration.coerceAtLeast(1.0)
     for (p in 0 until along) {
         columnGroups(data, p.toDouble() / along * dur, (p + 1.0) / along * dur, g)
@@ -260,9 +293,23 @@ private fun renderOverview(data: WaveformData, size: IntSize2, duration: Double,
     return bitmap.asImageBitmap()
 }
 
-/** Overview with tap/drag seek: preview while held, one Seek on release (engine contract). */
-@Composable fun Minimap(ui: DeckUi, model: PlayerModel, wave: WaveformData?, modifier: Modifier, vertical: Boolean = false) {
+/**
+ * Overview with tap/drag seek (desktop: seek on click). While dragging, [preview] holds the finger's track
+ * position so this deck's detail wave follows live; the audio seeks once, where the finger lifts. A second
+ * finger cancels (no seek).
+ */
+@Composable fun Minimap(ui: DeckUi, model: PlayerModel, wave: WaveformData?, modifier: Modifier, vertical: Boolean = false, preview: MutableMap<DeckId, Double>? = null) {
     var seekPreview by remember(ui.id) { mutableStateOf<Double?>(null) }
+    LaunchedEffect(seekPreview) {
+        val p = seekPreview
+        if (preview == null) return@LaunchedEffect
+        if (p != null) { preview[ui.id] = p; return@LaunchedEffect }
+        // Released: hold the detail wave at the drop point until the engine reports the seek (no flash back).
+        val target = preview[ui.id] ?: return@LaunchedEffect
+        val until = System.nanoTime() + 400_000_000L
+        while (System.nanoTime() < until && kotlin.math.abs(position(ui) - target) > .15) kotlinx.coroutines.delay(16)
+        preview.remove(ui.id)
+    }
     val ready by remember(ui) { derivedStateOf { ui.ready } }
     val currentReady by rememberUpdatedState(ready)
     WaveView(wave, { seekPreview ?: position(ui) }, ui.durationSeconds, marksOf(ui), modifier.semantics { contentDescription = "${ui.id} minimap seek" }.pointerInput(ui.id, vertical) {
@@ -271,19 +318,22 @@ private fun renderOverview(data: WaveformData, size: IntSize2, duration: Double,
             val duration = ui.durationSeconds
             if (!currentReady || duration == null || duration <= 0) return@awaitEachGesture
             val id = model.beginGesture(ui.id, "SEEK") { seekPreview = null }
-            fun preview(p: Offset) { seekPreview = ((if (vertical) p.y / size.height else p.x / size.width) * duration).coerceIn(0.0, duration) }
+            // Pre-roll: dragging past the start edge parks the playhead before 0 (engine bound).
+            fun preview(p: Offset) { seekPreview = ((if (vertical) p.y / size.height else p.x / size.width) * duration).coerceIn(-AudioEngine.MAX_LEAD_IN_SECONDS, duration) }
             preview(down.position); down.consume()
             var cancelled = false
             try {
                 while (true) {
-                    val change = awaitPointerEvent().changes.firstOrNull { it.id == down.id }
+                    val event = awaitPointerEvent()
+                    if (event.changes.count { it.pressed } > 1) { cancelled = true; break }
+                    val change = event.changes.firstOrNull { it.id == down.id }
                     if (change == null || (!change.pressed && change.isConsumed)) { cancelled = true; break }
                     if (!change.pressed || !model.gestureActive(id)) break
                     preview(change.position); change.consume()
                 }
                 if (!cancelled && model.gestureActive(id)) seekPreview?.let { model.submit(AudioCommand.Seek(ui.id, it, id)) }
             } catch (cancel: CancellationException) { cancelled = true; throw cancel }
-            finally { seekPreview = null; model.finishGesture(id, cancelled) }
+            finally { if (cancelled) preview?.remove(ui.id); seekPreview = null; model.finishGesture(id, cancelled) }
         }
     }, overview = true, vertical = vertical, accent = deckColor(ui.id), status = if (!ui.ready) null else if (wave == null) "analysing…" else null)
 }
@@ -291,7 +341,7 @@ private fun renderOverview(data: WaveformData, size: IntSize2, duration: Double,
 fun position(ui: DeckUi) = if (ui.source?.id == ui.snapshot?.sourceId) ui.snapshot?.sourceSeconds ?: 0.0 else 0.0
 
 /** Per-column band groups for one (waveform, zoom): column k is computed once while its frames are analysed. */
-private class ColumnCache {
+internal class ColumnCache {
     private var data: WaveformData? = null
     private var colSeconds = 0.0
     private val cache = HashMap<Long, FloatArray>()
@@ -302,7 +352,7 @@ private class ColumnCache {
         if (d !== data || seconds != colSeconds) { data = d; colSeconds = seconds; cache.clear() }
         if (d.frames != fillFrames && (d.complete || d.frames - fillFrames > d.framesPerSecond * 20)) { fillFrames = d.frames; fill = fillGain(d) }
     }
-    private fun fillGain(d: WaveformData): Float {
+    fun fillGain(d: WaveformData): Float {
         val dur = d.frames / d.framesPerSecond
         if (dur <= 0) return 1f
         val n = 1500; val g = FloatArray(3); val peaks = FloatArray(n)
@@ -341,11 +391,11 @@ class SmoothClock {
 @Composable fun frameNanos(active: Boolean): State<Long> = produceState(0L, active) { while (active) withFrameNanos { value = it } }
 
 /** Browser row preview (desktop previewImage.ts): bins linearly sampled per pixel, bipolar — each band mirrors around the centre at half amplitude. */
-fun renderPreview(p: dev.manadj.app.browse.WaveformPreview, w: Int, h: Int, style: WaveStyle): ImageBitmap {
+fun renderPreview(p: dev.manadj.app.browse.WaveformPreview, w: Int, h: Int, style: WaveStyle, brightness: Float = OverviewDim.factor): ImageBitmap {
     val bitmap = Bitmap.createBitmap(max(1, w), max(1, h), Bitmap.Config.ARGB_8888)
     val canvas = android.graphics.Canvas(bitmap)
     val paint = Paint().apply { strokeWidth = 1f }
-    val l = Lines(style); val g = FloatArray(3)
+    val l = Lines(style, brightness); val g = FloatArray(3)
     for (x in 0 until w) {
         val f = ((x + .5f) * p.bins / w - .5f).coerceIn(0f, (p.bins - 1).toFloat())
         val i0 = f.toInt(); val i1 = min(i0 + 1, p.bins - 1); val fr = f - i0

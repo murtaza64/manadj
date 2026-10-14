@@ -159,9 +159,21 @@ object LibraryHolder {
      * `repository(context).bulk`; size/space preview: `bulkPlan(playlistId)`.
      * Android 13+: request POST_NOTIFICATIONS first or the progress notification is hidden.
      */
-    fun downloadAll(context: Context, playlistId: Int? = null) = LibraryDownloadService.start(context, playlistId)
+    fun downloadAll(context: Context, playlistId: Int? = null, stems: Boolean = false) = LibraryDownloadService.start(context, playlistId, stems)
 
     fun cancelDownloadAll(context: Context) = repository(context).cancelBulk()
+
+    /**
+     * The desktop's current stems for a library track (vocals/drums/bass/other → m4a,
+     * aligned with the track audio): cached, else downloaded now. Null when the desktop
+     * has none (track.stemsRev == null). Progress: `repository(ctx).stemDownloads`.
+     */
+    suspend fun stemFiles(context: Context, trackId: Int): Map<String, java.io.File>? =
+        repository(context).stemFiles(trackId)
+
+    /** A stem's desktop MWF1 waveform (for the stem lanes of the detail wave). */
+    suspend fun stemWaveform(context: Context, trackId: Int, stem: String): dev.manadj.library.DetailWaveform? =
+        repository(context).stemWaveform(trackId, stem)
 
     /** The desktop's detail waveform for a library track (offline cache, else fetched); null if none. */
     suspend fun detailWaveform(context: Context, trackId: Int): dev.manadj.library.DetailWaveform? =
@@ -182,6 +194,10 @@ object LibraryHolder {
         scope.launch {
             try {
                 val file = repo.audioFile(track.id)
+                // Stems ride along when already on the phone (never block a load on a 4-file download).
+                val stems = if (track.stemsRev != null && repo.hasLocalStems(track))
+                    runCatching { repo.stemFiles(track.id) }.getOrNull()?.let { m -> dev.manadj.audio.AudioEngine.STEM_NAMES.map { m.getValue(it) } }
+                else null
                 val segment = track.grid?.tempoChanges?.firstOrNull()
                 model.load(
                     deck, file, sourceId(track), track.title, track.artist.orEmpty(), track.durationSecs,
@@ -189,7 +205,26 @@ object LibraryHolder {
                     firstBeatSeconds = segment?.startTime ?: 0.0,
                     mainCueSeconds = track.mainCue,
                     hotCues = track.hotCues.filter { it.slot in 1..8 }.associate { it.slot - 1 to it.time },
+                    stems = stems,
                 )
+            } catch (e: Exception) {
+                onError(e.message ?: e.toString())
+            }
+        }
+    }
+
+    /**
+     * Download [trackId]'s stems; when done, reload it onto [deck] with them if the deck still holds it and
+     * is not sounding (a playing deck picks them up on its next load).
+     */
+    fun fetchStems(context: Context, model: PlayerModel, deck: DeckId, trackId: Int, onError: (String) -> Unit) {
+        val repo = repository(context)
+        scope.launch {
+            try {
+                repo.stemFiles(trackId) ?: return@launch
+                val s = model.decks.getValue(deck).snapshot
+                val track = repo.library.value?.track(trackId) ?: return@launch
+                if (trackOn(model, deck) == trackId && s?.playing != true && s?.previewing != true) load(context, model, deck, track, onError)
             } catch (e: Exception) {
                 onError(e.message ?: e.toString())
             }

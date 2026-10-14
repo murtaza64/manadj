@@ -33,6 +33,7 @@ class SyncTest {
     @Volatile private var deskMinimapMaster = 1.16
     @Volatile private var snapshotRequests = 0
     @Volatile private var twoWay = true
+    private val stemRequests = java.util.Collections.synchronizedList(mutableListOf<String>())
     @Volatile private var dropAudioAfter: Int? = null
     @Volatile private var onAudioRequest: () -> Unit = {}
     private val ranges = mutableListOf<String?>()
@@ -42,11 +43,11 @@ class SyncTest {
          "tag_categories":[{"id":1,"name":"Genre","display_order":0,"color":"#ff0000"}],
          "tags":[{"id":7,"name":"Neuro","category_id":1,"display_order":0,"color":null}],
          "tracks":[
-          {"id":10,"title":"$deskTitle","artist":"Synth","file_name":"decoy.mp3","bpm":174.0,"key":15,"key_openkey":"8m","key_camelot":"3A",
+          {"id":10,"title":"$deskTitle","artist":"Synth","file_name":"decoy.mp3","bpm":174.0,"bpm_centi":17400,"key":15,"key_openkey":"8m","key_camelot":"3A",
            "energy":4,"duration_secs":300.0,"date_added":"2026-10-01T00:00:00","main_cue":0.5,"codec":"mp3","filesize_bytes":200000,
-           "audio_rev":"r1","preview_rev":"$previewRev","waveform_rev":"w1","tag_ids":[7],"hot_cues":[{"slot":1,"time":12.5,"label":null,"color":"#00ff00"}],
+           "audio_rev":"r1","preview_rev":"$previewRev","waveform_rev":"w1","stems_rev":"s1","tag_ids":[7],"hot_cues":[{"slot":1,"time":12.5,"label":null,"color":"#00ff00"}],
            "grid":{"origin":"analyzed","anchor_time":0.5,"tempo_changes":[{"start_time":0.5,"bpm":174.0,"time_signature_num":4,"bar_position":1}]}},
-          {"id":11,"title":null,"artist":null,"file_name":"untitled.flac","bpm":null,"key":null,"key_openkey":null,"key_camelot":null,
+          {"id":11,"title":null,"artist":null,"file_name":"untitled.flac","bpm":null,"bpm_centi":null,"key":null,"key_openkey":null,"key_camelot":null,
            "energy":null,"duration_secs":null,"date_added":null,"main_cue":null,"codec":null,"filesize_bytes":null,
            "audio_rev":null,"preview_rev":null,"waveform_rev":null,"tag_ids":[],"hot_cues":[],"grid":null}],
          "playlists":[{"id":3,"name":"Set","color":null,"display_order":0,"track_ids":[11,10]}],
@@ -54,7 +55,8 @@ class SyncTest {
          "cameos":[],"takes":[{"a":11,"b":10,"count":2,"last_at":"2026-10-02T00:00:00"}],
          "settings":{
           "manadj.waveformStyles":{"value":{"version":1,"full":{"styleId":"additive-soft","params":{"master":1}},"minimap":{"styleId":"additive-soft","params":{"master":$deskMinimapMaster}}},"updated_at":"2026-10-14T12:00:00"},
-          "manadj-filter-settings":{"value":{"model":"res48","resonance":99,"drive":"x"},"updated_at":null}}}
+          "manadj-filter-settings":{"value":{"model":"res48","resonance":99,"drive":"x"},"updated_at":null},
+          "manadj-follow-params":{"value":{"bpm":true,"bpmThresholdPercent":7,"knownOnly":false,"temperature":0.18},"updated_at":null}}}
     """.trimIndent()
 
     @BeforeTest fun start() {
@@ -104,8 +106,13 @@ class SyncTest {
             }
         }
         server.createContext("/api/device-sync/tracks/") { ex ->
-            val id = ex.requestURI.path.split("/")[4].toInt()
-            if (ex.requestURI.path.endsWith("/waveform") && id == 10) {
+            val path = ex.requestURI.path
+            val id = path.split("/")[4].toInt()
+            if ("/stems/" in path && id == 10) {
+                stemRequests += path.substringAfter("/stems/")
+                val body = if (path.endsWith("/waveform")) mwf1(ByteArray(500) { 9 }) else ByteArray(3000) { path.length.toByte() }
+                ex.sendResponseHeaders(200, body.size.toLong()); ex.responseBody.use { it.write(body) }
+            } else if (path.endsWith("/waveform") && id == 10) {
                 waveformRequests++
                 val body = mwf1(ByteArray(2000) { (it % 200).toByte() }, duration = 5.8)
                 ex.responseHeaders.add("X-Waveform-Rev", "w1")
@@ -400,6 +407,56 @@ class SyncTest {
         assertEquals(5, library.track(10)!!.energy) // edit kept locally, still journaled
         assertEquals(1, repo.state.value.pendingEdits)
         assertEquals(null, repo.state.value.error)
+    }
+
+    @Test fun stemsDownloadOnceCachedOfflineAndInBulk() = runBlocking {
+        val repo = repo()
+        repo.sync().getOrThrow()
+        val files = repo.stemFiles(10)!!
+        assertEquals(STEM_NAMES, files.keys.toList())
+        assertTrue(files.values.all { it.length() == 3000L })
+        assertEquals(null, repo.stemFiles(11)) // no stems on the desktop
+        repo.stemFiles(10)
+        assertEquals(4, stemRequests.size)
+        assertEquals(500, repo.stemWaveform(10, "drums")!!.bins)
+        assertEquals(500, repo.stemWaveform(10, "drums")!!.bins)
+        assertEquals(5, stemRequests.size)
+
+        repo.clearStems()
+        assertTrue(!repo.hasLocalStems(repo.library.value!!.track(10)!!))
+        assertEquals(listOf(10), repo.bulkPlan(null, stems = true).tracks.map { it.id })
+        repo.downloadAll(null, stems = true).getOrThrow()
+        assertTrue(repo.hasLocalStems(repo.library.value!!.track(10)!!))
+
+        server.stop(0)
+        assertEquals(STEM_NAMES, repo().also { it.open() }.stemFiles(10)!!.keys.toList()) // offline from cache
+    }
+
+    @Test fun downloadedOnlyAndTagTree() = runBlocking {
+        val repo = repo()
+        repo.sync().getOrThrow()
+        assertEquals(emptyList(), repo.library.value!!.query(LibraryQuery(downloadedOnly = true)))
+        repo.audioFile(10)
+        assertEquals(listOf(10), repo.library.value!!.query(LibraryQuery(downloadedOnly = true)).map { it.id })
+        val tree = repo.library.value!!.tagTree()
+        assertEquals("Genre", tree.single().category.name)
+        assertEquals(1, tree.single().count)
+        assertEquals(listOf("Neuro" to 1), tree.single().tags.map { it.tag.name to it.count })
+        assertEquals(listOf(10), repo.library.value!!.tracksWithTag(7).map { it.id })
+        assertEquals(0, repo.library.value!!.tagTree(LibraryQuery(search = "untitled")).single().count)
+    }
+
+    @Test fun followParamsSyncedEditableAndReroll() = runBlocking {
+        val repo = repo()
+        repo.sync().getOrThrow()
+        assertEquals(FollowParams(bpmThresholdPercent = 7.0, temperature = 0.18), repo.library.value!!.followParams)
+        assertTrue(repo.editFollowParams(repo.library.value!!.followParams.copy(knownOnly = true)))
+        assertTrue(repo.library.value!!.followParams.knownOnly)
+        val seed = repo.followSeed.value
+        repo.rerollFollow()
+        assertEquals((seed + 1) and 0xffffffffL, repo.followSeed.value)
+        repo.sync().getOrThrow()
+        assertTrue(pushed.single().contains("setting:manadj-follow-params"))
     }
 
     @Test fun presyncAudio() = runBlocking {
