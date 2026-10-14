@@ -225,7 +225,17 @@ val StripEnd = 48.dp
     val open = model.pitchDrawer == ui.id
     val e = ux.extras.getValue(ui.id)
     Box(modifier) {
-        Key("", Modifier.fillMaxSize(), color, model.supports("varispeed"), open, "${ui.id} pitch panel") { model.pitchDrawer = if (open) null else ui.id }
+        // Opens on press (like BROWSE); the click only covers accessibility actions.
+        var downToggled by remember { mutableStateOf(false) }
+        val currentOpen by rememberUpdatedState(open)
+        Key("", Modifier.fillMaxSize().pointerInput(ui.id) {
+            awaitEachGesture {
+                awaitFirstDown(requireUnconsumed = false, pass = androidx.compose.ui.input.pointer.PointerEventPass.Initial)
+                downToggled = true; model.pitchDrawer = if (currentOpen) null else ui.id
+                do { val e = awaitPointerEvent(androidx.compose.ui.input.pointer.PointerEventPass.Final) } while (e.changes.any { it.pressed })
+                downToggled = false
+            }
+        }, color, model.supports("varispeed"), open, "${ui.id} pitch panel") { if (downToggled) downToggled = false else model.pitchDrawer = if (open) null else ui.id }
         Row(Modifier.fillMaxSize().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("%+.2f%%".format(ui.pitch), color = if (ui.pitch == 0.0) Ink.text else color, size = 14, bold = true)
             Spacer(Modifier.weight(1f))

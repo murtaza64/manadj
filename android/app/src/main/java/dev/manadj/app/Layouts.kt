@@ -228,21 +228,33 @@ fun mixOf(model: PlayerModel, ux: UiModel, id: DeckId): DeckMix {
                 BrowseKey(model, ux, Modifier.width(84.dp).fillMaxHeight())
                 Minimap(b, model, ux.waves[b.source?.id ?: ""], Modifier.weight(1f).fillMaxHeight(), preview = ux.seekPreview)
             }
-            Row(pad.fillMaxWidth().height(28.dp), horizontalArrangement = Arrangement.spacedBy(DeckGap)) { for (ui in listOf(a, b)) StemsStrip(ui, ux, model, Modifier.weight(1f).fillMaxHeight()) }
-            Row(pad.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(DeckGap)) { for (ui in listOf(a, b)) Pads(ui, model, ux, Modifier.weight(1f), 4, if (tight) 46.dp else PadRow) }
-            Row(pad.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(DeckGap)) {
-                for (ui in listOf(a, b)) Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(gap)) {
-                    LoopStrip(ui, ux, model, Modifier.fillMaxWidth().height(ControlRow).screenSafe())
-                    JumpStrip(ui, ux, model, Modifier.fillMaxWidth().height(ControlRow).screenSafe())
-                    Row(Modifier.fillMaxWidth().height(TransportRow).screenSafe()) { CueKey(ui, model, Modifier.weight(1f).fillMaxHeight()); PlayKey(ui, model, Modifier.weight(1f).fillMaxHeight()) }
-                    BendStrip(ui, model, Modifier.fillMaxWidth().height(ControlRow).screenSafe())
-                    PitchKey(ui, model, ux, Modifier.fillMaxWidth().height(40.dp).screenSafe())
+            // Deck control areas; the pitch panel replaces one deck's half in place (#105).
+            Box(Modifier.fillMaxWidth()) {
+                Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(gap)) {
+                    Row(pad.fillMaxWidth().height(28.dp), horizontalArrangement = Arrangement.spacedBy(DeckGap)) { for (ui in listOf(a, b)) StemsStrip(ui, ux, model, Modifier.weight(1f).fillMaxHeight()) }
+                    Row(pad.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(DeckGap)) { for (ui in listOf(a, b)) Pads(ui, model, ux, Modifier.weight(1f), 4, if (tight) 46.dp else PadRow) }
+                    Row(pad.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(DeckGap)) {
+                        for (ui in listOf(a, b)) Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(gap)) {
+                            LoopStrip(ui, ux, model, Modifier.fillMaxWidth().height(ControlRow).screenSafe())
+                            JumpStrip(ui, ux, model, Modifier.fillMaxWidth().height(ControlRow).screenSafe())
+                            Row(Modifier.fillMaxWidth().height(TransportRow).screenSafe()) { CueKey(ui, model, Modifier.weight(1f).fillMaxHeight()); PlayKey(ui, model, Modifier.weight(1f).fillMaxHeight()) }
+                            BendStrip(ui, model, Modifier.fillMaxWidth().height(ControlRow).screenSafe())
+                            PitchKey(ui, model, ux, Modifier.fillMaxWidth().height(40.dp).screenSafe())
+                        }
+                    }
+                }
+                Row(Modifier.matchParentSize().then(pad), horizontalArrangement = Arrangement.spacedBy(DeckGap)) {
+                    for (id in listOf(DeckId.A, DeckId.B)) Box(Modifier.weight(1f).fillMaxHeight()) { PitchArea(model, ux, id, Modifier.fillMaxSize()) }
                 }
             }
         }
-        AnimatedVisibility(model.pitchDrawer != null, Modifier.align(Alignment.BottomCenter).padding(bottom = bottomBlock - 4.dp), enter = fadeIn(tween(150)) + scaleIn(initialScale = .92f), exit = fadeOut(tween(120))) {
-            PitchPopup(model, ux, Modifier.widthIn(max = 400.dp).fillMaxWidth())
-        }
+    }
+}
+
+/** The in-place pitch panel over [id]'s control area: opens/closes with a short rigid fade + slide. */
+@Composable private fun PitchArea(model: PlayerModel, ux: UiModel, id: DeckId, modifier: Modifier) {
+    AnimatedVisibility(model.pitchDrawer == id, modifier, enter = fadeIn(tween(120)) + slideInVertically(tween(160)) { it / 14 }, exit = fadeOut(tween(110)) + slideOutVertically(tween(140)) { it / 14 }) {
+        PitchPanel(model.decks.getValue(id), model, ux, Modifier.fillMaxSize())
     }
 }
 
@@ -348,10 +360,8 @@ private enum class PaneKind { LEFT_SLOT, RIGHT_SLOT, BOTH_LEFT, BOTH_RIGHT }
             Row(Modifier.fillMaxWidth().height(TransportRow).screenSafe()) { CueKey(ui, model, Modifier.weight(1f).fillMaxHeight()); PlayKey(ui, model, Modifier.weight(1f).fillMaxHeight()) }
             Row(Modifier.fillMaxWidth().height(42.dp).screenSafe()) { BendStrip(ui, model, Modifier.weight(1f).fillMaxHeight()); PitchKey(ui, model, ux, Modifier.weight(1.6f).fillMaxHeight()) }
         }
-        // Deck popups are confined to this deck's side: they never cover the mixer.
-        AnimatedVisibility(model.pitchDrawer == ui.id, Modifier.align(Alignment.BottomCenter).padding(bottom = 40.dp), enter = fadeIn(tween(150)) + scaleIn(initialScale = .92f), exit = fadeOut(tween(120))) {
-            PitchPopup(model, ux, Modifier.widthIn(max = 380.dp).fillMaxWidth())
-        }
+        // The pitch panel replaces this deck's controls below info + minimap (#105); the mixer and other deck stay.
+        PitchArea(model, ux, ui.id, Modifier.fillMaxSize().padding(top = 88.dp).screenSafe())
     }
 }
 
