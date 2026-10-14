@@ -160,6 +160,27 @@ class AudioEngineTest {
         }
     }
 
+    @Test fun stemsReplaceTheTrackInMemoryAndGainsApply() {
+        val track = wav("engine-stems-mix.wav", .5)
+        val stems = listOf(.1, .2, .15, .05).mapIndexed { i, v -> wav("engine-stem-$i.wav", v, rate = 44100) }
+        AudioEngine(offline = true).use { engine ->
+            val fds = stems.map { ParcelFileDescriptor.open(it, ParcelFileDescriptor.MODE_READ_ONLY) }
+            try { ParcelFileDescriptor.open(track, ParcelFileDescriptor.MODE_READ_ONLY).use { assertTrue(engine.load(DeckId.A, "s", it, fds).accepted) } }
+            finally { fds.forEach { it.close() } }
+            engine.settled(DeckId.A)
+            engine.until("stems decoded") { deck(DeckId.A).let { it.fullyDecoded && it.stems } }
+            assertTrue(engine.submit(AudioCommand.Play(DeckId.A)).accepted)
+            engine.renderOfflineForTest(4800)
+            val unity = engine.renderOfflineForTest(480)[958]
+            assertTrue(engine.submit(AudioCommand.SetStemGain(DeckId.A, 1, 0.0)).accepted)
+            engine.renderOfflineForTest(4800)
+            val killed = engine.renderOfflineForTest(480)[958]
+            assertEquals(.5 / .3, (unity / killed).toDouble(), .01)        // .5 summed → .3 without drums
+            assertEquals(listOf(1.0, 0.0, 1.0, 1.0), engine.deck(DeckId.A).stemGains)
+            assertFalse(engine.submit(AudioCommand.SetStemGain(DeckId.A, 4, 0.0)).accepted)
+        }
+    }
+
     @Test fun decodedLocalWavMixSeekAndDesktopCueSemantics() {
         val a = wav("engine-a.wav", .25)
         val b = wav("engine-b.wav", -.25)

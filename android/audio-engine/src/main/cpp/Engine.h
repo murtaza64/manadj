@@ -25,6 +25,7 @@ constexpr double kLoopMinBeats = 0.125, kLoopMaxBeats = 128, kLoopDefaultBeats =
 constexpr double kGridlessBpm = 120;     // desktop jumpBeats fallback for BPM-less tracks
 constexpr int kHeadFrames = 8192;       // Pre-decoded audio at each cue (~170 ms at 48 kHz).
 constexpr int kTailFrames = 2048;       // Old audio captured for a crossfade (240 frames at <=8x ratio).
+constexpr int kStems = 4;
 constexpr double kMaxLeadInSeconds = 30; // desktop MAX_LEAD_IN_SECONDS: pre-roll bound
 constexpr double kAtCueEpsilon = 0.01;  // Desktop transport.ts AT_CUE_EPSILON.
 constexpr int kBlockFrames = 1024;
@@ -70,8 +71,10 @@ struct Head {
  * an older tag, so the worker may free and reallocate before tagging the new load.
  */
 struct Track {
-    std::unique_ptr<int16_t[]> pcm; // worker-owned allocation
+    std::unique_ptr<int16_t[]> pcm; // worker-owned allocation; frame-major: stems x stereo int16 per frame
     uint64_t capacity = 0;          // frames (worker-owned)
+    uint64_t allocated = 0;         // int16 samples (worker-owned)
+    std::atomic<int> stems{1};      // 1 = the track itself; kStems = vocals, drums, bass, other (desktop STEM_NAMES)
     std::atomic<uint64_t> load{0};
     std::atomic<uint64_t> frames{0};
     std::atomic<int> sampleRate{0};
@@ -82,7 +85,8 @@ struct Track {
 enum class Op : int { Prepare, Play, Pause, CueDown, CueUp, HotCueDown, HotCueUp,
                        HotCueSet, HotCueClear, Seek, Fader, Trim, Crossfade, Pitch, Bend, Pfl, CueMix, Eq, Filter,
                        SetGrid, BeatJump, LoopToggle, LoopResize, LoopPreset, Quantize, CueSetAt, HotCueSetAt, BeatFx, KeyLock, PhaseAlign, ScratchBegin, ScratchMove, ScratchEnd,
-                       LoopSet, CancelScheduled, SetSyncMembers, LaunchStart, HeardLatency, Clicks };
+                       LoopSet, CancelScheduled, SetSyncMembers, LaunchStart, HeardLatency, Clicks, StemGain };
+// StemGain: slot = stem (desktop STEM_NAMES order), value = 0..1 (declick-ramped; unity on Prepare).
 // Clicks (global): slot = count, value = interval seconds; calibration chirps on every output channel (see clickSample).
 // Quantize: value 0 off, 1 Grid, 2 Heard. HeardLatency (global): value = output latency L in seconds (Heard mode).
 // SetSyncMembers (global): value = Sync Group member mask, slot = SYNCED (in-lock) mask; scopes the launch reference.
@@ -182,6 +186,9 @@ struct Deck {
     // Deferred quantized launch: engine frame the deck starts sounding at (0 = none). Playing/preview is
     // already set; until then the deck renders silence and its playhead holds at the entry point.
     std::atomic<uint64_t> launchAt{0};
+    // Stem gains (stems #210 kill switches): target from StemGain; applied ramps over kFadeFrames (callback).
+    std::array<std::atomic<float>, kStems> stemTarget{1.f, 1.f, 1.f, 1.f};
+    std::array<float, kStems> stemGain{1.f, 1.f, 1.f, 1.f};
     bool scratchRunning = false;
     double scratchPos = 0, scratchDrive = 0, scratchRate = 0, scratchTime = 0;
     double scratchStart = 0, scratchLoopStart = 0, scratchLoopEnd = 0;
@@ -258,7 +265,8 @@ public:
     void headCommit(int deck, int slot, uint64_t load, double seconds, int frames);
     void headAbort(int deck, int slot);
     // Whole-track fill (worker, after Prepare(load) applied). False/-1 once superseded or full.
-    bool trackBegin(int deck, uint64_t load, uint64_t capacityFrames, int sampleRate, double startSeconds);
+    // stems: 1 (the track) or kStems (trackWrite then takes kStems x stereo per frame, STEM_NAMES order).
+    bool trackBegin(int deck, uint64_t load, uint64_t capacityFrames, int sampleRate, double startSeconds, int stems = 1);
     int trackWrite(int deck, uint64_t load, const float* samples, int frames);
     void trackFinish(int deck, uint64_t load);
 

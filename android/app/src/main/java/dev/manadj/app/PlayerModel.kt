@@ -219,21 +219,28 @@ class PlayerModel(application: Application) : AndroidViewModel(application) {
      * Library load (#372): a cached regular file plus library metadata and grid. Loads
      * immediately (no replace-while-playing confirmation; the caller's UI decides).
      * [sourceId] must be stable per audio revision, e.g. "library:<trackId>:<audioRev>".
+     * [stems]: the track's 4 stem files in [AudioEngine.STEM_NAMES] order (LibraryHolder.stemFiles), or null;
+     * with stems, [setStemGain] works once DeckSnapshot.stems is true.
      */
     fun load(
         deck: DeckId, file: java.io.File, sourceId: String, title: String, artist: String,
         durationSeconds: Double?, bpm: Double? = null, firstBeatSeconds: Double? = null,
-        mainCueSeconds: Double? = null, hotCues: Map<Int, Double> = emptyMap(),
+        mainCueSeconds: Double? = null, hotCues: Map<Int, Double> = emptyMap(), stems: List<java.io.File>? = null,
     ) = loadInto(
         deck, metadata = { LocalSource(sourceId, Uri.fromFile(file), title, artist, durationSeconds, persistentGrant = false, bpm = bpm) },
         open = { android.os.ParcelFileDescriptor.open(file, android.os.ParcelFileDescriptor.MODE_READ_ONLY) },
         grid = { bpm?.takeIf { it > 0 }?.let { it to (firstBeatSeconds ?: 0.0) } }, remember = false,
         cues = { d -> mainCueSeconds?.let { submit(AudioCommand.SetCueAt(d, it)) }; hotCues.forEach { (slot, at) -> submit(AudioCommand.SetHotCueAt(d, slot, at)) } },
+        stems = stems?.takeIf { it.size == AudioEngine.STEMS },
     )
+
+    /** Stem gain 0..1 (stem = [AudioEngine.STEM_NAMES] index); DeckSnapshot.stemGains reports it. */
+    fun setStemGain(deck: DeckId, stem: Int, gain: Double) = submit(AudioCommand.SetStemGain(deck, stem, gain))
 
     private fun loadInto(
         deck: DeckId, metadata: () -> LocalSource, open: () -> android.os.ParcelFileDescriptor?,
         grid: (LocalSource) -> Pair<Double, Double>?, remember: Boolean, cues: (DeckId) -> Unit = {},
+        stems: List<java.io.File>? = null,
     ) {
         releases.keys.filter { it.startsWith("${deck.name}:") }.forEach { id -> releases.remove(id)?.invoke() }
         val ui = decks.getValue(deck)
@@ -247,7 +254,10 @@ class PlayerModel(application: Application) : AndroidViewModel(application) {
                     open()?.use { descriptor ->
                         withContext(Dispatchers.Main.immediate) applyLoad@{
                             if (ui.generation.get() != generation) return@applyLoad
-                            val receipt = service?.load(deck, source, descriptor) ?: CommandReceipt(0, false, "Audio output unavailable")
+                            val stemFds = stems?.mapNotNull { runCatching { android.os.ParcelFileDescriptor.open(it, android.os.ParcelFileDescriptor.MODE_READ_ONLY) }.getOrNull() }
+                            val receipt = try {
+                                service?.load(deck, source, descriptor, stemFds?.takeIf { it.size == AudioEngine.STEMS }) ?: CommandReceipt(0, false, "Audio output unavailable")
+                            } finally { stemFds?.forEach { runCatching { it.close() } } }
                             lastReceipt = receipt
                             if (!receipt.accepted) throw IllegalStateException(receipt.reason)
                             ui.source = source; ui.pendingLoadCommandId = receipt.id

@@ -8,7 +8,7 @@
 
 namespace {
 constexpr int kHeader = 31;
-constexpr int kDeckFields = 40 + manadj::kHotCues;
+constexpr int kDeckFields = 40 + manadj::kHotCues + 1 + manadj::kStems; // + stems, stem gains
 constexpr int kSnapshotSize = kHeader + manadj::kDeckCount * kDeckFields;
 
 /*
@@ -164,7 +164,7 @@ extern "C" JNIEXPORT jlong JNICALL
 Java_dev_manadj_audio_AudioEngine_nativeSubmit(JNIEnv*, jobject, jlong handle, jint op, jint deck,
                                                   jdouble value, jlong load, jint slot) {
     using manadj::Op;
-    if (op < 0 || op > static_cast<int>(Op::Clicks) || op == static_cast<int>(Op::LaunchStart) || op == static_cast<int>(Op::Filter) || op == static_cast<int>(Op::BeatFx) ||
+    if (op < 0 || op > static_cast<int>(Op::StemGain) || op == static_cast<int>(Op::LaunchStart) || op == static_cast<int>(Op::Filter) || op == static_cast<int>(Op::BeatFx) ||
         op == static_cast<int>(Op::LoopSet) || op == static_cast<int>(Op::CancelScheduled)) return 0; // dedicated entry points
     if (op == static_cast<int>(manadj::Op::SetGrid)) return 0; // nativeSetGrid carries the anchor.
     return static_cast<jlong>(output(handle)->engine.submit(static_cast<manadj::Op>(op), deck, value,
@@ -316,21 +316,23 @@ Java_dev_manadj_audio_AudioEngine_nativeHeadCommit(JNIEnv*, jobject, jlong handl
 
 extern "C" JNIEXPORT jboolean JNICALL
 Java_dev_manadj_audio_AudioEngine_nativeTrackBegin(JNIEnv*, jobject, jlong handle, jint deck, jlong load, jlong capacity,
-                                                      jint rate, jdouble start) {
+                                                      jint rate, jdouble start, jint stems) {
     if (capacity <= 0) return false;
-    return output(handle)->engine.trackBegin(deck, static_cast<uint64_t>(load), static_cast<uint64_t>(capacity), rate, start);
+    return output(handle)->engine.trackBegin(deck, static_cast<uint64_t>(load), static_cast<uint64_t>(capacity), rate, start, stems);
 }
 
 extern "C" JNIEXPORT jint JNICALL
 Java_dev_manadj_audio_AudioEngine_nativeTrackWrite(JNIEnv* env, jobject, jlong handle, jint deck, jlong load,
-                                                      jfloatArray samples, jint frames) {
-    constexpr int kChunk = 2048;
-    if (frames < 1 || static_cast<jlong>(frames) * 2 > env->GetArrayLength(samples)) return -1;
-    float chunk[kChunk * 2];
+                                                      jfloatArray samples, jint frames, jint stems) {
+    constexpr int kChunk = 1024;
+    if (stems != 1 && stems != manadj::kStems) return -1;
+    const int width = 2 * stems;
+    if (frames < 1 || static_cast<jlong>(frames) * width > env->GetArrayLength(samples)) return -1;
+    float chunk[kChunk * 2 * manadj::kStems];
     int total = 0;
     while (total < frames) {
         const int n = std::min(kChunk, frames - total);
-        env->GetFloatArrayRegion(samples, total * 2, n * 2, chunk);
+        env->GetFloatArrayRegion(samples, total * width, n * width, chunk);
         const int written = output(handle)->engine.trackWrite(deck, static_cast<uint64_t>(load), chunk, n);
         if (written < 0) return total ? total : -1;
         total += written;
@@ -441,6 +443,8 @@ Java_dev_manadj_audio_AudioEngine_nativeSnapshot(JNIEnv* env, jobject, jlong han
         data[n + 38] = d.scratching.load() ? 1 : 0;
         data[n + 39] = static_cast<double>(d.launchAt.load());
         for (int h = 0; h < manadj::kHotCues; ++h) data[n + 40 + h] = d.hotcues[h].load();
+        data[n + 40 + manadj::kHotCues] = d.track.load.load() == d.loadId.load() && d.track.load.load() != 0 ? d.track.stems.load() : 0;
+        for (int s = 0; s < manadj::kStems; ++s) data[n + 41 + manadj::kHotCues + s] = d.stemTarget[s].load();
     }
     if (e.outputFrames() == clockFrame) break;
     }

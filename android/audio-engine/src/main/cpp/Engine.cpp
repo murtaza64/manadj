@@ -18,6 +18,30 @@ double snapToBeat(const Deck& d, double t) {
     return snapped < 0 && t >= 0 ? snapped + beat : snapped; // pre-roll (t < 0): the grid extends backwards
 }
 
+// In-memory track frame k as stereo float: the track, or its stems mixed at `gains` (desktop StemTrackSource).
+inline void trackFrame(const Track& t, const float* gains, uint64_t k, float& l, float& r) {
+    constexpr float kScale = 1.f / 32768;
+    const int stems = t.stems.load(std::memory_order_relaxed);
+    const int16_t* a = t.pcm.get() + k * 2 * static_cast<uint64_t>(stems);
+    if (stems == 1) { l = a[0] * kScale; r = a[1] * kScale; return; }
+    float sl = 0, sr = 0;
+    for (int s = 0; s < stems; ++s) { sl += a[s * 2] * gains[s]; sr += a[s * 2 + 1] * gains[s]; }
+    l = sl * kScale; r = sr * kScale;
+}
+
+// Moves the applied stem gains `frames` declick steps (1/kFadeFrames each) toward their targets; true while ramping.
+inline bool stepStemGains(Deck& d, int frames) {
+    bool ramping = false;
+    for (int s = 0; s < kStems; ++s) {
+        const float target = d.stemTarget[s].load(std::memory_order_relaxed), step = static_cast<float>(frames) / kFadeFrames;
+        float& g = d.stemGain[s];
+        if (g == target) continue;
+        g = g < target ? std::min(target, g + step) : std::max(target, g - step);
+        ramping |= g != target;
+    }
+    return ramping;
+}
+
 bool ready(const Deck& d) {
     const auto st = d.status.load(kAcquire);
     return (st & 3) == kReady && (st >> 2) == d.loadId.load(kRelaxed);
@@ -260,8 +284,8 @@ void Engine::headAbort(int index, int slot) {
     decks_[index].heads[slot].state.store(kHeadEmpty, kRelease);
 }
 
-bool Engine::trackBegin(int index, uint64_t load, uint64_t capacity, int sampleRate, double startSeconds) {
-    if (index < 0 || index >= kDeckCount || capacity == 0 || sampleRate <= 0) return false;
+bool Engine::trackBegin(int index, uint64_t load, uint64_t capacity, int sampleRate, double startSeconds, int stems) {
+    if (index < 0 || index >= kDeckCount || capacity == 0 || sampleRate <= 0 || (stems != 1 && stems != kStems)) return false;
     auto& d = decks_[index];
     auto& t = d.track;
     if (d.loadId.load(kAcquire) != load) return false; // Prepare(load) not applied, or superseded.
@@ -269,13 +293,17 @@ bool Engine::trackBegin(int index, uint64_t load, uint64_t capacity, int sampleR
     t.load.store(0, kRelease);
     t.frames.store(0, kRelease);
     t.complete.store(false, kRelease);
-    if (!t.pcm || t.capacity < capacity || t.capacity > capacity * 2) {
+    const uint64_t samples = capacity * 2 * static_cast<uint64_t>(stems);
+    if (!t.pcm || t.allocated < samples || t.allocated > samples * 2) {
         t.pcm.reset();
         t.capacity = 0;
-        t.pcm.reset(new (std::nothrow) int16_t[capacity * 2]);
+        t.allocated = 0;
+        t.pcm.reset(new (std::nothrow) int16_t[samples]);
         if (!t.pcm) return false;
-        t.capacity = capacity;
+        t.allocated = samples;
     }
+    t.capacity = capacity;
+    t.stems.store(stems, kRelease);
     t.sampleRate.store(sampleRate, kRelease);
     t.startSeconds.store(startSeconds, kRelease);
     t.load.store(load, kRelease);
@@ -289,8 +317,9 @@ int Engine::trackWrite(int index, uint64_t load, const float* samples, int frame
     if (t.load.load(kAcquire) != load || d.loadId.load(kAcquire) != load) return -1;
     const auto at = t.frames.load(kRelaxed);
     const int n = static_cast<int>(std::min<uint64_t>(frames, t.capacity - at));
-    int16_t* out = t.pcm.get() + at * 2;
-    for (int i = 0; i < n * 2; ++i)
+    const int width = 2 * t.stems.load(kRelaxed);
+    int16_t* out = t.pcm.get() + at * width;
+    for (int i = 0; i < n * width; ++i)
         out[i] = static_cast<int16_t>(std::lrint(std::clamp(samples[i], -1.f, 32767.f / 32768) * 32768));
     t.frames.store(at + n, kRelease);
     return n;
@@ -329,8 +358,7 @@ void Engine::captureTail(Deck& d) noexcept {
         const double frame = (d.position.load(kRelaxed) - t.startSeconds.load(kRelaxed)) * rate;
         const auto from = static_cast<uint64_t>(frame);
         n = static_cast<int>(std::min<uint64_t>(kTailFrames, t.frames.load(kAcquire) - from));
-        const int16_t* pcm = t.pcm.get() + from * 2;
-        for (int i = 0; i < n * 2; ++i) d.tail[i] = pcm[i] * (1.f / 32768);
+        for (int i = 0; i < n; ++i) trackFrame(t, d.stemGain.data(), from + i, d.tail[i * 2], d.tail[i * 2 + 1]);
         if (n < 2) return;
         d.tailAvail = n;
         d.tailPos = frame - static_cast<double>(from);
@@ -529,6 +557,7 @@ void Engine::apply(const Command& c) noexcept {
             d.tailLeft = 0;
             d.inTrack.store(false);
             d.trackEnd.store(false);
+            for (int s = 0; s < kStems; ++s) { d.stemTarget[s].store(1.f); d.stemGain[s] = 1.f; } // unity is the load state
             relocate(d, 0);
             break;
         case Op::Play: {
@@ -635,6 +664,9 @@ void Engine::apply(const Command& c) noexcept {
             break;
         }
         case Op::Quantize: quantize_.store(c.value != 0); heard_.store(c.value == 2); break;
+        case Op::StemGain:
+            if (c.slot >= 0 && c.slot < kStems) d.stemTarget[c.slot].store(static_cast<float>(std::clamp(c.value, 0.0, 1.0)));
+            break;
         case Op::HeardLatency: heardLatency_.store(std::clamp(c.value, 0.0, 2.0)); break;
         case Op::Clicks:
             for (auto& n : clickNanos_) n.store(0);
@@ -1056,8 +1088,7 @@ int Engine::renderTrack(Deck& d, float* strip, int frames, bool& active) noexcep
     double frame = (startPosition - start) * rate;
     const bool looping = d.loopActive.load(kRelaxed) && startPosition < d.loopEnd.load(kRelaxed);
     const double loopEndFrame = looping ? (d.loopEnd.load(kRelaxed) - start) * rate : 0;
-    const int16_t* pcm = t.pcm.get();
-    constexpr float kScale = 1.f / 32768;
+    bool ramping = stepStemGains(d, 0);
     for (int i = 0; i < frames; ++i) {
         const auto k = static_cast<uint64_t>(frame);
         if (k + 1 >= avail) {
@@ -1065,11 +1096,14 @@ int Engine::renderTrack(Deck& d, float* strip, int frames, bool& active) noexcep
             else starvedFrames_.fetch_add(frames - i, kRelaxed);
             break;
         }
-        const int16_t* a = pcm + k * 2;
         const float f = static_cast<float>(frame - static_cast<double>(k));
         d.envelope = std::min(1.f, d.envelope + 1.f / kFadeFrames);
-        strip[i * 2] += (a[0] + (a[2] - a[0]) * f) * kScale * d.envelope;
-        strip[i * 2 + 1] += (a[1] + (a[3] - a[1]) * f) * kScale * d.envelope;
+        if (ramping) ramping = stepStemGains(d, 1);
+        float aL, aR, bL, bR;
+        trackFrame(t, d.stemGain.data(), k, aL, aR);
+        trackFrame(t, d.stemGain.data(), k + 1, bL, bR);
+        strip[i * 2] += (aL + (bL - aL) * f) * d.envelope;
+        strip[i * 2 + 1] += (aR + (bR - aR) * f) * d.envelope;
         active = true;
         frame += ratio;
         if (looping && frame >= loopEndFrame) {
@@ -1100,13 +1134,13 @@ void Engine::stretchBlock(Deck& d, double frame, double rate, int frames, float*
     const auto loopStart = static_cast<int64_t>(std::llround((d.loopStart.load(kRelaxed) - start) * src));
     const auto loopEnd = static_cast<int64_t>(std::llround((d.loopEnd.load(kRelaxed) - start) * src));
     const int64_t loopLength = loopEnd - loopStart;
-    const int16_t* pcm = t.pcm.get();
+    stepStemGains(d, frames); // the stretcher smooths a block-level step
     float* inL = d.stretchIn[0].data();
     float* inR = d.stretchIn[1].data();
     for (int i = 0; i < window; ++i) {
         int64_t f = first + i;
         if (looping && loopLength > 0 && f >= loopEnd) f = loopStart + (f - loopStart) % loopLength;
-        if (f >= 0 && f < avail) { inL[i] = pcm[f * 2] * (1.f / 32768); inR[i] = pcm[f * 2 + 1] * (1.f / 32768); }
+        if (f >= 0 && f < avail) trackFrame(t, d.stemGain.data(), static_cast<uint64_t>(f), inL[i], inR[i]);
         else inL[i] = inR[i] = 0;
     }
     float* ins[2] = {inL, inR};
@@ -1194,10 +1228,10 @@ void Engine::renderScratch(Deck& d, float* strip, int frames, int64_t frame, boo
     const int src = t.sampleRate.load(kRelaxed);
     const double start = t.startSeconds.load(kRelaxed);
     const auto avail = t.frames.load(kAcquire);
-    const int16_t* pcm = t.pcm.get();
     const double out = outputRate_.load(kRelaxed);
     if (d.envelope == 0 && d.tailLeft == 0) { d.gain = d.targetGain; d.cueGain = d.targetCueGain; d.xf = d.targetXf; }
     double pos = d.position.load(kRelaxed);
+    bool ramping = stepStemGains(d, 0);
     for (int i = 0; i < frames; ++i) {
         const double f = static_cast<double>(frame + i);
         pos = scratchPositionAt(d, f);
@@ -1208,11 +1242,14 @@ void Engine::renderScratch(Deck& d, float* strip, int frames, int64_t frame, boo
         const auto i0 = static_cast<uint64_t>(std::max(0.0, k));
         if (i0 + 1 >= avail || gain == 0) continue;
         const float fr = static_cast<float>(k - static_cast<double>(i0));
-        const int16_t* a = pcm + i0 * 2;
         d.envelope = std::min(1.f, d.envelope + 1.f / kFadeFrames);
-        const float g = gain * d.envelope * (1.f / 32768);
-        strip[i * 2] += (a[0] + (a[2] - a[0]) * fr) * g;
-        strip[i * 2 + 1] += (a[1] + (a[3] - a[1]) * fr) * g;
+        if (ramping) ramping = stepStemGains(d, 1);
+        const float g = gain * d.envelope;
+        float aL, aR, bL, bR;
+        trackFrame(t, d.stemGain.data(), i0, aL, aR);
+        trackFrame(t, d.stemGain.data(), i0 + 1, bL, bR);
+        strip[i * 2] += (aL + (bL - aL) * fr) * g;
+        strip[i * 2 + 1] += (aR + (bR - aR) * fr) * g;
         active = true;
     }
     d.position.store(pos, kRelease);
