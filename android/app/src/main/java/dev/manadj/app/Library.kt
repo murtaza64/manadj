@@ -14,6 +14,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
@@ -172,7 +173,9 @@ private fun tierColor(t: EvidenceTier) = when (t) { EvidenceTier.KNOWN -> Ink.pl
 /** [deck]: the deck holding this track and whether it is audible; [played]: played this session; [relation]: key vs the mix-from deck. */
 @Composable private fun TrackRow(track: LibraryTrack, follow: FollowCandidate?, ux: UiModel, playIndex: Int? = null, deck: Pair<DeckId, Boolean>? = null, played: Boolean = false, relation: KeyRelation = KeyRelation.OTHER, tap: () -> Unit) {
     val selected = ux.selectedRow == track.id
-    Column(Modifier.fillMaxWidth().background(if (selected) Ink.accent.copy(alpha = .08f) else Ink.panel).clickable(onClick = tap).padding(vertical = 5.dp, horizontal = 4.dp)) {
+    // Background + 1dp desktop --surface0 divider in one draw (no extra layout node; scroll-cheap).
+    val bg = if (selected) Ink.accent.copy(alpha = .08f) else Ink.panel
+    Column(Modifier.fillMaxWidth().drawBehind { drawRect(bg); val t = 1.dp.toPx(); drawRect(Ink.surface0, androidx.compose.ui.geometry.Offset(0f, size.height - t), androidx.compose.ui.geometry.Size(size.width, t)) }.clickable(onClick = tap).padding(vertical = 5.dp, horizontal = 4.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             deck?.let { (d, live) -> DeckBadge(d, live); Spacer(Modifier.width(6.dp)) }
             playIndex?.let { Text("%02d".format(it), Modifier.width(26.dp), Ink.muted, 11, true) }
@@ -217,13 +220,15 @@ private fun tierColor(t: EvidenceTier) = when (t) { EvidenceTier.KNOWN -> Ink.pl
  */
 @Composable fun PreviewWave(p: WaveformPreview, modifier: Modifier, width: androidx.compose.ui.unit.Dp = 110.dp, height: androidx.compose.ui.unit.Dp = 19.dp) {
     // Fixed size (no BoxWithConstraints subcomposition per row).
-    Box(modifier.size(width, height).background(Ink.crust)) {
+    // Transparent over the row (desktop previewImage `transparent: true`).
+    Box(modifier.size(width, height)) {
         val density = androidx.compose.ui.platform.LocalDensity.current
         val w = with(density) { width.roundToPx() }; val h = with(density) { height.roundToPx() }
         val style = WaveStyle.minimap ?: WaveStyle.MINIMAP
-        val key = Triple(p, style, w * 100_000 + h)
+        val k = OverviewDim.factor
+        val key = listOf(p, style, w * 100_000 + h, k)
         val bitmap by produceState(PreviewBitmaps.get(key), key) {
-            if (value == null && w > 0 && h > 0) value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { renderPreview(p, w, h, style) }.also { PreviewBitmaps.put(key, it) }
+            if (value == null && w > 0 && h > 0) value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { renderPreview(p, w, h, style, k) }.also { PreviewBitmaps.put(key, it) }
         }
         bitmap?.let { androidx.compose.foundation.Image(it, null, Modifier.fillMaxSize()) }
     }

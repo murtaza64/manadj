@@ -60,6 +60,9 @@ class UiModel(application: Application) : AndroidViewModel(application) {
     private val _beside = mutableStateOf(runCatching { BrowseBeside.valueOf(prefs.getString("browse-beside", null) ?: "") }.getOrDefault(BrowseBeside.LOADING))
     /** Landscape BROWSE layout (#93/#94). */
     var browseBeside: BrowseBeside get() = _beside.value; set(v) { _beside.value = v; prefs.edit().putString("browse-beside", v.name).apply() }
+    /** Mobile-only overview dim (previews + minimaps) on top of the desktop minimap brightness (#98). */
+    var overviewBrightness: Float get() = OverviewDim.phone; set(v) { OverviewDim.phone = v.coerceIn(.3f, 1f); prefs.edit().putFloat("overview-brightness", OverviewDim.phone).apply() }
+    init { OverviewDim.phone = prefs.getFloat("overview-brightness", .8f) }
     private val _bothRight = flag("browse-both-right", true)
     /** [BrowseBeside.BOTH]: the browser's fixed side (right by default). */
     var browseBothRight: Boolean get() = _bothRight.value; set(v) { _bothRight.value = v; store("browse-both-right", v) }

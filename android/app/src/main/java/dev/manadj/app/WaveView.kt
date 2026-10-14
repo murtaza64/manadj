@@ -100,7 +100,24 @@ private fun columnGroups(data: WaveformData, t0: Double, t1: Double, out: FloatA
  * Batched painter: segments bucketed per (nesting level, style color) so a column's outer bands draw first
  * and the whole lane costs a few drawLines calls.
  */
-private class Lines(val style: WaveStyle) {
+/**
+ * Overview brightness (minimap + browser previews). Desktop dims minimap-mode bodies toward the wave background
+ * (theme/markers MINIMAP_BRIGHTNESS = 0.65, VOID #0b0b0f; ladderWaveStyle toCss); [phone] is the extra
+ * mobile-only Settings factor (OLED at high brightness), applied the same way so shape/clipping stay faithful.
+ */
+object OverviewDim {
+    const val DESKTOP = .65f
+    var phone by mutableFloatStateOf(.8f)
+    val factor get() = DESKTOP * phone
+}
+private val WAVE_BG = floatArrayOf(11 / 255f, 11 / 255f, 15 / 255f)
+private fun dim(color: Int, k: Float): Int {
+    if (k >= 1f) return color
+    fun ch(v: Int, i: Int) = ((WAVE_BG[i] + (v / 255f - WAVE_BG[i]) * k).coerceIn(0f, 1f) * 255 + .5f).toInt()
+    return android.graphics.Color.argb(android.graphics.Color.alpha(color), ch(android.graphics.Color.red(color), 0), ch(android.graphics.Color.green(color), 1), ch(android.graphics.Color.blue(color), 2))
+}
+
+private class Lines(val style: WaveStyle, val brightness: Float = 1f) {
     private class Bucket(var buf: FloatArray, var count: Int = 0)
     private val levels = Array(3) { LinkedHashMap<Int, Bucket>() }
     fun reset() { for (l in levels) for (b in l.values) b.count = 0 }
@@ -120,7 +137,7 @@ private class Lines(val style: WaveStyle) {
         b.buf[b.count] = x0; b.buf[b.count + 1] = y0; b.buf[b.count + 2] = x1; b.buf[b.count + 3] = y1; b.count += 4
     }
     fun draw(canvas: android.graphics.Canvas, paint: Paint) {
-        for (l in levels) for ((color, b) in l) if (b.count > 0) { paint.color = color; canvas.drawLines(b.buf, 0, b.count, paint) }
+        for (l in levels) for ((color, b) in l) if (b.count > 0) { paint.color = dim(color, brightness); canvas.drawLines(b.buf, 0, b.count, paint) }
     }
 }
 
@@ -148,6 +165,7 @@ fun marksOf(ui: DeckUi) = ui.snapshot.let { s -> WaveMarks(s?.cueSeconds, ui.hot
     // Overview body depends only on data + size: cache it as a bitmap, overlay markers per frame.
     var cache by remember { mutableStateOf<Triple<WaveformData, IntSize2, ImageBitmap>?>(null) }
     var overviewStyle by remember { mutableStateOf<WaveStyle?>(null) }
+    var overviewDim by remember { mutableFloatStateOf(-1f) }
     Box(modifier.clipToBounds().background(Ink.background)) {
         Canvas(Modifier.fillMaxSize()) {
             val along = if (vertical) size.height else size.width
@@ -165,7 +183,8 @@ fun marksOf(ui: DeckUi) = ui.snapshot.let { s -> WaveMarks(s?.cueSeconds, ui.hot
                     val key = IntSize2(size.width.toInt(), size.height.toInt())
                     val c = cache
                     val style = WaveStyle.minimap ?: WaveStyle.MINIMAP
-                    val image = if (c != null && c.first === data && c.second == key && overviewStyle === style) c.third else renderOverview(data, key, dur, vertical, style).also { cache = Triple(data, key, it); overviewStyle = style }
+                    val k = OverviewDim.factor
+                    val image = if (c != null && c.first === data && c.second == key && overviewStyle === style && overviewDim == k) c.third else renderOverview(data, key, dur, vertical, style, k).also { cache = Triple(data, key, it); overviewStyle = style; overviewDim = k }
                     drawImage(image)
                     val p = at(pos).coerceIn(0f, along)
                     drawRect(Color.Black.copy(alpha = .5f), Offset.Zero, if (vertical) Size(size.width, p) else Size(p, size.height))
@@ -258,12 +277,12 @@ fun marksOf(ui: DeckUi) = ui.snapshot.let { s -> WaveMarks(s?.cueSeconds, ui.hot
 private data class IntSize2(val w: Int, val h: Int)
 
 /** Bottom-anchored minimap body (desktop minimap mode), drawn once into a bitmap. */
-private fun renderOverview(data: WaveformData, size: IntSize2, duration: Double, vertical: Boolean, style: WaveStyle): ImageBitmap {
+private fun renderOverview(data: WaveformData, size: IntSize2, duration: Double, vertical: Boolean, style: WaveStyle, brightness: Float): ImageBitmap {
     val bitmap = Bitmap.createBitmap(max(1, size.w), max(1, size.h), Bitmap.Config.ARGB_8888)
     val canvas = android.graphics.Canvas(bitmap)
     val paint = Paint().apply { strokeWidth = 1f }
     val along = if (vertical) size.h else size.w; val across = if (vertical) size.w else size.h
-    val l = Lines(style); val g = FloatArray(3)
+    val l = Lines(style, brightness); val g = FloatArray(3)
     val dur = duration.coerceAtLeast(1.0)
     for (p in 0 until along) {
         columnGroups(data, p.toDouble() / along * dur, (p + 1.0) / along * dur, g)
@@ -372,11 +391,11 @@ class SmoothClock {
 @Composable fun frameNanos(active: Boolean): State<Long> = produceState(0L, active) { while (active) withFrameNanos { value = it } }
 
 /** Browser row preview (desktop previewImage.ts): bins linearly sampled per pixel, bipolar — each band mirrors around the centre at half amplitude. */
-fun renderPreview(p: dev.manadj.app.browse.WaveformPreview, w: Int, h: Int, style: WaveStyle): ImageBitmap {
+fun renderPreview(p: dev.manadj.app.browse.WaveformPreview, w: Int, h: Int, style: WaveStyle, brightness: Float = OverviewDim.factor): ImageBitmap {
     val bitmap = Bitmap.createBitmap(max(1, w), max(1, h), Bitmap.Config.ARGB_8888)
     val canvas = android.graphics.Canvas(bitmap)
     val paint = Paint().apply { strokeWidth = 1f }
-    val l = Lines(style); val g = FloatArray(3)
+    val l = Lines(style, brightness); val g = FloatArray(3)
     for (x in 0 until w) {
         val f = ((x + .5f) * p.bins / w - .5f).coerceIn(0f, (p.bins - 1).toFloat())
         val i0 = f.toInt(); val i1 = min(i0 + 1, p.bins - 1); val fr = f - i0

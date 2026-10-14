@@ -33,6 +33,8 @@ object Ink {
     val panel = Color(0xff080a0c)
     val crust = Color(0xff111111)
     val surface = Color(0xff45454f)
+    /** Desktop --surface0: row dividers (TrackRow.css). */
+    val surface0 = Color(0xff313136)
     val surface2 = Color(0xff58585b)
     val overlay1 = Color(0xff7f849c)
     val text = Color(0xffcdd6f4)

@@ -123,6 +123,12 @@ import dev.manadj.audio.QuantizeMode
                 Key("LEFT", Modifier.width(72.dp).fillMaxHeight(), Ink.accent, engaged = !ux.browseBothRight, description = "Browser on the left", textSize = 10, style = KeyStyle.PILL) { ux.browseBothRight = false }
                 Key("RIGHT", Modifier.width(72.dp).fillMaxHeight(), Ink.accent, engaged = ux.browseBothRight, description = "Browser on the right", textSize = 10, style = KeyStyle.PILL) { ux.browseBothRight = true }
             }
+            Row(Modifier.fillMaxWidth().height(40.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                Column(Modifier.weight(1f)) { Text("Preview brightness", bold = true); Text("Browser previews + minimaps, on top of desktop's minimap dim.", color = Ink.muted, size = 11) }
+                Key("−", Modifier.width(44.dp).fillMaxHeight(), Ink.accent, ux.overviewBrightness > .31f, description = "Preview brightness down", textSize = 14, style = KeyStyle.PILL) { ux.overviewBrightness -= .05f }
+                Text("${(ux.overviewBrightness * 100 + .5f).toInt()}%", Modifier.width(48.dp), Ink.text, 13, true)
+                Key("+", Modifier.width(44.dp).fillMaxHeight(), Ink.accent, ux.overviewBrightness < .99f, description = "Preview brightness up", textSize = 14, style = KeyStyle.PILL) { ux.overviewBrightness += .05f }
+            }
             Toggle("Crossfader", "Off hides the crossfader (both decks play through).", ux.crossfaderEnabled) {
                 ux.crossfaderEnabled = !ux.crossfaderEnabled
                 if (!ux.crossfaderEnabled) model.updateCrossfade(.5)
