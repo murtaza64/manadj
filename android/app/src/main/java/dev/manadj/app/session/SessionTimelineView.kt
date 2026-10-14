@@ -40,6 +40,8 @@ import kotlin.math.*
 
 /** Timeline lanes top to bottom: desktop C, A, B, D (the mixer's channel order). */
 val LANE_ORDER = intArrayOf(2, 0, 1, 3)
+/** The lanes a Session needs: decks that never played take no space on a phone. */
+fun lanesOf(tl: SessionTimeline): IntArray = LANE_ORDER.filter { d -> tl.runs[d].isNotEmpty() }.toIntArray().takeIf { it.isNotEmpty() } ?: LANE_ORDER
 private const val TILE = 256
 /** Desktop max zoom (60 px/s), in dp. */
 const val MAX_DP_PER_SECOND = 60.0
@@ -59,8 +61,8 @@ private fun fxShort(effect: String) = when (effect) {
  * Each column is the run's track audio (styled like every other waveform), modulated by EQ and fader·trim,
  * over the audibility fill (height = Master gain / 0.5). Inaudible stretches draw dimmed.
  */
-private class Tiles(val tl: SessionTimeline, val origin: Double, val laneH: Int, val gap: Int, val waves: Map<Int, TimelineWave>, val scope: CoroutineScope) {
-    val height = laneH * 4 + gap * 3
+private class Tiles(val tl: SessionTimeline, val lanes: IntArray, val origin: Double, val laneH: Int, val gap: Int, val waves: Map<Int, TimelineWave>, val scope: CoroutineScope) {
+    val height = laneH * lanes.size + gap * (lanes.size - 1)
     private class Tile(val bitmap: Bitmap, val gen: Int)
     private val cache = object : LinkedHashMap<Long, Tile>(64, .75f, true) { override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Long, Tile>?) = size > 44 }
     private val queued = HashSet<Long>()
@@ -110,7 +112,7 @@ private class Tiles(val tl: SessionTimeline, val origin: Double, val laneH: Int,
         val paint = Paint().apply { strokeWidth = 1f }
         val fill = Paint()
         val g = FloatArray(3)
-        for ((i, d) in LANE_ORDER.withIndex()) {
+        for ((i, d) in lanes.withIndex()) {
             val y0 = i * (laneH + gap).toFloat()
             val mid = y0 + laneH / 2f; val half = laneH / 2f - 2
             val color = deckColor(DeckId.entries[d])
@@ -159,13 +161,13 @@ private class LabelHit(val a: Appearance, val l: Float, val t: Float, val r: Flo
  * (when zoomed to 10 min or less), machine holds, played veil and the playhead.
  * Touch: drag/fling pans, pinch zooms at the fingers, tap seeks, tap a label focuses its track, double-tap fits.
  */
-@Composable fun SessionTimelineView(model: SessionModel, player: PlayerModel, log: SessionLog, tl: SessionTimeline, laneHeight: Dp, rulerHeight: Dp, modifier: Modifier = Modifier, gap: Dp = 3.dp) {
+@Composable fun SessionTimelineView(model: SessionModel, player: PlayerModel, log: SessionLog, tl: SessionTimeline, lanes: IntArray, laneHeight: Dp, rulerHeight: Dp, modifier: Modifier = Modifier, gap: Dp = 3.dp) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val density = androidx.compose.ui.platform.LocalDensity.current
     val laneH = with(density) { laneHeight.roundToPx() }
     val gapPx = with(density) { gap.roundToPx() }
-    val tiles = remember(tl, laneH, gapPx) { Tiles(tl, log.activeStart, laneH, gapPx, model.waves, scope) }
+    val tiles = remember(tl, lanes, laneH, gapPx) { Tiles(tl, lanes, log.activeStart, laneH, gapPx, model.waves, scope) }
     DisposableEffect(tiles) { onDispose { tiles.close() } }
     val playing = model.playing
     val focused = model.focus != null
@@ -178,7 +180,7 @@ private class LabelHit(val a: Appearance, val l: Float, val t: Float, val r: Flo
     val currentModel by rememberUpdatedState(model)
     val lanesTop = with(density) { rulerHeight.toPx() }
 
-    Canvas(modifier.fillMaxWidth().height(rulerHeight + laneHeight * 4 + gap * 3).clipToBounds().testTag("session-timeline")
+    Canvas(modifier.fillMaxWidth().height(rulerHeight + laneHeight * lanes.size + gap * (lanes.size - 1)).clipToBounds().testTag("session-timeline")
         .semantics { contentDescription = "Four deck Session timeline; tap to seek, drag to pan, pinch to zoom, double-tap to fit" }
         .pointerInput(log) { timelineGestures(this, { currentModel }, player, hits, scope) }) {
         model.minViewWidth = size.width / density.density / MAX_DP_PER_SECOND
@@ -191,10 +193,10 @@ private class LabelHit(val a: Appearance, val l: Float, val t: Float, val r: Flo
         fun x(t: Double) = ((t - vs) * pps).toFloat()
         fun laneY(i: Int) = lanesTop + i * (laneH + gapPx)
         val dp = density.density
-        val lanesBottom = laneY(3) + laneH
+        val lanesBottom = laneY(lanes.size - 1) + laneH
 
         // Lanes.
-        for ((i, d) in LANE_ORDER.withIndex()) {
+        for ((i, d) in lanes.withIndex()) {
             val c = deckColor(DeckId.entries[d])
             drawRect(c.copy(alpha = .05f), Offset(0f, laneY(i)), Size(w, laneH.toFloat()))
         }
@@ -241,7 +243,7 @@ private class LabelHit(val a: Appearance, val l: Float, val t: Float, val r: Flo
         val maxRows = max(1, ((laneH - 8 * dp) / rowH).toInt())
         hits.clear()
         val titles = HashMap<Int, String>()
-        for ((i, d) in LANE_ORDER.withIndex()) {
+        for ((i, d) in lanes.withIndex()) {
             val y = laneY(i)
             val c = deckColor(DeckId.entries[d])
             // Beat FX band (top 4dp): effect colour, opacity by depth.
@@ -298,11 +300,13 @@ private class LabelHit(val a: Appearance, val l: Float, val t: Float, val r: Flo
                 val (a, sx, label) = p
                 val ax = x(a.start)
                 if (ax in 0f..w) {
-                    drawLine(c.copy(alpha = .8f), Offset(ax, y), Offset(ax, y + laneH), 1.5f * dp)
+                    // Dense loads (zoomed far out) keep just the flag; the full-height line returns with room.
+                    val prevX = placed.getOrNull(k - 1)?.let { x(it.first.start) } ?: -1e9f
+                    if (ax - prevX > 14 * dp) drawLine(c.copy(alpha = .8f), Offset(ax, y), Offset(ax, y + laneH), 1.5f * dp)
                     drawPath(androidx.compose.ui.graphics.Path().apply { moveTo(ax, y); lineTo(ax + 6 * dp, y + 4 * dp); lineTo(ax, y + 8 * dp); close() }, c)
                 }
                 val room = min(widths[k], nextOnRow[k] - sx - 4 * dp)
-                if (room < 18 * dp) continue
+                if (room < 44 * dp) continue
                 val n = text.breakText(label, true, room - 10 * dp, null)
                 val shown = if (n < label.length) label.take(max(1, n - 1)) + "…" else label
                 val ty = y + 6 * dp + rows[k] * rowH
@@ -315,10 +319,10 @@ private class LabelHit(val a: Appearance, val l: Float, val t: Float, val r: Flo
         }
         // Spotlight: a focused track occurrence stays lit; everything else dims.
         model.focus?.let { f ->
-            val lane = LANE_ORDER.indexOf(f.deck)
+            val lane = lanes.indexOf(f.deck)
             val (fs, fe) = tl.playedSpan(f) ?: (f.start to f.end)
             val l = x(fs).coerceIn(0f, w); val r = x(fe).coerceIn(0f, w)
-            for (i in 0..3) {
+            for (i in lanes.indices) {
                 val y = laneY(i)
                 if (i != lane) drawRect(Color.Black.copy(alpha = .6f), Offset(0f, y), Size(w, laneH.toFloat()))
                 else { drawRect(Color.Black.copy(alpha = .6f), Offset(0f, y), Size(l, laneH.toFloat())); drawRect(Color.Black.copy(alpha = .6f), Offset(r, y), Size(w - r, laneH.toFloat())) }

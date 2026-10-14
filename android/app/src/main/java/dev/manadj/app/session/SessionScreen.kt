@@ -103,9 +103,10 @@ private fun sessionLength(h: SessionHeader): String? = runCatching {
         }
     }
     val tl = model.timeline ?: return
+    val lanes = remember(tl) { lanesOf(tl) }
     BoxWithConstraints(Modifier.fillMaxWidth().weight(1f)) {
-        if (maxWidth > maxHeight) LandscapeReplay(model, player, ux, log, tl, frame, maxHeight)
-        else PortraitReplay(model, player, ux, log, tl, frame)
+        if (maxWidth > maxHeight) LandscapeReplay(model, player, ux, log, tl, lanes, frame, maxHeight)
+        else PortraitReplay(model, player, ux, log, tl, lanes, frame)
     }
 }
 
@@ -113,19 +114,19 @@ private val RULER = 20.dp
 private val GAP = 3.dp
 
 /** Landscape (primary): each lane's deck panel sits beside its timeline lane; transport along the bottom. */
-@Composable private fun LandscapeReplay(model: SessionModel, player: PlayerModel, ux: UiModel, log: SessionLog, tl: SessionTimeline, frame: SessionState, height: androidx.compose.ui.unit.Dp) {
+@Composable private fun LandscapeReplay(model: SessionModel, player: PlayerModel, ux: UiModel, log: SessionLog, tl: SessionTimeline, lanes: IntArray, frame: SessionState, height: androidx.compose.ui.unit.Dp) {
     val bar = 52.dp
-    val lane = ((height - bar - RULER - GAP * 3 - 6.dp) / 4).coerceIn(40.dp, 140.dp)
+    val lane = ((height - bar - RULER - GAP * (lanes.size - 1) - 6.dp) / lanes.size).coerceIn(40.dp, 180.dp)
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().weight(1f).padding(top = 4.dp)) {
             Column(Modifier.width(184.dp)) {
                 Spacer(Modifier.height(RULER))
-                for ((i, d) in LANE_ORDER.withIndex()) {
+                for ((i, d) in lanes.withIndex()) {
                     if (i > 0) Spacer(Modifier.height(GAP))
                     DeckPanel(d, model, player, ux, frame, Modifier.fillMaxWidth().height(lane))
                 }
             }
-            SessionTimelineView(model, player, log, tl, lane, RULER, Modifier.weight(1f).padding(end = 8.dp), GAP)
+            SessionTimelineView(model, player, log, tl, lanes, lane, RULER, Modifier.weight(1f).padding(end = 8.dp), GAP)
         }
         Row(Modifier.fillMaxWidth().height(bar).padding(horizontal = 6.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
             StatusReadout(model, log, frame, Modifier.width(280.dp).padding(start = 8.dp))
@@ -138,14 +139,14 @@ private val GAP = 3.dp
 }
 
 /** Portrait (compact): deck strips, the timeline, the track loads list, transport. */
-@Composable private fun PortraitReplay(model: SessionModel, player: PlayerModel, ux: UiModel, log: SessionLog, tl: SessionTimeline, frame: SessionState) {
+@Composable private fun PortraitReplay(model: SessionModel, player: PlayerModel, ux: UiModel, log: SessionLog, tl: SessionTimeline, lanes: IntArray, frame: SessionState) {
     Column(Modifier.fillMaxSize()) {
-        for (d in LANE_ORDER) DeckStrip(d, model, player, ux, frame)
+        for (d in lanes) DeckStrip(d, model, player, ux, frame)
         Row(Modifier.fillMaxWidth().height(40.dp).padding(start = 12.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("TIMELINE", Modifier.weight(1f), Ink.muted, 11, bold = true)
             TimelineKeys(model, Modifier.height(36.dp))
         }
-        SessionTimelineView(model, player, log, tl, 46.dp, RULER, Modifier.padding(horizontal = 4.dp), GAP)
+        SessionTimelineView(model, player, log, tl, lanes, when (lanes.size) { 4 -> 46.dp; 3 -> 56.dp; else -> 66.dp }, RULER, Modifier.padding(horizontal = 4.dp), GAP)
         Row(Modifier.fillMaxWidth().height(24.dp).padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("TRACK LOADS", Modifier.weight(1f), Ink.muted, 10, bold = true)
             Text("${log.appearances.size} · TAP TO JUMP", color = Ink.muted, size = 10)

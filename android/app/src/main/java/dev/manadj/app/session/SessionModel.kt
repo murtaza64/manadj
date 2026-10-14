@@ -111,8 +111,9 @@ class SessionModel(application: Application) : AndroidViewModel(application) {
                 val parsed = store.log(h)
                 require(parsed.events.isNotEmpty() && parsed.duration > 0) { "Session has no recorded duration" }
                 stop()
+                val timelineJob = async(Dispatchers.Default) { SessionTimeline(parsed) }
                 val drift = withContext(Dispatchers.Default) { parsed.tickDivergence() }
-                val tl = withContext(Dispatchers.Default) { SessionTimeline(parsed) }
+                val tl = timelineJob.await()
                 header = h; log = parsed; driver = null; recordingDrift = drift; timeline = tl; focus = null
                 loadWaves(parsed)
                 if (drift.isNotEmpty()) android.util.Log.w(TAG, "recording drift: ${drift.size} ticks > 5 ms, worst %.1f ms".format(drift.maxOf { abs(it.seconds) } * 1000))
