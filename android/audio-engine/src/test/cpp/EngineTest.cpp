@@ -405,13 +405,77 @@ int main() {
         CHECK(db(measure(200, [](Engine& e) { e.submitFilter(0, 1); })) < -40);             // HP fully swept (16 kHz)
         CHECK(std::abs(db(measure(100, [](Engine& e) { e.submitFilter(0, .5); }))) > 6);    // mid HP sweep cuts 100 Hz
         // ...and passes 5 kHz at the desktop's resonance-compensated passband level.
-        CHECK(std::abs(db(measure(5000, [](Engine& e) { e.submitFilter(0, .5); })) - db(static_cast<float>(dsp::describeFilter(.5, 48000).gain))) < 1);
+        CHECK(std::abs(db(measure(5000, [](Engine& e) { e.submitFilter(0, .5); })) - db(static_cast<float>(std::pow(10.0, dsp::describeFilter(.5, 48000).gainDb / 20)))) < 1);
         const auto t = dsp::describeFilter(-1, 48000);
-        CHECK(t.pass == dsp::Pass::Low && std::abs(t.frequency - 40) < .01 && t.wet == 1 && t.gain < 1);
+        CHECK(t.pass == dsp::Pass::Low && std::abs(t.frequency - 40) < .01 && t.wet == 1 && t.gainDb < 0);
         const auto h = dsp::describeFilter(1, 48000);
         CHECK(h.pass == dsp::Pass::High && std::abs(h.frequency - 16000) < .01);
         CHECK(dsp::describeFilter(.03, 48000).wet == 0);
     }
+    { // Filter parity: magnitude response matches the desktop sweepResponseDb for every model.
+        struct Case { int model; double resonance, compensation, curve, deadzone, lpMin, hpMax, spread, trim, position; double db[9]; };
+        static const Case cases[] = {
+#include "FilterCases.inc"
+        };
+        const double freqs[9] = {30, 80, 200, 500, 1000, 2500, 6000, 12000, 18000};
+        for (const auto& c : cases) {
+            dsp::FilterSettings s;
+            s.model = static_cast<dsp::FilterModel>(c.model);
+            s.resonance = c.resonance; s.compensation = c.compensation; s.curve = c.curve; s.deadzone = c.deadzone;
+            s.lpMin = c.lpMin; s.hpMax = c.hpMax; s.spread = c.spread; s.trim = c.trim;
+            for (int k = 0; k < 9; ++k) {
+                if (c.db[k] < -90) continue; // TS clamps at -120 dB
+                const double got = dsp::sweepResponseDb(s, c.position, freqs[k], 48000);
+                if (std::abs(got - c.db[k]) > .05) std::fprintf(stderr, "model %d pos %g hz %g: %f vs %f\n", c.model, c.position, freqs[k], got, c.db[k]);
+                CHECK(std::abs(got - c.db[k]) < .05);
+            }
+        }
+        // The realtime strip renders that response (sine RMS vs the formula), incl. live settings changes.
+        auto measureWith = [&](const dsp::FilterSettings& s, double position, double hz) {
+            auto owned = std::make_unique<Engine>(48000);
+            Engine& e = *owned;
+            e.submitFilterSettings(s);
+            e.submitFilter(0, position);
+            e.submit(Op::Prepare, 0, 0, 1);
+            tick(e);
+            feedTone(e, 0, 1, hz);
+            e.submit(Op::Play, 0);
+            return 20 * std::log10(std::max(1e-9f, toneRms(e, 12000, 12000) / (.25f / std::sqrt(2.f) * unity)));
+        };
+        dsp::FilterSettings dual; dual.model = dsp::FilterModel::Dual; dual.spread = 1.4; dual.resonance = 20;
+        dsp::FilterSettings steep; steep.model = dsp::FilterModel::Res48; steep.resonance = 12; steep.trim = 2;
+        dsp::FilterSettings legacy; legacy.model = dsp::FilterModel::Current;
+        for (const auto* s : {&dual, &steep, &legacy})
+            for (double pos : {-.6, .45})
+                for (double hz : {200.0, 1000.0, 6000.0}) {
+                    const double want = dsp::sweepResponseDb(*s, pos, hz, 48000);
+                    if (want < -40) continue;
+                    const double got = measureWith(*s, pos, hz);
+                    if (std::abs(got - want) > 1) std::fprintf(stderr, "strip model %d pos %g hz %g: %f vs %f\n", (int)s->model, pos, hz, got, want);
+                    CHECK(std::abs(got - want) < 1);
+                }
+    }
+
+    { // Live settings changes (model swap, resonance, trim) are click-free.
+        auto owned = std::make_unique<Engine>(48000);
+        Engine& e = *owned;
+        e.submit(Op::Prepare, 0, 0, 1);
+        tick(e);
+        feedTone(e, 0, 1, 1000);
+        e.submit(Op::Play, 0);
+        e.submitFilter(0, .3);
+        tick(e, 9600);
+        float prev = out[9599 * 2], worst = 0;
+        dsp::FilterSettings s;
+        for (int step = 0; step < 6; ++step) {
+            s.model = static_cast<dsp::FilterModel>(step % 5); s.resonance = 4 * step; s.trim = step % 2 ? -6 : 3;
+            e.submitFilterSettings(s);
+            tick(e, 2400);
+            for (int i = 0; i < 2400; ++i) { worst = std::max(worst, std::abs(out[i * 2] - prev)); prev = out[i * 2]; }
+        }
+        CHECK(worst < .05f); // a 1 kHz tone at this level moves <= ~.02 per sample; a click jumps far more
+    }
+
     { // Beat jump (desktop jumpBeats): grid tempo, gridless 120 BPM fallback, loop translates.
         auto owned = std::make_unique<Engine>(48000);
         Engine& e = *owned;

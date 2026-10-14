@@ -90,12 +90,15 @@ struct Command {
     double aux[5]; // Filter: pass (0 low/1 high), cutoff Hz, wet, resonance dB, compensation gain
 };
 
-/** One sweep-filter branch (res24 cascade); LP and HP run in parallel like the desktop graph. */
+/** One sweep-filter branch (biquad cascade of up to 4 stages). Two banks x LP/HP run in parallel like
+ * the desktop graph (per-model branches): a model change fades the old bank out while the new one fades in. */
 struct FilterBranch {
-    dsp::Pass pass;
-    dsp::Biquad stages[2];
-    double logHz = std::log(20000.0), hzTarget = 20000;
-    double qDb = 0, qTarget = 0;
+    dsp::Pass pass = dsp::Pass::Low;
+    int stages = 0;
+    dsp::Biquad stage[dsp::kMaxFilterStages];
+    double logHz[dsp::kMaxFilterStages] = {}, qDb[dsp::kMaxFilterStages] = {};
+    double logTarget[dsp::kMaxFilterStages] = {}, qTarget[dsp::kMaxFilterStages] = {};
+    double tau = .02;
     float gain = 0, gainTarget = 0;
     bool designed = false;
 };
@@ -142,8 +145,11 @@ struct Deck {
     // Strip DSP (callback-private): LR4 isolator EQ, sweep filter.
     dsp::Biquad eqLow[2], eqMidHp[2], eqMidLp[2], eqHigh[2];
     float eqGain[3] = {1, 1, 1}, eqTarget[3] = {1, 1, 1};
-    FilterBranch branch[2] = {{dsp::Pass::Low}, {dsp::Pass::High}};
+    FilterBranch branch[4] = {{dsp::Pass::Low}, {dsp::Pass::High}, {dsp::Pass::Low}, {dsp::Pass::High}}; // bank x pass
+    int bank = 0, bankModel = -1;
     float dry = 1, dryTarget = 1;
+    // Filter drive (tanh(4x) shaper on the summed filter output, gain-compensated; mixed by wet).
+    float driveIn = .25f, driveInTarget = .25f, driveOut = 1, driveOutTarget = 1, driveMix = 0, driveMixTarget = 0;
     bool stripWarm = false;
     std::array<Head, kHeadSlots> heads{};
     Track track;
@@ -184,6 +190,9 @@ public:
     uint64_t submit(Op op, int deck, double value = 0, uint64_t load = 0, int slot = 0, const double* aux = nullptr);
     // Control thread: computes the desktop sweep-filter target (not realtime-safe) and queues it.
     uint64_t submitFilter(int deck, double position);
+    // Desktop FilterSettings for every deck (click-free); re-targets each deck at its last knob position.
+    uint64_t submitFilterSettings(const dsp::FilterSettings& settings);
+    dsp::FilterSettings filterSettings() { std::lock_guard<std::mutex> lock(filterMutex_); return filterSettings_; }
     // Whole Beat FX section (desktop setBeatFxSection). effect -1 = none; target fx::Target.
     uint64_t submitBeatFx(int effect, int target, bool on, double depth, double beats, int heldMask);
 
@@ -251,6 +260,13 @@ private:
     int fxTempoDeck_ = 0; // MST follows the last deck target (desktop beatFxTempoChannel).
     void applyBeatFx(bool immediate) noexcept;
     void clockBeatFx(int64_t frame) noexcept;
+    static constexpr int kFilterSlots = 64;
+    std::mutex filterMutex_;                       // control side only
+    dsp::FilterSettings filterSettings_;
+    std::array<double, kDeckCount> filterPosition_{};
+    uint64_t filterSlot_ = 0;
+    std::array<dsp::FilterTarget, kFilterSlots> filterTargets_{}; // written before the Op that names the slot
+    std::array<float, 16385> driveCurve_{};
     std::array<float, kBlockFrames * 2> master_{};
     std::array<float, kBlockFrames * 2> cue_{};
     void renderBuses(int frames, int64_t frame) noexcept;

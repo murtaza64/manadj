@@ -47,6 +47,69 @@ object BeatFx {
     }
 }
 
+/** Desktop filterSettings.ts FILTER_MODELS; [id] is the persisted value, ordinals match native `FilterModel`. */
+enum class FilterModel(val id: String, val label: String, val description: String) {
+    CURRENT("current", "Original 12 dB", "The original manadj response: fixed resonance, 80 Hz / 8 kHz endpoints and an open low-pass at center."),
+    RES12("res12", "Resonant 12 dB", "One resonant stage. A broad, open sweep."),
+    RES24("res24", "Resonant 24 dB", "Two stages with resonance on the sharper stage."),
+    RES48("res48", "Steep 48 dB", "Four stages for a steeper cutoff and a sharper edge."),
+    DUAL("dual", "Twin peak 24 dB", "Two resonant stages with separated cutoffs. Spread sets their distance."),
+}
+
+/**
+ * Desktop sweep-filter settings (filterSettings.ts; persisted as JSON under [KEY]). Values outside
+ * [RANGES] are clamped, as desktop sanitizeFilterSettings does.
+ */
+data class FilterSettings(
+    val model: FilterModel = FilterModel.RES24,
+    val resonance: Double = 17.0, val compensation: Double = .85, val curve: Double = 1.0, val deadzone: Double = .03,
+    val lpMin: Double = 40.0, val hpMax: Double = 16000.0, val spread: Double = .8, val drive: Double = 0.0,
+    val trim: Double = 0.0, val smoothing: Double = 20.0,
+) {
+    internal fun params() = doubleArrayOf(resonance, compensation, curve, deadzone, lpMin, hpMax, spread, drive, trim, smoothing)
+
+    fun sanitized(): FilterSettings {
+        fun c(key: String, v: Double, fallback: Double) = RANGES.getValue(key).let { (lo, hi) -> if (v.isFinite()) v.coerceIn(lo, hi) else fallback }
+        val d = FilterSettings()
+        return copy(
+            resonance = c("resonance", resonance, d.resonance), compensation = c("compensation", compensation, d.compensation),
+            curve = c("curve", curve, d.curve), deadzone = c("deadzone", deadzone, d.deadzone), lpMin = c("lpMin", lpMin, d.lpMin),
+            hpMax = c("hpMax", hpMax, d.hpMax), spread = c("spread", spread, d.spread), drive = c("drive", drive, d.drive),
+            trim = c("trim", trim, d.trim), smoothing = c("smoothing", smoothing, d.smoothing),
+        )
+    }
+
+    /** The desktop JSON shape (`manadj-filter-settings`). */
+    fun toJson(): String = org.json.JSONObject().apply {
+        put("model", model.id)
+        params().zip(KEYS).forEach { (v, k) -> put(k, v) }
+    }.toString()
+
+    companion object {
+        const val KEY = "manadj-filter-settings"
+        val KEYS = listOf("resonance", "compensation", "curve", "deadzone", "lpMin", "hpMax", "spread", "drive", "trim", "smoothing")
+        /** FILTER_PARAMETER_RANGES: min, max, step. */
+        val RANGES: Map<String, Triple<Double, Double, Double>> = mapOf(
+            "resonance" to Triple(0.0, 24.0, .1), "compensation" to Triple(0.0, 1.0, .01), "curve" to Triple(.35, 2.5, .05),
+            "deadzone" to Triple(0.0, .12, .005), "lpMin" to Triple(20.0, 300.0, 5.0), "hpMax" to Triple(2000.0, 20000.0, 100.0),
+            "spread" to Triple(0.0, 2.0, .1), "drive" to Triple(0.0, 18.0, .5), "trim" to Triple(-18.0, 12.0, .5),
+            "smoothing" to Triple(5.0, 100.0, 5.0),
+        )
+        /** Parses the desktop JSON (unknown/missing fields fall back to defaults, like sanitizeFilterSettings). */
+        fun fromJson(json: String?): FilterSettings {
+            val o = runCatching { org.json.JSONObject(json ?: return FilterSettings()) }.getOrNull() ?: return FilterSettings()
+            val d = FilterSettings()
+            fun n(k: String, fallback: Double) = o.optDouble(k, fallback).takeIf { it.isFinite() } ?: fallback
+            return FilterSettings(
+                model = FilterModel.entries.firstOrNull { it.id == o.optString("model") } ?: d.model,
+                resonance = n("resonance", d.resonance), compensation = n("compensation", d.compensation), curve = n("curve", d.curve),
+                deadzone = n("deadzone", d.deadzone), lpMin = n("lpMin", d.lpMin), hpMax = n("hpMax", d.hpMax),
+                spread = n("spread", d.spread), drive = n("drive", d.drive), trim = n("trim", d.trim), smoothing = n("smoothing", d.smoothing),
+            ).sanitized()
+        }
+    }
+}
+
 /** Output stage mapping of the master and cue (PFL) buses. Ordinals match native `Routing`. */
 enum class Routing(val label: String) {
     STEREO("Stereo master"),
@@ -106,6 +169,10 @@ sealed interface AudioCommand {
     /** -1 = deck A only, 0 = both at unity, +1 = deck B only. */
     data class SetCrossfade(val value: Double, override val gestureId: String? = null) : AudioCommand {
         override val deck = DeckId.A // Global mixer command, not assigned to a deck's audio.
+    }
+    /** Sweep-filter settings for every deck (click-free live update; desktop FilterSettings). */
+    data class SetFilterSettings(val settings: FilterSettings, override val gestureId: String? = null) : AudioCommand {
+        override val deck = DeckId.A // Global.
     }
     /** Writes the whole Beat FX section (send the full state on every change). */
     data class SetBeatFx(
@@ -212,7 +279,7 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
         init { System.loadLibrary("manadj_audio") }
         const val MAIN_CUE = 8
         const val HOT_CUES = 8
-        val CAPABILITIES = setOf("play", "pause", "cue-gate", "hot-cue-gate", "hot-cue-set", "seek", "fader", "trim", "crossfade", "varispeed", "bend", "pfl", "cue-mix", "routing", "eq", "filter", "grid", "beat-jump", "loop", "quantize", "beat-fx")
+        val CAPABILITIES = setOf("play", "pause", "cue-gate", "hot-cue-gate", "hot-cue-set", "seek", "fader", "trim", "crossfade", "varispeed", "bend", "pfl", "cue-mix", "routing", "eq", "filter", "grid", "beat-jump", "loop", "quantize", "beat-fx", "filter-settings")
         private const val PRIME_FRAMES = 2048
         private const val MEMORY_RESERVE_BYTES = 768L shl 20
         private const val HEAD_PRIORITY_FRAMES = 16384 // ~340 ms buffered before a head fill may interrupt the ring
@@ -291,6 +358,12 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
             is AudioCommand.LoopPreset -> Op.LOOP_PRESET to command.beats
             is AudioCommand.LoopResize -> { slot = command.change.ordinal; Op.LOOP_RESIZE to command.beats }
             is AudioCommand.SetQuantize -> Op.QUANTIZE to if (command.on) 1.0 else 0.0
+            is AudioCommand.SetFilterSettings -> {
+                val s = command.settings.sanitized()
+                val id = nativeSetFilterSettings(handle, s.model.ordinal, s.params())
+                if (id != 0L) filterSettings = s
+                return if (id != 0L) CommandReceipt(id, true) else rejected("Command queue full")
+            }
             is AudioCommand.SetBeatFx -> {
                 if (!command.depth.isFinite() || !command.beats.isFinite() || command.beats <= 0) return rejected("Non-finite control")
                 val held = command.held.fold(0) { mask, d -> mask or (1 shl d.ordinal) }
@@ -308,6 +381,14 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
         val id = nativeSubmit(handle, op.ordinal, deck, value, 0, slot)
         return if (id != 0L) CommandReceipt(id, true) else rejected("Command queue full")
     }
+
+    /** Settings last applied via [AudioCommand.SetFilterSettings]. */
+    @Volatile var filterSettings = FilterSettings()
+        private set
+
+    /** Desktop sweepResponseDb: magnitude response (dB) of [settings] at knob [position] for [frequencies] (Settings graph). */
+    fun filterResponseDb(settings: FilterSettings, position: Double, frequencies: DoubleArray, sampleRate: Double = 48000.0): DoubleArray =
+        settings.sanitized().let { nativeFilterResponse(it.model.ordinal, it.params(), position, frequencies, sampleRate) }
 
     @Synchronized fun outputInfo(): OutputInfo? {
         if (closed) return null
@@ -595,6 +676,8 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
     private external fun nativeSubmit(handle: Long, op: Int, deck: Int, value: Double, load: Long, slot: Int): Long
     private external fun nativeSetGrid(handle: Long, deck: Int, bpm: Double, anchor: Double): Long
     private external fun nativeSubmitBeatFx(handle: Long, effect: Int, target: Int, on: Boolean, depth: Double, beats: Double, held: Int): Long
+    private external fun nativeSetFilterSettings(handle: Long, model: Int, params: DoubleArray): Long
+    private external fun nativeFilterResponse(model: Int, params: DoubleArray, position: Double, freqs: DoubleArray, rate: Double): DoubleArray
     private external fun nativeSubmitFilter(handle: Long, deck: Int, position: Double): Long
     private external fun nativeTransport(handle: Long, deck: Int, out: DoubleArray)
     private external fun nativeClaim(handle: Long, deck: Int, load: Long, transport: Long, rate: Int, start: Double): Boolean

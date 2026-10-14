@@ -72,6 +72,8 @@ class PlaybackService : Service() {
         }
     }
 
+    fun filterResponseDb(settings: FilterSettings, position: Double, frequencies: DoubleArray): DoubleArray? =
+        if (destroyed) null else try { engine?.filterResponseDb(settings, position, frequencies) } catch (_: IllegalStateException) { null }
     fun outputInfo(): OutputInfo? = if (destroyed) null else try { engine?.outputInfo() } catch (_: IllegalStateException) { null }
 
     fun source(id: String?): LocalSource? = sourceMetadata[id]

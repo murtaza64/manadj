@@ -415,6 +415,31 @@ class AudioEngineTest {
         }
     }
 
+    @Test fun filterSettingsParseDesktopJsonAndApplyLive() {
+        val desktop = """{"model":"dual","resonance":20,"compensation":1,"curve":1,"deadzone":0.08,"lpMin":40,"hpMax":16000,"spread":1.4,"drive":3,"trim":-2,"smoothing":30}"""
+        val s = FilterSettings.fromJson(desktop)
+        assertEquals(FilterModel.DUAL, s.model); assertEquals(1.4, s.spread, 0.0); assertEquals(-2.0, s.trim, 0.0)
+        assertEquals(s, FilterSettings.fromJson(s.toJson()))
+        assertEquals(FilterSettings(), FilterSettings.fromJson("not json"))
+        assertEquals(24.0, FilterSettings(resonance = 99.0).sanitized().resonance, 0.0)
+        val tone = wav("engine-filter.wav", .25, seconds = 5)
+        AudioEngine(offline = true).use { engine ->
+            // Values exported from desktop sweepResponseDb (FilterCases.inc): res48, resonance 12, lpMin 100, hpMax 8000, trim 2, position -0.6.
+            val steep = FilterSettings(model = FilterModel.RES48, resonance = 12.0, lpMin = 100.0, hpMax = 8000.0, trim = 2.0)
+            val db = engine.filterResponseDb(steep, -.6, doubleArrayOf(30.0, 200.0))
+            assertEquals(-5.783165, db[0], .05); assertEquals(-5.749322, db[1], .05)
+            assertEquals(0.0, engine.filterResponseDb(FilterSettings(), 0.0, doubleArrayOf(1000.0))[0], 1e-9)
+            engine.load(DeckId.A, "filter", tone)
+            engine.settled(DeckId.A)
+            assertTrue(engine.submit(AudioCommand.SetFilterSettings(s)).accepted)
+            assertTrue(engine.submit(AudioCommand.SetFilter(DeckId.A, -.5)).accepted)
+            engine.submit(AudioCommand.Play(DeckId.A))
+            engine.renderOfflineForTest(4096)
+            assertEquals(s, engine.filterSettings)
+            assertTrue("filter-settings" in engine.snapshot().supportedCapabilities)
+        }
+    }
+
     @Test fun outputTimestampGivesASmoothAudiblePosition() {
         val media = wav("engine-clock.wav", .25, seconds = 10)
         AudioEngine().use { engine ->

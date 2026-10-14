@@ -86,6 +86,10 @@ class PlayerModel(application: Application) : AndroidViewModel(application) {
     var beatFx by mutableStateOf(BeatFx.DEFAULT)
         private set
     private var pendingBeatFx: Long? = null
+    /** Desktop sweep-filter settings (synced `manadj-filter-settings`); re-sent until the engine accepts them. */
+    var filterSettings by mutableStateOf(FilterSettings())
+        private set
+    private var filterSettingsUnsent = false
     private val connection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, binder: IBinder?) { service = (binder as PlaybackService.LocalBinder).service }
         override fun onServiceDisconnected(name: ComponentName?) { service = null; output = null; failure = "Audio service disconnected" }
@@ -107,6 +111,7 @@ class PlayerModel(application: Application) : AndroidViewModel(application) {
                     if (pendingCrossfade == null || state.appliedCommandId >= pendingCrossfade!!) { crossfade = (state.crossfade + 1) / 2; pendingCrossfade = null }
                     if (pendingCueMix == null || state.appliedCommandId >= pendingCueMix!!) { cueMix = state.cueMix; pendingCueMix = null }
                     if (pendingBeatFx == null || state.appliedCommandId >= pendingBeatFx!!) { beatFx = state.beatFx; pendingBeatFx = null }
+                    if (filterSettingsUnsent && audio?.submit(AudioCommand.SetFilterSettings(filterSettings))?.accepted == true) filterSettingsUnsent = false
                     state.decks.forEach { (id, snapshot) ->
                         val ui = decks.getValue(id)
                         ui.snapshot = snapshot
@@ -264,6 +269,13 @@ class PlayerModel(application: Application) : AndroidViewModel(application) {
         val receipt = submit(AudioCommand.SetCueMix(value, gesture))
         if (receipt.accepted) { cueMix = value; pendingCueMix = receipt.id }
     }
+    /** Applies sweep-filter settings to every deck (click-free); kept and re-sent if the engine is not up yet. */
+    fun updateFilterSettings(settings: FilterSettings) {
+        filterSettings = settings.sanitized()
+        filterSettingsUnsent = !(service?.submit(AudioCommand.SetFilterSettings(filterSettings))?.accepted ?: false)
+    }
+    /** Desktop sweepResponseDb for the Settings response graph (null while the engine is starting). */
+    fun filterResponseDb(settings: FilterSettings, position: Double, frequencies: DoubleArray) = service?.filterResponseDb(settings, position, frequencies)
     /** Writes the whole Beat FX section; e.g. `updateBeatFx(beatFx.copy(on = true))`. */
     fun updateBeatFx(state: BeatFxState, gesture: String? = null) {
         val receipt = submit(AudioCommand.SetBeatFx(state, gesture))

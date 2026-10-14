@@ -177,6 +177,38 @@ Java_dev_manadj_audio_AudioEngine_nativeSubmitBeatFx(JNIEnv*, jobject, jlong han
     return static_cast<jlong>(output(handle)->engine.submitBeatFx(effect, target, on, depth, beats, held));
 }
 
+namespace {
+// params: resonance, compensation, curve, deadzone, lpMin, hpMax, spread, drive, trim, smoothing
+manadj::dsp::FilterSettings filterSettings(JNIEnv* env, jint model, jdoubleArray params) {
+    manadj::dsp::FilterSettings s;
+    if (env->GetArrayLength(params) < 10) return s;
+    double v[10];
+    env->GetDoubleArrayRegion(params, 0, 10, v);
+    s.model = static_cast<manadj::dsp::FilterModel>(model);
+    s.resonance = v[0]; s.compensation = v[1]; s.curve = v[2]; s.deadzone = v[3]; s.lpMin = v[4];
+    s.hpMax = v[5]; s.spread = v[6]; s.drive = v[7]; s.trim = v[8]; s.smoothing = v[9];
+    return s.sanitized();
+}
+}
+
+extern "C" JNIEXPORT jlong JNICALL
+Java_dev_manadj_audio_AudioEngine_nativeSetFilterSettings(JNIEnv* env, jobject, jlong handle, jint model, jdoubleArray params) {
+    return static_cast<jlong>(output(handle)->engine.submitFilterSettings(filterSettings(env, model, params)));
+}
+
+extern "C" JNIEXPORT jdoubleArray JNICALL
+Java_dev_manadj_audio_AudioEngine_nativeFilterResponse(JNIEnv* env, jobject, jint model, jdoubleArray params, jdouble position,
+                                                          jdoubleArray freqs, jdouble rate) {
+    const auto s = filterSettings(env, model, params);
+    const int n = env->GetArrayLength(freqs);
+    std::vector<double> hz(n), db(n);
+    env->GetDoubleArrayRegion(freqs, 0, n, hz.data());
+    for (int i = 0; i < n; ++i) db[i] = manadj::dsp::sweepResponseDb(s, position, hz[i], rate);
+    auto result = env->NewDoubleArray(n);
+    if (result) env->SetDoubleArrayRegion(result, 0, n, db.data());
+    return result;
+}
+
 extern "C" JNIEXPORT void JNICALL
 Java_dev_manadj_audio_AudioEngine_nativeTransport(JNIEnv* env, jobject, jlong handle, jint deck, jdoubleArray out) {
     if (deck < 0 || deck >= manadj::kDeckCount || env->GetArrayLength(out) < 5 + manadj::kHeadSlots) return;

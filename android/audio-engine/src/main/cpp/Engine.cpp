@@ -28,6 +28,8 @@ Engine::Engine(int outputRate) : outputRate_(outputRate) {
     for (auto& d : decks_) { for (auto& h : d.hotcues) h.store(-1); for (auto& e : d.eq) e.store(.5f); }
     for (int i = 0; i < kDeckCount; ++i) updateGain(i);
     for (auto& insert : fx_) insert = std::make_unique<fx::Insert>();
+    for (int i = 0; i < 16385; ++i) driveCurve_[i] = static_cast<float>(std::tanh(4 * (2.0 * i / 16384 - 1)));
+    for (int i = 0; i < kDeckCount; ++i) submitFilter(i, 0);
     applyBeatFx(true);
 }
 
@@ -72,10 +74,25 @@ void Engine::clockBeatFx(int64_t frame) noexcept {
 }
 
 uint64_t Engine::submitFilter(int deck, double position) {
-    const dsp::FilterSettings settings;
-    const auto t = dsp::describeFilter(position, outputRate_.load(), settings);
-    const double aux[5] = {t.pass == dsp::Pass::Low ? 0.0 : 1.0, t.frequency, t.wet, settings.resonance, t.gain};
-    return submit(Op::Filter, deck, position, 0, 0, aux);
+    if (deck < 0 || deck >= kDeckCount || !std::isfinite(position)) return 0;
+    std::lock_guard<std::mutex> lock(filterMutex_);
+    const int slot = static_cast<int>(filterSlot_++ % kFilterSlots);
+    filterTargets_[slot] = dsp::describeFilter(position, outputRate_.load(), filterSettings_);
+    filterPosition_[deck] = position;
+    const double aux[5] = {};
+    return submit(Op::Filter, deck, position, 0, slot, aux);
+}
+
+uint64_t Engine::submitFilterSettings(const dsp::FilterSettings& settings) {
+    std::array<double, kDeckCount> positions;
+    {
+        std::lock_guard<std::mutex> lock(filterMutex_);
+        filterSettings_ = settings.sanitized();
+        positions = filterPosition_;
+    }
+    uint64_t last = 0;
+    for (int i = 0; i < kDeckCount; ++i) if (const auto id = submitFilter(i, positions[i])) last = id;
+    return last;
 }
 
 uint64_t Engine::submit(Op op, int deck, double value, uint64_t load, int slot, const double* aux) {
@@ -459,14 +476,24 @@ void Engine::apply(const Command& c) noexcept {
             break;
         case Op::Filter: {
             d.filter.store(static_cast<float>(std::clamp(c.value, -1.0, 1.0)));
-            const bool low = c.aux[0] == 0;
-            const float wet = static_cast<float>(c.aux[2]);
-            d.dryTarget = 1 - wet;
-            auto& selected = d.branch[low ? 0 : 1];
-            selected.hzTarget = c.aux[1];
-            selected.qTarget = c.aux[3];
-            selected.gainTarget = wet * static_cast<float>(c.aux[4]);
-            d.branch[low ? 1 : 0].gainTarget = 0;
+            const dsp::FilterTarget t = filterTargets_[c.slot % kFilterSlots];
+            const int model = static_cast<int>(t.model);
+            if (model != d.bankModel) {
+                // Model change: the old bank fades out (tails intact), the new one starts at its target.
+                if (d.bankModel >= 0) { d.branch[d.bank * 2].gainTarget = d.branch[d.bank * 2 + 1].gainTarget = 0; d.bank ^= 1; }
+                d.bankModel = model;
+            }
+            const int lowIndex = d.bank * 2, selectedIndex = lowIndex + (t.pass == dsp::Pass::Low ? 0 : 1);
+            auto& selected = d.branch[selectedIndex];
+            if (selected.stages != t.stages) { selected.stages = t.stages; selected.designed = false; if (selected.gain != 0) for (auto& st : selected.stage) st.reset(); }
+            for (int k = 0; k < t.stages; ++k) { selected.logTarget[k] = std::log(t.stage[k].frequency); selected.qTarget[k] = t.stage[k].qDb; }
+            selected.tau = t.smoothingSeconds;
+            selected.gainTarget = static_cast<float>(t.wet * std::pow(10.0, t.gainDb / 20));
+            d.branch[selectedIndex ^ 1].gainTarget = 0;
+            d.dryTarget = static_cast<float>((1 - t.wet) * std::pow(10.0, t.trim / 20));
+            d.driveInTarget = static_cast<float>(std::pow(10.0, t.drive / 20) / 4);
+            d.driveOutTarget = static_cast<float>(std::pow(10.0, -t.drive / 20));
+            d.driveMixTarget = t.model == dsp::FilterModel::Current ? 0.f : static_cast<float>(t.driveMix);
             break;
         }
         case Op::CueMix: cueMix_.store(std::clamp(static_cast<float>(c.value), 0.f, 1.f)); break;
@@ -736,7 +763,7 @@ void Engine::designEq(Deck& d, double rate) noexcept {
 void Engine::resetStrip(Deck& d) noexcept {
     for (int i = 0; i < 2; ++i) {
         d.eqLow[i].reset(); d.eqMidHp[i].reset(); d.eqMidLp[i].reset(); d.eqHigh[i].reset();
-        for (auto& b : d.branch) b.stages[i].reset();
+        for (auto& b : d.branch) for (auto& st : b.stage) st.reset();
     }
 }
 
@@ -757,7 +784,6 @@ void Engine::renderBuses(int frames, int64_t frame) noexcept {
     // Per-sample one-pole smoothing: EQ ~ desktop 50 ms ramp, filter gains ~35 ms, cutoff/Q 20 ms.
     const float kEq = static_cast<float>(1 - std::exp(-1 / (.017 * rate)));
     const float kMix = static_cast<float>(1 - std::exp(-1 / (.012 * rate)));
-    const double kSweep = 1 - std::exp(-static_cast<double>(kSweepBlock) / (.020 * rate));
     int audible = 0;
     for (int index = 0; index < kDeckCount; ++index) {
         auto& d = decks_[index];
@@ -768,7 +794,12 @@ void Engine::renderBuses(int frames, int64_t frame) noexcept {
             // Silent strip: settle smoothed values so the next onset starts at its targets.
             for (int b = 0; b < 3; ++b) d.eqGain[b] = d.eqTarget[b];
             d.dry = d.dryTarget;
-            for (auto& br : d.branch) { br.gain = br.gainTarget; br.logHz = std::log(br.hzTarget); br.qDb = br.qTarget; br.designed = false; }
+            for (auto& br : d.branch) {
+                br.gain = br.gainTarget;
+                for (int k = 0; k < br.stages; ++k) { br.logHz[k] = br.logTarget[k]; br.qDb[k] = br.qTarget[k]; }
+                br.designed = false;
+            }
+            d.driveIn = d.driveInTarget; d.driveOut = d.driveOutTarget; d.driveMix = d.driveMixTarget;
             d.xf = d.targetXf;
             // A stopped deck's insert still rings out its tail (and the ROLL ring keeps recording).
             insert.process(strip, frames, frame);
@@ -784,15 +815,20 @@ void Engine::renderBuses(int frames, int64_t frame) noexcept {
                 for (auto& br : d.branch) {
                     if (br.gain == 0 && br.gainTarget == 0) continue;
                     if (br.gain == 0) { // Waking a silent branch: start at its target (sweepFilter.ts).
-                        br.logHz = std::log(br.hzTarget); br.qDb = br.qTarget; br.designed = false;
-                        br.stages[0].reset(); br.stages[1].reset();
+                        for (int k = 0; k < br.stages; ++k) { br.logHz[k] = br.logTarget[k]; br.qDb[k] = br.qTarget[k]; br.stage[k].reset(); }
+                        br.designed = false;
                     }
-                    const double logTarget = std::log(br.hzTarget);
-                    if (!br.designed || std::abs(br.logHz - logTarget) > 1e-4 || std::abs(br.qDb - br.qTarget) > 1e-3) {
-                        br.logHz += (logTarget - br.logHz) * kSweep;
-                        br.qDb += (br.qTarget - br.qDb) * kSweep;
-                        for (int k = 0; k < 2; ++k)
-                            br.stages[k].design(br.pass, std::exp(br.logHz), dsp::kRes24QDb[k] + (k == 1 ? br.qDb : 0), rate);
+                    bool moved = !br.designed;
+                    const double kSweep = 1 - std::exp(-static_cast<double>(kSweepBlock) / (br.tau * rate));
+                    for (int k = 0; k < br.stages; ++k) {
+                        if (std::abs(br.logHz[k] - br.logTarget[k]) > 1e-4 || std::abs(br.qDb[k] - br.qTarget[k]) > 1e-3) {
+                            br.logHz[k] += (br.logTarget[k] - br.logHz[k]) * kSweep;
+                            br.qDb[k] += (br.qTarget[k] - br.qDb[k]) * kSweep;
+                            moved = true;
+                        }
+                    }
+                    if (moved) {
+                        for (int k = 0; k < br.stages; ++k) br.stage[k].design(br.pass, std::exp(br.logHz[k]), br.qDb[k], rate);
                         br.designed = true;
                     }
                 }
@@ -802,6 +838,9 @@ void Engine::renderBuses(int frames, int64_t frame) noexcept {
                 if (std::abs(d.eqGain[b] - d.eqTarget[b]) < 1e-6f) d.eqGain[b] = d.eqTarget[b];
             }
             d.dry += (d.dryTarget - d.dry) * kMix;
+            d.driveMix += (d.driveMixTarget - d.driveMix) * kMix;
+            d.driveIn += (d.driveInTarget - d.driveIn) * kMix;
+            d.driveOut += (d.driveOutTarget - d.driveOut) * kMix;
             for (auto& br : d.branch) {
                 br.gain += (br.gainTarget - br.gain) * kMix;
                 if (std::abs(br.gain - br.gainTarget) < 1e-6f) br.gain = br.gainTarget;
@@ -815,8 +854,18 @@ void Engine::renderBuses(int frames, int64_t frame) noexcept {
                 const float high = d.eqHigh[1].process(ch, d.eqHigh[0].process(ch, x));
                 const float e = low * d.eqGain[0] + mid * d.eqGain[1] + high * d.eqGain[2];
                 float y = e * d.dry;
-                for (auto& br : d.branch)
-                    if (br.gain != 0) y += br.stages[1].process(ch, br.stages[0].process(ch, e)) * br.gain;
+                for (auto& br : d.branch) {
+                    if (br.gain == 0) continue;
+                    float v = e;
+                    for (int k = 0; k < br.stages; ++k) v = br.stage[k].process(ch, v);
+                    y += v * br.gain;
+                }
+                if (d.driveMix > 1e-6f) { // WaveShaper: 16385-point curve over [-1, 1], clamped.
+                    const float pos = (std::clamp(y * d.driveIn, -1.f, 1.f) + 1) * 8192;
+                    const int ci = std::min(static_cast<int>(pos), 16383);
+                    const float shaped = driveCurve_[ci] + (driveCurve_[ci + 1] - driveCurve_[ci]) * (pos - ci);
+                    y = y * (1 - d.driveMix) + shaped * d.driveOut * d.driveMix;
+                }
                 strip[i * 2 + ch] = y * d.gain; // post-fader, into the Beat FX insert
                 cue[i * 2 + ch] += y * d.cueGain;
             }
