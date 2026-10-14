@@ -213,16 +213,20 @@ fun DrawScope.drawKnob(kind: KnobKind, value: Double, r: Float, enabled: Boolean
             val first = current
             val id = model.beginGesture(deck, label) { setter(first, it) }
             held = true; down.consume()
-            var baseline = first; var baseY = down.position.y; var lastY = down.position.y
+            // Relative drag on a 2D axis (#109): up or right = increase. The axis commits after a small slop
+            // (whichever of dx / dy dominates); coordinate c grows in the decrease direction (down / left).
+            var axisH: Boolean? = null
+            fun coord(p: Offset) = if (axisH == true) -p.x else p.y
+            var baseline = first; var baseY = 0f; var lastPos = down.position; var holdPos = down.position
             var moved = false; var fine = false; var cancelled = false
-            var notch = abs(first - kind.neutral) < .001; var notchY = baseY; var previous = first
+            var notch = abs(first - kind.neutral) < .001; var notchY = 0f; var previous = first
             var popupResets = 0
             val hold = scope.launch {
                 delay(350)
                 if (!moved) {
-                    fine = true; baseline = current; baseY = lastY
+                    fine = true; baseline = current; holdPos = lastPos
                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                    ui.knob = KnobPopup(tag, kind, current, if (live) knobColor(kind, current) else Ink.pending, root.x + down.position.x, root.y + lastY, { setter(kind.neutral, id) })
+                    ui.knob = KnobPopup(tag, kind, current, if (live) knobColor(kind, current) else Ink.pending, root.x + down.position.x, root.y + lastPos.y, { setter(kind.neutral, id) })
                 }
             }
             try {
@@ -236,8 +240,17 @@ fun DrawScope.drawKnob(kind: KnobKind, value: Double, r: Float, enabled: Boolean
                         break
                     }
                     if (!model.gestureActive(id)) break
-                    val y = change.position.y; lastY = y
-                    if (abs(y - down.position.y) > 6.dp.toPx() && !fine) { moved = true; hold.cancel() }
+                    val p = change.position; lastPos = p
+                    if (axisH == null) {
+                        val from = if (fine) holdPos else down.position
+                        val d = p - from
+                        if (d.getDistance() > (if (fine) 2.dp else 6.dp).toPx()) {
+                            axisH = abs(d.x) > abs(d.y)
+                            if (!fine) { moved = true; hold.cancel() }
+                            baseY = coord(from); notchY = baseY
+                        } else continue
+                    }
+                    val y = coord(p)
                     val popup = ui.knob
                     if (fine && popup != null && popup.label == tag && popup.resetVersion != popupResets) { popupResets = popup.resetVersion; baseline = kind.neutral; baseY = y; notch = true; notchY = y }
                     if (moved || fine) {
@@ -253,7 +266,7 @@ fun DrawScope.drawKnob(kind: KnobKind, value: Double, r: Float, enabled: Boolean
                         }
                         previous = next
                         setter(next, id)
-                        if (fine) ui.knob = ui.knob?.copy(value = next, color = if (live) knobColor(kind, next) else Ink.pending, fingerY = root.y + y)
+                        if (fine) ui.knob = ui.knob?.copy(value = next, color = if (live) knobColor(kind, next) else Ink.pending, fingerY = root.y + p.y)
                         change.consume()
                     }
                 }

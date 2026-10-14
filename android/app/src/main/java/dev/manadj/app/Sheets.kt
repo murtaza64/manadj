@@ -289,8 +289,8 @@ fun visibleOther(id: DeckId) = if (id == DeckId.A) DeckId.B else DeckId.A
     val headphones = remember(deviceId) {
         val am = context.getSystemService(android.media.AudioManager::class.java)
         val type = am.getDevices(android.media.AudioManager.GET_DEVICES_OUTPUTS).firstOrNull { it.id == deviceId }?.type
-        type in setOf(android.media.AudioDeviceInfo.TYPE_BLUETOOTH_A2DP, android.media.AudioDeviceInfo.TYPE_BLUETOOTH_SCO, android.media.AudioDeviceInfo.TYPE_BLE_HEADSET,
-            android.media.AudioDeviceInfo.TYPE_WIRED_HEADPHONES, android.media.AudioDeviceInfo.TYPE_WIRED_HEADSET, android.media.AudioDeviceInfo.TYPE_USB_HEADSET)
+        // Only explicit headphone types; classic A2DP may be a speaker (#100) — never guess.
+        type in setOf(android.media.AudioDeviceInfo.TYPE_BLE_HEADSET, android.media.AudioDeviceInfo.TYPE_WIRED_HEADPHONES, android.media.AudioDeviceInfo.TYPE_WIRED_HEADSET, android.media.AudioDeviceInfo.TYPE_USB_HEADSET)
     }
     // Beats at the playing deck's tempo: how far off a quantized launch would land uncorrected.
     val deck = model.visibleDecks.map { model.decks.getValue(it) }.firstOrNull { it.snapshot?.playing == true && it.snapshot?.bpm != null }
@@ -312,7 +312,7 @@ fun visibleOther(id: DeckId) = if (id == DeckId.A) DeckId.B else DeckId.A
             Key("FORGET", Modifier.weight(1.4f).fillMaxHeight(), Ink.warning, model.heardLatencyCalibrated, textSize = 10, style = KeyStyle.PILL) { model.setHeardLatency(null) }
         }
         Row(Modifier.fillMaxWidth().height(40.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            Key(if (model.calibrating) "LISTENING…" else "CALIBRATE", Modifier.weight(1f).fillMaxHeight(), Ink.play, !model.calibrating && !headphones, engaged = model.calibrating, description = "Calibrate latency with the microphone", textSize = 11, style = KeyStyle.PILL) {
+            Key(if (model.calibrating) "LISTENING…" else "CALIBRATE", Modifier.weight(1f).fillMaxHeight(), Ink.play, !model.calibrating, engaged = model.calibrating, description = "Calibrate latency with the microphone", textSize = 11, style = KeyStyle.PILL) {
                 if (context.checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) model.calibrateLatency()
                 else mic.launch(android.Manifest.permission.RECORD_AUDIO)
             }
@@ -325,7 +325,7 @@ fun visibleOther(id: DeckId) = if (id == DeckId.A) DeckId.B else DeckId.A
         }
         Text(when {
             model.calibrating -> "Volume up, quiet room: 6 chirps at full level (~7 s)."
-            headphones -> "Headphones: the phone mic can't hear them — use TAP along, or nudge."
+            headphones && last == null -> "Headphones: the phone mic likely can't hear them — TAP along instead."
             last?.seconds != null -> "Measured %.0f ms (spread %.1f ms, %d chirps).".format(last.seconds!! * 1000, last.spreadMillis, last.samples.size)
             last != null -> "Calibration failed: ${last.reason ?: "no clear chirps"}."
             deck == null -> "CALIBRATE uses the mic. TAP needs a playing deck with a beat grid."
