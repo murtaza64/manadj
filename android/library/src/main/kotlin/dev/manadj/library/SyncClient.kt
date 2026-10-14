@@ -112,17 +112,44 @@ class SyncClient(
         target: File,
         cancelled: () -> Boolean = { false },
         onProgress: (Long, Long?) -> Unit = { _, _ -> },
+    ): Unit = download("/tracks/$trackId/audio", target, cancelled, onProgress)
+
+    /** One current stem (vocals/drums/bass/other, AAC m4a) to [target]; resumable like [downloadAudio]. */
+    fun downloadStem(
+        trackId: Int,
+        stem: String,
+        target: File,
+        cancelled: () -> Boolean = { false },
+        onProgress: (Long, Long?) -> Unit = { _, _ -> },
+    ): Unit = download("/tracks/$trackId/stems/$stem", target, cancelled, onProgress)
+
+    /** A stem's MWF1 waveform; null when the desktop has no current stems (404). */
+    fun downloadStemWaveform(trackId: Int, stem: String): ByteArray? = io {
+        val conn = open("/tracks/$trackId/stems/$stem/waveform")
+        if (conn.responseCode == 404) {
+            conn.disconnect()
+            return@io null
+        }
+        conn.checked()
+        conn.inputStream.use { it.readBytes() }.also { conn.disconnect() }
+    }
+
+    private fun download(
+        path: String,
+        target: File,
+        cancelled: () -> Boolean,
+        onProgress: (Long, Long?) -> Unit,
     ): Unit = io {
         target.parentFile?.mkdirs()
         val tmp = partFile(target)
         val have = if (tmp.isFile) tmp.length() else 0L
-        val conn = open("/tracks/$trackId/audio")
+        val conn = open(path)
         if (have > 0) conn.setRequestProperty("Range", "bytes=$have-")
         if (conn.responseCode == 416) {
             // Partial is already complete (or stale beyond the file): start over.
             conn.disconnect()
             tmp.delete()
-            return@io downloadAudio(trackId, target, cancelled, onProgress)
+            return@io download(path, target, cancelled, onProgress)
         }
         conn.checked()
         val resumed = conn.responseCode == 206

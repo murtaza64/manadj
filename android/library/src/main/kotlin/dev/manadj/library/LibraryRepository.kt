@@ -352,11 +352,14 @@ class LibraryRepository(
     @Volatile private var bulkCancel = false
 
     /** What [downloadAll] would fetch for [playlistId] (null = whole Library) and whether it fits. */
-    fun bulkPlan(playlistId: Int? = null): BulkPlan {
+    /** [stems]: also count tracks whose current stems aren't cached (stem sizes aren't in the snapshot; not in [BulkPlan.bytes]). */
+    fun bulkPlan(playlistId: Int? = null, stems: Boolean = false): BulkPlan {
         val library = _library.value ?: return BulkPlan(emptyList(), 0, 0, store.root.usableSpace)
         val scope = playlistId?.let(library::playlistTracks) ?: library.tracks
         val missingAudio = { t: LibraryTrack -> t.audioRev != null && !store.hasAudio(t) }
-        val wanted = scope.filter { missingAudio(it) || (it.waveformRev != null && !store.hasWaveform(it)) }
+        val wanted = scope.filter {
+            missingAudio(it) || (it.waveformRev != null && !store.hasWaveform(it)) || (stems && it.stemsRev != null && !store.hasStems(it))
+        }
         val audio = wanted.filter(missingAudio)
         val total = audio.sumOf { it.fileSizeBytes ?: 0L }
         val partial = audio.sumOf { t -> store.audioFile(t)?.let(::partFile)?.takeIf { it.isFile }?.length() ?: 0L }
@@ -376,13 +379,13 @@ class LibraryRepository(
      * desktop stops the run with [BulkState.error]. Cached tracks from a
      * stopped run stay; re-running continues where it left off.
      */
-    suspend fun downloadAll(playlistId: Int? = null): Result<BulkState> {
+    suspend fun downloadAll(playlistId: Int? = null, stems: Boolean = false): Result<BulkState> {
         if (!bulkLock.tryLock()) return Result.failure(SyncException("A download is already running"))
         try {
             return withContext(io) {
                 bulkCancel = false
                 val name = playlistId?.let { _library.value?.playlist(it)?.name }
-                val plan = bulkPlan(playlistId)
+                val plan = bulkPlan(playlistId, stems)
                 var state = BulkState(running = true, playlistId = playlistId, scopeName = name, tracksTotal = plan.tracks.size, bytesTotal = plan.bytes)
                 _bulk.value = state
                 if (!plan.fits) {
@@ -401,6 +404,7 @@ class LibraryRepository(
                         fetchAudio(client, track, { bulkCancel }) { done ->
                             _bulk.value = state.copy(bytesDone = bytesBefore + done)
                         }
+                        if (stems) fetchStems(client, track, { bulkCancel })
                         state = state.copy(tracksDone = state.tracksDone + 1)
                     } catch (_: DownloadCancelled) {
                         break
@@ -426,6 +430,69 @@ class LibraryRepository(
             bulkLock.unlock()
         }
     }
+
+    // --- Stems (the desktop's current 4-stem split; for stem playback) ---
+
+    private val stemLocks = ConcurrentHashMap<Int, Mutex>()
+    private val _stems = MutableStateFlow<Map<Int, Float?>>(emptyMap())
+    /** Tracks with a stems download in flight → fraction (null = unknown). */
+    val stemDownloads: StateFlow<Map<Int, Float?>> = _stems.asStateFlow()
+
+    /** All four stems cached on the phone (track.stemsRev != null = the desktop has them). */
+    fun hasLocalStems(track: LibraryTrack) = store.hasStems(track)
+
+    /**
+     * The playable stem files for [trackId] (vocals/drums/bass/other → m4a,
+     * sample-aligned with the track audio): cached, else downloaded now
+     * (resumable). Null when the desktop has no current stems.
+     */
+    suspend fun stemFiles(trackId: Int): Map<String, File>? = withContext(io) {
+        val track = _library.value?.track(trackId) ?: throw SyncException("Track $trackId not in library")
+        if (track.stemsRev == null) return@withContext null
+        fetchStems(client(), track)
+        STEM_NAMES.associateWith { store.stemFile(track, it)!! }
+    }
+
+    /** A stem's MWF1 waveform (cached beside the stem, else fetched); null without stems. */
+    suspend fun stemWaveform(trackId: Int, stem: String): DetailWaveform? = withContext(io) {
+        val track = _library.value?.track(trackId) ?: return@withContext null
+        val file = store.stemWaveformFile(track, stem) ?: return@withContext null
+        if (!file.isFile) {
+            val blob = try { client().downloadStemWaveform(track.id, stem) } catch (_: SyncException) { null } ?: return@withContext null
+            file.parentFile?.mkdirs()
+            LibraryStore.atomicWrite(file, blob)
+        }
+        try { PreviewWaveform.parse(file.readBytes()) } catch (_: RuntimeException) { file.delete(); null }
+    }
+
+    private suspend fun fetchStems(
+        client: SyncClient,
+        track: LibraryTrack,
+        cancelled: () -> Boolean = { false },
+    ) {
+        if (track.stemsRev == null) return
+        stemLocks.getOrPut(track.id) { Mutex() }.withLock {
+            if (store.hasStems(track)) return
+            _stems.update { it + (track.id to null) }
+            try {
+                STEM_NAMES.forEachIndexed { i, stem ->
+                    val target = store.stemFile(track, stem)!!
+                    if (!target.isFile) client.downloadStem(track.id, stem, target, cancelled) { done, total ->
+                        val part = total?.let { t -> done.toFloat() / t } ?: 0f
+                        _stems.update { it + (track.id to (i + part) / STEM_NAMES.size) }
+                    }
+                }
+            } finally {
+                _stems.update { it - track.id }
+            }
+        }
+    }
+
+    /** Remove all cached stems. */
+    suspend fun clearStems() = withContext(io) {
+        store.stemsDir.listFiles()?.forEach { it.deleteRecursively() }
+    }
+
 
     /** Remove all cached audio (snapshot and waveforms stay). */
     suspend fun clearAudio() = withContext(io) {
