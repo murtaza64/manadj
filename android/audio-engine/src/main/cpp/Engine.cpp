@@ -38,6 +38,39 @@ Engine::Engine(int outputRate) : outputRate_(outputRate) {
     applyBeatFx(true);
 }
 
+namespace {
+constexpr double kScratchTau = .008, kScratchMaxRate = 16, kScratchSilent = .001, kScratchFull = .04;
+// Track seconds travelled after `elapsed` output seconds (desktop scratchTravel).
+double scratchTravel(double rate, double drive, double elapsed) {
+    const double x = std::max(0.0, elapsed) / kScratchTau;
+    return kScratchTau * (rate * -std::expm1(-x) + drive * (1 - (1 + x) * std::exp(-x)));
+}
+double scratchRateAt(double rate, double drive, double elapsed) {
+    const double x = std::max(0.0, elapsed) / kScratchTau;
+    return (rate + drive * x) * std::exp(-x);
+}
+}
+
+double Engine::scratchPositionAt(const Deck& d, double frame) const noexcept {
+    const double elapsed = (frame - d.scratchTime) / outputRate_.load(kRelaxed);
+    double p = d.scratchPos + scratchTravel(d.scratchRate, d.scratchDrive, elapsed);
+    const auto& t = d.track;
+    const double end = t.startSeconds.load(kRelaxed) + t.frames.load(kRelaxed) / static_cast<double>(std::max(1, t.sampleRate.load(kRelaxed)));
+    if (d.scratchLoop) {
+        const double length = d.scratchLoopEnd - d.scratchLoopStart;
+        const double off = std::fmod(p - d.scratchLoopStart, length);
+        p = off < 0 ? d.scratchLoopEnd + off : d.scratchLoopStart + off;
+    } else if (d.scratchDrive * d.scratchRate < 0) {
+        // Clamp at the turning point too: no hidden out-of-track travel to repay (desktop scratchPosition).
+        const double turn = -d.scratchRate / d.scratchDrive * kScratchTau;
+        if (turn < elapsed) {
+            const double extreme = d.scratchPos + scratchTravel(d.scratchRate, d.scratchDrive, turn);
+            p += std::clamp(extreme, 0.0, end) - extreme;
+        }
+    }
+    return std::clamp(p, 0.0, end);
+}
+
 void Engine::configureStretch(Deck& d, int rate) {
     // presetDefault like the desktop, with split computation: the work of each 30 ms spectral step is
     // spread over the step instead of landing in one callback (phone callbacks are 2 ms).
@@ -116,6 +149,18 @@ uint64_t Engine::submitFilterSettings(const dsp::FilterSettings& settings) {
     return last;
 }
 
+namespace {
+thread_local uint64_t tlsSubmitFrame = 0, tlsSubmitTag = 0;
+}
+
+void Engine::setSubmitFrame(uint64_t frame, uint64_t tag) noexcept { tlsSubmitFrame = frame; tlsSubmitTag = tag; }
+
+uint64_t Engine::cancelScheduled(uint64_t tag) {
+    if (tag == 0) return 0;
+    ScheduleScope immediate(0, 0);
+    return submit(Op::CancelScheduled, 0, 0, tag);
+}
+
 uint64_t Engine::submit(Op op, int deck, double value, uint64_t load, int slot, const double* aux) {
     if (deck < 0 || deck >= kDeckCount || !std::isfinite(value)) return 0;
     if ((op == Op::HotCueDown || op == Op::HotCueUp || op == Op::HotCueSet || op == Op::HotCueClear || op == Op::HotCueSetAt) &&
@@ -127,7 +172,7 @@ uint64_t Engine::submit(Op op, int deck, double value, uint64_t load, int slot, 
     if (write - queueRead_.load(kAcquire) >= kQueueSize) return 0;
     const auto seq = accepted_.fetch_add(1) + 1;
     auto& c = commands_[write % kQueueSize];
-    c = {op, deck, seq, load, value, slot, {}};
+    c = {op, deck, seq, load, value, slot, tlsSubmitFrame, tlsSubmitTag, {}};
     if (aux) std::copy(aux, aux + 5, c.aux);
     queueWrite_.store(write + 1, kRelease);
     return seq;
@@ -318,6 +363,7 @@ void Engine::captureTail(Deck& d) noexcept {
 }
 
 void Engine::relocate(Deck& d, double seconds, int slot, double overshootFrames) noexcept {
+    d.launchAt.store(0, kRelaxed);
     captureTail(d);
     releaseHead(d);
     const auto t = std::max(0.0, seconds);
@@ -359,7 +405,62 @@ void Engine::relocate(Deck& d, double seconds, int slot, double overshootFrames)
     d.transport.store(d.transport.load(kRelaxed) + 1, kRelease);
 }
 
+// Desktop SyncGroup.launchReference / nearestPlayingTempoReference: with Quantize on, the other deck
+// playing with a grid whose effective tempo (half/double folded) is nearest this deck's; a Sync Group
+// member only references in-lock members. -1 = none (the launch is immediate).
+int Engine::launchReference(int index) const noexcept {
+    if (!quantize_.load(kRelaxed)) return -1;
+    const auto& own = decks_[index];
+    const double ownBpm = own.bpm.load(kRelaxed) * (1 + own.pitch.load(kRelaxed) / 100.);
+    if (!(ownBpm > 0)) return -1;
+    const bool grouped = (syncMembers_ >> index) & 1;
+    int best = -1;
+    double bestDistance = 0;
+    for (int i = 0; i < kDeckCount; ++i) {
+        const auto& d = decks_[i];
+        if (i == index || !ready(d) || !d.playing.load(kRelaxed) || d.scratching.load(kRelaxed) || d.launchAt.load(kRelaxed) != 0) continue;
+        if (!(d.bpm.load(kRelaxed) > 0) || (grouped && !((syncSynced_ >> i) & 1))) continue;
+        const double e = d.bpm.load(kRelaxed) * (1 + d.pitch.load(kRelaxed) / 100.);
+        const double distance = std::min({std::abs(e - ownBpm), std::abs(e * 2 - ownBpm), std::abs(e / 2 - ownBpm)});
+        if (best < 0 || distance < bestDistance) { best = i; bestDistance = distance; }
+    }
+    return best;
+}
+
+// Desktop transport.ts launchStart + quantize.ts crossDeckLaunchTarget for a paused deck's launch
+// (Play, Cue-hold, Hot-cue-hold) at `at`: Δ = reference's nearest beat − its playhead, in real seconds.
+// Δ > 0: hold, then enter exactly on `at` when the reference beat sounds (frame-exact: the start frame
+// rounds up and the entry advances by the sub-frame remainder). Δ ≤ 0: start now, |Δ|·rate ahead of `at`.
+void Engine::launch(int index, double at, int slot) noexcept {
+    const int ref = launchReference(index);
+    if (ref < 0) return;
+    auto& d = decks_[index];
+    const auto& r = decks_[ref];
+    const double refPosition = r.position.load(kRelaxed);
+    const double refRate = (1 + r.pitch.load(kRelaxed) / 100.) * (1 + r.bend.load(kRelaxed) / 100.);
+    const double rate = (1 + d.pitch.load(kRelaxed) / 100.) * (1 + d.bend.load(kRelaxed) / 100.);
+    const double delta = (snapToBeat(r, refPosition) - refPosition) / refRate;
+    if (!(delta > 0)) {
+        const double entry = at - delta * rate;
+        if (entry != at) relocate(d, entry);
+        return;
+    }
+    const double out = outputRate_.load(kRelaxed), exact = delta * out;
+    const auto wait = static_cast<uint64_t>(std::ceil(exact - 1e-6)); // float noise must not cost a frame
+    const double entry = at + std::max(0.0, static_cast<double>(wait) - exact) / out * rate;
+    if (std::abs(entry - d.position.load(kRelaxed)) > 1e-12 || entry != at) relocate(d, entry, entry == at ? slot : -1);
+    if (wait == 0) return;
+    const uint64_t frame = static_cast<uint64_t>(renderFrame_) + wait;
+    d.launchAt.store(frame, kRelaxed);
+    Command start{};
+    start.op = Op::LaunchStart;
+    start.deck = index;
+    start.at = frame;
+    enqueueScheduled(start);
+}
+
 void Engine::stop(Deck& d) noexcept {
+    d.launchAt.store(0, kRelaxed);
     captureTail(d);
     d.envelope = 0;
     d.playing.store(false, kRelaxed);
@@ -373,6 +474,7 @@ void Engine::apply(const Command& c) noexcept {
     const double position = d.position.load(kRelaxed);
     switch (c.op) {
         case Op::Prepare:
+            d.scratching.store(false);
             d.loadId.store(c.load, kRelease);
             d.status.store(status(c.load, kLoading), kRelease);
             d.playing.store(false);
@@ -387,15 +489,19 @@ void Engine::apply(const Command& c) noexcept {
             d.trackEnd.store(false);
             relocate(d, 0);
             break;
-        case Op::Play:
-            if (isReady) { d.playing.store(true); d.preview.store(false); d.previewSlot.store(-1); }
+        case Op::Play: {
+            if (!isReady) break;
+            const bool running = d.playing.load() || d.preview.load(); // a running preview is taken over seamlessly
+            d.playing.store(true); d.preview.store(false); d.previewSlot.store(-1);
+            if (!running && c.at == 0) launch(c.deck, position, -1); // frame-stamped (machine) launches are exact
             break;
+        }
         case Op::Pause: stop(d); break;
         case Op::CueDown: {
             if (!isReady) break;
             const double cue = d.cue.load();
             if (d.playing.load()) { stop(d); d.loopActive.store(false); relocate(d, cue, kMainCueSlot); }
-            else if (std::abs(position - cue) < kAtCueEpsilon) { d.preview.store(true); d.previewSlot.store(kMainCueSlot); }
+            else if (std::abs(position - cue) < kAtCueEpsilon) { d.preview.store(true); d.previewSlot.store(kMainCueSlot); if (c.at == 0) launch(c.deck, cue, kMainCueSlot); }
             else {
                 // Placement: Quantize snaps the cue, and the parked playhead moves with it.
                 const double at = quantize_.load() ? snapToBeat(d, position) : position;
@@ -417,7 +523,7 @@ void Engine::apply(const Command& c) noexcept {
             // paused triggers land exactly.
             const bool snap = quantize_.load() && d.playing.load() && d.bpm.load() > 0;
             relocate(d, snap ? snapToBeat(d, at) + (position - snapToBeat(d, position)) : at, snap ? -1 : c.slot);
-            if (!d.playing.load()) { d.preview.store(true); d.previewSlot.store(c.slot); }
+            if (!d.playing.load()) { d.preview.store(true); d.previewSlot.store(c.slot); if (c.at == 0) launch(c.deck, at, c.slot); }
             break;
         }
         case Op::HotCueUp:
@@ -531,6 +637,39 @@ void Engine::apply(const Command& c) noexcept {
             }
             break;
         }
+        case Op::ScratchBegin: {
+            if (!isReady || d.scratching.load() || !trackCovers(d, position, 0)) break; // needs the in-memory track
+            d.scratchRunning = d.playing.load() || d.preview.load();
+            stop(d); // tail of the running audio crossfades out
+            d.scratchPos = position; d.scratchDrive = d.scratchRate = 0;
+            d.scratchTime = static_cast<double>(renderFrame_);
+            d.scratchLoop = d.loopActive.load() && position >= d.loopStart.load() && position < d.loopEnd.load() && d.loopEnd.load() > d.loopStart.load();
+            d.scratchLoopStart = d.loopStart.load(); d.scratchLoopEnd = d.loopEnd.load();
+            d.scratching.store(true);
+            break;
+        }
+        case Op::ScratchMove: {
+            if (!d.scratching.load() || !std::isfinite(c.value)) break;
+            const double now = static_cast<double>(renderFrame_);
+            const double elapsed = (now - d.scratchTime) / outputRate_.load();
+            const double x = std::max(0.0, elapsed) / kScratchTau;
+            const double pos = scratchPositionAt(d, now);
+            const double rate = scratchRateAt(d.scratchRate, d.scratchDrive, elapsed);
+            const double drive = d.scratchDrive * std::exp(-x);
+            d.scratchPos = pos; d.scratchRate = rate; d.scratchTime = now;
+            d.scratchDrive = std::clamp(drive + c.value / kScratchTau, -kScratchMaxRate, kScratchMaxRate);
+            break;
+        }
+        case Op::ScratchEnd: {
+            if (!d.scratching.load()) break;
+            const double pos = scratchPositionAt(d, static_cast<double>(renderFrame_));
+            d.scratching.store(false);
+            d.position.store(pos);
+            d.envelope = 0;
+            relocate(d, pos);
+            if (d.scratchRunning && !d.trackEnd.load()) d.playing.store(true);
+            break;
+        }
         case Op::PhaseAlign: {
             // Desktop alignBeatPhase/beatPhaseTarget on constant grids: a one-shot micro-seek to the
             // nearest phase-aligned position (half/double projected), loop-wrapped; playing decks only.
@@ -552,6 +691,25 @@ void Engine::apply(const Command& c) noexcept {
             if (std::abs(target - position) >= 1e-7) relocate(d, target);
             break;
         }
+        case Op::LoopSet: {
+            // Explicit region (desktop setLoopRegion, Session replay): no quantize, no grid needed.
+            if (!isReady) break;
+            if (c.value < 0 || !(c.aux[0] > c.value)) d.loopActive.store(false);
+            else {
+                const double bpm = d.bpm.load();
+                d.loopStart.store(c.value);
+                d.loopEnd.store(c.aux[0]);
+                d.loopBeats.store(bpm > 0 ? (c.aux[0] - c.value) * bpm / 60 : 0);
+                d.loopActive.store(true);
+            }
+            if (std::isfinite(c.aux[1]) && std::abs(c.aux[1] - position) > 1e-4) relocate(d, std::max(0.0, c.aux[1]));
+            break;
+        }
+        case Op::CancelScheduled: cancelScheduledNow(c); break;
+        case Op::SetSyncMembers: syncMembers_ = static_cast<int>(c.value) & 15; syncSynced_ = c.slot & 15; break;
+        case Op::LaunchStart:
+            if (d.launchAt.load() == c.at) d.launchAt.store(0);
+            return; // internal: no receipt
         case Op::CueMix: cueMix_.store(std::clamp(static_cast<float>(c.value), 0.f, 1.f)); break;
         case Op::BeatFx: {
             const int target = static_cast<int>(c.aux[0]);
@@ -598,17 +756,58 @@ float Engine::ceiling(float x) noexcept {
     return std::clamp(x, -.7943282f, .7943282f);
 }
 
+// Inserts after any op with the same frame (submission order is kept).
+void Engine::enqueueScheduled(const Command& c) noexcept {
+    const int count = scheduleCount_.load(kRelaxed);
+    if (count >= kScheduleSize) { lateOps_.fetch_add(1, kRelaxed); apply(c); return; } // full: apply now
+    int i = count;
+    while (i > 0 && schedule_[(scheduleHead_ + i - 1) % kScheduleSize].at > c.at) {
+        schedule_[(scheduleHead_ + i) % kScheduleSize] = schedule_[(scheduleHead_ + i - 1) % kScheduleSize];
+        --i;
+    }
+    schedule_[(scheduleHead_ + i) % kScheduleSize] = c;
+    scheduleCount_.store(count + 1, kRelaxed);
+}
+
+void Engine::cancelScheduledNow(const Command& c) noexcept {
+    int kept = 0;
+    const int count = scheduleCount_.load(kRelaxed);
+    for (int i = 0; i < count; ++i) {
+        const Command& op = schedule_[(scheduleHead_ + i) % kScheduleSize];
+        if (op.tag == c.load) continue;
+        if (kept != i) schedule_[(scheduleHead_ + kept) % kScheduleSize] = op;
+        ++kept;
+    }
+    scheduleCount_.store(kept, kRelaxed);
+    applied_.store(c.seq, kRelease);
+}
+
 void Engine::render(float* output, int frames, int channels) noexcept {
+    const auto start = outputFrames_.load(kRelaxed);
+    renderFrame_ = static_cast<int64_t>(start);
     while (queueRead_.load(kRelaxed) != queueWrite_.load(kAcquire)) {
         const auto read = queueRead_.load(kRelaxed);
-        apply(commands_[read % kQueueSize]);
+        const Command& c = commands_[read % kQueueSize];
+        if (c.op == Op::CancelScheduled) cancelScheduledNow(c);
+        else if (c.at == 0) apply(c);
+        else { if (c.at < start) lateOps_.fetch_add(1, kRelaxed); enqueueScheduled(c); } // due ones apply below, in frame order
         queueRead_.store(read + 1, kRelease);
     }
     const auto routing = static_cast<Routing>(routing_.load(kRelaxed));
     const float mix = cueMix_.load(kRelaxed);
     for (int done = 0; done < frames;) {
-        const int n = std::min(kBlockFrames, frames - done);
-        renderBuses(n, static_cast<int64_t>(outputFrames_.load(kRelaxed)) + done);
+        const uint64_t now = start + done;
+        // Ops due at this frame apply before it renders; the segment ends at the next due op.
+        int n = std::min(kBlockFrames, frames - done);
+        while (scheduleCount_.load(kRelaxed) > 0) {
+            const Command& next = schedule_[scheduleHead_];
+            if (next.at > now) { n = std::min<uint64_t>(n, next.at - now); break; }
+            renderFrame_ = static_cast<int64_t>(now);
+            apply(next);
+            scheduleHead_ = (scheduleHead_ + 1) % kScheduleSize;
+            scheduleCount_.store(scheduleCount_.load(kRelaxed) - 1, kRelaxed);
+        }
+        renderBuses(n, static_cast<int64_t>(now));
         float* out = output + static_cast<size_t>(done) * channels;
         for (int i = 0; i < n; ++i, out += channels) {
             const float mL = master_[i * 2], mR = master_[i * 2 + 1];
@@ -681,7 +880,7 @@ int Engine::renderSegment(Deck& d, float* strip, int frames, bool& active) noexc
                 d.position.store(d.claimedStart.load(kAcquire), kRelease);
             d.positionTransport = transport;
         }
-        if (!(d.playing.load(kRelaxed) || d.preview.load(kRelaxed))) { d.envelope = 0; d.stretching.store(false, kRelaxed); return -1; }
+        if (!(d.playing.load(kRelaxed) || d.preview.load(kRelaxed)) || d.launchAt.load(kRelaxed) != 0) { d.envelope = 0; d.stretching.store(false, kRelaxed); return -1; }
         {
             const double span = frames * 8.0 * d.track.sampleRate.load(kRelaxed) / outRate; // max ratio margin
             // Enter memory mode with a margin; once in it, stay while the block itself is covered.
@@ -915,6 +1114,37 @@ void Engine::resetStrip(Deck& d) noexcept {
     }
 }
 
+// The platter: signed-rate read of the in-memory track along the motion trajectory, level faded by
+// speed (desktop scratchGain) so a stopping platter never parks on DC.
+void Engine::renderScratch(Deck& d, float* strip, int frames, int64_t frame, bool& active) noexcept {
+    const auto& t = d.track;
+    const int src = t.sampleRate.load(kRelaxed);
+    const double start = t.startSeconds.load(kRelaxed);
+    const auto avail = t.frames.load(kAcquire);
+    const int16_t* pcm = t.pcm.get();
+    const double out = outputRate_.load(kRelaxed);
+    if (d.envelope == 0 && d.tailLeft == 0) { d.gain = d.targetGain; d.cueGain = d.targetCueGain; d.xf = d.targetXf; }
+    double pos = d.position.load(kRelaxed);
+    for (int i = 0; i < frames; ++i) {
+        const double f = static_cast<double>(frame + i);
+        pos = scratchPositionAt(d, f);
+        const double rate = scratchRateAt(d.scratchRate, d.scratchDrive, (f - d.scratchTime) / out);
+        const double speed = std::clamp((std::abs(rate) - kScratchSilent) / (kScratchFull - kScratchSilent), 0.0, 1.0);
+        const float gain = static_cast<float>(speed * speed * (3 - 2 * speed));
+        const double k = (pos - start) * src;
+        const auto i0 = static_cast<uint64_t>(std::max(0.0, k));
+        if (i0 + 1 >= avail || gain == 0) continue;
+        const float fr = static_cast<float>(k - static_cast<double>(i0));
+        const int16_t* a = pcm + i0 * 2;
+        d.envelope = std::min(1.f, d.envelope + 1.f / kFadeFrames);
+        const float g = gain * d.envelope * (1.f / 32768);
+        strip[i * 2] += (a[0] + (a[2] - a[0]) * fr) * g;
+        strip[i * 2 + 1] += (a[1] + (a[3] - a[1]) * fr) * g;
+        active = true;
+    }
+    d.position.store(pos, kRelease);
+}
+
 void Engine::renderBuses(int frames, int64_t frame) noexcept {
     float* output = master_.data();
     float* cue = cue_.data();
@@ -937,7 +1167,10 @@ void Engine::renderBuses(int frames, int64_t frame) noexcept {
         auto& d = decks_[index];
         auto& insert = *fx_[index];
         std::fill(strip, strip + frames * 2, 0.f);
-        if (!renderSource(d, strip, frames)) {
+        bool sounding = false;
+        if (d.scratching.load(kRelaxed)) { renderScratch(d, strip, frames, frame, sounding); sounding |= renderTail(d, strip, frames); }
+        else sounding = renderSource(d, strip, frames);
+        if (!sounding) {
             if (d.stripWarm) { resetStrip(d); d.stripWarm = false; }
             // Silent strip: settle smoothed values so the next onset starts at its targets.
             for (int b = 0; b < 3; ++b) d.eqGain[b] = d.eqTarget[b];

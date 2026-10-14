@@ -162,6 +162,18 @@ sealed interface AudioCommand {
     data class LoopPreset(override val deck: DeckId, val beats: Double, override val gestureId: String? = null) : AudioCommand
     /** Halve/double (or set) the active loop, anchored at its start; idle = pending size. 1/8..128 beats. */
     data class LoopResize(override val deck: DeckId, val change: LoopChange, val beats: Double = 0.0, override val gestureId: String? = null) : AudioCommand
+    /**
+     * Explicit loop region in source seconds (desktop setLoopRegion; Session replay): null [start] clears.
+     * [playhead] (when given) relocates in the same callback, so the region and position land together.
+     */
+    data class SetLoopRegion(override val deck: DeckId, val start: Double?, val end: Double = 0.0, val playhead: Double? = null, override val gestureId: String? = null) : AudioCommand
+    /**
+     * Sync Group membership for the quantized launch reference (desktop SyncGroup.launchReference): a
+     * [members] deck launching with Quantize on aligns only to playing [synced] (in-lock) decks.
+     */
+    data class SetSyncMembers(val members: Set<DeckId>, val synced: Set<DeckId>, override val gestureId: String? = null) : AudioCommand {
+        override val deck = DeckId.A // Global.
+    }
     /** Global quantize (snaps loop engage to the nearest beat). */
     data class SetQuantize(val on: Boolean, override val gestureId: String? = null) : AudioCommand {
         override val deck = DeckId.A
@@ -170,6 +182,15 @@ sealed interface AudioCommand {
     data class SetKeyLock(override val deck: DeckId, val on: Boolean, override val gestureId: String? = null) : AudioCommand
     /** One-shot beat-phase micro-seek of a playing [deck] against playing [reference] (constant grids; loop kept). [ratio] = own beats per reference beat. */
     data class PhaseAlign(override val deck: DeckId, val reference: DeckId, val ratio: Double, override val gestureId: String? = null) : AudioCommand
+    /**
+     * Scratch (desktop scratchMotion): touch-down grabs the platter (the deck stops; needs the in-memory
+     * track, else ignored), each move pushes it by [ScratchMove.deltaSeconds] of track time (signed;
+     * map finger travel to track seconds; speed clamps at 16x), release resumes play at the platter
+     * position if the deck was running. Key lock is bypassed while scratching.
+     */
+    data class ScratchBegin(override val deck: DeckId, override val gestureId: String? = null) : AudioCommand
+    data class ScratchMove(override val deck: DeckId, val deltaSeconds: Double, override val gestureId: String? = null) : AudioCommand
+    data class ScratchEnd(override val deck: DeckId, override val gestureId: String? = null) : AudioCommand
     /** Pre-fader listen: sends the deck (post-trim) to the cue bus. */
     data class SetPfl(override val deck: DeckId, val on: Boolean, override val gestureId: String? = null) : AudioCommand
     /** Headphone feed: 0 = cue bus only, 1 = master only. */
@@ -194,6 +215,9 @@ sealed interface AudioCommand {
             this(state.effect, state.target, state.on, state.depth, state.beats, state.held, gestureId)
     }
 }
+
+/** A command to apply at engine output frame [atFrame] (the [EngineSnapshot.outputFrames] counter). */
+data class ScheduledCommand(val atFrame: Long, val command: AudioCommand)
 
 data class CommandReceipt(val id: Long, val accepted: Boolean, val reason: String? = null)
 data class DeckSnapshot(
@@ -220,6 +244,13 @@ data class DeckSnapshot(
     val decodedSeconds: Double = 0.0, val fullyDecoded: Boolean = false, val fromMemory: Boolean = false,
     /** Key lock requested; and actually time-stretching (needs the in-memory track at the playhead, else pitch follows tempo). */
     val keyLock: Boolean = false, val keyLockActive: Boolean = false,
+    /** The platter is held (scratch in progress). */
+    val scratching: Boolean = false,
+    /**
+     * Quantized launch waiting for the reference beat: engine frame the deck starts sounding at
+     * (`playing`/`previewing` are already set; the position holds until then). Null = none.
+     */
+    val launchFrame: Long? = null,
 )
 data class EngineSnapshot(
     val outputFrames: Long, val outputSampleRate: Int, val outputChannels: Int,
@@ -234,6 +265,8 @@ data class EngineSnapshot(
     val clockFrame: Long = 0,
     /** Engine frame heard at CLOCK_MONOTONIC [presentedNanos] (System.nanoTime domain); null offline / before the first timestamp. */
     val presentedFrame: Long? = null, val presentedNanos: Long? = null,
+    /** Scheduled ops that arrived after their frame (applied at the next callback start); ops waiting for their frame. */
+    val lateOps: Long = 0, val scheduledOps: Int = 0,
 ) {
     /**
      * The deck position being heard at [nanoTime] (System.nanoTime), extrapolated from the output
@@ -247,7 +280,8 @@ data class EngineSnapshot(
         val at = presentedNanos ?: return d.sourceSeconds
         val heard = frame + (nanoTime - at).coerceIn(-250_000_000L, 250_000_000L) * outputSampleRate / 1e9
         val speed = if (d.playing || d.previewing) (1 + d.pitchPercent / 100) * (1 + d.bendPercent / 100) else 0.0
-        val seconds = d.sourceSeconds + (heard - clockFrame) / outputSampleRate * speed
+        val from = d.launchFrame?.let { maxOf(clockFrame.toDouble(), it.toDouble()) } ?: clockFrame.toDouble()
+        val seconds = d.sourceSeconds + (if (d.launchFrame != null) maxOf(0.0, heard - from) else heard - from) / outputSampleRate * speed
         val loop = d.loop
         return if (loop != null && seconds >= loop.end && d.sourceSeconds < loop.end) loop.start + (seconds - loop.end) % (loop.end - loop.start)
         else seconds.coerceAtLeast(0.0)
@@ -291,7 +325,7 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
         init { System.loadLibrary("manadj_audio") }
         const val MAIN_CUE = 8
         const val HOT_CUES = 8
-        val CAPABILITIES = setOf("play", "pause", "cue-gate", "hot-cue-gate", "hot-cue-set", "seek", "fader", "trim", "crossfade", "varispeed", "bend", "pfl", "cue-mix", "routing", "eq", "filter", "grid", "beat-jump", "loop", "quantize", "beat-fx", "filter-settings", "key-lock", "sync")
+        val CAPABILITIES = setOf("play", "pause", "cue-gate", "hot-cue-gate", "hot-cue-set", "seek", "fader", "trim", "crossfade", "varispeed", "bend", "pfl", "cue-mix", "routing", "eq", "filter", "grid", "beat-jump", "loop", "quantize", "beat-fx", "filter-settings", "key-lock", "sync", "scratch", "loop-region", "schedule")
         private const val PRIME_FRAMES = 2048
         private const val MEMORY_RESERVE_BYTES = 768L shl 20
         private const val HEAD_PRIORITY_FRAMES = 16384 // ~340 ms buffered before a head fill may interrupt the ring
@@ -299,9 +333,9 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
         /** Main cue first (CUE stabs), then the loop start, then hot cues. */
         private val FILL_ORDER = listOf(MAIN_CUE, MAIN_CUE + 1) + (0 until HOT_CUES)
         private const val HEAD_FRAMES = 8192
-        private const val HEADER = 27
+        private const val HEADER = 29
         private const val DECK_FIELDS = 40 + HOT_CUES
-        private enum class Op { PREPARE, PLAY, PAUSE, CUE_DOWN, CUE_UP, HOT_CUE_DOWN, HOT_CUE_UP, HOT_CUE_SET, HOT_CUE_CLEAR, SEEK, FADER, TRIM, CROSSFADE, PITCH, BEND, PFL, CUE_MIX, EQ, FILTER, SET_GRID, BEAT_JUMP, LOOP_TOGGLE, LOOP_RESIZE, LOOP_PRESET, QUANTIZE, CUE_SET_AT, HOT_CUE_SET_AT, BEAT_FX, KEY_LOCK, PHASE_ALIGN }
+        private enum class Op { PREPARE, PLAY, PAUSE, CUE_DOWN, CUE_UP, HOT_CUE_DOWN, HOT_CUE_UP, HOT_CUE_SET, HOT_CUE_CLEAR, SEEK, FADER, TRIM, CROSSFADE, PITCH, BEND, PFL, CUE_MIX, EQ, FILTER, SET_GRID, BEAT_JUMP, LOOP_TOGGLE, LOOP_RESIZE, LOOP_PRESET, QUANTIZE, CUE_SET_AT, HOT_CUE_SET_AT, BEAT_FX, KEY_LOCK, PHASE_ALIGN, SCRATCH_BEGIN, SCRATCH_MOVE, SCRATCH_END, LOOP_SET, CANCEL_SCHEDULED, SET_SYNC_MEMBERS }
     }
 
     /** The caller retains/closes descriptor; the engine duplicates it for its own lifetime. */
@@ -371,7 +405,15 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
             is AudioCommand.LoopResize -> { slot = command.change.ordinal; Op.LOOP_RESIZE to command.beats }
             is AudioCommand.SetQuantize -> Op.QUANTIZE to if (command.on) 1.0 else 0.0
             is AudioCommand.SetKeyLock -> Op.KEY_LOCK to if (command.on) 1.0 else 0.0
+            is AudioCommand.ScratchBegin -> Op.SCRATCH_BEGIN to 0.0
+            is AudioCommand.ScratchMove -> Op.SCRATCH_MOVE to command.deltaSeconds
+            is AudioCommand.ScratchEnd -> Op.SCRATCH_END to 0.0
             is AudioCommand.PhaseAlign -> { slot = command.reference.ordinal; Op.PHASE_ALIGN to command.ratio }
+            is AudioCommand.SetSyncMembers -> {
+                fun mask(decks: Set<DeckId>) = decks.fold(0) { m, d -> m or (1 shl d.ordinal) }
+                val id = nativeSubmit(handle, Op.SET_SYNC_MEMBERS.ordinal, 0, mask(command.members).toDouble(), 0, mask(command.synced))
+                return if (id != 0L) CommandReceipt(id, true) else rejected("Command queue full")
+            }
             is AudioCommand.SetFilterSettings -> {
                 val s = command.settings.sanitized()
                 val id = nativeSetFilterSettings(handle, s.model.ordinal, s.params())
@@ -384,6 +426,12 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
                 val id = nativeSubmitBeatFx(handle, command.effect?.ordinal ?: -1, command.target.ordinal, command.on, command.depth, command.beats, held)
                 return if (id != 0L) CommandReceipt(id, true) else rejected("Command queue full")
             }
+            is AudioCommand.SetLoopRegion -> {
+                val start = command.start ?: -1.0
+                if (!start.isFinite() || !command.end.isFinite() || command.playhead?.isFinite() == false) return rejected("Non-finite loop")
+                val id = nativeSetLoop(handle, deck, start, command.end, command.playhead ?: Double.NaN)
+                return if (id != 0L) CommandReceipt(id, true) else rejected("Command queue full")
+            }
             is AudioCommand.SetFilter -> {
                 if (!command.position.isFinite()) return rejected("Non-finite control")
                 val id = nativeSubmitFilter(handle, deck, command.position)
@@ -393,6 +441,38 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
         if (slot !in 0 until HOT_CUES) return rejected("Invalid hot cue slot")
         if (!value.isFinite()) return rejected("Non-finite control")
         val id = nativeSubmit(handle, op.ordinal, deck, value, 0, slot)
+        return if (id != 0L) CommandReceipt(id, true) else rejected("Command queue full")
+    }
+
+    /**
+     * Applies [command] at engine output frame [atFrame] (same counter as [EngineSnapshot.outputFrames];
+     * a callback's first sample is the outputFrames before it). The callback splits its buffer there and
+     * applies due ops in (frame, submission) order, so the op lands on that exact sample. A frame already
+     * rendered applies at the next callback start and counts in [EngineSnapshot.lateOps]. [tag] (> 0)
+     * lets [cancelScheduled] drop the op while pending. Up to ~8k ops may wait; the receipt id becomes
+     * `appliedCommandId` when it runs. [AudioCommand.SetFilterSettings] is not schedulable.
+     */
+    @Synchronized fun schedule(atFrame: Long, command: AudioCommand, tag: Long = 0): CommandReceipt {
+        if (atFrame <= 0) return rejected("Invalid frame")
+        if (tag < 0) return rejected("Invalid tag")
+        if (command is AudioCommand.SetFilterSettings) return rejected("Not schedulable")
+        nativeSetSchedule(atFrame, tag)
+        try { return submit(command) } finally { nativeSetSchedule(0, 0) }
+    }
+
+    /** [schedule] for several commands at one frame, in order, under one lock. */
+    @Synchronized fun schedule(atFrame: Long, commands: List<AudioCommand>, tag: Long = 0): List<CommandReceipt> =
+        commands.map { schedule(atFrame, it, tag) }
+
+    /** [schedule] for a batch (any frame order; same-frame ops keep list order), under one lock. */
+    @Synchronized fun schedule(commands: List<ScheduledCommand>, tag: Long = 0): List<CommandReceipt> =
+        commands.map { schedule(it.atFrame, it.command, tag) }
+
+    /** Drops every pending scheduled op tagged [tag] (ops scheduled after this call are kept). */
+    @Synchronized fun cancelScheduled(tag: Long): CommandReceipt {
+        if (closed) return rejected("Engine closed")
+        if (tag <= 0) return rejected("Invalid tag")
+        val id = nativeCancelScheduled(handle, tag)
         return if (id != 0L) CommandReceipt(id, true) else rejected("Command queue full")
     }
 
@@ -474,6 +554,8 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
                 decodedSeconds = if (current) data[p + 32] else 0.0, fullyDecoded = current && data[p + 33] != 0.0,
                 fromMemory = current && data[p + 34] != 0.0,
                 keyLock = data[p + 36] != 0.0, keyLockActive = current && data[p + 37] != 0.0,
+                scratching = current && data[p + 38] != 0.0,
+                launchFrame = data[p + 39].toLong().takeIf { current && it > 0 },
             )
         }
         return EngineSnapshot(
@@ -483,7 +565,7 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
             starvedDeckFrames = data[4].toLong(), outputXruns = data[5].toLong(), outputError = data[6].toInt(),
             acceptedCommandId = data[7].toLong(), appliedCommandId = data[8].toLong(),
             decks = decks, supportedCapabilities = CAPABILITIES,
-            clockFrame = data[23].toLong(),
+            clockFrame = data[23].toLong(), lateOps = data[27].toLong(), scheduledOps = data[28].toInt(),
             presentedFrame = data[24].takeIf { it >= 0 }?.toLong(), presentedNanos = data[25].takeIf { it >= 0 }?.toLong(),
             beatFx = BeatFxState(
                 effect = BeatFxEffect.entries.getOrNull(data[16].toInt()), target = BeatFxTarget.entries[data[17].toInt().coerceIn(0, 4)],
@@ -715,10 +797,13 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
     private external fun nativeStop(handle: Long)
     private external fun nativeClose(handle: Long)
     private external fun nativeSubmit(handle: Long, op: Int, deck: Int, value: Double, load: Long, slot: Int): Long
+    private external fun nativeSetSchedule(frame: Long, tag: Long)
+    private external fun nativeCancelScheduled(handle: Long, tag: Long): Long
     private external fun nativeSetGrid(handle: Long, deck: Int, bpm: Double, anchor: Double): Long
     private external fun nativeSubmitBeatFx(handle: Long, effect: Int, target: Int, on: Boolean, depth: Double, beats: Double, held: Int): Long
     private external fun nativeSetFilterSettings(handle: Long, model: Int, params: DoubleArray): Long
     private external fun nativeFilterResponse(model: Int, params: DoubleArray, position: Double, freqs: DoubleArray, rate: Double): DoubleArray
+    private external fun nativeSetLoop(handle: Long, deck: Int, start: Double, end: Double, playhead: Double): Long
     private external fun nativeSubmitFilter(handle: Long, deck: Int, position: Double): Long
     private external fun nativeTransport(handle: Long, deck: Int, out: DoubleArray)
     private external fun nativeClaim(handle: Long, deck: Int, load: Long, transport: Long, rate: Int, start: Double): Boolean

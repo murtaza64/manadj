@@ -7,7 +7,7 @@
 #include <vector>
 
 namespace {
-constexpr int kHeader = 27;
+constexpr int kHeader = 29;
 constexpr int kDeckFields = 40 + manadj::kHotCues;
 constexpr int kSnapshotSize = kHeader + manadj::kDeckCount * kDeckFields;
 
@@ -162,10 +162,23 @@ Java_dev_manadj_audio_AudioEngine_nativeClose(JNIEnv*, jobject, jlong handle) {
 extern "C" JNIEXPORT jlong JNICALL
 Java_dev_manadj_audio_AudioEngine_nativeSubmit(JNIEnv*, jobject, jlong handle, jint op, jint deck,
                                                   jdouble value, jlong load, jint slot) {
-    if (op < 0 || op > static_cast<int>(manadj::Op::PhaseAlign) || op == static_cast<int>(manadj::Op::Filter) || op == static_cast<int>(manadj::Op::BeatFx)) return 0; // Filter/BeatFx: dedicated entry points.
+    using manadj::Op;
+    if (op < 0 || op > static_cast<int>(Op::SetSyncMembers) || op == static_cast<int>(Op::Filter) || op == static_cast<int>(Op::BeatFx) ||
+        op == static_cast<int>(Op::LoopSet) || op == static_cast<int>(Op::CancelScheduled)) return 0; // dedicated entry points
     if (op == static_cast<int>(manadj::Op::SetGrid)) return 0; // nativeSetGrid carries the anchor.
     return static_cast<jlong>(output(handle)->engine.submit(static_cast<manadj::Op>(op), deck, value,
                                                             static_cast<uint64_t>(load), slot));
+}
+
+// Frame stamp + cancel tag for the following submits on this thread (0, 0 = immediate).
+extern "C" JNIEXPORT void JNICALL
+Java_dev_manadj_audio_AudioEngine_nativeSetSchedule(JNIEnv*, jobject, jlong frame, jlong tag) {
+    manadj::Engine::setSubmitFrame(static_cast<uint64_t>(frame), static_cast<uint64_t>(tag));
+}
+
+extern "C" JNIEXPORT jlong JNICALL
+Java_dev_manadj_audio_AudioEngine_nativeCancelScheduled(JNIEnv*, jobject, jlong handle, jlong tag) {
+    return static_cast<jlong>(output(handle)->engine.cancelScheduled(static_cast<uint64_t>(tag)));
 }
 
 extern "C" JNIEXPORT jlong JNICALL
@@ -173,6 +186,13 @@ Java_dev_manadj_audio_AudioEngine_nativeSetGrid(JNIEnv*, jobject, jlong handle, 
     if (!std::isfinite(bpm) || !std::isfinite(anchor)) return 0;
     const double aux[5] = {anchor, 0, 0, 0, 0};
     return static_cast<jlong>(output(handle)->engine.submit(manadj::Op::SetGrid, deck, bpm, 0, 0, aux));
+}
+
+extern "C" JNIEXPORT jlong JNICALL
+Java_dev_manadj_audio_AudioEngine_nativeSetLoop(JNIEnv*, jobject, jlong handle, jint deck, jdouble start, jdouble end, jdouble playhead) {
+    if (!std::isfinite(start) || !std::isfinite(end)) return 0;
+    const double aux[5] = {end, playhead, 0, 0, 0};
+    return static_cast<jlong>(output(handle)->engine.submit(manadj::Op::LoopSet, deck, start, 0, 0, aux));
 }
 
 extern "C" JNIEXPORT jlong JNICALL
@@ -354,6 +374,7 @@ Java_dev_manadj_audio_AudioEngine_nativeSnapshot(JNIEnv* env, jobject, jlong han
         static_cast<double>(e.fxEffect()), static_cast<double>(e.fxTarget()), e.fxOn() ? 1.0 : 0.0,
         e.fxDepth(), e.fxBeats(), static_cast<double>(e.fxHeld()), static_cast<double>(e.fxAudible()),
         0, presentedFrame, presentedNanos, 0,
+        static_cast<double>(e.lateOps()), static_cast<double>(e.scheduledOps()),
     };
     // Deck positions are sampled at engine frame data[23]; retry if a callback ran mid-read.
     for (int attempt = 0; attempt < 4; ++attempt) {
@@ -406,6 +427,8 @@ Java_dev_manadj_audio_AudioEngine_nativeSnapshot(JNIEnv* env, jobject, jlong han
         if (d.trackEnd.load()) data[n + 5] = 1;
         data[n + 36] = d.keyLock.load() ? 1 : 0;
         data[n + 37] = d.stretching.load() ? 1 : 0;
+        data[n + 38] = d.scratching.load() ? 1 : 0;
+        data[n + 39] = static_cast<double>(d.launchAt.load());
         for (int h = 0; h < manadj::kHotCues; ++h) data[n + 40 + h] = d.hotcues[h].load();
     }
     if (e.outputFrames() == clockFrame) break;

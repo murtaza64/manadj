@@ -96,13 +96,22 @@ class PlayerModel(application: Application) : AndroidViewModel(application) {
     /** Group Tempo + per-deck OFF / SYNCED / OUT_OF_LOCK / WAITING. */
     var syncState by mutableStateOf(SyncState.NONE)
         private set
+    private var sentSyncMembers: AudioCommand.SetSyncMembers? = null
+    /** Publishes [syncState]; the engine scopes a member's quantized-launch reference to in-lock members. */
+    private fun publishSync() {
+        syncState = sync.state
+        val members = AudioCommand.SetSyncMembers(
+            syncState.decks.filterValues { it != SyncStatus.OFF }.keys, syncState.decks.filterValues { it == SyncStatus.SYNCED }.keys,
+        )
+        if (members != sentSyncMembers && service?.submit(members)?.accepted == true) sentSyncMembers = members
+    }
     /** Desktop sweep-filter settings (synced `manadj-filter-settings`); re-sent until the engine accepts them. */
     var filterSettings by mutableStateOf(FilterSettings.SHIPPED)
         private set
     private var filterSettingsUnsent = false
     private val connection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, binder: IBinder?) { service = (binder as PlaybackService.LocalBinder).service }
-        override fun onServiceDisconnected(name: ComponentName?) { service = null; output = null; failure = "Audio service disconnected" }
+        override fun onServiceDisconnected(name: ComponentName?) { service = null; output = null; sentSyncMembers = null; failure = "Audio service disconnected" }
     }
 
     init {
@@ -122,7 +131,7 @@ class PlayerModel(application: Application) : AndroidViewModel(application) {
                     if (pendingCueMix == null || state.appliedCommandId >= pendingCueMix!!) { cueMix = state.cueMix; pendingCueMix = null }
                     if (pendingBeatFx == null || state.appliedCommandId >= pendingBeatFx!!) { beatFx = state.beatFx; pendingBeatFx = null }
                     quantizeOn = state.quantize
-                    sync.update(state.decks.mapValues { SyncDeck.of(it.value) }); syncState = sync.state
+                    sync.update(state.decks.mapValues { SyncDeck.of(it.value) }); publishSync()
                     if (filterSettingsUnsent && audio?.submit(AudioCommand.SetFilterSettings(filterSettings))?.accepted == true) filterSettingsUnsent = false
                     state.decks.forEach { (id, snapshot) ->
                         val ui = decks.getValue(id)
@@ -166,6 +175,8 @@ class PlayerModel(application: Application) : AndroidViewModel(application) {
         return receipt
     }
     fun dismissFailure() { failure = null }
+    /** Fresh engine snapshot (not the 33 ms UI poll): Session replay reads its clock from it. */
+    fun engineSnapshot(): EngineSnapshot? = service?.snapshot()
 
     fun beginGesture(deck: DeckId, kind: String, cancel: (String) -> Unit): String {
         val id = "${deck.name}:$clientId:$kind:${++gestureSequence}"
@@ -260,11 +271,11 @@ class PlayerModel(application: Application) : AndroidViewModel(application) {
     fun updateFader(deck: DeckId, value: Double, gesture: String? = null) = control(deck, "fader", AudioCommand.SetFader(deck, value, gesture)) { it.fader = value }
     fun updateTrim(deck: DeckId, value: Double, gesture: String? = null) = control(deck, "trim", AudioCommand.SetTrim(deck, value, gesture)) { it.trim = value }
     /** Pitch fader: rides the Group Tempo when [deck] is synced (all members follow), plain pitch otherwise. */
-    fun updatePitch(deck: DeckId, value: Double, gesture: String? = null) { sync.setPitch(deck, value); syncState = sync.state }
+    fun updatePitch(deck: DeckId, value: Double, gesture: String? = null) { sync.setPitch(deck, value); publishSync() }
     /** SYNC: join/leave the Sync Group. Returns OutOfReach when the group tempo is past ±8 % (join refused), null when n/a. */
-    fun toggleSync(deck: DeckId): BpmMatch? = sync.toggle(deck).also { syncState = sync.state }
+    fun toggleSync(deck: DeckId): BpmMatch? = sync.toggle(deck).also { publishSync() }
     /** MATCH: one-shot tempo capture of the nearest playing deck (phase too with Quantize on). */
-    fun match(deck: DeckId): BpmMatch? = sync.match(deck).also { syncState = sync.state }
+    fun match(deck: DeckId): BpmMatch? = sync.match(deck).also { publishSync() }
     fun updateBend(deck: DeckId, value: Double, gesture: String? = null) = control(deck, "bend", AudioCommand.SetBend(deck, value, gesture)) { it.bend = value }
     /** Grid source for library tracks (#372): constant tempo + first-beat anchor; bpm <= 0 clears. */
     fun setGrid(deck: DeckId, bpm: Double, anchorSeconds: Double) = submit(AudioCommand.SetGrid(deck, bpm, anchorSeconds))
@@ -275,6 +286,10 @@ class PlayerModel(application: Application) : AndroidViewModel(application) {
     fun setQuantize(on: Boolean) = submit(AudioCommand.SetQuantize(on)).also { if (it.accepted) quantizeOn = on }
     /** Key lock per deck; DeckSnapshot.keyLock / keyLockActive report it. */
     fun setKeyLock(deck: DeckId, on: Boolean) = submit(AudioCommand.SetKeyLock(deck, on))
+    /** Waveform touch scratch: begin on touch-down, move by signed track seconds per drag event, end on release. */
+    fun scratchBegin(deck: DeckId) = submit(AudioCommand.ScratchBegin(deck))
+    fun scratchMove(deck: DeckId, deltaSeconds: Double) { if (deltaSeconds != 0.0 && deltaSeconds.isFinite()) submit(AudioCommand.ScratchMove(deck, deltaSeconds)) }
+    fun scratchEnd(deck: DeckId) = submit(AudioCommand.ScratchEnd(deck))
 
     fun updateEq(deck: DeckId, band: Int, value: Double, gesture: String? = null) = control(deck, "eq$band", AudioCommand.SetEq(deck, band, value, gesture)) { it.eq[band] = value }
     fun updateFilter(deck: DeckId, position: Double, gesture: String? = null) = control(deck, "filter", AudioCommand.SetFilter(deck, position, gesture)) { it.filter = position }

@@ -104,6 +104,62 @@ class AudioEngineTest {
         decks.all { deck(it).let { d -> d.loadState == LoadState.READY && !d.filling } }
     }
 
+    @Test fun scheduledOpsApplyOnTheirExactFrame() {
+        val a = wav("engine-sched-a.wav", .25)
+        val b = wav("engine-sched-b.wav", .25)
+        AudioEngine(offline = true).use { engine ->
+            engine.load(DeckId.A, "a", a); engine.load(DeckId.B, "b", b)
+            engine.settled(DeckId.A, DeckId.B)
+            engine.until("decoded") { deck(DeckId.A).fullyDecoded && deck(DeckId.B).fullyDecoded }
+            assertTrue(engine.submit(AudioCommand.SetCrossfade(-1.0)).accepted) // only A audible
+            engine.renderOfflineForTest(64)
+            val t = engine.snapshot().outputFrames
+            val receipts = engine.schedule(listOf(
+                ScheduledCommand(t + 301, AudioCommand.Play(DeckId.A)),
+                ScheduledCommand(t + 301, AudioCommand.Play(DeckId.B)),
+                ScheduledCommand(t + 2301, AudioCommand.Seek(DeckId.B, 1.0)),
+            ), tag = 1)
+            assertTrue(receipts.all { it.accepted })
+            assertTrue(engine.schedule(t + 1301, AudioCommand.Pause(DeckId.B), tag = 2).accepted)
+            assertTrue(engine.cancelScheduled(2).accepted)
+            assertFalse(engine.schedule(t, AudioCommand.SetFilterSettings(FilterSettings.SHIPPED)).accepted)
+            val out = engine.renderOfflineForTest(4000)
+            assertEquals(0f, out[300 * 2], 1e-6f)            // silent until exactly frame 301
+            assertTrue(out[301 * 2] != 0f)
+            val s = engine.snapshot()
+            assertEquals(0L, s.lateOps)
+            assertEquals(0, s.scheduledOps)
+            assertEquals((4000 - 301) / 48000.0, s.decks.getValue(DeckId.A).sourceSeconds, 1e-9)
+            assertEquals(1.0 + (4000 - 2301) / 48000.0, s.decks.getValue(DeckId.B).sourceSeconds, 1e-9)
+            assertTrue(s.decks.getValue(DeckId.B).playing)   // the cancelled Pause never ran
+            assertTrue("schedule" in s.supportedCapabilities)
+        }
+    }
+
+    @Test fun quantizedPlayLaunchesOnTheReferenceBeat() {
+        val a = wav("engine-q-a.wav", .25)
+        val b = wav("engine-q-b.wav", .25)
+        AudioEngine(offline = true).use { engine ->
+            engine.load(DeckId.A, "a", a); engine.load(DeckId.B, "b", b)
+            engine.settled(DeckId.A, DeckId.B)
+            engine.until("decoded") { deck(DeckId.A).fullyDecoded && deck(DeckId.B).fullyDecoded }
+            listOf(AudioCommand.SetGrid(DeckId.A, 120.0, .25), AudioCommand.SetGrid(DeckId.B, 120.0, 0.0), AudioCommand.SetQuantize(true),
+                AudioCommand.Seek(DeckId.A, 1.1), AudioCommand.Seek(DeckId.B, 2.0), AudioCommand.SetCrossfade(1.0),
+                AudioCommand.Play(DeckId.A), AudioCommand.Play(DeckId.B)).forEach { assertTrue(engine.submit(it).accepted) }
+            val start = engine.snapshot().outputFrames
+            engine.renderOfflineForTest(100)
+            val waiting = engine.deck(DeckId.B)
+            assertTrue(waiting.playing)
+            assertEquals(start + 7200, waiting.launchFrame)                  // A reaches its beat at 1.25 s
+            assertEquals(2.0, waiting.sourceSeconds, 0.0)
+            val out = engine.renderOfflineForTest(7200)
+            assertEquals(0f, out[(7099) * 2], 0f)
+            assertTrue(out[7100 * 2] != 0f)
+            assertNull(engine.deck(DeckId.B).launchFrame)
+            assertEquals(2.0 + 100 / 48000.0, engine.deck(DeckId.B).sourceSeconds, 1e-9)
+        }
+    }
+
     @Test fun decodedLocalWavMixSeekAndDesktopCueSemantics() {
         val a = wav("engine-a.wav", .25)
         val b = wav("engine-b.wav", -.25)
@@ -163,6 +219,7 @@ class AudioEngineTest {
         AudioEngine(offline = true).use { engine ->
             engine.load(DeckId.A, "hot", a)
             engine.settled(DeckId.A)
+            engine.until("decoded") { deck(DeckId.A).fullyDecoded } // offline renders outrun the streaming decoder
             engine.submit(AudioCommand.Seek(DeckId.A, 1.5))
             engine.renderOfflineForTest(64)
             engine.settled(DeckId.A)
@@ -480,6 +537,26 @@ class AudioEngineTest {
             val prime = (System.nanoTime() - t0) / 1000.0
             android.util.Log.i("manadj-bench", "4 decks key-locked: p50 %.0f p99 %.0f max %.0f us per 96-frame render; relocation re-prime %.0f us".format(times[1500] / 1e3, times[2970] / 1e3, times.last() / 1e3, prime))
             assertTrue("render too slow p50 ${times[1500] / 1e3} us", times[1500] < 1_000_000)
+        }
+    }
+
+    @Test fun scratchMovesThePlatterAndReleaseResumes() {
+        val tone = wav("engine-scratch.wav", .25, seconds = 10)
+        AudioEngine(offline = true).use { engine ->
+            assertTrue("scratch" in engine.snapshot().supportedCapabilities)
+            engine.load(DeckId.A, "s", tone)
+            engine.settled(DeckId.A)
+            engine.until("decoded") { deck(DeckId.A).fullyDecoded }
+            engine.submit(AudioCommand.Seek(DeckId.A, 4.0)); engine.submit(AudioCommand.Play(DeckId.A))
+            engine.renderOfflineForTest(960)
+            engine.submit(AudioCommand.ScratchBegin(DeckId.A)); engine.renderOfflineForTest(96)
+            val held = engine.deck(DeckId.A)
+            assertTrue(held.scratching && !held.playing)
+            repeat(30) { engine.submit(AudioCommand.ScratchMove(DeckId.A, -.01)); engine.renderOfflineForTest(96) }
+            engine.renderOfflineForTest(4800)
+            assertEquals(held.sourceSeconds - .3, engine.deck(DeckId.A).sourceSeconds, 2e-3)
+            engine.submit(AudioCommand.ScratchEnd(DeckId.A)); engine.renderOfflineForTest(96)
+            engine.deck(DeckId.A).let { assertTrue("$it", !it.scratching && it.playing) }
         }
     }
 

@@ -307,6 +307,16 @@ public:
         return value;
     }
     void setScale(float s) { scale_ = s; }
+    /**
+     * Desktop level: its ConvolverNode keeps the default `normalize = true`, so Web Audio rescales the
+     * already unit-energy IR (Chromium Reverb::CalculateNormalizationScale): 1 / rms(ir) x 0.00125 x
+     * 44100 / rate. For the 2.5 s IR that is ~-8 dB below unit energy.
+     */
+    static float webAudioNormalization(double rate, double seconds) {
+        const double length = std::max(1.0, std::round(rate * seconds));
+        const double rms = std::max(std::sqrt(1 / length), 0.000125); // per-channel sum of squares = 1
+        return static_cast<float>(1 / rms * 0.00125 * 44100 / rate); // spec GainCalibration, GainCalibrationSampleRate
+    }
 
     void process(float inL, float inR, float& outL, float& outR) noexcept {
         const float dL = diffuse(0, inL), dR = diffuse(1, inR);
@@ -377,7 +387,7 @@ public:
         echoPos_ = flangerPos_ = echoQuiet_ = flangerQuiet_ = 0;
         echoLive_ = flangerLive_ = false;
         reverb_.prepare(rate, settings_);
-        reverb_.setScale(reverbScale_);
+        reverb_.setScale(reverbScale_ * Reverb::webAudioNormalization(rate, settings_.reverbDecay));
         reverbLive_ = false;
         repeat_.prepare(rate);
         repeat_.setSettings(settings_);

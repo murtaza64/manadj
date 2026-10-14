@@ -67,6 +67,7 @@ import dev.manadj.audio.DeckId
             SettingsSheet(model, ux, Modifier.widthIn(max = 460.dp).fillMaxWidth().heightIn(max = screenHeight - band - 16.dp))
         }
         if (model.outputPanel) OutputPanel(model, Modifier.fillMaxSize())
+        if (ux.sessions) dev.manadj.app.session.SessionScreen(model, ux, Modifier.fillMaxSize().padding(top = band))
         ReplaceDialog(model, ux)
         KnobPopupOverlay(ux)
         WheelOverlay(ux)
@@ -84,7 +85,7 @@ import dev.manadj.audio.DeckId
     // Engine output-timestamp clock (what is heard now), eased by SmoothClock; raw snapshot when no timestamp.
     // Only read model.output while moving: it changes every engine tick and would redraw idle waves at 30 fps.
     fun heard(now: Long): Double { ux.seekPreview[ui.id]?.let { return it }; if (now == 0L) return position(ui); val out = model.output; return if (out != null && ui.source?.id == ui.snapshot?.sourceId) out.audibleSeconds(ui.id, now) else position(ui) }
-    WaveView(wave, { clock.at(frame.value, heard(frame.value), moving && frame.value != 0L, playbackRate(ui)) }, ui.durationSeconds, marksOf(ui), modifier.semantics { contentDescription = "${ui.id} detail wave" }.pinchZoom(ux),
+    WaveView(wave, { clock.at(frame.value, heard(frame.value), moving && frame.value != 0L, playbackRate(ui)) }, ui.durationSeconds, marksOf(ui), modifier.semantics { contentDescription = "${ui.id} detail wave" }.waveTouch(ui, model, ux, vertical),
         vertical = vertical, windowSeconds = ux.waveSeconds * tempoRate(ui), live = { ux.strip(ui) }, history = e.history, accent = deckColor(ui.id),
         status = when { ui.source == null -> "${ui.id} · no track"; wave == null -> if (ux.waveSource[ui.source?.id] == "failed") "no waveform" else "analysing…"; !wave.complete -> "analysing ${(100 * wave.frames * wave.bandHop / wave.sampleRate / (ui.durationSeconds ?: 1.0)).toInt().coerceIn(0, 99)}%"; else -> null })
 }
@@ -273,25 +274,41 @@ fun mixOf(model: PlayerModel, ux: UiModel, id: DeckId): DeckMix {
 }
 
 /**
- * Two-finger pinch on a detail wave zooms both decks' waves (shared ux.waveSeconds, so beats line up),
- * anchored on the playhead; persisted on release. One finger is left alone.
+ * Detail-wave touch (#35/#67): one finger scratches — drag the waveform toward the past (left / up) to advance,
+ * mapped px → track seconds at the current window; a second finger ends the scratch where it is (no jump) and
+ * pinches the shared zoom (both decks, persisted on release).
  */
-private fun Modifier.pinchZoom(ux: UiModel): Modifier = pointerInput(Unit) {
+private fun Modifier.waveTouch(ui: DeckUi, model: PlayerModel, ux: UiModel, vertical: Boolean): Modifier = pointerInput(ui.id, vertical) {
     awaitEachGesture {
-        awaitFirstDown(requireUnconsumed = false)
+        val first = awaitFirstDown(requireUnconsumed = false)
+        val canScratch = model.supports("scratch") && ui.ready
+        var scratching = false
+        var last = first.position
         var d0 = 0f; var s0 = ux.waveSeconds; var zooming = false
-        while (true) {
-            val event = awaitPointerEvent()
-            val down = event.changes.filter { it.pressed }
-            if (down.isEmpty()) break
-            if (down.size >= 2) {
-                val d = (down[0].position - down[1].position).getDistance()
-                if (!zooming) { zooming = true; d0 = d; s0 = ux.waveSeconds }
-                else if (d > 8f) ux.waveSeconds = (s0 * d0 / d).coerceIn(3.0, 48.0)
-                down.forEach { it.consume() }
-            } else if (zooming) { zooming = false; ux.chooseWaveSeconds(ux.waveSeconds) }
-        }
-        if (zooming) ux.chooseWaveSeconds(ux.waveSeconds)
+        fun endScratch() { if (scratching) { scratching = false; model.scratchEnd(ui.id) } }
+        try {
+            while (true) {
+                val event = awaitPointerEvent()
+                val down = event.changes.filter { it.pressed }
+                if (down.isEmpty()) break
+                if (down.size >= 2) {
+                    endScratch()
+                    val d = (down[0].position - down[1].position).getDistance()
+                    if (!zooming) { zooming = true; d0 = d; s0 = ux.waveSeconds }
+                    else if (d > 8f) ux.waveSeconds = (s0 * d0 / d).coerceIn(3.0, 48.0)
+                    down.forEach { it.consume() }
+                } else if (!zooming && canScratch) {
+                    val c = down.firstOrNull { it.id == first.id } ?: continue
+                    val delta = c.position - last; last = c.position
+                    val along = if (vertical) size.height else size.width
+                    val px = if (vertical) delta.y else delta.x
+                    if (!scratching && kotlin.math.abs(px) > 0f) { scratching = true; model.scratchBegin(ui.id) }
+                    // Content moving toward the past = track advances.
+                    if (scratching) model.scratchMove(ui.id, -px / along * ux.waveSeconds * tempoRate(ui))
+                    c.consume()
+                }
+            }
+        } finally { endScratch(); if (zooming) ux.chooseWaveSeconds(ux.waveSeconds) }
     }
 }
 

@@ -55,8 +55,8 @@ data class SyncDeck(
  * on, a successful SYNC join or MATCH aligns the playing deck's beat phase once. Membership is
  * session-only and survives pause, reload and missing metadata (WAITING).
  *
- * Not ported: machine-audible ownership release (no Session playback surface on the phone yet) and
- * quantized launch of paused decks against the group (the engine has no cross-deck launch yet).
+ * Not ported: machine-audible ownership release. Quantized launch of paused decks is native (engine
+ * `launchReference`); membership reaches it via [AudioCommand.SetSyncMembers].
  */
 class SyncGroup(private val actuator: Actuator) {
     interface Actuator {
