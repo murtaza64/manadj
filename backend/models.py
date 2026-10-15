@@ -761,6 +761,38 @@ class HotCue(Base):
     )
 
 
+class DeviceSyncChange(Base):
+    """One row of the Device change log (ADR 0045, #375): a field change that
+    crossed Device sync, either direction, with its outcome. Append-only —
+    a revert is a new row (`reverts_id`) and marks the original
+    (`reverted_by_id`). Values are JSON (null = absent/cleared)."""
+
+    __tablename__ = "device_sync_changes"
+
+    id = Column(Integer, primary_key=True)
+    batch_id = Column(String, nullable=False)
+    device_id = Column(String, nullable=False)  # "desktop" for reverts
+    device_name = Column(String, nullable=True)
+    direction = Column(String, nullable=False)  # to_desktop | to_phone
+    track_id = Column(Integer, nullable=True)  # null for setting:<key> rows
+    field = Column(String, nullable=False)  # hot_cue:N | main_cue | tag:ID | title | artist | energy | key | setting:<key>
+    old_json = Column(Text, nullable=True)
+    new_json = Column(Text, nullable=True)
+    edit_uuid = Column(String, nullable=True)
+    edited_at = Column(DateTime, nullable=True)
+    synced_at = Column(DateTime, nullable=False)
+    outcome = Column(String, nullable=False)  # applied | superseded | rejected | reverted (revert rows: applied)
+    reverts_id = Column(Integer, nullable=True)
+    reverted_by_id = Column(Integer, nullable=True)
+
+    __table_args__ = (
+        Index("idx_device_sync_changes_batch", "batch_id"),
+        Index("idx_device_sync_changes_track", "track_id"),
+        Index("idx_device_sync_changes_synced", "synced_at"),
+        Index("idx_device_sync_changes_edit_uuid", "edit_uuid"),
+    )
+
+
 class TrackLink(Base):
     """A Linked pair (linked-pairs PRD): a stored, symmetric assertion that
     two Tracks go well together. One row per unordered pair of distinct

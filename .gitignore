@@ -29,6 +29,9 @@ frontend/public/manual/
 # Generated Pages staging and ownership marker (site/build.py --output)
 /.site-dist/
 /.site-dist.site-build
+# Device sync secrets/state belong in the data dir (#374); safety net for the old location.
+/paired_devices.json
+/device_sync.json
 
 # Routine video exports (#377)
 exports/

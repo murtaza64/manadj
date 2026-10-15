@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import { api, type DeviceListenerStatus } from '../api/client';
+import { DeviceChangeLog } from './DeviceChangeLog';
 
 /** Settings → Library → Phone sync (#373): the opt-in LAN listener the
  * Android app pulls the Library from. Exposes only device sync, behind the
@@ -11,6 +12,15 @@ export default function PhoneSyncSettings() {
   const set = (next: DeviceListenerStatus) => client.setQueryData(['device-listener'], next);
   const update = useMutation({ mutationFn: api.deviceListener.update, onSuccess: set });
   const rotate = useMutation({ mutationFn: api.deviceListener.rotate, onSuccess: set });
+  const devices = useQuery({
+    queryKey: ['device-listener', 'devices'],
+    queryFn: api.deviceListener.devices,
+    refetchInterval: 5_000,
+  });
+  const revoke = useMutation({
+    mutationFn: api.deviceListener.revoke,
+    onSettled: () => client.invalidateQueries({ queryKey: ['device-listener', 'devices'] }),
+  });
   const [port, setPort] = useState('');
   useEffect(() => setPort(data ? String(data.port) : ''), [data]);
 
@@ -22,7 +32,7 @@ export default function PhoneSyncSettings() {
     if (Number.isInteger(value) && value >= 1024 && value <= 65535 && value !== data.port) update.mutate({ port: value });
     else setPort(String(data.port));
   };
-  const failure = update.error ?? rotate.error;
+  const failure = update.error ?? rotate.error ?? revoke.error;
 
   return (
     <>
@@ -38,8 +48,9 @@ export default function PhoneSyncSettings() {
             <span className="settings-field-label">Allow phones on this network</span>
             <p>
               Opens a second port on all network interfaces that serves only
-              the phone-sync endpoints, and only to a phone that sends the
-              pairing code. Traffic is unencrypted: use trusted networks.
+              the phone-sync endpoints, only to phones you paired, and
+              announces this computer on the network so phones find it.
+              Traffic is unencrypted: use trusted networks.
             </p>
           </div>
           <div className="settings-library-inputs">
@@ -78,8 +89,10 @@ export default function PhoneSyncSettings() {
             <div>
               <span className="settings-field-label">Pair a phone</span>
               <p>
-                In the app: Desktop library → enter one address and the
-                pairing code. A new code unpairs every phone.
+                In the app, pick this computer from the list of found
+                desktops. manaDJ asks you here to approve it after checking
+                that the codes match. Fallback: type one address and this
+                code. A new code only affects phones paired by code.
               </p>
             </div>
             <div className="settings-phone-pairing">
@@ -95,6 +108,42 @@ export default function PhoneSyncSettings() {
             </div>
           </div>
         ) : null}
+        {data.enabled || (devices.data?.length ?? 0) > 0 ? (
+          <div className="settings-field">
+            <div>
+              <span className="settings-field-label">Paired phones</span>
+              <p>Unpair a phone to stop it syncing. It has to ask again.</p>
+            </div>
+            <div className="settings-phone-pairing">
+              {devices.data?.length ? (
+                devices.data.map((d) => (
+                  <div key={d.device_id} className="settings-phone-device">
+                    <span>
+                      {d.name}
+                      <small>{d.last_seen ? ` · last sync ${new Date(d.last_seen).toLocaleString()}` : ' · never synced'}</small>
+                    </span>
+                    <button className="btn btn-secondary" onClick={() => revoke.mutate(d.device_id)}>
+                      Unpair
+                    </button>
+                  </div>
+                ))
+              ) : (
+                <span>None yet</span>
+              )}
+            </div>
+          </div>
+        ) : null}
+      </div>
+      <div className="settings-field device-change-log-field">
+        <div>
+          <span className="settings-field-label">Change log</span>
+          <p>
+            Every change a phone sync made, in both directions. Newest edit
+            wins; Revert puts the old value back (and on the phone at its
+            next sync).
+          </p>
+        </div>
+        <DeviceChangeLog />
       </div>
       {data.error ? (
         <p role="alert" className="settings-hint">{data.error}</p>

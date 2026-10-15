@@ -45,6 +45,7 @@ import { registerViewToggle } from './midi/controlRegistry';
 import { FirstRunWelcome } from './onboarding/FirstRunWelcome';
 import './setup/allGuides';
 import { KeyboardShortcutOverlay } from './components/KeyboardShortcutOverlay';
+import { PhonePairPrompt } from './settings/PhonePairPrompt';
 import { TourController } from './tour/TourController';
 import { HelpViewer } from './help/HelpViewer';
 import { TutorialController } from './tutorials/TutorialController';
@@ -330,6 +331,7 @@ function App() {
             </main>
           </div>
           <KeyboardShortcutOverlay mode={view} />
+          <PhonePairPrompt />
         </FilterProvider>
       </DeckProvider>
       </ToastProvider>

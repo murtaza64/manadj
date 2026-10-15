@@ -1,3 +1,4 @@
+import json
 """Phone sync LAN listener (#373): device-sync only, behind a pairing code."""
 
 import socket
@@ -62,7 +63,7 @@ def test_codes_are_unambiguous():
 
 
 def test_listener_serves_on_real_socket(tmp_path, db):
-    listener = DeviceListener(host="127.0.0.1")
+    listener = DeviceListener(host="127.0.0.1", advertise=False)
     port = _free_port()
     listener.start(port, lambda: "ABCDE-FGHJK")
     try:
@@ -78,7 +79,7 @@ def test_port_in_use_reports_error():
         busy.bind(("127.0.0.1", 0))
         busy.listen()
         port = busy.getsockname()[1]
-        listener = DeviceListener(host="127.0.0.1")
+        listener = DeviceListener(host="127.0.0.1", advertise=False)
         listener.start(port, lambda: "X")
         assert not listener.running
         assert listener.error
@@ -87,7 +88,7 @@ def test_port_in_use_reports_error():
 
 def test_control_enables_persists_and_rotates(data_root, monkeypatch):
     port = _free_port()
-    monkeypatch.setattr(device_listener, "_listener", DeviceListener(host="127.0.0.1"))
+    monkeypatch.setattr(device_listener, "_listener", DeviceListener(host="127.0.0.1", advertise=False))
     app = FastAPI()
     app.include_router(control.router, prefix="/api/device-listener")
     client = TestClient(app)
@@ -99,7 +100,9 @@ def test_control_enables_persists_and_rotates(data_root, monkeypatch):
     assert on["enabled"] and on["running"] and on["port"] == port
     code = on["pair_code"]
     assert code and (data_root / ".env").read_text().count(PAIR_SECRET) == 1
-    assert "[device_sync]" in (data_root / "config.toml").read_text()
+    # Machine-local state lives in the data dir, never the settings file / repo (#374 security fix).
+    assert json.loads((data_root / "data" / "device_sync.json").read_text()) == {"enabled": True, "port": port}
+    assert not (data_root / "config.toml").exists() or "device_sync" not in (data_root / "config.toml").read_text()
 
     rotated = client.post("/api/device-listener/rotate").json()
     assert rotated["pair_code"] != code
@@ -107,3 +110,119 @@ def test_control_enables_persists_and_rotates(data_root, monkeypatch):
     off = client.put("/api/device-listener", json={"enabled": False}).json()
     assert off["running"] is False
     assert client.post("/api/device-listener/rotate").status_code == 409
+
+
+# ── #374 zero-typing pairing ──
+
+
+@pytest.fixture
+def pairing(tmp_path):
+    from backend.device_pairing import DeviceRegistry, PairingRequests
+
+    return PairingRequests(DeviceRegistry(lambda: tmp_path / "paired_devices.json"))
+
+
+@pytest.fixture
+def paired_client(db, pairing):
+    app = build_app(lambda: "ABCDE-FGHJK", pairing)
+    app.dependency_overrides[get_db] = lambda: db
+    return TestClient(app)
+
+
+def test_approve_on_desktop_issues_device_token_once(paired_client, pairing, tmp_path):
+    from backend.device_pairing import TOKEN_HEADER
+
+    ask = paired_client.post("/api/device-pair/request", json={"device_id": "phone-1234", "device_name": "Pixel"}).json()
+    assert len(ask["match_code"]) == 4
+    assert paired_client.get(f"/api/device-pair/request/{ask['id']}").json() == {"status": "pending"}
+    [pending] = pairing.pending()
+    assert (pending.device_name, pending.match_code) == ("Pixel", ask["match_code"])
+
+    pairing.decide(ask["id"], approve=True)
+    got = paired_client.get(f"/api/device-pair/request/{ask['id']}").json()
+    assert got["status"] == "approved" and got["token"]
+    assert paired_client.get(f"/api/device-pair/request/{ask['id']}").status_code == 404  # token handed out once
+
+    ok = paired_client.get("/api/device-sync/snapshot", headers={TOKEN_HEADER: got["token"]})
+    assert ok.status_code == 200
+    assert got["token"] not in (tmp_path / "paired_devices.json").read_text()  # only the hash is stored
+    assert pairing.registry.list()[0].last_seen
+
+    pairing.registry.revoke("phone-1234")
+    assert paired_client.get("/api/device-sync/snapshot", headers={TOKEN_HEADER: got["token"]}).status_code == 401
+
+
+def test_denied_request_gets_no_token(paired_client, pairing):
+    ask = paired_client.post("/api/device-pair/request", json={"device_id": "phone-5678"}).json()
+    pairing.decide(ask["id"], approve=False)
+    assert paired_client.get(f"/api/device-pair/request/{ask['id']}").json() == {"status": "denied"}
+    assert pairing.registry.list() == []
+
+
+def test_pairing_surface_does_not_expose_sync(paired_client):
+    from backend.device_pairing import TOKEN_HEADER
+
+    assert paired_client.get("/api/device-sync/snapshot", headers={TOKEN_HEADER: "forged"}).status_code == 401
+    assert paired_client.get("/api/device-pair/request/nope").status_code == 404
+
+
+def test_pair_requests_are_rate_limited(paired_client):
+    codes = [
+        paired_client.post("/api/device-pair/request", json={"device_id": f"phone-{i:04d}"}).status_code
+        for i in range(device_listener.MAX_FAILURES + 1)
+    ]
+    assert 429 in codes
+
+
+def test_control_lists_approves_and_revokes(data_root, monkeypatch, pairing):
+    monkeypatch.setattr(device_listener, "pairing", pairing)
+    monkeypatch.setattr(device_listener, "registry", pairing.registry)
+    app = FastAPI()
+    app.include_router(control.router, prefix="/api/device-listener")
+    client = TestClient(app)
+
+    req = pairing.create("phone-abcdef", "Pixel", "192.168.1.9")
+    [listed] = client.get("/api/device-listener/pair-requests").json()
+    assert listed["match_code"] == req.match_code and listed["device_name"] == "Pixel"
+    assert client.post(f"/api/device-listener/pair-requests/{req.id}/approve").json()["status"] == "approved"
+    assert client.get("/api/device-listener/pair-requests").json() == []
+    [device] = client.get("/api/device-listener/devices").json()
+    assert device["name"] == "Pixel" and "token_sha256" not in device
+    assert client.delete("/api/device-listener/devices/phone-abcdef").status_code == 200
+    assert client.get("/api/device-listener/devices").json() == []
+
+
+def test_paired_device_identity_reaches_change_log(paired_client, pairing, make_track, db):
+    from backend.device_pairing import TOKEN_HEADER
+    from backend.models import DeviceSyncChange
+
+    track = make_track(title="A")
+    token = pairing.registry.add("phone-identity", "Pixel 9")
+    body = {"edits": [{"uuid": "u1", "track_id": track.id, "field": "title", "old": "A", "new": "B", "edited_at_ms": 0}]}
+    r = paired_client.post("/api/device-sync/edits", json=body, headers={TOKEN_HEADER: token})
+    assert r.json()["outcomes"] == {"u1": "applied"}
+    row = db.query(DeviceSyncChange).one()
+    assert (row.device_id, row.device_name) == ("phone-identity", "Pixel 9")
+
+
+def test_legacy_state_migrates_out_of_the_repo_root(data_root):
+    from backend.device_pairing import DeviceRegistry
+
+    (data_root / "config.toml").write_text("[device_sync]\nenabled = true\nport = 48555\n")
+    assert device_listener.read_settings() == (True, 48555)  # legacy fallback
+    device_listener.write_settings(port=48556)
+    assert device_listener.read_settings() == (True, 48556)
+    assert "48556" not in (data_root / "config.toml").read_text()
+
+    legacy = data_root / "paired_devices.json"
+    legacy.write_text('[{"device_id": "p1", "name": "Pixel", "token_sha256": "ab", "paired_at": "x", "last_seen": null}]')
+    registry = DeviceRegistry()
+    assert [d.device_id for d in registry.list()] == ["p1"]
+    assert not legacy.exists() and (data_root / "data" / "paired_devices.json").exists()
+
+
+def test_startup_moves_legacy_state(data_root, monkeypatch):
+    monkeypatch.setattr(device_listener, "_listener", DeviceListener(host="127.0.0.1", advertise=False))
+    (data_root / "config.toml").write_text("[device_sync]\nenabled = false\nport = 48557\n")
+    device_listener.apply_settings()
+    assert json.loads((data_root / "data" / "device_sync.json").read_text()) == {"enabled": False, "port": 48557}
