@@ -401,6 +401,10 @@ export function DeckWaveform({
             } else {
               const step = 2; // px per column — a translucent wash, not a plot
               const views = slip === null ? [[playhead, 0, h]] : [[playhead, 0, h / 2], [slip, h / 2, h]];
+              // One path, one fill: the column rects are disjoint, so this
+              // paints exactly what per-column fillRect did, without ~W/2
+              // draw calls per deck per frame (desktop-perf #385).
+              ctx.beginPath();
               for (const [position, y0, y1] of views) {
                 const start = position - span * PLAY_MARKER_FRACTION;
                 for (let x = 0; x < w; x += step) {
@@ -409,9 +413,10 @@ export function DeckWaveform({
                   const v = historyRef.current.at(t, live);
                   const bar = channelFaderToGain(v.fader) * h;
                   const top = Math.max(y0, h - bar);
-                  if (top < y1) ctx.fillRect(x, top, step, y1 - top);
+                  if (top < y1) ctx.rect(x, top, step, y1 - top);
                 }
               }
+              ctx.fill();
             }
           }
         }

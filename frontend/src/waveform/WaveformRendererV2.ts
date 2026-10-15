@@ -534,6 +534,7 @@ export class WaveformRendererV2 {
   private brightness: number;
 
   private programs = new Map<string, WebGLProgram>();
+  private uniformCache = new Map<WebGLProgram, Map<string, WebGLUniformLocation | null>>();
   private data: DecodedWaveform | null = null;
   private peakTex: TexBinding | null = null;
   private bandLoTex: TexBinding | null = null;
@@ -1054,7 +1055,7 @@ export class WaveformRendererV2 {
     const prog = this.programFor(this.styleId);
     gl.useProgram(prog);
     gl.disable(gl.BLEND);
-    const u = (name: string) => gl.getUniformLocation(prog, name);
+    const u = this.uniforms(prog);
 
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.peakTex!.tex);
@@ -1065,8 +1066,8 @@ export class WaveformRendererV2 {
     gl.uniform1i(u('u_peakTex'), 0);
     gl.uniform1i(u('u_bandLoTex'), 1);
     gl.uniform1i(u('u_bandHiTex'), 2);
-    this.uploadLod(prog, 'u_peak', this.peakTex!.pack);
-    this.uploadLod(prog, 'u_band', this.bandLoTex!.pack);
+    this.uploadLod(u, 'u_peak', this.peakTex!.pack);
+    this.uploadLod(u, 'u_band', this.bandLoTex!.pack);
 
     // Stem masking (stems #213): per-stem sets on units 4-15, the mask on
     // unit 3's neighbor (unit 3 is the modTex; mask rides the LAST unit).
@@ -1237,13 +1238,10 @@ export class WaveformRendererV2 {
     const { gl } = this;
     const prog = this.overlayProgram!;
     gl.useProgram(prog);
-    gl.uniformMatrix4fv(
-      gl.getUniformLocation(prog, 'u_matrix'),
-      false,
-      orthoMatrix(0, view.w, view.h, 0),
-    );
-    const uOffset = gl.getUniformLocation(prog, 'u_offsetPx');
-    const uAlpha = gl.getUniformLocation(prog, 'u_alpha');
+    const u = this.uniforms(prog);
+    gl.uniformMatrix4fv(u('u_matrix'), false, orthoMatrix(0, view.w, view.h, 0));
+    const uOffset = u('u_offsetPx');
+    const uAlpha = u('u_alpha');
     gl.uniform1f(uAlpha, 1);
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.ONE, gl.ONE); // additive (legacy parity: rgb premultiplied)
@@ -1835,6 +1833,7 @@ export class WaveformRendererV2 {
     const { gl } = this;
     for (const p of this.programs.values()) gl.deleteProgram(p);
     this.programs.clear();
+    this.uniformCache.clear();
     for (const b of [this.peakTex, this.bandLoTex, this.bandHiTex]) {
       if (b) gl.deleteTexture(b.tex);
     }
@@ -1868,15 +1867,42 @@ export class WaveformRendererV2 {
     return prog;
   }
 
-  private uploadLod(prog: WebGLProgram, prefix: string, pack: LodPack): void {
+  private lodScratch = { offs: new Int32Array(MAX_LEVELS), counts: new Int32Array(MAX_LEVELS) };
+
+  private uploadLod(
+    u: (name: string) => WebGLUniformLocation | null,
+    prefix: string,
+    pack: LodPack,
+  ): void {
     const { gl } = this;
-    const offs = new Int32Array(MAX_LEVELS);
-    const counts = new Int32Array(MAX_LEVELS);
+    const { offs, counts } = this.lodScratch;
+    offs.fill(0);
+    counts.fill(0);
     offs.set(pack.levelOffsets);
     counts.set(pack.levelCounts);
-    gl.uniform1iv(gl.getUniformLocation(prog, `${prefix}Offsets`), offs);
-    gl.uniform1iv(gl.getUniformLocation(prog, `${prefix}Counts`), counts);
-    gl.uniform1i(gl.getUniformLocation(prog, `${prefix}Levels`), pack.numLevels);
+    gl.uniform1iv(u(`${prefix}Offsets`), offs);
+    gl.uniform1iv(u(`${prefix}Counts`), counts);
+    gl.uniform1i(u(`${prefix}Levels`), pack.numLevels);
+  }
+
+  /** Cached uniform-location lookup per program (desktop-perf #385):
+   * getUniformLocation is a string round-trip into the GL layer, and a
+   * frame sets ~45 uniforms per body pass per renderer. */
+  private uniforms(prog: WebGLProgram): (name: string) => WebGLUniformLocation | null {
+    let cache = this.uniformCache.get(prog);
+    if (!cache) {
+      cache = new Map();
+      this.uniformCache.set(prog, cache);
+    }
+    const map = cache;
+    return (name) => {
+      let loc = map.get(name);
+      if (loc === undefined) {
+        loc = this.gl.getUniformLocation(prog, name);
+        map.set(name, loc);
+      }
+      return loc;
+    };
   }
 
   private uploadPack(prev: TexBinding | null, pack: LodPack, channels: 1 | 4): TexBinding {
