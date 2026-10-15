@@ -9,6 +9,8 @@ waveform_tests/
 node_modules/
 .lane-app/
 .lane-tmp/
+.gradle/
+.kotlin/
 
 .editspace/
 .scratch/

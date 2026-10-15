@@ -4,7 +4,14 @@ All notable changes to manaDJ. Format: [Keep a Changelog](https://keepachangelog
 versions follow [Semantic Versioning](https://semver.org/). Install: [docs/install.md](docs/install.md).
 
 ## [Unreleased]
+
+## [0.1.0-rc.6] - 2026-10-15
 - Phone sync (desktop side): Settings → Library → Phone sync opens an opt-in LAN port that serves only the library snapshot, preview waveforms and audio to the manaDJ Android app, behind a pairing code (#372, #373).
+- Phone pairing without typing: the desktop advertises itself on the LAN; approve the phone on the desktop (#374).
+- Two-way phone sync: edits made on the phone (cues, grids, titles, performance settings) flow back to the desktop, newest wins, with a change log and revert in Settings (#375). Stems, detail waveforms, waveform styles, Follow params and Sessions sync to the phone (#376, #378).
+- Routine video export: clip editor renders Routines, Transitions and Session spans to portrait video with keyframed looks, transitions, scene presets and an auto storyboard; clip specs save/load as .clip.json (#377, #383).
+- Recording: the REC button shows a SAVING state and saved/canceled/failed toasts.
+- Android app, first preview (debug-signed APK, `dev.murt.manadj`): native 4-deck engine with desktop-parity EQ/filter, Beat FX, key lock, Sync, quantize (incl. latency-compensated Heard quantize), loops, pre-roll, scratch and stems; portrait + landscape performance UI with multi-tier library browser and Follow; library sync and offline download from the desktop; sample-exact Session replay with timeline; single-track editor (cues, grid, metadata) (#369–#372, #378, #379, #382).
 
 ## [0.1.0-rc.5] - 2026-10-13
 - Windows: the backend no longer fails to start on the FEEDBACK lock (POSIX-only `fcntl`), which blocked the 0.1.0-rc.4 Windows installer.
@@ -96,7 +103,8 @@ First public release: a DJ library manager and performance app for Apple Silicon
 - No auto-update: download new versions from GitHub Releases.
 - The first launch takes longer than later ones while manaDJ prepares its database and analysis engine.
 
-[Unreleased]: https://github.com/murtaza64/manadj/compare/v0.1.0-rc.5...HEAD
+[Unreleased]: https://github.com/murtaza64/manadj/compare/v0.1.0-rc.6...HEAD
+[0.1.0-rc.6]: https://github.com/murtaza64/manadj/releases/tag/v0.1.0-rc.6
 [0.1.0-rc.5]: https://github.com/murtaza64/manadj/releases/tag/v0.1.0-rc.5
 [0.1.0-rc.4]: https://github.com/murtaza64/manadj/releases/tag/v0.1.0-rc.4
 [0.1.0-rc.3]: https://github.com/murtaza64/manadj/releases/tag/v0.1.0-rc.3
