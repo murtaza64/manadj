@@ -114,7 +114,7 @@ it('routes MST to the master target', () => {
 
 it('offers --- and dispatches null for unsupported effects', () => {
   const selector = container.querySelector<HTMLSelectElement>('[aria-label="Beat FX effect"]')!;
-  expect([...selector.options].map((option) => option.textContent)).toEqual(['---', 'ECH', 'RVB', 'FLG']);
+  expect([...selector.options].map((option) => option.textContent)).toEqual(['---', 'ECH', 'LCE', 'RVB', 'FLG', 'TRS', 'ROL']);
   act(() => {
     selector.value = '';
     selector.dispatchEvent(new Event('change', { bubbles: true }));
@@ -167,4 +167,18 @@ it('labels the length in bars while the Flanger is selected (#331)', () => {
   expect(length.textContent).toBe('1/2BAR');
   expect(length.dataset.unit).toBe('bars');
   expect(length.className).toContain(' bars');
+});
+
+it('lights a paddle-held channel in a distinct momentary state (#361)', () => {
+  const heldSection = { ...section, held: ['B'] as const };
+  const heldMixer = { ...mixer, getBeatFxSection: () => heldSection } as unknown as Mixer;
+  act(() => root.render(
+    <MixerContext.Provider value={heldMixer}>
+      <MixerStrip deckCount={4} onToggleHints={() => undefined} />
+    </MixerContext.Provider>
+  ));
+  const b = container.querySelector<HTMLElement>('[aria-label="Beat FX target B"]')!;
+  expect(b.className).toContain(' held');
+  expect(b.className).not.toContain(' on');
+  expect(container.querySelector('[aria-label="Beat FX target A"]')!.className).not.toContain(' held');
 });

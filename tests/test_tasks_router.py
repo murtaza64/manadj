@@ -32,11 +32,14 @@ def test_summary_counts_states_and_undismissed_failures(db_session: Session) -> 
     response = client_for(db_session).get("/api/tasks/summary")
 
     assert response.status_code == 200
-    assert response.json() == {
-        "counts": {"pending": 1, "running": 1, "done": 0, "failed": 2},
-        "running_task": {"type": "analysis", "ref": "track:2"},
-        "undismissed_failures": 1,
-    }
+    body = response.json()
+    assert body["counts"] == {"pending": 1, "running": 1, "done": 0, "failed": 2}
+    assert body["undismissed_failures"] == 1
+    assert body["attention"] == 1 and body["attention_by_type"] == {"SoundCloud download": 1}
+    assert body["pending_by_type"] == {"Waveform": 1}
+    assert [(r["type"], r["ref"], r["type_label"]) for r in body["running"]] == [("analysis", "track:2", "Analysis")]
+    # unresolved refs still get a subject (the thing is gone)
+    assert body["running"][0]["subject"] == {"kind": "track", "id": "2", "label": "track 2 (gone)", "detail": None}
 
 
 def test_default_list_keeps_old_undismissed_failures_only(db_session: Session) -> None:
@@ -95,3 +98,24 @@ def test_bulk_retry_and_dismiss_use_filters(db_session: Session) -> None:
 
     assert retry.json() == {"updated": 2}
     assert dismiss.json() == {"updated": 1}
+
+
+def test_attention_is_newest_per_subject(db_session: Session) -> None:
+    """Seven failed attempts for one item are one worklist entry; a failure
+    superseded by a later success is none (gh#342)."""
+    for _ in range(3):
+        t = create_task(db_session, "soulseek-download", {}, ref="source_item:9")
+        t.state = "failed"
+        t.error = "peer went away"
+    old = create_task(db_session, "download", {}, ref="source_item:10")
+    old.state = "failed"
+    newer = create_task(db_session, "soulseek-download", {}, ref="source_item:10")
+    newer.state = "done"
+    db_session.commit()
+    client = client_for(db_session)
+    attention = client.get("/api/tasks/attention").json()
+    assert [(r["ref"], r["superseded"], r["fix"]) for r in attention] == [("source_item:9", False, "acquisition")]
+    assert client.get("/api/tasks/summary").json()["attention"] == 1
+    # the raw list still shows history, flagged
+    rows = client.get("/api/tasks", params={"state": "failed"}).json()
+    assert sum(r["superseded"] for r in rows) == 3  # two older #9 attempts + the superseded #10

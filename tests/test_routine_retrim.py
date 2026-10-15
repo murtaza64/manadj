@@ -271,3 +271,24 @@ def test_retrim_endpoint_requires_origin_take(client, db, promoted_routine):
     )
     assert res.status_code == 422
     assert "origin" in res.json()["detail"].lower()
+
+
+def test_shift_edits_rebases_beat_fx():
+    from backend.routers.routines import _shift_edits
+
+    edits = {
+        "lanes": {}, "jumps": [],
+        "beatFx": {
+            "steps": [
+                {"beat": 2, "on": True, "selected": "echo", "target": "0", "beats": 0.5},
+                {"beat": 10, "on": True, "selected": "echo", "target": "2", "beats": 0.5},
+                {"beat": 30, "on": False, "selected": "echo", "target": "0", "beats": 0.5},
+            ],
+            "depth": [{"beat": 2, "value": 0.2}, {"beat": 12, "value": 0.8}],
+        },
+    }
+    out = _shift_edits(edits, shift_beats=4, new_duration=20, kept_slots=2)
+    steps = out["beatFx"]["steps"]
+    # The step sounding at the new start pins at 0; slot 2 was dropped → off; past-end drops.
+    assert [(s["beat"], s["target"], s["on"]) for s in steps] == [(0.0, "0", True), (6, "2", False)]
+    assert [(p["beat"], p["value"]) for p in out["beatFx"]["depth"]] == [(0.0, 0.2), (8, 0.8)]

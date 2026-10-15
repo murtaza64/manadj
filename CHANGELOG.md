@@ -5,6 +5,27 @@ versions follow [Semantic Versioning](https://semver.org/). Install: [docs/insta
 
 ## [Unreleased]
 
+## [0.1.0-rc.6] - 2026-10-15
+- Phone sync (desktop side): Settings → Library → Phone sync opens an opt-in LAN port that serves only the library snapshot, preview waveforms and audio to the manaDJ Android app, behind a pairing code (#372, #373).
+- Phone pairing without typing: the desktop advertises itself on the LAN; approve the phone on the desktop (#374).
+- Two-way phone sync: edits made on the phone (cues, grids, titles, performance settings) flow back to the desktop, newest wins, with a change log and revert in Settings (#375). Stems, detail waveforms, waveform styles, Follow params and Sessions sync to the phone (#376, #378).
+- Routine video export: clip editor renders Routines, Transitions and Session spans to portrait video with keyframed looks, transitions, scene presets and an auto storyboard; clip specs save/load as .clip.json (#377, #383).
+- Recording: the REC button shows a SAVING state and saved/canceled/failed toasts.
+- Android app, first preview (debug-signed APK, `dev.murt.manadj`): native 4-deck engine with desktop-parity EQ/filter, Beat FX, key lock, Sync, quantize (incl. latency-compensated Heard quantize), loops, pre-roll, scratch and stems; portrait + landscape performance UI with multi-tier library browser and Follow; library sync and offline download from the desktop; sample-exact Session replay with timeline; single-track editor (cues, grid, metadata) (#369–#372, #378, #379, #382).
+
+## [0.1.0-rc.5] - 2026-10-13
+- Windows: the backend no longer fails to start on the FEEDBACK lock (POSIX-only `fcntl`), which blocked the 0.1.0-rc.4 Windows installer.
+
+## [0.1.0-rc.4] - 2026-10-13
+- Beat FX: LOW CUT ECHO, TRANS and ROLL — strip SELECT, keyboard 8/9 and the DDJ-GRV6 SELECT knob; Trans/Roll lock to the target Deck's beatgrid, BEAT ◄ ► now reaches 1/16 and 1/8, tuning in Settings → Performance → Beat FX (#360).
+- DDJ-GRV6: tilting a side's DRUM RELEASE paddle holds the selected Beat FX on that Deck (whatever ON and CH SELECT say); release lets it ring out. The held channel lights yellow in the mixer's FX target strip (#361).
+- Keyboard map: new Track browsing tab listing the Perform browse-panel keys (deck focus and library focus after Tab); opens there when the library has the keyboard. The EXPORT view's tab is now labeled Export (#337).
+- Download progress bars (SoundCloud bytes via yt-dlp, Soulseek transfer bytes) in Acquisition and the Tasks badge; Tasks drawer reworked as a worklist: named subjects, one entry per subject, next steps, deep links (#342).
+- Acquisition redesigned (Dig view, #342): one table with the lifecycle in the status cell, inline Soulseek candidates on failure, batch verbs, queue drawer, sort/filter; Spotify likes/playlists as browse-only feeds with want (#347); favorite feeds pour into "all sources"; app-wide restyled checkboxes.
+
+- Capture: Beat FX echo/reverb tails count as audible — an echo-out Take now ends where the tail dies out, not at the fader slam; Session timeline bands follow (#355).
+- Session timeline shows Beat FX: an effect-coloured band (echo yellow, reverb green, flanger red) on the targeted deck lane — Master FX bands every lane — with opacity following LEVEL/DEPTH; the scrub readout shows the FX state (#354).
+- Mix editor: Beat FX lanes — Takes recorded with Beat FX audition with their echo/reverb/flanger; edit FX steps (effect, target, length, on/off) and depth under the slots; FX replays in Set playback and carries through templates and Routine promotion (#353).
 - Replaced the README with prerelease installation notes and current-app screenshots (#340).
 - Added website help pages and the offline in-app Help manual, linked from Settings, Tours and Setup guides (#295).
 - Mix editor: author mixes from scratch with + New blank mix — drag tracks from the library onto the canvas/timeline. 2 tracks save as a Transition, 3 or more as a Routine; adding or removing a track across that line converts it on save (Set pins follow). Drop a track onto an open Transition to grow it into a Routine (#325, #330).
@@ -82,6 +103,9 @@ First public release: a DJ library manager and performance app for Apple Silicon
 - No auto-update: download new versions from GitHub Releases.
 - The first launch takes longer than later ones while manaDJ prepares its database and analysis engine.
 
-[Unreleased]: https://github.com/murtaza64/manadj/compare/v0.1.0-rc.3...HEAD
+[Unreleased]: https://github.com/murtaza64/manadj/compare/v0.1.0-rc.6...HEAD
+[0.1.0-rc.6]: https://github.com/murtaza64/manadj/releases/tag/v0.1.0-rc.6
+[0.1.0-rc.5]: https://github.com/murtaza64/manadj/releases/tag/v0.1.0-rc.5
+[0.1.0-rc.4]: https://github.com/murtaza64/manadj/releases/tag/v0.1.0-rc.4
 [0.1.0-rc.3]: https://github.com/murtaza64/manadj/releases/tag/v0.1.0-rc.3
 [0.1.0]: https://github.com/murtaza64/manadj/releases/tag/v0.1.0

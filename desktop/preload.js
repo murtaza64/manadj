@@ -15,6 +15,9 @@ contextBridge.exposeInMainWorld("manadjSettings", {
   // Settings → Library folder pickers (packaged-app #277). Resolves to the
   // chosen absolute path, or null when cancelled.
   pickFolder: (options) => ipcRenderer.invoke("settings:pick-folder", options),
+  // Open an https URL in the system browser (Spotify sign-in #347: the
+  // user's browser already holds their Spotify session).
+  openExternal: (url) => ipcRenderer.invoke("settings:open-external", url),
 });
 
 contextBridge.exposeInMainWorld("manadjRecording", {

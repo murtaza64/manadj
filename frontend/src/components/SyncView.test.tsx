@@ -6,10 +6,10 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
 const gate = vi.hoisted(() => ({ connected: false }));
-vi.mock('../setup/soundcloud/soundcloudApi', () => ({ useSoundCloudConnected: () => gate.connected }));
+vi.mock('./acquisition/useAcquisitionAvailable', () => ({ useAcquisitionAvailable: () => gate.connected }));
 vi.mock('./PlaylistSync', () => ({ PlaylistSync: () => null }));
 vi.mock('./UnifiedTracksSync', () => ({ UnifiedTracksSync: () => null }));
-vi.mock('./Acquisition', () => ({ Acquisition: () => <div data-testid="acquisition" /> }));
+vi.mock('./acquisition/AcquisitionView', () => ({ AcquisitionView: () => <div data-testid="acquisition" /> }));
 
 import { SyncView } from './SyncView';
 
@@ -26,7 +26,7 @@ afterEach(() => {
 });
 const tabs = () => [...host.querySelectorAll('.sync-view-tab')].map((t) => t.textContent);
 
-it('hides Acquisition until SoundCloud is connected (setup-guides #290)', () => {
+it('hides Acquisition until a Supplier is configured (setup-guides #290, gh#342)', () => {
   gate.connected = false;
   act(() => root.render(<SyncView />));
   expect(tabs()).toEqual(['Tracks', 'Playlists', 'Rekordbox import']);

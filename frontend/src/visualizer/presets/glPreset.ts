@@ -124,6 +124,13 @@ class GlRenderer implements PresetRenderer {
     });
   }
 
+  /** Browsers cap live WebGL contexts (~16) and silently kill the oldest:
+   * a programme cycling many presets must release the ones it stops using. */
+  dispose(): void {
+    this.pipeline = null;
+    this.canvas.getContext('webgl')?.getExtension('WEBGL_lose_context')?.loseContext();
+  }
+
   private setup(): Pipeline | null {
     const gl = this.canvas.getContext('webgl');
     if (!gl) return null;

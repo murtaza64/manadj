@@ -88,6 +88,9 @@ class TransferStatus:
 
     state: TransferState
     local_path: Path | None = None
+    # bytes moved so far / file size, when the Supplier reports them (gh#342)
+    bytes_done: int | None = None
+    bytes_total: int | None = None
 
 
 @runtime_checkable

@@ -2,11 +2,14 @@ import { lazy, Suspense, useEffect, useState } from 'react';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { queryClient } from './api/queryClient';
 import { DEV_SURFACES } from './devMode';
+import { OPEN_LIBRARY_TRACK_EVENT } from './library/openTrack';
+import { OPEN_ACQUISITION_EVENT } from './components/acquisition/openAcquisition';
 
 const SettingsPage = lazy(() => import('./settings/SettingsPage'));
 const MidiInspectorPage = lazy(() => import('./midi/MidiInspectorPage'));
 const VisualizerApp = lazy(() => import('./visualizer/VisualizerApp'));
 const ArenaApp = lazy(() => import('./visualizer/ArenaApp'));
+const ClipEditorView = lazy(() => import('./export/ClipEditorView'));
 import { BrowsePanel } from './components/BrowsePanel';
 import { isBrowseMode } from './components/browseHost';
 import { SyncView } from './components/SyncView';
@@ -26,6 +29,7 @@ import { SetSpaceTransport } from './sets/SetSpaceTransport';
 import TransitionEditor from './editor/TransitionEditor';
 import RoutineEditorView from './routines/RoutineEditorView';
 import { OPEN_ROUTINE_EVENT } from './routines/openRoutine';
+import { OPEN_CLIP_EVENT } from './export/clipEvents';
 import { OPEN_MIX_EVENT } from './routines/openMix';
 import { TakeHistoryView } from './components/history/TakeHistoryView';
 import { OPEN_SESSION_EVENT } from './sessions/openSession';
@@ -41,6 +45,7 @@ import { registerViewToggle } from './midi/controlRegistry';
 import { FirstRunWelcome } from './onboarding/FirstRunWelcome';
 import './setup/allGuides';
 import { KeyboardShortcutOverlay } from './components/KeyboardShortcutOverlay';
+import { PhonePairPrompt } from './settings/PhonePairPrompt';
 import { TourController } from './tour/TourController';
 import { HelpViewer } from './help/HelpViewer';
 import { TutorialController } from './tutorials/TutorialController';
@@ -56,6 +61,7 @@ const TOUR_AREA_BY_MODE: Record<AppMode, TourArea> = {
   routine: 'edit',
   history: 'history',
   sync: 'sync',
+  clip: 'edit',
 };
 
 /** The one poller keeping track rows / Analyze buttons live against
@@ -66,7 +72,7 @@ function AnalysisPendingBridge() {
   return null;
 }
 
-const MODE_IDS: AppMode[] = ['library', 'performance', 'transition', 'routine', 'history', 'sync'];
+const MODE_IDS: AppMode[] = ['library', 'performance', 'transition', 'routine', 'history', 'sync', 'clip'];
 
 /** Session-state persistence of the top-panel mode: reopen where you were. */
 const MODE_KEY = 'manadj-app-mode';
@@ -178,9 +184,14 @@ function App() {
   // A routine-edit request (Set routine pin / history ◆ row, gh#170)
   // opens the Routine editor; the mounted editor consumes it.
   useEffect(() => {
+    const onOpenClip = () => setView('clip');
+    window.addEventListener(OPEN_CLIP_EVENT, onOpenClip);
     const onOpenRoutine = () => setView('routine');
     window.addEventListener(OPEN_ROUTINE_EVENT, onOpenRoutine);
-    return () => window.removeEventListener(OPEN_ROUTINE_EVENT, onOpenRoutine);
+    return () => {
+      window.removeEventListener(OPEN_ROUTINE_EVENT, onOpenRoutine);
+      window.removeEventListener(OPEN_CLIP_EVENT, onOpenClip);
+    };
   }, []);
 
   // A Mix-editor request (#221 phase 3): any artifact kind on the unified
@@ -198,6 +209,19 @@ function App() {
     const onOpenSession = () => setView('library');
     window.addEventListener(OPEN_SESSION_EVENT, onOpenSession);
     return () => window.removeEventListener(OPEN_SESSION_EVENT, onOpenSession);
+  }, []);
+
+  // A task worklist "open in Library" (gh#342): FilterProvider sets the
+  // search; the mode switch happens here.
+  useEffect(() => {
+    const onOpenTrack = () => setView('library');
+    window.addEventListener(OPEN_LIBRARY_TRACK_EVENT, onOpenTrack);
+    return () => window.removeEventListener(OPEN_LIBRARY_TRACK_EVENT, onOpenTrack);
+  }, []);
+  useEffect(() => {
+    const onOpenAcq = () => setView('sync');
+    window.addEventListener(OPEN_ACQUISITION_EVENT, onOpenAcq);
+    return () => window.removeEventListener(OPEN_ACQUISITION_EVENT, onOpenAcq);
   }, []);
 
   // Dev-only surface (packaged-app #278): hand-typed path, dev builds only.
@@ -282,6 +306,11 @@ function App() {
               <KeepAliveView active={view === 'sync' && !settingsOpen}>
                 <SyncView />
               </KeepAliveView>
+              {/* CLIP (#377): portrait video export — the offline render owns
+                  its own (Offline)AudioContexts, never the live one. */}
+              <KeepAliveView active={view === 'clip' && !settingsOpen}>
+                <Suspense fallback={null}><ClipEditorView /></Suspense>
+              </KeepAliveView>
               {!isBrowseMode(view) && settingsOpen ? (
                 <Suspense fallback={null}>
                   <SettingsPage />
@@ -302,6 +331,7 @@ function App() {
             </main>
           </div>
           <KeyboardShortcutOverlay mode={view} />
+          <PhonePairPrompt />
         </FilterProvider>
       </DeckProvider>
       </ToastProvider>

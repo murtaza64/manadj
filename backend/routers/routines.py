@@ -9,6 +9,7 @@ the slot-addressed beat-domain event replay rides the detail endpoint.
 """
 
 import json
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
@@ -535,11 +536,13 @@ def _shift_edits(
         nb = val - shift_beats
         if 0 <= nb <= new_duration:
             entry_offsets[str(slot)] = nb
+    beat_fx = _shift_beat_fx(edits.get("beatFx"), shift_beats, new_duration, kept_slots)
     if not any(
-        [lanes, jumps, removed, nudges, trims, pauses, removed_pauses, entry_offsets]
+        [lanes, jumps, removed, nudges, trims, pauses, removed_pauses, entry_offsets, beat_fx]
     ):
         return None
     return {
+        **({"beatFx": beat_fx} if beat_fx else {}),
         "lanes": lanes,
         "jumps": jumps,
         "removedRecordedJumps": removed,
@@ -549,6 +552,49 @@ def _shift_edits(
         "trims": trims,
         "entryOffsets": entry_offsets,
     }
+
+
+def _shift_beat_fx(
+    fx: Any, shift_beats: float, new_duration: float, kept_slots: int
+) -> dict | None:
+    """Rebase an authored Beat FX track (#353) onto a retrimmed clock.
+
+    Steps/depth points shift by `shift_beats`; the last step/point before
+    the new start pins at beat 0 (the state there keeps sounding); points
+    past the new end drop. Steps targeting a dropped slot read OFF.
+    """
+    if not isinstance(fx, dict):
+        return None
+
+    def rebase(items: Any, keep_fields) -> list:
+        pts = [
+            {**p, "beat": p["beat"] - shift_beats}
+            for p in (items if isinstance(items, list) else [])
+            if isinstance(p, dict) and isinstance(p.get("beat"), (int, float)) and keep_fields(p)
+        ]
+        pts.sort(key=lambda p: p["beat"])
+        before = [p for p in pts if p["beat"] < 0]
+        inside = [p for p in pts if 0 <= p["beat"] <= new_duration + 1e-6]
+        if before and not (inside and inside[0]["beat"] <= 1e-9):
+            inside.insert(0, {**before[-1], "beat": 0.0})
+        return inside
+
+    def target_ok(step: dict) -> dict:
+        target = step.get("target")
+        if target == "master":
+            return step
+        try:
+            if int(str(target)) < kept_slots:
+                return step
+        except ValueError:
+            pass
+        return {**step, "on": False}
+
+    steps = [target_ok(s) for s in rebase(fx.get("steps"), lambda p: isinstance(p.get("on"), bool))]
+    depth = rebase(fx.get("depth"), lambda p: isinstance(p.get("value"), (int, float)))
+    if not steps:
+        return None
+    return {"steps": steps, "depth": depth}
 
 
 @router.delete("/{uuid}")

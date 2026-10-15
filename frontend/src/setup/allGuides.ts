@@ -6,5 +6,6 @@
 import './cueMode/register';
 import './controllerCheck/register';
 import './soundcloud/register';
+import './spotify/register';
 import './soulseek/register';
 import '../onboarding/registerGuides';

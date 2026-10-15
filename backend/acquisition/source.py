@@ -137,6 +137,8 @@ class SoundCloudSource:
         from yt_dlp import YoutubeDL  # heavy import, keep it out of module load
         from yt_dlp.utils import DownloadError
 
+        from ..tasks.progress import ytdlp_progress_hook
+
         options = {
             "format": "ba[acodec!=opus]/ba",
             "outtmpl": str(dest_dir / f"{basename}.%(ext)s"),
@@ -144,6 +146,8 @@ class SoundCloudSource:
             "password": self._oauth_token,
             "quiet": True,
             "noprogress": True,
+            # task progress (gh#342): bytes so far / total, for the status cell
+            "progress_hooks": [ytdlp_progress_hook()],
             # transient-blip absorption (issue 08)
             "extractor_retries": 5,
             "retry_sleep_functions": {

@@ -226,3 +226,53 @@ def test_eof_straddling_loop_does_not_make_an_outward_eof_hold_audible():
               {**scratch(1, "scratchBegin"), "playhead": 100, "trackDuration": 100},
               {**scratch(1, "scratchMove", 8, 0), "playhead": 100, "trackDuration": 100}]
     assert not events_contain_audible(events + [tick(2)])
+
+
+def beat_fx(t, target="A", on=True, selected="echo", depth=0.0, beats=1.0):
+    return {"t": t, "kind": "beatFx", "selected": selected, "target": target,
+            "on": on, "depth": depth, "beats": beats}
+
+
+def _crossfaded_out_echo(extra):
+    """A plays crossfaded out (never Master-audible) into its channel echo;
+    the fader closes, then the crossfader returns at t=2.5."""
+    return [
+        load(0.0),
+        control(0.0, "crossfader", 1.0),
+        *extra,
+        play(1.0),
+        control(2.0, "fader", 0.0, "A"),
+        control(2.5, "crossfader", 0.0),
+        tick(3.0),
+    ]
+
+
+def test_beat_fx_tail_counts_as_audible():
+    """#355: the channel echo is pre-crossfader, so it is fed while A is
+    crossfaded out; its tail (5 repeats of a 1-beat echo at 174 BPM, ~1.7 s)
+    is still ringing when the crossfader returns."""
+    assert events_contain_audible(_crossfaded_out_echo([])) is False
+    assert events_contain_audible(_crossfaded_out_echo([beat_fx(0.5)])) is True
+
+
+def test_beat_fx_tail_expires_and_dry_depth_has_no_tail():
+    late = [load(0.0), control(0.0, "crossfader", 1.0), beat_fx(0.5), play(1.0),
+            control(2.0, "fader", 0.0, "A"), control(9.0, "crossfader", 0.0), tick(10.0)]
+    assert events_contain_audible(late) is False
+    assert events_contain_audible(_crossfaded_out_echo([beat_fx(0.5, depth=-1.0)])) is False
+    assert events_contain_audible(_crossfaded_out_echo([beat_fx(0.5, selected="flanger")])) is False
+
+
+def test_low_cut_echo_rings_trans_and_roll_stop_dead():
+    """#360: LOW CUT ECHO tails like Echo; TRANS/ROLL replace the signal."""
+    assert events_contain_audible(_crossfaded_out_echo([beat_fx(0.5, selected="lowCutEcho")])) is True
+    for effect in ("trans", "roll"):
+        assert events_contain_audible(_crossfaded_out_echo([beat_fx(0.5, selected=effect)])) is False
+
+
+def test_held_paddle_excites_a_tail_with_the_section_off():
+    """#361: a held DRUM RELEASE paddle runs the selected effect on its deck
+    regardless of ON / CH SELECT, so its echo tail counts as audible."""
+    held = {**beat_fx(0.5, target="B", on=False), "held": ["A"]}
+    assert events_contain_audible(_crossfaded_out_echo([held])) is True
+    assert events_contain_audible(_crossfaded_out_echo([beat_fx(0.5, target="B", on=False)])) is False

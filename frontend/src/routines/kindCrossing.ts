@@ -16,6 +16,7 @@
 import type { RoutineDetailWire } from '../api/client';
 import type { JumpEvent, LaneId, Lanes, Transition } from '../editor/mixModel';
 import { routineFilterToPair } from '../editor/pairSlotTranslation';
+import { cloneRoutineBeatFx, routineFxToPair } from '../editor/beatFxLane';
 import { traceStateAt, type RoutineLanePoint } from '../sets/routinePlan';
 import { normalizeAuthored, orderedSlots, structureToDetail } from './authoredMix';
 import { emptyEdits, laneKey, type RoutineEdits } from './routineDraft';
@@ -106,6 +107,12 @@ export function authoredToTransition(
       }));
   const jumpsA = jumpsFor(A.slotId);
   const jumps = jumpsFor(B.slotId);
+  // Beat FX (#353) keeps its absolute beats (steps may sit outside the
+  // window — the pair model admits them).
+  const beatFx = edits.beatFx
+    ? routineFxToPair(edits.beatFx, (beat) => (beat - from) / (to - from),
+      (slotId) => (slotId === A.slotId ? 'A' : slotId === B.slotId ? 'B' : null))
+    : undefined;
   return {
     aTrackId: A.trackId,
     bTrackId: B.trackId,
@@ -117,6 +124,7 @@ export function authoredToTransition(
       lanes,
       ...(jumps.length ? { jumps } : {}),
       ...(jumpsA.length ? { jumpsA } : {}),
+      ...(beatFx ? { beatFx } : {}),
     },
   };
 }
@@ -147,6 +155,7 @@ export function pairToAuthoredEdits(
         .map(([k, v]) => [k, v.map((p) => ({ ...p }))])
     ),
     jumps: pairEdits.jumps.map((j) => ({ ...j })),
+    ...(pairEdits.beatFx ? { beatFx: cloneRoutineBeatFx(pairEdits.beatFx) } : {}),
     authored: {
       slots: detail.cast.map((trackId, i) => ({
         slotId: detail.slot_ids?.[i] ?? String(i),

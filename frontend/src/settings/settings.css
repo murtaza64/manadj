@@ -168,7 +168,6 @@
 .settings-field-inputs > .perf-fader {
   width: 100%;
 }
-.settings-page input[type='checkbox'],
 .settings-page input[type='radio'] {
   accent-color: var(--accent);
 }
@@ -346,4 +345,58 @@
 .settings-unit-toggle {
   display: inline-flex;
   gap: var(--space-4);
+}
+
+/* Phone sync (#373): addresses + pairing code, monospace and copyable. */
+.settings-phone-pairing {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-8);
+}
+.settings-phone-pairing code {
+  user-select: all;
+}
+.settings-phone-code {
+  font-size: 1.4em;
+  letter-spacing: 0.12em;
+  color: var(--accent);
+}
+
+/* Device change log (#375). */
+.device-change-log-field {
+  flex-direction: column;
+  align-items: stretch;
+}
+.device-change-log {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-12);
+  max-height: 420px;
+  overflow-y: auto;
+}
+.device-change-batch header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: var(--font-small);
+  color: var(--subtext0);
+}
+.device-change-batch table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--font-small);
+}
+.device-change-batch td {
+  padding: var(--space-4) var(--space-8);
+  border-bottom: 1px solid var(--surface1);
+}
+.device-change-batch tr.is-inactive td {
+  color: var(--subtext0);
+  text-decoration: line-through;
+}
+.settings-phone-device {
+  display: flex;
+  align-items: center;
+  gap: var(--space-12);
 }

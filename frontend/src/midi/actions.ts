@@ -122,7 +122,10 @@ export type ButtonTarget =
    * engage `effect` on the scope — a side's focused Deck, or master —
    * (select + retarget + on); pressed again while that exact pairing runs,
    * turn the section off. */
-  | { control: 'beat-fx-engage'; scope: 'left' | 'right' | 'master'; effect: BeatFxEffectId };
+  | { control: 'beat-fx-engage'; scope: 'left' | 'right' | 'master'; effect: BeatFxEffectId }
+  /** Per-deck momentary (GRV6 DRUM RELEASE paddle, #361): held = the
+   * SELECTED effect runs on `channel` regardless of ON / CH SELECT. */
+  | { control: 'beat-fx-hold'; channel: ChannelId };
 
 export type AbsoluteTarget =
   | { control: 'pitch'; deck: ChannelId }

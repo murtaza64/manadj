@@ -28,7 +28,9 @@
  */
 import type { DeckEngine } from '../playback/DeckEngine';
 import type { Mixer } from '../playback/mixer';
+import { BeatFxOverride } from '../editor/beatFxLane';
 import {
+  routineBeatFxAt,
   routineSlotStateAt,
   slotLanesAt,
   slotOccupyingDeckAt,
@@ -94,9 +96,12 @@ export class RoutinePlayer {
   private scratchRuns: Partial<Record<RoutineDeck, { clip: PlannedScratchClip; owner: symbol }>> = {};
   /** Clips the engine refused (no prepared source): positional fallback. */
   private scratchRefused = new WeakSet<PlannedScratchClip>();
+  /** Beat FX section borrow (#353): snapshot on play, restore on pause. */
+  private readonly beatFx: BeatFxOverride;
 
   constructor(audio: RoutinePlayerAudio) {
     this.mixer = audio.mixer;
+    this.beatFx = new BeatFxOverride(audio.mixer);
     this.engines = audio.engines;
     this.audible = audio.audible ?? (() => true);
     this.constrainToBounds = audio.constrainToBounds ?? (() => false);
@@ -265,6 +270,7 @@ export class RoutinePlayer {
         void this.engine(deck)?.prepareScratchReplay().catch(() => undefined);
       }
     }
+    this.beatFx.engage();
     this.selfOp(() => this.syncDecks(this.getMixTime(), true));
     this.applyLanes(this.getMixTime());
     this.raf = requestAnimationFrame(this.tick);
@@ -282,6 +288,8 @@ export class RoutinePlayer {
     this.selfOp(() => {
       for (const deck of this.drivenDecks()) this.engine(deck)?.pause();
     });
+    // The live Beat FX section returns (a ringing tail keeps ringing).
+    this.beatFx.release();
     this.emit();
   }
 
@@ -296,6 +304,8 @@ export class RoutinePlayer {
     // The human has the decks: a recorded gesture must not keep moving
     // the platter under their hand.
     this.cancelScratches();
+    // Takeover: the FX section stays as it sounds.
+    this.beatFx.release({ keep: true });
     this.emit();
   }
 
@@ -512,6 +522,8 @@ export class RoutinePlayer {
         trim: lanes.trim,
       });
     }
+    // Beat FX (#353): section-level; target slots resolve to their decks.
+    this.beatFx.apply(routineBeatFxAt(this.routine, beat));
   }
 
   private emit(): void {

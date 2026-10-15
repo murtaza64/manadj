@@ -26,6 +26,7 @@
  *   REMOVED: continuity is restored by displacing the tail back.
  */
 import type { RoutineLanePoint, RoutineTracePoint } from '../sets/routinePlan';
+import { parseRoutineBeatFx, type RoutineBeatFx } from '../editor/beatFxLane';
 
 // ── Model ────────────────────────────────────────────────────────────────
 
@@ -121,6 +122,10 @@ export interface RoutineEdits {
    * persisted as the Routine's first-class fields, never in edits_json
    * (editsForSave strips it). Absent = a promoted/projected artifact. */
   authored?: import('./authoredMix').AuthoredStructure;
+  /** Authored Beat FX track (#353; section-level, slotId/'master'
+   * targets). Present = REPLACES the recorded FX; absent = the recorded
+   * FX plays (none on a pair without FX). */
+  beatFx?: RoutineBeatFx;
 }
 
 export const EMPTY_EDITS: RoutineEdits = {
@@ -162,7 +167,8 @@ export function editsAreEmpty(e: RoutineEdits): boolean {
     Object.keys(e.trims).length === 0 &&
     Object.keys(e.entryOffsets).length === 0 &&
     e.playbackBounds === undefined &&
-    Object.keys(e.startTrims ?? {}).length === 0
+    Object.keys(e.startTrims ?? {}).length === 0 &&
+    e.beatFx === undefined
   );
 }
 
@@ -288,6 +294,7 @@ export function parseEdits(raw: unknown): RoutineEdits {
       if (typeof value === 'number' && Number.isFinite(value) && value !== 0) startTrims[id] = value;
     }
   }
+  const beatFx = parseRoutineBeatFx(o.beatFx);
   return {
     lanes,
     jumps,
@@ -297,6 +304,7 @@ export function parseEdits(raw: unknown): RoutineEdits {
     nudges,
     trims,
     entryOffsets,
+    ...(beatFx ? { beatFx } : {}),
     ...(Object.keys(startTrims).length > 0 ? { startTrims } : {}),
     ...(o.playbackBounds && typeof o.playbackBounds === 'object' &&
       'startBeat' in o.playbackBounds && 'endBeat' in o.playbackBounds &&

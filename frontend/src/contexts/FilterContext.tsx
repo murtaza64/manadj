@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { OPEN_LIBRARY_TRACK_EVENT, takePendingLibrarySearch } from '../library/openTrack';
 import type { ReactNode } from 'react';
 import { writeSetting } from '../settings/persistedSettings';
 
@@ -61,6 +62,16 @@ export function FilterProvider({ children }: { children: ReactNode }) {
       }));
     }
   }, [filters.sortColumn, filters.sortDirection]);
+
+  // A task-worklist "open in Library" (gh#342): the pending search lands here.
+  useEffect(() => {
+    const apply = () => {
+      const search = takePendingLibrarySearch();
+      if (search != null) setFilters((prev) => ({ ...prev, search }));
+    };
+    window.addEventListener(OPEN_LIBRARY_TRACK_EVENT, apply);
+    return () => window.removeEventListener(OPEN_LIBRARY_TRACK_EVENT, apply);
+  }, []);
 
   const clearSearch = useCallback(() => {
     setFilters((prev) => (prev.search === '' ? prev : { ...prev, search: '' }));

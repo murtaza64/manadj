@@ -111,6 +111,11 @@ Shared draw helpers/tables: `frontend/src/theme/markers.ts` (gh#201).
   muted outline at rest, accent hover and `.btn-selected` when open/engaged.
 - **Modals use `<Modal>`** (gh#202): overlay, centering, escape/backdrop
   close, `--z-modal`, title bar.
+- **Checkboxes are the native input, restyled globally** (gh#342,
+  `utilities.css`): 14px square in the `.btn` vocabulary — transparent with a
+  `--surface2` border, `--text` border on hover, `--accent` fill with
+  `--base`-ink check when checked, accent dash when indeterminate. Never
+  `accent-color` or per-feature checkbox CSS.
 - No other primitives until a third duplication appears (D10).
 
 ## Exemptions (D12)

@@ -12,6 +12,14 @@ export interface BeatFxSettings {
   /** How the shared Beat FX length reads for the Flanger (#331):
    * 'bars' — 1 = one bar (BEATS_PER_BAR beats); 'beats' — 1 = one beat. */
   flangerLengthUnit: FlangerLengthUnit;
+  /** LOW CUT ECHO (#360): high-pass corner in the echo loop; every repeat
+   * passes it once more, so the low end thins out repeat by repeat. */
+  lowCutEchoHz: number;
+  /** TRANS (#360): on share of each gate cycle and the edge slope. */
+  transDuty: number;
+  transSlopeMs: number;
+  /** ROLL (#360): crossfade at the loop seam, entry and re-slice. */
+  rollFadeMs: number;
 }
 
 export type FlangerLengthUnit = 'bars' | 'beats';
@@ -26,6 +34,10 @@ export const DEFAULT_BEAT_FX_SETTINGS: Readonly<BeatFxSettings> = Object.freeze(
   flangerWidthMs: 2,
   flangerFeedback: 0.35,
   flangerLengthUnit: 'bars',
+  lowCutEchoHz: 300,
+  transDuty: 0.5,
+  transSlopeMs: 3,
+  rollFadeMs: 4,
 });
 
 export const BEAT_FX_PARAMETER_RANGES = {
@@ -37,6 +49,10 @@ export const BEAT_FX_PARAMETER_RANGES = {
   flangerDelayMs: [1, 10, 0.1],
   flangerWidthMs: [0, 5, 0.1],
   flangerFeedback: [0, 0.9, 0.01],
+  lowCutEchoHz: [100, 1000, 10],
+  transDuty: [0.1, 0.9, 0.01],
+  transSlopeMs: [0.5, 20, 0.5],
+  rollFadeMs: [1, 20, 0.5],
 } as const;
 
 export type BeatFxNumericKey = keyof typeof BEAT_FX_PARAMETER_RANGES;

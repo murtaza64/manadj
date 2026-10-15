@@ -1294,6 +1294,19 @@ describe('Beat FX capture (#351)', () => {
     r.recorder.dispose();
   });
 
+  it('logs held paddles (#361) in the snapshot only while any are held', () => {
+    const r = rig();
+    r.recorder.start();
+    const before = r.logged.length;
+    r.mixer.setBeatFx({ held: ['C'] });
+    r.mixer.setBeatFx({ held: [] });
+    expect(fx(r.logged.slice(before))).toEqual([
+      { t: expect.any(Number), kind: 'beatFx', ...DEFAULT_SECTION, held: ['C'] },
+      { t: expect.any(Number), kind: 'beatFx', ...DEFAULT_SECTION },
+    ]);
+    r.recorder.dispose();
+  });
+
   it('an unrelated mixer notify logs no Beat FX event', () => {
     const r = rig();
     r.recorder.start();

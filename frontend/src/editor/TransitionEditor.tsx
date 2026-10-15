@@ -1208,6 +1208,7 @@ function EditorCenterPanel({
         afterBeats: result.afterBeats,
         scalable: result.scalable,
         lanes: structuredClone(stripTemplateLanes(tr)),
+        ...(tr.beatFx && tr.beatFx.steps.length > 0 ? { beatFx: structuredClone(tr.beatFx) } : {}),
       });
       setSaveModalOpen(false);
     },

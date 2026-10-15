@@ -207,14 +207,15 @@ def _stems_config(data: dict[str, Any]) -> StemsConfig:
 
 
 def _soulseek_config(data: dict[str, Any]) -> SoulseekConfig:
-    """[soulseek] slskd_url from config.toml; the API key from env/.env only.
+    """[soulseek] slskd_url from config.toml (SLSKD_URL in env/.env overrides
+    it, e.g. an slskd on a non-default port); the API key from env/.env only.
 
     Unset => fall back to the managed slskd (#291) when the Soulseek guide
     stored credentials and the binary is shipped.
     """
     section: dict[str, Any] = data.get("soulseek", {})
     external = SoulseekConfig(
-        slskd_url=section.get("slskd_url") or None,
+        slskd_url=os.environ.get("SLSKD_URL") or section.get("slskd_url") or None,
         api_key=os.environ.get("SLSKD_API_KEY") or None,
     )
     if external.configured:

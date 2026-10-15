@@ -435,6 +435,7 @@ class TransitionTemplate(Base):
     after_beats = Column(Integer, nullable=False)
     scalable = Column(Boolean, nullable=False, default=False, server_default="0")
     lanes_json = Column(Text, nullable=False)  # sparse normalized lanes (opaque)
+    beat_fx_json = Column(Text, nullable=True)  # Beat FX track (#353; opaque)
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
 
@@ -757,6 +758,38 @@ class HotCue(Base):
     __table_args__ = (
         Index("idx_hotcues_track", "track_id"),
         Index("idx_hotcues_unique", "track_id", "slot_number", unique=True),
+    )
+
+
+class DeviceSyncChange(Base):
+    """One row of the Device change log (ADR 0045, #375): a field change that
+    crossed Device sync, either direction, with its outcome. Append-only —
+    a revert is a new row (`reverts_id`) and marks the original
+    (`reverted_by_id`). Values are JSON (null = absent/cleared)."""
+
+    __tablename__ = "device_sync_changes"
+
+    id = Column(Integer, primary_key=True)
+    batch_id = Column(String, nullable=False)
+    device_id = Column(String, nullable=False)  # "desktop" for reverts
+    device_name = Column(String, nullable=True)
+    direction = Column(String, nullable=False)  # to_desktop | to_phone
+    track_id = Column(Integer, nullable=True)  # null for setting:<key> rows
+    field = Column(String, nullable=False)  # hot_cue:N | main_cue | tag:ID | title | artist | energy | key | setting:<key>
+    old_json = Column(Text, nullable=True)
+    new_json = Column(Text, nullable=True)
+    edit_uuid = Column(String, nullable=True)
+    edited_at = Column(DateTime, nullable=True)
+    synced_at = Column(DateTime, nullable=False)
+    outcome = Column(String, nullable=False)  # applied | superseded | rejected | reverted (revert rows: applied)
+    reverts_id = Column(Integer, nullable=True)
+    reverted_by_id = Column(Integer, nullable=True)
+
+    __table_args__ = (
+        Index("idx_device_sync_changes_batch", "batch_id"),
+        Index("idx_device_sync_changes_track", "track_id"),
+        Index("idx_device_sync_changes_synced", "synced_at"),
+        Index("idx_device_sync_changes_edit_uuid", "edit_uuid"),
     )
 
 

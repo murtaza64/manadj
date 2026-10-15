@@ -1,4 +1,4 @@
-"""Data root resolution (packaged-app PRD; ADR 0043).
+r"""Data root resolution (packaged-app PRD; ADR 0043).
 
 All mutable state lives under one data root:
   - packaged app (MANADJ_PACKAGED=1, or MANADJ_DATA_DIR set explicitly by

@@ -67,6 +67,8 @@ export interface PresetRenderer {
     height: number,
     frame: VisualizerFrameData
   ): void;
+  /** Release GPU resources (WebGL context); the renderer is not reused after. */
+  dispose?(): void;
 }
 
 /** A user-tweakable preset parameter (viz-window chrome sliders). */

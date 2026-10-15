@@ -201,3 +201,53 @@
 
 /* User select utilities */
 .user-select-none { user-select: none; }
+
+/* Checkbox (gh#342): the site control idiom applied to the native checkbox
+   so OS chrome never shows. Same vocabulary as .btn — transparent, 1px
+   border, square; hover brightens the border; checked = accent fill with
+   dark ink; indeterminate = accent dash. Instant (D9), flat (D5). Sized to
+   sit on a 28px table row or inline with --font-body text. */
+input[type='checkbox'] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  flex-shrink: 0;
+  vertical-align: middle;
+  background: transparent;
+  border: 1px solid var(--surface2);
+  border-radius: 0;
+  cursor: pointer;
+  position: relative;
+  display: inline-block;
+}
+input[type='checkbox']:hover:not(:disabled) { border-color: var(--text); }
+input[type='checkbox']:checked,
+input[type='checkbox']:indeterminate {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+input[type='checkbox']:checked::after {
+  /* a drawn check: two strokes, dark ink on accent */
+  content: '';
+  position: absolute;
+  left: 4px;
+  top: 1px;
+  width: 4px;
+  height: 8px;
+  border: solid var(--base);
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+input[type='checkbox']:indeterminate::after {
+  content: '';
+  position: absolute;
+  left: 3px;
+  right: 3px;
+  top: 6px;
+  height: 2px;
+  background: var(--base);
+}
+input[type='checkbox']:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
+input[type='checkbox']:disabled { opacity: 0.4; cursor: not-allowed; }

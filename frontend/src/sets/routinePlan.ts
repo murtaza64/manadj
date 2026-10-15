@@ -43,6 +43,13 @@ import { MAX_PITCH_RANGE_PERCENT } from '../playback/tempo';
 import { applyJumpEditsToTrace, applyPauseEditsToTrace } from '../routines/routineDraft';
 import { isScratchMoveSample, planScratchClip, slotScratchClips } from './routineScratch';
 import type { PlannedScratchClip } from './routineScratch';
+import {
+  fxSection,
+  recordedRoutineBeatFx,
+  routineFxAt,
+  type RoutineBeatFx,
+} from '../editor/beatFxLane';
+import type { BeatFxSectionState } from '../playback/beatFx';
 
 // ── Input (the seam) ─────────────────────────────────────────────────────
 
@@ -201,6 +208,22 @@ export interface PlannedRoutine {
   /** Trace discontinuity instants on the mix axis (jumpCrossed feeds the
    * Conductor's hard-sync). */
   jumpMixSecs: number[];
+  /** The Beat FX track that plays (#353): the authored edit when present,
+   * else the recording's. Null = no FX (the section reads OFF). */
+  beatFx?: RoutineBeatFx | null;
+  /** The recording's own FX track (the editor seeds authoring from it). */
+  beatFxRecorded?: RoutineBeatFx | null;
+}
+
+/** The Beat FX section a Routine asks for at `beat` (#353), physical
+ * targets resolved through slot allocation. Null = no FX track. */
+export function routineBeatFxAt(routine: PlannedRoutine, beat: number): BeatFxSectionState | null {
+  const fx = routine.beatFx;
+  if (!fx) return null;
+  return fxSection(routineFxAt(fx, beat), (target) => {
+    if (target === 'master') return 'master';
+    return routine.slots.find((s) => s.slotId === target)?.deck ?? null;
+  });
 }
 
 export interface RoutineBuildWarning {
@@ -244,9 +267,13 @@ const TRACE_SIMPLIFY_EPS_SEC = 0.03;
 const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 
 /** Per-slot (beat, pos) samples from the slot-addressed events — ticks'
- * slot-keyed playheads plus every transport/loop playhead. */
-function slotSamples(events: RoutineEventInput[], slot: number): { beat: number; pos: number }[] {
-  const out: { beat: number; pos: number }[] = [];
+ * slot-keyed playheads plus every transport/loop playhead. A sample
+ * flagged `stop` is where the deck stopped (a `pause`, or a held hot-cue
+ * preview released without a `play`): ticks only carry playing decks, so
+ * without the flag the last segment's motion would ride on through the
+ * pause (#377 round 3: waveforms kept scrolling after a pause). */
+export function slotSamples(events: RoutineEventInput[], slot: number): { beat: number; pos: number; stop?: boolean }[] {
+  const out: { beat: number; pos: number; stop?: boolean }[] = [];
   for (const e of events) {
     const beat = num(e.beat);
     if (beat === null) continue;
@@ -259,13 +286,33 @@ function slotSamples(events: RoutineEventInput[], slot: number): { beat: number;
       if (pos !== null) out.push({ beat, pos });
     }
   }
-  out.sort((a, b) => a.beat - b.beat);
+  // Transport state machine over the slot's transport events (beat order)
+  // → the beats where the deck stopped.
+  const transport = events
+    .filter((e) => e.kind === 'transport' && e.slot === slot && num(e.beat) !== null && num(e.playhead) !== null)
+    .sort((a, b) => (a.beat as number) - (b.beat as number));
+  let state: 'playing' | 'stopped' | 'preview' | 'unknown' = 'unknown';
+  for (const e of transport) {
+    const action = e.action;
+    if (action === 'play') state = 'playing';
+    else if (action === 'pause') {
+      state = 'stopped';
+      out.push({ beat: e.beat as number, pos: e.playhead as number, stop: true });
+    } else if (action === 'previewStart') {
+      if (state !== 'playing') state = 'preview';
+    } else if (action === 'previewEnd' && state === 'preview') {
+      state = 'stopped';
+      out.push({ beat: e.beat as number, pos: e.playhead as number, stop: true });
+    }
+  }
+  out.sort((a, b) => a.beat - b.beat || Number(!!a.stop) - Number(!!b.stop));
   // Dedupe near-coincident samples (a transport event inside a tick's
-  // instant): the LATER sample wins (post-action position).
-  const dedup: { beat: number; pos: number }[] = [];
+  // instant): the LATER sample wins (post-action position); a stop at the
+  // same instant survives.
+  const dedup: { beat: number; pos: number; stop?: boolean }[] = [];
   for (const s of out) {
     const prev = dedup[dedup.length - 1];
-    if (prev && s.beat - prev.beat < 1e-6) dedup[dedup.length - 1] = s;
+    if (prev && s.beat - prev.beat < 1e-6) dedup[dedup.length - 1] = prev.stop || s.stop ? { ...s, stop: true } : s;
     else dedup.push(s);
   }
   return dedup;
@@ -274,7 +321,7 @@ function slotSamples(events: RoutineEventInput[], slot: number): { beat: number;
 /** Classify a slot's samples into the replay trace. `syncRate` is the
  * slot's beatmatched track-sec/beat (60 / trackBpm). */
 export function buildSlotTrace(
-  samples: { beat: number; pos: number }[],
+  samples: { beat: number; pos: number; stop?: boolean }[],
   syncRate: number,
   entryBeat: number,
   entryPos: number
@@ -285,6 +332,7 @@ export function buildSlotTrace(
     pts.push({ beat: entryBeat, pos: entryPos });
     pts.sort((a, b) => a.beat - b.beat);
   }
+  const stops = new Set(pts.filter((p) => p.stop).map((p) => p.beat));
   const trace: RoutineTracePoint[] = pts.map((p) => ({
     beat: p.beat,
     pos: p.pos,
@@ -300,6 +348,14 @@ export function buildSlotTrace(
     const dp = b.pos - a.pos;
     if (db <= 0) continue;
     const rate = dp / db;
+    if (stops.has(a.beat)) {
+      // The deck stopped here: hold until the next sample (snapping if
+      // it moved — a hot cue / seek while paused).
+      a.moving = false;
+      a.ratePerBeat = 0;
+      if (Math.abs(dp) > PAUSE_EPS_SEC) b.jump = true;
+      continue;
+    }
     if (rate >= MOVING_MIN * syncRate && rate <= MOVING_MAX * syncRate) {
       a.moving = true;
       a.ratePerBeat = rate;
@@ -328,8 +384,8 @@ export function buildSlotTrace(
   if (simplified.length >= 2) {
     const last = simplified[simplified.length - 1];
     const prev = simplified[simplified.length - 2];
-    last.moving = prev.moving;
-    last.ratePerBeat = prev.moving ? prev.ratePerBeat : 0;
+    last.moving = prev.moving && !stops.has(last.beat);
+    last.ratePerBeat = last.moving ? prev.ratePerBeat : 0;
   }
   return simplified;
 }
@@ -719,14 +775,16 @@ export function plannedWithLaneEdits(
   planned: PlannedRoutine,
   edits: import('../routines/routineDraft').RoutineEdits | null
 ): PlannedRoutine {
+  const beatFx = edits?.beatFx ?? planned.beatFxRecorded ?? null;
   if (
     !edits ||
     (Object.keys(edits.lanes).length === 0 && Object.keys(edits.trims ?? {}).length === 0)
   ) {
-    return planned;
+    return beatFx === (planned.beatFx ?? null) ? planned : { ...planned, beatFx };
   }
   return {
     ...planned,
+    beatFx,
     slots: planned.slots.map((s) => ({
       ...s,
       lanes: withLaneEdits(s.lanes, edits, s.slotId),
@@ -1078,6 +1136,11 @@ export function buildPlannedRoutine(
   // Routine-wide list kept for whole-plan queries (per-deck hard-sync
   // scoping reads the slots' own lists — #161).
   const jumpMixSecs: number[] = slots.flatMap((s) => s.jumpMixSecs).sort((a, b) => a - b);
+  // Beat FX (#353): section-level — recorded events address baked slot
+  // indices; slot ids are the stable handle.
+  const beatFxRecorded = input.authored
+    ? null
+    : recordedRoutineBeatFx(input.events, (i) => slotIdsIn[i] ?? null);
 
   return {
     routine: {
@@ -1098,6 +1161,8 @@ export function buildPlannedRoutine(
         pitchPercent: exitSlot.basePitchPercent,
       },
       jumpMixSecs,
+      beatFx: edits?.beatFx ?? beatFxRecorded,
+      beatFxRecorded,
     },
     warnings,
   };

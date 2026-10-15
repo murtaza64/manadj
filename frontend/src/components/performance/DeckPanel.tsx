@@ -50,6 +50,7 @@ import { channelFaderToGain, trimToGain } from '../../playback/mixerMath';
 import { createStripHistory } from '../../performance/stripHistory';
 import type { StripValues } from '../../performance/stripHistory';
 import { eqValueToGain } from '../../playback/graph';
+import { filterGroupGains } from '../../waveform/filterModulation';
 import type { Mixer } from '../../playback/mixer';
 import { focusDeck, useControlFocus } from '../../performance/controlFocus';
 import { formatKeyDisplay } from '../../utils/keyUtils';
@@ -272,8 +273,9 @@ export function DeckWaveform({
   const modCacheRef = useRef<{
     state: ReturnType<Mixer['getChannelState']> | null;
     auto: ReturnType<Mixer['getAutomation']>;
+    filterSettings: ReturnType<Mixer['getFilterSettings']> | null;
     value: StripValues;
-  }>({ state: null, auto: null, value: { gain: 1, low: 1, mid: 1, high: 1, fader: 1 } });
+  }>({ state: null, auto: null, filterSettings: null, value: { gain: 1, low: 1, mid: 1, high: 1, fader: 1 } });
   const liveStrip = useCallback(() => {
     const cache = modCacheRef.current;
     const ch = mixer.getChannelState(deck);
@@ -281,20 +283,25 @@ export function DeckWaveform({
     // the automation overlay, not the human state (ADR 0022) — the waveform
     // must show what's audible, whoever's hands are on the strip.
     const auto = mixer.getAutomation(deck);
-    if (ch !== cache.state || auto !== cache.auto) {
+    const filterSettings = mixer.getFilterSettings();
+    if (ch !== cache.state || auto !== cache.auto || filterSettings !== cache.filterSettings) {
       cache.state = ch;
       cache.auto = auto;
+      cache.filterSettings = filterSettings;
       const eq = auto?.eq ?? ch.eq;
       const trim = auto?.trim ?? ch.trim;
+      // Sweep filter (#377): the real response folded into the group gains
+      // — an LPF thins the high/mid groups, an HPF the low, like a kill.
+      const sweep = filterGroupGains(filterSettings, auto?.filter ?? ch.filter);
       cache.value = {
         // Real trim curve, center-normalized, UNCAPPED above neutral: a
         // boost fattens the body (the shader clamps heights at the rail,
         // like a meter pinning). The mod texture encodes up to 2× — a
         // +12 dB trim reads as 2× (saturated), which is the honest ceiling.
         gain: trimToGain(trim) / trimToGain(0.5),
-        low: eqValueToGain(eq.low),
-        mid: eqValueToGain(eq.mid),
-        high: eqValueToGain(eq.high),
+        low: eqValueToGain(eq.low) * sweep[0],
+        mid: eqValueToGain(eq.mid) * sweep[1],
+        high: eqValueToGain(eq.high) * sweep[2],
         // Raw fader position — the fill's input, never the waveform's.
         fader: auto?.fader ?? ch.fader,
       };

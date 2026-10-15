@@ -13,6 +13,7 @@ import {
   buildPlannedRoutine,
   buildSlotLanes,
   buildSlotTrace,
+  slotSamples,
   routineSlotStateAt,
   slotLanesAt,
   slotOccupyingDeckAt,
@@ -220,6 +221,36 @@ describe('buildSlotTrace / traceStateAt', () => {
     // At/after the jump: snapped.
     expect(traceStateAt(trace, 12).pos).toBeCloseTo(60, 6);
     expect(traceStateAt(trace, 16).pos).toBeCloseTo(62, 6);
+  });
+
+  it('a recorded pause stops the deck (ticks omit paused decks)', () => {
+    const events = [
+      { kind: 'transport', action: 'play', slot: 0, beat: 0, playhead: 10 },
+      { kind: 'tick', beat: 4, playheads: { '0': 12 } },
+      { kind: 'tick', beat: 8, playheads: { '0': 14 } },
+      { kind: 'transport', action: 'pause', slot: 0, beat: 10, playhead: 15 },
+      { kind: 'tick', beat: 12, playheads: { '1': 3 } },
+    ];
+    const trace = buildSlotTrace(slotSamples(events, 0), syncRate, 0, 10);
+    expect(traceStateAt(trace, 9).moving).toBe(true);
+    const after = traceStateAt(trace, 20);
+    expect(after.moving).toBe(false);
+    expect(after.pos).toBeCloseTo(15, 6);
+  });
+
+  it('pause then hot cue: holds, then snaps at the cue instant', () => {
+    const events = [
+      { kind: 'transport', action: 'play', slot: 0, beat: 0, playhead: 10 },
+      { kind: 'tick', beat: 4, playheads: { '0': 12 } },
+      { kind: 'transport', action: 'pause', slot: 0, beat: 8, playhead: 14 },
+      { kind: 'transport', action: 'previewStart', slot: 0, beat: 12, playhead: 0 },
+      { kind: 'transport', action: 'hotCue', slot: 0, beat: 12, playhead: 0 },
+      { kind: 'transport', action: 'previewEnd', slot: 0, beat: 13, playhead: 0 },
+    ];
+    const trace = buildSlotTrace(slotSamples(events, 0), syncRate, 0, 10);
+    expect(traceStateAt(trace, 10)).toMatchObject({ pos: 14, moving: false });
+    expect(traceStateAt(trace, 12.5).pos).toBeCloseTo(0, 6);
+    expect(traceStateAt(trace, 16)).toMatchObject({ pos: 0, moving: false });
   });
 
   it('before the first sample the deck parks at the first position', () => {

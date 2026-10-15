@@ -7,13 +7,19 @@ import type { StoppedMasterRecording } from '../recording/masterRecording';
 import { reduceRecorder } from '../recording/recorderState';
 import type { RecordingFormat } from '../recording/recorderState';
 import { formatRecordingElapsed } from '../recording/recordingTime';
+import { useToast } from './Toast';
 
 function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function basename(path: string): string {
+  return path.split(/[\\/]/).pop() ?? path;
+}
+
 export function MasterRecorderControl() {
   const mixer = useMixer();
+  const toast = useToast();
   const [format, setFormat] = useState<RecordingFormat>('wav');
   const [state, dispatch] = useReducer(reduceRecorder, { status: 'idle' });
   const [now, setNow] = useState(0);
@@ -30,11 +36,17 @@ export function MasterRecorderControl() {
   const persist = async (recording: StoppedMasterRecording, selected: RecordingFormat) => {
     try {
       const result = await recording.save(selected);
-      if (!result.canceled && result.path) console.info(`[recording] saved ${result.path}`);
+      if (!result.canceled && result.path) {
+        console.info(`[recording] saved ${result.path}`);
+        toast(`Recording saved: ${basename(result.path)}`);
+      } else if (result.canceled) {
+        toast('Save canceled: recording discarded');
+      }
       stopped.current = null;
       dispatch({ type: 'finished' });
     } catch (error) {
       console.error('[recording] save failed', error);
+      toast(`Recording save failed: ${message(error)}`);
       dispatch({ type: 'save-failed', message: message(error) });
     }
   };
@@ -65,6 +77,7 @@ export function MasterRecorderControl() {
     } catch (error) {
       active.current = null;
       console.error('[recording] stop failed', error);
+      toast(`Recording failed: ${message(error)}`);
       dispatch({ type: 'stop-failed', message: message(error) });
     }
   };
@@ -82,6 +95,7 @@ export function MasterRecorderControl() {
   };
 
   const busy = state.status === 'starting' || state.status === 'stopping' || state.status === 'saving';
+  const finishing = state.status === 'stopping' || state.status === 'saving';
   const duration =
     state.status === 'recording' || state.status === 'stopping'
       ? formatRecordingElapsed(now - state.startedAt)
@@ -113,10 +127,16 @@ export function MasterRecorderControl() {
         <button
           className="topbar-record-start"
           disabled={busy}
+          aria-busy={busy}
           onClick={() => void start()}
-          title={error ?? 'Record Master output'}
+          title={finishing ? 'Saving recording…' : error ?? 'Record Master output'}
         >
-          <span className="topbar-record-dot" /> {busy ? state.status.toUpperCase() : 'REC'}
+          {finishing ? (
+            <span className="topbar-record-spinner" aria-hidden />
+          ) : (
+            <span className="topbar-record-dot" />
+          )}{' '}
+          {busy ? `${state.status.toUpperCase()}…` : 'REC'}
         </button>
       )}
     </div>

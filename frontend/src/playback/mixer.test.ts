@@ -16,6 +16,22 @@ import { Mixer } from './mixer';
 import { channelFaderToGain } from './mixerMath';
 import type { AutomationChannelValues } from './mixer';
 import { DEFAULT_BEAT_FX_SETTINGS } from './beatFxSettings';
+import type { BeatFxRepeatCommand } from './worklet/beatFxRepeatProtocol';
+
+// TRANS/ROLL worklet seam (#360): off by default (inserts stay pass-through,
+// as in node); tests that need it record the commands each insert posts.
+const repeatFake = vi.hoisted(() => ({
+  enabled: false,
+  posts: [] as BeatFxRepeatCommand[][],
+}));
+vi.mock('./worklet/beatFxRepeatNode', () => ({
+  createBeatFxRepeatNode: async (ctx: { createGain(): unknown }) => {
+    if (!repeatFake.enabled) return null;
+    const log: BeatFxRepeatCommand[] = [];
+    repeatFake.posts.push(log);
+    return { node: ctx.createGain(), post: (command: BeatFxRepeatCommand) => log.push(command) };
+  },
+}));
 
 const values = (fader: number, eq: number, filter: number): AutomationChannelValues => ({
   fader,
@@ -689,7 +705,8 @@ describe('stem solo (stems review feedback)', () => {
  * the echo SEND, the other soft-clip output is the echo WET. */
 function fxNodesFor(ctx: FakeAudioContext, index: number) {
   type GainLike = FakeNode & { gain: FakeParam };
-  const delay = ctx.delays.filter((node) => node.maxDelayTime > 1)[index];
+  // Echo delays (LOW CUT ECHO's delay is fed by its high-pass instead).
+  const delay = ctx.delays.filter((node) => node.maxDelayTime > 1 && node.inputs.size === 2)[index];
   const feeds = [...delay.inputs] as GainLike[];
   const feedback = feeds.find((node) => node.gain.value === 0.5)!;
   const echoSend = feeds.find((node) => node !== feedback)!;
@@ -700,10 +717,10 @@ function fxNodesFor(ctx: FakeAudioContext, index: number) {
   const reverbSend = [...convolver.inputs][0] as GainLike;
   const reverbWet = [...convolver.outputs][0] as GainLike;
   const output = [...echoWet.outputs][0];
-  const input = [...echoSend.inputs][0] as GainLike;
-  const dry = ([...output.inputs] as GainLike[]).find(
-    (node) => node !== echoWet && node !== reverbWet
-  )!;
+  // echoSend hangs off the TRANS/ROLL splice point (`mid`), fed by input.
+  const mid = [...echoSend.inputs][0];
+  const input = [...mid.inputs][0] as GainLike;
+  const dry = ([...output.inputs] as GainLike[]).find((node) => node.inputs.has(mid))!;
   return { delay, feedback, echoSend, echoWet, clip, convolver, reverbSend, reverbWet, input, output, dry };
 }
 
@@ -757,7 +774,7 @@ describe('Beat FX insert (gh#272)', () => {
     const mixer = new Mixer();
     mixer.portFor('A').ensureAudio();
     const flanger = flangerNodesFor(Fake.instances[0], 0);
-    const echoDelay = Fake.instances[0].delays.filter((node) => node.maxDelayTime > 1)[0];
+    const echoDelay = Fake.instances[0].delays.filter((node) => node.maxDelayTime > 1 && node.inputs.size === 2)[0];
     mixer.selectBeatFx('flanger');
     mixer.toggleBeatFxOn();
     // Default 1/2 bar = 2 beats at 120 BPM = 1 second per LFO cycle.
@@ -995,5 +1012,107 @@ describe('Beat FX insert (gh#272)', () => {
     mixer.setBeatFxDepth(0.3);
     mixer.stepBeatFxBeats('double');
     expect(changes).toEqual(['beatFx', 'beatFx', 'beatFx', 'beatFx', 'beatFx']);
+  });
+});
+
+describe('LOW CUT ECHO, TRANS and ROLL (#360)', () => {
+  afterEach(() => {
+    repeatFake.enabled = false;
+    repeatFake.posts.length = 0;
+  });
+
+  it('LOW CUT ECHO high-passes the send AND every repeat (filter inside the loop)', () => {
+    const Fake = withFakeAudio();
+    const mixer = new Mixer();
+    mixer.portFor('A').ensureAudio();
+    const ctx = Fake.instances[0];
+    type Any = FakeNode & { gain?: FakeParam };
+    const lceDelay = ctx.delays.filter((node) => node.maxDelayTime > 1 && node.inputs.size === 1)[0];
+    const cut = [...lceDelay.inputs][0] as Any & { type: string; frequency: FakeParam };
+    expect(cut.type).toBe('highpass');
+    expect(cut.frequency.value).toBe(DEFAULT_BEAT_FX_SETTINGS.lowCutEchoHz);
+    // Two feeds: the send and the feedback return from the clip.
+    expect(cut.inputs.size).toBe(2);
+    const clip = [...lceDelay.outputs][0];
+    const feedback = [...clip.outputs].find((node) => [...node.outputs].includes(cut)) as Any;
+    expect(feedback.gain!.value).toBe(DEFAULT_BEAT_FX_SETTINGS.echoFeedback);
+    const send = [...cut.inputs].find((node) => node !== feedback) as Any;
+    expect(send.gain!.value).toBe(0);
+    mixer.selectBeatFx('lowCutEcho');
+    mixer.toggleBeatFxOn();
+    expect(send.gain!.value).toBe(1);
+    mixer.setBeatFxSettings({ lowCutEchoHz: 500 });
+    expect(cut.frequency.value).toBe(500);
+  });
+
+  it('posts TRANS/ROLL state, beats and a phase clock to the targeted insert only', async () => {
+    repeatFake.enabled = true;
+    withFakeAudio();
+    const mixer = new Mixer();
+    mixer.registerBeatClock((deck) => (deck === 'B' ? { beat: 12.5, beatSeconds: 0.5 } : null));
+    mixer.portFor('A').ensureAudio();
+    await Promise.resolve(); await Promise.resolve();
+    expect(repeatFake.posts).toHaveLength(5); // A–D + master
+    const [, b] = repeatFake.posts;
+    b.length = 0;
+    mixer.selectBeatFxTarget('B');
+    mixer.selectBeatFx('trans');
+    mixer.setBeatFxDepth(1);
+    mixer.toggleBeatFxOn();
+    const clock = b.find((command) => command.type === 'clock');
+    expect(clock).toMatchObject({ beat: 12.5, beatSeconds: 0.5 });
+    const state = b.filter((command) => command.type === 'state').at(-1);
+    expect(state).toMatchObject({ state: { mode: 'trans', dry: 0, wet: 1 } });
+    mixer.stepBeatFxBeats('halve');
+    expect(b.filter((command) => command.type === 'state').at(-1))
+      .toMatchObject({ state: { mode: 'trans', beats: 0.25 } });
+    mixer.selectBeatFx('roll');
+    expect(b.filter((command) => command.type === 'state').at(-1))
+      .toMatchObject({ state: { mode: 'roll' } });
+    // Other channels never left 'off'.
+    expect(repeatFake.posts[0].filter((c) => c.type === 'state').every((c) =>
+      c.type === 'state' && c.state.mode === 'off')).toBe(true);
+    mixer.toggleBeatFxOn();
+    expect(b.filter((command) => command.type === 'state').at(-1))
+      .toMatchObject({ state: { mode: 'off' } });
+  });
+});
+
+describe('DRUM RELEASE momentary hold (#361)', () => {
+  it('runs the SELECTED effect on a held channel regardless of ON and CH SELECT, additive to the section', () => {
+    const Fake = withFakeAudio();
+    const mixer = new Mixer();
+    mixer.portFor('A').ensureAudio();
+    const a = fxNodesFor(Fake.instances[0], 0);
+    const b = fxNodesFor(Fake.instances[0], 1);
+    mixer.selectBeatFx('echo');
+    mixer.selectBeatFxTarget('A');
+    mixer.setBeatFxDepth(0);
+    expect(a.echoSend.gain.value).toBe(0); // section OFF
+    mixer.setBeatFxHeld('B', true);
+    expect(b.echoSend.gain.value).toBe(1);
+    expect(a.echoSend.gain.value).toBe(0);
+    expect(mixer.getBeatFxSection().held).toEqual(['B']);
+    mixer.setBeatFxOn(true); // section on A + paddle on B
+    expect(a.echoSend.gain.value).toBe(1);
+    expect(b.echoSend.gain.value).toBe(1);
+    mixer.setBeatFxHeld('A', true); // same channel: still one engaged insert
+    expect(a.echoSend.gain.value).toBe(1);
+    mixer.setBeatFxHeld('A', false);
+    mixer.setBeatFxHeld('B', false);
+    expect(b.echoSend.gain.value).toBe(0); // SEND closes; the return stays for tails
+    expect(b.echoWet.gain.value).toBeGreaterThan(0);
+    expect(mixer.getBeatFxSection().held).toBeUndefined();
+  });
+
+  it('a held paddle does nothing with no effect selected', () => {
+    const Fake = withFakeAudio();
+    const mixer = new Mixer();
+    mixer.portFor('A').ensureAudio();
+    const c = fxNodesFor(Fake.instances[0], 2);
+    mixer.selectBeatFx(null);
+    mixer.setBeatFxHeld('C', true);
+    expect(c.echoSend.gain.value).toBe(0);
+    expect(c.reverbSend.gain.value).toBe(0);
   });
 });

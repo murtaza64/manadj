@@ -34,6 +34,12 @@ export const MAX_SCRATCH_RATE = 16;
  * No callback-gap division, prediction watchdog, or target-position debt. */
 export const SCRATCH_RESPONSE_SECONDS = 0.008;
 export const SCRATCH_SILENT_RATE = 0.001;
+/** Speed (× normal) at which the scratch voice reaches full level. Only a
+ * declick band: below it the voice fades to silence so a stopping platter
+ * never parks on a DC offset. Was 0.5 (from the Mixxx-style speed gain),
+ * which attenuated every slow drag and release tail by several dB — a CDJ
+ * keeps amplitude flat down to near-zero speed, only the pitch falls. */
+export const SCRATCH_FULL_GAIN_RATE = 0.04;
 
 /** Transport loops may extend past EOF; scratch trajectories may not. */
 export function effectiveScratchLoop(loop: { start: number; end: number } | null, trackDuration: number) {
@@ -55,7 +61,8 @@ export function scratchRate(motion: ScratchFilter & { time: number }, now: numbe
 }
 
 export function scratchGain(rate: number): number {
-  const speed = Math.max(0, Math.min(1, (Math.abs(rate) - SCRATCH_SILENT_RATE) / 0.5));
+  const speed = Math.max(0, Math.min(1,
+    (Math.abs(rate) - SCRATCH_SILENT_RATE) / (SCRATCH_FULL_GAIN_RATE - SCRATCH_SILENT_RATE)));
   return speed * speed * (3 - 2 * speed);
 }
 

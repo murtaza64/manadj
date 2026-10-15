@@ -5,6 +5,7 @@ backend.tasks.worker just calls it in a loop.
 """
 
 import json
+from contextvars import ContextVar
 import logging
 import time
 from collections.abc import Callable
@@ -52,6 +53,39 @@ def create_task(
     return task
 
 
+# The task a handler is running on behalf of, so deep code (a yt-dlp hook,
+# a transfer poll) can report progress without threading the id through
+# every signature.
+_current_task_id: ContextVar[int | None] = ContextVar("current_task_id", default=None)
+
+
+def current_task_id() -> int | None:
+    return _current_task_id.get()
+
+
+def report_progress(fraction: float | None, label: str | None = None, task_id: int | None = None) -> None:
+    """Write progress for the current task in its own short session, so a
+    handler's open transaction is untouched and readers see it immediately."""
+    tid = task_id if task_id is not None else _current_task_id.get()
+    if tid is None:
+        return
+    from ..database import SessionLocal
+
+    db = SessionLocal()
+    try:
+        task = db.get(Task, tid)
+        if task is None:
+            return
+        task.progress = None if fraction is None else max(0.0, min(1.0, float(fraction)))
+        task.progress_label = label
+        db.commit()
+    except Exception:  # progress is best-effort; never fail the task for it
+        db.rollback()
+        logger.debug("progress write failed for task %s", tid, exc_info=True)
+    finally:
+        db.close()
+
+
 def run_pending(
     db: Session,
     handlers: dict[str, Handler],
@@ -95,6 +129,7 @@ def run_pending(
         task.state = "running"
         task.started_at = now
         db.commit()
+        token = _current_task_id.set(task.id)
         try:
             handler = handlers[task_type]
             handler(db, task.payload)
@@ -107,11 +142,13 @@ def run_pending(
                 seconds=d.retry_in_secs
             )
             db.commit()
+            _current_task_id.reset(token)
             processed += 1
             continue
         except RateLimitedError as e:
             db.rollback()
             _defer_for_rate_limit(db, task, e)
+            _current_task_id.reset(token)
             processed += 1
             continue
         except Exception as e:
@@ -121,6 +158,8 @@ def run_pending(
             logger.warning("task %d (%s) failed: %s", task.id, task_type, e)
         else:
             task.state = "done"
+            task.progress = 1.0 if task.progress is not None else None
+        _current_task_id.reset(token)
         task.finished_at = datetime.now(timezone.utc).replace(tzinfo=None)
         db.commit()
         processed += 1
@@ -247,9 +286,62 @@ def task_summary(db: Session) -> tuple[dict[str, int], Task | None, int]:
     return counts, running, int(failures or 0)
 
 
+def latest_per_ref(db: Session, tasks: list[Task]) -> set[int]:
+    """Ids among `tasks` that are the newest task for their ref (ref-less
+    tasks count as their own). A failure that a later task for the same
+    subject superseded (it was retried, or the item was fulfilled another
+    way) is history, not a worklist entry (gh#342)."""
+    refs = {t.ref for t in tasks if t.ref}
+    newest: dict[str, int] = {}
+    if refs:
+        rows = (
+            db.query(Task.ref, func.max(Task.id))
+            .filter(Task.ref.in_(refs))
+            .group_by(Task.ref)
+            .all()
+        )
+        newest = {ref: int(mx) for ref, mx in rows}
+    return {t.id for t in tasks if not t.ref or newest.get(t.ref) == t.id}
+
+
+def attention_tasks(db: Session) -> list[Task]:
+    """The failure worklist: undismissed failed tasks that are the newest
+    task for their subject, newest first."""
+    failed = (
+        db.query(Task)
+        .filter(Task.state == "failed", Task.dismissed_at.is_(None))
+        .order_by(Task.id.desc())
+        .all()
+    )
+    keep = latest_per_ref(db, failed)
+    seen_refs: set[str] = set()
+    out: list[Task] = []
+    for t in failed:
+        if t.id not in keep:
+            continue
+        if t.ref:
+            if t.ref in seen_refs:
+                continue
+            seen_refs.add(t.ref)
+        out.append(t)
+    return out
+
+
+def active_tasks(db: Session) -> list[Task]:
+    """Running tasks, then pending ones (soonest first)."""
+    return (
+        db.query(Task)
+        .filter(Task.state.in_(("running", "pending")))
+        .order_by((Task.state == "running").desc(), Task.id)
+        .all()
+    )
+
+
 def _reset_for_retry(task: Task) -> None:
     task.state = "pending"
     task.error = None
+    task.progress = None
+    task.progress_label = None
     task.attempts = 0
     task.not_before = None
     task.started_at = None

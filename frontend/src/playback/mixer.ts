@@ -84,6 +84,9 @@ import {
   echoDelaySeconds,
   stepEchoBeats,
   flangerPeriodSeconds,
+  effectiveBeatFxState,
+  isReplacementEffect,
+  beatFxChannelEngaged,
 } from './beatFx';
 import type { BeatFxEffectId, BeatFxSectionState, BeatFxTarget } from './beatFx';
 import {
@@ -190,7 +193,7 @@ export interface AutomationChannelValues {
   stems?: Record<StemName, boolean>;
 }
 
-const FLAT_CHANNEL: ChannelState = {
+export const FLAT_CHANNEL: ChannelState = {
   trim: 0.5,
   eq: { low: 0.5, mid: 0.5, high: 0.5 },
   filter: 0,
@@ -218,7 +221,7 @@ export const CUE_MIX_DEFAULT = 0;
 export const MASTER_LEVEL_DEFAULT = MASTER_UNITY_VALUE;
 
 function makeFilter(
-  ctx: AudioContext,
+  ctx: BaseAudioContext,
   type: 'lowpass' | 'highpass',
   frequency: number
 ): BiquadFilterNode {
@@ -239,7 +242,7 @@ const LIVE_CEILING_CURVE = samplePeakCeilingCurve();
  * DynamicsCompressorNode added makeup gain, compressed ordinary mixes, and
  * still overshot above 0 dBFS. Neutral trim now provides summing headroom;
  * this node only bounds mistakes/transients at -2 dBFS. */
-function makeSamplePeakCeiling(ctx: AudioContext): WaveShaperNode {
+export function makeSamplePeakCeiling(ctx: BaseAudioContext): WaveShaperNode {
   const ceiling = ctx.createWaveShaper();
   ceiling.curve = LIVE_CEILING_CURVE;
   ceiling.oversample = 'none';
@@ -255,7 +258,7 @@ function makeSamplePeakCeiling(ctx: AudioContext): WaveShaperNode {
  * (audible as fuzz). Linear ramp so targets are actually reached (kill =
  * true zero, not a setTargetAtTime asymptote).
  */
-function rampGain(ctx: AudioContext, param: AudioParam, target: number): void {
+export function rampGain(ctx: BaseAudioContext, param: AudioParam, target: number): void {
   const current = param.value; // computed value, including in-flight ramp progress
   const now = ctx.currentTime;
   param.cancelScheduledValues(now);
@@ -267,7 +270,7 @@ function rampGain(ctx: AudioContext, param: AudioParam, target: number): void {
  * The PFL tap (headphone-cue 02) hangs off the sweep output — post-EQ/filter,
  * pre-fader/Beat-FX/crossfader. Beat FX is POST-FADER so closing the fader
  * stops new excitation while the processor's existing tail returns downstream. */
-class ChannelStrip {
+export class ChannelStrip {
   readonly input: GainNode;
   readonly trimGain: GainNode;
   readonly bandGains: Record<EqBand, GainNode>;
@@ -285,7 +288,7 @@ class ChannelStrip {
   readonly meterAnalyser: AnalyserNode;
   private readonly meterBuffer: Float32Array<ArrayBuffer>;
 
-  constructor(ctx: AudioContext, state: ChannelState) {
+  constructor(ctx: BaseAudioContext, state: ChannelState) {
     this.input = ctx.createGain();
     this.trimGain = ctx.createGain();
     this.trimGain.gain.value = trimToGain(state.trim);
@@ -327,7 +330,7 @@ class ChannelStrip {
 
     this.sweep = createSweepFilter(ctx);
     this.beatFx = createBeatFxInsert(ctx);
-    this.beatFx.update({ echo: false, reverb: false, flanger: false, depth: 0 }, true);
+    this.beatFx.update(effectiveBeatFxState(null, false, 0, ECHO_BEATS_DEFAULT), true);
 
     this.faderGain = ctx.createGain();
     this.faderGain.gain.value = channelFaderToGain(state.fader);
@@ -462,6 +465,7 @@ export class Mixer {
   /** MST has no Deck of its own; retain the last 1–4 target as its tempo
    * source, matching a hardware section whose BPM survives CH SELECT. */
   private beatFxTempoChannel: ChannelId = 'A';
+  private beatClock: ((deck: ChannelId) => { beat: number; beatSeconds: number } | null) | null = null;
   /** Wall seconds per musical beat, per channel (gh#272): the echo's beat
    * clock, pushed by each Deck's tempo bridge (DeckContext). Survives
    * graph rebuilds like the rest of the control state. */
@@ -485,7 +489,7 @@ export class Mixer {
         D: new ChannelStrip(ctx, this.channels.D),
       };
       const masterBeatFx = createBeatFxInsert(ctx);
-      masterBeatFx.update({ echo: false, reverb: false, flanger: false, depth: 0 }, true);
+      masterBeatFx.update(effectiveBeatFxState(null, false, 0, ECHO_BEATS_DEFAULT), true);
       const masterGain = ctx.createGain();
       masterGain.gain.value = masterValueToGain(this.master);
 
@@ -1260,6 +1264,23 @@ export class Mixer {
     this.applyMasterBeatFx();
   }
 
+  /** Per-deck momentary (GRV6 DRUM RELEASE paddle, #361): while held the
+   * channel runs the SELECTED effect at the section depth, regardless of
+   * ON and CH SELECT, additive to the section (one insert per channel, so
+   * paddle + section on the same channel is simply engaged). Release
+   * closes the SEND: tails ring out as usual. */
+  setBeatFxHeld(channel: ChannelId, held: boolean): void {
+    const current = this.beatFxSection.held ?? [];
+    if (current.includes(channel) === held) return;
+    const next = held ? [...current, channel].sort() : current.filter((c) => c !== channel);
+    const { held: _drop, ...rest } = this.beatFxSection;
+    void _drop;
+    this.beatFxSection = next.length ? { ...rest, held: next } : rest;
+    this.notify('beatFx');
+    this.ensure();
+    this.applyBeatFx(channel);
+  }
+
   /** Single GRV6 LEVEL/DEPTH control. -1 = original, 0 = midpoint,
    * +1 = effect-only. */
   setBeatFxDepth(depth: number): void {
@@ -1275,8 +1296,10 @@ export class Mixer {
   setBeatFxSection(state: Readonly<BeatFxSectionState>): void {
     const next = { ...state, on: state.selected === null ? false : state.on };
     const cur = this.beatFxSection;
+    const sameHeld = (cur.held ?? []).join() === (next.held ?? []).join();
     if (cur.selected === next.selected && cur.target === next.target && cur.on === next.on
-      && cur.depth === next.depth && cur.beats === next.beats) return;
+      && cur.depth === next.depth && cur.beats === next.beats && sameHeld) return;
+    if (next.held && next.held.length === 0) delete next.held;
     if (CHANNEL_IDS.includes(next.target as ChannelId)) {
       this.beatFxTempoChannel = next.target as ChannelId;
     }
@@ -1298,8 +1321,12 @@ export class Mixer {
     this.beatFxSection = { ...this.beatFxSection, beats };
     this.notify('beatFx');
     this.ensure();
-    for (const channel of CHANNEL_IDS) this.applyBeatFxTiming(channel);
+    for (const channel of CHANNEL_IDS) {
+      this.applyBeatFxTiming(channel);
+      this.applyBeatFx(channel);
+    }
     this.applyMasterBeatFxTiming();
+    this.applyMasterBeatFx();
   }
 
   /**
@@ -1317,6 +1344,7 @@ export class Mixer {
     if (this.liveGraph()) {
       this.applyBeatFxTiming(channel);
       if (channel === this.beatFxTempoChannel) this.applyMasterBeatFxTiming();
+      this.syncBeatFxClock(channel);
     }
   }
 
@@ -1331,30 +1359,49 @@ export class Mixer {
 
   private applyBeatFx(channel: ChannelId, immediate = false): void {
     if (!this.strips) return;
-    const engaged = this.beatFxSection.on && this.beatFxSection.target === channel;
-    this.strips[channel].beatFx.update(
-      {
-        echo: engaged && this.beatFxSection.selected === 'echo',
-        reverb: engaged && this.beatFxSection.selected === 'reverb',
-        flanger: engaged && this.beatFxSection.selected === 'flanger',
-        depth: this.beatFxSection.depth,
-      },
-      immediate
-    );
+    const { selected, depth, beats } = this.beatFxSection;
+    const engaged = beatFxChannelEngaged(this.beatFxSection, channel);
+    if (engaged && isReplacementEffect(selected)) this.pushBeatFxClock(channel);
+    this.strips[channel].beatFx.update(effectiveBeatFxState(selected, engaged, depth, beats), immediate);
   }
 
   private applyMasterBeatFx(immediate = false): void {
     if (!this.masterBeatFx) return;
-    const engaged = this.beatFxSection.on && this.beatFxSection.target === 'master';
-    this.masterBeatFx.update(
-      {
-        echo: engaged && this.beatFxSection.selected === 'echo',
-        reverb: engaged && this.beatFxSection.selected === 'reverb',
-        flanger: engaged && this.beatFxSection.selected === 'flanger',
-        depth: this.beatFxSection.depth,
-      },
-      immediate
-    );
+    const { selected, on, target, depth, beats } = this.beatFxSection;
+    const engaged = on && target === 'master';
+    if (engaged && isReplacementEffect(selected)) this.pushBeatFxClock('master');
+    this.masterBeatFx.update(effectiveBeatFxState(selected, engaged, depth, beats), immediate);
+  }
+
+  /** TRANS/ROLL phase lock (#360): the Deck beat-clock provider (DeckContext
+   * registers it) gives the beat coordinate now; MST follows the tempo
+   * Deck. Without a provider/grid the insert keeps its own tempo-only clock. */
+  registerBeatClock(provider: ((deck: ChannelId) => { beat: number; beatSeconds: number } | null) | null): void {
+    this.beatClock = provider;
+  }
+
+  /** A Deck's engine moved (frame, seek, tempo): re-anchor any TRANS/ROLL
+   * insert it clocks. Cheap no-op otherwise; the kernel ignores jitter. */
+  syncBeatFxClock(deck: ChannelId): void {
+    if (!this.liveGraph() || !isReplacementEffect(this.beatFxSection.selected)) return;
+    if (beatFxChannelEngaged(this.beatFxSection, deck)) this.pushBeatFxClock(deck);
+    if (beatFxChannelEngaged(this.beatFxSection, 'master') && deck === this.beatFxTempoChannel) {
+      this.pushBeatFxClock('master');
+    }
+  }
+
+  private pushBeatFxClock(target: ChannelId | 'master'): void {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    const deck = target === 'master' ? this.beatFxTempoChannel : target;
+    const insert = target === 'master' ? this.masterBeatFx : this.strips?.[target].beatFx;
+    if (!insert) return;
+    const live = this.beatClock?.(deck) ?? null;
+    insert.setClock({
+      time: ctx.currentTime,
+      beat: live ? live.beat : null,
+      beatSeconds: live?.beatSeconds ?? this.channelBeatSeconds[deck],
+    });
   }
 
   private applyMasterBeatFxTiming(immediate = false): void {

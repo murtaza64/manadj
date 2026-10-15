@@ -44,6 +44,7 @@ import { ROUTINE_ACCENT } from '../theme/routineColor';
 import { FILTER_LPF_COLOR } from '../theme/automationColors';
 import { hexToRgbTriplet } from '../theme/deckColors';
 import { LaneCanvas } from '../editor/LaneCanvas';
+import { BeatFxRows } from './BeatFxRows';
 import { deleteSelected } from '../editor/laneSelection';
 import { fillColorAt, NEUTRAL_EPS, strokeColorAt } from '../editor/laneShade';
 import { engineIdToOpenKey } from '../utils/keyUtils';
@@ -2206,6 +2207,21 @@ export function RoutineTimeline({
             </div>
           );
         })}
+        {/* Beat FX (#353): one section-level track under the slots. */}
+        <BeatFxRows
+          planned={planned}
+          authored={edits.beatFx}
+          draftStore={draftStore}
+          xOf={xOf}
+          pxPerBeat={pxPerBeat}
+          width={width}
+          authoringStart={authoringStart}
+          authoringEnd={authoringEnd}
+          playheadBeat={() => player.getBeat()}
+          guides={fallbackLaneGuides}
+          registerScrollDraw={scrollDrawFor('fx:depth')}
+          visible
+        />
         {(editor.pairBounds
           ? editor.pairBounds.handover ? [editor.pairBounds.handover.enter, editor.pairBounds.handover.exit] : []
           : [startBeat, endBeat]).map((b, i) => {

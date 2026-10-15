@@ -50,7 +50,8 @@ oauth_token = ""
 # Soulseek Supplier: manadj talks to a local slskd daemon over its REST API.
 # See README "Soulseek Supplier (slskd)" for standing up slskd itself.
 # Base URL of the slskd REST API. slskd's default HTTP port is 5030.
-# Leave unset/empty to disable the Soulseek Supplier entirely.
+# Leave unset/empty to disable the Soulseek Supplier entirely. SLSKD_URL in
+# the environment / .env overrides this (an slskd on another port).
 slskd_url = "http://localhost:5030"
 # The slskd API key is a secret and lives in the gitignored .env file at the
 # repo root, NOT here (this file is committed):

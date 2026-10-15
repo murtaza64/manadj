@@ -98,6 +98,7 @@ export function pairBounds(tr: Transition, durations: { a: number; b: number }, 
   // Retain hidden envelopes and unreachable setup/events as authored material.
   for (const points of Object.values(tr.lanes)) for (const p of points ?? [])
     authoringEnd = Math.max(authoringEnd, tr.startSec + p.x * tr.durationSec);
+  for (const x of beatFxXs(tr)) authoringEnd = Math.max(authoringEnd, tr.startSec + x * tr.durationSec);
   for (const [jumps, rate] of [[tr.jumpsA, 1], [tr.jumps, rateB]] as const)
     for (const j of jumps ?? []) authoringEnd = Math.max(authoringEnd,
       tr.startSec + j.x * tr.durationSec + (jumpRepeatCount(j) - 1) * Math.max(0, -j.deltaSec) / rate);
@@ -125,6 +126,10 @@ export function normalizePairWindow(tr: Transition, bounds: PairBounds, rateB = 
     start = Math.min(start, tr.startSec + c.x * tr.durationSec);
     end = Math.max(end, scratchEndSec(tr, c));
   }
+  for (const fx of beatFxXs(tr)) {
+    start = Math.min(start, tr.startSec + fx * tr.durationSec);
+    end = Math.max(end, tr.startSec + fx * tr.durationSec);
+  }
   start = Math.max(0, start);
   // A hidden fader keeps its stash, but evaluates the default on startSec.
   // Keep that origin rather than moving the default or overwriting the stash.
@@ -148,7 +153,19 @@ export function normalizePairWindow(tr: Transition, bounds: PairBounds, rateB = 
     jumps: tr.jumps?.map((j) => ({ ...j, x: x(j.x) })),
     ...(tr.scratchesA ? { scratchesA: tr.scratchesA.map((c) => ({ ...c, x: x(c.x) })) } : {}),
     ...(tr.scratches ? { scratches: tr.scratches.map((c) => ({ ...c, x: x(c.x) })) } : {}),
+    ...(tr.beatFx ? {
+      beatFx: {
+        steps: tr.beatFx.steps.map((st) => ({ ...st, x: x(st.x) })),
+        depth: tr.beatFx.depth.map((p) => ({ ...p, x: x(p.x) })),
+      },
+    } : {}),
   };
+}
+
+/** Beat FX positions (#353) — authored material the frame must retain. */
+function beatFxXs(tr: Transition): number[] {
+  if (!tr.beatFx) return [];
+  return [...tr.beatFx.steps.map((s) => s.x), ...tr.beatFx.depth.map((p) => p.x)];
 }
 
 /** Admit edits outside the old frame before evaluating transport or handover. */

@@ -162,6 +162,8 @@ export interface MidiMixerControls {
   /** Bipolar balance coordinate: -1 original, 0 midpoint, +1 effect. */
   setBeatFxDepth(depth: number): void;
   stepBeatFxBeats(change: 'halve' | 'double'): void;
+  /** Per-deck momentary engage (GRV6 DRUM RELEASE paddle, #361). */
+  setBeatFxHeld(channel: ChannelId, held: boolean): void;
 }
 
 const deckControls = new Map<ChannelId, MidiDeckControls>();

@@ -101,7 +101,7 @@ it('primary segments are PERFORM / EDIT / SYNC; EXPORT lives in the overflow nex
   const overflow = host.querySelector<HTMLButtonElement>('.topbar-segment-overflow')!;
   act(() => overflow.click());
   const items = [...host.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')];
-  expect(items.map(b => b.querySelector('.topbar-segment-label')!.textContent)).toEqual(['EXPORT', 'HISTORY']);
+  expect(items.map(b => b.querySelector('.topbar-segment-label')!.textContent)).toEqual(['EXPORT', 'HISTORY', 'CLIP']);
   act(() => items[0].click());
   expect(onModeChange).toHaveBeenCalledWith('library');
 });

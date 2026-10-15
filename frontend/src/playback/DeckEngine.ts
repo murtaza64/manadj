@@ -21,7 +21,7 @@ import { initialTransportState, isAudioRunning, reduceTransport } from './transp
 import type { TransportContext, TransportEvent, TransportState } from './transport';
 import { isQuantizeOn } from './quantizeStore';
 import { getCueMode } from './cueModeStore';
-import { addBeats, beatPhaseTarget, crossDeckLaunchTarget } from './quantize';
+import { addBeats, beatPhaseTarget, beatsBetween, crossDeckLaunchTarget } from './quantize';
 import type { LaunchReference } from './quantize';
 import { foldLoopPlayhead, projectLoopBeats } from './loop';
 import type { LoopRegion, LoopResize } from './loop';
@@ -1103,6 +1103,18 @@ export class DeckEngine {
    * fall back to the bpm scalar. Null = no tempo knowledge (unloaded or
    * BPM-less) — the Mixer then keeps its last known clock.
    */
+  /** Beat FX phase source (#360 TRANS/ROLL): the playhead's beat
+   * coordinate on the live grid and wall seconds per beat, while audio
+   * runs on a ≥2-beat grid. null = no phase (paused, gridless). */
+  beatFxClock(): { beat: number; beatSeconds: number } | null {
+    if (!isAudioRunning(this.transport)) return null;
+    if (!this.beatTimes || this.beatTimes.length < 2) return null;
+    const beatSeconds = this.echoBeatSeconds();
+    if (beatSeconds === null) return null;
+    const playhead = this.getPlayhead();
+    return { beat: beatsBetween(this.beatTimes[0], playhead, this.beatTimes), beatSeconds };
+  }
+
   echoBeatSeconds(): number | null {
     const rate = this.currentRate() || 1;
     if (this.beatTimes && this.beatTimes.length >= 2) {

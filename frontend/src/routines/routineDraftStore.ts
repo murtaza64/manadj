@@ -9,6 +9,7 @@
  */
 import { useSyncExternalStore } from 'react';
 import type { RoutineLanePoint } from '../sets/routinePlan';
+import { cloneRoutineBeatFx, type RoutineBeatFx } from '../editor/beatFxLane';
 import { addSlotsTo, removeSlotFrom, type SlotDrop } from './authoredMix';
 import { editsAreEmpty, emptyEdits, laneKey, type AuthoredJump, type AuthoredPause, type RoutineEdits, type RemovedRecordedJump, type RemovedRecordedPause } from './routineDraft';
 
@@ -35,6 +36,7 @@ const clone = (e: RoutineEdits): RoutineEdits => ({
   entryOffsets: { ...e.entryOffsets },
   ...(e.playbackBounds ? { playbackBounds: { ...e.playbackBounds } } : {}),
   ...(e.startTrims ? { startTrims: { ...e.startTrims } } : {}),
+  ...(e.beatFx ? { beatFx: cloneRoutineBeatFx(e.beatFx) } : {}),
   ...(e.authored
     ? { authored: { slots: e.authored.slots.map((s) => ({ ...s })), durationBeats: e.authored.durationBeats } }
     : {}),
@@ -150,6 +152,25 @@ export class RoutineDraftStore {
     this.mutate(`lane:${slotId}:${control}`, (e) => {
       e.lanes[laneKey(slotId, control)] = [...points].sort((a, b) => a.beat - b.beat);
     });
+  }
+
+  /** Author the Beat FX track (#353). `gestureKey` coalesces a drag into
+   * one undo entry (seal with endGesture). */
+  setBeatFx(fx: RoutineBeatFx, gestureKey = 'beat-fx'): void {
+    this.mutate(gestureKey, (e) => {
+      e.beatFx = {
+        steps: [...fx.steps].map((s) => ({ ...s })).sort((a, b) => a.beat - b.beat),
+        depth: [...fx.depth].map((p) => ({ ...p })).sort((a, b) => a.beat - b.beat),
+      };
+    });
+  }
+
+  /** Drop the authored Beat FX track — the recorded FX (if any) plays. */
+  clearBeatFx(): void {
+    this.mutate('beat-fx-clear', (e) => {
+      delete e.beatFx;
+    });
+    this.endGesture();
   }
 
   /** Drop an authored lane — the recorded step lane plays again. */

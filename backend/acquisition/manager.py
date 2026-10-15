@@ -8,6 +8,7 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
+from sqlalchemy.exc import NoResultFound
 from sqlalchemy.orm import Session
 
 if TYPE_CHECKING:
@@ -98,14 +99,17 @@ def set_classification(db: Session, item_id: int, classification: str) -> Source
     return item
 
 
-def list_source_items(db: Session, source_name: str = "soundcloud") -> list[SourceItem]:
-    """All Source Items for a Source, most recently liked first."""
-    return (
-        db.query(SourceItem)
-        .filter(SourceItem.source == source_name)
-        .order_by(SourceItem.liked_at.desc())
-        .all()
-    )
+def list_source_items(db: Session, source_name: str | None = "soundcloud") -> list[SourceItem]:
+    """Source Items for a Source (None = every Source), most recently liked first."""
+    query = db.query(SourceItem)
+    if source_name is not None:
+        query = query.filter(SourceItem.source == source_name)
+    return query.order_by(SourceItem.liked_at.desc(), SourceItem.id.desc()).all()
+
+
+# Sources whose Source Items address their own audio (Direct Suppliers).
+# Others (Spotify, #347) are fulfilled through a Search Supplier only.
+DIRECT_SUPPLIER_SOURCES = ("soundcloud",)
 
 
 @dataclass(frozen=True)
@@ -312,6 +316,11 @@ def queue_item(db: Session, item_id: int) -> "Task":
     from ..tasks.manager import create_task, list_tasks
 
     item = db.query(SourceItem).filter(SourceItem.id == item_id).one()
+    if item.source not in DIRECT_SUPPLIER_SOURCES:
+        raise ValueError(
+            f"source item {item_id} is from {item.source}, which supplies no audio — "
+            "get it through Soulseek"
+        )
     if item.state not in ("new", "queued"):
         raise ValueError(f"source item {item_id} is {item.state}; only new items can be queued")
 
@@ -351,6 +360,7 @@ def queue_bulk(db: Session, item_ids: list[int]) -> BulkQueueStats:
         item = db.query(SourceItem).filter(SourceItem.id == item_id).one_or_none()
         if (
             item is None
+            or item.source not in DIRECT_SUPPLIER_SOURCES
             or item.state not in ("new", "queued")
             or _has_failed_task(db, item_id)
             or get_correspondence(db, item_id) is not None
@@ -374,6 +384,57 @@ def ignore_item(db: Session, item_id: int) -> SourceItem:
         db.commit()
         return item
     raise ValueError(f"source item {item_id} is {item.state}; cannot ignore")
+
+
+@dataclass(frozen=True)
+class BulkStats:
+    done: int
+    skipped: int
+
+
+def ignore_bulk(db: Session, item_ids: list[int]) -> BulkStats:
+    """Ignore every ignorable item (new, or queued-and-failed); skip the rest."""
+    done = skipped = 0
+    for item_id in item_ids:
+        try:
+            ignore_item(db, item_id)
+            done += 1
+        except (ValueError, NoResultFound):
+            skipped += 1
+    return BulkStats(done=done, skipped=skipped)
+
+
+def accept_bulk(db: Session, item_ids: list[int]) -> BulkStats:
+    """Confirm every pending proposal among the ids; skip items without one."""
+    done = skipped = 0
+    for item_id in item_ids:
+        try:
+            accept_proposal(db, item_id)
+            done += 1
+        except LookupError:
+            skipped += 1
+    return BulkStats(done=done, skipped=skipped)
+
+
+def cancel_item(db: Session, item_id: int) -> SourceItem:
+    """Cancel a queued item's download before it starts: the item returns to
+    new and its pending task row is deleted (nothing has happened yet, so
+    there is nothing to keep). A running download cannot be cancelled —
+    yt-dlp / the slskd transfer are mid-flight; wait or let it fail."""
+    from ..tasks.manager import list_tasks
+
+    item = db.query(SourceItem).filter(SourceItem.id == item_id).one()
+    if item.state != "queued":
+        raise ValueError(f"source item {item_id} is {item.state}; only queued items cancel")
+    tasks = list_tasks(db, ref=f"source_item:{item_id}")
+    latest = tasks[0] if tasks else None
+    if latest is not None and latest.state == "running":
+        raise ValueError(f"source item {item_id} is downloading; cannot cancel mid-transfer")
+    if latest is not None and latest.state == "pending":
+        db.delete(latest)
+    item.state = "new"
+    db.commit()
+    return item
 
 
 def restore_item(db: Session, item_id: int) -> SourceItem:

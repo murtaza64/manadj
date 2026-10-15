@@ -285,6 +285,16 @@
   border-color: var(--surface1);
   flex-shrink: 0;
 }
+/* DRUM RELEASE paddle hold (#361): momentary engage, distinct from the
+   CH SELECT radio — effect-on yellow, pulsing while held. */
+.perf-fx-targets > .perf-fx-ch.held,
+.perf-fx-targets > .perf-fx-ch.held:hover:not(:disabled) {
+  background: var(--warning);
+  color: var(--base);
+  border-color: var(--warning);
+  animation: perf-fx-held-pulse 0.5s ease-in-out infinite alternate;
+}
+@keyframes perf-fx-held-pulse { from { opacity: 1; } to { opacity: 0.7; } }
 /* CH SELECT is one joined segmented strip (#285 review). */
 .perf-fx-targets > .perf-fx-ch + .perf-fx-ch { border-left: 0; }
 .perf-fx-targets > .perf-fx-ch.on + .perf-fx-ch { border-left: 0; }

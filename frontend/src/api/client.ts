@@ -29,6 +29,8 @@ import type {
   DropImportRequest,
   DropImportResult,
   SourceItem,
+  BulkResult,
+  AutoBulkResult,
   AcquisitionRefreshStats,
   Classification,
   SupplierInfo,
@@ -55,6 +57,8 @@ export interface TransitionTemplateWire {
   after_beats: number;
   scalable: boolean;
   lanes: Record<string, unknown>;
+  /** Beat FX track (#353; opaque TransitionBeatFx), null = none. */
+  beat_fx?: Record<string, unknown> | null;
 }
 
 // Backend URL: VITE_API_URL when set (scripts/dev.py injects it); dev/test
@@ -63,7 +67,59 @@ export interface TransitionTemplateWire {
 // app, ADR 0043 / #279).
 const BACKEND_URL =
   import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://localhost:8127' : '');
-const API_BASE = `${BACKEND_URL}/api`;
+export const API_BASE = `${BACKEND_URL}/api`;
+
+/** Phone sync LAN listener (#373, backend/device_listener.py). */
+export interface DeviceListenerStatus {
+  enabled: boolean;
+  running: boolean;
+  port: number;
+  pair_code: string | null;
+  addresses: string[];
+  error: string | null;
+}
+
+/** One Device change log row (ADR 0045, #375). */
+export interface DeviceSyncChangeRow {
+  id: number;
+  batch_id: string;
+  device_id: string;
+  device_name: string | null;
+  direction: 'to_desktop' | 'to_phone';
+  track_id: number | null;
+  track_title: string | null;
+  field: string;
+  /** Tag name for tag:<id> fields. */
+  tag_name?: string | null;
+  old: unknown;
+  new: unknown;
+  edited_at: string | null;
+  synced_at: string;
+  outcome: 'applied' | 'superseded' | 'rejected';
+  reverts_id: number | null;
+  reverted_by_id: number | null;
+  revertable: boolean;
+}
+
+
+
+/** A phone asking to pair (#374); the desktop approves after matching the code. */
+export interface PhonePairRequest {
+  id: string;
+  device_id: string;
+  device_name: string;
+  match_code: string;
+  client: string;
+  status: string;
+  age_s: number;
+}
+
+export interface PairedPhone {
+  device_id: string;
+  name: string;
+  paired_at: string;
+  last_seen: string | null;
+}
 
 // Export for use in other components (e.g., for static file URLs)
 export { BACKEND_URL };
@@ -114,6 +170,16 @@ export const api = {
       return response.json();
     },
 
+    attention: async (): Promise<TaskRow[]> => {
+      const response = await fetch(`${API_BASE}/tasks/attention`);
+      if (!response.ok) throw new Error('Failed to fetch task worklist');
+      return response.json();
+    },
+    active: async (): Promise<TaskRow[]> => {
+      const response = await fetch(`${API_BASE}/tasks/active`);
+      if (!response.ok) throw new Error('Failed to fetch active tasks');
+      return response.json();
+    },
     list: async (filters?: {
       state?: TaskState;
       type?: string;
@@ -179,6 +245,11 @@ export const api = {
 
     /** Enqueue a stem-split task ("extract stems" button). Dedup rides the
      * task queue; returns { queued, has_stems }. */
+    /** Show the track's stems folder in the OS file manager (404 without stems). */
+    revealStems: async (id: number): Promise<void> => {
+      const res = await fetch(`${API_BASE}/tracks/${id}/stems/reveal`, { method: 'POST' });
+      if (!res.ok) throw new Error(`reveal stems: ${res.status}`);
+    },
     extractStems: async (id: number): Promise<{ queued: boolean; has_stems: boolean }> => {
       const res = await fetch(`${API_BASE}/tracks/${id}/stems/split`, { method: 'POST' });
       if (!res.ok) throw new Error('Failed to request stem split');
@@ -1124,6 +1195,38 @@ export const api = {
       return res.json();
     },
 
+    ignoreBulk: async (itemIds: number[]): Promise<BulkResult> => {
+      const res = await fetch(`${API_BASE}/acquisition/items/ignore-bulk`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ item_ids: itemIds }),
+      });
+      if (!res.ok) throw new Error('Failed to ignore items');
+      return res.json();
+    },
+    acceptMatchBulk: async (itemIds: number[]): Promise<BulkResult> => {
+      const res = await fetch(`${API_BASE}/acquisition/items/accept-match-bulk`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ item_ids: itemIds }),
+      });
+      if (!res.ok) throw new Error('Failed to accept matches');
+      return res.json();
+    },
+    soulseekAutoBulk: async (itemIds: number[]): Promise<AutoBulkResult> => {
+      const res = await fetch(`${API_BASE}/acquisition/items/soulseek/auto-bulk`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ item_ids: itemIds }),
+      });
+      if (!res.ok) throw new Error((await res.json()).detail ?? 'Failed to start downloads');
+      return res.json();
+    },
+    cancelDownload: async (itemId: number): Promise<SourceItem> => {
+      const res = await fetch(`${API_BASE}/acquisition/items/${itemId}/cancel`, { method: 'POST' });
+      if (!res.ok) throw new Error((await res.json()).detail ?? 'Failed to cancel');
+      return res.json();
+    },
     ignoreItem: async (itemId: number): Promise<SourceItem> => {
       const res = await fetch(`${API_BASE}/acquisition/items/${itemId}/ignore`, { method: 'POST' });
       if (!res.ok) {
@@ -1764,6 +1867,60 @@ export const api = {
 
   // ── App configuration (packaged-app #277): the settings file, not the
   // DB settings table. Settings → Library edits these.
+  deviceListener: {
+    get: async (): Promise<DeviceListenerStatus> => {
+      const res = await fetch(`${API_BASE}/device-listener`);
+      if (!res.ok) throw new Error(`Failed to load phone sync (${res.status})`);
+      return res.json();
+    },
+    update: async (changes: { enabled?: boolean; port?: number }): Promise<DeviceListenerStatus> => {
+      const res = await fetch(`${API_BASE}/device-listener`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(changes),
+      });
+      if (!res.ok) throw new Error(`Failed to update phone sync (${res.status})`);
+      return res.json();
+    },
+    changes: async (): Promise<DeviceSyncChangeRow[]> => {
+      const res = await fetch(`${API_BASE}/device-listener/changes?limit=300`);
+      if (!res.ok) throw new Error(`Failed to load the change log (${res.status})`);
+      return res.json();
+    },
+    revertChange: async (id: number): Promise<void> => {
+      const res = await fetch(`${API_BASE}/device-listener/changes/${id}/revert`, { method: 'POST' });
+      if (!res.ok) throw new Error(`Could not revert (${res.status})`);
+    },
+    revertBatch: async (batchId: string): Promise<void> => {
+      const res = await fetch(`${API_BASE}/device-listener/batches/${batchId}/revert`, { method: 'POST' });
+      if (!res.ok) throw new Error(`Could not revert the sync (${res.status})`);
+    },
+    pairRequests: async (): Promise<PhonePairRequest[]> => {
+      const res = await fetch(`${API_BASE}/device-listener/pair-requests`);
+      if (!res.ok) throw new Error(`Failed to load pairing requests (${res.status})`);
+      return res.json();
+    },
+    decide: async (id: string, decision: 'approve' | 'deny'): Promise<PhonePairRequest> => {
+      const res = await fetch(`${API_BASE}/device-listener/pair-requests/${id}/${decision}`, { method: 'POST' });
+      if (!res.ok) throw new Error(`Pairing request is gone (${res.status})`);
+      return res.json();
+    },
+    devices: async (): Promise<PairedPhone[]> => {
+      const res = await fetch(`${API_BASE}/device-listener/devices`);
+      if (!res.ok) throw new Error(`Failed to load paired phones (${res.status})`);
+      return res.json();
+    },
+    revoke: async (deviceId: string): Promise<void> => {
+      const res = await fetch(`${API_BASE}/device-listener/devices/${encodeURIComponent(deviceId)}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error(`Failed to unpair (${res.status})`);
+    },
+    rotate: async (): Promise<DeviceListenerStatus> => {
+      const res = await fetch(`${API_BASE}/device-listener/rotate`, { method: 'POST' });
+      if (!res.ok) throw new Error(`Failed to rotate pairing code (${res.status})`);
+      return res.json();
+    },
+  },
+
   appConfig: {
     get: async (): Promise<AppConfigWire> => {
       const res = await fetch(`${API_BASE}/config`);

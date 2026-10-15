@@ -2,7 +2,6 @@
 
 import base64
 import binascii
-import fcntl
 import hashlib
 import json
 import logging
@@ -11,6 +10,7 @@ import os
 import re
 import sqlite3
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -67,6 +67,27 @@ def scrub(text: str) -> str:
     text = text.replace("<!--", "&lt;!--").replace("MANADJ_FEEDBACK_", "MANADJ-FEEDBACK-")
     return re.sub(r"[\x00-\x08\x0b-\x1f\x7f]", "", text)
 
+
+
+def _lock_fd(fd: int, blocking: bool) -> bool:
+    """Exclusive advisory lock on `fd`, released when it closes. False =
+    already held (non-blocking only). fcntl on POSIX, msvcrt on Windows."""
+    if sys.platform == "win32":
+        import msvcrt
+        while True:
+            try:
+                msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+                return True
+            except OSError:
+                if not blocking:
+                    return False
+                time.sleep(0.05)
+    import fcntl
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | (0 if blocking else fcntl.LOCK_NB))
+    except BlockingIOError:
+        return False
+    return True
 
 class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
@@ -342,9 +363,7 @@ class FeedbackService:
         scope_key = hashlib.sha256(self.scope.encode()).hexdigest()
         fd = os.open(self.storage / f"scope-{scope_key}.lock", os.O_CREAT | os.O_RDWR, 0o600)
         try:
-            try:
-                fcntl.flock(fd, fcntl.LOCK_EX | (0 if blocking else fcntl.LOCK_NB))
-            except BlockingIOError:
+            if not _lock_fd(fd, blocking):
                 yield None
                 return
             with self.connect() as db:

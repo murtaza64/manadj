@@ -42,6 +42,7 @@ import { channelFaderToGain, crossfaderGains } from '../playback/mixerMath';
 import type { TransitionScratch } from '../editor/mixModel';
 import { slotScratchClips, type RecordedScratchClip } from '../sets/routineScratch';
 import type { CaptureChannel, CaptureEvent, InitDeckState } from './events';
+import { deriveTransitionBeatFx } from '../editor/beatFxLane';
 
 const OTHER: Record<CaptureChannel, CaptureChannel> = { A: 'B', B: 'A' };
 
@@ -347,6 +348,9 @@ export function vectorizeTake(
       ...(jumpsA.length > 0 ? { jumpsA } : {}),
       ...(scratches.length > 0 ? { scratches } : {}),
       ...(scratchesA.length > 0 ? { scratchesA } : {}),
+      // Beat FX (#353): window-scoped section steps + depth, x on the
+      // (possibly widened) window.
+      ...withBeatFx(deriveTransitionBeatFx(input.events, windowStartS, windowEndS, out)),
     },
   };
 }
@@ -390,6 +394,10 @@ function transitionScratch(
       f.filter ? 1 : 0,
     ]),
   };
+}
+
+function withBeatFx(beatFx: Transition['beatFx']): { beatFx?: Transition['beatFx'] } {
+  return beatFx ? { beatFx } : {};
 }
 
 /**

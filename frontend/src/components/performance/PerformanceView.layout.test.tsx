@@ -233,7 +233,7 @@ describe('Performance library keyboard focus', () => {
   it('routes the number row to Beat FX only while decks own the keyboard', () => {
     browse(); render();
     for (const key of ['1', '2', '3', '4', '5', '6', '7', '8', '9', '-']) expect(press(key).defaultPrevented).toBe(true);
-    expect(vi.mocked(mixer.selectBeatFx).mock.calls).toEqual([['flanger'], ['reverb']]);
+    expect(vi.mocked(mixer.selectBeatFx).mock.calls).toEqual([['roll'], ['lowCutEcho']]);
     expect(vi.mocked(mixer.toggleBeatFxOn)).toHaveBeenCalledOnce();
     expect(vi.mocked(mixer.stepBeatFxBeats).mock.calls).toEqual([['halve'], ['double']]);
     expect(vi.mocked(mixer.selectBeatFxTarget).mock.calls)

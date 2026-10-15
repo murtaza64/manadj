@@ -91,8 +91,8 @@ describe('DDJ-GRV6 Mapping — official E1 message table', () => {
     // Every SELECT detent binds: unsupported algorithms explicitly select
     // none so the previous effect cannot remain live.
     const effects = [
-      null, 'echo', null, null, null, 'reverb', 'flanger',
-      null, null, null, null, null, null, null,
+      null, 'echo', 'lowCutEcho', null, null, 'reverb', 'flanger',
+      null, null, 'trans', null, 'roll', null, null,
     ] as const;
     expect(translate(effects.map((_, index) => press(4, 32 + index)))).toEqual(
       effects.map((effect) => ({
@@ -357,11 +357,21 @@ describe('DDJ-GRV6 Mapping — official E1 message table', () => {
     ]);
   });
 
-  it('leaves Groove Circuit GAIN, CAPTURE, DRUM ROLL, DRUM RELEASE, Pad FX, Sampler, Key Shift, and Keyboard unmapped', () => {
+  it('maps DRUM RELEASE (note 36; SHIFT 38/39) to a per-deck momentary Beat FX hold (#361)', () => {
+    const off = (channel: number, note: number) => [0x90 | channel, note, 0x00];
+    expect(translate([press(1, 36), off(1, 36), press(2, 38), press(3, 39)])).toEqual([
+      { kind: 'button', target: { control: 'beat-fx-hold', channel: 'B' }, edge: 'down' },
+      { kind: 'button', target: { control: 'beat-fx-hold', channel: 'B' }, edge: 'up' },
+      { kind: 'button', target: { control: 'beat-fx-hold', channel: 'C' }, edge: 'down' },
+      { kind: 'button', target: { control: 'beat-fx-hold', channel: 'D' }, edge: 'down' },
+    ]);
+  });
+
+  it('leaves Groove Circuit GAIN, CAPTURE, DRUM ROLL, Pad FX, Sampler, Key Shift, and Keyboard unmapped', () => {
     expect(
       translate([
         cc(0, 18, 64),
-        press(0, 36),
+        press(0, 8),
         press(0, 4),
         press(8, 16),
         press(7, 48),

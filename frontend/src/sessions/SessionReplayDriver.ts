@@ -27,12 +27,9 @@ import type { DeckEngine, DeckSnapshot } from '../playback/DeckEngine';
 import { foldLoopPlayhead } from '../playback/loop';
 import type { ChannelId, Mixer } from '../playback/mixer';
 import type { AutomationChannelValues } from '../playback/mixer';
-import type { BeatFxSectionState } from '../playback/beatFx';
+import { sameBeatFxSection, type BeatFxSectionState } from '../playback/beatFx';
 
-function sameBeatFx(a: Readonly<BeatFxSectionState>, b: Readonly<BeatFxSectionState>): boolean {
-  return a.selected === b.selected && a.target === b.target && a.on === b.on
-    && a.depth === b.depth && a.beats === b.beats;
-}
+const sameBeatFx = sameBeatFxSection;
 
 /** All-on stem default (stems #212): the state before any stem event. */
 function allStemsOn(): { vocals: boolean; drums: boolean; bass: boolean; other: boolean } {

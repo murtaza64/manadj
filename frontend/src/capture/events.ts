@@ -196,7 +196,10 @@ export interface InitDeckState {
  * deck-sharing engagements share one uuid, so a triple's pairwise
  * offspring are a first-class group). */
 // v7 (#225): paused scratch motion is audible; touched stationary holds are not.
-export const DETECTOR_VERSION = 7;
+// v8 (#355): Beat FX echo/reverb tails keep a deck audible after its
+// excitation stops (fader close, kill, stop, FX off) — an echo-out's
+// window ends where the tail decays below `audibleGain` (capture/fxTail.ts).
+export const DETECTOR_VERSION = 8;
 
 export interface DetectorParams {
   /** Master-bus gain (trim × channel fader × crossfader) below which a

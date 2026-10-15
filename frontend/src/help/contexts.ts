@@ -3,6 +3,7 @@ import type { HelpTarget } from './routes';
 
 export const SETTINGS_HELP: Record<string, HelpTarget> = {
   library: { topic: 'curate', anchor: 'importing' },
+  'phone-sync': { topic: 'curate', anchor: 'importing' },
   filters: { topic: 'beat-fx', anchor: 'filters' },
   effects: { topic: 'beat-fx', anchor: 'effects' },
   waveforms: { topic: 'analysis', anchor: 'automatic-analysis' },
@@ -12,6 +13,7 @@ export const SETTINGS_HELP: Record<string, HelpTarget> = {
   shortcuts: { topic: 'perform', anchor: 'keyboard' },
   soundcloud: { topic: 'acquire', anchor: 'soundcloud' },
   soulseek: { topic: 'acquire', anchor: 'soulseek' },
+  spotify: { topic: 'acquire' },
   setup: { topic: 'start', anchor: 'setup' },
   tour: { topic: 'start', anchor: 'tour' },
   tutorials: { topic: 'start', anchor: 'tutorials' },
@@ -24,6 +26,7 @@ export const GUIDE_HELP: Record<string, HelpTarget> = {
   'cue-mode': { topic: 'audio', anchor: 'cue-mode' },
   soundcloud: { topic: 'start', anchor: 'accounts' },
   soulseek: { topic: 'start', anchor: 'accounts' },
+  spotify: { topic: 'start', anchor: 'accounts' },
   'controller-check': SETTINGS_HELP['controller-check'],
 };
 

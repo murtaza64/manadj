@@ -107,6 +107,17 @@ describe('detector verdict windows agree with timeline audibility bands', () => 
     expect(defaultBands.some((sp) => sp.end === takes[0].windowEndS)).toBe(false);
   });
 
+  it('Beat FX echo-out (#355): the band ends at the tail end, where the window ends', () => {
+    const events = blendStream('A', 'B', (t) => [
+      { t: t - 1, kind: 'beatFx', selected: 'echo', target: 'A', on: true, depth: 0, beats: 1 },
+      { t, kind: 'control', control: 'fader', channel: 'A', value: 0 },
+    ]);
+    const takes = expectAgreement(events);
+    expect(takes).toHaveLength(1);
+    // 1-beat echo at 174 BPM, 5 audible repeats.
+    expect(takes[0].windowEndS).toBeCloseTo(20 + 5 * (60 / 174), 9);
+  });
+
   it('tenure suspension agrees: no verdicts and no bands beneath a hold', () => {
     const events: CaptureEvent[] = [
       { t: 0, kind: 'load', channel: 'A', trackId: 1, bpm: 174 },

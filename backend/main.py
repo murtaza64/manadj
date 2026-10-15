@@ -8,13 +8,14 @@ from alembic import command as alembic_command
 from alembic.config import Config as AlembicConfig
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from .routers import tracks, tags, waveforms, playlists, beatgrids, metric_ladders, hotcues, sync_playlists, sync_status, sync_performance, sync_export, sync_tags, sync_tracks, sync_library, analyze, transitions, transition_templates, track_links, takes, sessions, sets, tasks, drops, visualizer_ga, routine_candidates, routine_takes, routines, settings, cameos, app_config
+from .routers import tracks, tags, waveforms, playlists, beatgrids, metric_ladders, hotcues, sync_playlists, sync_status, sync_performance, sync_export, sync_tags, sync_tracks, sync_library, analyze, transitions, transition_templates, track_links, takes, sessions, sets, tasks, drops, visualizer_ga, routine_candidates, routine_takes, routines, settings, cameos, app_config, device_sync, device_listener as device_listener_router, video_export
 from .acquisition import models as acquisition_models  # noqa: F401  (registers tables on Base)
 from .acquisition.router import router as acquisition_router
 from .tasks import models as task_models  # noqa: F401  (registers tables on Base)
 from .tasks.worker import TaskWorkerPool
 from .soulseek import router as soulseek_router
 from .acquisition import connect_router as soundcloud_connect_router
+from .spotify import router as spotify_router
 from .logging_config import setup_logging
 from .feedback import FeedbackService, Workspace
 from .routers.feedback import router as feedback_router
@@ -88,13 +89,18 @@ app.include_router(drops.router, prefix="/api/drops", tags=["drops"])
 app.include_router(routine_candidates.router, prefix="/api/routine-candidates", tags=["routine-candidates"])
 app.include_router(routine_takes.router, prefix="/api/routine-takes", tags=["routine-takes"])
 app.include_router(routines.router, prefix="/api/routines", tags=["routines"])
+app.include_router(video_export.router, prefix="/api/video-export", tags=["video-export"])
 app.include_router(cameos.router, prefix="/api/cameos", tags=["cameos"])
+app.include_router(device_sync.router, prefix="/api/device-sync", tags=["device-sync"])
+app.include_router(device_listener_router.router, prefix="/api/device-listener", tags=["device-sync"])
 app.include_router(visualizer_ga.router, prefix="/api/ga", tags=["visualizer-ga"])
 app.include_router(settings.router, prefix="/api/settings", tags=["settings"])
 app.include_router(feedback_router)
 app.include_router(app_config.router, prefix="/api/config", tags=["app-config"])
 app.include_router(soulseek_router.router, prefix="/api/soulseek", tags=["soulseek"])
 app.include_router(soundcloud_connect_router.router, prefix="/api/soundcloud", tags=["soundcloud"])
+app.include_router(spotify_router.router, prefix="/api/spotify", tags=["spotify"])
+app.include_router(spotify_router.want_router, prefix="/api/acquisition", tags=["acquisition"])
 
 # Onboarding (#274): Rekordbox bulk import for first run.
 from .routers import onboarding as onboarding_router  # noqa: E402
@@ -373,6 +379,14 @@ async def startup_event():
     app.state.feedback_service = FeedbackService(Workspace(_repo_root))
     app.state.feedback_service.start()
 
+    # Phone sync LAN listener (#373): opt-in, from the settings file.
+    from . import device_listener as _device_listener
+
+    try:
+        _device_listener.apply_settings()
+    except Exception:
+        logging.getLogger("backend.main").exception("device listener failed to start")
+
 
 @app.on_event("shutdown")
 async def shutdown_event():
@@ -383,6 +397,9 @@ async def shutdown_event():
     from .soulseek.supervisor import get_supervisor
 
     get_supervisor().stop()
+    from . import device_listener as _device_listener
+
+    _device_listener.stop()
 
 
 # Serve the built frontend when one exists (packaged app, ADR 0043). Mounted

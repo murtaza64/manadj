@@ -423,6 +423,8 @@ def _advance_to_next_source(
         .one()
     )
     task.payload_json = json.dumps(payload)
+    task.progress = None  # a new peer: the bar starts over
+    task.progress_label = None
     db.commit()
 
 
@@ -496,6 +498,10 @@ def soulseek_download_handler(
             if "candidates" in payload else False
 
         status = supplier.transfer_status(payload["transfer_id"])
+        if status.state is TransferState.IN_PROGRESS:
+            from ..tasks.progress import transfer_progress
+
+            transfer_progress(status.bytes_done, status.bytes_total)
         if status.state in (TransferState.QUEUED, TransferState.IN_PROGRESS):
             # a transfer stuck in a peer's queue is abandoned for the next
             # source; one actually moving is left to run
