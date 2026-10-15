@@ -19,6 +19,9 @@ class RealPlaybackTest {
     private val files = mutableListOf<File>()
 
     @Before fun openRealApp() {
+        // Isolation: no deck restore from an earlier test, Sync not remembered on (default on since #399).
+        InstrumentationRegistry.getInstrumentation().targetContext.getSharedPreferences(DeckPersistence.PREFS, android.content.Context.MODE_PRIVATE)
+            .edit().clear().putStringSet("sync-decks", emptySet()).commit()
         scenario = ActivityScenario.launch(MainActivity::class.java)
         scenario.onActivity { model = ViewModelProvider(it)[PlayerModel::class.java] }
         await("native output opens") { model.output?.outputSampleRate?.let { it > 0 } == true }
@@ -138,6 +141,28 @@ class RealPlaybackTest {
             if (on) await("sync on remembered") { model.syncState.decks[DeckId.A] != SyncStatus.OFF }
             else { Thread.sleep(500); assertEquals("sync off remembered", SyncStatus.OFF, model.syncState.decks[DeckId.A]) }
         }
+    }
+
+    /** EH3: media notification shows the audible track; its Pause stops every playing deck, Play resumes them. */
+    @Test fun mediaNotificationPausesAndResumesThePlayingDecks() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val notifications = context.getSystemService(android.app.NotificationManager::class.java)
+        fun media() = notifications.activeNotifications.firstOrNull { it.id == 1 }?.notification
+        fun send(action: String) = onMain { context.startService(android.content.Intent(context, PlaybackService::class.java).setAction(action)) }
+        load(DeckId.A, tone(220.0)); load(DeckId.B, tone(330.0))
+        onMain { model.updateFader(DeckId.A, 0.0); model.updateFader(DeckId.B, 0.0); model.submit(AudioCommand.Play(DeckId.A)); model.submit(AudioCommand.Play(DeckId.B)) }
+        await("both playing") { model.output!!.decks.values.count { it.playing } == 2 }
+        await("media notification with Pause") { media()?.actions?.singleOrNull()?.title == "Pause" }
+        assertEquals(android.app.Notification.MediaStyle::class.java.name, media()!!.extras.getString(android.app.Notification.EXTRA_TEMPLATE))
+        send(PlaybackService.ACTION_PAUSE)
+        await("all paused") { model.output!!.decks.values.none { it.playing } }
+        await("notification stays with Play") { media()?.actions?.singleOrNull()?.title == "Play" }
+        send(PlaybackService.ACTION_PLAY)
+        await("both resumed") { model.output!!.decks.values.count { it.playing } == 2 }
+        send(PlaybackService.ACTION_PAUSE)
+        await("paused again") { model.output!!.decks.values.none { it.playing } }
+        send(PlaybackService.ACTION_DISMISS)
+        await("dismissed") { media() == null }
     }
 
     /** Repro attempt for the unexplained emulator deck-A stop: set + trigger a hot cue while playing, switch layouts. */
