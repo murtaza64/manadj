@@ -42,21 +42,23 @@ val ControlRow = 44.dp
     val selected by animateFloatAsState(if (model.selected == ui.id) 1f else 0f, tween(200), label = "select")
     val time by remember(ui) { derivedStateOf { clock(position(ui)) } }
     val remain by remember(ui) { derivedStateOf { ui.durationSeconds?.let { "-" + clock((it - position(ui)).coerceAtLeast(0.0)) } ?: "" } }
-    val status = when {
+    val status by remember(ui) { derivedStateOf { when {
         ui.importing -> "OPENING"; ui.error != null -> ui.error!!
         ui.snapshot?.loadState == LoadState.ERROR -> ui.snapshot?.error ?: "DECODE FAILED"
         ui.snapshot?.loadState == LoadState.LOADING -> "DECODING…"
         ui.ready && ui.snapshot?.filling == true -> "BUFFERING"
         ui.ready && ui.snapshot?.atEnd == true && ui.snapshot?.playing != true -> "END"
         else -> null
-    }
+    } } }
+    val playing by remember(ui) { derivedStateOf { ui.snapshot?.playing == true } }
+    val loadError by remember(ui) { derivedStateOf { ui.snapshot?.loadState == LoadState.ERROR } }
     Row(modifier, verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.width(4.dp).fillMaxHeight().padding(vertical = 4.dp).background(color.copy(alpha = .3f + .7f * selected)))
         Column(Modifier.weight(1f).fillMaxHeight().combinedClickable(onLongClickLabel = "Edit track", onLongClick = { dev.manadj.app.library.LibraryHolder.trackOn(model, ui.id)?.let { dev.manadj.app.edit.TrackEditNav.open(it, ui.id) } }) { model.chooseDeck(ui.id) }.semantics { contentDescription = "Select ${ui.id}" }.padding(horizontal = 6.dp), verticalArrangement = Arrangement.Center) {
             // A restored source that's gone (#157): say so instead of an empty deck.
             val missing = ui.missingTitle.takeIf { ui.source == null }
             Text("${ui.id}  ${ui.source?.title ?: missing?.let { "MISSING: $it" } ?: "LOAD A TRACK"}", color = if (missing != null) Ink.warning else color, size = if (compact) 12 else 14, bold = true)
-            Row { Text(ui.source?.artist?.ifBlank { null } ?: "local file", Modifier.weight(1f), Ink.muted, 11); val playing = ui.snapshot?.playing == true; Text(status ?: "${if (playing) "▶ " else ""}$time $remain", color = if (status != null && (ui.error != null || ui.snapshot?.loadState == LoadState.ERROR)) Ink.warning else if (playing) Ink.play else Ink.text, size = 11, bold = true) }
+            Row { Text(ui.source?.artist?.ifBlank { null } ?: "local file", Modifier.weight(1f), Ink.muted, 11); Text(status ?: "${if (playing) "▶ " else ""}$time $remain", color = if (status != null && (ui.error != null || loadError)) Ink.warning else if (playing) Ink.play else Ink.text, size = 11, bold = true) }
         }
     }
 }
@@ -74,7 +76,7 @@ val ControlRow = 44.dp
     val shift = ux.shifted(ui.id)
     val currentShift by rememberUpdatedState(shift)
     var held by remember(ui.id, slot) { mutableStateOf(false) }
-    val previewing = ui.snapshot?.previewSlot == slot
+    val previewing by remember(ui, slot) { derivedStateOf { ui.snapshot?.previewSlot == slot } }
     val haptic = LocalHapticFeedback.current
     val cue = Ink.cues[slot]
     val tint = if (ready) cue else Ink.edge
@@ -154,14 +156,15 @@ val ControlRow = 44.dp
     val playing by remember(ui) { derivedStateOf { ui.snapshot?.playing == true } }
     val ready by remember(ui) { derivedStateOf { ui.ready } }
     // Breathes on the beat when the deck has a grid.
-    val bpm = ui.snapshot?.bpm
+    val bpm by remember(ui) { derivedStateOf { ui.snapshot?.bpm } }
     // Quantized launch: armed but silent until the reference beat — PLAY blinks (desktop pending-play, 250 ms).
     val launching by remember(ui) { derivedStateOf { ui.snapshot?.launchFrame != null } }
     var blink by remember { mutableStateOf(true) }
     LaunchedEffect(launching) { blink = true; while (launching) { kotlinx.coroutines.delay(250); blink = !blink } }
-    val pulse = if (launching) 0f else if (playing && bpm != null) (1 - beatPhase(position(ui) - (ui.snapshot?.gridAnchorSeconds ?: 0.0), bpm)).let { it * it } * .35f else 0f
+    // Beat pulse read at draw time (position changes every engine tick).
+    val pulse = { if (launching || !playing || bpm == null) 0f else (1 - beatPhase(position(ui) - (ui.snapshot?.gridAnchorSeconds ?: 0.0), bpm)).let { it * it } * .35f }
     val lit = if (launching) blink else playing
-    Key(if (playing && !launching) "PAUSE" else "PLAY", modifier, Ink.play, ready || playing, lit, "${ui.id} play pause", if (playing && !launching) Glyph.Pause else Glyph.Play, KeyStyle.PILL, pulse, 15, feedback = HapticFeedbackType.VirtualKey) {
+    Key(if (playing && !launching) "PAUSE" else "PLAY", modifier, Ink.play, ready || playing, lit, "${ui.id} play pause", if (playing && !launching) Glyph.Pause else Glyph.Play, KeyStyle.PILL, 0f, 15, feedback = HapticFeedbackType.VirtualKey, pulseOf = pulse) {
         model.submit(if (playing) AudioCommand.Pause(ui.id) else AudioCommand.Play(ui.id))
     }
 }
@@ -181,7 +184,7 @@ val StripEnd = 48.dp
 
 @Composable fun JumpStrip(ui: DeckUi, ux: UiModel, model: PlayerModel, modifier: Modifier) {
     val live = model.supports("beat-jump")
-    val gridded = ui.snapshot?.bpm != null
+    val gridded by remember(ui) { derivedStateOf { ui.snapshot?.bpm != null } }
     val usable = live && ui.ready && gridded
     val color = if (live) deckColor(ui.id) else Ink.surface2
     Box(modifier) {
@@ -203,20 +206,19 @@ val StripEnd = 48.dp
 @Composable fun LoopStrip(ui: DeckUi, ux: UiModel, model: PlayerModel, modifier: Modifier) {
     val haptic = LocalHapticFeedback.current
     val live = model.supports("loop")
-    val snap = ui.snapshot
-    val gridded = snap?.bpm != null
-    val active = snap?.loop != null
-    val beats = snap?.loop?.beats ?: snap?.pendingLoopBeats ?: 4.0
+    val gridded by remember(ui) { derivedStateOf { ui.snapshot?.bpm != null } }
+    val active by remember(ui) { derivedStateOf { ui.snapshot?.loop != null } }
+    val beats by remember(ui) { derivedStateOf { ui.snapshot?.let { s -> s.loop?.beats ?: s.pendingLoopBeats } ?: 4.0 } }
     val base = if (live) deckColor(ui.id) else Ink.surface2
     val color = if (active) Ink.play else base
     val usable = live && ui.ready && gridded
-    val pulse = if (active) (1 - beatPhase(position(ui) - (snap?.gridAnchorSeconds ?: 0.0), snap?.bpm)) * .3f else 0f
+    val pulse = { if (!active) 0f else ui.snapshot.let { s -> (1 - beatPhase(position(ui) - (s?.gridAnchorSeconds ?: 0.0), s?.bpm)) * .3f } }
     Box(modifier) {
         Segmented(Modifier.fillMaxSize(), color) {
             Key("÷2", Modifier.width(StripEnd).fillMaxHeight(), base, live, description = "${ui.id} halve loop", style = KeyStyle.BARE, textSize = 15, feedback = HapticFeedbackType.VirtualKey.takeIf { active }) { model.resizeLoop(ui.id, LoopChange.HALVE) }
             Divider(base)
             ValueWheel("${ui.id} loop size", LOOP_CHOICES.map(::beatText), nearest(LOOP_CHOICES, beats), ux, model, ui.id, Modifier.weight(1f).fillMaxHeight(), color,
-                if (live && !gridded && ui.ready) "NO BPM" else "LOOP ${beatText(beats)}", icon = Glyph.Loop, live = live, bare = true, pulse = pulse, edgeHaptics = active, tickHaptics = active,
+                if (live && !gridded && ui.ready) "NO BPM" else "LOOP ${beatText(beats)}", icon = Glyph.Loop, live = live, bare = true, pulseOf = pulse, edgeHaptics = active, tickHaptics = active,
                 onTap = { if (usable) { haptic.performHapticFeedback(HapticFeedbackType.VirtualKey); model.toggleLoop(ui.id) } }) { model.submit(AudioCommand.LoopResize(ui.id, LoopChange.SET, LOOP_CHOICES[it])) }
             Divider(base)
             Key("×2", Modifier.width(StripEnd).fillMaxHeight(), base, live, description = "${ui.id} double loop", style = KeyStyle.BARE, textSize = 15, feedback = HapticFeedbackType.VirtualKey.takeIf { active }) { model.resizeLoop(ui.id, LoopChange.DOUBLE) }
@@ -230,6 +232,8 @@ val StripEnd = 48.dp
     val color = deckColor(ui.id)
     val open = model.pitchDrawer == ui.id
     val e = ux.extras.getValue(ui.id)
+    val gridBpm by remember(ui) { derivedStateOf { ui.snapshot?.bpm } }
+    val keyLocked by remember(ui) { derivedStateOf { ui.snapshot?.keyLock == true } }
     Box(modifier) {
         // Opens on press (like BROWSE); the click only covers accessibility actions.
         var downToggled by remember { mutableStateOf(false) }
@@ -251,9 +255,9 @@ val StripEnd = 48.dp
                 val groupTempo = model.syncState.tempo.takeIf { sync == dev.manadj.audio.SyncStatus.SYNCED }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     if (sync != dev.manadj.audio.SyncStatus.OFF) Text(when (sync) { dev.manadj.audio.SyncStatus.SYNCED -> "SYNC "; dev.manadj.audio.SyncStatus.OUT_OF_LOCK -> "SYNC⚠ "; else -> "SYNC… " }, color = if (sync == dev.manadj.audio.SyncStatus.SYNCED) Ink.play else Ink.warning, size = 9, bold = true)
-                    Text(groupTempo?.let { "%.1f".format(it) } ?: ui.snapshot?.bpm?.let { "%.1f".format(it * (1 + (ui.pitch + ui.bend) / 100)) } ?: "— BPM", color = bpmColor(groupTempo ?: ui.snapshot?.bpm?.let { it * (1 + ui.pitch / 100) }) ?: Ink.muted, size = 12, bold = true)
+                    Text(groupTempo?.let { "%.1f".format(it) } ?: gridBpm?.let { "%.1f".format(it * (1 + (ui.pitch + ui.bend) / 100)) } ?: "— BPM", color = bpmColor(groupTempo ?: gridBpm?.let { it * (1 + ui.pitch / 100) }) ?: Ink.muted, size = 12, bold = true)
                 }
-                Row(verticalAlignment = Alignment.CenterVertically) { if (ui.snapshot?.keyLock == true || (e.keyLock && !model.supports("key-lock"))) GlyphIcon(Glyph.Lock, color, 9.dp); val key = deckOpenKey(ui, model, ux)
+                Row(verticalAlignment = Alignment.CenterVertically) { if (keyLocked || (e.keyLock && !model.supports("key-lock"))) GlyphIcon(Glyph.Lock, color, 9.dp); val key = deckOpenKey(ui, model, ux)
                     Text(" KEY ${key ?: "—"}", color = keyColor(key) ?: Ink.muted, size = 10, bold = key != null) }
             }
         }

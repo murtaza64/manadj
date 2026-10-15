@@ -41,12 +41,13 @@ import dev.manadj.audio.QuantizeMode
     val canQuantize = model.supports("quantize")
     LaunchedEffect(canQuantize) { if (canQuantize) ux.setQuantize(model) }
     // Played-this-session: a library deck that starts playing.
+    // Snapshot reads here would recompose the whole app per engine tick (UH9): derived only.
     for (id in model.visibleDecks) {
-        val playingTrack = if (model.decks.getValue(id).snapshot?.playing == true) dev.manadj.app.library.LibraryHolder.trackOn(model, id)?.toLong() else null
-        LaunchedEffect(playingTrack) { if (playingTrack != null && playingTrack !in ux.played) ux.played.add(playingTrack) }
+        val playingTrack by remember(id) { derivedStateOf { if (model.decks.getValue(id).snapshot?.playing == true) dev.manadj.app.library.LibraryHolder.trackOn(model, id)?.toLong() else null } }
+        LaunchedEffect(playingTrack) { val t = playingTrack; if (t != null && t !in ux.played) ux.played.add(t) }
     }
     // Record what was heard (strip per source position) so the waveform behind the playhead keeps it.
-    val anyPlaying = model.visibleDecks.any { model.decks.getValue(it).snapshot?.playing == true }
+    val anyPlaying by remember { derivedStateOf { model.visibleDecks.any { model.decks.getValue(it).snapshot?.playing == true } } }
     LaunchedEffect(anyPlaying) {
         while (anyPlaying) {
             withFrameNanos { }
