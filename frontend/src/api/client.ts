@@ -92,6 +92,7 @@ export interface DeviceSyncChangeRow {
   field: string;
   /** Tag name for tag:<id> fields. */
   tag_name?: string | null;
+  link_title?: string | null;
   old: unknown;
   new: unknown;
   edited_at: string | null;

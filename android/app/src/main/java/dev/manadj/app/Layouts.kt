@@ -62,13 +62,10 @@ import dev.manadj.audio.QuantizeMode
         val band = with(LocalDensity.current) { screen.topBand.toDp() }
         val landscape = maxWidth > maxHeight
         val screenHeight = maxHeight
-        val modal = model.replace != null || ux.settings || model.outputPanel
+        val modal = model.replace != null || model.outputPanel
         val blur by animateDpAsState(if (modal) 8.dp else 0.dp, tween(220), label = "backdrop")
         Box(Modifier.fillMaxSize().blur(blur)) {
             if (landscape) Landscape(model, ux, pick, Modifier.fillMaxSize()) else Portrait(model, ux, pick, Modifier.fillMaxSize(), screenHeight, band)
-        }
-        AnimatedVisibility(ux.settings, Modifier.align(Alignment.TopCenter).padding(top = band), enter = fadeIn(tween(150)) + slideInVertically { -it / 4 }, exit = fadeOut(tween(120))) {
-            SettingsSheet(model, ux, Modifier.widthIn(max = 460.dp).fillMaxWidth().heightIn(max = screenHeight - band - 16.dp))
         }
         if (model.outputPanel) OutputPanel(model, Modifier.fillMaxSize())
         if (ux.sessions) dev.manadj.app.session.SessionScreen(model, ux, Modifier.fillMaxSize().padding(top = band))
@@ -128,7 +125,7 @@ import dev.manadj.audio.QuantizeMode
 
 
 /**
- * Portrait centre (#153): a 2-column grid of equal keys — QUANT·H / XF, SESSIONS / SETTINGS — top-aligned, with the
+ * Portrait centre (#153): a 2-column grid of equal keys — QUANT·H / XF, SESSIONS / A·B Link / SETTINGS — top-aligned, with the
  * FX card below at the bottom of the mixer (UH16); the space between is left free for future keys.
  */
 @Composable private fun GlobalControls(model: PlayerModel, ux: UiModel, modifier: Modifier, gap: Dp) {
@@ -145,10 +142,16 @@ import dev.manadj.audio.QuantizeMode
         }
         Row(h, horizontalArrangement = Arrangement.spacedBy(gap)) {
             SessionsKey(ux, Modifier.weight(1f).fillMaxHeight())
-            Key("", Modifier.weight(1f).fillMaxHeight(), Ink.muted, description = "Settings", icon = Glyph.Gear, style = KeyStyle.PILL, textSize = 11) { ux.settings = true }
+            // Link toggle for the loaded pair (#398): icon-only like the desktop A·B edge chip.
+            LinkKey(model, ux, Modifier.width(46.dp).fillMaxHeight(), label = false)
+            SettingsKey(model, ux, Modifier.width(46.dp).fillMaxHeight())
         }
     }
 }
+
+/** Gear: Settings takes over like the browser (#396); lit while open. */
+@Composable private fun SettingsKey(model: PlayerModel, ux: UiModel, modifier: Modifier) =
+    Key("", modifier, if (ux.settings) Ink.accent else Ink.muted, engaged = ux.settings, description = "Settings", icon = Glyph.Gear, style = KeyStyle.PILL, textSize = 11) { ux.toggleSettings(model) }
 
 /** Session replay (#153; moved out of Settings). */
 @Composable private fun SessionsKey(ux: UiModel, modifier: Modifier, textSize: Int = 11) =
@@ -165,7 +168,7 @@ import dev.manadj.audio.QuantizeMode
  * the browser covers — in landscape the outgoing deck (coveredDeck, decided once on open); portrait covers all.
  */
 @Composable fun BrowseKey(model: PlayerModel, ux: UiModel, modifier: Modifier, textSize: Int = 12) {
-    fun toggle() { model.browser = if (model.browser != null) null else coveredDeck(mixOf(model, ux, DeckId.A), mixOf(model, ux, DeckId.B)) }
+    fun toggle() { ux.settings = false; model.browser = if (model.browser != null) null else coveredDeck(mixOf(model, ux, DeckId.A), mixOf(model, ux, DeckId.B)) }
     // Toggles on pointer-down (the slide starts with the press); the click only covers accessibility actions.
     var downToggled by remember { mutableStateOf(false) }
     Key("BROWSE", modifier.pointerInput(Unit) {
@@ -268,6 +271,11 @@ fun mixOf(model: PlayerModel, ux: UiModel, id: DeckId): DeckMix {
                 }
             }
         }
+        // Settings (#396) takes the browser's place: everything below the waves.
+        val settle = spring<androidx.compose.ui.unit.IntOffset>(dampingRatio = 1f, stiffness = 900f)
+        AnimatedVisibility(ux.settings, Modifier.fillMaxSize().padding(top = topDp), enter = slideInVertically(settle) { it }, exit = slideOutVertically(settle) { it }) {
+            SettingsPanel(model, ux, Modifier.fillMaxSize().padding(top = 3.dp))
+        }
     }
 }
 
@@ -318,8 +326,10 @@ private enum class PaneKind { LEFT_SLOT, RIGHT_SLOT, BOTH_LEFT, BOTH_RIGHT }
             PaneKind.BOTH_LEFT -> (s - sidePx) * bothPx / sidePx
             PaneKind.BOTH_RIGHT -> screenPx - bothPx + (s + sidePx) * bothPx / sidePx
         }
+        // Settings (#396) takes the wide browser's place: the mixer slides to the right edge, settings covers both decks.
+        val stripKind = if (ux.settings) PaneKind.BOTH_LEFT else kind
         val shift = remember { androidx.compose.animation.core.Animatable(0f) }
-        LaunchedEffect(kind, sidePx) { shift.animateTo(goalOf(kind), androidx.compose.animation.core.spring(dampingRatio = 1f, stiffness = 1200f)) }
+        LaunchedEffect(stripKind, sidePx) { shift.animateTo(goalOf(stripKind), androidx.compose.animation.core.spring(dampingRatio = 1f, stiffness = 1200f)) }
         // The pane keeps its kind/target while sliding out; composed once opened, then kept (no build on press).
         var pane by remember { mutableStateOf<PaneKind?>(null) }
         var paneTarget by remember { mutableStateOf<DeckId?>(null) }
@@ -356,9 +366,13 @@ private enum class PaneKind { LEFT_SLOT, RIGHT_SLOT, BOTH_LEFT, BOTH_RIGHT }
                             val key = Modifier.width(76.dp).height(36.dp)
                             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                 QuantizeKey(model, ux, key)
-                                Key("", key, Ink.muted, description = "Settings", icon = Glyph.Gear, style = KeyStyle.PILL) { ux.settings = true }
+                                SettingsKey(model, ux, key)
                             }
-                            if (xf) Crossfader(model, ux, Modifier.weight(1f).height(44.dp)) else Spacer(Modifier.weight(1f))
+                            // Link toggle (#398) centred over the crossfader.
+                            Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                LinkKey(model, ux, Modifier.width(96.dp).height(32.dp), textSize = 10)
+                                if (xf) Crossfader(model, ux, Modifier.fillMaxWidth().height(44.dp))
+                            }
                             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                 SessionsKey(ux, key, textSize = 10)
                                 BrowseKey(model, ux, key)
@@ -380,6 +394,17 @@ private enum class PaneKind { LEFT_SLOT, RIGHT_SLOT, BOTH_LEFT, BOTH_RIGHT }
             CompositionLocalProvider(LocalSafeFrame provides paneFrame) {
                 Box(Modifier.width(if (wide) bothWidth else side).fillMaxHeight().graphicsLayer { translationX = paneX(k, shift.value) }.background(Ink.background)) {
                     LibraryPanel(model, ux, Modifier.fillMaxSize().padding(start = if (left) 6.dp else 0.dp, end = if (left) 0.dp else 6.dp).screenSafe(), pick, tapTarget = paneTarget, sidebar = true)
+                }
+            }
+        }
+        // Composed while open or still sliding out.
+        val settingsShown by remember(sidePx, bothPx) { derivedStateOf { ux.settings || paneX(PaneKind.BOTH_LEFT, shift.value) > -bothPx + 1f } }
+        if (settingsShown) {
+            val rest = paneX(PaneKind.BOTH_LEFT, goalOf(PaneKind.BOTH_LEFT))
+            val settingsFrame = remember(shift, sidePx, bothPx) { SafeFrame { paneX(PaneKind.BOTH_LEFT, shift.value) - rest } }
+            CompositionLocalProvider(LocalSafeFrame provides settingsFrame) {
+                Box(Modifier.width(bothWidth).fillMaxHeight().graphicsLayer { translationX = paneX(PaneKind.BOTH_LEFT, shift.value) }.background(Ink.background)) {
+                    SettingsPanel(model, ux, Modifier.fillMaxSize().padding(start = 6.dp).screenSafe())
                 }
             }
         }

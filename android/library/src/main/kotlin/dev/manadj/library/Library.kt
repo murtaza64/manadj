@@ -79,6 +79,12 @@ class Library(
     fun tracksWithTag(tagId: Int, within: LibraryQuery = LibraryQuery()): List<LibraryTrack> =
         query(within.copy(tagIds = setOf(tagId), tagMatch = TagMatch.ANY))
 
+    /** Is the unordered pair Linked? Self-pairs never are. */
+    fun linked(a: Int, b: Int): Boolean = a != b && follow.linked(a, b)
+
+    /** Linkable hint (linked-pairs 02): a favorited Transition either way and no Link. Display-only. */
+    fun linkable(a: Int, b: Int): Boolean = a != b && !linked(a, b) && follow.favoritedEitherWay(a, b)
+
     /** ◆/★/Linked marks of [candidateId] relative to a deck's loaded Track. */
     fun marks(deckTrackId: Int?, candidateId: Int): RowMarks = follow.marks(deckTrackId, candidateId)
 
