@@ -10,6 +10,7 @@ import { deriveFollowQuery, followedReferences } from './model';
 import { useFollowFlags } from './followStore';
 import { useFollowParams, useFollowSeed } from './paramsStore';
 import { FollowRanking } from './rankedFollow';
+import { useChordLoops } from './useChordLoops';
 
 const trackRows = (results: UseQueryResult<Track>[]) => results.map(r => r.data);
 interface CandidateResult { referenceId: number; items: Track[] }
@@ -27,6 +28,7 @@ export function useRankedFollow(
   const params = useFollowParams();
   const seed = useFollowSeed();
   const [cache] = useState(() => new FollowRanking());
+  const chordLoops = useChordLoops();
   const { A, B, C, D } = loaded;
   const slots = useMemo(() => {
     const seen = new Set<number>();
@@ -71,8 +73,8 @@ export function useRankedFollow(
       known.set(id, knownStrengthOf(from, links, reference.id, id)!);
     }
     return { track: reference, candidates: candidates.find(r => r?.referenceId === reference.id)?.items, known };
-  }), { knownOnly: params.knownOnly, bpmThresholdPercent: params.bpmThresholdPercent }),
-  [cache, references, candidates, transitions, links, params.knownOnly, params.bpmThresholdPercent]);
+  }), { knownOnly: params.knownOnly, bpmThresholdPercent: params.bpmThresholdPercent, chordLoops }),
+  [cache, references, candidates, transitions, links, params.knownOnly, params.bpmThresholdPercent, chordLoops]);
   return useMemo(() => ({
     ...snapshot,
     project: (source: Track[], scoreSort: boolean) => snapshot.project(source, scoreSort, params.temperature, seed),

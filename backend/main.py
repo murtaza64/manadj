@@ -8,7 +8,7 @@ from alembic import command as alembic_command
 from alembic.config import Config as AlembicConfig
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from .routers import tracks, tags, waveforms, playlists, beatgrids, metric_ladders, hotcues, sync_playlists, sync_status, sync_performance, sync_export, sync_tags, sync_tracks, sync_library, analyze, transitions, transition_templates, track_links, takes, sessions, sets, tasks, drops, visualizer_ga, routine_candidates, routine_takes, routines, settings, cameos, app_config, device_sync, device_listener as device_listener_router, video_export
+from .routers import tracks, tags, waveforms, playlists, beatgrids, metric_ladders, hotcues, sync_playlists, sync_status, sync_performance, sync_export, sync_tags, sync_tracks, sync_library, analyze, transitions, transition_templates, track_links, takes, sessions, sets, tasks, drops, visualizer_ga, routine_candidates, routine_takes, routines, settings, cameos, app_config, device_sync, device_listener as device_listener_router, video_export, harmony
 from .acquisition import models as acquisition_models  # noqa: F401  (registers tables on Base)
 from .acquisition.router import router as acquisition_router
 from .tasks import models as task_models  # noqa: F401  (registers tables on Base)
@@ -86,6 +86,7 @@ app.include_router(sessions.router, prefix="/api/sessions", tags=["sessions"])
 app.include_router(sets.router, prefix="/api/sets", tags=["sets"])
 app.include_router(tasks.router, prefix="/api/tasks", tags=["tasks"])
 app.include_router(drops.router, prefix="/api/drops", tags=["drops"])
+app.include_router(harmony.router, prefix="/api/harmony", tags=["harmony"])
 app.include_router(routine_candidates.router, prefix="/api/routine-candidates", tags=["routine-candidates"])
 app.include_router(routine_takes.router, prefix="/api/routine-takes", tags=["routine-takes"])
 app.include_router(routines.router, prefix="/api/routines", tags=["routines"])
@@ -119,6 +120,10 @@ def _analysis_enabled() -> bool:
 
 def _stems_enabled() -> bool:
     return os.getenv("DISABLE_STEMS_WORKER", "").lower() not in ("true", "1", "yes")
+
+
+def _harmony_enabled() -> bool:
+    return os.getenv("DISABLE_HARMONY_WORKER", "").lower() not in ("true", "1", "yes")
 
 
 def _build_task_worker() -> "TaskWorkerPool | None":
@@ -158,6 +163,14 @@ def _build_task_worker() -> "TaskWorkerPool | None":
     else:
         logging.getLogger("backend.main").info(
             "stem splitting disabled via DISABLE_STEMS_WORKER"
+        )
+
+    if _harmony_enabled():
+        from .harmony_tasks import HARMONY_TASK_TYPE, make_harmony_handler
+        handlers[HARMONY_TASK_TYPE] = make_harmony_handler()
+    else:
+        logging.getLogger("backend.main").info(
+            "harmony analysis disabled via DISABLE_HARMONY_WORKER"
         )
 
     # Routine mining (ADR 0035, routines 157): cheap event-log replay, no
@@ -349,6 +362,19 @@ async def startup_event():
             db = SessionLocal()
             try:
                 enqueue_missing_stems(db)
+            finally:
+                db.close()
+
+        # Sweep: harmony analysis (chord-match #387) for Tracks missing it,
+        # analyzed by an older version, or from the mix with stems now
+        # current — backlog-guarded like stems (scripts/backfill_harmony.py).
+        if _harmony_enabled():
+            from .database import SessionLocal
+            from .harmony_tasks import enqueue_missing_harmony
+
+            db = SessionLocal()
+            try:
+                enqueue_missing_harmony(db)
             finally:
                 db.close()
 

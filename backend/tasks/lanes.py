@@ -31,6 +31,7 @@ LANES: dict[str, tuple[str, ...]] = {
         "waveform",
         "analysis",
         "stem-split",
+        "harmony",
         "routine-mine",
         "rekordbox-onboarding-import",
         "tracks-directory-import",

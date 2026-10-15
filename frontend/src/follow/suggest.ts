@@ -18,7 +18,8 @@
  * side is exactly that.
  */
 import type { Track } from '../types';
-import { compareRanks, rankAgainst, type CandidateRank } from './matchScore';
+import { affinitySubtotal, compareRanks, rankAgainst, type CandidateRank } from './matchScore';
+import type { ChordLoops } from './chordMatch';
 
 /** A known strength for one ordered edge, or null (not Known). */
 export type EdgeKnownLookup = (candidateId: number) => number | null;
@@ -29,8 +30,14 @@ export type EdgeKnownLookup = (candidateId: number) => number | null;
  * throughout (an edge rank IS rankAgainst with a single-edge reference
  * whose reference Track is the edge's `from` side).
  */
-export function edgeRank(from: Track, to: Track, knownStrength: number | null): CandidateRank {
-  return rankAgainst(to, [{ track: from, knownStrength: () => knownStrength }]);
+export function edgeRank(
+  from: Track,
+  to: Track,
+  knownStrength: number | null,
+  loops?: ChordLoops,
+): CandidateRank {
+  return rankAgainst(to, [{ track: from, knownStrength: () => knownStrength }], undefined,
+    (reference, candidate) => affinitySubtotal(reference, candidate, loops));
 }
 
 export interface AppendSuggestion {
@@ -48,11 +55,12 @@ export function suggestAppend(
   candidates: readonly Track[],
   inSetIds: ReadonlySet<number>,
   last: Track,
-  knownOutOfLast: EdgeKnownLookup
+  knownOutOfLast: EdgeKnownLookup,
+  loops?: ChordLoops,
 ): AppendSuggestion[] {
   return candidates
     .filter((t) => !inSetIds.has(t.id))
-    .map((track) => ({ track, rank: edgeRank(last, track, knownOutOfLast(track.id)) }))
+    .map((track) => ({ track, rank: edgeRank(last, track, knownOutOfLast(track.id), loops) }))
     .filter((s) => s.rank.admitted)
     .sort((a, b) => compareRanks(a.rank, b.rank));
 }
@@ -87,14 +95,15 @@ export function suggestInsert(
   predecessor: Track,
   successor: Track,
   knownOutOfPredecessor: EdgeKnownLookup,
-  knownIntoSuccessor: EdgeKnownLookup
+  knownIntoSuccessor: EdgeKnownLookup,
+  loops?: ChordLoops,
 ): InsertSuggestion[] {
   return candidates
     .filter((t) => !inSetIds.has(t.id))
     .map((track) => ({
       track,
-      outRank: edgeRank(predecessor, track, knownOutOfPredecessor(track.id)),
-      inRank: edgeRank(track, successor, knownIntoSuccessor(track.id)),
+      outRank: edgeRank(predecessor, track, knownOutOfPredecessor(track.id), loops),
+      inRank: edgeRank(track, successor, knownIntoSuccessor(track.id), loops),
     }))
     .filter((s) => s.outRank.admitted && s.inRank.admitted)
     .sort(

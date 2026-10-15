@@ -272,6 +272,10 @@ def create_track(db: Session, track: schemas.TrackCreate):
     # arrival, so the deck's stem controls are live by the first Load.
     from .stems_tasks import enqueue_stem_split
     enqueue_stem_split(db, db_track.id)
+    # ... and harmony analysis (chord-match #387), queued after the split so
+    # it reads fresh stems (the split handler re-enqueues it too).
+    from .harmony_tasks import enqueue_harmony_task
+    enqueue_harmony_task(db, db_track.id)
 
     return db_track
 
