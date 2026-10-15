@@ -136,22 +136,22 @@ import dev.manadj.audio.QuantizeMode
 @Composable private fun GlobalControls(model: PlayerModel, ux: UiModel, modifier: Modifier, gap: Dp) {
     val mode by remember { derivedStateOf { model.output?.quantizeMode ?: ux.quantizeMode } }
     val q = mode.quantized
-    // Three rows share what the FX card and crossfader leave (UH24 added SHIFT / BROWSE); 40 dp max each.
-    val h = Modifier.fillMaxWidth().heightIn(max = 40.dp)
+    // Three rows share what the FX card and crossfader leave (UH24 added SHIFT / BROWSE); 40 dp each, shrinking only when short (fill = false: a filled weight would stretch them — UH29).
+    val h = Modifier.fillMaxWidth().height(40.dp)
     Column(modifier, verticalArrangement = Arrangement.spacedBy(gap)) {
-        Row(h.weight(1f), horizontalArrangement = Arrangement.spacedBy(gap)) {
+        Row(h.weight(1f, fill = false), horizontalArrangement = Arrangement.spacedBy(gap)) {
             Key(if (mode.heard) "QUANT·H" else "QUANT", Modifier.weight(1f).fillMaxHeight(), Ink.accent, model.supports("quantize"), q, if (q) "Quantize on" else "Quantize off", style = KeyStyle.PILL, textSize = 11, longPress = { ux.setQuantize(model, heard = !ux.quantizeHeard) }) { ux.setQuantize(model, on = !q) }
             Key("XF", Modifier.weight(1f).fillMaxHeight(), Ink.accent, engaged = ux.crossfaderEnabled, description = "Crossfader enable", style = KeyStyle.PILL, textSize = 11) {
                 ux.crossfaderEnabled = !ux.crossfaderEnabled
                 if (!ux.crossfaderEnabled) model.updateCrossfade(.5)
             }
         }
-        Row(h.weight(1f), horizontalArrangement = Arrangement.spacedBy(gap)) {
+        Row(h.weight(1f, fill = false), horizontalArrangement = Arrangement.spacedBy(gap)) {
             SessionsKey(ux, Modifier.weight(1f).fillMaxHeight())
             SettingsKey(model, ux, Modifier.weight(1f).fillMaxHeight())
         }
         // UH24: SHIFT (both decks) + a second BROWSE in the centre cluster.
-        Row(h.weight(1f), horizontalArrangement = Arrangement.spacedBy(gap)) {
+        Row(h.weight(1f, fill = false), horizontalArrangement = Arrangement.spacedBy(gap)) {
             ShiftKey(listOf(DeckId.A, DeckId.B), ux, Modifier.weight(1f).fillMaxHeight())
             BrowseKey(model, ux, Modifier.weight(1f).fillMaxHeight(), textSize = 11)
         }
