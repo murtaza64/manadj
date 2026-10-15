@@ -267,3 +267,10 @@ def test_stems_rev_and_stem_endpoints(client, make_track, tmp_path, monkeypatch)
     rows = {t["id"]: t for t in client.get("/api/device-sync/snapshot").json()["tracks"]}
     assert rows[track.id]["stems_rev"] is None
     assert client.get(f"/api/device-sync/tracks/{track.id}/stems/drums").status_code == 404
+
+
+def test_snapshot_bpm_centi_is_the_gate_column(client, make_track):
+    track = make_track()
+    track.bpm = 17412
+    rows = {t["id"]: t for t in client.get("/api/device-sync/snapshot").json()["tracks"]}
+    assert rows[track.id]["bpm_centi"] == 17412

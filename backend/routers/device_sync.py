@@ -198,6 +198,9 @@ def build_snapshot(db: Session) -> dict:
                 "artist": t.artist,
                 "file_name": Path(t.filename).name,
                 "bpm": t.bpm_projected,
+                # The centiBPM column desktop Follow's BPM gate filters on (crud.get_tracks):
+                # can differ from the served bpm (ADR 0027); the phone gates on it for parity.
+                "bpm_centi": t.bpm,
                 **_key_fields(t.key),
                 "energy": t.energy,
                 "duration_secs": t.duration_secs,
