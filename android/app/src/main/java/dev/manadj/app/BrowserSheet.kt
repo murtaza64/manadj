@@ -25,25 +25,29 @@ import kotlin.math.abs
 
 /**
  * Portrait browser as a direct-manipulation sheet (#132): [offset] = translationY (0 open, [height] closed). Drags
- * move it 1:1; release settles open/closed by fling direction, else 30 % travel, with a critically damped spring;
- * interruptible (a new drag cancels the settle). [PlayerModel.browser] stays the open/closed truth.
+ * move it 1:1; [isOpen]/[setOpen] are the open/closed truth (PlayerModel.browser in the app).
+ *
+ * UH30 rules (shared with the VH12 pitch sheet): a partial position never sticks. Every release, cancel or lost
+ * stream settles to an anchor; the direction of the last movement decides (a fling's sign when fast), not the
+ * distance travelled; a tap always toggles fully, also mid-settle (it reverses the spring).
  */
-@Stable class BrowserSheetState(private val model: PlayerModel, private val ux: UiModel, private val scope: CoroutineScope) {
+@Stable class BrowserSheetState(private val isOpen: () -> Boolean, private val setOpen: (Boolean) -> Unit, private val scope: CoroutineScope) {
     var height by mutableFloatStateOf(0f)
         internal set
-    var offset by mutableFloatStateOf(if (model.browser != null) 0f else CLOSED_UNMEASURED)
+    var offset by mutableFloatStateOf(if (isOpen()) 0f else CLOSED_UNMEASURED)
         private set
     /** The panel is composed once opened, dragged or prewarmed, then kept (no build on press). */
-    var composed by mutableStateOf(model.browser != null)
+    var composed by mutableStateOf(isOpen())
         private set
     /** Pre-build the panel shortly after start so the first swipe doesn't hitch on composition. */
     internal fun prewarm() { composed = true }
     var dragging = false
         private set
     private var settleJob: Job? = null
-    private var wasOpen = false
     private var settleTarget = Float.NaN
-    val open get() = model.browser != null
+    /** Sign of the last real movement: -1 up (toward open), +1 down (toward closed), 0 none yet. */
+    private var lastDir = 0
+    val open get() = isOpen()
 
     internal fun measured(h: Float) {
         height = h
@@ -51,19 +55,25 @@ import kotlin.math.abs
     }
 
     fun dragBy(dy: Float) {
-        if (!dragging) { dragging = true; composed = true; settleJob?.cancel(); settleTarget = Float.NaN; wasOpen = open }
+        if (!dragging) { dragging = true; composed = true; settleJob?.cancel(); settleTarget = Float.NaN; lastDir = 0 }
         val h = if (height > 0) height else return
+        if (abs(dy) >= .5f) lastDir = if (dy < 0) -1 else 1
         offset = (offset.coerceAtMost(h) + dy).coerceIn(0f, h)
     }
 
-    /** [velocity] px/s, positive = down. */
+    /** End of a drag (release, fling, cancel): always lands on an anchor. [velocity] px/s, positive = down. */
     fun settle(velocity: Float) {
         if (!dragging) return
         dragging = false
-        // A fling decides by direction; otherwise moving 30 % of the way from where the drag started flips it.
-        val openIt = if (abs(velocity) > FLING) velocity < 0 else if (wasOpen) offset < height * .3f else offset < height * .7f
-        model.browser = if (openIt) model.browser ?: coveredDeck(mixOf(model, ux, DeckId.A), mixOf(model, ux, DeckId.B)) else null
+        val openIt = settleOpen(velocity, lastDir, offset, height)
+        setOpen(openIt)
         animateTo(if (openIt) 0f else height, velocity)
+    }
+
+    /** Tap: toggle fully from wherever it is (a held drag is ended first). */
+    fun toggle() {
+        if (dragging) { dragging = false }
+        setOpen(!open); follow()
     }
 
     internal fun follow() {
@@ -73,7 +83,10 @@ import kotlin.math.abs
         if (height <= 0) { offset = if (open) 0f else CLOSED_UNMEASURED; return }
         if (target == settleTarget && settleJob?.isActive == true) return
         settleJob?.cancel(); settleTarget = target
-        settleJob = scope.launch { animate(offset.coerceAtMost(height), target, velocity, spring(dampingRatio = 1f, stiffness = 900f)) { v, _ -> offset = v } }
+        settleJob = scope.launch {
+            try { animate(offset.coerceAtMost(height), target, velocity, spring(dampingRatio = 1f, stiffness = 900f)) { v, _ -> offset = v } }
+            finally { if (!dragging && settleTarget == target) offset = target } // interrupted by anything but a drag: still land
+        }
     }
 
     /** List at the top: an overscroll-down drags the sheet closed; while pulled, an upward scroll lifts it back first. */
@@ -93,16 +106,37 @@ import kotlin.math.abs
     }
 
     companion object {
-        private const val FLING = 900f
         private const val CLOSED_UNMEASURED = 1e5f
     }
 }
 
+/** Fast enough to trust the fling's sign (px/s). */
+internal const val SHEET_FLING = 150f
+/**
+ * Open after a drag? Fast: the fling's sign. Otherwise the last movement's direction (up = open). No movement
+ * (a held-then-released finger): nearer anchor.
+ */
+fun settleOpen(velocity: Float, lastDir: Int, offset: Float, height: Float): Boolean = when {
+    abs(velocity) > SHEET_FLING -> velocity < 0
+    lastDir != 0 -> lastDir < 0
+    else -> offset < height / 2
+}
+
 @Composable fun rememberBrowserSheet(model: PlayerModel, ux: UiModel): BrowserSheetState {
     val scope = rememberCoroutineScope()
-    val state = remember { BrowserSheetState(model, ux, scope) }
+    val state = remember {
+        BrowserSheetState({ model.browser != null }, { open -> model.browser = if (open) model.browser ?: coveredDeck(mixOf(model, ux, DeckId.A), mixOf(model, ux, DeckId.B)) else null }, scope)
+    }
     LaunchedEffect(model.browser != null) { state.follow() }
     LaunchedEffect(Unit) { kotlinx.coroutines.delay(1500); state.prewarm() }
+    return state
+}
+
+/** Test/host form: [open] is the truth. */
+@Composable fun rememberBrowserSheet(open: MutableState<Boolean>): BrowserSheetState {
+    val scope = rememberCoroutineScope()
+    val state = remember { BrowserSheetState({ open.value }, { open.value = it }, scope) }
+    LaunchedEffect(open.value) { state.follow() }
     return state
 }
 
@@ -141,7 +175,20 @@ fun Modifier.browserSwipeUp(state: BrowserSheetState): Modifier = sheetDrag(stat
 /** The sheet: always laid out (for its height), panel composed once opened, translated by the offset. */
 @Composable fun BrowserSheet(state: BrowserSheetState, modifier: Modifier, content: @Composable () -> Unit) {
     Box(modifier.onSizeChanged { state.measured(it.height.toFloat()) }.graphicsLayer { translationY = state.offset }
-        .nestedScroll(state.nested).sheetDrag(state, translated = true) { up -> !up }) {
+        .settleWatchdog(state).nestedScroll(state.nested).sheetDrag(state, translated = true) { up -> !up }) {
         if (state.composed) content()
+    }
+}
+
+/**
+ * UH30 guarantee: whatever drove the drag (own detector, list overscroll via nested scroll), once no finger is down
+ * on the sheet a held sheet settles. Observes on the Initial pass without consuming.
+ */
+private fun Modifier.settleWatchdog(state: BrowserSheetState): Modifier = pointerInput(state) {
+    awaitPointerEventScope {
+        while (true) {
+            val e = awaitPointerEvent(PointerEventPass.Initial)
+            if (e.changes.none { it.pressed } && state.dragging) state.settle(0f)
+        }
     }
 }

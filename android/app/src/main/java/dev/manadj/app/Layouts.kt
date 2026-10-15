@@ -272,7 +272,8 @@ fun mixOf(model: PlayerModel, ux: UiModel, id: DeckId): DeckMix {
         BrowserSheet(sheet, Modifier.fillMaxSize().padding(top = topDp)) {
             Column(Modifier.fillMaxSize().then(dev.manadj.app.viz.Glass.sheet(Ink.background))) {
                 // Grabber (UH14): the sheet swipes down to dismiss.
-                Box(Modifier.fillMaxWidth().height(16.dp).semantics { contentDescription = "Drag down to close browser" }, contentAlignment = Alignment.Center) {
+                // UH30: tapping the grabber always closes fully (a tap toggles; the sheet is open while this is visible).
+                Box(Modifier.fillMaxWidth().height(16.dp).clickable { sheet.toggle() }.semantics { contentDescription = "Drag down to close browser" }, contentAlignment = Alignment.Center) {
                     Box(Modifier.size(40.dp, 4.dp).clip(androidx.compose.foundation.shape.RoundedCornerShape(50)).background(Ink.muted.copy(alpha = .7f)))
                 }
                 LibraryPanel(model, ux, Modifier.fillMaxWidth().weight(1f), pick, tapTarget = null)
