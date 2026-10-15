@@ -609,10 +609,17 @@ void Engine::apply(const Command& c) noexcept {
             const double at = d.hotcues[c.slot].load();
             if (!isReady || at < 0) break;
             d.loopActive.store(false);
-            // Playing + Quantize: phase-preserving whole-beat jump (desktop phasePreservingJumpTarget);
-            // paused triggers land exactly.
+            // Playing + Quantize: phase-preserving whole-beat jump (desktop phasePreservingJumpTarget); paused
+            // triggers land exactly. Heard (EH4): the press is read as made L ago at the heard position h, so the
+            // jump happened then — target from h (nearest beat to h, not to the render position, which can be a
+            // beat later), carried forward by the elapsed L·r: at the speaker the cue starts on the heard beat.
             const bool snap = quantize_.load() && d.playing.load() && d.bpm.load() > 0;
-            if (d.playing.load()) { relocate(d, snap ? snapToBeat(d, at) + (position - snapToBeat(d, position)) : at, snap ? -1 : c.slot); break; }
+            if (d.playing.load()) {
+                const double lead = heardLead(d), heardAt = position - lead;
+                const double target = (snap ? snapToBeat(d, at) + (heardAt - snapToBeat(d, heardAt)) : at) + lead;
+                relocate(d, target, target == at ? c.slot : -1);
+                break;
+            }
             // Paused: one relocation — straight to the quantized launch entry, else exactly the cue.
             d.preview.store(true); d.previewSlot.store(c.slot);
             if (!(c.at == 0 && launch(c.deck, at, c.slot))) relocate(d, at, c.slot);

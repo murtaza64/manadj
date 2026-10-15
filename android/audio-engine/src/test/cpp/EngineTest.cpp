@@ -1298,6 +1298,47 @@ int main() {
         CHECK(std::abs(e.deck(0).position.load() - .05) < 2 / 48000.);
     }
 
+    { // EH4: hot cue on a PLAYING deck at random sub-beat phases (174 BPM, pitch -8/0/+8, L 0/180/350/700 ms).
+      // Heard: the press is read at the heard position h = render - L·r; the deck lands as if it jumped then:
+      // position = snap(cue) + (h - snap(h)) + L·r (quantized) or cue + L·r (Heard unquantized). Grid: render phase.
+        unsigned seed = 7;
+        auto rnd = [&] { seed = seed * 1103515245u + 12345u; return ((seed >> 8) & 0xffff) / 65536.0; };
+        const double beat = 60 / 174.;
+        int checks = 0, beatOff = 0;
+        for (int mode : {1, 2, 3}) for (double L : {0.0, .18, .35, .7}) for (double pitch : {-8.0, 0.0, 8.0}) for (int k = 0; k < 12; ++k) {
+            auto owned = std::make_unique<Engine>(48000);
+            Engine& e = *owned;
+            std::vector<float> pcm(48000 * 60 * 2, .2f);
+            loadPcm(e, 0, 1, std::vector<float>(pcm.begin(), pcm.begin() + 48000 * 2));
+            fillTrack(e, 0, 1, pcm);
+            const double g[5] = {};
+            e.submit(Op::SetGrid, 0, 174, 0, 0, g);
+            e.submit(Op::Quantize, 0, mode);
+            e.submit(Op::HeardLatency, 0, L);
+            e.submit(Op::Pitch, 0, pitch);
+            const double cue = 64 * beat;                     // hot cue on a downbeat
+            e.submit(Op::HotCueSetAt, 0, cue, 0, 3);
+            e.submit(Op::Seek, 0, 16 * beat + rnd() * 8 * beat);
+            e.submit(Op::Play, 0);
+            tick(e, 480 + static_cast<int>(rnd() * 4800));
+            const double r = 1 + static_cast<double>(static_cast<float>(pitch)) / 100;
+            const double lead = mode >= 2 ? L * r : 0;
+            const double before = e.deck(0).position.load();
+            e.submit(Op::HotCueDown, 0, 0, 0, 3);
+            tick(e, 1);
+            const double after = e.deck(0).position.load() - r / 48000; // one rendered frame
+            const double h = before - lead;
+            const auto nearest = [&](double t) { return std::round(t / beat) * beat; };
+            const double expected = (mode == 3 ? cue : cue + (h - nearest(h))) + lead;
+            if (std::abs(after - expected) > 1e-9) std::fprintf(stderr, "EH4 mode %d L %.2f pitch %+.0f: after %.6f expected %.6f\n", mode, L, pitch, after, expected);
+            CHECK(std::abs(after - expected) < 1e-9);
+            if (mode == 2 && nearest(before) != nearest(h) + std::round(lead / beat) * beat) ++beatOff; // old code: a beat off
+            ++checks;
+            e.submit(Op::HotCueUp, 0, 0, 0, 3);
+        }
+        std::fprintf(stderr, "EH4 playing hot cue: %d presses exact; %d Heard presses the render-phase rule landed a beat off\n", checks, beatOff);
+    }
+
     { // Heard quantize (L = 350 ms): a launch on the heard downbeat lands its bar on the reference's bar at the
       // speaker (engine time = speaker time minus the shared L); Grid picks the render position's nearest beat.
         auto make = [](int mode) {
