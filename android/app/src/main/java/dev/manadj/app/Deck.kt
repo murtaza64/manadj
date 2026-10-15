@@ -2,6 +2,7 @@ package dev.manadj.app
 
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.*
@@ -225,6 +226,9 @@ val StripEnd = 48.dp
     }
 }
 
+/** #400 pitch tab: rounded top like the top edge of the panel it opens. */
+val PitchTab = RoundedCornerShape(topStart = 14.dp, topEnd = 14.dp, bottomStart = 4.dp, bottomEnd = 4.dp)
+
 /** Pitch key carries its own readouts: BPM (when gridded), key, and pitch adjustment. Opens the pitch popup. */
 @Composable fun PitchKey(ui: DeckUi, model: PlayerModel, ux: UiModel, modifier: Modifier) {
     val color = deckColor(ui.id)
@@ -234,15 +238,24 @@ val StripEnd = 48.dp
         // Opens on press (like BROWSE); the click only covers accessibility actions.
         var downToggled by remember { mutableStateOf(false) }
         val currentOpen by rememberUpdatedState(open)
-        Key("", Modifier.fillMaxSize().pointerInput(ui.id) {
-            awaitEachGesture {
-                awaitFirstDown(requireUnconsumed = false, pass = androidx.compose.ui.input.pointer.PointerEventPass.Initial)
-                downToggled = true; model.pitchDrawer = if (currentOpen) null else ui.id
-                do { val e = awaitPointerEvent(androidx.compose.ui.input.pointer.PointerEventPass.Final) } while (e.changes.any { it.pressed })
-                downToggled = false
+        // #400: a tab (rounded top, grabber bar) — the handle of the pitch panel that slides up from here.
+        val enabled = model.supports("varispeed")
+        val haptic = LocalHapticFeedback.current
+        Box(Modifier.fillMaxSize().padding(2.dp).clip(PitchTab).then(dev.manadj.app.viz.Glass.fill(Ink.panel, 14f))
+            .background(color.copy(alpha = if (open) .28f else 0f)).border(1.5.dp, color.copy(alpha = if (open) 1f else if (enabled) .6f else .25f), PitchTab)
+            .semantics { contentDescription = "${ui.id} pitch panel"; role = Role.Button }
+            .pointerInput(ui.id) {
+                awaitEachGesture {
+                    awaitFirstDown(requireUnconsumed = false, pass = androidx.compose.ui.input.pointer.PointerEventPass.Initial)
+                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    downToggled = true; model.pitchDrawer = if (currentOpen) null else ui.id
+                    do { val e = awaitPointerEvent(androidx.compose.ui.input.pointer.PointerEventPass.Final) } while (e.changes.any { it.pressed })
+                    downToggled = false
+                }
             }
-        }, color, model.supports("varispeed"), open, "${ui.id} pitch panel") { if (downToggled) downToggled = false else model.pitchDrawer = if (open) null else ui.id }
-        Row(Modifier.fillMaxSize().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { if (downToggled) downToggled = false else model.pitchDrawer = if (open) null else ui.id })
+        Box(Modifier.align(Alignment.TopCenter).padding(top = 5.dp).size(28.dp, 3.dp).clip(RoundedCornerShape(50)).background(color.copy(alpha = if (enabled) .9f else .3f)))
+        Row(Modifier.fillMaxSize().padding(start = 12.dp, end = 12.dp, top = 5.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("%+.2f%%".format(ui.pitch), color = if (ui.pitch == 0.0) Ink.text else color, size = 14, bold = true)
             Spacer(Modifier.weight(1f))
             Column(horizontalAlignment = Alignment.End) {

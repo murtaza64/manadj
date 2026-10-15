@@ -231,10 +231,10 @@ fun mixOf(model: PlayerModel, ux: UiModel, id: DeckId): DeckMix {
             // Deck control areas; the pitch panel replaces one deck's half in place (#105).
             Box(Modifier.fillMaxWidth()) {
                 Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(gap)) {
-                    Row(pad.fillMaxWidth().height(28.dp), horizontalArrangement = Arrangement.spacedBy(DeckGap)) { for (ui in listOf(a, b)) StemsStrip(ui, ux, model, Modifier.weight(1f).fillMaxHeight()) }
-                    Row(pad.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(DeckGap)) { for (ui in listOf(a, b)) Pads(ui, model, ux, Modifier.weight(1f), 4, if (tight) 46.dp else PadRow) }
+                    Row(pad.fillMaxWidth().height(28.dp), horizontalArrangement = Arrangement.spacedBy(DeckGap)) { for (ui in listOf(a, b)) StemsStrip(ui, ux, model, Modifier.weight(1f).fillMaxHeight().underPitchPanel(model, ui.id)) }
+                    Row(pad.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(DeckGap)) { for (ui in listOf(a, b)) Pads(ui, model, ux, Modifier.weight(1f).underPitchPanel(model, ui.id), 4, if (tight) 46.dp else PadRow) }
                     Row(pad.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(DeckGap)) {
-                        for (ui in listOf(a, b)) Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(gap)) {
+                        for (ui in listOf(a, b)) Column(Modifier.weight(1f).underPitchPanel(model, ui.id), verticalArrangement = Arrangement.spacedBy(gap)) {
                             LoopStrip(ui, ux, model, Modifier.fillMaxWidth().height(ControlRow).screenSafe())
                             JumpStrip(ui, ux, model, Modifier.fillMaxWidth().height(ControlRow).screenSafe())
                             Row(Modifier.fillMaxWidth().height(TransportRow).screenSafe()) { CueKey(ui, model, Modifier.weight(1f).fillMaxHeight()); PlayKey(ui, model, Modifier.weight(1f).fillMaxHeight()) }
@@ -272,7 +272,9 @@ fun mixOf(model: PlayerModel, ux: UiModel, id: DeckId): DeckMix {
 
 /** The in-place pitch panel over [id]'s control area: opens/closes with a short rigid fade + slide. */
 @Composable private fun PitchArea(model: PlayerModel, ux: UiModel, id: DeckId, modifier: Modifier) {
-    AnimatedVisibility(model.pitchDrawer == id, modifier, enter = fadeIn(tween(120)) + slideInVertically(tween(160)) { it / 14 }, exit = fadeOut(tween(110)) + slideOutVertically(tween(140)) { it / 14 }) {
+    // #400: slides up from the bottom edge of the deck's control area (clipped there) and replaces the controls.
+    AnimatedVisibility(model.pitchDrawer == id, modifier.clipToBounds(), enter = slideInVertically(tween(240, easing = FastOutSlowInEasing)) { it } + fadeIn(tween(140)),
+        exit = slideOutVertically(tween(200, easing = FastOutSlowInEasing)) { it } + fadeOut(tween(160, delayMillis = 40))) {
         PitchPanel(model.decks.getValue(id), model, ux, Modifier.fillMaxSize())
     }
 }
@@ -400,6 +402,8 @@ private enum class PaneKind { LEFT_SLOT, RIGHT_SLOT, BOTH_LEFT, BOTH_RIGHT }
                 DeckInfo(ui, model, Modifier.fillMaxWidth().height(38.dp).screenSafe(), compact = true)
             }
             Minimap(ui, model, ux.waves[ui.source?.id ?: ""], Modifier.fillMaxWidth().height(40.dp).screenSafe(), preview = ux.seekPreview, ux = ux)
+            // #400: everything below the minimap fades out while the pitch panel slides up over it.
+            Column(Modifier.fillMaxWidth().weight(1f).underPitchPanel(model, ui.id), verticalArrangement = Arrangement.spacedBy(5.dp)) {
             // Pads stay identical; the camera hole simply obscures part of one (touch still works around it).
             Pads(ui, model, ux, Modifier.fillMaxWidth().weight(1f), 4, Dp.Unspecified)
             // SHIFT keeps its mirrored outer-edge spot in both rotations (#147): no camera-hole dodge here.
@@ -408,6 +412,7 @@ private enum class PaneKind { LEFT_SLOT, RIGHT_SLOT, BOTH_LEFT, BOTH_RIGHT }
             JumpStrip(ui, ux, model, Modifier.fillMaxWidth().height(40.dp).screenSafe())
             Row(Modifier.fillMaxWidth().height(TransportRow).screenSafe()) { CueKey(ui, model, Modifier.weight(1f).fillMaxHeight()); PlayKey(ui, model, Modifier.weight(1f).fillMaxHeight()) }
             Row(Modifier.fillMaxWidth().height(42.dp).screenSafe()) { BendStrip(ui, model, Modifier.weight(1f).fillMaxHeight()); PitchKey(ui, model, ux, Modifier.weight(1.6f).fillMaxHeight()) }
+            }
         }
         // The pitch panel replaces this deck's controls below info + minimap (#105); the mixer and other deck stay.
         PitchArea(model, ux, ui.id, Modifier.fillMaxSize().padding(top = 88.dp).screenSafe())

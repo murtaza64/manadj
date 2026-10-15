@@ -12,7 +12,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.composed
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -28,6 +30,14 @@ import dev.manadj.audio.BpmMatch
 import dev.manadj.audio.SyncStatus
 import kotlin.math.*
 
+private val PitchSheet = RoundedCornerShape(topStart = 14.dp, topEnd = 14.dp)
+
+/** #400: controls under the pitch panel fade out while it is up (the glass panel would otherwise show them). */
+fun Modifier.underPitchPanel(model: PlayerModel, id: dev.manadj.audio.DeckId): Modifier = composed {
+    val a by androidx.compose.animation.core.animateFloatAsState(if (model.pitchDrawer == id) 0f else 1f, androidx.compose.animation.core.tween(200), label = "under pitch panel")
+    graphicsLayer { alpha = a }
+}
+
 /**
  * In-place pitch panel (#104/#105/#106): replaces one deck's control area (same bounds, full-bleed); the other
  * deck and the mixer stay live. Pitch fader, KEY LOCK · SYNC · = , jog strip (bend with momentum), VINYL-gated
@@ -41,8 +51,14 @@ import kotlin.math.*
     val playing = ui.snapshot?.playing == true
     val vinyl = ux.vinyl[target] == true
     var edit by remember(target) { mutableStateOf(false) }
-    Column(modifier.background(Ink.background).border(1.5.dp, color.copy(alpha = .7f))
-        .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {}.padding(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    // #400: a sheet risen from the pitch tab — rounded top, grabber, #394 glass (opaque when the backdrop is off).
+    Column(modifier.clip(PitchSheet).then(dev.manadj.app.viz.Glass.fill(Ink.background, 14f)).border(1.5.dp, color.copy(alpha = .7f), PitchSheet)
+        .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {}.padding(start = 6.dp, end = 6.dp, bottom = 6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        // Grabber: tap to lower the panel back into its tab.
+        Box(Modifier.fillMaxWidth().height(14.dp).semantics { contentDescription = "Lower pitch panel" }
+            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { model.pitchDrawer = null }, contentAlignment = Alignment.Center) {
+            Box(Modifier.size(36.dp, 4.dp).clip(RoundedCornerShape(50)).background(color.copy(alpha = .9f)))
+        }
         // Readout + close.
         Row(Modifier.fillMaxWidth().height(36.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("%+.2f%%".format(ui.pitch), color = color, size = 20, bold = true)
