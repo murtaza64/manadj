@@ -4,6 +4,7 @@ All notable changes to manaDJ. Format: [Keep a Changelog](https://keepachangelog
 versions follow [Semantic Versioning](https://semver.org/). Install: [docs/install.md](docs/install.md).
 
 ## [Unreleased]
+- Chord match: Follow and Set suggestions boost Tracks whose drop chord progression matches — double-drop candidates, marked with a note icon in the score column whose intensity shows match strength. Backed by background harmony analysis of every Track (stems, else full mix); backfill with `uv run scripts/backfill_harmony.py` (#387, #388).
 
 ## [0.1.0-rc.6] - 2026-10-15
 - Phone sync (desktop side): Settings → Library → Phone sync opens an opt-in LAN port that serves only the library snapshot, preview waveforms and audio to the manaDJ Android app, behind a pairing code (#372, #373).

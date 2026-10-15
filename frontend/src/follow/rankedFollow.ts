@@ -5,6 +5,7 @@ import {
   matchedSignals, compareRanks, compareKnownStrata, orderRanked, rankLabel,
   type CandidateRank, type MatchedSignals,
 } from './matchScore';
+import type { ChordLoops } from './chordMatch';
 
 export interface RankedReference {
   track: Track;
@@ -21,6 +22,9 @@ export class FollowRanking {
   private pairs = new WeakMap<Track, WeakMap<Track, PairEvidence>>();
   private identities = new WeakMap<Track, Track>();
   private facts = new Map<number, { key: string; track: Track }>();
+  /** Chord loops the pair cache was computed with; a new set (first load,
+   * refetch) invalidates every pair. */
+  private loops: ChordLoops | undefined;
 
   private canonical(track: Track): Track {
     const cached = this.identities.get(track);
@@ -46,15 +50,22 @@ export class FollowRanking {
     let evidence = candidates.get(candidate);
     if (!evidence) {
       evidence = {
-        affinity: affinitySubtotal(reference, candidate),
-        signals: matchedSignals(candidate, [{ track: reference, knownStrength: () => null }]),
+        affinity: affinitySubtotal(reference, candidate, this.loops),
+        signals: matchedSignals(candidate, [{ track: reference, knownStrength: () => null }], this.loops),
       };
       candidates.set(candidate, evidence);
     }
     return evidence;
   }
 
-  derive(references: readonly RankedReference[], params: { knownOnly: boolean; bpmThresholdPercent: number }) {
+  derive(
+    references: readonly RankedReference[],
+    params: { knownOnly: boolean; bpmThresholdPercent: number; chordLoops?: ChordLoops },
+  ) {
+    if (params.chordLoops !== this.loops) {
+      this.loops = params.chordLoops;
+      this.pairs = new WeakMap();
+    }
     const followedIds = references.map(r => r.track.id);
     const following = new Set(followedIds);
     const filtering = references.length > 0 && (params.knownOnly || references.some(r => r.candidates !== undefined));
@@ -82,6 +93,9 @@ export class FollowRanking {
         const pair = this.evidence(reference.track, candidate);
         signals.key ||= pair.signals.key;
         for (const id of pair.signals.tagIds) signals.tagIds.add(id);
+        if (pair.signals.chord !== undefined) {
+          signals.chord = Math.max(signals.chord ?? -Infinity, pair.signals.chord);
+        }
       }
       value = { rank, signals };
       rows.set(candidate, value);

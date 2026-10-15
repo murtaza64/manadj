@@ -1,0 +1,6 @@
+.chord-match-icon {
+  display: inline-flex;
+  align-items: center;
+  color: var(--text);
+  line-height: 1;
+}

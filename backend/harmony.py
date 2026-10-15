@@ -330,3 +330,24 @@ def chord_label(bar: np.ndarray) -> str:
 
 def progression(loop: np.ndarray) -> str:
     return " ".join(chord_label(b) for b in loop)
+
+
+# ---------------------------------------------------------------- chord match wire
+
+
+def chord_residual(loop: np.ndarray) -> np.ndarray:
+    """The loop's progression without its drone: subtract the loop's mean
+    chroma, normalise per bar. Chord match (#388) = mean per-bar dot of two
+    residuals, max over the 8 bar rotations."""
+    return _norm(loop - loop.mean(0))
+
+
+def encode_residual(loop: np.ndarray) -> bytes:
+    """int8 quantised residual (8 x 12 = 96 bytes) for the bulk wire."""
+    return np.round(chord_residual(loop) * 127).astype(np.int8).tobytes()
+
+
+def chord_match(a: np.ndarray, b: np.ndarray) -> float:
+    """Reference implementation of the frontend's chordMatch (loops in)."""
+    ra, rb = chord_residual(a), chord_residual(b)
+    return max(float(np.sum(ra * np.roll(rb, -r, 0), -1).mean()) for r in range(LOOP_BARS))

@@ -1,3 +1,4 @@
+import type { HarmonyLoopsWire } from '../follow/chordMatch';
 import type {
   CaptureEvent as CaptureEventWire,
   DetectorParams as CaptureDetectorParams,
@@ -531,6 +532,18 @@ export const api = {
       const response = await fetch(`${API_BASE}/drops/${trackId}`);
       if (!response.ok) {
         throw new Error(`Failed to fetch drops: ${response.statusText}`);
+      }
+      return response.json();
+    },
+  },
+
+  harmony: {
+    /** Chord residuals of every Track with a moving drop loop (chord-match
+     * #388) — the bulk input to the Chord match term. */
+    loops: async (): Promise<HarmonyLoopsWire> => {
+      const response = await fetch(`${API_BASE}/harmony/loops`);
+      if (!response.ok) {
+        throw new Error(`Failed to fetch harmony loops: ${response.statusText}`);
       }
       return response.json();
     },

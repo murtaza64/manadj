@@ -23,6 +23,9 @@ import {
   type EdgeKnownLookup,
 } from '../follow/suggest';
 import { knownStrengthOf } from '../links/known';
+import { CHORD_BADGE_MIN, chordMatchOf } from '../follow/chordMatch';
+import { ChordMatchIcon } from '../follow/ChordMatchIcon';
+import { useChordLoops } from '../follow/useChordLoops';
 import { useLinks } from '../links/linkStore';
 import {
   transitionsFrom,
@@ -50,6 +53,13 @@ interface SuggestionRow {
   /** Edge tier labels to chip: one for append, out/in for insert. */
   edges: string[];
   known: boolean;
+  /** Best Chord match over the row's edge(s) (#388), if defined. */
+  chord?: number;
+}
+
+function bestChord(...matches: (number | undefined)[]): number | undefined {
+  const defined = matches.filter((m): m is number => m !== undefined);
+  return defined.length ? Math.max(...defined) : undefined;
 }
 
 interface SetSuggestionsProps {
@@ -74,6 +84,7 @@ export default function SetSuggestions({
 
   const index = useTransitionIndex();
   const links = useLinks();
+  const loops = useChordLoops();
   const { data: candidates } = useQuery({
     queryKey: ['tracks', 'set-suggestions'],
     queryFn: () => api.tracks.list(1, 1000),
@@ -122,12 +133,13 @@ export default function SetSuggestions({
     if (target.kind === 'append') {
       // The Affinity floor is the cut (suggest.ts admits only floored
       // edges); the top-20 cap survives verbatim.
-      rows = suggestAppend(candidates, inSetIds, target.last, knownOutOf(target.last.id))
+      rows = suggestAppend(candidates, inSetIds, target.last, knownOutOf(target.last.id), loops)
         .slice(0, MAX_ROWS)
         .map((s) => ({
           track: s.track,
           edges: [edgeLabel(s.rank)],
           known: s.rank.known !== null,
+          chord: chordMatchOf(loops, target.last.id, s.track.id),
         }));
     } else {
       rows = suggestInsert(
@@ -136,13 +148,18 @@ export default function SetSuggestions({
         target.predecessor,
         target.successor,
         knownOutOf(target.predecessor.id),
-        knownInto(target.successor.id)
+        knownInto(target.successor.id),
+        loops,
       )
         .slice(0, MAX_ROWS)
         .map((s) => ({
           track: s.track,
           edges: [`out: ${edgeLabel(s.outRank)}`, `in: ${edgeLabel(s.inRank)}`],
           known: s.outRank.known !== null || s.inRank.known !== null,
+          chord: bestChord(
+            chordMatchOf(loops, target.predecessor.id, s.track.id),
+            chordMatchOf(loops, s.track.id, target.successor.id),
+          ),
         }));
     }
   }
@@ -241,6 +258,9 @@ export default function SetSuggestions({
                 {row.edges.map((edge) => (
                   <span key={edge}>{edge}</span>
                 ))}
+                {row.chord !== undefined && row.chord >= CHORD_BADGE_MIN && (
+                  <ChordMatchIcon match={row.chord} />
+                )}
               </span>
             </div>
           ))

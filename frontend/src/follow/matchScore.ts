@@ -1,13 +1,15 @@
 import type { Track } from '../types';
 import { engineIdToOpenKey } from '../utils/keyUtils';
 import { sharedArtist } from './sharedArtist';
+import { chordContribution, chordMatchOf, type ChordLoops } from './chordMatch';
 import { DEFAULT_FOLLOW_PARAMS } from './model';
 import type { FollowReference } from './model';
 
 /**
  * Match score (match-score PRD): the heuristic stratum's single order.
- * A weighted sum over five signals — key relation, Tag overlap, Shared
- * artist (AFFINITY signals: evidence two Tracks go together) plus BPM
+ * A weighted sum over six signals — key relation, Tag overlap, Shared
+ * artist, Chord match (AFFINITY signals: evidence two Tracks go
+ * together; Chord match per chordMatch.ts, #388) plus BPM
  * proximity and energy neighborhood (CONTEXT signals: evidence the blend
  * is mechanically comfortable). Key is a bonus with a zero floor: a clash
  * earns nothing and costs nothing. Missing data contributes 0 everywhere —
@@ -29,6 +31,9 @@ export const WEIGHTS = {
   tags: 30,
   key: 25,
   artist: 20,
+  /** Chord match (#388): a saturated match (>= 0.7) counts like a
+   * Shared artist and admits on its own (above the Affinity floor). */
+  chord: 20,
   energy: 15,
   bpm: 10,
 } as const;
@@ -163,12 +168,20 @@ function sharedTagCount(reference: Track, candidate: Track): number {
 export interface MatchedSignals {
   key: boolean;
   tagIds: Set<number>;
+  /** Best Chord match against any reference; absent when undefined. */
+  chord?: number;
 }
 
-export function matchedSignals(candidate: Track, references: FollowReference[]): MatchedSignals {
+export function matchedSignals(
+  candidate: Track,
+  references: FollowReference[],
+  loops?: ChordLoops,
+): MatchedSignals {
   const signals: MatchedSignals = { key: false, tagIds: new Set() };
   for (const reference of references) {
     if (keyRelation(reference.track.key, candidate.key) !== 'other') signals.key = true;
+    const chord = chordMatchOf(loops, reference.track.id, candidate.id);
+    if (chord !== undefined) signals.chord = Math.max(signals.chord ?? -Infinity, chord);
     if (reference.track.tags?.length && candidate.tags?.length) {
       const referenceIds = new Set(reference.track.tags.map((t) => t.id));
       for (const tag of candidate.tags) {
@@ -179,29 +192,32 @@ export function matchedSignals(candidate: Track, references: FollowReference[]):
   return signals;
 }
 
-/** The affinity signals' weighted subtotal (key + tags + artist) — what
- * the floor tests. Context signals (BPM, energy) are deliberately absent:
- * they order, but never admit. */
-export function affinitySubtotal(reference: Track, candidate: Track): number {
+/** The affinity signals' weighted subtotal (key + tags + artist + chord)
+ * — what the floor tests. Context signals (BPM, energy) are deliberately
+ * absent: they order, but never admit. Without `loops` the chord term is
+ * neutral. */
+export function affinitySubtotal(reference: Track, candidate: Track, loops?: ChordLoops): number {
   return (
     WEIGHTS.key * KEY_BONUS[keyRelation(reference.key, candidate.key)] +
     WEIGHTS.tags * tagContribution(sharedTagCount(reference, candidate)) +
-    WEIGHTS.artist * (sharedArtist(reference.artist, candidate.artist) ? 1 : 0)
+    WEIGHTS.artist * (sharedArtist(reference.artist, candidate.artist) ? 1 : 0) +
+    WEIGHTS.chord * chordContribution(chordMatchOf(loops, reference.id, candidate.id))
   );
 }
 
 /** A candidate's affinity evidence must be at least compatible-key-grade. */
-export function passesAffinityFloor(reference: Track, candidate: Track): boolean {
-  return affinitySubtotal(reference, candidate) >= AFFINITY_FLOOR;
+export function passesAffinityFloor(reference: Track, candidate: Track, loops?: ChordLoops): boolean {
+  return affinitySubtotal(reference, candidate, loops) >= AFFINITY_FLOOR;
 }
 
-/** The Match score: affinity subtotal + context signals. ~0..100. */
+/** The Match score: affinity subtotal + context signals. ~0..120. */
 export function matchScore(
   reference: Track,
   candidate: Track,
-  bpmThresholdPercent: number = DEFAULT_FOLLOW_PARAMS.bpmThresholdPercent
+  bpmThresholdPercent: number = DEFAULT_FOLLOW_PARAMS.bpmThresholdPercent,
+  loops?: ChordLoops,
 ): number {
-  return scoreFromAffinity(affinitySubtotal(reference, candidate), reference, candidate, bpmThresholdPercent);
+  return scoreFromAffinity(affinitySubtotal(reference, candidate, loops), reference, candidate, bpmThresholdPercent);
 }
 
 function scoreFromAffinity(affinity: number, reference: Track, candidate: Track, bpmThresholdPercent: number): number {

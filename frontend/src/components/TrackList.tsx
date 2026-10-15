@@ -69,7 +69,7 @@ interface TrackListProps {
   onScoreSort?: () => void;
   /** Why-did-this-match dimming (Follow views): per-row matched signals;
    * rows dim the key/tags that earned nothing. */
-  matchSignalsFor?: (track: Track) => { key: boolean; tagIds: Set<number> };
+  matchSignalsFor?: (track: Track) => { key: boolean; tagIds: Set<number>; chord?: number };
   sortColumn: SortColumn | null;
   sortDirection: 'asc' | 'desc';
   onSort: (column: SortColumn) => void;
@@ -321,6 +321,7 @@ export default function TrackList({
                     score={scoreFor !== undefined ? scoreFor(track) : undefined}
                     keyMatched={signals ? signals.key : undefined}
                     sharedTagIds={signals ? [...signals.tagIds].join(',') : undefined}
+                    chordMatch={signals?.chord}
                     evidence={evidenceFor(track.id)}
                   />
                 );

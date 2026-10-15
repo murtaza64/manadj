@@ -18,6 +18,8 @@ import {
   type TransitionMark,
 } from './rowEvidence';
 import { fileBasename } from '../utils/pathDisplay';
+import { ChordMatchIcon } from '../follow/ChordMatchIcon';
+import { CHORD_BADGE_MIN } from '../follow/chordMatch';
 import './TrackRow.css';
 
 /** Saved-Transition mark state for one source deck (transition-library
@@ -83,6 +85,9 @@ interface Props {
   /** CSV of tag ids shared with a followed reference; tags outside it
    * dim. undefined = no follow context (nothing dims). */
   sharedTagIds?: string;
+  /** Best Chord match against a followed reference (chord-match #388);
+   * the marks column shows its icon at CHORD_BADGE_MIN. undefined = no loops / no follow. */
+  chordMatch?: number;
   /** Per-Deck evidence marks (four-deck-performance 21), PACKED
    * (`packRowEvidence`): ◆/★ Transition marks and the symmetric Linked
    * chain for every Deck A–D. One primitive string keeps the row memo
@@ -140,11 +145,14 @@ const TrackRow = memo(function TrackRow({
   score,
   keyMatched,
   sharedTagIds,
+  chordMatch,
   evidence = '',
 }: Props) {
   // ≤4 tiny segments; parsing per render is cheaper than defeating the
   // row memo with object props.
   const deckEvidence = parseRowEvidence(evidence);
+  const chordIcon = chordMatch !== undefined && chordMatch >= CHORD_BADGE_MIN
+    ? <ChordMatchIcon match={chordMatch} size={9} /> : null;
   // Extract just the filename from the full path
   const filename = fileBasename(track.filename);
   const holdingDecks =
@@ -217,7 +225,7 @@ const TrackRow = memo(function TrackRow({
         })}
       </div>
     ) : score != null && deckEvidence.length === 0 ? (
-      <div className="track-match-score">{Math.round(score)}</div>
+      <div className="track-match-score">{Math.round(score)}{chordIcon}</div>
     ) : (
       <div className="track-marks">
         {/* Only occupied slots render, so a lone badge centers in
@@ -227,6 +235,7 @@ const TrackRow = memo(function TrackRow({
             {markSlot(mark, linked)}
           </span>
         ))}
+        {chordIcon}
       </div>
     ),
     title: (
