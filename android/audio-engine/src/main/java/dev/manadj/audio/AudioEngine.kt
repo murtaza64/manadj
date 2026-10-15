@@ -379,6 +379,13 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
         /** Main cue first (CUE stabs), then the loop start, then hot cues. */
         private val FILL_ORDER = listOf(MAIN_CUE, MAIN_CUE + 1) + (0 until HOT_CUES)
         private const val HEAD_FRAMES = 8192
+        /** Native in-memory fill block (Engine.h kTrackBlock). */
+        private const val TRACK_BLOCK = 4096L
+        /** A run serves a priority position until it is filled this far ahead, then gaps fill in order. */
+        private const val PRIORITY_AHEAD_SECONDS = 30.0
+        private const val CODEC_PREROLL_SECONDS = .1
+        private const val MP3_DECODER_DELAY_FRAMES = 529
+        private const val MAX_INDEXED_BYTES = 64L shl 20
         private const val HEADER = 31
         private const val DECK_FIELDS = 40 + HOT_CUES + 1 + 4
         private enum class Op { PREPARE, PLAY, PAUSE, CUE_DOWN, CUE_UP, HOT_CUE_DOWN, HOT_CUE_UP, HOT_CUE_SET, HOT_CUE_CLEAR, SEEK, FADER, TRIM, CROSSFADE, PITCH, BEND, PFL, CUE_MIX, EQ, FILTER, SET_GRID, BEAT_JUMP, LOOP_TOGGLE, LOOP_RESIZE, LOOP_PRESET, QUANTIZE, CUE_SET_AT, HOT_CUE_SET_AT, BEAT_FX, KEY_LOCK, PHASE_ALIGN, SCRATCH_BEGIN, SCRATCH_MOVE, SCRATCH_END, LOOP_SET, CANCEL_SCHEDULED, SET_SYNC_MEMBERS, LAUNCH_START, HEARD_LATENCY, CLICKS, STEM_GAIN }
@@ -546,6 +553,28 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
         val id = nativeSubmit(handle, Op.CLICKS.ordinal, 0, 1.0, 0, 0)
         return if (id != 0L) CommandReceipt(id, true) else rejected("Command queue full")
     }
+
+    /**
+     * Range fill (SH8): fill from [positions] (track seconds, priority order) next — each grows forward until
+     * filled [PRIORITY_AHEAD_SECONDS] ahead — before the remaining gaps; sample-identical to a decode from the
+     * start. A new call replaces the request; call after [load] (it applies to the current source). The deck's
+     * own last relocation target is always prioritized after these.
+     */
+    fun prefetch(deck: DeckId, positions: List<Double>) { prefetches[deck.ordinal].set(loads[deck.ordinal].get() to positions) }
+    fun prefetch(deck: DeckId, seconds: Double) = prefetch(deck, listOf(seconds))
+
+    /** Filled ranges of the in-memory track (track seconds, sorted, merged) for the deck's current source. */
+    fun decodedRanges(deck: DeckId): List<ClosedFloatingPointRange<Double>> = synchronized(this) {
+        if (closed) emptyList() else nativeTrackRanges(handle, deck.ordinal, loads[deck.ordinal].get()).let { r -> (r.indices step 2).map { r[it]..r[it + 1] } }
+    }
+
+    /** Seconds the in-memory track is filled contiguously from [seconds] for the deck's current source (0 = not there). */
+    fun decodedAhead(deck: DeckId, seconds: Double): Double =
+        synchronized(this) { if (closed) 0.0 else nativeTrackAhead(handle, deck.ordinal, loads[deck.ordinal].get(), seconds) }
+
+    /** Test hook: the in-memory track (stereo float, int16-quantized) from frame [from]; empty if not this load. */
+    internal fun trackCopyForTest(deck: DeckId, from: Long, frames: Int): FloatArray =
+        synchronized(this) { if (closed) FloatArray(0) else nativeTrackCopy(handle, deck.ordinal, loads[deck.ordinal].get(), from, frames) }
 
     /** Last quantized launch for diagnostics: count, deck, reference, L, ref render s, heard s, target beat s, delta s, entry s. */
     @Synchronized fun lastLaunch(): DoubleArray = if (closed) DoubleArray(9) else nativeLastLaunch(handle)
@@ -765,27 +794,152 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
                 Thread.sleep(5)
             }
             independent(source.fd).use { fd ->
-                PcmReader.open(fd.fileDescriptor).use { reader ->
-                    val duration = reader.durationSeconds ?: return
-                    var started = false
-                    while (current(deck, source)) {
-                        val n = reader.read()
-                        if (n < 0) break
-                        if (n == 0) continue
-                        if (!started) {
-                            val capacity = ((duration + 2) * reader.sampleRate).toLong()
-                            if (!memoryAllows(capacity * 4)) return
-                            if (!nativeTrackBegin(handle, deck, source.load, capacity, reader.sampleRate, reader.chunkStartSeconds, 1)) return
-                            started = true
-                        }
-                        if (nativeTrackWrite(handle, deck, source.load, reader.samples, n, 1) < n) return // Superseded or full.
-                    }
-                    if (started && current(deck, source)) nativeTrackFinish(handle, deck, source.load)
-                }
+                val mp3 = runCatching {
+                    val size = fd.statSize
+                    if (size in 1..MAX_INDEXED_BYTES) java.io.FileInputStream(fd.fileDescriptor).use { input ->
+                        input.channel.position(0)
+                        val bytes = ByteArray(size.toInt())
+                        var read = 0
+                        while (read < bytes.size) { val n = input.read(bytes, read, bytes.size - read); if (n < 0) break; read += n }
+                        if (read == bytes.size) Mp3Frames.parse(bytes) else null
+                    } else null
+                }.getOrNull()
+                if (mp3 != null) fillMp3(deck, source, mp3, state) else fillCodec(deck, source, fd, state)
             }
         } catch (_: InterruptedException) {
         } catch (_: Exception) { /* The streaming path still plays the track. */ }
     }
+
+    /** Explicit priority positions ([prefetch]): (load, track seconds in priority order). */
+    private val prefetches = Array(4) { java.util.concurrent.atomic.AtomicReference<Pair<Long, List<Double>>?>(null) }
+
+    /**
+     * Fill priority (track frame) for a range-filled deck: an explicit [prefetch], else the deck's last relocation
+     * target, while not yet filled [PRIORITY_AHEAD_SECONDS] ahead; null = fill gaps in order.
+     */
+    private fun priority(deck: Int, source: Source, state: DoubleArray, start: Double, rate: Int): Long? {
+        nativeTransport(handle, deck, state)
+        val candidates = prefetches[deck].get()?.takeIf { it.first == source.load }?.second.orEmpty() + listOfNotNull(state[2].takeIf { state[0].toLong() == source.load })
+        for (seconds in candidates) {
+            if (nativeTrackAhead(handle, deck, source.load, seconds) >= PRIORITY_AHEAD_SECONDS) continue
+            val frame = ((seconds - start) * rate).toLong().coerceAtLeast(0)
+            if (nativeTrackGap(handle, deck, source.load, frame / TRACK_BLOCK * TRACK_BLOCK) < 0) continue // filled to the end
+            return frame
+        }
+        return null
+    }
+
+    /** Next run start: the gap at/after the priority position, else the first gap after the target, else from 0. */
+    private fun nextRun(deck: Int, source: Source, state: DoubleArray, start: Double, rate: Int): Long {
+        priority(deck, source, state, start, rate)?.let { p ->
+            val gap = nativeTrackGap(handle, deck, source.load, p / TRACK_BLOCK * TRACK_BLOCK)
+            if (gap >= 0) return gap
+        }
+        val target = ((state[2] - start) * rate).toLong().coerceAtLeast(0)
+        val after = nativeTrackGap(handle, deck, source.load, target / TRACK_BLOCK * TRACK_BLOCK)
+        return if (after >= 0) after else nativeTrackGap(handle, deck, source.load, 0)
+    }
+
+    /** A run should yield to a priority position outside [runStart, cursor + lookahead]. */
+    private fun yieldTo(priority: Long?, runStart: Long, cursor: Long, rate: Int) =
+        priority != null && (priority < runStart || priority > cursor + PRIORITY_AHEAD_SECONDS.toLong() * rate)
+
+    /**
+     * MP3 range fill (SH8): exact frame index + raw decode ([Mp3Decoder]); any run is sample-identical to a
+     * decode from the start. Timeline = the desktop one (#390): LAME/Xing track frame n = raw sample n + encoder
+     * delay (start 0, padding trimmed); header-less n = raw n with the track starting 529 frames in.
+     */
+    private fun fillMp3(deck: Int, source: Source, frames: Mp3Frames, state: DoubleArray) {
+        val rate = frames.sampleRate
+        val shift = frames.delay ?: 0
+        val start = if (frames.delay == null) MP3_DECODER_DELAY_FRAMES.toDouble() / rate else 0.0
+        val total = frames.count.toLong() * frames.samplesPerFrame - shift - (frames.padding ?: 0)
+        if (total <= 0 || !memoryAllows(total * 4) || !nativeTrackBegin(handle, deck, source.load, total, rate, start, 1)) return
+        while (current(deck, source)) {
+            val runStart = nextRun(deck, source, state, start, rate)
+            if (runStart < 0) return // filled to the end
+            val firstFrame = ((runStart + shift) / frames.samplesPerFrame).toInt()
+            var cursor = runStart
+            var stop = false
+            val began = runStart
+            Mp3Decoder(frames).decode((firstFrame - Mp3Decoder.PREROLL).coerceAtLeast(0)) { samples, firstRaw, n ->
+                if (!current(deck, source)) { stop = true; return@decode false }
+                var from = cursor - (firstRaw - shift) // offset into this chunk of the next frame to write
+                if (from >= n) return@decode true      // preroll
+                if (from < 0) { stop = true; return@decode false } // not contiguous: never write a hole
+                var count = (n - from).toInt().coerceAtMost((total - cursor).toInt())
+                if (filled(deck, source, cursor)) return@decode false // another run got here first
+                val nextFilled = nextFilledBlock(deck, source, cursor, count)
+                if (nextFilled in (cursor + 1)..(cursor + count)) count = (nextFilled - cursor).toInt()
+                if (count > 0 && nativeTrackWriteAt(handle, deck, source.load, cursor, samples, from.toInt(), count, runStart) < count) { stop = true; return@decode false }
+                cursor += count
+                if (cursor >= total) { nativeTrackEnd(handle, deck, source.load, total, runStart); return@decode false }
+                if (count < n - from) return@decode false // reached filled data
+                !yieldTo(priority(deck, source, state, start, rate), runStart, cursor, rate)
+            }
+            if (!current(deck, source) || (stop && cursor == began)) return // superseded / no progress: give up
+        }
+    }
+
+    /** The block holding [frame] is already filled (by another run). */
+    private fun filled(deck: Int, source: Source, frame: Long) =
+        nativeTrackGap(handle, deck, source.load, frame) != frame / TRACK_BLOCK * TRACK_BLOCK
+
+    /** Start of the first filled block in (cursor, cursor + count], or -1. */
+    private fun nextFilledBlock(deck: Int, source: Source, cursor: Long, count: Int): Long {
+        var b = cursor / TRACK_BLOCK + 1
+        while (b * TRACK_BLOCK <= cursor + count) {
+            if (filled(deck, source, b * TRACK_BLOCK)) return b * TRACK_BLOCK
+            b++
+        }
+        return -1
+    }
+
+    /**
+     * Other codecs: PCM (WAV) seeks exactly, so runs start anywhere (preroll [CODEC_PREROLL_SECONDS] discarded);
+     * anything else (AAC: its extractor seek was not sample-exact everywhere) fills from the start in one run.
+     */
+    private fun fillCodec(deck: Int, source: Source, fd: ParcelFileDescriptor, state: DoubleArray) {
+        val (seekable, rate, start, duration) = PcmReader.open(fd.fileDescriptor).use { r ->
+            var n = 0
+            while (n == 0) n = r.read()
+            if (n < 0) return
+            Quad(r.seekable, r.sampleRate, r.chunkStartSeconds, r.durationSeconds ?: return)
+        }
+        val capacity = ((duration + 2) * rate).toLong()
+        if (!memoryAllows(capacity * 4) || !nativeTrackBegin(handle, deck, source.load, capacity, rate, start, 1)) return
+        while (current(deck, source)) {
+            val runStart = if (seekable) nextRun(deck, source, state, start, rate) else nativeTrackGap(handle, deck, source.load, 0)
+            if (runStart < 0) return
+            var progressed = false
+            PcmReader.open(fd.fileDescriptor).use { r ->
+                if (runStart > 0) r.seek(start + (runStart.toDouble() / rate - CODEC_PREROLL_SECONDS).coerceAtLeast(0.0))
+                var cursor = runStart
+                while (current(deck, source)) {
+                    val n = r.read()
+                    if (n < 0) { if (cursor > runStart || runStart == 0L) nativeTrackEnd(handle, deck, source.load, cursor, runStart); return@use }
+                    if (n == 0) continue
+                    if (r.sampleRate != rate) return
+                    val first = Math.round((r.chunkStartSeconds - start) * rate)
+                    var from = cursor - first
+                    if (from >= n) continue
+                    if (from < 0) { if (cursor == runStart && first <= runStart + 1) from = 0 else return } // a gap: not exact
+                    var count = (n - from).toInt()
+                    if (filled(deck, source, cursor)) return@use
+                    val nextFilled = nextFilledBlock(deck, source, cursor, count)
+                    if (nextFilled in (cursor + 1)..(cursor + count)) count = (nextFilled - cursor).toInt()
+                    if (nativeTrackWriteAt(handle, deck, source.load, cursor, r.samples, from.toInt(), count, runStart) < count) return
+                    cursor += count
+                    progressed = true
+                    if (count < n - from) return@use
+                    if (seekable && yieldTo(priority(deck, source, state, start, rate), runStart, cursor, rate)) return@use
+                }
+            }
+            if (!progressed) return
+        }
+    }
+
+    private data class Quad(val seekable: Boolean, val rate: Int, val start: Double, val duration: Double)
 
     /**
      * Whole-track decode of the 4 stems into one frame-major bank (desktop replace policy). Readers are
@@ -994,6 +1148,12 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
     private external fun nativeTrackBegin(handle: Long, deck: Int, load: Long, capacity: Long, rate: Int, start: Double, stems: Int): Boolean
     private external fun nativeTrackWrite(handle: Long, deck: Int, load: Long, pcm: FloatArray, frames: Int, stems: Int): Int
     private external fun nativeTrackFinish(handle: Long, deck: Int, load: Long)
+    private external fun nativeTrackWriteAt(handle: Long, deck: Int, load: Long, at: Long, pcm: FloatArray, offset: Int, frames: Int, runStart: Long): Int
+    private external fun nativeTrackEnd(handle: Long, deck: Int, load: Long, total: Long, runStart: Long)
+    private external fun nativeTrackCopy(handle: Long, deck: Int, load: Long, from: Long, frames: Int): FloatArray
+    private external fun nativeTrackRanges(handle: Long, deck: Int, load: Long): DoubleArray
+    private external fun nativeTrackGap(handle: Long, deck: Int, load: Long, from: Long): Long
+    private external fun nativeTrackAhead(handle: Long, deck: Int, load: Long, seconds: Double): Double
     private external fun nativePublish(handle: Long, deck: Int, load: Long, transport: Long, eof: Boolean): Boolean
     private external fun nativeFail(handle: Long, deck: Int, load: Long)
     private external fun nativeOutputInfo(handle: Long): DoubleArray

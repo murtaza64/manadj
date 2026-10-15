@@ -257,11 +257,12 @@ fun mixOf(model: PlayerModel, ux: UiModel, id: DeckId): DeckMix {
                             JumpStrip(ui, ux, model, Modifier.fillMaxWidth().height(ControlRow).screenSafe())
                             Row(Modifier.fillMaxWidth().height(TransportRow).screenSafe()) { CueKey(ui, model, Modifier.weight(1f).fillMaxHeight(), ux); PlayKey(ui, model, Modifier.weight(1f).fillMaxHeight(), ux) }
                             BendStrip(ui, model, Modifier.fillMaxWidth().height(ControlRow).screenSafe())
-                            PitchKey(ui, model, ux, Modifier.fillMaxWidth().height(40.dp).screenSafe())
                         }
                     }
+                    // VH5: pitch tabs run edge to edge (screen corners clip the outer ends; readouts inset).
+                    Row(Modifier.fillMaxWidth().height(PitchTabHeight), horizontalArrangement = Arrangement.spacedBy(DeckGap)) { for (ui in listOf(a, b)) PitchKey(ui, model, ux, Modifier.weight(1f).fillMaxHeight().underPitchPanel(model, ui.id)) }
                 }
-                Row(Modifier.matchParentSize().then(pad), horizontalArrangement = Arrangement.spacedBy(DeckGap)) {
+                Row(Modifier.matchParentSize(), horizontalArrangement = Arrangement.spacedBy(DeckGap)) {
                     for (id in listOf(DeckId.A, DeckId.B)) Box(Modifier.weight(1f).fillMaxHeight()) { PitchArea(model, ux, id, Modifier.fillMaxSize()) }
                 }
             }
@@ -292,8 +293,10 @@ fun mixOf(model: PlayerModel, ux: UiModel, id: DeckId): DeckMix {
 /** The in-place pitch panel over [id]'s control area: opens/closes with a short rigid fade + slide. */
 @Composable private fun PitchArea(model: PlayerModel, ux: UiModel, id: DeckId, modifier: Modifier) {
     // #400: slides up from the bottom edge of the deck's control area (clipped there) and replaces the controls.
-    AnimatedVisibility(model.pitchDrawer == id, modifier.clipToBounds(), enter = slideInVertically(tween(240, easing = FastOutSlowInEasing)) { it } + fadeIn(tween(140)),
-        exit = slideOutVertically(tween(200, easing = FastOutSlowInEasing)) { it } + fadeOut(tween(160, delayMillis = 40))) {
+    // VH5: the panel's top edge is a copy of the tab, so it starts exactly over the tab and rises (no fade).
+    val tab = with(LocalDensity.current) { PitchTabHeight.roundToPx() }
+    AnimatedVisibility(model.pitchDrawer == id, modifier.clipToBounds(), enter = slideInVertically(tween(240, easing = FastOutSlowInEasing)) { it - tab },
+        exit = slideOutVertically(tween(200, easing = FastOutSlowInEasing)) { it - tab }) {
         PitchPanel(model.decks.getValue(id), model, ux, Modifier.fillMaxSize())
     }
 }
@@ -440,11 +443,13 @@ private enum class PaneKind { LEFT_SLOT, RIGHT_SLOT, BOTH_LEFT, BOTH_RIGHT }
             LoopStrip(ui, ux, model, Modifier.fillMaxWidth().height(40.dp).screenSafe())
             JumpStrip(ui, ux, model, Modifier.fillMaxWidth().height(40.dp).screenSafe())
             Row(Modifier.fillMaxWidth().height(TransportRow).screenSafe()) { CueKey(ui, model, Modifier.weight(1f).fillMaxHeight(), ux); PlayKey(ui, model, Modifier.weight(1f).fillMaxHeight(), ux) }
-            Row(Modifier.fillMaxWidth().height(42.dp).screenSafe()) { BendStrip(ui, model, Modifier.weight(1f).fillMaxHeight()); PitchKey(ui, model, ux, Modifier.weight(1.6f).fillMaxHeight()) }
+            BendStrip(ui, model, Modifier.fillMaxWidth().height(30.dp).screenSafe())
             }
+            // VH5: full-width pitch tab, out to the screen edge on the outer side.
+            PitchKey(ui, model, ux, Modifier.fillMaxWidth().height(PitchTabHeight).underPitchPanel(model, ui.id).bleedSides(if (ui.id == DeckId.A) 6.dp else 0.dp, if (ui.id == DeckId.A) 0.dp else 6.dp))
         }
         // The pitch panel replaces this deck's controls below info + minimap (#105); the mixer and other deck stay.
-        PitchArea(model, ux, ui.id, Modifier.fillMaxSize().padding(top = 88.dp).screenSafe())
+        PitchArea(model, ux, ui.id, Modifier.fillMaxSize().padding(top = 88.dp).bleedSides(if (ui.id == DeckId.A) 6.dp else 0.dp, if (ui.id == DeckId.A) 0.dp else 6.dp))
     }
 }
 

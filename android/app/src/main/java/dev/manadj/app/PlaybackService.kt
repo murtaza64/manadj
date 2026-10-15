@@ -5,6 +5,9 @@ import android.content.*
 import android.media.AudioAttributes
 import android.media.AudioFocusRequest
 import android.media.AudioManager
+import android.media.MediaMetadata
+import android.media.session.MediaSession
+import android.media.session.PlaybackState
 import android.os.*
 import androidx.core.content.ContextCompat
 import dev.manadj.audio.*
@@ -37,9 +40,71 @@ class PlaybackService : Service() {
         override fun onReceive(context: Context?, intent: Intent?) { if (intent?.action == AudioManager.ACTION_AUDIO_BECOMING_NOISY) pauseAll("Paused: audio output became noisy (headphones unplugged)") }
     }
 
+    /**
+     * EH3: media session + media-style notification (lock screen / headset / notification shade). Pause stops every
+     * playing deck and remembers them; Play resumes those (else the last audible deck). The notification shows the
+     * audible deck's track; it stays (dismissable) while paused so playback can resume from the background.
+     */
+    private lateinit var session: MediaSession
+    private var resumeDecks: List<DeckId> = emptyList()
+    private var audible: DeckId? = null
+    private var shown: Triple<Boolean, String?, Boolean>? = null // (playing, sourceId, notification visible)
+    private val sessionCallback = object : MediaSession.Callback() {
+        override fun onPlay() = resumeFromMedia()
+        override fun onPause() = pauseFromMedia()
+        override fun onStop() = pauseFromMedia()
+    }
+
+    private fun pauseFromMedia() {
+        val decks = snapshot()?.decks ?: return
+        val playing = decks.filterValues { it.playing || it.previewing }.keys.toList()
+        if (playing.isEmpty()) return
+        resumeDecks = playing
+        playing.forEach { submit(AudioCommand.Pause(it)) }
+        updateMedia(force = true)
+    }
+
+    private fun resumeFromMedia() {
+        val decks = snapshot()?.decks ?: return
+        val targets = resumeDecks.ifEmpty { listOfNotNull(audible) }.filter { decks[it]?.loadState == LoadState.READY && decks[it]?.playing == false }
+        resumeDecks = emptyList()
+        targets.forEach { submit(AudioCommand.Play(it)) }
+        updateMedia(force = true)
+    }
+
+    /** The deck the audience hears: playing with the highest fader x trim (last one when nothing plays). */
+    private fun audibleDeck(state: EngineSnapshot): DeckId? =
+        state.decks.filterValues { it.playing || it.previewing }.maxByOrNull { (_, d) -> d.fader * d.trim }?.key ?: audible?.takeIf { state.decks[it]?.sourceId != null }
+
+    private fun updateMedia(force: Boolean = false) {
+        val state = snapshot() ?: return
+        audible = audibleDeck(state)
+        val playing = state.decks.values.any { it.playing || it.previewing }
+        val source = audible?.let { state.decks[it]?.sourceId }
+        val visible = playing || (source != null && (foreground || shown?.third == true))
+        val now = Triple(playing, source, visible)
+        if (!force && now == shown) return
+        shown = now
+        val meta = source?.let { sourceMetadata[it] }
+        session.setMetadata(MediaMetadata.Builder()
+            .putString(MediaMetadata.METADATA_KEY_TITLE, meta?.title ?: "manadj")
+            .putString(MediaMetadata.METADATA_KEY_ARTIST, meta?.artist ?: "")
+            .apply { meta?.durationSeconds?.let { putLong(MediaMetadata.METADATA_KEY_DURATION, (it * 1000).toLong()) } }
+            .build())
+        session.setPlaybackState(PlaybackState.Builder()
+            .setActions(PlaybackState.ACTION_PLAY or PlaybackState.ACTION_PAUSE or PlaybackState.ACTION_PLAY_PAUSE or PlaybackState.ACTION_STOP)
+            .setState(if (playing) PlaybackState.STATE_PLAYING else PlaybackState.STATE_PAUSED, PlaybackState.PLAYBACK_POSITION_UNKNOWN, 0f)
+            .build())
+        session.isActive = visible
+        val notifications = getSystemService(NotificationManager::class.java)
+        if (!visible) { notifications.cancel(1); return }
+        notifications.notify(1, notification()) // while foreground this updates the service notification (same id)
+    }
+
     override fun onCreate() {
         super.onCreate()
         audioManager = getSystemService(AudioManager::class.java)
+        session = MediaSession(this, "manadj").apply { setCallback(sessionCallback, main) }
         getSystemService(NotificationManager::class.java).createNotificationChannel(NotificationChannel("playback", "Playback", NotificationManager.IMPORTANCE_LOW))
         ContextCompat.registerReceiver(this, noisy, IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY), ContextCompat.RECEIVER_NOT_EXPORTED)
         lifetime.execute {
@@ -54,8 +119,14 @@ class PlaybackService : Service() {
 
     override fun onBind(intent: Intent?): IBinder = binder
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action == "STOP") { pauseAll("Stopped from the notification"); stopForeground(STOP_FOREGROUND_REMOVE); foreground = false; stopSelf() }
-        else if (!foreground) { startForeground(1, notification()); foreground = true }
+        when (intent?.action) {
+            ACTION_PAUSE -> pauseFromMedia()
+            ACTION_PLAY -> resumeFromMedia()
+            ACTION_DISMISS -> { resumeDecks = emptyList(); shown = shown?.copy(third = false); if (!foreground) { session.isActive = false; getSystemService(NotificationManager::class.java).cancel(1) } }
+            else -> if (!foreground) { startForeground(1, notification()); foreground = true }
+        }
+        // A media action must not keep an idle service started (it lives on only while the app binds it).
+        if (intent?.action in listOf(ACTION_PAUSE, ACTION_PLAY, ACTION_DISMISS) && !foreground) stopSelf()
         return START_NOT_STICKY
     }
 
@@ -161,11 +232,22 @@ class PlaybackService : Service() {
     }
 
     private fun notification(): Notification {
+        val state = snapshot()
+        val playing = state?.decks?.values?.any { it.playing || it.previewing } == true
+        val meta = audible?.let { state?.decks?.get(it)?.sourceId }?.let { sourceMetadata[it] }
+        fun service(action: String, code: Int) = PendingIntent.getService(this, code, Intent(this, PlaybackService::class.java).setAction(action), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val open = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-        val stop = PendingIntent.getService(this, 1, Intent(this, PlaybackService::class.java).setAction("STOP"), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-        return Notification.Builder(this, "playback").setSmallIcon(android.R.drawable.ic_media_play)
-            .setContentTitle("manadj playback").setContentText("Native shared audio output")
-            .setContentIntent(open).setOngoing(true).addAction(Notification.Action.Builder(null, "Stop", stop).build()).build()
+        val toggle = if (playing) Notification.Action.Builder(android.graphics.drawable.Icon.createWithResource(this, android.R.drawable.ic_media_pause), "Pause", service(ACTION_PAUSE, 1)).build()
+            else Notification.Action.Builder(android.graphics.drawable.Icon.createWithResource(this, android.R.drawable.ic_media_play), "Play", service(ACTION_PLAY, 2)).build()
+        val others = state?.decks?.count { (id, d) -> id != audible && (d.playing || d.previewing) } ?: 0
+        return Notification.Builder(this, "playback").setSmallIcon(if (playing) android.R.drawable.ic_media_play else android.R.drawable.ic_media_pause)
+            .setContentTitle(meta?.title ?: "manadj")
+            .setContentText(listOfNotNull(meta?.artist?.takeIf { it.isNotBlank() }, audible?.let { "Deck $it" + if (others > 0) " +$others" else "" }).joinToString(" · ").ifBlank { "manadj" })
+            .setContentIntent(open).setOngoing(playing).setDeleteIntent(service(ACTION_DISMISS, 3)).setShowWhen(false)
+            .setVisibility(Notification.VISIBILITY_PUBLIC)
+            .addAction(toggle)
+            .setStyle(Notification.MediaStyle().setMediaSession(session.sessionToken).setShowActionsInCompactView(0))
+            .build()
     }
 
     private var ticks = 0
@@ -180,9 +262,12 @@ class PlaybackService : Service() {
                 else if (now - closedSince >= 2000) { closedSince = now; lifetime.execute { engine?.reopen() } }
             } else closedSince = 0L
             if (foreground && state != null && state.appliedCommandId >= state.acceptedCommandId && state.decks.values.none { it.playing || it.previewing }) {
-                stopForeground(STOP_FOREGROUND_REMOVE); foreground = false; stopSelf()
+                // Paused: the notification stays (dismissable, Play resumes) while the app keeps the service bound.
+                stopForeground(STOP_FOREGROUND_DETACH); foreground = false; stopSelf()
+                shown = shown?.copy(third = true); updateMedia(force = true)
                 audioManager.abandonAudioFocusRequest(focusRequest); hasFocus = false
             }
+            if (state != null) updateMedia()
             // Every 10 s while playing: callback cost + deck modes, readable via `adb logcat -s manadj-bench`.
             if (state != null && ++ticks % 20 == 0 && state.decks.values.any { it.playing || it.previewing }) {
                 val cost = try { engine?.renderCost() } catch (_: IllegalStateException) { null }
@@ -203,10 +288,18 @@ class PlaybackService : Service() {
     }
     private var lastLaunchLogged = 0.0
 
+    companion object {
+        const val ACTION_PLAY = "dev.manadj.PLAY"
+        const val ACTION_PAUSE = "dev.manadj.PAUSE"
+        const val ACTION_DISMISS = "dev.manadj.DISMISS"
+    }
+
     override fun onDestroy() {
         destroyed = true
         main.removeCallbacks(monitor)
         unregisterReceiver(noisy)
+        session.release()
+        getSystemService(NotificationManager::class.java).cancel(1)
         audioManager.abandonAudioFocusRequest(focusRequest)
         lifetime.execute { val old = engine; engine = null; old?.close() }
         lifetime.shutdown()

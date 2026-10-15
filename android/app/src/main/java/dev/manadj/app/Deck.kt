@@ -10,6 +10,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithContent
@@ -241,38 +242,55 @@ val StripEnd = 48.dp
     }
 }
 
-/** #400 pitch tab: rounded top like the top edge of the panel it opens. */
-val PitchTab = RoundedCornerShape(topStart = 14.dp, topEnd = 14.dp, bottomStart = 4.dp, bottomEnd = 4.dp)
+/** VH5 pitch tab: full width, rounded top like the top edge of the panel it opens; square bottom (screen edge). */
+val PitchTab = RoundedCornerShape(topStart = 14.dp, topEnd = 14.dp)
+/** Pitch tab height; the panel slides up from here, keeping its own copy of the tab as its top edge. */
+val PitchTabHeight = 40.dp
 
-/** Pitch key carries its own readouts: BPM (when gridded), key, and pitch adjustment. Opens the pitch popup. */
+/**
+ * Pitch tab (VH5): a full-width strip (edge to edge per deck half; the rounded screen corners may clip its ends)
+ * whose readouts (pitch · SYNC/BPM · key) stay clear of corner arcs. Tap/press toggles the pitch panel; the open
+ * panel carries the same face as its top edge, so the tab appears to rise with it.
+ */
 @Composable fun PitchKey(ui: DeckUi, model: PlayerModel, ux: UiModel, modifier: Modifier) {
-    val color = deckColor(ui.id)
     val open = model.pitchDrawer == ui.id
+    // Opens on press (like BROWSE); the click only covers accessibility actions.
+    var downToggled by remember { mutableStateOf(false) }
+    val currentOpen by rememberUpdatedState(open)
+    val haptic = LocalHapticFeedback.current
+    PitchTabFace(ui, model, ux, open, modifier
+        .semantics { contentDescription = "${ui.id} pitch panel"; role = Role.Button }
+        .pointerInput(ui.id) {
+            awaitEachGesture {
+                awaitFirstDown(requireUnconsumed = false, pass = androidx.compose.ui.input.pointer.PointerEventPass.Initial)
+                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                downToggled = true; model.pitchDrawer = if (currentOpen) null else ui.id
+                do { val e = awaitPointerEvent(androidx.compose.ui.input.pointer.PointerEventPass.Final) } while (e.changes.any { it.pressed })
+                downToggled = false
+            }
+        }
+        .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { if (downToggled) downToggled = false else model.pitchDrawer = if (open) null else ui.id })
+}
+
+/** The tab's look (shared by the closed tab and the open panel's top edge): glass strip, deck-colour top rim, grabber, readouts. */
+@Composable fun PitchTabFace(ui: DeckUi, model: PlayerModel, ux: UiModel, open: Boolean, modifier: Modifier) {
+    val color = deckColor(ui.id)
     val e = ux.extras.getValue(ui.id)
     val gridBpm by remember(ui) { derivedStateOf { ui.snapshot?.bpm } }
     val keyLocked by remember(ui) { derivedStateOf { ui.snapshot?.keyLock == true } }
-    Box(modifier) {
-        // Opens on press (like BROWSE); the click only covers accessibility actions.
-        var downToggled by remember { mutableStateOf(false) }
-        val currentOpen by rememberUpdatedState(open)
-        // #400: a tab (rounded top, grabber bar) — the handle of the pitch panel that slides up from here.
-        val enabled = model.supports("varispeed")
-        val haptic = LocalHapticFeedback.current
-        Box(Modifier.fillMaxSize().padding(2.dp).clip(PitchTab).then(dev.manadj.app.viz.Glass.fill(Ink.panel, 14f))
-            .background(color.copy(alpha = if (open) .28f else 0f)).border(1.5.dp, color.copy(alpha = if (open) 1f else if (enabled) .6f else .25f), PitchTab)
-            .semantics { contentDescription = "${ui.id} pitch panel"; role = Role.Button }
-            .pointerInput(ui.id) {
-                awaitEachGesture {
-                    awaitFirstDown(requireUnconsumed = false, pass = androidx.compose.ui.input.pointer.PointerEventPass.Initial)
-                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                    downToggled = true; model.pitchDrawer = if (currentOpen) null else ui.id
-                    do { val e = awaitPointerEvent(androidx.compose.ui.input.pointer.PointerEventPass.Final) } while (e.changes.any { it.pressed })
-                    downToggled = false
-                }
+    val enabled = model.supports("varispeed")
+    Box(modifier.clip(PitchTab).then(dev.manadj.app.viz.Glass.fill(Ink.panel, 14f)).background(color.copy(alpha = if (open) .18f else 0f))
+        .drawBehind {
+            // Top rim + rounded shoulders in the deck colour (no side/bottom border: those edges run off-screen).
+            val w = 1.5.dp.toPx(); val r = 14.dp.toPx()
+            val path = Path().apply {
+                moveTo(w / 2, size.height); lineTo(w / 2, r); arcTo(androidx.compose.ui.geometry.Rect(w / 2, w / 2, 2 * r, 2 * r), 180f, 90f, false)
+                lineTo(size.width - r, w / 2); arcTo(androidx.compose.ui.geometry.Rect(size.width - 2 * r, w / 2, size.width - w / 2, 2 * r), 270f, 90f, false); lineTo(size.width - w / 2, size.height)
             }
-            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { if (downToggled) downToggled = false else model.pitchDrawer = if (open) null else ui.id })
-        Box(Modifier.align(Alignment.TopCenter).padding(top = 5.dp).size(28.dp, 3.dp).clip(RoundedCornerShape(50)).background(color.copy(alpha = if (enabled) .9f else .3f)))
-        Row(Modifier.fillMaxSize().padding(start = 12.dp, end = 12.dp, top = 5.dp), verticalAlignment = Alignment.CenterVertically) {
+            drawPath(path, color.copy(alpha = if (open) 1f else if (enabled) .7f else .25f), style = Stroke(w))
+        }) {
+        Box(Modifier.align(Alignment.TopCenter).padding(top = 5.dp).size(32.dp, 3.dp).clip(RoundedCornerShape(50)).background(color.copy(alpha = if (enabled) .9f else .3f)))
+        Row(Modifier.fillMaxSize().screenSafe(10.dp).padding(start = 12.dp, end = 12.dp, top = 5.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("%+.2f%%".format(ui.pitch), color = if (ui.pitch == 0.0) Ink.text else color, size = 14, bold = true)
             Spacer(Modifier.weight(1f))
             Column(horizontalAlignment = Alignment.End) {
@@ -288,6 +306,14 @@ val PitchTab = RoundedCornerShape(topStart = 14.dp, topEnd = 14.dp, bottomStart 
             }
         }
     }
+}
+
+/** Widens a node past its parent's padding on either side (edge-to-edge strips inside padded columns). */
+fun Modifier.bleedSides(left: Dp, right: Dp): Modifier = layout { measurable, constraints ->
+    val l = left.roundToPx(); val r = right.roundToPx()
+    val c = if (constraints.hasBoundedWidth) constraints.copy(minWidth = constraints.minWidth + l + r, maxWidth = constraints.maxWidth + l + r) else constraints
+    val p = measurable.measure(c)
+    layout(p.width - l - r, p.height) { p.place(-l, 0) }
 }
 
 /**

@@ -79,7 +79,9 @@ double Engine::scratchPositionAt(const Deck& d, double frame) const noexcept {
     const double elapsed = (frame - d.scratchTime) / outputRate_.load(kRelaxed);
     double p = d.scratchPos + scratchTravel(d.scratchRate, d.scratchDrive, elapsed);
     const auto& t = d.track;
-    const double end = t.startSeconds.load(kRelaxed) + t.frames.load(kRelaxed) / static_cast<double>(std::max(1, t.sampleRate.load(kRelaxed)));
+    const double rate = std::max(1, t.sampleRate.load(kRelaxed));
+    const double end = t.startSeconds.load(kRelaxed) + static_cast<double>(t.total.load(kAcquire) ? t.total.load(kAcquire)
+        : trackRunEnd(t, static_cast<uint64_t>(std::max(0.0, (d.scratchPos - t.startSeconds.load(kRelaxed)) * rate)))) / rate;
     if (d.scratchLoop) {
         const double length = d.scratchLoopEnd - d.scratchLoopStart;
         const double off = std::fmod(p - d.scratchLoopStart, length);
@@ -293,6 +295,12 @@ bool Engine::trackBegin(int index, uint64_t load, uint64_t capacity, int sampleR
     t.load.store(0, kRelease);
     t.frames.store(0, kRelease);
     t.complete.store(false, kRelease);
+    t.total.store(0, kRelease);
+    t.filled.store(0, kRelease);
+    const uint64_t blocks = (capacity + kTrackBlock - 1) >> kTrackBlockShift;
+    if (!t.blocks || t.blockCount < blocks) { t.blocks.reset(new (std::nothrow) std::atomic<uint8_t>[blocks]); t.blockCount = t.blocks ? blocks : 0; if (!t.blocks) return false; }
+    t.blockCount = blocks;
+    for (uint64_t b = 0; b < blocks; ++b) t.blocks[b].store(0, kRelaxed);
     const uint64_t samples = capacity * 2 * static_cast<uint64_t>(stems);
     if (!t.pcm || t.allocated < samples || t.allocated > samples * 2) {
         t.pcm.reset();
@@ -310,25 +318,79 @@ bool Engine::trackBegin(int index, uint64_t load, uint64_t capacity, int sampleR
     return d.loadId.load(kAcquire) == load;
 }
 
-int Engine::trackWrite(int index, uint64_t load, const float* samples, int frames) {
+namespace {
+void markBlock(Track& t, uint64_t b) {
+    if (b >= t.blockCount || t.blocks[b].exchange(1, std::memory_order_acq_rel) != 0) return;
+    if (t.filled.fetch_add(1, std::memory_order_acq_rel) + 1 == t.blockCount && t.total.load(std::memory_order_acquire) != 0)
+        t.complete.store(true, std::memory_order_release);
+}
+} // namespace
+
+int Engine::trackWriteAt(int index, uint64_t load, uint64_t at, const float* samples, int frames, uint64_t runStart) {
     if (index < 0 || index >= kDeckCount || frames <= 0 || !samples) return -1;
     auto& d = decks_[index];
     auto& t = d.track;
     if (t.load.load(kAcquire) != load || d.loadId.load(kAcquire) != load) return -1;
-    const auto at = t.frames.load(kRelaxed);
+    if (at >= t.capacity) return 0;
     const int n = static_cast<int>(std::min<uint64_t>(frames, t.capacity - at));
     const int width = 2 * t.stems.load(kRelaxed);
     int16_t* out = t.pcm.get() + at * width;
     for (int i = 0; i < n * width; ++i)
         out[i] = static_cast<int16_t>(std::lrint(std::clamp(samples[i], -1.f, 32767.f / 32768) * 32768));
-    t.frames.store(at + n, kRelease);
+    // Blocks whose last frame this write reached, fully inside the run.
+    for (uint64_t b = at >> kTrackBlockShift; ((b + 1) << kTrackBlockShift) <= at + n; ++b)
+        if ((b << kTrackBlockShift) >= runStart && ((b + 1) << kTrackBlockShift) > at) markBlock(t, b);
+    return n;
+}
+
+void Engine::trackEnd(int index, uint64_t load, uint64_t totalFrames, uint64_t runStart) {
+    if (index < 0 || index >= kDeckCount || totalFrames == 0) return;
+    auto& t = decks_[index].track;
+    if (t.load.load(kAcquire) != load) return;
+    totalFrames = std::min(totalFrames, t.capacity);
+    t.total.store(totalFrames, kRelease);
+    const uint64_t last = (totalFrames - 1) >> kTrackBlockShift;
+    if ((last << kTrackBlockShift) >= runStart) markBlock(t, last);
+    for (uint64_t b = last + 1; b < t.blockCount; ++b) markBlock(t, b); // past the end: nothing to fill
+    if (t.filled.load(kAcquire) == t.blockCount) t.complete.store(true, kRelease);
+}
+
+int Engine::trackWrite(int index, uint64_t load, const float* samples, int frames) {
+    if (index < 0 || index >= kDeckCount) return -1;
+    auto& t = decks_[index].track;
+    const auto at = t.frames.load(kRelaxed);
+    const int n = trackWriteAt(index, load, at, samples, frames, 0);
+    if (n > 0) t.frames.store(at + n, kRelease);
     return n;
 }
 
 void Engine::trackFinish(int index, uint64_t load) {
     if (index < 0 || index >= kDeckCount) return;
     auto& t = decks_[index].track;
-    if (t.load.load(kAcquire) == load) t.complete.store(true, kRelease);
+    if (t.load.load(kAcquire) == load && t.frames.load(kAcquire) > 0) trackEnd(index, load, t.frames.load(kAcquire), 0);
+}
+
+int64_t Engine::trackGap(int index, uint64_t load, uint64_t from) const {
+    if (index < 0 || index >= kDeckCount) return -1;
+    const auto& t = decks_[index].track;
+    if (t.load.load(kAcquire) != load || t.complete.load(kAcquire)) return -1;
+    const uint64_t total = t.total.load(kAcquire);
+    for (uint64_t b = from >> kTrackBlockShift; b < t.blockCount; ++b) {
+        if (total != 0 && (b << kTrackBlockShift) >= total) break;
+        if (t.blocks[b].load(kAcquire) == 0) return static_cast<int64_t>(b << kTrackBlockShift);
+    }
+    return -1;
+}
+
+double Engine::trackAhead(int index, uint64_t load, double seconds) const {
+    if (index < 0 || index >= kDeckCount) return 0;
+    const auto& t = decks_[index].track;
+    const int rate = t.sampleRate.load(kAcquire);
+    if (t.load.load(kAcquire) != load || rate <= 0) return 0;
+    const double f = (seconds - t.startSeconds.load(kRelaxed)) * rate;
+    if (f < 0) return 0;
+    const auto k = static_cast<uint64_t>(f);
+    return std::max(0.0, (static_cast<double>(trackRunEnd(t, k)) - f) / rate);
 }
 
 bool Engine::trackCovers(const Deck& d, double seconds, double spanFrames) const noexcept {
@@ -336,8 +398,9 @@ bool Engine::trackCovers(const Deck& d, double seconds, double spanFrames) const
     if (t.load.load(kAcquire) != d.loadId.load(kRelaxed) || t.load.load(kRelaxed) == 0) return false;
     const double f = (seconds - t.startSeconds.load(kRelaxed)) * t.sampleRate.load(kRelaxed);
     if (f < 0) return false;
-    const auto avail = static_cast<double>(t.frames.load(kAcquire));
-    return f + spanFrames + 2 < avail || (t.complete.load(kAcquire) && f + 1 < avail);
+    const auto end = static_cast<double>(trackRunEnd(t, static_cast<uint64_t>(f)));
+    const auto total = t.total.load(kAcquire);
+    return f + spanFrames + 2 < end || (total != 0 && end == static_cast<double>(total) && f + 1 < end);
 }
 
 void Engine::releaseHead(Deck& d) noexcept {
@@ -357,7 +420,7 @@ void Engine::captureTail(Deck& d) noexcept {
         const int rate = t.sampleRate.load(kRelaxed);
         const double frame = (d.position.load(kRelaxed) - t.startSeconds.load(kRelaxed)) * rate;
         const auto from = static_cast<uint64_t>(frame);
-        n = static_cast<int>(std::min<uint64_t>(kTailFrames, t.frames.load(kAcquire) - from));
+        n = static_cast<int>(std::min<uint64_t>(kTailFrames, trackRunEnd(t, from) - from));
         for (int i = 0; i < n; ++i) trackFrame(t, d.stemGain.data(), from + i, d.tail[i * 2], d.tail[i * 2 + 1]);
         if (n < 2) return;
         d.tailAvail = n;
@@ -1115,10 +1178,10 @@ int Engine::renderTrack(Deck& d, float* strip, int frames, bool& active) noexcep
     d.stretching.store(false, kRelaxed);
     if (d.envelope == 0 && d.tailLeft == 0) { d.gain = d.targetGain; d.cueGain = d.targetCueGain; d.xf = d.targetXf; }
     const double start = t.startSeconds.load(kRelaxed);
-    const auto avail = t.frames.load(kAcquire);
-    const bool complete = t.complete.load(kAcquire);
     const double startPosition = d.position.load(kRelaxed);
     double frame = (startPosition - start) * rate;
+    const auto avail = trackRunEnd(t, static_cast<uint64_t>(std::max(0.0, frame)));
+    const bool complete = t.total.load(kAcquire) != 0 && avail == t.total.load(kAcquire); // the run reaches the end
     const bool looping = d.loopActive.load(kRelaxed) && startPosition < d.loopEnd.load(kRelaxed);
     const double loopEndFrame = looping ? (d.loopEnd.load(kRelaxed) - start) * rate : 0;
     bool ramping = stepStemGains(d, 0);
@@ -1160,7 +1223,6 @@ void Engine::stretchBlock(Deck& d, double frame, double rate, int frames, float*
     const int window = static_cast<int>(d.stretchIn[0].size());
     const auto end = static_cast<int64_t>(std::llround(frame + rate * st.outputLatency() + st.inputLatency()));
     const int64_t first = end - window;
-    const auto avail = static_cast<int64_t>(t.frames.load(kAcquire));
     const int src = t.sampleRate.load(kRelaxed);
     const double start = t.startSeconds.load(kRelaxed);
     const bool looping = d.loopActive.load(kRelaxed);
@@ -1173,7 +1235,7 @@ void Engine::stretchBlock(Deck& d, double frame, double rate, int frames, float*
     for (int i = 0; i < window; ++i) {
         int64_t f = first + i;
         if (looping && loopLength > 0 && f >= loopEnd) f = loopStart + (f - loopStart) % loopLength;
-        if (f >= 0 && f < avail) trackFrame(t, d.stemGain.data(), static_cast<uint64_t>(f), inL[i], inR[i]);
+        if (f >= 0 && trackHas(t, static_cast<uint64_t>(f))) trackFrame(t, d.stemGain.data(), static_cast<uint64_t>(f), inL[i], inR[i]);
         else inL[i] = inR[i] = 0;
     }
     float* ins[2] = {inL, inR};
@@ -1190,7 +1252,7 @@ int Engine::renderStretch(Deck& d, float* strip, int frames, bool& active) noexc
     const double rate = speed * src / out;   // input frames per output frame
     const double transpose = src / out;      // input is read at the output rate: undo that pitch shift
     const double start = t.startSeconds.load(kRelaxed);
-    const auto avail = static_cast<double>(t.frames.load(kAcquire));
+    const auto total = static_cast<double>(t.total.load(kAcquire));
     double frame = (d.position.load(kRelaxed) - start) * src;
     auto& st = *d.stretch;
     float* outL = d.stretchOut[0].data();
@@ -1230,7 +1292,7 @@ int Engine::renderStretch(Deck& d, float* strip, int frames, bool& active) noexc
         // The stretcher already heard the wrap (folded window): only the playhead folds.
         if (le > ls && frame >= le && frame - frames * rate < le) frame = ls + std::fmod(frame - ls, le - ls);
     }
-    if (frame + 1 >= avail && t.complete.load(kAcquire)) {
+    if (total > 0 && frame + 1 >= total) {
         d.playing.store(false); d.preview.store(false); d.previewSlot.store(-1); d.trackEnd.store(true);
         d.stretching.store(false, kRelaxed);
     }
@@ -1260,7 +1322,6 @@ void Engine::renderScratch(Deck& d, float* strip, int frames, int64_t frame, boo
     const auto& t = d.track;
     const int src = t.sampleRate.load(kRelaxed);
     const double start = t.startSeconds.load(kRelaxed);
-    const auto avail = t.frames.load(kAcquire);
     const double out = outputRate_.load(kRelaxed);
     if (d.envelope == 0 && d.tailLeft == 0) { d.gain = d.targetGain; d.cueGain = d.targetCueGain; d.xf = d.targetXf; }
     double pos = d.position.load(kRelaxed);
@@ -1273,7 +1334,7 @@ void Engine::renderScratch(Deck& d, float* strip, int frames, int64_t frame, boo
         const float gain = static_cast<float>(speed * speed * (3 - 2 * speed));
         const double k = (pos - start) * src;
         const auto i0 = static_cast<uint64_t>(std::max(0.0, k));
-        if (i0 + 1 >= avail || gain == 0) continue;
+        if (gain == 0 || !trackHas(t, i0 + 1)) continue;
         const float fr = static_cast<float>(k - static_cast<double>(i0));
         d.envelope = std::min(1.f, d.envelope + 1.f / kFadeFrames);
         if (ramping) ramping = stepStemGains(d, 1);

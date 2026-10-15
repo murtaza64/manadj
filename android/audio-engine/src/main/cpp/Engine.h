@@ -79,8 +79,34 @@ struct Track {
     std::atomic<uint64_t> frames{0};
     std::atomic<int> sampleRate{0};
     std::atomic<double> startSeconds{0}; // source time of frame 0
-    std::atomic<bool> complete{false};
+    std::atomic<bool> complete{false};   // every frame up to `total` is filled
+    // Range fill (SH8): a block of kTrackBlock frames is readable once one writer run wrote all of it.
+    std::unique_ptr<std::atomic<uint8_t>[]> blocks; // worker-owned allocation
+    uint64_t blockCount = 0;                         // worker-owned
+    std::atomic<uint64_t> filled{0};                 // blocks marked
+    std::atomic<uint64_t> total{0};                  // track length in frames once known (0 = unknown)
 };
+
+constexpr int kTrackBlockShift = 12; // 4096-frame fill blocks
+constexpr uint64_t kTrackBlock = 1ull << kTrackBlockShift;
+
+// Frame k of the in-memory track is filled (readable).
+inline bool trackHas(const Track& t, uint64_t k) noexcept {
+    if (t.complete.load(std::memory_order_acquire)) return k < t.total.load(std::memory_order_relaxed);
+    const uint64_t b = k >> kTrackBlockShift;
+    return b < t.blockCount && t.blocks[b].load(std::memory_order_acquire) != 0;
+}
+
+// End (exclusive) of the filled run containing frame k; k itself when k is not filled.
+inline uint64_t trackRunEnd(const Track& t, uint64_t k) noexcept {
+    const uint64_t total = t.total.load(std::memory_order_acquire);
+    if (t.complete.load(std::memory_order_acquire)) return std::max(k, total);
+    uint64_t b = k >> kTrackBlockShift;
+    while (b < t.blockCount && t.blocks[b].load(std::memory_order_acquire) != 0) ++b;
+    uint64_t end = b << kTrackBlockShift;
+    if (total != 0 && end > total) end = total;
+    return end > k ? end : k;
+}
 
 enum class Op : int { Prepare, Play, Pause, CueDown, CueUp, HotCueDown, HotCueUp,
                        HotCueSet, HotCueClear, Seek, Fader, Trim, Crossfade, Pitch, Bend, Pfl, CueMix, Eq, Filter,
@@ -269,6 +295,14 @@ public:
     bool trackBegin(int deck, uint64_t load, uint64_t capacityFrames, int sampleRate, double startSeconds, int stems = 1);
     int trackWrite(int deck, uint64_t load, const float* samples, int frames);
     void trackFinish(int deck, uint64_t load);
+    // Range fill (SH8): one writer run writes contiguous frames from `runStart` (block-aligned, or 0); blocks it
+    // covers entirely become readable. trackEnd records the length (frames) and marks the run's final partial block.
+    int trackWriteAt(int deck, uint64_t load, uint64_t at, const float* samples, int frames, uint64_t runStart);
+    void trackEnd(int deck, uint64_t load, uint64_t totalFrames, uint64_t runStart);
+    // First unfilled frame (a block start) at or after `from`, -1 when filled to the end / not this load.
+    int64_t trackGap(int deck, uint64_t load, uint64_t from) const;
+    // Seconds filled contiguously from `seconds` (0 when not filled there or not this load).
+    double trackAhead(int deck, uint64_t load, double seconds) const;
 
     // Renders `frames` interleaved frames of `channels` channels through the current routing.
     void render(float* output, int frames, int channels = 2) noexcept;

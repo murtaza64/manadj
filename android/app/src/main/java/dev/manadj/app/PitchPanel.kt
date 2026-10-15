@@ -14,6 +14,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
@@ -30,7 +31,6 @@ import dev.manadj.audio.BpmMatch
 import dev.manadj.audio.SyncStatus
 import kotlin.math.*
 
-private val PitchSheet = RoundedCornerShape(topStart = 14.dp, topEnd = 14.dp)
 
 /** #400: controls under the pitch panel fade out while it is up (the glass panel would otherwise show them). */
 fun Modifier.underPitchPanel(model: PlayerModel, id: dev.manadj.audio.DeckId): Modifier = composed {
@@ -51,21 +51,15 @@ fun Modifier.underPitchPanel(model: PlayerModel, id: dev.manadj.audio.DeckId): M
     val playing = ui.snapshot?.playing == true
     val vinyl = ux.vinyl[target] == true
     var edit by remember(target) { mutableStateOf(false) }
-    // #400: a sheet risen from the pitch tab — rounded top, grabber, #394 glass (opaque when the backdrop is off).
-    Column(modifier.clip(PitchSheet).then(dev.manadj.app.viz.Glass.fill(Ink.background, 14f)).border(1.5.dp, color.copy(alpha = .7f), PitchSheet)
-        .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {}.padding(start = 6.dp, end = 6.dp, bottom = 6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        // Grabber: tap to lower the panel back into its tab.
-        Box(Modifier.fillMaxWidth().height(14.dp).semantics { contentDescription = "Lower pitch panel" }
-            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { model.pitchDrawer = null }, contentAlignment = Alignment.Center) {
-            Box(Modifier.size(36.dp, 4.dp).clip(RoundedCornerShape(50)).background(color.copy(alpha = .9f)))
-        }
-        // Readout + close.
-        Row(Modifier.fillMaxWidth().height(36.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("%+.2f%%".format(ui.pitch), color = color, size = 20, bold = true)
-            Spacer(Modifier.width(8.dp))
-            Text(bpm?.let { "%.2f".format(it * (1 + ui.pitch / 100)) } ?: "—", Modifier.weight(1f), if (bpm != null) Ink.text else Ink.muted, 12, true)
-            Key("", Modifier.size(36.dp), Ink.muted, description = "Close pitch panel", icon = Glyph.Close, style = KeyStyle.BARE) { model.pitchDrawer = null }
-        }
+    // VH5: a sheet whose top edge is the pitch tab itself (same face), #394 glass; full width like the tab.
+    // Side rims continue the tab's top rim down to the screen edge; no bottom border (a card rising from below the screen).
+    Column(modifier.clip(PitchTab).then(dev.manadj.app.viz.Glass.fill(Ink.background, 14f))
+        .drawBehind { val w = 1.5.dp.toPx(); val c = color.copy(alpha = .7f); drawLine(c, Offset(w / 2, 14.dp.toPx()), Offset(w / 2, size.height), w); drawLine(c, Offset(size.width - w / 2, 14.dp.toPx()), Offset(size.width - w / 2, size.height), w) }
+        .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {}, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        // The tab, risen: tap (or Back) lowers the panel.
+        PitchTabFace(ui, model, ux, open = true, Modifier.fillMaxWidth().height(PitchTabHeight).semantics { contentDescription = "Lower pitch panel" }
+            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { model.pitchDrawer = null })
+        Column(Modifier.fillMaxWidth().weight(1f).screenSafe().padding(start = 6.dp, end = 6.dp, bottom = 6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         // KEY LOCK · SYNC · = (desktop small match button).
         Row(Modifier.fillMaxWidth().height(38.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             val keyLock = model.supports("key-lock")
@@ -102,6 +96,7 @@ fun Modifier.underPitchPanel(model: PlayerModel, id: dev.manadj.audio.DeckId): M
             }
         }
         if (edit) GridEdit(ui, model, color)
+        }
     }
 }
 
