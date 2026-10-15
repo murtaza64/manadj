@@ -69,6 +69,12 @@ import dev.manadj.audio.QuantizeMode
                 Text("${(ux.overviewBrightness * 100 + .5f).toInt()}%", Modifier.width(48.dp), Ink.text, 13, true)
                 Key("+", Modifier.width(44.dp).fillMaxHeight(), Ink.accent, ux.overviewBrightness < .99f, description = "Preview brightness up", textSize = 14, style = KeyStyle.PILL) { ux.overviewBrightness += .05f }
             }
+            Row(Modifier.fillMaxWidth().height(40.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                Column(Modifier.weight(1f)) { Text("Jog sensitivity", bold = true); Text("Pitch-panel jog strip nudge strength.", color = Ink.muted, size = 11) }
+                Key("−", Modifier.width(44.dp).fillMaxHeight(), Ink.accent, ux.jogSensitivity > .55f, description = "Jog sensitivity down", textSize = 14, style = KeyStyle.PILL) { ux.jogSensitivity -= .1f }
+                Text("×%.1f".format(ux.jogSensitivity), Modifier.width(48.dp), Ink.text, 13, true)
+                Key("+", Modifier.width(44.dp).fillMaxHeight(), Ink.accent, ux.jogSensitivity < 2.95f, description = "Jog sensitivity up", textSize = 14, style = KeyStyle.PILL) { ux.jogSensitivity += .1f }
+            }
             Toggle("Crossfader", "Off hides the crossfader (both decks play through).", ux.crossfaderEnabled) {
                 ux.crossfaderEnabled = !ux.crossfaderEnabled
                 if (!ux.crossfaderEnabled) model.updateCrossfade(.5)

@@ -247,7 +247,7 @@ val StripEnd = 48.dp
                     if (sync != dev.manadj.audio.SyncStatus.OFF) Text(when (sync) { dev.manadj.audio.SyncStatus.SYNCED -> "SYNC "; dev.manadj.audio.SyncStatus.OUT_OF_LOCK -> "SYNC⚠ "; else -> "SYNC… " }, color = if (sync == dev.manadj.audio.SyncStatus.SYNCED) Ink.play else Ink.warning, size = 9, bold = true)
                     Text(groupTempo?.let { "%.1f".format(it) } ?: ui.snapshot?.bpm?.let { "%.1f".format(it * (1 + (ui.pitch + ui.bend) / 100)) } ?: "— BPM", color = bpmColor(groupTempo ?: ui.snapshot?.bpm?.let { it * (1 + ui.pitch / 100) }) ?: Ink.muted, size = 12, bold = true)
                 }
-                Row(verticalAlignment = Alignment.CenterVertically) { if (ui.snapshot?.keyLock == true || (e.keyLock && !model.supports("key-lock"))) GlyphIcon(Glyph.Lock, color, 9.dp); val key = remember(ui.source?.id, ux.library) { dev.manadj.app.library.LibraryHolder.trackOn(model, ui.id)?.toLong()?.let { id -> toOpenKey(ux.library.tracks().firstOrNull { it.id == id }?.key) } }
+                Row(verticalAlignment = Alignment.CenterVertically) { if (ui.snapshot?.keyLock == true || (e.keyLock && !model.supports("key-lock"))) GlyphIcon(Glyph.Lock, color, 9.dp); val key = deckOpenKey(ui, model, ux)
                     Text(" KEY ${key ?: "—"}", color = keyColor(key) ?: Ink.muted, size = 10, bold = key != null) }
             }
         }
@@ -425,5 +425,32 @@ fun Modifier.slideLockDraw(v: SlideLockVisual, shape: androidx.compose.ui.graphi
         val s = minOf(h * .32f, 12.dp.toPx()); val cx = w - s - 6.dp.toPx()
         val tri = Path().apply { moveTo(cx - s * .6f, cy - s); lineTo(cx + s, cy); lineTo(cx - s * .6f, cy + s); close() }
         if (p >= 1f) drawPath(tri, Ink.play) else drawPath(tri, Ink.play.copy(alpha = .4f + .6f * p), style = Stroke(2.dp.toPx()))
+    }
+}
+
+/** The loaded track's OpenKey (library lookup). */
+@Composable fun deckOpenKey(ui: DeckUi, model: PlayerModel, ux: UiModel): String? =
+    remember(ui.source?.id, ux.library) { dev.manadj.app.library.LibraryHolder.trackOn(model, ui.id)?.toLong()?.let { id -> toOpenKey(ux.library.tracks().firstOrNull { it.id == id }?.key) } }
+
+/** Effective BPM (Group Tempo when synced, else grid BPM × pitch) — the number a DJ compares against the browser. */
+fun effectiveBpm(ui: DeckUi, model: PlayerModel): Double? {
+    val synced = model.syncState.decks[ui.id] == dev.manadj.audio.SyncStatus.SYNCED
+    return model.syncState.tempo.takeIf { synced } ?: ui.snapshot?.bpm?.let { it * (1 + ui.pitch / 100) }
+}
+
+/** Compact BPM + key tag over a detail wave while browsing (#136); stacked on narrow vertical waves. */
+@Composable fun DeckTempoKeyTag(ui: DeckUi, model: PlayerModel, ux: UiModel, stacked: Boolean, modifier: Modifier) {
+    val bpm = effectiveBpm(ui, model)
+    val key = deckOpenKey(ui, model, ux)
+    val bpmText = bpm?.let { "%.1f".format(it) } ?: "—"
+    val keyText = key ?: "—"
+    Box(modifier.clip(RoundedCornerShape(4.dp)).background(Ink.crust.copy(alpha = .85f)).padding(horizontal = 4.dp, vertical = 1.dp)) {
+        if (stacked) Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(bpmText, color = bpmColor(bpm) ?: Ink.muted, size = 12, bold = true)
+            Text(keyText, color = keyColor(key) ?: Ink.muted, size = 12, bold = true)
+        } else Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(bpmText, color = bpmColor(bpm) ?: Ink.muted, size = 13, bold = true)
+            Text("  $keyText", color = keyColor(key) ?: Ink.muted, size = 13, bold = true)
+        }
     }
 }

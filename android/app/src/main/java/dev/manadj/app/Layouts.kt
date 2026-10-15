@@ -104,10 +104,14 @@ import dev.manadj.audio.QuantizeMode
         val extra = if (out.quantizeMode.heard) out.heardLatencySeconds - reported else 0.0
         return display.at(now, moving, { out.audibleSeconds(ui.id, now) - extra * rate }, position(ui), rate, reported + extra)
     }
-    WaveView(wave, { frame.value; tail; heard(System.nanoTime()) }, ui.durationSeconds, marksOf(ui), modifier.semantics { contentDescription = "${ui.id} detail wave" }.waveTouch(ui, model, ux, vertical),
+    Box(modifier) {
+    WaveView(wave, { frame.value; tail; heard(System.nanoTime()) }, ui.durationSeconds, marksOf(ui), Modifier.fillMaxSize().semantics { contentDescription = "${ui.id} detail wave" }.waveTouch(ui, model, ux, vertical),
         vertical = vertical, windowSeconds = ux.waveSeconds * tempoRate(ui), live = { ux.strip(ui) }, history = e.history, accent = deckColor(ui.id),
         stemWave = { mask -> val id = ui.source?.id; if (wave == null || id == null) null else ux.stemWave(id, wave, mask) },
         status = when { ui.source == null -> "${ui.id} · no track"; wave == null -> if (ux.waveSource[ui.source?.id] == "failed") "no waveform" else "analysing…"; !wave.complete -> "analysing ${(100 * wave.frames * wave.bandHop / wave.sampleRate / (ui.durationSeconds ?: 1.0)).toInt().coerceIn(0, 99)}%"; else -> null })
+    // While browsing (#136): effective BPM + OpenKey on the wave's far edge (away from the playhead).
+    if (model.browser != null && ui.source != null) DeckTempoKeyTag(ui, model, ux, vertical, Modifier.align(if (vertical) Alignment.BottomCenter else Alignment.TopEnd).padding(3.dp))
+    }
 }
 
 /** Deck info in the camera band (A left of the hole, B right); each half dodges the hole and corner arcs. */

@@ -328,8 +328,9 @@ fun knobReadout(kind: KnobKind, v: Double): String = when (kind) {
 }
 
 /**
- * Tap = [onTap] (or the step), hold 350ms then slide sideways to scroll values, lift to commit
- * (the jump-size gesture; FX effect/target/beats reuse it). Feedback floats above the control.
+ * Value wheel: slide sideways to scroll values, lift to commit (jump size, loop length, FX effect/target/beats).
+ * No [onTap] (pure value cells): the wheel opens on touch-down (#135). With [onTap]: tap = the action; the wheel
+ * opens after a 350 ms hold or at once on a sideways drag. Feedback floats above the control.
  */
 @Composable fun ValueWheel(
     label: String, choices: List<String>, index: Int, ui: UiModel, model: PlayerModel, deck: DeckId, modifier: Modifier, color: Color,
@@ -356,11 +357,14 @@ fun knobReadout(kind: KnobKind, v: Double): String = when (kind) {
                 down.consume(); held = true
                 val start = latest; var chosen = start; var open = false; var cancelled = false
                 val id = model.beginGesture(deck, label) { setter(start) }
-                val hold = scope.launch {
-                    delay(350); open = true
+                fun openWheel() {
+                    if (open) return
+                    open = true
                     ui.wheel = WheelFeedback(label, choices, chosen, root.x + width / 2, root.y, tint)
                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                 }
+                if (tap == null) openWheel()
+                val hold = scope.launch { delay(350); openWheel() }
                 try {
                     while (true) {
                         val change = awaitPointerEvent().changes.firstOrNull { it.id == down.id }
@@ -372,7 +376,8 @@ fun knobReadout(kind: KnobKind, v: Double): String = when (kind) {
                             if (next != chosen) { chosen = next; setter(next); haptic.performHapticFeedback(HapticFeedbackType.SegmentFrequentTick) }
                             ui.wheel = WheelFeedback(label, choices, chosen, root.x + width / 2, root.y, tint)
                             change.consume()
-                        } else if (abs(dx) > 12.dp.toPx() || abs(change.position.y - down.position.y) > 12.dp.toPx()) { cancelled = true; break }
+                        } else if (abs(change.position.y - down.position.y) > 12.dp.toPx()) { cancelled = true; break }
+                        else if (abs(dx) > 12.dp.toPx()) { hold.cancel(); openWheel(); change.consume() }
                     }
                     if (!open && !cancelled) tap?.invoke()
                 } catch (cancel: CancellationException) { cancelled = true; throw cancel }

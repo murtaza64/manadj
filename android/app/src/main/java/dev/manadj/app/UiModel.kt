@@ -66,6 +66,9 @@ class UiModel(application: Application) : AndroidViewModel(application) {
     /** Mobile-only overview dim (previews + minimaps) on top of the desktop minimap brightness (#98). */
     var overviewBrightness: Float get() = OverviewDim.phone; set(v) { OverviewDim.phone = v.coerceIn(.3f, 1f); prefs.edit().putFloat("overview-brightness", OverviewDim.phone).apply() }
     init { OverviewDim.phone = prefs.getFloat("overview-brightness", .8f) }
+    /** Jog-strip nudge gain (#134): bend multiplier on desktop's mouse jog curve; default 1.5. */
+    var jogSensitivity: Float get() = JogFeel.gain; set(v) { JogFeel.gain = (kotlin.math.round(v * 10) / 10).coerceIn(.5f, 3f); prefs.edit().putFloat("jog-sensitivity", JogFeel.gain).apply() }
+    init { JogFeel.gain = prefs.getFloat("jog-sensitivity", JogFeel.DEFAULT) }
     private val _bothRight = flag("browse-both-right", true)
     /** [BrowseBeside.BOTH]: the browser's fixed side (right by default). */
     var browseBothRight: Boolean get() = _bothRight.value; set(v) { _bothRight.value = v; store("browse-both-right", v) }

@@ -111,10 +111,17 @@ import kotlin.math.*
 /**
  * Jog strip (#104.2): swipes spin a virtual jog edge. Platter velocity follows the finger (a swipe slower than the
  * spinning platter doesn't brake it; an opposite swipe does), then coasts with friction (τ 350 ms). Bend follows
- * desktop's mouse jog curve (mouseJogSettings: 8·(|v|·2/6000)^1.8, smoothed τ 50 ms, engine clamp ±8 %), so many
- * fast swipes move fast and slow swipes give fine nudges; bend is key-locked by the engine when Key Lock is on.
+ * desktop's mouse jog curve (mouseJogSettings: 8·(|v|·2/6000)^1.8) × [JogFeel.gain] (#134, Settings), smoothed τ 50 ms,
+ * capped ±25 % (engine clamp), so many fast swipes move fast and slow swipes give fine nudges; bend is key-locked by the engine when Key Lock is on.
  * Paused: the swipe seeks (desktop mouseControl: speed-scaled seconds per dp). Haptic tick per swipe.
  */
+/** Jog-strip feel (#134): Settings › Jog sensitivity. */
+object JogFeel {
+    const val DEFAULT = 1.5f
+    const val MAX_BEND = 25.0
+    var gain by mutableFloatStateOf(DEFAULT)
+}
+
 @Composable fun JogStrip(ui: DeckUi, model: PlayerModel, modifier: Modifier) {
     val haptic = LocalHapticFeedback.current
     val density = LocalDensity.current.density
@@ -132,7 +139,7 @@ import kotlin.math.*
             if (!state.touching) state.velocity *= exp(-dt / .35)
             state.phase += (state.velocity * dt).toFloat()
             val v = abs(state.velocity)
-            val target = sign(state.velocity) * min(8.0, 8 * (v * 2 / 6000).pow(1.8))
+            val target = sign(state.velocity) * min(JogFeel.MAX_BEND, JogFeel.gain * 8 * (v * 2 / 6000).pow(1.8))
             state.bend += (1 - exp(-dt / .05)) * (target - state.bend)
             if (!state.touching && v < 2 && abs(state.bend) < .01) { state.bend = 0.0; state.velocity = 0.0; if (state.sent != 0.0) { model.updateBend(ui.id, 0.0); state.sent = 0.0 }; state.active = false; break }
             if (abs(state.bend - state.sent) > .004) { model.updateBend(ui.id, state.bend); state.sent = state.bend }
@@ -177,7 +184,7 @@ import kotlin.math.*
             val gap = 14.dp.toPx(); val off = ((state.phase * density) % gap + gap) % gap
             var x = off - gap
             while (x < size.width) { drawLine(color.copy(alpha = .35f), Offset(x, size.height * .2f), Offset(x, size.height * .8f), 2.dp.toPx()); x += gap }
-            val b = state.bend.toFloat() / 8f
+            val b = (state.bend / JogFeel.MAX_BEND).toFloat()
             if (b != 0f) drawRect(color.copy(alpha = .25f), Offset(if (b < 0) size.width / 2 * (1 + b) else size.width / 2, 0f), androidx.compose.ui.geometry.Size(size.width / 2 * abs(b), size.height))
         }
         Text(if (ui.snapshot?.playing == true) "JOG · NUDGE" else "JOG · SEEK", Modifier.align(Alignment.Center).background(Ink.crust).padding(horizontal = 4.dp), Ink.muted, 10, true)
