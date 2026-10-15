@@ -82,7 +82,7 @@ val ControlRow = 44.dp
     val scale by animateFloatAsState(if (held) .92f else 1f, if (held) tween(0) else spring(dampingRatio = .4f, stiffness = 800f), label = "bounce")
     val ring = remember { Animatable(1f) }
     LaunchedEffect(held) { if (held) { ring.snapTo(0f); ring.animateTo(1f, tween(360, easing = LinearOutSlowInEasing)) } }
-    // Slide to lock: while previewing a stored cue, drag right to latch playback (no second finger on PLAY).
+    // Slide to lock: while previewing a stored cue, drag either way to latch playback (no second finger on PLAY).
     val slideVisual = rememberSlideLockVisual()
     var previewHold by remember(ui.id, slot) { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
@@ -128,7 +128,7 @@ val ControlRow = 44.dp
     val scale by animateFloatAsState(if (held) .93f else 1f, if (held) tween(0) else spring(dampingRatio = .4f, stiffness = 900f), label = "cue press")
     val tint = if (ready) Ink.warning else Ink.edge
     val shape = RoundedCornerShape(50)
-    // Slide to lock: holding CUE (preview), drag right to latch playback.
+    // Slide to lock: holding CUE (preview), drag either way to latch playback.
     val slideVisual = rememberSlideLockVisual()
     val scope = rememberCoroutineScope()
     val slide = remember(ui.id) { SlideLock({ held }, { slideVisual.progress = it }) {
@@ -360,12 +360,12 @@ suspend fun androidx.compose.ui.input.pointer.PointerInputScope.momentaryPresses
                     release = if (enabled()) press() else null
                 }
                 val c = event.changes.firstOrNull { it.id == current }
-                // Slide to lock: dragging the held finger right past the threshold latches playback.
+                // Slide to lock: dragging the held finger either way past the threshold latches playback.
                 if (slide != null && release != null && c != null && c.pressed && !locked && slide.active()) {
                     val dx = c.position.x - startX
                     val t = slide.threshold(size.width.toFloat())
-                    slide.progress((dx / t).coerceIn(0f, 1f))
-                    if (dx >= t) { locked = true; slide.lock() }
+                    slide.progress((dx / t).coerceIn(-1f, 1f))
+                    if (kotlin.math.abs(dx) >= t) { locked = true; slide.lock() }
                 }
                 if (release != null && (c == null || !c.pressed)) { release!!.invoke(c == null); release = null; resetSlide() }
                 event.changes.forEach { if (it.pressed) it.consume() }
@@ -377,16 +377,17 @@ suspend fun androidx.compose.ui.input.pointer.PointerInputScope.momentaryPresses
 }
 
 /**
- * Slide-to-lock on a held cue (chat-app voice-record lock): [progress] 0..1 while the held finger drags right,
+ * Slide-to-lock on a held cue (chat-app voice-record lock): [progress] -1..1 (sign = direction) while the held finger drags,
  * [lock] once it passes [threshold] (px for a key [width]); only while [active] (a preview hold).
  */
 class SlideLock(val active: () -> Boolean, val progress: (Float) -> Unit, val lock: () -> Unit) {
     fun threshold(width: Float) = (width * .55f).coerceIn(80f, 220f)
 }
 
-/** Slide-to-lock feedback, drawn inside the key: a fill sweeping right, a ▶ target and the label riding the finger. */
+/** Slide-to-lock feedback, drawn inside the key: a fill sweeping toward the drag side, a ▶ target there and the label riding the finger. */
 @Composable fun rememberSlideLockVisual(): SlideLockVisual = remember { SlideLockVisual() }
 class SlideLockVisual {
+    /** -1..1: signed drag progress (negative = left). */
     var progress by mutableFloatStateOf(0f)
     /** 1 → 0 flash after a lock. */
     val flash = Animatable(0f)
@@ -404,36 +405,43 @@ class SlideLockVisual {
     }
     fun release() { job?.cancel(); job = null; hint = 0f }
 }
-/** [idle]: a faint static › on the right edge says the hold can slide (stored cue / ready CUE). */
+/** Hint arrows only while holding: chevron trails run outward on both sides; dragging fades the far side. [idle] is unused (UH18 dropped the idle arrow). */
+@Suppress("UNUSED_PARAMETER")
 fun Modifier.slideLockDraw(v: SlideLockVisual, shape: androidx.compose.ui.graphics.Shape? = null, idle: Boolean = false): Modifier = drawWithContent {
-    val p = v.progress; val f = v.flash.value; val hint = v.hint
-    if (p > 0f || f > 0f) {
+    val p = v.progress; val ap = kotlin.math.abs(p); val f = v.flash.value; val hint = v.hint
+    val h = size.height; val w = size.width; val cy = h / 2
+    if (ap > 0f || f > 0f) {
         val play = Ink.play
         val outline = shape?.createOutline(size, layoutDirection, this)
         val clipPath = Path().apply { if (outline != null) addOutline(outline) else addRect(androidx.compose.ui.geometry.Rect(Offset.Zero, size)) }
         clipPath(clipPath) {
-            drawRect(play.copy(alpha = .22f + .35f * p), size = Size(size.width * p, size.height))
+            val fw = w * ap
+            drawRect(play.copy(alpha = .22f + .35f * ap), topLeft = Offset(if (p < 0f) w - fw else 0f, 0f), size = Size(fw, h))
             if (f > 0f) drawRect(play.copy(alpha = .75f * f))
         }
     }
-    // The label rides the finger a little (rubber band), then the target ▶ at the far edge fills in.
+    // The label rides the finger a little (rubber band), then the target ▶ at the drag-side edge fills in.
     translate(left = 14.dp.toPx() * p) { this@drawWithContent.drawContent() }
-    val h = size.height; val w = size.width; val cy = h / 2
     val c = minOf(h * .16f, 6.dp.toPx())
-    fun chevron(x: Float, alpha: Float) = drawPath(Path().apply { moveTo(x - c * .6f, cy - c); lineTo(x + c * .4f, cy); lineTo(x - c * .6f, cy + c) }, Color.White.copy(alpha = alpha), style = Stroke(1.6.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round, join = androidx.compose.ui.graphics.StrokeJoin.Round))
-    if (hint > 0f && p < 1f) {
-        // ››› trail toward the lock target: a highlight travels left → right through three chevrons.
+    val stroke = Stroke(1.6.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round, join = androidx.compose.ui.graphics.StrokeJoin.Round)
+    // dir = +1 points right, -1 points left.
+    fun chevron(x: Float, dir: Float, alpha: Float) = drawPath(Path().apply { moveTo(x - dir * c * .6f, cy - c); lineTo(x + dir * c * .4f, cy); lineTo(x - dir * c * .6f, cy + c) }, Color.White.copy(alpha = alpha), style = stroke)
+    if (hint > 0f && ap < 1f) {
+        // ››› / ‹‹‹ trails toward both lock targets: a highlight travels outward through three chevrons per side.
         for (i in 0..2) {
-            val x = w * (.6f + .1f * i)
             val d = ((v.phase * 3 - i) % 3 + 3) % 3
             val wave = if (d < 1f) 1f - d else 0f
-            chevron(x, hint * (1 - p) * (.18f + .55f * wave))
+            val a = .18f + .55f * wave
+            val far = (1 - 3 * ap).coerceAtLeast(0f)
+            chevron(w * (.6f + .1f * i), 1f, hint * (1 - ap) * (if (p < 0f) far else 1f) * a)
+            chevron(w * (.4f - .1f * i), -1f, hint * (1 - ap) * (if (p > 0f) far else 1f) * a)
         }
-    } else if (idle && p == 0f && f == 0f) chevron(w - 6.dp.toPx() - c, .22f)
-    if (p > 0f) {
-        val s = minOf(h * .32f, 12.dp.toPx()); val cx = w - s - 6.dp.toPx()
+    }
+    if (ap > 0f) {
+        val s = minOf(h * .32f, 12.dp.toPx())
+        val cx = if (p > 0f) w - s - 6.dp.toPx() else s + 6.dp.toPx()
         val tri = Path().apply { moveTo(cx - s * .6f, cy - s); lineTo(cx + s, cy); lineTo(cx - s * .6f, cy + s); close() }
-        if (p >= 1f) drawPath(tri, Ink.play) else drawPath(tri, Ink.play.copy(alpha = .4f + .6f * p), style = Stroke(2.dp.toPx()))
+        if (ap >= 1f) drawPath(tri, Ink.play) else drawPath(tri, Ink.play.copy(alpha = .4f + .6f * ap), style = Stroke(2.dp.toPx()))
     }
 }
 
