@@ -249,6 +249,10 @@ fun mixOf(model: PlayerModel, ux: UiModel, id: DeckId): DeckMix {
         val topDp = with(LocalDensity.current) { sheetTop.toDp() }
         BrowserSheet(sheet, Modifier.fillMaxSize().padding(top = topDp)) {
             Column(Modifier.fillMaxSize().background(Ink.background)) {
+                // Grabber (UH14): the sheet swipes down to dismiss.
+                Box(Modifier.fillMaxWidth().height(16.dp).semantics { contentDescription = "Drag down to close browser" }, contentAlignment = Alignment.Center) {
+                    Box(Modifier.size(40.dp, 4.dp).clip(androidx.compose.foundation.shape.RoundedCornerShape(50)).background(Ink.muted.copy(alpha = .7f)))
+                }
                 LibraryPanel(model, ux, Modifier.fillMaxWidth().weight(1f), pick, tapTarget = null)
                 Row(pad.fillMaxWidth().height(TransportRow).screenSafe(), horizontalArrangement = Arrangement.spacedBy(DeckGap)) {
                     for (ui in listOf(a, b)) Row(Modifier.weight(1f).fillMaxHeight()) { CueKey(ui, model, Modifier.weight(1f).fillMaxHeight()); PlayKey(ui, model, Modifier.weight(1f).fillMaxHeight()) }

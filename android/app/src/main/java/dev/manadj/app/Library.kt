@@ -106,7 +106,7 @@ private val ADDED = DateTimeFormatter.ofPattern("dd MMM")
     androidx.compose.foundation.lazy.LazyColumn(modifier) {
         items(entries, key = { it.node.key }) { e ->
             val on = e.node == selected
-            Row(Modifier.fillMaxWidth().height(48.dp).drawBehind { drawRect(if (on) Ink.accent.copy(alpha = .14f) else Ink.panel); val t = 1.dp.toPx(); drawRect(Ink.surface0, Offset(0f, size.height - t), androidx.compose.ui.geometry.Size(size.width, t)) }
+            Row(Modifier.fillMaxWidth().height(48.dp).drawBehind { drawRect(if (on) Ink.accent.copy(alpha = .14f) else Ink.background); val t = 1.dp.toPx(); drawRect(Ink.surface0, Offset(0f, size.height - t), androidx.compose.ui.geometry.Size(size.width, t)) }
                 .clickable { ux.navigate(e.node) }.semantics { contentDescription = "Browse ${e.title}" }.padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                 e.color?.let { Box(Modifier.size(10.dp).clip(RoundedCornerShape(50)).background(Color(it))); Spacer(Modifier.width(8.dp)) }
                 if (e.node == BrowseNode.Follow) { GlyphIcon(Glyph.Follow, Ink.play, 14.dp); Spacer(Modifier.width(6.dp)) }
@@ -444,7 +444,8 @@ private class BrowseData(val decks: List<DeckId>, val refs: List<Long>, val foll
 @Composable private fun TrackRow(track: LibraryTrack, follow: FollowCandidate?, ux: UiModel, playIndex: Int? = null, deck: Pair<DeckId, Boolean>? = null, played: Boolean = false, relation: KeyRelation = KeyRelation.OTHER, downloaded: Boolean = false, dense: Boolean = false, tap: () -> Unit) {
     val selected = ux.selectedRow == track.id
     // Background + 1dp desktop --surface0 divider in one draw (no extra layout node; scroll-cheap).
-    val bg = if (selected) Ink.accent.copy(alpha = .08f) else Ink.panel
+    // Black rows on the black browser (UH15): no grey inset cards; dividers separate rows.
+    val bg = if (selected) Ink.accent.copy(alpha = .10f) else Ink.background
     Column(Modifier.fillMaxWidth().drawBehind { drawRect(bg); val t = 1.dp.toPx(); drawRect(Ink.surface0, androidx.compose.ui.geometry.Offset(0f, size.height - t), androidx.compose.ui.geometry.Size(size.width, t)) }.combinedClickable(onLongClickLabel = "Edit track", onLongClick = { if (ux.synced != null) { dev.manadj.app.edit.TrackEditNav.open(track.id.toInt()); ux.editHintSeen = true } }, onClick = tap).padding(top = if (dense) 3.dp else 5.dp, bottom = if (dense) 3.dp else 5.dp, start = 4.dp, end = 24.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             deck?.let { (d, live) -> DeckBadge(d, live); Spacer(Modifier.width(6.dp)) }
