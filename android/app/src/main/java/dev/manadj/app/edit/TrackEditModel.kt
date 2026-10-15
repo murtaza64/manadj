@@ -96,7 +96,7 @@ class TrackEditModel(private val context: Context, val trackId: Int, val deck: D
     }
     fun leave() {
         flush()
-        if (deck == EDIT_DECK && ui.snapshot?.playing == true) model.submit(AudioCommand.Pause(deck))
+        if (deck == EDIT_DECK && LibraryHolder.trackOn(model, deck) == trackId && ui.snapshot?.playing == true) model.submit(AudioCommand.Pause(deck))
     }
     /** The edit deck is on master while a performance deck plays (stereo routing): the audience hears it. */
     fun otherDeckPlaying() = routedToMaster && model.visibleDecks.any { it != deck && model.decks.getValue(it).snapshot?.playing == true }

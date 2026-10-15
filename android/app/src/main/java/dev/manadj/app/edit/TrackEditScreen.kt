@@ -62,7 +62,9 @@ private val MarkColor = Color(0xffff2dd4)
     var error by remember(request) { mutableStateOf<String?>(null) }
     val close = { TrackEditNav.request = null }
     androidx.activity.compose.BackHandler { close() }
-    LaunchedEffect(request, ux.synced != null) { edit.prepare { error = it } }
+    // Session replay drives all four engine decks (C/D included): never load the edit deck under it.
+    val sessionBusy = request.deck == null && ux.sessions
+    LaunchedEffect(request, ux.synced != null, sessionBusy) { if (!sessionBusy) edit.prepare { error = it } }
     val ready = edit.ready
     LaunchedEffect(ready) { if (ready) edit.route() }
     val ui = edit.ui
@@ -71,9 +73,9 @@ private val MarkColor = Color(0xffff2dd4)
     val track = edit.library
     // Opaque full-screen sheet: swallow touches meant for the performance UI beneath.
     BoxWithConstraints(modifier.background(Ink.background).clickable(remember { MutableInteractionSource() }, null) {}) {
-        if (track == null) {
+        if (track == null || sessionBusy) {
             Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("Track ${request.trackId} is not in the synced Library.", color = Ink.warning, size = 14, bold = true, lines = 2)
+                Text(if (sessionBusy) "Session replay is using every deck: close it to audition here (or edit from a loaded deck)." else "Track ${request.trackId} is not in the synced Library.", color = Ink.warning, size = 14, bold = true, lines = 3)
                 Key("CLOSE", Modifier.width(120.dp).height(44.dp), Ink.muted, icon = Glyph.Close) { close() }
             }
             return@BoxWithConstraints
