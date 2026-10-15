@@ -160,6 +160,26 @@ class SessionTimeline(private val log: SessionLog) {
         return best
     }
 
+    /**
+     * Decoded prefix deck [deck] needs at Session [from] so that, with the decode then advancing at [rate] track
+     * seconds per Session second, every position it plays on [trackId] over [from, to] is already decoded when
+     * played: max over (t, p) of p − rate·(t − from). Within a run the deck moves slower than the decode, so only
+     * run ends count; relocations (a run starting far ahead) dominate. Null = it plays nothing of the track then.
+     */
+    fun decodeNeed(deck: Int, trackId: Int, from: Double, to: Double, rate: Double): Double? {
+        val list = runs[deck]
+        var i = runIndex(deck, from)
+        var best: Double? = null
+        while (i < list.size && list[i].t0 < to) {
+            val r = list[i++]
+            if (r.trackId != trackId) continue
+            val a = max(r.t0, from); val b = min(r.t1, to)
+            val p = max(r.at(a) - rate * (a - from), r.at(b) - rate * (b - from))
+            best = max(best ?: p, p)
+        }
+        return best
+    }
+
     /** When deck [deck] next makes sound at or after [t] (null = never again). */
     fun nextSound(deck: Int, t: Double): Double? = runs[deck].getOrNull(runIndex(deck, t))?.let { max(it.t0, t) }
 

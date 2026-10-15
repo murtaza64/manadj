@@ -127,4 +127,33 @@ class ReplayDriverTest {
         val last = fake.scheduled.maxOf { e.timeAt(it.first) }
         assertTrue("stamped through %.2f at %.2f".format(last, now), last >= now + ReplayDriver.LOOKAHEAD - ReplayDriver.WINDOW - 1.0)
     }
+
+    @Test fun partialDecodeIsReadyJustAheadOfThePlayheadUnlessAJumpOutrunsTheDecode() {
+        // A plays from 240 s of its track; at t=6 it hot-cues to 400 s.
+        val l = log(
+            ev(0.0, "load", "A").put("trackId", 1),
+            ev(0.0, "transport", "A").put("action", "play").put("playhead", 240.0),
+            ev(6.0, "transport", "A").put("action", "hotCue").put("playhead", 400.0).put("detail", 1),
+            ev(60.0, "tick").put("playheads", JSONObject()),
+        )
+        // Decode measured at 20x: by t=6 it is 120 s further, far short of 400 -> waits for the jump target.
+        val fake = Fake(); val driver = ReplayDriver(l, fake)
+        driver.prepare(0.0)
+        var decoded = 230.0
+        run(driver, fake, 3.0) { decoded += 1.0; fake.state[0] = ReplayDriver.Load.Partial(decoded) } // 20 s/s
+        assertTrue("decoded %.0f: the jump to 400 s at t=6 needs ~343 s now".format(decoded), driver.preparing)
+        run(driver, fake, 3.0) { decoded = minOf(decoded + 30.0, 600.0); fake.state[0] = ReplayDriver.Load.Partial(decoded) }
+        assertTrue(driver.playing)
+        // Without the jump, 243 s decoded is enough (was playhead + 10 s horizon + 2 s = 252 s).
+        val plain = log(
+            ev(0.0, "load", "A").put("trackId", 1),
+            ev(0.0, "transport", "A").put("action", "play").put("playhead", 240.0),
+            ev(60.0, "tick").put("playheads", JSONObject()),
+        )
+        val fake2 = Fake(); val driver2 = ReplayDriver(plain, fake2)
+        driver2.prepare(0.0)
+        var d2 = 236.0
+        run(driver2, fake2, .5) { d2 += 1.0; fake2.state[0] = ReplayDriver.Load.Partial(d2) }
+        assertTrue("decoded %.0f".format(d2), driver2.playing)
+    }
 }

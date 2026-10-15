@@ -83,6 +83,23 @@ class SessionTimelineTest {
         assertEquals(listOf(SessionTimeline.EarlyLoad(0.0, 0, 1, 0.0), SessionTimeline.EarlyLoad(100.0, 0, 2, 30.0), SessionTimeline.EarlyLoad(120.0, 1, 3, 0.0)), tl.earlyLoads)
     }
 
+    @Test fun decodeNeedCoversRelocationsAheadOfTheDecode() {
+        val log = log(
+            ev(0.0, "load", "A").put("trackId", 1),
+            ev(0.0, "transport", "A").put("action", "play").put("playhead", 100.0),
+            ev(20.0, "transport", "A").put("action", "seek").put("playhead", 200.0), // hot cue far ahead
+            ev(60.0, "load", "A").put("trackId", 2),
+            ev(60.0, "transport", "A").put("action", "play").put("playhead", 300.0),
+            ev(90.0, "tick").put("playheads", JSONObject()),
+        )
+        val tl = SessionTimeline(log)
+        // Rate 10: playhead 100 now; the jump to 200 at t=20 needs 200 - 10*20 = 0 -> the current position wins.
+        assertEquals(100.0, tl.decodeNeed(0, 1, 0.0, 120.0, 10.0)!!, 1e-9)
+        // Rate 2: the jump dominates (200 - 2*20 = 160); track 2's runs never count for track 1.
+        assertEquals(160.0, tl.decodeNeed(0, 1, 0.0, 120.0, 2.0)!!, 1e-9)
+        assertNull(tl.decodeNeed(0, 1, 61.0, 120.0, 2.0))
+    }
+
     @Test fun gesturesSkipJogsAndLabelLikeDesktop() {
         val tl = SessionTimeline(log(
             ev(0.0, "load", "B").put("trackId", 2),

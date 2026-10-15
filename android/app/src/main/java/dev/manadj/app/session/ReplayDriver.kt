@@ -25,7 +25,7 @@ import dev.manadj.library.session.TimedOp
  * frame-stamps ops and may run on a background thread, so a busy UI thread never starves the op stream.
  * Public entry points are synchronized.
  */
-class ReplayDriver(val log: SessionLog, private val engine: Engine, private val onNotice: (String) -> Unit = {}, val timeline: SessionTimeline = SessionTimeline(log)) {
+class ReplayDriver(val log: SessionLog, private val engine: Engine, private val onNotice: (String) -> Unit = {}, val timeline: SessionTimeline = SessionTimeline(log), private val trace: (String) -> Unit = {}) {
     interface Engine {
         /** Engine output frame counter now (null = output not running). */
         fun outputFrames(): Long?
@@ -87,7 +87,7 @@ class ReplayDriver(val log: SessionLog, private val engine: Engine, private val 
             errors[d] = null
             track[d] = id
             loadDueAt[d] = startTime
-            partialSince[d] = Double.NaN
+            partialSince[d] = Double.NaN; decodeStart[d] = null
             notBefore[d] = Double.NEGATIVE_INFINITY
             decks[d] = when {
                 id == null -> Deck.EMPTY
@@ -138,6 +138,7 @@ class ReplayDriver(val log: SessionLog, private val engine: Engine, private val 
 
     private fun start() {
         val frames = engine.outputFrames() ?: return
+        trace("clock starts (waited for: ${(0..3).filter { neededAtStart(it) }.joinToString { "ABCD"[it].toString() }})")
         preparing = false
         tag += 1
         val e = ReplayEpoch(startTime, frames + (START_LEAD * engine.sampleRate).toLong(), engine.sampleRate)
@@ -171,7 +172,7 @@ class ReplayDriver(val log: SessionLog, private val engine: Engine, private val 
             if (only != null && d != only) continue
             if (op is ReplayOp.Load) {
                 if (earlyIssued.contains(t to op.deck)) continue
-                decks[op.deck] = Deck.LOADING; track[op.deck] = op.trackId; loadDueAt[op.deck] = t; partialSince[op.deck] = Double.NaN
+                decks[op.deck] = Deck.LOADING; track[op.deck] = op.trackId; loadDueAt[op.deck] = t; partialSince[op.deck] = Double.NaN; decodeStart[op.deck] = null
                 dueLoads += Triple(t, op.deck, op.trackId)
                 continue
             }
@@ -208,18 +209,41 @@ class ReplayDriver(val log: SessionLog, private val engine: Engine, private val 
             if (l.t <= now) continue // reached by the op stream already
             earlyIssued += l.t to l.deck
             dueLoads.removeAll { it.second == l.deck && it.first <= l.t }
-            decks[l.deck] = Deck.LOADING; track[l.deck] = l.trackId; loadDueAt[l.deck] = l.t; partialSince[l.deck] = Double.NaN
+            decks[l.deck] = Deck.LOADING; track[l.deck] = l.trackId; loadDueAt[l.deck] = l.t; partialSince[l.deck] = Double.NaN; decodeStart[l.deck] = null
             notBefore[l.deck] = l.t
             if (engine.holds(l.deck) != l.trackId) engine.startLoad(l.deck, l.trackId)
         }
     }
 
-    /** [state] covers what deck [d] plays from [at] for the next [READY_HORIZON] (plus margin). */
+    private val lastState = arrayOfNulls<String>(4)
+    private val lastWaitTrace = DoubleArray(4)
+    private fun needed(d: Int, at: Double): Double {
+        val id = track[d] ?: return 0.0
+        val need = timeline.decodeNeed(d, id, at, log.end, safeRate(d)) ?: log.replayAt(at).decks[d].playhead
+        return need.coerceAtLeast(0.0) + READY_MARGIN
+    }
+
+    /**
+     * [state] covers what deck [d] plays from [at] on: with the decode advancing at the measured rate (halved,
+     * floor [MIN_DECODE_RATE]), every position — relocation targets included — is decoded [READY_MARGIN] before it
+     * is played (the engine serves in-memory, sample-exact, only that far behind the decode front). Continuous
+     * play never catches a faster decode, so this is usually just the playhead, not playhead + a fixed horizon.
+     */
     private fun ready(d: Int, state: Load, at: Double): Boolean = when (state) {
         Load.Ready -> true
-        is Load.Partial -> state.decodedSeconds >= (timeline.reach(d, at, at + READY_HORIZON) ?: log.replayAt(at).decks[d].playhead).coerceAtLeast(0.0) + READY_MARGIN
+        is Load.Partial -> state.decodedSeconds >= needed(d, at)
         else -> false
     }
+
+    /** Measured decode progress per deck: first Partial (wall, decoded) and the latest rate (track s per wall s). */
+    private val decodeStart = arrayOfNulls<Pair<Double, Double>>(4)
+    private val decodeRate = DoubleArray(4)
+    private fun noteDecode(d: Int, wall: Double, decoded: Double) {
+        val s = decodeStart[d]
+        if (s == null || decoded < s.second) { decodeStart[d] = wall to decoded; return }
+        if (wall - s.first >= .5) decodeRate[d] = (decoded - s.second) / (wall - s.first)
+    }
+    private fun safeRate(d: Int) = maxOf(MIN_DECODE_RATE, decodeRate[d] * .5)
 
     /** LOADING decks become LIVE once fully decoded; mid-replay they are placed at a frame [JOIN_LEAD] ahead. */
     private fun pollLoads(wall: Double) {
@@ -227,12 +251,18 @@ class ReplayDriver(val log: SessionLog, private val engine: Engine, private val 
             if (decks[d] != Deck.LOADING) continue
             val id = track[d] ?: continue
             if (dueLoads.any { it.second == d }) continue // not issued yet
-            when (val state = engine.load(d, id)) {
+            val state = engine.load(d, id)
+            val kind = state::class.simpleName
+            if (kind != lastState[d]) { lastState[d] = kind; trace("deck ${"ABCD"[d]} #$id $kind${(state as? Load.Partial)?.let { " decoded %.0f s".format(it.decodedSeconds) } ?: ""}") }
+            when (state) {
                 Load.Pending -> continue
                 is Load.Failed -> { decks[d] = Deck.FAILED; errors[d] = state.reason; continue }
                 is Load.Partial -> {
+                    noteDecode(d, wall, state.decodedSeconds)
                     val at = epoch?.let { e -> engine.outputFrames()?.let { e.timeAt(it) + JOIN_LEAD } } ?: startTime
                     if (!ready(d, state, maxOf(at, notBefore[d]))) {
+                        val now = wall
+                        if (now - lastWaitTrace[d] >= 1.0) { lastWaitTrace[d] = now; trace("deck ${"ABCD"[d]} #$id waiting: decoded %.0f s, needs %.0f s".format(state.decodedSeconds, needed(d, maxOf(at, notBefore[d])))) }
                         if (partialSince[d].isNaN()) partialSince[d] = wall
                         if (wall - partialSince[d] < DECODE_GRACE) continue
                         onNotice("Deck ${"ABCD"[d]}: track not decoded far enough — relocations on it may not be sample-exact")
@@ -241,7 +271,7 @@ class ReplayDriver(val log: SessionLog, private val engine: Engine, private val 
                 Load.Ready -> {}
             }
             val e = epoch
-            if (preparing || e == null) { decks[d] = Deck.LIVE; continue }
+            if (preparing || e == null) { decks[d] = Deck.LIVE; trace("deck ${"ABCD"[d]} #$id ready for start"); continue }
             val now = e.timeAt(engine.outputFrames() ?: continue)
             if (notBefore[d] > now + LOOKAHEAD) continue // loaded early: placed once its Load is within the lookahead
             val join = maxOf(now + JOIN_LEAD, notBefore[d])
@@ -249,6 +279,7 @@ class ReplayDriver(val log: SessionLog, private val engine: Engine, private val 
             liveFrom[d] = e.frameOf(join)
             submit(liveFrom[d], script.place(join, d))
             stamp(e, script.between(join, maxOf(join, scheduledUntil)), only = d)
+            trace("deck ${"ABCD"[d]} #$id joins at session %.1f".format(join))
             val late = join - loadDueAt[d]
             if (late > 1 && log.replayAt(join).decks[d].sounding) onNotice("Deck ${"ABCD"[d]} joined %.1f s late (track still loading)".format(late))
         }
@@ -276,9 +307,10 @@ class ReplayDriver(val log: SessionLog, private val engine: Engine, private val 
         const val DECODE_GRACE = 20.0
         /** PLAY waits only for decks that sound this soon after the start; the rest join when ready. */
         const val START_HORIZON = 8.0
-        /** A partially decoded deck is ready when it covers what it plays over this horizon (+ margin). */
-        const val READY_HORIZON = 10.0
-        const val READY_MARGIN = 2.0
+        /** Decoded audio required ahead of any position when it is played: the engine's in-memory margin (2 s) + 1 s. */
+        const val READY_MARGIN = 3.0
+        /** Assumed decode speed before one is measured (track s per wall s; the phone does ~20× per deck). */
+        const val MIN_DECODE_RATE = 2.0
 
         fun command(op: ReplayOp): AudioCommand? {
             val deck = op.deck?.let { DeckId.entries[it] }

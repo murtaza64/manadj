@@ -230,7 +230,7 @@ class SessionModel(application: Application) : AndroidViewModel(application) {
     private fun driver(player: PlayerModel): ReplayDriver? {
         val l = log ?: return null
         this.player = player
-        return driver ?: ReplayDriver(l, engine(player), { notice = it }, timeline ?: SessionTimeline(l)).also { driver = it }
+        return driver ?: ReplayDriver(l, engine(player), { notice = it }, timeline ?: SessionTimeline(l), ::trace).also { driver = it }
     }
 
     fun play(player: PlayerModel) {
@@ -244,6 +244,7 @@ class SessionModel(application: Application) : AndroidViewModel(application) {
         loadFailure.fill(null)
         lateBase = player.engineSnapshot()?.lateOps ?: 0L; lateOps = 0; reopenBase = -1
         SessionRecording.machine = "session-replay"
+        traceFrom = System.nanoTime(); trace("PLAY at session %.1f s".format(time - l.activeStart))
         r.prepare(time)
         sync(r)
         loop?.cancel()
@@ -270,7 +271,7 @@ class SessionModel(application: Application) : AndroidViewModel(application) {
         val r = driver(player) ?: return
         moveClock(t.coerceIn(l.start, l.end))
         reveal()
-        if (playing || preparing) { r.prepare(time); sync(r) } else r.park(time)
+        if (playing || preparing) { traceFrom = System.nanoTime(); trace("SEEK to session %.1f s".format(time - l.activeStart)); r.prepare(time); sync(r) } else r.park(time)
     }
 
     private suspend fun run(player: PlayerModel, r: ReplayDriver) {
@@ -364,6 +365,7 @@ class SessionModel(application: Application) : AndroidViewModel(application) {
 
     private fun issueLoad(player: PlayerModel, deck: Int, trackId: Int) {
         loadFailure[deck] = null
+        trace("load ${DECKS[deck]} #$trackId (${track(trackId)?.let { repo.audioState(it) }?.javaClass?.simpleName})")
         val track = track(trackId)
         if (track == null || track.audioRev == null) {
             loadFailure[deck] = if (track == null) "Track #$trackId not in the synced Library" else "No audio file on the desktop"
@@ -375,20 +377,31 @@ class SessionModel(application: Application) : AndroidViewModel(application) {
     /** Download every track the Session loads, ahead of its load (mid-session loads then only decode). */
     private fun prefetch(l: SessionLog) {
         val ids = l.appearances.filter { it.end > time }.map { it.trackId }.distinct()
-        viewModelScope.launch(Dispatchers.IO) { for (id in ids) runCatching { repo.audioFile(id); probe(id) } }
+        viewModelScope.launch(Dispatchers.IO) {
+            for (id in ids) runCatching {
+                val cached = track(id)?.let { repo.audioState(it) == dev.manadj.library.AudioState.Cached } == true
+                val t0 = System.nanoTime()
+                repo.audioFile(id)
+                if (!cached) trace("download #$id %.0f ms".format((System.nanoTime() - t0) / 1e6))
+                probe(id)
+            }
+        }
     }
 
     /** Per track: this phone's decode vs the desktop's, in ms (> 0 = phone late). See [DecodeProbe]. */
     val decodeOffsets = mutableStateMapOf<Int, DecodeProbe.Result>()
     private val probed = HashSet<Int>()
     private val probeDispatcher = Dispatchers.Default.limitedParallelism(1)
+    /** S5 diagnostic, off by default (a full extra decode per track): `adb shell run-as dev.murt.manadj touch files/decode-probe`. */
+    private val probeOn get() = File(getApplication<Application>().filesDir, "decode-probe").exists()
     private fun probe(id: Int) {
-        if (!probed.add(id)) return
+        if (!probeOn || !probed.add(id)) return
         viewModelScope.launch(probeDispatcher) {
             val t = track(id) ?: return@launch
             val r = runCatching {
                 val wave = repo.detailWaveform(id) ?: error("no desktop waveform")
-                DecodeProbe.run(repo.audioFile(id), wave)
+                val t0 = System.nanoTime()
+                DecodeProbe.run(repo.audioFile(id), wave).also { trace("probe #$id %.0f ms".format((System.nanoTime() - t0) / 1e6)) }
             }.onFailure { android.util.Log.w(TAG, "decode-probe #$id ${t.title}: $it") }.getOrNull() ?: return@launch
             android.util.Log.i(TAG, "decode-probe #$id %s rate=%d delay=%s pad=%s firstPts=%dus raw=%s engine=%s score=%.3f · %s".format(
                 r.mime, r.sampleRate, r.encoderDelay, r.encoderPadding, r.firstPtsUs, r.offsetMs?.let { "%+.2fms".format(it) } ?: "?", r.engineOffsetMs?.let { "%+.2fms".format(it) } ?: "?", r.score, t.title))
@@ -397,6 +410,10 @@ class SessionModel(application: Application) : AndroidViewModel(application) {
     }
 
     /** Library track the engine deck holds and is ready with (null = other/none). */
+    /** SH8 load/seek timing (logcat `ManadjSession: timing +<ms since PLAY/seek> …`). */
+    @Volatile private var traceFrom = 0L
+    private fun trace(what: String) { android.util.Log.i(TAG, "timing +%.0f ms %s".format((System.nanoTime() - traceFrom) / 1e6, what)) }
+
     private fun held(player: PlayerModel, d: Int): Int? {
         val ui = player.decks.getValue(DeckId.entries[d])
         return if (ui.ready) LibraryHolder.trackOn(player, DeckId.entries[d]) else null
