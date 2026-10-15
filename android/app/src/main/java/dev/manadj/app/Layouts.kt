@@ -127,8 +127,8 @@ import dev.manadj.audio.QuantizeMode
 
 
 /**
- * Portrait centre (#153): a 2-column grid of equal keys under the FX card — QUANT·H / XF, SESSIONS / SETTINGS —
- * top-aligned with the same gaps as the FX card; the space below is left free for future keys.
+ * Portrait centre (#153): a 2-column grid of equal keys — QUANT·H / XF, SESSIONS / SETTINGS — top-aligned, with the
+ * FX card below at the bottom of the mixer (UH16); the space between is left free for future keys.
  */
 @Composable private fun GlobalControls(model: PlayerModel, ux: UiModel, modifier: Modifier, gap: Dp) {
     val mode by remember { derivedStateOf { model.output?.quantizeMode ?: ux.quantizeMode } }
@@ -212,9 +212,10 @@ fun mixOf(model: PlayerModel, ux: UiModel, id: DeckId): DeckMix {
                 KnobColumn(a, ux, model, Modifier.width(58.dp).fillMaxHeight())
                 ChannelFader(a, model, Modifier.width(54.dp).fillMaxHeight())
                 Column(Modifier.weight(1f).fillMaxHeight().padding(horizontal = 4.dp), verticalArrangement = Arrangement.spacedBy(gap)) {
-                    FxSection(ux, model, Modifier.fillMaxWidth(), compact = true)
+                    // UH16: app keys on top; FX sits directly above the crossfader (or, XF off, directly above BROWSE).
                     GlobalControls(model, ux, Modifier.fillMaxWidth().weight(1f), gap)
-                    Crossfader(model, ux, Modifier.fillMaxWidth().height(48.dp))
+                    FxSection(ux, model, Modifier.fillMaxWidth(), compact = true)
+                    if (ux.crossfaderEnabled) Crossfader(model, ux, Modifier.fillMaxWidth().height(48.dp))
                 }
                 ChannelFader(b, model, Modifier.width(54.dp).fillMaxHeight())
                 KnobColumn(b, ux, model, Modifier.width(58.dp).fillMaxHeight())
