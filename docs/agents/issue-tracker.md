@@ -29,7 +29,8 @@ there. Terminal issues remain as history; the migration mapping (sidecar file
 
 `gh issue create -R murtaza64/manadj --title "<feature-slug>: <title>"
 --label "feature:<slug>" [--label <marker>]` — body is the full issue text
-(problem, design, acceptance criteria). Untriaged = no marker label.
+(problem, design, acceptance criteria, and a `Port:` line for features — see
+AGENTS.md §Cross-platform porting). Untriaged = no marker label.
 
 ## When a skill says "fetch the relevant ticket"
 
