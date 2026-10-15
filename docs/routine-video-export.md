@@ -44,14 +44,22 @@ Portrait (1080×1920) or landscape (1920×1080), 30/60 fps MP4 of a mix with its
     (history mirrored out from a centre playhead); deck view WAVE / BARS (EQ analyser: the deck's share of the master
     spectrum) / RING (33⅓ platter, spectrum spokes, progress ring with hot cues) / NONE (visualizer only + lower
     third; the record label is the track's cover art); font MONO (terminal look, glowing text) / SF / AVENIR / NEW YORK
-    (italic; breakdown lower thirds) — premium faces get a soft shadow instead of glow; controls KNOBS / SLIDERS;
-    levels BAR / SEGMENTS (LED);
+    (italic; breakdown lower thirds) — premium faces get a soft shadow instead of glow; controls KNOBS / SLIDERS /
+    MINIMAL (thin white arcs, hairline meters, no colour); levels BAR / SEGMENTS (LED); DJ readout (top right):
+    PHRASE (16-tick ring, bar/phrase, drop distance) / MIX (balance line between the two loudest decks, "MIXING A→C ·
+    n BARS") / DATA (mono BPM · key · phrase:bar.beat · energy · remaining) / SET (track n of the set strip); lower
+    third CLASSIC / TECHY (mono, ticked rule, boxed fields) / METAL (brushed rule, metallic title) / BRIGHT (colour
+    slabs and chips) — title cards and the visualizer-only view, with BPM / key / genre tags and the set number;
+    `setTrackIds` (the whole set's track order) numbers tracks; `clockOffsetSec` / `clockTotalSec` run the footer
+    clock across a multi-part render;
     control colours; build-up (the 16 bars before each drop: zoom creep, closing vignette, beat subdividing to a
     snare roll, white haze, last-bar shake, growing countdown; the offline visualizer's `regime.buildup` is forced up
     over the same window so build-aware presets evolve too); text and controls swell with the beat only near drops (8
     bars after, 2 before; calm elsewhere); drop countdown = ghost digits behind the decks over the last 8 bars; action
-    pills = a row above the footer (deck bar, line icon, verb-first label; paired actions replace each other; the
-    action that lands a drop is a larger hero pill); bare lanes run the wave behind the info with local scrims;
+    pills = a right-aligned row above the footer (deck bar, line icon, verb-first label; paired actions replace each
+    other; the action that lands a drop is a larger hero pill; scratch / backspin get their own icons); bare lanes
+    run the wave behind the info (local scrims only when `infoShade` > 0); deck headers step back while a title card
+    is up;
     controls shade (dark strip behind the title/controls row);
     accent; handle/caption (defaults to the last handle typed, `@dj.reroll` initially). Titles at drop: a track reads
     "ID" until its hot cue 4 drop; one already past its drop when the clip starts is named from the start.

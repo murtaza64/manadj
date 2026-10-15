@@ -52,6 +52,12 @@ export interface SceneTrack {
   title: string;
   artist: string;
   bpm: number | null;
+  /** OpenKey (e.g. '4m'), when analysed. */
+  key?: string | null;
+  /** 1..5 library energy rating. */
+  energy?: number | null;
+  /** Genre / vibe tag names. */
+  tags?: string[];
   durationSec: number;
   wave: DecodedWaveform | null;
   beatTimes: number[];
@@ -147,6 +153,11 @@ let fontFace = FONT_FACES.mono;
  * away from drops, full in the 8 bars after one and the last 2 of a build. */
 let motionK = 1;
 let fontScale = 1;
+/** Per frame: the slot whose title card is up (its deck header steps back) and how far. */
+let cardSlot = -1;
+let cardK = 0;
+/** One title at a time: every deck header steps back while a title card is up. */
+const headerAlpha = (_slotIndex: number): number => (cardSlot >= 0 ? 1 - cardK : 1);
 function font(px: number, bold = false): string {
   const weight = bold ? fontFace.weight : fontFace === FONT_FACES.mono ? '' : '500';
   return `${fontFace.italic ? 'italic ' : ''}${weight ? `${weight} ` : ''}${Math.round(px * fontScale * fontFace.scale)}px ${fontFace.family}`;
@@ -599,6 +610,55 @@ function drawKnob(
   ctx.textAlign = 'left';
 }
 
+/** Minimal knob: a hairline track, a thin white value arc, a dot at the
+ * value; the band level only brightens the arc. No colour, no glow. */
+function drawKnobMinimal(
+  ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number,
+  label: string, value: number, _color: string, mode: 'bipolar' | 'filter', level: number, _glow: number, _pulse = 0,
+): void {
+  r *= 0.82;
+  const a0 = Math.PI * 0.75;
+  const a1 = Math.PI * 2.25;
+  const top = Math.PI * 1.5;
+  ctx.save();
+  ctx.lineCap = 'butt';
+  ctx.lineWidth = 1.5;
+  ctx.strokeStyle = 'rgba(255,255,255,0.16)';
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, a0, a1);
+  ctx.stroke();
+  const v = mode === 'filter' ? Math.max(-1, Math.min(1, value)) : (Math.max(0, Math.min(1, value)) - 0.5) * 2;
+  const ang = top + v * (Math.PI * 0.75);
+  ctx.strokeStyle = `rgba(255,255,255,${0.55 + 0.4 * Math.min(1, level)})`;
+  ctx.lineWidth = 2.5;
+  ctx.beginPath();
+  if (mode === 'bipolar') {
+    if (ang > a0 + 1e-3) ctx.arc(cx, cy, r, a0, ang);
+  } else if (v >= 0) ctx.arc(cx, cy, r, top, ang);
+  else ctx.arc(cx, cy, r, ang, top);
+  ctx.stroke();
+  // Killed band: a short slash through the centre.
+  if (mode === 'bipolar' && value < 0.05) {
+    ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(cx - r * 0.35, cy + r * 0.35);
+    ctx.lineTo(cx + r * 0.35, cy - r * 0.35);
+    ctx.stroke();
+  }
+  ctx.fillStyle = '#ffffff';
+  ctx.beginPath();
+  ctx.arc(cx + Math.cos(ang) * r, cy + Math.sin(ang) * r, 3.5, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.font = font(13, true);
+  ctx.letterSpacing = '1.5px';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = 'rgba(255,255,255,0.5)';
+  ctx.fillText(label, cx, cy + r + 16);
+  ctx.restore();
+}
+
 const CONTROL_PALETTES: Record<ClipLook['controlPalette'], [string, string, string, string] | null> = {
   classic: null,
   deck: null,
@@ -653,7 +713,7 @@ function drawControls(
   l: { eq: { low: number; mid: number; high: number }; filter: number }, meter: { low: number; mid: number; high: number } | null, lv: number, glow: number, pulse: number,
 ): void {
   const [cl, cm, ch, cf] = controlColors(look, deck);
-  const draw = look.controlStyle === 'sliders' ? drawSlider : drawKnob;
+  const draw = look.controlStyle === 'sliders' ? drawSlider : look.controlStyle === 'minimal' ? drawKnobMinimal : drawKnob;
   draw(ctx, kx(0), ky, kr, 'LOW', l.eq.low, cl, 'bipolar', meter?.low ?? 0, glow, pulse);
   draw(ctx, kx(1), ky, kr, 'MID', l.eq.mid, cm, 'bipolar', meter?.mid ?? 0, glow, pulse);
   draw(ctx, kx(2), ky, kr, 'HI', l.eq.high, ch, 'bipolar', meter?.high ?? 0, glow, pulse);
@@ -666,6 +726,16 @@ function drawLevelBar(
   frac: number, fill: string | CanvasGradient, color: string, blur: number, led: boolean,
 ): void {
   frac = Math.max(0, Math.min(1, frac));
+  if (look.controlStyle === 'minimal') {
+    // Hairline meter: a faint 1 px track, a 2 px white fill, a tick at the value.
+    const my = by + bh / 2;
+    ctx.fillStyle = 'rgba(255,255,255,0.14)';
+    ctx.fillRect(bx, my - 0.5, bw, 1);
+    ctx.fillStyle = led ? 'rgba(255,255,255,0.62)' : 'rgba(255,255,255,0.9)';
+    ctx.fillRect(bx, my - 1, bw * frac, 2);
+    ctx.fillRect(bx + bw * frac - 1, my - 5, 2, 10);
+    return;
+  }
   if (look.levelStyle === 'segments' && led) {
     const n = Math.max(8, Math.round(bw / 22));
     const sw = bw / n;
@@ -1162,13 +1232,16 @@ function drawLane(
   ctx.textBaseline = 'middle';
   ctx.textAlign = 'left';
   ctx.font = font(Math.round(26 * (1 + 0.05 * pulse * motionK)), true);
-  if (look.showTitles) {
+  if (look.showTitles && headerAlpha(lf.slotIndex) > 0.01) {
+    ctx.save();
+    ctx.globalAlpha *= headerAlpha(lf.slotIndex);
     const revealed = titleRevealed(scene, lf.slotIndex, t);
     const title = lf.track ? (revealed ? lf.track.title : ID_LABEL) : '—';
     glowText(ctx, ellipsize(ctx, title, leftW), leftX, iy + 24, deckColor, dim ? 0 : 10 * glow * (1 + 2 * pulse), dim ? 'rgba(255,255,255,0.5)' : '#ffffff');
     ctx.font = font(20);
     ctx.fillStyle = dim ? 'rgba(255,255,255,0.3)' : rgba(deckColor, 0.85);
     ctx.fillText(ellipsize(ctx, `${lf.deck} · ${revealed ? lf.track?.artist ?? '' : ID_LABEL}`, leftW), leftX, iy + 50);
+    ctx.restore();
   }
   if (look.showKnobs) {
     const l = lf.lanes ?? { fader: 0, trim: 0.5, eq: { low: 0.5, mid: 0.5, high: 0.5 }, filter: 0 };
@@ -1222,7 +1295,7 @@ function drawStage(
   for (const it of shown) {
     const color = DECK_COLORS[it.lf.deck];
     ctx.save();
-    ctx.globalAlpha = it.vis;
+    ctx.globalAlpha = it.vis * headerAlpha(it.lf.slotIndex);
     ctx.font = font(26, true);
     glowText(ctx, it.lf.deck, x + 4, y + titleRow / 2, color, 12 * look.glow);
     if (look.showTitles) {
@@ -1514,6 +1587,10 @@ function drawPillIcon(ctx: CanvasRenderingContext2D, a: RoutineAction, x: number
     case 'loop': case 'loopOff': ctx.beginPath(); ctx.arc(0, 0, 6, -Math.PI * 0.2, Math.PI * 1.5); ctx.stroke(); path([[0, -9], [3, -6], [0, -3]]); ctx.stroke(); break;
     case 'play': path([[-4, -6], [6, 0], [-4, 6]], true); ctx.fill(); break;
     case 'pause': ctx.fillRect(-5, -6, 3.5, 12); ctx.fillRect(1.5, -6, 3.5, 12); break;
+    case 'scratch': path([[-7, 2], [-4, -4], [-1, 4], [2, -4], [5, 4], [7, -1]]); ctx.stroke(); break;
+    case 'backspin':
+      ctx.beginPath(); ctx.arc(0, 0, 6, Math.PI * 1.65, Math.PI * 0.85, true); ctx.stroke();
+      path([[-6.5, -1], [-5.4, 3.6], [-1.6, 1.2]]); ctx.stroke(); break;
     default: path([[0, -7], [1.8, -1.8], [7, 0], [1.8, 1.8], [0, 7], [-1.8, 1.8], [-7, 0], [-1.8, -1.8]], true); ctx.fill();
   }
   ctx.restore();
@@ -1563,7 +1640,9 @@ function drawTicker(ctx: CanvasRenderingContext2D, scene: RoutineScene, t: numbe
   ctx.save();
   ctx.textBaseline = 'middle';
   ctx.textAlign = 'left';
-  let x = x0;
+  // Right-aligned: the newest pill sits at the right edge, older ones
+  // shift left (measured first so the row can anchor to the edge).
+  let x = SCENE_W - x0;
   shown.forEach(({ a, age, prev }, rank) => {
     const slot = a.slot === null ? null : routine.slots.find((s) => s.slot === a.slot) ?? null;
     const deck = slot?.deck ?? null;
@@ -1583,6 +1662,7 @@ function drawTicker(ctx: CanvasRenderingContext2D, scene: RoutineScene, t: numbe
     const barW = hero ? 6 : 4;
     const icon = hero ? 20 : 16;
     const w = barW + 10 + icon + 10 + tw + 14;
+    x -= w;
     const y = baseY - h / 2 + dy;
     ctx.save();
     ctx.globalAlpha = alpha;
@@ -1615,7 +1695,7 @@ function drawTicker(ctx: CanvasRenderingContext2D, scene: RoutineScene, t: numbe
       ctx.fill();
     }
     ctx.restore();
-    x += w + 10;
+    x -= 10;
   });
   ctx.letterSpacing = `${fontFace.tracking}px`;
   ctx.restore();
@@ -1627,21 +1707,16 @@ function drawTicker(ctx: CanvasRenderingContext2D, scene: RoutineScene, t: numbe
 function drawFooter(ctx: CanvasRenderingContext2D, scene: RoutineScene, t: number, L: Layout, look: ClipLook): void {
   const x0 = 44;
   const y = L.footer.y;
-  const total = scene.range.endSec - scene.range.startSec;
-  const elapsed = t - scene.range.startSec;
+  const total = look.clockTotalSec > 0 ? look.clockTotalSec : scene.range.endSec - scene.range.startSec;
+  const elapsed = t - scene.range.startSec + look.clockOffsetSec;
   const w = SCENE_W - x0 * 2;
+  // Hairline progress: 2 px, faint track, half-white fill, no glow.
   ctx.fillStyle = 'rgba(255,255,255,0.1)';
-  roundRect(ctx, x0, y + 8, w, 6, 3);
-  ctx.fill();
-  ctx.save();
-  ctx.shadowColor = look.accent;
-  ctx.shadowBlur = 12 * look.glow * (1 + 2 * (scene.hud ?? 0));
-  ctx.fillStyle = look.accent;
-  roundRect(ctx, x0, y + 8, Math.max(6, w * Math.max(0, Math.min(1, elapsed / total))), 6, 3);
-  ctx.fill();
-  ctx.restore();
-  ctx.font = font(22);
-  ctx.fillStyle = 'rgba(255,255,255,0.6)';
+  ctx.fillRect(x0, y + 10, w, 2);
+  ctx.fillStyle = 'rgba(255,255,255,0.45)';
+  ctx.fillRect(x0, y + 10, w * Math.max(0, Math.min(1, elapsed / total)), 2);
+  ctx.font = font(20);
+  ctx.fillStyle = 'rgba(255,255,255,0.5)';
   ctx.textBaseline = 'middle';
   ctx.textAlign = 'left';
   ctx.fillText(`${formatClock(elapsed)} / ${formatClock(total)}`, x0, y + 40);
@@ -1748,37 +1823,215 @@ function activeTitleCard(scene: RoutineScene, t: number): { slot: number; age: n
   return null;
 }
 
-function drawTitleCard(ctx: CanvasRenderingContext2D, scene: RoutineScene, card: { slot: number; age: number }, y: number, look: ClipLook): void {
-  const slot = scene.routine.slots[card.slot];
+function drawTitleCard(ctx: CanvasRenderingContext2D, scene: RoutineScene, card: { slot: number; age: number }, bottom: number, look: ClipLook, t: number): void {
+  const outK = card.age > CARD_SEC - 0.5 ? (CARD_SEC - card.age) / 0.5 : 1;
+  const x = isLandscape() ? 96 : 56;
+  drawTrackLowerThird(ctx, scene, card.slot, t, x, bottom, look, { age: card.age, alpha: Math.max(0, outK), big: false, maxW: isLandscape() ? 1000 : SCENE_W - 120 });
+}
+
+// ── Lower thirds ─────────────────────────────────────────────────────────
+
+const SF_STACK = 'system-ui, -apple-system, "SF Pro Display", "Helvetica Neue", sans-serif';
+const MONO_STACK = '"SF Mono", ui-monospace, Menlo, monospace';
+
+/** Track number in the whole set (look.setTrackIds order), 1-based. */
+function setNumberOf(scene: RoutineScene, look: ClipLook, slotIndex: number): number | null {
+  const ids = look.setTrackIds ?? [];
+  const slot = scene.routine.slots[slotIndex];
+  const k = slot ? ids.indexOf(slot.trackId) : -1;
+  return k < 0 ? null : k + 1;
+}
+
+function trackMeta(track: SceneTrack): string[] {
+  return [
+    track.bpm ? `${Math.round(track.bpm)} BPM` : '',
+    track.key ?? '',
+    ...(track.tags ?? []).filter((x) => !/^(dnb|remix|original|vip)$/i.test(x)).slice(0, 2).map((x) => x.toUpperCase()),
+  ].filter(Boolean);
+}
+
+function metallic(ctx: CanvasRenderingContext2D, y0: number, y1: number): CanvasGradient {
+  const g = ctx.createLinearGradient(0, y0, 0, y1);
+  g.addColorStop(0, '#ffffff');
+  g.addColorStop(0.45, '#c9ced6');
+  g.addColorStop(0.55, '#7d838d');
+  g.addColorStop(1, '#eef1f5');
+  return g;
+}
+
+/** One lower third (title card / visualizer-only view) in the look's
+ * `lowerThird` style. `bottom` = the block's bottom edge; `age` drives the
+ * entrance (kinetic tracking slam + slide); `big` = the visualizer-only
+ * size. */
+function drawTrackLowerThird(
+  ctx: CanvasRenderingContext2D, scene: RoutineScene, slotIndex: number, t: number,
+  x: number, bottom: number, look: ClipLook, opts: { age: number; alpha: number; big: boolean; maxW: number },
+): void {
+  const slot = scene.routine.slots[slotIndex];
   const track = slot ? scene.tracks.get(slot.trackId) : null;
   if (!slot || !track) return;
-  const color = slot.deck ? DECK_COLORS[slot.deck] : look.accent;
-  const inK = easeOut(Math.min(1, card.age / 0.45));
-  const outK = card.age > CARD_SEC - 0.5 ? (CARD_SEC - card.age) / 0.5 : 1;
-  // Widescreen: a lower-right card sliding in from the right.
-  const w = isLandscape() ? 780 : SCENE_W - 88;
-  const x = isLandscape() ? SCENE_W - 44 - w + (1 - inK) * 300 : 44 - (1 - inK) * 260;
+  const deck = slot.deck ?? 'A';
+  const color = DECK_COLORS[deck];
+  const revealed = titleRevealed(scene, slotIndex, t);
+  const title = revealed ? track.title : ID_LABEL;
+  const artist = revealed ? track.artist : ID_LABEL;
+  const meta = trackMeta(track);
+  const n = setNumberOf(scene, look, slotIndex);
+  const label = [n !== null ? `${String(n).padStart(2, '0')} / ${look.setTrackIds.length}` : 'NOW', `DECK ${deck}`].join('  ·  ');
+  const enter = easeOut(Math.min(1, opts.age / 0.45));
+  const slam = Math.min(1, opts.age / 0.28);
+  const S = opts.big ? 1.15 : 1;
+  const style = look.lowerThird ?? 'classic';
   ctx.save();
-  ctx.globalAlpha = Math.max(0, Math.min(inK, outK));
-  ctx.textBaseline = 'middle';
+  ctx.globalAlpha *= opts.alpha;
+  ctx.translate(-(1 - enter) * 40, 0);
+  ctx.textBaseline = 'alphabetic';
   ctx.textAlign = 'left';
-  ctx.fillStyle = 'rgba(6,6,10,0.78)';
-  ctx.shadowColor = color;
-  ctx.shadowBlur = 24 * look.glow;
-  roundRect(ctx, x, y, w, 96, 14);
-  ctx.fill();
-  ctx.shadowBlur = 0;
-  ctx.fillStyle = color;
-  ctx.fillRect(x, y + 14, 6, 68);
-  ctx.font = font(18, true);
-  ctx.fillStyle = rgba(color, 0.9);
-  ctx.fillText(`NOW · DECK ${slot.deck ?? '—'}`, x + 26, y + 24);
-  ctx.font = font(36, true);
-  const tt = ellipsize(ctx, track.title, w - 50);
-  glowText(ctx, tt, x + 26, y + 56, color, 14 * look.glow, '#ffffff');
-  ctx.font = font(22);
-  ctx.fillStyle = 'rgba(255,255,255,0.7)';
-  ctx.fillText(ellipsize(ctx, track.artist, w - 50), x + 26, y + 82);
+  const shadow = () => { ctx.shadowColor = 'rgba(0,0,0,0.55)'; ctx.shadowBlur = 8; ctx.shadowOffsetY = 1; };
+  const noShadow = () => { ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0; ctx.shadowOffsetY = 0; };
+  const titleTracking = `${(0.3 * (1 - slam) - 0.03) * 60 * S}px`;
+  const maxW = opts.maxW;
+  if (style === 'techy') {
+    const mono = (px: number, w = '500') => `${w} ${Math.round(px * S)}px ${MONO_STACK}`;
+    const lh = { meta: 22 * S, artist: 34 * S, title: 54 * S, label: 26 * S };
+    let y = bottom;
+    // Data fields: boxed cells.
+    ctx.font = mono(15, '600');
+    ctx.letterSpacing = '1px';
+    let cx = x;
+    const cells = [track.bpm ? `BPM ${track.bpm.toFixed(1)}` : '', track.key ? `KEY ${track.key}` : '', ...(track.tags ?? []).slice(0, 2).map((g) => g.toUpperCase())].filter(Boolean);
+    for (const c of cells) {
+      const cw = ctx.measureText(c).width + 16;
+      ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(cx + 0.5, y - lh.meta + 0.5, cw, lh.meta - 2);
+      ctx.fillStyle = 'rgba(255,255,255,0.8)';
+      ctx.fillText(c, cx + 8, y - 7 * S);
+      cx += cw + 6;
+    }
+    y -= lh.meta + 10 * S;
+    ctx.font = mono(22);
+    ctx.letterSpacing = '0px';
+    ctx.fillStyle = 'rgba(255,255,255,0.6)';
+    ctx.fillText(ellipsize(ctx, `> ${artist}`, maxW), x, y);
+    y -= lh.artist;
+    ctx.font = mono(44, '700');
+    ctx.letterSpacing = titleTracking;
+    shadow();
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(ellipsize(ctx, title, maxW), x, y);
+    noShadow();
+    const tw = Math.min(maxW, Math.max(420 * S, ctx.measureText(title).width));
+    y -= lh.title - 6 * S;
+    // Rule with ticks; the deck-hue segment leads.
+    ctx.fillStyle = 'rgba(255,255,255,0.4)';
+    ctx.fillRect(x, y, tw, 1);
+    for (let k = 0; k <= tw; k += 40 * S) ctx.fillRect(x + k, y - 4, 1, 4);
+    ctx.fillStyle = color;
+    ctx.fillRect(x, y - 1, 80 * S, 3);
+    ctx.font = mono(14, '600');
+    ctx.letterSpacing = '2px';
+    ctx.fillStyle = color;
+    ctx.fillText(`[${deck}] ${label.replace(`  ·  DECK ${deck}`, '')}`, x, y - 12 * S);
+  } else if (style === 'metal') {
+    let y = bottom;
+    ctx.font = `600 ${Math.round(14 * S)}px ${SF_STACK}`;
+    ctx.letterSpacing = '4px';
+    ctx.fillStyle = 'rgba(214,219,227,0.6)';
+    ctx.fillText(meta.join('   '), x, y);
+    y -= 30 * S;
+    ctx.font = `300 ${Math.round(24 * S)}px ${SF_STACK}`;
+    ctx.letterSpacing = '3px';
+    ctx.fillStyle = 'rgba(230,233,238,0.85)';
+    ctx.fillText(ellipsize(ctx, artist.toUpperCase(), maxW), x, y);
+    y -= 22 * S;
+    // Brushed rule: silver fading out, a deck-hue glint.
+    const rg = ctx.createLinearGradient(x, 0, x + 560 * S, 0);
+    rg.addColorStop(0, 'rgba(240,243,247,0.9)');
+    rg.addColorStop(0.6, 'rgba(150,156,166,0.5)');
+    rg.addColorStop(1, 'rgba(150,156,166,0)');
+    ctx.fillStyle = rg;
+    ctx.fillRect(x, y, 560 * S, 1.5);
+    ctx.fillStyle = color;
+    ctx.fillRect(x, y - 0.5, 28 * S, 2.5);
+    y -= 16 * S;
+    ctx.font = `800 ${Math.round(62 * S)}px ${SF_STACK}`;
+    ctx.letterSpacing = titleTracking;
+    shadow();
+    ctx.fillStyle = metallic(ctx, y - 50 * S, y + 4);
+    ctx.fillText(ellipsize(ctx, title, maxW), x, y);
+    noShadow();
+    y -= 70 * S;
+    ctx.font = `600 ${Math.round(13 * S)}px ${SF_STACK}`;
+    ctx.letterSpacing = '6px';
+    ctx.fillStyle = 'rgba(214,219,227,0.55)';
+    ctx.fillText(label, x, y);
+  } else if (style === 'bright') {
+    let y = bottom;
+    // Meta: saturated chips.
+    ctx.font = `800 ${Math.round(15 * S)}px ${SF_STACK}`;
+    ctx.letterSpacing = '1.5px';
+    let cx = x;
+    const chipColors = [color, '#ffffff', '#ffe600', '#00ff9c'];
+    meta.forEach((m, i) => {
+      const cw = ctx.measureText(m).width + 18;
+      ctx.fillStyle = chipColors[i % chipColors.length];
+      ctx.fillRect(cx, y - 24 * S, cw, 24 * S);
+      ctx.fillStyle = '#07080c';
+      ctx.fillText(m, cx + 9, y - 7 * S);
+      cx += cw + 6;
+    });
+    y -= 34 * S;
+    ctx.font = `700 ${Math.round(24 * S)}px ${SF_STACK}`;
+    ctx.letterSpacing = '0px';
+    const aw = Math.min(maxW, ctx.measureText(artist).width) + 24;
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(x, y - 34 * S, aw, 34 * S);
+    ctx.fillStyle = '#07080c';
+    ctx.fillText(ellipsize(ctx, artist, maxW), x + 12, y - 10 * S);
+    y -= 34 * S;
+    ctx.font = `900 ${Math.round(58 * S)}px ${SF_STACK}`;
+    ctx.letterSpacing = titleTracking;
+    const tt = ellipsize(ctx, title, maxW);
+    const tw = ctx.measureText(tt).width + 36;
+    ctx.fillStyle = color;
+    ctx.fillRect(x, y - 74 * S, tw * Math.min(1, enter * 1.2), 74 * S);
+    ctx.fillStyle = '#07080c';
+    ctx.fillText(tt, x + 18, y - 18 * S);
+    y -= 84 * S;
+    ctx.font = `800 ${Math.round(14 * S)}px ${SF_STACK}`;
+    ctx.letterSpacing = '4px';
+    shadow();
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(label, x, y);
+  } else {
+    // classic: deck-hue rule, label, display title, artist, meta.
+    let y = bottom;
+    ctx.font = `600 ${Math.round(15 * S)}px ${SF_STACK}`;
+    ctx.letterSpacing = '2.5px';
+    shadow();
+    ctx.fillStyle = 'rgba(255,255,255,0.6)';
+    ctx.fillText(meta.join('  ·  '), x + 22 * S, y);
+    y -= 32 * S;
+    ctx.font = `500 ${Math.round(26 * S)}px ${SF_STACK}`;
+    ctx.letterSpacing = '0px';
+    ctx.fillStyle = rgba(color, 0.95);
+    ctx.fillText(ellipsize(ctx, artist, maxW), x + 22 * S, y);
+    y -= 38 * S;
+    ctx.font = `800 ${Math.round(60 * S)}px ${SF_STACK}`;
+    ctx.letterSpacing = titleTracking;
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(ellipsize(ctx, title, maxW), x + 18 * S, y);
+    y -= 66 * S;
+    ctx.font = `600 ${Math.round(15 * S)}px ${SF_STACK}`;
+    ctx.letterSpacing = '3px';
+    ctx.fillStyle = 'rgba(255,255,255,0.7)';
+    ctx.fillText(label, x + 22 * S, y);
+    noShadow();
+    ctx.fillStyle = color;
+    ctx.fillRect(x, y - 14 * S, 4 * S, bottom - y + 18 * S);
+  }
+  ctx.letterSpacing = `${fontFace.tracking}px`;
   ctx.restore();
 }
 
@@ -2087,6 +2340,14 @@ function bandColor(look: ClipLook, deck: RoutineDeck, k: number): string {
   return `rgb(${Math.round(c[0] * 255)},${Math.round(c[1] * 255)},${Math.round(c[2] * 255)})`;
 }
 
+/** 'rgb(r,g,b)' (bandColor) → '#rrggbb' for rgba(). */
+function rgbHex(c: string): string {
+  if (c.startsWith('#')) return c;
+  const m = /rgb\((\d+),\s*(\d+),\s*(\d+)\)/.exec(c);
+  if (!m) return '#ffffff';
+  return `#${[m[1], m[2], m[3]].map((v) => Number(v).toString(16).padStart(2, '0')).join('')}`;
+}
+
 function deckPulse(scene: RoutineScene, lf: LaneFrame, meter: SlotMeter | null): number {
   return (scene.hud ?? 0) * (lf.state !== 'live' ? 0 : 0.3 + 0.7 * (meter?.post ?? 0));
 }
@@ -2095,10 +2356,12 @@ function drawDeckTitle(
   ctx: CanvasRenderingContext2D, scene: RoutineScene, lf: LaneFrame, t: number,
   x: number, y: number, w: number, look: ClipLook, pulse: number, size = 30, align: CanvasTextAlign = 'left',
 ): void {
-  if (!look.showTitles) return;
+  if (!look.showTitles || headerAlpha(lf.slotIndex) <= 0.01) return;
   const deckColor = DECK_COLORS[lf.deck];
   const dim = lf.state !== 'live';
   const revealed = titleRevealed(scene, lf.slotIndex, t);
+  ctx.save();
+  ctx.globalAlpha *= headerAlpha(lf.slotIndex);
   ctx.textBaseline = 'middle';
   ctx.textAlign = align;
   ctx.font = font(Math.round(size * (1 + 0.05 * pulse * motionK)), true);
@@ -2108,6 +2371,7 @@ function drawDeckTitle(
   ctx.fillStyle = dim ? 'rgba(255,255,255,0.3)' : rgba(deckColor, 0.85);
   ctx.fillText(ellipsize(ctx, `${lf.deck} · ${revealed ? lf.track?.artist ?? '' : ID_LABEL}`, w), x, y + size * 0.95);
   ctx.textAlign = 'left';
+  ctx.restore();
 }
 
 /** One row: FADER + LEVEL bars left, LOW/MID/HI/FILTER knobs right. */
@@ -2185,49 +2449,52 @@ function drawDeckBars(
   const top = y + titleH;
   const areaH = h - titleH - stripH;
   if (areaH < 30 || lf.slotIndex < 0) return;
-  const reflect = areaH > 160 ? 0.22 : 0;
+  const reflect = areaH > 160 ? 0.12 : 0;
   const maxH = areaH * (1 - reflect) - 6;
   const baseY = top + maxH;
-  const n = Math.max(12, Math.min(DECK_BANDS, Math.round((w - 2 * pad) / 30)));
+  // Sleek analyser: many thin square bars, deck hue fading up from a dim
+  // foot to a solid head, a hairline lit cap, floating hairline peaks, a
+  // faint baseline and a short reflection. Glow only on the loudest bands.
+  const n = Math.max(16, Math.min(DECK_BANDS, Math.round((w - 2 * pad) / 18)));
   const st = deckSpectrumAt(scene, lf.slotIndex, t, all);
   const raw = resampleBands(st.v, n);
   const vals = raw.map((v, i) => 0.25 * (raw[i - 1] ?? v) + 0.5 * v + 0.25 * (raw[i + 1] ?? v));
   const peaks = resampleBands(st.peak, n);
   const slotW = (w - 2 * pad) / n;
-  const bw = slotW * 0.68;
+  const bw = Math.max(3, slotW * 0.46);
   const dim = lf.state !== 'live';
-  const swell = 1 + 0.18 * pulse * look.wavePulse;
+  const swell = 1 + 0.12 * pulse * look.wavePulse;
   ctx.save();
   if (dim) ctx.globalAlpha *= 0.45;
+  ctx.fillStyle = 'rgba(255,255,255,0.12)';
+  ctx.fillRect(x + pad, baseY + 2, w - 2 * pad, 1);
   for (let i = 0; i < n; i++) {
     const k = i / (n - 1);
     const v = Math.min(1, vals[i] * swell);
-    const bh = Math.max(3, v * maxH);
-    const bx = x + pad + i * slotW + (slotW - bw) / 2;
+    const bh = Math.max(2, v * maxH);
+    const bx = Math.round(x + pad + i * slotW + (slotW - bw) / 2);
     const color = bandColor(look, lf.deck, k);
-    ctx.shadowColor = color;
-    ctx.shadowBlur = (8 + 22 * v) * look.glow;
     const g = ctx.createLinearGradient(0, baseY - bh, 0, baseY);
-    g.addColorStop(0, '#ffffff');
-    g.addColorStop(Math.min(0.5, 14 / bh), color);
-    g.addColorStop(1, color);
+    g.addColorStop(0, color);
+    g.addColorStop(1, rgba(rgbHex(color), 0.28));
+    ctx.shadowColor = color;
+    ctx.shadowBlur = v > 0.6 ? (v - 0.6) * 30 * look.glow : 0;
     ctx.fillStyle = g;
-    roundRect(ctx, bx, baseY - bh, bw, bh, Math.min(bw / 2, 6));
-    ctx.fill();
+    ctx.fillRect(bx, baseY - bh, bw, bh);
     ctx.shadowBlur = 0;
-    // Peak cap
-    const py = baseY - Math.min(1, peaks[i] * swell) * maxH - 10;
-    ctx.fillStyle = 'rgba(255,255,255,0.9)';
-    ctx.fillRect(bx, py, bw, 4);
+    ctx.fillStyle = 'rgba(255,255,255,0.85)';
+    ctx.fillRect(bx, baseY - bh, bw, 2);
+    // Peak: a hairline that floats and falls.
+    const py = baseY - Math.min(1, peaks[i] * swell) * maxH - 6;
+    ctx.fillStyle = 'rgba(255,255,255,0.55)';
+    ctx.fillRect(bx, py, bw, 1.5);
     if (reflect > 0) {
-      const rh = bh * 0.45;
-      const rg = ctx.createLinearGradient(0, baseY + 6, 0, baseY + 6 + rh);
-      rg.addColorStop(0, color);
+      const rh = bh * 0.3;
+      const rg = ctx.createLinearGradient(0, baseY + 5, 0, baseY + 5 + rh);
+      rg.addColorStop(0, rgba(rgbHex(color), 0.16));
       rg.addColorStop(1, 'rgba(0,0,0,0)');
-      ctx.globalAlpha *= 0.28;
       ctx.fillStyle = rg;
-      ctx.fillRect(bx, baseY + 6, bw, rh);
-      ctx.globalAlpha /= 0.28;
+      ctx.fillRect(bx, baseY + 5, bw, rh);
     }
   }
   ctx.restore();
@@ -2256,21 +2523,21 @@ function drawDeckRing(
   // Spectrum spokes, mirrored left/right from the top.
   if (lf.slotIndex >= 0) {
     const st = deckSpectrumAt(scene, lf.slotIndex, t, all);
-    const n = 96;
-    const lw = ((2 * Math.PI * rz * 1.12) / n) * 0.55;
-    ctx.lineCap = 'round';
+    const n = 144;
+    const lw = ((2 * Math.PI * rz * 1.12) / n) * 0.42;
+    ctx.lineCap = 'butt';
     ctx.lineWidth = lw;
     for (let j = 0; j < n; j++) {
       const b = j < n / 2 ? j : n - 1 - j;
       const band = Math.floor((b / (n / 2)) * DECK_BANDS);
       const v = Math.min(1, st.v[band] * (1 + 0.2 * pulse));
       const a = -Math.PI / 2 + ((j + 0.5) / n) * Math.PI * 2;
-      const r0 = rz * 1.14;
-      const r1 = r0 + 6 + v * r * 0.55;
+      const r0 = rz * 1.13;
+      const r1 = r0 + 3 + v * r * 0.42;
       const color = bandColor(look, lf.deck, b / (n / 2));
       ctx.strokeStyle = color;
       ctx.shadowColor = color;
-      ctx.shadowBlur = (6 + 16 * v) * glow;
+      ctx.shadowBlur = v > 0.65 ? (v - 0.65) * 30 * glow : 0;
       ctx.beginPath();
       ctx.moveTo(cx + Math.cos(a) * r0, cy + Math.sin(a) * r0);
       ctx.lineTo(cx + Math.cos(a) * r1, cy + Math.sin(a) * r1);
@@ -2281,8 +2548,8 @@ function drawDeckRing(
   // Progress ring + hot cue ticks
   const dur = lf.track?.durationSec ?? 0;
   const pr = rz * 1.06;
-  ctx.lineWidth = 6;
-  ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+  ctx.lineWidth = 1.5;
+  ctx.strokeStyle = 'rgba(255,255,255,0.14)';
   ctx.beginPath();
   ctx.arc(cx, cy, pr, 0, Math.PI * 2);
   ctx.stroke();
@@ -2290,8 +2557,9 @@ function drawDeckRing(
     const k = Math.max(0, Math.min(1, lf.trackTime / dur));
     ctx.save();
     ctx.strokeStyle = deckColor;
+    ctx.lineWidth = 3;
     ctx.shadowColor = deckColor;
-    ctx.shadowBlur = 14 * glow;
+    ctx.shadowBlur = 6 * glow;
     ctx.beginPath();
     ctx.arc(cx, cy, pr, -Math.PI / 2, -Math.PI / 2 + k * Math.PI * 2);
     ctx.stroke();
@@ -2342,10 +2610,10 @@ function drawDeckRing(
   const art = lf.track?.art ?? null;
   const lr = rz * (art ? 0.62 : 0.36);
   ctx.shadowColor = deckColor;
-  ctx.shadowBlur = (10 + 30 * (meter?.post ?? 0)) * glow;
+  ctx.shadowBlur = (4 + 14 * (meter?.post ?? 0)) * glow;
   ctx.fillStyle = deckColor;
   ctx.beginPath();
-  ctx.arc(0, 0, lr + (art ? 3 : 0), 0, Math.PI * 2);
+  ctx.arc(0, 0, lr + (art ? 1.5 : 0), 0, Math.PI * 2);
   ctx.fill();
   ctx.shadowBlur = 0;
   if (art) {
@@ -2370,8 +2638,8 @@ function drawDeckRing(
     ctx.fill();
   }
   // Sticker line (the spin reads off it)
-  ctx.strokeStyle = 'rgba(255,255,255,0.85)';
-  ctx.lineWidth = art ? 3 : 4;
+  ctx.strokeStyle = 'rgba(255,255,255,0.7)';
+  ctx.lineWidth = 1.5;
   ctx.beginPath();
   ctx.moveTo(lr + 6, 0);
   ctx.lineTo(rz * 0.95, 0);
@@ -2391,7 +2659,9 @@ function drawDeckRing(
   ctx.textBaseline = 'middle';
   const status = laneStatusText(scene.routine, lf, t);
   const bpm = lf.track?.bpm ? `${Math.round(lf.track.bpm)} BPM` : '';
-  ctx.fillText([status || (dur > 0 ? `-${formatClock(dur - lf.trackTime)}` : ''), bpm].filter(Boolean).join(' · '), ix, iy);
+  ctx.letterSpacing = '1px';
+  ctx.fillText([status || (dur > 0 ? `-${formatClock(dur - lf.trackTime)}` : ''), bpm, lf.track?.key ?? ''].filter(Boolean).join('  ·  '), ix, iy);
+  ctx.letterSpacing = `${fontFace.tracking}px`;
   iy += 24;
   if (look.showKnobs && y + h - iy > 60) drawDeckStrip(ctx, lf, ix, iy, Math.min(iw, 640), Math.min(96, y + h - iy - 4), look, meter, pulse);
 }
@@ -2427,26 +2697,10 @@ function drawLowerThird(
   if (!look.showTitles || shown.length === 0) return;
   const dom = scene.metric?.dominantAt(t) ?? -1;
   const it = shown.find((x) => x.lf.slotIndex === dom) ?? [...shown].sort((a, b) => b.vis - a.vis)[0];
-  const { lf } = it;
-  const deckColor = DECK_COLORS[lf.deck];
-  const x = 64;
-  const y = box.y + box.h - 70;
-  const revealed = titleRevealed(scene, lf.slotIndex, t);
-  ctx.save();
-  ctx.globalAlpha *= it.vis;
-  ctx.fillStyle = deckColor;
-  ctx.shadowColor = deckColor;
-  ctx.shadowBlur = (12 + 30 * hud) * look.glow;
-  ctx.fillRect(x, y - 54, 8, 92);
-  ctx.shadowBlur = 0;
-  ctx.textBaseline = 'middle';
-  ctx.textAlign = 'left';
-  ctx.font = font(52, true);
-  glowText(ctx, ellipsize(ctx, lf.track ? (revealed ? lf.track.title : ID_LABEL) : '—', SCENE_W * 0.6), x + 28, y - 22, deckColor, (12 + 24 * hud) * look.glow, '#ffffff');
-  ctx.font = font(26);
-  ctx.fillStyle = rgba(deckColor, 0.9);
-  ctx.fillText(`${lf.deck} · ${revealed ? lf.track?.artist ?? '' : ID_LABEL}`, x + 30, y + 24);
-  ctx.restore();
+  const card = look.titleCards ? activeTitleCard(scene, t) : null;
+  drawTrackLowerThird(ctx, scene, it.lf.slotIndex, t, isLandscape() ? 96 : 64, box.y + box.h - 24, look,
+    { age: card && card.slot === it.lf.slotIndex ? card.age : 10, alpha: it.vis, big: true, maxW: SCENE_W * 0.62 });
+  void hud;
 }
 
 /** Vertical: each deck a column, the wave scrolling down into a
@@ -2651,6 +2905,144 @@ function drawDecks(
   if (rest.length > 0 && stripH > 40) columns(rest, box.y + mainH + box.gap, stripH);
 }
 
+// ── DJ readout modules (headerless HUD, top-right) ───────────────────────
+
+const mixSinceCache = new WeakMap<object, Map<string, number>>();
+/** When the current pair of audible slots started overlapping (mix s). */
+function overlapSince(scene: RoutineScene, a: number, b: number, t: number): number {
+  const m = scene.metric!;
+  let c = mixSinceCache.get(m);
+  if (!c) { c = new Map(); mixSinceCache.set(m, c); }
+  const key = `${Math.min(a, b)}-${Math.max(a, b)}-${Math.floor(t / 4)}`;
+  const hit = c.get(key);
+  if (hit !== undefined) return hit;
+  let u = t;
+  while (u > scene.range.startSec && m.levelAt(a, u - 0.25) > 0.12 && m.levelAt(b, u - 0.25) > 0.12) u -= 0.25;
+  c.set(key, u);
+  return u;
+}
+
+function drawHudModule(ctx: CanvasRenderingContext2D, scene: RoutineScene, t: number, look: ClipLook, all: SlotMeter[], hud: number): void {
+  const mod = look.hudModule ?? 'none';
+  const m = scene.metric;
+  if (mod === 'none' || !m) return;
+  const right = SCENE_W - (isLandscape() ? 96 : 44);
+  const y = isLandscape() ? 34 : 26;
+  const barSec = scene.routine.secPerBeat * 4;
+  const dom = m.dominantAt(t);
+  const pos = headerPositionAt(scene, t);
+  ctx.save();
+  ctx.textBaseline = 'middle';
+  ctx.shadowColor = 'rgba(0,0,0,0.55)';
+  ctx.shadowBlur = 6;
+  const label = (text: string, x: number, yy: number, align: CanvasTextAlign = 'right', alpha = 0.7, px = 14) => {
+    ctx.font = `600 ${Math.round(px * fontScale)}px ${SF_STACK}`;
+    ctx.letterSpacing = '2.5px';
+    ctx.textAlign = align;
+    ctx.fillStyle = `rgba(255,255,255,${alpha})`;
+    ctx.fillText(text, x, yy);
+    return ctx.measureText(text).width;
+  };
+  if (mod === 'phrase' && pos) {
+    // 16-tick phrase ring with the bar's 4 beats inside; BAR n/16 · P n.
+    const r = 22;
+    const cx = right - r;
+    for (let i = 0; i < 16; i++) {
+      const a = -Math.PI / 2 + (i / 16) * Math.PI * 2;
+      const cur = i === pos.barInPhrase;
+      ctx.strokeStyle = cur ? '#ffffff' : i < pos.barInPhrase ? 'rgba(255,255,255,0.65)' : 'rgba(255,255,255,0.18)';
+      ctx.lineWidth = cur ? 3 : 2;
+      const r0 = i % 4 === 0 ? r - 7 : r - 4;
+      ctx.beginPath();
+      ctx.moveTo(cx + Math.cos(a) * r0, y + Math.sin(a) * r0);
+      ctx.lineTo(cx + Math.cos(a) * r, y + Math.sin(a) * r);
+      ctx.stroke();
+    }
+    const k = Math.pow(1 - pos.phase, 2);
+    ctx.fillStyle = `rgba(255,255,255,${0.35 + 0.6 * k})`;
+    ctx.beginPath();
+    ctx.arc(cx, y, 3 + 3 * k * (pos.beatInBar === 0 ? 1.4 : 1), 0, Math.PI * 2);
+    ctx.fill();
+    const next = m.events.find((e) => e.drop && e.t > t && e.t - t < barSec * 16);
+    const txt = `BAR ${String(pos.barInPhrase + 1).padStart(2, '0')}/16   P${pos.phrase + 1}${next ? `   DROP −${Math.ceil((next.t - t) / barSec)}` : ''}`;
+    label(txt, cx - r - 16, y);
+  } else if (mod === 'mix') {
+    // The two loudest audible slots as a balance line between deck hues.
+    const live = scene.routine.slots.map((s, i) => ({ i, deck: s.deck, v: m.visibilityAt(i, t) > 0.3 ? (all[i]?.post ?? 0) : 0 }))
+      .filter((x) => x.v > 0.04 && x.deck).sort((a, b) => b.v - a.v).slice(0, 2)
+      .sort((a, b) => ROUTINE_DECK_ORDER.indexOf(a.deck!) - ROUTINE_DECK_ORDER.indexOf(b.deck!));
+    const w = 260;
+    const x0 = right - w;
+    if (live.length === 2) {
+      const [a, b] = live;
+      const bal = b.v / (a.v + b.v);
+      const g = ctx.createLinearGradient(x0, 0, right, 0);
+      g.addColorStop(0, DECK_COLORS[a.deck!]);
+      g.addColorStop(1, DECK_COLORS[b.deck!]);
+      ctx.fillStyle = g;
+      ctx.globalAlpha = 0.85;
+      ctx.fillRect(x0, y + 6, w, 2);
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(x0 + w * bal - 1.5, y - 1, 3, 16);
+      label(a.deck!, x0 - 14, y + 7, 'right', 0.9, 16);
+      label(b.deck!, right + 10, y + 7, 'left', 0.9, 16);
+      const bars = Math.max(1, Math.round((t - overlapSince(scene, a.i, b.i, t)) / barSec));
+      // Outgoing → incoming: the later entry is the one coming in.
+      const [out, inc] = scene.routine.slots[a.i].entryMixSec <= scene.routine.slots[b.i].entryMixSec ? [a, b] : [b, a];
+      label(`MIXING  ${out.deck}→${inc.deck}  ·  ${bars} BAR${bars === 1 ? '' : 'S'}`, right, y - 14, 'right', 0.6, 12);
+    } else if (live.length === 1) {
+      const d = live[0].deck!;
+      ctx.fillStyle = DECK_COLORS[d];
+      ctx.fillRect(x0, y + 6, w, 2);
+      label(`DECK ${d}  ·  SOLO`, right, y - 14, 'right', 0.6, 12);
+    }
+  } else if (mod === 'data') {
+    const slot = scene.routine.slots[dom];
+    const track = slot ? scene.tracks.get(slot.trackId) : null;
+    if (track && slot) {
+      const lf = laneFrameAt(scene, slot.deck!, t);
+      const nrg = track.energy ?? 0;
+      const fields = [
+        `${(track.bpm ?? 0).toFixed(1)} BPM`, track.key ?? '—',
+        pos ? `P${pos.phrase + 1}:${String(pos.barInPhrase + 1).padStart(2, '0')}.${pos.beatInBar + 1}` : '',
+        `NRG ${'■'.repeat(nrg)}${'□'.repeat(Math.max(0, 5 - nrg))}`,
+        `-${formatClock(Math.max(0, track.durationSec - lf.trackTime))}`,
+      ].filter(Boolean);
+      ctx.font = `500 ${Math.round(16 * fontScale)}px ${MONO_STACK}`;
+      ctx.letterSpacing = '0.5px';
+      ctx.textAlign = 'left';
+      const sep = '  │  ';
+      const full = `${slot.deck}  ${fields.join(sep)}`;
+      let x = right - ctx.measureText(full).width;
+      ctx.fillStyle = DECK_COLORS[slot.deck!];
+      ctx.fillText(`${slot.deck}`, x, y);
+      x += ctx.measureText(`${slot.deck}  `).width;
+      ctx.fillStyle = 'rgba(255,255,255,0.8)';
+      ctx.fillText(fields.join(sep), x, y);
+      // Beat ticker under the line.
+      if (pos) for (let i = 0; i < 4; i++) {
+        ctx.fillStyle = i === pos.beatInBar ? `rgba(255,255,255,${0.5 + 0.5 * Math.pow(1 - pos.phase, 2)})` : 'rgba(255,255,255,0.15)';
+        ctx.fillRect(right - (4 - i) * 22, y + 16, 18, 2);
+      }
+    }
+  } else if (mod === 'set') {
+    const n = dom >= 0 ? setNumberOf(scene, look, dom) : null;
+    const total = look.setTrackIds?.length ?? 0;
+    if (n !== null && total > 0) {
+      const w = Math.min(360, total * 10);
+      const seg = w / total;
+      for (let i = 0; i < total; i++) {
+        ctx.fillStyle = i + 1 < n ? 'rgba(255,255,255,0.55)' : i + 1 === n ? '#ffffff' : 'rgba(255,255,255,0.14)';
+        ctx.fillRect(right - w + i * seg, y + 8, seg - 2, i + 1 === n ? 4 : 2);
+      }
+      label(`TRACK ${String(n).padStart(2, '0')} / ${total}`, right, y - 10, 'right', 0.75, 13);
+    }
+  }
+  ctx.restore();
+  void hud;
+}
+
 // ── Frame ────────────────────────────────────────────────────────────────
 
 const LANE_MAX_H = 560;
@@ -2783,6 +3175,11 @@ export function drawRoutineFrame(
 
   // Deck stack: presence-weighted, centered; cards unfold in/out with
   // their presence and the stack slides to make room.
+  {
+    const c = look.titleCards && look.deckView !== 'none' && !soloDeck && !hideWaves ? activeTitleCard(scene, t) : null;
+    cardSlot = c ? c.slot : -1;
+    cardK = c ? Math.min(1, c.age / 0.3, (CARD_SEC - c.age) / 0.4) : 0;
+  }
   const items = decks.map((deck) => {
     const lf = laneFrameAt(scene, deck, t);
     const m = lf.slotIndex >= 0 ? meters.slot[lf.slotIndex] ?? null : null;
@@ -2810,9 +3207,10 @@ export function drawRoutineFrame(
   // a full blackout keeps only the countdown and footer.
   const quiet = !!soloDeck || hideWaves;
   if (look.showFxPanel && !quiet) drawFxPanel(ctx, scene, t, L, look);
-  const card = look.titleCards && !quiet ? activeTitleCard(scene, t) : null;
+  const card = look.titleCards && !quiet && look.deckView !== 'none' ? activeTitleCard(scene, t) : null;
+  if (!quiet) drawHudModule(ctx, scene, t, look, meters.slot, hud);
   if (look.showTicker && !quiet) drawTicker(ctx, scene, t, L, look, card ? 1 : 4);
-  if (card) drawTitleCard(ctx, scene, card, isLandscape() ? L.footer.y - 112 : look.showTicker ? L.ticker.y + 4 : L.fx.y - 110, look);
+  if (card) drawTitleCard(ctx, scene, card, isLandscape() ? L.footer.y - 18 : look.showTicker ? L.ticker.y + 100 : L.fx.y - 16, look, t);
   if (look.showFooter) drawFooter(ctx, scene, t, L, look);
   if (extras.impact) drawImpact(ctx, extras.impact, look);
   if (ov?.kind === 'vfx' && ov.vfx) {

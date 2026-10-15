@@ -9,6 +9,7 @@
  */
 import { api, API_BASE, type RoutineDetailWire } from '../api/client';
 import type { HotCue, Track } from '../types';
+import { formatKeyDisplay } from '../utils/keyUtils';
 import type { Transition } from '../editor/mixModel';
 import { decodeWaveformBlob, toThreeBands } from '../waveform/blob';
 import { getSlot } from '../waveform/styleSlots';
@@ -165,6 +166,9 @@ export async function loadClip(spec: ClipSpec): Promise<LoadedClip> {
       title: t.title ?? t.filename,
       artist: t.artist ?? '',
       bpm: t.bpm ?? null,
+      key: t.key == null ? null : formatKeyDisplay(t.key),
+      energy: t.energy ?? null,
+      tags: (t.tags ?? []).filter((g) => g.category?.name === 'Genre' || g.category?.name === 'Vibe').map((g) => g.name),
       durationSec: t.duration_secs ?? wave?.duration ?? 0,
       wave,
       beatTimes,

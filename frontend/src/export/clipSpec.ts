@@ -143,7 +143,8 @@ export interface ClipLook {
   fontFace: FontFace;
   /** Knob/slider colours: classic band colours, the deck's, or a palette. */
   controlPalette: ControlPalette;
-  controlStyle: 'knobs' | 'sliders';
+  /** minimal: thin white arcs and hairline meters (no colour, no glow). */
+  controlStyle: 'knobs' | 'sliders' | 'minimal';
   /** Level meters as a smooth bar or LED segments. */
   levelStyle: 'bar' | 'segments';
   /** Build-up evolution 0..1: over the 16 bars before each drop the frame
@@ -152,7 +153,22 @@ export interface ClipLook {
   /** Top HUD bar (bar/phrase readout, beat pips, master meter). Off: the
    * beat lives in the controls' pulse instead. */
   showHeader: boolean;
+  /** Corner DJ readout (headerless): phrase ring, mix balance, data line,
+   * or set position. */
+  hudModule: HudModule;
+  /** Lower thirds (title cards, visualizer-only view): aesthetic. */
+  lowerThird: LowerThirdStyle;
+  /** Set position: the whole set's track ids in play order (empty = off);
+   * lower thirds and the SET module number tracks from it. */
+  setTrackIds: number[];
+  /** Footer clock for a part of a longer mix: seconds before this clip's
+   * start and the whole mix's length (0 = this clip alone). */
+  clockOffsetSec: number;
+  clockTotalSec: number;
 }
+
+export type HudModule = 'none' | 'phrase' | 'mix' | 'data' | 'set';
+export type LowerThirdStyle = 'classic' | 'techy' | 'metal' | 'bright';
 
 export interface ClipSpec {
   source: ClipSource;
@@ -214,6 +230,11 @@ export const DEFAULT_LOOK: ClipLook = {
   showTitles: true,
   showPlayhead: true,
   showHeader: false,
+  hudModule: 'none',
+  lowerThird: 'classic',
+  setTrackIds: [],
+  clockOffsetSec: 0,
+  clockTotalSec: 0,
 };
 
 const HANDLE_KEY = 'manadj-clip-handle';

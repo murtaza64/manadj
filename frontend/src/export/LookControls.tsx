@@ -151,10 +151,12 @@ export function LookControls({ look, onChange, overrides, onClear, onCaption, ch
               </div>
             </div>
           </>)}
-          {card('Type & controls', ['fontFace', 'controlStyle', 'levelStyle', 'controlPalette'], <>
+          {card('Type & controls', ['fontFace', 'controlStyle', 'levelStyle', 'controlPalette', 'hudModule', 'lowerThird'], <>
             {seg('fontFace', 'Font', FONTS.map((f) => ({ id: f.id, label: <span style={{ fontFamily: f.family }}>{f.label}</span> })))}
-            {seg('controlStyle', 'Controls', opt(['knobs', 'sliders'] as const))}
+            {seg('controlStyle', 'Controls', opt(['knobs', 'sliders', 'minimal'] as const))}
             {seg('levelStyle', 'Meters', [{ id: 'bar', label: 'Bar' }, { id: 'segments', label: 'LED' }])}
+            {seg('hudModule', 'DJ readout', opt(['none', 'phrase', 'mix', 'data', 'set'] as const))}
+            {seg('lowerThird', 'Lower third', opt(['classic', 'techy', 'metal', 'bright'] as const))}
             <div className={`lk-row lk-stack${ovr('controlPalette')}`}>
               <span className="lk-label">Colours{ovrX('controlPalette')}</span>
               <div className="lk-swatches">
