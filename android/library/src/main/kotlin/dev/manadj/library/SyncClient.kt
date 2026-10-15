@@ -97,6 +97,17 @@ class SyncClient(
         return outcomes.keys().asSequence().associateWith { outcomes.getString(it) }
     }
 
+    /**
+     * Push a phone-recorded Session (#395): idempotent upsert — the desktop stores chunks whose seq is new and
+     * ends the Session when [endedAt] is set. Returns the seqs the desktop now holds and whether a silent
+     * Session was dropped on end.
+     */
+    fun pushSession(uuid: String, body: JSONObject): Pair<Set<Int>, Boolean> {
+        val r = postJson("/sessions/${java.net.URLEncoder.encode(uuid, "UTF-8")}", body)
+        val seqs = r.getJSONArray("stored_seqs")
+        return (0 until seqs.length()).map { seqs.getInt(it) }.toSet() to r.optBoolean("deleted")
+    }
+
     /** Report what a pull changed on this phone (desktop logs it as to_phone). */
     fun reportReceived(changes: List<JSONObject>) {
         postJson("/received", JSONObject().put("changes", JSONArray(changes)))

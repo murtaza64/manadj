@@ -28,6 +28,9 @@ import dev.manadj.audio.QuantizeMode
 
 /** Device orientation picks the layout: portrait one-screen, landscape dense. No manual view switch. */
 @Composable fun PerformanceApp(model: PlayerModel, ux: UiModel, pick: (DeckId) -> Unit) {
+    // Session recording (#395, session lane): always on while the app runs; re-points after recreation.
+    val appContext = androidx.compose.ui.platform.LocalContext.current
+    LaunchedEffect(model) { dev.manadj.app.session.SessionRecording.attach(model, appContext) }
     for (id in model.visibleDecks) {
         val ui = model.decks.getValue(id)
         LaunchedEffect(ui.source?.id) { ux.ensureWave(ui.source, model.visibleDecks.mapNotNull { model.decks.getValue(it).source?.id }.toSet()); ux.extras.getValue(id).history.clear(); if (ui.source != null) ux.loadedAt[id] = System.nanoTime() else ux.loadedAt.remove(id) }

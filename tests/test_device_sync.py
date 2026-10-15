@@ -274,3 +274,44 @@ def test_snapshot_bpm_centi_is_the_gate_column(client, make_track):
     track.bpm = 17412
     rows = {t["id"]: t for t in client.get("/api/device-sync/snapshot").json()["tracks"]}
     assert rows[track.id]["bpm_centi"] == 17412
+
+
+def _audible_chunk():
+    return [{"t": 1.0, "kind": "load", "channel": "A", "trackId": 7, "bpm": 128},
+            {"t": 2.0, "kind": "transport", "channel": "A", "action": "play", "playhead": 0}]
+
+
+def test_phone_session_push_is_idempotent_and_resumable(client, db):
+    """#395: phone Sessions land as ordinary Sessions with an origin; re-pushes add only unseen chunks."""
+    headers = {"X-Manadj-Device-Id": "dev-1", "X-Manadj-Device-Name": "Pixel"}
+    body = {"started_at": "2026-10-15T07:00:00", "chunks": [{"seq": 0, "events": _audible_chunk()}]}
+    r = client.post("/api/device-sync/sessions/p-1", json=body, headers=headers)
+    assert r.status_code == 200 and r.json()["stored_seqs"] == [0]
+    # Retry of the same chunk + a new one + the end: only seq 1 is new.
+    tick = [{"t": 3.0, "kind": "tick", "playheads": {"A": 1.0}}]
+    body = {"started_at": "2026-10-15T07:00:00", "ended_at": "2026-10-15T07:30:00",
+            "chunks": [{"seq": 0, "events": _audible_chunk()}, {"seq": 1, "events": tick}]}
+    assert client.post("/api/device-sync/sessions/p-1", json=body, headers=headers).json()["stored_seqs"] == [0, 1]
+    rows = client.get("/api/device-sync/sessions").json()
+    assert rows[0]["uuid"] == "p-1" and rows[0]["origin"] == "Pixel"
+    assert rows[0]["ended_at"].startswith("2026-10-15T07:30")
+    assert client.get("/api/device-sync/sessions/p-1").json()["events"] == _audible_chunk() + tick
+
+
+def test_phone_session_push_never_touches_a_desktop_session(client, db):
+    from backend.models import Session as SessionRow
+
+    db.add(SessionRow(uuid="d-1", started_at=datetime(2026, 10, 1)))
+    db.commit()
+    body = {"started_at": "2026-10-15T07:00:00", "chunks": [{"seq": 0, "events": _audible_chunk()}]}
+    assert client.post("/api/device-sync/sessions/d-1", json=body).status_code == 409
+
+
+def test_silent_phone_session_is_dropped_on_end(client, db):
+    from backend.models import Session as SessionRow
+
+    silent = [{"t": 1.0, "kind": "load", "channel": "A", "trackId": 7, "bpm": 128}]
+    body = {"started_at": "2026-10-15T07:00:00", "ended_at": "2026-10-15T07:01:00", "chunks": [{"seq": 0, "events": silent}]}
+    r = client.post("/api/device-sync/sessions/p-2", json=body)
+    assert r.status_code == 200 and r.json()["deleted"] is True
+    assert db.query(SessionRow).filter(SessionRow.uuid == "p-2").first() is None

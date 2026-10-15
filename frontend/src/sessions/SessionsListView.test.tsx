@@ -129,3 +129,16 @@ it('shows five per day, expands independently, previews tracks and keeps expansi
   expect(host.querySelector('[role="alert"]')?.textContent).toContain('Delete refused');
   act(() => (host.querySelector('.session-show-more') as HTMLButtonElement).click());
 });
+
+it('marks phone-recorded Sessions with their device (#395)', async () => {
+  const rows = [{ ...row('phone', 30), origin: 'Pixel 7' }, row('desk', 20)];
+  client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
+  client.setQueryData(['sessions'], rows);
+  host = document.createElement('div');
+  document.body.append(host);
+  root = createRoot(host);
+  await act(async () => root!.render(<QueryClientProvider client={client}><SessionsListView /></QueryClientProvider>));
+  const origin = (uuid: string) => host.querySelector(`[data-session-uuid="${uuid}"] .session-origin`)?.textContent ?? null;
+  expect(origin('phone')).toBe('Phone · Pixel 7');
+  expect(origin('desk')).toBeNull();
+});
