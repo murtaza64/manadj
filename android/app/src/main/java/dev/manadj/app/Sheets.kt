@@ -259,57 +259,34 @@ fun visibleOther(id: DeckId) = if (id == DeckId.A) DeckId.B else DeckId.A
             }
             Key("FORGET", Modifier.weight(1.4f).fillMaxHeight(), Ink.warning, model.heardLatencyCalibrated, textSize = 10, style = KeyStyle.PILL) { model.setHeardLatency(null) }
         }
+        // tapCalibrating isn't snapshot state (engine-owned PlayerModel): poll it while this panel is shown.
+        val tapping by produceState(model.tapCalibrating) { while (true) { value = model.tapCalibrating; kotlinx.coroutines.delay(50) } }
+        val busy = model.calibrating || tapping || model.reactionPrePass || model.earAligning
         Row(Modifier.fillMaxWidth().height(40.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            Key(if (model.calibrating) "LISTENING…" else "CALIBRATE", Modifier.weight(1f).fillMaxHeight(), Ink.play, !model.calibrating && !headphones, engaged = model.calibrating, description = "Calibrate latency with the microphone", textSize = 11, style = KeyStyle.PILL) {
+            Key(if (model.calibrating) "LISTENING…" else "MIC", Modifier.weight(1f).fillMaxHeight(), Ink.play, !busy && !headphones, engaged = model.calibrating, description = "Calibrate latency with the microphone", textSize = 11, style = KeyStyle.PILL) {
                 if (context.checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) model.calibrateLatency()
                 else mic.launch(android.Manifest.permission.RECORD_AUDIO)
             }
-            Key(if (model.tapCalibrating) "TAPPING…" else "TAP ALONG", Modifier.weight(1f).fillMaxHeight(), Ink.accent, !model.calibrating && !model.tapCalibrating, engaged = model.tapCalibrating, description = "Tap along to calibration chirps", textSize = 11, style = KeyStyle.PILL) { model.startTapCalibration() }
+            Key("TAP ALONG", Modifier.weight(1f).fillMaxHeight(), Ink.accent, !busy, engaged = tapping || model.reactionPrePass, description = "Tap along to calibration clicks", textSize = 11, style = KeyStyle.PILL) {
+                if (model.heardLatencyCalibrated) model.startTapCalibration() else model.startReactionPrePass()
+            }
+            Key("BY EAR", Modifier.weight(1f).fillMaxHeight(), Ink.accent, !busy, engaged = model.earAligning, description = "Align by ear", textSize = 11, style = KeyStyle.PILL) { model.startEarAlign() }
         }
-        if (model.tapCalibrating) TapPad(model)
+        when {
+            model.reactionPrePass || tapping -> TapAlong(model)
+            model.earAligning -> EarAlign(model)
+        }
         val last = model.lastCalibration
         // Recovery: reopen the output stream (a calibration on a Bluetooth route could leave it silent).
-        if (last != null) Key("RESTART AUDIO OUTPUT", Modifier.fillMaxWidth().height(36.dp), Ink.warning, !model.calibrating, description = "Restart audio output", textSize = 10, style = KeyStyle.PILL) {
+        if (last != null && !busy) Key("RESTART AUDIO OUTPUT", Modifier.fillMaxWidth().height(36.dp), Ink.warning, description = "Restart audio output", textSize = 10, style = KeyStyle.PILL) {
             model.restartOutput()
         }
-        Text(when {
-            model.calibrating -> "Volume up, quiet room: 6 chirps at full level (~7 s)."
-            headphones -> "Headphones: the phone mic can't hear them — TAP along instead (wrong? set SPEAKER above)."
-            model.tapCalibrating -> "A chirp plays every 1.5 s — tap exactly when you hear it."
-            last?.seconds != null -> "Measured %.0f ms (spread %.1f ms, %d samples).".format(last.seconds!! * 1000, last.spreadMillis, last.samples.size)
-            last != null -> (last.reason ?: "no clear chirps").let { r -> "Calibration failed: $r" + if (!headphones && !r.contains("tap", ignoreCase = true)) " — try TAP ALONG." else "" }
-            else -> "CALIBRATE listens with the mic (speakers). TAP ALONG works on any output."
+        if (!busy || model.calibrating) Text(when {
+            model.calibrating -> "Volume up, quiet room: 8 chirps at full level."
+            headphones -> "Headphones: the phone mic can't hear them — TAP ALONG or BY EAR (wrong? set SPEAKER above)."
+            last?.seconds != null -> "Saved %.0f ms%s.".format(last.seconds!! * 1000, if (last.spreadMillis > 0) " (spread %.1f ms)".format(last.spreadMillis) else "")
+            last != null -> (last.reason ?: "no clear chirps").let { r -> "Calibration failed: $r" + if (!r.contains("tap", ignoreCase = true)) " — try TAP ALONG." else "" }
+            else -> "MIC listens to the speaker. TAP ALONG and BY EAR work on any output."
         }, color = if (last != null && last.seconds == null && !model.calibrating) Ink.warning else Ink.muted, size = 11, lines = 2)
-    }
-}
-
-/**
- * Tap-along calibration (#117, engine API): a distinct chirp every 1.5 s (not the track); tap the big pad on every
- * chirp you hear (pointer-down time), DONE after 8+ → the engine computes L (ms) and saves it for the route.
- */
-@Composable private fun TapPad(model: PlayerModel) {
-    var count by remember { mutableIntStateOf(0) }
-    LaunchedEffect(model.tapCalibrating) { if (model.tapCalibrating) count = 0 }
-    val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Box(Modifier.fillMaxWidth().height(110.dp).clip(RoundedCornerShape(10.dp)).background(Ink.accent.copy(alpha = .18f)).border(2.dp, Ink.accent, RoundedCornerShape(10.dp))
-            .semantics { contentDescription = "Tap on each chirp" }
-            .pointerInput(Unit) {
-                awaitEachGesture {
-                    awaitFirstDown(requireUnconsumed = false, pass = androidx.compose.ui.input.pointer.PointerEventPass.Initial)
-                    model.tap(System.nanoTime()); count++
-                    haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
-                }
-            }, contentAlignment = Alignment.Center) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("TAP", color = Ink.accent, size = 28, bold = true)
-                Text("on every chirp · $count${if (count < 8) " / 8" else ""}", color = Ink.muted, size = 11)
-            }
-        }
-        Row(Modifier.fillMaxWidth().height(36.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            // Under 8 taps the engine refuses the result (nothing saved), so finishing early is a cancel.
-            if (count < 8) Key("CANCEL", Modifier.weight(1f).fillMaxHeight(), Ink.warning, description = "Cancel tap calibration", textSize = 11, style = KeyStyle.PILL) { model.finishTapCalibration() }
-            Key("DONE", Modifier.weight(1f).fillMaxHeight(), Ink.play, count >= 8, description = "Finish tap calibration", textSize = 11, style = KeyStyle.PILL) { model.finishTapCalibration() }
-        }
     }
 }
