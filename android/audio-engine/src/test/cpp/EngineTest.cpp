@@ -1545,6 +1545,37 @@ int main() {
         CHECK(launches == 600);
     }
 
+    { // Heard on, both decks paused: 20 CUE stabs launch plain at X (no lag shift, no wait); the playhead moves
+      // continuously while held and the only discontinuity is the return to X on release.
+        auto owned = std::make_unique<Engine>(48000);
+        Engine& e = *owned;
+        std::vector<float> pcm(48000 * 20 * 2, .2f);
+        for (int d = 0; d < 2; ++d) { loadPcm(e, d, d + 1, std::vector<float>(pcm.begin(), pcm.begin() + 48000 * 2)); fillTrack(e, d, d + 1, pcm); grid120(e, d); }
+        e.submit(Op::Quantize, 0, 2);
+        e.submit(Op::HeardLatency, 0, .35);
+        const double X = 4.0;
+        e.submit(Op::Seek, 0, X);
+        e.submit(Op::CueSetAt, 0, X);
+        tick(e, 16);
+        for (int k = 0; k < 20; ++k) {
+            const auto transport = e.deck(0).transport.load();
+            e.submit(Op::CueDown, 0);
+            const int held = 480 + k * 960;
+            double last = e.deck(0).position.load();
+            CHECK(last == X);
+            for (int done = 0; done < held; done += 96) {
+                tick(e, 96);
+                const double now = e.deck(0).position.load();
+                CHECK(std::abs(now - last - 96 / 48000.) < 1e-9);   // continuous from X, no jump
+                last = now;
+            }
+            CHECK(e.deck(0).transport.load() == transport && e.deck(0).launchAt.load() == 0);
+            e.submit(Op::CueUp, 0);
+            tick(e, 96);
+            CHECK(e.deck(0).position.load() == X && e.deck(0).transport.load() == transport + 1);  // one return to X
+        }
+    }
+
     { // Beat FX ECHO on A: beat-synced repeats at beats x beatSeconds, feedback .5, tails ring after OFF.
         auto owned = std::make_unique<Engine>(48000);
         Engine& e = *owned;

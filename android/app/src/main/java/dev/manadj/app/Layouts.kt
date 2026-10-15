@@ -125,26 +125,34 @@ import dev.manadj.audio.QuantizeMode
     }
 }
 
-@Composable private fun SettingsKey(ux: UiModel, modifier: Modifier = Modifier.size(40.dp)) = Key("", modifier, Ink.muted, description = "Settings", icon = Glyph.Gear, style = KeyStyle.BARE) { ux.settings = true }
 
-/** Portrait centre: app-level toggles in one floating group (#58) — QUANTIZE, crossfader enable, SETTINGS. */
-@Composable private fun GlobalControls(model: PlayerModel, ux: UiModel, modifier: Modifier) {
+/**
+ * Portrait centre (#153): a 2-column grid of equal keys under the FX card — QUANT·H / XF, SESSIONS / SETTINGS —
+ * top-aligned with the same gaps as the FX card; the space below is left free for future keys.
+ */
+@Composable private fun GlobalControls(model: PlayerModel, ux: UiModel, modifier: Modifier, gap: Dp) {
     val mode by remember { derivedStateOf { model.output?.quantizeMode ?: ux.quantizeMode } }
     val q = mode.quantized
-    // One row of compact keys; the group centres in whatever height the mixer leaves.
-    Box(modifier, contentAlignment = Alignment.Center) {
-        Row(Modifier.fillMaxWidth().height(40.dp).clip(androidx.compose.foundation.shape.RoundedCornerShape(10.dp)).border(1.dp, Ink.surface, androidx.compose.foundation.shape.RoundedCornerShape(10.dp)).padding(3.dp), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-            Key(if (mode.heard) "QUANT·H" else "QUANT", Modifier.weight(1.2f).fillMaxHeight(), Ink.accent, model.supports("quantize"), q, if (q) "Quantize on" else "Quantize off", style = KeyStyle.PILL, textSize = 10, longPress = { ux.setQuantize(model, heard = !ux.quantizeHeard) }) { ux.setQuantize(model, on = !q) }
-            Key("XF", Modifier.weight(.8f).fillMaxHeight(), Ink.accent, engaged = ux.crossfaderEnabled, description = "Crossfader enable", style = KeyStyle.PILL, textSize = 10) {
+    val h = Modifier.fillMaxWidth().height(40.dp)
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(gap)) {
+        Row(h, horizontalArrangement = Arrangement.spacedBy(gap)) {
+            Key(if (mode.heard) "QUANT·H" else "QUANT", Modifier.weight(1f).fillMaxHeight(), Ink.accent, model.supports("quantize"), q, if (q) "Quantize on" else "Quantize off", style = KeyStyle.PILL, textSize = 11, longPress = { ux.setQuantize(model, heard = !ux.quantizeHeard) }) { ux.setQuantize(model, on = !q) }
+            Key("XF", Modifier.weight(1f).fillMaxHeight(), Ink.accent, engaged = ux.crossfaderEnabled, description = "Crossfader enable", style = KeyStyle.PILL, textSize = 11) {
                 ux.crossfaderEnabled = !ux.crossfaderEnabled
                 if (!ux.crossfaderEnabled) model.updateCrossfade(.5)
             }
-            Key("", Modifier.weight(.7f).fillMaxHeight(), Ink.muted, description = "Settings", icon = Glyph.Gear, style = KeyStyle.PILL, textSize = 12) { ux.settings = true }
+        }
+        Row(h, horizontalArrangement = Arrangement.spacedBy(gap)) {
+            SessionsKey(ux, Modifier.weight(1f).fillMaxHeight())
+            Key("", Modifier.weight(1f).fillMaxHeight(), Ink.muted, description = "Settings", icon = Glyph.Gear, style = KeyStyle.PILL, textSize = 11) { ux.settings = true }
         }
     }
 }
 
-/** Quantize quick toggle + indicator (Settings has the same switch); long-press flips GRID / HEARD ("Q·H"). */
+/** Session replay (#153; moved out of Settings). */
+@Composable private fun SessionsKey(ux: UiModel, modifier: Modifier, textSize: Int = 11) =
+    Key("SESSIONS", modifier, Ink.accent, description = "Sessions replay", style = KeyStyle.PILL, textSize = textSize) { ux.sessions = true }
+
 @Composable private fun QuantizeKey(model: PlayerModel, ux: UiModel, modifier: Modifier) {
     val mode by remember { derivedStateOf { model.output?.quantizeMode ?: ux.quantizeMode } }
     val on = mode.quantized
@@ -155,7 +163,7 @@ import dev.manadj.audio.QuantizeMode
  * The one BROWSE button: swaps controls for the browser and back. `model.browser` = the deck whose controls
  * the browser covers — in landscape the outgoing deck (coveredDeck, decided once on open); portrait covers all.
  */
-@Composable fun BrowseKey(model: PlayerModel, ux: UiModel, modifier: Modifier) {
+@Composable fun BrowseKey(model: PlayerModel, ux: UiModel, modifier: Modifier, textSize: Int = 12) {
     fun toggle() { model.browser = if (model.browser != null) null else coveredDeck(mixOf(model, ux, DeckId.A), mixOf(model, ux, DeckId.B)) }
     // Toggles on pointer-down (the slide starts with the press); the click only covers accessibility actions.
     var downToggled by remember { mutableStateOf(false) }
@@ -165,7 +173,7 @@ import dev.manadj.audio.QuantizeMode
             do { val e = awaitPointerEvent(androidx.compose.ui.input.pointer.PointerEventPass.Final) } while (e.changes.any { it.pressed })
             downToggled = false
         }
-    }, Ink.warning, engaged = model.browser != null, textSize = 12, style = KeyStyle.PILL) { if (downToggled) downToggled = false else toggle() }
+    }, Ink.warning, engaged = model.browser != null, textSize = textSize, style = KeyStyle.PILL) { if (downToggled) downToggled = false else toggle() }
 }
 
 fun mixOf(model: PlayerModel, ux: UiModel, id: DeckId): DeckMix {
@@ -205,7 +213,7 @@ fun mixOf(model: PlayerModel, ux: UiModel, id: DeckId): DeckMix {
                 ChannelFader(a, model, Modifier.width(54.dp).fillMaxHeight())
                 Column(Modifier.weight(1f).fillMaxHeight().padding(horizontal = 4.dp), verticalArrangement = Arrangement.spacedBy(gap)) {
                     FxSection(ux, model, Modifier.fillMaxWidth(), compact = true)
-                    GlobalControls(model, ux, Modifier.fillMaxWidth().weight(1f))
+                    GlobalControls(model, ux, Modifier.fillMaxWidth().weight(1f), gap)
                     Crossfader(model, ux, Modifier.fillMaxWidth().height(48.dp))
                 }
                 ChannelFader(b, model, Modifier.width(54.dp).fillMaxHeight())
@@ -317,11 +325,19 @@ private enum class PaneKind { LEFT_SLOT, RIGHT_SLOT, BOTH_LEFT, BOTH_RIGHT }
                         ChannelFader(b, model, Modifier.width(48.dp).fillMaxHeight())
                         KnobColumn(b, ux, model, Modifier.width(54.dp).fillMaxHeight().padding(top = 4.dp), 34.dp)
                     }
-                    // Symmetric flanks keep the crossfader centred; QUANT/settings left, BROWSE right (#94 swap).
-                    Row(Modifier.fillMaxWidth().height(44.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Row(Modifier.width(76.dp), verticalAlignment = Alignment.CenterVertically) { QuantizeKey(model, ux, Modifier.weight(1f).height(32.dp)); SettingsKey(ux, Modifier.size(38.dp)) }
-                        Crossfader(model, ux, Modifier.weight(1f).fillMaxHeight())
-                        BrowseKey(model, ux, Modifier.width(76.dp).height(40.dp))
+                    // Symmetric flanks keep the crossfader centred at full width (#153): two stacked equal keys each,
+                    // Q·H over settings left, SESSIONS over BROWSE right (#94 swap).
+                    Row(Modifier.fillMaxWidth().height(80.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        val key = Modifier.width(76.dp).height(36.dp)
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            QuantizeKey(model, ux, key)
+                            Key("", key, Ink.muted, description = "Settings", icon = Glyph.Gear, style = KeyStyle.PILL) { ux.settings = true }
+                        }
+                        Crossfader(model, ux, Modifier.weight(1f).height(44.dp))
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            SessionsKey(ux, key, textSize = 10)
+                            BrowseKey(model, ux, key)
+                        }
                     }
                     FxSection(ux, model, Modifier.fillMaxWidth().height(54.dp).padding(bottom = 4.dp), horizontal = true)
                 }

@@ -11,6 +11,7 @@ import dev.manadj.audio.*
 import kotlinx.coroutines.*
 import java.util.concurrent.atomic.AtomicLong
 import java.util.UUID
+import java.io.File
 
 /** UI state is a projection of engine snapshots; no method advances playback time. */
 class DeckUi(val id: DeckId) {
@@ -18,6 +19,8 @@ class DeckUi(val id: DeckId) {
     var snapshot by mutableStateOf<DeckSnapshot?>(null)
     var importing by mutableStateOf(false)
     var error by mutableStateOf<String?>(null)
+    /** Restored deck whose source is gone (library file deleted / document permission lost): show this title as missing. */
+    var missingTitle by mutableStateOf<String?>(null)
     var fader by mutableDoubleStateOf(1.0)
     var trim by mutableDoubleStateOf(.5)
     var pitch by mutableDoubleStateOf(0.0)
@@ -154,6 +157,9 @@ class PlayerModel(application: Application) : AndroidViewModel(application) {
                         for (band in 0..2) applied("eq$band") { ui.eq[band] = snapshot.eq[band] }
                         applied("filter") { ui.filter = snapshot.filter }
                     }
+                    restoreSession(state)
+                    applyRestores(state)
+                    if (tick % 30 == 15) saveSession(state)
                     // Latch on change so OK dismisses until something new happens.
                     if (state.outputError != lastOutputError) { lastOutputError = state.outputError; if (state.outputError != 0 && !state.outputOpen) failure = "Audio output error ${state.outputError}: reconnecting" }
                     if (state.outputOpen != outputWasOpen) { outputWasOpen = state.outputOpen; failure = if (state.outputOpen) null else "Audio output disconnected: reconnecting" }
@@ -217,7 +223,7 @@ class PlayerModel(application: Application) : AndroidViewModel(application) {
     fun pickerResult(uri: Uri?) { val target = pickerTarget; pickerTarget = null; if (target != null && uri != null) requestImport(target, uri) }
 
     private fun importSource(deck: DeckId, uri: Uri) = loadInto(
-        deck, metadata = { catalog.readMetadata(uri) },
+        deck, metadata = { catalog.readMetadata(uri).also { loadSpecs[deck] = SavedSource(it.id, it.title, it.artist, it.durationSeconds, uri = uri.toString(), bpm = it.bpm) } },
         open = { getApplication<Application>().contentResolver.openFileDescriptor(uri, "r") },
         // Grid until a library beatgrid exists: tagged BPM anchored at 0 s (or gridless).
         grid = { it.bpm?.let { bpm -> bpm to 0.0 } }, remember = true,
@@ -235,7 +241,11 @@ class PlayerModel(application: Application) : AndroidViewModel(application) {
         durationSeconds: Double?, bpm: Double? = null, firstBeatSeconds: Double? = null,
         mainCueSeconds: Double? = null, hotCues: Map<Int, Double> = emptyMap(), stems: List<java.io.File>? = null,
     ) = loadInto(
-        deck, metadata = { LocalSource(sourceId, Uri.fromFile(file), title, artist, durationSeconds, persistentGrant = false, bpm = bpm) },
+        deck, metadata = {
+            loadSpecs[deck] = SavedSource(sourceId, title, artist, durationSeconds, file = file.path, bpm = bpm, firstBeatSeconds = firstBeatSeconds,
+                mainCueSeconds = mainCueSeconds, hotCues = hotCues, stems = stems?.map { it.path })
+            LocalSource(sourceId, Uri.fromFile(file), title, artist, durationSeconds, persistentGrant = false, bpm = bpm)
+        },
         open = { android.os.ParcelFileDescriptor.open(file, android.os.ParcelFileDescriptor.MODE_READ_ONLY) },
         grid = { bpm?.takeIf { it > 0 }?.let { it to (firstBeatSeconds ?: 0.0) } }, remember = false,
         cues = { d -> mainCueSeconds?.let { submit(AudioCommand.SetCueAt(d, it)) }; hotCues.forEach { (slot, at) -> submit(AudioCommand.SetHotCueAt(d, slot, at)) } },
@@ -253,7 +263,8 @@ class PlayerModel(application: Application) : AndroidViewModel(application) {
         releases.keys.filter { it.startsWith("${deck.name}:") }.forEach { id -> releases.remove(id)?.invoke() }
         val ui = decks.getValue(deck)
         val generation = ui.generation.incrementAndGet()
-        ui.importing = true; ui.error = null
+        ui.importing = true; ui.error = null; ui.missingTitle = null
+        if (restoreLoads.remove(deck) == null) restoring.remove(deck) // A user load replaces a pending restore.
         viewModelScope.launch {
             try {
                 val source = withContext(Dispatchers.IO) { metadata() }
@@ -362,9 +373,12 @@ class PlayerModel(application: Application) : AndroidViewModel(application) {
     var reactionPrePass by mutableStateOf(false)
         private set
     private var tapCalibrator: TapCalibrator? = null
+        set(value) { field = value; tapCalibrating = value != null }
+    /** Snapshot state (Compose sees every start/stop). */
+    var tapCalibrating by mutableStateOf(false)
+        private set
     private var tapStarted = 0L
     private val reactionTaps = mutableListOf<Long>()
-    val tapCalibrating get() = tapCalibrator != null
     /** Coarse L for the wrap: [coarseSource] says where it came from ("mic" / "reaction" / "Android"). */
     val coarseLatency: Double get() = (if (heardLatencyCalibrated) heardLatency else null) ?: reactionCoarse ?: output?.reportedLatencySeconds() ?: heardLatency
     val coarseSource: String get() = if (heardLatencyCalibrated) "calibrated" else if (reactionCoarse != null) "reaction" else "Android"
@@ -490,7 +504,89 @@ class PlayerModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    // ── Restore across restart / reinstall (human 2026-10-15) ─────────────────────────────────────────────
+    private val prefs = application.getSharedPreferences(DeckPersistence.PREFS, Context.MODE_PRIVATE)
+    /** How each deck's current source was loaded (what a restore re-runs). */
+    private val loadSpecs = java.util.concurrent.ConcurrentHashMap<DeckId, SavedSource>()
+    /** Decks being restored: the saved state applies once their reloaded source is ready. */
+    private val restoring = mutableMapOf<DeckId, SavedDeck>()
+    /** Marks the next loadInto on a deck as the restore's own load (so it doesn't cancel the restore). */
+    private val restoreLoads = mutableMapOf<DeckId, Unit>()
+    private var restoreChecked = false
+    private var lastSaved: String? = null
+
+    /** Once per process, on the first snapshot of an engine with every deck empty: reload the saved decks paused. */
+    private fun restoreSession(state: EngineSnapshot) {
+        if (restoreChecked || !state.outputOpen) return
+        restoreChecked = true
+        if (state.decks.values.any { it.loadState != LoadState.EMPTY }) return // The service kept its decks.
+        val saved = DeckPersistence.decode(prefs.getString(DeckPersistence.KEY, null)) ?: return
+        android.util.Log.i("manadj-restore", "restoring ${saved.decks.map { (id, d) -> "$id=${d.source.title}@%.2f".format(d.position) }}")
+        updateCrossfade(saved.crossfade); updateCueMix(saved.cueMix); updateBeatFx(saved.beatFx)
+        val app = getApplication<Application>()
+        val granted = app.contentResolver.persistedUriPermissions.filter { it.isReadPermission }.map { it.uri.toString() }.toSet()
+        for ((deck, d) in saved.decks) {
+            val s = d.source
+            val file = s.file?.let(::File)?.takeIf { it.isFile }
+            val stems = s.stems?.map(::File)?.takeIf { list -> list.all { it.isFile } }
+            when {
+                file != null -> { restoreLoads[deck] = Unit; restoring[deck] = d; load(deck, file, s.sourceId, s.title, s.artist, s.durationSeconds, s.bpm, s.firstBeatSeconds, s.mainCueSeconds, s.hotCues, stems) }
+                s.uri != null && s.uri in granted -> { restoreLoads[deck] = Unit; restoring[deck] = d; importSource(deck, Uri.parse(s.uri)) }
+                else -> decks.getValue(deck).missingTitle = listOf(s.artist, s.title).filter { it.isNotBlank() }.joinToString(" – ").ifBlank { s.sourceId }
+            }
+        }
+    }
+
+    /** Applies saved positions, cues, loop and strip once a restored deck's source is ready (never plays). */
+    private fun applyRestores(state: EngineSnapshot) {
+        for ((deck, d) in restoring.toMap()) {
+            val ui = decks.getValue(deck)
+            val snap = state.decks.getValue(deck)
+            if (ui.pendingLoadCommandId != null || snap.loadState != LoadState.READY || snap.sourceId != loadSpecs[deck]?.sourceId) {
+                if (snap.loadState == LoadState.ERROR) restoring.remove(deck)
+                continue
+            }
+            restoring.remove(deck)
+            android.util.Log.i("manadj-restore", "$deck ready: seek %.3f, loop %s, pitch %.2f".format(d.position, d.loopStart?.let { "$it..${d.loopEnd}" }, d.pitch))
+            d.cue?.let { submit(AudioCommand.SetCueAt(deck, it)) }
+            d.hotCues.forEachIndexed { slot, at -> submit(if (at != null) AudioCommand.SetHotCueAt(deck, slot, at) else AudioCommand.ClearHotCue(deck, slot)) }
+            submit(AudioCommand.Seek(deck, d.position))
+            if (d.loopStart != null && d.loopEnd != null) submit(AudioCommand.SetLoopRegion(deck, d.loopStart, d.loopEnd, d.position))
+            updatePitch(deck, d.pitch)
+            setKeyLock(deck, d.keyLock)
+            updateFader(deck, d.fader); updateTrim(deck, d.trim)
+            d.eq.forEachIndexed { band, v -> if (band < 3) updateEq(deck, band, v) }
+            updateFilter(deck, d.filter)
+            if (d.pfl) submit(AudioCommand.SetPfl(deck, true))
+            d.stemGains.forEachIndexed { stem, g -> if (g != 1.0) setStemGain(deck, stem, g) }
+        }
+    }
+
+    /** Debounced (≈1 s) snapshot of every ready deck; also on teardown. Decks still restoring keep their saved state. */
+    private fun saveSession(state: EngineSnapshot) {
+        if (!restoreChecked) return
+        val previous = DeckPersistence.decode(prefs.getString(DeckPersistence.KEY, null))
+        val saved = DeckId.entries.mapNotNull { deck ->
+            restoring[deck]?.let { return@mapNotNull deck to it }
+            val snap = state.decks.getValue(deck)
+            val spec = loadSpecs[deck]
+            if (spec == null || snap.sourceId != spec.sourceId || snap.loadState != LoadState.READY) {
+                // Missing restored sources stay saved so a later fix (re-sync, re-grant) can bring them back.
+                if (decks.getValue(deck).missingTitle != null) previous?.decks?.get(deck)?.let { return@mapNotNull deck to it }
+                return@mapNotNull null
+            }
+            deck to SavedDeck(
+                source = spec, position = snap.sourceSeconds, cue = snap.cueSeconds, hotCues = snap.hotCues,
+                loopStart = snap.loop?.start, loopEnd = snap.loop?.end, pitch = snap.pitchPercent, keyLock = snap.keyLock,
+                fader = snap.fader, trim = snap.trim, eq = snap.eq, filter = snap.filter, pfl = snap.pfl, stemGains = snap.stemGains,
+            )
+        }.toMap()
+        val json = DeckPersistence.encode(SavedSession(saved, (state.crossfade + 1) / 2, state.cueMix, state.beatFx))
+        if (json != lastSaved) { prefs.edit().putString(DeckPersistence.KEY, json).apply(); lastSaved = json }
+    }
+
     override fun onCleared() {
+        output?.let(::saveSession)
         outputDevices.close()
         cancelGestures()
         if (bound) getApplication<Application>().unbindService(connection)

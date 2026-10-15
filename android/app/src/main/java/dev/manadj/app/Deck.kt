@@ -53,7 +53,9 @@ val ControlRow = 44.dp
     Row(modifier, verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.width(4.dp).fillMaxHeight().padding(vertical = 4.dp).background(color.copy(alpha = .3f + .7f * selected)))
         Column(Modifier.weight(1f).fillMaxHeight().combinedClickable(onLongClickLabel = "Edit track", onLongClick = { dev.manadj.app.library.LibraryHolder.trackOn(model, ui.id)?.let { dev.manadj.app.edit.TrackEditNav.open(it, ui.id) } }) { model.chooseDeck(ui.id) }.semantics { contentDescription = "Select ${ui.id}" }.padding(horizontal = 6.dp), verticalArrangement = Arrangement.Center) {
-            Text("${ui.id}  ${ui.source?.title ?: "LOAD A TRACK"}", color = color, size = if (compact) 12 else 14, bold = true)
+            // A restored source that's gone (#157): say so instead of an empty deck.
+            val missing = ui.missingTitle.takeIf { ui.source == null }
+            Text("${ui.id}  ${ui.source?.title ?: missing?.let { "MISSING: $it" } ?: "LOAD A TRACK"}", color = if (missing != null) Ink.warning else color, size = if (compact) 12 else 14, bold = true)
             Row { Text(ui.source?.artist?.ifBlank { null } ?: "local file", Modifier.weight(1f), Ink.muted, 11); val playing = ui.snapshot?.playing == true; Text(status ?: "${if (playing) "▶ " else ""}$time $remain", color = if (status != null && (ui.error != null || ui.snapshot?.loadState == LoadState.ERROR)) Ink.warning else if (playing) Ink.play else Ink.text, size = 11, bold = true) }
         }
     }
