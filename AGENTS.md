@@ -11,9 +11,9 @@ this project does NOT prefer pastel colors as per my global theme, instead prefe
 manadj ships on desktop and Android. Every feature built for one platform needs
 an explicit port decision for the other. Record it in the PRD/issue as a
 `Port:` line — `now` (same change/issue), `later (#N)` (file the follow-up
-issue), or `never (<reason>)`. No decision recorded → ask Murtaza before
-parking. Applies to features developed outside the tracker too: ask, and
-file the follow-up if porting is deferred.
+issue), or `never (<reason>)`. Make the call yourself; ask Murtaza only if
+it is genuinely unclear. Applies to features developed outside the tracker
+too: file the follow-up if porting is deferred.
 
 ## Agent skills
 
