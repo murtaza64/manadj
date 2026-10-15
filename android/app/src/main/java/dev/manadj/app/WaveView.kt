@@ -3,6 +3,7 @@ package dev.manadj.app
 import android.graphics.Bitmap
 import android.graphics.Paint
 import android.graphics.Typeface
+import android.os.Build
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -46,19 +47,32 @@ class WaveStyle(val colors: Array<FloatArray>, val coreWhite: Float, val coreBlo
         val FULL = WaveStyle(arrayOf(floatArrayOf(.7804f, .0588f, .0588f), floatArrayOf(.2353f, .6863f, .0706f), floatArrayOf(.0588f, .5922f, 1f)), .32f, .3f, 1f)
         val MINIMAP = WaveStyle(arrayOf(floatArrayOf(.8039f, .0157f, .0157f), floatArrayOf(.0196f, .6392f, .1765f), floatArrayOf(.1333f, .6235f, .9255f)), .12f, .42f, 1.16f)
     }
-    /** Color of the [mask] subset (bit0 low, bit1 mid, bit2 high) given the column's groups [g]; weights quantized. */
-    fun color(mask: Int, g: FloatArray): Int {
-        var r = 0f; var gr = 0f; var b = 0f
-        for (i in 0..2) if (mask and (1 shl i) != 0) { r += colors[i][0]; gr += colors[i][1]; b += colors[i][2] }
-        val over = (max(r, max(gr, b)) - 1f).coerceIn(0f, 1f)
-        r = min(r, 1f); gr = min(gr, 1f); b = min(b, 1f)
+    // Per-mask constants: the additive sum (clamped) and its overflow depend only on the subset.
+    private val sumR = FloatArray(8); private val sumG = FloatArray(8); private val sumB = FloatArray(8); private val overOf = FloatArray(8)
+    init {
+        for (mask in 0..7) {
+            var r = 0f; var gr = 0f; var b = 0f
+            for (i in 0..2) if (mask and (1 shl i) != 0) { r += colors[i][0]; gr += colors[i][1]; b += colors[i][2] }
+            overOf[mask] = (max(r, max(gr, b)) - 1f).coerceIn(0f, 1f)
+            sumR[mask] = min(r, 1f); sumG[mask] = min(gr, 1f); sumB[mask] = min(b, 1f)
+        }
+    }
+
+    /**
+     * ARGB of the [mask] subset (bit0 low, bit1 mid, bit2 high) given the column's groups [g], dimmed toward the wave
+     * background by [brightness]. Continuous energy-balance hue, exactly desktop's styleColor (#397: the old 1/8-step
+     * weight quantization posterized cores and turned quiet stacked cores grey). Allocation-free: runs per column.
+     */
+    fun color(mask: Int, g: FloatArray, brightness: Float = 1f): Int {
+        var r = sumR[mask]; var gr = sumG[mask]; var b = sumB[mask]
+        val over = overOf[mask]
         if (over > 0f) {
-            // Energy-balance hue from g^2 weights, quantized to 1/8 steps so columns batch into few draw calls.
-            val w = FloatArray(3) { (g[it] * g[it] * 8).roundToInt() / 8f }
-            val sw = w.sum() + 1e-6f
-            var dr = 0f; var dg = 0f; var db = 0f
-            for (i in 0..2) { dr += w[i] * colors[i][0]; dg += w[i] * colors[i][1]; db += w[i] * colors[i][2] }
-            dr /= sw; dg /= sw; db /= sw
+            val w0 = g[0] * g[0]; val w1 = g[1] * g[1]; val w2 = g[2] * g[2]
+            val sw = w0 + w1 + w2 + 1e-6f
+            val c0 = colors[0]; val c1 = colors[1]; val c2 = colors[2]
+            var dr = (w0 * c0[0] + w1 * c1[0] + w2 * c2[0]) / sw
+            var dg = (w0 * c0[1] + w1 * c1[1] + w2 * c2[1]) / sw
+            var db = (w0 * c0[2] + w1 * c1[2] + w2 * c2[2]) / sw
             val dm = max(dr, max(dg, db)) + 1e-6f
             dr /= dm; dg /= dm; db /= dm
             val white = (coreWhite + coreBloom * over).coerceIn(0f, 1f)
@@ -66,16 +80,20 @@ class WaveStyle(val colors: Array<FloatArray>, val coreWhite: Float, val coreBlo
             val t = (over / .5f).coerceIn(0f, 1f).let { it * it * (3 - 2 * it) }
             r += (cr - r) * t; gr += (cg - gr) * t; b += (cb - b) * t
         }
-        return Color(r, gr, b).toArgb()
+        if (brightness < 1f) { r = WAVE_BG[0] + (r - WAVE_BG[0]) * brightness; gr = WAVE_BG[1] + (gr - WAVE_BG[1]) * brightness; b = WAVE_BG[2] + (b - WAVE_BG[2]) * brightness }
+        return (0xff shl 24) or (ch(r) shl 16) or (ch(gr) shl 8) or ch(b)
     }
+    private fun ch(v: Float) = (v.coerceIn(0f, 1f) * 255 + .5f).toInt()
 }
+
+private val BAND_SCRATCH = ThreadLocal.withInitial { FloatArray(8) }
 
 /** One column's group heights (0..1): desktop groupAmps over the column's box-filtered band frames. */
 internal fun columnGroups(data: WaveformData, t0: Double, t1: Double, out: FloatArray) {
     val fps = data.framesPerSecond
     val x0 = t0 * fps - data.stftWindow * .5 / data.bandHop
     val x1 = t1 * fps - data.stftWindow * .5 / data.bandHop
-    val b = FloatArray(8)
+    val b = BAND_SCRATCH.get()!!
     if (x1 - x0 < 1) {
         val i0 = floor((x0 + x1) / 2).toInt().coerceIn(0, max(0, data.frames - 2)); val fr = (((x0 + x1) / 2) - i0).toFloat().coerceIn(0f, 1f)
         if (data.frames == 0) { out.fill(0f); return }
@@ -84,22 +102,17 @@ internal fun columnGroups(data: WaveformData, t0: Double, t1: Double, out: Float
     } else {
         val i0 = floor(x0).toInt().coerceIn(0, max(0, data.frames - 1)); val i1 = floor(x1).toInt().coerceIn(i0, max(0, data.frames - 1))
         if (data.frames == 0 || x0 >= data.frames) { out.fill(0f); return }
-        // Box-filter mean over the column's frames (desktop bands8Column, ADR 0015).
-        val step = max(1, (i1 - i0) / 12); var n = 0
-        val acc = FloatArray(8)
-        var i = i0
-        while (i <= i1) { for (k in 0..7) acc[k] += (data.bands[i * 8 + k].toInt() and 0xff) / 255f; n++; i += step }
-        for (k in 0..7) { val v = acc[k] / n; b[k] = v * v }
+        // Box-filter mean over every frame of the column (desktop bands8Column, ADR 0015; a strided subsample aliased).
+        b.fill(0f)
+        for (i in i0..i1) for (k in 0..7) b[k] += (data.bands[i * 8 + k].toInt() and 0xff) / 255f
+        val n = (i1 - i0 + 1).toFloat()
+        for (k in 0..7) { val v = b[k] / n; b[k] = v * v }
     }
     var lo = 0f; var mid = 0f; var hi = 0f
     for (k in 0..7) { val e = b[k] * b[k]; if (k < 3) lo += e else if (k < 5) mid += e else hi += e }
     out[0] = softLimit(sqrt(lo) * GROUP_GAINS[0]) * MASTER; out[1] = softLimit(sqrt(mid) * GROUP_GAINS[1]) * MASTER; out[2] = softLimit(sqrt(hi) * GROUP_GAINS[2]) * MASTER
 }
 
-/**
- * Batched painter: segments bucketed per (nesting level, style color) so a column's outer bands draw first
- * and the whole lane costs a few drawLines calls.
- */
 /**
  * Overview brightness (minimap + browser previews). Desktop dims minimap-mode bodies toward the wave background
  * (theme/markers MINIMAP_BRIGHTNESS = 0.65, VOID #0b0b0f; ladderWaveStyle toCss); [phone] is the extra
@@ -111,33 +124,90 @@ object OverviewDim {
     val factor get() = DESKTOP * phone
 }
 private val WAVE_BG = floatArrayOf(11 / 255f, 11 / 255f, 15 / 255f)
-private fun dim(color: Int, k: Float): Int {
-    if (k >= 1f) return color
-    fun ch(v: Int, i: Int) = ((WAVE_BG[i] + (v / 255f - WAVE_BG[i]) * k).coerceIn(0f, 1f) * 255 + .5f).toInt()
-    return android.graphics.Color.argb(android.graphics.Color.alpha(color), ch(android.graphics.Color.red(color), 0), ch(android.graphics.Color.green(color), 1), ch(android.graphics.Color.blue(color), 2))
-}
 
+/**
+ * Column painter: each column's nested group segments (outer level first) with their exact per-column colour,
+ * drawn as one flat-shaded triangle mesh (#397). Segments are axis-aligned lines of the paint's stroke width,
+ * expanded to quads at draw time; levels draw in order so inner (stacked) segments paint over outer ones.
+ * Replaces per-colour drawLines batches, which needed quantized colours and went through Skia's path renderer.
+ */
 internal class Lines(val style: WaveStyle, val brightness: Float = 1f) {
-    private class Bucket(var buf: FloatArray, var count: Int = 0)
-    private val levels = Array(3) { LinkedHashMap<Int, Bucket>() }
-    fun reset() { for (l in levels) for (b in l.values) b.count = 0 }
-    fun column(g: FloatArray, emit: (level: Int, color: Int, extent: Float) -> Unit) {
-        val idx = intArrayOf(0, 1, 2).sortedByDescending { g[it] }
+    private val seg = Array(3) { FloatArray(256) }
+    private val col = Array(3) { IntArray(64) }
+    private val count = IntArray(3)
+    private var verts = FloatArray(0); private var colors = IntArray(0)
+    private val order = IntArray(3)
+    fun reset() { count.fill(0) }
+    /** Emits [level] 0..2 (outermost first) with the subset's colour and extent; allocation-free when inlined. */
+    inline fun column(g: FloatArray, emit: (level: Int, color: Int, extent: Float) -> Unit) {
+        val o = sortDescending(g)
         for (level in 0..2) {
-            val h = g[idx[level]]
+            val h = g[o[level]]
             if (h <= .002f) break
             var mask = 0
             for (i in 0..2) if (g[i] >= h) mask = mask or (1 shl i)
-            emit(level, style.color(mask, g), h)
+            emit(level, style.color(mask, g, brightness), h)
         }
     }
+    /** Group indices of [g] by descending height (shared scratch: valid until the next call). */
+    fun sortDescending(g: FloatArray): IntArray {
+        var a = 0; var b = 1; var c = 2
+        if (g[b] > g[a]) { val t = a; a = b; b = t }
+        if (g[c] > g[b]) { val t = b; b = c; c = t }
+        if (g[b] > g[a]) { val t = a; a = b; b = t }
+        order[0] = a; order[1] = b; order[2] = c
+        return order
+    }
     fun add(level: Int, color: Int, x0: Float, y0: Float, x1: Float, y1: Float) {
-        val b = levels[level].getOrPut(color) { Bucket(FloatArray(256)) }
-        if (b.count + 4 > b.buf.size) b.buf = b.buf.copyOf(b.buf.size * 2)
-        b.buf[b.count] = x0; b.buf[b.count + 1] = y0; b.buf[b.count + 2] = x1; b.buf[b.count + 3] = y1; b.count += 4
+        val n = count[level]
+        if ((n + 1) * 4 > seg[level].size) seg[level] = seg[level].copyOf(seg[level].size * 2)
+        if (n + 1 > col[level].size) col[level] = col[level].copyOf(col[level].size * 2)
+        val s = seg[level]; s[n * 4] = x0; s[n * 4 + 1] = y0; s[n * 4 + 2] = x1; s[n * 4 + 3] = y1
+        col[level][n] = color; count[level] = n + 1
     }
     fun draw(canvas: android.graphics.Canvas, paint: Paint) {
-        for (l in levels) for ((color, b) in l) if (b.count > 0) { paint.color = dim(color, brightness); canvas.drawLines(b.buf, 0, b.count, paint) }
+        val quads = count.sum()
+        if (quads == 0) return
+        val w = paint.strokeWidth.coerceAtLeast(1f) / 2
+        if (Build.VERSION.SDK_INT < 29 && canvas.isHardwareAccelerated) {
+            // drawVertices is software-only before Q on hardware canvases: one rect per segment instead.
+            val style = paint.style; paint.style = Paint.Style.FILL
+            for (l in 0..2) { val s = seg[l]; for (i in 0 until count[l]) { paint.color = col[l][i]; rect(s, i, w) { a, b, c, d -> canvas.drawRect(a, b, c, d, paint) } } }
+            paint.style = style
+            return
+        }
+        if (verts.size < quads * 8) { verts = FloatArray(quads * 8 + 1024); colors = IntArray(quads * 8 + 1024) }
+        var v = 0
+        for (l in 0..2) {
+            val s = seg[l]; val cl = col[l]
+            for (i in 0 until count[l]) {
+                rect(s, i, w) { a, b, c, d ->
+                    verts[v * 2] = a; verts[v * 2 + 1] = b; verts[v * 2 + 2] = c; verts[v * 2 + 3] = b
+                    verts[v * 2 + 4] = a; verts[v * 2 + 5] = d; verts[v * 2 + 6] = c; verts[v * 2 + 7] = d
+                }
+                val k = cl[i]; colors[v] = k; colors[v + 1] = k; colors[v + 2] = k; colors[v + 3] = k
+                v += 4
+            }
+        }
+        paint.color = android.graphics.Color.WHITE
+        var q = 0
+        while (q < quads) {
+            val n = min(MAX_QUADS, quads - q)
+            canvas.drawVertices(android.graphics.Canvas.VertexMode.TRIANGLES, n * 8, verts, q * 8, null, 0, colors, q * 4, QUAD_INDICES, 0, n * 6, paint)
+            q += n
+        }
+    }
+    /** Segment [i] as a rect (left, top, right, bottom): vertical lines widen in x, horizontal ones in y. */
+    private inline fun rect(s: FloatArray, i: Int, w: Float, out: (Float, Float, Float, Float) -> Unit) {
+        val x0 = s[i * 4]; val y0 = s[i * 4 + 1]; val x1 = s[i * 4 + 2]; val y1 = s[i * 4 + 3]
+        if (x0 == x1) out(x0 - w, min(y0, y1), x0 + w, max(y0, y1)) else out(min(x0, x1), y0 - w, max(x0, x1), y0 + w)
+    }
+    private companion object {
+        /** Vertex indices are 16-bit: chunk meshes at 16383 quads (65532 vertices). */
+        const val MAX_QUADS = 16383
+        val QUAD_INDICES = ShortArray(MAX_QUADS * 6).also { ix ->
+            for (q in 0 until MAX_QUADS) { val b = q * 4; val o = q * 6; ix[o] = b.toShort(); ix[o + 1] = (b + 1).toShort(); ix[o + 2] = (b + 2).toShort(); ix[o + 3] = (b + 1).toShort(); ix[o + 4] = (b + 3).toShort(); ix[o + 5] = (b + 2).toShort() }
+        }
     }
 }
 
@@ -198,7 +268,8 @@ fun marksOf(ui: DeckUi) = ui.snapshot.let { s -> WaveMarks(s?.cueSeconds, ui.hot
                 } else {
                     // Columns live in absolute track coordinates (column k always covers the same audio) and
                     // the body translates by a whole-pixel offset: pixel-consistent scrolling, no resampling.
-                    val step = 2
+                    // One column per physical pixel, like desktop's per-fragment body (#397: 2px columns stair-stepped).
+                    val step = 1
                     val count = (along / step).toInt() + 2
                     val style = WaveStyle.full ?: WaveStyle.FULL
                     val l = lines?.takeIf { it.style === style } ?: Lines(style).also { lines = it }
@@ -215,7 +286,7 @@ fun marksOf(ui: DeckUi) = ui.snapshot.let { s -> WaveMarks(s?.cueSeconds, ui.hot
                         val t0 = k * colSeconds; val t1 = t0 + colSeconds
                         if (t1 < 0 || t0 > dur) continue
                         val q = offset + i * step
-                        val p = q
+                        val p = q + step * .5f // segment centre: the stroke covers exactly [q, q + step)
                         columns.groups(data, k, t0, t1, g)
                         for (j in 0..2) g[j] = (g[j] * columns.fill).coerceAtMost(1f)
                         val behind = t0 < pos
@@ -381,12 +452,14 @@ fun position(ui: DeckUi) = if (ui.source?.id == ui.snapshot?.sourceId) ui.snapsh
 internal class ColumnCache {
     private var data: WaveformData? = null
     private var colSeconds = 0.0
-    private val cache = HashMap<Long, FloatArray>()
+    // Direct-mapped ring keyed by column index (no boxing): slot k mod SLOTS holds column k's three groups.
+    private val keys = LongArray(SLOTS) { Long.MIN_VALUE }
+    private val values = FloatArray(SLOTS * 3)
     /** Display gain so the track's loud passages reach the lane edge (99th-percentile column peak -> 0.95). */
     var fill = 1f; private set
     private var fillFrames = -1
     fun prepare(d: WaveformData, seconds: Double) {
-        if (d !== data || seconds != colSeconds) { data = d; colSeconds = seconds; cache.clear() }
+        if (d !== data || seconds != colSeconds) { data = d; colSeconds = seconds; keys.fill(Long.MIN_VALUE) }
         if (d.frames != fillFrames && (d.complete || d.frames - fillFrames > d.framesPerSecond * 20)) { fillFrames = d.frames; fill = fillGain(d) }
     }
     fun fillGain(d: WaveformData): Float {
@@ -399,11 +472,13 @@ internal class ColumnCache {
         return if (p <= .01f) 1f else (.95f / p).coerceIn(1f, 3f)
     }
     fun groups(d: WaveformData, k: Long, t0: Double, t1: Double, out: FloatArray) {
-        cache[k]?.let { it.copyInto(out); return }
+        val slot = Math.floorMod(k, SLOTS.toLong()).toInt()
+        if (keys[slot] == k) { out[0] = values[slot * 3]; out[1] = values[slot * 3 + 1]; out[2] = values[slot * 3 + 2]; return }
         columnGroups(d, t0, t1, out)
         // Only cache once the column's audio is fully analysed (streaming analysis grows the data).
-        if (d.complete || t1 * d.framesPerSecond + 1 < d.frames) { if (cache.size > 20_000) cache.clear(); cache[k] = out.copyOf() }
+        if (d.complete || t1 * d.framesPerSecond + 1 < d.frames) { keys[slot] = k; values[slot * 3] = out[0]; values[slot * 3 + 1] = out[1]; values[slot * 3 + 2] = out[2] }
     }
+    private companion object { const val SLOTS = 8192 } // > widest lane in px, so a frame's columns never collide
 }
 
 /**
