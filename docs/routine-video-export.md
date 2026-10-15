@@ -29,7 +29,7 @@ Portrait (1080×1920, 30/60 fps) MP4 of a mix with its rendered audio (#377).
     (the wave inverts the visualizer) / CUTOUT (black hole, color rim) / TINT (deck hue, preset light) / STAGE;
     palette; lanes FULL-BLEED (default) / CARDS; decks AUDIBLE / ALL; glow, visualizer, darken, vignette, zoom
     pulse, impacts, wave zoom; response (BEAT×ENERGY / BEAT / ENERGY / BASS / OFF; controls amount, waveform
-    pulse, drop boost); overlays (top bar, mixer row, beat grid, hot cue flags, action pills, title cards, titles at drop,
+    pulse, drop boost); overlays (top bar, mixer row, beat grid, hot cue flags, track titles, playhead, action pills, title cards, titles at drop,
     drop countdown, Beat FX strip, footer, manaDJ mark); controls shade (dark strip behind the title/controls row);
     accent; handle/caption (defaults to the last handle typed, `@dj.reroll` initially). Titles at drop: a track reads
     "ID" until its hot cue 4 drop; one already past its drop when the clip starts is named from the start.

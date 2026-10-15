@@ -120,6 +120,10 @@ export interface ClipLook {
   showGrid: boolean;
   /** Hot cue flags (numbered pins) on the waveforms. */
   showCues: boolean;
+  /** Track title + artist on each lane (stage: the title row). */
+  showTitles: boolean;
+  /** The shared playhead line through the lanes. */
+  showPlayhead: boolean;
   /** Top HUD bar (bar/phrase readout, beat pips, master meter). Off: the
    * beat lives in the controls' pulse instead. */
   showHeader: boolean;
@@ -175,6 +179,8 @@ export const DEFAULT_LOOK: ClipLook = {
   phraseCountdown: true,
   showGrid: false,
   showCues: true,
+  showTitles: true,
+  showPlayhead: true,
   showHeader: false,
 };
 

@@ -776,7 +776,7 @@ export default function ClipEditorView() {
                 <section className="ce-group">
                   <h4>Overlays</h4>
                   <div className="ce-checks">
-                    {([['showHeader', 'top bar'], ['showKnobs', 'mixer row'], ['showGrid', 'beat grid'], ['showCues', 'hot cue flags'], ['showTicker', 'action pills'], ['titleCards', 'title cards'], ['revealAtDrop', 'titles at drop'], ['phraseCountdown', 'drop countdown'], ['showFxPanel', 'beat fx strip'], ['showFooter', 'footer'], ['showWordmark', 'manaDJ mark']] as const).map(([k, label]) => (
+                    {([['showHeader', 'top bar'], ['showKnobs', 'mixer row'], ['showGrid', 'beat grid'], ['showCues', 'hot cue flags'], ['showTitles', 'track titles'], ['showPlayhead', 'playhead'], ['showTicker', 'action pills'], ['titleCards', 'title cards'], ['revealAtDrop', 'titles at drop'], ['phraseCountdown', 'drop countdown'], ['showFxPanel', 'beat fx strip'], ['showFooter', 'footer'], ['showWordmark', 'manaDJ mark']] as const).map(([k, label]) => (
                       <label key={k} className={`ce-check${ovr(k)}`}>{ovrX(k)}<input type="checkbox" checked={shownLook[k]} onChange={(e) => setLook({ [k]: e.target.checked } as Partial<ClipLook>)} />{label}</label>
                     ))}
                   </div>

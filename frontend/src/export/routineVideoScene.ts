@@ -972,12 +972,14 @@ function drawLane(
   ctx.textBaseline = 'middle';
   ctx.textAlign = 'left';
   ctx.font = font(Math.round(26 * (1 + 0.05 * pulse)), true);
-  const revealed = titleRevealed(scene, lf.slotIndex, t);
-  const title = lf.track ? (revealed ? lf.track.title : ID_LABEL) : '—';
-  glowText(ctx, ellipsize(ctx, title, leftW), leftX, iy + 24, deckColor, dim ? 0 : 10 * glow * (1 + 2 * pulse), dim ? 'rgba(255,255,255,0.5)' : '#ffffff');
-  ctx.font = font(20);
-  ctx.fillStyle = dim ? 'rgba(255,255,255,0.3)' : rgba(deckColor, 0.85);
-  ctx.fillText(ellipsize(ctx, `${lf.deck} · ${revealed ? lf.track?.artist ?? '' : ID_LABEL}`, leftW), leftX, iy + 50);
+  if (look.showTitles) {
+    const revealed = titleRevealed(scene, lf.slotIndex, t);
+    const title = lf.track ? (revealed ? lf.track.title : ID_LABEL) : '—';
+    glowText(ctx, ellipsize(ctx, title, leftW), leftX, iy + 24, deckColor, dim ? 0 : 10 * glow * (1 + 2 * pulse), dim ? 'rgba(255,255,255,0.5)' : '#ffffff');
+    ctx.font = font(20);
+    ctx.fillStyle = dim ? 'rgba(255,255,255,0.3)' : rgba(deckColor, 0.85);
+    ctx.fillText(ellipsize(ctx, `${lf.deck} · ${revealed ? lf.track?.artist ?? '' : ID_LABEL}`, leftW), leftX, iy + 50);
+  }
   if (look.showKnobs) {
     const l = lf.lanes ?? { fader: 0, trim: 0.5, eq: { low: 0.5, mid: 0.5, high: 0.5 }, filter: 0 };
     ctx.save();
@@ -1043,9 +1045,11 @@ function drawStage(
     ctx.globalAlpha = it.vis;
     ctx.font = font(26, true);
     glowText(ctx, it.lf.deck, x + 4, y + titleRow / 2, color, 12 * look.glow);
-    ctx.font = font(28, true);
-    const title = ellipsize(ctx, titleRevealed(scene, it.lf.slotIndex, t) ? it.lf.track?.title ?? '—' : ID_LABEL, w - 260);
-    glowText(ctx, title, x + 44, y + titleRow / 2, color, 10 * look.glow, '#ffffff');
+    if (look.showTitles) {
+      ctx.font = font(28, true);
+      const title = ellipsize(ctx, titleRevealed(scene, it.lf.slotIndex, t) ? it.lf.track?.title ?? '—' : ID_LABEL, w - 260);
+      glowText(ctx, title, x + 44, y + titleRow / 2, color, 10 * look.glow, '#ffffff');
+    }
     // Level bar on the right
     ctx.fillStyle = 'rgba(255,255,255,0.1)';
     ctx.fillRect(x + w - 180, y + titleRow / 2 - 4, 180, 8);
@@ -1089,7 +1093,7 @@ function drawStage(
     const t0 = ref.trackTime - visible / 2;
     drawGridAndCues(ctx, scene, ref, t0, (s) => ((s - t0) / visible) * sw, sw, stageH, look);
   }
-  drawPlayhead(ctx, sw / 2, stageH, look.glow, false);
+  if (look.showPlayhead) drawPlayhead(ctx, sw / 2, stageH, look.glow, false);
   ctx.restore();
   for (const it of shown) if (it.lf.slot) {
     ctx.save();
@@ -1765,7 +1769,7 @@ export function drawRoutineFrame(
       y += (hNat + gap) * it.vis;
     }
     // One playhead through every card.
-    if (bottom > top) {
+    if (look.showPlayhead && bottom > top) {
       ctx.save();
       ctx.shadowColor = PLAYHEAD;
       ctx.shadowBlur = 18 * look.glow * (1 + 2 * hud);
