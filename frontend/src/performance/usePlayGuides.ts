@@ -29,7 +29,7 @@ function guideDeck(engine: DeckEngine): GuideDeck {
     // preview moves the playhead, so there is no stable cued position to
     // project from; guides return at the release, cued afresh (story 23).
     playing: s.playing || s.pendingPlay || s.previewing || s.hotCuePreviewSlot !== null,
-    playhead: engine.getPlayhead(),
+    playhead: engine.getVisualPlayhead(),
     bpm: s.bpm,
     pitchPercent: s.pitchPercent,
   };

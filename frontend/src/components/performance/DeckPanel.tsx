@@ -368,7 +368,7 @@ export function DeckWaveform({
     };
     const loop = () => {
       const snap = engine.getSnapshot();
-      const playhead = engine.getPlayhead();
+      const playhead = engine.getVisualPlayhead();
       const slip = engine.getSlipReturnPlayhead();
       const live = liveStrip();
       const advancing = snap.playing || snap.previewing;
@@ -449,7 +449,7 @@ export function DeckWaveform({
         stemWaveforms={stemWaveforms}
         stemMaskAt={stemMaskAt}
         transparentBackground
-        clock={engine}
+        clock={engine.visualClock}
         cuePoint={cuePoint}
         loop={loop}
         transport={transport}
@@ -1184,7 +1184,7 @@ export function DeckPanel({
             stemWaveforms={stemWaveforms}
             stemMaskAt={stemMaskAt}
             wakeKey={minimapWake}
-            clock={engine}
+            clock={engine.visualClock}
             cuePoint={cuePoint}
             loop={loop}
           onSeek={(t) => { if (deckReadyNow(engine, track?.id ?? null)) engine.seek(t); }}

@@ -30,6 +30,8 @@ import { DeckSourceNode } from './worklet/deckSourceNode';
 import { getCachedBuffer, getCachedStems, putCachedBuffer, putCachedStems } from './bufferCache';
 import { firstNonSilentTime, resolveInitialCue } from './cueDefaults';
 import { MAX_PITCH_RANGE_PERCENT, composeRate } from './tempo';
+import { visualContextTime } from './visualClock';
+import type { PlaybackClock } from './clock';
 import { moveScratch, scratchPosition, scratchFilterAt, effectiveScratchLoop } from './worklet/scratchMotion';
 import type { ScratchFrame, ScheduledScratchFrame } from './worklet/scratchMotion';
 import type { ScratchMotion, ScratchFilter } from './worklet/scratchMotion';
@@ -1064,13 +1066,31 @@ export class DeckEngine {
    * counts up from the negative anchor through 0, driving the silent
    * scroll and the on-time entry. */
   getPlayhead(): number {
+    return this.playheadAt(this.audio ? this.audio.ctx.currentTime : 0, false);
+  }
+
+  /** The playhead for DRAWING (desktop-perf #385): the same projection as
+   * getPlayhead, read at the smoothed context time (visualClock.ts) so it
+   * advances evenly per frame instead of in render-quantum steps. Never
+   * for transport logic. */
+  getVisualPlayhead(): number {
+    return this.playheadAt(this.audio ? visualContextTime(this.audio.ctx) : 0, true);
+  }
+
+  /** PlaybackClock for renderers: the visual playhead, stable identity. */
+  readonly visualClock: PlaybackClock = { getPlayhead: () => this.getVisualPlayhead() };
+
+  private playheadAt(now: number, visual: boolean): number {
     this.syncScheduledScratch();
-    if (this.scratch && this.audio) return scratchPosition(this.scratch.motion, this.audio.ctx.currentTime);
+    if (this.scratch && this.audio) return scratchPosition(this.scratch.motion, now);
     const pending = this.pendingStart?.when !== undefined ? this.pendingStart : null;
     if ((this.runningStartId !== null || this.leadInActive || pending) && this.audio) {
       const anchorPosition = pending?.at ?? this.anchorPosition;
+      const anchorTime = pending?.when ?? this.anchorCtxTime;
+      // A smoothed read can trail a just-set anchor by a fraction of a
+      // quantum; drawing must not show the playhead behind its anchor.
       const elapsed =
-        (this.audio.ctx.currentTime - (pending?.when ?? this.anchorCtxTime)) * this.currentRate();
+        ((visual && !pending ? Math.max(now, anchorTime) : now) - anchorTime) * this.currentRate();
       let position = anchorPosition + elapsed;
       // Active loop: fold the monotone clock into the region — the mirror
       // of the worklet's sample wrap, exact across many wraps (modulo). A

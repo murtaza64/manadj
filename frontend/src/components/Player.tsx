@@ -52,7 +52,7 @@ export default function Player() {
       >
         <WebGLWaveform
           trackId={trackId}
-          clock={engine}
+          clock={engine.visualClock}
           cuePoint={cuePoint}
           loop={loop}
           transport={scrubTransport}

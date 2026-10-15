@@ -355,7 +355,7 @@ const TagEditor = forwardRef<TagEditorHandle, Props>(({ track, onSave, onUpdate,
               {/* Minimap follows the Deck (loaded Track), not the selection */}
               <WaveformMinimap
                 trackId={loadedTrack?.id ?? null}
-                clock={engine}
+                clock={engine.visualClock}
                 cuePoint={deckCuePoint}
                 onSeek={(t) => { if (deckReadyNow(engine, loadedTrack?.id ?? null)) engine.seek(t); }}
                 dimmed={loadedTrack !== null && !deckReady}

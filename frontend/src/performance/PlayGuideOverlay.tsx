@@ -123,7 +123,7 @@ export function PlayGuideOverlay({ visibleSeconds, order }: {
         // wobble the marker (performance-mode 06 reasoning).
         const rate = composeRate(snapshot.pitchPercent, 0);
         const windowSeconds = trackWindowSeconds(visibleRef.current, rate);
-        const playhead = engine.getPlayhead();
+        const playhead = engine.getVisualPlayhead();
         key += `|${frame.outgoing}:${playhead}:${rate}`;
         for (const guide of frame.guides) {
           const guideKey = `${frame.outgoing}>${frame.incoming}:${guide.uuid}`;
