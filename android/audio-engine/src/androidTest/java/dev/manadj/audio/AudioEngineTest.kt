@@ -305,19 +305,34 @@ class AudioEngineTest {
             }
             AudioEngine(offline = true).use { engine ->
                 engine.load(DeckId.A, name, file)
-                engine.prefetch(DeckId.A, 12.0)
+                engine.prefetch(DeckId.A, listOf(12.0, 4.0))
                 engine.settled(DeckId.A)
                 var startAtFirstFill = -1.0
-                engine.until("$name 12 s filled") { decodedAhead(DeckId.A, 12.0).also { if (it > 0 && startAtFirstFill < 0) startAtFirstFill = decodedAhead(DeckId.A, 0.5) } >= 5 }
+                var ranges = emptyList<ClosedFloatingPointRange<Double>>()
+                engine.until("$name 12 s filled") { decodedAhead(DeckId.A, 12.0).also { if (it > 0 && startAtFirstFill < 0) { startAtFirstFill = decodedAhead(DeckId.A, 0.5); ranges = decodedRanges(DeckId.A) } } >= 5 }
+                var startAtSecond = -1.0
+                engine.until("$name 4 s filled") { decodedAhead(DeckId.A, 4.0).also { if (it > 0 && startAtSecond < 0) startAtSecond = decodedAhead(DeckId.A, 0.5) } > 0 }
+                android.util.Log.i("manadj-range", "$name ranges at first fill $ranges; ahead(0.5) when 4 s first filled $startAtSecond")
                 engine.until("$name fully decoded") { deck(DeckId.A).fullyDecoded }
                 val rate = engine.deck(DeckId.A).sampleRate
                 val track = engine.trackCopyForTest(DeckId.A, 0, rate * 25)
                 val frames = minOf(track.size, ref.size) / 2 - rate / 10 // ends: padding conventions differ
                 var mismatches = 0; var first = -1
-                for (i in 0 until frames * 2) if (track[i] != ref[i]) { mismatches++; if (first < 0) first = i / 2 }
+                var worst = 0f; var lastBad = -1
+                for (i in 0 until frames * 2) if (track[i] != ref[i]) { mismatches++; if (first < 0) first = i / 2; lastBad = i / 2; worst = maxOf(worst, kotlin.math.abs(track[i] - ref[i])) }
+                if (first >= 0) android.util.Log.i("manadj-range", "$name worst diff ${worst * 32768} LSB, last bad frame $lastBad")
+                if (first >= 0) for (o in -4096..4096) {
+                    val a = first + 3000
+                    if ((0 until 200).all { i -> (a + i + o) * 2 < ref.size && track[(a + i) * 2] == ref[(a + i + o) * 2] }) { android.util.Log.i("manadj-range", "$name offset at mismatch: track[i] == ref[i + $o]"); break }
+                }
                 android.util.Log.i("manadj-range", "$name rate $rate ref start ${refStart * rate} frames ${ref.size / 2} track ${track.size / 2} mismatches $mismatches first $first; ahead(0.5) when 12 s first filled: $startAtFirstFill")
                 assertEquals("$name sample-exact vs from-start decode (first mismatch frame $first)", 0, mismatches)
-                if (name.endsWith(".mp3") || name.endsWith(".m4a")) assertEquals("$name filled 12 s before the start", 0.0, startAtFirstFill, 0.0)
+                if (name.endsWith(".mp3")) { // AAC fills from 0 (its seek was not exact everywhere)
+                    assertEquals("$name filled 12 s before the start", 0.0, startAtFirstFill, 0.0)
+                    assertEquals("$name second priority (4 s) before the start", 0.0, startAtSecond, 0.0)
+                    assertTrue("$name one island at 12 s: $ranges", ranges.size == 1 && ranges[0].start in 11.8..12.0)
+                }
+                assertEquals("$name decodedRanges when done", 1, engine.decodedRanges(DeckId.A).size)
             }
         }
     }

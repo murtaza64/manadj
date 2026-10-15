@@ -406,6 +406,29 @@ Java_dev_manadj_audio_AudioEngine_nativeTrackCopy(JNIEnv* env, jobject, jlong ha
     return result;
 }
 
+extern "C" JNIEXPORT jdoubleArray JNICALL
+Java_dev_manadj_audio_AudioEngine_nativeTrackRanges(JNIEnv* env, jobject, jlong handle, jint deck, jlong load) {
+    std::vector<double> out;
+    if (deck >= 0 && deck < manadj::kDeckCount) {
+        const auto& t = output(handle)->engine.deck(deck).track;
+        const int rate = t.sampleRate.load();
+        if (t.load.load() == static_cast<uint64_t>(load) && rate > 0) {
+            const double start = t.startSeconds.load();
+            const uint64_t total = t.total.load(), limit = total ? total : t.capacity;
+            uint64_t k = 0;
+            while (k < limit) {
+                if (!manadj::trackHas(t, k)) { k = ((k >> manadj::kTrackBlockShift) + 1) << manadj::kTrackBlockShift; continue; }
+                const uint64_t end = manadj::trackRunEnd(t, k);
+                out.push_back(start + k / static_cast<double>(rate)); out.push_back(start + end / static_cast<double>(rate));
+                k = end;
+            }
+        }
+    }
+    jdoubleArray result = env->NewDoubleArray(static_cast<jsize>(out.size()));
+    env->SetDoubleArrayRegion(result, 0, static_cast<jsize>(out.size()), out.data());
+    return result;
+}
+
 extern "C" JNIEXPORT jlong JNICALL
 Java_dev_manadj_audio_AudioEngine_nativeTrackGap(JNIEnv*, jobject, jlong handle, jint deck, jlong load, jlong from) {
     return output(handle)->engine.trackGap(deck, static_cast<uint64_t>(load), static_cast<uint64_t>(std::max<jlong>(0, from)));
@@ -508,13 +531,9 @@ Java_dev_manadj_audio_AudioEngine_nativeSnapshot(JNIEnv* env, jobject, jlong han
         data[n + 30] = d.loopBeats.load();
         data[n + 31] = d.pendingLoopBeats.load();
         const bool tracked = d.track.load.load() == d.loadId.load() && d.track.load.load() != 0;
-        // decodedSeconds: end of the filled run at the playhead (range fill, SH8), else of the run from the start.
+        // decodedSeconds: end of the filled run from the start (prefix; islands: decodedRanges).
         if (tracked && d.track.sampleRate.load() > 0) {
-            const double rate = d.track.sampleRate.load(), start = d.track.startSeconds.load();
-            const double f = (d.position.load() - start) * rate;
-            const uint64_t k = f > 0 ? static_cast<uint64_t>(f) : 0;
-            const uint64_t end = manadj::trackHas(d.track, k) ? manadj::trackRunEnd(d.track, k) : manadj::trackRunEnd(d.track, 0);
-            data[n + 32] = start + end / rate;
+            data[n + 32] = d.track.startSeconds.load() + manadj::trackRunEnd(d.track, 0) / static_cast<double>(d.track.sampleRate.load());
         } else data[n + 32] = 0;
         data[n + 33] = tracked && d.track.complete.load() ? 1 : 0;
         data[n + 34] = d.inTrack.load() ? 1 : 0;

@@ -555,10 +555,18 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
     }
 
     /**
-     * Range fill (SH8): ask the in-memory decode to fill from [seconds] next (exact, sample-identical to a decode
-     * from the start), ahead of the gaps. The deck's own relocations are prioritized automatically.
+     * Range fill (SH8): fill from [positions] (track seconds, priority order) next — each grows forward until
+     * filled [PRIORITY_AHEAD_SECONDS] ahead — before the remaining gaps; sample-identical to a decode from the
+     * start. A new call replaces the request; call after [load] (it applies to the current source). The deck's
+     * own last relocation target is always prioritized after these.
      */
-    fun prefetch(deck: DeckId, seconds: Double) { prefetches[deck.ordinal].set(loads[deck.ordinal].get() to seconds) }
+    fun prefetch(deck: DeckId, positions: List<Double>) { prefetches[deck.ordinal].set(loads[deck.ordinal].get() to positions) }
+    fun prefetch(deck: DeckId, seconds: Double) = prefetch(deck, listOf(seconds))
+
+    /** Filled ranges of the in-memory track (track seconds, sorted, merged) for the deck's current source. */
+    fun decodedRanges(deck: DeckId): List<ClosedFloatingPointRange<Double>> = synchronized(this) {
+        if (closed) emptyList() else nativeTrackRanges(handle, deck.ordinal, loads[deck.ordinal].get()).let { r -> (r.indices step 2).map { r[it]..r[it + 1] } }
+    }
 
     /** Seconds the in-memory track is filled contiguously from [seconds] for the deck's current source (0 = not there). */
     fun decodedAhead(deck: DeckId, seconds: Double): Double =
@@ -802,8 +810,8 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
         } catch (_: Exception) { /* The streaming path still plays the track. */ }
     }
 
-    /** Explicit priority positions ([prefetch]): (load, seconds). */
-    private val prefetches = Array(4) { java.util.concurrent.atomic.AtomicReference<Pair<Long, Double>?>(null) }
+    /** Explicit priority positions ([prefetch]): (load, track seconds in priority order). */
+    private val prefetches = Array(4) { java.util.concurrent.atomic.AtomicReference<Pair<Long, List<Double>>?>(null) }
 
     /**
      * Fill priority (track frame) for a range-filled deck: an explicit [prefetch], else the deck's last relocation
@@ -811,10 +819,12 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
      */
     private fun priority(deck: Int, source: Source, state: DoubleArray, start: Double, rate: Int): Long? {
         nativeTransport(handle, deck, state)
-        val candidates = listOfNotNull(prefetches[deck].get()?.takeIf { it.first == source.load }?.second, state[2].takeIf { state[0].toLong() == source.load })
+        val candidates = prefetches[deck].get()?.takeIf { it.first == source.load }?.second.orEmpty() + listOfNotNull(state[2].takeIf { state[0].toLong() == source.load })
         for (seconds in candidates) {
             if (nativeTrackAhead(handle, deck, source.load, seconds) >= PRIORITY_AHEAD_SECONDS) continue
-            return ((seconds - start) * rate).toLong().coerceAtLeast(0)
+            val frame = ((seconds - start) * rate).toLong().coerceAtLeast(0)
+            if (nativeTrackGap(handle, deck, source.load, frame / TRACK_BLOCK * TRACK_BLOCK) < 0) continue // filled to the end
+            return frame
         }
         return null
     }
@@ -886,8 +896,8 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
     }
 
     /**
-     * Other codecs: AAC/MP4 and WAV seek exactly (sample-table / PCM; PTS-placed), so runs start anywhere (decoder
-     * preroll [CODEC_PREROLL_SECONDS] discarded); anything else fills from the start in one run.
+     * Other codecs: PCM (WAV) seeks exactly, so runs start anywhere (preroll [CODEC_PREROLL_SECONDS] discarded);
+     * anything else (AAC: its extractor seek was not sample-exact everywhere) fills from the start in one run.
      */
     private fun fillCodec(deck: Int, source: Source, fd: ParcelFileDescriptor, state: DoubleArray) {
         val (seekable, rate, start, duration) = PcmReader.open(fd.fileDescriptor).use { r ->
@@ -1141,6 +1151,7 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
     private external fun nativeTrackWriteAt(handle: Long, deck: Int, load: Long, at: Long, pcm: FloatArray, offset: Int, frames: Int, runStart: Long): Int
     private external fun nativeTrackEnd(handle: Long, deck: Int, load: Long, total: Long, runStart: Long)
     private external fun nativeTrackCopy(handle: Long, deck: Int, load: Long, from: Long, frames: Int): FloatArray
+    private external fun nativeTrackRanges(handle: Long, deck: Int, load: Long): DoubleArray
     private external fun nativeTrackGap(handle: Long, deck: Int, load: Long, from: Long): Long
     private external fun nativeTrackAhead(handle: Long, deck: Int, load: Long, seconds: Double): Double
     private external fun nativePublish(handle: Long, deck: Int, load: Long, transport: Long, eof: Boolean): Boolean
