@@ -6,16 +6,40 @@
  * features; the host drives preset/options through `window.manadjViz`.
  */
 import type { PresetRenderer, VisualizerPreset } from '../visualizer/presets/types';
+import { PHONE_PRESETS } from './presetList';
 import { voyagePreset } from '../visualizer/presets/voyage';
 import { tunnelPreset } from '../visualizer/presets/tunnel';
+import { auroraPreset } from '../visualizer/presets/aurora';
+import { novaPreset } from '../visualizer/presets/nova';
+import { plasmaPreset } from '../visualizer/presets/plasma';
+import { odysseyPreset } from '../visualizer/presets/odyssey';
+import { silkPreset } from '../visualizer/presets/silk';
+import { strataPreset } from '../visualizer/presets/strata';
+import { siphonPreset } from '../visualizer/presets/siphon';
+import { orbitPreset } from '../visualizer/presets/orbit';
+import { pulsePreset } from '../visualizer/presets/pulse';
+import { ladderPreset } from '../visualizer/presets/ladder';
 import g02VoyagePrime from '../visualizer/presets/gen/g02-voyage-prime.candidate';
 import g05MateriaShards from '../visualizer/presets/gen/g05-materia-shards.candidate';
 import g02Materia from '../visualizer/presets/gen/g02-materia.candidate';
 import g03MateriaDeep from '../visualizer/presets/gen/g03-materia-deep.candidate';
 import g07MateriaMetric from '../visualizer/presets/gen/g07-materia-metric.candidate';
+import g04MateriaArc from '../visualizer/presets/gen/g04-materia-arc.candidate';
+import g05MateriaMercury from '../visualizer/presets/gen/g05-materia-mercury.candidate';
 import g03SolarCrown from '../visualizer/presets/gen/g03-solar-crown.candidate';
-import g04TunnelSaga from '../visualizer/presets/gen/g04-tunnel-saga.candidate';
 import g07SeasonsNeon from '../visualizer/presets/gen/g07-seasons-neon.candidate';
+import g07VoyageHardcut from '../visualizer/presets/gen/g07-voyage-hardcut.candidate';
+import g05VoyageDeckmix from '../visualizer/presets/gen/g05-voyage-deckmix.candidate';
+import g04TunnelSaga from '../visualizer/presets/gen/g04-tunnel-saga.candidate';
+import g05TunnelDeckmix from '../visualizer/presets/gen/g05-tunnel-deckmix.candidate';
+import g02MirrorLadder from '../visualizer/presets/gen/g02-mirror-ladder.candidate';
+import g07Crt from '../visualizer/presets/gen/g07-crt.candidate';
+import g01WarpNebula from '../visualizer/presets/gen/g01-warp-nebula.candidate';
+import g06Orrery from '../visualizer/presets/gen/g06-orrery.candidate';
+import g01OdysseyDrift from '../visualizer/presets/gen/g01-odyssey-drift.candidate';
+import g05OdysseyCracks from '../visualizer/presets/gen/g05-odyssey-cracks.candidate';
+import g03ChargeBloom from '../visualizer/presets/gen/g03-charge-bloom.candidate';
+import g06Nursery from '../visualizer/presets/gen/g06-nursery.candidate';
 import { createAndroidFeed, type HostFrame } from './feed';
 
 interface HostBridge {
@@ -29,19 +53,19 @@ declare global {
   }
 }
 
-/** Top-rated genepool presets (score v3, genepool.json) — voyage and the materia line first. */
-const PRESETS: Array<[string, VisualizerPreset]> = [
-  ['voyage', voyagePreset],
-  ['g02-voyage-prime', g02VoyagePrime],
-  ['g05-materia-shards', g05MateriaShards],
-  ['g02-materia', g02Materia],
-  ['g03-materia-deep', g03MateriaDeep],
-  ['g07-materia-metric', g07MateriaMetric],
-  ['g03-solar-crown', g03SolarCrown],
-  ['g07-seasons-neon', g07SeasonsNeon],
-  ['tunnel', tunnelPreset],
-  ['g04-tunnel-saga', g04TunnelSaga],
-];
+const MODULES: Record<string, VisualizerPreset> = {
+  voyage: voyagePreset, tunnel: tunnelPreset, aurora: auroraPreset, nova: novaPreset, plasma: plasmaPreset,
+  odyssey: odysseyPreset, silk: silkPreset, strata: strataPreset, siphon: siphonPreset, orbit: orbitPreset,
+  pulse: pulsePreset, ladder: ladderPreset,
+  'g02-voyage-prime': g02VoyagePrime, 'g05-materia-shards': g05MateriaShards, 'g02-materia': g02Materia,
+  'g03-materia-deep': g03MateriaDeep, 'g07-materia-metric': g07MateriaMetric, 'g04-materia-arc': g04MateriaArc,
+  'g05-materia-mercury': g05MateriaMercury, 'g03-solar-crown': g03SolarCrown, 'g07-seasons-neon': g07SeasonsNeon,
+  'g07-voyage-hardcut': g07VoyageHardcut, 'g05-voyage-deckmix': g05VoyageDeckmix, 'g04-tunnel-saga': g04TunnelSaga,
+  'g05-tunnel-deckmix': g05TunnelDeckmix, 'g02-mirror-ladder': g02MirrorLadder, 'g07-crt': g07Crt,
+  'g01-warp-nebula': g01WarpNebula, 'g06-orrery': g06Orrery, 'g01-odyssey-drift': g01OdysseyDrift,
+  'g05-odyssey-cracks': g05OdysseyCracks, 'g03-charge-bloom': g03ChargeBloom, 'g06-nursery': g06Nursery,
+};
+const PRESETS: Array<[string, VisualizerPreset]> = PHONE_PRESETS.map(([id]) => [id, MODULES[id]]);
 
 export interface VizOptions {
   /** Backing-store scale relative to CSS px × devicePixelRatio. */

@@ -91,6 +91,9 @@ class SyncClient(
         JSONObject(text)
     }
 
+    /** POST a JSON body to /api/device-sync[path] (extension pushes, e.g. #401 viz ratings). */
+    fun post(path: String, body: JSONObject): JSONObject = postJson(path, body)
+
     /** Push journaled edits (#375); returns uuid → applied | superseded | rejected. */
     fun pushEdits(edits: List<JournaledEdit>): Map<String, String> {
         val outcomes = postJson("/edits", editsBody(edits)).getJSONObject("outcomes")

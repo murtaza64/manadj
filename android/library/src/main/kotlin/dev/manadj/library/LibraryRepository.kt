@@ -69,6 +69,9 @@ class LibraryRepository(
     private val audioLocks = ConcurrentHashMap<Int, Mutex>()
     private val previewCache = ConcurrentHashMap<String, PreviewWaveform>()
 
+    /** Extra pushes run on every [sync] after the edit journal (blocking, on the IO thread). */
+    val extraPushes = java.util.concurrent.CopyOnWriteArrayList<(SyncClient) -> Unit>()
+
     private fun client() = SyncClient(baseUrl, pairCode, deviceToken = deviceToken, deviceId = deviceId, deviceName = deviceName)
 
     val journal = EditJournal(File(root, "edits.jsonl"))
@@ -189,6 +192,8 @@ class LibraryRepository(
                         if (e.status != 404 && e.status != 405) throw e
                     }
                 }
+                // App-side pushes riding the sync (#401 viz ratings); best-effort, never fail the pull.
+                for (push in extraPushes) try { push(client) } catch (e: SyncException) { if (e.unpaired) throw e }
                 running("Snapshot", null)
                 val text = client.snapshotText()
                 val snapshot = SnapshotJson.parse(text)

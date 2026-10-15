@@ -28,14 +28,16 @@ import kotlin.math.*
  * crossfader). No engine meter/FFT is involved.
  */
 object Viz {
-    /** Must match frontend/src/vizEmbed/main.ts PRESETS (ids) — top genepool scores, voyage + materia first. */
-    val PRESETS = listOf(
-        "voyage" to "Voyage", "g02-voyage-prime" to "Voyage Prime", "g05-materia-shards" to "Materia Shards", "g02-materia" to "Materia",
-        "g03-materia-deep" to "Materia Deep", "g07-materia-metric" to "Materia Metric", "g03-solar-crown" to "Solar Crown",
-        "g07-seasons-neon" to "Seasons Neon", "tunnel" to "Tunnel", "g04-tunnel-saga" to "Tunnel Saga",
-    )
+    /** (id, name) best first: assets/viz/presets.json, written by the embed build from frontend/src/vizEmbed/presetList.ts. */
+    var PRESETS: List<Pair<String, String>> = listOf("voyage" to "Voyage"); private set
+    private fun loadPresets(context: Context) {
+        runCatching {
+            val a = org.json.JSONArray(context.assets.open("viz/presets.json").bufferedReader().use { it.readText() })
+            PRESETS = (0 until a.length()).map { a.getJSONObject(it).let { o -> o.getString("id") to o.getString("name") } }
+        }
+    }
     private var prefs: android.content.SharedPreferences? = null
-    private fun p(context: Context) = prefs ?: context.applicationContext.getSharedPreferences("viz", Context.MODE_PRIVATE).also { prefs = it; load(it) }
+    private fun p(context: Context) = prefs ?: context.applicationContext.getSharedPreferences("viz", Context.MODE_PRIVATE).also { prefs = it; loadPresets(context.applicationContext); load(it); VizRatings.init(context.applicationContext) }
     var enabled by mutableStateOf(false); private set
     var preset by mutableStateOf("voyage"); private set
     /** Canvas opacity over black (the UI stays readable). */
@@ -78,6 +80,7 @@ class VizHost(private val model: PlayerModel, private val ux: UiModel) {
         val now = System.nanoTime()
         val j = StringBuilder(512).append("{\"decks\":[")
         var first = true
+        var loudest = 0.0; var loudestTrack: Int? = null
         for (id in model.visibleDecks) {
             val ui = model.decks.getValue(id)
             val s = ui.snapshot ?: continue
@@ -91,6 +94,8 @@ class VizHost(private val model: PlayerModel, private val ux: UiModel) {
             if (wave == null) bands.fill(0f) else bandsAt(wave, pos, bands)
             for (k in 0..7) bands[k] *= strip.gain * (if (k < 3) strip.low else if (k < 5) strip.mid else strip.high) * filterGain(s.filter, k)
             val xf = if (!ux.crossfaderEnabled) 1.0 else if (id == DeckId.A) ((1 - model.crossfade) * 2).coerceAtMost(1.0) else (model.crossfade * 2).coerceAtMost(1.0)
+            val g = s.fader * xf
+            if (playing && g > loudest) { loudest = g; loudestTrack = dev.manadj.app.library.LibraryHolder.trackOn(model, id) }
             if (!first) j.append(',')
             first = false
             j.append("{\"ch\":\"").append(id.name).append("\",\"bands\":[")
@@ -101,6 +106,7 @@ class VizHost(private val model: PlayerModel, private val ux: UiModel) {
                 .append(",\"eq\":[").append(s.eq.getOrElse(0) { .5 }).append(',').append(s.eq.getOrElse(1) { .5 }).append(',').append(s.eq.getOrElse(2) { .5 })
                 .append("],\"fader\":").append(s.fader).append(",\"trackId\":").append(dev.manadj.app.library.LibraryHolder.trackOn(model, id) ?: "null").append('}')
         }
+        VizRatings.contextTrackId = loudestTrack
         j.append("],\"panes\":")
         if (Glass.on) Glass.panesJson(j) else j.append("[]")
         return j.append('}').toString()
@@ -183,8 +189,21 @@ class VizHost(private val model: PlayerModel, private val ux: UiModel) {
         Key(if (on) "ON" else "OFF", Modifier.width(64.dp).fillMaxHeight(), Ink.accent, engaged = on, description = "Visualizer backdrop", textSize = 12, style = KeyStyle.PILL) { Viz.set(context, enabled = !on) }
     }
     if (!on) return
+    // #401: rate what is on screen now (thumbs; queued offline, pushed to the desktop on sync).
+    val current = Viz.PRESETS.firstOrNull { it.first == Viz.preset }
+    val verdict = VizRatings.latest[Viz.preset]
+    Row(Modifier.fillMaxWidth().height(44.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        Key("‹", Modifier.width(40.dp).fillMaxHeight(), Ink.accent, description = "Previous preset", textSize = 16, style = KeyStyle.PILL) { Viz.step(context, -1) }
+        Column(Modifier.weight(1f)) {
+            Text(current?.second ?: Viz.preset, bold = true)
+            Text("${VizRatings.pending} rating${if (VizRatings.pending == 1) "" else "s"} to sync", color = Ink.muted, size = 10)
+        }
+        Key("▲", Modifier.width(48.dp).fillMaxHeight(), Ink.play, engaged = verdict == VizRatings.UP, description = "Rate preset up", textSize = 14, style = KeyStyle.PILL) { VizRatings.rate(Viz.preset, VizRatings.UP) }
+        Key("▼", Modifier.width(48.dp).fillMaxHeight(), Ink.warning, engaged = verdict == VizRatings.DOWN, description = "Rate preset down", textSize = 14, style = KeyStyle.PILL) { VizRatings.rate(Viz.preset, VizRatings.DOWN) }
+        Key("›", Modifier.width(40.dp).fillMaxHeight(), Ink.accent, description = "Next preset", textSize = 16, style = KeyStyle.PILL) { Viz.step(context, 1) }
+    }
     for (row in Viz.PRESETS.chunked(3)) Row(Modifier.fillMaxWidth().height(36.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-        for ((id, name) in row) Key(name.uppercase(), Modifier.weight(1f).fillMaxHeight(), Ink.accent, engaged = Viz.preset == id, description = "Visualizer preset $name", textSize = 9, style = KeyStyle.PILL) { Viz.set(context, preset = id) }
+        for ((id, name) in row) Key(name.uppercase() + when (VizRatings.latest[id]) { VizRatings.UP -> " ▲"; VizRatings.DOWN -> " ▼"; else -> "" }, Modifier.weight(1f).fillMaxHeight(), Ink.accent, engaged = Viz.preset == id, description = "Visualizer preset $name", textSize = 9, style = KeyStyle.PILL) { Viz.set(context, preset = id) }
         repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
     }
     @Composable fun Stepper(label: String, value: String, down: () -> Unit, up: () -> Unit) =
