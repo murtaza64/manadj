@@ -315,31 +315,39 @@ private enum class PaneKind { LEFT_SLOT, RIGHT_SLOT, BOTH_LEFT, BOTH_RIGHT }
         CompositionLocalProvider(LocalSafeFrame provides stripFrame) {
             Row(Modifier.width(screen).fillMaxHeight().graphicsLayer { translationX = shift.value }.padding(horizontal = 6.dp)) {
                 DeckSide(a, model, ux, pick, Modifier.weight(1f).fillMaxHeight())
-                Column(Modifier.width(mixerWidth).fillMaxHeight().padding(horizontal = DeckGap), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Row(Modifier.fillMaxWidth().weight(1f)) {
-                        KnobColumn(a, ux, model, Modifier.width(54.dp).fillMaxHeight().padding(top = 4.dp), 34.dp)
-                        ChannelFader(a, model, Modifier.width(48.dp).fillMaxHeight())
-                        Row(Modifier.weight(1f).fillMaxHeight().padding(horizontal = 3.dp), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-                            for (ui in listOf(a, b)) DetailWave(ui, model, ux, Modifier.weight(1f).fillMaxHeight(), vertical = true)
-                        }
-                        ChannelFader(b, model, Modifier.width(48.dp).fillMaxHeight())
-                        KnobColumn(b, ux, model, Modifier.width(54.dp).fillMaxHeight().padding(top = 4.dp), 34.dp)
+                // XF off (UH13): the waves leave the knob/fader row and run the full mixer height to the screen edge,
+                // under the XF row (crossfader slot left empty) and the FX card (scrimmed for legibility).
+                val xf = ux.crossfaderEnabled
+                Box(Modifier.width(mixerWidth).fillMaxHeight().padding(horizontal = DeckGap)) {
+                    @Composable fun Waves(m: Modifier) = Row(m, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                        for (ui in listOf(a, b)) DetailWave(ui, model, ux, Modifier.weight(1f).fillMaxHeight(), vertical = true)
                     }
-                    // Symmetric flanks keep the crossfader centred at full width (#153): two stacked equal keys each,
-                    // Q·H over settings left, SESSIONS over BROWSE right (#94 swap).
-                    Row(Modifier.fillMaxWidth().height(80.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        val key = Modifier.width(76.dp).height(36.dp)
-                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            QuantizeKey(model, ux, key)
-                            Key("", key, Ink.muted, description = "Settings", icon = Glyph.Gear, style = KeyStyle.PILL) { ux.settings = true }
+                    if (!xf) Waves(Modifier.fillMaxHeight().fillMaxWidth().padding(horizontal = 54.dp + 48.dp + 3.dp))
+                    Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Row(Modifier.fillMaxWidth().weight(1f)) {
+                            KnobColumn(a, ux, model, Modifier.width(54.dp).fillMaxHeight().padding(top = 4.dp), 34.dp)
+                            ChannelFader(a, model, Modifier.width(48.dp).fillMaxHeight())
+                            if (xf) Waves(Modifier.weight(1f).fillMaxHeight().padding(horizontal = 3.dp)) else Spacer(Modifier.weight(1f))
+                            ChannelFader(b, model, Modifier.width(48.dp).fillMaxHeight())
+                            KnobColumn(b, ux, model, Modifier.width(54.dp).fillMaxHeight().padding(top = 4.dp), 34.dp)
                         }
-                        Crossfader(model, ux, Modifier.weight(1f).height(44.dp))
-                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            SessionsKey(ux, key, textSize = 10)
-                            BrowseKey(model, ux, key)
+                        // Symmetric flanks keep the crossfader centred at full width (#153): two stacked equal keys each,
+                        // Q·H over settings left, SESSIONS over BROWSE right (#94 swap).
+                        Row(Modifier.fillMaxWidth().height(80.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            val key = Modifier.width(76.dp).height(36.dp)
+                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                QuantizeKey(model, ux, key)
+                                Key("", key, Ink.muted, description = "Settings", icon = Glyph.Gear, style = KeyStyle.PILL) { ux.settings = true }
+                            }
+                            if (xf) Crossfader(model, ux, Modifier.weight(1f).height(44.dp)) else Spacer(Modifier.weight(1f))
+                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                SessionsKey(ux, key, textSize = 10)
+                                BrowseKey(model, ux, key)
+                            }
                         }
+                        FxSection(ux, model, Modifier.fillMaxWidth().height(54.dp).padding(bottom = 4.dp)
+                            .then(if (xf) Modifier else Modifier.background(Ink.background.copy(alpha = .82f), androidx.compose.foundation.shape.RoundedCornerShape(10.dp))), horizontal = true)
                     }
-                    FxSection(ux, model, Modifier.fillMaxWidth().height(54.dp).padding(bottom = 4.dp), horizontal = true)
                 }
                 DeckSide(b, model, ux, pick, Modifier.weight(1f).fillMaxHeight())
             }
