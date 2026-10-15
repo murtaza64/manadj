@@ -209,6 +209,12 @@ fun mixOf(model: PlayerModel, ux: UiModel, id: DeckId): DeckMix {
             Column(pad.onGloballyPositioned { sheetTop = (it.positionInParent().y + it.size.height).toInt() }, verticalArrangement = Arrangement.spacedBy(3.dp)) {
                 for (ui in listOf(a, b)) DetailWave(ui, model, ux, Modifier.fillMaxWidth().height(waveHeight))
             }
+            // UH21: the sheet pushes everything below the waves up and out (clipped under the waves) instead of
+            // covering it. Body below kept at its old indentation so concurrent lane edits merge cleanly.
+            Box(Modifier.fillMaxWidth().weight(1f).clipToBounds()) { Column(Modifier.fillMaxSize().graphicsLayer {
+                val push = (sheet.height - sheet.offset).coerceIn(0f, sheet.height)
+                translationY = -push; alpha = if (push >= size.height - 1f && push > 0f) 0f else 1f
+            }, verticalArrangement = Arrangement.spacedBy(gap)) {
             Row(pad.fillMaxWidth().weight(1f)) {
                 KnobColumn(a, ux, model, Modifier.width(58.dp).fillMaxHeight())
                 ChannelFader(a, model, Modifier.width(54.dp).fillMaxHeight())
@@ -246,8 +252,9 @@ fun mixOf(model: PlayerModel, ux: UiModel, id: DeckId): DeckMix {
                     for (id in listOf(DeckId.A, DeckId.B)) Box(Modifier.weight(1f).fillMaxHeight()) { PitchArea(model, ux, id, Modifier.fillMaxSize()) }
                 }
             }
+            } } // UH21 push wrapper
         }
-        // The browser sheet covers everything below the waves (CUE/PLAY row at its foot); translate-only (#132).
+        // The browser sheet takes everything below the waves (CUE/PLAY row at its foot); translate-only (#132).
         val topDp = with(LocalDensity.current) { sheetTop.toDp() }
         BrowserSheet(sheet, Modifier.fillMaxSize().padding(top = topDp)) {
             Column(Modifier.fillMaxSize().background(Ink.background)) {
@@ -317,10 +324,16 @@ private enum class PaneKind { LEFT_SLOT, RIGHT_SLOT, BOTH_LEFT, BOTH_RIGHT }
         var pane by remember { mutableStateOf<PaneKind?>(null) }
         var paneTarget by remember { mutableStateOf<DeckId?>(null) }
         LaunchedEffect(kind, targetDeck) { if (kind != null) { pane = kind; paneTarget = if (kind == PaneKind.BOTH_LEFT || kind == PaneKind.BOTH_RIGHT) null else targetDeck } }
+        // UH21: the wide pane's covered deck fades out as the pane slides over it (slot panes push the deck off-screen).
+        fun covered(id: DeckId) = when {
+            id == DeckId.A && pane == PaneKind.BOTH_LEFT -> (shift.value / sidePx).coerceIn(0f, 1f)
+            id == DeckId.B && pane == PaneKind.BOTH_RIGHT -> (-shift.value / sidePx).coerceIn(0f, 1f)
+            else -> 0f
+        }
         val stripFrame = remember(shift) { SafeFrame { shift.value } }
         CompositionLocalProvider(LocalSafeFrame provides stripFrame) {
             Row(Modifier.width(screen).fillMaxHeight().graphicsLayer { translationX = shift.value }.padding(horizontal = 6.dp)) {
-                DeckSide(a, model, ux, pick, Modifier.weight(1f).fillMaxHeight())
+                DeckSide(a, model, ux, pick, Modifier.weight(1f).fillMaxHeight().graphicsLayer { alpha = 1f - covered(DeckId.A) })
                 // XF off (UH13): the waves leave the knob/fader row and run the full mixer height to the screen edge,
                 // under the XF row (crossfader slot left empty) and the FX card (scrimmed for legibility).
                 val xf = ux.crossfaderEnabled
@@ -355,7 +368,7 @@ private enum class PaneKind { LEFT_SLOT, RIGHT_SLOT, BOTH_LEFT, BOTH_RIGHT }
                             .then(if (xf) Modifier else Modifier.background(Ink.background.copy(alpha = .82f), androidx.compose.foundation.shape.RoundedCornerShape(10.dp))), horizontal = true)
                     }
                 }
-                DeckSide(b, model, ux, pick, Modifier.weight(1f).fillMaxHeight())
+                DeckSide(b, model, ux, pick, Modifier.weight(1f).fillMaxHeight().graphicsLayer { alpha = 1f - covered(DeckId.B) })
             }
         }
         val k = pane
