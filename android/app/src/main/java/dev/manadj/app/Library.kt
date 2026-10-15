@@ -3,6 +3,8 @@ package dev.manadj.app
 import androidx.compose.foundation.*
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.foundation.layout.*
@@ -38,7 +40,8 @@ private val ADDED = DateTimeFormatter.ofPattern("dd MMM")
     val color = Ink.accent
     androidx.activity.compose.BackHandler(model.browser != null && ux.path.size > 2) { ux.back() }
     LaunchedEffect(ux.filter, ux.selectedRow, ux.path) { ux.saveBrowse() }
-    Column(modifier.background(Ink.background).clickable(interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }, indication = null) {}.padding(horizontal = 8.dp)) {
+    // Hit target over the controls beneath without consuming (a clickable would eat the down and block the sheet drag).
+    Column(modifier.background(Ink.background).pointerInput(Unit) { awaitEachGesture { awaitFirstDown(requireUnconsumed = false) } }.padding(horizontal = 8.dp)) {
         Row(Modifier.fillMaxWidth().height(40.dp), verticalAlignment = Alignment.CenterVertically) {
             if (tapTarget != null) {
                 Text("LOAD → $tapTarget", color = deckColor(tapTarget), size = 15, bold = true)

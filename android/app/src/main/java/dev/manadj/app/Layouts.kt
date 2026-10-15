@@ -12,6 +12,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -189,20 +190,14 @@ fun mixOf(model: PlayerModel, ux: UiModel, id: DeckId): DeckMix {
     val bottomBlock = ControlRow * 3 + TransportRow + 40.dp + gap * 4
     val waveHeight = if (tight) 50.dp else 66.dp
     val pad = Modifier.padding(horizontal = Gap)
-    Box(modifier) {
-        Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(gap)) {
+    val sheet = rememberBrowserSheet(model, ux)
+    var sheetTop by remember { mutableIntStateOf(0) }
+    Box(modifier.clipToBounds()) {
+        Column(Modifier.fillMaxSize().browserSwipeUp(sheet), verticalArrangement = Arrangement.spacedBy(gap)) {
             TopBar(model, pad.fillMaxWidth().height(maxOf(band, 44.dp)))
             if (ux.outputDebug) Box(pad) { OutputLine(model) }
-            Column(pad, verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            Column(pad.onGloballyPositioned { sheetTop = (it.positionInParent().y + it.size.height).toInt() }, verticalArrangement = Arrangement.spacedBy(3.dp)) {
                 for (ui in listOf(a, b)) DetailWave(ui, model, ux, Modifier.fillMaxWidth().height(waveHeight))
-            }
-            // The browser replaces the controls region (full-bleed); waves above and CUE/PLAY below stay.
-            if (model.browser != null) {
-                LibraryPanel(model, ux, Modifier.fillMaxWidth().weight(1f), pick, tapTarget = null)
-                Row(pad.fillMaxWidth().height(TransportRow).screenSafe(), horizontalArrangement = Arrangement.spacedBy(DeckGap)) {
-                    for (ui in listOf(a, b)) Row(Modifier.weight(1f).fillMaxHeight()) { CueKey(ui, model, Modifier.weight(1f).fillMaxHeight()); PlayKey(ui, model, Modifier.weight(1f).fillMaxHeight()) }
-                }
-                return@Column
             }
             Row(pad.fillMaxWidth().weight(1f)) {
                 KnobColumn(a, ux, model, Modifier.width(58.dp).fillMaxHeight())
@@ -238,6 +233,16 @@ fun mixOf(model: PlayerModel, ux: UiModel, id: DeckId): DeckMix {
                 }
                 Row(Modifier.matchParentSize().then(pad), horizontalArrangement = Arrangement.spacedBy(DeckGap)) {
                     for (id in listOf(DeckId.A, DeckId.B)) Box(Modifier.weight(1f).fillMaxHeight()) { PitchArea(model, ux, id, Modifier.fillMaxSize()) }
+                }
+            }
+        }
+        // The browser sheet covers everything below the waves (CUE/PLAY row at its foot); translate-only (#132).
+        val topDp = with(LocalDensity.current) { sheetTop.toDp() }
+        BrowserSheet(sheet, Modifier.fillMaxSize().padding(top = topDp)) {
+            Column(Modifier.fillMaxSize().background(Ink.background)) {
+                LibraryPanel(model, ux, Modifier.fillMaxWidth().weight(1f), pick, tapTarget = null)
+                Row(pad.fillMaxWidth().height(TransportRow).screenSafe(), horizontalArrangement = Arrangement.spacedBy(DeckGap)) {
+                    for (ui in listOf(a, b)) Row(Modifier.weight(1f).fillMaxHeight()) { CueKey(ui, model, Modifier.weight(1f).fillMaxHeight()); PlayKey(ui, model, Modifier.weight(1f).fillMaxHeight()) }
                 }
             }
         }
@@ -368,6 +373,7 @@ private enum class PaneKind { LEFT_SLOT, RIGHT_SLOT, BOTH_LEFT, BOTH_RIGHT }
 private fun Modifier.waveTouch(ui: DeckUi, model: PlayerModel, ux: UiModel, vertical: Boolean): Modifier = pointerInput(ui.id, vertical) {
     awaitEachGesture {
         val first = awaitFirstDown(requireUnconsumed = false)
+        first.consume() // the wave owns its touches (no browser swipe-up from a wave, #132)
         val playing = ui.snapshot?.playing == true
         val scratchMode = model.supports("scratch") && ui.ready && (ux.vinyl[ui.id] == true || !playing)
         val canScrub = ui.ready && model.supports("seek")
