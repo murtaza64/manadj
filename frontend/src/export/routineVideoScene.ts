@@ -791,7 +791,7 @@ function drawGridAndCues(
     const bx = Math.round(xOf(bt));
     ctx.fillRect(bx - (down || phrase ? 1 : 0), 0, phrase ? 4 : down ? 3 : 1, h);
   }
-  for (const cue of lf.track.hotCues) {
+  for (const cue of look.showCues ? lf.track.hotCues : []) {
     if (cue.time_seconds < t0 - 1 || cue.time_seconds > t1 + 1) continue;
     const cx = xOf(cue.time_seconds);
     const color = cueCssColor(cue.slot_number, cue.color);

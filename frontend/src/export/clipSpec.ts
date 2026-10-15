@@ -118,6 +118,8 @@ export interface ClipLook {
   phraseCountdown: boolean;
   /** Beat grid lines on the waveforms. */
   showGrid: boolean;
+  /** Hot cue flags (numbered pins) on the waveforms. */
+  showCues: boolean;
   /** Top HUD bar (bar/phrase readout, beat pips, master meter). Off: the
    * beat lives in the controls' pulse instead. */
   showHeader: boolean;
@@ -172,6 +174,7 @@ export const DEFAULT_LOOK: ClipLook = {
   revealAtDrop: false,
   phraseCountdown: true,
   showGrid: false,
+  showCues: true,
   showHeader: false,
 };
 
