@@ -9,6 +9,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.runtime.*
+import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
@@ -80,7 +81,15 @@ private fun dateLabel(iso: String): String = local(iso)?.let { "${it.format(dayF
     val now = remember(all) { java.time.Instant.now() }
     val days = remember(all) { groupSessionsByDay(all, now = now) }
     val expanded = rememberSaveable(saver = listSaver(save = { it.toList() }, restore = { it.toMutableStateList() })) { mutableStateListOf<String>() }
-    LazyColumn(Modifier.fillMaxSize().testTag("session-list"), contentPadding = PaddingValues(bottom = 16.dp)) {
+    // Always opens at the top (newest). Rows arrive in stages (cached list, this phone's recordings, the refresh),
+    // and LazyColumn keeps its first visible key when items are inserted above it, which would leave the list
+    // parked on an older day: stay pinned to the top until the user scrolls.
+    val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+    var userScrolled by remember { mutableStateOf(false) }
+    val dragged by listState.interactionSource.collectIsDraggedAsState()
+    LaunchedEffect(dragged) { if (dragged) userScrolled = true }
+    LaunchedEffect(days.firstOrNull()?.day, days.firstOrNull()?.sessions?.firstOrNull()?.uuid) { if (!userScrolled) listState.scrollToItem(0) }
+    LazyColumn(Modifier.fillMaxSize().testTag("session-list"), state = listState, contentPadding = PaddingValues(bottom = 16.dp)) {
         for (day in days) {
             val key = day.day.toString()
             val open = key in expanded
