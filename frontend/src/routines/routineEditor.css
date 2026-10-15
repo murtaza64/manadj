@@ -1070,6 +1070,7 @@
   background: var(--playhead); /* Transport playhead (D6 registry) */
   pointer-events: none;
   z-index: 1; /* under the slot panel's dim (gh#190 iteration) */
+  will-change: transform; /* own layer: the per-frame move skips paint (desktop-perf #385) */
 }
 
 .rt-trimhandle {

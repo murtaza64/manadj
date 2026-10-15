@@ -1053,6 +1053,7 @@ export function RoutineTimeline({
 
   // ── Playhead (rAF-driven; div transform only — the editor's pink) ────
   useEffect(() => {
+    if (!viewActive) return; // hidden keep-alive view: no per-frame work
     let raf = 0;
     let lastPx = NaN;
     const loop = () => {
@@ -1070,7 +1071,7 @@ export function RoutineTimeline({
     };
     raf = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(raf);
-  }, [player]);
+  }, [player, viewActive]);
 
   // ── Derived render model ─────────────────────────────────────────────
   const gridBeats = useMemo(

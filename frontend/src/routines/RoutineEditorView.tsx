@@ -1586,19 +1586,28 @@ export default function RoutineEditorView() {
 
   // ── Transport readout (rAF text — beats advance continuously) ────────
   const beatReadoutRef = useRef<HTMLSpanElement>(null);
+  // Hidden keep-alive view: no loop. Text writes only on change — an
+  // unconditional textContent write is a DOM mutation (style + paint)
+  // every frame, even paused (desktop-perf #385).
   useEffect(() => {
+    if (!viewActive) return;
     let raf = 0;
+    let last = '';
     const loop = () => {
       const el = beatReadoutRef.current;
       if (el && editor) {
         const beat = player.getBeat();
-        el.textContent = `${beatLabel(beat)} b · ${secondsLabel(beat * editor.planned.secPerBeat)}`;
+        const text = `${beatLabel(beat)} b · ${secondsLabel(beat * editor.planned.secPerBeat)}`;
+        if (text !== last || el.textContent !== text) {
+          last = text;
+          el.textContent = text;
+        }
       }
       raf = requestAnimationFrame(loop);
     };
     raf = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(raf);
-  }, [player, editor]);
+  }, [player, editor, viewActive]);
 
   const onSeekBeat = useCallback(
     (beat: number) => {
