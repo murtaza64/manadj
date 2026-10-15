@@ -36,10 +36,11 @@ private val ADDED = DateTimeFormatter.ofPattern("dd MMM")
  * drill-down in narrow panes, tree + tracks side by side when the pane is wide. Rows load by swipe: left → deck A,
  * right → deck B. [tapTarget]: landscape loads a tapped row into this (visible) deck.
  */
-@Composable fun LibraryPanel(model: PlayerModel, ux: UiModel, modifier: Modifier, pick: (DeckId) -> Unit, tapTarget: DeckId? = null) {
+@Composable fun LibraryPanel(model: PlayerModel, ux: UiModel, modifier: Modifier, pick: (DeckId) -> Unit, tapTarget: DeckId? = null, sidebar: Boolean = false) {
     val color = Ink.accent
     androidx.activity.compose.BackHandler(model.browser != null && ux.path.size > 2) { ux.back() }
     LaunchedEffect(ux.filter, ux.selectedRow, ux.path) { ux.saveBrowse() }
+    if (sidebar) { SidebarBrowser(model, ux, modifier, pick, tapTarget); return }
     // Hit target over the controls beneath without consuming (a clickable would eat the down and block the sheet drag).
     Column(modifier.background(Ink.background).pointerInput(Unit) { awaitEachGesture { awaitFirstDown(requireUnconsumed = false) } }.padding(horizontal = 8.dp)) {
         Row(Modifier.fillMaxWidth().height(40.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -129,9 +130,10 @@ private fun followDecks(model: PlayerModel, ux: UiModel): List<DeckId> {
     }
 }
 
-/** A track source: header, sort + downloaded toggle, Follow bar, rows. */
-@Composable private fun TrackPane(model: PlayerModel, ux: UiModel, node: BrowseNode, pick: (DeckId) -> Unit, tapTarget: DeckId?, modifier: Modifier) {
-    val ctx = androidx.compose.ui.platform.LocalContext.current
+/** One track source's rows and Follow state, shared by the portrait pane and the landscape sidebar. */
+private class BrowseData(val decks: List<DeckId>, val refs: List<Long>, val followById: Map<Long, FollowCandidate>?, val rows: List<LibraryTrack>, val downloadedIds: Set<Long>)
+
+@Composable private fun rememberBrowseData(model: PlayerModel, ux: UiModel, node: BrowseNode): BrowseData {
     val isFollow = node == BrowseNode.Follow
     val decks by remember { derivedStateOf { followDecks(model, ux) } }
     val refs = decks.mapNotNull { d -> dev.manadj.app.library.LibraryHolder.trackOn(model, d)?.toLong() }.distinct()
@@ -142,9 +144,17 @@ private fun followDecks(model: PlayerModel, ux: UiModel): List<DeckId> {
         }
     }
     val followById = remember(follow) { follow?.associateBy { it.trackId } }
-    val all = remember(ux.library, node, ux.filter, follow, ux.played.size, ux.downloads) { ux.library.rows(node, ux.filter, follow, ux.played.toList(), ignoreDownloaded = true) }
+    val all = remember(ux.library, node, ux.filter, follow, ux.played.size, ux.downloads) { if (!node.hasTracks) emptyList() else ux.library.rows(node, ux.filter, follow, ux.played.toList(), ignoreDownloaded = true) }
     val downloadedIds = remember(all, ux.downloads) { all.filter { ux.library.downloaded(it.id) }.mapTo(HashSet()) { it.id } }
     val rows = if (ux.filter.downloadedOnly) all.filter { it.id in downloadedIds } else all
+    return BrowseData(decks, refs, followById, rows, downloadedIds)
+}
+
+/** A track source: header, sort + downloaded toggle, Follow bar, rows. */
+@Composable private fun TrackPane(model: PlayerModel, ux: UiModel, node: BrowseNode, pick: (DeckId) -> Unit, tapTarget: DeckId?, modifier: Modifier) {
+    val data = rememberBrowseData(model, ux, node)
+    val isFollow = node == BrowseNode.Follow
+    val rows = data.rows; val downloadedIds = data.downloadedIds; val decks = data.decks
     Column(modifier) {
         Row(Modifier.fillMaxWidth().padding(top = 2.dp, bottom = 2.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(ux.library.title(node).uppercase() + " · ${rows.size}" + when { ux.syncState.running || ux.syncState.cacheStale -> " · syncing…"; ux.syncState.lastSynced != null -> " · " + java.time.format.DateTimeFormatter.ofPattern("HH:mm").withZone(java.time.ZoneId.systemDefault()).format(ux.syncState.lastSynced); else -> "" }, Modifier.weight(1f), Ink.muted, 10, true)
@@ -161,12 +171,21 @@ private fun followDecks(model: PlayerModel, ux: UiModel): List<DeckId> {
         }
         if (isFollow) FollowBar(model, ux, decks)
         if (node is BrowseNode.Playlist && ux.synced != null) BulkDownload(ux, node.id.toInt(), compact = true)
-        val local = node == BrowseNode.Collection
-        if (local) Row(Modifier.fillMaxWidth().height(36.dp), verticalAlignment = Alignment.CenterVertically) {
+        if (node == BrowseNode.Collection) Row(Modifier.fillMaxWidth().height(36.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("ON THIS PHONE", Modifier.weight(1f), Ink.muted, 10, true)
             Text("FILE →", color = Ink.muted, size = 10, bold = true)
             for (id in model.visibleDecks) { Spacer(Modifier.width(4.dp)); Key(id.name, Modifier.width(52.dp).fillMaxHeight(), deckColor(id), model.supports("play"), description = "Choose audio file for $id", style = KeyStyle.PILL) { pick(id) } }
         }
+        TrackList(model, ux, node, data, tapTarget, Modifier.weight(1f).fillMaxWidth())
+    }
+}
+
+/** The rows of a track source (scroll position remembered per source, Follow section headers in rank order). */
+@Composable private fun TrackList(model: PlayerModel, ux: UiModel, node: BrowseNode, data: BrowseData, tapTarget: DeckId?, modifier: Modifier, dense: Boolean = false) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val isFollow = node == BrowseNode.Follow
+    val rows = data.rows; val downloadedIds = data.downloadedIds; val followById = data.followById; val refs = data.refs
+    val local = node == BrowseNode.Collection
         // Remember the view per source (#55/U20): restore by row key (nearest index when the row is gone).
         val source = node.key
         val localCount = if (local) model.sources.size else 0
@@ -193,7 +212,7 @@ private fun followDecks(model: PlayerModel, ux: UiModel): List<DeckId> {
         val playOrder = remember(ux.library, node) { (node as? BrowseNode.Playlist)?.let { n -> ux.library.playlists().firstOrNull { it.id == n.id }?.trackIds?.withIndex()?.associate { (i, t) -> t to i + 1 } } }
         // Follow section headers (desktop rankLabel) while the list is in rank order.
         val sections = isFollow && ux.filter.sort == LibrarySort.RANK
-        LazyColumn(Modifier.weight(1f).fillMaxWidth(), state = listState) {
+        LazyColumn(modifier, state = listState) {
             if (local) items(model.sources, key = { "local:" + it.id }, contentType = { "local" }) { source ->
                 SwipeToLoad(source.title, Modifier.fillMaxWidth(), { model.requestImport(it, source.uri) }) {
                     Row(Modifier.fillMaxWidth().height(48.dp).then(if (tapTarget != null) Modifier.clickable { model.requestImport(tapTarget, source.uri) } else Modifier).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -210,14 +229,13 @@ private fun followDecks(model: PlayerModel, ux: UiModel): List<DeckId> {
                 }
                 item(key = "lib:" + track.id, contentType = "track") {
                     SwipeToLoad(track.title, Modifier.fillMaxWidth(), { ux.loadRow(model, it, track.id) }) {
-                        TrackRow(track, c?.takeIf { it.label != "Following" }, ux, playOrder?.get(track.id), onDecks[track.id], track.id in ux.played, keyRelation(reference, toOpenKey(track.key)), track.id in downloadedIds) {
+                        TrackRow(track, c?.takeIf { it.label != "Following" }, ux, playOrder?.get(track.id), onDecks[track.id], track.id in ux.played, keyRelation(reference, toOpenKey(track.key)), track.id in downloadedIds, dense) {
                             dev.manadj.app.library.LibraryHolder.prefetch(ctx, track.id.toInt()); if (tapTarget != null) ux.loadRow(model, tapTarget, track.id) else ux.selectedRow = track.id
                         }
                     }
                 }
             }
         }
-    }
 }
 
 @Composable private fun FilterControls(ux: UiModel) {
@@ -261,10 +279,139 @@ private fun followDecks(model: PlayerModel, ux: UiModel): List<DeckId> {
     }
 }
 
-@Composable fun Chip(text: String, color: Color, on: Boolean, flip: () -> Unit) {
+/**
+ * Landscape browser (#149): a narrow sidebar holds search, the source tree and every control (sort, ON PHONE,
+ * filters, Follow, local files), so the track list keeps full height under a one-line header. Tapping the selected
+ * sidebar entry hides the sidebar (list goes full width); tapping the source label in the header brings it back.
+ * Remembered ([UiModel.browseSidebar]).
+ */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable private fun SidebarBrowser(model: PlayerModel, ux: UiModel, modifier: Modifier, pick: (DeckId) -> Unit, tapTarget: DeckId?) {
+    val node = ux.node
+    val data = rememberBrowseData(model, ux, node)
+    BoxWithConstraints(modifier.background(Ink.background).pointerInput(Unit) { awaitEachGesture { awaitFirstDown(requireUnconsumed = false) } }) {
+        val sideWidth = (maxWidth * .38f).coerceIn(150.dp, 210.dp)
+        Row(Modifier.fillMaxSize()) {
+            if (ux.browseSidebar) {
+                Sidebar(model, ux, node, data, pick, Modifier.width(sideWidth).fillMaxHeight())
+                Box(Modifier.width(1.dp).fillMaxHeight().background(Ink.surface0))
+            }
+            Column(Modifier.weight(1f).fillMaxHeight().padding(horizontal = 6.dp)) {
+                // One-line header: source (toggles the sidebar) · count · sort; load target + FLIP.
+                Row(Modifier.fillMaxWidth().height(30.dp), verticalAlignment = Alignment.CenterVertically) {
+                    val label = (if (ux.browseSidebar) "◂ " else "☰ ") + ux.library.title(node).uppercase()
+                    Text(label, Modifier.clip(RoundedCornerShape(4.dp)).clickable { ux.browseSidebar = !ux.browseSidebar }.semantics { contentDescription = "Toggle browser sidebar" }.padding(horizontal = 4.dp, vertical = 5.dp), Ink.accent, 12, true)
+                    Text(if (node.hasTracks) " ${data.rows.size} · ${ux.filter.sort.label} ${if (ux.filter.descending) "▼" else "▲"}" else "", Modifier.weight(1f), Ink.muted, 10, true)
+                    if (tapTarget != null) {
+                        Text("→ $tapTarget ", color = deckColor(tapTarget), size = 12, bold = true)
+                        Chip("FLIP", deckColor(other(tapTarget)), false, small = true) { model.browser = tapTarget }
+                    }
+                }
+                when {
+                    node.hasTracks -> TrackList(model, ux, node, data, tapTarget, Modifier.weight(1f).fillMaxWidth(), dense = true)
+                    !ux.browseSidebar -> NodeList(ux, node, null, Modifier.weight(1f).fillMaxWidth())
+                    else -> Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) { Text("pick a source", color = Ink.muted, size = 12) }
+                }
+            }
+        }
+    }
+}
+
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable private fun Sidebar(model: PlayerModel, ux: UiModel, node: BrowseNode, data: BrowseData, pick: (DeckId) -> Unit, modifier: Modifier) {
+    val container = if (node.hasTracks) ux.path.getOrNull(ux.path.size - 2) ?: BrowseNode.Root else node
+    val entries = remember(ux.library, container, ux.filter, ux.played.size, ux.downloads) { ux.library.children(container, ux.filter, ux.played.toList()) }
+    val f = ux.filter
+    val gap = Arrangement.spacedBy(4.dp)
+    androidx.compose.foundation.lazy.LazyColumn(modifier.padding(start = 6.dp, end = 4.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+        item(key = "search") {
+            Row(Modifier.fillMaxWidth().padding(top = 3.dp).height(32.dp).clip(RoundedCornerShape(50)).background(Ink.crust).border(1.dp, Ink.surface, RoundedCornerShape(50)).padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                GlyphIcon(Glyph.Search, Ink.muted, 12.dp); Spacer(Modifier.width(6.dp))
+                Box(Modifier.weight(1f)) {
+                    if (f.text.isEmpty()) Text("search", color = Ink.surface2, size = 12)
+                    BasicTextField(f.text, { ux.filter = ux.filter.copy(text = it) }, Modifier.fillMaxWidth().semantics { contentDescription = "Search library" }, singleLine = true, textStyle = TextStyle(color = Ink.text, fontSize = 12.sp, fontFamily = Mono), cursorBrush = SolidColor(Ink.accent))
+                }
+            }
+        }
+        item(key = "crumb") {
+            Row(Modifier.fillMaxWidth().height(28.dp), verticalAlignment = Alignment.CenterVertically) {
+                Key("‹", Modifier.width(34.dp).height(26.dp), Ink.accent, ux.path.size > 1, description = "Browser back", textSize = 14, style = KeyStyle.PILL) { ux.back() }
+                Text("  " + ux.library.title(container).uppercase(), Modifier.weight(1f), Ink.muted, 10, true)
+            }
+        }
+        items(entries, key = { "e:" + it.node.key }) { e ->
+            val on = e.node == node
+            Row(Modifier.fillMaxWidth().height(34.dp).clip(RoundedCornerShape(4.dp)).background(if (on) Ink.accent.copy(alpha = .16f) else Ink.panel)
+                // Tapping the selected entry hides the sidebar (#149).
+                .clickable { if (on) ux.browseSidebar = false else ux.navigate(e.node) }.semantics { contentDescription = "Browse ${e.title}" }.padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                e.color?.let { Box(Modifier.size(8.dp).clip(RoundedCornerShape(50)).background(Color(it))); Spacer(Modifier.width(6.dp)) }
+                if (e.node == BrowseNode.Follow) { GlyphIcon(Glyph.Follow, Ink.play, 12.dp); Spacer(Modifier.width(4.dp)) }
+                Text(e.title, Modifier.weight(1f), Ink.text, 12, true)
+                e.count?.let { Text("$it", color = Ink.muted, size = 10) }
+                if (e.container) Text(" ›", color = Ink.accent, size = 13, bold = true)
+            }
+        }
+        if (node.hasTracks) {
+            item(key = "sort") {
+                Column(Modifier.padding(top = 6.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    Text("SORT", color = Ink.muted, size = 9, bold = true)
+                    FlowRow(horizontalArrangement = gap, verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        for (sort in LibrarySort.entries) if (node.allows(sort)) {
+                            val on = f.sort == sort
+                            Chip(if (on) "${sort.label} ${if (f.descending) "▼" else "▲"}" else sort.label, Ink.accent, on, small = true) { ux.chooseSort(sort) }
+                        }
+                    }
+                }
+            }
+            item(key = "filters") {
+                Column(Modifier.padding(top = 4.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    FlowRow(horizontalArrangement = gap, verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        Chip("● ON PHONE ${data.downloadedIds.size}", Ink.play, f.downloadedOnly, small = true) { ux.filter = ux.filter.copy(downloadedOnly = !ux.filter.downloadedOnly) }
+                        Chip("FILTER", Ink.accent, ux.filtersOpen || f.tags.isNotEmpty() || f.bpmCenter != null, small = true) { ux.filtersOpen = !ux.filtersOpen }
+                    }
+                    if (ux.filtersOpen) FlowRow(horizontalArrangement = gap, verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        val ref = ux.selectedRow?.let { id -> ux.library.tracks().firstOrNull { it.id == id } }
+                        Chip(if (f.bpmCenter != null) "BPM ${f.bpmCenter.toInt()}±${f.bpmTolerance.toInt()}" else "BPM ≈ SEL", Ink.accent, f.bpmCenter != null, small = true) { ux.filter = f.copy(bpmCenter = if (f.bpmCenter != null) null else ref?.bpm) }
+                        for (tag in ux.library.allTags()) {
+                            val on = tag.name in f.tags
+                            Chip(tag.name, Color(tag.color), on, small = true) { ux.filter = f.copy(tags = if (on) f.tags - tag.name else f.tags + tag.name) }
+                        }
+                    }
+                }
+            }
+        }
+        if (node == BrowseNode.Follow) item(key = "follow") {
+            val settings = ux.library.followSettings
+            Column(Modifier.padding(top = 4.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text("FOLLOW " + data.decks.joinToString("+") { it.name }.ifEmpty { "—" }, color = Ink.play, size = 9, bold = true)
+                FlowRow(horizontalArrangement = gap, verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    for (pin in FollowPin.entries) Chip(when (pin) { FollowPin.AUTO -> "AUTO"; FollowPin.BOTH -> "A+B"; else -> pin.name }, when (pin) { FollowPin.A -> deckColor(DeckId.A); FollowPin.B -> deckColor(DeckId.B); else -> Ink.play }, ux.followPin == pin, small = true) { ux.pinFollow(pin) }
+                    Chip("KNOWN", Ink.play, settings.knownOnly, small = true) { ux.editFollow(knownOnly = !settings.knownOnly) }
+                }
+                Row(Modifier.height(28.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = gap) {
+                    Text("T", color = Ink.muted, size = 10, bold = true)
+                    Key("−", Modifier.width(28.dp).fillMaxHeight(), Ink.accent, settings.temperature > 0, description = "Temperature down", textSize = 12, style = KeyStyle.PILL) { ux.editFollow(temperature = kotlin.math.round((settings.temperature - .1) * 10) / 10) }
+                    Text("%.1f".format(settings.temperature), color = Ink.text, size = 11, bold = true)
+                    Key("+", Modifier.width(28.dp).fillMaxHeight(), Ink.accent, settings.temperature < 1, description = "Temperature up", textSize = 12, style = KeyStyle.PILL) { ux.editFollow(temperature = kotlin.math.round((settings.temperature + .1) * 10) / 10) }
+                    Key("↻", Modifier.width(32.dp).fillMaxHeight(), Ink.accent, settings.temperature > 0, description = "Reroll Follow", textSize = 13, style = KeyStyle.PILL) { ux.rerollFollow() }
+                }
+            }
+        }
+        if (node is BrowseNode.Playlist && ux.synced != null) item(key = "bulk") { BulkDownload(ux, node.id.toInt(), compact = true) }
+        if (node == BrowseNode.Collection) item(key = "files") {
+            Row(Modifier.padding(top = 4.dp).height(28.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = gap) {
+                Text("FILE →", color = Ink.muted, size = 9, bold = true)
+                for (id in model.visibleDecks) Key(id.name, Modifier.width(36.dp).fillMaxHeight(), deckColor(id), model.supports("play"), description = "Choose audio file for $id", style = KeyStyle.PILL, textSize = 11) { pick(id) }
+            }
+        }
+        item(key = "end") { Spacer(Modifier.height(8.dp)) }
+    }
+}
+
+@Composable fun Chip(text: String, color: Color, on: Boolean, small: Boolean = false, flip: () -> Unit) {
     val shape = RoundedCornerShape(50)
-    Box(Modifier.height(30.dp).clip(shape).background(if (on) color.copy(alpha = .25f) else Ink.crust).border(1.dp, if (on) color else Ink.surface, shape).clickable(onClick = flip).padding(horizontal = 10.dp), contentAlignment = Alignment.Center) {
-        Text(text, color = if (on) Ink.text else color.copy(alpha = .85f), size = 11, bold = true)
+    Box(Modifier.height(if (small) 24.dp else 30.dp).clip(shape).background(if (on) color.copy(alpha = .25f) else Ink.crust).border(1.dp, if (on) color else Ink.surface, shape).clickable(onClick = flip).padding(horizontal = if (small) 7.dp else 10.dp), contentAlignment = Alignment.Center) {
+        Text(text, color = if (on) Ink.text else color.copy(alpha = .85f), size = if (small) 10 else 11, bold = true)
     }
 }
 
@@ -273,11 +420,11 @@ private fun followDecks(model: PlayerModel, ux: UiModel): List<DeckId> {
  * the mix-from deck; [downloaded]: audio cached on the phone (leading ● / ○ mark). [follow]: Match score (tap for the
  * breakdown) and desktop's dimming of unmatched key / tags.
  */
-@Composable private fun TrackRow(track: LibraryTrack, follow: FollowCandidate?, ux: UiModel, playIndex: Int? = null, deck: Pair<DeckId, Boolean>? = null, played: Boolean = false, relation: KeyRelation = KeyRelation.OTHER, downloaded: Boolean = false, tap: () -> Unit) {
+@Composable private fun TrackRow(track: LibraryTrack, follow: FollowCandidate?, ux: UiModel, playIndex: Int? = null, deck: Pair<DeckId, Boolean>? = null, played: Boolean = false, relation: KeyRelation = KeyRelation.OTHER, downloaded: Boolean = false, dense: Boolean = false, tap: () -> Unit) {
     val selected = ux.selectedRow == track.id
     // Background + 1dp desktop --surface0 divider in one draw (no extra layout node; scroll-cheap).
     val bg = if (selected) Ink.accent.copy(alpha = .08f) else Ink.panel
-    Column(Modifier.fillMaxWidth().drawBehind { drawRect(bg); val t = 1.dp.toPx(); drawRect(Ink.surface0, androidx.compose.ui.geometry.Offset(0f, size.height - t), androidx.compose.ui.geometry.Size(size.width, t)) }.combinedClickable(onLongClickLabel = "Edit track", onLongClick = { if (ux.synced != null) dev.manadj.app.edit.TrackEditNav.open(track.id.toInt()) }, onClick = tap).padding(vertical = 5.dp, horizontal = 4.dp)) {
+    Column(Modifier.fillMaxWidth().drawBehind { drawRect(bg); val t = 1.dp.toPx(); drawRect(Ink.surface0, androidx.compose.ui.geometry.Offset(0f, size.height - t), androidx.compose.ui.geometry.Size(size.width, t)) }.combinedClickable(onLongClickLabel = "Edit track", onLongClick = { if (ux.synced != null) dev.manadj.app.edit.TrackEditNav.open(track.id.toInt()) }, onClick = tap).padding(vertical = if (dense) 3.dp else 5.dp, horizontal = 4.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             deck?.let { (d, live) -> DeckBadge(d, live); Spacer(Modifier.width(6.dp)) }
             playIndex?.let { Text("%02d".format(it), Modifier.width(26.dp), Ink.muted, 11, true) }
@@ -299,8 +446,8 @@ private fun followDecks(model: PlayerModel, ux: UiModel): List<DeckId> {
                 Text(ok ?: "—", Modifier.clip(RoundedCornerShape(3.dp)).background(Ink.play.copy(alpha = .45f * relation.strength)).padding(horizontal = 4.dp), (keyColor(ok) ?: Ink.muted).copy(alpha = keyAlpha), 11, true)
             }
         }
-        Row(Modifier.fillMaxWidth().height(22.dp).padding(top = 3.dp), verticalAlignment = Alignment.CenterVertically) {
-            (ux.synced?.preview(track.id) ?: track.preview)?.let { PreviewWave(it, Modifier) }
+        Row(Modifier.fillMaxWidth().height(if (dense) 19.dp else 22.dp).padding(top = if (dense) 2.dp else 3.dp), verticalAlignment = Alignment.CenterVertically) {
+            (ux.synced?.preview(track.id) ?: track.preview)?.let { PreviewWave(it, Modifier, height = if (dense) 17.dp else 19.dp) }
             Spacer(Modifier.width(6.dp))
             Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
                 for (tag in track.tags) {

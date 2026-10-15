@@ -245,6 +245,9 @@ class UiModel(application: Application) : AndroidViewModel(application) {
     }
     var selectedRow by mutableStateOf(browsePrefs.getLong("row", -1).takeIf { it >= 0 })
     var filtersOpen by mutableStateOf(false)
+    private val _sidebar = mutableStateOf(browsePrefs.getBoolean("sidebar", true))
+    /** Landscape browser sidebar shown (#149); remembered. */
+    var browseSidebar: Boolean get() = _sidebar.value; set(v) { _sidebar.value = v; browsePrefs.edit().putBoolean("sidebar", v).apply() }
     /** Follow row whose Match-score breakdown is expanded. */
     var breakdownRow by mutableStateOf<Long?>(null)
 
