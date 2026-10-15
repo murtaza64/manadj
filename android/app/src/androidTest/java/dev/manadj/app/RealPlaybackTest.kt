@@ -52,7 +52,7 @@ class RealPlaybackTest {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val file = File(context.cacheDir, "native-app-test-${UUID.randomUUID()}.wav")
         files.add(file)
-        val frames = 44_100 * 8
+        val frames = 44_100 * 40 // outlasts the layout sweeps (more layouts than when this was 8 s)
         val dataBytes = frames * 2
         val buffer = ByteBuffer.allocate(44 + dataBytes).order(ByteOrder.LITTLE_ENDIAN)
         buffer.put("RIFF".toByteArray()).putInt(36 + dataBytes).put("WAVEfmt ".toByteArray()).putInt(16)
@@ -80,6 +80,63 @@ class RealPlaybackTest {
             assertEquals(epoch, model.output!!.epoch)
             assertTrue(model.decks.getValue(DeckId.A).snapshot!!.playing)
             assertTrue(model.decks.getValue(DeckId.B).snapshot!!.playing)
+        }
+    }
+
+    /** #399: quantized launches (Grid and Heard) reference the other playing deck without Sync (desktop parity). */
+    @Test fun quantizedLaunchReferencesThePlayingDeckWithoutSync() {
+        load(DeckId.A, tone(220.0)); load(DeckId.B, tone(330.0))
+        for (mode in listOf(QuantizeMode.GRID, QuantizeMode.HEARD)) for (bBpm in listOf(120.0, 126.0)) {
+            onMain {
+                DeckId.entries.take(2).forEach { model.updateFader(it, 0.0); model.submit(AudioCommand.Pause(it)) }
+                model.setGrid(DeckId.A, 120.0, 0.0); model.setGrid(DeckId.B, bBpm, 0.0)
+                model.setQuantizeMode(mode); model.setHeardLatency(.2)
+                model.submit(AudioCommand.Seek(DeckId.A, .1)); model.submit(AudioCommand.Seek(DeckId.B, 2.0))
+            }
+            await("$mode: decks parked") { model.output!!.decks.getValue(DeckId.B).let { !it.playing && it.sourceSeconds == 2.0 } && model.output!!.quantizeMode == mode }
+            onMain { model.submit(AudioCommand.Play(DeckId.A)) }
+            await("$mode: A playing") { model.output!!.decks.getValue(DeckId.A).let { it.playing && it.sourceSeconds > .5 } }
+            onMain { DeckId.entries.forEach { if (model.syncState.decks[it] != SyncStatus.OFF) model.toggleSync(it) } }
+            assertTrue("no sync", model.syncState.decks.values.all { it == SyncStatus.OFF })
+            val before = model.engineSnapshot()!!.decks.getValue(DeckId.B)
+            var launched: DeckSnapshot? = null
+            onMain { model.submit(AudioCommand.Play(DeckId.B)) }
+            await("$mode $bBpm: B play applied") { model.output!!.decks.getValue(DeckId.B).playing.also { if (it) launched = model.output!!.decks.getValue(DeckId.B) } }
+            Thread.sleep(800)
+            android.util.Log.i("manadj-399", "$mode B bpm $bBpm: before ${before.sourceSeconds} launched $launched")
+            // Quantized: B waits for A's beat (launchFrame) or enters ahead of 2.0 — never a plain start at 2.0.
+            assertTrue("$mode $bBpm not quantized: $launched", launched!!.launchFrame != null || launched!!.sourceSeconds > 2.0 + 2048.0 / 44100)
+        }
+    }
+
+    /** #399: SYNC is remembered per deck across app restarts; a remembered deck rejoins once ready with a BPM. */
+    @Test fun syncIsRememberedAcrossRestarts() {
+        fun restart() {
+            scenario.close()
+            scenario = ActivityScenario.launch(MainActivity::class.java)
+            scenario.onActivity { model = ViewModelProvider(it)[PlayerModel::class.java] }
+            await("native output opens") { model.output?.outputSampleRate?.let { it > 0 } == true }
+        }
+        // The app's own deck restore may still replace A right after launch: re-load until A keeps our source + grid.
+        fun loadWithGrid(hz: Double) {
+            Thread.sleep(1500)
+            val before = model.output!!.decks.getValue(DeckId.A).sourceId
+            onMain { model.requestImport(DeckId.A, Uri.fromFile(tone(hz))) }
+            await("A replaced and ready") { model.output!!.decks.getValue(DeckId.A).let { it.sourceId != before && it.loadState == LoadState.READY } }
+            onMain { model.setGrid(DeckId.A, 120.0, 0.0) }
+            await("A has a BPM") { model.output!!.decks.getValue(DeckId.A).bpm == 120.0 }
+            Thread.sleep(500)
+            assertEquals(120.0, model.output!!.decks.getValue(DeckId.A).bpm)
+        }
+        for (on in listOf(true, false, true)) {
+            loadWithGrid(220.0)
+            var result: Any? = "untoggled"
+            onMain { if ((model.syncState.decks[DeckId.A] != SyncStatus.OFF) != on) result = model.toggleSync(DeckId.A) }
+            assertEquals("on=$on toggle=$result ${model.syncState}", on, model.syncState.decks[DeckId.A] != SyncStatus.OFF)
+            restart()
+            loadWithGrid(221.0)
+            if (on) await("sync on remembered") { model.syncState.decks[DeckId.A] != SyncStatus.OFF }
+            else { Thread.sleep(500); assertEquals("sync off remembered", SyncStatus.OFF, model.syncState.decks[DeckId.A]) }
         }
     }
 
