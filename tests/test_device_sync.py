@@ -202,7 +202,7 @@ def test_snapshot_synced_settings_user_value_else_shipped_default(client, db):
     def settings():
         return client.get("/api/device-sync/snapshot").json()["settings"]
 
-    shipped = {k: json.loads(shipped_settings()[k]) for k in ("manadj.waveformStyles", "manadj-filter-settings")}
+    shipped = {k: json.loads(shipped_settings()[k]) for k in ("manadj.waveformStyles", "manadj-filter-settings", "manadj-follow-params")}
     assert settings() == {k: {"value": v, "updated_at": None} for k, v in shipped.items()}
 
     mine = {"version": 1, "full": {"styleId": "additive-rgb", "params": {"master": 0.5}}, "minimap": {"styleId": "additive-rgb", "params": {}}}
@@ -211,7 +211,7 @@ def test_snapshot_synced_settings_user_value_else_shipped_default(client, db):
     db.add(AppSetting(key="manadj-quantize", value="true"))  # not synced
     db.commit()
     got = settings()
-    assert set(got) == {"manadj.waveformStyles", "manadj-filter-settings"}
+    assert set(got) == {"manadj.waveformStyles", "manadj-filter-settings", "manadj-follow-params"}
     assert got["manadj.waveformStyles"]["value"] == mine
     assert got["manadj.waveformStyles"]["updated_at"] is not None
     assert got["manadj-filter-settings"] == {"value": shipped["manadj-filter-settings"], "updated_at": None}

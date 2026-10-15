@@ -9,6 +9,7 @@ import { api, type DeviceSyncChangeRow } from '../api/client';
 const SETTING_LABELS: Record<string, string> = {
   'manadj.waveformStyles': 'Waveform style',
   'manadj-filter-settings': 'Filter',
+  'manadj-follow-params': 'Follow parameters',
 };
 
 function flatten(value: unknown, prefix = '', out: Record<string, string> = {}): Record<string, string> {

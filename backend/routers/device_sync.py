@@ -116,7 +116,7 @@ def _waveform_revs(db: Session) -> dict[int, str]:
 
 # Synced performance settings (settings #176 keys): the phone plays with the
 # desktop's look and feel. Values are the parsed JSON the frontend persists.
-SYNCED_SETTINGS: tuple[str, ...] = ("manadj.waveformStyles", "manadj-filter-settings")
+SYNCED_SETTINGS: tuple[str, ...] = ("manadj.waveformStyles", "manadj-filter-settings", "manadj-follow-params")
 
 
 def _json_object(raw: str | None) -> dict | None:
