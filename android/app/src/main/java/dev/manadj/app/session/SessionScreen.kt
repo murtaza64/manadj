@@ -42,6 +42,8 @@ private fun hms(seconds: Double): String { val s = seconds.coerceAtLeast(0.0).to
     val close = { model.leave(); ux.sessions = false }
     BackHandler { if (model.log != null) model.close() else close() }
     LaunchedEffect(Unit) { if (model.headers.isEmpty() || model.listError == null) model.refresh() }
+    // This phone's recordings (#395) appear as the recorder opens/ends them.
+    LaunchedEffect(Unit) { while (true) { model.syncRecorded(); kotlinx.coroutines.delay(2000) } }
     // Leaving the screen stops replay; a configuration change (rotation, layout switch) must not: the
     // replay lives in the ViewModel and this composition is only rebuilt.
     DisposableEffect(Unit) { onDispose { if (!activity.isChangingConfigurations) model.leave() } }
@@ -52,7 +54,7 @@ private fun hms(seconds: Double): String { val s = seconds.coerceAtLeast(0.0).to
             Spacer(Modifier.width(8.dp))
             Column(Modifier.weight(1f)) {
                 Text(if (log == null) "SESSIONS" else "SESSION · ${model.header?.startedAt?.let(::dateLabel) ?: ""}", bold = true, size = 15)
-                Text(if (log == null) "${model.headers.size} from the desktop · replay on all four decks" else "${hms(log.end - log.activeStart)} · ${log.appearances.size} loads · ${log.events.size} events", color = Ink.muted, size = 10)
+                Text(if (log == null) "${model.recorded.size} recorded here · ${model.headers.count { h -> model.recorded.none { it.uuid == h.uuid } }} from the desktop · replay on all four decks" else "${hms(log.end - log.activeStart)} · ${log.appearances.size} loads · ${log.events.size} events", color = Ink.muted, size = 10)
             }
             if (log != null) Key("LIST", Modifier.size(64.dp, 40.dp), Ink.accent) { model.close() }
             else Key(if (model.refreshing) "…" else "REFRESH", Modifier.size(88.dp, 40.dp), Ink.accent, enabled = !model.refreshing) { model.refresh() }
@@ -73,9 +75,10 @@ private fun dateLabel(iso: String): String = local(iso)?.let { "${it.format(dayF
 @OptIn(ExperimentalFoundationApi::class)
 @Composable private fun SessionList(model: SessionModel) {
     model.listError?.let { Text("Session list: $it${if (model.headers.isNotEmpty()) " · showing the cached list" else ""}", Modifier.padding(12.dp), Ink.warning, 11, lines = 3) }
-    if (model.headers.isEmpty() && !model.refreshing) Text("No Sessions yet. Sessions are recorded by the desktop app while you play.", Modifier.padding(12.dp), Ink.muted, 12, lines = 3)
-    val now = remember(model.headers) { java.time.Instant.now() }
-    val days = remember(model.headers) { groupSessionsByDay(model.headers, now = now) }
+    val all = model.sessions
+    if (all.isEmpty() && !model.refreshing) Text("No Sessions yet. Sessions are recorded while you play, here and on the desktop.", Modifier.padding(12.dp), Ink.muted, 12, lines = 3)
+    val now = remember(all) { java.time.Instant.now() }
+    val days = remember(all) { groupSessionsByDay(all, now = now) }
     val expanded = rememberSaveable(saver = listSaver(save = { it.toList() }, restore = { it.toMutableStateList() })) { mutableStateListOf<String>() }
     LazyColumn(Modifier.fillMaxSize().testTag("session-list"), contentPadding = PaddingValues(bottom = 16.dp)) {
         for (day in days) {
@@ -119,8 +122,14 @@ private fun dateLabel(iso: String): String = local(iso)?.let { "${it.format(dayF
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text(ids?.let { "${it.size} ${if (it.size == 1) "track" else "tracks"}" } ?: "– tracks", color = Ink.muted, size = 10)
                     Text("${h.takeCount} ${if (h.takeCount == 1) "take" else "takes"}", color = if (h.takeCount > 0) Ink.accent else Ink.muted, size = 10)
-                    if (h.endedAt == null) Text("LIVE", color = Ink.pending, size = 10, bold = true)
-                    if (cached) Text("ON PHONE", color = Ink.play, size = 10, bold = true)
+                    if (h.endedAt == null) Text(if (h.local) "RECORDING" else "LIVE", color = Ink.pending, size = 10, bold = true)
+                    // Origin (#395): recorded on this phone (synced to the desktop or not yet) vs on the desktop.
+                    when {
+                        h.local -> Text(if (h.uuid in model.synced) "PHONE · SYNCED" else "PHONE", color = deckColor(DeckId.A), size = 10, bold = true)
+                        h.origin != null -> Text("PHONE · ${h.origin}", color = deckColor(DeckId.A), size = 10, bold = true)
+                        else -> Text("DESKTOP", color = Ink.muted, size = 10, bold = true)
+                    }
+                    if (cached && !h.local) Text("ON PHONE", color = Ink.play, size = 10, bold = true)
                 }
             }
             Text(if (opening) "LOADING…" else "›", Modifier.padding(start = 8.dp), Ink.accent, if (opening) 11 else 20, true)

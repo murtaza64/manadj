@@ -155,6 +155,10 @@ fun marksOf(ui: DeckUi) = ui.snapshot.let { s -> WaveMarks(s?.cueSeconds, ui.hot
     overview: Boolean = false, vertical: Boolean = false, windowSeconds: Double = 16.0, playheadAt: Float = .3f,
     live: () -> Strip = { Strip() }, history: StripHistory? = null, accent: Color = Ink.accent, status: String? = null,
     stemWave: ((Int) -> WaveformData?)? = null,
+    /** Overview: small unnumbered cue flags (portrait minimaps, UH11). */
+    compactCues: Boolean = false,
+    /** Overview: Metric-ladder hypermeter lines (UH17); null = fall back to 32-beat steps from the grid anchor. */
+    hyper: List<HyperMark>? = null,
 ) {
     val paint = remember { Paint().apply { strokeWidth = 2f; isAntiAlias = false } }
     val ink = remember { Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = Typeface.MONOSPACE; isFakeBoldText = true } }
@@ -166,7 +170,7 @@ fun marksOf(ui: DeckUi) = ui.snapshot.let { s -> WaveMarks(s?.cueSeconds, ui.hot
     var cache by remember { mutableStateOf<Triple<WaveformData, IntSize2, ImageBitmap>?>(null) }
     var overviewStyle by remember { mutableStateOf<WaveStyle?>(null) }
     var overviewDim by remember { mutableFloatStateOf(-1f) }
-    Box(modifier.clipToBounds().background(Ink.background)) {
+    Box(modifier.clipToBounds().then(dev.manadj.app.viz.Glass.scrim(Ink.background, vertical, overview))) {
         Canvas(Modifier.fillMaxSize()) {
             val along = if (vertical) size.height else size.width
             val across = if (vertical) size.width else size.height
@@ -188,9 +192,11 @@ fun marksOf(ui: DeckUi) = ui.snapshot.let { s -> WaveMarks(s?.cueSeconds, ui.hot
                     val mask = if (stemWave != null) live().stems else ALL_STEMS
                     val body = (if (mask != ALL_STEMS) stemWave?.invoke(mask) else null) ?: data
                     val image = if (c != null && c.first === body && c.second == key && overviewStyle === style && overviewDim == k) c.third else renderOverview(body, key, dur, vertical, style, k).also { cache = Triple(body, key, it); overviewStyle = style; overviewDim = k }
-                    drawImage(image)
                     val p = at(pos).coerceIn(0f, along)
-                    drawRect(Color.Black.copy(alpha = .5f), Offset.Zero, if (vertical) Size(size.width, p) else Size(p, size.height))
+                    if (!dev.manadj.app.viz.Glass.drawOverview(this, image, p, vertical)) { // backdrop: dim the played waveform only, not the lane
+                        drawImage(image)
+                        drawRect(Color.Black.copy(alpha = .5f), Offset.Zero, if (vertical) Size(size.width, p) else Size(p, size.height))
+                    }
                 } else {
                     // Columns live in absolute track coordinates (column k always covers the same audio) and
                     // the body translates by a whole-pixel offset: pixel-consistent scrolling, no resampling.
@@ -244,6 +250,18 @@ fun marksOf(ui: DeckUi) = ui.snapshot.let { s -> WaveMarks(s?.cueSeconds, ui.hot
                     line(marks.anchor + k * beat, Color.White.copy(alpha = floatArrayOf(.14f, .32f, .45f, .6f, .75f)[tier]), floatArrayOf(1f, 1.5f, 2f, 2.5f, 3f)[tier].dp.toPx())
                 }
             }
+            // Minimap hypermeter (UH12/UH17): 8-bar / 16-bar ladder groups (desktop Metric ladder); local files without a
+            // ladder fall back to 32-beat steps from the grid anchor.
+            if (overview && hyper != null) for (m in hyper) line(m.seconds, Color.White.copy(alpha = if (m.strong) .30f else .16f), 1.dp.toPx())
+            else if (overview) marks.bpm?.let { bpm ->
+                val beat = 60.0 / bpm
+                val first = ceil(-marks.anchor / (beat * 32)).toInt()
+                val last = floor((dur - marks.anchor) / (beat * 32)).toInt()
+                if (last - first < 400) for (k in first..last) {
+                    val strong = k % 2 == 0
+                    line(marks.anchor + k * 32 * beat, Color.White.copy(alpha = if (strong) .30f else .16f), 1.dp.toPx())
+                }
+            }
             marks.loop?.let { loop ->
                 val x = at(loop.start).coerceIn(0f, along); val y = at(loop.endInclusive).coerceIn(0f, along); val a = min(x, y); val b = max(x, y)
                 if (b > a) drawRect(Ink.play.copy(alpha = .2f), if (vertical) Offset(0f, a) else Offset(a, 0f), if (vertical) Size(size.width, b - a) else Size(b - a, size.height))
@@ -256,7 +274,11 @@ fun marksOf(ui: DeckUi) = ui.snapshot.let { s -> WaveMarks(s?.cueSeconds, ui.hot
             marks.hotCues.forEachIndexed { slot, cue -> cue?.let {
                 line(it, Ink.cues[slot], (if (overview) 1.5f else 2f).dp.toPx())
                 val p = at(it)
-                if (p in 0f..along) {
+                if (p in 0f..along && overview && compactCues) {
+                    // Portrait minimaps (UH11): a 5dp flag, no digit — numbered flags overlapped.
+                    val flag = 5.dp.toPx()
+                    drawRect(Ink.cues[slot], Offset(if (vertical) 0f else p.coerceAtMost(size.width - flag), if (vertical) p.coerceAtMost(size.height - flag) else 0f), Size(flag, flag))
+                } else if (p in 0f..along) {
                     // Overview labels stay small (round-5 feedback): a 10dp flag with the slot digit only.
                     val flag = (if (overview) 10 else 14).dp.toPx()
                     val x = if (vertical) 0f else p.coerceAtMost(size.width - flag)
@@ -301,7 +323,7 @@ private fun renderOverview(data: WaveformData, size: IntSize2, duration: Double,
  * position so this deck's detail wave follows live; the audio seeks once, where the finger lifts. A second
  * finger cancels (no seek).
  */
-@Composable fun Minimap(ui: DeckUi, model: PlayerModel, wave: WaveformData?, modifier: Modifier, vertical: Boolean = false, preview: MutableMap<DeckId, Double>? = null, ux: UiModel? = null) {
+@Composable fun Minimap(ui: DeckUi, model: PlayerModel, wave: WaveformData?, modifier: Modifier, vertical: Boolean = false, preview: MutableMap<DeckId, Double>? = null, ux: UiModel? = null, compactCues: Boolean = false) {
     var seekPreview by remember(ui.id) { mutableStateOf<Double?>(null) }
     LaunchedEffect(seekPreview) {
         val p = seekPreview
@@ -316,6 +338,9 @@ private fun renderOverview(data: WaveformData, size: IntSize2, duration: Double,
     val ready by remember(ui) { derivedStateOf { ui.ready } }
     val currentReady by rememberUpdatedState(ready)
     val stems by remember(ui) { derivedStateOf { ui.snapshot?.takeIf { it.stems }?.stemGains } }
+    // Library track: hypermeter lines from its Metric ladder (UH17), recomputed when the synced track changes.
+    val track = ux?.let { u -> dev.manadj.app.library.LibraryHolder.trackOn(model, ui.id)?.let { u.synced?.lib?.track(it) } }
+    val hyper = remember(track, ui.durationSeconds) { track?.let { Hypermeter.marks(it, ui.durationSeconds ?: it.durationSecs ?: 0.0) } }
     Box(modifier) {
     WaveView(wave, { seekPreview ?: position(ui) }, ui.durationSeconds, marksOf(ui), Modifier.fillMaxSize().semantics { contentDescription = "${ui.id} minimap seek" }.pointerInput(ui.id, vertical) {
         awaitEachGesture {
@@ -341,7 +366,7 @@ private fun renderOverview(data: WaveformData, size: IntSize2, duration: Double,
             finally { if (cancelled) preview?.remove(ui.id); seekPreview = null; model.finishGesture(id, cancelled) }
         }
     }, overview = true, vertical = vertical, accent = deckColor(ui.id), status = if (!ui.ready) null else if (wave == null) "analysing…" else null,
-        live = { ux?.strip(ui) ?: Strip() },
+        live = { ux?.strip(ui) ?: Strip() }, compactCues = compactCues, hyper = hyper,
         stemWave = ux?.let { u -> { mask: Int -> val id = ui.source?.id; if (wave == null || id == null) null else u.stemWave(id, wave, mask) } })
     // Per-stem state (#158): one bar per stem in its colour, dim when killed.
     stems?.let { g ->

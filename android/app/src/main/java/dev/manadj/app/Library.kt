@@ -13,6 +13,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.runtime.*
+import kotlinx.coroutines.flow.collectLatest
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -42,7 +44,7 @@ private val ADDED = DateTimeFormatter.ofPattern("dd MMM")
     LaunchedEffect(ux.filter, ux.selectedRow, ux.path) { ux.saveBrowse() }
     if (sidebar) { SidebarBrowser(model, ux, modifier, pick, tapTarget); return }
     // Hit target over the controls beneath without consuming (a clickable would eat the down and block the sheet drag).
-    Column(modifier.background(Ink.background).pointerInput(Unit) { awaitEachGesture { awaitFirstDown(requireUnconsumed = false) } }.padding(horizontal = 8.dp)) {
+    Column(modifier.then(dev.manadj.app.viz.Glass.clear(Ink.background)).pointerInput(Unit) { awaitEachGesture { awaitFirstDown(requireUnconsumed = false) } }.padding(horizontal = 8.dp)) {
         Row(Modifier.fillMaxWidth().height(40.dp), verticalAlignment = Alignment.CenterVertically) {
             if (tapTarget != null) {
                 Text("LOAD → $tapTarget", color = deckColor(tapTarget), size = 15, bold = true)
@@ -106,7 +108,7 @@ private val ADDED = DateTimeFormatter.ofPattern("dd MMM")
     androidx.compose.foundation.lazy.LazyColumn(modifier) {
         items(entries, key = { it.node.key }) { e ->
             val on = e.node == selected
-            Row(Modifier.fillMaxWidth().height(48.dp).drawBehind { drawRect(if (on) Ink.accent.copy(alpha = .14f) else Ink.panel); val t = 1.dp.toPx(); drawRect(Ink.surface0, Offset(0f, size.height - t), androidx.compose.ui.geometry.Size(size.width, t)) }
+            Row(Modifier.fillMaxWidth().height(48.dp).drawBehind { drawRect(if (on) Ink.accent.copy(alpha = .14f) else Ink.background); val t = 1.dp.toPx(); drawRect(Ink.surface0, Offset(0f, size.height - t), androidx.compose.ui.geometry.Size(size.width, t)) }
                 .clickable { ux.navigate(e.node) }.semantics { contentDescription = "Browse ${e.title}" }.padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                 e.color?.let { Box(Modifier.size(10.dp).clip(RoundedCornerShape(50)).background(Color(it))); Spacer(Modifier.width(8.dp)) }
                 if (e.node == BrowseNode.Follow) { GlyphIcon(Glyph.Follow, Ink.play, 14.dp); Spacer(Modifier.width(6.dp)) }
@@ -144,8 +146,14 @@ private class BrowseData(val decks: List<DeckId>, val refs: List<Long>, val foll
         }
     }
     val followById = remember(follow) { follow?.associateBy { it.trackId } }
-    val all = remember(ux.library, node, ux.filter, follow, ux.played.size, ux.downloads) { if (!node.hasTracks) emptyList() else ux.library.rows(node, ux.filter, follow, ux.played.toList(), ignoreDownloaded = true) }
-    val downloadedIds = remember(all, ux.downloads) { all.filter { ux.library.downloaded(it.id) }.mapTo(HashSet()) { it.id } }
+    // Rows ignore downloads (UH9: a download progress tick must not re-sort the list on the main thread).
+    val all = remember(ux.library, node, ux.filter, follow, ux.played.size) { if (!node.hasTracks) emptyList() else ux.library.rows(node, ux.filter, follow, ux.played.toList(), ignoreDownloaded = true) }
+    // On-phone set: one file stat per track — synchronous once on open, then recomputed off the main thread.
+    fun downloaded(rows: List<LibraryTrack>) = rows.filter { ux.library.downloaded(it.id) }.mapTo(HashSet()) { it.id }
+    val initialDownloaded = remember { downloaded(all) }
+    val downloadedIds by produceState<Set<Long>>(initialDownloaded, all, ux.downloads) {
+        value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { downloaded(all) }
+    }
     val rows = if (ux.filter.downloadedOnly) all.filter { it.id in downloadedIds } else all
     return BrowseData(decks, refs, followById, rows, downloadedIds)
 }
@@ -176,7 +184,7 @@ private class BrowseData(val decks: List<DeckId>, val refs: List<Long>, val foll
             Text("FILE →", color = Ink.muted, size = 10, bold = true)
             for (id in model.visibleDecks) { Spacer(Modifier.width(4.dp)); Key(id.name, Modifier.width(52.dp).fillMaxHeight(), deckColor(id), model.supports("play"), description = "Choose audio file for $id", style = KeyStyle.PILL) { pick(id) } }
         }
-        TrackList(model, ux, node, data, tapTarget, Modifier.weight(1f).fillMaxWidth())
+        TrackList(model, ux, node, data, tapTarget, Modifier.weight(1f).fillMaxWidth().bleed(8.dp))
     }
 }
 
@@ -199,6 +207,7 @@ private class BrowseData(val decks: List<DeckId>, val refs: List<Long>, val foll
                 if (!scrolling) { val first = listState.layoutInfo.visibleItemsInfo.firstOrNull(); ux.saveScroll(source, first?.key as? String, listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset) }
             }
         }
+        ScrollFrameMeter(listState, "browser")
         // Row decorations from a small state map (not per-frame): which deck holds each track, playing, played.
         val onDecks by remember { derivedStateOf {
             model.visibleDecks.mapNotNull { d -> dev.manadj.app.library.LibraryHolder.trackOn(model, d)?.toLong()?.let { it to (d to audible(mixOf(model, ux, d))) } }.toMap()
@@ -212,7 +221,18 @@ private class BrowseData(val decks: List<DeckId>, val refs: List<Long>, val foll
         val playOrder = remember(ux.library, node) { (node as? BrowseNode.Playlist)?.let { n -> ux.library.playlists().firstOrNull { it.id == n.id }?.trackIds?.withIndex()?.associate { (i, t) -> t to i + 1 } } }
         // Follow section headers (desktop rankLabel) while the list is in rank order.
         val sections = isFollow && ux.filter.sort == LibrarySort.RANK
-        LazyColumn(modifier, state = listState) {
+        // Row → LazyColumn item index (leading items + Follow section headers), for the scrubber (#166).
+        val hint = ux.synced != null && !ux.editHintSeen
+        val rowItems = remember(rows, sections, followById, localCount, hint, refs.isEmpty()) {
+            var idx = localCount + (if (hint) 1 else 0) + (if (isFollow && refs.isEmpty()) 1 else 0)
+            IntArray(rows.size) { i ->
+                val c = followById?.get(rows[i].id)
+                if (sections && c != null && (i == 0 || followById[rows[i - 1].id]?.label != c.label)) idx++
+                idx++
+            }
+        }
+        Box(modifier) {
+        LazyColumn(Modifier.fillMaxSize(), state = listState) {
             if (local) items(model.sources, key = { "local:" + it.id }, contentType = { "local" }) { source ->
                 SwipeToLoad(source.title, Modifier.fillMaxWidth(), { model.requestImport(it, source.uri) }) {
                     Row(Modifier.fillMaxWidth().height(48.dp).then(if (tapTarget != null) Modifier.clickable { model.requestImport(tapTarget, source.uri) } else Modifier).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -231,7 +251,7 @@ private class BrowseData(val decks: List<DeckId>, val refs: List<Long>, val foll
             rows.forEachIndexed { i, track ->
                 val c = followById?.get(track.id)
                 if (sections && c != null && (i == 0 || followById[rows[i - 1].id]?.label != c.label)) item(key = "section:${c.label}:$i", contentType = "section") {
-                    Text(c.label.uppercase(), Modifier.fillMaxWidth().background(Ink.background).padding(top = 8.dp, bottom = 3.dp, start = 4.dp), if (c.label == "Following") Ink.accent else if (c.tier == EvidenceTier.KNOWN) Ink.play else Ink.muted, 10, true)
+                    Text(c.label.uppercase(), Modifier.fillMaxWidth().background(dev.manadj.app.viz.Glass.chip(Ink.background)).padding(top = 8.dp, bottom = 3.dp, start = 4.dp), if (c.label == "Following") Ink.accent else if (c.tier == EvidenceTier.KNOWN) Ink.play else Ink.muted, 10, true)
                 }
                 item(key = "lib:" + track.id, contentType = "track") {
                     SwipeToLoad(track.title, Modifier.fillMaxWidth(), { ux.loadRow(model, it, track.id) }) {
@@ -241,6 +261,10 @@ private class BrowseData(val decks: List<DeckId>, val refs: List<Long>, val foll
                     }
                 }
             }
+        }
+        ScrubOverlay(listState, rows, ux.filter.sort, { r -> rowItems.getOrElse(r) { 0 } },
+            { item -> var lo = 0; var hi = rowItems.size - 1; while (lo < hi) { val m = (lo + hi + 1) / 2; if (rowItems[m] <= item) lo = m else hi = m - 1 }; lo },
+            Modifier.matchParentSize())
         }
 }
 
@@ -295,7 +319,7 @@ private class BrowseData(val decks: List<DeckId>, val refs: List<Long>, val foll
 @Composable private fun SidebarBrowser(model: PlayerModel, ux: UiModel, modifier: Modifier, pick: (DeckId) -> Unit, tapTarget: DeckId?) {
     val node = ux.node
     val data = rememberBrowseData(model, ux, node)
-    BoxWithConstraints(modifier.background(Ink.background).pointerInput(Unit) { awaitEachGesture { awaitFirstDown(requireUnconsumed = false) } }) {
+    BoxWithConstraints(modifier.then(dev.manadj.app.viz.Glass.clear(Ink.background)).pointerInput(Unit) { awaitEachGesture { awaitFirstDown(requireUnconsumed = false) } }) {
         val sideWidth = (maxWidth * .38f).coerceIn(150.dp, 210.dp)
         Row(Modifier.fillMaxSize()) {
             if (ux.browseSidebar) {
@@ -314,7 +338,7 @@ private class BrowseData(val decks: List<DeckId>, val refs: List<Long>, val foll
                     }
                 }
                 when {
-                    node.hasTracks -> TrackList(model, ux, node, data, tapTarget, Modifier.weight(1f).fillMaxWidth(), dense = true)
+                    node.hasTracks -> TrackList(model, ux, node, data, tapTarget, Modifier.weight(1f).fillMaxWidth().bleed(6.dp), dense = true)
                     !ux.browseSidebar -> NodeList(ux, node, null, Modifier.weight(1f).fillMaxWidth())
                     else -> Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) { Text("pick a source", color = Ink.muted, size = 12) }
                 }
@@ -326,7 +350,7 @@ private class BrowseData(val decks: List<DeckId>, val refs: List<Long>, val foll
 @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable private fun Sidebar(model: PlayerModel, ux: UiModel, node: BrowseNode, data: BrowseData, pick: (DeckId) -> Unit, modifier: Modifier) {
     val container = if (node.hasTracks) ux.path.getOrNull(ux.path.size - 2) ?: BrowseNode.Root else node
-    val entries = remember(ux.library, container, ux.filter, ux.played.size, ux.downloads) { ux.library.children(container, ux.filter, ux.played.toList()) }
+    val entries = remember(ux.library, container, ux.filter, ux.played.size, if (ux.filter.downloadedOnly) ux.downloads else 0) { ux.library.children(container, ux.filter, ux.played.toList()) }
     val f = ux.filter
     val gap = Arrangement.spacedBy(4.dp)
     androidx.compose.foundation.lazy.LazyColumn(modifier.padding(start = 6.dp, end = 4.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
@@ -429,13 +453,24 @@ private class BrowseData(val decks: List<DeckId>, val refs: List<Long>, val foll
 @Composable private fun TrackRow(track: LibraryTrack, follow: FollowCandidate?, ux: UiModel, playIndex: Int? = null, deck: Pair<DeckId, Boolean>? = null, played: Boolean = false, relation: KeyRelation = KeyRelation.OTHER, downloaded: Boolean = false, dense: Boolean = false, tap: () -> Unit) {
     val selected = ux.selectedRow == track.id
     // Background + 1dp desktop --surface0 divider in one draw (no extra layout node; scroll-cheap).
-    val bg = if (selected) Ink.accent.copy(alpha = .08f) else Ink.panel
-    Column(Modifier.fillMaxWidth().drawBehind { drawRect(bg); val t = 1.dp.toPx(); drawRect(Ink.surface0, androidx.compose.ui.geometry.Offset(0f, size.height - t), androidx.compose.ui.geometry.Size(size.width, t)) }.combinedClickable(onLongClickLabel = "Edit track", onLongClick = { if (ux.synced != null) { dev.manadj.app.edit.TrackEditNav.open(track.id.toInt()); ux.editHintSeen = true } }, onClick = tap).padding(vertical = if (dense) 3.dp else 5.dp, horizontal = 4.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+    // Black rows on the black browser (UH15): no grey inset cards; dividers separate rows.
+    val bg = if (selected) Ink.accent.copy(alpha = .10f) else if (dev.manadj.app.viz.Glass.on) Ink.background.copy(alpha = .45f) else Ink.background
+    Column(Modifier.fillMaxWidth().drawBehind { drawRect(bg); val t = 1.dp.toPx(); drawRect(Ink.surface0, androidx.compose.ui.geometry.Offset(0f, size.height - t), androidx.compose.ui.geometry.Size(size.width, t)) }.combinedClickable(onLongClickLabel = "Edit track", onLongClick = { if (ux.synced != null) { dev.manadj.app.edit.TrackEditNav.open(track.id.toInt()); ux.editHintSeen = true } }, onClick = tap).padding(top = if (dense) 3.dp else 5.dp, bottom = if (dense) 3.dp else 5.dp, start = 4.dp, end = 24.dp)) {
+        // UH22: the row runs edge to edge (bleed); its content keeps the old inset.
+        Row(Modifier.padding(start = 8.dp, end = 6.dp), verticalAlignment = Alignment.CenterVertically) {
             deck?.let { (d, live) -> DeckBadge(d, live); Spacer(Modifier.width(6.dp)) }
             playIndex?.let { Text("%02d".format(it), Modifier.width(26.dp), Ink.muted, 11, true) }
             DownloadMark(track.id, downloaded, ux)
             Spacer(Modifier.width(6.dp))
+            // BPM + key left of the title (UH8): the right edge belongs to the fast-scroll scrubber.
+            Column(Modifier.width(46.dp), horizontalAlignment = Alignment.Start) {
+                Text(track.bpm?.let { "%.1f".format(it) } ?: "—", color = bpmColor(track.bpm) ?: Ink.muted, size = 13, bold = true)
+                val ok = toOpenKey(track.key)
+                // Harmonic match vs the mix-from deck: chip strength by relation (exact strongest); Follow dims an unmatched key.
+                val keyAlpha = if (follow != null && !follow.keyMatched) .4f else 1f
+                Text(ok ?: "—", Modifier.clip(RoundedCornerShape(3.dp)).background(Ink.play.copy(alpha = .45f * relation.strength)).padding(horizontal = 4.dp), (keyColor(ok) ?: Ink.muted).copy(alpha = keyAlpha), 11, true)
+            }
+            Spacer(Modifier.width(8.dp))
             Column(Modifier.weight(1f)) {
                 Text((if (played && deck == null) "✓ " else "") + track.title, color = if (played && deck == null) Ink.muted else Ink.text, bold = true, size = 14)
                 Text(track.artist, color = Ink.muted, size = 11)
@@ -444,16 +479,18 @@ private class BrowseData(val decks: List<DeckId>, val refs: List<Long>, val foll
                 Text("${kotlin.math.round(score).toInt()}", Modifier.clip(RoundedCornerShape(4.dp)).clickable { ux.breakdownRow = if (ux.breakdownRow == track.id) null else track.id }.background(Ink.accent.copy(alpha = .15f)).padding(horizontal = 6.dp, vertical = 2.dp), Ink.accent, 13, true)
                 Spacer(Modifier.width(6.dp))
             }
-            Column(horizontalAlignment = Alignment.End) {
-                Text(track.bpm?.let { "%.1f".format(it) } ?: "—", color = bpmColor(track.bpm) ?: Ink.muted, size = 13, bold = true)
-                val ok = toOpenKey(track.key)
-                // Harmonic match vs the mix-from deck: chip strength by relation (exact strongest); Follow dims an unmatched key.
-                val keyAlpha = if (follow != null && !follow.keyMatched) .4f else 1f
-                Text(ok ?: "—", Modifier.clip(RoundedCornerShape(3.dp)).background(Ink.play.copy(alpha = .45f * relation.strength)).padding(horizontal = 4.dp), (keyColor(ok) ?: Ink.muted).copy(alpha = keyAlpha), 11, true)
-            }
         }
-        Row(Modifier.fillMaxWidth().height(if (dense) 19.dp else 22.dp).padding(top = if (dense) 2.dp else 3.dp), verticalAlignment = Alignment.CenterVertically) {
-            (ux.synced?.preview(track.id) ?: track.preview)?.let { PreviewWave(it, Modifier, height = if (dense) 17.dp else 19.dp) }
+        Row(Modifier.fillMaxWidth().height(if (dense) 19.dp else 22.dp).padding(top = if (dense) 2.dp else 3.dp, start = 8.dp, end = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+            // Synced preview: disk read + band mapping off the main thread (UH9); the slot is held while loading.
+            val synced = ux.synced
+            val preview by produceState(if (synced == null) java.util.Optional.ofNullable(track.preview) else synced.loadedPreview(track.id)?.let { java.util.Optional.ofNullable(it.orElse(null) ?: track.preview) }, synced, track.id) {
+                if (value == null && synced != null) value = java.util.Optional.ofNullable(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { synced.preview(track.id) } ?: track.preview)
+            }
+            val previewHeight = if (dense) 17.dp else 19.dp
+            when (val p = preview) {
+                null -> Spacer(Modifier.size(110.dp, previewHeight))
+                else -> p.orElse(null)?.let { PreviewWave(it, Modifier, height = previewHeight) }
+            }
             Spacer(Modifier.width(6.dp))
             Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
                 for (tag in track.tags) {
@@ -557,4 +594,39 @@ private object PreviewBitmaps {
     Box(Modifier.size(22.dp).clip(RoundedCornerShape(4.dp)).background(deckColor(deck).copy(alpha = if (live) pulse else .25f)), contentAlignment = Alignment.Center) {
         Text(deck.name, color = if (live) Color.Black else deckColor(deck), size = 12, bold = true)
     }
+}
+
+/**
+ * UH9: per-fling frame-interval stats to logcat (`adb logcat -s manadj-perf`) — passive on-device measurement,
+ * no input injection. Janky = interval > 1.5 vsync.
+ */
+@Composable fun ScrollFrameMeter(state: androidx.compose.foundation.lazy.LazyListState, name: String) {
+    val view = androidx.compose.ui.platform.LocalView.current
+    LaunchedEffect(state) {
+        snapshotFlow { state.isScrollInProgress }.collectLatest { scrolling ->
+            if (!scrolling) return@collectLatest
+            val vsync = 1e9 / (view.display?.refreshRate ?: 60f)
+            val dt = ArrayList<Long>(512)
+            var last = withFrameNanos { it }
+            try { while (true) { val t = withFrameNanos { it }; dt += t - last; last = t } }
+            finally {
+                if (dt.size >= 10) {
+                    val ms = dt.map { it / 1e6 }.sorted()
+                    fun pct(q: Double) = ms[((ms.size - 1) * q).toInt()]
+                    val janky = dt.count { it > vsync * 1.5 }
+                    val missed = dt.sumOf { kotlin.math.max(0L, kotlin.math.round(it / vsync).toLong() - 1) }
+                    android.util.Log.i("manadj-perf", "%s scroll: %d frames @%.0fHz, p50 %.1f p90 %.1f p99 %.1f max %.1f ms, janky %d%%, missed vsyncs %d".format(
+                        name, dt.size, 1e9 / vsync, pct(.5), pct(.9), pct(.99), ms.last(), 100 * janky / dt.size, missed))
+                }
+            }
+        }
+    }
+}
+
+/** Widen past the parent's horizontal padding by [x] each side (UH22: rows run edge to edge). */
+fun Modifier.bleed(x: androidx.compose.ui.unit.Dp): Modifier = layout { measurable, constraints ->
+    val extra = (x * 2).roundToPx()
+    val c = if (constraints.hasBoundedWidth) constraints.copy(minWidth = constraints.minWidth + extra, maxWidth = constraints.maxWidth + extra) else constraints
+    val p = measurable.measure(c)
+    layout(p.width - extra, p.height) { p.place(-x.roundToPx(), 0) }
 }
