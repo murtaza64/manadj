@@ -1,0 +1,72 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.12"
+# dependencies = ["qrcode[pil]"]
+# ///
+"""Pair the phone over wireless debugging by QR (no typing).
+
+Opens a QR in Preview. On the phone: Developer options > Wireless debugging >
+Pair device with QR code, scan. Discovery uses macOS dns-sd (adb's built-in
+mdns sees nothing on this Mac), then adb pair + adb connect.
+"""
+import os, re, secrets, socket, subprocess, sys, tempfile, time
+import qrcode
+
+TIMEOUT = 180
+
+
+def dnssd(args, secs=2.5):
+    p = subprocess.Popen(["dns-sd", *args], stdout=subprocess.PIPE, text=True)
+    time.sleep(secs)
+    p.kill()
+    return p.communicate()[0]
+
+
+def browse(svc):
+    out = dnssd(["-B", svc, "local."])
+    return sorted({m.group(1) for m in re.finditer(rf"Add .*{re.escape(svc)}\.\s+(.+)$", out, re.M)})
+
+
+def resolve(inst, svc):
+    m = re.search(r"can be reached at (\S+?)\.?:(\d+)", dnssd(["-L", inst, svc, "local."], 1.5))
+    return f"{socket.gethostbyname(m.group(1))}:{m.group(2)}" if m else None
+
+
+def adb(*a):
+    r = subprocess.run(["adb", *a], capture_output=True, text=True)
+    print(f"adb {' '.join(a)}: {(r.stdout + r.stderr).strip()}", flush=True)
+    return r.stdout
+
+
+def connect():
+    for inst in browse("_adb-tls-connect._tcp"):
+        ep = resolve(inst, "_adb-tls-connect._tcp")
+        if ep and "connected" in adb("connect", ep):
+            return True
+    return False
+
+
+if "--connect-only" in sys.argv:
+    sys.exit(0 if connect() else "no reachable adb-tls-connect service")
+
+name = f"manadj-{secrets.token_hex(3)}"
+pw = secrets.token_hex(4)
+png = os.path.join(tempfile.gettempdir(), "manadj-adb-pair.png")
+qrcode.make(f"WIFI:T:ADB;S:{name};P:{pw};;").save(png)
+subprocess.run(["open", png])
+print(f"QR at {png}; scan with Wireless debugging > Pair device with QR code", flush=True)
+
+deadline = time.time() + TIMEOUT
+paired = False
+while time.time() < deadline and not paired:
+    if name in browse("_adb-tls-pairing._tcp"):
+        ep = resolve(name, "_adb-tls-pairing._tcp")
+        paired = bool(ep) and "Successfully paired" in adb("pair", ep, pw)
+if not paired:
+    sys.exit("pairing timed out")
+subprocess.run(["osascript", "-e", 'tell application "Preview" to close (every window whose name contains "manadj-adb-pair")'], capture_output=True)
+
+while time.time() < deadline:
+    if connect():
+        sys.exit(0)
+sys.exit("paired, but no reachable adb-tls-connect service; is Wireless debugging on?")

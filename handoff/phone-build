@@ -1,0 +1,66 @@
+#!/bin/zsh
+# Build the integrated Android app from the lane bookmarks and install it on the human's phone.
+# Usage: phone-build [note]   (any lane may run it after a phone-visible change)
+set -euo pipefail
+REPO=/Users/murtaza/editspaces/manadj/lanes/android-phone-build/repos/murtaza64/manadj
+LOCK=/Users/murtaza/manadj/.editspace/android/phone-build.lock
+LOG=/Users/murtaza/manadj/.editspace/android/phone-build.log
+HEADS=(android-engine android-ui android-library android-session android-track-edit android-icon android-settings android-viz android-onehand android-wave android-link)
+note=${1:-}
+
+until mkdir $LOCK 2>/dev/null; do echo "waiting for another phone-build…"; sleep 10; done
+trap 'rmdir $LOCK' EXIT
+
+export JAVA_HOME=/Library/Java/JavaVirtualMachines/temurin-17.jdk/Contents/Home
+export ANDROID_HOME=$HOME/Library/Android/sdk
+export MANADJ_ANDROID_KEYSTORE=/Users/murtaza/manadj/.editspace/android/debug.keystore
+
+cd $REPO
+jj workspace update-stale >/dev/null 2>&1 || true
+revs=()
+for b in $HEADS; do
+  if ! jj log -r "$b" --no-graph -T '""' >/dev/null 2>&1; then
+    echo "BOOKMARK $b unresolvable (conflicted/divergent/missing) — owning lane must fix: jj bookmark list $b"; exit 5
+  fi
+  revs+=("$b")
+done
+# Fresh merge of whatever the lanes have marked phone-ready.
+jj new "${revs[@]}" -m "tmp: phone build ${note} (abandon)" >/dev/null
+if jj log -r @ --no-graph -T 'if(conflict, "C", "")' | grep -q C; then
+  echo "CONFLICT merging ${revs[*]} — the owning lanes must rebase onto each other"; jj st | head -20; exit 2
+fi
+heads=$(jj log -r @- --no-graph -T 'change_id.short(8) ++ "\n"' | tr '\n' ' ')
+
+(cd android && ./gradlew -q :app:assemblePhone) >>$LOG 2>&1 || { echo "BUILD FAILED (tail $LOG)"; tail -30 $LOG; exit 3; }
+apk=android/app/build/outputs/apk/phone/app-phone.apk
+
+HOLD=/Users/murtaza/manadj/.editspace/android/phone-install.hold
+if [[ -e $HOLD ]]; then  # human is using the app: build-check only, no install
+  echo "$(date -u +%FT%TZ) HELD (built, not installed; $(cat $HOLD)) [$heads] ${note}" | tee -a $LOG; exit 0
+fi
+phone_ok() { [[ -n $1 ]] && adb -s $1 get-state 2>/dev/null | grep -q device; }
+adb devices | awk '$2!="device" && $1 ~ /192\.168\.1\.176/ {print $1}' | while read s; do adb disconnect $s >/dev/null 2>&1; done
+phone_ok 192.168.1.176:5555 || adb connect 192.168.1.176:5555 >/dev/null 2>&1 || true  # legacy tcpip mode: survives wireless-debugging toggles until reboot
+serial=$(adb devices | awk '$2=="device" && $1 ~ /192\.168\.1\.176|adb-0031636/ {print $1; exit}')
+phone_ok "$serial" || { adb disconnect $serial >/dev/null 2>&1; serial=; }
+if [[ -z $serial ]]; then
+  ep=$(adb mdns services 2>/dev/null | awk '/adb-0031636.*_adb-tls-connect/ {print $NF}' | tail -1)
+  [[ -n $ep ]] && adb connect $ep >/dev/null 2>&1 && serial=$ep
+fi
+if [[ -z $serial ]]; then  # adb's mdns is blind on this Mac; dns-sd fallback
+  "$(dirname $0)/phone-pair" --connect-only >/dev/null 2>&1 || true
+  serial=$(adb devices | awk '$2=="device" && $1 ~ /192\.168\.1\.176|adb-0031636/ {print $1; exit}')
+fi
+phone_ok "$serial" || serial=
+[[ -n $serial && $serial != *:5555 ]] && { adb -s $serial tcpip 5555 >/dev/null 2>&1; sleep 3; adb connect 192.168.1.176:5555 >/dev/null 2>&1; phone_ok 192.168.1.176:5555 && serial=192.168.1.176:5555; }
+if [[ -z $serial ]]; then
+  echo "$(date -u +%FT%TZ) PHONE OFFLINE (not installed) [$heads] ${note}" >> $LOG
+  es --editspace manadj mail send --as orchestrator --to human "phone-build: phone offline, not installed: ${note}. Turn on Wireless debugging; if still not connected, ask the orchestrator to run phone-pair (QR)." >/dev/null 2>&1 || true
+  echo "PHONE OFFLINE: built $apk from [$heads]; orchestrator/human notified"; exit 4
+fi
+if ! adb -s $serial install -r $apk 2>&1 | tail -1 | grep -q Success; then
+  echo "$(date -u +%FT%TZ) INSTALL FAILED on $serial [$heads] ${note}" | tee -a $LOG; exit 6
+fi
+adb -s $serial shell cmd package compile -f -m speed-profile dev.murt.manadj >/dev/null 2>&1 || true
+adb -s $serial shell monkey -p dev.murt.manadj -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1 || true
+echo "$(date -u +%FT%TZ) installed [$heads] ${note}" | tee -a $LOG
