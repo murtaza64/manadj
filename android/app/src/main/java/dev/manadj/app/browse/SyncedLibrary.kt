@@ -3,7 +3,6 @@ package dev.manadj.app.browse
 import dev.manadj.app.toOpenKey
 
 import dev.manadj.library.AudioState
-import dev.manadj.library.FollowParams
 import dev.manadj.library.Library
 import dev.manadj.library.LibraryRepository
 import java.time.ZoneId
@@ -36,15 +35,19 @@ class SyncedLibrary(val lib: Library, private val repo: LibraryRepository) : Lib
     override fun tracks() = rows
     override fun allTags() = lib.tags.map { TrackTag(it.name, it.categoryName, it.argb ?: 0xff7f849c.toInt()) }
     override fun playlists() = lib.playlists.map { LibraryPlaylist(it.id.toLong(), it.name, null, false, it.trackIds.map(Int::toLong)) }
-    override fun follow(references: Set<Long>, knownOnly: Boolean, playlist: Long?) =
-        lib.follow(references.map(Long::toInt), FollowParams(knownOnly = knownOnly), playlist?.let { dev.manadj.library.LibraryQuery(playlistId = it.toInt()) }).map { r ->
-            val marks = references.map { lib.marks(it.toInt(), r.track.id) }
+    /** Desktop Follow (library lystp, golden-tested): synced params + session seed (repo.followSeed). */
+    override fun follow(references: Set<Long>): List<FollowCandidate> {
+        val tagName = lib.tags.associate { it.id to it.name }
+        return repo.follow(references.map(Long::toInt)).map { r ->
             FollowCandidate(
-                r.track.id.toLong(), EvidenceTier.valueOf(r.tier.name), r.score, linked = marks.any { it.linked },
-                transitionsFrom = marks.count { it.transition != dev.manadj.library.TransitionMark.NONE }, transitionsTo = 0,
-                takes = r.observedTakes, knownLabel = r.known?.label,
+                r.track.id.toLong(), if (r.tier == dev.manadj.library.EvidenceTier.KNOWN) EvidenceTier.KNOWN else EvidenceTier.COMPATIBLE,
+                r.label, r.displayScore, r.keyMatched, r.matchedTagIds.mapNotNullTo(HashSet()) { tagName[it] },
+                r.breakdown?.let { b -> FollowBreakdown(b.keyRelation.name, b.key, b.sharedTags, b.tags, b.artist, b.energy, b.bpm, b.total) },
             )
         }
+    }
+    override val followSettings get() = lib.followParams.let { FollowSettings(it.knownOnly, it.temperature) }
+    override fun downloaded(id: Long): Boolean = lib.track(id.toInt())?.let(lib.isDownloaded) == true
     override fun audioLabel(id: Long): String? = lib.track(id.toInt())?.let { t ->
         when (val a = repo.audioState(t)) {
             AudioState.Cached -> "ON PHONE"; AudioState.Remote -> "DOWNLOAD"; AudioState.Unavailable -> "NO FILE"

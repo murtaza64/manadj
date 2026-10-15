@@ -20,6 +20,7 @@ fun track(
     keyOpenKey = key, keyCamelot = null, energy = energy, durationSecs = 300.0,
     dateAdded = Instant.ofEpochSecond(added), mainCue = null, codec = "mp3", fileSizeBytes = null,
     audioRev = audioRev, previewRev = previewRev, tagIds = tags, hotCues = emptyList(), grid = null,
+    bpmCenti = bpm?.let { Math.round(it * 100) },
 )
 
 fun snapshot(

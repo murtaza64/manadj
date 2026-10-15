@@ -194,24 +194,59 @@ class UiModel(application: Application) : AndroidViewModel(application) {
             text = o.optString("text"), tags = o.optJSONArray("tags")?.let { a -> (0 until a.length()).map { a.getString(it) }.toSet() } ?: emptySet(),
             bpmCenter = o.optDouble("bpm").takeIf { it.isFinite() }, bpmTolerance = o.optDouble("tol", 6.0),
             sort = runCatching { LibrarySort.valueOf(o.optString("sort")) }.getOrDefault(LibrarySort.DATE_ADDED),
-            playlist = if (o.has("playlist")) o.getLong("playlist") else null,
+            descending = o.optBoolean("desc", true), downloadedOnly = o.optBoolean("downloaded", false),
         )
     }.getOrDefault(LibraryFilter())
     fun saveBrowse() {
         val f = filter
-        val o = org.json.JSONObject().put("text", f.text).put("tags", org.json.JSONArray(f.tags.toList())).put("tol", f.bpmTolerance).put("sort", f.sort.name)
-        f.bpmCenter?.let { o.put("bpm", it) }; f.playlist?.let { o.put("playlist", it) }
-        browsePrefs.edit().putString("filter", o.toString()).putLong("row", selectedRow ?: -1).apply()
+        val o = org.json.JSONObject().put("text", f.text).put("tags", org.json.JSONArray(f.tags.toList())).put("tol", f.bpmTolerance)
+            .put("sort", f.sort.name).put("desc", f.descending).put("downloaded", f.downloadedOnly)
+        f.bpmCenter?.let { o.put("bpm", it) }
+        browsePrefs.edit().putString("filter", o.toString()).putLong("row", selectedRow ?: -1).putString("path", path.joinToString("|") { it.key }).apply()
+    }
+    /** Browser tier path (#130), root first; the last node is shown. Persisted with the filter. */
+    var path by mutableStateOf(browsePrefs.getString("path", null)?.split("|")?.mapNotNull(BrowseNode::parse)?.takeIf { it.firstOrNull() == BrowseNode.Root } ?: listOf(BrowseNode.Root, BrowseNode.Collection))
+        private set
+    val node: BrowseNode get() = path.last()
+    /** Opens [node] (path resolved from the root) and restores its remembered sort (#128). */
+    fun navigate(target: BrowseNode) {
+        path = library.pathTo(target)
+        val (sort, desc) = sortFor(target)
+        filter = filter.copy(sort = sort, descending = desc)
+    }
+    fun back(): Boolean { if (path.size <= 1) return false; navigate(path[path.size - 2]); return true }
+    /** Display sort per source node (#128): tap a new sort = its default direction, tap the active one = flip. */
+    fun chooseSort(sort: LibrarySort) {
+        val f = filter
+        val desc = if (f.sort == sort) !f.descending else sort.defaultDescending
+        filter = f.copy(sort = sort, descending = desc)
+        browsePrefs.edit().putString("sort-${node.key}", "${sort.name}:$desc").apply()
+    }
+    private fun sortFor(n: BrowseNode): Pair<LibrarySort, Boolean> {
+        val saved = browsePrefs.getString("sort-${n.key}", null)?.split(":")
+        val sort = saved?.getOrNull(0)?.let { runCatching { LibrarySort.valueOf(it) }.getOrNull() }?.takeIf(n::allows) ?: n.defaultSort
+        return sort to (saved?.getOrNull(1)?.toBooleanStrictOrNull()?.takeIf { saved[0] == sort.name } ?: sort.defaultDescending)
     }
     /** Scroll anchor per source (Collection / playlist id): first visible row key + offset (falls back to its index). */
     fun scrollAnchor(source: String): Triple<String?, Int, Int> = Triple(browsePrefs.getString("scroll-key-$source", null), browsePrefs.getInt("scroll-index-$source", 0), browsePrefs.getInt("scroll-offset-$source", 0))
     fun saveScroll(source: String, key: String?, index: Int, offset: Int) { browsePrefs.edit().putString("scroll-key-$source", key).putInt("scroll-index-$source", index).putInt("scroll-offset-$source", offset).apply() }
-    val following = mutableStateMapOf<DeckId, Boolean>()
-    /** Follow reference per deck: a library Track id (fixture rows until #372 maps loaded files to Tracks). */
-    val followRef = mutableStateMapOf<DeckId, Long>()
-    var knownOnly by mutableStateOf(false)
+    /** Follow target (#133): AUTO follows the audible/outgoing deck and re-targets as the mix moves; A/B/BOTH pin. */
+    var followPin by mutableStateOf(runCatching { FollowPin.valueOf(browsePrefs.getString("follow-pin", null) ?: "") }.getOrDefault(FollowPin.AUTO))
+    fun pinFollow(pin: FollowPin) { followPin = pin; browsePrefs.edit().putString("follow-pin", pin.name).apply() }
+    /** Follow Temperature draw seed (desktop session seed, +1 per Reroll); rows recompute when it changes. */
+    var followSeed by mutableLongStateOf(0L)
+        private set
+    fun rerollFollow() = repo.rerollFollow()
+    /** Desktop Follow params edit (known-only / Temperature), synced back to the desktop. */
+    fun editFollow(knownOnly: Boolean? = null, temperature: Double? = null) = viewModelScope.launch {
+        val lib = synced?.lib ?: return@launch
+        val p = lib.followParams
+        repo.editFollowParams(p.copy(knownOnly = knownOnly ?: p.knownOnly, temperature = (temperature ?: p.temperature).coerceIn(0.0, 1.0)))
+    }
     var selectedRow by mutableStateOf(browsePrefs.getLong("row", -1).takeIf { it >= 0 })
     var filtersOpen by mutableStateOf(false)
+    /** Follow row whose Match-score breakdown is expanded. */
+    var breakdownRow by mutableStateOf<Long?>(null)
 
     init {
         viewModelScope.launch { repo.library.collect { lib ->
@@ -220,6 +255,7 @@ class UiModel(application: Application) : AndroidViewModel(application) {
         } }
         viewModelScope.launch { repo.state.collect { syncState = it } }
         viewModelScope.launch { repo.downloads.collect { downloads++ } }
+        viewModelScope.launch { repo.followSeed.collect { followSeed = it } }
     }
 
     // Waveform analysis cache by source id.

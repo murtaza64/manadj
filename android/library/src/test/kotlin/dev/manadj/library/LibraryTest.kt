@@ -108,16 +108,27 @@ class FollowTest {
 
     @Test fun tiersInOrder() {
         val rows = lib.follow(listOf(1))
-        assertEquals(listOf(5, 4, 8, 6, 7, 2), rows.map { it.track.id })
-        assertEquals(listOf(KnownKind.FAVORITED_TRANSITION, KnownKind.LINKED, KnownKind.SAVED_CAMEO), rows.take(3).map { it.known })
-        assertEquals(EvidenceTier.OBSERVED, rows[3].tier)
-        assertEquals(3, rows[3].observedTakes)
-        assertEquals(setOf(1, 2, 3), rows[4].matchedTagIds)
-        assertTrue(rows[5].keyMatched)
-        assertEquals("Compatible", rows[5].label)
+        // Desktop parity: Known = favorited transition > linked > saved transition; cameos and Takes are not Known.
+        assertEquals(listOf(KnownKind.FAVORITED_TRANSITION, KnownKind.LINKED), rows.take(2).map { it.known })
+        assertTrue(rows.drop(2).all { it.tier == EvidenceTier.COMPATIBLE && it.known == null })
+        assertFalse(rows.any { it.tier == EvidenceTier.OBSERVED })
+        val tagged = rows.single { it.track.id == 7 }
+        assertEquals(setOf(1, 2, 3), tagged.matchedTagIds)
+        assertTrue(rows.single { it.track.id == 2 }.keyMatched)
+        assertEquals("Compatible", tagged.label)
+        assertEquals(null, rows.first().displayScore) // Known rows show no score
+        assertEquals(tagged.score, tagged.breakdown!!.total, 1e-12)
     }
 
-    @Test fun knownOnly() = assertEquals(listOf(5, 4, 8), lib.follow(listOf(1), FollowParams(knownOnly = true)).map { it.track.id })
+    @Test fun knownOnly() = assertEquals(listOf(5, 4), lib.follow(listOf(1), FollowParams(knownOnly = true)).map { it.track.id })
+
+    @Test fun temperatureRerollKeepsKnownPinned() {
+        val calm = lib.follow(listOf(1)).map { it.track.id }
+        val hot = (0L..20L).map { seed -> lib.follow(listOf(1), FollowParams(temperature = 1.0, seed = seed)).map { it.track.id } }
+        assertTrue(hot.all { it.take(2) == listOf(5, 4) && it.toSet() == calm.toSet() })
+        assertTrue(hot.distinct().size > 1) // rerolls actually redraw
+        assertEquals(hot[3], lib.follow(listOf(1), FollowParams(temperature = 1.0, seed = 3)).map { it.track.id }) // deterministic
+    }
 
     @Test fun bpmGateOffAdmitsOffTempo() = assertTrue(9 in lib.follow(listOf(1), FollowParams(bpm = false)).map { it.track.id })
 

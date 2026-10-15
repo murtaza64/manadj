@@ -2,6 +2,7 @@ package dev.manadj.library
 
 import java.time.Instant
 import kotlin.math.abs
+import kotlin.math.ln
 import kotlin.math.max
 import kotlin.math.min
 
@@ -115,46 +116,71 @@ object MatchScore {
     }
 }
 
-/** Known strength, strongest first (CONTEXT.md Known; a pair takes its best). */
+/**
+ * Known strength, strongest first — desktop links/known.ts (KNOWN_FAVORITED,
+ * KNOWN_LINKED, KNOWN_SAVED); a pair takes its best. Transitions count FROM
+ * the followed reference; Linked is symmetric. Cameos and Takes are not
+ * Known on the desktop.
+ */
 enum class KnownKind(val label: String) {
     FAVORITED_TRANSITION("★ Favorited transition"),
-    FAVORITED_CAMEO("★ Favorited cameo"),
     LINKED("🔗 Linked"),
     SAVED_TRANSITION("◆ Saved transition"),
-    SAVED_CAMEO("◆ Saved cameo"),
 }
 
+/** Desktop Follow has two strata: Known, then Compatible. OBSERVED is never produced (kept for API stability). */
 enum class EvidenceTier { KNOWN, OBSERVED, COMPATIBLE }
 
+/** Desktop FollowParams (follow/model.ts), synced as the `manadj-follow-params` setting. */
 data class FollowParams(
     /** BPM gate on/off (Compatible tier only). */
     val bpm: Boolean = true,
+    /** Gate width; the desktop's candidate query takes an integer percent. */
     val bpmThresholdPercent: Double = 5.0,
     /** Narrow to the Known tier. */
     val knownOnly: Boolean = false,
-    /** Observed Take-count floor (tunable heuristic, nominally 2). */
-    val observedMinTakes: Int = 2,
+    /** 0 = Match-score order; 1 = adventurous score-weighted draw over Compatible (Gumbel, desktop orderRanked). */
+    val temperature: Double = 0.0,
+    /** Draw seed (desktop: session-random uint32, +1 per Reroll). Only used when temperature > 0. */
+    val seed: Long = 0,
+    @Deprecated("Desktop Follow has no Observed tier") val observedMinTakes: Int = 2,
 )
 
-/** One Follow suggestion, with why it matched (best position across references). */
+/** Per-signal contributions of a Match score (weights applied), for the reference that gave the best score. */
+data class ScoreBreakdown(
+    val referenceId: Int,
+    val keyRelation: MatchScore.KeyRelation,
+    val key: Double,
+    val sharedTags: Int,
+    val tags: Double,
+    val artist: Double,
+    val energy: Double,
+    val bpm: Double,
+) {
+    val affinity: Double get() = key + tags + artist
+    val total: Double get() = affinity + energy + bpm
+}
+
+/** One Follow suggestion (desktop row: rank label, match score, matched signals). */
 data class FollowRow(
     val track: LibraryTrack,
     val tier: EvidenceTier,
     val known: KnownKind?,
     val observedTakes: Int,
     val observedLastAt: Instant?,
-    /** Best Match score across references (shown for every tier). */
+    /** Best Match score across references (factual; the temperature draw never changes it). */
     val score: Double,
     val keyMatched: Boolean,
     val matchedTagIds: Set<Int>,
     val sharedArtist: Boolean,
+    /** Contributions behind [score]. */
+    val breakdown: ScoreBreakdown? = null,
 ) {
-    /** Section header text, desktop rankLabel vocabulary. */
-    val label: String get() = when (tier) {
-        EvidenceTier.KNOWN -> known!!.label
-        EvidenceTier.OBSERVED -> "Observed"
-        EvidenceTier.COMPATIBLE -> "Compatible"
-    }
+    /** Section header text — desktop rankLabel. */
+    val label: String get() = known?.label ?: "Compatible"
+
+    /** The score the desktop shows: none for Known rows (desktop scoreFor). */
+    val displayScore: Double? get() = if (known != null) null else score
 }
 
 enum class TransitionMark { NONE, SAVED, FAVORITED }
@@ -168,8 +194,6 @@ data class RowMarks(val transition: TransitionMark, val linked: Boolean) {
 class FollowIndex(snapshot: Snapshot) {
     private val transitionsFrom: Map<Int, Map<Int, TransitionEdge>> =
         snapshot.transitions.groupBy { it.a }.mapValues { (_, v) -> v.associateBy { it.b } }
-    private val cameosHosted: Map<Int, Map<Int, CameoEdge>> =
-        snapshot.cameos.groupBy { it.host }.mapValues { (_, v) -> v.associateBy { it.guest } }
     private val links: Map<Int, Set<Int>> = buildMap<Int, MutableSet<Int>> {
         for ((lo, hi) in snapshot.links) {
             getOrPut(lo) { HashSet() }.add(hi)
@@ -188,13 +212,18 @@ class FollowIndex(snapshot: Snapshot) {
         return RowMarks(mark, linked(deckTrackId, candidateId))
     }
 
-    /** Known kinds from [reference] to every Known candidate. */
+    /** Known kinds from [reference] to every Known candidate (knownStrengthOf). */
     fun known(reference: Int): Map<Int, KnownKind> {
         val out = HashMap<Int, KnownKind>()
-        fun offer(id: Int, kind: KnownKind) { if (id != reference) out.merge(id, kind) { a, b -> minOf(a, b) } }
-        transitionsFrom[reference]?.values?.forEach { offer(it.b, if (it.favorite) KnownKind.FAVORITED_TRANSITION else KnownKind.SAVED_TRANSITION) }
-        cameosHosted[reference]?.values?.forEach { offer(it.guest, if (it.favorite) KnownKind.FAVORITED_CAMEO else KnownKind.SAVED_CAMEO) }
-        links[reference]?.forEach { offer(it, KnownKind.LINKED) }
+        val from = transitionsFrom[reference].orEmpty()
+        for (id in from.keys + links[reference].orEmpty()) {
+            val info = from[id]
+            out[id] = when {
+                info?.favorite == true -> KnownKind.FAVORITED_TRANSITION
+                linked(reference, id) -> KnownKind.LINKED
+                else -> KnownKind.SAVED_TRANSITION
+            }
+        }
         return out
     }
 
@@ -202,21 +231,31 @@ class FollowIndex(snapshot: Snapshot) {
 }
 
 /**
- * Follow ranking for the followed references (desktop Follow mode order):
- * Known strata in strength order, then Observed (Take count, then recency),
- * then Compatible by Match score. Multi-reference: best position wins.
- * The followed Tracks themselves are never candidates.
+ * Desktop Follow, exactly (frontend/src/follow/rankedFollow.ts FollowRanking +
+ * matchScore.ts + the server's BPM-gated candidate query, crud.get_tracks):
+ *
+ * - admission: Known from any reference (bypasses gate and floor); otherwise,
+ *   unless knownOnly, a candidate inside one reference's BPM gate whose
+ *   affinity to THAT reference reaches the Affinity floor;
+ * - rank: best (lowest) Known strength, then best Match score across ALL
+ *   references (desktop rankAgainst);
+ * - order: Known strata, then score descending; temperature > 0 perturbs the
+ *   Compatible order with a seeded Gumbel draw keyed by (seed, followed set,
+ *   track id); ties keep the pool order.
+ *
+ * Golden-tested against the desktop pipeline (FollowGoldenTest). The followed
+ * Tracks themselves are never rows (the desktop pins them as "Following").
  */
 object FollowRanker {
-    private data class Pos(val tier: EvidenceTier, val known: KnownKind?, val takes: Int, val lastAt: Instant?)
+    private data class Rank(val known: KnownKind?, val score: Double)
 
-    private val POS_ORDER = Comparator<Pos> { a, b ->
-        if (a.tier != b.tier) return@Comparator a.tier.compareTo(b.tier)
-        when (a.tier) {
-            EvidenceTier.KNOWN -> a.known!!.compareTo(b.known!!)
-            EvidenceTier.OBSERVED -> if (a.takes != b.takes) b.takes - a.takes else compareValues(b.lastAt, a.lastAt)
-            EvidenceTier.COMPATIBLE -> 0
+    private val COMPARE = Comparator<Rank> { a, b ->
+        if (a.known != null || b.known != null) {
+            if (a.known == null) return@Comparator 1
+            if (b.known == null) return@Comparator -1
+            if (a.known != b.known) return@Comparator a.known.compareTo(b.known)
         }
+        b.score.compareTo(a.score)
     }
 
     fun rank(
@@ -225,49 +264,92 @@ object FollowRanker {
         references: List<LibraryTrack>,
         params: FollowParams = FollowParams(),
     ): List<FollowRow> {
-        if (references.isEmpty()) return emptyList()
-        val referenceIds = references.mapTo(HashSet()) { it.id }
-        val knownByRef = references.associate { it.id to index.known(it.id) }
-        val takesByRef = references.associate { it.id to index.takesFrom(it.id) }
+        val refs = references.distinctBy { it.id }
+        if (refs.isEmpty()) return emptyList()
+        val referenceIds = refs.mapTo(HashSet()) { it.id }
+        val knownByRef = refs.associate { it.id to index.known(it.id) }
+        val gates = refs.associate { it.id to BpmGate.of(it, params) }
         val rows = ArrayList<FollowRow>()
         for (candidate in tracks) {
             if (candidate.id in referenceIds) continue
-            var best: Pos? = null
+            var known: KnownKind? = null
+            var admitted = false
             var score = Double.NEGATIVE_INFINITY
+            var best: ScoreBreakdown? = null
             var keyMatched = false
             var artist = false
             val tags = HashSet<Int>()
-            for (reference in references) {
-                val affinity = MatchScore.affinity(reference, candidate)
-                score = max(score, MatchScore.score(reference, candidate, params.bpmThresholdPercent, affinity))
-                if (MatchScore.keyRelation(reference.keyOpenKey, candidate.keyOpenKey) != MatchScore.KeyRelation.OTHER) keyMatched = true
-                if (MatchScore.sharedArtist(reference.artist, candidate.artist)) artist = true
+            for (reference in refs) {
+                knownByRef.getValue(reference.id)[candidate.id]?.let { k -> known = known?.let { minOf(it, k) } ?: k }
+                val b = breakdown(reference, candidate, params.bpmThresholdPercent)
+                if (b.total > score) { score = b.total; best = b }
+                if (!params.knownOnly && b.affinity >= MatchScore.AFFINITY_FLOOR && gates.getValue(reference.id).admits(candidate)) admitted = true
+                if (b.keyRelation != MatchScore.KeyRelation.OTHER) keyMatched = true
+                if (b.artist > 0) artist = true
                 tags += MatchScore.sharedTags(reference, candidate)
-
-                val known = knownByRef.getValue(reference.id)[candidate.id]
-                val take = takesByRef.getValue(reference.id)[candidate.id]
-                val pos = when {
-                    known != null -> Pos(EvidenceTier.KNOWN, known, 0, null)
-                    params.knownOnly -> null
-                    take != null && take.count >= params.observedMinTakes -> Pos(EvidenceTier.OBSERVED, null, take.count, take.lastAt)
-                    passesBpmGate(reference, candidate, params) && affinity >= MatchScore.AFFINITY_FLOOR -> Pos(EvidenceTier.COMPATIBLE, null, 0, null)
-                    else -> null
-                }
-                if (pos != null && (best == null || POS_ORDER.compare(pos, best) < 0)) best = pos
             }
-            val b = best ?: continue
-            rows += FollowRow(candidate, b.tier, b.known, b.takes, b.lastAt, score, keyMatched, tags, artist)
+            if (known == null && !admitted) continue
+            val tier = if (known != null) EvidenceTier.KNOWN else EvidenceTier.COMPATIBLE
+            rows += FollowRow(candidate, tier, known, 0, null, score, keyMatched, tags, artist, best)
         }
-        return rows.sortedWith { x, y ->
-            val p = POS_ORDER.compare(Pos(x.tier, x.known, x.observedTakes, x.observedLastAt), Pos(y.tier, y.known, y.observedTakes, y.observedLastAt))
-            if (p != 0) p else y.score.compareTo(x.score)
+        val salt = "${params.seed}:${refs.map { it.id }.sorted().joinToString(",")}"
+        val sortRanks = rows.associate { row ->
+            var s = row.score
+            if (row.known == null && params.temperature > 0) s -= 30 * params.temperature * ln(-ln(uniform("$salt:${row.track.id}")))
+            row.track.id to Rank(row.known, s)
         }
+        return rows.sortedWith { x, y -> COMPARE.compare(sortRanks.getValue(x.track.id), sortRanks.getValue(y.track.id)) }
     }
 
-    private fun passesBpmGate(reference: LibraryTrack, candidate: LibraryTrack, params: FollowParams): Boolean {
-        val refBpm = reference.bpm
-        if (!params.bpm || refBpm == null || refBpm <= 0) return true
-        val bpm = candidate.bpm ?: return false
-        return LibraryFilter.inBpmWindow(bpm, refBpm, params.bpmThresholdPercent)
+    fun breakdown(reference: LibraryTrack, candidate: LibraryTrack, bpmThresholdPercent: Double): ScoreBreakdown {
+        val relation = MatchScore.keyRelation(reference.keyOpenKey, candidate.keyOpenKey)
+        val shared = MatchScore.sharedTags(reference, candidate).size
+        return ScoreBreakdown(
+            referenceId = reference.id,
+            keyRelation = relation,
+            key = MatchScore.W_KEY * relation.bonus,
+            sharedTags = shared,
+            tags = MatchScore.W_TAGS * MatchScore.tagContribution(shared),
+            artist = MatchScore.W_ARTIST * (if (MatchScore.sharedArtist(reference.artist, candidate.artist)) 1.0 else 0.0),
+            energy = MatchScore.W_ENERGY * MatchScore.energyContribution(reference.energy, candidate.energy),
+            bpm = MatchScore.W_BPM * MatchScore.bpmContribution(reference.bpm, candidate.bpm, bpmThresholdPercent),
+        )
+    }
+
+    /** Desktop orderRanked's identity hash → uniform (FNV-1a over UTF-16 units, murmur3 fmix32). */
+    fun uniform(key: String): Double {
+        var h = 2166136261L.toInt()
+        for (c in key) h = (h xor c.code) * 16777619
+        h = (h xor (h ushr 16)) * 0x85ebca6bL.toInt()
+        h = (h xor (h ushr 13)) * 0xc2b2ae35L.toInt()
+        h = h xor (h ushr 16)
+        return ((h.toLong() and 0xffffffffL) + 0.5) / 4294967296.0
+    }
+}
+
+/**
+ * The desktop's per-reference candidate query (crud.get_tracks bpm_center /
+ * bpm_threshold_percent): the centiBPM COLUMN (snapshot bpm_centi, which can
+ * differ from the served bpm) within ±pct of the center, ×2 or ÷2, each
+ * bound truncated to an integer like the SQL. Off (everything passes) when
+ * the gate is disabled or the reference has no served BPM.
+ */
+class BpmGate private constructor(private val ranges: List<LongRange>?) {
+    fun admits(candidate: LibraryTrack): Boolean {
+        val r = ranges ?: return true
+        val c = candidate.bpmCenti ?: return false
+        return r.any { c in it }
+    }
+
+    companion object {
+        fun of(reference: LibraryTrack, params: FollowParams): BpmGate {
+            val center = reference.bpm
+            if (!params.bpm || center == null || center == 0.0) return BpmGate(null)
+            val pct = params.bpmThresholdPercent.toInt().toDouble()
+            return BpmGate(listOf(center, center * 2, center / 2).map { fold ->
+                val t = fold * (pct / 100.0)
+                ((fold - t) * 100).toLong()..((fold + t) * 100).toLong()
+            })
+        }
     }
 }
