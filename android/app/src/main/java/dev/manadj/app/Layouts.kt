@@ -221,9 +221,9 @@ fun mixOf(model: PlayerModel, ux: UiModel, id: DeckId): DeckMix {
             }
             // Minimaps flank the centre BROWSE key (the #94 swap is landscape-only, #101).
             Row(pad.fillMaxWidth().height(if (tight) 36.dp else 44.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                Minimap(a, model, ux.waves[a.source?.id ?: ""], Modifier.weight(1f).fillMaxHeight(), preview = ux.seekPreview, ux = ux)
+                Minimap(a, model, ux.waves[a.source?.id ?: ""], Modifier.weight(1f).fillMaxHeight(), preview = ux.seekPreview, ux = ux, compactCues = true)
                 BrowseKey(model, ux, Modifier.width(84.dp).fillMaxHeight())
-                Minimap(b, model, ux.waves[b.source?.id ?: ""], Modifier.weight(1f).fillMaxHeight(), preview = ux.seekPreview, ux = ux)
+                Minimap(b, model, ux.waves[b.source?.id ?: ""], Modifier.weight(1f).fillMaxHeight(), preview = ux.seekPreview, ux = ux, compactCues = true)
             }
             // Deck control areas; the pitch panel replaces one deck's half in place (#105).
             Box(Modifier.fillMaxWidth()) {

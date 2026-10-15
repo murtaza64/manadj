@@ -155,6 +155,8 @@ fun marksOf(ui: DeckUi) = ui.snapshot.let { s -> WaveMarks(s?.cueSeconds, ui.hot
     overview: Boolean = false, vertical: Boolean = false, windowSeconds: Double = 16.0, playheadAt: Float = .3f,
     live: () -> Strip = { Strip() }, history: StripHistory? = null, accent: Color = Ink.accent, status: String? = null,
     stemWave: ((Int) -> WaveformData?)? = null,
+    /** Overview: small unnumbered cue flags (portrait minimaps, UH11). */
+    compactCues: Boolean = false,
 ) {
     val paint = remember { Paint().apply { strokeWidth = 2f; isAntiAlias = false } }
     val ink = remember { Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = Typeface.MONOSPACE; isFakeBoldText = true } }
@@ -244,6 +246,16 @@ fun marksOf(ui: DeckUi) = ui.snapshot.let { s -> WaveMarks(s?.cueSeconds, ui.hot
                     line(marks.anchor + k * beat, Color.White.copy(alpha = floatArrayOf(.14f, .32f, .45f, .6f, .75f)[tier]), floatArrayOf(1f, 1.5f, 2f, 2.5f, 3f)[tier].dp.toPx())
                 }
             }
+            // Minimap hypermeter (UH12): subtle grey lines every 32 beats, 64 slightly stronger, from the grid anchor.
+            if (overview) marks.bpm?.let { bpm ->
+                val beat = 60.0 / bpm
+                val first = ceil(-marks.anchor / (beat * 32)).toInt()
+                val last = floor((dur - marks.anchor) / (beat * 32)).toInt()
+                if (last - first < 400) for (k in first..last) {
+                    val strong = k % 2 == 0
+                    line(marks.anchor + k * 32 * beat, Color.White.copy(alpha = if (strong) .30f else .16f), 1.dp.toPx())
+                }
+            }
             marks.loop?.let { loop ->
                 val x = at(loop.start).coerceIn(0f, along); val y = at(loop.endInclusive).coerceIn(0f, along); val a = min(x, y); val b = max(x, y)
                 if (b > a) drawRect(Ink.play.copy(alpha = .2f), if (vertical) Offset(0f, a) else Offset(a, 0f), if (vertical) Size(size.width, b - a) else Size(b - a, size.height))
@@ -256,7 +268,11 @@ fun marksOf(ui: DeckUi) = ui.snapshot.let { s -> WaveMarks(s?.cueSeconds, ui.hot
             marks.hotCues.forEachIndexed { slot, cue -> cue?.let {
                 line(it, Ink.cues[slot], (if (overview) 1.5f else 2f).dp.toPx())
                 val p = at(it)
-                if (p in 0f..along) {
+                if (p in 0f..along && overview && compactCues) {
+                    // Portrait minimaps (UH11): a 5dp flag, no digit — numbered flags overlapped.
+                    val flag = 5.dp.toPx()
+                    drawRect(Ink.cues[slot], Offset(if (vertical) 0f else p.coerceAtMost(size.width - flag), if (vertical) p.coerceAtMost(size.height - flag) else 0f), Size(flag, flag))
+                } else if (p in 0f..along) {
                     // Overview labels stay small (round-5 feedback): a 10dp flag with the slot digit only.
                     val flag = (if (overview) 10 else 14).dp.toPx()
                     val x = if (vertical) 0f else p.coerceAtMost(size.width - flag)
@@ -301,7 +317,7 @@ private fun renderOverview(data: WaveformData, size: IntSize2, duration: Double,
  * position so this deck's detail wave follows live; the audio seeks once, where the finger lifts. A second
  * finger cancels (no seek).
  */
-@Composable fun Minimap(ui: DeckUi, model: PlayerModel, wave: WaveformData?, modifier: Modifier, vertical: Boolean = false, preview: MutableMap<DeckId, Double>? = null, ux: UiModel? = null) {
+@Composable fun Minimap(ui: DeckUi, model: PlayerModel, wave: WaveformData?, modifier: Modifier, vertical: Boolean = false, preview: MutableMap<DeckId, Double>? = null, ux: UiModel? = null, compactCues: Boolean = false) {
     var seekPreview by remember(ui.id) { mutableStateOf<Double?>(null) }
     LaunchedEffect(seekPreview) {
         val p = seekPreview
@@ -341,7 +357,7 @@ private fun renderOverview(data: WaveformData, size: IntSize2, duration: Double,
             finally { if (cancelled) preview?.remove(ui.id); seekPreview = null; model.finishGesture(id, cancelled) }
         }
     }, overview = true, vertical = vertical, accent = deckColor(ui.id), status = if (!ui.ready) null else if (wave == null) "analysing…" else null,
-        live = { ux?.strip(ui) ?: Strip() },
+        live = { ux?.strip(ui) ?: Strip() }, compactCues = compactCues,
         stemWave = ux?.let { u -> { mask: Int -> val id = ui.source?.id; if (wave == null || id == null) null else u.stemWave(id, wave, mask) } })
     // Per-stem state (#158): one bar per stem in its colour, dim when killed.
     stems?.let { g ->
