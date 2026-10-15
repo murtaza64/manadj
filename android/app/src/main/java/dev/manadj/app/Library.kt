@@ -212,7 +212,18 @@ private class BrowseData(val decks: List<DeckId>, val refs: List<Long>, val foll
         val playOrder = remember(ux.library, node) { (node as? BrowseNode.Playlist)?.let { n -> ux.library.playlists().firstOrNull { it.id == n.id }?.trackIds?.withIndex()?.associate { (i, t) -> t to i + 1 } } }
         // Follow section headers (desktop rankLabel) while the list is in rank order.
         val sections = isFollow && ux.filter.sort == LibrarySort.RANK
-        LazyColumn(modifier, state = listState) {
+        // Row → LazyColumn item index (leading items + Follow section headers), for the scrubber (#166).
+        val hint = ux.synced != null && !ux.editHintSeen
+        val rowItems = remember(rows, sections, followById, localCount, hint, refs.isEmpty()) {
+            var idx = localCount + (if (hint) 1 else 0) + (if (isFollow && refs.isEmpty()) 1 else 0)
+            IntArray(rows.size) { i ->
+                val c = followById?.get(rows[i].id)
+                if (sections && c != null && (i == 0 || followById[rows[i - 1].id]?.label != c.label)) idx++
+                idx++
+            }
+        }
+        Box(modifier) {
+        LazyColumn(Modifier.fillMaxSize(), state = listState) {
             if (local) items(model.sources, key = { "local:" + it.id }, contentType = { "local" }) { source ->
                 SwipeToLoad(source.title, Modifier.fillMaxWidth(), { model.requestImport(it, source.uri) }) {
                     Row(Modifier.fillMaxWidth().height(48.dp).then(if (tapTarget != null) Modifier.clickable { model.requestImport(tapTarget, source.uri) } else Modifier).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -241,6 +252,10 @@ private class BrowseData(val decks: List<DeckId>, val refs: List<Long>, val foll
                     }
                 }
             }
+        }
+        ScrubOverlay(listState, rows, ux.filter.sort, { r -> rowItems.getOrElse(r) { 0 } },
+            { item -> var lo = 0; var hi = rowItems.size - 1; while (lo < hi) { val m = (lo + hi + 1) / 2; if (rowItems[m] <= item) lo = m else hi = m - 1 }; lo },
+            Modifier.matchParentSize())
         }
 }
 
