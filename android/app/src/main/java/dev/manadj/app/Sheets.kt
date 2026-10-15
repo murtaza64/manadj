@@ -36,61 +36,6 @@ import dev.manadj.audio.QuantizeMode
 }
 
 
-@Composable fun SettingsSheet(model: PlayerModel, ux: UiModel, modifier: Modifier) {
-    Card(Ink.accent, modifier) {
-        CardHeader("SETTINGS", Ink.accent) { ux.settings = false }
-        Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            @Composable fun Toggle(label: String, detail: String, on: Boolean, pending: Boolean = false, flip: () -> Unit) {
-                Row(Modifier.fillMaxWidth().clickable(onClick = flip).padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) { Row { Text(label, bold = true); if (pending) { Spacer(Modifier.width(6.dp)); PendingTag() } }; Text(detail, color = Ink.muted, size = 11, lines = 2) }
-                    Box(Modifier.size(52.dp, 28.dp).clip(RoundedCornerShape(50)).background(if (on) Ink.accent.copy(alpha = .35f) else Ink.crust).border(1.5.dp, if (on) Ink.accent else Ink.surface, RoundedCornerShape(50)), contentAlignment = if (on) Alignment.CenterEnd else Alignment.CenterStart) {
-                        Box(Modifier.padding(4.dp).size(20.dp).clip(RoundedCornerShape(50)).background(if (on) Ink.accent else Ink.surface2))
-                    }
-                }
-            }
-            val mode = model.output?.quantizeMode ?: ux.quantizeMode
-            Toggle("Quantize", "Snap cues, loops and jumps to the beat grid.", mode.quantized, !model.supports("quantize")) { ux.setQuantize(model, on = !mode.quantized) }
-            Toggle("Heard (lag compensation)", "Cues and launches line up with what you hear, offset by the output latency below. Works with Quantize on or off. Long-press Q.", ux.quantizeHeard) { ux.setQuantize(model, heard = !ux.quantizeHeard) }
-            if (ux.quantizeHeard) HeardLatency(model)
-            // Landscape BROWSE parity: which deck stays on screen next to the browser.
-            Text("Browse beside (landscape)", bold = true)
-            Row(Modifier.fillMaxWidth().height(40.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                for ((mode, label) in listOf(BrowseBeside.LOADING to "LOADING DECK", BrowseBeside.PLAYING to "PLAYING DECK", BrowseBeside.BOTH to "BOTH DECKS"))
-                    Key(label, Modifier.weight(1f).fillMaxHeight(), Ink.accent, engaged = ux.browseBeside == mode, description = "Browse beside: $label", textSize = 10, style = KeyStyle.PILL) { ux.browseBeside = mode }
-            }
-            if (ux.browseBeside == BrowseBeside.BOTH) Row(Modifier.fillMaxWidth().height(36.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text("Browser side · swipe rows to A / B", Modifier.weight(1f), Ink.muted, 11)
-                Key("LEFT", Modifier.width(72.dp).fillMaxHeight(), Ink.accent, engaged = !ux.browseBothRight, description = "Browser on the left", textSize = 10, style = KeyStyle.PILL) { ux.browseBothRight = false }
-                Key("RIGHT", Modifier.width(72.dp).fillMaxHeight(), Ink.accent, engaged = ux.browseBothRight, description = "Browser on the right", textSize = 10, style = KeyStyle.PILL) { ux.browseBothRight = true }
-            }
-            Row(Modifier.fillMaxWidth().height(40.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                Column(Modifier.weight(1f)) { Text("Preview brightness", bold = true); Text("Browser previews + minimaps, on top of desktop's minimap dim.", color = Ink.muted, size = 11) }
-                Key("−", Modifier.width(44.dp).fillMaxHeight(), Ink.accent, ux.overviewBrightness > .31f, description = "Preview brightness down", textSize = 14, style = KeyStyle.PILL) { ux.overviewBrightness -= .05f }
-                Text("${(ux.overviewBrightness * 100 + .5f).toInt()}%", Modifier.width(48.dp), Ink.text, 13, true)
-                Key("+", Modifier.width(44.dp).fillMaxHeight(), Ink.accent, ux.overviewBrightness < .99f, description = "Preview brightness up", textSize = 14, style = KeyStyle.PILL) { ux.overviewBrightness += .05f }
-            }
-            Row(Modifier.fillMaxWidth().height(40.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                Column(Modifier.weight(1f)) { Text("Jog sensitivity", bold = true); Text("Pitch-panel jog strip nudge strength.", color = Ink.muted, size = 11) }
-                Key("−", Modifier.width(44.dp).fillMaxHeight(), Ink.accent, ux.jogSensitivity > .55f, description = "Jog sensitivity down", textSize = 14, style = KeyStyle.PILL) { ux.jogSensitivity -= .1f }
-                Text("×%.1f".format(ux.jogSensitivity), Modifier.width(48.dp), Ink.text, 13, true)
-                Key("+", Modifier.width(44.dp).fillMaxHeight(), Ink.accent, ux.jogSensitivity < 2.95f, description = "Jog sensitivity up", textSize = 14, style = KeyStyle.PILL) { ux.jogSensitivity += .1f }
-            }
-            Toggle("Crossfader", "Off hides the crossfader (both decks play through).", ux.crossfaderEnabled) {
-                ux.crossfaderEnabled = !ux.crossfaderEnabled
-                if (!ux.crossfaderEnabled) model.updateCrossfade(.5)
-            }
-            Toggle("Preview pending controls", "EQ, filter, Beat FX, loops, stems move visually but make no sound until the engine lands them.", ux.previewPending) { ux.previewPending = !ux.previewPending }
-            Toggle("Output readout", "Show the native output stats line.", ux.outputDebug) { ux.outputDebug = !ux.outputDebug }
-            Text("Waveform zoom (or pinch a waveform)", bold = true)
-            Row(Modifier.fillMaxWidth().height(40.dp)) { for (s in listOf(6.0, 8.0, 12.0, 16.0, 24.0)) Key("${s.toInt()}s", Modifier.weight(1f).fillMaxHeight(), Ink.accent, engaged = kotlin.math.abs(ux.waveSeconds - s) < .5, textSize = 12) { ux.chooseWaveSeconds(s) } }
-            Key("OUTPUT / ROUTING", Modifier.fillMaxWidth().height(44.dp), Ink.accent, icon = Glyph.Headphones) { ux.settings = false; model.outputPanel = true }
-            LibrarySync(ux)
-            FilterSettingsPanel(model)
-            Text("manadj Android · UI #371 · engine #369/#370", color = Ink.muted, size = 10)
-        }
-    }
-}
-
 @Composable fun ReplaceDialog(model: PlayerModel, ux: UiModel) {
     ux.confirmLoad?.let { (deck, id) -> return ConfirmReplace(deck, { ux.confirmLoad = null }) { ux.loadRow(model, deck, id, confirmed = true) } }
     val (deck, _) = model.replace ?: return
@@ -123,7 +68,7 @@ fun visibleOther(id: DeckId) = if (id == DeckId.A) DeckId.B else DeckId.A
  * Desktop library (#372-#376): zero-typing pairing (DNS-SD discovery → approve on the desktop, match code shown
  * big), manual address as a collapsed fallback, SYNC (dot = unsynced phone edits), bulk offline download.
  */
-@Composable private fun LibrarySync(ux: UiModel) {
+@Composable fun LibrarySync(ux: UiModel) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val holder = dev.manadj.app.library.LibraryHolder
     var url by remember { mutableStateOf(ux.repo.baseUrl) }
@@ -142,7 +87,6 @@ fun visibleOther(id: DeckId) = if (id == DeckId.A) DeckId.B else DeckId.A
             if (value.isEmpty()) Text(hint, color = Ink.muted, size = 13)
             androidx.compose.foundation.text.BasicTextField(value, onChange, Modifier.fillMaxWidth(), singleLine = true, textStyle = androidx.compose.ui.text.TextStyle(color = Ink.text, fontSize = androidx.compose.ui.unit.TextUnit(13f, androidx.compose.ui.unit.TextUnitType.Sp), fontFamily = Mono), cursorBrush = androidx.compose.ui.graphics.SolidColor(Ink.accent))
         }
-    Text("Desktop library", bold = true)
     when (val p = pairing) {
         is dev.manadj.library.PairingState.AwaitingApproval -> {
             Text("Check that ${p.desktop} shows", color = Ink.muted, size = 12)

@@ -498,6 +498,9 @@ class Session(Base):
     uuid = Column(String, nullable=False)
     started_at = Column(DateTime, nullable=False, default=func.now())
     ended_at = Column(DateTime, nullable=True)
+    # Where it was recorded (#395): NULL = this desktop; else the device name
+    # of the phone that recorded it and pushed it over device sync.
+    origin = Column(String, nullable=True)
     # Routine-miner currency marker (routines 157): the MINER_VERSION whose
     # suggestion rows this Session currently carries. NULL = never mined;
     # != routine_miner.MINER_VERSION = stale, the startup sweep re-enqueues.

@@ -99,7 +99,19 @@ class UiModel(application: Application) : AndroidViewModel(application) {
 
     val extras = DeckId.entries.associateWith { DeckExtras() }
     val fx = FxUi()
+    /** Settings takeover (#396): replaces the controls below the waves (portrait) / beside the mixer (landscape). */
     var settings by mutableStateOf(false)
+    /** Open Settings sub-page; null = the group list (stacked) / first group (side-by-side). */
+    var settingsPage by mutableStateOf<SettingsPage?>(null)
+    /** Settings is drilling in (narrow): back pops [settingsPage] before closing. */
+    var settingsStacked = true
+    /** Gear: toggles Settings; opening it closes the browser and pitch panel it replaces. */
+    fun toggleSettings(model: PlayerModel) {
+        settings = !settings
+        if (settings) { model.browser = null; model.pitchDrawer = null }
+    }
+    /** System back inside Settings: up one level, then closed. */
+    fun settingsBack() { if (settingsStacked && settingsPage != null) settingsPage = null else settings = false }
     /** Session replay screen (#378) open. */
     var sessions by mutableStateOf(false)
     var stemsFor by mutableStateOf<DeckId?>(null)

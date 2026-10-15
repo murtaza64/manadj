@@ -7,8 +7,11 @@ import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import java.io.File
 
-/** Desktop SessionRow. Times are the desktop's ISO strings (naive = UTC). */
-data class SessionHeader(val uuid: String, val startedAt: String?, val endedAt: String?, val takeCount: Int)
+/**
+ * Desktop SessionRow. Times are the desktop's ISO strings (naive = UTC). [origin]: recording device
+ * (null = the desktop). [local]: recorded on this phone (a [RecordedSessions] entry).
+ */
+data class SessionHeader(val uuid: String, val startedAt: String?, val endedAt: String?, val takeCount: Int, val origin: String? = null, val local: Boolean = false)
 
 /**
  * Sessions pulled from the desktop over device sync (#378), cached for offline replay:
@@ -70,7 +73,7 @@ class SessionStore(private val root: File, private val client: () -> SyncClient,
             return (0 until a.length()).map { i ->
                 val o = a.getJSONObject(i)
                 fun str(k: String) = if (o.isNull(k)) null else o.optString(k).ifEmpty { null }
-                SessionHeader(o.getString("uuid"), str("started_at"), str("ended_at"), o.optInt("take_count"))
+                SessionHeader(o.getString("uuid"), str("started_at"), str("ended_at"), o.optInt("take_count"), str("origin"))
             }
         }
     }
