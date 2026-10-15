@@ -219,3 +219,10 @@ def test_legacy_state_migrates_out_of_the_repo_root(data_root):
     registry = DeviceRegistry()
     assert [d.device_id for d in registry.list()] == ["p1"]
     assert not legacy.exists() and (data_root / "data" / "paired_devices.json").exists()
+
+
+def test_startup_moves_legacy_state(data_root, monkeypatch):
+    monkeypatch.setattr(device_listener, "_listener", DeviceListener(host="127.0.0.1", advertise=False))
+    (data_root / "config.toml").write_text("[device_sync]\nenabled = false\nport = 48557\n")
+    device_listener.apply_settings()
+    assert json.loads((data_root / "data" / "device_sync.json").read_text()) == {"enabled": False, "port": 48557}

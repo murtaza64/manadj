@@ -365,7 +365,9 @@ def rotate_pair_code() -> str:
 
 
 def apply_settings() -> None:
-    """Start or stop the listener to match the settings file (startup + edits)."""
+    """Start or stop the listener to match the persisted state (startup + edits)."""
+    if not state_path().exists() and _legacy_table():
+        write_settings()  # one-time move out of config.toml (the repo, in dev); the stale table is then ignored
     enabled, port = read_settings()
     if enabled:
         ensure_pair_code()
