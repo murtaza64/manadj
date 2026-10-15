@@ -8,6 +8,8 @@ package dev.manadj.library
 class Library(
     val snapshot: Snapshot,
     private val previews: (LibraryTrack) -> PreviewWaveform? = { null },
+    /** Audio cached on the phone (live file check; [LibraryQuery.downloadedOnly]). */
+    val isDownloaded: (LibraryTrack) -> Boolean = { false },
 ) {
     val tracks: List<LibraryTrack> = snapshot.tracks
     val tags: List<LibraryTag> = snapshot.tags.sortedWith(compareBy({ categoryOrder[it.categoryId] ?: Int.MAX_VALUE }, { it.displayOrder }, { it.id }))
@@ -42,7 +44,37 @@ class Library(
 
     /** The browse list: the whole collection or one Playlist, filtered and sorted. */
     fun query(query: LibraryQuery = LibraryQuery()): List<LibraryTrack> =
-        query.playlistId?.let { LibraryFilter.applyInPlaylist(playlistTracks(it), query) } ?: LibraryFilter.apply(tracks, query)
+        query.playlistId?.let { LibraryFilter.applyInPlaylist(playlistTracks(it), query, isDownloaded) }
+            ?: LibraryFilter.apply(tracks, query, isDownloaded)
+
+    // ── Tag browse tiers: category → tag → tracks ──
+
+    /** A Tag with how many tracks carry it within the current filters. */
+    data class TagCount(val tag: LibraryTag, val count: Int)
+
+    /** A Tag category with its Tags (display order) and how many filtered tracks carry any of them. */
+    data class CategoryCount(val category: TagCategory, val tags: List<TagCount>, val count: Int)
+
+    /**
+     * Tag categories → tags with track counts, counted over [within] (its own
+     * tagIds ignored, so counts answer "how many if I pick this"). Empty tags
+     * are kept (count 0) so the tree is stable.
+     */
+    fun tagTree(within: LibraryQuery = LibraryQuery()): List<CategoryCount> {
+        val pool = query(within.copy(tagIds = emptySet()))
+        val counts = HashMap<Int, Int>()
+        for (t in pool) for (id in t.tagIds) counts[id] = (counts[id] ?: 0) + 1
+        val byCategory = tags.groupBy { it.categoryId }
+        return categories.sortedWith(compareBy({ it.displayOrder }, { it.id })).map { c ->
+            val tagCounts = byCategory[c.id].orEmpty().map { TagCount(it, counts[it.id] ?: 0) }
+            val ids = tagCounts.mapTo(HashSet()) { it.tag.id }
+            CategoryCount(c, tagCounts, pool.count { t -> t.tagIds.any(ids::contains) })
+        }
+    }
+
+    /** Tracks carrying [tagId] within [within] (the third browse tier). */
+    fun tracksWithTag(tagId: Int, within: LibraryQuery = LibraryQuery()): List<LibraryTrack> =
+        query(within.copy(tagIds = setOf(tagId), tagMatch = TagMatch.ANY))
 
     /** ◆/★/Linked marks of [candidateId] relative to a deck's loaded Track. */
     fun marks(deckTrackId: Int?, candidateId: Int): RowMarks = follow.marks(deckTrackId, candidateId)
