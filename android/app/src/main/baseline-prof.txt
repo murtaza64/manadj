@@ -1,0 +1,5 @@
+# Baseline profile (UH31): precompile the whole app — performance UI, browser (open/close/scroll/scrub), deck
+# load, pitch panel, waveform drawing, library — so the first gestures after an install never run interpreted.
+# Compose/foundation ship their own profiles (merged by AGP, installed by profileinstaller).
+HSPLdev/manadj/**->**(**)**
+Ldev/manadj/**;
