@@ -43,11 +43,11 @@ class SyncTest {
          "tag_categories":[{"id":1,"name":"Genre","display_order":0,"color":"#ff0000"}],
          "tags":[{"id":7,"name":"Neuro","category_id":1,"display_order":0,"color":null}],
          "tracks":[
-          {"id":10,"title":"$deskTitle","artist":"Synth","file_name":"decoy.mp3","bpm":174.0,"key":15,"key_openkey":"8m","key_camelot":"3A",
+          {"id":10,"title":"$deskTitle","artist":"Synth","file_name":"decoy.mp3","bpm":174.0,"bpm_centi":17400,"key":15,"key_openkey":"8m","key_camelot":"3A",
            "energy":4,"duration_secs":300.0,"date_added":"2026-10-01T00:00:00","main_cue":0.5,"codec":"mp3","filesize_bytes":200000,
            "audio_rev":"r1","preview_rev":"$previewRev","waveform_rev":"w1","stems_rev":"s1","tag_ids":[7],"hot_cues":[{"slot":1,"time":12.5,"label":null,"color":"#00ff00"}],
            "grid":{"origin":"analyzed","anchor_time":0.5,"tempo_changes":[{"start_time":0.5,"bpm":174.0,"time_signature_num":4,"bar_position":1}]}},
-          {"id":11,"title":null,"artist":null,"file_name":"untitled.flac","bpm":null,"key":null,"key_openkey":null,"key_camelot":null,
+          {"id":11,"title":null,"artist":null,"file_name":"untitled.flac","bpm":null,"bpm_centi":null,"key":null,"key_openkey":null,"key_camelot":null,
            "energy":null,"duration_secs":null,"date_added":null,"main_cue":null,"codec":null,"filesize_bytes":null,
            "audio_rev":null,"preview_rev":null,"waveform_rev":null,"tag_ids":[],"hot_cues":[],"grid":null}],
          "playlists":[{"id":3,"name":"Set","color":null,"display_order":0,"track_ids":[11,10]}],
@@ -55,7 +55,8 @@ class SyncTest {
          "cameos":[],"takes":[{"a":11,"b":10,"count":2,"last_at":"2026-10-02T00:00:00"}],
          "settings":{
           "manadj.waveformStyles":{"value":{"version":1,"full":{"styleId":"additive-soft","params":{"master":1}},"minimap":{"styleId":"additive-soft","params":{"master":$deskMinimapMaster}}},"updated_at":"2026-10-14T12:00:00"},
-          "manadj-filter-settings":{"value":{"model":"res48","resonance":99,"drive":"x"},"updated_at":null}}}
+          "manadj-filter-settings":{"value":{"model":"res48","resonance":99,"drive":"x"},"updated_at":null},
+          "manadj-follow-params":{"value":{"bpm":true,"bpmThresholdPercent":7,"knownOnly":false,"temperature":0.18},"updated_at":null}}}
     """.trimIndent()
 
     @BeforeTest fun start() {
@@ -443,6 +444,19 @@ class SyncTest {
         assertEquals(listOf("Neuro" to 1), tree.single().tags.map { it.tag.name to it.count })
         assertEquals(listOf(10), repo.library.value!!.tracksWithTag(7).map { it.id })
         assertEquals(0, repo.library.value!!.tagTree(LibraryQuery(search = "untitled")).single().count)
+    }
+
+    @Test fun followParamsSyncedEditableAndReroll() = runBlocking {
+        val repo = repo()
+        repo.sync().getOrThrow()
+        assertEquals(FollowParams(bpmThresholdPercent = 7.0, temperature = 0.18), repo.library.value!!.followParams)
+        assertTrue(repo.editFollowParams(repo.library.value!!.followParams.copy(knownOnly = true)))
+        assertTrue(repo.library.value!!.followParams.knownOnly)
+        val seed = repo.followSeed.value
+        repo.rerollFollow()
+        assertEquals((seed + 1) and 0xffffffffL, repo.followSeed.value)
+        repo.sync().getOrThrow()
+        assertTrue(pushed.single().contains("setting:manadj-follow-params"))
     }
 
     @Test fun presyncAudio() = runBlocking {

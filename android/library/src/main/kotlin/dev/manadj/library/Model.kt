@@ -41,6 +41,8 @@ data class LibraryTrack(
     val artist: String?,
     val fileName: String,
     val bpm: Double?,
+    /** The desktop's centiBPM column (Follow's BPM gate filters on it); null when unknown. */
+    val bpmCenti: Long? = null,
     val key: Int?,
     val keyOpenKey: String?,
     val keyCamelot: String?,

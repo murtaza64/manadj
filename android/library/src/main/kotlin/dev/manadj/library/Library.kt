@@ -33,6 +33,9 @@ class Library(
     /** The desktop's Waveform styles: draw detail waveforms with [WaveformStyles.full], previews/overviews with [WaveformStyles.minimap]. */
     val waveformStyles: WaveformStyles get() = snapshot.performance.waveformStyles
 
+    /** The desktop's Follow parameters (bpm gate, threshold, knownOnly, temperature); pass with a seed to [follow]. */
+    val followParams: FollowParams get() = snapshot.performance.follow
+
     /**
      * A synced setting's JSON (with local edits), e.g. [PerformanceSettings.FILTER]:
      * `dev.manadj.audio.FilterSettings.fromJson(JSONObject(it))` → PlayerModel.updateFilterSettings.
@@ -87,7 +90,7 @@ class Library(
     fun follow(referenceIds: List<Int>, params: FollowParams = FollowParams(), within: LibraryQuery? = null): List<FollowRow> {
         val references = referenceIds.distinct().mapNotNull(byId::get)
         val scope = within?.playlistId?.let(::playlistTracks) ?: tracks
-        val pool = if (within == null) scope else scope.filter { LibraryFilter.matches(it, within) }
+        val pool = if (within == null) scope else scope.filter { LibraryFilter.matches(it, within, isDownloaded) }
         return FollowRanker.rank(pool, follow, references, params)
     }
 }
