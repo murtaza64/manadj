@@ -297,6 +297,10 @@ export function buildClipMetric(
 export type VizImpact = 'none' | 'flash' | 'zoom' | 'shockwave' | 'strobe';
 
 export interface AutoVizOptions {
+  /** 'storyboard': an arc (mixer-forward intro, blackout into the drop,
+   * restyles that brighten the visualizer and strip the UI as the clip
+   * goes on); 'rotation': presets cycle on drops / phrases. */
+  style?: 'storyboard' | 'rotation';
   /** Preset rotation (cycled). */
   presets: string[];
   /** Minimum seconds between preset switches. */
@@ -320,6 +324,7 @@ export const DEFAULT_AUTO_VIZ: AutoVizOptions = {
   dropImpact: 'shockwave',
   phraseImpact: 'flash',
   phrasePulses: true,
+  style: 'storyboard',
   transitions: false,
   lookChanges: false,
 };
@@ -359,6 +364,7 @@ const PULSE_VFX: TransitionVfx[] = ['invert', 'strobe', 'mirror'];
 export function autoVizCues(
   metric: ClipMetric, range: { startSec: number; endSec: number }, opts: AutoVizOptions, secPerBar = 2,
 ): VizCue[] {
+  if ((opts.style ?? 'storyboard') === 'storyboard') return storyboardCues(metric, range, opts, secPerBar);
   const presets = opts.presets.length > 0 ? opts.presets : DEFAULT_AUTO_VIZ.presets;
   let pi = 0;
   const cues: VizCue[] = [{ atSec: 0, presetId: presets[0] }];
@@ -403,4 +409,107 @@ export function autoVizCues(
     }
   }
   return cues;
+}
+
+/** Look fields the storyboard drives (each scene sets all of them). */
+type StoryLook = Pick<ClipLook,
+  'vizDim' | 'vignette' | 'vizOpacity' | 'composite' | 'wavePalette' | 'showKnobs' | 'showTitles' | 'showPlayhead' | 'showCues' | 'showTicker'>;
+const STORY_COMPOSITES: ClipLook['composite'][] = ['screen', 'cards', 'mask', 'cards'];
+const STORY_PALETTES: ClipLook['wavePalette'][] = ['neon', 'deck', 'deck', 'fire'];
+
+const lerp = (a: number, b: number, k: number): number => a + (b - a) * Math.max(0, Math.min(1, k));
+const r2 = (v: number): number => Math.round(v * 100) / 100;
+
+/** The auto storyboard (modelled on a hand-authored clip): the intro is
+ * mixer-forward (titles, knobs, a dim visualizer); a short blackout and a
+ * preset blast break up the first phrase change; the visualizer blacks
+ * out for a bar into each drop and the drop cuts to a restyled scene;
+ * after it every scene change cuts to a new preset, the visualizer
+ * brightens (darken / vignette → 0) and the UI strips back — knobs and
+ * titles at ~2/3, playhead / cue flags / pills for the closing scene. */
+export function storyboardCues(
+  metric: ClipMetric, range: { startSec: number; endSec: number }, opts: AutoVizOptions, secPerBar = 2,
+): VizCue[] {
+  const presets = opts.presets.length > 0 ? opts.presets : DEFAULT_AUTO_VIZ.presets;
+  const dur = Math.max(1, range.endSec - range.startSec);
+  let pi = 0;
+  const intro: StoryLook = {
+    vizDim: 0.35, vignette: 0.6, vizOpacity: 0.75, composite: 'cards', wavePalette: 'deck',
+    showKnobs: true, showTitles: true, showPlayhead: true, showCues: true, showTicker: true,
+  };
+  const cues: VizCue[] = [{ atSec: 0, presetId: presets[0], look: { ...intro, revealAtDrop: true } }];
+  // Scenes carry only what they change against the running storyboard look.
+  let running: Partial<ClipLook> = { ...intro };
+  const changes = (target: Partial<ClipLook>): Partial<ClipLook> | undefined => {
+    const out: Partial<ClipLook> = {};
+    for (const [k, v] of Object.entries(target) as [keyof ClipLook, unknown][]) {
+      if (running[k] !== v) (out as Record<string, unknown>)[k] = v;
+    }
+    running = { ...running, ...target };
+    return Object.keys(out).length > 0 ? out : undefined;
+  };
+  // Candidate boundaries: audible drops and the dominant track's phrases
+  // (16-bar before the first drop, 8-bar after it — the cuts quicken).
+  const firstDropT = metric.events.find((e) => e.drop && e.t - range.startSec >= 1 && range.endSec - e.t >= 4)?.t ?? Infinity;
+  const evs: { s: number; drop: boolean }[] = [];
+  for (const e of metric.events) {
+    const s = e.t - range.startSec;
+    if (s < 1 || range.endSec - e.t < 4) continue;
+    if (!e.drop && !(e.dominant && e.tier >= (e.t > firstDropT ? 3 : 4))) continue;
+    const prev = evs[evs.length - 1];
+    if (prev && s - prev.s < 0.5) { prev.drop ||= e.drop; continue; }
+    evs.push({ s, drop: e.drop });
+  }
+  const firstDrop = evs.find((e) => e.drop)?.s ?? dur * 0.35;
+  const minGap = Math.max(8, opts.minGapSec * 0.5);
+  let last = 0;
+  let scene = 0;
+  let drops = 0;
+  let blasted = false;
+  for (const e of evs) {
+    const s = e.s;
+    if (!e.drop && s - last < minGap) {
+      if (opts.phrasePulses) cues.push({ atSec: s, presetId: presets[pi], impact: opts.phraseImpact });
+      continue;
+    }
+    if (e.drop && s - last < secPerBar * 2) continue;
+    pi = (pi + 1) % presets.length;
+    const cue: VizCue = { atSec: s, presetId: presets[pi], impact: e.drop ? opts.dropImpact : opts.phraseImpact };
+    const p = s / dur;
+    if (s < firstDrop) {
+      // Intro: the first phrase change breaks with a blackout + a blast.
+      if (!blasted && s > secPerBar) {
+        cues.push({ atSec: r2(s - secPerBar / 2), presetId: presets[(pi + presets.length - 1) % presets.length], transition: { kind: 'blackout', placement: 'after', durationSec: r2(secPerBar / 2) } });
+        cue.transition = { kind: 'blast', placement: 'after', durationSec: r2(secPerBar * 2), presetId: presets[(pi + Math.floor(presets.length / 2)) % presets.length] };
+        blasted = true;
+      } else {
+        cue.transition = { kind: 'cut' };
+      }
+    } else {
+      const q = (s - firstDrop) / Math.max(1, dur - firstDrop);
+      const look: Partial<ClipLook> = e.drop && drops === 0
+        ? { composite: 'cards', wavePalette: 'mono', vizDim: 0.12, vignette: 0.35, vizOpacity: 0.9 }
+        : {
+          composite: STORY_COMPOSITES[scene % STORY_COMPOSITES.length],
+          wavePalette: STORY_PALETTES[scene % STORY_PALETTES.length],
+          vizDim: r2(lerp(0.12, 0, q * 1.5)), vignette: r2(lerp(0.35, 0, q * 1.5)), vizOpacity: r2(lerp(0.9, 1, q * 2)),
+        };
+      look.showKnobs = look.showTitles = p < 0.65;
+      look.showPlayhead = look.showCues = look.showTicker = p < 0.82;
+      const diff = changes(look);
+      if (diff) cue.look = diff;
+      if (e.drop) {
+        cue.transition = drops % 2 === 0
+          ? { kind: 'blackout', placement: 'before', durationSec: r2(Math.min(secPerBar, s - last - 0.5)) }
+          : { kind: 'blast', placement: 'after', durationSec: r2(secPerBar * 2), presetId: presets[(pi + 2) % presets.length] };
+        drops++;
+      } else {
+        cue.transition = scene % 3 === 2 ? { kind: 'crossfade', durationSec: r2(secPerBar) } : { kind: 'cut' };
+      }
+      scene++;
+    }
+    cues.push(cue);
+    last = s;
+  }
+  return cues.sort((a, b) => a.atSec - b.atSec);
 }

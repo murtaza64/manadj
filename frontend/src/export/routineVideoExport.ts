@@ -27,7 +27,7 @@ import {
   createBackgroundLayer, createOfflineVisualizerFeed, ensureExportPresets, exportPresetById, presetParamsFor,
   type BackgroundLayer,
 } from './offlineVisualizer';
-import { overlayAt, programmeFrame, programmePresetIds, vizAt, type ClipSource, type ClipSpec } from './clipSpec';
+import { clipSpecFile, overlayAt, programmeFrame, programmePresetIds, vizAt, type ClipSource, type ClipSpec } from './clipSpec';
 import { FONT_MONO } from '../theme/tokens';
 import {
   autoVizCues, buildClipMetric, buildTrackMetric, DEFAULT_AUTO_VIZ, type ClipMetric, type TrackMetric,
@@ -517,6 +517,8 @@ export async function exportClip(specIn: ClipSpec, opts: RoutineVideoExportOptio
       `${API_BASE}/video-export/jobs?name=${encodeURIComponent(name)}&fps=${fps}&width=${width}&height=${height}`, wav
     );
     jobId = ((await res.json()) as { id: string }).id;
+    // The spec beside the MP4 (<name>.clip.json): LOAD CLIP reopens it.
+    await post(`${API_BASE}/video-export/jobs/${jobId}/spec`, clipSpecFile(spec)).catch(() => null);
   }
 
   progress({ stage: 'frames', fraction: 0 });

@@ -186,3 +186,26 @@
 .ce-badge { margin-left: var(--space-6); padding: 0 var(--space-4); font-size: var(--font-small); color: var(--crust); }
 .ce-badge-tr { background: #ffea00; }
 .ce-badge-look { background: #ff00ff; }
+
+/* Storyboard scenes (#377 r5): one card per cue — preset, transition, look changes */
+.ce-scenes { display: flex; flex-direction: column; gap: var(--space-2); max-height: 520px; overflow-y: auto; }
+.ce-scene {
+  display: grid; grid-template-columns: 27px 1fr 22px; gap: var(--space-8); align-items: center;
+  padding: var(--space-4) var(--space-6); border: 1px solid var(--surface0); background: var(--mantle); cursor: pointer;
+  font-size: var(--font-body);
+}
+.ce-scene:hover { border-color: var(--surface1); }
+.ce-scene.ce-scene-selected { border-color: var(--routine-accent); }
+.ce-scene.ce-scene-now { box-shadow: inset 3px 0 0 var(--routine-accent); }
+.ce-scene.ce-scene-pulse { opacity: 0.55; padding-top: 0; padding-bottom: 0; }
+.ce-scene.ce-scene-pulse .ce-thumb { height: 16px; width: 9px; justify-self: center; }
+.ce-scene .ce-thumb { width: 27px; height: 48px; }
+.ce-scene-main { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; }
+.ce-scene-line { display: flex; gap: var(--space-6); align-items: baseline; min-width: 0; flex-wrap: wrap; }
+.ce-scene-line .ce-badge { margin-left: 0; }
+.ce-scene .btn-mini { padding: 0 var(--space-4); height: 18px; line-height: 16px; }
+.ce-scene-head { display: flex; gap: var(--space-8); align-items: center; flex-wrap: wrap; padding-bottom: var(--space-6); }
+.ce-scene-head b { color: var(--routine-accent); letter-spacing: 1px; }
+.ce-scene-viz { display: grid; grid-template-columns: 54px 1fr; gap: var(--space-12); align-items: start; }
+.ce-thumb.ce-thumb-lg { width: 54px; height: 96px; }
+.ce-scene-preset { color: var(--text); min-width: 140px; text-align: center; }

@@ -12,20 +12,29 @@ Portrait (1080×1920, 30/60 fps) MP4 of a mix with its rendered audio (#377).
 - Editor: source bar · portrait preview + inspector · transport + timeline.
   - Timeline: per-deck presence envelopes, drops (red), dominant 16-bar phrases, cue flags (drag to move),
     in/out handles (drag to trim), click/drag to scrub. The source renders once; trims slice it.
-  - PROGRAMME: auto programme (rotation from the preset browser, drop/phrase impacts, min gap, phrase pulses →
-    GENERATE CUES; collapses once cues exist), compact cue list, `+ CUE AT PLAYHEAD` snaps to the nearest
-    phrase/drop. Selected cue: preset browser (every curated + genepool preset; search; sort by score, likes,
-    rating, newest, name; dead toggle) and the preset's params as sliders — per cue (keyframe), not per preset.
-    Each cue is a keyframe:
-    - Transition: CROSSFADE (own fade length; also blends numeric look changes) / CUT / held kinds that run for a
+  - A **scene** is a cue: from its time on it sets the visualizer preset (+ params), changes look fields, and
+    arrives with a transition. Tabs:
+    - STORYBOARD: auto storyboard — ARC (default; modelled on a hand-authored clip: mixer-forward intro with titles
+      at drop, a short blackout + preset blast at the first phrase change, a bar of blackout into the first drop
+      which cuts to MONO DROP, then a new preset every 8-bar phrase with the visualizer brightening (darken /
+      vignette → 0) and the UI stripping back — knobs + titles at ~65 %, playhead / cue flags / pills at ~82 %)
+      or ROTATION (presets cycle on drops / phrases; optional `vary transitions` / `look changes`); preset list,
+      impacts, min gap, phrase pulses → GENERATE STORYBOARD. Scene cards: rendered thumbnail, time, length,
+      preset, transition, what the look changes (diff against the scene before); `+ SCENE AT PLAYHEAD` snaps to
+      the nearest phrase/drop.
+    - SCENE n: everything about one scene on one page — ◀ ▶ between scenes, time, impact, PREVIEW (seeks past the
+      transition); Visualizer (◀ ▶ steps presets, BROWSE = the preset browser, PARAMS = per-scene param sliders);
+      Arrives with: CROSSFADE (own fade length; also blends numeric look changes) / CUT / held kinds that run for a
       length (bar buttons) before (`⇥ INTO CUE`) or after the cue and hand back — BLACKOUT (visualizer black;
       optionally the waves too), SOLO (one deck full-frame; AUTO = dominant), BLAST (another preset, then back),
-      VFX (beat-synced RGB split / glitch / kaleido / mirror / invert / tunnel / strobe over the frame).
-    - Look: `EDIT LOOK FROM THIS CUE` opens the LOOK tab scoped to the cue (`FROM CUE m:ss`); every field set there
-      is a keyframe change (magenta, `×` clears = inherit) that persists until a later cue changes it.
-    - Auto programme options `vary transitions` / `look changes` sprinkle both over generated cues.
-    Timeline: crossfade ramps and held segments (colored per kind) under the flags; `◆` = cue changes the look.
-  - LOOK: look presets; composite SOLID / WINDOW (wave masks the visualizer) / LIGHT (additive) / NEGATIVE
+      VFX (beat-synced RGB split / glitch / kaleido / mirror / invert / tunnel / strobe over the frame); Look: the
+      full look editor showing the look in force, fields this scene changes in magenta (`×` = inherit), styles
+      (MIXER, BRIGHT, WAVES ONLY, MONO DROP, …), CLEAR CHANGES, COPY PREVIOUS SCENE. Changes persist until a later
+      scene changes them.
+    - BASE LOOK: the clip's starting look (same editor) + file name.
+    Timeline: click a flag to open its scene; crossfade ramps and held segments (colored per kind) under the
+    flags; `◆` = scene changes the look.
+  - Look fields: styles; composite SOLID / WINDOW (wave masks the visualizer) / LIGHT (additive) / NEGATIVE
     (the wave inverts the visualizer) / CUTOUT (black hole, color rim) / TINT (deck hue, preset light) / STAGE;
     palette; lanes FULL-BLEED (default) / CARDS; decks AUDIBLE / ALL; glow, visualizer, darken, vignette, zoom
     pulse, impacts, wave zoom; response (BEAT×ENERGY / BEAT / ENERGY / BASS / OFF; controls amount, waveform
@@ -38,7 +47,7 @@ Portrait (1080×1920, 30/60 fps) MP4 of a mix with its rendered audio (#377).
 - Headless: `node scripts/export/render_routine_video.mjs --app <vite> --source <kind:uuid> [--max s] [--viz id] [--auto 1|'<AutoVizOptions json>'] [--spec '<partial ClipSpec json>']`
   (drives `?view=clip&autostart=1`; `window.manadjClipEditor.{run,state,seek}`)
   (needs `playwright`: sibling `node_modules`, `~/manadj/node_modules`, or `PLAYWRIGHT_MODULE`; runs Chromium with ANGLE/Metal — SwiftShader is ~15× slower).
-- Output: `<data root>/exports/<title>-<id>.mp4`, served at `/api/video-export/files/<name>`.
+- Output: `<data root>/exports/<title>-<id>.mp4` (+ `<title>-<id>.clip.json`, the spec that made it — LOAD CLIP reopens it), served at `/api/video-export/files/<name>`.
 
 ## Pipeline (`frontend/src/export/`)
 

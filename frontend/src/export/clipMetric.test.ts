@@ -1,3 +1,4 @@
+import { defaultClipSpec, lookAt } from './clipSpec';
 import { describe, expect, it } from 'vitest';
 import type { PlannedRoutine } from '../sets/routinePlan';
 import { autoVizCues, barTier, buildClipMetric, buildTrackMetric, DEFAULT_AUTO_VIZ, metricAt } from './clipMetric';
@@ -48,15 +49,27 @@ describe('clip metric', () => {
     expect(p16).toEqual([32, 64, 96, 128, 160]);
   });
   it('auto programme switches on the drop with its impact', () => {
-    const cues = autoVizCues(metric, { startSec: 0, endSec: 180 }, { ...DEFAULT_AUTO_VIZ, minGapSec: 20 });
+    const cues = autoVizCues(metric, { startSec: 0, endSec: 180 }, { ...DEFAULT_AUTO_VIZ, style: 'rotation', minGapSec: 20 });
     expect(cues[0]).toEqual({ atSec: 0, presetId: 'voyage' });
     expect(cues[1]).toMatchObject({ presetId: 'odyssey', impact: 'shockwave' });
     expect(cues[1].atSec).toBeCloseTo(32, 1);
   });
   it('varied transitions + look changes ride the switches', () => {
-    const cues = autoVizCues(metric, { startSec: 0, endSec: 180 }, { ...DEFAULT_AUTO_VIZ, minGapSec: 20, transitions: true, lookChanges: true }, 2);
+    const cues = autoVizCues(metric, { startSec: 0, endSec: 180 }, { ...DEFAULT_AUTO_VIZ, style: 'rotation', minGapSec: 20, transitions: true, lookChanges: true }, 2);
     expect(cues[1].transition).toMatchObject({ kind: 'blackout', placement: 'before', durationSec: 2 });
     expect(cues[1].look?.composite).toBe('screen');
     expect(cues.slice(2).some((c) => c.transition)).toBe(true);
+  });
+  it('storyboard: mixer-forward intro, blackout into the drop, the UI strips back by the end', () => {
+    const cues = autoVizCues(metric, { startSec: 0, endSec: 180 }, { ...DEFAULT_AUTO_VIZ, minGapSec: 20 }, 2);
+    expect(cues[0].look).toMatchObject({ showKnobs: true, showTitles: true, revealAtDrop: true });
+    const drop = cues.find((c) => Math.abs(c.atSec - 32) < 0.5 && c.look)!;
+    expect(drop.transition).toMatchObject({ kind: 'blackout', placement: 'before' });
+    expect(drop.look).toMatchObject({ wavePalette: 'mono' });
+    const spec = { ...defaultClipSpec({ kind: 'routine', uuid: 'r' }), viz: { cues, crossfadeSec: 2 } };
+    expect(lookAt(spec, 20)).toMatchObject({ showKnobs: true, showPlayhead: true });
+    const end = lookAt(spec, 179);
+    expect(end).toMatchObject({ showKnobs: false, showPlayhead: false });
+    expect(end.vizDim).toBeLessThan(0.12);
   });
 });

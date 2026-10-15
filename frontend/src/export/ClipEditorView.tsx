@@ -26,16 +26,17 @@ import {
   attachRendered, BackgroundProgramme, clipRange, exportClip, loadClip, renderClipAudio, resolveAutoViz,
   type ExportProgress, type LoadedClip, type RenderedClipAudio, type RoutineVideoExportResult,
 } from './routineVideoExport';
-import { drawRoutineFrame, paletteColors, sceneDecks } from './routineVideoScene';
+import { drawRoutineFrame, sceneDecks } from './routineVideoScene';
 import {
   DEFAULT_HOLD_SEC, DEFAULT_LOOK, defaultPlacement, fadeGainAt, HELD_TRANSITIONS, loadClipSpec, lookAfterCue,
   clipSpecFile, overlayAt, parseClipSpecFile, programmeFrame, sourceKey, transitionBadge, programmePresetIds, rememberHandle, saveClipSpec,
   type ClipLook, type ClipSource, type ClipSpec, type CueTransition, type CueTransitionKind, type TransitionVfx,
-  type VizCue, type WaveComposite, type WavePalette,
+  type VizCue,
 } from './clipSpec';
 import { autoVizCues, DEFAULT_AUTO_VIZ, type AutoVizOptions, type VizImpact } from './clipMetric';
 import { ensureExportPresets, exportPresetById, isPresetLoaded, presetCatalogue } from './offlineVisualizer';
 import { PresetBrowser } from './PresetBrowser';
+import { LookControls } from './LookControls';
 import { clipSourceString, OPEN_CLIP_EVENT, parseClipSource, takePendingClipSource } from './clipEvents';
 import { ClipTimeline } from './ClipTimeline';
 import { useViewActive } from '../contexts/viewActive';
@@ -50,6 +51,8 @@ declare global {
       state: () => { progress: ExportProgress | null; result: RoutineVideoExportResult | null; error: string | null; ready: boolean };
       /** Preview at a clip-relative second (headless checks). */
       seek: (clipSec: number) => void;
+      /** The source's structure for authoring (headless): slots, hypermeter events, takeovers. */
+      structure: () => unknown;
     };
   }
 }
@@ -62,32 +65,6 @@ function fmt(sec: number, tenths = false): string {
 }
 
 const IMPACTS: VizImpact[] = ['none', 'flash', 'zoom', 'shockwave', 'strobe'];
-const PALETTES: WavePalette[] = ['deck', 'style', 'neon', 'fire', 'ice', 'mono'];
-const COMPOSITES: { id: WaveComposite; label: string; title: string }[] = [
-  { id: 'cards', label: 'SOLID', title: 'Waveforms drawn solid over the visualizer' },
-  { id: 'mask', label: 'WINDOW', title: 'The waveform is a window onto the visualizer' },
-  { id: 'screen', label: 'LIGHT', title: 'Waveforms add as light over the visualizer' },
-  { id: 'negative', label: 'NEGATIVE', title: 'The waveform imprints a negative: the visualizer inverts inside it' },
-  { id: 'cutout', label: 'CUTOUT', title: 'The waveform punches a black hole in the visualizer, rimmed in its colors' },
-  { id: 'tint', label: 'TINT', title: 'The waveform recolors the visualizer: deck hue, preset light' },
-  { id: 'stage', label: 'STAGE', title: 'One shared stage: every deck overlaid' },
-];
-const HUD_SOURCES: { id: ClipLook['hudSource']; label: string; title: string }[] = [
-  { id: 'beat-energy', label: 'BEAT×ENERGY', title: 'Beat envelope scaled by bass and energy' },
-  { id: 'beat', label: 'BEAT', title: 'Pure beat envelope (dominant track grid)' },
-  { id: 'energy', label: 'ENERGY', title: 'Follows the audible level, no beat shape' },
-  { id: 'bass', label: 'BASS', title: 'Follows the low band, beat-shaped' },
-  { id: 'off', label: 'OFF', title: 'Controls stay still' },
-];
-const LOOK_PRESETS: { id: string; label: string; look: Partial<ClipLook> }[] = [
-  { id: 'neon', label: 'NEON', look: { laneFrame: 'bare', composite: 'cards', wavePalette: 'deck', glow: 0.7, vizOpacity: 0.75, beatPulse: 0.35, showKnobs: true, showTicker: true } },
-  { id: 'glass', label: 'GLASS CARDS', look: { laneFrame: 'cards', composite: 'cards', wavePalette: 'deck', glow: 0.7, vizOpacity: 0.75, beatPulse: 0.35 } },
-  { id: 'window', label: 'WINDOW', look: { laneFrame: 'bare', composite: 'mask', wavePalette: 'mono', glow: 0.5, vizOpacity: 0.85, beatPulse: 0.3 } },
-  { id: 'light', label: 'LIGHT', look: { laneFrame: 'bare', composite: 'screen', wavePalette: 'neon', glow: 0.9, vizOpacity: 0.7, beatPulse: 0.45 } },
-  { id: 'stage', label: 'STAGE', look: { laneFrame: 'bare', composite: 'stage', wavePalette: 'deck', glow: 0.8, vizOpacity: 0.8, beatPulse: 0.4, showTicker: false } },
-  { id: 'minimal', label: 'MINIMAL', look: { composite: 'cards', wavePalette: 'style', glow: 0.3, vizOpacity: 0.5, beatPulse: 0, showKnobs: false, showTicker: false, titleCards: false } },
-];
-
 const TRANSITIONS: { id: CueTransitionKind; label: string; title: string }[] = [
   { id: 'crossfade', label: 'CROSSFADE', title: 'Fade the presets (and blend numeric look changes) over the fade length' },
   { id: 'cut', label: 'CUT', title: 'Instant switch' },
@@ -100,14 +77,8 @@ const VFX: { id: TransitionVfx; label: string }[] = [
   { id: 'rgb', label: 'RGB SPLIT' }, { id: 'glitch', label: 'GLITCH' }, { id: 'kaleido', label: 'KALEIDO' },
   { id: 'mirror', label: 'MIRROR' }, { id: 'invert', label: 'INVERT' }, { id: 'tunnel', label: 'TUNNEL' }, { id: 'strobe', label: 'STROBE' },
 ];
-type Tab = 'programme' | 'look' | 'output';
+type Tab = 'storyboard' | 'scene' | 'look' | 'output';
 
-function paletteSwatch(p: WavePalette): string {
-  if (p === 'style') return 'var(--surface1)';
-  if (p === 'deck') return `linear-gradient(90deg, ${DECK_COLORS.A}, ${DECK_COLORS.B}, ${DECK_COLORS.C}, ${DECK_COLORS.D})`;
-  const c = paletteColors(p, 'A')!.map(([r, g, b]) => `rgb(${r * 255}, ${g * 255}, ${b * 255})`);
-  return `linear-gradient(90deg, ${c.join(', ')})`;
-}
 
 export default function ClipEditorView() {
   const viewActive = useViewActive();
@@ -128,7 +99,7 @@ export default function ClipEditorView() {
   const [error, setError] = useState<string | null>(null);
   const [previewT, setPreviewT] = useState(0);
   const [playing, setPlaying] = useState(false);
-  const [tab, setTab] = useState<Tab>('programme');
+  const [tab, setTab] = useState<Tab>('storyboard');
   const [selectedCue, setSelectedCue] = useState<number | null>(null);
   const [thumbs, setThumbs] = useState<Map<string, string>>(new Map());
   const [auto, setAuto] = useState<AutoVizOptions>(DEFAULT_AUTO_VIZ);
@@ -361,10 +332,27 @@ export default function ClipEditorView() {
   useEffect(() => {
     seekRef.current = (s) => { if (range) { stopAudio(); setPreviewT(range.startSec + s); } };
   });
+  const structureRef = useRef<() => unknown>(() => null);
+  useEffect(() => {
+    structureRef.current = () => {
+      if (!loaded || !range) return null;
+      const m = loaded.scene.metric;
+      const rel = (t: number) => Math.round((t - range.startSec) * 100) / 100;
+      return {
+        range, secPerBeat: loaded.routine.secPerBeat,
+        slots: loaded.routine.slots.map((sl, i) => ({ i, deck: sl.deck, title: loaded.scene.tracks.get(sl.trackId)?.title, entry: rel(sl.entryMixSec) })),
+        events: (m?.events ?? []).filter((e) => e.tier >= 3 || e.drop).map((e) => ({ s: rel(e.t), slot: e.slot, tier: e.tier, drop: e.drop, dominant: e.dominant, level: Math.round(e.level * 100) / 100 })),
+        takeovers: (m?.takeovers ?? []).map((x) => ({ s: rel(x.t), slot: x.slot })),
+        actions: loaded.scene.actions.map((a) => ({ s: rel(loaded.routine.beatOriginMixSec + a.beat * loaded.routine.secPerBeat), slot: a.slot, kind: a.kind, label: a.label })),
+      };
+    };
+  });
   const runRef = useRef(run);
   useEffect(() => { runRef.current = run; }, [run]);
   useEffect(() => {
-    window.manadjClipEditor = { run: () => runRef.current(), state: () => stateRef.current, seek: (s) => seekRef.current(s) };
+    window.manadjClipEditor = {
+      run: () => runRef.current(), state: () => stateRef.current, seek: (s) => seekRef.current(s), structure: () => structureRef.current(),
+    };
   }, []);
   useEffect(() => {
     if (params.get('autostart') === '1' && renderDone && !window.manadjClipEditorStarted) {
@@ -399,11 +387,12 @@ export default function ClipEditorView() {
   const look = spec?.look ?? DEFAULT_LOOK;
   const secPerBar = loaded ? loaded.routine.secPerBeat * 4 : 2;
 
-  // ── Keyframe look scope: the LOOK tab edits the clip look or the selected cue's overrides ──
-  const [lookScope, setLookScope] = useState<'clip' | 'cue'>('clip');
-  const scopeCue = lookScope === 'cue' && selectedCue !== null ? sortedCues[selectedCue] ?? null : null;
-  const shownLook: ClipLook = spec && scopeCue && selectedCue !== null ? lookAfterCue(spec, selectedCue) : look;
-  const overrides: Partial<ClipLook> | null = scopeCue ? scopeCue.look ?? {} : null;
+  // ── Scenes: a cue is a scene — its preset, its look changes and how it arrives ──
+  /** The scene in force at the preview playhead. */
+  const sceneAtPlayhead = range ? Math.max(0, sortedCues.reduce((k, c, i) => (c.atSec <= previewT - range.startSec + 1e-3 ? i : k), 0)) : 0;
+  const sceneIdx = selectedCue !== null && sortedCues[selectedCue] ? selectedCue : null;
+  const sceneCue = sceneIdx !== null ? sortedCues[sceneIdx] : null;
+  const sceneLook: ClipLook = spec && sceneIdx !== null ? lookAfterCue(spec, sceneIdx) : look;
   /** Preview just past a cue's switch (its fade / held segment). */
   const previewAfterCue = (cue: VizCue) => {
     if (!range || !spec) return;
@@ -411,27 +400,110 @@ export default function ClipEditorView() {
     const fade = !tr || tr.kind === 'crossfade' ? tr?.durationSec ?? spec.viz.crossfadeSec : 0;
     const hold = tr && HELD_TRANSITIONS.includes(tr.kind) && (tr.placement ?? defaultPlacement(tr.kind)) === 'after' ? tr.durationSec ?? DEFAULT_HOLD_SEC : 0;
     const at = range.startSec + cue.atSec + Math.max(fade, hold) + 0.1;
-    if (previewT < at) { stopAudio(); setPreviewT(at); }
+    const next = sortedCues.find((c) => c.atSec > cue.atSec);
+    const end = next ? range.startSec + next.atSec - 0.05 : range.endSec;
+    if (previewT < at || previewT > end) { stopAudio(); setPreviewT(Math.min(at, end)); }
   };
-  const setLook = (patch: Partial<ClipLook>) => {
-    if (scopeCue && selectedCue !== null) {
-      patchCue(selectedCue, { look: { ...(scopeCue.look ?? {}), ...patch } });
-      previewAfterCue(scopeCue);
-    } else {
-      updateLook(patch);
-    }
+  const openScene = (i: number) => {
+    setSelectedCue(i);
+    setTab('scene');
+    const c = sortedCues[i];
+    if (c) previewAfterCue(c);
   };
-  const clearOverride = (keys: (keyof ClipLook)[]) => {
-    if (!scopeCue || selectedCue === null) return;
-    const next = { ...(scopeCue.look ?? {}) };
+  const setSceneLook = (patch: Partial<ClipLook>) => {
+    if (!sceneCue || sceneIdx === null) return;
+    patchCue(sceneIdx, { look: { ...(sceneCue.look ?? {}), ...patch } });
+    previewAfterCue(sceneCue);
+  };
+  const clearSceneLook = (keys: (keyof ClipLook)[]) => {
+    if (!sceneCue || sceneIdx === null) return;
+    const next = { ...(sceneCue.look ?? {}) };
     for (const k of keys) delete next[k];
-    patchCue(selectedCue, { look: Object.keys(next).length > 0 ? next : undefined });
+    patchCue(sceneIdx, { look: Object.keys(next).length > 0 ? next : undefined });
   };
-  /** Class + clear button for a field overridden by the cue in scope. */
-  const ovr = (...keys: (keyof ClipLook)[]) => (overrides && keys.some((k) => k in overrides) ? ' ce-ovr' : '');
-  const ovrX = (...keys: (keyof ClipLook)[]) => (overrides && keys.some((k) => k in overrides)
-    ? <button className="ce-ovr-x" title="Clear this keyframe override (inherit)" onClick={(e) => { e.preventDefault(); e.stopPropagation(); clearOverride(keys); }}>×</button>
-    : null);
+  /** Short labels for a scene's look changes (storyboard cards). */
+  const lookSummary = (i: number): string[] => {
+    const raw = sortedCues[i]?.look;
+    if (!raw || !spec) return [];
+    const before = i > 0 ? lookAfterCue(spec, i - 1) : spec.look;
+    const l: Partial<ClipLook> = {};
+    for (const [k, v] of Object.entries(raw) as [keyof ClipLook, unknown][]) if (before[k] !== v) (l as Record<string, unknown>)[k] = v;
+    const out: string[] = [];
+    if (l.composite) out.push(l.composite === 'cards' ? 'solid' : l.composite === 'mask' ? 'window' : l.composite === 'screen' ? 'light' : l.composite);
+    if (l.wavePalette) out.push(l.wavePalette);
+    if (l.vizDim !== undefined && l.vizDim <= 0.05 && (l.vignette ?? 1) <= 0.05) out.push('bright');
+    const hidden = (['showKnobs', 'showTitles', 'showPlayhead', 'showCues', 'showTicker'] as const).filter((k) => l[k] === false);
+    if (hidden.length >= 4) out.push('waves only');
+    else if (hidden.length) out.push(`− ${hidden.map((k) => k.replace('show', '').toLowerCase()).join(' ')}`);
+    const shown = (['showKnobs', 'showTitles'] as const).filter((k) => l[k] === true);
+    if (shown.length === 2 && !hidden.length) out.push('mixer');
+    return out;
+  };
+
+  const [browseOpen, setBrowseOpen] = useState(false);
+  const [paramsOpen, setParamsOpen] = useState(false);
+  /** ◀ ▶ on a scene: the storyboard presets first, then the catalogue. */
+  const stepPreset = (i: number, dir: 1 | -1) => {
+    const cue = sortedCues[i];
+    if (!cue) return;
+    const ring = [...new Set([...auto.presets, ...presetCatalogue().map((p) => p.id)])];
+    const k = ring.indexOf(cue.presetId);
+    const id = ring[(k + dir + ring.length) % ring.length];
+    patchCue(i, { presetId: id, params: undefined });
+    previewAfterCue(cue);
+  };
+  /** Scene thumbnails: a small frame of each scene as it looks once landed. */
+  const sceneThumbKey = (i: number): string => {
+    const c = sortedCues[i];
+    return c && spec ? `${c.atSec}|${c.presetId}|${JSON.stringify(lookAfterCue(spec, i))}|${JSON.stringify(c.params ?? null)}` : '';
+  };
+  const [sceneThumbs, setSceneThumbs] = useState<Map<string, string>>(new Map());
+  const thumbJobs = sortedCues.map((c, i) => {
+    const next = sortedCues.slice(i + 1).find((n) => n.atSec > c.atSec + 0.5);
+    const tr = c.transition;
+    const settle = !tr || tr.kind === 'crossfade' ? (tr?.durationSec ?? spec?.viz.crossfadeSec ?? 2) : tr && HELD_TRANSITIONS.includes(tr.kind) && (tr.placement ?? defaultPlacement(tr.kind)) === 'after' ? (tr.durationSec ?? DEFAULT_HOLD_SEC) : 0;
+    const end = next ? next.atSec : clipDur;
+    return { key: sceneThumbKey(i), at: Math.min(c.atSec + settle + 1.5, (c.atSec + end) / 2) };
+  });
+  const thumbSig = thumbJobs.map((j) => j.key).join('\n');
+  const thumbJobsRef = useRef(thumbJobs);
+  useEffect(() => { thumbJobsRef.current = thumbJobs; });
+  useEffect(() => {
+    if (!renderDone || !spec || !loaded || !rendered || !range) return;
+    let live = true;
+    const timer = setTimeout(() => {
+      void (async () => {
+        const r = range;
+        const programme = new BackgroundProgramme(rendered.meters, loaded.routine, r, loaded.scene.metric, rendered.startSec);
+        const canvas = document.createElement('canvas');
+        canvas.width = 108;
+        canvas.height = 192;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+        const out = new Map(sceneThumbs);
+        let changed = false;
+        for (const job of thumbJobsRef.current) {
+          if (!live) return;
+          if (out.has(job.key)) continue;
+          const t = r.startSec + job.at;
+          // Two frames back: the feed's ballistics settle a little.
+          programme.at(spec, t - 1 / 15, 1 / 30);
+          const background = programme.at(spec, t, 1 / 30);
+          const pf = programmeFrame(spec, job.at, r.endSec - r.startSec);
+          loaded.scene.look = pf.look;
+          loaded.scene.range = r;
+          drawRoutineFrame(ctx, loaded.scene, t, 108, 192, { background, fade: 1, impact: null, overlay: pf.overlay });
+          out.set(job.key, canvas.toDataURL('image/jpeg', 0.7));
+          changed = true;
+          await new Promise((res) => setTimeout(res, 0));
+        }
+        programme.dispose();
+        if (live && changed) setSceneThumbs(out);
+      })();
+    }, 700);
+    return () => { live = false; clearTimeout(timer); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [thumbSig, renderDone, presetEpoch]);
 
   const renderTransition = (cue: VizCue, index: number) => {
     const tr: CueTransition = cue.transition ?? { kind: 'crossfade' };
@@ -451,7 +523,6 @@ export default function ClipEditorView() {
     const decksHere = loaded ? sceneDecks(loaded.routine) : [];
     return (
       <>
-        <h4>Transition <span className="ce-muted">how this cue arrives</span></h4>
         <div className="ce-seg ce-wrap">
           {TRANSITIONS.map((k) => <button key={k.id} title={k.title} className={`btn btn-mini${tr.kind === k.id ? ' btn-selected' : ''}`} onClick={() => setKind(k.id)}>{k.label}</button>)}
         </div>
@@ -505,29 +576,6 @@ export default function ClipEditorView() {
     );
   };
 
-  const renderCueLook = (cue: VizCue, index: number) => {
-    const keys = Object.keys(cue.look ?? {}) as (keyof ClipLook)[];
-    return (
-      <>
-        <h4>Look <span className="ce-muted">{keys.length === 0 ? 'inherits — no keyframe changes' : `${keys.length} change${keys.length > 1 ? 's' : ''} from here on`}</span></h4>
-        {keys.length > 0 && (
-          <div className="ce-chips">
-            {keys.map((k) => (
-              <button key={k} className="btn btn-mini ce-ovr-chip" title="Remove this change" onClick={() => {
-                const next = { ...(cue.look ?? {}) };
-                delete next[k];
-                patchCue(index, { look: Object.keys(next).length > 0 ? next : undefined });
-              }}>{k} {String(cue.look?.[k])} ×</button>
-            ))}
-          </div>
-        )}
-        <div className="ce-seg">
-          <button className="btn btn-mini" onClick={() => { setLookScope('cue'); setTab('look'); previewAfterCue(cue); }}>EDIT LOOK FROM THIS CUE →</button>
-          {keys.length > 0 && <button className="btn btn-mini" onClick={() => patchCue(index, { look: undefined })}>CLEAR</button>}
-        </div>
-      </>
-    );
-  };
 
   return (
     <div className="ce-view" data-testid="clip-editor">
@@ -597,19 +645,25 @@ export default function ClipEditorView() {
         {spec && loaded && range && full && (
           <aside className="ce-inspector">
             <nav className="ce-tabs">
-              {(['programme', 'look', 'output'] as Tab[]).map((t) => (
-                <button key={t} className={`btn btn-mini${tab === t ? ' btn-selected' : ''}`} onClick={() => setTab(t)}>{t.toUpperCase()}</button>
+              {([['storyboard', 'STORYBOARD'], ['scene', sceneIdx !== null ? `SCENE ${sceneIdx + 1}` : 'SCENE'], ['look', 'BASE LOOK'], ['output', 'OUTPUT']] as [Tab, string][]).map(([t, label]) => (
+                <button key={t} className={`btn btn-mini${tab === t ? ' btn-selected' : ''}`}
+                  onClick={() => { if (t === 'scene' && sceneIdx === null) setSelectedCue(sceneAtPlayhead); setTab(t); }}>{label}</button>
               ))}
             </nav>
 
-            {tab === 'programme' && (
+            {tab === 'storyboard' && (
               <div className="ce-pane">
                 <details className="ce-group ce-details" open={sortedCues.length <= 1}>
-                  <summary><h4>Auto programme <span className="ce-muted">drops + phrase boundaries of the audible tracks</span></h4></summary>
+                  <summary><h4>Auto storyboard <span className="ce-muted">scenes on the drops + phrases of the audible tracks</span></h4></summary>
+                  <div className="ce-seg">
+                    {([['storyboard', 'ARC', 'Mixer-forward intro → blackout into the drop → restyles that brighten the visualizer and strip the UI'], ['rotation', 'ROTATION', 'Presets cycle on drops / phrases; optional varied transitions / look changes']] as const).map(([id, label, title]) => (
+                      <button key={id} title={title} className={`btn btn-mini${(auto.style ?? 'storyboard') === id ? ' btn-selected' : ''}`} onClick={() => setAuto({ ...auto, style: id })}>{label}</button>
+                    ))}
+                  </div>
                   <div className="ce-chips">
-                    <span className="ce-muted">rotation</span>
+                    <span className="ce-muted">presets</span>
                     {auto.presets.map((id, i) => (
-                      <button key={id} className="btn btn-mini btn-selected" title="Remove from rotation" onClick={() => setAuto({ ...auto, presets: auto.presets.filter((x) => x !== id) })}>
+                      <button key={id} className="btn btn-mini btn-selected" title="Remove" onClick={() => setAuto({ ...auto, presets: auto.presets.filter((x) => x !== id) })}>
                         {i + 1} {presetName(id)} ×
                       </button>
                     ))}
@@ -617,7 +671,7 @@ export default function ClipEditorView() {
                   <PresetBrowser
                     selected={auto.presets}
                     ordered
-                    height={180}
+                    height={160}
                     onPick={(id) => setAuto({ ...auto, presets: auto.presets.includes(id) ? auto.presets.filter((x) => x !== id) : [...auto.presets, id] })}
                   />
                   <div className="ce-fields">
@@ -633,31 +687,39 @@ export default function ClipEditorView() {
                     </label>
                     <label>min gap s<input type="number" min={4} step={1} value={auto.minGapSec} onChange={(e) => setAuto({ ...auto, minGapSec: Number(e.target.value) })} /></label>
                     <label className="ce-check"><input type="checkbox" checked={auto.phrasePulses} onChange={(e) => setAuto({ ...auto, phrasePulses: e.target.checked })} />phrase pulses</label>
-                    <label className="ce-check" title="Blackouts into drops, blasts / VFX after them, solos and kaleidoscopes on phrase switches"><input type="checkbox" checked={!!auto.transitions} onChange={(e) => setAuto({ ...auto, transitions: e.target.checked })} />vary transitions</label>
-                    <label className="ce-check" title="Each drop restyles the waves; breakdowns strip the overlays back"><input type="checkbox" checked={!!auto.lookChanges} onChange={(e) => setAuto({ ...auto, lookChanges: e.target.checked })} />look changes</label>
+                    {auto.style === 'rotation' && <>
+                      <label className="ce-check"><input type="checkbox" checked={!!auto.transitions} onChange={(e) => setAuto({ ...auto, transitions: e.target.checked })} />vary transitions</label>
+                      <label className="ce-check"><input type="checkbox" checked={!!auto.lookChanges} onChange={(e) => setAuto({ ...auto, lookChanges: e.target.checked })} />look changes</label>
+                    </>}
                   </div>
-                  <button className="btn" disabled={!metric} onClick={() => { if (metric) { setCues(autoVizCues(metric, range, auto, loaded.routine.secPerBeat * 4)); setSelectedCue(null); } }}>GENERATE CUES</button>
+                  <button className="btn" disabled={!metric} onClick={() => { if (metric) { setCues(autoVizCues(metric, range, auto, secPerBar)); setSelectedCue(null); } }}>GENERATE STORYBOARD</button>
                 </details>
 
                 <section className="ce-group">
-                  <h4>Cues <span className="ce-muted">{sortedCues.length} · crossfade
+                  <h4>Scenes <span className="ce-muted">{sortedCues.length} · click to edit preset + look together · default crossfade
                     <input className="ce-inline-num" type="number" step={0.5} min={0} value={spec.viz.crossfadeSec} onChange={(e) => update({ viz: { ...spec.viz, crossfadeSec: Number(e.target.value) } })} /> s</span></h4>
-                  <div className="ce-cues">
+                  <div className="ce-scenes">
                     {sortedCues.map((cue, i) => {
-                      const impactOnly = i > 0 && sortedCues[i - 1].presetId === cue.presetId;
+                      const pulse = i > 0 && sortedCues[i - 1].presetId === cue.presetId && !cue.look && !cue.transition;
+                      const end = sortedCues.slice(i + 1).find((c) => c.presetId !== cue.presetId || c.look)?.atSec ?? clipDur;
                       return (
-                        <div key={`${i}-${cue.atSec}`} className={`ce-cue${selectedCue === i ? ' ce-cue-selected' : ''}${impactOnly ? ' ce-cue-pulse' : ''}`}
-                          onClick={() => { setSelectedCue(i); stopAudio(); setPreviewT(range.startSec + cue.atSec + 0.05); }}>
-                          <div className="ce-thumb" style={thumbs.get(cue.presetId) ? { backgroundImage: `url(${thumbs.get(cue.presetId)})` } : undefined} />
-                          <span className="ce-cue-time">{fmt(cue.atSec, true)}</span>
-                          <span className="ce-cue-preset">{presetName(cue.presetId)}
-                            {transitionBadge(cue.transition) && <span className="ce-badge ce-badge-tr">{transitionBadge(cue.transition)}</span>}
-                            {cue.look && Object.keys(cue.look).length > 0 && <span className="ce-badge ce-badge-look" title={Object.keys(cue.look).join(', ')}>LOOK {Object.keys(cue.look).length}</span>}
-                          </span>
-                          <select className="ce-cue-impact" value={cue.impact ?? 'none'} onClick={(e) => e.stopPropagation()} onChange={(e) => patchCue(i, { impact: e.target.value as VizImpact })}>
-                            {IMPACTS.map((x) => <option key={x} value={x}>{x}</option>)}
-                          </select>
-                          {i > 0 && <button className="btn btn-mini" title="Remove cue" onClick={(e) => { e.stopPropagation(); setCues(sortedCues.filter((_, k) => k !== i)); setSelectedCue(null); }}>×</button>}
+                        <div key={`${i}-${cue.atSec}`}
+                          className={`ce-scene${selectedCue === i ? ' ce-scene-selected' : ''}${sceneAtPlayhead === i ? ' ce-scene-now' : ''}${pulse ? ' ce-scene-pulse' : ''}`}
+                          onClick={() => openScene(i)}>
+                          <div className="ce-thumb" style={(sceneThumbs.get(sceneThumbKey(i)) ?? thumbs.get(cue.presetId)) ? { backgroundImage: `url(${sceneThumbs.get(sceneThumbKey(i)) ?? thumbs.get(cue.presetId)})` } : undefined} />
+                          <div className="ce-scene-main">
+                            <div className="ce-scene-line">
+                              <span className="ce-cue-time">{fmt(cue.atSec, true)}</span>
+                              <span className="ce-cue-preset">{pulse ? <span className="ce-muted">pulse · {cue.impact ?? 'none'}</span> : presetName(cue.presetId)}</span>
+                              {!pulse && <span className="ce-muted">{Math.max(0, end - cue.atSec).toFixed(0)}s</span>}
+                            </div>
+                            <div className="ce-scene-line">
+                              {transitionBadge(cue.transition) && <span className="ce-badge ce-badge-tr">{transitionBadge(cue.transition)}</span>}
+                              {cue.impact && cue.impact !== 'none' && !pulse && <span className="ce-muted">{cue.impact}</span>}
+                              {lookSummary(i).map((t) => <span key={t} className="ce-badge ce-badge-look">{t}</span>)}
+                            </div>
+                          </div>
+                          {i > 0 && <button className="btn btn-mini" title="Remove scene" onClick={(e) => { e.stopPropagation(); setCues(sortedCues.filter((_, k) => k !== i)); setSelectedCue(null); }}>×</button>}
                         </div>
                       );
                     })}
@@ -665,43 +727,91 @@ export default function ClipEditorView() {
                   <button className="btn btn-mini" onClick={() => {
                     const at = snap(previewT - range.startSec);
                     const prev = [...sortedCues].reverse().find((c) => c.atSec <= at);
-                    setCues([...sortedCues, { atSec: at, presetId: prev?.presetId ?? 'voyage', impact: 'flash' }]);
-                  }}>+ CUE AT PLAYHEAD <span className="ce-muted">(snaps to phrase)</span></button>
+                    const next = [...sortedCues, { atSec: at, presetId: prev?.presetId ?? 'voyage', impact: 'flash' as const }].sort((a, b) => a.atSec - b.atSec);
+                    setCues(next);
+                    setSelectedCue(next.findIndex((c) => c.atSec === at));
+                    setTab('scene');
+                  }}>+ SCENE AT PLAYHEAD <span className="ce-muted">(snaps to phrase)</span></button>
                 </section>
+              </div>
+            )}
 
-                {selectedCue !== null && sortedCues[selectedCue] && (() => {
-                  const cue = sortedCues[selectedCue];
+            {tab === 'scene' && (
+              <div className="ce-pane">
+                {!sceneCue && <span className="ce-muted">Pick a scene in STORYBOARD or on the timeline.</span>}
+                {sceneCue && sceneIdx !== null && (() => {
+                  const cue = sceneCue;
                   const preset = isPresetLoaded(cue.presetId) ? exportPresetById(cue.presetId) : null;
-                  const overrides = cue.params ?? {};
+                  const params = cue.params ?? {};
                   const setParam = (pid: string, v: number | null) => {
-                    const next = { ...overrides };
+                    const next = { ...params };
                     if (v === null) delete next[pid]; else next[pid] = v;
-                    patchCue(selectedCue, { params: next });
+                    patchCue(sceneIdx, { params: next });
                   };
+                  const changed = Object.keys(cue.look ?? {}).length;
+                  const prevLook = sceneIdx > 0 ? sortedCues[sceneIdx - 1].look : undefined;
                   return (
-                    <section className="ce-group">
-                      <h4>Cue {fmt(cue.atSec, true)} <span className="ce-muted">{presetName(cue.presetId)}</span></h4>
-                      <PresetBrowser selected={[cue.presetId]} height={160} onPick={(id) => patchCue(selectedCue, { presetId: id, params: id === cue.presetId ? cue.params : undefined })} />
-                      {renderTransition(cue, selectedCue)}
-                      {renderCueLook(cue, selectedCue)}
-                      <h4>Parameters <span className="ce-muted">this cue only</span></h4>
-                      {!preset && <span className="ce-muted">loading…</span>}
-                      {preset && (preset.params ?? []).length === 0 && <span className="ce-muted">this preset has no tunable parameters</span>}
-                      {preset && (preset.params ?? []).length > 0 && (
-                        <div className="ce-sliders">
-                          {(preset.params ?? []).map((p) => {
-                            const v = overrides[p.id] ?? p.default;
-                            return (
-                              <label key={p.id}><span>{p.label}</span>
-                                <input type="range" min={p.min} max={p.max} step={p.step} value={v} onChange={(e) => setParam(p.id, Number(e.target.value))} />
-                                <span className="ce-val" title="double-click to reset" onDoubleClick={() => setParam(p.id, null)}>{v.toFixed(p.step < 0.1 ? 2 : 1)}</span>
-                              </label>
-                            );
-                          })}
-                          <button className="btn btn-mini" onClick={() => patchCue(selectedCue, { params: undefined })}>RESET PARAMETERS</button>
+                    <>
+                      <div className="ce-scene-head">
+                        <button className="btn btn-mini" disabled={sceneIdx === 0} onClick={() => openScene(sceneIdx - 1)}>◀</button>
+                        <b>SCENE {sceneIdx + 1}/{sortedCues.length}</b>
+                        <button className="btn btn-mini" disabled={sceneIdx >= sortedCues.length - 1} onClick={() => openScene(sceneIdx + 1)}>▶</button>
+                        <label className="ce-muted">at <input className="ce-inline-num" type="number" step={0.1} min={0} disabled={sceneIdx === 0} value={Number(cue.atSec.toFixed(2))}
+                          onChange={(e) => patchCue(sceneIdx, { atSec: Math.max(0.1, Number(e.target.value)) })} /> s</label>
+                        <select className="ce-cue-impact" value={cue.impact ?? 'none'} onChange={(e) => patchCue(sceneIdx, { impact: e.target.value as VizImpact })} title="Impact on the cue">
+                          {IMPACTS.map((x) => <option key={x} value={x}>{x}</option>)}
+                        </select>
+                        <button className="btn btn-mini" title="Preview this scene" onClick={() => previewAfterCue(cue)}>◉ PREVIEW</button>
+                        <span className="ce-grow" />
+                        {sceneIdx > 0 && <button className="btn btn-mini" title="Remove scene" onClick={() => { setCues(sortedCues.filter((_, k) => k !== sceneIdx)); setSelectedCue(null); setTab('storyboard'); }}>DELETE</button>}
+                      </div>
+
+                      <div className="ce-group">
+                        <div className="ce-scene-viz">
+                          <div className="ce-thumb ce-thumb-lg" style={sceneThumbs.get(sceneThumbKey(sceneIdx)) ? { backgroundImage: `url(${sceneThumbs.get(sceneThumbKey(sceneIdx))})` } : undefined} />
+                          <div className="ce-scene-main">
+                            <h4>Visualizer</h4>
+                            <div className="ce-seg">
+                              <button className="btn btn-mini" title="Previous preset" onClick={() => stepPreset(sceneIdx, -1)}>◀</button>
+                              <b className="ce-scene-preset">{presetName(cue.presetId)}</b>
+                              <button className="btn btn-mini" title="Next preset" onClick={() => stepPreset(sceneIdx, 1)}>▶</button>
+                              <button className={`btn btn-mini${browseOpen ? ' btn-selected' : ''}`} onClick={() => setBrowseOpen(!browseOpen)}>BROWSE</button>
+                              {preset && (preset.params ?? []).length > 0 && <button className={`btn btn-mini${paramsOpen ? ' btn-selected' : ''}`} onClick={() => setParamsOpen(!paramsOpen)}>PARAMS{Object.keys(params).length ? ` ${Object.keys(params).length}` : ''}</button>}
+                            </div>
+                            <span className="ce-muted">◀ ▶ step through the storyboard presets · BROWSE for all {presetCatalogue().length}</span>
+                          </div>
                         </div>
-                      )}
-                    </section>
+                        {browseOpen && <PresetBrowser selected={[cue.presetId]} height={150} onPick={(id) => { patchCue(sceneIdx, { presetId: id, params: id === cue.presetId ? cue.params : undefined }); previewAfterCue(cue); }} />}
+                        {paramsOpen && preset && (preset.params ?? []).length > 0 && (
+                          <div className="ce-sliders">
+                            {(preset.params ?? []).map((pp) => {
+                              const v = params[pp.id] ?? pp.default;
+                              return (
+                                <label key={pp.id}><span>{pp.label}</span>
+                                  <input type="range" min={pp.min} max={pp.max} step={pp.step} value={v} onChange={(e) => setParam(pp.id, Number(e.target.value))} />
+                                  <span className="ce-val" title="double-click to reset" onDoubleClick={() => setParam(pp.id, null)}>{v.toFixed(pp.step < 0.1 ? 2 : 1)}</span>
+                                </label>
+                              );
+                            })}
+                            <button className="btn btn-mini" onClick={() => patchCue(sceneIdx, { params: undefined })}>RESET PARAMETERS</button>
+                          </div>
+                        )}
+                      </div>
+
+                      <details className="ce-group ce-details" open={!!cue.transition}>
+                        <summary><h4>Arrives with <span className="ce-muted">{transitionBadge(cue.transition) || 'crossfade'}</span></h4></summary>
+                        {renderTransition(cue, sceneIdx)}
+                      </details>
+
+                      <div className="ce-group">
+                        <h4>Look <span className="ce-muted">{changed === 0 ? 'same as before this scene' : `${changed} change${changed > 1 ? 's' : ''} from here on (magenta)`}</span></h4>
+                        <div className="ce-seg">
+                          {changed > 0 && <button className="btn btn-mini" title="This scene inherits the look" onClick={() => patchCue(sceneIdx, { look: undefined })}>CLEAR CHANGES</button>}
+                          {prevLook && <button className="btn btn-mini" title="Repeat the previous scene's look changes" onClick={() => { patchCue(sceneIdx, { look: { ...prevLook } }); previewAfterCue(cue); }}>COPY PREVIOUS SCENE</button>}
+                        </div>
+                      </div>
+                      <LookControls look={sceneLook} onChange={setSceneLook} overrides={cue.look ?? {}} onClear={clearSceneLook} />
+                    </>
                   );
                 })()}
               </div>
@@ -709,86 +819,10 @@ export default function ClipEditorView() {
 
             {tab === 'look' && (
               <div className="ce-pane">
-                <div className="ce-seg ce-scope">
-                  <span className="ce-muted">editing</span>
-                  <button className={`btn btn-mini${!scopeCue ? ' btn-selected' : ''}`} onClick={() => setLookScope('clip')} title="The clip's base look">CLIP LOOK</button>
-                  <button className={`btn btn-mini${scopeCue ? ' btn-selected' : ''}`} disabled={selectedCue === null}
-                    title={selectedCue === null ? 'Select a cue (PROGRAMME tab or timeline flag) to keyframe the look' : 'Changes land at this cue and persist until a later cue changes them'}
-                    onClick={() => { setLookScope('cue'); if (selectedCue !== null && sortedCues[selectedCue]) previewAfterCue(sortedCues[selectedCue]); }}>
-                    {selectedCue !== null && sortedCues[selectedCue] ? `FROM CUE ${fmt(sortedCues[selectedCue].atSec, true)}` : 'FROM CUE —'}
-                  </button>
-                  {scopeCue && <span className="ce-muted">{Object.keys(overrides ?? {}).length} changed here</span>}
-                </div>
-                <section className="ce-group">
-                  <h4>Presets</h4>
-                  <div className="ce-chips">
-                    {LOOK_PRESETS.map((p) => <button key={p.id} className="btn btn-mini" onClick={() => setLook(p.look)}>{p.label}</button>)}
-                  </div>
-                </section>
-                <section className="ce-group">
-                  <h4>Waveforms</h4>
-                  <div className={`ce-seg${ovr('composite')}`}>
-                    {ovrX('composite')}
-                    {COMPOSITES.map((c) => <button key={c.id} title={c.title} className={`btn btn-mini${shownLook.composite === c.id ? ' btn-selected' : ''}`} onClick={() => setLook({ composite: c.id })}>{c.label}</button>)}
-                  </div>
-                  <div className={`ce-swatches${ovr('wavePalette')}`}>
-                    {ovrX('wavePalette')}
-                    {PALETTES.map((p) => (
-                      <button key={p} className={`ce-swatch${shownLook.wavePalette === p ? ' ce-swatch-on' : ''}`} onClick={() => setLook({ wavePalette: p })} title={p}>
-                        <span style={{ background: paletteSwatch(p) }} />{p.toUpperCase()}
-                      </button>
-                    ))}
-                  </div>
-                  <div className={`ce-seg${ovr('laneFrame')}`}>
-                    {ovrX('laneFrame')}
-                    <span className="ce-muted">lanes</span>
-                    {(['bare', 'cards'] as const).map((v) => <button key={v} className={`btn btn-mini${shownLook.laneFrame === v ? ' btn-selected' : ''}`} onClick={() => setLook({ laneFrame: v })}>{v === 'bare' ? 'FULL-BLEED' : 'CARDS'}</button>)}
-                  </div>
-                  <div className={`ce-seg${ovr('deckVisibility')}`}>
-                    {ovrX('deckVisibility')}
-                    <span className="ce-muted">decks</span>
-                    {(['audible', 'all'] as const).map((v) => <button key={v} className={`btn btn-mini${shownLook.deckVisibility === v ? ' btn-selected' : ''}`} onClick={() => setLook({ deckVisibility: v })}>{v.toUpperCase()}</button>)}
-                  </div>
-                </section>
-                <section className="ce-group">
-                  <h4>Motion</h4>
-                  <div className="ce-sliders">
-                    {([['glow', 'glow', 0, 1, 0.05], ['vizOpacity', 'visualizer', 0, 1, 0.05], ['vizDim', 'darken', 0, 1, 0.05], ['vignette', 'vignette', 0, 1, 0.05], ['infoShade', 'controls shade', 0, 1, 0.05], ['beatPulse', 'zoom pulse', 0, 1, 0.05], ['impactStrength', 'impacts', 0, 1, 0.05], ['waveZoomSec', 'wave zoom s', 2, 16, 0.5]] as const).map(([k, label, min, max, step]) => (
-                      <label key={k} className={ovr(k).trim()}><span>{label}{ovrX(k)}</span>
-                        <input type="range" min={min} max={max} step={step} value={shownLook[k]} onChange={(e) => setLook({ [k]: Number(e.target.value) } as Partial<ClipLook>)} />
-                        <span className="ce-val">{shownLook[k].toFixed(k === 'waveZoomSec' ? 1 : 2)}</span>
-                      </label>
-                    ))}
-                  </div>
-                </section>
-                <section className="ce-group">
-                  <h4>Response <span className="ce-muted">how the controls and waves breathe</span></h4>
-                  <div className={`ce-seg${ovr('hudSource')}`}>
-                    {ovrX('hudSource')}
-                    {HUD_SOURCES.map((h) => <button key={h.id} title={h.title} className={`btn btn-mini${shownLook.hudSource === h.id ? ' btn-selected' : ''}`} onClick={() => setLook({ hudSource: h.id })}>{h.label}</button>)}
-                  </div>
-                  <div className="ce-sliders">
-                    {([['hudAmount', 'controls', 0, 2, 0.05], ['wavePulse', 'waveforms', 0, 1, 0.05], ['dropBoost', 'drop boost', 0, 2, 0.05]] as const).map(([k, label, min, max, step]) => (
-                      <label key={k} className={ovr(k).trim()}><span>{label}{ovrX(k)}</span>
-                        <input type="range" min={min} max={max} step={step} value={shownLook[k]} onChange={(e) => setLook({ [k]: Number(e.target.value) } as Partial<ClipLook>)} />
-                        <span className="ce-val">{shownLook[k].toFixed(2)}</span>
-                      </label>
-                    ))}
-                  </div>
-                </section>
-                <section className="ce-group">
-                  <h4>Overlays</h4>
-                  <div className="ce-checks">
-                    {([['showHeader', 'top bar'], ['showKnobs', 'mixer row'], ['showGrid', 'beat grid'], ['showCues', 'hot cue flags'], ['showTitles', 'track titles'], ['showPlayhead', 'playhead'], ['showTicker', 'action pills'], ['titleCards', 'title cards'], ['revealAtDrop', 'titles at drop'], ['phraseCountdown', 'drop countdown'], ['showFxPanel', 'beat fx strip'], ['showFooter', 'footer'], ['showWordmark', 'manaDJ mark']] as const).map(([k, label]) => (
-                      <label key={k} className={`ce-check${ovr(k)}`}>{ovrX(k)}<input type="checkbox" checked={shownLook[k]} onChange={(e) => setLook({ [k]: e.target.checked } as Partial<ClipLook>)} />{label}</label>
-                    ))}
-                  </div>
-                  <div className="ce-fields">
-                    <label className={ovr('accent').trim()}>accent{ovrX('accent')}<input type="color" value={shownLook.accent} onChange={(e) => setLook({ accent: e.target.value })} /></label>
-                    <label className={`ce-wide${ovr('caption')}`}>handle / caption{ovrX('caption')}<input type="text" placeholder="@dj.reroll" value={shownLook.caption} onChange={(e) => { setLook({ caption: e.target.value }); if (!scopeCue) rememberHandle(e.target.value); }} /></label>
-                    {!scopeCue && <label className="ce-wide">file name<input type="text" placeholder={loaded.scene.title} value={look.title} onChange={(e) => updateLook({ title: e.target.value })} /></label>}
-                  </div>
-                </section>
+                <span className="ce-muted">The clip's starting look; scenes change it from their cue on.</span>
+                <LookControls look={look} onChange={updateLook} onCaption={rememberHandle}>
+                  <label className="ce-wide">file name<input type="text" placeholder={loaded.scene.title} value={look.title} onChange={(e) => updateLook({ title: e.target.value })} /></label>
+                </LookControls>
               </div>
             )}
 
@@ -875,7 +909,7 @@ export default function ClipEditorView() {
             onSeek={(t) => { if (playing) stopAudio(); setPreviewT(t); }}
             onRange={(r) => update({ range: r })}
             onCueMove={(i, at) => patchCue(i, { atSec: at })}
-            onCueSelect={setSelectedCue}
+            onCueSelect={(i) => { if (i !== null) openScene(i); else setSelectedCue(null); }}
           />
         </footer>
       )}

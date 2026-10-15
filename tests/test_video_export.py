@@ -46,7 +46,11 @@ def test_job_roundtrip(tmp_path, monkeypatch):
     job = video_export.start_job(_wav(0.5), name="t/est clip", fps=10, width=64, height=112)
     frames = b"".join(_jpeg(ffmpeg, c) for c in ("red", "green", "blue", "red", "green"))
     video_export.write_frames(job, frames, 5)
+    spec = video_export.write_spec(job, b'{"fps": 10}')
+    with pytest.raises(video_export.VideoExportError):
+        video_export.write_spec(job, b"[1]")
     out = video_export.finish_job(job)
+    assert spec == out.with_suffix(".clip.json") and spec.read_text().startswith("{")
     assert out.exists() and out.parent == tmp_path / "exports"
     assert out.name.startswith("t-est-clip-")
     probe = subprocess.run(

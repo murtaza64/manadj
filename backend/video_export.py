@@ -12,6 +12,7 @@ temp dir is per job and cleaned on finish/abort).
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import shutil
@@ -115,6 +116,23 @@ def get_job(job_id: str) -> VideoExportJob:
     if job is None:
         raise VideoExportError(f"unknown video export job {job_id}")
     return job
+
+
+def spec_path(job: VideoExportJob) -> Path:
+    return job.output.with_suffix(".clip.json")
+
+
+def write_spec(job: VideoExportJob, data: bytes) -> Path:
+    """The clip spec beside the MP4 (`<name>.clip.json`); must be a JSON object."""
+    try:
+        parsed = json.loads(data)
+    except ValueError as exc:
+        raise VideoExportError(f"spec is not JSON: {exc}") from exc
+    if not isinstance(parsed, dict):
+        raise VideoExportError("spec must be a JSON object")
+    path = spec_path(job)
+    path.write_text(json.dumps(parsed, indent=1))
+    return path
 
 
 def write_frames(job: VideoExportJob, data: bytes, frame_count: int) -> None:

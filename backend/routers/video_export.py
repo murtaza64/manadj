@@ -2,6 +2,7 @@
 
 POST /api/video-export/jobs?name&fps&width&height   body: WAV bytes
 POST /api/video-export/jobs/{id}/frames?count        body: concatenated JPEGs
+POST /api/video-export/jobs/{id}/spec                body: the clip spec (JSON) → <output>.clip.json
 POST /api/video-export/jobs/{id}/finish              → {path, url, frames}
 POST /api/video-export/jobs/{id}/abort
 GET  /api/video-export/files/{name}                  serve a finished MP4
@@ -46,6 +47,18 @@ async def frames(request: Request, job_id: str, count: int = Query(1, ge=1)) -> 
     except video_export.VideoExportError as exc:
         raise HTTPException(409, str(exc)) from exc
     return {"frames": job.frames, "bytes": job.bytes_written}
+
+
+@router.post("/jobs/{job_id}/spec")
+async def spec(request: Request, job_id: str) -> dict:
+    """Keep the clip spec next to the MP4 (reload / inspect what made it)."""
+    body = await request.body()
+    try:
+        job = video_export.get_job(job_id)
+        path = video_export.write_spec(job, body)
+    except video_export.VideoExportError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"path": str(path)}
 
 
 @router.post("/jobs/{job_id}/finish")
