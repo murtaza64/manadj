@@ -126,6 +126,8 @@ val ControlRow = 44.dp
     val currentReady by rememberUpdatedState(ready)
     var held by remember(ui.id) { mutableStateOf(false) }
     val haptic = LocalHapticFeedback.current
+    // UH23: while playing, a CUE press returns to the cue point and stops — show |<.
+    val playing by remember(ui) { derivedStateOf { ui.snapshot?.playing == true } }
     val heat by animateFloatAsState(if (held) 1f else 0f, tween(if (held) 0 else 300), label = "cue")
     val scale by animateFloatAsState(if (held) .93f else 1f, if (held) tween(0) else spring(dampingRatio = .4f, stiffness = 900f), label = "cue press")
     val tint = if (ready) Ink.warning else Ink.edge
@@ -146,7 +148,7 @@ val ControlRow = 44.dp
     }.padding(4.dp).graphicsLayer { scaleX = scale; scaleY = scale }.clip(shape).background(Ink.panel).background(Ink.warning.copy(alpha = .9f * heat)).slideLockDraw(slideVisual, shape, idle = ready).border(2.dp, tint, shape), contentAlignment = Alignment.Center) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
             // Same metrics as PLAY (Key: icon textSize+3, label textSize 15).
-            GlyphIcon(Glyph.Cue, if (held) Color.Black else tint, 18.dp)
+            GlyphIcon(if (playing && !held) Glyph.CueStop else Glyph.Cue, if (held) Color.Black else tint, 18.dp)
             Text("CUE", color = if (held) Color.Black else tint, size = 15, bold = true)
         }
     }

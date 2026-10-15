@@ -93,7 +93,7 @@ fun Modifier.halo(color: Color, amount: () -> Float, halo: Dp, round: Boolean = 
 /** Beat phase 0..1 from source position and effective BPM (null when no grid is known). */
 fun beatPhase(seconds: Double, bpm: Double?): Float = if (bpm == null || bpm <= 0) 0f else (((seconds * bpm / 60) % 1.0 + 1.0) % 1.0).toFloat()
 
-enum class Glyph { Play, Pause, Cue, Loop, Back, Forward, Fx, Load, Pitch, Info, Gear, Lock, Grid, Search, Follow, Headphones, Stems, Close }
+enum class Glyph { Play, Pause, Cue, Loop, Back, Forward, Fx, Load, Pitch, Info, Gear, Lock, Grid, Search, Follow, Headphones, Stems, Close, CueStop }
 
 @Composable fun GlyphIcon(glyph: Glyph, color: Color, size: Dp = 16.dp) { Canvas(Modifier.size(size)) { drawGlyph(glyph, color) } }
 
@@ -105,6 +105,8 @@ fun DrawScope.drawGlyph(glyph: Glyph, color: Color) {
         Glyph.Pause -> { drawRoundRect(color, Offset(w * .2f, h * .15f), Size(w * .2f, h * .7f), CornerRadius(w * .04f)); drawRoundRect(color, Offset(w * .6f, h * .15f), Size(w * .2f, h * .7f), CornerRadius(w * .04f)) }
         // CDJ cue: a vertical bar + triangle (return to cue point).
         Glyph.Cue -> { drawRect(color, Offset(w * .14f, h * .16f), Size(w * .14f, h * .68f)); drawPath(tri(w * .4f, w * .9f), color) }
+        // |< return to cue and stop (UH23): bar + left-pointing triangle.
+        Glyph.CueStop -> { drawRect(color, Offset(w * .14f, h * .16f), Size(w * .14f, h * .68f)); drawPath(tri(w * .9f, w * .34f), color) }
         Glyph.Loop -> {
             drawArc(color, 200f, 290f, false, Offset(w * .14f, h * .14f), Size(w * .72f, h * .72f), style = s)
             val a = (200 + 290) * PI / 180; val tip = Offset(center.x + cos(a).toFloat() * w * .36f, center.y + sin(a).toFloat() * h * .36f)
