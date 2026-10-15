@@ -139,21 +139,20 @@ private class CodecReader(extractor: MediaExtractor, format: MediaFormat, mime: 
     private var outputSeen = false
     private var seeked = false
     /**
-     * MP3 timing vs desktop (Chrome decodeAudioData = ffmpeg gapless), measured on Android 15/16 (emulator API 35,
-     * Nothing phone API 36; AudioEngineTest.codecPrimingMatchesTheWav): with a LAME/Xing header the platform output
-     * from the start is late by encoder delay + padding while desktop trims to the exact WAV alignment; without a
-     * header the platform drops the 529-frame decoder delay that desktop keeps. AAC (MP4 edit list) needs nothing
-     * (the extractor's negative PTS already trims the priming). After a seek the MP3 extractor's TOC-estimated PTS
+     * MP3 timing vs desktop (Chrome decodeAudioData = ffmpeg gapless), measured with raw MediaCodec on Android 15
+     * (AudioEngineTest.probe/codecPriming; real files: Session DecodeProbe, mail #84): from the start the decoder's
+     * output, taken as one sample-continuous stream, already starts exactly at desktop time 0 for LAME/Xing files
+     * (encoder delay trimmed) — only its PTS are offset (first buffer at ~1775 frames, later buffers jump past the
+     * trimmed first buffer by a padding-dependent amount). Header-less files: the stream starts at PTS 0 but desktop
+     * keeps the 529-frame decoder delay. So from the start the MP3 timeline is sequential: first output frame at 0
+     * (LAME) or PTS + 529 frames (header-less), then frame-counted. After a seek the extractor's TOC-estimated PTS
      * is only approximate (tens of ms); the whole-track decode (from the start) is the exact path.
      */
-    private val mp3ShiftUs: Long = if (mime != MediaFormat.MIMETYPE_AUDIO_MPEG) 0 else {
-        val rate = format.getInteger(MediaFormat.KEY_SAMPLE_RATE).toLong()
-        if (format.containsKey(MediaFormat.KEY_ENCODER_DELAY)) {
-            val delay = format.getInteger(MediaFormat.KEY_ENCODER_DELAY)
-            val padding = if (format.containsKey(MediaFormat.KEY_ENCODER_PADDING)) format.getInteger(MediaFormat.KEY_ENCODER_PADDING) else 0
-            -(delay + padding) * 1_000_000L / rate
-        } else MP3_DECODER_DELAY * 1_000_000L / rate
-    }
+    private val mp3 = mime == MediaFormat.MIMETYPE_AUDIO_MPEG
+    private val mp3Gapless = mp3 && format.containsKey(MediaFormat.KEY_ENCODER_DELAY)
+    private val mp3HeaderlessUs: Long = if (mp3 && !mp3Gapless) MP3_DECODER_DELAY * 1_000_000L / format.getInteger(MediaFormat.KEY_SAMPLE_RATE) else 0
+    /** Sequential from-start MP3 timeline: next output frame index, -1 before the first output. */
+    private var mp3NextFrame = -1L
 
     init {
         try {
@@ -182,7 +181,9 @@ private class CodecReader(extractor: MediaExtractor, format: MediaFormat, mime: 
 
     override fun seek(seconds: Double) {
         super.seek(seconds)
-        seeked = true
+        // Back to the start = the from-start timeline again (the ring's track-start path).
+        seeked = seconds > 0
+        mp3NextFrame = -1
         if (queuedInput) {
             codec.flush()
             // A flush before the first output drops codec-specific data; resubmit it.
@@ -225,9 +226,11 @@ private class CodecReader(extractor: MediaExtractor, format: MediaFormat, mime: 
                         val buffer = codec.getOutputBuffer(output) ?: error("Missing codec output")
                         buffer.position(info.offset)
                         buffer.limit(info.offset + info.size)
-                        // The header shift is a from-the-start property; after a seek only the decoder-delay one holds.
-                        val shift = if (seeked && mp3ShiftUs < 0) 0 else mp3ShiftUs
-                        if (info.size > 0) convert(buffer, info.presentationTimeUs + shift) else 0
+                        if (info.size <= 0) 0
+                        else if (mp3 && !seeked) {
+                            if (mp3NextFrame < 0) mp3NextFrame = if (mp3Gapless) 0 else (info.presentationTimeUs + mp3HeaderlessUs) * sampleRate / 1_000_000L
+                            convert(buffer, mp3NextFrame * 1_000_000L / sampleRate).also { mp3NextFrame += it }
+                        } else convert(buffer, info.presentationTimeUs + mp3HeaderlessUs) // after a seek only the decoder-delay shift holds
                     } finally { codec.releaseOutputBuffer(output, false) }
                     if ((info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) outputDone = true
                     if (frames > 0) return frames

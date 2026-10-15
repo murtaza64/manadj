@@ -349,7 +349,10 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
     }
     /** Whole-track decoders: fill native memory front-to-back so jumps are exact and gapless. */
     private val trackExecutors: Array<ExecutorService> = Array(4) { deck ->
-        Executors.newSingleThreadExecutor { task -> Thread(task, "manadj-track-${DeckId.entries[deck]}") }
+        Executors.newSingleThreadExecutor { task ->
+            // Decode throughput is the Session replay start-latency floor (mail #82); one per deck bounds parallelism at 4.
+            Thread({ Process.setThreadPriority(Process.THREAD_PRIORITY_AUDIO); task.run() }, "manadj-track-${DeckId.entries[deck]}")
+        }
     }
     private val loads = Array(4) { AtomicLong() }
     private val sources = arrayOfNulls<Source>(4) // Guarded by this.

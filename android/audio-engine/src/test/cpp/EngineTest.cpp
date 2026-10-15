@@ -211,6 +211,44 @@ int main() {
         CHECK(e.deck(0).position.load() > 2.0);
     }
 
+    { // Stored cue on a ring whose decoder start is off (MP3 seek, mail #86): the parked deck stays at the cue
+      // and CUE-hold previews; a running deck still adopts the ring's start.
+        auto owned = std::make_unique<Engine>(48000);
+        Engine& e = *owned;
+        loadDeck(e, 0, 1, .25f);
+        const double cue = 66.2107980103843;
+        e.submit(Op::CueSetAt, 0, cue);
+        tick(e);
+        auto& d = e.deck(0);
+        auto feedAt = [&](double start) {
+            const auto transport = d.transport.load();
+            CHECK(e.claim(0, 1, transport, 48000, start));
+            std::vector<float> pcm(48000 * 2, .25f);
+            CHECK(e.offer(0, transport, pcm.data(), 48000) == 48000);
+            CHECK(e.publish(0, 1, transport, false));
+        };
+        feedAt(cue + .04025);
+        tick(e, 480);
+        CHECK(d.position.load() == cue);
+        e.submit(Op::CueDown, 0);
+        tick(e, 480);
+        CHECK(d.preview.load());
+        CHECK(d.cue.load() == cue);
+        e.submit(Op::CueUp, 0);
+        tick(e);
+        CHECK(!d.preview.load() && d.position.load() == cue);
+        feedAt(cue + .04025);
+        tick(e);                                      // the callback sees the ring while parked
+        e.submit(Op::Play, 0);
+        tick(e, 1);
+        CHECK(std::abs(d.position.load() - (cue + 1 / 48000.)) < 1e-9); // Play on an already-published ring: no late adoption
+        e.submit(Op::Seek, 0, 10.0);
+        tick(e);
+        feedAt(10.02);
+        tick(e, 1);
+        CHECK(std::abs(d.position.load() - (10.02 + 1 / 48000.)) < 1e-9); // running: adopts the decoder's start
+    }
+
     { // Hot cues: set captures the applied position; gated preview; jump while playing.
         auto owned = std::make_unique<Engine>(48000);
         Engine& e = *owned;
