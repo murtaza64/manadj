@@ -58,6 +58,9 @@ def make_stem_split_handler(split: Split | None = None):
             split(track_id, source)
         else:
             split_track(track_id, source)
+        # Fresh stems: harmony analysis re-reads them (chord-match #387).
+        from .harmony_tasks import enqueue_harmony_task
+        enqueue_harmony_task(db, track_id)
 
     return handle
 

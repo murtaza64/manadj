@@ -121,6 +121,10 @@ def _stems_enabled() -> bool:
     return os.getenv("DISABLE_STEMS_WORKER", "").lower() not in ("true", "1", "yes")
 
 
+def _harmony_enabled() -> bool:
+    return os.getenv("DISABLE_HARMONY_WORKER", "").lower() not in ("true", "1", "yes")
+
+
 def _build_task_worker() -> "TaskWorkerPool | None":
     """The task workers (ADR-0003, gh#224): one per concurrency lane.
 
@@ -158,6 +162,14 @@ def _build_task_worker() -> "TaskWorkerPool | None":
     else:
         logging.getLogger("backend.main").info(
             "stem splitting disabled via DISABLE_STEMS_WORKER"
+        )
+
+    if _harmony_enabled():
+        from .harmony_tasks import HARMONY_TASK_TYPE, make_harmony_handler
+        handlers[HARMONY_TASK_TYPE] = make_harmony_handler()
+    else:
+        logging.getLogger("backend.main").info(
+            "harmony analysis disabled via DISABLE_HARMONY_WORKER"
         )
 
     # Routine mining (ADR 0035, routines 157): cheap event-log replay, no
@@ -349,6 +361,19 @@ async def startup_event():
             db = SessionLocal()
             try:
                 enqueue_missing_stems(db)
+            finally:
+                db.close()
+
+        # Sweep: harmony analysis (chord-match #387) for Tracks missing it,
+        # analyzed by an older version, or from the mix with stems now
+        # current — backlog-guarded like stems (scripts/backfill_harmony.py).
+        if _harmony_enabled():
+            from .database import SessionLocal
+            from .harmony_tasks import enqueue_missing_harmony
+
+            db = SessionLocal()
+            try:
+                enqueue_missing_harmony(db)
             finally:
                 db.close()
 

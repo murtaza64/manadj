@@ -294,6 +294,37 @@ class MetricLadder(Base):
     track = relationship("Track", backref=backref("metric_ladder", uselist=False))
 
 
+class Harmony(Base):
+    """Harmony analysis (chord-match #387): one row per analyzed Track.
+
+    Versioned like Waveform data (ADR 0014): `analyzer_version` below
+    backend.harmony.HARMONY_VERSION makes the sweep re-run the Track.
+    `source` is "stems" or "mix" (full-mix fallback; re-run once stems are
+    current). A Track with no drop has a row with NULL loop fields.
+    Blobs: bar chroma float16 (bars x 12), loop float32 (8 x 12)."""
+
+    __tablename__ = "harmonies"
+
+    id = Column(Integer, primary_key=True, index=True)
+    track_id = Column(Integer, ForeignKey("tracks.id"), nullable=False, unique=True, index=True)
+    analyzer_version = Column(Integer, nullable=False)
+    source = Column(String, nullable=False)
+    bar_count = Column(Integer, nullable=False)
+    first_bar_s = Column(Float, nullable=True)
+    bar_chroma_blob = deferred(Column(LargeBinary, nullable=False))
+    drop_start_bar = Column(Integer, nullable=True)
+    drop_end_bar = Column(Integer, nullable=True)
+    drop_start_s = Column(Float, nullable=True)
+    loop_blob = Column(LargeBinary, nullable=True)
+    loop_reps = Column(Integer, nullable=True)
+    movement = Column(Float, nullable=True)
+    consistency = Column(Float, nullable=True)
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+
+    track = relationship("Track", backref=backref("harmony", uselist=False))
+
+
 class GridAnalysis(Base):
     """Native grid Analysis diagnostics (ADR 0024): the fit's verdict and
     evidence, one row per Track, overwritten on every run (no versioning —
