@@ -343,7 +343,7 @@ fun knobReadout(kind: KnobKind, v: Double): String = when (kind) {
  */
 @Composable fun ValueWheel(
     label: String, choices: List<String>, index: Int, ui: UiModel, model: PlayerModel, deck: DeckId, modifier: Modifier, color: Color,
-    text: String = choices[index], icon: Glyph? = null, live: Boolean = true, pulse: Float = 0f, bare: Boolean = false, tagPending: Boolean = true, edgeHaptics: Boolean = true, tickHaptics: Boolean = true, pulseOf: (() -> Float)? = null, onTap: (() -> Unit)? = null, onIndex: (Int) -> Unit,
+    text: String = choices[index], icon: Glyph? = null, live: Boolean = true, pulse: Float = 0f, bare: Boolean = false, tagPending: Boolean = true, edgeHaptics: Boolean = true, tickHaptics: Boolean = true, pulseOf: (() -> Float)? = null, textSize: Int = 15, onTap: (() -> Unit)? = null, onIndex: (Int) -> Unit,
 ) {
     val edgeBuzz by rememberUpdatedState(edgeHaptics)
     val tickBuzz by rememberUpdatedState(tickHaptics)
@@ -403,7 +403,7 @@ fun knobReadout(kind: KnobKind, v: Double): String = when (kind) {
         }.padding(3.dp).then(if (bare) Modifier else Modifier.clip(RoundedCornerShape(2.dp)).then(dev.manadj.app.viz.Glass.fill(Ink.panel)).background(tint.copy(alpha = .06f + .22f * heat))), contentAlignment = Alignment.Center) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
             if (icon != null) GlyphIcon(icon, tint, 15.dp)
-            Text(text, color = if (interactive) tint else Ink.muted, size = 15, bold = true)
+            Text(text, color = if (interactive) tint else Ink.muted, size = textSize, bold = true)
         }
         if (!live && tagPending && !bare) PendingTag(Modifier.align(Alignment.TopEnd))
     }

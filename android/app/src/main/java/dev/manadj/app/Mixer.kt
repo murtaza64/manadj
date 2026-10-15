@@ -55,17 +55,19 @@ import dev.manadj.audio.*
     }
     val audible by remember { derivedStateOf { model.output?.beatFxAudible?.isNotEmpty() == true } }
     @Composable fun Effect(m: Modifier) = ValueWheel("FX effect", FxEffect.entries.map { it.label }, fx.effect.ordinal, ux, model, DeckId.A, m, color, if (horizontal) fx.effect.short else fx.effect.label, Glyph.Fx, live, tagPending = false, onTap = { if (usable) fx.effect = FxEffect.entries[(fx.effect.ordinal + 1) % FxEffect.entries.size] }) { fx.effect = FxEffect.entries[it] }
-    @Composable fun Target(m: Modifier) = ValueWheel("FX target", FX_TARGETS, fx.target, ux, model, DeckId.A, m, if (usable) targetColor else Ink.surface2, "→ ${FX_TARGETS[fx.target]}", live = live, tagPending = false, onTap = { if (usable) fx.target = (fx.target + 1) % FX_TARGETS.size }) { fx.target = it }
-    @Composable fun Beats(m: Modifier) = ValueWheel("FX beats", FX_BEATS.map(::beatText), fx.beats, ux, model, DeckId.A, m, color, if (fx.effect == FxEffect.REVERB) "∞" else "${beatText(FX_BEATS[fx.beats])} ${if (fx.effect == FxEffect.FLANGER) "BAR" else "BT"}", live = live, tagPending = false) { fx.beats = it }
+    @Composable fun Target(m: Modifier, size: Int = 15) = ValueWheel("FX target", FX_TARGETS, fx.target, ux, model, DeckId.A, m, if (usable) targetColor else Ink.surface2, (if (size < 15) "→" else "→ ") + FX_TARGETS[fx.target], live = live, tagPending = false, textSize = size, onTap = { if (usable) fx.target = (fx.target + 1) % FX_TARGETS.size }) { fx.target = it }
+    @Composable fun Beats(m: Modifier, size: Int = 15) = ValueWheel("FX beats", FX_BEATS.map(::beatText), fx.beats, ux, model, DeckId.A, m, color, if (fx.effect == FxEffect.REVERB) "∞" else "${beatText(FX_BEATS[fx.beats])} ${if (fx.effect == FxEffect.FLANGER) "BAR" else "BT"}", live = live, tagPending = false, textSize = size) { fx.beats = it }
     @Composable fun Depth(m: Modifier) = Knob("DEPTH", KnobKind.FX_DEPTH, fx.depth, ux, model, DeckId.A, m, live, 40.dp, tagPending = false) { v, _ -> fx.depth = v }
     @Composable fun On(m: Modifier) = Key(if (fx.on) "ON" else "OFF", m, color, usable, fx.on && usable, if (fx.on) "FX ON" else "FX OFF", style = KeyStyle.PILL, pulse = if (audible || (fx.on && !live && usable)) .3f else 0f, textSize = 15) { if (usable) fx.on = !fx.on else ux.pending("Beat FX") }
     val card = Modifier.clip(RoundedCornerShape(10.dp)).background(Brush.verticalGradient(listOf(tone.copy(alpha = if (usable) .10f else .03f), Color.Transparent))).border(1.dp, color.copy(alpha = .35f), RoundedCornerShape(10.dp))
     if (horizontal) Row(modifier.then(card).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
         On(Modifier.width(64.dp).fillMaxHeight()); Effect(Modifier.weight(1f).fillMaxHeight()); Target(Modifier.width(72.dp).fillMaxHeight()); Beats(Modifier.width(76.dp).fillMaxHeight()); Depth(Modifier.width(56.dp).fillMaxHeight())
-    } else if (compact) Column(modifier.then(card).padding(4.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        // Portrait (#58): two inline rows — effect + target, then beats + depth + ON.
-        Row(Modifier.fillMaxWidth().height(40.dp)) { Effect(Modifier.weight(1.4f).fillMaxHeight()); Target(Modifier.weight(1f).fillMaxHeight()) }
-        Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically) { Beats(Modifier.weight(1f).fillMaxHeight()); Depth(Modifier.width(44.dp).fillMaxHeight()); On(Modifier.width(56.dp).height(40.dp)) }
+    } else if (compact) Column(modifier.then(card).padding(horizontal = 4.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        // Portrait (UH28): the landscape strip folded in two, same order and equal-height chips — ON + effect,
+        // then target + beats + depth; ON and DEPTH line up in one column.
+        val row = Modifier.fillMaxWidth().height(44.dp)
+        Row(row, verticalAlignment = Alignment.CenterVertically) { On(Modifier.width(64.dp).fillMaxHeight()); Effect(Modifier.weight(1f).fillMaxHeight()) }
+        Row(row, verticalAlignment = Alignment.CenterVertically) { Target(Modifier.width(52.dp).fillMaxHeight(), 13); Beats(Modifier.weight(1f).fillMaxHeight(), 13); Depth(Modifier.width(48.dp).fillMaxHeight()) }
     } else Column(modifier.then(card).padding(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) { Text("BEAT FX", Modifier.weight(1f), color, 11, true); if (!live) PendingTag() }
         Effect(Modifier.fillMaxWidth().height(44.dp))
