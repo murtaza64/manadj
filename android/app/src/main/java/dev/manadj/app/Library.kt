@@ -14,6 +14,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.runtime.*
 import kotlinx.coroutines.flow.collectLatest
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -183,7 +184,7 @@ private class BrowseData(val decks: List<DeckId>, val refs: List<Long>, val foll
             Text("FILE →", color = Ink.muted, size = 10, bold = true)
             for (id in model.visibleDecks) { Spacer(Modifier.width(4.dp)); Key(id.name, Modifier.width(52.dp).fillMaxHeight(), deckColor(id), model.supports("play"), description = "Choose audio file for $id", style = KeyStyle.PILL) { pick(id) } }
         }
-        TrackList(model, ux, node, data, tapTarget, Modifier.weight(1f).fillMaxWidth())
+        TrackList(model, ux, node, data, tapTarget, Modifier.weight(1f).fillMaxWidth().bleed(8.dp))
     }
 }
 
@@ -337,7 +338,7 @@ private class BrowseData(val decks: List<DeckId>, val refs: List<Long>, val foll
                     }
                 }
                 when {
-                    node.hasTracks -> TrackList(model, ux, node, data, tapTarget, Modifier.weight(1f).fillMaxWidth(), dense = true)
+                    node.hasTracks -> TrackList(model, ux, node, data, tapTarget, Modifier.weight(1f).fillMaxWidth().bleed(6.dp), dense = true)
                     !ux.browseSidebar -> NodeList(ux, node, null, Modifier.weight(1f).fillMaxWidth())
                     else -> Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) { Text("pick a source", color = Ink.muted, size = 12) }
                 }
@@ -455,7 +456,8 @@ private class BrowseData(val decks: List<DeckId>, val refs: List<Long>, val foll
     // Black rows on the black browser (UH15): no grey inset cards; dividers separate rows.
     val bg = if (selected) Ink.accent.copy(alpha = .10f) else Ink.background
     Column(Modifier.fillMaxWidth().drawBehind { drawRect(bg); val t = 1.dp.toPx(); drawRect(Ink.surface0, androidx.compose.ui.geometry.Offset(0f, size.height - t), androidx.compose.ui.geometry.Size(size.width, t)) }.combinedClickable(onLongClickLabel = "Edit track", onLongClick = { if (ux.synced != null) { dev.manadj.app.edit.TrackEditNav.open(track.id.toInt()); ux.editHintSeen = true } }, onClick = tap).padding(top = if (dense) 3.dp else 5.dp, bottom = if (dense) 3.dp else 5.dp, start = 4.dp, end = 24.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        // UH22: the row runs edge to edge (bleed); its content keeps the old inset.
+        Row(Modifier.padding(start = 8.dp, end = 6.dp), verticalAlignment = Alignment.CenterVertically) {
             deck?.let { (d, live) -> DeckBadge(d, live); Spacer(Modifier.width(6.dp)) }
             playIndex?.let { Text("%02d".format(it), Modifier.width(26.dp), Ink.muted, 11, true) }
             DownloadMark(track.id, downloaded, ux)
@@ -478,7 +480,7 @@ private class BrowseData(val decks: List<DeckId>, val refs: List<Long>, val foll
                 Spacer(Modifier.width(6.dp))
             }
         }
-        Row(Modifier.fillMaxWidth().height(if (dense) 19.dp else 22.dp).padding(top = if (dense) 2.dp else 3.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth().height(if (dense) 19.dp else 22.dp).padding(top = if (dense) 2.dp else 3.dp, start = 8.dp, end = 6.dp), verticalAlignment = Alignment.CenterVertically) {
             // Synced preview: disk read + band mapping off the main thread (UH9); the slot is held while loading.
             val synced = ux.synced
             val preview by produceState(if (synced == null) java.util.Optional.ofNullable(track.preview) else synced.loadedPreview(track.id)?.let { java.util.Optional.ofNullable(it.orElse(null) ?: track.preview) }, synced, track.id) {
@@ -619,4 +621,12 @@ private object PreviewBitmaps {
             }
         }
     }
+}
+
+/** Widen past the parent's horizontal padding by [x] each side (UH22: rows run edge to edge). */
+fun Modifier.bleed(x: androidx.compose.ui.unit.Dp): Modifier = layout { measurable, constraints ->
+    val extra = (x * 2).roundToPx()
+    val c = if (constraints.hasBoundedWidth) constraints.copy(minWidth = constraints.minWidth + extra, maxWidth = constraints.maxWidth + extra) else constraints
+    val p = measurable.measure(c)
+    layout(p.width - extra, p.height) { p.place(-x.roundToPx(), 0) }
 }
