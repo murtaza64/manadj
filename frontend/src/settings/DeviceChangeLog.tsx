@@ -36,6 +36,7 @@ function show(field: string, value: unknown): string {
     return `${cue.time.toFixed(2)}s${cue.label ? ` “${cue.label}”` : ''}`;
   }
   if (field.startsWith('tag:')) return value ? 'on' : 'off';
+  if (field.startsWith('link:')) return value ? 'linked' : 'unlinked';
   if (field === 'grid' && typeof value === 'object') {
     const g = value as { anchor_time: number | null; tempo_changes: { bpm: number }[] };
     const bpms = [...new Set(g.tempo_changes.map((t) => t.bpm.toFixed(2)))].join('/');
@@ -48,10 +49,11 @@ function show(field: string, value: unknown): string {
   return String(value);
 }
 
-function fieldLabel(field: string, tagName?: string | null): string {
+function fieldLabel(field: string, tagName?: string | null, linkTitle?: string | null): string {
   if (field.startsWith('setting:')) return SETTING_LABELS[field.slice(8)] ?? field.slice(8);
   if (field.startsWith('hot_cue:')) return `Hot cue ${field.slice(8)}`;
   if (field.startsWith('tag:')) return `Tag ${tagName ?? `#${field.slice(4)}`}`;
+  if (field.startsWith('link:')) return `Link ↔ ${linkTitle ?? `Track ${field.slice(5)}`}`;
   return { main_cue: 'Main cue', title: 'Title', artist: 'Artist', energy: 'Energy', key: 'Key', grid: 'Beatgrid', reset_marks: 'Reset marks' }[field] ?? field;
 }
 
@@ -102,7 +104,7 @@ export function DeviceChangeLog() {
                 {rows.map((r) => (
                   <tr key={r.id} className={r.outcome !== 'applied' || r.reverted_by_id ? 'is-inactive' : undefined}>
                     <td>{r.track_id === null ? 'Settings' : (r.track_title ?? `Track ${r.track_id}`)}</td>
-                    <td>{fieldLabel(r.field, r.tag_name)}</td>
+                    <td>{fieldLabel(r.field, r.tag_name, r.link_title)}</td>
                     <td>
                       {r.field.startsWith('setting:')
                         ? settingDiff(r.old, r.new)

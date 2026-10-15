@@ -10,6 +10,7 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -35,6 +36,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
@@ -46,7 +48,7 @@ import dev.manadj.library.parseHexColor
 import kotlin.math.abs
 import kotlinx.coroutines.launch
 
-private enum class EditTab(val label: String) { GRID("GRID · METER"), CUES("CUE DETAILS") }
+private enum class EditTab(val label: String) { GRID("GRID · METER"), CUES("CUES"), INFO("TAGS · INFO") }
 
 /** Reset-mark colour (magenta: distinct from every cue/deck identity). */
 private val MarkColor = Color(0xffff2dd4)
@@ -198,6 +200,7 @@ private val MarkColor = Color(0xffff2dd4)
         when (tab) {
             EditTab.GRID -> GridMeterPanel(edit)
             EditTab.CUES -> CuePanel(edit, ux)
+            EditTab.INFO -> InfoPanel(edit)
         }
     }
 }
@@ -469,3 +472,78 @@ private fun DrawScope.overlay(edit: TrackEditModel, pos: Double, window: Double,
         drawContext.canvas.nativeCanvas.drawText(text, p + 3.dp.toPx(), top + 11.5f.dp.toPx(), ink)
     }
 }
+
+
+/** Desktop ENERGY_COLORS (theme/tokens.ts). */
+private val EnergyColors = listOf(0xffffffcc, 0xffffcc66, 0xffff9933, 0xffff4444, 0xffff0000).map { Color(it) }
+
+/**
+ * Tags + metadata (TH1): energy 1–5, key (OpenKey wheel, desktop key colours), Tag assignment grouped by
+ * category in the desktop's tag colours, read-only facts. Every change journals at once through Device sync.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable private fun InfoPanel(edit: TrackEditModel) {
+    val track = edit.library ?: return
+    Label("ENERGY")
+    Row(Modifier.fillMaxWidth().height(40.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        for (level in 1..5) {
+            val c = EnergyColors[level - 1]
+            val on = track.energy == level
+            Chip("$level", Modifier.weight(1f).fillMaxHeight(), c, on, "Energy $level${if (on) " (tap to clear)" else ""}") { edit.setEnergy(level) }
+        }
+        Chip("—", Modifier.weight(.7f).fillMaxHeight(), Ink.muted, false, "Clear energy", enabled = track.energy != null) { edit.setEnergy(null) }
+    }
+    val current = track.key?.let { dev.manadj.library.keyNames(it) }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Label("KEY")
+        Spacer(Modifier.width(8.dp))
+        Text(current?.let { "${it.first} · ${it.second}" } ?: "none", color = current?.let { keyColor(it.first) } ?: Ink.muted, size = 12, bold = true)
+        Spacer(Modifier.weight(1f))
+        if (current != null) Chip("CLEAR", Modifier.width(64.dp).height(26.dp), Ink.muted, false, "Clear key") { edit.setKey(null) }
+    }
+    // OpenKey wheel as two rows: minor (m) and major (d), 1..12 — relative keys stacked.
+    for (mode in listOf("m", "d")) Row(Modifier.fillMaxWidth().height(34.dp), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+        for (n in 1..12) {
+            val ok = "$n$mode"
+            val id = dev.manadj.library.keyIdOfOpenKey(ok)
+            Chip(ok, Modifier.weight(1f).fillMaxHeight(), keyColor(ok) ?: Ink.text, track.key != null && track.key == id, "Key $ok", textSize = 10) { edit.setKey(id) }
+        }
+    }
+    val tags = edit.allTags
+    var filter by remember(edit) { mutableStateOf("") }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Label("TAGS · ${track.tagIds.size}")
+        Spacer(Modifier.width(8.dp))
+        Field(filter, Modifier.weight(1f), "filter tags", 12, description = "Filter tags") { filter = it }
+    }
+    if (tags.isEmpty()) Text("No Tags synced from the desktop.", color = Ink.muted, size = 11)
+    val shown = tags.filter { filter.isBlank() || it.name.contains(filter, true) || it.categoryName.contains(filter, true) }
+    for ((category, group) in shown.groupBy { it.categoryName }) {
+        Text(category.uppercase(), Modifier.padding(top = 2.dp), Ink.muted, 9, true)
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            for (tag in group) {
+                val c = tag.argb?.let { Color(it) } ?: Ink.overlay1
+                Chip(tag.name, Modifier.height(32.dp), c, edit.hasTag(tag.id), "Tag ${tag.name}", textSize = 11, pad = 10.dp) { edit.toggleTag(tag.id) }
+            }
+        }
+    }
+    Label("FILE")
+    Text(listOfNotNull(track.fileName, track.codec?.uppercase(), track.durationSecs?.let { clock(it) }, track.bpm?.let { bpmText(it) + " BPM" }).joinToString(" · "), color = Ink.muted, size = 10, lines = 3)
+}
+
+/** Toggle chip: outlined in [color], filled when [on]; glass when the backdrop is on. */
+@Composable private fun Chip(
+    text: String, modifier: Modifier, color: Color, on: Boolean, description: String, enabled: Boolean = true,
+    textSize: Int = 12, pad: androidx.compose.ui.unit.Dp = 0.dp, action: () -> Unit,
+) {
+    val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
+    val shape = RoundedCornerShape(4.dp)
+    val tint = if (enabled) color else Ink.surface2
+    Box(modifier.clip(shape).then(if (on) Modifier.background(tint) else dev.manadj.app.viz.Glass.fill(Ink.panel, 4f)).border(1.5.dp, tint.copy(alpha = if (on) 1f else .6f), shape)
+        .clickable(enabled = enabled) { haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove); action() }
+        .semantics { contentDescription = description; selected = on }.padding(horizontal = pad), contentAlignment = Alignment.Center) {
+        Text(text, color = if (on) Color.Black else tint, size = textSize, bold = true)
+    }
+}
+
+@Composable private fun Label(text: String) = Text(text, Modifier.padding(top = 2.dp), Ink.muted, 10, true)

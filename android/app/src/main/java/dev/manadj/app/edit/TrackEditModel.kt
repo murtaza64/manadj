@@ -203,6 +203,16 @@ class TrackEditModel(private val context: Context, val trackId: Int, val deck: D
 
     // ── Metadata ──
 
+    /** Synced Tags, desktop order (category, then tag display order). */
+    val allTags: List<LibraryTag> get() = ux.synced?.lib?.tags.orEmpty()
+    fun hasTag(id: Int) = library?.tagIds?.contains(id) == true
+    /** Tag assignment (desktop Tag toggle): journaled at once, newest-wins on the desktop. */
+    fun toggleTag(id: Int) = journal(TrackEdit.TagSet(id, !hasTag(id)))
+    /** Energy 1..5; tapping the current value clears it (desktop rating idiom). */
+    fun setEnergy(value: Int?) = journal(TrackEdit.Energy(value?.takeUnless { it == library?.energy }))
+    /** Key as an Engine DJ id 0..23 (OpenKey 1d = 0); null clears. */
+    fun setKey(engineId: Int?) = journal(TrackEdit.Key(engineId))
+
     fun saveTitle(value: String) {
         titleDraft = value
         commit("title", 800) { journal(TrackEdit.Title(value.trim().ifEmpty { null })) }

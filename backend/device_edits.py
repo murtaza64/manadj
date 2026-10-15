@@ -16,6 +16,9 @@ Field vocabulary and JSON values:
                  time_signature_num, time_signature_den?, bar_position}]} | null
                  (null = no saved grid: generated placeholder / deleted)
   reset_marks    [float] Metric-ladder Reset marks, seconds (ADR 0029)
+  link:<id>      bool (the Linked pair {track_id, id} exists; linked-pairs PRD,
+                 #398) — pair-level: either Track may carry it, one fact per
+                 unordered pair, written like PUT /api/track-links/pair/{a}/{b}
   setting:<key>  JSON object (a synced performance setting, device_sync
                  SYNCED_SETTINGS; track_id null) — the whole persisted value
 """
@@ -32,7 +35,7 @@ from sqlalchemy.orm import Session
 
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
-from .models import AppSetting, Beatgrid, DeviceSyncChange, HotCue, MetricLadder, Tag, Track, TrackTag
+from .models import AppSetting, Beatgrid, DeviceSyncChange, HotCue, MetricLadder, Tag, Track, TrackLink, TrackTag
 from .track_metadata.manager import apply_update
 from .track_metadata.models import TrackChanges
 
@@ -67,7 +70,7 @@ def _parse_field(field: str) -> tuple[str, int | None]:
     if field in SCALAR_FIELDS:
         return field, None
     kind, _, arg = field.partition(":")
-    if kind in ("hot_cue", "tag") and arg.isdigit():
+    if kind in ("hot_cue", "tag", "link") and arg.isdigit():
         n = int(arg)
         if kind == "hot_cue" and not 1 <= n <= 8:
             raise FieldError(f"hot cue slot out of range: {field}")
@@ -91,6 +94,9 @@ def read_field(db: Session, track: Track, field: str) -> tuple[Any, datetime | N
         return (tt is not None), (tt.created_at if tt is not None else track.updated_at)
     if kind == "main_cue":
         return track.cue_point_time, track.updated_at
+    if kind == "link":
+        row = _link_row(db, track.id, n)
+        return (row is not None), (row.created_at if row is not None else None)
     if kind == "grid":
         bg = db.query(Beatgrid).filter_by(track_id=track.id).one_or_none()
         if bg is None or bg.origin == "generated":
@@ -102,6 +108,11 @@ def read_field(db: Session, track: Track, field: str) -> tuple[Any, datetime | N
             return [], None
         return json.loads(ladder.reset_marks_json), ladder.updated_at
     return getattr(track, kind), track.updated_at
+
+
+def _link_row(db: Session, a: int, b: int) -> TrackLink | None:
+    low, high = sorted((a, b))
+    return db.query(TrackLink).filter_by(low_track_id=low, high_track_id=high).one_or_none()
 
 
 def _num(v: Any) -> bool:
@@ -126,6 +137,7 @@ def _validate(kind: str, value: Any) -> None:
     ok = {
         "hot_cue": value is None or (isinstance(value, dict) and isinstance(value.get("time"), (int, float))),
         "tag": isinstance(value, bool),
+        "link": isinstance(value, bool),
         "main_cue": value is None or isinstance(value, (int, float)),
         "title": value is None or isinstance(value, str),
         "artist": value is None or isinstance(value, str),
@@ -165,6 +177,14 @@ def write_field(db: Session, track: Track, field: str, value: Any) -> None:
         return
     if kind == "main_cue":
         track.cue_point_time = None if value is None else float(value)
+        return
+    if kind == "link":
+        from .routers.track_links import write_pair_linked
+
+        other = db.get(Track, n)
+        if n == track.id or other is None or other.archived_at is not None:
+            raise FieldError(f"bad link pair {track.id}/{n}")
+        write_pair_linked(db, track.id, n, value)
         return
     if kind == "grid":
         from . import crud
@@ -324,11 +344,16 @@ def list_changes(db: Session, limit: int = 300, device_id: str | None = None) ->
     titles = {t.id: t.title or t.filename for t in db.query(Track).filter(Track.id.in_(ids))} if ids else {}
     tag_ids = {int(r.field[4:]) for r in rows if r.field.startswith("tag:")}
     tag_names = {t.id: t.name for t in db.query(Tag).filter(Tag.id.in_(tag_ids))} if tag_ids else {}
+    link_ids = {int(r.field[5:]) for r in rows if r.field.startswith("link:")} - set(titles)
+    if link_ids:
+        titles |= {t.id: t.title or t.filename for t in db.query(Track).filter(Track.id.in_(link_ids))}
     out = []
     for r in rows:
         row = change_row(r, titles)
         if r.field.startswith("tag:"):
             row["tag_name"] = tag_names.get(int(r.field[4:]))
+        if r.field.startswith("link:"):
+            row["link_title"] = titles.get(int(r.field[5:]))
         out.append(row)
     return out
 

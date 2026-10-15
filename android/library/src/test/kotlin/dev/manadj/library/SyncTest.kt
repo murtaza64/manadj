@@ -33,6 +33,7 @@ class SyncTest {
     @Volatile private var deskMinimapMaster = 1.16
     @Volatile private var snapshotRequests = 0
     @Volatile private var twoWay = true
+    @Volatile private var deskLinks = "[[10,11]]"
     private val stemRequests = java.util.Collections.synchronizedList(mutableListOf<String>())
     @Volatile private var dropAudioAfter: Int? = null
     @Volatile private var onAudioRequest: () -> Unit = {}
@@ -51,7 +52,7 @@ class SyncTest {
            "energy":null,"duration_secs":null,"date_added":null,"main_cue":null,"codec":null,"filesize_bytes":null,
            "audio_rev":null,"preview_rev":null,"waveform_rev":null,"tag_ids":[],"hot_cues":[],"grid":null}],
          "playlists":[{"id":3,"name":"Set","color":null,"display_order":0,"track_ids":[11,10]}],
-         "links":[[10,11]],"transitions":[{"a":10,"b":11,"count":2,"favorite":true}],
+         "links":$deskLinks,"transitions":[{"a":10,"b":11,"count":2,"favorite":true}],
          "cameos":[],"takes":[{"a":11,"b":10,"count":2,"last_at":"2026-10-02T00:00:00"}],
          "settings":{
           "manadj.waveformStyles":{"value":{"version":1,"full":{"styleId":"additive-soft","params":{"master":1}},"minimap":{"styleId":"additive-soft","params":{"master":$deskMinimapMaster}}},"updated_at":"2026-10-14T12:00:00"},
@@ -257,6 +258,36 @@ class SyncTest {
         assertEquals(1, received.size) // the desktop's title change reached the phone
         assertTrue(received[0].contains("\"field\":\"title\"") && !received[0].contains("hot_cue"))
         assertEquals(false, repo.edit(10, TrackEdit.Title("Decoy (desk edit)"))) // no-op edit
+    }
+
+    @Test fun linkToggleJournaledPairLevelPushedAndReceived() = runBlocking {
+        val repo = repo()
+        repo.sync().getOrThrow()
+        val lib0 = repo.library.value!!
+        assertTrue(lib0.linked(11, 10) && !lib0.linkable(10, 11))
+        assertEquals(false, repo.setLinked(10, 10, true)) // no self-links
+        assertEquals(false, repo.setLinked(10, 11, true)) // already linked
+        assertEquals(false, repo.setLinked(10, 99, true)) // unknown track
+        assertTrue(repo.setLinked(11, 10, false)) // order never matters
+        val lib = repo.library.value!!
+        assertTrue(!lib.linked(10, 11) && lib.linkable(11, 10)) // favorited Transition, no Link → hint
+        assertEquals(false, lib.marks(10, 11).linked)
+        assertEquals(1, repo.state.value.pendingEdits)
+        // Offline restart keeps the overlay.
+        assertEquals(false, repo().also { it.open() }.library.value!!.linked(10, 11))
+
+        deskLinks = "[]" // the desktop applies the pushed unlink
+        repo.sync().getOrThrow()
+        val edit = org.json.JSONObject(pushed.single()).getJSONArray("edits").getJSONObject(0)
+        assertEquals(listOf<Any>(10, "link:11", true, false), listOf(edit.getInt("track_id"), edit.getString("field"), edit.get("old"), edit.get("new")))
+        assertTrue(received.none { "link:" in it }) // our own edit is not reported back
+        assertEquals(false, repo.library.value!!.linked(10, 11))
+
+        deskLinks = "[[11,10]]" // relinked on the desktop
+        repo.sync().getOrThrow()
+        assertTrue(repo.library.value!!.linked(10, 11))
+        val got = org.json.JSONObject(received.last()).getJSONArray("changes").getJSONObject(0)
+        assertEquals(listOf<Any>(10, "link:11", false, true), listOf(got.getInt("track_id"), got.getString("field"), got.get("old"), got.get("new")))
     }
 
     @Test fun detailWaveformFetchedOnceAndCachedOffline() = runBlocking {
