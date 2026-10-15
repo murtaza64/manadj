@@ -7,7 +7,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { api } from '../api/client';
 import { getSlot, resetSlots, setSlot } from '../waveform/styleSlots';
 import { TrackWaveformPreview } from './TrackWaveformPreview';
-import { requestPreviewImage } from '../waveform/previewImage';
+import { requestPreviewImage, setPreviewImageCacheLimit } from '../waveform/previewImage';
 import type { HotCue } from '../types';
 
 vi.mock('../api/client', () => ({ api: { waveforms: { getPreview: vi.fn(), getData: vi.fn() } } }));
@@ -30,7 +30,12 @@ beforeEach(() => {
     clearRect: vi.fn(),
     fillRect(this: { fillStyle: string }) { colors.push(this.fillStyle); },
   } as unknown as CanvasRenderingContext2D);
-  raster = vi.spyOn(HTMLCanvasElement.prototype, 'toDataURL').mockImplementation(() => `data:image/png;base64,${++serial}`);
+  raster = vi.spyOn(HTMLCanvasElement.prototype, 'toBlob').mockImplementation((callback: BlobCallback) => {
+    const blob = new Blob([String(++serial)]);
+    setTimeout(() => callback(blob), 0);
+  });
+  URL.createObjectURL = vi.fn(() => `blob:test/${++serial}`);
+  URL.revokeObjectURL = vi.fn();
   const bytes = readFileSync('src/waveform/fixtures/golden.wfb');
   vi.mocked(api.waveforms.getPreview).mockResolvedValue({
     etag: `test-${++serial}`,
@@ -168,12 +173,17 @@ it('deduplicates queued renders, cancels abandoned work, and bounds the raster c
   await vi.advanceTimersByTimeAsync(100);
   expect(raster).toHaveBeenCalledTimes(1);
   expect(first).toHaveBeenCalledWith(second.mock.calls[0][0]);
-  for (let i = 0; i < 128; i++) {
+  const IMAGE_CACHE_LIMIT = 16;
+  setPreviewImageCacheLimit(IMAGE_CACHE_LIMIT);
+  for (let i = 0; i < IMAGE_CACHE_LIMIT; i++) {
     requestPreviewImage({ ...data, etag: `${data.etag}-${i}` }, slot, () => {});
   }
   await vi.advanceTimersByTimeAsync(1000);
-  expect(raster).toHaveBeenCalledTimes(129);
+  expect(raster).toHaveBeenCalledTimes(IMAGE_CACHE_LIMIT + 1);
+  // The first image was evicted (and its object URL revoked): re-rastered.
+  expect(URL.revokeObjectURL).toHaveBeenCalledWith(first.mock.calls[0][0]);
   requestPreviewImage(data, slot, () => {});
   await vi.advanceTimersByTimeAsync(100);
-  expect(raster).toHaveBeenCalledTimes(130);
+  expect(raster).toHaveBeenCalledTimes(IMAGE_CACHE_LIMIT + 2);
+  setPreviewImageCacheLimit(4096);
 });

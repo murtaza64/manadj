@@ -21,6 +21,16 @@ const NORMAL_CURSOR_SELECTOR = [
 
 const HIDDEN_CLASS = 'midi-cursor-hidden';
 
+/** The element carrying HIDDEN_CLASS: the app surface (.app-main) that
+ * the suppression blankets, or the view root outside the app shell. A
+ * class on the scope itself, not `.app-main:has(.perf-root.…)`: that
+ * selector made every DOM insertion under .app-main recalc the whole
+ * subtree's style (~1.8k elements, 35-60 ms per library scroll step;
+ * desktop-perf #385). */
+function scopeOf(root: HTMLElement | null): HTMLElement | null {
+  return (root?.closest('.app-main') as HTMLElement | null) ?? root;
+}
+
 function keepsNormalCursor(target: EventTarget | null): boolean {
   return target instanceof Element && target.closest(NORMAL_CURSOR_SELECTOR) !== null;
 }
@@ -28,7 +38,7 @@ function keepsNormalCursor(target: EventTarget | null): boolean {
 /** Performance-view-only cursor policy: controller activity hides; intent
  * restores. `enabled` gates the whole policy — the keep-alive Performance
  * view stays mounted while hidden, and since the suppression now blankets
- * the app surface via :has() (gh#165), a hidden view must never arm it. */
+ * the app surface (gh#165), a hidden view must never arm it. */
 export function useMidiCursorSuppression(
   rootRef: RefObject<HTMLElement | null>,
   enabled = true
@@ -37,7 +47,7 @@ export function useMidiCursorSuppression(
 
   useEffect(() => {
     if (!enabled) return;
-    const hide = () => rootRef.current?.classList.add(HIDDEN_CLASS);
+    const hide = () => scopeOf(rootRef.current)?.classList.add(HIDDEN_CLASS);
 
     return subscribeMidiActivity(() => {
       if (keepsNormalCursor(document.activeElement)) return;
@@ -48,9 +58,11 @@ export function useMidiCursorSuppression(
 
   useEffect(() => {
     if (!enabled) return;
+    // Captured: the root ref is already detached when unmount cleanup runs.
+    const mountedScope = scopeOf(rootRef.current);
     const revealNow = () => {
       stateRef.current = revealCursor(stateRef.current);
-      rootRef.current?.classList.remove(HIDDEN_CLASS);
+      scopeOf(rootRef.current)?.classList.remove(HIDDEN_CLASS);
     };
     const onPointerMove = (event: PointerEvent) => {
       if (keepsNormalCursor(event.target)) {
@@ -59,7 +71,7 @@ export function useMidiCursorSuppression(
       }
       const next = pointerMoved(stateRef.current, { x: event.clientX, y: event.clientY });
       stateRef.current = next;
-      if (!next.hidden) rootRef.current?.classList.remove(HIDDEN_CLASS);
+      if (!next.hidden) scopeOf(rootRef.current)?.classList.remove(HIDDEN_CLASS);
     };
 
     document.addEventListener('pointermove', onPointerMove, { passive: true });
@@ -69,7 +81,7 @@ export function useMidiCursorSuppression(
       document.removeEventListener('pointermove', onPointerMove);
       document.removeEventListener('pointerdown', revealNow, { capture: true });
       document.removeEventListener('wheel', revealNow, { capture: true });
-      rootRef.current?.classList.remove(HIDDEN_CLASS);
+      (scopeOf(rootRef.current) ?? mountedScope)?.classList.remove(HIDDEN_CLASS);
       stateRef.current = initialCursorSuppressionState;
     };
   }, [rootRef, enabled]);

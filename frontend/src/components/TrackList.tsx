@@ -9,7 +9,7 @@ import { useDeckOccupancy } from '../hooks/useDeckOccupancy';
 import { usePlayedTracks } from '../sessions/playedStore';
 import { useDeckPlaybackLevels } from '../hooks/useDeckPlaybackLevels';
 import { loadedDecks } from '../sets/rowMarks';
-import type { Track } from '../types';
+import type { HotCue, Track } from '../types';
 import type { ChannelId } from '../playback/mixer';
 import type { PairInfo } from '../editor/transitionIndex';
 import { isLinked, type LinkKey } from '../links/linkStore';
@@ -193,6 +193,27 @@ export default function TrackList({
     staleTime: 60_000,
     gcTime: 60_000,
   });
+  // Each window shift fetches a new bulk key, so every row's cue array is a
+  // fresh object even when unchanged — which defeated the TrackRow memo and
+  // re-rendered every mounted row per scroll step (desktop-perf #385).
+  // Reuse the previous array for a track whose cues are identical.
+  const cueCache = useRef(new Map<number, { json: string; cues: HotCue[] }>());
+  const stableCues = useMemo(() => {
+    if (!previewCues) return previewCues;
+    const out: Record<number, HotCue[]> = {};
+    for (const [key, cues] of Object.entries(previewCues)) {
+      const id = Number(key);
+      const json = JSON.stringify(cues);
+      const prev = cueCache.current.get(id);
+      if (prev && prev.json === json) {
+        out[id] = prev.cues;
+      } else {
+        cueCache.current.set(id, { json, cues });
+        out[id] = cues;
+      }
+    }
+    return out;
+  }, [previewCues]);
 
   // Register a scroller so keyboard navigation can bring an off-screen
   // (unmounted) row into view by index geometry (useTrackSelection reads
@@ -210,22 +231,21 @@ export default function TrackList({
         const i = g.indexOfTrack.get(id);
         if (i === undefined) return false;
         const top = i * ROW_HEIGHT;
-        return top + ROW_HEIGHT > g.metrics.scrollTop &&
-          top < g.metrics.scrollTop + g.metrics.clientHeight;
+        const m = g.metrics();
+        return top + ROW_HEIGHT > m.scrollTop && top < m.scrollTop + m.clientHeight;
       },
       scrollIntoView: (id, smooth) => {
         const g = scrollGeom.current;
         const i = g.indexOfTrack.get(id);
         const c = g.container();
         if (i === undefined || !c) return;
-        scrollIndexIntoView(c, i, g.metrics, ROW_HEIGHT, 3, smooth);
+        scrollIndexIntoView(c, i, g.metrics(), ROW_HEIGHT, 3, smooth);
       },
       visibleIds: () => {
         const g = scrollGeom.current;
-        const first = Math.floor(g.metrics.scrollTop / ROW_HEIGHT);
-        const last = Math.ceil(
-          (g.metrics.scrollTop + g.metrics.clientHeight) / ROW_HEIGHT
-        );
+        const m = g.metrics();
+        const first = Math.floor(m.scrollTop / ROW_HEIGHT);
+        const last = Math.ceil((m.scrollTop + m.clientHeight) / ROW_HEIGHT);
         const ids: number[] = [];
         for (let i = Math.max(0, first); i < Math.min(g.rows.length, last); i++) {
           const r = g.rows[i];
@@ -304,7 +324,7 @@ export default function TrackList({
                     key={track.id}
                     track={track}
                     columns={columns}
-                    previewCues={previewCues?.[track.id]}
+                    previewCues={stableCues?.[track.id]}
                     isSelected={selectedIds.has(track.id)}
                     loadedOn={loadedFor(track.id)}
                     played={played.has(track.id)}

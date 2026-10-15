@@ -183,30 +183,37 @@ export function useVirtualWindow(
 ): {
   start: number;
   end: number;
-  metrics: ViewportMetrics;
+  /** Live viewport read (not render-time state: the hook re-renders only
+   * when the row WINDOW changes, so a captured value would go stale). */
+  metrics: () => ViewportMetrics;
   container: () => HTMLElement | null;
 } {
   const containerRef = useRef<HTMLElement | null>(null);
+  // Last viewport read. DOM reads happen at most once per frame (scroll
+  // and resize coalesce to one rAF), never during render: reading
+  // scrollTop right after a commit forces a synchronous layout, and fast
+  // scroll used to do that several times per frame (desktop-perf #385).
+  const viewRef = useRef<ViewportMetrics>({ scrollTop: 0, clientHeight: 0 });
   // Cached snapshot: useSyncExternalStore needs a stable reference when
-  // nothing changed, so listeners replace this only on a real delta.
-  const snapRef = useRef<ViewportMetrics>({ scrollTop: 0, clientHeight: 0 });
+  // nothing changed, so the window object is replaced only on a real delta.
+  const windowRef = useRef<{ start: number; end: number }>({ start: 0, end: 0 });
 
-  const measure = useCallback((): ViewportMetrics => {
+  const read = useCallback((): ViewportMetrics => {
     if (injectedMeasurer) return injectedMeasurer();
     const c = containerRef.current ?? scrollableAncestor(anchorRef.current);
     containerRef.current = c;
-    return c ? { scrollTop: c.scrollTop, clientHeight: c.clientHeight } : snapRef.current;
+    if (c) viewRef.current = { scrollTop: c.scrollTop, clientHeight: c.clientHeight };
+    return viewRef.current;
   }, [anchorRef]);
 
-  const getSnapshot = useCallback((): ViewportMetrics => {
-    const next = measure();
-    const prev = snapRef.current;
-    if (next.scrollTop === prev.scrollTop && next.clientHeight === prev.clientHeight) {
-      return prev;
-    }
-    snapRef.current = next;
+  const getSnapshot = useCallback((): { start: number; end: number } => {
+    const view = injectedMeasurer ? injectedMeasurer() : viewRef.current;
+    const next = windowRange(view.scrollTop, view.clientHeight, rowCount);
+    const prev = windowRef.current;
+    if (next.start === prev.start && next.end === prev.end) return prev;
+    windowRef.current = next;
     return next;
-  }, [measure]);
+  }, [rowCount]);
 
   const subscribe = useCallback(
     (onChange: () => void) => {
@@ -214,34 +221,36 @@ export function useVirtualWindow(
       const c = scrollableAncestor(anchorRef.current);
       containerRef.current = c;
       if (!c) return () => {};
-      c.addEventListener('scroll', onChange, { passive: true });
-      const ro =
-        typeof ResizeObserver !== 'undefined' ? new ResizeObserver(onChange) : null;
+      let frame: number | null = null;
+      const flush = () => {
+        frame = null;
+        read();
+        onChange();
+      };
+      const schedule = () => {
+        if (frame === null) frame = requestAnimationFrame(flush);
+      };
+      // Initial read: the container exists now (first render saw none).
+      read();
+      onChange();
+      c.addEventListener('scroll', schedule, { passive: true });
+      const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(schedule) : null;
       ro?.observe(c);
       return () => {
-        c.removeEventListener('scroll', onChange);
+        if (frame !== null) cancelAnimationFrame(frame);
+        c.removeEventListener('scroll', schedule);
         ro?.disconnect();
       };
     },
-    [anchorRef]
+    [anchorRef, read]
   );
 
-  const metrics = useSyncExternalStore(subscribe, getSnapshot);
+  const { start, end } = useSyncExternalStore(subscribe, getSnapshot);
 
-  // The row stream changing (filter, follow churn) shifts the window even
-  // without a scroll event; re-read on the next frame so the mounted set
-  // stays right. rowCount is the dependency the caller controls.
-  void rowCount;
-
-  const { start, end } = windowRange(
-    metrics.scrollTop,
-    metrics.clientHeight,
-    rowCount
-  );
   return {
     start,
     end,
-    metrics,
+    metrics: read,
     container: () => containerRef.current,
   };
 }

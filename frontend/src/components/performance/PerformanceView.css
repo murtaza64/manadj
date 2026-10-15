@@ -17,18 +17,20 @@
 }
 
 /* Cursor suppression blankets the whole app surface (top panel + shared
-   browse panel below) — the class stays on .perf-root (the hook's target,
-   armed only while the view is active), :has() lifts the scope. */
-.app-main:has(.perf-root.midi-cursor-hidden),
-.app-main:has(.perf-root.midi-cursor-hidden) :not(input):not(textarea):not(select):not([contenteditable="true"]):not([role="menu"]):not([role="menuitem"]) {
+   browse panel below): the hook (armed only while the view is active)
+   puts the class on .app-main itself. Never .app-main:has(...) here — a
+   :has() subject over a universal descendant rule recalcs the whole app's
+   style on every DOM insertion (desktop-perf #385). */
+.app-main.midi-cursor-hidden,
+.app-main.midi-cursor-hidden :not(input):not(textarea):not(select):not([contenteditable="true"]):not([role="menu"]):not([role="menuitem"]) {
   cursor: none !important;
 }
 
-.app-main:has(.perf-root.midi-cursor-hidden) :is(input, textarea, select, [contenteditable="true"], [role="menu"], [role="menuitem"], [data-cursor-normal]) {
+.app-main.midi-cursor-hidden :is(input, textarea, select, [contenteditable="true"], [role="menu"], [role="menuitem"], [data-cursor-normal]) {
   cursor: auto !important;
 }
 
-.app-main:has(.perf-root.midi-cursor-hidden)::after {
+.app-main.midi-cursor-hidden::after {
   content: "";
   position: absolute;
   inset: 0;
