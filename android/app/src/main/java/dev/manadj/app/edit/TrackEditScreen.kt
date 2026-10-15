@@ -46,7 +46,7 @@ import dev.manadj.library.parseHexColor
 import kotlin.math.abs
 import kotlinx.coroutines.launch
 
-private enum class EditTab(val label: String) { GRID("GRID"), METER("METER"), CUES("CUES") }
+private enum class EditTab(val label: String) { GRID("GRID · METER"), CUES("CUE DETAILS") }
 
 /** Reset-mark colour (magenta: distinct from every cue/deck identity). */
 private val MarkColor = Color(0xffff2dd4)
@@ -87,8 +87,9 @@ private val MarkColor = Color(0xffff2dd4)
                 Row(Modifier.weight(1f)) {
                     Column(Modifier.weight(1.4f).fillMaxHeight()) {
                         EditWave(edit, model, ux, Modifier.weight(1f).fillMaxWidth())
-                        Minimap(ui, model, ux.waves[ui.source?.id ?: ""], Modifier.fillMaxWidth().height(30.dp))
-                        Transport(edit, Modifier.fillMaxWidth().height(44.dp))
+                        Minimap(ui, model, ux.waves[ui.source?.id ?: ""], Modifier.fillMaxWidth().height(28.dp))
+                        CueRow(edit, model, ux, Modifier.fillMaxWidth().height(44.dp))
+                        Transport(edit, model, Modifier.fillMaxWidth().height(48.dp))
                     }
                     Column(Modifier.weight(1f).fillMaxHeight().padding(start = 6.dp)) {
                         Tabs(tab) { tab = it }
@@ -99,9 +100,10 @@ private val MarkColor = Color(0xffff2dd4)
         } else {
             Column(Modifier.fillMaxSize()) {
                 Header(edit, ux, error, close)
-                EditWave(edit, model, ux, Modifier.fillMaxWidth().height(height * .3f))
-                Minimap(ui, model, ux.waves[ui.source?.id ?: ""], Modifier.fillMaxWidth().height(34.dp))
-                Transport(edit, Modifier.fillMaxWidth().height(48.dp))
+                EditWave(edit, model, ux, Modifier.fillMaxWidth().height(height * .26f))
+                Minimap(ui, model, ux.waves[ui.source?.id ?: ""], Modifier.fillMaxWidth().height(30.dp))
+                CueRow(edit, model, ux, Modifier.fillMaxWidth().height(46.dp))
+                Transport(edit, model, Modifier.fillMaxWidth().height(50.dp))
                 Tabs(tab) { tab = it }
                 Panel(edit, ux, tab, Modifier.weight(1f))
             }
@@ -154,34 +156,45 @@ private val MarkColor = Color(0xffff2dd4)
 }
 
 @Composable private fun Tabs(tab: EditTab, choose: (EditTab) -> Unit) {
-    Row(Modifier.fillMaxWidth().height(40.dp).padding(horizontal = 4.dp, vertical = 3.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+    Row(Modifier.fillMaxWidth().height(36.dp).padding(horizontal = 4.dp, vertical = 2.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
         for (t in EditTab.entries) Key(t.label, Modifier.weight(1f).fillMaxHeight(), Ink.accent, engaged = t == tab, style = KeyStyle.PILL, textSize = 12) { choose(t) }
     }
 }
 
-@Composable private fun Transport(edit: TrackEditModel, modifier: Modifier) {
-    val ui = edit.ui
-    val playing = ui.snapshot?.playing == true
+/** Hot cue row on the audition deck: the performance pads (tap = desktop hot-cue rules, empty = set) + SHIFT for delete. */
+@Composable private fun CueRow(edit: TrackEditModel, model: PlayerModel, ux: UiModel, modifier: Modifier) {
+    val deck = edit.deck
+    val shift = ux.shifted(deck)
+    Row(modifier.padding(horizontal = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+        Key("SHIFT", Modifier.width(54.dp).fillMaxHeight().padding(vertical = 2.dp), Ink.warning, engaged = shift, description = "Shift: next pad tap deletes", style = KeyStyle.PILL, textSize = 10) {
+            ux.shiftLatched[deck] = !(ux.shiftLatched[deck] ?: false)
+        }
+        for (slot in 0 until 8) Hotcue(edit.ui, slot, model, ux, Modifier.weight(1f).fillMaxHeight())
+    }
+}
+
+/** CUE and PLAY exactly as the performance deck (gated cue, slide-to-lock), beat/bar jumps, playhead readout. */
+@Composable private fun Transport(edit: TrackEditModel, model: PlayerModel, modifier: Modifier) {
     val ready = edit.ready
-    Row(modifier.padding(horizontal = 4.dp, vertical = 3.dp), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
-        Key("BAR", Modifier.weight(1f).fillMaxHeight(), Ink.muted, ready, description = "Back one bar", icon = Glyph.Back, textSize = 11) { edit.jumpBeats(-4.0) }
-        Key("1", Modifier.weight(.8f).fillMaxHeight(), Ink.muted, ready, description = "Back one beat", icon = Glyph.Back, textSize = 11) { edit.jumpBeats(-1.0) }
-        Key("", Modifier.weight(1.2f).fillMaxHeight(), Ink.play, ready, playing, if (playing) "Pause" else "Play", icon = if (playing) Glyph.Pause else Glyph.Play) { edit.playPause() }
-        Key("1", Modifier.weight(.8f).fillMaxHeight(), Ink.muted, ready, description = "Forward one beat", icon = Glyph.Forward, textSize = 11) { edit.jumpBeats(1.0) }
-        Key("BAR", Modifier.weight(1f).fillMaxHeight(), Ink.muted, ready, description = "Forward one bar", icon = Glyph.Forward, textSize = 11) { edit.jumpBeats(4.0) }
+    Row(modifier.padding(horizontal = 2.dp, vertical = 2.dp), horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.CenterVertically) {
+        CueKey(edit.ui, model, Modifier.weight(1.5f).fillMaxHeight())
+        PlayKey(edit.ui, model, Modifier.weight(1.7f).fillMaxHeight())
+        Key("", Modifier.weight(.7f).fillMaxHeight(), Ink.muted, ready, description = "Back one bar", icon = Glyph.Back, style = KeyStyle.BARE) { edit.jumpBeats(-4.0) }
+        Key("1", Modifier.weight(.7f).fillMaxHeight(), Ink.muted, ready, description = "Back one beat", icon = Glyph.Back, style = KeyStyle.BARE, textSize = 11) { edit.jumpBeats(-1.0) }
+        Key("1", Modifier.weight(.7f).fillMaxHeight(), Ink.muted, ready, description = "Forward one beat", icon = Glyph.Forward, style = KeyStyle.BARE, textSize = 11) { edit.jumpBeats(1.0) }
+        Key("", Modifier.weight(.7f).fillMaxHeight(), Ink.muted, ready, description = "Forward one bar", icon = Glyph.Forward, style = KeyStyle.BARE) { edit.jumpBeats(4.0) }
         Column(Modifier.weight(1.6f), horizontalAlignment = Alignment.End) {
             val t = edit.playhead
-            Text("%d:%06.3f".format(t.toInt() / 60, t % 60), color = Ink.text, size = 13, bold = true)
-            Text(edit.barLabel() ?: if (edit.expansion == null) "no grid" else "—", color = MarkColor, size = 11, bold = true)
+            Text("%d:%06.3f".format(t.toInt() / 60, t % 60), color = Ink.text, size = 12, bold = true)
+            Text(edit.barLabel() ?: if (edit.expansion == null) "no grid" else "—", color = MarkColor, size = 13, bold = true)
         }
     }
 }
 
 @Composable private fun Panel(edit: TrackEditModel, ux: UiModel, tab: EditTab, modifier: Modifier) {
-    Column(modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 6.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    Column(modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 6.dp, vertical = 3.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
         when (tab) {
-            EditTab.GRID -> GridPanel(edit)
-            EditTab.METER -> MeterPanel(edit)
+            EditTab.GRID -> GridMeterPanel(edit)
             EditTab.CUES -> CuePanel(edit, ux)
         }
     }
@@ -189,80 +202,112 @@ private val MarkColor = Color(0xffff2dd4)
 
 private fun bpmText(bpm: Double) = "%.2f".format(bpm).trimEnd('0').trimEnd('.')
 private fun timeText(t: Double) = "%d:%06.3f".format(t.toInt() / 60, t % 60)
-private val Row40 = 44.dp
+private val Row40 = 40.dp
 
-@Composable private fun GridPanel(edit: TrackEditModel) {
+/** Grid and Metric ladder on one page: tempo, nudge, downbeat / drop anchor, Reset marks. */
+@Composable private fun GridMeterPanel(edit: TrackEditModel) {
     val bpm = edit.bpm
     val grid = edit.grid
     val canGrid = edit.changes != null
     val ready = edit.ready
+    val meter = ready && edit.expansion != null
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Text(bpm?.let(::bpmText) ?: "—", color = Ink.text, size = 28, bold = true)
-        Text(" BPM", color = Ink.muted, size = 12, bold = true)
-        Spacer(Modifier.weight(1f))
-        Column(horizontalAlignment = Alignment.End) {
-            Text(when { grid == null && canGrid -> "PLACEHOLDER GRID"; grid == null -> "NO GRID"; else -> grid.origin.uppercase() + " GRID" }, color = if (grid == null) Ink.warning else Ink.play, size = 11, bold = true)
-            if (edit.variable) Text("VARIABLE · ${edit.changes?.size} SEGMENTS", color = Ink.orange, size = 10, bold = true)
+        Text(bpm?.let(::bpmText) ?: "—", color = Ink.text, size = 24, bold = true)
+        Text(" BPM", color = Ink.muted, size = 11, bold = true)
+        Spacer(Modifier.width(10.dp))
+        Column(Modifier.weight(1f)) {
+            Text(when { grid == null && canGrid -> "PLACEHOLDER"; grid == null -> "NO GRID"; else -> grid.origin.uppercase() } + if (edit.variable) " · VARIABLE ${edit.changes?.size}" else "", color = if (grid == null) Ink.warning else Ink.play, size = 10, bold = true)
             grid?.anchorTime?.let { Text("ANCHOR ${timeText(it)}", color = Ink.muted, size = 10, bold = true) }
         }
+        Text(edit.barLabel() ?: "—", color = MarkColor, size = 20, bold = true)
     }
-    Label("TEMPO (anchor-preserving)")
-    val tempo = canGrid && !edit.variable || bpm == null
-    Row(Modifier.fillMaxWidth().height(Row40), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-        Key("÷2", Modifier.weight(1f).fillMaxHeight(), Ink.accent, tempo && bpm != null, description = "Halve BPM") { edit.scaleBpm(.5) }
-        Key("GROW", Modifier.weight(1.3f).fillMaxHeight(), Ink.accent, tempo && bpm != null, description = "Grow: BPM down 0.03", textSize = 12) { edit.growShrink(true) }
-        Key("SHRINK", Modifier.weight(1.3f).fillMaxHeight(), Ink.accent, tempo && bpm != null, description = "Shrink: BPM up 0.03", textSize = 12) { edit.growShrink(false) }
-        Key("×2", Modifier.weight(1f).fillMaxHeight(), Ink.accent, tempo && bpm != null, description = "Double BPM") { edit.scaleBpm(2.0) }
-    }
-    Row(Modifier.fillMaxWidth().height(Row40), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+    val tempo = canGrid && !edit.variable && bpm != null
+    Row(Modifier.fillMaxWidth().height(Row40), horizontalArrangement = Arrangement.spacedBy(3.dp), verticalAlignment = Alignment.CenterVertically) {
+        Key("÷2", Modifier.weight(.8f).fillMaxHeight(), Ink.accent, tempo, description = "Halve BPM") { edit.scaleBpm(.5) }
+        Key("GROW", Modifier.weight(1.1f).fillMaxHeight(), Ink.accent, tempo, description = "Grow: BPM down 0.03", textSize = 11) { edit.growShrink(true) }
+        Key("SHRINK", Modifier.weight(1.1f).fillMaxHeight(), Ink.accent, tempo, description = "Shrink: BPM up 0.03", textSize = 11) { edit.growShrink(false) }
+        Key("×2", Modifier.weight(.8f).fillMaxHeight(), Ink.accent, tempo, description = "Double BPM") { edit.scaleBpm(2.0) }
         var typed by remember(edit) { mutableStateOf("") }
-        var refused by remember(edit) { mutableStateOf(false) }
-        val apply = { typed.toDoubleOrNull()?.let { refused = !edit.retempo(it); if (!refused) typed = "" } }
-        Field(typed, Modifier.weight(1f), "type BPM", 15, description = "BPM", keyboard = KeyboardType.Decimal, done = { apply() }) { typed = it.filter { c -> c.isDigit() || c == '.' } }
-        Key("SET BPM", Modifier.width(96.dp).fillMaxHeight(), Ink.accent, typed.toDoubleOrNull()?.let { it in 40.0..300.0 } == true && !edit.variable, textSize = 12) { apply() }
-        if (refused) Text("variable grid", color = Ink.warning, size = 10, bold = true)
+        val apply = { typed.toDoubleOrNull()?.let { if (edit.retempo(it)) typed = "" } }
+        Field(typed, Modifier.weight(1.2f), "BPM", 14, description = "Type BPM", keyboard = KeyboardType.Decimal, done = { apply() }) { typed = it.filter { c -> c.isDigit() || c == '.' } }
+        Key("SET", Modifier.weight(.8f).fillMaxHeight(), Ink.accent, typed.toDoubleOrNull()?.let { it in 40.0..300.0 } == true && !edit.variable, description = "Set typed BPM", textSize = 11) { apply() }
     }
-    Label("GRID NUDGE (translate)")
-    Row(Modifier.fillMaxWidth().height(Row40), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-        Key("10ms", Modifier.weight(1f).fillMaxHeight(), Ink.accent, canGrid, description = "Grid earlier 10 ms", icon = Glyph.Back, textSize = 11) { edit.nudgeGrid(-10.0) }
-        Key("1ms", Modifier.weight(1f).fillMaxHeight(), Ink.accent, canGrid, description = "Grid earlier 1 ms", icon = Glyph.Back, textSize = 11) { edit.nudgeGrid(-1.0) }
-        Key("1ms", Modifier.weight(1f).fillMaxHeight(), Ink.accent, canGrid, description = "Grid later 1 ms", icon = Glyph.Forward, textSize = 11) { edit.nudgeGrid(1.0) }
-        Key("10ms", Modifier.weight(1f).fillMaxHeight(), Ink.accent, canGrid, description = "Grid later 10 ms", icon = Glyph.Forward, textSize = 11) { edit.nudgeGrid(10.0) }
+    Row(Modifier.fillMaxWidth().height(Row40), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+        IconKey("10", Modifier.weight(1f).fillMaxHeight(), Ink.accent, canGrid, "Grid earlier 10 ms", Icons.nudgeLeft) { edit.nudgeGrid(-10.0) }
+        IconKey("1", Modifier.weight(1f).fillMaxHeight(), Ink.accent, canGrid, "Grid earlier 1 ms", Icons.nudgeLeft) { edit.nudgeGrid(-1.0) }
+        IconKey("1", Modifier.weight(1f).fillMaxHeight(), Ink.accent, canGrid, "Grid later 1 ms", Icons.nudgeRight, iconAfter = true) { edit.nudgeGrid(1.0) }
+        IconKey("10", Modifier.weight(1f).fillMaxHeight(), Ink.accent, canGrid, "Grid later 10 ms", Icons.nudgeRight, iconAfter = true) { edit.nudgeGrid(10.0) }
     }
-    Label("AT PLAYHEAD")
-    Row(Modifier.fillMaxWidth().height(52.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-        Key("DOWNBEAT HERE", Modifier.weight(1f).fillMaxHeight(), Ink.play, ready && canGrid, description = "Set downbeat at playhead", icon = Glyph.Grid, textSize = 12) { edit.setDownbeatHere() }
-        Key("DROP ANCHOR", Modifier.weight(1f).fillMaxHeight(), Ink.orange, ready && canGrid, description = "Drop anchor: downbeat + reset mark + cue 4 at playhead", textSize = 12) { edit.dropAnchor() }
+    Row(Modifier.fillMaxWidth().height(46.dp), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+        IconKey("DOWNBEAT", Modifier.weight(1f).fillMaxHeight(), Ink.play, ready && canGrid, "Set downbeat at playhead (anchors the grid)", Icons.anchor) { edit.setDownbeatHere() }
+        IconKey("DROP", Modifier.weight(1f).fillMaxHeight(), Ink.orange, ready && canGrid, "Drop anchor at playhead: downbeat + Reset mark + Hot Cue 4 (3/2/1 fill empty at -8/-16/-32 bars)", Icons.drop) { edit.dropAnchor() }
+        IconKey("RESET", Modifier.weight(1f).fillMaxHeight(), MarkColor, meter, "Mark a Reset at the nearest downbeat", Icons.resetMark) { edit.markHere() }
+        IconKey("RESET", Modifier.weight(1f).fillMaxHeight(), Ink.warning, meter && edit.marks.isNotEmpty(), "Delete the Reset mark nearest the playhead", Icons.resetMarkDelete) { edit.deleteNearestMark() }
     }
-    Text("DROP ANCHOR = downbeat + Reset mark + Hot Cue 4 here; cues 3/2/1 fill empty slots at −8/−16/−32 bars.", color = Ink.muted, size = 10, lines = 3)
-}
-
-@Composable private fun Label(text: String) = Text(text, Modifier.padding(top = 2.dp), Ink.muted, 10, true)
-
-@Composable private fun MeterPanel(edit: TrackEditModel) {
-    val ready = edit.ready && edit.expansion != null
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Text(edit.barLabel() ?: "—", color = MarkColor, size = 26, bold = true)
-        Spacer(Modifier.weight(1f))
-        Text(edit.ladder?.let { "TIERS " + it.tierBars.drop(1).joinToString("/") + " BARS" } ?: "NO GRID: LADDER UNDEFINED", color = Ink.muted, size = 10, bold = true)
-    }
-    Row(Modifier.fillMaxWidth().height(52.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-        Key("MARK RESET", Modifier.weight(1f).fillMaxHeight(), MarkColor, ready, description = "Add a reset mark at the nearest downbeat", textSize = 12) { edit.markHere() }
-        Key("DELETE NEAREST", Modifier.weight(1f).fillMaxHeight(), Ink.warning, ready && edit.marks.isNotEmpty(), description = "Delete the reset mark nearest the playhead", textSize = 12) { edit.deleteNearestMark() }
-    }
-    Text("A Reset mark recounts every tier from 1 at its downbeat; the earliest mark is the Ladder anchor (the intro counts backward from it). Parenthetical bars show as +1, +2.", color = Ink.muted, size = 10, lines = 4)
     val downbeats = edit.expansion?.downbeats
     val marks = edit.marks.sorted()
-    if (marks.isEmpty()) Text("No Reset marks: default ladder from the Grid origin.", color = Ink.muted, size = 11)
+    if (marks.isEmpty()) Text("No Reset marks — ladder counts from the Grid origin. First mark = Ladder anchor.", color = Ink.muted, size = 10, lines = 2)
     marks.forEachIndexed { i, m ->
         val ordinal = downbeats?.takeIf { it.isNotEmpty() }?.let { LadderProjection.nearestDownbeatOrdinal(it, m) }
-        Row(Modifier.fillMaxWidth().height(40.dp).clip(RoundedCornerShape(3.dp)).background(Ink.crust).clickable { edit.seek(m) }.padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth().height(34.dp).clip(RoundedCornerShape(3.dp)).background(Ink.crust).clickable { edit.seek(m) }.padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(if (i == 0) "ANCHOR" else "RESET", Modifier.width(64.dp), MarkColor, 11, true)
             Text(timeText(m), Modifier.weight(1f), Ink.text, 12, true)
             ordinal?.let { Text("bar ${it + 1}", Modifier.padding(end = 8.dp), Ink.muted, 11) }
-            Key("", Modifier.size(36.dp), Ink.warning, description = "Delete reset mark at ${timeText(m)}", icon = Glyph.Close, style = KeyStyle.BARE) { edit.deleteMark(m) }
+            Key("", Modifier.size(32.dp), Ink.warning, description = "Delete reset mark at ${timeText(m)}", icon = Glyph.Close, style = KeyStyle.BARE) { edit.deleteMark(m) }
         }
     }
+}
+
+/** A box key with a desktop-parity icon (16-unit viewBox, MeterIcons/GridIcons/AnchorIcon) and a short label. */
+@Composable private fun IconKey(text: String, modifier: Modifier, color: Color, enabled: Boolean, description: String, icon: DrawScope.(Color) -> Unit, iconAfter: Boolean = false, action: () -> Unit) {
+    val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
+    val tint = if (enabled) color else Ink.surface2
+    val shape = RoundedCornerShape(2.dp)
+    Box(modifier.padding(2.dp).clip(shape).background(Ink.panel).border(1.5.dp, tint.copy(alpha = .7f), shape)
+        .clickable(enabled = enabled) { haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove); action() }
+        .semantics { contentDescription = description }, contentAlignment = Alignment.Center) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            val glyph = @Composable { Canvas(Modifier.size(18.dp)) { icon(tint) } }
+            if (!iconAfter) glyph()
+            Text(text, color = tint, size = 11, bold = true)
+            if (iconAfter) glyph()
+        }
+    }
+}
+
+/** Desktop icons (frontend/src/components/icons) drawn on a 16×16 grid. */
+private object Icons {
+    private fun DrawScope.u() = size.minDimension / 16f
+    private fun DrawScope.stroke(w: Float) = androidx.compose.ui.graphics.drawscope.Stroke(w * u(), cap = androidx.compose.ui.graphics.StrokeCap.Round)
+    private fun DrawScope.path(build: Path.(Float) -> Unit) = Path().apply { build(u()) }
+
+    /** DropAnchorIcon: a drop landing on a baseline. */
+    val drop: DrawScope.(Color) -> Unit = { c ->
+        drawPath(path { k -> moveTo(8 * k, 1.5f * k); cubicTo(6.5f * k, 4 * k, 4.5f * k, 6.2f * k, 4.5f * k, 8.6f * k); cubicTo(4.5f * k, 13.3f * k, 11.5f * k, 13.3f * k, 11.5f * k, 8.6f * k); cubicTo(11.5f * k, 6.2f * k, 9.5f * k, 4 * k, 8 * k, 1.5f * k); close() }, c)
+        drawLine(c, Offset(2 * u(), 13.5f * u()), Offset(14 * u(), 13.5f * u()), 1.4f * u())
+    }
+    /** ResetMarkIcon: a flag on a tick. */
+    val resetMark: DrawScope.(Color) -> Unit = { c ->
+        drawLine(c, Offset(4 * u(), 2.5f * u()), Offset(4 * u(), 13.5f * u()), 1.3f * u())
+        drawPath(path { k -> moveTo(4 * k, 3 * k); lineTo(12 * k, 3 * k); lineTo(9.5f * k, 5.25f * k); lineTo(12 * k, 7.5f * k); lineTo(4 * k, 7.5f * k); close() }, c)
+    }
+    /** ResetMarkDeleteIcon: outlined flag with a minus. */
+    val resetMarkDelete: DrawScope.(Color) -> Unit = { c ->
+        drawLine(c, Offset(4 * u(), 2.5f * u()), Offset(4 * u(), 13.5f * u()), 1.3f * u())
+        drawPath(path { k -> moveTo(4 * k, 3 * k); lineTo(12 * k, 3 * k); lineTo(9.5f * k, 5.25f * k); lineTo(12 * k, 7.5f * k); lineTo(4 * k, 7.5f * k); close() }, c, style = stroke(1.1f))
+        drawLine(c, Offset(8 * u(), 12 * u()), Offset(15 * u(), 12 * u()), 1.6f * u())
+    }
+    /** AnchorIcon: set-downbeat. */
+    val anchor: DrawScope.(Color) -> Unit = { c ->
+        drawCircle(c, 1.7f * u(), Offset(8 * u(), 3.2f * u()), style = stroke(1.3f))
+        drawLine(c, Offset(8 * u(), 4.9f * u()), Offset(8 * u(), 13.5f * u()), 1.3f * u())
+        drawLine(c, Offset(5.2f * u(), 7 * u()), Offset(10.8f * u(), 7 * u()), 1.3f * u())
+        drawPath(path { k -> moveTo(2 * k, 9.5f * k); cubicTo(2.4f * k, 12.6f * k, 4.8f * k, 13.9f * k, 8 * k, 13.9f * k); cubicTo(11.2f * k, 13.9f * k, 13.6f * k, 12.6f * k, 14 * k, 9.5f * k); lineTo(11.9f * k, 10.6f * k) }, c, style = stroke(1.3f))
+        drawLine(c, Offset(2 * u(), 9.5f * u()), Offset(4.1f * u(), 10.6f * u()), 1.3f * u())
+    }
+    /** GridNudgeLeft/RightIcon: solid triangles. */
+    val nudgeLeft: DrawScope.(Color) -> Unit = { c -> drawPath(path { k -> moveTo(5.5f * k, 4.5f * k); lineTo(1 * k, 8 * k); lineTo(5.5f * k, 11.5f * k); close() }, c); drawLine(c, Offset(7 * u(), 3 * u()), Offset(7 * u(), 13 * u()), 1.3f * u()) }
+    val nudgeRight: DrawScope.(Color) -> Unit = { c -> drawPath(path { k -> moveTo(10.5f * k, 4.5f * k); lineTo(15 * k, 8 * k); lineTo(10.5f * k, 11.5f * k); close() }, c); drawLine(c, Offset(9 * u(), 3 * u()), Offset(9 * u(), 13 * u()), 1.3f * u()) }
 }
 
 @Composable private fun CuePanel(edit: TrackEditModel, ux: UiModel) {

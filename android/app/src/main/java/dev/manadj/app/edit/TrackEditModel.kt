@@ -183,7 +183,12 @@ class TrackEditModel(private val context: Context, val trackId: Int, val deck: D
         val next = time?.let { HotCue(slot, it.coerceIn(0.0, duration.takeIf { d -> d > 0 } ?: it), if (keepDecor) existing?.label else label, if (keepDecor) existing?.color else color) }
         cueDrafts[slot] = Draft(next)
         holders().forEach { d -> if (next == null) model.submit(AudioCommand.ClearHotCue(d, slot - 1)) else model.submit(AudioCommand.SetHotCueAt(d, slot - 1, next.time)) }
-        commit("cue$slot", 1000) { val c = cueDrafts[slot]?.value; journal(TrackEdit.HotCueSet(slot, c?.time, c?.label, c?.color)) }
+        commit("cue$slot", 1000) {
+            val draft = cueDrafts[slot]; val c = draft?.value
+            journal(TrackEdit.HotCueSet(slot, c?.time, c?.label, c?.color))
+            // Hand back to the Library once journaled, so pad SET/DEL on the deck (journaled by the pads) show through.
+            ux.viewModelScope.launch { delay(1500); if (cueDrafts[slot] === draft) cueDrafts.remove(slot) }
+        }
     }
     fun setCueHere(slot: Int) = setCue(slot, quantized(playhead))
     fun nudgeCue(slot: Int, seconds: Double) { val c = cue(slot) ?: return; setCue(slot, c.time + seconds) }
