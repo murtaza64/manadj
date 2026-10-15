@@ -157,6 +157,8 @@ fun marksOf(ui: DeckUi) = ui.snapshot.let { s -> WaveMarks(s?.cueSeconds, ui.hot
     stemWave: ((Int) -> WaveformData?)? = null,
     /** Overview: small unnumbered cue flags (portrait minimaps, UH11). */
     compactCues: Boolean = false,
+    /** Overview: Metric-ladder hypermeter lines (UH17); null = fall back to 32-beat steps from the grid anchor. */
+    hyper: List<HyperMark>? = null,
 ) {
     val paint = remember { Paint().apply { strokeWidth = 2f; isAntiAlias = false } }
     val ink = remember { Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = Typeface.MONOSPACE; isFakeBoldText = true } }
@@ -246,8 +248,10 @@ fun marksOf(ui: DeckUi) = ui.snapshot.let { s -> WaveMarks(s?.cueSeconds, ui.hot
                     line(marks.anchor + k * beat, Color.White.copy(alpha = floatArrayOf(.14f, .32f, .45f, .6f, .75f)[tier]), floatArrayOf(1f, 1.5f, 2f, 2.5f, 3f)[tier].dp.toPx())
                 }
             }
-            // Minimap hypermeter (UH12): subtle grey lines every 32 beats, 64 slightly stronger, from the grid anchor.
-            if (overview) marks.bpm?.let { bpm ->
+            // Minimap hypermeter (UH12/UH17): 8-bar / 16-bar ladder groups (desktop Metric ladder); local files without a
+            // ladder fall back to 32-beat steps from the grid anchor.
+            if (overview && hyper != null) for (m in hyper) line(m.seconds, Color.White.copy(alpha = if (m.strong) .30f else .16f), 1.dp.toPx())
+            else if (overview) marks.bpm?.let { bpm ->
                 val beat = 60.0 / bpm
                 val first = ceil(-marks.anchor / (beat * 32)).toInt()
                 val last = floor((dur - marks.anchor) / (beat * 32)).toInt()
@@ -332,6 +336,9 @@ private fun renderOverview(data: WaveformData, size: IntSize2, duration: Double,
     val ready by remember(ui) { derivedStateOf { ui.ready } }
     val currentReady by rememberUpdatedState(ready)
     val stems by remember(ui) { derivedStateOf { ui.snapshot?.takeIf { it.stems }?.stemGains } }
+    // Library track: hypermeter lines from its Metric ladder (UH17), recomputed when the synced track changes.
+    val track = ux?.let { u -> dev.manadj.app.library.LibraryHolder.trackOn(model, ui.id)?.let { u.synced?.lib?.track(it) } }
+    val hyper = remember(track, ui.durationSeconds) { track?.let { Hypermeter.marks(it, ui.durationSeconds ?: it.durationSecs ?: 0.0) } }
     Box(modifier) {
     WaveView(wave, { seekPreview ?: position(ui) }, ui.durationSeconds, marksOf(ui), Modifier.fillMaxSize().semantics { contentDescription = "${ui.id} minimap seek" }.pointerInput(ui.id, vertical) {
         awaitEachGesture {
@@ -357,7 +364,7 @@ private fun renderOverview(data: WaveformData, size: IntSize2, duration: Double,
             finally { if (cancelled) preview?.remove(ui.id); seekPreview = null; model.finishGesture(id, cancelled) }
         }
     }, overview = true, vertical = vertical, accent = deckColor(ui.id), status = if (!ui.ready) null else if (wave == null) "analysing…" else null,
-        live = { ux?.strip(ui) ?: Strip() }, compactCues = compactCues,
+        live = { ux?.strip(ui) ?: Strip() }, compactCues = compactCues, hyper = hyper,
         stemWave = ux?.let { u -> { mask: Int -> val id = ui.source?.id; if (wave == null || id == null) null else u.stemWave(id, wave, mask) } })
     // Per-stem state (#158): one bar per stem in its colour, dim when killed.
     stems?.let { g ->
