@@ -53,7 +53,7 @@ enum class KeyStyle { BOX, PILL, BARE }
         .then(if (longPress == null) Modifier.clickable(interactionSource = interaction, indication = null, enabled = enabled || pending) { feedback?.let(haptic::performHapticFeedback); action() }
             else Modifier.combinedClickable(interactionSource = interaction, indication = null, enabled = enabled || pending, onLongClick = { haptic.performHapticFeedback(HapticFeedbackType.LongPress); longPress() }) { feedback?.let(haptic::performHapticFeedback); action() })
         .padding(inset).graphicsLayer { scaleX = scale; scaleY = scale }
-        .then(if (style == KeyStyle.BARE) Modifier else Modifier.clip(shape).background(Ink.panel).background(tint.copy(alpha = .28f * heat)).border(1.5.dp, tint.copy(alpha = if (engaged || pressed) 1f else .6f), shape))
+        .then(if (style == KeyStyle.BARE) Modifier else Modifier.clip(shape).then(dev.manadj.app.viz.Glass.fill(Ink.panel, if (style == KeyStyle.PILL) dev.manadj.app.viz.Glass.PILL else 2f)).background(tint.copy(alpha = .28f * heat)).border(1.5.dp, tint.copy(alpha = if (engaged || pressed) 1f else .6f), shape))
         .padding(horizontal = 3.dp), contentAlignment = Alignment.Center) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
             val ink = textColor ?: if (engaged || pressed) Ink.text else tint
@@ -277,7 +277,7 @@ fun DrawScope.drawKnob(kind: KnobKind, value: Double, r: Float, enabled: Boolean
         // Label sits in the arc's open bottom, so it can only belong to this knob.
         Box(contentAlignment = Alignment.BottomCenter) {
             Canvas(Modifier.size(size).halo(knobColor(kind, value), heat * .6f, 4.dp, round = true)) { drawKnob(kind, value, this.size.minDimension / 2 - 4.dp.toPx(), interactive) }
-            Text(label, Modifier.offset(y = 6.dp).background(Color.Black).padding(horizontal = 2.dp), color = when { !live -> Ink.muted; held -> labelColor ?: Ink.text; else -> labelColor ?: Ink.muted }, size = 9, bold = true)
+            if (!dev.manadj.app.viz.Glass.hideLabel(kind)) Text(label, Modifier.offset(y = 6.dp).background(dev.manadj.app.viz.Glass.chip(Color.Black)).padding(horizontal = 2.dp), color = when { !live -> Ink.muted; held -> labelColor ?: Ink.text; else -> labelColor ?: Ink.muted }, size = 9, bold = true)
         }
         if (!live && tagPending) PendingTag(Modifier.align(Alignment.TopEnd))
     }
@@ -394,7 +394,7 @@ fun knobReadout(kind: KnobKind, v: Double): String = when (kind) {
                     model.finishGesture(id, cancelled && open)
                 }
             }
-        }.padding(3.dp).then(if (bare) Modifier else Modifier.clip(RoundedCornerShape(2.dp)).background(Ink.panel).background(tint.copy(alpha = .06f + .22f * heat))), contentAlignment = Alignment.Center) {
+        }.padding(3.dp).then(if (bare) Modifier else Modifier.clip(RoundedCornerShape(2.dp)).then(dev.manadj.app.viz.Glass.fill(Ink.panel)).background(tint.copy(alpha = .06f + .22f * heat))), contentAlignment = Alignment.Center) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
             if (icon != null) GlyphIcon(icon, tint, 15.dp)
             Text(text, color = if (interactive) tint else Ink.muted, size = 15, bold = true)
@@ -460,7 +460,7 @@ fun knobReadout(kind: KnobKind, v: Double): String = when (kind) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("−", color = if (ready) color else Ink.muted, size = 15, bold = true)
             Spacer(Modifier.weight(1f))
-            Text(if (ui.bend == 0.0) "BEND" else "%+.1f%%".format(ui.bend), Modifier.background(Color.Black.copy(alpha = .6f)).padding(horizontal = 2.dp), if (ready) color else Ink.muted, 11, true)
+            Text(if (ui.bend == 0.0) "BEND" else "%+.1f%%".format(ui.bend), Modifier.background(dev.manadj.app.viz.Glass.chip(Color.Black.copy(alpha = .6f))).padding(horizontal = 2.dp), if (ready) color else Ink.muted, 11, true)
             Spacer(Modifier.weight(1f))
             Text("+", color = if (ready) color else Ink.muted, size = 15, bold = true)
         }

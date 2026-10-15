@@ -207,11 +207,11 @@ fun mixOf(model: PlayerModel, ux: UiModel, id: DeckId): DeckMix {
         Column(Modifier.fillMaxSize().browserSwipeUp(sheet), verticalArrangement = Arrangement.spacedBy(gap)) {
             TopBar(model, pad.fillMaxWidth().height(maxOf(band, 44.dp)))
             if (ux.outputDebug) Box(pad) { OutputLine(model) }
-            Column(pad.onGloballyPositioned { sheetTop = (it.positionInParent().y + it.size.height).toInt() }, verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            Column((if (dev.manadj.app.viz.Glass.on) Modifier else pad).onGloballyPositioned { sheetTop = (it.positionInParent().y + it.size.height).toInt() }, verticalArrangement = Arrangement.spacedBy(3.dp)) {
                 for (ui in listOf(a, b)) DetailWave(ui, model, ux, Modifier.fillMaxWidth().height(waveHeight))
             }
             Row(pad.fillMaxWidth().weight(1f)) {
-                KnobColumn(a, ux, model, Modifier.width(58.dp).fillMaxHeight())
+                KnobColumn(a, ux, model, Modifier.width(58.dp).fillMaxHeight().then(dev.manadj.app.viz.Glass.softPanel()))
                 ChannelFader(a, model, Modifier.width(54.dp).fillMaxHeight())
                 Column(Modifier.weight(1f).fillMaxHeight().padding(horizontal = 4.dp), verticalArrangement = Arrangement.spacedBy(gap)) {
                     // UH16: app keys on top; FX sits directly above the crossfader (or, XF off, directly above BROWSE).
@@ -220,10 +220,10 @@ fun mixOf(model: PlayerModel, ux: UiModel, id: DeckId): DeckMix {
                     if (ux.crossfaderEnabled) Crossfader(model, ux, Modifier.fillMaxWidth().height(48.dp))
                 }
                 ChannelFader(b, model, Modifier.width(54.dp).fillMaxHeight())
-                KnobColumn(b, ux, model, Modifier.width(58.dp).fillMaxHeight())
+                KnobColumn(b, ux, model, Modifier.width(58.dp).fillMaxHeight().then(dev.manadj.app.viz.Glass.softPanel()))
             }
             // Minimaps flank the centre BROWSE key (the #94 swap is landscape-only, #101).
-            Row(pad.fillMaxWidth().height(if (tight) 36.dp else 44.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row((if (dev.manadj.app.viz.Glass.on) Modifier else pad).fillMaxWidth().height(if (tight) 36.dp else 44.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                 Minimap(a, model, ux.waves[a.source?.id ?: ""], Modifier.weight(1f).fillMaxHeight(), preview = ux.seekPreview, ux = ux, compactCues = true)
                 BrowseKey(model, ux, Modifier.width(84.dp).fillMaxHeight())
                 Minimap(b, model, ux.waves[b.source?.id ?: ""], Modifier.weight(1f).fillMaxHeight(), preview = ux.seekPreview, ux = ux, compactCues = true)
@@ -251,7 +251,7 @@ fun mixOf(model: PlayerModel, ux: UiModel, id: DeckId): DeckMix {
         // The browser sheet covers everything below the waves (CUE/PLAY row at its foot); translate-only (#132).
         val topDp = with(LocalDensity.current) { sheetTop.toDp() }
         BrowserSheet(sheet, Modifier.fillMaxSize().padding(top = topDp)) {
-            Column(Modifier.fillMaxSize().background(Ink.background)) {
+            Column(Modifier.fillMaxSize().then(dev.manadj.app.viz.Glass.sheet(Ink.background))) {
                 // Grabber (UH14): the sheet swipes down to dismiss.
                 Box(Modifier.fillMaxWidth().height(16.dp).semantics { contentDescription = "Drag down to close browser" }, contentAlignment = Alignment.Center) {
                     Box(Modifier.size(40.dp, 4.dp).clip(androidx.compose.foundation.shape.RoundedCornerShape(50)).background(Ink.muted.copy(alpha = .7f)))
@@ -339,11 +339,11 @@ private enum class PaneKind { LEFT_SLOT, RIGHT_SLOT, BOTH_LEFT, BOTH_RIGHT }
                     if (!xf) Waves(Modifier.fillMaxHeight().fillMaxWidth().padding(horizontal = 54.dp + 48.dp + 3.dp))
                     Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Row(Modifier.fillMaxWidth().weight(1f)) {
-                            KnobColumn(a, ux, model, Modifier.width(54.dp).fillMaxHeight().padding(top = 4.dp), 34.dp)
+                            KnobColumn(a, ux, model, Modifier.width(54.dp).fillMaxHeight().then(dev.manadj.app.viz.Glass.softPanel()).padding(top = 4.dp), 34.dp)
                             ChannelFader(a, model, Modifier.width(48.dp).fillMaxHeight())
                             if (xf) Waves(Modifier.weight(1f).fillMaxHeight().padding(horizontal = 3.dp)) else Spacer(Modifier.weight(1f))
                             ChannelFader(b, model, Modifier.width(48.dp).fillMaxHeight())
-                            KnobColumn(b, ux, model, Modifier.width(54.dp).fillMaxHeight().padding(top = 4.dp), 34.dp)
+                            KnobColumn(b, ux, model, Modifier.width(54.dp).fillMaxHeight().then(dev.manadj.app.viz.Glass.softPanel()).padding(top = 4.dp), 34.dp)
                         }
                         // Symmetric flanks keep the crossfader centred at full width (#153): two stacked equal keys each,
                         // Q·H over settings left, SESSIONS over BROWSE right (#94 swap).
@@ -373,7 +373,7 @@ private enum class PaneKind { LEFT_SLOT, RIGHT_SLOT, BOTH_LEFT, BOTH_RIGHT }
             val rest = paneX(k, goalOf(k))
             val paneFrame = remember(shift, k, sidePx, screenPx) { SafeFrame { paneX(k, shift.value) - rest } }
             CompositionLocalProvider(LocalSafeFrame provides paneFrame) {
-                Box(Modifier.width(if (wide) bothWidth else side).fillMaxHeight().graphicsLayer { translationX = paneX(k, shift.value) }.background(Ink.background)) {
+                Box(Modifier.width(if (wide) bothWidth else side).fillMaxHeight().graphicsLayer { translationX = paneX(k, shift.value) }.then(dev.manadj.app.viz.Glass.sheet(Ink.background))) {
                     LibraryPanel(model, ux, Modifier.fillMaxSize().padding(start = if (left) 6.dp else 0.dp, end = if (left) 0.dp else 6.dp).screenSafe(), pick, tapTarget = paneTarget, sidebar = true)
                 }
             }

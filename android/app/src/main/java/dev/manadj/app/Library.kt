@@ -42,7 +42,7 @@ private val ADDED = DateTimeFormatter.ofPattern("dd MMM")
     LaunchedEffect(ux.filter, ux.selectedRow, ux.path) { ux.saveBrowse() }
     if (sidebar) { SidebarBrowser(model, ux, modifier, pick, tapTarget); return }
     // Hit target over the controls beneath without consuming (a clickable would eat the down and block the sheet drag).
-    Column(modifier.background(Ink.background).pointerInput(Unit) { awaitEachGesture { awaitFirstDown(requireUnconsumed = false) } }.padding(horizontal = 8.dp)) {
+    Column(modifier.then(dev.manadj.app.viz.Glass.clear(Ink.background)).pointerInput(Unit) { awaitEachGesture { awaitFirstDown(requireUnconsumed = false) } }.padding(horizontal = 8.dp)) {
         Row(Modifier.fillMaxWidth().height(40.dp), verticalAlignment = Alignment.CenterVertically) {
             if (tapTarget != null) {
                 Text("LOAD → $tapTarget", color = deckColor(tapTarget), size = 15, bold = true)
@@ -242,7 +242,7 @@ private class BrowseData(val decks: List<DeckId>, val refs: List<Long>, val foll
             rows.forEachIndexed { i, track ->
                 val c = followById?.get(track.id)
                 if (sections && c != null && (i == 0 || followById[rows[i - 1].id]?.label != c.label)) item(key = "section:${c.label}:$i", contentType = "section") {
-                    Text(c.label.uppercase(), Modifier.fillMaxWidth().background(Ink.background).padding(top = 8.dp, bottom = 3.dp, start = 4.dp), if (c.label == "Following") Ink.accent else if (c.tier == EvidenceTier.KNOWN) Ink.play else Ink.muted, 10, true)
+                    Text(c.label.uppercase(), Modifier.fillMaxWidth().background(dev.manadj.app.viz.Glass.chip(Ink.background)).padding(top = 8.dp, bottom = 3.dp, start = 4.dp), if (c.label == "Following") Ink.accent else if (c.tier == EvidenceTier.KNOWN) Ink.play else Ink.muted, 10, true)
                 }
                 item(key = "lib:" + track.id, contentType = "track") {
                     SwipeToLoad(track.title, Modifier.fillMaxWidth(), { ux.loadRow(model, it, track.id) }) {
@@ -310,7 +310,7 @@ private class BrowseData(val decks: List<DeckId>, val refs: List<Long>, val foll
 @Composable private fun SidebarBrowser(model: PlayerModel, ux: UiModel, modifier: Modifier, pick: (DeckId) -> Unit, tapTarget: DeckId?) {
     val node = ux.node
     val data = rememberBrowseData(model, ux, node)
-    BoxWithConstraints(modifier.background(Ink.background).pointerInput(Unit) { awaitEachGesture { awaitFirstDown(requireUnconsumed = false) } }) {
+    BoxWithConstraints(modifier.then(dev.manadj.app.viz.Glass.clear(Ink.background)).pointerInput(Unit) { awaitEachGesture { awaitFirstDown(requireUnconsumed = false) } }) {
         val sideWidth = (maxWidth * .38f).coerceIn(150.dp, 210.dp)
         Row(Modifier.fillMaxSize()) {
             if (ux.browseSidebar) {
@@ -445,7 +445,7 @@ private class BrowseData(val decks: List<DeckId>, val refs: List<Long>, val foll
     val selected = ux.selectedRow == track.id
     // Background + 1dp desktop --surface0 divider in one draw (no extra layout node; scroll-cheap).
     // Black rows on the black browser (UH15): no grey inset cards; dividers separate rows.
-    val bg = if (selected) Ink.accent.copy(alpha = .10f) else Ink.background
+    val bg = if (selected) Ink.accent.copy(alpha = .10f) else if (dev.manadj.app.viz.Glass.on) androidx.compose.ui.graphics.Color.Transparent else Ink.background
     Column(Modifier.fillMaxWidth().drawBehind { drawRect(bg); val t = 1.dp.toPx(); drawRect(Ink.surface0, androidx.compose.ui.geometry.Offset(0f, size.height - t), androidx.compose.ui.geometry.Size(size.width, t)) }.combinedClickable(onLongClickLabel = "Edit track", onLongClick = { if (ux.synced != null) { dev.manadj.app.edit.TrackEditNav.open(track.id.toInt()); ux.editHintSeen = true } }, onClick = tap).padding(top = if (dense) 3.dp else 5.dp, bottom = if (dense) 3.dp else 5.dp, start = 4.dp, end = 24.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             deck?.let { (d, live) -> DeckBadge(d, live); Spacer(Modifier.width(6.dp)) }

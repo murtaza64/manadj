@@ -41,6 +41,8 @@ export interface HostDeck {
 
 export interface HostFrame {
   decks: HostDeck[];
+  /** Frosted-glass panes over the backdrop: [x, y, w, h, radius] in device px relative to the WebView. */
+  panes?: number[][];
 }
 
 /** MWF1 band edges (backend/waveform_data.py, Waveform.kt BAND_EDGES). */

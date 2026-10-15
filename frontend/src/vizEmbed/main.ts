@@ -83,6 +83,47 @@ function resize(): void {
   if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
 }
 
+/**
+ * Frosted glass (VH6): the UI's glass panes sit over this canvas, so blur the canvas's own pixels inside each
+ * pane. One shared blur per frame: downsample ×4 with a small CSS blur (cheap, wide), then draw it back clipped
+ * to the union of the panes' rounded rects.
+ */
+/** Frosted glass (VH6): one absolutely-placed div per UI glass pane with CSS backdrop-filter, so the
+ * compositor blurs the canvas under each pane on the GPU (canvas-to-canvas copies read back from the GPU in
+ * Android WebView: ~14 ms/frame). Divs are reused; only changed rects touch the DOM. */
+const frostLayer = document.createElement('div');
+frostLayer.style.cssText = 'position:fixed;inset:0;pointer-events:none;';
+document.body.appendChild(frostLayer);
+const frostDivs: HTMLDivElement[] = [];
+const frostKeys: string[] = [];
+let frostDownMs = 0;
+const frostDrawMs = 0;
+function frost(panes: number[][]): void {
+  const t0 = performance.now();
+  const dpr = window.devicePixelRatio || 1;
+  for (let i = 0; i < panes.length; i++) {
+    let div = frostDivs[i];
+    if (!div) {
+      div = document.createElement('div');
+      div.style.cssText = 'position:absolute;-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);';
+      frostLayer.appendChild(div);
+      frostDivs.push(div);
+      frostKeys.push('');
+    }
+    const [x, y, w, h, r] = panes[i];
+    const key = `${x},${y},${w},${h},${r}`;
+    if (frostKeys[i] !== key) {
+      frostKeys[i] = key;
+      div.style.left = `${x / dpr}px`; div.style.top = `${y / dpr}px`;
+      div.style.width = `${w / dpr}px`; div.style.height = `${h / dpr}px`;
+      div.style.borderRadius = `${r / dpr}px`;
+      div.style.display = 'block';
+    }
+  }
+  for (let i = panes.length; i < frostDivs.length; i++) if (frostKeys[i] !== '') { frostKeys[i] = ''; frostDivs[i].style.display = 'none'; }
+  frostDownMs += (performance.now() - t0 - frostDownMs) * 0.05;
+}
+
 const SILENT: HostFrame = { decks: [] };
 function pull(): HostFrame {
   try {
@@ -111,6 +152,7 @@ function tick(now: number): void {
   const t1 = performance.now();
   const frame = feed.frameAt(host, dt, current.params);
   current.renderer.render(ctx, canvas.width, canvas.height, frame);
+  frost(host.panes ?? []);
   const t2 = performance.now();
   costAvg += (t2 - t1 - costAvg) * 0.05;
   pullAvg += (t1 - t0 - pullAvg) * 0.05;
@@ -124,7 +166,7 @@ function tick(now: number): void {
   if (now - statsAt > 2000) {
     const fps = (frames * 1000) / (now - statsAt || 1);
     statsAt = now; frames = 0;
-    window.ManadjVizHost?.stats(JSON.stringify({ preset: current.id, renderMs: costAvg, pullMs: pullAvg, fps, w: canvas.width, h: canvas.height }));
+    window.ManadjVizHost?.stats(JSON.stringify({ preset: current.id, renderMs: costAvg, pullMs: pullAvg, frostDownMs, frostDrawMs, fps, w: canvas.width, h: canvas.height }));
   }
 }
 

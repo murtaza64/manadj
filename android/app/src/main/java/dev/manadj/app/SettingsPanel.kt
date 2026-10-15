@@ -27,6 +27,7 @@ enum class SettingsPage(val title: String) {
     TIMING("Quantize & timing"),
     CONTROLS("Controls"),
     DISPLAY("Display"),
+    VISUALIZER("Visualizer"), // android-viz #394 spike
     BROWSER("Browser"),
     OUTPUT("Audio output"),
     FILTER("Filter"),
@@ -117,6 +118,7 @@ private fun summary(page: SettingsPage, model: PlayerModel, ux: UiModel): String
     }
     SettingsPage.CONTROLS -> (if (ux.crossfaderEnabled) "Crossfader on" else "Crossfader off") + " · jog ×%.1f".format(ux.jogSensitivity)
     SettingsPage.DISPLAY -> "Zoom ${ux.waveSeconds.let { if (it >= 1) "%.0f".format(it) else "%.2f".format(it) }} s · previews ${(ux.overviewBrightness * 100 + .5f).toInt()}%"
+    SettingsPage.VISUALIZER -> dev.manadj.app.viz.Viz.summary
     SettingsPage.BROWSER -> when (ux.browseBeside) {
         BrowseBeside.LOADING -> "Beside the loading deck"
         BrowseBeside.PLAYING -> "Beside the playing deck"
@@ -140,6 +142,7 @@ private fun summary(page: SettingsPage, model: PlayerModel, ux: UiModel): String
                     SettingsPage.TIMING -> TimingPage(model, ux)
                     SettingsPage.CONTROLS -> ControlsPage(model, ux)
                     SettingsPage.DISPLAY -> DisplayPage(ux)
+                    SettingsPage.VISUALIZER -> dev.manadj.app.viz.VizSettings()
                     SettingsPage.BROWSER -> BrowserPage(ux)
                     SettingsPage.OUTPUT -> OutputRouting(model)
                     SettingsPage.FILTER -> FilterSettingsPanel(model)

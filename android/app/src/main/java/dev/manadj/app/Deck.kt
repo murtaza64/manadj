@@ -109,7 +109,7 @@ val ControlRow = 44.dp
             if (!set) ux.journalCueWhenSet(model, ui.id, slot)
             ;{ cancelled -> held = false; previewHold = false; slideVisual.release(); if (!cancelled && set && model.gestureActive(id)) model.submit(AudioCommand.HotCueUp(ui.id, slot, id)); model.finishGesture(id, cancelled) }
         }
-    }.padding(3.dp).graphicsLayer { scaleX = scale; scaleY = scale }.background(Ink.panel).background(tint.copy(alpha = if (stored != null) .1f + .5f * lit else .5f * lit)).slideLockDraw(slideVisual, idle = ready && stored != null && !shift).border(if (stored != null) 1.5.dp else 1.dp, tint.copy(alpha = if (stored != null) 1f else .45f)), contentAlignment = Alignment.Center) {
+    }.padding(3.dp).graphicsLayer { scaleX = scale; scaleY = scale }.then(dev.manadj.app.viz.Glass.fill(Ink.panel, 0f)).background(tint.copy(alpha = if (stored != null) .1f + .5f * lit else .5f * lit)).slideLockDraw(slideVisual, idle = ready && stored != null && !shift).border(if (stored != null) 1.5.dp else 1.dp, tint.copy(alpha = if (stored != null) 1f else .45f)), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text("${slot + 1}", color = if (lit > .5f) Ink.text else tint, size = 15, bold = true)
             if (shift && stored != null) Text("DEL", color = Ink.warning, size = 9, bold = true)
@@ -141,7 +141,7 @@ val ControlRow = 44.dp
             held = true; haptic.performHapticFeedback(HapticFeedbackType.VirtualKey); model.submit(AudioCommand.CueDown(ui.id, id)); slideVisual.hold(scope)
             ;{ cancelled -> held = false; slideVisual.release(); if (!cancelled && model.gestureActive(id)) model.submit(AudioCommand.CueUp(ui.id, id)); model.finishGesture(id, cancelled) }
         }
-    }.padding(4.dp).graphicsLayer { scaleX = scale; scaleY = scale }.clip(shape).background(Ink.panel).background(Ink.warning.copy(alpha = .9f * heat)).slideLockDraw(slideVisual, shape, idle = ready).border(2.dp, tint, shape), contentAlignment = Alignment.Center) {
+    }.padding(4.dp).graphicsLayer { scaleX = scale; scaleY = scale }.clip(shape).then(dev.manadj.app.viz.Glass.fill(Ink.panel, dev.manadj.app.viz.Glass.PILL)).background(Ink.warning.copy(alpha = .9f * heat)).slideLockDraw(slideVisual, shape, idle = ready).border(2.dp, tint, shape), contentAlignment = Alignment.Center) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
             // Same metrics as PLAY (Key: icon textSize+3, label textSize 15).
             GlyphIcon(Glyph.Cue, if (held) Color.Black else tint, 18.dp)
@@ -169,7 +169,7 @@ val ControlRow = 44.dp
 /** One outline around adjacent segments; hairline dividers instead of doubled borders (round-5). */
 @Composable fun Segmented(modifier: Modifier, color: Color, content: @Composable RowScope.() -> Unit) {
     val shape = RoundedCornerShape(50)
-    Row(modifier.padding(3.dp).clip(shape).background(Ink.panel).border(1.5.dp, color.copy(alpha = .7f), shape), verticalAlignment = Alignment.CenterVertically, content = content)
+    Row(modifier.padding(3.dp).clip(shape).then(dev.manadj.app.viz.Glass.fill(Ink.panel, dev.manadj.app.viz.Glass.PILL)).border(1.5.dp, color.copy(alpha = .7f), shape), verticalAlignment = Alignment.CenterVertically, content = content)
 }
 @Composable fun RowScope.Divider(color: Color) { Box(Modifier.width(1.dp).fillMaxHeight(.6f).background(color.copy(alpha = .45f))) }
 
@@ -336,7 +336,7 @@ val StripEnd = 48.dp
             finally { ux.shiftHeld[deck] = false }
             if (up - start < 250) ux.shiftLatched[deck] = !wasLatched else ux.shiftLatched[deck] = false
         }
-    }.padding(vertical = 2.dp).clip(shape).background(if (on) Ink.warning else Ink.panel).border(1.5.dp, Ink.warning, shape), contentAlignment = Alignment.Center) {
+    }.padding(vertical = 2.dp).clip(shape).then(if (on) Modifier.background(Ink.warning) else dev.manadj.app.viz.Glass.fill(Ink.panel, dev.manadj.app.viz.Glass.PILL)).border(1.5.dp, Ink.warning, shape), contentAlignment = Alignment.Center) {
         Text("SHIFT", color = if (on) Color.Black else Ink.warning, size = 10, bold = true)
     }
 }
@@ -465,7 +465,7 @@ fun effectiveBpm(ui: DeckUi, model: PlayerModel): Double? {
     val key = deckOpenKey(ui, model, ux)
     val bpmText = bpm?.let { "%.1f".format(it) } ?: "—"
     val keyText = key ?: "—"
-    Box(modifier.clip(RoundedCornerShape(4.dp)).background(Ink.crust.copy(alpha = .85f)).padding(horizontal = 4.dp, vertical = 1.dp)) {
+    Box(modifier.clip(RoundedCornerShape(4.dp)).then(dev.manadj.app.viz.Glass.fill(Ink.crust.copy(alpha = .85f), 4f)).padding(horizontal = 4.dp, vertical = 1.dp)) {
         if (stacked) Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text(bpmText, color = bpmColor(bpm) ?: Ink.muted, size = 12, bold = true)
             Text(keyText, color = keyColor(key) ?: Ink.muted, size = 12, bold = true)

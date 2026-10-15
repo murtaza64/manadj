@@ -12,6 +12,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInWindow
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import dev.manadj.app.*
@@ -52,6 +54,8 @@ object Viz {
         hud = sp.getBoolean("hud", false); gainDb = sp.getFloat("gain-db", 0f)
     }
     fun init(context: Context) { p(context) }
+    /** Settings group-list summary line. */
+    val summary: String get() = if (!enabled) "Off" else PRESETS.firstOrNull { it.first == preset }?.second ?: preset
     fun set(context: Context, enabled: Boolean = this.enabled, preset: String = this.preset, brightness: Float = this.brightness,
             scale: Float = this.scale, fps: Int = this.fps, hud: Boolean = this.hud, gainDb: Float = this.gainDb) {
         this.enabled = enabled; this.preset = preset; this.brightness = brightness.coerceIn(.1f, 1f); this.scale = scale; this.fps = fps
@@ -97,7 +101,9 @@ class VizHost(private val model: PlayerModel, private val ux: UiModel) {
                 .append(",\"eq\":[").append(s.eq.getOrElse(0) { .5 }).append(',').append(s.eq.getOrElse(1) { .5 }).append(',').append(s.eq.getOrElse(2) { .5 })
                 .append("],\"fader\":").append(s.fader).append(",\"trackId\":").append(dev.manadj.app.library.LibraryHolder.trackOn(model, id) ?: "null").append('}')
         }
-        return j.append("]}").toString()
+        j.append("],\"panes\":")
+        if (Glass.on) Glass.panesJson(j) else j.append("[]")
+        return j.append('}').toString()
     }
 
     @JavascriptInterface fun stats(json: String) {
@@ -164,7 +170,7 @@ class VizHost(private val model: PlayerModel, private val ux: UiModel) {
             loadUrl("file:///android_asset/viz/index.html")
             view = this
         }
-    }, modifier)
+    }, modifier.onGloballyPositioned { c -> val p = c.positionInWindow(); Glass.origin = floatArrayOf(p.x, p.y) })
 }
 
 /** Settings › Visualizer (one call from SettingsSheet). */

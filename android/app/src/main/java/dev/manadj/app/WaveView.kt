@@ -170,7 +170,7 @@ fun marksOf(ui: DeckUi) = ui.snapshot.let { s -> WaveMarks(s?.cueSeconds, ui.hot
     var cache by remember { mutableStateOf<Triple<WaveformData, IntSize2, ImageBitmap>?>(null) }
     var overviewStyle by remember { mutableStateOf<WaveStyle?>(null) }
     var overviewDim by remember { mutableFloatStateOf(-1f) }
-    Box(modifier.clipToBounds().background(Ink.background)) {
+    Box(modifier.clipToBounds().then(dev.manadj.app.viz.Glass.scrim(Ink.background, vertical, overview))) {
         Canvas(Modifier.fillMaxSize()) {
             val along = if (vertical) size.height else size.width
             val across = if (vertical) size.width else size.height
@@ -192,9 +192,11 @@ fun marksOf(ui: DeckUi) = ui.snapshot.let { s -> WaveMarks(s?.cueSeconds, ui.hot
                     val mask = if (stemWave != null) live().stems else ALL_STEMS
                     val body = (if (mask != ALL_STEMS) stemWave?.invoke(mask) else null) ?: data
                     val image = if (c != null && c.first === body && c.second == key && overviewStyle === style && overviewDim == k) c.third else renderOverview(body, key, dur, vertical, style, k).also { cache = Triple(body, key, it); overviewStyle = style; overviewDim = k }
-                    drawImage(image)
                     val p = at(pos).coerceIn(0f, along)
-                    drawRect(Color.Black.copy(alpha = .5f), Offset.Zero, if (vertical) Size(size.width, p) else Size(p, size.height))
+                    if (!dev.manadj.app.viz.Glass.drawOverview(this, image, p, vertical)) { // backdrop: dim the played waveform only, not the lane
+                        drawImage(image)
+                        drawRect(Color.Black.copy(alpha = .5f), Offset.Zero, if (vertical) Size(size.width, p) else Size(p, size.height))
+                    }
                 } else {
                     // Columns live in absolute track coordinates (column k always covers the same audio) and
                     // the body translates by a whole-pixel offset: pixel-consistent scrolling, no resampling.
