@@ -306,7 +306,11 @@ export function MidiFeedbackBridge() {
   const onNeedsB = useCallback((needs: boolean) => setNeedsB(needs), []);
   const onNeedsC = useCallback((needs: boolean) => setNeedsC(needs), []);
   const onNeedsD = useCallback((needs: boolean) => setNeedsD(needs), []);
-  const clockNow = useBlinkClock(needsA || needsB || needsC || needsD);
+  // No controller output, no lamps: the clock (a 20 Hz re-render of every
+  // publisher, in every view, whenever a loaded deck is paused) idles until
+  // an output connects (desktop-perf #385).
+  const outputs = useSyncExternalStore(subscribeOutputs, connectedOutputs);
+  const clockNow = useBlinkClock(outputs.length > 0 && (needsA || needsB || needsC || needsD));
   return (
     <>
       <DeckScope deck="A">
