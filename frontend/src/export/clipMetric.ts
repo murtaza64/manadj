@@ -31,19 +31,63 @@ export interface TrackMetricInput {
   drops?: { time: number; strength: number }[] | null;
   /** Metric-ladder reset marks (track seconds). */
   resetMarks?: number[] | null;
+  /** Low-band amplitude over the track (drop inference when no hot cue 4). */
+  lowBand?: { values: Float32Array; duration: number } | null;
 }
 
 export interface TrackMetric {
   beatTimes: number[];
   /** Beat ordinal (into beatTimes) of the phrase anchor. */
   anchorBeat: number;
-  anchorSource: 'hotcue4' | 'ladder' | 'downbeat' | 'beat';
+  anchorSource: 'hotcue4' | 'inferred' | 'ladder' | 'downbeat' | 'beat';
   /** Track-seconds of drops (sorted). */
   dropSecs: number[];
 }
 
 export const PHRASE_BARS = 16;
+
+/** Build-up progress 0..1 through the `bars` bars before the next drop
+ * (eased: slow start, steep at the end); 0 outside a build. */
+export function buildUpAt(drops: readonly number[], t: number, barSec: number, bars = 16): number {
+  let next = Infinity;
+  for (const d of drops) if (d > t && d < next) next = d;
+  const span = barSec * bars;
+  if (!Number.isFinite(next) || next - t > span) return 0;
+  return Math.pow(1 - (next - t) / span, 1.6);
+}
+
 const DROP_STRENGTH_MIN = 0.6;
+const INFER_RATIO = 1.6;
+
+/** Drops from energy: 8-bar boundaries (on the beat grid from `origin`)
+ * where the low band's mean over the next 8 bars jumps ≥ INFER_RATIO× the
+ * previous 8 and reaches ≥ 70 % of the track's loudest 8 bars; later drops
+ * at least 32 bars on. */
+export function inferDrops(beats: number[], origin: number, low: { values: Float32Array; duration: number }): number[] {
+  const n = low.values.length;
+  if (n < 16 || beats.length < 64) return [];
+  const meanBetween = (a: number, b: number): number => {
+    const i0 = Math.max(0, Math.floor((a / low.duration) * n));
+    const i1 = Math.min(n, Math.ceil((b / low.duration) * n));
+    let sum = 0;
+    for (let i = i0; i < i1; i++) sum += low.values[i];
+    return i1 > i0 ? sum / (i1 - i0) : 0;
+  };
+  const span = 32; // 8 bars of beats
+  const first = origin % span;
+  const blocks: { at: number; mean: number }[] = [];
+  for (let b = first; b + span < beats.length; b += span) blocks.push({ at: beats[b], mean: meanBetween(beats[b], beats[b + span]) });
+  const peak = blocks.reduce((m, x) => Math.max(m, x.mean), 0);
+  if (peak <= 0) return [];
+  const out: number[] = [];
+  for (let i = 1; i < blocks.length; i++) {
+    const { at, mean } = blocks[i];
+    if (mean < 0.7 * peak || mean < INFER_RATIO * blocks[i - 1].mean) continue;
+    if (out.length > 0 && at - out[out.length - 1] < (beats[span * 4] ?? Infinity) - beats[0]) continue;
+    out.push(at);
+  }
+  return out;
+}
 
 export function buildTrackMetric(input: TrackMetricInput): TrackMetric | null {
   const beats = input.beatTimes;
@@ -68,6 +112,14 @@ export function buildTrackMetric(input: TrackMetricInput): TrackMetric | null {
     if (!dropSecs.some((x) => Math.abs(x - at) < 1)) dropSecs.push(at);
   }
   dropSecs.sort((a, b) => a - b);
+  // No hot cue 4 and no strong hypothesis: infer from the low band, and
+  // anchor the phrase lattice on the first inferred drop.
+  if (dropSecs.length === 0 && anchorSource !== 'hotcue4' && input.lowBand) {
+    const inferred = inferDrops(beats, anchorBeat, input.lowBand);
+    if (inferred.length > 0) {
+      return { beatTimes: beats, anchorBeat: Math.round(beatIndexAt(beats, inferred[0]) ?? anchorBeat), anchorSource: 'inferred', dropSecs: inferred };
+    }
+  }
   return { beatTimes: beats, anchorBeat, anchorSource, dropSecs };
 }
 

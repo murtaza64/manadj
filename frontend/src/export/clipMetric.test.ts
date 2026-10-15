@@ -1,7 +1,7 @@
 import { defaultClipSpec, lookAt } from './clipSpec';
 import { describe, expect, it } from 'vitest';
 import type { PlannedRoutine } from '../sets/routinePlan';
-import { autoVizCues, barTier, buildClipMetric, buildTrackMetric, DEFAULT_AUTO_VIZ, metricAt } from './clipMetric';
+import { autoVizCues, barTier, buildClipMetric, buildTrackMetric, DEFAULT_AUTO_VIZ, inferDrops, metricAt } from './clipMetric';
 
 // 120 BPM: a beat every 0.5 s, 400 beats.
 const beatTimes = Array.from({ length: 400 }, (_, i) => 1 + i * 0.5);
@@ -71,5 +71,26 @@ describe('clip metric', () => {
     const end = lookAt(spec, 179);
     expect(end).toMatchObject({ showKnobs: false, showPlayhead: false });
     expect(end.vizDim).toBeLessThan(0.12);
+  });
+});
+
+describe('inferDrops', () => {
+  // 174 BPM, 128 bars; quiet intro (32 bars), drop at bar 32, breakdown at
+  // bar 64, second drop at bar 96.
+  const spb = 60 / 174;
+  const beats = Array.from({ length: 512 }, (_, i) => i * spb);
+  const duration = 512 * spb;
+  const values = new Float32Array(2000).map((_, i) => {
+    const bar = (i / 2000) * 128;
+    return (bar >= 32 && bar < 64) || bar >= 96 ? 0.9 : 0.25;
+  });
+  it('finds the energy jumps on 8-bar boundaries', () => {
+    const drops = inferDrops(beats, 0, { values, duration });
+    expect(drops.map((d) => Math.round(d / spb / 4))).toEqual([32, 96]);
+  });
+  it('anchors the lattice on the first inferred drop when nothing else is known', () => {
+    const m = buildTrackMetric({ beatTimes: beats, downbeatTimes: [], hotCues: [], lowBand: { values, duration } });
+    expect(m?.anchorSource).toBe('inferred');
+    expect(m?.anchorBeat).toBe(128);
   });
 });

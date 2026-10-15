@@ -3,9 +3,10 @@
  * presence envelopes (post-fader level), drops, 16-bar phrase ticks of the
  * dominant track, the visualizer cues as flags, the clip's in/out handles
  * and the preview playhead. Drag a handle to trim, drag a flag to move a
- * cue, click/drag anywhere else to scrub.
+ * cue, click/drag anywhere else to scrub. Wheel / pinch zooms around the
+ * pointer, horizontal wheel or shift+wheel pans, double-click shows all.
  */
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { PlannedRoutine, RoutineDeck } from '../sets/routinePlan';
 import { DECK_COLORS } from '../theme/deckColors';
 import { ROUTINE_ACCENT } from '../theme/routineColor';
@@ -39,6 +40,9 @@ const FLAG_H = 26;
 const LANE_H = 16;
 const PAD_X = 12;
 const HANDLE_HIT = 8;
+const MIN_VIEW_SEC = 6;
+/** Ruler step: the smallest of these leaving ≥ 60 px between labels. */
+const RULER_STEPS = [1, 2, 5, 10, 15, 30, 60, 120, 300];
 
 const presetName = (id: string): string => EXPORT_PRESETS.find((p) => p.id === id)?.name ?? id;
 
@@ -52,15 +56,62 @@ export function ClipTimeline(props: Props) {
   const decks = sceneDecks(props.routine);
   const height = RULER_H + FLAG_H + decks.length * (LANE_H + 4) + 14;
   const dragRef = useRef<{ kind: 'in' | 'out' | 'cue' | 'seek'; cue?: number } | null>(null);
+  // Visible window (null = the whole source).
+  const [view, setView] = useState<{ startSec: number; endSec: number } | null>(null);
+  const viewRef = useRef(view);
+  useEffect(() => { viewRef.current = view; });
+  const clampView = (v: { startSec: number; endSec: number }, full = propsRef.current.full) => {
+    const fullSpan = full.endSec - full.startSec;
+    const span = Math.max(MIN_VIEW_SEC, Math.min(fullSpan, v.endSec - v.startSec));
+    if (span >= fullSpan - 1e-3) return null;
+    const start = Math.max(full.startSec, Math.min(full.endSec - span, v.startSec));
+    return { startSec: start, endSec: start + span };
+  };
 
-  // Geometry helpers bound to the current width.
+  // Geometry helpers bound to the current width and view.
   const geom = (w: number) => {
     const { full } = propsRef.current;
-    const span = Math.max(1, full.endSec - full.startSec);
-    const xOf = (sec: number) => PAD_X + ((sec - full.startSec) / span) * (w - PAD_X * 2);
-    const secOf = (x: number) => full.startSec + ((x - PAD_X) / (w - PAD_X * 2)) * span;
+    const v = viewRef.current ?? full;
+    const span = Math.max(1, v.endSec - v.startSec);
+    const xOf = (sec: number) => PAD_X + ((sec - v.startSec) / span) * (w - PAD_X * 2);
+    const secOf = (x: number) => v.startSec + ((x - PAD_X) / (w - PAD_X * 2)) * span;
     return { xOf, secOf };
   };
+
+  // Keep the playhead in view: page forward when it runs off the edge
+  // (adjusted during render when t changes, not in an effect).
+  const [followT, setFollowT] = useState(props.t);
+  if (props.t !== followT) {
+    setFollowT(props.t);
+    if (view && (props.t > view.endSec || props.t < view.startSec)) {
+      const span = view.endSec - view.startSec;
+      setView(clampView({ startSec: props.t - span * 0.1, endSec: props.t + span * 0.9 }, props.full));
+    }
+  }
+
+  // Wheel: zoom (vertical / pinch) around the pointer, pan (horizontal / shift).
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const { full } = propsRef.current;
+      const v = viewRef.current ?? full;
+      const span = v.endSec - v.startSec;
+      const w = canvas.clientWidth;
+      const pan = e.shiftKey ? e.deltaY || e.deltaX : Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : 0;
+      if (pan) {
+        setView(clampView({ startSec: v.startSec + (pan / w) * span, endSec: v.endSec + (pan / w) * span }));
+        return;
+      }
+      const rect = canvas.getBoundingClientRect();
+      const k = Math.exp(e.deltaY * (e.ctrlKey ? 0.01 : 0.002));
+      const at = v.startSec + ((e.clientX - rect.left - PAD_X) / (w - PAD_X * 2)) * span;
+      setView(clampView({ startSec: at - (at - v.startSec) * k, endSec: at + (v.endSec - at) * k }));
+    };
+    canvas.addEventListener('wheel', onWheel, { passive: false });
+    return () => canvas.removeEventListener('wheel', onWheel);
+  }, []);
 
   // Paint
   useEffect(() => {
@@ -76,14 +127,18 @@ export function ClipTimeline(props: Props) {
     if (!ctx) return;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     const { routine, full, range, t, metric, cues, selectedCue } = props;
-    const { xOf } = geom(w);
+    const { xOf, secOf } = geom(w);
+    const v = view ?? full;
     ctx.fillStyle = CRUST;
     ctx.fillRect(0, 0, w, height);
     ctx.font = `11px ${FONT_MONO}`;
     ctx.textBaseline = 'middle';
-    // Ruler: every 30 s
+    // Ruler
     ctx.fillStyle = OVERLAY0;
-    for (let s = Math.ceil(full.startSec / 30) * 30; s <= full.endSec; s += 30) {
+    const pxPerSec = (w - PAD_X * 2) / Math.max(1, v.endSec - v.startSec);
+    const step = RULER_STEPS.find((x) => x * pxPerSec >= 60) ?? 600;
+    const s0 = full.startSec + Math.ceil((v.startSec - full.startSec) / step) * step;
+    for (let s = s0; s <= v.endSec; s += step) {
       const x = Math.round(xOf(s));
       ctx.fillRect(x, RULER_H - 6, 1, 6);
       const rel = s - full.startSec;
@@ -97,7 +152,7 @@ export function ClipTimeline(props: Props) {
       ctx.fillRect(PAD_X, y, w - PAD_X * 2, LANE_H);
       ctx.fillStyle = DECK_COLORS[deck];
       for (let x = PAD_X; x < w - PAD_X; x++) {
-        const sec = full.startSec + ((x - PAD_X) / (w - PAD_X * 2)) * (full.endSec - full.startSec);
+        const sec = secOf(x);
         let lv = 0;
         routine.slots.forEach((s, i) => {
           if (s.deck !== deck || sec < s.occupyFromMixSec) return;
@@ -113,6 +168,10 @@ export function ClipTimeline(props: Props) {
       ctx.fillText(deck, 1, y + LANE_H / 2);
     });
     const lanesBottom = lanesY + decks.length * (LANE_H + 4);
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(PAD_X - 6, 0, w - PAD_X * 2 + 12, height);
+    ctx.clip();
     // Hypermeter: dominant 16-bar phrases (faint), drops (danger)
     for (const e of metric?.events ?? []) {
       const x = Math.round(xOf(e.t));
@@ -213,6 +272,17 @@ export function ClipTimeline(props: Props) {
     // Playhead
     ctx.fillStyle = PLAYHEAD;
     ctx.fillRect(Math.round(xOf(t)) - 1, 0, 2, height);
+    ctx.restore();
+    // Zoomed: where the view sits in the source.
+    if (view) {
+      const span = full.endSec - full.startSec;
+      const bx = PAD_X + ((view.startSec - full.startSec) / span) * (w - PAD_X * 2);
+      const bw = Math.max(6, ((view.endSec - view.startSec) / span) * (w - PAD_X * 2));
+      ctx.fillStyle = SURFACE0;
+      ctx.fillRect(PAD_X, height - 3, w - PAD_X * 2, 3);
+      ctx.fillStyle = ROUTINE_ACCENT;
+      ctx.fillRect(bx, height - 3, bw, 3);
+    }
   });
 
   const hit = (x: number, y: number) => {
@@ -271,6 +341,8 @@ export function ClipTimeline(props: Props) {
       onPointerDown={(e) => onPointer(e, 'down')}
       onPointerMove={(e) => onPointer(e, 'move')}
       onPointerUp={(e) => onPointer(e, 'up')}
+      onDoubleClick={() => setView(null)}
+      title="wheel / pinch: zoom · shift+wheel: pan · double-click: show all"
     />
   );
 }

@@ -53,6 +53,8 @@ declare global {
       seek: (clipSec: number) => void;
       /** The source's structure for authoring (headless): slots, hypermeter events, takeovers. */
       structure: () => unknown;
+      /** Replace the spec in place (headless authoring: no reload, no re-render of the audio). */
+      setSpec: (spec: ClipSpec) => void;
     };
   }
 }
@@ -76,6 +78,7 @@ const TRANSITIONS: { id: CueTransitionKind; label: string; title: string }[] = [
 const VFX: { id: TransitionVfx; label: string }[] = [
   { id: 'rgb', label: 'RGB SPLIT' }, { id: 'glitch', label: 'GLITCH' }, { id: 'kaleido', label: 'KALEIDO' },
   { id: 'mirror', label: 'MIRROR' }, { id: 'invert', label: 'INVERT' }, { id: 'tunnel', label: 'TUNNEL' }, { id: 'strobe', label: 'STROBE' },
+  { id: 'chop', label: 'FADER CHOP' }, { id: 'freeze', label: 'FREEZE' }, { id: 'rise', label: 'RISE' }, { id: 'shake', label: 'SHAKE' },
 ];
 type Tab = 'storyboard' | 'scene' | 'look' | 'output';
 
@@ -232,10 +235,10 @@ export default function ClipEditorView() {
     loaded.scene.range = r;
     let background: { canvas: HTMLCanvasElement; alpha: number }[] | undefined;
     if (rendered) {
-      const key = `${r.startSec}:${rendered.startSec}`;
+      const key = `${r.startSec}:${rendered.startSec}:${spec.width > spec.height}`;
       if (!programmeRef.current || programmeRef.current.key !== key) {
         programmeRef.current?.programme.dispose();
-        programmeRef.current = { key, programme: new BackgroundProgramme(rendered.meters, loaded.routine, r, loaded.scene.metric, rendered.startSec) };
+        programmeRef.current = { key, programme: new BackgroundProgramme(rendered.meters, loaded.routine, r, loaded.scene.metric, rendered.startSec, spec.width > spec.height) };
       }
       background = programmeRef.current.programme.at(spec, t, 1 / 30);
       // Thumbnail the running preset the first time it is seen.
@@ -340,7 +343,10 @@ export default function ClipEditorView() {
       const rel = (t: number) => Math.round((t - range.startSec) * 100) / 100;
       return {
         range, secPerBeat: loaded.routine.secPerBeat,
-        slots: loaded.routine.slots.map((sl, i) => ({ i, deck: sl.deck, title: loaded.scene.tracks.get(sl.trackId)?.title, entry: rel(sl.entryMixSec) })),
+        slots: loaded.routine.slots.map((sl, i) => {
+          const tm = m?.tracks.get(sl.trackId);
+          return { i, deck: sl.deck, trackId: sl.trackId, title: loaded.scene.tracks.get(sl.trackId)?.title, entry: rel(sl.entryMixSec), anchor: tm?.anchorSource, drops: tm?.dropSecs.map((x) => Math.round(x * 10) / 10) };
+        }),
         events: (m?.events ?? []).filter((e) => e.tier >= 3 || e.drop).map((e) => ({ s: rel(e.t), slot: e.slot, tier: e.tier, drop: e.drop, dominant: e.dominant, level: Math.round(e.level * 100) / 100 })),
         takeovers: (m?.takeovers ?? []).map((x) => ({ s: rel(x.t), slot: x.slot })),
         actions: loaded.scene.actions.map((a) => ({ s: rel(loaded.routine.beatOriginMixSec + a.beat * loaded.routine.secPerBeat), slot: a.slot, kind: a.kind, label: a.label })),
@@ -352,6 +358,7 @@ export default function ClipEditorView() {
   useEffect(() => {
     window.manadjClipEditor = {
       run: () => runRef.current(), state: () => stateRef.current, seek: (s) => seekRef.current(s), structure: () => structureRef.current(),
+      setSpec: (next) => setSpec(parseClipSpecFile(clipSpecFile(next))),
     };
   }, []);
   useEffect(() => {
@@ -474,10 +481,11 @@ export default function ClipEditorView() {
     const timer = setTimeout(() => {
       void (async () => {
         const r = range;
-        const programme = new BackgroundProgramme(rendered.meters, loaded.routine, r, loaded.scene.metric, rendered.startSec);
+        const wide = spec.width > spec.height;
+        const programme = new BackgroundProgramme(rendered.meters, loaded.routine, r, loaded.scene.metric, rendered.startSec, wide);
         const canvas = document.createElement('canvas');
-        canvas.width = 108;
-        canvas.height = 192;
+        canvas.width = wide ? 192 : 108;
+        canvas.height = wide ? 108 : 192;
         const ctx = canvas.getContext('2d');
         if (!ctx) return;
         const out = new Map(sceneThumbs);
@@ -492,7 +500,7 @@ export default function ClipEditorView() {
           const pf = programmeFrame(spec, job.at, r.endSec - r.startSec);
           loaded.scene.look = pf.look;
           loaded.scene.range = r;
-          drawRoutineFrame(ctx, loaded.scene, t, 108, 192, { background, fade: 1, impact: null, overlay: pf.overlay });
+          drawRoutineFrame(ctx, loaded.scene, t, canvas.width, canvas.height, { background, fade: 1, impact: null, overlay: pf.overlay });
           out.set(job.key, canvas.toDataURL('image/jpeg', 0.7));
           changed = true;
           await new Promise((res) => setTimeout(res, 0));
@@ -632,7 +640,7 @@ export default function ClipEditorView() {
       {/* ── Preview + inspector ── */}
       <div className="ce-body">
         <div className="ce-stage">
-          <canvas ref={previewRef} width={540} height={960} className="ce-preview" />
+          <canvas ref={previewRef} width={spec && spec.width > spec.height ? 960 : 540} height={spec && spec.width > spec.height ? 540 : 960} className={`ce-preview${spec && spec.width > spec.height ? ' ce-preview-wide' : ''}`} />
           {!source && <div className="ce-empty">Pick a Routine, Transition, Take or Session span.</div>}
           {source && !rendered && !loadError && (
             <div className="ce-empty">
@@ -844,6 +852,11 @@ export default function ClipEditorView() {
                     <span className="ce-muted">fps</span>
                     {[30, 60].map((f) => <button key={f} className={`btn btn-mini${spec.fps === f ? ' btn-selected' : ''}`} onClick={() => update({ fps: f })}>{f}</button>)}
                     <span className="ce-muted">{spec.width}×{spec.height} · H.264 + AAC</span>
+                  </div>
+                  <div className="ce-seg">
+                    <span className="ce-muted">frame</span>
+                    <button className={`btn btn-mini${spec.width < spec.height ? ' btn-selected' : ''}`} onClick={() => update({ width: 1080, height: 1920 })}>PORTRAIT</button>
+                    <button className={`btn btn-mini${spec.width > spec.height ? ' btn-selected' : ''}`} onClick={() => update({ width: 1920, height: 1080 })}>LANDSCAPE</button>
                   </div>
                   {progress && exporting && (
                     <div data-testid="export-progress">

@@ -23,7 +23,7 @@ import type { PlannedRoutine } from '../sets/routinePlan';
 import { routineSlotStateAt, slotLanesAt, slotOccupyingDeckAt, ROUTINE_DECK_ORDER } from '../sets/routinePlan';
 import type { RenderMeters } from './routineAudioRender';
 import { meterLevel } from './meterMath';
-import type { ClipMetric } from './clipMetric';
+import { buildUpAt, type ClipMetric } from './clipMetric';
 
 /** Registered presets plus the two "materia" candidates the review asked for. */
 export const EXPORT_PRESETS: VisualizerPreset[] = [...PRESETS, g02MateriaPreset, g05MateriaMercuryPreset];
@@ -200,6 +200,9 @@ export function createOfflineVisualizerFeed(
         const age = t - lastDrop;
         reg = { ...reg, dropTransition: Math.max(reg.dropTransition, Math.exp(-age * 1.2)), dropAgeS: Math.min(reg.dropAgeS, age) };
       }
+      // ...and the 16 bars before one are its build-up, whatever the energy says.
+      const build = buildUpAt(drops, t, routine.secPerBeat * 4);
+      if (reg && build > 0) reg = { ...reg, buildup: Math.max(reg.buildup, build), sustained: reg.sustained * (1 - build) };
       return {
         bands, bandsSlow, spectrum, wave: null,
         beat: beatInfo,

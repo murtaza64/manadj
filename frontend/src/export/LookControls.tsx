@@ -26,12 +26,12 @@ const HUD_SOURCES: { id: ClipLook['hudSource']; label: string; title: string }[]
   { id: 'bass', label: 'BASS', title: 'Follows the low band, beat-shaped' },
   { id: 'off', label: 'OFF', title: 'Controls stay still' },
 ];
-type NumKey = 'glow' | 'vizOpacity' | 'vizDim' | 'vignette' | 'infoShade' | 'beatPulse' | 'impactStrength' | 'waveZoomSec' | 'hudAmount' | 'wavePulse' | 'dropBoost';
+type NumKey = 'glow' | 'vizOpacity' | 'vizDim' | 'vignette' | 'infoShade' | 'beatPulse' | 'impactStrength' | 'waveZoomSec' | 'hudAmount' | 'wavePulse' | 'dropBoost' | 'buildUp';
 const VIZ_SLIDERS: [NumKey, string, number, number, number][] = [
   ['vizOpacity', 'visualizer', 0, 1, 0.05], ['vizDim', 'darken', 0, 1, 0.05], ['vignette', 'vignette', 0, 1, 0.05], ['glow', 'glow', 0, 1, 0.05],
 ];
 const MOTION_SLIDERS: [NumKey, string, number, number, number][] = [
-  ['beatPulse', 'zoom pulse', 0, 1, 0.05], ['impactStrength', 'impacts', 0, 1, 0.05], ['waveZoomSec', 'wave zoom s', 2, 16, 0.5], ['infoShade', 'controls shade', 0, 1, 0.05],
+  ['beatPulse', 'zoom pulse', 0, 1, 0.05], ['impactStrength', 'impacts', 0, 1, 0.05], ['waveZoomSec', 'wave zoom s', 2, 16, 0.5], ['infoShade', 'controls shade', 0, 1, 0.05], ['buildUp', 'build-up', 0, 1, 0.05],
 ];
 const RESPONSE_SLIDERS: [NumKey, string, number, number, number][] = [
   ['hudAmount', 'controls', 0, 2, 0.05], ['wavePulse', 'waveforms', 0, 1, 0.05], ['dropBoost', 'drop boost', 0, 2, 0.05],
@@ -105,6 +105,44 @@ export function LookControls({ look, onChange, overrides, onClear, onCaption, ch
             {ovrX('deckVisibility')}
             <span className="ce-muted">decks</span>
             {(['audible', 'all'] as const).map((v) => <button key={v} className={`btn btn-mini${look.deckVisibility === v ? ' btn-selected' : ''}`} onClick={() => onChange({ deckVisibility: v })}>{v.toUpperCase()}</button>)}
+          </span>
+        </div>
+        <div className="ce-seg">
+          <span className={`ce-seg${ovr('deckLayout')}`}>
+            {ovrX('deckLayout')}
+            <span className="ce-muted">layout</span>
+            {(['stack', 'side', 'grid', 'spotlight', 'vertical', 'mirror'] as const).map((v) => <button key={v} className={`btn btn-mini${look.deckLayout === v ? ' btn-selected' : ''}`} onClick={() => onChange({ deckLayout: v })}>{v.toUpperCase()}</button>)}
+          </span>
+          <span className={`ce-seg${ovr('deckView')}`}>
+            {ovrX('deckView')}
+            <span className="ce-muted">view</span>
+            {(['wave', 'bars', 'ring', 'none'] as const).map((v) => <button key={v} className={`btn btn-mini${look.deckView === v ? ' btn-selected' : ''}`} onClick={() => onChange({ deckView: v })}>{v.toUpperCase()}</button>)}
+          </span>
+        </div>
+        <div className="ce-seg">
+          <span className={`ce-seg${ovr('fontFace')}`}>
+            {ovrX('fontFace')}
+            <span className="ce-muted">font</span>
+            {(['mono', 'sf', 'avenir', 'newyork'] as const).map((v) => <button key={v} className={`btn btn-mini${look.fontFace === v ? ' btn-selected' : ''}`} onClick={() => onChange({ fontFace: v })}>{v.toUpperCase()}</button>)}
+          </span>
+        </div>
+        <div className="ce-seg">
+          <span className={`ce-seg${ovr('controlStyle')}`}>
+            {ovrX('controlStyle')}
+            <span className="ce-muted">controls</span>
+            {(['knobs', 'sliders'] as const).map((v) => <button key={v} className={`btn btn-mini${look.controlStyle === v ? ' btn-selected' : ''}`} onClick={() => onChange({ controlStyle: v })}>{v.toUpperCase()}</button>)}
+          </span>
+          <span className={`ce-seg${ovr('levelStyle')}`}>
+            {ovrX('levelStyle')}
+            <span className="ce-muted">levels</span>
+            {(['bar', 'segments'] as const).map((v) => <button key={v} className={`btn btn-mini${look.levelStyle === v ? ' btn-selected' : ''}`} onClick={() => onChange({ levelStyle: v })}>{v.toUpperCase()}</button>)}
+          </span>
+        </div>
+        <div className="ce-seg">
+          <span className={`ce-seg${ovr('controlPalette')}`}>
+            {ovrX('controlPalette')}
+            <span className="ce-muted">control colours</span>
+            {(['classic', 'deck', 'neon', 'fire', 'ice', 'mono'] as const).map((v) => <button key={v} className={`btn btn-mini${look.controlPalette === v ? ' btn-selected' : ''}`} onClick={() => onChange({ controlPalette: v })}>{v.toUpperCase()}</button>)}
           </span>
         </div>
       </section>
