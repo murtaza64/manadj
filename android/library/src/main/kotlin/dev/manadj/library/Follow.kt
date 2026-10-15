@@ -205,6 +205,9 @@ class FollowIndex(snapshot: Snapshot) {
 
     fun linked(a: Int, b: Int) = links[a]?.contains(b) == true
 
+    fun favoritedEitherWay(a: Int, b: Int) =
+        transitionsFrom[a]?.get(b)?.favorite == true || transitionsFrom[b]?.get(a)?.favorite == true
+
     fun marks(deckTrackId: Int?, candidateId: Int): RowMarks {
         if (deckTrackId == null) return RowMarks.NONE
         val t = transitionsFrom[deckTrackId]?.get(candidateId)

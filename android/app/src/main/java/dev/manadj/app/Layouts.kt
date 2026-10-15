@@ -130,7 +130,7 @@ import dev.manadj.audio.QuantizeMode
 
 
 /**
- * Portrait centre (#153): a 2-column grid of equal keys — QUANT·H / XF, SESSIONS / SETTINGS — top-aligned, with the
+ * Portrait centre (#153): a 2-column grid of equal keys — QUANT·H / XF, SESSIONS / A·B Link / SETTINGS — top-aligned, with the
  * FX card below at the bottom of the mixer (UH16); the space between is left free for future keys.
  */
 @Composable private fun GlobalControls(model: PlayerModel, ux: UiModel, modifier: Modifier, gap: Dp) {
@@ -147,7 +147,9 @@ import dev.manadj.audio.QuantizeMode
         }
         Row(h, horizontalArrangement = Arrangement.spacedBy(gap)) {
             SessionsKey(ux, Modifier.weight(1f).fillMaxHeight())
-            SettingsKey(model, ux, Modifier.weight(1f).fillMaxHeight())
+            // Link toggle for the loaded pair (#398): icon-only like the desktop A·B edge chip.
+            LinkKey(model, ux, Modifier.width(46.dp).fillMaxHeight(), label = false)
+            SettingsKey(model, ux, Modifier.width(46.dp).fillMaxHeight())
         }
     }
 }
@@ -373,7 +375,11 @@ private enum class PaneKind { LEFT_SLOT, RIGHT_SLOT, BOTH_LEFT, BOTH_RIGHT }
                                 QuantizeKey(model, ux, key)
                                 SettingsKey(model, ux, key)
                             }
-                            if (xf) Crossfader(model, ux, Modifier.weight(1f).height(44.dp)) else Spacer(Modifier.weight(1f))
+                            // Link toggle (#398) centred over the crossfader.
+                            Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                LinkKey(model, ux, Modifier.width(96.dp).height(32.dp), textSize = 10)
+                                if (xf) Crossfader(model, ux, Modifier.fillMaxWidth().height(44.dp))
+                            }
                             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                 SessionsKey(ux, key, textSize = 10)
                                 BrowseKey(model, ux, key)

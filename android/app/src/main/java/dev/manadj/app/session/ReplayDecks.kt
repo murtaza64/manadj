@@ -28,8 +28,8 @@ import dev.manadj.library.session.SessionState
 
 /**
  * Replay deck strips (#378 SH2–SH5), performance-view style: each deck's detail waveform runs edge to edge
- * (strips adjacent), with deck letter + track info, read-only mini mixer and Beat FX as overlays, and a
- * minimap whose played part is dimmed. Everything follows the replay reference (the Session log), which the
+ * (strips adjacent), with deck letter + track info, read-only mini mixer and Beat FX as overlays (no minimaps:
+ * the Session timeline is the overview). Everything follows the replay reference (the Session log), which the
  * engine matches sample-exactly, so strips draw before a track is even loaded.
  */
 @Composable fun ReplayDeckStack(lanes: IntArray, model: SessionModel, player: PlayerModel, ux: UiModel, log: SessionLog, frame: SessionState, modifier: Modifier) {
@@ -70,7 +70,6 @@ private fun replayStrip(s: SessionState, d: Int): Strip {
             if (s.trackId == null) Box(Modifier.fillMaxWidth().weight(1f).background(Ink.background))
             else WaveView(wave, position, duration, marks, Modifier.fillMaxWidth().weight(1f), windowSeconds = 8.0 * s.rate, playheadAt = .35f,
                 live = { strip }, accent = color, status = if (wave == null) "no waveform" else null)
-            if (s.trackId != null) WaveView(wave, position, duration, WaveMarks(null, emptyList()), Modifier.fillMaxWidth().height(12.dp), overview = true, accent = color)
         }
         // Audible: deck-coloured edge (the strip's letter column is gone).
         Box(Modifier.align(Alignment.CenterStart).width(3.dp).fillMaxHeight().background(if (v.audible) color else color.copy(alpha = .2f)))
@@ -78,8 +77,8 @@ private fun replayStrip(s: SessionState, d: Int): Strip {
         // Narrow (portrait): overlays sit over the played side, left of the playhead, so what is coming stays clear.
         // Wide (landscape): the mixer takes the far end, the info the played side.
         val wide = maxWidth > 560.dp
-        if (s.trackId != null) MiniMixer(frame, d, color, if (wide) Modifier.align(Alignment.CenterEnd).padding(end = 6.dp, bottom = 10.dp) else Modifier.align(Alignment.BottomStart).padding(start = 6.dp, bottom = 14.dp))
-        BeatFxOverlay(frame, d, if (wide) Modifier.align(Alignment.BottomStart).padding(start = 8.dp, bottom = 14.dp) else Modifier.align(Alignment.TopEnd).padding(end = 6.dp, top = 3.dp))
+        if (s.trackId != null) MiniMixer(frame, d, color, if (wide) Modifier.align(Alignment.CenterEnd).padding(end = 6.dp) else Modifier.align(Alignment.BottomStart).padding(start = 6.dp, bottom = 4.dp))
+        BeatFxOverlay(frame, d, if (wide) Modifier.align(Alignment.BottomStart).padding(start = 8.dp, bottom = 4.dp) else Modifier.align(Alignment.TopEnd).padding(end = 6.dp, top = 3.dp))
     }
 }
 
@@ -172,4 +171,23 @@ private fun DrawScope.drawMiniFader(v: Float, color: Color, horizontal: Boolean)
         MiniFader((frame.crossfader.coerceIn(-1.0, 1.0) + 1) / 2, if (frame.crossfaderEnabled) Ink.accent else Ink.surface2, Modifier.fillMaxWidth().height(16.dp), horizontal = true)
         Text(if (frame.crossfaderEnabled) "XF" else "XF OFF", color = Ink.muted, size = 8)
     }
+}
+
+/**
+ * The pair the link toggle (#398 [LinkKey]) addresses during replay: the two decks most recently Master-audible
+ * at the Session clock (the blend in progress, or the last one). Null until two distinct decks have sounded.
+ */
+fun replayLinkPair(log: SessionLog, frame: SessionState, now: Double): Pair<DeckId, DeckId>? {
+    val audibleNow = (0..3).filter(frame::audible)
+    val recent = log.appearances.filter { it.firstSound != null && it.firstSound!! <= now && it.end > now - 1 }
+        .sortedByDescending { if (frame.audible(it.deck)) Double.MAX_VALUE else it.firstSound!! }.map { it.deck }
+    val decks = (audibleNow + recent).distinct().take(2).sorted()
+    return if (decks.size == 2) DeckId.entries[decks[0]] to DeckId.entries[decks[1]] else null
+}
+
+/** Link toggle for the replayed pair (desktop A·B link chip semantics, via the Perform [LinkKey]). */
+@Composable fun ReplayLinkKey(model: SessionModel, player: PlayerModel, ux: UiModel, log: SessionLog, frame: SessionState, modifier: Modifier) {
+    val pair = replayLinkPair(log, frame, model.time)
+    if (pair == null) Key("", modifier, Ink.muted, enabled = false, description = "No pair to link yet", icon = Glyph.Link, style = KeyStyle.PILL) {}
+    else LinkKey(player, ux, modifier.testTag("session-link"), pair.first, pair.second, textSize = 10)
 }

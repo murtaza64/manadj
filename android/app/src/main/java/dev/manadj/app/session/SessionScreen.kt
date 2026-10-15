@@ -182,6 +182,8 @@ private val GAP = 3.dp
             Spacer(Modifier.weight(1f))
             ReplayCrossfader(frame, Modifier.width(96.dp))
             Spacer(Modifier.width(8.dp))
+            ReplayLinkKey(model, player, ux, log, frame, Modifier.width(84.dp).fillMaxHeight())
+            Spacer(Modifier.width(8.dp))
             TimelineKeys(model, Modifier.fillMaxHeight())
             Spacer(Modifier.width(8.dp))
             TransportKeys(model, player, log, Modifier.width(340.dp).fillMaxHeight())
@@ -196,6 +198,8 @@ private val GAP = 3.dp
         Row(Modifier.fillMaxWidth().height(40.dp).padding(start = 12.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("TIMELINE", Modifier.weight(1f), Ink.muted, 11, bold = true)
             ReplayCrossfader(frame, Modifier.width(80.dp))
+            Spacer(Modifier.width(8.dp))
+            ReplayLinkKey(model, player, ux, log, frame, Modifier.width(72.dp).height(36.dp))
             Spacer(Modifier.width(8.dp))
             TimelineKeys(model, Modifier.height(36.dp))
         }
