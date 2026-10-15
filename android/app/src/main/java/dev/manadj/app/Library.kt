@@ -221,6 +221,12 @@ private class BrowseData(val decks: List<DeckId>, val refs: List<Long>, val foll
                     }
                 }
             }
+            if (ux.synced != null && !ux.editHintSeen) item(key = "edit-hint") {
+                Row(Modifier.fillMaxWidth().padding(vertical = 4.dp).clip(RoundedCornerShape(6.dp)).background(Ink.accent.copy(alpha = .12f)).clickable { ux.editHintSeen = true }.padding(horizontal = 10.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("Long-press a track (or tap ✎) to edit it", Modifier.weight(1f), Ink.accent, 11, true)
+                    Text("✕", color = Ink.muted, size = 12, bold = true)
+                }
+            }
             if (isFollow && refs.isEmpty()) item(key = "follow-empty") { Text("Load a library track to follow it.", Modifier.padding(12.dp), Ink.muted, 12) }
             rows.forEachIndexed { i, track ->
                 val c = followById?.get(track.id)
@@ -424,7 +430,7 @@ private class BrowseData(val decks: List<DeckId>, val refs: List<Long>, val foll
     val selected = ux.selectedRow == track.id
     // Background + 1dp desktop --surface0 divider in one draw (no extra layout node; scroll-cheap).
     val bg = if (selected) Ink.accent.copy(alpha = .08f) else Ink.panel
-    Column(Modifier.fillMaxWidth().drawBehind { drawRect(bg); val t = 1.dp.toPx(); drawRect(Ink.surface0, androidx.compose.ui.geometry.Offset(0f, size.height - t), androidx.compose.ui.geometry.Size(size.width, t)) }.combinedClickable(onLongClickLabel = "Edit track", onLongClick = { if (ux.synced != null) dev.manadj.app.edit.TrackEditNav.open(track.id.toInt()) }, onClick = tap).padding(vertical = if (dense) 3.dp else 5.dp, horizontal = 4.dp)) {
+    Column(Modifier.fillMaxWidth().drawBehind { drawRect(bg); val t = 1.dp.toPx(); drawRect(Ink.surface0, androidx.compose.ui.geometry.Offset(0f, size.height - t), androidx.compose.ui.geometry.Size(size.width, t)) }.combinedClickable(onLongClickLabel = "Edit track", onLongClick = { if (ux.synced != null) { dev.manadj.app.edit.TrackEditNav.open(track.id.toInt()); ux.editHintSeen = true } }, onClick = tap).padding(vertical = if (dense) 3.dp else 5.dp, horizontal = 4.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             deck?.let { (d, live) -> DeckBadge(d, live); Spacer(Modifier.width(6.dp)) }
             playIndex?.let { Text("%02d".format(it), Modifier.width(26.dp), Ink.muted, 11, true) }
@@ -456,6 +462,8 @@ private class BrowseData(val decks: List<DeckId>, val refs: List<Long>, val foll
                 }
             }
             Text(track.dateAdded?.format(ADDED) ?: "", color = Ink.muted, size = 9)
+            // Visible EDIT entry (#379): opens the track editor on the spare deck.
+            if (ux.synced != null) Text("✎", Modifier.padding(start = 6.dp).clip(RoundedCornerShape(4.dp)).clickable { dev.manadj.app.edit.TrackEditNav.open(track.id.toInt()); ux.editHintSeen = true }.semantics { contentDescription = "Edit ${track.title}" }.padding(horizontal = 6.dp), Ink.accent, 13, true)
         }
         if (follow?.breakdown != null && ux.breakdownRow == track.id) follow.breakdown.let { b ->
             Text("key %s %.0f · tags %d %.0f · artist %.0f · energy %.0f · bpm %.0f = %.0f".format(b.keyRelation.lowercase(), b.key, b.sharedTags, b.tags, b.artist, b.energy, b.bpm, b.total), Modifier.padding(top = 3.dp), Ink.accent, 10, lines = 2)

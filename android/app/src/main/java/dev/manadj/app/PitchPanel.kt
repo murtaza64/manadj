@@ -79,6 +79,11 @@ import kotlin.math.*
         Row(Modifier.fillMaxWidth().height(34.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             Key("VINYL", Modifier.weight(1f).fillMaxHeight(), color, model.supports("scratch"), vinyl, "$target vinyl", style = KeyStyle.PILL, textSize = 11) { ux.vinyl[target] = !vinyl }
             Key("EDIT GRID", Modifier.weight(1f).fillMaxHeight(), Ink.warning, engaged = edit, description = "$target edit grid", style = KeyStyle.PILL, textSize = 11) { edit = !edit }
+            // Full track editor (#379) for this deck's library track: metadata, cues, grid, hypermeter.
+            val trackId = remember(ui.source?.id) { dev.manadj.app.library.LibraryHolder.trackOn(model, target) }
+            Key("✎ TRACK", Modifier.weight(1f).fillMaxHeight(), Ink.accent, trackId != null, description = "$target edit track", style = KeyStyle.PILL, textSize = 11) {
+                trackId?.let { model.pitchDrawer = null; dev.manadj.app.edit.TrackEditNav.open(it, target); ux.editHintSeen = true }
+            }
         }
         if (edit) GridEdit(ui, model, color)
     }

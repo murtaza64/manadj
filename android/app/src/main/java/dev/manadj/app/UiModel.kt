@@ -248,6 +248,9 @@ class UiModel(application: Application) : AndroidViewModel(application) {
     private val _sidebar = mutableStateOf(browsePrefs.getBoolean("sidebar", true))
     /** Landscape browser sidebar shown (#149); remembered. */
     var browseSidebar: Boolean get() = _sidebar.value; set(v) { _sidebar.value = v; browsePrefs.edit().putBoolean("sidebar", v).apply() }
+    private val _editHint = mutableStateOf(browsePrefs.getBoolean("edit-hint-seen", false))
+    /** One-time "long-press a track to edit" hint dismissed (or the editor was opened). */
+    var editHintSeen: Boolean get() = _editHint.value; set(v) { _editHint.value = v; browsePrefs.edit().putBoolean("edit-hint-seen", v).apply() }
     /** Follow row whose Match-score breakdown is expanded. */
     var breakdownRow by mutableStateOf<Long?>(null)
 
