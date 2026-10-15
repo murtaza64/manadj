@@ -11,6 +11,9 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.layout
+import androidx.compose.ui.layout.positionInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.findRootCoordinates
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithContent
@@ -249,36 +252,41 @@ val PitchTabHeight = 40.dp
 
 /**
  * Pitch tab (VH5): a full-width strip (edge to edge per deck half; the rounded screen corners may clip its ends)
- * whose readouts (pitch · SYNC/BPM · key) stay clear of corner arcs. Tap/press toggles the pitch panel; the open
- * panel carries the same face as its top edge, so the tab appears to rise with it.
+ * whose readouts (pitch · BPM · SYNC · key · lock) stay clear of corner arcs. Tap toggles the pitch panel (VH11),
+ * an upward swipe pulls it up with the finger; the open panel carries the same face as its top edge.
  */
 @Composable fun PitchKey(ui: DeckUi, model: PlayerModel, ux: UiModel, modifier: Modifier) {
     val open = model.pitchDrawer == ui.id
-    // Opens on press (like BROWSE); the click only covers accessibility actions.
-    var downToggled by remember { mutableStateOf(false) }
-    val currentOpen by rememberUpdatedState(open)
     val haptic = LocalHapticFeedback.current
-    PitchTabFace(ui, model, ux, open, modifier
-        .semantics { contentDescription = "${ui.id} pitch panel"; role = Role.Button }
-        .pointerInput(ui.id) {
-            awaitEachGesture {
-                awaitFirstDown(requireUnconsumed = false, pass = androidx.compose.ui.input.pointer.PointerEventPass.Initial)
-                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                downToggled = true; model.pitchDrawer = if (currentOpen) null else ui.id
-                do { val e = awaitPointerEvent(androidx.compose.ui.input.pointer.PointerEventPass.Final) } while (e.changes.any { it.pressed })
-                downToggled = false
-            }
-        }
-        .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { if (downToggled) downToggled = false else model.pitchDrawer = if (open) null else ui.id })
+    val sheet = PitchSheets.of(ui.id)
+    val shape = LocalScreenShape.current
+    val frame = LocalSafeFrame.current
+    val (margin, band) = with(androidx.compose.ui.platform.LocalDensity.current) { 6.dp.toPx() to (12.dp.toPx() to 8.dp.toPx()) }
+    PitchTabFace(ui, model, ux, open = false, modifier
+        // VH9: corner insets measured once here, at the tab's rest position, and shared with the risen copy.
+        .onGloballyPositioned { val p = it.positionInWindow(); val x = Math.round(p.x - frame.drift()).toFloat()
+            // VH15: from the tab's rest geometry only — it rests on the screen bottom, so the browser push (or any
+            // translation) never changes the inset. Only the readout's text band counts (the text sits above the arc).
+            val y = it.findRootCoordinates().size.height - it.size.height.toFloat()
+            val ins = shape.keepOut(androidx.compose.ui.geometry.Rect(x, y + band.first, x + it.size.width, y + it.size.height - band.second), margin)
+            if (ins != sheet.faceInsets) sheet.faceInsets = ins }
+        .semantics { contentDescription = "${ui.id} pitch panel"; role = Role.Button; onClick { togglePitchSheet(model, ui.id); true } }
+        .pitchSheetDrag(model, ui.id) { haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove) })
 }
 
-/** The tab's look (shared by the closed tab and the open panel's top edge): glass strip, deck-colour top rim, grabber, readouts. */
+/**
+ * The tab's look (shared by the closed tab and the open panel's top edge): glass strip, deck-colour top rim, grabber,
+ * readouts ([PitchReadout]). VH9/VH13: the readout is printed on the card — same insets ([PitchSheetState.faceInsets]),
+ * sizes and positions in both copies, so it moves only with the sheet translation. [open] = the risen copy (open
+ * tint); the closed tab never shows open/pressed state (VH14).
+ */
 @Composable fun PitchTabFace(ui: DeckUi, model: PlayerModel, ux: UiModel, open: Boolean, modifier: Modifier) {
     val color = deckColor(ui.id)
     val e = ux.extras.getValue(ui.id)
     val gridBpm by remember(ui) { derivedStateOf { ui.snapshot?.bpm } }
     val keyLocked by remember(ui) { derivedStateOf { ui.snapshot?.keyLock == true } }
     val enabled = model.supports("varispeed")
+    val (insL, insR) = PitchSheets.of(ui.id).faceInsets
     Box(modifier.clip(PitchTab).then(dev.manadj.app.viz.Glass.fill(Ink.panel, 14f)).background(color.copy(alpha = if (open) .18f else 0f))
         .drawBehind {
             // Top rim + rounded shoulders in the deck colour (no side/bottom border: those edges run off-screen).
@@ -290,19 +298,49 @@ val PitchTabHeight = 40.dp
             drawPath(path, color.copy(alpha = if (open) 1f else if (enabled) .7f else .25f), style = Stroke(w))
         }) {
         Box(Modifier.align(Alignment.TopCenter).padding(top = 5.dp).size(32.dp, 3.dp).clip(RoundedCornerShape(50)).background(color.copy(alpha = if (enabled) .9f else .3f)))
-        Row(Modifier.fillMaxSize().screenSafe(10.dp).padding(start = 12.dp, end = 12.dp, top = 5.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("%+.2f%%".format(ui.pitch), color = if (ui.pitch == 0.0) Ink.text else color, size = 14, bold = true)
-            Spacer(Modifier.weight(1f))
-            Column(horizontalAlignment = Alignment.End) {
-                // Synced: lit SYNC tag and the Group Tempo; out of lock / waiting flagged.
-                val sync = model.syncState.decks[ui.id] ?: dev.manadj.audio.SyncStatus.OFF
-                val groupTempo = model.syncState.tempo.takeIf { sync == dev.manadj.audio.SyncStatus.SYNCED }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    if (sync != dev.manadj.audio.SyncStatus.OFF) Text(when (sync) { dev.manadj.audio.SyncStatus.SYNCED -> "SYNC "; dev.manadj.audio.SyncStatus.OUT_OF_LOCK -> "SYNC⚠ "; else -> "SYNC… " }, color = if (sync == dev.manadj.audio.SyncStatus.SYNCED) Ink.play else Ink.warning, size = 9, bold = true)
-                    Text(groupTempo?.let { "%.1f".format(it) } ?: gridBpm?.let { "%.1f".format(it * (1 + (ui.pitch + ui.bend) / 100)) } ?: "— BPM", color = bpmColor(groupTempo ?: gridBpm?.let { it * (1 + ui.pitch / 100) }) ?: Ink.muted, size = 12, bold = true)
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) { if (keyLocked || (e.keyLock && !model.supports("key-lock"))) GlyphIcon(Glyph.Lock, color, 9.dp); val key = deckOpenKey(ui, model, ux)
-                    Text(" KEY ${key ?: "—"}", color = keyColor(key) ?: Ink.muted, size = 10, bold = key != null) }
+        val sync = model.syncState.decks[ui.id] ?: dev.manadj.audio.SyncStatus.OFF
+        val groupTempo = model.syncState.tempo.takeIf { sync == dev.manadj.audio.SyncStatus.SYNCED }
+        val key = deckOpenKey(ui, model, ux)
+        val left = ui.id == DeckId.A // deck A's outer edge is the left screen edge
+        val bpmText = groupTempo?.let { "%.1f".format(it) } ?: gridBpm?.let { "%.1f".format(it * (1 + (ui.pitch + ui.bend) / 100)) } ?: "— BPM"
+        // Inner → outer (VH13): pitch %, BPM, SYNC, key, lock. Each item is tagged "<deck> <part> <tab|card>" for the no-shift test.
+        val part = if (open) "card" else "tab"
+        fun Modifier.tag(name: String) = semantics { contentDescription = "${ui.id} $name $part" }
+        PitchReadout(innerOnLeft = !left, outerInset = if (left) insL else insR, Modifier.fillMaxSize()) {
+            Text("%+.2f%%".format(ui.pitch), Modifier.tag("pitch"), color = if (ui.pitch == 0.0) Ink.muted else color, size = 12, bold = true)
+            Text(bpmText, Modifier.tag("bpm"), color = bpmColor(groupTempo ?: gridBpm?.let { it * (1 + ui.pitch / 100) }) ?: Ink.muted, size = 16, bold = true)
+            if (sync != dev.manadj.audio.SyncStatus.OFF) Text(when (sync) { dev.manadj.audio.SyncStatus.SYNCED -> "SYNC"; dev.manadj.audio.SyncStatus.OUT_OF_LOCK -> "SYNC⚠"; else -> "SYNC…" }, Modifier.tag("sync"), color = if (sync == dev.manadj.audio.SyncStatus.SYNCED) Ink.play else Ink.warning, size = 10, bold = true)
+            Text(key ?: "—", Modifier.tag("key"), color = keyColor(key) ?: Ink.muted, size = 14, bold = key != null)
+            if (keyLocked || (e.keyLock && !model.supports("key-lock"))) Box(Modifier.tag("lock")) { GlyphIcon(Glyph.Lock, color, 11.dp) }
+        }
+    }
+}
+
+/**
+ * VH13/VH15 tab readout layout, children listed inner → outer. Anchored flush at the inner (screen-centre) edge,
+ * spread evenly across the whole width up to the outer corner inset [outerInset] px, every item
+ * centred on one line. Too wide: the whole readout scales down uniformly (min gap kept), same in both copies. Pure
+ * function of (tab size, inset, content), so the closed tab and the risen card lay it out identically.
+ */
+@Composable fun PitchReadout(innerOnLeft: Boolean, outerInset: Float, modifier: Modifier, content: @Composable () -> Unit) {
+    androidx.compose.ui.layout.Layout(content, modifier) { ms, c ->
+        val w = c.maxWidth; val h = c.maxHeight
+        // VH15: no screen corner at the inner edge — the readout starts flush there; the outer side keeps corner padding.
+        val pad = 3.dp.toPx(); val outerPad = 6.dp.toPx(); val minGap = 6.dp.toPx(); val top = 6.dp.toPx() // grabber band
+        val ps = ms.map { it.measure(androidx.compose.ui.unit.Constraints()) }
+        val avail = (w - outerInset - outerPad - pad).coerceAtLeast(1f) // VH15: all the width
+        val sum = ps.sumOf { it.width }.toFloat()
+        val gaps = (ps.size - 1).coerceAtLeast(1)
+        val scale = if (sum + minGap * (ps.size - 1) > avail) avail / (sum + minGap * (ps.size - 1)) else 1f
+        val gap = if (ps.size < 2) 0f else if (scale < 1f) minGap else (avail - sum) / gaps
+        val centreY = (h + top) / 2f
+        layout(w, h) {
+            var u = 0f // distance from the inner pad, unscaled
+            for (p in ps) {
+                val x = if (innerOnLeft) pad + u * scale else w - pad - (u + p.width) * scale
+                val y = centreY - p.height * scale / 2f
+                p.placeWithLayer(Math.round(x), Math.round(y)) { scaleX = scale; scaleY = scale; transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0f, 0f) }
+                u += p.width + gap
             }
         }
     }

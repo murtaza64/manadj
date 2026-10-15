@@ -3,10 +3,8 @@ package dev.manadj.app
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.*
@@ -25,6 +23,9 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import dev.manadj.audio.AudioCommand
 import dev.manadj.audio.BpmMatch
@@ -34,8 +35,8 @@ import kotlin.math.*
 
 /** #400: controls under the pitch panel fade out while it is up (the glass panel would otherwise show them). */
 fun Modifier.underPitchPanel(model: PlayerModel, id: dev.manadj.audio.DeckId): Modifier = composed {
-    val a by androidx.compose.animation.core.animateFloatAsState(if (model.pitchDrawer == id) 0f else 1f, androidx.compose.animation.core.tween(200), label = "under pitch panel")
-    graphicsLayer { alpha = a }
+    val sheet = PitchSheets.of(id)
+    graphicsLayer { alpha = 1f - sheet.progress.value } // draw phase only (VH6)
 }
 
 /**
@@ -55,11 +56,11 @@ fun Modifier.underPitchPanel(model: PlayerModel, id: dev.manadj.audio.DeckId): M
     // Side rims continue the tab's top rim down to the screen edge; no bottom border (a card rising from below the screen).
     Column(modifier.clip(PitchTab).then(dev.manadj.app.viz.Glass.fill(Ink.background, 14f))
         .drawBehind { val w = 1.5.dp.toPx(); val c = color.copy(alpha = .7f); drawLine(c, Offset(w / 2, 14.dp.toPx()), Offset(w / 2, size.height), w); drawLine(c, Offset(size.width - w / 2, 14.dp.toPx()), Offset(size.width - w / 2, size.height), w) }
-        .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {}, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        // The tab, risen: tap (or Back) lowers the panel.
-        PitchTabFace(ui, model, ux, open = true, Modifier.fillMaxWidth().height(PitchTabHeight).semantics { contentDescription = "Lower pitch panel" }
-            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { model.pitchDrawer = null })
-        Column(Modifier.fillMaxWidth().weight(1f).screenSafe().padding(start = 6.dp, end = 6.dp, bottom = 6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        .pitchSheetDrag(model, target), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        // The tab, risen: tap (or Back) lowers the panel; tapping mid-slide reverses it (VH11).
+        PitchTabFace(ui, model, ux, open = true, Modifier.fillMaxWidth().height(PitchTabHeight).semantics { contentDescription = "$target lower pitch panel"; role = Role.Button; onClick { togglePitchSheet(model, target); true } }
+            .pitchSheetDrag(model, target) {})
+        Column(Modifier.fillMaxWidth().weight(1f).padding(start = 6.dp, end = 6.dp, bottom = 6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         // KEY LOCK · SYNC · = (desktop small match button).
         Row(Modifier.fillMaxWidth().height(38.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             val keyLock = model.supports("key-lock")
@@ -86,9 +87,9 @@ fun Modifier.underPitchPanel(model: PlayerModel, id: dev.manadj.audio.DeckId): M
                 JogStrip(ui, model, Modifier.fillMaxWidth().height(56.dp))
             }
         }
-        Row(Modifier.fillMaxWidth().height(34.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        Row(Modifier.fillMaxWidth().height(34.dp).screenSafe(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             Key("VINYL", Modifier.weight(1f).fillMaxHeight(), color, model.supports("scratch"), vinyl, "$target vinyl", style = KeyStyle.PILL, textSize = 11) { ux.vinyl[target] = !vinyl }
-            Key("EDIT GRID", Modifier.weight(1f).fillMaxHeight(), Ink.warning, engaged = edit, description = "$target edit grid", style = KeyStyle.PILL, textSize = 11) { edit = !edit }
+            Key("GRID", Modifier.weight(1f).fillMaxHeight(), Ink.warning, engaged = edit, description = "$target edit grid", style = KeyStyle.PILL, textSize = 11) { edit = !edit }
             // Full track editor (#379) for this deck's library track: metadata, cues, grid, hypermeter.
             val trackId = remember(ui.source?.id) { dev.manadj.app.library.LibraryHolder.trackOn(model, target) }
             Key("✎ TRACK", Modifier.weight(1f).fillMaxHeight(), Ink.accent, trackId != null, description = "$target edit track", style = KeyStyle.PILL, textSize = 11) {

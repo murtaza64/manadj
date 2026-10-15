@@ -3,6 +3,7 @@ package dev.manadj.app
 import android.content.pm.ActivityInfo
 import android.content.res.Configuration
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.lifecycle.ViewModelProvider
@@ -88,5 +89,163 @@ class PerformanceUiTest {
         val mixerLeft = box("A TRIM control").left
         assertTrue("popup right ${popup.right} <= mixer left $mixerLeft", popup.right <= mixerLeft)
         rule.activityRule.scenario.onActivity { it.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED }
+    }
+
+    /** VH11: tap always toggles the pitch sheet — open, close via the risen header, and a tap mid-spring reverses it. */
+    @Test fun pitchTabTapTogglesAlongsideSwipe() {
+        // The app never idles (live meters/viz), so drive the clock by hand instead of waitForIdle.
+        rule.mainClock.autoAdvance = false
+        rule.mainClock.advanceTimeBy(3000)
+        val A = dev.manadj.audio.DeckId.A
+        val sheet = PitchSheets.of(A)
+        fun settle() = rule.mainClock.advanceTimeBy(1500)
+        rule.onNodeWithContentDescription("A pitch panel").performTouchInput { click(center) }
+        settle()
+        assertEquals(A, model.pitchDrawer); assertEquals(1f, sheet.progress.value, .01f)
+        rule.onNodeWithContentDescription("A lower pitch panel").performTouchInput { click(center) }
+        settle()
+        assertNull(model.pitchDrawer); assertEquals(0f, sheet.progress.value, .01f)
+        // Mid-animation: open, stop part-way, tap the (moving) header — the sheet reverses and settles closed.
+        rule.onNodeWithContentDescription("A pitch panel").performTouchInput { click(center) }
+        rule.mainClock.advanceTimeBy(100)
+        val mid = sheet.progress.value
+        assertTrue("mid-spring: $mid", mid > .05f && mid < .95f)
+        rule.onNodeWithContentDescription("A lower pitch panel").performTouchInput { click(center) }
+        settle()
+        assertNull(model.pitchDrawer); assertEquals(0f, sheet.progress.value, .01f)
+        assertFalse("never left held", sheet.dragging)
+    }
+
+    /** VH12: drags released slowly at 30/50/70 %, a cancelled drag and tap spam always end fully open or closed. */
+    @Test fun pitchSheetNeverSticksHalfway() {
+        rule.mainClock.autoAdvance = false
+        rule.mainClock.advanceTimeBy(3000)
+        val A = dev.manadj.audio.DeckId.A
+        val sheet = PitchSheets.of(A)
+        fun settle() = rule.mainClock.advanceTimeBy(2000)
+        fun anchored(label: String): Boolean {
+            settle()
+            val p = sheet.progress.value; val open = model.pitchDrawer == A
+            assertEquals("$label: progress $p vs open=$open", if (open) 1f else 0f, p, .001f)
+            assertFalse("$label: held", sheet.dragging)
+            return open
+        }
+        // The sheet's travel is known once it has been built (first open).
+        rule.onNodeWithContentDescription("A pitch panel").performTouchInput { click(center) }
+        assertTrue(anchored("first open"))
+        rule.onNodeWithContentDescription("A lower pitch panel").performTouchInput { click(center) }
+        assertFalse(anchored("first close"))
+        val travel = sheet.travel
+        // Drag from the closed tab by [fractions] of the travel (each step slow), pause, release.
+        fun dragTab(vararg fractions: Float, cancel: Boolean = false) =
+            rule.onNodeWithContentDescription("A pitch panel").performTouchInput {
+                down(center)
+                for (f in fractions) { val steps = 12; repeat(steps) { advanceEventTime(30); moveBy(Offset(0f, -f * travel / steps)) } }
+                advanceEventTime(600) // slow release: no fling velocity left
+                if (cancel) cancel() else up()
+            }
+        for (f in listOf(.3f, .5f, .7f)) {
+            dragTab(f + .03f)
+            assertTrue("up to $f, last move up -> open", anchored("up $f"))
+            rule.onNodeWithContentDescription("A lower pitch panel").performTouchInput {
+                down(center); repeat(12) { advanceEventTime(30); moveBy(Offset(0f, (1 - f) * travel / 12)) }; advanceEventTime(600); up()
+            }
+            assertFalse("down to $f, last move down -> closed", anchored("down $f"))
+        }
+        dragTab(.6f, -.1f)
+        assertFalse("up then back down: last direction decides", anchored("up-down"))
+        dragTab(.5f, cancel = true)
+        anchored("cancelled mid-drag")
+        rule.onNodeWithContentDescription("A pitch panel").performTouchInput {
+            repeat(9) { click(center); advanceEventTime(40) }
+        }
+        anchored("tap spam")
+        // Taps spread over the slide: each must reverse it; nothing sticks.
+        repeat(6) { k ->
+            val node = if (model.pitchDrawer == A) "A lower pitch panel" else "A pitch panel"
+            rule.onNodeWithContentDescription(node).performTouchInput { click(center) }
+            rule.mainClock.advanceTimeBy(40L + 25 * k)
+        }
+        anchored("taps mid-slide")
+    }
+
+    /** VH13: every readout element sits at the same place on the card collapsed and expanded (only the card moves). */
+    @Test fun pitchReadoutIsPrintedOnTheCard() {
+        rule.mainClock.autoAdvance = false
+        rule.mainClock.advanceTimeBy(3000)
+        val all = listOf("pitch", "bpm", "sync", "key", "lock")
+        fun present(d: String, part: String) = all.filter { rule.onAllNodesWithContentDescription("$d $it $part").fetchSemanticsNodes().isNotEmpty() }
+        for (d in listOf("A", "B")) {
+            rule.onNodeWithContentDescription("$d pitch panel").performTouchInput { click(center) }
+            rule.mainClock.advanceTimeBy(2000)
+            // The closed tab stays laid out under the risen card: compare both copies at the same data.
+            val tab = box("$d pitch panel")
+            val card = rule.onNodeWithContentDescription("$d lower pitch panel").fetchSemanticsNode().boundsInRoot
+            assertTrue("$d card risen", card.top < tab.top - 100f)
+            val parts = present(d, "tab")
+            assertEquals("$d same items", parts, present(d, "card"))
+            for (p in parts) {
+                val c = box("$d $p tab").translate(-tab.left, -tab.top)
+                val b = box("$d $p card").translate(-card.left, -card.top)
+                assertEquals("$d $p left", c.left, b.left, .5f); assertEquals("$d $p top", c.top, b.top, .5f)
+                assertEquals("$d $p width", c.width, b.width, .5f); assertEquals("$d $p height", c.height, b.height, .5f)
+            }
+            // One centre line (VH13).
+            val ys = parts.map { box("$d $it card").center.y }
+            assertTrue("$d centres $ys", ys.max() - ys.min() < 1.5f)
+            rule.onNodeWithContentDescription("$d lower pitch panel").performTouchInput { click(center) }
+            rule.mainClock.advanceTimeBy(2000)
+        }
+    }
+
+    /** VH15: the browser push (portrait) moves the tab, never the readout on it. */
+    @Test fun pitchReadoutHoldsStillWhileTheBrowserMoves() {
+        rule.mainClock.autoAdvance = false
+        // Capabilities (and with them the lock glyph) arrive late: let the readout content settle first.
+        var n = 0; var last = ""; var same = 0
+        while (n++ < 40 && same < 3) { rule.mainClock.advanceTimeBy(1000); val k = "${model.supports("varispeed")}${model.supports("key-lock")}${rule.onAllNodesWithContentDescription("A lock tab").fetchSemanticsNodes().size}"; if (k == last) same++ else { same = 0; last = k } }
+        val all = listOf("pitch", "bpm", "sync", "key", "lock")
+        fun rel(d: String): Map<String, androidx.compose.ui.geometry.Rect> {
+            val tab = box("$d pitch panel")
+            return all.filter { rule.onAllNodesWithContentDescription("$d $it tab").fetchSemanticsNodes().isNotEmpty() }
+                .associateWith { box("$d $it tab").translate(-tab.left, -tab.top) }
+        }
+        val rest = listOf("A", "B").associateWith(::rel)
+        val restTop = box("A pitch panel").top
+        rule.runOnUiThread { model.browser = dev.manadj.audio.DeckId.A }
+        for (step in 1..4) {
+            rule.mainClock.advanceTimeBy(30)
+            val moved = restTop - box("A pitch panel").top
+            for (d in listOf("A", "B")) {
+                val now = rel(d)
+                assertEquals("$d items (step $step)", rest.getValue(d).keys, now.keys)
+                for ((p, r) in rest.getValue(d)) { val n = now.getValue(p); assertEquals("$d $p left step $step (tab moved $moved)", r.left, n.left, .5f); assertEquals("$d $p width", r.width, n.width, .5f) }
+            }
+        }
+        rule.runOnUiThread { model.browser = null }
+        rule.mainClock.advanceTimeBy(2000)
+        for (d in listOf("A", "B")) for ((p, r) in rest.getValue(d)) assertEquals("$d $p left after close", r.left, rel(d).getValue(p).left, .5f)
+    }
+
+    /** VH14: the closed tab shows no open/pressed fill after a tap cycle, a drag or a cancelled drag. */
+    @Test fun pitchTabFillIsTransient() {
+        rule.mainClock.autoAdvance = false
+        rule.mainClock.advanceTimeBy(3000)
+        val A = dev.manadj.audio.DeckId.A
+        fun sample(): Int { val img = rule.onNodeWithContentDescription("A pitch panel").captureToImage().asAndroidBitmap(); return img.getPixel(img.width / 2, img.height * 7 / 8) }
+        fun closeIfOpen() { if (model.pitchDrawer == A) { rule.onNodeWithContentDescription("A lower pitch panel").performTouchInput { click(center) } }; rule.mainClock.advanceTimeBy(2000) }
+        val rest = sample()
+        rule.onNodeWithContentDescription("A pitch panel").performTouchInput { click(center) }
+        rule.mainClock.advanceTimeBy(2000)
+        closeIfOpen()
+        assertEquals("after tap cycle", rest, sample())
+        rule.onNodeWithContentDescription("A pitch panel").performTouchInput { down(center); repeat(10) { advanceEventTime(30); moveBy(Offset(0f, -40f)) }; up() }
+        rule.mainClock.advanceTimeBy(2000)
+        closeIfOpen()
+        assertEquals("after drag", rest, sample())
+        rule.onNodeWithContentDescription("A pitch panel").performTouchInput { down(center); repeat(10) { advanceEventTime(30); moveBy(Offset(0f, -40f)) }; cancel() }
+        rule.mainClock.advanceTimeBy(2000)
+        closeIfOpen()
+        assertEquals("after cancel", rest, sample())
     }
 }

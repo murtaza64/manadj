@@ -292,13 +292,8 @@ fun mixOf(model: PlayerModel, ux: UiModel, id: DeckId): DeckMix {
 
 /** The in-place pitch panel over [id]'s control area: opens/closes with a short rigid fade + slide. */
 @Composable private fun PitchArea(model: PlayerModel, ux: UiModel, id: DeckId, modifier: Modifier) {
-    // #400: slides up from the bottom edge of the deck's control area (clipped there) and replaces the controls.
-    // VH5: the panel's top edge is a copy of the tab, so it starts exactly over the tab and rises (no fade).
-    val tab = with(LocalDensity.current) { PitchTabHeight.roundToPx() }
-    AnimatedVisibility(model.pitchDrawer == id, modifier.clipToBounds(), enter = slideInVertically(tween(240, easing = FastOutSlowInEasing)) { it - tab },
-        exit = slideOutVertically(tween(200, easing = FastOutSlowInEasing)) { it - tab }) {
-        PitchPanel(model.decks.getValue(id), model, ux, Modifier.fillMaxSize())
-    }
+    // VH6: spring/finger-driven sheet (graphicsLayer only); its top edge is the tab, so it rises from the tab.
+    PitchSheetHost(model, id, modifier) { PitchPanel(model.decks.getValue(id), model, ux, Modifier.fillMaxSize()) }
 }
 
 /** Where the landscape browser pane sits: beside one deck (slot) or over both decks from a fixed side. */
