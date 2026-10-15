@@ -642,34 +642,26 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusFlash, f
   // Moving playhead: follow the driver's session clock while it rolls.
   // ONE cursor: during playback this replaces the click anchor; when
   // playback ends (stop/takeover/ended) the anchor lands where it stopped.
-  const [replayT, setReplayT] = useState<number | null>(null);
+  // The head moves imperatively (desktop-perf #385): a per-frame
+  // setReplayT re-rendered this whole view every frame (~25 ms of React
+  // work per frame in dev on a 4 h Session). React state only flips when
+  // replay starts/stops; the rAF loop writes the head's transform and
+  // drives follow-scroll directly. lastReplayTRef is the head position.
+  const [replayOn, setReplayOn] = useState(false);
   const lastReplayTRef = useRef<number | null>(null);
+  const replayHeadRef = useRef<SVGGElement | null>(null);
+  const axisRef = useRef(axis);
+  axisRef.current = axis;
   // A fresh replay re-arms follow-scroll immediately (sessions 17).
   useEffect(() => {
     if (replayHere) lastManualScrollAtRef.current = -Infinity;
   }, [replayHere]);
-  // Follow the rolling playhead: pinned at the zone edge while it rides
-  // the last 20% of the viewport — paused for REARM_AFTER_MS after a
-  // manual scroll, then back on duty.
-  useEffect(() => {
-    if (replayT === null || !axis) return;
-    if (performance.now() - lastManualScrollAtRef.current < REARM_AFTER_MS) return;
-    const el = scrollRef.current;
-    if (!el) return;
-    const target = followScrollTarget(
-      axis.tToPx(replayT),
-      el.scrollLeft,
-      el.clientWidth,
-      el.scrollWidth
-    );
-    if (target !== null) setScrollLeft(el, target);
-  }, [replayT, axis, setScrollLeft]);
   useEffect(() => {
     if (!viewActive) return; // hidden view: no per-frame playhead work
     if (!replayHere) {
       const last = lastReplayTRef.current;
       lastReplayTRef.current = null;
-      setReplayT(null);
+      setReplayOn(false);
       if (last !== null) {
         // The anchor lands where playback stopped — including after a
         // remount mid-replay (selection 'none'), so the next space/▶ has
@@ -686,14 +678,29 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusFlash, f
     const loop = () => {
       const t = replayNowT();
       if (t !== null) {
+        const first = lastReplayTRef.current === null;
         lastReplayTRef.current = t;
-        setReplayT(t);
+        if (first) setReplayOn(true);
+        const ax = axisRef.current;
+        if (ax) {
+          const x = ax.tToPx(t);
+          // Follow the rolling playhead: pinned at the zone edge while it
+          // rides the last 20% of the viewport — paused for REARM_AFTER_MS
+          // after a manual scroll, then back on duty.
+          const el = scrollRef.current;
+          if (el && performance.now() - lastManualScrollAtRef.current >= REARM_AFTER_MS) {
+            const target = followScrollTarget(x, el.scrollLeft, el.clientWidth, el.scrollWidth);
+            if (target !== null) setScrollLeft(el, target);
+          }
+          replayHeadRef.current?.setAttribute('transform', `translate(${x},0)`);
+        }
       }
       raf = requestAnimationFrame(loop);
     };
     raf = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(raf);
-  }, [replayHere, viewActive]);
+  }, [replayHere, viewActive, setScrollLeft]);
+  const replayT = replayOn ? lastReplayTRef.current : null;
 
   // Space: pause/resume while rolling; START playback from the selected
   // moment when idle (view-scoped, like the editor's space).
@@ -976,8 +983,6 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusFlash, f
     () => Object.fromEntries((routineRows ?? []).map((r) => [r.uuid, r.name])),
     [routineRows]
   );
-  const axisRef = useRef(axis);
-  axisRef.current = axis;
   const trimDraggedRef = useRef(false);
   /** Drag a trim boundary: window-level listeners for the gesture, time
    * clamped inside the miner window and 2s off the opposite edge. */
@@ -1432,6 +1437,7 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusFlash, f
                   viewportW={viewportW}
                   scrubT={scrubT}
                   replayT={replayHere ? replayT : null}
+                  replayHeadRef={replayHeadRef}
                   replayPaused={replay.status === 'paused'}
                   selection={selection}
                   hoverTake={hoverTake}
@@ -2012,6 +2018,7 @@ function SceneOverlay({
   viewportW,
   scrubT,
   replayT,
+  replayHeadRef,
   replayPaused,
   selection,
   hoverTake,
@@ -2028,7 +2035,10 @@ function SceneOverlay({
   scrollX: number;
   viewportW: number;
   scrubT: number | null;
+  /** Head position at render time; the replay loop then moves the head
+   * through replayHeadRef (transform) without re-rendering. */
   replayT: number | null;
+  replayHeadRef: React.RefObject<SVGGElement | null>;
   replayPaused: boolean;
   selection: Selection;
   hoverTake: TakeRowWire | null;
@@ -2269,11 +2279,13 @@ function SceneOverlay({
 
       {/* Replay playhead: the moving line while the session plays back. */}
       {replayT !== null ? (
-        <g className={`stl-replay-head${replayPaused ? ' paused' : ''}`}>
-          <line x1={X(replayT)} y1={RULER_H} x2={X(replayT)} y2={lanesBottom} />
-          <polygon
-            points={`${X(replayT) - 5},${lanesBottom} ${X(replayT) + 5},${lanesBottom} ${X(replayT)},${lanesBottom - 8}`}
-          />
+        <g
+          ref={replayHeadRef}
+          className={`stl-replay-head${replayPaused ? ' paused' : ''}`}
+          transform={`translate(${X(replayT)},0)`}
+        >
+          <line x1={0} y1={RULER_H} x2={0} y2={lanesBottom} />
+          <polygon points={`-5,${lanesBottom} 5,${lanesBottom} 0,${lanesBottom - 8}`} />
         </g>
       ) : null}
 
