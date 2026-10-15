@@ -27,6 +27,8 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import dev.manadj.audio.DeckId
 import kotlinx.coroutines.*
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.unit.em
 import kotlin.math.*
 
 enum class KeyStyle { BOX, PILL, BARE }
@@ -142,7 +144,9 @@ enum class KeyStyle { BOX, PILL, BARE }
         val handle = if (horizontal) Modifier.align(Alignment.CenterStart).offset(x = (maxWidth - 44.dp) * v) else Modifier.align(Alignment.TopCenter).offset(y = 6.dp + (maxHeight - 36.dp) * (1 - v))
         val hw = if (horizontal) 44.dp else min(maxWidth.value, 52f).dp
         Box(handle.width(hw).height(if (horizontal) 30.dp else 24.dp).halo(tint, heat * .9f, 4.dp).padding(2.dp).clip(RoundedCornerShape(3.dp)).background(Ink.crust).border(1.5.dp, if (enabled) tint else Ink.edge, RoundedCornerShape(3.dp)), contentAlignment = Alignment.Center) {
-            Box(Modifier.fillMaxWidth(.8f).height(2.dp).background(if (enabled) tint else Ink.edge))
+            // UH27: desktop label-on-handle (.perf-fader-handle: micro, heavy, spaced) for channel VOL and PITCH.
+            if (label == "VOL" || label == "PITCH") androidx.compose.foundation.text.BasicText(label, style = androidx.compose.ui.text.TextStyle(color = if (enabled) tint else Ink.edge, fontSize = 9.sp, fontFamily = Mono, fontWeight = androidx.compose.ui.text.font.FontWeight.ExtraBold, letterSpacing = .08.em), maxLines = 1)
+            else Box(Modifier.fillMaxWidth(.8f).height(2.dp).background(if (enabled) tint else Ink.edge))
         }
     }
 }
