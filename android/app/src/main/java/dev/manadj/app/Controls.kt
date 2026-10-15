@@ -37,7 +37,9 @@ enum class KeyStyle { BOX, PILL, BARE }
  */
 @Composable fun Key(
     text: String, modifier: Modifier, color: Color = Ink.accent, enabled: Boolean = true, engaged: Boolean = false, description: String = text,
-    icon: Glyph? = null, style: KeyStyle = KeyStyle.BOX, pulse: Float = 0f, textSize: Int = 13, textColor: Color? = null, pending: Boolean = false, longPress: (() -> Unit)? = null, action: () -> Unit,
+    icon: Glyph? = null, style: KeyStyle = KeyStyle.BOX, pulse: Float = 0f, textSize: Int = 13, textColor: Color? = null, pending: Boolean = false, longPress: (() -> Unit)? = null,
+    /** Tap haptic; null = silent. */
+    feedback: HapticFeedbackType? = HapticFeedbackType.TextHandleMove, action: () -> Unit,
 ) {
     val haptic = LocalHapticFeedback.current
     val interaction = remember { MutableInteractionSource() }
@@ -48,8 +50,8 @@ enum class KeyStyle { BOX, PILL, BARE }
     val shape = if (style == KeyStyle.PILL) RoundedCornerShape(50) else RoundedCornerShape(2.dp)
     val inset = if (style == KeyStyle.BARE) 0.dp else 3.dp
     Box(modifier.halo(tint, (heat + pulse) * .8f, inset + 3.dp, style == KeyStyle.PILL).semantics { contentDescription = description; if (!enabled) disabled() }
-        .then(if (longPress == null) Modifier.clickable(interactionSource = interaction, indication = null, enabled = enabled || pending) { haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove); action() }
-            else Modifier.combinedClickable(interactionSource = interaction, indication = null, enabled = enabled || pending, onLongClick = { haptic.performHapticFeedback(HapticFeedbackType.LongPress); longPress() }) { haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove); action() })
+        .then(if (longPress == null) Modifier.clickable(interactionSource = interaction, indication = null, enabled = enabled || pending) { feedback?.let(haptic::performHapticFeedback); action() }
+            else Modifier.combinedClickable(interactionSource = interaction, indication = null, enabled = enabled || pending, onLongClick = { haptic.performHapticFeedback(HapticFeedbackType.LongPress); longPress() }) { feedback?.let(haptic::performHapticFeedback); action() })
         .padding(inset).graphicsLayer { scaleX = scale; scaleY = scale }
         .then(if (style == KeyStyle.BARE) Modifier else Modifier.clip(shape).background(Ink.panel).background(tint.copy(alpha = .28f * heat)).border(1.5.dp, tint.copy(alpha = if (engaged || pressed) 1f else .6f), shape))
         .padding(horizontal = 3.dp), contentAlignment = Alignment.Center) {
@@ -331,11 +333,14 @@ fun knobReadout(kind: KnobKind, v: Double): String = when (kind) {
  * Value wheel: slide sideways to scroll values, lift to commit (jump size, loop length, FX effect/target/beats).
  * No [onTap] (pure value cells): the wheel opens on touch-down (#135). With [onTap]: tap = the action; the wheel
  * opens after a 350 ms hold or at once on a sideways drag. Feedback floats above the control.
+ * Haptics: [edgeHaptics] = buzz on open / commit / cancel; [tickHaptics] = tick per value step.
  */
 @Composable fun ValueWheel(
     label: String, choices: List<String>, index: Int, ui: UiModel, model: PlayerModel, deck: DeckId, modifier: Modifier, color: Color,
-    text: String = choices[index], icon: Glyph? = null, live: Boolean = true, pulse: Float = 0f, bare: Boolean = false, tagPending: Boolean = true, onTap: (() -> Unit)? = null, onIndex: (Int) -> Unit,
+    text: String = choices[index], icon: Glyph? = null, live: Boolean = true, pulse: Float = 0f, bare: Boolean = false, tagPending: Boolean = true, edgeHaptics: Boolean = true, tickHaptics: Boolean = true, onTap: (() -> Unit)? = null, onIndex: (Int) -> Unit,
 ) {
+    val edgeBuzz by rememberUpdatedState(edgeHaptics)
+    val tickBuzz by rememberUpdatedState(tickHaptics)
     val interactive = live || ui.previewPending
     val latest by rememberUpdatedState(index)
     val setter by rememberUpdatedState(onIndex)
@@ -361,7 +366,7 @@ fun knobReadout(kind: KnobKind, v: Double): String = when (kind) {
                     if (open) return
                     open = true
                     ui.wheel = WheelFeedback(label, choices, chosen, root.x + width / 2, root.y, tint)
-                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    if (edgeBuzz) haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                 }
                 if (tap == null) openWheel()
                 val hold = scope.launch { delay(350); openWheel() }
@@ -373,7 +378,7 @@ fun knobReadout(kind: KnobKind, v: Double): String = when (kind) {
                         val dx = change.position.x - down.position.x
                         if (open) {
                             val next = (start + (dx / 30.dp.toPx()).roundToInt()).coerceIn(choices.indices)
-                            if (next != chosen) { chosen = next; setter(next); haptic.performHapticFeedback(HapticFeedbackType.SegmentFrequentTick) }
+                            if (next != chosen) { chosen = next; setter(next); if (tickBuzz) haptic.performHapticFeedback(HapticFeedbackType.SegmentFrequentTick) }
                             ui.wheel = WheelFeedback(label, choices, chosen, root.x + width / 2, root.y, tint)
                             change.consume()
                         } else if (abs(change.position.y - down.position.y) > 12.dp.toPx()) { cancelled = true; break }
@@ -384,7 +389,7 @@ fun knobReadout(kind: KnobKind, v: Double): String = when (kind) {
                 finally {
                     hold.cancel(); held = false
                     if (cancelled && open) setter(start)
-                    if (open) haptic.performHapticFeedback(if (cancelled) HapticFeedbackType.Reject else HapticFeedbackType.Confirm)
+                    if (open && edgeBuzz) haptic.performHapticFeedback(if (cancelled) HapticFeedbackType.Reject else HapticFeedbackType.Confirm)
                     if (ui.wheel?.label == label) ui.wheel = null
                     model.finishGesture(id, cancelled && open)
                 }

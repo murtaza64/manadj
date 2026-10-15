@@ -161,7 +161,7 @@ val ControlRow = 44.dp
     LaunchedEffect(launching) { blink = true; while (launching) { kotlinx.coroutines.delay(250); blink = !blink } }
     val pulse = if (launching) 0f else if (playing && bpm != null) (1 - beatPhase(position(ui) - (ui.snapshot?.gridAnchorSeconds ?: 0.0), bpm)).let { it * it } * .35f else 0f
     val lit = if (launching) blink else playing
-    Key(if (playing && !launching) "PAUSE" else "PLAY", modifier, Ink.play, ready || playing, lit, "${ui.id} play pause", if (playing && !launching) Glyph.Pause else Glyph.Play, KeyStyle.PILL, pulse, 15) {
+    Key(if (playing && !launching) "PAUSE" else "PLAY", modifier, Ink.play, ready || playing, lit, "${ui.id} play pause", if (playing && !launching) Glyph.Pause else Glyph.Play, KeyStyle.PILL, pulse, 15, feedback = HapticFeedbackType.VirtualKey) {
         model.submit(if (playing) AudioCommand.Pause(ui.id) else AudioCommand.Play(ui.id))
     }
 }
@@ -186,18 +186,22 @@ val StripEnd = 48.dp
     val color = if (live) deckColor(ui.id) else Ink.surface2
     Box(modifier) {
         Segmented(Modifier.fillMaxSize(), color) {
-            Key("", Modifier.width(StripEnd).fillMaxHeight(), color, usable, description = "${ui.id} jump backward", icon = Glyph.Back, style = KeyStyle.BARE) { model.jump(ui.id, -1) }
+            Key("", Modifier.width(StripEnd).fillMaxHeight(), color, usable, description = "${ui.id} jump backward", icon = Glyph.Back, style = KeyStyle.BARE, feedback = HapticFeedbackType.VirtualKey) { model.jump(ui.id, -1) }
             Divider(color)
-            ValueWheel("${ui.id} jump size", BEAT_CHOICES.map(::beatText), nearest(BEAT_CHOICES, ui.jumpBeats), ux, model, ui.id, Modifier.weight(1f).fillMaxHeight(), color, if (live && !gridded && ui.ready) "NO BPM" else "JUMP ${beatText(ui.jumpBeats)}", live = live, bare = true) { ui.jumpBeats = BEAT_CHOICES[it] }
+            ValueWheel("${ui.id} jump size", BEAT_CHOICES.map(::beatText), nearest(BEAT_CHOICES, ui.jumpBeats), ux, model, ui.id, Modifier.weight(1f).fillMaxHeight(), color, if (live && !gridded && ui.ready) "NO BPM" else "JUMP ${beatText(ui.jumpBeats)}", live = live, bare = true, edgeHaptics = false) { ui.jumpBeats = BEAT_CHOICES[it] }
             Divider(color)
-            Key("", Modifier.width(StripEnd).fillMaxHeight(), color, usable, description = "${ui.id} jump forward", icon = Glyph.Forward, style = KeyStyle.BARE) { model.jump(ui.id, 1) }
+            Key("", Modifier.width(StripEnd).fillMaxHeight(), color, usable, description = "${ui.id} jump forward", icon = Glyph.Forward, style = KeyStyle.BARE, feedback = HapticFeedbackType.VirtualKey) { model.jump(ui.id, 1) }
         }
         if (!live) PendingTag(Modifier.align(Alignment.TopCenter))
     }
 }
 
-/** Loop (engine): tap toggles, hold-wheel sets length, ÷2 / ×2 resize (same segment widths as the jump strip). Pulses while looping. */
+/**
+ * Loop (engine): tap toggles, hold-wheel sets length, ÷2 / ×2 resize (same segment widths as the jump strip). Pulses while looping.
+ * Haptics: toggle always; resize only while a loop is active.
+ */
 @Composable fun LoopStrip(ui: DeckUi, ux: UiModel, model: PlayerModel, modifier: Modifier) {
+    val haptic = LocalHapticFeedback.current
     val live = model.supports("loop")
     val snap = ui.snapshot
     val gridded = snap?.bpm != null
@@ -209,13 +213,13 @@ val StripEnd = 48.dp
     val pulse = if (active) (1 - beatPhase(position(ui) - (snap?.gridAnchorSeconds ?: 0.0), snap?.bpm)) * .3f else 0f
     Box(modifier) {
         Segmented(Modifier.fillMaxSize(), color) {
-            Key("÷2", Modifier.width(StripEnd).fillMaxHeight(), base, live, description = "${ui.id} halve loop", style = KeyStyle.BARE, textSize = 15) { model.resizeLoop(ui.id, LoopChange.HALVE) }
+            Key("÷2", Modifier.width(StripEnd).fillMaxHeight(), base, live, description = "${ui.id} halve loop", style = KeyStyle.BARE, textSize = 15, feedback = HapticFeedbackType.VirtualKey.takeIf { active }) { model.resizeLoop(ui.id, LoopChange.HALVE) }
             Divider(base)
             ValueWheel("${ui.id} loop size", LOOP_CHOICES.map(::beatText), nearest(LOOP_CHOICES, beats), ux, model, ui.id, Modifier.weight(1f).fillMaxHeight(), color,
-                if (live && !gridded && ui.ready) "NO BPM" else "LOOP ${beatText(beats)}", icon = Glyph.Loop, live = live, bare = true, pulse = pulse,
-                onTap = { if (usable) model.toggleLoop(ui.id) }) { model.submit(AudioCommand.LoopResize(ui.id, LoopChange.SET, LOOP_CHOICES[it])) }
+                if (live && !gridded && ui.ready) "NO BPM" else "LOOP ${beatText(beats)}", icon = Glyph.Loop, live = live, bare = true, pulse = pulse, edgeHaptics = active, tickHaptics = active,
+                onTap = { if (usable) { haptic.performHapticFeedback(HapticFeedbackType.VirtualKey); model.toggleLoop(ui.id) } }) { model.submit(AudioCommand.LoopResize(ui.id, LoopChange.SET, LOOP_CHOICES[it])) }
             Divider(base)
-            Key("×2", Modifier.width(StripEnd).fillMaxHeight(), base, live, description = "${ui.id} double loop", style = KeyStyle.BARE, textSize = 15) { model.resizeLoop(ui.id, LoopChange.DOUBLE) }
+            Key("×2", Modifier.width(StripEnd).fillMaxHeight(), base, live, description = "${ui.id} double loop", style = KeyStyle.BARE, textSize = 15, feedback = HapticFeedbackType.VirtualKey.takeIf { active }) { model.resizeLoop(ui.id, LoopChange.DOUBLE) }
         }
         if (!live) PendingTag(Modifier.align(Alignment.TopCenter))
     }
