@@ -37,7 +37,11 @@ enum class KeyStyle { BOX, PILL, BARE }
  */
 @Composable fun Key(
     text: String, modifier: Modifier, color: Color = Ink.accent, enabled: Boolean = true, engaged: Boolean = false, description: String = text,
-    icon: Glyph? = null, style: KeyStyle = KeyStyle.BOX, pulse: Float = 0f, textSize: Int = 13, textColor: Color? = null, pending: Boolean = false, longPress: (() -> Unit)? = null, action: () -> Unit,
+    icon: Glyph? = null, style: KeyStyle = KeyStyle.BOX, pulse: Float = 0f, textSize: Int = 13, textColor: Color? = null, pending: Boolean = false, longPress: (() -> Unit)? = null,
+    /** Tap haptic; null = silent. */
+    feedback: HapticFeedbackType? = HapticFeedbackType.TextHandleMove,
+    /** Per-frame glow read at draw time (beat pulse) — no recomposition per engine tick. */
+    pulseOf: (() -> Float)? = null, action: () -> Unit,
 ) {
     val haptic = LocalHapticFeedback.current
     val interaction = remember { MutableInteractionSource() }
@@ -47,11 +51,11 @@ enum class KeyStyle { BOX, PILL, BARE }
     val tint = if (enabled) color else Ink.surface2
     val shape = if (style == KeyStyle.PILL) RoundedCornerShape(50) else RoundedCornerShape(2.dp)
     val inset = if (style == KeyStyle.BARE) 0.dp else 3.dp
-    Box(modifier.halo(tint, (heat + pulse) * .8f, inset + 3.dp, style == KeyStyle.PILL).semantics { contentDescription = description; if (!enabled) disabled() }
-        .then(if (longPress == null) Modifier.clickable(interactionSource = interaction, indication = null, enabled = enabled || pending) { haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove); action() }
-            else Modifier.combinedClickable(interactionSource = interaction, indication = null, enabled = enabled || pending, onLongClick = { haptic.performHapticFeedback(HapticFeedbackType.LongPress); longPress() }) { haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove); action() })
+    Box(modifier.halo(tint, { (heat + pulse + (pulseOf?.invoke() ?: 0f)) * .8f }, inset + 3.dp, style == KeyStyle.PILL).semantics { contentDescription = description; if (!enabled) disabled() }
+        .then(if (longPress == null) Modifier.clickable(interactionSource = interaction, indication = null, enabled = enabled || pending) { feedback?.let(haptic::performHapticFeedback); action() }
+            else Modifier.combinedClickable(interactionSource = interaction, indication = null, enabled = enabled || pending, onLongClick = { haptic.performHapticFeedback(HapticFeedbackType.LongPress); longPress() }) { feedback?.let(haptic::performHapticFeedback); action() })
         .padding(inset).graphicsLayer { scaleX = scale; scaleY = scale }
-        .then(if (style == KeyStyle.BARE) Modifier else Modifier.clip(shape).background(Ink.panel).background(tint.copy(alpha = .28f * heat)).border(1.5.dp, tint.copy(alpha = if (engaged || pressed) 1f else .6f), shape))
+        .then(if (style == KeyStyle.BARE) Modifier else Modifier.clip(shape).then(dev.manadj.app.viz.Glass.fill(Ink.panel, if (style == KeyStyle.PILL) dev.manadj.app.viz.Glass.PILL else 2f)).background(tint.copy(alpha = .28f * heat)).border(1.5.dp, tint.copy(alpha = if (engaged || pressed) 1f else .6f), shape))
         .padding(horizontal = 3.dp), contentAlignment = Alignment.Center) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
             val ink = textColor ?: if (engaged || pressed) Ink.text else tint
@@ -148,11 +152,11 @@ enum class KnobKind(val neutral: Double) { TRIM(.5), EQ_LOW(.5), EQ_MID(.5), EQ_
 /**
  * Double-tap target (#125), desktop DeckKeys double-tap: EQ uses invertControl(v, neutral) = v < neutral/2 ?
  * neutral : 0 (kill ↔ neutral, nearer stop; a boost goes to kill); FILTER resets to centre; FX depth to dry.
- * TRIM has no desktop key; it takes the EQ rule (human: neutral ↔ minimum).
+ * TRIM always resets to neutral, never minimum (UH10).
  */
 fun doubleTapTarget(kind: KnobKind, value: Double): Double = when (kind) {
-    KnobKind.EQ_LOW, KnobKind.EQ_MID, KnobKind.EQ_HIGH, KnobKind.TRIM -> if (value < kind.neutral / 2) kind.neutral else 0.0
-    KnobKind.FILTER, KnobKind.FX_DEPTH -> kind.neutral
+    KnobKind.EQ_LOW, KnobKind.EQ_MID, KnobKind.EQ_HIGH -> if (value < kind.neutral / 2) kind.neutral else 0.0
+    KnobKind.TRIM, KnobKind.FILTER, KnobKind.FX_DEPTH -> kind.neutral
 }
 
 private fun mix(a: Color, b: Color, t: Float) = Color(a.red + (b.red - a.red) * t, a.green + (b.green - a.green) * t, a.blue + (b.blue - a.blue) * t)
@@ -275,7 +279,7 @@ fun DrawScope.drawKnob(kind: KnobKind, value: Double, r: Float, enabled: Boolean
         // Label sits in the arc's open bottom, so it can only belong to this knob.
         Box(contentAlignment = Alignment.BottomCenter) {
             Canvas(Modifier.size(size).halo(knobColor(kind, value), heat * .6f, 4.dp, round = true)) { drawKnob(kind, value, this.size.minDimension / 2 - 4.dp.toPx(), interactive) }
-            Text(label, Modifier.offset(y = 6.dp).background(Color.Black).padding(horizontal = 2.dp), color = when { !live -> Ink.muted; held -> labelColor ?: Ink.text; else -> labelColor ?: Ink.muted }, size = 9, bold = true)
+            if (!dev.manadj.app.viz.Glass.hideLabel(kind)) Text(label, Modifier.offset(y = 6.dp).background(dev.manadj.app.viz.Glass.chip(Color.Black)).padding(horizontal = 2.dp), color = when { !live -> Ink.muted; held -> labelColor ?: Ink.text; else -> labelColor ?: Ink.muted }, size = 9, bold = true)
         }
         if (!live && tagPending) PendingTag(Modifier.align(Alignment.TopEnd))
     }
@@ -331,11 +335,14 @@ fun knobReadout(kind: KnobKind, v: Double): String = when (kind) {
  * Value wheel: slide sideways to scroll values, lift to commit (jump size, loop length, FX effect/target/beats).
  * No [onTap] (pure value cells): the wheel opens on touch-down (#135). With [onTap]: tap = the action; the wheel
  * opens after a 350 ms hold or at once on a sideways drag. Feedback floats above the control.
+ * Haptics: [edgeHaptics] = buzz on open / commit / cancel; [tickHaptics] = tick per value step.
  */
 @Composable fun ValueWheel(
     label: String, choices: List<String>, index: Int, ui: UiModel, model: PlayerModel, deck: DeckId, modifier: Modifier, color: Color,
-    text: String = choices[index], icon: Glyph? = null, live: Boolean = true, pulse: Float = 0f, bare: Boolean = false, tagPending: Boolean = true, onTap: (() -> Unit)? = null, onIndex: (Int) -> Unit,
+    text: String = choices[index], icon: Glyph? = null, live: Boolean = true, pulse: Float = 0f, bare: Boolean = false, tagPending: Boolean = true, edgeHaptics: Boolean = true, tickHaptics: Boolean = true, pulseOf: (() -> Float)? = null, onTap: (() -> Unit)? = null, onIndex: (Int) -> Unit,
 ) {
+    val edgeBuzz by rememberUpdatedState(edgeHaptics)
+    val tickBuzz by rememberUpdatedState(tickHaptics)
     val interactive = live || ui.previewPending
     val latest by rememberUpdatedState(index)
     val setter by rememberUpdatedState(onIndex)
@@ -347,7 +354,7 @@ fun knobReadout(kind: KnobKind, v: Double): String = when (kind) {
     val heat by animateFloatAsState(if (held) 1f else 0f, tween(if (held) 60 else 280), label = "wheel")
     val tint = if (interactive) color else Ink.surface2
     Box(modifier.onGloballyPositioned { root = it.positionInRoot(); width = it.size.width.toFloat() }
-        .halo(tint, (heat * .8f + pulse).coerceAtMost(1f), 6.dp)
+        .halo(tint, { (heat * .8f + pulse + (pulseOf?.invoke() ?: 0f)).coerceAtMost(1f) }, 6.dp)
         .semantics { contentDescription = label; stateDescription = choices[index]; onClick { if (!interactive) ui.pending(label) else tap?.invoke(); true } }
         .pointerInput(label, choices, interactive) {
             if (!interactive) { awaitEachGesture { awaitFirstDown(); ui.pending(label) }; return@pointerInput }
@@ -361,7 +368,7 @@ fun knobReadout(kind: KnobKind, v: Double): String = when (kind) {
                     if (open) return
                     open = true
                     ui.wheel = WheelFeedback(label, choices, chosen, root.x + width / 2, root.y, tint)
-                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    if (edgeBuzz) haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                 }
                 if (tap == null) openWheel()
                 val hold = scope.launch { delay(350); openWheel() }
@@ -373,7 +380,7 @@ fun knobReadout(kind: KnobKind, v: Double): String = when (kind) {
                         val dx = change.position.x - down.position.x
                         if (open) {
                             val next = (start + (dx / 30.dp.toPx()).roundToInt()).coerceIn(choices.indices)
-                            if (next != chosen) { chosen = next; setter(next); haptic.performHapticFeedback(HapticFeedbackType.SegmentFrequentTick) }
+                            if (next != chosen) { chosen = next; setter(next); if (tickBuzz) haptic.performHapticFeedback(HapticFeedbackType.SegmentFrequentTick) }
                             ui.wheel = WheelFeedback(label, choices, chosen, root.x + width / 2, root.y, tint)
                             change.consume()
                         } else if (abs(change.position.y - down.position.y) > 12.dp.toPx()) { cancelled = true; break }
@@ -384,12 +391,12 @@ fun knobReadout(kind: KnobKind, v: Double): String = when (kind) {
                 finally {
                     hold.cancel(); held = false
                     if (cancelled && open) setter(start)
-                    if (open) haptic.performHapticFeedback(if (cancelled) HapticFeedbackType.Reject else HapticFeedbackType.Confirm)
+                    if (open && edgeBuzz) haptic.performHapticFeedback(if (cancelled) HapticFeedbackType.Reject else HapticFeedbackType.Confirm)
                     if (ui.wheel?.label == label) ui.wheel = null
                     model.finishGesture(id, cancelled && open)
                 }
             }
-        }.padding(3.dp).then(if (bare) Modifier else Modifier.clip(RoundedCornerShape(2.dp)).background(Ink.panel).background(tint.copy(alpha = .06f + .22f * heat))), contentAlignment = Alignment.Center) {
+        }.padding(3.dp).then(if (bare) Modifier else Modifier.clip(RoundedCornerShape(2.dp)).then(dev.manadj.app.viz.Glass.fill(Ink.panel)).background(tint.copy(alpha = .06f + .22f * heat))), contentAlignment = Alignment.Center) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
             if (icon != null) GlyphIcon(icon, tint, 15.dp)
             Text(text, color = if (interactive) tint else Ink.muted, size = 15, bold = true)
@@ -455,7 +462,7 @@ fun knobReadout(kind: KnobKind, v: Double): String = when (kind) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("−", color = if (ready) color else Ink.muted, size = 15, bold = true)
             Spacer(Modifier.weight(1f))
-            Text(if (ui.bend == 0.0) "BEND" else "%+.1f%%".format(ui.bend), Modifier.background(Color.Black.copy(alpha = .6f)).padding(horizontal = 2.dp), if (ready) color else Ink.muted, 11, true)
+            Text(if (ui.bend == 0.0) "BEND" else "%+.1f%%".format(ui.bend), Modifier.background(dev.manadj.app.viz.Glass.chip(Color.Black.copy(alpha = .6f))).padding(horizontal = 2.dp), if (ready) color else Ink.muted, 11, true)
             Spacer(Modifier.weight(1f))
             Text("+", color = if (ready) color else Ink.muted, size = 15, bold = true)
         }

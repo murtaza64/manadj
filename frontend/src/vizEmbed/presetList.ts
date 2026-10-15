@@ -1,0 +1,40 @@
+/**
+ * Phone visualizer presets (#394/#401), best first: the curated GL set plus the top genepool candidates
+ * (score v3) that run as GL shaders or light canvas scenes. The single source of truth: the embed bundles
+ * these, and the build writes `presets.json` (id, name) for the Android settings page.
+ */
+export const PHONE_PRESETS: ReadonlyArray<readonly [id: string, name: string]> = [
+  ['voyage', 'Voyage'],
+  ['g02-voyage-prime', 'Voyage Prime'],
+  ['g05-materia-shards', 'Materia Shards'],
+  ['g02-materia', 'Materia'],
+  ['g03-materia-deep', 'Materia Deep'],
+  ['g07-materia-metric', 'Materia Metric'],
+  ['g04-materia-arc', 'Materia Arc'],
+  ['g05-materia-mercury', 'Materia Mercury'],
+  ['g03-solar-crown', 'Solar Crown'],
+  ['g07-seasons-neon', 'Seasons Neon'],
+  ['g07-voyage-hardcut', 'Voyage Hardcut'],
+  ['g05-voyage-deckmix', 'Voyage Deckmix'],
+  ['tunnel', 'Tunnel'],
+  ['g04-tunnel-saga', 'Tunnel Saga'],
+  ['g05-tunnel-deckmix', 'Tunnel Deckmix'],
+  ['g02-mirror-ladder', 'Mirror Ladder'],
+  ['g07-crt', 'CRT'],
+  ['g01-warp-nebula', 'Warp Nebula'],
+  ['g06-orrery', 'Orrery'],
+  ['g01-odyssey-drift', 'Odyssey Drift'],
+  ['g05-odyssey-cracks', 'Odyssey Cracks'],
+  ['g03-charge-bloom', 'Charge Bloom'],
+  ['g06-nursery', 'Nursery'],
+  ['odyssey', 'Odyssey'],
+  ['aurora', 'Aurora'],
+  ['plasma', 'Plasma'],
+  ['silk', 'Silk'],
+  ['strata', 'Strata'],
+  ['nova', 'Nova'],
+  ['siphon', 'Siphon'],
+  ['ladder', 'Ladder'],
+  ['pulse', 'Pulse'],
+  ['orbit', 'Orbit'],
+];

@@ -42,6 +42,7 @@
 .session-when { display: flex; gap: var(--space-6); align-items: baseline; grid-column: 1; grid-row: 2; color: var(--subtext0); font-size: var(--font-small); }
 .session-duration { grid-column: 1; grid-row: 1; font-size: var(--font-large); font-weight: 700; font-variant-numeric: tabular-nums; }
 .session-live { color: var(--success); }
+.session-origin { color: var(--orange); font-weight: 700; }
 .session-preview { grid-column: 2; grid-row: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .session-preview-more { color: var(--subtext0); }
 .session-stats { grid-column: 2; grid-row: 2; display: flex; gap: var(--space-12); color: var(--subtext0); font-size: var(--font-small); flex-wrap: wrap; }

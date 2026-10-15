@@ -111,10 +111,12 @@ sealed class BrowseNode(val key: String) {
 /** A child entry of a container node, with its track count (over the current filters) where meaningful. */
 data class BrowseEntry(val node: BrowseNode, val title: String, val count: Int?, val color: Int? = null, val container: Boolean = false)
 
+private val KEY_RE = Regex("^(\\d{1,2})([md])$")
+
 /** Desktop key order (engine key id: 1d, 1m, 2d, 2m … 12m; trackSort.ts sorts by it). */
 fun keyOrder(key: String?): Int? {
     val ok = toOpenKey(key) ?: return null
-    val m = Regex("^(\\d{1,2})([md])$").matchEntire(ok) ?: return null
+    val m = KEY_RE.matchEntire(ok) ?: return null
     return (m.groupValues[1].toInt() - 1) * 2 + if (m.groupValues[2] == "m") 1 else 0
 }
 

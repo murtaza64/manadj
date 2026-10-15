@@ -28,6 +28,9 @@ import dev.manadj.audio.QuantizeMode
 
 /** Device orientation picks the layout: portrait one-screen, landscape dense. No manual view switch. */
 @Composable fun PerformanceApp(model: PlayerModel, ux: UiModel, pick: (DeckId) -> Unit) {
+    // Session recording (#395, session lane): always on while the app runs; re-points after recreation.
+    val appContext = androidx.compose.ui.platform.LocalContext.current
+    LaunchedEffect(model) { dev.manadj.app.session.SessionRecording.attach(model, appContext) }
     for (id in model.visibleDecks) {
         val ui = model.decks.getValue(id)
         LaunchedEffect(ui.source?.id) { ux.ensureWave(ui.source, model.visibleDecks.mapNotNull { model.decks.getValue(it).source?.id }.toSet()); ux.extras.getValue(id).history.clear(); if (ui.source != null) ux.loadedAt[id] = System.nanoTime() else ux.loadedAt.remove(id) }
@@ -41,12 +44,13 @@ import dev.manadj.audio.QuantizeMode
     val canQuantize = model.supports("quantize")
     LaunchedEffect(canQuantize) { if (canQuantize) ux.setQuantize(model) }
     // Played-this-session: a library deck that starts playing.
+    // Snapshot reads here would recompose the whole app per engine tick (UH9): derived only.
     for (id in model.visibleDecks) {
-        val playingTrack = if (model.decks.getValue(id).snapshot?.playing == true) dev.manadj.app.library.LibraryHolder.trackOn(model, id)?.toLong() else null
-        LaunchedEffect(playingTrack) { if (playingTrack != null && playingTrack !in ux.played) ux.played.add(playingTrack) }
+        val playingTrack by remember(id) { derivedStateOf { if (model.decks.getValue(id).snapshot?.playing == true) dev.manadj.app.library.LibraryHolder.trackOn(model, id)?.toLong() else null } }
+        LaunchedEffect(playingTrack) { val t = playingTrack; if (t != null && t !in ux.played) ux.played.add(t) }
     }
     // Record what was heard (strip per source position) so the waveform behind the playhead keeps it.
-    val anyPlaying = model.visibleDecks.any { model.decks.getValue(it).snapshot?.playing == true }
+    val anyPlaying by remember { derivedStateOf { model.visibleDecks.any { model.decks.getValue(it).snapshot?.playing == true } } }
     LaunchedEffect(anyPlaying) {
         while (anyPlaying) {
             withFrameNanos { }
@@ -58,16 +62,15 @@ import dev.manadj.audio.QuantizeMode
     var screen by remember { mutableStateOf(ScreenShape()) }
     CompositionLocalProvider(LocalScreenShape provides screen) {
     BoxWithConstraints(Modifier.fillMaxSize().background(Ink.background).onGloballyPositioned { val s = ScreenShape.of(view); if (s != screen) { android.util.Log.d("ScreenSafe", "shape $screen -> $s"); screen = s } }) {
+        dev.manadj.app.viz.VizBackdrop(model, ux, Modifier.fillMaxSize()) // visualizer spike (android-viz #394): Settings › Visualizer
         val band = with(LocalDensity.current) { screen.topBand.toDp() }
         val landscape = maxWidth > maxHeight
         val screenHeight = maxHeight
-        val modal = model.replace != null || ux.settings || model.outputPanel
+        val modal = model.replace != null || model.outputPanel
         val blur by animateDpAsState(if (modal) 8.dp else 0.dp, tween(220), label = "backdrop")
         Box(Modifier.fillMaxSize().blur(blur)) {
-            if (landscape) Landscape(model, ux, pick, Modifier.fillMaxSize()) else Portrait(model, ux, pick, Modifier.fillMaxSize(), screenHeight, band)
-        }
-        AnimatedVisibility(ux.settings, Modifier.align(Alignment.TopCenter).padding(top = band), enter = fadeIn(tween(150)) + slideInVertically { -it / 4 }, exit = fadeOut(tween(120))) {
-            SettingsSheet(model, ux, Modifier.widthIn(max = 460.dp).fillMaxWidth().heightIn(max = screenHeight - band - 16.dp))
+            // One-handed portrait spike (android-onehand): Settings › Layout picks a dev.manadj.app.onehand layout; STANDARD = this file's Portrait.
+            if (landscape) Landscape(model, ux, pick, Modifier.fillMaxSize()) else if (dev.manadj.app.onehand.OneHand.layout(view.context) != dev.manadj.app.onehand.OneHandLayout.STANDARD) dev.manadj.app.onehand.OneHandApp(model, ux, pick, Modifier.fillMaxSize(), band) else Portrait(model, ux, pick, Modifier.fillMaxSize(), screenHeight, band)
         }
         if (model.outputPanel) OutputPanel(model, Modifier.fillMaxSize())
         if (ux.sessions) dev.manadj.app.session.SessionScreen(model, ux, Modifier.fillMaxSize().padding(top = band))
@@ -80,7 +83,7 @@ import dev.manadj.audio.QuantizeMode
     }
 }
 
-@Composable private fun DetailWave(ui: DeckUi, model: PlayerModel, ux: UiModel, modifier: Modifier, vertical: Boolean = false) {
+@Composable internal fun DetailWave(ui: DeckUi, model: PlayerModel, ux: UiModel, modifier: Modifier, vertical: Boolean = false) {
     val wave = ux.waves[ui.source?.id ?: ""]
     val e = ux.extras.getValue(ui.id)
     val moving = ui.snapshot.let { it?.playing == true || it?.previewing == true }
@@ -127,8 +130,8 @@ import dev.manadj.audio.QuantizeMode
 
 
 /**
- * Portrait centre (#153): a 2-column grid of equal keys under the FX card — QUANT·H / XF, SESSIONS / SETTINGS —
- * top-aligned with the same gaps as the FX card; the space below is left free for future keys.
+ * Portrait centre (#153): a 2-column grid of equal keys — QUANT·H / XF, SESSIONS / SETTINGS — top-aligned, with the
+ * FX card below at the bottom of the mixer (UH16); the space between is left free for future keys.
  */
 @Composable private fun GlobalControls(model: PlayerModel, ux: UiModel, modifier: Modifier, gap: Dp) {
     val mode by remember { derivedStateOf { model.output?.quantizeMode ?: ux.quantizeMode } }
@@ -144,10 +147,14 @@ import dev.manadj.audio.QuantizeMode
         }
         Row(h, horizontalArrangement = Arrangement.spacedBy(gap)) {
             SessionsKey(ux, Modifier.weight(1f).fillMaxHeight())
-            Key("", Modifier.weight(1f).fillMaxHeight(), Ink.muted, description = "Settings", icon = Glyph.Gear, style = KeyStyle.PILL, textSize = 11) { ux.settings = true }
+            SettingsKey(model, ux, Modifier.weight(1f).fillMaxHeight())
         }
     }
 }
+
+/** Gear: Settings takes over like the browser (#396); lit while open. */
+@Composable private fun SettingsKey(model: PlayerModel, ux: UiModel, modifier: Modifier) =
+    Key("", modifier, if (ux.settings) Ink.accent else Ink.muted, engaged = ux.settings, description = "Settings", icon = Glyph.Gear, style = KeyStyle.PILL, textSize = 11) { ux.toggleSettings(model) }
 
 /** Session replay (#153; moved out of Settings). */
 @Composable private fun SessionsKey(ux: UiModel, modifier: Modifier, textSize: Int = 11) =
@@ -164,7 +171,7 @@ import dev.manadj.audio.QuantizeMode
  * the browser covers — in landscape the outgoing deck (coveredDeck, decided once on open); portrait covers all.
  */
 @Composable fun BrowseKey(model: PlayerModel, ux: UiModel, modifier: Modifier, textSize: Int = 12) {
-    fun toggle() { model.browser = if (model.browser != null) null else coveredDeck(mixOf(model, ux, DeckId.A), mixOf(model, ux, DeckId.B)) }
+    fun toggle() { ux.settings = false; model.browser = if (model.browser != null) null else coveredDeck(mixOf(model, ux, DeckId.A), mixOf(model, ux, DeckId.B)) }
     // Toggles on pointer-down (the slide starts with the press); the click only covers accessibility actions.
     var downToggled by remember { mutableStateOf(false) }
     Key("BROWSE", modifier.pointerInput(Unit) {
@@ -205,33 +212,40 @@ fun mixOf(model: PlayerModel, ux: UiModel, id: DeckId): DeckMix {
         Column(Modifier.fillMaxSize().browserSwipeUp(sheet), verticalArrangement = Arrangement.spacedBy(gap)) {
             TopBar(model, pad.fillMaxWidth().height(maxOf(band, 44.dp)))
             if (ux.outputDebug) Box(pad) { OutputLine(model) }
-            Column(pad.onGloballyPositioned { sheetTop = (it.positionInParent().y + it.size.height).toInt() }, verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            Column((if (dev.manadj.app.viz.Glass.on) Modifier else pad).onGloballyPositioned { sheetTop = (it.positionInParent().y + it.size.height).toInt() }, verticalArrangement = Arrangement.spacedBy(3.dp)) {
                 for (ui in listOf(a, b)) DetailWave(ui, model, ux, Modifier.fillMaxWidth().height(waveHeight))
             }
+            // UH21: the sheet pushes everything below the waves up and out (clipped under the waves) instead of
+            // covering it. Body below kept at its old indentation so concurrent lane edits merge cleanly.
+            Box(Modifier.fillMaxWidth().weight(1f).clipToBounds()) { Column(Modifier.fillMaxSize().graphicsLayer {
+                val push = (sheet.height - sheet.offset).coerceIn(0f, sheet.height)
+                translationY = -push; alpha = if (push >= size.height - 1f && push > 0f) 0f else 1f
+            }, verticalArrangement = Arrangement.spacedBy(gap)) {
             Row(pad.fillMaxWidth().weight(1f)) {
-                KnobColumn(a, ux, model, Modifier.width(58.dp).fillMaxHeight())
+                KnobColumn(a, ux, model, Modifier.width(58.dp).fillMaxHeight().then(dev.manadj.app.viz.Glass.softPanel()))
                 ChannelFader(a, model, Modifier.width(54.dp).fillMaxHeight())
                 Column(Modifier.weight(1f).fillMaxHeight().padding(horizontal = 4.dp), verticalArrangement = Arrangement.spacedBy(gap)) {
-                    FxSection(ux, model, Modifier.fillMaxWidth(), compact = true)
+                    // UH16: app keys on top; FX sits directly above the crossfader (or, XF off, directly above BROWSE).
                     GlobalControls(model, ux, Modifier.fillMaxWidth().weight(1f), gap)
-                    Crossfader(model, ux, Modifier.fillMaxWidth().height(48.dp))
+                    FxSection(ux, model, Modifier.fillMaxWidth(), compact = true)
+                    if (ux.crossfaderEnabled) Crossfader(model, ux, Modifier.fillMaxWidth().height(48.dp))
                 }
                 ChannelFader(b, model, Modifier.width(54.dp).fillMaxHeight())
-                KnobColumn(b, ux, model, Modifier.width(58.dp).fillMaxHeight())
+                KnobColumn(b, ux, model, Modifier.width(58.dp).fillMaxHeight().then(dev.manadj.app.viz.Glass.softPanel()))
             }
             // Minimaps flank the centre BROWSE key (the #94 swap is landscape-only, #101).
-            Row(pad.fillMaxWidth().height(if (tight) 36.dp else 44.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                Minimap(a, model, ux.waves[a.source?.id ?: ""], Modifier.weight(1f).fillMaxHeight(), preview = ux.seekPreview, ux = ux)
+            Row((if (dev.manadj.app.viz.Glass.on) Modifier else pad).fillMaxWidth().height(if (tight) 36.dp else 44.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                Minimap(a, model, ux.waves[a.source?.id ?: ""], Modifier.weight(1f).fillMaxHeight(), preview = ux.seekPreview, ux = ux, compactCues = true)
                 BrowseKey(model, ux, Modifier.width(84.dp).fillMaxHeight())
-                Minimap(b, model, ux.waves[b.source?.id ?: ""], Modifier.weight(1f).fillMaxHeight(), preview = ux.seekPreview, ux = ux)
+                Minimap(b, model, ux.waves[b.source?.id ?: ""], Modifier.weight(1f).fillMaxHeight(), preview = ux.seekPreview, ux = ux, compactCues = true)
             }
             // Deck control areas; the pitch panel replaces one deck's half in place (#105).
             Box(Modifier.fillMaxWidth()) {
                 Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(gap)) {
-                    Row(pad.fillMaxWidth().height(28.dp), horizontalArrangement = Arrangement.spacedBy(DeckGap)) { for (ui in listOf(a, b)) StemsStrip(ui, ux, model, Modifier.weight(1f).fillMaxHeight()) }
-                    Row(pad.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(DeckGap)) { for (ui in listOf(a, b)) Pads(ui, model, ux, Modifier.weight(1f), 4, if (tight) 46.dp else PadRow) }
+                    Row(pad.fillMaxWidth().height(28.dp), horizontalArrangement = Arrangement.spacedBy(DeckGap)) { for (ui in listOf(a, b)) StemsStrip(ui, ux, model, Modifier.weight(1f).fillMaxHeight().underPitchPanel(model, ui.id)) }
+                    Row(pad.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(DeckGap)) { for (ui in listOf(a, b)) Pads(ui, model, ux, Modifier.weight(1f).underPitchPanel(model, ui.id), 4, if (tight) 46.dp else PadRow) }
                     Row(pad.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(DeckGap)) {
-                        for (ui in listOf(a, b)) Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(gap)) {
+                        for (ui in listOf(a, b)) Column(Modifier.weight(1f).underPitchPanel(model, ui.id), verticalArrangement = Arrangement.spacedBy(gap)) {
                             LoopStrip(ui, ux, model, Modifier.fillMaxWidth().height(ControlRow).screenSafe())
                             JumpStrip(ui, ux, model, Modifier.fillMaxWidth().height(ControlRow).screenSafe())
                             Row(Modifier.fillMaxWidth().height(TransportRow).screenSafe()) { CueKey(ui, model, Modifier.weight(1f).fillMaxHeight()); PlayKey(ui, model, Modifier.weight(1f).fillMaxHeight()) }
@@ -244,23 +258,35 @@ fun mixOf(model: PlayerModel, ux: UiModel, id: DeckId): DeckMix {
                     for (id in listOf(DeckId.A, DeckId.B)) Box(Modifier.weight(1f).fillMaxHeight()) { PitchArea(model, ux, id, Modifier.fillMaxSize()) }
                 }
             }
+            } } // UH21 push wrapper
         }
-        // The browser sheet covers everything below the waves (CUE/PLAY row at its foot); translate-only (#132).
+        // The browser sheet takes everything below the waves (CUE/PLAY row at its foot); translate-only (#132).
         val topDp = with(LocalDensity.current) { sheetTop.toDp() }
         BrowserSheet(sheet, Modifier.fillMaxSize().padding(top = topDp)) {
-            Column(Modifier.fillMaxSize().background(Ink.background)) {
+            Column(Modifier.fillMaxSize().then(dev.manadj.app.viz.Glass.sheet(Ink.background))) {
+                // Grabber (UH14): the sheet swipes down to dismiss.
+                Box(Modifier.fillMaxWidth().height(16.dp).semantics { contentDescription = "Drag down to close browser" }, contentAlignment = Alignment.Center) {
+                    Box(Modifier.size(40.dp, 4.dp).clip(androidx.compose.foundation.shape.RoundedCornerShape(50)).background(Ink.muted.copy(alpha = .7f)))
+                }
                 LibraryPanel(model, ux, Modifier.fillMaxWidth().weight(1f), pick, tapTarget = null)
                 Row(pad.fillMaxWidth().height(TransportRow).screenSafe(), horizontalArrangement = Arrangement.spacedBy(DeckGap)) {
                     for (ui in listOf(a, b)) Row(Modifier.weight(1f).fillMaxHeight()) { CueKey(ui, model, Modifier.weight(1f).fillMaxHeight()); PlayKey(ui, model, Modifier.weight(1f).fillMaxHeight()) }
                 }
             }
         }
+        // Settings (#396) takes the browser's place: everything below the waves.
+        val settle = spring<androidx.compose.ui.unit.IntOffset>(dampingRatio = 1f, stiffness = 900f)
+        AnimatedVisibility(ux.settings, Modifier.fillMaxSize().padding(top = topDp), enter = slideInVertically(settle) { it }, exit = slideOutVertically(settle) { it }) {
+            SettingsPanel(model, ux, Modifier.fillMaxSize().padding(top = 3.dp))
+        }
     }
 }
 
 /** The in-place pitch panel over [id]'s control area: opens/closes with a short rigid fade + slide. */
 @Composable private fun PitchArea(model: PlayerModel, ux: UiModel, id: DeckId, modifier: Modifier) {
-    AnimatedVisibility(model.pitchDrawer == id, modifier, enter = fadeIn(tween(120)) + slideInVertically(tween(160)) { it / 14 }, exit = fadeOut(tween(110)) + slideOutVertically(tween(140)) { it / 14 }) {
+    // #400: slides up from the bottom edge of the deck's control area (clipped there) and replaces the controls.
+    AnimatedVisibility(model.pitchDrawer == id, modifier.clipToBounds(), enter = slideInVertically(tween(240, easing = FastOutSlowInEasing)) { it } + fadeIn(tween(140)),
+        exit = slideOutVertically(tween(200, easing = FastOutSlowInEasing)) { it } + fadeOut(tween(160, delayMillis = 40))) {
         PitchPanel(model.decks.getValue(id), model, ux, Modifier.fillMaxSize())
     }
 }
@@ -305,43 +331,59 @@ private enum class PaneKind { LEFT_SLOT, RIGHT_SLOT, BOTH_LEFT, BOTH_RIGHT }
             PaneKind.BOTH_LEFT -> (s - sidePx) * bothPx / sidePx
             PaneKind.BOTH_RIGHT -> screenPx - bothPx + (s + sidePx) * bothPx / sidePx
         }
+        // Settings (#396) takes the wide browser's place: the mixer slides to the right edge, settings covers both decks.
+        val stripKind = if (ux.settings) PaneKind.BOTH_LEFT else kind
         val shift = remember { androidx.compose.animation.core.Animatable(0f) }
-        LaunchedEffect(kind, sidePx) { shift.animateTo(goalOf(kind), androidx.compose.animation.core.spring(dampingRatio = 1f, stiffness = 1200f)) }
+        LaunchedEffect(stripKind, sidePx) { shift.animateTo(goalOf(stripKind), androidx.compose.animation.core.spring(dampingRatio = 1f, stiffness = 1200f)) }
         // The pane keeps its kind/target while sliding out; composed once opened, then kept (no build on press).
         var pane by remember { mutableStateOf<PaneKind?>(null) }
         var paneTarget by remember { mutableStateOf<DeckId?>(null) }
         LaunchedEffect(kind, targetDeck) { if (kind != null) { pane = kind; paneTarget = if (kind == PaneKind.BOTH_LEFT || kind == PaneKind.BOTH_RIGHT) null else targetDeck } }
+        // UH21: the wide pane's covered deck fades out as the pane slides over it (slot panes push the deck off-screen).
+        fun covered(id: DeckId) = when {
+            id == DeckId.A && pane == PaneKind.BOTH_LEFT -> (shift.value / sidePx).coerceIn(0f, 1f)
+            id == DeckId.B && pane == PaneKind.BOTH_RIGHT -> (-shift.value / sidePx).coerceIn(0f, 1f)
+            else -> 0f
+        }
         val stripFrame = remember(shift) { SafeFrame { shift.value } }
         CompositionLocalProvider(LocalSafeFrame provides stripFrame) {
             Row(Modifier.width(screen).fillMaxHeight().graphicsLayer { translationX = shift.value }.padding(horizontal = 6.dp)) {
-                DeckSide(a, model, ux, pick, Modifier.weight(1f).fillMaxHeight())
-                Column(Modifier.width(mixerWidth).fillMaxHeight().padding(horizontal = DeckGap), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Row(Modifier.fillMaxWidth().weight(1f)) {
-                        KnobColumn(a, ux, model, Modifier.width(54.dp).fillMaxHeight().padding(top = 4.dp), 34.dp)
-                        ChannelFader(a, model, Modifier.width(48.dp).fillMaxHeight())
-                        Row(Modifier.weight(1f).fillMaxHeight().padding(horizontal = 3.dp), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-                            for (ui in listOf(a, b)) DetailWave(ui, model, ux, Modifier.weight(1f).fillMaxHeight(), vertical = true)
-                        }
-                        ChannelFader(b, model, Modifier.width(48.dp).fillMaxHeight())
-                        KnobColumn(b, ux, model, Modifier.width(54.dp).fillMaxHeight().padding(top = 4.dp), 34.dp)
+                DeckSide(a, model, ux, pick, Modifier.weight(1f).fillMaxHeight().graphicsLayer { alpha = 1f - covered(DeckId.A) })
+                // XF off (UH13): the waves leave the knob/fader row and run the full mixer height to the screen edge,
+                // under the XF row (crossfader slot left empty) and the FX card (scrimmed for legibility).
+                val xf = ux.crossfaderEnabled
+                Box(Modifier.width(mixerWidth).fillMaxHeight().padding(horizontal = DeckGap)) {
+                    @Composable fun Waves(m: Modifier) = Row(m, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                        for (ui in listOf(a, b)) DetailWave(ui, model, ux, Modifier.weight(1f).fillMaxHeight(), vertical = true)
                     }
-                    // Symmetric flanks keep the crossfader centred at full width (#153): two stacked equal keys each,
-                    // Q·H over settings left, SESSIONS over BROWSE right (#94 swap).
-                    Row(Modifier.fillMaxWidth().height(80.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        val key = Modifier.width(76.dp).height(36.dp)
-                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            QuantizeKey(model, ux, key)
-                            Key("", key, Ink.muted, description = "Settings", icon = Glyph.Gear, style = KeyStyle.PILL) { ux.settings = true }
+                    if (!xf) Waves(Modifier.fillMaxHeight().fillMaxWidth().padding(horizontal = 54.dp + 48.dp + 3.dp))
+                    Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Row(Modifier.fillMaxWidth().weight(1f)) {
+                            KnobColumn(a, ux, model, Modifier.width(54.dp).fillMaxHeight().then(dev.manadj.app.viz.Glass.softPanel()).padding(top = 4.dp), 34.dp)
+                            ChannelFader(a, model, Modifier.width(48.dp).fillMaxHeight())
+                            if (xf) Waves(Modifier.weight(1f).fillMaxHeight().padding(horizontal = 3.dp)) else Spacer(Modifier.weight(1f))
+                            ChannelFader(b, model, Modifier.width(48.dp).fillMaxHeight())
+                            KnobColumn(b, ux, model, Modifier.width(54.dp).fillMaxHeight().then(dev.manadj.app.viz.Glass.softPanel()).padding(top = 4.dp), 34.dp)
                         }
-                        Crossfader(model, ux, Modifier.weight(1f).height(44.dp))
-                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            SessionsKey(ux, key, textSize = 10)
-                            BrowseKey(model, ux, key)
+                        // Symmetric flanks keep the crossfader centred at full width (#153): two stacked equal keys each,
+                        // Q·H over settings left, SESSIONS over BROWSE right (#94 swap).
+                        Row(Modifier.fillMaxWidth().height(80.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            val key = Modifier.width(76.dp).height(36.dp)
+                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                QuantizeKey(model, ux, key)
+                                SettingsKey(model, ux, key)
+                            }
+                            if (xf) Crossfader(model, ux, Modifier.weight(1f).height(44.dp)) else Spacer(Modifier.weight(1f))
+                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                SessionsKey(ux, key, textSize = 10)
+                                BrowseKey(model, ux, key)
+                            }
                         }
+                        FxSection(ux, model, Modifier.fillMaxWidth().height(54.dp).padding(bottom = 4.dp)
+                            .then(if (xf) Modifier else Modifier.background(Ink.background.copy(alpha = .82f), androidx.compose.foundation.shape.RoundedCornerShape(10.dp))), horizontal = true)
                     }
-                    FxSection(ux, model, Modifier.fillMaxWidth().height(54.dp).padding(bottom = 4.dp), horizontal = true)
                 }
-                DeckSide(b, model, ux, pick, Modifier.weight(1f).fillMaxHeight())
+                DeckSide(b, model, ux, pick, Modifier.weight(1f).fillMaxHeight().graphicsLayer { alpha = 1f - covered(DeckId.B) })
             }
         }
         val k = pane
@@ -351,8 +393,19 @@ private enum class PaneKind { LEFT_SLOT, RIGHT_SLOT, BOTH_LEFT, BOTH_RIGHT }
             val rest = paneX(k, goalOf(k))
             val paneFrame = remember(shift, k, sidePx, screenPx) { SafeFrame { paneX(k, shift.value) - rest } }
             CompositionLocalProvider(LocalSafeFrame provides paneFrame) {
-                Box(Modifier.width(if (wide) bothWidth else side).fillMaxHeight().graphicsLayer { translationX = paneX(k, shift.value) }.background(Ink.background)) {
+                Box(Modifier.width(if (wide) bothWidth else side).fillMaxHeight().graphicsLayer { translationX = paneX(k, shift.value) }.then(dev.manadj.app.viz.Glass.sheet(Ink.background))) {
                     LibraryPanel(model, ux, Modifier.fillMaxSize().padding(start = if (left) 6.dp else 0.dp, end = if (left) 0.dp else 6.dp).screenSafe(), pick, tapTarget = paneTarget, sidebar = true)
+                }
+            }
+        }
+        // Composed while open or still sliding out.
+        val settingsShown by remember(sidePx, bothPx) { derivedStateOf { ux.settings || paneX(PaneKind.BOTH_LEFT, shift.value) > -bothPx + 1f } }
+        if (settingsShown) {
+            val rest = paneX(PaneKind.BOTH_LEFT, goalOf(PaneKind.BOTH_LEFT))
+            val settingsFrame = remember(shift, sidePx, bothPx) { SafeFrame { paneX(PaneKind.BOTH_LEFT, shift.value) - rest } }
+            CompositionLocalProvider(LocalSafeFrame provides settingsFrame) {
+                Box(Modifier.width(bothWidth).fillMaxHeight().graphicsLayer { translationX = paneX(PaneKind.BOTH_LEFT, shift.value) }.background(Ink.background)) {
+                    SettingsPanel(model, ux, Modifier.fillMaxSize().padding(start = 6.dp).screenSafe())
                 }
             }
         }
@@ -367,6 +420,8 @@ private enum class PaneKind { LEFT_SLOT, RIGHT_SLOT, BOTH_LEFT, BOTH_RIGHT }
                 DeckInfo(ui, model, Modifier.fillMaxWidth().height(38.dp).screenSafe(), compact = true)
             }
             Minimap(ui, model, ux.waves[ui.source?.id ?: ""], Modifier.fillMaxWidth().height(40.dp).screenSafe(), preview = ux.seekPreview, ux = ux)
+            // #400: everything below the minimap fades out while the pitch panel slides up over it.
+            Column(Modifier.fillMaxWidth().weight(1f).underPitchPanel(model, ui.id), verticalArrangement = Arrangement.spacedBy(5.dp)) {
             // Pads stay identical; the camera hole simply obscures part of one (touch still works around it).
             Pads(ui, model, ux, Modifier.fillMaxWidth().weight(1f), 4, Dp.Unspecified)
             // SHIFT keeps its mirrored outer-edge spot in both rotations (#147): no camera-hole dodge here.
@@ -375,6 +430,7 @@ private enum class PaneKind { LEFT_SLOT, RIGHT_SLOT, BOTH_LEFT, BOTH_RIGHT }
             JumpStrip(ui, ux, model, Modifier.fillMaxWidth().height(40.dp).screenSafe())
             Row(Modifier.fillMaxWidth().height(TransportRow).screenSafe()) { CueKey(ui, model, Modifier.weight(1f).fillMaxHeight()); PlayKey(ui, model, Modifier.weight(1f).fillMaxHeight()) }
             Row(Modifier.fillMaxWidth().height(42.dp).screenSafe()) { BendStrip(ui, model, Modifier.weight(1f).fillMaxHeight()); PitchKey(ui, model, ux, Modifier.weight(1.6f).fillMaxHeight()) }
+            }
         }
         // The pitch panel replaces this deck's controls below info + minimap (#105); the mixer and other deck stay.
         PitchArea(model, ux, ui.id, Modifier.fillMaxSize().padding(top = 88.dp).screenSafe())

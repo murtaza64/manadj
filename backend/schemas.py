@@ -492,6 +492,8 @@ class SessionRow(BaseModel):
     started_at: datetime
     ended_at: datetime | None = None
     take_count: int
+    # Recording device (#395): null = this desktop, else the phone's name.
+    origin: str | None = None
 
 
 class SessionDetail(SessionRow):

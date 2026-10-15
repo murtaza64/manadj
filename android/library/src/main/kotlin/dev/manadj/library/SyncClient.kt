@@ -91,10 +91,24 @@ class SyncClient(
         JSONObject(text)
     }
 
+    /** POST a JSON body to /api/device-sync[path] (extension pushes, e.g. #401 viz ratings). */
+    fun post(path: String, body: JSONObject): JSONObject = postJson(path, body)
+
     /** Push journaled edits (#375); returns uuid → applied | superseded | rejected. */
     fun pushEdits(edits: List<JournaledEdit>): Map<String, String> {
         val outcomes = postJson("/edits", editsBody(edits)).getJSONObject("outcomes")
         return outcomes.keys().asSequence().associateWith { outcomes.getString(it) }
+    }
+
+    /**
+     * Push a phone-recorded Session (#395): idempotent upsert — the desktop stores chunks whose seq is new and
+     * ends the Session when [endedAt] is set. Returns the seqs the desktop now holds and whether a silent
+     * Session was dropped on end.
+     */
+    fun pushSession(uuid: String, body: JSONObject): Pair<Set<Int>, Boolean> {
+        val r = postJson("/sessions/${java.net.URLEncoder.encode(uuid, "UTF-8")}", body)
+        val seqs = r.getJSONArray("stored_seqs")
+        return (0 until seqs.length()).map { seqs.getInt(it) }.toSet() to r.optBoolean("deleted")
     }
 
     /** Report what a pull changed on this phone (desktop logs it as to_phone). */

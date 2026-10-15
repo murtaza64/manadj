@@ -63,6 +63,7 @@ def _row(db: Session, s: models.Session) -> schemas.SessionRow:
         started_at=s.started_at,
         ended_at=s.ended_at,
         take_count=take_count or 0,
+        origin=s.origin,
     )
 
 
