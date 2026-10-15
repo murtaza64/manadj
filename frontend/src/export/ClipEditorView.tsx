@@ -29,7 +29,7 @@ import {
 import { drawRoutineFrame, paletteColors, sceneDecks } from './routineVideoScene';
 import {
   DEFAULT_HOLD_SEC, DEFAULT_LOOK, defaultPlacement, fadeGainAt, HELD_TRANSITIONS, loadClipSpec, lookAfterCue,
-  overlayAt, programmeFrame, transitionBadge, programmePresetIds, rememberHandle, saveClipSpec,
+  clipSpecFile, overlayAt, parseClipSpecFile, programmeFrame, sourceKey, transitionBadge, programmePresetIds, rememberHandle, saveClipSpec,
   type ClipLook, type ClipSource, type ClipSpec, type CueTransition, type CueTransitionKind, type TransitionVfx,
   type VizCue, type WaveComposite, type WavePalette,
 } from './clipSpec';
@@ -549,6 +549,29 @@ export default function ClipEditorView() {
         <span className="ce-grow" />
         {loaded && <span className="ce-title" title={loaded.scene.title}>{look.title || loaded.scene.title}</span>}
         {busy && !exporting && <span className="ce-muted">{progress?.stage === 'audio' ? 'rendering mix' : progress?.stage} {pct}%</span>}
+        {spec && <button className="btn btn-mini" title="Download this clip (programme, look, range) as a .clip.json — carries it to another app instance" onClick={() => {
+          const url = URL.createObjectURL(new Blob([clipSpecFile(spec)], { type: 'application/json' }));
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `${(spec.look.title || loaded?.scene.title || 'clip').replace(/[^\w.-]+/g, '-')}.clip.json`;
+          a.click();
+          setTimeout(() => URL.revokeObjectURL(url), 1000);
+        }}>SAVE CLIP</button>}
+        <label className="btn btn-mini" title="Open a .clip.json (its source opens with it)">
+          LOAD CLIP
+          <input type="file" accept=".json,application/json" hidden onChange={(e) => {
+            const file = e.target.files?.[0];
+            e.target.value = '';
+            if (!file) return;
+            void file.text().then((text) => {
+              const next = parseClipSpecFile(text);
+              saveClipSpec(next);
+              if (source && sourceKey(source) === sourceKey(next.source)) setSpec(next);
+              else setSource(next.source);
+              toast('Clip loaded.');
+            }).catch((err: unknown) => toast(`Not a clip file: ${err instanceof Error ? err.message : String(err)}`));
+          }} />
+        </label>
         <button className="btn btn-primary" disabled={!renderDone || busy} onClick={() => void run().catch(() => {})} data-testid="export-button">
           {exporting ? `EXPORTING ${pct}%` : 'EXPORT MP4'}
         </button>

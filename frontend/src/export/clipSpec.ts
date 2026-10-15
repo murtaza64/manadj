@@ -220,19 +220,39 @@ const STORAGE_PREFIX = 'manadj-clip:';
 export function loadClipSpec(source: ClipSource): ClipSpec {
   try {
     const raw = localStorage.getItem(STORAGE_PREFIX + sourceKey(source));
-    if (raw) {
-      const parsed = JSON.parse(raw) as Partial<ClipSpec>;
-      const base = defaultClipSpec(source);
-      return {
-        ...base, ...parsed, source,
-        look: { ...base.look, ...(parsed.look ?? {}) },
-        viz: { ...base.viz, ...(parsed.viz ?? {}) },
-      };
-    }
+    if (raw) return normalizeClipSpec(JSON.parse(raw) as Partial<ClipSpec>, source);
   } catch {
     // ignore
   }
   return defaultClipSpec(source);
+}
+
+function normalizeClipSpec(parsed: Partial<ClipSpec>, source: ClipSource): ClipSpec {
+  const base = defaultClipSpec(source);
+  return {
+    ...base, ...parsed, source,
+    look: { ...base.look, ...(parsed.look ?? {}) },
+    viz: { ...base.viz, ...(parsed.viz ?? {}) },
+  };
+}
+
+const CLIP_FILE_KIND = 'manadj-clip';
+
+/** A saved clip as a portable file (localStorage is per origin, so lane
+ * apps and the default app don't share specs). */
+export function clipSpecFile(spec: ClipSpec): string {
+  return JSON.stringify({ kind: CLIP_FILE_KIND, version: 1, spec }, null, 1);
+}
+
+/** Parse a `.clip.json` (or a bare spec); throws on anything without a source. */
+export function parseClipSpecFile(text: string): ClipSpec {
+  const raw = JSON.parse(text) as { kind?: string; spec?: Partial<ClipSpec> } & Partial<ClipSpec>;
+  const parsed = raw.kind === CLIP_FILE_KIND && raw.spec ? raw.spec : raw;
+  const src = parsed.source;
+  if (!src || typeof src !== 'object' || typeof src.kind !== 'string' || typeof (src as { uuid?: unknown }).uuid !== 'string') {
+    throw new Error('not a clip file (no source)');
+  }
+  return normalizeClipSpec(parsed, src);
 }
 
 export function saveClipSpec(spec: ClipSpec): void {

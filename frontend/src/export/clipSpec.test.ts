@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { defaultClipSpec, fadeGainAt, impactAt, lookAfterCue, lookAt, overlayAt, programmePresetIds, vizAt, type VizCue } from './clipSpec';
+import { clipSpecFile, defaultClipSpec, parseClipSpecFile, fadeGainAt, impactAt, lookAfterCue, lookAt, overlayAt, programmePresetIds, vizAt, type VizCue } from './clipSpec';
 
 describe('clipSpec', () => {
   const spec = defaultClipSpec({ kind: 'routine', uuid: 'r' });
@@ -73,5 +73,11 @@ describe('clipSpec', () => {
       expect(overlayAt(s, 47)).toMatchObject({ kind: 'solo', deck: 'B', startSec: 46 });
       expect(programmePresetIds(s).sort()).toEqual(['aurora', 'nova', 'voyage']);
     });
+  });
+  it('round-trips a clip file and refuses files without a source', () => {
+    const s = { ...spec, viz: { cues: [{ atSec: 0, presetId: 'nova', look: { glow: 1 } }], crossfadeSec: 3 } };
+    expect(parseClipSpecFile(clipSpecFile(s))).toEqual(s);
+    expect(parseClipSpecFile(JSON.stringify({ source: s.source, fps: 60 })).fps).toBe(60);
+    expect(() => parseClipSpecFile('{"fps":30}')).toThrow();
   });
 });
