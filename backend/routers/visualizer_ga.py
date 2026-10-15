@@ -16,8 +16,12 @@ import json
 import time
 from pathlib import Path
 
+from typing import Any
+
 from fastapi import APIRouter
 from pydantic import BaseModel
+
+from .. import viz_ratings
 
 router = APIRouter()
 
@@ -79,3 +83,23 @@ def append_event(event: ArenaEvent) -> dict:
     with EVENTS_PATH.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(record) + "\n")
     return {"ok": True}
+
+
+# ── Preset ratings (#401): solo verdicts from any surface ──────────────
+
+
+class DesktopRatingIn(viz_ratings.RatingIn):
+    source: viz_ratings.Source
+
+
+@router.post("/ratings")
+def rate(body: DesktopRatingIn) -> dict[str, Any]:
+    """Rate a preset from a desktop surface (viz / clip-editor / reviewer)."""
+    result = viz_ratings.record([body], body.source, EVENTS_PATH, GEN_DIR)
+    return {**result, "presets": ratings_state()["presets"]}
+
+
+@router.get("/ratings")
+def ratings_state() -> dict[str, Any]:
+    """Per-preset tallies over every solo verdict (uuid-collapsed)."""
+    return {"presets": viz_ratings.aggregate(viz_ratings.read_events(EVENTS_PATH))}

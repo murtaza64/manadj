@@ -1,0 +1,4 @@
+.preset-rating { display: inline-flex; gap: var(--space-4); align-items: center; }
+.preset-rating .btn { font-variant-numeric: tabular-nums; }
+.preset-rating-like.preset-rating-on { background: var(--success); border-color: var(--success); color: var(--base); }
+.preset-rating-dislike.preset-rating-on { background: var(--danger); border-color: var(--danger); color: var(--base); }

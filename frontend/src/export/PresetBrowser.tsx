@@ -6,6 +6,7 @@
  */
 import { useMemo, useState } from 'react';
 import { presetCatalogue, type PresetListing } from './offlineVisualizer';
+import { tallyFor, usePresetRatings } from '../visualizer/presetRatings';
 
 type SortKey = 'score' | 'approvals' | 'rating' | 'newest' | 'name';
 
@@ -40,6 +41,7 @@ function sortListings(rows: PresetListing[], key: SortKey): PresetListing[] {
 
 export function PresetBrowser({ selected, onPick, ordered, height = 220 }: Props) {
   const catalogue = useMemo(() => presetCatalogue(), []);
+  const { tallies } = usePresetRatings();
   const [query, setQuery] = useState('');
   const [sort, setSort] = useState<SortKey>('score');
   const [showDead, setShowDead] = useState(false);
@@ -65,6 +67,7 @@ export function PresetBrowser({ selected, onPick, ordered, height = 220 }: Props
       <div className="ce-browser-list" style={{ maxHeight: height }}>
         {rows.map((p) => {
           const idx = selected.indexOf(p.id);
+          const live = tallyFor(tallies, p.id);
           return (
             <button
               key={p.id}
@@ -77,6 +80,7 @@ export function PresetBrowser({ selected, onPick, ordered, height = 220 }: Props
               <span className="ce-browser-meta">{p.source === 'curated' ? 'curated' : `g${String(p.generation ?? 0).padStart(2, '0')}`}</span>
               <span className="ce-browser-meta">{p.score > 0 ? `+${p.score}` : p.score}</span>
               <span className="ce-browser-meta">♥ {p.approvals}</span>
+              <span className="ce-browser-meta" title="Ratings from every surface (viz, clip editor, reviewer, phone): likes / nopes">{live ? `${live.likes}/${live.dislikes}` : ''}</span>
               <span className="ce-browser-brief">{p.brief}</span>
             </button>
           );

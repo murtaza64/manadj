@@ -11,6 +11,8 @@ prefix so a future LAN listener can expose it alone.
 - GET  /tracks/{id}/waveform  the full detail waveform (MWF1), with `waveform_rev`
 - GET  /tracks/{id}/stems/{stem}           one current stem (AAC m4a, Range), `stems_rev`
 - GET  /tracks/{id}/stems/{stem}/waveform  that stem's MWF1 (generated lazily)
+- POST /viz-ratings           phone visualizer preset ratings (#401, idempotent per uuid)
+- GET  /viz-ratings           per-preset rating tallies
 
 The snapshot also carries `settings`: synced performance settings
 (SYNCED_SETTINGS: Waveform style slots, filter) so the phone plays with the
@@ -500,3 +502,36 @@ def report_received(body: ReceivedIn, request: Request, db: Session = Depends(ge
     except (FieldError, KeyError, ValueError) as exc:
         raise HTTPException(status_code=422, detail=str(exc))
     return {"batch_id": batch}
+
+
+# ── Visualizer preset ratings, phone → desktop (#401) ─────────────────
+
+
+class VizRatingsIn(BaseModel):
+    ratings: list[dict]
+
+
+@router.post("/viz-ratings")
+def push_viz_ratings(body: VizRatingsIn, request: Request):
+    """Queued phone ratings → GA solo events (source "phone")."""
+    from pydantic import ValidationError
+
+    from .. import viz_ratings
+    from .visualizer_ga import EVENTS_PATH, GEN_DIR
+
+    try:
+        ratings = [viz_ratings.RatingIn.model_validate(r) for r in body.ratings]
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    missing = [i for i, r in enumerate(ratings) if not r.uuid]
+    if missing:
+        raise HTTPException(status_code=422, detail=f"uuid required (ratings {missing})")
+    device_id, name = _device(request)
+    return viz_ratings.record(ratings, "phone", EVENTS_PATH, GEN_DIR, {"id": device_id, "name": name})
+
+
+@router.get("/viz-ratings")
+def get_viz_ratings():
+    from .visualizer_ga import ratings_state
+
+    return ratings_state()

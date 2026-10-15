@@ -5,6 +5,7 @@ versions follow [Semantic Versioning](https://semver.org/). Install: [docs/insta
 
 ## [Unreleased]
 - Chord match: Follow and Set suggestions boost Tracks whose drop chord progression matches — double-drop candidates, marked with a note icon in the score column whose intensity shows match strength. Backed by background harmony analysis of every Track (stems, else full mix); backfill with `uv run scripts/backfill_harmony.py` (#387, #388).
+- Visualizer preset ratings: LIKE / NOPE the visualizer on screen in the clip editor (header, scene tab, G / B keys); preset browser shows live tallies. Ratings from every surface (viz window, clip editor, video reviewer, phone via sync) feed the preset evolution score (#401).
 
 ## [0.1.0-rc.6] - 2026-10-15
 - Phone sync (desktop side): Settings → Library → Phone sync opens an opt-in LAN port that serves only the library snapshot, preview waveforms and audio to the manaDJ Android app, behind a pairing code (#372, #373).

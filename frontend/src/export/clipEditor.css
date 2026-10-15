@@ -144,7 +144,7 @@
 .ce-browser-list { overflow-y: auto; display: flex; flex-direction: column; }
 .ce-browser-row {
   display: grid;
-  grid-template-columns: 22px minmax(120px, 1.2fr) 64px 44px 52px 2fr;
+  grid-template-columns: 22px minmax(120px, 1.2fr) 64px 44px 52px 44px 2fr;
   gap: var(--space-8);
   align-items: center;
   padding: var(--space-2) var(--space-4);
@@ -311,3 +311,7 @@
 .lk-seg.lk-seg-grid button { border-top: 1px solid var(--ce-line); }
 .lk-seg.lk-seg-grid button:nth-child(-n+3) { border-top: 0; }
 .lk-seg.lk-seg-grid button:nth-child(3n+1) { border-left: 0; }
+
+/* #401: rate the visualizer on screen */
+.ce-onscreen { display: inline-flex; gap: var(--space-4); align-items: center; }
+.ce-onscreen-name { color: var(--text); font-size: var(--font-small); max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

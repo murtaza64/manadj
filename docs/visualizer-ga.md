@@ -55,6 +55,15 @@ agent breeds. Design decisions: issue
      legacy Elo `rating` is retained only as a tiebreaker. ALL presets
      are equal: the curated set participates as its g00-* seeds, there
      is no first-class tier; the switcher shows one score-sorted list.
+   - RATINGS FROM OTHER SURFACES (#401): solo events also arrive from
+     the clip editor, the video reviewer (`POST /api/ga/ratings`) and the
+     phone (`POST /api/device-sync/viz-ratings`, queued offline). Extra
+     fields: `source` (viz|clip-editor|reviewer|phone; absent = viz),
+     `uuid`, `ratedAt` (when rated; `at` stays receive time so late phone
+     pushes still land after `foldedThrough`), `context`, `device`.
+     Curated ids arrive as their `g00-*` seed. Lines sharing a `uuid` are
+     ONE verdict — fold only the latest. `GET /api/ga/ratings` returns
+     uuid-collapsed per-preset tallies (likes/dislikes/neutral/score/last).
    - SKIP/WATCH-TIME evidence (human-approved 2026-08-22): manual `n`
      skips emit `type: skip` events with `watchedS`. Fold each through
      skipAdjustment (soloReview.ts): <10s → −0.5, <45s → −0.25,

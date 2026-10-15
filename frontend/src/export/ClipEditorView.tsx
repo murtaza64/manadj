@@ -41,6 +41,9 @@ import { clipSourceString, OPEN_CLIP_EVENT, parseClipSource, takePendingClipSour
 import { ClipTimeline } from './ClipTimeline';
 import { useViewActive } from '../contexts/viewActive';
 import { DECK_COLORS } from '../theme/deckColors';
+import { PresetRating } from '../visualizer/PresetRating';
+import { ratePreset } from '../visualizer/presetRatings';
+import { presetOnScreen } from './presetOnScreen';
 import './clipEditor.css';
 
 declare global {
@@ -400,6 +403,29 @@ export default function ClipEditorView() {
   /** The scene in force at the preview playhead. */
   const sceneAtPlayhead = range ? Math.max(0, sortedCues.reduce((k, c, i) => (c.atSec <= previewT - range.startSec + 1e-3 ? i : k), 0)) : 0;
   const sceneIdx = selectedCue !== null && sortedCues[selectedCue] ? selectedCue : null;
+  /** #401: the preset on screen at the playhead — the header rating + g/b target. */
+  const onScreen = range && spec ? presetOnScreen(spec, previewT - range.startSec) : null;
+  const ratingContext = source && range ? { clip: sourceKey(source), t: Math.round((previewT - range.startSec) * 10) / 10 } : undefined;
+  const ratingKey = source ? sourceKey(source) : '';
+  const rateRef = useRef<(outcome: 'like' | 'dislike') => void>(() => {});
+  rateRef.current = (outcome) => {
+    if (!onScreen || !viewActive) return;
+    ratePreset({ presetId: onScreen.presetId, outcome, source: 'clip-editor', contextKey: ratingKey, context: ratingContext, params: onScreen.params })
+      .then(() => toast(`${outcome === 'like' ? 'Liked' : 'Disliked'} ${presetName(onScreen.presetId)}`))
+      .catch((err: unknown) => toast(`Rating failed: ${err instanceof Error ? err.message : String(err)}`));
+  };
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey || e.repeat) return;
+      const el = e.target as HTMLElement | null;
+      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable)) return;
+      const k = e.key.toLowerCase();
+      if (k === 'g') rateRef.current('like');
+      else if (k === 'b') rateRef.current('dislike');
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
   const sceneCue = sceneIdx !== null ? sortedCues[sceneIdx] : null;
   const sceneLook: ClipLook = spec && sceneIdx !== null ? lookAfterCue(spec, sceneIdx) : look;
   /** Preview just past a cue's switch (its fade / held segment). */
@@ -610,6 +636,13 @@ export default function ClipEditorView() {
         <button className={`btn btn-mini${pickerOpen ? ' btn-selected' : ''}`} onClick={() => setPickerOpen(!pickerOpen)} title="Routines, transitions, takes and candidates to clip">SOURCES</button>
         <span className="ce-grow" />
         {loaded && <span className="ce-title" title={loaded.scene.title}>{look.title || loaded.scene.title}</span>}
+        {onScreen && (
+          <span className="ce-onscreen" title="Rate the visualizer on screen at the playhead (G like · B nope)">
+            <span className="ce-muted">viz</span>
+            <span className="ce-onscreen-name">{presetName(onScreen.presetId)}</span>
+            <PresetRating presetId={onScreen.presetId} source="clip-editor" contextKey={ratingKey} context={ratingContext} params={onScreen.params} onError={(m) => toast(`Rating failed: ${m}`)} />
+          </span>
+        )}
         {busy && !exporting && <span className="ce-muted">{progress?.stage === 'audio' ? 'rendering mix' : progress?.stage} {pct}%</span>}
         {spec && <button className="btn btn-mini" title="Download this clip (programme, look, range) as a .clip.json — carries it to another app instance" onClick={() => {
           const url = URL.createObjectURL(new Blob([clipSpecFile(spec)], { type: 'application/json' }));
@@ -786,6 +819,9 @@ export default function ClipEditorView() {
                               <button className="btn btn-mini" title="Previous preset" onClick={() => stepPreset(sceneIdx, -1)}>◀</button>
                               <b className="ce-scene-preset">{presetName(cue.presetId)}</b>
                               <button className="btn btn-mini" title="Next preset" onClick={() => stepPreset(sceneIdx, 1)}>▶</button>
+                              <PresetRating presetId={cue.presetId} source="clip-editor" contextKey={ratingKey}
+                                context={source ? { clip: sourceKey(source), t: Math.round(cue.atSec * 10) / 10, scene: sceneIdx + 1 } : undefined}
+                                params={cue.params} onError={(m) => toast(`Rating failed: ${m}`)} />
                               <button className={`btn btn-mini${browseOpen ? ' btn-selected' : ''}`} onClick={() => setBrowseOpen(!browseOpen)}>BROWSE</button>
                               {preset && (preset.params ?? []).length > 0 && <button className={`btn btn-mini${paramsOpen ? ' btn-selected' : ''}`} onClick={() => setParamsOpen(!paramsOpen)}>PARAMS{Object.keys(params).length ? ` ${Object.keys(params).length}` : ''}</button>}
                             </div>
