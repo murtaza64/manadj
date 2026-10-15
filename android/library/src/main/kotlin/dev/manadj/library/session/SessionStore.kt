@@ -41,6 +41,21 @@ class SessionStore(private val root: File, private val client: () -> SyncClient,
         f.bufferedReader().use { SessionLog.parse(it) }
     }
 
+    /**
+     * Audible track ids of a cached Session (list summary), or null when its log is not on the phone.
+     * Ended Sessions are immutable: the result is kept beside the log, so the log is parsed once.
+     */
+    suspend fun audibleTracks(header: SessionHeader): List<Int>? = withContext(io) {
+        val f = file(header.uuid)
+        if (!f.isFile) return@withContext null
+        val memo = File(f.parentFile, f.nameWithoutExtension + ".tracks")
+        if (header.endedAt != null && memo.isFile && memo.lastModified() >= f.lastModified())
+            return@withContext memo.readText().split(',').mapNotNull { it.trim().toIntOrNull() }
+        val ids = runCatching { f.bufferedReader().use { SessionLog.parse(it) }.audibleTrackIds }.getOrNull() ?: return@withContext null
+        if (header.endedAt != null) atomicWrite(memo, ids.joinToString(","))
+        ids
+    }
+
     private fun file(uuid: String) = File(dir, uuid.replace(Regex("[^A-Za-z0-9._-]"), "_") + ".json")
 
     private fun atomicWrite(target: File, text: String) {

@@ -108,4 +108,23 @@ class ReplayDriverTest {
         val p = (place.second.first { it is AudioCommand.SetLoopRegion } as AudioCommand.SetLoopRegion).playhead!!
         assertEquals("position is the reference at the stamped frame (catch up exactly)", at - 5.0, p, 1.0 / 48000)
     }
+
+    @Test fun pumpAheadKeepsOpsStampedWhileTicksStall() {
+        val l = log(
+            ev(0.0, "load", "A").put("trackId", 1),
+            ev(0.0, "transport", "A").put("action", "play").put("playhead", 0.0),
+            *(1..60).map { ev(it.toDouble(), "control", "A").put("control", "fader").put("value", (it % 2).toDouble()) }.toTypedArray(),
+            ev(70.0, "tick").put("playheads", JSONObject()),
+        )
+        val fake = Fake(); val driver = ReplayDriver(l, fake)
+        fake.held[0] = 1; fake.state[0] = ReplayDriver.Load.Ready
+        driver.prepare(0.0)
+        run(driver, fake, 1.0)
+        val e = driver.epoch!!
+        // The UI thread stalls for 10 s (no tick); the background pump alone keeps the lookahead.
+        repeat(200) { fake.frames += 2400; driver.pumpAhead() }
+        val now = e.timeAt(fake.frames)
+        val last = fake.scheduled.maxOf { e.timeAt(it.first) }
+        assertTrue("stamped through %.2f at %.2f".format(last, now), last >= now + ReplayDriver.LOOKAHEAD - ReplayDriver.WINDOW - 1.0)
+    }
 }

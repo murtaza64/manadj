@@ -26,9 +26,12 @@ data class TagCategory(val id: Int, val name: String, val color: String?, val di
 data class HotCue(val slot: Int, val time: Double, val label: String?, val color: String?)
 
 /** One tempo segment of a saved Beatgrid (desktop ADR 0027 shape). */
-data class TempoChange(val startTime: Double, val bpm: Double, val timeSignatureNum: Int, val barPosition: Int)
+data class TempoChange(val startTime: Double, val bpm: Double, val timeSignatureNum: Int, val barPosition: Int, val timeSignatureDen: Int = 4)
 
 data class Beatgrid(val origin: String, val anchorTime: Double?, val tempoChanges: List<TempoChange>)
+
+/** A Track's persisted Metric-ladder deviation (ADR 0029): arities bottom-up from the bar, Reset marks in track seconds. */
+data class MetricLadder(val arities: List<Int>, val resetMarks: List<Double>)
 
 /**
  * A desktop Library Track as synced to the device. `id` is the desktop Track
@@ -61,6 +64,8 @@ data class LibraryTrack(
     val tagIds: List<Int>,
     val hotCues: List<HotCue>,
     val grid: Beatgrid?,
+    /** Null = the default ladder (nothing persisted). */
+    val ladder: MetricLadder? = null,
 )
 
 /** A desktop Playlist (flat — the desktop has no folders); [trackIds] in Play order. */

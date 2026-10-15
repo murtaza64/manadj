@@ -88,6 +88,8 @@ class SessionModel(application: Application) : AndroidViewModel(application) {
     private val loadFailure = arrayOfNulls<String>(4)
 
     fun track(id: Int?): LibraryTrack? = id?.let { repo.library.value?.track(it) }
+    /** The synced Library (collect in composition so titles resolve once it loads). */
+    val library get() = repo.library
 
     fun refresh() {
         if (refreshing) return
@@ -104,6 +106,17 @@ class SessionModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun isCached(h: SessionHeader) = store.isCached(h.uuid)
+
+    /** List row summaries: audible track ids per cached Session (absent = not on the phone / not read yet). */
+    val audibleTracks = mutableStateMapOf<String, List<Int>>()
+    private val summarizing = HashSet<String>()
+    @OptIn(ExperimentalCoroutinesApi::class) private val summaryIo = Dispatchers.IO.limitedParallelism(1)
+
+    /** Read [h]'s summary in the background once (parses a cached log at most once per Session). */
+    fun summarize(h: SessionHeader) {
+        if (h.uuid in audibleTracks || !summarizing.add(h.uuid) || !store.isCached(h.uuid)) return
+        viewModelScope.launch(summaryIo) { store.audibleTracks(h)?.let { audibleTracks[h.uuid] = it } }
+    }
 
     fun open(h: SessionHeader) {
         if (opening != null) return
@@ -124,7 +137,7 @@ class SessionModel(application: Application) : AndroidViewModel(application) {
         val timelineJob = async(Dispatchers.Default) { SessionTimeline(parsed) }
         val drift = withContext(Dispatchers.Default) { parsed.tickDivergence() }
         val tl = timelineJob.await()
-        header = h; log = parsed; driver = null; recordingDrift = drift; timeline = tl; focus = null
+        header = h; log = parsed; driver = null; audibleTracks[h.uuid] = parsed.audibleTrackIds; recordingDrift = drift; timeline = tl; focus = null
         loadWaves(parsed)
         for (id in parsed.appearances.map { it.trackId }.distinct()) track(id)?.let { if (repo.audioState(it) == dev.manadj.library.AudioState.Cached) probe(id) }
         if (drift.isNotEmpty()) android.util.Log.w(TAG, "recording drift: ${drift.size} ticks > 5 ms, worst %.1f ms".format(drift.maxOf { abs(it.seconds) } * 1000))
@@ -202,7 +215,11 @@ class SessionModel(application: Application) : AndroidViewModel(application) {
         r.prepare(time)
         sync(r)
         loop?.cancel()
-        loop = viewModelScope.launch { run(player, r) }
+        loop = viewModelScope.launch {
+            // Op stream off the UI thread: heavy frames (waveforms) delay main-thread ticks, never frame-stamped ops.
+            launch(Dispatchers.Default) { while (isActive) { r.pumpAhead(); delay(50) } }
+            run(player, r)
+        }
     }
 
     fun stop() {

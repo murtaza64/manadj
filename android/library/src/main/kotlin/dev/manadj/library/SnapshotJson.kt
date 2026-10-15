@@ -67,7 +67,7 @@ object SnapshotJson {
                 origin = g.getString("origin"),
                 anchorTime = g.dbl("anchor_time"),
                 tempoChanges = g.getJSONArray("tempo_changes").objects().map { tc ->
-                    TempoChange(tc.getDouble("start_time"), tc.getDouble("bpm"), tc.optInt("time_signature_num", 4), tc.optInt("bar_position", 1))
+                    TempoChange(tc.getDouble("start_time"), tc.getDouble("bpm"), tc.optInt("time_signature_num", 4), tc.optInt("bar_position", 1), tc.optInt("time_signature_den", 4))
                 },
             )
         }
@@ -101,6 +101,12 @@ object SnapshotJson {
                 HotCue(c.getInt("slot"), c.getDouble("time"), c.str("label"), c.str("color"))
             },
             grid = grid,
+            ladder = it.optJSONObject("metric_ladder")?.let { m ->
+                MetricLadder(
+                    m.optJSONArray("arities")?.let { a -> (0 until a.length()).map(a::getInt) }.orEmpty(),
+                    m.optJSONArray("reset_marks")?.let { a -> (0 until a.length()).map(a::getDouble) }.orEmpty(),
+                )
+            },
         )
     }
 

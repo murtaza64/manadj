@@ -413,9 +413,6 @@ void Engine::relocate(Deck& d, double seconds, int slot, double overshootFrames)
         d.fractional = 0;
         d.envelope = 0;
         d.transport.store(d.transport.load(kRelaxed) + 1, kRelease);
-        // The exact position stands: the ring's claimed (frame-quantized) start must not replace it, even
-        // while paused (renderTrack, which also guards this, only runs when sounding).
-        d.positionTransport = d.transport.load(kRelaxed);
         return;
     }
     int offset = 0;
@@ -819,7 +816,7 @@ void Engine::apply(const Command& c) noexcept {
                 d.loopBeats.store(bpm > 0 ? (c.aux[0] - c.value) * bpm / 60 : 0);
                 d.loopActive.store(true);
             }
-            if (std::isfinite(c.aux[1]) && c.aux[1] != position) relocate(d, std::max(0.0, c.aux[1]));
+            if (std::isfinite(c.aux[1]) && std::abs(c.aux[1] - position) > 1e-4) relocate(d, std::max(0.0, c.aux[1]));
             break;
         }
         case Op::CancelScheduled: cancelScheduledNow(c); break;

@@ -46,11 +46,11 @@ private const val TILE = 256
 /** Desktop max zoom (60 px/s), in dp. */
 const val MAX_DP_PER_SECOND = 60.0
 
-private fun fxColor(effect: String) = Color(when (effect) {
+internal fun fxColor(effect: String) = Color(when (effect) {
     "echo" -> FxEffect.ECHO.color; "lowCutEcho" -> FxEffect.LOW_CUT_ECHO.color; "reverb" -> FxEffect.REVERB.color
     "flanger" -> FxEffect.FLANGER.color; "trans" -> FxEffect.TRANS.color; "roll" -> FxEffect.ROLL.color; else -> 0xffffffff
 })
-private fun fxShort(effect: String) = when (effect) {
+internal fun fxShort(effect: String) = when (effect) {
     "echo" -> FxEffect.ECHO.short; "lowCutEcho" -> FxEffect.LOW_CUT_ECHO.short; "reverb" -> FxEffect.REVERB.short
     "flanger" -> FxEffect.FLANGER.short; "trans" -> FxEffect.TRANS.short; "roll" -> FxEffect.ROLL.short; else -> effect.uppercase()
 }

@@ -21,7 +21,9 @@ import dev.manadj.library.session.TimedOp
  * ready joins later at a stamped frame with the reference position for that frame.
  * Decode time is hidden: PLAY waits only for decks that sound within [START_HORIZON]; a Session Load is
  * issued as soon as its deck goes silent before it ([SessionTimeline.earlyLoads]), not when the Load happens.
- * The host calls [tick] periodically (and renders, offline).
+ * The host calls [tick] periodically (and renders, offline). Loads run in [tick] (host thread); [pumpAhead] only
+ * frame-stamps ops and may run on a background thread, so a busy UI thread never starves the op stream.
+ * Public entry points are synchronized.
  */
 class ReplayDriver(val log: SessionLog, private val engine: Engine, private val onNotice: (String) -> Unit = {}, val timeline: SessionTimeline = SessionTimeline(log)) {
     interface Engine {
@@ -74,7 +76,7 @@ class ReplayDriver(val log: SessionLog, private val engine: Engine, private val 
     private var scheduledUntil = 0.0
 
     /** Every deck gets the track it holds at [t]; [tick] starts the clock once all are fully decoded. */
-    fun prepare(t: Double) {
+    @Synchronized fun prepare(t: Double) {
         if (playing || preparing) engine.cancel(tag)
         playing = false; epoch = null
         startTime = t.coerceIn(log.start, log.end)
@@ -101,7 +103,7 @@ class ReplayDriver(val log: SessionLog, private val engine: Engine, private val 
     /** Whether PLAY must wait for [d]: it sounds within [START_HORIZON] of the start. */
     private fun neededAtStart(d: Int) = timeline.nextSound(d, startTime)?.let { it <= startTime + START_HORIZON } == true
 
-    fun stop() {
+    @Synchronized fun stop() {
         if (playing || preparing) {
             engine.cancel(tag)
             DeckId.entries.forEach { engine.submit(AudioCommand.Pause(it)); engine.submit(AudioCommand.SetBend(it, 0.0)) }
@@ -111,7 +113,7 @@ class ReplayDriver(val log: SessionLog, private val engine: Engine, private val 
     }
 
     /** Session time now (null = not running). [wallSeconds] times the decode grace. */
-    fun tick(wallSeconds: Double): Double? {
+    @Synchronized fun tick(wallSeconds: Double): Double? {
         pollLoads(wallSeconds)
         if (preparing) {
             if ((0..3).none { decks[it] == Deck.LOADING && neededAtStart(it) }) start()
@@ -125,6 +127,13 @@ class ReplayDriver(val log: SessionLog, private val engine: Engine, private val 
         pump(now)
         if (now >= log.end) stop()
         return now.coerceAtMost(log.end)
+    }
+
+    /** Keep [LOOKAHEAD] stamped from the engine clock (no loads); safe from any thread. */
+    @Synchronized fun pumpAhead() {
+        if (!playing) return
+        val e = epoch ?: return
+        pump(e.timeAt(engine.outputFrames() ?: return))
     }
 
     private fun start() {
@@ -249,7 +258,7 @@ class ReplayDriver(val log: SessionLog, private val engine: Engine, private val 
     fun exact(deck: Int, frame: Long) = playing && decks[deck] == Deck.LIVE && frame >= liveFrom[deck]
 
     /** Scrub while paused: decks holding their track park at [t]. */
-    fun park(t: Double) {
+    @Synchronized fun park(t: Double) {
         val want = log.replayAt(t)
         for (d in 0..3) if (want.decks[d].trackId != null && engine.holds(d) == want.decks[d].trackId) {
             for (op in script.place(t, d)) if (op !is ReplayOp.Play) command(op)?.let(engine::submit)

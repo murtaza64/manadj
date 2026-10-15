@@ -10,8 +10,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import dev.manadj.audio.DeckId
+import dev.manadj.audio.QuantizeMode
 
 /** Floating card chrome shared by popups: rounded, glowing edge in [color], swallows touches. */
 @Composable fun Card(color: Color, modifier: Modifier, content: @Composable ColumnScope.() -> Unit) {
@@ -28,71 +35,6 @@ import dev.manadj.audio.DeckId
     }
 }
 
-/** Compact pitch popup: varispeed (engine), key lock + sync + grid edit (pending, marked). */
-@Composable fun PitchPopup(model: PlayerModel, ux: UiModel, modifier: Modifier) {
-    val target = model.pitchDrawer ?: return
-    val ui = model.decks.getValue(target)
-    val e = ux.extras.getValue(target)
-    val color = deckColor(target)
-    val varispeed = model.supports("varispeed")
-    Card(color, modifier) {
-        CardHeader("$target · PITCH", color) { model.pitchDrawer = null }
-        Row(verticalAlignment = Alignment.Bottom) {
-            Text("%+.2f%%".format(ui.pitch), color = color, size = 28, bold = true)
-            Spacer(Modifier.width(12.dp))
-            Column { Text(ui.snapshot?.bpm?.let { "%.2f BPM".format(it * (1 + ui.pitch / 100)) } ?: "BPM —", color = if (ui.snapshot?.bpm != null) Ink.text else Ink.muted, size = 12, bold = true); Text("KEY —", color = Ink.muted, size = 12) }
-        }
-        PhysicalFader("PITCH", ((ui.pitch + 8) / 16).coerceIn(0.0, 1.0), model, target, Modifier.fillMaxWidth().height(52.dp), varispeed, horizontal = true, doubleTapCenter = true, color = color) { v, id -> model.updatePitch(target, v * 16 - 8, id) }
-        Row(Modifier.fillMaxWidth().height(40.dp)) {
-            Key("−0.05", Modifier.weight(1f).fillMaxHeight(), color, varispeed, textSize = 12) { model.updatePitch(target, (ui.pitch - .05).coerceAtLeast(-8.0)) }
-            Key("0", Modifier.weight(1f).fillMaxHeight(), color, varispeed, description = "$target pitch reset") { model.updatePitch(target, 0.0) }
-            Key("+0.05", Modifier.weight(1f).fillMaxHeight(), color, varispeed, textSize = 12) { model.updatePitch(target, (ui.pitch + .05).coerceAtMost(8.0)) }
-        }
-        Spacer(Modifier.height(4.dp))
-        val keyLock = model.supports("key-lock")
-        val bpm = ui.snapshot?.bpm
-        val other = model.decks.getValue(visibleOther(target))
-        val otherBpm = other.snapshot?.bpm?.let { it * (1 + other.pitch / 100) }
-        Row(Modifier.fillMaxWidth().height(40.dp)) {
-            // Engine key lock: requested state from the snapshot; label says WAIT until the whole track is decoded.
-            val requested = if (keyLock) ui.snapshot?.keyLock == true else e.keyLock
-            val waiting = keyLock && requested && ui.snapshot?.keyLockActive != true && ui.ready
-            Key(if (waiting) "KEY LOCK…" else "KEY LOCK", Modifier.weight(1f).fillMaxHeight(), color, keyLock || ux.previewPending, requested, icon = Glyph.Lock, textSize = 12, pending = !keyLock) { if (keyLock) model.setKeyLock(ui.id, !requested) else if (ux.previewPending) e.keyLock = !e.keyLock else ux.pending("Key lock") }
-        }
-        // Sync (desktop performance-sync.md via the engine's SyncGroup): SYNC joins/leaves the group, MATCH is one-shot.
-        val canSync = model.supports("sync")
-        val status = model.syncState.decks[target] ?: dev.manadj.audio.SyncStatus.OFF
-        var refused by remember(target) { mutableStateOf(false) }
-        Row(Modifier.fillMaxWidth().height(40.dp)) {
-            val label = when (status) { dev.manadj.audio.SyncStatus.SYNCED -> "SYNC ●"; dev.manadj.audio.SyncStatus.OUT_OF_LOCK -> "SYNC ⚠"; dev.manadj.audio.SyncStatus.WAITING -> "SYNC …"; else -> if (refused) "OUT OF REACH" else "SYNC" }
-            Key(label, Modifier.weight(1f).fillMaxHeight(), if (status == dev.manadj.audio.SyncStatus.OUT_OF_LOCK || refused) Ink.warning else color, canSync && bpm != null, status != dev.manadj.audio.SyncStatus.OFF, description = "$target sync", textSize = 12, pending = !canSync) {
-                refused = model.toggleSync(target) == dev.manadj.audio.BpmMatch.OutOfReach
-            }
-            if (canSync) Key("MATCH", Modifier.weight(1f).fillMaxHeight(), color, bpm != null, description = "$target match", textSize = 12) { refused = model.match(target) == dev.manadj.audio.BpmMatch.OutOfReach }
-            else Key("MATCH ${visibleOther(target)}", Modifier.weight(1f).fillMaxHeight(), color, varispeed && bpm != null && otherBpm != null, textSize = 12) { model.updatePitch(target, ((otherBpm!! / bpm!! - 1) * 100).coerceIn(-8.0, 8.0)) }
-        }
-        val grid = model.supports("grid") && ui.ready
-        val anchor = ui.snapshot?.gridAnchorSeconds ?: 0.0
-        var taps by remember(target) { mutableStateOf(listOf<Long>()) }
-        Row(verticalAlignment = Alignment.CenterVertically) { Text("GRID", color = Ink.muted, size = 10, bold = true); Spacer(Modifier.width(8.dp)); Text(bpm?.let { "%.2f BPM · 1.1 @ %.3fs".format(it, anchor) } ?: "no grid — tap the tempo", color = Ink.muted, size = 10) }
-        Row(Modifier.fillMaxWidth().height(40.dp)) {
-            Key("◄", Modifier.weight(1f).fillMaxHeight(), color, grid && bpm != null, description = "$target grid earlier") { model.setGrid(target, bpm!!, anchor - .01) }
-            Key("►", Modifier.weight(1f).fillMaxHeight(), color, grid && bpm != null, description = "$target grid later") { model.setGrid(target, bpm!!, anchor + .01) }
-            Key("½×", Modifier.weight(1f).fillMaxHeight(), color, grid && bpm != null, description = "$target BPM halve", textSize = 12) { model.setGrid(target, bpm!! / 2, anchor) }
-            Key("2×", Modifier.weight(1f).fillMaxHeight(), color, grid && bpm != null, description = "$target BPM double", textSize = 12) { model.setGrid(target, bpm!! * 2, anchor) }
-            Key("1.1", Modifier.weight(1f).fillMaxHeight(), color, grid && bpm != null, description = "$target set downbeat here", textSize = 12) { model.setGrid(target, bpm!!, position(ui)) }
-            Key("TAP", Modifier.weight(1.2f).fillMaxHeight(), color, grid, description = "$target tap tempo", textSize = 12) {
-                val now = System.currentTimeMillis()
-                taps = (taps.filter { now - it < 2500 } + now).takeLast(9)
-                if (taps.size >= 4) {
-                    val beat = (taps.last() - taps.first()) / 1000.0 / (taps.size - 1)
-                    model.setGrid(target, 60 / beat, position(ui))
-                }
-            }
-        }
-        Text("±8% varispeed · double-tap the slider to centre · TAP 4+ beats to grid a file without BPM.", color = Ink.muted, size = 10, lines = 2)
-    }
-}
 
 @Composable fun SettingsSheet(model: PlayerModel, ux: UiModel, modifier: Modifier) {
     Card(Ink.accent, modifier) {
@@ -106,8 +48,33 @@ import dev.manadj.audio.DeckId
                     }
                 }
             }
-            val quantize = model.output?.quantize ?: ux.quantize
-            Toggle("Quantize", "Snap cues, loops and jumps to the beat grid.", quantize, !model.supports("quantize")) { ux.quantize = !quantize; if (model.supports("quantize")) model.setQuantize(!quantize) }
+            val mode = model.output?.quantizeMode ?: ux.quantizeMode
+            Toggle("Quantize", "Snap cues, loops and jumps to the beat grid.", mode.quantized, !model.supports("quantize")) { ux.setQuantize(model, on = !mode.quantized) }
+            Toggle("Heard (lag compensation)", "Cues and launches line up with what you hear, offset by the output latency below. Works with Quantize on or off. Long-press Q.", ux.quantizeHeard) { ux.setQuantize(model, heard = !ux.quantizeHeard) }
+            if (ux.quantizeHeard) HeardLatency(model)
+            // Landscape BROWSE parity: which deck stays on screen next to the browser.
+            Text("Browse beside (landscape)", bold = true)
+            Row(Modifier.fillMaxWidth().height(40.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                for ((mode, label) in listOf(BrowseBeside.LOADING to "LOADING DECK", BrowseBeside.PLAYING to "PLAYING DECK", BrowseBeside.BOTH to "BOTH DECKS"))
+                    Key(label, Modifier.weight(1f).fillMaxHeight(), Ink.accent, engaged = ux.browseBeside == mode, description = "Browse beside: $label", textSize = 10, style = KeyStyle.PILL) { ux.browseBeside = mode }
+            }
+            if (ux.browseBeside == BrowseBeside.BOTH) Row(Modifier.fillMaxWidth().height(36.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("Browser side · swipe rows to A / B", Modifier.weight(1f), Ink.muted, 11)
+                Key("LEFT", Modifier.width(72.dp).fillMaxHeight(), Ink.accent, engaged = !ux.browseBothRight, description = "Browser on the left", textSize = 10, style = KeyStyle.PILL) { ux.browseBothRight = false }
+                Key("RIGHT", Modifier.width(72.dp).fillMaxHeight(), Ink.accent, engaged = ux.browseBothRight, description = "Browser on the right", textSize = 10, style = KeyStyle.PILL) { ux.browseBothRight = true }
+            }
+            Row(Modifier.fillMaxWidth().height(40.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                Column(Modifier.weight(1f)) { Text("Preview brightness", bold = true); Text("Browser previews + minimaps, on top of desktop's minimap dim.", color = Ink.muted, size = 11) }
+                Key("−", Modifier.width(44.dp).fillMaxHeight(), Ink.accent, ux.overviewBrightness > .31f, description = "Preview brightness down", textSize = 14, style = KeyStyle.PILL) { ux.overviewBrightness -= .05f }
+                Text("${(ux.overviewBrightness * 100 + .5f).toInt()}%", Modifier.width(48.dp), Ink.text, 13, true)
+                Key("+", Modifier.width(44.dp).fillMaxHeight(), Ink.accent, ux.overviewBrightness < .99f, description = "Preview brightness up", textSize = 14, style = KeyStyle.PILL) { ux.overviewBrightness += .05f }
+            }
+            Row(Modifier.fillMaxWidth().height(40.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                Column(Modifier.weight(1f)) { Text("Jog sensitivity", bold = true); Text("Pitch-panel jog strip nudge strength.", color = Ink.muted, size = 11) }
+                Key("−", Modifier.width(44.dp).fillMaxHeight(), Ink.accent, ux.jogSensitivity > .55f, description = "Jog sensitivity down", textSize = 14, style = KeyStyle.PILL) { ux.jogSensitivity -= .1f }
+                Text("×%.1f".format(ux.jogSensitivity), Modifier.width(48.dp), Ink.text, 13, true)
+                Key("+", Modifier.width(44.dp).fillMaxHeight(), Ink.accent, ux.jogSensitivity < 2.95f, description = "Jog sensitivity up", textSize = 14, style = KeyStyle.PILL) { ux.jogSensitivity += .1f }
+            }
             Toggle("Crossfader", "Off hides the crossfader (both decks play through).", ux.crossfaderEnabled) {
                 ux.crossfaderEnabled = !ux.crossfaderEnabled
                 if (!ux.crossfaderEnabled) model.updateCrossfade(.5)
@@ -117,7 +84,6 @@ import dev.manadj.audio.DeckId
             Text("Waveform zoom (or pinch a waveform)", bold = true)
             Row(Modifier.fillMaxWidth().height(40.dp)) { for (s in listOf(6.0, 8.0, 12.0, 16.0, 24.0)) Key("${s.toInt()}s", Modifier.weight(1f).fillMaxHeight(), Ink.accent, engaged = kotlin.math.abs(ux.waveSeconds - s) < .5, textSize = 12) { ux.chooseWaveSeconds(s) } }
             Key("OUTPUT / ROUTING", Modifier.fillMaxWidth().height(44.dp), Ink.accent, icon = Glyph.Headphones) { ux.settings = false; model.outputPanel = true }
-            Key("SESSIONS · REPLAY", Modifier.fillMaxWidth().height(44.dp), Ink.accent, icon = Glyph.Play) { ux.settings = false; ux.sessions = true }
             LibrarySync(ux)
             FilterSettingsPanel(model)
             Text("manadj Android · UI #371 · engine #369/#370", color = Ink.muted, size = 10)
@@ -226,22 +192,105 @@ fun visibleOther(id: DeckId) = if (id == DeckId.A) DeckId.B else DeckId.A
     val context = androidx.compose.ui.platform.LocalContext.current
     val bulk by ux.repo.bulk.collectAsState()
     val mine = bulk.running && bulk.playlistId == playlistId
-    val notify = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) { dev.manadj.app.library.LibraryHolder.downloadAll(context, playlistId) }
+    // "with stems": also fetch the four stems (audio + waveforms) for tracks the desktop has separated.
+    var stems by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
+    val notify = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) { dev.manadj.app.library.LibraryHolder.downloadAll(context, playlistId, stems) }
     fun start() {
         if (android.os.Build.VERSION.SDK_INT >= 33 && context.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) notify.launch(android.Manifest.permission.POST_NOTIFICATIONS)
-        else dev.manadj.app.library.LibraryHolder.downloadAll(context, playlistId)
+        else dev.manadj.app.library.LibraryHolder.downloadAll(context, playlistId, stems)
     }
+    val height = if (compact) 30.dp else 36.dp
     if (mine) {
-        Row(Modifier.fillMaxWidth().height(if (compact) 30.dp else 36.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth().height(height), verticalAlignment = Alignment.CenterVertically) {
             Text("${bulk.tracksDone}/${bulk.tracksTotal} · ${dev.manadj.library.formatBytes(bulk.bytesDone)}/${dev.manadj.library.formatBytes(bulk.bytesTotal)}" + (bulk.current?.let { " · $it" } ?: ""), Modifier.weight(1f), Ink.muted, 10)
             Key("CANCEL", Modifier.width(76.dp).fillMaxHeight(), Ink.warning, textSize = 10, style = KeyStyle.PILL) { dev.manadj.app.library.LibraryHolder.cancelDownloadAll(context) }
         }
         Box(Modifier.fillMaxWidth().height(3.dp).background(Ink.surface)) { Box(Modifier.fillMaxWidth(bulk.progress ?: 0f).fillMaxHeight().background(Ink.play)) }
     } else {
-        val plan = remember(playlistId, ux.synced, ux.downloads) { runCatching { ux.repo.bulkPlan(playlistId) }.getOrNull() }
-        val label = plan?.let { if (it.remainingBytes <= 0) "ALL ON PHONE" else "DOWNLOAD ${if (playlistId == null) "LIBRARY" else "PLAYLIST"} · ${dev.manadj.library.formatBytes(it.remainingBytes)}" } ?: "DOWNLOAD"
-        Key(label, Modifier.fillMaxWidth().height(if (compact) 30.dp else 36.dp), Ink.play, plan != null && plan.remainingBytes > 0 && plan.fits && !bulk.running, textSize = 10, style = KeyStyle.PILL) { start() }
+        val plan = remember(playlistId, stems, ux.synced, ux.downloads) { runCatching { ux.repo.bulkPlan(playlistId, stems) }.getOrNull() }
+        val todo = plan != null && plan.tracks.isNotEmpty()
+        // Stem sizes aren't in the snapshot: the byte figure covers full mixes only.
+        val label = plan?.let { if (!todo) "ALL ON PHONE" else "DOWNLOAD ${if (playlistId == null) "LIBRARY" else "PLAYLIST"}" + (if (it.remainingBytes > 0) " · ${dev.manadj.library.formatBytes(it.remainingBytes)}" else "") + if (stems) " + STEMS" else "" } ?: "DOWNLOAD"
+        Row(Modifier.fillMaxWidth().height(height), verticalAlignment = Alignment.CenterVertically) {
+            Key(label, Modifier.weight(1f).fillMaxHeight(), Ink.play, todo && plan!!.fits && !bulk.running, textSize = 10, style = KeyStyle.PILL) { start() }
+            Key("STEMS", Modifier.width(76.dp).fillMaxHeight().testTag("bulk-stems"), Ink.accent, engaged = stems, description = "download with stems", textSize = 10, style = KeyStyle.PILL) { stems = !stems }
+        }
         if (plan != null && !plan.fits) Text("Not enough space: needs ${dev.manadj.library.formatBytes(plan.remainingBytes)}, ${dev.manadj.library.formatBytes(plan.freeBytes)} free", color = Ink.warning, size = 10)
         if (bulk.finished && bulk.playlistId == playlistId && bulk.failed > 0) Text("${bulk.failed} tracks could not be downloaded", color = Ink.warning, size = 10)
+    }
+}
+
+/**
+ * Output latency L for HEARD quantize (#382), per route: Android-reported until calibrated. Nudge by ms,
+ * mic-loopback CALIBRATE (6 chirps), or TAP along to a playing gridded deck; FORGET returns to reported.
+ */
+@Composable fun HeardLatency(model: PlayerModel) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val mic = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) { if (it) model.calibrateLatency() }
+    val ms = model.heardLatency * 1000
+    // Route kind (#100, engine classification + per-route override): only HEADPHONES hints; UNKNOWN never blocks.
+    val kind = model.routeKind
+    val headphones = kind == dev.manadj.audio.RouteKind.HEADPHONES
+    val btPermission = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) { model.refreshRoute() }
+    // Beats at the playing deck's tempo: how far off a quantized launch would land uncorrected.
+    val deck = model.visibleDecks.map { model.decks.getValue(it) }.firstOrNull { it.snapshot?.playing == true && it.snapshot?.bpm != null }
+    val beats = deck?.snapshot?.bpm?.let { model.heardLatency * it * tempoRate(deck) / 60 }
+    Column(Modifier.fillMaxWidth().border(1.dp, Ink.surface, RoundedCornerShape(8.dp)).padding(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("OUTPUT LATENCY", Modifier.weight(1f), Ink.muted, 10, true)
+            Text(model.heardRoute ?: "this output", color = Ink.muted, size = 10)
+        }
+        // Speaker / Headphones: one-tap override remembered per route (tap the lit one again for automatic).
+        Row(Modifier.fillMaxWidth().height(32.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(when { model.routeKindOverridden -> "set by you"; kind == dev.manadj.audio.RouteKind.UNKNOWN -> "type unknown"; else -> "detected" }, Modifier.weight(1f), Ink.muted, 10)
+            for ((k, label) in listOf(dev.manadj.audio.RouteKind.SPEAKER to "SPEAKER", dev.manadj.audio.RouteKind.HEADPHONES to "HEADPHONES"))
+                Key(label, Modifier.width(96.dp).fillMaxHeight(), Ink.accent, engaged = kind == k, description = "This output is a $label", textSize = 10, style = KeyStyle.PILL) {
+                    model.overrideRouteKind(if (kind == k && model.routeKindOverridden) null else k)
+                }
+        }
+        if (model.routeKindNeedsBluetoothPermission && kind == dev.manadj.audio.RouteKind.UNKNOWN && !model.routeKindOverridden && android.os.Build.VERSION.SDK_INT >= 31)
+            Row(Modifier.fillMaxWidth().height(32.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("Allow Bluetooth access to tell speakers from headphones.", Modifier.weight(1f), Ink.muted, 10, lines = 2)
+                Key("ALLOW", Modifier.width(72.dp).fillMaxHeight(), Ink.accent, description = "Allow Bluetooth access", textSize = 10, style = KeyStyle.PILL) { btPermission.launch(android.Manifest.permission.BLUETOOTH_CONNECT) }
+            }
+        Row(verticalAlignment = Alignment.Bottom) {
+            Text("%.0f ms".format(ms), color = Ink.text, size = 22, bold = true)
+            Spacer(Modifier.width(8.dp))
+            Text((if (model.heardLatencyCalibrated) "calibrated" else "Android-reported") + (beats?.let { " · %.2f beats".format(it) } ?: ""), Modifier.padding(bottom = 3.dp), if (model.heardLatencyCalibrated) Ink.play else Ink.muted, 11)
+        }
+        Row(Modifier.fillMaxWidth().height(36.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            for (step in listOf(-10, -1, 1, 10)) Key((if (step > 0) "+" else "−") + "${kotlin.math.abs(step)}", Modifier.weight(1f).fillMaxHeight(), Ink.accent, description = "Latency ${step} ms", textSize = 11, style = KeyStyle.PILL) {
+                model.setHeardLatency((model.heardLatency + step / 1000.0).coerceIn(0.0, 2.0))
+            }
+            Key("FORGET", Modifier.weight(1.4f).fillMaxHeight(), Ink.warning, model.heardLatencyCalibrated, textSize = 10, style = KeyStyle.PILL) { model.setHeardLatency(null) }
+        }
+        val tapping = model.tapCalibrating
+        val busy = model.calibrating || tapping || model.reactionPrePass || model.earAligning
+        Row(Modifier.fillMaxWidth().height(40.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            Key(if (model.calibrating) "LISTENING…" else "MIC", Modifier.weight(1f).fillMaxHeight(), Ink.play, !busy && !headphones, engaged = model.calibrating, description = "Calibrate latency with the microphone", textSize = 11, style = KeyStyle.PILL) {
+                if (context.checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) model.calibrateLatency()
+                else mic.launch(android.Manifest.permission.RECORD_AUDIO)
+            }
+            Key("TAP ALONG", Modifier.weight(1f).fillMaxHeight(), Ink.accent, !busy, engaged = tapping || model.reactionPrePass, description = "Tap along to calibration clicks", textSize = 11, style = KeyStyle.PILL) {
+                if (model.heardLatencyCalibrated) model.startTapCalibration() else model.startReactionPrePass()
+            }
+            Key("BY EAR", Modifier.weight(1f).fillMaxHeight(), Ink.accent, !busy, engaged = model.earAligning, description = "Align by ear", textSize = 11, style = KeyStyle.PILL) { model.startEarAlign() }
+        }
+        when {
+            model.reactionPrePass || tapping -> TapAlong(model)
+            model.earAligning -> EarAlign(model)
+        }
+        val last = model.lastCalibration
+        // Recovery: reopen the output stream (a calibration on a Bluetooth route could leave it silent).
+        if (last != null && !busy) Key("RESTART AUDIO OUTPUT", Modifier.fillMaxWidth().height(36.dp), Ink.warning, description = "Restart audio output", textSize = 10, style = KeyStyle.PILL) {
+            model.restartOutput()
+        }
+        if (!busy || model.calibrating) Text(when {
+            model.calibrating -> "Volume up, quiet room: 8 chirps at full level."
+            headphones -> "Headphones: the phone mic can't hear them — TAP ALONG or BY EAR (wrong? set SPEAKER above)."
+            last?.seconds != null -> "Saved %.0f ms%s.".format(last.seconds!! * 1000, if (last.spreadMillis > 0) " (spread %.1f ms)".format(last.spreadMillis) else "")
+            last != null -> (last.reason ?: "no clear chirps").let { r -> "Calibration failed: $r" + if (!r.contains("tap", ignoreCase = true)) " — try TAP ALONG." else "" }
+            else -> "MIC listens to the speaker. TAP ALONG and BY EAR work on any output."
+        }, color = if (last != null && last.seconds == null && !model.calibrating) Ink.warning else Ink.muted, size = 11, lines = 2)
     }
 }

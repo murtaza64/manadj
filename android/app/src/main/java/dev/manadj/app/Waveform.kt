@@ -182,7 +182,33 @@ object WaveformAnalyzer {
 }
 
 /** Live strip as the waveform should show it: desktop DeckPanel liveStrip (EQ gain per group, trim gain on height). */
-data class Strip(val gain: Float = 1f, val low: Float = 1f, val mid: Float = 1f, val high: Float = 1f)
+/** [stems]: audible-stem bitmask (bit i = AudioEngine.STEM_NAMES[i]; [ALL_STEMS] = the plain mix). */
+data class Strip(val gain: Float = 1f, val low: Float = 1f, val mid: Float = 1f, val high: Float = 1f, val stems: Int = ALL_STEMS)
+const val ALL_STEMS = 0b1111
+
+/**
+ * Desktop stem composite (WaveformRendererV2 fetchLoV/fetchPeakV): the audible stems' waveforms combined in
+ * the linear domain — bands as a power sum, peaks as a clamped sum — re-encoded (bytes are amp^(1/2)).
+ * Null when the stems don't share the mix's band layout.
+ */
+fun stemComposite(mix: WaveformData, stems: List<WaveformData>, mask: Int): WaveformData? {
+    if (stems.size != 4 || stems.any { it.bandHop != mix.bandHop || it.sampleRate != mix.sampleRate || it.peakHop != mix.peakHop }) return null
+    val frames = minOf(mix.frames, stems.minOf { it.frames })
+    val bands = ByteArray(frames * 8)
+    for (i in 0 until frames * 8) {
+        var e = 0f
+        for (s in 0..3) if (mask and (1 shl s) != 0) { val v = (stems[s].bands[i].toInt() and 0xff) / 255f; val a = v * v; e += a * a }
+        bands[i] = (kotlin.math.sqrt(kotlin.math.sqrt(e).coerceAtMost(1f)) * 255 + .5f).toInt().toByte()
+    }
+    val peakCount = minOf(mix.peaks.size, stems.minOf { it.peaks.size })
+    val peaks = ByteArray(peakCount)
+    for (i in 0 until peakCount) {
+        var a = 0f
+        for (s in 0..3) if (mask and (1 shl s) != 0) { val v = (stems[s].peaks[i].toInt() and 0xff) / 255f; a += v * v }
+        peaks[i] = (kotlin.math.sqrt(a.coerceAtMost(1f)) * 255 + .5f).toInt().toByte()
+    }
+    return WaveformData(mix.sampleRate, mix.duration, mix.peakHop, mix.bandHop, mix.stftWindow, peaks, bands, frames)
+}
 
 fun eqValueToGain(value: Double): Float { val v = value.coerceIn(0.0, 1.0); return (if (v >= .5) 10.0.pow((v - .5) * 12 / 20) else v / .5).toFloat() }
 fun trimToRelativeGain(value: Double) = 10.0.pow((value.coerceIn(0.0, 1.0) - .5) * 24 / 20).toFloat()
