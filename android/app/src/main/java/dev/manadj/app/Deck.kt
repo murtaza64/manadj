@@ -297,11 +297,18 @@ val StripEnd = 48.dp
             if (!outerRight) Key("UNDO", Modifier.width(72.dp).fillMaxHeight(), Ink.warning, style = KeyStyle.PILL, textSize = 11) { ux.undoDelete(model) }
         } else {
             if (outerRight) Tag()
+            fun isOn(j: Int) = if (live) (gains?.getOrNull(j) ?: 1.0) > .5 else e.stems[j]
+            fun set(j: Int, v: Boolean) { if (live) model.setStemGain(ui.id, j, if (v) 1.0 else 0.0) else if (ux.previewPending) e.stems[j] = v }
             listOf("VOC", "DRM", "BAS", "OTH").forEachIndexed { i, name ->
-                val on = if (live) (gains?.getOrNull(i) ?: 1.0) > .5 else e.stems[i]
+                val on = isOn(i)
                 val enabled = live || ux.previewPending
                 Key(name, Modifier.weight(1f).fillMaxHeight(), Ink.stems[i], enabled, on && enabled, "${ui.id} stem $name", style = KeyStyle.BARE, textSize = 10) {
-                    if (live) model.setStemGain(ui.id, i, if (on) 0.0 else 1.0) else if (ux.previewPending) e.stems[i] = !on
+                    if (ux.shifted(ui.id)) {
+                        // SHIFT + stem = solo (desktop mixer.soloStem): only this stem; soloing the soloed stem restores all.
+                        val soloed = (0..3).all { isOn(it) == (it == i) }
+                        for (j in 0..3) set(j, soloed || j == i)
+                        ux.shiftLatched[ui.id] = false
+                    } else set(i, !on)
                 }
             }
             if (!outerRight) Tag()

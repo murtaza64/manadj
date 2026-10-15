@@ -184,7 +184,10 @@ fun marksOf(ui: DeckUi) = ui.snapshot.let { s -> WaveMarks(s?.cueSeconds, ui.hot
                     val c = cache
                     val style = WaveStyle.minimap ?: WaveStyle.MINIMAP
                     val k = OverviewDim.factor
-                    val image = if (c != null && c.first === data && c.second == key && overviewStyle === style && overviewDim == k) c.third else renderOverview(data, key, dur, vertical, style, k).also { cache = Triple(data, key, it); overviewStyle = style; overviewDim = k }
+                    // Stems (#158): killed/soloed stems drop out of the minimap too (same composite as the detail wave).
+                    val mask = if (stemWave != null) live().stems else ALL_STEMS
+                    val body = (if (mask != ALL_STEMS) stemWave?.invoke(mask) else null) ?: data
+                    val image = if (c != null && c.first === body && c.second == key && overviewStyle === style && overviewDim == k) c.third else renderOverview(body, key, dur, vertical, style, k).also { cache = Triple(body, key, it); overviewStyle = style; overviewDim = k }
                     drawImage(image)
                     val p = at(pos).coerceIn(0f, along)
                     drawRect(Color.Black.copy(alpha = .5f), Offset.Zero, if (vertical) Size(size.width, p) else Size(p, size.height))
@@ -298,7 +301,7 @@ private fun renderOverview(data: WaveformData, size: IntSize2, duration: Double,
  * position so this deck's detail wave follows live; the audio seeks once, where the finger lifts. A second
  * finger cancels (no seek).
  */
-@Composable fun Minimap(ui: DeckUi, model: PlayerModel, wave: WaveformData?, modifier: Modifier, vertical: Boolean = false, preview: MutableMap<DeckId, Double>? = null) {
+@Composable fun Minimap(ui: DeckUi, model: PlayerModel, wave: WaveformData?, modifier: Modifier, vertical: Boolean = false, preview: MutableMap<DeckId, Double>? = null, ux: UiModel? = null) {
     var seekPreview by remember(ui.id) { mutableStateOf<Double?>(null) }
     LaunchedEffect(seekPreview) {
         val p = seekPreview
@@ -312,7 +315,9 @@ private fun renderOverview(data: WaveformData, size: IntSize2, duration: Double,
     }
     val ready by remember(ui) { derivedStateOf { ui.ready } }
     val currentReady by rememberUpdatedState(ready)
-    WaveView(wave, { seekPreview ?: position(ui) }, ui.durationSeconds, marksOf(ui), modifier.semantics { contentDescription = "${ui.id} minimap seek" }.pointerInput(ui.id, vertical) {
+    val stems by remember(ui) { derivedStateOf { ui.snapshot?.takeIf { it.stems }?.stemGains } }
+    Box(modifier) {
+    WaveView(wave, { seekPreview ?: position(ui) }, ui.durationSeconds, marksOf(ui), Modifier.fillMaxSize().semantics { contentDescription = "${ui.id} minimap seek" }.pointerInput(ui.id, vertical) {
         awaitEachGesture {
             val down = awaitFirstDown(requireUnconsumed = false)
             val duration = ui.durationSeconds
@@ -335,7 +340,16 @@ private fun renderOverview(data: WaveformData, size: IntSize2, duration: Double,
             } catch (cancel: CancellationException) { cancelled = true; throw cancel }
             finally { if (cancelled) preview?.remove(ui.id); seekPreview = null; model.finishGesture(id, cancelled) }
         }
-    }, overview = true, vertical = vertical, accent = deckColor(ui.id), status = if (!ui.ready) null else if (wave == null) "analysing…" else null)
+    }, overview = true, vertical = vertical, accent = deckColor(ui.id), status = if (!ui.ready) null else if (wave == null) "analysing…" else null,
+        live = { ux?.strip(ui) ?: Strip() },
+        stemWave = ux?.let { u -> { mask: Int -> val id = ui.source?.id; if (wave == null || id == null) null else u.stemWave(id, wave, mask) } })
+    // Per-stem state (#158): one bar per stem in its colour, dim when killed.
+    stems?.let { g ->
+        Row(Modifier.align(Alignment.TopEnd).padding(3.dp).semantics { contentDescription = "${ui.id} stems ${g.joinToString(",") { if (it > .5) "on" else "off" }}" }, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+            for (i in 0..3) Box(Modifier.size(9.dp, 4.dp).background(if ((g.getOrNull(i) ?: 1.0) > .5) Ink.stems[i] else Ink.stems[i].copy(alpha = .18f)))
+        }
+    }
+    }
 }
 
 fun position(ui: DeckUi) = if (ui.source?.id == ui.snapshot?.sourceId) ui.snapshot?.sourceSeconds ?: 0.0 else 0.0

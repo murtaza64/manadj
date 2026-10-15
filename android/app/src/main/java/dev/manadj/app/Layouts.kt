@@ -221,9 +221,9 @@ fun mixOf(model: PlayerModel, ux: UiModel, id: DeckId): DeckMix {
             }
             // Minimaps flank the centre BROWSE key (the #94 swap is landscape-only, #101).
             Row(pad.fillMaxWidth().height(if (tight) 36.dp else 44.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                Minimap(a, model, ux.waves[a.source?.id ?: ""], Modifier.weight(1f).fillMaxHeight(), preview = ux.seekPreview)
+                Minimap(a, model, ux.waves[a.source?.id ?: ""], Modifier.weight(1f).fillMaxHeight(), preview = ux.seekPreview, ux = ux)
                 BrowseKey(model, ux, Modifier.width(84.dp).fillMaxHeight())
-                Minimap(b, model, ux.waves[b.source?.id ?: ""], Modifier.weight(1f).fillMaxHeight(), preview = ux.seekPreview)
+                Minimap(b, model, ux.waves[b.source?.id ?: ""], Modifier.weight(1f).fillMaxHeight(), preview = ux.seekPreview, ux = ux)
             }
             // Deck control areas; the pitch panel replaces one deck's half in place (#105).
             Box(Modifier.fillMaxWidth()) {
@@ -366,7 +366,7 @@ private enum class PaneKind { LEFT_SLOT, RIGHT_SLOT, BOTH_LEFT, BOTH_RIGHT }
             CompositionLocalProvider(androidx.compose.ui.platform.LocalLayoutDirection provides if (ui.id == DeckId.A) androidx.compose.ui.unit.LayoutDirection.Rtl else androidx.compose.ui.unit.LayoutDirection.Ltr) {
                 DeckInfo(ui, model, Modifier.fillMaxWidth().height(38.dp).screenSafe(), compact = true)
             }
-            Minimap(ui, model, ux.waves[ui.source?.id ?: ""], Modifier.fillMaxWidth().height(40.dp).screenSafe(), preview = ux.seekPreview)
+            Minimap(ui, model, ux.waves[ui.source?.id ?: ""], Modifier.fillMaxWidth().height(40.dp).screenSafe(), preview = ux.seekPreview, ux = ux)
             // Pads stay identical; the camera hole simply obscures part of one (touch still works around it).
             Pads(ui, model, ux, Modifier.fillMaxWidth().weight(1f), 4, Dp.Unspecified)
             // SHIFT keeps its mirrored outer-edge spot in both rotations (#147): no camera-hole dodge here.
