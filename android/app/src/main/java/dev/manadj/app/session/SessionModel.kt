@@ -91,10 +91,37 @@ class SessionModel(application: Application) : AndroidViewModel(application) {
     /** The synced Library (collect in composition so titles resolve once it loads). */
     val library get() = repo.library
 
+    /** Sessions recorded on this phone (#395), newest first. */
+    var recorded by mutableStateOf<List<SessionHeader>>(emptyList())
+        private set
+    private var recordedRevision = -1L
+    private val recordedStore = SessionRecording.init(application)
+
+    /** Re-read the recorded list when the recorder or a push changed it (cheap header reads). */
+    fun syncRecorded() {
+        if (SessionRecording.revision == recordedRevision) return
+        recordedRevision = SessionRecording.revision
+        val name = repo.deviceName ?: "this phone"
+        recorded = recordedStore.all().map { SessionHeader(it.uuid, it.startedAt, it.endedAt, 0, name, local = true) }
+        synced = recordedStore.all().filter { it.endPushed }.map { it.uuid }.toSet()
+    }
+    /** Recorded Sessions the desktop holds completely. */
+    var synced by mutableStateOf<Set<String>>(emptySet())
+        private set
+
+    /** The list: this phone's recordings and the desktop's Sessions (a pushed recording appears once, as local). */
+    val sessions: List<SessionHeader> get() {
+        val local = recorded.map { it.uuid }.toSet()
+        return recorded + headers.filter { it.uuid !in local }
+    }
+
     fun refresh() {
         if (refreshing) return
         refreshing = true
         viewModelScope.launch {
+            // Push first, so the desktop list already carries this phone's Sessions.
+            withContext(Dispatchers.IO) { runCatching { SessionRecording.pushAll() } }
+            recordedRevision = -1L; syncRecorded()
             try { headers = store.refresh(); listError = null }
             catch (e: CancellationException) { throw e }
             catch (e: dev.manadj.library.SyncException) {
@@ -105,7 +132,7 @@ class SessionModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun isCached(h: SessionHeader) = store.isCached(h.uuid)
+    fun isCached(h: SessionHeader) = h.local || store.isCached(h.uuid)
 
     /** List row summaries: audible track ids per cached Session (absent = not on the phone / not read yet). */
     val audibleTracks = mutableStateMapOf<String, List<Int>>()
@@ -114,8 +141,12 @@ class SessionModel(application: Application) : AndroidViewModel(application) {
 
     /** Read [h]'s summary in the background once (parses a cached log at most once per Session). */
     fun summarize(h: SessionHeader) {
-        if (h.uuid in audibleTracks || !summarizing.add(h.uuid) || !store.isCached(h.uuid)) return
-        viewModelScope.launch(summaryIo) { store.audibleTracks(h)?.let { audibleTracks[h.uuid] = it } }
+        if (h.uuid in audibleTracks || !isCached(h) || !summarizing.add(h.uuid)) return
+        viewModelScope.launch(summaryIo) {
+            val ids = if (h.local) runCatching { SessionLog.parse(recordedStore.detail(h.uuid)).audibleTrackIds }.getOrNull() else store.audibleTracks(h)
+            ids?.let { audibleTracks[h.uuid] = it }
+            if (h.local && h.endedAt == null) summarizing.remove(h.uuid) // still recording: re-read later
+        }
     }
 
     fun open(h: SessionHeader) {
@@ -123,7 +154,7 @@ class SessionModel(application: Application) : AndroidViewModel(application) {
         opening = h.uuid
         viewModelScope.launch {
             try {
-                show(h, store.log(h))
+                show(h, if (h.local) withContext(Dispatchers.IO) { SessionLog.parse(recordedStore.detail(h.uuid)) } else store.log(h))
             } catch (e: CancellationException) { throw e }
             catch (e: Exception) { notice = "Open failed: ${e.message ?: e}" }
             finally { opening = null }
@@ -212,6 +243,7 @@ class SessionModel(application: Application) : AndroidViewModel(application) {
         prefetch(l)
         loadFailure.fill(null)
         lateBase = player.engineSnapshot()?.lateOps ?: 0L; lateOps = 0; reopenBase = -1
+        SessionRecording.machine = "session-replay"
         r.prepare(time)
         sync(r)
         loop?.cancel()
@@ -223,6 +255,7 @@ class SessionModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun stop() {
+        SessionRecording.machine = null
         loop?.cancel(); loop = null
         driver?.stop()
         playing = false; preparing = false; displayTime = time

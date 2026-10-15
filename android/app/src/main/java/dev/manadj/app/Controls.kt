@@ -39,7 +39,9 @@ enum class KeyStyle { BOX, PILL, BARE }
     text: String, modifier: Modifier, color: Color = Ink.accent, enabled: Boolean = true, engaged: Boolean = false, description: String = text,
     icon: Glyph? = null, style: KeyStyle = KeyStyle.BOX, pulse: Float = 0f, textSize: Int = 13, textColor: Color? = null, pending: Boolean = false, longPress: (() -> Unit)? = null,
     /** Tap haptic; null = silent. */
-    feedback: HapticFeedbackType? = HapticFeedbackType.TextHandleMove, action: () -> Unit,
+    feedback: HapticFeedbackType? = HapticFeedbackType.TextHandleMove,
+    /** Per-frame glow read at draw time (beat pulse) — no recomposition per engine tick. */
+    pulseOf: (() -> Float)? = null, action: () -> Unit,
 ) {
     val haptic = LocalHapticFeedback.current
     val interaction = remember { MutableInteractionSource() }
@@ -49,7 +51,7 @@ enum class KeyStyle { BOX, PILL, BARE }
     val tint = if (enabled) color else Ink.surface2
     val shape = if (style == KeyStyle.PILL) RoundedCornerShape(50) else RoundedCornerShape(2.dp)
     val inset = if (style == KeyStyle.BARE) 0.dp else 3.dp
-    Box(modifier.halo(tint, (heat + pulse) * .8f, inset + 3.dp, style == KeyStyle.PILL).semantics { contentDescription = description; if (!enabled) disabled() }
+    Box(modifier.halo(tint, { (heat + pulse + (pulseOf?.invoke() ?: 0f)) * .8f }, inset + 3.dp, style == KeyStyle.PILL).semantics { contentDescription = description; if (!enabled) disabled() }
         .then(if (longPress == null) Modifier.clickable(interactionSource = interaction, indication = null, enabled = enabled || pending) { feedback?.let(haptic::performHapticFeedback); action() }
             else Modifier.combinedClickable(interactionSource = interaction, indication = null, enabled = enabled || pending, onLongClick = { haptic.performHapticFeedback(HapticFeedbackType.LongPress); longPress() }) { feedback?.let(haptic::performHapticFeedback); action() })
         .padding(inset).graphicsLayer { scaleX = scale; scaleY = scale }
@@ -337,7 +339,7 @@ fun knobReadout(kind: KnobKind, v: Double): String = when (kind) {
  */
 @Composable fun ValueWheel(
     label: String, choices: List<String>, index: Int, ui: UiModel, model: PlayerModel, deck: DeckId, modifier: Modifier, color: Color,
-    text: String = choices[index], icon: Glyph? = null, live: Boolean = true, pulse: Float = 0f, bare: Boolean = false, tagPending: Boolean = true, edgeHaptics: Boolean = true, tickHaptics: Boolean = true, onTap: (() -> Unit)? = null, onIndex: (Int) -> Unit,
+    text: String = choices[index], icon: Glyph? = null, live: Boolean = true, pulse: Float = 0f, bare: Boolean = false, tagPending: Boolean = true, edgeHaptics: Boolean = true, tickHaptics: Boolean = true, pulseOf: (() -> Float)? = null, onTap: (() -> Unit)? = null, onIndex: (Int) -> Unit,
 ) {
     val edgeBuzz by rememberUpdatedState(edgeHaptics)
     val tickBuzz by rememberUpdatedState(tickHaptics)
@@ -352,7 +354,7 @@ fun knobReadout(kind: KnobKind, v: Double): String = when (kind) {
     val heat by animateFloatAsState(if (held) 1f else 0f, tween(if (held) 60 else 280), label = "wheel")
     val tint = if (interactive) color else Ink.surface2
     Box(modifier.onGloballyPositioned { root = it.positionInRoot(); width = it.size.width.toFloat() }
-        .halo(tint, (heat * .8f + pulse).coerceAtMost(1f), 6.dp)
+        .halo(tint, { (heat * .8f + pulse + (pulseOf?.invoke() ?: 0f)).coerceAtMost(1f) }, 6.dp)
         .semantics { contentDescription = label; stateDescription = choices[index]; onClick { if (!interactive) ui.pending(label) else tap?.invoke(); true } }
         .pointerInput(label, choices, interactive) {
             if (!interactive) { awaitEachGesture { awaitFirstDown(); ui.pending(label) }; return@pointerInput }

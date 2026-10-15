@@ -31,6 +31,8 @@ enum class SettingsPage(val title: String) {
     OUTPUT("Audio output"),
     FILTER("Filter"),
     DEVELOPER("Developer"),
+    /** One-handed portrait spike (android-onehand, #386). */
+    LAYOUT("Layout (portrait)"),
 }
 
 /**
@@ -125,6 +127,7 @@ private fun summary(page: SettingsPage, model: PlayerModel, ux: UiModel): String
     SettingsPage.OUTPUT -> (model.output?.routing?.label ?: "No stream") + " · " + (model.devices.firstOrNull { it.id == model.routingDevice }?.let { it.name.ifEmpty { it.type } } ?: "System default")
     SettingsPage.FILTER -> model.filterSettings.model.label
     SettingsPage.DEVELOPER -> listOfNotNull("pending preview".takeIf { ux.previewPending }, "output readout".takeIf { ux.outputDebug }).joinToString(" · ").ifEmpty { "All off" }
+    SettingsPage.LAYOUT -> dev.manadj.app.onehand.OneHand.summary()
 }
 
 @Composable private fun PageBody(page: SettingsPage, model: PlayerModel, ux: UiModel, modifier: Modifier, header: Boolean) {
@@ -144,6 +147,7 @@ private fun summary(page: SettingsPage, model: PlayerModel, ux: UiModel): String
                     SettingsPage.OUTPUT -> OutputRouting(model)
                     SettingsPage.FILTER -> FilterSettingsPanel(model)
                     SettingsPage.DEVELOPER -> DeveloperPage(ux)
+                    SettingsPage.LAYOUT -> dev.manadj.app.onehand.OneHandSettings()
                 }
             }
         }

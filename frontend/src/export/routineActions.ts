@@ -9,10 +9,12 @@
 import type { PlannedRoutine, PlannedRoutineSlot, RoutineLanePoint } from '../sets/routinePlan';
 import { routineFxAt, type RoutineBeatFx } from '../editor/beatFxLane';
 import { BEAT_FX_SHORT_LABELS, formatBeatFxLength } from '../playback/beatFx';
+import { scratchClipStateAt, type PlannedScratchClip } from '../sets/routineScratch';
 
 export type ActionKind =
   | 'hotCue' | 'jump' | 'loop' | 'loopOff' | 'play' | 'pause' | 'seek'
-  | 'kill' | 'restore' | 'faderIn' | 'faderOut' | 'filter' | 'filterOff' | 'fx' | 'fxOff';
+  | 'kill' | 'restore' | 'faderIn' | 'faderOut' | 'filter' | 'filterOff' | 'fx' | 'fxOff'
+  | 'scratch' | 'backspin';
 
 export interface RoutineAction {
   beat: number;
@@ -147,6 +149,46 @@ function fxActions(fx: RoutineBeatFx, slotIndexOf: (slotId: string) => number | 
   return out;
 }
 
+/** Backspin = the gesture is mostly one long fast backward throw. */
+const BACKSPIN_MIN_BACK_SEC = 1.5;
+/** Travel per 5 ms step beyond any platter speed (40×): a snap. */
+const SNAP_SEC = 0.2;
+
+/** One callout per scratch clip (#393): BACKSPIN when the gesture's
+ * backward travel dominates and spans over BACKSPIN_MIN_BACK_SEC of
+ * track, SCRATCH otherwise. Silent clips (a held, stopped record) emit
+ * nothing. */
+export function scratchActionKind(clip: PlannedScratchClip): 'scratch' | 'backspin' | null {
+  const step = 0.005;
+  let back = 0;
+  let fwd = 0;
+  let p = scratchClipStateAt(clip, clip.startMixSec).position;
+  for (let t = clip.startMixSec + step; t <= clip.endMixSec + 1e-9; t += step) {
+    const q = scratchClipStateAt(clip, Math.min(t, clip.endMixSec)).position;
+    // Snaps (cue / hot cue on the stopped record) are not hand travel.
+    if (Math.abs(q - p) > SNAP_SEC) {
+      p = q;
+      continue;
+    }
+    if (q < p) back += p - q;
+    else fwd += q - p;
+    p = q;
+  }
+  if (back + fwd < 0.02) return null;
+  return back >= BACKSPIN_MIN_BACK_SEC && back > 3 * fwd ? 'backspin' : 'scratch';
+}
+
+function scratchActions(routine: PlannedRoutine, slot: PlannedRoutineSlot): RoutineAction[] {
+  const out: RoutineAction[] = [];
+  for (const clip of slot.scratches ?? []) {
+    const kind = scratchActionKind(clip);
+    if (!kind) continue;
+    const beat = (clip.startMixSec - routine.beatOriginMixSec) / routine.secPerBeat;
+    out.push({ beat, slot: slot.slot, kind, label: kind === 'backspin' ? '◀◀ BACKSPIN' : 'SCRATCH' });
+  }
+  return out;
+}
+
 /** All callouts for a Routine, beat-sorted. */
 export function routineActions(routine: PlannedRoutine, events: Ev[]): RoutineAction[] {
   const out: RoutineAction[] = [...transportActions(events)];
@@ -158,6 +200,7 @@ export function routineActions(routine: PlannedRoutine, events: Ev[]): RoutineAc
     out.push(...laneActions(slot, 'eqMid', l.eqMid, l.defaults.eq, entryBeat));
     out.push(...laneActions(slot, 'eqHigh', l.eqHigh, l.defaults.eq, entryBeat));
     out.push(...laneActions(slot, 'filter', l.filter, l.defaults.filter, entryBeat));
+    out.push(...scratchActions(routine, slot));
   }
   if (routine.beatFx) {
     out.push(...fxActions(routine.beatFx, (id) => routine.slots.find((s) => s.slotId === id)?.slot ?? null));

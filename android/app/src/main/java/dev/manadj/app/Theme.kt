@@ -74,8 +74,10 @@ val DeckGap = 14.dp
  * Halo drawn strictly INSIDE the node bounds (inset by [halo]); callers inset their body by the same amount.
  * Drawing outside a node's bounds leaves stale pixels (Android damage tracking) — the round-4 "stuck border" bug.
  */
-fun Modifier.halo(color: Color, amount: Float, halo: Dp, round: Boolean = false): Modifier = drawBehind {
-    val a = amount.coerceIn(0f, 1f)
+fun Modifier.halo(color: Color, amount: Float, halo: Dp, round: Boolean = false): Modifier = halo(color, { amount }, halo, round)
+/** [amount] read at draw time: per-frame pulses redraw without recomposing. */
+fun Modifier.halo(color: Color, amount: () -> Float, halo: Dp, round: Boolean = false): Modifier = drawBehind {
+    val a = amount().coerceIn(0f, 1f)
     if (a < .01f) return@drawBehind
     val r = halo.toPx()
     drawIntoCanvas { canvas ->

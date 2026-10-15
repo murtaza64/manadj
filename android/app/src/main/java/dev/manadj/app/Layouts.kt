@@ -28,6 +28,9 @@ import dev.manadj.audio.QuantizeMode
 
 /** Device orientation picks the layout: portrait one-screen, landscape dense. No manual view switch. */
 @Composable fun PerformanceApp(model: PlayerModel, ux: UiModel, pick: (DeckId) -> Unit) {
+    // Session recording (#395, session lane): always on while the app runs; re-points after recreation.
+    val appContext = androidx.compose.ui.platform.LocalContext.current
+    LaunchedEffect(model) { dev.manadj.app.session.SessionRecording.attach(model, appContext) }
     for (id in model.visibleDecks) {
         val ui = model.decks.getValue(id)
         LaunchedEffect(ui.source?.id) { ux.ensureWave(ui.source, model.visibleDecks.mapNotNull { model.decks.getValue(it).source?.id }.toSet()); ux.extras.getValue(id).history.clear(); if (ui.source != null) ux.loadedAt[id] = System.nanoTime() else ux.loadedAt.remove(id) }
@@ -41,12 +44,13 @@ import dev.manadj.audio.QuantizeMode
     val canQuantize = model.supports("quantize")
     LaunchedEffect(canQuantize) { if (canQuantize) ux.setQuantize(model) }
     // Played-this-session: a library deck that starts playing.
+    // Snapshot reads here would recompose the whole app per engine tick (UH9): derived only.
     for (id in model.visibleDecks) {
-        val playingTrack = if (model.decks.getValue(id).snapshot?.playing == true) dev.manadj.app.library.LibraryHolder.trackOn(model, id)?.toLong() else null
-        LaunchedEffect(playingTrack) { if (playingTrack != null && playingTrack !in ux.played) ux.played.add(playingTrack) }
+        val playingTrack by remember(id) { derivedStateOf { if (model.decks.getValue(id).snapshot?.playing == true) dev.manadj.app.library.LibraryHolder.trackOn(model, id)?.toLong() else null } }
+        LaunchedEffect(playingTrack) { val t = playingTrack; if (t != null && t !in ux.played) ux.played.add(t) }
     }
     // Record what was heard (strip per source position) so the waveform behind the playhead keeps it.
-    val anyPlaying = model.visibleDecks.any { model.decks.getValue(it).snapshot?.playing == true }
+    val anyPlaying by remember { derivedStateOf { model.visibleDecks.any { model.decks.getValue(it).snapshot?.playing == true } } }
     LaunchedEffect(anyPlaying) {
         while (anyPlaying) {
             withFrameNanos { }
@@ -64,7 +68,8 @@ import dev.manadj.audio.QuantizeMode
         val modal = model.replace != null || model.outputPanel
         val blur by animateDpAsState(if (modal) 8.dp else 0.dp, tween(220), label = "backdrop")
         Box(Modifier.fillMaxSize().blur(blur)) {
-            if (landscape) Landscape(model, ux, pick, Modifier.fillMaxSize()) else Portrait(model, ux, pick, Modifier.fillMaxSize(), screenHeight, band)
+            // One-handed portrait spike (android-onehand): Settings › Layout picks a dev.manadj.app.onehand layout; STANDARD = this file's Portrait.
+            if (landscape) Landscape(model, ux, pick, Modifier.fillMaxSize()) else if (dev.manadj.app.onehand.OneHand.layout(view.context) != dev.manadj.app.onehand.OneHandLayout.STANDARD) dev.manadj.app.onehand.OneHandApp(model, ux, pick, Modifier.fillMaxSize(), band) else Portrait(model, ux, pick, Modifier.fillMaxSize(), screenHeight, band)
         }
         if (model.outputPanel) OutputPanel(model, Modifier.fillMaxSize())
         if (ux.sessions) dev.manadj.app.session.SessionScreen(model, ux, Modifier.fillMaxSize().padding(top = band))
@@ -77,7 +82,7 @@ import dev.manadj.audio.QuantizeMode
     }
 }
 
-@Composable private fun DetailWave(ui: DeckUi, model: PlayerModel, ux: UiModel, modifier: Modifier, vertical: Boolean = false) {
+@Composable internal fun DetailWave(ui: DeckUi, model: PlayerModel, ux: UiModel, modifier: Modifier, vertical: Boolean = false) {
     val wave = ux.waves[ui.source?.id ?: ""]
     val e = ux.extras.getValue(ui.id)
     val moving = ui.snapshot.let { it?.playing == true || it?.previewing == true }

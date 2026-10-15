@@ -173,10 +173,10 @@ export class RoutinePlayer {
   private slotStateAt(slot: PlannedRoutineSlot, t: number) {
     const r = this.routine!;
     const firstTime = r.beatOriginMixSec + (slot.trace[0]?.beat ?? 0) * r.secPerBeat;
-    if (slot.transportBounds || t >= firstTime) return routineSlotStateAt(r, slot, t);
+    if (slot.transportBounds || t >= firstTime) return routineSlotStateAt(r, slot, t, { netScratch: true });
     // Sample just inside the window: AT the boundary the trace's first
     // point reads as parked (traceStateAt's beat <= first-point rule).
-    const s0 = routineSlotStateAt(r, slot, firstTime + 1e-3);
+    const s0 = routineSlotStateAt(r, slot, firstTime + 1e-3, { netScratch: true });
     if (slot.entryMixSec > r.mixStartSec) return { ...s0, playing: false };
     if (!s0.playing) return s0;
     const rate = 1 + s0.pitchPercent / 100;

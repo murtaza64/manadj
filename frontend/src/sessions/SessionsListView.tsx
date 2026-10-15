@@ -129,6 +129,7 @@ export function SessionsListView({ onOpen }: { onOpen?: (uuid: string) => void }
                 <span className="session-when">
                   <time dateTime={sessionDate(session.started_at).toISOString()}>{sessionDate(session.started_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time>
                   {session.ended_at === null && <span className="session-live">Live</span>}
+                  {session.origin && <span className="session-origin" title={`Recorded on ${session.origin}`}>Phone · {session.origin}</span>}
                 </span>
                 <span className="session-duration">{fmtDuration(session, now)}</span>
                 <SessionSummary session={session} />

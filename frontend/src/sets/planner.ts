@@ -582,7 +582,7 @@ export function planSet(input: PlanInput): SetPlan {
         const isLast = k === n - 2;
         const incomingMixStart = Math.max(planned.mixStartSec, incoming.entryMixSec);
         const incomingTrackStart = incoming.entryMixSec < planned.mixStartSec
-          ? routineSlotStateAt(planned, incoming, incomingMixStart).trackTime
+          ? routineSlotStateAt(planned, incoming, incomingMixStart, { netScratch: true }).trackTime
           : Math.max(0, incoming.entryTrackSec);
         adjacencies.push({
           kind: 'routine',
@@ -623,7 +623,7 @@ export function planSet(input: PlanInput): SetPlan {
       mixOffset = exitMixOffset;
       entryMixSec = Math.max(planned.mixStartSec, planned.slots[n - 1].entryMixSec);
       entrySec = planned.slots[n - 1].entryMixSec < planned.mixStartSec
-        ? routineSlotStateAt(planned, planned.slots[n - 1], entryMixSec).trackTime
+        ? routineSlotStateAt(planned, planned.slots[n - 1], entryMixSec, { netScratch: true }).trackTime
         : Math.max(0, planned.slots[n - 1].entryTrackSec);
       forcedDeck = exit.deck;
       prevDeck = exit.deck;
@@ -1532,7 +1532,7 @@ export function planStateAtRaw(plan: SetPlan, mixTime: number): PlanState {
         // order, so the in-occupancy write below overwrites correctly
         // once mixTime passes each occupant's occupyFrom.
         if (mixTime < slot.occupyFromMixSec) continue;
-        const s = routineSlotStateAt(routine, slot, mixTime);
+        const s = routineSlotStateAt(routine, slot, mixTime, { netScratch: true });
         const entryIndex = routine.startEntryIndex + slot.slot;
         // A slot's deck may still carry an EXTERNAL occupant early in the
         // span (allocation reuses a deck that frees before the slot's

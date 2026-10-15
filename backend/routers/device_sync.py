@@ -447,6 +447,59 @@ def get_device_session(uuid: str, db: Session = Depends(get_db)):
 # ── Phone → desktop (ADR 0045, #375) ──────────────────────────────────
 
 
+class PushedChunk(BaseModel):
+    seq: int
+    events: list[dict]
+
+
+class SessionPush(BaseModel):
+    started_at: datetime
+    ended_at: datetime | None = None
+    chunks: list[PushedChunk] = []
+
+
+@router.post("/sessions/{uuid}")
+def push_session(uuid: str, body: SessionPush, request: Request, db: Session = Depends(get_db)):
+    """A phone-recorded Session (#395), pushed as it was recorded: creates the
+    row (origin = the device name) if missing, stores only chunks whose seq is
+    new (idempotent, resumable after any failure), and ends it when
+    `ended_at` is given — through the same rule as desktop ends: a 100%-silent
+    Session is deleted instead. A uuid that belongs to a desktop Session is
+    refused (409): a push never writes into another recorder's log."""
+    from .. import models
+    from ..routine_miner_tasks import enqueue_routine_mine
+    from . import sessions as sessions_router
+
+    device_id, name = _device(request)
+    origin = name or device_id
+    s = db.query(models.Session).filter(models.Session.uuid == uuid).first()
+    if s is None:
+        s = models.Session(uuid=uuid, started_at=body.started_at, origin=origin)
+        db.add(s)
+        db.flush()
+    elif s.origin is None:
+        raise HTTPException(status_code=409, detail="a desktop Session has this uuid")
+    have = {seq for (seq,) in db.query(models.SessionChunk.seq).filter(models.SessionChunk.session_id == s.id)}
+    for c in body.chunks:
+        if c.seq not in have:
+            db.add(models.SessionChunk(session_id=s.id, seq=c.seq, events_json=json.dumps(c.events)))
+            have.add(c.seq)
+    db.flush()
+    db.refresh(s)
+    deleted = False
+    if body.ended_at is not None and s.ended_at is None:
+        if sessions_router._is_silent(s):
+            sessions_router._drop_routine_candidates(db, s.uuid)
+            db.delete(s)
+            deleted = True
+        else:
+            s.ended_at = body.ended_at
+            db.flush()
+            enqueue_routine_mine(db, s.uuid)
+    db.commit()
+    return {"uuid": uuid, "stored_seqs": sorted(have), "deleted": deleted}
+
+
 class EditIn(BaseModel):
     uuid: str
     track_id: int | None = None  # null for setting:<key>

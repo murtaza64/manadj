@@ -2136,6 +2136,8 @@ export interface SessionRowWire {
   started_at: string;
   ended_at: string | null;
   take_count: number;
+  /** Recording device (#395): null/absent = this desktop, else the phone's name. */
+  origin?: string | null;
 }
 
 export interface SessionDetailWire extends SessionRowWire {

@@ -13,6 +13,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.runtime.*
+import kotlinx.coroutines.flow.collectLatest
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -144,8 +145,14 @@ private class BrowseData(val decks: List<DeckId>, val refs: List<Long>, val foll
         }
     }
     val followById = remember(follow) { follow?.associateBy { it.trackId } }
-    val all = remember(ux.library, node, ux.filter, follow, ux.played.size, ux.downloads) { if (!node.hasTracks) emptyList() else ux.library.rows(node, ux.filter, follow, ux.played.toList(), ignoreDownloaded = true) }
-    val downloadedIds = remember(all, ux.downloads) { all.filter { ux.library.downloaded(it.id) }.mapTo(HashSet()) { it.id } }
+    // Rows ignore downloads (UH9: a download progress tick must not re-sort the list on the main thread).
+    val all = remember(ux.library, node, ux.filter, follow, ux.played.size) { if (!node.hasTracks) emptyList() else ux.library.rows(node, ux.filter, follow, ux.played.toList(), ignoreDownloaded = true) }
+    // On-phone set: one file stat per track — synchronous once on open, then recomputed off the main thread.
+    fun downloaded(rows: List<LibraryTrack>) = rows.filter { ux.library.downloaded(it.id) }.mapTo(HashSet()) { it.id }
+    val initialDownloaded = remember { downloaded(all) }
+    val downloadedIds by produceState<Set<Long>>(initialDownloaded, all, ux.downloads) {
+        value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { downloaded(all) }
+    }
     val rows = if (ux.filter.downloadedOnly) all.filter { it.id in downloadedIds } else all
     return BrowseData(decks, refs, followById, rows, downloadedIds)
 }
@@ -199,6 +206,7 @@ private class BrowseData(val decks: List<DeckId>, val refs: List<Long>, val foll
                 if (!scrolling) { val first = listState.layoutInfo.visibleItemsInfo.firstOrNull(); ux.saveScroll(source, first?.key as? String, listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset) }
             }
         }
+        ScrollFrameMeter(listState, "browser")
         // Row decorations from a small state map (not per-frame): which deck holds each track, playing, played.
         val onDecks by remember { derivedStateOf {
             model.visibleDecks.mapNotNull { d -> dev.manadj.app.library.LibraryHolder.trackOn(model, d)?.toLong()?.let { it to (d to audible(mixOf(model, ux, d))) } }.toMap()
@@ -341,7 +349,7 @@ private class BrowseData(val decks: List<DeckId>, val refs: List<Long>, val foll
 @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable private fun Sidebar(model: PlayerModel, ux: UiModel, node: BrowseNode, data: BrowseData, pick: (DeckId) -> Unit, modifier: Modifier) {
     val container = if (node.hasTracks) ux.path.getOrNull(ux.path.size - 2) ?: BrowseNode.Root else node
-    val entries = remember(ux.library, container, ux.filter, ux.played.size, ux.downloads) { ux.library.children(container, ux.filter, ux.played.toList()) }
+    val entries = remember(ux.library, container, ux.filter, ux.played.size, if (ux.filter.downloadedOnly) ux.downloads else 0) { ux.library.children(container, ux.filter, ux.played.toList()) }
     val f = ux.filter
     val gap = Arrangement.spacedBy(4.dp)
     androidx.compose.foundation.lazy.LazyColumn(modifier.padding(start = 6.dp, end = 4.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
@@ -471,7 +479,16 @@ private class BrowseData(val decks: List<DeckId>, val refs: List<Long>, val foll
             }
         }
         Row(Modifier.fillMaxWidth().height(if (dense) 19.dp else 22.dp).padding(top = if (dense) 2.dp else 3.dp), verticalAlignment = Alignment.CenterVertically) {
-            (ux.synced?.preview(track.id) ?: track.preview)?.let { PreviewWave(it, Modifier, height = if (dense) 17.dp else 19.dp) }
+            // Synced preview: disk read + band mapping off the main thread (UH9); the slot is held while loading.
+            val synced = ux.synced
+            val preview by produceState(if (synced == null) java.util.Optional.ofNullable(track.preview) else synced.loadedPreview(track.id)?.let { java.util.Optional.ofNullable(it.orElse(null) ?: track.preview) }, synced, track.id) {
+                if (value == null && synced != null) value = java.util.Optional.ofNullable(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { synced.preview(track.id) } ?: track.preview)
+            }
+            val previewHeight = if (dense) 17.dp else 19.dp
+            when (val p = preview) {
+                null -> Spacer(Modifier.size(110.dp, previewHeight))
+                else -> p.orElse(null)?.let { PreviewWave(it, Modifier, height = previewHeight) }
+            }
             Spacer(Modifier.width(6.dp))
             Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
                 for (tag in track.tags) {
@@ -574,5 +591,32 @@ private object PreviewBitmaps {
     val pulse = if (live) androidx.compose.animation.core.rememberInfiniteTransition(label = "badge").animateFloat(.35f, 1f, androidx.compose.animation.core.infiniteRepeatable(androidx.compose.animation.core.tween(600), androidx.compose.animation.core.RepeatMode.Reverse), label = "badge").value else .6f
     Box(Modifier.size(22.dp).clip(RoundedCornerShape(4.dp)).background(deckColor(deck).copy(alpha = if (live) pulse else .25f)), contentAlignment = Alignment.Center) {
         Text(deck.name, color = if (live) Color.Black else deckColor(deck), size = 12, bold = true)
+    }
+}
+
+/**
+ * UH9: per-fling frame-interval stats to logcat (`adb logcat -s manadj-perf`) — passive on-device measurement,
+ * no input injection. Janky = interval > 1.5 vsync.
+ */
+@Composable fun ScrollFrameMeter(state: androidx.compose.foundation.lazy.LazyListState, name: String) {
+    val view = androidx.compose.ui.platform.LocalView.current
+    LaunchedEffect(state) {
+        snapshotFlow { state.isScrollInProgress }.collectLatest { scrolling ->
+            if (!scrolling) return@collectLatest
+            val vsync = 1e9 / (view.display?.refreshRate ?: 60f)
+            val dt = ArrayList<Long>(512)
+            var last = withFrameNanos { it }
+            try { while (true) { val t = withFrameNanos { it }; dt += t - last; last = t } }
+            finally {
+                if (dt.size >= 10) {
+                    val ms = dt.map { it / 1e6 }.sorted()
+                    fun pct(q: Double) = ms[((ms.size - 1) * q).toInt()]
+                    val janky = dt.count { it > vsync * 1.5 }
+                    val missed = dt.sumOf { kotlin.math.max(0L, kotlin.math.round(it / vsync).toLong() - 1) }
+                    android.util.Log.i("manadj-perf", "%s scroll: %d frames @%.0fHz, p50 %.1f p90 %.1f p99 %.1f max %.1f ms, janky %d%%, missed vsyncs %d".format(
+                        name, dt.size, 1e9 / vsync, pct(.5), pct(.9), pct(.99), ms.last(), 100 * janky / dt.size, missed))
+                }
+            }
+        }
     }
 }
