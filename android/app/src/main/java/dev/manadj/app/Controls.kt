@@ -148,11 +148,11 @@ enum class KnobKind(val neutral: Double) { TRIM(.5), EQ_LOW(.5), EQ_MID(.5), EQ_
 /**
  * Double-tap target (#125), desktop DeckKeys double-tap: EQ uses invertControl(v, neutral) = v < neutral/2 ?
  * neutral : 0 (kill ↔ neutral, nearer stop; a boost goes to kill); FILTER resets to centre; FX depth to dry.
- * TRIM has no desktop key; it takes the EQ rule (human: neutral ↔ minimum).
+ * TRIM always resets to neutral, never minimum (UH10).
  */
 fun doubleTapTarget(kind: KnobKind, value: Double): Double = when (kind) {
-    KnobKind.EQ_LOW, KnobKind.EQ_MID, KnobKind.EQ_HIGH, KnobKind.TRIM -> if (value < kind.neutral / 2) kind.neutral else 0.0
-    KnobKind.FILTER, KnobKind.FX_DEPTH -> kind.neutral
+    KnobKind.EQ_LOW, KnobKind.EQ_MID, KnobKind.EQ_HIGH -> if (value < kind.neutral / 2) kind.neutral else 0.0
+    KnobKind.TRIM, KnobKind.FILTER, KnobKind.FX_DEPTH -> kind.neutral
 }
 
 private fun mix(a: Color, b: Color, t: Float) = Color(a.red + (b.red - a.red) * t, a.green + (b.green - a.green) * t, a.blue + (b.blue - a.blue) * t)
