@@ -40,6 +40,15 @@ def set_pair_linked(
         if db.query(models.Track.id).filter(models.Track.id == track_id).first() is None:
             raise HTTPException(status_code=404, detail=f"Track {track_id} not found")
 
+    if write_pair_linked(db, a_track_id, b_track_id, payload.linked):
+        db.commit()
+    return schemas.TrackLinkState(linked=payload.linked)
+
+
+def write_pair_linked(db: Session, a_track_id: int, b_track_id: int, linked: bool) -> bool:
+    """Set or clear the Linked fact for an unordered pair of distinct, known
+    Tracks (callers validate). Shared with phone edits (device_edits, #398).
+    Returns whether anything changed; caller commits."""
     low, high = sorted((a_track_id, b_track_id))
     row = (
         db.query(models.TrackLink)
@@ -49,12 +58,10 @@ def set_pair_linked(
         )
         .first()
     )
-
-    if payload.linked and row is None:
+    if linked and row is None:
         db.add(models.TrackLink(low_track_id=low, high_track_id=high))
-        db.commit()
-    elif not payload.linked and row is not None:
+        return True
+    if not linked and row is not None:
         db.delete(row)
-        db.commit()
-
-    return schemas.TrackLinkState(linked=payload.linked)
+        return True
+    return False

@@ -135,6 +135,12 @@ object LibraryHolder {
         scope.launch { repo.edit(trackId, edit) }
     }
 
+    /** Set/clear the Linked pair for two Tracks (#398): applies now, syncs back to the desktop. */
+    fun setLinked(context: Context, a: Int, b: Int, linked: Boolean) {
+        val repo = repository(context)
+        scope.launch { repo.setLinked(a, b, linked) }
+    }
+
     /**
      * Change a synced setting on the phone (#375), e.g. the DJ filter:
      * `editSetting(ctx, PerformanceSettings.FILTER, audioFilterSettings.toJson())`.

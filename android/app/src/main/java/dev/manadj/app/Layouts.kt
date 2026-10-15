@@ -130,7 +130,7 @@ import dev.manadj.audio.QuantizeMode
 
 
 /**
- * Portrait centre (#153): a 2-column grid of equal keys — QUANT·H / XF, SESSIONS / SETTINGS — top-aligned, with the
+ * Portrait centre (#153): a 2-column grid of equal keys — QUANT·H / XF, SESSIONS / SETTINGS, SHIFT / BROWSE (UH24) — top-aligned, with the
  * FX card below at the bottom of the mixer (UH16); the space between is left free for future keys.
  */
 @Composable private fun GlobalControls(model: PlayerModel, ux: UiModel, modifier: Modifier, gap: Dp) {
@@ -148,6 +148,11 @@ import dev.manadj.audio.QuantizeMode
         Row(h, horizontalArrangement = Arrangement.spacedBy(gap)) {
             SessionsKey(ux, Modifier.weight(1f).fillMaxHeight())
             SettingsKey(model, ux, Modifier.weight(1f).fillMaxHeight())
+        }
+        // UH24: SHIFT (both decks) + a second BROWSE in the centre cluster.
+        Row(h, horizontalArrangement = Arrangement.spacedBy(gap)) {
+            ShiftKey(listOf(DeckId.A, DeckId.B), ux, Modifier.weight(1f).fillMaxHeight())
+            BrowseKey(model, ux, Modifier.weight(1f).fillMaxHeight(), textSize = 11)
         }
     }
 }
@@ -236,19 +241,20 @@ fun mixOf(model: PlayerModel, ux: UiModel, id: DeckId): DeckMix {
             // Minimaps flank the centre BROWSE key (the #94 swap is landscape-only, #101).
             Row((if (dev.manadj.app.viz.Glass.on) Modifier else pad).fillMaxWidth().height(if (tight) 36.dp else 44.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                 Minimap(a, model, ux.waves[a.source?.id ?: ""], Modifier.weight(1f).fillMaxHeight(), preview = ux.seekPreview, ux = ux, compactCues = true)
-                BrowseKey(model, ux, Modifier.width(84.dp).fillMaxHeight())
+                // UH24: BROWSE moved to the stems strip's outer edges and the centre cluster; the link key (#398) sits here.
+                LinkKey(model, ux, Modifier.width(84.dp).fillMaxHeight())
                 Minimap(b, model, ux.waves[b.source?.id ?: ""], Modifier.weight(1f).fillMaxHeight(), preview = ux.seekPreview, ux = ux, compactCues = true)
             }
             // Deck control areas; the pitch panel replaces one deck's half in place (#105).
             Box(Modifier.fillMaxWidth()) {
                 Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(gap)) {
-                    Row(pad.fillMaxWidth().height(28.dp), horizontalArrangement = Arrangement.spacedBy(DeckGap)) { for (ui in listOf(a, b)) StemsStrip(ui, ux, model, Modifier.weight(1f).fillMaxHeight().underPitchPanel(model, ui.id)) }
+                    Row(pad.fillMaxWidth().height(28.dp), horizontalArrangement = Arrangement.spacedBy(DeckGap)) { for (ui in listOf(a, b)) StemsStrip(ui, ux, model, Modifier.weight(1f).fillMaxHeight().underPitchPanel(model, ui.id)) { m -> BrowseKey(model, ux, m, textSize = 10) } }
                     Row(pad.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(DeckGap)) { for (ui in listOf(a, b)) Pads(ui, model, ux, Modifier.weight(1f).underPitchPanel(model, ui.id), 4, if (tight) 46.dp else PadRow) }
                     Row(pad.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(DeckGap)) {
                         for (ui in listOf(a, b)) Column(Modifier.weight(1f).underPitchPanel(model, ui.id), verticalArrangement = Arrangement.spacedBy(gap)) {
                             LoopStrip(ui, ux, model, Modifier.fillMaxWidth().height(ControlRow).screenSafe())
                             JumpStrip(ui, ux, model, Modifier.fillMaxWidth().height(ControlRow).screenSafe())
-                            Row(Modifier.fillMaxWidth().height(TransportRow).screenSafe()) { CueKey(ui, model, Modifier.weight(1f).fillMaxHeight()); PlayKey(ui, model, Modifier.weight(1f).fillMaxHeight()) }
+                            Row(Modifier.fillMaxWidth().height(TransportRow).screenSafe()) { CueKey(ui, model, Modifier.weight(1f).fillMaxHeight(), ux); PlayKey(ui, model, Modifier.weight(1f).fillMaxHeight(), ux) }
                             BendStrip(ui, model, Modifier.fillMaxWidth().height(ControlRow).screenSafe())
                             PitchKey(ui, model, ux, Modifier.fillMaxWidth().height(40.dp).screenSafe())
                         }
@@ -270,7 +276,7 @@ fun mixOf(model: PlayerModel, ux: UiModel, id: DeckId): DeckMix {
                 }
                 LibraryPanel(model, ux, Modifier.fillMaxWidth().weight(1f), pick, tapTarget = null)
                 Row(pad.fillMaxWidth().height(TransportRow).screenSafe(), horizontalArrangement = Arrangement.spacedBy(DeckGap)) {
-                    for (ui in listOf(a, b)) Row(Modifier.weight(1f).fillMaxHeight()) { CueKey(ui, model, Modifier.weight(1f).fillMaxHeight()); PlayKey(ui, model, Modifier.weight(1f).fillMaxHeight()) }
+                    for (ui in listOf(a, b)) Row(Modifier.weight(1f).fillMaxHeight()) { CueKey(ui, model, Modifier.weight(1f).fillMaxHeight(), ux); PlayKey(ui, model, Modifier.weight(1f).fillMaxHeight(), ux) }
                 }
             }
         }
@@ -373,7 +379,11 @@ private enum class PaneKind { LEFT_SLOT, RIGHT_SLOT, BOTH_LEFT, BOTH_RIGHT }
                                 QuantizeKey(model, ux, key)
                                 SettingsKey(model, ux, key)
                             }
-                            if (xf) Crossfader(model, ux, Modifier.weight(1f).height(44.dp)) else Spacer(Modifier.weight(1f))
+                            // Link toggle (#398) centred over the crossfader.
+                            Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                LinkKey(model, ux, Modifier.width(96.dp).height(32.dp), textSize = 10)
+                                if (xf) Crossfader(model, ux, Modifier.fillMaxWidth().height(44.dp))
+                            }
                             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                 SessionsKey(ux, key, textSize = 10)
                                 BrowseKey(model, ux, key)
@@ -428,7 +438,7 @@ private enum class PaneKind { LEFT_SLOT, RIGHT_SLOT, BOTH_LEFT, BOTH_RIGHT }
             StemsStrip(ui, ux, model, Modifier.fillMaxWidth().height(26.dp))
             LoopStrip(ui, ux, model, Modifier.fillMaxWidth().height(40.dp).screenSafe())
             JumpStrip(ui, ux, model, Modifier.fillMaxWidth().height(40.dp).screenSafe())
-            Row(Modifier.fillMaxWidth().height(TransportRow).screenSafe()) { CueKey(ui, model, Modifier.weight(1f).fillMaxHeight()); PlayKey(ui, model, Modifier.weight(1f).fillMaxHeight()) }
+            Row(Modifier.fillMaxWidth().height(TransportRow).screenSafe()) { CueKey(ui, model, Modifier.weight(1f).fillMaxHeight(), ux); PlayKey(ui, model, Modifier.weight(1f).fillMaxHeight(), ux) }
             Row(Modifier.fillMaxWidth().height(42.dp).screenSafe()) { BendStrip(ui, model, Modifier.weight(1f).fillMaxHeight()); PitchKey(ui, model, ux, Modifier.weight(1.6f).fillMaxHeight()) }
             }
         }

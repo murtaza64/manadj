@@ -129,6 +129,25 @@ class LibraryRepository(
     }
 
     /**
+     * Set or clear the Linked fact for the unordered pair [a]/[b] (linked-pairs
+     * PRD, #398): journaled pair-level, applied to [library] now, pushed on the
+     * next sync (newest wins on the desktop). False for a self-pair, an
+     * unknown Track, or no change.
+     */
+    suspend fun setLinked(a: Int, b: Int, linked: Boolean): Boolean = withContext(io) {
+        val base = pulled ?: return@withContext false
+        val library = _library.value ?: return@withContext false
+        val (carrier, field) = LinkFields.of(a, b) ?: return@withContext false
+        if (library.track(a) == null || library.track(b) == null) return@withContext false
+        val old = library.linked(a, b)
+        if (old == linked) return@withContext false
+        journal.append(EditJournal.newEdit(carrier, field, old, linked))
+        _library.value = build(base)
+        _state.update { it.copy(pendingEdits = journal.all().size) }
+        true
+    }
+
+    /**
      * Change a synced performance setting on the phone (#375): the whole JSON
      * value for [key] (PerformanceSettings.WAVEFORM_STYLES / FILTER), journaled
      * and applied now, pushed on the next sync (newest wins on the desktop).

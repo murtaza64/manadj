@@ -122,8 +122,11 @@ val ControlRow = 44.dp
 }
 
 /** CUE: round, yellow text (round-5 feedback); desktop gated semantics via the engine. */
-@Composable fun CueKey(ui: DeckUi, model: PlayerModel, modifier: Modifier) {
+/** [ux] given: SHIFT+CUE seeks to the track start (UH24; glyph/label say so while shifted). */
+@Composable fun CueKey(ui: DeckUi, model: PlayerModel, modifier: Modifier, ux: UiModel? = null) {
     val ready by remember(ui) { derivedStateOf { ui.ready } }
+    val shift = ux?.shifted(ui.id) == true
+    val currentShift by rememberUpdatedState(shift)
     val currentReady by rememberUpdatedState(ready)
     var held by remember(ui.id) { mutableStateOf(false) }
     val haptic = LocalHapticFeedback.current
@@ -142,6 +145,10 @@ val ControlRow = 44.dp
     } }
     Box(modifier.halo(Ink.warning, heat * .9f, 7.dp, round = true).semantics { contentDescription = "${ui.id} CUE"; if (!ready) disabled() }.pointerInput(ui.id) {
         momentaryPresses({ currentReady }, slide) {
+            if (currentShift && ux != null) {
+                haptic.performHapticFeedback(HapticFeedbackType.VirtualKey); model.submit(AudioCommand.Seek(ui.id, 0.0)); ux.shiftLatched[ui.id] = false
+                return@momentaryPresses { }
+            }
             val id = model.beginGesture(ui.id, "CUE") { model.submit(AudioCommand.CueUp(ui.id, it)) }
             held = true; haptic.performHapticFeedback(HapticFeedbackType.VirtualKey); model.submit(AudioCommand.CueDown(ui.id, id)); slideVisual.hold(scope)
             ;{ cancelled -> held = false; slideVisual.release(); if (!cancelled && model.gestureActive(id)) model.submit(AudioCommand.CueUp(ui.id, id)); model.finishGesture(id, cancelled) }
@@ -149,13 +156,15 @@ val ControlRow = 44.dp
     }.padding(4.dp).graphicsLayer { scaleX = scale; scaleY = scale }.clip(shape).then(dev.manadj.app.viz.Glass.fill(Ink.panel, dev.manadj.app.viz.Glass.PILL)).background(Ink.warning.copy(alpha = .9f * heat)).slideLockDraw(slideVisual, shape, idle = ready).border(2.dp, tint, shape), contentAlignment = Alignment.Center) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
             // Same metrics as PLAY (Key: icon textSize+3, label textSize 15).
-            GlyphIcon(if (playing && !held) Glyph.CueStop else Glyph.Cue, if (held) Color.Black else tint, 18.dp)
-            Text("CUE", color = if (held) Color.Black else tint, size = 15, bold = true)
+            GlyphIcon(if (shift) Glyph.ToStart else if (playing && !held) Glyph.CueStop else Glyph.Cue, if (held) Color.Black else tint, 18.dp)
+            Text(if (shift) "START" else "CUE", color = if (held) Color.Black else tint, size = 15, bold = true)
         }
     }
 }
 
-@Composable fun PlayKey(ui: DeckUi, model: PlayerModel, modifier: Modifier) {
+/** [ux] given: SHIFT+PLAY plays from the track start (UH24; glyph/label say so while shifted). */
+@Composable fun PlayKey(ui: DeckUi, model: PlayerModel, modifier: Modifier, ux: UiModel? = null) {
+    val shift = ux?.shifted(ui.id) == true
     val playing by remember(ui) { derivedStateOf { ui.snapshot?.playing == true } }
     val ready by remember(ui) { derivedStateOf { ui.ready } }
     // Breathes on the beat when the deck has a grid.
@@ -167,7 +176,9 @@ val ControlRow = 44.dp
     // Beat pulse read at draw time (position changes every engine tick).
     val pulse = { if (launching || !playing || bpm == null) 0f else (1 - beatPhase(position(ui) - (ui.snapshot?.gridAnchorSeconds ?: 0.0), bpm)).let { it * it } * .35f }
     val lit = if (launching) blink else playing
-    Key(if (playing && !launching) "PAUSE" else "PLAY", modifier, Ink.play, ready || playing, lit, "${ui.id} play pause", if (playing && !launching) Glyph.Pause else Glyph.Play, KeyStyle.PILL, 0f, 15, feedback = HapticFeedbackType.VirtualKey, pulseOf = pulse) {
+    if (shift) Key("START", modifier, Ink.play, ready, false, "${ui.id} play from start", Glyph.PlayStart, KeyStyle.PILL, 0f, 15, feedback = HapticFeedbackType.VirtualKey) {
+        model.submit(AudioCommand.Seek(ui.id, 0.0)); if (!playing) model.submit(AudioCommand.Play(ui.id)); ux?.shiftLatched?.set(ui.id, false)
+    } else Key(if (playing && !launching) "PAUSE" else "PLAY", modifier, Ink.play, ready || playing, lit, "${ui.id} play pause", if (playing && !launching) Glyph.Pause else Glyph.Play, KeyStyle.PILL, 0f, 15, feedback = HapticFeedbackType.VirtualKey, pulseOf = pulse) {
         model.submit(if (playing) AudioCommand.Pause(ui.id) else AudioCommand.Play(ui.id))
     }
 }
@@ -283,7 +294,8 @@ val PitchTab = RoundedCornerShape(topStart = 14.dp, topEnd = 14.dp, bottomStart 
  * Stems surface (vocals / drums / bass / other; desktop kill switches): live once the deck loaded its stem
  * bank (DeckSnapshot.stems) — tap = gain 0 / 1. A synced track whose stems aren't on the phone offers ↓ STEMS.
  */
-@Composable fun StemsStrip(ui: DeckUi, ux: UiModel, model: PlayerModel, modifier: Modifier) {
+/** [outer]: the outer-edge key (default SHIFT; portrait passes BROWSE, UH24). */
+@Composable fun StemsStrip(ui: DeckUi, ux: UiModel, model: PlayerModel, modifier: Modifier, outer: (@Composable (Modifier) -> Unit)? = null) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val live by remember(ui) { derivedStateOf { ui.snapshot?.stems == true } }
     val gains by remember(ui) { derivedStateOf { ui.snapshot?.stemGains } }
@@ -313,7 +325,8 @@ val PitchTab = RoundedCornerShape(topStart = 14.dp, topEnd = 14.dp, bottomStart 
         }
     }
     Row(modifier, verticalAlignment = Alignment.CenterVertically) {
-        if (!outerRight) { ShiftKey(ui.id, ux, Modifier.width(50.dp).fillMaxHeight()); Spacer(Modifier.width(2.dp)) }
+        @Composable fun Outer() { val m = Modifier.width(if (outer != null) 64.dp else 50.dp).fillMaxHeight(); if (outer != null) outer(m) else ShiftKey(ui.id, ux, m) }
+        if (!outerRight) { Outer(); Spacer(Modifier.width(2.dp)) }
         if (undo != null) {
             if (outerRight) Key("UNDO", Modifier.width(72.dp).fillMaxHeight(), Ink.warning, style = KeyStyle.PILL, textSize = 11) { ux.undoDelete(model) }
             Text("CUE ${undo.second + 1} DELETED", Modifier.weight(1f).padding(horizontal = 4.dp), Ink.muted, 10, true)
@@ -336,24 +349,27 @@ val PitchTab = RoundedCornerShape(topStart = 14.dp, topEnd = 14.dp, bottomStart 
             }
             if (!outerRight) Tag()
         }
-        if (outerRight) { Spacer(Modifier.width(2.dp)); ShiftKey(ui.id, ux, Modifier.width(50.dp).fillMaxHeight()) }
+        if (outerRight) { Spacer(Modifier.width(2.dp)); Outer() }
     }
 }
 
 /** SHIFT: hold for momentary, short tap latches it for the next pad press (tap again to cancel). */
-@Composable fun ShiftKey(deck: DeckId, ux: UiModel, modifier: Modifier) {
-    val on = ux.shifted(deck)
+@Composable fun ShiftKey(deck: DeckId, ux: UiModel, modifier: Modifier) = ShiftKey(listOf(deck), ux, modifier, "$deck shift")
+/** SHIFT over several decks (UH24 portrait centre key: both decks). */
+@Composable fun ShiftKey(decks: List<DeckId>, ux: UiModel, modifier: Modifier, description: String = "shift") {
+    val on = decks.any { ux.shifted(it) }
     val shape = RoundedCornerShape(50)
-    Box(modifier.semantics { contentDescription = "$deck shift" }.pointerInput(deck) {
+    Box(modifier.semantics { contentDescription = description }.pointerInput(decks) {
         awaitEachGesture {
             val down = awaitFirstDown(requireUnconsumed = false); down.consume()
-            val wasLatched = ux.shiftLatched[deck] == true
-            ux.shiftHeld[deck] = true
+            val wasLatched = decks.any { ux.shiftLatched[it] == true }
+            decks.forEach { ux.shiftHeld[it] = true }
             val start = down.uptimeMillis
             var up = down.uptimeMillis
             try { while (true) { val c = awaitPointerEvent().changes.firstOrNull { it.id == down.id } ?: break; up = c.uptimeMillis; if (!c.pressed) break } }
-            finally { ux.shiftHeld[deck] = false }
-            if (up - start < 250) ux.shiftLatched[deck] = !wasLatched else ux.shiftLatched[deck] = false
+            finally { decks.forEach { ux.shiftHeld[it] = false } }
+            val latch = up - start < 250 && !wasLatched
+            decks.forEach { ux.shiftLatched[it] = latch }
         }
     }.padding(vertical = 2.dp).clip(shape).then(if (on) Modifier.background(Ink.warning) else dev.manadj.app.viz.Glass.fill(Ink.panel, dev.manadj.app.viz.Glass.PILL)).border(1.5.dp, Ink.warning, shape), contentAlignment = Alignment.Center) {
         Text("SHIFT", color = if (on) Color.Black else Ink.warning, size = 10, bold = true)

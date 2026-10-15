@@ -228,3 +228,41 @@ def test_snapshot_carries_metric_ladder(db, make_track):
     tracks = {t["id"]: t for t in build_snapshot(db)["tracks"]}
     assert tracks[a.id]["metric_ladder"] == {"arities": [2, 2, 2, 2], "reset_marks": [16.0]}
     assert tracks[b.id]["metric_ladder"] is None
+
+
+def test_link_edits_pair_level_newest_wins_logged_and_revertable(db, make_track):
+    """#398: phone Link toggle — one fact per unordered pair, either Track may carry it."""
+    from backend.models import TrackLink
+
+    a, b, c, gone = make_track(title="A"), make_track(title="B"), make_track(), make_track(archived_at=NOW)
+    _, out = apply_edits(db, "p", None, [
+        edit(b, f"link:{a.id}", False, True, uid="ab"),  # high→low order still addresses {a, b}
+        edit(a, f"link:{a.id}", False, True, uid="self"),
+        edit(a, f"link:{gone.id}", False, True, uid="gone"),
+        edit(a, f"link:{c.id}", False, "yes", uid="bad"),
+    ])
+    assert out == {"ab": "applied", "self": "rejected", "gone": "rejected", "bad": "rejected"}
+    [row] = db.query(TrackLink).all()
+    assert (row.low_track_id, row.high_track_id) == tuple(sorted((a.id, b.id)))
+    assert read_field(db, a, f"link:{b.id}")[0] is True
+
+    # Desktop linked a/c after an older phone unlink of the same pair: newest wins.
+    db.add(TrackLink(low_track_id=min(a.id, c.id), high_track_id=max(a.id, c.id)))
+    db.commit()
+    _, out = apply_edits(db, "p", None, [edit(a, f"link:{c.id}", False, False, at=NOW - timedelta(hours=1), uid="old")])
+    assert out == {"old": "superseded"} and read_field(db, a, f"link:{c.id}")[0] is True
+
+    ab = db.query(DeviceSyncChange).filter_by(edit_uuid="ab").one()
+    logged = next(r for r in list_changes(db) if r["id"] == ab.id)
+    assert logged["link_title"] == "A" and logged["track_title"] == "B" and logged["revertable"]
+    revert(db, [ab.id])
+    assert read_field(db, a, f"link:{b.id}")[0] is False
+
+
+def test_snapshot_links_reach_phone_after_link_push(client, make_track):
+    a, b = make_track(), make_track()
+    body = {"edits": [{"uuid": "l1", "track_id": a.id, "field": f"link:{b.id}", "old": False, "new": True, "edited_at_ms": ms(NOW)}]}
+    assert client.post("/api/device-sync/edits", json=body).json()["outcomes"] == {"l1": "applied"}
+    assert sorted((a.id, b.id)) in client.get("/api/device-sync/snapshot").json()["links"]
+    got = client.post("/api/device-sync/received", json={"changes": [{"track_id": a.id, "field": f"link:{b.id}", "old": True, "new": False}]})
+    assert got.status_code == 200

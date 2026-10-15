@@ -50,6 +50,47 @@ data class JournaledEdit(val uuid: String, val trackId: Int?, val field: String,
 
 const val SETTING_PREFIX = "setting:"
 
+/**
+ * Linked pair edits (linked-pairs PRD, #398): pair-level, journaled on the
+ * lower Track id as `link:<higher id>` with a boolean value. The desktop
+ * writes them like PUT /api/track-links/pair/{a}/{b}.
+ */
+object LinkFields {
+    const val PREFIX = "link:"
+
+    fun field(other: Int) = "$PREFIX$other"
+
+    /** (carrier track id, field) for the unordered pair; null for a self-pair. */
+    fun of(a: Int, b: Int): Pair<Int, String>? = if (a == b) null else minOf(a, b) to field(maxOf(a, b))
+
+    /** The unordered pair an edit addresses, normalized low → high; null for non-link edits. */
+    fun pair(e: JournaledEdit): Pair<Int, Int>? {
+        val carrier = e.trackId ?: return null
+        val other = e.field.takeIf { it.startsWith(PREFIX) }?.removePrefix(PREFIX)?.toIntOrNull() ?: return null
+        return minOf(carrier, other) to maxOf(carrier, other)
+    }
+
+    /** Apply link edits (journal order) to the pulled pair list. */
+    fun overlay(links: List<Pair<Int, Int>>, edits: List<JournaledEdit>): List<Pair<Int, Int>> {
+        val pairs = edits.mapNotNull { e -> pair(e)?.let { it to (e.new == true) } }
+        if (pairs.isEmpty()) return links
+        val out = LinkedHashSet(links.map { (a, b) -> minOf(a, b) to maxOf(a, b) })
+        for ((p, on) in pairs) if (on) out += p else out -= p
+        return out.toList()
+    }
+
+    /** Desktop → phone link changes a pull brings, in /received form. */
+    fun received(before: Snapshot, after: Snapshot, exclude: Set<Pair<Int?, String>>): List<JSONObject> {
+        val known = after.tracks.mapTo(HashSet()) { it.id }
+        val old = before.links.mapTo(HashSet()) { (a, b) -> minOf(a, b) to maxOf(a, b) }
+        val new = after.links.mapTo(HashSet()) { (a, b) -> minOf(a, b) to maxOf(a, b) }
+        return ((old - new).map { it to false } + (new - old).map { it to true })
+            .filter { (p, _) -> p.first in known && p.second in known && (p.first to field(p.second)) !in exclude }
+            .sortedWith(compareBy({ it.first.first }, { it.first.second }))
+            .map { (p, on) -> JSONObject().put("track_id", p.first).put("field", field(p.second)).put("old", !on).put("new", on) }
+    }
+}
+
 /** Engine DJ key id → (OpenKey, Camelot); mirrors backend/key.py. */
 internal val KEY_TABLE: Map<Int, Pair<String, String>> = listOf(
     "1d" to "8B", "1m" to "8A", "2d" to "9B", "2m" to "9A", "3d" to "10B", "3m" to "10A", "4d" to "11B", "4m" to "11A",
@@ -175,6 +216,7 @@ object TrackFields {
         val settings = edits.mapNotNull { e -> e.settingKey?.let { it to e } }
         return snapshot.copy(
             tracks = snapshot.tracks.map { t -> byTrack[t.id]?.fold(t, ::apply) ?: t },
+            links = LinkFields.overlay(snapshot.links, edits),
             settings = if (settings.isEmpty()) snapshot.settings else snapshot.settings + settings.map { (key, e) ->
                 key to SyncedSetting((e.new as? JSONObject)?.toString(), java.time.Instant.ofEpochMilli(e.editedAtMs))
             },
@@ -227,6 +269,7 @@ object SnapshotDiff {
                 }
             }
         }
+        out += LinkFields.received(before, after, exclude)
         for (key in (before.settings.keys + after.settings.keys).toSortedSet()) {
             val field = SETTING_PREFIX + key
             if ((null to field) in exclude) continue
