@@ -197,6 +197,7 @@ export default function ClipEditorView() {
     setLoadError(null);
     setSelectedCue(null);
     setThumbs(new Map());
+    programmeRef.current?.programme.dispose();
     programmeRef.current = null;
     let cancelled = false;
     (async () => {
@@ -234,7 +235,7 @@ export default function ClipEditorView() {
     const ids = programmePresetIds(spec);
     if (ids.every(isPresetLoaded)) return;
     let live = true;
-    void ensureExportPresets(ids).then(() => { if (live) { programmeRef.current = null; setPresetEpoch((n) => n + 1); } });
+    void ensureExportPresets(ids).then(() => { if (live) { programmeRef.current?.programme.dispose(); programmeRef.current = null; setPresetEpoch((n) => n + 1); } });
     return () => { live = false; };
   }, [spec]);
   const presetName = useMemo(() => {
@@ -262,6 +263,7 @@ export default function ClipEditorView() {
     if (rendered) {
       const key = `${r.startSec}:${rendered.startSec}`;
       if (!programmeRef.current || programmeRef.current.key !== key) {
+        programmeRef.current?.programme.dispose();
         programmeRef.current = { key, programme: new BackgroundProgramme(rendered.meters, loaded.routine, r, loaded.scene.metric, rendered.startSec) };
       }
       background = programmeRef.current.programme.at(spec, t, 1 / 30);
@@ -350,6 +352,7 @@ export default function ClipEditorView() {
       setError(msg);
       throw e;
     } finally {
+      programmeRef.current?.programme.dispose();
       programmeRef.current = null;
       attachRendered(loaded, rendered);
     }

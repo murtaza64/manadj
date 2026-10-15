@@ -338,10 +338,13 @@ export function masterLevelReader(audio: AudioBuffer, startSec: number): (t: num
 export const BG_W = 540;
 export const BG_H = 960;
 
-/** Sequential background painter: owns one renderer per preset the
- * programme uses and the frame feed's ballistics. */
+/** A layer idle this long is released (and rebuilt fresh if it returns):
+ * Chromium keeps ~16 WebGL contexts and kills the oldest, which turned
+ * presets reused later in a long programme black. */
+const LAYER_IDLE_SEC = 2;
+
 export class BackgroundProgramme {
-  private layers = new Map<string, BackgroundLayer>();
+  private layers = new Map<string, { layer: BackgroundLayer; lastT: number; fallback: boolean }>();
   private feed: ReturnType<typeof createOfflineVisualizerFeed>;
   private range: { startSec: number; endSec: number };
   /** `range` = the clip (cue times are clip-relative); `metersStartSec` =
@@ -350,32 +353,52 @@ export class BackgroundProgramme {
     this.range = range;
     this.feed = createOfflineVisualizerFeed(meters, routine, metersStartSec, metric);
   }
-  private layer(id: string): BackgroundLayer {
+  private layer(id: string, t: number): BackgroundLayer {
     let l = this.layers.get(id);
+    if (l && (t - l.lastT > LAYER_IDLE_SEC || t < l.lastT - LAYER_IDLE_SEC || (l.fallback && exportPresetById(id).id === id))) {
+      l.layer.dispose();
+      this.layers.delete(id);
+      l = undefined;
+    }
     if (!l) {
       const preset = exportPresetById(id);
-      l = createBackgroundLayer(preset, BG_W, BG_H);
-      // A genepool preset not loaded yet renders the fallback uncached.
-      if (preset.id === id) this.layers.set(id, l);
+      // A genepool preset not loaded yet renders the fallback until it is.
+      l = { layer: createBackgroundLayer(preset, BG_W, BG_H), lastT: t, fallback: preset.id !== id };
+      this.layers.set(id, l);
     }
-    return l;
+    l.lastT = t;
+    return l.layer;
+  }
+  /** Release every layer's WebGL context. */
+  dispose(): void {
+    for (const l of this.layers.values()) l.layer.dispose();
+    this.layers.clear();
+  }
+  private sweep(t: number): void {
+    for (const [id, l] of this.layers) {
+      if (Math.abs(t - l.lastT) > LAYER_IDLE_SEC) {
+        l.layer.dispose();
+        this.layers.delete(id);
+      }
+    }
   }
   /** Render the programme at mix instant `t`; returns the layers to composite. */
   at(spec: ClipSpec, t: number, dt: number): { canvas: HTMLCanvasElement; alpha: number }[] {
     const s = t - this.range.startSec;
     const v = vizAt(spec, s);
-    const cur = this.layer(v.presetId);
+    this.sweep(t);
+    const cur = this.layer(v.presetId, t);
     const frame = this.feed.frameAt(t, dt, presetParamsFor(v.presetId, v.params));
     const ov = overlayAt(spec, s);
     if (ov?.kind === 'blackout') return [];
     if (ov?.kind === 'blast' && ov.presetId) {
-      const blast = this.layer(ov.presetId);
+      const blast = this.layer(ov.presetId, t);
       blast.render({ ...frame, params: presetParamsFor(ov.presetId, null) });
       return [{ canvas: blast.canvas, alpha: 1 }];
     }
     const out: { canvas: HTMLCanvasElement; alpha: number }[] = [];
     if (v.from) {
-      const prev = this.layer(v.from);
+      const prev = this.layer(v.from, t);
       prev.render({ ...frame, params: presetParamsFor(v.from, v.fromParams) });
       out.push({ canvas: prev.canvas, alpha: 1 - v.mix });
     }
@@ -548,6 +571,7 @@ export async function exportClip(specIn: ClipSpec, opts: RoutineVideoExportOptio
   await settle();
   await flush();
   encoder.dispose();
+  programme.dispose();
 
   if (!jobId) {
     progress({ stage: 'done', fraction: 1 });

@@ -223,6 +223,7 @@ export function createOfflineVisualizerFeed(
 export interface BackgroundLayer {
   canvas: HTMLCanvasElement;
   render(frame: VisualizerFrameData): void;
+  dispose(): void;
 }
 
 export function createBackgroundLayer(preset: VisualizerPreset, width: number, height: number): BackgroundLayer {
@@ -235,6 +236,9 @@ export function createBackgroundLayer(preset: VisualizerPreset, width: number, h
     canvas,
     render(frame) {
       renderer.render(ctx, width, height, frame);
+    },
+    dispose() {
+      renderer.dispose?.();
     },
   };
 }
