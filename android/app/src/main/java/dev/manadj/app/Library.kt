@@ -445,12 +445,21 @@ private class BrowseData(val decks: List<DeckId>, val refs: List<Long>, val foll
     val selected = ux.selectedRow == track.id
     // Background + 1dp desktop --surface0 divider in one draw (no extra layout node; scroll-cheap).
     val bg = if (selected) Ink.accent.copy(alpha = .08f) else Ink.panel
-    Column(Modifier.fillMaxWidth().drawBehind { drawRect(bg); val t = 1.dp.toPx(); drawRect(Ink.surface0, androidx.compose.ui.geometry.Offset(0f, size.height - t), androidx.compose.ui.geometry.Size(size.width, t)) }.combinedClickable(onLongClickLabel = "Edit track", onLongClick = { if (ux.synced != null) { dev.manadj.app.edit.TrackEditNav.open(track.id.toInt()); ux.editHintSeen = true } }, onClick = tap).padding(vertical = if (dense) 3.dp else 5.dp, horizontal = 4.dp)) {
+    Column(Modifier.fillMaxWidth().drawBehind { drawRect(bg); val t = 1.dp.toPx(); drawRect(Ink.surface0, androidx.compose.ui.geometry.Offset(0f, size.height - t), androidx.compose.ui.geometry.Size(size.width, t)) }.combinedClickable(onLongClickLabel = "Edit track", onLongClick = { if (ux.synced != null) { dev.manadj.app.edit.TrackEditNav.open(track.id.toInt()); ux.editHintSeen = true } }, onClick = tap).padding(top = if (dense) 3.dp else 5.dp, bottom = if (dense) 3.dp else 5.dp, start = 4.dp, end = 24.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             deck?.let { (d, live) -> DeckBadge(d, live); Spacer(Modifier.width(6.dp)) }
             playIndex?.let { Text("%02d".format(it), Modifier.width(26.dp), Ink.muted, 11, true) }
             DownloadMark(track.id, downloaded, ux)
             Spacer(Modifier.width(6.dp))
+            // BPM + key left of the title (UH8): the right edge belongs to the fast-scroll scrubber.
+            Column(Modifier.width(46.dp), horizontalAlignment = Alignment.Start) {
+                Text(track.bpm?.let { "%.1f".format(it) } ?: "—", color = bpmColor(track.bpm) ?: Ink.muted, size = 13, bold = true)
+                val ok = toOpenKey(track.key)
+                // Harmonic match vs the mix-from deck: chip strength by relation (exact strongest); Follow dims an unmatched key.
+                val keyAlpha = if (follow != null && !follow.keyMatched) .4f else 1f
+                Text(ok ?: "—", Modifier.clip(RoundedCornerShape(3.dp)).background(Ink.play.copy(alpha = .45f * relation.strength)).padding(horizontal = 4.dp), (keyColor(ok) ?: Ink.muted).copy(alpha = keyAlpha), 11, true)
+            }
+            Spacer(Modifier.width(8.dp))
             Column(Modifier.weight(1f)) {
                 Text((if (played && deck == null) "✓ " else "") + track.title, color = if (played && deck == null) Ink.muted else Ink.text, bold = true, size = 14)
                 Text(track.artist, color = Ink.muted, size = 11)
@@ -458,13 +467,6 @@ private class BrowseData(val decks: List<DeckId>, val refs: List<Long>, val foll
             follow?.displayScore?.let { score ->
                 Text("${kotlin.math.round(score).toInt()}", Modifier.clip(RoundedCornerShape(4.dp)).clickable { ux.breakdownRow = if (ux.breakdownRow == track.id) null else track.id }.background(Ink.accent.copy(alpha = .15f)).padding(horizontal = 6.dp, vertical = 2.dp), Ink.accent, 13, true)
                 Spacer(Modifier.width(6.dp))
-            }
-            Column(horizontalAlignment = Alignment.End) {
-                Text(track.bpm?.let { "%.1f".format(it) } ?: "—", color = bpmColor(track.bpm) ?: Ink.muted, size = 13, bold = true)
-                val ok = toOpenKey(track.key)
-                // Harmonic match vs the mix-from deck: chip strength by relation (exact strongest); Follow dims an unmatched key.
-                val keyAlpha = if (follow != null && !follow.keyMatched) .4f else 1f
-                Text(ok ?: "—", Modifier.clip(RoundedCornerShape(3.dp)).background(Ink.play.copy(alpha = .45f * relation.strength)).padding(horizontal = 4.dp), (keyColor(ok) ?: Ink.muted).copy(alpha = keyAlpha), 11, true)
             }
         }
         Row(Modifier.fillMaxWidth().height(if (dense) 19.dp else 22.dp).padding(top = if (dense) 2.dp else 3.dp), verticalAlignment = Alignment.CenterVertically) {
