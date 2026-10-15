@@ -97,6 +97,7 @@ fun waypoints(rows: List<LibraryTrack>, sort: LibrarySort, minGap: Float): List<
  */
 @Composable fun ScrubOverlay(
     state: LazyListState, rows: List<LibraryTrack>, sort: LibrarySort, rowItem: (Int) -> Int, itemRow: (Int) -> Int, modifier: Modifier,
+    onDragging: (Boolean) -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
     val haptic = LocalHapticFeedback.current
@@ -107,6 +108,16 @@ fun waypoints(rows: List<LibraryTrack>, sort: LibrarySort, minGap: Float): List<
     val minGap = with(density) { if (heightPx > 0) 20.dp.toPx() / heightPx else .05f }
     val points = remember(rows, sort, minGap) { waypoints(rows, sort, minGap) }
     val n = rows.size
+    val draggingNow by rememberUpdatedState(onDragging)
+    LaunchedEffect(Unit) { snapshotFlow { dragging }.collect { draggingNow(it) } }
+    FrameMeter(state, "browser scrub") { dragging }
+    // UH26: one scrollToItem per frame at most (touch events arrive faster than frames; each forces a relayout).
+    val currentRowItem by rememberUpdatedState(rowItem)
+    LaunchedEffect(state, dragging) {
+        if (!dragging) return@LaunchedEffect
+        var shown = -1
+        while (true) { withFrameNanos { }; val r = dragRow; if (r != shown) { shown = r; state.scrollToItem(currentRowItem(r)) } }
+    }
     // Shown while scrolling or dragging; lingers 1.2 s.
     var visible by remember { mutableStateOf(false) }
     LaunchedEffect(state) {
@@ -149,7 +160,6 @@ fun waypoints(rows: List<LibraryTrack>, sort: LibrarySort, minGap: Float): List<
                             dragRow = r
                             val sec = sectionOf(rows[r], r, sort, n)
                             if (sec != lastSection) { if (lastSection != null) haptic.performHapticFeedback(HapticFeedbackType.SegmentFrequentTick); lastSection = sec }
-                            scope.launch { state.scrollToItem(rowItem(r)) }
                         }
                         go(down.position.y)
                         try {

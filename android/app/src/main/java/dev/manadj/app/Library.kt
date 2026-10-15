@@ -27,6 +27,8 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.graphics.nativeCanvas
 import dev.manadj.app.browse.*
 import dev.manadj.audio.DeckId
 import java.time.format.DateTimeFormatter
@@ -208,6 +210,15 @@ private class BrowseData(val decks: List<DeckId>, val refs: List<Long>, val foll
             }
         }
         ScrollFrameMeter(listState, "browser")
+        // UH25: Follow jumps to the top whenever the followed set changes (a remembered position there disorients).
+        if (isFollow) {
+            var lastRefs by remember(listState) { mutableStateOf(refs) }
+            LaunchedEffect(refs) { if (refs != lastRefs) { lastRefs = refs; listState.scrollToItem(0) } }
+        }
+        // UH26: while the fast-scroll thumb is dragged every frame shows a fresh page of rows; they render as a
+        // two-text placeholder at the measured row height (profile: subcompose + text layout of full rows ≈ 50 %).
+        var scrubbing by remember { mutableStateOf(false) }
+        var liteHeight by remember { mutableIntStateOf(0) }
         // Row decorations from a small state map (not per-frame): which deck holds each track, playing, played.
         val onDecks by remember { derivedStateOf {
             model.visibleDecks.mapNotNull { d -> dev.manadj.app.library.LibraryHolder.trackOn(model, d)?.toLong()?.let { it to (d to audible(mixOf(model, ux, d))) } }.toMap()
@@ -254,6 +265,7 @@ private class BrowseData(val decks: List<DeckId>, val refs: List<Long>, val foll
                     Text(c.label.uppercase(), Modifier.fillMaxWidth().background(dev.manadj.app.viz.Glass.chip(Ink.background)).padding(top = 8.dp, bottom = 3.dp, start = 4.dp), if (c.label == "Following") Ink.accent else if (c.tier == EvidenceTier.KNOWN) Ink.play else Ink.muted, 10, true)
                 }
                 item(key = "lib:" + track.id, contentType = "track") {
+                    if (scrubbing && liteHeight > 0) { LiteRow(track, liteHeight); return@item }
                     SwipeToLoad(track.title, Modifier.fillMaxWidth(), { ux.loadRow(model, it, track.id) }) {
                         TrackRow(track, c?.takeIf { it.label != "Following" }, ux, playOrder?.get(track.id), onDecks[track.id], track.id in ux.played, keyRelation(reference, toOpenKey(track.key)), track.id in downloadedIds, dense) {
                             dev.manadj.app.library.LibraryHolder.prefetch(ctx, track.id.toInt()); if (tapTarget != null) ux.loadRow(model, tapTarget, track.id) else ux.selectedRow = track.id
@@ -264,7 +276,10 @@ private class BrowseData(val decks: List<DeckId>, val refs: List<Long>, val foll
         }
         ScrubOverlay(listState, rows, ux.filter.sort, { r -> rowItems.getOrElse(r) { 0 } },
             { item -> var lo = 0; var hi = rowItems.size - 1; while (lo < hi) { val m = (lo + hi + 1) / 2; if (rowItems[m] <= item) lo = m else hi = m - 1 }; lo },
-            Modifier.matchParentSize())
+            Modifier.matchParentSize()) { on ->
+                if (on) liteHeight = listState.layoutInfo.visibleItemsInfo.filter { it.contentType == "track" }.map { it.size }.sorted().let { it.getOrNull(it.size / 2) ?: 0 }
+                scrubbing = on
+            }
         }
 }
 
@@ -600,10 +615,12 @@ private object PreviewBitmaps {
  * UH9: per-fling frame-interval stats to logcat (`adb logcat -s manadj-perf`) — passive on-device measurement,
  * no input injection. Janky = interval > 1.5 vsync.
  */
-@Composable fun ScrollFrameMeter(state: androidx.compose.foundation.lazy.LazyListState, name: String) {
+@Composable fun ScrollFrameMeter(state: androidx.compose.foundation.lazy.LazyListState, name: String) = FrameMeter(state, "$name scroll") { state.isScrollInProgress }
+/** Frame-interval stats to logcat (`manadj-perf`) for each stretch where [active] holds. */
+@Composable fun FrameMeter(key: Any, name: String, active: () -> Boolean) {
     val view = androidx.compose.ui.platform.LocalView.current
-    LaunchedEffect(state) {
-        snapshotFlow { state.isScrollInProgress }.collectLatest { scrolling ->
+    LaunchedEffect(key) {
+        snapshotFlow { active() }.collectLatest { scrolling ->
             if (!scrolling) return@collectLatest
             val vsync = 1e9 / (view.display?.refreshRate ?: 60f)
             val dt = ArrayList<Long>(512)
@@ -615,7 +632,7 @@ private object PreviewBitmaps {
                     fun pct(q: Double) = ms[((ms.size - 1) * q).toInt()]
                     val janky = dt.count { it > vsync * 1.5 }
                     val missed = dt.sumOf { kotlin.math.max(0L, kotlin.math.round(it / vsync).toLong() - 1) }
-                    android.util.Log.i("manadj-perf", "%s scroll: %d frames @%.0fHz, p50 %.1f p90 %.1f p99 %.1f max %.1f ms, janky %d%%, missed vsyncs %d".format(
+                    android.util.Log.i("manadj-perf", "%s: %d frames @%.0fHz, p50 %.1f p90 %.1f p99 %.1f max %.1f ms, janky %d%%, missed vsyncs %d".format(
                         name, dt.size, 1e9 / vsync, pct(.5), pct(.9), pct(.99), ms.last(), 100 * janky / dt.size, missed))
                 }
             }
@@ -630,3 +647,27 @@ fun Modifier.bleed(x: androidx.compose.ui.unit.Dp): Modifier = layout { measurab
     val p = measurable.measure(c)
     layout(p.width - extra, p.height) { p.place(-x.roundToPx(), 0) }
 }
+
+/**
+ * Scrub placeholder (UH26): BPM + title · artist at a fixed [heightPx]. Drawn with platform drawText — no text
+ * layout or child nodes (a fresh page of rows composes every frame while scrubbing).
+ */
+@Composable private fun LiteRow(track: LibraryTrack, heightPx: Int) {
+    val h = with(androidx.compose.ui.platform.LocalDensity.current) { heightPx.toDp() }
+    val bpm = remember(track) { track.bpm?.let { "%.1f".format(it) } ?: "—" }
+    val bpmArgb = (bpmColor(track.bpm) ?: Ink.muted).toArgb()
+    Box(Modifier.fillMaxWidth().height(h).drawBehind {
+        val p = LitePaint.paint
+        p.textSize = 14.sp.toPx()
+        val y = size.height / 2 + p.textSize * .35f
+        val x0 = 26.dp.toPx()
+        p.color = bpmArgb; drawContext.canvas.nativeCanvas.drawText(bpm, x0, y, p)
+        p.color = Ink.text.toArgb()
+        val c = drawContext.canvas.nativeCanvas
+        c.save(); c.clipRect(x0 + 62.dp.toPx(), 0f, size.width - 30.dp.toPx(), size.height)
+        val tx = x0 + 62.dp.toPx(); c.drawText(track.title, tx, y, p)
+        p.color = Ink.muted.toArgb(); c.drawText(track.artist, tx + p.measureText(track.title + "  "), y, p); c.restore()
+        val t = 1.dp.toPx(); drawRect(Ink.surface0, androidx.compose.ui.geometry.Offset(0f, size.height - t), androidx.compose.ui.geometry.Size(size.width, t))
+    })
+}
+private object LitePaint { val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { typeface = android.graphics.Typeface.create(android.graphics.Typeface.MONOSPACE, android.graphics.Typeface.BOLD) } }
