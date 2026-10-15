@@ -9,6 +9,8 @@ prefix so a future LAN listener can expose it alone.
 - POST /previews              bulk preview-waveform pack (MPK1, see below)
 - GET  /tracks/{id}/audio     the audio file (Range-capable)
 - GET  /tracks/{id}/waveform  the full detail waveform (MWF1), with `waveform_rev`
+- GET  /tracks/{id}/stems/{stem}           one current stem (AAC m4a, Range), `stems_rev`
+- GET  /tracks/{id}/stems/{stem}/waveform  that stem's MWF1 (generated lazily)
 
 The snapshot also carries `settings`: synced performance settings
 (SYNCED_SETTINGS: Waveform style slots, filter) so the phone plays with the
@@ -44,6 +46,7 @@ from ..models import (
     Beatgrid,
     Cameo,
     HotCue,
+    MetricLadder,
     Playlist,
     PlaylistTrack,
     Tag,
@@ -113,7 +116,7 @@ def _waveform_revs(db: Session) -> dict[int, str]:
 
 # Synced performance settings (settings #176 keys): the phone plays with the
 # desktop's look and feel. Values are the parsed JSON the frontend persists.
-SYNCED_SETTINGS: tuple[str, ...] = ("manadj.waveformStyles", "manadj-filter-settings")
+SYNCED_SETTINGS: tuple[str, ...] = ("manadj.waveformStyles", "manadj-filter-settings", "manadj-follow-params")
 
 
 def _json_object(raw: str | None) -> dict | None:
@@ -140,6 +143,20 @@ def synced_settings(db: Session) -> dict[str, dict]:
     return out
 
 
+def stems_rev(track_id: int, filename: str) -> str | None:
+    """Revision of a Track's current stems (stale = absent, #149): changes
+    with the split (meta.json) — null when there are none."""
+    from ..stems import META_FILENAME, is_current, stems_dir
+
+    try:
+        if not is_current(track_id, Path(filename)):
+            return None
+        meta = (stems_dir(track_id) / META_FILENAME).read_bytes()
+    except OSError:
+        return None
+    return hashlib.sha1(meta).hexdigest()[:16]
+
+
 def build_snapshot(db: Session) -> dict:
     tracks = (
         db.query(Track)
@@ -159,6 +176,10 @@ def build_snapshot(db: Session) -> dict:
 
     previews = _preview_revs(db)
     waveforms = _waveform_revs(db)
+    ladders = {
+        lad.track_id: {"arities": json.loads(lad.arities_json), "reset_marks": json.loads(lad.reset_marks_json)}
+        for lad in db.query(MetricLadder)
+    }
 
     track_rows = []
     for t in tracks:
@@ -177,6 +198,9 @@ def build_snapshot(db: Session) -> dict:
                 "artist": t.artist,
                 "file_name": Path(t.filename).name,
                 "bpm": t.bpm_projected,
+                # The centiBPM column desktop Follow's BPM gate filters on (crud.get_tracks):
+                # can differ from the served bpm (ADR 0027); the phone gates on it for parity.
+                "bpm_centi": t.bpm,
                 **_key_fields(t.key),
                 "energy": t.energy,
                 "duration_secs": t.duration_secs,
@@ -187,9 +211,11 @@ def build_snapshot(db: Session) -> dict:
                 "audio_rev": audio_rev(t.filename),
                 "preview_rev": previews.get(t.id),
                 "waveform_rev": waveforms.get(t.id),
+                "stems_rev": stems_rev(t.id, t.filename),
                 "tag_ids": sorted(tt.tag_id for tt in t.track_tags),
                 "hot_cues": cues.get(t.id, []),
                 "grid": grid,
+                "metric_ladder": ladders.get(t.id),
             }
         )
 
@@ -349,7 +375,73 @@ def get_audio(track_id: int, db: Session = Depends(get_db)):
     return response
 
 
+def _current_stem(db: Session, track_id: int, stem: str) -> Path:
+    from ..stems import STEM_NAMES, is_current, stems_dir
+
+    track = db.get(Track, track_id)
+    if stem not in STEM_NAMES or track is None or track.archived_at is not None:
+        raise HTTPException(status_code=404, detail="Unknown track or stem")
+    if not is_current(track_id, Path(track.filename)):
+        raise HTTPException(status_code=404, detail="Stems not available")
+    return stems_dir(track_id) / f"{stem}.m4a"
+
+
+@router.get("/tracks/{track_id}/stems/{stem}")
+def get_stem(track_id: int, stem: str, db: Session = Depends(get_db)):
+    """One current stem (vocals/drums/bass/other) as AAC m4a, Range-capable."""
+    path = _current_stem(db, track_id, stem)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Stems not available")
+    response = FileResponse(path, media_type="audio/mp4", filename=f"{track_id}-{stem}.m4a")
+    rev = stems_rev(track_id, db.get(Track, track_id).filename)
+    if rev:
+        response.headers["X-Stems-Rev"] = rev
+    return response
+
+
+@router.get("/tracks/{track_id}/stems/{stem}/waveform")
+def get_stem_waveform(track_id: int, stem: str, db: Session = Depends(get_db)):
+    """That stem's MWF1 waveform (generated on first request, ~1.5 s)."""
+    from ..stems import ensure_stem_waveform
+
+    _current_stem(db, track_id, stem)
+    try:
+        path = ensure_stem_waveform(track_id, stem)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Stems not available")
+    return FileResponse(path, media_type="application/octet-stream")
+
+
 __all__ = ["router", "build_snapshot", "pack_previews", "audio_rev"]
+
+
+# ── Sessions (#378): the phone replays desktop Sessions ───────────────
+
+
+@router.get("/sessions")
+def list_device_sessions(db: Session = Depends(get_db)):
+    """Session headers, newest first (the desktop Sessions list). Event logs
+    are fetched per Session on demand: they are large and immutable once
+    ended, so the phone caches them by uuid."""
+    from . import sessions as sessions_router
+
+    return [row.model_dump(mode="json") for row in sessions_router.list_sessions(db)]
+
+
+@router.get("/sessions/{uuid}")
+def get_device_session(uuid: str, db: Session = Depends(get_db)):
+    """One Session's capture-event log (SessionDetail) for replay. scratchMove
+    samples are dropped: the phone has no scratch engine (scratchBegin/End
+    stay as landings), and they are most of a scratch-heavy log's bytes
+    (81 MB -> 3 MB on a real Session)."""
+    from . import sessions as sessions_router
+
+    detail = sessions_router.get_session(uuid, db).model_dump(mode="json")
+    detail["events"] = [
+        e for e in detail["events"]
+        if not (e.get("kind") == "transport" and e.get("action") == "scratchMove")
+    ]
+    return detail
 
 
 # ── Phone → desktop (ADR 0045, #375) ──────────────────────────────────

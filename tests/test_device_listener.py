@@ -1,3 +1,4 @@
+import json
 """Phone sync LAN listener (#373): device-sync only, behind a pairing code."""
 
 import socket
@@ -99,7 +100,9 @@ def test_control_enables_persists_and_rotates(data_root, monkeypatch):
     assert on["enabled"] and on["running"] and on["port"] == port
     code = on["pair_code"]
     assert code and (data_root / ".env").read_text().count(PAIR_SECRET) == 1
-    assert "[device_sync]" in (data_root / "config.toml").read_text()
+    # Machine-local state lives in the data dir, never the settings file / repo (#374 security fix).
+    assert json.loads((data_root / "data" / "device_sync.json").read_text()) == {"enabled": True, "port": port}
+    assert not (data_root / "config.toml").exists() or "device_sync" not in (data_root / "config.toml").read_text()
 
     rotated = client.post("/api/device-listener/rotate").json()
     assert rotated["pair_code"] != code
@@ -200,3 +203,26 @@ def test_paired_device_identity_reaches_change_log(paired_client, pairing, make_
     assert r.json()["outcomes"] == {"u1": "applied"}
     row = db.query(DeviceSyncChange).one()
     assert (row.device_id, row.device_name) == ("phone-identity", "Pixel 9")
+
+
+def test_legacy_state_migrates_out_of_the_repo_root(data_root):
+    from backend.device_pairing import DeviceRegistry
+
+    (data_root / "config.toml").write_text("[device_sync]\nenabled = true\nport = 48555\n")
+    assert device_listener.read_settings() == (True, 48555)  # legacy fallback
+    device_listener.write_settings(port=48556)
+    assert device_listener.read_settings() == (True, 48556)
+    assert "48556" not in (data_root / "config.toml").read_text()
+
+    legacy = data_root / "paired_devices.json"
+    legacy.write_text('[{"device_id": "p1", "name": "Pixel", "token_sha256": "ab", "paired_at": "x", "last_seen": null}]')
+    registry = DeviceRegistry()
+    assert [d.device_id for d in registry.list()] == ["p1"]
+    assert not legacy.exists() and (data_root / "data" / "paired_devices.json").exists()
+
+
+def test_startup_moves_legacy_state(data_root, monkeypatch):
+    monkeypatch.setattr(device_listener, "_listener", DeviceListener(host="127.0.0.1", advertise=False))
+    (data_root / "config.toml").write_text("[device_sync]\nenabled = false\nport = 48557\n")
+    device_listener.apply_settings()
+    assert json.loads((data_root / "data" / "device_sync.json").read_text()) == {"enabled": False, "port": 48557}

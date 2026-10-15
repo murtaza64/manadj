@@ -73,7 +73,7 @@ private val SORTS = listOf(SortColumn.DATE_ADDED, SortColumn.TITLE, SortColumn.A
     val rows: List<Pair<LibraryTrack, FollowRow?>> = remember(lib, query, follow, knownOnly, references) {
         when {
             lib == null -> emptyList()
-            follow && references.isNotEmpty() -> lib.follow(references, FollowParams(knownOnly = knownOnly), within = query).map { it.track to it }
+            follow && references.isNotEmpty() -> lib.follow(references, lib.followParams.copy(knownOnly = knownOnly || lib.followParams.knownOnly), within = query).map { it.track to it }
             else -> lib.query(query).map { it to null }
         }
     }
@@ -248,11 +248,7 @@ private fun audioLabel(a: AudioState) = when (a) {
     is AudioState.Downloading -> a.fraction?.let { "${(it * 100).toInt()}%" } ?: "↓"
 }
 
-private fun evidence(row: FollowRow) = when (row.tier) {
-    EvidenceTier.KNOWN -> row.known!!.label
-    EvidenceTier.OBSERVED -> "Observed ×${row.observedTakes}"
-    EvidenceTier.COMPATIBLE -> "Match ${row.score.toInt()}" + (if (row.keyMatched) " · key" else "") + (if (row.sharedArtist) " · artist" else "")
-}
+private fun evidence(row: FollowRow) = row.displayScore?.let { "Match ${it.toInt()}" + (if (row.keyMatched) " · key" else "") + (if (row.sharedArtist) " · artist" else "") } ?: row.label
 
 private fun bulkLine(bulk: BulkState, plan: BulkPlan, playlist: String?): String = when {
     bulk.running -> "Downloading ${bulk.tracksDone}/${bulk.tracksTotal} · ${formatBytes(bulk.bytesDone)} / ${formatBytes(bulk.bytesTotal)}${bulk.current?.let { " · $it" }.orEmpty()}"

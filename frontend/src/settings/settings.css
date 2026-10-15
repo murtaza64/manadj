@@ -362,11 +362,6 @@
   letter-spacing: 0.12em;
   color: var(--accent);
 }
-.settings-phone-device {
-  display: flex;
-  align-items: center;
-  gap: var(--space-12);
-}
 
 /* Device change log (#375). */
 .device-change-log-field {
@@ -399,4 +394,9 @@
 .device-change-batch tr.is-inactive td {
   color: var(--subtext0);
   text-decoration: line-through;
+}
+.settings-phone-device {
+  display: flex;
+  align-items: center;
+  gap: var(--space-12);
 }

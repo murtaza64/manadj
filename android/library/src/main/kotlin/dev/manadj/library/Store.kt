@@ -13,17 +13,31 @@ import java.io.File
  * Revisions in the file names make a changed desktop artifact a cache miss;
  * [prune] drops files the current snapshot no longer references.
  */
+/** The desktop's stem names (backend/stems.py STEM_NAMES), in its order. */
+val STEM_NAMES = listOf("vocals", "drums", "bass", "other")
+
 class LibraryStore(val root: File) {
     private val snapshotFile = File(root, "snapshot.json")
     val previewDir = File(root, "previews")
     val audioDir = File(root, "audio")
     val waveformDir = File(root, "waveforms")
+    val stemsDir = File(root, "stems")
 
     init {
         previewDir.mkdirs()
         audioDir.mkdirs()
         waveformDir.mkdirs()
+        stemsDir.mkdirs()
     }
+
+    /** Folder holding a track's current stems (`<stem>.m4a` + `<stem>.mwf`); null when it has none. */
+    fun stemFolder(track: LibraryTrack): File? = track.stemsRev?.let { File(stemsDir, "${track.id}-$it") }
+
+    fun stemFile(track: LibraryTrack, stem: String): File? = stemFolder(track)?.let { File(it, "$stem.m4a") }
+
+    fun stemWaveformFile(track: LibraryTrack, stem: String): File? = stemFolder(track)?.let { File(it, "$stem.mwf") }
+
+    fun hasStems(track: LibraryTrack) = STEM_NAMES.all { stemFile(track, it)?.isFile == true }
 
     fun readSnapshotText(): String? = snapshotFile.takeIf { it.isFile }?.readText()
 
@@ -74,6 +88,8 @@ class LibraryStore(val root: File) {
         previewDir.listFiles()?.forEach { if (it.name !in previews) it.delete() }
         waveformDir.listFiles()?.forEach { if (it.name !in waveforms) it.delete() }
         audioDir.listFiles()?.forEach { if (it.name !in audio) it.deleteRecursively() }
+        val stems = snapshot.tracks.mapNotNullTo(HashSet()) { stemFolder(it)?.name }
+        stemsDir.listFiles()?.forEach { if (it.name !in stems) it.deleteRecursively() }
     }
 
     companion object {

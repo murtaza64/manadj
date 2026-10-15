@@ -103,116 +103,187 @@ class SessionTest {
     }
 }
 
-class SessionReplayerTest {
-    private fun none() = List<Int?>(4) { null }
+class ReplayScriptTest {
+    private fun custom(events: String) = SessionLog.parse(JSONObject(resource("session.json")).put("events", JSONArray(events)).toString())
 
-    @Test fun seedLoadsEveryOccupiedDeckThenResyncsOnReady() {
-        val r = SessionReplayer(fixture())
-        val ops = r.seek(130.0, none(), play = true)
-        assertEquals(listOf(101, 102, 103, 104), ops.filterIsInstance<ReplayOp.Load>().map { it.trackId })
-        assertTrue(ops.none { it is ReplayOp.Play })
-        val ready = r.deckReady(0)
-        // A at 130: played from 80 at 128 with +4 % pitch.
-        assertEquals(80 + 2 * 1.04, ready.filterIsInstance<ReplayOp.Seek>().single().seconds, 1e-9)
-        assertTrue(ready.any { it is ReplayOp.Play && it.deck == 0 })
-        assertTrue(ready.any { it is ReplayOp.Pitch && it.percent == 4.0 })
-    }
-
-    @Test fun heldTracksResyncWithoutReloading() {
-        val r = SessionReplayer(fixture())
-        val ops = r.seek(130.0, listOf(101, 102, 103, 104), play = true)
-        assertTrue(ops.none { it is ReplayOp.Load })
-        assertEquals(4, ops.count { it is ReplayOp.Play })
-        // C is inside its loop at 130 (24..28 from 132? no: engaged at 132) -> plain seek.
-        assertTrue(ops.any { it is ReplayOp.Seek && it.deck == 2 })
-    }
-
-    @Test fun cuesFireOnceInOrderAsTheClockPasses() {
-        val r = SessionReplayer(fixture())
-        r.seek(130.0, listOf(101, 102, 103, 104), play = true)
-        val loop = r.advance(132.5)
-        assertEquals(ReplayOp.Loop(2, LoopSpan(24.0, 28.0), 24.0), loop.single())
-        assertTrue(r.advance(132.6).isEmpty())
-        val fader = r.advance(136.0).filterIsInstance<ReplayOp.Fader>().single()
-        assertEquals(1, fader.deck); assertEquals(.3, fader.value, 1e-9)
-        // Crossfader hard right at 164 folds into the left decks' faders.
-        val xf = r.advance(164.0).filterIsInstance<ReplayOp.Fader>()
-        assertEquals(0.0, xf.first { it.deck == 0 }.value, 1e-9)
-        assertEquals(1.0, xf.first { it.deck == 1 }.value, 1e-9)
-    }
-
-    @Test fun loadingDeckSkipsTransportUntilReady() {
-        val r = SessionReplayer(fixture())
-        r.seek(183.0, listOf(101, 102, 103, 104), play = true)
-        val ops = r.advance(184.5)
-        assertTrue(ops.any { it is ReplayOp.Load && it.deck == 0 && it.trackId == 105 })
-        assertTrue(ops.none { it is ReplayOp.Play && it.deck == 0 })
-        assertTrue(r.isLoading(0))
-        val ready = r.deckReady(0)
-        assertEquals(.52, ready.filterIsInstance<ReplayOp.Seek>().single().seconds, 1e-9)
-        assertTrue(ready.any { it is ReplayOp.Play && it.deck == 0 })
-    }
-
-    @Test fun syncCorrectsPersistentDriftOnly() {
-        val r = SessionReplayer(fixture())
-        r.seek(184.5, listOf(105, 106, 107, 108), play = true)
-        // Tick at 200 records A at 16.64. Engine 50 ms off: no correction.
-        assertTrue(r.advance(200.0, listOf(16.66, null, null, null)).none { it is ReplayOp.Seek })
-        // Gross one-off (a late landing) with only one sample: still waits for the window.
-        val events = r.advance(220.0, listOf(37.44 + 1.0, null, null, null))
-        assertTrue(events.none { it is ReplayOp.Seek && it.deck == 0 })
-    }
-
-    @Test fun jumpBeforeTrackStartPrerollsSilenceThenPlaysFromZero() {
-        val root = JSONObject(resource("session.json")).put("events", JSONArray("""[
+    @Test fun referenceIgnoresTicksAndIntegratesBend() {
+        val log = custom("""[
             {"t":10,"kind":"load","channel":"A","trackId":101,"bpm":128},
+            {"t":10,"kind":"transport","channel":"A","action":"play","playhead":0},
+            {"t":12,"kind":"bend","channel":"A","value":4},
+            {"t":12.5,"kind":"bend","channel":"A","value":0},
+            {"t":13,"kind":"pitch","channel":"A","value":-2},
+            {"t":15,"kind":"tick","playheads":{"A":5.0}}
+        ]""")
+        assertEquals(5.0 + .5 * .98, log.at(15.5).decks[0].playhead, 1e-12)   // desktop: tick re-anchors, no bend
+        assertEquals(1.5, log.replayAt(11.5).decks[0].playhead, 1e-12)
+        assertEquals(3.0 + .5 * .04, log.replayAt(13.0).decks[0].playhead, 1e-12)
+        assertEquals(3.02 + .98, log.replayAt(14.0).decks[0].playhead, 1e-12)
+        assertEquals(3.02 + 2.5 * .98, log.replayAt(15.5).decks[0].playhead, 1e-12) // a lone tick (20 ms off) moves nothing...
+        assertEquals(listOf(0 to 15.0), log.tickDivergence().map { it.deck to it.t })   // ...it is flagged
+    }
+
+    @Test fun anchorsAreRefinedByTheTicksThatAgreeAfterThem() {
+        // Desktop recorded the launch at the gesture; the audio landed 40 ms later (quantized launch): ticks agree.
+        val log = custom("""[
+            {"t":10,"kind":"load","channel":"A","trackId":101,"bpm":128},
+            {"t":10,"kind":"transport","channel":"A","action":"play","playhead":0},
+            {"t":11,"kind":"tick","playheads":{"A":0.9601}},
+            {"t":12,"kind":"tick","playheads":{"A":1.9599}},
+            {"t":13,"kind":"tick","playheads":{"A":2.96}},
+            {"t":14,"kind":"transport","channel":"A","action":"pause","playhead":3.96},
+            {"t":20,"kind":"transport","channel":"A","action":"play","playhead":3.96},
+            {"t":21,"kind":"tick","playheads":{"A":4.9}},
+            {"t":22,"kind":"tick","playheads":{"A":5.98}}
+        ]""")
+        assertEquals(-.04, log.replayAt(10.0).decks[0].playhead, 1e-12)      // anchor shifted, applied at the anchor
+        assertEquals(2.96, log.replayAt(13.0).decks[0].playhead, 1e-12)
+        assertEquals(3.96, log.replayAt(14.5).decks[0].playhead, 1e-12)      // pause keeps its recorded position
+        assertEquals(4.96, log.replayAt(21.0).decks[0].playhead, 1e-12)      // disagreeing ticks: no shift...
+        assertEquals(listOf(21.0, 22.0), log.tickDivergence().map { it.t })   // ...flagged instead
+        assertTrue(ReplayScript(log).between(10.5, 30.0).none { it.t in setOf(11.0, 12.0, 13.0, 21.0, 22.0) })
+    }
+
+    @Test fun ticksNeverBecomeOps() {
+        val log = fixture()
+        val ops = ReplayScript(log).between(log.start, log.end)
+        val tickTimes = log.events.filterIsInstance<CaptureEvent.Tick>().map { it.t }.toSet()
+        val atTicks = ops.filter { it.t in tickTimes }.map { it.op }
+        assertTrue(atTicks.none { it is ReplayOp.Locate }, "$atTicks")
+    }
+
+    @Test fun jumpBeforeTrackStartParksThenPlaysAtTheExactCrossing() {
+        val log = custom("""[
+            {"t":10,"kind":"load","channel":"A","trackId":101,"bpm":128},
+            {"t":10,"kind":"pitch","channel":"A","value":25},
             {"t":10,"kind":"transport","channel":"A","action":"play","playhead":8},
             {"t":11,"kind":"transport","channel":"A","action":"jumpBeats","playhead":-2},
             {"t":20,"kind":"tick","playheads":{"A":7}}
-        ]"""))
-        val r = SessionReplayer(SessionLog.parse(root.toString()))
-        r.seek(10.5, listOf(101, null, null, null), play = true)
-        val jump = r.advance(11.5)
-        assertTrue(jump.contains(ReplayOp.Seek(0, 0.0)) && jump.none { it is ReplayOp.Play })
-        assertTrue(r.advance(12.9).none { it is ReplayOp.Play })
-        assertEquals(listOf(ReplayOp.Seek(0, 0.0), ReplayOp.Play(0)), r.advance(13.1))
+        ]""")
+        val ops = ReplayScript(log).between(10.5, 20.0)
+        assertEquals(listOf(TimedOp(11.0, ReplayOp.Pause(0)), TimedOp(11.0, ReplayOp.Locate(0, null, 0.0)),
+            TimedOp(12.6, ReplayOp.Locate(0, null, 0.0)), TimedOp(12.6, ReplayOp.Play(0))), ops.map { it.copy(t = Math.round(it.t * 1e9) / 1e9) })
+        // A window starting inside the pre-roll still starts the deck.
+        assertEquals(TimedOp(12.6, ReplayOp.Play(0)), ReplayScript(log).between(12.0, 13.0).last().let { it.copy(t = Math.round(it.t * 1e9) / 1e9) })
     }
 
-    @Test fun residualOffsetIsServoedWithBendNotSeeks() {
-        val root = JSONObject(resource("session.json")).put("events", JSONArray("""[
-            {"t":10,"kind":"load","channel":"A","trackId":101,"bpm":128},
-            {"t":10,"kind":"transport","channel":"A","action":"play","playhead":0},
-            {"t":11,"kind":"tick","playheads":{"A":1}}, {"t":12,"kind":"tick","playheads":{"A":2}},
-            {"t":13,"kind":"tick","playheads":{"A":3}}, {"t":14,"kind":"tick","playheads":{"A":4}}
-        ]"""))
-        val r = SessionReplayer(SessionLog.parse(root.toString()))
-        r.seek(10.5, listOf(101, null, null, null), play = true)
-        assertTrue(r.advance(11.0, listOf(1.03, null, null, null)).isEmpty())
-        val ops = r.advance(12.0, listOf(2.03, null, null, null))
-        assertEquals(1, ops.size); assertEquals(-.3, (ops.single() as ReplayOp.Bend).percent, 1e-9)
-        r.advance(13.0, listOf(3.002, null, null, null))
-        assertEquals(ReplayOp.Bend(0, 0.0), r.advance(14.0, listOf(4.001, null, null, null)).first())
+    @Test fun placeSeedsLoopPitchAndTransport() {
+        val log = fixture()
+        val ops = ReplayScript(log).place(136.0, 2)
+        assertTrue(ReplayOp.Locate(2, LoopSpan(24.0, 28.0), log.replayAt(136.0).decks[2].playhead) in ops, "$ops")
+        assertEquals(ReplayOp.Play(2), ops.last())
     }
 
-    @Test fun firstMeasurementAfterStartSnapsStagger() {
-        val root = JSONObject(resource("session.json")).put("events", JSONArray("""[
-            {"t":10,"kind":"load","channel":"A","trackId":101,"bpm":128},
-            {"t":10,"kind":"transport","channel":"A","action":"play","playhead":0},
-            {"t":11,"kind":"tick","playheads":{"A":1}}, {"t":12,"kind":"tick","playheads":{"A":2}}
-        ]"""))
-        val r = SessionReplayer(SessionLog.parse(root.toString()))
-        r.seek(10.5, listOf(101, null, null, null), play = true)
-        val ops = r.advance(11.0, listOf(.9, null, null, null))
-        assertEquals(1.0, ops.filterIsInstance<ReplayOp.Seek>().single().seconds, 1e-9)
-        assertTrue(ops.any { it is ReplayOp.Play })
+    /** Engine semantics the native tests pin down (EngineTest "Replay exactness"), stepped per output frame. */
+    private class EngineModel(val rate: Int) {
+        class Deck { var track: Int? = null; var playing = false; var pos = 0.0; var pitch = 0.0; var bend = 0.0; var loop: LoopSpan? = null }
+        val decks = List(4) { Deck() }
+        var frame = 0L
+        fun apply(op: ReplayOp) {
+            val d = op.deck?.let(decks::get)
+            when (op) {
+                is ReplayOp.Load -> d!!.apply { track = op.trackId; playing = false; pos = 0.0; loop = null }
+                is ReplayOp.Play -> d!!.playing = true
+                is ReplayOp.Pause -> d!!.playing = false
+                is ReplayOp.Pitch -> d!!.pitch = op.percent.toFloat().toDouble()
+                is ReplayOp.Bend -> d!!.bend = op.percent.toFloat().toDouble()
+                is ReplayOp.Locate -> d!!.apply { loop = op.region; pos = op.playhead }
+                is ReplayOp.Scratch, is ReplayOp.Fader, is ReplayOp.Eq, is ReplayOp.Filter, is ReplayOp.BeatFx -> {}
+            }
+        }
+        fun runTo(target: Long) {
+            val n = target - frame
+            if (n <= 0) return
+            for (d in decks) if (d.playing && d.track != null) {
+                val before = d.pos
+                d.pos += n * (1 + d.pitch / 100) * (1 + d.bend / 100) / rate
+                val l = d.loop
+                if (l != null && before < l.end && d.pos >= l.end) d.pos = l.start + (d.pos - l.start) % (l.end - l.start)
+            }
+            frame = target
+        }
     }
 
-    @Test fun pauseStopsEveryDeckAndEndPauses() {
-        val r = SessionReplayer(fixture())
-        r.seek(219.0, listOf(105, null, 107, 108), play = true)
-        val end = r.advance(221.0)
-        assertFalse(r.playing)
-        assertEquals(4, end.count { it is ReplayOp.Pause })
+    /** Host loop (SessionModel's scheduling): 1 s windows from one epoch, loads ready at once then placed. */
+    private fun replay(log: SessionLog, from: Double, probes: List<Double>, check: (Double, EngineModel, SessionState) -> Unit) {
+        val rate = 48000
+        val script = ReplayScript(log)
+        val engine = EngineModel(rate)
+        val epoch = ReplayEpoch(from, 1000, rate)
+        engine.frame = epoch.frame0
+        for (d in 0..3) log.replayAt(from).decks[d].trackId?.let { engine.apply(ReplayOp.Load(d, it)) }
+        val pending = java.util.PriorityQueue<Pair<Long, Pair<Int, ReplayOp>>>(compareBy({ it.first }, { it.second.first }))
+        var seq = 0
+        fun schedule(t: Double, op: ReplayOp) { pending += epoch.frameOf(t) to (seq++ to op) }
+        for (d in 0..3) script.place(from, d).forEach { schedule(from, it) }
+        var until = from
+        val probeQueue = ArrayDeque(probes.sorted())
+        while (until < log.end || pending.isNotEmpty()) {
+            if (until < log.end) {
+                val next = minOf(until + 1.0, log.end)
+                for (op in script.between(until, next)) {
+                    schedule(op.t, op.op)
+                    // Instant load: the host places the deck as of the load (desktop state after it).
+                    if (op.op is ReplayOp.Load) script.place(op.t, op.op.deck).forEach { schedule(op.t, it) }
+                }
+                until = next
+            }
+            val horizon = epoch.frameOf(until)
+            while (pending.isNotEmpty() && pending.peek().first <= horizon) {
+                val (f, op) = pending.poll()
+                while (probeQueue.isNotEmpty() && epoch.frameOf(probeQueue.first()) < f) {
+                    val t = probeQueue.removeFirst(); engine.runTo(epoch.frameOf(t)); check(t, engine, log.replayAt(epoch.timeAt(epoch.frameOf(t))))
+                }
+                engine.runTo(f); engine.apply(op.second)
+            }
+            if (until >= log.end) break
+        }
+        while (probeQueue.isNotEmpty()) { val t = probeQueue.removeFirst(); engine.runTo(epoch.frameOf(t)); check(t, engine, log.replayAt(epoch.timeAt(epoch.frameOf(t)))) }
+    }
+
+    @Test fun syntheticFourDeckSessionReplaysWithinOneSample() {
+        val log = SessionLog.parse(SyntheticSession.json())
+        assertTrue(log.events.size > 500 && log.events.any { it is CaptureEvent.Loop } && log.events.any { it is CaptureEvent.Bend })
+        val rnd = kotlin.random.Random(3)
+        val probes = List(400) { log.start + rnd.nextDouble() * log.duration }
+        var checked = 0
+        replay(log, log.start, probes) { t, engine, ref ->
+            for (d in 0..3) {
+                val want = ref.decks[d]
+                if (want.trackId == null || want.playhead < 0) continue
+                assertEquals(want.playhead, engine.decks[d].pos, 1.0 / 48000, "t=$t deck ${DECKS[d]}")
+                checked++
+            }
+        }
+        assertTrue(checked > 1000, "checked $checked")
+    }
+
+    @Test fun replayFromMidSessionSeekMatchesToo() {
+        val log = SessionLog.parse(SyntheticSession.json(seed = 11, seconds = 300.0))
+        val from = log.start + 137.25
+        val probes = List(150) { from + 1 + it * 1.03 }
+        replay(log, from, probes) { t, engine, ref ->
+            for (d in 0..3) if (ref.decks[d].trackId != null && ref.decks[d].playhead >= 0)
+                assertEquals(ref.decks[d].playhead, engine.decks[d].pos, 1.0 / 48000, "t=$t deck ${DECKS[d]}")
+        }
+    }
+
+    @Test fun beatmatchedDecksStayPhaseLockedForTenMinutes() {
+        val log = SessionLog.parse(SyntheticSession.beatmatched())
+        var worst = 0.0
+        replay(log, log.start, List(600) { it + .5 }) { _, engine, _ ->
+            val a = (engine.decks[0].pos * 2) % 8 // beats in A's 8-beat loop (from 1 s = beat 2)
+            val b = (engine.decks[1].pos * 125 / 60) % 8
+            val diff = kotlin.math.abs(a - b).let { minOf(it, 8 - it) }
+            worst = maxOf(worst, diff * .5 * 48000)
+        }
+        assertTrue(worst <= 1.0, "worst phase error $worst samples")
+    }
+
+    @Test fun recordingJitterIsReportedNotCorrected() {
+        val log = SessionLog.parse(SyntheticSession.json(tickNoise = .008))
+        assertTrue(log.tickDivergence().isNotEmpty())
+        assertTrue(SessionLog.parse(SyntheticSession.json(tickNoise = .002)).tickDivergence().isEmpty())
     }
 }
 
@@ -225,17 +296,12 @@ class RealSessionsTest {
             val t0 = System.nanoTime()
             val log = f.bufferedReader().use { SessionLog.parse(it) }
             val parsed = (System.nanoTime() - t0) / 1e6
-            val r = SessionReplayer(log)
-            val held = MutableList<Int?>(4) { null }
-            r.seek(log.start, held, play = true)
+            val script = ReplayScript(log)
             var t = log.start
             var ops = 0
-            while (r.playing) {
-                t += .02
-                ops += r.advance(t).size
-                for (d in 0..3) if (r.isLoading(d)) ops += r.deckReady(d).size
-            }
-            report.appendLine("${f.name.take(8)} ${f.length() / 1000} kB ${log.events.size} ev parse ${"%.0f".format(parsed)} ms, replay ops $ops, issues ${log.issues.size}")
+            while (t < log.end) { ops += script.between(t, t + 1.0).size; t += 1.0 }
+            val drift = log.tickDivergence()
+            report.appendLine("${f.name.take(8)} ${f.length() / 1000} kB ${log.events.size} ev parse ${"%.0f".format(parsed)} ms, replay ops $ops, issues ${log.issues.size}, ticks >5 ms ${drift.size} (worst ${"%.1f".format((drift.maxOfOrNull { kotlin.math.abs(it.seconds) } ?: 0.0) * 1000)} ms)")
         }
         println(report)
     }

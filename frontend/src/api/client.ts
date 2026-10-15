@@ -67,7 +67,7 @@ export interface TransitionTemplateWire {
 // app, ADR 0043 / #279).
 const BACKEND_URL =
   import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://localhost:8127' : '');
-const API_BASE = `${BACKEND_URL}/api`;
+export const API_BASE = `${BACKEND_URL}/api`;
 
 /** Phone sync LAN listener (#373, backend/device_listener.py). */
 export interface DeviceListenerStatus {
@@ -77,17 +77,6 @@ export interface DeviceListenerStatus {
   pair_code: string | null;
   addresses: string[];
   error: string | null;
-}
-
-/** A phone asking to pair (#374); the desktop approves after matching the code. */
-export interface PhonePairRequest {
-  id: string;
-  device_id: string;
-  device_name: string;
-  match_code: string;
-  client: string;
-  status: string;
-  age_s: number;
 }
 
 /** One Device change log row (ADR 0045, #375). */
@@ -110,6 +99,19 @@ export interface DeviceSyncChangeRow {
   reverts_id: number | null;
   reverted_by_id: number | null;
   revertable: boolean;
+}
+
+
+
+/** A phone asking to pair (#374); the desktop approves after matching the code. */
+export interface PhonePairRequest {
+  id: string;
+  device_id: string;
+  device_name: string;
+  match_code: string;
+  client: string;
+  status: string;
+  age_s: number;
 }
 
 export interface PairedPhone {
@@ -1880,6 +1882,19 @@ export const api = {
       if (!res.ok) throw new Error(`Failed to update phone sync (${res.status})`);
       return res.json();
     },
+    changes: async (): Promise<DeviceSyncChangeRow[]> => {
+      const res = await fetch(`${API_BASE}/device-listener/changes?limit=300`);
+      if (!res.ok) throw new Error(`Failed to load the change log (${res.status})`);
+      return res.json();
+    },
+    revertChange: async (id: number): Promise<void> => {
+      const res = await fetch(`${API_BASE}/device-listener/changes/${id}/revert`, { method: 'POST' });
+      if (!res.ok) throw new Error(`Could not revert (${res.status})`);
+    },
+    revertBatch: async (batchId: string): Promise<void> => {
+      const res = await fetch(`${API_BASE}/device-listener/batches/${batchId}/revert`, { method: 'POST' });
+      if (!res.ok) throw new Error(`Could not revert the sync (${res.status})`);
+    },
     pairRequests: async (): Promise<PhonePairRequest[]> => {
       const res = await fetch(`${API_BASE}/device-listener/pair-requests`);
       if (!res.ok) throw new Error(`Failed to load pairing requests (${res.status})`);
@@ -1898,19 +1913,6 @@ export const api = {
     revoke: async (deviceId: string): Promise<void> => {
       const res = await fetch(`${API_BASE}/device-listener/devices/${encodeURIComponent(deviceId)}`, { method: 'DELETE' });
       if (!res.ok) throw new Error(`Failed to unpair (${res.status})`);
-    },
-    changes: async (): Promise<DeviceSyncChangeRow[]> => {
-      const res = await fetch(`${API_BASE}/device-listener/changes?limit=300`);
-      if (!res.ok) throw new Error(`Failed to load the change log (${res.status})`);
-      return res.json();
-    },
-    revertChange: async (id: number): Promise<void> => {
-      const res = await fetch(`${API_BASE}/device-listener/changes/${id}/revert`, { method: 'POST' });
-      if (!res.ok) throw new Error(`Could not revert (${res.status})`);
-    },
-    revertBatch: async (batchId: string): Promise<void> => {
-      const res = await fetch(`${API_BASE}/device-listener/batches/${batchId}/revert`, { method: 'POST' });
-      if (!res.ok) throw new Error(`Could not revert the sync (${res.status})`);
     },
     rotate: async (): Promise<DeviceListenerStatus> => {
       const res = await fetch(`${API_BASE}/device-listener/rotate`, { method: 'POST' });

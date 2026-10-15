@@ -9,6 +9,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.listSaver
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -40,7 +42,9 @@ private fun hms(seconds: Double): String { val s = seconds.coerceAtLeast(0.0).to
     val close = { model.leave(); ux.sessions = false }
     BackHandler { if (model.log != null) model.close() else close() }
     LaunchedEffect(Unit) { if (model.headers.isEmpty() || model.listError == null) model.refresh() }
-    DisposableEffect(Unit) { onDispose { model.leave() } }
+    // Leaving the screen stops replay; a configuration change (rotation, layout switch) must not: the
+    // replay lives in the ViewModel and this composition is only rebuilt.
+    DisposableEffect(Unit) { onDispose { if (!activity.isChangingConfigurations) model.leave() } }
     Column(modifier.background(Ink.background).testTag("session-screen")) {
         val log = model.log
         Row(Modifier.fillMaxWidth().height(48.dp).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -60,84 +64,174 @@ private fun hms(seconds: Double): String { val s = seconds.coerceAtLeast(0.0).to
     }
 }
 
-private fun dateLabel(iso: String): String = iso.replace('T', ' ').take(16)
+private val dayFormat = java.time.format.DateTimeFormatter.ofPattern("EEE, MMM d, yyyy")
+private val timeFormat = java.time.format.DateTimeFormatter.ofPattern("HH:mm")
+private fun local(iso: String?) = sessionInstant(iso)?.atZone(java.time.ZoneId.systemDefault())
+private fun dateLabel(iso: String): String = local(iso)?.let { "${it.format(dayFormat)} ${it.format(timeFormat)}" } ?: iso
 
+/** Desktop SessionsListView: local-day sections (newest first), longest Session first, 5 per day until expanded. */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable private fun SessionList(model: SessionModel) {
     model.listError?.let { Text("Session list: $it${if (model.headers.isNotEmpty()) " · showing the cached list" else ""}", Modifier.padding(12.dp), Ink.warning, 11, lines = 3) }
     if (model.headers.isEmpty() && !model.refreshing) Text("No Sessions yet. Sessions are recorded by the desktop app while you play.", Modifier.padding(12.dp), Ink.muted, 12, lines = 3)
-    LazyColumn(Modifier.fillMaxSize().testTag("session-list")) {
-        items(model.headers, key = { it.uuid }) { h ->
-            val opening = model.opening == h.uuid
-            Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).clickable(enabled = model.opening == null) { model.open(h) }.padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text(h.startedAt?.let(::dateLabel) ?: h.uuid, bold = true)
-                    Text(listOfNotNull(sessionLength(h), if (h.takeCount > 0) "${h.takeCount} takes" else null, if (h.endedAt == null) "OPEN" else null, if (model.isCached(h)) "ON PHONE" else null).joinToString(" · "), color = Ink.muted, size = 11)
+    val now = remember(model.headers) { java.time.Instant.now() }
+    val days = remember(model.headers) { groupSessionsByDay(model.headers, now = now) }
+    val expanded = rememberSaveable(saver = listSaver(save = { it.toList() }, restore = { it.toMutableStateList() })) { mutableStateListOf<String>() }
+    LazyColumn(Modifier.fillMaxSize().testTag("session-list"), contentPadding = PaddingValues(bottom = 16.dp)) {
+        for (day in days) {
+            val key = day.day.toString()
+            val open = key in expanded
+            stickyHeader(key = "day-$key") {
+                Row(Modifier.fillMaxWidth().background(Ink.background).padding(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 6.dp), verticalAlignment = Alignment.Bottom) {
+                    Text(if (day.day == java.time.LocalDate.MIN) "UNDATED" else day.day.format(dayFormat).uppercase(), Modifier.weight(1f).testTag("session-day"), Ink.text, 12, bold = true)
+                    Text("${day.sessions.size} ${if (day.sessions.size == 1) "SESSION" else "SESSIONS"}", color = Ink.muted, size = 10)
                 }
-                Text(if (opening) "LOADING…" else "›", color = Ink.accent, size = if (opening) 11 else 18, bold = true)
             }
-            Box(Modifier.fillMaxWidth().height(1.dp).background(Ink.edge))
+            items(if (open) day.sessions else day.sessions.take(5), key = { it.uuid }) { h -> SessionRow(model, h, now) }
+            if (day.sessions.size > 5) item(key = "more-$key") {
+                Text(if (open) "SHOW LESS" else "SHOW MORE (${day.sessions.size - 5})",
+                    Modifier.fillMaxWidth().clickable { if (open) expanded.remove(key) else expanded.add(key) }.padding(horizontal = 16.dp, vertical = 12.dp), Ink.accent, 11, bold = true)
+            }
         }
     }
 }
 
-private fun sessionLength(h: SessionHeader): String? = runCatching {
-    val a = java.time.LocalDateTime.parse(h.startedAt!!.take(19)); val b = java.time.LocalDateTime.parse(h.endedAt!!.take(19))
-    hms(java.time.Duration.between(a, b).seconds.toDouble())
-}.getOrNull()
+@Composable private fun SessionRow(model: SessionModel, h: SessionHeader, now: java.time.Instant) {
+    val opening = model.opening == h.uuid
+    val cached = model.isCached(h)
+    LaunchedEffect(h.uuid, cached) { model.summarize(h) }
+    val ids = model.audibleTracks[h.uuid]
+    val library by model.library.collectAsState()
+    Column(Modifier.fillMaxWidth().clickable(enabled = model.opening == null) { model.open(h) }.testTag("session-row")) {
+        Box(Modifier.fillMaxWidth().padding(horizontal = 12.dp).height(1.dp).background(Ink.surface0))
+        Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.width(76.dp)) {
+                Text(local(h.startedAt)?.format(timeFormat) ?: "—", color = Ink.text, size = 18, bold = true)
+                Text(sessionLengthLabel(sessionSeconds(h, now)), color = Ink.muted, size = 11)
+            }
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                val titles = ids?.take(3)?.map { library?.track(it)?.title ?: "#$it" }
+                Text(when {
+                    ids == null -> if (cached) "Reading tracks…" else "Tracks show once opened on the phone"
+                    ids.isEmpty() -> "No audible tracks"
+                    else -> titles!!.joinToString(" / ") + if (ids.size > 3) "  +${ids.size - 3}" else ""
+                }, color = if (ids.isNullOrEmpty()) Ink.muted else Ink.text, size = 12, lines = 2)
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(ids?.let { "${it.size} ${if (it.size == 1) "track" else "tracks"}" } ?: "– tracks", color = Ink.muted, size = 10)
+                    Text("${h.takeCount} ${if (h.takeCount == 1) "take" else "takes"}", color = if (h.takeCount > 0) Ink.accent else Ink.muted, size = 10)
+                    if (h.endedAt == null) Text("LIVE", color = Ink.pending, size = 10, bold = true)
+                    if (cached) Text("ON PHONE", color = Ink.play, size = 10, bold = true)
+                }
+            }
+            Text(if (opening) "LOADING…" else "›", Modifier.padding(start = 8.dp), Ink.accent, if (opening) 11 else 20, true)
+        }
+    }
+}
 
 @Composable private fun ColumnScope.Replay(model: SessionModel, player: PlayerModel, ux: UiModel, log: SessionLog) {
     val frame = remember(log, model.time) { log.at(model.time) }
     var issuesOpen by remember(log) { mutableStateOf(false) }
-    if (log.issues.isNotEmpty()) {
+    val drift = model.recordingDrift
+    // One warning line (space): not-reproduced vocabulary + recording drift; tap for the issue list.
+    val decode = model.decodeOffsets.filterKeys { id -> log.appearances.any { it.trackId == id } }.values.mapNotNull { it.engineOffsetMs }
+    if (log.issues.isNotEmpty() || drift.isNotEmpty() || decode.any { kotlin.math.abs(it) > .5 }) {
         val counts = log.issues.groupingBy { it.what.substringBefore(" (") }.eachCount()
-        Column(Modifier.fillMaxWidth().background(Ink.crust).clickable { issuesOpen = !issuesOpen }.padding(horizontal = 12.dp, vertical = 5.dp)) {
-            Text("NOT REPRODUCED: " + counts.entries.joinToString(" · ") { "${it.key} ×${it.value}" }, color = Ink.warning, size = 10, lines = if (issuesOpen) 4 else 1)
+        Column(Modifier.fillMaxWidth().background(Ink.crust).clickable { issuesOpen = !issuesOpen }.padding(horizontal = 12.dp, vertical = 3.dp)) {
+            Row {
+                if (counts.isNotEmpty()) Text("NOT REPRODUCED: " + counts.entries.joinToString(" · ") { "${it.key} ×${it.value}" } + "   ", color = Ink.warning, size = 10, lines = if (issuesOpen) 4 else 1)
+                // Bad recording data, not a replay fault: replay follows the recorded rates and never corrects toward ticks.
+                // Decoder vs desktop placement of the audio (encoder delay / priming): decks would flam by the difference.
+                if (decode.any { kotlin.math.abs(it) > .5 }) Text("DECODE vs DESKTOP: %d/%d tracks off, worst %+.1f ms   ".format(decode.count { kotlin.math.abs(it) > .5 }, decode.size, decode.maxBy { kotlin.math.abs(it) }),
+                    Modifier.testTag("session-decode"), Ink.warning, 10)
+                if (drift.isNotEmpty()) Text("RECORDING DRIFT: ${drift.size} tick${if (drift.size == 1) "" else "s"} > 5 ms (worst %.0f ms) · not corrected".format(drift.maxOf { kotlin.math.abs(it.seconds) } * 1000),
+                    Modifier.testTag("session-drift"), Ink.warning, 10)
+            }
             if (issuesOpen) log.issues.take(12).forEach { Text("${hms(it.t - log.activeStart)} ${it.deck?.let(DECKS::get) ?: "–"} ${it.what}", color = Ink.muted, size = 10) }
         }
     }
-    for (d in 0..3) DeckStrip(d, model, player, ux, frame, log)
-    Row(Modifier.fillMaxWidth().height(40.dp).padding(start = 12.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text("TIMELINE", Modifier.weight(1f), Ink.muted, 11, bold = true)
-        Key("−", Modifier.size(44.dp, 36.dp), Ink.text, description = "Zoom out") { model.zoom(.5) }
-        Key("+", Modifier.size(44.dp, 36.dp), Ink.text, description = "Zoom in") { model.zoom(2.0) }
-        Key("FIT", Modifier.size(48.dp, 36.dp), Ink.text) { model.fit() }
-        Key("", Modifier.size(44.dp, 36.dp), Ink.accent, engaged = model.follow, icon = Glyph.Follow, description = "Follow playhead") { model.follow = !model.follow }
+    val tl = model.timeline ?: return
+    val lanes = remember(tl) { lanesOf(tl) }
+    BoxWithConstraints(Modifier.fillMaxWidth().weight(1f)) {
+        if (maxWidth > maxHeight) LandscapeReplay(model, player, ux, log, tl, lanes, frame, maxHeight)
+        else PortraitReplay(model, player, ux, log, tl, lanes, frame)
     }
-    Timeline(model, player, log)
-    Row(Modifier.fillMaxWidth().height(24.dp).padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text("TRACK LOADS", Modifier.weight(1f), Ink.muted, 10, bold = true)
-        Text("${log.appearances.size} · TAP TO JUMP", color = Ink.muted, size = 10)
-    }
-    // The list follows the clock: the newest load sounding now stays in view.
-    val listState = androidx.compose.foundation.lazy.rememberLazyListState()
-    val current = remember(log, frame) { log.appearances.indexOfLast { model.time >= it.start && model.time < it.end && frame.audible(it.deck) } }
-    LaunchedEffect(current) { if (current >= 0 && model.follow) listState.animateScrollToItem((current - 1).coerceAtLeast(0)) }
-    LazyColumn(Modifier.fillMaxWidth().weight(1f).testTag("session-tracklist"), state = listState) {
-        itemsIndexed(log.appearances, key = { _, a -> "${a.deck}:${a.start}" }) { _, a ->
-            val t = model.track(a.trackId)
-            val current = model.time >= a.start && model.time < a.end && frame.audible(a.deck)
-            Row(Modifier.fillMaxWidth().heightIn(min = 52.dp).background(if (current) Ink.crust else Ink.background)
-                .clickable { model.seek(a.firstSound ?: a.start, player) }.padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text(DECKS[a.deck], Modifier.width(24.dp), deckColor(deckId(a.deck)), 17, true)
-                Column(Modifier.weight(1f)) {
-                    Text(t?.title ?: "Track #${a.trackId} (not in Library)", color = if (t == null) Ink.warning else Ink.text, bold = current)
-                    Text("${hms(a.start - log.activeStart)}–${hms(a.end - log.activeStart)}${t?.artist?.let { " · $it" } ?: ""}${if (a.firstSound == null) " · loaded only" else ""}", color = Ink.muted, size = 10)
-                }
-                if (current) Text("●", color = deckColor(deckId(a.deck)), size = 16)
-            }
-            Box(Modifier.fillMaxWidth().height(1.dp).background(Ink.edge))
+}
+
+private val RULER = 20.dp
+private val GAP = 3.dp
+
+/** Landscape (primary): deck strips (performance-style, adjacent) over the timeline; transport + crossfader along the bottom. */
+@Composable private fun LandscapeReplay(model: SessionModel, player: PlayerModel, ux: UiModel, log: SessionLog, tl: SessionTimeline, lanes: IntArray, frame: SessionState, height: androidx.compose.ui.unit.Dp) {
+    val bar = 52.dp
+    val timeline = ((height - bar) * .36f).coerceAtLeast(RULER + 24.dp * lanes.size)
+    val lane = ((timeline - RULER - GAP * (lanes.size - 1)) / lanes.size).coerceIn(16.dp, 120.dp)
+    Column(Modifier.fillMaxSize()) {
+        ReplayDeckStack(lanes, model, player, ux, log, frame, Modifier.fillMaxWidth().weight(1f))
+        SessionTimelineView(model, player, log, tl, lanes, lane, RULER, Modifier.fillMaxWidth().padding(horizontal = 4.dp), GAP)
+        Row(Modifier.fillMaxWidth().height(bar).padding(horizontal = 6.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+            StatusReadout(model, log, frame, Modifier.width(280.dp).padding(start = 8.dp))
+            Spacer(Modifier.weight(1f))
+            ReplayCrossfader(frame, Modifier.width(96.dp))
+            Spacer(Modifier.width(8.dp))
+            TimelineKeys(model, Modifier.fillMaxHeight())
+            Spacer(Modifier.width(8.dp))
+            TransportKeys(model, player, log, Modifier.width(340.dp).fillMaxHeight())
         }
     }
-    Row(Modifier.fillMaxWidth().height(26.dp).background(Ink.crust).padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(hms(model.time - log.activeStart), Modifier.weight(1f).testTag("session-time"), Ink.playhead, 15, true)
-        Text(when {
-            model.preparing -> "LOADING DECKS…"
-            frame.tenure != null && frame.tenure != "shared" -> "GAP · ${frame.tenure}"
-            else -> "${(0..3).count(frame::audible)} AUDIBLE"
-        }, color = Ink.muted, size = 10)
-        Text(" / ${hms(log.end - log.activeStart)}", size = 12)
+}
+
+/** Portrait (compact): deck strips, the timeline, the track loads list, transport. */
+@Composable private fun PortraitReplay(model: SessionModel, player: PlayerModel, ux: UiModel, log: SessionLog, tl: SessionTimeline, lanes: IntArray, frame: SessionState) {
+    Column(Modifier.fillMaxSize()) {
+        ReplayDeckStack(lanes, model, player, ux, log, frame, Modifier.fillMaxWidth().height(76.dp * lanes.size))
+        Row(Modifier.fillMaxWidth().height(40.dp).padding(start = 12.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("TIMELINE", Modifier.weight(1f), Ink.muted, 11, bold = true)
+            ReplayCrossfader(frame, Modifier.width(80.dp))
+            Spacer(Modifier.width(8.dp))
+            TimelineKeys(model, Modifier.height(36.dp))
+        }
+        SessionTimelineView(model, player, log, tl, lanes, when (lanes.size) { 4 -> 46.dp; 3 -> 56.dp; else -> 66.dp }, RULER, Modifier.padding(horizontal = 4.dp), GAP)
+        Row(Modifier.fillMaxWidth().height(24.dp).padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("TRACK LOADS", Modifier.weight(1f), Ink.muted, 10, bold = true)
+            Text("${log.appearances.size} · TAP TO JUMP", color = Ink.muted, size = 10)
+        }
+        // The list follows the clock: the newest load sounding now stays in view.
+        val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+        val current = remember(log, frame) { log.appearances.indexOfLast { model.time >= it.start && model.time < it.end && frame.audible(it.deck) } }
+        LaunchedEffect(current) { if (current >= 0 && model.follow) listState.animateScrollToItem((current - 1).coerceAtLeast(0)) }
+        LazyColumn(Modifier.fillMaxWidth().weight(1f).testTag("session-tracklist"), state = listState) {
+            itemsIndexed(log.appearances, key = { _, a -> "${a.deck}:${a.start}" }) { _, a ->
+                val t = model.track(a.trackId)
+                val now = model.time >= a.start && model.time < a.end && frame.audible(a.deck)
+                Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).background(if (now) Ink.crust else Ink.background)
+                    .clickable { model.seek(a.firstSound ?: a.start, player) }.padding(horizontal = 12.dp, vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(DECKS[a.deck], Modifier.width(24.dp), deckColor(deckId(a.deck)), 17, true)
+                    Column(Modifier.weight(1f)) {
+                        Text(t?.title ?: "Track #${a.trackId} (not in Library)", color = if (t == null) Ink.warning else Ink.text, bold = now)
+                        Text("${hms(a.start - log.activeStart)}–${hms(a.end - log.activeStart)}${t?.artist?.let { " · $it" } ?: ""}${if (a.firstSound == null) " · loaded only" else ""}", color = Ink.muted, size = 10)
+                    }
+                    if (now) Text("●", color = deckColor(deckId(a.deck)), size = 16)
+                }
+                Box(Modifier.fillMaxWidth().height(1.dp).background(Ink.edge))
+            }
+        }
+        StatusReadout(model, log, frame, Modifier.fillMaxWidth().height(26.dp).background(Ink.crust).padding(horizontal = 12.dp))
+        TransportKeys(model, player, log, Modifier.fillMaxWidth().height(56.dp).padding(4.dp))
     }
-    Row(Modifier.fillMaxWidth().height(56.dp).padding(4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+}
+
+@Composable private fun TimelineKeys(model: SessionModel, modifier: Modifier) {
+    val held = model.followHeldUntil > System.nanoTime()
+    Row(modifier, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        Key("FIT", Modifier.width(52.dp).fillMaxHeight(), Ink.text, description = "Fit the whole Session") { model.fit() }
+        Key("", Modifier.width(48.dp).fillMaxHeight(), Ink.accent, engaged = model.follow && !held, icon = Glyph.Follow, description = "Follow playhead") {
+            if (model.follow && held) model.followHeldUntil = 0L else model.follow = !model.follow
+        }
+    }
+}
+
+@Composable private fun TransportKeys(model: SessionModel, player: PlayerModel, log: SessionLog, modifier: Modifier) {
+    Row(modifier, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
         Key("|‹", Modifier.weight(1f).fillMaxHeight(), Ink.text, description = "Session start") { model.seek(log.activeStart, player); model.fit() }
         Key("−10", Modifier.weight(1f).fillMaxHeight(), Ink.text) { model.seek(model.time - 10, player) }
         val active = model.playing || model.preparing
@@ -147,13 +241,34 @@ private fun sessionLength(h: SessionHeader): String? = runCatching {
     }
 }
 
-@Composable private fun DeckStrip(d: Int, model: SessionModel, player: PlayerModel, ux: UiModel, frame: SessionState, log: SessionLog) {
+@Composable private fun StatusReadout(model: SessionModel, log: SessionLog, frame: SessionState, modifier: Modifier) {
+    Row(modifier, verticalAlignment = Alignment.CenterVertically) {
+        Text(hms(model.time - log.activeStart), Modifier.testTag("session-time"), Ink.playhead, 15, true)
+        Text(" of ${hms(log.end - log.activeStart)}  ", color = Ink.muted, size = 11)
+        Spacer(Modifier.weight(1f))
+        val offsets = model.engineOffsetMs.filterNotNull()
+        if (model.playing && offsets.isNotEmpty()) {
+            val worst = offsets.maxOf { kotlin.math.abs(it) }
+            // Engine vs reference: sample-exact replay keeps this under one sample (0.02 ms at 48 kHz).
+            Text("SYNC %.2f ms%s  ".format(worst, if (model.lateOps > 0) " · ${model.lateOps} late" else ""), Modifier.testTag("session-sync"),
+                if (worst < .05 && model.lateOps == 0L) Ink.muted else Ink.warning, 10)
+        }
+        Text(when {
+            model.preparing -> "LOADING DECKS…"
+            frame.tenure != null && frame.tenure != "shared" -> "GAP · ${frame.tenure}"
+            else -> "${(0..3).count(frame::audible)} AUDIBLE"
+        }, color = Ink.muted, size = 10)
+    }
+}
+
+internal class DeckView(val track: dev.manadj.library.LibraryTrack?, val status: String, val audible: Boolean, val engineHolds: Boolean, val meta: String)
+
+@Composable internal fun deckView(d: Int, model: SessionModel, player: PlayerModel, ux: UiModel, frame: SessionState): DeckView {
     val id = deckId(d)
     val ui = player.decks.getValue(id)
     val s = frame.decks[d]
     val track = model.track(s.trackId)
     val audible = frame.audible(d)
-    val color = deckColor(id)
     LaunchedEffect(ui.source?.id) { ux.ensureWave(ui.source, DeckId.entries.mapNotNull { player.decks.getValue(it).source?.id }.toSet()) }
     val engineHolds = ui.source?.id?.let { src -> track?.let { src == dev.manadj.app.library.LibraryHolder.sourceId(it) } } == true
     val downloads by ux.repo.downloads.collectAsState()
@@ -162,7 +277,7 @@ private fun sessionLength(h: SessionHeader): String? = runCatching {
         s.trackId == null -> "EMPTY"
         model.deckErrors[d] != null -> "FAILED"
         download is AudioState.Downloading -> "↓ ${download.fraction?.let { "${(it * 100).toInt()}%" } ?: "…"}"
-        (model.playing || model.preparing) && !engineHolds -> "LOADING"
+        (model.playing || model.preparing) && (!engineHolds || model.isLoading(d)) -> if (ui.snapshot?.fullyDecoded == false && engineHolds) "DECODING" else "LOADING"
         ui.snapshot?.loadState == LoadState.LOADING -> "DECODING"
         s.loop != null && s.playhead >= s.loop!!.start && s.playhead < s.loop!!.end -> "LOOP"
         s.previewing -> "PREVIEW"
@@ -170,99 +285,6 @@ private fun sessionLength(h: SessionHeader): String? = runCatching {
         s.playing -> "MUTED"
         else -> "PAUSED"
     }
-    Row(Modifier.fillMaxWidth().height(50.dp).testTag("session-deck-${DECKS[d]}").semantics { contentDescription = "Deck ${DECKS[d]}: ${track?.title ?: "empty"}, $status" }
-        .padding(horizontal = 8.dp, vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(DECKS[d], Modifier.width(22.dp), if (s.trackId == null) Ink.surface2 else color, 19, true)
-        Column(Modifier.weight(1f)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(track?.title ?: s.trackId?.let { "Track #$it (not in Library)" } ?: "—", Modifier.weight(1f), if (audible) Ink.text else Ink.muted, 11, audible)
-                val bpm = (track?.bpm ?: s.bpm)?.let { "%.1f".format(it * (1 + s.pitch / 100)) } ?: "—"
-                Text(" $bpm · ${track?.keyCamelot ?: "—"} · ${hms(s.playhead)} ", color = Ink.muted, size = 10)
-                Text(status, color = if (status == "FAILED") Ink.pending else color, size = 9, bold = true)
-            }
-            Spacer(Modifier.height(2.dp))
-            if (engineHolds) {
-                val moving = ui.snapshot.let { it?.playing == true || it?.previewing == true }
-                val tick = frameNanos(moving)
-                WaveView(ux.waves[ui.source!!.id], { val out = player.output; if (out != null && tick.value != 0L && ui.snapshot?.sourceId == ui.source?.id) out.audibleSeconds(id, tick.value) else position(ui) },
-                    ui.durationSeconds, marksOf(ui), Modifier.fillMaxWidth().height(26.dp), windowSeconds = 8.0, accent = color, live = { ux.strip(ui) })
-            } else {
-                val error = model.deckErrors[d]
-                Box(Modifier.fillMaxWidth().height(26.dp).background(Ink.crust), contentAlignment = Alignment.CenterStart) {
-                    Text(error ?: if (s.trackId == null) "" else if (model.playing || model.preparing) "loading…" else "loads when you press PLAY", Modifier.padding(horizontal = 6.dp), if (error != null) Ink.pending else Ink.muted, 10)
-                }
-            }
-        }
-    }
-    Box(Modifier.fillMaxWidth().height(1.dp).background(Ink.edge))
+    val bpm = (track?.bpm ?: s.bpm)?.let { "%.1f".format(it * (1 + s.pitch / 100)) } ?: "—"
+    return DeckView(track, status, audible, engineHolds, "$bpm · ${track?.keyCamelot ?: "—"} · ${hms(s.playhead)}")
 }
-
-/** Per-deck audibility sampled across the whole Session (bit d = deck d audible). */
-private class AudibleTrace(val start: Double, val step: Double, val bits: ByteArray)
-
-@Composable private fun Timeline(model: SessionModel, player: PlayerModel, log: SessionLog) {
-    val trace by produceState<AudibleTrace?>(null, log) {
-        value = withContext(Dispatchers.Default) {
-            val span = log.end - log.activeStart
-            val step = maxOf(.25, span / 20000)
-            val n = (span / step).toInt()
-            AudibleTrace(log.activeStart, step, ByteArray(n + 1) { i -> val s = log.at(log.activeStart + i * step); (0..3).fold(0) { m, d -> if (s.audible(d)) m or (1 shl d) else m }.toByte() })
-        }
-    }
-    val marks = remember(log) {
-        log.events.filterIsInstance<CaptureEvent.Transport>().filter { it.action in setOf("hotCue", "jumpBeats", "cue", "seek") }.map { it.t to it.deck }
-    }
-    val label = remember { android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG) }
-    Column {
-        Row(Modifier.fillMaxWidth().height(16.dp).padding(horizontal = 12.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text(hms(model.viewStart - log.activeStart), color = Ink.muted, size = 10)
-            Text("${hms(model.viewWidth)} WINDOW", color = Ink.muted, size = 10)
-            Text(hms(model.viewStart + model.viewWidth - log.activeStart), color = Ink.muted, size = 10)
-        }
-        Canvas(Modifier.fillMaxWidth().height(112.dp).testTag("session-timeline")
-            .semantics { contentDescription = "Four deck Session timeline; tap to seek, drag to pan, pinch to zoom" }
-            .pointerInput(log) { detectTapGestures { p -> model.seek(model.viewStart + p.x / size.width * model.viewWidth, player) } }
-            .pointerInput(log) { detectTransformGestures { centroid, pan, zoom, _ -> if (zoom != 1f) model.zoom(zoom.toDouble(), (centroid.x / size.width).toDouble()); if (pan.x != 0f) model.pan((-pan.x / size.width).toDouble()) } }) {
-            val lane = size.height / 4
-            fun x(t: Double) = ((t - model.viewStart) / model.viewWidth * size.width).toFloat()
-            for (d in 0..3) {
-                val c = deckColor(deckId(d))
-                drawRect(c.copy(alpha = .06f), Offset(0f, lane * d), Size(size.width, lane - 2))
-                drawRect(c, Offset(0f, lane * d), Size(3f, lane - 2))
-            }
-            // Loaded spans (dim) with the recorded-audible stretches bright.
-            label.textSize = 9.sp.toPx(); label.color = android.graphics.Color.WHITE
-            for (a in log.appearances) {
-                val l = x(a.start).coerceIn(0f, size.width); val r = x(a.end).coerceIn(0f, size.width)
-                if (r <= l) continue
-                val c = deckColor(deckId(a.deck)); val y = lane * a.deck
-                drawRect(c.copy(alpha = .18f), Offset(l, y + 2), Size(r - l, lane - 6))
-                drawRect(c, Offset(l, y + 2), Size(1.5f, lane - 6))
-            }
-            trace?.let { tr ->
-                val cols = size.width.toInt().coerceAtLeast(1)
-                for (px in 0 until cols step 2) {
-                    val t = model.viewStart + px.toDouble() / size.width * model.viewWidth
-                    val i = ((t - tr.start) / tr.step).toInt()
-                    if (i !in tr.bits.indices) continue
-                    val bits = tr.bits[i].toInt()
-                    for (d in 0..3) if (bits and (1 shl d) != 0) drawRect(deckColor(deckId(d)).copy(alpha = .75f), Offset(px.toFloat(), lane * d + lane * .3f), Size(2f, lane * .4f - 2))
-                }
-            }
-            for (a in log.appearances) {
-                val l = x(a.start).coerceAtLeast(0f); val r = x(a.end).coerceAtMost(size.width)
-                if (r - l < 40) continue
-                clipRect(l, lane * a.deck, r, lane * (a.deck + 1)) {
-                    drawContext.canvas.nativeCanvas.drawText(model.track(a.trackId)?.title ?: "#${a.trackId}", l + 5, lane * a.deck + label.textSize + 2, label)
-                }
-            }
-            for ((t, d) in marks) {
-                val px = x(t)
-                if (px in 0f..size.width) drawLine(Ink.orange, Offset(px, lane * d + lane * .7f), Offset(px, lane * (d + 1) - 2), 2f)
-            }
-            val p = x(model.time)
-            if (p in 0f..size.width) drawLine(Ink.playhead, Offset(p, 0f), Offset(p, size.height), 3f)
-        }
-    }
-}
-

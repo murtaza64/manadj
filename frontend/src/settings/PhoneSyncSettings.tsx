@@ -134,19 +134,17 @@ export default function PhoneSyncSettings() {
           </div>
         ) : null}
       </div>
-      {data.enabled || (devices.data?.length ?? 0) > 0 ? (
-        <div className="settings-field device-change-log-field">
-          <div>
-            <span className="settings-field-label">Change log</span>
-            <p>
-              Every change a phone sync made, in both directions. Newest edit
-              wins; Revert puts the old value back (and on the phone at its
-              next sync).
-            </p>
-          </div>
-          <DeviceChangeLog />
+      <div className="settings-field device-change-log-field">
+        <div>
+          <span className="settings-field-label">Change log</span>
+          <p>
+            Every change a phone sync made, in both directions. Newest edit
+            wins; Revert puts the old value back (and on the phone at its
+            next sync).
+          </p>
         </div>
-      ) : null}
+        <DeviceChangeLog />
+      </div>
       {data.error ? (
         <p role="alert" className="settings-hint">{data.error}</p>
       ) : null}

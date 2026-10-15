@@ -9,6 +9,7 @@ import { api, type DeviceSyncChangeRow } from '../api/client';
 const SETTING_LABELS: Record<string, string> = {
   'manadj.waveformStyles': 'Waveform style',
   'manadj-filter-settings': 'Filter',
+  'manadj-follow-params': 'Follow parameters',
 };
 
 function flatten(value: unknown, prefix = '', out: Record<string, string> = {}): Record<string, string> {
@@ -35,6 +36,14 @@ function show(field: string, value: unknown): string {
     return `${cue.time.toFixed(2)}s${cue.label ? ` “${cue.label}”` : ''}`;
   }
   if (field.startsWith('tag:')) return value ? 'on' : 'off';
+  if (field === 'grid' && typeof value === 'object') {
+    const g = value as { anchor_time: number | null; tempo_changes: { bpm: number }[] };
+    const bpms = [...new Set(g.tempo_changes.map((t) => t.bpm.toFixed(2)))].join('/');
+    return `${bpms} BPM${g.anchor_time !== null ? ` @ ${g.anchor_time.toFixed(3)}s` : ''}`;
+  }
+  if (field === 'reset_marks' && Array.isArray(value)) {
+    return value.length ? value.map((m: number) => `${m.toFixed(1)}s`).join(', ') : 'none';
+  }
   if (typeof value === 'number') return Number.isInteger(value) ? String(value) : value.toFixed(2);
   return String(value);
 }
@@ -43,7 +52,7 @@ function fieldLabel(field: string, tagName?: string | null): string {
   if (field.startsWith('setting:')) return SETTING_LABELS[field.slice(8)] ?? field.slice(8);
   if (field.startsWith('hot_cue:')) return `Hot cue ${field.slice(8)}`;
   if (field.startsWith('tag:')) return `Tag ${tagName ?? `#${field.slice(4)}`}`;
-  return { main_cue: 'Main cue', title: 'Title', artist: 'Artist', energy: 'Energy', key: 'Key' }[field] ?? field;
+  return { main_cue: 'Main cue', title: 'Title', artist: 'Artist', energy: 'Energy', key: 'Key', grid: 'Beatgrid', reset_marks: 'Reset marks' }[field] ?? field;
 }
 
 export function DeviceChangeLog() {

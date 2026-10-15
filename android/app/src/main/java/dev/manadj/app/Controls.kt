@@ -37,7 +37,7 @@ enum class KeyStyle { BOX, PILL, BARE }
  */
 @Composable fun Key(
     text: String, modifier: Modifier, color: Color = Ink.accent, enabled: Boolean = true, engaged: Boolean = false, description: String = text,
-    icon: Glyph? = null, style: KeyStyle = KeyStyle.BOX, pulse: Float = 0f, textSize: Int = 13, textColor: Color? = null, pending: Boolean = false, action: () -> Unit,
+    icon: Glyph? = null, style: KeyStyle = KeyStyle.BOX, pulse: Float = 0f, textSize: Int = 13, textColor: Color? = null, pending: Boolean = false, longPress: (() -> Unit)? = null, action: () -> Unit,
 ) {
     val haptic = LocalHapticFeedback.current
     val interaction = remember { MutableInteractionSource() }
@@ -48,7 +48,8 @@ enum class KeyStyle { BOX, PILL, BARE }
     val shape = if (style == KeyStyle.PILL) RoundedCornerShape(50) else RoundedCornerShape(2.dp)
     val inset = if (style == KeyStyle.BARE) 0.dp else 3.dp
     Box(modifier.halo(tint, (heat + pulse) * .8f, inset + 3.dp, style == KeyStyle.PILL).semantics { contentDescription = description; if (!enabled) disabled() }
-        .clickable(interactionSource = interaction, indication = null, enabled = enabled || pending) { haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove); action() }
+        .then(if (longPress == null) Modifier.clickable(interactionSource = interaction, indication = null, enabled = enabled || pending) { haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove); action() }
+            else Modifier.combinedClickable(interactionSource = interaction, indication = null, enabled = enabled || pending, onLongClick = { haptic.performHapticFeedback(HapticFeedbackType.LongPress); longPress() }) { haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove); action() })
         .padding(inset).graphicsLayer { scaleX = scale; scaleY = scale }
         .then(if (style == KeyStyle.BARE) Modifier else Modifier.clip(shape).background(Ink.panel).background(tint.copy(alpha = .28f * heat)).border(1.5.dp, tint.copy(alpha = if (engaged || pressed) 1f else .6f), shape))
         .padding(horizontal = 3.dp), contentAlignment = Alignment.Center) {
@@ -144,6 +145,16 @@ enum class KeyStyle { BOX, PILL, BARE }
 
 enum class KnobKind(val neutral: Double) { TRIM(.5), EQ_LOW(.5), EQ_MID(.5), EQ_HIGH(.5), FILTER(.5), FX_DEPTH(0.0) }
 
+/**
+ * Double-tap target (#125), desktop DeckKeys double-tap: EQ uses invertControl(v, neutral) = v < neutral/2 ?
+ * neutral : 0 (kill ↔ neutral, nearer stop; a boost goes to kill); FILTER resets to centre; FX depth to dry.
+ * TRIM has no desktop key; it takes the EQ rule (human: neutral ↔ minimum).
+ */
+fun doubleTapTarget(kind: KnobKind, value: Double): Double = when (kind) {
+    KnobKind.EQ_LOW, KnobKind.EQ_MID, KnobKind.EQ_HIGH, KnobKind.TRIM -> if (value < kind.neutral / 2) kind.neutral else 0.0
+    KnobKind.FILTER, KnobKind.FX_DEPTH -> kind.neutral
+}
+
 private fun mix(a: Color, b: Color, t: Float) = Color(a.red + (b.red - a.red) * t, a.green + (b.green - a.green) * t, a.blue + (b.blue - a.blue) * t)
 
 /** Desktop knobAppearance.ts + laneShade strokeColorAt: value color and arc anchor per control kind. */
@@ -188,8 +199,9 @@ fun DrawScope.drawKnob(kind: KnobKind, value: Double, r: Float, enabled: Boolean
 }
 
 /**
- * Relative-drag rotary (vertical travel, desktop feel): notch at neutral, double-tap reset, hold still 350ms
- * for fine mode with an enlarged copy beside the finger ([UiModel.knob]).
+ * Relative-drag rotary (desktop feel): notch at neutral, double-tap per [doubleTapTarget]. The enlarged copy ([UiModel.knobs])
+ * shows on touch-down, anchored beside the knob (#114). Full range ≈ 1.5× the popup height of drag (#115);
+ * a second finger resting on the knob is the explicit fine modifier (3.5× slower).
  */
 @Composable fun Knob(
     label: String, kind: KnobKind, value: Double, ui: UiModel, model: PlayerModel, deck: DeckId, modifier: Modifier,
@@ -205,59 +217,59 @@ fun DrawScope.drawKnob(kind: KnobKind, value: Double, r: Float, enabled: Boolean
     val tag = "${deck.name} $label"
     Box(modifier.onGloballyPositioned { root = it.positionInRoot() }.semantics { contentDescription = "$tag control"; stateDescription = "${(value * 100).roundToInt()}%"; if (!live) disabled() }.pointerInput(tag, interactive) {
         if (!interactive) { awaitEachGesture { awaitFirstDown(); ui.pending(label) }; return@pointerInput }
-        val scope = CoroutineScope(currentCoroutineContext())
         var lastTap = -1000L
         awaitEachGesture {
             val down = awaitFirstDown(requireUnconsumed = false)
             val first = current
             val id = model.beginGesture(deck, label) { setter(first, it) }
             held = true; down.consume()
-            var baseline = first; var baseY = down.position.y; var lastY = down.position.y
+            // Popup immediately, fixed beside the knob for the whole drag.
+            ui.knobs[tag] = KnobPopup(tag, kind, current, if (live) knobColor(kind, current) else Ink.pending, root.x + this.size.width / 2f, root.y + this.size.height / 2f, { setter(kind.neutral, id) }, anchorR = this.size.width / 2f)
+            // Relative drag on a 2D axis (#109): up or right = increase. The axis commits after a small slop
+            // (whichever of dx / dy dominates); coordinate c grows in the decrease direction (down / left).
+            var axisH: Boolean? = null
+            fun coord(p: Offset) = if (axisH == true) -p.x else p.y
+            var baseline = first; var baseY = 0f
             var moved = false; var fine = false; var cancelled = false
-            var notch = abs(first - kind.neutral) < .001; var notchY = baseY; var previous = first
-            var popupResets = 0
-            val hold = scope.launch {
-                delay(350)
-                if (!moved) {
-                    fine = true; baseline = current; baseY = lastY
-                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                    ui.knob = KnobPopup(tag, kind, current, if (live) knobColor(kind, current) else Ink.pending, root.x + down.position.x, root.y + lastY, { setter(kind.neutral, id) })
-                }
-            }
+            var notch = abs(first - kind.neutral) < .001; var notchY = 0f; var previous = first
             try {
                 while (true) {
-                    val change = awaitPointerEvent().changes.firstOrNull { it.id == down.id }
+                    val event = awaitPointerEvent()
+                    val change = event.changes.firstOrNull { it.id == down.id }
                     if (change == null || (!change.pressed && change.isConsumed)) { cancelled = true; break }
                     if (!change.pressed) {
-                        if (!moved && !fine && change.uptimeMillis - down.uptimeMillis < 250) {
-                            if (down.uptimeMillis - lastTap < 320) { setter(kind.neutral, id); haptic.performHapticFeedback(HapticFeedbackType.LongPress); lastTap = -1000 } else lastTap = change.uptimeMillis
+                        if (!moved && change.uptimeMillis - down.uptimeMillis < 250) {
+                            if (down.uptimeMillis - lastTap < 320) { setter(doubleTapTarget(kind, first), id); haptic.performHapticFeedback(HapticFeedbackType.LongPress); lastTap = -1000 } else lastTap = change.uptimeMillis
                         }
                         break
                     }
                     if (!model.gestureActive(id)) break
-                    val y = change.position.y; lastY = y
-                    if (abs(y - down.position.y) > 6.dp.toPx() && !fine) { moved = true; hold.cancel() }
-                    val popup = ui.knob
-                    if (fine && popup != null && popup.label == tag && popup.resetVersion != popupResets) { popupResets = popup.resetVersion; baseline = kind.neutral; baseY = y; notch = true; notchY = y }
-                    if (moved || fine) {
-                        val span = 180.dp.toPx() * (if (fine) 3.5f else 1f)
-                        var next = (baseline - (y - baseY) / span).coerceIn(0.0, 1.0)
-                        val escape = (if (fine) 2.dp else 6.dp).toPx()
-                        if (notch) {
-                            val travel = y - notchY
-                            if (abs(travel) <= escape) next = kind.neutral
-                            else { notch = false; baseline = kind.neutral; baseY = notchY + sign(travel) * escape; next = (kind.neutral - (y - baseY) / span).coerceIn(0.0, 1.0) }
-                        } else if (kind.neutral in 0.01..0.99 && previous != kind.neutral && (previous - kind.neutral) * (next - kind.neutral) <= 0) {
-                            next = kind.neutral; notch = true; notchY = y; haptic.performHapticFeedback(HapticFeedbackType.SegmentTick)
-                        }
-                        previous = next
-                        setter(next, id)
-                        if (fine) ui.knob = ui.knob?.copy(value = next, color = if (live) knobColor(kind, next) else Ink.pending, fingerY = root.y + y)
-                        change.consume()
+                    val p = change.position
+                    if (axisH == null) {
+                        val d = p - down.position
+                        if (d.getDistance() > 6.dp.toPx()) { axisH = abs(d.x) > abs(d.y); moved = true; baseY = coord(down.position); notchY = baseY } else continue
                     }
+                    val y = coord(p)
+                    // Fine modifier: another finger resting on the knob; rebase so switching never jumps.
+                    val nowFine = event.changes.any { it.id != down.id && it.pressed }
+                    if (nowFine != fine) { fine = nowFine; baseline = current; baseY = y; if (notch) notchY = y; haptic.performHapticFeedback(HapticFeedbackType.SegmentTick) }
+                    val span = 264.dp.toPx() * (if (fine) 3.5f else 1f)
+                    var next = (baseline - (y - baseY) / span).coerceIn(0.0, 1.0)
+                    val escape = (if (fine) 2.dp else 6.dp).toPx()
+                    if (notch) {
+                        val travel = y - notchY
+                        if (abs(travel) <= escape) next = kind.neutral
+                        else { notch = false; baseline = kind.neutral; baseY = notchY + sign(travel) * escape; next = (kind.neutral - (y - baseY) / span).coerceIn(0.0, 1.0) }
+                    } else if (kind.neutral in 0.01..0.99 && previous != kind.neutral && (previous - kind.neutral) * (next - kind.neutral) <= 0) {
+                        next = kind.neutral; notch = true; notchY = y; haptic.performHapticFeedback(HapticFeedbackType.SegmentTick)
+                    }
+                    previous = next
+                    setter(next, id)
+                    ui.knobs[tag]?.let { ui.knobs[tag] = it.copy(value = next, color = if (live) knobColor(kind, next) else Ink.pending, fine = fine) }
+                    event.changes.forEach { if (it.pressed) it.consume() }
                 }
             } catch (cancel: CancellationException) { cancelled = true; throw cancel }
-            finally { hold.cancel(); held = false; if (ui.knob?.label == tag) ui.knob = null; model.finishGesture(id, cancelled) }
+            finally { held = false; ui.knobs.remove(tag); model.finishGesture(id, cancelled) }
         }
     }, contentAlignment = Alignment.Center) {
         // Label sits in the arc's open bottom, so it can only belong to this knob.
@@ -271,22 +283,39 @@ fun DrawScope.drawKnob(kind: KnobKind, value: Double, r: Float, enabled: Boolean
 
 /** The enlarged knob beside the finger while a knob is held still (fine mode). */
 @Composable fun KnobPopupOverlay(ui: UiModel) {
-    val popup = ui.knob ?: return
+    // Per-knob popups (#126); each keeps its last state through a short fade after its own finger lifts.
+    val shown = remember { mutableStateMapOf<String, KnobPopup>() }
+    for ((k, p) in ui.knobs) shown[k] = p
+    if (shown.isEmpty()) return
     val density = androidx.compose.ui.platform.LocalDensity.current
-    val reveal = remember(popup.label) { Animatable(0f) }
-    LaunchedEffect(popup.label) { reveal.animateTo(1f, spring(dampingRatio = .6f, stiffness = 500f)) }
+    val shape = LocalScreenShape.current
     BoxWithConstraints(Modifier.fillMaxSize()) {
-        val w = 150.dp; val h = 176.dp
-        val fx = with(density) { popup.fingerX.toDp() }; val fy = with(density) { popup.fingerY.toDp() }
-        // Beside the finger, on the side with more room, never under it.
-        val x = if (fx < maxWidth / 2) (fx + 44.dp).coerceAtMost(maxWidth - w) else (fx - 44.dp - w).coerceAtLeast(0.dp)
-        val y = (fy - h / 2).coerceIn(0.dp, (maxHeight - h).coerceAtLeast(0.dp))
-        Column(Modifier.offset(x, y).size(w, h).graphicsLayer { alpha = reveal.value; scaleX = .85f + .15f * reveal.value; scaleY = scaleX }
-            .halo(popup.color, .5f, 8.dp).padding(8.dp).clip(RoundedCornerShape(10.dp)).background(Ink.panel).border(1.5.dp, popup.color, RoundedCornerShape(10.dp)).padding(6.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(popup.label + " · FINE", color = popup.color.copy(alpha = 1f), size = 11, bold = true)
-            Canvas(Modifier.size(96.dp)) { drawKnob(popup.kind, popup.value, size.minDimension / 2 - 4.dp.toPx(), true) }
-            Text(knobReadout(popup.kind, popup.value), size = 14, bold = true)
-            Key("RESET", Modifier.fillMaxWidth().height(30.dp), popup.color.copy(alpha = 1f), textSize = 11) { popup.reset(); ui.knob = popup.copy(value = popup.kind.neutral, resetVersion = popup.resetVersion + 1) }
+        val w = 132.dp; val h = 150.dp
+        val wPx = with(density) { w.toPx() }; val hPx = with(density) { h.toPx() }
+        val maxW = with(density) { maxWidth.toPx() }; val maxH = with(density) { maxHeight.toPx() }; val m = with(density) { 4.dp.toPx() }; val gap = with(density) { 10.dp.toPx() }
+        // Place in hold order: beside the knob (side with more room, then the other side), else stacked below
+        // the previous popup; never over a held knob, another popup or the camera cutout.
+        val held = shown.values.map { androidx.compose.ui.geometry.Rect(it.fingerX - it.anchorR, it.fingerY - it.anchorR, it.fingerX + it.anchorR, it.fingerY + it.anchorR) }
+        val placed = mutableListOf<androidx.compose.ui.geometry.Rect>()
+        val spots = LinkedHashMap<String, Offset>()
+        for ((key, p) in shown) {
+            fun rectAt(x: Float, y: Float) = androidx.compose.ui.geometry.Rect(x.coerceIn(m, maxW - wPx - m), y.coerceIn(m, maxH - hPx - m), x.coerceIn(m, maxW - wPx - m) + wPx, y.coerceIn(m, maxH - hPx - m) + hPx)
+            fun free(r: androidx.compose.ui.geometry.Rect) = placed.none { it.overlaps(r) } && held.none { it.overlaps(r) } && shape.cutouts.none { it.overlaps(r) }
+            val right = p.fingerX + p.anchorR + gap; val left = p.fingerX - p.anchorR - gap - wPx; val cy = p.fingerY - hPx / 2
+            val sides = if (p.fingerX < maxW / 2) listOf(right, left) else listOf(left, right)
+            val candidates = sides.map { rectAt(it, cy) } + sides.flatMap { x -> listOf(1, -1, 2, -2).map { k -> rectAt(x, cy + k * (hPx + m)) } }
+            val r = candidates.firstOrNull(::free) ?: candidates.first()
+            placed += r; spots[key] = r.topLeft
+        }
+        for ((key, p) in shown) key(key) {
+            val spot = spots.getValue(key)
+            val visible = key in ui.knobs
+            val alpha by androidx.compose.animation.core.animateFloatAsState(if (visible) 1f else 0f, tween(if (visible) 70 else 150), label = "knob popup") { if (it == 0f && key !in ui.knobs) shown.remove(key) }
+            Column(Modifier.offset { androidx.compose.ui.unit.IntOffset(spot.x.toInt(), spot.y.toInt()) }.size(w, h).graphicsLayer { this.alpha = alpha }.halo(p.color, .5f, 8.dp).padding(8.dp).clip(RoundedCornerShape(10.dp)).background(Ink.panel).border(1.5.dp, p.color, RoundedCornerShape(10.dp)).padding(6.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(p.label + if (p.fine) " · FINE" else "", color = p.color.copy(alpha = 1f), size = 11, bold = true)
+                Canvas(Modifier.size(84.dp)) { drawKnob(p.kind, p.value, size.minDimension / 2 - 4.dp.toPx(), true) }
+                Text(knobReadout(p.kind, p.value), size = 14, bold = true)
+            }
         }
     }
 }
@@ -299,8 +328,9 @@ fun knobReadout(kind: KnobKind, v: Double): String = when (kind) {
 }
 
 /**
- * Tap = [onTap] (or the step), hold 350ms then slide sideways to scroll values, lift to commit
- * (the jump-size gesture; FX effect/target/beats reuse it). Feedback floats above the control.
+ * Value wheel: slide sideways to scroll values, lift to commit (jump size, loop length, FX effect/target/beats).
+ * No [onTap] (pure value cells): the wheel opens on touch-down (#135). With [onTap]: tap = the action; the wheel
+ * opens after a 350 ms hold or at once on a sideways drag. Feedback floats above the control.
  */
 @Composable fun ValueWheel(
     label: String, choices: List<String>, index: Int, ui: UiModel, model: PlayerModel, deck: DeckId, modifier: Modifier, color: Color,
@@ -327,11 +357,14 @@ fun knobReadout(kind: KnobKind, v: Double): String = when (kind) {
                 down.consume(); held = true
                 val start = latest; var chosen = start; var open = false; var cancelled = false
                 val id = model.beginGesture(deck, label) { setter(start) }
-                val hold = scope.launch {
-                    delay(350); open = true
+                fun openWheel() {
+                    if (open) return
+                    open = true
                     ui.wheel = WheelFeedback(label, choices, chosen, root.x + width / 2, root.y, tint)
                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                 }
+                if (tap == null) openWheel()
+                val hold = scope.launch { delay(350); openWheel() }
                 try {
                     while (true) {
                         val change = awaitPointerEvent().changes.firstOrNull { it.id == down.id }
@@ -343,7 +376,8 @@ fun knobReadout(kind: KnobKind, v: Double): String = when (kind) {
                             if (next != chosen) { chosen = next; setter(next); haptic.performHapticFeedback(HapticFeedbackType.SegmentFrequentTick) }
                             ui.wheel = WheelFeedback(label, choices, chosen, root.x + width / 2, root.y, tint)
                             change.consume()
-                        } else if (abs(dx) > 12.dp.toPx() || abs(change.position.y - down.position.y) > 12.dp.toPx()) { cancelled = true; break }
+                        } else if (abs(change.position.y - down.position.y) > 12.dp.toPx()) { cancelled = true; break }
+                        else if (abs(dx) > 12.dp.toPx()) { hold.cancel(); openWheel(); change.consume() }
                     }
                     if (!open && !cancelled) tap?.invoke()
                 } catch (cancel: CancellationException) { cancelled = true; throw cancel }

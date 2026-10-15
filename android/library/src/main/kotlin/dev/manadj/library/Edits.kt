@@ -21,6 +21,10 @@ sealed interface TrackEdit {
     data class Energy(val value: Int?) : TrackEdit
     /** Engine DJ key id 0..23 (null clears). */
     data class Key(val engineId: Int?) : TrackEdit
+    /** Whole Beatgrid after a grid op (set-downbeat, nudge, re-tempo; [GridMath]); null deletes it (#379). */
+    data class Grid(val grid: Beatgrid?) : TrackEdit
+    /** The Metric ladder's whole Reset-mark list, track seconds (#379). */
+    data class ResetMarks(val marks: List<Double>) : TrackEdit
 }
 
 /**
@@ -54,6 +58,24 @@ internal val KEY_TABLE: Map<Int, Pair<String, String>> = listOf(
 ).withIndex().associate { (i, v) -> i to v }
 
 object TrackFields {
+    /** Wire form of a grid edit (desktop beatgrid row: tempo_changes + anchor_time). */
+    fun gridJson(g: Beatgrid?): JSONObject? = g?.let {
+        JSONObject().put("anchor_time", it.anchorTime ?: JSONObject.NULL).put("tempo_changes", JSONArray(it.tempoChanges.map { tc ->
+            JSONObject().put("start_time", tc.startTime).put("bpm", tc.bpm).put("time_signature_num", tc.timeSignatureNum)
+                .put("time_signature_den", tc.timeSignatureDen).put("bar_position", tc.barPosition)
+        }))
+    }
+
+    private fun gridOf(o: JSONObject?, origin: String): Beatgrid? = o?.let {
+        val a = it.getJSONArray("tempo_changes")
+        Beatgrid(origin, if (it.isNull("anchor_time")) null else it.optDouble("anchor_time"), (0 until a.length()).map { i ->
+            val tc = a.getJSONObject(i)
+            TempoChange(tc.getDouble("start_time"), tc.getDouble("bpm"), tc.optInt("time_signature_num", 4), tc.optInt("bar_position", 1), tc.optInt("time_signature_den", 4))
+        })
+    }
+
+    private fun marksJson(track: LibraryTrack) = JSONArray(track.ladder?.resetMarks.orEmpty())
+
     private fun cueJson(c: HotCue?): JSONObject? = c?.let {
         JSONObject().put("time", it.time).put("label", it.label ?: JSONObject.NULL).put("color", it.color ?: JSONObject.NULL)
     }
@@ -67,6 +89,8 @@ object TrackFields {
         is TrackEdit.Artist -> "artist" to track.artist
         is TrackEdit.Energy -> "energy" to track.energy
         is TrackEdit.Key -> "key" to track.key
+        is TrackEdit.Grid -> "grid" to gridJson(track.grid)
+        is TrackEdit.ResetMarks -> "reset_marks" to marksJson(track)
     }
 
     fun newValue(edit: TrackEdit): Any? = when (edit) {
@@ -77,6 +101,8 @@ object TrackFields {
         is TrackEdit.Artist -> edit.value
         is TrackEdit.Energy -> edit.value
         is TrackEdit.Key -> edit.engineId
+        is TrackEdit.Grid -> gridJson(edit.grid)
+        is TrackEdit.ResetMarks -> JSONArray(edit.marks.sorted())
     }
 
     /** Read a field off a track in wire form (for diffs). */
@@ -88,12 +114,14 @@ object TrackFields {
         field == "artist" -> track.artist
         field == "energy" -> track.energy
         field == "key" -> track.key
+        field == "grid" -> gridJson(track.grid)
+        field == "reset_marks" -> marksJson(track)
         else -> null
     }
 
     /** Fields Device sync carries both ways, for diffing two snapshots of a track. */
     fun syncedFields(a: LibraryTrack, b: LibraryTrack): List<String> =
-        (1..8).map { "hot_cue:$it" } + listOf("main_cue", "title", "artist", "energy", "key") +
+        (1..8).map { "hot_cue:$it" } + listOf("main_cue", "title", "artist", "energy", "key", "grid", "reset_marks") +
             (a.tagIds + b.tagIds).toSortedSet().map { "tag:$it" }
 
     /** Value equality in wire form (JSON objects deep, numbers by value). */
@@ -127,6 +155,15 @@ object TrackFields {
                 val id = (v as? Number)?.toInt()
                 val names = id?.let(KEY_TABLE::get)
                 track.copy(key = id, keyOpenKey = names?.first, keyCamelot = names?.second)
+            }
+            e.field == "grid" -> {
+                val g = gridOf(v as? JSONObject, GridMath.EDITED)
+                track.copy(grid = g, bpm = g?.tempoChanges?.let { GridMath.dominantBpm(it, track.durationSecs) } ?: track.bpm)
+            }
+            e.field == "reset_marks" -> {
+                val a = v as? JSONArray
+                val marks = a?.let { (0 until it.length()).map(it::getDouble) }.orEmpty()
+                track.copy(ladder = MetricLadder(track.ladder?.arities.orEmpty(), marks))
             }
             else -> track
         }

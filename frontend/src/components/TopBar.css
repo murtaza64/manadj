@@ -289,6 +289,30 @@
 }
 .topbar-recorder.recording .topbar-record-square { background: var(--base); }
 
+/* Stop/save face: the record button stays fully visible (not the dimmed
+   disabled look) with a warning frame and spinner until the file lands. */
+.topbar-recorder.stopping .topbar-record-start:disabled,
+.topbar-recorder.saving .topbar-record-start:disabled {
+  min-width: 58px;
+  opacity: 1;
+  border-color: var(--warning);
+  color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 12%, transparent);
+}
+.topbar-recorder.stopping select:disabled,
+.topbar-recorder.saving select:disabled { cursor: wait; }
+.topbar-record-spinner {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border: 2px solid color-mix(in srgb, var(--warning) 30%, transparent);
+  border-top-color: var(--warning);
+  border-radius: 50%;
+  vertical-align: -1px;
+  animation: topbar-record-spin .8s linear infinite;
+}
+@keyframes topbar-record-spin { to { transform: rotate(360deg); } }
+
 /* Save-error face (select · ! · SAVE · ×): the error glyph splits the
    joined pair; SAVE and × join instead. */
 .topbar-recorder.ready select { border-right-width: 1px; }

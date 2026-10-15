@@ -3,7 +3,7 @@ package dev.manadj.app
 import android.os.Build
 import android.view.RoundedCorner
 import android.view.View
-import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.absolutePadding
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
@@ -64,12 +64,21 @@ import kotlin.math.sqrt
 
 val LocalScreenShape = staticCompositionLocalOf { ScreenShape() }
 
+/**
+ * A horizontally sliding container (landscape BROWSE): [drift] = its current translation minus the translation
+ * at which this subtree's insets are computed (px). screenSafe measures bounds at rest so a slide
+ * never changes padding (no relayout per frame).
+ */
+@Immutable class SafeFrame(val drift: () -> Float)
+val LocalSafeFrame = staticCompositionLocalOf { SafeFrame { 0f } }
+
 /** Pads this element horizontally so its content stays out of rounded-corner arcs and cutouts it overlaps. */
 fun Modifier.screenSafe(margin: Dp = 4.dp): Modifier = composed {
     val shape = LocalScreenShape.current
     val density = LocalDensity.current
+    val frame = LocalSafeFrame.current
     var bounds by remember { mutableStateOf<Rect?>(null) }
     val (l, r) = bounds?.let { shape.keepOut(it, with(density) { margin.toPx() }) } ?: (0f to 0f)
-    onGloballyPositioned { val p = it.positionInWindow(); val nb = Rect(p.x, p.y, p.x + it.size.width, p.y + it.size.height); if (nb != bounds) { android.util.Log.d("ScreenSafe", "bounds $bounds -> $nb"); bounds = nb } }
-        .padding(start = with(density) { l.toDp() }, end = with(density) { r.toDp() })
+    onGloballyPositioned { val p = it.positionInWindow(); val x = Math.round(p.x - frame.drift()).toFloat(); val nb = Rect(x, p.y, x + it.size.width, p.y + it.size.height); if (nb != bounds) bounds = nb }
+        .absolutePadding(left = with(density) { l.toDp() }, right = with(density) { r.toDp() })
 }

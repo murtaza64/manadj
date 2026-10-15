@@ -41,7 +41,7 @@ object FixtureLibrary : LibrarySource {
     override fun playlists() = lists
     override fun tracks() = rows
     override fun allTags() = tagSet
-    override fun follow(references: Set<Long>, knownOnly: Boolean): List<FollowCandidate> {
+    override fun follow(references: Set<Long>): List<FollowCandidate> {
         if (references.isEmpty()) return emptyList()
         val best = mutableMapOf<Long, FollowCandidate>()
         for (ref in references) {
@@ -49,15 +49,15 @@ object FixtureLibrary : LibrarySource {
             for (t in rows) {
                 if (t.id == ref) continue
                 val r = Random(ref * 31 + t.id)
-                val known = r.nextFloat() < .18f; val observed = !known && r.nextFloat() < .2f
+                val known = r.nextFloat() < .18f
                 val bpmOk = reference.bpm != null && t.bpm != null && listOf(t.bpm, t.bpm * 2, t.bpm / 2).any { abs(it - reference.bpm) <= 6 }
-                val tier = when { known -> EvidenceTier.KNOWN; observed -> EvidenceTier.OBSERVED; bpmOk -> EvidenceTier.COMPATIBLE; else -> null } ?: continue
-                if (knownOnly && tier != EvidenceTier.KNOWN) continue
-                val c = FollowCandidate(t.id, tier, if (tier == EvidenceTier.COMPATIBLE) (40 + r.nextInt(60)).toDouble() else null, linked = known && r.nextBoolean(), transitionsFrom = if (known) r.nextInt(3) else 0, transitionsTo = if (known) r.nextInt(2) else 0, takes = if (observed) 2 + r.nextInt(4) else 0)
+                if (!known && !bpmOk) continue
+                val c = if (known) FollowCandidate(t.id, EvidenceTier.KNOWN, "◆ Saved transition", null)
+                    else FollowCandidate(t.id, EvidenceTier.COMPATIBLE, "Compatible", (20 + r.nextInt(70)).toDouble())
                 val prev = best[t.id]
                 if (prev == null || c.tier.ordinal < prev.tier.ordinal) best[t.id] = c
             }
         }
-        return best.values.toList()
+        return best.values.sortedWith(compareBy({ it.tier.ordinal }, { -(it.displayScore ?: 0.0) }))
     }
 }

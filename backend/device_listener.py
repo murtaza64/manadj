@@ -6,9 +6,10 @@ router (/api/device-sync/*), and every request must carry the pairing code
 (`X-Manadj-Pair` header). Settings → Library → Phone sync turns it on and
 shows the code; rotating the code unpairs every phone.
 
-State: `[device_sync] enabled/port` in the settings file (config.toml);
-the pairing code is a secret in the data root's .env
-(MANADJ_DEVICE_PAIR_CODE).
+State: enabled/port in <data root>/data/device_sync.json (machine-local,
+never the repo checkout; a legacy `[device_sync]` table in config.toml is
+read once as the fallback); the pairing code is a secret in the data root's
+.env (MANADJ_DEVICE_PAIR_CODE).
 """
 
 from __future__ import annotations
@@ -288,10 +289,48 @@ registry = DeviceRegistry()
 pairing = PairingRequests(registry)
 
 
-def read_settings() -> tuple[bool, int]:
-    from .settings_file import _document
+def state_path():
+    from pathlib import Path
 
-    table = _document().get("device_sync", {})
+    from .data_root import data_root
+
+    return Path(data_root()) / "data" / "device_sync.json"
+
+
+def _legacy_table() -> dict:
+    try:
+        from .settings_file import _document
+
+        return dict(_document().get("device_sync", {}))
+    except Exception:
+        return {}
+
+
+def write_settings(enabled: bool | None = None, port: int | None = None) -> None:
+    """Persist listener state in the data dir (atomic)."""
+    import json
+
+    current_enabled, current_port = read_settings()
+    state = {
+        "enabled": current_enabled if enabled is None else bool(enabled),
+        "port": current_port if port is None else int(port),
+    }
+    path = state_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(state), encoding="utf-8")
+    tmp.replace(path)
+
+
+def read_settings() -> tuple[bool, int]:
+    import json
+
+    try:
+        table = json.loads(state_path().read_text(encoding="utf-8"))
+        if not isinstance(table, dict):
+            table = {}
+    except (OSError, ValueError):
+        table = _legacy_table()
     enabled = bool(table.get("enabled", False))
     try:
         port = int(table.get("port", DEFAULT_PORT))
@@ -326,7 +365,9 @@ def rotate_pair_code() -> str:
 
 
 def apply_settings() -> None:
-    """Start or stop the listener to match the settings file (startup + edits)."""
+    """Start or stop the listener to match the persisted state (startup + edits)."""
+    if not state_path().exists() and _legacy_table():
+        write_settings()  # one-time move out of config.toml (the repo, in dev); the stale table is then ignored
     enabled, port = read_settings()
     if enabled:
         ensure_pair_code()

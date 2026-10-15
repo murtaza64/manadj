@@ -12,6 +12,10 @@ Field vocabulary and JSON values:
   title, artist  str | null
   energy         int 1-5 | null
   key            Engine DJ key id 0-23 | null
+  grid           {"anchor_time": float|null, "tempo_changes": [{start_time, bpm,
+                 time_signature_num, time_signature_den?, bar_position}]} | null
+                 (null = no saved grid: generated placeholder / deleted)
+  reset_marks    [float] Metric-ladder Reset marks, seconds (ADR 0029)
   setting:<key>  JSON object (a synced performance setting, device_sync
                  SYNCED_SETTINGS; track_id null) — the whole persisted value
 """
@@ -28,11 +32,11 @@ from sqlalchemy.orm import Session
 
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
-from .models import AppSetting, DeviceSyncChange, HotCue, Tag, Track, TrackTag
+from .models import AppSetting, Beatgrid, DeviceSyncChange, HotCue, MetricLadder, Tag, Track, TrackTag
 from .track_metadata.manager import apply_update
 from .track_metadata.models import TrackChanges
 
-SCALAR_FIELDS = ("title", "artist", "energy", "key", "main_cue")
+SCALAR_FIELDS = ("title", "artist", "energy", "key", "main_cue", "grid", "reset_marks")
 DESKTOP = "desktop"
 
 
@@ -87,7 +91,35 @@ def read_field(db: Session, track: Track, field: str) -> tuple[Any, datetime | N
         return (tt is not None), (tt.created_at if tt is not None else track.updated_at)
     if kind == "main_cue":
         return track.cue_point_time, track.updated_at
+    if kind == "grid":
+        bg = db.query(Beatgrid).filter_by(track_id=track.id).one_or_none()
+        if bg is None or bg.origin == "generated":
+            return None, (bg.updated_at if bg is not None else None)
+        return {"anchor_time": bg.anchor_time, "tempo_changes": json.loads(bg.tempo_changes_json)}, bg.updated_at
+    if kind == "reset_marks":
+        ladder = db.query(MetricLadder).filter_by(track_id=track.id).one_or_none()
+        if ladder is None:
+            return [], None
+        return json.loads(ladder.reset_marks_json), ladder.updated_at
     return getattr(track, kind), track.updated_at
+
+
+def _num(v: Any) -> bool:
+    return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+
+def _valid_grid(value: Any) -> bool:
+    if not isinstance(value, dict):
+        return False
+    anchor = value.get("anchor_time")
+    tcs = value.get("tempo_changes")
+    if not (anchor is None or _num(anchor)) or not isinstance(tcs, list) or not tcs:
+        return False
+    return all(
+        isinstance(tc, dict) and _num(tc.get("start_time")) and _num(tc.get("bpm")) and tc["bpm"] > 0
+        and isinstance(tc.get("time_signature_num"), int) and isinstance(tc.get("bar_position"), int)
+        for tc in tcs
+    )
 
 
 def _validate(kind: str, value: Any) -> None:
@@ -99,6 +131,8 @@ def _validate(kind: str, value: Any) -> None:
         "artist": value is None or isinstance(value, str),
         "energy": value is None or (isinstance(value, int) and 1 <= value <= 5),
         "key": value is None or (isinstance(value, int) and 0 <= value <= 23),
+        "grid": value is None or _valid_grid(value),
+        "reset_marks": isinstance(value, list) and all(_num(m) and m >= 0 for m in value),
     }[kind]
     if not ok:
         raise FieldError(f"bad value for {kind}: {value!r}")
@@ -131,6 +165,22 @@ def write_field(db: Session, track: Track, field: str, value: Any) -> None:
         return
     if kind == "main_cue":
         track.cue_point_time = None if value is None else float(value)
+        return
+    if kind == "grid":
+        from . import crud
+        from .routers.beatgrids import delete_beatgrid
+
+        if value is None:
+            delete_beatgrid(track.id, db)  # projects bpm first, like the desktop's delete
+        else:
+            tcs = [dict(tc, start_time=float(tc["start_time"]), bpm=float(tc["bpm"])) for tc in value["tempo_changes"]]
+            anchor = value.get("anchor_time")
+            crud.update_beatgrid_tempo_changes(db, track.id, tcs, anchor_time=None if anchor is None else float(anchor))
+        return
+    if kind == "reset_marks":
+        from . import crud
+
+        crud.upsert_metric_ladder(db, track.id, [float(m) for m in value])
         return
     if value is None:
         setattr(track, kind, None)  # TrackChanges cannot clear; plain column write
