@@ -90,6 +90,8 @@ export default function ClipEditorView() {
   const [spec, setSpec] = useState<ClipSpec | null>(() => (source ? loadClipSpec(source) : null));
   const [sessions, setSessions] = useState<SessionRowWire[]>([]);
   const [spanOpen, setSpanOpen] = useState(false);
+  /** Sources drawer: open until a source is picked. */
+  const [pickerOpen, setPickerOpen] = useState(() => !source);
   const [sessionSpan, setSessionSpan] = useState({ uuid: '', startS: 0, endS: 120 });
 
   const [loaded, setLoaded] = useState<LoadedClip | null>(null);
@@ -605,6 +607,7 @@ export default function ClipEditorView() {
               onClick={() => { setSource({ kind: 'session', uuid: sessionSpan.uuid, startS: sessionSpan.startS, endS: sessionSpan.endS }); setSpanOpen(false); }}>OPEN</button>
           </span>
         )}
+        <button className={`btn btn-mini${pickerOpen ? ' btn-selected' : ''}`} onClick={() => setPickerOpen(!pickerOpen)} title="Routines, transitions, takes and candidates to clip">SOURCES</button>
         <span className="ce-grow" />
         {loaded && <span className="ce-title" title={loaded.scene.title}>{look.title || loaded.scene.title}</span>}
         {busy && !exporting && <span className="ce-muted">{progress?.stage === 'audio' ? 'rendering mix' : progress?.stage} {pct}%</span>}
@@ -638,7 +641,7 @@ export default function ClipEditorView() {
       {(loadError || error) && <div className="ce-error" data-testid="load-error">{loadError ?? error}</div>}
 
       {/* ── Preview + inspector ── */}
-      <div className="ce-body">
+      <div className={`ce-body${pickerOpen ? '' : ' ce-body-nopicker'}`}>
         <div className="ce-stage">
           <canvas ref={previewRef} width={spec && spec.width > spec.height ? 960 : 540} height={spec && spec.width > spec.height ? 540 : 960} className={`ce-preview${spec && spec.width > spec.height ? ' ce-preview-wide' : ''}`} />
           {!source && <div className="ce-empty">Pick a Routine, Transition, Take or Session span.</div>}
@@ -829,7 +832,7 @@ export default function ClipEditorView() {
               <div className="ce-pane">
                 <span className="ce-muted">The clip's starting look; scenes change it from their cue on.</span>
                 <LookControls look={look} onChange={updateLook} onCaption={rememberHandle}>
-                  <label className="ce-wide">file name<input type="text" placeholder={loaded.scene.title} value={look.title} onChange={(e) => updateLook({ title: e.target.value })} /></label>
+                  <label className="lk-row"><span className="lk-label">File name</span><input className="lk-input" type="text" placeholder={loaded.scene.title} value={look.title} onChange={(e) => updateLook({ title: e.target.value })} /></label>
                 </LookControls>
               </div>
             )}
@@ -875,7 +878,7 @@ export default function ClipEditorView() {
             )}
           </aside>
         )}
-        <div className="ce-picker">
+        {pickerOpen && <div className="ce-picker">
           <MixPicker
             openPair={null}
             openRefKey={pickerRefKey}
@@ -894,7 +897,7 @@ export default function ClipEditorView() {
             onDeleteTransition={noopEdit}
             trackById={trackById}
           />
-        </div>
+        </div>}
       </div>
 
       {/* ── Transport + timeline ── */}
