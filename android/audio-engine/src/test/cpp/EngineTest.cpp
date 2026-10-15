@@ -211,6 +211,41 @@ int main() {
         CHECK(e.deck(0).position.load() > 2.0);
     }
 
+    { // Range fill (SH8): a run written at 20 s makes jumps there exact from memory before the start is decoded;
+      // playing into a gap leaves memory; gaps report via trackGap/trackAhead; filling them + trackEnd completes.
+        auto owned = std::make_unique<Engine>(48000);
+        Engine& e = *owned;
+        loadDeck(e, 0, 1, .25f);
+        const int total = 48000 * 30;
+        std::vector<float> ramp(static_cast<size_t>(total) * 2);
+        for (int i = 0; i < total; ++i) ramp[i * 2] = ramp[i * 2 + 1] = static_cast<float>(i % 30000) / 32768.f;
+        CHECK(e.trackBegin(0, 1, total, 48000, 0));
+        const uint64_t run = 20 * 48000 / kTrackBlock * kTrackBlock;  // block-aligned run start
+        const int len = 48000 * 5;
+        for (int at = 0; at < len; at += 1000) CHECK(e.trackWriteAt(0, 1, run + at, ramp.data() + (run + at) * 2, std::min(1000, len - at), run) > 0);
+        CHECK(e.trackGap(0, 1, 0) == 0);
+        CHECK(e.trackGap(0, 1, run) == static_cast<int64_t>((run + len) / kTrackBlock * kTrackBlock));
+        CHECK(std::abs(e.trackAhead(0, 1, 21.0) - ((run + len) / kTrackBlock * kTrackBlock / 48000. - 21.0)) < 1e-9);
+        CHECK(e.trackAhead(0, 1, 5.0) == 0);
+        CHECK(!e.deck(0).track.complete.load());
+        const double target = 21.0 + 7 / 48000.;
+        e.submit(Op::Seek, 0, target);
+        tick(e);
+        CHECK(e.deck(0).inTrack.load() && e.deck(0).position.load() == target); // memory: exact
+        e.submit(Op::Play, 0);
+        const auto x = capture(e, 4800);
+        CHECK(e.deck(0).inTrack.load() && std::abs(e.deck(0).position.load() - (target + .1)) < 1e-9);
+        CHECK(x[2000] > .1f && x[4000] > x[2000]);                       // the filled ramp, not silence
+        // Fill the rest (a run from 0 up to the filled region, then past it to the end) + end: complete.
+        for (int at = 0; at < static_cast<int>(run); at += 4096) CHECK(e.trackWriteAt(0, 1, at, ramp.data() + at * 2, std::min<int>(4096, run - at), 0) > 0);
+        CHECK(e.trackGap(0, 1, 0) == static_cast<int64_t>((run + len) / kTrackBlock * kTrackBlock));
+        const uint64_t tailRun = (run + len) / kTrackBlock * kTrackBlock;
+        for (uint64_t at = tailRun; at < static_cast<uint64_t>(total); at += 4096) CHECK(e.trackWriteAt(0, 1, at, ramp.data() + at * 2, static_cast<int>(std::min<uint64_t>(4096, total - at)), tailRun) > 0);
+        e.trackEnd(0, 1, total, tailRun);
+        CHECK(e.deck(0).track.complete.load() && e.trackGap(0, 1, 0) == -1);
+        CHECK(std::abs(e.trackAhead(0, 1, 1.0) - 29.0) < 1e-9);
+    }
+
     { // Stored cue on a ring whose decoder start is off (MP3 seek, mail #86): the parked deck stays at the cue
       // and CUE-hold previews; a running deck still adopts the ring's start.
         auto owned = std::make_unique<Engine>(48000);

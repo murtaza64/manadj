@@ -370,6 +370,52 @@ Java_dev_manadj_audio_AudioEngine_nativeTrackWrite(JNIEnv* env, jobject, jlong h
     return total;
 }
 
+extern "C" JNIEXPORT jint JNICALL
+Java_dev_manadj_audio_AudioEngine_nativeTrackWriteAt(JNIEnv* env, jobject, jlong handle, jint deck, jlong load, jlong at,
+                                                        jfloatArray samples, jint offset, jint frames, jlong runStart) {
+    constexpr int kChunk = 1024;
+    if (frames < 1 || at < 0 || offset < 0 || static_cast<jlong>(offset + frames) * 2 > env->GetArrayLength(samples)) return -1;
+    float chunk[kChunk * 2];
+    int total = 0;
+    while (total < frames) {
+        const int n = std::min(kChunk, frames - total);
+        env->GetFloatArrayRegion(samples, (offset + total) * 2, n * 2, chunk);
+        const int written = output(handle)->engine.trackWriteAt(deck, static_cast<uint64_t>(load), static_cast<uint64_t>(at + total), chunk, n,
+                                                                static_cast<uint64_t>(runStart));
+        if (written < 0) return total ? total : -1;
+        total += written;
+        if (written < n) break;
+    }
+    return total;
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_dev_manadj_audio_AudioEngine_nativeTrackEnd(JNIEnv*, jobject, jlong handle, jint deck, jlong load, jlong total, jlong runStart) {
+    if (total > 0) output(handle)->engine.trackEnd(deck, static_cast<uint64_t>(load), static_cast<uint64_t>(total), static_cast<uint64_t>(std::max<jlong>(0, runStart)));
+}
+
+extern "C" JNIEXPORT jfloatArray JNICALL
+Java_dev_manadj_audio_AudioEngine_nativeTrackCopy(JNIEnv* env, jobject, jlong handle, jint deck, jlong load, jlong from, jint frames) {
+    const auto& t = output(handle)->engine.deck(deck).track;
+    if (deck < 0 || deck >= manadj::kDeckCount || t.load.load() != static_cast<uint64_t>(load) || from < 0 || frames < 0 || t.stems.load() != 1) return env->NewFloatArray(0);
+    const uint64_t n = std::min<uint64_t>(frames, t.capacity > static_cast<uint64_t>(from) ? t.capacity - from : 0);
+    std::vector<float> out(n * 2);
+    for (uint64_t i = 0; i < n * 2; ++i) out[i] = t.pcm[from * 2 + i] / 32768.f;
+    jfloatArray result = env->NewFloatArray(static_cast<jsize>(n * 2));
+    env->SetFloatArrayRegion(result, 0, static_cast<jsize>(n * 2), out.data());
+    return result;
+}
+
+extern "C" JNIEXPORT jlong JNICALL
+Java_dev_manadj_audio_AudioEngine_nativeTrackGap(JNIEnv*, jobject, jlong handle, jint deck, jlong load, jlong from) {
+    return output(handle)->engine.trackGap(deck, static_cast<uint64_t>(load), static_cast<uint64_t>(std::max<jlong>(0, from)));
+}
+
+extern "C" JNIEXPORT jdouble JNICALL
+Java_dev_manadj_audio_AudioEngine_nativeTrackAhead(JNIEnv*, jobject, jlong handle, jint deck, jlong load, jdouble seconds) {
+    return output(handle)->engine.trackAhead(deck, static_cast<uint64_t>(load), seconds);
+}
+
 extern "C" JNIEXPORT void JNICALL
 Java_dev_manadj_audio_AudioEngine_nativeTrackFinish(JNIEnv*, jobject, jlong handle, jint deck, jlong load) {
     output(handle)->engine.trackFinish(deck, static_cast<uint64_t>(load));
@@ -462,7 +508,14 @@ Java_dev_manadj_audio_AudioEngine_nativeSnapshot(JNIEnv* env, jobject, jlong han
         data[n + 30] = d.loopBeats.load();
         data[n + 31] = d.pendingLoopBeats.load();
         const bool tracked = d.track.load.load() == d.loadId.load() && d.track.load.load() != 0;
-        data[n + 32] = tracked && d.track.sampleRate.load() > 0 ? d.track.startSeconds.load() + d.track.frames.load() / static_cast<double>(d.track.sampleRate.load()) : 0;
+        // decodedSeconds: end of the filled run at the playhead (range fill, SH8), else of the run from the start.
+        if (tracked && d.track.sampleRate.load() > 0) {
+            const double rate = d.track.sampleRate.load(), start = d.track.startSeconds.load();
+            const double f = (d.position.load() - start) * rate;
+            const uint64_t k = f > 0 ? static_cast<uint64_t>(f) : 0;
+            const uint64_t end = manadj::trackHas(d.track, k) ? manadj::trackRunEnd(d.track, k) : manadj::trackRunEnd(d.track, 0);
+            data[n + 32] = start + end / rate;
+        } else data[n + 32] = 0;
         data[n + 33] = tracked && d.track.complete.load() ? 1 : 0;
         data[n + 34] = d.inTrack.load() ? 1 : 0;
         data[n + 35] = e.trackCovers(d, d.position.load(), 0) ? 1 : 0;

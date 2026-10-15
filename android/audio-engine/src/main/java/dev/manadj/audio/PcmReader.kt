@@ -38,6 +38,9 @@ internal abstract class PcmReader(protected val extractor: MediaExtractor, forma
     /** Frames decoded (>0), 0 if nothing is ready yet, -1 at end of stream. */
     abstract fun read(): Int
 
+    /** [seek] lands sample-exactly on the from-start timeline (PTS exact): PCM, AAC/MP4 (sample table). */
+    open val seekable: Boolean get() = false
+
     protected fun validate() {
         require(channels in 1..8 && sampleRate in 8000..192000) { "Unsupported PCM layout: $channels ch @ $sampleRate Hz" }
         require(encoding in SUPPORTED_ENCODINGS) { "Unsupported PCM encoding $encoding" }
@@ -108,6 +111,7 @@ internal abstract class PcmReader(protected val extractor: MediaExtractor, forma
 }
 
 private class RawReader(extractor: MediaExtractor, format: MediaFormat) : PcmReader(extractor, format) {
+    override val seekable get() = true
     private val packet = ByteBuffer.allocateDirect(256 * 1024)
 
     override fun read(): Int {
@@ -149,6 +153,7 @@ private class CodecReader(extractor: MediaExtractor, format: MediaFormat, mime: 
      * is only approximate (tens of ms); the whole-track decode (from the start) is the exact path.
      */
     private val mp3 = mime == MediaFormat.MIMETYPE_AUDIO_MPEG
+    override val seekable = mime == MediaFormat.MIMETYPE_AUDIO_AAC
     private val mp3Gapless = mp3 && format.containsKey(MediaFormat.KEY_ENCODER_DELAY)
     private val mp3HeaderlessUs: Long = if (mp3 && !mp3Gapless) MP3_DECODER_DELAY * 1_000_000L / format.getInteger(MediaFormat.KEY_SAMPLE_RATE) else 0
     /** Sequential from-start MP3 timeline: next output frame index, -1 before the first output. */
