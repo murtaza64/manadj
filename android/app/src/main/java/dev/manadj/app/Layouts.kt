@@ -352,7 +352,8 @@ private enum class PaneKind { LEFT_SLOT, RIGHT_SLOT, BOTH_LEFT, BOTH_RIGHT }
             Minimap(ui, model, ux.waves[ui.source?.id ?: ""], Modifier.fillMaxWidth().height(40.dp).screenSafe(), preview = ux.seekPreview)
             // Pads stay identical; the camera hole simply obscures part of one (touch still works around it).
             Pads(ui, model, ux, Modifier.fillMaxWidth().weight(1f), 4, Dp.Unspecified)
-            StemsStrip(ui, ux, model, Modifier.fillMaxWidth().height(26.dp).screenSafe())
+            // SHIFT keeps its mirrored outer-edge spot in both rotations (#147): no camera-hole dodge here.
+            StemsStrip(ui, ux, model, Modifier.fillMaxWidth().height(26.dp))
             LoopStrip(ui, ux, model, Modifier.fillMaxWidth().height(40.dp).screenSafe())
             JumpStrip(ui, ux, model, Modifier.fillMaxWidth().height(40.dp).screenSafe())
             Row(Modifier.fillMaxWidth().height(TransportRow).screenSafe()) { CueKey(ui, model, Modifier.weight(1f).fillMaxHeight()); PlayKey(ui, model, Modifier.weight(1f).fillMaxHeight()) }
