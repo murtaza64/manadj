@@ -191,16 +191,39 @@ class AudioEngineTest {
         fun asset(name: String) = File(cache, name).also { files.add(it); it.writeBytes(context.assets.open(name).readBytes()) }
         val onsets = mutableMapOf<String, Double>()
         val seekOnsets = mutableMapOf<String, Double>()
+        val zeroOnsets = mutableMapOf<String, Double>()
         for (name in listOf("priming.wav", "priming-aac.m4a", "priming-aacat.m4a", "priming.mp3", "priming-noxing.mp3", "priming-short.mp3")) {
             ParcelFileDescriptor.open(asset(name), ParcelFileDescriptor.MODE_READ_ONLY).use { fd ->
                 PcmReader.open(fd.fileDescriptor).use { r ->
+                    // Sequential, as the engine stores it: the first chunk's start + every frame after it
+                    // (per-chunk PTS can jump past a trimmed first buffer; the stream has no gap there).
                     var onset: Double? = null
+                    var start: Double? = null
+                    var count = 0L
                     while (onset == null) {
                         val n = r.read()
                         if (n < 0) break
-                        for (i in 0 until n) if (kotlin.math.abs(r.samples[i * 2]) > .1f) { onset = r.chunkStartSeconds + i.toDouble() / r.sampleRate; break }
+                        if (start == null && n > 0) start = r.chunkStartSeconds
+                        for (i in 0 until n) if (kotlin.math.abs(r.samples[i * 2]) > .1f) { onset = start!! + (count + i).toDouble() / r.sampleRate; break }
+                        count += n
                     }
                     onsets[name] = onset ?: Double.NaN
+                }
+                // Seek back to 0 after decoding (the ring's track-start path): the same sequential onset.
+                PcmReader.open(fd.fileDescriptor).use { r ->
+                    repeat(20) { r.read() }
+                    r.seek(0.0)
+                    var onset: Double? = null
+                    var start: Double? = null
+                    var count = 0L
+                    while (onset == null) {
+                        val n = r.read()
+                        if (n < 0) break
+                        if (start == null && n > 0) start = r.chunkStartSeconds
+                        for (i in 0 until n) if (kotlin.math.abs(r.samples[i * 2]) > .1f) { onset = start!! + (count + i).toDouble() / r.sampleRate; break }
+                        count += n
+                    }
+                    zeroOnsets[name] = onset ?: Double.NaN
                 }
                 // After a seek (decoder flush + extractor seek): the second burst (2.5 s) at the same offset.
                 PcmReader.open(fd.fileDescriptor).use { r ->
@@ -221,7 +244,45 @@ class AudioEngineTest {
         // the header-less MP3, which desktop leaves 1105 frames late (encoder 576 + decoder 529 delay untrimmed).
         val wav = onsets.getValue("priming.wav")
         assertEquals(44101 / 44100.0, wav, 1.5 / 44100)
-        for ((name, at) in onsets) assertEquals("$name onset vs desktop (frames)", if (name == "priming-noxing.mp3") 1105.0 else 0.0, (at - wav) * 44100, 2.0)
+        android.util.Log.i("manadj-priming", "after seek(0): " + zeroOnsets.entries.joinToString { (k, v) -> "%s %+.1f frames".format(k, (v - onsets.getValue(k)) * 44100) })
+        // Known: the Apple aac_at decoy streams 64 frames (1.5 ms) early sequentially (its PTS after the first buffer
+        // are exact); real library m4a files measure 0.00 ms sequentially on the phone (Session DecodeProbe, mail #84).
+        val expected = mapOf("priming-noxing.mp3" to 1105.0, "priming-aacat.m4a" to -64.0)
+        for ((name, at) in onsets) assertEquals("$name onset vs desktop (frames)", expected[name] ?: 0.0, (at - wav) * 44100, 2.0)
+        for ((name, at) in zeroOnsets) assertEquals("$name onset after seek(0) (frames)", onsets.getValue(name), at, 2.0 / 44100)
+    }
+
+    /**
+     * Human bug (MP3 'Higher', mail #86): a stored main cue parks the deck exactly on the cue (desktop time base) and
+     * CUE-hold previews — on the streaming path right after load and once the whole track is in memory, for LAME and
+     * header-less MP3s. The ring's decoder start (TOC-estimated after an MP3 seek) must not move the parked playhead.
+     */
+    @Test fun mp3StoredCueParksAtTheCueAndCueHoldPreviews() {
+        val context = InstrumentationRegistry.getInstrumentation().context
+        fun asset(name: String) = File(cache, name).also { files.add(it); it.writeBytes(context.assets.open(name).readBytes()) }
+        for (name in listOf("priming.mp3", "priming-noxing.mp3")) {
+            val file = asset(name)
+            for (cue in listOf(0.6113, 1.2107980103843, 2.0007)) for (memory in listOf(false, true)) {
+                AudioEngine(offline = true).use { engine ->
+                    engine.load(DeckId.A, name, file)
+                    engine.settled(DeckId.A)
+                    if (memory) engine.until("$name decoded") { deck(DeckId.A).fullyDecoded }
+                    engine.submit(AudioCommand.SetCueAt(DeckId.A, cue))
+                    engine.renderOfflineForTest(16); engine.settled(DeckId.A)
+                    repeat(8) { engine.renderOfflineForTest(256); Thread.sleep(5) } // ring published + adopted
+                    val d = engine.deck(DeckId.A)
+                    android.util.Log.i("manadj-cue", "$name cue=$cue memory=$memory pos=${d.sourceSeconds} (%+.2f ms) fromMemory=${d.fromMemory}".format((d.sourceSeconds - cue) * 1000))
+                    assertEquals("$name memory=$memory parked at cue", cue, d.sourceSeconds, 1e-6)
+                    engine.submit(AudioCommand.CueDown(DeckId.A))
+                    engine.renderOfflineForTest(64)
+                    engine.deck(DeckId.A).let { assertTrue("$name memory=$memory previews: $it", it.previewing && it.previewSlot == AudioEngine.MAIN_CUE) }
+                    assertEquals(cue, engine.deck(DeckId.A).cueSeconds!!, 1e-9)
+                    engine.submit(AudioCommand.CueUp(DeckId.A))
+                    engine.renderOfflineForTest(64)
+                    assertEquals(cue, engine.deck(DeckId.A).sourceSeconds, 1e-6)
+                }
+            }
+        }
     }
 
     @Test fun decodedLocalWavMixSeekAndDesktopCueSemantics() {

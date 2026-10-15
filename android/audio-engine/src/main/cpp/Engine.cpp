@@ -1003,8 +1003,11 @@ int Engine::renderSegment(Deck& d, float* strip, int frames, bool& active) noexc
         const auto transport = d.transport.load(kRelaxed);
         const bool ringLive = d.ring.load(kAcquire) == transport;
         if (ringLive && d.positionTransport != transport) {
-            // First audible frame of a claimed ring: adopt the decoder's actual start.
-            if (d.headSlot.load(kRelaxed) < 0 && d.ringOffset.load(kRelaxed) == 0 && d.claimedTransport.load(kAcquire) == transport)
+            // First audible frame of a claimed ring: adopt the decoder's actual start — only for a running deck
+            // streaming from the ring. A parked playhead stays exactly where it was put (a stored cue must stay
+            // "at cue": an MP3 seek's decoder start is TOC-estimated, tens of ms off), and memory is exact.
+            if (d.headSlot.load(kRelaxed) < 0 && d.ringOffset.load(kRelaxed) == 0 && d.claimedTransport.load(kAcquire) == transport &&
+                !d.inTrack.load(kRelaxed) && (d.playing.load(kRelaxed) || d.preview.load(kRelaxed)) && d.launchAt.load(kRelaxed) == 0)
                 d.position.store(d.claimedStart.load(kAcquire), kRelease);
             d.positionTransport = transport;
         }
