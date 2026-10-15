@@ -44,7 +44,7 @@ class DeckUi(val id: DeckId) {
 enum class Layout(val label: String) { PORTRAIT("L1"), DENSE("L3") }
 
 class PlayerModel(application: Application) : AndroidViewModel(application) {
-    companion object { const val EAR_PERIOD = .6 }
+    companion object { const val EAR_PERIOD = .6; private const val SYNC_PREF = "sync-decks" }
     val decks = DeckId.entries.associateWith(::DeckUi)
     val visibleDecks = listOf(DeckId.A, DeckId.B)
     var selected by mutableStateOf(DeckId.A)
@@ -137,6 +137,7 @@ class PlayerModel(application: Application) : AndroidViewModel(application) {
                     quantizeOn = state.quantize
                     if (tick % 30 == 1) followRoute(outputInfo, state)
                     sync.update(state.decks.mapValues { SyncDeck.of(it.value) }); publishSync()
+                    rejoinSync(state)
                     if (filterSettingsUnsent && audio?.submit(AudioCommand.SetFilterSettings(filterSettings))?.accepted == true) filterSettingsUnsent = false
                     state.decks.forEach { (id, snapshot) ->
                         val ui = decks.getValue(id)
@@ -303,7 +304,7 @@ class PlayerModel(application: Application) : AndroidViewModel(application) {
     /** Pitch fader: rides the Group Tempo when [deck] is synced (all members follow), plain pitch otherwise. */
     fun updatePitch(deck: DeckId, value: Double, gesture: String? = null) { sync.setPitch(deck, value); publishSync() }
     /** SYNC: join/leave the Sync Group. Returns OutOfReach when the group tempo is past ±8 % (join refused), null when n/a. */
-    fun toggleSync(deck: DeckId): BpmMatch? = sync.toggle(deck).also { publishSync() }
+    fun toggleSync(deck: DeckId): BpmMatch? = sync.toggle(deck).also { publishSync(); rememberSync(deck, syncState.decks[deck] != SyncStatus.OFF) }
     /** MATCH: one-shot tempo capture of the nearest playing deck (phase too with Quantize on). */
     fun match(deck: DeckId): BpmMatch? = sync.match(deck).also { publishSync() }
     fun updateBend(deck: DeckId, value: Double, gesture: String? = null) = control(deck, "bend", AudioCommand.SetBend(deck, value, gesture)) { it.bend = value }
@@ -506,6 +507,29 @@ class PlayerModel(application: Application) : AndroidViewModel(application) {
 
     // ── Restore across restart / reinstall (human 2026-10-15) ─────────────────────────────────────────────
     private val prefs = application.getSharedPreferences(DeckPersistence.PREFS, Context.MODE_PRIVATE)
+
+    /**
+     * SYNC per deck is remembered across boots (#399; default on): a remembered deck joins the Sync Group once
+     * per loaded source when it is ready with a BPM (after any restore applied its pitch). A refused join
+     * (out of reach) keeps the preference and retries on the next source.
+     */
+    private val syncWanted: MutableSet<DeckId> = (prefs.getStringSet(SYNC_PREF, null)?.mapNotNull { runCatching { DeckId.valueOf(it) }.getOrNull() } ?: DeckId.entries).toMutableSet()
+    private val syncTried = mutableMapOf<DeckId, String>()
+    private fun rememberSync(deck: DeckId, on: Boolean) {
+        if (on) syncWanted.add(deck) else syncWanted.remove(deck)
+        state(deck)?.sourceId?.let { syncTried[deck] = it }
+        prefs.edit().putStringSet(SYNC_PREF, syncWanted.map { it.name }.toSet()).apply()
+    }
+    private fun state(deck: DeckId) = output?.decks?.get(deck)
+    private fun rejoinSync(state: EngineSnapshot) {
+        for (deck in syncWanted) {
+            val d = state.decks.getValue(deck)
+            val source = d.sourceId ?: continue
+            if (d.loadState != LoadState.READY || d.bpm == null || deck in restoring || syncTried[deck] == source) continue
+            syncTried[deck] = source
+            if (syncState.decks[deck] == SyncStatus.OFF) { sync.toggle(deck); publishSync() }
+        }
+    }
     /** How each deck's current source was loaded (what a restore re-runs). */
     private val loadSpecs = java.util.concurrent.ConcurrentHashMap<DeckId, SavedSource>()
     /** Decks being restored: the saved state applies once their reloaded source is ready. */

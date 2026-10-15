@@ -18,7 +18,7 @@
  * position.
  */
 import type { ScratchFrame } from '../playback/worklet/scratchMotion';
-import { scratchFilterAt, scratchPosition } from '../playback/worklet/scratchMotion';
+import { scratchFilterAt, scratchPosition, scratchRate } from '../playback/worklet/scratchMotion';
 
 type EventInput = Record<string, unknown>;
 
@@ -209,6 +209,26 @@ export function scratchFramesFrom(
     const time = toAudio(f.time);
     return { ...f, time, motion: f.motion ? { ...f.motion, time } : null };
   });
+}
+
+/** The gesture's deck state at mix time t inside the clip (the worklet's
+ * trajectory: each frame's motion governs until the next frame; a frame
+ * without motion holds or plays from its position). `rate` is track
+ * seconds per mix second, signed. */
+export function scratchClipStateAt(clip: PlannedScratchClip, t: number): { position: number; rate: number } {
+  const frames = clip.frames;
+  let lo = 0;
+  let hi = frames.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1;
+    if (frames[mid].time <= t) lo = mid;
+    else hi = mid - 1;
+  }
+  const f = frames[lo];
+  if (t < f.time) return { position: f.position, rate: 0 };
+  if (f.motion) return { position: scratchPosition(f.motion, t), rate: scratchRate(f.motion, t) };
+  if (f.playing) return { position: f.position + (t - f.time) * f.rate, rate: f.rate };
+  return { position: f.position, rate: 0 };
 }
 
 /** The clip running (or about to, within `leadSec`) at mix time t. */

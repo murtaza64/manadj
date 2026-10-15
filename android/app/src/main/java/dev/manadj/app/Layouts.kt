@@ -58,6 +58,7 @@ import dev.manadj.audio.QuantizeMode
     var screen by remember { mutableStateOf(ScreenShape()) }
     CompositionLocalProvider(LocalScreenShape provides screen) {
     BoxWithConstraints(Modifier.fillMaxSize().background(Ink.background).onGloballyPositioned { val s = ScreenShape.of(view); if (s != screen) { android.util.Log.d("ScreenSafe", "shape $screen -> $s"); screen = s } }) {
+        dev.manadj.app.viz.VizBackdrop(model, ux, Modifier.fillMaxSize()) // visualizer spike (android-viz #394): Settings › Visualizer
         val band = with(LocalDensity.current) { screen.topBand.toDp() }
         val landscape = maxWidth > maxHeight
         val screenHeight = maxHeight

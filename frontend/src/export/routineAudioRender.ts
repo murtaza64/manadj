@@ -11,7 +11,10 @@
  *
  * Sources: each slot's trace (the position/rate authority) becomes a list
  * of constant-rate AudioBufferSourceNode segments — sample-accurate jumps
- * and pauses, no drift servo. Lanes and FX are applied at a fixed control
+ * and pauses, no drift servo. Scratch clips (#393) replace the trace over
+ * their spans: the recorded trajectory sampled per render quantum into
+ * monotone runs (speed stepped per quantum; backward runs play a reversed
+ * slice), with the worklet's declick gain. Lanes and FX are applied at a fixed control
  * rate via suspend/resume so the live `update` paths (ramps, sweep
  * mapping, send gating) run unchanged.
  */
@@ -31,6 +34,8 @@ import {
 } from '../playback/beatFx';
 import { createBeatFxRepeatNode } from '../playback/worklet/beatFxRepeatNode';
 import { routineFxAt } from '../editor/beatFxLane';
+import { scratchClipStateAt, type PlannedScratchClip } from '../sets/routineScratch';
+import { SCRATCH_SILENT_RATE, scratchGain } from '../playback/worklet/scratchMotion';
 
 /** One constant-rate playback stretch of a slot's track on the mix axis. */
 export interface PlaySegment {
@@ -79,6 +84,10 @@ export interface RoutineAudioRenderInput {
 
 export const DEFAULT_RENDER_SAMPLE_RATE = 48000;
 const DEFAULT_CONTROL_STEP = 2048;
+/** Scratch speed steps once per render quantum (playbackRate is k-rate). */
+const SCRATCH_STEP_SAMPLES = 128;
+/** Faster than any platter (MAX_SCRATCH_RATE is 16): a snap, not motion. */
+export const SCRATCH_SNAP_RATE = 40;
 
 const beatOf = (routine: PlannedRoutine, mixSec: number): number =>
   (mixSec - routine.beatOriginMixSec) / routine.secPerBeat;
@@ -138,9 +147,140 @@ export function traceSegments(
     const untilTrackEnd = mixStart + (trackDurationSec - trackStart) / rate;
     mixEnd = Math.min(mixEnd, untilTrackEnd);
     if (mixEnd - mixStart <= 1e-4 || trackStart >= trackDurationSec) continue;
-    out.push({ mixStart, mixEnd, trackStart, rate });
+    // Scratch clips (#393) own their spans: the trace there is only the
+    // gesture's net effect (pre-gesture motion → landing jump).
+    for (const piece of withoutClips(mixStart, mixEnd, slot.scratches)) {
+      out.push({ mixStart: piece[0], mixEnd: piece[1], trackStart: trackStart + (piece[0] - mixStart) * rate, rate });
+    }
   }
   return out;
+}
+
+function withoutClips(a: number, b: number, clips: readonly PlannedScratchClip[] | undefined): [number, number][] {
+  let pieces: [number, number][] = [[a, b]];
+  for (const c of clips ?? []) {
+    pieces = pieces.flatMap(([s, e]): [number, number][] => {
+      if (c.endMixSec <= s || c.startMixSec >= e) return [[s, e]];
+      const keep: [number, number][] = [];
+      if (c.startMixSec > s) keep.push([s, c.startMixSec]);
+      if (c.endMixSec < e) keep.push([c.endMixSec, e]);
+      return keep;
+    });
+  }
+  return pieces.filter(([s, e]) => e - s > 1e-4);
+}
+
+/** One monotone stretch of a scratch gesture: a source runs `direction`
+ * through the track from `trackStart`, its speed stepping every `stepSec`
+ * (rates[k] = |Δposition| / stepSec — integrates exactly onto the sampled
+ * trajectory at every step boundary). */
+export interface ScratchRun {
+  mixStart: number;
+  trackStart: number;
+  direction: 1 | -1;
+  stepSec: number;
+  /** Unsigned speed per step (track seconds per mix second). */
+  rates: number[];
+  /** Declick gain per step (scratchGain of the speed). */
+  gains: number[];
+}
+
+/**
+ * A slot's scratch clips as monotone runs, sampled on a `stepSec` grid
+ * anchored at range.startSec (pass the render quantum: playbackRate is
+ * k-rate). Stretches slower than SCRATCH_SILENT_RATE are silent gaps;
+ * snaps faster than SCRATCH_SNAP_RATE restart the run at the new position.
+ */
+export function scratchRuns(
+  slot: PlannedRoutineSlot,
+  range: { startSec: number; endSec: number },
+  trackDurationSec: number,
+  stepSec: number
+): ScratchRun[] {
+  const out: ScratchRun[] = [];
+  const limit = Math.min(range.endSec, slot.releaseMixSec);
+  for (const clip of slot.scratches ?? []) {
+    const from = Math.max(clip.startMixSec, range.startSec);
+    const to = Math.min(clip.endMixSec, limit);
+    if (to <= from) continue;
+    const j0 = Math.floor((from - range.startSec) / stepSec + 1e-9);
+    const j1 = Math.ceil((to - range.startSec) / stepSec - 1e-9);
+    const at = (j: number) => {
+      const t = Math.min(Math.max(range.startSec + j * stepSec, clip.startMixSec), clip.endMixSec);
+      return Math.max(0, Math.min(trackDurationSec, scratchClipStateAt(clip, t).position));
+    };
+    let run: ScratchRun | null = null;
+    let p = at(j0);
+    for (let j = j0; j < j1; j++) {
+      const q = at(j + 1);
+      const v = (q - p) / stepSec;
+      const speed = Math.abs(v);
+      const direction: 1 | -1 = v >= 0 ? 1 : -1;
+      // Silent (held) stretches, and snaps (cue / hot cue inside the
+      // clip) — a position step no hand can make — break the run.
+      if (speed <= SCRATCH_SILENT_RATE || speed > SCRATCH_SNAP_RATE) {
+        run = null;
+      } else {
+        if (!run || run.direction !== direction) {
+          run = { mixStart: range.startSec + j * stepSec, trackStart: p, direction, stepSec, rates: [], gains: [] };
+          out.push(run);
+        }
+        run.rates.push(speed);
+        run.gains.push(scratchGain(speed));
+      }
+      p = q;
+    }
+  }
+  return out;
+}
+
+/** The track's samples over [lo, hi] seconds, reversed (a backward run
+ * plays it forward). Returns the buffer and the track second its
+ * offset 0 corresponds to. */
+function reversedSlice(ctx: BaseAudioContext, buffer: AudioBuffer, lo: number, hi: number): { slice: AudioBuffer; topSec: number } {
+  const sr = buffer.sampleRate;
+  const i0 = Math.max(0, Math.floor(lo * sr) - 4);
+  const i1 = Math.min(buffer.length - 1, Math.ceil(hi * sr) + 4);
+  const n = Math.max(1, i1 - i0 + 1);
+  const slice = ctx.createBuffer(buffer.numberOfChannels, n, sr);
+  for (let c = 0; c < buffer.numberOfChannels; c++) {
+    const src = buffer.getChannelData(c);
+    const dst = slice.getChannelData(c);
+    for (let k = 0; k < n; k++) dst[k] = src[i1 - k];
+  }
+  return { slice, topSec: i1 / sr };
+}
+
+/** Schedule a run's source (forward on the track buffer, backward on a
+ * reversed slice) into `dest`. */
+function scheduleScratchRun(
+  ctx: BaseAudioContext, buffer: AudioBuffer, run: ScratchRun, renderStartSec: number, dest: AudioNode
+): void {
+  const when = run.mixStart - renderStartSec;
+  const dur = run.rates.length * run.stepSec;
+  const travel = run.rates.reduce((a, r) => a + r * run.stepSec, 0);
+  const src = ctx.createBufferSource();
+  let offset: number;
+  if (run.direction > 0) {
+    src.buffer = buffer;
+    offset = run.trackStart;
+  } else {
+    const { slice, topSec } = reversedSlice(ctx, buffer, run.trackStart - travel, run.trackStart);
+    src.buffer = slice;
+    offset = topSec - run.trackStart;
+  }
+  const gain = ctx.createGain();
+  gain.gain.setValueAtTime(run.gains[0], when);
+  run.rates.forEach((r, k) => {
+    const t = when + k * run.stepSec;
+    src.playbackRate.setValueAtTime(r, t);
+    gain.gain.linearRampToValueAtTime(run.gains[k], t + run.stepSec);
+  });
+  gain.gain.linearRampToValueAtTime(0, when + dur + run.stepSec);
+  src.connect(gain);
+  gain.connect(dest);
+  src.start(when, Math.max(0, offset));
+  src.stop(when + dur);
 }
 
 /** Deck seconds-per-beat at a trace rate (the echo's beat clock). */
@@ -258,6 +398,11 @@ export async function renderRoutineAudio(input: RoutineAudioRenderInput): Promis
       src.connect(strip.input);
       const when = seg.mixStart - range.startSec;
       src.start(when, seg.trackStart, (seg.mixEnd - seg.mixStart) * seg.rate);
+    }
+    for (const run of scratchRuns(slot, range, buffer.duration, SCRATCH_STEP_SAMPLES / sampleRate)) {
+      activeFrom = Math.min(activeFrom, run.mixStart - range.startSec);
+      activeTo = Math.max(activeTo, run.mixStart + run.rates.length * run.stepSec - range.startSec);
+      scheduleScratchRun(ctx, buffer, run, range.startSec, strip.input);
     }
     const meters = { post: makeMeter(), low: makeMeter(), mid: makeMeter(), high: makeMeter() };
     strip.crossfadeGain.connect(meters.post);
