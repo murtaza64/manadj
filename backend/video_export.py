@@ -199,7 +199,8 @@ def session_span_preview(db, session_uuid: str, start_s: float, end_s: float):
     (entry order = first audible instant) and run the same promotion
     preview a candidate gets. Lets the clip editor cut an arbitrary span
     without minting anything. Raises VideoExportError with the promotion's
-    reason (e.g. scratch motion) when the span cannot be promoted."""
+    reason when the span cannot be promoted. Scratch gestures pass through
+    as scratch clips (#352, #393)."""
     import json as _json
 
     from backend import models

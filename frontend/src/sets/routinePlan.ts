@@ -41,7 +41,8 @@
  */
 import { MAX_PITCH_RANGE_PERCENT } from '../playback/tempo';
 import { applyJumpEditsToTrace, applyPauseEditsToTrace } from '../routines/routineDraft';
-import { isScratchMoveSample, planScratchClip, slotScratchClips } from './routineScratch';
+import { isScratchMoveSample, planScratchClip, scratchClipAt, scratchClipStateAt, slotScratchClips } from './routineScratch';
+import { SCRATCH_SILENT_RATE } from '../playback/worklet/scratchMotion';
 import type { PlannedScratchClip } from './routineScratch';
 import {
   fxSection,
@@ -1004,10 +1005,17 @@ export function buildPlannedRoutine(
   const beatOriginMixSec = mixStartSec - startBeat * secPerBeat;
   const mixEndSec = beatOriginMixSec + endBeat * secPerBeat;
   const entryMixSecs = entryBeats.map((b) => beatOriginMixSec + b * secPerBeat);
+  // Recorded Vinyl gestures (#352) per slot; a gesture holds its deck to
+  // its end (a backspin onto a stopped record sounds past the trace's
+  // last motion — #393).
+  const recordedClips = traces.map((_, slot) => (input.authored ? [] : slotScratchClips(input.events, order[slot])));
   const releaseMixSecs = traces.map((trace, slot) =>
     slot === n - 1
       ? mixEndSec // the exit slot holds its deck to the boundary contract
-      : Math.min(mixEndSec, beatOriginMixSec + lastMotionEndBeat(trace, editHorizon) * secPerBeat)
+      : Math.min(mixEndSec, beatOriginMixSec + Math.max(
+        lastMotionEndBeat(trace, editHorizon),
+        ...recordedClips[slot].map((c) => c.endBeat + entryDeltas[slot]),
+      ) * secPerBeat)
   );
 
   const assignments = allocateRoutineDecks(
@@ -1073,7 +1081,7 @@ export function buildPlannedRoutine(
     // Clips ride the FINAL trace: anchored where it stands at each
     // gesture's start, so nudges, entry shifts and authored jumps before
     // the gesture move the gesture with its material.
-    const scratches = input.authored ? [] : slotScratchClips(input.events, order[slot]).map((clip) => {
+    const scratches = recordedClips[slot].map((clip) => {
       const after = traceStateAt(trace, clip.endBeat + delta + 1e-6);
       const rateAfter = after.moving ? after.ratePerBeat / secPerBeat : 1 + basePitchPercent / 100;
       const posShift = traceStateAt(trace, clip.startBeat + delta).pos - clip.frames[0].position;
@@ -1176,12 +1184,30 @@ export interface RoutineSlotState {
   pitchPercent: number;
 }
 
-/** One slot's deck verdict at a mix instant inside the Routine span. */
+/** One slot's deck verdict at a mix instant inside the Routine span.
+ *
+ * Inside a scratch clip (#352) the verdict follows the recorded gesture
+ * (#393: export scenes scroll with the hand) unless `netScratch` asks for
+ * the trace's net view — live players hand the clip to the audio thread
+ * and servo only on the net trace (a refused clip must not seek-chase the
+ * gesture). */
 export function routineSlotStateAt(
   routine: PlannedRoutine,
   slot: PlannedRoutineSlot,
-  mixTime: number
+  mixTime: number,
+  opts: { netScratch?: boolean } = {}
 ): RoutineSlotState {
+  if (!opts.netScratch && slot.scratches) {
+    const clip = scratchClipAt(slot.scratches, mixTime);
+    if (clip) {
+      const s = scratchClipStateAt(clip, mixTime);
+      return {
+        trackTime: Math.max(0, s.position),
+        playing: Math.abs(s.rate) > SCRATCH_SILENT_RATE,
+        pitchPercent: slot.basePitchPercent,
+      };
+    }
+  }
   const beat = (mixTime - routine.beatOriginMixSec) / routine.secPerBeat;
   if (slot.transportBounds) {
     const { startBeat, endBeat } = slot.transportBounds;
