@@ -24,7 +24,7 @@ import { useDecks } from '../hooks/useDeck';
 import type { ChannelId } from '../playback/mixer';
 import type { Track } from '../types';
 import type { DeckCount } from '../components/performance/waveformOrder';
-import { LinkIcon } from './LinkIcon';
+import { PulsingLinkIcon } from './LinkIcon';
 import { pairHasFavoritedTransition } from './linkable';
 import { isLinked, setLinked, useLinks } from './linkStore';
 import './performancePairLinks.css';
@@ -71,7 +71,7 @@ export function PairEdgeChip({
       title={title}
       onClick={toggle}
     >
-      <LinkIcon size={11} />
+      <PulsingLinkIcon size={11} pulse={hint} />
     </button>
   );
 }
@@ -102,7 +102,7 @@ export function PairDiagonalChip({
       title={title}
       onClick={toggle}
     >
-      <LinkIcon size={10} />
+      <PulsingLinkIcon size={10} pulse={hint} />
       <span className={`pairlink-diag-letters${descending ? ' descending' : ' ascending'}`}>
         <span className={`pairlink-diag-letter first deck-${a.toLowerCase()}`}>{a}</span>
         <span className={`pairlink-diag-letter second deck-${b.toLowerCase()}`}>{b}</span>

@@ -1,3 +1,5 @@
+import './linkPulse.css';
+
 /**
  * Chain-link icon (linked-pairs): inline SVG so it takes `currentColor` —
  * green on the toggle when Linked, deck accents on row marks. The emoji
@@ -19,5 +21,21 @@ export function LinkIcon({ size = 12 }: { size?: number }) {
       <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
       <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
     </svg>
+  );
+}
+
+/**
+ * LinkIcon with the hint pulse toward green (favorited Transition, no
+ * Link): an opacity-animated green copy over the icon (linkPulse.css).
+ */
+export function PulsingLinkIcon({ size, pulse }: { size?: number; pulse: boolean }) {
+  if (!pulse) return <LinkIcon size={size} />;
+  return (
+    <span className="link-icon-pulse">
+      <LinkIcon size={size} />
+      <span className="link-icon-pulse-glow" aria-hidden="true">
+        <LinkIcon size={size} />
+      </span>
+    </span>
   );
 }

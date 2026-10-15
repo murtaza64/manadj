@@ -49,8 +49,23 @@
   opacity: 1;
 }
 
-.pairlink-chip.hint {
-  animation: pairlink-pulse 2s ease-in-out infinite;
+/* Hint: pulses toward green (icon: PulsingLinkIcon; border: this green
+   ring's opacity) — compositor-only, see linkPulse.css. */
+.pairlink-chip.hint,
+.pairlink-diag.hint {
+  position: relative;
+}
+
+.pairlink-chip.hint::after,
+.pairlink-diag.hint::after {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border: 1px solid var(--success);
+  border-radius: inherit;
+  opacity: 0;
+  pointer-events: none;
+  animation: link-hint-glow 2s ease-in-out infinite;
 }
 
 /* ── Diagonal pairs: grid mini-maps on the mixer strip ─────────────── */
@@ -122,18 +137,4 @@
   opacity: 1;
 }
 
-.pairlink-diag.hint {
-  animation: pairlink-pulse 2s ease-in-out infinite;
-}
 
-@keyframes pairlink-pulse {
-  0%,
-  100% {
-    color: var(--subtext0);
-    border-color: var(--surface1);
-  }
-  50% {
-    color: var(--success);
-    border-color: var(--success);
-  }
-}

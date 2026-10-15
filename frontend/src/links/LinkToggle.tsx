@@ -5,7 +5,7 @@
  * loaded pair (no self-links). Optimistic via linkStore.
  */
 import { useTransitionIndex } from '../editor/transitionIndex';
-import { LinkIcon } from './LinkIcon';
+import { PulsingLinkIcon } from './LinkIcon';
 import { isTogglablePair, pairHasFavoritedTransition } from './linkable';
 import { isLinked, setLinked, useLinks } from './linkStore';
 import './linkToggle.css';
@@ -46,7 +46,7 @@ export function LinkToggle({
         aTrackId !== null && bTrackId !== null && setLinked(aTrackId, bTrackId, !linked)
       }
     >
-      <LinkIcon size={13} />
+      <PulsingLinkIcon size={13} pulse={hint} />
     </button>
   );
 }

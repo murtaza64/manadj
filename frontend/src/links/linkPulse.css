@@ -1,0 +1,30 @@
+/* Hint pulse, compositor-only (desktop-perf #385). The hint used to
+   animate `color` / `border-color`: a main-thread style + paint every
+   frame for as long as a hint showed (~25% of the idle main thread on the
+   Performance view, and a forced 120 Hz frame pipeline). Instead the
+   green state is a second layer whose OPACITY pulses — alpha-over of the
+   green layer is the same sRGB blend the color interpolation produced. */
+.link-icon-pulse {
+  position: relative;
+  display: inline-flex;
+}
+
+.link-icon-pulse-glow {
+  position: absolute;
+  inset: 0;
+  display: inline-flex;
+  color: var(--success);
+  opacity: 0;
+  pointer-events: none;
+  animation: link-hint-glow 2s ease-in-out infinite;
+}
+
+@keyframes link-hint-glow {
+  0%,
+  100% {
+    opacity: 0;
+  }
+  50% {
+    opacity: 1;
+  }
+}
