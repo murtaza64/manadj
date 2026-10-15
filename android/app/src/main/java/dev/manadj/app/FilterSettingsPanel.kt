@@ -46,7 +46,7 @@ private fun FilterSettings.with(key: String, v: Double) = when (key) {
         model.updateFilterSettings(next)
         runCatching { dev.manadj.app.library.LibraryHolder.editSetting(context, dev.manadj.library.PerformanceSettings.FILTER, org.json.JSONObject(next.toJson())) }
     }
-    Text("Filter" + if (live) "" else " (engine pending)", bold = true)
+    if (!live) Text("Engine pending: edits apply once the engine supports filter settings.", color = Ink.pending, size = 11, lines = 2)
     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
         for (m in FilterModel.entries) Chip(m.label, Ink.accent, s.model == m) { edit(s.copy(model = m)) }
     }

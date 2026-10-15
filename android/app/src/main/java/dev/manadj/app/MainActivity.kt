@@ -38,7 +38,7 @@ class MainActivity : ComponentActivity() {
         window.attributes = window.attributes.apply { layoutInDisplayCutoutMode = if (android.os.Build.VERSION.SDK_INT >= 30) WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS else WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES }
         immerse()
         setContent {
-            BackHandler(model.browser != null || model.pitchDrawer != null || model.replace != null || ux.confirmLoad != null || model.outputPanel || ux.settings) { if (ux.confirmLoad != null) ux.confirmLoad = null else { model.browser = null; model.pitchDrawer = null; model.replace = null; model.outputPanel = false; ux.settings = false } }
+            BackHandler(model.browser != null || model.pitchDrawer != null || model.replace != null || ux.confirmLoad != null || model.outputPanel || ux.settings) { if (ux.confirmLoad != null) ux.confirmLoad = null else if (ux.settings && model.replace == null && !model.outputPanel) ux.settingsBack() else { model.browser = null; model.pitchDrawer = null; model.replace = null; model.outputPanel = false; ux.settings = false } }
             PerformanceApp(model, ux) { deck -> model.pickerTarget = deck; picker.launch(arrayOf("audio/*")) }
         }
     }

@@ -64,36 +64,39 @@ class OutputDevices(context: Context, private val changed: (List<OutputDevice>) 
 
 /** Debug panel: devices + channel counts, negotiated stream, bus routing and cue mix. */
 @Composable fun OutputPanel(model: PlayerModel, modifier: Modifier) {
-    val selected = model.devices.firstOrNull { it.id == model.routingDevice }
     Column(modifier.background(Ink.background).border(2.dp, Ink.accent).clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {}.padding(8.dp)) {
         Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("OUTPUT / ROUTING", Modifier.weight(1f), Ink.accent, 18, true)
             Key("CLOSE", Modifier.width(64.dp).fillMaxHeight()) { model.outputPanel = false }
         }
-        Text(model.outputInfo?.toString() ?: "No stream open", color = Ink.muted, size = 11, lines = 3)
-        Text("Routing", color = Ink.text, size = 13, bold = true)
-        for (routing in Routing.entries) {
-            val quadOk = routing != Routing.QUAD || selected?.supportsQuad == true
-            Key(routing.label + if (!quadOk) " (device <4 ch)" else "", Modifier.fillMaxWidth().height(44.dp), Ink.accent, quadOk, model.output?.routing == routing) {
-                model.configureOutput(routing, model.routingDevice)
-            }
+        Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) { OutputRouting(model) }
+    }
+}
+
+/** Stream line, bus routing, cue mix and device list (Settings › Audio output; the debug [OutputPanel]). */
+@Composable fun OutputRouting(model: PlayerModel) {
+    val selected = model.devices.firstOrNull { it.id == model.routingDevice }
+    Text(model.outputInfo?.toString() ?: "No stream open", color = Ink.muted, size = 11, lines = 3)
+    Text("Routing", color = Ink.text, size = 13, bold = true)
+    for (routing in Routing.entries) {
+        val quadOk = routing != Routing.QUAD || selected?.supportsQuad == true
+        Key(routing.label + if (!quadOk) " (device <4 ch)" else "", Modifier.fillMaxWidth().height(40.dp), Ink.accent, quadOk, model.output?.routing == routing, textSize = 12, style = KeyStyle.PILL) {
+            model.configureOutput(routing, model.routingDevice)
         }
-        Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("CUE MIX", Modifier.width(80.dp), Ink.text, 12, true)
-            PhysicalFader("MIX", model.cueMix, model, DeckId.A, Modifier.weight(1f).fillMaxHeight(), model.supports("cue-mix"), true) { value, id -> model.updateCueMix(value, id) }
-        }
-        Text("Devices (tap to route there)", color = Ink.text, size = 13, bold = true)
-        Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
-            Key("System default", Modifier.fillMaxWidth().height(44.dp), Ink.accent, engaged = model.routingDevice == 0) { model.configureOutput(model.output?.routing ?: Routing.STEREO, 0) }
-            for (device in model.devices) {
-                Column(Modifier.fillMaxWidth().border(1.dp, if (device.id == model.routingDevice) Ink.accent else Ink.edge).clickable {
-                    val routing = model.output?.routing?.takeIf { it != Routing.QUAD || device.supportsQuad } ?: Routing.STEREO
-                    model.configureOutput(routing, device.id)
-                }.padding(6.dp)) {
-                    Text("#${device.id} ${device.type} ${device.name}", bold = true, size = 12)
-                    Text("channels ${device.channelCounts.ifEmpty { listOf("any") }} · rates ${device.sampleRates.ifEmpty { listOf("any") }}", color = Ink.muted, size = 11, lines = 2)
-                }
-            }
+    }
+    Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text("CUE MIX", Modifier.width(80.dp), Ink.text, 12, true)
+        PhysicalFader("MIX", model.cueMix, model, DeckId.A, Modifier.weight(1f).fillMaxHeight(), model.supports("cue-mix"), true) { value, id -> model.updateCueMix(value, id) }
+    }
+    Text("Devices (tap to route there)", color = Ink.text, size = 13, bold = true)
+    Key("System default", Modifier.fillMaxWidth().height(40.dp), Ink.accent, engaged = model.routingDevice == 0, textSize = 12, style = KeyStyle.PILL) { model.configureOutput(model.output?.routing ?: Routing.STEREO, 0) }
+    for (device in model.devices) {
+        Column(Modifier.fillMaxWidth().border(1.dp, if (device.id == model.routingDevice) Ink.accent else Ink.edge).clickable {
+            val routing = model.output?.routing?.takeIf { it != Routing.QUAD || device.supportsQuad } ?: Routing.STEREO
+            model.configureOutput(routing, device.id)
+        }.padding(6.dp)) {
+            Text("#${device.id} ${device.type} ${device.name}", bold = true, size = 12)
+            Text("channels ${device.channelCounts.ifEmpty { listOf("any") }} · rates ${device.sampleRates.ifEmpty { listOf("any") }}", color = Ink.muted, size = 11, lines = 2)
         }
     }
 }
