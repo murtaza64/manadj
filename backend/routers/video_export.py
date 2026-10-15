@@ -6,6 +6,7 @@ POST /api/video-export/jobs/{id}/spec                body: the clip spec (JSON) 
 POST /api/video-export/jobs/{id}/finish              → {path, url, frames}
 POST /api/video-export/jobs/{id}/abort
 GET  /api/video-export/files/{name}                  serve a finished MP4
+GET  /api/video-export/artwork/{track_id}            track artwork (embedded, else scraped; cached)
 """
 
 from __future__ import annotations
@@ -14,7 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
-from backend import schemas, video_export
+from backend import artwork, models, schemas, video_export
 from backend.database import get_db
 
 router = APIRouter()
@@ -123,3 +124,14 @@ def session_span(
         events=result.events,
         edits=None,
     )
+
+
+@router.get("/artwork/{track_id}")
+def track_artwork(track_id: int, refresh: bool = Query(False), db: Session = Depends(get_db)) -> FileResponse:
+    track = db.get(models.Track, track_id)
+    if track is None:
+        raise HTTPException(404, "track not found")
+    path = artwork.track_artwork(track.id, track.filename, track.artist, track.title, refresh)
+    if path is None:
+        raise HTTPException(404, "no artwork")
+    return FileResponse(path, media_type="image/jpeg", headers={"Cache-Control": "max-age=86400"})

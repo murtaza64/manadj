@@ -95,7 +95,7 @@ object LibraryFilter {
             SortColumn.TITLE -> by { it.title.lowercase() }
             SortColumn.ARTIST -> by { it.artist?.lowercase() }
             SortColumn.BPM -> by { it.bpm }
-            SortColumn.KEY -> by { it.keyOpenKey?.let(::openKeyOrder) }
+            SortColumn.KEY -> by { it.key ?: it.keyOpenKey?.let(::openKeyOrder) } // desktop trackSort: engine key id
             SortColumn.ENERGY -> by { it.energy }
             SortColumn.DURATION -> by { it.durationSecs }
         }
@@ -103,9 +103,9 @@ object LibraryFilter {
         return primary.thenComparator { a, b -> b.id.compareTo(a.id) }
     }
 
-    /** Wheel order: 1m, 1d, 2m, 2d … 12d. */
+    /** Engine key id order (desktop trackSort): 1d, 1m, 2d, 2m … 12m — fallback when only OpenKey is known. */
     fun openKeyOrder(openKey: String): Int? {
         val match = Regex("^(\\d+)([md])$").matchEntire(openKey) ?: return null
-        return match.groupValues[1].toInt() * 2 + if (match.groupValues[2] == "d") 1 else 0
+        return (match.groupValues[1].toInt() - 1) * 2 + if (match.groupValues[2] == "m") 1 else 0
     }
 }

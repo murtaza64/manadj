@@ -175,3 +175,13 @@ class WaveformTest {
         assertNull(runCatching { PreviewWaveform.parse(ByteArray(100)) }.getOrNull())
     }
 }
+
+class KeySortTest {
+    @Test fun keySortMatchesDesktopEngineIdOrder() {
+        val ks = listOf("2m", "1m", "12d", "1d", "2d")
+        val tracks = ks.mapIndexed { i, k -> track(i + 1, key = k) }
+        val sorted = LibraryFilter.apply(tracks, LibraryQuery(sort = SortColumn.KEY, descending = false)).map { it.keyOpenKey }
+        assertEquals(listOf("1d", "1m", "2d", "2m", "12d"), sorted)
+        assertEquals(KEY_TABLE.keys.sorted(), KEY_TABLE.entries.sortedBy { LibraryFilter.openKeyOrder(it.value.first) }.map { it.key })
+    }
+}

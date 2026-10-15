@@ -23,7 +23,7 @@ export type ClipSource =
  * - `blast`: another preset (`presetId`) takes over, then the programme returns
  * - `vfx`: a post effect (`vfx`) over the whole frame */
 export type CueTransitionKind = 'crossfade' | 'cut' | 'blackout' | 'solo' | 'blast' | 'vfx';
-export type TransitionVfx = 'rgb' | 'glitch' | 'kaleido' | 'mirror' | 'invert' | 'tunnel' | 'strobe';
+export type TransitionVfx = 'rgb' | 'glitch' | 'kaleido' | 'mirror' | 'invert' | 'tunnel' | 'strobe' | 'chop' | 'freeze' | 'rise' | 'shake';
 export const HELD_TRANSITIONS: readonly CueTransitionKind[] = ['blackout', 'solo', 'blast', 'vfx'];
 
 export interface CueTransition {
@@ -65,6 +65,16 @@ export type HudSource = 'beat-energy' | 'beat' | 'energy' | 'bass' | 'off';
 export type DeckVisibility = 'all' | 'audible';
 /** Deck lanes: full-bleed waveforms with no box (default), or glass cards. */
 export type LaneFrame = 'bare' | 'cards';
+
+/** How the decks are arranged: rows (info under each wave), rows with an
+ * info column (widescreen), side-by-side columns, or the dominant deck
+ * big with the rest in a strip. */
+export type DeckLayout = 'stack' | 'side' | 'grid' | 'spotlight' | 'vertical' | 'mirror';
+export type FontFace = 'mono' | 'sf' | 'avenir' | 'newyork';
+export type ControlPalette = 'classic' | 'deck' | 'neon' | 'fire' | 'ice' | 'mono';
+/** What a deck shows: its scrolling waveform, an EQ analyser, or a
+ * spinning platter ringed by its spectrum. */
+export type DeckView = 'wave' | 'bars' | 'ring' | 'none';
 
 export interface ClipLook {
   /** Accent for the chip, pips, progress — defaults to the Routine accent. */
@@ -124,6 +134,21 @@ export interface ClipLook {
   showTitles: boolean;
   /** The shared playhead line through the lanes. */
   showPlayhead: boolean;
+  /** stack / side / grid / spotlight, plus vertical (waves scroll upward
+   * in columns) and mirror (each wave's history flows outward from a
+   * centre playhead, both halves). */
+  deckLayout: DeckLayout;
+  /** none: visualizer only, the playing track as a lower third. */
+  deckView: DeckView;
+  fontFace: FontFace;
+  /** Knob/slider colours: classic band colours, the deck's, or a palette. */
+  controlPalette: ControlPalette;
+  controlStyle: 'knobs' | 'sliders';
+  /** Level meters as a smooth bar or LED segments. */
+  levelStyle: 'bar' | 'segments';
+  /** Build-up evolution 0..1: over the 16 bars before each drop the frame
+   * zooms in, the vignette closes, the beat subdivides, the last bar shakes. */
+  buildUp: number;
   /** Top HUD bar (bar/phrase readout, beat pips, master meter). Off: the
    * beat lives in the controls' pulse instead. */
   showHeader: boolean;
@@ -179,6 +204,13 @@ export const DEFAULT_LOOK: ClipLook = {
   phraseCountdown: true,
   showGrid: false,
   showCues: true,
+  deckLayout: 'stack',
+  deckView: 'wave',
+  fontFace: 'mono',
+  controlPalette: 'classic',
+  controlStyle: 'knobs',
+  levelStyle: 'bar',
+  buildUp: 0,
   showTitles: true,
   showPlayhead: true,
   showHeader: false,

@@ -10,7 +10,7 @@
 import { api, API_BASE, type RoutineDetailWire } from '../api/client';
 import type { HotCue, Track } from '../types';
 import type { Transition } from '../editor/mixModel';
-import { decodeWaveformBlob } from '../waveform/blob';
+import { decodeWaveformBlob, toThreeBands } from '../waveform/blob';
 import { getSlot } from '../waveform/styleSlots';
 import { loadFilterSettings } from '../playback/filterSettings';
 import { loadBeatFxSettings } from '../playback/beatFxSettings';
@@ -113,6 +113,21 @@ export async function resolveClipSource(source: ClipSource): Promise<ResolvedSou
 
 // ── Scene load ───────────────────────────────────────────────────────────
 
+/** The track's cover (embedded, else scraped by the backend), square-cropped. */
+async function loadArtwork(trackId: number): Promise<ImageBitmap | null> {
+  try {
+    const res = await fetch(`${API_BASE}/video-export/artwork/${trackId}`);
+    if (!res.ok) return null;
+    const img = await createImageBitmap(await res.blob());
+    const side = Math.min(img.width, img.height);
+    const out = await createImageBitmap(img, (img.width - side) / 2, (img.height - side) / 2, side, side, { resizeWidth: 512, resizeHeight: 512, resizeQuality: 'high' });
+    img.close();
+    return out;
+  } catch {
+    return null;
+  }
+}
+
 /** Load everything the scene needs (no audio). */
 export async function loadClip(spec: ClipSpec): Promise<LoadedClip> {
   const src = await resolveClipSource(spec.source);
@@ -130,17 +145,19 @@ export async function loadClip(spec: ClipSpec): Promise<LoadedClip> {
   const trackMetrics = new Map<number, TrackMetric>();
   await Promise.all(ids.map(async (id) => {
     const t = tracks.get(id)!;
-    const [wave, grid, drops, ladder] = await Promise.all([
+    const [wave, grid, drops, ladder, art] = await Promise.all([
       api.waveforms.getData(id).then(decodeWaveformBlob).catch(() => null),
       api.beatgrids.get(id).catch(() => null) as Promise<{ data: { beat_times: number[]; downbeat_times: number[] } } | null>,
       api.drops.get(id).catch(() => null) as Promise<{ drops: { time: number; strength: number }[] } | null>,
       api.metricLadders.get(id).catch(() => null) as Promise<{ reset_marks: number[] } | null>,
+      loadArtwork(id),
     ]);
     const hotCues = (cueRows[id] ?? []).map((c) => ({ slot_number: c.slot_number, time_seconds: c.time_seconds, color: c.color }));
     const beatTimes = grid?.data.beat_times ?? [];
     const downbeatTimes = grid?.data.downbeat_times ?? [];
     const metric = buildTrackMetric({
       beatTimes, downbeatTimes, hotCues, drops: drops?.drops ?? null, resetMarks: ladder?.reset_marks ?? null,
+      lowBand: wave ? { values: toThreeBands(wave).low, duration: wave.duration } : null,
     });
     if (metric) trackMetrics.set(id, metric);
     sceneTracks.set(id, {
@@ -153,6 +170,7 @@ export async function loadClip(spec: ClipSpec): Promise<LoadedClip> {
       beatTimes,
       downbeatTimes,
       hotCues,
+      art,
     });
   }));
 
@@ -347,10 +365,12 @@ export class BackgroundProgramme {
   private layers = new Map<string, { layer: BackgroundLayer; lastT: number; fallback: boolean }>();
   private feed: ReturnType<typeof createOfflineVisualizerFeed>;
   private range: { startSec: number; endSec: number };
+  private size: [number, number];
   /** `range` = the clip (cue times are clip-relative); `metersStartSec` =
-   * the render's start (meter step 0). */
-  constructor(meters: RenderMeters, routine: PlannedRoutine, range: { startSec: number; endSec: number }, metric?: ClipMetric | null, metersStartSec = range.startSec) {
+   * the render's start (meter step 0); `landscape`: 960×540 layers. */
+  constructor(meters: RenderMeters, routine: PlannedRoutine, range: { startSec: number; endSec: number }, metric?: ClipMetric | null, metersStartSec = range.startSec, landscape = false) {
     this.range = range;
+    this.size = landscape ? [BG_H, BG_W] : [BG_W, BG_H];
     this.feed = createOfflineVisualizerFeed(meters, routine, metersStartSec, metric);
   }
   private layer(id: string, t: number): BackgroundLayer {
@@ -363,7 +383,7 @@ export class BackgroundProgramme {
     if (!l) {
       const preset = exportPresetById(id);
       // A genepool preset not loaded yet renders the fallback until it is.
-      l = { layer: createBackgroundLayer(preset, BG_W, BG_H), lastT: t, fallback: preset.id !== id };
+      l = { layer: createBackgroundLayer(preset, this.size[0], this.size[1]), lastT: t, fallback: preset.id !== id };
       this.layers.set(id, l);
     }
     l.lastT = t;
@@ -438,6 +458,10 @@ class JpegEncoder {
   private waiting = new Map<number, (bytes: ArrayBuffer) => void>();
 
   constructor() {
+    this.spawn();
+  }
+
+  private spawn(): void {
     if (typeof OffscreenCanvas !== 'undefined' && typeof Worker !== 'undefined') {
       try {
         for (let i = 0; i < ENCODE_WORKERS; i++) {
@@ -471,6 +495,14 @@ class JpegEncoder {
   dispose(): void {
     for (const w of this.workers) w.terminate();
     this.workers = [];
+  }
+
+  /** Fresh workers (call between batches, nothing in flight): each
+   * encode leaves a JPEG Blob that only a worker GC frees. */
+  recycle(): void {
+    this.dispose();
+    this.waiting.clear();
+    this.spawn();
   }
 }
 
@@ -527,23 +559,28 @@ export async function exportClip(specIn: ClipSpec, opts: RoutineVideoExportOptio
   canvas.height = height;
   const ctx = canvas.getContext('2d', { alpha: false });
   if (!ctx) throw new Error('2d context');
-  const programme = new BackgroundProgramme(meters, routine, range, scene.metric, rendered.startSec);
+  const programme = new BackgroundProgramme(meters, routine, range, scene.metric, rendered.startSec, width > height);
   const frameCount = Math.ceil(seconds * fps);
   let batch: ArrayBuffer[] = [];
   let batchBytes = 0;
   const flush = async (): Promise<void> => {
     if (!jobId || batch.length === 0) return;
-    const blob = new Blob(batch, { type: 'application/octet-stream' });
+    // One contiguous buffer, not a Blob: blobs live in Chromium's blob
+    // store until GC, which a long render fills (ERR_BLOB_OUT_OF_MEMORY).
+    const body = new Uint8Array(batchBytes);
+    let off = 0;
+    for (const b of batch) { body.set(new Uint8Array(b), off); off += b.byteLength; }
     const count = batch.length;
     batch = [];
     batchBytes = 0;
-    await post(`${API_BASE}/video-export/jobs/${jobId}/frames?count=${count}`, blob);
+    await post(`${API_BASE}/video-export/jobs/${jobId}/frames?count=${count}`, body);
   };
   const preview = opts.previewCanvas ?? null;
   const previewCtx = preview?.getContext('2d') ?? null;
   const ENCODE_LAG = 12;
   const encoder = new JpegEncoder();
   let pending: Promise<ArrayBuffer>[] = [];
+  let settles = 0;
   const settle = async (): Promise<void> => {
     const done = await Promise.all(pending);
     pending = [];
@@ -552,6 +589,7 @@ export async function exportClip(specIn: ClipSpec, opts: RoutineVideoExportOptio
       batchBytes += jpeg.byteLength;
     }
     if (batchBytes >= FRAME_BATCH_BYTES) await flush();
+    if (++settles % 100 === 0) encoder.recycle();
   };
   for (let i = 0; i < frameCount; i++) {
     const t = range.startSec + i / fps;

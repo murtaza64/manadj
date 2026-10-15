@@ -54,6 +54,7 @@
   background: var(--void);
   border: 1px solid var(--surface0);
 }
+.ce-preview-wide { height: auto; width: 100%; max-height: 100%; aspect-ratio: 16 / 9; align-self: center; }
 .ce-empty {
   position: absolute;
   inset: 0;
