@@ -4,6 +4,7 @@ import android.media.AudioFormat
 import android.media.MediaCodec
 import android.media.MediaExtractor
 import android.media.MediaFormat
+import android.system.Os
 import java.io.Closeable
 import java.io.FileDescriptor
 import java.nio.ByteBuffer
@@ -47,22 +48,24 @@ internal abstract class PcmReader(protected val extractor: MediaExtractor, forma
     }
 
     /** Converts [buffer] (position..limit) starting at [ptsUs], dropping frames before the seek target. */
-    protected fun convert(buffer: ByteBuffer, ptsUs: Long): Int {
+    protected fun convert(buffer: ByteBuffer, ptsUs: Long): Int =
+        convert(buffer, ptsUs / 1e6, (skipUntilUs - ptsUs).coerceAtLeast(0) * sampleRate / 1_000_000L)
+
+    /** [convert] for a buffer whose first frame is source frame [frame] (frame-exact, no µs rounding). */
+    protected fun convertAtFrame(buffer: ByteBuffer, frame: Long): Int =
+        convert(buffer, frame.toDouble() / sampleRate, ((skipUntilUs * sampleRate + 500_000L) / 1_000_000L - frame).coerceAtLeast(0))
+
+    private fun convert(buffer: ByteBuffer, startSeconds: Double, skipFrames: Long): Int {
         validate()
         buffer.order(ByteOrder.LITTLE_ENDIAN)
-        val bytesPerSample = when (encoding) {
-            AudioFormat.ENCODING_PCM_8BIT -> 1
-            AudioFormat.ENCODING_PCM_16BIT -> 2
-            AudioFormat.ENCODING_PCM_24BIT_PACKED -> 3
-            else -> 4
-        }
-        val frameBytes = bytesPerSample * channels
+        val bytesPerSample = bytesPerSample()
+        val frameBytes = frameBytes()
         val total = buffer.remaining() / frameBytes
-        val skip = ((skipUntilUs - ptsUs).coerceAtLeast(0) * sampleRate / 1_000_000L).coerceAtMost(total.toLong()).toInt()
+        val skip = skipFrames.coerceAtMost(total.toLong()).toInt()
         val frames = total - skip
         if (frames <= 0) return 0
         skipUntilUs = 0
-        chunkStartSeconds = ptsUs / 1e6 + skip.toDouble() / sampleRate
+        chunkStartSeconds = startSeconds + skip.toDouble() / sampleRate
         if (samples.size < frames * 2) samples = FloatArray(max(frames * 2, samples.size * 2))
         val out = samples
         var at = buffer.position() + skip * frameBytes
@@ -75,6 +78,15 @@ internal abstract class PcmReader(protected val extractor: MediaExtractor, forma
         }
         return frames
     }
+
+    private fun bytesPerSample() = when (encoding) {
+        AudioFormat.ENCODING_PCM_8BIT -> 1
+        AudioFormat.ENCODING_PCM_16BIT -> 2
+        AudioFormat.ENCODING_PCM_24BIT_PACKED -> 3
+        else -> 4
+    }
+
+    protected fun frameBytes() = bytesPerSample() * channels
 
     private fun sample(b: ByteBuffer, at: Int): Float = when (encoding) {
         AudioFormat.ENCODING_PCM_8BIT -> ((b.get(at).toInt() and 0xff) - 128) / 128f
@@ -91,6 +103,24 @@ internal abstract class PcmReader(protected val extractor: MediaExtractor, forma
             AudioFormat.ENCODING_PCM_24BIT_PACKED, AudioFormat.ENCODING_PCM_32BIT,
         )
 
+        /** [Mp3Frames.desktopTrim] from positional reads (the extractor shares [fd]'s offset). */
+        private fun mp3DesktopTrim(fd: FileDescriptor): Int = runCatching {
+            fun read(offset: Long, n: Int): ByteArray {
+                val b = ByteArray(n)
+                var got = 0
+                while (got < n) { val r = Os.pread(fd, b, got, n - got, offset + got); if (r <= 0) break; got += r }
+                return if (got == n) b else b.copyOf(got)
+            }
+            var at = 0L
+            while (true) { // ID3v2 tags (possibly several, with large cover art)
+                val h = read(at, 10)
+                val skip = Mp3Frames.audioStart(h)
+                if (skip == 0 || h.size < 10) break
+                at += skip
+            }
+            Mp3Frames.desktopTrim(read(at, 16 * 1024))
+        }.getOrDefault(0)
+
         fun open(fd: FileDescriptor): PcmReader {
             val extractor = MediaExtractor()
             try {
@@ -101,7 +131,8 @@ internal abstract class PcmReader(protected val extractor: MediaExtractor, forma
                 extractor.selectTrack(track)
                 val format = extractor.getTrackFormat(track)
                 val mime = format.getString(MediaFormat.KEY_MIME) ?: error("Unknown audio format")
-                return if (mime == MediaFormat.MIMETYPE_AUDIO_RAW) RawReader(extractor, format) else CodecReader(extractor, format, mime)
+                return if (mime == MediaFormat.MIMETYPE_AUDIO_RAW) RawReader(extractor, format)
+                else CodecReader(extractor, format, mime, if (mime == MediaFormat.MIMETYPE_AUDIO_MPEG) mp3DesktopTrim(fd) else 0)
             } catch (e: Exception) {
                 extractor.release()
                 throw e
@@ -133,7 +164,7 @@ private class RawReader(extractor: MediaExtractor, format: MediaFormat) : PcmRea
 
 private const val MP3_DECODER_DELAY = 529
 
-private class CodecReader(extractor: MediaExtractor, format: MediaFormat, mime: String) : PcmReader(extractor, format) {
+private class CodecReader(extractor: MediaExtractor, format: MediaFormat, mime: String, mp3DesktopTrim: Int) : PcmReader(extractor, format) {
     private val codec = MediaCodec.createDecoderByType(mime)
     private val info = MediaCodec.BufferInfo()
     private val csd = (0..2).mapNotNull { format.getByteBuffer("csd-$it")?.duplicate() }
@@ -155,10 +186,30 @@ private class CodecReader(extractor: MediaExtractor, format: MediaFormat, mime: 
     private val mp3 = mime == MediaFormat.MIMETYPE_AUDIO_MPEG
     // AAC: extractor seek + preroll was NOT sample-exact on every position (AudioEngineTest, SH8): fill from 0.
     override val seekable = false
-    private val mp3Gapless = mp3 && format.containsKey(MediaFormat.KEY_ENCODER_DELAY)
-    private val mp3HeaderlessUs: Long = if (mp3 && !mp3Gapless) MP3_DECODER_DELAY * 1_000_000L / format.getInteger(MediaFormat.KEY_SAMPLE_RATE) else 0
+    /**
+     * Desktop time of the MP3 decoder's first output frame. The platform cuts its 529-frame decoder delay plus the
+     * encoder delay its extractor reads from ANY Xing/Info LAME extension; desktop (ffmpeg) cuts delay + 529 only
+     * for a "LAME"/"Lavc"/"Lavf" tag. Recognised tags: 0; header-less: 529; "Lame3.100" (unrecognised) files: 1105;
+     * recognised tag with delay 0 (no platform key): 0 (#410).
+     */
+    private val mp3StartFrames: Long = if (!mp3) 0 else MP3_DECODER_DELAY.toLong() - mp3DesktopTrim +
+        (if (format.containsKey(MediaFormat.KEY_ENCODER_DELAY)) format.getInteger(MediaFormat.KEY_ENCODER_DELAY) else 0)
+    private val mp3StartUs: Long = if (mp3) mp3StartFrames * 1_000_000L / format.getInteger(MediaFormat.KEY_SAMPLE_RATE) else 0
     /** Sequential from-start MP3 timeline: next output frame index, -1 before the first output. */
     private var mp3NextFrame = -1L
+    /**
+     * AAC timing vs desktop (ffmpeg honours the MP4 edit list: the first `media_time` frames are cut). Android's
+     * MPEG4Extractor shifts every PTS by -media_time AND reports it as KEY_ENCODER_DELAY, and the codec framework
+     * (CCodec SkipCutBuffer) cuts that many frames from the output after start and after EVERY flush, then holds back
+     * the padding — moving data across buffers without touching their PTS. So per-buffer PTS do not describe their
+     * frames; the output stream is sample-continuous. Timeline: first output frame = first queued packet's PTS +
+     * encoder delay, then frame-counted. (PTS-based placement was off by the delay's remainder within a 1024-frame
+     * packet: 576 frames = 13 ms on media_time 1600 files after any seek; #410.)
+     */
+    private val aac = mime == MediaFormat.MIMETYPE_AUDIO_AAC
+    private val aacDelay = if (aac && format.containsKey(MediaFormat.KEY_ENCODER_DELAY)) format.getInteger(MediaFormat.KEY_ENCODER_DELAY) else 0
+    private var aacFirstInputUs = Long.MIN_VALUE
+    private var aacNextFrame = Long.MIN_VALUE
 
     init {
         try {
@@ -190,6 +241,8 @@ private class CodecReader(extractor: MediaExtractor, format: MediaFormat, mime: 
         // Back to the start = the from-start timeline again (the ring's track-start path).
         seeked = seconds > 0
         mp3NextFrame = -1
+        aacFirstInputUs = Long.MIN_VALUE
+        aacNextFrame = Long.MIN_VALUE
         if (queuedInput) {
             codec.flush()
             // A flush before the first output drops codec-specific data; resubmit it.
@@ -215,7 +268,10 @@ private class CodecReader(extractor: MediaExtractor, format: MediaFormat, mime: 
                     val buffer = codec.getInputBuffer(input) ?: error("Missing codec input")
                     val n = extractor.readSampleData(buffer, 0)
                     if (n < 0) { codec.queueInputBuffer(input, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM); inputDone = true }
-                    else { codec.queueInputBuffer(input, 0, n, extractor.sampleTime, 0); extractor.advance() }
+                    else {
+                        if (aacFirstInputUs == Long.MIN_VALUE) aacFirstInputUs = extractor.sampleTime
+                        codec.queueInputBuffer(input, 0, n, extractor.sampleTime, 0); extractor.advance()
+                    }
                     queuedInput = true
                 }
             }
@@ -233,10 +289,15 @@ private class CodecReader(extractor: MediaExtractor, format: MediaFormat, mime: 
                         buffer.position(info.offset)
                         buffer.limit(info.offset + info.size)
                         if (info.size <= 0) 0
-                        else if (mp3 && !seeked) {
-                            if (mp3NextFrame < 0) mp3NextFrame = if (mp3Gapless) 0 else (info.presentationTimeUs + mp3HeaderlessUs) * sampleRate / 1_000_000L
-                            convert(buffer, mp3NextFrame * 1_000_000L / sampleRate).also { mp3NextFrame += it }
-                        } else convert(buffer, info.presentationTimeUs + mp3HeaderlessUs) // after a seek only the decoder-delay shift holds
+                        else if (aac) {
+                            if (aacNextFrame == Long.MIN_VALUE)
+                                aacNextFrame = Math.floorDiv(aacFirstInputUs * sampleRate + 500_000L, 1_000_000L) + aacDelay
+                            val total = buffer.remaining() / frameBytes()
+                            convertAtFrame(buffer, aacNextFrame).also { aacNextFrame += total }
+                        } else if (mp3 && !seeked) {
+                            if (mp3NextFrame < 0) mp3NextFrame = mp3StartFrames
+                            convertAtFrame(buffer, mp3NextFrame).also { mp3NextFrame += it }
+                        } else convert(buffer, info.presentationTimeUs + mp3StartUs) // after a seek only the start shift holds
                     } finally { codec.releaseOutputBuffer(output, false) }
                     if ((info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) outputDone = true
                     if (frames > 0) return frames

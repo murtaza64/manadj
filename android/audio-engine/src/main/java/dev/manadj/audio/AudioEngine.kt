@@ -420,7 +420,7 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
             previous?.stems?.forEach { runCatching { it.close() } }
             decode(index, source)
         }
-        trackExecutors[index].execute { if (source.stems.isEmpty() || !decodeStems(index, source)) decodeWholeTrack(index, source) }
+        if (wholeTrackForTest) trackExecutors[index].execute { if (source.stems.isEmpty() || !decodeStems(index, source)) decodeWholeTrack(index, source) }
         return CommandReceipt(id, true)
     }
 
@@ -571,6 +571,9 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
     /** Seconds the in-memory track is filled contiguously from [seconds] for the deck's current source (0 = not there). */
     fun decodedAhead(deck: DeckId, seconds: Double): Double =
         synchronized(this) { if (closed) 0.0 else nativeTrackAhead(handle, deck.ordinal, loads[deck.ordinal].get(), seconds) }
+
+    /** Test hook: false = no in-memory track for later loads (streaming ring and cue heads only). */
+    @Volatile internal var wholeTrackForTest = true
 
     /** Test hook: the in-memory track (stereo float, int16-quantized) from frame [from]; empty if not this load. */
     internal fun trackCopyForTest(deck: DeckId, from: Long, frames: Int): FloatArray =

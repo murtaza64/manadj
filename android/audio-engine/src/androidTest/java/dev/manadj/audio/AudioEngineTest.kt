@@ -192,7 +192,7 @@ class AudioEngineTest {
         val onsets = mutableMapOf<String, Double>()
         val seekOnsets = mutableMapOf<String, Double>()
         val zeroOnsets = mutableMapOf<String, Double>()
-        for (name in listOf("priming.wav", "priming-aac.m4a", "priming-aacat.m4a", "priming.mp3", "priming-noxing.mp3", "priming-short.mp3")) {
+        for (name in listOf("priming.wav", "priming-aac.m4a", "priming-aacat.m4a", "priming-aac1600.m4a", "priming.mp3", "priming-noxing.mp3", "priming-short.mp3", "priming-lame-lc.mp3", "priming-zerodelay.mp3")) {
             ParcelFileDescriptor.open(asset(name), ParcelFileDescriptor.MODE_READ_ONLY).use { fd ->
                 PcmReader.open(fd.fileDescriptor).use { r ->
                     // Sequential, as the engine stores it: the first chunk's start + every frame after it
@@ -225,14 +225,19 @@ class AudioEngineTest {
                     }
                     zeroOnsets[name] = onset ?: Double.NaN
                 }
-                // After a seek (decoder flush + extractor seek): the second burst (2.5 s) at the same offset.
+                // After a seek (decoder flush + extractor seek): the second burst (2.5 s) at the same offset, read
+                // sequentially from the first chunk's start like the streaming ring.
                 PcmReader.open(fd.fileDescriptor).use { r ->
                     r.seek(2.0)
                     var onset: Double? = null
+                    var start: Double? = null
+                    var count = 0L
                     while (onset == null) {
                         val n = r.read()
                         if (n < 0) break
-                        for (i in 0 until n) if (kotlin.math.abs(r.samples[i * 2]) > .1f) { onset = r.chunkStartSeconds + i.toDouble() / r.sampleRate; break }
+                        if (start == null && n > 0) start = r.chunkStartSeconds
+                        for (i in 0 until n) if (kotlin.math.abs(r.samples[i * 2]) > .1f) { onset = start!! + (count + i).toDouble() / r.sampleRate; break }
+                        count += n
                     }
                     seekOnsets[name] = (onset ?: Double.NaN) - 1.5
                 }
@@ -245,11 +250,59 @@ class AudioEngineTest {
         val wav = onsets.getValue("priming.wav")
         assertEquals(44101 / 44100.0, wav, 1.5 / 44100)
         android.util.Log.i("manadj-priming", "after seek(0): " + zeroOnsets.entries.joinToString { (k, v) -> "%s %+.1f frames".format(k, (v - onsets.getValue(k)) * 44100) })
-        // Known: the Apple aac_at decoy streams 64 frames (1.5 ms) early sequentially (its PTS after the first buffer
-        // are exact); real library m4a files measure 0.00 ms sequentially on the phone (Session DecodeProbe, mail #84).
-        val expected = mapOf("priming-noxing.mp3" to 1105.0, "priming-aacat.m4a" to -64.0)
+        // ffmpeg's LAME rule (#410): "Lame3.100"-tagged files keep delay + decoder delay; a recognised tag with
+        // delay 0 still trims the 529-frame decoder delay (576 encoder frames remain).
+        val expected = mapOf("priming-noxing.mp3" to 1105.0, "priming-lame-lc.mp3" to 1105.0, "priming-zerodelay.mp3" to 576.0)
         for ((name, at) in onsets) assertEquals("$name onset vs desktop (frames)", expected[name] ?: 0.0, (at - wav) * 44100, 2.0)
+        // AAC after a seek: exact for any edit-list media_time (#410: YouTube m4a = 1600 played 576 frames early).
+        for (name in listOf("priming-aac.m4a", "priming-aacat.m4a", "priming-aac1600.m4a")) assertEquals("$name onset after seek(2.0) (frames)", 0.0, (seekOnsets.getValue(name) - wav) * 44100, 2.0)
         for ((name, at) in zeroOnsets) assertEquals("$name onset after seek(0) (frames)", onsets.getValue(name), at, 2.0 / 44100)
+    }
+
+    /**
+     * #410 (Drag Me Down = YouTube m4a with edit-list media_time 1600; Monster = "Lame3.100" Info tag): what the deck
+     * plays at a position is what desktop (ffmpeg) has there — from the in-memory track, and from the streaming
+     * ring right after a seek (AAC: the decoder flush re-cuts the encoder delay). Burst onsets: 1.0 s and 2.5 s.
+     */
+    @Test fun playedAudioMatchesDesktopAtThePlayhead() {
+        val context = InstrumentationRegistry.getInstrumentation().context
+        fun asset(name: String) = File(cache, name).also { files.add(it); it.writeBytes(context.assets.open(name).readBytes()) }
+        val desktopFrames = mapOf("priming.wav" to 0, "priming-aac.m4a" to 0, "priming-aacat.m4a" to 0, "priming-aac1600.m4a" to 0, "priming.mp3" to 0,
+            "priming-noxing.mp3" to 1105, "priming-lame-lc.mp3" to 1105, "priming-zerodelay.mp3" to 576)
+        fun AudioEngine.onsetAfter(from: Double?): Double {
+            if (from != null) { submit(AudioCommand.Seek(DeckId.A, from)); renderOfflineForTest(16); settled(DeckId.A) }
+            submit(AudioCommand.Play(DeckId.A))
+            renderOfflineForTest(1)
+            val start = deck(DeckId.A).sourceSeconds
+            var at = 0
+            repeat(250) {
+                val out = renderOfflineForTest(256)
+                for (i in 0 until 256) if (kotlin.math.abs(out[i * 2]) > .05f) return start + (at + i) / 48000.0
+                at += 256
+                Thread.sleep(1) // let the streaming ring keep up with the offline callback
+            }
+            return Double.NaN
+        }
+        // memory: whole track decoded, seek before the 1.0 s burst. ring-start: no in-memory track, play from the
+        // track start. ring-seek (AAC; MP3 ring seeks are TOC-estimated): no in-memory track, seek before 2.5 s.
+        val wav = mutableMapOf<String, Double>() // the WAV through the same path = desktop time
+        for ((name, frames) in desktopFrames) for (path in listOf("memory", "ring-start", "ring-seek")) {
+            if (path == "ring-seek" && name.endsWith(".mp3")) continue
+            val file = asset(name)
+            AudioEngine(offline = true).use { engine ->
+                engine.wholeTrackForTest = path == "memory"
+                engine.load(DeckId.A, name, file)
+                engine.settled(DeckId.A)
+                engine.submit(AudioCommand.SetCrossfade(-1.0))
+                if (path == "memory") engine.until("$name decoded") { deck(DeckId.A).fullyDecoded }
+                val burst = if (path == "ring-seek") 2.5 else 1.0
+                val onset = engine.onsetAfter(when (path) { "memory" -> .95; "ring-seek" -> 2.45; else -> null })
+                if (name == "priming.wav") { wav[path] = onset; return@use }
+                val vsDesktop = (onset - wav.getValue(path)) * 44100 - frames
+                android.util.Log.i("manadj-priming", "engine $name $path onset %+.1f frames vs desktop".format(vsDesktop))
+                assertEquals("$name $path onset vs desktop (frames)", 0.0, vsDesktop, 2.0)
+            }
+        }
     }
 
     /**

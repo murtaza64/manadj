@@ -36,24 +36,36 @@ internal class Mp3Frames private constructor(
             return Header(version, rate, size, if (v1) 1152 else 576, if (mono) 1 else 2, if (v1) (if (mono) 17 else 32) else (if (mono) 9 else 17))
         }
 
-        fun parse(b: ByteArray): Mp3Frames? {
+        /** Byte offset just past the leading ID3v2 tag(s). */
+        fun audioStart(b: ByteArray): Int {
             var at = 0
             while (at + 10 <= b.size && b[at] == 'I'.code.toByte() && b[at + 1] == 'D'.code.toByte() && b[at + 2] == '3'.code.toByte()) {
                 val size = (b[at + 6].toInt() and 0x7f shl 21) or (b[at + 7].toInt() and 0x7f shl 14) or (b[at + 8].toInt() and 0x7f shl 7) or (b[at + 9].toInt() and 0x7f)
                 at += 10 + size + if ((b[at + 5].toInt() and 0x10) != 0) 10 else 0
             }
-            // First frame: a header whose successor also parses (no false sync in tag padding / junk).
-            var first: Header? = null
+            return at
+        }
+
+        /** First frame at/after [from]: a header whose successor also parses (no false sync in tag padding / junk). */
+        private fun firstFrame(b: ByteArray, from: Int): Pair<Int, Header>? {
+            var at = from
             while (at + 4 <= b.size) {
                 val h = header(b, at)
-                if (h != null && header(b, at + h.size)?.let { it.version == h.version && it.rate == h.rate } == true) { first = h; break }
+                if (h != null && header(b, at + h.size)?.let { it.version == h.version && it.rate == h.rate } == true) return at to h
                 at++
             }
-            first ?: return null
-            val offsets = ArrayList<Int>(b.size / 300)
-            val sizes = ArrayList<Int>(b.size / 300)
-            var delay: Int? = null; var padding: Int? = null
-            // Xing/Info (after the side info) or VBRI (offset 36) marks a header frame, not audio.
+            return null
+        }
+
+        private class Gapless(val headerFrame: Boolean, val delay: Int?, val padding: Int?)
+
+        /**
+         * The Xing/Info (after the side info) or VBRI (offset 36) frame marks a header frame, not audio. Its LAME
+         * extension counts only under ffmpeg's rule (desktop = Chrome/ffmpeg): version string "LAME", "Lavc" or
+         * "Lavf" exactly. Other encoders' strings ("Lame3.100", "55.2", …) leave the delay untrimmed on desktop,
+         * though Android's extractor reads the same bytes regardless (#410).
+         */
+        private fun gapless(b: ByteArray, at: Int, first: Header): Gapless {
             val tag = at + 4 + first.sideInfo
             fun ascii(p: Int, s: String) = p + 4 <= b.size && (0 until 4).all { b[p + it] == s[it].code.toByte() }
             if (ascii(tag, "Xing") || ascii(tag, "Info")) {
@@ -63,11 +75,35 @@ internal class Mp3Frames private constructor(
                 // LAME extension: 9-byte version, then 12 bytes in, 3 bytes of delay (12 bits) | padding (12 bits).
                 if (p + 24 <= at + first.size && (ascii(p, "LAME") || ascii(p, "Lavc") || ascii(p, "Lavf"))) {
                     val x = p + 21
-                    delay = ((b[x].toInt() and 0xff) shl 4) or ((b[x + 1].toInt() and 0xff) shr 4)
-                    padding = ((b[x + 1].toInt() and 0x0f) shl 8) or (b[x + 2].toInt() and 0xff)
+                    return Gapless(true, ((b[x].toInt() and 0xff) shl 4) or ((b[x + 1].toInt() and 0xff) shr 4),
+                        ((b[x + 1].toInt() and 0x0f) shl 8) or (b[x + 2].toInt() and 0xff))
                 }
-                at += first.size
-            } else if (ascii(at + 36, "VBRI")) at += first.size
+                return Gapless(true, null, null)
+            }
+            return Gapless(ascii(at + 36, "VBRI"), null, null)
+        }
+
+        /**
+         * Frames desktop trims from the decoder output start (ffmpeg: LAME delay + 529 decoder delay when the LAME
+         * tag is recognised, else 0). [head] = the file from [audioStart], at least the first two frames.
+         */
+        fun desktopTrim(head: ByteArray): Int {
+            val (at, first) = firstFrame(head, 0) ?: return 0
+            return gapless(head, at, first).delay?.let { it + DECODER_DELAY } ?: 0
+        }
+
+        const val DECODER_DELAY = 529
+
+        fun parse(b: ByteArray): Mp3Frames? {
+            val found = firstFrame(b, audioStart(b)) ?: return null
+            var at = found.first
+            val first = found.second
+            val offsets = ArrayList<Int>(b.size / 300)
+            val sizes = ArrayList<Int>(b.size / 300)
+            val tag = gapless(b, at, first)
+            val delay = tag.delay
+            val padding = tag.padding
+            if (tag.headerFrame) at += first.size
             while (true) {
                 val h = header(b, at) ?: break
                 if (h.version != first.version || h.rate != first.rate || at + h.size > b.size) break
