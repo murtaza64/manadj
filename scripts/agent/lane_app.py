@@ -31,6 +31,7 @@ Refuses to run in the default workspace — that is the human's real app
 from __future__ import annotations
 
 import argparse
+import errno
 import os
 import re
 import shutil
@@ -134,10 +135,16 @@ def ports_available(backend: int, vite: int) -> bool:
     if backend == vite or not all(0 < port < 65536 for port in (backend, vite)):
         return False
     for port in (backend, vite):
-        with socket.socket() as probe:
+        # Vite's localhost may bind ::1 while uvicorn binds 127.0.0.1.
+        for family, host in ((socket.AF_INET, "127.0.0.1"), (socket.AF_INET6, "::1")):
             try:
-                probe.bind(("127.0.0.1", port))
-            except OSError:
+                with socket.socket(family) as probe:
+                    probe.bind((host, port))
+            except OSError as error:
+                if family == socket.AF_INET6 and error.errno in (
+                    errno.EAFNOSUPPORT, errno.EPROTONOSUPPORT, errno.EADDRNOTAVAIL,
+                ):
+                    continue  # IPv6 disabled/unavailable on this host.
                 return False
     return True
 

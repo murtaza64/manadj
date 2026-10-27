@@ -1,16 +1,20 @@
 """Host tooling checks use synthetic trees/DBs only."""
 
 import argparse
+import errno
 import shutil
 import socket
 import sqlite3
 import subprocess
+import sys
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
 from scripts.agent import db_backup, guard, land, lane_app
 from scripts.agent.project_paths import discover, require_lane
+from scripts.release.build_dmg import BACKEND_FILES
 
 
 @pytest.fixture
@@ -105,6 +109,71 @@ def test_occupied_ports_not_taken_over():
                 lane_app.cmd_start(args)
             deps.assert_not_called()
         assert occupied.getsockname()[1] == port
+
+
+def test_ipv6_occupied_port_is_skipped_and_refused(project):
+    try:
+        occupied = socket.socket(socket.AF_INET6)
+        occupied.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
+        occupied.bind(("::1", 0))
+    except OSError:
+        pytest.skip("IPv6 loopback unavailable")
+    with occupied:
+        port = occupied.getsockname()[1]
+        backend = port - 1
+        assert not lane_app.ports_available(backend, port)
+        args = argparse.Namespace(reset=False, empty_db=True, backend_port=backend, vite_port=port)
+        with patch.object(lane_app, "running_pid", return_value=None), \
+             patch.object(lane_app, "ensure_venv") as deps:
+            with pytest.raises(SystemExit, match="ports unavailable"):
+                lane_app.cmd_start(args)
+            deps.assert_not_called()
+        with patch.object(lane_app, "lane_record", return_value=project.record), \
+             patch.object(lane_app, "taken_offsets", return_value=set()), \
+             patch.object(lane_app, "BASE_BACKEND", backend - 10), \
+             patch.object(lane_app, "BASE_VITE", port - 10):
+            assigned = lane_app.self_assign_ports()
+            assert assigned != (backend, port)
+        assert occupied.getsockname()[1] == port
+
+
+def test_ipv6_disabled_host_still_accepts_free_ipv4_ports():
+    real_socket = socket.socket
+
+    def ipv4_only(family=socket.AF_INET):
+        if family == socket.AF_INET6:
+            raise OSError(errno.EAFNOSUPPORT, "IPv6 disabled")
+        return real_socket(family)
+
+    with real_socket() as first, real_socket() as second:
+        first.bind(("127.0.0.1", 0))
+        second.bind(("127.0.0.1", 0))
+        ports = first.getsockname()[1], second.getsockname()[1]
+    with patch.object(lane_app.socket, "socket", side_effect=ipv4_only):
+        assert lane_app.ports_available(*ports)
+
+
+@pytest.mark.parametrize("override", [False, True])
+def test_packaged_backup_import_from_shared_release_manifest(tmp_path, override):
+    """No source checkout on sys.path; same BACKEND_FILES on macOS/Windows."""
+    root = Path(__file__).resolve().parents[1]
+    package = tmp_path / "packaged-backend"
+    for relative in [*BACKEND_FILES, "backend/fs_clone.py"]:
+        dest = package / relative
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(root / relative, dest)
+    script = (
+        "import os, sys; from pathlib import Path; "
+        f"sys.path.insert(0, {str(package)!r}); "
+        + (f"os.environ['MANADJ_DATA_DIR'] = {str(tmp_path / 'user-data')!r}; "
+           if override else "os.environ.pop('MANADJ_DATA_DIR', None); ")
+        + "from scripts.agent import db_backup; "
+        + (f"assert db_backup.REAL_DB == Path({str(tmp_path / 'user-data/data/library.db')!r})"
+           if override else "assert db_backup.REAL_DB == db_backup.PROJECT_ROOT / 'data/library.db'")
+    )
+    result = subprocess.run([sys.executable, "-I", "-c", script], cwd=tmp_path,
+                            capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
 
 
 def test_port_assignment_skips_busy_pair(project):
