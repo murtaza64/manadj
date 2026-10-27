@@ -3,7 +3,7 @@
 # requires-python = ">=3.12"
 # dependencies = []
 # ///
-"""Real-DB backups: APFS-cheap, automatic, retained (editspace-migration 06).
+"""Real-DB backups: copy-on-write where available, retained (editspace-migration 06).
 
 Backs up the discovered project's data/library.db into data/backups/ as
 library-<UTC timestamp>.db via backend/fs_clone.py (APFS clone: instant,
@@ -27,7 +27,7 @@ Manual usage:
 RESTORE RUNBOOK (incident-tested 2026-07-08):
   1. Stop the backend (and don't relaunch until step 4).
   2. mv data/library.db data/library.db.BAD-<date>   # quarantine, never delete
-  3. cp -c data/backups/<chosen>.db data/library.db
+  3. cp data/backups/<chosen>.db data/library.db (copy matching -wal/-shm too)
   4. uv run alembic upgrade head && sqlite3 data/library.db "PRAGMA integrity_check;"
   5. Boot the app; re-run derived-data backfills if the backup predates them
      (scripts/backfill_bpm_from_grids.py --apply, scripts/backfill_analysis.py).
@@ -52,9 +52,8 @@ from scripts.agent.project_paths import discover
 # Default target: the real data root (MANADJ_DATA_DIR overrides, so the
 # script works against any data root — packaged-app #277). Automatic call
 # sites (backend/main.py) pass explicit paths instead.
-DATA_DIR = (
-    Path(os.environ.get("MANADJ_DATA_DIR", str(discover(Path(__file__).resolve().parents[2]).default))).expanduser() / "data"
-)
+PROJECT_ROOT = discover(Path(__file__).resolve().parents[2]).default
+DATA_DIR = Path(os.environ.get("MANADJ_DATA_DIR", str(PROJECT_ROOT))).expanduser() / "data"
 REAL_DB = DATA_DIR / "library.db"
 BACKUP_DIR = DATA_DIR / "backups"
 STAMP = "%Y%m%d-%H%M%S"
@@ -87,7 +86,7 @@ _WAL_SUFFIXES = ("-wal", "-shm")
 
 
 def _clone(src: Path, dest: Path) -> None:
-    """APFS-clone `src` and its WAL sidecars to `dest` (+ matching suffixes)."""
+    """Clone `src` and its WAL sidecars using the portable clone helper."""
     dest.parent.mkdir(parents=True, exist_ok=True)
     clone_file(src, dest)
     for suffix in _WAL_SUFFIXES:

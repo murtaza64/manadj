@@ -41,7 +41,9 @@ def lane_name() -> str | None:
 
 def jj(*args: str) -> str:
     r = subprocess.run(["jj", *args], capture_output=True, text=True, cwd=LANE_ROOT)
-    return r.stdout if r.returncode == 0 else ""
+    if r.returncode:
+        sys.exit(f"STALE: jj {' '.join(args)} failed: {r.stderr.strip()}")
+    return r.stdout
 
 
 def main() -> None:

@@ -95,7 +95,7 @@ backups. Sanctioned ops on trunk/default-workspace flow only through
 ## Database (Sandbox DB)
 
 - The real DB exists only in the default workspace (`~/manadj/data/library.db`).
-- `lane_app.py start` clones your sandbox (APFS `cp -c`) internally and takes
+- `lane_app.py start` clones your sandbox via `backend.fs_clone` and takes
   a real-DB backup point first. Staleness is a feature; re-clone for fresher
   data (delete your `data/library.db`, restart the lane app).
 - Migrations run against the real DB only after landing (startup
@@ -111,6 +111,17 @@ backups. Sanctioned ops on trunk/default-workspace flow only through
 sandbox DB + deps, self-assigns a free port offset on first start (recorded as
 a `ports:` line in your `LANE.md`), daemonizes backend+vite. Refuses in the
 default workspace.
+
+Use `start --empty-db` for an isolated, migrated empty Library without reading
+or backing up the real DB. Plain restarts retain that data root. Port assignment
+skips occupied loopback ports; explicit or recorded occupied ports are refused,
+never taken over. After `stop`, allow the child processes to finish before restart.
+
+Host tooling discovers the default workspace and sidecar from `EDITSPACE.md`
+via `scripts/agent/project_paths.py`; compatibility symlinks are resolved.
+`guard.py`, `land.py`, and `lane_app.py` require the owning session and matching
+jj workspace. Relocated embedded sidecars use their actual parent as the project
+root rather than the old absolute `repo:` field.
 
 Walkthroughs prefer the Electron desktop shell over a browser (Firefox has
 known audio breakage — headphone-cue 08). It attaches from anywhere:

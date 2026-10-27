@@ -87,6 +87,13 @@ def test_guard_and_lander_refuse_before_mutation(project):
         jj.assert_not_called()
 
 
+def test_guard_jj_failure_is_not_clean():
+    result = subprocess.CompletedProcess([], 1, "", "missing main")
+    with patch.object(guard.subprocess, "run", return_value=result):
+        with pytest.raises(SystemExit, match="missing main"):
+            guard.jj("log", "-r", "main")
+
+
 def test_occupied_ports_not_taken_over():
     with socket.socket() as occupied:
         occupied.bind(("127.0.0.1", 0))
