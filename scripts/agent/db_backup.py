@@ -5,7 +5,7 @@
 # ///
 """Real-DB backups: APFS-cheap, automatic, retained (editspace-migration 06).
 
-Backs up /Users/murtaza/manadj/data/library.db into data/backups/ as
+Backs up the discovered project's data/library.db into data/backups/ as
 library-<UTC timestamp>.db via backend/fs_clone.py (APFS clone: instant,
 block-shared; plain copy where CoW is unavailable).
 Fires automatically from:
@@ -47,12 +47,13 @@ from pathlib import Path
 # (stdlib-only) backend/fs_clone.py.
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from backend.fs_clone import clone_file
+from scripts.agent.project_paths import discover
 
 # Default target: the real data root (MANADJ_DATA_DIR overrides, so the
 # script works against any data root — packaged-app #277). Automatic call
 # sites (backend/main.py) pass explicit paths instead.
 DATA_DIR = (
-    Path(os.environ.get("MANADJ_DATA_DIR", "/Users/murtaza/manadj")).expanduser() / "data"
+    Path(os.environ.get("MANADJ_DATA_DIR", str(discover(Path(__file__).resolve().parents[2]).default))).expanduser() / "data"
 )
 REAL_DB = DATA_DIR / "library.db"
 BACKUP_DIR = DATA_DIR / "backups"

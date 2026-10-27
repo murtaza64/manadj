@@ -35,14 +35,20 @@ import os
 import re
 import shutil
 import signal
+import socket
 import subprocess
 import sys
 import time
 from pathlib import Path
 
-MAIN_ROOT = Path("/Users/murtaza/manadj")
-SIDECAR = MAIN_ROOT / ".editspace"
+try:
+    from .project_paths import discover, require_lane, session_id
+except ImportError:
+    from project_paths import discover, require_lane, session_id
+
 LANE_ROOT = Path(__file__).resolve().parents[2]
+PATHS = discover(LANE_ROOT)
+MAIN_ROOT, SIDECAR = PATHS.default, PATHS.sidecar
 RUNTIME_DIR = LANE_ROOT / ".lane-app"
 PID_FILE = RUNTIME_DIR / "dev.pid"
 LOG_FILE = RUNTIME_DIR / "dev.log"
@@ -105,7 +111,10 @@ def self_assign_ports() -> tuple[int, int]:
             "es lane? Pass --backend-port and --vite-port to override."
         )
     taken = taken_offsets()
-    offset = next(o for o in range(10, 1000, 10) if o not in taken)
+    offset = next((o for o in range(10, 1000, 10)
+                   if o not in taken and ports_available(BASE_BACKEND + o, BASE_VITE + o)), None)
+    if offset is None:
+        sys.exit("error: no free lane port pair")
     backend, vite = BASE_BACKEND + offset, BASE_VITE + offset
     with record.open("a") as f:
         f.write(f"ports: backend {backend}, vite {vite}\n")
@@ -114,9 +123,23 @@ def self_assign_ports() -> tuple[int, int]:
 
 
 def resolve_ports(args: argparse.Namespace) -> tuple[int, int]:
+    if bool(args.backend_port) != bool(args.vite_port):
+        sys.exit("error: pass both --backend-port and --vite-port")
     if args.backend_port and args.vite_port:
         return args.backend_port, args.vite_port
     return record_ports() or self_assign_ports()
+
+
+def ports_available(backend: int, vite: int) -> bool:
+    if backend == vite or not all(0 < port < 65536 for port in (backend, vite)):
+        return False
+    for port in (backend, vite):
+        with socket.socket() as probe:
+            try:
+                probe.bind(("127.0.0.1", port))
+            except OSError:
+                return False
+    return True
 
 
 def ensure_empty_db(reset: bool) -> None:
@@ -167,7 +190,7 @@ def ensure_sandbox_db() -> None:
         sidecar = real.with_name(real.name + suffix)
         if sidecar.exists():
             clone_file(sidecar, db.with_name(db.name + suffix))
-    print(f"cloned sandbox DB (APFS) from {real}")
+    print(f"cloned sandbox DB from {real}")
 
 
 def ensure_frontend_deps() -> None:
@@ -242,6 +265,8 @@ def cmd_start(args: argparse.Namespace) -> None:
     if args.reset and not args.empty_db:
         sys.exit("error: --reset only makes sense with --empty-db")
     backend_port, vite_port = resolve_ports(args)
+    if not ports_available(backend_port, vite_port):
+        sys.exit(f"error: lane ports unavailable ({backend_port}, {vite_port}); no process stopped")
     RUNTIME_DIR.mkdir(exist_ok=True)
     ensure_venv()
     if args.empty_db:
@@ -301,11 +326,10 @@ def cmd_stop(_args: argparse.Namespace) -> None:
 
 
 def main() -> None:
-    if LANE_ROOT == MAIN_ROOT:
-        sys.exit(
-            "error: refusing to run in the default workspace — it hosts the "
-            "human's real app and real DB. Run from a lane workspace."
-        )
+    try:
+        require_lane(discover(LANE_ROOT), session_id())
+    except ValueError as error:
+        sys.exit(f"error: {error}")
     ap = argparse.ArgumentParser(description=__doc__)
     sub = ap.add_subparsers(dest="cmd", required=True)
     start = sub.add_parser("start")

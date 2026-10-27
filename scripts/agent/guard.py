@@ -16,15 +16,18 @@ LANE.md, identity is $EDITSPACE_AGENT_ID (editspace-lock plugin).
 from __future__ import annotations
 
 import argparse
-import os
-import re
 import subprocess
 import sys
 from pathlib import Path
 
-DEFAULT_WS = Path("/Users/murtaza/manadj")
-SIDECAR = DEFAULT_WS / ".editspace"
+try:
+    from .project_paths import discover, require_lane, session_id
+except ImportError:
+    from project_paths import discover, require_lane, session_id
+
 LANE_ROOT = Path(__file__).resolve().parents[2]
+PATHS = discover(LANE_ROOT)
+DEFAULT_WS, SIDECAR = PATHS.default, PATHS.sidecar
 
 
 def lane_name() -> str | None:
@@ -34,14 +37,6 @@ def lane_name() -> str | None:
     except ValueError:
         return None
     return rel[1] if len(rel) >= 2 and rel[0] == "lanes" else None
-
-
-def session_id() -> str:
-    """Bare session ID from $EDITSPACE_AGENT_ID (opencode:<id>) or legacy env."""
-    agent = os.environ.get("EDITSPACE_AGENT_ID", "")
-    if agent.startswith("opencode:"):
-        return agent.removeprefix("opencode:")
-    return os.environ.get("OPENCODE_SESSION_ID", "")
 
 
 def jj(*args: str) -> str:
@@ -56,37 +51,10 @@ def main() -> None:
 
     findings: list[str] = []
     lane = lane_name()
-
-    if LANE_ROOT.resolve() == DEFAULT_WS.resolve():
-        sys.exit("STALE: you are in the default workspace — read-only for "
-                 "agents; open a lane")
-    if lane is None:
-        sys.exit(f"STALE: {LANE_ROOT} is not an es lane workspace — open a "
-                 "lane (es lane create / es agent spawn)")
-
-    record = SIDECAR / "lanes" / lane / "LANE.md"
-    if not record.exists():
-        findings.append(f"no LANE.md for lane {lane!r} — record missing "
-                        f"({record})")
-        owner = ""
-    else:
-        m = re.search(r"owner:\s*(\S+)", record.read_text())
-        owner = m.group(1) if m else ""
-        owner_ses = owner.removeprefix("opencode:")
-        if not owner:
-            findings.append("lane record has no owner — stamp one")
-        elif args.session and owner_ses != args.session and owner != "human":
-            findings.append(f"lane owned by {owner}, you are {args.session} — "
-                            "the lane was handed over; open your own")
-        elif not args.session:
-            findings.append("cannot verify ownership: no $EDITSPACE_AGENT_ID "
-                            "(plugin not loaded?) — proceed with care")
-
-    workspaces = jj("workspace", "list")
-    ws_name = f"manadj--{lane}"
-    if not re.search(rf"^{re.escape(ws_name)}:", workspaces, re.M):
-        findings.append(f"workspace {ws_name!r} not in `jj workspace list` — "
-                        "it was forgotten while you were away")
+    try:
+        require_lane(discover(LANE_ROOT), args.session)
+    except ValueError as error:
+        sys.exit(f"STALE: {error}")
 
     behind = jj("log", "--no-graph", "-r", "main ~ ::@", "-T", '"x"')
     if behind:
@@ -97,8 +65,7 @@ def main() -> None:
     if findings:
         print("\n".join(f"STALE: {f}" for f in findings))
         sys.exit(1)
-    print(f"guard: clean (lane {lane}, owner verified)" if owner and args.session
-          else f"guard: clean-ish (lane {lane})")
+    print(f"guard: clean (lane {lane}, owner verified)")
 
 
 if __name__ == "__main__":

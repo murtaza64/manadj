@@ -20,9 +20,14 @@ import subprocess
 import sys
 from pathlib import Path
 
-DEFAULT_WS = Path("/Users/murtaza/manadj")
-SIDECAR = DEFAULT_WS / ".editspace"
+try:
+    from .project_paths import discover, require_lane
+except ImportError:
+    from project_paths import discover, require_lane
+
 LANE_ROOT = Path(__file__).resolve().parents[2]
+PATHS = discover(LANE_ROOT)
+DEFAULT_WS, SIDECAR = PATHS.default, PATHS.sidecar
 
 
 def _lane_and_record() -> tuple[str, Path | None]:
@@ -66,6 +71,10 @@ def main() -> None:
     ap.add_argument("--session", default=_session_id(),
                     help="caller session ID (default: $EDITSPACE_AGENT_ID)")
     args = ap.parse_args()
+    try:
+        require_lane(discover(LANE_ROOT), args.session)
+    except ValueError as error:
+        refuse(str(error), "run guard.py from your owned lane")
 
     # Retry invariant: main must be an ancestor of the target.
     if template(f"main & ::{args.change}", "change_id.short()") == "":
