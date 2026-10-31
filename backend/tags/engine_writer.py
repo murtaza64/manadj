@@ -1,6 +1,9 @@
 """Write manadj tags to Engine DJ as flat playlist structure, and energy as
 star ratings."""
 
+import os
+from pathlib import Path
+
 from sqlalchemy.orm import Session
 
 from enginedj.connection import EngineDJDatabase
@@ -116,7 +119,10 @@ class EngineTagWriter:
         ).all()
         with self.engine_db.session_m_write() as edj_session:
             edj_tracks = edj_session.query(EDJTrack).all()
-            edj_index = TrackIndex.build(edj_tracks, edj_path)
+            library_root = Path(self.engine_db.database_path).parent
+            edj_index = TrackIndex.build(
+                edj_tracks, lambda t: os.path.abspath(library_root / t.path) if t.path else None
+            )
             scoped_pairs = [
                 (track, edj_index.match(track.filename)) for track in scoped_tracks
             ]

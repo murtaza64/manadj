@@ -30,15 +30,27 @@ function TargetPlan({ preview, loading, error }: {
   const membership = preview.playlist_exists
     ? (changes.length > 0 ? `replaces playlist: ${changes.join(', ')}` : 'playlist already matches')
     : `creates playlist (${preview.tracks_matched} tracks)`;
-  const unmatched = preview.unmatched ?? [];
+  const additions = preview.tracks_to_create ?? [];
+  const errors = preview.track_errors ?? {};
+  const unavailable = [...new Set([...(preview.unmatched ?? []), ...Object.keys(errors)])];
   return (
     <span className="target-plan">
       {membership}
       {' · '}
-      overwrites data for {preview.tracks_matched} track{preview.tracks_matched === 1 ? '' : 's'}
-      {unmatched.length > 0 && (
-        <span className="plan-unmatched" title={unmatched.join('\n')}>
-          {' · '}{unmatched.length} unmatched
+      writes performance data for {preview.tracks_matched} usable track{preview.tracks_matched === 1 ? '' : 's'}
+      {additions.length > 0 && (
+        <span title={additions.join('\n')}>
+          {' · '}adds {additions.length} destination library record{additions.length === 1 ? '' : 's'}
+        </span>
+      )}
+      {unavailable.length > 0 && (
+        <span className="plan-unmatched">
+          {' · '}{unavailable.length} unavailable / failed
+          <ul>
+            {unavailable.map(filename => (
+              <li key={filename}>{filename}: {errors[filename] || 'Audio unavailable or track could not be prepared'}</li>
+            ))}
+          </ul>
         </span>
       )}
     </span>
@@ -85,8 +97,14 @@ export function PlaylistFullExportModal({ playlistName, onClose }: PlaylistFullE
         </header>
 
         <p className="playlist-export-warning">
-          Replaces playlist order, hot cues, beatgrid, key, Main cue, tags, and energy for
-          this playlist's tracks. Quit each selected destination before exporting.
+          Adds missing destination library records from available audio and replaces playlist order.
+          Overwrites hot cues, Main cue, tags, and available beatgrid, key, and energy data.
+          Empty hot cues and Main cue clear destination values; missing beatgrid or key leaves
+          destination values unchanged. Missing energy clears Rekordbox color but leaves Engine DJ
+          energy unchanged. Engine DJ cue/grid writes require analyzed sample-rate data.
+          New Rekordbox records have no analysis files; beatgrid export requires analysis first
+          and reports a failure without undoing the added library record.
+          Quit each selected destination before exporting.
         </p>
 
         <fieldset className="playlist-export-targets">
@@ -131,6 +149,7 @@ export function PlaylistFullExportModal({ playlistName, onClose }: PlaylistFullE
                   {result.target === 'rekordbox' ? 'Rekordbox' : 'Engine DJ'}: {' '}
                   {result.tracks_exported} exported, {result.tracks_failed} failed
                   {result.tracks_skipped > 0 && `, ${result.tracks_skipped} skipped`}
+                  {!!result.tracks_added?.length && `, ${result.tracks_added.length} library records added`}
                 </h3>
                 {result.error && <p>{result.error}</p>}
                 {result.tracks.filter(track => track.status !== 'exported').map(track => (

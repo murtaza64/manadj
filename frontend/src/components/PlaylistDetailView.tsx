@@ -12,6 +12,37 @@ interface PlaylistDetailViewProps {
   onBack: () => void;
 }
 
+function SyncTargetResult({ result }: { result: SyncResult }) {
+  const errors = result.track_errors ?? {};
+  const failures = [...new Set([...result.tracks_unmatched, ...Object.keys(errors)])];
+  const added = result.tracks_added ?? [];
+  const failed = !result.success || !!result.error;
+  return (
+    <div className={`sync-status ${failed ? 'sync-status-error' : failures.length ? 'sync-status-warning' : 'sync-status-success'}`}>
+      <div>
+        {result.target}: {failed ? 'sync failed' : failures.length ? 'partially synced' : 'synced'}
+        {' · '}{result.tracks_synced} tracks synced
+        {!failed && (result.created ? ' (created)' : ' (updated)')}
+      </div>
+      {result.error && <p>{result.error}</p>}
+      {added.length > 0 && (
+        <div>
+          Added {added.length} destination library record{added.length === 1 ? '' : 's'}:
+          <ul>{added.map((filename, index) => <li key={`${filename}-${index}`}>{filename}</li>)}</ul>
+        </div>
+      )}
+      {failures.length > 0 && (
+        <div>
+          {failures.length} unavailable / failed:
+          <ul>{failures.map(filename => (
+            <li key={filename}>{filename}: {errors[filename] || 'Audio unavailable or track could not be prepared'}</li>
+          ))}</ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function PlaylistDetailView({ playlist, onBack }: PlaylistDetailViewProps) {
   const [syncResult, setSyncResult] = useState<SyncResult | SyncResult[] | null>(null);
   const [syncError, setSyncError] = useState<string | null>(null);
@@ -170,25 +201,10 @@ export function PlaylistDetailView({ playlist, onBack }: PlaylistDetailViewProps
         </div>
       )}
       {syncResult && !syncError && (
-        <div className="sync-status sync-status-success">
-          {Array.isArray(syncResult) ? (
-            <>
-              Synced to {syncResult.length} target(s).
-              {syncResult.map(r => (
-                <div key={r.target}>
-                  {r.target}: {r.tracks_synced} tracks synced
-                  {r.tracks_unmatched.length > 0 && ` (${r.tracks_unmatched.length} unmatched)`}
-                  {r.created ? ' (created)' : ' (updated)'}
-                </div>
-              ))}
-            </>
-          ) : (
-            <>
-              Synced to {syncResult.target}: {syncResult.tracks_synced} tracks
-              {syncResult.tracks_unmatched.length > 0 && ` (${syncResult.tracks_unmatched.length} unmatched)`}
-              {syncResult.created ? ' (created)' : ' (updated)'}
-            </>
-          )}
+        <div>
+          {(Array.isArray(syncResult) ? syncResult : [syncResult]).map(result => (
+            <SyncTargetResult key={result.target} result={result} />
+          ))}
         </div>
       )}
 

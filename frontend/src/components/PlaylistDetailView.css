@@ -120,6 +120,12 @@
   border-left: 3px solid var(--success);
 }
 
+.sync-status-warning {
+  background: var(--surface0);
+  color: var(--text);
+  border-left: 3px solid var(--warning);
+}
+
 .sync-status-success > div {
   font-size: var(--font-body);
   margin-top: var(--space-4);

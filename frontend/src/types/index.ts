@@ -230,7 +230,10 @@ export interface SyncResult {
   success: boolean;
   created: boolean;  // True if playlist was created, False if updated
   tracks_synced: number;
-  tracks_unmatched: string[];  // Filenames that couldn't be matched
+  tracks_unmatched: string[];  // Failed or unavailable filenames
+  tracks_to_add?: string[];  // Planned destination library records (dry run)
+  tracks_added?: string[];  // Destination library records actually created
+  track_errors?: Record<string, string>;
   error?: string | null;
 }
 
@@ -257,6 +260,7 @@ export interface PlaylistExportTargetReport {
   playlist_created: boolean;
   tracks_total: number;
   tracks_exported: number;
+  tracks_added?: string[];
   tracks_skipped: number;
   tracks_failed: number;
   tracks: PlaylistExportTrackReport[];
@@ -275,7 +279,9 @@ export interface PlaylistExportTargetPreview {
   playlist_exists?: boolean;
   tracks_total?: number;
   tracks_matched?: number;
-  tracks_to_add?: number;
+  tracks_to_add?: number;  // Playlist membership additions, not library records
+  tracks_to_create?: string[];  // Planned destination library records
+  track_errors?: Record<string, string>;
   tracks_to_remove?: number;
   tracks_moved?: number;
   unmatched?: string[];

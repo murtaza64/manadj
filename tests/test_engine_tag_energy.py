@@ -162,7 +162,7 @@ class TestEnergyRatingExport:
         assert not energy_diverged()
 
 
-def test_scoped_tags_leave_nonmember_assignments_untouched(db, make_track) -> None:
+def test_scoped_tags_leave_nonmember_assignments_untouched(db, make_track, tmp_path) -> None:
     outside = make_track(filename="/m/outside.mp3")
     inside = make_track(filename="/m/inside.mp3")
     category = TagCategory(name="Genre")
@@ -177,6 +177,7 @@ def test_scoped_tags_leave_nonmember_assignments_untouched(db, make_track) -> No
     ])
     db.commit()
     edb = InMemoryEngineDB()
+    edb.database_path = tmp_path / "Engine Library" / "Database2"
     make_edj_track(edb, "/m/outside.mp3")
     make_edj_track(edb, "/m/inside.mp3")
     writer = EngineTagWriter(db, edb)

@@ -78,6 +78,8 @@ it('previews the plan for each destination before exporting', async () => {
         tracks_to_remove: 1,
         tracks_moved: 4,
         unmatched: ['ghost.flac', 'lost.flac'],
+        tracks_to_create: ['new.flac', 'another.flac'],
+        track_errors: { 'ghost.flac': 'Audio file not found', 'lost.flac': 'Cannot read audio' },
       },
       {
         target: 'engine',
@@ -110,8 +112,41 @@ it('previews the plan for each destination before exporting', async () => {
 
   expect(api.playlistSync.previewExportPerformance).toHaveBeenCalledWith('Alien');
   expect(host.textContent).toContain('replaces playlist: adds 3, removes 1, moves 4');
-  expect(host.textContent).toContain('overwrites data for 33 tracks');
-  expect(host.textContent).toContain('2 unmatched');
+  expect(host.textContent).toContain('writes performance data for 33 usable tracks');
+  expect(host.textContent).toContain('adds 2 destination library records');
+  expect([...host.querySelectorAll('[title]')].some(element => element.getAttribute('title') === 'new.flac\nanother.flac')).toBe(true);
+  expect(host.textContent).toContain('2 unavailable / failed');
+  expect(host.textContent).toContain('ghost.flac: Audio file not found');
+  expect(host.textContent).toContain('lost.flac: Cannot read audio');
+  expect(host.textContent).not.toContain('unmatched');
+  expect(host.textContent).toContain('missing beatgrid or key leaves destination values unchanged');
+  expect(host.textContent).toContain('Empty hot cues and Main cue clear destination values');
   expect(host.textContent).toContain('creates playlist (35 tracks)');
+  act(() => root.unmount());
+});
+
+it('shows error-only preview failures and unavailable audio without error details', async () => {
+  vi.spyOn(api.playlistSync, 'previewExportPerformance').mockResolvedValue({
+    playlist_name: 'Alien',
+    previews: [{
+      target: 'engine', available: true, playlist_exists: true, tracks_matched: 0,
+      unmatched: ['missing.flac'], track_errors: { 'broken.flac': 'Record creation failed' },
+    }],
+  });
+  const host = document.createElement('div');
+  document.body.append(host);
+  const root = createRoot(host);
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  await act(async () => {
+    root.render(<QueryClientProvider client={client}>
+      <PlaylistFullExportModal playlistName="Alien" onClose={() => undefined} />
+    </QueryClientProvider>);
+    await new Promise(resolve => setTimeout(resolve, 0));
+  });
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
+  expect(host.textContent).toContain('2 unavailable / failed');
+  expect(host.textContent).toContain('missing.flac: Audio unavailable or track could not be prepared');
+  expect(host.textContent).toContain('broken.flac: Record creation failed');
+  expect([...host.querySelectorAll('.target-plan')].map(plan => plan.textContent).join('')).not.toContain('destination library records');
   act(() => root.unmount());
 });

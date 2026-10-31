@@ -1,6 +1,7 @@
 """Overwrite performance data on tracks already present in Engine DJ."""
 
 import math
+import os
 from itertools import pairwise
 from pathlib import Path
 
@@ -22,7 +23,6 @@ from enginedj.performance_blobs import (
     parse_track_data,
 )
 from enginedj.ratings import energy_to_rating
-from enginedj.sync import edj_path
 from enginedj.track_export import ensure_engine_closed, snapshot_database
 
 
@@ -91,7 +91,10 @@ class EnginePerfExporter:
         snapshot_database(self._database_path)
         with self._db.session_m_write() as session:
             tracks = session.query(Track).all()
-            track = TrackIndex.build(tracks, edj_path).match(filename)
+            library_root = self._database_path.parent
+            track = TrackIndex.build(
+                tracks, lambda t: os.path.abspath(library_root / t.path) if t.path else None
+            ).match(filename)
             if track is None:
                 raise TrackNotInEngineError(f"{Path(filename).name}: not found in Engine DJ")
             perf = session.get(PerformanceData, track.id)
@@ -168,5 +171,4 @@ class EnginePerfExporter:
             else:
                 track.rating = energy_to_rating(energy)
                 result["energy"] = "exported"
-            track.isAnalyzed = True
             return result
