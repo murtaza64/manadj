@@ -19,6 +19,7 @@ from .spotify import router as spotify_router
 from .logging_config import setup_logging
 from .feedback import FeedbackService, Workspace
 from .routers.feedback import router as feedback_router
+from .routers.release_notes import router as release_notes_router
 
 if TYPE_CHECKING:
     from .config import Config
@@ -97,6 +98,7 @@ app.include_router(device_listener_router.router, prefix="/api/device-listener",
 app.include_router(visualizer_ga.router, prefix="/api/ga", tags=["visualizer-ga"])
 app.include_router(settings.router, prefix="/api/settings", tags=["settings"])
 app.include_router(feedback_router)
+app.include_router(release_notes_router)
 app.include_router(app_config.router, prefix="/api/config", tags=["app-config"])
 app.include_router(soulseek_router.router, prefix="/api/soulseek", tags=["soulseek"])
 app.include_router(soundcloud_connect_router.router, prefix="/api/soundcloud", tags=["soundcloud"])

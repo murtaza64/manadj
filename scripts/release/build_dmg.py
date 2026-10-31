@@ -118,7 +118,10 @@ def build_frontend(version: str) -> None:
     if not (fe / "node_modules" / ".package-lock.json").exists():
         run(["npm", "install", "--no-audit", "--no-fund"], cwd=fe)
     # Never bake an API URL; stamp the (possibly prerelease) version (#298).
-    env = {**os.environ, "VITE_API_URL": "", "MANADJ_APP_VERSION": version}
+    from metadata import prepare_metadata
+    metadata = prepare_metadata(ROOT, version, BUILD / "metadata")
+    env = {**os.environ, "VITE_API_URL": "", "MANADJ_APP_VERSION": version,
+           "VITE_MANADJ_RELEASE_ID": metadata["release_id"]}
     # The `prebuild` hook runs `uv run --project ..`, i.e. a full
     # project sync — which fails on Windows (essentia, #302) and is wasted
     # work here. The generator only needs stdlib backend/key.py: run it
@@ -127,6 +130,7 @@ def build_frontend(version: str) -> None:
     run(["uv", "run", "--no-project", "python", "scripts/export/gen_key_table.py"], cwd=ROOT)
     run(["uv", "run", "site/build.py", "--app-help"], cwd=ROOT)
     run(["npm", "run", "build", "--ignore-scripts"], cwd=fe, env=env)
+    (fe / "dist" / "build-info.json").write_text(json.dumps(metadata) + "\n", encoding="utf-8")
 
 
 # --- python runtime -------------------------------------------------------------
@@ -324,6 +328,8 @@ def assemble_app(python_runtime: Path, ffmpeg_dir: Path, icns: Path, version: st
     if not (dist / "index.html").is_file():
         sys.exit("frontend/dist/index.html missing — frontend build failed?")
     copytree_pyclean(dist, backend_root / "frontend" / "dist")
+    from metadata import stage_metadata
+    stage_metadata(BUILD / "metadata", dist, backend_root, version)
 
     # Runtime, ffmpeg, branding.
     run(["ditto", python_runtime, resources / "python"])
