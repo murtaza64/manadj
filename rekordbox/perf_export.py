@@ -193,6 +193,7 @@ class RekordboxPerfExporter:
             "skipped_slots": sorted(plan.skipped_slots),
         }
         if plan.empty:
+            self._sync_cue_analysis(content)
             return summary
 
         snapshot_library(self._db_dir)
@@ -227,6 +228,7 @@ class RekordboxPerfExporter:
                     self._new_cue_row(content, 0, add.rb_ms, label, color_idx)
                 )
         self._db.commit(autoinc=True)
+        self._sync_cue_analysis(content)
         logger.info(
             "exported hotcues -> rekordbox %s: %s", content.FolderPath, summary
         )
@@ -277,14 +279,28 @@ class RekordboxPerfExporter:
         """
         from pyrekordbox.db6.tables import DjmdCue
 
-        from rekordbox.cue_mapping import MEMORY_KIND
+        from rekordbox.cue_mapping import HOT_CUE_KINDS, MEMORY_KIND
         from rekordbox.decode_offset import manadj_seconds_to_rb_ms
 
         ensure_rekordbox_closed()
-        if seconds is None:
-            return False
         content = self._content_for(filename)
-        rb_ms = manadj_seconds_to_rb_ms(seconds, content.FolderPath)
+        rb_ms = manadj_seconds_to_rb_ms(seconds, content.FolderPath) if seconds is not None else None
+        rows = self._db.session.query(DjmdCue).filter(
+            DjmdCue.ContentID == content.ID, DjmdCue.rb_local_deleted == 0
+        ).all()
+        hot_times = {row.InMsec for row in rows if row.Kind in HOT_CUE_KINDS}
+        stale = [row for row in rows if (
+            row.Kind == MEMORY_KIND and row.Comment == "Main cue"
+            and row.InMsec not in hot_times and row.InMsec != rb_ms
+        )]
+        if stale:
+            snapshot_library(self._db_dir)
+            for row in stale:
+                row.rb_local_deleted = 1
+            self._db.commit(autoinc=True)
+        if seconds is None:
+            self._sync_cue_analysis(content)
+            return False
         existing = (
             self._db.session.query(DjmdCue)
             .filter(
@@ -296,13 +312,42 @@ class RekordboxPerfExporter:
             .first()
         )
         if existing is not None:
+            self._sync_cue_analysis(content)
             return False
         snapshot_library(self._db_dir)
         self._db.session.add(
             self._new_cue_row(content, MEMORY_KIND, rb_ms, "Main cue", None)
         )
         self._db.commit(autoinc=True)
+        self._sync_cue_analysis(content)
         return True
+
+    def _sync_cue_analysis(self, content) -> None:
+        """Cue DB rows alone are not sufficient for Rekordbox downstream export."""
+        from pyrekordbox.db6.tables import DjmdCue
+
+        from rekordbox.anlz_cues import CueAnalysisSyncError, cues_from_rows, sync_cue_files
+
+        ensure_rekordbox_closed()
+        try:
+            dat_path = self._dat_path(content)
+            share = (self._db_dir / "share").resolve()
+            if not dat_path.resolve().is_relative_to(share):
+                raise ValueError("AnalysisDataPath escapes the Rekordbox share directory")
+            if not dat_path.with_suffix(".EXT").resolve().is_relative_to(share):
+                raise ValueError("Native EXT path escapes the Rekordbox share directory")
+            rows = self._db.session.query(DjmdCue).filter(
+                DjmdCue.ContentID == content.ID, DjmdCue.rb_local_deleted == 0
+            ).all()
+            cues = cues_from_rows(rows)
+            snapshot_library(self._db_dir)
+            sync_cue_files(dat_path, cues)
+        except CueAnalysisSyncError:
+            raise
+        except Exception as error:
+            raise CueAnalysisSyncError(
+                f"Cue DB committed; native DAT/EXT not synchronized: {error}"
+            ) from error
 
     # -- beatgrid --------------------------------------------------------
 

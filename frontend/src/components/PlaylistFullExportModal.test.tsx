@@ -121,6 +121,8 @@ it('previews the plan for each destination before exporting', async () => {
   expect(host.textContent).not.toContain('unmatched');
   expect(host.textContent).toContain('missing beatgrid or key leaves destination values unchanged');
   expect(host.textContent).toContain('Empty hot cues and Main cue clear destination values');
+  expect(host.textContent).toContain('Rekordbox cues require existing native DAT/EXT analysis files for downstream readiness');
+  expect(host.textContent).toContain('reported as failed, not downstream-ready');
   expect(host.textContent).toContain('creates playlist (35 tracks)');
   act(() => root.unmount());
 });

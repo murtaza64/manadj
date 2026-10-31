@@ -71,6 +71,7 @@ def export_hotcues_endpoint(
     """Write the Library's hot cues onto the matching Rekordbox track,
     mirrored to hot + memory cues (issue 08 semantics)."""
     from rekordbox.perf_export import RekordboxRunningError, TrackNotInRekordboxError
+    from rekordbox.anlz_cues import CueAnalysisSyncError
 
     track = _track_or_404(db, request.track_id)
     cues = [(c.slot_number, c.time_seconds, c.label, c.color) for c in track.hotcues]
@@ -83,6 +84,8 @@ def export_hotcues_endpoint(
     except TrackNotInRekordboxError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except RekordboxRunningError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except CueAnalysisSyncError as e:
         raise HTTPException(status_code=409, detail=str(e))
 
 

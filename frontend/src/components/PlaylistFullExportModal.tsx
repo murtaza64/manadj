@@ -102,8 +102,9 @@ export function PlaylistFullExportModal({ playlistName, onClose }: PlaylistFullE
           Empty hot cues and Main cue clear destination values; missing beatgrid or key leaves
           destination values unchanged. Missing energy clears Rekordbox color but leaves Engine DJ
           energy unchanged. Engine DJ cue/grid writes require analyzed sample-rate data.
-          New Rekordbox records have no analysis files; beatgrid export requires analysis first
-          and reports a failure without undoing the added library record.
+          Rekordbox cues require existing native DAT/EXT analysis files for downstream readiness.
+          If analysis is missing or cannot be updated, cue database writes may be saved but are
+          reported as failed, not downstream-ready. New library records are retained.
           Quit each selected destination before exporting.
         </p>
 
