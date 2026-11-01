@@ -1,4 +1,5 @@
 import type { HarmonyLoopsWire } from '../follow/chordMatch';
+import { completePlaylistExportReceipt } from './playlistExportReceipt';
 import type {
   CaptureEvent as CaptureEventWire,
   DetectorParams as CaptureDetectorParams,
@@ -891,7 +892,7 @@ export const api = {
         throw new PlaylistExportRequestError('Connection lost. Outcome unknown; do not repeat the export blindly.', 'unknown');
       }
       const body = await res.json().catch(() => null);
-      if (res.ok && body?.results) return body;
+      if (res.ok && completePlaylistExportReceipt(body, plan)) return body;
       if (res.status >= 500 || res.ok) {
         throw new PlaylistExportRequestError('The server did not return a complete receipt. Outcome unknown; inspect the destination before repeating.', 'unknown');
       }

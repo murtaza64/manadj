@@ -73,6 +73,22 @@ with sync_playwright() as p:
     submit()
     expect(page.get_by_role('heading', name='Outcome unknown', exact=True)).to_be_visible()
     cases.append('lost receipt remains unknown')
+    # HTTP200 alone is not evidence that the reviewed export completed.
+    for label, receipt in [
+        ('empty', {'playlist_name': 'Night Shift', 'results': []}),
+        ('non-array', {'playlist_name': 'Night Shift', 'results': {'target': 'rekordbox'}}),
+        ('wrong-context', {'playlist_name': 'Another playlist', 'results': []}),
+    ]:
+        scenario('skips')
+        page.route('**/api/sync/export/playlists/execute?*',
+                   lambda route, _request, body=receipt: route.fulfill(status=200, json=body))
+        submit()
+        expect(page.get_by_role('heading', name='Outcome unknown', exact=True)).to_be_visible()
+        expect(page.get_by_text('The server did not return a complete receipt.', exact=False)).to_be_visible()
+        if label == 'empty':
+            screenshot('incomplete-receipt')
+        page.unroute('**/api/sync/export/playlists/execute?*')
+        cases.append(f'HTTP200 {label} receipt remains unknown')
     scenario('slow')
     submit()
     expect(page.get_by_role('heading', name='Writing to Rekordbox desktop…', exact=True)).to_be_visible()

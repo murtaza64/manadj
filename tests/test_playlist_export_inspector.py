@@ -1,5 +1,92 @@
 from backend.models import Playlist, PlaylistTrack, Track
 from backend.sync_status.models import HotCueValue, SurfaceTrackRef, TrackFields
+import pytest
+
+
+@pytest.mark.parametrize('readonly', [False, True])
+def test_production_factory_unchanged_closed_wal_can_execute(db, tmp_path, monkeypatch, readonly):
+    """Only generated SQLite files: observation creates/removes SHM/empty WAL."""
+    import sqlite3
+    from types import SimpleNamespace
+    from backend.playlist_export_inspector import build_playlist_export_inspector, StalePlan
+
+    destination = tmp_path / 'destination'
+    destination.mkdir()
+    database = destination / 'master.db'
+    with sqlite3.connect(database) as connection:
+        connection.execute('pragma journal_mode=wal')
+        connection.execute('create table fixture (value integer)')
+        connection.execute('insert into fixture values (1)')
+    connection.close()
+    track = Track(filename='/fixture/a.flac', title='A', key=1)
+    playlist = Playlist(name='Set')
+    db.add_all([track, playlist])
+    db.flush()
+    db.add(PlaylistTrack(playlist_id=playlist.id, track_id=track.id, position=0))
+    db.commit()
+    monkeypatch.setattr('backend.config.get_config', lambda: SimpleNamespace(
+        database=SimpleNamespace(rekordbox_path=str(destination))))
+
+    class Connection:
+        session = None  # Playlist reader is replaced below; no ORM target queries.
+
+        def __init__(self, path):
+            self.connection = sqlite3.connect(f'file:{path}/master.db?mode=ro' if readonly else database,
+                                              uri=readonly)
+            self.connection.execute('select * from fixture').fetchall()
+
+        def close(self):
+            self.connection.close()
+
+    class Reader:
+        fields = {'key'}
+
+        def __init__(self, connection):
+            pass
+
+        def list_tracks(self):
+            return [SurfaceTrackRef(track.filename, TrackFields(key=2))]
+
+    monkeypatch.setattr('rekordbox.connection.get_rekordbox_db', Connection)
+    monkeypatch.setattr('backend.sync_status.adapters.RekordboxSurfaceReader', Reader)
+    monkeypatch.setattr('backend.playlists.sync_manager.PlaylistSyncManager.load_all_playlists',
+                        lambda self: {'rekordbox': []})
+    writes = []
+    monkeypatch.setattr('backend.playlist_full_export.build_playlist_full_export_service',
+                        lambda *args, **kwargs: SimpleNamespace(export=lambda *args: writes.append(args) or {'ok': True}))
+    inspector = build_playlist_export_inspector(db)
+    plan = inspector.preview('Set', 'rekordbox', 'full')
+    assert inspector.preview('Set', 'rekordbox', 'full')['token'] == plan['token']
+    assert inspector.execute('Set', 'rekordbox', 'full', plan['token']) == {'ok': True}
+    assert writes == [('Set', ['rekordbox'])]
+
+    # A committed, uncheckpointed WAL must invalidate even unchanged reader values.
+    writer = sqlite3.connect(database)
+    try:
+        writer.execute('pragma wal_autocheckpoint=0')
+        before_write = inspector.preview('Set', 'rekordbox', 'full')['token']
+        writer.execute('update fixture set value=2')
+        writer.commit()
+        with pytest.raises(StalePlan):
+            inspector.execute('Set', 'rekordbox', 'full', before_write)
+    finally:
+        writer.close()
+    assert len(writes) == 1
+
+    before_database = inspector.preview('Set', 'rekordbox', 'full')['token']
+    with sqlite3.connect(database) as connection:
+        connection.execute('update fixture set value=3')
+    connection.close()  # Checkpointed main DB changes are still freshness-bound.
+    with pytest.raises(StalePlan):
+        inspector.execute('Set', 'rekordbox', 'full', before_database)
+    assert len(writes) == 1
+
+    # Native analysis is also freshness-bound, although not exposed by this reader.
+    before_native = inspector.preview('Set', 'rekordbox', 'full')['token']
+    (destination / 'ANLZ.DAT').write_bytes(b'generated fixture')
+    with pytest.raises(StalePlan):
+        inspector.execute('Set', 'rekordbox', 'full', before_native)
+    assert len(writes) == 1
 
 
 def test_plan_names_destructive_effects_and_unknowns_without_writing(db):

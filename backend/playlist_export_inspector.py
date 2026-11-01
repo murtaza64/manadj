@@ -228,8 +228,14 @@ def build_playlist_export_inspector(db: Session) -> PlaylistExportInspector:
             # a reader cannot decode (e.g. Rekordbox Main cue). No file writes.
             stats = []
             for file in sorted(path.rglob('*')):
-                if file.is_file() and ('.db' in file.name.lower() or file.suffix.upper() in {'.DAT', '.EXT', '.2EX'}):
+                name = file.name.lower()
+                # SHM is an observation-created coordination index, not data.
+                # An absent WAL and an empty WAL both contain no changes.
+                # Opening the last closed WAL DB can recreate both sidecars.
+                if file.is_file() and (name.endswith(('.db', '.db-wal')) or file.suffix.upper() in {'.DAT', '.EXT', '.2EX'}):
                     stat = file.stat()
+                    if name.endswith('.db-wal') and stat.st_size == 0:
+                        continue
                     stats.append((str(file.relative_to(path)), stat.st_size, stat.st_mtime_ns))
             return DestinationSnapshot(
                 str(path.resolve()), [t.path for t in matched[0].tracks] if matched else None,

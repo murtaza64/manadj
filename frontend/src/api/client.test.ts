@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { api, detailToMessage, PlaylistExportRequestError } from './client';
-import { exportPlanFixture } from '../test/playlistExportFixtures';
+import { exportPlanFixture, exportReportFixture } from '../test/playlistExportFixtures';
 
 
 describe('playlistSync', () => {
@@ -60,7 +60,10 @@ describe('playlistSync', () => {
   });
 
   it('submits exactly the reviewed target, scope and freshness token', async () => {
-    const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({ results: [] })));
+    const report = structuredClone(exportReportFixture);
+    report.playlist_name = 'A / B';
+    report.results[0].target = 'engine';
+    const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify(report)));
     await api.playlistSync.executeExportPlan({ ...exportPlanFixture, playlist_name: 'A / B', target: 'engine', scope: 'order' });
     expect(fetch).toHaveBeenCalledWith('http://localhost:8127/api/sync/export/playlists/execute?playlist=A%20%2F%20B', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -75,6 +78,68 @@ describe('playlistSync', () => {
     await expect(api.playlistSync.executeExportPlan(exportPlanFixture)).rejects.toMatchObject({ code: 'unknown' });
     fetch.mockRejectedValue(new TypeError('offline'));
     await expect(api.playlistSync.executeExportPlan(exportPlanFixture)).rejects.toBeInstanceOf(PlaylistExportRequestError);
+  });
+
+  it.each([
+    ['empty', () => ({ playlist_name: 'Night Shift', results: [] })],
+    ['non-array', () => ({ playlist_name: 'Night Shift', results: {} })],
+    ['wrong playlist', () => ({ ...exportReportFixture, playlist_name: 'Other' })],
+    ['wrong target', () => {
+      const report = structuredClone(exportReportFixture); report.results[0].target = 'engine'; return report;
+    }],
+    ['missing track', () => {
+      const report = structuredClone(exportReportFixture); report.results[0].tracks.pop(); return report;
+    }],
+    ['duplicate track', () => {
+      const report = structuredClone(exportReportFixture); report.results[0].tracks[2] = report.results[0].tracks[0]; return report;
+    }],
+    ['missing field', () => {
+      const report = structuredClone(exportReportFixture); delete report.results[0].tracks[0].fields.key; return report;
+    }],
+    ['malformed field', () => {
+      const report = structuredClone(exportReportFixture); return { ...report, results: [{ ...report.results[0], tracks: [{ ...report.results[0].tracks[0], fields: { playlist: 12 } }] }] };
+    }],
+    ['wrong counters', () => {
+      const report = structuredClone(exportReportFixture); report.results[0].tracks_total = 4; return report;
+    }],
+    ['invalid track status', () => {
+      const report = structuredClone(exportReportFixture); return { ...report, results: [{ ...report.results[0], tracks: [{ ...report.results[0].tracks[0], status: 'done' }] }] };
+    }],
+    ['missing membership outcome', () => {
+      const report = structuredClone(exportReportFixture); delete report.results[0].tracks[0].fields.playlist; return report;
+    }],
+  ])('treats %s HTTP200 receipts as unknown, not success or safe rejection', async (_name, body) => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify(body())));
+    await expect(api.playlistSync.executeExportPlan(exportPlanFixture)).rejects.toMatchObject({ code: 'unknown' });
+  });
+
+  it('accepts complete per-field receipts including skips and failures', async () => {
+    const report = structuredClone(exportReportFixture);
+    report.results[0].status = 'partial';
+    report.results[0].tracks[0].status = 'failed';
+    report.results[0].tracks[0].fields.key = 'failed: generated fixture';
+    report.results[0].tracks_failed = 1;
+    report.results[0].tracks_exported = 2;
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify(report)));
+    await expect(api.playlistSync.executeExportPlan(exportPlanFixture)).resolves.toEqual(report);
+  });
+
+  it('accepts an explicitly aborted track without inventing later field outcomes', async () => {
+    const report = structuredClone(exportReportFixture);
+    report.results[0].status = 'partial';
+    report.results[0].tracks[0] = { ...report.results[0].tracks[0], status: 'failed', fields: { playlist: 'exported' }, reason: 'Writer aborted before remaining fields' };
+    report.results[0].tracks_failed = 1;
+    report.results[0].tracks_exported = 2;
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify(report)));
+    await expect(api.playlistSync.executeExportPlan(exportPlanFixture)).resolves.toEqual(report);
+  });
+
+  it('accepts a complete empty-playlist receipt, but not an empty result list', async () => {
+    const plan = { ...exportPlanFixture, tracks: [] };
+    const report = structuredClone(exportReportFixture);
+    Object.assign(report.results[0], { tracks: [], tracks_total: 0, tracks_exported: 0 });
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify(report)));
+    await expect(api.playlistSync.executeExportPlan(plan)).resolves.toEqual(report);
   });
 });
 
