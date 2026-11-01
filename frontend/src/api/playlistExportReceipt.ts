@@ -16,7 +16,7 @@ export function completePlaylistExportReceipt(value: unknown, plan: PlaylistExpo
       || !Array.isArray(value.results) || value.results.length !== 1) return false;
   const result: unknown = value.results[0];
   if (!record(result) || result.target !== plan.target
-      || !['exported', 'partial', 'failed'].includes(String(result.status))
+      || typeof result.status !== 'string' || !['exported', 'partial', 'failed'].includes(result.status)
       || typeof result.playlist_created !== 'boolean'
       || (result.error != null && typeof result.error !== 'string')
       || !Array.isArray(result.tracks) || result.tracks.length !== plan.tracks.length) return false;
@@ -28,7 +28,7 @@ export function completePlaylistExportReceipt(value: unknown, plan: PlaylistExpo
   const counts = { exported: 0, skipped: 0, failed: 0 };
   for (const track of result.tracks as unknown[]) {
     if (!record(track) || !Number.isSafeInteger(track.track_id)
-        || !['exported', 'skipped', 'failed'].includes(String(track.status))
+        || typeof track.status !== 'string' || !['exported', 'skipped', 'failed'].includes(track.status)
         || (track.title !== null && typeof track.title !== 'string')
         || (track.reason !== null && typeof track.reason !== 'string')
         || !record(track.fields) || !Object.values(track.fields).every(outcome)) return false;

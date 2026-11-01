@@ -124,6 +124,14 @@ describe('playlistSync', () => {
     await expect(api.playlistSync.executeExportPlan(exportPlanFixture)).resolves.toEqual(report);
   });
 
+  it.each(['result', 'track'])('rejects an array-valued %s status as an unknown outcome', async where => {
+    const report = structuredClone(exportReportFixture);
+    const node = where === 'result' ? report.results[0] : report.results[0].tracks[0];
+    Object.assign(node, { status: [node.status] });
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify(report)));
+    await expect(api.playlistSync.executeExportPlan(exportPlanFixture)).rejects.toMatchObject({ code: 'unknown' });
+  });
+
   it('accepts an explicitly aborted track without inventing later field outcomes', async () => {
     const report = structuredClone(exportReportFixture);
     report.results[0].status = 'partial';

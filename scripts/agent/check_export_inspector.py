@@ -89,6 +89,21 @@ with sync_playwright() as p:
             screenshot('incomplete-receipt')
         page.unroute('**/api/sync/export/playlists/execute?*')
         cases.append(f'HTTP200 {label} receipt remains unknown')
+    for where in ('result', 'track'):
+        scenario('skips')
+
+        def malformed_status(route):
+            response = route.fetch()
+            receipt = response.json()
+            node = receipt['results'][0] if where == 'result' else receipt['results'][0]['tracks'][0]
+            node['status'] = [node['status']]
+            route.fulfill(response=response, json=receipt)
+
+        page.route('**/api/sync/export/playlists/execute?*', malformed_status)
+        submit()
+        expect(page.get_by_role('heading', name='Outcome unknown', exact=True)).to_be_visible()
+        page.unroute('**/api/sync/export/playlists/execute?*')
+        cases.append(f'HTTP200 array {where} status remains unknown')
     scenario('slow')
     submit()
     expect(page.get_by_role('heading', name='Writing to Rekordbox desktop…', exact=True)).to_be_visible()
