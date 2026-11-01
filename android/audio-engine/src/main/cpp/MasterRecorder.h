@@ -124,6 +124,16 @@ private:
         }
         return true;
     }
+    bool syncDirectory(const std::string& path) {
+        // Worker only. Propagate errors from supported Android/POSIX
+        // operations rather than reporting Complete without the barrier.
+        const int fd = ::open(path.c_str(), O_RDONLY | O_DIRECTORY);
+        if (fd < 0) { fail(Storage); return false; }
+        bool ok = ::fsync(fd) == 0;
+        if (::close(fd) != 0) ok = false;
+        if (!ok) fail(Storage);
+        return ok;
+    }
     std::array<uint8_t, 44> header(uint32_t frames) const {
         std::array<uint8_t, 44> h{};
         auto put = [&](int at, uint32_t n, int count) { for (int i = 0; i < count; ++i) h[at + i] = static_cast<uint8_t>(n >> (i * 8)); };
@@ -168,13 +178,16 @@ private:
             if (::lseek(fd, 0, SEEK_SET) < 0 || !writeAll(fd, h.data(), h.size()) || ::fsync(fd) != 0) fail(Storage);
         }
         if (::close(fd) != 0) fail(Storage);
-        if (error() == None && ::rename(partial.c_str(), path.c_str()) != 0) fail(Storage);
         if (error() == None) {
             const auto slash = path.find_last_of('/');
-            const std::string parent = slash == std::string::npos ? "." : path.substr(0, slash);
-            const int dir = ::open(parent.c_str(), O_RDONLY | O_DIRECTORY);
-            if (dir < 0) fail(Storage);
-            else { if (::fsync(dir) != 0) fail(Storage); ::close(dir); }
+            const std::string parent = slash == std::string::npos ? "." : (slash == 0 ? "/" : path.substr(0, slash));
+            // PlaybackService may just have mkdir'd master-recordings.
+            // Sync filesDir's entry for it BEFORE publishing the final WAV;
+            // syncing the leaf alone cannot persist that creation edge.
+            if (syncDirectory(parent + "/..")) {
+                if (::rename(partial.c_str(), path.c_str()) != 0) fail(Storage);
+                else syncDirectory(parent);
+            }
         }
         // A failed post-rename directory sync is not shareable success.
         if (error() != None && ::access(path.c_str(), F_OK) == 0) ::rename(path.c_str(), partial.c_str());
