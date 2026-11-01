@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { api, detailToMessage } from './client';
+import { api, detailToMessage, PlaylistExportRequestError } from './client';
+import { exportPlanFixture } from '../test/playlistExportFixtures';
 
 
 describe('playlistSync', () => {
@@ -56,6 +57,24 @@ describe('playlistSync', () => {
       'http://localhost:8127/api/sync/playlists/sync?playlist=scb%2Fhalloween',
       expect.objectContaining({ method: 'POST' }),
     );
+  });
+
+  it('submits exactly the reviewed target, scope and freshness token', async () => {
+    const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({ results: [] })));
+    await api.playlistSync.executeExportPlan({ ...exportPlanFixture, playlist_name: 'A / B', target: 'engine', scope: 'order' });
+    expect(fetch).toHaveBeenCalledWith('http://localhost:8127/api/sync/export/playlists/execute?playlist=A%20%2F%20B', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ target: 'engine', scope: 'order', token: 'fixture-plan-token' }),
+    });
+  });
+
+  it('distinguishes revalidation rejection from an unknown write outcome', async () => {
+    const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({ detail: { code: 'stale_plan', message: 'Changed; recheck' } }), { status: 409 }));
+    await expect(api.playlistSync.executeExportPlan(exportPlanFixture)).rejects.toMatchObject({ code: 'stale_plan', message: 'Changed; recheck' });
+    fetch.mockResolvedValue(new Response('server disconnected', { status: 502 }));
+    await expect(api.playlistSync.executeExportPlan(exportPlanFixture)).rejects.toMatchObject({ code: 'unknown' });
+    fetch.mockRejectedValue(new TypeError('offline'));
+    await expect(api.playlistSync.executeExportPlan(exportPlanFixture)).rejects.toBeInstanceOf(PlaylistExportRequestError);
   });
 });
 

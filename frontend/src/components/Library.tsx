@@ -69,8 +69,7 @@ import {
 import { SessionTimelinePane } from '../sessions/SessionTimelinePane';
 import { SessionsListView } from '../sessions/SessionsListView';
 import { NAVIGATE_SET_EVENT } from '../sets/navigateToSet';
-import { PlaylistFullExportModal } from './PlaylistFullExportModal';
-import { useExportEnabled } from '../settings/useAppConfig';
+import { PlaylistExportEntry } from './PlaylistExportInspector';
 import { PlaylistStatusBadge } from './PlaylistStatusBadge';
 import { playlistStatus } from './playlistStatus';
 import { trackMatchesFilters } from './playlistFilter';
@@ -166,10 +165,6 @@ export default function Library({
   const [selectedPlaylistId, setSelectedPlaylistId] = useState<number | null>(
     () => browseSession().playlistId
   );
-  const [playlistExportOpen, setPlaylistExportOpen] = useState(false);
-  // Export gate (ADR 0043): the playlist Sync/Export modal only writes
-  // external libraries, so it hides until the Settings toggle is on.
-  const exportEnabled = useExportEnabled();
   const [selectedSetId, setSelectedSetId] = useState<number | null>(() => getSelectedSetId());
   const [selectedSessionUuid, setSelectedSessionUuid] = useState<string | null>(() =>
     getSelectedSessionUuid()
@@ -1243,17 +1238,7 @@ export default function Library({
                 {unifiedPlaylist && (
                   <PlaylistStatusBadge status={playlistStatus(unifiedPlaylist)} />
                 )}
-                {exportEnabled && (
-                  <button
-                    className="playlist-export-submit"
-                    onClick={() => setPlaylistExportOpen(true)}
-                    disabled={!playlistData?.name}
-                    aria-label="Open playlist sync and export"
-                    style={{ padding: '2px 10px' }}
-                  >
-                    Sync / Export
-                  </button>
-                )}
+                <PlaylistExportEntry playlistName={playlistData?.name} />
                 {!browseOnly && (
                   <button
                     onClick={() => setIsSplitViewOpen((v) => !v)}
@@ -1504,12 +1489,6 @@ export default function Library({
 
       {rowMenu && (
         <ContextMenu x={rowMenu.x} y={rowMenu.y} items={rowMenuItems} onClose={closeRowMenu} />
-      )}
-      {playlistExportOpen && playlistData?.name && (
-        <PlaylistFullExportModal
-          playlistName={playlistData.name}
-          onClose={() => setPlaylistExportOpen(false)}
-        />
       )}
     </div>
     </BrowseActiveContext.Provider>

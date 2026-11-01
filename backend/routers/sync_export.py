@@ -232,3 +232,42 @@ def preview_playlist_performance_endpoint(
         return previewer(playlist, ["rekordbox", "engine"])
     except LookupError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
+
+
+def get_playlist_export_inspector(db: Session = Depends(get_db)):
+    from backend.playlist_export_inspector import build_playlist_export_inspector
+    return build_playlist_export_inspector(db)
+
+
+class InspectorExportRequest(BaseModel):
+    target: Literal['rekordbox', 'engine']
+    scope: Literal['full', 'order']
+    token: str
+
+
+@router.get('/playlists/plan')
+def playlist_export_plan(
+    playlist: str = Query(min_length=1),
+    target: Literal['rekordbox', 'engine'] = Query(),
+    scope: Literal['full', 'order'] = Query(),
+    inspector=Depends(get_playlist_export_inspector),
+):
+    from backend.playlist_export_inspector import PlanUnavailable
+    try:
+        return inspector.preview(playlist, target, scope)
+    except PlanUnavailable as error:
+        raise HTTPException(status_code=409, detail={'code': 'plan_unavailable', 'message': str(error)}) from error
+
+
+@router.post('/playlists/execute', dependencies=[Depends(require_export_enabled)])
+def execute_playlist_export_plan(
+    request: InspectorExportRequest,
+    playlist: str = Query(min_length=1),
+    inspector=Depends(get_playlist_export_inspector),
+):
+    from backend.playlist_export_inspector import PlanUnavailable, StalePlan, ExportInProgress
+    try:
+        return inspector.execute(playlist, request.target, request.scope, request.token)
+    except (StalePlan, ExportInProgress, PlanUnavailable) as error:
+        code = 'stale_plan' if isinstance(error, StalePlan) else 'export_in_progress' if isinstance(error, ExportInProgress) else 'plan_unavailable'
+        raise HTTPException(status_code=409, detail={'code': code, 'message': str(error)}) from error

@@ -163,6 +163,11 @@ export function detailToMessage(detail: unknown, fallback: string): string {
   }
 }
 
+export class PlaylistExportRequestError extends Error {
+  readonly code: string;
+  constructor(message: string, code: string) { super(message); this.code = code; }
+}
+
 export const api = {
   tasks: {
     summary: async (): Promise<TaskSummary> => {
@@ -863,6 +868,34 @@ export const api = {
         throw new Error(detailToMessage(detail, 'Failed to preview playlist export'));
       }
       return res.json();
+    },
+
+    previewExportPlan: async (playlistName: string, target: import('../types').PlaylistExportTarget, scope: 'full' | 'order'): Promise<import('../types').PlaylistExportPlan> => {
+      const params = new URLSearchParams({ playlist: playlistName, target, scope });
+      const res = await fetch(`${API_BASE}/sync/export/playlists/plan?${params}`);
+      if (!res.ok) {
+        const detail = (await res.json().catch(() => null))?.detail;
+        throw new Error(detailToMessage(detail, 'Could not load export plan'));
+      }
+      return res.json();
+    },
+
+    executeExportPlan: async (plan: import('../types').PlaylistExportPlan): Promise<PlaylistFullExportReport> => {
+      let res: Response;
+      try {
+        res = await fetch(`${API_BASE}/sync/export/playlists/execute?playlist=${encodeURIComponent(plan.playlist_name)}`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ target: plan.target, scope: plan.scope, token: plan.token }),
+        });
+      } catch {
+        throw new PlaylistExportRequestError('Connection lost. Outcome unknown; do not repeat the export blindly.', 'unknown');
+      }
+      const body = await res.json().catch(() => null);
+      if (res.ok && body?.results) return body;
+      if (res.status >= 500 || res.ok) {
+        throw new PlaylistExportRequestError('The server did not return a complete receipt. Outcome unknown; inspect the destination before repeating.', 'unknown');
+      }
+      throw new PlaylistExportRequestError(detailToMessage(body?.detail, 'Export was not started'), body?.detail?.code ?? 'rejected');
     },
   },
 

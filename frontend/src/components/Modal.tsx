@@ -17,6 +17,8 @@ export interface ModalProps {
   onClose: () => void;
   /** Title bar content; omitting it omits the whole bar (and its ×). */
   title?: ReactNode;
+  closeDisabled?: boolean;
+  labelledBy?: string;
   /** Extra class(es) on the panel for content-specific sizing/layout. */
   className?: string;
   /** Anchored dialect: center the panel on this viewport point. */
@@ -45,6 +47,8 @@ function clampAnchor(
 export default function Modal({
   onClose,
   title,
+  closeDisabled = false,
+  labelledBy,
   className,
   anchor,
   anchorSize,
@@ -57,12 +61,12 @@ export default function Modal({
     const onEsc = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.stopPropagation();
-        onClose();
+          if (!closeDisabled) onClose();
       }
     };
     document.addEventListener('keydown', onEsc, { capture: true });
     return () => document.removeEventListener('keydown', onEsc, { capture: true });
-  }, [onClose]);
+  }, [onClose, closeDisabled]);
 
   const pos = anchor
     ? clampAnchor(anchor, anchorSize ?? { width: 400, height: 400 })
@@ -71,7 +75,7 @@ export default function Modal({
   return (
     <div
       className={`modal-overlay${pos ? ' modal-overlay-anchored' : ''}`}
-      onMouseDown={onClose}
+      onMouseDown={() => { if (!closeDisabled) onClose(); }}
       style={
         pos
           ? ({
@@ -84,6 +88,7 @@ export default function Modal({
       <div
         role="dialog"
         aria-modal="true"
+        aria-labelledby={labelledBy}
         className={`modal-panel${className ? ` ${className}` : ''}`}
         onMouseDown={(e) => e.stopPropagation()}
         style={
@@ -104,6 +109,7 @@ export default function Modal({
               type="button"
               className="modal-x"
               onClick={onClose}
+              disabled={closeDisabled}
               aria-label="Close"
             >
               ×

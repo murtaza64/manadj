@@ -3,8 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { UnifiedPlaylist, Track, SyncResult } from '../types';
 import { formatKeyDisplay } from '../utils/keyUtils';
-import { PlaylistFullExportModal } from './PlaylistFullExportModal';
-import { useExportEnabled } from '../settings/useAppConfig';
+import { PlaylistExportEntry } from './PlaylistExportInspector';
 import './PlaylistDetailView.css';
 
 interface PlaylistDetailViewProps {
@@ -15,11 +14,7 @@ interface PlaylistDetailViewProps {
 export function PlaylistDetailView({ playlist, onBack }: PlaylistDetailViewProps) {
   const [syncResult, setSyncResult] = useState<SyncResult | SyncResult[] | null>(null);
   const [syncError, setSyncError] = useState<string | null>(null);
-  const [exportOpen, setExportOpen] = useState(false);
   const queryClient = useQueryClient();
-  // Export gate (ADR 0043): with export off, syncing only imports INTO
-  // manadj (target pinned to 'manadj'); external-write verbs hide.
-  const exportEnabled = useExportEnabled();
   // Collect all manadj track IDs
   const manadjTrackIds = (playlist.manadj || [])
     .map(entry => entry.track_id)
@@ -63,8 +58,8 @@ export function PlaylistDetailView({ playlist, onBack }: PlaylistDetailViewProps
     mutationFn: async ({ source, ignoreMissing }: { source: string, ignoreMissing: boolean }) => {
       return api.playlistSync.sync(playlist.name, {
         source,
-        // All targets when export is on; import-only into manadj otherwise.
-        target: exportEnabled ? null : 'manadj',
+        // Import is always into Library, never an implicit external fan-out.
+        target: 'manadj',
         ignore_missing_tracks: ignoreMissing,
         dry_run: false,
       });
@@ -93,7 +88,7 @@ export function PlaylistDetailView({ playlist, onBack }: PlaylistDetailViewProps
       syncMutation.mutate({ source, ignoreMissing: false });
     } else if (hasUnmatched && syncResult) {
       // Second attempt - user confirmed, ignore missing
-      if (confirm('Some tracks could not be matched. Proceed with partial sync?')) {
+      if (confirm('Import only matched playlist entries into Library and omit unmatched entries?')) {
         syncMutation.mutate({ source, ignoreMissing: true });
       }
     } else {
@@ -118,16 +113,7 @@ export function PlaylistDetailView({ playlist, onBack }: PlaylistDetailViewProps
         </div>
         <div className="playlist-detail-actions">
           <div className="sync-buttons">
-            <span className="sync-label">{exportEnabled ? 'Sync from:' : 'Import from:'}</span>
-            {hasManadj && exportEnabled && (
-              <button
-                onClick={() => handleSync('manadj')}
-                disabled={syncMutation.isPending}
-                className="sync-button sync-button-manadj"
-              >
-                manadj
-              </button>
-            )}
+            <span className="sync-label">Import playlist order into Library:</span>
             {hasEngine && (
               <button
                 onClick={() => handleSync('engine')}
@@ -146,14 +132,7 @@ export function PlaylistDetailView({ playlist, onBack }: PlaylistDetailViewProps
                 Rekordbox
               </button>
             )}
-            {hasManadj && exportEnabled && (
-              <button
-                onClick={() => setExportOpen(true)}
-                className="sync-button playlist-full-export-button"
-              >
-                Export all data
-              </button>
-            )}
+            {hasManadj && <PlaylistExportEntry playlistName={playlist.name} />}
           </div>
         </div>
       </div>
@@ -161,7 +140,7 @@ export function PlaylistDetailView({ playlist, onBack }: PlaylistDetailViewProps
       {/* Sync status messages */}
       {syncMutation.isPending && (
         <div className="sync-status sync-status-loading">
-          Syncing playlist...
+          Importing playlist order into Library...
         </div>
       )}
       {syncError && (
@@ -173,10 +152,10 @@ export function PlaylistDetailView({ playlist, onBack }: PlaylistDetailViewProps
         <div className="sync-status sync-status-success">
           {Array.isArray(syncResult) ? (
             <>
-              Synced to {syncResult.length} target(s).
+              Imported playlist order to {syncResult.length} target(s).
               {syncResult.map(r => (
                 <div key={r.target}>
-                  {r.target}: {r.tracks_synced} tracks synced
+                  {r.target}: {r.tracks_synced} playlist entries imported
                   {r.tracks_unmatched.length > 0 && ` (${r.tracks_unmatched.length} unmatched)`}
                   {r.created ? ' (created)' : ' (updated)'}
                 </div>
@@ -184,7 +163,7 @@ export function PlaylistDetailView({ playlist, onBack }: PlaylistDetailViewProps
             </>
           ) : (
             <>
-              Synced to {syncResult.target}: {syncResult.tracks_synced} tracks
+              Imported playlist order into {syncResult.target}: {syncResult.tracks_synced} entries
               {syncResult.tracks_unmatched.length > 0 && ` (${syncResult.tracks_unmatched.length} unmatched)`}
               {syncResult.created ? ' (created)' : ' (updated)'}
             </>
@@ -272,12 +251,6 @@ export function PlaylistDetailView({ playlist, onBack }: PlaylistDetailViewProps
           );
         })}
       </div>
-      {exportOpen && (
-        <PlaylistFullExportModal
-          playlistName={playlist.name}
-          onClose={() => setExportOpen(false)}
-        />
-      )}
     </div>
   );
 }

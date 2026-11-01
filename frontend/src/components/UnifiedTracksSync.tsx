@@ -8,7 +8,7 @@
  * PRD Story 15, revised).
  */
 
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, BACKEND_URL } from '../api/client';
 import { formatKeyDisplay } from '../utils/keyUtils';
@@ -169,6 +169,7 @@ export function UnifiedTracksSync() {
     new Set(GROUPS.filter((g) => g.collapsedByDefault).map((g) => g.key)),
   );
   const [pending, setPending] = useState<PendingAction | null>(null);
+  const startedPending = useRef<PendingAction | null>(null);
   const [bulkPanel, setBulkPanel] = useState<BulkPendingItem[] | null>(null);
 
   const refresh = () => queryClient.invalidateQueries({ queryKey: ['sync-status'] });
@@ -657,8 +658,12 @@ export function UnifiedTracksSync() {
             <b>{pending.scope}</b>
             <div className="uts-pending-side">{pending.sideEffects}</div>
           </div>
-          <button className="uts-btn" onClick={pending.run}>Apply</button>
-          <button className="uts-btn uts-btn-ghost" onClick={() => setPending(null)}>Cancel</button>
+          <button className="uts-btn" disabled={busy} onClick={() => {
+            if (busy || startedPending.current === pending) return;
+            startedPending.current = pending;
+            pending.run();
+          }}>{busy ? 'Applying…' : 'Apply'}</button>
+          <button className="uts-btn uts-btn-ghost" disabled={busy} onClick={() => { if (!busy) setPending(null); }}>Dismiss plan</button>
         </div>
       )}
       {notice && <div className="uts-notice" onClick={() => setNotice(null)}>{notice} ✕</div>}

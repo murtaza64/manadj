@@ -53,7 +53,7 @@ vi.mock('./useTrackMenuItems', () => ({ useTrackMenuItems: () => [], useAddTrack
 vi.mock('../sets/SetDetailPane', () => ({ default: () => null }));
 vi.mock('../sessions/SessionTimelinePane', () => ({ SessionTimelinePane: () => null }));
 vi.mock('../sessions/SessionsListView', () => ({ SessionsListView: () => null }));
-vi.mock('./PlaylistFullExportModal', () => ({ PlaylistFullExportModal: () => null }));
+vi.mock('./PlaylistExportInspector', () => ({ PlaylistExportEntry: () => null }));
 vi.mock('../sets/spaceTransport', () => ({ dispatchSetSpace: vi.fn(() => true) }));
 vi.mock('./Player', () => ({ default: function Player() {
   const [zoom, setZoom] = useState(8);

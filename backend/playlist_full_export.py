@@ -413,27 +413,34 @@ def preview_playlist_full_export(db: Session, playlist_name: str, targets: list[
     return {"playlist_name": playlist_name, "previews": previews}
 
 
-def build_playlist_full_export_service(db: Session):
+def build_playlist_full_export_service(db: Session, *, destination_paths: dict[str, str] | None = None):
     from backend.config import get_config
 
-    config = get_config()
+    if destination_paths is None:
+        config = get_config()
+        destination_paths = {
+            key: path for key, path in (
+                ('rekordbox', config.database.rekordbox_path),
+                ('engine', config.database.engine_dj_path),
+            ) if path
+        }
     targets: dict[str, PlaylistExportTarget] = {}
-    if config.database.rekordbox_path:
+    if destination_paths.get('rekordbox'):
         try:
             from rekordbox.connection import get_rekordbox_db
 
             targets["rekordbox"] = PlaylistExportTargetRunner(
                 RekordboxPlaylistWriter(
-                    db, get_rekordbox_db(), Path(config.database.rekordbox_path)
+                    db, get_rekordbox_db(destination_paths['rekordbox']), Path(destination_paths['rekordbox'])
                 )
             )
         except Exception as error:
             targets["rekordbox"] = UnavailableTarget("rekordbox", str(error))
-    if config.database.engine_dj_path:
+    if destination_paths.get('engine'):
         try:
             from enginedj.connection import EngineDJDatabase
 
-            engine_path = Path(config.database.engine_dj_path)
+            engine_path = Path(destination_paths['engine'])
             targets["engine"] = PlaylistExportTargetRunner(
                 EnginePlaylistWriter(db, EngineDJDatabase(engine_path), engine_path)
             )

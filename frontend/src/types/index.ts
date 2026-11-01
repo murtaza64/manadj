@@ -286,6 +286,30 @@ export interface PlaylistFullExportPreview {
   previews: PlaylistExportTargetPreview[];
 }
 
+export interface PlaylistExportFieldPlan {
+  field: string;
+  before_known: boolean;
+  before: unknown;
+  after: unknown;
+  action: 'replace' | 'replace-unknown' | 'clear' | 'unchanged' | 'skip' | 'blocked';
+  reason: string | null;
+}
+
+export interface PlaylistExportPlan {
+  playlist_name: string;
+  playlist_id: number;
+  source: string;
+  target: PlaylistExportTarget;
+  scope: 'full' | 'order';
+  destination: string;
+  executable: boolean;
+  token: string;
+  membership: { create: boolean; before: string[]; after: string[]; added: string[]; removed: string[]; moved: number };
+  tracks: { track_id: number; title: string; filename: string; duration: number | null; record_action: 'existing' | 'blocked'; fields: PlaylistExportFieldPlan[] }[];
+  tag_structure: { id: number; name: string; tags: { id: number; name: string }[] }[];
+  warnings: string[];
+}
+
 export interface TrackDiscrepancy {
   filename: string;
   title?: string | null;
