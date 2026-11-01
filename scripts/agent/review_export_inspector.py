@@ -154,7 +154,7 @@ def fixture_track(track_id: int):
     return {'id': track_id, 'title': TITLES[track_id - 1], 'artist': 'Fixture Artist', 'filename': f'/fixture/{TITLES[track_id - 1]}.flac', 'bpm': 174, 'key': 8, 'energy': 4}
 
 
-@app.get('/api/playlists')
+@app.get('/api/playlists/')
 def fixture_playlists():
     with Session(engine) as db:
         return [{'id': p.id, 'name': p.name} for p in db.query(models.Playlist)]
