@@ -19,6 +19,7 @@ constexpr int kSnapshotSize = kHeader + manadj::kDeckCount * kDeckFields;
  */
 struct Output final : oboe::AudioStreamDataCallback, oboe::AudioStreamErrorCallback {
     manadj::Engine engine;
+    bool offline = false;
     std::mutex streamMutex;
     std::shared_ptr<oboe::AudioStream> stream;
     std::atomic<bool> closing{false};
@@ -73,6 +74,7 @@ struct Output final : oboe::AudioStreamDataCallback, oboe::AudioStreamErrorCallb
     // system silenced without a disconnect callback.
     int restart() {
         std::lock_guard<std::mutex> lock(streamMutex);
+        engine.masterRecorder.stop(manadj::MasterRecorder::Interrupted);
         if (stream) {
             stream->requestStop();
             stream->close();
@@ -88,6 +90,7 @@ struct Output final : oboe::AudioStreamDataCallback, oboe::AudioStreamErrorCallb
         const int want = routing == static_cast<int>(manadj::Routing::Quad) ? 4 : 2;
         engine.setRouting(static_cast<manadj::Routing>(routing));
         if (stream && want == wantChannels.load() && device == wantDevice.load()) return 0;
+        engine.masterRecorder.stop(manadj::MasterRecorder::Interrupted);
         wantChannels.store(want);
         wantDevice.store(device);
         if (stream) {
@@ -120,6 +123,7 @@ struct Output final : oboe::AudioStreamDataCallback, oboe::AudioStreamErrorCallb
 
     void onErrorAfterClose(oboe::AudioStream*, oboe::Result error) override {
         std::lock_guard<std::mutex> lock(streamMutex);
+        engine.masterRecorder.stop(manadj::MasterRecorder::Interrupted);
         lastError.store(static_cast<int>(error));
         stream.reset();
         xrunBase.store(xruns.load());
@@ -132,6 +136,7 @@ struct Output final : oboe::AudioStreamDataCallback, oboe::AudioStreamErrorCallb
     void stop() {
         closing.store(true);
         std::lock_guard<std::mutex> lock(streamMutex);
+        engine.masterRecorder.stop(manadj::MasterRecorder::Interrupted);
         if (stream) {
             stream->requestStop();
             stream->close();
@@ -143,9 +148,36 @@ struct Output final : oboe::AudioStreamDataCallback, oboe::AudioStreamErrorCallb
 Output* output(jlong handle) { return reinterpret_cast<Output*>(handle); }
 }
 
+extern "C" JNIEXPORT jboolean JNICALL
+Java_dev_manadj_audio_AudioEngine_nativeStartMasterRecording(JNIEnv* env, jobject, jlong handle, jstring path) {
+    auto* out = output(handle);
+    std::lock_guard<std::mutex> lock(out->streamMutex);
+    if (out->closing.load() || (!out->offline && !out->stream)) return false;
+    const char* text = env->GetStringUTFChars(path, nullptr);
+    if (!text) return false;
+    const bool ok = out->engine.masterRecorder.start(text, out->engine.outputRate());
+    env->ReleaseStringUTFChars(path, text);
+    return ok;
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_dev_manadj_audio_AudioEngine_nativeStopMasterRecording(JNIEnv*, jobject, jlong handle, jboolean cancel) {
+    output(handle)->engine.masterRecorder.stop(cancel ? manadj::MasterRecorder::Cancelled : manadj::MasterRecorder::None);
+}
+
+extern "C" JNIEXPORT jlongArray JNICALL
+Java_dev_manadj_audio_AudioEngine_nativeMasterRecording(JNIEnv* env, jobject, jlong handle) {
+    const auto& r = output(handle)->engine.masterRecorder;
+    const jlong values[] = {r.state(), r.error(), static_cast<jlong>(r.frames()), r.sampleRate()};
+    auto result = env->NewLongArray(4);
+    if (result) env->SetLongArrayRegion(result, 0, 4, values);
+    return result;
+}
+
 extern "C" JNIEXPORT jlong JNICALL
 Java_dev_manadj_audio_AudioEngine_nativeOpen(JNIEnv*, jobject, jboolean offline) {
     auto sink = std::make_unique<Output>();
+    sink->offline = offline;
     if (!offline && sink->open() != 0) return 0;
     return reinterpret_cast<jlong>(sink.release());
 }

@@ -9,6 +9,11 @@ import android.os.*
 import androidx.core.content.ContextCompat
 import dev.manadj.audio.*
 import java.util.concurrent.Executors
+import java.io.File
+import java.util.UUID
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 /** One service-owned engine survives view/layout changes and the Android document picker. */
 class PlaybackService : Service() {
@@ -21,6 +26,56 @@ class PlaybackService : Service() {
         private set
     @Volatile private var destroyed = false
     private var foreground = false
+    @Volatile var masterRecordings = MasterRecordings()
+        private set
+    private var masterFile: File? = null
+    private val recordingOperation = java.util.concurrent.atomic.AtomicBoolean(false)
+    @Volatile private var cancelPendingRecording = false
+
+    private fun refreshMasterFiles() {
+        val directory = File(filesDir, "master-recordings")
+        val files = directory.listFiles().orEmpty()
+        val failedPath = masterFile?.path?.takeIf { masterRecordings.status?.state == 4 }
+        masterRecordings = masterRecordings.copy(
+            files = files.filter { it.extension == "wav" && it.length() > 44 && it.path != failedPath }.sortedByDescending { it.name },
+            incomplete = files.count { it.name.endsWith(".partial") },
+        )
+    }
+
+    fun startMasterRecording() {
+        if (destroyed || masterRecordings.busy || !recordingOperation.compareAndSet(false, true)) return
+        startingPlayback()?.let { masterRecordings = masterRecordings.copy(error = it); recordingOperation.set(false); return }
+        masterRecordings = masterRecordings.copy(pending = true, error = null)
+        cancelPendingRecording = false
+        lifetime.execute {
+            try {
+                val directory = File(filesDir, "master-recordings")
+                check(directory.isDirectory || directory.mkdirs()) { "Cannot create recording directory" }
+                val stamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())
+                val file = File(directory, "manadj-master-$stamp-${UUID.randomUUID().toString().take(8)}.wav")
+                masterFile = file
+                check(engine?.startMasterRecording(file.absolutePath) == true) { "Cannot start Master recording" }
+                if (cancelPendingRecording || destroyed) engine?.stopMasterRecording(cancel = true)
+                masterRecordings = masterRecordings.copy(status = engine?.masterRecording(), pending = false, error = null)
+            } catch (e: Exception) { masterRecordings = masterRecordings.copy(pending = false, error = e.message) }
+            finally { recordingOperation.set(false) }
+        }
+    }
+
+    fun stopMasterRecording(cancel: Boolean = false) {
+        if (cancel) cancelPendingRecording = true
+        if (destroyed || !recordingOperation.compareAndSet(false, true)) return
+        masterRecordings = masterRecordings.copy(pending = true)
+        lifetime.execute {
+            try {
+                engine?.stopMasterRecording(cancel)
+                val status = engine?.masterRecording()
+                masterRecordings = masterRecordings.copy(status = status, pending = false, error = status?.errorMessage)
+                refreshMasterFiles()
+            } catch (e: Exception) { masterRecordings = masterRecordings.copy(pending = false, error = e.message) }
+            finally { recordingOperation.set(false) }
+        }
+    }
     private var closedSince = 0L
     private var hasFocus = false
     private val sourceMetadata = mutableMapOf<String, LocalSource>()
@@ -46,6 +101,7 @@ class PlaybackService : Service() {
             try {
                 val opened = AudioEngine()
                 if (destroyed) opened.close() else engine = opened
+                refreshMasterFiles()
             } catch (error: Exception) { failure = "Audio output unavailable: ${error.message}" }
             catch (error: LinkageError) { failure = "Native audio library unavailable: ${error.message}" }
         }
@@ -149,6 +205,7 @@ class PlaybackService : Service() {
     @Volatile var pauseReason: String? = null
 
     fun pauseAll(reason: String) {
+        if (masterRecordings.busy) stopMasterRecording(cancel = true)
         val audio = engine ?: return
         if (DeckId.entries.any { snapshot()?.decks?.get(it)?.let { d -> d.playing || d.previewing } == true }) {
             pauseReason = reason
@@ -164,7 +221,7 @@ class PlaybackService : Service() {
         val open = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val stop = PendingIntent.getService(this, 1, Intent(this, PlaybackService::class.java).setAction("STOP"), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         return Notification.Builder(this, "playback").setSmallIcon(android.R.drawable.ic_media_play)
-            .setContentTitle("manadj playback").setContentText("Native shared audio output")
+            .setContentTitle("manadj playback").setContentText(if (masterRecordings.busy) "Recording stereo Master · open app to stop/save" else "Native shared audio output")
             .setContentIntent(open).setOngoing(true).addAction(Notification.Action.Builder(null, "Stop", stop).build()).build()
     }
 
@@ -173,13 +230,20 @@ class PlaybackService : Service() {
         override fun run() {
             if (destroyed) return
             val state = snapshot()
+            if (!recordingOperation.get()) lifetime.execute {
+                val recording = engine?.masterRecording()
+                val before = masterRecordings.status
+                masterRecordings = masterRecordings.copy(status = recording, error = recording?.errorMessage ?: masterRecordings.error)
+                if (recording != null && !recording.busy && before?.busy == true) refreshMasterFiles()
+            }
+            if (foreground) getSystemService(NotificationManager::class.java).notify(1, notification())
             // Oboe reopens after a disconnect on its own; if that failed, retry here off the main thread.
             if (state != null && !state.outputOpen) {
                 val now = SystemClock.uptimeMillis()
                 if (closedSince == 0L) closedSince = now
                 else if (now - closedSince >= 2000) { closedSince = now; lifetime.execute { engine?.reopen() } }
             } else closedSince = 0L
-            if (foreground && state != null && state.appliedCommandId >= state.acceptedCommandId && state.decks.values.none { it.playing || it.previewing }) {
+            if (foreground && !masterRecordings.busy && state != null && state.appliedCommandId >= state.acceptedCommandId && state.decks.values.none { it.playing || it.previewing }) {
                 stopForeground(STOP_FOREGROUND_REMOVE); foreground = false; stopSelf()
                 audioManager.abandonAudioFocusRequest(focusRequest); hasFocus = false
             }

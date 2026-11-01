@@ -10,6 +10,22 @@ import java.util.concurrent.atomic.AtomicReferenceArray
 
 enum class DeckId { A, B, C, D }
 enum class LoadState { EMPTY, LOADING, READY, ERROR }
+data class MasterRecordingStatus(val state: Int, val error: Int, val frames: Long, val sampleRate: Int) {
+    val busy get() = state == 1 || state == 2
+    val complete get() = state == 3 && error == 0
+    val seconds get() = if (sampleRate > 0) frames.toDouble() / sampleRate else 0.0
+    val errorMessage get() = when (error) {
+        0 -> null
+        1 -> "Cannot create recording file"
+        2 -> "Recording overflow: disk writer could not keep up"
+        3 -> "Recording interrupted: output sample rate changed"
+        4 -> "Recording storage/finalization failed"
+        5 -> "Recording reached the WAV size limit"
+        6 -> "Recording interrupted by audio output/lifecycle change"
+        7 -> "Recording cancelled or empty"
+        else -> "Recording failed ($error)"
+    }
+}
 enum class LoopChange { HALVE, DOUBLE, SET }
 /**
  * Quantize mode. HEARD / HEARD_UNQUANTIZED add lag compensation (#382, human semantics): a launch (PLAY, CUE-hold,
@@ -360,6 +376,9 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
     private val durations = AtomicReferenceArray<Pair<Long, Double>?>(4)
     private var loadCounter = 0L
     @Volatile private var closed = false
+    // Slow recorder start/finalization must not hold the snapshot/command
+    // monitor used by the UI. close() takes this separate lifetime lock too.
+    private val recordingLifetime = Any()
 
     companion object {
         init { System.loadLibrary("manadj_audio") }
@@ -639,6 +658,13 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
 
     /** Reopens the output after a failed automatic recovery. Returns 0 or an Oboe error. */
     @Synchronized fun reopen(): Int = if (closed || offline) -1 else nativeReopen(handle)
+
+    /** Off main/callback: native worker owns file IO. No microphone permission. */
+    fun startMasterRecording(path: String): Boolean = synchronized(recordingLifetime) { !closed && nativeStartMasterRecording(handle, path) }
+    fun stopMasterRecording(cancel: Boolean = false) { synchronized(recordingLifetime) { if (!closed) nativeStopMasterRecording(handle, cancel) } }
+    @Synchronized fun masterRecording(): MasterRecordingStatus? = if (closed) null else nativeMasterRecording(handle).let {
+        MasterRecordingStatus(it[0].toInt(), it[1].toInt(), it[2], it[3].toInt())
+    }
 
     /** Closes and reopens the output stream (same routing/device; decks keep playing). Returns 0 or an Oboe error. */
     @Synchronized fun restartOutput(): Int = if (closed || offline) -1 else nativeRestart(handle)
@@ -1115,7 +1141,7 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
         synchronized(this) {
             sources.forEach { runCatching { it?.fd?.close() } }
             // A worker stuck in a provider read keeps native memory alive (leak, not use-after-free).
-            if (stopped) nativeClose(handle) else nativeStop(handle)
+            synchronized(recordingLifetime) { if (stopped) nativeClose(handle) else nativeStop(handle) }
         }
     }
 
@@ -1127,6 +1153,9 @@ class AudioEngine(private val offline: Boolean = false) : AutoCloseable {
 
     private fun rejected(reason: String) = CommandReceipt(0, false, reason)
     private external fun nativeOpen(offline: Boolean): Long
+    private external fun nativeStartMasterRecording(handle: Long, path: String): Boolean
+    private external fun nativeStopMasterRecording(handle: Long, cancel: Boolean)
+    private external fun nativeMasterRecording(handle: Long): LongArray
     private external fun nativeReopen(handle: Long): Int
     private external fun nativeRestart(handle: Long): Int
     private external fun nativeStop(handle: Long)

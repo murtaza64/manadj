@@ -29,6 +29,13 @@ Pull-only from the desktop backend (`/api/device-sync/*`, `backend/routers/devic
 - Load: `app/.../library/LibraryHolder.load` → `PlayerModel.load` (snapshot title/artist, first grid segment, main cue, hot cues; source id `library:<trackId>:<audioRev>`).
 - Decoy data for checks: `uv run scripts/android/seed_decoy_library.py http://127.0.0.1:<port> <dir>` against an `--empty-db` lane app.
 
+## Master audio recording (#425)
+
+- App-wide REC MASTER / STOP / SAVE controls capture the shared native stereo Master, including live performance and Session replay. Session event recording remains separate and unchanged.
+- SAVED lists finalized timestamped PCM16 stereo WAVs. SHARE opens Android's chooser with read access to that file; EXPORT writes a user-selected document. Originals remain in app-owned storage. No mic/MediaProjection permission or upload is used.
+- CANCEL, focus/noisy interruptions, output replacement/disconnect, overflow, rate changes and storage errors retain an unshareable `.partial` file. Completed recordings survive Activity/view recreation and service restarts.
+- Native QA and build/device proof are separate: see [`docs/android-master-recording.md`](../docs/android-master-recording.md).
+
 ## Session replay (#378)
 
 Settings › SESSIONS · REPLAY: desktop Sessions replayed on all four decks through the shared engine.
