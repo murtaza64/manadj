@@ -1,6 +1,7 @@
 """Main FastAPI application."""
 
 import os
+import sys as _sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -8,7 +9,7 @@ from alembic import command as alembic_command
 from alembic.config import Config as AlembicConfig
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from .routers import tracks, tags, waveforms, playlists, beatgrids, metric_ladders, hotcues, sync_playlists, sync_status, sync_performance, sync_export, sync_tags, sync_tracks, sync_library, analyze, transitions, transition_templates, track_links, takes, sessions, sets, tasks, drops, visualizer_ga, routine_candidates, routine_takes, routines, settings, cameos, app_config, device_sync, device_listener as device_listener_router, video_export, harmony
+from .routers import tracks, tags, waveforms, playlists, beatgrids, metric_ladders, hotcues, sync_playlists, sync_status, sync_performance, sync_export, sync_fields, sync_tags, sync_tracks, sync_library, analyze, transitions, transition_templates, track_links, takes, sessions, sets, tasks, drops, visualizer_ga, routine_candidates, routine_takes, routines, settings, cameos, app_config, device_sync, device_listener as device_listener_router, video_export, harmony
 from .acquisition import models as acquisition_models  # noqa: F401  (registers tables on Base)
 from .acquisition.router import router as acquisition_router
 from .tasks import models as task_models  # noqa: F401  (registers tables on Base)
@@ -31,8 +32,6 @@ setup_logging()
 # incident 2026-07-08). Backs up into the data root's own backups dir, so the
 # real DB, lane sandbox clones and packaged installs are all covered
 # (packaged-app #277); APFS clones make the sandbox copies free.
-import sys as _sys
-
 _repo_root = Path(__file__).parent.parent
 _sys.path.insert(0, str(_repo_root / "scripts" / "agent"))
 import db_backup as _db_backup  # noqa: E402
@@ -77,6 +76,7 @@ app.include_router(sync_tracks.router, prefix="/api")
 app.include_router(sync_status.router, prefix="/api")
 app.include_router(sync_performance.router, prefix="/api")
 app.include_router(sync_export.router, prefix="/api")
+app.include_router(sync_fields.router, prefix="/api")
 app.include_router(sync_library.router, prefix="/api")
 app.include_router(acquisition_router, prefix="/api/acquisition", tags=["acquisition"])
 app.include_router(transition_templates.router, prefix="/api/transition-templates", tags=["transition-templates"])

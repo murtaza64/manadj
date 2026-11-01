@@ -86,7 +86,11 @@ class EnginePerfExporter:
         maincue: float | None,
         energy: int | None,
         duration: float | None,
+        selected_fields: set[str] | None = None,
     ) -> dict[str, str]:
+        fields = {'hotcues', 'maincue', 'beatgrid', 'key', 'energy'} if selected_fields is None else selected_fields
+        if not fields <= {'hotcues', 'maincue', 'beatgrid', 'key', 'energy'}:
+            raise ValueError('Unsupported performance field')
         ensure_engine_closed()
         snapshot_database(self._database_path)
         with self._db.session_m_write() as session:
@@ -97,16 +101,17 @@ class EnginePerfExporter:
             perf = session.get(PerformanceData, track.id)
             if perf is None:
                 perf = PerformanceData(trackId=track.id)
-                session.add(perf)
+                if fields & {'hotcues', 'maincue', 'beatgrid'}:
+                    session.add(perf)
 
-            beat_data = parse_beat_data(perf.beatData) if perf.beatData else None
+            beat_data = parse_beat_data(perf.beatData) if perf.beatData and fields & {'hotcues', 'maincue', 'beatgrid'} else None
             sample_rate = beat_data.sample_rate if beat_data else None
             result: dict[str, str] = {}
 
             if sample_rate is None:
-                result["hotcues"] = "skipped: Engine track has no analyzed sample rate"
-                result["maincue"] = "skipped: Engine track has no analyzed sample rate"
-            else:
+                for field in fields & {'hotcues', 'maincue'}:
+                    result[field] = "skipped: Engine track has no analyzed sample rate"
+            elif fields & {'hotcues', 'maincue'}:
                 existing = (
                     parse_quick_cues(perf.quickCues)
                     if perf.quickCues
@@ -123,17 +128,21 @@ class EnginePerfExporter:
                 ]
                 perf.quickCues = encode_quick_cues(
                     QuickCues(
-                        hot_cues=hot_cues,
-                        main_cue_samples=maincue * sample_rate if maincue is not None else -1.0,
-                        main_cue_overridden=maincue is not None,
+                        hot_cues=hot_cues if 'hotcues' in fields else existing.hot_cues,
+                        main_cue_samples=(maincue * sample_rate if maincue is not None else -1.0) if 'maincue' in fields else existing.main_cue_samples,
+                        main_cue_overridden=(maincue is not None) if 'maincue' in fields else existing.main_cue_overridden,
                         default_cue_samples=existing.default_cue_samples,
                         slot_count=max(8, existing.slot_count),
                     )
                 )
-                result["hotcues"] = "exported"
-                result["maincue"] = "exported" if maincue is not None else "exported: cleared"
+                if 'hotcues' in fields:
+                    result["hotcues"] = "exported"
+                if 'maincue' in fields:
+                    result["maincue"] = "exported" if maincue is not None else "exported: cleared"
 
-            if beat_data is None or not tempo_changes or not duration:
+            if 'beatgrid' not in fields:
+                pass
+            elif beat_data is None or not tempo_changes or not duration:
                 result["beatgrid"] = "skipped: Library has no saved grid or Engine sample rate"
             else:
                 markers = _grid_markers(tempo_changes, beat_data.sample_rate, duration)
@@ -149,7 +158,9 @@ class EnginePerfExporter:
                 )
                 result["beatgrid"] = "exported"
 
-            if key is None:
+            if 'key' not in fields:
+                pass
+            elif key is None:
                 result["key"] = "skipped: Library has no key"
             else:
                 track.key = key
@@ -163,10 +174,13 @@ class EnginePerfExporter:
                         perf.trackData = encode_track_data(track_data)
                 result["key"] = "exported"
 
-            if energy is None:
+            if 'energy' not in fields:
+                pass
+            elif energy is None:
                 result["energy"] = "skipped: Library has no energy"
             else:
                 track.rating = energy_to_rating(energy)
                 result["energy"] = "exported"
-            track.isAnalyzed = True
+            if selected_fields is None:
+                track.isAnalyzed = True
             return result

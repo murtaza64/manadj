@@ -70,6 +70,7 @@ import { SessionTimelinePane } from '../sessions/SessionTimelinePane';
 import { SessionsListView } from '../sessions/SessionsListView';
 import { NAVIGATE_SET_EVENT } from '../sets/navigateToSet';
 import { PlaylistExportEntry, PlaylistExportInspector } from './PlaylistExportInspector';
+import { FieldReviewEntry } from './FieldReviewInspector';
 import { OPEN_LIBRARY_PLAYLIST_EVENT, peekLibraryPlaylistRequest, clearLibraryPlaylistRequest } from '../library/openPlaylist';
 import { PlaylistStatusBadge } from './PlaylistStatusBadge';
 import { playlistStatus } from './playlistStatus';
@@ -600,6 +601,22 @@ export default function Library({
   const activeSel = splitView && focusedPane === 'library' ? editLibSel : mainSel;
   const selectedTrack = activeSel.selectedTrack;
 
+  async function fieldScopeIds(filtered: boolean): Promise<number[]> {
+    // Resolve every page-equivalent record, not just the first1000 rendered rows.
+    // The backend bounds a single plan at10000; refuse rather than truncate.
+    const result = await api.tracks.list(1, 10000, filtered ? {
+      tagIds: filters.selectedTagIds, search: filters.search, energyMin: filters.energyMin,
+      energyMax: filters.energyMax, tagMatchMode: filters.tagMatchMode, bpmCenter: filters.bpmCenter,
+      bpmThresholdPercent: filters.bpmCenter !== null ? filters.bpmThresholdPercent : null,
+      keyCamelotIds: filters.selectedKeyCamelotIds, unprocessed: selectedView === 'unprocessed',
+      needsAttention: selectedView === 'needs-attention', archived: selectedView === 'archived',
+      sortColumn: filters.sortColumn, sortDirection: filters.sortDirection,
+    } : undefined);
+    if (!Array.isArray(result.items) || !Number.isInteger(result.total) || result.total > result.items.length) throw new Error('Scope could not be captured completely (maximum10000). Narrow the filter.');
+    const tracks: Track[] = filtered ? follow.project(result.items, followScoreSort) : result.items;
+    return tracks.map(track => track.id);
+  }
+
   // Switching views/playlists clears the main selection outright (prune
   // would do most of it; this also covers same-id coincidences). The MOUNT
   // run is exempt: a fresh instance restoring the browse session (issue 27)
@@ -685,7 +702,7 @@ export default function Library({
     dragPointerTsRef.current = e.timeStamp;
   }, []);
 
-  const stopEdgeScroll = useCallback(() => {
+  const stopEdgeScroll = useCallback(function stopEdgeScroll() {
     if (edgeScrollRafRef.current !== null) cancelAnimationFrame(edgeScrollRafRef.current);
     edgeScrollRafRef.current = null;
     dragPointerRef.current = null;
@@ -1207,6 +1224,12 @@ export default function Library({
           flexDirection: 'column',
           overflow: 'hidden'
         }}>
+          {!browseOnly && selectedView !== 'playlist' && <div style={{ padding: '4px 12px', borderBottom: '1px solid var(--surface0)' }}>
+            <FieldReviewEntry initialScope={activeSel.selectedIds.size ? 'selected' : 'filtered'} scopes={{
+              selected: async () => [...activeSel.selectedIds],
+              filtered: () => fieldScopeIds(true), all: () => fieldScopeIds(false),
+            }} /> <small>Fields only · all = active Library; archived tracks require their explicit view/selection</small>
+          </div>}
           {/* Playlist header strip: name + split-view toggle (playlist view only) */}
           {selectedView === 'playlist' && (
             <div style={{

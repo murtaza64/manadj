@@ -1,0 +1,8 @@
+.field-review-inspector .field-review-controls { border: 0; padding: 0; margin: 12px 0; display: grid; gap: 12px; }
+.field-review-controls > label { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.field-review-controls > div { display: flex; flex-wrap: wrap; gap: 10px; }
+.field-review-controls select { max-width: 70%; }
+.field-review-controls input, .field-replacement input { margin-right: 6px; }
+.field-replacement { display: block; margin: 8px 0; color: var(--yellow); }
+.field-review-inspector .pei-content > section { border-bottom: 1px solid var(--surface1); padding: 12px 0; }
+.field-review-inspector .pei-footer { flex-wrap: wrap; }
