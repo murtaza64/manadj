@@ -154,6 +154,23 @@ def fixture_track(track_id: int):
     return {'id': track_id, 'title': TITLES[track_id - 1], 'artist': 'Fixture Artist', 'filename': f'/fixture/{TITLES[track_id - 1]}.flac', 'bpm': 174, 'key': 8, 'energy': 4}
 
 
+@app.get('/api/playlists')
+def fixture_playlists():
+    with Session(engine) as db:
+        return [{'id': p.id, 'name': p.name} for p in db.query(models.Playlist)]
+
+
+@app.get('/api/sync/playlists/')
+def fixture_unified_playlists():
+    entries = [{'track_id': i + 1, 'filename': f'/fixture/{title}.flac'} for i, title in enumerate(TITLES)]
+    return [{'name': 'Night Shift', 'manadj': entries, 'engine': entries, 'rekordbox': entries, 'synced': False}]
+
+
+@app.get('/api/sync/playlists/stats')
+def fixture_playlist_stats():
+    return {'manadj_playlists_loaded': 1, 'engine_playlists_loaded': 1, 'rekordbox_playlists_loaded': 1, 'playlists_matched': 1}
+
+
 @app.post('/fixture/scenario')
 def fixture_scenario(name: str):
     if name not in {'skips', 'partial', 'blocked', 'unavailable', 'stale', 'unknown', 'slow', 'gated'}:

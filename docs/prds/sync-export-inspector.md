@@ -7,14 +7,16 @@
 
 ## Current slice
 
-- Library's playlist Export button and Sync's playlist detail open the same production inspector. The clicked playlist name is captured; subsequent underlying selection cannot retarget the operation.
+- Playlist-in-Library Export opens the production inspector. The Sync playlist index resolves the exact Library playlist ID and routes into Library + that inspector; the old three-column detail is superseded, reference-only. The clicked playlist name is captured; subsequent underlying selection cannot retarget the operation.
+- External-only playlist membership can be imported explicitly from the index into Library before navigation. A fresh Library-name check prevents knowingly overwriting a newly appeared playlist; this legacy import contract has no hash-bound preview and is not the new export-plan API.
 - Choose one destination: Rekordbox desktop or Engine DJ. Scope: playlist + track data, or membership/order only. No implicit all-target fan-out.
 - Plan: actual before/after destination order, added/removed entries, changed common positions; per-track before/after hot-cue slots, saved grid, key, Main cue, tags and energy.
 - Clear, overwrite, same-value rewrite, skip, blocked record and unknown-prior operations have distinct labels. Destination-only memory-cue deletion is disclosed separately: the current Rekordbox writer replaces the DB memory set with hot-cue mirrors plus Main cue, while its reader does not expose the full prior memory-cue set.
 - Shared tag-structure updates show unknown prior structure, not “no changes”. Full export always requires explicit acknowledgement; order-only requires it when entries are removed.
+- Density revision: scalar/key changes are aligned before→after rows using existing key colors, not wrapper cards. Same-value fields collapse but remain labeled rewritten. Cue occupancy retains geometry; grid summary is compact with optional measured tick geometry from the full tempo-change lists.
 - Removal means destination membership removal, not source-track or audio deletion. Track fields affect other playlists referencing the same destination records.
 - Results retain every writer field, including skips on nominally exported tracks. “Needs attention” is not a green track count. Session-memory receipts reopen with the playlist; they are not durable job history.
-- Playlist import buttons now explicitly import order into Library only. They no longer silently write to every other configured external library.
+- Playlist import is membership/order into Library only, never implicit writes to other external libraries. Existing-Library playlist-order replacement needs a unified import-plan follow-up rather than preserving the superseded detail as a competing workflow.
 - Tracks' existing scope-confirm Apply runs once per plan; Apply and plan dismissal are disabled during its request. Dismiss is not cancellation.
 
 ## API and write guard
@@ -36,6 +38,7 @@
 - Existing blank policy is preserved: no saved grid / no key → skip; unset Rekordbox Main cue / energy and empty cue set can clear destination data; unset Engine energy → skip. Existing Engine foreign tag-list memberships are preserved outside current Library tag names.
 - Reader observations are not independent readback. Rekordbox Main cue and full memory-cue prior values remain unknown. Native cue files, app refresh, USB output and hardware playback are not verified by a desktop writer receipt.
 - USB is not offered as an implemented destination. #97 engine and #98/#99 task/preflight/UI integration remain separate. No OneLibrary capability.
+- “Library” without a selected playlist is a different scope. This production tranche implements playlist-in-Library export only; selected/filtered/all-Library bulk planning is a separate simulated design, not a hidden use of the playlist endpoint. No membership/order writes are implied by Library field review.
 - Production adapters were not run against real libraries/devices during this task. QA uses in-memory source data and explicit fake destination seams.
 
 ## Connected-flow audit and next slices

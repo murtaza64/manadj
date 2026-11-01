@@ -24,12 +24,15 @@ with sync_playwright() as p:
     page.on('pageerror', lambda e: errors.append(str(e)))
     page.on('request', lambda r: requests.append(r.url))
 
-    def scenario(name, context='Library'):
+    def scenario(name, context='Playlist in Library'):
         page.goto(url)
         page.get_by_label('Review scenario').select_option(name)
         page.wait_for_timeout(300)
         page.get_by_label('Review context').select_option(context)
-        page.get_by_role('button', name='Export this playlist', exact=True).click()
+        if context == 'Playlist index → Library':
+            page.get_by_role('row').filter(has_text='Night Shift').click()
+        else:
+            page.get_by_role('button', name='Export this playlist', exact=True).click()
         page.get_by_label('Export destination').select_option('rekordbox')
         expect(page.get_by_role('status')).to_have_count(0)
         page.wait_for_timeout(300)
@@ -50,7 +53,7 @@ with sync_playwright() as p:
     expect(page.get_by_text('skipped: Library has no saved grid', exact=True)).to_be_visible()
     screenshot('skips')
     cases.append('visual plan / successful track with skipped field')
-    scenario('partial', 'Sync playlist')
+    scenario('partial', 'Playlist index → Library')
     submit()
     expect(page.locator('dd').get_by_text('failed: fixture native-file write', exact=True)).to_be_visible()
     cases.append('Sync entry / per-field partial')

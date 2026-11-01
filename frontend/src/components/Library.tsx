@@ -69,7 +69,8 @@ import {
 import { SessionTimelinePane } from '../sessions/SessionTimelinePane';
 import { SessionsListView } from '../sessions/SessionsListView';
 import { NAVIGATE_SET_EVENT } from '../sets/navigateToSet';
-import { PlaylistExportEntry } from './PlaylistExportInspector';
+import { PlaylistExportEntry, PlaylistExportInspector } from './PlaylistExportInspector';
+import { OPEN_LIBRARY_PLAYLIST_EVENT, peekLibraryPlaylistRequest, clearLibraryPlaylistRequest } from '../library/openPlaylist';
 import { PlaylistStatusBadge } from './PlaylistStatusBadge';
 import { playlistStatus } from './playlistStatus';
 import { trackMatchesFilters } from './playlistFilter';
@@ -165,6 +166,25 @@ export default function Library({
   const [selectedPlaylistId, setSelectedPlaylistId] = useState<number | null>(
     () => browseSession().playlistId
   );
+  const [navigationExportName, setNavigationExportName] = useState<string | null>(() => {
+    const request = peekLibraryPlaylistRequest();
+    return request?.openExport ? request.name : null;
+  });
+  useEffect(() => {
+    // The browse-session seed handles a cold mount; the pending name above
+    // opens its inspector after the same event. Mounted Library uses this handler.
+    const openPlaylist = () => {
+      const request = peekLibraryPlaylistRequest();
+      if (!request) { setNavigationExportName(null); return; }
+      setSelectedView('playlist');
+      setSelectedPlaylistId(request.id);
+      selectSet(null);
+      selectSession(null);
+      setNavigationExportName(request.openExport ? request.name : null);
+    };
+    window.addEventListener(OPEN_LIBRARY_PLAYLIST_EVENT, openPlaylist);
+    return () => window.removeEventListener(OPEN_LIBRARY_PLAYLIST_EVENT, openPlaylist);
+  }, []);
   const [selectedSetId, setSelectedSetId] = useState<number | null>(() => getSelectedSetId());
   const [selectedSessionUuid, setSelectedSessionUuid] = useState<string | null>(() =>
     getSelectedSessionUuid()
@@ -1490,6 +1510,7 @@ export default function Library({
       {rowMenu && (
         <ContextMenu x={rowMenu.x} y={rowMenu.y} items={rowMenuItems} onClose={closeRowMenu} />
       )}
+      {navigationExportName && <PlaylistExportInspector playlistName={navigationExportName} onClose={clearLibraryPlaylistRequest} />}
     </div>
     </BrowseActiveContext.Provider>
   );

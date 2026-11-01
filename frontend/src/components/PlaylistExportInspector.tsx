@@ -3,13 +3,15 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, PlaylistExportRequestError } from '../api/client';
 import type { PlaylistExportFieldPlan, PlaylistExportPlan, PlaylistExportTarget, PlaylistFullExportReport } from '../types';
 import { cueCssColor } from '../hotcues/palette';
-import { formatKeyDisplay } from '../utils/keyUtils';
+import KeyDisplay from './KeyDisplay';
+import BPMDisplay from './BPMDisplay';
+import { beatMarkersFromTempoChanges, markersInWindow, type TempoChangeLike } from '../utils/perfDiffOverlay';
 import { useExportEnabled } from '../settings/useAppConfig';
 import Modal from './Modal';
 import './PlaylistExportInspector.css';
 
 const TARGETS = { rekordbox: 'Rekordbox desktop', engine: 'Engine DJ' };
-const LABELS: Record<string, string> = { hotcues: 'Hot cues', memorycues: 'Memory cue mirror', maincue: 'Main cue', beatgrid: 'Beatgrid', key: 'Key', tags: 'Tags', energy: 'Energy' };
+const LABELS: Record<string, string> = { title: 'Title', artist: 'Artist', bpm: 'BPM', hotcues: 'Hot cues', memorycues: 'Memory cue mirror', maincue: 'Main cue', beatgrid: 'Beatgrid', key: 'Key', tags: 'Tags', energy: 'Energy' };
 const ACTIONS: Record<string, string> = { replace: 'OVERWRITE', 'replace-unknown': 'OVERWRITE · prior value unknown', clear: 'CLEAR', unchanged: 'SAME VALUE · rewritten', skip: 'SKIP', blocked: 'BLOCKED' };
 const PLAN_MAX_AGE_MS = 60_000;
 const basename = (path: string) => path.replaceAll('\\', '/').split('/').pop() || path;
@@ -33,18 +35,49 @@ function FieldValue({ field, value, known }: { field: string; value: unknown; kn
   if (field === 'memorycues' && Array.isArray(value)) return value.length ? <div className="pei-tags">{value.map((v, i) => <span key={i}>{Number(v).toFixed(3)}s</span>)}</div> : <span className="pei-empty">∅ No memory cues</span>;
   if (field === 'beatgrid') {
     const changes = (value as { tempo_changes: { start_time: number; bpm: number; bar_position: number }[] }).tempo_changes;
-    return <div className="pei-grid-values">{changes.map((c, i) => <span key={i}><b>▏▏▏▏</b> {c.bpm} BPM @ {c.start_time.toFixed(3)}s · bar {c.bar_position}</span>)}</div>;
+    const first = changes[0];
+    return first ? <span className="pei-grid-value"><b>{first.bpm}</b> BPM <span className="pei-secondary">@ {first.start_time.toFixed(3)}s{changes.length > 1 ? ` · ${changes.length} segments` : ''}</span></span> : <span className="pei-empty">∅ No saved grid</span>;
   }
   if (Array.isArray(value)) return value.length ? <div className="pei-tags">{value.map((v, i) => <span key={i}>{String(v)}</span>)}</div> : <span className="pei-empty">∅ No tags</span>;
-  if (field === 'key' && typeof value === 'number') return <b>{formatKeyDisplay(value)}</b>;
+  if (field === 'key' && typeof value === 'number') return <span className="pei-key-chip"><KeyDisplay keyValue={value} /></span>;
+  if (field === 'bpm' && typeof value === 'number') return <BPMDisplay bpm={value} round={false} />;
   return <b>{field === 'maincue' && typeof value === 'number' ? `${value.toFixed(3)}s` : String(value)}</b>;
 }
 
+function GridGeometry({ change }: { change: PlaylistExportFieldPlan }) {
+  const read = (value: unknown) => (value && typeof value === 'object' && 'tempo_changes' in value ? value.tempo_changes : []) as TempoChangeLike[];
+  const before = change.before_known ? read(change.before) : [], after = read(change.after);
+  const firsts = [before[0]?.start_time, after[0]?.start_time].filter((v): v is number => v !== undefined);
+  if (!firsts.length) return null;
+  const start = Math.max(0, Math.min(...firsts) - 0.1), end = start + 4;
+  return <details className="pei-grid-geometry"><summary>Grid geometry · {start.toFixed(3)}–{end.toFixed(3)}s</summary>
+    <svg viewBox="0 0 520 56" role="img" aria-label="Observed and intended grid positions in the first preview window">
+      {[before, after].map((changes, lane) => <g key={lane} className={lane ? 'pei-grid-after' : 'pei-grid-before'}><line x1="0" y1={lane * 28 + 20} x2="520" y2={lane * 28 + 20} />{markersInWindow(beatMarkersFromTempoChanges(changes, end), start, end - start).map((m, i) => <line key={i} x1={(m.time - start) / (end - start) * 520} x2={(m.time - start) / (end - start) * 520} y1={lane * 28 + (m.isDownbeat ? 2 : 10)} y2={lane * 28 + 20} />)}</g>)}
+    </svg><p className="pei-secondary">Top: observed destination{!change.before_known ? ' · unknown (not an empty grid)' : ''}. Bottom: intended source. Geometry is computed from the tempo-change lists; no audio waveform or native readback is implied.</p>
+  </details>;
+}
+
 function FieldChange({ change }: { change: PlaylistExportFieldPlan }) {
-  return <div className={`pei-field pei-${change.action}`}>
-    <div className="pei-field-title"><b>{LABELS[change.field] || change.field}</b><span className={`pei-badge pei-${change.action}`}>{ACTIONS[change.action]}</span></div>
-    <div className="pei-before-after"><div><small>DESTINATION NOW</small><FieldValue field={change.field} value={change.before} known={change.before_known} /></div><span aria-hidden="true">→</span><div><small>{change.action === 'skip' || change.action === 'blocked' ? 'LIBRARY · NOT APPLIED' : 'LIBRARY → DESTINATION'}</small><FieldValue field={change.field} value={change.after} known /></div></div>
-    {change.reason && <p className="pei-secondary">{change.reason}</p>}
+  const geometric = change.field === 'hotcues';
+  const action = change.action === 'replace' && change.before_known && (change.before === null || (Array.isArray(change.before) && change.before.length === 0)) ? 'FILL BLANK' : ACTIONS[change.action];
+  return <div role="group" aria-label={`${LABELS[change.field] || change.field} change`} className={`pei-field-row pei-${change.action}${geometric ? ' pei-cue-change' : ''}`}>
+    <span className="pei-field-label">{LABELS[change.field] || change.field}</span>
+    <div className="pei-value-before">{geometric && <small className="pei-cue-caption">Before</small>}<FieldValue field={change.field} value={change.before} known={change.before_known} /></div><span className="pei-arrow" aria-hidden="true">→</span><div className="pei-value-after">{geometric && <small className="pei-cue-caption">After</small>}<FieldValue field={change.field} value={change.after} known /></div>
+    <span className={`pei-field-action pei-${change.action}`} title={change.reason || undefined}>{action}</span>
+    {change.field === 'beatgrid' && change.action !== 'skip' && change.action !== 'blocked' && <GridGeometry change={change} />}
+  </div>;
+}
+
+/** Read-only field presentation. Scope, policy and execution remain with callers. */
+export function ExportFieldChanges({ changes, beforeLabel = 'DESTINATION NOW', afterLabel = 'LIBRARY VALUE' }: { changes: PlaylistExportFieldPlan[]; beforeLabel?: string; afterLabel?: string }) {
+  const changed = changes.filter(c => c.action !== 'unchanged');
+  const unchanged = changes.filter(c => c.action === 'unchanged');
+  const notes = [...new Set(changes.map(c => c.reason).filter((r): r is string => Boolean(r)))];
+  return <div className="pei-field-list">
+    <div className="pei-field-columns"><span>FIELD</span><span>{beforeLabel}</span><span /><span>{afterLabel}</span><span>ACTION</span></div>
+    {changed.map(change => <FieldChange key={change.field} change={change} />)}
+    {unchanged.length > 0 && <details className="pei-unchanged"><summary>{unchanged.length} same-value field{unchanged.length === 1 ? '' : 's'} · still rewritten</summary>{unchanged.map(change => <FieldChange key={change.field} change={change} />)}</details>}
+    {notes.length > 0 && <details className="pei-policy-notes"><summary>Policy / unknown details · {notes.length}</summary>{notes.map(note => <p className="pei-secondary" key={note}>{note}</p>)}</details>}
   </div>;
 }
 
@@ -179,7 +212,7 @@ export function PlaylistExportInspector({ playlistName, onClose }: { playlistNam
           {scope === 'full' && <section className="pei-track-plans"><h3>Track data · {plan.data.tracks.length} tracks</h3><p className="pei-secondary">Compared values are the readers' observations, not independent native-file verification. Unknown is not empty. Same values can still be rewritten.</p>
             {plan.data.tracks.map((track, i) => <details key={`${track.track_id}:${i}`} open={track.record_action === 'blocked' || (i === 0 && track.fields.some(f => f.action === 'clear'))}>
               <summary>{track.title} <span className={`pei-badge ${track.record_action === 'blocked' ? 'pei-clear' : ''}`}>{track.record_action === 'blocked' ? 'RECORD ABSENT · cannot add' : 'EXISTING RECORD'}</span>{track.fields.some(f => f.action === 'clear') && <span className="pei-badge pei-clear">CLEAR: {track.fields.filter(f => f.action === 'clear').map(f => LABELS[f.field] || f.field).join(', ')}</span>}{track.fields.some(f => f.action === 'skip') && <span className="pei-badge pei-skip">SKIP</span>}</summary>
-              {track.fields.map(change => <FieldChange key={change.field} change={change} />)}
+              <ExportFieldChanges changes={track.fields} />
             </details>)}
             <details><summary><span className="pei-badge pei-replace-unknown">SHARED TAG STRUCTURE · prior values unknown</span></summary><p>Current full export can create/update destination tag structure. Prior structure details are unknown; track assignment scope remains this playlist.</p>{plan.data.tag_structure.map(c => <p key={c.id}>{c.name} → {c.tags.map(t => t.name).join(' · ') || '∅'}</p>)}</details>
           </section>}

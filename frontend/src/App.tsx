@@ -3,6 +3,7 @@ import { QueryClientProvider } from '@tanstack/react-query';
 import { queryClient } from './api/queryClient';
 import { DEV_SURFACES } from './devMode';
 import { OPEN_LIBRARY_TRACK_EVENT } from './library/openTrack';
+import { OPEN_LIBRARY_PLAYLIST_EVENT, peekLibraryPlaylistRequest } from './library/openPlaylist';
 import { OPEN_ACQUISITION_EVENT } from './components/acquisition/openAcquisition';
 
 const SettingsPage = lazy(() => import('./settings/SettingsPage'));
@@ -217,6 +218,11 @@ function App() {
     const onOpenTrack = () => setView('library');
     window.addEventListener(OPEN_LIBRARY_TRACK_EVENT, onOpenTrack);
     return () => window.removeEventListener(OPEN_LIBRARY_TRACK_EVENT, onOpenTrack);
+  }, []);
+  useEffect(() => {
+    const openPlaylist = () => { if (peekLibraryPlaylistRequest()) setView('library'); };
+    window.addEventListener(OPEN_LIBRARY_PLAYLIST_EVENT, openPlaylist);
+    return () => window.removeEventListener(OPEN_LIBRARY_PLAYLIST_EVENT, openPlaylist);
   }, []);
   useEffect(() => {
     const onOpenAcq = () => setView('sync');

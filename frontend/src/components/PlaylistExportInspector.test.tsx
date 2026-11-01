@@ -4,7 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, expect, it, vi } from 'vitest';
 import { api, PlaylistExportRequestError } from '../api/client';
-import { PlaylistExportEntry } from './PlaylistExportInspector';
+import { ExportFieldChanges, PlaylistExportEntry } from './PlaylistExportInspector';
 import { exportPlanFixture as plan, exportReportFixture as report } from '../test/playlistExportFixtures';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -98,4 +98,20 @@ it('keeps an unavailable preview non-executable and rechecks after a prerequisit
   expect(document.body.textContent).not.toContain('Plan unavailable');
   await acknowledge();
   expect(button('Export reviewed changes').disabled).toBe(false);
+});
+
+it('presents scalar deltas as colored key values and collapses same-value rewrites without hiding clear intent', () => {
+  const host = document.createElement('div'); document.body.append(host); root = createRoot(host);
+  act(() => root.render(<ExportFieldChanges changes={[
+    { field: 'key', before_known: true, before: 7, after: 8, action: 'replace', reason: null },
+    { field: 'energy', before_known: true, before: 4, after: null, action: 'clear', reason: null },
+    { field: 'title', before_known: true, before: 'Same', after: 'Same', action: 'unchanged', reason: null },
+  ]} />));
+  const key = host.querySelector('[aria-label="Key change"]')!;
+  expect(key.querySelectorAll('.key-display')).toHaveLength(2);
+  expect((key.querySelector('.key-display') as HTMLElement).style.color).not.toBe('');
+  expect(host.querySelector('[aria-label="Energy change"]')?.textContent).toContain('∅ Empty');
+  expect(host.querySelector('[aria-label="Energy change"]')?.textContent).toContain('CLEAR');
+  expect(host.querySelector<HTMLDetailsElement>('.pei-unchanged')?.open).toBe(false);
+  expect(host.querySelector('.pei-unchanged summary')?.textContent).toContain('still rewritten');
 });
