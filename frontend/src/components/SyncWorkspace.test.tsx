@@ -4,7 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { api } from '../api/client';
-import { fieldReview, FieldRequestError, type FieldContext, type FieldPlan } from '../api/fieldReview';
+import { fieldReview, FieldRequestError, type FieldContext, type FieldPlan, type FieldReceipt } from '../api/fieldReview';
 import { openSyncWorkspace, setSyncWorkspaceBusy, takeSyncWorkspace } from '../sync/openWorkspace';
 import { SyncView } from './SyncView';
 import { FieldReviewEntry } from './FieldReviewInspector';
@@ -147,4 +147,69 @@ it('rejects malformed playlist tracks without crashing the workspace', async () 
   await act(async () => { button('Export…').click(); await tick(); });
   expect(document.body.textContent).toContain('Library data unavailable');
   expect(document.querySelector('.sync-workspace')).not.toBeNull();
+});
+
+it.each((['filtered', 'all'] as const).flatMap(scope => (['success', 'error', 'unknown'] as const).map(outcome => ({ scope, outcome }))))('retains $scope operation and $outcome outcome across passive scope refreshes', async ({ scope, outcome }) => {
+  let resolve!: (value: FieldReceipt) => void, reject!: (error: Error) => void;
+  const execute = vi.spyOn(fieldReview, 'execute').mockImplementation(() => new Promise((ok, fail) => { resolve = ok; reject = fail; }));
+  await render();
+  await choose('Review scope', scope);
+  act(() => client.setQueryData(['tracks', 'sync-workspace'], { items: tracks.slice(0, 2), total: 2 }));
+  await act(async () => { await tick(); button('Recheck plan').click(); await tick(); });
+  await act(async () => { document.querySelectorAll<HTMLInputElement>('.field-replacement input').forEach(input => input.click()); await tick(); });
+  await act(async () => { button('Apply 6 fields').click(); await tick(); });
+  const panel = document.querySelector('[data-review-panel]');
+  await act(async () => { client.setQueryData(['tracks', 'sync-workspace'], { items: tracks, total: 3 }); await tick(); });
+  expect(document.querySelector('[data-review-panel]')).toBe(panel);
+  expect(button('Recheck plan').disabled).toBe(true);
+  expect(button('Clear review').disabled).toBe(true);
+  expect(execute.mock.calls[0][0].track_ids).toEqual([1, 2]);
+  const expected = outcome === 'success' ? 'Field receipt' : outcome === 'error' ? 'Operation not started' : 'Outcome unknown';
+  await act(async () => {
+    if (outcome === 'success') {
+      const submitted = execute.mock.calls[0][0];
+      resolve({ ...submitted, status: 'complete', verification: 'Fixture receipt', tracks: submitted.tracks.map(track => ({ ...track, fields: submitted.fields.map(field => ({ field, status: 'applied' })) })) });
+    } else reject(new FieldRequestError('Original operation outcome', outcome === 'unknown' ? 'unknown' : 'rejected'));
+    await tick();
+  });
+  expect(document.body.textContent).toContain(expected);
+  await act(async () => { client.setQueryData(['tracks', 'sync-workspace'], { items: tracks.slice().reverse(), total: 3 }); await tick(); });
+  expect(document.querySelector('[data-review-panel]')).toBe(panel);
+  expect(document.body.textContent).toContain(expected);
+  await act(async () => { button('Inspect destination, then recheck').click(); await tick(); });
+  expect(vi.mocked(fieldReview.plan).mock.calls.at(-1)![0].track_ids).toEqual([3, 2, 1]);
+});
+
+it('invalidates an unapplied implicit plan on passive scope change without replacing its owner', async () => {
+  await render();
+  await act(async () => { client.setQueryData(['tracks', 'sync-workspace'], { items: tracks.slice(0, 2), total: 2 }); await tick(); button('Recheck plan').click(); await tick(); });
+  const panel = document.querySelector('[data-review-panel]');
+  await act(async () => { document.querySelectorAll<HTMLInputElement>('.field-replacement input').forEach(input => input.click()); await tick(); });
+  expect(button('Apply 6 fields').disabled).toBe(false);
+  await act(async () => { client.setQueryData(['tracks', 'sync-workspace'], { items: tracks, total: 3 }); await tick(); });
+  expect(document.querySelector('[data-review-panel]')).toBe(panel);
+  expect(button('Apply 6 fields').disabled).toBe(true);
+  expect(document.body.textContent).toContain('Scope changed since this plan');
+});
+
+it.each(['success', 'error'] as const)('retains submitted playlist owner and %s outcome when Library and playlist caches change', async outcome => {
+  vi.spyOn(api.playlistSync, 'previewExportPlan').mockImplementation(async (name, target, scope) => ({ ...exportPlanFixture, playlist_name: name, target, scope }));
+  let resolve!: (value: typeof exportReportFixture) => void, reject!: (error: Error) => void;
+  vi.spyOn(api.playlistSync, 'executeExportPlan').mockImplementation(() => new Promise((ok, fail) => { resolve = ok; reject = fail; }));
+  await render();
+  await act(async () => { button('Export…').click(); await tick(); });
+  await act(async () => { document.querySelector<HTMLInputElement>('.pei-confirm input')!.click(); await tick(); });
+  await act(async () => { button('Export reviewed changes').click(); await tick(); });
+  const panel = document.querySelector('[data-review-panel]');
+  await act(async () => {
+    client.setQueryData(['tracks', 'sync-workspace'], { items: tracks.slice().reverse(), total: 3 });
+    client.setQueryData(['playlists'], []); await tick();
+  });
+  expect(document.querySelector('[data-review-panel]')).toBe(panel);
+  expect(button('Clear review').disabled).toBe(true);
+  await act(async () => { if (outcome === 'success') resolve(exportReportFixture); else reject(new Error('Lost playlist receipt')); await tick(); });
+  expect(document.querySelector('[data-review-panel]')).toBe(panel);
+  expect(document.body.textContent).toContain(outcome === 'success' ? 'Export receipt' : 'Lost playlist receipt');
+  await act(async () => { button('Clear review').click(); await tick(); });
+  expect(document.querySelector('[data-review-panel]')).toBeNull();
 });

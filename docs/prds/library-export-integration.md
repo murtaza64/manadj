@@ -11,11 +11,13 @@
 - Library field and playlist entries capture context then open SYNC. Exact IDs and source scope survive navigation; empty selection never becomes the whole Library. Complete filtered/all scopes refuse truncated or malformed responses. Keyboard rows remain reachable after filtering hides the focused track.
 - Plan readiness is an observation, not connection/native playback proof. Engine and Rekordbox desktop use existing adapters; USB remains unavailable. Phone/peer setup remains Settings-owned.
 - Target/scope/operation changes discard stale plans and consent. Pending execution locks local routing/context controls and duplicate execution; top-level mode changes keep the pending workspace mounted. Unknown outcomes require inspection and a fresh plan, not replay.
+- Passive Library/playlist cache changes never replace the submitted inspector or discard its pending/success/error/unknown outcome. A changed implicit ID scope disables an unapplied field plan; explicit Recheck captures the current IDs. Explicit context changes remain locked until settlement; Clear/new review can replace the owner afterward.
 - Recommendation: consolidate destination work under SYNC. This candidate retains legacy EXPORT and existing Tracks/Playlists/import tabs; retiring or redirecting EXPORT requires a separate explicit decision.
 - Review choices after independent source QA: develop this placement, revise it, or park it. None authorizes source landing, installed activation, or device/media writes.
 - Production backend/writers/USB/Android are unchanged from1036. The fixture host only adds truthful ffmpeg availability; other optional full-App services remain unmounted and may return403/404.
 - Review build: `npm exec vite -- build --config scripts/review-sync442/vite.config.ts --outDir <own isolated assets>`. Serve using the fixture command below, then open `?view=sync`.
 - Browser: `uv run scripts/agent/check_sync_workspace.py --url <fresh own fixture URL> --artifacts-prefix <own prefix>` runs actual App navigation, captured Library/playlist entry, real Engine/RB/native/playlist writes and backups, pending mode retention, keyboard/mobile, real gate/freshness rejection and injected transport failure. It never substitutes a successful plan or writer result.
+- Browser qualification: headless MIDI denial triggers the existing App boot recovery's whole-page reload after3attempts. The checker seeds only its existing session recovery flag to prevent this unrelated reload from racing selection/receipt checks; no MIDI permission/device access or production MIDI behavior is changed. Selection and captured-ID assertions remain strict.
 
 ## Inputs and ancestry
 

@@ -4,6 +4,7 @@
 # ///
 """Actual App/Sync browser proof; refuses anything but the disposable fixture."""
 import argparse
+import re
 from playwright.sync_api import expect, sync_playwright
 
 parser = argparse.ArgumentParser()
@@ -14,6 +15,10 @@ url = args.url.rstrip('/')
 with sync_playwright() as pw:
     browser = pw.chromium.launch()
     page = browser.new_page(viewport={'width': 1500, 'height': 1000})
+    # Headless MIDI permission is denied. Its existing boot recovery otherwise
+    # reloads the whole App after3s, racing captured selection/receipts. Seed
+    # only that recovery flag; do not grant devices or mock adapter success.
+    page.add_init_script("sessionStorage.setItem('manadj-midi-boot-reloaded', '1')")
     identity = page.request.get(url + '/fixture/identity').json()
     assert identity['fixture'] == 'library-export-442' and not identity['installed_app']
     assert identity['engine_identity_fixture']
@@ -159,7 +164,11 @@ with sync_playwright() as pw:
     page.locator('.topbar-segment-overflow').click()
     page.get_by_role('menuitem', name='EXPORT', exact=False).click()
     # The real Library entry captures its exact selection then changes App mode.
-    page.get_by_text('Neon Current', exact=True).filter(visible=True).first.click()
+    library_row = page.locator('.track-row:visible[data-track-id="1"]').filter(has_text='Neon Current')
+    expect(library_row).to_have_count(1)
+    library_row.click()
+    expect(library_row).to_have_class(re.compile('track-row-selected'))
+    expect(page.get_by_role('button', name='Review fields…', exact=True)).to_have_attribute('data-field-scope', 'selected')
     page.get_by_role('button', name='Review fields…', exact=True).click()
     expect(sw).to_be_visible()
     expect(sw.get_by_label('Review scope', exact=True)).to_have_value('captured')

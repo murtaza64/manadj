@@ -67,7 +67,7 @@ export function SyncWorkspace({ request, onPendingChange }: { request: Workspace
   }, []);
   function change(action: () => void) {
     if (busyRef.current) return;
-    setObservation('not checked'); setOpen(true); action();
+    setObservation('not checked'); setOpen(true); setGeneration(value => value + 1); action();
   }
   function choose(track: Track, toggle = false) {
     change(() => {
@@ -90,7 +90,9 @@ export function SyncWorkspace({ request, onPendingChange }: { request: Workspace
     if ((scope === 'all' || scope === 'filtered') && !complete) throw new Error('Library scope is incomplete (maximum10000). Capture an exact selection instead.');
     return [...ids];
   } };
-  const contextKey = JSON.stringify([request?.sequence, generation, kind, surface, direction, normalizedScope, ids, playlistName, playlistScope]);
+  // Only explicit context transitions replace the operation owner. Live query
+  // results may invalidate a plan, never unmount its pending request/receipt.
+  const contextKey = JSON.stringify([request?.sequence, generation, kind, surface, direction, normalizedScope, playlistName, playlistScope]);
   const clear = () => { if (!busyRef.current) { setOpen(false); setObservation('not checked'); setGeneration(value => value + 1); } };
 
   return <section className="sync-workspace" aria-label="Sync workspace">
@@ -133,8 +135,8 @@ export function SyncWorkspace({ request, onPendingChange }: { request: Workspace
     </section>
     <div className="sw-detail" aria-label="Review and receipt">
       {busy && <p className="sw-warning" role="status">Operation pending. Scope/navigation controls are locked until its receipt arrives.</p>}
-      {!open ? <p>Review cleared. Choose a scope and select “Review this scope”.</p> : kind === 'fields' ? <FieldReviewInspector key={contextKey} embedded scopes={scopes} initialScope={normalizedScope} initialFields={fields} initialSurface={surface} initialDirection={direction} onFieldsChange={setFields} onPendingChange={pending} onObservationChange={setObservation} onClose={clear} />
-        : matches.length !== 1 ? <p>{playlistName ? 'Playlist name is unavailable or ambiguous. Choose an unambiguous Library playlist.' : 'Choose a Library playlist. This export can add missing records; field-only review cannot.'}</p>
+      {!open ? <p>Review cleared. Choose a scope and select “Review this scope”.</p> : kind === 'fields' ? <FieldReviewInspector key={contextKey} embedded scopes={scopes} scopeRevision={JSON.stringify(ids)} initialScope={normalizedScope} initialFields={fields} initialSurface={surface} initialDirection={direction} onFieldsChange={setFields} onPendingChange={pending} onObservationChange={setObservation} onClose={clear} />
+        : !playlistName ? <p>Choose a Library playlist. This export can add missing records; field-only review cannot.</p>
           : <PlaylistExportInspector key={contextKey} embedded playlistName={playlistName} initialTarget={surface} initialScope={playlistScope} onPendingChange={pending} onObservationChange={setObservation} onClose={clear} />}
     </div>
   </section>;

@@ -25,14 +25,15 @@ export function FieldReviewEntry({ scopes, initialScope = 'selected', initialFie
     } catch (error) { setError(error instanceof Error ? error.message : String(error)); }
     finally { pending.current = false; setOpening(false); }
   }
-  return <><button className="btn" disabled={opening} onClick={() => void open()}>{opening ? 'Capturing scope…' : label}</button>{error && <span role="alert">{error}</span>}</>;
+  return <><button className="btn" data-field-scope={initialScope} disabled={opening} onClick={() => void open()}>{opening ? 'Capturing scope…' : label}</button>{error && <span role="alert">{error}</span>}</>;
 }
 
 export type ReviewObservation = 'not checked' | 'reading' | 'plan available' | 'blocked plan' | 'unavailable';
-export function FieldReviewInspector({ scopes, initialScope, initialFields, onClose, embedded = false, initialSurface = 'engine', initialDirection = 'import', onPendingChange, onFieldsChange, onObservationChange }: {
+export function FieldReviewInspector({ scopes, initialScope, initialFields, onClose, embedded = false, initialSurface = 'engine', initialDirection = 'import', onPendingChange, onFieldsChange, onObservationChange, scopeRevision }: {
   scopes: FieldScopes; initialScope: FieldScope; initialFields?: FieldName[]; onClose: () => void;
   embedded?: boolean; initialSurface?: 'engine' | 'rekordbox'; initialDirection?: 'import' | 'export';
   onPendingChange?: (pending: boolean) => void; onFieldsChange?: (fields: FieldName[]) => void; onObservationChange?: (state: ReviewObservation) => void;
+  scopeRevision?: string;
 }) {
   const queryClient = useQueryClient();
   const enabled = useExportEnabled();
@@ -41,6 +42,7 @@ export function FieldReviewInspector({ scopes, initialScope, initialFields, onCl
   const [direction, setDirection] = useState<'import' | 'export'>(initialDirection);
   const [fields, setFields] = useState<FieldName[]>((initialFields ?? ['key', 'hotcues', 'maincue']).filter(field => supportedFields(initialSurface, initialDirection).includes(field)));
   const [plan, setPlan] = useState<FieldPlan | null>(null);
+  const [plannedScopeRevision, setPlannedScopeRevision] = useState(scopeRevision);
   const [receipt, setReceipt] = useState<FieldReceipt | null>(null);
   const [choices, setChoices] = useState<Set<string>>(new Set());
   const [error, setError] = useState<{ message: string; code: string } | null>(null);
@@ -85,6 +87,7 @@ export function FieldReviewInspector({ scopes, initialScope, initialFields, onCl
     if (inFlight.current) return;
     clear();
     const ticket = ++serial.current;
+    setPlannedScopeRevision(scopeRevision);
     setLoading(true);
     onObservationChange?.('reading');
     try {
@@ -101,7 +104,7 @@ export function FieldReviewInspector({ scopes, initialScope, initialFields, onCl
     } finally { if (ticket === serial.current) setLoading(false); }
   }
   async function apply() {
-    if (!plan || inFlight.current || !plan.executable || now - loadedAt >= 60000 || (direction === 'export' && !enabled)) return;
+    if (!plan || inFlight.current || plannedScopeRevision !== scopeRevision || !plan.executable || now - loadedAt >= 60000 || (direction === 'export' && !enabled)) return;
     inFlight.current = true; setWriting(true); setError(null);
     onPendingChange?.(true);
     try {
@@ -117,6 +120,7 @@ export function FieldReviewInspector({ scopes, initialScope, initialFields, onCl
     }
   }
   const expired = plan && now - loadedAt >= 60000;
+  const scopeChanged = plan && plannedScopeRevision !== scopeRevision;
   const resolved = receipt !== null || error !== null;
   const count = plan?.tracks.reduce((n, track) => n + track.fields.filter(field => field.action === 'fill' || (field.action === 'consent' && choices.has(key(track.track_id, field.field)))).length, 0) || 0;
   const content = <>
@@ -134,6 +138,7 @@ export function FieldReviewInspector({ scopes, initialScope, initialFields, onCl
       {error && <section role="alert"><h3>{error.code === 'unknown' ? 'Outcome unknown' : 'Operation not started'}</h3><p>{error.message}</p></section>}
       {plan && <><p>{plan.track_ids.length} tracks · IDs {plan.track_ids.join(', ')} · {plan.direction === 'import' ? `${plan.surface} → Library` : `Library → ${plan.surface}`}</p>
         {expired && <p role="alert">Plan expired. Recheck before applying.</p>}
+        {scopeChanged && !writing && !resolved && <p role="alert">Scope changed since this plan. Recheck to capture its current IDs before applying.</p>}
         {plan.warnings.map(warning => <p className="pei-warning" key={warning}>{warning}</p>)}
         {!receipt && !error && plan.tracks.map(track => <section key={track.track_id}><h3>{track.title || track.filename}</h3>
           {track.fields.filter(field => field.action === 'consent').map(field => <label className="field-replacement" key={field.field}><input type="checkbox" disabled={writing} checked={choices.has(key(track.track_id, field.field))} onChange={() => setChoices(previous => { const next = new Set(previous); const id = key(track.track_id, field.field); if (next.has(id)) next.delete(id); else next.add(id); return next; })} />Replace saved {field.field} for {track.title || track.track_id}</label>)}
@@ -143,7 +148,7 @@ export function FieldReviewInspector({ scopes, initialScope, initialFields, onCl
       </>}
       {receipt && <section aria-label="Field receipt"><h3>{receipt.status === 'unknown' ? 'Outcome unknown' : receipt.status === 'partial' ? 'Needs attention' : 'Field receipt'}</h3>{receipt.tracks.map(track => <section key={track.track_id}><h4>{track.title || track.track_id}</h4>{track.fields.map(field => <p key={field.field}>{field.field} · {field.status}{field.reason ? ` · ${field.reason}` : ''}</p>)}</section>)}<p>{receipt.verification}</p></section>}
     </div>
-    <footer className="pei-footer"><button className="btn" disabled={writing} onClick={onClose}>{embedded ? 'Clear review' : 'Close'}</button><button className="btn" disabled={writing || !fields.length || loading} onClick={() => void recheck()}>{loading ? 'Reading…' : resolved ? 'Inspect destination, then recheck' : 'Recheck plan'}</button><button className="btn btn-primary" disabled={writing || loading || !plan?.executable || Boolean(expired) || resolved || !count || (direction === 'export' && !enabled)} onClick={() => void apply()}>{writing ? 'Applying…' : `Apply ${count} fields`}</button></footer>
+    <footer className="pei-footer"><button className="btn" disabled={writing} onClick={onClose}>{embedded ? 'Clear review' : 'Close'}</button><button className="btn" disabled={writing || !fields.length || loading} onClick={() => void recheck()}>{loading ? 'Reading…' : resolved ? 'Inspect destination, then recheck' : 'Recheck plan'}</button><button className="btn btn-primary" disabled={writing || loading || !plan?.executable || Boolean(expired) || Boolean(scopeChanged) || resolved || !count || (direction === 'export' && !enabled)} onClick={() => void apply()}>{writing ? 'Applying…' : `Apply ${count} fields`}</button></footer>
   </>;
   return embedded ? <section data-review-panel tabIndex={-1} aria-label="Field review" className="sync-embedded-review field-review-inspector"><h2>Review fields</h2>{content}</section>
     : <Modal title={<h2>Review Library fields</h2>} className="playlist-export-inspector field-review-inspector" closeDisabled={writing} onClose={() => { if (!inFlight.current) onClose(); }}>{content}</Modal>;
