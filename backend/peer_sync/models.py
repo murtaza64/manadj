@@ -63,6 +63,17 @@ class PeerHistory(Base):
     session = relationship("Session", backref=backref("peer_history", uselist=False, passive_deletes="all"))
 
 
+class FolderRoot(Base):
+    __tablename__ = "peer_folder_roots"
+    id = Column(Integer, primary_key=True)
+    root = Column(Text, nullable=False, unique=True)
+    token = Column(String(32), nullable=False, unique=True)
+    archived = Column(Integer, nullable=False, default=0)
+    cursor = Column(String(160), nullable=False, default="")
+    last_success = Column(String(40), nullable=True)
+    entries = Column(Integer, nullable=True)
+
+
 class FolderConfig(Base):
     __tablename__ = "peer_folder_config"
     id = Column(Integer, primary_key=True)
@@ -72,11 +83,13 @@ class FolderConfig(Base):
     state = Column(String(80), nullable=False, default="disabled")
     cursor = Column(String(160), nullable=False, default="")
     generation = Column(Integer, nullable=False, default=0)
+    root_id = Column(Integer, ForeignKey("peer_folder_roots.id"), nullable=False)
     __table_args__ = (CheckConstraint("id = 1"),)
 
 
 class FolderPublication(Base):
     __tablename__ = "peer_folder_publications"
+    root_id = Column(Integer, ForeignKey("peer_folder_roots.id"), primary_key=True)
     session_uuid = Column(String(36), ForeignKey("peer_sync_sessions.session_uuid"), primary_key=True)
     published = Column(Integer, nullable=False, default=0)
     state = Column(String(80), nullable=False, default="pending")
@@ -84,6 +97,7 @@ class FolderPublication(Base):
 
 class FolderReceipt(Base):
     __tablename__ = "peer_folder_receipts"
+    root_id = Column(Integer, ForeignKey("peer_folder_roots.id"), primary_key=True)
     artifact = Column(String(160), primary_key=True)
     received = Column(Integer, nullable=False, default=0)
     state = Column(String(80), nullable=False)

@@ -41,6 +41,19 @@ class FolderBody(Strict):
     enabled: bool
 
 
+class ArchiveBody(Strict):
+    generation: int = Field(ge=0)
+    pending: int = Field(ge=0)
+    retain_all_files: Literal[True]
+
+    @field_validator("retain_all_files", mode="before")
+    @classmethod
+    def explicit_retention(cls, value):
+        if value is not True:
+            raise ValueError("Explicit boolean retention consent required")
+        return value
+
+
 class Asset(Strict):
     algorithm: Literal["sha256-file-bytes-v1"]
     sha256: Digest

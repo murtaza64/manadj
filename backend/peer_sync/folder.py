@@ -10,6 +10,7 @@ import os
 import re
 import stat
 from contextlib import contextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 from uuid import UUID, uuid4
 
@@ -17,7 +18,7 @@ from sqlalchemy import select, update
 
 from ..peer_inventory.contracts import MAX_EXPORT, canonical
 from .contracts import Bundle, Chunk, ExportBody, Manifest, digest
-from .models import FolderConfig, FolderPublication, FolderReceipt, SyncSession, SyncSource
+from .models import FolderConfig, FolderPublication, FolderReceipt, FolderRoot, SyncSession, SyncSource
 from .service import PeerSync, SyncError
 
 MARKER = ".manadj-peer-folder.json"
@@ -129,53 +130,115 @@ class FolderTransport:
             PeerSync(db)._lock()
             PeerSync(db).identity()
             config = db.get(FolderConfig, 1)
-            if config is not None and config.root != body.root:
-                raise SyncError(409, "transport_root_is_pinned")
+            changing = config is not None and config.root != body.root
+            if changing and (config.enabled or not db.get(FolderRoot, config.root_id).archived):
+                raise SyncError(409, "disable_and_archive_before_rotation")
+            known = db.scalar(select(FolderRoot).where(FolderRoot.root == body.root))
             if not body.enabled and config is not None:
+                if changing:
+                    raise SyncError(409, "activate_new_root_explicitly")
                 config.enabled, config.state = 0, "disabled"
                 config.generation += 1
                 db.commit()
                 return self.status()
             try:
                 with root_fd(body.root) as fd:
-                    if not names(fd):
+                    entries = names(fd)
+                    if not entries and known is None:
                         immutable_json(fd, MARKER, {**FORMAT, "token": uuid4().hex})
                     token = marker(fd)
-                    if config is not None and config.token != token:
+                    if known is not None and known.token != token:
                         raise SyncError(409, "folder_ownership_changed")
+                    if known is None and db.scalar(select(FolderRoot).where(FolderRoot.token == token)) is not None:
+                        raise SyncError(409, "folder_token_already_authorized_at_another_path")
             except OSError:
                 raise SyncError(422, "existing_no_symlink_owned_folder_required") from None
+            if known is None:
+                known = FolderRoot(root=body.root, token=token)
+                db.add(known)
+                db.flush()
+            known.archived = 0
             if config is None:
-                config = FolderConfig(id=1, root=body.root, token=token)
+                config = FolderConfig(id=1, root=body.root, token=token, root_id=known.id)
                 db.add(config)
+            config.root, config.token, config.root_id = known.root, known.token, known.id
+            config.cursor = known.cursor
             config.enabled, config.state = int(body.enabled), "pending" if body.enabled else "disabled"
             config.generation = (config.generation or 0) + 1
+            db.commit()
+        return self.status()
+
+    @staticmethod
+    def _pending(db, root_id):
+        from sqlalchemy import func
+        return db.scalar(select(func.count()).select_from(FolderPublication).where(
+            FolderPublication.root_id == root_id, FolderPublication.state != "acknowledged"))
+
+    def archive(self, body):
+        with self.sessions() as db:
+            PeerSync(db)._lock()
+            config = db.get(FolderConfig, 1)
+            if config is None or config.enabled:
+                raise SyncError(409, "disable_before_archive")
+            if config.generation != body.generation or self._pending(db, config.root_id) != body.pending:
+                raise SyncError(409, "archive_status_changed_refresh_required")
+            db.get(FolderRoot, config.root_id).archived = 1
+            config.state = "archived"
+            config.generation += 1
             db.commit()
         return self.status()
 
     def select(self, sid):
         # Freezes the existing strict issued evidence, including exact asset hashes.
         with self.sessions() as db:
+            config = db.get(FolderConfig, 1)
+            if config is None or db.get(FolderRoot, config.root_id).archived:
+                raise SyncError(409, "active_root_required")
+            selection_root = (config.root_id, config.generation)
+        with self.sessions() as db:
             PeerSync(db).export(sid, ExportBody(reference_basis="explicit-current-row-bindings", fingerprint_assets=True))
         with self.sessions() as db:
             PeerSync(db)._lock()
-            if db.get(FolderPublication, str(sid)) is None:
-                if len(list(db.scalars(select(FolderPublication.session_uuid).limit(255)))) >= 255:
+            config = db.get(FolderConfig, 1)
+            if config is None or db.get(FolderRoot, config.root_id).archived:
+                raise SyncError(409, "active_root_required")
+            if (config.root_id, config.generation) != selection_root:
+                raise SyncError(409, "selection_root_changed_retry_required")
+            if db.get(FolderPublication, (config.root_id, str(sid))) is None:
+                if len(list(db.scalars(select(FolderPublication.session_uuid).where(
+                        FolderPublication.root_id == config.root_id).limit(255)))) >= 255:
                     raise SyncError(422, "transport_selection_limit")
-                db.add(FolderPublication(session_uuid=str(sid)))
+                db.add(FolderPublication(root_id=config.root_id, session_uuid=str(sid)))
             db.commit()
         return self.status()
 
     def status(self):
         with self.sessions() as db:
             config = db.get(FolderConfig, 1)
+            roots = [{"id": r.id, "root": r.root, "archived": bool(r.archived),
+                      "pending": self._pending(db, r.id), "last_success": r.last_success,
+                      "entries": r.entries} for r in db.scalars(select(FolderRoot).order_by(FolderRoot.id))]
+            root_id = config.root_id if config else None
+            try:
+                directory_flags()
+                supported = True
+            except SyncError:
+                supported = False
             return {"state": config.state if config else "unconfigured", "enabled": bool(config and config.enabled),
-                    "root": config.root if config else None,
-                    "publications": [{"session_uuid": row.session_uuid, "state": row.state, "published": bool(row.published)}
-                                     for row in db.scalars(select(FolderPublication).order_by(FolderPublication.session_uuid))],
+                     "root": config.root if config else None,
+                    "root_id": root_id, "generation": config.generation if config else 0,
+                    "supported": supported, "roots": roots, "entry_limit": 256, "selection_limit": 255,
+                    "pending": self._pending(db, root_id) if config else 0,
+                    "retention": "All files and evidence retained. No pruning; archive does not free disk space.",
+                    "sources": [{"replica_id": r.replica_id, "label": r.label}
+                                for r in db.scalars(select(SyncSource).order_by(SyncSource.replica_id))],
+                     "publications": [{"session_uuid": row.session_uuid, "state": row.state, "published": bool(row.published)}
+                                     for row in db.scalars(select(FolderPublication).where(
+                                         FolderPublication.root_id == root_id).order_by(FolderPublication.session_uuid))],
                     "receipts": [{"artifact": row.artifact, "state": row.state, "received": bool(row.received),
                                   "readiness": row.readiness}
-                                 for row in db.scalars(select(FolderReceipt).order_by(FolderReceipt.artifact))]}
+                                 for row in db.scalars(select(FolderReceipt).where(
+                                     FolderReceipt.root_id == root_id).order_by(FolderReceipt.artifact))]}
 
     def _config_state(self, state, generation):
         with self.sessions() as db:
@@ -187,26 +250,51 @@ class FolderTransport:
             ).values(state=state))
             db.commit()
 
-    def _publication(self, sid, state, published=None):
+    def root_evidence(self, root_id):
+        # Database evidence only: archived/offline roots are never opened.
         with self.sessions() as db:
-            row = db.get(FolderPublication, sid)
+            root = db.get(FolderRoot, root_id)
+            if root is None:
+                raise SyncError(404, "authorized_root_missing")
+            return {"root": root.root, "archived": bool(root.archived),
+                    "publications": [{"session_uuid": p.session_uuid, "state": p.state, "published": bool(p.published)}
+                                     for p in db.scalars(select(FolderPublication).where(
+                                         FolderPublication.root_id == root_id).order_by(FolderPublication.session_uuid))],
+                    "receipts": [{"artifact": r.artifact, "state": r.state, "received": bool(r.received), "readiness": r.readiness}
+                                 for r in db.scalars(select(FolderReceipt).where(
+                                     FolderReceipt.root_id == root_id).order_by(FolderReceipt.artifact))]}
+
+    @staticmethod
+    def _current(db, cycle):
+        config = db.get(FolderConfig, 1)
+        return bool(config and config.enabled and (config.root_id, config.generation) == cycle)
+
+    def _publication(self, sid, state, published=None, cycle=None):
+        with self.sessions() as db:
+            PeerSync(db)._lock()
+            if not self._current(db, cycle):
+                return
+            row = db.get(FolderPublication, (cycle[0], sid))
             row.state = state
             if published is not None:
                 row.published = published
             db.commit()
 
-    def _receipt(self, key, state, received=None, readiness=None):
+    def _receipt(self, key, state, received=None, readiness=None, cycle=None):
         with self.sessions() as db:
-            row = db.get(FolderReceipt, key)
+            PeerSync(db)._lock()
+            if not self._current(db, cycle):
+                return
+            row = db.get(FolderReceipt, (cycle[0], key))
             if row is None:
-                row = FolderReceipt(artifact=key)
+                row = FolderReceipt(root_id=cycle[0], artifact=key)
                 db.add(row)
             row.state, row.readiness = state, readiness
             if received is not None:
                 row.received = received
             db.commit()
 
-    def _publish(self, root, sid, published, local, accepted):
+    def _publish(self, root, sid, published, local, accepted, cycle):
         with self.sessions() as db:
             source = db.get(SyncSession, sid)
             key = f"{local}_{sid}_{source.manifest_sha256}"
@@ -216,7 +304,7 @@ class FolderTransport:
             fd = os.open(key, directory_flags(), dir_fd=root)
         except FileNotFoundError:
             if published:
-                self._publication(sid, "file_missing")
+                self._publication(sid, "file_missing", cycle=cycle)
                 return
             if len(names(root)) >= 256:
                 raise SyncError(422, "folder_entry_limit")
@@ -230,14 +318,14 @@ class FolderTransport:
                 try:
                     self._read_bundle(fd, key)
                 except FileNotFoundError:
-                    self._publication(sid, "file_missing")
+                    self._publication(sid, "file_missing", cycle=cycle)
                     return
             else:
                 immutable_json(fd, "manifest.json", expected)
                 for seq, events in chunks.items():
                     immutable_json(fd, f"{seq}-{manifest.chunk_sha256[seq]}.json", {"seq": seq, "events": events})
                 immutable_json(fd, "complete.json", complete)
-                self._publication(sid, "published_waiting_ack", 1)
+                self._publication(sid, "published_waiting_ack", 1, cycle=cycle)
             acknowledged = False
             for receiver in accepted:
                 try:
@@ -246,7 +334,7 @@ class FolderTransport:
                     continue
                 if canonical(ack) == canonical(self._ack(local, sid, source.manifest_sha256, receiver)):
                     acknowledged = True
-            self._publication(sid, "acknowledged" if acknowledged else "published_waiting_ack")
+            self._publication(sid, "acknowledged" if acknowledged else "published_waiting_ack", cycle=cycle)
         finally:
             os.close(fd)
 
@@ -278,19 +366,19 @@ class FolderTransport:
         return Bundle(format="manadj-peer-session", version=1, digest_algorithm="sha256-rfc8785-jcs-v1",
                       manifest=manifest, chunks=chunks)
 
-    def _receive(self, root, key, local, accepted):
+    def _receive(self, root, key, local, accepted, cycle):
         origin, sid, hashed = ARTIFACT.fullmatch(key).groups()
         if origin == local:
             return  # Never forward or echo this replica's own immutable outbox.
         if origin not in accepted:
-            self._receipt(key, "unknown_source")
+            self._receipt(key, "unknown_source", cycle=cycle)
             return
         fd = os.open(key, directory_flags(), dir_fd=root)
         try:
             bundle = self._read_bundle(fd, key)
             with self.sessions() as db:
                 PeerSync(db).receive(bundle)
-            self._receipt(key, "received", received=1)
+            self._receipt(key, "received", received=1, cycle=cycle)
             # Receipt is durable BEFORE ack. Restart retries the same bytes, not a new outbox.
             immutable_json(fd, f"ack-{local}.json", self._ack(origin, sid, hashed, local))
             with self.sessions() as db:
@@ -300,7 +388,7 @@ class FolderTransport:
                 with self.sessions() as db:
                     PeerSync(db).materialize(UUID(sid))
                 readiness = "materialized"
-            self._receipt(key, "acknowledged", received=1, readiness=readiness)
+            self._receipt(key, "acknowledged", received=1, readiness=readiness, cycle=cycle)
         finally:
             os.close(fd)
 
@@ -311,6 +399,7 @@ class FolderTransport:
                 return self.status()  # Disabled does not stat/open the configured root.
             root, token, cursor = config.root, config.token, config.cursor
             generation = config.generation
+            cycle = (config.root_id, generation)
             local = PeerSync(db).identity()["replica_id"]
             accepted = set(db.scalars(select(SyncSource.replica_id).limit(257)))
             if len(accepted) > 256:
@@ -320,7 +409,8 @@ class FolderTransport:
                 db.commit()
                 return self.status()
             publications = [(p.session_uuid, p.published) for p in db.scalars(
-                select(FolderPublication).order_by(FolderPublication.session_uuid).limit(255))]
+                select(FolderPublication).where(FolderPublication.root_id == config.root_id)
+                .order_by(FolderPublication.session_uuid).limit(255))]
         try:
             with root_fd(root) as fd:
                 if marker(fd) != token:
@@ -333,25 +423,38 @@ class FolderTransport:
                         source = db.get(SyncSession, sid)
                         pub_keys[f"{local}_{sid}_{source.manifest_sha256}"] = (sid, published)
                 keys = sorted(set(k for k in entries if ARTIFACT.fullmatch(k)) | pub_keys.keys())
-                cycle = [k for k in keys if k > cursor] + [k for k in keys if k <= cursor]
-                for key in cycle[:8]:
+                work = [k for k in keys if k > cursor] + [k for k in keys if k <= cursor]
+                for key in work[:8]:
+                    with self.sessions() as db:
+                        if not self._current(db, cycle):
+                            break
                     try:
                         if key in pub_keys:
-                            self._publish(fd, *pub_keys[key], local, accepted)
+                            self._publish(fd, *pub_keys[key], local, accepted, cycle)
                         else:
-                            self._receive(fd, key, local, accepted)
+                            self._receive(fd, key, local, accepted, cycle)
                     except (OSError, ValueError, TypeError, KeyError, RecursionError, SyncError) as error:
                         state = ("partial" if isinstance(error, FileNotFoundError) else
                                  error.code if isinstance(error, SyncError) else "invalid_or_unavailable_artifact")
                         if key in pub_keys:
-                            self._publication(pub_keys[key][0], state)
+                            self._publication(pub_keys[key][0], state, cycle=cycle)
                         else:
-                            self._receipt(key, state)
+                            self._receipt(key, state, cycle=cycle)
                     with self.sessions() as db:
+                        PeerSync(db)._lock()
                         db.execute(update(FolderConfig).where(
                             FolderConfig.id == 1, FolderConfig.enabled == 1, FolderConfig.generation == generation,
                         ).values(cursor=key))
+                        if self._current(db, cycle):
+                            db.get(FolderRoot, cycle[0]).cursor = key
                         db.commit()
+                with self.sessions() as db:
+                    PeerSync(db)._lock()
+                    if self._current(db, cycle):
+                        record = db.get(FolderRoot, cycle[0])
+                        record.last_success = datetime.now(timezone.utc).isoformat()
+                        record.entries = len(names(fd))
+                    db.commit()
                 self._config_state("ready", generation)
         except (OSError, ValueError, TypeError, KeyError, SyncError) as error:
             self._config_state(error.code if isinstance(error, SyncError) else "offline", generation)

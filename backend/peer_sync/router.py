@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from ..database import get_db
 from ..peer_inventory.router import local_control, parse
 from ..peer_inventory.contracts import LocalId
-from .contracts import BindBody, Bundle, ExportBody, FolderBody, GuardBody, SourceBody, Strict
+from .contracts import ArchiveBody, BindBody, Bundle, ExportBody, FolderBody, GuardBody, SourceBody, Strict
 from .folder import FolderTransport
 from .service import PeerSync, SyncError
 
@@ -139,3 +139,13 @@ async def transport_select(sid: UUID, request: Request, db: Database):
     except (ValueError, TypeError, RecursionError):
         raise HTTPException(422, "invalid_folder_request") from None
     return await invoke_transport(db, "select", sid)
+
+
+@router.post("/transport/archive")
+async def transport_archive(request: Request, db: Database):
+    return await invoke_transport(db, "archive", request=request, model=ArchiveBody)
+
+
+@router.get("/transport/roots/{root_id}")
+async def transport_root_evidence(root_id: LocalId, db: Database):
+    return await invoke_transport(db, "root_evidence", root_id)

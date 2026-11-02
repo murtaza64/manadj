@@ -89,6 +89,9 @@ async function outputsOf(devices: MediaDeviceInfo[]): Promise<AudioOutputDevice[
 
 export async function listAudioOutputs(forceProbe = false, allowPrompt = true): Promise<AudioOutputDevice[]> {
   if (forceProbe) channelCountCache.clear();
+  // Insecure HTTP LAN review has no mediaDevices. Keep non-audio views usable;
+  // do not fabricate devices or claim secure output routing is available.
+  if (!navigator.mediaDevices) return [];
   const locked = (devices: MediaDeviceInfo[]) => {
     const outputs = devices.filter((d) => d.kind === 'audiooutput' && d.deviceId !== '');
     return outputs.length === 0 || outputs.some((d) => d.label === '');
@@ -118,6 +121,8 @@ export async function listAudioOutputs(forceProbe = false, allowPrompt = true): 
  * Fires on plug/unplug (and on permission changes). Returns an unsubscribe.
  */
 export function onAudioDevicesChanged(listener: () => void): () => void {
-  navigator.mediaDevices.addEventListener('devicechange', listener);
-  return () => navigator.mediaDevices.removeEventListener('devicechange', listener);
+  const devices = navigator.mediaDevices;
+  if (!devices) return () => {};
+  devices.addEventListener('devicechange', listener);
+  return () => devices.removeEventListener('devicechange', listener);
 }

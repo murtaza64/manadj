@@ -163,7 +163,57 @@ export function detailToMessage(detail: unknown, fallback: string): string {
   }
 }
 
+export interface ExchangeStatus {
+  state: string;
+  enabled: boolean;
+  supported: boolean;
+  root: string | null;
+  root_id: number | null;
+  generation: number;
+  pending: number;
+  entry_limit: number;
+  selection_limit: number;
+  retention: string;
+  roots: { id: number; root: string; archived: boolean; pending: number; entries: number | null; last_success: string | null }[];
+  sources: { replica_id: string; label: string }[];
+  publications: { session_uuid: string; state: string; published: boolean }[];
+  receipts: { artifact: string; state: string; received: boolean; readiness: string | null }[];
+}
+
+export interface ExchangeDetail {
+  session_uuid: string;
+  state: string;
+  dependencies_ready: boolean;
+  dependencies: { logical_track_id: string; local_track_id: number | null; asset_state: string }[];
+}
+
+async function exchangeRequest<T>(path: string, body?: unknown): Promise<T> {
+  const response = await fetch(`${API_BASE}/peer-sync/${path}`, body === undefined ? undefined : {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  });
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(detailToMessage(error.detail, `Exchange request failed (${response.status})`));
+  }
+  return response.json();
+}
+
 export const api = {
+  exchange: {
+    status: () => exchangeRequest<ExchangeStatus>('transport'),
+    rootEvidence: (id: number) => exchangeRequest<Pick<ExchangeStatus, 'root' | 'publications' | 'receipts'>>(`transport/roots/${id}`),
+    initialize: () => exchangeRequest<{ replica_id: string }>('identity', {}),
+    identity: () => exchangeRequest<{ replica_id: string }>('identity'),
+    configure: (root: string, enabled: boolean) => exchangeRequest<ExchangeStatus>('transport', { root, enabled }),
+    archive: (generation: number, pending: number) => exchangeRequest<ExchangeStatus>('transport/archive', {
+      generation, pending, retain_all_files: true,
+    }),
+    accept: (replica_id: string, label: string) => exchangeRequest('sources', { replica_id, label }),
+    select: (sid: string) => exchangeRequest<ExchangeStatus>(`transport/selections/${encodeURIComponent(sid)}`, {}),
+    detail: (sid: string) => exchangeRequest<ExchangeDetail>(`sessions/${encodeURIComponent(sid)}`),
+    selectTrack: (id: number) => exchangeRequest<{ guard: string }>(`tracks/${id}/select`, {}),
+    bind: (id: number, guard: string, logical_track_id: string) => exchangeRequest(`tracks/${id}/bind`, { guard, logical_track_id }),
+  },
   tasks: {
     summary: async (): Promise<TaskSummary> => {
       const response = await fetch(`${API_BASE}/tasks/summary`);
