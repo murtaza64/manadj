@@ -43,7 +43,8 @@ class GroupExchange(private val replica: GroupReplica) {
 class GroupHttpTransport(baseUrl: String, groupId: String, private val timeoutMs: Int = 15_000) : GroupTransport {
     private val base = URI(baseUrl.trimEnd('/')).also {
         require(it.scheme in setOf("http", "https") && it.host != null && it.rawUserInfo == null &&
-            it.rawQuery == null && it.rawFragment == null && it.rawPath.orEmpty() in setOf("", "/")) { "Explicit peer origin URL required" }
+            it.rawQuery == null && it.rawFragment == null &&
+            it.rawPath.orEmpty().trimEnd('/').matches(Regex("(?:/[A-Za-z0-9_-]+)*"))) { "Explicit peer base URL with a bounded routing prefix required" }
         require(timeoutMs in 1..120_000)
     }.toString().trimEnd('/') + "/api/device-groups/" + GroupWire.uuid(groupId)
 

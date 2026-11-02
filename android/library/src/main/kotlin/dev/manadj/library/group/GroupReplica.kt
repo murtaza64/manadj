@@ -112,6 +112,20 @@ class GroupReplica(private val root: File, val groupId: String) {
     private fun receipt(state: JSONObject, row: JSONObject, peer: String) = sign(state, "ack") {
         it.put("recipient_device_id", peer).put("operation_id", row.getString("operation_id")).put("operation_sha256", row.getString("sha256"))
     }
+    private fun rememberPossession(state: JSONObject, row: JSONObject, peer: String, proof: GroupSigned) {
+        // A verified relay-signed Delivery/Page carrying this exact operation proves possession,
+        // not a peer-signed ack addressed to us. Keep those facts distinct and retain the proof.
+        val possessions = state.optJSONObject("possessions") ?: JSONObject().also { state.put("possessions", it) }
+        possessions.put(peer + ":" + row.getString("operation_id"), JSONObject()
+            .put("sha256", row.getString("sha256")).put("proof", proof.json()))
+    }
+    private fun wants(state: JSONObject, row: JSONObject, peer: String): Boolean {
+        val key = peer + ":" + row.getString("operation_id")
+        return row.getString("origin_device_id") != peer &&
+            state.getJSONObject("members").getJSONObject(row.getString("origin_device_id")).get("revoked") == false &&
+            !state.getJSONObject("acks").has(key) &&
+            state.optJSONObject("possessions")?.optJSONObject(key)?.optString("sha256") != row.getString("sha256")
+    }
 
     /** Explicit local trust mutation, never called from network handlers. Existing pins are immutable. */
     fun pinMember(id: String, publicKey: ByteArray) = write { state ->
@@ -140,11 +154,7 @@ class GroupReplica(private val root: File, val groupId: String) {
     fun evidence(): List<GroupSigned> = read { state -> local(state); entries(state).map { GroupSigned.parse(it.getJSONObject("signed")) } }
     fun pendingFor(peer: String): List<String> = read { state ->
         local(state); member(state, peer)
-        entries(state).filter { row ->
-            row.getString("origin_device_id") != peer &&
-                state.getJSONObject("members").getJSONObject(row.getString("origin_device_id")).get("revoked") == false &&
-                !state.getJSONObject("acks").has(peer + ":" + row.getString("operation_id"))
-        }.map { it.getString("operation_id") }
+        entries(state).filter { wants(state, it, peer) }.map { it.getString("operation_id") }
     }
     fun delivery(peer: String, id: String): GroupSigned = read { state ->
         member(state, peer); val row = entry(state, id); member(state, row.getString("origin_device_id"))
@@ -153,6 +163,7 @@ class GroupReplica(private val root: File, val groupId: String) {
     fun receiveDelivery(signed: GroupSigned): GroupSigned = write { state ->
         val delivery = verify(state, signed, "deliver", true).body
         val row = store(state, GroupSigned.parse(delivery.getJSONObject("operation")))
+        rememberPossession(state, row, delivery.getString("origin_device_id"), signed)
         receipt(state, row, delivery.getString("origin_device_id"))
     }
     fun acceptAck(signed: GroupSigned, expectedPeer: String) = write { state ->
@@ -172,9 +183,7 @@ class GroupReplica(private val root: File, val groupId: String) {
         val pull = verify(state, request, "pull", true).body
         val after = GroupWire.counter(pull, "after"); val peer = pull.getString("origin_device_id")
         val candidates = entries(state).withIndex().filter { (index, row) ->
-            index.toLong()+1 > after && row.getString("origin_device_id") != peer &&
-                state.getJSONObject("members").getJSONObject(row.getString("origin_device_id")).get("revoked") == false &&
-                !state.getJSONObject("acks").has(peer + ":" + row.getString("operation_id"))
+            index.toLong()+1 > after && wants(state, row, peer)
         }.take(2)
         sign(state, "page") { body ->
             body.put("recipient_device_id", peer).put("request_id", pull.getString("request_id"))
@@ -191,7 +200,11 @@ class GroupReplica(private val root: File, val groupId: String) {
         val ops = page.getJSONArray("operations"); require(ops.length() <= 1 && page.get("more") is Boolean)
         val more = page.getBoolean("more")
         require(next >= after && (ops.length() == 0 && !more || ops.length() == 1 && next > after)) { "Non-progressing group page" }
-        val acks = (0 until ops.length()).map { receipt(state, store(state, GroupSigned.parse(ops.getJSONObject(it))), page.getString("origin_device_id")) }
+        val acks = (0 until ops.length()).map {
+            val row = store(state, GroupSigned.parse(ops.getJSONObject(it)))
+            rememberPossession(state, row, page.getString("origin_device_id"), response)
+            receipt(state, row, page.getString("origin_device_id"))
+        }
         GroupPageReceipt(acks, next, more)
     }
 

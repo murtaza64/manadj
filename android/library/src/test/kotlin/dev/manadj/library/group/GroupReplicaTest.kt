@@ -55,13 +55,7 @@ class GroupReplicaTest {
         assertTrue(phoneAfterRestart.pendingFor(b).isEmpty())
         assertTrue(open(a).pendingFor(p).isEmpty())
         assertEquals(original, open(p).evidence().single())
-        val process = ProcessBuilder(java.io.File(System.getProperty("java.home"), "bin/java").path,
-            "-cp", System.getProperty("manadj.groupTestClasspath"), ReplicaRestartProbe::class.java.name,
-            root.resolve(p).path, gid, b).redirectErrorStream(true).start()
-        assertTrue(process.waitFor(30, java.util.concurrent.TimeUnit.SECONDS))
-        val output = process.inputStream.bufferedReader().readText()
-        assertEquals(0, process.exitValue(), output)
-        val restarted = JSONObject(output)
+        val restarted = restartReplica(root.resolve(p), gid, b)
         assertEquals(original, GroupSigned.parse(restarted.getJSONArray("evidence").getJSONObject(0)))
         assertEquals(0, restarted.getJSONArray("pending").length()) // ack survives real process restart
         // Retry after an acknowledgement was lost returns a valid duplicate ack, not a new op.
@@ -87,6 +81,56 @@ class GroupReplicaTest {
         assertTrue(open(p).pendingFor(a).isEmpty()); assertTrue(open(p).pendingFor(b).isEmpty())
         assertEquals(GroupExchangeResult(0, 0), GroupExchange(open(p)).sync(a, transport(aa)))
         assertEquals(GroupExchangeResult(0, 0), GroupExchange(open(p)).sync(b, transport(bb)))
+    }
+
+    @Test fun originalEvidenceReceivedThroughRelayNeverEchoesBackToThatRelayAfterRestart() {
+        val r = replicas(); val aa = r.getValue(a); val pp = r.getValue(p); val bb = r.getValue(b)
+        val op = aa.issue(bundle(a)); val opId = id(op)
+        bb.receiveDelivery(aa.delivery(b, opId))
+        pp.receiveDelivery(bb.delivery(p, opId))
+        pp.receiveDelivery(bb.delivery(p, opId)) // duplicate supplier proof cannot create evidence/acks
+        assertTrue(open(p).pendingFor(b).isEmpty())
+        assertEquals(0, restartReplica(root.resolve(p), gid, b).getJSONArray("pending").length())
+        assertEquals(0, body(open(p).page(bb.pullRequest(p))).getJSONArray("operations").length())
+        assertEquals(listOf(op), open(p).evidence())
+        // Separate generated phone/group receives the same original op through a signed page.
+        val freshRoot = root.resolve("page-phone")
+        val fresh = GroupReplica.provision(freshRoot, gid, p, keys.getValue(p))
+        keys.forEach { (id, seed) -> fresh.pinMember(id, GroupWire.publicKey(seed)) }
+        val request = fresh.pullRequest(b)
+        fresh.receivePage(bb.page(request), request)
+        val restarted = GroupReplica(freshRoot, gid)
+        assertTrue(restarted.pendingFor(b).isEmpty())
+        assertEquals(0, restartReplica(freshRoot, gid, b).getJSONArray("pending").length())
+        assertEquals(0, body(restarted.page(bb.pullRequest(p))).getJSONArray("operations").length())
+        assertEquals(listOf(op), restarted.evidence())
+    }
+
+    @Test fun failedFilesystemCommitReturnsNoAckAndPersistsNeitherOperationNorSupplierProof() {
+        val r = replicas(); val aa = r.getValue(a); val pp = r.getValue(p); val bb = r.getValue(b)
+        val op = aa.issue(bundle(a)); val opId = id(op)
+        bb.receiveDelivery(aa.delivery(b, opId))
+        val message = bb.delivery(p, opId)
+        fun failedCommit() {
+            val directory = root.resolve(p).toPath()
+            java.nio.file.Files.setPosixFilePermissions(directory, java.nio.file.attribute.PosixFilePermissions.fromString("r-x------"))
+            try {
+                org.junit.jupiter.api.Assumptions.assumeTrue(!java.nio.file.Files.isWritable(directory), "Requires non-root POSIX permission enforcement")
+                // Existing state/lock are readable. Only temporary-file commit is denied.
+                assertFailsWith<java.io.IOException> { pp.receiveDelivery(message) }
+            } finally {
+                java.nio.file.Files.setPosixFilePermissions(directory, java.nio.file.attribute.PosixFilePermissions.fromString("rwx------"))
+            }
+        }
+        failedCommit()
+        assertTrue(open(p).evidence().isEmpty())
+        pp.receiveDelivery(aa.delivery(p, opId))
+        assertEquals(listOf(opId), open(p).pendingFor(b))
+        failedCommit() // duplicate operation's supplier proof must also roll back on failed commit
+        assertEquals(listOf(opId), open(p).pendingFor(b))
+        assertEquals(listOf(op), open(p).evidence())
+        pp.receiveDelivery(message)
+        assertTrue(open(p).pendingFor(b).isEmpty())
     }
 
     private fun body(signed: GroupSigned) = GroupWire.parse(GroupWire.decode64(signed.bodyBase64, GroupWire.MAX_BODY))
@@ -143,6 +187,11 @@ class GroupReplicaTest {
         val equivocation = alter(op, a) { it.getJSONObject("bundle").getJSONObject("manifest").put("recording_origin", "Changed") }
         val envelope = alter(aa.delivery(p, id(op)), a) { it.put("operation", equivocation.json()) }
         assertFails { pp.receiveDelivery(envelope) }
+        val forgedSupplierProof = alter(aa.delivery(p, id(op)), b) {
+            it.put("origin_device_id", b).put("operation", equivocation.json())
+        }
+        assertFails { pp.receiveDelivery(forgedSupplierProof) }
+        assertTrue(id(op) in open(p).pendingFor(b)) // failed store must not persist supplier knowledge
         assertEquals(setOf(op, other), open(p).evidence().toSet())
         fun badOperation(edit: (JSONObject) -> Unit) {
             val changed = alter(op, a) { it.put("operation_id", java.util.UUID.randomUUID().toString()); edit(it) }

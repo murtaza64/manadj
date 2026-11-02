@@ -20,6 +20,7 @@
 - Only complete `session-create`, `parents=[]` supported. Existing Bundle/chunk digests, complete contiguous chunks, declared Track references, event grammar and audible evidence are validated. Dense temporary IDs are used only inside validation's existing audibility reducer, never as receiving bindings or signed data.
 - Same operation UUID with different bytes rejects. Same Session UUID in different valid operations retains both; no clock-order winner. Local retry returns its original operation rather than minting another.
 - Durable acknowledgements bind peer, recipient, operation UUID and body SHA256; they prove metadata receipt only. They never imply assets, local Track binding or playable readiness.
+- Authenticated Delivery/Page supplier-possession proofs are persisted separately from peer-signed acknowledgements, bound to the exact operation UUID/hash. Pending push and pull exclude a known supplying relay; no synthetic peer acknowledgement or origin rewrite is created. This corrects the supplying-relay echo found at frozen `49d3e3a9678373fa981594311af57597331d178c`.
 - Native ledger has no automatic projection into received replay, local recording history or Library/audio caches. Portable TrackUUID/asset descriptors are retained; source integers are never attached to receiving rows. Audio transfer and guarded native projection remain outside this metadata-relay slice.
 - Existing local-integer offline edits remain in the legacy journal. They are preserved, not relayed to another desktop as portable operations. Curated updates/deletes/causal merge are not implemented.
 
@@ -29,7 +30,7 @@
 2. Pull signed pages bound to peer, recipient and fresh request UUID. Store authenticated operations durably before sending their acks.
 3. Advance only within that serving peer's scan. New scans start at zero; failures retain evidence and recover via duplicate delivery/pull. Bound page count and reject non-progressing pages.
 
-HTTP redirects are refused; legacy pairing credentials are never sent. Reachability/TLS must be configured separately. No phone server, Syncthing share, hosted relay or real-device operation is implied.
+HTTP redirects are refused; legacy pairing credentials are never sent. A bounded explicit URL routing prefix supports reverse proxies and generated integration fixtures; it does not supply authority. Reachability/TLS must be configured separately. No phone server, Syncthing share, hosted relay or real-device operation is implied.
 
 ## Automated walkthrough
 
@@ -45,3 +46,10 @@ From `android/`, with the local JDK17/SDK configured:
 4. Missing assets/reused foreign integers never become local bindings; group changes preserve generated legacy cache/journal/pairing sentinels and repository credentials. This proves preservation, not portable legacy-edit migration.
 
 No manual/device check applies to this library-only checkpoint. Android DEX/compilation is build evidence, not installed lifecycle, scheduling, native audio or physical speaker proof. Cross-language Python↔Kotlin relay results must be recorded separately from the Kotlin-replica harness.
+
+## Cross-language checkpoint
+
+- Executed against backend correction `e72e57f763061b7f2474516fac655410ae9d0133`, generated Python A/B HTTP fixture; its Python-phone oracle was unused.
+- Actual Kotlin foreground client: first A exchange0push/1pull; B exchange1push/1pull; reverse A exchange1push/0pull. Subsequent scans of both peers0push/0pull; a separate JVM process reopened native state.
+- Both Python replicas and Kotlin persisted the same two original operation UUID/body-SHA256 pairs. No direct A↔B transport or native re-minting occurred. Raw issuer signatures survived native persistence/reopen unchanged.
+- These are generated metadata-relay results, not installed-phone, asset transfer/readiness, native playback or transparent scheduling proof. Later backend validation changes require a separately pinned rerun, not reuse of this receipt as new-source evidence.
