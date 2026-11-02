@@ -29,6 +29,17 @@ logger = logging.getLogger(__name__)
 # Library dirs already snapshotted during this backend process run.
 _snapshotted: set[str] = set()
 
+# Library hot-cue inputs are points, never retained destination loops.
+_POINT_LOOP_STATE = {
+    "OutMsec": -1,
+    "OutFrame": 0,
+    "OutMpegFrame": 0,
+    "OutMpegAbs": 0,
+    "OutPointSeekInfo": None,
+    "ActiveLoop": 0,
+    "BeatLoopSize": 0,
+}
+
 
 def _frames(ms: int) -> int:
     """RB's InFrame column: 1/150-second frames (spike-observed)."""
@@ -175,7 +186,7 @@ class RekordboxPerfExporter:
             slot: (label or None, nearest_palette_index(color))
             for slot, _sec, label, color in cues
         }
-        from rekordbox.cue_mapping import HOT_CUE_KINDS, MEMORY_KIND
+        from rekordbox.cue_mapping import HOT_CUE_KINDS, KIND_TO_SLOT, MEMORY_KIND
 
         rows = (
             self._db.session.query(DjmdCue)
@@ -185,18 +196,33 @@ class RekordboxPerfExporter:
         hot = [r for r in rows if r.Kind in HOT_CUE_KINDS]
         memory = [r for r in rows if r.Kind == MEMORY_KIND]
         plan = plan_hotcue_export(desired, hot, memory, mode, deco)
+        point_rows = []
+        if mode == "replace-all":
+            moved_ids = {move.row_id for move in plan.moves}
+            deleted_ids = set(plan.soft_deletes)
+            point_times = set(desired.values())
+            # Own both the hot point and its memory twin, including reused
+            # memory rows and unchanged-position/decor (formerly empty) plans.
+            point_rows = [row for row in rows if row.ID not in deleted_ids and (
+                KIND_TO_SLOT.get(row.Kind) in desired
+                or row.Kind == MEMORY_KIND and (row.ID in moved_ids or row.InMsec in point_times)
+            ) and any(getattr(row, name) != value for name, value in _POINT_LOOP_STATE.items())]
         summary = {
             "added": sum(1 for a in plan.adds if a.slot),
             "moved": 0,
             "deleted": 0,
             "refreshed": 0,
             "skipped_slots": sorted(plan.skipped_slots),
+            "normalized_points": len(point_rows),
         }
-        if plan.empty:
+        if plan.empty and not point_rows:
             self._sync_cue_analysis(content)
             return summary
 
         snapshot_library(self._db_dir)
+        for row in point_rows:
+            for name, value in _POINT_LOOP_STATE.items():
+                setattr(row, name, value)
         by_id = {r.ID: r for r in rows}
         for mv in plan.moves:
             row = by_id[mv.row_id]
@@ -260,6 +286,8 @@ class RekordboxPerfExporter:
             OutFrame=0,
             OutMpegFrame=0,
             OutMpegAbs=0,
+            ActiveLoop=0,
+            BeatLoopSize=0,
             Comment=label,
             Color=color_index if color_index is not None else -1,
             ContentUUID=content.UUID,
