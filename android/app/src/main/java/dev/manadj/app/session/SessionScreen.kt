@@ -41,7 +41,7 @@ private fun hms(seconds: Double): String { val s = seconds.coerceAtLeast(0.0).to
     val activity = androidx.compose.ui.platform.LocalContext.current as androidx.activity.ComponentActivity
     val model = remember(activity) { androidx.lifecycle.ViewModelProvider(activity)[SessionModel::class.java] }
     val close = { model.leave(); ux.sessions = false }
-    BackHandler { if(model.groupInfo != null) model.groupInfo = null else if (model.log != null) model.close() else close() }
+    BackHandler { if(model.groupInfo != null) model.closeGroupInfo() else if (model.log != null) model.close() else close() }
     LaunchedEffect(Unit) { if (model.headers.isEmpty() || model.listError == null) model.refresh() }
     // This phone's recordings (#395) appear as the recorder opens/ends them.
     LaunchedEffect(Unit) { while (true) { model.syncRecorded(); model.refreshGroupHistory(); kotlinx.coroutines.delay(2000) } }
@@ -65,7 +65,7 @@ private fun hms(seconds: Double): String { val s = seconds.coerceAtLeast(0.0).to
         }
         model.peerInfo?.let { item -> PeerSessionInfo(item, model.ownGroupMarkerAuthority(item)) { model.peerInfo = null } }
         model.groupInfo?.let { item ->
-            GroupSessionInfo(item) { model.groupInfo = null }
+            GroupSessionInfo(item) { model.closeGroupInfo() }
             GroupReplayControls(model,item)
         }
         model.groupReplaySource?.let { source ->

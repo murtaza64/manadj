@@ -9,6 +9,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.viewModelScope
 import dev.manadj.app.*
 import dev.manadj.app.library.LibraryHolder
 import dev.manadj.library.LibraryRepository
@@ -27,6 +28,10 @@ import java.io.File
 import java.net.InetAddress
 import java.net.ServerSocket
 import java.time.Duration
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.Job
 
 /** Real normal SessionScreen/SessionModel/repository; only audio output is a host double. */
 @RunWith(RobolectricTestRunner::class)
@@ -158,6 +163,12 @@ class GroupSessionUiTest {
     @Test fun sameBytesReplacementStopsGroupReplayAndRefusesCachedDecodedResume() = exerciseGroupReplay("replace")
     @Test fun staleDecodedLoadStopsGroupReplayAndRequiresANewVerifiedAttempt() = exerciseGroupReplay("decoded")
     @Test fun actualTransportedGroupControlsBindDecodeAndStopOnStorageFailure() = exerciseGroupReplay("transport")
+    @Test fun delayedGroupOpenCannotReplaceNewLocalPlaybackAfterClose() = exerciseGroupReplay("pending-local")
+    @Test fun delayedGroupOpenCannotReopenAfterClose() = exerciseGroupReplay("pending-close")
+    @Test fun delayedGroupOpenCannotOverrideANewerGroupInspection() = exerciseGroupReplay("pending-group")
+    @Test fun delayedGroupOpenCannotOverrideANewerRejectedIntent() = exerciseGroupReplay("pending-rejected")
+    @Test fun cancelledGroupOpenCannotPublishAfterBlockedIoReturns() = exerciseGroupReplay("pending-cancel")
+    @Test fun delayedGroupOpenCannotPublishAfterLeavingSessions() = exerciseGroupReplay("pending-leave")
     private fun exerciseGroupReplay(refusal: String) {
         val fixture=JSONObject(File("../../tests/fixtures/group_replay_v1.json").readText())
         val body=JSONObject(fixture.getString("body_utf8")); val group=body.getString("group_id")
@@ -173,7 +184,7 @@ class GroupSessionUiTest {
             replica.receiveDelivery(GroupWire.sign(JSONObject().put("format",GroupWire.FORMAT).put("group_id",group).put("origin_device_id",a)
                 .put("kind","deliver").put("recipient_device_id",p).put("operation",signed.json()),ByteArray(32) { it.toByte() }))
         }
-        val rows=JSONArray()
+        val rows=JSONArray().put(JSONObject("""{"id":77,"title":"Safe unrelated phone track","file_name":"safe.wav","audio_rev":"r77","tag_ids":[],"hot_cues":[]}"""))
         for(i in 0..1) {
             val asset=fixture.getJSONArray("assets").getJSONObject(i); val recipe=asset.getJSONObject("recipe")
             val row=JSONObject().put("id",73+i).put("title","Generated local tone $i").put("file_name",asset.getString("file_name"))
@@ -200,6 +211,7 @@ class GroupSessionUiTest {
         compose.onNodeWithText("USE Generated local tone 1").performClick()
         waitFor { model.groupReplayReadiness?.state == "candidate-exact" }
         assertFalse(view.playable); assertEquals(0,PeerUiAudio.loads)
+        if(refusal.startsWith("pending-")) { exercisePendingGroupOpen(view,refusal);return }
         compose.onNodeWithText("OPEN GUARDED REPLAY").performClick()
         waitFor { model.groupReplaySource != null && model.log != null }
         compose.runOnUiThread { model.play(player) }
@@ -231,6 +243,51 @@ class GroupSessionUiTest {
             PeerUiAudio.sources[dev.manadj.audio.DeckId.A] != initialSourceA && player.decks.getValue(dev.manadj.audio.DeckId.A).snapshot?.loadId != 9999L }
         else waitFor { !model.groupReplayBusy && !model.playing && !model.preparing }
         assertEquals(original,phone.detail(sid))
+    }
+    private fun exercisePendingGroupOpen(view: GroupSessionView,mode: String) {
+        val adapter=SessionModel::class.java.getDeclaredField("groupAdapter").apply { isAccessible=true }.get(model) as GroupReplay
+        val other=model.groupItems.single { it.groupId == gid }
+        val disk=GroupReplay::class.java.getDeclaredField("disk").apply { isAccessible=true }.get(adapter)
+        @Suppress("UNCHECKED_CAST")
+        val locks=disk.javaClass.getDeclaredField("locks").apply { isAccessible=true }.get(null) as ConcurrentHashMap<String,Any>
+        val mutex=locks.getValue(File(repo.store.root,"group-replay/bindings").canonicalPath)
+        val held=CountDownLatch(1);val release=CountDownLatch(1)
+        val gate=Thread { synchronized(mutex) { held.countDown();release.await(15,TimeUnit.SECONDS) } }.apply { start() }
+        try {
+            assertTrue(held.await(5,TimeUnit.SECONDS))
+            val before=model.viewModelScope.coroutineContext[Job]!!.children.toSet()
+            compose.runOnUiThread { model.openGroupReplay(view) }
+            val pending=model.viewModelScope.coroutineContext[Job]!!.children.single { it !in before }
+            val priorNotice=model.notice
+            when(mode) {
+                "pending-local" -> {
+                    compose.runOnUiThread { model.close();model.open(model.sessions.single { it.uuid == safeSid }) }
+                    waitFor { model.log?.uuid == safeSid }
+                    compose.mainClock.autoAdvance=false
+                    compose.runOnUiThread { model.play(player) }
+                    waitFor { model.playing && PeerUiAudio.loads>0 }
+                }
+                "pending-close" -> compose.runOnUiThread { model.close() }
+                "pending-group" -> compose.runOnUiThread { model.open(SessionHeader(other.sessionUuid,other.startedAt,other.endedAt,0,group=other)) }
+                "pending-rejected" -> compose.runOnUiThread { model.open(SessionHeader(view.sessionUuid,view.startedAt,view.endedAt,0,local=true)) }
+                "pending-cancel" -> pending.cancel()
+                "pending-leave" -> compose.runOnUiThread { model.leave() }
+            }
+            val newerNotice=model.notice
+            release.countDown();gate.join(5000)
+            waitFor { pending.isCompleted }
+            assertNull(model.groupReplaySource)
+            assertFalse(model.groupReplayBusy)
+            if(mode == "pending-local") { assertEquals(safeSid,model.log?.uuid);assertTrue(model.playing) }
+            else { assertNull(model.log);assertFalse(model.playing) }
+            if(mode == "pending-group") {
+                waitFor { model.groupReplayReadiness != null }
+                assertEquals(other.key,model.groupInfo?.key)
+            }
+            assertEquals(newerNotice,model.notice) // old success/error/finally cannot overwrite context
+            if(mode == "pending-close" || mode == "pending-cancel") assertEquals(priorNotice,model.notice)
+            assertEquals(original,phone.detail(sid))
+        } finally { release.countDown();gate.join(5000) }
     }
     @Test fun groupUuidCannotOpenOrSummarizeRawPhoneOrCacheAndNeverPushesRawCollision() {
         compose.runOnUiThread { model.open(SessionHeader(sid, null, null, 0, local=true)); model.summarize(SessionHeader(sid,null,null,0,local=true)) }

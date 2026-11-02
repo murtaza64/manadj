@@ -31,6 +31,20 @@ class SessionModel(application: Application) : AndroidViewModel(application) {
         private set
     var selectingGroupTrack by mutableStateOf<String?>(null)
     private var groupValidation: Job? = null
+    @Volatile private var sourceRequest = 0L
+    private var sourceOpenJob: Job? = null
+    /** A newer selection/close invalidates intent even when blocking local IO ignores cancel. */
+    private fun nextSourceRequest(): Long {
+        sourceRequest++
+        sourceOpenJob?.cancel(); sourceOpenJob=null
+        opening=null; groupReplayBusy=false
+        return sourceRequest
+    }
+    private suspend fun requireSourceRequest(request: Long, groupContext: String? = null) {
+        currentCoroutineContext().ensureActive()
+        if(request != sourceRequest || groupContext != null && groupInfo?.key != groupContext)
+            throw CancellationException("Session source request superseded")
+    }
     private data class GroupDecodedProof(val attempt: GroupLoadAttempt,val requestGeneration: Long,var loadId: Long? = null,var validated: Boolean = false,var verifying: Boolean = false)
     private val groupDecoded=mutableMapOf<Int,GroupDecodedProof>()
     private val store = SessionStore(File(application.filesDir, "sessions-cache"), {
@@ -294,7 +308,7 @@ class SessionModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun open(requested: SessionHeader) {
-        if (opening != null) return
+        val request=nextSourceRequest()
         requested.peer?.takeIf { it.groupManaged }?.let { marker ->
             val current = peerItems.singleOrNull { it.key == marker.key && it.groupManaged }
             if(current != null) { close(); peerInfo = current }
@@ -313,21 +327,29 @@ class SessionModel(application: Application) : AndroidViewModel(application) {
         val h = authoritativeHeader(requested) ?: return
         h.peer?.let { if (!it.canValidate) { peerInfo = it; return } }
         opening = h.key
-        viewModelScope.launch {
+        sourceOpenJob=viewModelScope.launch {
             try {
                 val peer = h.peer?.let { repo.peerSessions.open(it) }
-                show(peer?.item?.header() ?: h, peer?.log ?: if (h.local) withContext(Dispatchers.IO) { SessionLog.parse(recordedStore.detail(h.uuid)) } else store.log(h), peer)
+                requireSourceRequest(request)
+                val parsed=peer?.log ?: if (h.local) withContext(Dispatchers.IO) { SessionLog.parse(recordedStore.detail(h.uuid)) } else store.log(h)
+                requireSourceRequest(request)
+                showResolved(peer?.item?.header() ?: h,parsed,peer,null,request)
             } catch (e: CancellationException) { throw e }
-            catch (e: Exception) { notice = "Open failed: ${e.message ?: e}" }
-            finally { opening = null }
+            catch (e: Exception) { if(request == sourceRequest) notice = "Open failed: ${e.message ?: e}" }
+            finally { if(request == sourceRequest) { opening = null;sourceOpenJob=null } }
         }
     }
 
     /** Make [parsed] the open Session (also the test entry: no desktop needed). */
-    suspend fun show(h: SessionHeader, parsed: SessionLog, peer: PeerReplay? = null, group: GroupReplaySource? = null) = coroutineScope {
+    suspend fun show(h: SessionHeader, parsed: SessionLog, peer: PeerReplay? = null, group: GroupReplaySource? = null) {
+        showResolved(h,parsed,peer,group,nextSourceRequest())
+    }
+    private suspend fun showResolved(h: SessionHeader, parsed: SessionLog, peer: PeerReplay?, group: GroupReplaySource?,request: Long,groupContext: String? = null) = coroutineScope {
+        requireSourceRequest(request,groupContext)
         if(group != null) {
             require(peer == null && parsed === group.log && h.group?.key == group.view.key && h.uuid == group.view.sessionUuid)
             withContext(Dispatchers.IO) { groupAdapter.validate(group) }
+            requireSourceRequest(request,groupContext)
         } else {
         require(h.group == null && h.peer?.groupManaged != true && groupUuidAllowed(parsed.uuid) &&
             (peer == null || repo.peerSessions.groupOwnedClaims?.containsKey(parsed.uuid.lowercase()) == false)) { "Group evidence cannot enter raw or peer replay" }
@@ -346,10 +368,13 @@ class SessionModel(application: Application) : AndroidViewModel(application) {
         require(if (peer == null) parsed.replayGeneration == null else parsed.replayGeneration == peer.generation) { "Peer Session requires fresh generation validation" }
         }
         require(parsed.events.isNotEmpty() && parsed.duration > 0) { "Session has no recorded duration" }
-        stop()
         val timelineJob = async(Dispatchers.Default) { SessionTimeline(parsed) }
         val drift = withContext(Dispatchers.Default) { parsed.tickDivergence() }
+        requireSourceRequest(request,groupContext)
         val tl = timelineJob.await()
+        requireSourceRequest(request,groupContext)
+        // No stop/state publication before the final current-context check after ALL awaits.
+        stop()
         peerReplay = peer; groupReplaySource=group; groupInfo=null; groupDecoded.clear(); peerInfo = null; peerDecoded.clear(); waves.clear(); decodeOffsets.clear()
         val displayHeader = peer?.item?.header() ?: h
         header = displayHeader; log = parsed; driver = null; audibleTracks[displayHeader.key] = parsed.audibleTrackIds; recordingDrift = drift; timeline = tl; focus = null
@@ -362,15 +387,18 @@ class SessionModel(application: Application) : AndroidViewModel(application) {
         deckErrors.indices.forEach { deckErrors[it] = null }
     }
 
-    fun close() { stop(); log = null; header = null; peerReplay = null; groupReplaySource=null; groupInfo = null; groupReplayReadiness=null; selectingGroupTrack=null; groupDecoded.clear(); peerInfo = null; driver = null; recordingDrift = emptyList(); timeline = null; focus = null; wavesJob?.cancel() }
+    fun close() { nextSourceRequest(); stop(); log = null; header = null; peerReplay = null; groupReplaySource=null; groupInfo = null; groupReplayReadiness=null; selectingGroupTrack=null; groupDecoded.clear(); peerInfo = null; driver = null; recordingDrift = emptyList(); timeline = null; focus = null; wavesJob?.cancel() }
+    fun closeGroupInfo() { nextSourceRequest();groupInfo=null;groupReplayReadiness=null;selectingGroupTrack=null }
 
     private fun refreshGroupReplay(view: GroupSessionView) {
+        val request=sourceRequest
         groupReplayReadiness=null
         viewModelScope.launch { val result=withContext(Dispatchers.IO) { groupAdapter.readiness(view) }
-            if(groupInfo?.key == view.key) groupReplayReadiness=result }
+            if(request == sourceRequest && groupInfo?.key == view.key) groupReplayReadiness=result }
     }
     fun bindGroupTrack(view: GroupSessionView,logicalId: String,localId: Int) {
         if(groupReplayBusy) return
+        val request=sourceRequest
         groupReplayBusy=true; selectingGroupTrack=null
         viewModelScope.launch {
             try {
@@ -379,23 +407,28 @@ class SessionModel(application: Application) : AndroidViewModel(application) {
                     groupAdapter.bind(view,logicalId,selected)
                     groupAdapter.readiness(view)
                 }
-                if(groupInfo?.key == view.key) groupReplayReadiness=ready
+                requireSourceRequest(request,view.key)
+                groupReplayReadiness=ready
             } catch(e: CancellationException) { throw e }
-            catch(_: Exception) { notice="Exact local binding refused; evidence retained. Select current matching local audio explicitly." }
-            finally { groupReplayBusy=false }
+            catch(_: Exception) { if(request == sourceRequest) notice="Exact local binding refused; evidence retained. Select current matching local audio explicitly." }
+            finally { if(request == sourceRequest) groupReplayBusy=false }
         }
     }
     fun openGroupReplay(view: GroupSessionView) {
         val generation=groupReplayReadiness?.takeIf { it.state == "candidate-exact" }?.generation ?: return
         if(groupReplayBusy) return
+        if(groupInfo?.key != view.key) return
+        val request=nextSourceRequest()
         groupReplayBusy=true
-        viewModelScope.launch {
+        sourceOpenJob=viewModelScope.launch {
             try {
+                requireSourceRequest(request,view.key)
                 val source=withContext(Dispatchers.IO) { groupAdapter.open(view,generation) }
-                show(SessionHeader(view.sessionUuid,view.startedAt,view.endedAt,0,group=view),source.log,group=source)
+                requireSourceRequest(request,view.key)
+                showResolved(SessionHeader(view.sessionUuid,view.startedAt,view.endedAt,0,group=view),source.log,null,source,request,view.key)
             } catch(e: CancellationException) { throw e }
-            catch(_: Exception) { notice="Group replay open refused; evidence retained. Revalidate current bindings." }
-            finally { groupReplayBusy=false }
+            catch(_: Exception) { if(request == sourceRequest) notice="Group replay open refused; evidence retained. Revalidate current bindings." }
+            finally { if(request == sourceRequest) { groupReplayBusy=false;sourceOpenJob=null } }
         }
     }
 
@@ -444,7 +477,7 @@ class SessionModel(application: Application) : AndroidViewModel(application) {
     }
 
     /** Leaving the Session screen: replay stops, decks keep what they hold. */
-    fun leave() = stop()
+    fun leave() { nextSourceRequest();stop() }
 
     fun toggle(player: PlayerModel) { if (playing || preparing || peerChecking) stop() else play(player) }
 
@@ -822,7 +855,7 @@ class SessionModel(application: Application) : AndroidViewModel(application) {
         if (time < viewStart || time > viewStart + viewWidth) setView(time - viewWidth * .25, viewWidth)
     }
 
-    override fun onCleared() { stop(); super.onCleared() }
+    override fun onCleared() { nextSourceRequest();stop(); super.onCleared() }
 }
 
 /** A Session track's detail waveform for the timeline, with its display fill gain (loud passages reach the lane edge). */
