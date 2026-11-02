@@ -77,6 +77,20 @@ class LibraryRepository(
     /** Separate generation-bound peer evidence/audio; ordinary snapshot, journal and audio cache stay v1. */
     val peerSessions = dev.manadj.library.session.PeerSessions(File(root, "peer-sessions"), ::client, io)
 
+    /** Additive own-device group ledger. Never changes legacy pairing, snapshot, audio or edits.
+     * Provision/pin explicitly through GroupReplica's local-owner API before exchange.
+     */
+    fun groupReplica(groupId: String): dev.manadj.library.group.GroupReplica =
+        dev.manadj.library.group.GroupReplica(File(store.root, "device-groups/${dev.manadj.library.group.GroupWire.uuid(groupId)}"), groupId)
+
+    /** Explicit foreground seam only; no automatic migration or scheduling is implied. */
+    suspend fun syncGroup(groupId: String, peerId: String, peerUrl: String): Result<dev.manadj.library.group.GroupExchangeResult> = withContext(io) {
+        runCatching {
+            dev.manadj.library.group.GroupExchange(groupReplica(groupId)).sync(peerId,
+                dev.manadj.library.group.GroupHttpTransport(peerUrl, groupId))
+        }
+    }
+
     val journal = EditJournal(File(root, "edits.jsonl"))
     /** The last pulled snapshot, without local edits (the diff base for /received). */
     @Volatile private var pulled: Snapshot? = null
