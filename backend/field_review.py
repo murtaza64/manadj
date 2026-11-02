@@ -104,9 +104,18 @@ class FieldReview:
                 media = [stat.st_size, stat.st_mtime_ns]
             except OSError:
                 media = None
+            grid = track.beatgrid
+            # Import replaces provenance and clears the anchor, not just tempo
+            # values. Bind that affected saved state before allowing dispatch.
+            grid_revision = None if grid is None else {
+                'id': grid.id, 'origin': grid.origin, 'anchor_time': grid.anchor_time,
+                'tempo_changes_json': grid.tempo_changes_json,
+                'updated_at': grid.updated_at.isoformat() if grid.updated_at else None,
+            }
             source.append({'id': track.id, 'filename': track.filename, 'active': track.is_active,
-                           'values': library, 'media': media,
-                           'duration': track.duration_secs or getattr(track.waveform, 'duration', None)})
+                            'values': library, 'media': media,
+                            'grid_revision': grid_revision if 'beatgrid' in request.fields else None,
+                            'duration': track.duration_secs or getattr(track.waveform, 'duration', None)})
             changes = []
             for field in request.fields:
                 before, after = ((library[field], external.get(field)) if request.direction == 'import'
@@ -165,8 +174,14 @@ class FieldReview:
                 raise FieldPlanUnavailable('Replacement choices do not match the reviewed pending fields')
             rows = []
             for track in plan['tracks']:
-                fields = []
-                for field in track['fields']:
+                results = {}
+                dispatch = track['fields']
+                if request.direction == 'export' and request.surface == 'rekordbox':
+                    # Hot-cue reconciliation removes stray memory rows. The
+                    # selected Main cue must be written after that reconcile.
+                    # Sorting only existing fields never adds an unselected write.
+                    dispatch = sorted(dispatch, key=lambda field: field['field'] == 'maincue')
+                for field in dispatch:
                     if field['action'] == 'skip' or (field['action'] == 'consent' and (track['track_id'], field['field']) not in consent):
                         result = {'status': 'skipped', 'reason': field['reason'] or 'Replacement not selected'}
                     else:
@@ -179,7 +194,9 @@ class FieldReview:
                             # Exceptions after dispatch cannot prove no write took place.
                             self.db.rollback()
                             result = {'status': 'unknown', 'reason': str(error)}
-                    fields.append({'field': field['field'], **result})
+                    results[field['field']] = {'field': field['field'], **result}
+                # Keep receipt identity/order in the reviewed request vocabulary.
+                fields = [results[field['field']] for field in track['fields']]
                 rows.append({'track_id': track['track_id'], 'title': track['title'], 'fields': fields})
             statuses = [field['status'] for row in rows for field in row['fields']]
             status = 'unknown' if 'unknown' in statuses else 'partial' if 'failed' in statuses else 'complete'

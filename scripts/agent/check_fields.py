@@ -119,6 +119,37 @@ with sync_playwright() as p:
     assert page.request.get(url + '/api/tracks/').json()['items'][0]['key'] == 7
     cases.append('actual Tracks row → per-field consent → real Library Apply')
 
+    start()
+    recheck()
+    held = []
+    page.route('**/api/sync/fields/execute', lambda route: held.append(route))
+    apply()
+    expect(page.get_by_role('button', name='Applying…', exact=True)).to_be_disabled()
+    page.keyboard.press('Escape')
+    expect(page.get_by_role('dialog')).to_be_visible()
+    try:
+        for tab in ['Tab', 'Tab', 'Shift+Tab', 'Tab', 'Shift+Tab']:
+            page.keyboard.press(tab)
+            assert page.evaluate('document.querySelector("[role=dialog]").contains(document.activeElement)'), 'Pending focus escaped into background'
+        # Exercise the out-of-dialog and no-eligible-control fallbacks too.
+        page.locator('main > nav button').first.focus()
+        page.keyboard.press('Shift+Tab')
+        assert page.evaluate('document.querySelector("[role=dialog]").contains(document.activeElement)')
+        page.get_by_role('dialog').evaluate('dialog => dialog.querySelectorAll("button,input,select,summary").forEach(el => { el.disabled = true; el.tabIndex = -1; })')
+        page.keyboard.press('Tab')
+        assert page.evaluate('document.querySelector("[role=dialog]") === document.activeElement')
+    finally:
+        for route in held:
+            route.fulfill(status=503, json={})
+        page.unroute('**/api/sync/fields/execute')
+    expect(page.get_by_role('heading', name='Outcome unknown', exact=True)).to_be_visible()
+    cases.append('pending Tab/Shift+Tab/outside/empty focus trap; lost response unknown')
+
+    start()
+    recheck()
+    assert page.locator('.field-replacement').first.evaluate('el => getComputedStyle(el).color') == 'rgb(255, 204, 0)'
+    cases.append('replacement consent uses semantic warning color')
+
     page.set_viewport_size({'width': 390, 'height': 844})
     assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
     page.screenshot(path='/tmp/opencode/manadj-fields430-narrow.png')

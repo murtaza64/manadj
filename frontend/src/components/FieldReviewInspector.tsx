@@ -40,19 +40,28 @@ export function FieldReviewInspector({ scopes, initialScope, initialFields, onCl
   const opener = useRef<HTMLElement | null>(null);
   useEffect(() => {
     opener.current = document.activeElement as HTMLElement;
-    const dialog = body.current?.closest('[role="dialog"]');
+    const dialog = body.current?.closest<HTMLElement>('[role="dialog"]');
+    if (dialog) dialog.tabIndex = -1;
     dialog?.querySelector<HTMLElement>('button,select')?.focus();
     const trap = (event: KeyboardEvent) => {
       if (event.key !== 'Tab' || !dialog) return;
-      const focusable = [...dialog.querySelectorAll<HTMLElement>('button:not(:disabled),input:not(:disabled),select:not(:disabled),summary')];
+      const focusable = [...dialog.querySelectorAll<HTMLElement>('button,input,select,summary,a[href],[tabindex]')]
+        .filter(element => !element.matches(':disabled') && element.tabIndex >= 0);
       const first = focusable[0], last = focusable.at(-1);
-      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
-      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+      if (!first) { event.preventDefault(); dialog.focus(); }
+      else if (!focusable.includes(document.activeElement as HTMLElement)) { event.preventDefault(); (event.shiftKey ? last : first)?.focus(); }
+      else if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
     };
     document.addEventListener('keydown', trap, true);
     const generation = serial;
     return () => { generation.current++; document.removeEventListener('keydown', trap, true); opener.current?.focus(); };
   }, []);
+  useEffect(() => {
+    // Apply disables the element that held focus. Keep focus in the live modal
+    // even when every control becomes disabled during the synchronous request.
+    if (writing) body.current?.closest<HTMLElement>('[role="dialog"]')?.focus();
+  }, [writing]);
   useEffect(() => { const timer = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(timer); }, []);
   function clear() { serial.current++; setPlan(null); setReceipt(null); setError(null); setChoices(new Set()); setLoading(false); }
   async function recheck() {
