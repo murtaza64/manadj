@@ -233,3 +233,43 @@ def test_missing_operation_and_unreadable_durable_receipt_is_unknown_not_empty_a
     assert response.status_code == 409 and response.json()["detail"] == "group_uuid_authority_unavailable"
     with phone.sessions() as db:
         assert db.query(SessionChunk).count() == 2
+
+
+@pytest.mark.parametrize("alias", ["own-operation", "dangling-index", "same-session-own-operation"])
+def test_readable_signed_proof_denial_does_not_depend_on_receipt_index_coverage(instance, alias):
+    from backend.peer_sync.models import GroupPossession
+    (a, phone, _), gid, ids, _ = setup(instance)
+    sid = str(uuid4())
+    seed(a, 1, session_uuid=sid)
+    export(a, sid)
+    foreign = call(a, gid, "issue", sid)
+    seed(phone, 1, session_uuid=sid, filename="retained-collision.wav")
+    push(a, phone, gid, ids[1]["device_id"], foreign)
+    own_sid = sid if alias == "same-session-own-operation" else str(uuid4())
+    if own_sid != sid:
+        seed(phone, 2, session_uuid=own_sid, filename="own-operation.wav")
+    export(phone, own_sid)
+    own = call(phone, gid, "issue", own_sid)
+    unrelated = str(uuid4())
+    seed(phone, 3, session_uuid=unrelated, filename="unrelated-control.wav")
+    with phone.sessions() as db:
+        db.delete(db.query(GroupOperation).filter_by(operation_id=str(unpack(foreign, Operation)[0].operation_id)).one())
+        db.commit()
+    normal = history(phone)
+    assert normal.get(f"/api/sessions/{sid}").json()["events"] == []  # proof-only positive control
+    with phone.sessions() as db:
+        receipt = db.query(GroupPossession).one()
+        proof = (receipt.proof_body_b64, receipt.proof_signature_b64, receipt.sha256)
+        receipt.operation_id = str(uuid4()) if alias == "dangling-index" else str(unpack(own, Operation)[0].operation_id)
+        db.commit()
+    response = normal.get(f"/api/sessions/{sid}")
+    assert response.status_code == 200
+    assert response.json()["events"] == [] and response.json()["group_history"][0]["status"] == "invalid"
+    assert normal.get(f"/api/sessions/{unrelated}").json()["events"][0]["trackId"] == 3
+    if own_sid != sid:
+        assert normal.get(f"/api/sessions/{own_sid}").json()["events"][0]["trackId"] == 2
+    restarted = history(instance("phone"))
+    assert restarted.get(f"/api/sessions/{sid}").json()["events"] == []
+    with phone.sessions() as db:
+        receipt = db.query(GroupPossession).one()
+        assert (receipt.proof_body_b64, receipt.proof_signature_b64, receipt.sha256) == proof

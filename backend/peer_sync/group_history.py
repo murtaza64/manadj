@@ -70,7 +70,8 @@ def received_operations(db, uuid=None):
             verified = verified_operation(db, row)
             group = db.get(DeviceGroup, row.group_id)
             if group is not None and str(verified.origin_device_id) == group.device_id:
-                own_verified.add((str(verified.group_id), str(verified.operation_id), row.sha256))
+                own_verified.add((str(verified.group_id), str(verified.operation_id),
+                    str(verified.bundle.manifest.session_uuid), str(verified.origin_device_id), row.sha256))
                 continue  # exact verified own-issued evidence only
         except (SyncError, ValueError, TypeError, KeyError, RecursionError):
             pass
@@ -89,7 +90,8 @@ def received_operations(db, uuid=None):
                     group_id=str(operation.group_id) if operation else row.group_id,
                     operation_id=str(operation.operation_id) if operation else row.operation_id,
                     origin_device_id=str(operation.origin_device_id) if operation else row.origin_device_id))
-                represented.add((result[-1].group_id, result[-1].operation_id, sid))
+                represented.add((result[-1].group_id, result[-1].operation_id, sid,
+                                 result[-1].origin_device_id, row.sha256))
     # Supplying-peer proof commits atomically with each received operation and
     # retains the original signed bytes. It is a second denial anchor when a
     # ledger row is missing, including a collision that never materialized.
@@ -105,9 +107,11 @@ def received_operations(db, uuid=None):
             for signed in signed_operations:
                 operation, _, hashed = unpack(signed, Operation)
                 key = (str(operation.group_id), str(operation.operation_id), str(operation.bundle.manifest.session_uuid))
-                if key[:2] != (receipt.group_id, receipt.operation_id) or hashed != receipt.sha256:
-                    raise ValueError("Supplying proof identity mismatch")
-                if key in represented or (key[0], key[1], hashed) in own_verified:
+                identity = (*key, str(operation.origin_device_id), hashed)
+                # Receipt indexes are fallible bookkeeping too. A readable
+                # original proof keeps its own denial identity even when an
+                # index aliases another valid (including own-issued) row.
+                if identity in represented or identity in own_verified:
                     continue
                 if uuid is not None and key[2] != canonical_uuid(uuid):
                     continue
@@ -116,13 +120,11 @@ def received_operations(db, uuid=None):
                     body_b64=signed.body_b64, signature_b64=signed.signature_b64)
                 result.append(GroupClaim(row=ghost, session_uuid=key[2], group_id=key[0], operation_id=key[1],
                     origin_device_id=str(operation.origin_device_id), missing=True))
-                represented.add(key)
+                represented.add(identity)
         except (ValueError, TypeError, KeyError, RecursionError):
-            # Without either the operation or its receipt identity, authority
-            # is unknown. Never silently treat an unknown registry as empty.
-            if db.scalar(select(GroupOperation.cursor).where(GroupOperation.group_id == receipt.group_id,
-                    GroupOperation.operation_id == receipt.operation_id)) is None:
-                raise HTTPException(409, "group_uuid_authority_unavailable") from None
+            # Unreadable proof cannot be covered merely by an indexed row:
+            # that index could itself be corrupt. Unknown is never empty.
+            raise HTTPException(409, "group_uuid_authority_unavailable") from None
     return result
 
 
