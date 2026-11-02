@@ -9,6 +9,7 @@ import dev.manadj.app.library.LibraryHolder
 import dev.manadj.audio.*
 import dev.manadj.library.LibraryTrack
 import dev.manadj.library.SyncClient
+import dev.manadj.library.group.GroupSessionView
 import dev.manadj.library.session.*
 import kotlinx.coroutines.*
 import java.io.File
@@ -23,7 +24,7 @@ class SessionModel(application: Application) : AndroidViewModel(application) {
     private val repo = LibraryHolder.repository(application)
     private val store = SessionStore(File(application.filesDir, "sessions-cache"), {
         SyncClient(repo.baseUrl, repo.pairCode, deviceToken = repo.deviceToken, deviceId = repo.deviceId, deviceName = repo.deviceName)
-    })
+    }, uuidAllowed=repo::rawSessionAllowed)
 
     var headers by mutableStateOf(store.cached())
         private set
@@ -32,6 +33,12 @@ class SessionModel(application: Application) : AndroidViewModel(application) {
     var peerListError by mutableStateOf<String?>(null)
         private set
     var peerInfo by mutableStateOf<PeerSessionItem?>(null)
+    var groupItems by mutableStateOf<List<GroupSessionView>>(emptyList())
+        private set
+    var groupInfo by mutableStateOf<GroupSessionView?>(null)
+    var groupError by mutableStateOf<String?>(null)
+        private set
+    private var groupRead: Job? = null
     var peerReplay by mutableStateOf<PeerReplay?>(null)
         private set
     var peerChecking by mutableStateOf(false)
@@ -102,6 +109,7 @@ class SessionModel(application: Application) : AndroidViewModel(application) {
     private val loadFailure = arrayOfNulls<String>(4)
 
     fun track(id: Int?): LibraryTrack? = id?.let {
+        if(log?.uuid?.let { uuid -> !groupUuidAllowed(uuid) } == true) return@let null
         if (peerReplay != null) peerReplay!!.tracks[it]?.track
         else if (log != null && !unscopedUuidAllowed(log!!.uuid)) null else repo.library.value?.track(it)
     }
@@ -131,13 +139,52 @@ class SessionModel(application: Application) : AndroidViewModel(application) {
     val sessions: List<SessionHeader> get() {
         val local = recorded.map { it.uuid }.toSet()
         return recorded.filter { unscopedUuidAllowed(it.uuid) } +
-            headers.filter { it.uuid !in local && unscopedUuidAllowed(it.uuid) } + peerItems.map { it.header() }
+            headers.filter { it.uuid !in local && unscopedUuidAllowed(it.uuid) } +
+            peerItems.filter { !it.groupManaged && groupUuidAllowed(it.uuid) }.map { it.header() } + groupItems.map {
+                SessionHeader(it.sessionUuid, it.startedAt, it.endedAt, 0, it.origin.label, group=it)
+            }
     }
     val unscopedUuidCollisions get() = (recorded + headers).map { it.uuid }.filterNot(::unscopedUuidAllowed).distinct()
-    private fun unscopedUuidAllowed(uuid: String) = repo.peerSessions.knownUuids?.let { uuid.lowercase() !in it } == true
+    val groupDenyItems get() = peerItems.filter { marker -> marker.groupManaged &&
+        repo.groupHistory.snapshot().items.none { it.sessionUuid.equals(marker.uuid, ignoreCase=true) } }
+    fun ownGroupMarkerAuthority(item: PeerSessionItem) = item.groupManaged && recordedStore.meta(item.uuid) != null && repo.rawSessionAllowed(item.uuid,allowOwnIssued=true)
+    private fun groupUuidAllowed(uuid: String) = repo.groupSessionAllowsRaw(uuid,allowOwnIssued=recordedStore.meta(uuid) != null)
+    private fun unscopedUuidAllowed(uuid: String) = repo.rawSessionAllowed(uuid,allowOwnIssued=recordedStore.meta(uuid) != null)
+
+    /** Explicit projection commits are separate from immutable metadata receipt. Polls only read. */
+    fun refreshGroupHistory(project: Boolean = false) {
+        if(groupRead?.isActive == true) { if(!project) return; groupRead?.cancel() }
+        val retained = (recorded + headers).map { it.uuid.lowercase() }.toSet()
+        groupRead = viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                val failure = if(project) runCatching { repo.groupHistory.project(retained) }.exceptionOrNull() else null
+                repo.groupHistory.snapshot(retained) to failure
+            }
+            groupItems = result.first.items
+            groupError = result.first.error ?: result.second?.let { "Received Session projection is pending; original evidence retained" }
+            groupInfo = groupInfo?.let { old -> groupItems.singleOrNull { it.key == old.key } }
+            if(log?.uuid?.let { !groupUuidAllowed(it) || peerReplay != null && repo.peerSessions.groupOwnedClaims?.containsKey(it.lowercase()) != false } == true) {
+                close(); notice = "Group Session authority changed; replay closed. Original phone evidence is retained."
+            }
+        }
+    }
 
     /** Header flags are hints, not authority: every entry source resolves through the same UUID fence. */
     private fun authoritativeHeader(requested: SessionHeader): SessionHeader? {
+        if(requested.group != null || !groupUuidAllowed(requested.uuid) ||
+            requested.peer?.let { !it.groupManaged && repo.peerSessions.groupOwnedClaims?.containsKey(requested.uuid.lowercase()) != false } == true) {
+            notice = "Group Session evidence is not a playback source; original local evidence is retained."
+            return null
+        }
+        if(requested.peer == null && repo.peerSessions.groupOwnedClaims?.containsKey(requested.uuid.lowercase()) == true) {
+            // An exact own-issued exception selects the actual original recording, never a
+            // requested raw desktop/cache header with coincidentally equal UUID/local integers.
+            val original = recordedStore.meta(requested.uuid)
+            if(original != null && repo.rawSessionAllowed(requested.uuid,allowOwnIssued=true))
+                return SessionHeader(original.uuid,original.startedAt,original.endedAt,0,repo.deviceName,local=true)
+            notice = "Group claim does not authorize this raw source; original evidence is retained."
+            return null
+        }
         val matches = peerItems.filter { it.uuid.equals(requested.uuid, ignoreCase = true) }
         if (repo.peerSessions.knownUuids == null || matches.size > 1) {
             notice = "Session UUID authority is unavailable or ambiguous; replay refused. Local evidence is retained."
@@ -160,6 +207,10 @@ class SessionModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun refuseUnscopedReplay(): Boolean {
+        if(log?.uuid?.let { !groupUuidAllowed(it) || peerReplay != null && repo.peerSessions.groupOwnedClaims?.containsKey(it.lowercase()) != false } == true) {
+            stop(); notice = "Group Session authority prevents replay; original local evidence is retained."
+            return true
+        }
         if (peerReplay != null || log == null || unscopedUuidAllowed(log!!.uuid)) return false
         stop()
         notice = "Session UUID conflicts with received evidence; reopen its guarded received entry. Local evidence is retained."
@@ -168,6 +219,8 @@ class SessionModel(application: Application) : AndroidViewModel(application) {
 
     fun refresh() {
         if (refreshing) return
+        recordedRevision = -1L; syncRecorded()
+        refreshGroupHistory(project=true)
         refreshing = true
         viewModelScope.launch {
             // Push first, so the desktop list already carries this phone's Sessions.
@@ -186,6 +239,10 @@ class SessionModel(application: Application) : AndroidViewModel(application) {
                     peerItems = peerItems.map { it.copy(checked = false) }
                     peerListError = if (e is dev.manadj.library.SyncException && e.status == 404) "Desktop has no peer Session adapter yet" else e.message
                 }
+                if(log?.uuid?.let { !groupUuidAllowed(it) || peerReplay != null && repo.peerSessions.groupOwnedClaims?.containsKey(it.lowercase()) != false } == true) {
+                    close()
+                    notice = "Group Session authority changed; received replay closed and original evidence retained."
+                }
                 if (peerReplay == null && log != null && !unscopedUuidAllowed(log!!.uuid)) {
                     close()
                     notice = "Session UUID now conflicts with received evidence; unscoped replay closed. Local evidence is retained."
@@ -195,7 +252,7 @@ class SessionModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun isCached(h: SessionHeader) = h.peer == null && (h.local || store.isCached(h.uuid))
+    fun isCached(h: SessionHeader) = h.group == null && h.peer == null && (h.local || store.isCached(h.uuid))
 
     /** List row summaries: audible track ids per cached Session (absent = not on the phone / not read yet). */
     val audibleTracks = mutableStateMapOf<String, List<Int>>()
@@ -204,7 +261,7 @@ class SessionModel(application: Application) : AndroidViewModel(application) {
 
     /** Read [h]'s summary in the background once (parses a cached log at most once per Session). */
     fun summarize(h: SessionHeader) {
-        if (h.peer != null || !unscopedUuidAllowed(h.uuid)) return // No raw cached/local summary for received UUIDs.
+        if (h.group != null || h.peer != null || !unscopedUuidAllowed(h.uuid)) return // No raw cached/local summary for received UUIDs.
         if (h.uuid in audibleTracks || !isCached(h) || !summarizing.add(h.uuid)) return
         viewModelScope.launch(summaryIo) {
             val ids = if (h.local) runCatching { SessionLog.parse(recordedStore.detail(h.uuid)).audibleTrackIds }.getOrNull() else store.audibleTracks(h)
@@ -215,6 +272,21 @@ class SessionModel(application: Application) : AndroidViewModel(application) {
 
     fun open(requested: SessionHeader) {
         if (opening != null) return
+        requested.peer?.takeIf { it.groupManaged }?.let { marker ->
+            val current = peerItems.singleOrNull { it.key == marker.key && it.groupManaged }
+            if(current != null) { close(); peerInfo = current }
+            else notice = "Group claim status unavailable; raw UUID fallback remains blocked."
+            return
+        }
+        requested.group?.let { selected ->
+            val retained = (recorded + headers).map { it.uuid.lowercase() }.toSet()
+            val current = repo.groupHistory.snapshot(retained)
+            groupItems = current.items; groupError = current.error
+            val selectedItem = current.items.singleOrNull { it.key == selected.key }
+            if(selectedItem != null) { close(); groupInfo = selectedItem }
+            else notice = "Group evidence is unavailable; raw fallback is refused and local evidence retained."
+            return
+        }
         val h = authoritativeHeader(requested) ?: return
         h.peer?.let { if (!it.canValidate) { peerInfo = it; return } }
         opening = h.key
@@ -230,6 +302,13 @@ class SessionModel(application: Application) : AndroidViewModel(application) {
 
     /** Make [parsed] the open Session (also the test entry: no desktop needed). */
     suspend fun show(h: SessionHeader, parsed: SessionLog, peer: PeerReplay? = null) = coroutineScope {
+        require(h.group == null && h.peer?.groupManaged != true && groupUuidAllowed(parsed.uuid) &&
+            (peer == null || repo.peerSessions.groupOwnedClaims?.containsKey(parsed.uuid.lowercase()) == false)) { "Group evidence cannot enter raw or peer replay" }
+        if(peer == null && repo.peerSessions.groupOwnedClaims?.containsKey(parsed.uuid.lowercase()) == true) {
+            require(h.local && recordedStore.meta(parsed.uuid) != null && repo.rawSessionAllowed(parsed.uuid,allowOwnIssued=true)) { "Only the original phone recording retains own-issued authority" }
+            val original=SessionLog.parse(recordedStore.detail(parsed.uuid))
+            require(original.events == parsed.events) { "Own-issued authority cannot reinterpret raw cached foreign events" }
+        }
         require(h.uuid == parsed.uuid) { "Session header/evidence UUID mismatch" }
         require(peer != null || unscopedUuidAllowed(parsed.uuid)) { "Received Session UUID requires its guarded projection; local evidence is retained" }
         if (peer != null) {
@@ -255,7 +334,7 @@ class SessionModel(application: Application) : AndroidViewModel(application) {
         deckErrors.indices.forEach { deckErrors[it] = null }
     }
 
-    fun close() { stop(); log = null; header = null; peerReplay = null; peerInfo = null; driver = null; recordingDrift = emptyList(); timeline = null; focus = null; wavesJob?.cancel() }
+    fun close() { stop(); log = null; header = null; peerReplay = null; peerInfo = null; groupInfo = null; driver = null; recordingDrift = emptyList(); timeline = null; focus = null; wavesJob?.cancel() }
 
     private var wavesJob: Job? = null
     /** Fetch every Session track's detail waveform (cache first), two at a time. */
@@ -393,6 +472,7 @@ class SessionModel(application: Application) : AndroidViewModel(application) {
 
     private suspend fun run(player: PlayerModel, r: ReplayDriver) {
         while (currentCoroutineContext().isActive) {
+            if(refuseUnscopedReplay()) return
             val wall = System.nanoTime() / 1e9
             val now = r.tick(wall)
             sync(r)
@@ -493,6 +573,7 @@ class SessionModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun issueLoad(player: PlayerModel, deck: Int, trackId: Int) {
+        if(log?.uuid?.let { !groupUuidAllowed(it) } == true) { stop(); notice = "Group Session load refused; evidence retained"; return }
         loadFailure[deck] = null
         peerReplay?.let { replay ->
             val asset = replay.tracks[trackId]
@@ -502,7 +583,7 @@ class SessionModel(application: Application) : AndroidViewModel(application) {
             peerLoads[deck] = viewModelScope.launch {
                 try {
                     val file = repo.peerSessions.audio(replay, trackId)
-                    if (peerReplay?.generation != replay.generation || header?.key != replay.item.key || !(playing || preparing)) return@launch
+                    if (peerReplay?.generation != replay.generation || header?.key != replay.item.key || !(playing || preparing) || !groupUuidAllowed(replay.log.uuid)) return@launch
                     val t = asset.track
                     val grid = t.grid?.tempoChanges?.firstOrNull()
                     player.load(DeckId.entries[deck], file, asset.sourceId(replay), t.title, t.artist.orEmpty(), t.durationSecs,
@@ -530,7 +611,10 @@ class SessionModel(application: Application) : AndroidViewModel(application) {
     private fun prefetch(l: SessionLog) {
         if (peerReplay != null) return // Peer audio has its own fresh generation/member/byte validation.
         val ids = l.appearances.filter { it.end > time }.map { it.trackId }.distinct()
-        viewModelScope.launch(Dispatchers.IO) { for (id in ids) runCatching { repo.audioFile(id); probe(id) } }
+        viewModelScope.launch(Dispatchers.IO) { for (id in ids) {
+            if(!unscopedUuidAllowed(l.uuid)) break
+            runCatching { repo.audioFile(id); if(unscopedUuidAllowed(l.uuid)) probe(id) }
+        } }
     }
 
     /** Per track: this phone's decode vs the desktop's, in ms (> 0 = phone late). See [DecodeProbe]. */

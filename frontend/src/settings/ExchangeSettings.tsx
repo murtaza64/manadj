@@ -45,6 +45,7 @@ export default function ExchangeSettings() {
     <div className="settings-section-heading"><div>
       <h2>Session exchange</h2>
       <p>Exchange closed Session evidence through an existing folder. No audio, playlists, Sets or curated Library metadata are transferred.</p>
+      <p>Complete device-group Sessions appear in Sessions as read-only evidence. Group pairing and automatic exchange are not configured here.</p>
     </div><button className="btn" disabled={busy} onClick={() => void act(refresh)}>Refresh health</button></div>
     {!local && <p role="note">Read-only preview. Configure folders and bindings in the local desktop app.</p>}
     {error && <p role="alert">{error}</p>}

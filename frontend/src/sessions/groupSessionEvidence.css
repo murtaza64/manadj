@@ -1,0 +1,15 @@
+.group-session-attribution { color: var(--text); font-weight: 600; }
+.group-session-summary { display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
+.group-session-status { color: #ffcb00; font-weight: 700; }
+.group-session-status-metadata-ready { color: #00e5ff; }
+.group-session-status-conflicted, .group-session-status-invalid, .group-session-status-revoked { color: #ff4066; }
+.group-session-evidence { flex: 1; overflow: auto; padding: 24px; color: var(--text); }
+.group-session-evidence header { display: flex; align-items: center; gap: 16px; }
+.group-session-evidence p, .group-session-evidence li { line-height: 1.6; }
+.group-session-evidence details { margin-top: 24px; border-top: 1px solid var(--surface1); padding-top: 16px; }
+.group-session-evidence summary { cursor: pointer; font-weight: 600; }
+.group-session-evidence article { margin-top: 16px; padding: 16px; background: var(--surface0); }
+.group-session-evidence dl > div { display: grid; grid-template-columns: 150px 1fr; gap: 12px; margin: 8px 0; }
+.group-session-evidence dd { margin: 0; min-width: 0; }
+.group-session-evidence code { overflow-wrap: anywhere; font-size: 12px; }
+@media (max-width: 600px) { .group-session-evidence { padding: 12px; } .group-session-evidence dl > div { grid-template-columns: 1fr; gap: 2px; } }

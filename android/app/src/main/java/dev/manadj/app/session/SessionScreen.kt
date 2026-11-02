@@ -28,6 +28,7 @@ import dev.manadj.app.*
 import dev.manadj.audio.DeckId
 import dev.manadj.audio.LoadState
 import dev.manadj.library.AudioState
+import dev.manadj.library.group.GroupSessionView
 import dev.manadj.library.session.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -40,10 +41,10 @@ private fun hms(seconds: Double): String { val s = seconds.coerceAtLeast(0.0).to
     val activity = androidx.compose.ui.platform.LocalContext.current as androidx.activity.ComponentActivity
     val model = remember(activity) { androidx.lifecycle.ViewModelProvider(activity)[SessionModel::class.java] }
     val close = { model.leave(); ux.sessions = false }
-    BackHandler { if (model.log != null) model.close() else close() }
+    BackHandler { if(model.groupInfo != null) model.groupInfo = null else if (model.log != null) model.close() else close() }
     LaunchedEffect(Unit) { if (model.headers.isEmpty() || model.listError == null) model.refresh() }
     // This phone's recordings (#395) appear as the recorder opens/ends them.
-    LaunchedEffect(Unit) { while (true) { model.syncRecorded(); kotlinx.coroutines.delay(2000) } }
+    LaunchedEffect(Unit) { while (true) { model.syncRecorded(); model.refreshGroupHistory(); kotlinx.coroutines.delay(2000) } }
     // Leaving the screen stops replay; a configuration change (rotation, layout switch) must not: the
     // replay lives in the ViewModel and this composition is only rebuilt.
     DisposableEffect(Unit) { onDispose { if (!activity.isChangingConfigurations) model.leave() } }
@@ -54,7 +55,7 @@ private fun hms(seconds: Double): String { val s = seconds.coerceAtLeast(0.0).to
             Spacer(Modifier.width(8.dp))
             Column(Modifier.weight(1f)) {
                 Text(if (log == null) "SESSIONS" else "SESSION · ${model.header?.startedAt?.let(::dateLabel) ?: ""}", bold = true, size = 15)
-                Text(if (log == null) "${model.recorded.size} recorded here · ${model.headers.count { h -> model.recorded.none { it.uuid == h.uuid } }} from the desktop · replay on all four decks" else "${hms(log.end - log.activeStart)} · ${log.appearances.size} loads · ${log.events.size} events", color = Ink.muted, size = 10)
+                Text(if (log == null) if(model.groupItems.isNotEmpty()) "${model.recorded.size} recorded here · ${model.groupItems.size} received from your devices" else "${model.recorded.size} recorded here · ${model.headers.count { h -> model.recorded.none { it.uuid == h.uuid } }} from the desktop · replay on all four decks" else "${hms(log.end - log.activeStart)} · ${log.appearances.size} loads · ${log.events.size} events", color = Ink.muted, size = 10)
             }
             if (log != null) Key("LIST", Modifier.size(64.dp, 40.dp), Ink.accent) { model.close() }
             else Key(if (model.refreshing) "…" else "REFRESH", Modifier.size(88.dp, 40.dp), Ink.accent, enabled = !model.refreshing) { model.refresh() }
@@ -62,7 +63,8 @@ private fun hms(seconds: Double): String { val s = seconds.coerceAtLeast(0.0).to
         model.notice?.let { n ->
             Row(Modifier.fillMaxWidth().background(Ink.crust).clickable { model.notice = null }.padding(horizontal = 12.dp, vertical = 6.dp)) { Text(n, color = Ink.warning, size = 11, lines = 3) }
         }
-        model.peerInfo?.let { item -> PeerSessionInfo(item) { model.peerInfo = null } }
+        model.peerInfo?.let { item -> PeerSessionInfo(item, model.ownGroupMarkerAuthority(item)) { model.peerInfo = null } }
+        model.groupInfo?.let { item -> GroupSessionInfo(item) { model.groupInfo = null } }
         model.header?.peer?.let { item ->
             Text("RECEIVED · ${item.recordingOrigin ?: "unknown recording origin"} · source ${item.originReplicaId.take(8)} · generation ${item.generation?.take(8)} · exact audio revalidated before replay/load",
                 Modifier.fillMaxWidth().padding(8.dp).testTag("peer-session-provenance"), Ink.accent, 11, lines = 3)
@@ -76,12 +78,52 @@ private val timeFormat = java.time.format.DateTimeFormatter.ofPattern("HH:mm")
 private fun local(iso: String?) = sessionInstant(iso)?.atZone(java.time.ZoneId.systemDefault())
 private fun dateLabel(iso: String): String = local(iso)?.let { "${it.format(dayFormat)} ${it.format(timeFormat)}" } ?: iso
 
-@Composable internal fun PeerSessionInfo(item: PeerSessionItem, close: () -> Unit) {
+private fun groupOrigin(item: GroupSessionView) = "From ${item.origin.label}" +
+    if(item.relays.isEmpty()) "" else " · via " + item.relays.joinToString { it.label + if(it.revoked) " (revoked)" else "" }
+private fun groupStatus(item: GroupSessionView) = when(item.status) {
+    "projection-pending" -> "Preparing Session history"
+    "unbound" -> "Waiting for track bindings"
+    "missing-assets" -> "Waiting for audio"
+    "changed-assets" -> "Audio changed · verification needed"
+    "unverified-assets" -> "Audio not verified"
+    "metadata-ready" -> "Metadata ready · playback unavailable"
+    "conflicted" -> "Conflicting Session evidence"
+    "revoked" -> "Source revoked · playback unavailable"
+    else -> "Evidence cannot be validated"
+}
+
+@Composable internal fun GroupSessionInfo(item: GroupSessionView, close: () -> Unit) {
+    var technical by remember(item.key) { mutableStateOf(false) }
+    Column(Modifier.fillMaxWidth().heightIn(max=480.dp).background(Ink.crust).verticalScroll(rememberScrollState()).padding(12.dp).testTag("group-session-info")) {
+        Text(groupOrigin(item), color=Ink.text, size=13, bold=true, lines=3)
+        Text(groupStatus(item), color=Ink.warning, size=12, bold=true)
+        Text("Evidence only · playback unavailable", color=Ink.muted, size=11)
+        Text("${item.tracks.size} track dependencies · ${item.conflictCount} conflicting evidence record(s). Original recordings are retained; no automatic track binding or audio transfer.", color=Ink.muted, size=11, lines=4)
+        Key(if(technical) "HIDE TECHNICAL EVIDENCE" else "TECHNICAL EVIDENCE", Modifier.fillMaxWidth().height(48.dp), Ink.accent) { technical = !technical }
+        if(technical) {
+            Text("Group: ${item.groupId}\nSigner: ${item.origin.deviceId}\nOperation: ${item.operationId}\nSession: ${item.sessionUuid}", color=Ink.muted, size=10, lines=6)
+            Text("Operation SHA256: ${item.operationSha256}\nManifest SHA256: ${item.manifestSha256}", color=Ink.muted, size=10, lines=6)
+            Text("Supplying devices, not an ordered route: ${item.relays.joinToString { "${it.label}: ${it.deviceId}${if(it.revoked) " (revoked)" else ""}" }.ifEmpty { "direct from original device" }}", color=Ink.muted, size=10, lines=5)
+            item.tracks.forEach { track -> Text("Track UUID: ${track.logicalTrackId}\nState: ${track.assetState}\nExpected asset: ${track.expectedAsset ?: "no issuer fingerprint"}", color=Ink.muted, size=10, lines=7) }
+        }
+        Key("CLOSE", Modifier.size(80.dp, 48.dp), description="Close group Session evidence", action=close)
+    }
+}
+
+@Composable internal fun PeerSessionInfo(item: PeerSessionItem, ownRecordingAuthority: Boolean = false, close: () -> Unit) {
+    var technical by remember(item.key) { mutableStateOf(false) }
     Column(Modifier.fillMaxWidth().background(Ink.crust).padding(12.dp).testTag("peer-session-info")) {
         Text(item.statusLabel, color = Ink.warning, size = 12, bold = true)
-        Text("Recording origin: ${item.recordingOrigin ?: "unknown"}\nSource namespace: ${item.originReplicaId}\nSession: ${item.uuid}", color = Ink.text, size = 11, lines = 4)
-        Text("${item.dependencies.size} track dependencies · ${item.dependencies.groupingBy { it.state }.eachCount().entries.joinToString { "${it.value} ${it.key}" }}", color = Ink.muted, size = 11, lines = 3)
-        Text("Received metadata is not playable audio. Resolve bindings, finish intake and verify exact assets on the owning desktop, then refresh. Cached evidence needs desktop revalidation.", color = Ink.muted, size = 11, lines = 4)
+        if(item.groupManaged) {
+            Text(if(ownRecordingAuthority) "The original recording on this phone retains its own authority. This paired-desktop claim grants no playback of received group data or membership."
+                else "The paired desktop reports group-owned evidence. This status is not a verified Session payload or group enrollment. Raw cached and local playback for its UUID remain blocked; original recordings are retained.", color=Ink.muted, size=11, lines=5)
+            Key("TECHNICAL EVIDENCE", Modifier.fillMaxWidth().height(48.dp), Ink.accent) { technical = !technical }
+        }
+        if(!item.groupManaged || technical) {
+            Text("Recording origin: ${item.recordingOrigin ?: "unknown"}\nSource namespace: ${item.originReplicaId}\nSession: ${item.uuid}", color = Ink.text, size = 11, lines = 4)
+            Text("${item.dependencies.size} track dependencies · ${item.dependencies.groupingBy { it.state }.eachCount().entries.joinToString { "${it.value} ${it.key}" }}", color = Ink.muted, size = 11, lines = 3)
+        }
+        if(!item.groupManaged) Text("Received metadata is not playable audio. Resolve bindings, finish intake and verify exact assets on the owning desktop, then refresh. Cached evidence needs desktop revalidation.", color = Ink.muted, size = 11, lines = 4)
         Key("CLOSE", Modifier.size(80.dp, 48.dp), description = "Close peer Session status", action = close)
     }
 }
@@ -91,6 +133,11 @@ private fun dateLabel(iso: String): String = local(iso)?.let { "${it.format(dayF
 @Composable private fun SessionList(model: SessionModel) {
     model.listError?.let { Text("Session list: $it${if (model.headers.isNotEmpty()) " · showing the cached list" else ""}", Modifier.padding(12.dp), Ink.warning, 11, lines = 3) }
     model.peerListError?.let { Text("Received Sessions: $it · cached metadata is not replay-ready", Modifier.padding(12.dp), Ink.warning, 11, lines = 3) }
+    model.groupError?.let { Text("Received group Sessions: $it", Modifier.padding(12.dp).testTag("group-session-error"), Ink.warning, 11, lines=4) }
+    model.groupDenyItems.forEach { marker ->
+        Text("Group evidence received · inspect unavailable playback status ›", Modifier.fillMaxWidth().clickable { model.open(marker.header()) }
+            .padding(12.dp).testTag("group-deny-only-status"), Ink.warning, 11, lines=3)
+    }
     if (model.unscopedUuidCollisions.isNotEmpty()) Text(
         "${model.unscopedUuidCollisions.size} UNSCOPED LOCAL/CACHED UUID COLLISION(S) · evidence retained; use guarded received entries, never local Track IDs",
         Modifier.padding(12.dp).testTag("session-uuid-collision"), Ink.warning, 11, lines = 3)
@@ -119,6 +166,15 @@ private fun dateLabel(iso: String): String = local(iso)?.let { "${it.format(dayF
 }
 
 @Composable private fun SessionRow(model: SessionModel, h: SessionHeader, now: java.time.Instant) {
+    h.group?.let { group ->
+        Column(Modifier.fillMaxWidth().clickable { model.open(h) }.padding(horizontal=16.dp, vertical=12.dp).testTag("group-session-row")) {
+            Text(groupOrigin(group), color=Ink.text, size=12, bold=true, lines=3)
+            Text("${local(h.startedAt)?.format(timeFormat) ?: "—"} · ${sessionLengthLabel(sessionSeconds(h, now))} · ${group.tracks.size} tracks", color=Ink.muted, size=10)
+            Text(groupStatus(group), color=Ink.warning, size=11, lines=2)
+            Text("Evidence only · inspect ›", color=Ink.accent, size=10)
+        }
+        return
+    }
     val peer = h.peer
     val opening = model.opening == h.key
     val cached = model.isCached(h)

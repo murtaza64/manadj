@@ -10,6 +10,7 @@ import { api } from '../api/client';
 import { SessionTimelineView } from './SessionTimelineView';
 import { OPEN_SESSION_EVENT, peekSessionFocus } from './openSession';
 import type { SessionFocus } from './openSession';
+import { GroupSessionEvidence } from './GroupSessionEvidence';
 
 export function SessionTimelinePane({
   sessionUuid,
@@ -39,6 +40,7 @@ export function SessionTimelinePane({
       </div>
     );
   }
+  if (session.group_history?.length) return <GroupSessionEvidence key={session.uuid} session={session} onBack={onBack} />;
   // Keyed per session (sessions 21): a session switch is a fresh mount —
   // state comes from the per-uuid store, never leaks across sessions.
   return (

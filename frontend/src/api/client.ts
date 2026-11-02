@@ -1823,6 +1823,13 @@ export const api = {
   },
 
   sessions: {
+    retryGroupProjection: async (group_id: string, operation_id: string): Promise<void> => {
+      const res = await fetch(`${API_BASE}/peer-sync/group-history/project`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ group_id, operation_id }),
+      });
+      if (!res.ok) throw new Error(`Session projection unavailable (${res.status})`);
+    },
     /** The Sessions list, newest first — headers + Take count (ADR 0033). */
     list: async (): Promise<SessionRowWire[]> => {
       const res = await fetch(`${API_BASE}/sessions`);
@@ -2223,6 +2230,29 @@ export interface SessionRowWire {
   take_count: number;
   /** Recording device (#395): null/absent = this desktop, else the phone's name. */
   origin?: string | null;
+  group_history?: GroupSessionView[];
+}
+
+export interface GroupSessionView {
+  format: 'manadj-group-session-view/v1';
+  group_id: string;
+  operation_id: string;
+  session_uuid: string;
+  operation_sha256: string;
+  manifest_sha256: string;
+  origin: { device_id: string; label: string; revoked: boolean };
+  /** Authenticated supplying peers, not an asserted ordered route. */
+  relays: { device_id: string; label: string; revoked: boolean }[];
+  started_at: string;
+  ended_at: string;
+  status: 'projection-pending' | 'unbound' | 'missing-assets' | 'changed-assets' | 'unverified-assets' |
+    'metadata-ready' | 'conflicted' | 'revoked' | 'invalid';
+  projected: boolean;
+  playable: false;
+  editable: false;
+  conflict_count: number;
+  tracks: { logical_track_id: string; asset_state: 'unbound' | 'missing' | 'partial' | 'changed' | 'unverified' | 'exact';
+    expected_asset: { algorithm: 'sha256-file-bytes-v1'; sha256: string; byte_length: number } | null }[];
 }
 
 export interface SessionDetailWire extends SessionRowWire {

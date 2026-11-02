@@ -1,7 +1,10 @@
 """Pydantic schemas for API validation."""
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 from datetime import datetime
+
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
+
+from .peer_sync.projection_contracts import GroupSessionView
 
 
 # Tag Category Schemas
@@ -494,6 +497,7 @@ class SessionRow(BaseModel):
     take_count: int
     # Recording device (#395): null = this desktop, else the phone's name.
     origin: str | None = None
+    group_history: list[GroupSessionView] = Field(default_factory=list)
 
 
 class SessionDetail(SessionRow):

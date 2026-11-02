@@ -117,6 +117,7 @@ class GroupMember(Base):
     device_id = Column(String(36), primary_key=True)
     public_key_b64 = Column(String(44), nullable=False)
     revoked = Column(Integer, nullable=False, default=0)
+    label = Column(String(80), nullable=False, default="Own device")
 
 
 class GroupOperation(Base):
@@ -149,3 +150,14 @@ class GroupPossession(Base):
     sha256 = Column(String(64), nullable=False)
     proof_body_b64 = Column(Text, nullable=False)
     proof_signature_b64 = Column(String(88), nullable=False)
+
+
+class GroupHistory(Base):
+    __tablename__ = "device_group_history"
+    session_id = Column(Integer, ForeignKey("sessions.id", ondelete="CASCADE"), primary_key=True)
+    group_id = Column(String(36), ForeignKey("device_groups.group_id"), nullable=False)
+    operation_id = Column(String(36), nullable=False)
+    origin_device_id = Column(String(36), nullable=False)
+    source_sha256 = Column(String(64), nullable=False)
+    manifest_sha256 = Column(String(64), nullable=False)
+    session = relationship("Session", backref=backref("group_history", uselist=False, passive_deletes="all"))

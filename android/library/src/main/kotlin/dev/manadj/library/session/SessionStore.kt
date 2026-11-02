@@ -12,8 +12,8 @@ import java.io.File
  * (null = the desktop). [local]: recorded on this phone (a [RecordedSessions] entry).
  */
 data class SessionHeader(val uuid: String, val startedAt: String?, val endedAt: String?, val takeCount: Int, val origin: String? = null, val local: Boolean = false,
-    val peer: PeerSessionItem? = null) {
-    val key get() = peer?.key ?: uuid
+    val peer: PeerSessionItem? = null, val group: dev.manadj.library.group.GroupSessionView? = null) {
+    val key get() = group?.key ?: peer?.key ?: uuid
 }
 
 /**
@@ -22,7 +22,8 @@ data class SessionHeader(val uuid: String, val startedAt: String?, val endedAt: 
  *   sessions.json         last pulled header list
  *   sessions/<uuid>.json  SessionDetail per opened Session (ended Sessions are immutable)
  */
-class SessionStore(private val root: File, private val client: () -> SyncClient, private val io: CoroutineDispatcher = Dispatchers.IO) {
+class SessionStore(private val root: File, private val client: () -> SyncClient, private val io: CoroutineDispatcher = Dispatchers.IO,
+    private val uuidAllowed: (String) -> Boolean = { true }) {
     private val listFile = File(root, "sessions.json")
     private val dir = File(root, "sessions").apply { mkdirs() }
 
@@ -40,11 +41,15 @@ class SessionStore(private val root: File, private val client: () -> SyncClient,
 
     /** The Session's log: cached when ended and present, else pulled (falling back to any cached copy). */
     suspend fun log(header: SessionHeader): SessionLog = withContext(io) {
+        require(header.group == null && header.peer == null && uuidAllowed(header.uuid)) { "Received UUID cannot use raw cached Session detail" }
         val f = file(header.uuid)
         if (header.endedAt == null || !f.isFile) {
             try { client().downloadSession(header.uuid, f) } catch (e: Exception) { if (!f.isFile) throw e }
         }
-        f.bufferedReader().use { SessionLog.parse(it) }.also { require(it.replayGeneration == null) { "Peer Session requires versioned intake; legacy cached detail is not replay authority" } }
+        f.bufferedReader().use { SessionLog.parse(it) }.also {
+            require(uuidAllowed(header.uuid)) { "Session UUID authority changed during raw detail read" }
+            require(it.replayGeneration == null) { "Peer Session requires versioned intake; legacy cached detail is not replay authority" }
+        }
     }
 
     /**
@@ -52,12 +57,14 @@ class SessionStore(private val root: File, private val client: () -> SyncClient,
      * Ended Sessions are immutable: the result is kept beside the log, so the log is parsed once.
      */
     suspend fun audibleTracks(header: SessionHeader): List<Int>? = withContext(io) {
+        if(header.group != null || header.peer != null || !uuidAllowed(header.uuid)) return@withContext null
         val f = file(header.uuid)
         if (!f.isFile) return@withContext null
         val memo = File(f.parentFile, f.nameWithoutExtension + ".tracks")
         if (header.endedAt != null && memo.isFile && memo.lastModified() >= f.lastModified())
             return@withContext memo.readText().split(',').mapNotNull { it.trim().toIntOrNull() }
         val ids = runCatching { f.bufferedReader().use { SessionLog.parse(it) }.audibleTrackIds }.getOrNull() ?: return@withContext null
+        if(!uuidAllowed(header.uuid)) return@withContext null
         if (header.endedAt != null) atomicWrite(memo, ids.joinToString(","))
         ids
     }

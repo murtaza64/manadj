@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "items": [{
+    "session_uuid": "55555555-5555-4555-8555-555555555555",
+    "origin_replica_id": "11111111-1111-4111-8111-111111111111",
+    "recording_origin": "Group Session evidence",
+    "manifest_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "started_at": null,
+    "ended_at": null,
+    "materialized": false,
+    "state": "group_metadata_only",
+    "group_managed": true,
+    "group_claims": [{
+      "group_id": "33333333-3333-4333-8333-333333333333",
+      "operation_id": "44444444-4444-4444-8444-444444444444",
+      "origin_device_id": "11111111-1111-4111-8111-111111111111",
+      "operation_sha256": "9883b104a969e9cd916dedcac71eae28a52139556ffcfbeda1b70103a1770154"
+    }],
+    "replay_generation": null,
+    "dependencies": [],
+    "conflict_count": 0
+  }]
+}

@@ -18,13 +18,16 @@ Take carries is provenance, not a dependency.
 """
 
 import json
+from datetime import UTC
 
 from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy import func
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, object_session
 
 from backend import models, schemas
 from backend.database import get_db
+from backend.peer_sync.group_history import deny_group_uuid, owns_uuid
+from backend.peer_sync.group_history import views as group_views
 from backend.routine_miner_tasks import enqueue_routine_mine
 from backend.session_audibility import events_contain_audible
 from backend.session_source import deny_peer_write, peer_audio, replay_generation, session_events
@@ -46,7 +49,7 @@ def _is_silent(s: models.Session) -> bool:
     Deck (sessions 11) — chunk by chunk, short-circuiting on the first
     audible instant, so real Sessions stop at their opening seconds."""
 
-    if s.peer_history is not None:
+    if s.peer_history is not None or s.group_history is not None or owns_uuid(object_session(s), s.uuid):
         return False  # immutable source was complete/audible at materialization
 
     def _events():
@@ -56,7 +59,7 @@ def _is_silent(s: models.Session) -> bool:
     return not events_contain_audible(_events())
 
 
-def _row(db: Session, s: models.Session) -> schemas.SessionRow:
+def _row(db: Session, s: models.Session, projections=None) -> schemas.SessionRow:
     take_count = (
         db.query(func.count(models.Take.id))
         .filter(models.Take.session_uuid == s.uuid)
@@ -68,6 +71,7 @@ def _row(db: Session, s: models.Session) -> schemas.SessionRow:
         ended_at=s.ended_at,
         take_count=take_count or 0,
         origin=s.origin,
+        group_history=group_views(db, s.uuid) if projections is None else projections,
     )
 
 
@@ -79,7 +83,16 @@ def list_sessions(db: Session = Depends(get_db)) -> list[schemas.SessionRow]:
         .order_by(models.Session.started_at.desc(), models.Session.id.desc())
         .all()
     )
-    return [_row(db, s) for s in rows]
+    projections = {}
+    for projection in group_views(db):
+        projections.setdefault(str(projection.session_uuid), []).append(projection)
+    result = [_row(db, s, projections.get(s.uuid, [])) for s in rows]
+    present = {s.uuid for s in rows}
+    for uuid, items in projections.items():
+        if uuid not in present and any(item.status != "invalid" for item in items):
+            result.append(schemas.SessionRow(uuid=uuid, started_at=items[0].started_at,
+                ended_at=items[0].ended_at, origin=items[0].origin.label, take_count=0, group_history=items))
+    return sorted(result, key=lambda row: row.started_at.replace(tzinfo=UTC), reverse=True)
 
 
 @router.post("", response_model=schemas.SessionRow)
@@ -88,6 +101,7 @@ def create_session(
 ) -> schemas.SessionRow:
     """Open a Session (recorder start). Idempotent on the client uuid is
     not offered — a duplicate uuid is a client bug (400)."""
+    deny_group_uuid(db, payload.uuid)
     if db.query(models.Session.id).filter(models.Session.uuid == payload.uuid).first() is not None:
         raise HTTPException(status_code=400, detail=f"duplicate session uuid {payload.uuid}")
     s = models.Session(uuid=payload.uuid)
@@ -138,6 +152,15 @@ def get_session(uuid: str, db: Session = Depends(get_db)) -> schemas.SessionDeta
     order (the relationship's order_by). The diagnostic/inspection seam —
     the persisted events, readable through the app boundary."""
     s = db.query(models.Session).filter(models.Session.uuid == uuid).first()
+    projections = group_views(db, uuid)
+    if projections:
+        if s is None and all(view.status == "invalid" for view in projections):
+            raise HTTPException(409, "invalid_group_session_evidence")
+        header = _row(db, s, projections) if s is not None else schemas.SessionRow(uuid=uuid,
+            started_at=projections[0].started_at, ended_at=projections[0].ended_at,
+            take_count=0, origin=projections[0].origin.label, group_history=projections)
+        return schemas.SessionDetail(**header.model_dump(), events=[], replay_generation=None)
+    deny_group_uuid(db, uuid)
     if s is None:
         raise HTTPException(status_code=404, detail="session not found")
     events = session_events(db, s)
@@ -147,6 +170,7 @@ def get_session(uuid: str, db: Session = Depends(get_db)) -> schemas.SessionDeta
 
 @router.get("/{uuid}/audio/{track_id}")
 def get_peer_audio(uuid: str, track_id: int, generation: str, db: Session = Depends(get_db)):
+    deny_group_uuid(db, uuid)
     s = db.query(models.Session).filter(models.Session.uuid == uuid).first()
     if s is None or s.peer_history is None:
         raise HTTPException(404, "peer_history_not_found")
@@ -160,6 +184,7 @@ def append_chunk(
 ) -> schemas.SessionRow:
     """Append one batch of events. `seq` must be new within the Session — a
     duplicate seq is a client retry bug (400); the sink never retries."""
+    deny_group_uuid(db, uuid)
     s = db.query(models.Session).filter(models.Session.uuid == uuid).first()
     if s is None:
         raise HTTPException(status_code=404, detail="session not found")
@@ -192,6 +217,7 @@ def end_session(
     closing twice is harmless. A 100%-silent Session is deleted instead of
     closed (sessions 11): shutdown and the auto-split both end through
     here, and neither may leave a silent history entry."""
+    deny_group_uuid(db, uuid)
     s = db.query(models.Session).filter(models.Session.uuid == uuid).first()
     if s is None:
         raise HTTPException(status_code=404, detail="session not found")
@@ -214,6 +240,7 @@ def end_session(
 def delete_session(uuid: str, db: Session = Depends(get_db)) -> dict:
     """Delete a Session and its chunks. Takes are untouched — pruning a
     Session's timeline never destroys kept evidence (ADR 0033)."""
+    deny_group_uuid(db, uuid)
     s = db.query(models.Session).filter(models.Session.uuid == uuid).first()
     if s is None:
         raise HTTPException(status_code=404, detail="session not found")
