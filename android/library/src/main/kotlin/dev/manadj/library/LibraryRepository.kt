@@ -74,6 +74,9 @@ class LibraryRepository(
 
     private fun client() = SyncClient(baseUrl, pairCode, deviceToken = deviceToken, deviceId = deviceId, deviceName = deviceName)
 
+    /** Separate generation-bound peer evidence/audio; ordinary snapshot, journal and audio cache stay v1. */
+    val peerSessions = dev.manadj.library.session.PeerSessions(File(root, "peer-sessions"), ::client, io)
+
     val journal = EditJournal(File(root, "edits.jsonl"))
     /** The last pulled snapshot, without local edits (the diff base for /received). */
     @Volatile private var pulled: Snapshot? = null
