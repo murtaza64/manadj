@@ -19,6 +19,14 @@ class ProjectionRetry(Strict):
     operation_id: UUID
 
 
+class GroupDenyClaim(Strict):
+    """Paired adapter denial reason, never a group trust/readiness grant."""
+    group_id: UUID
+    operation_id: UUID
+    origin_device_id: UUID
+    operation_sha256: Digest
+
+
 class ProjectionTrack(Strict):
     logical_track_id: UUID
     asset_state: Literal["unbound", "missing", "partial", "changed", "unverified", "exact"]

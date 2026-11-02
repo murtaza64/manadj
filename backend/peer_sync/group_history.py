@@ -65,16 +65,23 @@ def paired_deny_items(db):
     states. Never advertise READY/materialization/audio or grant membership.
     This prevents a refreshed non-enrolled phone resurrecting an old raw cache.
     """
-    claims = {row.session_uuid: row.origin_device_id for row in reversed(received_operations(db))}
+    claims = {}
+    for row in received_operations(db):
+        claims.setdefault(row.session_uuid, set()).add((row.group_id, row.operation_id, row.origin_device_id, row.sha256))
     for normal in db.scalars(select(RecordedSession).join(GroupHistory)):
-        claims.setdefault(normal.uuid, normal.group_history.origin_device_id)
+        history = normal.group_history
+        claims.setdefault(normal.uuid, set()).add((history.group_id, history.operation_id,
+                                                   history.origin_device_id, history.source_sha256))
     result = []
-    for uuid, origin in sorted(claims.items()):
+    for uuid, evidence in sorted(claims.items()):
+        ordered = sorted(evidence)
+        reasons = [{"group_id": gid, "operation_id": oid, "origin_device_id": origin,
+                    "operation_sha256": sha} for gid, oid, origin, sha in ordered] if len(ordered) <= 256 else []
         source = db.get(SyncSession, uuid)
-        result.append({"session_uuid": uuid, "origin_replica_id": origin,
+        result.append({"session_uuid": uuid, "origin_replica_id": ordered[0][2],
             "recording_origin": "Group Session evidence", "manifest_sha256": source.manifest_sha256 if source else "0" * 64,
             "started_at": None, "ended_at": None, "materialized": False,
-            "state": "group_metadata_only", "group_managed": True, "replay_generation": None,
+            "state": "group_metadata_only", "group_managed": True, "group_claims": reasons, "replay_generation": None,
             "dependencies": [], "conflict_count": 0})
     return result
 

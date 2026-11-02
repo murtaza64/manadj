@@ -128,6 +128,8 @@ def test_uuid_authority_survives_projection_failure_revocation_missing_and_colli
     marker = next(item for item in normal.get("/api/device-sync/peer-sessions").json()["items"] if item["session_uuid"] == sid)
     assert marker["group_managed"] and marker["state"] == "group_metadata_only"
     assert marker["materialized"] is False and marker["replay_generation"] is None and marker["dependencies"] == []
+    assert marker["group_claims"] == [{"group_id": gid, "operation_id": str(unpack(issued, Operation)[0].operation_id),
+        "origin_device_id": ids[0]["device_id"], "operation_sha256": unpack(issued, Operation)[2]}]
     assert normal.get(f"/api/device-sync/peer-sessions/{sid}?generation=anything").status_code == 409
     with phone.sessions() as db:
         count = db.query(SessionChunk).count()
@@ -157,6 +159,10 @@ def test_incompatible_same_uuid_preserves_both_signed_ops_and_existing_projectio
     detail = history(phone).get(f"/api/sessions/{sid}").json()
     assert len(detail["group_history"]) == 2 and all(v["status"] == "conflicted" for v in detail["group_history"])
     assert len(history(phone).get("/api/sessions").json()) == 1
+    from backend.peer_sync.group_history import paired_deny_items
+    with phone.sessions() as db:
+        claims = paired_deny_items(db)[0]["group_claims"]
+        assert len(claims) == 2 and {claim["operation_sha256"] for claim in claims} == {unpack(issued, Operation)[2], unpack(sign(changed, seeds[0]), Operation)[2]}
     with phone.sessions() as db:
         assert db.query(GroupOperation).count() == 2 and db.query(RecordedSession).count() == 1
         assert db.query(SessionChunk).count() == 0
