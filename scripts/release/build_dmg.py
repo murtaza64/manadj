@@ -71,7 +71,11 @@ APP_NAME = "manaDJ"
 
 # The repo-shaped backend tree (everything the backend imports at runtime).
 BACKEND_DIRS = ["backend", "rekordbox", "enginedj", "harness", "alembic"]
-BACKEND_FILES = ["alembic.ini", "scripts/agent/db_backup.py"]
+BACKEND_FILES = [
+    "alembic.ini",
+    "scripts/agent/db_backup.py",
+    "scripts/agent/project_paths.py",
+]
 SHELL_FILES = [
     "main.js",
     "backend.js",

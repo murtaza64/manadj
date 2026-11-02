@@ -21,8 +21,13 @@ import time
 import urllib.request
 from pathlib import Path
 
-DEFAULT_WS = Path("/Users/murtaza/manadj")
-SIDECAR = DEFAULT_WS / ".editspace"
+try:
+    from .project_paths import discover
+except ImportError:
+    from project_paths import discover
+
+PATHS = discover(Path(__file__).resolve().parents[2])
+DEFAULT_WS, SIDECAR = PATHS.default, PATHS.sidecar
 LIVE_HORIZON_S = 30 * 60  # owner session updated within this = live
 
 
@@ -39,8 +44,11 @@ def discover_port() -> int | None:
             return port
         except Exception:
             pass
-    out = subprocess.run(["lsof", "-nP", "-iTCP", "-sTCP:LISTEN"],
-                         capture_output=True, text=True).stdout
+    try:
+        out = subprocess.run(["lsof", "-nP", "-iTCP", "-sTCP:LISTEN"],
+                             capture_output=True, text=True).stdout
+    except FileNotFoundError:
+        return None
     for line in out.splitlines()[1:]:
         cols = line.split()
         if len(cols) >= 9 and "opencode" in cols[0].lower():
