@@ -54,6 +54,7 @@ class PeerSessionUiTest {
     private lateinit var service: org.robolectric.android.controller.ServiceController<PlaybackService>
     @Volatile private var state="ready"
     @Volatile private var peerListFails=false
+    @Volatile private var peerOmitted=false
     private var details=0
     private var bareIdCalls=0
 
@@ -73,6 +74,7 @@ class PeerSessionUiTest {
     }
     @Before fun start() {
         RuntimeEnvironment.setQualifiers("w600dp-h900dp-mdpi")
+        peerOmitted=testName.methodName=="failedAuthorityWriteClosesAnAlreadyOpenUnscopedPhoneView"
         server=ServerSocket(0,50,InetAddress.getByName("127.0.0.1"))
         serverThread=Thread({
             while(!server.isClosed) try { server.accept().use { socket ->
@@ -84,7 +86,7 @@ class PeerSessionUiTest {
                 path=="/api/device-sync/sessions" -> "[]".toByteArray()
                 path.startsWith("/api/device-sync/sessions/") -> {code=409;byteArrayOf()} // retain generated phone evidence, no peer write authority
                 path=="/api/device-sync/peer-sessions" -> {
-                    if(peerListFails) {code=503;byteArrayOf()} else JSONObject().put("version",1).put("items",JSONArray().put(item())).toString().toByteArray()
+                    if(peerListFails) {code=503;byteArrayOf()} else JSONObject().put("version",1).put("items",if(peerOmitted) JSONArray() else JSONArray().put(item())).toString().toByteArray()
                 }
                 path.startsWith("/api/device-sync/peer-sessions/$sid") -> {
                     details++
@@ -136,7 +138,7 @@ class PeerSessionUiTest {
         assertTrue("control: stale source UUID header really was cached",model.headers.any {it.uuid==sid})
         val ux=provider[UiModel::class.java]
         compose.setContent {SessionScreen(player,ux,Modifier.fillMaxSize())}
-        waitFor {model.peerItems.isNotEmpty() && !model.refreshing}
+        waitFor {!model.refreshing && if(peerOmitted) model.headers.none {it.uuid==sid} else model.peerItems.isNotEmpty()}
     }
     @After fun finish() {
         compose.runOnUiThread {model.close();compose.activity.viewModelStore.clear()}
@@ -260,6 +262,28 @@ class PeerSessionUiTest {
         waitFor {model.playing && PeerUiAudio.loads==1}
         assertEquals("library:77:r77",player.decks.getValue(DeckId.A).source?.id)
         assertEquals(original,phone.detail(phoneSid));assertNotNull(phone.meta(phoneSid))
+    }
+
+    @Test fun failedAuthorityWriteClosesAnAlreadyOpenUnscopedPhoneView() {
+        val phone=SessionRecording.init(compose.activity)
+        val original=phone.detail(sid)
+        compose.runOnUiThread {model.open(model.sessions.single {it.uuid==sid})}
+        waitFor {model.log!=null}
+        assertNull(model.peerReplay)
+        val target=File(compose.activity.cacheDir,"peer-ui/peer-sessions/known-uuids.json")
+        require(target.canonicalPath.startsWith(compose.activity.cacheDir.canonicalPath+File.separator))
+        assertTrue(target.isFile);assertTrue(target.delete());assertTrue(target.mkdirs())
+        File(target,"owned-decoy").writeText("generated")
+        peerOmitted=false
+        compose.runOnUiThread {model.refresh()}
+        waitFor {!model.refreshing && model.peerListError!=null}
+        assertNull(model.log);assertFalse(model.playing);assertEquals(0,PeerUiAudio.loads)
+        assertTrue(model.notice!!.contains("UUID now conflicts"))
+        val repo=LibraryHolder.repository(compose.activity)
+        assertTrue(sid in repo.peerSessions.knownUuids!!)
+        compose.runOnUiThread {model.open(SessionHeader(sid,null,null,0,local=true))}
+        assertNull(model.log);assertTrue(model.notice!!.contains("without a current guarded projection"))
+        assertEquals(original,phone.detail(sid));assertNotNull(phone.meta(sid))
     }
 }
 

@@ -28,6 +28,9 @@ class PeerSessionsTest {
     private var foreignCalls = 0
     private var conflicts = 0
     private var omitPeer = false
+    private var listVersion = 1
+    private var listStatus = 200
+    private var beforeList: () -> Unit = {}
 
     private fun item() = JSONObject().put("session_uuid",sid).put("origin_replica_id",origin).put("recording_origin","Original phone")
         .put("manifest_sha256",manifest).put("started_at","2026-11-02T00:00:00Z").put("ended_at","2026-11-02T00:00:06Z")
@@ -53,7 +56,11 @@ class PeerSessionsTest {
             if (ex.requestHeaders.getFirst(DEVICE_TOKEN_HEADER) != "synthetic-paired-token") { ex.sendResponseHeaders(401,-1); ex.close(); return@createContext }
             val path = ex.requestURI.path
             val body = when {
-                path == "/api/device-sync/peer-sessions" -> JSONObject().put("version",1).put("items",if (omitPeer) JSONArray() else JSONArray().put(item())).toString().toByteArray()
+                path == "/api/device-sync/peer-sessions" -> {
+                    beforeList()
+                    if (listStatus != 200) {ex.sendResponseHeaders(listStatus,-1);ex.close();return@createContext}
+                    JSONObject().put("version",listVersion).put("items",if (omitPeer) JSONArray() else JSONArray().put(item())).toString().toByteArray()
+                }
                 ex.requestURI.rawQuery != "generation=$generation" || state != "ready" -> { ex.sendResponseHeaders(409,-1); ex.close(); return@createContext }
                 path.endsWith("/audio/9") -> { audioCalls++; audio }
                 path == "/api/device-sync/peer-sessions/$sid" -> { detailCalls++; detail().toString().toByteArray() }
@@ -174,5 +181,53 @@ class PeerSessionsTest {
         assertNull(restarted.peerSessions.knownUuids)
         assertFailsWith<SyncException> {restarted.peerSessions.refresh()}
         Unit
+    }
+
+    @Test fun learnedFencePrecedesKnownAndVisibleListWriteFailures() = runBlocking {
+        for (name in listOf("known-uuids.json","items.json")) {
+            val caseRoot=java.io.File(root,name.substringBefore('.'))
+            val case=LibraryRepository(caseRoot,repo.baseUrl,deviceToken="synthetic-paired-token")
+            val target=java.io.File(caseRoot,"peer-sessions/$name")
+            assertTrue(target.canonicalPath.startsWith(root.canonicalPath+java.io.File.separator))
+            target.mkdirs();java.io.File(target,"owned-decoy").writeText("generated")
+            assertFails {case.peerSessions.refresh()}
+            assertTrue(sid in case.peerSessions.knownUuids!!)
+            assertTrue(java.io.File(caseRoot,"peer-sessions/authority-refresh.pending").isFile)
+            assertNull(LibraryRepository(caseRoot,repo.baseUrl).peerSessions.knownUuids)
+            target.deleteRecursively() // this newly generated failure target only
+            case.peerSessions.refresh()
+            assertFalse(java.io.File(caseRoot,"peer-sessions/authority-refresh.pending").exists())
+            assertTrue(sid in LibraryRepository(caseRoot,repo.baseUrl).peerSessions.knownUuids!!)
+        }
+    }
+
+    @Test fun readonlyFailureAfterResponseRetainsFenceAcrossRestart() = runBlocking {
+        val parent=java.io.File(root,"peer-sessions")
+        beforeList={assertTrue(parent.setWritable(false,false))}
+        try {
+            assertFails {repo.peerSessions.refresh()}
+            assertTrue(sid in repo.peerSessions.knownUuids!!)
+            assertNull(LibraryRepository(root,repo.baseUrl).peerSessions.knownUuids)
+        } finally {parent.setWritable(true,true);beforeList={}}
+    }
+
+    @Test fun rejectedListNeverRemovesAnExistingFence() = runBlocking {
+        repo.peerSessions.refresh()
+        listVersion=2;omitPeer=true
+        assertFails {repo.peerSessions.refresh()}
+        assertEquals(setOf(sid),repo.peerSessions.knownUuids)
+        assertFalse(java.io.File(root,"peer-sessions/authority-refresh.pending").exists())
+        assertEquals(setOf(sid),LibraryRepository(root,repo.baseUrl).peerSessions.knownUuids)
+    }
+
+    @Test fun noPeerLegacyDesktopRetainsOrdinaryOfflineEvidence() = runBlocking {
+        listStatus=404
+        assertEquals(404,assertFailsWith<SyncException> {repo.peerSessions.refresh()}.status)
+        assertEquals(emptySet(),repo.peerSessions.knownUuids)
+        assertFalse(java.io.File(root,"peer-sessions/authority-refresh.pending").exists())
+        val legacy=java.io.File(root,"legacy/sessions").apply {mkdirs()}
+        java.io.File(legacy,"legacy.json").writeText("""{"uuid":"legacy","events":[{"t":0,"kind":"load","channel":"A","trackId":1}]}""")
+        val store=SessionStore(legacy.parentFile,{SyncClient(repo.baseUrl)})
+        assertEquals(1,store.log(SessionHeader("legacy",null,"ended",0)).events.filterIsInstance<CaptureEvent.Load>().single().trackId)
     }
 }

@@ -50,8 +50,12 @@ class PeerSessions(private val root: File, private val client: () -> SyncClient,
     private val lock = Mutex()
     private val listFile = File(root, "items.json")
     private val knownFile = File(root, "known-uuids.json")
+    private val pendingAuthority = File(root, "authority-refresh.pending")
     /** A received UUID never regains bare-ID authority when a list omits it or the desktop is offline. */
     @Volatile var knownUuids: Set<String>? = runCatching {
+        require(!pendingAuthority.exists()) { "Interrupted peer authority refresh" }
+        require(!knownFile.exists() || knownFile.isFile) { "Unreadable peer UUID authority" }
+        require(!listFile.exists() || listFile.isFile) { "Unreadable peer metadata" }
         val remembered = if (knownFile.isFile) JSONArray(knownFile.readText()).let { a ->
             (0 until a.length()).map { peerUuid(a.getString(it)).lowercase() }.toSet()
         } else emptySet()
@@ -61,15 +65,28 @@ class PeerSessions(private val root: File, private val client: () -> SyncClient,
     fun cached(): List<PeerSessionItem> = runCatching { parseList(listFile.readText()).map { it.copy(checked = false) } }.getOrDefault(emptyList())
 
     suspend fun refresh(): List<PeerSessionItem> = withContext(io) { lock.withLock {
-        val text = client().peerSessionsText()
-        val items = parseList(text)
         val known = knownUuids ?: throw SyncException("Peer UUID authority cache is unreadable; unscoped replay is disabled")
-        // Publish the fail-closed UUID fence before replacing the visible metadata list.
-        val next = known + items.map { it.uuid.lowercase() }
-        store(knownFile, JSONArray(next.sorted()).toString())
-        knownUuids = next
-        store(listFile, text)
-        items
+        // A crash/write failure after learning new IDs must not make an older empty cache
+        // authoritative on restart. Persist intent before fetching any new authority.
+        try { store(pendingAuthority, "pending") }
+        catch (e: Exception) { knownUuids = null; throw e }
+        var learned = false
+        try {
+            val text = client().peerSessionsText()
+            val items = parseList(text)
+            val next = known + items.map { it.uuid.lowercase() }
+            knownUuids = next // In-memory fence precedes every fallible metadata write.
+            learned = true
+            store(knownFile, JSONArray(next.sorted()).toString())
+            store(listFile, text)
+            check(pendingAuthority.delete()) { "Cannot finish peer UUID authority refresh" }
+            items
+        } catch (e: Exception) {
+            // A rejected/unreachable response supplied no trusted new IDs. Preserve prior
+            // authority; a failed cleanup is itself an unknown-authority state.
+            if (!learned && !pendingAuthority.delete()) knownUuids = null
+            throw e
+        }
     } }
 
     /** Fresh desktop validation on every open/start/resume/seek; deliberately no cached-detail fallback. */

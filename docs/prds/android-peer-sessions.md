@@ -22,6 +22,7 @@
 - Normal Session playback is unchanged. Legacy fresh lists prune old source-UUID cache visibility; generation-marked details cannot enter the old offline Session path.
 - Known received UUIDs fence every entry source, including phone-recorded copies, stale caller headers, direct model show/start/seek and cached summaries. Same-UUID local evidence remains on disk but deduplicates to the current guarded received entry; unavailable/ambiguous mappings refuse replay, never raw-ID fallback.
 - A durable UUID fence survives metadata-list omission and repository restart. Unreadable authority state fails closed; it cannot silently restore a recorded/cache entry's old IDs. A newly discovered collision closes an already-open unscoped view/replay without deleting its evidence.
+- Refresh records an authority-write intent before fetching new identities and publishes learned IDs in memory before fallible cache writes. Failed writes retain the fence; interrupted/partial authority is unknown on restart, not an older empty permission to replay. Rejected/unreachable lists preserve prior authority without a false pending refresh.
 - No peer bare-ID waveform, stem or diagnostic-probe requests. The current timeline can show no waveform until local analysis is available; this is not an audio-readiness claim.
 
 ## Checks
