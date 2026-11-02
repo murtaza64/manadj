@@ -20,6 +20,7 @@ from .logging_config import setup_logging
 from .feedback import FeedbackService, Workspace
 from .routers.feedback import router as feedback_router
 from .peer_inventory.router import router as peer_inventory_router
+from .peer_sync.router import router as peer_sync_router
 
 if TYPE_CHECKING:
     from .config import Config
@@ -64,6 +65,7 @@ app.add_middleware(
 
 # Include routers
 app.include_router(peer_inventory_router, prefix="/api/peer-inventory", tags=["peer-inventory"])
+app.include_router(peer_sync_router, prefix="/api/peer-sync", tags=["peer-sync"])
 app.include_router(tracks.router, prefix="/api/tracks", tags=["tracks"])
 app.include_router(tags.router, prefix="/api/tags", tags=["tags"])
 app.include_router(waveforms.router, prefix="/api/waveforms", tags=["waveforms"])
