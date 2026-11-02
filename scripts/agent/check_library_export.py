@@ -42,6 +42,9 @@ with sync_playwright() as playwright:
     close()
 
     page.get_by_placeholder('search...', exact=True).fill('Neon')
+    # FilterBar applies search after its debounce. Capture the applied filter,
+    # not a scope frozen while the old four-row result is still current.
+    expect(page.get_by_role('row').filter(has_text='Signal Loop')).to_have_count(0)
     fields()
     page.get_by_label('Field scope').select_option('filtered')
     recheck()
@@ -49,6 +52,7 @@ with sync_playwright() as playwright:
     cases.append('actual complete-filtered Library scope captures matching ID only')
     close()
     page.get_by_placeholder('search...', exact=True).fill('')
+    expect(page.get_by_role('row').filter(has_text='Signal Loop')).to_have_count(1)
 
     page.get_by_text('Neon Current', exact=True).first.click()
     fields()
