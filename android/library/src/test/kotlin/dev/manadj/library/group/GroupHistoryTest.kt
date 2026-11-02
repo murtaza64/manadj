@@ -46,6 +46,37 @@ class GroupHistoryTest {
         assertEquals(view, history.snapshot().items.single())
     }
 
+    @Test fun corruptLocalDeviceIdCannotPromoteReceivedEvidenceIntoOwnSourceAuthority() = corruptLocalAuthority("device")
+    @Test fun corruptLocalSeedRefusesHistoryReplayAndSigningWithoutErasingEvidence() = corruptLocalAuthority("seed")
+    @Test fun corruptLocalPinnedKeyRefusesHistoryReplayAndSigningWithoutErasingEvidence() = corruptLocalAuthority("pin")
+    @Test fun missingLocalIdentityRefusesHistoryReplayAndSigningWithoutErasingEvidence() = corruptLocalAuthority("missing")
+    private fun corruptLocalAuthority(kind: String) {
+        val replica=receive();val view=GroupHistory(root).project().items.single()
+        val file=File(root,"device-groups/$gid/replica.json");val original=file.readText()
+        val state=JSONObject(original)
+        when(kind) {
+            "device" -> state.put("device_id",a)
+            "seed" -> state.put("private_seed_b64",GroupWire.encode64(ByteArray(32) { (it+64).toByte() }))
+            "pin" -> state.getJSONObject("members").getJSONObject(p).put("public_key_b64",GroupWire.encode64(GroupWire.publicKey(ByteArray(32) { (it+64).toByte() })))
+            "missing" -> state.getJSONObject("members").remove(p)
+        }
+        file.writeText(state.toString()) // generated corruption only; never real group identity
+        val snapshot=GroupHistory(root).snapshot()
+        assertNull(snapshot.knownUuids)
+        assertTrue(snapshot.ownIssuedClaims.isEmpty())
+        assertNotNull(snapshot.error)
+        val repo=dev.manadj.library.LibraryRepository(root,"http://127.0.0.1:1")
+        assertFalse(repo.rawSessionAllowed(sid,allowOwnIssued=true))
+        assertFalse(repo.rawSessionUploadAllowed(sid))
+        assertNotEquals("candidate-exact",repo.groupReplay().readiness(view).state)
+        assertFails { replica.pullRequest(a) }
+        assertEquals(state.toString(),file.readText())
+        file.writeText(original)
+        assertEquals(setOf(sid),GroupHistory(root).snapshot().knownUuids)
+        assertTrue(GroupHistory(root).snapshot().ownIssuedClaims.isEmpty())
+        assertTrue(replica.evidence().isNotEmpty())
+    }
+
     @Test fun revocationCollisionStorageOmissionAndProjectionFailureNeverRestoreRawAuthority() {
         val replica = receive(); val history = GroupHistory(root)
         val directory = File(root, "group-history").apply { mkdirs() }
