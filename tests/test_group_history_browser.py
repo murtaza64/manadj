@@ -38,7 +38,8 @@ def test_normal_sessions_origin_relay_status_expandable_evidence_no_playback(tmp
         assert row.locator(".session-delete").count() == 0
         row.locator(".session-open").click()
         evidence = page.get_by_role("region", name="Relayed Session evidence")
-        evidence.get_by_text("Playback, audio transfer and editing are not available", exact=False).wait_for()
+        evidence.get_by_text("Replay requires explicit exact local audio selections", exact=False).wait_for()
+        assert evidence.get_by_role("button", name="Replay local audio").is_disabled()
         assert evidence.get_by_role("button", name="Play", exact=True).count() == 0
         assert evidence.locator("details").get_attribute("open") is None
         evidence.get_by_text("Technical evidence", exact=False).click()

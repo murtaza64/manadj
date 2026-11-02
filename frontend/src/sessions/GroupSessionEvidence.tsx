@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, type GroupSessionView, type SessionRowWire } from '../api/client';
 import './groupSessionEvidence.css';
+import { GroupReplayControls } from './GroupReplayControls';
 
 export const groupStatus: Record<GroupSessionView['status'], string> = {
   'projection-pending': 'History projection pending', unbound: 'Tracks need binding',
@@ -57,7 +58,8 @@ export function GroupSessionEvidence({ session, onBack }: { session: SessionRowW
       <GroupSessionAttribution views={views} />
       <p><time dateTime={primary.started_at}>{new Date(primary.started_at).toLocaleString()}</time></p>
       <GroupSessionSummary views={views} />
-      <p>Session evidence is retained. Playback, audio transfer and editing are not available for group Sessions.</p>
+      <p>Session evidence is retained. Replay requires explicit exact local audio selections and a successful engine decode. Audio transfer and editing are unavailable.</p>
+      <GroupReplayControls key={`${primary.group_id}:${primary.operation_id}`} view={primary} />
       {primary.status === 'projection-pending' && <button className="btn btn-secondary" disabled={retrying}
         onClick={() => void retry()}>{retrying ? 'Retrying…' : 'Retry history projection'}</button>}
       <h3>Track availability</h3>

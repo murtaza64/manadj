@@ -2,7 +2,7 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session
 
@@ -59,6 +59,51 @@ async def initialize(request: Request, db: Database):
 async def group_history(db: Database):
     from .group_history import views
     return {"format": "manadj-group-session-views/v1", "items": views(db)}
+
+
+async def invoke_replay(db, method, *args, request=None, model=None):
+    from .group_replay import GroupReplay
+    try:
+        if model is not None:
+            args = (*args, await parse(request, model))
+        return getattr(GroupReplay(db), method)(*args)
+    except SyncError as error:
+        db.rollback()
+        raise HTTPException(error.status, error.code) from None
+    except (ValueError, TypeError, KeyError, RecursionError):
+        db.rollback()
+        raise HTTPException(422, "invalid_group_replay") from None
+    except (IntegrityError, OperationalError):
+        db.rollback()
+        raise HTTPException(503, "group_replay_storage_unavailable") from None
+
+
+@router.post("/group-replay/selections/{local_id}")
+async def replay_select(local_id: LocalId, request: Request, db: Database):
+    await parse(request, Strict)
+    return await invoke_replay(db, "select", local_id)
+
+
+@router.get("/group-replay/{gid}/{oid}/readiness")
+async def replay_readiness(gid: UUID, oid: UUID, db: Database):
+    return await invoke_replay(db, "readiness", gid, oid)
+
+
+@router.post("/group-replay/{gid}/{oid}/bindings")
+async def replay_bind(gid: UUID, oid: UUID, request: Request, db: Database):
+    from .replay_contracts import BindReplayTrack
+    return await invoke_replay(db, "bind", gid, oid, request=request, model=BindReplayTrack)
+
+
+@router.get("/group-replay/{gid}/{oid}/source")
+async def replay_source(gid: UUID, oid: UUID, generation: str, db: Database):
+    return await invoke_replay(db, "replay", gid, oid, generation)
+
+
+@router.get("/group-replay/{gid}/{oid}/audio/{logical}")
+async def replay_audio(gid: UUID, oid: UUID, logical: UUID, generation: str, db: Database):
+    data = await invoke_replay(db, "replay", gid, oid, generation, logical)
+    return Response(data, media_type="application/octet-stream", headers={"Cache-Control": "no-store"})
 
 
 @router.post("/group-history/project")

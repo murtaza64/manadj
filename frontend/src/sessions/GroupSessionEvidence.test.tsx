@@ -13,6 +13,7 @@ import { sessionReplaySource } from './sessionReplaySource';
 
 const timeline = vi.hoisted(() => vi.fn());
 vi.mock('./SessionTimelineView', () => ({ SessionTimelineView: () => { timeline(); return <p>Recorded timeline</p>; } }));
+vi.mock('./GroupReplayControls', () => ({ GroupReplayControls: () => <p>Explicit local replay adapter</p> }));
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 let root: Root | undefined;
 let host: HTMLDivElement;

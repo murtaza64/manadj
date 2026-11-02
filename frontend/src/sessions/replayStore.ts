@@ -111,9 +111,9 @@ export function toggleReplayPause(): void {
 }
 
 /** Click-to-seek during playback: jump the active replay to a new plan. */
-export function seekReplay(plan: ReplayPlan): void {
+export async function seekReplay(plan: ReplayPlan): Promise<void> {
   const driver = instance;
   if (!driver) return;
   setState({ startT: plan.startT });
-  void driver.seekTo(plan);
+  await driver.seekTo(plan);
 }

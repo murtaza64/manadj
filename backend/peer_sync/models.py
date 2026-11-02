@@ -161,3 +161,21 @@ class GroupHistory(Base):
     source_sha256 = Column(String(64), nullable=False)
     manifest_sha256 = Column(String(64), nullable=False)
     session = relationship("Session", backref=backref("group_history", uselist=False, passive_deletes="all"))
+
+
+class GroupReplaySelection(Base):
+    __tablename__ = "group_replay_selections"
+    selection_id = Column(String(36), primary_key=True)
+    track_id = Column(Integer, ForeignKey("tracks.id", ondelete="CASCADE"), nullable=False)
+    incarnation = Column(String(64), nullable=False)
+    asset_json = Column(Text, nullable=False)
+
+
+class GroupReplayBinding(Base):
+    __tablename__ = "group_replay_bindings"
+    group_id = Column(String(36), ForeignKey("device_groups.group_id"), primary_key=True)
+    operation_id = Column(String(36), primary_key=True)
+    logical_track_id = Column(String(36), primary_key=True)
+    operation_sha256 = Column(String(64), nullable=False)
+    selection_id = Column(String(36), ForeignKey("group_replay_selections.selection_id", ondelete="SET NULL"))
+    incarnation = Column(String(64), nullable=False)
