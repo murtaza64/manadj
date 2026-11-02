@@ -305,6 +305,10 @@ _task_worker: "TaskWorkerPool | None" = None
 @app.on_event("startup")
 async def startup_event():
     """Start background workers on server startup."""
+    from .database import SessionLocal
+    from .peer_sync.folder_worker import FolderWorker
+    app.state.peer_folder_worker = FolderWorker(SessionLocal)
+    app.state.peer_folder_worker.start()
     global _task_worker
 
     # Waveform data generation (ADR 0014) requires ffmpeg. Non-fatal
@@ -421,6 +425,8 @@ async def startup_event():
 @app.on_event("shutdown")
 async def shutdown_event():
     """Stop background workers on server shutdown."""
+    if worker := getattr(app.state, "peer_folder_worker", None):
+        worker.stop()
     if _task_worker is not None:
         _task_worker.stop()
     app.state.feedback_service.stop()

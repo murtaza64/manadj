@@ -9,7 +9,8 @@ from sqlalchemy.orm import Session
 from ..database import get_db
 from ..peer_inventory.router import local_control, parse
 from ..peer_inventory.contracts import LocalId
-from .contracts import BindBody, Bundle, ExportBody, GuardBody, SourceBody, Strict
+from .contracts import BindBody, Bundle, ExportBody, FolderBody, GuardBody, SourceBody, Strict
+from .folder import FolderTransport
 from .service import PeerSync, SyncError
 
 router = APIRouter(dependencies=[Depends(local_control)])
@@ -98,3 +99,43 @@ async def conflicts(sid: UUID, db: Database):
 @router.post("/sessions/{sid}/materialize")
 async def materialize(sid: UUID, request: Request, db: Database):
     return await invoke(db, "materialize", sid, request=request, model=Strict)
+
+
+def transport(db):
+    from sqlalchemy.orm import sessionmaker
+    return FolderTransport(sessionmaker(bind=db.get_bind(), autoflush=False))
+
+
+async def invoke_transport(db, method, *args, request=None, model=None):
+    try:
+        if model is not None:
+            args = (*args, await parse(request, model))
+        return getattr(transport(db), method)(*args)
+    except SyncError as error:
+        raise HTTPException(error.status, error.code) from None
+    except (ValueError, TypeError, KeyError, RecursionError):
+        raise HTTPException(422, "invalid_folder_request") from None
+    except IntegrityError:
+        raise HTTPException(409, "folder_constraint_conflict") from None
+    except OperationalError:
+        raise HTTPException(503, "folder_database_unavailable") from None
+
+
+@router.get("/transport")
+async def transport_status(db: Database):
+    return await invoke_transport(db, "status")
+
+
+@router.post("/transport")
+async def transport_configure(request: Request, db: Database):
+    return await invoke_transport(db, "configure", request=request, model=FolderBody)
+
+
+@router.post("/transport/selections/{sid}")
+async def transport_select(sid: UUID, request: Request, db: Database):
+    # Selection's empty authorization body is parsed before any filesystem/DB mutation.
+    try:
+        await parse(request, Strict)
+    except (ValueError, TypeError, RecursionError):
+        raise HTTPException(422, "invalid_folder_request") from None
+    return await invoke_transport(db, "select", sid)

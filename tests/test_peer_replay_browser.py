@@ -27,8 +27,9 @@ def instance(tmp_path):
     yield from exchange.instance.__wrapped__(tmp_path)
 
 
+@pytest.mark.parametrize("delivery", ["manual", "folder"])
 @pytest.mark.parametrize("refusal", ["offline", "same_id_foreign_cache"])
-def test_independent_libraries_replay_real_audio_then_refuse_offline_resume(instance, tmp_path, refusal):
+def test_independent_libraries_replay_real_audio_then_refuse_offline_resume(instance, tmp_path, delivery, refusal):
     browser_api = pytest.importorskip("playwright.sync_api")
     shells = sorted((Path.home() / ".cache/ms-playwright").glob("chromium_headless_shell-*/chrome-headless-shell-linux64/chrome-headless-shell"))
     if not shells:
@@ -44,9 +45,21 @@ def test_independent_libraries_replay_real_audio_then_refuse_offline_resume(inst
             wav.setframerate(8000)
             wav.writeframes(b"".join(struct.pack("<h", int(6000 * math.sin(2 * math.pi * 440 * n / 8000))) for n in range(16000)))
     packet = export(a, sid)
-    post(b, "imports", packet)
+    if delivery == "folder":
+        from tests.test_peer_folder_transport import configured, copy_artifacts
+        ta, ra = configured(a)
+        tb, rb = configured(b)
+        ta.select(sid)
+        ta.run_once()
+        copy_artifacts(ra, rb)
+        tb.run_once()
+    else:
+        post(b, "imports", packet)
     bind(b, 9, packet["manifest"]["tracks"][0]["logical_track_id"])
-    post(b, f"sessions/{sid}/materialize")
+    if delivery == "folder":
+        assert tb.run_once()["receipts"][0]["readiness"] == "materialized"
+    else:
+        post(b, f"sessions/{sid}/materialize")
     b = instance("b")  # new engine/application before the browser reads normal history
     from backend.routers.tracks import router as tracks_router
     app = history(b).app

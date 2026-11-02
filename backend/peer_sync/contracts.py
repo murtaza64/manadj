@@ -36,6 +36,11 @@ class ExportBody(Strict):
     fingerprint_assets: bool = False
 
 
+class FolderBody(Strict):
+    root: str = Field(min_length=1, max_length=4096)
+    enabled: bool
+
+
 class Asset(Strict):
     algorithm: Literal["sha256-file-bytes-v1"]
     sha256: Digest

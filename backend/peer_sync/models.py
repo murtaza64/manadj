@@ -61,3 +61,29 @@ class PeerHistory(Base):
     source_sha256 = Column(String(64), nullable=False)
     binding_sha256 = Column(String(64), nullable=False)
     session = relationship("Session", backref=backref("peer_history", uselist=False, passive_deletes="all"))
+
+
+class FolderConfig(Base):
+    __tablename__ = "peer_folder_config"
+    id = Column(Integer, primary_key=True)
+    root = Column(Text, nullable=False)
+    token = Column(String(32), nullable=False)
+    enabled = Column(Integer, nullable=False, default=0)
+    state = Column(String(80), nullable=False, default="disabled")
+    cursor = Column(String(160), nullable=False, default="")
+    __table_args__ = (CheckConstraint("id = 1"),)
+
+
+class FolderPublication(Base):
+    __tablename__ = "peer_folder_publications"
+    session_uuid = Column(String(36), ForeignKey("peer_sync_sessions.session_uuid"), primary_key=True)
+    published = Column(Integer, nullable=False, default=0)
+    state = Column(String(80), nullable=False, default="pending")
+
+
+class FolderReceipt(Base):
+    __tablename__ = "peer_folder_receipts"
+    artifact = Column(String(160), primary_key=True)
+    received = Column(Integer, nullable=False, default=0)
+    state = Column(String(80), nullable=False)
+    readiness = Column(String(80), nullable=True)
