@@ -17,12 +17,12 @@ Two reads:
 
 import json
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from backend import models, schemas
 from backend.database import get_db
-from backend.session_source import preview_source, session_events
+from backend.session_source import preview_source, replay_generation, session_events
 
 router = APIRouter()
 
@@ -46,6 +46,8 @@ def _validate_sources(db, rows):
         s = db.query(models.Session).filter(models.Session.uuid == uuid).first()
         if s is not None and s.peer_history is not None:
             session_events(db, s)
+            if any(c.peer_generation != replay_generation(s) for c in rows if c.session_uuid == uuid):
+                raise HTTPException(409, "peer_candidate_generation_changed")
 
 
 @router.get("", response_model=list[schemas.RoutineCandidateRow])
@@ -115,6 +117,7 @@ def preview_candidate(uuid: str, db: Session = Depends(get_db)) -> schemas.Routi
     )
     if c is None:
         raise HTTPException(status_code=404, detail="candidate not found")
+    _validate_sources(db, [c])
     try:
         result = build_promotion_preview(
             db,

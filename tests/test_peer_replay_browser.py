@@ -27,7 +27,8 @@ def instance(tmp_path):
     yield from exchange.instance.__wrapped__(tmp_path)
 
 
-def test_independent_libraries_replay_real_audio_then_refuse_offline_resume(instance, tmp_path):
+@pytest.mark.parametrize("refusal", ["offline", "same_id_foreign_cache"])
+def test_independent_libraries_replay_real_audio_then_refuse_offline_resume(instance, tmp_path, refusal):
     browser_api = pytest.importorskip("playwright.sync_api")
     shells = sorted((Path.home() / ".cache/ms-playwright").glob("chromium_headless_shell-*/chrome-headless-shell-linux64/chrome-headless-shell"))
     if not shells:
@@ -85,8 +86,12 @@ def test_independent_libraries_replay_real_audio_then_refuse_offline_resume(inst
                 assert result["track"] == 9 and result["state"] == "ready", result
                 assert result["playing"] and result["playhead"] > 0.05 and result["level"] > 0, result
                 assert result["generation"] and result["stopped"] is None, result
-                (b.root / "generated.wav").unlink()  # decoy only; cached ready deck must not resume
-                assert page.evaluate("() => window.peerProof.resume()") == {"playing": False, "stopped": "load-failed"}
+                if refusal == "offline":
+                    (b.root / "generated.wav").unlink()  # decoy only; cached ready deck must not resume
+                    assert page.evaluate("() => window.peerProof.resume()") == {"playing": False, "stopped": "load-failed"}
+                else:
+                    foreign = page.evaluate("() => window.peerProof.foreignSameIdLoad()")
+                    assert foreign["duration"] == 6 and not foreign["playing"] and foreign["stopped"] is not None, foreign
                 browser.close()
         finally:
             process.terminate()

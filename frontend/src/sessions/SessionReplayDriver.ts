@@ -1074,6 +1074,13 @@ export class SessionReplayDriver {
       const before = prev;
       prev = snap;
       if (this.selfOps > 0 || !this.active) return;
+      // Same integer Track ID does not identify generation-guarded audio.
+      // A normal cached load clears its provenance even while paused.
+      if (this.hooks.validateSource && before.audioSourceKey !== undefined
+          && snap.audioSourceKey !== before.audioSourceKey && snap.trackId === before.trackId) {
+        this.takeover(`foreign audio source on ${deck}`);
+        return;
+      }
       // Load-flow emits from our own async loads are not gestures; a
       // trackId we never requested is a FOREIGN load = takeover.
       if (snap.trackId !== before.trackId || snap.loadState !== before.loadState) {

@@ -62,6 +62,8 @@ export interface DeckTrackInfo {
   audioUrl: string;
   /** Version-guarded peer audio must never read or populate bare-ID caches. */
   bypassCache?: boolean;
+  /** Opaque identity of generation-guarded decoded bytes, not a bare Track ID. */
+  audioSourceKey?: string;
   bpm: number | null;
   /** Persisted Main cue, if any (CDJ memory-cue behavior). On the Track
    * row — synchronous, no fetch. */
@@ -82,6 +84,7 @@ export interface DeckTrackInfo {
 }
 
 export interface DeckSnapshot {
+  audioSourceKey?: string;
   loadState: LoadState;
   loadError: string | null;
   trackId: number | null;
@@ -1636,6 +1639,7 @@ export class DeckEngine {
       loadState: this.loadState,
       loadError: this.loadError,
       trackId: this.trackInfo?.trackId ?? null,
+      audioSourceKey: this.trackInfo?.audioSourceKey,
       bpm: this.trackInfo?.bpm ?? null,
       duration: this.buffer?.duration ?? 0,
       playing: this.transport.playing,
