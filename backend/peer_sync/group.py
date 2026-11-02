@@ -8,7 +8,7 @@ from uuid import UUID, uuid4
 
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
-from sqlalchemy import exists, select
+from sqlalchemy import exists, select, text
 
 from .contracts import Bundle, Chunk, Manifest
 from .group_contracts import (
@@ -23,7 +23,7 @@ from .group_contracts import (
     sign,
     unpack,
 )
-from .models import DeviceGroup, GroupAck, GroupMember, GroupOperation, SyncSession
+from .models import DeviceGroup, GroupAck, GroupMember, GroupOperation, GroupPossession, SyncSession
 from .service import PeerSync, SyncError, validate_complete
 
 MAX_OPERATION_BYTES = 1024 * 1024
@@ -33,6 +33,16 @@ class GroupSync:
     def __init__(self, db, group_id):
         self.db = db
         self.group_id = str(UUID(str(group_id)))
+
+    def _lock(self):
+        if self.db.in_transaction():
+            raise SyncError(409, "fresh_sync_transaction_required")
+        # Group receipts promise committed metadata, not merely a WAL write
+        # surviving this process. Upgrade NORMAL to FULL before BEGIN: SQLite
+        # syncs the WAL on commit before we return an ack. A pooled connection
+        # may retain the stronger setting; never weaken it during cleanup.
+        self.db.execute(text("PRAGMA synchronous=FULL"))
+        self.db.execute(text("BEGIN IMMEDIATE"))
 
     def _local(self):
         group = self.db.get(DeviceGroup, self.group_id)
@@ -50,7 +60,7 @@ class GroupSync:
     def provision(self, private_seed):
         """Local-owner-only creation. No wire endpoint; never reset an existing group."""
         key = Ed25519PrivateKey.from_private_bytes(private_seed)
-        PeerSync(self.db)._lock()
+        self._lock()
         device = PeerSync(self.db).identity()["replica_id"]
         if self.db.get(DeviceGroup, self.group_id) is not None:
             raise SyncError(409, "group_already_provisioned")
@@ -66,7 +76,7 @@ class GroupSync:
         device_id = str(UUID(str(device_id)))
         raw = decode(public_key_b64)
         Ed25519PublicKey.from_public_bytes(raw)
-        PeerSync(self.db)._lock()
+        self._lock()
         self._local()
         old = self.db.get(GroupMember, (self.group_id, device_id))
         if old is not None and (old.revoked or old.public_key_b64 != public_key_b64):
@@ -77,7 +87,7 @@ class GroupSync:
         self.db.commit()
 
     def revoke(self, device_id):
-        PeerSync(self.db)._lock()
+        self._lock()
         self._local()
         self._member(str(device_id)).revoked = 1
         self.db.commit()
@@ -136,7 +146,7 @@ class GroupSync:
 
     def issue(self, session_uuid):
         """Sign only a complete immutable locally-issued existing Session export."""
-        PeerSync(self.db)._lock()
+        self._lock()
         local = self._local()
         old = self.db.scalar(select(GroupOperation).where(GroupOperation.group_id == self.group_id,
             GroupOperation.origin_device_id == local.device_id, GroupOperation.session_uuid == str(session_uuid)))
@@ -176,16 +186,28 @@ class GroupSync:
         return self._sign("ack", recipient_device_id=str(recipient), operation_id=row.operation_id,
                           operation_sha256=row.sha256)
 
+    def _supplied(self, row, device_id, proof):
+        """Caller already verified this addressed Delivery/Page and inner op.
+
+        The peer signed these exact bytes as supplied; do not invent its ack.
+        Persist the signed outer evidence separately from original operation.
+        """
+        key = (self.group_id, row.operation_id, str(device_id))
+        if self.db.get(GroupPossession, key) is None:
+            self.db.add(GroupPossession(group_id=key[0], operation_id=key[1], device_id=key[2],
+                sha256=row.sha256, proof_body_b64=proof.body_b64, proof_signature_b64=proof.signature_b64))
+
     def receive(self, signed):
-        PeerSync(self.db)._lock()
+        self._lock()
         delivery, _, _ = self._verify(signed, Delivery, addressed=True)
         row = self._store(delivery.operation)
+        self._supplied(row, delivery.origin_device_id, signed)
         ack = self._receipt(row, delivery.origin_device_id)
         self.db.commit()
         return ack
 
     def accept_ack(self, signed):
-        PeerSync(self.db)._lock()
+        self._lock()
         ack, _, _ = self._verify(signed, Ack, addressed=True)
         row = self._operation(ack.operation_id)
         if row is None or row.sha256 != ack.operation_sha256:
@@ -208,10 +230,12 @@ class GroupSync:
         requester = str(request.origin_device_id)
         acknowledged = exists().where(GroupAck.group_id == self.group_id,
             GroupAck.operation_id == GroupOperation.operation_id, GroupAck.device_id == requester)
+        supplied = exists().where(GroupPossession.group_id == self.group_id,
+            GroupPossession.operation_id == GroupOperation.operation_id, GroupPossession.device_id == requester)
         rows = self.db.scalars(select(GroupOperation).join(GroupMember,
             (GroupMember.group_id == GroupOperation.group_id) & (GroupMember.device_id == GroupOperation.origin_device_id))
             .where(GroupOperation.group_id == self.group_id, GroupOperation.cursor > request.after,
-                   GroupOperation.origin_device_id != requester, GroupMember.revoked == 0, ~acknowledged)
+                   GroupOperation.origin_device_id != requester, GroupMember.revoked == 0, ~acknowledged, ~supplied)
             .order_by(GroupOperation.cursor).limit(2)).all()
         return self._sign("page", recipient_device_id=requester, request_id=str(request.request_id),
             next_after=rows[0].cursor if rows else request.after, more=len(rows) > 1,
@@ -220,20 +244,24 @@ class GroupSync:
     def receive_page(self, signed, request_signed):
         """Foreground client's receiving seam. Ack is addressed to serving peer."""
         from .group_contracts import Page
-        PeerSync(self.db)._lock()
+        self._lock()
         request, _, _ = self._verify(request_signed, Pull)
         page, _, _ = self._verify(signed, Page, addressed=True)
         if (request.origin_device_id != UUID(self._local().device_id)
                 or page.origin_device_id != request.recipient_device_id or page.request_id != request.request_id
                 or page.next_after < request.after):
             raise SyncError(403, "group_page_request_mismatch")
-        receipts = [self._receipt(self._store(operation), page.origin_device_id) for operation in page.operations]
+        receipts = []
+        for operation in page.operations:
+            row = self._store(operation)
+            self._supplied(row, page.origin_device_id, signed)
+            receipts.append(self._receipt(row, page.origin_device_id))
         self.db.commit()
         return {"acks": receipts, "next_after": page.next_after, "more": page.more}
 
     def project(self, operation_id):
         """Explicit group-authenticated evidence projection; never legacy source trust."""
-        PeerSync(self.db)._lock()
+        self._lock()
         self._local()
         row = self._operation(operation_id)
         if row is None:

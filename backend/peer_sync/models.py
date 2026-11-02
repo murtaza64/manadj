@@ -138,3 +138,14 @@ class GroupAck(Base):
     operation_id = Column(String(36), primary_key=True)
     device_id = Column(String(36), primary_key=True)
     sha256 = Column(String(64), nullable=False)
+
+
+class GroupPossession(Base):
+    """Verified supplying-peer evidence, not a signed acknowledgement."""
+    __tablename__ = "device_group_possessions"
+    group_id = Column(String(36), ForeignKey("device_groups.group_id"), primary_key=True)
+    operation_id = Column(String(36), primary_key=True)
+    device_id = Column(String(36), primary_key=True)
+    sha256 = Column(String(64), nullable=False)
+    proof_body_b64 = Column(Text, nullable=False)
+    proof_signature_b64 = Column(String(88), nullable=False)

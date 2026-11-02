@@ -13,6 +13,7 @@ from backend.peer_sync.group_contracts import Operation, Page, Signed, decode, e
 from backend.peer_sync.models import (
     GroupAck,
     GroupOperation,
+    GroupPossession,
     SyncChunk,
     SyncConflict,
     SyncSession,
@@ -264,6 +265,73 @@ def test_foreground_pull_ack_and_request_binding(instance):
     assert error.value.code == "group_page_request_mismatch"
     # Phone can relay same issuer bytes to B without listening itself.
     push(phone, b, gid, ids[2]["device_id"], issued)
+
+
+@pytest.mark.parametrize("adapter", ["deliver", "page"])
+def test_authenticated_supplying_relay_is_not_echoed_without_synthetic_ack(instance, adapter):
+    (a, phone, b), gid, ids, _ = setup(instance)
+    sid = str(uuid4())
+    seed(a, 1, session_uuid=sid)
+    export(a, sid)
+    issued = call(a, gid, "issue", sid)
+    push(a, b, gid, ids[2]["device_id"], issued)
+    if adapter == "deliver":
+        delivery = call(b, gid, "delivery", ids[1]["device_id"], unpack(issued, Operation)[0].operation_id)
+        http(phone, gid, "deliver", delivery)  # deliberately drop returned ack
+    else:
+        request = call(phone, gid, "pull_request", ids[2]["device_id"])
+        page = http(b, gid, "pull", request)
+        call(phone, gid, "receive_page", page, request)  # deliberately do not send ack
+    phone = instance("phone")
+    request = call(b, gid, "pull_request", ids[1]["device_id"])
+    response = call(phone, gid, "pull", request)
+    assert unpack(response, Page)[0].operations == []
+    with phone.sessions() as db:
+        assert db.query(GroupAck).count() == 0  # possession is NOT a minted peer ack
+        possession = db.query(GroupPossession).one()
+        assert possession.device_id == ids[2]["device_id"]
+        assert possession.sha256 == unpack(issued, Operation)[2]
+        from backend.peer_sync.group_contracts import Delivery
+        proof = Signed(body_b64=possession.proof_body_b64, signature_b64=possession.proof_signature_b64)
+        GroupSync(db, gid)._verify(proof, Delivery if adapter == "deliver" else Page, addressed=True)
+
+
+def test_group_commit_is_full_synchronous_before_ack_and_failed_commit_returns_none(instance, monkeypatch):
+    from sqlalchemy import event
+    (a, phone, _), gid, ids, _ = setup(instance)
+    sid = str(uuid4())
+    seed(a, 1, session_uuid=sid)
+    export(a, sid)
+    issued = call(a, gid, "issue", sid)
+    oid = unpack(issued, Operation)[0].operation_id
+    delivery = call(a, gid, "delivery", ids[1]["device_id"], oid)
+    statements = []
+
+    def trace(conn, cursor, statement, parameters, context, executemany):
+        statements.append(statement)
+    event.listen(phone.engine, "before_cursor_execute", trace)
+    try:
+        with phone.sessions() as db:
+            def fail():
+                raise OSError("injected failed commit, generated DB only")
+            monkeypatch.setattr(db, "commit", fail)
+            with pytest.raises(OSError):
+                GroupSync(db, gid).receive(delivery)
+        with phone.sessions() as db:
+            assert db.query(GroupOperation).count() == db.query(GroupPossession).count() == 0
+        statements.clear()
+        with phone.sessions() as db:
+            commit = db.commit
+
+            def committed():
+                commit()
+                statements.append("COMMIT_RETURNED")
+            monkeypatch.setattr(db, "commit", committed)
+            ack = GroupSync(db, gid).receive(delivery)
+            assert ack is not None and statements[-1] == "COMMIT_RETURNED"
+        assert statements[:2] == ["PRAGMA synchronous=FULL", "BEGIN IMMEDIATE"]
+    finally:
+        event.remove(phone.engine, "before_cursor_execute", trace)
 
 
 def test_unknown_revoked_forged_group_recipient_and_equivocation(instance):
