@@ -5,18 +5,19 @@ never repair or import; a failed projector leaves a visible retryable pending
 view, not permission to reinterpret foreign integers through a recorded source.
 """
 import logging
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import UUID
 
 from fastapi import HTTPException
-from sqlalchemy import or_, select
+from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 
 from ..models import Session as RecordedSession
 from ..models import Track
 from .contracts import digest
 from .group import GroupSync
-from .group_contracts import Operation, unpack
+from .group_contracts import Delivery, Operation, Page, Signed, unpack
 from .models import (
     DeviceGroup,
     GroupHistory,
@@ -31,6 +32,24 @@ from .service import PeerSync, SyncError, validate_complete
 logger = logging.getLogger(__name__)
 
 
+@dataclass(frozen=True)
+class GroupClaim:
+    """Denial identity recovered before consulting fallible ledger indexes.
+
+    `row` stays untouched so full validation still detects contradictory DB
+    columns. Body identities can preserve denial, never grant replay authority.
+    """
+    row: GroupOperation
+    session_uuid: str
+    group_id: str
+    operation_id: str
+    origin_device_id: str
+    missing: bool = False
+
+    def __getattr__(self, name):
+        return getattr(self.row, name)
+
+
 def canonical_uuid(value):
     try:
         return str(UUID(str(value)))
@@ -39,11 +58,72 @@ def canonical_uuid(value):
 
 
 def received_operations(db, uuid=None):
-    query = select(GroupOperation).outerjoin(DeviceGroup, DeviceGroup.group_id == GroupOperation.group_id).where(
-        or_(DeviceGroup.device_id.is_(None), GroupOperation.origin_device_id != DeviceGroup.device_id))
-    if uuid is not None:
-        query = query.where(GroupOperation.session_uuid == canonical_uuid(uuid))
-    return db.scalars(query.order_by(GroupOperation.group_id, GroupOperation.operation_id)).all()
+    result = []
+    represented = set()
+    own_verified = set()
+    # Never filter on unauthenticated origin/session bookkeeping first. A
+    # single damaged column must not resurrect a retained raw-ID recording.
+    for row in db.scalars(select(GroupOperation).order_by(GroupOperation.group_id, GroupOperation.operation_id)):
+        operation = None
+        try:
+            operation = unpack(GroupSync._signed(row), Operation)[0]
+            verified = verified_operation(db, row)
+            group = db.get(DeviceGroup, row.group_id)
+            if group is not None and str(verified.origin_device_id) == group.device_id:
+                own_verified.add((str(verified.group_id), str(verified.operation_id), row.sha256))
+                continue  # exact verified own-issued evidence only
+        except (SyncError, ValueError, TypeError, KeyError, RecursionError):
+            pass
+        identities = set()
+        try:
+            identities.add(str(UUID(row.session_uuid)))
+        except (ValueError, TypeError):
+            pass
+        if operation:
+            identities.add(str(operation.bundle.manifest.session_uuid))
+        if not identities:
+            raise HTTPException(409, "group_uuid_authority_unavailable")
+        for sid in sorted(identities):
+            if uuid is None or sid == canonical_uuid(uuid):
+                result.append(GroupClaim(row=row, session_uuid=sid,
+                    group_id=str(operation.group_id) if operation else row.group_id,
+                    operation_id=str(operation.operation_id) if operation else row.operation_id,
+                    origin_device_id=str(operation.origin_device_id) if operation else row.origin_device_id))
+                represented.add((result[-1].group_id, result[-1].operation_id, sid))
+    # Supplying-peer proof commits atomically with each received operation and
+    # retains the original signed bytes. It is a second denial anchor when a
+    # ledger row is missing, including a collision that never materialized.
+    for receipt in db.scalars(select(GroupPossession)):
+        proof = Signed(body_b64=receipt.proof_body_b64, signature_b64=receipt.proof_signature_b64)
+        try:
+            try:
+                signed_operations = [unpack(proof, Delivery)[0].operation]
+            except ValueError:
+                signed_operations = unpack(proof, Page)[0].operations
+            if len(signed_operations) != 1:
+                raise ValueError("Supplying proof lost its operation identity")
+            for signed in signed_operations:
+                operation, _, hashed = unpack(signed, Operation)
+                key = (str(operation.group_id), str(operation.operation_id), str(operation.bundle.manifest.session_uuid))
+                if key[:2] != (receipt.group_id, receipt.operation_id) or hashed != receipt.sha256:
+                    raise ValueError("Supplying proof identity mismatch")
+                if key in represented or (key[0], key[1], hashed) in own_verified:
+                    continue
+                if uuid is not None and key[2] != canonical_uuid(uuid):
+                    continue
+                ghost = GroupOperation(group_id=key[0], operation_id=key[1], session_uuid=key[2],
+                    origin_device_id=str(operation.origin_device_id), sha256=hashed,
+                    body_b64=signed.body_b64, signature_b64=signed.signature_b64)
+                result.append(GroupClaim(row=ghost, session_uuid=key[2], group_id=key[0], operation_id=key[1],
+                    origin_device_id=str(operation.origin_device_id), missing=True))
+                represented.add(key)
+        except (ValueError, TypeError, KeyError, RecursionError):
+            # Without either the operation or its receipt identity, authority
+            # is unknown. Never silently treat an unknown registry as empty.
+            if db.scalar(select(GroupOperation.cursor).where(GroupOperation.group_id == receipt.group_id,
+                    GroupOperation.operation_id == receipt.operation_id)) is None:
+                raise HTTPException(409, "group_uuid_authority_unavailable") from None
+    return result
 
 
 def owns_uuid(db, uuid):
@@ -87,6 +167,10 @@ def paired_deny_items(db):
 
 
 def verified_operation(db, row):
+    if isinstance(row, GroupClaim):
+        if row.missing:
+            raise SyncError(409, "group_projection_ledger_missing")
+        row = row.row
     group = GroupSync(db, row.group_id)
     group._local()
     operation, _, hashed = group._verify(group._signed(row), Operation)
@@ -237,7 +321,8 @@ def project_received(db, group_id, operation_id):
     try:
         row = GroupSync(db, group_id)._operation(operation_id)
         group = db.get(DeviceGroup, str(group_id))
-        local = group and row and group.device_id == row.origin_device_id
+        operation = verified_operation(db, row) if row is not None else None
+        local = group and operation and group.device_id == str(operation.origin_device_id)
         db.rollback()  # close this read before entering the fresh write seam
         if not local:
             project(db, group_id, operation_id)

@@ -166,3 +166,70 @@ def test_incompatible_same_uuid_preserves_both_signed_ops_and_existing_projectio
     with phone.sessions() as db:
         assert db.query(GroupOperation).count() == 2 and db.query(RecordedSession).count() == 1
         assert db.query(SessionChunk).count() == 0
+
+
+@pytest.mark.parametrize("column", ["origin_device_id", "session_uuid", "operation_id", "body_b64", "body-and-session", "missing-operation"])
+def test_corrupt_derived_identity_column_cannot_drop_signed_uuid_authority(instance, column):
+    (a, phone, _), gid, ids, _ = setup(instance)
+    sid = str(uuid4())
+    seed(a, 1, session_uuid=sid)
+    export(a, sid)
+    issued = call(a, gid, "issue", sid)
+    seed(phone, 1, session_uuid=sid)  # retain real local capture bytes
+    unrelated = str(uuid4())
+    seed(phone, 2, session_uuid=unrelated, filename="unrelated-local.wav")
+    push(a, phone, gid, ids[1]["device_id"], issued)
+    normal = history(phone)
+    assert normal.get(f"/api/sessions/{sid}").json()["group_history"][0]["status"] == "conflicted"
+    with phone.sessions() as db:
+        row = db.query(GroupOperation).one()
+        before = (row.body_b64, row.signature_b64, row.sha256)
+        replacement = ids[1]["device_id"] if column == "origin_device_id" else encode(b"{") if column == "body_b64" else str(uuid4())
+        if column == "missing-operation":
+            db.delete(row)
+        elif column == "body-and-session":
+            row.body_b64 = encode(b"{")
+            row.session_uuid = str(uuid4())
+        else:
+            setattr(row, column, replacement)
+        db.commit()
+    detail = normal.get(f"/api/sessions/{sid}").json()
+    assert detail["group_history"][0]["status"] == "invalid"
+    assert detail["events"] == []
+    with phone.sessions() as db:
+        assert owns_uuid(db, sid)
+        row = db.query(GroupOperation).one_or_none()
+        if column == "missing-operation":
+            assert row is None
+        elif column not in ("body_b64", "body-and-session"):
+            assert (row.body_b64, row.signature_b64, row.sha256) == before
+        assert db.query(SessionChunk).count() == 4
+        assert db.query(GroupHistory).count() == 0
+    from backend.routers.device_sync import router
+    normal.app.include_router(router, prefix="/api/device-sync")
+    assert normal.get(f"/api/device-sync/sessions/{sid}").status_code == 409
+    assert any(item["session_uuid"] == sid for item in normal.get("/api/device-sync/peer-sessions").json()["items"])
+    assert normal.get(f"/api/sessions/{unrelated}").json()["events"][0]["trackId"] == 2
+    restarted = history(instance("phone"))
+    assert restarted.get(f"/api/sessions/{sid}").json()["events"] == []
+    assert restarted.get(f"/api/sessions/{unrelated}").json()["events"][0]["trackId"] == 2
+    assert history(a).get(f"/api/sessions/{sid}").json()["events"][0]["trackId"] == 1
+
+
+def test_missing_operation_and_unreadable_durable_receipt_is_unknown_not_empty_authority(instance):
+    from backend.peer_sync.models import GroupPossession
+    (a, phone, _), gid, ids, _ = setup(instance)
+    sid = str(uuid4())
+    seed(a, 1, session_uuid=sid)
+    export(a, sid)
+    issued = call(a, gid, "issue", sid)
+    seed(phone, 1, session_uuid=sid)
+    push(a, phone, gid, ids[1]["device_id"], issued)
+    with phone.sessions() as db:
+        db.delete(db.query(GroupOperation).one())
+        db.query(GroupPossession).one().proof_body_b64 = encode(b'{"bad":"receipt"}')
+        db.commit()
+    response = history(phone).get(f"/api/sessions/{sid}")
+    assert response.status_code == 409 and response.json()["detail"] == "group_uuid_authority_unavailable"
+    with phone.sessions() as db:
+        assert db.query(SessionChunk).count() == 2
