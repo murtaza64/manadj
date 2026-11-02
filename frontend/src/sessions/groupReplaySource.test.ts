@@ -86,3 +86,13 @@ it('fails closed on readiness IO errors and source identity changes', async () =
   e.fetch.mockRejectedValue(new Error('unavailable'));
   await expect(groupReplaySource('group', 'operation', e.engines)).rejects.toThrow();
 });
+
+it('refuses duplicate receiver keys even when the advertised assets match', async () => {
+  const e = environment();
+  const duplicate = [...bindings, { ...bindings[0], logical_track_id: 'another-logical' }];
+  e.fetch.mockImplementation(async url => new Response(JSON.stringify({
+    ...(url.includes('/source?') ? wire() : ready()), bindings: duplicate,
+  })));
+  await expect(groupReplaySource('group', 'operation', e.engines)).rejects.toThrow('ambiguous');
+  expect(e.load).not.toHaveBeenCalled();
+});

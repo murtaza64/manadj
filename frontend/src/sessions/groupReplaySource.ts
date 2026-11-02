@@ -64,6 +64,9 @@ export async function groupReplaySource(group: string, operation: string, engine
       || wire.playable !== false || JSON.stringify(wire.bindings) !== JSON.stringify(candidate.bindings)) {
     throw new Error('Group source changed');
   }
+  if (new Set(wire.bindings.map(binding => binding.receiver_key)).size !== wire.bindings.length) {
+    throw new Error('Group source has ambiguous receiver bindings');
+  }
   const loaded: Partial<Record<CaptureDeck, string>> = {};
   const attempts: Partial<Record<CaptureDeck, symbol>> = {};
   const validateSource = async () => {

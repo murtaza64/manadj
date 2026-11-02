@@ -9,6 +9,8 @@ import stat
 from pathlib import Path
 from uuid import UUID, uuid4
 
+from sqlalchemy import select
+
 from ..models import Track
 from .contracts import Asset, digest
 from .events import remap
@@ -126,6 +128,13 @@ class GroupReplay:
             raise SyncError(409, "stale-selection")
         if asset != ref.asset:
             raise SyncError(409, "changed")
+        duplicates = self.db.scalars(select(GroupReplayBinding).where(
+            GroupReplayBinding.group_id == str(gid), GroupReplayBinding.operation_id == str(oid),
+            GroupReplayBinding.logical_track_id != str(body.logical_track_id)))
+        for other in duplicates:
+            selected = self.db.get(GroupReplaySelection, other.selection_id) if other.selection_id else None
+            if selected is not None and selected.track_id == selection.track_id:
+                raise SyncError(409, "conflicted")
         key = (str(gid), str(oid), str(body.logical_track_id))
         binding = self.db.get(GroupReplayBinding, key)
         if binding is None:
@@ -150,6 +159,8 @@ class GroupReplay:
                 raise SyncError(409, "invalid")
             selection = self.db.get(GroupReplaySelection, binding.selection_id) if binding.selection_id else None
             data, asset = self.selected(selection)
+            if selection.track_id in mapping.values():
+                raise SyncError(409, "conflicted")
             if binding.incarnation != selection.incarnation:
                 raise SyncError(409, "stale-selection")
             if asset != ref.asset:

@@ -15,10 +15,19 @@ from tests.test_peer_session_exchange import get, post
 from tests.test_peer_session_exchange import instance as instance  # noqa: PLC0414
 
 
-def receiver(instance):
+def receiver(instance, *, identical_assets=False):
     peer = instance("replay456")
     value = fixture()
     body = json.loads(value["body_utf8"])
+    if identical_assets:
+        body["operation_id"], body["bundle"]["manifest"]["session_uuid"] = str(uuid4()), str(uuid4())
+        body["bundle"]["manifest"]["tracks"][1]["asset"] = value["assets"][0]["asset"]
+        value["assets"][1] = {**value["assets"][1], "recipe": value["assets"][0]["recipe"], "asset": value["assets"][0]["asset"]}
+        signed = sign(body, bytes(range(32)))
+        from backend.peer_sync.group_contracts import Operation, decode, unpack
+        value["body_utf8"] = decode(signed.body_b64).decode()
+        value["signature_b64"] = signed.signature_b64
+        value["operation_sha256"] = unpack(signed, Operation)[2]
     gid, oid = body["group_id"], body["operation_id"]
     post(peer, "identity")
     identity = call(peer, gid, "provision", bytes([87]) * 32)
@@ -138,6 +147,26 @@ def test_selection_strict_body_and_local_owner_gate(instance):
     assert response.status_code == 422
     response = peer.client.post("/api/peer-sync/group-replay/selections/73", json={}, headers={"Origin": "https://peer.example"})
     assert response.status_code == 403
+
+
+def test_same_receiver_cannot_satisfy_two_distinct_logical_decode_identities(instance):
+    from backend.peer_sync.models import GroupReplayBinding
+    peer, value, path = receiver(instance, identical_assets=True)
+    selection = post(peer, "group-replay/selections/73")
+    body = {"logical_track_id": value["assets"][0]["logical_track_id"], "selection_id": selection["selection_id"],
+            "incarnation": selection["incarnation"]}
+    post(peer, path + "/bindings", body)
+    post(peer, path + "/bindings", {**body, "logical_track_id": value["assets"][1]["logical_track_id"]}, status=409)
+    # Even contradictory persisted bindings cannot bypass the candidate check.
+    _, gid, oid = path.split("/")
+    with peer.sessions() as db:
+        first = db.query(GroupReplayBinding).one()
+        db.add(GroupReplayBinding(group_id=gid, operation_id=oid, logical_track_id=value["assets"][1]["logical_track_id"],
+            operation_sha256=first.operation_sha256, selection_id=first.selection_id, incarnation=first.incarnation))
+        db.commit()
+    readiness = get(peer, path + "/readiness")
+    assert readiness["state"] == "conflicted" and readiness["generation"] is None and not readiness["playable"]
+    get(peer, path + "/source?generation=anything", status=409)
 
 
 @pytest.mark.parametrize("corruption", ["device-id", "local-id", "local-pin", "private-seed"])
