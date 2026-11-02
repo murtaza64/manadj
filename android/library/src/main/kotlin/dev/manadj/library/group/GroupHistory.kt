@@ -48,6 +48,7 @@ class GroupHistory(private val libraryRoot: File) {
     private val root = File(libraryRoot, "group-history")
     private val authorityFile = File(root, "authority.json")
     private val projectionFile = File(root, "projections.json")
+    private val authority = GroupAuthority.forLibrary(libraryRoot)
     @Volatile private var cached: Triple<String, Set<String>, GroupHistorySnapshot>? = null
     private fun fingerprint(): String = buildString {
         fun facts(file: File) {
@@ -58,7 +59,7 @@ class GroupHistory(private val libraryRoot: File) {
             }
             append(';')
         }
-        facts(groups); facts(root); facts(authorityFile); facts(projectionFile)
+        facts(groups); facts(root); facts(authorityFile); facts(projectionFile); facts(authority.root); facts(File(authority.root,"inventory.json"))
         groups.listFiles()?.sortedBy { it.name }?.forEach { facts(it); facts(File(it, "replica.json")) }
     }
     private fun objectFile(file: File): JSONObject = if(!file.exists()) JSONObject() else {
@@ -77,16 +78,19 @@ class GroupHistory(private val libraryRoot: File) {
         require(label.isNotBlank() && label.length <= 80 && label.none(Char::isISOControl))
         return GroupProjectionDevice(id, label, m.getBoolean("revoked")) to key
     }
-    private data class Scan(val snapshot: GroupHistorySnapshot, val groups: Set<String>, val known: Set<String>)
+    private data class Scan(val snapshot: GroupHistorySnapshot, val groups: Set<String>, val known: Set<String>, val perGroup: Map<String,Set<String>>)
     private fun scan(localHistoryUuids: Set<String>): Scan {
         val seenGroups = mutableSetOf<String>(); val known = mutableSetOf<String>(); val rows = mutableListOf<GroupSessionView>()
         val ownIssued = mutableMapOf<String, MutableSet<GroupOperationClaim>>()
-        var invalid = 0; var error: String? = null
+        val perGroup=mutableMapOf<String,Set<String>>()
+        var invalid = 0; var error: String? = null; var unknown=false
         try {
-            val authority = objectFile(authorityFile)
-            if(authority.length() > 0) {
-                GroupWire.fields(authority, "version", "groups", "known_uuids"); require(authority.get("version") == 1)
-                seenGroups += ids(authority.getJSONArray("groups")); known += ids(authority.getJSONArray("known_uuids"))
+            val anchored=authority.read()
+            seenGroups += anchored.keys; known += anchored.values.flatten()
+            val remembered = objectFile(authorityFile)
+            if(remembered.length() > 0) {
+                GroupWire.fields(remembered, "version", "groups", "known_uuids"); require(remembered.get("version") == 1)
+                seenGroups += ids(remembered.getJSONArray("groups")); known += ids(remembered.getJSONArray("known_uuids"))
             }
             val projected = objectFile(projectionFile)
             val directories = if(!groups.exists()) emptyList() else {
@@ -96,11 +100,16 @@ class GroupHistory(private val libraryRoot: File) {
                 require(dir.isDirectory && dir.canonicalFile.parentFile == groups.canonicalFile)
                 GroupWire.uuid(dir.name)
             }.toSet()
-            require(present.containsAll(seenGroups)) { "Known group storage is missing; raw replay remains blocked" }
+            val missing=seenGroups-present
+            require(missing.all { it in anchored }) { "Historical group authority unavailable" }
+            if(missing.isNotEmpty()) error="Known group storage unavailable; original evidence and UUID denials retained"
             seenGroups += present
             for(dir in directories.sortedBy { it.name }) {
                 val gid = dir.name
                 val state = GroupReplica(dir, gid).historyState()
+                perGroup[gid]=GroupAuthority.received(state,gid)
+                if(!perGroup.getValue(gid).containsAll(anchored[gid].orEmpty()))
+                    error="Received group evidence unavailable; original recordings and UUID denials retained"
                 val local = GroupWire.uuid(state.getString("device_id")); val localMember = member(state, local).first
                 val ops = state.getJSONArray("operations")
                 val received = ids(state.optJSONArray("received_session_uuids"))
@@ -202,12 +211,12 @@ class GroupHistory(private val libraryRoot: File) {
                         rows += GroupSessionView(gid, opId, sid, verified.sha256, manifestSha, origin, relays.distinctBy { it.deviceId }.sortedBy { it.deviceId },
                             m.getString("started_at"), m.getString("ended_at"), status, isProjected, 0, tracks)
                     } catch(e: Exception) {
-                        invalid++; error = "Group evidence validation failed; original evidence retained and raw replay blocked"
+                        invalid++; unknown=true; error = "Group evidence validation failed; original evidence retained and raw replay blocked"
                     }
                 }
             }
         } catch(e: Exception) {
-            invalid++
+            invalid++; unknown=true
             // Platform JSON exception messages may include source text; never expose a local
             // ledger (which contains its signing seed) through user-visible diagnostics.
             error = "Group history authority unavailable; evidence retained and raw replay blocked"
@@ -217,7 +226,7 @@ class GroupHistory(private val libraryRoot: File) {
             val conflicts = incompatible + if(row.sessionUuid in localHistoryUuids) 1 else 0
             row.copy(conflictCount = conflicts, status = if(conflicts > 0 && row.status != "revoked") "conflicted" else row.status)
         }.sortedWith(compareByDescending<GroupSessionView> { it.startedAt }.thenBy { it.key })
-        return Scan(GroupHistorySnapshot(views, if(error == null) known.toSet() else null, error, invalid, ownIssued.mapValues { it.value.toSet() }), seenGroups, known)
+        return Scan(GroupHistorySnapshot(views, if(!unknown) known.toSet() else null, error, invalid, ownIssued.mapValues { it.value.toSet() }), seenGroups, known, perGroup)
     }
     /** Read never mutates/repairs derived history or the authority index. */
     fun snapshot(localHistoryUuids: Set<String> = emptySet()): GroupHistorySnapshot {
@@ -235,6 +244,7 @@ class GroupHistory(private val libraryRoot: File) {
         return synchronized(locks.getOrPut(root.canonicalPath) { Any() }) {
             RandomAccessFile(File(root, ".lock"), "rw").use { lockFile -> lockFile.channel.lock().use {
                 val scanned = scan(localHistoryUuids); require(scanned.snapshot.error == null) { scanned.snapshot.error.orEmpty() }
+                scanned.perGroup.forEach { (gid, ids) -> authority.record(gid,ids) }
                 persist(authorityFile, JSONObject().put("version", 1).put("groups", JSONArray(scanned.groups.sorted())).put("known_uuids", JSONArray(scanned.known.sorted())))
                 val projections = objectFile(projectionFile)
                 scanned.snapshot.items.filter { it.status != "revoked" }.forEach { view ->

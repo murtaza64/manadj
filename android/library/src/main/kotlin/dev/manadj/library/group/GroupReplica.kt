@@ -51,6 +51,7 @@ class GroupReplica(private val root: File, val groupId: String) {
     private fun <T> write(block: (JSONObject) -> T) = locked {
         val state = load(); local(state)
         val result = block(state)
+        GroupAuthority.forReplica(root,groupId).record(groupId,GroupAuthority.received(state,groupId))
         persist(state) // fsync + atomic replacement completes BEFORE any returned ack can escape.
         result
     }
@@ -232,7 +233,9 @@ class GroupReplica(private val root: File, val groupId: String) {
                 val state = JSONObject().put("version", 1).put("group_id", groupId).put("device_id", deviceId)
                     .put("private_seed_b64", GroupWire.encode64(seed)).put("operations", JSONArray()).put("acks", JSONObject()).put("received_session_uuids",JSONArray())
                     .put("members", JSONObject().put(deviceId, JSONObject().put("public_key_b64", GroupWire.encode64(GroupWire.publicKey(seed))).put("revoked", false)))
+                GroupAuthority.forReplica(root,groupId).record(groupId,emptySet())
                 replica.persist(state)
+                FileChannel.open(root.parentFile.toPath(),READ).use { it.force(true) }
             }
             return replica
         }

@@ -65,7 +65,7 @@ class GroupHistoryTest {
         val group = File(root, "device-groups/$gid")
         val moved = File(root, "retained-decoy-group")
         assertTrue(group.renameTo(moved)) // generated data retained, not deleted
-        assertNull(history.snapshot().knownUuids)
+        assertEquals(setOf(sid),history.snapshot().knownUuids)
         assertNotNull(history.snapshot().error)
         assertTrue(moved.renameTo(group))
         assertEquals(setOf(sid), GroupHistory(root).snapshot().knownUuids)
@@ -172,5 +172,62 @@ class GroupHistoryTest {
         assertTrue(repo.groupHistory.snapshot().items.isEmpty())
         file.writeText(original)
         assertEquals(setOf(sid),repo.groupHistory.snapshot().knownUuids)
+    }
+
+    @Test fun acknowledgedGroupUnavailableBeforeFirstProjectionStaysDeniedWithOrWithoutSibling() = kotlinx.coroutines.runBlocking {
+        for(sibling in listOf(false,true)) {
+            val caseRoot=File(root,if(sibling) "with-sibling" else "sole")
+            val groupRoot=File(caseRoot,"device-groups/$gid")
+            val replica=GroupReplica.provision(groupRoot,gid,p,ByteArray(32) { (it+32).toByte() })
+            replica.pinMember(a,GroupWire.publicKey(ByteArray(32) { it.toByte() }),"Laptop A")
+            val delivery=GroupWire.sign(JSONObject().put("format",GroupWire.FORMAT).put("group_id",gid).put("kind","deliver")
+                .put("origin_device_id",a).put("recipient_device_id",p).put("operation",operation.json()),ByteArray(32) { it.toByte() })
+            replica.receiveDelivery(delivery)
+            if(sibling) {
+                val other="bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+                GroupReplica.provision(File(caseRoot,"device-groups/$other"),other,p,ByteArray(32) { (it+32).toByte() })
+            }
+            val repo=dev.manadj.library.LibraryRepository(caseRoot,"http://unused.invalid")
+            assertFalse(File(caseRoot,"group-history/authority.json").exists())
+            assertFalse(repo.rawSessionAllowed(sid))
+            val retained=File(caseRoot,"retained-generated-group")
+            assertTrue(groupRoot.renameTo(retained))
+            assertFalse(repo.rawSessionAllowed(sid)); assertFalse(dev.manadj.library.LibraryRepository(caseRoot,repo.baseUrl).rawSessionAllowed(sid))
+            assertTrue(repo.rawSessionAllowed("77777777-7777-4777-8777-777777777777")) // unrelated legacy authority unaffected
+            val cache=File(caseRoot,"legacy/sessions/$sid.json").apply { parentFile.mkdirs();writeText("""{"uuid":"$sid","events":[{"t":0,"kind":"load","channel":"A","trackId":1}]}""") }
+            val raw=dev.manadj.library.session.SessionStore(cache.parentFile.parentFile,{dev.manadj.library.SyncClient(repo.baseUrl)},uuidAllowed={repo.rawSessionAllowed(it)})
+            assertFails { raw.log(dev.manadj.library.session.SessionHeader(sid,null,"ended",0)) }
+            assertTrue(groupRoot.let { retained.renameTo(it) })
+            assertEquals("unbound",repo.groupHistory.project().items.single().status)
+            assertFalse(repo.rawSessionAllowed(sid)); assertTrue(cache.isFile)
+            val inventory=File(caseRoot,"group-authority/inventory.json")
+            val saved=File(caseRoot,"retained-generated-inventory.json")
+            assertTrue(inventory.renameTo(saved)) // missing anchor is unknown, never an empty registry
+            assertFalse(repo.rawSessionAllowed(sid)); assertNull(repo.groupHistory.snapshot().knownUuids)
+            assertFails { replica.receiveDelivery(delivery) }
+            assertTrue(saved.renameTo(inventory))
+            replica.receiveDelivery(delivery)
+            assertFalse(repo.rawSessionAllowed(sid)); assertEquals(1,replica.evidence().size)
+        }
+    }
+
+    @Test fun outsideAuthoritySurvivesMetadataCommitFailureAndRetryWithoutProjection() {
+        val groupRoot=File(root,"device-groups/$gid")
+        val replica=GroupReplica.provision(groupRoot,gid,p,ByteArray(32) { (it+32).toByte() })
+        replica.pinMember(a,GroupWire.publicKey(ByteArray(32) { it.toByte() }),"Laptop A")
+        val message=GroupWire.sign(JSONObject().put("format",GroupWire.FORMAT).put("group_id",gid).put("kind","deliver")
+            .put("origin_device_id",a).put("recipient_device_id",p).put("operation",operation.json()),ByteArray(32) { it.toByte() })
+        Files.setPosixFilePermissions(groupRoot.toPath(),java.nio.file.attribute.PosixFilePermissions.fromString("r-x------"))
+        try {
+            org.junit.jupiter.api.Assumptions.assumeTrue(!Files.isWritable(groupRoot.toPath()))
+            assertFailsWith<java.io.IOException> { replica.receiveDelivery(message) }
+        } finally { Files.setPosixFilePermissions(groupRoot.toPath(),java.nio.file.attribute.PosixFilePermissions.fromString("rwx------")) }
+        assertTrue(replica.evidence().isEmpty())
+        val repo=dev.manadj.library.LibraryRepository(root,"http://unused.invalid")
+        assertFalse(repo.rawSessionAllowed(sid)); assertTrue(repo.groupHistory.snapshot().items.isEmpty())
+        assertFalse(dev.manadj.library.LibraryRepository(root,repo.baseUrl).rawSessionAllowed(sid))
+        replica.receiveDelivery(message)
+        assertEquals(1,replica.evidence().size)
+        assertEquals("unbound",repo.groupHistory.project().items.single().status)
     }
 }
