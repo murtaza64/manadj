@@ -35,6 +35,7 @@ class PeerSessionsTest {
     private var groupManaged = false
     private var markerOrigin = origin
     private var markerGroupClaims: JSONArray? = null
+    @Volatile private var authorityCompanions: List<Any> = emptyList()
 
     private fun item() = JSONObject().put("session_uuid",sid).put("origin_replica_id",markerOrigin).put("recording_origin","Original phone")
         .put("manifest_sha256",manifest).put("started_at","2026-11-02T00:00:00Z").put("ended_at","2026-11-02T00:00:06Z")
@@ -65,7 +66,7 @@ class PeerSessionsTest {
                 path == "/api/device-sync/peer-sessions" -> {
                     beforeList()
                     if (listStatus != 200) {ex.sendResponseHeaders(listStatus,-1);ex.close();return@createContext}
-                    JSONObject().put("version",listVersion).put("items",if (omitPeer) JSONArray() else JSONArray().put(item())).toString().toByteArray()
+                    JSONObject().put("version",listVersion).put("items",if (omitPeer) JSONArray() else JSONArray().put(item()).also { a -> authorityCompanions.forEach(a::put) }).toString().toByteArray()
                 }
                 ex.requestURI.rawQuery != "generation=$generation" || state != "ready" -> { ex.sendResponseHeaders(409,-1); ex.close(); return@createContext }
                 path.endsWith("/audio/9") -> { audioCalls++; audio }
@@ -182,6 +183,26 @@ class PeerSessionsTest {
             markerGroupClaims=mutation(claim); isolated.peerSessions.refresh()
             assertFalse(isolated.rawSessionAllowed(sid,allowOwnIssued=true),"variant $index")
             assertFalse(LibraryRepository(target,repo.baseUrl).rawSessionAllowed(sid,allowOwnIssued=true),"restart variant $index")
+        }
+    }
+
+    @Test fun validGroupDenialBeforeMalformedAuthorityCompanionNeverRestoresRawCachePermission() = runBlocking {
+        groupManaged=true
+        val malformed = listOf<Any>(JSONObject(item().toString()).put("session_uuid","bad-group-uuid"), "non-object companion")
+        malformed.forEachIndexed { index, bad ->
+            val caseRoot=File(root,"generated-malformed-batch-$index")
+            val case=LibraryRepository(caseRoot,repo.baseUrl,deviceToken="synthetic-paired-token")
+            val cache=File(caseRoot,"legacy/sessions/$sid.json").apply { parentFile.mkdirs(); writeText("""{"uuid":"$sid","events":[{"t":0,"kind":"load","channel":"A","trackId":1}]}""") }
+            val original=cache.readText()
+            authorityCompanions=listOf(bad)
+            assertFails { case.peerSessions.refresh() }
+            assertFalse(case.rawSessionAllowed(sid),"live batch $index")
+            assertTrue(File(caseRoot,"peer-sessions/authority-refresh.pending").isFile)
+            val restarted=LibraryRepository(caseRoot,repo.baseUrl)
+            assertFalse(restarted.rawSessionAllowed(sid),"restart batch $index")
+            val raw=SessionStore(cache.parentFile.parentFile,{SyncClient(repo.baseUrl)},uuidAllowed={ restarted.rawSessionAllowed(it) })
+            assertFails { raw.log(SessionHeader(sid,null,"ended",0)) }
+            assertEquals(original,cache.readText())
         }
     }
 

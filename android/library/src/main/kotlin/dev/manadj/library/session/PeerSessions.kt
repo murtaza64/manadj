@@ -15,6 +15,9 @@ import org.json.JSONObject
 import java.io.File
 import java.security.MessageDigest
 
+private class UnsupportedPeerAdapterVersion : IllegalArgumentException("Unsupported peer adapter version")
+private class MalformedPeerAuthority : IllegalArgumentException("Malformed paired UUID authority; replay is disabled and evidence retained")
+
 fun peerUuid(value: String): String = value.also {
     require(it.matches(Regex("[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"))) { "Invalid peer UUID" }
 }
@@ -94,23 +97,18 @@ class PeerSessions(private val root: File, private val client: () -> SyncClient,
         // A crash/write failure after learning new IDs must not make an older empty cache
         // authoritative on restart. Persist intent before fetching any new authority.
         try { store(pendingAuthority, "pending") }
-        catch (e: Exception) { knownUuids = null; throw e }
+        catch (e: Exception) { knownUuids = null; groupOwnedClaims = null; ordinaryKnown = null; throw e }
         var learned = false
         try {
             val text = client().peerSessionsText()
-            // A paired desktop's group claim is deny-only, not membership or a Session payload.
-            // Persist it before parsing optional evidence fields, so a contradictory marker can
-            // never make a previously cached raw UUID playable after a schema/write failure.
-            val claims = groupDeniedClaims(text)
+            // A malformed v1 batch may contain a valid denial before a bad sibling. The durable
+            // intent is already present: parse failures become unknown authority, never an old
+            // empty permission set. Parse the complete batch before any fallible cache write.
+            val claims = parseAuthority { groupDeniedClaims(text) }
+            val items = parseAuthority { parseList(text) }
             val denied = claims.keys
-            if(denied.isNotEmpty()) {
-                groupOwnedClaims = mergeClaims(previousGroups, claims)
-                knownUuids = known + denied; learned = true
-                store(groupClaimsFile, claimsJson(groupOwnedClaims!!).toString())
-                store(knownFile, JSONArray(knownUuids!!.sorted()).toString())
-            }
-            val items = parseList(text)
             val next = known + denied + items.map { it.uuid.lowercase() }
+            groupOwnedClaims = mergeClaims(previousGroups, claims)
             knownUuids = next // In-memory fence precedes every fallible metadata write.
             ordinaryKnown = previousOrdinary + items.filterNot { it.groupManaged }.map { it.uuid.lowercase() }
             learned = true
@@ -121,12 +119,20 @@ class PeerSessions(private val root: File, private val client: () -> SyncClient,
             check(pendingAuthority.delete()) { "Cannot finish peer UUID authority refresh" }
             items
         } catch (e: Exception) {
+            if(e is MalformedPeerAuthority) {
+                knownUuids = null; groupOwnedClaims = null; ordinaryKnown = null
+                learned = true // retain the fsynced intent; restart must remain fail-closed
+            }
             // A rejected/unreachable response supplied no trusted new IDs. Preserve prior
             // authority; a failed cleanup is itself an unknown-authority state.
-            if (!learned && !pendingAuthority.delete()) knownUuids = null
+            if (!learned && !pendingAuthority.delete()) { knownUuids = null; groupOwnedClaims = null; ordinaryKnown = null }
             throw e
         }
     } }
+
+    private fun <T> parseAuthority(block: () -> T): T = try { block() }
+    catch(e: UnsupportedPeerAdapterVersion) { throw e }
+    catch(e: Exception) { throw MalformedPeerAuthority() }
 
     /** Fresh desktop validation on every open/start/resume/seek; deliberately no cached-detail fallback. */
     suspend fun open(item: PeerSessionItem): PeerReplay = withContext(io) { lock.withLock {
@@ -185,8 +191,9 @@ class PeerSessions(private val root: File, private val client: () -> SyncClient,
             ?.takeIf { o.get(key) is Number } ?: error("Invalid peer integer $key")
         private fun id(o: JSONObject, key: String): Int = integer(o, key).also { require(it in 1..Int.MAX_VALUE) }.toInt()
         private fun str(o: JSONObject, key: String): String? = if (o.isNull(key)) null else o.getString(key)
-        private fun version(o: JSONObject) { require(integer(o, "version") == 1L) { "Unsupported peer adapter version" } }
+        private fun version(o: JSONObject) { if(integer(o, "version") != 1L) throw UnsupportedPeerAdapterVersion() }
         fun parseItem(o: JSONObject): PeerSessionItem {
+            require(!o.has("group_managed") || o.get("group_managed") is Boolean) { "Invalid group ownership marker" }
             val groupManaged = o.opt("group_managed") == true || o.optString("state") == "group_metadata_only"
             val deps = o.getJSONArray("dependencies")
             require(deps.length() <= 10000)
