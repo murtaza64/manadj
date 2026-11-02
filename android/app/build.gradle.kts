@@ -18,6 +18,7 @@ android {
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
     kotlinOptions { jvmTarget = "17" }
     buildFeatures { compose = true }
+    testOptions { unitTests.isIncludeAndroidResources = true }
     // Lanes sharing one phone install side by side: -Pmanadj.appIdSuffix=.lane
     (findProperty("manadj.appIdSuffix") as String?)?.let { buildTypes.getByName("debug").applicationIdSuffix = it }
     // One debug identity across lanes/machines so installs update in place:
@@ -40,6 +41,10 @@ dependencies {
     implementation("androidx.compose.runtime:runtime")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303") // the real org.json (android.jar ships stubs)
+    testImplementation(composeBom)
+    testImplementation("org.robolectric:robolectric:4.14.1")
+    testImplementation("androidx.compose.ui:ui-test-junit4")
+    debugImplementation("androidx.compose.ui:ui-test-manifest")
     androidTestImplementation(composeBom)
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")

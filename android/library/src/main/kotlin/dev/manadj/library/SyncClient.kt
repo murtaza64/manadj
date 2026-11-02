@@ -1,5 +1,7 @@
 package dev.manadj.library
 
+import dev.manadj.library.session.peerUuid
+import dev.manadj.library.session.peerDigest
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -57,6 +59,54 @@ class SyncClient(
 
     /** Session headers, newest first (#378). */
     fun sessionsText(): String = io { open("/sessions").checked().run { inputStream.use { it.readBytes().decodeToString() }.also { disconnect() } } }
+
+    /** Additive paired peer adapter v1; never falls back to unversioned Session/audio endpoints. */
+    fun peerSessionsText(): String = peerJson("/peer-sessions")
+    fun peerSessionText(uuid: String, generation: String): String =
+        peerJson("/peer-sessions/${peerUuid(uuid)}?generation=${peerDigest(generation)}")
+
+    private fun peerJson(path: String): String = io {
+        val conn = open(path).apply { useCaches = false; setRequestProperty("Cache-Control", "no-cache, no-store") }.checked()
+        try {
+            conn.inputStream.use { input ->
+                val output = java.io.ByteArrayOutputStream()
+                val buffer = ByteArray(64 * 1024)
+                while (true) {
+                    val n = input.read(buffer)
+                    if (n < 0) break
+                    if (output.size() > 64 * 1024 * 1024 - n) throw SyncException("Peer Session response exceeds 64 MiB")
+                    output.write(buffer, 0, n)
+                }
+                output.toByteArray().decodeToString()
+            }
+        } finally { conn.disconnect() }
+    }
+
+    /** No resumable bare-ID cache or cross-generation partials. Bytes must match the guarded manifest. */
+    fun downloadPeerAudio(uuid: String, generation: String, trackId: Int, sha256: String, length: Long, target: File): Unit = io {
+        require(trackId > 0 && length > 0)
+        peerDigest(sha256)
+        val conn = open("/peer-sessions/${peerUuid(uuid)}/audio/$trackId?generation=${peerDigest(generation)}")
+            .apply { useCaches = false; setRequestProperty("Cache-Control", "no-cache, no-store") }.checked()
+        target.parentFile!!.mkdirs()
+        val tmp = File.createTempFile(".peer-", ".part", target.parentFile)
+        try {
+            if (conn.contentLengthLong >= 0 && conn.contentLengthLong != length) throw SyncException("Peer audio length differs from manifest")
+            val digest = java.security.MessageDigest.getInstance("SHA-256")
+            var count = 0L
+            conn.inputStream.use { input -> tmp.outputStream().use { output ->
+                val buffer = ByteArray(64 * 1024)
+                while (true) {
+                    val n = input.read(buffer)
+                    if (n < 0) break
+                    if (count > length - n) throw SyncException("Peer audio exceeds manifest length")
+                    count += n; digest.update(buffer, 0, n); output.write(buffer, 0, n)
+                }
+            } }
+            if (count != length || digest.digest().joinToString("") { "%02x".format(it) } != sha256) throw SyncException("Peer audio does not match exact manifest bytes")
+            java.nio.file.Files.move(tmp.toPath(), target.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+        } finally { tmp.delete(); conn.disconnect() }
+    }
 
     /** One Session with its capture-event log (SessionDetail, #378), streamed to [target]. */
     fun downloadSession(uuid: String, target: File): Unit = io {
