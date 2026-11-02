@@ -213,3 +213,77 @@ it.each(['success', 'error'] as const)('retains submitted playlist owner and %s 
   await act(async () => { button('Clear review').click(); await tick(); });
   expect(document.querySelector('[data-review-panel]')).toBeNull();
 });
+
+it.each((['filtered', 'all'] as const).flatMap(scope => [3, 1, -1, NaN, 10001].map(total => ({ scope, total }))))('invalidates $scope authority for same IDs with total=$total until explicit recheck', async ({ scope, total }) => {
+  const execute = vi.spyOn(fieldReview, 'execute');
+  await render();
+  await choose('Review scope', scope);
+  await act(async () => { client.setQueryData(['tracks', 'sync-workspace'], { items: tracks.slice(0, 2), total: 2 }); await tick(); button('Recheck plan').click(); await tick(); });
+  await act(async () => { document.querySelectorAll<HTMLInputElement>('.field-replacement input').forEach(input => input.click()); await tick(); });
+  expect(button('Apply 6 fields').disabled).toBe(false);
+  const panel = document.querySelector('[data-review-panel]');
+  await act(async () => { client.setQueryData(['tracks', 'sync-workspace'], { items: tracks.slice(0, 2), total }); await tick(); });
+  expect(button('Apply 6 fields').disabled).toBe(true);
+  await act(async () => { button('Apply 6 fields').click(); await tick(); });
+  expect(execute).not.toHaveBeenCalled();
+  expect(document.querySelector('[data-review-panel]')).toBe(panel);
+  await act(async () => { client.setQueryData(['tracks', 'sync-workspace'], { items: tracks.slice(0, 2), total: 2 }); await tick(); });
+  expect(button('Apply 6 fields').disabled).toBe(true);
+  await act(async () => { button('Recheck plan').click(); await tick(); });
+  expect(button('Apply 0 fields').disabled).toBe(true);
+  expect(fieldReview.plan).toHaveBeenCalledTimes(2);
+  expect(document.querySelector('[data-review-panel]')).toBe(panel);
+});
+
+it.each(['selected', 'captured'] as const)('keeps exact %s authority when unrelated total changes', async scope => {
+  await render();
+  await act(async () => { button('Review fields…').click(); await tick(); });
+  if (scope === 'selected') await choose('Review scope', 'selected');
+  await act(async () => { button('Recheck plan').click(); await tick(); });
+  await act(async () => { document.querySelector<HTMLInputElement>('.field-replacement input')!.click(); await tick(); });
+  expect(button('Apply 1 fields').disabled).toBe(false);
+  const panel = document.querySelector('[data-review-panel]');
+  await act(async () => { client.setQueryData(['tracks', 'sync-workspace'], { items: tracks, total: 4 }); await tick(); });
+  expect(button('Apply 1 fields').disabled).toBe(false);
+  expect(document.querySelector('[data-review-panel]')).toBe(panel);
+  expect(vi.mocked(fieldReview.plan).mock.calls[0][0].track_ids).toEqual([2]);
+});
+
+it.each(['filtered', 'all'] as const)('retains pending %s receipt when unchanged IDs lose completeness', async scope => {
+  let reject!: (error: Error) => void;
+  const execute = vi.spyOn(fieldReview, 'execute').mockImplementation(() => new Promise((_ok, fail) => { reject = fail; }));
+  await render();
+  await choose('Review scope', scope);
+  await act(async () => { client.setQueryData(['tracks', 'sync-workspace'], { items: tracks.slice(0, 2), total: 2 }); await tick(); button('Recheck plan').click(); await tick(); });
+  await act(async () => { document.querySelectorAll<HTMLInputElement>('.field-replacement input').forEach(input => input.click()); await tick(); button('Apply 6 fields').click(); await tick(); });
+  const panel = document.querySelector('[data-review-panel]');
+  await act(async () => { client.setQueryData(['tracks', 'sync-workspace'], { items: tracks.slice(0, 2), total: 3 }); await tick(); });
+  expect(document.querySelector('[data-review-panel]')).toBe(panel);
+  expect(button('Recheck plan').disabled).toBe(true);
+  expect(execute.mock.calls[0][0].track_ids).toEqual([1, 2]);
+  await act(async () => { reject(new FieldRequestError('Original outcome retained', 'unknown')); await tick(); });
+  expect(document.body.textContent).toContain('Outcome unknown');
+  await act(async () => { client.setQueryData(['tracks', 'sync-workspace'], { items: tracks.slice(0, 2), total: 2 }); await tick(); });
+  expect(document.querySelector('[data-review-panel]')).toBe(panel);
+  expect(document.body.textContent).toContain('Outcome unknown');
+});
+
+it.each(['filtered', 'all'] as const)('invalidates %s authority after failed refetch despite retained complete data', async scope => {
+  vi.mocked(api.tracks.list).mockResolvedValue({ items: tracks.slice(0, 2), total: 2 });
+  await render();
+  await choose('Review scope', scope);
+  await act(async () => { button('Recheck plan').click(); await tick(); });
+  await act(async () => { document.querySelectorAll<HTMLInputElement>('.field-replacement input').forEach(input => input.click()); await tick(); });
+  const panel = document.querySelector('[data-review-panel]');
+  let fail!: (error: Error) => void;
+  vi.mocked(api.tracks.list).mockImplementation(() => new Promise((_ok, reject) => { fail = reject; }));
+  await act(async () => { void client.refetchQueries({ queryKey: ['tracks', 'sync-workspace'] }); await tick(); });
+  expect(document.querySelector('[data-review-panel]')).toBe(panel);
+  await act(async () => { fail(new Error('Scope refetch failed')); await tick(); });
+  expect(button('Apply 6 fields').disabled).toBe(true);
+  expect(document.body.textContent).toContain('Library data unavailable');
+  const calls = vi.mocked(fieldReview.plan).mock.calls.length;
+  await act(async () => { button('Recheck plan').click(); await tick(); });
+  expect(fieldReview.plan).toHaveBeenCalledTimes(calls);
+  expect(document.body.textContent).toContain('Library scope is incomplete');
+});

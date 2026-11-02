@@ -43,6 +43,7 @@ export function FieldReviewInspector({ scopes, initialScope, initialFields, onCl
   const [fields, setFields] = useState<FieldName[]>((initialFields ?? ['key', 'hotcues', 'maincue']).filter(field => supportedFields(initialSurface, initialDirection).includes(field)));
   const [plan, setPlan] = useState<FieldPlan | null>(null);
   const [plannedScopeRevision, setPlannedScopeRevision] = useState(scopeRevision);
+  const [scopeInvalidated, setScopeInvalidated] = useState(false);
   const [receipt, setReceipt] = useState<FieldReceipt | null>(null);
   const [choices, setChoices] = useState<Set<string>>(new Set());
   const [error, setError] = useState<{ message: string; code: string } | null>(null);
@@ -56,6 +57,11 @@ export function FieldReviewInspector({ scopes, initialScope, initialFields, onCl
   const liveScopes = useRef(scopes);
   liveScopes.current = scopes;
   const opener = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    // Once authority changes, restoring the same IDs/completeness cannot
+    // resurrect old consent. Only explicit Recheck starts another review.
+    if (plannedScopeRevision !== scopeRevision) setScopeInvalidated(true);
+  }, [plannedScopeRevision, scopeRevision]);
   useEffect(() => {
     const generation = serial;
     if (embedded) return () => { generation.current++; };
@@ -88,6 +94,7 @@ export function FieldReviewInspector({ scopes, initialScope, initialFields, onCl
     clear();
     const ticket = ++serial.current;
     setPlannedScopeRevision(scopeRevision);
+    setScopeInvalidated(false);
     setLoading(true);
     onObservationChange?.('reading');
     try {
@@ -104,7 +111,7 @@ export function FieldReviewInspector({ scopes, initialScope, initialFields, onCl
     } finally { if (ticket === serial.current) setLoading(false); }
   }
   async function apply() {
-    if (!plan || inFlight.current || plannedScopeRevision !== scopeRevision || !plan.executable || now - loadedAt >= 60000 || (direction === 'export' && !enabled)) return;
+    if (!plan || inFlight.current || scopeInvalidated || plannedScopeRevision !== scopeRevision || !plan.executable || now - loadedAt >= 60000 || (direction === 'export' && !enabled)) return;
     inFlight.current = true; setWriting(true); setError(null);
     onPendingChange?.(true);
     try {
@@ -120,7 +127,7 @@ export function FieldReviewInspector({ scopes, initialScope, initialFields, onCl
     }
   }
   const expired = plan && now - loadedAt >= 60000;
-  const scopeChanged = plan && plannedScopeRevision !== scopeRevision;
+  const scopeChanged = plan && (scopeInvalidated || plannedScopeRevision !== scopeRevision);
   const resolved = receipt !== null || error !== null;
   const count = plan?.tracks.reduce((n, track) => n + track.fields.filter(field => field.action === 'fill' || (field.action === 'consent' && choices.has(key(track.track_id, field.field)))).length, 0) || 0;
   const content = <>

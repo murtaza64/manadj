@@ -52,7 +52,7 @@ export function SyncWorkspace({ request, onPendingChange }: { request: Workspace
     return data;
   }, enabled: kind === 'playlist' && matches.length === 1 });
   const items: Track[] = useMemo(() => library.data?.items || [], [library.data?.items]);
-  const complete = typeof library.data?.total === 'number' && library.data.total <= items.length;
+  const complete = !library.isError && Number.isSafeInteger(library.data?.total) && library.data?.total === items.length && items.length <= 10000;
   const filtered = useMemo(() => items.filter(track => `${track.title || ''} ${track.artist || ''} ${track.filename}`.toLocaleLowerCase().includes(search.toLocaleLowerCase())), [items, search]);
   const rows = kind === 'playlist' ? playlist.data?.tracks || [] : filtered;
   const shown = rows.slice(0, 1000);
@@ -86,6 +86,7 @@ export function SyncWorkspace({ request, onPendingChange }: { request: Workspace
   }
   const ids = scope === 'captured' ? capture?.trackIds || [] : scope === 'selected' ? [...selected] : (scope === 'filtered' ? filtered : items).map(track => track.id);
   const normalizedScope = scope === 'captured' ? capture?.scope || 'selected' : scope;
+  const scopeRevision = JSON.stringify([ids, scope === 'all' || scope === 'filtered' ? [complete, library.data?.total ?? null] : null]);
   const scopes: FieldScopes = { [normalizedScope]: async () => {
     if ((scope === 'all' || scope === 'filtered') && !complete) throw new Error('Library scope is incomplete (maximum10000). Capture an exact selection instead.');
     return [...ids];
@@ -135,7 +136,7 @@ export function SyncWorkspace({ request, onPendingChange }: { request: Workspace
     </section>
     <div className="sw-detail" aria-label="Review and receipt">
       {busy && <p className="sw-warning" role="status">Operation pending. Scope/navigation controls are locked until its receipt arrives.</p>}
-      {!open ? <p>Review cleared. Choose a scope and select “Review this scope”.</p> : kind === 'fields' ? <FieldReviewInspector key={contextKey} embedded scopes={scopes} scopeRevision={JSON.stringify(ids)} initialScope={normalizedScope} initialFields={fields} initialSurface={surface} initialDirection={direction} onFieldsChange={setFields} onPendingChange={pending} onObservationChange={setObservation} onClose={clear} />
+      {!open ? <p>Review cleared. Choose a scope and select “Review this scope”.</p> : kind === 'fields' ? <FieldReviewInspector key={contextKey} embedded scopes={scopes} scopeRevision={scopeRevision} initialScope={normalizedScope} initialFields={fields} initialSurface={surface} initialDirection={direction} onFieldsChange={setFields} onPendingChange={pending} onObservationChange={setObservation} onClose={clear} />
         : !playlistName ? <p>Choose a Library playlist. This export can add missing records; field-only review cannot.</p>
           : <PlaylistExportInspector key={contextKey} embedded playlistName={playlistName} initialTarget={surface} initialScope={playlistScope} onPendingChange={pending} onObservationChange={setObservation} onClose={clear} />}
     </div>
