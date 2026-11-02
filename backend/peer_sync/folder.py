@@ -13,7 +13,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from uuid import UUID, uuid4
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from ..peer_inventory.contracts import MAX_EXPORT, canonical
 from .contracts import Bundle, Chunk, ExportBody, Manifest, digest
@@ -176,7 +176,12 @@ class FolderTransport:
 
     def _config_state(self, state):
         with self.sessions() as db:
-            db.get(FolderConfig, 1).state = state
+            # Atomic publication fence: an operator disable wins even when this
+            # cycle took its enabled snapshot before the request committed.
+            # Root/token are pinned, so no configuration rollover can reuse it.
+            db.execute(update(FolderConfig).where(
+                FolderConfig.id == 1, FolderConfig.enabled == 1,
+            ).values(state=state))
             db.commit()
 
     def _publication(self, sid, state, published=None):

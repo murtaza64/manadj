@@ -369,3 +369,26 @@ def test_missing_posix_flags_do_not_break_import_or_disabled_transport(instance,
         assert folder.FolderTransport(a.sessions).run_once()["state"] == "disabled"
     importlib.reload(folder)
     assert before == list(root.iterdir())
+
+
+def test_inflight_cycle_cannot_overwrite_operator_disable_and_restart_is_honest(instance, monkeypatch):
+    from backend.peer_sync.models import FolderConfig
+    a = instance("disable-interleave")
+    post(a, "identity")
+    sid = str(uuid4())
+    seed(a, 1, session_uuid=sid)
+    transport, root = configured(a)
+    transport.select(sid)
+    original = transport._publish
+    def disable_then_finish(*args):
+        post(a, "transport", {"root": str(root), "enabled": False})
+        return original(*args)
+    monkeypatch.setattr(transport, "_publish", disable_then_finish)
+    result = transport.run_once()
+    assert result["state"] == "disabled" and result["enabled"] is False
+    with a.sessions() as db:
+        assert db.get(FolderConfig, 1).state == "disabled"
+    restarted = FolderTransport(instance("disable-interleave").sessions)
+    assert restarted.run_once()["state"] == "disabled"
+    post(a, "transport", {"root": str(root), "enabled": True})
+    assert restarted.run_once()["state"] == "ready"
