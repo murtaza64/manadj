@@ -20,7 +20,14 @@ from urllib.parse import parse_qs, quote, urlsplit
 from urllib.request import Request, urlopen
 
 REPO = Path(__file__).resolve().parents[2]
-SIDECAR = Path('/Users/murtaza/manadj/.editspace')
+try:
+    from .project_paths import discover
+except ImportError:
+    import sys
+    sys.path.insert(0, str(REPO))
+    from scripts.agent.project_paths import discover
+
+SIDECAR = discover(REPO).sidecar
 LANE_RE = re.compile(r'[a-z0-9]+(?:-[a-z0-9]+)*\Z')
 SESSION_RE = re.compile(r'ses_[A-Za-z0-9]+\Z')
 SHA_RE = re.compile(r'[0-9a-f]{40}\Z')
