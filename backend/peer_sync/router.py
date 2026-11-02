@@ -7,9 +7,18 @@ from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from ..peer_inventory.router import local_control, parse
 from ..peer_inventory.contracts import LocalId
-from .contracts import ArchiveBody, BindBody, Bundle, ExportBody, FolderBody, GuardBody, SourceBody, Strict
+from ..peer_inventory.router import local_control, parse
+from .contracts import (
+    ArchiveBody,
+    BindBody,
+    Bundle,
+    ExportBody,
+    FolderBody,
+    GuardBody,
+    SourceBody,
+    Strict,
+)
 from .folder import FolderTransport
 from .service import PeerSync, SyncError
 
@@ -44,6 +53,30 @@ async def identity(db: Database):
 @router.post("/identity")
 async def initialize(request: Request, db: Database):
     return await invoke(db, "initialize", request=request, model=Strict)
+
+
+@router.get("/group-history")
+async def group_history(db: Database):
+    from .group_history import views
+    return {"format": "manadj-group-session-views/v1", "items": views(db)}
+
+
+@router.post("/group-history/project")
+async def project_group_history(request: Request, db: Database):
+    from .group_history import project
+    from .projection_contracts import ProjectionRetry
+    try:
+        body = await parse(request, ProjectionRetry)
+        return project(db, body.group_id, body.operation_id)
+    except SyncError as error:
+        db.rollback()
+        raise HTTPException(error.status, error.code) from None
+    except (ValueError, TypeError, KeyError, RecursionError):
+        db.rollback()
+        raise HTTPException(422, "invalid_group_projection") from None
+    except (IntegrityError, OperationalError):
+        db.rollback()
+        raise HTTPException(503, "group_projection_storage_unavailable") from None
 
 
 @router.post("/sources")

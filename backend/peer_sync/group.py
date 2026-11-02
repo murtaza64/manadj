@@ -71,8 +71,10 @@ class GroupSync:
         self.db.commit()
         return {"device_id": device, "public_key_b64": encode(key.public_key().public_bytes_raw())}
 
-    def pin_member(self, device_id, public_key_b64):
+    def pin_member(self, device_id, public_key_b64, label=None):
         """Explicit local trust establishment; no key replacement or un-revocation."""
+        if label is not None and (not isinstance(label, str) or not 1 <= len(label) <= 80):
+            raise ValueError("Bounded local member label required")
         device_id = str(UUID(str(device_id)))
         raw = decode(public_key_b64)
         Ed25519PublicKey.from_public_bytes(raw)
@@ -83,7 +85,9 @@ class GroupSync:
             raise SyncError(409, "member_pin_is_immutable")
         if old is None:
             self.db.add(GroupMember(group_id=self.group_id, device_id=device_id,
-                                    public_key_b64=public_key_b64, revoked=0))
+                                    public_key_b64=public_key_b64, revoked=0, label=label or "Own device"))
+        elif label is not None:
+            old.label = label
         self.db.commit()
 
     def revoke(self, device_id):
@@ -203,7 +207,10 @@ class GroupSync:
         row = self._store(delivery.operation)
         self._supplied(row, delivery.origin_device_id, signed)
         ack = self._receipt(row, delivery.origin_device_id)
+        operation_id = row.operation_id
         self.db.commit()
+        from .group_history import project_received
+        project_received(self.db, self.group_id, operation_id)
         return ack
 
     def accept_ack(self, signed):
@@ -254,11 +261,16 @@ class GroupSync:
                 or (not page.operations and page.more)):
             raise SyncError(403, "group_page_request_mismatch")
         receipts = []
+        operation_ids = []
         for operation in page.operations:
             row = self._store(operation)
             self._supplied(row, page.origin_device_id, signed)
             receipts.append(self._receipt(row, page.origin_device_id))
+            operation_ids.append(row.operation_id)
         self.db.commit()
+        from .group_history import project_received
+        for operation_id in operation_ids:
+            project_received(self.db, self.group_id, operation_id)
         return {"acks": receipts, "next_after": page.next_after, "more": page.more}
 
     def project(self, operation_id):

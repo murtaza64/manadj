@@ -9,16 +9,17 @@ export async function sessionReplaySource(
   loadLocal: (deck: CaptureDeck, trackId: number) => Promise<boolean>,
 ) {
   const detail = await api.sessions.get(uuid);
+  if (detail.group_history?.length) throw new Error('Group Session evidence is not playable');
   const generation = detail.replay_generation;
   const loaded: Partial<Record<CaptureDeck, string>> = {};
-  const validateSource = generation ? async () => {
+  const validateSource = async () => {
     try {
       const current = await api.sessions.get(uuid);
-      return current.replay_generation === generation && Object.entries(loaded).every(([deck, key]) =>
+      return !current.group_history?.length && current.replay_generation === generation && Object.entries(loaded).every(([deck, key]) =>
         engines[deck as CaptureDeck].getSnapshot().audioSourceKey === key);
     }
     catch { return false; }
-  } : undefined;
+  };
   const loadTrack = generation ? async (deck: CaptureDeck, trackId: number) => {
     if (!await validateSource!()) return false;
     try {
@@ -34,6 +35,6 @@ export async function sessionReplaySource(
       loaded[deck] = audioSourceKey;
       return engines[deck].getSnapshot().loadState === 'ready' && await validateSource!();
     } catch { return false; }
-  } : loadLocal;
+  } : async (deck: CaptureDeck, trackId: number) => await validateSource() && loadLocal(deck, trackId);
   return { detail, loadTrack, validateSource };
 }

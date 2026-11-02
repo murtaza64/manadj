@@ -49,11 +49,14 @@ def item(db, stored):
 
 
 def list_peer_sessions(db):
+    from .group_history import owns_uuid, paired_deny_items
     rows = db.scalars(select(SyncSession).where(SyncSession.direction == "received").order_by(SyncSession.session_uuid)).all()
-    return {"version": 1, "items": [item(db, stored) for stored in rows]}
+    return {"version": 1, "items": [item(db, stored) for stored in rows if not owns_uuid(db, stored.session_uuid)] + paired_deny_items(db)}
 
 
 def require_ready(db, sid, generation):
+    from .group_history import deny_group_uuid
+    deny_group_uuid(db, sid)
     stored = db.get(SyncSession, str(sid))
     if stored is None or stored.direction != "received":
         raise HTTPException(404, "peer_history_not_found")

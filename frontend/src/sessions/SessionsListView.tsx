@@ -5,6 +5,7 @@ import type { CaptureEvent } from '../capture/events';
 import { deriveTimeline } from './timelineModel';
 import { groupSessionsByDay, sessionDate, sessionDuration } from './sessionsListModel';
 import './sessionsList.css';
+import { GroupSessionAttribution, GroupSessionSummary } from './GroupSessionEvidence';
 
 function fmtDuration(session: SessionRowWire, now: number): string {
   const sec = sessionDuration(session, now) / 1000;
@@ -13,7 +14,7 @@ function fmtDuration(session: SessionRowWire, now: number): string {
   return `${Math.floor(sec / 3600)}h ${String(Math.floor((sec % 3600) / 60)).padStart(2, '0')}m`;
 }
 
-function SessionSummary({ session }: { session: SessionRowWire }) {
+function RecordedSessionSummary({ session }: { session: SessionRowWire }) {
   const previewRef = useRef<HTMLSpanElement>(null);
   const [visible, setVisible] = useState(() => typeof IntersectionObserver === 'undefined');
   useEffect(() => {
@@ -65,6 +66,10 @@ function SessionSummary({ session }: { session: SessionRowWire }) {
   </>;
 }
 
+function SessionSummary({ session }: { session: SessionRowWire }) {
+  return session.group_history?.length ? <GroupSessionSummary views={session.group_history} /> : <RecordedSessionSummary session={session} />;
+}
+
 // Retain expansion as well as scroll when returning from a timeline.
 let lastListScrollTop = 0;
 let expandedDays = new Set<string>();
@@ -77,7 +82,8 @@ export function SessionsListView({ onOpen }: { onOpen?: (uuid: string) => void }
   const [deleting, setDeleting] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [now, setNow] = useState(Date.now);
-  const { data: rows, error } = useQuery({ queryKey: ['sessions'], queryFn: api.sessions.list });
+  const { data: rows, error } = useQuery({ queryKey: ['sessions'], queryFn: api.sessions.list,
+    refetchInterval: query => query.state.data?.some(row => row.group_history?.length) ? 5000 : false });
   const hasLive = rows?.some(row => row.ended_at === null) ?? false;
   useEffect(() => {
     if (!hasLive) return;
@@ -129,15 +135,16 @@ export function SessionsListView({ onOpen }: { onOpen?: (uuid: string) => void }
                 <span className="session-when">
                   <time dateTime={sessionDate(session.started_at).toISOString()}>{sessionDate(session.started_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time>
                   {session.ended_at === null && <span className="session-live">Live</span>}
-                  {session.origin && <span className="session-origin" title={`Recorded on ${session.origin}`}>Phone · {session.origin}</span>}
+                  {session.group_history?.length ? <GroupSessionAttribution views={session.group_history} /> :
+                    session.origin && <span className="session-origin" title={`Recorded on ${session.origin}`}>Phone · {session.origin}</span>}
                 </span>
                 <span className="session-duration">{fmtDuration(session, now)}</span>
                 <SessionSummary session={session} />
-                <span className="session-open-hint" aria-hidden="true">Open timeline</span>
+                <span className="session-open-hint" aria-hidden="true">{session.group_history?.length ? 'Inspect evidence' : 'Open timeline'}</span>
               </button>
-              <button className="btn btn-danger btn-mini session-delete" title="Delete this Session (Takes are kept)"
+              {!session.group_history?.length && <button className="btn btn-danger btn-mini session-delete" title="Delete this Session (Takes are kept)"
                 aria-label={`Delete session from ${sessionDate(session.started_at).toLocaleString()}`}
-                disabled={deleting !== null} onClick={() => void remove(session.uuid)}>Delete</button>
+                disabled={deleting !== null} onClick={() => void remove(session.uuid)}>Delete</button>}
             </li>)}
           </ul>
           {sessions.length > 5 && <button className="btn btn-secondary session-show-more" aria-expanded={isExpanded}

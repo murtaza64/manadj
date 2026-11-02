@@ -424,9 +424,8 @@ def list_device_sessions(db: Session = Depends(get_db)):
     """Session headers, newest first (the desktop Sessions list). Event logs
     are fetched per Session on demand: they are large and immutable once
     ended, so the phone caches them by uuid."""
-    from . import sessions as sessions_router
-
     from ..models import Session as RecordedSession
+    from . import sessions as sessions_router
 
     # Legacy phones cache ended logs by UUID without refetching detail. A peer
     # projection can reuse a cached source UUID with entirely different local
@@ -434,7 +433,8 @@ def list_device_sessions(db: Session = Depends(get_db)):
     rows = db.query(RecordedSession).filter(~RecordedSession.peer_history.has()).order_by(
         RecordedSession.started_at.desc(), RecordedSession.id.desc()
     ).all()
-    return [sessions_router._row(db, s).model_dump(mode="json") for s in rows]
+    from ..peer_sync.group_history import owns_uuid
+    return [sessions_router._row(db, s).model_dump(mode="json") for s in rows if not owns_uuid(db, s.uuid)]
 
 
 @router.get("/sessions/{uuid}")
@@ -443,7 +443,9 @@ def get_device_session(uuid: str, db: Session = Depends(get_db)):
     samples are dropped: the phone has no scratch engine (scratchBegin/End
     stay as landings), and they are most of a scratch-heavy log's bytes
     (81 MB -> 3 MB on a real Session)."""
+    from ..peer_sync.group_history import deny_group_uuid
     from . import sessions as sessions_router
+    deny_group_uuid(db, uuid)
 
     detail = sessions_router.get_session(uuid, db).model_dump(mode="json")
     if detail.get("replay_generation") is not None:
@@ -496,6 +498,8 @@ def push_session(uuid: str, body: SessionPush, request: Request, db: Session = D
     Session is deleted instead. A uuid that belongs to a desktop Session is
     refused (409): a push never writes into another recorder's log."""
     from .. import models
+    from ..peer_sync.group_history import deny_group_uuid
+    deny_group_uuid(db, uuid)
     from ..routine_miner_tasks import enqueue_routine_mine
     from . import sessions as sessions_router
 

@@ -3,23 +3,31 @@
 Peer projections never contain compiled local-ID chunks. Every reader resolves
 the source again; a binding incarnation change requires explicit rematerialization.
 """
-import json
 import hashlib
+import json
 from pathlib import Path
 
 from fastapi import HTTPException
 
-from .peer_sync.service import PeerSync, SyncError
 from .peer_sync.contracts import Manifest, digest
 from .peer_sync.models import SyncSession
+from .peer_sync.service import PeerSync, SyncError
 
 
 def deny_peer_write(session):
+    if session is not None:
+        from sqlalchemy.orm import object_session
+
+        from .peer_sync.group_history import deny_group_uuid
+        deny_group_uuid(object_session(session), session.uuid)
     if session is not None and session.peer_history is not None:
         raise HTTPException(409, "peer_history_is_immutable")
 
 
 def deny_peer_derivation(db, uuid):
+    from .peer_sync.group_history import deny_group_uuid
+    if uuid:
+        deny_group_uuid(db, uuid)
     from .models import Session
     session = db.query(Session).filter(Session.uuid == uuid).first() if uuid else None
     if session is not None and session.peer_history is not None:
@@ -40,6 +48,8 @@ def peer_detail(db, session):
 
 
 def session_events(db, session):
+    from .peer_sync.group_history import deny_group_uuid
+    deny_group_uuid(db, session.uuid)
     if session.peer_history is not None:
         return peer_detail(db, session)["session"]["events"]
     return [event for chunk in session.chunks for event in json.loads(chunk.events_json)]
@@ -51,6 +61,8 @@ def replay_generation(session):
 
 
 def preview_source(db, uuid):
+    from .peer_sync.group_history import deny_group_uuid
+    deny_group_uuid(db, uuid)
     from .models import Session
     session = db.query(Session).filter(Session.uuid == uuid).first()
     if session is None or session.peer_history is None:
@@ -60,6 +72,8 @@ def preview_source(db, uuid):
 
 
 def peer_audio(db, session, track_id, generation):
+    from .peer_sync.group_history import deny_group_uuid
+    deny_group_uuid(db, session.uuid)
     from .models import Track
     detail = peer_detail(db, session)
     if generation != replay_generation(session):

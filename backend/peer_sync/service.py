@@ -238,8 +238,9 @@ class PeerSync:
         if stored is not None and (stored.direction != "received" or stored.manifest_sha256 != hashed):
             self._conflict(bundle, stored_snapshot(stored.manifest_json, self._chunks(sid)), "peer_snapshot")
         existing_history = self.db.scalar(select(RecordedSession).where(RecordedSession.uuid == sid))
-        if existing_history is not None and (existing_history.peer_history is None
-                or existing_history.peer_history.source_sha256 != hashed):
+        peer_matches = existing_history is not None and existing_history.peer_history is not None and existing_history.peer_history.source_sha256 == hashed
+        group_matches = existing_history is not None and existing_history.group_history is not None and existing_history.group_history.manifest_sha256 == hashed
+        if existing_history is not None and not (peer_matches or group_matches):
             self._conflict(bundle, {
                 "uuid": sid, "started_at": existing_history.started_at.isoformat(),
                 "ended_at": existing_history.ended_at.isoformat() if existing_history.ended_at else None,
@@ -347,8 +348,11 @@ class PeerSync:
         return digest(sorted(refs, key=lambda item: item["logical"]))
 
     def materialize(self, sid, body=None):
+        from .group_history import owns_uuid
         self._lock()
         sid = str(sid)
+        if owns_uuid(self.db, sid):
+            raise SyncError(409, "group_session_replay_not_implemented")
         detail = self.detail(sid)
         source = self.db.get(SyncSession, sid)
         if source.direction != "received" or not detail["dependencies_ready"]:

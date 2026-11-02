@@ -1,0 +1,26 @@
+# Relayed Session history — #454 / Android #455
+
+- Port: now desktop + Android; existing two owners, shared `backend/peer_sync/projection_contracts.py` and full generated fixture `tests/fixtures/group_session_v1.json`.
+- Normal Sessions history shows complete authenticated Session evidence, original device name and supplying-relay attribution. UUID/hash/Track details are expandable evidence, not primary labels.
+- This slice never enables group-source playback/audio/editing/derivation, including when metadata and local assets match. Unrelated recorded/legacy Sessions retain existing behavior.
+
+## Projection contract
+
+- Replica-local view `manadj-group-session-view/v1`, not a wire enrollment/trust document. Existing signed group operation/Bundle bytes remain unchanged. Do not serialize the view back into an operation or mint replacement IDs.
+- View fields and literals are defined in `projection_contracts.py`. One view per group/operation. Normal history aggregates incompatible same-Session creations into a conflicted row; evidence retains every operation. Native may key evidence by group+operation, but ownership and playback denial cover the Session UUID across all sources.
+- `origin` and `relays` contain device UUID, local-owner-assigned label and current revocation flag. Relays are authenticated supplying peers (not an asserted ordered route or inferred network topology); exclude original device and local receiver. No sender supplies trusted display names or membership.
+- `projected` means a normal-history projection exists; a metadata ack does not attest it. `playable=false` and `editable=false` in every view, independently of status.
+- States: `projection-pending` (valid durable ledger, history projection absent/failed), `unbound` (portable references have no explicit current binding), `missing-assets`, `changed-assets` (including partial bytes), `unverified-assets` (no issuer fingerprint), `metadata-ready` (all explicit current bindings/assets exact, still no group replay), `conflicted` (incompatible creations or preexisting unrelated local history UUID), `revoked` (group/local/original-member authority unavailable), `invalid` (stored issuer signature/kind/complete payload/hash integrity fails).
+- Precedence: invalid/revoked/conflicted override readiness; pending overrides asset states until projection exists. No wall-clock winner, automatic binding, source-local integer fallback, deletion of recordings or metadata-only playable claim.
+- Validate original signature, group/member authority, exact operation UUID/hash and complete audible immutable Bundle again before projection. Generic/partial/invalid metadata cannot create normal Session rows.
+- Ledger UUID ownership is durable independently of the derived history projection. Known group Session UUIDs must not fall through recorded/desktop/cache readers, audio, write or derivation paths on missing projection, revocation, conflicts or storage failure. This includes a collision with a retained local recording; retain its bytes but block ambiguous playback.
+- Paired phones not enrolled in the group still need deny-only UUID authority. Existing `/api/device-sync/peer-sessions` v1 includes one `group_managed=true`, `state="group_metadata_only"` marker per received-owned UUID, even pending/revoked/missing projection. `materialized=false`, generation null and dependencies empty always; timestamps null, unavailable manifest token all-zero. This is not a Session projection or membership grant. Existing443 clients persist UUIDs even for unsupported states;455 handles markers explicitly and does not duplicate an enrolled group's normal-history view. Raw paired list omits these UUIDs and raw detail/push/audio paths reject them. An offline phone cannot learn a server-side claim until authority refresh; retained claims remain deny-only offline.
+- Projector is idempotent and commits derived rows separately after metadata-ledger durability. Failed projection leaves original ledger/evidence intact and retryable; it never claims successful history projection or enables fallback. Reads do not write or silently repair failures.
+- Desktop uses actual normal Session rows with a separate group-history relationship; never writes compiled foreign-local-ID Session chunks. Existing441 guarded Track bindings/incarnations and exact-byte checks feed readiness only. Native integrates the same view into normal Sessions history, preserving local recordings and legacy cache/journals.
+
+## Exclusions / verification
+
+- No enrollment, audio transfer, automatic Track binding, curated edits/deletes, scheduler, old-journal merge or installed effects.
+- Reusable generated full Session fixture uses existing capture grammar/chunk hashes, portable Track UUIDs and asset descriptors. Actual Python A/B↔Kotlin phone relay/reverse/retry/restart must show original identities and honest normal-history states.
+- Test malformed/partial/generic operations, revoked/unknown authority, conflicting UUIDs, failed projection commits, missing/deleted/reused local IDs, immutable rows and unchanged unrelated playback. Verify actual desktop and Compose Sessions UI; no new dashboard.
+- Follow-up: exact-asset replay through shared playback seam, then pairing/discovery/automatic exchange UX. Not implemented here.
