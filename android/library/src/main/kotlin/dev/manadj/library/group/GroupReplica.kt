@@ -33,7 +33,12 @@ class GroupReplica(private val root: File, val groupId: String) {
         require(stateFile.isFile && stateFile.length() <= MAX_STATE) { "Group state missing/oversized; never reset automatically" }
         return JSONObject(stateFile.readText()).also {
             require(it.get("version") == 1 && it.getString("group_id") == groupId)
-            GroupWire.uuid(it.getString("device_id"))
+            val localId=GroupWire.uuid(it.getString("device_id"))
+            val seed=GroupWire.decode64(it.getString("private_seed_b64"),32)
+            val pinned=GroupWire.decode64(it.getJSONObject("members").getJSONObject(localId).getString("public_key_b64"),32)
+            require(seed.size == 32 && pinned.size == 32 && java.security.MessageDigest.isEqual(GroupWire.publicKey(seed),pinned)) {
+                "Local group identity does not match its retained signing key"
+            }
         }
     }
     private fun persist(state: JSONObject) {

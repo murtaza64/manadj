@@ -84,6 +84,11 @@ class LibraryRepository(
         dev.manadj.library.group.GroupReplica(File(store.root, "device-groups/${dev.manadj.library.group.GroupWire.uuid(groupId)}"), groupId)
 
     val groupHistory = dev.manadj.library.group.GroupHistory(store.root)
+    /** Explicit GROUP source only; this never grants raw UUID access. */
+    fun groupReplay(localHistory: () -> Set<String> = { emptySet() }) = dev.manadj.library.group.GroupReplay(store.root,localHistory) { view ->
+        peerSessions.rawAllowed(view.sessionUuid,setOf(dev.manadj.library.group.GroupOperationClaim(
+            view.groupId,view.operationId,view.origin.deviceId,view.operationSha256)))
+    }
     /** A verified own-issued operation can preserve its original recording authority, but never
      * override a foreign group collision or an ordinary #443 denial of unknown historical origin. */
     fun groupSessionAllowsRaw(uuid: String, allowOwnIssued: Boolean = false): Boolean {

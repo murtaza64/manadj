@@ -40,7 +40,7 @@ class PeerSessionNativeChainTest {
             assertTrue(file.length()>44)
             val retry = repo.peerSessions.audio(replay,9)
             assertEquals(file,retry)
-            Bridge(binary!!.absolutePath,replay,file).use { engine ->
+            NativeReplayBridge(binary!!.absolutePath,replay.tracks.keys.associateWith { file }).use { engine ->
                 val driver = ReplayDriver(replay.log,engine)
                 fun run(start: Double): Pair<Int,Double> {
                     driver.prepare(start)
@@ -85,7 +85,10 @@ class PeerSessionNativeChainTest {
         c.requestMethod="POST";c.setRequestProperty("X-Manadj-Pair",setup.getString("pair_code"))
         try { assertEquals(200,c.responseCode); c.inputStream.close() } finally { c.disconnect() }
     }
-    private class Bridge(binary: String,private val replay: PeerReplay,private val file: File): ReplayDriver.Engine,Closeable {
+}
+
+/** Test adapter over the existing native Engine, shared by ordinary peer and GROUP proofs. */
+internal class NativeReplayBridge(binary: String,private val files: Map<Int,File>,private val beforeLoad: (Int) -> Unit = {}): ReplayDriver.Engine,Closeable {
         private val process=ProcessBuilder(binary).redirectError(ProcessBuilder.Redirect.INHERIT).start()
         private val reader=process.inputStream.bufferedReader();private val writer=process.outputStream.bufferedWriter()
         private var state=DoubleArray(8)
@@ -94,8 +97,9 @@ class PeerSessionNativeChainTest {
         val late get()=state[2].toLong()
         val energy get()=state[3]
         val position get()=state[4]
+        fun position(deck: Int)=state[4+deck]
         override val sampleRate=48000
-        private fun send(line: String) {
+        fun send(line: String) {
             writer.write(line);writer.newLine();writer.flush()
             val result=reader.readLine() ?: error("Native bridge exited ${process.waitFor()}")
             state=result.split(' ').map(String::toDouble).toDoubleArray();check(state[0]==1.0) { "$line -> $result" }
@@ -104,7 +108,7 @@ class PeerSessionNativeChainTest {
         fun render(n: Int)=send("render $n")
         override fun holds(deck: Int)=held[deck]
         override fun startLoad(deck: Int,trackId: Int) {
-            check(trackId in replay.tracks);send("wav $deck $trackId \"${file.absolutePath}\"");held[deck]=trackId
+            beforeLoad(trackId);val file=files.getValue(trackId);send("wav $deck $trackId \"${file.absolutePath}\"");held[deck]=trackId
         }
         override fun load(deck: Int,trackId: Int)=ReplayDriver.Load.Ready
         override fun cancel(tag: Long)=send("cancel $tag")
@@ -127,5 +131,4 @@ class PeerSessionNativeChainTest {
             send("op $frame $tag $op")
         }
         override fun close() {writer.close();assertEquals(0,process.waitFor())}
-    }
 }

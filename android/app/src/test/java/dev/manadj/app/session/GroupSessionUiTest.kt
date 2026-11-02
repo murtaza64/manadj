@@ -9,6 +9,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.viewModelScope
 import dev.manadj.app.*
 import dev.manadj.app.library.LibraryHolder
 import dev.manadj.library.LibraryRepository
@@ -27,6 +28,10 @@ import java.io.File
 import java.net.InetAddress
 import java.net.ServerSocket
 import java.time.Duration
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.Job
 
 /** Real normal SessionScreen/SessionModel/repository; only audio output is a host double. */
 @RunWith(RobolectricTestRunner::class)
@@ -153,6 +158,136 @@ class GroupSessionUiTest {
         capture("group-evidence-technical.png")
         assertNull(model.log); assertFalse(model.playing); assertEquals(0, PeerUiAudio.loads)
         assertEquals(original, phone.detail(sid))
+    }
+    @Test fun exactLocalGroupBindingUsesExplicitControlsThenExistingReplayAndRefusesRevokedResume() = exerciseGroupReplay("revoke")
+    @Test fun sameBytesReplacementStopsGroupReplayAndRefusesCachedDecodedResume() = exerciseGroupReplay("replace")
+    @Test fun staleDecodedLoadStopsGroupReplayAndRequiresANewVerifiedAttempt() = exerciseGroupReplay("decoded")
+    @Test fun actualTransportedGroupControlsBindDecodeAndStopOnStorageFailure() = exerciseGroupReplay("transport")
+    @Test fun delayedGroupOpenCannotReplaceNewLocalPlaybackAfterClose() = exerciseGroupReplay("pending-local")
+    @Test fun delayedGroupOpenCannotReopenAfterClose() = exerciseGroupReplay("pending-close")
+    @Test fun delayedGroupOpenCannotOverrideANewerGroupInspection() = exerciseGroupReplay("pending-group")
+    @Test fun delayedGroupOpenCannotOverrideANewerRejectedIntent() = exerciseGroupReplay("pending-rejected")
+    @Test fun cancelledGroupOpenCannotPublishAfterBlockedIoReturns() = exerciseGroupReplay("pending-cancel")
+    @Test fun delayedGroupOpenCannotPublishAfterLeavingSessions() = exerciseGroupReplay("pending-leave")
+    private fun exerciseGroupReplay(refusal: String) {
+        val fixture=JSONObject(File("../../tests/fixtures/group_replay_v1.json").readText())
+        val body=JSONObject(fixture.getString("body_utf8")); val group=body.getString("group_id")
+        val target=File(repo.store.root,"device-groups/$group")
+        val r=if(refusal == "transport") {
+            val source=System.getenv("MANADJ_GROUP_REPLAY_PHONE_DIR")?.let { File(it,"device-groups/$group/replica.json") }
+            Assume.assumeTrue("Requires actual NEW transported #456 phone",source?.isFile == true)
+            assertTrue(target.mkdirs());File(target,"replica.json").writeBytes(source!!.readBytes())
+            GroupReplica(target,group)
+        } else GroupReplica.provision(target,group,p,ByteArray(32) { (it+32).toByte() }).also { replica ->
+            replica.pinMember(a,GroupWire.publicKey(ByteArray(32) { it.toByte() }),"Laptop A")
+            val signed=GroupSigned(GroupWire.encode64(fixture.getString("body_utf8").toByteArray()),fixture.getString("signature_b64"))
+            replica.receiveDelivery(GroupWire.sign(JSONObject().put("format",GroupWire.FORMAT).put("group_id",group).put("origin_device_id",a)
+                .put("kind","deliver").put("recipient_device_id",p).put("operation",signed.json()),ByteArray(32) { it.toByte() }))
+        }
+        val rows=JSONArray().put(JSONObject("""{"id":77,"title":"Safe unrelated phone track","file_name":"safe.wav","audio_rev":"r77","tag_ids":[],"hot_cues":[]}"""))
+        for(i in 0..1) {
+            val asset=fixture.getJSONArray("assets").getJSONObject(i); val recipe=asset.getJSONObject("recipe")
+            val row=JSONObject().put("id",73+i).put("title","Generated local tone $i").put("file_name",asset.getString("file_name"))
+                .put("audio_rev","generated456").put("tag_ids",JSONArray()).put("hot_cues",JSONArray())
+            rows.put(row)
+            val n=recipe.getInt("sample_frames"); val rate=recipe.getInt("sample_rate"); val period=recipe.getInt("period_frames"); val amp=recipe.getInt("amplitude")
+            val wav=java.nio.ByteBuffer.allocate(44+2*n).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+            wav.put("RIFF".toByteArray()).putInt(36+2*n).put("WAVEfmt ".toByteArray()).putInt(16).putShort(1).putShort(1)
+                .putInt(rate).putInt(rate*2).putShort(2).putShort(16).put("data".toByteArray()).putInt(2*n)
+            repeat(n) { wav.putShort((if(it%period<period/2) amp else -amp).toShort()) }
+            File(repo.store.audioDir,"${73+i}-generated456/${asset.getString("file_name")}").apply { parentFile!!.mkdirs(); writeBytes(wav.array()) }
+        }
+        repo.store.writeSnapshotText(JSONObject("""{"version":1,"tag_categories":[],"tags":[],"links":[],"transitions":[],"cameos":[],"takes":[],"settings":{}}""").put("tracks",rows).toString())
+        runBlocking { repo.open() }; repo.groupHistory.project()
+        compose.runOnUiThread { model.refreshGroupHistory() }
+        waitFor { model.groupItems.any { it.groupId == group } }
+        val view=model.groupItems.single { it.groupId == group }
+        compose.runOnUiThread { model.open(SessionHeader(view.sessionUuid,view.startedAt,view.endedAt,0,group=view)) }
+        waitFor { model.groupReplayReadiness?.state == "unbound" }
+        compose.onNodeWithText("SELECT LOCAL AUDIO 1").performClick()
+        compose.onNodeWithText("USE Generated local tone 0").performClick()
+        waitFor { !model.groupReplayBusy }
+        compose.onNodeWithText("SELECT LOCAL AUDIO 2").performClick()
+        compose.onNodeWithText("USE Generated local tone 1").performClick()
+        waitFor { model.groupReplayReadiness?.state == "candidate-exact" }
+        assertFalse(view.playable); assertEquals(0,PeerUiAudio.loads)
+        if(refusal.startsWith("pending-")) { exercisePendingGroupOpen(view,refusal);return }
+        compose.onNodeWithText("OPEN GUARDED REPLAY").performClick()
+        waitFor { model.groupReplaySource != null && model.log != null }
+        compose.runOnUiThread { model.play(player) }
+        waitFor { PeerUiAudio.loads >= 2 && model.playing }
+        assertTrue(PeerUiAudio.sources.values.all { it.startsWith("group:") && ":attempt:" in it })
+        val initialSourceA=PeerUiAudio.sources[dev.manadj.audio.DeckId.A]
+        if(refusal == "transport") {
+            compose.runOnUiThread { model.stop() }
+            waitFor { !model.playing && !model.preparing }
+            capture("group-exact-local-playback.png") // paused actual guarded source, not a fake playing raster
+            compose.runOnUiThread { model.play(player) }
+            waitFor { model.playing }
+        }
+        if(refusal == "revoke") r.revoke(a)
+        else if(refusal == "decoded") { PeerUiAudio.loadIds[dev.manadj.audio.DeckId.A]=9999L }
+        else if(refusal == "transport") {
+            val file=File(repo.store.root,"group-replay/bindings/bindings.json")
+            assertTrue(file.renameTo(File(repo.store.root,"retained-generated-456-bindings.json")))
+            assertTrue(file.mkdir()) // generated local storage failure; original evidence retained
+        }
+        else {
+            val file=File(repo.store.audioDir,"73-generated456/tone-a.wav")
+            val retained=File(repo.store.root,"retained-generated-456-audio.wav")
+            assertTrue(file.renameTo(retained)); file.writeBytes(retained.readBytes())
+        }
+        waitFor { !model.playing && !model.preparing }
+        compose.runOnUiThread { model.play(player) }
+        if(refusal == "decoded") waitFor { PeerUiAudio.loads >= 3 && model.playing &&
+            PeerUiAudio.sources[dev.manadj.audio.DeckId.A] != initialSourceA && player.decks.getValue(dev.manadj.audio.DeckId.A).snapshot?.loadId != 9999L }
+        else waitFor { !model.groupReplayBusy && !model.playing && !model.preparing }
+        assertEquals(original,phone.detail(sid))
+    }
+    private fun exercisePendingGroupOpen(view: GroupSessionView,mode: String) {
+        val adapter=SessionModel::class.java.getDeclaredField("groupAdapter").apply { isAccessible=true }.get(model) as GroupReplay
+        val other=model.groupItems.single { it.groupId == gid }
+        val disk=GroupReplay::class.java.getDeclaredField("disk").apply { isAccessible=true }.get(adapter)
+        @Suppress("UNCHECKED_CAST")
+        val locks=disk.javaClass.getDeclaredField("locks").apply { isAccessible=true }.get(null) as ConcurrentHashMap<String,Any>
+        val mutex=locks.getValue(File(repo.store.root,"group-replay/bindings").canonicalPath)
+        val held=CountDownLatch(1);val release=CountDownLatch(1)
+        val gate=Thread { synchronized(mutex) { held.countDown();release.await(15,TimeUnit.SECONDS) } }.apply { start() }
+        try {
+            assertTrue(held.await(5,TimeUnit.SECONDS))
+            val before=model.viewModelScope.coroutineContext[Job]!!.children.toSet()
+            compose.runOnUiThread { model.openGroupReplay(view) }
+            val pending=model.viewModelScope.coroutineContext[Job]!!.children.single { it !in before }
+            val priorNotice=model.notice
+            when(mode) {
+                "pending-local" -> {
+                    compose.runOnUiThread { model.close();model.open(model.sessions.single { it.uuid == safeSid }) }
+                    waitFor { model.log?.uuid == safeSid }
+                    compose.mainClock.autoAdvance=false
+                    compose.runOnUiThread { model.play(player) }
+                    waitFor { model.playing && PeerUiAudio.loads>0 }
+                }
+                "pending-close" -> compose.runOnUiThread { model.close() }
+                "pending-group" -> compose.runOnUiThread { model.open(SessionHeader(other.sessionUuid,other.startedAt,other.endedAt,0,group=other)) }
+                "pending-rejected" -> compose.runOnUiThread { model.open(SessionHeader(view.sessionUuid,view.startedAt,view.endedAt,0,local=true)) }
+                "pending-cancel" -> pending.cancel()
+                "pending-leave" -> compose.runOnUiThread { model.leave() }
+            }
+            val newerNotice=model.notice
+            release.countDown();gate.join(5000)
+            waitFor { pending.isCompleted }
+            assertNull(model.groupReplaySource)
+            assertFalse(model.groupReplayBusy)
+            if(mode == "pending-local") { assertEquals(safeSid,model.log?.uuid);assertTrue(model.playing) }
+            else { assertNull(model.log);assertFalse(model.playing) }
+            if(mode == "pending-group") {
+                waitFor { model.groupReplayReadiness != null }
+                assertEquals(other.key,model.groupInfo?.key)
+            }
+            assertEquals(newerNotice,model.notice) // old success/error/finally cannot overwrite context
+            if(mode == "pending-close" || mode == "pending-cancel") assertEquals(priorNotice,model.notice)
+            assertEquals(original,phone.detail(sid))
+        } finally { release.countDown();gate.join(5000) }
     }
     @Test fun groupUuidCannotOpenOrSummarizeRawPhoneOrCacheAndNeverPushesRawCollision() {
         compose.runOnUiThread { model.open(SessionHeader(sid, null, null, 0, local=true)); model.summarize(SessionHeader(sid,null,null,0,local=true)) }
@@ -299,6 +434,7 @@ class GroupSessionUiTest {
     }
     private fun capture(name: String) {
         val output = System.getProperty("manadj.groupScreenshots") ?: return
+        require(File(output).mkdirs() || File(output).isDirectory)
         compose.runOnIdle {
             val view = compose.activity.window.decorView
             val bitmap = android.graphics.Bitmap.createBitmap(view.width, view.height, android.graphics.Bitmap.Config.ARGB_8888)
