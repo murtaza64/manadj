@@ -84,6 +84,7 @@ def compare_inventory(db, request):
             index[hint].add(row.source_local_id)
     items = []
     hinted_local_ids = set()
+    configured_root_keys = {root.key for root in request.local.roots}
     for remote in request.remote.tracks:
         matches = defaultdict(list)
         for hint in _hints(remote):
@@ -104,7 +105,7 @@ def compare_inventory(db, request):
             "local_id_overlap": overlap is not None,
             "origin_row_changed": bool(overlap and local.replica_id == request.remote.replica_id
                                        and overlap.snapshot_token != remote.snapshot_token),
-            "location_unmapped": remote.location is None,
+            "location_unmapped": remote.location is None or remote.location.root_key not in configured_root_keys,
         })
     return {"version": 1, "source_replica_id": str(request.remote.replica_id),
             "local_replica_id": str(local.replica_id), "items": items, "capabilities": CAPABILITIES,

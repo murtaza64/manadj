@@ -220,3 +220,16 @@ def test_disappeared_remote_rows_are_not_deletions_and_no_media_io_is_needed(lib
     assert report["items"] == [] and report["capabilities"]["merge"] is False
     assert report["local_without_candidate_ids"] == [1]  # not a deletion instruction
     assert dump(a) == before
+
+
+def test_remote_root_without_local_mapping_is_reported_unmapped(library):
+    source = library("source", [{"id": 1, "filename": "/one/music/shared.wav", "title": "Shared", "artist": "DJ"}])
+    receiver = library("receiver", [{"id": 88, "filename": r"D:\Audio\shared.wav", "title": "Shared", "artist": "DJ"}])
+    remote = export(source, config())
+    local = config(B, r"D:\Audio", "windows")
+    local["roots"][0]["key"] = "different-unmapped-root"
+    before = dump(source), dump(receiver)
+    row = compare(receiver, local, remote)["items"][0]
+    assert row["status"] == "candidate" and row["candidates"][0]["reasons"] == ["metadata"]
+    assert row["resolved_local_id"] is None and (dump(source), dump(receiver)) == before
+    assert row["location_unmapped"] is True
