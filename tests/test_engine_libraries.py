@@ -88,4 +88,4 @@ def test_surface_reader_unions_libraries(db, make_track, two_drives):
     export_tracks_to_engine(db, main, drive_dbs=[drive])
 
     refs = EngineSurfaceReader(main, [drive]).list_tracks()
-    assert sorted(r.path for r in refs) == ["../Tracks/c.mp3", "../d.mp3"]
+    assert sorted(r.path for r in refs) == [str(c / 'Tracks/c.mp3'), str(d / 'd.mp3')]

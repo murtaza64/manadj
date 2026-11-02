@@ -7,6 +7,7 @@ from enginedj.models.playlist import Playlist
 from enginedj.models.playlist_entity import PlaylistEntity
 from enginedj.models.track import Track
 from backend.playlists.models import PlaylistInfo, TrackReference
+from enginedj.paths import absolute_track_path
 
 
 class EnginePlaylistReader:
@@ -128,8 +129,11 @@ class EnginePlaylistReader:
             for entity in ordered_entities:
                 track = session.query(Track).filter_by(id=entity.trackId).first()
                 if track and track.path:
+                    absolute = absolute_track_path(track.path, Path(self.db.database_path).parent)
+                    if absolute is None:
+                        continue
                     result.append(TrackReference(
-                        path=track.path,
+                        path=absolute,
                         filename=Path(track.filename or track.path).name,
                         title=track.title,
                         artist=track.artist,

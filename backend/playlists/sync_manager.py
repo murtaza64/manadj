@@ -400,21 +400,21 @@ class PlaylistSyncManager:
 
         # Load all Engine DJ tracks using session
         with self.engine_db.session_m() as edj_session:
-            all_tracks = edj_session.query(EDJTrack).all()
+            all_tracks = edj_session.query(EDJTrack).order_by(EDJTrack.id).all()
 
-            import os
             from pathlib import Path
+            from enginedj.paths import absolute_track_path
 
             library_root = Path(self.engine_db.database_path).parent
             index = TrackIndex.build(
-                all_tracks, lambda t: os.path.normpath(library_root / t.path) if t.path else None
+                all_tracks, lambda t: absolute_track_path(t.path, library_root)
             )
 
             matched = []
             unmatched = []
 
             for ref in track_refs:
-                track = index.match(ref.path)
+                track = index.match(absolute_track_path(ref.path, library_root))
                 if track:
                     matched.append(track)
                 else:

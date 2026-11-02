@@ -101,7 +101,11 @@ def create_review(root: Path, pin: str):
         db.flush()
         seeded = []
         for index, title in enumerate(titles):
-            audio = root / f'{index + 1:02d}-{title.replace(" ", "-")}.flac'
+            # Two real files with the same basename exercise review/dispatch
+            # exact identity rather than an accidental basename-only success.
+            audio = root / ('first/same.flac' if index == 0 else 'second/same.flac' if index == 1
+                            else f'{index + 1:02d}-{title.replace(" ", "-")}.flac')
+            audio.parent.mkdir(parents=True, exist_ok=True)
             if index != 3:
                 shutil.copyfile(ROOT / 'tests/fixtures/silence.flac', audio)
             track = models.Track(filename=str(audio), title=title, artist='Generated fixture', key=7 + index,
@@ -121,7 +125,7 @@ def create_review(root: Path, pin: str):
         with engine.session_m_write() as db:
             external_id = insert_track(db, EngineTrackSpec(audio, title), engine_path.parent)
             row = db.get(EngineTrack, external_id)
-            row.key = 1
+            row.key = 1 if ident == 1 else 7
             # Generated analyzed prerequisite only for the two existing rows.
             perf = db.get(PerformanceData, external_id)
             if perf is None:
@@ -175,7 +179,8 @@ def create_review(root: Path, pin: str):
     def identity():
         return {'fixture': 'library-export-442', 'pin': pin, 'library': 'Alembic disposable SQLite',
                 'external_adapters': 'production on generated Engine/pyrekordbox SQLite + native-layout DAT/EXT',
-                'fixture_root': str(root), 'installed_app': False, 'encrypted_library': False,
+                'fixture_root': str(root), 'engine_identity_fixture': True,
+                'installed_app': False, 'encrypted_library': False,
                 'usb': False, 'audio': 'committed silence fixture copies only'}
 
     @app.get('/api/config')
@@ -205,13 +210,14 @@ def create_review(root: Path, pin: str):
             engine = EngineDJDatabase(engine_path)
             try:
                 with engine.session_m() as db:
-                    engine_rows = [{'id': row.id, 'key': row.key, 'analyzed': row.isAnalyzed} for row in db.query(EngineTrack)]
+                    engine_rows = [{'id': row.id, 'path': row.path, 'key': row.key, 'analyzed': row.isAnalyzed}
+                                   for row in db.query(EngineTrack).order_by(EngineTrack.id)]
             finally:
                 engine.m_engine.dispose()
                 engine.m_engine_write.dispose()
             return {'records': len(contents), 'cue_rows': [{'kind': c.Kind, 'time_ms': c.InMsec, 'out_ms': c.OutMsec} for c in cues],
                     'native': native, 'engine': engine_rows,
-                    'backups': [str(p.relative_to(root)) for p in root.rglob('*-manadj-pre-write')]}
+                    'backups': [str(p.relative_to(root)) for p in root.rglob('*-manadj-pre-write*')]}
         finally:
             rb.close()
 

@@ -77,6 +77,7 @@ class EngineSurfaceReader:
         from enginedj.models.playlist_entity import PlaylistEntity
         from enginedj.models.track import Track as EDJTrack
         from enginedj.ratings import rating_to_energy
+        from enginedj.paths import absolute_track_path
 
         with engine_db.session_m() as session:
             tags_by_track: dict[int, list[str]] = {}
@@ -94,6 +95,7 @@ class EngineSurfaceReader:
             tracks = (
                 session.query(EDJTrack)
                 .options(joinedload(EDJTrack.performance_data))
+                .order_by(EDJTrack.id)
                 .all()
             )
             for t in tracks:
@@ -107,7 +109,8 @@ class EngineSurfaceReader:
                 )
                 refs.append(
                     SurfaceTrackRef(
-                        path=t.path,
+                        path=absolute_track_path(t.path, Path(engine_db.database_path).parent),
+                        identity=f'engine:{t.id}',
                         fields=TrackFields(
                             title=t.title,
                             artist=t.artist,

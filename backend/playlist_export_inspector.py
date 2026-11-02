@@ -81,7 +81,11 @@ class PlaylistExportInspector:
         known_tag_names = {t['name'] for c in catalogue for t in c['tags']}
         rows, final, source = [], [], []
         for track in tracks:
-            hit = index.match(track.filename)
+            match_path = track.filename
+            if target == 'engine':
+                from enginedj.paths import absolute_track_path
+                match_path = absolute_track_path(match_path, Path(dest.identity).parent)
+            hit = index.match(match_path)
             can_add = not hit and track.filename in dest.additions and dest.additions[track.filename] is None
             record_reason = dest.additions.get(track.filename) if not hit else None
             grid = beatgrid_value_from_row(track.beatgrid)
@@ -97,6 +101,7 @@ class PlaylistExportInspector:
             except OSError:
                 media_revision = None
             source.append({'id': track.id, 'filename': track.filename, 'title': track.title,
+                           'matched_destination': {'path': hit.path, 'identity': hit.identity} if hit else None,
                            'active': track.is_active, 'duration': duration, 'values': values,
                            'media_revision': media_revision})
             if hit:
@@ -216,7 +221,7 @@ def build_playlist_export_inspector(db: Session) -> PlaylistExportInspector:
         raw = config.rekordbox_path if target == 'rekordbox' else config.engine_dj_path
         if not raw:
             raise PlanUnavailable(f'{target} library is not configured')
-        path = Path(raw)
+        path = Path(raw).resolve()
         if not path.is_dir():
             raise PlanUnavailable(f'{target} library is unavailable: {path}')
         rb_db, engine_db = None, None
@@ -242,7 +247,11 @@ def build_playlist_export_inspector(db: Session) -> PlaylistExportInspector:
             additions = {}
             source = next((p for p in manager.manadj_reader.get_all_playlists() if p.name == name), None)
             for ref in source.tracks if source else ():
-                if ref_index.match(ref.path) is None:
+                match_path = ref.path
+                if target == 'engine':
+                    from enginedj.paths import absolute_track_path
+                    match_path = absolute_track_path(match_path, path.parent)
+                if ref_index.match(match_path) is None:
                     try:
                         validate_track_source(manager, target, ref)
                         additions[ref.path] = None

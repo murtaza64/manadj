@@ -97,7 +97,11 @@ class FieldReview:
         for track_id in request.track_ids:
             track = tracks[track_id]
             library = _library_values(track)
-            hit = index.match(track.filename)
+            match_path = track.filename
+            if request.surface == 'engine':
+                from enginedj.paths import absolute_track_path
+                match_path = absolute_track_path(match_path, Path(snapshot.identity).parent)
+            hit = index.match(match_path)
             external = asdict(hit.fields) if hit else {}
             try:
                 stat = Path(track.filename).stat()
@@ -113,6 +117,7 @@ class FieldReview:
                 'updated_at': grid.updated_at.isoformat() if grid.updated_at else None,
             }
             source.append({'id': track.id, 'filename': track.filename, 'active': track.is_active,
+                             'matched_destination': {'path': hit.path, 'identity': hit.identity} if hit else None,
                             'values': library, 'media': media,
                             'grid_revision': grid_revision if 'beatgrid' in request.fields else None,
                             'duration': track.duration_secs or getattr(track.waveform, 'duration', None)})

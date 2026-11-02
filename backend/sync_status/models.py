@@ -92,6 +92,7 @@ class SurfaceTrackRef:
 
     path: str | None
     fields: TrackFields
+    identity: str | None = None  # Stable destination row identity when observed.
 
 
 @dataclass

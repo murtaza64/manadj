@@ -8,6 +8,7 @@ from playwright.sync_api import expect, sync_playwright
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--url', required=True)
+parser.add_argument('--artifacts-prefix', default='/tmp/opencode/manadj-library442-correction')
 args = parser.parse_args()
 url = args.url.rstrip('/')
 with sync_playwright() as playwright:
@@ -15,14 +16,15 @@ with sync_playwright() as playwright:
     page = browser.new_page(viewport={'width': 1440, 'height': 1000})
     identity = page.request.get(url + '/fixture/identity').json()
     assert identity['fixture'] == 'library-export-442' and not identity['installed_app']
+    assert identity.get('engine_identity_fixture') is True
     errors, external, cases = [], [], []
     page.on('pageerror', lambda error: errors.append(str(error)))
     page.on('request', lambda request: external.append(request.url) if not request.url.startswith(url + '/') else None)
 
-    def fields():
+    def fields(surface='rekordbox'):
         page.get_by_role('button', name='Review fields…', exact=True).click()
         page.get_by_label('Field direction').select_option('export')
-        page.get_by_label('Field surface').select_option('rekordbox')
+        page.get_by_label('Field surface').select_option(surface)
 
     def recheck():
         page.get_by_role('button', name='Recheck plan', exact=True).click()
@@ -55,12 +57,34 @@ with sync_playwright() as playwright:
     expect(page.get_by_role('row').filter(has_text='Signal Loop')).to_have_count(1)
 
     page.get_by_text('Neon Current', exact=True).first.click()
+    fields('engine')
+    for field in ['hotcues', 'maincue']:
+        page.get_by_label(field, exact=True).uncheck()
+    with page.expect_response(lambda response: response.url.endswith('/api/sync/fields/plan')) as observed:
+        recheck()
+    planned = observed.value.json()
+    assert planned['track_ids'] == [1]
+    assert planned['tracks'][0]['fields'][0]['before'] == 1
+    assert planned['tracks'][0]['fields'][0]['after'] == 7
+    assert planned['tracks'][0]['fields'][0]['action'] == 'consent'
+    expect(page.get_by_role('group', name='Key change').locator('.pei-value-before')).to_contain_text('1m')
+    page.get_by_label('Replace saved key for Neon Current', exact=True).check()
+    page.screenshot(path=args.artifacts_prefix + '-engine-before.png')
+    page.get_by_role('button', name='Apply ', exact=False).click()
+    expect(page.get_by_role('heading', name='Field receipt', exact=True)).to_be_visible()
+    engine_evidence = page.request.get(url + '/fixture/evidence').json()
+    assert [row['key'] for row in engine_evidence['engine']] == [7, 7]
+    assert any('Engine Library-snapshots' in name for name in engine_evidence['backups'])
+    cases.append('Engine duplicate basenames: actual Library before1/consent changes exact first row; second stays7')
+    close()
+
+    page.get_by_text('Neon Current', exact=True).first.click()
     fields()
     recheck()
     expect(page.get_by_text('1 tracks · IDs 1', exact=False)).to_be_visible()
     page.get_by_label('Replace saved hotcues for Neon Current', exact=True).check()
     page.get_by_label('Replace saved maincue for Neon Current', exact=True).check()
-    page.screenshot(path='/tmp/opencode/manadj-library442-selected-plan.png')
+    page.screenshot(path=args.artifacts_prefix + '-selected-plan.png')
     page.get_by_role('button', name='Apply ', exact=False).click()
     expect(page.get_by_role('heading', name='Field receipt', exact=True)).to_be_visible()
     evidence = page.request.get(url + '/fixture/evidence').json()
@@ -85,7 +109,7 @@ with sync_playwright() as playwright:
     expect(page.get_by_role('heading', name='Export receipt', exact=True)).to_be_visible()
     expect(page.get_by_text('Added 1 destination library record', exact=False)).to_be_visible()
     expect(page.get_by_text('Cue DB committed; native DAT/EXT not synchronized', exact=False).first).to_be_visible()
-    page.screenshot(path='/tmp/opencode/manadj-library442-partial-receipt.png')
+    page.screenshot(path=args.artifacts_prefix + '-partial-receipt.png')
     evidence = page.request.get(url + '/fixture/evidence').json()
     assert evidence['records'] == 3
     cases.append('separate playlist adds real record; unavailable audio + no-ANLZ partial receipt preserves additions')
@@ -126,7 +150,7 @@ with sync_playwright() as playwright:
     page.set_viewport_size({'width': 390, 'height': 844})
     fields()
     recheck()
-    page.screenshot(path='/tmp/opencode/manadj-library442-narrow.png')
+    page.screenshot(path=args.artifacts_prefix + '-narrow.png')
     expect(page.get_by_role('dialog')).to_be_visible()
     assert not errors, errors
     assert not external, external

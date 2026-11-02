@@ -9,6 +9,7 @@ path stays cold.
 """
 
 from contextlib import contextmanager
+from pathlib import Path
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -27,6 +28,7 @@ class InMemoryEngineDB:
     a schema-real in-memory database."""
 
     def __init__(self) -> None:
+        self.database_path = Path('/fixture/Engine Library/Database2')
         self.engine = create_engine(
             "sqlite://",
             poolclass=StaticPool,
