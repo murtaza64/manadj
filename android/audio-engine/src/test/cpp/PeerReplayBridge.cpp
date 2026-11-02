@@ -37,11 +37,12 @@ static bool wav(Engine& e, int d, uint64_t id, const std::string& path, std::vec
 }
 int main() {
     auto owned=std::make_unique<Engine>(48000); auto& e=*owned;
-    std::vector<float> out(8192); double energy=0;
+    std::vector<float> out(8192); double energy=0; std::ofstream capture;
     for(std::string line;std::getline(std::cin,line);) {
         std::istringstream in(line); std::string command; in>>command; bool ok=true;
         if(command=="wav") { int d;uint64_t id;std::string path;in>>d>>id>>std::quoted(path);ok=wav(e,d,id,path,out); }
-        else if(command=="render") { int frames;in>>frames;while(frames>0) {int n=std::min(frames,4096);e.render(out.data(),n);frames-=n;for(int i=0;i<n*2;++i) energy+=out[i]*out[i];} }
+        else if(command=="capture") { std::string path;in>>std::quoted(path);capture.open(path,std::ios::binary);ok=capture.good(); }
+        else if(command=="render") { int frames;in>>frames;while(frames>0) {int n=std::min(frames,4096);e.render(out.data(),n);frames-=n;for(int i=0;i<n*2;++i) energy+=out[i]*out[i];if(capture.is_open()) capture.write(reinterpret_cast<const char*>(out.data()),n*2*sizeof(float));} }
         else if(command=="cancel") {uint64_t tag;in>>tag;ok=e.cancelScheduled(tag)!=0;}
         else if(command=="op") {
             uint64_t frame,tag;int d;std::string op;double v,a,b;in>>frame>>tag>>op>>d>>v>>a>>b;

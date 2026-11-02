@@ -154,6 +154,84 @@ class GroupSessionUiTest {
         assertNull(model.log); assertFalse(model.playing); assertEquals(0, PeerUiAudio.loads)
         assertEquals(original, phone.detail(sid))
     }
+    @Test fun exactLocalGroupBindingUsesExplicitControlsThenExistingReplayAndRefusesRevokedResume() = exerciseGroupReplay("revoke")
+    @Test fun sameBytesReplacementStopsGroupReplayAndRefusesCachedDecodedResume() = exerciseGroupReplay("replace")
+    @Test fun staleDecodedLoadStopsGroupReplayAndRequiresANewVerifiedAttempt() = exerciseGroupReplay("decoded")
+    @Test fun actualTransportedGroupControlsBindDecodeAndStopOnStorageFailure() = exerciseGroupReplay("transport")
+    private fun exerciseGroupReplay(refusal: String) {
+        val fixture=JSONObject(File("../../tests/fixtures/group_replay_v1.json").readText())
+        val body=JSONObject(fixture.getString("body_utf8")); val group=body.getString("group_id")
+        val target=File(repo.store.root,"device-groups/$group")
+        val r=if(refusal == "transport") {
+            val source=System.getenv("MANADJ_GROUP_REPLAY_PHONE_DIR")?.let { File(it,"device-groups/$group/replica.json") }
+            Assume.assumeTrue("Requires actual NEW transported #456 phone",source?.isFile == true)
+            assertTrue(target.mkdirs());File(target,"replica.json").writeBytes(source!!.readBytes())
+            GroupReplica(target,group)
+        } else GroupReplica.provision(target,group,p,ByteArray(32) { (it+32).toByte() }).also { replica ->
+            replica.pinMember(a,GroupWire.publicKey(ByteArray(32) { it.toByte() }),"Laptop A")
+            val signed=GroupSigned(GroupWire.encode64(fixture.getString("body_utf8").toByteArray()),fixture.getString("signature_b64"))
+            replica.receiveDelivery(GroupWire.sign(JSONObject().put("format",GroupWire.FORMAT).put("group_id",group).put("origin_device_id",a)
+                .put("kind","deliver").put("recipient_device_id",p).put("operation",signed.json()),ByteArray(32) { it.toByte() }))
+        }
+        val rows=JSONArray()
+        for(i in 0..1) {
+            val asset=fixture.getJSONArray("assets").getJSONObject(i); val recipe=asset.getJSONObject("recipe")
+            val row=JSONObject().put("id",73+i).put("title","Generated local tone $i").put("file_name",asset.getString("file_name"))
+                .put("audio_rev","generated456").put("tag_ids",JSONArray()).put("hot_cues",JSONArray())
+            rows.put(row)
+            val n=recipe.getInt("sample_frames"); val rate=recipe.getInt("sample_rate"); val period=recipe.getInt("period_frames"); val amp=recipe.getInt("amplitude")
+            val wav=java.nio.ByteBuffer.allocate(44+2*n).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+            wav.put("RIFF".toByteArray()).putInt(36+2*n).put("WAVEfmt ".toByteArray()).putInt(16).putShort(1).putShort(1)
+                .putInt(rate).putInt(rate*2).putShort(2).putShort(16).put("data".toByteArray()).putInt(2*n)
+            repeat(n) { wav.putShort((if(it%period<period/2) amp else -amp).toShort()) }
+            File(repo.store.audioDir,"${73+i}-generated456/${asset.getString("file_name")}").apply { parentFile!!.mkdirs(); writeBytes(wav.array()) }
+        }
+        repo.store.writeSnapshotText(JSONObject("""{"version":1,"tag_categories":[],"tags":[],"links":[],"transitions":[],"cameos":[],"takes":[],"settings":{}}""").put("tracks",rows).toString())
+        runBlocking { repo.open() }; repo.groupHistory.project()
+        compose.runOnUiThread { model.refreshGroupHistory() }
+        waitFor { model.groupItems.any { it.groupId == group } }
+        val view=model.groupItems.single { it.groupId == group }
+        compose.runOnUiThread { model.open(SessionHeader(view.sessionUuid,view.startedAt,view.endedAt,0,group=view)) }
+        waitFor { model.groupReplayReadiness?.state == "unbound" }
+        compose.onNodeWithText("SELECT LOCAL AUDIO 1").performClick()
+        compose.onNodeWithText("USE Generated local tone 0").performClick()
+        waitFor { !model.groupReplayBusy }
+        compose.onNodeWithText("SELECT LOCAL AUDIO 2").performClick()
+        compose.onNodeWithText("USE Generated local tone 1").performClick()
+        waitFor { model.groupReplayReadiness?.state == "candidate-exact" }
+        assertFalse(view.playable); assertEquals(0,PeerUiAudio.loads)
+        compose.onNodeWithText("OPEN GUARDED REPLAY").performClick()
+        waitFor { model.groupReplaySource != null && model.log != null }
+        compose.runOnUiThread { model.play(player) }
+        waitFor { PeerUiAudio.loads >= 2 && model.playing }
+        assertTrue(PeerUiAudio.sources.values.all { it.startsWith("group:") && ":attempt:" in it })
+        val initialSourceA=PeerUiAudio.sources[dev.manadj.audio.DeckId.A]
+        if(refusal == "transport") {
+            compose.runOnUiThread { model.stop() }
+            waitFor { !model.playing && !model.preparing }
+            capture("group-exact-local-playback.png") // paused actual guarded source, not a fake playing raster
+            compose.runOnUiThread { model.play(player) }
+            waitFor { model.playing }
+        }
+        if(refusal == "revoke") r.revoke(a)
+        else if(refusal == "decoded") { PeerUiAudio.loadIds[dev.manadj.audio.DeckId.A]=9999L }
+        else if(refusal == "transport") {
+            val file=File(repo.store.root,"group-replay/bindings/bindings.json")
+            assertTrue(file.renameTo(File(repo.store.root,"retained-generated-456-bindings.json")))
+            assertTrue(file.mkdir()) // generated local storage failure; original evidence retained
+        }
+        else {
+            val file=File(repo.store.audioDir,"73-generated456/tone-a.wav")
+            val retained=File(repo.store.root,"retained-generated-456-audio.wav")
+            assertTrue(file.renameTo(retained)); file.writeBytes(retained.readBytes())
+        }
+        waitFor { !model.playing && !model.preparing }
+        compose.runOnUiThread { model.play(player) }
+        if(refusal == "decoded") waitFor { PeerUiAudio.loads >= 3 && model.playing &&
+            PeerUiAudio.sources[dev.manadj.audio.DeckId.A] != initialSourceA && player.decks.getValue(dev.manadj.audio.DeckId.A).snapshot?.loadId != 9999L }
+        else waitFor { !model.groupReplayBusy && !model.playing && !model.preparing }
+        assertEquals(original,phone.detail(sid))
+    }
     @Test fun groupUuidCannotOpenOrSummarizeRawPhoneOrCacheAndNeverPushesRawCollision() {
         compose.runOnUiThread { model.open(SessionHeader(sid, null, null, 0, local=true)); model.summarize(SessionHeader(sid,null,null,0,local=true)) }
         waitFor { model.opening == null }
@@ -299,6 +377,7 @@ class GroupSessionUiTest {
     }
     private fun capture(name: String) {
         val output = System.getProperty("manadj.groupScreenshots") ?: return
+        require(File(output).mkdirs() || File(output).isDirectory)
         compose.runOnIdle {
             val view = compose.activity.window.decorView
             val bitmap = android.graphics.Bitmap.createBitmap(view.width, view.height, android.graphics.Bitmap.Config.ARGB_8888)

@@ -64,7 +64,7 @@ internal object GroupBundle {
         sites.forEach { (parent, key) -> require(parent.has(key)); if (!parent.isNull(key)) positiveId(parent.get(key)) }
         return sites
     }
-    private fun event(j: JSONObject): List<Pair<JSONObject, String>> {
+    internal fun event(j: JSONObject): List<Pair<JSONObject, String>> {
         bounded(j)
         val kind = j.getString("kind")
         require(fields[kind]?.containsAll(keys(j)) == true) { "Unsupported event grammar" }

@@ -64,12 +64,44 @@ private fun hms(seconds: Double): String { val s = seconds.coerceAtLeast(0.0).to
             Row(Modifier.fillMaxWidth().background(Ink.crust).clickable { model.notice = null }.padding(horizontal = 12.dp, vertical = 6.dp)) { Text(n, color = Ink.warning, size = 11, lines = 3) }
         }
         model.peerInfo?.let { item -> PeerSessionInfo(item, model.ownGroupMarkerAuthority(item)) { model.peerInfo = null } }
-        model.groupInfo?.let { item -> GroupSessionInfo(item) { model.groupInfo = null } }
+        model.groupInfo?.let { item ->
+            GroupSessionInfo(item) { model.groupInfo = null }
+            GroupReplayControls(model,item)
+        }
+        model.groupReplaySource?.let { source ->
+            Text("GUARDED GROUP SOURCE · ${source.view.origin.label} · exact local bindings · decode and authority revalidated before playback",
+                Modifier.fillMaxWidth().padding(8.dp).testTag("group-replay-provenance"),Ink.accent,11,lines=3)
+        }
         model.header?.peer?.let { item ->
             Text("RECEIVED · ${item.recordingOrigin ?: "unknown recording origin"} · source ${item.originReplicaId.take(8)} · generation ${item.generation?.take(8)} · exact audio revalidated before replay/load",
                 Modifier.fillMaxWidth().padding(8.dp).testTag("peer-session-provenance"), Ink.accent, 11, lines = 3)
         }
         if (log == null) SessionList(model) else Replay(model, player, ux, log)
+    }
+}
+
+@Composable private fun GroupReplayControls(model: SessionModel,item: GroupSessionView) {
+    val library by model.library.collectAsState()
+    val ready=model.groupReplayReadiness
+    Column(Modifier.fillMaxWidth().heightIn(max=360.dp).verticalScroll(rememberScrollState()).padding(12.dp).testTag("group-replay-controls")) {
+        Text("EXACT LOCAL REPLAY · ${ready?.state ?: "checking"}",color=Ink.warning,size=11,bold=true)
+        Text("Select matching audio already cached on this phone. No automatic binding or download. Candidate bytes still require an actual engine decode before Play.",color=Ink.muted,size=10,lines=4)
+        if(item.status !in setOf("revoked","conflicted","projection-pending")) {
+            item.tracks.forEachIndexed { index,track ->
+                Key("SELECT LOCAL AUDIO ${index+1}",Modifier.fillMaxWidth().height(44.dp),Ink.accent,enabled=!model.groupReplayBusy) {
+                    model.selectingGroupTrack=track.logicalTrackId
+                }
+                if(model.selectingGroupTrack == track.logicalTrackId) {
+                    library?.snapshot?.tracks?.filter { it.audioRev != null }?.forEach { local ->
+                        Key("USE ${local.title}",Modifier.fillMaxWidth().height(44.dp),Ink.accent,enabled=!model.groupReplayBusy) {
+                            model.bindGroupTrack(item,track.logicalTrackId,local.id)
+                        }
+                    }
+                }
+            }
+        }
+        Key(if(model.groupReplayBusy) "CHECKING…" else "OPEN GUARDED REPLAY",Modifier.fillMaxWidth().height(48.dp),Ink.accent,
+            enabled=!model.groupReplayBusy && ready?.state == "candidate-exact") { model.openGroupReplay(item) }
     }
 }
 
@@ -361,7 +393,7 @@ internal class DeckView(val track: dev.manadj.library.LibraryTrack?, val status:
     val track = model.track(s.trackId)
     val audible = frame.audible(d)
     LaunchedEffect(ui.source?.id) { ux.ensureWave(ui.source, DeckId.entries.mapNotNull { player.decks.getValue(it).source?.id }.toSet()) }
-    val engineHolds = ui.source?.id?.let { src -> track?.let { src == model.sourceId(it) } } == true
+    val engineHolds = ui.source?.id?.let { src -> track?.let { model.matchesSource(it,src) } } == true
     val downloads by ux.repo.downloads.collectAsState()
     val download = if (model.peerReplay == null) track?.let { downloads[it.id] } else null
     val status = when {
