@@ -153,6 +153,10 @@ def sync_playlist(
         if not result.success:
             if "not found" in result.error:
                 raise HTTPException(status_code=404, detail=result.error)
+            elif request.source == "manadj" and request.target != "manadj":
+                # Creation may have partially succeeded. Preserve the complete
+                # receipt (including added records and per-track failures).
+                return result
             else:
                 raise HTTPException(status_code=400, detail=result.error)
 
@@ -168,7 +172,7 @@ def sync_playlist(
 
         # Check if any failed
         failed = [r for r in results if not r.success]
-        if failed:
+        if failed and request.source != "manadj":
             # Return all results but with error status
             raise HTTPException(
                 status_code=400,

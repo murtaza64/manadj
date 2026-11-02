@@ -35,6 +35,9 @@ def test_maincue_adds_memory_only_row_after_reconcile(monkeypatch, tmp_path):
         def first(self):
             return None
 
+        def all(self):
+            return []
+
     class FakeSession:
         def __init__(self):
             self.added = []
@@ -57,6 +60,9 @@ def test_maincue_adds_memory_only_row_after_reconcile(monkeypatch, tmp_path):
 
     db = FakeDB()
     exporter = RekordboxPerfExporter(db, tmp_path)
+    # This unit test covers DB row shape; native-file integration is exercised
+    # with actual pyrekordbox + native-layout fixtures in test_rekordbox_anlz_cues.
+    monkeypatch.setattr(exporter, "_sync_cue_analysis", lambda content: None)
     exporter._content_for = lambda filename: SimpleNamespace(
         ID="7", UUID="content-uuid", FolderPath=filename
     )

@@ -1,0 +1,21 @@
+@font-face { font-family: 'UbuntuMono Nerd Font'; src: url('/fonts/UbuntuMonoNerdFont-Regular.woff2'); font-weight: 400; }
+@font-face { font-family: 'UbuntuMono Nerd Font'; src: url('/fonts/UbuntuMonoNerdFont-Bold.woff2'); font-weight: 700; }
+.review426 { font-size: var(--font-body); }
+.review426-banner { background: var(--warning); color: var(--crust); padding: var(--space-8) var(--space-12); }
+.review426-controls { display: flex; flex-wrap: wrap; gap: var(--space-16); padding: var(--space-12); background: var(--mantle); }
+.review426-controls label { display: flex; gap: var(--space-8); align-items: center; }
+.review426 select { background: var(--crust); border: 1px solid var(--surface2); color: var(--text); padding: var(--space-4); font: inherit; }
+.review426-controls a { color: var(--accent); }
+.review426-body { flex: 1; min-height: 0; overflow: auto; }
+.review426-library { display: grid; grid-template-columns: 180px minmax(0,1fr); height: 100%; }
+.review426-library aside { background: var(--crust); padding: var(--space-12); border-right: 1px solid var(--surface1); }
+.review426-library aside h3 { font-size: var(--font-small); color: var(--subtext0); }
+.review426-library aside p { padding: var(--space-8); }
+.review426-selected { border: 1px solid var(--accent); color: var(--accent); }
+.review426-library header { padding: var(--space-16); display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--surface1); }
+.review426-library h2 { font-size: var(--font-title); }
+.review426-library header p { margin-top: var(--space-8); color: var(--subtext0); }
+.review426-library td, .review426-library th { height: 28px; padding: var(--space-6) var(--space-12); border-bottom: 1px solid var(--surface0); text-align: left; }
+.review426-library th { font-weight: 400; color: var(--subtext0); }
+.review426-note { padding: var(--space-16); color: var(--subtext0); }
+@media (max-width: 700px) { .review426-library { grid-template-columns: 1fr; } .review426-library aside { display: none; } .review426-controls select { max-width: 280px; } }

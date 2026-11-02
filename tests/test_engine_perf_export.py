@@ -13,6 +13,7 @@ from enginedj.performance_blobs import (
     parse_track_data,
     q_compress,
 )
+from enginedj.track_export import EngineTrackSpec, insert_track
 from tests.test_engine_performance_blobs import (
     CONSTANT_GRID,
     EMPTY_SLOT,
@@ -63,6 +64,7 @@ def test_engine_perf_export_overwrites_all_supported_fields(tmp_path) -> None:
     }
     with engine_db.session_m() as session:
         saved = session.query(EDJTrack).one()
+        assert saved.isAnalyzed is True
         perf = session.get(PerformanceData, saved.id)
         cues = parse_quick_cues(perf.quickCues)
         beat = parse_beat_data(perf.beatData)
@@ -109,3 +111,63 @@ def test_blank_colors_use_engine_slot_palette(tmp_path) -> None:
     with database.session_m() as session:
         cues = parse_quick_cues(session.query(PerformanceData).one().quickCues)
     assert [cue.color_hex for cue in cues.hot_cues] == ["#F4D338", "#CE3239"]
+
+
+@pytest.fixture
+def engine_database(tmp_path, monkeypatch):
+    database = InMemoryEngineDB(tmp_path / "Engine Library")
+    monkeypatch.setattr("enginedj.perf_export.ensure_engine_closed", lambda: None)
+    monkeypatch.setattr("enginedj.perf_export.snapshot_database", lambda _path: None)
+    try:
+        yield database
+    finally:
+        database.engine.dispose()
+
+
+def test_same_basename_key_exports_use_normalized_library_paths(engine_database, tmp_path):
+    database = engine_database
+    with database.session_m_write() as session:
+        session.add_all([
+            EDJTrack(id=1, path="../first/../first/same.mp3", key=1),
+            EDJTrack(id=2, path="../second/same.mp3", key=2),
+        ])
+
+    exporter = EnginePerfExporter(database, database.database_path)
+    for directory, key in [("first", 7), ("second", 12)]:
+        result = exporter.export_performance(
+            str(tmp_path / directory / "same.mp3"),
+            cues=[], tempo_changes=None, key=key, maincue=None, energy=None, duration=None,
+        )
+        assert result["key"] == "exported"
+        with database.session_m() as session:
+            assert session.get(EDJTrack, 1).key == 7
+            assert session.get(EDJTrack, 2).key == (2 if directory == "first" else 12)
+
+
+@pytest.mark.parametrize("analyzed", [False, True])
+def test_engine_perf_export_preserves_analysis_state(engine_database, audio_file, analyzed):
+    database = engine_database
+    audio = audio_file(name="fresh.mp3")
+    with database.session_m_write() as session:
+        track_id = insert_track(
+            session, EngineTrackSpec(audio, "Fresh"), database.database_path.parent
+        )
+        session.get(EDJTrack, track_id).isAnalyzed = analyzed
+
+    result = EnginePerfExporter(database, database.database_path).export_performance(
+        str(audio),
+        cues=[(1, 1.0, "Cue", None)],
+        tempo_changes=[TempoChangeValue(start_time=0.0, bpm=128.0, bar_position=1)],
+        key=7, maincue=1.0, energy=3, duration=180.0,
+    )
+
+    assert result["key"] == result["energy"] == "exported"
+    for field in ("hotcues", "maincue", "beatgrid"):
+        assert result[field].startswith("skipped:")
+    with database.session_m() as session:
+        saved = session.get(EDJTrack, track_id)
+        assert saved.isAnalyzed is analyzed
+        assert saved.key == 7
+        assert saved.rating == 60
+        perf = session.get(PerformanceData, track_id)
+        assert perf.beatData is perf.quickCues is perf.trackData is None

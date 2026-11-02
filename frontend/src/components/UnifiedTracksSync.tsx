@@ -8,7 +8,7 @@
  * PRD Story 15, revised).
  */
 
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, BACKEND_URL } from '../api/client';
 import { formatKeyDisplay } from '../utils/keyUtils';
@@ -21,6 +21,9 @@ import {
 } from './PerfDiffViewer';
 import { CUE_TIME_TOLERANCE_S } from '../utils/perfDiffOverlay';
 import { useExportEnabled } from '../settings/useAppConfig';
+import { FieldReviewEntry } from './FieldReviewInspector';
+import { captureActiveLibraryIds } from '../api/captureFieldScope';
+import type { FieldName } from '../api/fieldReview';
 import './UnifiedTracksSync.css';
 
 // ------------------------------------------------------------------- types
@@ -169,6 +172,7 @@ export function UnifiedTracksSync() {
     new Set(GROUPS.filter((g) => g.collapsedByDefault).map((g) => g.key)),
   );
   const [pending, setPending] = useState<PendingAction | null>(null);
+  const startedPending = useRef<PendingAction | null>(null);
   const [bulkPanel, setBulkPanel] = useState<BulkPendingItem[] | null>(null);
 
   const refresh = () => queryClient.invalidateQueries({ queryKey: ['sync-status'] });
@@ -558,6 +562,8 @@ export function UnifiedTracksSync() {
   };
 
   const renderRow = (row: StatusRow, selectable: boolean) => (
+    <div key={row.path}>
+    {row.track_id !== null && <FieldReviewEntry label={`Review fields: ${row.title || row.path}`} initialFields={[...new Set(row.diverged.map(divergence => divergence.field))] as FieldName[]} scopes={{ selected: async () => [row.track_id!] }} />}
     <RowCard
       key={row.path}
       row={row}
@@ -621,11 +627,16 @@ export function UnifiedTracksSync() {
       }
       surfacesAvailable={data.surfaces_available}
     />
+    </div>
   );
 
   return (
     <div className="uts-root" data-tour="sync.tracks">
       <div className="uts-chipbar">
+        <FieldReviewEntry label="Review Library fields…" initialScope="filtered" scopes={{
+          filtered: async () => (filter ? chipRows(filter) : attention).flatMap(row => row.track_id === null ? [] : [row.track_id]),
+          all: captureActiveLibraryIds,
+        }} />
         {GROUPS.map((g) => (
           <button
             key={g.key}
@@ -657,8 +668,12 @@ export function UnifiedTracksSync() {
             <b>{pending.scope}</b>
             <div className="uts-pending-side">{pending.sideEffects}</div>
           </div>
-          <button className="uts-btn" onClick={pending.run}>Apply</button>
-          <button className="uts-btn uts-btn-ghost" onClick={() => setPending(null)}>Cancel</button>
+          <button className="uts-btn" disabled={busy} onClick={() => {
+            if (busy || startedPending.current === pending) return;
+            startedPending.current = pending;
+            pending.run();
+          }}>{busy ? 'Applying…' : 'Apply'}</button>
+          <button className="uts-btn uts-btn-ghost" disabled={busy} onClick={() => { if (!busy) setPending(null); }}>Dismiss plan</button>
         </div>
       )}
       {notice && <div className="uts-notice" onClick={() => setNotice(null)}>{notice} ✕</div>}
@@ -701,6 +716,7 @@ export function UnifiedTracksSync() {
                 )}
                 {list.length} track{list.length === 1 ? '' : 's'} — {g.label.toLowerCase()}
                 {groupActions(filter, list, selectedHere)}
+                <FieldReviewEntry label="Review group fields…" initialScope="filtered" initialFields={[...new Set(list.flatMap(row => row.diverged.map(divergence => divergence.field)))] as FieldName[]} scopes={{ filtered: async () => list.flatMap(row => row.track_id === null ? [] : [row.track_id]) }} />
               </h3>
               {list.length === 0 && <div className="uts-empty">nothing matches</div>}
               {list.map((row) => renderRow(row, selectable))}
@@ -738,6 +754,7 @@ export function UnifiedTracksSync() {
                 )}
                 {g.label} <span className="uts-count">{list.length}</span>
                 {groupActions(g.key, list, selectedHere)}
+                <FieldReviewEntry label="Review group fields…" initialScope="filtered" initialFields={[...new Set(list.flatMap(row => row.diverged.map(divergence => divergence.field)))] as FieldName[]} scopes={{ filtered: async () => list.flatMap(row => row.track_id === null ? [] : [row.track_id]) }} />
               </h3>
               {!isCollapsed && list.map((row) => renderRow(row, selectable))}
             </section>

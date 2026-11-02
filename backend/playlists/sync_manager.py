@@ -16,7 +16,7 @@ class PlaylistSyncManager:
     Handles optional Engine DJ and Rekordbox databases with graceful degradation.
     """
 
-    def __init__(self, manadj_session: Session, engine_db=None, rb_db=None):
+    def __init__(self, manadj_session: Session, engine_db=None, rb_db=None, *, destination_paths=None):
         """Initialize with database connections.
 
         Args:
@@ -28,6 +28,7 @@ class PlaylistSyncManager:
         self.manadj_session = manadj_session
         self.engine_db = engine_db
         self.rb_db = rb_db
+        self.destination_paths = destination_paths or {}
 
         # Always create manadj reader
         self.manadj_reader = ManAdjPlaylistReader(manadj_session)
@@ -231,6 +232,13 @@ class PlaylistSyncManager:
                 error=f"Playlist '{playlist_name}' not found in {source}"
             )
 
+        if source == 'manadj' and target in ('engine', 'rekordbox'):
+            from .track_export import sync_downstream_playlist
+
+            return sync_downstream_playlist(
+                self, source_playlist, target, ignore_missing_tracks, dry_run
+            )
+
         # Match tracks to target database
         if target == 'manadj':
             matched_tracks, unmatched = self._match_tracks_to_manadj(source_playlist.tracks)
@@ -394,7 +402,13 @@ class PlaylistSyncManager:
         with self.engine_db.session_m() as edj_session:
             all_tracks = edj_session.query(EDJTrack).all()
 
-            index = TrackIndex.build(all_tracks, lambda t: t.path)
+            import os
+            from pathlib import Path
+
+            library_root = Path(self.engine_db.database_path).parent
+            index = TrackIndex.build(
+                all_tracks, lambda t: os.path.normpath(library_root / t.path) if t.path else None
+            )
 
             matched = []
             unmatched = []

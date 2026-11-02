@@ -29,7 +29,13 @@ class PlaylistExportTargetRunner:
 
     def export(self, playlist: Playlist, tracks: list[Track]) -> dict:
         self._writer.prepare(tracks)
-        created, unmatched = self._writer.replace_playlist(playlist.name, tracks)
+        try:
+            created, unmatched = self._writer.replace_playlist(playlist.name, tracks)
+        except Exception as error:
+            # Record creation commits independently of membership/performance.
+            # Do not erase those additions when a later write fails.
+            created = False
+            unmatched = {track.id: str(error) for track in tracks}
         rows = []
         for track in tracks:
             reason = unmatched.get(track.id)
@@ -77,6 +83,7 @@ class PlaylistExportTargetRunner:
         failed = sum(row["status"] == "failed" for row in rows)
         return {
             "target": self._writer.target,
+            "tracks_added": getattr(self._writer, "tracks_added", []),
             "status": "failed" if failed == len(rows) and rows else "partial" if failed else "exported",
             "playlist_created": created,
             "tracks_total": len(rows),
@@ -114,7 +121,7 @@ class PlaylistFullExportService:
         return {
             "playlist_name": playlist.name,
             "results": [
-                self._targets[target].export(playlist, tracks)
+                self._export_target(target, playlist, tracks)
                 if target in self._targets
                 else {
                     "target": target,
@@ -130,6 +137,12 @@ class PlaylistFullExportService:
                 for target in targets
             ],
         }
+
+    def _export_target(self, target: str, playlist: Playlist, tracks: list[Track]) -> dict:
+        try:
+            return self._targets[target].export(playlist, tracks)
+        except Exception as error:
+            return UnavailableTarget(target, str(error)).export(playlist, tracks)
 
 
 class UnavailableTarget:
@@ -151,12 +164,12 @@ class UnavailableTarget:
         }
 
 
-def _unmatched_by_id(tracks: list[Track], filenames: list[str], target: str) -> dict[int, str]:
-    names = set(filenames)
+def _unmatched_by_id(tracks: list[Track], result, target: str) -> dict[int, str]:
     return {
-        track.id: f"{Path(track.filename).name}: not found in {target}"
+        track.id: result.track_errors.get(Path(track.filename).name)
+        or f"{Path(track.filename).name}: not found in {target}"
         for track in tracks
-        if Path(track.filename).name in names
+        if track.id in result.unmatched_track_ids
     }
 
 
@@ -172,30 +185,39 @@ class RekordboxPlaylistWriter:
         self._perf = RekordboxPerfExporter(rb_db, self._path)
         self._tag_map: dict[int, str] = {}
         self._energy_colors: dict[int, str] = {}
+        self._metadata_error: str | None = None
 
     def prepare(self, tracks: list[Track]) -> None:
-        from rekordbox.mappings import build_energy_color_map
         from rekordbox.perf_export import ensure_rekordbox_closed, snapshot_library
-        from rekordbox.tag_sync import RekordboxTagSyncer
 
         ensure_rekordbox_closed()
         snapshot_library(self._path)
-        syncer = RekordboxTagSyncer(self._rb_db, self._db)
-        _categories, self._tag_map, _stats = syncer.sync_tag_structure(dry_run=False)
-        self._energy_colors = build_energy_color_map(self._rb_db.session)
-        self._rb_db.commit(autoinc=True)
 
     def replace_playlist(
         self, name: str, tracks: list[Track]
     ) -> tuple[bool, dict[int, str]]:
         from backend.playlists.sync_manager import PlaylistSyncManager
 
-        result = PlaylistSyncManager(self._db, rb_db=self._rb_db).sync_playlist_to_target(
+        manager = PlaylistSyncManager(self._db, rb_db=self._rb_db, destination_paths={'rekordbox': str(self._path)})
+        result = manager.sync_playlist_to_target(
             name, "manadj", "rekordbox", ignore_missing_tracks=True
         )
+        self.tracks_added = result.tracks_added
         if not result.success:
             raise RuntimeError(result.error or "Rekordbox playlist export failed")
-        return result.created, _unmatched_by_id(tracks, result.tracks_unmatched, "Rekordbox")
+        from rekordbox.mappings import build_energy_color_map
+        from rekordbox.tag_sync import RekordboxTagSyncer
+
+        self._metadata_error = None
+        try:
+            syncer = RekordboxTagSyncer(self._rb_db, self._db)
+            _categories, self._tag_map, _stats = syncer.sync_tag_structure(dry_run=False)
+            self._energy_colors = build_energy_color_map(self._rb_db.session)
+            self._rb_db.commit(autoinc=True)
+        except Exception as error:
+            self._rb_db.rollback()
+            self._metadata_error = str(error)
+        return result.created, _unmatched_by_id(tracks, result, "Rekordbox")
 
     def export_track(self, track: Track) -> dict[str, str]:
         from backend.sync_status.compare import beatgrid_value_from_row
@@ -238,6 +260,8 @@ class RekordboxPlaylistWriter:
                 fields["key"] = f"failed: {error}"
 
         try:
+            if self._metadata_error:
+                raise RuntimeError(self._metadata_error)
             RekordboxTagSyncer(self._rb_db, self._db).sync_track_tags_and_colors(
                 self._tag_map, self._energy_colors, dry_run=False, track_ids=[track.id]
             )
@@ -260,28 +284,37 @@ class EnginePlaylistWriter:
         self._engine_db = engine_db
         self._path = Path(database_path)
         self._perf = EnginePerfExporter(engine_db, self._path)
+        self._metadata_error: str | None = None
 
     def prepare(self, tracks: list[Track]) -> None:
-        from backend.tags.engine_writer import EngineTagWriter
         from enginedj.track_export import ensure_engine_closed, snapshot_database
 
         ensure_engine_closed()
         snapshot_database(self._path)
-        EngineTagWriter(self._db, self._engine_db).sync_scoped_tag_assignments(
-            [track.id for track in tracks]
-        )
 
     def replace_playlist(
         self, name: str, tracks: list[Track]
     ) -> tuple[bool, dict[int, str]]:
         from backend.playlists.sync_manager import PlaylistSyncManager
 
-        result = PlaylistSyncManager(self._db, engine_db=self._engine_db).sync_playlist_to_target(
+        from backend.tags.engine_writer import EngineTagWriter
+
+        manager = PlaylistSyncManager(self._db, engine_db=self._engine_db)
+        result = manager.sync_playlist_to_target(
             name, "manadj", "engine", ignore_missing_tracks=True
         )
+        self.tracks_added = result.tracks_added
         if not result.success:
             raise RuntimeError(result.error or "Engine playlist export failed")
-        return result.created, _unmatched_by_id(tracks, result.tracks_unmatched, "Engine DJ")
+        # Newly created rows must exist before their tag-playlist assignments.
+        self._metadata_error = None
+        try:
+            EngineTagWriter(self._db, self._engine_db).sync_scoped_tag_assignments(
+                [track.id for track in tracks]
+            )
+        except Exception as error:
+            self._metadata_error = str(error)
+        return result.created, _unmatched_by_id(tracks, result, "Engine DJ")
 
     def export_track(self, track: Track) -> dict[str, str]:
         from backend.sync_status.compare import beatgrid_value_from_row
@@ -297,7 +330,7 @@ class EnginePlaylistWriter:
             energy=track.energy,
             duration=duration,
         )
-        fields["tags"] = "exported"
+        fields["tags"] = f"failed: {self._metadata_error}" if self._metadata_error else "exported"
         return fields
 
 
@@ -312,7 +345,8 @@ def compute_target_preview(
     ``source_names`` is the manadj playlist's member filenames in play order;
     ``dest_names`` the destination playlist's current filenames (None when the
     playlist does not exist there); ``unmatched`` the source filenames absent
-    from the destination library (they will fail, not export).
+    that cannot be prepared for export (missing/unreadable audio or invalid
+    destination paths). Creatable library records are included in final order.
     """
     unmatched_left = Counter(unmatched)
     final: list[str] = []
@@ -398,42 +432,55 @@ def preview_playlist_full_export(db: Session, playlist_name: str, targets: list[
             previews.append({"target": target, "available": False, "error": error})
             continue
         try:
-            _matched, unmatched = manager.match_tracks_to_target(target, source.tracks)
+            plan = manager.sync_playlist_to_target(
+                playlist_name, "manadj", target, ignore_missing_tracks=True, dry_run=True
+            )
+            if not plan.success:
+                raise RuntimeError(plan.error or "Could not plan playlist export")
             dest = next((p for p in playlists[target] if p.name == playlist_name), None)
             previews.append(
                 compute_target_preview(
                     target,
                     [ref.filename for ref in source.tracks],
                     [ref.filename for ref in dest.tracks] if dest else None,
-                    unmatched,
+                    plan.tracks_unmatched,
                 )
             )
+            previews[-1]["tracks_to_create"] = plan.tracks_to_add
+            previews[-1]["track_errors"] = plan.track_errors
         except Exception as error:
             previews.append({"target": target, "available": False, "error": str(error)})
     return {"playlist_name": playlist_name, "previews": previews}
 
 
-def build_playlist_full_export_service(db: Session):
+def build_playlist_full_export_service(db: Session, *, destination_paths: dict[str, str] | None = None):
     from backend.config import get_config
 
-    config = get_config()
+    if destination_paths is None:
+        config = get_config()
+        destination_paths = {
+            key: path for key, path in (
+                ('rekordbox', config.database.rekordbox_path),
+                ('engine', config.database.engine_dj_path),
+            ) if path
+        }
     targets: dict[str, PlaylistExportTarget] = {}
-    if config.database.rekordbox_path:
+    if destination_paths.get('rekordbox'):
         try:
             from rekordbox.connection import get_rekordbox_db
 
             targets["rekordbox"] = PlaylistExportTargetRunner(
                 RekordboxPlaylistWriter(
-                    db, get_rekordbox_db(), Path(config.database.rekordbox_path)
+                    db, get_rekordbox_db(destination_paths['rekordbox']), Path(destination_paths['rekordbox'])
                 )
             )
         except Exception as error:
             targets["rekordbox"] = UnavailableTarget("rekordbox", str(error))
-    if config.database.engine_dj_path:
+    if destination_paths.get('engine'):
         try:
             from enginedj.connection import EngineDJDatabase
 
-            engine_path = Path(config.database.engine_dj_path)
+            engine_path = Path(destination_paths['engine'])
             targets["engine"] = PlaylistExportTargetRunner(
                 EnginePlaylistWriter(db, EngineDJDatabase(engine_path), engine_path)
             )

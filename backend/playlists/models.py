@@ -1,6 +1,6 @@
 """Data models for playlist synchronization."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
@@ -106,3 +106,7 @@ class SyncResult:
     tracks_synced: int
     tracks_unmatched: list[str]  # Filenames that couldn't be matched
     error: str | None = None
+    tracks_to_add: list[str] = field(default_factory=list)
+    tracks_added: list[str] = field(default_factory=list)
+    track_errors: dict[str, str] = field(default_factory=dict)
+    unmatched_track_ids: list[int | str] = field(default_factory=list)

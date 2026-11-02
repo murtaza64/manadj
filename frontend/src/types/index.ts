@@ -230,7 +230,10 @@ export interface SyncResult {
   success: boolean;
   created: boolean;  // True if playlist was created, False if updated
   tracks_synced: number;
-  tracks_unmatched: string[];  // Filenames that couldn't be matched
+  tracks_unmatched: string[];  // Failed or unavailable filenames
+  tracks_to_add?: string[];  // Planned destination library records (dry run)
+  tracks_added?: string[];  // Destination library records actually created
+  track_errors?: Record<string, string>;
   error?: string | null;
 }
 
@@ -257,6 +260,7 @@ export interface PlaylistExportTargetReport {
   playlist_created: boolean;
   tracks_total: number;
   tracks_exported: number;
+  tracks_added?: string[];
   tracks_skipped: number;
   tracks_failed: number;
   tracks: PlaylistExportTrackReport[];
@@ -275,7 +279,9 @@ export interface PlaylistExportTargetPreview {
   playlist_exists?: boolean;
   tracks_total?: number;
   tracks_matched?: number;
-  tracks_to_add?: number;
+  tracks_to_add?: number;  // Playlist membership additions, not library records
+  tracks_to_create?: string[];  // Planned destination library records
+  track_errors?: Record<string, string>;
   tracks_to_remove?: number;
   tracks_moved?: number;
   unmatched?: string[];
@@ -284,6 +290,30 @@ export interface PlaylistExportTargetPreview {
 export interface PlaylistFullExportPreview {
   playlist_name: string;
   previews: PlaylistExportTargetPreview[];
+}
+
+export interface PlaylistExportFieldPlan {
+  field: string;
+  before_known: boolean;
+  before: unknown;
+  after: unknown;
+  action: 'replace' | 'replace-unknown' | 'clear' | 'unchanged' | 'skip' | 'blocked';
+  reason: string | null;
+}
+
+export interface PlaylistExportPlan {
+  playlist_name: string;
+  playlist_id: number;
+  source: string;
+  target: PlaylistExportTarget;
+  scope: 'full' | 'order';
+  destination: string;
+  executable: boolean;
+  token: string;
+  membership: { create: boolean; before: string[]; after: string[]; added: string[]; removed: string[]; moved: number };
+  tracks: { track_id: number; title: string; filename: string; duration: number | null; record_action: 'existing' | 'create' | 'blocked'; record_reason?: string | null; fields: PlaylistExportFieldPlan[] }[];
+  tag_structure: { id: number; name: string; tags: { id: number; name: string }[] }[];
+  warnings: string[];
 }
 
 export interface TrackDiscrepancy {

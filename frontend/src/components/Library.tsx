@@ -69,8 +69,9 @@ import {
 import { SessionTimelinePane } from '../sessions/SessionTimelinePane';
 import { SessionsListView } from '../sessions/SessionsListView';
 import { NAVIGATE_SET_EVENT } from '../sets/navigateToSet';
-import { PlaylistFullExportModal } from './PlaylistFullExportModal';
-import { useExportEnabled } from '../settings/useAppConfig';
+import { PlaylistExportEntry, PlaylistExportInspector } from './PlaylistExportInspector';
+import { FieldReviewEntry } from './FieldReviewInspector';
+import { OPEN_LIBRARY_PLAYLIST_EVENT, peekLibraryPlaylistRequest, clearLibraryPlaylistRequest } from '../library/openPlaylist';
 import { PlaylistStatusBadge } from './PlaylistStatusBadge';
 import { playlistStatus } from './playlistStatus';
 import { trackMatchesFilters } from './playlistFilter';
@@ -166,10 +167,25 @@ export default function Library({
   const [selectedPlaylistId, setSelectedPlaylistId] = useState<number | null>(
     () => browseSession().playlistId
   );
-  const [playlistExportOpen, setPlaylistExportOpen] = useState(false);
-  // Export gate (ADR 0043): the playlist Sync/Export modal only writes
-  // external libraries, so it hides until the Settings toggle is on.
-  const exportEnabled = useExportEnabled();
+  const [navigationExportName, setNavigationExportName] = useState<string | null>(() => {
+    const request = peekLibraryPlaylistRequest();
+    return request?.openExport ? request.name : null;
+  });
+  useEffect(() => {
+    // The browse-session seed handles a cold mount; the pending name above
+    // opens its inspector after the same event. Mounted Library uses this handler.
+    const openPlaylist = () => {
+      const request = peekLibraryPlaylistRequest();
+      if (!request) { setNavigationExportName(null); return; }
+      setSelectedView('playlist');
+      setSelectedPlaylistId(request.id);
+      selectSet(null);
+      selectSession(null);
+      setNavigationExportName(request.openExport ? request.name : null);
+    };
+    window.addEventListener(OPEN_LIBRARY_PLAYLIST_EVENT, openPlaylist);
+    return () => window.removeEventListener(OPEN_LIBRARY_PLAYLIST_EVENT, openPlaylist);
+  }, []);
   const [selectedSetId, setSelectedSetId] = useState<number | null>(() => getSelectedSetId());
   const [selectedSessionUuid, setSelectedSessionUuid] = useState<string | null>(() =>
     getSelectedSessionUuid()
@@ -585,6 +601,22 @@ export default function Library({
   const activeSel = splitView && focusedPane === 'library' ? editLibSel : mainSel;
   const selectedTrack = activeSel.selectedTrack;
 
+  async function fieldScopeIds(filtered: boolean): Promise<number[]> {
+    // Resolve every page-equivalent record, not just the first1000 rendered rows.
+    // The backend bounds a single plan at10000; refuse rather than truncate.
+    const result = await api.tracks.list(1, 10000, filtered ? {
+      tagIds: filters.selectedTagIds, search: filters.search, energyMin: filters.energyMin,
+      energyMax: filters.energyMax, tagMatchMode: filters.tagMatchMode, bpmCenter: filters.bpmCenter,
+      bpmThresholdPercent: filters.bpmCenter !== null ? filters.bpmThresholdPercent : null,
+      keyCamelotIds: filters.selectedKeyCamelotIds, unprocessed: selectedView === 'unprocessed',
+      needsAttention: selectedView === 'needs-attention', archived: selectedView === 'archived',
+      sortColumn: filters.sortColumn, sortDirection: filters.sortDirection,
+    } : undefined);
+    if (!Array.isArray(result.items) || !Number.isInteger(result.total) || result.total > result.items.length) throw new Error('Scope could not be captured completely (maximum10000). Narrow the filter.');
+    const tracks: Track[] = filtered ? follow.project(result.items, followScoreSort) : result.items;
+    return tracks.map(track => track.id);
+  }
+
   // Switching views/playlists clears the main selection outright (prune
   // would do most of it; this also covers same-id coincidences). The MOUNT
   // run is exempt: a fresh instance restoring the browse session (issue 27)
@@ -670,7 +702,7 @@ export default function Library({
     dragPointerTsRef.current = e.timeStamp;
   }, []);
 
-  const stopEdgeScroll = useCallback(() => {
+  const stopEdgeScroll = useCallback(function stopEdgeScroll() {
     if (edgeScrollRafRef.current !== null) cancelAnimationFrame(edgeScrollRafRef.current);
     edgeScrollRafRef.current = null;
     dragPointerRef.current = null;
@@ -1192,6 +1224,12 @@ export default function Library({
           flexDirection: 'column',
           overflow: 'hidden'
         }}>
+          {!browseOnly && selectedView !== 'playlist' && <div style={{ padding: '4px 12px', borderBottom: '1px solid var(--surface0)' }}>
+            <FieldReviewEntry initialScope={activeSel.selectedIds.size ? 'selected' : 'filtered'} scopes={{
+              selected: async () => [...activeSel.selectedIds],
+              filtered: () => fieldScopeIds(true), all: () => fieldScopeIds(false),
+            }} /> <small>Fields only · all = active Library; archived tracks require their explicit view/selection</small>
+          </div>}
           {/* Playlist header strip: name + split-view toggle (playlist view only) */}
           {selectedView === 'playlist' && (
             <div style={{
@@ -1243,17 +1281,7 @@ export default function Library({
                 {unifiedPlaylist && (
                   <PlaylistStatusBadge status={playlistStatus(unifiedPlaylist)} />
                 )}
-                {exportEnabled && (
-                  <button
-                    className="playlist-export-submit"
-                    onClick={() => setPlaylistExportOpen(true)}
-                    disabled={!playlistData?.name}
-                    aria-label="Open playlist sync and export"
-                    style={{ padding: '2px 10px' }}
-                  >
-                    Sync / Export
-                  </button>
-                )}
+                <PlaylistExportEntry playlistName={playlistData?.name} />
                 {!browseOnly && (
                   <button
                     onClick={() => setIsSplitViewOpen((v) => !v)}
@@ -1505,12 +1533,7 @@ export default function Library({
       {rowMenu && (
         <ContextMenu x={rowMenu.x} y={rowMenu.y} items={rowMenuItems} onClose={closeRowMenu} />
       )}
-      {playlistExportOpen && playlistData?.name && (
-        <PlaylistFullExportModal
-          playlistName={playlistData.name}
-          onClose={() => setPlaylistExportOpen(false)}
-        />
-      )}
+      {navigationExportName && <PlaylistExportInspector playlistName={navigationExportName} onClose={clearLibraryPlaylistRequest} />}
     </div>
     </BrowseActiveContext.Provider>
   );

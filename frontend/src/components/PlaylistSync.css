@@ -116,3 +116,7 @@
   /* Status - fixed width */
   width: 120px;
 }
+.playlist-library-routing, .playlist-external-import { padding: var(--space-12) var(--space-16); color: var(--subtext0); }
+.playlist-external-import { border-bottom: 1px solid var(--surface1); }
+.playlist-external-import p { margin: var(--space-8) 0; }
+.playlist-external-import .btn { margin-right: var(--space-8); }
