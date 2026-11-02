@@ -347,3 +347,25 @@ def test_pinned_folder_marker_replacement_is_not_adopted(instance):
     assert transport.run_once()["state"] == "folder_ownership_changed"
     assert json.loads(path.read_text()) == value
     post(a, "transport", {"root": str(root), "enabled": True}, status=409)
+
+
+def test_missing_posix_flags_do_not_break_import_or_disabled_transport(instance, monkeypatch):
+    import importlib
+    import os
+    from backend.peer_sync import folder
+    a = instance("unsupported")
+    post(a, "identity")
+    transport, root = configured(a)
+    before = list(root.iterdir())
+    with monkeypatch.context() as patch:
+        patch.delattr(os, "O_NOFOLLOW")
+        patch.delattr(os, "O_DIRECTORY")
+        importlib.reload(folder)  # Formerly raised AttributeError, preventing ALL app startup.
+        from backend.peer_sync import router
+        importlib.reload(router)
+        assert folder.FolderTransport(a.sessions).run_once()["state"] == "folder_transport_unsupported_platform"
+        post(a, "transport", {"root": str(root), "enabled": True}, status=422)
+        post(a, "transport", {"root": str(root), "enabled": False})
+        assert folder.FolderTransport(a.sessions).run_once()["state"] == "disabled"
+    importlib.reload(folder)
+    assert before == list(root.iterdir())

@@ -24,18 +24,26 @@ MARKER = ".manadj-peer-folder.json"
 FORMAT = {"format": "manadj-peer-folder", "version": 1}
 UUID_PATTERN = r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
 ARTIFACT = re.compile(rf"({UUID_PATTERN})_({UUID_PATTERN})_([0-9a-f]{{64}})")
-DIR_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+def directory_flags():
+    # Windows can start the application with transport disabled. Never emulate
+    # no-follow by silently omitting unsupported security flags.
+    if (os.name != "posix" or not hasattr(os, "O_DIRECTORY") or not hasattr(os, "O_NOFOLLOW")
+            or any(operation not in os.supports_dir_fd for operation in (os.open, os.mkdir, os.link, os.unlink))
+            or os.scandir not in os.supports_fd):
+        raise SyncError(422, "folder_transport_unsupported_platform")
+    return os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
 
 
 @contextmanager
 def root_fd(root):
+    flags = directory_flags()
     path = Path(root)
     if not path.is_absolute() or ".." in path.parts:
         raise SyncError(422, "absolute_no_traversal_root_required")
-    fd = os.open(path.anchor, DIR_FLAGS)
+    fd = os.open(path.anchor, flags)
     try:
         for part in path.parts[1:]:
-            child = os.open(part, DIR_FLAGS, dir_fd=fd)
+            child = os.open(part, flags, dir_fd=fd)
             os.close(fd)
             fd = child
         yield fd
@@ -44,6 +52,7 @@ def root_fd(root):
 
 
 def read_json(fd, name, limit=MAX_EXPORT):
+    directory_flags()
     file_fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=fd)
     with os.fdopen(file_fd, "rb") as stream:
         info = os.fstat(stream.fileno())
@@ -68,6 +77,7 @@ def immutable_json(fd, name, value):
     link() is the no-replace atomic publication operation (rename overwrites).
     A crash before the DB cursor is harmless: existing canonical content wins.
     """
+    directory_flags()
     try:
         existing = read_json(fd, name)
     except FileNotFoundError:
@@ -195,7 +205,7 @@ class FolderTransport:
             manifest = Manifest.model_validate_json(source.manifest_json)
             chunks = PeerSync(db)._chunks(sid)
         try:
-            fd = os.open(key, DIR_FLAGS, dir_fd=root)
+            fd = os.open(key, directory_flags(), dir_fd=root)
         except FileNotFoundError:
             if published:
                 self._publication(sid, "file_missing")
@@ -204,7 +214,7 @@ class FolderTransport:
                 raise SyncError(422, "folder_entry_limit")
             os.mkdir(key, mode=0o700, dir_fd=root)
             os.fsync(root)
-            fd = os.open(key, DIR_FLAGS, dir_fd=root)
+            fd = os.open(key, directory_flags(), dir_fd=root)
         try:
             expected = manifest.model_dump(mode="json")
             complete = self._complete(local, sid, source.manifest_sha256, manifest.chunk_sha256)
@@ -267,7 +277,7 @@ class FolderTransport:
         if origin not in accepted:
             self._receipt(key, "unknown_source")
             return
-        fd = os.open(key, DIR_FLAGS, dir_fd=root)
+        fd = os.open(key, directory_flags(), dir_fd=root)
         try:
             bundle = self._read_bundle(fd, key)
             with self.sessions() as db:
