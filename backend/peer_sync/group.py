@@ -23,7 +23,15 @@ from .group_contracts import (
     sign,
     unpack,
 )
-from .models import DeviceGroup, GroupAck, GroupMember, GroupOperation, GroupPossession, SyncSession
+from .models import (
+    DeviceGroup,
+    GroupAck,
+    GroupMember,
+    GroupOperation,
+    GroupPossession,
+    SyncLocal,
+    SyncSession,
+)
 from .service import PeerSync, SyncError, validate_complete
 
 MAX_OPERATION_BYTES = 1024 * 1024
@@ -48,7 +56,15 @@ class GroupSync:
         group = self.db.get(DeviceGroup, self.group_id)
         if group is None:
             raise SyncError(403, "unknown_device_group")
-        self._member(group.device_id)
+        member = self._member(group.device_id)
+        local = self.db.get(SyncLocal, 1)
+        try:
+            public = Ed25519PrivateKey.from_private_bytes(decode(group.private_seed_b64)).public_key().public_bytes_raw()
+            consistent = local is not None and local.replica_id == group.device_id and public == decode(member.public_key_b64)
+        except (ValueError, TypeError):
+            consistent = False
+        if not consistent:
+            raise SyncError(403, "group_local_authority_invalid")
         return group
 
     def _member(self, device_id):

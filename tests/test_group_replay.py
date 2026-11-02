@@ -129,3 +129,45 @@ def test_explicit_binding_rejects_wrong_selection_identity_and_stale_generation(
     post(peer, path + "/bindings", {"logical_track_id": value["assets"][1]["logical_track_id"],
         "selection_id": selection_b["selection_id"], "incarnation": selection_b["incarnation"]})
     get(peer, path + "/source?generation=old", status=409)
+
+
+def test_selection_strict_body_and_local_owner_gate(instance):
+    peer, _, _ = receiver(instance)
+    post(peer, "group-replay/selections/73", {"decoded": True}, status=422)
+    response = peer.client.post("/api/peer-sync/group-replay/selections/73", content="{", headers={"Content-Type": "application/json"})
+    assert response.status_code == 422
+    response = peer.client.post("/api/peer-sync/group-replay/selections/73", json={}, headers={"Origin": "https://peer.example"})
+    assert response.status_code == 403
+
+
+@pytest.mark.parametrize("corruption", ["device-id", "local-id", "local-pin", "private-seed"])
+def test_corrupt_local_authority_never_reclassifies_received_evidence_as_own_raw_history(instance, corruption):
+    from backend.peer_sync.models import DeviceGroup, GroupMember, SyncLocal
+    from backend.peer_sync.service import SyncError
+    from tests.test_device_group_mesh import push, setup
+    from tests.test_peer_session_exchange import export, seed
+    (a, phone, _), gid, ids, _ = setup(instance)
+    sid = str(uuid4())
+    seed(a, 1, session_uuid=sid)
+    export(a, sid)
+    seed(phone, 1, session_uuid=sid)
+    issued = call(a, gid, "issue", sid)
+    push(a, phone, gid, ids[1]["device_id"], issued)
+    with phone.sessions() as db:
+        group = db.get(DeviceGroup, gid)
+        if corruption == "device-id":
+            group.device_id = ids[0]["device_id"]
+        elif corruption == "local-id":
+            db.get(SyncLocal, 1).replica_id = ids[0]["device_id"]
+        elif corruption == "local-pin":
+            db.get(GroupMember, (gid, group.device_id)).public_key_b64 = ids[0]["public_key_b64"]
+        else:
+            group.private_seed_b64 = encode(bytes(32))
+        db.commit()
+    with pytest.raises(SyncError):
+        call(phone, gid, "_local")
+    normal = history(phone)
+    detail = normal.get(f"/api/sessions/{sid}").json()
+    assert detail["events"] == [] and detail["replay_generation"] is None and detail["group_history"]
+    assert normal.get(f"/api/sessions/{sid}/audio/1?generation=anything").status_code == 409
+    assert normal.post(f"/api/sessions/{sid}/chunks", json={"seq": 2, "events": []}).status_code == 409

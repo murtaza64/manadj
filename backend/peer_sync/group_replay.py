@@ -65,7 +65,7 @@ class GroupReplay:
     def __init__(self, db):
         self.db = db
 
-    def select(self, local_id):
+    def select(self, local_id, body=None):
         peer = PeerSync(self.db)
         peer._lock()
         track = peer._track(local_id)

@@ -80,8 +80,7 @@ async def invoke_replay(db, method, *args, request=None, model=None):
 
 @router.post("/group-replay/selections/{local_id}")
 async def replay_select(local_id: LocalId, request: Request, db: Database):
-    await parse(request, Strict)
-    return await invoke_replay(db, "select", local_id)
+    return await invoke_replay(db, "select", local_id, request=request, model=Strict)
 
 
 @router.get("/group-replay/{gid}/{oid}/readiness")
