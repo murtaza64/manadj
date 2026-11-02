@@ -91,6 +91,9 @@ private fun dateLabel(iso: String): String = local(iso)?.let { "${it.format(dayF
 @Composable private fun SessionList(model: SessionModel) {
     model.listError?.let { Text("Session list: $it${if (model.headers.isNotEmpty()) " · showing the cached list" else ""}", Modifier.padding(12.dp), Ink.warning, 11, lines = 3) }
     model.peerListError?.let { Text("Received Sessions: $it · cached metadata is not replay-ready", Modifier.padding(12.dp), Ink.warning, 11, lines = 3) }
+    if (model.unscopedUuidCollisions.isNotEmpty()) Text(
+        "${model.unscopedUuidCollisions.size} UNSCOPED LOCAL/CACHED UUID COLLISION(S) · evidence retained; use guarded received entries, never local Track IDs",
+        Modifier.padding(12.dp).testTag("session-uuid-collision"), Ink.warning, 11, lines = 3)
     val all = model.sessions
     if (all.isEmpty() && !model.refreshing) Text("No Sessions yet. Sessions are recorded while you play, here and on the desktop.", Modifier.padding(12.dp), Ink.muted, 12, lines = 3)
     val now = remember(all) { java.time.Instant.now() }

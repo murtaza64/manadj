@@ -15,6 +15,9 @@ import dev.manadj.app.*
 import dev.manadj.app.library.LibraryHolder
 import dev.manadj.audio.*
 import dev.manadj.library.LibraryRepository
+import dev.manadj.library.session.RecordedSessions
+import dev.manadj.library.session.SessionHeader
+import dev.manadj.library.session.SessionLog
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.*
@@ -40,6 +43,7 @@ class PeerSessionUiTest {
     private val sid="44444444-4444-4444-8444-444444444444"
     private val origin="55555555-5555-4555-8555-555555555555"
     private val logical="66666666-6666-4666-8666-666666666666"
+    private val phoneSid="77777777-7777-4777-8777-777777777777"
     private val generation="b".repeat(64)
     private val audio=ByteArray(1000) { (it%127).toByte() }
     private val sha=MessageDigest.getInstance("SHA-256").digest(audio).joinToString("") { "%02x".format(it) }
@@ -78,6 +82,7 @@ class PeerSessionUiTest {
                 var code=200
                 val bytes=when {
                 path=="/api/device-sync/sessions" -> "[]".toByteArray()
+                path.startsWith("/api/device-sync/sessions/") -> {code=409;byteArrayOf()} // retain generated phone evidence, no peer write authority
                 path=="/api/device-sync/peer-sessions" -> {
                     if(peerListFails) {code=503;byteArrayOf()} else JSONObject().put("version",1).put("items",JSONArray().put(item())).toString().toByteArray()
                 }
@@ -92,6 +97,25 @@ class PeerSessionUiTest {
         },"peer-ui-fixture").apply {isDaemon=true;start()}
         val app=RuntimeEnvironment.getApplication()
         val repo=LibraryRepository(File(app.cacheDir,"peer-ui"),"http://127.0.0.1:${server.localPort}")
+        repo.store.writeSnapshotText("""{"version":1,"settings":{},"tag_categories":[],"tags":[],"links":[],"transitions":[],"cameos":[],"takes":[],"playlists":[],"tracks":[
+            {"id":1,"title":"Unrelated current receiver one","file_name":"unrelated.wav","audio_rev":null,"tag_ids":[],"hot_cues":[]},
+            {"id":77,"title":"Safe noncollision phone track","file_name":"phone.wav","audio_rev":"r77","tag_ids":[],"hot_cues":[]}
+        ]}""")
+        kotlinx.coroutines.runBlocking {repo.open()}
+        repo.store.audioFile(repo.library.value!!.track(77)!!)!!.also {it.parentFile!!.mkdirs();it.writeBytes(audio)}
+        // Reset only the test singleton reference to this test's generated public store. Existing
+        // files (including an independently injected review fixture) are never deleted/replaced.
+        val phone=RecordedSessions(File(app.filesDir,"sessions-cache/recorded"))
+        SessionRecording::class.java.getDeclaredField("store").apply {isAccessible=true}.set(null,phone)
+        SessionRecording::class.java.getDeclaredField("app").apply {isAccessible=true}.set(null,app)
+        fun record(uuid: String,track: Int) {
+            if(phone.meta(uuid)!=null) return
+            phone.open(uuid,"2026-11-02T00:00:00Z")
+            phone.append(uuid,0,JSONArray("""[{"t":0,"kind":"load","channel":"A","trackId":$track},{"t":0,"kind":"transport","channel":"A","action":"play","playhead":0},{"t":6,"kind":"transport","channel":"A","action":"pause","playhead":6}]"""))
+            phone.end(uuid,"2026-11-02T00:00:06Z")
+        }
+        record(sid,1)
+        if(testName.methodName=="noncollisionPhoneRecordingStillOpensAndReplays") record(phoneSid,77)
         // A generated source-desktop cache carries the same UUID but foreign Track1.
         val legacy=File(app.filesDir,"sessions-cache").apply {mkdirs()}
         File(legacy,"sessions.json").writeText("""[{"uuid":"$sid","started_at":"2026-11-02T00:00:00Z","ended_at":"2026-11-02T00:00:06Z","take_count":0}]""")
@@ -194,6 +218,48 @@ class PeerSessionUiTest {
         waitFor {model.playing && PeerUiAudio.loads==2 && model.replayEpoch!=null && player.decks.getValue(DeckId.A).ready && player.decks.getValue(DeckId.A).snapshot?.loadId==2L}
         assertNotEquals(99L,player.decks.getValue(DeckId.A).snapshot?.loadId)
         assertTrue(details>=5)
+    }
+
+    @Test fun phoneRecordedUuidCollisionDeduplicatesAndStaleLocalHeaderUsesGuardedProjection() {
+        val phone=SessionRecording.init(compose.activity)
+        val original=phone.detail(sid)
+        val rows=model.sessions.filter {it.uuid==sid}
+        assertEquals(1,rows.size);assertNotNull(rows.single().peer);assertFalse(rows.single().local)
+        compose.onNodeWithTag("session-uuid-collision").assertExists()
+        compose.runOnUiThread {model.open(SessionHeader(sid,null,"2026-11-02T00:00:06Z",0,local=true))}
+        waitFor {model.log!=null}
+        assertNotNull(model.peerReplay);assertFalse(model.header!!.local)
+        assertEquals("Resolved receiver nine",model.track(9)?.title);assertNull(model.track(1))
+        assertEquals(original,phone.detail(sid));assertNotNull(phone.meta(sid))
+    }
+
+    @Test fun directShowAndFailedReceivedValidationNeverFallBackToPhoneEvidence() {
+        val phone=SessionRecording.init(compose.activity)
+        val original=phone.detail(sid)
+        kotlinx.coroutines.runBlocking {
+            try {model.show(SessionHeader(sid,null,null,0,local=true),SessionLog.parse(original));fail("Direct local show must refuse a known received UUID")}
+            catch(expected: IllegalArgumentException) {assertTrue(expected.message!!.contains("guarded"))}
+        }
+        state="assets_unavailable"
+        compose.runOnUiThread {model.open(SessionHeader(sid,null,null,0,local=true))}
+        waitFor {model.opening==null && model.notice?.startsWith("Open failed:")==true}
+        assertNull(model.log);assertNull(model.peerReplay);assertEquals(0,PeerUiAudio.loads)
+        assertEquals(original,phone.detail(sid));assertNotNull(phone.meta(sid))
+    }
+
+    @Test fun noncollisionPhoneRecordingStillOpensAndReplays() {
+        val phone=SessionRecording.init(compose.activity)
+        val original=phone.detail(phoneSid)
+        val h=model.sessions.single {it.uuid==phoneSid}
+        assertTrue(h.local);assertNull(h.peer)
+        compose.runOnUiThread {model.open(h)}
+        waitFor {model.log?.uuid==phoneSid}
+        assertNull(model.peerReplay);assertEquals("Safe noncollision phone track",model.track(77)?.title)
+        compose.mainClock.autoAdvance=false
+        compose.runOnUiThread {model.play(player)}
+        waitFor {model.playing && PeerUiAudio.loads==1}
+        assertEquals("library:77:r77",player.decks.getValue(DeckId.A).source?.id)
+        assertEquals(original,phone.detail(phoneSid));assertNotNull(phone.meta(phoneSid))
     }
 }
 

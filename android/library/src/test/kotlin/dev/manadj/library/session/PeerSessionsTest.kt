@@ -27,6 +27,7 @@ class PeerSessionsTest {
     private var detailCalls = 0
     private var foreignCalls = 0
     private var conflicts = 0
+    private var omitPeer = false
 
     private fun item() = JSONObject().put("session_uuid",sid).put("origin_replica_id",origin).put("recording_origin","Original phone")
         .put("manifest_sha256",manifest).put("started_at","2026-11-02T00:00:00Z").put("ended_at","2026-11-02T00:00:06Z")
@@ -52,7 +53,7 @@ class PeerSessionsTest {
             if (ex.requestHeaders.getFirst(DEVICE_TOKEN_HEADER) != "synthetic-paired-token") { ex.sendResponseHeaders(401,-1); ex.close(); return@createContext }
             val path = ex.requestURI.path
             val body = when {
-                path == "/api/device-sync/peer-sessions" -> JSONObject().put("version",1).put("items",JSONArray().put(item())).toString().toByteArray()
+                path == "/api/device-sync/peer-sessions" -> JSONObject().put("version",1).put("items",if (omitPeer) JSONArray() else JSONArray().put(item())).toString().toByteArray()
                 ex.requestURI.rawQuery != "generation=$generation" || state != "ready" -> { ex.sendResponseHeaders(409,-1); ex.close(); return@createContext }
                 path.endsWith("/audio/9") -> { audioCalls++; audio }
                 path == "/api/device-sync/peer-sessions/$sid" -> { detailCalls++; detail().toString().toByteArray() }
@@ -154,5 +155,24 @@ class PeerSessionsTest {
         val old=SessionStore(legacy,{SyncClient("http://127.0.0.1:${server.address.port}")})
         assertFails {old.log(SessionHeader(sid,null,"2026-11-02T00:00:06Z",0))}
         assertEquals(0,foreignCalls)
+    }
+
+    @Test fun receivedUuidFenceSurvivesOmissionAndRepositoryRestart() = runBlocking {
+        repo.peerSessions.refresh()
+        omitPeer=true
+        assertTrue(repo.peerSessions.refresh().isEmpty())
+        assertTrue(sid in repo.peerSessions.knownUuids!!)
+        val restarted=LibraryRepository(root,repo.baseUrl,deviceToken="synthetic-paired-token")
+        assertTrue(restarted.peerSessions.cached().isEmpty())
+        assertTrue(sid in restarted.peerSessions.knownUuids!!)
+    }
+
+    @Test fun corruptUuidFenceFailsClosedInsteadOfForgettingAuthority() = runBlocking {
+        repo.peerSessions.refresh()
+        java.io.File(root,"peer-sessions/known-uuids.json").writeText("truncated decoy")
+        val restarted=LibraryRepository(root,repo.baseUrl,deviceToken="synthetic-paired-token")
+        assertNull(restarted.peerSessions.knownUuids)
+        assertFailsWith<SyncException> {restarted.peerSessions.refresh()}
+        Unit
     }
 }

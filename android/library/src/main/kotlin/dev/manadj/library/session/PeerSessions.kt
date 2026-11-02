@@ -49,17 +49,32 @@ data class PeerReplay(val item: PeerSessionItem, val log: SessionLog, val tracks
 class PeerSessions(private val root: File, private val client: () -> SyncClient, private val io: CoroutineDispatcher = Dispatchers.IO) {
     private val lock = Mutex()
     private val listFile = File(root, "items.json")
+    private val knownFile = File(root, "known-uuids.json")
+    /** A received UUID never regains bare-ID authority when a list omits it or the desktop is offline. */
+    @Volatile var knownUuids: Set<String>? = runCatching {
+        val remembered = if (knownFile.isFile) JSONArray(knownFile.readText()).let { a ->
+            (0 until a.length()).map { peerUuid(a.getString(it)).lowercase() }.toSet()
+        } else emptySet()
+        remembered + if (listFile.isFile) parseList(listFile.readText()).map { it.uuid.lowercase() } else emptyList()
+    }.getOrNull()
+        private set
     fun cached(): List<PeerSessionItem> = runCatching { parseList(listFile.readText()).map { it.copy(checked = false) } }.getOrDefault(emptyList())
 
     suspend fun refresh(): List<PeerSessionItem> = withContext(io) { lock.withLock {
         val text = client().peerSessionsText()
         val items = parseList(text)
+        val known = knownUuids ?: throw SyncException("Peer UUID authority cache is unreadable; unscoped replay is disabled")
+        // Publish the fail-closed UUID fence before replacing the visible metadata list.
+        val next = known + items.map { it.uuid.lowercase() }
+        store(knownFile, JSONArray(next.sorted()).toString())
+        knownUuids = next
         store(listFile, text)
         items
     } }
 
     /** Fresh desktop validation on every open/start/resume/seek; deliberately no cached-detail fallback. */
     suspend fun open(item: PeerSessionItem): PeerReplay = withContext(io) { lock.withLock {
+        require(knownUuids?.contains(item.uuid.lowercase()) == true) { "Known received UUID authority required" }
         require(item.canValidate) { "Peer Session is not resolved/materialized with exact audio" }
         val text = client().peerSessionText(item.uuid, requireNotNull(item.generation))
         val replay = parseDetail(text)

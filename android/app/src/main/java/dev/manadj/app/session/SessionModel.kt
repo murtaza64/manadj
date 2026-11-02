@@ -101,7 +101,10 @@ class SessionModel(application: Application) : AndroidViewModel(application) {
     /** Load failures reported by the library path (download/missing), per deck. */
     private val loadFailure = arrayOfNulls<String>(4)
 
-    fun track(id: Int?): LibraryTrack? = id?.let { if (peerReplay != null) peerReplay!!.tracks[it]?.track else repo.library.value?.track(it) }
+    fun track(id: Int?): LibraryTrack? = id?.let {
+        if (peerReplay != null) peerReplay!!.tracks[it]?.track
+        else if (log != null && !unscopedUuidAllowed(log!!.uuid)) null else repo.library.value?.track(it)
+    }
     fun sourceId(track: LibraryTrack): String = peerReplay?.let { it.tracks.getValue(track.id).sourceId(it) } ?: LibraryHolder.sourceId(track)
     /** The synced Library (collect in composition so titles resolve once it loads). */
     val library get() = repo.library
@@ -127,8 +130,40 @@ class SessionModel(application: Application) : AndroidViewModel(application) {
     /** The list: this phone's recordings and the desktop's Sessions (a pushed recording appears once, as local). */
     val sessions: List<SessionHeader> get() {
         val local = recorded.map { it.uuid }.toSet()
-        val managed = peerItems.filter { it.materialized }.map { it.uuid }.toSet()
-        return recorded + headers.filter { it.uuid !in local && it.uuid !in managed } + peerItems.map { it.header() }
+        return recorded.filter { unscopedUuidAllowed(it.uuid) } +
+            headers.filter { it.uuid !in local && unscopedUuidAllowed(it.uuid) } + peerItems.map { it.header() }
+    }
+    val unscopedUuidCollisions get() = (recorded + headers).map { it.uuid }.filterNot(::unscopedUuidAllowed).distinct()
+    private fun unscopedUuidAllowed(uuid: String) = repo.peerSessions.knownUuids?.let { uuid.lowercase() !in it } == true
+
+    /** Header flags are hints, not authority: every entry source resolves through the same UUID fence. */
+    private fun authoritativeHeader(requested: SessionHeader): SessionHeader? {
+        val matches = peerItems.filter { it.uuid.equals(requested.uuid, ignoreCase = true) }
+        if (repo.peerSessions.knownUuids == null || matches.size > 1) {
+            notice = "Session UUID authority is unavailable or ambiguous; replay refused. Local evidence is retained."
+            return null
+        }
+        val peer = matches.singleOrNull()
+        if (peer != null) {
+            val requestedPeer = requested.peer
+            if (requestedPeer != null && (requestedPeer.key != peer.key || requestedPeer.generation != peer.generation)) {
+                notice = "Received Session mapping changed; refresh/reopen. Local evidence is retained."
+                return null
+            }
+            return peer.header()
+        }
+        if (requested.peer != null || !unscopedUuidAllowed(requested.uuid)) {
+            notice = "Session UUID conflicts with received evidence without a current guarded projection; replay refused. Local evidence is retained."
+            return null
+        }
+        return requested
+    }
+
+    private fun refuseUnscopedReplay(): Boolean {
+        if (peerReplay != null || log == null || unscopedUuidAllowed(log!!.uuid)) return false
+        stop()
+        notice = "Session UUID conflicts with received evidence; reopen its guarded received entry. Local evidence is retained."
+        return true
     }
 
     fun refresh() {
@@ -151,6 +186,10 @@ class SessionModel(application: Application) : AndroidViewModel(application) {
                     peerItems = peerItems.map { it.copy(checked = false) }
                     peerListError = if (e is dev.manadj.library.SyncException && e.status == 404) "Desktop has no peer Session adapter yet" else e.message
                 }
+                if (peerReplay == null && log != null && !unscopedUuidAllowed(log!!.uuid)) {
+                    close()
+                    notice = "Session UUID now conflicts with received evidence; unscoped replay closed. Local evidence is retained."
+                }
                 refreshing = false
             }
         }
@@ -165,7 +204,7 @@ class SessionModel(application: Application) : AndroidViewModel(application) {
 
     /** Read [h]'s summary in the background once (parses a cached log at most once per Session). */
     fun summarize(h: SessionHeader) {
-        if (h.peer != null) return // Never interpret peer receiver IDs using a bare-ID cached summary.
+        if (h.peer != null || !unscopedUuidAllowed(h.uuid)) return // No raw cached/local summary for received UUIDs.
         if (h.uuid in audibleTracks || !isCached(h) || !summarizing.add(h.uuid)) return
         viewModelScope.launch(summaryIo) {
             val ids = if (h.local) runCatching { SessionLog.parse(recordedStore.detail(h.uuid)).audibleTrackIds }.getOrNull() else store.audibleTracks(h)
@@ -174,8 +213,9 @@ class SessionModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun open(h: SessionHeader) {
+    fun open(requested: SessionHeader) {
         if (opening != null) return
+        val h = authoritativeHeader(requested) ?: return
         h.peer?.let { if (!it.canValidate) { peerInfo = it; return } }
         opening = h.key
         viewModelScope.launch {
@@ -190,6 +230,12 @@ class SessionModel(application: Application) : AndroidViewModel(application) {
 
     /** Make [parsed] the open Session (also the test entry: no desktop needed). */
     suspend fun show(h: SessionHeader, parsed: SessionLog, peer: PeerReplay? = null) = coroutineScope {
+        require(h.uuid == parsed.uuid) { "Session header/evidence UUID mismatch" }
+        require(peer != null || unscopedUuidAllowed(parsed.uuid)) { "Received Session UUID requires its guarded projection; local evidence is retained" }
+        if (peer != null) {
+            val authoritative = authoritativeHeader(h)
+            require(authoritative?.peer?.key == peer.item.key && authoritative?.peer?.generation == peer.generation) { "Current authoritative peer mapping required" }
+        }
         require(h.peer == null || peer != null && h.peer?.key == peer.item.key && parsed === peer.log) { "Guarded peer projection required" }
         require(if (peer == null) parsed.replayGeneration == null else parsed.replayGeneration == peer.generation) { "Peer Session requires fresh generation validation" }
         require(parsed.events.isNotEmpty() && parsed.duration > 0) { "Session has no recorded duration" }
@@ -198,7 +244,8 @@ class SessionModel(application: Application) : AndroidViewModel(application) {
         val drift = withContext(Dispatchers.Default) { parsed.tickDivergence() }
         val tl = timelineJob.await()
         peerReplay = peer; peerInfo = null; peerDecoded.clear(); waves.clear(); decodeOffsets.clear()
-        header = h; log = parsed; driver = null; audibleTracks[h.key] = parsed.audibleTrackIds; recordingDrift = drift; timeline = tl; focus = null
+        val displayHeader = peer?.item?.header() ?: h
+        header = displayHeader; log = parsed; driver = null; audibleTracks[displayHeader.key] = parsed.audibleTrackIds; recordingDrift = drift; timeline = tl; focus = null
         if (peer == null) {
             loadWaves(parsed)
             for (id in parsed.appearances.map { it.trackId }.distinct()) track(id)?.let { if (repo.audioState(it) == dev.manadj.library.AudioState.Cached) probe(id) }
@@ -266,6 +313,7 @@ class SessionModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun play(player: PlayerModel) {
+        if (refuseUnscopedReplay()) return
         if (peerReplay != null) { validatePeer { beginPlay(player) }; return }
         beginPlay(player)
     }
@@ -273,6 +321,7 @@ class SessionModel(application: Application) : AndroidViewModel(application) {
     private fun validatePeer(action: () -> Unit) {
         if (peerChecking) return
         val expected = peerReplay ?: return
+        if (authoritativeHeader(header ?: return)?.peer?.let { it.key == expected.item.key && it.generation == expected.generation } != true) { stop(); return }
         peerChecking = true
         peerValidation = viewModelScope.launch {
             try {
@@ -324,6 +373,7 @@ class SessionModel(application: Application) : AndroidViewModel(application) {
 
     /** Relocate the Session clock; decks follow (parked while paused). */
     fun seek(t: Double, player: PlayerModel) {
+        if (refuseUnscopedReplay()) return
         if (peerReplay != null) {
             val resume = playing || preparing
             stop()

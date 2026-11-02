@@ -20,6 +20,8 @@
 - Track labels, grids/cues and source identity come from guarded receiver metadata, not a possibly stale phone Library row. Native loads have generation-qualified source IDs.
 - Decoded reuse also requires the verified load's PlayerModel request generation and native snapshot load ID. A same-label decoded replacement cannot inherit readiness. Importing is never a ready decode receipt; live replacement stops peer replay instead of silently continuing.
 - Normal Session playback is unchanged. Legacy fresh lists prune old source-UUID cache visibility; generation-marked details cannot enter the old offline Session path.
+- Known received UUIDs fence every entry source, including phone-recorded copies, stale caller headers, direct model show/start/seek and cached summaries. Same-UUID local evidence remains on disk but deduplicates to the current guarded received entry; unavailable/ambiguous mappings refuse replay, never raw-ID fallback.
+- A durable UUID fence survives metadata-list omission and repository restart. Unreadable authority state fails closed; it cannot silently restore a recorded/cache entry's old IDs. A newly discovered collision closes an already-open unscoped view/replay without deleting its evidence.
 - No peer bare-ID waveform, stem or diagnostic-probe requests. The current timeline can show no waveform until local analysis is available; this is not an audio-readiness claim.
 
 ## Checks
