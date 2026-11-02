@@ -222,10 +222,17 @@ class PeerSync:
     def receive(self, bundle):
         self._lock()
         local = self.identity()["replica_id"]
+        if str(bundle.manifest.origin_replica_id) == local or self.db.get(SyncSource, str(bundle.manifest.origin_replica_id)) is None:
+            raise SyncError(403, "source_namespace_not_explicitly_accepted")
+        return self._store_verified_bundle(bundle)
+
+    def _store_verified_bundle(self, bundle):
+        """Caller authenticates namespace and owns fresh write transaction.
+
+        Group projection uses cryptographic membership, never creates legacy trust.
+        """
         manifest = bundle.manifest
         origin, sid = str(manifest.origin_replica_id), str(manifest.session_uuid)
-        if origin == local or self.db.get(SyncSource, origin) is None:
-            raise SyncError(403, "source_namespace_not_explicitly_accepted")
         hashed = digest(manifest.model_dump(mode="json"))
         stored = self.db.get(SyncSession, sid)
         if stored is not None and (stored.direction != "received" or stored.manifest_sha256 != hashed):

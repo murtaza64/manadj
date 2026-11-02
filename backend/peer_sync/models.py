@@ -1,4 +1,4 @@
-from sqlalchemy import CheckConstraint, Column, ForeignKey, Integer, String, Text
+from sqlalchemy import CheckConstraint, Column, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import backref, relationship
 
 from ..models import Base
@@ -102,3 +102,39 @@ class FolderReceipt(Base):
     received = Column(Integer, nullable=False, default=0)
     state = Column(String(80), nullable=False)
     readiness = Column(String(80), nullable=True)
+
+
+class DeviceGroup(Base):
+    __tablename__ = "device_groups"
+    group_id = Column(String(36), primary_key=True)
+    device_id = Column(String(36), nullable=False)
+    private_seed_b64 = Column(String(44), nullable=False)
+
+
+class GroupMember(Base):
+    __tablename__ = "device_group_members"
+    group_id = Column(String(36), ForeignKey("device_groups.group_id"), primary_key=True)
+    device_id = Column(String(36), primary_key=True)
+    public_key_b64 = Column(String(44), nullable=False)
+    revoked = Column(Integer, nullable=False, default=0)
+
+
+class GroupOperation(Base):
+    __tablename__ = "device_group_operations"
+    cursor = Column(Integer, primary_key=True, autoincrement=True)
+    group_id = Column(String(36), ForeignKey("device_groups.group_id"), nullable=False)
+    operation_id = Column(String(36), nullable=False)
+    origin_device_id = Column(String(36), nullable=False)
+    session_uuid = Column(String(36), nullable=False)
+    sha256 = Column(String(64), nullable=False)
+    body_b64 = Column(Text, nullable=False)
+    signature_b64 = Column(String(88), nullable=False)
+    __table_args__ = (UniqueConstraint("group_id", "operation_id"), {"sqlite_autoincrement": True})
+
+
+class GroupAck(Base):
+    __tablename__ = "device_group_acks"
+    group_id = Column(String(36), ForeignKey("device_groups.group_id"), primary_key=True)
+    operation_id = Column(String(36), primary_key=True)
+    device_id = Column(String(36), primary_key=True)
+    sha256 = Column(String(64), nullable=False)
