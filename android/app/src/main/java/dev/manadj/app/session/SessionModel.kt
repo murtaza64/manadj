@@ -27,6 +27,20 @@ class SessionModel(application: Application) : AndroidViewModel(application) {
 
     var headers by mutableStateOf(store.cached())
         private set
+    var peerItems by mutableStateOf(repo.peerSessions.cached())
+        private set
+    var peerListError by mutableStateOf<String?>(null)
+        private set
+    var peerInfo by mutableStateOf<PeerSessionItem?>(null)
+    var peerReplay by mutableStateOf<PeerReplay?>(null)
+        private set
+    var peerChecking by mutableStateOf(false)
+        private set
+    private var peerValidation: Job? = null
+    private val peerLoads = arrayOfNulls<Job>(4)
+    private data class PeerDecodedProof(val sourceId: String, val requestGeneration: Long, var loadId: Long? = null)
+    /** Exact-file load provenance, independent of a reused receiver ID or unchanged source label. */
+    private val peerDecoded = mutableMapOf<Int, PeerDecodedProof>()
     var listError by mutableStateOf<String?>(null)
         private set
     var refreshing by mutableStateOf(false)
@@ -87,7 +101,11 @@ class SessionModel(application: Application) : AndroidViewModel(application) {
     /** Load failures reported by the library path (download/missing), per deck. */
     private val loadFailure = arrayOfNulls<String>(4)
 
-    fun track(id: Int?): LibraryTrack? = id?.let { repo.library.value?.track(it) }
+    fun track(id: Int?): LibraryTrack? = id?.let {
+        if (peerReplay != null) peerReplay!!.tracks[it]?.track
+        else if (log != null && !unscopedUuidAllowed(log!!.uuid)) null else repo.library.value?.track(it)
+    }
+    fun sourceId(track: LibraryTrack): String = peerReplay?.let { it.tracks.getValue(track.id).sourceId(it) } ?: LibraryHolder.sourceId(track)
     /** The synced Library (collect in composition so titles resolve once it loads). */
     val library get() = repo.library
 
@@ -112,7 +130,40 @@ class SessionModel(application: Application) : AndroidViewModel(application) {
     /** The list: this phone's recordings and the desktop's Sessions (a pushed recording appears once, as local). */
     val sessions: List<SessionHeader> get() {
         val local = recorded.map { it.uuid }.toSet()
-        return recorded + headers.filter { it.uuid !in local }
+        return recorded.filter { unscopedUuidAllowed(it.uuid) } +
+            headers.filter { it.uuid !in local && unscopedUuidAllowed(it.uuid) } + peerItems.map { it.header() }
+    }
+    val unscopedUuidCollisions get() = (recorded + headers).map { it.uuid }.filterNot(::unscopedUuidAllowed).distinct()
+    private fun unscopedUuidAllowed(uuid: String) = repo.peerSessions.knownUuids?.let { uuid.lowercase() !in it } == true
+
+    /** Header flags are hints, not authority: every entry source resolves through the same UUID fence. */
+    private fun authoritativeHeader(requested: SessionHeader): SessionHeader? {
+        val matches = peerItems.filter { it.uuid.equals(requested.uuid, ignoreCase = true) }
+        if (repo.peerSessions.knownUuids == null || matches.size > 1) {
+            notice = "Session UUID authority is unavailable or ambiguous; replay refused. Local evidence is retained."
+            return null
+        }
+        val peer = matches.singleOrNull()
+        if (peer != null) {
+            val requestedPeer = requested.peer
+            if (requestedPeer != null && (requestedPeer.key != peer.key || requestedPeer.generation != peer.generation)) {
+                notice = "Received Session mapping changed; refresh/reopen. Local evidence is retained."
+                return null
+            }
+            return peer.header()
+        }
+        if (requested.peer != null || !unscopedUuidAllowed(requested.uuid)) {
+            notice = "Session UUID conflicts with received evidence without a current guarded projection; replay refused. Local evidence is retained."
+            return null
+        }
+        return requested
+    }
+
+    private fun refuseUnscopedReplay(): Boolean {
+        if (peerReplay != null || log == null || unscopedUuidAllowed(log!!.uuid)) return false
+        stop()
+        notice = "Session UUID conflicts with received evidence; reopen its guarded received entry. Local evidence is retained."
+        return true
     }
 
     fun refresh() {
@@ -128,11 +179,23 @@ class SessionModel(application: Application) : AndroidViewModel(application) {
                 listError = if (e.status == 404) "this desktop has no Session sync yet — update the desktop app" else e.message
             }
             catch (e: Exception) { listError = e.message ?: e.toString() }
-            finally { refreshing = false }
+            finally {
+                try { peerItems = repo.peerSessions.refresh(); peerListError = null }
+                catch (e: CancellationException) { throw e }
+                catch (e: Exception) {
+                    peerItems = peerItems.map { it.copy(checked = false) }
+                    peerListError = if (e is dev.manadj.library.SyncException && e.status == 404) "Desktop has no peer Session adapter yet" else e.message
+                }
+                if (peerReplay == null && log != null && !unscopedUuidAllowed(log!!.uuid)) {
+                    close()
+                    notice = "Session UUID now conflicts with received evidence; unscoped replay closed. Local evidence is retained."
+                }
+                refreshing = false
+            }
         }
     }
 
-    fun isCached(h: SessionHeader) = h.local || store.isCached(h.uuid)
+    fun isCached(h: SessionHeader) = h.peer == null && (h.local || store.isCached(h.uuid))
 
     /** List row summaries: audible track ids per cached Session (absent = not on the phone / not read yet). */
     val audibleTracks = mutableStateMapOf<String, List<Int>>()
@@ -141,6 +204,7 @@ class SessionModel(application: Application) : AndroidViewModel(application) {
 
     /** Read [h]'s summary in the background once (parses a cached log at most once per Session). */
     fun summarize(h: SessionHeader) {
+        if (h.peer != null || !unscopedUuidAllowed(h.uuid)) return // No raw cached/local summary for received UUIDs.
         if (h.uuid in audibleTracks || !isCached(h) || !summarizing.add(h.uuid)) return
         viewModelScope.launch(summaryIo) {
             val ids = if (h.local) runCatching { SessionLog.parse(recordedStore.detail(h.uuid)).audibleTrackIds }.getOrNull() else store.audibleTracks(h)
@@ -149,12 +213,15 @@ class SessionModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun open(h: SessionHeader) {
+    fun open(requested: SessionHeader) {
         if (opening != null) return
-        opening = h.uuid
+        val h = authoritativeHeader(requested) ?: return
+        h.peer?.let { if (!it.canValidate) { peerInfo = it; return } }
+        opening = h.key
         viewModelScope.launch {
             try {
-                show(h, if (h.local) withContext(Dispatchers.IO) { SessionLog.parse(recordedStore.detail(h.uuid)) } else store.log(h))
+                val peer = h.peer?.let { repo.peerSessions.open(it) }
+                show(peer?.item?.header() ?: h, peer?.log ?: if (h.local) withContext(Dispatchers.IO) { SessionLog.parse(recordedStore.detail(h.uuid)) } else store.log(h), peer)
             } catch (e: CancellationException) { throw e }
             catch (e: Exception) { notice = "Open failed: ${e.message ?: e}" }
             finally { opening = null }
@@ -162,21 +229,33 @@ class SessionModel(application: Application) : AndroidViewModel(application) {
     }
 
     /** Make [parsed] the open Session (also the test entry: no desktop needed). */
-    suspend fun show(h: SessionHeader, parsed: SessionLog) = coroutineScope {
+    suspend fun show(h: SessionHeader, parsed: SessionLog, peer: PeerReplay? = null) = coroutineScope {
+        require(h.uuid == parsed.uuid) { "Session header/evidence UUID mismatch" }
+        require(peer != null || unscopedUuidAllowed(parsed.uuid)) { "Received Session UUID requires its guarded projection; local evidence is retained" }
+        if (peer != null) {
+            val authoritative = authoritativeHeader(h)
+            require(authoritative?.peer?.key == peer.item.key && authoritative?.peer?.generation == peer.generation) { "Current authoritative peer mapping required" }
+        }
+        require(h.peer == null || peer != null && h.peer?.key == peer.item.key && parsed === peer.log) { "Guarded peer projection required" }
+        require(if (peer == null) parsed.replayGeneration == null else parsed.replayGeneration == peer.generation) { "Peer Session requires fresh generation validation" }
         require(parsed.events.isNotEmpty() && parsed.duration > 0) { "Session has no recorded duration" }
         stop()
         val timelineJob = async(Dispatchers.Default) { SessionTimeline(parsed) }
         val drift = withContext(Dispatchers.Default) { parsed.tickDivergence() }
         val tl = timelineJob.await()
-        header = h; log = parsed; driver = null; audibleTracks[h.uuid] = parsed.audibleTrackIds; recordingDrift = drift; timeline = tl; focus = null
-        loadWaves(parsed)
-        for (id in parsed.appearances.map { it.trackId }.distinct()) track(id)?.let { if (repo.audioState(it) == dev.manadj.library.AudioState.Cached) probe(id) }
+        peerReplay = peer; peerInfo = null; peerDecoded.clear(); waves.clear(); decodeOffsets.clear()
+        val displayHeader = peer?.item?.header() ?: h
+        header = displayHeader; log = parsed; driver = null; audibleTracks[displayHeader.key] = parsed.audibleTrackIds; recordingDrift = drift; timeline = tl; focus = null
+        if (peer == null) {
+            loadWaves(parsed)
+            for (id in parsed.appearances.map { it.trackId }.distinct()) track(id)?.let { if (repo.audioState(it) == dev.manadj.library.AudioState.Cached) probe(id) }
+        } else wavesJob?.cancel() // No unversioned receiver-ID waveform/audio requests for peer evidence.
         if (drift.isNotEmpty()) android.util.Log.w(TAG, "recording drift: ${drift.size} ticks > 5 ms, worst %.1f ms".format(drift.maxOf { abs(it.seconds) } * 1000))
         moveClock(parsed.activeStart); fit()
         deckErrors.indices.forEach { deckErrors[it] = null }
     }
 
-    fun close() { stop(); log = null; header = null; driver = null; recordingDrift = emptyList(); timeline = null; focus = null; wavesJob?.cancel() }
+    fun close() { stop(); log = null; header = null; peerReplay = null; peerInfo = null; driver = null; recordingDrift = emptyList(); timeline = null; focus = null; wavesJob?.cancel() }
 
     private var wavesJob: Job? = null
     /** Fetch every Session track's detail waveform (cache first), two at a time. */
@@ -225,7 +304,7 @@ class SessionModel(application: Application) : AndroidViewModel(application) {
     /** Leaving the Session screen: replay stops, decks keep what they hold. */
     fun leave() = stop()
 
-    fun toggle(player: PlayerModel) { if (playing || preparing) stop() else play(player) }
+    fun toggle(player: PlayerModel) { if (playing || preparing || peerChecking) stop() else play(player) }
 
     private fun driver(player: PlayerModel): ReplayDriver? {
         val l = log ?: return null
@@ -234,6 +313,32 @@ class SessionModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun play(player: PlayerModel) {
+        if (refuseUnscopedReplay()) return
+        if (peerReplay != null) { validatePeer { beginPlay(player) }; return }
+        beginPlay(player)
+    }
+
+    private fun validatePeer(action: () -> Unit) {
+        if (peerChecking) return
+        val expected = peerReplay ?: return
+        if (authoritativeHeader(header ?: return)?.peer?.let { it.key == expected.item.key && it.generation == expected.generation } != true) { stop(); return }
+        peerChecking = true
+        peerValidation = viewModelScope.launch {
+            try {
+                val current = repo.peerSessions.open(expected.item)
+                if (header?.key != expected.item.key || peerReplay?.generation != expected.generation) return@launch
+                peerReplay = current
+                action()
+            } catch (cancel: CancellationException) { throw cancel }
+            catch (e: Exception) {
+                peerValidation = null
+                stop()
+                notice = "Peer replay unavailable: ${e.message ?: e}. Refresh/reopen on the owning desktop; cached evidence is not playback authority."
+            } finally { peerChecking = false; peerValidation = null }
+        }
+    }
+
+    private fun beginPlay(player: PlayerModel) {
         val l = log ?: return
         val r = driver(player) ?: return
         if (time >= l.end) moveClock(l.activeStart)
@@ -255,6 +360,8 @@ class SessionModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun stop() {
+        peerValidation?.cancel(); peerValidation = null; peerChecking = false
+        peerLoads.indices.forEach { peerLoads[it]?.cancel(); peerLoads[it] = null }
         SessionRecording.machine = null
         loop?.cancel(); loop = null
         driver?.stop()
@@ -266,6 +373,17 @@ class SessionModel(application: Application) : AndroidViewModel(application) {
 
     /** Relocate the Session clock; decks follow (parked while paused). */
     fun seek(t: Double, player: PlayerModel) {
+        if (refuseUnscopedReplay()) return
+        if (peerReplay != null) {
+            val resume = playing || preparing
+            stop()
+            validatePeer { seekResolved(t, player); if (resume) beginPlay(player) }
+            return
+        }
+        seekResolved(t, player)
+    }
+
+    private fun seekResolved(t: Double, player: PlayerModel) {
         val l = log ?: return
         val r = driver(player) ?: return
         moveClock(t.coerceIn(l.start, l.end))
@@ -278,6 +396,10 @@ class SessionModel(application: Application) : AndroidViewModel(application) {
             val wall = System.nanoTime() / 1e9
             val now = r.tick(wall)
             sync(r)
+            if (peerReplay != null && (0..3).any { r.decks[it] == ReplayDriver.Deck.LIVE && held(player, it) == null }) {
+                stop(); notice = "Peer decoded Track changed; replay stopped. Revalidate and reload exact audio before resuming."
+                return
+            }
             if (now != null && lastTick != null) {
                 val (t, w) = lastTick!!
                 if (kotlin.math.abs((now - t) - (wall - w)) > .25) {
@@ -353,17 +475,49 @@ class SessionModel(application: Application) : AndroidViewModel(application) {
         override fun load(deck: Int, trackId: Int): ReplayDriver.Load {
             loadFailure[deck]?.let { return ReplayDriver.Load.Failed(it) }
             val t = track(trackId) ?: return ReplayDriver.Load.Failed("Track #$trackId not in the synced Library")
-            val want = LibraryHolder.sourceId(t)
+            val want = sourceId(t)
             val ui = player.decks.getValue(DeckId.entries[deck])
             val snap = ui.snapshot
+            if (peerReplay != null && (peerLoads[deck]?.isActive == true || ui.importing)) return ReplayDriver.Load.Pending
             if (snap?.loadState == LoadState.ERROR && snap.sourceId == want) return ReplayDriver.Load.Failed(snap.error ?: "decode failed")
+            if (peerReplay != null && ui.error != null && !ui.importing) return ReplayDriver.Load.Failed(ui.error!!)
             if (!(ui.ready && ui.source?.id == want)) return ReplayDriver.Load.Pending
+            if (peerReplay != null) {
+                val proof = peerDecoded[deck] ?: return ReplayDriver.Load.Failed("No verified peer decode receipt")
+                if (proof.sourceId != want || proof.requestGeneration != ui.generation.get()) return ReplayDriver.Load.Failed("Peer load was superseded")
+                if (proof.loadId == null) proof.loadId = snap?.loadId
+                if (proof.loadId != snap?.loadId) return ReplayDriver.Load.Failed("Peer decoded audio was replaced")
+            }
             return if (snap?.fullyDecoded == true) ReplayDriver.Load.Ready else ReplayDriver.Load.Partial(snap?.decodedSeconds ?: 0.0)
         }
     }
 
     private fun issueLoad(player: PlayerModel, deck: Int, trackId: Int) {
         loadFailure[deck] = null
+        peerReplay?.let { replay ->
+            val asset = replay.tracks[trackId]
+            if (asset == null) { loadFailure[deck] = "Track is not a member of this peer generation"; return }
+            peerLoads[deck]?.cancel()
+            peerDecoded.remove(deck)
+            peerLoads[deck] = viewModelScope.launch {
+                try {
+                    val file = repo.peerSessions.audio(replay, trackId)
+                    if (peerReplay?.generation != replay.generation || header?.key != replay.item.key || !(playing || preparing)) return@launch
+                    val t = asset.track
+                    val grid = t.grid?.tempoChanges?.firstOrNull()
+                    player.load(DeckId.entries[deck], file, asset.sourceId(replay), t.title, t.artist.orEmpty(), t.durationSecs,
+                        bpm = grid?.bpm ?: t.bpm, firstBeatSeconds = grid?.startTime ?: 0.0, mainCueSeconds = t.mainCue,
+                        hotCues = t.hotCues.filter { it.slot in 1..8 }.associate { it.slot - 1 to it.time })
+                    peerDecoded[deck] = PeerDecodedProof(asset.sourceId(replay), player.decks.getValue(DeckId.entries[deck]).generation.get())
+                } catch (cancel: CancellationException) { throw cancel }
+                catch (e: Exception) {
+                    loadFailure[deck] = "Peer load refused: ${e.message ?: e}"
+                    stop()
+                    notice = loadFailure[deck]
+                }
+            }
+            return
+        }
         val track = track(trackId)
         if (track == null || track.audioRev == null) {
             loadFailure[deck] = if (track == null) "Track #$trackId not in the synced Library" else "No audio file on the desktop"
@@ -374,6 +528,7 @@ class SessionModel(application: Application) : AndroidViewModel(application) {
 
     /** Download every track the Session loads, ahead of its load (mid-session loads then only decode). */
     private fun prefetch(l: SessionLog) {
+        if (peerReplay != null) return // Peer audio has its own fresh generation/member/byte validation.
         val ids = l.appearances.filter { it.end > time }.map { it.trackId }.distinct()
         viewModelScope.launch(Dispatchers.IO) { for (id in ids) runCatching { repo.audioFile(id); probe(id) } }
     }
@@ -399,6 +554,11 @@ class SessionModel(application: Application) : AndroidViewModel(application) {
     /** Library track the engine deck holds and is ready with (null = other/none). */
     private fun held(player: PlayerModel, d: Int): Int? {
         val ui = player.decks.getValue(DeckId.entries[d])
+        peerReplay?.let { p ->
+            val proof = peerDecoded[d]
+            return if (ui.ready && !ui.importing && proof != null && proof.requestGeneration == ui.generation.get() && proof.loadId == ui.snapshot?.loadId && proof.sourceId == ui.source?.id)
+                p.tracks.values.firstOrNull { it.sourceId(p) == proof.sourceId }?.track?.id else null
+        }
         return if (ui.ready) LibraryHolder.trackOn(player, DeckId.entries[d]) else null
     }
 

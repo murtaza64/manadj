@@ -62,6 +62,11 @@ private fun hms(seconds: Double): String { val s = seconds.coerceAtLeast(0.0).to
         model.notice?.let { n ->
             Row(Modifier.fillMaxWidth().background(Ink.crust).clickable { model.notice = null }.padding(horizontal = 12.dp, vertical = 6.dp)) { Text(n, color = Ink.warning, size = 11, lines = 3) }
         }
+        model.peerInfo?.let { item -> PeerSessionInfo(item) { model.peerInfo = null } }
+        model.header?.peer?.let { item ->
+            Text("RECEIVED · ${item.recordingOrigin ?: "unknown recording origin"} · source ${item.originReplicaId.take(8)} · generation ${item.generation?.take(8)} · exact audio revalidated before replay/load",
+                Modifier.fillMaxWidth().padding(8.dp).testTag("peer-session-provenance"), Ink.accent, 11, lines = 3)
+        }
         if (log == null) SessionList(model) else Replay(model, player, ux, log)
     }
 }
@@ -71,10 +76,24 @@ private val timeFormat = java.time.format.DateTimeFormatter.ofPattern("HH:mm")
 private fun local(iso: String?) = sessionInstant(iso)?.atZone(java.time.ZoneId.systemDefault())
 private fun dateLabel(iso: String): String = local(iso)?.let { "${it.format(dayFormat)} ${it.format(timeFormat)}" } ?: iso
 
+@Composable internal fun PeerSessionInfo(item: PeerSessionItem, close: () -> Unit) {
+    Column(Modifier.fillMaxWidth().background(Ink.crust).padding(12.dp).testTag("peer-session-info")) {
+        Text(item.statusLabel, color = Ink.warning, size = 12, bold = true)
+        Text("Recording origin: ${item.recordingOrigin ?: "unknown"}\nSource namespace: ${item.originReplicaId}\nSession: ${item.uuid}", color = Ink.text, size = 11, lines = 4)
+        Text("${item.dependencies.size} track dependencies · ${item.dependencies.groupingBy { it.state }.eachCount().entries.joinToString { "${it.value} ${it.key}" }}", color = Ink.muted, size = 11, lines = 3)
+        Text("Received metadata is not playable audio. Resolve bindings, finish intake and verify exact assets on the owning desktop, then refresh. Cached evidence needs desktop revalidation.", color = Ink.muted, size = 11, lines = 4)
+        Key("CLOSE", Modifier.size(80.dp, 48.dp), description = "Close peer Session status", action = close)
+    }
+}
+
 /** Desktop SessionsListView: local-day sections (newest first), longest Session first, 5 per day until expanded. */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable private fun SessionList(model: SessionModel) {
     model.listError?.let { Text("Session list: $it${if (model.headers.isNotEmpty()) " · showing the cached list" else ""}", Modifier.padding(12.dp), Ink.warning, 11, lines = 3) }
+    model.peerListError?.let { Text("Received Sessions: $it · cached metadata is not replay-ready", Modifier.padding(12.dp), Ink.warning, 11, lines = 3) }
+    if (model.unscopedUuidCollisions.isNotEmpty()) Text(
+        "${model.unscopedUuidCollisions.size} UNSCOPED LOCAL/CACHED UUID COLLISION(S) · evidence retained; use guarded received entries, never local Track IDs",
+        Modifier.padding(12.dp).testTag("session-uuid-collision"), Ink.warning, 11, lines = 3)
     val all = model.sessions
     if (all.isEmpty() && !model.refreshing) Text("No Sessions yet. Sessions are recorded while you play, here and on the desktop.", Modifier.padding(12.dp), Ink.muted, 12, lines = 3)
     val now = remember(all) { java.time.Instant.now() }
@@ -90,7 +109,7 @@ private fun dateLabel(iso: String): String = local(iso)?.let { "${it.format(dayF
                     Text("${day.sessions.size} ${if (day.sessions.size == 1) "SESSION" else "SESSIONS"}", color = Ink.muted, size = 10)
                 }
             }
-            items(if (open) day.sessions else day.sessions.take(5), key = { it.uuid }) { h -> SessionRow(model, h, now) }
+            items(if (open) day.sessions else day.sessions.take(5), key = { it.key }) { h -> SessionRow(model, h, now) }
             if (day.sessions.size > 5) item(key = "more-$key") {
                 Text(if (open) "SHOW LESS" else "SHOW MORE (${day.sessions.size - 5})",
                     Modifier.fillMaxWidth().clickable { if (open) expanded.remove(key) else expanded.add(key) }.padding(horizontal = 16.dp, vertical = 12.dp), Ink.accent, 11, bold = true)
@@ -100,10 +119,11 @@ private fun dateLabel(iso: String): String = local(iso)?.let { "${it.format(dayF
 }
 
 @Composable private fun SessionRow(model: SessionModel, h: SessionHeader, now: java.time.Instant) {
-    val opening = model.opening == h.uuid
+    val peer = h.peer
+    val opening = model.opening == h.key
     val cached = model.isCached(h)
-    LaunchedEffect(h.uuid, cached) { model.summarize(h) }
-    val ids = model.audibleTracks[h.uuid]
+    LaunchedEffect(h.key, cached) { model.summarize(h) }
+    val ids = model.audibleTracks[h.key]
     val library by model.library.collectAsState()
     Column(Modifier.fillMaxWidth().clickable(enabled = model.opening == null) { model.open(h) }.testTag("session-row")) {
         Box(Modifier.fillMaxWidth().padding(horizontal = 12.dp).height(1.dp).background(Ink.surface0))
@@ -113,8 +133,12 @@ private fun dateLabel(iso: String): String = local(iso)?.let { "${it.format(dayF
                 Text(sessionLengthLabel(sessionSeconds(h, now)), color = Ink.muted, size = 11)
             }
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                val titles = ids?.take(3)?.map { library?.track(it)?.title ?: "#$it" }
+                val titles = ids?.take(3)?.map { id ->
+                    if (peer != null) model.peerReplay?.takeIf { it.item.key == peer.key }?.tracks?.get(id)?.track?.title ?: "Resolved track #$id"
+                    else library?.track(id)?.title ?: "#$id"
+                }
                 Text(when {
+                    peer != null && ids == null -> "Received evidence · ${peer.dependencies.size} track dependencies"
                     ids == null -> if (cached) "Reading tracks…" else "Tracks show once opened on the phone"
                     ids.isEmpty() -> "No audible tracks"
                     else -> titles!!.joinToString(" / ") + if (ids.size > 3) "  +${ids.size - 3}" else ""
@@ -125,12 +149,14 @@ private fun dateLabel(iso: String): String = local(iso)?.let { "${it.format(dayF
                     if (h.endedAt == null) Text(if (h.local) "RECORDING" else "LIVE", color = Ink.pending, size = 10, bold = true)
                     // Origin (#395): recorded on this phone (synced to the desktop or not yet) vs on the desktop.
                     when {
+                        peer != null -> Text("RECEIVED · ${peer.recordingOrigin ?: "unknown origin"}", color = Ink.accent, size = 10, bold = true)
                         h.local -> Text(if (h.uuid in model.synced) "PHONE · SYNCED" else "PHONE", color = deckColor(DeckId.A), size = 10, bold = true)
                         h.origin != null -> Text("PHONE · ${h.origin}", color = deckColor(DeckId.A), size = 10, bold = true)
                         else -> Text("DESKTOP", color = Ink.muted, size = 10, bold = true)
                     }
                     if (cached && !h.local) Text("ON PHONE", color = Ink.play, size = 10, bold = true)
                 }
+                h.peer?.let { Text(it.statusLabel, Modifier.semantics { contentDescription = "Peer Session status: ${it.statusLabel}" }, if (it.canValidate && it.checked) Ink.accent else Ink.warning, 10, lines = 3) }
             }
             Text(if (opening) "LOADING…" else "›", Modifier.padding(start = 8.dp), Ink.accent, if (opening) 11 else 20, true)
         }
@@ -243,8 +269,8 @@ private val GAP = 3.dp
     Row(modifier, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
         Key("|‹", Modifier.weight(1f).fillMaxHeight(), Ink.text, description = "Session start") { model.seek(log.activeStart, player); model.fit() }
         Key("−10", Modifier.weight(1f).fillMaxHeight(), Ink.text) { model.seek(model.time - 10, player) }
-        val active = model.playing || model.preparing
-        Key(if (model.preparing) "LOADING" else if (model.playing) "PAUSE" else "PLAY", Modifier.weight(1.6f).fillMaxHeight().testTag("session-play"), Ink.play, engaged = active,
+        val active = model.playing || model.preparing || model.peerChecking
+        Key(if (model.peerChecking) "VERIFYING" else if (model.preparing) "LOADING" else if (model.playing) "PAUSE" else "PLAY", Modifier.weight(1.6f).fillMaxHeight().testTag("session-play"), Ink.play, engaged = active,
             icon = if (active) Glyph.Pause else Glyph.Play, description = if (active) "Pause Session" else "Play Session") { model.toggle(player) }
         Key("+10", Modifier.weight(1f).fillMaxHeight(), Ink.text) { model.seek(model.time + 10, player) }
     }
@@ -279,9 +305,9 @@ internal class DeckView(val track: dev.manadj.library.LibraryTrack?, val status:
     val track = model.track(s.trackId)
     val audible = frame.audible(d)
     LaunchedEffect(ui.source?.id) { ux.ensureWave(ui.source, DeckId.entries.mapNotNull { player.decks.getValue(it).source?.id }.toSet()) }
-    val engineHolds = ui.source?.id?.let { src -> track?.let { src == dev.manadj.app.library.LibraryHolder.sourceId(it) } } == true
+    val engineHolds = ui.source?.id?.let { src -> track?.let { src == model.sourceId(it) } } == true
     val downloads by ux.repo.downloads.collectAsState()
-    val download = track?.let { downloads[it.id] }
+    val download = if (model.peerReplay == null) track?.let { downloads[it.id] } else null
     val status = when {
         s.trackId == null -> "EMPTY"
         model.deckErrors[d] != null -> "FAILED"

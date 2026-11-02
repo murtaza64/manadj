@@ -60,7 +60,7 @@ object SnapshotJson {
         )
     }
 
-    private fun track(it: JSONObject): LibraryTrack {
+    internal fun track(it: JSONObject): LibraryTrack {
         val fileName = it.getString("file_name")
         val grid = it.optJSONObject("grid")?.let { g ->
             Beatgrid(

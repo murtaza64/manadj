@@ -11,7 +11,10 @@ import java.io.File
  * Desktop SessionRow. Times are the desktop's ISO strings (naive = UTC). [origin]: recording device
  * (null = the desktop). [local]: recorded on this phone (a [RecordedSessions] entry).
  */
-data class SessionHeader(val uuid: String, val startedAt: String?, val endedAt: String?, val takeCount: Int, val origin: String? = null, val local: Boolean = false)
+data class SessionHeader(val uuid: String, val startedAt: String?, val endedAt: String?, val takeCount: Int, val origin: String? = null, val local: Boolean = false,
+    val peer: PeerSessionItem? = null) {
+    val key get() = peer?.key ?: uuid
+}
 
 /**
  * Sessions pulled from the desktop over device sync (#378), cached for offline replay:
@@ -41,7 +44,7 @@ class SessionStore(private val root: File, private val client: () -> SyncClient,
         if (header.endedAt == null || !f.isFile) {
             try { client().downloadSession(header.uuid, f) } catch (e: Exception) { if (!f.isFile) throw e }
         }
-        f.bufferedReader().use { SessionLog.parse(it) }
+        f.bufferedReader().use { SessionLog.parse(it) }.also { require(it.replayGeneration == null) { "Peer Session requires versioned intake; legacy cached detail is not replay authority" } }
     }
 
     /**
@@ -70,7 +73,7 @@ class SessionStore(private val root: File, private val client: () -> SyncClient,
     companion object {
         fun parseList(text: String): List<SessionHeader> {
             val a = JSONArray(text)
-            return (0 until a.length()).map { i ->
+            return (0 until a.length()).filter { !a.getJSONObject(it).optBoolean("peer_managed", false) }.map { i ->
                 val o = a.getJSONObject(i)
                 fun str(k: String) = if (o.isNull(k)) null else o.optString(k).ifEmpty { null }
                 SessionHeader(o.getString("uuid"), str("started_at"), str("ended_at"), o.optInt("take_count"), str("origin"))

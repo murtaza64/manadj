@@ -99,6 +99,7 @@ data class ReplayIssue(val t: Double, val deck: Int?, val what: String)
  */
 class SessionLog(
     val uuid: String, val startedAt: String?, val endedAt: String?, val events: List<CaptureEvent>, val issues: List<ReplayIssue>,
+    val replayGeneration: String? = null,
 ) {
     val start: Double = events.firstOrNull()?.t ?: 0.0
     val end: Double = events.lastOrNull()?.t ?: 0.0
@@ -310,6 +311,7 @@ class SessionLog(
         fun parse(reader: java.io.Reader): SessionLog {
             val json = JsonStream(reader)
             var uuid: String? = null; var startedAt: String? = null; var endedAt: String? = null
+            var generation: String? = null
             val issues = ArrayList<ReplayIssue>()
             val unknown = HashSet<String>()
             val events = ArrayList<CaptureEvent>()
@@ -319,6 +321,7 @@ class SessionLog(
                     "uuid" -> uuid = json.value() as? String
                     "started_at" -> startedAt = json.value() as? String
                     "ended_at" -> endedAt = json.value() as? String
+                    "replay_generation" -> generation = json.value()?.let { peerDigest(it as? String ?: error("Invalid replay generation")) }
                     "events" -> json.array {
                         @Suppress("UNCHECKED_CAST") val e = json.value() as? Map<String, Any?> ?: error("Event ${events.size}: not an object")
                         val event = event(e, events.size, issues, unknown)
@@ -329,7 +332,7 @@ class SessionLog(
                     else -> json.skip()
                 }
             }
-            return SessionLog(requireNotNull(uuid) { "Missing Session uuid" }, startedAt, endedAt, events, issues)
+            return SessionLog(requireNotNull(uuid) { "Missing Session uuid" }, startedAt, endedAt, events, issues, generation)
         }
 
         private fun event(e: Map<String, Any?>, i: Int, issues: MutableList<ReplayIssue>, unknown: MutableSet<String>): CaptureEvent {
