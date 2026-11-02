@@ -4,6 +4,7 @@ import { queryClient } from './api/queryClient';
 import { DEV_SURFACES } from './devMode';
 import { OPEN_LIBRARY_TRACK_EVENT } from './library/openTrack';
 import { OPEN_LIBRARY_PLAYLIST_EVENT, peekLibraryPlaylistRequest } from './library/openPlaylist';
+import { OPEN_SYNC_WORKSPACE_EVENT } from './sync/openWorkspace';
 import { OPEN_ACQUISITION_EVENT } from './components/acquisition/openAcquisition';
 
 const SettingsPage = lazy(() => import('./settings/SettingsPage'));
@@ -228,6 +229,11 @@ function App() {
     const onOpenAcq = () => setView('sync');
     window.addEventListener(OPEN_ACQUISITION_EVENT, onOpenAcq);
     return () => window.removeEventListener(OPEN_ACQUISITION_EVENT, onOpenAcq);
+  }, []);
+  useEffect(() => {
+    const open = () => setView('sync');
+    window.addEventListener(OPEN_SYNC_WORKSPACE_EVENT, open);
+    return () => window.removeEventListener(OPEN_SYNC_WORKSPACE_EVENT, open);
   }, []);
 
   // Dev-only surface (packaged-app #278): hand-typed path, dev builds only.

@@ -185,7 +185,7 @@ def create_review(root: Path, pin: str):
 
     @app.get('/api/config')
     def app_config():
-        return {'export_enabled': config.export.enabled}
+        return {'export_enabled': config.export.enabled, 'ffmpeg_available': shutil.which('ffmpeg') is not None}
 
     @app.post('/fixture/gate')
     def gate(enabled: bool):

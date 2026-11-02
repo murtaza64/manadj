@@ -18,7 +18,11 @@
   gap: var(--space-6);
   margin-bottom: var(--space-12);
   flex-shrink: 0;
+  flex-wrap: wrap;
 }
+.sync-workspace-host { display:flex; flex:1; min-height:0; }
+.sync-workspace-host[hidden] { display:none; }
+.sync-workspace-host > .sync-workspace { width:100%; }
 
 .sync-view-tab {
   padding: var(--space-4) var(--space-12);

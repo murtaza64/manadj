@@ -9,11 +9,12 @@ import { browseSession } from './browseStore';
 import { selectSet, getSelectedSetId } from '../sets/setStore';
 import { selectSession, getSelectedSessionUuid } from '../sessions/openSession';
 import { clearLibraryPlaylistRequest, peekLibraryPlaylistRequest } from '../library/openPlaylist';
+import { peekSyncWorkspace, takeSyncWorkspace } from '../sync/openWorkspace';
 import type { UnifiedPlaylist } from '../types';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 let root: Root, client: QueryClient;
-afterEach(() => { if (root) act(() => root.unmount()); client?.clear(); clearLibraryPlaylistRequest(); vi.restoreAllMocks(); document.body.innerHTML = ''; });
+afterEach(() => { if (root) act(() => root.unmount()); client?.clear(); clearLibraryPlaylistRequest(); takeSyncWorkspace(); vi.restoreAllMocks(); document.body.innerHTML = ''; });
 const tick = () => new Promise(r => setTimeout(r, 10));
 async function render(playlist: UnifiedPlaylist) {
   client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
@@ -22,15 +23,15 @@ async function render(playlist: UnifiedPlaylist) {
   await act(async () => { root.render(<QueryClientProvider client={client}><PlaylistSync /></QueryClientProvider>); await tick(); });
 }
 
-it('supersedes the old detail with exact Library playlist navigation + inspector intent', async () => {
+it('routes exact playlist context to Sync without replacing the Library browse selection', async () => {
   vi.spyOn(api.playlists, 'list').mockResolvedValue([{ id: 7, name: 'Night Shift' }]);
   selectSet(9); selectSession('previous-session');
+  const previous = [browseSession().view, browseSession().playlistId, getSelectedSetId(), getSelectedSessionUuid()];
   await render({ name: 'Night Shift', manadj: [], engine: [], rekordbox: [], synced: true });
   await act(async () => { document.querySelector<HTMLTableRowElement>('tbody tr')!.click(); await tick(); });
-  expect(browseSession().view).toBe('playlist');
-  expect(browseSession().playlistId).toBe(7);
-  expect(peekLibraryPlaylistRequest()).toEqual({ id: 7, name: 'Night Shift', openExport: true });
-  expect(getSelectedSetId()).toBeNull(); expect(getSelectedSessionUuid()).toBeNull();
+  expect(peekSyncWorkspace()).toMatchObject({ kind: 'playlist', playlistName: 'Night Shift' });
+  expect(peekLibraryPlaylistRequest()).toBeNull();
+  expect([browseSession().view, browseSession().playlistId, getSelectedSetId(), getSelectedSessionUuid()]).toEqual(previous);
   expect(document.querySelector('.playlist-detail-container')).toBeNull();
 });
 
@@ -43,7 +44,7 @@ it('imports external-only membership into Library explicitly before routing, nev
   const importButton = [...document.querySelectorAll('button')].find(b => b.textContent?.startsWith('Import 1 entries'))!;
   await act(async () => { importButton.click(); await tick(); });
   expect(sync).toHaveBeenCalledWith('Guest Set', { source: 'engine', target: 'manadj', ignore_missing_tracks: false, dry_run: false });
-  expect(peekLibraryPlaylistRequest()?.id).toBe(22);
+  expect(peekSyncWorkspace()).toMatchObject({ kind: 'playlist', playlistName: 'Guest Set' });
 });
 
 it('refuses ambiguous Library names instead of selecting the first playlist', async () => {
@@ -52,4 +53,5 @@ it('refuses ambiguous Library names instead of selecting the first playlist', as
   await act(async () => { document.querySelector<HTMLTableRowElement>('tbody tr')!.click(); await tick(); });
   expect(document.querySelector('[role=alert]')?.textContent).toContain('ambiguous');
   expect(peekLibraryPlaylistRequest()).toBeNull();
+  expect(peekSyncWorkspace()).toBeNull();
 });

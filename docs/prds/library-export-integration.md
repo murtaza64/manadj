@@ -4,6 +4,19 @@
 - Status: integrated development candidate; no landing, installed activation or real-library export authorization.
 - Port: never (Android does not manage desktop Engine DJ/Rekordbox libraries; phone Device sync unchanged).
 
+## Sync workspace placement revision
+
+- Decision: Murtaza selected REVISE on the prior EXPORT placement; source landing is not approved. The child of preserved `1036d7ee36b88c36359b337287249681aea79011` implements the bounded frontend revision allocated by Coda task73.
+- Actual App SYNC opens Workspace by default. Destination/readiness/direction/scope occupy its rail; the center reuses track rows without Library playback or curation controls; field/playlist review and receipts stay embedded.
+- Library field and playlist entries capture context then open SYNC. Exact IDs and source scope survive navigation; empty selection never becomes the whole Library. Complete filtered/all scopes refuse truncated or malformed responses. Keyboard rows remain reachable after filtering hides the focused track.
+- Plan readiness is an observation, not connection/native playback proof. Engine and Rekordbox desktop use existing adapters; USB remains unavailable. Phone/peer setup remains Settings-owned.
+- Target/scope/operation changes discard stale plans and consent. Pending execution locks local routing/context controls and duplicate execution; top-level mode changes keep the pending workspace mounted. Unknown outcomes require inspection and a fresh plan, not replay.
+- Recommendation: consolidate destination work under SYNC. This candidate retains legacy EXPORT and existing Tracks/Playlists/import tabs; retiring or redirecting EXPORT requires a separate explicit decision.
+- Review choices after independent source QA: develop this placement, revise it, or park it. None authorizes source landing, installed activation, or device/media writes.
+- Production backend/writers/USB/Android are unchanged from1036. The fixture host only adds truthful ffmpeg availability; other optional full-App services remain unmounted and may return403/404.
+- Review build: `npm exec vite -- build --config scripts/review-sync442/vite.config.ts --outDir <own isolated assets>`. Serve using the fixture command below, then open `?view=sync`.
+- Browser: `uv run scripts/agent/check_sync_workspace.py --url <fresh own fixture URL> --artifacts-prefix <own prefix>` runs actual App navigation, captured Library/playlist entry, real Engine/RB/native/playlist writes and backups, pending mode retention, keyboard/mobile, real gate/freshness rejection and injected transport failure. It never substitutes a successful plan or writer result.
+
 ## Inputs and ancestry
 
 - Main: `3defc5e189f91f899a427bd3934b0307d876a8c6`.

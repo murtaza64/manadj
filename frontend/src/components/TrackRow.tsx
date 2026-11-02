@@ -1,4 +1,4 @@
-import { memo, type CSSProperties, type ReactNode } from 'react';
+import { memo, type CSSProperties, type ReactNode, type KeyboardEventHandler } from 'react';
 import TagPill from './TagPill';
 import EnergySquare from './EnergySquare';
 import BPMDisplay from './BPMDisplay';
@@ -41,6 +41,9 @@ export interface SelectMods {
 export type LoadedMark = string;
 
 interface Props {
+  rowId?: string;
+  rowTabIndex?: number;
+  onRowKeyDown?: KeyboardEventHandler<HTMLTableRowElement>;
   track: Track;
   previewCues?: HotCue[];
   isSelected: boolean;
@@ -126,6 +129,7 @@ function markSlot(mark: TransitionMark, linked: boolean): ReactNode {
 /** Memoized: the table is large, and rows must not re-render on deck/selection
  * churn unless their own props changed. */
 const TrackRow = memo(function TrackRow({
+  rowId, rowTabIndex, onRowKeyDown,
   track,
   previewCues,
   isSelected,
@@ -348,6 +352,7 @@ const TrackRow = memo(function TrackRow({
 
   return (
     <tr
+      id={rowId} tabIndex={rowTabIndex} onKeyDown={onRowKeyDown} aria-selected={rowId ? isSelected : undefined}
       className={`track-row ${isSelected ? 'track-row-selected' : ''} ${track.archived_at ? 'track-row-archived' : ''} ${played ? 'track-row-played' : ''}`}
       onClick={(e) => onSelect(track, { shift: e.shiftKey, toggle: e.metaKey || e.ctrlKey })}
       onDoubleClick={() => onLoad(track)}

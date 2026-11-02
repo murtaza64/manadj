@@ -8,6 +8,8 @@ import BPMDisplay from './BPMDisplay';
 import { beatMarkersFromTempoChanges, markersInWindow, type TempoChangeLike } from '../utils/perfDiffOverlay';
 import { useExportEnabled } from '../settings/useAppConfig';
 import Modal from './Modal';
+import { openSyncWorkspace } from '../sync/openWorkspace';
+import type { ReviewObservation } from './FieldReviewInspector';
 import './PlaylistExportInspector.css';
 
 const TARGETS = { rekordbox: 'Rekordbox desktop', engine: 'Engine DJ' };
@@ -123,12 +125,16 @@ function ResultReceipt({ receipt }: { receipt: SavedReceipt }) {
   </section>;
 }
 
-export function PlaylistExportInspector({ playlistName, onClose }: { playlistName: string; onClose: () => void }) {
+export function PlaylistExportInspector({ playlistName, onClose, embedded = false, initialTarget, initialScope, onPendingChange, onObservationChange }: {
+  playlistName: string; onClose: () => void; embedded?: boolean; initialTarget?: PlaylistExportTarget; initialScope?: 'full' | 'order';
+  onPendingChange?: (pending: boolean) => void; onObservationChange?: (state: ReviewObservation) => void;
+}) {
   const queryClient = useQueryClient();
-  const cached = queryClient.getQueryData<SavedReceipt>(['playlist-export-receipt', playlistName]);
+  const receiptKey = embedded ? ['playlist-export-receipt', playlistName, initialTarget, initialScope] : ['playlist-export-receipt', playlistName];
+  const cached = queryClient.getQueryData<SavedReceipt>(receiptKey);
   const [receipt, setReceipt] = useState<SavedReceipt | null>(cached || null);
-  const [target, setTarget] = useState<PlaylistExportTarget | ''>(cached?.plan.target || '');
-  const [scope, setScope] = useState<'full' | 'order'>(cached?.plan.scope || 'full');
+  const [target, setTarget] = useState<PlaylistExportTarget | ''>(initialTarget || cached?.plan.target || '');
+  const [scope, setScope] = useState<'full' | 'order'>(initialScope || cached?.plan.scope || 'full');
   const [now, setNow] = useState(Date.now);
   const [acknowledgement, setAcknowledgement] = useState<string | null>(null);
   const inFlight = useRef(false);
@@ -141,8 +147,8 @@ export function PlaylistExportInspector({ playlistName, onClose }: { playlistNam
   });
   const save = (value: SavedReceipt) => {
     setReceipt(value);
-    queryClient.setQueryDefaults(['playlist-export-receipt', playlistName], { gcTime: Infinity });
-    queryClient.setQueryData(['playlist-export-receipt', playlistName], value);
+    queryClient.setQueryDefaults(receiptKey, { gcTime: Infinity });
+    queryClient.setQueryData(receiptKey, value);
   };
   const mutation = useMutation({
     mutationFn: (submitted: PlaylistExportPlan) => api.playlistSync.executeExportPlan(submitted),
@@ -152,7 +158,7 @@ export function PlaylistExportInspector({ playlistName, onClose }: { playlistNam
     },
     onError: (error, submitted) => save({ plan: submitted, error: { message: error.message,
       code: error instanceof PlaylistExportRequestError ? error.code : 'unknown' } }),
-    onSettled: () => { inFlight.current = false; },
+    onSettled: () => { inFlight.current = false; onPendingChange?.(false); },
   });
   const writing = mutation.isPending;
   const stale = now - plan.dataUpdatedAt >= PLAN_MAX_AGE_MS;
@@ -167,6 +173,7 @@ export function PlaylistExportInspector({ playlistName, onClose }: { playlistNam
     return () => clearInterval(timer);
   }, []);
   useEffect(() => {
+    if (embedded) return;
     const opener = document.activeElement as HTMLElement | null;
     const dialog = body.current?.closest('[role="dialog"]') as HTMLElement | null;
     dialog?.querySelector<HTMLElement>('select,button')?.focus();
@@ -180,28 +187,35 @@ export function PlaylistExportInspector({ playlistName, onClose }: { playlistNam
     }
     document.addEventListener('keydown', trap, true);
     return () => { document.removeEventListener('keydown', trap, true); opener?.focus(); };
-  }, []);
+  }, [embedded]);
+  useEffect(() => {
+    if (writing) body.current?.closest<HTMLElement>('[role="dialog"], [data-review-panel]')?.focus();
+  }, [writing]);
+  useEffect(() => {
+    onObservationChange?.(!target || !exportEnabled ? 'not checked' : plan.isFetching ? 'reading' : plan.isError ? 'unavailable' : plan.data ? plan.data.executable ? 'plan available' : 'blocked plan' : 'not checked');
+  }, [target, exportEnabled, plan.isFetching, plan.isError, plan.data, onObservationChange]);
 
   function recheck() {
     if (inFlight.current) return;
     setReceipt(null); mutation.reset(); setAcknowledgement(null);
-    queryClient.removeQueries({ queryKey: ['playlist-export-receipt', playlistName], exact: true });
+    queryClient.removeQueries({ queryKey: receiptKey, exact: true });
     void plan.refetch();
   }
   function submit() {
     if (!ready || !plan.data || inFlight.current || (destructive && !acknowledged)) return;
     inFlight.current = true;
+    onPendingChange?.(true);
     mutation.mutate(plan.data);
   }
-  return <Modal title={<h2 id={titleId}>Export · {playlistName}</h2>} labelledBy={titleId} className="playlist-export-inspector" closeDisabled={writing} onClose={() => { if (!inFlight.current) onClose(); }}>
+  const content = <>
     <div className="pei-content" ref={body}>
       <p className="pei-direction">manaDJ Library → {target ? TARGETS[target] : 'choose destination'}</p>
       <p className="pei-secondary">External export, not phone Device sync. Desktop export does not update a USB.</p>
       {!exportEnabled && <p role="alert" className="pei-warning">External export is off. Enable it in Settings → Library. Imports remain available.</p>}
-      <fieldset disabled={writing || Boolean(receipt)}><legend>Destination and scope</legend>
+      {!embedded && <fieldset disabled={writing || Boolean(receipt)}><legend>Destination and scope</legend>
         <label>Destination <select aria-label="Export destination" value={target} onChange={e => setTarget(e.target.value as PlaylistExportTarget | '')}><option value="">Choose…</option><option value="rekordbox">Rekordbox desktop</option><option value="engine">Engine DJ</option></select></label>
         <label>Scope <select aria-label="Export scope" value={scope} onChange={e => setScope(e.target.value as 'full' | 'order')}><option value="full">Playlist + track data</option><option value="order">Playlist membership / order only</option></select></label>
-      </fieldset>
+      </fieldset>}
       {writing ? <section role="status" className="pei-writing"><h3>Writing to {target ? TARGETS[target] : 'destination'}…</h3><p>Waiting for the writer receipt. No progress, cancellation or rollback API exists for this operation. Keep this inspector open.</p></section> : receipt ? <ResultReceipt receipt={receipt} /> : <>
         {!target && <p>Choose one destination to load its plan. No other library will receive this export.</p>}
         {target && plan.isFetching && <p role="status">Reading source and destination plan…</p>}
@@ -228,22 +242,24 @@ export function PlaylistExportInspector({ playlistName, onClose }: { playlistNam
       </>}
     </div>
     <footer className="pei-footer">
-      <button className="btn btn-secondary" disabled={writing} onClick={() => { if (!inFlight.current) onClose(); }}>Close</button>
+      <button className="btn btn-secondary" disabled={writing} onClick={() => { if (!inFlight.current) onClose(); }}>{embedded ? 'Clear review' : 'Close'}</button>
       {!receipt && !writing && <button className="btn btn-secondary" disabled={!target || plan.isFetching} onClick={recheck}>Recheck plan</button>}
       {receipt && <button className="btn" onClick={recheck}>{receipt.error?.code === 'unknown' ? 'I inspected the destination · load a new plan' : 'Review a new plan'}</button>}
       {!receipt && <button className="btn btn-primary" disabled={!ready || (destructive && !acknowledged)} onClick={submit}>{writing ? 'Writing…' : 'Export reviewed changes'}</button>}
     </footer>
-  </Modal>;
+  </>;
+  return embedded ? <section data-review-panel tabIndex={-1} aria-labelledby={titleId} className="sync-embedded-review"><h2 id={titleId}>Export · {playlistName}</h2>{content}</section>
+    : <Modal title={<h2 id={titleId}>Export · {playlistName}</h2>} labelledBy={titleId} className="playlist-export-inspector" closeDisabled={writing} onClose={() => { if (!inFlight.current) onClose(); }}>{content}</Modal>;
 }
 
 /** Shared by Library and Sync. Capture the clicked playlist, not a later
  * sidebar selection; changing the underlying context cannot retarget writes. */
 export function PlaylistExportEntry({ playlistName }: { playlistName?: string }) {
   const enabled = useExportEnabled();
-  const [openedName, setOpenedName] = useState<string | null>(null);
+  const [error, setError] = useState('');
   return <>
-    {enabled ? <button className="btn btn-primary" aria-label="Export this playlist" disabled={!playlistName} onClick={() => { if (playlistName) setOpenedName(playlistName); }}>Export…</button>
+    {enabled ? <button className="btn btn-primary" aria-label="Export this playlist" disabled={!playlistName} onClick={() => { if (playlistName) { setError(''); if (!openSyncWorkspace({ kind: 'playlist', playlistName })) setError('A Sync operation is pending. Inspect its receipt before opening another scope.'); } }}>Export…</button>
       : <span title="Settings → Library → Allow external export">External export off</span>}
-    {openedName && <PlaylistExportInspector playlistName={openedName} onClose={() => setOpenedName(null)} />}
+    {error && <span role="alert">{error}</span>}
   </>;
 }

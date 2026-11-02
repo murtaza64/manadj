@@ -4,6 +4,7 @@ import { fieldReview, FieldRequestError, supportedFields, type FieldContext, typ
 import Modal from './Modal';
 import { useExportEnabled } from '../settings/useAppConfig';
 import { ExportFieldChanges } from './PlaylistExportInspector';
+import { openSyncWorkspace } from '../sync/openWorkspace';
 import './PlaylistExportInspector.css';
 import './FieldReviewInspector.css';
 
@@ -12,18 +13,33 @@ const FIELDS: FieldName[] = ['title', 'artist', 'key', 'bpm', 'energy', 'tags', 
 const key = (id: number, field: string) => `${id}:${field}`;
 
 export function FieldReviewEntry({ scopes, initialScope = 'selected', initialFields, label = 'Review fields…' }: { scopes: FieldScopes; initialScope?: FieldScope; initialFields?: FieldName[]; label?: string }) {
-  const [open, setOpen] = useState(false);
-  return <><button className="btn" onClick={() => setOpen(true)}>{label}</button>
-    {open && <FieldReviewInspector scopes={scopes} initialScope={initialScope} initialFields={initialFields} onClose={() => setOpen(false)} />}</>;
+  const [opening, setOpening] = useState(false);
+  const [error, setError] = useState('');
+  const pending = useRef(false);
+  async function open() {
+    if (pending.current) return;
+    pending.current = true; setOpening(true); setError('');
+    try {
+      const trackIds = [...new Set(await scopes[initialScope]?.() || [])];
+      if (!openSyncWorkspace({ kind: 'fields', trackIds, scope: initialScope, label, fields: initialFields })) throw new Error('A Sync operation is pending. Inspect its receipt before opening another scope.');
+    } catch (error) { setError(error instanceof Error ? error.message : String(error)); }
+    finally { pending.current = false; setOpening(false); }
+  }
+  return <><button className="btn" disabled={opening} onClick={() => void open()}>{opening ? 'Capturing scope…' : label}</button>{error && <span role="alert">{error}</span>}</>;
 }
 
-export function FieldReviewInspector({ scopes, initialScope, initialFields, onClose }: { scopes: FieldScopes; initialScope: FieldScope; initialFields?: FieldName[]; onClose: () => void }) {
+export type ReviewObservation = 'not checked' | 'reading' | 'plan available' | 'blocked plan' | 'unavailable';
+export function FieldReviewInspector({ scopes, initialScope, initialFields, onClose, embedded = false, initialSurface = 'engine', initialDirection = 'import', onPendingChange, onFieldsChange, onObservationChange }: {
+  scopes: FieldScopes; initialScope: FieldScope; initialFields?: FieldName[]; onClose: () => void;
+  embedded?: boolean; initialSurface?: 'engine' | 'rekordbox'; initialDirection?: 'import' | 'export';
+  onPendingChange?: (pending: boolean) => void; onFieldsChange?: (fields: FieldName[]) => void; onObservationChange?: (state: ReviewObservation) => void;
+}) {
   const queryClient = useQueryClient();
   const enabled = useExportEnabled();
   const [scope, setScope] = useState(initialScope);
-  const [surface, setSurface] = useState<'engine' | 'rekordbox'>('engine');
-  const [direction, setDirection] = useState<'import' | 'export'>('import');
-  const [fields, setFields] = useState<FieldName[]>(initialFields?.length ? initialFields.filter(field => supportedFields('engine', 'import').includes(field)) : ['key', 'hotcues', 'maincue']);
+  const [surface, setSurface] = useState<'engine' | 'rekordbox'>(initialSurface);
+  const [direction, setDirection] = useState<'import' | 'export'>(initialDirection);
+  const [fields, setFields] = useState<FieldName[]>((initialFields ?? ['key', 'hotcues', 'maincue']).filter(field => supportedFields(initialSurface, initialDirection).includes(field)));
   const [plan, setPlan] = useState<FieldPlan | null>(null);
   const [receipt, setReceipt] = useState<FieldReceipt | null>(null);
   const [choices, setChoices] = useState<Set<string>>(new Set());
@@ -39,6 +55,8 @@ export function FieldReviewInspector({ scopes, initialScope, initialFields, onCl
   liveScopes.current = scopes;
   const opener = useRef<HTMLElement | null>(null);
   useEffect(() => {
+    const generation = serial;
+    if (embedded) return () => { generation.current++; };
     opener.current = document.activeElement as HTMLElement;
     const dialog = body.current?.closest<HTMLElement>('[role="dialog"]');
     if (dialog) dialog.tabIndex = -1;
@@ -54,21 +72,21 @@ export function FieldReviewInspector({ scopes, initialScope, initialFields, onCl
       else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
     };
     document.addEventListener('keydown', trap, true);
-    const generation = serial;
     return () => { generation.current++; document.removeEventListener('keydown', trap, true); opener.current?.focus(); };
-  }, []);
+  }, [embedded]);
   useEffect(() => {
     // Apply disables the element that held focus. Keep focus in the live modal
     // even when every control becomes disabled during the synchronous request.
-    if (writing) body.current?.closest<HTMLElement>('[role="dialog"]')?.focus();
+    if (writing) body.current?.closest<HTMLElement>('[role="dialog"], [data-review-panel]')?.focus();
   }, [writing]);
   useEffect(() => { const timer = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(timer); }, []);
-  function clear() { serial.current++; setPlan(null); setReceipt(null); setError(null); setChoices(new Set()); setLoading(false); }
+  function clear() { serial.current++; setPlan(null); setReceipt(null); setError(null); setChoices(new Set()); setLoading(false); onObservationChange?.('not checked'); }
   async function recheck() {
     if (inFlight.current) return;
     clear();
     const ticket = ++serial.current;
     setLoading(true);
+    onObservationChange?.('reading');
     try {
       const ids = [...new Set(await liveScopes.current[scope]?.() || [])];
       if (!ids.length) throw new Error('No tracks in this scope. Select tracks or choose another scope.');
@@ -77,13 +95,15 @@ export function FieldReviewInspector({ scopes, initialScope, initialFields, onCl
       if (ticket !== serial.current) return;
       if (JSON.stringify(next.track_ids) !== JSON.stringify(ids) || next.scope !== scope || next.surface !== surface || next.direction !== direction || JSON.stringify(next.fields) !== JSON.stringify(fields)) throw new Error('Plan context mismatch; nothing can be applied.');
       setPlan(next); setLoadedAt(Date.now()); setNow(Date.now());
+      onObservationChange?.(next.executable ? 'plan available' : 'blocked plan');
     } catch (error) {
-      if (ticket === serial.current) setError({ message: error instanceof Error ? error.message : String(error), code: 'rejected' });
+      if (ticket === serial.current) { setError({ message: error instanceof Error ? error.message : String(error), code: 'rejected' }); onObservationChange?.('unavailable'); }
     } finally { if (ticket === serial.current) setLoading(false); }
   }
   async function apply() {
     if (!plan || inFlight.current || !plan.executable || now - loadedAt >= 60000 || (direction === 'export' && !enabled)) return;
     inFlight.current = true; setWriting(true); setError(null);
+    onPendingChange?.(true);
     try {
       const replacements = plan.tracks.flatMap(track => track.fields.filter(field => field.action === 'consent' && choices.has(key(track.track_id, field.field))).map(field => ({ track_id: track.track_id, field: field.field })));
       setReceipt(await fieldReview.execute(plan, replacements));
@@ -93,19 +113,20 @@ export function FieldReviewInspector({ scopes, initialScope, initialFields, onCl
       // Unknown/partial may have changed data too; invalidate every affected cache.
       for (const prefix of ['tracks', 'track', 'playlist', 'sync-status', 'beatgrid', 'hotcues']) void queryClient.invalidateQueries({ queryKey: [prefix] });
       inFlight.current = false; setWriting(false);
+      onPendingChange?.(false);
     }
   }
   const expired = plan && now - loadedAt >= 60000;
   const resolved = receipt !== null || error !== null;
   const count = plan?.tracks.reduce((n, track) => n + track.fields.filter(field => field.action === 'fill' || (field.action === 'consent' && choices.has(key(track.track_id, field.field)))).length, 0) || 0;
-  return <Modal title={<h2>Review Library fields</h2>} className="playlist-export-inspector field-review-inspector" closeDisabled={writing} onClose={() => { if (!inFlight.current) onClose(); }}>
+  const content = <>
     <div className="pei-content" ref={body}>
       <p>Field data only · no playlist membership/order, audio copy or record creation.</p>
       <fieldset disabled={writing} className="field-review-controls">
-        <label>Scope <select aria-label="Field scope" value={scope} onChange={e => { clear(); setScope(e.target.value as FieldScope); }}>{(['selected', 'filtered', 'all'] as FieldScope[]).map(value => <option key={value} value={value} disabled={!scopes[value]}>{value === 'all' ? 'All Library tracks' : value}</option>)}</select></label>
+        {!embedded && <><label>Scope <select aria-label="Field scope" value={scope} onChange={e => { clear(); setScope(e.target.value as FieldScope); }}>{(['selected', 'filtered', 'all'] as FieldScope[]).map(value => <option key={value} value={value} disabled={!scopes[value]}>{value === 'all' ? 'All Library tracks' : value}</option>)}</select></label>
         <label>Direction <select aria-label="Field direction" value={direction} onChange={e => { clear(); const value = e.target.value as typeof direction; setDirection(value); setFields(fields.filter(field => supportedFields(surface, value).includes(field))); }}><option value="import">Import external values into Library</option><option value="export">Export Library values</option></select></label>
-        <label>Surface <select aria-label="Field surface" value={surface} onChange={e => { clear(); const value = e.target.value as typeof surface; setSurface(value); setFields(fields.filter(field => supportedFields(value, direction).includes(field))); }}><option value="engine">Engine DJ</option><option value="rekordbox">Rekordbox desktop</option></select></label>
-        <div>{FIELDS.map(field => <label key={field} title={supportedFields(surface, direction).includes(field) ? field : 'Not supported by this field-isolated adapter; no wider operation is substituted'}><input type="checkbox" disabled={!supportedFields(surface, direction).includes(field)} checked={fields.includes(field)} onChange={() => { clear(); setFields(fields.includes(field) ? fields.filter(f => f !== field) : [...fields, field]); }} />{field}</label>)}</div>
+        <label>Surface <select aria-label="Field surface" value={surface} onChange={e => { clear(); const value = e.target.value as typeof surface; setSurface(value); setFields(fields.filter(field => supportedFields(value, direction).includes(field))); }}><option value="engine">Engine DJ</option><option value="rekordbox">Rekordbox desktop</option></select></label></>}
+        <div>{FIELDS.map(field => <label key={field} title={supportedFields(surface, direction).includes(field) ? field : 'Not supported by this field-isolated adapter; no wider operation is substituted'}><input type="checkbox" disabled={!supportedFields(surface, direction).includes(field)} checked={fields.includes(field)} onChange={() => { clear(); const next = fields.includes(field) ? fields.filter(f => f !== field) : [...fields, field]; setFields(next); onFieldsChange?.(next); }} />{field}</label>)}</div>
         <small>Disabled fields have no isolated writer here. Tags/catalogue and scalar BPM operations are not substituted.</small>
       </fieldset>
       {direction === 'export' && !enabled && <p role="alert">External export is off. Imports remain available.</p>}
@@ -122,6 +143,8 @@ export function FieldReviewInspector({ scopes, initialScope, initialFields, onCl
       </>}
       {receipt && <section aria-label="Field receipt"><h3>{receipt.status === 'unknown' ? 'Outcome unknown' : receipt.status === 'partial' ? 'Needs attention' : 'Field receipt'}</h3>{receipt.tracks.map(track => <section key={track.track_id}><h4>{track.title || track.track_id}</h4>{track.fields.map(field => <p key={field.field}>{field.field} · {field.status}{field.reason ? ` · ${field.reason}` : ''}</p>)}</section>)}<p>{receipt.verification}</p></section>}
     </div>
-    <footer className="pei-footer"><button className="btn" disabled={writing} onClick={onClose}>Close</button><button className="btn" disabled={writing || !fields.length || loading} onClick={() => void recheck()}>{loading ? 'Reading…' : resolved ? 'Inspect destination, then recheck' : 'Recheck plan'}</button><button className="btn btn-primary" disabled={writing || loading || !plan?.executable || Boolean(expired) || resolved || !count || (direction === 'export' && !enabled)} onClick={() => void apply()}>{writing ? 'Applying…' : `Apply ${count} fields`}</button></footer>
-  </Modal>;
+    <footer className="pei-footer"><button className="btn" disabled={writing} onClick={onClose}>{embedded ? 'Clear review' : 'Close'}</button><button className="btn" disabled={writing || !fields.length || loading} onClick={() => void recheck()}>{loading ? 'Reading…' : resolved ? 'Inspect destination, then recheck' : 'Recheck plan'}</button><button className="btn btn-primary" disabled={writing || loading || !plan?.executable || Boolean(expired) || resolved || !count || (direction === 'export' && !enabled)} onClick={() => void apply()}>{writing ? 'Applying…' : `Apply ${count} fields`}</button></footer>
+  </>;
+  return embedded ? <section data-review-panel tabIndex={-1} aria-label="Field review" className="sync-embedded-review field-review-inspector"><h2>Review fields</h2>{content}</section>
+    : <Modal title={<h2>Review Library fields</h2>} className="playlist-export-inspector field-review-inspector" closeDisabled={writing} onClose={() => { if (!inFlight.current) onClose(); }}>{content}</Modal>;
 }

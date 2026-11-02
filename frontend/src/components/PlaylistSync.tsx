@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import { PlaylistSyncHeader } from './PlaylistSyncHeader';
 import { PlaylistSyncTable } from './PlaylistSyncTable';
-import { requestLibraryPlaylist } from '../library/openPlaylist';
+import { openSyncWorkspace } from '../sync/openWorkspace';
 import type { UnifiedPlaylist } from '../types';
 import './PlaylistSync.css';
 
@@ -16,7 +16,7 @@ export function PlaylistSync() {
   async function openLibrary(name: string) {
     const matches = (await api.playlists.list()).filter((p: { name: string }) => p.name === name);
     if (matches.length !== 1) throw new Error('Library playlist is missing or its name is ambiguous. Resolve the Library name before opening export.');
-    requestLibraryPlaylist({ id: matches[0].id, name, openExport: true });
+    if (!openSyncWorkspace({ kind: 'playlist', playlistName: name })) throw new Error('A Sync operation is pending. Inspect its receipt before opening another playlist.');
   }
   const importOrder = useMutation({
     mutationFn: async ({ name, source }: { name: string; source: 'engine' | 'rekordbox' }) => {
@@ -90,8 +90,8 @@ export function PlaylistSync() {
       <div className="playlist-sync-stats-bar">
         <PlaylistSyncHeader stats={stats} />
       </div>
-      <p className="playlist-library-routing">Open a playlist in Library to review/export it. The old three-column playlist detail is superseded.</p>
-      {opening && <p role="status">Opening playlist in Library…</p>}
+      <p className="playlist-library-routing">Open a Library playlist in the Sync workspace to review/export it. External-only playlists retain their separate import-to-Library step.</p>
+      {opening && <p role="status">Opening playlist in Sync workspace…</p>}
       {notice && <p role="alert">{notice}</p>}
       {externalPlaylist && <section className="playlist-external-import">
         <h3>{externalPlaylist.name} · not in Library</h3><p>Import playlist membership/order into Library first. This does not import performance data or copy audio. Unmatched tracks stop this existing import operation.</p>

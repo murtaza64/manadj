@@ -3,7 +3,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, expect, it, vi } from 'vitest';
-import { FieldReviewEntry } from './FieldReviewInspector';
+import { FieldReviewInspector } from './FieldReviewInspector';
 import { fieldReview, FieldRequestError, type FieldPlan } from '../api/fieldReview';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -20,8 +20,9 @@ async function render() {
   const host = document.createElement('div'); document.body.append(host); root = createRoot(host);
   client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   client.setQueryData(['app-config'], { export_enabled: true });
-  await act(async () => { root.render(<QueryClientProvider client={client}><FieldReviewEntry scopes={{ selected: async () => [2], filtered: async () => [2, 3] }} /></QueryClientProvider>); await tick(); });
-  await act(async () => { button('Review fields…').click(); await tick(); });
+  // Preserve direct inspector/guard regressions; entry routing is now tested
+  // through the real Sync workspace instead of expecting the old Library modal.
+  await act(async () => { root.render(<QueryClientProvider client={client}><FieldReviewInspector initialScope="selected" onClose={() => undefined} scopes={{ selected: async () => [2], filtered: async () => [2, 3] }} /></QueryClientProvider>); await tick(); });
 }
 it('captures exact selected IDs and sends only separately selected replacements once', async () => {
   const preview = vi.spyOn(fieldReview, 'plan').mockResolvedValue(plan);

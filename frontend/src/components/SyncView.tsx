@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { PlaylistSync } from './PlaylistSync';
 import { AcquisitionView } from './acquisition/AcquisitionView';
 import { useAcquisitionAvailable } from './acquisition/useAcquisitionAvailable';
@@ -6,10 +6,13 @@ import { OPEN_ACQUISITION_EVENT, peekPendingAcquisition } from './acquisition/op
 import { UnifiedTracksSync } from './UnifiedTracksSync';
 import { RekordboxImportGuide } from '../onboarding/RekordboxImportGuide';
 import './SyncView.css';
+import { SyncWorkspace } from './SyncWorkspace';
+import { OPEN_SYNC_WORKSPACE_EVENT, takeSyncWorkspace } from '../sync/openWorkspace';
 
-type TabType = 'tracks' | 'playlists' | 'acquisition' | 'rekordbox-import';
+type TabType = 'workspace' | 'tracks' | 'playlists' | 'acquisition' | 'rekordbox-import';
 
 const TABS: { id: TabType; label: string }[] = [
+  { id: 'workspace', label: 'Workspace' },
   { id: 'tracks', label: 'Tracks' },
   { id: 'playlists', label: 'Playlists' },
   { id: 'acquisition', label: 'Acquisition' },
@@ -19,10 +22,19 @@ const TABS: { id: TabType; label: string }[] = [
 /** The Sync mode: a normal top-bar mode (the persistent TopBar is the way
  * in and out), with a slim secondary tab row in the topbar design language. */
 export function SyncView() {
-  const [selectedTab, setActiveTab] = useState<TabType>(() => (peekPendingAcquisition() ? 'acquisition' : 'tracks'));
+  const [selectedTab, setActiveTab] = useState<TabType>(() => (peekPendingAcquisition() ? 'acquisition' : 'workspace'));
+  const [request, setRequest] = useState(takeSyncWorkspace);
+  const [busy, setBusy] = useState(false);
+  const pending = useRef(false);
+  const onPendingChange = useCallback((value: boolean) => { pending.current = value; setBusy(value); }, []);
+  useEffect(() => {
+    const open = () => { const next = takeSyncWorkspace(); if (next && !pending.current) { setRequest(next); setActiveTab('workspace'); } };
+    window.addEventListener(OPEN_SYNC_WORKSPACE_EVENT, open);
+    return () => window.removeEventListener(OPEN_SYNC_WORKSPACE_EVENT, open);
+  }, []);
   // a task worklist "open in Acquisition" (gh#342) while already mounted
   useEffect(() => {
-    const open = () => setActiveTab('acquisition');
+    const open = () => { if (!pending.current) setActiveTab('acquisition'); };
     window.addEventListener(OPEN_ACQUISITION_EVENT, open);
     return () => window.removeEventListener(OPEN_ACQUISITION_EVENT, open);
   }, []);
@@ -30,7 +42,7 @@ export function SyncView() {
   // set up (Settings → Accounts; setup-guides #290/#291, gh#342).
   const acquisitionAvailable = useAcquisitionAvailable();
   const tabs = TABS.filter((t) => t.id !== 'acquisition' || acquisitionAvailable);
-  const activeTab = tabs.some((t) => t.id === selectedTab) ? selectedTab : 'tracks';
+  const activeTab = tabs.some((t) => t.id === selectedTab) ? selectedTab : 'workspace';
 
   return (
     <div className="sync-view-container">
@@ -39,13 +51,15 @@ export function SyncView() {
           <button
             key={t.id}
             className={`sync-view-tab${activeTab === t.id ? ' active' : ''}`}
-            onClick={() => setActiveTab(t.id)}
+            disabled={busy}
+            onClick={() => { if (!pending.current) setActiveTab(t.id); }}
           >
             {t.label}
           </button>
         ))}
       </div>
 
+      <div className="sync-workspace-host" hidden={activeTab !== 'workspace'}><SyncWorkspace key={request?.sequence || 0} request={request} onPendingChange={onPendingChange} /></div>
       {activeTab === 'tracks' && <UnifiedTracksSync />}
       {activeTab === 'playlists' && <PlaylistSync />}
       {activeTab === 'acquisition' && <AcquisitionView />}

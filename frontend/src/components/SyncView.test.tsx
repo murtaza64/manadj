@@ -9,6 +9,7 @@ const gate = vi.hoisted(() => ({ connected: false }));
 vi.mock('./acquisition/useAcquisitionAvailable', () => ({ useAcquisitionAvailable: () => gate.connected }));
 vi.mock('./PlaylistSync', () => ({ PlaylistSync: () => null }));
 vi.mock('./UnifiedTracksSync', () => ({ UnifiedTracksSync: () => null }));
+vi.mock('./SyncWorkspace', () => ({ SyncWorkspace: () => <div data-testid="workspace" /> }));
 vi.mock('./acquisition/AcquisitionView', () => ({ AcquisitionView: () => <div data-testid="acquisition" /> }));
 
 import { SyncView } from './SyncView';
@@ -29,17 +30,17 @@ const tabs = () => [...host.querySelectorAll('.sync-view-tab')].map((t) => t.tex
 it('hides Acquisition until a Supplier is configured (setup-guides #290, gh#342)', () => {
   gate.connected = false;
   act(() => root.render(<SyncView />));
-  expect(tabs()).toEqual(['Tracks', 'Playlists', 'Rekordbox import']);
+  expect(tabs()).toEqual(['Workspace', 'Tracks', 'Playlists', 'Rekordbox import']);
 
   gate.connected = true;
   act(() => root.render(<SyncView />));
-  expect(tabs()).toEqual(['Tracks', 'Playlists', 'Acquisition', 'Rekordbox import']);
-  act(() => (host.querySelectorAll('.sync-view-tab')[2] as HTMLButtonElement).click());
+  expect(tabs()).toEqual(['Workspace', 'Tracks', 'Playlists', 'Acquisition', 'Rekordbox import']);
+  act(() => (host.querySelectorAll('.sync-view-tab')[3] as HTMLButtonElement).click());
   expect(host.querySelector('[data-testid="acquisition"]')).not.toBeNull();
 
   // disconnecting while on the tab falls back to Tracks
   gate.connected = false;
   act(() => root.render(<SyncView />));
   expect(host.querySelector('[data-testid="acquisition"]')).toBeNull();
-  expect(host.querySelector('.sync-view-tab.active')?.textContent).toBe('Tracks');
+  expect(host.querySelector('.sync-view-tab.active')?.textContent).toBe('Workspace');
 });

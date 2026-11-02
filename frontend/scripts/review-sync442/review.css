@@ -1,0 +1,6 @@
+html,body,#root { height:100%; margin:0; }
+.review-sync442 { height:100%; min-height:0; display:flex; flex-direction:column; background:var(--base); color:var(--text); }
+.review-sync442 > header { padding:8px 16px; border-bottom:2px solid var(--accent); flex:none; font-size:var(--font-small); }
+.review-sync442 > header p { margin:4px 0; }
+.review-sync442 > header a { color:var(--accent); }
+.review-sync442 > .app-shell { flex:1; height:auto; min-height:0; }

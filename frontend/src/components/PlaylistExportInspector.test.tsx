@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
-import { act } from 'react';
+import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, expect, it, vi } from 'vitest';
 import { api, PlaylistExportRequestError } from '../api/client';
-import { ExportFieldChanges, PlaylistExportEntry } from './PlaylistExportInspector';
+import { ExportFieldChanges, PlaylistExportEntry, PlaylistExportInspector } from './PlaylistExportInspector';
 import { exportPlanFixture as plan, exportReportFixture as report } from '../test/playlistExportFixtures';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -12,11 +12,16 @@ let root: Root, client: QueryClient;
 afterEach(() => { if (root) act(() => root.unmount()); client?.clear(); vi.restoreAllMocks(); document.body.innerHTML = ''; });
 const tick = () => new Promise(resolve => setTimeout(resolve, 5));
 function button(text: string) { return [...document.querySelectorAll<HTMLButtonElement>('button')].find(b => b.textContent === text)!; }
+function InspectorHarness({ name, enabled }: { name: string; enabled: boolean }) {
+  const [openedName, setOpenedName] = useState<string | null>(null);
+  return <>{enabled ? <button onClick={() => setOpenedName(name)}>Export…</button> : <PlaylistExportEntry playlistName={name} />}
+    {openedName && <PlaylistExportInspector playlistName={openedName} onClose={() => setOpenedName(null)} />}</>;
+}
 async function render(name = 'Night Shift', enabled = true) {
   const host = document.createElement('div'); document.body.append(host); root = createRoot(host);
   client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   client.setQueryData(['app-config'], { export_enabled: enabled });
-  await act(async () => { root.render(<QueryClientProvider client={client}><PlaylistExportEntry playlistName={name} /></QueryClientProvider>); await tick(); });
+  await act(async () => { root.render(<QueryClientProvider client={client}><InspectorHarness name={name} enabled={enabled} /></QueryClientProvider>); await tick(); });
 }
 async function select(label: string, value: string) {
   await act(async () => { const select = document.querySelector<HTMLSelectElement>(`select[aria-label="${label}"]`)!; select.value = value; select.dispatchEvent(new Event('change', { bubbles: true })); await tick(); });
@@ -37,7 +42,7 @@ it('opens the Library entry with captured context, visual removals/clears, then 
   expect(document.querySelector('.pei-clear')?.textContent).toContain('− 1 entries');
   expect(document.body.textContent).toContain('CLEAR: Hot cues, Main cue, Energy');
   expect(document.body.textContent).toContain('? Not observed');
-  await act(async () => { root.render(<QueryClientProvider client={client}><PlaylistExportEntry playlistName="Different playlist" /></QueryClientProvider>); await tick(); });
+  await act(async () => { root.render(<QueryClientProvider client={client}><InspectorHarness name="Different playlist" enabled /></QueryClientProvider>); await tick(); });
   expect(document.querySelector('[role="dialog"] h2')?.textContent).toContain('Night Shift');
   await acknowledge();
   await act(async () => { button('Export reviewed changes').click(); button('Export reviewed changes').click(); await tick(); });
