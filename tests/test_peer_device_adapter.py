@@ -126,3 +126,38 @@ def test_paired_adapter_reused_id_same_bytes_stays_stale_until_explicit_remateri
         db.commit()
     assert client.get("/api/device-sync/peer-sessions").json()["items"][0]["state"] == "source_invalid"
     assert client.get(f"/api/device-sync/peer-sessions/{sid}", params={"generation": new}).status_code == 409
+
+
+def test_legacy_list_never_advertises_peer_uuid_even_if_peer_intake_fails(instance, monkeypatch):
+    from tests.test_peer_history_integration import history
+    from tests.test_peer_session_exchange import seed
+    a, b, _, _, sid = setup_pair(instance)
+    # The phone can already have A's immutable ended cache with source Track1.
+    assert [row["uuid"] for row in device(a).get("/api/device-sync/sessions").json()] == [sid]
+    source_log = device(a).get(f"/api/device-sync/sessions/{sid}").json()
+    assert source_log["events"][0]["trackId"] == 1
+    local_sid = str(uuid4())
+    seed(b, 10, session_uuid=local_sid, filename="receiver-own.wav")
+    before = device(b).get("/api/device-sync/sessions").json()
+    packet = export(a, sid)
+    post(b, "imports", packet)
+    bind(b, 9, packet["manifest"]["tracks"][0]["logical_track_id"])
+    post(b, f"sessions/{sid}/materialize")
+    receiver = device(b)
+    assert receiver.get("/api/device-sync/sessions").json() == before
+    assert [row["uuid"] for row in before] == [local_sid]
+    assert {row["uuid"] for row in history(b).get("/api/sessions").json()} == {sid, local_sid}
+    assert receiver.get("/api/device-sync/peer-sessions").json()["items"][0]["session_uuid"] == sid
+    assert history(b).get(f"/api/sessions/{sid}").json()["events"][0]["trackId"] == 9
+
+    from backend.peer_sync import device as adapter
+    from fastapi import HTTPException
+
+    def unavailable(_db):
+        raise HTTPException(503, "decoy_peer_intake_unavailable")
+
+    monkeypatch.setattr(adapter, "list_peer_sessions", unavailable)
+    assert receiver.get("/api/device-sync/peer-sessions").status_code == 503
+    # A failed separate intake cannot re-advertise the unmarked foreign-ID cache UUID.
+    assert receiver.get("/api/device-sync/sessions").json() == before
+    assert receiver.get(f"/api/device-sync/sessions/{sid}").status_code == 409

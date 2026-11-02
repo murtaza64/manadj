@@ -67,7 +67,7 @@
 
 ## Paired-device peer reader — version1
 
-Uses the existing Device listener token/pair-code boundary, never local-owner mutators or friend authority. Legacy `/api/device-sync/sessions/{uuid}` refuses peer-managed rows409; old snapshot/journal/local Sessions are unchanged.
+Uses the existing Device listener token/pair-code boundary, never local-owner mutators or friend authority. Legacy `/api/device-sync/sessions` excludes peer-managed headers; `/sessions/{uuid}` refuses them409. The separate peer reader is their sole phone intake, including when it fails/offlines. This prevents a phone's ended source-UUID cache from being reused with another receiver's local IDs. Old snapshot/journal/local Sessions are unchanged.
 
 - `GET /api/device-sync/peer-sessions` → `{version: 1, items: [item]}`. An unused/uninitialized peer store returns an empty list.
 - `item`: `session_uuid`, `origin_replica_id`, `recording_origin`, `manifest_sha256`, `started_at`, `ended_at`, `materialized`, `state`, `replay_generation`, `dependencies`, `conflict_count`.

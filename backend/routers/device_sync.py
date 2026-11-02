@@ -426,7 +426,15 @@ def list_device_sessions(db: Session = Depends(get_db)):
     ended, so the phone caches them by uuid."""
     from . import sessions as sessions_router
 
-    return [row.model_dump(mode="json") for row in sessions_router.list_sessions(db)]
+    from ..models import Session as RecordedSession
+
+    # Legacy phones cache ended logs by UUID without refetching detail. A peer
+    # projection can reuse a cached source UUID with entirely different local
+    # IDs: never advertise it here, even when the separate peer intake is down.
+    rows = db.query(RecordedSession).filter(~RecordedSession.peer_history.has()).order_by(
+        RecordedSession.started_at.desc(), RecordedSession.id.desc()
+    ).all()
+    return [sessions_router._row(db, s).model_dump(mode="json") for s in rows]
 
 
 @router.get("/sessions/{uuid}")
