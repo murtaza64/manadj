@@ -86,9 +86,8 @@ def replace_session_candidates(db: Session, session: models.Session) -> int:
     this Session are dropped (gh#187): the take chip/band is the
     surviving surface for that span.
     """
-    events: list[dict[str, Any]] = []
-    for chunk in session.chunks:  # relationship order: seq
-        events.extend(json.loads(chunk.events_json))
+    from backend.session_source import session_events
+    events = session_events(db, session)
     result = mine_session(events, playlist_orderings(db))
     confirmed = [
         (set(json.loads(t.cast_json)), t.window_start_s, t.window_end_s)

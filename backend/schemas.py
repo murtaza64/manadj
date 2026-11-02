@@ -502,6 +502,7 @@ class SessionDetail(SessionRow):
     (Sessions PRD, ADR 0033): fetch the persisted events through the app
     boundary; clients read them with the capture vocabulary's real types."""
     events: list[dict]
+    replay_generation: str | None = None
 
 
 class RoutineCandidateRow(BaseModel):
@@ -634,6 +635,7 @@ class KindConversion(BaseModel):
 
 
 class RoutineDetail(RoutineRow):
+    peer_source: dict[str, str] | None = None
     """One Routine with its slot-addressed, beat-domain event replay and
     the editor's authored edits layer (gh#170 pass 2; null = unedited)."""
     events: list[dict]

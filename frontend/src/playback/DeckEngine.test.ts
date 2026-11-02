@@ -385,6 +385,13 @@ describe('decoded-buffer cache (mix-editor 28)', () => {
     expect(engine.getSnapshot().loadState).toBe('error');
   });
 
+  it('peer loads cannot use a ready bare-ID decode when the versioned source is unavailable', async () => {
+    putCachedBuffer(7, fakeBuffer);
+    const engine = new DeckEngine(unusedPort);
+    await engine.load({ trackId: 7, audioUrl: 'http://127.0.0.1:1/none', bpm: 128, bypassCache: true });
+    expect(engine.getSnapshot().loadState).toBe('error');
+  });
+
   it('setTrackBpm keeps beat-jump math honest after a BPM edit', async () => {
     putCachedBuffer(9, fakeBuffer);
     const engine = new DeckEngine(unusedPort);

@@ -43,9 +43,8 @@ def build_promotion_preview(
         raise PreviewError(
             "the take's Session is gone — its event slice reference cannot be read"
         )
-    events: list[dict] = []
-    for chunk in s.chunks:
-        events.extend(json.loads(chunk.events_json))
+    from backend.session_source import session_events
+    events = session_events(db, s)
 
     grids: dict[int, list[dict]] = {}
     for tid in cast:

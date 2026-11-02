@@ -419,7 +419,8 @@ interface Rig {
 function rig(
   plan: ReplayPlan,
   loadOk = true,
-  loader?: (engines: Record<ChannelId, FakeEngine>, deck: ChannelId, trackId: number) => Promise<boolean>
+  loader?: (engines: Record<ChannelId, FakeEngine>, deck: ChannelId, trackId: number) => Promise<boolean>,
+  validateSource?: () => Promise<boolean>
 ): Rig {
   const clock = { t: 100 };
   const read = () => clock.t;
@@ -435,6 +436,7 @@ function rig(
     plan,
     { mixer: mixer as unknown as Mixer, engines: engines as unknown as Record<ChannelId, DeckEngine> },
     {
+      validateSource,
       loadTrack: async (deck, trackId) => {
         if (loader) return loader(engines, deck, trackId);
         if (!loadOk) return false;
@@ -482,6 +484,52 @@ function planFor(events: CaptureEvent[], t: number): ReplayPlan {
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────
+
+describe('peer source generation validation', () => {
+  it('refuses stale cached plans before touching decks', async () => {
+    const loader = vi.fn();
+    const r = rig(planFor(simpleLog(), 3), true, loader, async () => false);
+    await r.driver.start();
+    expect(loader).not.toHaveBeenCalled();
+    expect(r.stops).toEqual(['load-failed']);
+  });
+
+  it('refuses resume when an asset disappears, even with a ready deck', async () => {
+    let available = true;
+    const r = rig(planFor(simpleLog(), 3), true, undefined, async () => available);
+    await r.driver.start();
+    r.driver.pauseReplay();
+    available = false;
+    r.driver.resumeReplay();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(r.engines.A.getSnapshot().playing).toBe(false);
+    expect(r.stops).toEqual(['load-failed']);
+  });
+
+  it('refuses seek with a stale binding instead of reusing loaded integers', async () => {
+    let current = true;
+    const r = rig(planFor(simpleLog(), 3), true, undefined, async () => current);
+    await r.driver.start();
+    current = false;
+    await r.driver.seekTo(planFor(simpleLog(), 4));
+    expect(r.engines.A.getSnapshot().playing).toBe(false);
+    expect(r.stops).toEqual(['load-failed']);
+  });
+
+  it('a stop during preflight cannot start later', async () => {
+    let release!: (ok: boolean) => void;
+    const loader = vi.fn();
+    const r = rig(planFor(simpleLog(), 3), true, loader, () => new Promise(resolve => { release = resolve; }));
+    const pending = r.driver.start();
+    r.driver.stop();
+    release(true);
+    await pending;
+    expect(loader).not.toHaveBeenCalled();
+    expect(r.stops).toEqual(['stopped']);
+  });
+});
 
 it('keeps the playhead and follow viewport at the requested moment during startup loading', async () => {
   let finish!: () => void;

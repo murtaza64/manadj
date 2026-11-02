@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session
 
 from backend import models, schemas
 from backend.database import get_db
+from backend.session_source import preview_source, session_events
 
 router = APIRouter()
 
@@ -40,6 +41,13 @@ def _row(c: models.RoutineCandidate) -> schemas.RoutineCandidateRow:
     )
 
 
+def _validate_sources(db, rows):
+    for uuid in {c.session_uuid for c in rows}:
+        s = db.query(models.Session).filter(models.Session.uuid == uuid).first()
+        if s is not None and s.peer_history is not None:
+            session_events(db, s)
+
+
 @router.get("", response_model=list[schemas.RoutineCandidateRow])
 def list_candidates(
     session_uuid: str | None = None, db: Session = Depends(get_db)
@@ -52,6 +60,7 @@ def list_candidates(
         models.RoutineCandidate.session_uuid,
         models.RoutineCandidate.window_start_s,
     ).all()
+    _validate_sources(db, rows)
     return [_row(c) for c in rows]
 
 
@@ -72,6 +81,7 @@ def query_by_cast_prefix(
         .filter(models.RoutineCandidate.entry_track_id == track_ids[0])
         .all()
     )
+    _validate_sources(db, rows)
     matches = []
     for c in rows:
         cast = json.loads(c.cast_json)
@@ -117,6 +127,7 @@ def preview_candidate(uuid: str, db: Session = Depends(get_db)) -> schemas.Routi
     except PreviewError as e:
         raise HTTPException(status_code=422, detail=str(e))
     return schemas.RoutineDetail(
+        peer_source=preview_source(db, c.session_uuid),
         uuid=f"preview-cand-{c.uuid}",
         name=None,
         cast=result.cast,

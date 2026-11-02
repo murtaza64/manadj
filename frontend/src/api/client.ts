@@ -2121,6 +2121,7 @@ export interface RoutineStructureWire {
 }
 
 export interface RoutineDetailWire extends RoutineRowWire {
+  peer_source?: { session_uuid: string; generation: string } | null;
   /** Slot-addressed, beat-domain mechanical replay (each event carries
    * `beat` + `slot`; global controls carry slot null). */
   events: Record<string, unknown>[];
@@ -2141,6 +2142,7 @@ export interface SessionRowWire {
 }
 
 export interface SessionDetailWire extends SessionRowWire {
+  replay_generation?: string | null;
   /** The whole event log, chunks concatenated in seq order. Opaque to the
    * backend; this client reads it with the capture module's real types. */
   events: CaptureEventWire[];

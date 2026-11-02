@@ -67,6 +67,8 @@ export interface ReplayAudio {
 export type ReplayLiveStatus = 'loading' | 'playing' | 'paused';
 
 export interface ReplayHooks {
+  /** Validate immutable source generation/assets before starting or resuming. */
+  validateSource?(): Promise<boolean>;
   /** Resolve + load a track onto a shared deck (the provider's one Load
    * path). Resolves false when the track is missing from the library. */
   loadTrack(deck: ChannelId, trackId: number): Promise<boolean>;
@@ -163,6 +165,7 @@ export class SessionReplayDriver {
   private loading = true;
   private started = false;
   private stoppedFired = false;
+  private cancelled = false;
   private suppressSilence = false;
   private selfOps = 0;
   private raf = 0;
@@ -270,6 +273,11 @@ export class SessionReplayDriver {
   async start(): Promise<void> {
     if (this.started) return;
     this.started = true;
+    if (this.hooks.validateSource && !await this.sourceReady()) {
+      this.fireStopped('load-failed');
+      return;
+    }
+    if (this.cancelled) return;
 
     registerSurface('replay', {
       // Deck transport stays a deck-class gesture (the Conductor's
@@ -327,11 +335,12 @@ export class SessionReplayDriver {
       })
     );
     if (!this.active) return; // displaced while loading
-    if (results.some((ok) => !ok)) {
+    if (results.some((ok) => !ok) || (this.hooks.validateSource && !await this.sourceReady())) {
       this.teardown({ release: true });
       this.fireStopped('load-failed');
       return;
     }
+    if (!this.active) return;
 
     // Seed decks + mixer, then start the clock and watchers.
     this.self(() => this.applySeed());
@@ -352,6 +361,10 @@ export class SessionReplayDriver {
 
   /** UI stop: pause the decks, release, capture resumes. */
   stop(): void {
+    this.cancelled = true;
+    if (this.started && !this.active && !this.stoppedFired) {
+      this.fireStopped('stopped');
+    }
     if (!this.active) return;
     cancelAnimationFrame(this.raf);
     this.self(() => {
@@ -377,6 +390,32 @@ export class SessionReplayDriver {
   /** Space again: re-anchor the clock and resume the parked decks. */
   resumeReplay(): void {
     if (!this.active || this.seeking || this.pausedAtOffset === null) return;
+    if (this.hooks.validateSource) {
+      this.seeking = true;
+      const gen = this.seekGen;
+      void this.sourceReady().then((ok) => {
+        if (gen !== this.seekGen) return;
+        this.seeking = false;
+        if (!this.active || this.pausedAtOffset === null) return;
+        if (!ok) {
+          this.self(() => this.silenceDecks());
+          this.teardown({ release: true });
+          this.fireStopped('load-failed');
+          return;
+        }
+        this.resumeValidated();
+      });
+      return;
+    }
+    this.resumeValidated();
+  }
+
+  private async sourceReady(): Promise<boolean> {
+    try { return await this.hooks.validateSource!(); } catch { return false; }
+  }
+
+  private resumeValidated(): void {
+    if (!this.active || this.pausedAtOffset === null) return;
     const offset = this.pausedAtOffset;
     this.anchorAudioTime = this.mixer.now() - offset + (this.scheduledReplay ? SCRATCH_PREROLL_S : 0);
     this.pausedAtOffset = null;
@@ -411,6 +450,7 @@ export class SessionReplayDriver {
     this.plan = plan;
     this.cueIndex = 0;
     try {
+      if (this.hooks.validateSource && !await this.sourceReady()) throw new Error('stale replay source');
       // Load anything the new seed needs that isn't already on its deck.
       const needed = ALL_DECKS.filter((d) => {
         const id = plan.seed.decks[d].trackId;
@@ -430,11 +470,12 @@ export class SessionReplayDriver {
       // finishing here too double-started the tick loop.
       if (gen !== this.seekGen) return;
       if (!this.active) return; // displaced/taken over while loading
-      if (results.some((ok) => !ok)) {
+      if (results.some((ok) => !ok) || (this.hooks.validateSource && !await this.sourceReady())) {
         this.teardown({ release: true });
         this.fireStopped('load-failed');
         return;
       }
+      if (!this.active || gen !== this.seekGen) return;
       this.self(() => this.applySeed());
       if (wasPaused) {
         // Stay paused at the new moment; decks are seeded but parked.

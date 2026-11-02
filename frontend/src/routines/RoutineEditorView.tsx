@@ -656,10 +656,17 @@ export default function RoutineEditorView() {
   const openedReview = opened?.kind === 'review' ? opened : null;
   const { data: previewDetail } = useQuery<RoutineDetailWire>({
     queryKey: ['routine-preview', openedReview?.source, openedReview?.uuid],
-    queryFn: () =>
-      openedReview!.source === 'routine-take'
+    queryFn: async () => {
+      const detail = await (openedReview!.source === 'routine-take'
         ? api.routineTakes.preview(openedReview!.uuid)
-        : api.routineCandidates.preview(openedReview!.uuid),
+        : api.routineCandidates.preview(openedReview!.uuid));
+      if (detail.peer_source) {
+        toast('Peer previews use the Clip Editor; saved derivations are not supported.');
+        throw new Error('Peer source requires versioned audio');
+      }
+      return detail;
+    },
+    retry: false,
     enabled: openedReview !== null,
     staleTime: Infinity,
   });

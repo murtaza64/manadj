@@ -93,3 +93,8 @@ async def detail(sid: UUID, db: Database):
 @router.get("/sessions/{sid}/conflicts")
 async def conflicts(sid: UUID, db: Database):
     return await invoke(db, "conflicts", sid)
+
+
+@router.post("/sessions/{sid}/materialize")
+async def materialize(sid: UUID, request: Request, db: Database):
+    return await invoke(db, "materialize", sid, request=request, model=Strict)

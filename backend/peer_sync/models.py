@@ -1,4 +1,5 @@
 from sqlalchemy import CheckConstraint, Column, ForeignKey, Integer, String, Text
+from sqlalchemy.orm import backref, relationship
 
 from ..models import Base
 
@@ -52,3 +53,11 @@ class SyncConflict(Base):
     existing_kind = Column(String(32), nullable=False)
     existing_json = Column(Text, nullable=False)
     incoming_json = Column(Text, nullable=False)
+
+
+class PeerHistory(Base):
+    __tablename__ = "peer_history"
+    session_id = Column(Integer, ForeignKey("sessions.id", ondelete="CASCADE"), primary_key=True)
+    source_sha256 = Column(String(64), nullable=False)
+    binding_sha256 = Column(String(64), nullable=False)
+    session = relationship("Session", backref=backref("peer_history", uselist=False, passive_deletes="all"))

@@ -1,8 +1,8 @@
-"""Transactional own-machine outbox/inbox. No normal history mutation or network effects."""
+"""Transactional own-machine outbox/inbox and explicit guarded history projection."""
 import hashlib
 import json
 import os
-from datetime import timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from uuid import UUID, uuid4
 
@@ -14,7 +14,7 @@ from ..peer_inventory.contracts import MAX_EXPORT, canonical
 from ..session_audibility import events_contain_audible
 from .contracts import Asset, Bundle, Chunk, Manifest, TrackReference, digest
 from .events import reference_ids, remap, validate_events
-from .models import SyncChunk, SyncConflict, SyncLocal, SyncSelection, SyncSession, SyncSource, SyncTrack
+from .models import PeerHistory, SyncChunk, SyncConflict, SyncLocal, SyncSelection, SyncSession, SyncSource, SyncTrack
 
 CAPABILITIES = {"session_exchange": True, "library_apply": False, "playback": False,
                 "audio_transfer": False, "curated_merge": False}
@@ -231,7 +231,8 @@ class PeerSync:
         if stored is not None and (stored.direction != "received" or stored.manifest_sha256 != hashed):
             self._conflict(bundle, stored_snapshot(stored.manifest_json, self._chunks(sid)), "peer_snapshot")
         existing_history = self.db.scalar(select(RecordedSession).where(RecordedSession.uuid == sid))
-        if existing_history is not None:
+        if existing_history is not None and (existing_history.peer_history is None
+                or existing_history.peer_history.source_sha256 != hashed):
             self._conflict(bundle, {
                 "uuid": sid, "started_at": existing_history.started_at.isoformat(),
                 "ended_at": existing_history.ended_at.isoformat() if existing_history.ended_at else None,
@@ -284,6 +285,8 @@ class PeerSync:
         if stored is None:
             raise SyncError(404, "exchanged_session_missing")
         manifest = Manifest.model_validate_json(stored.manifest_json)
+        if digest(manifest.model_dump(mode="json")) != stored.manifest_sha256:
+            raise SyncError(409, "stored_manifest_integrity_mismatch")
         chunks = self._chunks(sid)
         complete = validate_complete(manifest, chunks)
         dependencies, mapping = [], {}
@@ -321,4 +324,50 @@ class PeerSync:
                 "recording_origin": manifest.recording_origin,
                 "manifest_sha256": stored.manifest_sha256, "stored_seqs": sorted(chunks),
                 "state": "partial_chunks" if not complete else "unresolved_references" if not resolved else "resolved" if ready else "assets_unavailable",
-                "dependencies_ready": ready, "dependencies": dependencies, "session": session, "capabilities": CAPABILITIES}
+                 "dependencies_ready": ready, "dependencies": dependencies, "session": session, "capabilities": CAPABILITIES}
+
+    def binding_generation(self, sid):
+        stored = self.db.get(SyncSession, str(sid))
+        manifest = Manifest.model_validate_json(stored.manifest_json)
+        refs = []
+        for ref in manifest.tracks:
+            binding = self.db.get(SyncTrack, str(ref.logical_track_id))
+            track = self.db.get(Track, binding.track_id) if binding and binding.track_id is not None else None
+            guard = self._guard(track) if track is not None else None
+            if guard is None:
+                raise SyncError(409, "selected_current_binding_required")
+            refs.append({"logical": str(ref.logical_track_id), "local": track.id, "guard": guard})
+        return digest(sorted(refs, key=lambda item: item["logical"]))
+
+    def materialize(self, sid, body=None):
+        self._lock()
+        sid = str(sid)
+        detail = self.detail(sid)
+        source = self.db.get(SyncSession, sid)
+        if source.direction != "received" or not detail["dependencies_ready"]:
+            raise SyncError(409, "complete_resolved_exact_peer_source_required")
+        generation = self.binding_generation(sid)
+        recorded = self.db.scalar(select(RecordedSession).where(RecordedSession.uuid == sid))
+        duplicate = recorded is not None
+        if recorded is not None and (recorded.peer_history is None
+                or recorded.peer_history.source_sha256 != source.manifest_sha256):
+            raise SyncError(409, "unrelated_normal_history_collision")
+        if recorded is None:
+            session = detail["session"]
+            recorded = RecordedSession(uuid=sid, origin=session["origin"],
+                started_at=datetime.fromisoformat(session["started_at"]).replace(tzinfo=None),
+                ended_at=datetime.fromisoformat(session["ended_at"]).replace(tzinfo=None))
+            self.db.add(recorded)
+            self.db.flush()
+            recorded.peer_history = PeerHistory(source_sha256=source.manifest_sha256, binding_sha256=generation)
+        elif recorded.peer_history.binding_sha256 != generation:
+            from ..models import RoutineCandidate
+            self.db.query(RoutineCandidate).filter(RoutineCandidate.session_uuid == sid).delete()
+            recorded.routine_miner_version = None
+            recorded.peer_history.binding_sha256 = generation
+            duplicate = False
+        self.db.commit()
+        if not duplicate:
+            from ..routine_miner_tasks import enqueue_routine_mine
+            enqueue_routine_mine(self.db, sid)
+        return {"session_uuid": sid, "duplicate": duplicate, "binding_generation": generation}

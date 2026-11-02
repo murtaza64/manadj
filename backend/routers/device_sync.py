@@ -31,6 +31,7 @@ import struct
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import FileResponse
@@ -437,6 +438,8 @@ def get_device_session(uuid: str, db: Session = Depends(get_db)):
     from . import sessions as sessions_router
 
     detail = sessions_router.get_session(uuid, db).model_dump(mode="json")
+    if detail.get("replay_generation") is not None:
+        raise HTTPException(409, "peer_history_requires_versioned_audio_adapter")
     detail["events"] = [
         e for e in detail["events"]
         if not (e.get("kind") == "transport" and e.get("action") == "scratchMove")
@@ -445,6 +448,24 @@ def get_device_session(uuid: str, db: Session = Depends(get_db)):
 
 
 # ── Phone → desktop (ADR 0045, #375) ──────────────────────────────────
+
+
+@router.get("/peer-sessions")
+def list_peer_sessions(db: Session = Depends(get_db)):
+    from ..peer_sync.device import list_peer_sessions as listing
+    return listing(db)
+
+
+@router.get("/peer-sessions/{uuid}")
+def get_peer_session(uuid: UUID, generation: str, db: Session = Depends(get_db)):
+    from ..peer_sync.device import peer_session
+    return peer_session(db, uuid, generation)
+
+
+@router.get("/peer-sessions/{uuid}/audio/{track_id}")
+def get_peer_session_audio(uuid: UUID, track_id: int, generation: str, db: Session = Depends(get_db)):
+    from ..peer_sync.device import audio
+    return Response(audio(db, uuid, track_id, generation), media_type="application/octet-stream", headers={"Cache-Control": "no-store"})
 
 
 class PushedChunk(BaseModel):
@@ -473,6 +494,8 @@ def push_session(uuid: str, body: SessionPush, request: Request, db: Session = D
     device_id, name = _device(request)
     origin = name or device_id
     s = db.query(models.Session).filter(models.Session.uuid == uuid).first()
+    from ..session_source import deny_peer_write
+    deny_peer_write(s)
     if s is None:
         s = models.Session(uuid=uuid, started_at=body.started_at, origin=origin)
         db.add(s)

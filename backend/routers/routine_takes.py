@@ -71,6 +71,8 @@ def create_routine_take(
     )
     if s is None:
         raise HTTPException(status_code=404, detail="session not found")
+    from backend.session_source import deny_peer_derivation
+    deny_peer_derivation(db, s.uuid)
     if (
         db.query(models.RoutineTake.id)
         .filter(models.RoutineTake.uuid == payload.uuid)

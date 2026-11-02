@@ -62,6 +62,8 @@ def get_take(uuid: str, db: Session = Depends(get_db)) -> schemas.TakeDetail:
 
 @router.post("", response_model=schemas.TakeRow)
 def create_take(payload: schemas.TakeCreate, db: Session = Depends(get_db)) -> schemas.TakeRow:
+    from backend.session_source import deny_peer_derivation
+    deny_peer_derivation(db, payload.session_uuid)
     for track_id in (payload.a_track_id, payload.b_track_id):
         if db.query(models.Track.id).filter(models.Track.id == track_id).first() is None:
             raise HTTPException(status_code=404, detail=f"track {track_id} not found")

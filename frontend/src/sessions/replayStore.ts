@@ -39,12 +39,14 @@ export async function startReplay(
   plan: ReplayPlan,
   audio: ReplayAudio,
   loadTrack: (deck: 'A' | 'B' | 'C' | 'D', trackId: number) => Promise<boolean>,
-  onStopped?: (reason: ReplayStopReason, cause?: string) => void
+  onStopped?: (reason: ReplayStopReason, cause?: string) => void,
+  validateSource?: () => Promise<boolean>
 ): Promise<void> {
   instance?.stop();
   setState({ status: 'loading', sessionUuid, startT: plan.startT, lastStop: null });
   const driver = new SessionReplayDriver(plan, audio, {
     loadTrack,
+    validateSource,
     // The DRIVER is authoritative for status — every transition is pushed
     // here, so the store never infers 'playing' from a resolved promise
     // (which raced a same-frame stop and left status stuck while audio

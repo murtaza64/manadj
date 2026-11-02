@@ -28,7 +28,7 @@ FX_SETTINGS = {"echoFeedback", "echoSaturation", "reverbDecay", "reverbDampingHz
 
 
 def number(value):
-    return type(value) in (int, float) and math.isfinite(value) and abs(value) <= 1e12
+    return type(value) in (int, float) and abs(value) <= 1e12 and math.isfinite(value)
 
 
 def fx_shape(value):
@@ -59,7 +59,7 @@ def _bounded(value, path=(), depth=0):
         if len(value) > 2048:
             raise ValueError("Event text too large")
     elif isinstance(value, (int, float)) and not isinstance(value, bool):
-        if not math.isfinite(value):
+        if abs(value) > 9007199254740991 or not math.isfinite(value):
             raise ValueError("Finite event numbers required")
     elif value is not None and not isinstance(value, bool):
         raise ValueError("JSON event values required")
@@ -89,7 +89,7 @@ def validate_events(events):
         if not isinstance(event, dict) or event.get("kind") not in FIELDS or not set(event) <= FIELDS[event["kind"]]:
             raise ValueError("Unsupported capture event grammar")
         t = event.get("t")
-        if type(t) not in (int, float) or not math.isfinite(t) or not 0 <= t <= 1e9 or t < previous:
+        if type(t) not in (int, float) or not 0 <= t <= 1e9 or not math.isfinite(t) or t < previous:
             raise ValueError("Ordered finite capture times required")
         previous = t
         kind = event["kind"]

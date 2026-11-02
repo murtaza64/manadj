@@ -60,6 +60,8 @@ export interface DeckTransportGesture {
 export interface DeckTrackInfo {
   trackId: number;
   audioUrl: string;
+  /** Version-guarded peer audio must never read or populate bare-ID caches. */
+  bypassCache?: boolean;
   bpm: number | null;
   /** Persisted Main cue, if any (CDJ memory-cue behavior). On the Track
    * row — synchronous, no fetch. */
@@ -337,7 +339,7 @@ export class DeckEngine {
     try {
       let buffer: AudioBuffer | null = null;
       let stems: AudioBuffer[] | null = null;
-      if (info.stemUrls && info.stemUrls.length > 0) {
+      if (!info.bypassCache && info.stemUrls && info.stemUrls.length > 0) {
         // Stems path (stems #209, replace policy): cached decodes (a set
         // prefetch or a previous Load, #211) or fetch + decode all stems;
         // the worklet mixes them. Any failure falls back to the
@@ -360,7 +362,7 @@ export class DeckEngine {
         // Decoded-buffer cache (mix-editor 28): another surface (or a
         // previous Load) may already hold this track's decode — reuse it and
         // skip fetch+decode entirely (mode-switch into the editor path).
-        buffer = getCachedBuffer(info.trackId) ?? null;
+        buffer = info.bypassCache ? null : getCachedBuffer(info.trackId) ?? null;
       }
       if (!buffer) {
         const res = await fetch(info.audioUrl, { signal: abort.signal });
@@ -372,7 +374,7 @@ export class DeckEngine {
         this.emit();
         buffer = await this.ensureAudio().ctx.decodeAudioData(bytes);
         if (abort.signal.aborted) return;
-        putCachedBuffer(info.trackId, buffer);
+        if (!info.bypassCache) putCachedBuffer(info.trackId, buffer);
       }
 
       // The grid was fetched concurrently with the audio — ONE round trip
