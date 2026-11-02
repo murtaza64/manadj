@@ -267,6 +267,25 @@ def test_foreground_pull_ack_and_request_binding(instance):
     push(phone, b, gid, ids[2]["device_id"], issued)
 
 
+@pytest.mark.parametrize("contains_operation", [True, False])
+def test_authenticated_page_requires_cursor_progress_before_any_receipt(instance, contains_operation):
+    (a, phone, _), gid, ids, seeds = setup(instance)
+    sid = str(uuid4())
+    seed(a, 1, session_uuid=sid)
+    export(a, sid)
+    issued = call(a, gid, "issue", sid)
+    request = call(phone, gid, "pull_request", ids[0]["device_id"])
+    page = {"format": "manadj-device-group/v1", "group_id": gid,
+            "origin_device_id": ids[0]["device_id"], "kind": "page",
+            "recipient_device_id": ids[1]["device_id"], "request_id": signed_body(request)["request_id"],
+            "next_after": 0, "more": True, "operations": [issued.model_dump()] if contains_operation else []}
+    with pytest.raises(SyncError) as error:
+        call(phone, gid, "receive_page", sign(page, seeds[0]), request)
+    assert error.value.code == "group_page_request_mismatch"
+    with phone.sessions() as db:
+        assert db.query(GroupOperation).count() == db.query(GroupPossession).count() == db.query(GroupAck).count() == 0
+
+
 @pytest.mark.parametrize("adapter", ["deliver", "page"])
 def test_authenticated_supplying_relay_is_not_echoed_without_synthetic_ack(instance, adapter):
     (a, phone, b), gid, ids, _ = setup(instance)
@@ -378,6 +397,33 @@ def test_unknown_revoked_forged_group_recipient_and_equivocation(instance):
     # Revoke relay P separately; original validity does not authorize transport.
     call(b, gid, "revoke", ids[1]["device_id"])
     http(b, gid, "deliver", delivery, status=403)
+
+
+@pytest.mark.parametrize("field", ["operation_id", "origin_device_id", "group_id", "recipient_device_id", "session_uuid", "logical_track_id"])
+def test_signed_wire_uuids_require_canonical_spelling_before_normalization(instance, field):
+    (a, phone, _), gid, ids, seeds = setup(instance)
+    sid = str(uuid4())
+    seed(a, 1, session_uuid=sid)
+    export(a, sid)
+    issued = call(a, gid, "issue", sid)
+    inner = signed_body(issued)
+    envelope = {"format": "manadj-device-group/v1", "group_id": gid,
+                "origin_device_id": ids[0]["device_id"], "kind": "deliver",
+                "recipient_device_id": ids[1]["device_id"]}
+    if field in ("group_id", "recipient_device_id"):
+        envelope[field] = envelope[field].replace("-", "")
+    elif field == "origin_device_id":
+        inner[field] = inner[field].replace("-", "")
+        inner["bundle"]["manifest"]["origin_replica_id"] = inner[field]
+    elif field == "session_uuid":
+        inner["bundle"]["manifest"][field] = sid.replace("-", "")
+    elif field == "logical_track_id":
+        ref = inner["bundle"]["manifest"]["tracks"][0]
+        ref[field] = ref[field].replace("-", "")
+    else:
+        inner[field] = inner[field].replace("-", "")
+    envelope["operation"] = sign(inner, seeds[0]).model_dump()
+    http(phone, gid, "deliver", sign(envelope, seeds[0]), status=422)
 
 
 def test_signed_bytes_reject_duplicates_unknown_fields_and_partial_bundle(instance):

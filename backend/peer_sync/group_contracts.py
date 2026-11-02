@@ -15,6 +15,8 @@ from .contracts import Bundle, Digest
 DOMAIN = b"manadj-device-group/v1\x00"
 MAX_BYTES = 4 * 1024 * 1024
 Counter = Annotated[int, Field(strict=True, ge=0, le=9007199254740991)]
+UUID_FIELDS = frozenset({"group_id", "origin_device_id", "recipient_device_id", "operation_id",
+                         "request_id", "session_uuid", "origin_replica_id", "logical_track_id"})
 
 
 class Signed(Strict):
@@ -83,6 +85,22 @@ def sign(body, private_key):
     return Signed(body_b64=encode(raw), signature_b64=encode(key.sign(DOMAIN + raw)))
 
 
+def wire_identifiers(value):
+    """Validate raw wire spelling before Pydantic can normalize a UUID.
+
+    Includes nested Bundle identifiers without changing legacy Bundle parsing.
+    Signed inner operations are checked when their own opaque bytes unpack.
+    """
+    if isinstance(value, dict):
+        for field, child in value.items():
+            if field in UUID_FIELDS and (not isinstance(child, str) or str(UUID(child)) != child):
+                raise ValueError("Canonical lowercase hyphenated wire UUID required")
+            wire_identifiers(child)
+    elif isinstance(value, list):
+        for child in value:
+            wire_identifiers(child)
+
+
 def unpack(signed, model):
     """Authenticate these exact bytes later; parsing never supplies trusted keys."""
     raw = decode(signed.body_b64)
@@ -98,6 +116,7 @@ def unpack(signed, model):
         return result
 
     body = json.loads(raw.decode("utf-8"), object_pairs_hook=unique)
+    wire_identifiers(body)
     if rfc8785.dumps(body) != raw:
         raise ValueError("Canonical issuer JSON required")
     return model.model_validate_json(raw), raw, hashlib.sha256(raw).hexdigest()

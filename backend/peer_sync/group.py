@@ -249,7 +249,9 @@ class GroupSync:
         page, _, _ = self._verify(signed, Page, addressed=True)
         if (request.origin_device_id != UUID(self._local().device_id)
                 or page.origin_device_id != request.recipient_device_id or page.request_id != request.request_id
-                or page.next_after < request.after):
+                or page.next_after < request.after
+                or (page.operations and page.next_after <= request.after)
+                or (not page.operations and page.more)):
             raise SyncError(403, "group_page_request_mismatch")
         receipts = []
         for operation in page.operations:
