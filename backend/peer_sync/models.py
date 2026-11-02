@@ -71,6 +71,7 @@ class FolderConfig(Base):
     enabled = Column(Integer, nullable=False, default=0)
     state = Column(String(80), nullable=False, default="disabled")
     cursor = Column(String(160), nullable=False, default="")
+    generation = Column(Integer, nullable=False, default=0)
     __table_args__ = (CheckConstraint("id = 1"),)
 
 

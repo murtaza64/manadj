@@ -392,3 +392,50 @@ def test_inflight_cycle_cannot_overwrite_operator_disable_and_restart_is_honest(
     assert restarted.run_once()["state"] == "disabled"
     post(a, "transport", {"root": str(root), "enabled": True})
     assert restarted.run_once()["state"] == "ready"
+
+
+@pytest.mark.parametrize("failure", [False, True])
+@pytest.mark.parametrize("reenable", [False, True])
+def test_configuration_generation_fences_late_success_and_root_error(instance, monkeypatch, failure, reenable):
+    from backend.peer_sync import folder
+    from backend.peer_sync.models import FolderConfig
+    a = instance("generation-interleave")
+    post(a, "identity")
+    sid = str(uuid4())
+    seed(a, 1, session_uuid=sid)
+    transport, root = configured(a)
+    transport.select(sid)
+    def configure_during_cycle():
+        post(a, "transport", {"root": str(root), "enabled": False})
+        if reenable:
+            post(a, "transport", {"root": str(root), "enabled": True})
+    with monkeypatch.context() as patch:
+        if failure:
+            original = folder.marker
+            def late_root_error(fd):
+                original(fd)
+                # Do not reenter the patched marker via the enable API.
+                patch.setattr(folder, "marker", original)
+                configure_during_cycle()
+                raise OSError("generated root went offline after configuration changed")
+            patch.setattr(folder, "marker", late_root_error)
+        else:
+            original = transport._publish
+            def late_success(*args):
+                configure_during_cycle()
+                return original(*args)
+            patch.setattr(transport, "_publish", late_success)
+        final = transport.run_once()
+    expected = "pending" if reenable else "disabled"
+    assert final["state"] == expected and final["enabled"] is reenable
+    with a.sessions() as db:
+        config = db.get(FolderConfig, 1)
+        assert config.state == expected and config.cursor == ""
+    if reenable:
+        assert transport.run_once()["state"] == "ready"
+    else:
+        with monkeypatch.context() as patch:
+            def forbidden(*args):
+                raise AssertionError("future disabled tick touched root")
+            patch.setattr(folder, "root_fd", forbidden)
+            assert FolderTransport(instance("generation-interleave").sessions).run_once()["state"] == "disabled"

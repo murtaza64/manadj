@@ -64,6 +64,8 @@ Freeze a concrete implemented vertical slice with exact source pin, API walkthro
 
 - Root marker: `.manadj-peer-folder.json`, exact `{format: "manadj-peer-folder", version: 1, token: <32 hex characters>}`. Existing configuration pins the token and root; root rollover is not implemented.
 - Requires a POSIX filesystem supporting no-follow directory descriptors, hard links and fsync. Unsupported filesystems fail closed; no fallback publication mode is supplied.
+- Platform capabilities are checked only when performing transport filesystem operations, not at import. Unsupported platforms may start the application with transport disabled; enable returns `folder_transport_unsupported_platform`. Native Windows execution has not been verified.
+- Correction migration `0051_pqtxo` persists a configuration generation. Serialized configure calls advance it; cycle completion/error state and round-robin cursor updates require the same enabled generation. A disable, including disable followed by re-enable, fences an older cycle's state publication. An already-running artifact operation may finish; future disabled ticks do not open the root.
 - Artifact directory: `<origin-UUID>_<Session-UUID>_<manifest-SHA256>` with canonical lowercase UUIDs/digest. Files: `manifest.json`, `<seq>-<event-SHA256>.json`, `complete.json`, `ack-<receiver-UUID>.json`. Marker/acks contain no paths or local receiver IDs.
 - Limits: 256 root entries including the ownership marker, 255 selected publications, 256 accepted sources per cycle, 8 artifacts per tick with a durable round-robin cursor. Manifest: 1 MiB; complete marker: 512 KiB; ack: 2 KiB; aggregate chunk JSON: 3 MiB; at most 4096 chunks. No automatic pruning or folder rollover.
 - Every absolute root component and artifact/file is opened with no-follow descriptor-relative operations. Regular-file/size/duplicate-key checks precede strict Manifest/Chunk/Bundle validation and digest checks. Unknown namespaces are recorded without opening artifact payloads.
@@ -79,3 +81,10 @@ Local-owner API sequence (all bodies are JSON):
 6. Disable without opening the configured folder: `POST /api/peer-sync/transport {"root":"<same configured directory>","enabled":false}`. An already-running cycle may finish; subsequent cycles perform no filesystem operations.
 
 Automated walkthrough: `uv run pytest tests/test_peer_folder_transport.py -q`; actual Chromium/WebAudio: `uv run --with playwright --with pytest -m pytest tests/test_peer_replay_browser.py -q -rs`. Fixtures create independent migrated databases and generated audio only; servers stop with the browser test. No settings UI is claimed.
+
+## Next bounded scope — proposal, not implemented
+
+- Local-owner Settings: explicit opt-in/disable, platform/filesystem capability errors, per-artifact delivery versus media readiness, bounded-capacity health and actionable failure display. No automatic share/provider configuration.
+- Root rotation: explicit authorization of another existing empty/owned root, new configuration generation, root-scoped cursors, preserved old receipts/issued evidence and rejection of late old-root progress. No silent creation of a missing mount or automatic republish into a replacement folder.
+- Retention: inventory/dry-run and capacity reporting first; specify safe acknowledged-artifact retention and durable deduplication before any pruning. Do not treat artifact removal as deletion of a Session, Library row or source evidence. The current 255-selection cap is a visible limitation, not a finished device lifecycle.
+- Port: desktop folder controls only; native folder watching/configuration never (Android consumes the paired desktop adapter). No new production stream, retention deletion, real roots, provider service or rollout is authorized by this proposal.

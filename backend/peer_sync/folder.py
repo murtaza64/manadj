@@ -126,12 +126,14 @@ class FolderTransport:
 
     def configure(self, body):
         with self.sessions() as db:
+            PeerSync(db)._lock()
             PeerSync(db).identity()
             config = db.get(FolderConfig, 1)
             if config is not None and config.root != body.root:
                 raise SyncError(409, "transport_root_is_pinned")
             if not body.enabled and config is not None:
                 config.enabled, config.state = 0, "disabled"
+                config.generation += 1
                 db.commit()
                 return self.status()
             try:
@@ -147,6 +149,7 @@ class FolderTransport:
                 config = FolderConfig(id=1, root=body.root, token=token)
                 db.add(config)
             config.enabled, config.state = int(body.enabled), "pending" if body.enabled else "disabled"
+            config.generation = (config.generation or 0) + 1
             db.commit()
         return self.status()
 
@@ -174,13 +177,13 @@ class FolderTransport:
                                   "readiness": row.readiness}
                                  for row in db.scalars(select(FolderReceipt).order_by(FolderReceipt.artifact))]}
 
-    def _config_state(self, state):
+    def _config_state(self, state, generation):
         with self.sessions() as db:
             # Atomic publication fence: an operator disable wins even when this
             # cycle took its enabled snapshot before the request committed.
-            # Root/token are pinned, so no configuration rollover can reuse it.
+            # A subsequent re-enable must not authorize this older cycle either.
             db.execute(update(FolderConfig).where(
-                FolderConfig.id == 1, FolderConfig.enabled == 1,
+                FolderConfig.id == 1, FolderConfig.enabled == 1, FolderConfig.generation == generation,
             ).values(state=state))
             db.commit()
 
@@ -307,10 +310,13 @@ class FolderTransport:
             if config is None or not config.enabled:
                 return self.status()  # Disabled does not stat/open the configured root.
             root, token, cursor = config.root, config.token, config.cursor
+            generation = config.generation
             local = PeerSync(db).identity()["replica_id"]
             accepted = set(db.scalars(select(SyncSource.replica_id).limit(257)))
             if len(accepted) > 256:
-                config.state = "accepted_source_limit"
+                db.execute(update(FolderConfig).where(
+                    FolderConfig.id == 1, FolderConfig.enabled == 1, FolderConfig.generation == generation,
+                ).values(state="accepted_source_limit"))
                 db.commit()
                 return self.status()
             publications = [(p.session_uuid, p.published) for p in db.scalars(
@@ -342,9 +348,11 @@ class FolderTransport:
                         else:
                             self._receipt(key, state)
                     with self.sessions() as db:
-                        db.get(FolderConfig, 1).cursor = key
+                        db.execute(update(FolderConfig).where(
+                            FolderConfig.id == 1, FolderConfig.enabled == 1, FolderConfig.generation == generation,
+                        ).values(cursor=key))
                         db.commit()
-                self._config_state("ready")
+                self._config_state("ready", generation)
         except (OSError, ValueError, TypeError, KeyError, SyncError) as error:
-            self._config_state(error.code if isinstance(error, SyncError) else "offline")
+            self._config_state(error.code if isinstance(error, SyncError) else "offline", generation)
         return self.status()
