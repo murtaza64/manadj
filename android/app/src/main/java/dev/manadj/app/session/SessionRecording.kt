@@ -108,7 +108,12 @@ object SessionRecording {
         var pushed = 0
         for (m in store.all()) {
             if (m.endPushed) continue
-            try { if (store.push(m.uuid, { client.pushSession(m.uuid, it) })) pushed++ }
+            // An own-issued exception preserves local playback, not legacy raw-ID upload.
+            if(!repo.rawSessionUploadAllowed(m.uuid)) continue
+            try { if (store.push(m.uuid, {
+                require(repo.rawSessionUploadAllowed(m.uuid)) { "Received UUID authority prevents raw Session push" }
+                client.pushSession(m.uuid, it)
+            })) pushed++ }
             catch (e: Exception) { Log.i(TAG, "push ${m.uuid}: ${e.message}"); break }
         }
         if (pushed > 0) revision++

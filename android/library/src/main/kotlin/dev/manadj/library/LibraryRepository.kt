@@ -83,6 +83,22 @@ class LibraryRepository(
     fun groupReplica(groupId: String): dev.manadj.library.group.GroupReplica =
         dev.manadj.library.group.GroupReplica(File(store.root, "device-groups/${dev.manadj.library.group.GroupWire.uuid(groupId)}"), groupId)
 
+    val groupHistory = dev.manadj.library.group.GroupHistory(store.root)
+    /** A verified own-issued operation can preserve its original recording authority, but never
+     * override a foreign group collision or an ordinary #443 denial of unknown historical origin. */
+    fun groupSessionAllowsRaw(uuid: String, allowOwnIssued: Boolean = false): Boolean {
+        val id=uuid.lowercase(); val view=groupHistory.snapshot(); val known=view.knownUuids ?: return false
+        if(id in known) return false
+        val claims=peerSessions.groupOwnedClaims ?: return false
+        return claims[id]?.let { reasons -> allowOwnIssued && reasons.isNotEmpty() && reasons.all { it != null && it in view.ownIssuedClaims[id].orEmpty() } } ?: true
+    }
+    fun rawSessionAllowed(uuid: String, allowOwnIssued: Boolean = false): Boolean {
+        val view=groupHistory.snapshot(); val known=view.knownUuids ?: return false; val id=uuid.lowercase()
+        return id !in known && peerSessions.rawAllowed(id, if(allowOwnIssued) view.ownIssuedClaims[id].orEmpty() else emptySet())
+    }
+    fun rawSessionUploadAllowed(uuid: String): Boolean = rawSessionAllowed(uuid) &&
+        groupHistory.snapshot().ownIssuedClaims[uuid.lowercase()].isNullOrEmpty()
+
     /** Explicit foreground seam only; no automatic migration or scheduling is implied. */
     suspend fun syncGroup(groupId: String, peerId: String, peerUrl: String): Result<dev.manadj.library.group.GroupExchangeResult> = withContext(io) {
         runCatching {

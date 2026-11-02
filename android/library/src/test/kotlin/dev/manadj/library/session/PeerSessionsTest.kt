@@ -6,6 +6,7 @@ import kotlinx.coroutines.runBlocking
 import org.json.JSONArray
 import org.json.JSONObject
 import java.net.InetSocketAddress
+import java.io.File
 import java.nio.file.Files
 import java.security.MessageDigest
 import kotlin.test.*
@@ -31,11 +32,16 @@ class PeerSessionsTest {
     private var listVersion = 1
     private var listStatus = 200
     private var beforeList: () -> Unit = {}
+    private var groupManaged = false
+    private var markerOrigin = origin
+    private var markerGroupClaims: JSONArray? = null
 
-    private fun item() = JSONObject().put("session_uuid",sid).put("origin_replica_id",origin).put("recording_origin","Original phone")
+    private fun item() = JSONObject().put("session_uuid",sid).put("origin_replica_id",markerOrigin).put("recording_origin","Original phone")
         .put("manifest_sha256",manifest).put("started_at","2026-11-02T00:00:00Z").put("ended_at","2026-11-02T00:00:06Z")
         .put("materialized",true).put("state",state).put("replay_generation",generation).put("conflict_count",conflicts)
+        .put("group_managed",groupManaged)
         .put("dependencies",JSONArray().put(JSONObject().put("logical_track_id",logical).put("local_track_id",9).put("asset_state","exact").put("sha256",sha).put("byte_length",bytes.size)))
+        .also { item -> markerGroupClaims?.let { item.put("group_claims", it) } }
     private fun detail(): JSONObject {
         val track = JSONObject().put("id",9).put("title","Receiver nine").put("artist","Synthetic").put("bpm",120).put("duration_secs",40)
             .put("main_cue",0).put("hot_cues",JSONArray()).put("grid",JSONObject.NULL).put("audio_rev","receiver-nine")
@@ -86,6 +92,97 @@ class PeerSessionsTest {
         assertEquals(0,foreignCalls)
         assertTrue(repo.peerSessions.cached().single().checked.not())
         assertFalse(cached.path.contains("library/9"))
+    }
+
+    @Test fun groupMarkerIsDenyOnlyWithoutEnrollmentAndPersistsAcrossOmissionRestartAndFalseReady() = runBlocking {
+        groupManaged=true // even contradictory legacy READY data cannot grant group playback
+        val marker=repo.peerSessions.refresh().single()
+        assertEquals(PeerSessionState.GROUP_METADATA_ONLY, marker.state); assertTrue(marker.groupManaged); assertFalse(marker.canValidate)
+        assertFails { repo.peerSessions.open(marker) }
+        assertEquals(setOf(sid), repo.peerSessions.knownUuids)
+        assertEquals(0, detailCalls); assertEquals(0, audioCalls)
+        omitPeer=true; assertTrue(repo.peerSessions.refresh().isEmpty())
+        val reopened=LibraryRepository(root,repo.baseUrl,deviceToken="synthetic-paired-token")
+        assertEquals(setOf(sid), reopened.peerSessions.knownUuids)
+        assertFalse(File(root,"device-groups").exists()) // no group keys/trust were imported
+    }
+
+    private fun ownIssuedGroupOperation(targetRoot: File = root): dev.manadj.library.group.GroupReplica {
+        val group = "33333333-3333-4333-8333-333333333333"
+        val replica = dev.manadj.library.group.GroupReplica.provision(File(targetRoot,"device-groups/$group"),group,origin,ByteArray(32) { (it+32).toByte() })
+        val fixture = JSONObject(File("../../tests/fixtures/group_session_v1.json").readText())
+        val bundle = JSONObject(fixture.getString("body_utf8")).getJSONObject("bundle")
+        bundle.getJSONObject("manifest").put("session_uuid",sid).put("origin_replica_id",origin)
+        replica.issue(bundle)
+        return replica
+    }
+    private fun ownClaim(replica: dev.manadj.library.group.GroupReplica): JSONObject {
+        val signed=replica.evidence().single()
+        val raw=dev.manadj.library.group.GroupWire.decode64(signed.bodyBase64,dev.manadj.library.group.GroupWire.MAX_OPERATION)
+        val body=dev.manadj.library.group.GroupWire.parse(raw)
+        return JSONObject().put("group_id",body.getString("group_id")).put("operation_id",body.getString("operation_id"))
+            .put("origin_device_id",body.getString("origin_device_id")).put("operation_sha256",dev.manadj.library.group.GroupWire.sha256(raw))
+    }
+
+    @Test fun onlyVerifiedOwnOriginalSurvivesItsOwnGroupMarkerAndForeignClaimStillWins() = runBlocking {
+        val local = ownIssuedGroupOperation()
+        markerGroupClaims=JSONArray().put(ownClaim(local))
+        groupManaged=true; repo.peerSessions.refresh()
+        assertTrue(repo.rawSessionAllowed(sid,allowOwnIssued=true)) // caller must be the original recording path
+        assertFalse(repo.rawSessionAllowed(sid)) // never a raw desktop/cache exception
+        assertFails { repo.peerSessions.open(repo.peerSessions.cached().single()) }
+        local.revoke(origin) // leaving/revoking group membership does not erase original recording authority
+        assertTrue(repo.rawSessionAllowed(sid,allowOwnIssued=true))
+        markerOrigin="88888888-8888-4888-8888-888888888888"
+        repo.peerSessions.refresh()
+        assertFalse(repo.rawSessionAllowed(sid,allowOwnIssued=true))
+        omitPeer=true; repo.peerSessions.refresh()
+        assertFalse(LibraryRepository(root,repo.baseUrl).rawSessionAllowed(sid,allowOwnIssued=true))
+    }
+
+    @Test fun ownGroupProofCannotEraseAnOlderOrdinaryPeerUuidDenial() = runBlocking {
+        repo.peerSessions.refresh() // ordinary peer authority already owns this UUID
+        markerGroupClaims=JSONArray().put(ownClaim(ownIssuedGroupOperation())); groupManaged=true; repo.peerSessions.refresh()
+        assertFalse(repo.rawSessionAllowed(sid,allowOwnIssued=true))
+        assertFalse(LibraryRepository(root,repo.baseUrl).rawSessionAllowed(sid,allowOwnIssued=true))
+    }
+
+    @Test fun sameOriginDifferentOperationBytesCannotExemptRawFallback() = runBlocking {
+        val claim=ownClaim(ownIssuedGroupOperation()); groupManaged=true
+        markerGroupClaims=JSONArray().put(claim); repo.peerSessions.refresh(); assertTrue(repo.rawSessionAllowed(sid,allowOwnIssued=true))
+        markerGroupClaims=JSONArray().put(JSONObject(claim.toString()).put("operation_sha256","0".repeat(64)))
+        repo.peerSessions.refresh()
+        assertFalse(repo.rawSessionAllowed(sid,allowOwnIssued=true))
+        omitPeer=true; repo.peerSessions.refresh()
+        assertFalse(LibraryRepository(root,repo.baseUrl).rawSessionAllowed(sid,allowOwnIssued=true))
+    }
+
+    @Test fun originOnlyHistoricalMarkerCannotExemptEvenAVerifiedOwnOriginal() = runBlocking {
+        val claim=ownClaim(ownIssuedGroupOperation()); groupManaged=true
+        repo.peerSessions.refresh(); assertFalse(repo.rawSessionAllowed(sid,allowOwnIssued=true))
+        markerGroupClaims=JSONArray().put(claim); repo.peerSessions.refresh()
+        assertFalse(repo.rawSessionAllowed(sid,allowOwnIssued=true)) // unidentified historical claim is never silently erased
+    }
+
+    @Test fun wrongGroupOperationMixedMalformedAndOversizedReasonsEachDenyIndependently() = runBlocking {
+        groupManaged=true
+        val variants: List<(JSONObject) -> JSONArray> = listOf(
+            { c -> JSONArray().put(JSONObject(c.toString()).put("group_id","99999999-9999-4999-8999-999999999999")) },
+            { c -> JSONArray().put(JSONObject(c.toString()).put("operation_id","aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")) },
+            { c -> JSONArray().put(c).put(JSONObject(c.toString()).put("origin_device_id","88888888-8888-4888-8888-888888888888")) },
+            { c -> JSONArray().put(JSONObject(c.toString()).put("unexpected",true)) },
+            { _ -> JSONArray() },
+            { c -> JSONArray().also { a -> repeat(257) { a.put(c) } } },
+        )
+        variants.forEachIndexed { index, mutation ->
+            val target=File(root,"generated-variant-$index")
+            val claim=ownClaim(ownIssuedGroupOperation(target))
+            val isolated=LibraryRepository(target,repo.baseUrl,deviceToken="synthetic-paired-token")
+            markerGroupClaims=JSONArray().put(claim); isolated.peerSessions.refresh(); assertTrue(isolated.rawSessionAllowed(sid,allowOwnIssued=true))
+            markerGroupClaims=mutation(claim); isolated.peerSessions.refresh()
+            assertFalse(isolated.rawSessionAllowed(sid,allowOwnIssued=true),"variant $index")
+            assertFalse(LibraryRepository(target,repo.baseUrl).rawSessionAllowed(sid,allowOwnIssued=true),"restart variant $index")
+        }
     }
 
     @Test fun staleGenerationAndIdReuseCannotReplayCachedBytes() = runBlocking {

@@ -101,10 +101,16 @@ class GroupReplica(private val root: File, val groupId: String) {
         val id = body.getString("operation_id")
         entries(state).singleOrNull { it.getString("operation_id") == id }?.let {
             require(it.getString("sha256") == verified.sha256) { "Operation UUID equivocation" }
+            if(origin != local(state)) rememberReceivedUuid(state,sid)
             return it
         }
         require(origin != local(state)) { "Unknown local-origin operation cannot be imported" }
+        rememberReceivedUuid(state,sid)
         return append(state, signed, id, origin, sid, verified.sha256)
+    }
+    private fun rememberReceivedUuid(state: JSONObject, sid: String) {
+        val owned=state.optJSONArray("received_session_uuids") ?: JSONArray().also { state.put("received_session_uuids",it) }
+        if((0 until owned.length()).none { owned.getString(it) == sid }) owned.put(sid)
     }
     private fun append(state: JSONObject, signed: GroupSigned, id: String, origin: String, sid: String, sha: String): JSONObject =
         JSONObject().put("operation_id", id).put("origin_device_id", origin).put("session_uuid", sid)
@@ -128,12 +134,14 @@ class GroupReplica(private val root: File, val groupId: String) {
     }
 
     /** Explicit local trust mutation, never called from network handlers. Existing pins are immutable. */
-    fun pinMember(id: String, publicKey: ByteArray) = write { state ->
+    fun pinMember(id: String, publicKey: ByteArray, label: String? = null) = write { state ->
         GroupWire.uuid(id); require(publicKey.size == 32)
+        label?.let { require(it.isNotBlank() && it.length <= 80 && it.none(Char::isISOControl)) }
         val members = state.getJSONObject("members"); val encoded = GroupWire.encode64(publicKey)
         val old = members.optJSONObject(id)
         if(old != null) require(old.get("revoked") == false && old.getString("public_key_b64") == encoded) { "Member pin immutable" }
         else members.put(id, JSONObject().put("public_key_b64", encoded).put("revoked", false))
+        if(label != null) members.getJSONObject(id).put("label", label)
         Unit
     }
     fun revoke(id: String) = write { state -> member(state, id); state.getJSONObject("members").getJSONObject(id).put("revoked", true); Unit }
@@ -152,6 +160,8 @@ class GroupReplica(private val root: File, val groupId: String) {
     }
     /** Preserved evidence includes revoked origins for audit; it is never automatically playable. */
     fun evidence(): List<GroupSigned> = read { state -> local(state); entries(state).map { GroupSigned.parse(it.getJSONObject("signed")) } }
+    /** Read-only local history inspection includes revocation; private seed never leaves this class. */
+    internal fun historyState(): JSONObject = read { state -> state.remove("private_seed_b64"); state }
     fun pendingFor(peer: String): List<String> = read { state ->
         local(state); member(state, peer)
         entries(state).filter { wants(state, it, peer) }.map { it.getString("operation_id") }
@@ -220,7 +230,7 @@ class GroupReplica(private val root: File, val groupId: String) {
             replica.locked {
                 require(!replica.stateFile.exists()) { "Group already provisioned; no reset" }
                 val state = JSONObject().put("version", 1).put("group_id", groupId).put("device_id", deviceId)
-                    .put("private_seed_b64", GroupWire.encode64(seed)).put("operations", JSONArray()).put("acks", JSONObject())
+                    .put("private_seed_b64", GroupWire.encode64(seed)).put("operations", JSONArray()).put("acks", JSONObject()).put("received_session_uuids",JSONArray())
                     .put("members", JSONObject().put(deviceId, JSONObject().put("public_key_b64", GroupWire.encode64(GroupWire.publicKey(seed))).put("revoked", false)))
                 replica.persist(state)
             }
