@@ -1,4 +1,4 @@
-import { useEffect, useState, useSyncExternalStore } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import type { GroupSessionView } from '../api/client';
 import { useDecks } from '../hooks/useDeck';
@@ -9,6 +9,10 @@ import { replayState, seekReplay, startReplay, stopReplay, subscribeReplay, togg
 
 /** Explicit local-owner actions. Received source IDs never preselect a Track. */
 export function GroupReplayControls({ view }: { view: GroupSessionView }) {
+  return <LocalReplayControls key={`${view.group_id}:${view.operation_id}:${view.session_uuid}`} view={view} />;
+}
+
+function LocalReplayControls({ view }: { view: GroupSessionView }) {
   const decks = useDecks();
   const mixer = useMixer();
   const replay = useSyncExternalStore(subscribeReplay, replayState);
@@ -18,6 +22,13 @@ export function GroupReplayControls({ view }: { view: GroupSessionView }) {
   const [busy, setBusy] = useState(false);
   const [offset, setOffset] = useState('0');
   const [source, setSource] = useState<Awaited<ReturnType<typeof groupReplaySource>> | null>(null);
+  const openRequest = useRef(0);
+  const mounted = useRef(false);
+  useEffect(() => {
+    mounted.current = true;
+    ++openRequest.current;
+    return () => { mounted.current = false; };
+  }, [view.group_id, view.operation_id, view.session_uuid]);
   const readiness = useQuery({ queryKey: ['group-replay', view.group_id, view.operation_id],
     queryFn: () => groupReplayApi.readiness(view.group_id, view.operation_id), refetchInterval: 5000, retry: false });
   useEffect(() => {
@@ -37,18 +48,21 @@ export function GroupReplayControls({ view }: { view: GroupSessionView }) {
     finally { setBusy(false); }
   };
   const play = async () => {
+    const request = ++openRequest.current;
+    const current = () => mounted.current && openRequest.current === request;
     setBusy(true); setError(null);
     try {
       if (!Number.isFinite(Number(offset)) || Number(offset) < 0) throw new Error('Choose a nonnegative replay offset');
       const engines = { A: decks.A.engine, B: decks.B.engine, C: decks.C.engine, D: decks.D.engine };
       const next = await groupReplaySource(view.group_id, view.operation_id, engines);
+      if (!current()) return;
       const plan = planReplay(next.events, Number(offset));
       if (!plan.ok) throw new Error('No supported replay at this offset');
       setSource(next);
       await startReplay(view.session_uuid, plan.plan, { mixer, engines }, next.loadTrack,
         reason => { if (reason === 'load-failed') setError('Replay refused: audio decode or current source check failed'); }, next.validateSource);
-    } catch (error) { setError(String(error)); }
-    finally { setBusy(false); }
+    } catch (error) { if (current()) setError(String(error)); }
+    finally { if (current()) setBusy(false); }
   };
   const seek = async () => {
     setBusy(true);
