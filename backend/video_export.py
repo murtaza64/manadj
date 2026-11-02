@@ -201,8 +201,6 @@ def session_span_preview(db, session_uuid: str, start_s: float, end_s: float):
     without minting anything. Raises VideoExportError with the promotion's
     reason when the span cannot be promoted. Scratch gestures pass through
     as scratch clips (#352, #393)."""
-    import json as _json
-
     from backend import models
     from backend.routine_miner import reconstruct_audibility
     from backend.routine_preview import PreviewError, build_promotion_preview
@@ -210,9 +208,8 @@ def session_span_preview(db, session_uuid: str, start_s: float, end_s: float):
     s = db.query(models.Session).filter(models.Session.uuid == session_uuid).first()
     if s is None:
         raise VideoExportError("session not found")
-    events: list[dict] = []
-    for chunk in s.chunks:
-        events.extend(_json.loads(chunk.events_json))
+    from backend.session_source import session_events
+    events = session_events(db, s)
     events.sort(key=lambda e: e.get("t", 0))
     intervals, _ = reconstruct_audibility(events)
     first: dict[int, float] = {}

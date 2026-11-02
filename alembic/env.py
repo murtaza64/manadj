@@ -22,6 +22,7 @@ from backend.models import Base
 # Model modules that register tables on Base (autogenerate must see them all)
 import backend.acquisition.models  # noqa: F401
 import backend.tasks.models  # noqa: F401
+import backend.peer_sync.models  # noqa: F401
 
 config = context.config
 

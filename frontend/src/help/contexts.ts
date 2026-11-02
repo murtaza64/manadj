@@ -4,6 +4,7 @@ import type { HelpTarget } from './routes';
 export const SETTINGS_HELP: Record<string, HelpTarget> = {
   library: { topic: 'curate', anchor: 'importing' },
   'phone-sync': { topic: 'curate', anchor: 'importing' },
+  'session-exchange': { topic: 'capture', anchor: 'exchange' },
   filters: { topic: 'beat-fx', anchor: 'filters' },
   effects: { topic: 'beat-fx', anchor: 'effects' },
   waveforms: { topic: 'analysis', anchor: 'automatic-analysis' },

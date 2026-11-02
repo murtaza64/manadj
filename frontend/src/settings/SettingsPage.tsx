@@ -35,6 +35,7 @@ const ControllerCalibrationSettings = lazy(() => import('./ControllerCalibration
 const MouseJogSettings = lazy(() => import('./MouseJogSettings'));
 const LibrarySettings = lazy(() => import('./LibrarySettings'));
 const PhoneSyncSettings = lazy(() => import('./PhoneSyncSettings'));
+const ExchangeSettings = lazy(() => import('./ExchangeSettings'));
 const SetupSettings = lazy(() => import('../setup/SetupSettings'));
 const ControllerCheckSettings = lazy(() => import('../setup/controllerCheck/ControllerCheckSettings'));
 const SoulseekSettings = lazy(() => import('../setup/soulseek/SoulseekSettings'));
@@ -441,6 +442,7 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
     sections: [
       { id: 'library', title: 'Library', render: () => <LibrarySettings /> },
       { id: 'phone-sync', title: 'Phone sync', render: () => <PhoneSyncSettings /> },
+      { id: 'session-exchange', title: 'Session exchange', render: () => <ExchangeSettings /> },
     ],
   },
   {

@@ -370,9 +370,9 @@ def retrim_routine(
             status_code=422,
             detail="the take's Session is gone — its event slice reference cannot be read",
         )
-    events: list[dict] = []
-    for chunk in s.chunks:
-        events.extend(json.loads(chunk.events_json))
+    from backend.session_source import deny_peer_derivation, session_events
+    deny_peer_derivation(db, s.uuid)
+    events = session_events(db, s)
 
     # Measure against the routine's CURRENT window (gh#190). The cast is
     # the routine's current cast — a prefix of the take's (end trims drop

@@ -203,8 +203,9 @@ export function clipRange(spec: ClipSpec, routine: PlannedRoutine): { startSec: 
 
 // ── Audio ────────────────────────────────────────────────────────────────
 
-async function fetchAudioBuffer(trackId: number, sampleRate: number): Promise<AudioBuffer> {
-  const res = await fetch(api.tracks.audioUrl(trackId));
+async function fetchAudioBuffer(trackId: number, sampleRate: number, peer: RoutineDetailWire['peer_source']): Promise<AudioBuffer> {
+  const url = peer ? `${API_BASE}/sessions/${peer.session_uuid}/audio/${trackId}?generation=${encodeURIComponent(peer.generation)}` : api.tracks.audioUrl(trackId);
+  const res = await fetch(url);
   if (!res.ok) throw new Error(`audio ${trackId}: ${res.status}`);
   const bytes = await res.arrayBuffer();
   const decoder = new OfflineAudioContext({ numberOfChannels: 2, length: 1, sampleRate });
@@ -227,6 +228,10 @@ export async function renderClipAudio(
   onPartial?: (rendered: RenderedClipAudio, readyUntilSec: number) => void,
 ): Promise<RenderedClipAudio> {
   const { routine, scene } = loaded;
+  const peer = loaded.detail.peer_source;
+  if (peer && (await api.sessions.get(peer.session_uuid)).replay_generation !== peer.generation) {
+    throw new Error('Peer source bindings changed — reopen the clip source');
+  }
   const beatFxSettings = loadBeatFxSettings();
   const key = renderKey(loaded, renderRange, beatFxSettings);
   const hit = renderCache.find((e) => e.key === key);
@@ -239,7 +244,7 @@ export async function renderClipAudio(
   const ids = Array.from(new Set(routine.slots.map((s) => s.trackId)));
   let decoded = 0;
   await Promise.all(ids.map(async (id) => {
-    buffers.set(id, await fetchAudioBuffer(id, sampleRate));
+    buffers.set(id, await fetchAudioBuffer(id, sampleRate, peer));
     decoded++;
     onProgress({ stage: 'load', fraction: decoded / ids.length, detail: `decoded ${decoded}/${ids.length}` });
   }));

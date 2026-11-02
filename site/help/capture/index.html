@@ -60,6 +60,7 @@
 <li><a href="#timeline">Open and replay a Session</a></li>
 <li><a href="#takes">Find and review a Take</a></li>
 <li><a href="#routine-evidence">Multi-Track candidates</a></li>
+<li><a href="#exchange">Exchange Sessions between libraries</a></li>
 </ul>
 </div>
 </nav>
@@ -119,7 +120,15 @@
 <p><img alt="HISTORY with recorded Takes and links back to Sessions." src="../../shots/help-editor-take-history.webp" /></p>
 <p><em>Engagement-grouped Take history with duration, confidence and source Session links.</em></p>
 <h2 id="routine-evidence">Multi-Track candidates</h2>
-<p>The Session timeline can surface mined Routine candidates. Select one, trim its proposed span and inspect its cast. <strong>Confirm Routine Take</strong> retains a chosen passage as evidence; <strong>Promote</strong> turns a reviewed Routine Take into a saved Routine. If trimming a selected candidate leaves two Tracks, <strong>Cut Take instead</strong> offers pair evidence. This is <strong>not</strong> a general drag-any-range cutting tool on the Session timeline. A candidate and its promoted artifact are different records; do not confuse a suggested span with a saved Routine.</p></div>
+<p>The Session timeline can surface mined Routine candidates. Select one, trim its proposed span and inspect its cast. <strong>Confirm Routine Take</strong> retains a chosen passage as evidence; <strong>Promote</strong> turns a reviewed Routine Take into a saved Routine. If trimming a selected candidate leaves two Tracks, <strong>Cut Take instead</strong> offers pair evidence. This is <strong>not</strong> a general drag-any-range cutting tool on the Session timeline. A candidate and its promoted artifact are different records; do not confuse a suggested span with a saved Routine.</p>
+<h2 id="exchange">Exchange Sessions between libraries</h2>
+<ol>
+<li>Open <strong>Settings → Library → Session exchange</strong> in the local desktop app. Initialize its replica namespace, then authorize an existing empty or manadj-owned folder. Configure any external folder replication separately; manadj does not create a share.</li>
+<li>Explicitly accept the other replica UUID on each library. These are namespace claims, not cryptographic authentication. Select each closed local Session to publish on the current root.</li>
+<li>On the receiver, inspect dependencies and bind each logical Track to its intended <strong>local Track ID</strong>. Media must already exist with exactly matching bytes. Delivery acknowledgment means evidence is durable, not that audio is ready. The enabled worker retries partial files and materializes ready evidence into normal Sessions history.</li>
+<li>At the per-root capacity bound, <strong>Disable exchange</strong>, review pending/unacknowledged counts and explicitly <strong>Archive and retain all files</strong>. Authorize another existing folder. It starts with no selected outboxes. Reactivating a retained root validates its original ownership marker and resumes its own work.</li>
+</ol>
+<p>Archive stops scanning and publishing; it deletes nothing and frees no disk space. Retained-root inspection shows last durable state without opening the folder. Missing published files are not silently recreated; conflicts retain the original evidence. Remote previews are read-only. Folder transport requires supported POSIX no-follow operations; Android uses its paired desktop adapter, not a native folder watcher. No audio, playlists, Sets or curated Library metadata are exchanged.</p></div>
         <nav class="help-related" aria-label="Related articles">
           <h2>Related articles</h2>
           <ul class="help-cards">

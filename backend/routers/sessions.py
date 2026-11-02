@@ -19,7 +19,7 @@ Take carries is provenance, not a dependency.
 
 import json
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -27,6 +27,7 @@ from backend import models, schemas
 from backend.database import get_db
 from backend.routine_miner_tasks import enqueue_routine_mine
 from backend.session_audibility import events_contain_audible
+from backend.session_source import deny_peer_write, peer_audio, replay_generation, session_events
 
 router = APIRouter()
 
@@ -44,6 +45,9 @@ def _is_silent(s: models.Session) -> bool:
     """True when no instant of the Session's stream had a Master-audible
     Deck (sessions 11) — chunk by chunk, short-circuiting on the first
     audible instant, so real Sessions stop at their opening seconds."""
+
+    if s.peer_history is not None:
+        return False  # immutable source was complete/audible at materialization
 
     def _events():
         for chunk in s.chunks:  # relationship order: seq
@@ -136,11 +140,18 @@ def get_session(uuid: str, db: Session = Depends(get_db)) -> schemas.SessionDeta
     s = db.query(models.Session).filter(models.Session.uuid == uuid).first()
     if s is None:
         raise HTTPException(status_code=404, detail="session not found")
-    events: list[dict] = []
-    for chunk in s.chunks:
-        events.extend(json.loads(chunk.events_json))
+    events = session_events(db, s)
     header = _row(db, s)
-    return schemas.SessionDetail(**header.model_dump(), events=events)
+    return schemas.SessionDetail(**header.model_dump(), events=events, replay_generation=replay_generation(s))
+
+
+@router.get("/{uuid}/audio/{track_id}")
+def get_peer_audio(uuid: str, track_id: int, generation: str, db: Session = Depends(get_db)):
+    s = db.query(models.Session).filter(models.Session.uuid == uuid).first()
+    if s is None or s.peer_history is None:
+        raise HTTPException(404, "peer_history_not_found")
+    data = peer_audio(db, s, track_id, generation)
+    return Response(data, media_type="application/octet-stream", headers={"Cache-Control": "no-store"})
 
 
 @router.post("/{uuid}/chunks", response_model=schemas.SessionRow)
@@ -152,6 +163,7 @@ def append_chunk(
     s = db.query(models.Session).filter(models.Session.uuid == uuid).first()
     if s is None:
         raise HTTPException(status_code=404, detail="session not found")
+    deny_peer_write(s)
     dup = (
         db.query(models.SessionChunk.id)
         .filter(models.SessionChunk.session_id == s.id, models.SessionChunk.seq == payload.seq)
@@ -183,6 +195,7 @@ def end_session(
     s = db.query(models.Session).filter(models.Session.uuid == uuid).first()
     if s is None:
         raise HTTPException(status_code=404, detail="session not found")
+    deny_peer_write(s)
     if _is_silent(s):
         header = _row(db, s)
         _drop_routine_candidates(db, s.uuid)

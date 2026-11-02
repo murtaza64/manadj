@@ -1,0 +1,12 @@
+.exchange-settings { display: grid; gap: var(--space-12); min-width: 0; }
+.exchange-settings fieldset { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-12); border: 1px solid var(--surface2); padding: var(--space-16); min-width: 0; }
+.exchange-settings legend { color: var(--accent); font-weight: 700; }
+.exchange-settings label { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-8); }
+.exchange-settings input:not([type="checkbox"]), .exchange-settings select { background: var(--base); color: var(--text); border: 1px solid var(--surface2); padding: var(--space-8); max-width: 100%; min-width: 0; }
+.exchange-settings input[aria-label="Existing absolute folder path"] { width: min(36rem, 100%); }
+.exchange-settings p, .exchange-settings ul { flex-basis: 100%; margin: 0; }
+.exchange-settings ul { padding-left: var(--space-16); }
+.exchange-settings li { margin-block: var(--space-8); }
+.exchange-settings code { overflow-wrap: anywhere; }
+.exchange-settings [role="alert"] { color: #ff4242; }
+.exchange-settings fieldset:disabled { opacity: .65; }

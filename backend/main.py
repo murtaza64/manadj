@@ -20,6 +20,8 @@ from .spotify import router as spotify_router
 from .logging_config import setup_logging
 from .feedback import FeedbackService, Workspace
 from .routers.feedback import router as feedback_router
+from .peer_inventory.router import router as peer_inventory_router
+from .peer_sync.router import router as peer_sync_router
 
 if TYPE_CHECKING:
     from .config import Config
@@ -61,6 +63,8 @@ app.add_middleware(
 )
 
 # Include routers
+app.include_router(peer_inventory_router, prefix="/api/peer-inventory", tags=["peer-inventory"])
+app.include_router(peer_sync_router, prefix="/api/peer-sync", tags=["peer-sync"])
 app.include_router(tracks.router, prefix="/api/tracks", tags=["tracks"])
 app.include_router(tags.router, prefix="/api/tags", tags=["tags"])
 app.include_router(waveforms.router, prefix="/api/waveforms", tags=["waveforms"])
@@ -301,6 +305,10 @@ _task_worker: "TaskWorkerPool | None" = None
 @app.on_event("startup")
 async def startup_event():
     """Start background workers on server startup."""
+    from .database import SessionLocal
+    from .peer_sync.folder_worker import FolderWorker
+    app.state.peer_folder_worker = FolderWorker(SessionLocal)
+    app.state.peer_folder_worker.start()
     global _task_worker
 
     # Waveform data generation (ADR 0014) requires ffmpeg. Non-fatal
@@ -417,6 +425,8 @@ async def startup_event():
 @app.on_event("shutdown")
 async def shutdown_event():
     """Stop background workers on server shutdown."""
+    if worker := getattr(app.state, "peer_folder_worker", None):
+        worker.stop()
     if _task_worker is not None:
         _task_worker.stop()
     app.state.feedback_service.stop()

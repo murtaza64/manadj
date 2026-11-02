@@ -45,3 +45,12 @@ Click a Take chip on the Session timeline, then **open in editor**. Or choose to
 ## Multi-Track candidates {#routine-evidence}
 
 The Session timeline can surface mined Routine candidates. Select one, trim its proposed span and inspect its cast. **Confirm Routine Take** retains a chosen passage as evidence; **Promote** turns a reviewed Routine Take into a saved Routine. If trimming a selected candidate leaves two Tracks, **Cut Take instead** offers pair evidence. This is **not** a general drag-any-range cutting tool on the Session timeline. A candidate and its promoted artifact are different records; do not confuse a suggested span with a saved Routine.
+
+## Exchange Sessions between libraries {#exchange}
+
+1. Open **Settings → Library → Session exchange** in the local desktop app. Initialize its replica namespace, then authorize an existing empty or manadj-owned folder. Configure any external folder replication separately; manadj does not create a share.
+2. Explicitly accept the other replica UUID on each library. These are namespace claims, not cryptographic authentication. Select each closed local Session to publish on the current root.
+3. On the receiver, inspect dependencies and bind each logical Track to its intended **local Track ID**. Media must already exist with exactly matching bytes. Delivery acknowledgment means evidence is durable, not that audio is ready. The enabled worker retries partial files and materializes ready evidence into normal Sessions history.
+4. At the per-root capacity bound, **Disable exchange**, review pending/unacknowledged counts and explicitly **Archive and retain all files**. Authorize another existing folder. It starts with no selected outboxes. Reactivating a retained root validates its original ownership marker and resumes its own work.
+
+Archive stops scanning and publishing; it deletes nothing and frees no disk space. Retained-root inspection shows last durable state without opening the folder. Missing published files are not silently recreated; conflicts retain the original evidence. Remote previews are read-only. Folder transport requires supported POSIX no-follow operations; Android uses its paired desktop adapter, not a native folder watcher. No audio, playlists, Sets or curated Library metadata are exchanged.

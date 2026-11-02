@@ -86,10 +86,27 @@ def replace_session_candidates(db: Session, session: models.Session) -> int:
     this Session are dropped (gh#187): the take chip/band is the
     surviving surface for that span.
     """
-    events: list[dict[str, Any]] = []
-    for chunk in session.chunks:  # relationship order: seq
-        events.extend(json.loads(chunk.events_json))
+    from backend.session_source import peer_detail, replay_generation, session_events
+    from backend.peer_sync.models import PeerHistory
+    from fastapi import HTTPException
+    from sqlalchemy import update
+    events = session_events(db, session)
+    generation = replay_generation(session)
+    projection = session.peer_history
+    expected = (projection.source_sha256, projection.binding_sha256) if projection is not None else None
     result = mine_session(events, playlist_orderings(db))
+    if expected is not None:
+        # Compare-and-lock publication AFTER the expensive read-only computation.
+        # This write owns SQLite's writer lock through candidate replace+commit;
+        # rematerialize cannot slip between the comparison and publication.
+        locked = db.execute(update(PeerHistory).where(
+            PeerHistory.session_id == session.id,
+            PeerHistory.source_sha256 == expected[0], PeerHistory.binding_sha256 == expected[1],
+        ).values(binding_sha256=expected[1]).execution_options(synchronize_session=False))
+        if locked.rowcount != 1:
+            raise HTTPException(409, "peer_mining_generation_changed")
+        db.expire_all()
+        peer_detail(db, session)  # Recheck exact assets/current bindings while holding the lock.
     confirmed = [
         (set(json.loads(t.cast_json)), t.window_start_s, t.window_end_s)
         for t in db.query(models.RoutineTake)
@@ -124,6 +141,7 @@ def replace_session_candidates(db: Session, session: models.Session) -> int:
                     }
                 ),
                 miner_version=MINER_VERSION,
+                peer_generation=generation,
             )
         )
     session.routine_miner_version = MINER_VERSION

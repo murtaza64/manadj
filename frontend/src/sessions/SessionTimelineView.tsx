@@ -18,6 +18,7 @@ import type { ReactNode } from 'react';
 import { flushSync } from 'react-dom';
 import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
+import { sessionReplaySource } from './sessionReplaySource';
 import type {
   RoutineCandidateWire,
   RoutineTakeRowWire,
@@ -608,9 +609,17 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusFlash, f
     }
   }, []);
 
-  const replayFrom = (t: number) => {
+  const replayFrom = async (t: number) => {
     if (!events) return;
-    const res = planReplay(events, t);
+    // Never plan peer replay from the query cache: local integer bindings
+    // may have changed since this timeline was opened.
+    const engines = { A: decks.A.engine, B: decks.B.engine, C: decks.C.engine, D: decks.D.engine };
+    let source;
+    try { source = await sessionReplaySource(session.uuid, engines, loadTrack); } catch {
+      toast('Replay refused — Session source or audio is unavailable.');
+      return;
+    }
+    const res = planReplay(source.detail.events as CaptureEvent[], t);
     if (!res.ok) {
       toast(
         res.reason === 'empty-log'
@@ -626,7 +635,7 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusFlash, f
         mixer,
         engines: { A: decks.A.engine, B: decks.B.engine, C: decks.C.engine, D: decks.D.engine },
       },
-      loadTrack,
+      source.loadTrack,
       (reason, cause) => {
         if (reason === 'load-failed') {
           toast('Replay refused — a track this moment needs is missing from the library.');
@@ -635,7 +644,8 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusFlash, f
           // fader shows up here by name instead of as a mystery stop.
           toast(`Takeover (${cause ?? 'manual gesture'}) — the decks are yours; capture resumed.`);
         }
-      }
+      },
+      source.validateSource
     );
   };
 

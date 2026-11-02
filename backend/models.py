@@ -582,6 +582,7 @@ class RoutineCandidate(Base):
     entry_offsets_json = Column(Text, nullable=False)  # JSON list, per slot
     evidence_json = Column(Text, nullable=False)  # {"returns": n, "triples": n}
     miner_version = Column(Integer, nullable=False)
+    peer_generation = Column(String(64), nullable=True)
     created_at = Column(DateTime, default=func.now())
 
     __table_args__ = (

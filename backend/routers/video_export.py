@@ -108,11 +108,13 @@ def session_span(
     """Promotion preview of an arbitrary Session span (clip editor source)."""
     if end_s <= start_s:
         raise HTTPException(400, "end_s must be after start_s")
+    from backend.session_source import preview_source
     try:
         cast, result = video_export.session_span_preview(db, session_uuid, start_s, end_s)
     except video_export.VideoExportError as exc:
         raise HTTPException(422, str(exc)) from exc
     return schemas.RoutineDetail(
+        peer_source=preview_source(db, session_uuid),
         uuid=f"preview-span-{session_uuid}-{start_s:.1f}-{end_s:.1f}",
         name=None,
         cast=list(cast),
