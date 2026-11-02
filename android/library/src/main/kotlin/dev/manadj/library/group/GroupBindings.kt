@@ -69,11 +69,13 @@ class GroupBindings(private val libraryRoot: File) {
         val s = record.getJSONObject("selection"); val a=s.getJSONObject("asset")
         return GroupReceiverSelection(s.getString("selection_id"),s.getString("receiver_key"),s.getString("incarnation"),s.getString("label"),GroupAsset(a.getString("sha256"),a.getLong("byte_length")))
     }
+    private fun incarnation(id: String,f: Facts)=GroupWire.sha256(GroupWire.canonical(JSONObject()
+        .put("selection_id",id).put("snapshot",f.snapshot).put("row",f.row).put("file",f.file)))
     fun select(trackId: Int): GroupReceiverSelection = disk.locked {
         val f=facts(trackId)
         require(f.length > 0) { "Empty local audio cannot be selected" }
         val id=UUID.randomUUID().toString()
-        val incarnation=GroupWire.sha256(GroupWire.canonical(JSONObject().put("selection_id",id).put("snapshot",f.snapshot).put("row",f.row).put("file",f.file)))
+        val incarnation=incarnation(id,f)
         val selected=GroupReceiverSelection(id,trackId.toString(),incarnation,f.track.title.take(160).ifBlank { "Local audio" },GroupAsset(GroupWire.sha256(f.bytes),f.bytes.size.toLong()))
         val records=disk.read("selections.json")
         records.put(id,JSONObject().put("selection",selected.json()).put("snapshot",f.snapshot).put("row",f.row).put("file",f.file))
@@ -88,6 +90,7 @@ class GroupBindings(private val libraryRoot: File) {
         if(f.length < selected.asset.byteLength) throw GroupSelectionException("partial")
         if(f.length != selected.asset.byteLength || readBytes && GroupWire.sha256(f.bytes) != selected.asset.sha256) throw GroupSelectionException("changed")
         if(f.file != record.getString("file")) throw GroupSelectionException("stale-selection")
+        if(selected.selectionId != selectionId || selected.incarnation != incarnation(selectionId,f)) throw GroupSelectionException("stale-selection")
         GroupLocalBytes(selected,f.track,f.bytes)
     }
 }

@@ -63,4 +63,24 @@ class GroupBindingsTest {
         assertTrue(audio().delete()) // generated decoy only
         assertEquals("missing",assertFailsWith<GroupSelectionException> { GroupBindings(root).current(selected.selectionId) }.state)
     }
+    @Test fun copyingCurrentFileFactsIntoOldRecordCannotRestoreAnOldIncarnation() = corruptMutableFacts("file")
+    @Test fun copyingCurrentSnapshotFactsIntoOldRecordCannotRestoreAnOldIncarnation() = corruptMutableFacts("snapshot")
+    private fun corruptMutableFacts(field: String) {
+        store.writeSnapshotText(snapshot)
+        audio().apply { parentFile.mkdirs();writeBytes(byteArrayOf(1,2,3,4)) }
+        val bindings=GroupBindings(root);val old=bindings.select(73)
+        if(field == "file") {
+            val retained=File(root,"retained-generated-old-file")
+            assertTrue(audio().renameTo(retained));audio().writeBytes(retained.readBytes())
+        } else store.writeSnapshotText(snapshot)
+        assertFails { bindings.current(old.selectionId) }
+        val next=bindings.select(73)
+        val file=File(root,"group-replay/selections.json");val records=JSONObject(file.readText())
+        val oldRecord=records.getJSONObject(old.selectionId)
+        oldRecord.put(field,records.getJSONObject(next.selectionId).getString(field))
+        assertEquals(old.json().toString(),oldRecord.getJSONObject("selection").toString())
+        file.writeText(records.toString()) // generated corruption; embedded old grant untouched
+        assertFails { GroupBindings(root).current(old.selectionId) }
+        assertEquals(next,GroupBindings(root).current(next.selectionId))
+    }
 }

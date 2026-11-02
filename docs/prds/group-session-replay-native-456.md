@@ -6,6 +6,7 @@
 ## Interfaces
 
 - `GroupBindings.select(localId)` captures explicit current cached-file selection: fresh UUID, persisted snapshot physical identity, canonical row digest and file dev/inode/ctime/mtime/size; exact SHA256/length. These facts stay local. Unsupported stable identity refuses. Snapshot/ID/audio revision alone never authorizes a binding.
+- Every selection read recomputes incarnation from its lookup UUID and current snapshot/row/file facts. Editing a mutable stored fact cannot restore an unchanged old selection/generation after physical replacement or snapshot rewrite.
 - `GroupReplay.bind(view, logicalUuid, selection)` durably commits an exact current selection against group/op/raw-body SHA. Missing/partial/changed/stale selections refuse; same bytes in a new file or an identical rewritten snapshot invalidate prior selection.
 - `GroupReplica.load` validates retained seed-derived Ed25519 public key against the current local UUID's member pin before any read, own-source exemption or signing. Missing/mismatched local identity fails closed without changing evidence. Retained received-UUID inventory and signed supplier recipient identities separately prevent received evidence becoming an own-source exception.
 - `GroupReplay.readiness/open/audio/validateLoad` are a separate GROUP adapter. Metadata `GroupSessionView/v1` remains nonplayable; candidate readiness is never a decoded grant. Existing raw/ordinary peer fences remain intact; unknown inventory, conflicting recordings, revoked authority and ordinary peer collisions refuse.
