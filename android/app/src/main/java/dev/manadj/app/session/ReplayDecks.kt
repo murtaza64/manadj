@@ -62,14 +62,14 @@ private fun replayStrip(s: SessionState, d: Int): Strip {
         val out = if (model.playing) player.output else null
         ref.playheadAt(model.displayTime - (out?.reportedLatencySeconds() ?: 0.0))
     }
-    val strip = remember(frame, d) { replayStrip(frame, d) }
     val tempo = v.track?.grid?.tempoChanges?.firstOrNull()
     val marks = WaveMarks(null, emptyList(), s.loop?.let { it.start..it.end }, tempo?.bpm ?: v.track?.bpm ?: s.bpm, tempo?.startTime ?: 0.0)
     BoxWithConstraints(modifier.testTag("session-deck-${DECKS[d]}").semantics { contentDescription = "Deck ${DECKS[d]}: ${v.track?.title ?: "empty"}, ${v.status}" }) {
         Column(Modifier.fillMaxSize()) {
             if (s.trackId == null) Box(Modifier.fillMaxWidth().weight(1f).background(Ink.background))
-            else WaveView(wave, position, duration, marks, Modifier.fillMaxWidth().weight(1f), windowSeconds = 8.0 * s.rate, playheadAt = .35f,
-                live = { strip }, accent = color, status = if (wave == null) "no waveform" else null)
+            else ReplayWaveform(log, d, frame, wave, position,
+                { model.displayTime - (if (model.playing) player.output?.reportedLatencySeconds() ?: 0.0 else 0.0) },
+                duration, marks, Modifier.fillMaxWidth().weight(1f), color)
             if (s.trackId != null) WaveView(wave, position, duration, WaveMarks(null, emptyList()), Modifier.fillMaxWidth().height(12.dp), overview = true, accent = color)
         }
         // Audible: deck-coloured edge (the strip's letter column is gone).
@@ -81,6 +81,19 @@ private fun replayStrip(s: SessionState, d: Int): Strip {
         if (s.trackId != null) MiniMixer(frame, d, color, if (wide) Modifier.align(Alignment.CenterEnd).padding(end = 6.dp, bottom = 10.dp) else Modifier.align(Alignment.BottomStart).padding(start = 6.dp, bottom = 14.dp))
         BeatFxOverlay(frame, d, if (wide) Modifier.align(Alignment.BottomStart).padding(start = 8.dp, bottom = 14.dp) else Modifier.align(Alignment.TopEnd).padding(end = 6.dp, top = 3.dp))
     }
+}
+
+/** Shared by the actual replay deck and host render regression; no service/audio ownership. */
+@Composable internal fun ReplayWaveform(
+    log: SessionLog, deck: Int, frame: SessionState, wave: WaveformData?,
+    position: () -> Double, sessionTime: () -> Double, duration: Double?, marks: WaveMarks,
+    modifier: Modifier, accent: Color,
+) {
+    val strip = remember(frame, deck) { replayStrip(frame, deck) }
+    val history = remember(log, deck) { ReplayHeardHistory(log, deck, ::replayStrip) }
+    WaveView(wave, position, duration, marks, modifier, windowSeconds = 8.0 * frame.decks[deck].rate,
+        playheadAt = .35f, live = { strip }, accent = accent, status = if (wave == null) "no waveform" else null,
+        heardStrip = { history.at(sessionTime(), it) })
 }
 
 @Composable private fun DeckInfoOverlay(d: Int, v: DeckView, frame: SessionState, color: Color, modifier: Modifier) {

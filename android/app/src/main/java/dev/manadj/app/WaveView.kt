@@ -159,6 +159,8 @@ fun marksOf(ui: DeckUi) = ui.snapshot.let { s -> WaveMarks(s?.cueSeconds, ui.hot
     compactCues: Boolean = false,
     /** Overview: Metric-ladder hypermeter lines (UH17); null = fall back to 32-beat steps from the grid anchor. */
     hyper: List<HyperMark>? = null,
+    /** Recorded replay evidence in source coordinates; null leaves the existing live history path unchanged. */
+    heardStrip: ((Double) -> Strip?)? = null,
 ) {
     val paint = remember { Paint().apply { strokeWidth = 2f; isAntiAlias = false } }
     val ink = remember { Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = Typeface.MONOSPACE; isFakeBoldText = true } }
@@ -221,7 +223,7 @@ fun marksOf(ui: DeckUi) = ui.snapshot.let { s -> WaveMarks(s?.cueSeconds, ui.hot
                         columns.groups(data, k, t0, t1, g)
                         for (j in 0..2) g[j] = (g[j] * columns.fill).coerceAtMost(1f)
                         val behind = t0 < pos
-                        val strip = if (behind) history?.at(t0, liveStrip) ?: liveStrip else liveStrip
+                        val strip = if (behind) heardStrip?.invoke(t0) ?: history?.at(t0, liveStrip) ?: liveStrip else liveStrip
                         // Stems (desktop #213): the top lobe (and the heard past) shows the audible stems' composite.
                         val stemData = if (strip.stems != ALL_STEMS) stemWave?.invoke(strip.stems) else null
                         val src = if (stemData != null) {
