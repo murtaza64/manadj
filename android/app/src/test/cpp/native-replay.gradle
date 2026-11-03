@@ -1,0 +1,13 @@
+// Host regression only; never used by the APK build or device tests.
+// Run Gradle with --init-script app/src/test/cpp/native-replay.gradle
+// and -Dmanadj.nativeReplay=<compiled SessionReplayBridge executable>.
+gradle.beforeProject { app ->
+    if (app.path == ':app') app.plugins.withId('com.android.application') {
+        app.tasks.withType(Test).configureEach {
+            def bridge = System.getProperty('manadj.nativeReplay')
+            if (bridge == null) throw new GradleException('Set -Dmanadj.nativeReplay to the host bridge executable')
+            systemProperty 'manadj.nativeReplay', bridge
+            testLogging.showStandardStreams = true
+        }
+    }
+}

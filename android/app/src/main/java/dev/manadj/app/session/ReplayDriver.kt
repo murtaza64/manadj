@@ -106,7 +106,11 @@ class ReplayDriver(val log: SessionLog, private val engine: Engine, private val 
     @Synchronized fun stop() {
         if (playing || preparing) {
             engine.cancel(tag)
-            DeckId.entries.forEach { engine.submit(AudioCommand.Pause(it)); engine.submit(AudioCommand.SetBend(it, 0.0)) }
+            DeckId.entries.forEach {
+                engine.submit(AudioCommand.ScratchEnd(it))
+                engine.submit(AudioCommand.Pause(it))
+                engine.submit(AudioCommand.SetBend(it, 0.0))
+            }
             engine.submit(AudioCommand.SetBeatFx(beatFx(null)))
         }
         playing = false; preparing = false; epoch = null; dueLoads.clear()
@@ -261,7 +265,10 @@ class ReplayDriver(val log: SessionLog, private val engine: Engine, private val 
     @Synchronized fun park(t: Double) {
         val want = log.replayAt(t)
         for (d in 0..3) if (want.decks[d].trackId != null && engine.holds(d) == want.decks[d].trackId) {
-            for (op in script.place(t, d)) if (op !is ReplayOp.Play) command(op)?.let(engine::submit)
+            for (op in script.place(t, d)) {
+                if (op is ReplayOp.Play || (op is ReplayOp.Scratch && op.phase != ReplayOp.Scratch.Phase.END)) continue
+                command(op)?.let(engine::submit)
+            }
             engine.submit(AudioCommand.Pause(DeckId.entries[d]))
         }
     }

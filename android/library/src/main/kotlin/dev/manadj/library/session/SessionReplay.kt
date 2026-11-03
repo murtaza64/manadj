@@ -81,8 +81,21 @@ class ReplayScript(val log: SessionLog) {
     /** Deck [d]'s reference state at [t] as ops (mixer, rate, loop, position, transport); no load. */
     fun place(t: Double, d: Int): List<ReplayOp> {
         val s = log.replayAt(t)
-        return mixerOps(s, d) + listOf(ReplayOp.Pitch(d, s.decks[d].pitch), ReplayOp.Bend(d, s.decks[d].bend)) +
-            if (s.decks[d].trackId == null) listOf(ReplayOp.Pause(d)) else settle(d, s.decks[d])
+        val deck = s.decks[d]
+        val transport = when {
+            deck.trackId == null -> listOf(ReplayOp.Pause(d))
+            deck.scratching -> listOf(
+                ReplayOp.Locate(d, deck.loop?.takeIf { deck.playhead >= it.start && deck.playhead < it.end }, deck.playhead.coerceAtLeast(0.0)),
+                if (deck.sounding) ReplayOp.Play(d) else ReplayOp.Pause(d),
+                ReplayOp.Scratch(d, ReplayOp.Scratch.Phase.BEGIN),
+            )
+            else -> settle(d, deck)
+        }
+        // Placement replaces any previous platter tenure. The recorded head seeds a held
+        // platter; subsequent MOVE/END events keep their original frame stamps. Historical
+        // scratch filter drive/rate is not present in the parsed event model.
+        return listOf(ReplayOp.Scratch(d, ReplayOp.Scratch.Phase.END)) + mixerOps(s, d) +
+            listOf(ReplayOp.Pitch(d, deck.pitch), ReplayOp.Bend(d, deck.bend)) + transport
     }
 
     fun beatFx(t: Double) = ReplayOp.BeatFx(log.replayAt(t).beatFx)
