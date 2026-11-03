@@ -152,4 +152,42 @@ class ScratchEntryNativeTest {
             assertReleased(log, native, advance(replay, native, 6.0))
         }
     }
+
+    @Test fun ordinaryTwoDeckClockRateSeekAndResumeStayWithinOneSample() {
+        val log = SessionLog.parse(JSONObject().put("uuid", "synthetic445-clock")
+            .put("events", JSONArray(listOf(
+                JSONObject().put("t", 0.0).put("kind", "load").put("channel", "A").put("trackId", 1),
+                JSONObject().put("t", 0.0).put("kind", "load").put("channel", "B").put("trackId", 2),
+                ev(0.0, "play", 0.0), ev(0.0, "play", 2.0).put("channel", "B"),
+                JSONObject().put("t", 2.0).put("kind", "pitch").put("channel", "A").put("value", 4.0),
+                JSONObject().put("t", 3.0).put("kind", "bend").put("channel", "B").put("value", -3.0),
+                ev(5.0, "seek", 12.0),
+                JSONObject().put("t", 10.0).put("kind", "tick").put("playheads", JSONObject()),
+            ))).toString())
+        withNative { native ->
+            val replay = ReplayDriver(log, native)
+            replay.prepare(0.0)
+            var resumed = false
+            var checks = 0
+            repeat(1000) {
+                replay.tick(0.0); native.render(400)
+                val epoch = replay.epoch ?: return@repeat
+                val at = epoch.timeAt(native.outputFrames())
+                if (at <= epoch.t0 + 1.0 / 48000) return@repeat
+                for (d in 0..1) {
+                    assertTrue(replay.exact(d, native.state[1].toLong()))
+                    // outputFrames names the next frame: its boundary op has not run yet.
+                    assertEquals("ordinary at=$at deck=$d", log.replayAt(Math.nextDown(at)).decks[d].playhead, native.state[4+d], 1.0 / 48000)
+                    assertEquals(0.0, native.state[8+d], 0.0)
+                    checks++
+                }
+                if (!resumed && at > 4.0) {
+                    replay.stop(); native.render(800); replay.prepare(at); resumed = true
+                }
+            }
+            assertTrue("actual two-deck reference/native comparisons", checks > 1500)
+            assertTrue("actual rendered generated PCM", native.state[3] > 1.0)
+            assertEquals(0.0, native.state[2], 0.0)
+        }
+    }
 }
