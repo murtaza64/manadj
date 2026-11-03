@@ -99,15 +99,22 @@ class ReplayHeardHistory(log: SessionLog, deck: Int, stripOf: (SessionState, Int
         occurrences = rows.map { (from, spans) -> Occurrence(from, if (spans.isEmpty()) null else Index(spans)) }
     }
 
-    /** Latest recorded visit to [trackTime] before [sessionTime], within that instant's Load occurrence. */
-    fun at(sessionTime: Double, trackTime: Double): Strip? {
-        if (!sessionTime.isFinite() || !trackTime.isFinite() || trackTime < 0 || sessionTime < start || sessionTime > end) return null
+    /** Rendered and heard clocks must refer to the SAME Load, including repeated loads of one Track. */
+    fun at(sessionTime: Double, trackTime: Double, renderedTime: Double = sessionTime): Strip? {
+        if (!sessionTime.isFinite() || !trackTime.isFinite() || trackTime < 0 || sessionTime < start || sessionTime > end ||
+            !renderedTime.isFinite() || renderedTime < start || renderedTime > end) return null
+        val heard = occurrenceAt(sessionTime)
+        if (heard != occurrenceAt(renderedTime)) return null
+        return occurrences.getOrNull(heard)?.index?.at(sessionTime, trackTime)
+    }
+
+    private fun occurrenceAt(time: Double): Int {
         var lo = 0
         var hi = occurrences.size
         while (lo < hi) {
             val middle = (lo + hi) ushr 1
-            if (occurrences[middle].from <= sessionTime) lo = middle + 1 else hi = middle
+            if (occurrences[middle].from <= time) lo = middle + 1 else hi = middle
         }
-        return occurrences.getOrNull(lo - 1)?.index?.at(sessionTime, trackTime)
+        return lo - 1
     }
 }

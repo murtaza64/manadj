@@ -91,9 +91,12 @@ private fun replayStrip(s: SessionState, d: Int): Strip {
 ) {
     val strip = remember(frame, deck) { replayStrip(frame, deck) }
     val history = remember(log, deck) { ReplayHeardHistory(log, deck, ::replayStrip) }
+    // SessionLog.reconstruct stamps every deck's playheadAt with the frame's query time.
+    // Bind to that rendered occurrence, not merely Track ID or the latency-adjusted clock.
+    val renderedTime = frame.decks[deck].playheadAt
     WaveView(wave, position, duration, marks, modifier, windowSeconds = 8.0 * frame.decks[deck].rate,
         playheadAt = .35f, live = { strip }, accent = accent, status = if (wave == null) "no waveform" else null,
-        heardStrip = { history.at(sessionTime(), it) })
+        heardStrip = { history.at(sessionTime(), it, renderedTime) })
 }
 
 @Composable private fun DeckInfoOverlay(d: Int, v: DeckView, frame: SessionState, color: Color, modifier: Modifier) {

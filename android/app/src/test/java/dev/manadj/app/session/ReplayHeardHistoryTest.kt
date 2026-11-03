@@ -161,4 +161,24 @@ class ReplayHeardHistoryTest {
         val empty = ReplayHeardHistory(SessionLog.parse("""{"uuid":"empty","events":[]}"""), 0) { _, _ -> Strip() }
         assertNull(empty.at(0.0, 0.0))
     }
+
+    @Test fun latencyCannotCrossRenderedOccurrenceEvenWhenTrackIdRepeats() {
+        val h = history("""[
+            {"t":0,"kind":"load","channel":"A","trackId":1},
+            {"t":0,"kind":"transport","channel":"A","action":"play","playhead":0},
+            {"t":4,"kind":"control","channel":"A","control":"eqLow","value":0.1},
+            {"t":5,"kind":"load","channel":"A","trackId":1},
+            {"t":5,"kind":"loop","channel":"A","playhead":3,"region":{"start":0,"end":4}},
+            {"t":5,"kind":"transport","channel":"A","action":"play","playhead":3},
+            {"t":12,"kind":"tick","playheads":{}}
+        ]""")
+        assertNull(h.at(4.91, 3.0, 5.01))
+        assertNull(h.at(4.99, 3.0, 5.0))
+        assertEquals(.5f, h.at(4.91, 3.0, 4.99)!!.low) // Valid latency within old occurrence.
+        assertEquals(.1f, h.at(5.21, 3.1, 5.31)!!.low) // Valid latency within new occurrence.
+        assertEquals(.1f, h.at(9.21, 3.1, 9.31)!!.low) // Loop wraps do not mint another Load.
+        assertEquals(.5f, h.at(4.91, 3.0, 4.99)!!.low) // Seek backward, then forward, no mutable epoch cache.
+        assertNull(h.at(4.91, 3.0, 5.01))
+        assertNull(h.at(5.21, 3.1, Double.NaN))
+    }
 }

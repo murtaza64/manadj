@@ -49,6 +49,44 @@ class ReplayWaveformIntegrationTest {
         """{"t":5,"kind":"transport","channel":"A","action":"pause","playhead":5},
             {"t":10,"kind":"control","channel":"A","control":"eqLow","value":0}""", 9.99, 10.01)
 
+    @Test fun repeatedTrackLoadLatencyLoopAndSeekNeverBorrowAnotherOccurrencesHistory() {
+        fun log(oldLow: Double) = SessionLog.parse("""{"uuid":"same-id-replay-decoy","events":[
+            {"t":0,"kind":"load","channel":"A","trackId":1},
+            {"t":0,"kind":"control","channel":"A","control":"eqLow","value":$oldLow},
+            {"t":0,"kind":"transport","channel":"A","action":"play","playhead":0},
+            {"t":5,"kind":"load","channel":"A","trackId":1},
+            {"t":5,"kind":"control","channel":"A","control":"eqLow","value":0.5},
+            {"t":5,"kind":"loop","channel":"A","playhead":3,"region":{"start":0,"end":4}},
+            {"t":5,"kind":"transport","channel":"A","action":"play","playhead":3},
+            {"t":12,"kind":"tick","playheads":{}}
+        ]}""")
+        val selected = mutableStateOf(log(0.0))
+        val display = mutableStateOf(5.01)
+        val wave = WaveformData(48000, 20.0, 480, 480, 480,
+            ByteArray(2000) { 100 }, ByteArray(2000 * 8) { if (it % 8 < 3) 170.toByte() else 40 }, 2000)
+        compose.setContent {
+            val frame = selected.value.replayAt(display.value)
+            val ref = frame.decks[0].copy()
+            ReplayWaveform(selected.value, 0, frame, wave, { ref.playheadAt(display.value - .1) },
+                { display.value - .1 }, wave.duration, WaveMarks(null, emptyList()),
+                Modifier.size(600.dp, 200.dp).testTag("replay-wave"), Ink.accent)
+        }
+        val atBoundary = pixels()
+        compose.runOnIdle { selected.value = log(.5) }
+        assertTrue("same-ID Load is still a different occurrence", atBoundary.buffer.contentEquals(pixels().buffer))
+        compose.runOnIdle { display.value = 4.99 }
+        pixels() // Seek to the previous Load, then return in a fresh playback epoch.
+        compose.runOnIdle { display.value = 5.01 }
+        assertTrue("seek epochs cannot retain a previous Load cache", atBoundary.buffer.contentEquals(pixels().buffer))
+        for (time in listOf(5.31, 9.31)) {
+            compose.runOnIdle { display.value = time }
+            val before = pixels()
+            compose.runOnIdle { selected.value = log(0.0) }
+            assertTrue("same-occurrence positive latency/loop at $time", before.buffer.contentEquals(pixels().buffer))
+            compose.runOnIdle { selected.value = log(.5) }
+        }
+    }
+
     private fun boundary(change: String, beforeTime: Double, afterTime: Double) {
         val log = SessionLog.parse("""{"uuid":"replay-wave-decoy","events":[
             {"t":0,"kind":"load","channel":"A","trackId":1},
