@@ -39,11 +39,15 @@ class MainActivity : ComponentActivity() {
         immerse()
         setContent {
             BackHandler(model.browser != null || model.pitchDrawer != null || model.replace != null || ux.confirmLoad != null || model.outputPanel || ux.settings) { if (ux.confirmLoad != null) ux.confirmLoad = null else if (ux.settings && model.replace == null && !model.outputPanel) ux.settingsBack() else { model.browser = null; model.pitchDrawer = null; model.replace = null; model.outputPanel = false; ux.settings = false } }
-            PerformanceApp(model, ux) { deck -> model.pickerTarget = deck; picker.launch(arrayOf("audio/*")) }
+            Column(Modifier.fillMaxSize()) {
+                MasterRecordingBar(model)
+                Box(Modifier.weight(1f)) {
+                    PerformanceApp(model, ux) { deck -> model.pickerTarget = deck; picker.launch(arrayOf("audio/*")) }
+                }
+            }
         }
     }
     override fun onWindowFocusChanged(hasFocus: Boolean) { super.onWindowFocusChanged(hasFocus); if (hasFocus) immerse() }
     override fun onPause() { model.cancelGestures(); super.onPause() }
     private fun immerse() { WindowInsetsControllerCompat(window, window.decorView).apply { systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE; hide(WindowInsetsCompat.Type.systemBars()) } }
 }
-

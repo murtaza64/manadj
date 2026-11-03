@@ -992,9 +992,17 @@ void Engine::render(float* output, int frames, int channels) noexcept {
             scheduleCount_.store(scheduleCount_.load(kRelaxed) - 1, kRelaxed);
         }
         renderBuses(n, static_cast<int64_t>(now));
+        // Record the logical stereo Master, never the physical cue-routing
+        // buffer. Fixed stack scratch; worker owns conversion and disk IO.
+        std::array<float, kBlockFrames * 2> recorded;
+        const uint64_t captureMaster = masterRecorder.epoch();
         float* out = output + static_cast<size_t>(done) * channels;
         for (int i = 0; i < n; ++i, out += channels) {
             const float mL = master_[i * 2], mR = master_[i * 2 + 1];
+            if (captureMaster) {
+                recorded[i * 2] = ceiling(mL);
+                recorded[i * 2 + 1] = ceiling(mR);
+            }
             // Headphone feed: cue bus blended toward master by the cue-mix knob.
             const float cL = cue_[i * 2] * (1 - mix) + mL * mix, cR = cue_[i * 2 + 1] * (1 - mix) + mR * mix;
             for (int c = 0; c < channels; ++c) out[c] = 0;
@@ -1009,6 +1017,7 @@ void Engine::render(float* output, int frames, int channels) noexcept {
                 if (channels >= 2) out[1] = ceiling(mR);
             }
         }
+        if (captureMaster) masterRecorder.push(recorded.data(), n, outputRate_.load(kRelaxed), captureMaster);
         done += n;
     }
     if (clicksLeft_ > 0) renderClicks(output, frames, channels, start);

@@ -76,6 +76,10 @@ class PlayerModel(application: Application) : AndroidViewModel(application) {
     val sources = mutableStateListOf<LocalSource>()
     private val catalog = MediaSources(application)
     private var service: PlaybackService? = null
+    var masterRecordings by mutableStateOf(MasterRecordings())
+        private set
+    fun startMasterRecording() { service?.startMasterRecording() }
+    fun stopMasterRecording(cancel: Boolean = false) { service?.stopMasterRecording(cancel) }
     private var bound = false
     private val releases = linkedMapOf<String, () -> Unit>()
     private var pendingSelection: DeckId? = null
@@ -127,6 +131,7 @@ class PlayerModel(application: Application) : AndroidViewModel(application) {
             var tick = 0
             while (isActive) {
                 val audio = service
+                masterRecordings = audio?.masterRecordings ?: MasterRecordings(error = "Audio service unavailable")
                 if (tick++ % 30 == 0) outputInfo = audio?.outputInfo()
                 val state = audio?.snapshot()
                 if (state != null) {

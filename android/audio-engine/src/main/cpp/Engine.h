@@ -10,6 +10,7 @@
 #include "BeatFx.h"
 #include "signalsmith-stretch/signalsmith-stretch.h"
 #include "Dsp.h"
+#include "MasterRecorder.h"
 
 namespace manadj {
 constexpr int kDeckCount = 4;
@@ -251,6 +252,7 @@ struct Deck {
 
 class Engine {
 public:
+    MasterRecorder masterRecorder;
     explicit Engine(int outputRate = 48000);
     // Any thread; one producer lock, never taken on the callback. Returns 0 if full.
     uint64_t submit(Op op, int deck, double value = 0, uint64_t load = 0, int slot = 0, const double* aux = nullptr);

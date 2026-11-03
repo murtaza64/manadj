@@ -16,6 +16,10 @@
             </intent-filter>
         </activity>
         <service android:name=".PlaybackService" android:exported="false" android:foregroundServiceType="mediaPlayback" />
+        <provider android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.recordings" android:exported="false" android:grantUriPermissions="true">
+            <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/master_recordings_paths" />
+        </provider>
         <service android:name=".library.LibraryDownloadService" android:exported="false" android:foregroundServiceType="dataSync" />
     </application>
 </manifest>
