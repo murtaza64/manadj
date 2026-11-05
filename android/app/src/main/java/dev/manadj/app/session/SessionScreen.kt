@@ -252,7 +252,8 @@ private fun groupStatus(item: GroupSessionView) = when(item.status) {
 }
 
 @Composable private fun ColumnScope.Replay(model: SessionModel, player: PlayerModel, ux: UiModel, log: SessionLog) {
-    val frame = remember(log, model.time) { log.at(model.time) }
+    // Replay reference, not log.at: ticks are evidence and must not re-anchor what is drawn (#486).
+    val frame = remember(log, model.time) { log.replayAt(model.time) }
     var issuesOpen by remember(log) { mutableStateOf(false) }
     val drift = model.recordingDrift
     // One warning line (space): not-reproduced vocabulary + recording drift; tap for the issue list.
