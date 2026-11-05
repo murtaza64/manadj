@@ -264,4 +264,14 @@ class UpdateChannelTest {
         val padded = f("release-notes.json") + ByteArray(ReleaseIdentity.MAX_FILE_BYTES + 1 - f("release-notes.json").size) { ' '.code.toByte() }
         assertNull(ReleaseIdentity.parse(f("build-info.json"), padded, f("android-build.json")), "over the 256 KiB per-file cap")
     }
+
+    @Test fun sdkIntegersAreRangeCheckedBeforeNarrowing() {
+        val wrap = (1L shl 32) + 26 // .toInt() == 26
+        assertFails { UpdateChannel.parse(channel(entry(8) { put("min_sdk", wrap) })) }
+        assertFails { UpdateChannel.parse(channel(entry(8) { put("min_sdk", -(1L shl 32) + 26) })) }
+        val b = build { put("release_id", "a".repeat(64)).put("notes_sha256", "b".repeat(64)) }
+        assertNotNull(AndroidBuild.parse(b.toString().toByteArray()))
+        for ((k, v) in listOf("min_sdk" to wrap, "target_sdk" to (1L shl 32) + 35, "min_sdk" to Long.MAX_VALUE))
+            assertNull(AndroidBuild.parse(JSONObject(b.toString()).put(k, v).toString().toByteArray()), "$k=$v")
+    }
 }

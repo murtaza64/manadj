@@ -88,9 +88,10 @@ data class AndroidBuild(
             if (o.keySet() != KEYS || o.get("format") != "manadj_android_build/v1") return null
             fun str(k: String) = o.get(k) as String
             fun int(k: String) = when (val v = o.get(k)) { is Int -> v.toLong(); is Long -> v; else -> error(k) }
+            fun sdk(k: String) = int(k).also { require(it in 26L..100L) { k } }.toInt() // range before narrowing
             val abis = o.getJSONArray("abis").let { a -> (0 until a.length()).map { a.get(it) as String } }
             val b = AndroidBuild(str("release_id"), str("package"), int("version_code"), str("version_name"), str("source_revision"),
-                str("source_tree_sha256"), str("build_batch_id"), str("notes_sha256"), int("min_sdk").toInt(), int("target_sdk").toInt(), abis)
+                str("source_tree_sha256"), str("build_batch_id"), str("notes_sha256"), sdk("min_sdk"), sdk("target_sdk"), abis)
             val ok = HEX64.matches(b.releaseId) && b.packageName == UpdatePolicy.PACKAGE && b.versionCode in 1..2_100_000_000 &&
                 VERSION.matches(b.versionName) && HEX40.matches(b.sourceRevision) && HEX64.matches(b.sourceTreeSha256) &&
                 BATCH.matches(b.buildBatchId) && HEX64.matches(b.notesSha256) && b.minSdk in 26..100 && b.targetSdk in b.minSdk..100 &&

@@ -105,7 +105,7 @@ object UpdateChannel {
                 releaseId = releaseId,
                 versionCode = e.int("version_code").also { require(it in 1..2_100_000_000) { "version_code" } },
                 versionName = e.str("version_name").also { require(VERSION.matches(it)) { "version_name" } },
-                minSdk = e.int("min_sdk").toInt().also { require(it in 26..100) { "min_sdk" } },
+                minSdk = e.int("min_sdk").also { require(it in 26L..100L) { "min_sdk" } }.toInt(), // range before narrowing
                 abis = e.strings("abis").also { require(it.size in 1..4 && it.all { a -> a in UpdatePolicy.ABIS } && it.orderedUnique()) { "abis" } },
                 sourceRevision = e.str("source_revision").also { require(HEX40.matches(it)) { "source_revision" } },
                 notesSha256 = e.str("notes_sha256").also { require(HEX64.matches(it)) { "notes_sha256" } },
