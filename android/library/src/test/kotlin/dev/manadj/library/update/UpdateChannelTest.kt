@@ -113,4 +113,40 @@ class UpdateChannelTest {
         assertEquals("Stop playback to install", Activity(true, true, true).blockReason)
         assertNotNull(Activity(false, false, true).blockReason)
     }
+
+    @Test fun artifactAllowlistIsSeparateFromChannelAndExplicit() {
+        assertTrue(UpdatePolicy.channel("https://manadj.murtaza.earth/android/stable/channel.json"))
+        assertFalse(UpdatePolicy.channel("https://manadj.murtaza.earth/android/stable/channel.json?x=1"))
+        assertTrue(UpdatePolicy.artifact("https://manadj.murtaza.earth/android/stable/manadj-8.apk"))
+        for (bad in listOf("https://manadj.murtaza.earth/other/manadj-8.apk", "https://manadj.murtaza.earth/android/stable/%2e%2e/x.apk",
+                "https://manadj.murtaza.earth/android/stable/../x.apk", "https://manadj.murtaza.earth:8443/android/stable/a.apk",
+                "https://github.com/murtaza64/manadj/releases/download/v8/a.apk")) assertFalse(UpdatePolicy.artifact(bad), bad)
+        val gh = listOf("https://github.com" to "/murtaza64/manadj/releases/download/")
+        assertTrue(UpdatePolicy.artifact("https://github.com/murtaza64/manadj/releases/download/v8/a.apk", gh))
+        assertFalse(UpdatePolicy.artifact("https://github.com/murtaza64/manadj/releases/latest/download/a.apk", gh))
+        assertFails { UpdateChannel.parse(channel(entry(8) { put("apk_url", "https://manadj.murtaza.earth/elsewhere/a.apk") })) }
+    }
+
+    @Test fun scheduleRateLimitsAndBacksOffAndPersists() {
+        val dir = Files.createTempDirectory("sched-").toFile()
+        try {
+            val f = File(dir, "check.json")
+            val h = 3600_000L; val m = 60_000L
+            val s = UpdateSchedule(f)
+            assertTrue(s.due(0), "never checked")
+            s.record(1_000, ok = true, result = "Up to date")
+            assertFalse(s.due(1_000 + 5 * h))
+            assertTrue(UpdateSchedule(f).due(1_000 + 6 * h), "persisted across restart")
+            assertTrue(s.due(0), "clock moved backwards")
+            s.record(10 * h, ok = false, result = "offline")
+            assertFalse(s.due(10 * h + 4 * m)); assertTrue(s.due(10 * h + 5 * m))
+            s.record(11 * h, ok = false, result = "offline")
+            assertFalse(s.due(11 * h + 9 * m)); assertTrue(s.due(11 * h + 10 * m))
+            repeat(20) { s.record(12 * h, ok = false, result = "offline") }
+            assertFalse(s.due(12 * h + 5 * h)); assertTrue(s.due(12 * h + 6 * h), "backoff capped at the interval")
+            assertEquals("offline", s.read().lastResult); assertEquals(1_000L, s.read().lastSuccessMs)
+            s.record(20 * h, ok = true, result = "Up to date")
+            assertEquals(0, s.read().failures)
+        } finally { dir.deleteRecursively() }
+    }
 }

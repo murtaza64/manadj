@@ -28,12 +28,24 @@ object UpdatePolicy {
     const val MAX_MANIFEST_BYTES = 256 * 1024
     const val MAX_APK_BYTES = 512L * 1024 * 1024
 
-    /** Same scheme + host + port as [ORIGIN]; nothing else is ever fetched. */
-    fun pinned(url: String, origin: String = ORIGIN): Boolean = runCatching {
+    /**
+     * Immutable APK locations: explicit https origin + path prefix pairs, separate from the channel origin.
+     * PENDING core's canonical contract (artifact host/redirect policy); until then only the Pages path below.
+     */
+    val ARTIFACTS: List<Pair<String, String>> = listOf(ORIGIN to "/android/$CHANNEL/")
+
+    /** Same scheme + host + port as [origin] and under [pathPrefix]; nothing else is ever fetched. */
+    fun pinned(url: String, origin: String = ORIGIN, pathPrefix: String = "/"): Boolean = runCatching {
         val u = URI(url); val o = URI(origin)
         u.scheme == "https" && u.scheme == o.scheme && u.host.equals(o.host, ignoreCase = true) && u.port == o.port &&
-            u.userInfo == null && u.rawQuery == null && u.rawFragment == null && !u.rawPath.contains("..")
+            u.userInfo == null && u.rawQuery == null && u.rawFragment == null && !u.rawPath.contains("..") &&
+            !u.rawPath.contains("%") && u.rawPath.startsWith(pathPrefix)
     }.getOrDefault(false)
+
+    fun artifact(url: String, allow: List<Pair<String, String>> = ARTIFACTS) = allow.any { (o, p) -> pinned(url, o, p) }
+
+    /** The channel URL itself (exact). */
+    fun channel(url: String) = url == channelUrl
 }
 
 data class ChannelEntry(
@@ -55,7 +67,7 @@ object UpdateChannel {
     private val HEX64 = Regex("[0-9a-f]{64}")
 
     /** Parses a channel manifest; refuses anything outside the pinned format/channel/package/signer/origin. */
-    fun parse(bytes: ByteArray, origin: String = UpdatePolicy.ORIGIN, channel: String = UpdatePolicy.CHANNEL): List<ChannelEntry> {
+    fun parse(bytes: ByteArray, artifacts: List<Pair<String, String>> = UpdatePolicy.ARTIFACTS, channel: String = UpdatePolicy.CHANNEL): List<ChannelEntry> {
         require(bytes.size <= UpdatePolicy.MAX_MANIFEST_BYTES) { "Channel manifest too large" }
         val o = JSONObject(String(bytes, Charsets.UTF_8))
         require(o.optString("format") == UpdatePolicy.FORMAT) { "Unknown channel format" }
@@ -73,7 +85,7 @@ object UpdateChannel {
                 abis = e.getJSONArray("abis").let { a -> (0 until a.length()).map { a.getString(it) } },
                 sourceRevision = e.getString("source_revision").also { require(HEX40.matches(it)) { "source_revision" } },
                 notesSha256 = e.getString("notes_sha256").also { require(HEX64.matches(it)) { "notes_sha256" } },
-                apkUrl = e.getString("apk_url").also { require(UpdatePolicy.pinned(it, origin)) { "APK URL outside the pinned origin" } },
+                apkUrl = e.getString("apk_url").also { require(UpdatePolicy.artifact(it, artifacts)) { "APK URL outside the artifact allowlist" } },
                 apkSha256 = e.getString("apk_sha256").also { require(HEX64.matches(it)) { "apk_sha256" } },
                 apkBytes = e.getLong("apk_bytes").also { require(it in 1..UpdatePolicy.MAX_APK_BYTES) { "apk_bytes" } },
             )
@@ -160,4 +172,38 @@ data class Activity(val playing: Boolean, val recording: Boolean, val transferri
             transferring -> "Wait for the library transfer to finish"
             else -> null
         }
+}
+
+/**
+ * Automatic check cadence (#419): on app start and each return to the foreground, at most once per [intervalMs]
+ * after a completed check; after a failure, exponential backoff from [retryMs] up to [intervalMs]. Persisted so a
+ * restart does not hammer the host. A manual CHECK always runs.
+ */
+class UpdateSchedule(private val file: File, private val intervalMs: Long = 6 * 3600_000L, private val retryMs: Long = 5 * 60_000L) {
+    data class Record(val lastAttemptMs: Long?, val lastSuccessMs: Long?, val failures: Int, val lastResult: String?)
+
+    fun read(): Record = runCatching {
+        val o = JSONObject(file.readText())
+        Record(o.optLong("last_attempt_ms").takeIf { o.has("last_attempt_ms") }, o.optLong("last_success_ms").takeIf { o.has("last_success_ms") },
+            o.optInt("failures"), o.optString("last_result").ifEmpty { null })
+    }.getOrDefault(Record(null, null, 0, null))
+
+    /** True when an automatic check is due at [nowMs]. A clock moved backwards counts as due. */
+    fun due(nowMs: Long): Boolean {
+        val r = read()
+        val last = r.lastAttemptMs ?: return true
+        if (nowMs < last) return true
+        val wait = if (r.failures == 0) intervalMs else minOf(intervalMs, retryMs shl minOf(r.failures - 1, 10))
+        return nowMs - last >= wait
+    }
+
+    fun record(nowMs: Long, ok: Boolean, result: String) {
+        val r = read()
+        val o = JSONObject().put("last_attempt_ms", nowMs).put("failures", if (ok) 0 else r.failures + 1).put("last_result", result.take(200))
+        (if (ok) nowMs else r.lastSuccessMs)?.let { o.put("last_success_ms", it) }
+        file.parentFile?.mkdirs()
+        val tmp = File(file.parentFile, file.name + ".tmp")
+        FileOutputStream(tmp).use { it.write(o.toString().toByteArray()); it.fd.sync() }
+        if (!tmp.renameTo(file)) throw IOException("Cannot record update check")
+    }
 }

@@ -106,7 +106,7 @@ enum class SettingsPage(val title: String) {
 }
 
 /** What an install would interrupt (#419): playing/previewing decks, master recording, library sync or bulk download. */
-private fun installActivity(model: PlayerModel, ux: UiModel) = dev.manadj.library.update.Activity(
+internal fun installActivity(model: PlayerModel, ux: UiModel) = dev.manadj.library.update.Activity(
     playing = model.decks.values.any { d -> d.snapshot.let { it?.playing == true || it?.previewing == true } },
     recording = model.masterRecordings.busy,
     transferring = ux.syncState.running ||

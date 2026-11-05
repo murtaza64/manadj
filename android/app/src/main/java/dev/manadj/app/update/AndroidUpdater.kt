@@ -21,6 +21,7 @@ import dev.manadj.library.update.ReleaseIdentity
 import dev.manadj.library.update.SeenReleases
 import dev.manadj.library.update.UpdateChannel
 import dev.manadj.library.update.UpdatePolicy
+import dev.manadj.library.update.UpdateSchedule
 import dev.manadj.library.update.UpdateStager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -54,7 +55,7 @@ object AndroidUpdater {
 
     var state by mutableStateOf<State>(State.Idle)
         internal set
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    internal var scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     // --- identity -----------------------------------------------------------------------------
 
@@ -81,7 +82,9 @@ object AndroidUpdater {
     private val signingFlag get() = if (Build.VERSION.SDK_INT >= 28) PackageManager.GET_SIGNING_CERTIFICATES else PackageManager.GET_SIGNATURES
 
     /** PackageManager facts about the running package. */
+    internal var installedOverride: Installed? = null
     fun installed(context: Context): Installed {
+        installedOverride?.let { return it }
         val info = context.packageManager.getPackageInfo(context.packageName, signingFlag)
         return Installed(context.packageName, versionCode(info), signers(info), Build.VERSION.SDK_INT, Build.SUPPORTED_ABIS.toList())
     }
@@ -90,7 +93,7 @@ object AndroidUpdater {
 
     /** HTTPS GET from the pinned origin only; redirects are refused (the pin covers the final URL). */
     internal fun open(url: String): InputStream {
-        if (!UpdatePolicy.pinned(url)) throw IOException("Refusing an update URL outside ${UpdatePolicy.ORIGIN}")
+        if (!UpdatePolicy.channel(url) && !UpdatePolicy.artifact(url)) throw IOException("Refusing an update URL outside the pinned channel/artifact hosts")
         val c = URL(url).openConnection() as HttpURLConnection
         c.instanceFollowRedirects = false
         c.connectTimeout = 10_000; c.readTimeout = 30_000
@@ -100,19 +103,45 @@ object AndroidUpdater {
         return c.inputStream
     }
 
-    fun check(context: Context) {
+    /** Last automatic/manual check, for the status line. */
+    var lastCheckedMs by mutableStateOf<Long?>(null)
+        internal set
+    internal var clock: () -> Long = System::currentTimeMillis
+    internal var fetch: (String) -> InputStream = ::open
+    internal fun schedule(context: Context) = UpdateSchedule(File(context.noBackupFilesDir, "update-check.json"))
+
+    /**
+     * App start / foreground: a rate-limited check (see [UpdateSchedule]); an applicable release is then staged
+     * automatically only when [activity] is idle (download never competes with playback/recording/transfer).
+     * Installing always stays a user action outside activity.
+     */
+    fun autoCheck(context: Context, activity: () -> Activity) {
+        val sched = schedule(context)
+        lastCheckedMs = sched.read().lastAttemptMs
+        if (!sched.due(clock())) return
+        check(context) { offered -> if (activity().blockReason == null) download(context, offered) }
+    }
+
+    fun check(context: Context, onOffer: (ChannelEntry) -> Unit = {}) {
         if (state is State.Checking || state is State.Downloading) return
         state = State.Checking
         scope.launch {
+            var ok = false
             state = try {
-                val bytes = open(UpdatePolicy.channelUrl).use { bounded(it, UpdatePolicy.MAX_MANIFEST_BYTES + 1) }
-                when (val offer = UpdateChannel.offer(UpdateChannel.parse(bytes), installed(context))) {
+                val bytes = fetch(UpdatePolicy.channelUrl).use { bounded(it, UpdatePolicy.MAX_MANIFEST_BYTES + 1) }
+                val entries = UpdateChannel.parse(bytes)
+                ok = true
+                when (val offer = UpdateChannel.offer(entries, installed(context))) {
                     is Offer.Available -> stager(context).staged(offer.entry)?.let { verifyArchive(context, offer.entry, it); State.Staged(offer.entry, it) }
                         ?: State.Offered(offer.entry)
                     is Offer.UpToDate -> State.UpToDate(offer.versionCode)
                     is Offer.Refused -> State.Failed(offer.reason)
                 }
-            } catch (e: Exception) { State.Failed("Update check failed: ${e.message ?: e.javaClass.simpleName}") }
+            } catch (e: Exception) { ok = false; State.Failed("Update check failed: ${e.message ?: e.javaClass.simpleName}") }
+            val now = clock()
+            runCatching { schedule(context).record(now, ok, updateLine(state)) }
+            lastCheckedMs = now
+            (state as? State.Offered)?.let { onOffer(it.entry) }
         }
     }
 
@@ -121,7 +150,7 @@ object AndroidUpdater {
         state = State.Downloading(entry, 0)
         scope.launch {
             state = try {
-                val file = stager(context).stage(entry, ::open) { n -> state = State.Downloading(entry, n) }
+                val file = stager(context).stage(entry, fetch) { n -> state = State.Downloading(entry, n) }
                 verifyArchive(context, entry, file)
                 State.Staged(entry, file)
             } catch (e: Exception) {
@@ -132,7 +161,9 @@ object AndroidUpdater {
     }
 
     /** The staged archive must be the offered package/versionCode signed by the pinned release certificate. */
-    private fun verifyArchive(context: Context, entry: ChannelEntry, file: File) {
+    internal var verifyArchive: (Context, ChannelEntry, File) -> Unit = ::verifyArchiveReal
+
+    internal fun verifyArchiveReal(context: Context, entry: ChannelEntry, file: File) {
         val info = context.packageManager.getPackageArchiveInfo(file.path, signingFlag) ?: throw IOException("Not an installable APK")
         if (info.packageName != UpdatePolicy.PACKAGE) throw IOException("APK is ${info.packageName}, not ${UpdatePolicy.PACKAGE}")
         if (versionCode(info) != entry.versionCode) throw IOException("APK versionCode ${versionCode(info)} differs from the offer ${entry.versionCode}")

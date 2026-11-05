@@ -46,6 +46,7 @@ fun identityLine(applied: ReleaseIdentity?, versionCode: Long, versionName: Stri
     Text("Channel: ${UpdatePolicy.channelUrl}", color = Ink.muted, size = 10, lines = 2)
     val s = AndroidUpdater.state
     Text(updateLine(s), Modifier.testTag("update-state"), if (s is AndroidUpdater.State.Failed) Ink.warning else Ink.text, 12, lines = 3)
+    Text(lastCheckedLine(AndroidUpdater.lastCheckedMs, System.currentTimeMillis()), Modifier.testTag("update-last-checked"), Ink.muted, 11)
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Key("CHECK", Modifier.height(36.dp).widthIn(min = 80.dp), enabled = s !is AndroidUpdater.State.Checking && s !is AndroidUpdater.State.Downloading) {
             AndroidUpdater.check(context)
@@ -67,6 +68,40 @@ fun identityLine(applied: ReleaseIdentity?, versionCode: Long, versionName: Stri
         var open by remember { mutableStateOf(false) }
         Key("RELEASE NOTES", Modifier.height(32.dp).widthIn(min = 120.dp), color = Ink.accent) { open = true }
         if (open) ReleaseNotes(r) { open = false }
+    }
+}
+
+/** "Checked 12 min ago · automatic on launch (6 h)"; never-checked says so. */
+fun lastCheckedLine(lastMs: Long?, nowMs: Long): String {
+    val ago = lastMs?.let { (nowMs - it).coerceAtLeast(0) / 60_000 }
+    val word = when {
+        ago == null -> "Never checked"
+        ago < 1 -> "Checked just now"
+        ago < 120 -> "Checked $ago min ago"
+        else -> "Checked ${ago / 60} h ago"
+    }
+    return "$word · checks automatically on launch (every 6 h)"
+}
+
+/**
+ * Compact visible offer over the app (#419): shown while an update is offered/downloading/ready, until dismissed for
+ * that release. [open] goes to Settings → App & updates (installing happens there, never from the banner).
+ */
+@Composable fun UpdateBanner(open: () -> Unit) {
+    val s = AndroidUpdater.state
+    val entry = when (s) {
+        is AndroidUpdater.State.Offered -> s.entry
+        is AndroidUpdater.State.Downloading -> s.entry
+        is AndroidUpdater.State.Staged -> s.entry
+        else -> null
+    } ?: return
+    var dismissed by remember { mutableStateOf<String?>(null) }
+    if (dismissed == entry.releaseId) return
+    Row(Modifier.fillMaxWidth().background(Ink.panel).padding(horizontal = 10.dp, vertical = 4.dp).testTag("update-banner"),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(updateLine(s), Modifier.weight(1f), if (s is AndroidUpdater.State.Staged) Ink.play else Ink.text, 12)
+        Key("UPDATE", Modifier.height(30.dp).widthIn(min = 80.dp), color = Ink.play) { open() }
+        Key("LATER", Modifier.height(30.dp).widthIn(min = 64.dp), color = Ink.muted) { dismissed = entry.releaseId }
     }
 }
 

@@ -39,7 +39,16 @@ class UpdateUiTest {
     private val entry = ChannelEntry("a".repeat(64), 8, "0.1.0-rc.8", 26, listOf("arm64-v8a"), src, "b".repeat(64),
         "https://manadj.murtaza.earth/android/stable/manadj-8.apk", "c".repeat(64), 41_000_000)
 
-    @After fun reset() { AndroidUpdater.state = AndroidUpdater.State.Idle }
+    @After fun reset() {
+        AndroidUpdater.state = AndroidUpdater.State.Idle
+        AndroidUpdater.fetch = AndroidUpdater::open
+        AndroidUpdater.clock = System::currentTimeMillis
+        AndroidUpdater.installedOverride = null
+        AndroidUpdater.verifyArchive = AndroidUpdater::verifyArchiveReal
+        AndroidUpdater.scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO)
+        File(compose.activity.noBackupFilesDir, "update-check.json").delete()
+        File(compose.activity.noBackupFilesDir, "update").deleteRecursively()
+    }
 
     private fun shot(name: String) {
         val root = File(System.getProperty("manadj.previewViews") ?: "build/generated-views/419").apply { mkdirs() }
@@ -90,5 +99,79 @@ class UpdateUiTest {
         compose.onNodeWithText("DONE").performClick()
         compose.runOnIdle { assertTrue(done) }
         assertTrue(File(compose.activity.noBackupFilesDir, "release-seen/${r.releaseId}.json").isFile)
+    }
+
+    /** Generated channel + APK stand-in served by an injected fetch; counts requests per URL. */
+    private inner class Server(val apk: ByteArray = ByteArray(5000) { it.toByte() }) {
+        val hits = mutableListOf<String>()
+        var offline = false
+        val channel = org.json.JSONObject().put("format", "manadj_android_channel/v1").put("channel", "stable")
+            .put("package", "dev.murt.manadj.excalibur").put("signer_cert_sha256", dev.manadj.library.update.UpdatePolicy.SIGNER_SHA256)
+            .put("entries", org.json.JSONArray().put(org.json.JSONObject().put("release_id", "a".repeat(64)).put("version_code", 8)
+                .put("version_name", "0.1.0-rc.8").put("min_sdk", 26).put("abis", org.json.JSONArray())
+                .put("source_revision", src).put("notes_sha256", "b".repeat(64))
+                .put("apk_url", "https://manadj.murtaza.earth/android/stable/manadj-8.apk")
+                .put("apk_sha256", ReleaseIdentity.sha256(apk)).put("apk_bytes", apk.size)))
+        fun install() {
+            AndroidUpdater.fetch = { url ->
+                hits.add(url)
+                if (offline) throw java.io.IOException("offline")
+                java.io.ByteArrayInputStream(if (url.endsWith(".apk")) apk else channel.toString().toByteArray())
+            }
+            AndroidUpdater.installedOverride = dev.manadj.library.update.Installed("dev.murt.manadj.excalibur", 7,
+                setOf(dev.manadj.library.update.UpdatePolicy.SIGNER_SHA256), 35, listOf("arm64-v8a"))
+            AndroidUpdater.verifyArchive = { _, _, _ -> } // archive cert check needs a real signed APK; device verification
+            AndroidUpdater.scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Unconfined)
+        }
+    }
+
+    @Test fun autoCheckIsRateLimitedAndStagesOnlyWhenIdle() {
+        val server = Server().apply { install() }
+        var now = 1_000_000L
+        AndroidUpdater.clock = { now }
+        val ctx = compose.activity
+        AndroidUpdater.autoCheck(ctx) { Activity(playing = true, recording = false, transferring = false) }
+        assertTrue(AndroidUpdater.state is AndroidUpdater.State.Offered)
+        assertEquals(listOf("https://manadj.murtaza.earth/android/stable/channel.json"), server.hits) // no download while playing
+        assertEquals(now, AndroidUpdater.lastCheckedMs)
+        now += 60_000
+        AndroidUpdater.state = AndroidUpdater.State.Idle
+        AndroidUpdater.autoCheck(ctx) { Activity(false, false, false) }
+        assertEquals(1, server.hits.size); assertTrue(AndroidUpdater.state is AndroidUpdater.State.Idle) // rate-limited
+        now += 6 * 3600_000L
+        AndroidUpdater.autoCheck(ctx) { Activity(false, false, false) }
+        assertTrue(AndroidUpdater.state.toString(), AndroidUpdater.state is AndroidUpdater.State.Staged)
+        assertEquals(3, server.hits.size); assertTrue(server.hits.last().endsWith("manadj-8.apk"))
+        assertEquals("Stop recording to install", AndroidUpdater.blocked(ctx, Activity(false, true, false)))
+    }
+
+    @Test fun failedAutoCheckBacksOffAndIsVisible() {
+        val server = Server().apply { install(); offline = true }
+        var now = 5_000_000L
+        AndroidUpdater.clock = { now }
+        AndroidUpdater.autoCheck(compose.activity) { Activity(false, false, false) }
+        assertTrue((AndroidUpdater.state as AndroidUpdater.State.Failed).reason.contains("offline"))
+        now += 2 * 60_000
+        AndroidUpdater.autoCheck(compose.activity) { Activity(false, false, false) }
+        assertEquals(1, server.hits.size)
+        now += 4 * 60_000
+        server.offline = false
+        AndroidUpdater.state = AndroidUpdater.State.Idle
+        AndroidUpdater.autoCheck(compose.activity) { Activity(false, false, false) }
+        assertEquals(3, server.hits.size) // channel + apk after the 5 min backoff
+        assertEquals("Checked 12 min ago · checks automatically on launch (every 6 h)", lastCheckedLine(0, 12 * 60_000))
+        assertEquals("Never checked · checks automatically on launch (every 6 h)", lastCheckedLine(null, 0))
+    }
+
+    @Test fun bannerShowsOfferAndOpensUpdatesWithoutInstalling() {
+        AndroidUpdater.state = AndroidUpdater.State.Staged(entry, File("unused"))
+        var opened = false
+        compose.setContent { Column(Modifier.fillMaxSize().background(Ink.background)) { UpdateBanner { opened = true } } }
+        compose.onNodeWithTag("update-banner").assertExists()
+        shot("419-banner-staged")
+        compose.onNodeWithText("UPDATE").performClick()
+        compose.runOnIdle { assertTrue(opened); assertTrue(AndroidUpdater.state is AndroidUpdater.State.Staged) }
+        compose.onNodeWithText("LATER").performClick()
+        compose.onNodeWithTag("update-banner").assertDoesNotExist()
     }
 }
