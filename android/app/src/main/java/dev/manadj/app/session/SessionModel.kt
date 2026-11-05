@@ -720,7 +720,13 @@ class SessionModel(application: Application) : AndroidViewModel(application) {
                 if (proof.loadId == null) proof.loadId = snap?.loadId
                 if (proof.loadId != snap?.loadId) return ReplayDriver.Load.Failed("Peer decoded audio was replaced")
             }
-            return if (snap?.fullyDecoded == true) ReplayDriver.Load.Ready else ReplayDriver.Load.Partial(snap?.decodedSeconds ?: 0.0)
+            if (snap?.fullyDecoded == true) return ReplayDriver.Load.Ready
+            val id = DeckId.entries[deck]; val duration = snap?.durationSeconds
+            // Range-aware (#448): what is filled at the positions replay needs, for this exact load (source checked above).
+            return ReplayDriver.Load.Partial(snap?.decodedSeconds ?: 0.0) { from, to ->
+                val end = if (duration != null) minOf(to, duration - 1e-3) else to
+                end <= from || player.decodedAhead(id, from) >= end - from
+            }
         }
     }
 

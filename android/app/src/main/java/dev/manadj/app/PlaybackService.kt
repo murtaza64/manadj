@@ -115,6 +115,10 @@ class PlaybackService : Service() {
         return START_NOT_STICKY
     }
 
+    /** Seconds of the deck's current load filled contiguously in memory from [seconds] (0 = none / destroyed). */
+    fun decodedAhead(deck: DeckId, seconds: Double): Double =
+        if (destroyed) 0.0 else try { engine?.decodedAhead(deck, seconds) ?: 0.0 } catch (_: IllegalStateException) { 0.0 }
+
     fun snapshot(): EngineSnapshot? {
         if (destroyed) return null
         return try { engine?.snapshot() } catch (error: IllegalStateException) { failure = error.message; null }

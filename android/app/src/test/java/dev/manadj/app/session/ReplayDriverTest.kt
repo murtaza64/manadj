@@ -88,6 +88,29 @@ class ReplayDriverTest {
         assertEquals("never reloaded at the Load itself", 1, fake.loads.size)
     }
 
+    /** #448: a range fill already covers the seek target (70 s+) while the prefix is only at 20 s — ready now, not after the 20 s grace. */
+    @Test fun partialLoadIsReadyWhenTheRangeItPlaysIsFilledEvenIfThePrefixIsNot() {
+        val l = log(
+            ev(0.0, "load", "A").put("trackId", 1),
+            ev(0.0, "transport", "A").put("action", "seek").put("playhead", 70.0),
+            ev(0.0, "transport", "A").put("action", "play").put("playhead", 70.0),
+            ev(30.0, "tick").put("playheads", JSONObject()),
+        )
+        val fake = Fake(); val driver = ReplayDriver(l, fake)
+        driver.prepare(0.0)
+        val asked = ArrayList<Pair<Double, Double>>()
+        fake.state[0] = ReplayDriver.Load.Partial(20.0) { a, b -> asked += a to b; b <= 20.0 || (a >= 69.0 && b <= 95.0) }
+        run(driver, fake, .5)
+        assertTrue("clock started within 0.5 s", driver.playing)
+        assertEquals(ReplayDriver.Deck.LIVE, driver.decks[0])
+        assertTrue("asked about the played range, not the prefix", asked.any { (a, b) -> a >= 69.9 && b in 80.0..84.0 })
+        // Control: only the prefix filled → still waiting.
+        val l2 = Fake(); val d2 = ReplayDriver(l, l2); d2.prepare(0.0)
+        l2.state[0] = ReplayDriver.Load.Partial(20.0) { _, b -> b <= 20.0 }
+        run(d2, l2, .5)
+        assertFalse(d2.playing)
+    }
+
     @Test fun lateDeckJoinsAtAStampedFrameWithTheReferencePositionThere() {
         val l = log(
             ev(0.0, "load", "A").put("trackId", 1),
