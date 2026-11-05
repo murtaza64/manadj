@@ -173,6 +173,7 @@ private fun summary(page: SettingsPage, model: PlayerModel, ux: UiModel): String
 }
 
 @Composable private fun DisplayPage(ux: UiModel) {
+    SettingToggle("Finger seek on waveforms", "Drag a detail waveform to scrub (or scratch a paused deck). Off: pinch zoom only, no accidental seeks; VINYL scratch and minimap seek still work.", ux.waveFingerSeek) { ux.waveFingerSeek = !ux.waveFingerSeek }
     Text("Waveform zoom", bold = true)
     Text("Or pinch a waveform.", color = Ink.muted, size = 11)
     Row(Modifier.fillMaxWidth().height(40.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
