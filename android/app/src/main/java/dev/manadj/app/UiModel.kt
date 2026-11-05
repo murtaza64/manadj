@@ -148,10 +148,30 @@ class UiModel(application: Application) : AndroidViewModel(application) {
     val played = mutableStateListOf<Long>()
     /** Monotonic load time per deck (landscape BROWSE picks the least recently loaded as outgoing). */
     val loadedAt = mutableMapOf<DeckId, Long>()
-    /** SHIFT per deck: held = momentary, short tap = latched for one pad press. */
+    /** SHIFT per deck: held = momentary, short tap = latched for exactly one action, slide = locked until tapped (#404). */
     val shiftHeld = mutableStateMapOf<DeckId, Boolean>()
     val shiftLatched = mutableStateMapOf<DeckId, Boolean>()
-    fun shifted(deck: DeckId) = shiftHeld[deck] == true || shiftLatched[deck] == true
+    val shiftLocked = mutableStateMapOf<DeckId, Boolean>()
+    private val shiftUsed = mutableMapOf<DeckId, Boolean>()
+    private val shiftWasLatched = mutableMapOf<DeckId, Boolean>()
+    fun shifted(deck: DeckId) = shiftHeld[deck] == true || shiftLatched[deck] == true || shiftLocked[deck] == true
+    /** A shifted action ran: a latch releases (a lock stays), and the SHIFT press in progress will not latch on release. */
+    fun consumeShift(deck: DeckId) { shiftUsed[deck] = true; shiftLatched[deck] = false }
+    fun shiftDown(deck: DeckId) { shiftUsed[deck] = false; shiftWasLatched[deck] = shiftLatched[deck] == true; shiftHeld[deck] = true }
+    /** [tap]: a short press without a slide; [slid]: dragged past the slide-to-lock threshold. */
+    fun shiftUp(deck: DeckId, tap: Boolean, slid: Boolean) {
+        shiftHeld[deck] = false
+        when {
+            slid -> { shiftLocked[deck] = true; shiftLatched[deck] = false }
+            shiftLocked[deck] == true -> if (tap) { shiftLocked[deck] = false; shiftLatched[deck] = false }
+            tap && shiftUsed[deck] != true -> shiftLatched[deck] = shiftWasLatched[deck] != true
+            else -> shiftLatched[deck] = false
+        }
+    }
+    /** A plain SHIFT toggle key (track editor): latch / release, and releases a lock. */
+    fun toggleShift(deck: DeckId) {
+        if (shiftLocked[deck] == true) { shiftLocked[deck] = false; shiftLatched[deck] = false } else shiftLatched[deck] = shiftLatched[deck] != true
+    }
 
     /** Last deleted hot cue (deck, slot, seconds), offered as UNDO for a few seconds. */
     var undoCue by mutableStateOf<Triple<DeckId, Int, Double>?>(null)
@@ -162,7 +182,7 @@ class UiModel(application: Application) : AndroidViewModel(application) {
         val at = model.decks.getValue(deck).hotCues[slot] ?: return
         model.submit(dev.manadj.audio.AudioCommand.ClearHotCue(deck, slot))
         journalCue(model, deck, slot, null)
-        shiftLatched[deck] = false
+        consumeShift(deck)
         undoCue = Triple(deck, slot, at)
         undoJob?.cancel(); undoJob = viewModelScope.launch { delay(5000); undoCue = null }
     }

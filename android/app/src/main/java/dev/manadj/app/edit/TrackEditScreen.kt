@@ -169,7 +169,7 @@ private val MarkColor = Color(0xffff2dd4)
     val shift = ux.shifted(deck)
     Row(modifier.padding(horizontal = 2.dp), verticalAlignment = Alignment.CenterVertically) {
         Key("SHIFT", Modifier.width(54.dp).fillMaxHeight().padding(vertical = 2.dp), Ink.warning, engaged = shift, description = "Shift: next pad tap deletes", style = KeyStyle.PILL, textSize = 10) {
-            ux.shiftLatched[deck] = !(ux.shiftLatched[deck] ?: false)
+            ux.toggleShift(deck)
         }
         for (slot in 0 until 8) Hotcue(edit.ui, slot, model, ux, Modifier.weight(1f).fillMaxHeight())
     }

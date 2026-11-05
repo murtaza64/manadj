@@ -101,6 +101,7 @@ val ControlRow = 44.dp
         momentaryPresses({ currentReady }, slide) {
             if (currentShift) {
                 if (ui.hotCues[slot] != null) { haptic.performHapticFeedback(HapticFeedbackType.LongPress); ux.deleteCue(model, ui.id, slot) }
+                else ux.consumeShift(ui.id) // SHIFT + empty pad: no-op, still the one shifted action
                 return@momentaryPresses { }
             }
             held = true; haptic.performHapticFeedback(HapticFeedbackType.VirtualKey)
@@ -330,7 +331,7 @@ val PitchTab = RoundedCornerShape(topStart = 14.dp, topEnd = 14.dp, bottomStart 
                         // SHIFT + stem = solo (desktop mixer.soloStem): only this stem; soloing the soloed stem restores all.
                         val soloed = (0..3).all { isOn(it) == (it == i) }
                         for (j in 0..3) set(j, soloed || j == i)
-                        ux.shiftLatched[ui.id] = false
+                        ux.consumeShift(ui.id)
                     } else set(i, !on)
                 }
             }
@@ -340,23 +341,41 @@ val PitchTab = RoundedCornerShape(topStart = 14.dp, topEnd = 14.dp, bottomStart 
     }
 }
 
-/** SHIFT: hold for momentary, short tap latches it for the next pad press (tap again to cancel). */
+/**
+ * SHIFT (#404): hold = momentary; short tap = latched for exactly one shifted action (tap again to cancel); an action made
+ * while SHIFT is still held never latches it on release; hold and slide either way (same gesture as CUE/hot-cue
+ * slide-to-lock) = locked for any number of actions until tapped.
+ */
 @Composable fun ShiftKey(deck: DeckId, ux: UiModel, modifier: Modifier) {
     val on = ux.shifted(deck)
+    val locked = ux.shiftLocked[deck] == true
     val shape = RoundedCornerShape(50)
+    var slide by remember(deck) { mutableFloatStateOf(0f) }
     Box(modifier.semantics { contentDescription = "$deck shift" }.pointerInput(deck) {
         awaitEachGesture {
             val down = awaitFirstDown(requireUnconsumed = false); down.consume()
-            val wasLatched = ux.shiftLatched[deck] == true
-            ux.shiftHeld[deck] = true
-            val start = down.uptimeMillis
+            ux.shiftDown(deck)
+            val threshold = (size.width * .55f).coerceIn(40f, 220f)
             var up = down.uptimeMillis
-            try { while (true) { val c = awaitPointerEvent().changes.firstOrNull { it.id == down.id } ?: break; up = c.uptimeMillis; if (!c.pressed) break } }
-            finally { ux.shiftHeld[deck] = false }
-            if (up - start < 250) ux.shiftLatched[deck] = !wasLatched else ux.shiftLatched[deck] = false
+            var slid = false
+            var lifted = false
+            try {
+                while (true) {
+                    val c = awaitPointerEvent().changes.firstOrNull { it.id == down.id } ?: break
+                    up = c.uptimeMillis; c.consume()
+                    val dx = c.position.x - down.position.x
+                    if (!slid) { slide = (kotlin.math.abs(dx) / threshold).coerceIn(0f, 1f); if (kotlin.math.abs(dx) >= threshold) slid = true }
+                    if (!c.pressed) { lifted = true; break }
+                }
+            } finally { slide = 0f; ux.shiftUp(deck, tap = lifted && !slid && up - down.uptimeMillis < 250, slid = slid) }
         }
-    }.padding(vertical = 2.dp).clip(shape).then(if (on) Modifier.background(Ink.warning) else dev.manadj.app.viz.Glass.fill(Ink.panel, dev.manadj.app.viz.Glass.PILL)).border(1.5.dp, Ink.warning, shape), contentAlignment = Alignment.Center) {
-        Text("SHIFT", color = if (on) Color.Black else Ink.warning, size = 10, bold = true)
+    }.padding(vertical = 2.dp).clip(shape).then(if (on) Modifier.background(Ink.warning) else dev.manadj.app.viz.Glass.fill(Ink.panel, dev.manadj.app.viz.Glass.PILL))
+        .drawBehind { if (slide > 0f && !on) drawRect(Ink.warning.copy(alpha = .6f), size = Size(size.width * slide, size.height)) }
+        .border(1.5.dp, Ink.warning, shape), contentAlignment = Alignment.Center) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text("SHIFT", color = if (on) Color.Black else Ink.warning, size = 10, bold = true)
+            if (locked) Text("LOCK", color = Color.Black, size = 8, bold = true)
+        }
     }
 }
 
