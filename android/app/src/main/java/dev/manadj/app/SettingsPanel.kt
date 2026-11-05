@@ -34,6 +34,8 @@ enum class SettingsPage(val title: String) {
     DEVELOPER("Developer"),
     /** One-handed portrait spike (android-onehand, #386). */
     LAYOUT("Layout (portrait)"),
+    /** Running release identity + self-update (#419). */
+    UPDATES("App & updates"),
 }
 
 /**
@@ -103,6 +105,14 @@ enum class SettingsPage(val title: String) {
     }
 }
 
+/** What an install would interrupt (#419): playing/previewing decks, master recording, library sync or bulk download. */
+private fun installActivity(model: PlayerModel, ux: UiModel) = dev.manadj.library.update.Activity(
+    playing = model.decks.values.any { d -> d.snapshot.let { it?.playing == true || it?.previewing == true } },
+    recording = model.masterRecordings.busy,
+    transferring = ux.syncState.running ||
+        dev.manadj.app.library.LibraryHolder.repository(ux.getApplication()).bulk.value.running,
+)
+
 @Composable private fun About(modifier: Modifier) = Text("manadj Android · UI #371 · engine #369/#370", modifier, Ink.muted, 10)
 
 /** One-line state of a group, shown under its name. */
@@ -130,6 +140,7 @@ private fun summary(page: SettingsPage, model: PlayerModel, ux: UiModel): String
     SettingsPage.FILTER -> model.filterSettings.model.label
     SettingsPage.DEVELOPER -> listOfNotNull("pending preview".takeIf { ux.previewPending }, "output readout".takeIf { ux.outputDebug }).joinToString(" · ").ifEmpty { "All off" }
     SettingsPage.LAYOUT -> dev.manadj.app.onehand.OneHand.summary()
+    SettingsPage.UPDATES -> dev.manadj.app.update.updateLine(dev.manadj.app.update.AndroidUpdater.state)
 }
 
 @Composable private fun PageBody(page: SettingsPage, model: PlayerModel, ux: UiModel, modifier: Modifier, header: Boolean) {
@@ -151,6 +162,7 @@ private fun summary(page: SettingsPage, model: PlayerModel, ux: UiModel): String
                     SettingsPage.FILTER -> FilterSettingsPanel(model)
                     SettingsPage.DEVELOPER -> DeveloperPage(ux)
                     SettingsPage.LAYOUT -> dev.manadj.app.onehand.OneHandSettings()
+                    SettingsPage.UPDATES -> dev.manadj.app.update.UpdatePage { installActivity(model, ux) }
                 }
             }
         }

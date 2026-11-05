@@ -43,6 +43,7 @@ class MainActivity : ComponentActivity() {
                 MasterRecordingBar(model)
                 Box(Modifier.weight(1f)) {
                     PerformanceApp(model, ux) { deck -> model.pickerTarget = deck; picker.launch(arrayOf("audio/*")) }
+                    dev.manadj.app.update.ReleaseNotesOnLaunch() // #419: once per verified applied release
                 }
             }
         }
