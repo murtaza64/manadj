@@ -20,6 +20,9 @@ android {
     kotlinOptions { jvmTarget = "17" }
     buildFeatures { compose = true }
     testOptions { unitTests.isIncludeAndroidResources = true }
+    // Release identity (#419): scripts/release/android_release.py stamp writes <dir>/manadj-release/{build-info,release-notes}.json;
+    // -Pmanadj.releaseMetadataDir=<dir> ships them as assets/manadj-release/*. Absent = unstamped dev build.
+    (findProperty("manadj.releaseMetadataDir") as String?)?.let { sourceSets.getByName("main").assets.srcDir(it) }
     // Lanes sharing one phone install side by side: -Pmanadj.appIdSuffix=.lane
     (findProperty("manadj.appIdSuffix") as String?)?.let { buildTypes.getByName("debug").applicationIdSuffix = it }
     // One debug identity across lanes/machines so installs update in place:
