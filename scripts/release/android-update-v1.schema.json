@@ -1,0 +1,600 @@
+{
+  "$defs": {
+    "AndroidBuild": {
+      "additionalProperties": false,
+      "properties": {
+        "abis": {
+          "items": {
+            "enum": [
+              "arm64-v8a",
+              "armeabi-v7a",
+              "x86_64",
+              "x86"
+            ],
+            "type": "string"
+          },
+          "maxItems": 4,
+          "minItems": 1,
+          "title": "Abis",
+          "type": "array"
+        },
+        "build_batch_id": {
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "title": "Build Batch Id",
+          "type": "string"
+        },
+        "format": {
+          "const": "manadj_android_build/v1",
+          "title": "Format",
+          "type": "string"
+        },
+        "min_sdk": {
+          "maximum": 100,
+          "minimum": 26,
+          "title": "Min Sdk",
+          "type": "integer"
+        },
+        "notes_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Notes Sha256",
+          "type": "string"
+        },
+        "package": {
+          "const": "dev.murt.manadj.excalibur",
+          "title": "Package",
+          "type": "string"
+        },
+        "release_id": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Release Id",
+          "type": "string"
+        },
+        "source_revision": {
+          "pattern": "^[0-9a-f]{40}$",
+          "title": "Source Revision",
+          "type": "string"
+        },
+        "source_tree_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Source Tree Sha256",
+          "type": "string"
+        },
+        "target_sdk": {
+          "maximum": 100,
+          "minimum": 26,
+          "title": "Target Sdk",
+          "type": "integer"
+        },
+        "version_code": {
+          "maximum": 2100000000,
+          "minimum": 1,
+          "title": "Version Code",
+          "type": "integer"
+        },
+        "version_name": {
+          "pattern": "^\\d+\\.\\d+\\.\\d+(?:-[0-9A-Za-z.]+)?$",
+          "title": "Version Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "format",
+        "release_id",
+        "package",
+        "version_code",
+        "version_name",
+        "source_revision",
+        "source_tree_sha256",
+        "build_batch_id",
+        "notes_sha256",
+        "min_sdk",
+        "target_sdk",
+        "abis"
+      ],
+      "title": "AndroidBuild",
+      "type": "object"
+    },
+    "BuildInfo": {
+      "additionalProperties": false,
+      "properties": {
+        "notes_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Notes Sha256",
+          "type": "string"
+        },
+        "release_id": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Release Id",
+          "type": "string"
+        },
+        "schema": {
+          "const": 1,
+          "title": "Schema",
+          "type": "integer"
+        },
+        "source_revision": {
+          "pattern": "^[0-9a-f]{40}$",
+          "title": "Source Revision",
+          "type": "string"
+        },
+        "version": {
+          "pattern": "^\\d+\\.\\d+\\.\\d+(?:-[0-9A-Za-z.]+)?$",
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "schema",
+        "version",
+        "source_revision",
+        "notes_sha256",
+        "release_id"
+      ],
+      "title": "BuildInfo",
+      "type": "object"
+    },
+    "Candidate": {
+      "additionalProperties": false,
+      "properties": {
+        "build": {
+          "$ref": "#/$defs/AndroidBuild"
+        },
+        "build_info": {
+          "$ref": "#/$defs/BuildInfo"
+        },
+        "channel": {
+          "enum": [
+            "stable",
+            "preview"
+          ],
+          "title": "Channel",
+          "type": "string"
+        },
+        "content_entries_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Content Entries Sha256",
+          "type": "string"
+        },
+        "format": {
+          "const": "manadj_android_candidate/v1",
+          "title": "Format",
+          "type": "string"
+        },
+        "qa_receipts": {
+          "items": {
+            "$ref": "#/$defs/QAReceipt"
+          },
+          "maxItems": 64,
+          "minItems": 2,
+          "title": "Qa Receipts",
+          "type": "array"
+        },
+        "release_notes": {
+          "$ref": "#/$defs/Notes"
+        },
+        "unsigned_apk_bytes": {
+          "maximum": 536870912,
+          "minimum": 1,
+          "title": "Unsigned Apk Bytes",
+          "type": "integer"
+        },
+        "unsigned_apk_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Unsigned Apk Sha256",
+          "type": "string"
+        },
+        "verification_receipt_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Verification Receipt Sha256",
+          "type": "string"
+        }
+      },
+      "required": [
+        "format",
+        "channel",
+        "build",
+        "build_info",
+        "release_notes",
+        "unsigned_apk_sha256",
+        "unsigned_apk_bytes",
+        "content_entries_sha256",
+        "verification_receipt_sha256",
+        "qa_receipts"
+      ],
+      "title": "Candidate",
+      "type": "object"
+    },
+    "Channel": {
+      "additionalProperties": false,
+      "properties": {
+        "channel": {
+          "enum": [
+            "stable",
+            "preview"
+          ],
+          "title": "Channel",
+          "type": "string"
+        },
+        "entries": {
+          "items": {
+            "$ref": "#/$defs/Entry"
+          },
+          "maxItems": 128,
+          "minItems": 1,
+          "title": "Entries",
+          "type": "array"
+        },
+        "format": {
+          "const": "manadj_android_channel/v1",
+          "title": "Format",
+          "type": "string"
+        },
+        "package": {
+          "const": "dev.murt.manadj.excalibur",
+          "title": "Package",
+          "type": "string"
+        },
+        "signer_cert_sha256": {
+          "const": "18f8fe820d6abd112be1fa5c99e3c69f77cbb5c834242899135c9b528af7417c",
+          "title": "Signer Cert Sha256",
+          "type": "string"
+        }
+      },
+      "required": [
+        "format",
+        "channel",
+        "package",
+        "signer_cert_sha256",
+        "entries"
+      ],
+      "title": "Channel",
+      "type": "object"
+    },
+    "Entry": {
+      "additionalProperties": false,
+      "properties": {
+        "abis": {
+          "items": {
+            "enum": [
+              "arm64-v8a",
+              "armeabi-v7a",
+              "x86_64",
+              "x86"
+            ],
+            "type": "string"
+          },
+          "maxItems": 4,
+          "minItems": 1,
+          "title": "Abis",
+          "type": "array"
+        },
+        "apk_bytes": {
+          "maximum": 536870912,
+          "minimum": 1,
+          "title": "Apk Bytes",
+          "type": "integer"
+        },
+        "apk_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Apk Sha256",
+          "type": "string"
+        },
+        "apk_url": {
+          "title": "Apk Url",
+          "type": "string"
+        },
+        "build_batch_id": {
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "title": "Build Batch Id",
+          "type": "string"
+        },
+        "min_sdk": {
+          "maximum": 100,
+          "minimum": 26,
+          "title": "Min Sdk",
+          "type": "integer"
+        },
+        "notes_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Notes Sha256",
+          "type": "string"
+        },
+        "qa_receipt_sha256s": {
+          "items": {
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "maxItems": 64,
+          "minItems": 2,
+          "title": "Qa Receipt Sha256S",
+          "type": "array"
+        },
+        "release_id": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Release Id",
+          "type": "string"
+        },
+        "source_revision": {
+          "pattern": "^[0-9a-f]{40}$",
+          "title": "Source Revision",
+          "type": "string"
+        },
+        "source_tree_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Source Tree Sha256",
+          "type": "string"
+        },
+        "version_code": {
+          "maximum": 2100000000,
+          "minimum": 1,
+          "title": "Version Code",
+          "type": "integer"
+        },
+        "version_name": {
+          "pattern": "^\\d+\\.\\d+\\.\\d+(?:-[0-9A-Za-z.]+)?$",
+          "title": "Version Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "release_id",
+        "version_code",
+        "version_name",
+        "min_sdk",
+        "abis",
+        "source_revision",
+        "source_tree_sha256",
+        "build_batch_id",
+        "notes_sha256",
+        "apk_url",
+        "apk_sha256",
+        "apk_bytes",
+        "qa_receipt_sha256s"
+      ],
+      "title": "Entry",
+      "type": "object"
+    },
+    "Notes": {
+      "additionalProperties": false,
+      "properties": {
+        "body": {
+          "title": "Body",
+          "type": "string"
+        },
+        "release_id": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Release Id",
+          "type": "string"
+        },
+        "schema": {
+          "const": 1,
+          "title": "Schema",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "schema",
+        "release_id",
+        "body"
+      ],
+      "title": "Notes",
+      "type": "object"
+    },
+    "QAReceipt": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact_sha256": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Artifact Sha256"
+        },
+        "build_batch_id": {
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "title": "Build Batch Id",
+          "type": "string"
+        },
+        "id": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "receipt_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Receipt Sha256",
+          "type": "string"
+        },
+        "release_id": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Release Id",
+          "type": "string"
+        },
+        "result": {
+          "const": "pass",
+          "title": "Result",
+          "type": "string"
+        },
+        "scope": {
+          "enum": [
+            "source",
+            "unsigned",
+            "signed"
+          ],
+          "title": "Scope",
+          "type": "string"
+        },
+        "source_revision": {
+          "pattern": "^[0-9a-f]{40}$",
+          "title": "Source Revision",
+          "type": "string"
+        },
+        "source_tree_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Source Tree Sha256",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "scope",
+        "result",
+        "source_revision",
+        "source_tree_sha256",
+        "build_batch_id",
+        "release_id",
+        "artifact_sha256",
+        "receipt_sha256"
+      ],
+      "title": "QAReceipt",
+      "type": "object"
+    },
+    "SignReceipt": {
+      "additionalProperties": false,
+      "properties": {
+        "apk_bytes": {
+          "maximum": 536870912,
+          "minimum": 1,
+          "title": "Apk Bytes",
+          "type": "integer"
+        },
+        "apk_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Apk Sha256",
+          "type": "string"
+        },
+        "build": {
+          "$ref": "#/$defs/AndroidBuild"
+        },
+        "candidate_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Candidate Sha256",
+          "type": "string"
+        },
+        "content_entries_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Content Entries Sha256",
+          "type": "string"
+        },
+        "format": {
+          "const": "manadj_android_sign_receipt/v1",
+          "title": "Format",
+          "type": "string"
+        },
+        "signer_cert_sha256": {
+          "const": "18f8fe820d6abd112be1fa5c99e3c69f77cbb5c834242899135c9b528af7417c",
+          "title": "Signer Cert Sha256",
+          "type": "string"
+        },
+        "unsigned_apk_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Unsigned Apk Sha256",
+          "type": "string"
+        },
+        "verification_receipt_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Verification Receipt Sha256",
+          "type": "string"
+        }
+      },
+      "required": [
+        "format",
+        "candidate_sha256",
+        "build",
+        "unsigned_apk_sha256",
+        "apk_sha256",
+        "apk_bytes",
+        "content_entries_sha256",
+        "signer_cert_sha256",
+        "verification_receipt_sha256"
+      ],
+      "title": "SignReceipt",
+      "type": "object"
+    },
+    "SignRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "build": {
+          "$ref": "#/$defs/AndroidBuild"
+        },
+        "candidate_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Candidate Sha256",
+          "type": "string"
+        },
+        "content_entries_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Content Entries Sha256",
+          "type": "string"
+        },
+        "expected_signer_cert_sha256": {
+          "const": "18f8fe820d6abd112be1fa5c99e3c69f77cbb5c834242899135c9b528af7417c",
+          "title": "Expected Signer Cert Sha256",
+          "type": "string"
+        },
+        "format": {
+          "const": "manadj_android_sign_request/v1",
+          "title": "Format",
+          "type": "string"
+        },
+        "unsigned_apk_bytes": {
+          "maximum": 536870912,
+          "minimum": 1,
+          "title": "Unsigned Apk Bytes",
+          "type": "integer"
+        },
+        "unsigned_apk_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Unsigned Apk Sha256",
+          "type": "string"
+        }
+      },
+      "required": [
+        "format",
+        "candidate_sha256",
+        "build",
+        "unsigned_apk_sha256",
+        "unsigned_apk_bytes",
+        "content_entries_sha256",
+        "expected_signer_cert_sha256"
+      ],
+      "title": "SignRequest",
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "document": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Candidate"
+        },
+        {
+          "$ref": "#/$defs/SignRequest"
+        },
+        {
+          "$ref": "#/$defs/SignReceipt"
+        },
+        {
+          "$ref": "#/$defs/Channel"
+        },
+        {
+          "$ref": "#/$defs/AndroidBuild"
+        }
+      ],
+      "title": "Document"
+    }
+  },
+  "required": [
+    "document"
+  ],
+  "title": "Contract",
+  "type": "object"
+}
