@@ -94,7 +94,7 @@ class ReplayHeardHistoryTest {
         assertNull(h.at(3.5, 5.5))
     }
 
-    @Test fun previewsCountButSilentTenureAndUnknownScratchMotionDoNot() {
+    @Test fun previewsAndMutedFaderCountButTenureAndUnknownScratchMotionDoNot() {
         val h = history("""[
             {"t":0,"kind":"load","channel":"A","trackId":1},
             {"t":0,"kind":"transport","channel":"A","action":"previewStart","playhead":0},
@@ -106,8 +106,8 @@ class ReplayHeardHistoryTest {
             {"t":6,"kind":"transport","channel":"A","action":"scratchEnd","playhead":6},
             {"t":10,"kind":"tick","playheads":{}}
         ]""")
-        assertNotNull(h.at(9.0, .5))
-        assertNull(h.at(9.0, 1.5))
+        assertEquals(1f, h.at(9.0, .5)!!.gain)
+        assertEquals("muted fader is recorded silent, not unknown (#485)", 0f, h.at(9.0, 1.5)!!.gain)
         assertNull(h.at(9.0, 3.5))
         assertNull(h.at(9.0, 5.5))
         assertNotNull(h.at(9.0, 6.5))

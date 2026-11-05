@@ -12,8 +12,10 @@ import kotlin.math.min
 /**
  * Immutable, occurrence-scoped evidence for the replay detail waveform's heard side (#469).
  * Built once per log/deck; queries neither reduce events nor depend on observer frames/replay epochs.
- * A query selects the latest Master-audible visit strictly before [at]'s Session time in its current
- * Load occurrence. Unknown/unheard coordinates return null; the caller owns its fallback rendering.
+ * A query selects the latest sounding visit strictly before [at]'s Session time in its current Load
+ * occurrence. Muted visits (fader/crossfader/EQ/filter below audibility) are recorded with their silent
+ * strip, so a later fader-up cannot repaint them live (#485). Unvisited coordinates and non-shared tenure
+ * return null; the caller owns its fallback rendering.
  * Scratch motion is deliberately unknown, not an invented forward run.
  */
 class ReplayHeardHistory(log: SessionLog, deck: Int, stripOf: (SessionState, Int) -> Strip) {
@@ -84,7 +86,7 @@ class ReplayHeardHistory(log: SessionLog, deck: Int, stripOf: (SessionState, Int
         for (event in log.replayEvents) {
             if (event.t > previous) {
                 val d = state.decks[deck]
-                if (current != null && state.audible(deck) && !d.scratching && d.rate.isFinite()) {
+                if (current != null && state.soundingForHistory(deck) && !d.scratching && d.rate.isFinite()) {
                     val region = d.loop?.takeIf { d.rate > 0 && d.playhead >= it.start && d.playhead < it.end }
                     current += Span(previous, event.t, d.playheadAt(previous), d.rate, region, stripOf(state.copy(), deck))
                 }
@@ -118,3 +120,7 @@ class ReplayHeardHistory(log: SessionLog, deck: Int, stripOf: (SessionState, Int
         return lo - 1
     }
 }
+
+/** [SessionState.audible] minus its gain/kill thresholds: what reached the mix, silent or not. */
+private fun SessionState.soundingForHistory(deck: Int): Boolean =
+    (tenure == null || tenure == "shared") && decks[deck].trackId != null && decks[deck].sounding
