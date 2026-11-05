@@ -205,8 +205,6 @@ def assemble_app(python_runtime: Path, ffmpeg_dir: Path, version: str) -> Path:
     if not (dist / "index.html").is_file():
         sys.exit("frontend/dist/index.html missing — frontend build failed?")
     copytree_pyclean(dist, backend_root / "frontend" / "dist")
-    from metadata import stage_metadata
-    stage_metadata(BUILD / "metadata", dist, backend_root, version)
 
     shutil.copytree(python_runtime, resources / "python")
     shutil.copytree(ffmpeg_dir, resources / "ffmpeg")

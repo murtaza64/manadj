@@ -23,7 +23,6 @@ from .routers.feedback import router as feedback_router
 from .peer_inventory.router import router as peer_inventory_router
 from .peer_sync.router import router as peer_sync_router
 from .peer_sync.group_router import router as device_group_router
-from .routers.release_notes import router as release_notes_router
 
 if TYPE_CHECKING:
     from .config import Config
@@ -104,7 +103,6 @@ app.include_router(device_listener_router.router, prefix="/api/device-listener",
 app.include_router(visualizer_ga.router, prefix="/api/ga", tags=["visualizer-ga"])
 app.include_router(settings.router, prefix="/api/settings", tags=["settings"])
 app.include_router(feedback_router)
-app.include_router(release_notes_router)
 app.include_router(app_config.router, prefix="/api/config", tags=["app-config"])
 app.include_router(soulseek_router.router, prefix="/api/soulseek", tags=["soulseek"])
 app.include_router(soundcloud_connect_router.router, prefix="/api/soundcloud", tags=["soundcloud"])

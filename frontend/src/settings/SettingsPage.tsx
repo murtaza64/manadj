@@ -26,7 +26,6 @@ import {
   type BeatFxSettings,
 } from '../playback/beatFxSettings';
 import { APP_VERSION } from '../version';
-import { ReleaseNotesButton } from '../releases/ReleaseNotes';
 import { HelpLink } from '../help/HelpLink';
 import { HelpSettings } from '../help/HelpSettings';
 import { SETTINGS_HELP } from '../help/contexts';
@@ -545,7 +544,6 @@ export default function SettingsPage({ performance = false }: { performance?: bo
         <p>
           Changes apply immediately. Preferences are stored with your library.
           <span className="settings-version">manaDJ v{APP_VERSION}</span>
-          <ReleaseNotesButton />
         </p>
       </header>
       <div className="settings-layout">

@@ -39,7 +39,6 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
-import os
 import re
 import subprocess
 import sys
@@ -276,8 +275,7 @@ def main() -> None:
     dmg = DMG_DIR / f"manaDJ-{version}-arm64.dmg"
     if not args.skip_build:
         print("==> build DMG")
-        run(["uv", "run", ROOT / "scripts" / "release" / "build_dmg.py", "--version", version],
-            cwd=ROOT, env={**os.environ, "MANADJ_SOURCE_REVISION": sha})
+        run(["uv", "run", ROOT / "scripts" / "release" / "build_dmg.py", "--version", version], cwd=ROOT)
     if not dmg.exists():
         sys.exit(f"missing {dmg}")
 
