@@ -70,11 +70,14 @@ internal data class SessionFrameFixture(
     val pausedFirst: Boolean = false,
     val pausedTickNoise: Double = 0.0,
     val pausedSeeks: List<Pair<Double, Double>> = emptyList(),
+    val pastRaster: Boolean = false,
+    val compactEvidence: Boolean = false,
 )
 
 internal data class SessionPresentedFrame(
     val updateMs: Double, val drawMs: Double, val rasterHash: Long,
     val captureTime: Double, val displayTime: Double, val renderedSource: Double, val replaySource: Double,
+    val otherReplaySource: Double, val rasterShiftPx: Int, val rasterMismatch: Double,
 )
 
 internal data class SessionFrameProfile(val fixture: SessionFrameFixture, val frames: List<SessionPresentedFrame>, val width: Int, val height: Int, val inputHash: String) {
@@ -88,7 +91,7 @@ internal data class SessionFrameProfile(val fixture: SessionFrameFixture, val fr
     }
     fun report(name: String) {
         fun percentile(xs: List<Double>, p: Double) = xs.sorted()[ceil(xs.size * p).toInt().coerceAtLeast(1) - 1]
-        println("FRAME-DIAG name=$name decks=${fixture.decks} paused=${fixture.pausedFirst} tickNoise=${fixture.pausedTickNoise} frames=${frames.size} view=${width}x$height inputSHA=$inputHash testDisplayStepMs=16 sourceUpdateStepMs=32 detailWindowSec=8 timelineWindowSec=40 follow=true updateHostMs.p50=${percentile(frames.map { it.updateMs }, .5)} updateHostMs.p95=${percentile(frames.map { it.updateMs }, .95)} drawHostMs.p50=${percentile(frames.map { it.drawMs }, .5)} drawHostMs.p95=${percentile(frames.map { it.drawMs }, .95)} drawsOver16.67ms=${frames.count { it.drawMs > 16.67 }} longestDuplicateRun=$longestDuplicateRun rawSourceRange=${frames.maxOf { it.renderedSource } - frames.minOf { it.renderedSource }} replaySourceRange=${frames.maxOf { it.replaySource } - frames.minOf { it.replaySource }} hostOnly=true")
+        println("FRAME-DIAG name=$name decks=${fixture.decks} paused=${fixture.pausedFirst} tickNoise=${fixture.pausedTickNoise} frames=${frames.size} view=${width}x$height inputSHA=$inputHash testDisplayStepMs=16 sourceUpdateStepMs=32 detailWindowSec=8 timelineWindowSec=40 follow=true updateHostMs.p50=${percentile(frames.map { it.updateMs }, .5)} updateHostMs.p95=${percentile(frames.map { it.updateMs }, .95)} drawHostMs.p50=${percentile(frames.map { it.drawMs }, .5)} drawHostMs.p95=${percentile(frames.map { it.drawMs }, .95)} drawsOver16.67ms=${frames.count { it.drawMs > 16.67 }} longestDuplicateRun=$longestDuplicateRun rawSourceRange=${frames.maxOf { it.renderedSource } - frames.minOf { it.renderedSource }} replaySourceRange=${frames.maxOf { it.replaySource } - frames.minOf { it.replaySource }} otherSourceRange=${frames.maxOf { it.otherReplaySource } - frames.minOf { it.otherReplaySource }} rasterShifts=${frames.map { it.rasterShiftPx }.distinct()} rasterMismatchMax=${frames.maxOf { it.rasterMismatch }} hostOnly=true")
     }
 }
 
@@ -144,7 +147,8 @@ internal class SessionFrameHarness(private val compose: AndroidComposeTestRule<*
             rows += event(0.0, "transport", d).put("action", "play").put("playhead", 0)
             if (d == 0 && config.pausedFirst) rows += event(10.0, "transport", d).put("action", "pause").put("playhead", 10)
         }
-        for (n in 1 until 2400) {
+        val tickIndices = if (config.compactEvidence) (1200..1202) else (1 until 2400)
+        for (n in tickIndices) {
             val t = n / 2.0
             val heads = JSONObject()
             repeat(config.decks) { d ->
@@ -152,8 +156,9 @@ internal class SessionFrameHarness(private val compose: AndroidComposeTestRule<*
                 else if (config.pausedTickNoise != 0.0) heads.put(DECKS[d], 10 + (if (n % 2 == 0) -1 else 1) * config.pausedTickNoise)
             }
             rows += event(t, "tick").put("playheads", heads)
-            if (n % 4 == 0) repeat(config.decks) { d ->
-                rows += event(t, "control", d).put("control", "eqLow").put("value", if (n % 8 == 0) .5 else .3)
+            if (!config.compactEvidence && n % 4 == 0) repeat(config.decks) { d ->
+                if (!(d == 0 && config.pausedFirst && t >= 10))
+                    rows += event(t, "control", d).put("control", "eqLow").put("value", if (n % 8 == 0) .5 else .3)
             }
         }
         for ((t, source) in config.pausedSeeks) rows += event(t, "transport", 0).put("action", "seek").put("playhead", source)
@@ -186,6 +191,7 @@ internal class SessionFrameHarness(private val compose: AndroidComposeTestRule<*
         val canvas = android.graphics.Canvas(bitmap)
         val origin = compose.mainClock.currentTime
         val out = mutableListOf<SessionPresentedFrame>()
+        var rasterReference: IntArray? = null
         repeat(144) { i ->
             val updateStarted = System.nanoTime()
             compose.runOnUiThread {
@@ -207,15 +213,34 @@ internal class SessionFrameHarness(private val compose: AndroidComposeTestRule<*
                 drawMs = (System.nanoTime() - before) / 1e6
             }
             var hash = 1125899906842597L
-            val left = (bounds.left + bounds.width * .45f).toInt()
-            val right = (bounds.left + bounds.width * .80f).toInt()
-            val top = bounds.top.toInt() + 5
-            val bottom = (bounds.top + (bounds.height - 12) / 2 - 2).toInt()
+            val left = (bounds.left + bounds.width * (if (config.pastRaster) .10f else .45f)).toInt()
+            val right = (bounds.left + bounds.width * (if (config.pastRaster) .25f else .80f)).toInt()
+            val top = if (config.pastRaster) (bounds.top + (bounds.height - 12) / 2 + 4).toInt() else bounds.top.toInt() + 5
+            val bottom = if (config.pastRaster) (bounds.bottom - 16).toInt() else (bounds.top + (bounds.height - 12) / 2 - 2).toInt()
             for (y in top until bottom) for (x in left until right) hash = hash * 31 + bitmap.getPixel(x, y)
             if (i >= 24) {
                 val rendered = log.at(model.time).decks[0].playheadAt(model.displayTime)
+                var bestShift = 0
+                var mismatch = 0.0
+                if (config.pastRaster) {
+                    val width = right - left; val height = bottom - top
+                    val pixels = IntArray(width * height)
+                    bitmap.getPixels(pixels, 0, width, left, top, width, height)
+                    val previous = rasterReference
+                    if (previous == null) rasterReference = pixels else {
+                        var best = Int.MAX_VALUE
+                        for (shift in -8..8) {
+                            var errors = 0
+                            for (y in 0 until height) for (x in 8 until width - 8)
+                                if (pixels[y * width + x] != previous[y * width + x + shift]) errors++
+                            if (errors < best) { best = errors; bestShift = shift }
+                        }
+                        mismatch = best.toDouble() / (height * (width - 16))
+                    }
+                }
+                val reference = log.replayAt(model.displayTime)
                 out += SessionPresentedFrame(updateMs, drawMs, hash, model.time, model.displayTime,
-                    rendered, log.replayAt(model.displayTime).decks[0].playhead)
+                    rendered, reference.decks[0].playhead, reference.decks[1].playhead, bestShift, mismatch)
             }
         }
         bitmap.recycle()
