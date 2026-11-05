@@ -2,6 +2,7 @@
 import copy
 import hashlib
 import json
+from pathlib import Path
 import zipfile
 
 import pytest
@@ -201,3 +202,24 @@ def test_stamp_preserves_exact_notes_and_pins_batch_before_build(pipeline, tmp_p
     assert embedded_build == build
     with pytest.raises(FileExistsError):
         p.stamp("pin", notes, out, f["build"]["build_batch_id"], ["arm64-v8a"])
+
+
+def test_exact_native_5d0_maxbody_fixture_and_encoded_cap(tmp_path):
+    # Restored byte-identically from native full5d0d77ff87f20f9c49ded3983304366514ea711e.
+    fixture = Path(__file__).parent / "fixtures/android-release-maxbody-v1"
+    notes = (fixture / "release-notes.json").read_bytes()
+    assert len(notes) == 196710
+    apk = tmp_path / "native-fixture.zip"
+    for padding, accepted in ((0, True), (256 * 1024 - len(notes), True),
+                              (256 * 1024 + 1 - len(notes), False)):
+        with zipfile.ZipFile(apk, "w") as archive:
+            for name in ("build-info.json", "release-notes.json", "android-build.json"):
+                raw = (fixture / name).read_bytes()
+                archive.writestr(p.ASSET_PREFIX + name, raw + (b" " * padding if name == "release-notes.json" else b""))
+        if accepted:
+            info, parsed, build = p.embedded(apk)
+            assert info.release_id == build.release_id == "2acff59658cddeeda815028bfc4b53b4910babaa6df6b6860078b904e3eadf9d"
+            assert parsed.body == "\x01" * 32768
+        else:
+            with pytest.raises(ValueError, match="metadata too large"):
+                p.embedded(apk)
