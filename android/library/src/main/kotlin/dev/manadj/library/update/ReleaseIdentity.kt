@@ -24,7 +24,8 @@ data class ReleaseIdentity(val version: String, val sourceRevision: String, val 
     companion object {
         const val ASSET_DIR = "manadj-release"
         const val MAX_BODY_BYTES = 32_768
-        const val MAX_FILE_BYTES = 64 * 1024
+        /** Per asset: a 32768-byte body escaped with ensure_ascii (worst case 6 bytes per control char) still fits. */
+        const val MAX_FILE_BYTES = 256 * 1024
         private val HEX40 = Regex("[0-9a-f]{40}")
         private val HEX64 = Regex("[0-9a-f]{64}")
 

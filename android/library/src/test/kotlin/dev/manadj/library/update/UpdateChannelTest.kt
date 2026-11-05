@@ -219,4 +219,36 @@ class UpdateChannelTest {
             s.markSeen(id); assertTrue(s.seen(id))
         } finally { dir.deleteRecursively() }
     }
+
+    /** Python json.dumps(..., ensure_ascii=True): every non-ASCII/control char as \\uXXXX (surrogate pairs above BMP). */
+    private fun asciiJson(fields: List<Pair<String, Any>>): ByteArray = fields.joinToString(",", "{", "}") { (k, v) ->
+        "\"$k\":" + when (v) {
+            is String -> v.flatMap { c -> if (c.code in 0x20..0x7e && c != '"' && c != '\\') listOf(c.toString()) else listOf("\\u%04x".format(c.code)) }.joinToString("", "\"", "\"")
+            else -> v.toString()
+        }
+    }.toByteArray(Charsets.US_ASCII)
+
+    @Test fun maxSizeNotesEscapedAsAsciiAreAcceptedAndSchemaTypesStayStrict() {
+        for (body in listOf("\u0001".repeat(32768), "\ud83c\udfa7".repeat(8192), "\u00e9".repeat(16384))) {
+            assertEquals(32768, body.toByteArray(Charsets.UTF_8).size)
+            val notes = ReleaseIdentity.sha256(body.toByteArray(Charsets.UTF_8))
+            val id = ReleaseIdentity.releaseId("0.1.0-rc.8", src, notes)
+            val info = asciiJson(listOf("schema" to 1, "version" to "0.1.0-rc.8", "source_revision" to src, "notes_sha256" to notes, "release_id" to id))
+            val rn = asciiJson(listOf("schema" to 1, "release_id" to id, "body" to body))
+            assertTrue(rn.size > 64 * 1024 || body.startsWith("\u00e9"), "escaped form exceeds the old 64 KiB bound")
+            assertTrue(rn.size <= ReleaseIdentity.MAX_FILE_BYTES)
+            assertEquals(body, assertNotNull(ReleaseIdentity.parse(info, rn)).body)
+            val over = asciiJson(listOf("schema" to 1, "release_id" to id, "body" to body + "x"))
+            assertNull(ReleaseIdentity.parse(info, over), "32769 body bytes refused")
+        }
+        val body = "n"; val notes = ReleaseIdentity.sha256(body.toByteArray()); val id = ReleaseIdentity.releaseId("0.1.0-rc.8", src, notes)
+        fun info(schema: String) = "{\"schema\":$schema,\"version\":\"0.1.0-rc.8\",\"source_revision\":\"$src\",\"notes_sha256\":\"$notes\",\"release_id\":\"$id\"}".toByteArray()
+        val rn = "{\"schema\":1,\"release_id\":\"$id\",\"body\":\"n\"}".toByteArray()
+        assertNotNull(ReleaseIdentity.parse(info("1"), rn))
+        for (bad in listOf("true", "1.0", "\"1\"", "2")) assertNull(ReleaseIdentity.parse(info(bad), rn), bad)
+        val b = build { put("release_id", id).put("notes_sha256", notes) }.toString()
+        assertNull(AndroidBuild.parse(b.replace("\"version_code\":8", "\"version_code\":8.0").toByteArray()))
+        assertNull(AndroidBuild.parse(b.replace("\"version_code\":8", "\"version_code\":true").toByteArray()))
+        assertNotNull(AndroidBuild.parse(b.toByteArray()))
+    }
 }
