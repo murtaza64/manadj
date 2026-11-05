@@ -8,7 +8,8 @@ android {
     compileSdk = 35
     defaultConfig {
         // Project domain manadj.murt.dev; distinct from the #365 prototype (dev.manadj.phonelab).
-        applicationId = "dev.murt.manadj"
+        // #481: Excalibur-signed app installs alongside the original da36-signed dev.murt.manadj (separate data store).
+        applicationId = "dev.murt.manadj.excalibur"
         minSdk = 26
         targetSdk = 35
         versionCode = 7
