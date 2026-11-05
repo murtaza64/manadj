@@ -191,6 +191,8 @@ class PlayerModel(application: Application) : AndroidViewModel(application) {
     fun dismissFailure() { failure = null }
     /** Fresh engine snapshot (not the 33 ms UI poll): Session replay reads its clock from it. */
     fun engineSnapshot(): EngineSnapshot? = service?.snapshot()
+    /** [AudioEngine.decodedAhead] for the deck's current load (0 without output). */
+    fun decodedAhead(deck: DeckId, seconds: Double): Double = service?.decodedAhead(deck, seconds) ?: 0.0
     /** Frame-stamped commands (Session replay); UI pending/receipt state is not involved. */
     fun schedule(atFrame: Long, commands: List<AudioCommand>, tag: Long): Boolean {
         val receipts = service?.schedule(atFrame, commands, tag) ?: return false

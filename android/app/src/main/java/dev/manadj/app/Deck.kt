@@ -76,15 +76,15 @@ val ControlRow = 44.dp
     val stored = ui.hotCues[slot]
     val shift = ux.shifted(ui.id)
     val currentShift by rememberUpdatedState(shift)
-    var held by remember(ui.id, slot) { mutableStateOf(false) }
+    val press = rememberPadPress(ui.id, slot)
+    val held = press.held
     val previewing by remember(ui, slot) { derivedStateOf { ui.snapshot?.previewSlot == slot } }
     val haptic = LocalHapticFeedback.current
     val cue = Ink.cues[slot]
     val tint = if (ready) cue else Ink.edge
     val lit by animateFloatAsState(if (held || previewing) 1f else 0f, tween(if (held) 0 else 220), label = "pad")
     val scale by animateFloatAsState(if (held) .92f else 1f, if (held) tween(0) else spring(dampingRatio = .4f, stiffness = 800f), label = "bounce")
-    val ring = remember { Animatable(1f) }
-    LaunchedEffect(held) { if (held) { ring.snapTo(0f); ring.animateTo(1f, tween(360, easing = LinearOutSlowInEasing)) } }
+    val ring = press.ring
     // Slide to lock: while previewing a stored cue, drag either way to latch playback (no second finger on PLAY).
     val slideVisual = rememberSlideLockVisual()
     var previewHold by remember(ui.id, slot) { mutableStateOf(false) }
@@ -104,14 +104,14 @@ val ControlRow = 44.dp
                 else ux.consumeShift(ui.id) // SHIFT + empty pad: no-op, still the one shifted action
                 return@momentaryPresses { }
             }
-            held = true; haptic.performHapticFeedback(HapticFeedbackType.VirtualKey)
+            press.down(); haptic.performHapticFeedback(HapticFeedbackType.VirtualKey)
             val set = ui.hotCues[slot] != null
             previewHold = set && ui.snapshot?.playing != true
             if (previewHold) slideVisual.hold(scope)
             val id = model.beginGesture(ui.id, "HOTCUE$slot") { if (set) model.submit(AudioCommand.HotCueUp(ui.id, slot, it)) }
             model.submit(if (set) AudioCommand.HotCueDown(ui.id, slot, id) else AudioCommand.SetHotCue(ui.id, slot, id))
             if (!set) ux.journalCueWhenSet(model, ui.id, slot)
-            ;{ cancelled -> held = false; previewHold = false; slideVisual.release(); if (!cancelled && set && model.gestureActive(id)) model.submit(AudioCommand.HotCueUp(ui.id, slot, id)); model.finishGesture(id, cancelled) }
+            ;{ cancelled -> press.up(); previewHold = false; slideVisual.release(); if (!cancelled && set && model.gestureActive(id)) model.submit(AudioCommand.HotCueUp(ui.id, slot, id)); model.finishGesture(id, cancelled) }
         }
     }.padding(3.dp).graphicsLayer { scaleX = scale; scaleY = scale }.then(dev.manadj.app.viz.Glass.fill(Ink.panel, 0f)).background(tint.copy(alpha = if (stored != null) .1f + .5f * lit else .5f * lit)).slideLockDraw(slideVisual, idle = ready && stored != null && !shift).border(if (stored != null) 1.5.dp else 1.dp, tint.copy(alpha = if (stored != null) 1f else .45f)), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -120,6 +120,25 @@ val ControlRow = 44.dp
             else Text(if (stored == null) "SET" else clock(stored), color = tint.copy(alpha = .8f), size = 8)
         }
     }
+}
+
+/** A pad's press feedback (#408): [held] while a finger is down; [ring] 0 → 1 expanding ring per press. */
+@Stable class PadPress {
+    var held by mutableStateOf(false)
+        private set
+    val ring = Animatable(1f)
+    var presses by mutableIntStateOf(0)
+        private set
+    fun down() { held = true; presses++ }
+    fun up() { held = false }
+}
+
+@Composable fun rememberPadPress(vararg keys: Any?): PadPress {
+    val p = remember(*keys) { PadPress() }
+    // Keyed on the press count, not [PadPress.held]: a release (or a cancel / second finger) must never cancel the ring
+    // mid-flight — that left it frozen part-way, drawing a border that never cleared (#408).
+    LaunchedEffect(p, p.presses) { if (p.presses > 0) { p.ring.snapTo(0f); p.ring.animateTo(1f, tween(360, easing = LinearOutSlowInEasing)) } }
+    return p
 }
 
 /** CUE: round, yellow text (round-5 feedback); desktop gated semantics via the engine. */

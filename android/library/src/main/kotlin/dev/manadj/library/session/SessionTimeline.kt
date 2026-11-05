@@ -160,6 +160,19 @@ class SessionTimeline(private val log: SessionLog) {
         return best
     }
 
+    /** Track-position ranges (lo, hi) deck [deck] plays over Session [from, to], one per run (jumps/loops split runs). */
+    fun spans(deck: Int, from: Double, to: Double): List<Pair<Double, Double>> {
+        val list = runs[deck]
+        var i = runIndex(deck, from)
+        val out = ArrayList<Pair<Double, Double>>()
+        while (i < list.size && list[i].t0 < to) {
+            val r = list[i]
+            val a = r.at(max(r.t0, from)); val b = r.at(min(r.t1, to))
+            out += min(a, b) to max(a, b); i++
+        }
+        return out
+    }
+
     /** When deck [deck] next makes sound at or after [t] (null = never again). */
     fun nextSound(deck: Int, t: Double): Double? = runs[deck].getOrNull(runIndex(deck, t))?.let { max(it.t0, t) }
 

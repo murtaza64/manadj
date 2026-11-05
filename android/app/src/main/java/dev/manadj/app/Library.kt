@@ -489,7 +489,7 @@ private class BrowseData(val decks: List<DeckId>, val refs: List<Long>, val foll
             val previewHeight = if (dense) 17.dp else 19.dp
             when (val p = preview) {
                 null -> Spacer(Modifier.size(110.dp, previewHeight))
-                else -> p.orElse(null)?.let { PreviewWave(it, Modifier, height = previewHeight) }
+                else -> p.orElse(null)?.let { PreviewWave(it, Modifier, height = previewHeight, cueTrack = synced?.lib?.track(track.id.toInt())) }
             }
             Spacer(Modifier.width(6.dp))
             Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
@@ -524,7 +524,7 @@ private class BrowseData(val decks: List<DeckId>, val refs: List<Long>, val foll
  * Desktop preview strip (minimap style, bottom-anchored), pre-rendered off the main thread into a cached
  * bitmap (LRU by preview + style + size) so scrolling only blits.
  */
-@Composable fun PreviewWave(p: WaveformPreview, modifier: Modifier, width: androidx.compose.ui.unit.Dp = 110.dp, height: androidx.compose.ui.unit.Dp = 19.dp) {
+@Composable fun PreviewWave(p: WaveformPreview, modifier: Modifier, width: androidx.compose.ui.unit.Dp = 110.dp, height: androidx.compose.ui.unit.Dp = 19.dp, cueTrack: dev.manadj.library.LibraryTrack? = null) {
     // Fixed size (no BoxWithConstraints subcomposition per row).
     // Transparent over the row (desktop previewImage `transparent: true`).
     Box(modifier.size(width, height)) {
@@ -537,6 +537,23 @@ private class BrowseData(val decks: List<DeckId>, val refs: List<Long>, val foll
             if (value == null && w > 0 && h > 0) value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { renderPreview(p, w, h, style, k) }.also { PreviewBitmaps.put(key, it) }
         }
         bitmap?.let { androidx.compose.foundation.Image(it, null, Modifier.fillMaxSize()) }
+        cueTrack?.takeIf { it.hotCues.isNotEmpty() }?.let { t -> PreviewCues(t.hotCues, t.durationSecs ?: 0.0, Modifier.fillMaxSize()) }
+    }
+}
+
+/** Hot cue flags over a preview (#405, desktop TrackWaveformPreview): 1 dp pole + 3 dp flag at the top, cue colour. */
+@Composable fun PreviewCues(cues: List<dev.manadj.library.HotCue>, duration: Double, modifier: Modifier) {
+    if (!(duration > 0)) return
+    val shown = cues.filter { it.time.isFinite() && it.time in 0.0..duration }
+    if (shown.isEmpty()) return
+    androidx.compose.foundation.Canvas(modifier.semantics { contentDescription = "${shown.size} hot cues" }) {
+        val pole = 1.dp.toPx(); val flag = 3.dp.toPx()
+        for (c in shown) {
+            val color = androidx.compose.ui.graphics.Color(dev.manadj.library.parseHexColor(dev.manadj.app.edit.cueHex(c.slot, c.color)) ?: 0xffffffff.toInt())
+            val x = (c.time / duration * size.width).toFloat().coerceIn(0f, size.width - flag)
+            drawRect(color, androidx.compose.ui.geometry.Offset(x, 0f), androidx.compose.ui.geometry.Size(pole, size.height))
+            drawRect(color, androidx.compose.ui.geometry.Offset(x, 0f), androidx.compose.ui.geometry.Size(flag, flag))
+        }
     }
 }
 

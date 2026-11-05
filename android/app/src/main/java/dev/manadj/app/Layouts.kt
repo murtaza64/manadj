@@ -449,8 +449,9 @@ private fun Modifier.waveTouch(ui: DeckUi, model: PlayerModel, ux: UiModel, vert
         val first = awaitFirstDown(requireUnconsumed = false)
         first.consume() // the wave owns its touches (no browser swipe-up from a wave, #132)
         val playing = ui.snapshot?.playing == true
-        val scratchMode = model.supports("scratch") && ui.ready && (ux.vinyl[ui.id] == true || !playing)
-        val canScrub = ui.ready && model.supports("seek")
+        val mode = waveDrag(ux.waveFingerSeek, ux.vinyl[ui.id] == true, playing, ui.ready, model.supports("scratch"), model.supports("seek"))
+        val scratchMode = mode == WaveDrag.SCRATCH
+        val canScrub = mode == WaveDrag.SCRUB
         var scratching = false
         var scrubbing = false; var resume = false; var scrubFrom = 0.0; var scrubTo = 0.0
         var last = first.position
@@ -499,6 +500,18 @@ private fun Modifier.waveTouch(ui: DeckUi, model: PlayerModel, ux: UiModel, vert
             endScrub(commit = true)
         } finally { endScratch(); endScrub(commit = false); if (zooming) ux.chooseWaveSeconds(ux.waveSeconds) }
     }
+}
+
+enum class WaveDrag { SCRATCH, SCRUB, NONE }
+
+/**
+ * What a one-finger drag on a detail wave does: VINYL (or a paused deck) scratches, else it scrubs. With finger seek off
+ * (#406) only an explicit VINYL scratch remains — no scrub, no implicit paused scratch; pinch zoom is unaffected.
+ */
+fun waveDrag(fingerSeek: Boolean, vinyl: Boolean, playing: Boolean, ready: Boolean, canScratch: Boolean, canSeek: Boolean): WaveDrag = when {
+    ready && canScratch && (vinyl || (!playing && fingerSeek)) -> WaveDrag.SCRATCH
+    ready && canSeek && fingerSeek -> WaveDrag.SCRUB
+    else -> WaveDrag.NONE
 }
 
 /** Detail-wave zoom range (window seconds): 4x the previous zoom-in (#107, ~1 ms/px on a phone). */

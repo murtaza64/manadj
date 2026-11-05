@@ -41,8 +41,14 @@ class ReplayDriver(val log: SessionLog, private val engine: Engine, private val 
     }
     sealed interface Load {
         data object Pending : Load
-        /** Playable, decoded from the start up to [decodedSeconds] (relocations past it are not exact). */
-        data class Partial(val decodedSeconds: Double) : Load
+        /**
+         * Playable, still decoding. [decodedSeconds]: the engine's reported filled run; [covered] (when known) answers
+         * whether track positions [from, to] are filled in memory for this load — range fills start anywhere (#448),
+         * so a seek target can be decoded long before the prefix reaches it. Without it, the prefix decides.
+         */
+        data class Partial(val decodedSeconds: Double, val covered: ((from: Double, to: Double) -> Boolean)? = null) : Load {
+            fun covers(from: Double, to: Double) = covered?.invoke(from, to) ?: (to <= decodedSeconds)
+        }
         data object Ready : Load
         data class Failed(val reason: String) : Load
     }
@@ -221,7 +227,11 @@ class ReplayDriver(val log: SessionLog, private val engine: Engine, private val 
     /** [state] covers what deck [d] plays from [at] for the next [READY_HORIZON] (plus margin). */
     private fun ready(d: Int, state: Load, at: Double): Boolean = when (state) {
         Load.Ready -> true
-        is Load.Partial -> state.decodedSeconds >= (timeline.reach(d, at, at + READY_HORIZON) ?: log.replayAt(at).decks[d].playhead).coerceAtLeast(0.0) + READY_MARGIN
+        is Load.Partial -> {
+            // Every range the deck plays over the horizon (split at jumps/loops), each with the margin past its end.
+            val spans = timeline.spans(d, at, at + READY_HORIZON).ifEmpty { log.replayAt(at).decks[d].playhead.let { listOf(it to it) } }
+            spans.all { (lo, hi) -> state.covers(lo.coerceAtLeast(0.0), hi.coerceAtLeast(0.0) + READY_MARGIN) }
+        }
         else -> false
     }
 
