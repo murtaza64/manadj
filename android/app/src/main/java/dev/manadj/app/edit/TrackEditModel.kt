@@ -104,7 +104,6 @@ class TrackEditModel(private val context: Context, val trackId: Int, val deck: D
 
     fun playPause() = model.submit(if (ui.snapshot?.playing == true) AudioCommand.Pause(deck) else AudioCommand.Play(deck))
     fun seek(t: Double) = model.submit(AudioCommand.Seek(deck, t.coerceIn(0.0, duration)))
-    fun jumpBeats(beats: Double) = model.submit(AudioCommand.BeatJump(deck, beats))
 
     /** The playhead snapped to the nearest beat when Quantize is on (desktop hot-cue set). */
     fun quantized(t: Double): Double {

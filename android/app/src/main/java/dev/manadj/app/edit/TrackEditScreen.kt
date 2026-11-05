@@ -91,7 +91,7 @@ private val MarkColor = Color(0xffff2dd4)
                         EditWave(edit, model, ux, Modifier.weight(1f).fillMaxWidth())
                         Minimap(ui, model, ux.waves[ui.source?.id ?: ""], Modifier.fillMaxWidth().height(28.dp))
                         CueRow(edit, model, ux, Modifier.fillMaxWidth().height(44.dp))
-                        Transport(edit, model, Modifier.fillMaxWidth().height(48.dp))
+                        Transport(edit, model, ux, Modifier.fillMaxWidth().height(48.dp))
                     }
                     Column(Modifier.weight(1f).fillMaxHeight().padding(start = 6.dp)) {
                         Tabs(tab) { tab = it }
@@ -105,7 +105,7 @@ private val MarkColor = Color(0xffff2dd4)
                 EditWave(edit, model, ux, Modifier.fillMaxWidth().height(height * .26f))
                 Minimap(ui, model, ux.waves[ui.source?.id ?: ""], Modifier.fillMaxWidth().height(30.dp))
                 CueRow(edit, model, ux, Modifier.fillMaxWidth().height(46.dp))
-                Transport(edit, model, Modifier.fillMaxWidth().height(50.dp))
+                Transport(edit, model, ux, Modifier.fillMaxWidth().height(50.dp))
                 Tabs(tab) { tab = it }
                 Panel(edit, ux, tab, Modifier.weight(1f))
             }
@@ -176,15 +176,12 @@ private val MarkColor = Color(0xffff2dd4)
 }
 
 /** CUE and PLAY exactly as the performance deck (gated cue, slide-to-lock), beat/bar jumps, playhead readout. */
-@Composable private fun Transport(edit: TrackEditModel, model: PlayerModel, modifier: Modifier) {
-    val ready = edit.ready
+@Composable private fun Transport(edit: TrackEditModel, model: PlayerModel, ux: UiModel, modifier: Modifier) {
     Row(modifier.padding(horizontal = 2.dp, vertical = 2.dp), horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.CenterVertically) {
         CueKey(edit.ui, model, Modifier.weight(1.5f).fillMaxHeight())
         PlayKey(edit.ui, model, Modifier.weight(1.7f).fillMaxHeight())
-        Key("", Modifier.weight(.7f).fillMaxHeight(), Ink.muted, ready, description = "Back one bar", icon = Glyph.Back, style = KeyStyle.BARE) { edit.jumpBeats(-4.0) }
-        Key("1", Modifier.weight(.7f).fillMaxHeight(), Ink.muted, ready, description = "Back one beat", icon = Glyph.Back, style = KeyStyle.BARE, textSize = 11) { edit.jumpBeats(-1.0) }
-        Key("1", Modifier.weight(.7f).fillMaxHeight(), Ink.muted, ready, description = "Forward one beat", icon = Glyph.Forward, style = KeyStyle.BARE, textSize = 11) { edit.jumpBeats(1.0) }
-        Key("", Modifier.weight(.7f).fillMaxHeight(), Ink.muted, ready, description = "Forward one bar", icon = Glyph.Forward, style = KeyStyle.BARE) { edit.jumpBeats(4.0) }
+        // The performance deck's JumpStrip (#449): same shared size wheel, labels, NO BPM / disabled rules.
+        JumpStrip(edit.ui, ux, model, Modifier.weight(2.8f).fillMaxHeight())
         Column(Modifier.weight(1.6f), horizontalAlignment = Alignment.End) {
             val t = edit.playhead
             Text("%d:%06.3f".format(t.toInt() / 60, t % 60), color = Ink.text, size = 12, bold = true)
