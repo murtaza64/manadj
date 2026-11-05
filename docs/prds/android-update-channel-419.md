@@ -46,3 +46,19 @@ Entry retains the existing ten fields (`release_id`, `version_code`, `version_na
 - Install: PackageManager confirms package/versionCode/actual signing cert. Apply: the running process reads its embedded triple and checks actual installed package/versionName/versionCode/cert against it and the selected identity. Offered notes or a self-consistent but wrong embedded version are not applied notes.
 - Notes popup/seen receipt derive only from verified applied embedded assets. Seen receipt is exact schema1/release ID content, not file existence. Dev/legacy missing/inconsistent metadata exposes no applied release.
 - No publication, build, signing job, PackageInstaller action, key handling, Pages workflow or phone effect is authorized by this source contract.
+
+## Key-free local producer
+
+`uv run -m scripts.release.android_producer --help`
+
+1. `stamp --rev FULL_PIN --notes-file NOTES --out ASSETS --batch-id UUID --abi arm64-v8a`: exclusive metadata triple, exact notes bytes; outputs stay outside tracked source. Pass `-Pmanadj.releaseMetadataDir=ASSETS` to the separately owned build.
+2. `candidate --apk UNSIGNED --rev FULL_PIN --channel stable --qa SOURCE_QA --qa UNSIGNED_QA --out CANDIDATE --verification-out UNSIGNED_RECEIPT`: mandatory checkout/source/SDK checks, no legacy bypass.
+3. `request --candidate CANDIDATE --out SIGN_REQUEST`: send these records and unsigned bytes to the protected adapter. This command never signs.
+4. `accept-signed --candidate CANDIDATE --request SIGN_REQUEST --unsigned-apk UNSIGNED --unsigned-receipt UNSIGNED_RECEIPT --signed-apk SIGNED --out SIGN_RECEIPT --verification-out SIGNED_RECEIPT`: rerun actual SDK archive/signature checks, bind unchanged embedded triple/content.
+5. `eligible` accepts the same candidate/request/unsigned/signed inputs, plus `--sign-receipt SIGN_RECEIPT --qa SOURCE_QA --qa UNSIGNED_QA --qa SIGNED_QA --histories HISTORIES --floor-code RESERVED_CODE --out LOCAL_FEED`. This re-verifies bytes and requires a strictly higher code than both histories and the trusted package-wide floor (at least legacy code7).
+
+- QA files contain `QAReceipt` fields **except** `receipt_sha256`; producer hashes actual file bytes. Scope `source` has null artifact SHA; `unsigned` and `signed` bind their exact artifact. All bind source/tree/batch/release; IDs must be distinct and result `pass`.
+- QA records are trusted-local runner inputs, not authenticated network evidence. The protected operator selects those files; this producer cannot establish that a fabricated `pass` ran tests.
+- `HISTORIES` is an explicit object with both `stable` and `preview` keys, each a validated channel snapshot or explicit null for no published feed. Offline/malformed history must not be replaced with null. The protected operator owns fresh readback, version reservation and stale-head compare-and-swap before publication; local eligibility does not serialize two publishers.
+- JSON outputs are create-only. Failure after writing one output can leave partial local evidence; retry into fresh paths. No partial output is a feed publication receipt.
+- Producer tests use actual synthetic ZIP payloads with the SDK verifier seam simulated. They do not qualify a new signed APK, actual Android build, channel deployment or installed application.
