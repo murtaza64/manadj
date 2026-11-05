@@ -3,6 +3,7 @@
 import importlib.util
 import json
 import zipfile
+import zlib
 from pathlib import Path
 
 import pytest
@@ -132,3 +133,55 @@ def test_write_receipt_is_immutable(tmp_path):
     ar.write_receipt(path, {"a": 1})
     with pytest.raises(ar.Refused):
         ar.write_receipt(path, {"a": 2})
+
+
+def _crc_twin(data: bytes) -> bytes:
+    """Different bytes, same length and CRC32: solve the last 4 bytes over GF(2) (CRC32 is affine)."""
+    n, target = len(data), zlib.crc32(data)
+    base = bytearray(data); base[0] ^= 1  # differ from data
+    zero = zlib.crc32(bytes(n))
+    def crc_lin(buf):  # linear part
+        return zlib.crc32(bytes(buf)) ^ zero
+    cols = []
+    for bit in range(32):
+        e = bytearray(n); e[n - 4 + bit // 8] = 1 << (bit % 8)
+        cols.append(crc_lin(e))
+    want = target ^ zlib.crc32(bytes(base[:n - 4]) + bytes(4))
+    # Gaussian elimination: find bits x with XOR of cols[x] == want.
+    rows = [(cols[i], 1 << i) for i in range(32)]
+    basis = {}
+    for v, m in rows:
+        for b in range(31, -1, -1):
+            if not (v >> b) & 1:
+                continue
+            if b in basis:
+                v ^= basis[b][0]; m ^= basis[b][1]
+            else:
+                basis[b] = (v, m); break
+    mask = 0
+    for b in range(31, -1, -1):
+        if (want >> b) & 1:
+            want ^= basis[b][0]; mask ^= basis[b][1]
+    assert want == 0
+    out = bytes(base[:n - 4]) + mask.to_bytes(4, "little")
+    assert out != data and len(out) == n and zlib.crc32(out) == target
+    return out
+
+
+def test_digest_binds_payload_bytes_not_crc(tmp_path):
+    dex = b"dex payload " * 20
+    twin = _crc_twin(dex)
+    a = _zip(tmp_path / "a.apk", {"classes.dex": dex})
+    b = _zip(tmp_path / "b.apk", {"classes.dex": twin})
+    digest = lambda p: ar.entries_digest(ar.content_entries(ar.zip_entries(p)))  # noqa: E731
+    assert digest(a) != digest(b)
+
+
+def test_duplicate_zip_entries_are_refused(tmp_path):
+    path = tmp_path / "dup.apk"
+    with zipfile.ZipFile(path, "w") as z:
+        z.writestr("classes.dex", b"one")
+        with pytest.warns(UserWarning):
+            z.writestr("classes.dex", b"two")
+    with pytest.raises(ar.Refused):
+        ar.zip_entries(path)

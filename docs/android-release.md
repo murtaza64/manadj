@@ -1,6 +1,6 @@
 # Android release build and verification (#419)
 
-Tool: `scripts/release/android_release.py`. It never builds, signs, installs or publishes. Each stage refuses (exit 1, `REFUSED: <check>`) or prints JSON. Receipts are written once, mode 0444.
+Tool: `scripts/release/android_release.py`. It never builds, signs, installs or publishes. Each stage refuses (exit 1, `REFUSED: <check>`) or prints JSON. Receipts are created exclusively (`open(..., 'x')`), mode 0444.
 
 ## Identity
 
@@ -30,7 +30,7 @@ This tool produces only offered entries. It never claims installed or applied.
    - no signature entries, and `apksigner verify` fails
    - `zipalign -c -P 16 -v 4` passes
    - embedded identity is valid with `source_revision` == pin
-   - records the pin's source-file digest and a digest of the non-signature zip entries
+   - records the pin's source-file digest and a content digest: SHA-256 over sorted `<entry>\0<sha256 of decompressed payload>` for non-signature entries; duplicate entry names are refused
 5. Signer (personal/operations) signs a separate output. Then `verify-signed SIGNED --unsigned-receipt unsigned.json --out signed.json` checks:
    - one signer with the expected cert; v2 or v3 verifies
    - same package/version/sdk/ABIs

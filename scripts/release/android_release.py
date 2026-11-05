@@ -161,17 +161,27 @@ def parse_print_certs(text: str) -> dict:
             "certs": re.findall(r"^Signer #\d+ certificate SHA-256 digest: ([0-9a-f]{64})$", text, re.M)}
 
 
-def zip_entries(apk: Path) -> dict[str, tuple[int, int]]:
+def zip_entries(apk: Path) -> dict[str, str]:
+    """Entry name -> SHA-256 of its decompressed payload. Duplicate names are refused (zip readers disagree on them)."""
+    entries: dict[str, str] = {}
     with zipfile.ZipFile(apk) as z:
-        return {i.filename: (i.CRC, i.file_size) for i in z.infolist()}
+        for info in z.infolist():
+            check(info.filename not in entries, f"duplicate ZIP entry {info.filename!r}")
+            digest = hashlib.sha256()
+            with z.open(info) as f:
+                for chunk in iter(lambda: f.read(1 << 20), b""):
+                    digest.update(chunk)
+            entries[info.filename] = digest.hexdigest()
+    return entries
 
 
-def content_entries(entries: dict[str, tuple[int, int]]) -> dict[str, tuple[int, int]]:
+def content_entries(entries: dict[str, str]) -> dict[str, str]:
     return {k: v for k, v in entries.items() if not SIGNATURE_ENTRY.match(k)}
 
 
-def entries_digest(entries: dict[str, tuple[int, int]]) -> str:
-    return hashlib.sha256("".join(f"{k}\0{c:08x}\0{s}\n" for k, (c, s) in sorted(entries.items())).encode()).hexdigest()
+def entries_digest(entries: dict[str, str]) -> str:
+    """SHA-256 over sorted '<name>\\0<payload sha256>\\n' lines."""
+    return hashlib.sha256("".join(f"{k}\0{v}\n" for k, v in sorted(entries.items())).encode()).hexdigest()
 
 
 def embedded_metadata(apk: Path) -> tuple[dict, dict] | None:
@@ -190,9 +200,12 @@ def sha256_file(path: Path) -> str:
 
 
 def write_receipt(path: Path, data: dict) -> None:
-    check(not path.exists(), f"refusing to overwrite receipt {path}")
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2) + "\n")
+    try:
+        with path.open("x") as f:  # create-only: never replaces a receipt, even under a race
+            f.write(json.dumps(data, indent=2) + "\n")
+    except FileExistsError:
+        raise Refused(f"refusing to overwrite receipt {path}") from None
     path.chmod(0o444)
 
 
