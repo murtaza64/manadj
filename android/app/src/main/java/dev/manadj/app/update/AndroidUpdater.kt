@@ -64,7 +64,9 @@ object AndroidUpdater {
         fun asset(name: String) = runCatching {
             context.assets.open("${ReleaseIdentity.ASSET_DIR}/$name").use { bounded(it, ReleaseIdentity.MAX_FILE_BYTES + 1) }
         }.getOrNull()
-        return ReleaseIdentity.parse(asset("build-info.json"), asset("release-notes.json"))
+        val identity = ReleaseIdentity.parse(asset("build-info.json"), asset("release-notes.json")) ?: return null
+        val installed = runCatching { installed(context) }.getOrNull() ?: return null
+        return identity.takeIf { it.appliedOn(installed) }
     }
 
     @Suppress("DEPRECATION")
@@ -86,7 +88,7 @@ object AndroidUpdater {
     fun installed(context: Context): Installed {
         installedOverride?.let { return it }
         val info = context.packageManager.getPackageInfo(context.packageName, signingFlag)
-        return Installed(context.packageName, versionCode(info), signers(info), Build.VERSION.SDK_INT, Build.SUPPORTED_ABIS.toList())
+        return Installed(context.packageName, versionCode(info), signers(info), Build.VERSION.SDK_INT, Build.SUPPORTED_ABIS.toList(), info.versionName)
     }
 
     // --- check / stage ------------------------------------------------------------------------
@@ -121,6 +123,19 @@ object AndroidUpdater {
         if (!sched.due(clock())) return
         check(context) { offered -> if (activity().blockReason == null) download(context, offered) }
     }
+
+    /**
+     * Foreground tick (every [TICK_MS] while the activity is visible, no service/permission): a due check per
+     * [UpdateSchedule], and an Offered release starts staging as soon as activity returns to idle (play/record/sync
+     * -> idle). In-flight checks/downloads coalesce (no second request).
+     */
+    fun foregroundTick(context: Context, activity: () -> Activity) {
+        if (state is State.Checking || state is State.Downloading) return
+        (state as? State.Offered)?.let { if (activity().blockReason == null) download(context, it.entry); return }
+        autoCheck(context, activity)
+    }
+
+    const val TICK_MS = 5 * 60_000L
 
     fun check(context: Context, onOffer: (ChannelEntry) -> Unit = {}) {
         if (state is State.Checking || state is State.Downloading) return
@@ -182,13 +197,15 @@ object AndroidUpdater {
         Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${context.packageName}")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
 
     /** Re-verifies the staged bytes, then a PackageInstaller session; the system asks the user to confirm. */
-    fun install(context: Context, activity: Activity) {
+    fun install(context: Context, activity: () -> Activity) {
         val staged = state as? State.Staged ?: return
-        blocked(context, activity)?.let { state = State.Failed(it, staged.entry); return }
+        blocked(context, activity())?.let { state = State.Failed(it, staged.entry); return }
         scope.launch {
             state = try {
                 val file = stager(context).staged(staged.entry) ?: throw IOException("Staged update changed; download again")
                 verifyArchive(context, staged.entry, file)
+                // Live provider, re-read after the archive check and before any installer session exists.
+                activity().blockReason?.let { reason -> return@launch run { state = State.Failed(reason, staged.entry) } }
                 val installer = context.packageManager.packageInstaller
                 val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL).apply {
                     setAppPackageName(UpdatePolicy.PACKAGE)
@@ -197,6 +214,8 @@ object AndroidUpdater {
                 val id = installer.createSession(params)
                 installer.openSession(id).use { session ->
                     session.openWrite("manadj.apk", 0, file.length()).use { out -> file.inputStream().use { it.copyTo(out) }; session.fsync(out) }
+                    // Activity may have started while verifying/copying: re-check right before handing to Android.
+                    activity().blockReason?.let { reason -> session.abandon(); return@launch run { state = State.Failed(reason, staged.entry) } }
                     val intent = Intent(context, UpdateInstallReceiver::class.java).putExtra(EXTRA_RELEASE, staged.entry.releaseId)
                     val flags = PendingIntent.FLAG_UPDATE_CURRENT or (if (Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_MUTABLE else 0)
                     session.commit(PendingIntent.getBroadcast(context, id, intent, flags).intentSender)

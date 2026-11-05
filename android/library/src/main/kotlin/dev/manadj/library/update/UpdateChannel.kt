@@ -54,7 +54,8 @@ data class ChannelEntry(
 )
 
 /** What this device has installed (PackageManager facts about the running package). */
-data class Installed(val packageName: String, val versionCode: Long, val signerSha256: Set<String>, val sdk: Int, val abis: List<String>)
+data class Installed(val packageName: String, val versionCode: Long, val signerSha256: Set<String>, val sdk: Int, val abis: List<String>,
+                     val versionName: String? = null)
 
 sealed interface Offer {
     data class Available(val entry: ChannelEntry) : Offer
@@ -153,7 +154,13 @@ class UpdateStager(private val dir: File) {
 
 /** Seen receipts for applied-release notes: one file per release_id in app-private storage. */
 class SeenReleases(private val dir: File) {
-    fun seen(releaseId: String): Boolean = File(dir, "$releaseId.json").isFile
+    /** Seen only with an exact receipt for this release (`{"schema":1,"release_id":"<id>"}`); anything else = unseen. */
+    fun seen(releaseId: String): Boolean = runCatching {
+        val f = File(dir, "$releaseId.json")
+        if (!f.isFile || f.length() > 4096) return false
+        val o = JSONObject(f.readText())
+        o.keySet() == setOf("schema", "release_id") && o.get("schema") == 1 && o.get("release_id") == releaseId
+    }.getOrDefault(false)
     fun markSeen(releaseId: String) {
         require(Regex("[0-9a-f]{64}").matches(releaseId))
         if (!dir.isDirectory) check(dir.mkdirs())

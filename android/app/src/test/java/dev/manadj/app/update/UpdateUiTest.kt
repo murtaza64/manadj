@@ -174,4 +174,55 @@ class UpdateUiTest {
         compose.onNodeWithText("LATER").performClick()
         compose.onNodeWithTag("update-banner").assertDoesNotExist()
     }
+
+    @Test fun foregroundTickStagesAnOfferWhenActivityEndsAndCoalesces() {
+        val server = Server().apply { install() }
+        var now = 9_000_000L
+        AndroidUpdater.clock = { now }
+        var playing = true
+        val act = { Activity(playing, false, false) }
+        AndroidUpdater.foregroundTick(compose.activity, act) // due: check, offer held while playing
+        assertTrue(AndroidUpdater.state is AndroidUpdater.State.Offered); assertEquals(1, server.hits.size)
+        now += AndroidUpdater.TICK_MS
+        AndroidUpdater.foregroundTick(compose.activity, act) // still playing: nothing fetched
+        assertEquals(1, server.hits.size)
+        playing = false
+        now += AndroidUpdater.TICK_MS
+        AndroidUpdater.foregroundTick(compose.activity, act) // play -> idle: stage without app restart
+        assertTrue(AndroidUpdater.state is AndroidUpdater.State.Staged); assertEquals(2, server.hits.size)
+        now += AndroidUpdater.TICK_MS
+        AndroidUpdater.foregroundTick(compose.activity, act) // staged + not due: no request
+        assertEquals(2, server.hits.size)
+        AndroidUpdater.state = AndroidUpdater.State.Checking
+        AndroidUpdater.foregroundTick(compose.activity, act) // in flight: coalesced
+        assertEquals(2, server.hits.size)
+    }
+
+    @Test fun installRefusesBeforeASessionWhenActivityStartsDuringVerification() {
+        Server().apply { install() }
+        val ctx = compose.activity
+        org.robolectric.Shadows.shadowOf(ctx.packageManager).setCanRequestPackageInstalls(true)
+        AndroidUpdater.clock = { 1L }
+        AndroidUpdater.check(ctx) { AndroidUpdater.download(ctx, it) }
+        var playing = false
+        AndroidUpdater.verifyArchive = { _, _, _ -> playing = true }
+        AndroidUpdater.install(ctx) { Activity(playing, false, false) }
+        assertEquals("Stop playback to install", (AndroidUpdater.state as AndroidUpdater.State.Failed).reason)
+        assertTrue(ctx.packageManager.packageInstaller.mySessions.isEmpty())
+    }
+
+    @Test fun installRechecksActivityBeforeCommitAndAbandonsTheSession() {
+        val server = Server().apply { install() }
+        val ctx = compose.activity
+        org.robolectric.Shadows.shadowOf(ctx.packageManager).setCanRequestPackageInstalls(true)
+        AndroidUpdater.clock = { 1L }
+        AndroidUpdater.check(ctx) { AndroidUpdater.download(ctx, it) }
+        val staged = AndroidUpdater.state as AndroidUpdater.State.Staged
+        var calls = 0
+        AndroidUpdater.install(ctx) { calls++; Activity(playing = calls > 2, recording = false, transferring = false) }
+        assertEquals(3, calls) // before IO, after the archive check (before a session), right before commit
+        assertEquals(AndroidUpdater.State.Failed("Stop playback to install", staged.entry), AndroidUpdater.state)
+        assertTrue(ctx.packageManager.packageInstaller.mySessions.isEmpty()) // abandoned, never committed
+        assertEquals(2, server.hits.size)
+    }
 }

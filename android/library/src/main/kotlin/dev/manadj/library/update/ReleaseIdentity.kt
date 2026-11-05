@@ -9,6 +9,14 @@ import java.security.MessageDigest
  * Missing, malformed, inconsistent or wrong-release files expose NO release (never a partial claim).
  */
 data class ReleaseIdentity(val version: String, val sourceRevision: String, val notesSha256: String, val releaseId: String, val body: String) {
+    /**
+     * APPLIED = this embedded identity belongs to the running installed build: release package, release signer, and
+     * PackageManager versionName == build-info version. A self-consistent pair in any other build is not applied.
+     */
+    fun appliedOn(installed: Installed): Boolean =
+        installed.packageName == UpdatePolicy.PACKAGE && UpdatePolicy.SIGNER_SHA256 in installed.signerSha256 &&
+            installed.versionName == version
+
     companion object {
         const val ASSET_DIR = "manadj-release"
         const val MAX_BODY_BYTES = 32_768

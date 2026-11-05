@@ -57,7 +57,7 @@ fun identityLine(applied: ReleaseIdentity?, versionCode: Long, versionName: Stri
                 val reason = AndroidUpdater.blocked(context, activity())
                 if (reason == "Allow manaDJ to install updates") Key("ALLOW", Modifier.height(36.dp).widthIn(min = 80.dp)) { AndroidUpdater.allowInstalls(context) }
                 else Key("INSTALL", Modifier.height(36.dp).widthIn(min = 90.dp), color = Ink.play, enabled = reason == null) {
-                    AndroidUpdater.install(context, activity())
+                    AndroidUpdater.install(context, activity)
                 }
                 reason?.let { Text(it, Modifier.align(Alignment.CenterVertically), Ink.warning, 11) }
             }

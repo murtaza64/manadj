@@ -42,6 +42,14 @@ class MainActivity : ComponentActivity() {
             Column(Modifier.fillMaxSize()) {
                 MasterRecordingBar(model)
                 dev.manadj.app.update.UpdateBanner { ux.settings = true; ux.settingsPage = SettingsPage.UPDATES }
+                // #419: while visible, a light 5 min tick (rate-limited check; stage an offer once idle).
+                androidx.compose.runtime.LaunchedEffect(Unit) {
+                    while (true) {
+                        kotlinx.coroutines.delay(dev.manadj.app.update.AndroidUpdater.TICK_MS)
+                        if (lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED))
+                            dev.manadj.app.update.AndroidUpdater.foregroundTick(this@MainActivity) { installActivity(model, ux) }
+                    }
+                }
                 Box(Modifier.weight(1f)) {
                     PerformanceApp(model, ux) { deck -> model.pickerTarget = deck; picker.launch(arrayOf("audio/*")) }
                     dev.manadj.app.update.ReleaseNotesOnLaunch() // #419: once per verified applied release

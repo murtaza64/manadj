@@ -149,4 +149,28 @@ class UpdateChannelTest {
             assertEquals(0, s.read().failures)
         } finally { dir.deleteRecursively() }
     }
+
+    @Test fun appliedRequiresTheInstalledReleaseBuild() {
+        val body = "n"; val notes = ReleaseIdentity.sha256(body.toByteArray())
+        val r = ReleaseIdentity("0.1.0-rc.8", src, notes, ReleaseIdentity.releaseId("0.1.0-rc.8", src, notes), body)
+        val ok = installed.copy(versionName = "0.1.0-rc.8")
+        assertTrue(r.appliedOn(ok))
+        assertFalse(r.appliedOn(ok.copy(versionName = "0.1.0-rc.7")))
+        assertFalse(r.appliedOn(ok.copy(versionName = null)))
+        assertFalse(r.appliedOn(ok.copy(packageName = "dev.murt.manadj.excalibur.lane")))
+        assertFalse(r.appliedOn(ok.copy(signerSha256 = setOf("a".repeat(64)))))
+    }
+
+    @Test fun seenNeedsAnExactReceipt() {
+        val dir = Files.createTempDirectory("seen2-").toFile()
+        try {
+            val id = "c".repeat(64)
+            val s = SeenReleases(dir)
+            for (body in listOf("", "{}", "not json", "{\"schema\":1,\"release_id\":\"${"d".repeat(64)}\"}",
+                    "{\"schema\":\"1\",\"release_id\":\"$id\"}", "{\"schema\":1,\"release_id\":\"$id\",\"x\":1}")) {
+                File(dir, "$id.json").writeText(body); assertFalse(s.seen(id), body)
+            }
+            s.markSeen(id); assertTrue(s.seen(id))
+        } finally { dir.deleteRecursively() }
+    }
 }
