@@ -251,4 +251,17 @@ class UpdateChannelTest {
         assertNull(AndroidBuild.parse(b.replace("\"version_code\":8", "\"version_code\":true").toByteArray()))
         assertNotNull(AndroidBuild.parse(b.toByteArray()))
     }
+
+    /** Python-generated max-boundary triple (tests/fixtures/android-release-maxbody-v1, core canonical serialization). */
+    @Test fun pythonGeneratedMaxBoundaryTripleParses() {
+        val dir = File("../../tests/fixtures/android-release-maxbody-v1")
+        fun f(n: String) = File(dir, n).readBytes()
+        assertTrue(f("release-notes.json").size in (64 * 1024 + 1)..ReleaseIdentity.MAX_FILE_BYTES)
+        val r = assertNotNull(ReleaseIdentity.parse(f("build-info.json"), f("release-notes.json"), f("android-build.json")))
+        assertEquals("2acff59658cddeeda815028bfc4b53b4910babaa6df6b6860078b904e3eadf9d", r.releaseId)
+        assertEquals("\u0001".repeat(32768), r.body)
+        assertTrue(r.appliedOn(installed.copy(versionCode = 8, versionName = "0.1.0-rc.8")))
+        val padded = f("release-notes.json") + ByteArray(ReleaseIdentity.MAX_FILE_BYTES + 1 - f("release-notes.json").size) { ' '.code.toByte() }
+        assertNull(ReleaseIdentity.parse(f("build-info.json"), padded, f("android-build.json")), "over the 256 KiB per-file cap")
+    }
 }
