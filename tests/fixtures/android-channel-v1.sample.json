@@ -1,0 +1,28 @@
+{
+  "channel": "stable",
+  "entries": [
+    {
+      "abis": [
+        "arm64-v8a"
+      ],
+      "apk_bytes": 123456,
+      "apk_sha256": "4444444444444444444444444444444444444444444444444444444444444444",
+      "apk_url": "https://manadj.murtaza.earth/android/artifacts/93e82dba3a957479b1b17a5f561aa641663b738b580f2709db84a22dcb194d33/4444444444444444444444444444444444444444444444444444444444444444.apk",
+      "build_batch_id": "33333333-3333-4333-8333-333333333333",
+      "min_sdk": 26,
+      "notes_sha256": "02cae2f16f36df3252b634a9bdea8f6ed441c2ebd564a9fb4c5209cb81898c33",
+      "qa_receipt_sha256s": [
+        "5555555555555555555555555555555555555555555555555555555555555555",
+        "6666666666666666666666666666666666666666666666666666666666666666"
+      ],
+      "release_id": "93e82dba3a957479b1b17a5f561aa641663b738b580f2709db84a22dcb194d33",
+      "source_revision": "1111111111111111111111111111111111111111",
+      "source_tree_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+      "version_code": 8,
+      "version_name": "0.1.0-rc.8"
+    }
+  ],
+  "format": "manadj_android_channel/v1",
+  "package": "dev.murt.manadj.excalibur",
+  "signer_cert_sha256": "18f8fe820d6abd112be1fa5c99e3c69f77cbb5c834242899135c9b528af7417c"
+}

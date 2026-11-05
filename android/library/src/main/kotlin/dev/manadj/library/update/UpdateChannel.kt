@@ -23,34 +23,37 @@ object UpdatePolicy {
     const val PACKAGE = "dev.murt.manadj.excalibur"
     const val SIGNER_SHA256 = "18f8fe820d6abd112be1fa5c99e3c69f77cbb5c834242899135c9b528af7417c"
     const val ORIGIN = "https://manadj.murtaza.earth"
-    const val CHANNEL = "stable"
+    const val CHANNEL = "stable" // core contract: stable | preview
+    val CHANNELS = setOf("stable", "preview")
+    val ABIS = setOf("arm64-v8a", "armeabi-v7a", "x86_64", "x86")
     val channelUrl get() = "$ORIGIN/android/$CHANNEL/channel.json"
     const val MAX_MANIFEST_BYTES = 256 * 1024
     const val MAX_APK_BYTES = 512L * 1024 * 1024
 
-    /**
-     * Immutable APK locations: explicit https origin + path prefix pairs, separate from the channel origin.
-     * PENDING core's canonical contract (artifact host/redirect policy); until then only the Pages path below.
-     */
-    val ARTIFACTS: List<Pair<String, String>> = listOf(ORIGIN to "/android/$CHANNEL/")
-
-    /** Same scheme + host + port as [origin] and under [pathPrefix]; nothing else is ever fetched. */
+    /** Same scheme + host + default port as [origin] and under [pathPrefix]; no credentials/query/fragment/traversal/escapes. */
     fun pinned(url: String, origin: String = ORIGIN, pathPrefix: String = "/"): Boolean = runCatching {
         val u = URI(url); val o = URI(origin)
-        u.scheme == "https" && u.scheme == o.scheme && u.host.equals(o.host, ignoreCase = true) && u.port == o.port &&
+        u.scheme == "https" && u.scheme == o.scheme && u.host.equals(o.host, ignoreCase = true) && (u.port == -1 || u.port == 443) &&
             u.userInfo == null && u.rawQuery == null && u.rawFragment == null && !u.rawPath.contains("..") &&
             !u.rawPath.contains("%") && u.rawPath.startsWith(pathPrefix)
     }.getOrDefault(false)
 
-    fun artifact(url: String, allow: List<Pair<String, String>> = ARTIFACTS) = allow.any { (o, p) -> pinned(url, o, p) }
+    /** Core contract v1 topology: the immutable APK lives exactly at `<ORIGIN>/android/artifacts/<release_id>/<apk_sha256>.apk`. */
+    fun artifactUrl(releaseId: String, apkSha256: String) = "$ORIGIN/android/artifacts/$releaseId/$apkSha256.apk"
+
+    /** Any well-formed v1 artifact URL (for the fetch guard); the parser additionally binds it to its entry. */
+    fun artifact(url: String) = pinned(url) && Regex("/android/artifacts/[0-9a-f]{64}/[0-9a-f]{64}\\.apk").matches(URI(url).rawPath)
 
     /** The channel URL itself (exact). */
     fun channel(url: String) = url == channelUrl
 }
 
+/** One offered release; fields = core contract `Entry` (88fea251). Provenance fields carry no applied claim. */
 data class ChannelEntry(
     val releaseId: String, val versionCode: Long, val versionName: String, val minSdk: Int, val abis: List<String>,
     val sourceRevision: String, val notesSha256: String, val apkUrl: String, val apkSha256: String, val apkBytes: Long,
+    val sourceTreeSha256: String = "0".repeat(64), val buildBatchId: String = "00000000-0000-4000-8000-000000000000",
+    val qaReceiptSha256s: List<String> = emptyList(),
 )
 
 /** What this device has installed (PackageManager facts about the running package). */
@@ -67,30 +70,53 @@ object UpdateChannel {
     private val HEX40 = Regex("[0-9a-f]{40}")
     private val HEX64 = Regex("[0-9a-f]{64}")
 
-    /** Parses a channel manifest; refuses anything outside the pinned format/channel/package/signer/origin. */
-    fun parse(bytes: ByteArray, artifacts: List<Pair<String, String>> = UpdatePolicy.ARTIFACTS, channel: String = UpdatePolicy.CHANNEL): List<ChannelEntry> {
+    private val VERSION = Regex("\\d+\\.\\d+\\.\\d+(?:-[0-9A-Za-z.]+)?")
+    private val BATCH = Regex("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+    private val ROOT = setOf("format", "channel", "package", "signer_cert_sha256", "entries")
+    private val ENTRY = setOf("release_id", "version_code", "version_name", "min_sdk", "abis", "source_revision", "source_tree_sha256",
+        "build_batch_id", "notes_sha256", "apk_url", "apk_sha256", "apk_bytes", "qa_receipt_sha256s")
+
+    private fun JSONObject.str(k: String) = get(k) as? String ?: throw IllegalArgumentException("$k must be a string")
+    private fun JSONObject.int(k: String): Long = when (val v = get(k)) {
+        is Int -> v.toLong(); is Long -> v
+        else -> throw IllegalArgumentException("$k must be an integer")
+    }
+    private fun JSONObject.strings(k: String): List<String> = getJSONArray(k).let { a -> (0 until a.length()).map { a.get(it) as? String ?: throw IllegalArgumentException(k) } }
+    private fun List<String>.orderedUnique() = this == toSortedSet().toList()
+
+    /** Parses a channel manifest per the core contract (exact keys, types, patterns, ordering, artifact path). */
+    fun parse(bytes: ByteArray, channel: String = UpdatePolicy.CHANNEL): List<ChannelEntry> {
         require(bytes.size <= UpdatePolicy.MAX_MANIFEST_BYTES) { "Channel manifest too large" }
+        require(channel in UpdatePolicy.CHANNELS)
         val o = JSONObject(String(bytes, Charsets.UTF_8))
-        require(o.optString("format") == UpdatePolicy.FORMAT) { "Unknown channel format" }
-        require(o.optString("channel") == channel) { "Wrong channel" }
-        require(o.optString("package") == UpdatePolicy.PACKAGE) { "Channel names another package" }
-        require(o.optString("signer_cert_sha256") == UpdatePolicy.SIGNER_SHA256) { "Channel names another signer" }
+        require(o.keySet() == ROOT) { "Unexpected channel fields" }
+        require(o.get("format") == UpdatePolicy.FORMAT) { "Unknown channel format" }
+        require(o.get("channel") == channel) { "Wrong channel" }
+        require(o.get("package") == UpdatePolicy.PACKAGE) { "Channel names another package" }
+        require(o.get("signer_cert_sha256") == UpdatePolicy.SIGNER_SHA256) { "Channel names another signer" }
         val entries = o.getJSONArray("entries")
+        require(entries.length() in 1..128) { "Channel entry count" }
         return (0 until entries.length()).map { i ->
             val e = entries.getJSONObject(i)
+            require(e.keySet() == ENTRY) { "Unexpected entry fields" }
+            val releaseId = e.str("release_id").also { require(HEX64.matches(it)) { "release_id" } }
+            val apkSha = e.str("apk_sha256").also { require(HEX64.matches(it)) { "apk_sha256" } }
             ChannelEntry(
-                releaseId = e.getString("release_id").also { require(HEX64.matches(it)) { "release_id" } },
-                versionCode = e.getLong("version_code").also { require(it > 0) { "version_code" } },
-                versionName = e.getString("version_name").also { require(it.isNotBlank() && it.length <= 100) { "version_name" } },
-                minSdk = e.getInt("min_sdk"),
-                abis = e.getJSONArray("abis").let { a -> (0 until a.length()).map { a.getString(it) } },
-                sourceRevision = e.getString("source_revision").also { require(HEX40.matches(it)) { "source_revision" } },
-                notesSha256 = e.getString("notes_sha256").also { require(HEX64.matches(it)) { "notes_sha256" } },
-                apkUrl = e.getString("apk_url").also { require(UpdatePolicy.artifact(it, artifacts)) { "APK URL outside the artifact allowlist" } },
-                apkSha256 = e.getString("apk_sha256").also { require(HEX64.matches(it)) { "apk_sha256" } },
-                apkBytes = e.getLong("apk_bytes").also { require(it in 1..UpdatePolicy.MAX_APK_BYTES) { "apk_bytes" } },
+                releaseId = releaseId,
+                versionCode = e.int("version_code").also { require(it in 1..2_100_000_000) { "version_code" } },
+                versionName = e.str("version_name").also { require(VERSION.matches(it)) { "version_name" } },
+                minSdk = e.int("min_sdk").toInt().also { require(it in 26..100) { "min_sdk" } },
+                abis = e.strings("abis").also { require(it.size in 1..4 && it.all { a -> a in UpdatePolicy.ABIS } && it.orderedUnique()) { "abis" } },
+                sourceRevision = e.str("source_revision").also { require(HEX40.matches(it)) { "source_revision" } },
+                notesSha256 = e.str("notes_sha256").also { require(HEX64.matches(it)) { "notes_sha256" } },
+                apkUrl = e.str("apk_url").also { require(it == UpdatePolicy.artifactUrl(releaseId, apkSha)) { "APK URL must be the pinned immutable artifact path" } },
+                apkSha256 = apkSha,
+                apkBytes = e.int("apk_bytes").also { require(it in 1..UpdatePolicy.MAX_APK_BYTES) { "apk_bytes" } },
+                sourceTreeSha256 = e.str("source_tree_sha256").also { require(HEX64.matches(it)) { "source_tree_sha256" } },
+                buildBatchId = e.str("build_batch_id").also { require(BATCH.matches(it)) { "build_batch_id" } },
+                qaReceiptSha256s = e.strings("qa_receipt_sha256s").also { require(it.size in 2..64 && it.all { h -> HEX64.matches(h) } && it.orderedUnique()) { "qa_receipt_sha256s" } },
             )
-        }.also { list -> require(list.map { it.versionCode }.toSet().size == list.size) { "Duplicate version_code in channel" } }
+        }.also { list -> val codes = list.map { it.versionCode }; require(codes == codes.toSortedSet().toList()) { "Ordered unique version codes required" } }
     }
 
     /** Highest applicable entry for [installed], or why nothing applies. */
@@ -98,7 +124,7 @@ object UpdateChannel {
         if (installed.packageName != UpdatePolicy.PACKAGE) return Offer.Refused("This build (${installed.packageName}) does not self-update")
         if (UpdatePolicy.SIGNER_SHA256 !in installed.signerSha256) return Offer.Refused("Installed app is not signed by the release key")
         val newer = entries.filter { it.versionCode > installed.versionCode }
-        val fits = newer.filter { it.minSdk <= installed.sdk && (it.abis.isEmpty() || it.abis.any { a -> a in installed.abis }) }
+        val fits = newer.filter { it.minSdk <= installed.sdk && it.abis.any { a -> a in installed.abis } }
         return fits.maxByOrNull { it.versionCode }?.let { Offer.Available(it) }
             ?: if (newer.isEmpty()) Offer.UpToDate(installed.versionCode) else Offer.Refused("Newer release does not support this device")
     }

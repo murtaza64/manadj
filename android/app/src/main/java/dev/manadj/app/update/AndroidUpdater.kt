@@ -64,7 +64,7 @@ object AndroidUpdater {
         fun asset(name: String) = runCatching {
             context.assets.open("${ReleaseIdentity.ASSET_DIR}/$name").use { bounded(it, ReleaseIdentity.MAX_FILE_BYTES + 1) }
         }.getOrNull()
-        val identity = ReleaseIdentity.parse(asset("build-info.json"), asset("release-notes.json")) ?: return null
+        val identity = ReleaseIdentity.parse(asset("build-info.json"), asset("release-notes.json"), asset("android-build.json")) ?: return null
         val installed = runCatching { installed(context) }.getOrNull() ?: return null
         return identity.takeIf { it.appliedOn(installed) }
     }
@@ -131,8 +131,9 @@ object AndroidUpdater {
      */
     fun foregroundTick(context: Context, activity: () -> Activity) {
         if (state is State.Checking || state is State.Downloading) return
-        (state as? State.Offered)?.let { if (activity().blockReason == null) download(context, it.entry); return }
-        autoCheck(context, activity)
+        // A due check always runs (a newer release may supersede a held offer); otherwise stage a held offer once idle.
+        if (schedule(context).due(clock())) { autoCheck(context, activity); return }
+        (state as? State.Offered)?.let { if (activity().blockReason == null) download(context, it.entry) }
     }
 
     const val TICK_MS = 5 * 60_000L

@@ -37,7 +37,7 @@ class UpdateUiTest {
     @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
     private val src = "6dca1c7265e3aafdc95d4c2cdb687d360c81346d"
     private val entry = ChannelEntry("a".repeat(64), 8, "0.1.0-rc.8", 26, listOf("arm64-v8a"), src, "b".repeat(64),
-        "https://manadj.murtaza.earth/android/stable/manadj-8.apk", "c".repeat(64), 41_000_000)
+        "https://manadj.murtaza.earth/android/artifacts/${"a".repeat(64)}/${"c".repeat(64)}.apk", "c".repeat(64), 41_000_000)
 
     @After fun reset() {
         AndroidUpdater.state = AndroidUpdater.State.Idle
@@ -108,9 +108,11 @@ class UpdateUiTest {
         val channel = org.json.JSONObject().put("format", "manadj_android_channel/v1").put("channel", "stable")
             .put("package", "dev.murt.manadj.excalibur").put("signer_cert_sha256", dev.manadj.library.update.UpdatePolicy.SIGNER_SHA256)
             .put("entries", org.json.JSONArray().put(org.json.JSONObject().put("release_id", "a".repeat(64)).put("version_code", 8)
-                .put("version_name", "0.1.0-rc.8").put("min_sdk", 26).put("abis", org.json.JSONArray())
-                .put("source_revision", src).put("notes_sha256", "b".repeat(64))
-                .put("apk_url", "https://manadj.murtaza.earth/android/stable/manadj-8.apk")
+                .put("version_name", "0.1.0-rc.8").put("min_sdk", 26).put("abis", org.json.JSONArray(listOf("arm64-v8a")))
+                .put("source_revision", src).put("notes_sha256", "b".repeat(64)).put("source_tree_sha256", "2".repeat(64))
+                .put("build_batch_id", "33333333-3333-4333-8333-333333333333")
+                .put("qa_receipt_sha256s", org.json.JSONArray(listOf("5".repeat(64), "6".repeat(64))))
+                .put("apk_url", "https://manadj.murtaza.earth/android/artifacts/${"a".repeat(64)}/${ReleaseIdentity.sha256(apk)}.apk")
                 .put("apk_sha256", ReleaseIdentity.sha256(apk)).put("apk_bytes", apk.size)))
         fun install() {
             AndroidUpdater.fetch = { url ->
@@ -141,7 +143,7 @@ class UpdateUiTest {
         now += 6 * 3600_000L
         AndroidUpdater.autoCheck(ctx) { Activity(false, false, false) }
         assertTrue(AndroidUpdater.state.toString(), AndroidUpdater.state is AndroidUpdater.State.Staged)
-        assertEquals(3, server.hits.size); assertTrue(server.hits.last().endsWith("manadj-8.apk"))
+        assertEquals(3, server.hits.size); assertTrue(server.hits.last().endsWith(".apk") && server.hits.last().contains("/android/artifacts/"))
         assertEquals("Stop recording to install", AndroidUpdater.blocked(ctx, Activity(false, true, false)))
     }
 
@@ -224,5 +226,40 @@ class UpdateUiTest {
         assertEquals(AndroidUpdater.State.Failed("Stop playback to install", staged.entry), AndroidUpdater.state)
         assertTrue(ctx.packageManager.packageInstaller.mySessions.isEmpty()) // abandoned, never committed
         assertEquals(2, server.hits.size)
+    }
+
+    /** Port of reviewer d1c780b7 (UpdateCadenceIndependentTest) to the canonical feed: same steps, canonical entry fields. */
+    @Test fun dueCheckRunsEvenWithAHeldOfferWhileBusy() {
+        var now = 10_000_000L
+        var code = 8L
+        var fetches = 0
+        AndroidUpdater.scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Unconfined)
+        AndroidUpdater.clock = { now }
+        AndroidUpdater.installedOverride = dev.manadj.library.update.Installed(dev.manadj.library.update.UpdatePolicy.PACKAGE, 7,
+            setOf(dev.manadj.library.update.UpdatePolicy.SIGNER_SHA256), 35, listOf("arm64-v8a"))
+        AndroidUpdater.fetch = {
+            fetches++
+            val id = "%064x".format(code)
+            val entry = org.json.JSONObject().put("release_id", id).put("version_code", code).put("version_name", "0.1.0-rc.$code")
+                .put("min_sdk", 26).put("abis", org.json.JSONArray(listOf("arm64-v8a"))).put("source_revision", "a".repeat(40))
+                .put("source_tree_sha256", "2".repeat(64)).put("build_batch_id", "33333333-3333-4333-8333-333333333333")
+                .put("notes_sha256", "b".repeat(64)).put("qa_receipt_sha256s", org.json.JSONArray(listOf("5".repeat(64), "6".repeat(64))))
+                .put("apk_url", "https://manadj.murtaza.earth/android/artifacts/$id/${"c".repeat(64)}.apk").put("apk_sha256", "c".repeat(64)).put("apk_bytes", 100)
+            java.io.ByteArrayInputStream(org.json.JSONObject().put("format", "manadj_android_channel/v1").put("channel", "stable")
+                .put("package", dev.manadj.library.update.UpdatePolicy.PACKAGE).put("signer_cert_sha256", dev.manadj.library.update.UpdatePolicy.SIGNER_SHA256)
+                .put("entries", org.json.JSONArray().put(entry)).toString().toByteArray())
+        }
+        val ctx = compose.activity
+        AndroidUpdater.autoCheck(ctx) { Activity(true, false, false) }
+        assertEquals(1, fetches)
+        assertEquals(8L, (AndroidUpdater.state as AndroidUpdater.State.Offered).entry.versionCode)
+        now += AndroidUpdater.TICK_MS
+        AndroidUpdater.foregroundTick(ctx) { Activity(true, false, false) } // not due, busy: nothing
+        assertEquals(1, fetches)
+        now += 6 * 3600_000L
+        code = 9L
+        AndroidUpdater.foregroundTick(ctx) { Activity(true, false, false) }
+        assertEquals(2, fetches)
+        assertEquals(9L, (AndroidUpdater.state as AndroidUpdater.State.Offered).entry.versionCode)
     }
 }
