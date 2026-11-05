@@ -41,13 +41,25 @@ class MainActivity : ComponentActivity() {
             BackHandler(model.browser != null || model.pitchDrawer != null || model.replace != null || ux.confirmLoad != null || model.outputPanel || ux.settings) { if (ux.confirmLoad != null) ux.confirmLoad = null else if (ux.settings && model.replace == null && !model.outputPanel) ux.settingsBack() else { model.browser = null; model.pitchDrawer = null; model.replace = null; model.outputPanel = false; ux.settings = false } }
             Column(Modifier.fillMaxSize()) {
                 MasterRecordingBar(model)
+                dev.manadj.app.update.UpdateBanner { ux.settings = true; ux.settingsPage = SettingsPage.UPDATES }
+                // #419: while visible, a light 5 min tick (rate-limited check; stage an offer once idle).
+                androidx.compose.runtime.LaunchedEffect(Unit) {
+                    while (true) {
+                        kotlinx.coroutines.delay(dev.manadj.app.update.AndroidUpdater.TICK_MS)
+                        if (lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED))
+                            dev.manadj.app.update.AndroidUpdater.foregroundTick(this@MainActivity) { installActivity(model, ux) }
+                    }
+                }
                 Box(Modifier.weight(1f)) {
                     PerformanceApp(model, ux) { deck -> model.pickerTarget = deck; picker.launch(arrayOf("audio/*")) }
+                    dev.manadj.app.update.ReleaseNotesOnLaunch() // #419: once per verified applied release
                 }
             }
         }
     }
     override fun onWindowFocusChanged(hasFocus: Boolean) { super.onWindowFocusChanged(hasFocus); if (hasFocus) immerse() }
     override fun onPause() { model.cancelGestures(); super.onPause() }
+    /** #419: rate-limited channel check on launch and each return to the foreground; stages only when idle. */
+    override fun onResume() { super.onResume(); dev.manadj.app.update.AndroidUpdater.autoCheck(this) { installActivity(model, ux) } }
     private fun immerse() { WindowInsetsControllerCompat(window, window.decorView).apply { systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE; hide(WindowInsetsCompat.Type.systemBars()) } }
 }

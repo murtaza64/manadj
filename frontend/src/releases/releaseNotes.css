@@ -1,0 +1,17 @@
+.release-notes {
+  color: #fff;
+  background: #121216;
+  border: 2px solid #00c8ff;
+  border-radius: 8px;
+  width: min(620px, 90vw);
+  max-height: 80vh;
+  padding: 24px;
+}
+.release-notes::backdrop { background: #000b; }
+.release-notes h2 { margin: 0 0 12px; color: #00c8ff; }
+.release-notes-source { color: #bbb; font-size: 12px; overflow-wrap: anywhere; }
+.release-notes-body { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.5; }
+.release-notes footer { display: flex; justify-content: flex-end; gap: 12px; margin-top: 24px; }
+.release-notes button { background: #005bff; color: #fff; border: 0; border-radius: 4px; padding: 10px 16px; cursor: pointer; }
+.release-notes button:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
+.release-notes [role=alert] { color: #ff6040; }

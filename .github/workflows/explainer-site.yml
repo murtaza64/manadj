@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'site/**'
+      - 'scripts/release/**'
       - 'frontend/src/theme/**'
       - 'frontend/public/logo.png'
       - '.github/workflows/explainer-site.yml'
@@ -30,8 +31,14 @@ jobs:
         with:
           python-version: '3.12'
       - uses: actions/configure-pages@v5
+      - name: Refuse stale queued source before building
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: test "$GITHUB_SHA" = "$(gh api repos/murtaza64/manadj/commits/main --jq .sha)"
       - name: Build site
-        run: uv run site/build.py --output .site-dist
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: uv run -m scripts.release.android_pages_build --output .site-dist
       - uses: actions/upload-pages-artifact@v3
         with:
           path: .site-dist/
@@ -40,12 +47,17 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     permissions:
+      contents: read
       pages: write
       id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
+      - name: Refuse stale source or snapshot pointer before deployment
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: test "$GITHUB_SHA" = "$(gh api repos/murtaza64/manadj/commits/main --jq .sha)"
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
