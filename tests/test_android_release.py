@@ -36,9 +36,10 @@ Signer #1 certificate SHA-256 digest: 18f8fe820d6abd112be1fa5c99e3c69f77cbb5c834
 """
 
 
-def test_identity_matches_core_420_schema_vector():
-    # Vector computed with core #420 backend/release_notes.identity (ce63b1b3); keep both in lockstep.
+def test_identity_is_core_420_identity():
+    from backend.release_notes import identity
     got = ar.release_identity("0.1.0-rc.8", REV, BODY)
+    assert got == identity("0.1.0-rc.8", REV, BODY)
     assert got["release_id"] == "2fad79f44ef9ff33923d7bcdfe956dcac8ff320167462848a6574c80323837d5"
     assert list(sorted(got)) == ["notes_sha256", "release_id", "schema", "source_revision", "version"]
 
@@ -100,32 +101,66 @@ def test_signature_entries_do_not_change_content_digest_but_payload_does(tmp_pat
     assert "META-INF/androidx/LICENSE.txt" in ar.content_entries(ar.zip_entries(signed))
 
 
-def test_embedded_metadata_requires_both_files(tmp_path):
-    build = ar.release_identity("0.1.0", REV, BODY)
+BATCH = "6f1c1d2e-3a4b-4c5d-8e9f-0a1b2c3d4e5f"
+FIELDS = {"package": ar.EXPECTED_PACKAGE, "version_code": 8, "version_name": "0.1.0-rc.8", "min_sdk": 26, "target_sdk": 35}
+
+
+def _triple():
+    build = ar.release_identity("0.1.0-rc.8", REV, BODY)
     notes = {"schema": 1, "release_id": build["release_id"], "body": BODY}
-    full = _zip(tmp_path / "a.apk", {"assets/manadj-release/build-info.json": json.dumps(build).encode(),
-                                     "assets/manadj-release/release-notes.json": json.dumps(notes).encode()})
-    assert ar.embedded_metadata(full) == (build, notes)
-    assert ar.embedded_metadata(_zip(tmp_path / "b.apk", {"classes.dex": b""})) is None
-    with pytest.raises(ar.Refused):
-        ar.embedded_metadata(_zip(tmp_path / "c.apk", {"assets/manadj-release/build-info.json": b"{}"}))
+    android = ar.android_build(build, FIELDS, "c" * 64, BATCH, ["x86_64", "arm64-v8a", "x86", "armeabi-v7a"])
+    return build, notes, android
 
 
-def test_channel_entry_is_offered_only_from_signed_https():
-    signed = {"stage": "signed", "package": ar.EXPECTED_PACKAGE, "version_code": 8, "version_name": "0.1.0-rc.8",
-              "min_sdk": 26, "abis": ["arm64-v8a"], "apk_sha256": "a" * 64, "apk_bytes": 1,
-              "signer_cert_sha256": ar.EXCALIBUR_CERT, "source_revision": REV,
-              "release_identity": ar.release_identity("0.1.0-rc.8", REV, BODY)}
-    entry = ar.channel_entry(signed, "https://manadj.murtaza.earth/android/x.apk")
-    assert entry["release_id"] == signed["release_identity"]["release_id"]
-    assert set(entry) == {"release_id", "version_code", "version_name", "min_sdk", "abis", "source_revision",
-                          "notes_sha256", "apk_url", "apk_sha256", "apk_bytes"}
-    for bad in ({"stage": "unsigned"}, {"release_identity": None}, {"signer_cert_sha256": "b" * 64},
-                {"package": "dev.murt.manadj"}):
+def test_android_build_is_canonical_and_bound_to_build_info():
+    build, notes, android = _triple()
+    assert android["abis"] == ["arm64-v8a", "armeabi-v7a", "x86", "x86_64"]
+    ar.contract.AndroidBuild.model_validate(android)
+    ar.validate_triple(build, notes, android)
+    for bad in ({"release_id": "d" * 64}, {"version_name": "0.1.0-rc.9"}, {"source_revision": "e" * 40},
+                {"notes_sha256": "f" * 64}):
         with pytest.raises(ar.Refused):
-            ar.channel_entry({**signed, **bad}, "https://x")
+            ar.validate_triple(build, notes, {**android, **bad})
     with pytest.raises(ar.Refused):
-        ar.channel_entry(signed, "http://x")
+        ar.validate_triple(build, notes, {**android, "extra": 1})
+    with pytest.raises(ar.Refused):
+        ar.android_build(build, FIELDS, "c" * 64, "not-a-uuid", ["x86"])
+    with pytest.raises(ar.Refused):
+        ar.android_build(build, {**FIELDS, "package": "dev.murt.manadj"}, "c" * 64, BATCH, ["x86"])
+
+
+def test_embedded_metadata_requires_all_three_files(tmp_path):
+    build, notes, android = _triple()
+    files = {f"assets/manadj-release/{n}": json.dumps(v).encode()
+             for n, v in zip(ar.ASSET_FILES, (build, notes, android))}
+    assert ar.embedded_metadata(_zip(tmp_path / "a.apk", files)) == (build, notes, android)
+    assert ar.embedded_metadata(_zip(tmp_path / "b.apk", {"classes.dex": b""})) is None
+    partial = dict(list(files.items())[:2])
+    with pytest.raises(ar.Refused):
+        ar.embedded_metadata(_zip(tmp_path / "c.apk", partial))
+
+
+def test_channel_entry_is_canonical_entry_with_pinned_url():
+    build, _, android = _triple()
+    signed = {"stage": "signed", "package": ar.EXPECTED_PACKAGE, "version_code": 8, "version_name": "0.1.0-rc.8",
+              "min_sdk": 26, "abis": android["abis"], "apk_sha256": "a" * 64, "apk_bytes": 1,
+              "signer_cert_sha256": ar.EXCALIBUR_CERT, "source_revision": REV,
+              "release_identity": build, "android_build": android}
+    entry = ar.channel_entry(signed, ["2" * 64, "1" * 64, "2" * 64])
+    assert entry["apk_url"] == f"https://manadj.murtaza.earth/android/artifacts/{build['release_id']}/{'a' * 64}.apk"
+    assert entry["qa_receipt_sha256s"] == ["1" * 64, "2" * 64]
+    assert entry["build_batch_id"] == BATCH and entry["source_tree_sha256"] == "c" * 64
+    ar.contract.Channel.model_validate({"format": "manadj_android_channel/v1", "channel": "stable",
+                                        "package": ar.EXPECTED_PACKAGE, "signer_cert_sha256": ar.EXCALIBUR_CERT,
+                                        "entries": [entry]})
+    fixture = json.loads((ROOT / "tests/fixtures/android-channel-v1.sample.json").read_text())
+    assert set(entry) == set(fixture["entries"][0])
+    for bad in ({"stage": "unsigned"}, {"release_identity": None}, {"android_build": None},
+                {"signer_cert_sha256": "b" * 64}, {"package": "dev.murt.manadj"}):
+        with pytest.raises(ar.Refused):
+            ar.channel_entry({**signed, **bad}, ["1" * 64, "2" * 64])
+    with pytest.raises(ar.Refused):  # contract: >= 2 QA receipts
+        ar.channel_entry(signed, ["1" * 64])
 
 
 def test_write_receipt_is_immutable(tmp_path):
@@ -185,3 +220,94 @@ def test_duplicate_zip_entries_are_refused(tmp_path):
             z.writestr("classes.dex", b"two")
     with pytest.raises(ar.Refused):
         ar.zip_entries(path)
+
+
+def test_schema_must_be_integer_one_not_bool_or_float():
+    build, notes, _ = _triple()
+    for bad in (True, 1.0):
+        with pytest.raises(ar.Refused):
+            ar.validate_metadata({**build, "schema": bad}, notes)
+        with pytest.raises(ar.Refused):
+            ar.validate_metadata(build, {**notes, "schema": bad})
+
+
+def _fake_source(monkeypatch, *, version_code=8, source=REV):
+    monkeypatch.setattr(ar, "full_commit", lambda rev: source)
+    monkeypatch.setattr(ar, "jj", lambda *a: 'applicationId = "dev.murt.manadj.excalibur"\nversionName = "0.1.0-rc.8"\n'
+                        f"versionCode = {version_code}\nminSdk = 26\ntargetSdk = 35\n")
+    monkeypatch.setattr(ar, "source_manifest", lambda commit: ("x\n", 1))
+
+
+def _stamp_body(tmp_path, monkeypatch, body: str, name: str):
+    notes_file = tmp_path / f"{name}.txt"; notes_file.write_bytes(body.encode("utf-8"))
+    _fake_source(monkeypatch)
+    ar.stamp("x", notes_file, tmp_path / name, batch_id=BATCH, require_checkout_match=False)
+    files = {f"assets/manadj-release/{n}": (tmp_path / name / "manadj-release" / n).read_bytes() for n in ar.ASSET_FILES}
+    return files, ar.embedded_metadata(_zip(tmp_path / f"{name}.apk", files))
+
+
+@pytest.mark.parametrize("body", [
+    "\u0001" * 32768,                      # worst case: 6 encoded bytes per body byte
+    "\U0001F3A7" * 8192,                   # astral: 4 UTF-8 bytes, 12 encoded (surrogate pair)
+    "é" * 16384,                           # accent: 2 UTF-8 bytes, 6 encoded
+    "  edges \r\n\t\u2028 kept\n\n",   # no trim/normalization
+])
+def test_bounded_bodies_round_trip_exactly_through_stamp_and_zip(tmp_path, monkeypatch, body):
+    files, (build, notes, android) = _stamp_body(tmp_path, monkeypatch, body, "b")
+    assert len(body.encode("utf-8")) <= 32768
+    assert max(len(v) for v in files.values()) <= ar.MAX_ASSET_BYTES
+    ar.validate_triple(build, notes, android)
+    assert notes["body"] == body
+    assert all(v == ar.contract.canonical(json.loads(v)) for v in files.values())
+
+
+def test_stamp_refuses_body_over_32768_utf8_bytes(tmp_path, monkeypatch):
+    with pytest.raises(ar.Refused):
+        _stamp_body(tmp_path, monkeypatch, "\u0001" * 32769, "over")
+
+
+# Native 5d0d77ff tests/fixtures/android-release-maxbody-v1 (generated by core canonical(); consumed by the
+# Kotlin parser). Same inputs through this stamper must give byte-identical files.
+NATIVE_MAXBODY_SHA256 = {
+    "build-info.json": (258, "dc3ce59d13699c01ea749fa5cee26437f1f7f33ca6790c3fa3b7901f2bb1cedb"),
+    "release-notes.json": (196710, "e6dfc90b2afbff49f5eb5c09e916e31de1f63636f2d1db5f5f790503c125f407"),
+    "android-build.json": (536, "0f9a124b46f7997e47763f64cbde96e8896f6fe59878c224e3f8fdb60f1ecee3"),
+}
+
+
+def test_stamp_reproduces_native_maxbody_fixture_bytes(tmp_path, monkeypatch):
+    import hashlib
+    notes_file = tmp_path / "n.txt"; notes_file.write_bytes(("\u0001" * 32768).encode())
+    monkeypatch.setattr(ar, "full_commit", lambda rev: "1" * 40)
+    monkeypatch.setattr(ar, "jj", lambda *a: 'applicationId = "dev.murt.manadj.excalibur"\nversionName = "0.1.0-rc.8"\n'
+                        "versionCode = 8\nminSdk = 26\ntargetSdk = 35\n")
+    real = hashlib.sha256
+    monkeypatch.setattr(ar, "source_manifest", lambda commit: ("<tree>", 1))
+    monkeypatch.setattr(ar.hashlib, "sha256", lambda data=b"": (type("H", (), {"hexdigest": lambda self: "2" * 64})()
+                                                               if data == b"<tree>" else real(data)))
+    ar.stamp("x", notes_file, tmp_path / "out", batch_id="33333333-3333-4333-8333-333333333333",
+             abis=["arm64-v8a"], require_checkout_match=False)
+    for name, (size, digest) in NATIVE_MAXBODY_SHA256.items():
+        data = (tmp_path / "out/manadj-release" / name).read_bytes()
+        assert (len(data), real(data).hexdigest()) == (size, digest), name
+
+
+def test_oversized_embedded_asset_is_refused_before_parse(tmp_path):
+    build, notes, android = _triple()
+    files = {f"assets/manadj-release/{n}": json.dumps(v).encode() for n, v in zip(ar.ASSET_FILES, (build, notes, android))}
+    files["assets/manadj-release/release-notes.json"] = b" " * (ar.MAX_ASSET_BYTES + 1)
+    with pytest.raises(ar.Refused):
+        ar.embedded_metadata(_zip(tmp_path / "big.apk", files))
+
+
+def test_stamp_keeps_exact_notes_bytes(tmp_path, monkeypatch):
+    body = "  Notes with edges.\n\n"
+    notes_file = tmp_path / "notes.txt"; notes_file.write_bytes(body.encode())
+    monkeypatch.setattr(ar, "full_commit", lambda rev: REV)
+    monkeypatch.setattr(ar, "jj", lambda *a: 'applicationId = "dev.murt.manadj.excalibur"\nversionName = "0.1.0-rc.8"\n'
+                        "versionCode = 8\nminSdk = 26\ntargetSdk = 35\n")
+    monkeypatch.setattr(ar, "source_manifest", lambda commit: ("x\n", 1))
+    result = ar.stamp("x", notes_file, tmp_path / "out", batch_id=BATCH, require_checkout_match=False)
+    notes = json.loads((tmp_path / "out/manadj-release/release-notes.json").read_bytes())
+    assert notes["body"] == body
+    assert result["build_info"]["notes_sha256"] == __import__("hashlib").sha256(body.encode()).hexdigest()
