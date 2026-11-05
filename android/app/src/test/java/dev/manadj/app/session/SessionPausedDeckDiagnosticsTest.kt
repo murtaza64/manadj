@@ -36,9 +36,11 @@ class SessionPausedDeckDiagnosticsTest {
             result.report("paused-tick-evidence")
             assertTrue(result.frames.last().otherReplaySource - result.frames.first().otherReplaySource > 1)
             assertTrue("replay never acted on those evidence ticks", result.frames.all { it.replaySource == 10.0 })
-            println("PAUSED-DIAG renderedSources=${result.frames.map { it.renderedSource }.distinct()} rasterHashes=${result.frames.map { it.rasterHash }.distinct().size} rasterShifts=${result.frames.map { it.rasterShiftPx }.distinct()}")
-            assertTrue("display source must match the paused replay reference without invented motion", result.frames.all { it.renderedSource == it.replaySource })
+            println("PAUSED-DIAG rawEvidenceSources=${result.frames.map { it.renderedSource }.distinct()} rasterHashes=${result.frames.map { it.rasterHash }.distinct().size} rasterShifts=${result.frames.map { it.rasterShiftPx }.distinct()}")
+            // Raw evidence is deliberately noisy. Assert actual presentation, so correcting the production
+            // frame reference can turn this unchanged test green without rewriting a diagnostic proxy.
             assertEquals("paused actual waveform raster must not jitter on evidence-only ticks", 1, result.frames.map { it.rasterHash }.distinct().size)
+            assertTrue("observed paused raster displacement must remain zero", result.frames.all { it.rasterShiftPx == 0 })
         }
     }
 
