@@ -174,7 +174,8 @@ def test_create_only_cli_output_preserves_existing_decoy(pipeline, tmp_path):
     assert path.read_bytes() == before
 
 
-def test_stamp_preserves_exact_notes_and_pins_batch_before_build(pipeline, tmp_path, monkeypatch):
+@pytest.mark.parametrize("body", ["Synthetic producer test; not an offer.\r\n", "音" * 10922 + "x", "x" + "\x00" * 32767])
+def test_stamp_preserves_exact_notes_and_pins_batch_before_build(pipeline, tmp_path, monkeypatch, body):
     f = pipeline
     monkeypatch.setattr(p.verifier, "full_commit", lambda rev: f["build"]["source_revision"])
     monkeypatch.setattr(p.verifier, "require_checkout", lambda rev: None)
@@ -183,11 +184,20 @@ def test_stamp_preserves_exact_notes_and_pins_batch_before_build(pipeline, tmp_p
         "package", "version_code", "version_name", "min_sdk", "target_sdk")})
     monkeypatch.setattr(p.verifier, "source_manifest", lambda rev: ("pinned manifest\n", 1))
     notes = tmp_path / "notes.txt"
-    notes.write_bytes(f["notes"]["body"].encode())
+    notes.write_bytes(body.encode())
     out = tmp_path / "metadata"
     build = p.stamp("pin", notes, out, f["build"]["build_batch_id"], ["arm64-v8a"])
-    assert p.read(out / "manadj-release/release-notes.json")["body"] == f["notes"]["body"]
+    assert p.read(out / "manadj-release/release-notes.json")["body"] == body
     assert build.source_tree_sha256 == hashlib.sha256(b"pinned manifest\n").hexdigest()
-    assert p.read(out / "manadj-release/build-info.json") == f["info"]
+    expected = identity(f["info"]["version"], f["info"]["source_revision"], body)
+    assert p.read(out / "manadj-release/build-info.json") == expected
+    apk = tmp_path / "stamped.zip"
+    with zipfile.ZipFile(apk, "w") as archive:
+        for path in (out / "manadj-release").iterdir():
+            archive.write(path, p.ASSET_PREFIX + path.name)
+    embedded_info, embedded_notes, embedded_build = p.embedded(apk)
+    assert embedded_info.model_dump() == expected
+    assert embedded_notes.body == body
+    assert embedded_build == build
     with pytest.raises(FileExistsError):
         p.stamp("pin", notes, out, f["build"]["build_batch_id"], ["arm64-v8a"])

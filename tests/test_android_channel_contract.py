@@ -84,3 +84,17 @@ def test_candidate_requires_matching_distinct_qa_source_and_unsigned():
             {**candidate, "qa_receipts": [{**qa[0], "source_revision": "0" * 40}, qa[1]]}):
         with pytest.raises(ValueError):
             Candidate.model_validate(changed)
+
+
+@pytest.mark.parametrize("value", [True, False, 1.0, "1", None])
+@pytest.mark.parametrize("target", ["build", "notes"])
+def test_schema_one_is_integer_not_python_equal_literal(value, target):
+    build, _android, _channel = vector()
+    notes = {"schema": 1, "release_id": build["release_id"],
+             "body": "Update pipeline parser vector. Not an offered build.\n"}
+    if target == "build":
+        build["schema"] = value
+    else:
+        notes["schema"] = value
+    with pytest.raises(ValueError, match="integer 1"):
+        metadata(build, notes)

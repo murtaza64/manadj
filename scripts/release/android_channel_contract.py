@@ -6,7 +6,7 @@ import json
 from typing import Annotated, Literal
 from urllib.parse import urlsplit
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, model_validator
 
 from backend.release_notes import identity
 
@@ -36,8 +36,17 @@ def sha(value):
     return hashlib.sha256(canonical(value)).hexdigest()
 
 
+def schema_one(value):
+    if type(value) is not int or value != 1:
+        raise ValueError("schema must be the integer 1")
+    return value
+
+
+SCHEMA_ONE = Annotated[Literal[1], BeforeValidator(schema_one)]
+
+
 class BuildInfo(Strict):
-    schema: Literal[1]
+    schema: SCHEMA_ONE
     version: VERSION
     source_revision: SOURCE
     notes_sha256: SHA
@@ -45,7 +54,7 @@ class BuildInfo(Strict):
 
 
 class Notes(Strict):
-    schema: Literal[1]
+    schema: SCHEMA_ONE
     release_id: SHA
     body: str
 

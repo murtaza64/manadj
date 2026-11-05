@@ -33,8 +33,16 @@ def dump(model):
 
 
 def write(path, value):
-    # Qualified create-only writer, including under competing writers.
-    verifier.write_receipt(Path(path), dump(value))
+    # Preserve exact Unicode notes, with exclusive creation even under races.
+    path = Path(path)
+    raw = json.dumps(dump(value), ensure_ascii=False, allow_nan=False, indent=2) + "\n"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with path.open("x", encoding="utf-8", newline="\n") as output:
+            output.write(raw)
+    except FileExistsError:
+        raise verifier.Refused(f"refusing to overwrite receipt {path}") from None
+    path.chmod(0o444)
 
 
 def stamp(revision, notes_file, out, batch_id, abis):
@@ -70,7 +78,9 @@ def embedded(apk):
         values = []
         for name in ("build-info.json", "release-notes.json", "android-build.json"):
             member = ASSET_PREFIX + name
-            require(archive.getinfo(member).file_size <= 65536, "Embedded metadata too large")
+            # Worst-case JSON escapes are six bytes per UTF-8 body byte.
+            # A valid 32768-byte body plus object framing fits within 256 KiB.
+            require(archive.getinfo(member).file_size <= 256 * 1024, "Embedded metadata too large")
             values.append(json.loads(archive.read(member)))
     info, notes = metadata(values[0], values[1])
     build = AndroidBuild.model_validate(values[2])
