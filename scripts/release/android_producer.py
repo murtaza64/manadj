@@ -8,15 +8,13 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import zipfile
 from pathlib import Path
 
 from scripts.release import android_release as verifier
 from scripts.release.android_channel_contract import (
-    ASSET_PREFIX, CERT, FEED_ORIGIN, PACKAGE, AndroidBuild, Candidate, Channel,
+    ASSET_PREFIX as ASSET_PREFIX, CERT, FEED_ORIGIN, PACKAGE, AndroidBuild, Candidate, Channel,
     Entry, QAReceipt, SignReceipt, SignRequest, metadata, sha,
 )
-from backend.release_notes import identity
 
 
 def require(ok, message):
@@ -47,46 +45,24 @@ def write(path, value):
 
 def stamp(revision, notes_file, out, batch_id, abis):
     """Exact notes bytes, pinned source tree and caller-selected batch BEFORE build."""
-    commit = verifier.full_commit(revision)
-    verifier.require_checkout(commit)
-    source = verifier.gradle_fields(verifier.jj("file", "show", "-r", commit, verifier.GRADLE))
-    tree, _ = verifier.source_manifest(commit)
-    body = Path(notes_file).read_bytes().decode("utf-8")
-    info = identity(source["version_name"], commit, body)
-    notes = {"schema": 1, "release_id": info["release_id"], "body": body}
-    metadata(info, notes)
-    build = AndroidBuild.model_validate({
-        "format": "manadj_android_build/v1", **source, "abis": sorted(abis),
-        "release_id": info["release_id"], "source_revision": commit,
-        "source_tree_sha256": hashlib.sha256(tree.encode()).hexdigest(),
-        "build_batch_id": batch_id, "notes_sha256": info["notes_sha256"],
-    })
-    target = Path(out) / "manadj-release"
-    # An exclusive directory owns the entire triple. A failed partial stamp is
-    # deliberately not reusable: start with a fresh output directory.
-    target.mkdir(parents=True, exist_ok=False)
-    for name, value in (("build-info.json", info), ("release-notes.json", notes),
-                        ("android-build.json", build)):
-        write(target / name, value)
-    return build
+    if (Path(out) / verifier.ASSET_DIR).exists():
+        raise FileExistsError("refusing to overwrite stamped metadata")
+    result = verifier.stamp(revision, Path(notes_file), Path(out), batch_id=batch_id,
+                            abis=sorted(abis), require_checkout_match=True)
+    return AndroidBuild.model_validate(result["android_build"])
 
 
 def embedded(apk):
     # Also rejects duplicate names anywhere in the archive.
     verifier.zip_entries(Path(apk))
-    with zipfile.ZipFile(apk) as archive:
-        values = []
-        for name in ("build-info.json", "release-notes.json", "android-build.json"):
-            member = ASSET_PREFIX + name
-            # Worst-case JSON escapes are six bytes per UTF-8 body byte.
-            # A valid 32768-byte body plus object framing fits within 256 KiB.
-            require(archive.getinfo(member).file_size <= 256 * 1024, "Embedded metadata too large")
-            values.append(json.loads(archive.read(member)))
+    try:
+        values = verifier.embedded_metadata(Path(apk))
+        require(values is not None, "APK lacks the embedded release triple")
+        verifier.validate_triple(*values)
+    except verifier.Refused as error:
+        raise ValueError(str(error)) from error
     info, notes = metadata(values[0], values[1])
     build = AndroidBuild.model_validate(values[2])
-    for key, expected in (("release_id", info.release_id), ("version_name", info.version),
-                          ("source_revision", info.source_revision), ("notes_sha256", info.notes_sha256)):
-        require(getattr(build, key) == expected, "Embedded Android/schema1 identity mismatch")
     return info, notes, build
 
 

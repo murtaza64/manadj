@@ -1,20 +1,18 @@
-#!/usr/bin/env -S uv run --script
-# /// script
-# requires-python = ">=3.12"
-# dependencies = []
-# ///
+#!/usr/bin/env -S uv run
 """Android release build/verification hooks (#419, #481). See docs/android-release.md.
 
 Stages (each writes an immutable JSON receipt; none builds, signs, installs or publishes):
 
-  stamp            cut build-info.json + release-notes.json (core #420 schema 1) for a pinned
-                   commit into <out>/manadj-release/; pass the printed -P flag to gradle so the
-                   APK carries them as assets/manadj-release/*.
+  stamp            cut the embedded triple for a pinned commit into <out>/manadj-release/:
+                   build-info.json + release-notes.json (core #420 schema 1) and android-build.json
+                   (manadj_android_build/v1); pass the printed -P flag to gradle so the APK
+                   carries them as assets/manadj-release/*.
   verify-unsigned  unsigned release APK vs pinned source: package/version/sdk from gradle at
                    the pin, not debuggable, no signature, 16 KiB aligned, embedded identity.
   verify-signed    signed APK vs its unsigned receipt: expected signer certificate, v2/v3,
                    identical non-signature entries, same package/version.
-  channel-entry    one offered entry of manadj_android_channel/v1 from a signed, stamped receipt + URL.
+  channel-entry    one manadj_android_channel/v1 entry (canonical Entry) from a signed, stamped
+                   receipt + QA receipt hashes; APK URL is the pinned immutable Pages path.
 
 Offered / installed / applied are distinct: this tool only produces offered entries. Installed
 (PackageManager package + versionCode + signer) and applied (running process reads its embedded
@@ -24,7 +22,9 @@ Usage:
   uv run scripts/release/android_release.py stamp --rev <commit> --notes-file notes.txt --out DIR
   uv run scripts/release/android_release.py verify-unsigned APK --rev <commit> --out receipt.json
   uv run scripts/release/android_release.py verify-signed APK --unsigned-receipt R --out S
-  uv run scripts/release/android_release.py channel-entry --signed-receipt S --url URL
+  uv run scripts/release/android_release.py channel-entry --signed-receipt S --qa-receipt-sha256 H [H ...]
+
+Types: scripts/release/android_channel_contract.py (core). Identity: backend.release_notes.identity (#420).
 """
 
 from __future__ import annotations
@@ -36,14 +36,27 @@ import os
 import re
 import subprocess
 import sys
+import uuid
 import zipfile
 from pathlib import Path
 
+from pydantic import ValidationError
+
 ROOT = Path(__file__).resolve().parents[2]
+sys.path[:0] = [str(ROOT), str(ROOT / "scripts" / "release")]
+import android_channel_contract as contract  # noqa: E402
+from backend.release_notes import identity  # noqa: E402
+
 GRADLE = "android/app/build.gradle.kts"
 ASSET_DIR = "manadj-release"
-EXPECTED_PACKAGE = "dev.murt.manadj.excalibur"
-EXCALIBUR_CERT = "18f8fe820d6abd112be1fa5c99e3c69f77cbb5c834242899135c9b528af7417c"
+ASSET_FILES = ("build-info.json", "release-notes.json", "android-build.json")
+EXPECTED_PACKAGE = contract.PACKAGE
+EXCALIBUR_CERT = contract.CERT
+DEFAULT_ABIS = ("arm64-v8a", "armeabi-v7a", "x86", "x86_64")
+# Per encoded embedded file (core 9aba / native ReleaseIdentity.MAX_FILE_BYTES). Assets are written as core
+# contract.canonical() bytes (compact, sorted, ensure_ascii); worst case 6 bytes per body byte (control chars),
+# so a valid 32768-byte body still fits. The decoded body bound (32768 UTF-8 bytes) is unchanged.
+MAX_ASSET_BYTES = 256 * 1024
 MAX_NOTES_BYTES = 32768
 HEX40 = re.compile(r"[0-9a-f]{40}")
 HEX64 = re.compile(r"[0-9a-f]{64}")
@@ -59,26 +72,47 @@ def check(ok: bool, message: str) -> None:
         raise Refused(message)
 
 
-# --- shared identity (core #420 schema 1, docs/releases.md; mirror until #420 lands) ---
+# --- shared identity: #420 identity() + core canonical types; no parallel formula ---
+
+def contract_check(model, value, what: str):
+    try:
+        return model.model_validate(value)
+    except ValidationError as error:
+        raise Refused(f"{what} violates the canonical contract: {error.errors()[0]['msg']}") from None
+
 
 def release_identity(version: str, source_revision: str, body: str) -> dict:
     check(bool(HEX40.fullmatch(source_revision)), "source_revision must be a full 40-hex commit")
     check(version.isascii() and bool(version.strip()), "version must be nonblank ASCII")
-    raw = body.encode("utf-8")
-    check(bool(body.strip()) and len(raw) <= MAX_NOTES_BYTES, "notes body must be nonblank and <= 32768 bytes")
-    fields = {"schema": 1, "version": version, "source_revision": source_revision,
-              "notes_sha256": hashlib.sha256(raw).hexdigest()}
-    rid = hashlib.sha256(json.dumps(fields, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
-    return {**fields, "release_id": rid}
+    check(bool(body.strip()) and len(body.encode("utf-8")) <= MAX_NOTES_BYTES, "notes body must be nonblank and <= 32768 bytes")
+    return identity(version, source_revision, body)
 
 
 def validate_metadata(build: dict, notes: dict) -> None:
-    check(set(build) == {"schema", "version", "source_revision", "notes_sha256", "release_id"},
-          "build-info.json must have exactly schema/version/source_revision/notes_sha256/release_id")
-    check(set(notes) == {"schema", "release_id", "body"}, "release-notes.json must have exactly schema/release_id/body")
-    expected = release_identity(build["version"], build["source_revision"], notes["body"])
-    check(build == expected, "build-info.json does not match its notes/identity")
-    check(notes["schema"] == 1 and notes["release_id"] == build["release_id"], "release-notes.json is for another release")
+    for name, doc in (("build-info.json", build), ("release-notes.json", notes)):
+        check(isinstance(doc, dict) and type(doc.get("schema")) is int, f"{name} schema must be the integer 1 (not bool/float)")
+    try:
+        contract.metadata(build, notes)
+    except (ValidationError, ValueError) as error:
+        raise Refused(f"build-info/release-notes pair invalid: {str(error).splitlines()[0]}") from None
+
+
+def android_build(build: dict, fields: dict, tree_sha256: str, batch_id: str, abis: list[str]) -> dict:
+    record = {"format": "manadj_android_build/v1", "release_id": build["release_id"], "package": fields["package"],
+              "version_code": fields["version_code"], "version_name": fields["version_name"],
+              "source_revision": build["source_revision"], "source_tree_sha256": tree_sha256,
+              "build_batch_id": batch_id, "notes_sha256": build["notes_sha256"],
+              "min_sdk": fields["min_sdk"], "target_sdk": fields["target_sdk"], "abis": sorted(abis)}
+    contract_check(contract.AndroidBuild, record, "android-build.json")
+    return record
+
+
+def validate_triple(build: dict, notes: dict, android: dict) -> None:
+    validate_metadata(build, notes)
+    contract_check(contract.AndroidBuild, android, "android-build.json")
+    for key, expected in (("release_id", build["release_id"]), ("source_revision", build["source_revision"]),
+                          ("notes_sha256", build["notes_sha256"]), ("version_name", build["version"])):
+        check(android[key] == expected, f"android-build.json {key} disagrees with build-info.json")
 
 
 # --- source ---
@@ -184,14 +218,19 @@ def entries_digest(entries: dict[str, str]) -> str:
     return hashlib.sha256("".join(f"{k}\0{v}\n" for k, v in sorted(entries.items())).encode()).hexdigest()
 
 
-def embedded_metadata(apk: Path) -> tuple[dict, dict] | None:
+def embedded_metadata(apk: Path) -> tuple[dict, dict, dict] | None:
+    """(build-info, release-notes, android-build) from assets/manadj-release/; None = unstamped. Partial = refused."""
     with zipfile.ZipFile(apk) as z:
         names = set(z.namelist())
-        b, n = f"assets/{ASSET_DIR}/build-info.json", f"assets/{ASSET_DIR}/release-notes.json"
-        if b not in names and n not in names:
+        paths = [f"assets/{ASSET_DIR}/{name}" for name in ASSET_FILES]
+        present = [p in names for p in paths]
+        if not any(present):
             return None
-        check(b in names and n in names, "APK carries only one of build-info/release-notes")
-        return json.loads(z.read(b)), json.loads(z.read(n))
+        check(all(present), f"APK carries a partial release identity: {[p for p, ok in zip(paths, present) if ok]}")
+        for p in paths:
+            check(z.getinfo(p).file_size <= MAX_ASSET_BYTES, f"{p} exceeds {MAX_ASSET_BYTES} bytes")
+        build, notes, android = (json.loads(z.read(p).decode("utf-8")) for p in paths)
+        return build, notes, android
 
 
 def sha256_file(path: Path) -> str:
@@ -211,19 +250,29 @@ def write_receipt(path: Path, data: dict) -> None:
 
 # --- stages ---
 
-def stamp(rev: str, notes_file: Path, out: Path) -> dict:
+def stamp(rev: str, notes_file: Path, out: Path, *, batch_id: str | None = None,
+          abis: list[str] | tuple[str, ...] = DEFAULT_ABIS, require_checkout_match: bool = True) -> dict:
+    """The one triple stamper (core producer delegates here). Notes are the file's exact UTF-8 bytes."""
     commit = full_commit(rev)
+    if require_checkout_match:
+        require_checkout(commit)
     fields = gradle_fields(jj("file", "show", "-r", commit, GRADLE))
-    body = notes_file.read_text(encoding="utf-8").strip()
+    body = notes_file.read_bytes().decode("utf-8")
     build = release_identity(fields["version_name"], commit, body)
     notes = {"schema": 1, "release_id": build["release_id"], "body": body}
-    validate_metadata(build, notes)
+    manifest_text, _ = source_manifest(commit)
+    android = android_build(build, fields, hashlib.sha256(manifest_text.encode()).hexdigest(),
+                            batch_id or str(uuid.uuid4()), list(abis))
+    validate_triple(build, notes, android)
     target = out / ASSET_DIR
     check(not target.exists(), f"refusing to overwrite {target}")
     target.mkdir(parents=True)
-    (target / "build-info.json").write_text(json.dumps(build) + "\n")
-    (target / "release-notes.json").write_text(json.dumps(notes) + "\n")
-    return {**build, "gradle_flag": f"-Pmanadj.releaseMetadataDir={out.resolve()}"}
+    encoded = [contract.canonical(v) for v in (build, notes, android)]
+    for name, data in zip(ASSET_FILES, encoded):
+        check(len(data) <= MAX_ASSET_BYTES, f"{name} would exceed {MAX_ASSET_BYTES} bytes")
+    for name, data in zip(ASSET_FILES, encoded):
+        (target / name).write_bytes(data)
+    return {"build_info": build, "android_build": android, "gradle_flag": f"-Pmanadj.releaseMetadataDir={out.resolve()}"}
 
 
 def verify_unsigned(apk: Path, rev: str, *, expect_package: str = EXPECTED_PACKAGE,
@@ -249,26 +298,29 @@ def verify_unsigned(apk: Path, rev: str, *, expect_package: str = EXPECTED_PACKA
     check(sign_code != 0, "apksigner verifies an APK that must be unsigned")
     align_code, align_out = run([tools["zipalign"], "-c", "-P", "16", "-v", "4", str(apk)])
     check(align_code == 0, "zipalign -c -P 16 -v 4 failed")
+    manifest_text, files = source_manifest(commit)
+    tree = hashlib.sha256(manifest_text.encode()).hexdigest()
     embedded = embedded_metadata(apk)
     if embedded is None:
         check(not require_metadata, f"APK lacks assets/{ASSET_DIR}/ release identity (stamp + -Pmanadj.releaseMetadataDir)")
-        identity = None
+        release, android = None, None
     else:
-        build, notes = embedded
-        validate_metadata(build, notes)
-        check(build["source_revision"] == commit, f"embedded source_revision {build['source_revision'][:12]} != pin {commit[:12]}")
-        check(build["version"] == source["version_name"], "embedded version != versionName")
-        identity = build
-    manifest_text, files = source_manifest(commit)
+        release, notes, android = embedded
+        validate_triple(release, notes, android)
+        check(release["source_revision"] == commit, f"embedded source_revision {release['source_revision'][:12]} != pin {commit[:12]}")
+        check(android["source_tree_sha256"] == tree, "embedded source_tree_sha256 != pinned source tree")
+        for key in ("package", "version_code", "version_name", "min_sdk", "target_sdk"):
+            check(android[key] == badging[key], f"embedded {key} {android[key]} != APK {badging[key]}")
+        check(android["abis"] == sorted(badging["abis"]), f"embedded ABIs {android['abis']} != APK {sorted(badging['abis'])}")
     return {
         "schema": "manadj_android_release/v1", "stage": "unsigned",
         "apk_path": str(apk.resolve()), "apk_sha256": sha256_file(apk), "apk_bytes": apk.stat().st_size,
         "content_entries_sha256": entries_digest(content_entries(entries)),
-        "source_revision": commit, "source_tree_sha256": hashlib.sha256(manifest_text.encode()).hexdigest(),
+        "source_revision": commit, "source_tree_sha256": tree,
         "source_files": files,
         **{k: badging[k] for k in ("package", "label", "version_code", "version_name", "min_sdk", "target_sdk", "abis")},
         "debuggable": False,
-        "release_identity": identity,
+        "release_identity": release, "android_build": android,
         "checks": {"unsigned": f"apksigner verify exit {sign_code}: {sign_out.strip().splitlines()[-1] if sign_out.strip() else ''}",
                    "alignment": "zipalign -c -P 16 -v 4 exit 0", "signature_entries": []},
         "sdk_tools": tools,
@@ -296,7 +348,8 @@ def verify_signed(apk: Path, unsigned: dict, *, expect_cert: str = EXCALIBUR_CER
     align_code, _ = run([tools["zipalign"], "-c", "-P", "16", "-v", "4", str(apk)])
     check(align_code == 0, "signed APK fails zipalign -c -P 16 -v 4")
     embedded = embedded_metadata(apk)
-    check((embedded[0] if embedded else None) == unsigned["release_identity"], "embedded identity changed by signing")
+    check((embedded[0] if embedded else None) == unsigned["release_identity"]
+          and (embedded[2] if embedded else None) == unsigned.get("android_build"), "embedded identity changed by signing")
     return {
         "schema": "manadj_android_release/v1", "stage": "signed",
         "apk_path": str(apk.resolve()), "apk_sha256": sha256_file(apk), "apk_bytes": apk.stat().st_size,
@@ -304,40 +357,49 @@ def verify_signed(apk: Path, unsigned: dict, *, expect_cert: str = EXCALIBUR_CER
         "signer_cert_sha256": expect_cert,
         "schemes": {k: v for k, v in certs["schemes"].items() if v},
         **{k: unsigned[k] for k in ("source_revision", "source_tree_sha256", "package", "label", "version_code",
-                                    "version_name", "min_sdk", "target_sdk", "abis", "release_identity")},
+                                    "version_name", "min_sdk", "target_sdk", "abis", "release_identity", "android_build")},
         "sdk_tools": tools,
     }
 
 
-def channel_entry(signed: dict, url: str) -> dict:
+def channel_entry(signed: dict, qa_receipt_sha256s: list[str]) -> dict:
+    """Canonical contract.Entry; the APK URL is derived, never supplied: same Pages origin, immutable path."""
     check(signed.get("stage") == "signed", "channel entries come from a signed receipt")
-    check(url.startswith("https://"), "artifact URL must be HTTPS")
-    identity = signed["release_identity"]
-    check(identity is not None, "unstamped APK cannot be offered: the app could never verify it as applied")
+    release, android = signed.get("release_identity"), signed.get("android_build")
+    check(release is not None and android is not None,
+          "unstamped APK cannot be offered: the app could never verify it as applied")
     check(signed["package"] == EXPECTED_PACKAGE and signed["signer_cert_sha256"] == EXCALIBUR_CERT,
           "channel offers only the pinned package/signer")
-    # Entry of manadj_android_channel/v1 (native #419 proposal); package/signer live at channel level.
-    return {"release_id": identity["release_id"], "version_code": signed["version_code"],
-            "version_name": signed["version_name"], "min_sdk": signed["min_sdk"], "abis": signed["abis"],
-            "source_revision": signed["source_revision"], "notes_sha256": identity["notes_sha256"],
-            "apk_url": url, "apk_sha256": signed["apk_sha256"], "apk_bytes": signed["apk_bytes"]}
+    entry = {"release_id": release["release_id"], "version_code": signed["version_code"],
+             "version_name": signed["version_name"], "min_sdk": signed["min_sdk"], "abis": android["abis"],
+             "source_revision": signed["source_revision"], "source_tree_sha256": android["source_tree_sha256"],
+             "build_batch_id": android["build_batch_id"], "notes_sha256": release["notes_sha256"],
+             "apk_url": f"{contract.FEED_ORIGIN}/android/artifacts/{release['release_id']}/{signed['apk_sha256']}.apk",
+             "apk_sha256": signed["apk_sha256"], "apk_bytes": signed["apk_bytes"],
+             "qa_receipt_sha256s": sorted(set(qa_receipt_sha256s))}
+    contract_check(contract.Entry, entry, "channel entry")
+    return entry
 
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
     s = sub.add_parser("stamp"); s.add_argument("--rev", required=True); s.add_argument("--notes-file", type=Path, required=True); s.add_argument("--out", type=Path, required=True)
+    s.add_argument("--build-batch-id", help="UUID; default: fresh uuid4"); s.add_argument("--abis", nargs="+", default=list(DEFAULT_ABIS))
+    s.add_argument("--skip-checkout-check", action="store_true", help="stamp a pin other than the working copy (no build follows)")
     u = sub.add_parser("verify-unsigned"); u.add_argument("apk", type=Path); u.add_argument("--rev", required=True); u.add_argument("--out", type=Path, required=True)
     u.add_argument("--expect-package", default=EXPECTED_PACKAGE)
     u.add_argument("--allow-unstamped", action="store_true", help="legacy APK without embedded identity (reported as null)")
     u.add_argument("--skip-checkout-check", action="store_true", help="re-verify an existing APK; the pin's tree is still digested")
     v = sub.add_parser("verify-signed"); v.add_argument("apk", type=Path); v.add_argument("--unsigned-receipt", type=Path, required=True); v.add_argument("--out", type=Path, required=True)
     v.add_argument("--expect-cert", default=EXCALIBUR_CERT)
-    c = sub.add_parser("channel-entry"); c.add_argument("--signed-receipt", type=Path, required=True); c.add_argument("--url", required=True)
+    c = sub.add_parser("channel-entry"); c.add_argument("--signed-receipt", type=Path, required=True)
+    c.add_argument("--qa-receipt-sha256", nargs="+", required=True, help="SHA-256 of each bound QA receipt (>= 2)")
     a = ap.parse_args()
     try:
         if a.cmd == "stamp":
-            result = stamp(a.rev, a.notes_file, a.out)
+            result = stamp(a.rev, a.notes_file, a.out, batch_id=a.build_batch_id, abis=a.abis,
+                           require_checkout_match=not a.skip_checkout_check)
         elif a.cmd == "verify-unsigned":
             result = verify_unsigned(a.apk, a.rev, expect_package=a.expect_package,
                                      require_metadata=not a.allow_unstamped,
@@ -347,7 +409,7 @@ def main() -> int:
             result = verify_signed(a.apk, json.loads(a.unsigned_receipt.read_text()), expect_cert=a.expect_cert)
             write_receipt(a.out, result)
         else:
-            result = channel_entry(json.loads(a.signed_receipt.read_text()), a.url)
+            result = channel_entry(json.loads(a.signed_receipt.read_text()), a.qa_receipt_sha256)
     except Refused as error:
         print(f"REFUSED: {error}", file=sys.stderr)
         return 1

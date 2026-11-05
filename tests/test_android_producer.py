@@ -9,7 +9,7 @@ import pytest
 
 from backend.release_notes import identity
 from scripts.release import android_producer as p
-from scripts.release.android_channel_contract import CERT, PACKAGE, sha
+from scripts.release.android_channel_contract import CERT, PACKAGE, canonical, sha
 
 
 @pytest.fixture
@@ -192,6 +192,10 @@ def test_stamp_preserves_exact_notes_and_pins_batch_before_build(pipeline, tmp_p
     assert build.source_tree_sha256 == hashlib.sha256(b"pinned manifest\n").hexdigest()
     expected = identity(f["info"]["version"], f["info"]["source_revision"], body)
     assert p.read(out / "manadj-release/build-info.json") == expected
+    for name, value in (("build-info.json", expected),
+                        ("release-notes.json", {"schema": 1, "release_id": expected["release_id"], "body": body}),
+                        ("android-build.json", build.model_dump())):
+        assert (out / "manadj-release" / name).read_bytes() == canonical(value)
     apk = tmp_path / "stamped.zip"
     with zipfile.ZipFile(apk, "w") as archive:
         for path in (out / "manadj-release").iterdir():
@@ -221,5 +225,5 @@ def test_exact_native_5d0_maxbody_fixture_and_encoded_cap(tmp_path):
             assert info.release_id == build.release_id == "2acff59658cddeeda815028bfc4b53b4910babaa6df6b6860078b904e3eadf9d"
             assert parsed.body == "\x01" * 32768
         else:
-            with pytest.raises(ValueError, match="metadata too large"):
+            with pytest.raises(ValueError, match="metadata too large|exceeds"):
                 p.embedded(apk)

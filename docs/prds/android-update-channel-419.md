@@ -7,7 +7,7 @@ Port: now (Android #419; desktop #418 reuses #420 identity, not an Android block
 - Types: `scripts/release/android_channel_contract.py`.
 - Versioned generated schema: `scripts/release/android-update-v1.schema.json` (`$defs.Channel` is the native feed, not the tooling `document` wrapper).
 - Native parser vector: `tests/fixtures/android-channel-v1.sample.json`. **Synthetic fixture, no corresponding APK or offered release. Never publish it.**
-- Build/archive verifier: integrator-owned `scripts/release/android_release.py` at qualified correction `f6987af528efb69d5ac35e21312481bf1d2c146d`; old `9c4588a7` HOLD remains historical.
+- Build/archive verifier: integrator-owned `scripts/release/android_release.py`; source composition includes `fcc571d0c607a91c677f0bfc51796389e822f628` triple hooks (separate qualification), extending qualified payload-digest correction `f6987af528efb69d5ac35e21312481bf1d2c146d`. Old `9c4588a7` HOLD remains historical. Producer `stamp` and embedded reader delegate to this ONE implementation; no independent asset writer/ZIP reader.
 - Shared identity: reuse `backend.release_notes.identity` and `scripts.release.metadata` from #420 `ce63b1b3` source composition. No parallel release-ID formula. Its landing is not assumed.
 
 ## Identity and trust
