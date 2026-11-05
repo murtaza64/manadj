@@ -85,7 +85,9 @@ def artifact(root, apk, feed_value, receipt_value):
             atomic_bytes(destination, data)
         return {"format": "manadj_android_artifact_staged/v1", "state": "local-artifact-staged",
                 "url": entry.apk_url, "apk_sha256": entry.apk_sha256, "apk_bytes": entry.apk_bytes,
-                "sign_receipt_sha256": sha(receipt.model_dump()), "channel_sha256": sha(feed.model_dump())}
+                "sign_receipt_sha256": sha(receipt.model_dump()), "channel_sha256": sha(feed.model_dump()),
+                "staged_feed_sha256": hashlib.sha256(canonical(feed.model_dump()) + b"\n").hexdigest(),
+                "staged_feed_bytes": len(canonical(feed.model_dump()) + b"\n")}
 
 
 def heads(root):
@@ -144,6 +146,7 @@ def main():
     for flag in ("site-root", "feed", "sign-receipt", "out"):
         parser.add_argument("--" + flag, required=True)
     parser.add_argument("--apk")
+    parser.add_argument("--feed-bytes-out", help="Create-only exact canonical+newline feed bytes for the protected plan")
     parser.add_argument("--served-artifact")
     parser.add_argument("--expected-heads")
     parser.add_argument("--floor-code", type=int)
@@ -152,6 +155,9 @@ def main():
     if args.command == "artifact":
         require(args.apk is not None, "--apk required")
         result = artifact(args.site_root, args.apk, feed, receipt)
+        if args.feed_bytes_out:
+            with safe(args.feed_bytes_out).open("xb") as output:
+                output.write(canonical(Channel.model_validate(feed).model_dump()) + b"\n")
     else:
         require(args.served_artifact and args.expected_heads and args.floor_code is not None,
                 "--served-artifact, --expected-heads and --floor-code required")
