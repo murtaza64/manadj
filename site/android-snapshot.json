@@ -1,10 +1,10 @@
 {
   "format": "manadj_android_snapshot/v1",
-  "sha256": "ef0906deba58af256462e1ca58227f9aad9ea0958c632834213b206d75b1d17c",
+  "sha256": "c4e03976f9c82df583d1a02d7060b9bf19b9106d7d1fa44b5931b55a78ea9e5c",
   "bytes": 15134720,
-  "url": "https://github.com/murtaza64/manadj/releases/download/android-snapshot-ef0906deba58af256462e1ca58227f9aad9ea0958c632834213b206d75b1d17c/android-snapshot-ef0906deba58af256462e1ca58227f9aad9ea0958c632834213b206d75b1d17c.tar",
+  "url": "https://github.com/murtaza64/manadj/releases/download/android-snapshot-c4e03976f9c82df583d1a02d7060b9bf19b9106d7d1fa44b5931b55a78ea9e5c/android-snapshot-c4e03976f9c82df583d1a02d7060b9bf19b9106d7d1fa44b5931b55a78ea9e5c.tar",
   "heads": {
-    "stable": null,
+    "stable": "3335beef1ac7596e0ed58ad8467385ed8ba3edbedf2ef5a9411d06fbb3b47e21",
     "preview": null
   }
 }
