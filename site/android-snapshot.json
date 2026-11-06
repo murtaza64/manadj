@@ -1,0 +1,10 @@
+{
+  "format": "manadj_android_snapshot/v1",
+  "sha256": "ef0906deba58af256462e1ca58227f9aad9ea0958c632834213b206d75b1d17c",
+  "bytes": 15134720,
+  "url": "https://github.com/murtaza64/manadj/releases/download/android-snapshot-ef0906deba58af256462e1ca58227f9aad9ea0958c632834213b206d75b1d17c/android-snapshot-ef0906deba58af256462e1ca58227f9aad9ea0958c632834213b206d75b1d17c.tar",
+  "heads": {
+    "stable": null,
+    "preview": null
+  }
+}
