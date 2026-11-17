@@ -17,7 +17,7 @@ orchestration, reporting vocabulary). This doc states only what manadj does
    lander. The landing merge pins the exact `main` verified against; retries
    when `main` moves are new merges, never rewrites; `main` only ever moves to
    a descendant of itself. Rebase is an intra-lane cleanup tool only; catch up
-   with trunk by merging it into your lane at issue boundaries.
+   with trunk by merging it into your lane at issue boundaries. Changes may also land through a GitHub PR merged into main. Existing review and approval requirements still apply, and CI must pass before merging. Local checkouts must sync with the merged remote main before further landing work.
 3. **Auto-land policy** (canon parks everything): bugfixes, incidental
    maintenance, and the docs fast-path auto-land after agent-owned
    verification; feature work and tracked refactors park (`parked` label +
