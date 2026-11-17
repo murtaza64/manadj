@@ -127,3 +127,24 @@ def test_done_tasks_are_not_rerun(db_session: Session) -> None:
     run_pending(db_session, {"t": handler})
     run_pending(db_session, {"t": handler})
     assert count == 1
+
+
+def test_interactive_imports_run_ahead_of_background_backlog(db_session: Session) -> None:
+    order: list[str] = []
+
+    def handler(db: Session, payload: dict[str, Any]) -> None:
+        order.append(payload["n"])
+
+    create_task(db_session, "waveform", {"n": "wave1"})
+    create_task(db_session, "waveform", {"n": "wave2"})
+    create_task(db_session, "tracks-directory-import", {"n": "scan"})
+    create_task(db_session, "rekordbox-onboarding-import", {"n": "rb"})
+    run_pending(
+        db_session,
+        {
+            "waveform": handler,
+            "tracks-directory-import": handler,
+            "rekordbox-onboarding-import": handler,
+        },
+    )
+    assert order == ["scan", "rb", "wave1", "wave2"]

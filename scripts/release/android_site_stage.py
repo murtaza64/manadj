@@ -9,11 +9,16 @@ from __future__ import annotations
 
 import argparse
 from contextlib import contextmanager
-import fcntl
 import hashlib
 import os
 from pathlib import Path
+import sys
 import tempfile
+
+if sys.platform == "win32":
+    import msvcrt
+else:
+    import fcntl
 
 from scripts.release.android_channel_contract import Channel, SignReceipt, canonical, sha
 from scripts.release.android_producer import read, require, write
@@ -31,9 +36,28 @@ def locked(root):
     root = safe(root)
     require(root.is_dir(), "Build the existing site first; staging root must exist")
     lock = safe(root.parent / f".{root.name}.android-stage.lock")
-    with lock.open("a") as handle:
+    with lock.open("a+b") as handle:
+        _lock(handle)
+        try:
+            yield root
+        finally:
+            _unlock(handle)
+
+
+def _lock(handle):
+    if sys.platform == "win32":
+        handle.seek(0)
+        msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+    else:
         fcntl.flock(handle, fcntl.LOCK_EX)
-        yield root
+
+
+def _unlock(handle):
+    if sys.platform == "win32":
+        handle.seek(0)
+        msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+    else:
+        fcntl.flock(handle, fcntl.LOCK_UN)
 
 
 def bind(feed_value, receipt_value):

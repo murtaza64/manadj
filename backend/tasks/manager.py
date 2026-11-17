@@ -28,6 +28,12 @@ BACKOFF_MINUTES = (5, 10, 20, 40, 80)
 MAX_ATTEMPTS = len(BACKOFF_MINUTES)
 
 
+# User-initiated onboarding imports jump ahead of background analysis work
+# (issue #335): a folder scan must not wait behind ~1,000 queued waveform
+# tasks. Everything else stays FIFO at the default priority.
+INTERACTIVE_TASK_TYPES = ("rekordbox-onboarding-import", "tracks-directory-import")
+
+
 class Deferred(Exception):  # noqa: N818 — control-flow signal, not an error
     """Raised by a handler to say "not ready yet — poll me again later".
 
@@ -92,7 +98,8 @@ def run_pending(
     delays: dict[str, float] | None = None,
     sleep: Callable[[float], None] = time.sleep,
 ) -> int:
-    """Run all pending tasks THIS worker has handlers for, oldest first.
+    """Run all pending tasks THIS worker has handlers for, oldest first
+    (interactive onboarding imports ahead of everything else).
     Returns the number processed.
 
     Tasks of other types are left pending — a worker without a handler
@@ -120,7 +127,7 @@ def run_pending(
                 Task.type.in_(handlers.keys()),
                 (Task.not_before.is_(None)) | (Task.not_before <= now),
             )
-            .order_by(Task.id)
+            .order_by(Task.type.in_(INTERACTIVE_TASK_TYPES).desc(), Task.id)
             .first()
         )
         if task is None:
