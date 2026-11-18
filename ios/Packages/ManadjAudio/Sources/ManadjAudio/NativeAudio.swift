@@ -39,6 +39,12 @@ private final class RenderContext: @unchecked Sendable {
     }
 }
 
+// Construct outside NativeAudio's MainActor context. AVAudioSourceNode invokes this
+// on the real-time audio thread; inheriting MainActor isolation traps in Swift 6.
+private func makeSourceNode(context: RenderContext, format: AVAudioFormat) -> AVAudioSourceNode {
+    AVAudioSourceNode(format: format) { _, _, count, output in context.render(count, output) }
+}
+
 public struct AudioFailure: Error, LocalizedError, Sendable {
     public let message: String
     public init(_ message: String) { self.message = message }
@@ -68,7 +74,7 @@ private final class NotificationTokens: @unchecked Sendable {
         handle = engine
         let context = RenderContext(engine)
         let format = AVAudioFormat(standardFormatWithSampleRate: 48_000, channels: 2)!
-        node = AVAudioSourceNode(format: format) { _, _, count, output in context.render(count, output) }
+        node = makeSourceNode(context: context, format: format)
         graph.attach(node)
         graph.connect(node, to: graph.mainMixerNode, format: format)
         let center = NotificationCenter.default
