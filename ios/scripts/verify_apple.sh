@@ -41,7 +41,7 @@ trap 'touch "$STOP"; wait "$MONITOR_PID" || true' EXIT
 PRIMARY_STATUS=0
 xcodebuild -project ios/Manadj.xcodeproj -scheme Manadj -sdk iphonesimulator \
   -destination "platform=iOS Simulator,id=$DESTINATION_UDID" -derivedDataPath ios/.derived-data \
-  -resultBundlePath "$RESULT" CODE_SIGNING_ALLOWED=NO ONLY_ACTIVE_ARCH=YES ARCHS="$HOST_ARCH" test || PRIMARY_STATUS=$?
+  -parallel-testing-enabled NO -maximum-concurrent-test-simulator-destinations 1 -resultBundlePath "$RESULT" CODE_SIGNING_ALLOWED=NO ONLY_ACTIVE_ARCH=YES ARCHS="$HOST_ARCH" test || PRIMARY_STATUS=$?
 touch "$STOP"
 wait "$MONITOR_PID" || true
 trap - EXIT
@@ -56,7 +56,11 @@ for devices in r.values():
 ')
 SMALL_STATUS=0
 if [[ -n "$SMALL_UDID" ]]; then
+  xcrun simctl shutdown "$DESTINATION_UDID" || true
+  xcrun simctl boot "$SMALL_UDID" || true
+  xcrun simctl bootstatus "$SMALL_UDID" -b
   xcodebuild -project ios/Manadj.xcodeproj -scheme Manadj -sdk iphonesimulator \
+    -parallel-testing-enabled NO -maximum-concurrent-test-simulator-destinations 1 \
     -destination "platform=iOS Simulator,id=$SMALL_UDID" -derivedDataPath ios/.derived-data \
     -only-testing:ManadjUITests/WorkspaceUITests/testStandardWorkspaceSettingsAndPitch \
     -resultBundlePath ios/.test-results/SmallPhone.xcresult CODE_SIGNING_ALLOWED=NO ONLY_ACTIVE_ARCH=YES ARCHS="$HOST_ARCH" test || SMALL_STATUS=$?
