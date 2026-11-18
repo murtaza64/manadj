@@ -41,14 +41,18 @@ struct PerformanceDeckControls: View {
                 }.frame(height: compact ? 80 : 104)
                 HStack(spacing: 0) {
                     Button("½") { model.set(MDJLoopResize, index, 0, slot: 0) }
+                    Rectangle().fill(color.opacity(0.5)).frame(width: 1).padding(.vertical, 10)
                     Button("⟳ LOOP \(Int(state.loopBeats))") { model.set(MDJLoopToggle, index, 0) }
+                    Rectangle().fill(color.opacity(0.5)).frame(width: 1).padding(.vertical, 10)
                     Button("2×") { model.set(MDJLoopResize, index, 0, slot: 1) }
-                }.buttonStyle(PerformanceKeyStyle(color: color, active: state.loopActive)).frame(height: row).disabled(!state.ready || state.bpm <= 0)
+                }.buttonStyle(PerformanceStripStyle(color: color)).background(state.loopActive ? color.opacity(0.15) : Color.clear).clipShape(Capsule()).overlay(Capsule().stroke(color.opacity(0.7), lineWidth: 1.5)).padding(3).frame(height: row).disabled(!state.ready || state.bpm <= 0)
                 HStack(spacing: 0) {
                     Button("◀") { model.set(MDJBeatJump, index, -jump) }
+                    Rectangle().fill(color.opacity(0.5)).frame(width: 1).padding(.vertical, 10)
                     Button("JUMP \(Int(jump))") { jump = jump >= 64 ? 1 : jump * 2 }
+                    Rectangle().fill(color.opacity(0.5)).frame(width: 1).padding(.vertical, 10)
                     Button("▶") { model.set(MDJBeatJump, index, jump) }
-                }.buttonStyle(PerformanceKeyStyle(color: color)).frame(height: row).disabled(!state.ready)
+                }.buttonStyle(PerformanceStripStyle(color: color)).clipShape(Capsule()).overlay(Capsule().stroke(color.opacity(0.7), lineWidth: 1.5)).padding(3).frame(height: row).disabled(!state.ready)
                 onTransport().frame(height: row + 8)
                 HStack(spacing: 0) {
                     HoldControl(title: "−", color: color, enabled: state.ready, down: { model.set(MDJBend, index, -4) }, up: { model.set(MDJBend, index, 0) }).padding(3)

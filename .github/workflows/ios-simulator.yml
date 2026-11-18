@@ -39,10 +39,12 @@ jobs:
           mkdir -p ios/.test-results/export
           for result in ios/.test-results/*.xcresult; do
             [ -d "$result" ] || continue
-            xcrun xcresulttool get test-results summary --path "$result" | tee ios/.test-results/export/summary.json
-            xcrun xcresulttool get test-results tests --path "$result" | tee ios/.test-results/export/tests.json
-            xcrun xcresulttool export diagnostics --path "$result" --output-path ios/.test-results/export/diagnostics || true
-            xcrun xcresulttool export attachments --path "$result" --output-path ios/.test-results/export/attachments || true
+            destination="ios/.test-results/export/$(basename "$result" .xcresult)"
+            mkdir -p "$destination"
+            xcrun xcresulttool get test-results summary --path "$result" | tee "$destination/summary.json"
+            xcrun xcresulttool get test-results tests --path "$result" | tee "$destination/tests.json"
+            xcrun xcresulttool export diagnostics --path "$result" --output-path "$destination/diagnostics" || true
+            xcrun xcresulttool export attachments --path "$result" --output-path "$destination/attachments" || true
           done
           find ios/.test-results/export -type f -name '*.ips' -exec cat {} \;
       - name: Preserve test evidence

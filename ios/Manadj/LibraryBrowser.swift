@@ -3,6 +3,7 @@ import ManadjCore
 
 struct LibraryBrowser: View {
     @EnvironmentObject var model: AppModel
+    var onClose: () -> Void = {}
     var onLoad: (LibraryTrack) -> Bool
     @FocusState private var searchFocused: Bool
     @State private var restoreSearchAfterError = false
@@ -22,31 +23,37 @@ struct LibraryBrowser: View {
     var body: some View {
         VStack(spacing: 0) {
             VStack(spacing: 8) {
-                HStack {
-                    Text("LIBRARY").font(Ink.font(16, bold: true))
-                    Spacer()
-                    Menu("LOAD → \(Ink.deckName(model.loadTarget))") { ForEach(0..<4) { index in Button("Deck \(Ink.deckName(index))") { model.loadTarget = index } } }
-                    Button { model.sync() } label: { Image(systemName: "arrow.triangle.2.circlepath").frame(width: 44, height: 44) }.disabled(model.busy)
+                HStack(spacing: 8) {
+                    Button("← A") { model.loadTarget = 0 }.foregroundStyle(Ink.decks[0]).frame(minWidth: 44, minHeight: 44)
+                    Text("SWIPE A TRACK TO LOAD").font(Ink.font(9, bold: true)).foregroundStyle(Ink.muted).lineLimit(1).minimumScaleFactor(0.7)
+                    Spacer(minLength: 0)
+                    Button("B →") { model.loadTarget = 1 }.foregroundStyle(Ink.decks[1]).frame(minWidth: 44, minHeight: 44)
+                    Button("BROWSE", action: onClose).buttonStyle(PerformanceKeyStyle(color: Ink.warning, active: true)).frame(width: 76, height: 44)
                 }
                 HStack {
                     Image(systemName: "magnifyingglass").foregroundStyle(Ink.muted)
                     TextField("Search title, artist, file", text: $search).textInputAutocapitalization(.never).autocorrectionDisabled().submitLabel(.search).focused($searchFocused)
                     if !search.isEmpty { Button { search = ""; searchFocused = true } label: { Image(systemName: "xmark").frame(width: 44, height: 44) }.accessibilityLabel("Clear search") }
-                }.padding(.leading, 12).frame(minHeight: 44).background(Ink.crust).overlay(Rectangle().stroke(Ink.edge))
+                }.padding(.leading, 12).frame(minHeight: 44).background(Ink.crust, in: Capsule()).overlay(Capsule().stroke(Ink.edge))
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
                         Menu(playlist.flatMap { id in model.snapshot?.playlists.first { $0.id == id }?.name } ?? "ALL TRACKS") {
                             Button("All tracks") { playlist = nil }
                             ForEach(model.snapshot?.playlists ?? []) { p in Button(p.name) { playlist = p.id; sort = .playOrder } }
-                        }.buttonStyle(FlatButtonStyle())
-                        Menu("SORT: \(sort.rawValue.uppercased())") { ForEach(SortColumn.allCases, id: \.rawValue) { c in Button(c.rawValue) { sort = c } } }.buttonStyle(FlatButtonStyle())
-                        Button("OFFLINE") { downloadedOnly.toggle() }.buttonStyle(FlatButtonStyle(active: downloadedOnly))
+                        }.buttonStyle(LibraryChipStyle())
+                        Menu("\(sort.rawValue.uppercased()) ▼") { ForEach(SortColumn.allCases, id: \.rawValue) { c in Button(c.rawValue) { sort = c } } }.buttonStyle(LibraryChipStyle())
+                        Button("● ON PHONE \(model.downloaded.count)") { downloadedOnly.toggle() }.buttonStyle(LibraryChipStyle(active: downloadedOnly))
                         Menu(tag.flatMap { id in model.snapshot?.tags.first { $0.id == id }?.name } ?? "TAGS") {
                             Button("Any tag") { tag = nil }
                             ForEach(model.snapshot?.tags ?? [], id: \.id) { t in Button(t.name) { tag = t.id } }
-                        }.buttonStyle(FlatButtonStyle(active: tag != nil))
-                        Menu(energy == 0 ? "ENERGY" : "ENERGY \(energy)") { Button("Any energy") { energy = 0 }; ForEach(1...5, id: \.self) { n in Button("Energy \(n)") { energy = n } } }.buttonStyle(FlatButtonStyle(active: energy > 0))
+                        }.buttonStyle(LibraryChipStyle(active: tag != nil))
+                        Menu(energy == 0 ? "ENERGY" : "ENERGY \(energy)") { Button("Any energy") { energy = 0 }; ForEach(1...5, id: \.self) { n in Button("Energy \(n)") { energy = n } } }.buttonStyle(LibraryChipStyle(active: energy > 0))
                     }
+                }
+                HStack {
+                    Text("BROWSE  ›  " + (playlist == nil ? "COLLECTION" : "PLAYLIST")).font(Ink.font(11, bold: true)).foregroundStyle(Ink.accent)
+                    Spacer()
+                    Button { model.sync() } label: { Image(systemName: "arrow.triangle.2.circlepath").frame(width: 44, height: 44) }.disabled(model.busy).accessibilityLabel("Sync library")
                 }
                 if let followReference {
                     HStack {
@@ -74,9 +81,11 @@ struct LibraryBrowser: View {
                         if onLoad(track) { searchFocused = false }
                         else { restoreSearchAfterError = wasSearching }
                     } label: {
-                        LibraryRow(track: track, downloaded: model.downloaded.contains(track.id), evidence: followLabels[track.id])
+                        LibraryRow(track: track, downloaded: model.downloaded.contains(track.id), evidence: followLabels[track.id]).environmentObject(model)
                     }
                     .buttonStyle(.plain)
+                    .swipeActions(edge: .leading, allowsFullSwipe: true) { Button("LOAD A") { model.loadTarget = 0; if onLoad(track) { searchFocused = false } }.tint(Ink.decks[0]) }
+                    .swipeActions(edge: .trailing, allowsFullSwipe: true) { Button("LOAD B") { model.loadTarget = 1; if onLoad(track) { searchFocused = false } }.tint(Ink.decks[1]) }
                     .listRowBackground(Ink.base)
                     .listRowSeparatorTint(Ink.edge)
                     .contextMenu { Button("Follow this track") { followReference = track.id }; ForEach(0..<4) { index in Button("Load deck \(Ink.deckName(index))") { if model.load(track, deck: index) { searchFocused = false } } } }
@@ -113,22 +122,47 @@ struct LibraryBrowser: View {
     }
 }
 
+private struct LibraryChipStyle: ButtonStyle {
+    var active = false
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label.font(Ink.font(11, bold: true)).lineLimit(1).padding(.horizontal, 11).frame(minHeight: 36)
+            .foregroundStyle(active ? Ink.play : Ink.text)
+            .background(active || configuration.isPressed ? Ink.accent.opacity(0.18) : Ink.crust, in: Capsule())
+            .overlay(Capsule().stroke(active ? Ink.accent : Ink.edge, lineWidth: 1))
+    }
+}
+
 private struct LibraryRow: View {
+    @EnvironmentObject var model: AppModel
     let track: LibraryTrack
     let downloaded: Bool
     let evidence: String?
+    @State private var waveform: PreviewWaveform?
     var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: downloaded ? "checkmark.circle.fill" : "icloud.and.arrow.down").foregroundStyle(downloaded ? Ink.play : Ink.muted).frame(width: 24).accessibilityLabel(downloaded ? "Downloaded" : "Download required")
-            VStack(alignment: .leading, spacing: 4) {
-                Text(track.title).font(Ink.font(16, bold: true)).foregroundStyle(Ink.text).lineLimit(2)
-                Text(track.artist ?? track.fileName).font(Ink.font(12)).foregroundStyle(Ink.muted).lineLimit(1)
-                if let evidence { Text(evidence).font(Ink.font(11)).foregroundStyle(Ink.accent) }
-            }.frame(maxWidth: .infinity, alignment: .leading)
-            VStack(alignment: .trailing, spacing: 4) {
-                Text(track.bpm.map { String(format: "%.1f", $0) } ?? "--")
-                Text("\(track.keyOpenKey ?? "--") · \(track.durationSecs.map(Ink.clock) ?? "--:--")").foregroundStyle(Ink.muted)
-            }.font(Ink.font(12)).monospacedDigit()
-        }.padding(.vertical, 8).frame(minHeight: 64)
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(alignment: .top, spacing: 10) {
+                VStack(spacing: 2) {
+                    Text(track.bpm.map { String(format: "%.1f", $0) } ?? "--").foregroundStyle(Ink.decks[1])
+                    Text(track.keyOpenKey ?? "--").foregroundStyle(Ink.play)
+                }.font(Ink.font(12, bold: true)).frame(width: 48)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(track.title).font(Ink.font(15, bold: true)).foregroundStyle(Ink.text).lineLimit(1)
+                    Text(track.artist ?? track.fileName).font(Ink.font(11)).foregroundStyle(Ink.muted).lineLimit(1)
+                }.frame(maxWidth: .infinity, alignment: .leading)
+                Image(systemName: downloaded ? "checkmark.circle.fill" : "icloud.and.arrow.down").font(.system(size: 11)).foregroundStyle(downloaded ? Ink.play : Ink.muted).accessibilityLabel(downloaded ? "Downloaded" : "Download required")
+            }
+            HStack(spacing: 6) {
+                WaveformView(waveform: waveform, color: Ink.accent).frame(width: 102, height: 16)
+                ForEach(track.tagIds.prefix(3), id: \.self) { id in
+                    if let tag = model.snapshot?.tags.first(where: { $0.id == id }) {
+                        Text(tag.name).font(Ink.font(9)).foregroundStyle(Ink.accent).padding(.horizontal, 3).background(Ink.accent.opacity(0.15), in: RoundedRectangle(cornerRadius: 3))
+                    }
+                }
+                Spacer(minLength: 0)
+                Text(track.durationSecs.map(Ink.clock) ?? "--:--").font(Ink.font(9)).foregroundStyle(Ink.muted)
+            }
+            if let evidence { Text(evidence).font(Ink.font(10)).foregroundStyle(Ink.accent) }
+        }.padding(.vertical, 5).frame(minHeight: 54)
+        .task(id: track.previewRev) { waveform = await model.preview(track) }
     }
 }

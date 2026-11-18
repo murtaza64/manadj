@@ -57,3 +57,11 @@ This is a review ledger, not release acceptance. Android is a baseline, not a re
 - Apple: https://developer.apple.com/documentation/swiftui/view/glasseffect(_:in:)
 - Apple: https://developer.apple.com/documentation/technologyoverviews/adopting-liquid-glass.md
 - Apple accessibility discussion: https://developer.apple.com/videos/play/wwdc2025/219/
+
+## Apple HIG synthesis, November 18 review
+
+Sources checked live: https://developer.apple.com/design/human-interface-guidelines/layout.md , https://developer.apple.com/design/human-interface-guidelines/buttons.md , https://developer.apple.com/design/human-interface-guidelines/accessibility.md .
+
+Apple's general button guidance calls for 44x44pt hit regions, clear custom press states and space between controls. The current accessibility table distinguishes 44x44pt default from 28x28pt minimum, not permission to make every control tiny. Layout guidance requires safe areas and text-size adaptation. Our current dense dual-deck layout has not passed that bar on the smallest phone or large Dynamic Type. A clipped-but-green UI test is not acceptance. Small-phone capture is now a separate test destination, and compact-layout tradeoffs must be visible in review rather than quietly shrinking text or hiding controls.
+
+Broader differences tracked after the first real iOS screenshot: segmented loop/jump capsules, cue timestamps, mirrored SHIFT/stem rows, jump default32, fader rail/handle semantics and level fill, cue/filter color drift, browser navigation/chips/swipe-load structure. The waveform fill normalization matches Android's99th-percentile rule, including its1..3 gain cap. Heard-time alignment, true scratch, EQ-history lobes and physical haptic feel are still missing even after these improvements.

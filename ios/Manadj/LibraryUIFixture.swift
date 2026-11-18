@@ -25,6 +25,23 @@ extension AppModel {
         } catch { self.error = error.localizedDescription }
     }
 
+    static func makePerformanceUIFixture() -> URL? {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("performance-ui-" + UUID().uuidString)
+        do {
+            let store = try LibraryStore(root: root.appendingPathComponent("library"))
+            let text = #"{"version":1,"tag_categories":[],"tags":[],"settings":{},"playlists":[],"tracks":[{"id":1,"file_name":"synthetic-A.wav","title":"Synthetic pulse A","artist":"Generated PCM, no music source","bpm":128,"duration_secs":24,"audio_rev":"fixture","preview_rev":"fixture"},{"id":2,"file_name":"synthetic-B.wav","title":"Synthetic pulse B","artist":"Generated PCM, no music source","bpm":128,"duration_secs":24,"audio_rev":"fixture","preview_rev":"fixture"}]}"#
+            try store.saveSnapshot(text)
+            for (i, track) in try SnapshotJson.parse(text).tracks.enumerated() {
+                let name = "synthetic-" + ["A", "B"][i]
+                guard let source = Bundle.main.url(forResource: name, withExtension: "wav"), let wave = Bundle.main.url(forResource: name, withExtension: "mwf"), let target = store.audioFile(track) else { return nil }
+                try FileManager.default.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try FileManager.default.copyItem(at: source, to: target)
+                try store.savePreview(Data(contentsOf: wave), track: track)
+            }
+            return root
+        } catch { return nil }
+    }
+
     static func makeLibraryUIFixture() -> URL? {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("library-ui-" + UUID().uuidString)
         do {

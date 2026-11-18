@@ -14,9 +14,10 @@ struct PerformanceWave: UIViewRepresentable {
     func updateUIView(_ view: PerformanceWaveView, context: Context) {
         let deck = model.decks[index]
         if view.source != deck.engine.load {
-            view.source = deck.engine.load; view.columns.removeAll()
+            view.source = deck.engine.load; view.columns.removeAll(); view.waveReady = false
             view.fillGain = deck.waveform?.displayFillGain ?? 1
         }
+        if !view.waveReady, let wave = deck.waveform { view.fillGain = wave.displayFillGain; view.waveReady = true }
         view.wave = deck.waveform
         view.duration = deck.duration
         view.vertical = vertical
@@ -46,6 +47,7 @@ struct PerformanceWave: UIViewRepresentable {
     var playback: ((Bool) -> Void)?
     var columns: [Int: [Double]] = [:]
     var fillGain = 1.0
+    var waveReady = false
     private var cachedStep = 0.0
     private var clock = WaveClock()
     private var link: CADisplayLink?

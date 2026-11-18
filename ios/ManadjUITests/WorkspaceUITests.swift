@@ -17,7 +17,10 @@ final class WorkspaceUITests: XCTestCase {
         let paused = NSPredicate(format: "value BEGINSWITH %@", "paused")
         expectation(for: paused, evaluatedWith: wave); waitForExpectations(timeout: 8)
         let portrait = XCTAttachment(screenshot: app.screenshot()); portrait.name = "Android-structure iOS portrait WIP"; portrait.lifetime = .keepAlways; add(portrait)
-        app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "PITCH")).firstMatch.tap()
+        let pitchButton = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "PITCH")).firstMatch
+        XCTAssertLessThanOrEqual(pitchButton.frame.maxY, app.frame.maxY - 16, "Pitch control must stay above bottom safe area")
+        XCTAssertTrue(pitchButton.isHittable)
+        pitchButton.tap()
         let pitch = XCTAttachment(screenshot: app.screenshot()); pitch.name = "iOS one-deck pitch overlay WIP"; pitch.lifetime = .keepAlways; add(pitch)
         app.buttons["×"].firstMatch.tap()
         app.buttons["Settings"].tap()

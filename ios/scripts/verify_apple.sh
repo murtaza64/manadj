@@ -33,10 +33,29 @@ RESULT="ios/.test-results/Manadj-$(date +%Y%m%d-%H%M%S).xcresult"
 mkdir -p ios/.test-results
 xcrun simctl boot "$DESTINATION_UDID" || true
 xcrun simctl bootstatus "$DESTINATION_UDID" -b
-xcrun simctl io "$DESTINATION_UDID" recordVideo --codec=h264 ios/.test-results/native-ui-temporal.mp4 > ios/.test-results/video.log 2>&1 &
-VIDEO_PID=$!
-trap 'kill -INT "$VIDEO_PID" 2>/dev/null || true; wait "$VIDEO_PID" || true' EXIT
+PRIMARY_STATUS=0
 xcodebuild -project ios/Manadj.xcodeproj -scheme Manadj -sdk iphonesimulator \
   -destination "platform=iOS Simulator,id=$DESTINATION_UDID" -derivedDataPath ios/.derived-data \
-  -resultBundlePath "$RESULT" CODE_SIGNING_ALLOWED=NO ONLY_ACTIVE_ARCH=YES ARCHS="$HOST_ARCH" test
+  -resultBundlePath "$RESULT" CODE_SIGNING_ALLOWED=NO ONLY_ACTIVE_ARCH=YES ARCHS="$HOST_ARCH" test || PRIMARY_STATUS=$?
+# Smallest phone in this SDK: independent safe-area and control-fit smoke test.
+SMALL_UDID=$(xcrun simctl list devices available --json | python3 -c '
+import json,sys
+r=json.load(sys.stdin)["devices"]
+for devices in r.values():
+    for device in devices:
+        if device.get("isAvailable") and device["name"] == "iPhone SE (3rd generation)":
+            print(device["udid"]); raise SystemExit
+')
+SMALL_STATUS=0
+if [[ -n "$SMALL_UDID" ]]; then
+  xcodebuild -project ios/Manadj.xcodeproj -scheme Manadj -sdk iphonesimulator \
+    -destination "platform=iOS Simulator,id=$SMALL_UDID" -derivedDataPath ios/.derived-data \
+    -only-testing:ManadjUITests/WorkspaceUITests/testStandardWorkspaceSettingsAndPitch \
+    -resultBundlePath ios/.test-results/SmallPhone.xcresult CODE_SIGNING_ALLOWED=NO ONLY_ACTIVE_ARCH=YES ARCHS="$HOST_ARCH" test || SMALL_STATUS=$?
+else
+  printf '%s\n' 'Small-phone coverage unavailable: iPhone SE simulator not installed.'
+  SMALL_STATUS=1
+fi
 printf '\n%s\n' "Apple verification completed. Open $RESULT in Xcode to inspect tests and actual simulator screenshots."
+
+if (( PRIMARY_STATUS != 0 || SMALL_STATUS != 0 )); then exit 1; fi

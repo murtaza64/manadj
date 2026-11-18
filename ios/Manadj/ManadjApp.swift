@@ -21,7 +21,7 @@ struct WorkspaceView: View {
     @State private var files = false
     @State private var fileTarget = 0
     @State private var pitch: Int?
-    @State private var xf = false
+    @State private var xf = true
     @State private var fx = false
     @State private var effect = 0
     @State private var fxTarget = 0
@@ -134,7 +134,7 @@ struct WorkspaceView: View {
         Button("BROWSE") { withAnimation { settings = false; browsing.toggle() } }.buttonStyle(PerformanceKeyStyle(color: Ink.warning, active: browsing))
     }
     private var library: some View {
-        LibraryBrowser(onLoad: { track in
+        LibraryBrowser(onClose: { withAnimation { browsing = false } }, onLoad: { track in
             let accepted = model.load(track, deck: model.loadTarget)
             if accepted { withAnimation { browsing = false } }
             return accepted
@@ -168,7 +168,7 @@ struct WorkspaceView: View {
                 let eq = model.decks[index].engine.eq
                 PerformanceKnob(label: ["HI", "MID", "LOW"][i], color: Ink.bands[2 - i], value: Binding(get: { Double([eq.2, eq.1, eq.0][i]) }, set: { model.set(MDJEq, index, $0, slot: 2 - i) }))
             }
-            PerformanceKnob(label: "FILTER", color: Ink.cue, value: Binding(get: { Double(model.decks[index].engine.filter) }, set: { model.audio?.filter(index, position: $0) }), range: -1...1, neutral: 0)
+            PerformanceKnob(label: "FILTER", color: Ink.muted, value: Binding(get: { Double(model.decks[index].engine.filter) }, set: { model.audio?.filter(index, position: $0) }), range: -1...1, neutral: 0)
         }
     }
     private func channel(_ index: Int) -> some View {
@@ -210,8 +210,8 @@ struct WorkspaceView: View {
     private func transport(_ index: Int) -> some View {
         let state = model.decks[index].engine
         return HStack(spacing: 0) {
-            HoldControl(title: "CUE", color: Ink.cue, active: state.preview && state.previewSlot == 8, enabled: state.ready, rounded: true, down: { model.set(MDJCueDown, index, 0) }, up: { model.set(MDJCueUp, index, 0) })
-            Button { model.play(index) } label: { Image(systemName: state.playing ? "pause.fill" : "play.fill") }.buttonStyle(PerformanceKeyStyle(color: Ink.play, active: state.playing)).disabled(!state.ready).accessibilityLabel("\(Ink.deckName(index)) play pause")
+            HoldControl(title: "CUE", color: Ink.warning, active: state.preview && state.previewSlot == 8, enabled: state.ready, rounded: true, down: { model.set(MDJCueDown, index, 0) }, up: { model.set(MDJCueUp, index, 0) })
+            Button { model.play(index) } label: { Label(state.playing ? "PAUSE" : "PLAY", systemImage: state.playing ? "pause.fill" : "play.fill") }.buttonStyle(PerformanceKeyStyle(color: Ink.play, active: state.playing)).disabled(!state.ready).accessibilityLabel("\(Ink.deckName(index)) play pause")
         }
     }
     private func deckControls(_ index: Int, compact: Bool) -> some View {

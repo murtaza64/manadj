@@ -43,6 +43,9 @@ struct DeckViewState {
     init(storageRoot: URL? = nil) {
         #if DEBUG
         if let storageRoot { root = storageRoot }
+        else if ProcessInfo.processInfo.arguments.contains("--performance-ui-fixture") {
+            root = Self.makePerformanceUIFixture() ?? FileManager.default.temporaryDirectory.appendingPathComponent("fixture-failed-" + UUID().uuidString)
+        }
         else if ProcessInfo.processInfo.arguments.contains("--library-ui-fixture") {
             root = Self.makeLibraryUIFixture() ?? FileManager.default.temporaryDirectory.appendingPathComponent("fixture-failed-" + UUID().uuidString)
         } else { root = URL.applicationSupportDirectory.appendingPathComponent("manadj", isDirectory: true) }
@@ -80,7 +83,7 @@ struct DeckViewState {
             repository = repo
             snapshot = await repo.cachedSnapshot()
             downloaded = await repo.downloadedIds()
-            if !ProcessInfo.processInfo.arguments.contains("--library-ui-fixture"), let url = URL(string: origin), let token = PairingKeychain.token(for: origin) {
+            if !ProcessInfo.processInfo.arguments.contains("--library-ui-fixture"), !ProcessInfo.processInfo.arguments.contains("--performance-ui-fixture"), let url = URL(string: origin), let token = PairingKeychain.token(for: origin) {
                 connection = try DesktopConnection(url: url, deviceToken: token, deviceId: deviceId, deviceName: UIDevice.current.name)
             }
             if let warning = await repo.recoveryWarning { error = warning }
@@ -158,6 +161,7 @@ struct DeckViewState {
             }
         }
     }
+    func preview(_ track: LibraryTrack) async -> PreviewWaveform? { await repository?.preview(track) }
     func cancelWork() { task?.cancel() }
     var pairedOrigin: String? { connection?.baseURL.absoluteString }
     func forgetDesktop() {
