@@ -25,8 +25,8 @@ jobs:
           echo "$ANDROID_HOME/platform-tools" >> "$GITHUB_PATH"
           ls -l /dev/kvm
           sudo chmod 666 /dev/kvm
-          sdkmanager 'platforms;android-35' 'build-tools;35.0.0' 'ndk;27.0.12077973' 'cmake;3.22.1' 'system-images;android-35;google_apis;x86_64' 'emulator'
-          echo no | avdmanager create avd --force --name reference --package 'system-images;android-35;google_apis;x86_64' --device pixel_7
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-35' 'build-tools;35.0.0' 'ndk;27.0.12077973' 'cmake;3.22.1' 'system-images;android-35;google_apis;x86_64' 'emulator'
+          echo no | "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" create avd --force --name reference --package 'system-images;android-35;google_apis;x86_64' --device pixel_7
       - name: Build current Android source with capture-only instrumentation
         run: |
           bash android/gradlew -p android :app:assembleDebug :app:assembleDebugAndroidTest -Pandroid.injected.build.abi=x86_64 --max-workers=2
