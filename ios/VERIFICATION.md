@@ -36,7 +36,7 @@ Environment: Linux x86_64, official Swift 6.0.3 toolchain, g++ portable-engine h
 - End-to-end recording share/export on iOS or native failure-injection cases.
 - Full Android feature parity. See `FEATURE_COVERAGE.md`.
 - Full portable-engine sanitizer proof. An earlier monolithic C++ sanitizer build exceeded its execution window. The separate 4-test C bridge suite now passes AddressSanitizer, but that is narrower coverage and leak detection was disabled.
-- Branch publication, pull request, merge, release build, signing or paid service setup.
+- Complete branch publication, pull request, merge, release build, signing or paid service setup. Partial text publication is recorded below.
 
 ## Apple verification path
 
@@ -49,3 +49,10 @@ bash ios/scripts/verify_apple.sh
 This first runs both host packages, then unsigned simulator build/test. `ManadjTests/NativeAudioTests.swift` generates a real WAV, decodes it through AVAudioFile and checks transport through AVAudioEngine. `ManadjUITests/WorkspaceUITests.swift` launches the app, visits C/D and Settings and attaches actual screenshots to the `.xcresult`.
 
 Those Apple tests are prepared work, not evidence that they pass. Fix any compile/runtime failures first, inspect the actual screenshots, then update this record with the Xcode/runtime/device versions and resulting artifacts. Simulator verification does not require an Apple Developer enrollment, a signing account or company access.
+
+## Publication checkpoint, November 18, 2026, 11:26 PST
+
+- The complete prepared tree rebuilt from scratch at 10:35 PST: 19 Core tests and 4 bridge tests passed again. Xcode project regeneration did not change the checked-in project.
+- `instinct/ios-app` contains 47 intended text files, verified byte-for-byte. Publication is incomplete: the icon, two fonts, golden snapshot and workflow are not yet remote. A duplicate-path `.gitignore` from the initial editor attempt is queued for removal.
+- The complete corrective source is prepared locally. GitHub binary-upload commit attempts returned HTTP 400 without landing. Permission for a temporary write key restricted to the personal repository is pending. No key has been generated or added.
+- The unsigned simulator workflow targets standard `macos-15`, with pinned actions, read-only contents permission, a 25-minute timeout and three-day evidence retention. It has not run. No Apple SDK or simulator success is claimed.
