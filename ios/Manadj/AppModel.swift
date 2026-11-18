@@ -39,8 +39,15 @@ struct DeckViewState {
     private let root: URL
     private let deviceId: String
 
-    init() {
-        root = URL.applicationSupportDirectory.appendingPathComponent("manadj", isDirectory: true)
+    init(storageRoot: URL? = nil) {
+        #if DEBUG
+        if let storageRoot { root = storageRoot }
+        else if ProcessInfo.processInfo.arguments.contains("--library-ui-fixture") {
+            root = Self.makeLibraryUIFixture() ?? FileManager.default.temporaryDirectory.appendingPathComponent("fixture-failed-" + UUID().uuidString)
+        } else { root = URL.applicationSupportDirectory.appendingPathComponent("manadj", isDirectory: true) }
+        #else
+        root = storageRoot ?? URL.applicationSupportDirectory.appendingPathComponent("manadj", isDirectory: true)
+        #endif
         let existing = UserDefaults.standard.string(forKey: "device.id")
         deviceId = existing ?? UUID().uuidString
         if existing == nil { UserDefaults.standard.set(deviceId, forKey: "device.id") }
@@ -67,7 +74,7 @@ struct DeckViewState {
             repository = repo
             snapshot = await repo.cachedSnapshot()
             downloaded = await repo.downloadedIds()
-            if let url = URL(string: origin), let token = PairingKeychain.token(for: origin) {
+            if !ProcessInfo.processInfo.arguments.contains("--library-ui-fixture"), let url = URL(string: origin), let token = PairingKeychain.token(for: origin) {
                 connection = try DesktopConnection(url: url, deviceToken: token, deviceId: deviceId, deviceName: UIDevice.current.name)
             }
             if let warning = await repo.recoveryWarning { error = warning }
@@ -152,8 +159,18 @@ struct DeckViewState {
         do { if let pairedOrigin { try PairingKeychain.save(nil, origin: pairedOrigin) }; connection = nil; status = "Desktop forgotten on this iPhone. Offline tracks kept." }
         catch { self.error = error.localizedDescription }
     }
-    func load(_ track: LibraryTrack, deck: Int) {
-        guard let repository, let audio, !decks[deck].loading else { return }
+    /// Acceptance means the request was queued, not that asynchronous decoding succeeded.
+    /// Refused requests keep the browser and its search focus in place.
+    @discardableResult func load(_ track: LibraryTrack, deck: Int) -> Bool {
+        guard decks.indices.contains(deck) else { error = "Choose a valid deck"; return false }
+        guard !decks[deck].loading else { error = "This deck is already loading. Wait for it to finish."; return false }
+        guard let repository else { error = "The offline library is still opening. Try again shortly."; return false }
+        guard let audio else { error = "The audio engine is unavailable. Reopen manaDJ and try again."; return false }
+        guard track.audioRev != nil else { error = "Track has no downloadable audio revision. Sync the desktop library again."; return false }
+        guard downloaded.contains(track.id) || connection != nil else {
+            error = "This track is not downloaded. Connect to the desktop first."
+            return false
+        }
         let previousLoad = audio.state(deck).load
         decks[deck].loading = true
         Task {
@@ -173,6 +190,7 @@ struct DeckViewState {
                 downloaded = await repository.downloadedIds()
             } catch { loadFailed(error, deck: deck, previousLoad: previousLoad) }
         }
+        return true
     }
     func importFile(_ url: URL, deck: Int) {
         guard let audio, !decks[deck].loading else { return }

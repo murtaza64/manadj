@@ -3,7 +3,9 @@ import ManadjCore
 
 struct LibraryBrowser: View {
     @EnvironmentObject var model: AppModel
-    var onLoad: (LibraryTrack) -> Void
+    var onLoad: (LibraryTrack) -> Bool
+    @FocusState private var searchFocused: Bool
+    @State private var restoreSearchAfterError = false
     @State private var search = ""
     @State private var playlist: Int? = nil
     @State private var sort: SortColumn = .dateAdded
@@ -28,8 +30,8 @@ struct LibraryBrowser: View {
                 }
                 HStack {
                     Image(systemName: "magnifyingglass").foregroundStyle(Ink.muted)
-                    TextField("Search title, artist, file", text: $search).textInputAutocapitalization(.never).autocorrectionDisabled().submitLabel(.search)
-                    if !search.isEmpty { Button { search = "" } label: { Image(systemName: "xmark").frame(width: 44, height: 44) }.accessibilityLabel("Clear search") }
+                    TextField("Search title, artist, file", text: $search).textInputAutocapitalization(.never).autocorrectionDisabled().submitLabel(.search).focused($searchFocused)
+                    if !search.isEmpty { Button { search = ""; searchFocused = true } label: { Image(systemName: "xmark").frame(width: 44, height: 44) }.accessibilityLabel("Clear search") }
                 }.padding(.leading, 12).frame(minHeight: 44).background(Ink.crust).overlay(Rectangle().stroke(Ink.edge))
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
@@ -67,18 +69,28 @@ struct LibraryBrowser: View {
                 ContentUnavailableView.search(text: search)
             } else {
                 List(rows) { track in
-                    Button { onLoad(track) } label: {
+                    Button {
+                        let wasSearching = searchFocused
+                        if onLoad(track) { searchFocused = false }
+                        else { restoreSearchAfterError = wasSearching }
+                    } label: {
                         LibraryRow(track: track, downloaded: model.downloaded.contains(track.id), evidence: followLabels[track.id])
                     }
                     .buttonStyle(.plain)
                     .listRowBackground(Ink.base)
                     .listRowSeparatorTint(Ink.edge)
-                    .contextMenu { Button("Follow this track") { followReference = track.id }; ForEach(0..<4) { index in Button("Load deck \(Ink.deckName(index))") { model.load(track, deck: index) } } }
+                    .contextMenu { Button("Follow this track") { followReference = track.id }; ForEach(0..<4) { index in Button("Load deck \(Ink.deckName(index))") { if model.load(track, deck: index) { searchFocused = false } } } }
                 }.listStyle(.plain).scrollContentBackground(.hidden)
             }
         }
         .background(Ink.base)
         .task(id: taskId) { await filter() }
+        .onChange(of: model.error) { _, error in
+            if error == nil && restoreSearchAfterError {
+                restoreSearchAfterError = false
+                searchFocused = true
+            }
+        }
     }
     private func filter() async {
         guard let snapshot = model.snapshot else { rows = []; return }
