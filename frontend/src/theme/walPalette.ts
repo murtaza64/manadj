@@ -209,4 +209,4 @@ export function mapWalPalette(palette: WalPalette, opts: MapOptions = {}): WalTh
     proposal.deckProposal = { A: ansi[6], B: ansi[5], C: ansi[3], D: ansi[13] };
   }
   return proposal;
-  }
+}
