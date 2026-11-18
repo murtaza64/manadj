@@ -79,13 +79,13 @@ def test_hand_edits_survive_ui_writes(temp_data_root):
         "[library]\n"
         'tracks_directory = "/old"\n'
         "\n"
-        "[soulseek]\n"
-        'slskd_url = "http://localhost:5030"\n'
+        "[custom]\n"
+        'some_key = "keep me"\n'
     )
     update_settings_file({"tracks_directory": "/new", "export_enabled": True})
     text = settings_file_path().read_text()
     assert "# my precious comment" in text
-    assert 'slskd_url = "http://localhost:5030"' in text
+    assert 'some_key = "keep me"' in text
     cfg = load_config()
     assert cfg.library.tracks_directory == "/new"
     assert cfg.export.enabled is True

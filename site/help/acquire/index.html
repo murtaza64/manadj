@@ -5,7 +5,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Acquire Tracks — manadj</title>
-  <meta name="description" content="Review SoundCloud likes, match existing Tracks, queue downloads, and inspect failures.">
+  <meta name="description" content="Review SoundCloud likes and Spotify wants, match existing Tracks, and link out to buy what&#39;s missing.">
   <link rel="icon" href="../../assets/logo.png">
   <link rel="preload" href="../../assets/fonts/UbuntuMono-Regular.ttf" as="font" type="font/ttf" crossorigin>
   <link rel="preload" href="../../assets/fonts/UbuntuMono-Bold.ttf" as="font" type="font/ttf" crossorigin>
@@ -50,7 +50,7 @@
         <header class="help-heading">
           <a class="kicker" href="../index.html">Help manual</a>
           <h1>Acquire Tracks</h1>
-          <p>Review SoundCloud likes, match existing Tracks, queue downloads, and inspect failures.</p>
+          <p>Review SoundCloud likes and Spotify wants, match existing Tracks, and link out to buy what&#39;s missing.</p>
         </header>
         <details class="help-toc" open>
           <summary>On this page</summary>
@@ -58,7 +58,7 @@
 <ul>
 <li><a href="#prepare">Prepare the sources</a></li>
 <li><a href="#review">Review your likes</a></li>
-<li><a href="#download">Get missing audio</a></li>
+<li><a href="#get">Get missing audio</a></li>
 </ul>
 </div>
 </nav>
@@ -70,13 +70,13 @@
   </a>
 </figure>
         <div class="prose help-prose"><h2 id="prepare">Prepare the sources</h2>
-<p>Set <strong>Settings → Library → Tracks directory</strong> for downloads and connect <strong>SoundCloud</strong> in <strong>Settings → Accounts</strong> (or its Setup guide). A connected SoundCloud account reveals <strong>SYNC → Acquisition</strong>; connection alone does <strong>not</strong> refresh likes. Soulseek is optional: connect it under <strong>Settings → Accounts</strong> to show its picker and standalone search. For account connection steps, see <a href="../start/index.html#accounts">first run</a>.</p>
+<p>Connect <strong>SoundCloud</strong> and/or <strong>Spotify</strong> in <strong>Settings → Accounts</strong> (or their Setup guides). A connected account reveals <strong>SYNC → Acquisition</strong>; connection alone does <strong>not</strong> refresh likes. manaDJ does not download audio: Acquisition is a wishlist, and each wanted item links out to a Beatport search so you can buy a legitimate copy. For account connection steps, see <a href="../start/index.html#accounts">first run</a>.</p>
 <p><span id="soundcloud"></span></p>
 <h2 id="review">Review your likes</h2>
 <ol>
-<li>Open <strong>SYNC → Acquisition</strong> and click <strong>↻ Refresh likes</strong>. Check the reported new and total local counts. The refresh adds unseen SoundCloud likes, classifies them and looks for Library matches. Unliking on SoundCloud does not delete an item already recorded in manaDJ.</li>
+<li>Open <strong>SYNC → Acquisition</strong> and click <strong>↻ Refresh likes</strong>. Check the reported new and total local counts. The refresh adds unseen SoundCloud likes, classifies them and looks for Library matches. Unliking on SoundCloud does not delete an item already recorded in manaDJ. Spotify Liked Songs and playlists are browse-only: <strong>+ want</strong> turns a row into a Source Item.</li>
 <li>Start with the <strong>new</strong> state list. The default classification filter shows <strong>track</strong> and <strong>other</strong>; check <strong>mix</strong> or <strong>clip</strong> to reveal those suspected classifications. Click a row’s classification chip to cycle <strong>track → mix → clip → other</strong> if it was misclassified. Classification filters visibility; it does <strong>not</strong> mark an item ignored.</li>
-<li>Click an item to inspect the detail panel. Compare a proposed SoundCloud↔Library match before choosing <strong>accept match</strong> or <strong>reject</strong>. An accepted match fulfills the Source Item without downloading another copy. For a match the scanner missed, use <strong>manual link</strong>, search by title, artist or filename, and pick the correct Library Track. Optionally record <strong>audio from</strong> (a URL or label such as <code>cd-rip</code>) as asserted provenance; this is not a download by manaDJ. A confirmed correspondence means the Track is already accounted for.</li>
+<li>Click an item to inspect the detail panel. Compare a proposed SoundCloud↔Library match before choosing <strong>accept match</strong> or <strong>reject</strong>. An accepted match fulfills the Source Item — the Track is already accounted for. For a match the scanner missed, use <strong>manual link</strong>, search by title, artist or filename, and pick the correct Library Track. Optionally record <strong>audio from</strong> (a URL or label such as <code>cd-rip</code>) as asserted provenance.</li>
 </ol>
 <p><img alt="Acquisition review list and item detail" src="../../shots/acquisition.webp" /></p>
 <table>
@@ -89,34 +89,25 @@
 <tbody>
 <tr>
 <td><strong>new</strong></td>
-<td>Not fulfilled; check for a proposed match, link manually, queue download, or <strong>ignore</strong>.</td>
-</tr>
-<tr>
-<td><strong>queued</strong></td>
-<td>Download requested; its task badge shows pending/running/done/failure. A failed task remains a queued item.</td>
+<td>Not fulfilled; check for a proposed match, link manually, open <strong>find on Beatport ↗</strong>, or <strong>ignore</strong>.</td>
 </tr>
 <tr>
 <td><strong>fulfilled</strong></td>
-<td>Linked to a Library Track, either from an existing match or a completed acquisition. Check provenance before assuming it was downloaded.</td>
+<td>Linked to a Library Track, either from an existing match or because you got the audio. Check provenance before assuming where it came from.</td>
 </tr>
 <tr>
 <td><strong>ignored</strong></td>
-<td>Removed from the active worklist; <strong>restore to new</strong> reverses the decision.</td>
-</tr>
-<tr>
-<td><strong>failed</strong></td>
-<td>Filter for queued items whose latest download task failed; inspect the item error and choose recovery.</td>
+<td>Removed from the active worklist; <strong>restore</strong> reverses the decision.</td>
 </tr>
 </tbody>
 </table>
-<h2 id="download">Get missing audio</h2>
-<p><span id="soulseek"></span></p>
+<h2 id="get">Get missing audio</h2>
 <ol>
-<li>In a new unmatched item’s detail panel choose <strong>⇣ queue download</strong> for SoundCloud. For a batch, check rows and choose <strong>⇣ queue selected</strong>; with none checked, <strong>⇣ queue all visible</strong> uses the <em>current filtered list</em>, not all likes. Check the reported <strong>queued / skipped</strong> counts. Pending match proposals and non-new items are not ordinary queue candidates.</li>
-<li>Watch the status badge or <strong>TASKS</strong>. On failure, read the error in item detail; <strong>retry via soundcloud</strong>, <strong>ignore</strong>, or link to an existing Track. If Soulseek is connected, inspect its suggested search, edit the query, compare result filename/format/bitrate/size/duration and peer queue, then select a candidate. <strong>⚡ auto mp3</strong> attempts an MP3 candidate and may try other peers. The standalone <strong>soulseek search</strong> expander can fetch a Track without any SoundCloud item.</li>
-<li>After a successful download, check the Track in the Library. The download is saved in the configured tracks directory, imported, linked to the Source Item with recorded provenance, and marked fulfilled. Verify metadata, Tags and Energy; fulfillment does not mean curation is complete. See <a href="../curate/index.html#edit-track">curation</a>.</li>
+<li>In a new unmatched item, choose <strong>find on Beatport ↗</strong> to open a Beatport search for the track (built from the cleaned-up artist and title, so junk tokens don't poison the query). Buy or otherwise obtain the audio yourself.</li>
+<li>Drop the file into your tracks directory; the next Scan imports it as a Track. manaDJ's matcher usually links it to the wishlist item on its own — accept the proposed match, or use <strong>manual link</strong>.</li>
+<li>Check the Track in the Library. Verify metadata, Tags and Energy; fulfillment does not mean curation is complete. See <a href="../curate/index.html#edit-track">curation</a>.</li>
 </ol>
-<p>Treat a manually asserted audio source differently from a recorded download: you can update an assertion, but cannot replace manaDJ-recorded download provenance with an assertion.</p></div>
+<p>Provenance for audio manaDJ never downloaded is asserted by you or derived from file hints at import (purchase tag URLs, yt-dlp IDs); you can always update an assertion.</p></div>
         <nav class="help-related" aria-label="Related articles">
           <h2>Related articles</h2>
           <ul class="help-cards">

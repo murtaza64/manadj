@@ -67,15 +67,13 @@ def test_token_sources(env: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_connect_flow(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    connected: list[bool] = []
-    monkeypatch.setattr(connect_router, "on_connected", lambda: connected.append(True))
     assert client.get("/api/soundcloud/status").json() == {
         "connected": False, "token_source": None, "account": None, "error": None,
     }
 
     r = client.put("/api/soundcloud/token", json={"token": "bad"})
     assert r.status_code == 400 and "rejected" in r.json()["detail"]
-    assert get_token_store().load() is None and connected == []
+    assert get_token_store().load() is None
 
     st = client.put("/api/soundcloud/token", json={"token": f"OAuth {GOOD} "}).json()
     assert st == {
@@ -84,7 +82,6 @@ def test_connect_flow(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> No
     }
     assert get_token_store().load() == GOOD
     assert config_module.get_config().soundcloud.oauth_token == GOOD
-    assert connected == [True]
 
     st = client.delete("/api/soundcloud/token").json()
     assert st["connected"] is False and get_token_store().load() is None

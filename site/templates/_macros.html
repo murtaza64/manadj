@@ -49,7 +49,7 @@
 </table>
 {% elif kind == 'setup' %}
 <ol class="steps" aria-label="First-run sequence">
-  {% for s in ['Welcome', 'Rekordbox import', 'Tracks directory', 'Cue mode', 'SoundCloud', 'Soulseek', 'Controller check', 'Tour'] %}
+  {% for s in ['Welcome', 'Rekordbox import', 'Tracks directory', 'Cue mode', 'SoundCloud', 'Spotify', 'Controller check', 'Tour'] %}
   <li class="step"><span class="step-n">{{ loop.index }}</span>{{ s }}</li>
   {% endfor %}
 </ol>

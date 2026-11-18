@@ -1,4 +1,4 @@
-"""Parallel worker lanes (gh#224): downloads vs soulseek vs compute.
+"""Parallel worker lanes (gh#224): the lane split and cross-lane concurrency.
 
 The lane split itself is pure-function tested; the cross-lane concurrency
 test runs two real TaskWorker threads against a file-backed SQLite DB (WAL +
@@ -37,9 +37,6 @@ def test_every_lane_type_is_unique() -> None:
 
 def test_split_handlers_groups_by_lane() -> None:
     handlers = {
-        "download": _noop,
-        "soulseek-download": _noop,
-        "soulseek-search": _noop,
         "waveform": _noop,
         "analysis": _noop,
         "stem-split": _noop,
@@ -48,21 +45,11 @@ def test_split_handlers_groups_by_lane() -> None:
         "tracks-directory-import": _noop,
     }
     by_lane = split_handlers(handlers)
-    assert set(by_lane) == {"soundcloud", "soulseek", "compute"}
-    assert set(by_lane["soundcloud"]) == {"download"}
-    assert set(by_lane["soulseek"]) == {"soulseek-download", "soulseek-search"}
-    assert set(by_lane["compute"]) == {
-        "waveform",
-        "analysis",
-        "stem-split",
-        "routine-mine",
-        "rekordbox-onboarding-import",
-        "tracks-directory-import",
-    }
+    assert set(by_lane) == {"compute"}
+    assert set(by_lane["compute"]) == set(handlers)
 
 
 def test_split_handlers_omits_empty_lanes() -> None:
-    # No SoundCloud/soulseek configured: only the compute lane exists.
     by_lane = split_handlers({"waveform": _noop})
     assert set(by_lane) == {"compute"}
 
@@ -80,7 +67,7 @@ def test_split_handlers_rejects_unassigned_type() -> None:
 def test_recover_interrupted_scoped_to_types(db_session: Session) -> None:
     """A lane recovers only its own types — not tasks another lane is running."""
     mine = create_task(db_session, "waveform", {})
-    theirs = create_task(db_session, "download", {})
+    theirs = create_task(db_session, "analysis", {})
     mine.state = "running"
     theirs.state = "running"
     db_session.commit()
@@ -109,50 +96,50 @@ def _make_file_engine(tmp_path: Path):
     return engine
 
 
-def test_compute_task_completes_while_download_is_running(tmp_path: Path) -> None:
+def test_compute_task_completes_while_slow_lane_task_is_running(tmp_path: Path) -> None:
     """Two lane workers, real threads: a waveform task finishes while a slow
-    download holds the soundcloud lane, and both lanes write the shared DB
-    without `database is locked` failures (WAL + busy_timeout)."""
+    task holds its own lane, and both lanes write the shared DB without
+    `database is locked` failures (WAL + busy_timeout)."""
     engine = _make_file_engine(tmp_path)
     factory = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-    download_started = threading.Event()
-    release_download = threading.Event()
+    slow_started = threading.Event()
+    release_slow = threading.Event()
 
-    def slow_download(db: Session, payload: dict[str, Any]) -> None:
-        download_started.set()
-        assert release_download.wait(timeout=10), "test never released the download"
+    def slow_task(db: Session, payload: dict[str, Any]) -> None:
+        slow_started.set()
+        assert release_slow.wait(timeout=10), "test never released the slow task"
 
     def waveform(db: Session, payload: dict[str, Any]) -> None:
         pass
 
     db = factory()
-    create_task(db, "download", {})
+    create_task(db, "analysis", {})
     create_task(db, "waveform", {})
     db.close()
 
-    soundcloud = TaskWorker(
-        factory, {"download": slow_download}, poll_interval=0.05, name="task-worker-soundcloud"
+    lane_a = TaskWorker(
+        factory, {"analysis": slow_task}, poll_interval=0.05, name="task-worker-a"
     )
-    compute = TaskWorker(
-        factory, {"waveform": waveform}, poll_interval=0.05, name="task-worker-compute"
+    lane_b = TaskWorker(
+        factory, {"waveform": waveform}, poll_interval=0.05, name="task-worker-b"
     )
-    soundcloud.start()
+    lane_a.start()
     try:
-        assert download_started.wait(timeout=5), "download task never started"
-        # Starting the compute lane while the download is mid-flight must not
+        assert slow_started.wait(timeout=5), "slow task never started"
+        # Starting the other lane while the slow task is mid-flight must not
         # re-queue it (recovery is scoped per lane).
-        compute.start()
+        lane_b.start()
 
         deadline = time.monotonic() + 5
         while time.monotonic() < deadline:
             db = factory()
             try:
                 wf = db.query(Task).filter(Task.type == "waveform").one()
-                dl = db.query(Task).filter(Task.type == "download").one()
+                slow = db.query(Task).filter(Task.type == "analysis").one()
                 if wf.state == "done":
-                    assert dl.state == "running", (
-                        "waveform finished but download was not still running"
+                    assert slow.state == "running", (
+                        "waveform finished but the slow task was not still running"
                     )
                     assert wf.error is None
                     break
@@ -161,16 +148,16 @@ def test_compute_task_completes_while_download_is_running(tmp_path: Path) -> Non
                 db.close()
             time.sleep(0.02)
         else:
-            raise AssertionError("waveform task did not complete while download ran")
+            raise AssertionError("waveform task did not complete while the slow task ran")
     finally:
-        release_download.set()
-        soundcloud.stop()
-        compute.stop()
+        release_slow.set()
+        lane_a.stop()
+        lane_b.stop()
 
     db = factory()
     try:
-        dl = db.query(Task).filter(Task.type == "download").one()
-        assert dl.state == "done", f"download ended {dl.state}: {dl.error}"
+        slow = db.query(Task).filter(Task.type == "analysis").one()
+        assert slow.state == "done", f"slow task ended {slow.state}: {slow.error}"
     finally:
         db.close()
         engine.dispose()
@@ -191,25 +178,23 @@ def _wait_for_state(factory, type_: str, state: str, timeout: float = 5.0) -> Ta
     raise AssertionError(f"{type_} never reached {state}")
 
 
-def test_pool_add_handlers_starts_new_lane_and_extends_running_one(tmp_path: Path) -> None:
-    """A setup guide configuring soulseek mid-session (#290/#291) routes new
-    handlers through the pool: a new lane's worker starts on the fly, and a
-    handler for an already-running lane extends that worker."""
+def test_pool_add_handlers_extends_a_running_lane(tmp_path: Path) -> None:
+    """A mid-session handler registration routes through the pool: a handler
+    added for an already-running lane extends that worker without a
+    restart."""
     engine = _make_file_engine(tmp_path)
     factory = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
     db = factory()
-    create_task(db, "soulseek-search", {})
+    create_task(db, "stem-split", {})
     create_task(db, "analysis", {})
     db.close()
 
     pool = TaskWorkerPool(factory, {"waveform": _noop}, poll_interval=0.05)
     pool.start()
     try:
-        # New lane, brought up mid-session.
-        pool.add_handlers({"soulseek-search": _noop})
-        _wait_for_state(factory, "soulseek-search", "done")
-        # Existing (running) lane, extended.
+        pool.add_handlers({"stem-split": _noop})
+        _wait_for_state(factory, "stem-split", "done")
         pool.add_handlers({"analysis": _noop})
         _wait_for_state(factory, "analysis", "done")
     finally:
