@@ -66,6 +66,63 @@ const BACKEND_URL =
   import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://localhost:8127' : '');
 export const API_BASE = `${BACKEND_URL}/api`;
 
+/** A Rekordbox or Engine library found on a mounted external drive. */
+export interface ExternalDrive {
+  root: string;
+  kind: 'rekordbox' | 'engine';
+  name: string;
+  track_count: number | null;
+  written_by_manadj: boolean;
+}
+
+export interface ExternalDrivePullEntry {
+  ordinal: number;
+  title: string | null;
+  artist: string | null;
+  bpm: number | null;
+  key: string | null;
+  duration_secs: number | null;
+  device_path: string;
+  status: 'new' | 'present' | 'uncertain' | 'duplicate' | 'missing-file';
+  detail: string | null;
+}
+
+export interface ExternalDrivePreview {
+  root: string;
+  kind: 'rekordbox' | 'engine';
+  device_track_count: number;
+  new_count: number;
+  present_count: number;
+  uncertain_count: number;
+  duplicate_count: number;
+  missing_file_count: number;
+  default_destination: string | null;
+  fingerprint: string;
+  entries: ExternalDrivePullEntry[];
+}
+
+export interface ExternalDriveImportRequest {
+  root: string;
+  destination?: string;
+  confirm: boolean;
+  /** Binds the confirm to the reviewed preview; the server refuses a
+   * mismatch with 409 so the confirmed set never silently changes. */
+  preview_fingerprint: string;
+}
+
+export interface ExternalDriveImportResult {
+  root: string;
+  kind: string;
+  destination: string;
+  imported: number;
+  skipped_present: number;
+  skipped_uncertain: number;
+  skipped_duplicate: number;
+  skipped_missing_file: number;
+  errors: string[];
+  track_ids: number[];
+}
+
 /** Phone sync LAN listener (#373, backend/device_listener.py). */
 export interface DeviceListenerStatus {
   enabled: boolean;
@@ -1018,6 +1075,45 @@ export const api = {
         body: JSON.stringify(request),
       });
       if (!res.ok) throw new Error('Failed to sync tracks with Rekordbox');
+      return res.json();
+    },
+  },
+
+  externalDrives: {
+    /** Detect Rekordbox/Engine libraries on mounted external drives. */
+    list: async (): Promise<ExternalDrive[]> => {
+      const res = await fetch(`${API_BASE}/external-drives`);
+      if (!res.ok) throw new Error('Failed to detect external drives');
+      return res.json();
+    },
+
+    /** Read-only diff: what a pull from this drive would add or skip.
+     * Pass destination to bind the returned fingerprint to it (the
+     * confirm flow does this right before importing). */
+    preview: async (root: string, destination?: string): Promise<ExternalDrivePreview> => {
+      const res = await fetch(`${API_BASE}/external-drives/preview`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(destination ? { root, destination } : { root }),
+      });
+      if (!res.ok) {
+        const detail = (await res.json().catch(() => null))?.detail;
+        throw new Error(detailToMessage(detail, 'Failed to preview the drive'));
+      }
+      return res.json();
+    },
+
+    /** The confirmed pull. The server refuses confirm != true. */
+    import: async (request: ExternalDriveImportRequest): Promise<ExternalDriveImportResult> => {
+      const res = await fetch(`${API_BASE}/external-drives/import`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(request),
+      });
+      if (!res.ok) {
+        const detail = (await res.json().catch(() => null))?.detail;
+        throw new Error(detailToMessage(detail, 'Failed to import from the drive'));
+      }
       return res.json();
     },
   },
@@ -2221,4 +2317,4 @@ export interface SetWithEntriesWire extends SetRowWire {
   dormant: SetDormantPinWire[];
   /** Dormant Cameo pins (#140): host-track-keyed memories. */
   dormant_cameos: SetDormantCameoPinWire[];
-}
+        }
