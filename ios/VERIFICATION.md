@@ -2,6 +2,18 @@
 
 Implementation snapshot: November 18, 2026. Base commit `d137e2d7`.
 
+## Current Apple checkpoint, November 18, 2026, 12:52 PST
+
+- Source `7457bf24bb62fb726e3a3179265e7ba9d317e36c`: [successful run 44392249847](https://github.com/murtaza64/manadj/actions/runs/44392249847), standard macOS 15 arm64 runner, Xcode 16.4 / iOS Simulator SDK 18.5.
+- Unsigned simulator app build passed. All **3 native/UI tests passed, 0 failed, 0 skipped**, on iPhone 16 Pro / iOS 18.5 (22F77). The generated 44.1 kHz stereo WAV decoded through AVAudioFile, then AVAudioEngine transport advanced, paused and sought as asserted. This is not a listening test or long-file/codec matrix.
+- Both host packages passed on macOS too: 19 Core tests and 4 C-bridge tests. No tests were disabled to obtain this result.
+- Pixel-inspected the two exported screenshots: empty C/D workspace and Settings. Text and controls are readable in portrait; D continues below the fold. Loaded tracks, full lower-page scrolling, landscape, smaller iPhones and iPad remain visually unverified.
+- [Exported evidence artifact](https://github.com/murtaza64/manadj/actions/runs/44392249847/artifacts/14470135563) contains the log, xcresult, test summary/tree and screenshots. GitHub retention is three days, so the artifact link is temporary.
+- Previous native crash was a Swift executor assertion in the AVAudioSourceNode callback created inside a MainActor initializer. Creating the callback in a non-actor helper cleared that concrete failure while retaining the native audio test.
+- Complete branch publication is verified. No PR merge, device signing, iPhone install, TestFlight or release build is claimed at this checkpoint.
+
+Earlier sections below are a historical log. Their pending publication/Apple build statements were true at the stated checkpoint and are superseded by this section.
+
 ## Passed here
 
 Environment: Linux x86_64, official Swift 6.0.3 toolchain, g++ portable-engine host build. These are not iOS execution results.
@@ -27,8 +39,6 @@ Environment: Linux x86_64, official Swift 6.0.3 toolchain, g++ portable-engine h
 
 ## Not passed, not claimed
 
-- Apple SDK typechecking or linking of the SwiftUI/AVFoundation code.
-- Simulator launch, native decode/output test, UI tests or screenshots.
 - iPhone install, real audio listening, latency/drift/CPU/memory measurements.
 - Headphone unplug, Bluetooth/USB routing, interruptions and media-services reset on iOS.
 - Long-file AVAudioFile seeking/refill and compressed-codec accuracy on iOS.
@@ -36,7 +46,7 @@ Environment: Linux x86_64, official Swift 6.0.3 toolchain, g++ portable-engine h
 - End-to-end recording share/export on iOS or native failure-injection cases.
 - Full Android feature parity. See `FEATURE_COVERAGE.md`.
 - Full portable-engine sanitizer proof. An earlier monolithic C++ sanitizer build exceeded its execution window. The separate 4-test C bridge suite now passes AddressSanitizer, but that is narrower coverage and leak detection was disabled.
-- Complete branch publication, pull request, merge, release build, signing or paid service setup. Partial text publication is recorded below.
+- Pull request merge, release build, signing or paid service setup. Complete branch publication is now verified.
 
 ## Apple verification path
 
@@ -48,7 +58,7 @@ bash ios/scripts/verify_apple.sh
 
 This first runs both host packages, then unsigned simulator build/test. `ManadjTests/NativeAudioTests.swift` generates a real WAV, decodes it through AVAudioFile and checks transport through AVAudioEngine. `ManadjUITests/WorkspaceUITests.swift` launches the app, visits C/D and Settings and attaches actual screenshots to the `.xcresult`.
 
-Those Apple tests are prepared work, not evidence that they pass. Fix any compile/runtime failures first, inspect the actual screenshots, then update this record with the Xcode/runtime/device versions and resulting artifacts. Simulator verification does not require an Apple Developer enrollment, a signing account or company access.
+The current Apple checkpoint above records the first successful run and inspected screenshots. Broader device/audio gates remain open. Simulator verification does not require an Apple Developer enrollment, a signing account or company access.
 
 ## Publication checkpoint, November 18, 2026, 11:26 PST
 

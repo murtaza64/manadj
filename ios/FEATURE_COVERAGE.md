@@ -2,6 +2,10 @@
 
 Baseline: personal `murtaza64/manadj` main at `d137e2d7` (piracy-removal merge). This map uses current source modules, not only the older Android README's pending labels. It is not approval to remove or defer Android features permanently.
 
+## Apple runtime checkpoint
+
+At `7457bf24`, Xcode 16.4 unsigned build and all 3 native/UI tests passed on iPhone 16 Pro / iOS 18.5 simulator. Native WAV decode and basic engine transport passed; actual empty-workspace/Settings portrait screenshots were inspected. [Evidence](https://github.com/murtaza64/manadj/actions/runs/44392249847). This narrow result does not validate every control, real audio quality, loaded-library behavior or physical-device routing. In the table, **Source only** means the individual feature still lacks runtime proof, even though the app builds and launches.
+
 ## Status key
 
 - **Host-tested**: relevant Swift/C bridge behavior ran on Linux. Not iOS runtime proof.
@@ -11,11 +15,11 @@ Baseline: personal `murtaza64/manadj` main at `d137e2d7` (piracy-removal merge).
 
 | Area | Android source basis | iOS state and remaining work |
 |---|---|---|
-| Native interface | `app/Layouts.kt`, `Theme.kt`, `Controls.kt` | **Source only.** SwiftUI, native Files/share sheets, UIKit touch tracking for hold/release/cancel. manaDJ flat geometry, mono fonts and semantic colors. No Apple screenshot or visual-layout validation yet. |
+| Native interface | `app/Layouts.kt`, `Theme.kt`, `Controls.kt` | **Partly simulator-checked.** SwiftUI launches; C/D selector and Settings navigation pass UI tests. Actual empty-workspace/Settings portrait screenshots inspected. Native Files/share sheets and hold/release/cancel still need interaction checks. |
 | Four decks | `PlayerModel.kt`, `Deck.kt` | **Source only.** Four engine decks, A/B and C/D workspace selector, two-column layout above 760 points. Not a port of Android's complete L1/L3 layouts. |
 | One-handed layouts | `onehand/*` | **Missing.** Focus/chords/rings variants are not recreated. Requires interaction design and device checks, not a web-view substitute. |
-| Playback/DSP engine | `audio-engine/src/main/cpp/Engine.*` | **Host-tested seam.** Compiles the existing engine unchanged. C bridge tests render synthetic audio and check position/seek. Apple callback, device latency and sound quality remain unverified. |
-| Native decoding and load ownership | `audio/AudioEngine.kt`, decoder classes | **Source only + host-tested C protocols.** AVAudioFile mono/stereo 8–192 kHz; one serial worker/deck; superseded loads cannot write a new load. No Ogg/codec parity claim. AVFoundation decode test is written but unrun. |
+| Playback/DSP engine | `audio-engine/src/main/cpp/Engine.*` | **Host-tested seam.** Compiles the existing engine unchanged. C bridge tests render synthetic audio and check position/seek. Apple callback and basic transport pass the native simulator test; device latency and sound quality remain unverified. |
+| Native decoding and load ownership | `audio/AudioEngine.kt`, decoder classes | **Source only + host-tested C protocols.** AVAudioFile mono/stereo 8–192 kHz; one serial worker/deck; superseded loads cannot write a new load. No Ogg/codec parity claim. Generated WAV decoding passes the native simulator test. Long files and the codec matrix remain unverified. |
 | Memory and long files | Android full/range decode and ring APIs | **Source only.** Up to 64 MiB decoded PCM/deck uses the shared full-track buffer; larger files stream through the bounded ring. No duration rejection/truncation. Ring backpressure, sample-rate conversion, seek refill and EOF pass host tests. Android's priority/range-fill optimization is not ported. |
 | Play, pause, cue and hot cues | `Deck.kt`, shared `Op` handlers | **Source only + host-tested engine.** Cue/gated hot cues, set/clear and saved snapshot marks load into the engine. iOS touch cancellation and interruption timing need device tests. No cue write-back/persistence. |
 | Seek, pitch and bend | `Scrubber.kt`, `PitchPanel.kt` | **Source only.** Native seek/tempo sliders, reset, held ±4% bend, ±8% pitch. No platter scratch/drag-bend gesture parity. |
@@ -45,7 +49,7 @@ Baseline: personal `murtaza64/manadj` main at `d137e2d7` (piracy-removal merge).
 
 ## Next gates, not approved scope cuts
 
-1. Build with an Apple SDK, run the native decode test and inspect actual simulator screenshots in portrait/landscape, including a smaller iPhone and an iPad.
+1. Expand the successful Apple build/native test/portrait screenshot checkpoint to loaded tracks, landscape, a smaller iPhone and an iPad.
 2. Exercise interruption/headphone-route changes, repeated loads, long-file seeking/EOF, key-lock/fallback truth, memory pressure and master-recording failure/finalization on an iPhone.
 3. Port the edit journal and full grid/waveform behavior, then session/group replay and remaining performance controls, using Android's existing fixtures wherever available.
 4. Resolve the iOS deployment floor and distribution approach with the owner before committing to a release policy.

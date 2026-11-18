@@ -2,7 +2,7 @@
 
 This is an initial implementation, not a working-release or Android-parity claim.
 
-**Verification boundary:** the Swift library and the C ABI into the existing C++ engine build and pass host tests. The SwiftUI app, AVFoundation device callback and file decoder have not been typechecked with an Apple SDK, launched in a simulator or tested on an iPhone. No app screenshot or installable IPA is provided as evidence.
+**Verification boundary:** Xcode 16.4 built the unsigned app and all 3 native/UI tests passed on an arm64 iPhone 16 Pro simulator running iOS 18.5. The native test decodes a generated WAV through AVAudioFile and verifies play/pause/seek transport through AVAudioEngine. Actual empty-workspace and Settings screenshots were inspected. The 19 Core and 4 C-bridge host tests also pass. This is not physical-iPhone, listening, loaded-library, long-file or full Android-parity proof. No installable IPA is provided. See [VERIFICATION.md](VERIFICATION.md) for the source run.
 
 ## Architecture
 
@@ -26,7 +26,7 @@ Requires Xcode 16 or later, an installed iOS simulator runtime, Swift 6 and Pyth
    bash ios/scripts/verify_apple.sh
    ```
 
-   Set `DESTINATION_UDID` to select an existing simulator. The script runs host packages, builds the simulator app without signing, runs native/UI tests and leaves an `.xcresult` with screenshot attachments. These test sources exist, but have **not** run on Apple hardware yet.
+   Set `DESTINATION_UDID` to select an existing simulator. The script runs host packages, builds the simulator app without signing, runs native/UI tests and leaves an `.xcresult` with screenshot attachments. These tests passed in the GitHub-hosted simulator run linked in the verification record. Physical-iPhone testing remains open.
 4. On a physical iPhone, signing and a personal development team must be configured separately. Do not use a company account for this work.
 
 ## Host verification
@@ -40,7 +40,7 @@ ASAN_OPTIONS=detect_leaks=0 swift test --package-path ios/Packages/ManadjAudio -
 
 The Core integration tests start a loopback-only Python fixture with synthetic audio and fake tokens. They do not access a real desktop library or account. See [VERIFICATION.md](VERIFICATION.md) for the actual checks run and the remaining gates.
 
-## Intended app flow, awaiting Apple validation
+## Implemented app flow, broader device validation pending
 
 - Perform has A/B and C/D workspaces, pads, cue/play, loop/jump, pitch/bend, key lock, EQ/filter/fader/PFL, crossfader and Beat FX.
 - Files imports a platform-decodable mono/stereo file into app-owned storage. Ogg support is not promised by AVFoundation.
