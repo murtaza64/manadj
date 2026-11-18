@@ -127,13 +127,15 @@ class AndroidReferenceCaptureTest {
         touch("BROWSE")
 
         capture("02-portrait-library-root")
-        touch("Browse Collection")
+        // The fixture opens the last Collection node directly.
         capture("03-portrait-library-collection")
         touch("BROWSE")
         touch("A pitch panel")
+        until(8000, "A pitch panel opened by tap") { model.pitchDrawer == DeckId.A }
         capture("04-portrait-pitch-panel")
-        onMain { model.pitchDrawer = null }
+        touch("Close pitch panel")
         touch("Settings")
+        until(8000, "Settings opened by tap") { ux.settings }
         capture("05-portrait-settings")
         onMain { ux.settings = false }
         orient(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE, Configuration.ORIENTATION_LANDSCAPE)
