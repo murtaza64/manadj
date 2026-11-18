@@ -18,6 +18,9 @@ struct PerformanceWave: UIViewRepresentable {
         view.vertical = vertical
         view.overview = overview
         view.index = index
+        view.spanSeconds = model.waveSeconds
+        view.zoom = { [weak model] seconds in model?.waveSeconds = seconds }
+        view.playback = { [weak model] playing in model?.set(playing ? MDJPlay : MDJPause, index, 0) }
         view.state = { [weak model] in model?.audio?.state(index) ?? MDJDeck() }
         view.seek = { [weak model] seconds in model?.set(MDJSeek, index, seconds) }
         view.accessibilityLabel = "\(Ink.deckName(index)) \(overview ? "minimap seek" : "detail wave")"
@@ -35,15 +38,19 @@ struct PerformanceWave: UIViewRepresentable {
     var overview = false
     var state: (() -> MDJDeck)?
     var seek: ((Double) -> Void)?
+    var zoom: ((Double) -> Void)?
+    var playback: ((Bool) -> Void)?
     var columns: [Int: [Double]] = [:]
     private var cachedStep = 0.0
     private var clock = WaveClock()
     private var link: CADisplayLink?
     private var proxy: DisplayProxy?
-    private var spanSeconds = 12.0
+    var spanSeconds = 12.0
     private var pinchWindow = 12.0
     private var panPosition = 0.0
     private var scrubbing = false
+    private var previewPosition: Double?
+    private var resume = false
     private var observedFrames = 0
     private var missedFrames = 0
     private var lastFrame = 0.0
@@ -76,7 +83,8 @@ struct PerformanceWave: UIViewRepresentable {
     @objc private func pinch(_ gesture: UIPinchGestureRecognizer) {
         guard !overview else { return }
         if gesture.state == .began { pinchWindow = spanSeconds }
-        spanSeconds = min(48, max(1.5, pinchWindow / Double(gesture.scale)))
+        spanSeconds = min(48, max(0.75, pinchWindow / Double(gesture.scale)))
+        zoom?(spanSeconds)
         columns.removeAll(); setNeedsDisplay()
     }
     private func location(_ point: CGPoint) -> Double {
@@ -90,11 +98,23 @@ struct PerformanceWave: UIViewRepresentable {
     }
     @objc private func pan(_ gesture: UIPanGestureRecognizer) {
         guard duration > 0 else { return }
-        if gesture.state == .began { panPosition = state?().position ?? 0; scrubbing = true; tickHaptic.prepare() }
+        if gesture.state == .began {
+            panPosition = state?().position ?? 0; scrubbing = true; tickHaptic.prepare()
+            resume = state?().playing == true
+            if !overview && resume { playback?(false) }
+        }
         let amount = location(gesture.translation(in: self))
-        let time = overview ? location(gesture.location(in: self)) * duration : panPosition - amount * spanSeconds
-        seek?(min(duration, max(0, time)))
-        if gesture.state == .ended || gesture.state == .cancelled { scrubbing = false; tickHaptic.selectionChanged() }
+        let tempo = min(4, max(0.25, 1 + Double(state?().pitch ?? 0) / 100))
+        let time = overview ? location(gesture.location(in: self)) * duration : panPosition - amount * spanSeconds * tempo
+        let target = min(duration, max(0, time))
+        if overview { seek?(target) } else { previewPosition = target }
+        if gesture.state == .ended || gesture.state == .cancelled {
+            if !overview {
+                if gesture.state == .ended { seek?(target) }
+                if resume { playback?(true) }
+            }
+            scrubbing = false; previewPosition = nil; tickHaptic.selectionChanged()
+        }
         setNeedsDisplay()
     }
     override func draw(_ rect: CGRect) {
@@ -104,11 +124,12 @@ struct PerformanceWave: UIViewRepresentable {
         accessibilityValue = String(format: "%@ %.2f seconds", state.playing ? "playing" : "paused", state.position)
         let rate = (1 + Double(state.pitch) / 100) * (1 + Double(state.bend) / 100)
         let moving = (state.playing || state.preview) && !scrubbing
-        let position = clock.at(CACurrentMediaTime(), raw: state.position, moving: moving, rate: rate)
+        let position = previewPosition ?? clock.at(CACurrentMediaTime(), raw: state.position, moving: moving, rate: rate)
         let along = vertical ? bounds.height : bounds.width
         let across = vertical ? bounds.width : bounds.height
         let head = overview ? 0 : vertical ? 0.18 : 0.3
-        let span = overview ? max(1, duration) : spanSeconds * rate
+        let tempo = min(4, max(0.25, 1 + Double(state.pitch) / 100))
+        let span = overview ? max(1, duration) : spanSeconds * tempo
         let start = overview ? 0 : position - span * head
         let secondsPerColumn = span / max(1, Double(along)) * 2
         if abs(secondsPerColumn - cachedStep) > 0.000001 { cachedStep = secondsPerColumn; columns.removeAll() }

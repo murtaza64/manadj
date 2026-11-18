@@ -28,6 +28,7 @@ struct DeckViewState {
     @Published var loadTarget = 0
     @Published var crossfade = 0.0
     @Published var quantize = false
+    @Published var waveSeconds = 12.0
     @Published var splitOutput = false
     @Published var cueMix = 0.0
     private(set) var audio: NativeAudio?

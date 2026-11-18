@@ -1,0 +1,59 @@
+# Android-to-iOS feel parity, working checklist
+
+This is a review ledger, not release acceptance. Android is a baseline, not a requirement to copy its rough edges. Both existing iOS PRs remain on hold.
+
+## Evidence baseline
+
+- Production Android source: d137e2d7, debug 0.1.0-rc.8. Reference branch changes only workflow and instrumentation.
+- Clean Android portrait and Collection screenshots: run 44414066045. Generated 24-second PCM tones and actual decoded/analyzed waveforms, no commercial music.
+- That run verified injected touchscreen Play, Pause and Browse with native playing-state assertions. It then failed an extra navigation step because Collection was already selected. It is not an all-pass exploration run.
+- Current Apple baseline: Xcode 16.4 / iOS 18.5 simulator. No signed physical iPhone check.
+
+## Motion and input
+
+| Android behavior | Native iOS implementation direction | Verification still needed |
+| --- | --- | --- |
+| Frame-clock waveform redraw, extrapolated position; discontinuities snap | CADisplayLink drawing separate from observable UI poll; pure WaveClock port with seek/stop/rate tests | Native build, loop/seek recording, long frame intervals under interaction |
+| Heard-time latency correction and stop-tail handling | Not yet implemented on iOS; current predictor is engine-time only | Route-aware output latency model and actual output alignment |
+| Immediate 0.93 key press, spring return, 240ms glow release | Native key press compression and spring, UIKit touch-down/cancel handling for gated controls | Compare temporal recordings; glow details remain incomplete |
+| Cue/hotcue press begins immediately, release/cancel ends it | UIKit touch-down/up/outside/cancel; haptic call on press | Slide-to-play and cancellation under navigation not yet equivalent |
+| Knob chooses dominant horizontal/vertical relative axis, center notch, two-finger fine adjustment | Dominant-axis SwiftUI drag, neutral crossing haptic, double-tap reset | Two-finger fine mode, sticky notch escape distance, fixed numeric popover missing |
+| Fader rail/handle semantics, optional double-tap centering | Current iOS fader is still relative drag | Must match rail/handle and recenter semantics, not accepted |
+| Pitch opens on down with 240ms slide and 140ms fade | In-place one-deck overlay, native animation | Trigger timing and interruption/cancel path need comparison |
+| Hardware haptic events for key, notch, long press, wheels | Native selection and light/medium impact generators | Simulator cannot establish physical strength, timing or feel |
+
+## Waveform fidelity
+
+- Dedicated detail versus minimap rendering is required. The previous all-track overview used as a detail wave was wrong.
+- New native painter ports Android's eight-band grouping: FFT half-window alignment, box-filter mean or interpolation, squared companding, 3/2/3 grouping, per-group gains, soft limiting and additive-soft overlap color calculation.
+- Cached columns live at absolute track-time coordinates so scrolling translates stable columns instead of resampling every frame.
+- Detail playhead is 30% from the left in portrait. Vertical detail time runs downward and uses an 18% top playhead.
+- Both decks must share zoom. Track-time span scales with tempo only. Momentary bend changes motion, not scale.
+- Beat/bar/16/32/64-beat grid tiers, cue markers, hotcue numbers and active-loop range must remain legible.
+- Detail pinch range is 0.75 to 48 seconds, matching Android. Scrub previews should pause and commit on release, cancel without committing and resume prior playback. This is not a scratch implementation.
+- Missing: true scratch/vinyl behavior, heard-strip EQ/filter history, per-channel audible top/raw bottom lobe, Android fill normalization, synced waveform-style settings, exact overview brightness/style and output-latency phase alignment. Do not call waveform parity complete.
+- Synthetic fixture MWF data is analyzed from the same generated PCM, using Android FFT=1024, band hop=512, peak hop=128 and band edges. It is not a decorative invented waveform.
+
+## Deliberate native departures
+
+- Recording strip: user identified Android's strip as a rough edge. iOS uses compact record/saved controls and a quiet master-format label, not the large outlined Android bar. Needs side-by-side review.
+- Secondary controls may use native material. Performance lanes stay black, opaque and high-contrast.
+- Apple glassEffect is iOS26+. Xcode16.4/iOS18.5 cannot verify it. Do not label ultraThinMaterial as Liquid Glass.
+- Apple advises sparse glass use, preserving content clarity and respecting Reduced Transparency, Increased Contrast and Reduced Motion. True glass work requires an iOS26 SDK/runtime build and pixel check before acceptance.
+
+## Acceptance gates
+
+1. Clean same-fixture Android/iOS portrait, landscape, browser and pitch screenshots, actual pixels reviewed.
+2. Native Play/Pause/Cue/hotcue/loop/jump/zoom/seek input paths with state checks and recordings.
+3. No accidental full-screen scroll, no hidden performance controls, no keyboard/focus regressions.
+4. Frame-callback diagnostics and motion video are simulator evidence, not a guarantee of physical-device frame smoothness or touch-to-audio latency.
+5. Physical iPhone session: cue cancellation, scratching, route latency, haptic feel, thermal/audio stability, accessibility settings.
+6. No merge until review hold is explicitly lifted. A green compile or unit suite alone is insufficient.
+
+## Sources
+
+- Android source: android/app/src/main/java/dev/manadj/app/Layouts.kt, Controls.kt, Deck.kt, WaveView.kt, Waveform.kt, UiModel.kt.
+- Android runtime: https://github.com/murtaza64/manadj/actions/runs/44414066045/artifacts/14478372755
+- Apple: https://developer.apple.com/documentation/swiftui/view/glasseffect(_:in:)
+- Apple: https://developer.apple.com/documentation/technologyoverviews/adopting-liquid-glass.md
+- Apple accessibility discussion: https://developer.apple.com/videos/play/wwdc2025/219/
