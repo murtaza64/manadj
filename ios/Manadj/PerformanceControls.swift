@@ -25,19 +25,7 @@ struct PerformanceKnob: View {
     var body: some View {
         VStack(spacing: 0) {
             Text(label).font(Ink.font(9, bold: true)).foregroundStyle(Ink.muted)
-            Canvas { context, size in
-                let center = CGPoint(x: size.width / 2, y: size.height / 2)
-                let r = min(size.width, size.height) * 0.36
-                let rect = CGRect(x: center.x - r, y: center.y - r, width: r * 2, height: r * 2)
-                context.fill(Path(ellipseIn: rect), with: .color(Ink.crust))
-                var arc = Path()
-                arc.addArc(center: center, radius: r, startAngle: .degrees(135), endAngle: .degrees(405), clockwise: false)
-                context.stroke(arc, with: .color(Ink.edge), style: StrokeStyle(lineWidth: 2, lineCap: .round))
-                let angle = (135 + min(1, max(0, fraction)) * 270) * .pi / 180
-                var needle = Path(); needle.move(to: center)
-                needle.addLine(to: CGPoint(x: center.x + cos(angle) * r * 0.82, y: center.y + sin(angle) * r * 0.82))
-                context.stroke(needle, with: .color(color), style: StrokeStyle(lineWidth: 2, lineCap: .round))
-            }
+            Canvas { context, size in draw(context: context, size: size) }
         }.contentShape(Rectangle())
         .gesture(DragGesture(minimumDistance: 0).onChanged { drag in
             if start == nil { start = value }
@@ -48,6 +36,23 @@ struct PerformanceKnob: View {
         .accessibilityElement().accessibilityLabel(label + " control").accessibilityValue(String(format: "%.2f", value))
         .accessibilityAdjustableAction { direction in value = min(range.upperBound, max(range.lowerBound, value + (direction == .increment ? 0.01 : -0.01))) }
     }
+    private func draw(context: GraphicsContext, size: CGSize) {
+        let center = CGPoint(x: size.width / 2, y: size.height / 2)
+        let radius: CGFloat = min(size.width, size.height) * 0.36
+        let rect = CGRect(x: center.x - radius, y: center.y - radius, width: radius * 2, height: radius * 2)
+        context.fill(Path(ellipseIn: rect), with: .color(Ink.crust))
+        var arc = Path()
+        arc.addArc(center: center, radius: radius, startAngle: .degrees(135), endAngle: .degrees(405), clockwise: false)
+        context.stroke(arc, with: .color(Ink.edge), style: StrokeStyle(lineWidth: 2, lineCap: .round))
+        let angle: Double = (135.0 + min(1.0, max(0.0, fraction)) * 270.0) * Double.pi / 180.0
+        let dx: CGFloat = CGFloat(cos(angle)) * radius * 0.82
+        let dy: CGFloat = CGFloat(sin(angle)) * radius * 0.82
+        var needle = Path()
+        needle.move(to: center)
+        needle.addLine(to: CGPoint(x: center.x + dx, y: center.y + dy))
+        context.stroke(needle, with: .color(color), style: StrokeStyle(lineWidth: 2, lineCap: .round))
+    }
+
 }
 
 struct PerformanceFader: View {
