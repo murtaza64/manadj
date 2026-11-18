@@ -33,10 +33,18 @@ RESULT="ios/.test-results/Manadj-$(date +%Y%m%d-%H%M%S).xcresult"
 mkdir -p ios/.test-results
 xcrun simctl boot "$DESTINATION_UDID" || true
 xcrun simctl bootstatus "$DESTINATION_UDID" -b
+STOP="$PWD/ios/.test-results/recording-stop"
+rm -f "$STOP"
+bash ios/scripts/record_ui_simulator.sh "$STOP" "$PWD/ios/.test-results/actual-ui-runner.mp4" > ios/.test-results/record-ui.log 2>&1 &
+MONITOR_PID=$!
+trap 'touch "$STOP"; wait "$MONITOR_PID" || true' EXIT
 PRIMARY_STATUS=0
 xcodebuild -project ios/Manadj.xcodeproj -scheme Manadj -sdk iphonesimulator \
   -destination "platform=iOS Simulator,id=$DESTINATION_UDID" -derivedDataPath ios/.derived-data \
   -resultBundlePath "$RESULT" CODE_SIGNING_ALLOWED=NO ONLY_ACTIVE_ARCH=YES ARCHS="$HOST_ARCH" test || PRIMARY_STATUS=$?
+touch "$STOP"
+wait "$MONITOR_PID" || true
+trap - EXIT
 # Smallest phone in this SDK: independent safe-area and control-fit smoke test.
 SMALL_UDID=$(xcrun simctl list devices available --json | python3 -c '
 import json,sys
