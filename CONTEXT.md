@@ -31,7 +31,7 @@ _Avoid_: release build, native app
 The state of a manadj with an empty Library. Starts the Setup sequence before anything else.
 
 **Setup guide**:
-A short, skippable, independently re-runnable flow configuring one thing: Rekordbox import, tracks directory, Cue mode, SoundCloud, Soulseek, Controller check. First run chains them in order (the Setup sequence), then starts the Tour; Settings lists each with its status (done, skipped, not started) and relaunches any of them alone.
+A short, skippable, independently re-runnable flow configuring one thing: Rekordbox import, tracks directory, Cue mode, SoundCloud, Spotify, Controller check. First run chains them in order (the Setup sequence), then starts the Tour; Settings lists each with its status (done, skipped, not started) and relaunches any of them alone.
 
 **Shipped defaults**:
 The preference values a fresh install starts with — a deliberate snapshot of the developer's own preferences, excluding anything machine- or account-bound (device IDs, paths, tokens, Export enablement). A user's own setting always wins; re-snapshotting changes only what fresh or never-touched keys see.
@@ -484,31 +484,22 @@ A named render recipe over Waveform data: a shader variant plus its tunable disp
 ### Acquisition
 
 **Source**:
-A place Source Items come from — where demand for tracks originates (SoundCloud likes today). Unlike an External library, a Source holds no copy of manadj's library state. Either Native or External. Distinct from a Supplier: a Source is where wanted tracks are discovered; a Supplier is where audio is obtained. SoundCloud is both.
-
-**Supplier**:
-A place manadj can obtain audio from. SoundCloud and Soulseek are Suppliers; Soulseek is supply-only — it has no Source Items. A Source Item may be fulfilled through any Supplier; Audio Provenance records which one actually supplied the audio. Either Direct or Search.
-
-**Direct Supplier**:
-A Supplier where the Source Item itself addresses the audio — fulfillment is a download, no choosing involved (SoundCloud).
-
-**Search Supplier**:
-A Supplier with no per-item address: candidates are found by searching, and one must be picked before download (Soulseek). Only Search Suppliers involve a picker.
+A place Source Items come from — where demand for tracks originates (SoundCloud likes, Spotify "want"). Unlike an External library, a Source holds no copy of manadj's library state. Either Native or External. A Source is where wanted tracks are discovered; where audio is obtained is the user's call — manaDJ does not download audio, it links out (Beatport search) and records Audio Provenance.
 
 **Native Source**:
-A Source manadj is integrated with: it can Refresh Source Items from it (SoundCloud today). Provenance recorded from its downloads carries a structured external ID. Whether it can also supply audio is a Supplier question, not a Source one.
+A Source manadj is integrated with: it can Refresh Source Items from it (SoundCloud, Spotify). Whether it could also supply audio is out of scope — manaDJ never downloads from it.
 
 **External Source**:
 A Source manadj recognizes but is not integrated with (e.g. Beatport, YouTube, Bandcamp). Identified by URL only — the URL carries whatever identity exists (video ID, Beatport ID). Provenance from an External Source is asserted by the user. An External Source can be promoted to Native later; its provenance URLs remain parseable.
 
 **Acquisition**:
-The pipeline that turns Source Items into Tracks: Refresh, classification and queueing, download, Disk Import, and creation of the Source Correspondence. Distinct from Export/External Import, which transfer state about existing Tracks.
+The wishlist pipeline that relates Source Items to Tracks: Refresh, classification, matching (Source Correspondence proposals), manual linking, and fulfillment by the user getting the audio elsewhere (each item links out to a Beatport search). manaDJ performs no downloads. Distinct from Export/External Import, which transfer state about existing Tracks.
 
 **Source Correspondence**:
 An association between a Track and a track on a Source — "this Track is that SoundCloud track" — keyed by the Source's stable ID. Independent of where the Track's audio actually came from.
 
 **Source Item**:
-A track on a Source that manadj knows about and considers a candidate for acquisition (e.g. a SoundCloud like). Persisted with a lifecycle: new → queued → fulfilled (a Source Correspondence to a Track exists) or ignored.
+A track on a Source that manadj knows about and considers a candidate for acquisition (e.g. a SoundCloud like). Persisted with a lifecycle: new → fulfilled (a Source Correspondence to a Track exists) or ignored. (Legacy `queued` rows from the download era present as new.)
 _Avoid_: like (SoundCloud-specific; fine informally, not in code/issues)
 
 **Classification**:
@@ -521,7 +512,7 @@ Fetching the current list of Source Items from a Source. Only ever adds new Sour
 Normalizing raw metadata from a Source or filename into canonical Track title and artist — junk-token stripping, `Artist - Title` splitting, uploader fallback.
 
 **Audio Provenance**:
-A record of where a Track's current audio file came from: an origin label (the Source's name, derived from the URL host for External Sources), an optional URL, and when it was acquired. Recorded automatically for downloads manadj performs; asserted otherwise — by the user, or derived automatically from file hints at Disk Import (yt-dlp IDs, purchase tag URLs). Label-only provenance is allowed for URL-less origins (cd-rip, unknown). Asserted provenance stays editable; recorded provenance is ground truth and cannot be overwritten by an assertion. Replacing a Track's audio replaces its provenance. Distinct from Source Correspondence: a Track can correspond to a SoundCloud track while its audio was bought elsewhere.
+A record of where a Track's current audio file came from: an origin label (the Source's name, derived from the URL host for External Sources), an optional URL, and when it was acquired. Asserted by the user, or derived automatically from file hints at Disk Import (yt-dlp IDs, purchase tag URLs). Label-only provenance is allowed for URL-less origins (cd-rip, unknown). Asserted provenance stays editable; recorded provenance is ground truth and cannot be overwritten by an assertion. Replacing a Track's audio replaces its provenance. Distinct from Source Correspondence: a Track can correspond to a SoundCloud track while its audio was bought elsewhere.
 
 ### Sync
 

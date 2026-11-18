@@ -42,7 +42,7 @@ Import never writes to Rekordbox or moves music. Export is off by default.
 ## Music folder / Tracks directory {#music-folder}
 
 1. **Choose folder…** → **Save & scan folder**, or **Use folder without scanning / Skip for now**.
-2. Keep manaDJ open during scanning. Downloads use this folder; imported files stay in place.
+2. Keep manaDJ open during scanning. Imported files stay in place.
 
 ## Cue mode {#cue-mode}
 
@@ -59,11 +59,6 @@ Playing-Deck Hot Cues always jump; Main cue retains hold behavior. Headphone rou
 2. Developer tools: **Option–Command–I** (macOS), **Ctrl–Shift–I** (Windows). Chrome/Edge/Brave: **Application**; Firefox/Safari: **Storage**. Safari: first enable **Settings → Advanced → Show features for web developers**.
 3. **Cookies → https://soundcloud.com**: copy **oauth_token** (`2-…`).
 4. Paste into manaDJ → **Connect**; verify account and likes → **Done**.
-
-## Soulseek {#soulseek}
-
-1. Enter username/password → **Connect**. New accounts are created on first login.
-2. Wait for **Connected to Soulseek** → **Done**; if slskd is unavailable, **Skip**.
 
 ## Controller check {#controller-check}
 

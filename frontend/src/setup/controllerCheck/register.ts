@@ -8,7 +8,7 @@ registerGuide({
   id: CONTROLLER_CHECK_ID,
   title: 'Controller check',
   // Sequence: Welcome → Rekordbox → tracks dir → Cue mode → SoundCloud →
-  // Soulseek → Controller check → Tour.
+  // Spotify → Controller check → Tour.
   order: 60,
   status: () => guideStatus(CONTROLLER_CHECK_ID),
   Component: lazy(() => import('./ControllerCheckGuide')),

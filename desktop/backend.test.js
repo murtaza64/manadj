@@ -20,7 +20,6 @@ test("macOS packaged layout", () => {
   assert.equal(cfg.backendRoot, "/A/manaDJ.app/Contents/Resources/backend");
   assert.equal(cfg.dataRoot, "/Users/u/Library/Application Support/manaDJ");
   assert.equal(cfg.ffmpegDir, "/A/manaDJ.app/Contents/Resources/ffmpeg");
-  assert.equal(cfg.slskdBin, "/A/manaDJ.app/Contents/Resources/slskd/slskd");
 });
 
 test("Windows packaged layout", () => {
@@ -35,7 +34,6 @@ test("Windows packaged layout", () => {
   });
   assert.equal(cfg.python, "C:\\Users\\u\\AppData\\Local\\Programs\\manaDJ\\resources\\python\\python.exe");
   assert.equal(cfg.dataRoot, "C:\\Users\\u\\AppData\\Roaming\\manaDJ");
-  assert.equal(cfg.slskdBin, "C:\\Users\\u\\AppData\\Local\\Programs\\manaDJ\\resources\\slskd\\slskd.exe");
 });
 
 test("Windows dev --managed uses the venv Scripts python and no data root", () => {
@@ -51,33 +49,29 @@ test("Windows dev --managed uses the venv Scripts python and no data root", () =
   assert.equal(cfg.python, "C:\\repo\\.venv\\Scripts\\python.exe");
   assert.equal(cfg.dataRoot, null);
   assert.equal(cfg.ffmpegDir, null);
-  assert.equal(cfg.slskdBin, null);
 });
 
-test("missing bundled ffmpeg/slskd are not exported", () => {
+test("missing bundled ffmpeg is not exported", () => {
   const cfg = resolveBackendConfig({
     isPackaged: true, resourcesPath: "/R", appDataPath: "/D", repoRoot: "/repo",
     platform: "darwin", env: {}, exists: none,
   });
   assert.equal(cfg.ffmpegDir, null);
-  assert.equal(cfg.slskdBin, null);
-  assert.equal(backendEnv(cfg, { token: "t", baseEnv: {} }).MANADJ_SLSKD_BIN, undefined);
 });
 
 test("env overrides win", () => {
   const cfg = resolveBackendConfig({
     isPackaged: true, resourcesPath: "/R", appDataPath: "/D", repoRoot: "/repo", platform: "darwin",
-    env: { MANADJ_PYTHON: "/py", MANADJ_DATA_DIR: "/data", MANADJ_SLSKD_BIN: "/s" },
+    env: { MANADJ_PYTHON: "/py", MANADJ_DATA_DIR: "/data" },
     exists: none,
   });
   assert.equal(cfg.python, "/py");
   assert.equal(cfg.dataRoot, "/data");
-  assert.equal(cfg.slskdBin, "/s");
 });
 
 test("backend env: token, lifeline, packaged, ffmpeg on Windows Path key", () => {
   const cfg = {
-    dataRoot: "C:\\data", packaged: true, ffmpegDir: "C:\\R\\ffmpeg", slskdBin: null, platform: "win32",
+    dataRoot: "C:\\data", packaged: true, ffmpegDir: "C:\\R\\ffmpeg", platform: "win32",
   };
   const env = backendEnv(cfg, { token: "tok", baseEnv: { Path: "C:\\Windows" } });
   assert.equal(env.MANADJ_SHELL_TOKEN, "tok");

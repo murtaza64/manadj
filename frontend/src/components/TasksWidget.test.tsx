@@ -25,14 +25,14 @@ describe('taskSummaryPollMs', () => {
 });
 
 const RUNNING = {
-  id: 7, type: 'download', type_label: 'SoundCloud download', fix: 'acquisition', ref: 'source_item:2',
-  subject: { kind: 'source_item', id: '2', label: 'Wake Up', detail: 'Hoax' }, state: 'running', error: null,
+  id: 7, type: 'stem-split', type_label: 'Stem split', fix: 'retry', ref: 'track:2',
+  subject: { kind: 'track', id: '2', label: 'Wake Up', detail: 'Hoax' }, state: 'running', error: null,
   attempts: 0, progress: 0.4, progress_label: '3.6 / 9.0 MB', superseded: false, not_before: null,
   created_at: null, started_at: null, finished_at: null, dismissed_at: null,
 };
 const SUMMARY = {
   counts: { pending: 4, running: 1, done: 20, failed: 3 },
-  attention: 2, attention_by_type: { 'SoundCloud download': 2 }, running: [RUNNING],
+  attention: 2, attention_by_type: { 'Stem split': 2 }, running: [RUNNING],
   pending_by_type: { Waveform: 4 }, undismissed_failures: 3,
 };
 
@@ -52,7 +52,7 @@ it('renders active queue depth, the current progress sliver and the attention ba
   expect(host.querySelector('[aria-label="2 need attention"]')).not.toBeNull();
   expect((host.querySelector('.tasks-sliver span') as HTMLElement).style.width).toBe('40%');
   // the badge's tooltip names the subject, never a raw ref
-  expect(host.querySelector('.tasks-widget')?.getAttribute('title')).toBe('SoundCloud download: Hoax - Wake Up · 3.6 / 9.0 MB');
+  expect(host.querySelector('.tasks-widget')?.getAttribute('title')).toBe('Stem split: Hoax - Wake Up · 3.6 / 9.0 MB');
   await api.tasks.summary();
   expect(globalThis.fetch).toHaveBeenCalledWith('http://localhost:8127/api/tasks/summary');
   act(() => root.unmount());

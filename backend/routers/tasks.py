@@ -111,8 +111,8 @@ def get_summary(db: Session = Depends(get_db)) -> TaskSummary:
     for t in attention:
         by_type[type_label(t.type)] = by_type.get(type_label(t.type), 0) + 1
     active = manager.active_tasks(db)
-    # a polling download (Soulseek) is a pending task between ticks, but its
-    # bytes are moving: measured progress makes it running for the UI
+    # a long poll is a pending task between ticks, but its bytes may be
+    # moving: measured progress makes it running for the UI
     running = [t for t in active if t.state == "running" or t.progress is not None]
     pending_by_type: dict[str, int] = {}
     for t in active:

@@ -3,10 +3,8 @@
 One worker thread per lane; each lane serializes its own task types and owns
 its own pacing/backoff state. This keeps the constraint that a given task
 type never runs twice concurrently — `(state=running, type, ref)` stays a
-unique address (backend/acquisition/download.py) — while letting a slow
-librosa analysis proceed during a SoundCloud download, and letting soulseek
-transfers proceed while the SoundCloud lane sits in its pacing sleep or
-rate-limit cool-down.
+unique address — while letting a slow librosa analysis proceed alongside
+other work.
 
 Every registered task type MUST appear in exactly one lane: `split_handlers`
 raises on an unknown type so a new task type fails loudly at startup instead
@@ -19,11 +17,6 @@ from .manager import Handler
 # the *_TASK_TYPE constants — those modules pull heavy deps (librosa etc.)
 # and are imported lazily by main.py.
 LANES: dict[str, tuple[str, ...]] = {
-    # SoundCloud downloads: paced (download_delay_secs) and 429-backed-off;
-    # isolated so the budget sleep stalls nothing else.
-    "soundcloud": ("download",),
-    # Soulseek traffic polls slskd — no SoundCloud budget applies to it.
-    "soulseek": ("soulseek-download", "soulseek-search"),
     # CPU-bound local work, plus the onboarding imports (#274/#276): imports
     # share the lane with the waveform/analysis tasks they enqueue, matching
     # the pre-lane serialized ordering.

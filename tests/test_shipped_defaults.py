@@ -10,7 +10,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from backend import shipped_defaults
-from backend.config import _classification_config, _download_delay_secs
+from backend.config import _classification_config
 from backend.routers import settings
 
 ROOT = Path(__file__).parent.parent
@@ -38,11 +38,11 @@ def test_load_drops_unlisted_keys(tmp_path):
     path = tmp_path / "defaults.json"
     path.write_text(json.dumps({
         "settings": {"manadj-quantize": "true", "manadj-audio-routing": "{}", "manadj-app-mode": "perf"},
-        "config": {"library": {"tracks_directory": "/x"}, "acquisition": {"download_delay_secs": 7}},
+        "config": {"library": {"tracks_directory": "/x"}, "acquisition": {"cleanup": {"junk_patterns": ["x"]}}},
     }))
     loaded = shipped_defaults.load(path)
     assert loaded["settings"] == {"manadj-quantize": "true"}
-    assert loaded["config"] == {"acquisition": {"download_delay_secs": 7}}
+    assert loaded["config"] == {"acquisition": {"cleanup": {"junk_patterns": ["x"]}}}
 
 
 def test_missing_file_is_empty(tmp_path):
@@ -50,9 +50,8 @@ def test_missing_file_is_empty(tmp_path):
 
 
 def test_config_file_wins_and_shipped_fills_unset():
-    shipped = {"acquisition": {"download_delay_secs": 9, "classification": {"clip_max_duration_secs": 60, "mix_min_duration_secs": 999}}}
+    shipped = {"acquisition": {"classification": {"clip_max_duration_secs": 60, "mix_min_duration_secs": 999}}}
     data = shipped_defaults.merge_under({"acquisition": {"classification": {"clip_max_duration_secs": 30}}}, shipped)
-    assert _download_delay_secs(data) == 9
     classification = _classification_config(data)
     assert classification.clip_max_duration_secs == 30
     assert classification.mix_min_duration_secs == 999
@@ -80,7 +79,7 @@ def test_snapshot_reads_decoy_db_read_only(tmp_path):
     conn.close()
     before = db.read_bytes()
     config = tmp_path / "config.toml"
-    config.write_text('[library]\ntracks_directory = "/music"\n[acquisition]\ndownload_delay_secs = 4\n')
+    config.write_text('[library]\ntracks_directory = "/music"\n[acquisition.classification]\nclip_max_duration_secs = 45\n')
 
     payload = json.loads(_snapshot_module().snapshot(db, config))
 
@@ -89,7 +88,7 @@ def test_snapshot_reads_decoy_db_read_only(tmp_path):
         "manadj-visualizer-params:neon": '{"speed":2}',
         **shipped_defaults.SETTING_OVERRIDES,
     }
-    assert payload["config"] == {"acquisition": {"download_delay_secs": 4}}
+    assert payload["config"] == {"acquisition": {"classification": {"clip_max_duration_secs": 45}}}
     assert db.read_bytes() == before
 
 

@@ -153,7 +153,7 @@ class InstallBuildTests(unittest.TestCase):
 
     def test_setup_sequence_and_home_round_trip(self):
         page = Page(self.pages["install.html"])
-        sequence = ["welcome", "rekordbox-import", "music-folder", "cue-mode", "soundcloud", "soulseek", "controller-check"]
+        sequence = ["welcome", "rekordbox-import", "music-folder", "cue-mode", "soundcloud", "controller-check"]
         self.assertEqual([id for id in page.ids if id in sequence], sequence)
         for id in sequence + ["rerun-setup", "data", "updates", "uninstall", "troubleshooting"]:
             self.assertIn(f"#{id}", page.links, "Guide heading must be reachable from the contents")

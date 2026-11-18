@@ -18,8 +18,6 @@
 //   MANADJ_FFMPEG_DIR   dir holding ffmpeg/ffprobe, prepended to the
 //                       backend's PATH; packaged default <resources>/ffmpeg
 //                       (only when it exists)
-//   MANADJ_SLSKD_BIN    bundled slskd (#291), exported when
-//                       <resources>/slskd/slskd[.exe] exists
 //   MANADJ_PACKAGED=1   set for packaged builds (backend/data_root.py, #277)
 //
 // Stopping (#314): POSIX signals shut uvicorn down cleanly, but on Windows
@@ -84,9 +82,7 @@ function resolveBackendConfig({
   const bundledFfmpeg = p.join(resourcesPath, "ffmpeg");
   const ffmpegDir =
     env.MANADJ_FFMPEG_DIR || (isPackaged && exists(bundledFfmpeg) ? bundledFfmpeg : null);
-  const bundledSlskd = p.join(resourcesPath, "slskd", platform === "win32" ? "slskd.exe" : "slskd");
-  const slskdBin = env.MANADJ_SLSKD_BIN || (isPackaged && exists(bundledSlskd) ? bundledSlskd : null);
-  return { backendRoot, python, dataRoot, ffmpegDir, slskdBin, packaged: isPackaged, platform };
+  return { backendRoot, python, dataRoot, ffmpegDir, packaged: isPackaged, platform };
 }
 
 function pythonInFor(p, dir, platform, venv) {
@@ -112,7 +108,6 @@ function backendEnv(cfg, { token, baseEnv = process.env }) {
   // backend/data_root.py (#277): packaged posture (data root, Export off
   // by default, dev surfaces hidden) keys off MANADJ_PACKAGED.
   if (cfg.packaged) env.MANADJ_PACKAGED = "1";
-  if (cfg.slskdBin) env.MANADJ_SLSKD_BIN = cfg.slskdBin;
   if (cfg.ffmpegDir) {
     // Windows env keys are case-insensitive but node preserves the
     // original spelling ("Path"); prepend to whichever key exists.

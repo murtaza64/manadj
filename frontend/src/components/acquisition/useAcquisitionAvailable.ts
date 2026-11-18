@@ -1,16 +1,19 @@
-// Gate for the Acquisition tab (gh#342): visible when any Supplier is
-// configured — SoundCloud (likes + direct downloads) or Soulseek (search
-// for any track) — not only SoundCloud.
+// Gate for the Acquisition tab: visible when a wishlist Source is
+// connected — SoundCloud (likes) or Spotify ("want" items).
 import { useQuery } from '@tanstack/react-query';
-import { api } from '../../api/client';
-
-export const SUPPLIERS_KEY = ['acquisitionSuppliers'] as const;
+import { SOUNDCLOUD_STATUS_KEY, soundcloudApi } from '../../setup/soundcloud/soundcloudApi';
+import { SPOTIFY_STATUS_KEY, spotifyApi } from '../../setup/spotify/spotifyApi';
 
 export function useAcquisitionAvailable(): boolean {
-  const { data } = useQuery({
-    queryKey: SUPPLIERS_KEY,
-    queryFn: api.acquisition.getSuppliers,
+  const soundcloud = useQuery({
+    queryKey: SOUNDCLOUD_STATUS_KEY,
+    queryFn: () => soundcloudApi.status(),
     staleTime: 5 * 60 * 1000,
   });
-  return (data ?? []).length > 0;
+  const spotify = useQuery({
+    queryKey: SPOTIFY_STATUS_KEY,
+    queryFn: () => spotifyApi.status(),
+    staleTime: 5 * 60 * 1000,
+  });
+  return (soundcloud.data?.connected ?? false) || spotify.data?.state === 'connected';
 }

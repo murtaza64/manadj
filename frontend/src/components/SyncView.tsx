@@ -38,8 +38,8 @@ export function SyncView() {
     window.addEventListener(OPEN_ACQUISITION_EVENT, open);
     return () => window.removeEventListener(OPEN_ACQUISITION_EVENT, open);
   }, []);
-  // Acquisition needs a Supplier: hidden until SoundCloud or Soulseek is
-  // set up (Settings → Accounts; setup-guides #290/#291, gh#342).
+  // Acquisition is the wishlist: hidden until SoundCloud or Spotify is
+  // set up (Settings → Accounts; setup-guides #290, gh#342, #347).
   const acquisitionAvailable = useAcquisitionAvailable();
   const tabs = TABS.filter((t) => t.id !== 'acquisition' || acquisitionAvailable);
   const activeTab = tabs.some((t) => t.id === selectedTab) ? selectedTab : 'workspace';

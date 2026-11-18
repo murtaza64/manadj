@@ -63,14 +63,10 @@ class AudioProvenance(Base):
 
 
 class SoulseekSearch(Base):
-    """The remembered Soulseek search for a Source Item (gh#216).
-
-    One row per item: the query actually searched and the shaped results
-    (JSON list of picker-facing candidate dicts), overwritten by every new
-    search — manual or auto. Lets the picker hydrate instantly on item
-    selection instead of re-searching peers (~20s), and gives the hands-off
-    download (gh#214) a candidate list to snapshot from.
-    """
+    """LEGACY (gh#488): remembered Soulseek searches from when Soulseek was
+    a Supplier. The feature and its code are gone; the table and rows are
+    kept untouched (they may hold the operator's hand-tuned queries) and
+    nothing reads or writes them."""
 
     __tablename__ = "soulseek_searches"
 

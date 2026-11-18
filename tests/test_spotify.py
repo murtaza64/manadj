@@ -24,9 +24,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from backend.acquisition.models import SourceItem
-from backend.acquisition.router import get_soulseek_supplier, require_soundcloud_downloads
 from backend.acquisition.router import router as acquisition_router
-from backend.acquisition.supplier import SupplierSearchResult
 from backend.database import get_db
 from backend.models import Track
 from backend.spotify import router as spotify_router
@@ -39,7 +37,6 @@ from backend.spotify.connection import (
 )
 from backend.spotify.feeds import SpotifyFeeds, get_feeds
 
-from .conftest import FakeSource
 
 CLIENT_ID = "abc123clientid"
 BASE_URL = "http://127.0.0.1:8127"
@@ -229,7 +226,7 @@ def conn(env: Path, fake: FakeSpotify, clock: Clock, listener: FakeListener) -> 
 def make_client(
     db_session: Session, conn: SpotifyConnection, clock: Clock
 ) -> Callable[..., TestClient]:
-    def make(soulseek: Any = None) -> TestClient:
+    def make() -> TestClient:
         feeds = SpotifyFeeds(conn, clock=clock)
         app = FastAPI()
         app.include_router(spotify_router.router, prefix="/api/spotify")
@@ -238,8 +235,6 @@ def make_client(
         app.dependency_overrides[get_db] = lambda: db_session
         app.dependency_overrides[get_connection] = lambda: conn
         app.dependency_overrides[get_feeds] = lambda: feeds
-        app.dependency_overrides[get_soulseek_supplier] = lambda: soulseek
-        app.dependency_overrides[require_soundcloud_downloads] = lambda: None
         return TestClient(app, base_url=BASE_URL)
 
     return make
@@ -476,13 +471,9 @@ def test_want_creates_spotify_source_item(client: TestClient, fake: FakeSpotify,
     assert other["title"] == "Elsewhere" and other["liked_at"] is None
     assert client.post("/api/acquisition/want", json={"external_id": "nope"}).status_code == 404
 
-    # Acquisition lists every Source; Spotify items have no Direct Supplier
+    # Acquisition lists every Source; Spotify items are wishlist entries
     assert {i["source"] for i in client.get("/api/acquisition/items").json()} == {"spotify"}
     assert len(client.get("/api/acquisition/items", params={"source": "soundcloud"}).json()) == 0
-    q = client.post(f"/api/acquisition/items/{item['id']}/queue")
-    assert q.status_code == 409 and "Soulseek" in q.json()["detail"]
-    bulk = client.post("/api/acquisition/items/queue-bulk", json={"item_ids": [item["id"]]}).json()
-    assert bulk == {"queued": 0, "skipped": 1}
 
 
 def test_want_in_library_track_links(
@@ -520,22 +511,6 @@ def test_feeds_carry_last_added_at(client: TestClient, fake: FakeSpotify, conn: 
     assert feeds["liked"]["last_added_at"] == "2026-10-03T10:00:00Z"
     assert feeds["playlist:pl-mine"]["last_added_at"] == "2026-09-01T00:00:00Z"
     assert feeds["playlist:pl-followed"]["last_added_at"] is None  # unreadable: not sampled
-
-
-def test_want_queues_soulseek_search_when_configured(
-    make_client: Callable[..., TestClient], fake: FakeSpotify, conn: SpotifyConnection, db_session: Session
-) -> None:
-    from backend.tasks.models import Task
-
-    soulseek = FakeSource([], search_results=[SupplierSearchResult(
-        download_token="t", filename="@@p\\Hoax - Wake Up.mp3", format="mp3", bitrate_kbps=320,
-        size_bytes=1, duration_ms=274_000, queue_length=0,
-    )])
-    client = make_client(soulseek=soulseek)
-    _connect(client, fake, conn)
-    item = client.post("/api/acquisition/want", json={"external_id": "sp1"}).json()
-    tasks = db_session.query(Task).filter(Task.type == "soulseek-search").all()
-    assert [t.ref for t in tasks] == [f"source_item:{item['id']}:soulseek-search"]
 
 
 def test_loopback_listener_serves_the_callback() -> None:

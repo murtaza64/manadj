@@ -5,8 +5,8 @@ kicker: ACQUIRE
 where: SYNC › Acquisition
 title: Acquisition
 shot: acquisition
-caption: "SoundCloud likes and download status"
+caption: "SoundCloud likes on the wishlist"
 terms: [source-item]
 ---
 
-Browse SoundCloud likes, check Library matches, and download audio from SoundCloud or search **Soulseek** when SoundCloud cannot supply it.
+Browse SoundCloud likes and Spotify playlists, check Library matches, and link out to **Beatport** for what's missing — manaDJ keeps the wishlist; you stay on legitimate sources.

@@ -19,8 +19,6 @@ desktop shell (desktop/main.js — managed mode, #279):
                                  torch, ...) — relocatable, no venv
     Resources/ffmpeg/            static arm64 ffmpeg + ffprobe
                                  (ffmpeg.martin-riedl.de release builds)
-    Resources/slskd/             slskd 0.26.0 osx-arm64, unmodified (AGPL;
-                                 #291 scripts/slskd/fetch_slskd.py)
     Resources/logo.png,
     Resources/manaDJ.icns        icon (generated from logo.png)
 
@@ -334,11 +332,6 @@ def assemble_app(python_runtime: Path, ffmpeg_dir: Path, icns: Path, version: st
     copytree_pyclean(ffmpeg_dir, resources / "ffmpeg")
     shutil.copy2(ROOT / "logo.png", resources / "logo.png")
     shutil.copy2(icns, resources / f"{APP_NAME}.icns")
-    # Bundled slskd (#291, AGPL, unmodified): Resources/slskd/slskd — the
-    # backend resolves it as ../slskd/slskd and the shell exports
-    # MANADJ_SLSKD_BIN. Signed by the --deep pass below.
-    run(["uv", "run", ROOT / "scripts" / "slskd" / "fetch_slskd.py",
-         "--dest", resources / "slskd", "--rid", "osx-arm64"])
 
     # Identity: rename the executable (app.isPackaged keys off its name) and
     # patch the plist. Helpers keep their Electron identities — fine unsigned.
@@ -373,7 +366,6 @@ def smoke_check(app: Path) -> None:
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     assert (res / "backend" / "frontend" / "dist" / "index.html").is_file()
     assert (res / "app" / "main.js").is_file()
-    assert (res / "slskd" / "slskd").is_file(), "bundled slskd missing (#291)"
     print("  ok")
 
 

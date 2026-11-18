@@ -86,7 +86,7 @@ describe('SetupSequence', () => {
   it('keeps the six-step host visible while an external guide loads lazily', async () => {
     let resolve: (value: { default: SetupGuide['Component'] }) => void = () => {};
     const loading = new Promise<{ default: SetupGuide['Component'] }>((r) => { resolve = r; });
-    const ids = ['rekordbox-import', 'tracks-directory', 'cue-mode', 'soundcloud', 'soulseek', 'controller-check'];
+    const ids = ['rekordbox-import', 'tracks-directory', 'cue-mode', 'soundcloud', 'spotify', 'controller-check'];
     const guides = ids.map((id, i) => fakeGuide(id, i));
     guides[3] = { ...guides[3], Component: lazy(() => loading) };
     act(() => root.render(<SetupSequence guides={guides} initialIndex={3} onFinish={vi.fn()} />));
@@ -96,7 +96,7 @@ describe('SetupSequence', () => {
     await act(async () => resolve({ default: fakeGuide('soundcloud', 4).Component }));
     click('done soundcloud');
     expect(container.textContent).toContain('Step 5 of 6');
-    click('skip soulseek');
+    click('skip spotify');
     expect(container.textContent).toContain('Step 6 of 6');
     click('done controller-check');
     expect(container.textContent).toContain('Ready when you are.');

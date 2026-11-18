@@ -8,7 +8,7 @@
 // The drawer is a worklist, not a log: Needs attention (one entry per
 // subject, named, with its next step), Running (progress), Queued (by
 // type), History (collapsed, dismissible). Raw ids never appear; every row
-// is "Soulseek download · Hoax - Spark It".
+// is "Stem split · Hoax - Spark It".
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
@@ -65,12 +65,6 @@ function subjectVerb(t: TaskRow): string | null {
 
 /** One short line that says what to do about a failure. */
 function nextStep(t: TaskRow): string {
-  if (t.fix === 'acquisition') {
-    if (/drm/i.test(t.error ?? '')) return 'SoundCloud will never serve this (Go+). Get it from Soulseek or ignore it — in Acquisition.';
-    if (/429|rate.?limit/i.test(t.error ?? '')) return 'Rate-limited by SoundCloud; it retries by itself. Nothing to do yet.';
-    if (/not completed within|transfer failed|peer/i.test(t.error ?? '')) return 'The peer never delivered. Pick another candidate or ⚡ auto — in Acquisition.';
-    return 'Choose where to get it from — in Acquisition.';
-  }
   if (t.fix === 'retry') {
     if (t.type === 'analysis' && /grid|beat/i.test(t.error ?? '')) return 'Beat analysis bailed on this file. Retry, or set the grid by hand in the editor.';
     return 'Usually transient — retry. If it keeps failing, dismiss and look at the file.';

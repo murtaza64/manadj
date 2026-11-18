@@ -32,13 +32,8 @@ import type {
   DropImportResult,
   SourceItem,
   BulkResult,
-  AutoBulkResult,
   AcquisitionRefreshStats,
   Classification,
-  SupplierInfo,
-  SoulseekResult,
-  AdhocSoulseekDownload,
-  SoulseekSearchResponse,
   AnalysisPendingItem,
   AnalysisTaskStatus,
   TaskRow,
@@ -1282,16 +1277,6 @@ export const api = {
       return res.json();
     },
 
-    queueBulk: async (itemIds: number[]): Promise<{ queued: number; skipped: number }> => {
-      const res = await fetch(`${API_BASE}/acquisition/items/queue-bulk`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ item_ids: itemIds }),
-      });
-      if (!res.ok) throw new Error('Failed to bulk queue');
-      return res.json();
-    },
-
     ignoreBulk: async (itemIds: number[]): Promise<BulkResult> => {
       const res = await fetch(`${API_BASE}/acquisition/items/ignore-bulk`, {
         method: 'POST',
@@ -1308,20 +1293,6 @@ export const api = {
         body: JSON.stringify({ item_ids: itemIds }),
       });
       if (!res.ok) throw new Error('Failed to accept matches');
-      return res.json();
-    },
-    soulseekAutoBulk: async (itemIds: number[]): Promise<AutoBulkResult> => {
-      const res = await fetch(`${API_BASE}/acquisition/items/soulseek/auto-bulk`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ item_ids: itemIds }),
-      });
-      if (!res.ok) throw new Error((await res.json()).detail ?? 'Failed to start downloads');
-      return res.json();
-    },
-    cancelDownload: async (itemId: number): Promise<SourceItem> => {
-      const res = await fetch(`${API_BASE}/acquisition/items/${itemId}/cancel`, { method: 'POST' });
-      if (!res.ok) throw new Error((await res.json()).detail ?? 'Failed to cancel');
       return res.json();
     },
     ignoreItem: async (itemId: number): Promise<SourceItem> => {
@@ -1355,15 +1326,6 @@ export const api = {
       return res.json();
     },
 
-    queueDownload: async (itemId: number): Promise<SourceItem> => {
-      const res = await fetch(`${API_BASE}/acquisition/items/${itemId}/queue`, { method: 'POST' });
-      if (!res.ok) {
-        const error = await res.json().catch(() => ({}));
-        throw new Error(detailToMessage(error.detail, 'Failed to queue download'));
-      }
-      return res.json();
-    },
-
     linkToTrack: async (itemId: number, trackId: number, audioFrom?: string): Promise<SourceItem> => {
       const res = await fetch(`${API_BASE}/acquisition/items/${itemId}/link`, {
         method: 'POST',
@@ -1374,96 +1336,6 @@ export const api = {
       return res.json();
     },
 
-    // Suppliers (soulseek-supplier issue 03). An unconfigured Supplier is
-    // absent from this list and its UI never renders.
-    getSuppliers: async (): Promise<SupplierInfo[]> => {
-      const res = await fetch(`${API_BASE}/acquisition/suppliers`);
-      if (!res.ok) throw new Error('Failed to fetch suppliers');
-      return res.json();
-    },
-
-    // The remembered search for an item (gh#216), or null if never searched.
-    soulseekRemembered: async (itemId: number): Promise<SoulseekSearchResponse | null> => {
-      const res = await fetch(`${API_BASE}/acquisition/items/${itemId}/soulseek/search`);
-      if (!res.ok) throw new Error('Failed to fetch remembered soulseek search');
-      return res.json();
-    },
-
-    soulseekSearch: async (itemId: number, query: string): Promise<SoulseekSearchResponse> => {
-      const res = await fetch(`${API_BASE}/acquisition/items/${itemId}/soulseek/search`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: query || null }),
-      });
-      if (!res.ok) {
-        const error = await res.json().catch(() => ({}));
-        throw new Error(detailToMessage(error.detail, 'Soulseek search failed'));
-      }
-      return res.json();
-    },
-
-    // Standalone search (gh#217): no Source Item, no deltas, not remembered.
-    soulseekGlobalSearch: async (query: string): Promise<SoulseekSearchResponse> => {
-      const res = await fetch(`${API_BASE}/acquisition/soulseek/search`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query }),
-      });
-      if (!res.ok) {
-        const error = await res.json().catch(() => ({}));
-        throw new Error(detailToMessage(error.detail, 'Soulseek search failed'));
-      }
-      return res.json();
-    },
-
-    soulseekAdhocDownload: async (
-      result: SoulseekResult,
-      artist?: string,
-      title?: string,
-    ): Promise<AdhocSoulseekDownload> => {
-      const res = await fetch(`${API_BASE}/acquisition/soulseek/download`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ result, artist: artist || null, title: title || null }),
-      });
-      if (!res.ok) {
-        const error = await res.json().catch(() => ({}));
-        throw new Error(detailToMessage(error.detail, 'Soulseek download failed'));
-      }
-      return res.json();
-    },
-
-    soulseekAdhocDownloads: async (): Promise<AdhocSoulseekDownload[]> => {
-      const res = await fetch(`${API_BASE}/acquisition/soulseek/downloads`);
-      if (!res.ok) throw new Error('Failed to fetch soulseek downloads');
-      return res.json();
-    },
-
-    // Hands-off download (gh#214): auto-pick a high-quality mp3 and retry
-    // across peers server-side. 409 = nothing auto-pickable.
-    soulseekAuto: async (itemId: number): Promise<SourceItem> => {
-      const res = await fetch(`${API_BASE}/acquisition/items/${itemId}/soulseek/auto`, {
-        method: 'POST',
-      });
-      if (!res.ok) {
-        const error = await res.json().catch(() => ({}));
-        throw new Error(detailToMessage(error.detail, 'Soulseek auto-download failed'));
-      }
-      return res.json();
-    },
-
-    soulseekPick: async (itemId: number, result: SoulseekResult): Promise<SourceItem> => {
-      const res = await fetch(`${API_BASE}/acquisition/items/${itemId}/soulseek/pick`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(result),
-      });
-      if (!res.ok) {
-        const error = await res.json().catch(() => ({}));
-        throw new Error(detailToMessage(error.detail, 'Soulseek pick failed'));
-      }
-      return res.json();
-    },
   },
 
   transitionTemplates: {

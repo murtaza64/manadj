@@ -121,8 +121,8 @@ export default function SoundCloudGuide({ onDone, onSkip }: GuideProps) {
         <div>
           <h2>SoundCloud</h2>
           <p>
-            Connect your SoundCloud account so manaDJ can list your likes and download them into
-            your library (Sync → Acquisition).
+            Connect your SoundCloud account so manaDJ can list your likes on the wishlist
+            (Sync → Acquisition), where each one links out to Beatport.
           </p>
         </div>
       </div>

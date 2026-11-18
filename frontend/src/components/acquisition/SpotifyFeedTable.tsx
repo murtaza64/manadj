@@ -1,7 +1,7 @@
 // A Spotify feed (Liked Songs or a playlist) as an acquisition table (#347 /
 // gh#342). Spotify is browse-only: a row is either already in the library,
 // already a Source Item (live status cell), or wantable — "want" creates a
-// Source Item and the normal Soulseek chain takes over. Sort, filter and
+// Source Item on the wishlist. Sort, filter and
 // paging run server-side over the whole cached feed, so "latest" means the
 // latest of all 3k rows, not of the first page.
 import { Fragment, useEffect, useMemo, useState } from 'react';
@@ -10,7 +10,7 @@ import type { SourceItem } from '../../types';
 import { FEED_PAGE, spotifyItemFor, useSpotifyFeedPages, useSpotifyItemIndex, useWant } from './spotifyFeeds';
 import { StatusCell } from './StatusCell';
 import type { Panel } from './panels';
-import { FulfilledPanel, MatchPanel, SoulseekPanel } from './InlinePanels';
+import { FulfilledPanel, MatchPanel } from './InlinePanels';
 import { formatDuration, likedLabel } from './format';
 import { type SortState, sortGlyph, type SortKey } from './sortFilter';
 
@@ -20,7 +20,6 @@ export function SpotifyRow({
   item: it,
   panel,
   onToggle,
-  soulseekAvailable,
   onWant,
   onWantAnyway,
   wantBusy,
@@ -31,7 +30,6 @@ export function SpotifyRow({
   item: SourceItem | null;
   panel: Panel | null;
   onToggle: (p: Panel) => void;
-  soulseekAvailable: boolean;
   onWant: () => void;
   /** "that match is wrong": want with the library match rejected */
   onWantAnyway: () => void;
@@ -57,7 +55,7 @@ export function SpotifyRow({
         <td />
         <td className="acq-td-status">
           {it ? (
-            <StatusCell item={it} panel={panel} onToggle={onToggle} soulseekAvailable={soulseekAvailable} />
+            <StatusCell item={it} panel={panel} onToggle={onToggle} />
           ) : r.library ? (
             <>
               <span
@@ -74,7 +72,7 @@ export function SpotifyRow({
               </button>
             </>
           ) : (
-            <button className="btn btn-mini btn-primary" disabled={wantBusy} onClick={onWant} title="mark wanted: becomes a Source Item; Soulseek candidates are searched automatically">
+            <button className="btn btn-mini btn-primary" disabled={wantBusy} onClick={onWant} title="mark wanted: becomes a Source Item on the wishlist">
               + want
             </button>
           )}
@@ -84,7 +82,6 @@ export function SpotifyRow({
       {it && panel && (
         <tr className={`acq-tr-inline acq-tr-${it.stage}`}>
           <td colSpan={colSpan}>
-            {panel === 'soulseek' && <SoulseekPanel key={it.id} item={it} soulseekAvailable={soulseekAvailable} />}
             {panel === 'match' && <MatchPanel key={it.id} item={it} />}
             {panel === 'fulfilled' && <FulfilledPanel key={it.id} item={it} />}
           </td>
@@ -97,7 +94,6 @@ export function SpotifyRow({
 export function SpotifyFeedTable({
   feed,
   items,
-  soulseekAvailable,
   sort,
   onSort,
   filter,
@@ -107,7 +103,6 @@ export function SpotifyFeedTable({
   feed: SpotifyFeed;
   /** the live Source Item list — feed rows that are Source Items render from here */
   items: SourceItem[];
-  soulseekAvailable: boolean;
   sort: SortState;
   onSort: (k: SortKey) => void;
   filter: string;
@@ -199,7 +194,6 @@ export function SpotifyFeedTable({
                   item={it}
                   panel={it ? opened.get(r.spotify_id) ?? null : null}
                   onToggle={p => togglePanel(r.spotify_id, p)}
-                  soulseekAvailable={soulseekAvailable}
                   onWant={() => want.mutate([{ id: r.spotify_id }])}
                   onWantAnyway={() => want.mutate([{ id: r.spotify_id, rejectTrackId: r.library?.track_id }])}
                   wantBusy={want.isPending}

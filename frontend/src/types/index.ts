@@ -534,29 +534,18 @@ export interface SourceItem {
   classification: Classification | null;
   liked_at: string | null;
   correspondence: SourceCorrespondenceInfo | null;
-  download: DownloadStatus | null;
   provenance: ProvenanceInfo | null;
-  // Cleanup-derived default query for Search Supplier pickers
-  search_query: string | null;
-  // the lifecycle on the wire (gh#342): state + latest task state folded
+  // Beatport search link: the legitimate next step for a wanted item
+  beatport_url: string | null;
+  // the lifecycle on the wire: a legacy `queued` row presents as `new`
   stage: SourceItemStage;
-  error_kind: ErrorKind | null;
-  // remembered Soulseek candidates, if a search ran
-  candidate_count: number | null;
 }
 
-export type SourceItemStage = 'new' | 'queued' | 'downloading' | 'failed' | 'fulfilled' | 'ignored';
-export type ErrorKind = 'drm' | 'gone' | 'ratelimit' | 'peer' | 'other';
+export type SourceItemStage = 'new' | 'fulfilled' | 'ignored';
 
 export interface BulkResult {
   done: number;
   skipped: number;
-}
-
-export interface AutoBulkResult {
-  started: number;
-  skipped: number;
-  reasons: Record<string, string>;
 }
 
 export interface ProvenanceInfo {
@@ -564,61 +553,6 @@ export interface ProvenanceInfo {
   url: string | null;
   asserted: boolean;
   acquired_at: string | null;
-}
-
-export interface DownloadStatus {
-  task_state: 'pending' | 'running' | 'done' | 'failed';
-  error: string | null;
-  // ISO-8601 UTC deferral floor when a rate-limited task is cooling down.
-  cooling_down_until?: string | null;
-  // which Supplier is delivering the audio
-  via: 'soundcloud' | 'soulseek';
-  // hands-off soulseek downloads (gh#214): candidate being tried (1-based) / total
-  attempt?: number | null;
-  attempts_total?: number | null;
-  // measured progress (gh#342): 0..1 and "4.2 / 9.0 MB"; null = unmeasured
-  progress?: number | null;
-  progress_label?: string | null;
-}
-
-// Suppliers (see CONTEXT.md: Supplier / Direct Supplier / Search Supplier)
-export interface SupplierInfo {
-  id: string;
-  kind: 'direct' | 'search';
-}
-
-export interface SoulseekResult {
-  download_token: string;
-  filename: string;
-  format: string;
-  bitrate_kbps: number | null;
-  size_bytes: number | null;
-  duration_ms: number | null;
-  queue_length: number | null;
-  has_free_slot: boolean | null;
-  // the peer offering the file
-  username?: string | null;
-  // derived server-side vs the item's duration; results arrive sorted
-  // exact-duration-lossless first (issue 04)
-  duration_delta_ms: number | null;
-}
-
-// A standalone (Source-Item-less) soulseek download (gh#217)
-export interface AdhocSoulseekDownload {
-  task_id: number;
-  filename: string;
-  artist: string | null;
-  title: string;
-  task_state: 'pending' | 'running' | 'done' | 'failed';
-  error: string | null;
-  created_at: string | null;
-}
-
-export interface SoulseekSearchResponse {
-  query: string;
-  results: SoulseekResult[];
-  // ISO-8601 UTC when this search ran (remembered searches, gh#216)
-  searched_at?: string | null;
 }
 
 // State of a track's latest analysis task (task-system 01): the Analyze

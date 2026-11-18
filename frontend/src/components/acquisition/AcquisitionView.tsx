@@ -1,27 +1,23 @@
-// The Acquisition view (gh#342, "Dig" layout chosen via UI prototype):
+// The Acquisition view (gh#342, "Dig" layout chosen via UI prototype) —
+// now a wishlist (gh#487):
 //
-//   hero search ─ Soulseek for any track (standalone downloads)
 //   rail        ─ feeds, scopes (open = not yet in the library) (SoundCloud likes; Spotify Liked Songs +
 //                 playlists, browse-only: "want" makes a Source Item), class toggles
 //   sort/filter ─ one bar over whichever table is showing
 //   table       ─ one row per Source Item at track-table density; the STATUS
-//                 CELL is the whole lifecycle (get → queued → progress →
-//                 fix ▾ → ✓ via). Rows never vanish on action: ordering is
-//                 by liked date, filters are scopes, and a failed row opens
-//                 its Soulseek panel inline under itself.
-//   drawer      ─ queue: to fix / in flight / landed recently
-//
-// The combined SoundCloud+Soulseek search replaces the hero's Soulseek-only
-// search when it exists.
+//                 CELL is the whole lifecycle (find on Beatport ↗ / ignore →
+//                 ≈ match ▾ → ✓ via). Rows never vanish on action: ordering is
+//                 by liked date, filters are scopes.
+//   drawer      ─ landed recently
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
-import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueries, useQuery } from '@tanstack/react-query';
 import { api } from '../../api/client';
-import type { Classification, SoulseekResult, SourceItem } from '../../types';
+import type { Classification, SourceItem } from '../../types';
 import { useToast } from '../Toast';
 import { SPOTIFY_FEEDS_KEY, SPOTIFY_STATUS_KEY, type SpotifyFeed, type SpotifyFeedRow, type SpotifyFeedStatus, spotifyApi, spotifyFeedsApi } from '../../setup/spotify/spotifyApi';
-import { FulfilledPanel, MatchPanel, SoulseekPanel } from './InlinePanels';
+import { SOUNDCLOUD_STATUS_KEY, soundcloudApi } from '../../setup/soundcloud/soundcloudApi';
+import { FulfilledPanel, MatchPanel } from './InlinePanels';
 import { ITEMS_KEY, useInvalidateItems } from './useItems';
-import { SoulseekCandidates } from './SoulseekCandidates';
 import { SpotifyFeedTable, SpotifyRow } from './SpotifyFeedTable';
 import { spotifyItemFor, useSpotifyItemIndex, useWant } from './spotifyFeeds';
 import { isFavoriteFeed, toggleFavoriteFeed, useFavoriteFeeds } from './favoriteFeeds';
@@ -29,15 +25,14 @@ import { OPEN_ACQUISITION_EVENT, takePendingAcquisition } from './openAcquisitio
 import { StatusCell } from './StatusCell';
 import { defaultPanel, type Panel } from './panels';
 import { type Sortable, type SortKey, compareRows, matchesFilter, serverSort, sortGlyph, useSortFilter, useSortedFiltered } from './sortFilter';
-import { errorKindLabel, formatDuration, inFlight, landedRecently, likedLabel, needsTarget, remoteBasename, statusRank } from './format';
+import { formatDuration, landedRecently, likedLabel, statusRank } from './format';
 import './AcquisitionView.css';
 
-type Scope = 'open' | 'attention' | 'flight' | 'new' | 'library' | 'ignored' | 'all';
+type Scope = 'open' | 'attention' | 'new' | 'library' | 'ignored' | 'all';
 
 const SCOPES: Array<{ id: Scope; label: string; test: (i: SourceItem) => boolean }> = [
   { id: 'open', label: 'open', test: i => i.stage !== 'ignored' && i.stage !== 'fulfilled' },
-  { id: 'attention', label: 'needs you', test: i => needsTarget(i) || (i.stage === 'new' && i.correspondence?.status === 'proposed') },
-  { id: 'flight', label: 'in flight', test: inFlight },
+  { id: 'attention', label: 'needs you', test: i => i.stage === 'new' && i.correspondence?.status === 'proposed' },
   { id: 'new', label: 'new', test: i => i.stage === 'new' },
   { id: 'library', label: 'in library', test: i => i.stage === 'fulfilled' },
   { id: 'ignored', label: 'ignored', test: i => i.stage === 'ignored' },
@@ -113,16 +108,13 @@ export function AcquisitionView() {
   const { data: items, isLoading, error } = useQuery({
     queryKey: ITEMS_KEY,
     queryFn: api.acquisition.getItems,
-    // poll while anything is in flight so stages stay live
-    refetchInterval: q => ((q.state.data ?? []).some(inFlight) ? 3000 : false),
   });
-  const { data: suppliers } = useQuery({
-    queryKey: ['acquisitionSuppliers'],
-    queryFn: api.acquisition.getSuppliers,
+  const { data: soundcloudStatus } = useQuery({
+    queryKey: SOUNDCLOUD_STATUS_KEY,
+    queryFn: () => soundcloudApi.status(),
     staleTime: 5 * 60 * 1000,
   });
-  const soulseekAvailable = (suppliers ?? []).some(s => s.id === 'soulseek');
-  const soundcloudAvailable = (suppliers ?? []).some(s => s.id === 'soundcloud');
+  const soundcloudAvailable = soundcloudStatus?.connected ?? false;
 
   // Spotify (#347): feeds appear once connected
   const { data: spotifyStatus } = useQuery({ queryKey: SPOTIFY_STATUS_KEY, queryFn: () => spotifyApi.status(), staleTime: 5 * 60 * 1000 });
@@ -216,11 +208,6 @@ export function AcquisitionView() {
     ) as Record<Scope, number>;
   }, [feedItems, classFilter, feed, unionRows, bySpotify]);
   const sourceCount = (source: string) => all.filter(i => i.source === source).length;
-  const toFix = useMemo(() => all.filter(needsTarget), [all]);
-  const flight = useMemo(
-    () => all.filter(inFlight).sort((a, b) => (a.stage === 'downloading' ? -1 : 1) - (b.stage === 'downloading' ? -1 : 1)),
-    [all],
-  );
   const landed = useMemo(
     () => all.filter(landedRecently).sort((a, b) => (b.provenance?.acquired_at ?? '').localeCompare(a.provenance?.acquired_at ?? '')).slice(0, 8),
     [all],
@@ -260,23 +247,6 @@ export function AcquisitionView() {
   const clearSel = () => setSel(new Set());
 
   // batch verbs — each reports what it did and what it skipped
-  const queueBulk = useMutation({
-    mutationFn: (ids: number[]) => api.acquisition.queueBulk(ids),
-    onSuccess: r => {
-      invalidate();
-      clearSel();
-      toast(`queued ${r.queued}${r.skipped ? ` · skipped ${r.skipped}` : ''}`);
-    },
-  });
-  const autoBulk = useMutation({
-    mutationFn: (ids: number[]) => api.acquisition.soulseekAutoBulk(ids),
-    onSuccess: r => {
-      invalidate();
-      clearSel();
-      toast(`soulseek auto: started ${r.started}${r.skipped ? ` · skipped ${r.skipped}` : ''}`);
-    },
-    onError: e => toast((e as Error).message),
-  });
   const acceptBulk = useMutation({
     mutationFn: (ids: number[]) => api.acquisition.acceptMatchBulk(ids),
     onSuccess: r => {
@@ -294,15 +264,8 @@ export function AcquisitionView() {
     },
   });
 
-  // "get" = a SoundCloud download, so only SoundCloud items are gettable;
-  // Spotify-origin items go through Soulseek
-  const gettable = (i: SourceItem) => soundcloudAvailable && i.stage === 'new' && !i.correspondence && i.source === 'soundcloud';
-  const selNew = selected.filter(gettable);
-  const selFixable = selected.filter(i => i.stage === 'new' || needsTarget(i));
   const selMatches = selected.filter(i => i.stage === 'new' && i.correspondence?.status === 'proposed');
-  const selIgnorable = selected.filter(i => i.stage === 'new' || needsTarget(i));
-  const allNew = rows.filter(gettable);
-  const allNewSoulseek = rows.filter(i => i.stage === 'new' && !i.correspondence && !gettable(i));
+  const selIgnorable = selected.filter(i => i.stage === 'new');
 
   const feedLabel =
     feed === FEED_ALL ? 'all sources' : feed === FEED_SC ? 'SoundCloud likes' : feed === FEED_SP_ITEMS ? 'wanted from Spotify' : spotifyFeed?.name ?? 'feed';
@@ -321,8 +284,6 @@ export function AcquisitionView() {
 
   return (
     <div className="acq">
-      <HeroSearch soulseekAvailable={soulseekAvailable} />
-
       <div className="acq-body">
         <div className="acq-rail">
           <div className="acq-rail-sub">feeds</div>
@@ -449,7 +410,6 @@ export function AcquisitionView() {
               key={spotifyFeed.id}
               feed={spotifyFeed}
               items={all}
-              soulseekAvailable={soulseekAvailable}
               sort={sort}
               onSort={toggleSort}
               filter={filter}
@@ -461,16 +421,6 @@ export function AcquisitionView() {
               {selected.length > 0 ? (
                 <div className="acq-seltool">
                   <b>{selected.length} selected</b>
-                  {soundcloudAvailable && (
-                    <button className="btn btn-mini" disabled={selNew.length === 0 || queueBulk.isPending} onClick={() => queueBulk.mutate(selNew.map(i => i.id))}>
-                      ⇣ get {selNew.length}
-                    </button>
-                  )}
-                  {soulseekAvailable && (
-                    <button className="btn btn-mini" disabled={selFixable.length === 0 || autoBulk.isPending} onClick={() => autoBulk.mutate(selFixable.map(i => i.id))} title="hands-off Soulseek: best mp3, walk peers on failure">
-                      ⚡ auto soulseek {selFixable.length}
-                    </button>
-                  )}
                   <button className="btn btn-mini" disabled={selMatches.length === 0 || acceptBulk.isPending} onClick={() => acceptBulk.mutate(selMatches.map(i => i.id))}>
                     ✓ accept {selMatches.length} matches
                   </button>
@@ -493,16 +443,6 @@ export function AcquisitionView() {
                       + want all {union.filter(u => u.kind === 'spotify' && !u.row.library).length}
                     </button>
                   )}
-                  {allNew.length > 0 && (
-                    <button className="btn btn-mini btn-primary" disabled={queueBulk.isPending} onClick={() => queueBulk.mutate(allNew.map(i => i.id))}>
-                      ⇣ get all new ({allNew.length})
-                    </button>
-                  )}
-                  {allNewSoulseek.length > 0 && soulseekAvailable && (
-                    <button className="btn btn-mini btn-primary" disabled={autoBulk.isPending} onClick={() => autoBulk.mutate(allNewSoulseek.map(i => i.id))} title="no SoundCloud download for these (not connected, or Spotify-origin): hands-off Soulseek">
-                      ⚡ auto soulseek all new ({allNewSoulseek.length})
-                    </button>
-                  )}
                 </div>
               )}
 
@@ -513,7 +453,7 @@ export function AcquisitionView() {
                   {all.length === 0
                     ? soundcloudAvailable
                       ? 'no source items — hit ↻ refresh to fetch your likes'
-                      : 'nothing here yet — connect SoundCloud or Spotify (Settings → Accounts), or search Soulseek above'
+                      : 'nothing here yet — connect SoundCloud or Spotify (Settings → Accounts)'
                     : filter
                       ? 'no rows match the filter'
                       : 'nothing in this scope'}
@@ -553,7 +493,6 @@ export function AcquisitionView() {
                             item={null}
                             panel={null}
                             onToggle={() => {}}
-                            soulseekAvailable={soulseekAvailable}
                             onWant={() => want.mutate([{ id: u.row.spotify_id }])}
                             onWantAnyway={() => want.mutate([{ id: u.row.spotify_id, rejectTrackId: u.row.library?.track_id }])}
                             wantBusy={want.isPending}
@@ -582,14 +521,13 @@ export function AcquisitionView() {
                               <ClassChip item={i} />
                             </td>
                             <td className="acq-td-status">
-                              <StatusCell item={i} panel={panel} onToggle={p => togglePanel(i, p)} soulseekAvailable={soulseekAvailable} />
+                              <StatusCell item={i} panel={panel} onToggle={p => togglePanel(i, p)} />
                             </td>
                             <td className="acq-sub">{likedLabel(i.liked_at)}</td>
                           </tr>
                           {panel && (
                             <tr className={`acq-tr-inline acq-tr-${i.stage}`}>
                               <td colSpan={8}>
-                                {panel === 'soulseek' && <SoulseekPanel key={i.id} item={i} soulseekAvailable={soulseekAvailable} />}
                                 {panel === 'match' && <MatchPanel key={i.id} item={i} />}
                                 {panel === 'fulfilled' && <FulfilledPanel key={i.id} item={i} />}
                               </td>
@@ -607,43 +545,10 @@ export function AcquisitionView() {
 
         <div className={`acq-drawer${drawer ? '' : ' closed'}`}>
           <button className="acq-drawer-toggle" onClick={() => setDrawer(!drawer)}>
-            {drawer ? '▸' : '◂'} queue {flight.length}
-            {toFix.length ? ` · fix ${toFix.length}` : ''}
+            {drawer ? '▸' : '◂'} landed {landed.length}
           </button>
           {drawer && (
             <div className="acq-drawer-body">
-              <div className="acq-drawer-sec">
-                <div className="acq-drawer-head">
-                  to fix <b className="acq-danger">{toFix.length}</b>
-                  {toFix.length > 0 && soulseekAvailable && (
-                    <button className="btn btn-mini btn-primary" disabled={autoBulk.isPending} onClick={() => autoBulk.mutate(toFix.map(i => i.id))}>
-                      ⚡ auto all
-                    </button>
-                  )}
-                </div>
-                {toFix.map(i => (
-                  <div key={i.id} className="acq-drawer-row">
-                    <span className="acq-drawer-title" title={i.title}>{i.title}</span>
-                    <span className="acq-sub">
-                      {errorKindLabel(i.error_kind, i)}
-                      {i.candidate_count != null && ` · ${i.candidate_count} candidates`}
-                    </span>
-                  </div>
-                ))}
-                {toFix.length === 0 && <div className="acq-sub">nothing failed</div>}
-              </div>
-              <div className="acq-drawer-sec">
-                <div className="acq-drawer-head">
-                  in flight <b>{flight.length}</b>
-                </div>
-                {flight.map(i => (
-                  <div key={i.id} className="acq-drawer-row">
-                    <span className="acq-drawer-title" title={i.title}>{i.title}</span>
-                    <StatusCell item={i} panel={null} soulseekAvailable={soulseekAvailable} compact />
-                  </div>
-                ))}
-                {flight.length === 0 && <div className="acq-sub">idle</div>}
-              </div>
               <div className="acq-drawer-sec">
                 <div className="acq-drawer-head">landed recently</div>
                 {landed.map(i => (
@@ -694,75 +599,5 @@ function ClassChip({ item }: { item: SourceItem }) {
     >
       {item.classification ?? '?'}
     </button>
-  );
-}
-
-/** Standalone Soulseek search (gh#217): find and download a specific track
- * with no Source Item involved — the file lands through the normal import
- * chain. Becomes the combined SoundCloud+Soulseek search later (#342). */
-function HeroSearch({ soulseekAvailable }: { soulseekAvailable: boolean }) {
-  const queryClient = useQueryClient();
-  const [query, setQuery] = useState('');
-  const [open, setOpen] = useState(false);
-  const search = useMutation({ mutationFn: () => api.acquisition.soulseekGlobalSearch(query.trim()) });
-  const download = useMutation({
-    mutationFn: (r: SoulseekResult) => api.acquisition.soulseekAdhocDownload(r),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['soulseekAdhocDownloads'] }),
-  });
-  const { data: downloads } = useQuery({
-    queryKey: ['soulseekAdhocDownloads'],
-    queryFn: api.acquisition.soulseekAdhocDownloads,
-    enabled: soulseekAvailable,
-    refetchInterval: q => ((q.state.data ?? []).some(d => d.task_state === 'pending' || d.task_state === 'running') ? 3000 : false),
-  });
-  const active = (downloads ?? []).filter(d => d.task_state === 'pending' || d.task_state === 'running' || (d.task_state === 'failed' && d.error));
-  const results = search.data?.results;
-  const showPanel = open && (results != null || search.isPending || search.isError || active.length > 0);
-
-  return (
-    <div className="acq-hero-wrap">
-      <div className={`acq-hero${soulseekAvailable ? '' : ' disabled'}`}>
-        <span className="acq-hero-glyph">⌕</span>
-        <input
-          className="acq-hero-input"
-          placeholder={soulseekAvailable ? 'dig: artist - title  (searches Soulseek for any track, no like needed)' : 'dig: set up Soulseek (Settings → Accounts) to search for tracks you have not liked'}
-          disabled={!soulseekAvailable}
-          value={query}
-          onChange={e => setQuery(e.target.value)}
-          onFocus={() => setOpen(true)}
-          onKeyDown={e => {
-            if (e.key === 'Enter' && query.trim()) {
-              setOpen(true);
-              search.mutate();
-            }
-            if (e.key === 'Escape') setOpen(false);
-          }}
-        />
-        {showPanel && <button className="btn btn-mini" onClick={() => setOpen(false)}>✕</button>}
-      </div>
-      {showPanel && (
-        <div className="acq-hero-results">
-          {search.isPending && <div className="acq-sub">searching peers (~20s)…</div>}
-          {search.isError && <div className="acq-inline-error">{(search.error as Error).message}</div>}
-          {download.isError && <div className="acq-inline-error">{(download.error as Error).message}</div>}
-          {results && results.length === 0 && <div className="acq-sub">no peers offered a match</div>}
-          {results && results.length > 0 && (
-            <SoulseekCandidates results={results} limit={6} disabled={download.isPending} onPick={r => download.mutate(r)} withDelta={false} />
-          )}
-          {active.length > 0 && (
-            <div className="acq-hero-downloads">
-              <div className="acq-rail-sub">downloads</div>
-              {active.map(d => (
-                <div key={d.task_id} className="acq-inline-row">
-                  <span className="acq-td-title">{d.artist ? `${d.artist} - ` : ''}{d.title || remoteBasename(d.filename)}</span>
-                  <span className={`acq-badge acq-badge-${d.task_state === 'running' ? 'downloading' : d.task_state === 'failed' ? 'failed' : 'queued'}`}>{d.task_state}</span>
-                  {d.error && <span className="acq-inline-error">{d.error}</span>}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-    </div>
   );
 }

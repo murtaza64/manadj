@@ -1,18 +1,17 @@
 """Acquisition manager: Refresh and Source Item queries.
 
-Refresh only ever adds Source Items — removal upstream never deletes local
-state, and existing items are never rewritten (see CONTEXT.md: Refresh).
+manadj no longer downloads audio (gh#488/#489): Source Items are a
+wishlist. Refresh only ever adds Source Items — removal upstream never
+deletes local state, and existing items are never rewritten (see CONTEXT.md:
+Refresh).
 """
 
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, cast
+from typing import cast
 
 from sqlalchemy.exc import NoResultFound
 from sqlalchemy.orm import Session
-
-if TYPE_CHECKING:
-    from ..tasks.models import Task
 
 from ..models import Track
 from ..track_metadata.file_facts import refresh_file_facts
@@ -106,10 +105,6 @@ def list_source_items(db: Session, source_name: str | None = "soundcloud") -> li
         query = query.filter(SourceItem.source == source_name)
     return query.order_by(SourceItem.liked_at.desc(), SourceItem.id.desc()).all()
 
-
-# Sources whose Source Items address their own audio (Direct Suppliers).
-# Others (Spotify, #347) are fulfilled through a Search Supplier only.
-DIRECT_SUPPLIER_SOURCES = ("soundcloud",)
 
 
 @dataclass(frozen=True)
@@ -311,75 +306,11 @@ def link_track_by_url(db: Session, url: str, track_id: int) -> SourceCorresponde
     return link_item_to_track(db, item.id, track_id)
 
 
-def queue_item(db: Session, item_id: int) -> "Task":
-    """Queue a Source Item for download. Idempotent while a task is in flight."""
-    from ..tasks.manager import create_task, list_tasks
-
-    item = db.query(SourceItem).filter(SourceItem.id == item_id).one()
-    if item.source not in DIRECT_SUPPLIER_SOURCES:
-        raise ValueError(
-            f"source item {item_id} is from {item.source}, which supplies no audio — "
-            "get it through Soulseek"
-        )
-    if item.state not in ("new", "queued"):
-        raise ValueError(f"source item {item_id} is {item.state}; only new items can be queued")
-
-    ref = f"source_item:{item_id}"
-    for task in list_tasks(db, ref=ref):
-        if task.state in ("pending", "running"):
-            return task
-    task = create_task(db, "download", {"source_item_id": item_id}, ref=ref)
-    item.state = "queued"
-    db.commit()
-    return task
-
-
-@dataclass(frozen=True)
-class BulkQueueStats:
-    queued: int
-    skipped: int
-
-
-def _has_failed_task(db: Session, item_id: int) -> bool:
-    from ..tasks.manager import list_tasks
-
-    tasks = list_tasks(db, ref=f"source_item:{item_id}")
-    return bool(tasks) and tasks[0].state == "failed"
-
-
-def queue_bulk(db: Session, item_ids: list[int]) -> BulkQueueStats:
-    """Queue every queueable item; skip the rest.
-
-    Skipped: fulfilled, ignored, failed (a bulk catch-up never hammers
-    permanent failures — retry is an explicit per-item action), and items
-    with a pending proposal (resolve it instead of downloading a duplicate).
-    """
-    queued = 0
-    skipped = 0
-    for item_id in item_ids:
-        item = db.query(SourceItem).filter(SourceItem.id == item_id).one_or_none()
-        if (
-            item is None
-            or item.source not in DIRECT_SUPPLIER_SOURCES
-            or item.state not in ("new", "queued")
-            or _has_failed_task(db, item_id)
-            or get_correspondence(db, item_id) is not None
-        ):
-            skipped += 1
-            continue
-        queue_item(db, item_id)
-        queued += 1
-    logger.info("bulk queue: %d queued, %d skipped", queued, skipped)
-    return BulkQueueStats(queued=queued, skipped=skipped)
-
-
 def ignore_item(db: Session, item_id: int) -> SourceItem:
-    """Mark an item ignored: allowed from new, or queued whose download failed.
-
-    The failed-queued case is the permanent-failure resolution (e.g. DRM).
-    """
+    """Mark an item ignored, from new. A legacy `queued` row (pre-removal,
+    gh#488/#489) counts as new: no download path remains for it."""
     item = db.query(SourceItem).filter(SourceItem.id == item_id).one()
-    if item.state == "new" or (item.state == "queued" and _has_failed_task(db, item_id)):
+    if item.state in ("new", "queued"):
         item.state = "ignored"
         db.commit()
         return item
@@ -414,27 +345,6 @@ def accept_bulk(db: Session, item_ids: list[int]) -> BulkStats:
         except LookupError:
             skipped += 1
     return BulkStats(done=done, skipped=skipped)
-
-
-def cancel_item(db: Session, item_id: int) -> SourceItem:
-    """Cancel a queued item's download before it starts: the item returns to
-    new and its pending task row is deleted (nothing has happened yet, so
-    there is nothing to keep). A running download cannot be cancelled —
-    yt-dlp / the slskd transfer are mid-flight; wait or let it fail."""
-    from ..tasks.manager import list_tasks
-
-    item = db.query(SourceItem).filter(SourceItem.id == item_id).one()
-    if item.state != "queued":
-        raise ValueError(f"source item {item_id} is {item.state}; only queued items cancel")
-    tasks = list_tasks(db, ref=f"source_item:{item_id}")
-    latest = tasks[0] if tasks else None
-    if latest is not None and latest.state == "running":
-        raise ValueError(f"source item {item_id} is downloading; cannot cancel mid-transfer")
-    if latest is not None and latest.state == "pending":
-        db.delete(latest)
-    item.state = "new"
-    db.commit()
-    return item
 
 
 def restore_item(db: Session, item_id: int) -> SourceItem:
