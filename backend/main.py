@@ -14,7 +14,6 @@ from .acquisition import models as acquisition_models  # noqa: F401  (registers 
 from .acquisition.router import router as acquisition_router
 from .tasks import models as task_models  # noqa: F401  (registers tables on Base)
 from .tasks.worker import TaskWorkerPool
-from .soulseek import router as soulseek_router
 from .acquisition import connect_router as soundcloud_connect_router
 from .spotify import router as spotify_router
 from .logging_config import setup_logging
@@ -25,8 +24,7 @@ from .peer_sync.router import router as peer_sync_router
 from .peer_sync.group_router import router as device_group_router
 
 if TYPE_CHECKING:
-    from .config import Config
-    from .tasks.manager import Handler
+    pass
 
 # Configure logging with colors and override uvicorn handlers
 setup_logging()
@@ -104,7 +102,6 @@ app.include_router(visualizer_ga.router, prefix="/api/ga", tags=["visualizer-ga"
 app.include_router(settings.router, prefix="/api/settings", tags=["settings"])
 app.include_router(feedback_router)
 app.include_router(app_config.router, prefix="/api/config", tags=["app-config"])
-app.include_router(soulseek_router.router, prefix="/api/soulseek", tags=["soulseek"])
 app.include_router(soundcloud_connect_router.router, prefix="/api/soundcloud", tags=["soundcloud"])
 app.include_router(spotify_router.router, prefix="/api/spotify", tags=["spotify"])
 app.include_router(spotify_router.want_router, prefix="/api/acquisition", tags=["acquisition"])
@@ -135,14 +132,12 @@ def _harmony_enabled() -> bool:
 def _build_task_worker() -> "TaskWorkerPool | None":
     """The task workers (ADR-0003, gh#224): one per concurrency lane.
 
-    Handlers are registered as before (waveform generation always, downloads
-    if configured); the pool splits them into lanes (backend.tasks.lanes) so
-    downloads, soulseek traffic, and compute work proceed in parallel while
-    each task type stays serialized within its lane.
+    The pool splits handlers into lanes (backend.tasks.lanes) so compute
+    work proceeds in parallel while each task type stays serialized within
+    its lane.
     """
     import logging
 
-    from .config import get_config
     from .database import SessionLocal
 
     handlers = {}
@@ -198,108 +193,12 @@ def _build_task_worker() -> "TaskWorkerPool | None":
     )
     handlers[TRACKS_DIRECTORY_IMPORT_TASK_TYPE] = make_tracks_directory_import_handler()
 
-    config = get_config()
-    delays: dict[str, float] = {}
-
-    # Soulseek Supplier first: the SoundCloud download handler wants its
-    # failure hook (auto soulseek search, gh#216) when slskd is configured.
-    slskd = None
-    if config.soulseek.configured and config.library.tracks_directory:
-        from .acquisition.slskd import SlskdSupplier
-
-        assert config.soulseek.slskd_url is not None and config.soulseek.api_key is not None
-        slskd = SlskdSupplier(config.soulseek.slskd_url, config.soulseek.api_key)
-
-    if config.soundcloud.oauth_token and config.library.tracks_directory:
-        handlers.update(_download_handlers(config, soulseek_fallback=slskd is not None))
-        # Pace downloads under SoundCloud's request budget (issue 08).
-        delays["download"] = config.acquisition.download_delay_secs
-    else:
-        logging.getLogger("backend.main").warning(
-            "download handler not registered: soundcloud oauth_token or tracks_directory missing"
-        )
-
-    if slskd is not None:
-        handlers.update(_soulseek_handlers(config))
-    else:
-        logging.getLogger("backend.main").info(
-            "soulseek download handler not registered: [soulseek]/SLSKD_API_KEY unset"
-        )
-
     if not handlers:
         return None
-    # One worker thread per concurrency lane (gh#224): downloads, soulseek
-    # traffic and compute work proceed in parallel; each task type stays
-    # serialized within its lane.
-    return TaskWorkerPool(SessionLocal, handlers, delays=delays)
+    # One worker thread per concurrency lane (gh#224): each task type stays
+    # serialized within its lane while lanes proceed in parallel.
+    return TaskWorkerPool(SessionLocal, handlers)
 
-
-def _download_handlers(config: "Config", soulseek_fallback: bool) -> dict[str, "Handler"]:
-    """The SoundCloud `download` handler over the configured token."""
-    from .acquisition.download import download_handler
-    from .acquisition.searches import enqueue_soulseek_search
-    from .acquisition.source import SoundCloudSource
-    from .acquisition.supplier import SoundCloudSupplier
-
-    assert config.soundcloud.oauth_token is not None
-    assert config.library.tracks_directory is not None
-    supplier = SoundCloudSupplier(SoundCloudSource(config.soundcloud.oauth_token))
-    return {
-        "download": download_handler(
-            supplier,
-            Path(config.library.tracks_directory),
-            config.acquisition.cleanup,
-            # a failed SoundCloud download queues an automatic soulseek
-            # search so alternatives are ready when the operator looks
-            on_failure=enqueue_soulseek_search if soulseek_fallback else None,  # type: ignore[arg-type]
-        )
-    }
-
-
-def _soulseek_handlers(config: "Config") -> dict[str, "Handler"]:
-    """soulseek-download + soulseek-search handlers over the configured slskd."""
-    from .acquisition.download import SOULSEEK_TASK_TYPE, soulseek_download_handler
-    from .acquisition.searches import SOULSEEK_SEARCH_TASK_TYPE, soulseek_search_handler
-    from .acquisition.slskd import SlskdSupplier
-
-    assert config.soulseek.slskd_url is not None and config.soulseek.api_key is not None
-    assert config.library.tracks_directory is not None
-    slskd = SlskdSupplier(config.soulseek.slskd_url, config.soulseek.api_key)
-    return {
-        SOULSEEK_TASK_TYPE: soulseek_download_handler(
-            slskd, Path(config.library.tracks_directory), config.acquisition.cleanup
-        ),
-        SOULSEEK_SEARCH_TASK_TYPE: soulseek_search_handler(slskd, config.acquisition.cleanup),
-    }
-
-
-def _on_soulseek_configured() -> None:
-    """The Soulseek guide configured the managed slskd mid-session (#291):
-    give the live worker its handlers without a backend restart."""
-    from .config import get_config
-
-    config = get_config()
-    if _task_worker is not None and config.soulseek.configured and config.library.tracks_directory:
-        _task_worker.add_handlers(_soulseek_handlers(config))
-
-
-soulseek_router.on_configured = _on_soulseek_configured
-
-
-def _on_soundcloud_connected() -> None:
-    """The SoundCloud guide stored a token mid-session (#290): register the
-    download handler on the live worker without a backend restart."""
-    from .config import get_config
-
-    config = get_config()
-    if _task_worker is not None and config.soundcloud.oauth_token and config.library.tracks_directory:
-        _task_worker.add_handlers(
-            _download_handlers(config, soulseek_fallback=config.soulseek.configured),
-            delays={"download": config.acquisition.download_delay_secs},
-        )
-
-
-soundcloud_connect_router.on_connected = _on_soundcloud_connected
 
 _task_worker: "TaskWorkerPool | None" = None
 
@@ -327,13 +226,6 @@ async def startup_event():
             "%s — waveforms, analysis and stems will fail until it is installed", exc
         )
 
-    # Managed slskd (#291): before the worker, so Soulseek tasks find it up.
-    from .config import get_config as _get_config
-
-    if _get_config().soulseek.managed:
-        from .soulseek.supervisor import get_supervisor
-
-        get_supervisor().start()
     if os.getenv("DISABLE_TASK_WORKER", "").lower() not in ("true", "1", "yes"):
         _task_worker = _build_task_worker()
         if _task_worker is not None:
@@ -399,19 +291,6 @@ async def startup_event():
         finally:
             db.close()
 
-        # Sweep: failed downloads that never got an automatic soulseek
-        # search (failures predating #216 or a restart) get one (gh#223).
-        from .config import get_config
-
-        if get_config().soulseek.configured:
-            from .acquisition.searches import backfill_soulseek_searches
-
-            db = SessionLocal()
-            try:
-                backfill_soulseek_searches(db)
-            finally:
-                db.close()
-
     app.state.feedback_service = FeedbackService(Workspace(_repo_root))
     app.state.feedback_service.start()
 
@@ -432,9 +311,6 @@ async def shutdown_event():
     if _task_worker is not None:
         _task_worker.stop()
     app.state.feedback_service.stop()
-    from .soulseek.supervisor import get_supervisor
-
-    get_supervisor().stop()
     from . import device_listener as _device_listener
 
     _device_listener.stop()

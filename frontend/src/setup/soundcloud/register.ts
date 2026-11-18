@@ -8,7 +8,7 @@ registerGuide({
   id: SOUNDCLOUD_GUIDE_ID,
   title: 'SoundCloud',
   // Sequence: Welcome → Rekordbox → tracks dir → Cue mode → SoundCloud →
-  // Soulseek → Controller check → Tour.
+  // Spotify → Controller check → Tour.
   order: 40,
   status: () => guideStatus(SOUNDCLOUD_GUIDE_ID),
   Component: lazy(() => import('./SoundCloudGuide')),

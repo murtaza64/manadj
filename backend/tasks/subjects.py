@@ -20,9 +20,6 @@ TYPE_LABELS: dict[str, str] = {
     "waveform": "Waveform",
     "analysis": "Analysis",
     "stem-split": "Stem split",
-    "download": "SoundCloud download",
-    "soulseek-download": "Soulseek download",
-    "soulseek-search": "Soulseek search",
     "routine-mine": "Routine mining",
     "rekordbox-onboarding-import": "Rekordbox import",
     "tracks-directory-import": "Tracks directory import",
@@ -35,9 +32,6 @@ TYPE_FIX: dict[str, str] = {
     "waveform": "retry",
     "analysis": "retry",
     "stem-split": "retry",
-    "download": "acquisition",
-    "soulseek-download": "acquisition",
-    "soulseek-search": "acquisition",
     "routine-mine": "retry",
     "rekordbox-onboarding-import": "retry",
     "tracks-directory-import": "retry",
@@ -62,8 +56,7 @@ class Subject:
 
 
 def parse_ref(ref: str | None) -> tuple[str, str] | None:
-    """("track", "779") from "track:779"; the soulseek-search ref carries a
-    suffix ("source_item:725:soulseek-search") — the subject is the item."""
+    """("track", "779") from "track:779"."""
     if not ref:
         return None
     parts = ref.split(":", 2)

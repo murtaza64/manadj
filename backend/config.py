@@ -83,24 +83,6 @@ class SoundCloudConfig:
 
 
 @dataclass
-class SoulseekConfig:
-    """Soulseek Supplier configuration (a local slskd daemon's REST API).
-
-    Both values set => the Supplier exists; otherwise it is absent entirely
-    (no UI affordance, no task handler). See README "Soulseek Supplier (slskd)".
-    """
-    slskd_url: str | None = None
-    api_key: str | None = None
-    # True when the values point at manadj's own supervised slskd (#291)
-    # rather than a user-run daemon.
-    managed: bool = False
-
-    @property
-    def configured(self) -> bool:
-        return bool(self.slskd_url and self.api_key)
-
-
-@dataclass
 class StemsConfig:
     """Stem splitting configuration (stems map #118; storage decisions #149).
 
@@ -132,12 +114,9 @@ class ExportConfig:
 
 @dataclass
 class AcquisitionConfig:
-    """Acquisition configuration."""
+    """Acquisition (wishlist) configuration."""
     classification: ClassificationConfig = field(default_factory=ClassificationConfig)
     cleanup: CleanupConfig = field(default_factory=CleanupConfig)
-    # Seconds the worker sleeps between download tasks, to stay under
-    # SoundCloud's request budget (issue 08). 3s was assumed, not confirmed.
-    download_delay_secs: float = 3.0
 
 
 @dataclass
@@ -146,7 +125,6 @@ class Config:
     database: DatabaseConfig
     library: LibraryConfig
     soundcloud: SoundCloudConfig
-    soulseek: SoulseekConfig
     acquisition: AcquisitionConfig
     stems: StemsConfig = field(default_factory=StemsConfig)
     export: ExportConfig = field(default_factory=ExportConfig)
@@ -188,13 +166,6 @@ def _cleanup_config(data: dict[str, Any]) -> CleanupConfig:
     return CleanupConfig(junk_patterns=section.get("junk_patterns", defaults.junk_patterns))
 
 
-def _download_delay_secs(data: dict[str, Any]) -> float:
-    """Inter-download pacing from [acquisition], default 3s (issue 08)."""
-    section: dict[str, Any] = data.get("acquisition", {})
-    default = AcquisitionConfig().download_delay_secs
-    return float(section.get("download_delay_secs", default))
-
-
 def _stems_config(data: dict[str, Any]) -> StemsConfig:
     """[stems] section: directory/model/device knobs, defaults otherwise."""
     section: dict[str, Any] = data.get("stems", {})
@@ -204,28 +175,6 @@ def _stems_config(data: dict[str, Any]) -> StemsConfig:
         model=section.get("model", "") or defaults.model,
         device=section.get("device", "") or defaults.device,
     )
-
-
-def _soulseek_config(data: dict[str, Any]) -> SoulseekConfig:
-    """[soulseek] slskd_url from config.toml (SLSKD_URL in env/.env overrides
-    it, e.g. an slskd on a non-default port); the API key from env/.env only.
-
-    Unset => fall back to the managed slskd (#291) when the Soulseek guide
-    stored credentials and the binary is shipped.
-    """
-    section: dict[str, Any] = data.get("soulseek", {})
-    external = SoulseekConfig(
-        slskd_url=os.environ.get("SLSKD_URL") or section.get("slskd_url") or None,
-        api_key=os.environ.get("SLSKD_API_KEY") or None,
-    )
-    if external.configured:
-        return external
-    from backend.soulseek.managed import get_store, resolve_binary
-
-    managed = get_store().load()
-    if managed is not None and resolve_binary() is not None:
-        return SoulseekConfig(slskd_url=managed.url, api_key=managed.api_key, managed=True)
-    return external
 
 
 def _soundcloud_config(data: dict[str, Any]) -> SoundCloudConfig:
@@ -309,11 +258,9 @@ def load_config() -> Config:
             tracks_directory=tracks_dir
         ),
         soundcloud=_soundcloud_config(data),
-        soulseek=_soulseek_config(data),
         acquisition=AcquisitionConfig(
             classification=_classification_config(data),
             cleanup=_cleanup_config(data),
-            download_delay_secs=_download_delay_secs(data),
         ),
         stems=_stems_config(data),
         export=_export_config(data),

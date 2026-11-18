@@ -30,14 +30,10 @@ from ..acquisition.matching import LibraryIndex, LibraryTrack, MatchingConfig
 from ..acquisition.models import SourceItem
 from ..acquisition.router import (
     CorrespondenceInfo,
-    DownloadStatus,
     ProvenanceInfo,
     SourceItemResponse,
-    get_soulseek_supplier,
     item_responses,
 )
-from ..acquisition.searches import enqueue_soulseek_search
-from ..acquisition.supplier import SearchSupplier
 from ..config import get_config
 from ..database import get_db
 from ..models import Track
@@ -369,7 +365,6 @@ class WantOut(SourceItemResponse):
 WantOut.model_rebuild(
     _types_namespace={
         "CorrespondenceInfo": CorrespondenceInfo,
-        "DownloadStatus": DownloadStatus,
         "ProvenanceInfo": ProvenanceInfo,
     }
 )
@@ -380,13 +375,11 @@ def want(
     body: WantIn,
     db: Session = Depends(get_db),
     feeds: SpotifyFeeds = Depends(get_feeds),
-    soulseek: SearchSupplier | None = Depends(get_soulseek_supplier),
 ) -> WantOut:
     """Mark a Spotify track wanted: a Source Item (source="spotify").
 
-    Spotify supplies no audio, so there is no Direct Supplier download; when
-    Soulseek is configured an automatic search is queued so candidates are
-    waiting in the picker. Idempotent per Spotify track.
+    Spotify supplies no audio; the item is a wishlist entry pointing at a
+    legit way to get the track (gh#487). Idempotent per Spotify track.
     """
     existing = (
         db.query(SourceItem)
@@ -422,7 +415,5 @@ def want(
             db.commit()
             db.refresh(item)
             logger.info("want: rejected library match track %d for item %d", corr.track_id, item.id)
-    if item.state == "new" and soulseek is not None:
-        enqueue_soulseek_search(db, item)
     logger.info("wanted spotify track %s (%s) -> source item %d", track.spotify_id, track.title, item.id)
     return WantOut(**item_responses(db, [item])[0].model_dump(), created=True)

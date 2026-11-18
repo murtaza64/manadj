@@ -1,15 +1,17 @@
-"""The Source boundary: the feature's single seam.
+"""The Source boundary: the wishlist feature's single seam.
 
-A Source lists items available for acquisition (metadata only). The real
-implementation talks to SoundCloud's API v2; tests substitute a fake.
-See .scratch/soundcloud-acquisition/issues/01-investigate-likes-scanning.md
+A Source lists items that are wanted (metadata only) — SoundCloud likes
+today. manadj never downloads audio from a Source: acquisition is the
+user's own (Beatport, free sources, files they already own), and a Source
+Item is a wishlist entry pointing at a legit way to get the track. The real
+implementation talks to SoundCloud's API v2; tests substitute a fake. See
+.scratch/soundcloud-acquisition/issues/01-investigate-likes-scanning.md
 for why API v2 (not yt-dlp) is used for enumeration.
 """
 
 import logging
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Any, Protocol, cast
+from typing import Any, Protocol
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -28,19 +30,19 @@ USER_AGENT = (
 
 
 class RateLimitedError(Exception):
-    """The Source rejected a request for exceeding its rate budget (HTTP 429).
+    """A service rejected a request for exceeding its rate budget (HTTP 429).
 
     Distinct from a permanent failure: the task system defers and retries the
     work instead of marking it `failed` (acquisition issue 08). SoundCloud's
-    budget is ~600 requests / 10 min; a bulk catch-up trips it.
+    budget is ~600 requests / 10 min.
     """
 
 
 def is_rate_limit(error: BaseException) -> bool:
-    """True if a yt-dlp / requests error indicates HTTP 429 (Too Many Requests).
+    """True if an error indicates HTTP 429 (Too Many Requests).
 
-    yt-dlp surfaces the upstream status only in the message text, so we sniff
-    both the numeric code and the phrase.
+    Upstream libraries often surface the status only in the message text, so
+    we sniff both the numeric code and the phrase.
     """
     text = str(error).lower()
     return "429" in text or "too many requests" in text
@@ -59,19 +61,15 @@ class SourceItemData:
 
 
 class Source(Protocol):
-    """A place tracks are acquired from."""
+    """A place wanted tracks are discovered (the wishlist's demand side)."""
 
     def list_items(self) -> list[SourceItemData]:
         """Return all items (e.g. likes) currently on the Source."""
         ...
 
-    def download(self, permalink_url: str, dest_dir: Path, basename: str) -> Path:
-        """Download an item's audio to dest_dir as `basename.<ext>`; return the path."""
-        ...
-
 
 class SoundCloudSource:
-    """SoundCloud likes via API v2, downloads via yt-dlp; personal OAuth token."""
+    """SoundCloud likes via API v2; personal OAuth token."""
 
     def __init__(self, oauth_token: str) -> None:
         self._oauth_token = oauth_token
@@ -126,47 +124,3 @@ class SoundCloudSource:
             url = page.get("next_href")
         logger.info("SoundCloud: listed %d liked tracks", len(items))
         return items
-
-    def download(self, permalink_url: str, dest_dir: Path, basename: str) -> Path:
-        """Download best non-opus audio via yt-dlp (the user's proven incantation).
-
-        A 429 surfaces as RateLimitedError so the task system can defer rather
-        than fast-fail (issue 08). extractor_retries + exponential
-        retry_sleep_functions absorb transient blips before that point.
-        """
-        from yt_dlp import YoutubeDL  # heavy import, keep it out of module load
-        from yt_dlp.utils import DownloadError
-
-        from ..tasks.progress import ytdlp_progress_hook
-
-        options = {
-            "format": "ba[acodec!=opus]/ba",
-            "outtmpl": str(dest_dir / f"{basename}.%(ext)s"),
-            "username": "oauth",
-            "password": self._oauth_token,
-            "quiet": True,
-            "noprogress": True,
-            # task progress (gh#342): bytes so far / total, for the status cell
-            "progress_hooks": [ytdlp_progress_hook()],
-            # transient-blip absorption (issue 08)
-            "extractor_retries": 5,
-            "retry_sleep_functions": {
-                "http": lambda n: min(2 ** n, 60),
-                "extractor": lambda n: min(2 ** n, 60),
-            },
-        }
-        try:
-            with YoutubeDL(cast(Any, options)) as ydl:
-                info = cast(
-                    "dict[str, Any] | None", ydl.extract_info(permalink_url, download=True)
-                )
-        except DownloadError as e:
-            if is_rate_limit(e):
-                raise RateLimitedError(str(e)) from e
-            raise
-        if info is None:
-            raise RuntimeError(f"yt-dlp returned no info for {permalink_url}")
-        downloads: list[dict[str, Any]] = info.get("requested_downloads") or []
-        if not downloads or not downloads[0].get("filepath"):
-            raise RuntimeError(f"yt-dlp reported no downloaded file for {permalink_url}")
-        return Path(downloads[0]["filepath"])

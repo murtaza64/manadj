@@ -78,8 +78,8 @@ class TaskWorkerPool:
 
     Presents the same start/stop/add_handlers surface as a single TaskWorker;
     `add_handlers` routes each handler to its lane, extending that lane's
-    running worker or starting a fresh one (a setup guide configuring
-    SoundCloud/soulseek mid-session brings the lane up without a restart).
+    running worker or starting a fresh one (a mid-session registration
+    brings the lane up without a restart).
     """
 
     def __init__(

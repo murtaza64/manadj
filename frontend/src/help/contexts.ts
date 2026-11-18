@@ -13,7 +13,6 @@ export const SETTINGS_HELP: Record<string, HelpTarget> = {
   'mouse-jog': { topic: 'perform', anchor: 'mouse-jog' },
   shortcuts: { topic: 'perform', anchor: 'keyboard' },
   soundcloud: { topic: 'acquire', anchor: 'soundcloud' },
-  soulseek: { topic: 'acquire', anchor: 'soulseek' },
   spotify: { topic: 'acquire' },
   setup: { topic: 'start', anchor: 'setup' },
   tour: { topic: 'start', anchor: 'tour' },
@@ -26,7 +25,6 @@ export const GUIDE_HELP: Record<string, HelpTarget> = {
   'tracks-directory': { topic: 'start', anchor: 'tracks-directory' },
   'cue-mode': { topic: 'audio', anchor: 'cue-mode' },
   soundcloud: { topic: 'start', anchor: 'accounts' },
-  soulseek: { topic: 'start', anchor: 'accounts' },
   spotify: { topic: 'start', anchor: 'accounts' },
   'controller-check': SETTINGS_HELP['controller-check'],
 };

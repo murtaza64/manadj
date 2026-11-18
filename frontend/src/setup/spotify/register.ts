@@ -7,7 +7,7 @@ export const SPOTIFY_GUIDE_ID = 'spotify';
 registerGuide({
   id: SPOTIFY_GUIDE_ID,
   title: 'Spotify',
-  // Between SoundCloud (40) and Soulseek (50).
+  // Between SoundCloud (40) and Controller check (60).
   order: 45,
   status: () => guideStatus(SPOTIFY_GUIDE_ID),
   Component: lazy(() => import('./SpotifyGuide')),

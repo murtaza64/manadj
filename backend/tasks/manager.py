@@ -39,8 +39,8 @@ class Deferred(Exception):  # noqa: N818 — control-flow signal, not an error
 
     The task returns to `pending` with `not_before` set `retry_in_secs` ahead;
     no attempt is consumed and no error is recorded. This is how a polling
-    task (e.g. `soulseek-download` watching a peer transfer) advances one
-    non-blocking step per worker tick instead of holding the worker hostage.
+    task (e.g. one watching an external job) advances one non-blocking step
+    per worker tick instead of holding the worker hostage.
     Unlike the rate-limit path there is no cap: the handler owns its own
     give-up policy (e.g. a hard TTL).
     """
@@ -59,8 +59,8 @@ def create_task(
     return task
 
 
-# The task a handler is running on behalf of, so deep code (a yt-dlp hook,
-# a transfer poll) can report progress without threading the id through
+# The task a handler is running on behalf of, so deep code (a long import,
+# an external poll) can report progress without threading the id through
 # every signature.
 _current_task_id: ContextVar[int | None] = ContextVar("current_task_id", default=None)
 

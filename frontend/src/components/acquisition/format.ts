@@ -1,21 +1,11 @@
 // Acquisition view formatting helpers (gh#342).
-import type { ErrorKind, SourceItem } from '../../types';
+import type { SourceItem } from '../../types';
 
 export function formatDuration(ms: number): string {
   const totalSecs = Math.round(ms / 1000);
   const mins = Math.floor(totalSecs / 60);
   const secs = totalSecs % 60;
   return `${mins}:${String(secs).padStart(2, '0')}`;
-}
-
-export function formatSize(bytes: number | null): string {
-  if (bytes == null) return '?';
-  return `${(bytes / 1_000_000).toFixed(1)} MB`;
-}
-
-export function remoteBasename(filename: string): string {
-  const parts = filename.replace(/\\/g, '/').split('/');
-  return parts[parts.length - 1];
 }
 
 export function timeAgo(iso: string): string {
@@ -35,34 +25,6 @@ export function likedLabel(iso: string | null): string {
   return new Date(iso).toLocaleDateString('sv');
 }
 
-export function errorKindLabel(kind: ErrorKind | null, item: SourceItem): string {
-  switch (kind) {
-    case 'drm':
-      return 'DRM';
-    case 'gone':
-      return 'gone';
-    case 'ratelimit':
-      return 'rate limited';
-    case 'peer':
-      return item.download?.via === 'soulseek' ? 'peer' : 'failed';
-    default:
-      return 'failed';
-  }
-}
-
-/** Whether the item is waiting on the operator to choose a target. */
-export function needsTarget(item: SourceItem): boolean {
-  return item.stage === 'failed' && !item.download?.cooling_down_until;
-}
-
-export function inFlight(item: SourceItem): boolean {
-  return (
-    item.stage === 'queued' ||
-    item.stage === 'downloading' ||
-    (item.stage === 'failed' && !!item.download?.cooling_down_until)
-  );
-}
-
 /** Fulfilled within the last day, by recorded/asserted acquisition time. */
 export function landedRecently(item: SourceItem): boolean {
   const at = item.provenance?.acquired_at;
@@ -72,11 +34,8 @@ export function landedRecently(item: SourceItem): boolean {
 
 /** Attention order for status sorting: lower sorts first. */
 export function statusRank(item: SourceItem): number {
-  if (needsTarget(item)) return 0;
-  if (item.stage === 'new' && item.correspondence?.status === 'proposed') return 1;
-  if (item.stage === 'downloading') return 2;
-  if (inFlight(item)) return 3;
-  if (item.stage === 'new') return 4;
-  if (item.stage === 'fulfilled') return 6;
-  return 7; // ignored
+  if (item.stage === 'new' && item.correspondence?.status === 'proposed') return 0;
+  if (item.stage === 'new') return 1;
+  if (item.stage === 'fulfilled') return 2;
+  return 3; // ignored
 }

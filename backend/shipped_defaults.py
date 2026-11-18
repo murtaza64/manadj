@@ -6,8 +6,8 @@
 - `settings`: persisted-preference key -> raw string (the `settings` table
   shape). Served by GET /api/settings/defaults; the frontend applies a value
   only when its key is unset (no DB row, no local value).
-- `config`: non-path settings-file values (acquisition classification,
-  cleanup, download delay). Layered under config.toml: a key present in the
+- `config`: non-path settings-file values (acquisition classification and
+  cleanup). Layered under config.toml: a key present in the
   file wins, a missing key falls back here, then to code defaults.
 
 Inclusion lists and overrides live here so the snapshot script and the
@@ -57,7 +57,6 @@ SETTING_OVERRIDES: dict[str, str] = {
 
 # Non-path config sections/keys snapshotted from config.toml.
 CONFIG_KEYS: dict[str, tuple[str, ...]] = {
-    "acquisition": ("download_delay_secs",),
     "acquisition.classification": (
         "clip_max_duration_secs",
         "mix_min_duration_secs",

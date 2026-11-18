@@ -27,9 +27,6 @@ from .connect import (
 
 router = APIRouter()
 
-# Set by main.py: registers the download handler on the live worker.
-on_connected: Callable[[], None] | None = None
-
 # /me results per token, so status polls don't spend SoundCloud's budget.
 VALIDATION_TTL_SECS = 600.0
 _cache: dict[str, tuple[float, SoundCloudAccount | str]] = {}
@@ -109,8 +106,6 @@ def put_token(body: TokenIn) -> SoundCloudStatus:
         raise HTTPException(400, result)
     get_token_store().save(token)
     reload_config()
-    if on_connected is not None:
-        on_connected()
     return _status()
 
 

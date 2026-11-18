@@ -10,7 +10,7 @@ DJ software for keyboard, mouse and controllers: four Decks, a Mixer, a Mix edit
 
 - **macOS:** [Apple Silicon DMG](https://github.com/murtaza64/manadj/releases/download/v0.1.0-rc.3/manaDJ-0.1.0-rc.3-arm64.dmg). Drag into Applications; first launch: right-click → Open. Not notarized.
 - **Windows:** [x64 installer](https://github.com/murtaza64/manadj/releases/download/v0.1.0-rc.3/manaDJ-0.1.0-rc.3-x64-setup.exe). SmartScreen: More info → Run anyway. Untested on Windows hardware.
-- Setup covers Rekordbox import, music folder, Cue mode, SoundCloud, Soulseek and controller check. Steps are skippable.
+- Setup covers Rekordbox import, music folder, Cue mode, SoundCloud, Spotify and controller check. Steps are skippable.
 - Rekordbox import never writes to Rekordbox. Export is off by default.
 - Data: `~/Library/Application Support/manaDJ` on macOS; `%APPDATA%\manaDJ` on Windows. Imported music stays in place.
 - [Installation details, updates and troubleshooting](docs/install.md).

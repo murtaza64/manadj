@@ -2,7 +2,7 @@
  * Spotify connect guide (#347): create a Spotify app in the developer
  * dashboard, give manaDJ its Client ID, sign in (Authorization Code with
  * PKCE — no client secret). Spotify is a read-only Source: its Feeds are
- * browsed in Acquisition; audio comes from SoundCloud/Soulseek.
+ * browsed in Acquisition; wanted tracks link out to Beatport.
  * Works inside the First-run sequence and standalone (Settings → Spotify).
  */
 import { useEffect, useRef, useState } from 'react';
@@ -137,8 +137,8 @@ export default function SpotifyGuide({ onDone, onSkip }: GuideProps) {
           <h2>Spotify</h2>
           <p>
             Connect Spotify so manaDJ can show your Liked Songs and playlists in Acquisition and
-            mark tracks you want. manaDJ only reads from Spotify; audio comes from SoundCloud or
-            Soulseek.
+            mark tracks you want. manaDJ only reads from Spotify; wanted tracks link out to
+            Beatport.
           </p>
         </div>
       </div>
