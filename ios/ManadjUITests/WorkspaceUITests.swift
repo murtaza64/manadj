@@ -21,13 +21,16 @@ final class WorkspaceUITests: XCTestCase {
         XCTAssertLessThanOrEqual(pitchButton.frame.maxY, app.frame.maxY - 16, "Pitch control must stay above bottom safe area")
         XCTAssertTrue(pitchButton.isHittable)
         pitchButton.tap()
+        XCTAssertTrue(app.buttons["Close pitch panel"].waitForExistence(timeout: 5))
+        Thread.sleep(forTimeInterval: 0.6)
         let pitch = XCTAttachment(screenshot: app.screenshot()); pitch.name = "iOS one-deck pitch overlay WIP"; pitch.lifetime = .keepAlways; add(pitch)
-        app.buttons["×"].firstMatch.tap()
+        app.buttons["Close pitch panel"].firstMatch.tap()
         app.buttons["Settings"].tap()
         XCTAssertTrue(app.textFields["Desktop address"].waitForExistence(timeout: 5))
         app.buttons["CLOSE"].tap()
         app.buttons["BROWSE"].tap()
         XCTAssertTrue(app.textFields["Search title, artist, file"].waitForExistence(timeout: 5))
+        Thread.sleep(forTimeInterval: 0.6)
         let browse = XCTAttachment(screenshot: app.screenshot()); browse.name = "iOS in-place browser with transport WIP"; browse.lifetime = .keepAlways; add(browse)
     }
     @MainActor func testLibrarySearchAcceptedAndRefusedLoads() {

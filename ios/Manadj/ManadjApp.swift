@@ -166,7 +166,7 @@ struct WorkspaceView: View {
             PerformanceKnob(label: "TRIM", color: Ink.muted, value: value(index, MDJTrim, Double(model.decks[index].engine.trim)))
             ForEach(0..<3) { i in
                 let eq = model.decks[index].engine.eq
-                PerformanceKnob(label: ["HI", "MID", "LOW"][i], color: Ink.bands[2 - i], value: Binding(get: { Double([eq.2, eq.1, eq.0][i]) }, set: { model.set(MDJEq, index, $0, slot: 2 - i) }))
+                PerformanceKnob(label: ["HI", "MID", "LOW"][i], color: Ink.bands[2 - i], value: Binding(get: { Double([eq.2, eq.1, eq.0][i]) }, set: { model.set(MDJEq, index, $0, slot: 2 - i) }), eqKillToggle: true)
             }
             PerformanceKnob(label: "FILTER", color: Ink.muted, value: Binding(get: { Double(model.decks[index].engine.filter) }, set: { model.audio?.filter(index, position: $0) }), range: -1...1, neutral: 0)
         }

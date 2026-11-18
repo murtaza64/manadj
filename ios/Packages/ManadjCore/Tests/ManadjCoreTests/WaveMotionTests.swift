@@ -17,6 +17,15 @@ final class WaveMotionTests: XCTestCase {
         let before = clock.at(1.2, raw: 4.15, moving: true, rate: 1.08)
         XCTAssertGreaterThanOrEqual(clock.at(1.21, raw: 4.10, moving: true, rate: 1.08), before)
     }
+    func testFillNormalizationIsBoundedAndSilenceSafe() {
+        let silence = PreviewWaveform(durationSecs: 2, gamma: 0.5, nBands: 8, sampleRate: 100, peakHop: 1, bandHop: 10, stftWindow: 0, peaks: [], bands: [UInt8](repeating: 0, count: 80))
+        XCTAssertEqual(silence.displayFillGain, 1)
+        let quiet = PreviewWaveform(durationSecs: 2, gamma: 0.5, nBands: 8, sampleRate: 100, peakHop: 1, bandHop: 10, stftWindow: 0, peaks: [], bands: [UInt8](repeating: 80, count: 80))
+        XCTAssertEqual(quiet.displayFillGain, 3)
+        let loud = PreviewWaveform(durationSecs: 2, gamma: 0.5, nBands: 8, sampleRate: 100, peakHop: 1, bandHop: 10, stftWindow: 0, peaks: [], bands: [UInt8](repeating: 255, count: 80))
+        XCTAssertGreaterThanOrEqual(loud.displayFillGain, 1)
+        XCTAssertLessThanOrEqual(loud.displayFillGain, 3)
+    }
     func testAndroidGroupsAndEmptyBands() {
         let wave = PreviewWaveform(durationSecs: 2, gamma: 0.5, nBands: 8, sampleRate: 100, peakHop: 1, bandHop: 10, stftWindow: 0, peaks: [], bands: [UInt8](repeating: 255, count: 80))
         let g = wave.columnGroups(from: 0.1, to: 0.4)

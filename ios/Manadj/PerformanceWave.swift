@@ -17,7 +17,7 @@ struct PerformanceWave: UIViewRepresentable {
             view.source = deck.engine.load; view.columns.removeAll(); view.waveReady = false
             view.fillGain = deck.waveform?.displayFillGain ?? 1
         }
-        if !view.waveReady, let wave = deck.waveform { view.fillGain = wave.displayFillGain; view.waveReady = true }
+        if !view.waveReady, let wave = deck.waveform { view.fillGain = wave.displayFillGain; view.columns.removeAll(); view.waveReady = true }
         view.wave = deck.waveform
         view.duration = deck.duration
         view.vertical = vertical

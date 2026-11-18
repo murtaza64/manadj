@@ -63,13 +63,33 @@ struct PerformanceDeckControls: View {
             }
             .overlay {
                 if pitch {
-                    VStack(spacing: 8) {
-                        HStack { Text("\(Ink.deckName(index)) · PITCH").font(Ink.font(13, bold: true)); Spacer(); Button("×") { pitch = false }.font(Ink.font(22)) }.foregroundStyle(color).frame(height: 36)
-                        Text(state.bpm > 0 ? String(format: "%.2f BPM", state.bpm * (1 + Double(state.pitch) / 100)) : "NO BPM").font(Ink.font(18, bold: true)).foregroundStyle(color)
-                        PerformanceFader(value: Binding(get: { (Double(state.pitch) + 8) / 16 }, set: { model.set(MDJPitch, index, $0 * 16 - 8) }), color: color, label: "\(Ink.deckName(index)) pitch fader")
+                    VStack(spacing: 5) {
+                        Capsule().fill(color).frame(width: 36, height: 3).frame(height: 10)
+                        HStack(spacing: 4) {
+                            Text(String(format: "%+.2f%%", state.pitch)).font(Ink.font(18, bold: true))
+                            Spacer(minLength: 0)
+                            Text(state.bpm > 0 ? String(format: "%.2f", state.bpm * (1 + Double(state.pitch) / 100)) : "--").font(Ink.font(10, bold: true))
+                            Button("×") { withAnimation(.easeOut(duration: 0.24)) { pitch = false } }.font(Ink.font(24)).frame(width: 36, height: 36).accessibilityLabel("Close pitch panel")
+                        }.foregroundStyle(color).frame(height: 36)
+                        HStack(spacing: 0) {
+                            Button(state.keyLock ? "KEY ON" : "KEY OFF") { model.set(MDJKeyLock, index, state.keyLock ? 0 : 1) }.buttonStyle(PerformanceKeyStyle(color: color, active: state.keyLock))
+                            Button("SYNC") {}.buttonStyle(PerformanceKeyStyle(color: color)).disabled(true).accessibilityHint("Sync groups not implemented on iOS")
+                            Button("0") { model.set(MDJPitch, index, 0) }.buttonStyle(PerformanceKeyStyle(color: color)).frame(width: 36).accessibilityLabel("Reset pitch")
+                        }.frame(height: 38)
+                        HStack(spacing: 6) {
+                            PerformanceFader(value: Binding(get: { (Double(state.pitch) + 8) / 16 }, set: { model.set(MDJPitch, index, $0 * 16 - 8) }), color: color, doubleTapCenter: true, label: "\(Ink.deckName(index)) pitch fader").frame(width: 52)
+                            VStack(spacing: 8) {
+                                Spacer(minLength: 0)
+                                Image(systemName: "hand.draw").font(.system(size: 26)).foregroundStyle(Ink.muted)
+                                Text("SCRATCH\nNOT YET AVAILABLE").font(Ink.font(9, bold: true)).foregroundStyle(Ink.muted).multilineTextAlignment(.center)
+                                Spacer(minLength: 0)
+                            }.frame(maxWidth: .infinity, maxHeight: .infinity).overlay(RoundedRectangle(cornerRadius: 10).stroke(Ink.edge))
+                        }.frame(maxHeight: .infinity)
                         Button("RESET 0.00%") { model.set(MDJPitch, index, 0) }.buttonStyle(PerformanceKeyStyle(color: color)).frame(height: 36)
-                        Button(state.keyLock ? "KEY LOCK ON" : "KEY LOCK OFF") { model.set(MDJKeyLock, index, state.keyLock ? 0 : 1) }.buttonStyle(PerformanceKeyStyle(color: color, active: state.keyLock)).frame(height: 36)
-                    }.padding(4).background(Ink.base).transition(.move(edge: .bottom).combined(with: .opacity))
+                    }.padding(.horizontal, 6).padding(.bottom, 6).frame(width: geometry.size.width, height: geometry.size.height)
+                        .background(Color.black).clipShape(UnevenRoundedRectangle(topLeadingRadius: 14, topTrailingRadius: 14))
+                        .overlay(UnevenRoundedRectangle(topLeadingRadius: 14, topTrailingRadius: 14).stroke(color.opacity(0.75), lineWidth: 1.5))
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
             }.clipped()
         }.frame(minHeight: compact ? 316 : 360)

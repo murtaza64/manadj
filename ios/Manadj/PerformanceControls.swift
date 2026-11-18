@@ -24,6 +24,7 @@ struct PerformanceKnob: View {
     @Binding var value: Double
     var range: ClosedRange<Double> = 0...1
     var neutral: Double = 0.5
+    var eqKillToggle = false
     @State private var start: Double?
     @State private var horizontal: Bool?
     @State private var lastValue = 0.0
@@ -42,7 +43,7 @@ struct PerformanceKnob: View {
             if (lastValue - neutral) * (next - neutral) < 0 { next = neutral; UISelectionFeedbackGenerator().selectionChanged() }
             lastValue = next; value = next
         }.onEnded { _ in start = nil; horizontal = nil })
-        .simultaneousGesture(TapGesture(count: 2).onEnded { value = neutral; UIImpactFeedbackGenerator(style: .medium).impactOccurred() })
+        .simultaneousGesture(TapGesture(count: 2).onEnded { value = eqKillToggle && value >= neutral / 2 ? range.lowerBound : neutral; UIImpactFeedbackGenerator(style: .medium).impactOccurred() })
         .accessibilityElement().accessibilityLabel(label + " control").accessibilityValue(String(format: "%.2f", value))
         .accessibilityAdjustableAction { direction in value = min(range.upperBound, max(range.lowerBound, value + (direction == .increment ? 0.01 : -0.01))) }
     }
@@ -54,7 +55,7 @@ struct PerformanceKnob: View {
         var arc = Path()
         arc.addArc(center: center, radius: radius, startAngle: .degrees(135), endAngle: .degrees(405), clockwise: false)
         context.stroke(arc, with: .color(Ink.edge), style: StrokeStyle(lineWidth: 2, lineCap: .round))
-        let anchor = (neutral - range.lowerBound) / (range.upperBound - range.lowerBound)
+        let anchor = eqKillToggle ? 0 : (neutral - range.lowerBound) / (range.upperBound - range.lowerBound)
         let from = min(anchor, fraction), to = max(anchor, fraction)
         var filled = Path()
         filled.addArc(center: center, radius: radius, startAngle: .degrees(135 + from * 270), endAngle: .degrees(135 + to * 270), clockwise: false)
@@ -74,6 +75,7 @@ struct PerformanceFader: View {
     @Binding var value: Double
     var color: Color
     var vertical = true
+    var doubleTapCenter = false
     var label = "Channel fader"
     @State private var grab: CGFloat?
     var body: some View {
@@ -103,11 +105,11 @@ struct PerformanceFader: View {
                     let thumb = low + length * CGFloat(vertical ? 1 - value : value)
                     grab = abs(origin - thumb) <= (vertical ? 16 : 24) ? origin - thumb : 0
                 }
-                if !vertical && hypot(drag.translation.width, drag.translation.height) < 5 { return }
+                if (!vertical || doubleTapCenter) && hypot(drag.translation.width, drag.translation.height) < 5 { return }
                 let fraction = Double((coordinate - (grab ?? 0) - low) / length)
                 value = min(1, max(0, vertical ? 1 - fraction : fraction))
             }.onEnded { _ in grab = nil })
-            .simultaneousGesture(TapGesture(count: 2).onEnded { if !vertical { value = 0.5; UISelectionFeedbackGenerator().selectionChanged() } })
+            .simultaneousGesture(TapGesture(count: 2).onEnded { if !vertical || doubleTapCenter { value = 0.5; UISelectionFeedbackGenerator().selectionChanged() } })
         }.accessibilityElement().accessibilityLabel(label).accessibilityValue("\(Int(value * 100)) percent")
         .accessibilityAdjustableAction { direction in value = min(1, max(0, value + (direction == .increment ? 0.05 : -0.05))) }
     }
