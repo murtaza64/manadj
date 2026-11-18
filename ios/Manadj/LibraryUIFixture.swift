@@ -20,6 +20,7 @@ extension AppModel {
                 let sample = Float(sin(Double(i) * .pi * 2 * 440 / 44100)) * 0.05
                 channels[0][i] = sample; channels[1][i] = sample
             }
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
             let file = try AVAudioFile(forWriting: url, settings: format.settings)
             try file.write(from: buffer)
             return root
