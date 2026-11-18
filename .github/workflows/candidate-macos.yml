@@ -1,0 +1,48 @@
+# Candidate macOS DMG build for instinct/* lanes: fires on push so a
+# branch can produce a testable artifact BEFORE anything lands on main
+# (workflow_dispatch only works once a workflow exists on the default
+# branch). Artifact only - never touches releases, tags or main; delete
+# from any merge proposal, where release-macos.yml (dispatch-only) is the
+# lasting twin of release-windows.yml. Ad-hoc signed, matching
+# docs/install.md (right-click -> Open; manaDJ is not notarized).
+
+name: candidate-macos
+on:
+  push:
+    branches: ["instinct/**"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: candidate-macos-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-latest
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+    env:
+      PYTHONUTF8: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: version
+        id: v
+        run: |
+          v=$(sed -nE 's/^version *= *"([^"]+)".*/\1/p' pyproject.toml | head -1)
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+      - name: build DMG
+        run: uv run scripts/release/build_dmg.py --version "${{ steps.v.outputs.version }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: manaDJ-candidate-${{ github.sha }}-macos-arm64
+          path: build/release/out/*.dmg
+          compression-level: 0
+          retention-days: 7
