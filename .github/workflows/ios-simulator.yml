@@ -32,6 +32,19 @@ jobs:
         run: |
           set -o pipefail
           bash ios/scripts/verify_apple.sh 2>&1 | tee ios-verification.log
+      - name: Export simulator diagnostics and attachments
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p ios/.test-results/export
+          for result in ios/.test-results/*.xcresult; do
+            [ -d "$result" ] || continue
+            xcrun xcresulttool get test-results summary --path "$result" | tee ios/.test-results/export/summary.json
+            xcrun xcresulttool get test-results tests --path "$result" | tee ios/.test-results/export/tests.json
+            xcrun xcresulttool export diagnostics --path "$result" --output-path ios/.test-results/export/diagnostics || true
+            xcrun xcresulttool export attachments --path "$result" --output-path ios/.test-results/export/attachments || true
+          done
+          find ios/.test-results/export -type f -name '*.ips' -exec cat {} \;
       - name: Preserve test evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -39,7 +52,7 @@ jobs:
           name: ios-simulator-evidence
           path: |
             ios-verification.log
-            ios/.test-results/*.xcresult
+            ios/.test-results/
           retention-days: 3
           if-no-files-found: warn
           include-hidden-files: true
