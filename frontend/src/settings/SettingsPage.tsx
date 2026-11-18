@@ -589,4 +589,4 @@ export default function SettingsPage({ performance = false }: { performance?: bo
       </div>
     </div>
   );
-      }
+}
