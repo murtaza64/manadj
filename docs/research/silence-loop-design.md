@@ -27,7 +27,7 @@ When a playing, phrase-aligned deck reaches the end of audible material, the tra
 **Recommend: extend the deck's Metric past decoded audio at the final tempo segment, beat-domain only (the loop length is in beats, so tempo/pitch changes during the loop stretch or compress wall-clock duration and stay on grid, matching how beat-jumps already behave under pitch).** Mark the extrapolated region in metadata so UI and Session rendering can show it as extrapolated, not as audio.
 
 ### D7. Escape and interaction semantics
-**Recommend: any intentional transport action exits instantly.** Precise arithmetic: with entry beat E (first beat at/after the last audible sample) and loop length J, any position p inside the phantom region [E, E+J) minus J lands in [E-J, E), i.e. at or before the entry beat. That zone is audible material except for the sub-beat sliver between the last audible sample and E (under one beat, by construction), and it clamps to track start when the audible material is shorter than J. So: one backward jump of the snapshot size always exits the loop and lands within one beat of audible content, but "always lands on audio" is not literally guaranteed — say "lands at or before the entry beat." Hot cue, seek, CUE, pause, or engaging a real loop all replace the phantom region immediately. Forward jumps wrap inside the loop (that is what a loop is). Ordinary loops and hot cues keep their current meanings everywhere before the end of audio.
+**Recommend: any intentional transport action exits instantly.** Precise arithmetic: with entry beat E (first projected top-tier ladder boundary at/after the last audible sample, per D3/D10) and loop length J, any position p inside the phantom region [E, E+J) minus J lands in [E-J, E), i.e. at or before the entry beat. That zone is audible material plus the trailing-silence stretch between the last audible sample and E (up to one top-tier cycle under the hypermetric rule, silent by definition of the last audible sample), and it clamps to track start when the audible material is shorter than J. So: one backward jump of the snapshot size always exits the loop and lands within one beat of audible content, but "always lands on audio" is not literally guaranteed — say "lands at or before the entry beat." Hot cue, seek, CUE, pause, or engaging a real loop all replace the phantom region immediately. Forward jumps wrap inside the loop (that is what a loop is). Ordinary loops and hot cues keep their current meanings everywhere before the end of audio.
 
 ### D8. Session recording and replay
 **Recommend: record silence-loop entry and exit as explicit Session events (slot, boundary, snapshot size), not as generic seeks.** The #478 lesson applies: unnamed events get mislabeled later. Replay renders silence from the events, the Session timeline shows the region as hatched/extrapolated rather than fabricating waveform (#437's no-fabricated-events rule), and offline export (#472) renders the same events so an exported MP3 contains the performed silence exactly. This also keeps #473/#446 replay-fidelity work honest: silence regions are deterministic and must not become another desync source.
@@ -35,15 +35,40 @@ When a playing, phrase-aligned deck reaches the end of audible material, the tra
 ### D9. Test posture (for the eventual build, both engines)
 Deterministic engine-clock fixtures: phase-exact wrap positions at wrap counts 1..100; entry under pitch ramps; variable-beatgrid tracks; gridless no-op; jump-size snapshot vs mid-loop change; escape from each gesture; Session event round-trip and export equivalence. Port boundary per the ticket: behavior design is shared; any implementation splits desktop and Android per lane, with shared behavioral fixtures where the engines allow.
 
+## D10 — Phrase alignment: the actual criterion (2026-11-18 revision, supersedes D3/D5)
+
+The user's stated goal: when one track ends, its drops must stay aligned with the other deck's drops after beat jumps — the reason for the 64-beat idea. Reviewed against that goal, the model is:
+
+- Entry E on a grid tick; wait t beats in a loop of length L; k backward jumps of size J at exit. Landing source s = E + (t mod L) − J·k. Deficit vs shared musical time: D = L·⌊t/L⌋ + J·k. Drops realign iff D ≡ 0 (mod 64).
+- Beat grid: kept by any whole-beat loop (transport never stops). Drop/phrase alignment is a source-position property at exit — a live transport clock alone does not guarantee it.
+- Assumptions: decks phrase-aligned at entry, 64-beat (16-bar) phrases, power-of-two jump sizes, grid/hypermeter extrapolated past EOF.
+
+Enumerated over waits 0–512 beats, jumps 0–39, J ∈ {4,8,16,32,64} (test script verified):
+
+| Loop rule | Recovery jumps to an aligned landing |
+|---|---|
+| Fixed 64-beat loop | Constant 64/J for every wait and wrap count (J=64→1, 32→2, 16→4, 8→8, 4→16); those jumps also always leave the silent window |
+| Snapshot L = jump size (D5's rule) | J=64: always 1 (matches fixed-64). Below 64: k_min ≡ −wraps (mod 64/J), i.e. wait-dependent (32: 1–2; 16: 1–4) |
+| Changed size mid-loop (in with 8, out with 64) | Residue (L·wraps) mod 64 is locked; jumps add whole phrases and cannot change it — only exit timing realigns (aligned iff wraps ≡ 0 mod 8) |
+
+Consequences:
+- Fixed-64 strictly dominates the snapshot rule for drop alignment: constant, wait-independent recovery. The snapshot rule only matches it at jump size 64. The ticket's "fixed-64 superseded" line was written before this criterion was stated and deserves a second look; decision remains the user's.
+- D5 revised: fixed 64-beat loop (one hypermeter cycle), not a jump-size snapshot. Intermediate smaller-jump landings are mid-phrase; only the 64/J-th jump realigns.
+- D3 revised: entry at the first projected top-tier ladder boundary (64-tick) at/after the last audible sample — equivalently the first 64-tick in complete silence — so landings are downbeats. Grounding: the stored beat lattice ends at the last beat at/before track duration (backend walk), so this boundary comes from the past-EOF projection on the final tempo segment (D6), anchored at the grid origin and per-track Reset marks. Residual edge: a landing can still fall in a pre-entry silent stretch when the track ends just after a tick — the deck simply jumps again.
+
+Implementation status 2026-11-18: the grid projection + entry-boundary module is written and unit-tested (8 tests, including the Reset-mark movement case), local only; the engine transport slice (phantom region, Session events) is not started.
+- Gridless fallback (D4) and Session semantics (D8) unchanged.
+
+
 ## Decision summary
 
 | # | Question | Recommendation | Main alternative |
 |---|---|---|---|
 | D1 | Activation | On for gridded, off for gridless, per-deck toggle | Opt-in |
 | D2 | Silence detection | Analysis-time, stored metadata | Runtime RMS |
-| D3 | Entry boundary | First beat after last audible sample | First 64-tick in silence |
+| D3 | Entry boundary | First projected 64-tick at/after the last audible sample (revised by D10) | First beat after last audible sample |
 | D4 | Gridless | Disabled (no phase to keep) | Seconds-based fallback loop |
-| D5 | Loop length | Jump-size snapshot at entry | Live resize |
+| D5 | Loop length | Fixed 64-beat hypermeter cycle (revised by D10) | Jump-size snapshot at entry |
 | D6 | Past-EOF grid | Extend final tempo segment, beat-domain | Freeze at entry tempo |
 | D7 | Escape | Any intentional action exits; backward jump lands at/before entry beat | Dedicated exit gesture |
 | D8 | Session | Explicit entry/exit events | Log as seeks |
