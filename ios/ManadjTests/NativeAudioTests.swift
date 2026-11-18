@@ -42,9 +42,10 @@ final class NativeAudioTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: root) }
         let model = AppModel(storageRoot: root)
         for _ in 0..<100 {
-            if model.snapshot != nil { break }
+            if model.snapshot != nil && model.downloaded.contains(1) { break }
             try await Task.sleep(for: .milliseconds(20))
         }
+        XCTAssertTrue(model.downloaded.contains(1), "Fixture cache should finish opening before requesting a load")
         let snapshot = try XCTUnwrap(model.snapshot)
         let cached = try XCTUnwrap(snapshot.tracks.first { $0.id == 1 })
         let offline = try XCTUnwrap(snapshot.tracks.first { $0.id == 2 })
@@ -52,7 +53,7 @@ final class NativeAudioTests: XCTestCase {
         XCTAssertFalse(model.load(cached, deck: 4))
         XCTAssertFalse(model.load(offline, deck: 0))
         XCTAssertFalse(model.decks[0].loading)
-        XCTAssertTrue(model.load(cached, deck: 0))
+        XCTAssertTrue(model.load(cached, deck: 0), model.error ?? "Load refused without a reason")
         XCTAssertTrue(model.decks[0].loading)
         XCTAssertFalse(model.load(cached, deck: 0)) // duplicate request is refused synchronously
         for _ in 0..<150 {
