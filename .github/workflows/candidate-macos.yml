@@ -1,15 +1,21 @@
-# Candidate macOS DMG build for instinct/* lanes: fires on push so a
-# branch can produce a testable artifact BEFORE anything lands on main
+# Candidate macOS DMG build for a release-candidate lane: fires on push so
+# the branch produces a testable artifact BEFORE anything lands on main
 # (workflow_dispatch only works once a workflow exists on the default
 # branch). Artifact only - never touches releases, tags or main; delete
 # from any merge proposal, where release-macos.yml (dispatch-only) is the
 # lasting twin of release-windows.yml. Ad-hoc signed, matching
 # docs/install.md (right-click -> Open; manaDJ is not notarized).
+#
+# Scoped to the exact candidate branch, not instinct/**: one build per
+# landed edit batch, never one per partial web edit on unrelated lanes.
+# The concurrency group cancels a superseded run on the same branch, so
+# rapid pushes collapse to the newest tree. A future candidate lane adds
+# its branch here for the duration of its candidacy.
 
 name: candidate-macos
 on:
   push:
-    branches: ["instinct/**"]
+    branches: ["instinct/wallpaper-theme"]
 
 permissions:
   contents: read
