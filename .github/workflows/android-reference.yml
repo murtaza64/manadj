@@ -56,8 +56,8 @@ jobs:
           APP_APK=$(find "$GITHUB_WORKSPACE" -name "*.apk" -not -path "*/androidTest/*" -print -quit)
           TEST_APK=$(find "$GITHUB_WORKSPACE" -name "*.apk" -path "*/androidTest/*" -print -quit)
           test -n "$APP_APK" && test -n "$TEST_APK"
-          adb install -r "$APP_APK"
-          adb install -r "$TEST_APK"
+          adb install -r -t "$APP_APK"
+          adb install -r -t "$TEST_APK"
           set +e
           timeout 420 adb shell am instrument -w -r -e class dev.manadj.app.AndroidReferenceCaptureTest dev.murt.manadj.excalibur.test/androidx.test.runner.AndroidJUnitRunner | tee reference-evidence/instrumentation.txt
           CODE=${PIPESTATUS[0]}
