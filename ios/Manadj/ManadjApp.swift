@@ -30,7 +30,7 @@ struct WorkspaceView: View {
             header
             Text(model.status).font(Ink.font(11)).foregroundStyle(Ink.muted).lineLimit(2).frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 12).padding(.vertical, 4).background(Ink.crust)
             if tab == 0 { performance }
-            else if tab == 1 { LibraryBrowser(onLoad: { track in model.load(track, deck: model.loadTarget); tab = 0 }) }
+            else if tab == 1 { LibraryBrowser(onLoad: { track in let accepted = model.load(track, deck: model.loadTarget); if accepted { tab = 0 }; return accepted }) }
             else { SettingsView() }
             HStack(spacing: 0) {
                 tabButton("PERFORM", icon: "slider.horizontal.3", index: 0)
@@ -41,7 +41,7 @@ struct WorkspaceView: View {
         .background(Ink.base.ignoresSafeArea())
         .sheet(isPresented: $showLibrary) {
             NavigationStack {
-                LibraryBrowser(onLoad: { track in model.load(track, deck: model.loadTarget); showLibrary = false })
+                LibraryBrowser(onLoad: { track in let accepted = model.load(track, deck: model.loadTarget); if accepted { showLibrary = false }; return accepted })
                     .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { showLibrary = false } } }
             }.environmentObject(model).font(Ink.font()).foregroundStyle(Ink.text).preferredColorScheme(.dark)
         }

@@ -37,4 +37,30 @@ final class NativeAudioTests: XCTestCase {
         XCTAssertNotNil(Bundle.main.object(forInfoDictionaryKey: "NSLocalNetworkUsageDescription"))
         XCTAssertNotNil(Bundle.main.url(forResource: "UbuntuMono-Regular", withExtension: "ttf"))
     }
+    @MainActor func testLibraryLoadAcceptanceIsNotDecodeCompletion() async throws {
+        let root = try XCTUnwrap(AppModel.makeLibraryUIFixture())
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = AppModel(storageRoot: root)
+        for _ in 0..<100 {
+            if model.snapshot != nil { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        let snapshot = try XCTUnwrap(model.snapshot)
+        let cached = try XCTUnwrap(snapshot.tracks.first { $0.id == 1 })
+        let offline = try XCTUnwrap(snapshot.tracks.first { $0.id == 2 })
+        XCTAssertFalse(model.load(cached, deck: -1))
+        XCTAssertFalse(model.load(cached, deck: 4))
+        XCTAssertFalse(model.load(offline, deck: 0))
+        XCTAssertFalse(model.decks[0].loading)
+        XCTAssertTrue(model.load(cached, deck: 0))
+        XCTAssertTrue(model.decks[0].loading)
+        XCTAssertFalse(model.load(cached, deck: 0)) // duplicate request is refused synchronously
+        for _ in 0..<150 {
+            if !model.decks[0].loading { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertFalse(model.decks[0].loading)
+        XCTAssertEqual(model.decks[0].track?.id, cached.id)
+        XCTAssertTrue(model.audio?.state(0).ready == true)
+    }
 }
