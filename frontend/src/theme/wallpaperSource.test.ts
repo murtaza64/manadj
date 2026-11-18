@@ -2,8 +2,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
-  applyWallpaperOverrides,
-  clearWallpaperOverrides,
   disableWallpaperTheme,
   enableWallpaperTheme,
   isWallpaperThemeEnabled,
