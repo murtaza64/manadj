@@ -24,6 +24,10 @@ struct WorkspaceView: View {
     @State private var xf = false
     @State private var fx = false
     @State private var effect = 0
+    @State private var fxTarget = 0
+    @State private var fxBeatIndex = 3
+    @State private var saved = false
+    private let fxBeats = [0.0625, 0.125, 0.25, 0.5, 1.0, 2.0, 4.0, 8.0]
     @State private var fxDepth = -0.5
     @State private var selected = 0
     @State private var notice: String?
@@ -42,6 +46,7 @@ struct WorkspaceView: View {
             case .failure(let error): model.error = error.localizedDescription
             }
         }
+        .sheet(isPresented: $saved) { SettingsView().environmentObject(model) }
         .alert("manaDJ", isPresented: Binding(get: { model.error != nil }, set: { if !$0 { model.error = nil } })) {
             Button("OK", role: .cancel) { model.error = nil }
         } message: { Text(model.error ?? "") }
@@ -51,6 +56,7 @@ struct WorkspaceView: View {
             let compact = geometry.size.height < 860
             let gap: CGFloat = compact ? 5 : 8
             VStack(spacing: gap) {
+                recordingBar.frame(height: 30)
                 HStack(spacing: 14) { deckInfo(0); deckInfo(1) }.frame(height: 44)
                 VStack(spacing: 3) { detailWave(0); detailWave(1) }.frame(height: compact ? 103 : 135)
                 ZStack(alignment: .bottom) {
@@ -177,19 +183,34 @@ struct WorkspaceView: View {
             Button { model.set(MDJPfl, index, model.decks[index].engine.pfl ? 0 : 1) } label: { Image(systemName: "headphones") }.buttonStyle(PerformanceKeyStyle(color: Ink.decks[index], active: model.decks[index].engine.pfl)).frame(height: 30).accessibilityLabel("\(Ink.deckName(index)) headphone cue")
         }
     }
-    private var fxCard: some View {
-        VStack(spacing: 0) {
-            Button(["ECHO", "LOW CUT", "REVERB", "FLANGER", "TRANS", "ROLL"][effect]) { effect = (effect + 1) % 6; updateFX() }.buttonStyle(PerformanceKeyStyle()).frame(height: 30)
-            PerformanceKnob(label: "DEPTH", color: .pink, value: $fxDepth, range: -1...1, neutral: 0).frame(height: 42).onChange(of: fxDepth) { _, _ in updateFX() }
-            Button(fx ? "FX ON" : "FX OFF") { fx.toggle(); updateFX() }.buttonStyle(PerformanceKeyStyle(color: Ink.accent, active: fx)).frame(height: 30)
+    private var recordingBar: some View {
+        HStack(spacing: 8) {
+            Button(model.recording ? "STOP REC" : "REC MASTER") { model.toggleRecording() }
+                .buttonStyle(FlatButtonStyle(color: model.recording ? Ink.danger : Ink.accent)).scaleEffect(0.8).frame(width: 98)
+            Text("Stereo Master · WAV").font(Ink.font(9)).foregroundStyle(Ink.muted)
+            Spacer(minLength: 0)
+            Button("SAVED \(model.recordings.count)") { saved = true }.buttonStyle(FlatButtonStyle()).scaleEffect(0.8).frame(width: 70)
         }
     }
-    private func updateFX() { model.audio?.beatFX(effect: effect, target: 4, on: fx, depth: fxDepth, beats: 0.5) }
+    private var fxCard: some View {
+        VStack(spacing: 2) {
+            HStack(spacing: 2) {
+                Button(["ECHO", "LOW CUT", "REVERB", "FLANGER", "TRANS", "ROLL"][effect]) { effect = (effect + 1) % 6; updateFX() }.buttonStyle(PerformanceKeyStyle(color: Ink.warning))
+                Button(["→ A", "→ B", "→ C", "→ D", "MASTER"][fxTarget]) { fxTarget = fxTarget == 0 ? 1 : fxTarget == 1 ? 4 : 0; updateFX() }.buttonStyle(PerformanceKeyStyle(color: fxTarget < 4 ? Ink.decks[fxTarget] : Ink.accent))
+            }.frame(height: 32)
+            HStack(spacing: 2) {
+                Button(["1/16", "1/8", "1/4", "1/2", "1", "2", "4", "8"][fxBeatIndex] + " BT") { fxBeatIndex = (fxBeatIndex + 1) % fxBeats.count; updateFX() }.buttonStyle(PerformanceKeyStyle(color: Ink.warning))
+                PerformanceKnob(label: "DEPTH", color: Ink.muted, value: $fxDepth, range: -1...1, neutral: 0).frame(width: 34).onChange(of: fxDepth) { _, _ in updateFX() }
+                Button(fx ? "ON" : "OFF") { fx.toggle(); updateFX() }.buttonStyle(PerformanceKeyStyle(color: Ink.warning, active: fx)).frame(width: 44)
+            }.frame(height: 40)
+        }.padding(3).background(Ink.warning.opacity(0.05)).overlay(RoundedRectangle(cornerRadius: 8).stroke(Ink.warning.opacity(0.4)))
+    }
+    private func updateFX() { model.audio?.beatFX(effect: effect, target: fxTarget, on: fx, depth: fxDepth, beats: fxBeats[fxBeatIndex]) }
     private func value(_ index: Int, _ op: MDJOp, _ current: Double) -> Binding<Double> { Binding(get: { current }, set: { model.set(op, index, $0) }) }
     private func transport(_ index: Int) -> some View {
         let state = model.decks[index].engine
         return HStack(spacing: 0) {
-            HoldControl(title: "CUE", color: Ink.cue, active: state.preview && state.previewSlot == 8, enabled: state.ready, down: { model.set(MDJCueDown, index, 0) }, up: { model.set(MDJCueUp, index, 0) })
+            HoldControl(title: "CUE", color: Ink.cue, active: state.preview && state.previewSlot == 8, enabled: state.ready, rounded: true, down: { model.set(MDJCueDown, index, 0) }, up: { model.set(MDJCueUp, index, 0) })
             Button { model.play(index) } label: { Image(systemName: state.playing ? "pause.fill" : "play.fill") }.buttonStyle(PerformanceKeyStyle(color: Ink.play, active: state.playing)).disabled(!state.ready).accessibilityLabel("\(Ink.deckName(index)) play pause")
         }
     }

@@ -8,11 +8,12 @@ struct HoldControl: UIViewRepresentable {
     var color: Color
     var active = false
     var enabled = true
+    var rounded = false
     var down: () -> Void
     var up: () -> Void
     func makeCoordinator() -> Coordinator { Coordinator(self) }
     func makeUIView(context: Context) -> UIButton {
-        let button = UIButton(type: .custom)
+        let button = HoldButton(type: .custom)
         button.titleLabel?.font = UIFont(name: "UbuntuMono-Bold", size: 14) ?? .monospacedSystemFont(ofSize: 14, weight: .bold)
         button.layer.borderWidth = 1
         button.addTarget(context.coordinator, action: #selector(Coordinator.press), for: .touchDown)
@@ -24,6 +25,8 @@ struct HoldControl: UIViewRepresentable {
         view.setTitle(title, for: .normal)
         view.setTitleColor(UIColor(active ? Ink.base : color), for: .normal)
         view.backgroundColor = UIColor(active ? color : Ink.panel)
+        (view as? HoldButton)?.rounded = rounded
+        view.setNeedsLayout()
         view.layer.borderColor = UIColor(color).cgColor
         view.isEnabled = enabled
         view.alpha = enabled ? 1 : 0.4
@@ -38,4 +41,9 @@ struct HoldControl: UIViewRepresentable {
         @objc func press() { guard !held else { return }; held = true; parent.down() }
         @objc func endHold() { guard held else { return }; held = false; parent.up() }
     }
+}
+
+private final class HoldButton: UIButton {
+    var rounded = false
+    override func layoutSubviews() { super.layoutSubviews(); layer.cornerRadius = rounded ? bounds.height / 2 : 0 }
 }
