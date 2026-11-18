@@ -1,15 +1,19 @@
 import SwiftUI
+import UIKit
 
 /// Rounded 3-point inset body follows Android PILL key geometry. Native hit testing remains local.
 struct PerformanceKeyStyle: ButtonStyle {
     var color: Color = Ink.accent
     var active = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     func makeBody(configuration: Configuration) -> some View {
         configuration.label.font(Ink.font(11, bold: true)).lineLimit(1).minimumScaleFactor(0.75)
             .foregroundStyle(color).frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Capsule().fill(active || configuration.isPressed ? color.opacity(0.2) : Ink.panel))
             .overlay(Capsule().stroke(color.opacity(active || configuration.isPressed ? 1 : 0.5), lineWidth: 1))
-            .padding(3).contentShape(Rectangle()).scaleEffect(configuration.isPressed ? 0.96 : 1)
+            .padding(3).contentShape(Rectangle()).scaleEffect(configuration.isPressed ? 0.93 : 1)
+            .animation(reduceMotion ? nil : configuration.isPressed ? .linear(duration: 0) : .interpolatingSpring(stiffness: 900, damping: 20), value: configuration.isPressed)
+            .sensoryFeedback(.selection, trigger: configuration.isPressed) { _, new in new }
     }
 }
 
@@ -21,6 +25,8 @@ struct PerformanceKnob: View {
     var range: ClosedRange<Double> = 0...1
     var neutral: Double = 0.5
     @State private var start: Double?
+    @State private var horizontal: Bool?
+    @State private var lastValue = 0.0
     private var fraction: Double { (value - range.lowerBound) / (range.upperBound - range.lowerBound) }
     var body: some View {
         VStack(spacing: 0) {
@@ -28,11 +34,15 @@ struct PerformanceKnob: View {
             Canvas { context, size in draw(context: context, size: size) }
         }.contentShape(Rectangle())
         .gesture(DragGesture(minimumDistance: 0).onChanged { drag in
-            if start == nil { start = value }
-            let delta = Double(-drag.translation.height + drag.translation.width * 0.25) / 180
-            value = min(range.upperBound, max(range.lowerBound, (start ?? value) + delta * (range.upperBound - range.lowerBound)))
-        }.onEnded { _ in start = nil })
-        .simultaneousGesture(TapGesture(count: 2).onEnded { value = neutral })
+            if start == nil { start = value; lastValue = value }
+            if horizontal == nil && hypot(drag.translation.width, drag.translation.height) > 6 { horizontal = abs(drag.translation.width) > abs(drag.translation.height) }
+            guard let horizontal else { return }
+            let delta = Double(horizontal ? drag.translation.width : -drag.translation.height) / 264
+            var next = min(range.upperBound, max(range.lowerBound, (start ?? value) + delta * (range.upperBound - range.lowerBound)))
+            if (lastValue - neutral) * (next - neutral) < 0 { next = neutral; UISelectionFeedbackGenerator().selectionChanged() }
+            lastValue = next; value = next
+        }.onEnded { _ in start = nil; horizontal = nil })
+        .simultaneousGesture(TapGesture(count: 2).onEnded { value = neutral; UIImpactFeedbackGenerator(style: .medium).impactOccurred() })
         .accessibilityElement().accessibilityLabel(label + " control").accessibilityValue(String(format: "%.2f", value))
         .accessibilityAdjustableAction { direction in value = min(range.upperBound, max(range.lowerBound, value + (direction == .increment ? 0.01 : -0.01))) }
     }

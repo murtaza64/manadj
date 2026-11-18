@@ -177,13 +177,19 @@ struct WorkspaceView: View {
             Button { model.set(MDJPfl, index, model.decks[index].engine.pfl ? 0 : 1) } label: { Image(systemName: "headphones") }.buttonStyle(PerformanceKeyStyle(color: Ink.decks[index], active: model.decks[index].engine.pfl)).frame(height: 30).accessibilityLabel("\(Ink.deckName(index)) headphone cue")
         }
     }
+    /// Deliberate iOS cleanup of the Android recording strip, kept away from performance lanes.
     private var recordingBar: some View {
         HStack(spacing: 8) {
-            Button(model.recording ? "STOP REC" : "REC MASTER") { model.toggleRecording() }
-                .buttonStyle(FlatButtonStyle(color: model.recording ? Ink.danger : Ink.accent)).scaleEffect(0.8).frame(width: 98)
-            Text("Stereo Master · WAV").font(Ink.font(9)).foregroundStyle(Ink.muted)
+            Button { model.toggleRecording() } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: model.recording ? "stop.fill" : "record.circle")
+                    Text(model.recording ? "STOP" : "REC")
+                }.font(Ink.font(11, bold: true)).foregroundStyle(model.recording ? Ink.danger : Ink.text).padding(.horizontal, 10).frame(height: 30)
+            }.buttonStyle(.plain).background(.ultraThinMaterial, in: Capsule()).accessibilityLabel(model.recording ? "Stop master recording" : "Record master")
+            Text("MASTER · WAV").font(Ink.font(9)).foregroundStyle(Ink.muted)
             Spacer(minLength: 0)
-            Button("SAVED \(model.recordings.count)") { saved = true }.buttonStyle(FlatButtonStyle()).scaleEffect(0.8).frame(width: 70)
+            Button { saved = true } label: { Label("\(model.recordings.count)", systemImage: "waveform.path").font(Ink.font(11)).padding(.horizontal, 10).frame(height: 30) }
+                .buttonStyle(.plain).background(.ultraThinMaterial, in: Capsule()).accessibilityLabel("Saved recordings")
         }
     }
     private var fxCard: some View {

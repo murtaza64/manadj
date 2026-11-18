@@ -31,6 +31,11 @@ if [[ -z "$DESTINATION_UDID" ]]; then
 fi
 RESULT="ios/.test-results/Manadj-$(date +%Y%m%d-%H%M%S).xcresult"
 mkdir -p ios/.test-results
+xcrun simctl boot "$DESTINATION_UDID" || true
+xcrun simctl bootstatus "$DESTINATION_UDID" -b
+xcrun simctl io "$DESTINATION_UDID" recordVideo --codec=h264 ios/.test-results/native-ui-temporal.mp4 > ios/.test-results/video.log 2>&1 &
+VIDEO_PID=$!
+trap 'kill -INT "$VIDEO_PID" 2>/dev/null || true; wait "$VIDEO_PID" || true' EXIT
 xcodebuild -project ios/Manadj.xcodeproj -scheme Manadj -sdk iphonesimulator \
   -destination "platform=iOS Simulator,id=$DESTINATION_UDID" -derivedDataPath ios/.derived-data \
   -resultBundlePath "$RESULT" CODE_SIGNING_ALLOWED=NO ONLY_ACTIVE_ARCH=YES ARCHS="$HOST_ARCH" test

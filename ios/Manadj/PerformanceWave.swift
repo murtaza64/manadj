@@ -101,6 +101,7 @@ struct PerformanceWave: UIViewRepresentable {
         guard let ctx = UIGraphicsGetCurrentContext() else { return }
         ctx.setFillColor(UIColor.black.cgColor); ctx.fill(bounds)
         guard duration > 0, let state = state?() else { return }
+        accessibilityValue = String(format: "%@ %.2f seconds", state.playing ? "playing" : "paused", state.position)
         let rate = (1 + Double(state.pitch) / 100) * (1 + Double(state.bend) / 100)
         let moving = (state.playing || state.preview) && !scrubbing
         let position = clock.at(CACurrentMediaTime(), raw: state.position, moving: moving, rate: rate)

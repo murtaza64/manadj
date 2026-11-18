@@ -14,6 +14,7 @@ struct HoldControl: UIViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator(self) }
     func makeUIView(context: Context) -> UIButton {
         let button = HoldButton(type: .custom)
+        context.coordinator.button = button
         button.titleLabel?.font = UIFont(name: "UbuntuMono-Bold", size: 14) ?? .monospacedSystemFont(ofSize: 14, weight: .bold)
         button.layer.borderWidth = 1
         button.addTarget(context.coordinator, action: #selector(Coordinator.press), for: .touchDown)
@@ -37,9 +38,11 @@ struct HoldControl: UIViewRepresentable {
     @MainActor final class Coordinator: NSObject {
         var parent: HoldControl
         private var held = false
+        weak var button: UIButton?
+        private let haptic = UIImpactFeedbackGenerator(style: .light)
         init(_ parent: HoldControl) { self.parent = parent }
-        @objc func press() { guard !held else { return }; held = true; parent.down() }
-        @objc func endHold() { guard held else { return }; held = false; parent.up() }
+        @objc func press() { guard !held else { return }; held = true; haptic.impactOccurred(); parent.down(); button?.transform = CGAffineTransform(scaleX: 0.93, y: 0.93) }
+        @objc func endHold() { guard held else { return }; held = false; parent.up(); guard let button else { return }; if UIAccessibility.isReduceMotionEnabled { button.transform = .identity } else { UIView.animate(withDuration: 0.32, delay: 0, usingSpringWithDamping: 0.4, initialSpringVelocity: 0, options: [.allowUserInteraction]) { button.transform = .identity } } }
     }
 }
 

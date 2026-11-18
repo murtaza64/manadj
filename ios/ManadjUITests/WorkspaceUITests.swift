@@ -7,6 +7,15 @@ final class WorkspaceUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Synthetic pulse A")).firstMatch.waitForExistence(timeout: 20))
         XCTAssertFalse(app.buttons["PERFORM"].exists)
         XCTAssertFalse(app.buttons["LIBRARY"].exists)
+        let play = app.buttons["A play pause"]
+        XCTAssertTrue(play.waitForExistence(timeout: 5)); play.tap()
+        let wave = app.otherElements["A detail wave"]
+        let playing = NSPredicate(format: "value BEGINSWITH %@", "playing")
+        expectation(for: playing, evaluatedWith: wave); waitForExpectations(timeout: 8)
+        Thread.sleep(forTimeInterval: 4)
+        play.tap()
+        let paused = NSPredicate(format: "value BEGINSWITH %@", "paused")
+        expectation(for: paused, evaluatedWith: wave); waitForExpectations(timeout: 8)
         let portrait = XCTAttachment(screenshot: app.screenshot()); portrait.name = "Android-structure iOS portrait WIP"; portrait.lifetime = .keepAlways; add(portrait)
         app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "PITCH")).firstMatch.tap()
         let pitch = XCTAttachment(screenshot: app.screenshot()); pitch.name = "iOS one-deck pitch overlay WIP"; pitch.lifetime = .keepAlways; add(pitch)
