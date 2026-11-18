@@ -64,7 +64,12 @@ struct DeckViewState {
                 try? await Task.sleep(for: .milliseconds(33))
             }
         }
-        Task { await openCache() }
+        Task {
+            await openCache()
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("--performance-ui-fixture") { await installPerformanceFixture() }
+            #endif
+        }
         refreshRecordings()
     }
     deinit { clock?.cancel(); task?.cancel() }

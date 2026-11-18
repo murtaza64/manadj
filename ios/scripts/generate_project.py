@@ -25,6 +25,7 @@ def configs(key, settings):
 
 sources = sorted((ROOT/'Manadj').glob('*.swift'))
 resources = sorted((ROOT/'Manadj/Resources').glob('*.ttf')) + [ROOT/'Manadj/Resources/UBUNTU_FONT_LICENCE.txt', ROOT/'Manadj/Resources/Assets.xcassets']
+resources += sorted((ROOT/'Manadj/Resources').glob('synthetic-*'))
 source_refs, source_builds, resource_refs, resource_builds = [], [], [], []
 for path in sources + resources:
     ref = add(str(path.relative_to(ROOT)), 'PBXFileReference', lastKnownFileType=('sourcecode.swift' if path.suffix == '.swift' else 'folder.assetcatalog' if path.suffix == '.xcassets' else 'file'), path=str(path.relative_to(ROOT)), sourceTree='<group>')

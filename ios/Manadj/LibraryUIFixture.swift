@@ -2,9 +2,29 @@
 import Foundation
 import AVFoundation
 import ManadjCore
+import ManadjAudio
+import CEngine
 
 /// Synthetic, isolated cache for UI tests. Never reads a user library or connects to a desktop.
 extension AppModel {
+    func installPerformanceFixture() async {
+        guard let audio else { return }
+        do {
+            for (index, name) in ["A", "B"].enumerated() {
+                guard let url = Bundle.main.url(forResource: "synthetic-" + name, withExtension: "wav"),
+                      let wave = Bundle.main.url(forResource: "synthetic-" + name, withExtension: "mwf") else { throw AudioFailure("Missing synthetic fixture resources") }
+                let duration = try await audio.load(url, deck: index)
+                audio.grid(index, bpm: 128, anchor: 0)
+                audio.send(MDJFader, deck: index, value: index == 0 ? 0.75 : 0.55)
+                for slot in 0..<(index == 0 ? 4 : 2) { audio.send(MDJHotCueSetAt, deck: index, value: Double(slot) * 3.75, slot: slot) }
+                decks[index].title = "Synthetic pulse " + name
+                decks[index].artist = "Generated PCM, no music source"
+                decks[index].duration = duration
+                decks[index].waveform = try PreviewWaveform.parse(Data(contentsOf: wave))
+            }
+        } catch { self.error = error.localizedDescription }
+    }
+
     static func makeLibraryUIFixture() -> URL? {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("library-ui-" + UUID().uuidString)
         do {
