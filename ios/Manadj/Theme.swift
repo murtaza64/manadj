@@ -63,11 +63,11 @@ struct WaveformView: View {
                 let to = max(from + 1, (x + 1) * waveform.peaks.count / width)
                 var amp = 0.0
                 for i in from..<min(to, waveform.peaks.count) { amp = max(amp, waveform.amplitude(i)) }
-                let height = max(1, amp * size.height)
+                let height = max(CGFloat(1), CGFloat(amp) * size.height)
                 let rect = CGRect(x: CGFloat(x) * 2, y: (size.height - height) / 2, width: 1.5, height: height)
                 context.fill(Path(rect), with: .color(color.opacity(0.65)))
             }
-            let x = min(1, max(0, progress)) * size.width
+            let x = CGFloat(min(1.0, max(0.0, progress))) * size.width
             var head = Path(); head.move(to: CGPoint(x: x, y: 0)); head.addLine(to: CGPoint(x: x, y: size.height))
             context.stroke(head, with: .color(Ink.playhead), lineWidth: 2)
         }

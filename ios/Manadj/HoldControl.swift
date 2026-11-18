@@ -31,7 +31,7 @@ struct HoldControl: UIViewRepresentable {
         view.accessibilityHint = "Touch and hold to preview; release to stop"
     }
     static func dismantleUIView(_ view: UIButton, coordinator: Coordinator) { coordinator.endHold() }
-    final class Coordinator: NSObject {
+    @MainActor final class Coordinator: NSObject {
         var parent: HoldControl
         private var held = false
         init(_ parent: HoldControl) { self.parent = parent }
