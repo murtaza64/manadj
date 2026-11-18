@@ -21,7 +21,7 @@
 
 import { API_BASE } from '../api/client';
 import { CSS_VARS } from './tokens';
-import { mapWalPalette, validateWalPalette, type CssVarMap } from './walPalette';
+import { mapWalPalette, validateWalPalette, type CssVarMap, type WalPalette } from './walPalette';
 
 const STORAGE_KEY = 'manadj.wallpaperTheme.enabled';
 const POLL_MS = 3000;
@@ -119,4 +119,4 @@ export function disableWallpaperTheme(): void {
 /** Called once at boot, after installTheme, when the user has opted in. */
 export function initWallpaperTheme(): void {
   if (isWallpaperThemeEnabled()) enableWallpaperTheme();
-}
+    }
