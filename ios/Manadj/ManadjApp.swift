@@ -13,41 +13,32 @@ import CEngine
     }
 }
 
+/// Android STANDARD structure, native SwiftUI/UIKit controls. Runtime parity remains under review.
 struct WorkspaceView: View {
     @EnvironmentObject var model: AppModel
-    @State private var tab = 0
-    @State private var pair = 0
-    @State private var showLibrary = false
-    @State private var showFiles = false
+    @State private var browsing = false
+    @State private var settings = false
+    @State private var files = false
     @State private var fileTarget = 0
+    @State private var pitch: Int?
+    @State private var xf = false
     @State private var fx = false
     @State private var effect = 0
-    @State private var fxTarget = 0
     @State private var fxDepth = -0.5
-    @State private var fxBeats = 0.5
+    @State private var selected = 0
+    @State private var notice: String?
     var body: some View {
-        VStack(spacing: 0) {
-            header
-            Text(model.status).font(Ink.font(11)).foregroundStyle(Ink.muted).lineLimit(2).frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 12).padding(.vertical, 4).background(Ink.crust)
-            if tab == 0 { performance }
-            else if tab == 1 { LibraryBrowser(onLoad: { track in let accepted = model.load(track, deck: model.loadTarget); if accepted { tab = 0 }; return accepted }) }
-            else { SettingsView() }
-            HStack(spacing: 0) {
-                tabButton("PERFORM", icon: "slider.horizontal.3", index: 0)
-                tabButton("LIBRARY", icon: "music.note.list", index: 1)
-                tabButton("SETTINGS", icon: "gearshape", index: 2)
-            }.background(Ink.crust)
+        GeometryReader { geometry in
+            let landscape = geometry.size.width > geometry.size.height
+            Group { if landscape { landscapeBody } else { portraitBody } }
+                .background(Ink.base)
+                .overlay(alignment: .top) {
+                    if let notice { Text(notice).font(Ink.font(11)).padding(8).background(Ink.crust).padding(.top, 50).onTapGesture { self.notice = nil } }
+                }
         }
-        .background(Ink.base.ignoresSafeArea())
-        .sheet(isPresented: $showLibrary) {
-            NavigationStack {
-                LibraryBrowser(onLoad: { track in let accepted = model.load(track, deck: model.loadTarget); if accepted { showLibrary = false }; return accepted })
-                    .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { showLibrary = false } } }
-            }.environmentObject(model).font(Ink.font()).foregroundStyle(Ink.text).preferredColorScheme(.dark)
-        }
-        .fileImporter(isPresented: $showFiles, allowedContentTypes: [.audio], allowsMultipleSelection: false) { result in
+        .fileImporter(isPresented: $files, allowedContentTypes: [.audio]) { result in
             switch result {
-            case .success(let urls): if let url = urls.first { model.importFile(url, deck: fileTarget) }
+            case .success(let url): model.importFile(url, deck: fileTarget)
             case .failure(let error): model.error = error.localizedDescription
             }
         }
@@ -55,73 +46,154 @@ struct WorkspaceView: View {
             Button("OK", role: .cancel) { model.error = nil }
         } message: { Text(model.error ?? "") }
     }
-    private var header: some View {
-        HStack {
-            Text("manaDJ").font(Ink.font(24, bold: true)).foregroundStyle(Ink.text)
-            Text("iOS · WORK IN PROGRESS").font(Ink.font(9)).foregroundStyle(Ink.warning)
-            Spacer(minLength: 4)
-            Button { model.toggleRecording() } label: { Label(model.recording ? "STOP" : "REC", systemImage: "record.circle") }
-                .buttonStyle(FlatButtonStyle(color: Ink.danger, active: model.recording))
-        }.padding(.horizontal, 12).padding(.vertical, 8).background(Ink.crust)
-    }
-    private var performance: some View {
+    private var portraitBody: some View {
         GeometryReader { geometry in
-            ScrollView {
-                VStack(spacing: 12) {
-                    HStack(spacing: 8) {
-                        Button("A / B") { pair = 0 }.buttonStyle(FlatButtonStyle(active: pair == 0))
-                        Button("C / D") { pair = 1 }.buttonStyle(FlatButtonStyle(active: pair == 1))
-                        Spacer(minLength: 4)
-                        Button("GRID") { model.quantize.toggle(); model.set(MDJQuantize, 0, model.quantize ? 1 : 0) }.buttonStyle(FlatButtonStyle(color: Ink.cue, active: model.quantize))
-                        Menu {
-                            ForEach(0..<4) { index in Button("Deck \(Ink.deckName(index))") { fileTarget = index; showFiles = true } }
-                        } label: { Image(systemName: "folder").frame(width: 44, height: 44) }.accessibilityLabel("Import audio from Files")
+            let compact = geometry.size.height < 860
+            let gap: CGFloat = compact ? 5 : 8
+            VStack(spacing: gap) {
+                HStack(spacing: 14) { deckInfo(0); deckInfo(1) }.frame(height: 44)
+                VStack(spacing: 3) { detailWave(0); detailWave(1) }.frame(height: compact ? 103 : 135)
+                ZStack(alignment: .bottom) {
+                    VStack(spacing: gap) {
+                        mixer.frame(maxHeight: .infinity)
+                        HStack(spacing: 6) { minimap(0); browseKey.frame(width: 84); minimap(1) }.frame(height: compact ? 36 : 44)
+                        HStack(alignment: .top, spacing: 14) { deckControls(0, compact: compact); deckControls(1, compact: compact) }
                     }
-                    let columns = geometry.size.width >= 760 ? 2 : 1
-                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: columns), spacing: 12) {
-                        ForEach((pair * 2)..<(pair * 2 + 2), id: \.self) { index in
-                            DeckPanel(index: index, onLoad: { model.loadTarget = index; showLibrary = true })
-                        }
+                    .offset(y: browsing || settings ? -geometry.size.height : 0)
+                    .opacity(browsing || settings ? 0 : 1)
+                    if browsing {
+                        VStack(spacing: 0) {
+                            Capsule().fill(Ink.muted.opacity(0.7)).frame(width: 40, height: 4).frame(height: 16)
+                            library
+                            HStack(spacing: 14) { transport(0); transport(1) }.frame(height: 54)
+                        }.background(Ink.base).transition(.move(edge: .bottom))
+                            .gesture(DragGesture(minimumDistance: 40).onEnded { if $0.translation.height > 60 { withAnimation(.easeOut(duration: 0.24)) { browsing = false } } })
                     }
-                    HStack {
-                        Text("A + C").foregroundStyle(Ink.decks[0])
-                        Slider(value: $model.crossfade, in: -1...1).tint(Ink.accent).onChange(of: model.crossfade) { _, v in model.set(MDJCrossfade, 0, v) }.accessibilityLabel("Crossfader")
-                        Text("B + D").foregroundStyle(Ink.decks[1])
-                        Button("0") { model.crossfade = 0 }.frame(minWidth: 44, minHeight: 44).accessibilityLabel("Center crossfader")
-                    }.font(Ink.font(12))
-                    fxPanel
-                    Text("Performance edits are local to this run. Desktop write-back and Session replay are not implemented yet.")
-                        .font(Ink.font(11)).foregroundStyle(Ink.warning).frame(maxWidth: .infinity, alignment: .leading)
-                }.padding(12)
+                    if settings {
+                        VStack(spacing: 0) {
+                            HStack { Text("SETTINGS").font(Ink.font(14, bold: true)); Spacer(); Button("CLOSE") { settings = false }.buttonStyle(PerformanceKeyStyle()).frame(width: 75, height: 38) }
+                            SettingsView()
+                        }.background(Ink.base).transition(.move(edge: .bottom))
+                    }
+                }.clipped()
+            }.padding(.horizontal, 8)
+            .animation(.easeOut(duration: 0.24), value: browsing)
+            .animation(.easeOut(duration: 0.24), value: settings)
+        }
+    }
+    private var landscapeBody: some View {
+        GeometryReader { geometry in
+            HStack(spacing: 10) {
+                VStack(spacing: 4) { deckInfo(0).frame(height: 36); minimap(0).frame(height: 30); deckControls(0, compact: true) }.frame(width: geometry.size.width * 0.28)
+                VStack(spacing: 4) {
+                    HStack(spacing: 3) { detailWave(0, vertical: true); detailWave(1, vertical: true) }.frame(maxHeight: .infinity)
+                    mixer
+                    browseKey.frame(height: 36)
+                }
+                VStack(spacing: 4) { deckInfo(1).frame(height: 36); minimap(1).frame(height: 30); deckControls(1, compact: true) }.frame(width: geometry.size.width * 0.28)
+            }.padding(.horizontal, 8)
+            .overlay(alignment: .leading) {
+                if browsing { VStack { library; browseKey.frame(height: 36) }.frame(width: geometry.size.width * 0.6).background(Ink.base) }
+                if settings { VStack { Button("CLOSE SETTINGS") { settings = false }; SettingsView() }.frame(width: geometry.size.width * 0.6).background(Ink.base) }
             }
         }
     }
-    private var fxPanel: some View {
-        VStack(spacing: 8) {
-            HStack {
-                Text("BEAT FX").font(Ink.font(12, bold: true))
-                Picker("Effect", selection: $effect) {
-                    ForEach(Array(["ECHO", "LOW CUT", "REVERB", "FLANGER", "TRANS", "ROLL"].enumerated()), id: \.offset) { i, name in Text(name).tag(i) }
-                }.tint(Ink.accent)
-                Picker("FX target", selection: $fxTarget) { ForEach(0..<5) { index in Text(index == 4 ? "MASTER" : Ink.deckName(index)).tag(index) } }
-                Spacer(minLength: 0)
-                Button(fx ? "ON" : "OFF") { fx.toggle(); updateFX() }.buttonStyle(FlatButtonStyle(color: Ink.cue, active: fx))
+    private func deckInfo(_ index: Int) -> some View {
+        let deck = model.decks[index]
+        return HStack(spacing: 6) {
+            Rectangle().fill(Ink.decks[index].opacity(selected == index ? 1 : 0.3)).frame(width: 4)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("\(Ink.deckName(index))  \(deck.duration > 0 ? deck.title : "LOAD A TRACK")").font(Ink.font(14, bold: true)).foregroundStyle(Ink.decks[index]).lineLimit(1)
+                HStack(spacing: 2) {
+                    Text(deck.duration > 0 ? deck.artist : "local file").lineLimit(1)
+                    Spacer(minLength: 0)
+                    Text("\(Ink.clock(deck.engine.position)) -\(Ink.clock(max(0, deck.duration - deck.engine.position)))").foregroundStyle(deck.engine.playing ? Ink.play : Ink.text).lineLimit(1)
+                }.font(Ink.font(10)).foregroundStyle(Ink.muted)
             }
-            HStack {
-                Text("DRY").font(Ink.font(11))
-                Slider(value: $fxDepth, in: -1...1).tint(Ink.cue).accessibilityLabel("FX dry wet").onChange(of: fxDepth) { _, _ in updateFX() }
-                Text("WET").font(Ink.font(11))
-                Picker("Beats", selection: $fxBeats) { ForEach([0.0625, 0.125, 0.25, 0.5, 0.75, 1, 2, 4, 8], id: \.self) { n in Text(String(format: "%g beats", n)).tag(n) } }
-            }
-        }.padding(12).background(Ink.panel).overlay(Rectangle().stroke(Ink.edge))
-            .onChange(of: effect) { _, _ in updateFX() }.onChange(of: fxTarget) { _, _ in updateFX() }.onChange(of: fxBeats) { _, _ in updateFX() }
+        }.contentShape(Rectangle()).onTapGesture { selected = index; model.loadTarget = index }
+        .contextMenu { Button("Import audio from Files") { fileTarget = index; files = true } }
+        .accessibilityLabel("Select \(Ink.deckName(index))")
     }
-    private func updateFX() { model.audio?.beatFX(effect: effect, target: fxTarget, on: fx, depth: fxDepth, beats: fxBeats) }
-    private func tabButton(_ title: String, icon: String, index: Int) -> some View {
-        Button { tab = index } label: {
-            VStack(spacing: 4) { Image(systemName: icon); Text(title).font(Ink.font(11, bold: true)) }
-                .foregroundStyle(tab == index ? Ink.accent : Ink.muted).frame(maxWidth: .infinity, minHeight: 56)
-                .overlay(alignment: .top) { Rectangle().fill(tab == index ? Ink.accent : Ink.edge).frame(height: 2) }
-        }.buttonStyle(.plain).accessibilityLabel(title)
+    private func detailWave(_ index: Int, vertical: Bool = false) -> some View {
+        let deck = model.decks[index]
+        return WaveformView(waveform: deck.waveform, progress: deck.duration > 0 ? deck.engine.position / deck.duration : 0, color: Ink.decks[index])
+            .overlay { if deck.duration == 0 { Text("\(Ink.deckName(index)) · no track").font(Ink.font(11)).foregroundStyle(Ink.muted) } }
+            .accessibilityLabel("\(Ink.deckName(index)) detail wave")
+    }
+    private func minimap(_ index: Int) -> some View {
+        let deck = model.decks[index]
+        return GeometryReader { geometry in
+            WaveformView(waveform: deck.waveform, progress: deck.duration > 0 ? deck.engine.position / deck.duration : 0, color: Ink.decks[index])
+                .contentShape(Rectangle()).gesture(DragGesture(minimumDistance: 0).onChanged { drag in
+                    if deck.duration > 0 { model.set(MDJSeek, index, min(1, max(0, Double(drag.location.x / max(1, geometry.size.width)))) * deck.duration) }
+                }).accessibilityLabel("\(Ink.deckName(index)) minimap seek")
+        }
+    }
+
+    private var browseKey: some View {
+        Button("BROWSE") { withAnimation { settings = false; browsing.toggle() } }.buttonStyle(PerformanceKeyStyle(color: Ink.warning, active: browsing))
+    }
+    private var library: some View {
+        LibraryBrowser(onLoad: { track in
+            let accepted = model.load(track, deck: model.loadTarget)
+            if accepted { withAnimation { browsing = false } }
+            return accepted
+        })
+    }
+    private var mixer: some View {
+        HStack(spacing: 0) {
+            knobColumn(0).frame(width: 48)
+            channel(0).frame(width: 42)
+            VStack(spacing: 4) {
+                HStack(spacing: 2) {
+                    Button("QUANT") { model.quantize.toggle(); model.set(MDJQuantize, 0, model.quantize ? 1 : 0) }.buttonStyle(PerformanceKeyStyle(active: model.quantize))
+                    Button("XF") { xf.toggle(); if !xf { model.crossfade = 0; model.set(MDJCrossfade, 0, 0) } }.buttonStyle(PerformanceKeyStyle(active: xf))
+                }.frame(height: 36)
+                HStack(spacing: 2) {
+                    Button("SESSIONS") { notice = "Session replay is not implemented on iOS yet" }.buttonStyle(PerformanceKeyStyle(color: Ink.muted))
+                    Button { withAnimation { browsing = false; settings.toggle() } } label: { Image(systemName: "gearshape") }.buttonStyle(PerformanceKeyStyle(color: Ink.muted)).accessibilityLabel("Settings")
+                }.frame(height: 36)
+                Spacer(minLength: 0)
+                fxCard
+                if xf { PerformanceFader(value: Binding(get: { (model.crossfade + 1) / 2 }, set: { model.crossfade = $0 * 2 - 1; model.set(MDJCrossfade, 0, model.crossfade) }), color: Ink.accent, vertical: false, label: "Crossfader").frame(height: 40) }
+            }.padding(.horizontal, 3)
+            channel(1).frame(width: 42)
+            knobColumn(1).frame(width: 48)
+        }
+    }
+    private func knobColumn(_ index: Int) -> some View {
+        VStack(spacing: 0) {
+            PerformanceKnob(label: "TRIM", color: Ink.muted, value: value(index, MDJTrim, Double(model.decks[index].engine.trim)))
+            ForEach(0..<3) { i in
+                let eq = model.decks[index].engine.eq
+                PerformanceKnob(label: ["HI", "MID", "LOW"][i], color: Ink.bands[2 - i], value: Binding(get: { Double([eq.2, eq.1, eq.0][i]) }, set: { model.set(MDJEq, index, $0, slot: 2 - i) }))
+            }
+            PerformanceKnob(label: "FILTER", color: Ink.cue, value: Binding(get: { Double(model.decks[index].engine.filter) }, set: { model.audio?.filter(index, position: $0) }), range: -1...1, neutral: 0)
+        }
+    }
+    private func channel(_ index: Int) -> some View {
+        VStack(spacing: 2) {
+            PerformanceFader(value: value(index, MDJFader, Double(model.decks[index].engine.fader)), color: Ink.decks[index], label: "\(Ink.deckName(index)) channel fader")
+            Button { model.set(MDJPfl, index, model.decks[index].engine.pfl ? 0 : 1) } label: { Image(systemName: "headphones") }.buttonStyle(PerformanceKeyStyle(color: Ink.decks[index], active: model.decks[index].engine.pfl)).frame(height: 30).accessibilityLabel("\(Ink.deckName(index)) headphone cue")
+        }
+    }
+    private var fxCard: some View {
+        VStack(spacing: 0) {
+            Button(["ECHO", "LOW CUT", "REVERB", "FLANGER", "TRANS", "ROLL"][effect]) { effect = (effect + 1) % 6; updateFX() }.buttonStyle(PerformanceKeyStyle()).frame(height: 30)
+            PerformanceKnob(label: "DEPTH", color: .pink, value: $fxDepth, range: -1...1, neutral: 0).frame(height: 42).onChange(of: fxDepth) { _, _ in updateFX() }
+            Button(fx ? "FX ON" : "FX OFF") { fx.toggle(); updateFX() }.buttonStyle(PerformanceKeyStyle(color: Ink.accent, active: fx)).frame(height: 30)
+        }
+    }
+    private func updateFX() { model.audio?.beatFX(effect: effect, target: 4, on: fx, depth: fxDepth, beats: 0.5) }
+    private func value(_ index: Int, _ op: MDJOp, _ current: Double) -> Binding<Double> { Binding(get: { current }, set: { model.set(op, index, $0) }) }
+    private func transport(_ index: Int) -> some View {
+        let state = model.decks[index].engine
+        return HStack(spacing: 0) {
+            HoldControl(title: "CUE", color: Ink.cue, active: state.preview && state.previewSlot == 8, enabled: state.ready, down: { model.set(MDJCueDown, index, 0) }, up: { model.set(MDJCueUp, index, 0) })
+            Button { model.play(index) } label: { Image(systemName: state.playing ? "pause.fill" : "play.fill") }.buttonStyle(PerformanceKeyStyle(color: Ink.play, active: state.playing)).disabled(!state.ready).accessibilityLabel("\(Ink.deckName(index)) play pause")
+        }
+    }
+    private func deckControls(_ index: Int, compact: Bool) -> some View {
+        PerformanceDeckControls(index: index, pitch: Binding(get: { pitch == index }, set: { pitch = $0 ? index : nil }), compact: compact, onTransport: { AnyView(transport(index)) })
     }
 }

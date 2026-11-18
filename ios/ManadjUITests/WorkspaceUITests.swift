@@ -1,30 +1,27 @@
 import XCTest
 
 final class WorkspaceUITests: XCTestCase {
-    @MainActor func testWorkspaceAndSettings() {
-        let app = XCUIApplication()
-        app.launch()
-        XCTAssertTrue(app.buttons["PERFORM"].waitForExistence(timeout: 10))
-        XCTAssertTrue(app.buttons["A / B"].exists)
-        app.buttons["C / D"].tap()
-        XCTAssertTrue(app.buttons["Load deck C"].exists)
-        let screenshot = XCTAttachment(screenshot: app.screenshot())
-        screenshot.name = "manaDJ actual iOS simulator workspace"
-        screenshot.lifetime = .keepAlways
-        add(screenshot)
-        app.buttons["SETTINGS"].tap()
+    @MainActor func testStandardWorkspaceSettingsAndPitch() {
+        let app = XCUIApplication(); app.launch()
+        XCTAssertTrue(app.buttons["BROWSE"].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.buttons["PERFORM"].exists)
+        XCTAssertFalse(app.buttons["LIBRARY"].exists)
+        let portrait = XCTAttachment(screenshot: app.screenshot()); portrait.name = "Android-structure iOS portrait WIP"; portrait.lifetime = .keepAlways; add(portrait)
+        app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "PITCH")).firstMatch.tap()
+        let pitch = XCTAttachment(screenshot: app.screenshot()); pitch.name = "iOS one-deck pitch overlay WIP"; pitch.lifetime = .keepAlways; add(pitch)
+        app.buttons["×"].firstMatch.tap()
+        app.buttons["Settings"].tap()
         XCTAssertTrue(app.textFields["Desktop address"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.buttons["PAIR IPHONE"].exists)
-        let settings = XCTAttachment(screenshot: app.screenshot())
-        settings.name = "manaDJ actual iOS simulator settings"
-        settings.lifetime = .keepAlways
-        add(settings)
+        app.buttons["CLOSE"].tap()
+        app.buttons["BROWSE"].tap()
+        XCTAssertTrue(app.textFields["Search title, artist, file"].waitForExistence(timeout: 5))
+        let browse = XCTAttachment(screenshot: app.screenshot()); browse.name = "iOS in-place browser with transport WIP"; browse.lifetime = .keepAlways; add(browse)
     }
     @MainActor func testLibrarySearchAcceptedAndRefusedLoads() {
         let app = XCUIApplication()
         app.launchArguments = ["--library-ui-fixture"]
         app.launch()
-        app.buttons["LIBRARY"].tap()
+        app.buttons["BROWSE"].tap()
         let search = app.textFields["Search title, artist, file"]
         XCTAssertTrue(search.waitForExistence(timeout: 10))
         search.tap()
@@ -51,7 +48,7 @@ final class WorkspaceUITests: XCTestCase {
         XCTAssertTrue(app.keyboards.firstMatch.exists)
         search.typeText("Cached")
         app.staticTexts["Cached Test Tone"].tap()
-        XCTAssertTrue(app.buttons["A / B"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["BROWSE"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.keyboards.firstMatch.exists)
         let accepted = XCTAttachment(screenshot: app.screenshot())
         accepted.name = "Synthetic library - accepted load returns to Perform"

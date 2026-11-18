@@ -72,7 +72,7 @@ struct WaveformView: View {
             context.stroke(head, with: .color(Ink.playhead), lineWidth: 2)
         }
         .background(Ink.base)
-        .overlay { if waveform == nil { Text("NO CACHED WAVEFORM").font(Ink.font(11)).foregroundStyle(Ink.muted) } }
+
         .accessibilityLabel("Track overview waveform")
         .accessibilityValue("\(Int(min(1, max(0, progress)) * 100)) percent")
     }
