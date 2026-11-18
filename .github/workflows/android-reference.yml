@@ -1,0 +1,67 @@
+name: Android runtime UX reference
+on:
+  push:
+    branches: ["instinct/android-reference-capture"]
+permissions:
+  contents: read
+concurrency:
+  group: android-runtime-reference
+  cancel-in-progress: true
+jobs:
+  capture:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Verify runtime and install Android SDK components
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "JAVA_HOME=$JAVA_HOME_17_X64" >> "$GITHUB_ENV"
+          echo "$JAVA_HOME_17_X64/bin" >> "$GITHUB_PATH"
+          echo "$ANDROID_HOME/emulator" >> "$GITHUB_PATH"
+          echo "$ANDROID_HOME/platform-tools" >> "$GITHUB_PATH"
+          ls -l /dev/kvm
+          sudo chmod 666 /dev/kvm
+          sdkmanager 'platforms;android-35' 'build-tools;35.0.0' 'ndk;27.0.12077973' 'cmake;3.22.1' 'system-images;android-35;google_apis;x86_64' 'emulator'
+          echo no | avdmanager create avd --force --name reference --package 'system-images;android-35;google_apis;x86_64' --device pixel_7
+      - name: Build current Android source with capture-only instrumentation
+        run: |
+          bash android/gradlew -p android :app:assembleDebug :app:assembleDebugAndroidTest -Pandroid.injected.build.abi=x86_64 --max-workers=2
+      - name: Boot bounded emulator and capture synthetic reference
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p reference-evidence/screens
+          git rev-parse HEAD | tee reference-evidence/source-sha.txt
+          emulator -avd reference -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect -memory 2048 -cores 2 > reference-evidence/emulator.log 2>&1 &
+          EMULATOR_PID=$!
+          trap 'adb emu kill || true; wait "$EMULATOR_PID" || true' EXIT
+          timeout 180 adb wait-for-device
+          timeout 180 bash -c 'until [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d "\r")" = 1 ]; do sleep 2; done'
+          adb shell wm size 1260x2800
+          adb shell wm density 440
+          adb shell settings put global window_animation_scale 1
+          adb shell settings put global transition_animation_scale 1
+          adb shell settings put global animator_duration_scale 1
+          adb shell input keyevent 82
+          adb install -r android/app/build/outputs/apk/debug/app-debug.apk
+          adb install -r android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+          set +e
+          timeout 420 adb shell am instrument -w -r -e class dev.manadj.app.AndroidReferenceCaptureTest dev.murt.manadj.excalibur.test/androidx.test.runner.AndroidJUnitRunner | tee reference-evidence/instrumentation.txt
+          CODE=${PIPESTATUS[0]}
+          adb pull /sdcard/Android/data/dev.murt.manadj.excalibur/files/reference/. reference-evidence/screens/
+          adb logcat -d > reference-evidence/logcat.txt
+          set -e
+          test "$CODE" = 0
+          grep -q 'OK (1 test)' reference-evidence/instrumentation.txt
+      - name: Preserve runtime evidence only
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: android-ux-reference
+          path: reference-evidence/
+          retention-days: 3
+          if-no-files-found: warn
