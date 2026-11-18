@@ -52,8 +52,12 @@ jobs:
           adb shell settings put global transition_animation_scale 1
           adb shell settings put global animator_duration_scale 1
           adb shell input keyevent 82
-          adb install -r android/app/build/outputs/apk/debug/app-debug.apk
-          adb install -r android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+          find android/app/build/outputs -name "*.apk" -print
+          APP_APK=$(find android/app/build/outputs/apk/debug -name "*.apk" -print -quit)
+          TEST_APK=$(find android/app/build/outputs/apk/androidTest/debug -name "*.apk" -print -quit)
+          test -n "$APP_APK" && test -n "$TEST_APK"
+          adb install -r "$APP_APK"
+          adb install -r "$TEST_APK"
           set +e
           timeout 420 adb shell am instrument -w -r -e class dev.manadj.app.AndroidReferenceCaptureTest dev.murt.manadj.excalibur.test/androidx.test.runner.AndroidJUnitRunner | tee reference-evidence/instrumentation.txt
           CODE=${PIPESTATUS[0]}
