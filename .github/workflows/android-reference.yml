@@ -11,6 +11,8 @@ jobs:
   capture:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    env:
+      ANDROID_AVD_HOME: /home/runner/.android/avd
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -26,6 +28,7 @@ jobs:
           ls -l /dev/kvm
           sudo chmod 666 /dev/kvm
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-35' 'build-tools;35.0.0' 'ndk;27.0.12077973' 'cmake;3.22.1' 'system-images;android-35;google_apis;x86_64' 'emulator'
+          mkdir -p "$ANDROID_AVD_HOME"
           echo no | "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" create avd --force --name reference --package 'system-images;android-35;google_apis;x86_64' --device pixel_7
       - name: Build current Android source with capture-only instrumentation
         run: |
@@ -38,6 +41,8 @@ jobs:
           git rev-parse HEAD | tee reference-evidence/source-sha.txt
           emulator -avd reference -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect -memory 2048 -cores 2 > reference-evidence/emulator.log 2>&1 &
           EMULATOR_PID=$!
+          sleep 2
+          kill -0 "$EMULATOR_PID" || { cat reference-evidence/emulator.log; exit 1; }
           trap 'adb emu kill || true; wait "$EMULATOR_PID" || true' EXIT
           timeout 180 adb wait-for-device
           timeout 180 bash -c 'until [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d "\r")" = 1 ]; do sleep 2; done'
