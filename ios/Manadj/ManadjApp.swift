@@ -122,18 +122,12 @@ struct WorkspaceView: View {
     }
     private func detailWave(_ index: Int, vertical: Bool = false) -> some View {
         let deck = model.decks[index]
-        return WaveformView(waveform: deck.waveform, progress: deck.duration > 0 ? deck.engine.position / deck.duration : 0, color: Ink.decks[index])
+        return PerformanceWave(index: index, vertical: vertical)
             .overlay { if deck.duration == 0 { Text("\(Ink.deckName(index)) · no track").font(Ink.font(11)).foregroundStyle(Ink.muted) } }
             .accessibilityLabel("\(Ink.deckName(index)) detail wave")
     }
     private func minimap(_ index: Int) -> some View {
-        let deck = model.decks[index]
-        return GeometryReader { geometry in
-            WaveformView(waveform: deck.waveform, progress: deck.duration > 0 ? deck.engine.position / deck.duration : 0, color: Ink.decks[index])
-                .contentShape(Rectangle()).gesture(DragGesture(minimumDistance: 0).onChanged { drag in
-                    if deck.duration > 0 { model.set(MDJSeek, index, min(1, max(0, Double(drag.location.x / max(1, geometry.size.width)))) * deck.duration) }
-                }).accessibilityLabel("\(Ink.deckName(index)) minimap seek")
-        }
+        PerformanceWave(index: index, overview: true)
     }
 
     private var browseKey: some View {
