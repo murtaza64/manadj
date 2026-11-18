@@ -48,8 +48,11 @@ class AndroidReferenceCaptureTest {
         return walk(instrumentation.uiAutomation.rootInActiveWindow)
     }
     private fun touch(label: String) {
-        val node = find(label) ?: error("Missing runtime control: $label")
-        val rect = Rect(); node.getBoundsInScreen(rect)
+        dismissTutorial()
+        var node = find(label)
+        repeat(10) { if (node == null) { SystemClock.sleep(200); node = find(label) } }
+        val actual = node ?: error("Missing runtime control: $label")
+        val rect = Rect(); actual.getBoundsInScreen(rect)
         val now = SystemClock.uptimeMillis()
         for ((action, time) in listOf(MotionEvent.ACTION_DOWN to now, MotionEvent.ACTION_UP to now + 90)) {
             val event = MotionEvent.obtain(now, time, action, rect.exactCenterX(), rect.exactCenterY(), 0)
@@ -61,7 +64,13 @@ class AndroidReferenceCaptureTest {
         SystemClock.sleep(500)
     }
     private fun dismissTutorial() {
-        find("Got it")?.let { touch("Got it"); SystemClock.sleep(400) }
+        for (label in listOf("Got it", "Wait")) {
+            find(label)?.let { node ->
+                node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                Log.i("ReferenceCapture", "dismissed system overlay: $label")
+                SystemClock.sleep(600)
+            }
+        }
     }
     @Before fun launch() {
         scenario = ActivityScenario.launch(MainActivity::class.java)
