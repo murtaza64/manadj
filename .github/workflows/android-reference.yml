@@ -62,9 +62,15 @@ jobs:
           adb shell am start -W -n dev.murt.manadj.excalibur/dev.manadj.app.MainActivity
           sleep 3
           adb exec-out screencap -p > reference-evidence/screens/00-device-launch.png
+          adb shell screenrecord --bit-rate 2000000 --time-limit 170 /sdcard/reference-motion.mp4 > reference-evidence/video.log 2>&1 &
+          VIDEO_ADB_PID=$!
           set +e
           timeout 180 adb shell am instrument -w -r -e class dev.manadj.app.AndroidReferenceCaptureTest dev.murt.manadj.excalibur.test/androidx.test.runner.AndroidJUnitRunner | tee reference-evidence/instrumentation.txt
           CODE=${PIPESTATUS[0]}
+          adb shell pkill -INT screenrecord
+          wait "$VIDEO_ADB_PID"
+          adb pull /sdcard/reference-motion.mp4 reference-evidence/android-ui-temporal.mp4
+          adb shell dumpsys gfxinfo dev.murt.manadj.excalibur framestats > reference-evidence/frame-stats.txt
           adb pull /sdcard/Android/data/dev.murt.manadj.excalibur/files/reference/. reference-evidence/screens/
           adb exec-out screencap -p > reference-evidence/screens/99-device-final.png
           adb logcat -d > reference-evidence/logcat.txt
