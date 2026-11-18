@@ -22,6 +22,9 @@
 
 export const WAL_PALETTE_VERSION = 'wal-palette/1' as const;
 
+/** CSS custom-property overrides keyed by variable name. */
+export type CssVarMap = Record<string, string>;
+
 export interface WalPalette {
   version: typeof WAL_PALETTE_VERSION;
   colors: {
@@ -209,4 +212,4 @@ export function mapWalPalette(palette: WalPalette, opts: MapOptions = {}): WalTh
     proposal.deckProposal = { A: ansi[6], B: ansi[5], C: ansi[3], D: ansi[13] };
   }
   return proposal;
-}
+    }
