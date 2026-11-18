@@ -1,10 +1,15 @@
-/**
- * Side-effect imports registering every Setup guide. The framework (sequence
- * host, Settings Setup section) imports this once; each guide lane appends
- * its own line.
- */
-import './cueMode/register';
-import './controllerCheck/register';
-import './soundcloud/register';
-import './spotify/register';
-import '../onboarding/registerGuides';
+/** Registers the Controller check Setup guide (setup-guides PRD #292). */
+import { lazy } from 'react';
+import { guideStatus, registerGuide } from '../guides';
+
+export const CONTROLLER_CHECK_ID = 'controller-check';
+
+registerGuide({
+  id: CONTROLLER_CHECK_ID,
+  title: 'Controller check',
+  // Sequence: Welcome → Rekordbox → tracks dir → Cue mode → SoundCloud →
+  // Spotify → Controller check → Tour.
+  order: 60,
+  status: () => guideStatus(CONTROLLER_CHECK_ID),
+  Component: lazy(() => import('./ControllerCheckGuide')),
+});
