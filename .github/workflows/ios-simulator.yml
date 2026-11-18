@@ -1,0 +1,45 @@
+name: iOS unsigned simulator
+
+on:
+  push:
+    branches: ["instinct/ios-app"]
+  pull_request:
+    paths: ["ios/**", "android/audio-engine/src/main/cpp/**", ".github/workflows/ios-simulator.yml"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-simulator-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  simulator:
+    runs-on: macos-15
+    timeout-minutes: 25
+    steps:
+      - name: Check out reviewed source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Report Apple toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+          xcrun simctl list devices available
+      - name: Build and test without signing
+        shell: bash
+        run: |
+          set -o pipefail
+          bash ios/scripts/verify_apple.sh 2>&1 | tee ios-verification.log
+      - name: Preserve test evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ios-simulator-evidence
+          path: |
+            ios-verification.log
+            ios/.test-results/*.xcresult
+          retention-days: 3
+          if-no-files-found: warn
+          include-hidden-files: true

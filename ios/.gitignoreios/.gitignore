@@ -1,7 +1,0 @@
-**/.build/
-**/.swiftpm/
-.derived-data/
-.test-results/
-*.xcuserstate
-**/xcuserdata/
-.DS_Store
