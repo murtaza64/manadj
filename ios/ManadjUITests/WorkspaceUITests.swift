@@ -36,6 +36,9 @@ final class WorkspaceUITests: XCTestCase {
         app.staticTexts["Offline Test Tone"].tap()
         XCTAssertTrue(app.alerts["manaDJ"].waitForExistence(timeout: 5))
         app.alerts["manaDJ"].buttons["OK"].tap()
+        // The tutorial can be deferred until the alert relinquishes the keyboard.
+        if keyboardContinue.waitForExistence(timeout: 2) { keyboardContinue.tap() }
+        XCTAssertTrue(app.keys["a"].waitForExistence(timeout: 5))
         XCTAssertTrue(search.exists)
         XCTAssertEqual(search.value as? String, "Test Tone")
         XCTAssertTrue(app.keyboards.firstMatch.exists)
