@@ -89,3 +89,31 @@ def test_duplicate_track_same_file_uploaded_once(tmp_path):
     snap = {"tracks": [{"id": 1, "filename": "/m/a.mp3"}, {"id": 2, "filename": "/m/a.mp3"}]}
     plan = build_plan(snap, ["/m"], resolve=lambda p: lib / p[3:])
     assert len(plan.uploads) == 1 and plan.uploads[0]["track_ids"] == [1, 2]
+
+
+
+@pytest.mark.parametrize("content2", [b"2", b"1"])  # different and IDENTICAL bytes
+def test_case_variant_keys_refused_even_when_bytes_identical(tmp_path, content2):
+    lib = tmp_path / "lib"; lib.mkdir()
+    (lib / "x.mp3").write_bytes(b"1"); (lib / "X.mp3").write_bytes(content2)
+    snap = {"tracks": [{"id": 1, "filename": "/m/x.mp3"}, {"id": 2, "filename": "/m/X.mp3"}]}
+    plan = build_plan(snap, ["/m"], resolve=lambda p: lib / p[3:])
+    assert [u["key"] for u in plan.uploads] == ["x.mp3"]
+    assert plan.collisions == ["X.mp3"]
+    assert plan.missing[0]["track_id"] == 2 and "case-insensitive" in plan.missing[0]["reason"]
+    t = {t["id"]: t for t in plan.snapshot["tracks"]}
+    assert t[1]["remote_key"] == "x.mp3" and t[2]["remote_key"] is None
+
+
+def test_same_exact_key_identical_file_still_single_upload(tmp_path):
+    lib = tmp_path / "lib"; lib.mkdir(); (lib / "a.mp3").write_bytes(b"1")
+    snap = {"tracks": [{"id": 1, "filename": "/m/a.mp3"}, {"id": 2, "filename": "/m/a.mp3"}]}
+    plan = build_plan(snap, ["/m"], resolve=lambda p: lib / p[3:])
+    assert plan.collisions == [] and len(plan.uploads) == 1
+
+
+def test_windows_drive_case_same_key_not_a_collision(tmp_path):
+    lib = tmp_path / "lib"; lib.mkdir(); (lib / "a.mp3").write_bytes(b"1")
+    snap = {"tracks": [{"id": 1, "filename": "D:\\M\\a.mp3"}, {"id": 2, "filename": "d:\\m\\a.mp3"}]}
+    plan = build_plan(snap, ["D:\\M"], resolve=lambda p: lib / "a.mp3")
+    assert plan.collisions == [] and len(plan.uploads) == 1
