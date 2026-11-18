@@ -27,7 +27,11 @@ final class WorkspaceUITests: XCTestCase {
         app.buttons["LIBRARY"].tap()
         let search = app.textFields["Search title, artist, file"]
         XCTAssertTrue(search.waitForExistence(timeout: 10))
-        search.tap(); search.typeText("Test Tone")
+        search.tap()
+        // Fresh simulator keyboards may show the system slide-to-type tutorial.
+        let keyboardContinue = app.buttons["Continue"]
+        if keyboardContinue.waitForExistence(timeout: 2) { keyboardContinue.tap() }
+        search.typeText("Test Tone")
         XCTAssertTrue(app.buttons["Clear search"].exists)
         app.staticTexts["Offline Test Tone"].tap()
         XCTAssertTrue(app.alerts["manaDJ"].waitForExistence(timeout: 5))
