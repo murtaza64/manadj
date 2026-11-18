@@ -58,10 +58,14 @@ jobs:
           test -n "$APP_APK" && test -n "$TEST_APK"
           adb install -r -t "$APP_APK"
           adb install -r -t "$TEST_APK"
+          adb shell am start -W -n dev.murt.manadj.excalibur/dev.manadj.app.MainActivity
+          sleep 3
+          adb exec-out screencap -p > reference-evidence/screens/00-device-launch.png
           set +e
-          timeout 420 adb shell am instrument -w -r -e class dev.manadj.app.AndroidReferenceCaptureTest dev.murt.manadj.excalibur.test/androidx.test.runner.AndroidJUnitRunner | tee reference-evidence/instrumentation.txt
+          timeout 180 adb shell am instrument -w -r -e class dev.manadj.app.AndroidReferenceCaptureTest dev.murt.manadj.excalibur.test/androidx.test.runner.AndroidJUnitRunner | tee reference-evidence/instrumentation.txt
           CODE=${PIPESTATUS[0]}
           adb pull /sdcard/Android/data/dev.murt.manadj.excalibur/files/reference/. reference-evidence/screens/
+          adb exec-out screencap -p > reference-evidence/screens/99-device-final.png
           adb logcat -d > reference-evidence/logcat.txt
           set -e
           test "$CODE" = 0
