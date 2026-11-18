@@ -20,6 +20,18 @@ public struct WaveClock {
 }
 
 public extension PreviewWaveform {
+    var displayFillGain: Double {
+        guard sampleRate > 0, bandFrames > 0 else { return 1 }
+        let duration = Double(bandFrames * bandHop) / Double(sampleRate)
+        var peaks = [Double](); peaks.reserveCapacity(1500)
+        for i in 0..<1500 {
+            let time = duration * Double(i) / 1500
+            peaks.append(columnGroups(from: time, to: time + 0.02).max() ?? 0)
+        }
+        peaks.sort(); let p = peaks[1485]
+        return p <= 0.01 ? 1 : min(3, max(1, 0.95 / p))
+    }
+
     /// Android columnGroups: half-window alignment, box mean or interpolation, squared companding,
     /// energy groups (3/2/3 bands), gains and soft limiting. No made-up waveform on missing data.
     func columnGroups(from t0: Double, to t1: Double) -> [Double] {

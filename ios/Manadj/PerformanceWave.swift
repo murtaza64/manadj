@@ -13,6 +13,10 @@ struct PerformanceWave: UIViewRepresentable {
     func makeUIView(context: Context) -> PerformanceWaveView { PerformanceWaveView() }
     func updateUIView(_ view: PerformanceWaveView, context: Context) {
         let deck = model.decks[index]
+        if view.source != deck.engine.load {
+            view.source = deck.engine.load; view.columns.removeAll()
+            view.fillGain = deck.waveform?.displayFillGain ?? 1
+        }
         view.wave = deck.waveform
         view.duration = deck.duration
         view.vertical = vertical
@@ -24,7 +28,7 @@ struct PerformanceWave: UIViewRepresentable {
         view.state = { [weak model] in model?.audio?.state(index) ?? MDJDeck() }
         view.seek = { [weak model] seconds in model?.set(MDJSeek, index, seconds) }
         view.accessibilityLabel = "\(Ink.deckName(index)) \(overview ? "minimap seek" : "detail wave")"
-        if view.source != deck.engine.load { view.source = deck.engine.load; view.columns.removeAll() }
+
         view.setNeedsDisplay()
     }
 }
@@ -41,6 +45,7 @@ struct PerformanceWave: UIViewRepresentable {
     var zoom: ((Double) -> Void)?
     var playback: ((Bool) -> Void)?
     var columns: [Int: [Double]] = [:]
+    var fillGain = 1.0
     private var cachedStep = 0.0
     private var clock = WaveClock()
     private var link: CADisplayLink?
@@ -148,7 +153,7 @@ struct PerformanceWave: UIViewRepresentable {
                 if t0 + secondsPerColumn < 0 || t0 > duration { continue }
                 let groups: [Double]
                 if let cached = columns[k] { groups = cached }
-                else { groups = wave.columnGroups(from: t0, to: t0 + secondsPerColumn); columns[k] = groups }
+                else { groups = wave.columnGroups(from: t0, to: t0 + secondsPerColumn).map { min(1, $0 * fillGain) }; columns[k] = groups }
                 let p = pixel(t0).rounded(); let half = across / 2
                 let order = (0..<3).sorted { groups[$0] > groups[$1] }
                 for band in order {

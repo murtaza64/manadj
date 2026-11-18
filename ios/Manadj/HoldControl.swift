@@ -16,6 +16,8 @@ struct HoldControl: UIViewRepresentable {
         let button = HoldButton(type: .custom)
         context.coordinator.button = button
         button.titleLabel?.font = UIFont(name: "UbuntuMono-Bold", size: 14) ?? .monospacedSystemFont(ofSize: 14, weight: .bold)
+        button.titleLabel?.numberOfLines = 2
+        button.titleLabel?.textAlignment = .center
         button.layer.borderWidth = 1
         button.addTarget(context.coordinator, action: #selector(Coordinator.press), for: .touchDown)
         button.addTarget(context.coordinator, action: #selector(Coordinator.endHold), for: [.touchUpInside, .touchUpOutside, .touchCancel])

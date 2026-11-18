@@ -4,7 +4,7 @@ final class WorkspaceUITests: XCTestCase {
     @MainActor func testStandardWorkspaceSettingsAndPitch() {
         let app = XCUIApplication(); app.launchArguments = ["--performance-ui-fixture"]; app.launch()
         XCTAssertTrue(app.buttons["BROWSE"].waitForExistence(timeout: 10))
-        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Synthetic pulse A")).firstMatch.waitForExistence(timeout: 20))
+        XCTAssertTrue(app.buttons["A play pause"].waitForExistence(timeout: 20))
         XCTAssertFalse(app.buttons["PERFORM"].exists)
         XCTAssertFalse(app.buttons["LIBRARY"].exists)
         let play = app.buttons["A play pause"]

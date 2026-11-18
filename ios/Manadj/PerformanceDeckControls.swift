@@ -7,26 +7,32 @@ struct PerformanceDeckControls: View {
     @Binding var pitch: Bool
     let compact: Bool
     let onTransport: () -> AnyView
-    @State private var jump = 4.0
+    @State private var jump = 32.0
     @State private var shift = false
     private var state: MDJDeck { model.decks[index].engine }
     private var color: Color { Ink.decks[index] }
     private func cue(_ slot: Int) -> Double { var data = state.hotCues; return withUnsafeBytes(of: &data) { $0.bindMemory(to: Double.self)[slot] } }
+    private var shiftKey: some View {
+        Button("SHIFT") { shift.toggle() }.buttonStyle(PerformanceKeyStyle(color: Ink.warning, active: shift)).frame(width: 46)
+    }
     var body: some View {
         GeometryReader { geometry in
-            let row = min(CGFloat(44), max(28, (geometry.size.height - 120) / 5))
+            let padHeight: CGFloat = compact ? 80 : 104
+            let row = max(CGFloat(22), (geometry.size.height - padHeight - 60) / 5)
             VStack(spacing: 4) {
                 HStack(spacing: 0) {
+                    if index == 0 { shiftKey }
                     ForEach(0..<4) { i in
-                        Text(["VOC", "INST", "BASS", "DRUM"][i]).font(Ink.font(8, bold: true)).foregroundStyle(Ink.muted.opacity(0.4)).frame(maxWidth: .infinity)
+                        Text(["VOC", "DRM", "BAS", "OTH"][i]).font(Ink.font(8, bold: true)).foregroundStyle(Ink.muted.opacity(0.4)).frame(maxWidth: .infinity)
                     }
-                }.frame(height: 24).accessibilityLabel("Stems unavailable on iOS")
+                    if index == 1 { shiftKey }
+                }.frame(height: 24).accessibilityLabel("Stem controls unavailable on iOS")
                 VStack(spacing: 0) {
                     ForEach(0..<2) { r in
                         HStack(spacing: 0) {
                             ForEach(0..<4) { c in
                                 let slot = r * 4 + c
-                                HoldControl(title: "\(slot + 1)", color: Ink.cues[slot], active: state.preview && state.previewSlot == slot, enabled: state.ready, down: {
+                                HoldControl(title: "\(slot + 1)\n\(cue(slot) < 0 ? "SET" : Ink.clock(cue(slot)))", color: Ink.cues[slot], active: state.preview && state.previewSlot == slot, enabled: state.ready, down: {
                                     model.set(shift ? MDJHotCueClear : cue(slot) < 0 ? MDJHotCueSet : MDJHotCueDown, index, 0, slot: slot)
                                 }, up: { model.set(MDJHotCueUp, index, 0, slot: slot) }).padding(3).accessibilityLabel("\(Ink.deckName(index)) hotcue \(slot + 1)")
                             }
@@ -35,18 +41,18 @@ struct PerformanceDeckControls: View {
                 }.frame(height: compact ? 80 : 104)
                 HStack(spacing: 0) {
                     Button("½") { model.set(MDJLoopResize, index, 0, slot: 0) }
-                    Button("⟳ \(Int(state.loopBeats))") { model.set(MDJLoopToggle, index, 0) }
+                    Button("⟳ LOOP \(Int(state.loopBeats))") { model.set(MDJLoopToggle, index, 0) }
                     Button("2×") { model.set(MDJLoopResize, index, 0, slot: 1) }
                 }.buttonStyle(PerformanceKeyStyle(color: color, active: state.loopActive)).frame(height: row).disabled(!state.ready || state.bpm <= 0)
                 HStack(spacing: 0) {
                     Button("◀") { model.set(MDJBeatJump, index, -jump) }
-                    Button("\(Int(jump))") { jump = jump >= 64 ? 1 : jump * 2 }
+                    Button("JUMP \(Int(jump))") { jump = jump >= 64 ? 1 : jump * 2 }
                     Button("▶") { model.set(MDJBeatJump, index, jump) }
                 }.buttonStyle(PerformanceKeyStyle(color: color)).frame(height: row).disabled(!state.ready)
                 onTransport().frame(height: row + 8)
                 HStack(spacing: 0) {
                     HoldControl(title: "−", color: color, enabled: state.ready, down: { model.set(MDJBend, index, -4) }, up: { model.set(MDJBend, index, 0) }).padding(3)
-                    Button("SHIFT") { shift.toggle() }.buttonStyle(PerformanceKeyStyle(color: color, active: shift))
+                    Text("BEND").font(Ink.font(9)).foregroundStyle(color).frame(maxWidth: .infinity)
                     HoldControl(title: "+", color: color, enabled: state.ready, down: { model.set(MDJBend, index, 4) }, up: { model.set(MDJBend, index, 0) }).padding(3)
                 }.frame(height: row)
                 Button(String(format: "PITCH  %+.2f%%", state.pitch)) { withAnimation(.easeOut(duration: 0.24)) { pitch.toggle() } }.buttonStyle(PerformanceKeyStyle(color: color, active: pitch)).frame(height: row)
