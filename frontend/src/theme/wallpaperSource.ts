@@ -49,6 +49,56 @@ async function fetchPalette(): Promise<WallpaperPaletteResponse | null> {
     if (!response.ok) return null; // 404 no palette yet; 422 refused wholesale
     return (await response.json()) as WallpaperPaletteResponse;
   } catch {
+ * Wallpaper-derived theme source (gh#470).
+ *
+ * Fetches the wal-palette/1 palette from the backend (which adapts the
+ * wallpaper tool's real cache file), applies the mapped overrides on top of
+ * the installed base theme, and polls the file mtime so re-running the
+ * wallpaper tool updates manaDJ live. The source only ever consumes the
+ * internal contract; any backend refusal (404/422) keeps the current theme.
+ *
+ * The wallpaper source owns exactly the variables its mapper emits; the base
+ * installTheme keeps ownership of every other variable.
+ *
+ * The palette endpoint is device-local: it reads the wallpaper tool's cache
+ * file on the machine the backend runs on. It is not a library or remote-sync
+ * path; a remote device's backend serves that device's own wallpaper only.
+ * The opt-in is likewise device-local by design: it lives in raw per-origin
+ * localStorage and is deliberately NOT in PERSISTED_SETTING_KEYS, so the
+ * DB-backed settings sync can never carry one machine's wallpaper choice
+ * onto another host.
+ */
+
+import { API_BASE } from '../api/client';
+import { CSS_VARS } from './tokens';
+import { mapWalPalette, validateWalPalette, type CssVarMap } from './walPalette';
+
+const STORAGE_KEY = 'manadj.wallpaperTheme.enabled';
+const POLL_MS = 3000;
+
+interface WallpaperPaletteResponse {
+  palette: unknown;
+  mtime: number;
+}
+
+/** Stable identity of a validated palette's actual colors. Compared instead
+ * of mtime: a re-written file with an equal or older timestamp still applies,
+ * and identical colors never re-apply. */
+function paletteIdentity(palette: WalPalette): string {
+  const c = palette.colors;
+  return [c.background, c.foreground, c.cursor, ...c.ansi].join(',');
+}
+
+export function isWallpaperThemeEnabled(): boolean {
+  return localStorage.getItem(STORAGE_KEY) === '1';
+}
+
+async function fetchPalette(): Promise<WallpaperPaletteResponse | null> {
+  try {
+    const response = await fetch(`${API_BASE}/theme/wallpaper-palette`);
+    if (!response.ok) return null; // 404 no palette yet; 422 refused wholesale
+    return (await response.json()) as WallpaperPaletteResponse;
+  } catch {
     return null; // backend down or unreachable: keep current theme
   }
 }
@@ -119,4 +169,4 @@ export function disableWallpaperTheme(): void {
 /** Called once at boot, after installTheme, when the user has opted in. */
 export function initWallpaperTheme(): void {
   if (isWallpaperThemeEnabled()) enableWallpaperTheme();
-                                        }
+   }
