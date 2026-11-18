@@ -16,7 +16,7 @@ struct HoldControl: UIViewRepresentable {
         button.titleLabel?.font = UIFont(name: "UbuntuMono-Bold", size: 14) ?? .monospacedSystemFont(ofSize: 14, weight: .bold)
         button.layer.borderWidth = 1
         button.addTarget(context.coordinator, action: #selector(Coordinator.press), for: .touchDown)
-        button.addTarget(context.coordinator, action: #selector(Coordinator.release), for: [.touchUpInside, .touchUpOutside, .touchCancel])
+        button.addTarget(context.coordinator, action: #selector(Coordinator.endHold), for: [.touchUpInside, .touchUpOutside, .touchCancel])
         return button
     }
     func updateUIView(_ view: UIButton, context: Context) {
@@ -30,12 +30,12 @@ struct HoldControl: UIViewRepresentable {
         view.accessibilityLabel = title
         view.accessibilityHint = "Touch and hold to preview; release to stop"
     }
-    static func dismantleUIView(_ view: UIButton, coordinator: Coordinator) { coordinator.release() }
+    static func dismantleUIView(_ view: UIButton, coordinator: Coordinator) { coordinator.endHold() }
     final class Coordinator: NSObject {
         var parent: HoldControl
         private var held = false
         init(_ parent: HoldControl) { self.parent = parent }
         @objc func press() { guard !held else { return }; held = true; parent.down() }
-        @objc func release() { guard held else { return }; held = false; parent.up() }
+        @objc func endHold() { guard held else { return }; held = false; parent.up() }
     }
 }

@@ -56,3 +56,9 @@ Those Apple tests are prepared work, not evidence that they pass. Fix any compil
 - `instinct/ios-app` contains 47 intended text files, verified byte-for-byte. Publication is incomplete: the icon, two fonts, golden snapshot and workflow are not yet remote. A duplicate-path `.gitignore` from the initial editor attempt is queued for removal.
 - The complete corrective source is prepared locally. GitHub binary-upload commit attempts returned HTTP 400 without landing. Permission for a temporary write key restricted to the personal repository is pending. No key has been generated or added.
 - The unsigned simulator workflow targets standard `macos-15`, with pinned actions, read-only contents permission, a 25-minute timeout and three-day evidence retention. It has not run. No Apple SDK or simulator success is claimed.
+
+## First Apple CI, November 18, 2026
+
+Complete publication was verified at `fca40101`: 52 intended files match the prepared tree byte-for-byte and the duplicate path is absent. The repo-only temporary key was authorized through November 25, 11:51 PST; no company access or Apple enrollment was used.
+
+Run 44384968318 used Xcode 16.4 / iOS Simulator SDK 18.5 and reached app compilation after the host package tests. It failed because `HoldControl.Coordinator.release()` collided with the inherited Objective-C `release` selector. The callback is renamed `endHold`, retaining touch-up, touch-cancel and dismantle handling. A rerun is required; no app build/runtime pass is claimed.
