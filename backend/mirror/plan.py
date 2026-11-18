@@ -94,7 +94,7 @@ def build_plan(snapshot: dict, roots: list[str], remote_index: dict[str, str] | 
     out = dict(snapshot)
     tracks = []
     plan = Plan(snapshot=out)
-    seen: dict[str, tuple[str, int]] = {}  # lowercased key -> (sha, track id)
+    seen: dict[str, tuple[str, str]] = {}  # casefolded key -> (exact key, sha)
     by_key: dict[str, dict] = {}
     for t in snapshot.get("tracks", []):
         t = dict(t)
@@ -113,14 +113,19 @@ def build_plan(snapshot: dict, roots: list[str], remote_index: dict[str, str] | 
             tracks.append(t)
             continue
         digest = sha256_file(local)
-        lk = key.lower()
-        if lk in seen and seen[lk][0] != digest:
+        # Remote storage may be case-insensitive (Windows/macOS hosts, some
+        # object-store gateways), so keys are compared casefolded. Fail closed:
+        # two DIFFERENT spellings of a key collide whether or not the bytes are
+        # identical; the first track keeps its key, later ones are reported.
+        # The same exact key (several tracks, one file) is still uploaded once.
+        lk = key.casefold()
+        if lk in seen and (seen[lk][0] != key or seen[lk][1] != digest):
             plan.collisions.append(key)
-            plan.missing.append({"track_id": t["id"], "reason": "key collision with different content"})
+            plan.missing.append({"track_id": t["id"], "reason": "case-insensitive key collision with " + repr(seen[lk][0])})
             t["remote_key"] = None
             tracks.append(t)
             continue
-        seen[lk] = (digest, t["id"])
+        seen[lk] = (key, digest)
         t["remote_key"] = key
         t["audio_sha256"] = digest
         t["audio_size"] = local.stat().st_size
