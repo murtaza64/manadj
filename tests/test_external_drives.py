@@ -1600,3 +1600,28 @@ def test_post_import_queue_failure_keeps_committed_tracks_and_files(
     for name in ("track1", "track2", "twin"):
         assert (dest / "Contents" / f"{name}.mp3").exists()
     assert any("waveforms" in e for e in result.errors)
+
+
+def test_source_plan_token_ignores_destination_but_binds_source_and_match(tmp_path: Path):
+    from dataclasses import replace
+
+    root = tmp_path / "USB"
+    root.mkdir()
+    source = root / "track.mp3"
+    source.write_bytes(b"original")
+    entry = external_drives.PullEntry(
+        ordinal=0, title="Test", artist="Test", bpm=None, key=None,
+        duration_secs=None, device_path="track.mp3", status="present",
+        matched_path="/library/one.mp3",
+    )
+    first = external_drives._preview(root, "rekordbox", 1, [entry], tmp_path / "one")
+    second = external_drives._preview(root, "rekordbox", 1, [entry], tmp_path / "two")
+    assert first.fingerprint != second.fingerprint
+    assert first.source_fingerprint == second.source_fingerprint
+    changed_match = external_drives._preview(
+        root, "rekordbox", 1, [replace(entry, matched_path="/library/two.mp3")]
+    )
+    assert first.source_fingerprint != changed_match.source_fingerprint
+    source.write_bytes(b"replacement of different length")
+    changed_source = external_drives._preview(root, "rekordbox", 1, [entry])
+    assert first.source_fingerprint != changed_source.source_fingerprint

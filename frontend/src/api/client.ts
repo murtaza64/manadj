@@ -115,6 +115,7 @@ export interface ExternalDrivePreview {
   missing_file_count: number;
   default_destination: string | null;
   fingerprint: string;
+  source_fingerprint: string;
   entries: ExternalDrivePullEntry[];
   playlists: ExternalDrivePreviewPlaylist[];
 }

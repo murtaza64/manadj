@@ -30,6 +30,7 @@ const PREVIEW = {
   missing_file_count: 1,
   default_destination: '/library',
   fingerprint: 'fp-test',
+  source_fingerprint: 'source-test',
   playlists: [],
   entries: [
     {
@@ -607,3 +608,26 @@ it('refuses a playlist import when membership reordered after review, same count
     act(() => root.unmount());
   }
 });
+
+for (const playlist of [false, true]) {
+  it(`refuses changed same-path source evidence for ${playlist ? 'playlist' : 'track'} import`, async () => {
+    const reviewed = playlist ? PLAYLIST_PREVIEW : PREVIEW;
+    vi.spyOn(api.externalDrives, 'list').mockResolvedValue([DRIVE]);
+    vi.spyOn(api.externalDrives, 'preview')
+      .mockResolvedValueOnce(reviewed)
+      .mockResolvedValueOnce(reviewed)
+      .mockResolvedValueOnce({ ...reviewed, source_fingerprint: 'changed-source' });
+    const imp = vi.spyOn(api.externalDrives, 'import').mockResolvedValue(PLAYLIST_RESULT);
+    const { host, root, button } = render();
+    try {
+      await act(async () => { root.render(<ExternalDrivesSync />); await tick(); });
+      await act(async () => { button('Pull…')!.click(); await tick(); });
+      await act(async () => {
+        button(playlist ? 'Import playlist' : 'Import 1 selected')!.click();
+        await tick();
+      });
+      expect(imp).not.toHaveBeenCalled();
+      expect(host.textContent).toContain('changed since this preview');
+    } finally { act(() => root.unmount()); }
+  });
+}

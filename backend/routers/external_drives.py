@@ -104,6 +104,7 @@ class PreviewResponse(BaseModel):
     missing_file_count: int
     default_destination: str | None
     fingerprint: str
+    source_fingerprint: str
     entries: list[PullEntryOut]
     playlists: list[PlaylistOut] = []
 
@@ -120,6 +121,7 @@ def _preview_out(preview: external_drives.PullPreview) -> PreviewResponse:
         missing_file_count=preview.missing_file_count,
         default_destination=preview.default_destination,
         fingerprint=preview.fingerprint,
+        source_fingerprint=preview.source_fingerprint,
         entries=[PullEntryOut(**vars(e)) for e in preview.entries],
         playlists=[
             PlaylistOut(

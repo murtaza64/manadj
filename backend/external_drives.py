@@ -334,6 +334,7 @@ class PullPreview:
     missing_file_count: int
     default_destination: str | None
     fingerprint: str = ""
+    source_fingerprint: str = ""
     entries: list[PullEntry] = field(default_factory=list)
     playlists: list[PlaylistPreview] = field(default_factory=list)
 
@@ -501,7 +502,7 @@ def _plan_fingerprint(
                 sig = [stat.st_size, stat.st_mtime_ns]
             except OSError:
                 sig = None
-        items.append([entry.device_path, entry.status, sig])
+        items.append([entry.device_path, entry.status, entry.matched_path, sig])
     blob = json.dumps(
         {
             "root": str(root),
@@ -929,6 +930,9 @@ def _preview(
         default_destination=default_destination(),
         fingerprint=_plan_fingerprint(
             root, kind, entries, destination, playlists=device_playlists
+        ),
+        source_fingerprint=_plan_fingerprint(
+            root, kind, entries, None, playlists=device_playlists
         ),
         entries=entries,
     )
