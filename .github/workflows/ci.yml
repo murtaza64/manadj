@@ -48,6 +48,10 @@ jobs:
       - name: uv sync
         run: uv sync --frozen
 
+      - name: Synthetic Windows identity diagnostic
+        if: runner.os == 'Windows'
+        run: uv run --no-sync pytest -q -s tests/test_windows_stat_probe.py
+
       - name: pytest
         run: |
           deselect=()
