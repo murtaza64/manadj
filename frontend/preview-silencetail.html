@@ -9,9 +9,9 @@
     </style>
   </head>
   <body>
-    <div class="label">MAIN waveform — silence loop engaged, playhead folded mid-loop past EOF</div>
+    <div class="label" id="main-label"></div>
     <canvas id="main" width="1000" height="180"></canvas>
-    <div class="label">MINIMAP — domain extends to cover the loop past EOF</div>
+    <div class="label" id="mini-label"></div>
     <canvas id="mini" width="1000" height="90"></canvas>
     <script type="module" src="/src/preview/silenceTailPreview.tsx"></script>
   </body>
