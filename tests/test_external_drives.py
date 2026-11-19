@@ -1971,3 +1971,56 @@ def test_playlist_update_target_changed_during_copy_is_preserved(
     rows = db.query(PlaylistTrack).filter(PlaylistTrack.playlist_id == local_id).order_by(PlaylistTrack.position).all()
     assert [row.track_id for row in rows] == ([held.id, two.id] if change == "order" else [two.id, held.id])
     assert db.get(Playlist, local_id).name == ("Edited concurrently" if change == "rename" else "RIG Mix")
+
+def test_playlist_pull_repeated_device_track_refuses_before_any_copy(
+    db: Session, tmp_path: Path
+):
+    # "RIG New" lists track 3 twice: local playlists cannot represent a
+    # repeated track (migration 0011), so the pull must refuse before
+    # copying anything, not fail the commit after the files are copied.
+    usb = make_rekordbox_usb_with_playlists(tmp_path / "RB", entry_order_b=(3, 3))
+    dest = tmp_path / "lib"
+    preview = external_drives.build_pull_preview(db, usb, dest)
+
+    with pytest.raises(external_drives.ExternalDriveError, match="repeats tracks"):
+        external_drives.execute_playlist_pull(
+            db, usb, dest,
+            device_playlist_id=PAGE_LIST_B,
+            expected_fingerprint=preview.fingerprint,
+        )
+    assert db.query(Track).count() == 0
+    assert db.query(Playlist).count() == 0
+    assert not dest.exists()
+
+
+def test_playlist_pull_resolved_duplicate_refuses_before_copy(db, tmp_path, monkeypatch):
+    usb = make_rekordbox_usb_with_playlists(tmp_path / 'RB')
+    dest = tmp_path / 'lib'
+    preview = external_drives.build_pull_preview(db, usb, dest)
+    monkeypatch.setattr(external_drives, '_library_track_id', lambda index, entry: 42)
+    with pytest.raises(external_drives.ExternalDriveError, match='same library track'):
+        external_drives.execute_playlist_pull(db, usb, dest, device_playlist_id=PAGE_LIST_A,
+            expected_fingerprint=preview.fingerprint)
+    assert db.query(Track).count() == 0
+    assert db.query(Playlist).count() == 0
+    assert not dest.exists()
+
+
+def test_playlist_pull_postcopy_duplicate_reports_retained_tracks(db, tmp_path, monkeypatch):
+    usb = make_rekordbox_usb_with_playlists(tmp_path / 'RB', entry_order_b=(3, 2))
+    dest = tmp_path / 'lib'
+    preview = external_drives.build_pull_preview(db, usb, dest)
+    original = external_drives.execute_pull
+    def coalesced(*args, **kwargs):
+        result = original(*args, **kwargs)
+        ids = list(result.imported_by_ordinal)
+        if len(ids) >= 2:
+            result.imported_by_ordinal[ids[1]] = result.imported_by_ordinal[ids[0]]
+        return result
+    monkeypatch.setattr(external_drives, 'execute_pull', coalesced)
+    with pytest.raises(external_drives.ExternalDriveError, match='imported tracks stay in the library'):
+        external_drives.execute_playlist_pull(db, usb, dest, device_playlist_id=PAGE_LIST_B,
+            expected_fingerprint=preview.fingerprint)
+    assert db.query(Track).count() == 2
+    assert db.query(Playlist).count() == 0
+    assert dest.exists()

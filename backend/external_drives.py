@@ -1145,11 +1145,33 @@ def execute_playlist_pull(
             "importing over it is not automatic - pass a different playlist_name"
         )
 
+    # Refuse repeats before any file is copied, the same guards the
+    # update path applies: local playlists cannot represent repeated
+    # tracks (migration 0011), so importing one would copy files and then
+    # fail the playlist creation. Accurate refusal, never silent dedupe.
+    if len(node.track_ids) != len(set(node.track_ids)):
+        raise ExternalDriveError(
+            "this USB playlist repeats tracks; local playlists cannot represent repeated "
+            "tracks yet, so no import was made"
+        )
+
     entry_by_track_id = {
         device.tracks[e.ordinal].id: e
         for e in preview.entries
         if 0 <= e.ordinal < len(device.tracks)
     }
+    existing_index, _, _ = _manadj_matchers(manadj_session)
+    resolved_ids = [
+        _library_track_id(existing_index, entry_by_track_id[tid])
+        for tid in node.track_ids
+        if tid in entry_by_track_id
+    ]
+    resolved_ids = [tid for tid in resolved_ids if tid is not None]
+    if len(resolved_ids) != len(set(resolved_ids)):
+        raise ExternalDriveError(
+            "multiple USB entries resolve to the same library track; repeated tracks "
+            "are not supported locally yet, so no import was made"
+        )
     new_ordinals = {
         entry_by_track_id[tid].ordinal
         for tid in node.track_ids
@@ -1185,6 +1207,12 @@ def execute_playlist_pull(
         else:
             skipped_other += 1
 
+    if len(member_ids) != len(set(member_ids)):
+        raise ExternalDriveError(
+            "multiple USB entries resolve to the same library track; repeated tracks "
+            "are not supported locally yet; the imported tracks stay in the library, "
+            "but no playlist was created"
+        )
     if not member_ids:
         raise ExternalDriveError(
             f"no member of {final_name!r} could be imported or matched "
