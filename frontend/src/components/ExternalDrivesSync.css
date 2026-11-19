@@ -112,12 +112,38 @@
 /* Preview track list: every device entry rendered like a library track
    row, with the verification state visible instead of a flat "new" table. */
 .external-drive-tracklist {
+  border-top: 1px solid var(--surface0, #2a2e38);
+}
+
+.external-drive-tracklist-body {
   list-style: none;
   margin: 0;
   padding: 0;
-  border-top: 1px solid var(--surface0, #2a2e38);
   max-height: 480px;
   overflow-y: auto;
+}
+
+.external-drive-track-head {
+  color: var(--subtext1, #8b93a3);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.external-drive-filter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+}
+
+.external-drive-filter input {
+  flex: 1;
+  padding: 6px 8px;
+  background: var(--input-bg, #1a1d24);
+  border: 1px solid var(--border-color, #334);
+  border-radius: 4px;
+  color: inherit;
 }
 
 .external-drive-track {
@@ -159,9 +185,11 @@
   border-color: #f59e0b;
 }
 
+/* No-match rows are neutral pending review, not green: "no match found"
+   is not proof the track is new or safe to import. */
 .external-drive-status.status-new {
-  color: #34d399;
-  border-color: #34d399;
+  color: var(--subtext1, #8b93a3);
+  border-color: var(--subtext1, #8b93a3);
 }
 
 .external-drive-status.status-duplicate,

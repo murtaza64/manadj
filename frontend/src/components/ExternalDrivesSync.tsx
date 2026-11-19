@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api/client';
 import type {
   ExternalDrive,
@@ -13,7 +13,7 @@ import './ExternalDrivesSync.css';
 type Phase =
   | { step: 'idle' }
   | { step: 'previewing'; drive: ExternalDrive }
-  | { step: 'preview'; drive: ExternalDrive; preview: ExternalDrivePreview }
+  | { step: 'preview'; drive: ExternalDrive; preview: ExternalDrivePreview; verifying: boolean }
   | { step: 'importing'; drive: ExternalDrive; preview: ExternalDrivePreview }
   | { step: 'done'; drive: ExternalDrive; result: ExternalDriveImportResult };
 
@@ -37,20 +37,55 @@ function rowKind(e: ExternalDrivePullEntry): RowKind {
   return e.status;
 }
 
-const STATUS_LABEL: Record<RowKind, string> = {
-  present: 'in library',
-  renamed: 'renamed, verified',
-  uncertain: 'unverified match',
-  new: 'no match found',
-  duplicate: 'duplicate on drive',
-  'missing-file': 'missing audio',
-};
+function statusLabel(kind: RowKind, verifying: boolean): string {
+  if (verifying && kind === 'uncertain') return 'checking…';
+  switch (kind) {
+    case 'present':
+      return 'in library';
+    case 'renamed':
+      return 'renamed, verified';
+    case 'uncertain':
+      return 'unverified match';
+    case 'new':
+      return 'no match found';
+    case 'duplicate':
+      return 'duplicate on drive';
+    case 'missing-file':
+      return 'missing audio';
+  }
+}
 
 function formatDuration(secs: number | null): string {
   if (secs == null) return '';
   const m = Math.floor(secs / 60);
   const s = Math.round(secs % 60);
   return `${m}:${String(s).padStart(2, '0')}`;
+}
+
+function summaryOf(preview: ExternalDrivePreview, verifying: boolean): string {
+  if (verifying) {
+    const pending = preview.uncertain_count;
+    return pending > 0
+      ? `${preview.entries.length} tracks on the drive · checking ${pending} possible match${pending === 1 ? '' : 'es'}…`
+      : `${preview.entries.length} tracks on the drive · finishing verification…`;
+  }
+  const renamed = preview.entries.filter((e) => rowKind(e) === 'renamed').length;
+  const parts = [
+    `${preview.new_count} no match found`,
+    `${preview.present_count} already in library${renamed > 0 ? ` (${renamed} renamed, verified)` : ''}`,
+  ];
+  if (preview.uncertain_count > 0) {
+    parts.push(
+      `${preview.uncertain_count} unverified match${preview.uncertain_count === 1 ? '' : 'es'} (not imported)`
+    );
+  }
+  if (preview.duplicate_count > 0) {
+    parts.push(`${preview.duplicate_count} duplicate${preview.duplicate_count === 1 ? '' : 's'} on drive`);
+  }
+  if (preview.missing_file_count > 0) {
+    parts.push(`${preview.missing_file_count} missing audio`);
+  }
+  return parts.join(' · ');
 }
 
 /** External drives: detect a Rekordbox or Engine USB library, preview what a
@@ -60,7 +95,12 @@ export function ExternalDrivesSync() {
   const [drives, setDrives] = useState<ExternalDrive[] | null>(null);
   const [phase, setPhase] = useState<Phase>({ step: 'idle' });
   const [destination, setDestination] = useState('');
+  const [filter, setFilter] = useState('');
   const [error, setError] = useState<string | null>(null);
+  // Monotonic token: every async preview checks it before applying, so a
+  // response racing a cancel, a failure, or a newer preview is dropped
+  // instead of resurrecting a stale plan.
+  const previewGen = useRef(0);
 
   const refresh = useCallback(async () => {
     setError(null);
@@ -84,27 +124,42 @@ export function ExternalDrivesSync() {
   }, []);
 
   const openPreview = useCallback(async (drive: ExternalDrive) => {
+    const gen = ++previewGen.current;
     setError(null);
+    setFilter('');
     setPhase({ step: 'previewing', drive });
     try {
-      const preview = await api.externalDrives.preview(drive.root);
-      setDestination(preview.default_destination ?? '');
-      setPhase({ step: 'preview', drive, preview });
+      // Metadata first: every row listed immediately, matches unverified.
+      const fast = await api.externalDrives.preview(drive.root, undefined, false);
+      if (gen !== previewGen.current) return;
+      setDestination(fast.default_destination ?? '');
+      setPhase({ step: 'preview', drive, preview: fast, verifying: true });
+      // Then content verification; rows refine in place when it lands.
+      const full = await api.externalDrives.preview(drive.root, undefined, true);
+      if (gen !== previewGen.current) return;
+      setDestination(full.default_destination ?? '');
+      setPhase({ step: 'preview', drive, preview: full, verifying: false });
     } catch (e) {
+      if (gen !== previewGen.current) return;
       setError(e instanceof Error ? e.message : 'Preview failed');
       setPhase({ step: 'idle' });
     }
   }, []);
 
+  const cancelPreview = useCallback(() => {
+    previewGen.current += 1; // in-flight verification resolves into the void
+    setPhase({ step: 'idle' });
+  }, []);
+
   const runImport = useCallback(async () => {
-    if (phase.step !== 'preview') return;
+    if (phase.step !== 'preview' || phase.verifying) return;
     const { drive, preview } = phase;
     setError(null);
     setPhase({ step: 'importing', drive, preview });
     try {
-      // Re-preview (read-only) with the destination so the fingerprint the
-      // confirm carries binds the reviewed set AND where it lands, both as
-      // they are right now.
+      // Re-preview (read-only, verified) with the destination so the
+      // fingerprint the confirm carries binds the reviewed set AND where
+      // it lands, both as they are right now.
       const bound = await api.externalDrives.preview(drive.root, destination || undefined);
       // The re-preview must not mint a fingerprint for a plan the user
       // never saw: if the freshly read plan differs from the reviewed one
@@ -116,7 +171,7 @@ export function ExternalDrivesSync() {
         setError(
           'The drive or library changed since this preview; review the refreshed plan before importing.'
         );
-        setPhase({ step: 'preview', drive, preview: bound });
+        setPhase({ step: 'preview', drive, preview: bound, verifying: false });
         return;
       }
       const result = await api.externalDrives.import({
@@ -136,12 +191,24 @@ export function ExternalDrivesSync() {
       if (message.includes('changed since the preview')) {
         setPhase({ step: 'idle' });
       } else {
-        setPhase({ step: 'preview', drive, preview });
+        setPhase({ step: 'preview', drive, preview, verifying: false });
       }
     }
   }, [phase, destination, refresh]);
 
   const busy = phase.step === 'previewing' || phase.step === 'importing';
+  const verifying = phase.step === 'preview' && phase.verifying;
+  const filterNorm = filter.trim().toLowerCase();
+  const visibleEntries =
+    phase.step === 'preview' || phase.step === 'importing'
+      ? phase.preview.entries.filter((e) => {
+          if (!filterNorm) return true;
+          return [e.artist ?? '', e.title ?? '', e.device_path]
+            .join(' ')
+            .toLowerCase()
+            .includes(filterNorm);
+        })
+      : [];
 
   return (
     <div className="external-drives">
@@ -193,11 +260,7 @@ export function ExternalDrivesSync() {
             Pull from {phase.drive.name} ({phase.preview.kind})
           </h3>
           <p className="external-drive-summary">
-            {phase.preview.new_count} new · {phase.preview.present_count} already in library
-            {phase.preview.uncertain_count > 0 &&
-              ` · ${phase.preview.uncertain_count} name-only match${phase.preview.uncertain_count === 1 ? '' : 'es'} (not imported)`}
-            {phase.preview.duplicate_count > 0 && ` · ${phase.preview.duplicate_count} duplicates on drive`}
-            {phase.preview.missing_file_count > 0 && ` · ${phase.preview.missing_file_count} missing audio`}
+            {summaryOf(phase.preview, verifying)}
           </p>
 
           <label className="external-drive-dest">
@@ -211,60 +274,97 @@ export function ExternalDrivesSync() {
             />
           </label>
 
+          <label className="external-drive-filter">
+            Filter
+            <input
+              type="text"
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+              placeholder="Artist, title or file name"
+              disabled={phase.step === 'importing'}
+            />
+          </label>
+
           <p className="external-drive-hint">
             Every track on the drive, in drive order. Unverified matches are never
             imported; tracks with no library match are not proven new, just unmatched.
+            {verifying && ' Match verification is still running; import unlocks when it finishes.'}
           </p>
-          <ul className="external-drive-tracklist">
-            {phase.preview.entries.map((e) => {
-              const kind = rowKind(e);
-              return (
-                <li key={e.ordinal} className={`external-drive-track status-${kind}`}>
-                  <span className={`external-drive-status status-${kind}`}>
-                    {STATUS_LABEL[kind]}
-                  </span>
-                  <span className="external-drive-artist">{e.artist ?? ''}</span>
-                  <span className="external-drive-title">
-                    {e.title ?? fileName(e.device_path)}
-                    {kind === 'renamed' && e.matched_path ? (
-                      <span className="external-drive-detail">
-                        USB {fileName(e.device_path)} = library{' '}
-                        {fileName(e.matched_path)} (same audio, verified)
-                      </span>
-                    ) : (
-                      e.detail && <span className="external-drive-detail">{e.detail}</span>
-                    )}
-                  </span>
-                  <span className="external-drive-key">
-                    <KeyDisplay keyValue={e.key} />
-                  </span>
-                  <span className="external-drive-bpm">
-                    <BPMDisplay bpm={e.bpm} round />
-                  </span>
-                  <span className="external-drive-time">{formatDuration(e.duration_secs)}</span>
-                </li>
-              );
-            })}
-          </ul>
+          <div className="external-drive-tracklist">
+            <div className="external-drive-track external-drive-track-head">
+              <span>Match</span>
+              <span>Artist</span>
+              <span>Title</span>
+              <span className="external-drive-key">Key</span>
+              <span className="external-drive-bpm">BPM</span>
+              <span className="external-drive-time">Time</span>
+            </div>
+            <ul className="external-drive-tracklist-body">
+              {visibleEntries.map((e) => {
+                const kind = rowKind(e);
+                return (
+                  <li key={e.ordinal} className={`external-drive-track status-${kind}`}>
+                    <span className={`external-drive-status status-${kind}`}>
+                      {statusLabel(kind, verifying)}
+                    </span>
+                    <span className="external-drive-artist" title={e.artist ?? ''}>
+                      {e.artist ?? ''}
+                    </span>
+                    <span
+                      className="external-drive-title"
+                      title={`${e.title ?? ''} · USB: ${e.device_path}${
+                        e.matched_path ? ` · library: ${e.matched_path}` : ''
+                      }`}
+                    >
+                      {e.title ?? fileName(e.device_path)}
+                      {kind === 'renamed' && e.matched_path ? (
+                        <span className="external-drive-detail">
+                          USB {fileName(e.device_path)} = library{' '}
+                          {fileName(e.matched_path)} (same audio, verified)
+                        </span>
+                      ) : (
+                        e.detail && <span className="external-drive-detail">{e.detail}</span>
+                      )}
+                    </span>
+                    <span className="external-drive-key">
+                      <KeyDisplay keyValue={e.key} />
+                    </span>
+                    <span className="external-drive-bpm">
+                      <BPMDisplay bpm={e.bpm} round />
+                    </span>
+                    <span className="external-drive-time">{formatDuration(e.duration_secs)}</span>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
 
           <div className="external-drive-actions">
             <button
               className="btn btn-primary external-drive-confirm"
               disabled={
                 phase.step === 'importing' ||
+                verifying ||
                 phase.preview.new_count === 0 ||
                 !destination.trim()
+              }
+              title={
+                verifying
+                  ? 'Match verification is still running'
+                  : undefined
               }
               onClick={runImport}
             >
               {phase.step === 'importing'
                 ? 'Importing…'
-                : `Import ${phase.preview.new_count} track${phase.preview.new_count === 1 ? '' : 's'}`}
+                : verifying
+                  ? 'Checking matches…'
+                  : `Import ${phase.preview.new_count} track${phase.preview.new_count === 1 ? '' : 's'}`}
             </button>
             <button
               className="btn"
               disabled={phase.step === 'importing'}
-              onClick={() => setPhase({ step: 'idle' })}
+              onClick={cancelPreview}
             >
               Cancel
             </button>
@@ -278,7 +378,7 @@ export function ExternalDrivesSync() {
           <p>
             {phase.result.imported} added · {phase.result.skipped_present} already in library
             {phase.result.skipped_uncertain > 0 &&
-              ` · ${phase.result.skipped_uncertain} name-only match${phase.result.skipped_uncertain === 1 ? '' : 'es'} skipped`}
+              ` · ${phase.result.skipped_uncertain} unverified match${phase.result.skipped_uncertain === 1 ? '' : 'es'} skipped`}
             {phase.result.skipped_missing_file > 0 &&
               ` · ${phase.result.skipped_missing_file} missing audio`}
             . Copied into {phase.result.destination}. Waveform and analysis jobs are queued.
@@ -295,4 +395,4 @@ export function ExternalDrivesSync() {
       )}
     </div>
   );
-                    }
+}

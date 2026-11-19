@@ -23,6 +23,11 @@ class PreviewRequest(BaseModel):
     # re-previews with the destination right before confirming, so the
     # fingerprint it confirms covers the reviewed set AND where it lands.
     destination: str | None = None
+    # False skips content verification (no hashing): the response lists
+    # every track with its metadata immediately, with matches that still
+    # need verification left "uncertain". Imports must bind a verified
+    # preview's fingerprint, never a fast one.
+    verify: bool = True
 
 
 class ImportRequest(BaseModel):
@@ -96,6 +101,7 @@ def preview_pull(request: PreviewRequest, db: Session = Depends(get_db)):
             db,
             Path(request.root),
             Path(request.destination) if request.destination else None,
+            verify=request.verify,
         )
     except external_drives.ExternalDriveError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

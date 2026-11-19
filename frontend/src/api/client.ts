@@ -1092,11 +1092,19 @@ export const api = {
     /** Read-only diff: what a pull from this drive would add or skip.
      * Pass destination to bind the returned fingerprint to it (the
      * confirm flow does this right before importing). */
-    preview: async (root: string, destination?: string): Promise<ExternalDrivePreview> => {
+    preview: async (
+      root: string,
+      destination?: string,
+      verify?: boolean,
+    ): Promise<ExternalDrivePreview> => {
       const res = await fetch(`${API_BASE}/external-drives/preview`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(destination ? { root, destination } : { root }),
+        body: JSON.stringify({
+          root,
+          ...(destination ? { destination } : {}),
+          ...(verify !== undefined ? { verify } : {}),
+        }),
       });
       if (!res.ok) {
         const detail = (await res.json().catch(() => null))?.detail;

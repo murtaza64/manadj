@@ -99,9 +99,9 @@ it('lists detected drives and pulls only after the confirmed preview', async () 
       button('Pull…')!.click();
       await tick();
     });
-    expect(preview).toHaveBeenCalledWith(DRIVE.root);
-    expect(host.textContent).toContain('1 new · 1 already in library');
-    expect(host.textContent).toContain('1 name-only match (not imported)');
+    expect(preview).toHaveBeenCalledWith(DRIVE.root, undefined, false);
+    expect(host.textContent).toContain('1 no match found · 1 already in library');
+    expect(host.textContent).toContain('1 unverified match (not imported)');
     expect(host.textContent).toContain('Bright Lights');
     expect(host.textContent).toContain('Name Twin');
 
@@ -152,8 +152,9 @@ it('never imports a plan the user did not review, even if the re-preview could b
     ],
   };
   vi.spyOn(api.externalDrives, 'preview')
-    .mockResolvedValueOnce(PREVIEW)
-    .mockResolvedValueOnce(changed);
+    .mockResolvedValueOnce(PREVIEW) // fast metadata pass
+    .mockResolvedValueOnce(PREVIEW) // verified pass
+    .mockResolvedValueOnce(changed); // destination-binding re-preview
   const imp = vi.spyOn(api.externalDrives, 'import').mockResolvedValue({
     root: DRIVE.root,
     kind: 'rekordbox',
@@ -282,6 +283,91 @@ it('labels unmatched tracks as no match found, not proven new', async () => {
     });
     expect(host.textContent).toContain('no match found');
     expect(host.textContent).toContain('unverified match');
+  } finally {
+    act(() => root.unmount());
+  }
+});
+
+it('lists tracks metadata-first and unlocks import only after verification', async () => {
+  // Fast pass: the same-name match is not yet content-verified, so the row
+  // reads as checking and Import stays locked. When the verified pass
+  // lands, the row refines and Import unlocks.
+  const fast = {
+    ...PREVIEW,
+    new_count: 1,
+    present_count: 0,
+    uncertain_count: 2,
+    entries: PREVIEW.entries.map((e) =>
+      e.title === 'Bright Lights' ? e : { ...e, status: 'uncertain' as const }
+    ),
+  };
+  let resolveFull: (p: typeof PREVIEW) => void = () => {};
+  const fullCalled = new Promise<typeof PREVIEW>((res) => {
+    resolveFull = res;
+  });
+  const preview = vi
+    .spyOn(api.externalDrives, 'preview')
+    .mockResolvedValueOnce(fast)
+    .mockImplementationOnce(() => fullCalled);
+  vi.spyOn(api.externalDrives, 'list').mockResolvedValue([DRIVE]);
+  const { host, root, button } = render();
+  try {
+    await act(async () => {
+      root.render(<ExternalDrivesSync />);
+      await tick();
+    });
+    await act(async () => {
+      button('Pull…')!.click();
+      await tick();
+    });
+    // metadata visible before verification finished
+    expect(host.textContent).toContain('Bright Lights');
+    expect(host.textContent).toContain('checking 2 possible matches');
+    expect(host.textContent).toContain('checking…');
+    expect(button('Checking matches…')!.disabled).toBe(true);
+    expect(preview).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      resolveFull(PREVIEW);
+      await tick();
+    });
+    expect(host.textContent).toContain('1 already in library');
+    expect(button('Import 1 track')!.disabled).toBe(false);
+  } finally {
+    act(() => root.unmount());
+  }
+});
+
+it('discards a verification result that lands after cancel', async () => {
+  let resolveFull: (p: typeof PREVIEW) => void = () => {};
+  const fullCalled = new Promise<typeof PREVIEW>((res) => {
+    resolveFull = res;
+  });
+  vi.spyOn(api.externalDrives, 'preview')
+    .mockResolvedValueOnce(PREVIEW)
+    .mockImplementationOnce(() => fullCalled);
+  vi.spyOn(api.externalDrives, 'list').mockResolvedValue([DRIVE]);
+  const { host, root, button } = render();
+  try {
+    await act(async () => {
+      root.render(<ExternalDrivesSync />);
+      await tick();
+    });
+    await act(async () => {
+      button('Pull…')!.click();
+      await tick();
+    });
+    await act(async () => {
+      button('Cancel')!.click();
+      await tick();
+    });
+    await act(async () => {
+      resolveFull(PREVIEW);
+      await tick();
+    });
+    // the late verified preview must not resurrect the cancelled plan
+    expect(host.textContent).not.toContain('Import 1 track');
+    expect(button('Pull…')).toBeTruthy();
   } finally {
     act(() => root.unmount());
   }

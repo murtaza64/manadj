@@ -39,6 +39,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import shutil
 import sqlite3
 import string
@@ -292,8 +293,7 @@ def _manadj_matchers(
     for track in rows:
         if track.filename:
             by_basename.setdefault(_basename_key(track.filename), []).append(track)
-        tag_key = _tag_key(track.title, track.artist)
-        if tag_key is not None:
+        for tag_key in _tag_keys(track.title, track.artist):
             by_tags.setdefault(tag_key, []).append(track)
     return index, by_basename, by_tags
 
@@ -302,18 +302,39 @@ def _basename_key(path: str) -> str:
     return path_key(path).rsplit("/", 1)[-1]
 
 
-def _tag_key(title: str | None, artist: str | None) -> tuple[str, str] | None:
-    """Normalized (title, artist) pair for rename detection.
+_TRACKNUM_PREFIX = re.compile(r"^\d{1,3}[\s._\-]+")
 
-    Whitespace-trimmed and case-folded, the same normalization the field
-    diagnostic used on the real library. Tags only GENERATE candidates;
-    identity is always decided by file content, never by tag equality.
+
+def _clean_title(title: str) -> str:
+    """Looser title form for candidate GENERATION only.
+
+    Strips a leading playlist-position prefix ("005 Let Me Down" -> "let
+    me down", the pattern a friend's playlist export leaves on copied
+    files). Version and remix parentheses are kept: "(Aries Remix)" and
+    "(Original Mix)" are different audio and must never collapse into
+    one candidate. Content verification decides identity either way.
     """
-    norm_title = (title or "").strip().casefold()
+    return _TRACKNUM_PREFIX.sub("", title).strip()
+
+
+def _tag_keys(title: str | None, artist: str | None) -> list[tuple[str, str]]:
+    """Normalized (title, artist) candidate keys, exact and cleaned.
+
+    Whitespace-trimmed and case-folded, the same base normalization the
+    field diagnostic used on the real library. Tags only GENERATE
+    candidates; identity is always decided by file content, never by
+    tag equality.
+    """
+    raw_title = (title or "").strip()
     norm_artist = (artist or "").strip().casefold()
-    if not norm_title and not norm_artist:
-        return None
-    return norm_title, norm_artist
+    keys: list[tuple[str, str]] = []
+    norm_title = raw_title.casefold()
+    if norm_title or norm_artist:
+        keys.append((norm_title, norm_artist))
+    cleaned = _clean_title(raw_title).casefold()
+    if cleaned and cleaned != norm_title:
+        keys.append((cleaned, norm_artist))
+    return keys
 
 
 def _match_status(index: TrackIndex[Track], device_path: str) -> str | None:
@@ -458,6 +479,7 @@ def _classify(
     device_path: str,
     title: str | None = None,
     artist: str | None = None,
+    verify: bool = True,
 ) -> tuple[str, str | None, str | None]:
     base = _basename_key(device_path)
     if base in seen:
@@ -472,7 +494,11 @@ def _classify(
         # on byte-identical content; anything unreadable or different keeps
         # the conservative name-only classification.
         source = _device_source(root, kind, device_path)
-        verified = _verified_library_track(by_basename.get(base, []), source)
+        verified = (
+            _verified_library_track(by_basename.get(base, []), source)
+            if verify
+            else None
+        )
         if verified is not None:
             return (
                 STATUS_PRESENT,
@@ -490,9 +516,17 @@ def _classify(
     # Rename tier: no path or file-name match, but the library may hold
     # the same audio under a different file name. Tag equality generates
     # candidates only; content verification decides.
-    tag_key = _tag_key(title, artist)
-    if tag_key is not None:
-        verified = _verified_library_track(by_tags.get(tag_key, []), source)
+    tag_candidates: list[Track] = []
+    seen_ids: set[int] = set()
+    for tag_key in _tag_keys(title, artist):
+        for candidate in by_tags.get(tag_key, []):
+            if id(candidate) not in seen_ids:
+                seen_ids.add(id(candidate))
+                tag_candidates.append(candidate)
+    if tag_candidates:
+        verified = (
+            _verified_library_track(tag_candidates, source) if verify else None
+        )
         if verified is not None:
             return (
                 STATUS_PRESENT,
@@ -500,18 +534,18 @@ def _classify(
                 "file name, content-verified)",
                 verified.filename,
             )
-        if by_tags.get(tag_key):
-            return (
-                STATUS_UNCERTAIN,
-                "a library track has the same artist and title: verify it is "
-                "the same audio",
-                None,
-            )
+        return (
+            STATUS_UNCERTAIN,
+            "a library track has the same artist and title: verify it is "
+            "the same audio",
+            None,
+        )
     return STATUS_NEW, None, None
 
 
 def build_rekordbox_pull_preview(
-    manadj_session: Any, root: Path, destination: Path | None = None
+    manadj_session: Any, root: Path, destination: Path | None = None,
+    verify: bool = True,
 ) -> PullPreview:
     device = read_rekordbox_device(root)
     index, by_basename, by_tags = _manadj_matchers(manadj_session)
@@ -524,7 +558,7 @@ def build_rekordbox_pull_preview(
         artist = device.artists.get(track.artist_id)
         status, detail, matched = _classify(
             index, by_basename, by_tags, seen, root, "rekordbox",
-            track.file_path, track.title, artist,
+            track.file_path, track.title, artist, verify=verify,
         )
         entries.append(
             PullEntry(
@@ -545,7 +579,8 @@ def build_rekordbox_pull_preview(
 
 
 def build_engine_pull_preview(
-    manadj_session: Any, root: Path, destination: Path | None = None
+    manadj_session: Any, root: Path, destination: Path | None = None,
+    verify: bool = True,
 ) -> PullPreview:
     from enginedj.connection import EngineDJDatabase
     from enginedj.models.track import Track as EDJTrack
@@ -576,7 +611,7 @@ def build_engine_pull_preview(
             bpm = track.bpmAnalyzed or (float(track.bpm) if track.bpm else None)
             status, detail, matched = _classify(
                 index, by_basename, by_tags, seen, root, "engine",
-                stored, track.title, track.artist,
+                stored, track.title, track.artist, verify=verify,
             )
             entries.append(
                 PullEntry(
@@ -619,14 +654,19 @@ def _preview(
 
 
 def build_pull_preview(
-    manadj_session: Any, root: Path, destination: Path | None = None
+    manadj_session: Any, root: Path, destination: Path | None = None,
+    verify: bool = True,
 ) -> PullPreview:
+    """Read-only pull diff. verify=False skips content verification (no
+    hashing): matches that need it stay "uncertain", so the UI can render
+    every row with its metadata immediately and refine once verification
+    completes. Imports must always be bound to a verified preview."""
     drive = detect_drive_at(root)
     if drive is None:
         raise ExternalDriveError(f"no Rekordbox or Engine library found at {root}")
     if drive.kind == "rekordbox":
-        return build_rekordbox_pull_preview(manadj_session, root, destination)
-    return build_engine_pull_preview(manadj_session, root, destination)
+        return build_rekordbox_pull_preview(manadj_session, root, destination, verify=verify)
+    return build_engine_pull_preview(manadj_session, root, destination, verify=verify)
 
 
 # --- confirmed import --------------------------------------------------------

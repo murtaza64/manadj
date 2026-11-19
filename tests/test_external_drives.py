@@ -922,3 +922,97 @@ def test_engine_renamed_different_bytes_stays_uncertain(
     preview = external_drives.build_pull_preview(db, root)
 
     assert preview.entries[0].status == "uncertain"
+
+
+def test_unverified_preview_skips_hashing_and_marks_matches_uncertain(
+    db: Session, make_track, usb: Path, tmp_path: Path
+):
+    # The fast pass must not touch file contents: even byte-identical
+    # name-only and renamed matches stay unverified until the full pass.
+    library_file = tmp_path / "music" / "track2.mp3"
+    library_file.parent.mkdir(parents=True)
+    shutil.copy2(FIXTURES / "silence.mp3", library_file)
+    make_track(filename=str(library_file), title="Already Have")
+    renamed_file = tmp_path / "music" / "Bright Lights.mp3"
+    shutil.copy2(FIXTURES / "silence.mp3", renamed_file)
+    make_track(filename=str(renamed_file), title="Bright Lights", artist="Lane 8")
+
+    fast = external_drives.build_pull_preview(db, usb, verify=False)
+    by_title = {e.title: e for e in fast.entries}
+    assert by_title["Already Have"].status == "uncertain"
+    assert by_title["Already Have"].matched_path is None
+    assert by_title["Bright Lights"].status == "uncertain"
+    assert by_title["Bright Lights"].matched_path is None
+
+    full = external_drives.build_pull_preview(db, usb, verify=True)
+    by_title = {e.title: e for e in full.entries}
+    assert by_title["Already Have"].status == "present"
+    assert by_title["Already Have"].matched_path == str(library_file)
+    assert by_title["Bright Lights"].status == "present"
+    assert by_title["Bright Lights"].matched_path == str(renamed_file)
+
+
+def test_numbered_title_prefix_matches_cleaned_library_title(
+    db: Session, make_track, tmp_path: Path
+):
+    # "005 Let Me Down" on the drive is the same audio as the library's
+    # "Let Me Down": the playlist-position prefix only generates the
+    # candidate, identical bytes make it present.
+    root = tmp_path / "NUMBERED_USB"
+    root.mkdir()
+    make_rekordbox_usb(
+        root,
+        [track_spec(1, "005 Let Me Down", "/Contents/x.mp3", artist_id=1)],
+    )
+    put_audio(root, "/Contents/x.mp3")
+    library_file = tmp_path / "music" / "Let Me Down.mp3"
+    library_file.parent.mkdir(parents=True)
+    shutil.copy2(FIXTURES / "silence.mp3", library_file)
+    make_track(filename=str(library_file), title="Let Me Down", artist="Lane 8")
+
+    preview = external_drives.build_pull_preview(db, root)
+
+    entry = preview.entries[0]
+    assert entry.status == "present"
+    assert entry.matched_path == str(library_file)
+
+
+def test_remix_versions_never_collapse(
+    db: Session, make_track, tmp_path: Path
+):
+    # Same base title, different mix: no candidate at all, stays new.
+    root = tmp_path / "REMIX_USB"
+    root.mkdir()
+    make_rekordbox_usb(
+        root,
+        [track_spec(1, "014 Money (Aries Remix)", "/Contents/y.mp3", artist_id=1)],
+    )
+    put_audio(root, "/Contents/y.mp3")
+    library_file = tmp_path / "music" / "Money (Original Mix).mp3"
+    library_file.parent.mkdir(parents=True)
+    shutil.copy2(FIXTURES / "silence.mp3", library_file)
+    make_track(filename=str(library_file), title="Money (Original Mix)", artist="Lane 8")
+
+    preview = external_drives.build_pull_preview(db, root)
+
+    assert preview.entries[0].status == "new"
+
+
+def test_numbered_title_prefix_different_bytes_stays_uncertain(
+    db: Session, make_track, tmp_path: Path
+):
+    root = tmp_path / "NUMBERED2_USB"
+    root.mkdir()
+    make_rekordbox_usb(
+        root,
+        [track_spec(1, "005 Let Me Down", "/Contents/x.mp3", artist_id=1)],
+    )
+    put_audio(root, "/Contents/x.mp3")
+    library_file = tmp_path / "music" / "Let Me Down.mp3"
+    library_file.parent.mkdir(parents=True)
+    library_file.write_bytes(b"different audio entirely")
+    make_track(filename=str(library_file), title="Let Me Down", artist="Lane 8")
+
+    preview = external_drives.build_pull_preview(db, root)
+
+    assert preview.entries[0].status == "uncertain"
