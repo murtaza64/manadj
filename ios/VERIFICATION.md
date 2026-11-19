@@ -2,7 +2,18 @@
 
 Implementation snapshot: November 18, 2026. Base commit `d137e2d7`.
 
-## Current Apple checkpoint, November 18, 2026, 12:52 PST
+## Latest Apple checkpoint, November 19, 2026, 00:20 PST
+
+- Source `24bb90125e3196c831ef8094b8deb948bc798ffe`: [successful run 44484532224](https://github.com/murtaza64/manadj/actions/runs/44484532224), Xcode 16.4, regular iPhone 16 / iOS 18.5 simulator.
+- Unsigned simulator and arm64 iPhoneOS device-SDK builds passed. Device-SDK compilation is not a signed install or physical-device test.
+- Seven native tests and three UI tests passed, zero failures or skips. Native checks cover WAV transport; synthetic MP3, M4A, FLAC and AIFF decode/play; a synthetic 360-second streamed CAF with late seek, EOF and backward resume; actual composed desktop listener pairing/snapshot/download/offline reopen over loopback; load acceptance; cue geometry; and app resource configuration.
+- UI checks cover accepted/refused library loads with keyboard preservation, mixer gestures and transport recovery, center recording-control placement, pitch overlay and bottom clearance. The prior center-recording change failed the existing bottom-pitch guard. Reducing the detail-wave pair height fixed that failure without relaxing the guard.
+- Actual portrait, one-deck pitch overlay, library and keyboard-search pixels were inspected from this run. REC/WAV and saved-recordings controls sit between the faders; detail flags have centered digits; compact minimaps use small unnumbered pins; bottom pitch panels clear the home indicator. Captures use generated synthetic audio and data, not a real collection.
+- [Evidence artifact](https://github.com/murtaza64/manadj/actions/runs/44484532224/artifacts/14511085536) includes logs, xcresult exports, simulator captures and video. Artifact retention is temporary.
+- No listening test, physical LAN permission/transfer, background session playback, routing/latency, haptics or recording failure/finalization check is claimed. Session-event capture/replay, scratch and other gaps remain in `FEATURE_COVERAGE.md`.
+- Both iOS PR merges remain held for owner review. No signing, install, TestFlight or release action was taken.
+
+## Historical Apple checkpoint, November 18, 2026, 12:52 PST
 
 - Source `7457bf24bb62fb726e3a3179265e7ba9d317e36c`: [successful run 44392249847](https://github.com/murtaza64/manadj/actions/runs/44392249847), standard macOS 15 arm64 runner, Xcode 16.4 / iOS Simulator SDK 18.5.
 - Unsigned simulator app build passed. All **3 native/UI tests passed, 0 failed, 0 skipped**, on iPhone 16 Pro / iOS 18.5 (22F77). The generated 44.1 kHz stereo WAV decoded through AVAudioFile, then AVAudioEngine transport advanced, paused and sought as asserted. This is not a listening test or long-file/codec matrix.
@@ -41,7 +52,7 @@ Environment: Linux x86_64, official Swift 6.0.3 toolchain, g++ portable-engine h
 
 - iPhone install, real audio listening, latency/drift/CPU/memory measurements.
 - Headphone unplug, Bluetooth/USB routing, interruptions and media-services reset on iOS.
-- Long-file AVAudioFile seeking/refill and compressed-codec accuracy on iOS.
+- Real-library long-file and compressed-codec accuracy beyond the synthetic simulator fixtures.
 - Four simultaneous real tracks or thermal/background behavior.
 - End-to-end recording share/export on iOS or native failure-injection cases.
 - Full Android feature parity. See `FEATURE_COVERAGE.md`.
@@ -56,7 +67,7 @@ A personal Mac with Xcode 16+ and an iOS simulator runtime can run:
 bash ios/scripts/verify_apple.sh
 ```
 
-This first runs both host packages, then unsigned simulator build/test. `ManadjTests/NativeAudioTests.swift` generates a real WAV, decodes it through AVAudioFile and checks transport through AVAudioEngine. `ManadjUITests/WorkspaceUITests.swift` launches the app, visits C/D and Settings and attaches actual screenshots to the `.xcresult`.
+This first runs both host packages, then unsigned simulator build/test. `ManadjTests/NativeAudioTests.swift` generates a real WAV, decodes it through AVAudioFile and checks transport through AVAudioEngine. `ManadjUITests/WorkspaceUITests.swift` exercises the standard A/B workspace, mixer gestures, library loading/search and pitch/Settings navigation, and attaches actual screenshots to the `.xcresult`. C/D remains a current UI parity gap.
 
 The current Apple checkpoint above records the first successful run and inspected screenshots. Broader device/audio gates remain open. Simulator verification does not require an Apple Developer enrollment, a signing account or company access.
 

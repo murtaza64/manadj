@@ -73,3 +73,10 @@ Owner steering November18 4:00pm: optimize standard-size iPhone first; compact-p
 ## Iterative polish pass after November18 16:30 review
 
 Source-grounded corrections, not visual acceptance: 1/1.5pt empty/marked pad borders, 2pt transport border, 15/8pt cue label hierarchy, marked pad fill, labels under knobs, fader thumb/travel geometry, real bend rail, and Android-style top-rounded pitch tab. Control drags now keep a local visual value between engine UI polls. Press compression, release spring and haptic calls remain native implementations, not proof of physical feel. Expanded UI story exercises fader drag, loop, held cue, EQ double-tap, bend release and transport recovery. Session/recording completeness is not a tonight-v0 gate per owner; live play and local library transfer take priority.
+
+
+## November 19 standard-phone checkpoint
+
+At `24bb9012`, seven native and three UI tests pass on regular iPhone 16 / iOS 18.5. The center REC/WAV and saved-recordings controls pass hit/placement assertions between the channel faders. Detail flags use centered 14pt digits; minimaps use small unnumbered pins. Actual portrait, pitch, library and keyboard-search pixels were inspected. The bottom-pitch regression introduced by the recording row was fixed by reserving more vertical clearance, with the existing safe-area assertion retained. [Run](https://github.com/murtaza64/manadj/actions/runs/44484532224).
+
+This checkpoint does not lift either merge hold, establish physical haptic/audio quality, implement session replay or claim compact-phone acceptance. Dynamic Island recording status and saved-mix Now Playing boards are design concepts only. A Live Activity is not a background audio engine. Event-session replay and listening to a rendered recording are distinct features.
