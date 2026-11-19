@@ -25,12 +25,18 @@ class SyncError(Exception):
         self.status, self.code = status, code
 
 
+def _probe(reason, **facts):  # PROBE ONLY, do not land: always-visible reason for a None fingerprint
+    import sys
+    print(f"FILE_VERSION_NONE reason={reason} {facts}", file=sys.stderr, flush=True)
+
+
 def file_version(filename):
     """Only a selected/bound DB path, never a path from imported JSON."""
     try:
         with Path(filename).open("rb") as stream:
             before = os.fstat(stream.fileno())
             if not 0 < before.st_size <= 512 * 1024 * 1024:
+                _probe("size", filename=str(filename), size=before.st_size)
                 return None
             hashed, size = hashlib.sha256(), 0
             while block := stream.read(1024 * 1024):
@@ -43,9 +49,11 @@ def file_version(filename):
             def facts(stat):
                 return stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns
             if facts(before) != facts(after) or facts(after) != facts(current) or size != before.st_size:
+                _probe("facts", filename=str(filename), before=facts(before), after=facts(after), path=facts(current), read=size)
                 return None
         return Asset(algorithm="sha256-file-bytes-v1", sha256=hashed.hexdigest(), byte_length=size)
-    except OSError:
+    except OSError as error:
+        _probe("oserror", filename=str(filename), error=repr(error))
         return None
 
 
