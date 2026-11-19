@@ -356,6 +356,20 @@ describe('silence-loop entry routing (gh#424)', () => {
     expect(engine.getSnapshot().hasBeatgrid).toBe(false);
   });
 
+  it('exposes loopIsSilence on the snapshot for a silence loop only', async () => {
+    const engine = await loadedEngine(44);
+    engine.setMeter(44, grid120, null);
+    engine.seek(179.2);
+    engine.toggleLoop();
+    expect(engine.getSnapshot().loopIsSilence).toBe(true);
+    engine.toggleLoop();
+    engine.seek(10.1);
+    engine.toggleLoop();
+    expect(engine.getSnapshot().loopIsSilence).toBe(false);
+    engine.toggleLoop();
+    expect(engine.getSnapshot().loopIsSilence).toBe(false);
+  });
+
   it('ignores a meter push addressed to another track', async () => {
     const engine = await loadedEngine(43);
     engine.setMeter(99, grid120, null);

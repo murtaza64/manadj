@@ -149,6 +149,15 @@
   color: var(--base);
 }
 
+/* Silence loop (gh#424): the region runs past the last audible sample —
+   keep the green active state (green = state) and add a subdued EOF tag
+   so the performer can tell the loop lives beyond the audio. */
+.deck-looprow .deck-loop-toggle .deck-loop-eof {
+  font-size: var(--font-micro);
+  letter-spacing: 0.08em;
+  opacity: 0.65;
+}
+
 /* Grid-edit cluster (curation class): nudge / anchor / nudge */
 /* Segment feedback: the buttons have no own border inside a cluster, so
    hover reads as a fill (the border-color hover of standalone

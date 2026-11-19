@@ -118,6 +118,10 @@ export interface DeckSnapshot {
    * projected through the LIVE grid — `~N.N` after a re-tempo. Null when
    * no loop is active. */
   loopBeatsLabel: string | null;
+  /** gh#424: the active loop is a silence loop — its region runs past the
+   * last audible sample (structural: loop.end > buffer duration, loop.ts).
+   * False when no loop is active or the buffer is unknown. */
+  loopIsSilence: boolean;
   /** Pending auto-loop size in beats (survives Loads). */
   pendingLoopBeats: number;
   /** The loaded Track has a usable Beatgrid (auto-loop is inert without). */
@@ -1815,6 +1819,10 @@ export class DeckEngine {
       loopBeatsLabel: this.transport.loop
         ? projectLoopBeats(this.transport.loop, this.beatTimes)
         : null,
+      loopIsSilence:
+        this.transport.loop !== null &&
+        this.buffer !== null &&
+        isSilenceLoop(this.transport.loop, this.buffer.duration),
       pendingLoopBeats: this.transport.pendingLoopBeats,
       hasBeatgrid: (this.beatTimes?.length ?? 0) >= 2,
       stemsLoaded: this.stemBuffers !== null,
