@@ -956,3 +956,41 @@ def test_late_ack_is_checked_before_continuing_old_history_scan(world):
     service.poll()
     assert batch(service, frozen["id"])["status"] == "delivered"
     assert seen == [None, None] and len(world.daemon.sent) == 1
+
+
+def test_ignore_file_publication_tolerates_concurrent_windows_replace(tmp_path, monkeypatch):
+    from backend import feedback
+    target = tmp_path / ".gitignore"
+    real_replace = os.replace
+    calls = []
+
+    def denied_then_published_by_peer(src, dst):
+        calls.append(src)
+        if len(calls) < 3:
+            raise PermissionError(5, "Access is denied")  # WinError 5: a peer holds the target
+        if len(calls) == 3:
+            target.write_bytes(b"*\n")  # the peer finished publishing the same content
+            raise PermissionError(5, "Access is denied")
+        return real_replace(src, dst)
+
+    monkeypatch.setattr(feedback.os, "replace", denied_then_published_by_peer)
+    monkeypatch.setattr(feedback.time, "sleep", lambda _: None)
+    feedback._ensure_ignore_file(target)
+    assert target.read_bytes() == b"*\n"
+    assert [p.name for p in tmp_path.iterdir()] == [".gitignore"]  # no temp files left
+
+
+def test_ignore_file_publication_still_fails_when_never_published(tmp_path, monkeypatch):
+    from backend import feedback
+    monkeypatch.setattr(feedback.os, "replace", lambda *a: (_ for _ in ()).throw(PermissionError(5, "denied")))
+    monkeypatch.setattr(feedback.time, "sleep", lambda _: None)
+    with pytest.raises(PermissionError):
+        feedback._ensure_ignore_file(tmp_path / ".gitignore", attempts=3)
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_ignore_file_replaces_wrong_existing_content(tmp_path):
+    from backend import feedback
+    (tmp_path / ".gitignore").write_text("something else\n")
+    feedback._ensure_ignore_file(tmp_path / ".gitignore")
+    assert (tmp_path / ".gitignore").read_bytes() == b"*\n"
