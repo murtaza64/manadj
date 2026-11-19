@@ -18,7 +18,7 @@ This is a review ledger, not release acceptance. Android is a baseline, not a re
 | Immediate 0.93 key press, spring return, 240ms glow release | Native key press compression and spring, UIKit touch-down/cancel handling for gated controls | Compare temporal recordings; glow details remain incomplete |
 | Cue/hotcue press begins immediately, release/cancel ends it | UIKit touch-down/up/outside/cancel; haptic call on press | Slide-to-play and cancellation under navigation not yet equivalent |
 | Knob chooses dominant horizontal/vertical relative axis, center notch, two-finger fine adjustment | Dominant-axis SwiftUI drag, neutral crossing haptic, double-tap reset | Two-finger fine mode, sticky notch escape distance, fixed numeric popover missing |
-| Fader rail/handle semantics, optional double-tap centering | Current iOS fader is still relative drag | Must match rail/handle and recenter semantics, not accepted |
+| Fader rail/handle semantics, optional double-tap centering | Rail/offset-grab drag, double-tap centering, correct thumb dimensions and local gesture feedback implemented | Pending expanded Apple gesture story and actual pixels, not accepted |
 | Pitch opens on down with 240ms slide and 140ms fade | In-place one-deck overlay, native animation | Trigger timing and interruption/cancel path need comparison |
 | Hardware haptic events for key, notch, long press, wheels | Native selection and light/medium impact generators | Simulator cannot establish physical strength, timing or feel |
 
@@ -69,3 +69,7 @@ Broader differences tracked after the first real iOS screenshot: segmented loop/
 ## Current device scope
 
 Owner steering November18 4:00pm: optimize standard-size iPhone first; compact-phone support is backlog. Verification now selects the regular iPhone16 where installed, not the Pro as an unspoken proxy. SE diagnostic remains opt-in (`CHECK_COMPACT_PHONE=1`), with its confirmed off-screen pitch gap recorded, not fixed by dropping the test silently. Owner also requested future "iphone duo" support playfully; no device specification or hardware identity has been assumed for that phrase.
+
+## Iterative polish pass after November18 16:30 review
+
+Source-grounded corrections, not visual acceptance: 1/1.5pt empty/marked pad borders, 2pt transport border, 15/8pt cue label hierarchy, marked pad fill, labels under knobs, fader thumb/travel geometry, real bend rail, and Android-style top-rounded pitch tab. Control drags now keep a local visual value between engine UI polls. Press compression, release spring and haptic calls remain native implementations, not proof of physical feel. Expanded UI story exercises fader drag, loop, held cue, EQ double-tap, bend release and transport recovery. Session/recording completeness is not a tonight-v0 gate per owner; live play and local library transfer take priority.

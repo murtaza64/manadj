@@ -33,6 +33,22 @@ final class NativeAudioTests: XCTestCase {
         try await Task.sleep(for: .milliseconds(50))
         XCTAssertEqual(audio.state(0).position, 0.5, accuracy: 0.01)
     }
+    @MainActor func testCommonLibraryCodecsDecodeAndPlayNatively() async throws {
+        let audio = try NativeAudio()
+        for ext in ["mp3", "m4a", "flac", "aiff"] {
+            let url = try XCTUnwrap(Bundle.main.url(forResource: "synthetic-codec", withExtension: ext))
+            let duration = try await audio.load(url, deck: 0)
+            XCTAssertEqual(duration, 2, accuracy: 0.1, ext)
+            XCTAssertTrue(audio.state(0).ready, ext)
+            XCTAssertTrue(audio.state(0).fullyDecoded, ext)
+            audio.send(MDJPlay)
+            try await Task.sleep(for: .milliseconds(160))
+            XCTAssertTrue(audio.state(0).playing, ext)
+            XCTAssertGreaterThan(audio.state(0).position, 0.05, ext)
+            audio.send(MDJPause)
+            try await Task.sleep(for: .milliseconds(50))
+        }
+    }
     func testProjectConfigurationHasLocalNetworkPurposeAndFonts() throws {
         XCTAssertNotNil(Bundle.main.object(forInfoDictionaryKey: "NSLocalNetworkUsageDescription"))
         XCTAssertNotNil(Bundle.main.url(forResource: "UbuntuMono-Regular", withExtension: "ttf"))

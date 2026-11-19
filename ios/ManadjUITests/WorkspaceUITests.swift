@@ -33,6 +33,35 @@ final class WorkspaceUITests: XCTestCase {
         Thread.sleep(forTimeInterval: 0.6)
         let browse = XCTAttachment(screenshot: app.screenshot()); browse.name = "iOS in-place browser with transport WIP"; browse.lifetime = .keepAlways; add(browse)
     }
+    @MainActor func testLiveMixerControlsRespondAndRecover() {
+        let app = XCUIApplication(); app.launchArguments = ["--performance-ui-fixture"]; app.launch()
+        let play = app.buttons["A play pause"]
+        XCTAssertTrue(play.waitForExistence(timeout: 20))
+        let fader = app.otherElements["A channel fader"]
+        XCTAssertTrue(fader.waitForExistence(timeout: 5))
+        let initial = fader.value as? String ?? ""
+        fader.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3)).press(forDuration: 0.1, thenDragTo: fader.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.7)))
+        let changed = NSPredicate(format: "value != %@", initial)
+        expectation(for: changed, evaluatedWith: fader); waitForExpectations(timeout: 5)
+        app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "LOOP")).firstMatch.tap()
+        let cue = app.buttons["A hotcue 1"]
+        XCTAssertTrue(cue.exists); cue.press(forDuration: 0.4)
+        let eq = app.otherElements["HI control"].firstMatch
+        XCTAssertTrue(eq.exists); eq.doubleTap()
+        expectation(for: NSPredicate(format: "value == %@", "0.00"), evaluatedWith: eq); waitForExpectations(timeout: 5)
+        eq.doubleTap()
+        let bend = app.buttons["Momentary pitch bend"].firstMatch
+        XCTAssertTrue(bend.exists)
+        bend.coordinate(withNormalizedOffset: CGVector(dx: 0.8, dy: 0.5)).press(forDuration: 0.3)
+        expectation(for: NSPredicate(format: "value == %@", "+0.0 percent"), evaluatedWith: bend); waitForExpectations(timeout: 5)
+        play.tap()
+        let wave = app.otherElements["A detail wave"]
+        expectation(for: NSPredicate(format: "value BEGINSWITH %@", "playing"), evaluatedWith: wave); waitForExpectations(timeout: 5)
+        Thread.sleep(forTimeInterval: 2)
+        play.tap()
+        expectation(for: NSPredicate(format: "value BEGINSWITH %@", "paused"), evaluatedWith: wave); waitForExpectations(timeout: 5)
+        let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Live mixer gesture and transport recovery"; shot.lifetime = .keepAlways; add(shot)
+    }
     @MainActor func testLibrarySearchAcceptedAndRefusedLoads() {
         let app = XCUIApplication()
         app.launchArguments = ["--library-ui-fixture"]

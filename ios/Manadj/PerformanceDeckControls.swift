@@ -32,7 +32,7 @@ struct PerformanceDeckControls: View {
                         HStack(spacing: 0) {
                             ForEach(0..<4) { c in
                                 let slot = r * 4 + c
-                                HoldControl(title: "\(slot + 1)\n\(cue(slot) < 0 ? "SET" : Ink.clock(cue(slot)))", color: Ink.cues[slot], active: state.preview && state.previewSlot == slot, enabled: state.ready, down: {
+                                HoldControl(title: "\(slot + 1)\n\(cue(slot) < 0 ? "SET" : Ink.clock(cue(slot)))", color: Ink.cues[slot], active: state.preview && state.previewSlot == slot, enabled: state.ready, marked: cue(slot) >= 0, down: {
                                     model.set(shift ? MDJHotCueClear : cue(slot) < 0 ? MDJHotCueSet : MDJHotCueDown, index, 0, slot: slot)
                                 }, up: { model.set(MDJHotCueUp, index, 0, slot: slot) }).padding(3).accessibilityLabel("\(Ink.deckName(index)) hotcue \(slot + 1)")
                             }
@@ -40,26 +40,36 @@ struct PerformanceDeckControls: View {
                     }
                 }.frame(height: compact ? 80 : 104)
                 HStack(spacing: 0) {
-                    Button("½") { model.set(MDJLoopResize, index, 0, slot: 0) }
+                    Button("÷2") { model.set(MDJLoopResize, index, 0, slot: 0) }.frame(maxWidth: 40)
                     Rectangle().fill(color.opacity(0.5)).frame(width: 1).padding(.vertical, 10)
-                    Button("⟳ LOOP \(Int(state.loopBeats))") { model.set(MDJLoopToggle, index, 0) }
+                    Button("⟲ LOOP \(Int(state.loopBeats))") { model.set(MDJLoopToggle, index, 0) }
                     Rectangle().fill(color.opacity(0.5)).frame(width: 1).padding(.vertical, 10)
-                    Button("2×") { model.set(MDJLoopResize, index, 0, slot: 1) }
+                    Button("2×") { model.set(MDJLoopResize, index, 0, slot: 1) }.frame(maxWidth: 40)
                 }.buttonStyle(PerformanceStripStyle(color: color)).background(state.loopActive ? color.opacity(0.15) : Color.clear).clipShape(Capsule()).overlay(Capsule().stroke(color.opacity(0.7), lineWidth: 1.5)).padding(3).frame(height: row).disabled(!state.ready || state.bpm <= 0)
                 HStack(spacing: 0) {
-                    Button("◀") { model.set(MDJBeatJump, index, -jump) }
+                    Button("◀◀") { model.set(MDJBeatJump, index, -jump) }.frame(maxWidth: 40)
                     Rectangle().fill(color.opacity(0.5)).frame(width: 1).padding(.vertical, 10)
                     Button("JUMP \(Int(jump))") { jump = jump >= 64 ? 1 : jump * 2 }
                     Rectangle().fill(color.opacity(0.5)).frame(width: 1).padding(.vertical, 10)
-                    Button("▶") { model.set(MDJBeatJump, index, jump) }
+                    Button("▶▶") { model.set(MDJBeatJump, index, jump) }.frame(maxWidth: 40)
                 }.buttonStyle(PerformanceStripStyle(color: color)).clipShape(Capsule()).overlay(Capsule().stroke(color.opacity(0.7), lineWidth: 1.5)).padding(3).frame(height: row).disabled(!state.ready)
                 onTransport().frame(height: row + 8)
-                HStack(spacing: 0) {
-                    HoldControl(title: "−", color: color, enabled: state.ready, down: { model.set(MDJBend, index, -4) }, up: { model.set(MDJBend, index, 0) }).padding(3)
-                    Text("BEND").font(Ink.font(9)).foregroundStyle(color).frame(maxWidth: .infinity)
-                    HoldControl(title: "+", color: color, enabled: state.ready, down: { model.set(MDJBend, index, 4) }, up: { model.set(MDJBend, index, 0) }).padding(3)
-                }.frame(height: row)
-                Button(String(format: "PITCH  %+.2f%%", state.pitch)) { withAnimation(.easeOut(duration: 0.24)) { pitch.toggle() } }.buttonStyle(PerformanceKeyStyle(color: color, active: pitch)).frame(height: row)
+                PerformanceBend(color: color, enabled: state.ready, value: Double(state.bend)) { model.set(MDJBend, index, $0) }.frame(height: row)
+                Button { withAnimation(.easeOut(duration: 0.24)) { pitch.toggle() } } label: {
+                    VStack(spacing: 0) {
+                        Capsule().fill(color).frame(width: 28, height: 3).padding(.top, 3)
+                        HStack(alignment: .center) {
+                            Text(String(format: "%+.2f%%", state.pitch)).font(Ink.font(13, bold: true)).foregroundStyle(state.pitch == 0 ? Ink.text : color)
+                            Spacer(minLength: 0)
+                            VStack(alignment: .trailing, spacing: 0) {
+                                Text(state.bpm > 0 ? String(format: "%.1f", state.bpm * (1 + Double(state.pitch) / 100)) : "-- BPM").font(Ink.font(10, bold: true)).foregroundStyle(Ink.accent)
+                                Text((state.keyLock ? "▣ KEY " : "KEY ") + (model.decks[index].track?.keyOpenKey ?? "--")).font(Ink.font(8)).foregroundStyle(Ink.muted)
+                            }
+                        }.padding(.horizontal, 7).frame(maxHeight: .infinity)
+                    }.background(Ink.panel).clipShape(UnevenRoundedRectangle(topLeadingRadius: 12, topTrailingRadius: 12))
+                        .overlay(UnevenRoundedRectangle(topLeadingRadius: 12, topTrailingRadius: 12).stroke(color.opacity(0.6), lineWidth: 1.5)).padding(2)
+                }.buttonStyle(.plain).frame(height: row).accessibilityLabel("\(Ink.deckName(index)) PITCH panel")
+
             }
             .overlay {
                 if pitch {
