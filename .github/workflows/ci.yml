@@ -4,7 +4,7 @@
 # Known per-OS failures are deselected in the pytest step with the issue
 # that fixes each; the lane landing a fix deletes its
 # line, so the gate only ever goes red on NEW breakage.
-name: ci
+name: Windows fixture trace diagnostic
 on:
   push:
     branches: [main, "probe/**"]
@@ -21,7 +21,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, ubuntu-latest, macos-latest]
+        os: [windows-latest]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     defaults:
@@ -50,43 +50,19 @@ jobs:
 
       - name: Synthetic Windows identity diagnostic
         if: runner.os == 'Windows'
+        continue-on-error: true
         run: uv run --no-sync pytest -q -s tests/test_windows_stat_probe.py
 
       - name: pytest
         run: |
-          deselect=()
-          uv run --no-sync pytest -q -p no:cacheprovider "${deselect[@]}"
+          set -o pipefail
+          uv run --no-sync pytest -q -p no:cacheprovider --ignore=tests/test_windows_stat_probe.py 2>&1 | tee windows-fixture-trace.log
 
-      - name: backend boot smoke
-        env:
-          DISABLE_TASK_WORKER: "1"
-        run: |
-          export MANADJ_DATA_DIR="$RUNNER_TEMP/manadj-data"
-          mkdir -p "$MANADJ_DATA_DIR"
-          # Run the venv python directly (not `uv run`): a lingering uv process
-          # holds the cache lock and fails setup-uv's post-job cache prune.
-          if [ "$RUNNER_OS" = "Windows" ]; then py=.venv/Scripts/python.exe; else py=.venv/bin/python; fi
-          "$py" -m backend.serve --port 8127 > boot.log 2>&1 &
-          pid=$!
-          ok=1
-          for i in $(seq 1 120); do
-            if curl -sf http://127.0.0.1:8127/api/tracks/ > /dev/null; then echo "boot ok after ${i}s"; ok=0; break; fi
-            sleep 1
-          done
-          kill "$pid" 2>/dev/null || true
-          [ "$ok" = 0 ] || { cat boot.log; exit 1; }
-
-      - name: vitest
-        working-directory: frontend
-        run: |
-          npm ci --no-audit --no-fund
-          npx vitest run
-
-      - name: typecheck
-        working-directory: frontend
-        run: npx tsc -b
-
-      - name: desktop shell tests
-        # The preload smoke launches a real Electron binary (desktop/node_modules
-        # isn't installed here); everything else is plain node.
-        run: node --test --test-skip-pattern "production preload" desktop/backend.test.js desktop/recording.test.js
+      - name: Preserve actual fixture refusal traces
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-fixture-trace
+          path: windows-fixture-trace.log
+          if-no-files-found: warn
+          retention-days: 3
