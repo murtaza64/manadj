@@ -97,3 +97,26 @@ def test_marker_factoring_is_stable_but_changes_are_rejected():
     assert generator.canonical_requirement_lines(a) != generator.canonical_requirement_lines(b.replace(' or ', ' and ', 1))
     with pytest.raises(ValueError, match='Unsupported'):
         generator.canonical_requirement_lines("test==1 ; some_function()\n")
+
+
+def test_retained_evidence_keeps_exact_bytes_on_windows_checkout(tmp_path):
+    """core.autocrlf must not invalidate upstream source-byte evidence hashes."""
+    import shutil
+    evidence = json.loads((ROOT / 'licenses/inventory-evidence.json').read_text())
+    paths = sorted({p for record in evidence['components'] for p in record['license_hashes']})
+    repo = tmp_path / 'checkout'
+    repo.mkdir()
+    for name in ['.gitattributes', *paths]:
+        target = repo / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(ROOT / name, target)
+    def git(*args):
+        return subprocess.run(['git', '-C', str(repo), *args], check=True, capture_output=True, text=True)
+    git('init')
+    git('config', 'core.autocrlf', 'true')
+    git('add', '.')
+    for name in paths:
+        (repo / name).unlink()
+    git('checkout-index', '-a', '-f')
+    for name in paths:
+        assert (repo / name).read_bytes() == (ROOT / name).read_bytes(), name

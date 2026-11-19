@@ -1,0 +1,6 @@
+
+# Retained upstream license evidence is byte-hashed. Never rewrite line endings.
+licenses/third-party/** -text
+android/app/UBUNTU_FONT_LICENCE.txt -text
+android/audio-engine/src/main/cpp/third_party/signalsmith-linear/LICENSE.txt -text
+android/audio-engine/src/main/cpp/third_party/signalsmith-stretch/LICENSE.txt -text
