@@ -23,7 +23,7 @@ import { isQuantizeOn } from './quantizeStore';
 import { getCueMode } from './cueModeStore';
 import { addBeats, beatPhaseTarget, beatsBetween, crossDeckLaunchTarget } from './quantize';
 import type { LaunchReference } from './quantize';
-import { foldLoopPlayhead, projectLoopBeats } from './loop';
+import { foldLoopPlayhead, isSilenceLoop, loopFoldEnd, projectLoopBeats } from './loop';
 import type { LoopRegion, LoopResize } from './loop';
 import type { DeckAudioPort } from './mixer';
 import { DeckSourceNode } from './worklet/deckSourceNode';
@@ -182,6 +182,12 @@ export class DeckEngine {
    * Rescheduled on a rate change during the lead-in; cleared on any
    * stop/seek/dispose. */
   private leadInTimer: ReturnType<typeof setTimeout> | null = null;
+  /** True while a silence loop (gh#424) runs past the last audible sample:
+   * the voice ended at EOF but the loop region extends beyond it, so a
+   * silent anchor clock (the mirror of the lead-in) keeps the playhead
+   * advancing and folding inside the projected region. No audio sounds;
+   * any start/stop clears it. */
+  private phantomActive = false;
 
   /** Clock anchor: playhead position (s) at ctx time `anchorCtxTime`. */
   private anchorPosition = 0;
@@ -896,16 +902,26 @@ export class DeckEngine {
     const position = positionSeconds === undefined ? this.getPlayhead() : this.clampPlayhead(positionSeconds);
     this.slipLoop = null;
     if (positionSeconds !== undefined) this.cancelScratch(position, false);
-    const start = region ? this.clampTime(region.start) : 0;
-    const end = region ? this.clampTime(region.end) : 0;
+    // A silence-loop region (gh#424) legitimately extends past the buffer:
+    // its boundary comes from the grid projection, so only the track-domain
+    // floor is enforced here. Ordinary regions are unaffected (their callers
+    // never place a boundary past EOF).
+    const start = region ? Math.max(0, region.start) : 0;
+    const end = region ? Math.max(start, region.end) : 0;
     this.transport = { ...this.transport, playhead: position,
       loop: region && end > start ? { start, end, lengthBeats: (end - start) * (this.trackInfo?.bpm ?? 120) / 60 } : null };
     this.anchorPosition = position;
     this.anchorCtxTime = this.audio?.ctx.currentTime ?? 0;
     if (positionSeconds !== undefined && isAudioRunning(this.transport)) {
-      if (position >= (this.buffer?.duration ?? 0)) {
+      const duration = this.buffer?.duration ?? 0;
+      const loop = this.transport.loop;
+      if (position >= duration && !(loop && isSilenceLoop(loop, duration))) {
         this.transport = { ...this.transport, playing: false, previewing: false, hotCuePreviewSlot: null };
         this.stopAudio(position);
+      } else if (position >= duration) {
+        // Silence loop (gh#424): the playhead rests at EOF; the running
+        // voice's ended message anchors the phantom clock from here.
+        this.transport = { ...this.transport, playhead: position };
       } else this.startAudio(position);
     }
     this.syncLoopToSource();
@@ -1048,6 +1064,13 @@ export class DeckEngine {
       this.pitchPercent = pitchPercent;
       this.bendPercent = bendPercent;
       this.scheduleLeadInStart();
+    } else if (this.phantomActive && this.audio) {
+      // Rate change mid-phantom (gh#424): re-anchor the silent clock at the
+      // old rate and adopt the new one; the fold is rate-agnostic.
+      this.anchorPosition = this.getPlayhead(); // still at the old rate
+      this.anchorCtxTime = this.audio.ctx.currentTime;
+      this.pitchPercent = pitchPercent;
+      this.bendPercent = bendPercent;
     } else {
       this.pitchPercent = pitchPercent;
       this.bendPercent = bendPercent;
@@ -1072,7 +1095,7 @@ export class DeckEngine {
     this.syncScheduledScratch();
     if (this.scratch && this.audio) return scratchPosition(this.scratch.motion, this.audio.ctx.currentTime);
     const pending = this.pendingStart?.when !== undefined ? this.pendingStart : null;
-    if ((this.runningStartId !== null || this.leadInActive || pending) && this.audio) {
+    if ((this.runningStartId !== null || this.leadInActive || this.phantomActive || pending) && this.audio) {
       const anchorPosition = pending?.at ?? this.anchorPosition;
       const elapsed =
         (this.audio.ctx.currentTime - (pending?.when ?? this.anchorCtxTime)) * this.currentRate();
@@ -1086,10 +1109,14 @@ export class DeckEngine {
         position = foldLoopPlayhead(
           position,
           loop.start,
-          Math.min(loop.end, this.buffer?.duration ?? loop.end),
+          loopFoldEnd(loop, this.buffer?.duration ?? loop.end, this.phantomActive),
           anchorPosition
         );
       }
+      // A phantom position lives past the buffer by design; the fold above
+      // already bounds it to the silence region, so the track-domain clamp
+      // does not apply.
+      if (this.phantomActive) return position;
       return this.clampPlayhead(position);
     }
     return this.transport.playhead;
@@ -1221,7 +1248,7 @@ export class DeckEngine {
       this.slipLoop = null;
     } else if (loopControl && !synced.loop && next.loop && this.slipMode) {
       this.slipLoop = { position: synced.playhead,
-        time: (this.runningStartId !== null || this.leadInActive) && this.audio
+        time: (this.runningStartId !== null || this.leadInActive || this.phantomActive) && this.audio
           ? this.audio.ctx.currentTime : null };
     } else if (this.slipLoop && (!next.loop || event.type === 'pause'
       || effects.some(e => e.type === 'stop')
@@ -1335,6 +1362,7 @@ export class DeckEngine {
     // negative) or crosses into the track (>= 0).
     this.clearPendingLaunch();
     this.clearLeadIn();
+    this.clearPhantom();
     const { ctx, input } = this.ensureAudio();
     // A may request resume before B's already-queued key is dispatched.
     if (ctx.state !== 'running') DeckEngine.gestureClockFloors.set(ctx, ctx.currentTime);
@@ -1416,6 +1444,12 @@ export class DeckEngine {
     }, Math.max(0, remainingWallMs));
   }
 
+  /** Leave phantom mode (gh#424): any start/stop/seek lands a real voice
+   * or rests the transport, so the silent past-EOF clock is done. */
+  private clearPhantom(): void {
+    this.phantomActive = false;
+  }
+
   /** Cancel any pending lead-in (a stop, a fresh start, or dispose). */
   private clearLeadIn(): void {
     this.leadInActive = false;
@@ -1433,12 +1467,17 @@ export class DeckEngine {
     // A stop during the lead-in cancels the scheduled entry: the deck rests
     // at its (possibly still-negative) pre-start position.
     this.clearLeadIn();
+    // A phantom rest position lives inside the silence region past EOF;
+    // the fold already bounds it, so the track-domain clamp must not pull
+    // it back to the buffer end.
+    const wasPhantom = this.phantomActive;
+    this.clearPhantom();
     if (this.runningStartId !== null) {
       // The worklet declick-fades internally (its stop splice).
       this.sourceNode?.stop();
       this.runningStartId = null;
     }
-    this.transport = { ...this.transport, playhead: this.clampPlayhead(at) };
+    this.transport = { ...this.transport, playhead: wasPhantom ? at : this.clampPlayhead(at) };
   }
 
   /** One pending gesture-retry at a time. */
@@ -1601,6 +1640,18 @@ export class DeckEngine {
     this.syncScheduledScratch();
     if (this.runningStartId !== startId) return; // raced a seek/stop
     this.runningStartId = null;
+    // Silence loop (gh#424): the region extends past EOF, so EOF is not the
+    // end of the transport. Anchor the silent clock at the buffer end and
+    // keep playing; getPlayhead folds the past-EOF clock into the region.
+    const loop = this.transport.loop;
+    const duration = this.buffer?.duration ?? 0;
+    if (loop && this.audio && isSilenceLoop(loop, duration)) {
+      this.phantomActive = true;
+      this.anchorPosition = duration;
+      this.anchorCtxTime = this.audio.ctx.currentTime;
+      this.emit();
+      return;
+    }
     // The clock can no longer be read from the source; rest the playhead
     // at the end of the track before reducing.
     this.transport = {
