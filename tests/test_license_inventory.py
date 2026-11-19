@@ -85,3 +85,15 @@ def test_release_export_excludes_harness_without_building(tmp_path, monkeypatch)
     assert args[args.index("--no-group") + 1] == "harness"
     assert "--frozen" in args and "--no-dev" in args
     assert args[args.index("--group") + 1] == "stems"
+
+
+def test_marker_factoring_is_stable_but_changes_are_rejected():
+    generator = load_script('generate_sbom')
+    a = "torchaudio==2.9.1+cpu ; (python_full_version >= '3.15' and sys_platform == 'linux') or (platform_machine != 'aarch64' and sys_platform == 'linux') or (platform_python_implementation != 'CPython' and sys_platform == 'linux')\n"
+    b = "torchaudio==2.9.1+cpu ; (python_full_version >= '3.15' or platform_machine != 'aarch64' or platform_python_implementation != 'CPython') and sys_platform == 'linux'\n"
+    assert generator.canonical_requirement_lines(a) == generator.canonical_requirement_lines(b)
+    assert generator.canonical_requirement_lines(a) != generator.canonical_requirement_lines(b.replace('3.15', '3.14'))
+    assert generator.canonical_requirement_lines(a) != generator.canonical_requirement_lines(b.replace("sys_platform == 'linux'", "sys_platform == 'darwin'"))
+    assert generator.canonical_requirement_lines(a) != generator.canonical_requirement_lines(b.replace(' or ', ' and ', 1))
+    with pytest.raises(ValueError, match='Unsupported'):
+        generator.canonical_requirement_lines("test==1 ; some_function()\n")
