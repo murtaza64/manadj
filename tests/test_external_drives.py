@@ -1165,3 +1165,104 @@ def test_router_preview_includes_playlists(client: TestClient, tmp_path: Path):
     assert mix["folder_path"] == "RIG"
     assert mix["track_count"] == 3
     assert mix["new_count"] == 3
+
+
+# --- membership diff (dry-run, no writes) --------------------------------------
+
+
+def _add_local_playlist(db: Session, name: str, track_ids: list[int]) -> None:
+    from backend.models import Playlist, PlaylistTrack
+
+    playlist = Playlist(name=name)
+    db.add(playlist)
+    db.commit()
+    db.refresh(playlist)
+    for pos, tid in enumerate(track_ids):
+        db.add(PlaylistTrack(playlist_id=playlist.id, track_id=tid, position=pos))
+    db.commit()
+
+
+def _device_and_preview(db: Session, usb: Path):
+    device = external_drives.read_rekordbox_device(usb)
+    preview = external_drives.build_pull_preview(db, usb)
+    return device, preview
+
+
+def test_membership_diff_counts(db: Session, make_track, tmp_path: Path):
+    usb = make_rekordbox_usb_with_playlists(tmp_path / "RB")
+    two = make_track(filename="/Contents/two.mp3", title="Two")
+    held_elsewhere = make_track(filename="/music/elsewhere.mp3", title="Elsewhere")
+    _add_local_playlist(db, "RIG Mix", [two.id, held_elsewhere.id])
+    device, preview = _device_and_preview(db, usb)
+    mix = next(pl for pl in device.playlists if pl.name == "RIG Mix")
+
+    diff = external_drives.diff_device_playlist(db, device, mix, preview.entries)
+
+    assert diff.counterpart_status == "unique-name-match"
+    assert diff.common == 1  # two.mp3
+    assert diff.adds_new == 2  # one.mp3, three.mp3 not in the library
+    assert diff.adds_in_library == 0
+    assert diff.removes == 1  # held_elsewhere is not on the device playlist
+    assert diff.order_differs is False  # single common member cannot reorder
+    assert diff.uncertain_members == 0
+
+
+def test_membership_diff_detects_order_change(db: Session, make_track, tmp_path: Path):
+    usb = make_rekordbox_usb_with_playlists(tmp_path / "RB")
+    two = make_track(filename="/Contents/two.mp3", title="Two")
+    three = make_track(filename="/Contents/three.mp3", title="Three")
+    _add_local_playlist(db, "RIG New", [two.id, three.id])  # device order is 3,2
+    device, preview = _device_and_preview(db, usb)
+    new_pl = next(pl for pl in device.playlists if pl.name == "RIG New")
+
+    diff = external_drives.diff_device_playlist(db, device, new_pl, preview.entries)
+
+    assert diff.common == 2
+    assert diff.order_differs is True
+    assert diff.adds_in_library == 0
+    assert diff.removes == 0
+
+
+def test_membership_diff_ambiguous_name_never_binds(db: Session, make_track, tmp_path: Path):
+    usb = make_rekordbox_usb_with_playlists(tmp_path / "RB")
+    a = make_track(filename="/a.mp3")
+    b = make_track(filename="/b.mp3")
+    _add_local_playlist(db, "RIG Mix", [a.id])
+    _add_local_playlist(db, "RIG Mix", [b.id])
+    device, preview = _device_and_preview(db, usb)
+    mix = next(pl for pl in device.playlists if pl.name == "RIG Mix")
+
+    diff = external_drives.diff_device_playlist(db, device, mix, preview.entries)
+
+    assert diff.counterpart_status == "ambiguous-name"
+    assert diff.counterpart_id is None
+    assert diff.order_differs is None  # no silent bind, no order claim
+
+
+def test_membership_diff_without_local_playlist(db: Session, tmp_path: Path):
+    usb = make_rekordbox_usb_with_playlists(tmp_path / "RB")
+    device, preview = _device_and_preview(db, usb)
+    mix = next(pl for pl in device.playlists if pl.name == "RIG Mix")
+
+    diff = external_drives.diff_device_playlist(db, device, mix, preview.entries)
+
+    assert diff.counterpart_status == "no-local-playlist"
+    assert diff.adds_new == 3
+    assert diff.removes == 0
+    assert diff.order_differs is None
+
+
+def test_membership_diff_excludes_uncertain(db: Session, make_track, tmp_path: Path):
+    # A library track with the same FILE NAME but different content makes the
+    # device member uncertain; it must be excluded from every diff count.
+    usb = make_rekordbox_usb_with_playlists(tmp_path / "RB")
+    make_track(filename="/music/one.mp3", title="One")  # basename twin only
+    _add_local_playlist(db, "RIG Mix", [])
+    device, preview = _device_and_preview(db, usb)
+    mix = next(pl for pl in device.playlists if pl.name == "RIG Mix")
+
+    diff = external_drives.diff_device_playlist(db, device, mix, preview.entries)
+
+    assert diff.uncertain_members == 1  # one.mp3, unverified
+    assert diff.common == 0
+    assert diff.adds_in_library == 0  # uncertain is not counted as an add

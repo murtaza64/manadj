@@ -692,6 +692,124 @@ def _playlist_previews(
     return out
 
 
+@dataclass
+class PlaylistMembershipDiff:
+    """Dry-run membership comparison of one device playlist against a
+    local counterpart. A name-matched local playlist SUGGESTS the
+    counterpart only; it never binds. Uncertain device members are
+    excluded from every count and listed separately, because their
+    library identity is unverified."""
+
+    device_playlist_id: int
+    name: str | None
+    counterpart_status: str  # "unique-name-match" | "no-local-playlist" | "ambiguous-name"
+    counterpart_id: int | None
+    common: int = 0
+    adds_in_library: int = 0  # verified library tracks missing from the local playlist
+    adds_new: int = 0  # device members with no verified library copy at all
+    removes: int = 0  # local members absent from the device playlist
+    uncertain_members: int = 0  # unverified device members, excluded everywhere
+    order_differs: bool | None = None  # None when no unique counterpart
+
+
+def diff_device_playlist(
+    manadj_session: Any,
+    device: RekordboxDevice,
+    playlist: DevicePlaylist,
+    entries: list[PullEntry],
+) -> PlaylistMembershipDiff:
+    from backend.models import Playlist, PlaylistTrack
+
+    index, _, _ = _manadj_matchers(manadj_session)
+    entry_by_track_id = {
+        device.tracks[e.ordinal].id: e
+        for e in entries
+        if 0 <= e.ordinal < len(device.tracks)
+    }
+
+    def library_track_id(entry: PullEntry) -> int | None:
+        if entry.status != STATUS_PRESENT:
+            return None
+        hit = index.by_path.get(path_key(entry.device_path))
+        if hit is None and entry.matched_path:
+            hit = index.by_path.get(path_key(entry.matched_path))
+        return hit.id if hit is not None else None
+
+    device_member_ids: list[int] = []  # occurrence-tagged below
+    adds_in_library = 0
+    adds_new = 0
+    uncertain = 0
+    for track_id in playlist.track_ids:
+        entry = entry_by_track_id.get(track_id)
+        if entry is None:
+            uncertain += 1  # pdb row with no classifiable entry
+            continue
+        if entry.status == STATUS_UNCERTAIN:
+            uncertain += 1
+            continue
+        lib_id = library_track_id(entry)
+        if lib_id is not None:
+            device_member_ids.append(lib_id)
+            continue
+        if entry.status == STATUS_NEW:
+            adds_new += 1
+        else:
+            uncertain += 1  # duplicate/missing-file: identity unusable
+
+    counterparts = (
+        manadj_session.query(Playlist).filter(Playlist.name == playlist.name).all()
+        if playlist.name
+        else []
+    )
+    diff = PlaylistMembershipDiff(
+        device_playlist_id=playlist.id,
+        name=playlist.name,
+        counterpart_status=(
+            "unique-name-match"
+            if len(counterparts) == 1
+            else ("no-local-playlist" if not counterparts else "ambiguous-name")
+        ),
+        counterpart_id=counterparts[0].id if len(counterparts) == 1 else None,
+        adds_in_library=adds_in_library,
+        adds_new=adds_new,
+        uncertain_members=uncertain,
+    )
+    if len(counterparts) != 1:
+        return diff
+
+    local_rows = (
+        manadj_session.query(PlaylistTrack)
+        .filter(PlaylistTrack.playlist_id == counterparts[0].id)
+        .order_by(PlaylistTrack.position)
+        .all()
+    )
+    local_ids = [row.track_id for row in local_rows]
+    # Occurrence-tagged sets (order-pairing policy: k-th with k-th),
+    # same documented heuristic as the smart-diff proposal.
+    def occ(seq: list[int]) -> list[tuple[int, int]]:
+        seen: dict[int, int] = {}
+        out = []
+        for x in seq:
+            k = seen.get(x, 0)
+            seen[x] = k + 1
+            out.append((x, k))
+        return out
+
+    device_occ = occ(device_member_ids)
+    local_occ = occ(local_ids)
+    common_occ = set(device_occ) & set(local_occ)
+    diff.common = len(common_occ)
+    diff.adds_in_library = sum(1 for x in device_occ if x not in local_occ)
+    diff.removes = sum(1 for x in local_occ if x not in device_occ)
+    # Order comparison over common members only, each side in its own
+    # order. A plain sequence compare: the smart-diff proposal (move and
+    # block counts) is still a candidate, not an approved algorithm.
+    device_common = [x for x in device_occ if x in common_occ]
+    local_common = [x for x in local_occ if x in common_occ]
+    diff.order_differs = device_common != local_common
+    return diff
+
+
 def build_engine_pull_preview(
     manadj_session: Any, root: Path, destination: Path | None = None,
     verify: bool = True,
