@@ -8,6 +8,8 @@ import {
   clampLoopBeats,
   foldLoopPlayhead,
   formatLoopBeats,
+  isSilenceLoop,
+  loopFoldEnd,
   LOOP_MAX_BEATS,
   LOOP_MIN_BEATS,
   projectLoopBeats,
@@ -121,5 +123,34 @@ describe('resizeLoopBeats', () => {
   it('keeps the 3/4 ladder dyadic: 3/4 halves to 3/8, doubles to 3/2', () => {
     expect(resizeLoopBeats(0.75, 'halve')).toBe(0.375);
     expect(resizeLoopBeats(0.75, 'double')).toBe(1.5);
+  });
+});
+
+describe('silence loops (gh#424)', () => {
+  const region = { start: 100, end: 132, lengthBeats: 64 };
+
+  it('detects a region extending past the last audible sample', () => {
+    expect(isSilenceLoop(region, 110)).toBe(true);
+    expect(isSilenceLoop(region, 132)).toBe(false);
+    expect(isSilenceLoop(region, 200)).toBe(false);
+  });
+
+  it('folds at the real buffer end while the phantom clock has not started', () => {
+    expect(loopFoldEnd(region, 110, false)).toBe(110);
+  });
+
+  it('folds at the full projected end once the phantom clock runs', () => {
+    expect(loopFoldEnd(region, 110, true)).toBe(132);
+  });
+
+  it('keeps ordinary loops clamped to the buffer regardless of phantom state', () => {
+    const ordinary = { start: 10, end: 12, lengthBeats: 4 };
+    expect(loopFoldEnd(ordinary, 110, true)).toBe(12);
+    expect(loopFoldEnd(ordinary, 110, false)).toBe(12);
+  });
+
+  it('folds a past-EOF phantom position into the silence region (modulo)', () => {
+    // Phantom clock reached 140: 8 past the region end 132, wraps to 108.
+    expect(foldLoopPlayhead(140, region.start, region.end, 100)).toBeCloseTo(108, 10);
   });
 });

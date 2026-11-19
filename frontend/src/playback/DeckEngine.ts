@@ -23,7 +23,11 @@ import { isQuantizeOn } from './quantizeStore';
 import { getCueMode } from './cueModeStore';
 import { addBeats, beatPhaseTarget, beatsBetween, crossDeckLaunchTarget } from './quantize';
 import type { LaunchReference } from './quantize';
-import { foldLoopPlayhead, projectLoopBeats } from './loop';
+import { foldLoopPlayhead, isSilenceLoop, loopFoldEnd, projectLoopBeats } from './loop';
+import { extendBeatTimesPastEof } from './gridExtend';
+import { silenceLoopEntry } from '../meter/gridProjection';
+import type { PersistedLadder } from '../meter/ladder';
+import type { BeatgridData } from '../types';
 import type { LoopRegion, LoopResize } from './loop';
 import type { DeckAudioPort } from './mixer';
 import { DeckSourceNode } from './worklet/deckSourceNode';
@@ -114,6 +118,10 @@ export interface DeckSnapshot {
    * projected through the LIVE grid — `~N.N` after a re-tempo. Null when
    * no loop is active. */
   loopBeatsLabel: string | null;
+  /** gh#424: the active loop is a silence loop — its region runs past the
+   * last audible sample (structural: loop.end > buffer duration, loop.ts).
+   * False when no loop is active or the buffer is unknown. */
+  loopIsSilence: boolean;
   /** Pending auto-loop size in beats (survives Loads). */
   pendingLoopBeats: number;
   /** The loaded Track has a usable Beatgrid (auto-loop is inert without). */
@@ -143,6 +151,18 @@ export class DeckEngine {
   private pendingPlay = false;
   /** Loaded Track's Beatgrid beat times (null = gridless) — Quantize math. */
   private beatTimes: number[] | null = null;
+  /** gh#424: the full Beatgrid + persisted Metric ladder, pushed by the
+   * deck beatgrid sync observer (setMeter). The silence-loop entry needs
+   * the hypermetric projection (downbeats + ladder), which the bare
+   * beat-time array cannot supply. */
+  private beatgridData: BeatgridData | null = null;
+  private persistedLadder: PersistedLadder | null = null;
+  private silenceEntryCache: {
+    grid: BeatgridData;
+    ladder: PersistedLadder | null;
+    duration: number;
+    entry: { startSec: number; endSec: number; lengthBeats: number } | null;
+  } | null = null;
   /** The Main cue default is live until touched (ADR 0029 §2): true while
    * the cue still sits at the load-time default and nothing has played —
    * a late-arriving grid may upgrade it to the first beat. Any transport
@@ -182,6 +202,12 @@ export class DeckEngine {
    * Rescheduled on a rate change during the lead-in; cleared on any
    * stop/seek/dispose. */
   private leadInTimer: ReturnType<typeof setTimeout> | null = null;
+  /** True while a silence loop (gh#424) runs past the last audible sample:
+   * the voice ended at EOF but the loop region extends beyond it, so a
+   * silent anchor clock (the mirror of the lead-in) keeps the playhead
+   * advancing and folding inside the projected region. No audio sounds;
+   * any start/stop clears it. */
+  private phantomActive = false;
 
   /** Clock anchor: playhead position (s) at ctx time `anchorCtxTime`. */
   private anchorPosition = 0;
@@ -565,12 +591,20 @@ export class DeckEngine {
    * freezes it (cue defaults become a load-time decision again). */
   setBeatTimes(trackId: number, beatTimes: number[] | null): void {
     if (this.trackInfo?.trackId !== trackId) return;
+    this.applyBeatTimes(beatTimes);
+  }
+
+  /** Shared beat-time application for setBeatTimes/setMeter: refresh the
+   * Quantize grid, re-park the untouched load-default cue (ADR 0029 §2),
+   * and emit so hasBeatgrid/cue observers see the arrival. */
+  private applyBeatTimes(beatTimes: number[] | null): void {
     this.beatTimes = beatTimes && beatTimes.length > 0 ? beatTimes : null;
     if (
       this.cueIsLoadDefault &&
       this.loadState === 'ready' &&
       this.buffer !== null &&
-      (this.trackInfo.savedCuePoint ?? null) === null &&
+      // Callers guard on trackId first, so trackInfo is present here.
+      (this.trackInfo?.savedCuePoint ?? null) === null &&
       this.beatTimes !== null
     ) {
       const cue = this.clampTime(
@@ -583,6 +617,62 @@ export class DeckEngine {
       this.transport = { ...this.transport, cuePoint: cue, playhead: cue };
     }
     this.emit(); // hasBeatgrid (and possibly the parked cue) may have changed
+  }
+
+  /** The full Beatgrid + persisted Metric ladder for the loaded Track
+   * (gh#424), pushed by the deck beatgrid sync observer alongside the beat
+   * times. Feeds the silence-loop entry computation in transportContext().
+   * TrackId-addressed like setBeatTimes: a late push for a previous Track
+   * is ignored. */
+  setMeter(
+    trackId: number,
+    grid: BeatgridData | null,
+    ladder: PersistedLadder | null
+  ): void {
+    if (this.trackInfo?.trackId !== trackId) return;
+    this.beatgridData = grid;
+    this.persistedLadder = ladder;
+    // Keep the beat-time snapshot in step: same payload, one source of
+    // truth for the Quantize grid, with the same late-arrival cue re-park
+    // and emit as setBeatTimes.
+    this.applyBeatTimes(grid ? grid.beat_times : null);
+  }
+
+  /** The silence-loop entry region for the current grid + ladder + buffer,
+   * cached like the extended beat lattice: recomputed only when one of
+   * those inputs changes. */
+  private silenceLoopEntryRegion(): {
+    startSec: number;
+    endSec: number;
+    lengthBeats: number;
+  } | null {
+    const duration = this.buffer?.duration;
+    const grid = this.beatgridData;
+    if (!grid || duration === undefined || duration <= 0) return null;
+    const cache = this.silenceEntryCache;
+    if (
+      cache &&
+      cache.grid === grid &&
+      cache.ladder === this.persistedLadder &&
+      cache.duration === duration
+    ) {
+      return cache.entry;
+    }
+    const projected = silenceLoopEntry(grid, this.persistedLadder, duration);
+    const entry = projected
+      ? {
+          startSec: projected.entrySec,
+          endSec: projected.entrySec + projected.loopLengthSec,
+          lengthBeats: projected.loopLengthBeats,
+        }
+      : null;
+    this.silenceEntryCache = {
+      grid,
+      ladder: this.persistedLadder,
+      duration,
+      entry,
+    };
+    return entry;
   }
 
   cueDown(): void {
@@ -896,16 +986,26 @@ export class DeckEngine {
     const position = positionSeconds === undefined ? this.getPlayhead() : this.clampPlayhead(positionSeconds);
     this.slipLoop = null;
     if (positionSeconds !== undefined) this.cancelScratch(position, false);
-    const start = region ? this.clampTime(region.start) : 0;
-    const end = region ? this.clampTime(region.end) : 0;
+    // A silence-loop region (gh#424) legitimately extends past the buffer:
+    // its boundary comes from the grid projection, so only the track-domain
+    // floor is enforced here. Ordinary regions are unaffected (their callers
+    // never place a boundary past EOF).
+    const start = region ? Math.max(0, region.start) : 0;
+    const end = region ? Math.max(start, region.end) : 0;
     this.transport = { ...this.transport, playhead: position,
       loop: region && end > start ? { start, end, lengthBeats: (end - start) * (this.trackInfo?.bpm ?? 120) / 60 } : null };
     this.anchorPosition = position;
     this.anchorCtxTime = this.audio?.ctx.currentTime ?? 0;
     if (positionSeconds !== undefined && isAudioRunning(this.transport)) {
-      if (position >= (this.buffer?.duration ?? 0)) {
+      const duration = this.buffer?.duration ?? 0;
+      const loop = this.transport.loop;
+      if (position >= duration && !(loop && isSilenceLoop(loop, duration))) {
         this.transport = { ...this.transport, playing: false, previewing: false, hotCuePreviewSlot: null };
         this.stopAudio(position);
+      } else if (position >= duration) {
+        // Silence loop (gh#424): the playhead rests at EOF; the running
+        // voice's ended message anchors the phantom clock from here.
+        this.transport = { ...this.transport, playhead: position };
       } else this.startAudio(position);
     }
     this.syncLoopToSource();
@@ -1048,6 +1148,13 @@ export class DeckEngine {
       this.pitchPercent = pitchPercent;
       this.bendPercent = bendPercent;
       this.scheduleLeadInStart();
+    } else if (this.phantomActive && this.audio) {
+      // Rate change mid-phantom (gh#424): re-anchor the silent clock at the
+      // old rate and adopt the new one; the fold is rate-agnostic.
+      this.anchorPosition = this.getPlayhead(); // still at the old rate
+      this.anchorCtxTime = this.audio.ctx.currentTime;
+      this.pitchPercent = pitchPercent;
+      this.bendPercent = bendPercent;
     } else {
       this.pitchPercent = pitchPercent;
       this.bendPercent = bendPercent;
@@ -1063,6 +1170,24 @@ export class DeckEngine {
     return this.scratch !== null || isAudioRunning(this.transport);
   }
 
+  private extendedBeatTimesCache: { grid: number[]; duration: number; times: number[] } | null = null;
+
+  /** Beat lattice for transport math, extended past EOF (gh#424) so a
+   * loop-engage or quantize snap near the end projects into the silence
+   * region instead of clamping at the last stored beat. The stored grid is
+   * never mutated; the extension is cached per (grid identity, duration). */
+  private transportBeatTimes(): number[] | null {
+    if (!this.beatTimes) return null;
+    const duration = this.buffer?.duration ?? 0;
+    const cache = this.extendedBeatTimesCache;
+    if (cache && cache.grid === this.beatTimes && cache.duration === duration) return cache.times;
+    const n = this.beatTimes.length;
+    const interval = n >= 2 ? this.beatTimes[n - 1] - this.beatTimes[n - 2] : 0.5;
+    const times = extendBeatTimesPastEof(this.beatTimes, duration + 128 * interval);
+    this.extendedBeatTimesCache = { grid: this.beatTimes, duration, times };
+    return times;
+  }
+
   /** Current playhead in seconds. Cheap; safe to poll per animation frame.
    * Reads the anchor clock while a voice runs OR during the pre-start
    * lead-in (issue 07) — the lead-in has no voice yet, but the clock still
@@ -1072,7 +1197,7 @@ export class DeckEngine {
     this.syncScheduledScratch();
     if (this.scratch && this.audio) return scratchPosition(this.scratch.motion, this.audio.ctx.currentTime);
     const pending = this.pendingStart?.when !== undefined ? this.pendingStart : null;
-    if ((this.runningStartId !== null || this.leadInActive || pending) && this.audio) {
+    if ((this.runningStartId !== null || this.leadInActive || this.phantomActive || pending) && this.audio) {
       const anchorPosition = pending?.at ?? this.anchorPosition;
       const elapsed =
         (this.audio.ctx.currentTime - (pending?.when ?? this.anchorCtxTime)) * this.currentRate();
@@ -1086,10 +1211,14 @@ export class DeckEngine {
         position = foldLoopPlayhead(
           position,
           loop.start,
-          Math.min(loop.end, this.buffer?.duration ?? loop.end),
+          loopFoldEnd(loop, this.buffer?.duration ?? loop.end, this.phantomActive),
           anchorPosition
         );
       }
+      // A phantom position lives past the buffer by design; the fold above
+      // already bounds it to the silence region, so the track-domain clamp
+      // does not apply.
+      if (this.phantomActive) return position;
       return this.clampPlayhead(position);
     }
     return this.transport.playhead;
@@ -1164,10 +1293,12 @@ export class DeckEngine {
   private transportContext(): TransportContext {
     return {
       quantize: isQuantizeOn(),
-      beatTimes: this.beatTimes,
+      beatTimes: this.transportBeatTimes(),
       launchReference: this.launchReference(),
       playRate: this.currentRate(),
       cueMode: getCueMode(),
+      silenceEntry: this.silenceLoopEntryRegion(),
+      audibleDurationSec: this.buffer?.duration ?? null,
     };
   }
 
@@ -1221,7 +1352,7 @@ export class DeckEngine {
       this.slipLoop = null;
     } else if (loopControl && !synced.loop && next.loop && this.slipMode) {
       this.slipLoop = { position: synced.playhead,
-        time: (this.runningStartId !== null || this.leadInActive) && this.audio
+        time: (this.runningStartId !== null || this.leadInActive || this.phantomActive) && this.audio
           ? this.audio.ctx.currentTime : null };
     } else if (this.slipLoop && (!next.loop || event.type === 'pause'
       || effects.some(e => e.type === 'stop')
@@ -1335,6 +1466,7 @@ export class DeckEngine {
     // negative) or crosses into the track (>= 0).
     this.clearPendingLaunch();
     this.clearLeadIn();
+    this.clearPhantom();
     const { ctx, input } = this.ensureAudio();
     // A may request resume before B's already-queued key is dispatched.
     if (ctx.state !== 'running') DeckEngine.gestureClockFloors.set(ctx, ctx.currentTime);
@@ -1416,6 +1548,12 @@ export class DeckEngine {
     }, Math.max(0, remainingWallMs));
   }
 
+  /** Leave phantom mode (gh#424): any start/stop/seek lands a real voice
+   * or rests the transport, so the silent past-EOF clock is done. */
+  private clearPhantom(): void {
+    this.phantomActive = false;
+  }
+
   /** Cancel any pending lead-in (a stop, a fresh start, or dispose). */
   private clearLeadIn(): void {
     this.leadInActive = false;
@@ -1433,12 +1571,17 @@ export class DeckEngine {
     // A stop during the lead-in cancels the scheduled entry: the deck rests
     // at its (possibly still-negative) pre-start position.
     this.clearLeadIn();
+    // A phantom rest position lives inside the silence region past EOF;
+    // the fold already bounds it, so the track-domain clamp must not pull
+    // it back to the buffer end.
+    const wasPhantom = this.phantomActive;
+    this.clearPhantom();
     if (this.runningStartId !== null) {
       // The worklet declick-fades internally (its stop splice).
       this.sourceNode?.stop();
       this.runningStartId = null;
     }
-    this.transport = { ...this.transport, playhead: this.clampPlayhead(at) };
+    this.transport = { ...this.transport, playhead: wasPhantom ? at : this.clampPlayhead(at) };
   }
 
   /** One pending gesture-retry at a time. */
@@ -1544,6 +1687,12 @@ export class DeckEngine {
       node.setLoop(null);
       return;
     }
+    // A silence loop (gh#424) has no sample wrap: the voice must run to
+    // EOF and end so the phantom clock can take over past the buffer.
+    if (isSilenceLoop(loop, this.buffer.duration)) {
+      node.setLoop(null);
+      return;
+    }
     const sampleRate = this.buffer.sampleRate;
     node.setLoop({
       startFrames: Math.round(loop.start * sampleRate),
@@ -1601,6 +1750,18 @@ export class DeckEngine {
     this.syncScheduledScratch();
     if (this.runningStartId !== startId) return; // raced a seek/stop
     this.runningStartId = null;
+    // Silence loop (gh#424): the region extends past EOF, so EOF is not the
+    // end of the transport. Anchor the silent clock at the buffer end and
+    // keep playing; getPlayhead folds the past-EOF clock into the region.
+    const loop = this.transport.loop;
+    const duration = this.buffer?.duration ?? 0;
+    if (loop && this.audio && isSilenceLoop(loop, duration)) {
+      this.phantomActive = true;
+      this.anchorPosition = duration;
+      this.anchorCtxTime = this.audio.ctx.currentTime;
+      this.emit();
+      return;
+    }
     // The clock can no longer be read from the source; rest the playhead
     // at the end of the track before reducing.
     this.transport = {
@@ -1658,6 +1819,10 @@ export class DeckEngine {
       loopBeatsLabel: this.transport.loop
         ? projectLoopBeats(this.transport.loop, this.beatTimes)
         : null,
+      loopIsSilence:
+        this.transport.loop !== null &&
+        this.buffer !== null &&
+        isSilenceLoop(this.transport.loop, this.buffer.duration),
       pendingLoopBeats: this.transport.pendingLoopBeats,
       hasBeatgrid: (this.beatTimes?.length ?? 0) >= 2,
       stemsLoaded: this.stemBuffers !== null,

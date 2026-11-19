@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { BeatgridData } from '../types';
 import { DeckEngine } from './DeckEngine';
 import { _clearBufferCacheForTests, putCachedBuffer } from './bufferCache';
 import type { DeckAudioPort } from './mixer';
@@ -8,6 +9,7 @@ import type { DeckAudioPort } from './mixer';
 // concern; the real DeckSourceNode needs an AudioWorklet the test env lacks.
 const startCalls: { positionFrames: number; startId: number }[] = [];
 const stopCalls: number[] = [];
+const nodeInstances: { onEnded: ((startId: number) => void) | null }[] = [];
 vi.mock('./worklet/deckSourceNode', () => {
   class FakeDeckSourceNode {
     static create = vi.fn(async (ctx: AudioContext) => new FakeDeckSourceNode(ctx));
@@ -15,6 +17,7 @@ vi.mock('./worklet/deckSourceNode', () => {
     onEnded: ((startId: number) => void) | null = null;
     constructor(ctx: AudioContext) {
       this.ctx = ctx;
+      nodeInstances.push(this);
     }
     loadTrack(): void {}
     start(positionFrames: number, startId: number): void {
@@ -284,6 +287,99 @@ describe('DeckEngine active loop (looping 03)', () => {
     engine.toggleLoop();
     engine.pause(); // already paused: still must not clear the loop
     expect(engine.getSnapshot().loop).not.toBeNull();
+  });
+});
+
+describe('silence-loop entry routing (gh#424)', () => {
+  afterEach(() => _clearBufferCacheForTests());
+
+  const fakeBuffer = {
+    duration: 180,
+    sampleRate: 44100,
+    numberOfChannels: 1,
+    getChannelData: () => new Float32Array(44100),
+  } as unknown as AudioBuffer;
+
+  /** 120 BPM 4/4 from 0s across 180s: beats 0..179.5, downbeats every 2s.
+   * Default duple ladder: 64-beat boundaries at 0, 32, ..., 160, 192. */
+  const grid120: BeatgridData = {
+    tempo_changes: [
+      { start_time: 0, bpm: 120, time_signature_num: 4, time_signature_den: 4, bar_position: 1 },
+    ],
+    beat_times: Array.from({ length: 360 }, (_, i) => i * 0.5),
+    downbeat_times: Array.from({ length: 90 }, (_, i) => i * 2),
+  };
+
+  async function loadedEngine(trackId: number) {
+    putCachedBuffer(trackId, fakeBuffer);
+    const engine = new DeckEngine(unusedPort);
+    await engine.load({
+      trackId,
+      audioUrl: 'http://127.0.0.1:1/none',
+      bpm: 120,
+      beatTimes: Promise.resolve(grid120.beat_times),
+    });
+    return engine;
+  }
+
+  it('an engage crossing the last audible sample installs the hypermetric silence region', async () => {
+    const engine = await loadedEngine(40);
+    engine.setMeter(40, grid120, null);
+    engine.seek(179.2);
+    engine.toggleLoop();
+    const s = engine.getSnapshot();
+    // Natural 4-beat region would run 179.5..181.5, past the 180s buffer.
+    expect(s.loop).not.toBeNull();
+    expect(s.loop!.start).toBeCloseTo(192, 10);
+    expect(s.loop!.end).toBeCloseTo(224, 10);
+    expect(s.loop!.lengthBeats).toBe(64);
+    expect(engine.getPlayhead()).toBeCloseTo(179.2, 10);
+  });
+
+  it('an engage inside the audio keeps the natural region', async () => {
+    const engine = await loadedEngine(41);
+    engine.setMeter(41, grid120, null);
+    engine.seek(10.1);
+    engine.toggleLoop();
+    const s = engine.getSnapshot();
+    expect(s.loop!.start).toBeCloseTo(10.0, 10);
+    expect(s.loop!.end).toBeCloseTo(12.0, 10);
+    expect(s.loop!.lengthBeats).toBe(4);
+  });
+
+  it('a null grid push leaves the deck gridless and the toggle inert', async () => {
+    const engine = await loadedEngine(42);
+    engine.setMeter(42, null, null);
+    engine.seek(179.2);
+    engine.toggleLoop();
+    expect(engine.getSnapshot().loop).toBeNull();
+    expect(engine.getSnapshot().hasBeatgrid).toBe(false);
+  });
+
+  it('exposes loopIsSilence on the snapshot for a silence loop only', async () => {
+    const engine = await loadedEngine(44);
+    engine.setMeter(44, grid120, null);
+    engine.seek(179.2);
+    engine.toggleLoop();
+    expect(engine.getSnapshot().loopIsSilence).toBe(true);
+    engine.toggleLoop();
+    engine.seek(10.1);
+    engine.toggleLoop();
+    expect(engine.getSnapshot().loopIsSilence).toBe(false);
+    engine.toggleLoop();
+    expect(engine.getSnapshot().loopIsSilence).toBe(false);
+  });
+
+  it('ignores a meter push addressed to another track', async () => {
+    const engine = await loadedEngine(43);
+    engine.setMeter(99, grid120, null);
+    engine.seek(179.2);
+    engine.toggleLoop();
+    // Load-time grid has no ladder projection pushed: no entry, natural
+    // (unclamped) region stands.
+    const s = engine.getSnapshot();
+    expect(s.loop!.start).toBeCloseTo(179.0, 10);
+    expect(s.loop!.end).toBeCloseTo(181.0, 10);
   });
 });
 
@@ -989,5 +1085,120 @@ describe('deferred quantized launch under main-thread jank', () => {
     const phase = (playhead: number) => ((playhead % 0.5) + 0.5) % 0.5;
     const phaseGap = Math.abs(phase(peer.getPlayhead()) - phase(launcher.getPlayhead()));
     expect(Math.min(phaseGap, 0.5 - phaseGap)).toBeLessThan(0.02);
+  });
+});
+
+describe('silence-loop phantom transport (gh#424)', () => {
+  const fakeBuffer = {
+    duration: 180,
+    sampleRate: 44100,
+    numberOfChannels: 1,
+    getChannelData: () => new Float32Array(44100),
+  } as unknown as AudioBuffer;
+
+  function fakeAudioPort() {
+    const ctx = {
+      currentTime: 0,
+      state: 'running',
+      resume: () => Promise.resolve(),
+    } as { currentTime: number; state: AudioContextState; resume: () => Promise<void> };
+    const input = {} as AudioNode;
+    const port: DeckAudioPort = {
+      ensureAudio: () => ({ ctx: ctx as unknown as AudioContext, input }),
+    };
+    return { port, ctx };
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    startCalls.length = 0;
+    stopCalls.length = 0;
+    nodeInstances.length = 0;
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    _clearBufferCacheForTests();
+  });
+
+  async function phantomEngine(port: DeckAudioPort) {
+    putCachedBuffer(70, fakeBuffer);
+    const engine = new DeckEngine(port);
+    await engine.load({
+      trackId: 70,
+      audioUrl: 'http://127.0.0.1:1/none',
+      bpm: 120,
+      beatTimes: Promise.resolve(Array.from({ length: 360 }, (_, i) => i * 0.5)),
+    });
+    // Region [170, 210): projected hypermetric boundary past the 180s
+    // buffer. Engage after the seek: a seek cancels the active loop.
+    engine.seek(179.5);
+    engine.setLoopRegion({ start: 170, end: 210 });
+    engine.play();
+    await vi.advanceTimersByTimeAsync(0); // flush the async node build
+    return engine;
+  }
+
+  it('keeps the transport running past EOF and folds the playhead into the region', async () => {
+    const { port, ctx } = fakeAudioPort();
+    const engine = await phantomEngine(port);
+    expect(startCalls).toHaveLength(1);
+    // The voice runs off the end at ctx time 0.
+    nodeInstances[nodeInstances.length - 1].onEnded?.(startCalls[0].startId);
+    // No stop, no reducer 'ended': the transport keeps playing silently.
+    expect(stopCalls).toHaveLength(0);
+    expect(engine.getSnapshot().playing).toBe(true);
+    expect(engine.getPlayhead()).toBeCloseTo(180, 6);
+    // 20s past EOF: inside the region, not yet wrapped.
+    ctx.currentTime = 20;
+    expect(engine.getPlayhead()).toBeCloseTo(200, 6);
+    // 45s past EOF: clock at 225, 15s past the region end, folded to 185.
+    ctx.currentTime = 45;
+    expect(engine.getPlayhead()).toBeCloseTo(185, 6);
+    // Many wraps stay exact (modulo): 210 + 3*40 + 2 -> 172.
+    ctx.currentTime = 30 + 3 * 40 + 2;
+    expect(engine.getPlayhead()).toBeCloseTo(172, 6);
+  });
+
+  it('a natural EOF without a silence loop still stops at the buffer end', async () => {
+    const { port } = fakeAudioPort();
+    putCachedBuffer(71, fakeBuffer);
+    const engine = new DeckEngine(port);
+    await engine.load({
+      trackId: 71,
+      audioUrl: 'http://127.0.0.1:1/none',
+      bpm: 120,
+      beatTimes: Promise.resolve(Array.from({ length: 360 }, (_, i) => i * 0.5)),
+    });
+    engine.setLoopRegion({ start: 100, end: 104 }); // ordinary in-audio loop
+    engine.seek(179.5);
+    engine.play();
+    await vi.advanceTimersByTimeAsync(0);
+    nodeInstances[nodeInstances.length - 1].onEnded?.(startCalls[0].startId);
+    expect(engine.getSnapshot().playing).toBe(false);
+    expect(engine.getPlayhead()).toBeCloseTo(180, 6);
+  });
+
+  it('a pause mid-phantom rests inside the region and freezes the clock', async () => {
+    const { port, ctx } = fakeAudioPort();
+    const engine = await phantomEngine(port);
+    nodeInstances[nodeInstances.length - 1].onEnded?.(startCalls[0].startId);
+    ctx.currentTime = 20; // phantom at 200
+    engine.pause();
+    expect(engine.getSnapshot().playing).toBe(false);
+    expect(engine.getPlayhead()).toBeCloseTo(200, 6);
+    ctx.currentTime = 40;
+    expect(engine.getPlayhead()).toBeCloseTo(200, 6); // frozen
+  });
+
+  it('a rate change mid-phantom re-anchors the silent clock', async () => {
+    const { port, ctx } = fakeAudioPort();
+    const engine = await phantomEngine(port);
+    nodeInstances[nodeInstances.length - 1].onEnded?.(startCalls[0].startId);
+    ctx.currentTime = 10; // phantom at 190
+    engine.setPitch(25); // +25% (the clamp): 1.25x
+    ctx.currentTime = 20; // 10 wall seconds at 1.25x = 12.5 track seconds
+    expect(engine.getPlayhead()).toBeCloseTo(202.5, 6);
+    ctx.currentTime = 30; // 190 + 25 = 215 -> folded to 175
+    expect(engine.getPlayhead()).toBeCloseTo(175, 6);
   });
 });

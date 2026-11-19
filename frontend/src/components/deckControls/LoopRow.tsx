@@ -59,6 +59,7 @@ export function LoopRow({
   const loopBeatsLabel = useDeckSnapshot((s) => s.loopBeatsLabel);
   const pendingBeats = useDeckSnapshot((s) => s.pendingLoopBeats);
   const hasBeatgrid = useDeckSnapshot((s) => s.hasBeatgrid);
+  const loopIsSilence = useDeckSnapshot((s) => s.loopIsSilence);
 
   // Active loop: the displayed size projects the audible region through the
   // LIVE grid (ADR 0027 §6) — `~N.N` after a re-tempo. Idle: pending size.
@@ -66,7 +67,9 @@ export function LoopRow({
     ? (loopBeatsLabel ?? formatLoopBeats(loop.lengthBeats))
     : formatLoopBeats(pendingBeats);
   const title = loop
-    ? `Release the loop${titleSuffix}`
+    ? loopIsSilence
+      ? `Release the silence loop past the end of the track${titleSuffix}`
+      : `Release the loop${titleSuffix}`
     : hasBeatgrid
       ? `Loop ${label} beats from here${titleSuffix}`
       : 'Auto-loop needs a beatgrid';
@@ -82,16 +85,19 @@ export function LoopRow({
         {halveKbd}
       </button>
       <button
-        className={`player-button deck-loop-toggle${loop ? ' active' : ''}`}
+        className={`player-button deck-loop-toggle${loop ? ' active' : ''}${loopIsSilence ? ' silence' : ''}`}
         disabled={!ready || !hasBeatgrid}
         onClick={() => {
           if (deckReadyNow(engine, loadedTrack?.id ?? null)) engine.toggleLoop();
         }}
         title={title}
-        aria-label={`Loop ${label}`}
+        aria-label={
+          loopIsSilence ? `Silence loop ${label} past the end of the track` : `Loop ${label}`
+        }
       >
         <LoopIcon />
         {label}
+        {loopIsSilence && <span className="deck-loop-eof">EOF</span>}
         {kbd}
       </button>
       <button
