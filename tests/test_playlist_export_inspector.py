@@ -1,3 +1,4 @@
+from pathlib import Path
 from backend.models import Playlist, PlaylistTrack, Track
 from backend.sync_status.models import HotCueValue, SurfaceTrackRef, TrackFields
 import pytest
@@ -306,6 +307,6 @@ def test_full_export_factory_uses_only_the_validated_destination_not_later_confi
     monkeypatch.setattr('backend.config.get_config', no_config)
     service = playlist_full_export.build_playlist_full_export_service(db, destination_paths={'rekordbox': '/fixture/validated'})
     receipt = service.export('Set', ['rekordbox'])
-    assert observed == ['/fixture/validated', '/fixture/validated']
+    assert observed == [str(Path('/fixture/validated'))] * 2  # str(Path) is backslashed on Windows
     assert receipt['results'][0]['target'] == 'rekordbox'
     assert receipt['results'][0]['tracks_exported'] == 1

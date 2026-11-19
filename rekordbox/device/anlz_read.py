@@ -178,7 +178,8 @@ def _convert_song_structure(body: Any) -> AnlzSongStructure | None:
 def read_anlz(path: str | Path) -> AnlzData:
     """Parse one ANLZ file (.DAT, .EXT, or .2EX)."""
     path = Path(path)
-    root = RekordboxAnlz.from_file(str(path))
+    # from_bytes: from_file leaves the handle open, which blocks deleting the file on Windows.
+    root = RekordboxAnlz.from_bytes(path.read_bytes())
 
     data = AnlzData(path=str(path), audio_path=None, len_file=root.len_file)
     tags = RekordboxAnlz.SectionTags

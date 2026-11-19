@@ -1,5 +1,6 @@
 """Production filesystem/transaction seam over independent migrated decoy libraries."""
 import json
+import os
 import shutil
 import time
 from uuid import uuid4
@@ -10,6 +11,11 @@ from backend.peer_sync.folder import FolderTransport, MARKER
 from tests import test_peer_session_exchange as exchange
 from tests.test_peer_history_integration import history
 from tests.test_peer_session_exchange import bind, export, post, seed, setup_pair
+
+# The folder transport is POSIX-only by design (no-follow directory descriptors;
+# see folder.directory_flags): on Windows it reports folder_transport_unsupported_platform.
+posix_folder_transport = pytest.mark.skipif(
+    os.name != "posix", reason="folder transport needs POSIX no-follow directory descriptors")
 
 
 @pytest.fixture
@@ -34,6 +40,7 @@ def copy_artifacts(source, target):
             shutil.copytree(directory, target / directory.name, dirs_exist_ok=True)
 
 
+@posix_folder_transport
 def test_automatic_folder_partial_restart_binding_normal_history_ack_noecho(instance):
     a, b, ai, bi, sid = setup_pair(instance)
     post(a, "sources", {"replica_id": bi["replica_id"], "label": "Own B"})
@@ -79,6 +86,7 @@ def test_automatic_folder_partial_restart_binding_normal_history_ack_noecho(inst
     assert not (source / "complete.json").exists()
 
 
+@posix_folder_transport
 def test_unknown_source_never_autoaccepted_and_disable_never_opens_root(instance, monkeypatch):
     a, b, ai, _, sid = setup_pair(instance)
     from backend.peer_sync.models import SyncSource
@@ -129,6 +137,7 @@ def test_root_authorization_is_explicit_and_no_follow(instance, kind):
     post(peer, "transport", {"root": str(root), "enabled": True}, status=422)
 
 
+@posix_folder_transport
 @pytest.mark.parametrize("kind", ["digest", "file_symlink", "dir_symlink", "oversized", "complete", "duplicate_keys"])
 def test_bad_artifact_isolated_from_another_selected_session(instance, kind):
     a, b, _, _, sid = setup_pair(instance)
@@ -170,6 +179,7 @@ def test_bad_artifact_isolated_from_another_selected_session(instance, kind):
     assert history(b).get("/api/sessions").json() == []
 
 
+@posix_folder_transport
 def test_offline_root_never_recreated_and_worker_stops(instance):
     from backend.peer_sync.folder_worker import FolderWorker
     a = instance("worker")
@@ -185,6 +195,7 @@ def test_offline_root_never_recreated_and_worker_stops(instance):
     assert not thread.is_alive() and worker.thread is None
 
 
+@posix_folder_transport
 @pytest.mark.parametrize("crash", ["publication_cursor", "publication_partial", "receipt_cursor", "ack"])
 def test_crash_windows_recover_immutable_bytes_and_durable_receipt(instance, monkeypatch, crash):
     from backend.peer_sync import folder
@@ -245,6 +256,7 @@ def test_crash_windows_recover_immutable_bytes_and_durable_receipt(instance, mon
     assert tb.status()["publications"] == []
 
 
+@posix_folder_transport
 def test_real_polling_workers_deliver_and_materialize_without_manual_cycle(instance):
     from backend.peer_sync.folder_worker import FolderWorker
     a, b, ai, bi, sid = setup_pair(instance)
@@ -274,6 +286,7 @@ def test_real_polling_workers_deliver_and_materialize_without_manual_cycle(insta
             worker.stop()
 
 
+@posix_folder_transport
 def test_accepted_namespace_conflicts_preserved_and_unaccepted_ack_does_not_count(instance):
     from backend.peer_sync.contracts import digest
     from backend.peer_sync.models import SyncConflict
@@ -317,6 +330,7 @@ def test_transport_api_rejects_untrusted_and_invalid_configuration_before_mutati
     assert FolderTransport(peer.sessions).status()["state"] == "unconfigured"
 
 
+@posix_folder_transport
 def test_bounded_round_robin_cursor_survives_restart_without_stranding_later_artifacts(instance):
     a, b, _, _, sid = setup_pair(instance)
     ta, ra = configured(a)
@@ -336,6 +350,7 @@ def test_bounded_round_robin_cursor_survives_restart_without_stranding_later_art
     assert tb.status()["publications"] == []
 
 
+@posix_folder_transport
 def test_pinned_folder_marker_replacement_is_not_adopted(instance):
     a = instance("marker-replacement")
     post(a, "identity")
@@ -349,6 +364,7 @@ def test_pinned_folder_marker_replacement_is_not_adopted(instance):
     post(a, "transport", {"root": str(root), "enabled": True}, status=409)
 
 
+@posix_folder_transport
 def test_missing_posix_flags_do_not_break_import_or_disabled_transport(instance, monkeypatch):
     import importlib
     import os
@@ -371,6 +387,7 @@ def test_missing_posix_flags_do_not_break_import_or_disabled_transport(instance,
     assert before == list(root.iterdir())
 
 
+@posix_folder_transport
 def test_inflight_cycle_cannot_overwrite_operator_disable_and_restart_is_honest(instance, monkeypatch):
     from backend.peer_sync.models import FolderConfig
     a = instance("disable-interleave")
@@ -394,6 +411,7 @@ def test_inflight_cycle_cannot_overwrite_operator_disable_and_restart_is_honest(
     assert restarted.run_once()["state"] == "ready"
 
 
+@posix_folder_transport
 @pytest.mark.parametrize("failure", [False, True])
 @pytest.mark.parametrize("reenable", [False, True])
 def test_configuration_generation_fences_late_success_and_root_error(instance, monkeypatch, failure, reenable):

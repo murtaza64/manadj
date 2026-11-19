@@ -1,5 +1,6 @@
 """Standalone API and real SQLite, with fake external writes only."""
 
+import os
 import base64
 import json
 import multiprocessing
@@ -184,8 +185,9 @@ def test_context_private_durable_store_and_api_contract(world):
     }
     assert report["status"] == "filed" and report["batch_id"] is None
     assert service.storage == world.sidecar / "feedback"
-    assert service.storage.stat().st_mode & 0o777 == 0o700
-    assert service.db_path.stat().st_mode & 0o777 == 0o600
+    if os.name != "nt":  # Windows has no POSIX permission bits (stat reports 0o666/0o777)
+        assert service.storage.stat().st_mode & 0o777 == 0o700
+        assert service.db_path.stat().st_mode & 0o777 == 0o600
     restarted = world.make(path=service.workspace.path)
     assert restarted.list()["reports"] == [report]
     assert (

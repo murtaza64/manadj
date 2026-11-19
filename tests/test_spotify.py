@@ -291,7 +291,8 @@ def test_connect_flow(
     dotenv = env / ".env"
     text = dotenv.read_text()
     assert f"{CLIENT_ID_KEY}={CLIENT_ID}" in text and f"{REFRESH_TOKEN_KEY}=rt" in text
-    assert stat.S_IMODE(dotenv.stat().st_mode) == 0o600
+    if os.name != "nt":  # Windows has no POSIX permission bits
+        assert stat.S_IMODE(dotenv.stat().st_mode) == 0o600
 
     # a state can't be replayed
     ok, _, message = _callback(conn, state=state, code=code)
