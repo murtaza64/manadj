@@ -1266,3 +1266,60 @@ def test_membership_diff_excludes_uncertain(db: Session, make_track, tmp_path: P
     assert diff.uncertain_members == 1  # one.mp3, unverified
     assert diff.common == 0
     assert diff.adds_in_library == 0  # uncertain is not counted as an add
+
+
+def test_membership_diff_uncertain_makes_removes_provisional(
+    db: Session, make_track, tmp_path: Path
+):
+    # Local playlist holds A; the device playlist has a member that COULD
+    # be A (same file name, different bytes: unverified). The diff must
+    # not report A as a confirmed remove: removes stay provisional while
+    # any device member is unverified.
+    usb = make_rekordbox_usb_with_playlists(tmp_path / "RB")
+    local_a = make_track(filename="/music/one.mp3", title="One")  # basename twin of device one.mp3
+    _add_local_playlist(db, "RIG Mix", [local_a.id])
+    device, preview = _device_and_preview(db, usb)
+    mix = next(pl for pl in device.playlists if pl.name == "RIG Mix")
+
+    diff = external_drives.diff_device_playlist(db, device, mix, preview.entries)
+
+    assert diff.uncertain_members == 1  # device one.mp3, unverified
+    assert diff.common == 0  # nothing verified in common
+    assert diff.removes == 1  # local_a has no VERIFIED device counterpart
+    assert diff.removes_provisional is True  # ...but it might be the uncertain member
+
+
+def test_membership_diff_removes_confirmed_only_when_all_verified(
+    db: Session, make_track, tmp_path: Path
+):
+    usb = make_rekordbox_usb_with_playlists(tmp_path / "RB")
+    two = make_track(filename="/Contents/two.mp3", title="Two")
+    three = make_track(filename="/Contents/three.mp3", title="Three")
+    held_elsewhere = make_track(filename="/music/elsewhere.mp3", title="Elsewhere")
+    _add_local_playlist(db, "RIG New", [two.id, three.id, held_elsewhere.id])
+    device, preview = _device_and_preview(db, usb)
+    new_pl = next(pl for pl in device.playlists if pl.name == "RIG New")
+
+    diff = external_drives.diff_device_playlist(db, device, new_pl, preview.entries)
+
+    assert diff.uncertain_members == 0  # every device member resolved (2,3 verified; 1 new)
+    assert diff.removes == 1
+    assert diff.removes_provisional is False  # confirmed: nothing unverified left
+
+
+def test_playlist_rollup_flags_folder_gap(db: Session, tmp_path: Path):
+    usb = make_rekordbox_usb_with_playlists(tmp_path / "RB")
+    preview = external_drives.build_pull_preview(db, usb)
+    mix = next(pl for pl in preview.playlists if pl.name == "RIG Mix")
+    assert mix.folder_path == "RIG"
+    assert mix.folder_not_representable is True  # surfaced, never auto-resolved
+
+
+def test_router_membership_in_response(client: TestClient, tmp_path: Path):
+    usb = make_rekordbox_usb_with_playlists(tmp_path / "RB")
+    response = client.post("/api/external-drives/preview", json={"root": str(usb)})
+    assert response.status_code == 200
+    mix = response.json()["playlists"][0]
+    assert mix["folder_not_representable"] is True
+    assert mix["membership"]["counterpart_status"] == "no-local-playlist"
+    assert mix["membership"]["removes_provisional"] is False

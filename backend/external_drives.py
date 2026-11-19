@@ -307,6 +307,15 @@ class PlaylistPreview:
     present_count: int
     uncertain_count: int
     other_count: int  # duplicate/missing-file/unresolvable members
+    # Dry-run membership comparison against the SUGGESTED local
+    # counterpart (name-only; see PlaylistMembershipDiff). None when the
+    # diff could not be computed.
+    membership: "PlaylistMembershipDiff | None" = None
+    # True when this playlist sits inside a device folder: the local
+    # playlist model is flat and CANNOT represent the hierarchy. This is
+    # surfaced as an explicit gap for the user/design to resolve; the
+    # code must not auto-prefix names or silently drop the folder.
+    folder_not_representable: bool = False
 
 
 @dataclass
@@ -642,6 +651,17 @@ def build_rekordbox_pull_preview(
         device_playlists=device.playlists,
     )
     preview.playlists = _playlist_previews(device, entries)
+    device_by_id = {pl.id: pl for pl in device.playlists}
+    for rollup in preview.playlists:
+        node = device_by_id.get(rollup.id)
+        if node is None:
+            continue
+        try:
+            rollup.membership = diff_device_playlist(
+                manadj_session, device, node, entries
+            )
+        except Exception:  # a local-db hiccup must not kill the pull preview
+            log.warning("membership diff failed for playlist %s", node.id, exc_info=True)
     return preview
 
 
@@ -687,6 +707,7 @@ def _playlist_previews(
                 present_count=counts[STATUS_PRESENT],
                 uncertain_count=counts[STATUS_UNCERTAIN],
                 other_count=counts["other"],
+                folder_not_representable=bool(folder_path(node)),
             )
         )
     return out
@@ -707,7 +728,12 @@ class PlaylistMembershipDiff:
     common: int = 0
     adds_in_library: int = 0  # verified library tracks missing from the local playlist
     adds_new: int = 0  # device members with no verified library copy at all
-    removes: int = 0  # local members absent from the device playlist
+    removes: int = 0  # local members with no verified device counterpart
+    # True whenever any device member is unverified: an uncertain device
+    # member COULD be one of the "removed" local tracks (identity
+    # unproven), so every remove is then provisional, never a confirmed
+    # removal. The UI must not show removes as settled while this is set.
+    removes_provisional: bool = False
     uncertain_members: int = 0  # unverified device members, excluded everywhere
     order_differs: bool | None = None  # None when no unique counterpart
 
@@ -801,6 +827,7 @@ def diff_device_playlist(
     diff.common = len(common_occ)
     diff.adds_in_library = sum(1 for x in device_occ if x not in local_occ)
     diff.removes = sum(1 for x in local_occ if x not in device_occ)
+    diff.removes_provisional = diff.removes > 0 and diff.uncertain_members > 0
     # Order comparison over common members only, each side in its own
     # order. A plain sequence compare: the smart-diff proposal (move and
     # block counts) is still a candidate, not an approved algorithm.

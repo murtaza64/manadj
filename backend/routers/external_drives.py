@@ -59,6 +59,18 @@ class PullEntryOut(BaseModel):
     matched_path: str | None
 
 
+class MembershipOut(BaseModel):
+    counterpart_status: str
+    counterpart_id: int | None
+    common: int
+    adds_in_library: int
+    adds_new: int
+    removes: int
+    removes_provisional: bool
+    uncertain_members: int
+    order_differs: bool | None
+
+
 class PlaylistOut(BaseModel):
     id: int
     name: str | None
@@ -69,6 +81,8 @@ class PlaylistOut(BaseModel):
     present_count: int
     uncertain_count: int
     other_count: int
+    membership: MembershipOut | None = None
+    folder_not_representable: bool = False
 
 
 class PreviewResponse(BaseModel):
@@ -99,7 +113,13 @@ def _preview_out(preview: external_drives.PullPreview) -> PreviewResponse:
         default_destination=preview.default_destination,
         fingerprint=preview.fingerprint,
         entries=[PullEntryOut(**vars(e)) for e in preview.entries],
-        playlists=[PlaylistOut(**vars(pl)) for pl in preview.playlists],
+        playlists=[
+            PlaylistOut(
+                **{k: v for k, v in vars(pl).items() if k != "membership"},
+                membership=MembershipOut(**vars(pl.membership)) if pl.membership else None,
+            )
+            for pl in preview.playlists
+        ],
     )
 
 
