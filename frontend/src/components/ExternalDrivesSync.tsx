@@ -4,6 +4,7 @@ import type {
   ExternalDrive,
   ExternalDrivePreview,
   ExternalDriveImportResult,
+  ExternalDrivePreviewPlaylist,
   ExternalDrivePullEntry,
 } from '../api/client';
 import KeyDisplay from './KeyDisplay';
@@ -102,6 +103,11 @@ export function ExternalDrivesSync() {
   const [filter, setFilter] = useState('');
   const [selected, setSelected] = useState<ReadonlySet<number>>(new Set());
   const [error, setError] = useState<string | null>(null);
+  // Editable local name per device playlist (keyed by device playlist id),
+  // prefilled with the device name so a conflict is resolved by the user,
+  // never by silently merging.
+  const [playlistNames, setPlaylistNames] = useState<Record<number, string>>({});
+  const [importingPlaylistId, setImportingPlaylistId] = useState<number | null>(null);
   // Monotonic token: every async preview checks it before applying, so a
   // response racing a cancel, a failure, or a newer preview is dropped
   // instead of resurrecting a stale plan.
@@ -139,6 +145,9 @@ export function ExternalDrivesSync() {
       if (gen !== previewGen.current) return;
       setDestination(fast.default_destination ?? '');
       setSelected(newOrdinals(fast));
+      setPlaylistNames(
+        Object.fromEntries((fast.playlists ?? []).map((pl) => [pl.id, pl.name ?? '']))
+      );
       setPhase({ step: 'preview', drive, preview: fast, verifying: true });
       // Then content verification; rows refine in place when it lands.
       const full = await api.externalDrives.preview(drive.root, undefined, true);
@@ -211,6 +220,63 @@ export function ExternalDrivesSync() {
       }
     }
   }, [phase, destination, refresh, selected]);
+
+  const runPlaylistImport = useCallback(
+    async (playlist: ExternalDrivePreviewPlaylist) => {
+      if (phase.step !== 'preview' || phase.verifying) return;
+      const { drive, preview } = phase;
+      setError(null);
+      setImportingPlaylistId(playlist.id);
+      setPhase({ step: 'importing', drive, preview });
+      try {
+        // Same binding discipline as the track import: re-preview verified
+        // with the destination; a changed plan swaps in for fresh review
+        // and the server fingerprint refuses anything that slips past.
+        const bound = await api.externalDrives.preview(drive.root, destination || undefined);
+        const planOf = (p: ExternalDrivePreview) =>
+          p.entries.map((e) => `${e.ordinal}:${e.device_path}:${e.status}`).join('\n') +
+          '\n' +
+          (p.playlists ?? [])
+            .map((pl) => `${pl.id}:${pl.name}:${pl.track_count}`)
+            .join('\n');
+        if (planOf(bound) !== planOf(preview)) {
+          setError(
+            'The drive or library changed since this preview; review the refreshed plan before importing.'
+          );
+          setSelected(newOrdinals(bound));
+          setPlaylistNames(
+            Object.fromEntries((bound.playlists ?? []).map((pl) => [pl.id, pl.name ?? '']))
+          );
+          setPhase({ step: 'preview', drive, preview: bound, verifying: false });
+          return;
+        }
+        const editedName = (playlistNames[playlist.id] ?? '').trim();
+        const result = await api.externalDrives.import({
+          root: drive.root,
+          destination: destination || undefined,
+          confirm: true,
+          preview_fingerprint: bound.fingerprint,
+          create_playlist_id: playlist.id,
+          ...(editedName && editedName !== (playlist.name ?? '')
+            ? { playlist_name: editedName }
+            : {}),
+        });
+        setPhase({ step: 'done', drive, result });
+        refresh();
+      } catch (e) {
+        const message = e instanceof Error ? e.message : 'Import failed';
+        setError(message);
+        if (message.includes('changed since the preview')) {
+          setPhase({ step: 'idle' });
+        } else {
+          setPhase({ step: 'preview', drive, preview, verifying: false });
+        }
+      } finally {
+        setImportingPlaylistId(null);
+      }
+    },
+    [phase, destination, refresh, playlistNames]
+  );
 
   const busy = phase.step === 'previewing' || phase.step === 'importing';
   const verifying = phase.step === 'preview' && phase.verifying;
@@ -310,6 +376,57 @@ export function ExternalDrivesSync() {
             imported; tracks with no library match are not proven new, just unmatched.
             {verifying && ' Match verification is still running; import unlocks when it finishes.'}
           </p>
+          {(phase.preview.playlists ?? []).length > 0 && (
+            <div className="external-drive-playlists">
+              <h4>Playlists on this drive</h4>
+              <p className="external-drive-hint">
+                Importing a playlist copies only its tracks that have no library match and
+                creates the playlist in manaDJ in USB order. Nothing is written to the drive.
+              </p>
+              <ul>
+                {phase.preview.playlists.map((pl) => (
+                  <li key={pl.id} className="external-drive-playlist">
+                    <span className="external-drive-playlist-name">
+                      {pl.folder_path ? `${pl.folder_path} / ` : ''}
+                      {pl.name ?? '(unnamed)'}
+                    </span>
+                    <span className="external-drive-playlist-counts">
+                      {pl.track_count} tracks · {pl.new_count} to import ·{' '}
+                      {pl.present_count} already in library
+                      {pl.uncertain_count > 0 &&
+                        ` · ${pl.uncertain_count} unverified (skipped)`}
+                    </span>
+                    <input
+                      type="text"
+                      className="external-drive-playlist-rename"
+                      aria-label={`Local name for ${pl.name ?? 'playlist'}`}
+                      value={playlistNames[pl.id] ?? pl.name ?? ''}
+                      disabled={phase.step === 'importing'}
+                      onChange={(e) =>
+                        setPlaylistNames((prev) => ({ ...prev, [pl.id]: e.target.value }))
+                      }
+                    />
+                    <button
+                      className="btn"
+                      disabled={
+                        phase.step === 'importing' ||
+                        verifying ||
+                        !destination.trim() ||
+                        pl.track_count === 0
+                      }
+                      title={
+                        verifying ? 'Match verification is still running' : undefined
+                      }
+                      onClick={() => runPlaylistImport(pl)}
+                    >
+                      {importingPlaylistId === pl.id ? 'Importing…' : 'Import playlist'}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
           <div className="external-drive-tracklist">
             <div className="external-drive-track external-drive-track-head">
               <span></span>
@@ -421,6 +538,19 @@ export function ExternalDrivesSync() {
               ` · ${phase.result.skipped_missing_file} missing audio`}
             . Copied into {phase.result.destination}. Waveform and analysis jobs are queued.
           </p>
+          {phase.result.playlist && (
+            <p className="external-drive-playlist-result">
+              Playlist &quot;{phase.result.playlist.name}&quot; created with{' '}
+              {phase.result.playlist.member_count} tracks in USB order ·{' '}
+              {phase.result.playlist.imported} new files copied ·{' '}
+              {phase.result.playlist.already_in_library} already in library
+              {phase.result.playlist.skipped_uncertain > 0 &&
+                ` · ${phase.result.playlist.skipped_uncertain} unverified skipped`}
+              {phase.result.playlist.skipped_other > 0 &&
+                ` · ${phase.result.playlist.skipped_other} unavailable skipped`}
+              .
+            </p>
+          )}
           {phase.result.errors.length > 0 && (
             <ul className="external-drive-errors">
               {phase.result.errors.map((err, i) => (

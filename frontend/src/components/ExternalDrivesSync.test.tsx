@@ -30,6 +30,7 @@ const PREVIEW = {
   missing_file_count: 1,
   default_destination: '/library',
   fingerprint: 'fp-test',
+  playlists: [],
   entries: [
     {
       ordinal: 0,
@@ -439,6 +440,132 @@ it('imports only the checked tracks', async () => {
       expect.objectContaining({ ordinals: [0] })
     );
     expect(host.textContent).toContain('1 added');
+  } finally {
+    act(() => root.unmount());
+  }
+});
+
+const PLAYLIST_PREVIEW = {
+  ...PREVIEW,
+  playlists: [
+    {
+      id: 63,
+      name: 'nov 7',
+      folder_path: '',
+      track_count: 61,
+      new_count: 40,
+      present_count: 20,
+      uncertain_count: 1,
+      other_count: 0,
+      folder_not_representable: false,
+    },
+  ],
+};
+
+const PLAYLIST_RESULT = {
+  root: DRIVE.root,
+  kind: 'rekordbox',
+  destination: '/library',
+  imported: 40,
+  skipped_present: 0,
+  skipped_uncertain: 0,
+  skipped_duplicate: 0,
+  skipped_missing_file: 0,
+  skipped_unselected: 0,
+  errors: [],
+  track_ids: [42],
+  playlist: {
+    playlist_id: 7,
+    name: 'nov 7',
+    member_count: 60,
+    imported: 40,
+    already_in_library: 20,
+    skipped_uncertain: 1,
+    skipped_other: 0,
+  },
+};
+
+it('imports a device playlist with its tracks in one confirmed click', async () => {
+  vi.spyOn(api.externalDrives, 'list').mockResolvedValue([DRIVE]);
+  vi.spyOn(api.externalDrives, 'preview').mockResolvedValue(PLAYLIST_PREVIEW);
+  const imp = vi.spyOn(api.externalDrives, 'import').mockResolvedValue(PLAYLIST_RESULT);
+  const { host, root, button } = render();
+  try {
+    await act(async () => {
+      root.render(<ExternalDrivesSync />);
+      await tick();
+    });
+    await act(async () => {
+      button('Pull…')!.click();
+      await tick();
+    });
+    expect(host.textContent).toContain('Playlists on this drive');
+    expect(host.textContent).toContain('nov 7');
+    expect(host.textContent).toContain('61 tracks · 40 to import · 20 already in library');
+    expect(host.textContent).toContain('1 unverified (skipped)');
+
+    await act(async () => {
+      button('Import playlist')!.click();
+      await tick();
+    });
+    // the playlist defines the selection: no ordinals, device name kept
+    expect(imp).toHaveBeenCalledWith({
+      root: DRIVE.root,
+      destination: '/library',
+      confirm: true,
+      preview_fingerprint: 'fp-test',
+      create_playlist_id: 63,
+    });
+    expect(host.textContent).toContain(
+      'Playlist "nov 7" created with 60 tracks in USB order'
+    );
+    expect(host.textContent).toContain('40 new files copied');
+    expect(host.textContent).toContain('20 already in library');
+    expect(host.textContent).toContain('1 unverified skipped');
+  } finally {
+    act(() => root.unmount());
+  }
+});
+
+it('sends the edited local name instead of silently merging', async () => {
+  vi.spyOn(api.externalDrives, 'list').mockResolvedValue([DRIVE]);
+  vi.spyOn(api.externalDrives, 'preview').mockResolvedValue(PLAYLIST_PREVIEW);
+  const imp = vi.spyOn(api.externalDrives, 'import').mockResolvedValue(PLAYLIST_RESULT);
+  const { host, root, button } = render();
+  try {
+    await act(async () => {
+      root.render(<ExternalDrivesSync />);
+      await tick();
+    });
+    await act(async () => {
+      button('Pull…')!.click();
+      await tick();
+    });
+    const input = host.querySelector<HTMLInputElement>(
+      'input[aria-label="Local name for nov 7"]'
+    )!;
+    expect(input.value).toBe('nov 7');
+    const setter = Object.getOwnPropertyDescriptor(
+      window.HTMLInputElement.prototype,
+      'value'
+    )!.set!;
+    await act(async () => {
+      setter.call(input, 'nov 7 (USB)');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      await tick();
+    });
+    await act(async () => {
+      button('Import playlist')!.click();
+      await tick();
+    });
+    expect(imp).toHaveBeenCalledWith({
+      root: DRIVE.root,
+      destination: '/library',
+      confirm: true,
+      preview_fingerprint: 'fp-test',
+      create_playlist_id: 63,
+      playlist_name: 'nov 7 (USB)',
+    });
   } finally {
     act(() => root.unmount());
   }

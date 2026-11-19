@@ -89,6 +89,18 @@ export interface ExternalDrivePullEntry {
   matched_path: string | null;
 }
 
+export interface ExternalDrivePreviewPlaylist {
+  id: number;
+  name: string | null;
+  folder_path: string;
+  track_count: number;
+  new_count: number;
+  present_count: number;
+  uncertain_count: number;
+  other_count: number;
+  folder_not_representable: boolean;
+}
+
 export interface ExternalDrivePreview {
   root: string;
   kind: 'rekordbox' | 'engine';
@@ -101,6 +113,7 @@ export interface ExternalDrivePreview {
   default_destination: string | null;
   fingerprint: string;
   entries: ExternalDrivePullEntry[];
+  playlists: ExternalDrivePreviewPlaylist[];
 }
 
 export interface ExternalDriveImportRequest {
@@ -113,6 +126,22 @@ export interface ExternalDriveImportRequest {
   /** Binds the confirm to the reviewed preview; the server refuses a
    * mismatch with 409 so the confirmed set never silently changes. */
   preview_fingerprint: string;
+  /** Import one device playlist's new tracks and create a local playlist
+   * in device order. The playlist defines the selection; the server
+   * refuses combining it with explicit ordinals. */
+  create_playlist_id?: number;
+  /** Local name for the created playlist (defaults to the device name). */
+  playlist_name?: string;
+}
+
+export interface ExternalDriveImportedPlaylist {
+  playlist_id: number;
+  name: string;
+  member_count: number;
+  imported: number;
+  already_in_library: number;
+  skipped_uncertain: number;
+  skipped_other: number;
 }
 
 export interface ExternalDriveImportResult {
@@ -127,6 +156,7 @@ export interface ExternalDriveImportResult {
   skipped_unselected: number;
   errors: string[];
   track_ids: number[];
+  playlist?: ExternalDriveImportedPlaylist;
 }
 
 /** Phone sync LAN listener (#373, backend/device_listener.py). */
