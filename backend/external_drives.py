@@ -401,6 +401,16 @@ def _tag_keys(title: str | None, artist: str | None) -> list[tuple[str, str]]:
     return keys
 
 
+def _library_track_id(index: TrackIndex[Track], entry: PullEntry) -> int | None:
+    """The library Track a content-verified present entry maps to."""
+    if entry.status != STATUS_PRESENT:
+        return None
+    hit = index.by_path.get(path_key(entry.device_path))
+    if hit is None and entry.matched_path:
+        hit = index.by_path.get(path_key(entry.matched_path))
+    return hit.id if hit is not None else None
+
+
 def _match_status(index: TrackIndex[Track], device_path: str) -> str | None:
     """Full-path matches are certain; a bare file-name match is not."""
     key = path_key(device_path)
@@ -754,12 +764,7 @@ def diff_device_playlist(
     }
 
     def library_track_id(entry: PullEntry) -> int | None:
-        if entry.status != STATUS_PRESENT:
-            return None
-        hit = index.by_path.get(path_key(entry.device_path))
-        if hit is None and entry.matched_path:
-            hit = index.by_path.get(path_key(entry.matched_path))
-        return hit.id if hit is not None else None
+        return _library_track_id(index, entry)
 
     device_member_ids: list[int] = []  # occurrence-tagged below
     adds_in_library = 0
@@ -948,6 +953,9 @@ class PullResult:
     skipped_unselected: int = 0
     errors: list[str] = field(default_factory=list)
     track_ids: list[int] = field(default_factory=list)
+    # Which verified-preview ordinal each imported track came from, so a
+    # playlist import can place new tracks in device order.
+    imported_by_ordinal: dict[int, int] = field(default_factory=dict)
 
 
 def _sha256(path: Path) -> str:
@@ -1042,6 +1050,130 @@ def _copy_one(source: Path, dest: Path) -> tuple[Path | None, str | None, bool]:
     return dest, None, True
 
 
+@dataclass
+class PlaylistPullResult:
+    """Outcome of importing one device playlist: files copied plus a
+    local playlist created in device order."""
+
+    playlist_id: int
+    name: str
+    member_count: int
+    imported: int
+    already_in_library: int
+    skipped_uncertain: int
+    skipped_other: int
+    pull: PullResult
+
+
+def execute_playlist_pull(
+    manadj_session: Any,
+    root: Path,
+    destination: Path,
+    *,
+    device_playlist_id: int,
+    expected_fingerprint: str,
+    playlist_name: str | None = None,
+) -> PlaylistPullResult:
+    """Import one device playlist: copy its new tracks (and only those),
+    then create a local playlist with every resolvable member in device
+    order. Create-only: a local playlist with the final name must not
+    exist yet; merging into an existing playlist is a separate,
+    confirm-first flow.
+
+    The fingerprint must come from a verified (content-hashed) preview,
+    the same binding execute_pull enforces for the file copy. Uncertain
+    members are skipped and counted, never silently resolved.
+    """
+    from backend.models import Playlist, PlaylistTrack
+
+    root = root.resolve()
+    preview = build_pull_preview(manadj_session, root, destination)
+    if preview.fingerprint != expected_fingerprint:
+        raise PlanChangedError(
+            "the drive or library changed since the preview; run the preview again before importing"
+        )
+    device = read_rekordbox_device(root)
+    node = next((pl for pl in device.playlists if pl.id == device_playlist_id), None)
+    if node is None or node.is_folder:
+        raise ExternalDriveError(f"no device playlist with id {device_playlist_id}")
+
+    final_name = playlist_name or node.name
+    if not final_name:
+        raise ExternalDriveError("device playlist has no name; pass playlist_name")
+    if manadj_session.query(Playlist).filter(Playlist.name == final_name).first():
+        raise ExternalDriveError(
+            f"a local playlist named {final_name!r} already exists; "
+            "importing over it is not automatic - pass a different playlist_name"
+        )
+
+    entry_by_track_id = {
+        device.tracks[e.ordinal].id: e
+        for e in preview.entries
+        if 0 <= e.ordinal < len(device.tracks)
+    }
+    new_ordinals = {
+        entry_by_track_id[tid].ordinal
+        for tid in node.track_ids
+        if tid in entry_by_track_id and entry_by_track_id[tid].status == STATUS_NEW
+    }
+    pull = execute_pull(
+        manadj_session,
+        root,
+        destination,
+        expected_fingerprint=expected_fingerprint,
+        ordinals=new_ordinals,
+    )
+
+    index, _, _ = _manadj_matchers(manadj_session)
+    member_ids: list[int] = []
+    already = 0
+    skipped_uncertain = 0
+    skipped_other = 0
+    for tid in node.track_ids:
+        entry = entry_by_track_id.get(tid)
+        if entry is None:
+            skipped_other += 1
+            continue
+        if entry.ordinal in pull.imported_by_ordinal:
+            member_ids.append(pull.imported_by_ordinal[entry.ordinal])
+            continue
+        lib_id = _library_track_id(index, entry)
+        if lib_id is not None:
+            member_ids.append(lib_id)
+            already += 1
+        elif entry.status == STATUS_UNCERTAIN:
+            skipped_uncertain += 1
+        else:
+            skipped_other += 1
+
+    playlist = Playlist(name=final_name)
+    manadj_session.add(playlist)
+    manadj_session.flush()
+    for position, track_id in enumerate(member_ids):
+        manadj_session.add(
+            PlaylistTrack(playlist_id=playlist.id, track_id=track_id, position=position)
+        )
+    try:
+        manadj_session.commit()
+    except Exception as exc:
+        manadj_session.rollback()
+        raise ExternalDriveError(
+            f"playlist creation failed; the {pull.imported} imported tracks stay in the "
+            f"library but no playlist was created: {exc}"
+        ) from exc
+
+    return PlaylistPullResult(
+        playlist_id=playlist.id,
+        name=final_name,
+        member_count=len(member_ids),
+        imported=pull.imported,
+        already_in_library=already,
+        skipped_uncertain=skipped_uncertain,
+        skipped_other=skipped_other,
+        pull=pull,
+    )
+
+
 def execute_pull(
     manadj_session: Any,
     root: Path,
@@ -1098,7 +1230,7 @@ def execute_pull(
             )
         result.skipped_unselected = len(new_entries) - len(ordinals)
         new_entries = [e for e in new_entries if e.ordinal in ordinals]
-    imported_tracks: list[Track] = []
+    imported_tracks: list[tuple[int, Track]] = []
     created_files: list[Path] = []
     dest_names_seen: set[str] = set()
     for entry in new_entries:
@@ -1150,7 +1282,7 @@ def execute_pull(
             energy=None,
         )
         manadj_session.add(track)
-        imported_tracks.append(track)
+        imported_tracks.append((entry.ordinal, track))
         result.imported += 1
 
     if imported_tracks:
@@ -1170,7 +1302,7 @@ def execute_pull(
             enqueue_missing_analysis(manadj_session)
             from backend.stems_tasks import enqueue_stem_split
 
-            for track in imported_tracks:
+            for _ordinal, track in imported_tracks:
                 enqueue_stem_split(manadj_session, track.id)
             manadj_session.commit()
         except Exception as exc:
@@ -1180,6 +1312,7 @@ def execute_pull(
             raise ExternalDriveError(
                 f"import failed after copying; copied files were removed: {exc}"
             ) from exc
-        result.track_ids = [t.id for t in imported_tracks]
+        result.track_ids = [t.id for _o, t in imported_tracks]
+        result.imported_by_ordinal = {o: t.id for o, t in imported_tracks}
 
     return result

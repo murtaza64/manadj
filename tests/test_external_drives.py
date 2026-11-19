@@ -21,7 +21,7 @@ from sqlalchemy.orm import Session
 from backend import external_drives
 from backend.database import get_db
 from backend.key import Key
-from backend.models import Track
+from backend.models import Playlist, PlaylistTrack, Track
 from backend.routers import external_drives as external_drives_router
 from rekordbox.device.pdb_write import (
     ArtistRowSpec,
@@ -1323,3 +1323,204 @@ def test_router_membership_in_response(client: TestClient, tmp_path: Path):
     assert mix["folder_not_representable"] is True
     assert mix["membership"]["counterpart_status"] == "no-local-playlist"
     assert mix["membership"]["removes_provisional"] is False
+
+
+# --- playlist pull: import a device playlist as a local playlist --------------
+
+
+def test_playlist_pull_imports_new_members_and_builds_playlist(
+    db: Session, make_track, tmp_path: Path
+):
+    usb = make_rekordbox_usb_with_playlists(tmp_path / "RB")
+    two = make_track(filename="/Contents/two.mp3", title="Two")  # path-tier present
+    dest = tmp_path / "lib"
+    before = tree_digest(usb)
+    preview = external_drives.build_pull_preview(db, usb, dest)
+
+    result = external_drives.execute_playlist_pull(
+        db, usb, dest,
+        device_playlist_id=PAGE_LIST_A,
+        expected_fingerprint=preview.fingerprint,
+    )
+
+    assert result.imported == 2  # one.mp3 and three.mp3
+    assert result.already_in_library == 1  # two.mp3
+    assert result.skipped_uncertain == 0
+    assert result.skipped_other == 0
+    assert result.member_count == 3
+    assert result.name == "RIG Mix"
+    playlist = db.query(Playlist).filter(Playlist.id == result.playlist_id).one()
+    members = (
+        db.query(PlaylistTrack)
+        .filter(PlaylistTrack.playlist_id == playlist.id)
+        .order_by(PlaylistTrack.position)
+        .all()
+    )
+    # Device order 1,2,3: the two freshly imported tracks plus the
+    # already-present one, positioned exactly as on the drive.
+    titles = [db.get(Track, m.track_id).title for m in members]
+    assert titles == ["One", "Two", "Three"]
+    assert two.id in [m.track_id for m in members]
+    assert [m.position for m in members] == [0, 1, 2]
+    assert (dest / "Contents" / "one.mp3").exists() and (dest / "Contents" / "three.mp3").exists()
+    assert tree_digest(usb) == before  # the drive is never written to
+
+
+def test_playlist_pull_preserves_device_order_across_reorder(
+    db: Session, make_track, tmp_path: Path
+):
+    usb = make_rekordbox_usb_with_playlists(tmp_path / "RB")
+    two = make_track(filename="/Contents/two.mp3", title="Two")
+    three = make_track(filename="/Contents/three.mp3", title="Three")
+    dest = tmp_path / "lib"
+    preview = external_drives.build_pull_preview(db, usb, dest)
+
+    # "RIG New" is (3, 2) on the drive: order must round-trip, not sort.
+    result = external_drives.execute_playlist_pull(
+        db, usb, dest,
+        device_playlist_id=PAGE_LIST_B,
+        expected_fingerprint=preview.fingerprint,
+    )
+    members = (
+        db.query(PlaylistTrack)
+        .filter(PlaylistTrack.playlist_id == result.playlist_id)
+        .order_by(PlaylistTrack.position)
+        .all()
+    )
+    assert [m.track_id for m in members] == [three.id, two.id]
+    assert result.imported == 0  # both already in the library
+
+
+def test_playlist_pull_existing_local_name_refuses_before_any_copy(
+    db: Session, make_track, tmp_path: Path
+):
+    usb = make_rekordbox_usb_with_playlists(tmp_path / "RB")
+    _add_local_playlist(db, "RIG Mix", [])
+    dest = tmp_path / "lib"
+    preview = external_drives.build_pull_preview(db, usb, dest)
+
+    with pytest.raises(external_drives.ExternalDriveError, match="already exists"):
+        external_drives.execute_playlist_pull(
+            db, usb, dest,
+            device_playlist_id=PAGE_LIST_A,
+            expected_fingerprint=preview.fingerprint,
+        )
+    assert db.query(Track).count() == 0
+    assert not dest.exists()
+
+    # A distinct name resolves the conflict without merging.
+    result = external_drives.execute_playlist_pull(
+        db, usb, dest,
+        device_playlist_id=PAGE_LIST_A,
+        expected_fingerprint=preview.fingerprint,
+        playlist_name="RIG Mix (USB)",
+    )
+    assert result.name == "RIG Mix (USB)"
+    assert db.query(Playlist).filter(Playlist.name == "RIG Mix (USB)").count() == 1
+
+
+def test_playlist_pull_uncertain_member_is_skipped_and_counted(
+    db: Session, make_track, tmp_path: Path
+):
+    usb = make_rekordbox_usb_with_playlists(tmp_path / "RB")
+    # Basename-only candidate with no readable identical file: uncertain,
+    # never silently placed into the playlist and never imported.
+    make_track(filename="/music/one.mp3", title="One")
+    make_track(filename="/Contents/two.mp3", title="Two")
+    dest = tmp_path / "lib"
+    preview = external_drives.build_pull_preview(db, usb, dest)
+
+    result = external_drives.execute_playlist_pull(
+        db, usb, dest,
+        device_playlist_id=PAGE_LIST_A,
+        expected_fingerprint=preview.fingerprint,
+    )
+    assert result.skipped_uncertain == 1
+    assert result.imported == 1  # only three.mp3
+    assert result.member_count == 2
+    members = (
+        db.query(PlaylistTrack)
+        .filter(PlaylistTrack.playlist_id == result.playlist_id)
+        .order_by(PlaylistTrack.position)
+        .all()
+    )
+    titles = [db.get(Track, m.track_id).title for m in members]
+    assert titles == ["Two", "Three"]
+    assert not (dest / "Contents" / "one.mp3").exists()
+
+
+def test_playlist_pull_unknown_or_folder_id_refuses(db: Session, tmp_path: Path):
+    usb = make_rekordbox_usb_with_playlists(tmp_path / "RB")
+    dest = tmp_path / "lib"
+    preview = external_drives.build_pull_preview(db, usb, dest)
+    for bad_id in (9999, PAGE_LIST_FOLDER):
+        with pytest.raises(external_drives.ExternalDriveError):
+            external_drives.execute_playlist_pull(
+                db, usb, dest,
+                device_playlist_id=bad_id,
+                expected_fingerprint=preview.fingerprint,
+            )
+    assert db.query(Playlist).count() == 0
+    assert db.query(Track).count() == 0
+
+
+def test_playlist_pull_stale_fingerprint_refuses(db: Session, tmp_path: Path):
+    usb = make_rekordbox_usb_with_playlists(tmp_path / "RB")
+    with pytest.raises(external_drives.PlanChangedError):
+        external_drives.execute_playlist_pull(
+            db, usb, tmp_path / "lib",
+            device_playlist_id=PAGE_LIST_A,
+            expected_fingerprint="0" * 64,
+        )
+    assert db.query(Playlist).count() == 0
+    assert db.query(Track).count() == 0
+
+
+def test_router_playlist_import_end_to_end(
+    client: TestClient, db_session: Session, make_track, tmp_path: Path
+):
+    usb = make_rekordbox_usb_with_playlists(tmp_path / "RB")
+    make_track(filename="/Contents/two.mp3", title="Two")
+    dest = tmp_path / "lib"
+    resp = client.post(
+        "/api/external-drives/preview",
+        json={"root": str(usb), "destination": str(dest)},
+    )
+    assert resp.status_code == 200, resp.text
+    fingerprint = resp.json()["fingerprint"]
+
+    # The playlist selection and an explicit ordinal selection can never
+    # disagree, so combining them is refused.
+    resp = client.post(
+        "/api/external-drives/import",
+        json={
+            "root": str(usb),
+            "destination": str(dest),
+            "confirm": True,
+            "preview_fingerprint": fingerprint,
+            "create_playlist_id": PAGE_LIST_A,
+            "ordinals": [0],
+        },
+    )
+    assert resp.status_code == 400
+
+    resp = client.post(
+        "/api/external-drives/import",
+        json={
+            "root": str(usb),
+            "destination": str(dest),
+            "confirm": True,
+            "preview_fingerprint": fingerprint,
+            "create_playlist_id": PAGE_LIST_A,
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["imported"] == 2
+    playlist = body["playlist"]
+    assert playlist["name"] == "RIG Mix"
+    assert playlist["member_count"] == 3
+    assert playlist["imported"] == 2
+    assert playlist["already_in_library"] == 1
+    assert playlist["skipped_uncertain"] == 0
+    assert db_session.query(Playlist).count() == 1

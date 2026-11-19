@@ -44,6 +44,13 @@ class ImportRequest(BaseModel):
     # ordinals). None imports every new entry. Any ordinal that is not a
     # new entry in the verified plan refuses the whole import.
     ordinals: list[int] | None = None
+    # Optional: import one device playlist's new tracks and create a local
+    # playlist with every resolvable member in device order. The playlist
+    # defines the selection; combining it with explicit ordinals is
+    # refused so the two can never disagree.
+    create_playlist_id: int | None = None
+    # Override for the local playlist name (defaults to the device name).
+    playlist_name: str | None = None
 
 
 class PullEntryOut(BaseModel):
@@ -168,19 +175,39 @@ def import_pull(request: ImportRequest, db: Session = Depends(get_db)):
             status_code=400,
             detail="No library directory configured; pass an explicit destination.",
         )
-    try:
-        result = external_drives.execute_pull(
-            db,
-            Path(request.root),
-            Path(destination),
-            expected_fingerprint=request.preview_fingerprint,
-            ordinals=set(request.ordinals) if request.ordinals is not None else None,
+    if request.create_playlist_id is not None and request.ordinals is not None:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "create_playlist_id already selects the playlist's new tracks; "
+                "do not combine it with explicit ordinals."
+            ),
         )
+    try:
+        if request.create_playlist_id is not None:
+            playlist_result = external_drives.execute_playlist_pull(
+                db,
+                Path(request.root),
+                Path(destination),
+                device_playlist_id=request.create_playlist_id,
+                expected_fingerprint=request.preview_fingerprint,
+                playlist_name=request.playlist_name,
+            )
+            result = playlist_result.pull
+        else:
+            playlist_result = None
+            result = external_drives.execute_pull(
+                db,
+                Path(request.root),
+                Path(destination),
+                expected_fingerprint=request.preview_fingerprint,
+                ordinals=set(request.ordinals) if request.ordinals is not None else None,
+            )
     except external_drives.PlanChangedError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except external_drives.ExternalDriveError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return {
+    response = {
         "root": result.root,
         "kind": result.kind,
         "destination": result.destination,
@@ -192,4 +219,15 @@ def import_pull(request: ImportRequest, db: Session = Depends(get_db)):
         "skipped_unselected": result.skipped_unselected,
         "errors": result.errors,
         "track_ids": result.track_ids,
-      }
+    }
+    if playlist_result is not None:
+        response["playlist"] = {
+            "playlist_id": playlist_result.playlist_id,
+            "name": playlist_result.name,
+            "member_count": playlist_result.member_count,
+            "imported": playlist_result.imported,
+            "already_in_library": playlist_result.already_in_library,
+            "skipped_uncertain": playlist_result.skipped_uncertain,
+            "skipped_other": playlist_result.skipped_other,
+        }
+    return response
