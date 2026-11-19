@@ -53,3 +53,10 @@ At `7457bf24`, Xcode 16.4 unsigned build and all 3 native/UI tests passed on iPh
 2. Exercise interruption/headphone-route changes, repeated loads, long-file seeking/EOF, key-lock/fallback truth, memory pressure and master-recording failure/finalization on an iPhone.
 3. Port the edit journal and full grid/waveform behavior, then session/group replay and remaining performance controls, using Android's existing fixtures wherever available.
 4. Resolve the iOS deployment floor and distribution approach with the owner before committing to a release policy.
+
+## Deferred device backlog
+
+Owner priority, November18 2026: standard-size iPhone first.
+
+- Compact iPhones: support remains requested but is not part of the current fidelity acceptance gate. The iPhone SE (3rd generation) test exposed pitch at y743..778 on a667pt screen, outside the usable area. Keep both decks, waveforms and transport visible; the owner approved a tap-open native FX/EQ mixer panel as the preferred compact-layout tradeoff, rather than shrinking every control. Validate actual compact pixels, hit regions, safe areas and larger text before claiming support. The opt-in compact diagnostic is retained with `CHECK_COMPACT_PHONE=1`.
+- Future "iphone duo" support: preserve the owner's exact playful term as backlog intent. Device identity, screen sizes, folding behavior and hardware specification are unresolved. Do not implement a guessed device or substitute the SE for that request. Clarify the target when this work becomes active.
