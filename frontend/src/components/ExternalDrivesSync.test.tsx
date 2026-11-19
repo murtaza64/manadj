@@ -458,6 +458,7 @@ const PLAYLIST_PREVIEW = {
       uncertain_count: 1,
       other_count: 0,
       folder_not_representable: false,
+      track_ordinals: [0, 1, 2],
     },
   ],
 };
@@ -566,6 +567,42 @@ it('sends the edited local name instead of silently merging', async () => {
       create_playlist_id: 63,
       playlist_name: 'nov 7 (USB)',
     });
+  } finally {
+    act(() => root.unmount());
+  }
+});
+
+it('refuses a playlist import when membership reordered after review, same count', async () => {
+  vi.spyOn(api.externalDrives, 'list').mockResolvedValue([DRIVE]);
+  // Same playlist, same name, same count, different order: counts alone
+  // cannot see this, so the review guard must compare ordered membership.
+  const reordered = {
+    ...PLAYLIST_PREVIEW,
+    playlists: [
+      { ...PLAYLIST_PREVIEW.playlists[0], track_ordinals: [2, 1, 0] },
+    ],
+  };
+  vi.spyOn(api.externalDrives, 'preview')
+    .mockResolvedValueOnce(PLAYLIST_PREVIEW) // fast metadata pass
+    .mockResolvedValueOnce(PLAYLIST_PREVIEW) // verified pass
+    .mockResolvedValueOnce(reordered); // destination-binding re-preview
+  const imp = vi.spyOn(api.externalDrives, 'import').mockResolvedValue(PLAYLIST_RESULT);
+  const { host, root, button } = render();
+  try {
+    await act(async () => {
+      root.render(<ExternalDrivesSync />);
+      await tick();
+    });
+    await act(async () => {
+      button('Pull…')!.click();
+      await tick();
+    });
+    await act(async () => {
+      button('Import playlist')!.click();
+      await tick();
+    });
+    expect(imp).not.toHaveBeenCalled();
+    expect(host.textContent).toContain('changed since this preview');
   } finally {
     act(() => root.unmount());
   }

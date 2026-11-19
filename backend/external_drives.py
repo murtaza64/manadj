@@ -307,6 +307,10 @@ class PlaylistPreview:
     present_count: int
     uncertain_count: int
     other_count: int  # duplicate/missing-file/unresolvable members
+    # Member entry ordinals in device order. Lets a client bind its
+    # reviewed plan to the exact ordered membership, so a same-count
+    # reorder or replacement after review is caught before import.
+    track_ordinals: list[int] = field(default_factory=list)
     # Dry-run membership comparison against the SUGGESTED local
     # counterpart (name-only; see PlaylistMembershipDiff). None when the
     # diff could not be computed.
@@ -684,6 +688,11 @@ def _playlist_previews(
         for e in entries
         if 0 <= e.ordinal < len(device.tracks)
     }
+    ordinal_by_track_id = {
+        device.tracks[e.ordinal].id: e.ordinal
+        for e in entries
+        if 0 <= e.ordinal < len(device.tracks)
+    }
     folders = {p.id: p for p in device.playlists if p.is_folder}
 
     def folder_path(node: DevicePlaylist) -> str:
@@ -718,6 +727,11 @@ def _playlist_previews(
                 uncertain_count=counts[STATUS_UNCERTAIN],
                 other_count=counts["other"],
                 folder_not_representable=bool(folder_path(node)),
+                track_ordinals=[
+                    ordinal_by_track_id[tid]
+                    for tid in node.track_ids
+                    if tid in ordinal_by_track_id
+                ],
             )
         )
     return out
@@ -1298,30 +1312,40 @@ def execute_pull(
     if imported_tracks:
         try:
             manadj_session.commit()
-            # Same post-import pipeline as the Library import
-            # (backend/library/import_manager.py): file facts from the copied
-            # audio, then waveform, native analysis, and stem tasks.
-            from backend.track_metadata.file_facts import refresh_file_facts
-
-            refresh_file_facts(manadj_session)
-            from backend.waveform_tasks import enqueue_missing_waveforms
-
-            enqueue_missing_waveforms(manadj_session)
-            from backend.analysis_tasks import enqueue_missing_analysis
-
-            enqueue_missing_analysis(manadj_session)
-            from backend.stems_tasks import enqueue_stem_split
-
-            for _ordinal, track in imported_tracks:
-                enqueue_stem_split(manadj_session, track.id)
-            manadj_session.commit()
         except Exception as exc:
             manadj_session.rollback()
             for created in created_files:
                 created.unlink(missing_ok=True)
             raise ExternalDriveError(
-                f"import failed after copying; copied files were removed: {exc}"
+                f"import failed before the library commit; copied files were removed: {exc}"
             ) from exc
+        # The library commit landed: the copied files now belong to Track
+        # rows and are never deleted from here on. A failing post-import
+        # step (facts, waveforms, analysis, stems) is recorded and the
+        # rest continue; every step can be re-queued from the library.
+        from backend.track_metadata.file_facts import refresh_file_facts
+        from backend.waveform_tasks import enqueue_missing_waveforms
+        from backend.analysis_tasks import enqueue_missing_analysis
+        from backend.stems_tasks import enqueue_stem_split
+
+        def _post_step(label: str, fn: Any) -> None:
+            try:
+                fn()
+                manadj_session.commit()
+            except Exception as exc:  # noqa: BLE001 — recorded, not fatal
+                manadj_session.rollback()
+                result.errors.append(
+                    f"post-import step {label} failed "
+                    f"(the imported tracks are in the library; re-run it there): {exc}"
+                )
+
+        _post_step("file facts", lambda: refresh_file_facts(manadj_session))
+        _post_step("waveforms", lambda: enqueue_missing_waveforms(manadj_session))
+        _post_step("analysis", lambda: enqueue_missing_analysis(manadj_session))
+        for _ordinal, track in imported_tracks:
+            _post_step(
+                "stem split", lambda t=track: enqueue_stem_split(manadj_session, t.id)
+            )
         result.track_ids = [t.id for _o, t in imported_tracks]
         result.imported_by_ordinal = {o: t.id for o, t in imported_tracks}
 

@@ -237,7 +237,7 @@ export function ExternalDrivesSync() {
           p.entries.map((e) => `${e.ordinal}:${e.device_path}:${e.status}`).join('\n') +
           '\n' +
           (p.playlists ?? [])
-            .map((pl) => `${pl.id}:${pl.name}:${pl.track_count}`)
+            .map((pl) => `${pl.id}:${pl.name}:${(pl.track_ordinals ?? []).join(',')}`)
             .join('\n');
         if (planOf(bound) !== planOf(preview)) {
           setError(

@@ -99,6 +99,9 @@ export interface ExternalDrivePreviewPlaylist {
   uncertain_count: number;
   other_count: number;
   folder_not_representable: boolean;
+  /** Member entry ordinals in device order: the review guard binds the
+   * clicked plan to this exact ordered membership. */
+  track_ordinals: number[];
 }
 
 export interface ExternalDrivePreview {

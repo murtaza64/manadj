@@ -1567,3 +1567,36 @@ def test_playlist_pull_copied_bytes_match_and_present_tracks_not_recopied(
         ).hexdigest()
     # the already-present member is referenced, never copied again
     assert not (dest / "Contents" / "two.mp3").exists()
+
+
+def test_playlist_rollup_exposes_ordered_member_ordinals(db: Session, tmp_path: Path):
+    usb = make_rekordbox_usb_with_playlists(tmp_path / "RB")
+    preview = external_drives.build_pull_preview(db, usb)
+    mix = next(pl for pl in preview.playlists if pl.name == "RIG Mix")
+    new_pl = next(pl for pl in preview.playlists if pl.name == "RIG New")
+    assert mix.track_ordinals == [0, 1, 2]  # device order 1,2,3
+    assert new_pl.track_ordinals == [2, 1]  # device order 3,2 preserved
+
+
+def test_post_import_queue_failure_keeps_committed_tracks_and_files(
+    db: Session, usb: Path, tmp_path: Path, monkeypatch
+):
+    import backend.waveform_tasks as waveform_tasks
+
+    def boom(_session):
+        raise RuntimeError("queue down")
+
+    monkeypatch.setattr(waveform_tasks, "enqueue_missing_waveforms", boom)
+    dest = tmp_path / "lib"
+    preview = external_drives.build_pull_preview(db, usb, dest)
+    result = external_drives.execute_pull(
+        db, usb, dest, expected_fingerprint=preview.fingerprint
+    )
+    # The waveforms step failed AFTER the library commit: the tracks and
+    # their copied files must survive, the failure is reported, and the
+    # remaining pipeline steps still ran.
+    assert result.imported == 3
+    assert db.query(Track).count() == 3
+    for name in ("track1", "track2", "twin"):
+        assert (dest / "Contents" / f"{name}.mp3").exists()
+    assert any("waveforms" in e for e in result.errors)

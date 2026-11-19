@@ -88,6 +88,7 @@ class PlaylistOut(BaseModel):
     present_count: int
     uncertain_count: int
     other_count: int
+    track_ordinals: list[int] = []
     membership: MembershipOut | None = None
     folder_not_representable: bool = False
 
