@@ -771,3 +771,112 @@ def test_import_with_stale_fingerprint_is_refused(
 def test_preview_404_on_plain_directory(client: TestClient, tmp_path: Path):
     resp = client.post("/api/external-drives/preview", json={"root": str(tmp_path)})
     assert resp.status_code == 404
+
+
+# --- content-verified rename matching -----------------------------------------
+# A renamed device file matches no library path and no file name, so only the
+# device tags can generate candidates. Tag equality never decides identity:
+# byte-identical content upgrades to present (matched_path records which
+# library file verified, so the UI can show both names); anything else stays
+# conservatively uncertain or new.
+
+
+def renamed_usb(tmp_path: Path, title: str = "Renamed Tune") -> Path:
+    root = tmp_path / "RENAMED_USB"
+    root.mkdir()
+    make_rekordbox_usb(
+        root,
+        [track_spec(1, title, "/Contents/dj-edit-01.mp3", artist_id=1)],
+    )
+    put_audio(root, "/Contents/dj-edit-01.mp3")
+    return root
+
+
+def test_renamed_identical_content_is_present_with_matched_path(
+    db: Session, make_track, tmp_path: Path
+):
+    usb = renamed_usb(tmp_path)
+    library_file = tmp_path / "music" / "Renamed Tune.mp3"
+    library_file.parent.mkdir(parents=True)
+    shutil.copy2(FIXTURES / "silence.mp3", library_file)
+    make_track(filename=str(library_file), title="Renamed Tune", artist="Lane 8")
+    before = tree_digest(usb)
+
+    preview = external_drives.build_pull_preview(db, usb)
+
+    entry = preview.entries[0]
+    assert entry.status == "present"
+    assert "different file name" in (entry.detail or "")
+    assert "content-verified" in (entry.detail or "")
+    assert entry.matched_path == str(library_file)
+    assert preview.present_count == 1
+    assert preview.new_count == 0
+    assert tree_digest(usb) == before  # verification never touches the drive
+
+    result = external_drives.execute_pull(
+        db,
+        usb,
+        tmp_path / "lib",
+        expected_fingerprint=external_drives.build_pull_preview(
+            db, usb, tmp_path / "lib"
+        ).fingerprint,
+    )
+    assert result.imported == 0  # a renamed copy is never re-imported
+
+
+def test_renamed_tag_match_is_case_insensitive(
+    db: Session, make_track, tmp_path: Path
+):
+    usb = renamed_usb(tmp_path, title="RENAMED TUNE")
+    library_file = tmp_path / "music" / "anything.mp3"
+    library_file.parent.mkdir(parents=True)
+    shutil.copy2(FIXTURES / "silence.mp3", library_file)
+    make_track(filename=str(library_file), title=" renamed tune ", artist="lane 8")
+
+    preview = external_drives.build_pull_preview(db, usb)
+
+    assert preview.entries[0].status == "present"
+
+
+def test_renamed_tag_match_different_bytes_stays_uncertain(
+    db: Session, make_track, tmp_path: Path
+):
+    # Same artist+title tags, same size, different bytes: not the same audio.
+    usb = renamed_usb(tmp_path)
+    library_file = tmp_path / "music" / "Renamed Tune.mp3"
+    library_file.parent.mkdir(parents=True)
+    data = bytearray((FIXTURES / "silence.mp3").read_bytes())
+    data[-1] ^= 0xFF
+    library_file.write_bytes(bytes(data))
+    make_track(filename=str(library_file), title="Renamed Tune", artist="Lane 8")
+
+    preview = external_drives.build_pull_preview(db, usb)
+
+    entry = preview.entries[0]
+    assert entry.status == "uncertain"
+    assert "same artist and title" in (entry.detail or "")
+    assert entry.matched_path is None
+    assert preview.new_count == 0
+
+    result = external_drives.execute_pull(
+        db,
+        usb,
+        tmp_path / "lib",
+        expected_fingerprint=external_drives.build_pull_preview(
+            db, usb, tmp_path / "lib"
+        ).fingerprint,
+    )
+    assert result.imported == 0
+    assert result.skipped_uncertain == 1
+
+
+def test_no_tag_candidate_stays_new(db: Session, make_track, tmp_path: Path):
+    usb = renamed_usb(tmp_path)
+    make_track(title="Some Other Track", artist="Someone Else")
+
+    preview = external_drives.build_pull_preview(db, usb)
+
+    entry = preview.entries[0]
+    assert entry.status == "new"
+    assert entry.matched_path is None
+    assert preview.new_count == 1

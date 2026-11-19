@@ -226,8 +226,9 @@ def read_rekordbox_device(root: Path) -> RekordboxDevice:
 
 # --- preview -----------------------------------------------------------------
 
-# Entry statuses: "new" (importable), "present" (matched by full path),
-# "uncertain" (matched by file name only — never imported automatically),
+# Entry statuses: "new" (importable), "present" (matched by full path, or
+# content-verified under a same/renamed file name), "uncertain" (matched
+# by file name or artist+title only — never imported automatically),
 # "duplicate" (repeated file name on the drive), "missing-file".
 STATUS_NEW = "new"
 STATUS_PRESENT = "present"
@@ -247,6 +248,10 @@ class PullEntry:
     device_path: str
     status: str
     detail: str | None = None
+    # Library file that content-verified as the same audio, when one did.
+    # Lets the UI show the USB file name next to the library file name
+    # instead of silently collapsing a renamed track into "present".
+    matched_path: str | None = None
 
 
 @dataclass
@@ -271,26 +276,44 @@ def default_destination() -> str | None:
 
 def _manadj_matchers(
     manadj_session: Any,
-) -> tuple[TrackIndex[Track], dict[str, list[Track]]]:
-    """Path/basename index plus every library track grouped by basename.
+) -> tuple[TrackIndex[Track], dict[str, list[Track]], dict[tuple[str, str], list[Track]]]:
+    """Path/basename index plus basename and tag candidate maps.
 
     Import-side semantics (rekordbox/sync.py): every Track row counts,
     including Archived — an archived copy is still a copy we hold. The
-    basename map keeps ALL candidates per name, so content verification
-    is not limited to whichever row the single-value index happened to
-    keep.
+    basename and tag maps keep ALL candidates per key, so content
+    verification is not limited to whichever row the single-value index
+    happened to keep.
     """
     rows = manadj_session.query(Track).all()
     index = TrackIndex.build(rows, lambda t: t.filename)
     by_basename: dict[str, list[Track]] = {}
+    by_tags: dict[tuple[str, str], list[Track]] = {}
     for track in rows:
         if track.filename:
             by_basename.setdefault(_basename_key(track.filename), []).append(track)
-    return index, by_basename
+        tag_key = _tag_key(track.title, track.artist)
+        if tag_key is not None:
+            by_tags.setdefault(tag_key, []).append(track)
+    return index, by_basename, by_tags
 
 
 def _basename_key(path: str) -> str:
     return path_key(path).rsplit("/", 1)[-1]
+
+
+def _tag_key(title: str | None, artist: str | None) -> tuple[str, str] | None:
+    """Normalized (title, artist) pair for rename detection.
+
+    Whitespace-trimmed and case-folded, the same normalization the field
+    diagnostic used on the real library. Tags only GENERATE candidates;
+    identity is always decided by file content, never by tag equality.
+    """
+    norm_title = (title or "").strip().casefold()
+    norm_artist = (artist or "").strip().casefold()
+    if not norm_title and not norm_artist:
+        return None
+    return norm_title, norm_artist
 
 
 def _match_status(index: TrackIndex[Track], device_path: str) -> str | None:
@@ -390,24 +413,27 @@ def _plan_fingerprint(
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
 
-def _same_audio_on_drive(candidates: list[Track], source: Path | None) -> bool:
+def _verified_library_track(
+    candidates: list[Track], source: Path | None
+) -> Track | None:
     """Content-verified identity: byte-identical audio is already held.
 
-    Sizes must match before hashing (different sizes cannot be identical
-    content); only equal-size candidates pay the hash. A missing or
-    unreadable library file or device file just fails verification, so a
-    failed read never upgrades a match. Hashes are computed fresh against
-    the live files on every preview — nothing is cached, so a changed
-    file can never match on stale content.
+    Returns the library track whose live file bytes equal the device
+    file's, or None. Sizes must match before hashing (different sizes
+    cannot be identical content); only equal-size candidates pay the
+    hash. A missing or unreadable library file or device file just fails
+    verification, so a failed read never upgrades a match. Hashes are
+    computed fresh against the live files on every preview — nothing is
+    cached, so a changed file can never match on stale content.
     """
     if source is None:
-        return False
+        return None
     try:
         if not source.is_file():
-            return False
+            return None
         source_size = source.stat().st_size
     except OSError:
-        return False
+        return None
     for track in candidates:
         if not track.filename:
             continue
@@ -416,68 +442,102 @@ def _same_audio_on_drive(candidates: list[Track], source: Path | None) -> bool:
             if not library_file.is_file() or library_file.stat().st_size != source_size:
                 continue
             if _sha256(library_file) == _sha256(source):
-                return True
+                return track
         except OSError:
             continue
-    return False
+    return None
 
 
 def _classify(
     index: TrackIndex[Track],
     by_basename: dict[str, list[Track]],
+    by_tags: dict[tuple[str, str], list[Track]],
     seen: set[str],
     root: Path,
     kind: str,
     device_path: str,
-) -> tuple[str, str | None]:
+    title: str | None = None,
+    artist: str | None = None,
+) -> tuple[str, str | None, str | None]:
     base = _basename_key(device_path)
     if base in seen:
-        return STATUS_DUPLICATE, "same file name as another track on this drive"
+        return STATUS_DUPLICATE, "same file name as another track on this drive", None
     seen.add(base)
     status = _match_status(index, device_path)
     if status == STATUS_PRESENT:
-        return status, "already in the manadj library (same path)"
+        return status, "already in the manadj library (same path)", None
     if status == STATUS_UNCERTAIN:
         # A device path can never equal a library path (the file lives on
         # the drive), so real duplicates land here. Upgrade to present only
         # on byte-identical content; anything unreadable or different keeps
         # the conservative name-only classification.
         source = _device_source(root, kind, device_path)
-        if _same_audio_on_drive(by_basename.get(base, []), source):
+        verified = _verified_library_track(by_basename.get(base, []), source)
+        if verified is not None:
             return (
                 STATUS_PRESENT,
                 "already in the manadj library (same audio, content-verified)",
+                verified.filename,
             )
-        return status, "a library track has this file name — verify it is the same audio"
+        return (
+            status,
+            "a library track has this file name: verify it is the same audio",
+            None,
+        )
     source = _device_rel_source(root, device_path)
     if source is None or not source.is_file():
-        return STATUS_MISSING, "audio file not found on the drive"
-    return STATUS_NEW, None
+        return STATUS_MISSING, "audio file not found on the drive", None
+    # Rename tier: no path or file-name match, but the library may hold
+    # the same audio under a different file name. Tag equality generates
+    # candidates only; content verification decides.
+    tag_key = _tag_key(title, artist)
+    if tag_key is not None:
+        verified = _verified_library_track(by_tags.get(tag_key, []), source)
+        if verified is not None:
+            return (
+                STATUS_PRESENT,
+                "already in the manadj library (same audio under a different "
+                "file name, content-verified)",
+                verified.filename,
+            )
+        if by_tags.get(tag_key):
+            return (
+                STATUS_UNCERTAIN,
+                "a library track has the same artist and title: verify it is "
+                "the same audio",
+                None,
+            )
+    return STATUS_NEW, None, None
 
 
 def build_rekordbox_pull_preview(
     manadj_session: Any, root: Path, destination: Path | None = None
 ) -> PullPreview:
     device = read_rekordbox_device(root)
-    index, by_basename = _manadj_matchers(manadj_session)
+    index, by_basename, by_tags = _manadj_matchers(manadj_session)
 
     entries: list[PullEntry] = []
     seen: set[str] = set()
     for i, track in enumerate(device.tracks):
         if not track.file_path:
             continue
-        status, detail = _classify(index, by_basename, seen, root, "rekordbox", track.file_path)
+        artist = device.artists.get(track.artist_id)
+        status, detail, matched = _classify(
+            index, by_basename, by_tags, seen, root, "rekordbox",
+            track.file_path, track.title, artist,
+        )
         entries.append(
             PullEntry(
                 ordinal=i,
                 title=track.title,
-                artist=device.artists.get(track.artist_id),
+                artist=artist,
                 bpm=track.tempo_centibpm / 100.0 if track.tempo_centibpm else None,
                 key=device.keys.get(track.key_id),
                 duration_secs=float(track.duration_secs) if track.duration_secs else None,
                 device_path=track.file_path,
                 status=status,
                 detail=detail,
+                matched_path=matched,
             )
         )
 
@@ -498,7 +558,7 @@ def build_engine_pull_preview(
     except Exception as exc:
         raise ExternalDriveError(f"could not open {database2}: {exc}") from exc
 
-    index, by_basename = _manadj_matchers(manadj_session)
+    index, by_basename, by_tags = _manadj_matchers(manadj_session)
     entries: list[PullEntry] = []
     seen: set[str] = set()
     total = 0
@@ -514,7 +574,10 @@ def build_engine_pull_preview(
                 key_obj = Key.from_engine_id(track.key)
                 key_name = key_obj.musical if key_obj else None
             bpm = track.bpmAnalyzed or (float(track.bpm) if track.bpm else None)
-            status, detail = _classify(index, by_basename, seen, root, "engine", stored)
+            status, detail, matched = _classify(
+                index, by_basename, by_tags, seen, root, "engine",
+                stored, track.title, track.artist,
+            )
             entries.append(
                 PullEntry(
                     ordinal=i,
@@ -526,6 +589,7 @@ def build_engine_pull_preview(
                     device_path=stored,
                     status=status,
                     detail=detail,
+                    matched_path=matched,
                 )
             )
 

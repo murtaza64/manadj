@@ -47,6 +47,7 @@ class PullEntryOut(BaseModel):
     device_path: str
     status: str
     detail: str | None
+    matched_path: str | None
 
 
 class PreviewResponse(BaseModel):
