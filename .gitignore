@@ -38,3 +38,6 @@ frontend/public/manual/
 # Routine video exports (#377)
 exports/
 artwork/
+
+# Synthetic runtime descriptor, ephemeral host loopback port only.
+ios/Manadj/Resources/lan-fixture.json

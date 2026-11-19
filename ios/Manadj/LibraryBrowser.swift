@@ -71,7 +71,7 @@ struct LibraryBrowser: View {
                 }.font(Ink.font(11)).foregroundStyle(Ink.muted)
             }.padding(12).background(Ink.panel)
             if model.snapshot == nil {
-                ContentUnavailableView("Bring your library", systemImage: "desktopcomputer", description: Text("Open manaDJ desktop → Settings → Library → Phone sync. Pair this iPhone in Settings, then sync. Or import audio from Files on the Perform screen."))
+                ContentUnavailableView("Bring your library", systemImage: "desktopcomputer", description: Text("Open manaDJ desktop → Settings → Phone sync. Pair this iPhone in Settings, then sync. Or import audio from Files on the Perform screen."))
             } else if rows.isEmpty && !filtering {
                 ContentUnavailableView.search(text: search)
             } else {
@@ -97,7 +97,14 @@ struct LibraryBrowser: View {
         .onChange(of: model.error) { _, error in
             if error == nil && restoreSearchAfterError {
                 restoreSearchAfterError = false
-                searchFocused = true
+                // SwiftUI dismisses the alert asynchronously. A focus write while it is
+                // still the first responder is dropped on regular iPhone16/iOS18.5.
+                searchFocused = false
+                Task { @MainActor in
+                    try? await Task.sleep(for: .milliseconds(350))
+                    guard model.error == nil else { return }
+                    searchFocused = true
+                }
             }
         }
     }

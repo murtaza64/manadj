@@ -27,12 +27,18 @@ jobs:
           xcodebuild -version
           swift --version
           xcrun simctl list devices available
+      - name: Prepare real desktop LAN fixture
+        run: |
+          brew list python@3.13 || brew install python@3.13
+          "$(brew --prefix python@3.13)/bin/python3.13" -m venv /tmp/manadj-lan-venv
+          /tmp/manadj-lan-venv/bin/python -m pip install -r tests/lan_fixture/requirements.txt
+          /tmp/manadj-lan-venv/bin/python -m pytest -q tests/lan_fixture/test_serve.py --confcutdir=tests/lan_fixture
       - name: Build and test without signing
         timeout-minutes: 18
         shell: bash
         run: |
           set -o pipefail
-          bash ios/scripts/verify_apple.sh 2>&1 | tee ios-verification.log
+          /tmp/manadj-lan-venv/bin/python ios/scripts/with_lan_fixture.py 2>&1 | tee ios-verification.log
       - name: Export simulator diagnostics and attachments
         if: always()
         shell: bash

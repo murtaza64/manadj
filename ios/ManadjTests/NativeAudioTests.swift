@@ -49,6 +49,52 @@ final class NativeAudioTests: XCTestCase {
             try await Task.sleep(for: .milliseconds(50))
         }
     }
+    @MainActor func testRealDesktopPairSyncDownloadAndOfflinePlay() async throws {
+        guard let fixture = Bundle.main.url(forResource: "lan-fixture", withExtension: "json") else {
+            throw XCTSkip("Use with_lan_fixture.py to exercise the real desktop LAN listener")
+        }
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: fixture)) as? [String: Any])
+        let origin = try XCTUnwrap(object["origin"] as? String)
+        let url = try XCTUnwrap(URL(string: origin))
+        XCTAssertEqual(url.host, "127.0.0.1", "Synthetic tests must never use a real user's desktop")
+        let client = SyncClient(try DesktopConnection(url: url))
+        let ticket = try await client.requestPairing(deviceId: UUID().uuidString, deviceName: "Native synthetic LAN test")
+        var token: String?
+        for _ in 0..<40 {
+            let result = try await client.pollPairing(ticket)
+            if let approved = result.token { token = approved; break }
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        let approved = try XCTUnwrap(token, "Real desktop coordinator must approve the synthetic device")
+        let connection = try DesktopConnection(url: url, deviceToken: approved)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let repository = try LibraryRepository(root: root)
+        let snapshot = try await repository.sync(connection)
+        XCTAssertEqual(snapshot.tracks.count, object["snapshot_tracks"] as? Int)
+        let track = try XCTUnwrap(snapshot.tracks.first)
+        XCTAssertEqual(track.id, object["track_id"] as? Int)
+        XCTAssertEqual(track.audioRev, object["audio_rev"] as? String)
+        XCTAssertEqual(track.previewRev, object["preview_rev"] as? String)
+        let preview = await repository.preview(track)
+        XCTAssertNotNil(preview, "Real MPK1/MWF1 preview must populate the cache")
+        let downloaded = try await repository.audio(track, connection: connection)
+        XCTAssertEqual(try Data(contentsOf: downloaded).prefix(4), Data("RIFF".utf8))
+        let reopened = try LibraryRepository(root: root)
+        let cached = try await reopened.audio(track, connection: nil)
+        XCTAssertEqual(cached, downloaded, "Offline reopen must use downloaded audio without a connection")
+        let audio = try NativeAudio()
+        let duration = try await audio.load(cached, deck: 0)
+        XCTAssertEqual(duration, 2, accuracy: 0.01)
+        XCTAssertTrue(audio.state(0).fullyDecoded)
+        audio.send(MDJPlay)
+        try await Task.sleep(for: .milliseconds(200))
+        XCTAssertTrue(audio.state(0).playing)
+        XCTAssertGreaterThan(audio.state(0).position, 0.05)
+        audio.send(MDJPause)
+        try await Task.sleep(for: .milliseconds(50))
+        XCTAssertFalse(audio.state(0).playing)
+    }
     func testProjectConfigurationHasLocalNetworkPurposeAndFonts() throws {
         XCTAssertNotNil(Bundle.main.object(forInfoDictionaryKey: "NSLocalNetworkUsageDescription"))
         XCTAssertNotNil(Bundle.main.url(forResource: "UbuntuMono-Regular", withExtension: "ttf"))
