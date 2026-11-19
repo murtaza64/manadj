@@ -1625,3 +1625,150 @@ def test_source_plan_token_ignores_destination_but_binds_source_and_match(tmp_pa
     source.write_bytes(b"replacement of different length")
     changed_source = external_drives._preview(root, "rekordbox", 1, [entry])
     assert first.source_fingerprint != changed_source.source_fingerprint
+
+
+# --- playlist update: sync an existing local playlist from the drive ---------
+
+
+def test_playlist_update_adds_orders_and_keeps_local_only(
+    db: Session, make_track, tmp_path: Path
+):
+    usb = make_rekordbox_usb_with_playlists(tmp_path / "RB")
+    two = make_track(filename="/Contents/two.mp3", title="Two")
+    held_elsewhere = make_track(filename="/music/elsewhere.mp3", title="Elsewhere")
+    _add_local_playlist(db, "RIG Mix", [two.id, held_elsewhere.id])
+    local = db.query(Playlist).filter(Playlist.name == "RIG Mix").one()
+    dest = tmp_path / "lib"
+    before = tree_digest(usb)
+    preview = external_drives.build_pull_preview(db, usb, dest)
+
+    result = external_drives.execute_playlist_update(
+        db, usb, dest,
+        device_playlist_id=PAGE_LIST_A,
+        local_playlist_id=local.id,
+        expected_fingerprint=preview.fingerprint,
+    )
+
+    assert result.added_imported == 2  # one.mp3, three.mp3 copied in
+    assert result.added_from_library == 0  # two.mp3 was already a member
+    assert result.kept_local_only == 1  # held_elsewhere preserved
+    assert result.skipped_uncertain == 0
+    assert result.member_count == 4
+    members = (
+        db.query(PlaylistTrack)
+        .filter(PlaylistTrack.playlist_id == local.id)
+        .order_by(PlaylistTrack.position)
+        .all()
+    )
+    titles = [db.get(Track, m.track_id).title for m in members]
+    # device order first, the kept local-only track after, prior order kept
+    assert titles == ["One", "Two", "Three", "Elsewhere"]
+    assert (dest / "Contents" / "one.mp3").exists()
+    assert (dest / "Contents" / "three.mp3").exists()
+    assert tree_digest(usb) == before
+    # no second playlist appeared
+    assert db.query(Playlist).count() == 1
+
+
+def test_playlist_update_uncertain_member_skipped_local_member_kept(
+    db: Session, make_track, tmp_path: Path
+):
+    usb = make_rekordbox_usb_with_playlists(tmp_path / "RB")
+    # one.mp3 has only a basename-level candidate: unverified, never dropped
+    # onto the playlist silently, and the local member it MIGHT be stays.
+    maybe_one = make_track(filename="/music/one.mp3", title="One")
+    _add_local_playlist(db, "RIG Mix", [maybe_one.id])
+    local = db.query(Playlist).filter(Playlist.name == "RIG Mix").one()
+    dest = tmp_path / "lib"
+    preview = external_drives.build_pull_preview(db, usb, dest)
+
+    result = external_drives.execute_playlist_update(
+        db, usb, dest,
+        device_playlist_id=PAGE_LIST_A,
+        local_playlist_id=local.id,
+        expected_fingerprint=preview.fingerprint,
+    )
+    assert result.skipped_uncertain == 1
+    members = (
+        db.query(PlaylistTrack)
+        .filter(PlaylistTrack.playlist_id == local.id)
+        .order_by(PlaylistTrack.position)
+        .all()
+    )
+    titles = [db.get(Track, m.track_id).title for m in members]
+    # unverified device one.mp3 did not import; local maybe-one stays put
+    assert "One" in titles
+    assert not (dest / "Contents" / "one.mp3").exists()
+
+
+def test_playlist_update_requires_real_counterpart_and_fingerprint(
+    db: Session, make_track, tmp_path: Path
+):
+    usb = make_rekordbox_usb_with_playlists(tmp_path / "RB")
+    dest = tmp_path / "lib"
+    preview = external_drives.build_pull_preview(db, usb, dest)
+
+    with pytest.raises(external_drives.ExternalDriveError):
+        external_drives.execute_playlist_update(
+            db, usb, dest,
+            device_playlist_id=PAGE_LIST_A,
+            local_playlist_id=424242,
+            expected_fingerprint=preview.fingerprint,
+        )
+    with pytest.raises(external_drives.PlanChangedError):
+        external_drives.execute_playlist_update(
+            db, usb, dest,
+            device_playlist_id=PAGE_LIST_A,
+            local_playlist_id=1,
+            expected_fingerprint="0" * 64,
+        )
+    assert db.query(Track).count() == 0
+    assert not dest.exists()
+
+
+def test_router_playlist_update_flow(
+    client: TestClient, db_session: Session, make_track, tmp_path: Path
+):
+    usb = make_rekordbox_usb_with_playlists(tmp_path / "RB")
+    two = make_track(filename="/Contents/two.mp3", title="Two")
+    _add_local_playlist(db_session, "RIG Mix", [two.id])
+    local = db_session.query(Playlist).filter(Playlist.name == "RIG Mix").one()
+    dest = tmp_path / "lib"
+    resp = client.post(
+        "/api/external-drives/preview",
+        json={"root": str(usb), "destination": str(dest)},
+    )
+    assert resp.status_code == 200, resp.text
+    fingerprint = resp.json()["fingerprint"]
+
+    # update without the device playlist is refused
+    resp = client.post(
+        "/api/external-drives/import",
+        json={
+            "root": str(usb),
+            "destination": str(dest),
+            "confirm": True,
+            "preview_fingerprint": fingerprint,
+            "update_playlist_id": local.id,
+        },
+    )
+    assert resp.status_code == 400
+
+    resp = client.post(
+        "/api/external-drives/import",
+        json={
+            "root": str(usb),
+            "destination": str(dest),
+            "confirm": True,
+            "preview_fingerprint": fingerprint,
+            "create_playlist_id": PAGE_LIST_A,
+            "update_playlist_id": local.id,
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    update = resp.json()["playlist_update"]
+    assert update["playlist_id"] == local.id
+    assert update["added_imported"] == 2
+    assert update["member_count"] == 3
+    assert update["kept_local_only"] == 0
+    assert db_session.query(Playlist).count() == 1

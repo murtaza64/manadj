@@ -1202,6 +1202,141 @@ def execute_playlist_pull(
     )
 
 
+@dataclass
+class PlaylistUpdateResult:
+    """Outcome of syncing an existing local playlist from a device
+    playlist: missing members imported/added, order matched to the
+    device, local-only members kept (never silently removed)."""
+
+    playlist_id: int
+    name: str
+    member_count: int
+    added_imported: int  # newly copied files now on the playlist
+    added_from_library: int  # verified library tracks added to the playlist
+    kept_local_only: int  # local members absent from the device playlist, kept
+    skipped_uncertain: int
+    skipped_other: int
+    pull: PullResult
+
+
+def execute_playlist_update(
+    manadj_session: Any,
+    root: Path,
+    destination: Path,
+    *,
+    device_playlist_id: int,
+    local_playlist_id: int,
+    expected_fingerprint: str,
+) -> PlaylistUpdateResult:
+    """Sync an existing local playlist from a device playlist (pull side
+    only; the drive is never written to).
+
+    The pairing is the caller's reviewed choice: local_playlist_id is
+    explicit, never derived from a name match. Missing members are
+    imported (adds_new) or attached from the library (adds_in_library);
+    the playlist's order is matched to device order; members only in the
+    local playlist are KEPT in their prior relative order after the
+    device-ordered members, never silently removed. Uncertain and
+    missing members are skipped and counted.
+    """
+    from backend.models import Playlist, PlaylistTrack
+
+    root = root.resolve()
+    preview = build_pull_preview(manadj_session, root, destination)
+    if preview.fingerprint != expected_fingerprint:
+        raise PlanChangedError(
+            "the drive or library changed since the preview; run the preview again before importing"
+        )
+    device = read_rekordbox_device(root)
+    node = next((pl for pl in device.playlists if pl.id == device_playlist_id), None)
+    if node is None or node.is_folder:
+        raise ExternalDriveError(f"no device playlist with id {device_playlist_id}")
+    local = manadj_session.get(Playlist, local_playlist_id)
+    if local is None:
+        raise ExternalDriveError(f"no local playlist with id {local_playlist_id}")
+
+    entry_by_track_id = {
+        device.tracks[e.ordinal].id: e
+        for e in preview.entries
+        if 0 <= e.ordinal < len(device.tracks)
+    }
+    new_ordinals = {
+        entry_by_track_id[tid].ordinal
+        for tid in node.track_ids
+        if tid in entry_by_track_id and entry_by_track_id[tid].status == STATUS_NEW
+    }
+    pull = execute_pull(
+        manadj_session,
+        root,
+        destination,
+        expected_fingerprint=expected_fingerprint,
+        ordinals=new_ordinals,
+    )
+
+    index, _, _ = _manadj_matchers(manadj_session)
+    desired: list[int] = []
+    skipped_uncertain = 0
+    skipped_other = 0
+    for tid in node.track_ids:
+        entry = entry_by_track_id.get(tid)
+        if entry is None:
+            skipped_other += 1
+            continue
+        if entry.ordinal in pull.imported_by_ordinal:
+            desired.append(pull.imported_by_ordinal[entry.ordinal])
+            continue
+        lib_id = _library_track_id(index, entry)
+        if lib_id is not None:
+            desired.append(lib_id)
+        elif entry.status == STATUS_UNCERTAIN:
+            skipped_uncertain += 1
+        else:
+            skipped_other += 1
+
+    current = (
+        manadj_session.query(PlaylistTrack)
+        .filter(PlaylistTrack.playlist_id == local.id)
+        .order_by(PlaylistTrack.position)
+        .all()
+    )
+    current_ids = [c.track_id for c in current]
+    desired_set = set(desired)
+    kept_local_only = [tid for tid in current_ids if tid not in desired_set]
+    final = desired + kept_local_only
+    added_from_library = sum(
+        1 for tid in desired
+        if tid not in pull.imported_by_ordinal.values() and tid not in current_ids
+    )
+
+    try:
+        for row in current:
+            manadj_session.delete(row)
+        manadj_session.flush()
+        for position, track_id in enumerate(final):
+            manadj_session.add(
+                PlaylistTrack(playlist_id=local.id, track_id=track_id, position=position)
+            )
+        manadj_session.commit()
+    except Exception as exc:
+        manadj_session.rollback()
+        raise ExternalDriveError(
+            f"playlist update failed; imported tracks stay in the library "
+            f"and the local playlist was left unchanged: {exc}"
+        ) from exc
+
+    return PlaylistUpdateResult(
+        playlist_id=local.id,
+        name=local.name,
+        member_count=len(final),
+        added_imported=pull.imported,
+        added_from_library=added_from_library,
+        kept_local_only=len(kept_local_only),
+        skipped_uncertain=skipped_uncertain,
+        skipped_other=skipped_other,
+        pull=pull,
+    )
+
+
 def execute_pull(
     manadj_session: Any,
     root: Path,

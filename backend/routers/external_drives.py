@@ -51,6 +51,11 @@ class ImportRequest(BaseModel):
     create_playlist_id: int | None = None
     # Override for the local playlist name (defaults to the device name).
     playlist_name: str | None = None
+    # The user's explicit local counterpart for a sync-from-USB update.
+    # Only meaningful with create_playlist_id; a name suggestion never
+    # fills this in - the client passes it after the user picks the exact
+    # local playlist.
+    update_playlist_id: int | None = None
 
 
 class PullEntryOut(BaseModel):
@@ -178,6 +183,16 @@ def import_pull(request: ImportRequest, db: Session = Depends(get_db)):
             status_code=400,
             detail="No library directory configured; pass an explicit destination.",
         )
+    if request.update_playlist_id is not None and request.create_playlist_id is None:
+        raise HTTPException(
+            status_code=400,
+            detail="update_playlist_id requires create_playlist_id (the device playlist to sync from).",
+        )
+    if request.update_playlist_id is not None and request.playlist_name is not None:
+        raise HTTPException(
+            status_code=400,
+            detail="an update keeps the existing playlist's name; do not pass playlist_name.",
+        )
     if request.create_playlist_id is not None and request.ordinals is not None:
         raise HTTPException(
             status_code=400,
@@ -187,7 +202,19 @@ def import_pull(request: ImportRequest, db: Session = Depends(get_db)):
             ),
         )
     try:
-        if request.create_playlist_id is not None:
+        if request.update_playlist_id is not None:
+            update_result = external_drives.execute_playlist_update(
+                db,
+                Path(request.root),
+                Path(destination),
+                device_playlist_id=request.create_playlist_id,
+                local_playlist_id=request.update_playlist_id,
+                expected_fingerprint=request.preview_fingerprint,
+            )
+            result = update_result.pull
+            playlist_result = None
+        elif request.create_playlist_id is not None:
+            update_result = None
             playlist_result = external_drives.execute_playlist_pull(
                 db,
                 Path(request.root),
@@ -198,6 +225,7 @@ def import_pull(request: ImportRequest, db: Session = Depends(get_db)):
             )
             result = playlist_result.pull
         else:
+            update_result = None
             playlist_result = None
             result = external_drives.execute_pull(
                 db,
@@ -232,5 +260,16 @@ def import_pull(request: ImportRequest, db: Session = Depends(get_db)):
             "already_in_library": playlist_result.already_in_library,
             "skipped_uncertain": playlist_result.skipped_uncertain,
             "skipped_other": playlist_result.skipped_other,
+        }
+    if update_result is not None:
+        response["playlist_update"] = {
+            "playlist_id": update_result.playlist_id,
+            "name": update_result.name,
+            "member_count": update_result.member_count,
+            "added_imported": update_result.added_imported,
+            "added_from_library": update_result.added_from_library,
+            "kept_local_only": update_result.kept_local_only,
+            "skipped_uncertain": update_result.skipped_uncertain,
+            "skipped_other": update_result.skipped_other,
         }
     return response
