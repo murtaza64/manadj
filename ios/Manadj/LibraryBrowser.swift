@@ -7,6 +7,7 @@ struct LibraryBrowser: View {
     var onLoad: (LibraryTrack) -> Bool
     @FocusState private var searchFocused: Bool
     @State private var restoreSearchAfterError = false
+    @State private var keyboardOpen = false
     @State private var search = ""
     @State private var playlist: Int? = nil
     @State private var sort: SortColumn = .dateAdded
@@ -35,7 +36,7 @@ struct LibraryBrowser: View {
                     TextField("Search title, artist, file", text: $search).textInputAutocapitalization(.never).autocorrectionDisabled().submitLabel(.search).focused($searchFocused)
                     if !search.isEmpty { Button { search = ""; searchFocused = true } label: { Image(systemName: "xmark").frame(width: 44, height: 44) }.accessibilityLabel("Clear search") }
                 }.padding(.leading, 12).frame(minHeight: 44).background(Ink.crust, in: Capsule()).overlay(Capsule().stroke(Ink.edge))
-                ScrollView(.horizontal, showsIndicators: false) {
+                if !keyboardOpen { ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
                         Menu(playlist.flatMap { id in model.snapshot?.playlists.first { $0.id == id }?.name } ?? "ALL TRACKS") {
                             Button("All tracks") { playlist = nil }
@@ -54,6 +55,7 @@ struct LibraryBrowser: View {
                     Text("BROWSE  ›  " + (playlist == nil ? "COLLECTION" : "PLAYLIST")).font(Ink.font(11, bold: true)).foregroundStyle(Ink.accent)
                     Spacer()
                     Button { model.sync() } label: { Image(systemName: "arrow.triangle.2.circlepath").frame(width: 44, height: 44) }.disabled(model.busy).accessibilityLabel("Sync library")
+                }
                 }
                 if let followReference {
                     HStack {
@@ -93,6 +95,8 @@ struct LibraryBrowser: View {
             }
         }
         .background(Ink.base)
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in keyboardOpen = true }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in keyboardOpen = false }
         .task(id: taskId) { await filter() }
         .onChange(of: model.error) { _, error in
             if error == nil && restoreSearchAfterError {

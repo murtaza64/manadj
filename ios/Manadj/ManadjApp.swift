@@ -17,6 +17,7 @@ import CEngine
 struct WorkspaceView: View {
     @EnvironmentObject var model: AppModel
     @State private var browsing = false
+    @State private var keyboardOpen = false
     @State private var settings = false
     @State private var files = false
     @State private var fileTarget = 0
@@ -40,6 +41,8 @@ struct WorkspaceView: View {
                     if let notice { Text(notice).font(Ink.font(11)).padding(8).background(Ink.crust).padding(.top, 50).onTapGesture { self.notice = nil } }
                 }
         }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in keyboardOpen = true }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in keyboardOpen = false }
         .fileImporter(isPresented: $files, allowedContentTypes: [.audio]) { result in
             switch result {
             case .success(let url): model.importFile(url, deck: fileTarget)
@@ -56,20 +59,19 @@ struct WorkspaceView: View {
             let compact = geometry.size.height < 860
             let gap: CGFloat = compact ? 5 : 8
             VStack(spacing: gap) {
-                recordingBar.frame(height: 30)
-                HStack(spacing: 14) { deckInfo(0); deckInfo(1) }.frame(height: 44)
-                VStack(spacing: 3) { detailWave(0); detailWave(1) }.frame(height: compact ? 103 : 135)
+                if !(browsing && keyboardOpen) { recordingBar.frame(height: 30) }
+                HStack(spacing: 14) { deckInfo(0); deckInfo(1) }.frame(height: browsing && keyboardOpen ? 36 : 44)
+                if !(browsing && keyboardOpen) { VStack(spacing: 3) { detailWave(0); detailWave(1) }.frame(height: compact ? 103 : 135) }
                 ZStack(alignment: .bottom) {
-                    VStack(spacing: gap) {
+                    if !browsing && !settings { VStack(spacing: gap) {
                         mixer.frame(maxHeight: .infinity)
                         HStack(spacing: 6) { minimap(0); browseKey.frame(width: 84); minimap(1) }.frame(height: compact ? 36 : 44)
                         HStack(alignment: .top, spacing: 14) { deckControls(0, compact: compact); deckControls(1, compact: compact) }
                     }
-                    .offset(y: browsing || settings ? -geometry.size.height : 0)
-                    .opacity(browsing || settings ? 0 : 1)
+                    }
                     if browsing {
                         VStack(spacing: 0) {
-                            Capsule().fill(Ink.muted.opacity(0.7)).frame(width: 40, height: 4).frame(height: 16)
+                            if !keyboardOpen { Capsule().fill(Ink.muted.opacity(0.7)).frame(width: 40, height: 4).frame(height: 16) }
                             library
                             HStack(spacing: 14) { transport(0); transport(1) }.frame(height: 54)
                         }.background(Ink.base).transition(.move(edge: .bottom))

@@ -84,6 +84,10 @@ final class WorkspaceUITests: XCTestCase {
         XCTAssertTrue(search.exists)
         XCTAssertEqual(search.value as? String, "Test Tone")
         XCTAssertTrue(app.keyboards.firstMatch.exists)
+        let visibleResult = app.staticTexts["Cached Test Tone"]
+        XCTAssertTrue(visibleResult.exists)
+        XCTAssertTrue(visibleResult.isHittable, "Matching tracks must remain selectable above the keyboard")
+        XCTAssertLessThan(visibleResult.frame.maxY, app.keyboards.firstMatch.frame.minY, "Results must not sit behind the keyboard")
         let refused = XCTAttachment(screenshot: app.screenshot())
         refused.name = "Synthetic library - refused offline load preserves search"
         refused.lifetime = .keepAlways; add(refused)
