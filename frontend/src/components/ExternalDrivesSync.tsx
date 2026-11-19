@@ -233,7 +233,7 @@ export function ExternalDrivesSync({ focusPlaylist }: { focusPlaylist?: string |
   const runPlaylistUpdate = useCallback(
     async (playlist: ExternalDrivePreviewPlaylist) => {
       if (phase.step !== 'preview' || phase.verifying) return;
-      const counterpartId = playlist.membership?.counterpart_id;
+      const counterpartId = playlist.membership?.counterpart_id ?? playlist.membership?.candidate_id;
       const targetToken = playlist.membership?.target_token;
       if (counterpartId == null || !targetToken) return;
       const { drive, preview } = phase;
@@ -448,7 +448,7 @@ export function ExternalDrivesSync({ focusPlaylist }: { focusPlaylist?: string |
             (() => {
               const pl = (phase.preview.playlists ?? []).find((x) => x.id === updateReviewId);
               const m = pl?.membership;
-              if (!pl || !m || m.counterpart_id == null) return null;
+              if (!pl || !m || (m.counterpart_id == null && m.candidate_id == null)) return null;
               return (
                 <div className="external-drive-update-review">
                   <h4>Review update: {pl.name ?? '(unnamed)'}</h4>
@@ -517,10 +517,25 @@ export function ExternalDrivesSync({ focusPlaylist }: { focusPlaylist?: string |
                         {pl.membership.order_differs && ' · order differs'}
                       </span>
                     )}
+                    {pl.membership?.counterpart_status === 'candidate-name-match' && (
+                      <span className="external-drive-playlist-match">
+                        in folder {pl.folder_path} on the drive; same name as your library playlist
+                        {' '}"{pl.membership.candidate_name}" but not paired
+                      </span>
+                    )}
                     {pl.membership?.counterpart_status === 'ambiguous-name' && (
                       <span className="external-drive-playlist-match">
                         several local playlists share this name; rename one to update it
                       </span>
+                    )}
+                    {pl.membership?.counterpart_status === 'candidate-name-match' && (
+                      <button
+                        className="btn"
+                        disabled={phase.step === 'importing' || verifying || !destination.trim()}
+                        onClick={() => setUpdateReviewId(pl.id)}
+                      >
+                        Pair with "{pl.membership.candidate_name}" and review update
+                      </button>
                     )}
                     {pl.membership?.counterpart_status === 'unique-name-match' && (
                       <button

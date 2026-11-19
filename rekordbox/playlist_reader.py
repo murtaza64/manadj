@@ -22,6 +22,7 @@ class RekordboxPlaylistReader:
         """
         self.db = rb_db
         self.session = rb_db.session
+        self._skipped: dict[str, int] = {}
 
     def get_all_playlists(self) -> list[PlaylistInfo]:
         """Load all playlists from Rekordbox with hierarchy flattened.
@@ -34,6 +35,16 @@ class RekordboxPlaylistReader:
         """
         # Query all playlists
         playlists = self.session.query(DjmdPlaylist).all()
+        by_id = {pl.ID: pl for pl in playlists}
+
+        def path_of(pl) -> list[str]:
+            parts, seen, cur = [], set(), pl
+            while cur is not None and cur.ID not in seen:
+                seen.add(cur.ID)
+                if cur.Name:
+                    parts.insert(0, cur.Name)
+                cur = by_id.get(cur.ParentID) if cur.ParentID and cur.ParentID != '0' else None
+            return parts
 
         result = []
         for playlist in playlists:
@@ -61,7 +72,10 @@ class RekordboxPlaylistReader:
                 source_id=playlist.ID,
                 hierarchy_parts=hierarchy_parts if len(hierarchy_parts) > 1 else None,
                 last_modified=None,  # DateCreated available if needed
-                color=None  # Rekordbox playlists don't have colors in same way as manadj
+                color=None,  # Rekordbox playlists don't have colors in same way as manadj
+                skipped_tracks=self._skipped.get(playlist.ID, 0),
+                is_folder=(playlist.Attribute == 1) if playlist.Attribute is not None else None,
+                path_parts=path_of(playlist),
             ))
 
         return result
@@ -86,6 +100,7 @@ class RekordboxPlaylistReader:
         )
 
         result = []
+        skipped = 0
         for sp in song_playlists:
             # Get track content
             content = self.session.query(DjmdContent).filter_by(ID=sp.ContentID).first()
@@ -97,7 +112,10 @@ class RekordboxPlaylistReader:
                     artist=None,  # Artist is a relationship, would need join
                     track_id=sp.ContentID
                 ))
+            else:
+                skipped += 1
 
+        self._skipped[playlist_id] = skipped
         return result
 
     def flatten_hierarchy_name(self, playlist_id: str) -> str:

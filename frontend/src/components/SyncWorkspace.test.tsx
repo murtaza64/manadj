@@ -46,7 +46,7 @@ async function render() {
 it('opens captured Library context in actual Sync workspace, not another Library modal', async () => {
   await render();
   await act(async () => { button('Review fields…').click(); await tick(); });
-  expect(document.querySelector('.sync-view-tab.active')?.textContent).toBe('Workspace');
+  expect(document.querySelector('.sync-nav-title')?.textContent).toBe('Field review');
   expect(document.querySelector('[role=dialog]')).toBeNull();
   expect(document.querySelector('[aria-label="Review scope"]')?.textContent).toContain('Captured selected · 1 tracks');
   await act(async () => { button('Recheck plan').click(); await tick(); });
@@ -82,11 +82,11 @@ it('locks captured context while pending, excludes duplicate apply and preserves
   await act(async () => { button('Apply 1 fields').click(); button('Apply 1 fields').click(); await tick(); });
   expect(execute).toHaveBeenCalledTimes(1);
   expect(button('Rekordbox desktop').matches(':disabled')).toBe(true);
-  expect([...document.querySelectorAll<HTMLButtonElement>('.sync-view-tab')].every(tab => tab.disabled)).toBe(true);
+  expect(document.querySelector<HTMLButtonElement>('.sync-back')!.disabled).toBe(true);
   expect(document.activeElement?.hasAttribute('data-review-panel')).toBe(true);
   expect(openSyncWorkspace({ kind: 'playlist', playlistName: 'Other' })).toBe(false);
   await act(async () => { button('Sync from USB…').click(); await tick(); });
-  expect(document.querySelector('.sync-view-tab.active')?.textContent).toBe('Workspace');
+  expect(document.querySelector('.sync-nav-title')?.textContent).toBe('Field review');
   expect(takeUsbSyncFocus()).toBeNull();
   act(() => document.querySelector<HTMLTableRowElement>('[data-track-id="1"]')!.click());
   expect(execute.mock.calls[0][0].track_ids).toEqual([2]);

@@ -109,7 +109,7 @@ export const TOUR_SECTIONS: TourSection[] = [
       {
         anchor: 'sync.tabs',
         title: 'Import and export',
-        body: 'Start in Tracks to import music from disk or Rekordbox. Playlists handles playlist sync; Acquisition handles downloads.',
+        body: 'Pick a USB to see what differs, then choose what to bring in. Tracks, Playlists, Rekordbox import and Acquisition are under Tools.',
       },
       {
         anchor: 'sync.tracks',

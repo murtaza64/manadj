@@ -79,6 +79,8 @@ class MembershipOut(BaseModel):
     counterpart_status: str
     counterpart_id: int | None
     target_token: str | None = None
+    candidate_id: int | None = None
+    candidate_name: str | None = None
     common: int
     adds_in_library: int
     adds_new: int
@@ -92,6 +94,7 @@ class PlaylistOut(BaseModel):
     id: int
     name: str | None
     folder_path: str
+    folder_parts: list[str] = []
     sort_order: int
     track_count: int
     new_count: int
@@ -164,6 +167,75 @@ def preview_pull(request: PreviewRequest, db: Session = Depends(get_db)):
     except external_drives.ExternalDriveError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return _preview_out(preview)
+
+
+class CheckRequest(BaseModel):
+    root: str
+
+
+class FieldChange(BaseModel):
+    track_id: int
+    field: str
+    # The values the user reviewed. Required (null is a valid reviewed value):
+    # a change refuses if either moved since review.
+    drive: str | float | None
+    library: str | float | None
+
+
+class FieldApplyRequest(BaseModel):
+    root: str
+    preview_fingerprint: str
+    changes: list[FieldChange]
+
+
+@router.post("/fields/apply")
+def apply_fields(request: FieldApplyRequest, db: Session = Depends(get_db)):
+    """Take the drive's value for reviewed (track, field) pairs. Library only."""
+    try:
+        return external_drives.apply_field_changes(
+            db, Path(request.root), request.preview_fingerprint,
+            [c.model_dump(exclude_unset=True) for c in request.changes],
+        )
+    except external_drives.FieldChangeRefused as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except external_drives.ExternalDriveError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/fields")
+def compare_fields(request: CheckRequest, db: Session = Depends(get_db)):
+    """Read-only per-track metadata comparison against the library."""
+    try:
+        preview = external_drives.build_pull_preview(db, Path(request.root), None, verify=True)
+    except external_drives.ExternalDriveError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return external_drives.compare_matched_fields(db, preview)
+
+
+class ExportImpactRequest(BaseModel):
+    root: str
+    playlist_ids: list[int] = []
+
+
+@router.post("/export/impact")
+def export_impact(request: ExportImpactRequest, db: Session = Depends(get_db)):
+    """Read-only: what exporting these playlists to this drive would rebuild. Writes nothing."""
+    try:
+        return external_drives.export_impact(db, Path(request.root), request.playlist_ids)
+    except external_drives.ExternalDriveError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/check")
+def check_structure(request: CheckRequest):
+    """Read-only structural readback of a drive (see check_drive_structure)."""
+    try:
+        return external_drives.check_drive_structure(Path(request.root))
+    except external_drives.ExternalDriveError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001 - an unreadable tree is a result, not a 500
+        return {"kind": "rekordbox", "checked": True, "tracks": 0, "playlists": 0,
+                "analysis_files": 0, "errors": [f"unreadable: {exc}"], "error_count": 1}
 
 
 @router.post("/import")

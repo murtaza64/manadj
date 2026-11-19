@@ -54,6 +54,32 @@ def get_unified_playlists(db: Session = Depends(get_db)):
     return playlists
 
 
+@router.get("/coverage")
+def get_playlist_coverage(db: Session = Depends(get_db)):
+    """Playlists per library with explicit read status; same-name playlists are kept apart."""
+    from backend.playlists.coverage import build_coverage
+    from backend.playlists.manadj_reader import ManAdjPlaylistReader
+
+    config = get_config()
+    readers = {"manadj": ManAdjPlaylistReader(db).get_all_playlists, "engine": None, "rekordbox": None}
+
+    if config.database.engine_dj_path:
+        def read_engine():
+            from pathlib import Path
+            from enginedj.connection import EngineDJDatabase
+            from enginedj.playlist_reader import EnginePlaylistReader
+            return EnginePlaylistReader(EngineDJDatabase(Path(config.database.engine_dj_path))).get_all_playlists()
+        readers["engine"] = read_engine
+
+    if config.database.rekordbox_path:
+        def read_rekordbox():
+            from rekordbox.playlist_reader import RekordboxPlaylistReader
+            return RekordboxPlaylistReader(get_rekordbox_db()).get_all_playlists()
+        readers["rekordbox"] = read_rekordbox
+
+    return build_coverage(readers)
+
+
 @router.get("/stats", response_model=PlaylistSyncStats)
 def get_playlist_stats(db: Session = Depends(get_db)):
     """Get statistics about playlists across all sources.

@@ -321,6 +321,8 @@ class PlaylistPreview:
     # surfaced as an explicit gap for the user/design to resolve; the
     # code must not auto-prefix names or silently drop the folder.
     folder_not_representable: bool = False
+    # Typed folder chain (outermost first); folder_path is its "/" display form.
+    folder_parts: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -674,7 +676,8 @@ def build_rekordbox_pull_preview(
             continue
         try:
             rollup.membership = diff_device_playlist(
-                manadj_session, device, node, entries
+                manadj_session, device, node, entries,
+                foldered=bool(rollup.folder_path),
             )
         except Exception:  # a local-db hiccup must not kill the pull preview
             log.warning("membership diff failed for playlist %s", node.id, exc_info=True)
@@ -697,14 +700,17 @@ def _playlist_previews(
     }
     folders = {p.id: p for p in device.playlists if p.is_folder}
 
-    def folder_path(node: DevicePlaylist) -> str:
+    def folder_parts(node: DevicePlaylist) -> list[str]:
         parts: list[str] = []
         parent = folders.get(node.parent_id)
         while parent is not None and len(parts) < 20:
             if parent.name:
                 parts.append(parent.name)
             parent = folders.get(parent.parent_id)
-        return "/".join(reversed(parts))
+        return list(reversed(parts))
+
+    def folder_path(node: DevicePlaylist) -> str:
+        return "/".join(folder_parts(node))
 
     out: list[PlaylistPreview] = []
     for node in sorted(device.playlists, key=lambda p: (p.parent_id, p.sort_order, p.id)):
@@ -729,6 +735,7 @@ def _playlist_previews(
                 uncertain_count=counts[STATUS_UNCERTAIN],
                 other_count=counts["other"],
                 folder_not_representable=bool(folder_path(node)),
+                folder_parts=folder_parts(node),
                 track_ordinals=[
                     ordinal_by_track_id[tid]
                     for tid in node.track_ids
@@ -775,6 +782,12 @@ class PlaylistMembershipDiff:
     # Snapshot of the suggested counterpart at review time; the confirm
     # carries it back and the update refuses a target that changed since.
     target_token: str | None = None
+    # A device playlist inside a folder is only a CANDIDATE for a same-name
+    # local playlist (the local model is flat, so the folder is not part of
+    # the match). The candidate never becomes counterpart_id; pairing needs an
+    # explicit user choice that names it, and the token still binds the target.
+    candidate_id: int | None = None
+    candidate_name: str | None = None
 
 
 def diff_device_playlist(
@@ -782,6 +795,7 @@ def diff_device_playlist(
     device: RekordboxDevice,
     playlist: DevicePlaylist,
     entries: list[PullEntry],
+    foldered: bool = False,
 ) -> PlaylistMembershipDiff:
     from backend.models import Playlist, PlaylistTrack
 
@@ -825,11 +839,13 @@ def diff_device_playlist(
         device_playlist_id=playlist.id,
         name=playlist.name,
         counterpart_status=(
-            "unique-name-match"
+            ("candidate-name-match" if foldered else "unique-name-match")
             if len(counterparts) == 1
             else ("no-local-playlist" if not counterparts else "ambiguous-name")
         ),
-        counterpart_id=counterparts[0].id if len(counterparts) == 1 else None,
+        counterpart_id=counterparts[0].id if len(counterparts) == 1 and not foldered else None,
+        candidate_id=counterparts[0].id if len(counterparts) == 1 and foldered else None,
+        candidate_name=counterparts[0].name if len(counterparts) == 1 and foldered else None,
         adds_in_library=adds_in_library,
         adds_new=adds_new,
         uncertain_members=uncertain,
@@ -1603,3 +1619,262 @@ def execute_pull(
         result.imported_by_ordinal = {o: t.id for o, t in imported_tracks}
 
     return result
+
+
+def check_drive_structure(root: Path) -> dict:
+    """Read-only structural readback of a Rekordbox device tree.
+
+    Basis for the USB overview's "structure" line, nothing more: it reuses
+    manaDJ's own device reader (rekordbox.device.verify) to confirm the
+    database pages, playlist tree and analysis files parse. It does NOT
+    prove a Pioneer player will load the drive, and a drive written by
+    Rekordbox desktop may report differences simply because the checker
+    encodes manaDJ's writer layout. Engine drives are not checked.
+    """
+    drive = detect_drive_at(root)
+    if drive is None:
+        raise ExternalDriveError(f"{root} is not a Rekordbox or Engine library")
+    if drive.kind != "rekordbox":
+        return {"kind": drive.kind, "checked": False, "reason": "Engine drives have no structure check yet"}
+    from rekordbox.device.verify import verify_export
+
+    report = verify_export(Path(root))
+    return {
+        "kind": "rekordbox",
+        "checked": True,
+        "tracks": report["tracks"],
+        "playlists": report["playlists"],
+        "analysis_files": report["analysis_files"],
+        "errors": list(report["errors"])[:20],
+        "error_count": len(report["errors"]),
+    }
+
+
+# --- field comparison (read-only) -----------------------------------------
+
+COMPARED_FIELDS = ("title", "artist", "bpm", "key")
+# BPM is shown but never taken from a drive: it follows manaDJ's own analysis.
+APPLICABLE_FIELDS = ("title", "artist", "key")
+
+
+def _norm_text(value: str | None) -> str | None:
+    value = (value or "").strip()
+    return value or None
+
+
+def compare_matched_fields(manadj_session: Any, preview: "PullPreview") -> dict:
+    """Per-track metadata comparison for tracks already in the library.
+
+    One row per track (never per playlist): the drive's value, the library's
+    value, and whether they differ. Only audio-verified matches are compared;
+    unverified name matches never are. A field differs only when the drive has
+    a value: a blank drive value is nothing to take. Cues and other fields are
+    NOT compared; the response says so rather than staying silent.
+    Read-only: nothing here writes to the library or the drive.
+    """
+    from backend.key import Key
+    from backend.models import Track
+
+    index, _, _ = _manadj_matchers(manadj_session)
+    # Pass 1: gather EVERY drive entry that matches each library track, with
+    # all of its drive values, before deciding what differs. A duplicate that
+    # equals the library must still conflict with one that differs.
+    gathered: dict[int, dict] = {}
+    for entry in preview.entries:
+        track_id = _library_track_id(index, entry)
+        if track_id is None:
+            continue
+        slot = gathered.setdefault(track_id, {"first": entry, "entries": []})
+        slot["entries"].append(entry)
+    tracks: list[dict] = []
+    for track_id, slot in gathered.items():
+        track = manadj_session.get(Track, track_id)
+        if track is None:
+            continue
+        entry = slot["first"]
+        lib_key = Key(track.key).musical if track.key is not None else None
+        lib_values = {
+            "title": _norm_text(track.title),
+            "artist": _norm_text(track.artist),
+            "bpm": round(track.bpm / 100.0, 2) if track.bpm else None,
+            "key": lib_key,
+        }
+
+        def drive_value(e: Any, name: str) -> Any:
+            if name == "title":
+                return _norm_text(e.title)
+            if name == "artist":
+                return _norm_text(e.artist)
+            if name == "bpm":
+                return round(e.bpm, 2) if e.bpm else None
+            key_obj = Key.from_musical(e.key) if e.key else None
+            return key_obj.musical if key_obj else _norm_text(e.key)
+
+        def same(name: str, x: Any, y: Any) -> bool:
+            if name in ("title", "artist") and isinstance(x, str) and isinstance(y, str):
+                return x.casefold() == y.casefold()
+            if name == "bpm" and x is not None and y is not None:
+                return abs(x - y) <= 0.01
+            return x == y
+
+        fields = []
+        for name in COMPARED_FIELDS:
+            vals = [v for v in (drive_value(e, name) for e in slot["entries"]) if v is not None]
+            if not vals:
+                continue  # nothing on the drive to take
+            distinct: list[Any] = []
+            for v in vals:
+                if not any(same(name, v, d) for d in distinct):
+                    distinct.append(v)
+            lib_value = lib_values[name]
+            conflict = len(distinct) > 1
+            differing = [v for v in distinct if not same(name, v, lib_value)]
+            if not differing:
+                continue
+            row = {
+                "field": name,
+                "drive": differing[0],
+                "library": lib_value,
+                "applicable": name in APPLICABLE_FIELDS and not conflict,
+            }
+            if conflict:
+                row["conflict"] = "The drive holds this track twice with different values."
+            fields.append(row)
+        if fields:
+            tracks.append({
+                "ordinal": entry.ordinal,
+                "track_id": track_id,
+                "label": " - ".join(x for x in (entry.artist, entry.title) if x) or entry.device_path,
+                "fields": fields,
+            })
+    return {
+        "fingerprint": preview.fingerprint,
+        "tracks": tracks,
+        "compared": list(COMPARED_FIELDS),
+        "not_compared": {"cues": "Hot cue comparison is not available yet."},
+    }
+
+
+class FieldChangeRefused(ExternalDriveError):
+    pass
+
+
+def apply_field_changes(manadj_session: Any, root: Path, preview_fingerprint: str, changes: list[dict]) -> dict:
+    """Take the drive's value for the listed (track_id, field) pairs.
+
+    Bound to the reviewed preview: a changed drive or library refuses the
+    whole batch before anything is written. Only audio-verified matches and
+    APPLICABLE_FIELDS can be taken. Writes the library only, never the drive.
+    """
+    from backend.key import Key
+    from backend.models import Track
+
+    preview = build_pull_preview(manadj_session, root, None, verify=True)
+    if preview.fingerprint != preview_fingerprint:
+        raise FieldChangeRefused("The drive or library changed since you reviewed it. Review again.")
+    comparison = compare_matched_fields(manadj_session, preview)
+    by_track = {t["track_id"]: {f["field"]: f for f in t["fields"]} for t in comparison["tracks"]}
+    if not changes:
+        raise FieldChangeRefused("No field changes were chosen.")
+    # Validate EVERY change before the first write, so a late invalid or stale
+    # member refuses the whole batch with nothing written.
+    unique: dict[tuple[int, str], dict] = {}
+    for change in changes:
+        pair = (change.get("track_id"), change.get("field"))
+        field_row = by_track.get(pair[0], {}).get(pair[1])
+        if field_row is None:
+            raise FieldChangeRefused("A chosen change no longer differs. Review again.")
+        if not field_row["applicable"]:
+            raise FieldChangeRefused(f"{pair[1]} cannot be taken from a drive.")
+        # The values the user reviewed must still be the live values.
+        for side in ("drive", "library"):
+            if side not in change:
+                raise FieldChangeRefused("Each change must carry the reviewed drive and library values.")
+            if change[side] != field_row[side]:
+                raise FieldChangeRefused("A value changed since you reviewed it. Review again.")
+        if pair[1] == "key":
+            key = Key.from_musical(field_row["drive"])
+            if key is None or key.engine_id is None:
+                raise FieldChangeRefused(f"Unrecognized key {field_row['drive']!r}.")
+        if manadj_session.get(Track, pair[0]) is None:
+            raise FieldChangeRefused("A chosen track no longer exists. Review again.")
+        unique[pair] = change  # the same pair twice is one write
+    applied = []
+    try:
+        for (track_id, field_name), _ in unique.items():
+            track = manadj_session.get(Track, track_id)
+            value = by_track[track_id][field_name]["drive"]
+            if field_name == "key":
+                track.key = Key.from_musical(value).engine_id
+                track.key_provenance = "imported"
+            else:
+                setattr(track, field_name, value)
+            applied.append({"track_id": track_id, "field": field_name, "value": value})
+        manadj_session.commit()
+    except Exception:
+        manadj_session.rollback()
+        raise
+    return {"applied": applied}
+
+
+def export_impact(manadj_session: Any, root: Path, playlist_ids: list[int]) -> dict:
+    """Read-only: what a performance-USB export of these playlists would do to this drive.
+
+    The device exporter is a full rebuild of the drive's index, not a sync. It rewrites
+    export.pdb and exportExt.pdb from only the selected playlists, rewrites analysis files
+    for the exported tracks and copies audio into Contents/<track id>/. It deletes nothing,
+    but playlists and tracks that are on the drive and not selected disappear from the
+    index, and their audio files stay behind unreferenced. This function writes nothing.
+    Execution is not available: the exporter is hardware-unverified and has no endpoint.
+    """
+    from backend import models
+    from backend.config import get_config
+
+    root = Path(root)
+    drive = detect_drive_at(root)
+    if drive is None or drive.kind != "rekordbox":
+        raise ExternalDriveError("Not a Rekordbox drive")
+    selected = []
+    for pid in playlist_ids:
+        pl = manadj_session.get(models.Playlist, pid)
+        if pl is None:
+            continue
+        rows = manadj_session.query(models.PlaylistTrack).filter(models.PlaylistTrack.playlist_id == pid).all()
+        usable = 0
+        missing_audio = 0
+        for row in rows:
+            track = manadj_session.get(models.Track, row.track_id)
+            if track is None or track.archived_at is not None:
+                continue
+            if Path(track.filename).is_file():
+                usable += 1
+            else:
+                missing_audio += 1
+        selected.append({"id": pid, "name": pl.name, "tracks": usable, "missing_audio": missing_audio})
+    names = {s["name"] for s in selected}
+    drive_read: dict
+    try:
+        device = read_rekordbox_device(root)
+        listed = [p for p in device.playlists if not p.is_folder]
+        drive_read = {
+            "read": True,
+            "tracks": len(device.tracks),
+            "playlists": len(listed),
+            "dropped_playlists": sorted((p.name or "") for p in listed if p.name not in names),
+        }
+    except Exception as exc:  # noqa: BLE001 - an unreadable drive is a result
+        drive_read = {"read": False, "reason": str(exc)}
+    return {
+        "root": str(root),
+        "mode": "rebuild",
+        "selected": selected,
+        "drive": drive_read,
+        "one_library_present": (root / "PIONEER/rekordbox/exportLibrary.db").exists(),
+        "is_mount": root.resolve().is_mount(),
+        "gate_enabled": bool(get_config().export.enabled),
+        "rewrites": ["PIONEER/rekordbox/export.pdb", "PIONEER/rekordbox/exportExt.pdb", "PIONEER/USBANLZ (exported tracks)"],
+        "adds": ["Contents/<track id>/ (audio for exported tracks)"],
+        "deletes": [],
+        "executable": False,
+        "blocked_reason": "Not enabled: rebuild is hardware-unverified and not wired to the app.",
+    }
