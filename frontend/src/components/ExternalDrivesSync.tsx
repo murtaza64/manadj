@@ -108,6 +108,10 @@ export function ExternalDrivesSync() {
   // never by silently merging.
   const [playlistNames, setPlaylistNames] = useState<Record<number, string>>({});
   const [importingPlaylistId, setImportingPlaylistId] = useState<number | null>(null);
+  // The playlist whose update the user is reviewing: shows exactly what
+  // the sync would do (adds, kept local-only tracks, order) before the
+  // confirm, and the confirm names the exact local counterpart.
+  const [updateReviewId, setUpdateReviewId] = useState<number | null>(null);
   // Monotonic token: every async preview checks it before applying, so a
   // response racing a cancel, a failure, or a newer preview is dropped
   // instead of resurrecting a stale plan.
@@ -221,6 +225,61 @@ export function ExternalDrivesSync() {
       }
     }
   }, [phase, destination, refresh, selected]);
+
+  const runPlaylistUpdate = useCallback(
+    async (playlist: ExternalDrivePreviewPlaylist) => {
+      if (phase.step !== 'preview' || phase.verifying) return;
+      const counterpartId = playlist.membership?.counterpart_id;
+      if (counterpartId == null) return;
+      const { drive, preview } = phase;
+      setError(null);
+      setImportingPlaylistId(playlist.id);
+      setPhase({ step: 'importing', drive, preview });
+      try {
+        const bound = await api.externalDrives.preview(drive.root, destination || undefined);
+        const planOf = (p: ExternalDrivePreview) =>
+          p.entries.map((e) => `${e.ordinal}:${e.device_path}:${e.status}`).join('\n') +
+          '\n' +
+          (p.playlists ?? [])
+            .map((pl) => `${pl.id}:${pl.name}:${(pl.track_ordinals ?? []).join(',')}`)
+            .join('\n');
+        if (planOf(bound) !== planOf(preview)) {
+          setError(
+            'The drive or library changed since this preview; review the refreshed plan before importing.'
+          );
+          setSelected(newOrdinals(bound));
+          setPlaylistNames(
+            Object.fromEntries((bound.playlists ?? []).map((pl) => [pl.id, pl.name ?? '']))
+          );
+          setUpdateReviewId(null);
+          setPhase({ step: 'preview', drive, preview: bound, verifying: false });
+          return;
+        }
+        const result = await api.externalDrives.import({
+          root: drive.root,
+          destination: destination || undefined,
+          confirm: true,
+          preview_fingerprint: bound.fingerprint,
+          create_playlist_id: playlist.id,
+          update_playlist_id: counterpartId,
+        });
+        setUpdateReviewId(null);
+        setPhase({ step: 'done', drive, result });
+        refresh();
+      } catch (e) {
+        const message = e instanceof Error ? e.message : 'Update failed';
+        setError(message);
+        if (message.includes('changed since the preview')) {
+          setPhase({ step: 'idle' });
+        } else {
+          setPhase({ step: 'preview', drive, preview, verifying: false });
+        }
+      } finally {
+        setImportingPlaylistId(null);
+      }
+    },
+    [phase, destination, refresh]
+  );
 
   const runPlaylistImport = useCallback(
     async (playlist: ExternalDrivePreviewPlaylist) => {
@@ -378,6 +437,45 @@ export function ExternalDrivesSync() {
             imported; tracks with no library match are not proven new, just unmatched.
             {verifying && ' Match verification is still running; import unlocks when it finishes.'}
           </p>
+          {updateReviewId != null &&
+            (() => {
+              const pl = (phase.preview.playlists ?? []).find((x) => x.id === updateReviewId);
+              const m = pl?.membership;
+              if (!pl || !m || m.counterpart_id == null) return null;
+              return (
+                <div className="external-drive-update-review">
+                  <h4>Review update: {pl.name ?? '(unnamed)'}</h4>
+                  <p>
+                    Syncing from the USB will import {m.adds_new} new track
+                    {m.adds_new === 1 ? '' : 's'}, add {m.adds_in_library} already in your
+                    library, and match the playlist order to the USB. {m.removes}{' '}
+                    local-only track{m.removes === 1 ? '' : 's'} stay on the playlist
+                    {m.removes_provisional &&
+                      ' (provisional: unverified USB tracks could be some of them)'}
+                    . Nothing is removed, and nothing is written to the drive.
+                    {m.uncertain_members > 0 &&
+                      ` ${m.uncertain_members} unverified USB track${m.uncertain_members === 1 ? '' : 's'} skipped.`}
+                  </p>
+                  <button
+                    className="btn btn-primary"
+                    disabled={phase.step === 'importing'}
+                    onClick={() => runPlaylistUpdate(pl)}
+                  >
+                    {importingPlaylistId === pl.id
+                      ? 'Updating…'
+                      : `Update local playlist "${playlistNames[pl.id] ?? pl.name ?? ''}"`}
+                  </button>
+                  <button
+                    className="btn"
+                    disabled={phase.step === 'importing'}
+                    onClick={() => setUpdateReviewId(null)}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              );
+            })()}
+
           {(phase.preview.playlists ?? []).length > 0 && (
             <div className="external-drive-playlists">
               <h4>Playlists on this drive</h4>
@@ -398,6 +496,30 @@ export function ExternalDrivesSync() {
                       {pl.uncertain_count > 0 &&
                         ` · ${pl.uncertain_count} unverified (skipped)`}
                     </span>
+                    {pl.membership?.counterpart_status === 'unique-name-match' && (
+                      <span className="external-drive-playlist-match">
+                        suggested match: local playlist ·{' '}
+                        {pl.membership.adds_new} to import ·{' '}
+                        {pl.membership.adds_in_library} to add from library ·{' '}
+                        {pl.membership.removes} local-only kept
+                        {pl.membership.removes_provisional && ' (provisional)'}
+                        {pl.membership.order_differs && ' · order differs'}
+                      </span>
+                    )}
+                    {pl.membership?.counterpart_status === 'ambiguous-name' && (
+                      <span className="external-drive-playlist-match">
+                        several local playlists share this name; rename one to update it
+                      </span>
+                    )}
+                    {pl.membership?.counterpart_status === 'unique-name-match' && (
+                      <button
+                        className="btn"
+                        disabled={phase.step === 'importing' || verifying || !destination.trim()}
+                        onClick={() => setUpdateReviewId(pl.id)}
+                      >
+                        Review update
+                      </button>
+                    )}
                     <input
                       type="text"
                       className="external-drive-playlist-rename"
@@ -540,6 +662,20 @@ export function ExternalDrivesSync() {
               ` · ${phase.result.skipped_missing_file} missing audio`}
             . Copied into {phase.result.destination}. Waveform and analysis jobs are queued.
           </p>
+          {phase.result.playlist_update && (
+            <p className="external-drive-playlist-result">
+              Playlist &quot;{phase.result.playlist_update.name}&quot; updated:{' '}
+              {phase.result.playlist_update.member_count} tracks, USB order first ·{' '}
+              {phase.result.playlist_update.added_imported} new files copied ·{' '}
+              {phase.result.playlist_update.added_from_library} added from library ·{' '}
+              {phase.result.playlist_update.kept_local_only} local-only kept
+              {phase.result.playlist_update.skipped_uncertain > 0 &&
+                ` · ${phase.result.playlist_update.skipped_uncertain} unverified skipped`}
+              {phase.result.playlist_update.skipped_other > 0 &&
+                ` · ${phase.result.playlist_update.skipped_other} unavailable skipped`}
+              .
+            </p>
+          )}
           {phase.result.playlist && (
             <p className="external-drive-playlist-result">
               Playlist &quot;{phase.result.playlist.name}&quot; created with{' '}

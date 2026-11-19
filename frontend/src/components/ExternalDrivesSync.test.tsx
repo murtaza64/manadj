@@ -460,6 +460,7 @@ const PLAYLIST_PREVIEW = {
       other_count: 0,
       folder_not_representable: false,
       track_ordinals: [0, 1, 2],
+      membership: null,
     },
   ],
 };
@@ -631,3 +632,125 @@ for (const playlist of [false, true]) {
     } finally { act(() => root.unmount()); }
   });
 }
+
+const UPDATE_PREVIEW = {
+  ...PLAYLIST_PREVIEW,
+  playlists: [
+    {
+      ...PLAYLIST_PREVIEW.playlists[0],
+      name: 'RIG Mix',
+      membership: {
+        counterpart_status: 'unique-name-match' as const,
+        counterpart_id: 7,
+        common: 1,
+        adds_in_library: 0,
+        adds_new: 2,
+        removes: 1,
+        removes_provisional: true,
+        uncertain_members: 1,
+        order_differs: true,
+      },
+    },
+  ],
+};
+
+const UPDATE_RESULT = {
+  ...PLAYLIST_RESULT,
+  playlist_update: {
+    playlist_id: 7,
+    name: 'RIG Mix',
+    member_count: 4,
+    added_imported: 2,
+    added_from_library: 0,
+    kept_local_only: 1,
+    skipped_uncertain: 1,
+    skipped_other: 0,
+  },
+};
+
+it('previews the update and syncs the explicitly chosen local playlist', async () => {
+  vi.spyOn(api.externalDrives, 'list').mockResolvedValue([DRIVE]);
+  vi.spyOn(api.externalDrives, 'preview').mockResolvedValue(UPDATE_PREVIEW);
+  const imp = vi.spyOn(api.externalDrives, 'import').mockResolvedValue(UPDATE_RESULT);
+  const { host, root, button } = render();
+  try {
+    await act(async () => {
+      root.render(<ExternalDrivesSync />);
+      await tick();
+    });
+    await act(async () => {
+      button('Pull…')!.click();
+      await tick();
+    });
+    expect(host.textContent).toContain('suggested match: local playlist');
+    expect(host.textContent).toContain('1 local-only kept (provisional)');
+    expect(imp).not.toHaveBeenCalled();
+
+    // the review spells out adds, kept local-only tracks and order first
+    await act(async () => {
+      button('Review update')!.click();
+      await tick();
+    });
+    expect(host.textContent).toContain('import 2 new tracks');
+    expect(host.textContent).toContain('match the playlist order to the USB');
+    expect(host.textContent).toContain('Nothing is removed');
+    expect(imp).not.toHaveBeenCalled();
+
+    // the confirm names the exact local counterpart
+    await act(async () => {
+      button('Update local playlist "RIG Mix"')!.click();
+      await tick();
+    });
+    expect(imp).toHaveBeenCalledWith({
+      root: DRIVE.root,
+      destination: '/library',
+      confirm: true,
+      preview_fingerprint: 'fp-test',
+      create_playlist_id: 63,
+      update_playlist_id: 7,
+    });
+    expect(host.textContent).toContain('Playlist "RIG Mix" updated');
+    expect(host.textContent).toContain('1 local-only kept');
+  } finally {
+    act(() => root.unmount());
+  }
+});
+
+it('never offers an update when the name match is ambiguous', async () => {
+  vi.spyOn(api.externalDrives, 'list').mockResolvedValue([DRIVE]);
+  const ambiguous = {
+    ...PLAYLIST_PREVIEW,
+    playlists: [
+      {
+        ...PLAYLIST_PREVIEW.playlists[0],
+        membership: {
+          counterpart_status: 'ambiguous-name' as const,
+          counterpart_id: null,
+          common: 0,
+          adds_in_library: 0,
+          adds_new: 0,
+          removes: 0,
+          removes_provisional: false,
+          uncertain_members: 0,
+          order_differs: null,
+        },
+      },
+    ],
+  };
+  vi.spyOn(api.externalDrives, 'preview').mockResolvedValue(ambiguous);
+  const { host, root, button } = render();
+  try {
+    await act(async () => {
+      root.render(<ExternalDrivesSync />);
+      await tick();
+    });
+    await act(async () => {
+      button('Pull…')!.click();
+      await tick();
+    });
+    expect(host.textContent).toContain('several local playlists share this name');
+    expect(button('Review update')).toBeUndefined();
+  } finally {
+    act(() => root.unmount());
+  }
+});

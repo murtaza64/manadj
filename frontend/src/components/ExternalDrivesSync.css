@@ -276,7 +276,8 @@
 .external-drive-playlist {
   display: flex;
   align-items: center;
-  gap: 10px;
+  flex-wrap: wrap;
+  gap: 6px 10px;
   padding: 4px 0;
 }
 .external-drive-playlist-name {
@@ -285,11 +286,36 @@
 .external-drive-playlist-counts {
   color: #888;
   font-size: 12px;
-  flex: 1;
+  flex: 1 1 100%;
+  order: 10;
 }
 .external-drive-playlist-rename {
   width: 180px;
 }
 .external-drive-playlist-result {
   margin-top: 8px;
+}
+
+.external-drive-playlist-match {
+  color: #888;
+  font-size: 12px;
+  flex: 1 1 100%;
+  order: 11;
+}
+.external-drive-update-review {
+  border: 1px solid #333;
+  padding: 10px 12px;
+  margin: 8px 0;
+}
+.external-drive-update-review h4 {
+  margin: 0 0 6px;
+  font-size: 13px;
+}
+.external-drive-update-review p {
+  margin: 0 0 10px;
+  font-size: 12px;
+  color: #aaa;
+}
+.external-drive-update-review .btn {
+  margin-right: 8px;
 }

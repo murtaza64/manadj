@@ -89,6 +89,18 @@ export interface ExternalDrivePullEntry {
   matched_path: string | null;
 }
 
+export interface ExternalDrivePlaylistMembership {
+  counterpart_status: 'unique-name-match' | 'no-local-playlist' | 'ambiguous-name';
+  counterpart_id: number | null;
+  common: number;
+  adds_in_library: number;
+  adds_new: number;
+  removes: number;
+  removes_provisional: boolean;
+  uncertain_members: number;
+  order_differs: boolean | null;
+}
+
 export interface ExternalDrivePreviewPlaylist {
   id: number;
   name: string | null;
@@ -102,6 +114,7 @@ export interface ExternalDrivePreviewPlaylist {
   /** Member entry ordinals in device order: the review guard binds the
    * clicked plan to this exact ordered membership. */
   track_ordinals: number[];
+  membership: ExternalDrivePlaylistMembership | null;
 }
 
 export interface ExternalDrivePreview {
@@ -136,6 +149,21 @@ export interface ExternalDriveImportRequest {
   create_playlist_id?: number;
   /** Local name for the created playlist (defaults to the device name). */
   playlist_name?: string;
+  /** The user's explicitly chosen local playlist for a sync-from-USB
+   * update. Only with create_playlist_id; a name suggestion never fills
+   * this in. */
+  update_playlist_id?: number;
+}
+
+export interface ExternalDriveUpdatedPlaylist {
+  playlist_id: number;
+  name: string;
+  member_count: number;
+  added_imported: number;
+  added_from_library: number;
+  kept_local_only: number;
+  skipped_uncertain: number;
+  skipped_other: number;
 }
 
 export interface ExternalDriveImportedPlaylist {
@@ -161,6 +189,7 @@ export interface ExternalDriveImportResult {
   errors: string[];
   track_ids: number[];
   playlist?: ExternalDriveImportedPlaylist;
+  playlist_update?: ExternalDriveUpdatedPlaylist;
 }
 
 /** Phone sync LAN listener (#373, backend/device_listener.py). */
