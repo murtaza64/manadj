@@ -208,6 +208,15 @@ export class DeckEngine {
    * advancing and folding inside the projected region. No audio sounds;
    * any start/stop clears it. */
   private phantomActive = false;
+  /** True while the active silence loop was AUTO-ENGAGED at a natural EOF
+   * rather than installed by a gesture. The distinction matters for beat
+   * jumps: a gesture-installed loop translates with the playhead (looping
+   * 04), but the auto safety net belongs at the track's end — dragging it
+   * backwards would loop the tail mid-track and the natural EOF the
+   * performer is practicing against would never come again. A jump out of
+   * an auto-engaged silence loop releases it; playback runs free and the
+   * next natural EOF engages a fresh region. */
+  private autoSilenceLoop = false;
 
   /** Clock anchor: playhead position (s) at ctx time `anchorCtxTime`. */
   private anchorPosition = 0;
@@ -1332,6 +1341,14 @@ export class DeckEngine {
     let [next, effects] = reduceTransport(synced, event, context);
     const cueChanged = next.cuePoint !== synced.cuePoint;
     const loopChanged = next.loop !== synced.loop;
+    if (event.type === 'jump' && this.autoSilenceLoop && next.loop) {
+      // Jumping out of an auto-engaged silence loop releases it instead of
+      // translating it (see autoSilenceLoop): the retry plays to the end.
+      next = { ...next, loop: null };
+      this.autoSilenceLoop = false;
+    } else if (loopChanged) {
+      this.autoSilenceLoop = false;
+    }
     const loopControl = event.type === 'loop-toggle' || event.type === 'loop-preset';
     if (loopControl && synced.loop && !next.loop && this.slipLoop) {
       const at = this.hiddenLoopPosition();
@@ -1751,14 +1768,14 @@ export class DeckEngine {
     if (this.runningStartId !== startId) return; // raced a seek/stop
     this.runningStartId = null;
     // Silence loop (gh#424): the region extends past EOF, so EOF is not the
-    // end of the transport. Anchor the silent clock at the buffer end and
-    // keep playing; getPlayhead folds the past-EOF clock into the region.
+    // end of the transport. Keep the existing clock running; getPlayhead
+    // folds the past-EOF clock into the region without changing its phase.
     const loop = this.transport.loop;
     const duration = this.buffer?.duration ?? 0;
     if (loop && this.audio && isSilenceLoop(loop, duration)) {
       this.phantomActive = true;
-      this.anchorPosition = duration;
-      this.anchorCtxTime = this.audio.ctx.currentTime;
+      // Keep the running clock anchor: EOF may arrive late on the UI thread.
+      // Resetting to duration (or snapping it) loses elapsed phase.
       this.emit();
       return;
     }
@@ -1775,9 +1792,9 @@ export class DeckEngine {
           ...this.transport,
           loop: { start: entry.startSec, end: entry.endSec, lengthBeats: entry.lengthBeats },
         };
+        this.autoSilenceLoop = true;
         this.phantomActive = true;
-        this.anchorPosition = duration;
-        this.anchorCtxTime = this.audio.ctx.currentTime;
+        // Preserve the continuous voice clock, including elapsed callback delay.
         this.emit();
         return;
       }

@@ -1142,20 +1142,21 @@ describe('silence-loop phantom transport (gh#424)', () => {
     const { port, ctx } = fakeAudioPort();
     const engine = await phantomEngine(port);
     expect(startCalls).toHaveLength(1);
-    // The voice runs off the end at ctx time 0.
+    // Advance the half second of remaining audio before EOF.
+    ctx.currentTime = 0.5;
     nodeInstances[nodeInstances.length - 1].onEnded?.(startCalls[0].startId);
     // No stop, no reducer 'ended': the transport keeps playing silently.
     expect(stopCalls).toHaveLength(0);
     expect(engine.getSnapshot().playing).toBe(true);
     expect(engine.getPlayhead()).toBeCloseTo(180, 6);
     // 20s past EOF: inside the region, not yet wrapped.
-    ctx.currentTime = 20;
+    ctx.currentTime = 20.5;
     expect(engine.getPlayhead()).toBeCloseTo(200, 6);
     // 45s past EOF: clock at 225, 15s past the region end, folded to 185.
-    ctx.currentTime = 45;
+    ctx.currentTime = 45.5;
     expect(engine.getPlayhead()).toBeCloseTo(185, 6);
     // Many wraps stay exact (modulo): 210 + 3*40 + 2 -> 172.
-    ctx.currentTime = 30 + 3 * 40 + 2;
+    ctx.currentTime = 30.5 + 3 * 40 + 2;
     expect(engine.getPlayhead()).toBeCloseTo(172, 6);
   });
 
@@ -1203,6 +1204,7 @@ describe('silence-loop phantom transport (gh#424)', () => {
     engine.play();
     await vi.advanceTimersByTimeAsync(0);
     expect(startCalls).toHaveLength(1);
+    ctx.currentTime = 0.5;
     // The voice runs off the end: instead of stopping, the deck enters
     // the silence loop on its own — the region the gesture would install.
     nodeInstances[nodeInstances.length - 1].onEnded?.(startCalls[0].startId);
@@ -1215,16 +1217,73 @@ describe('silence-loop phantom transport (gh#424)', () => {
     expect(s.loop!.lengthBeats).toBe(64);
     expect(s.loopIsSilence).toBe(true);
     // The phantom clock runs past EOF exactly like the gesture path.
-    ctx.currentTime = 20;
+    ctx.currentTime = 20.5;
     expect(engine.getPlayhead()).toBeCloseTo(200, 6);
     // A backwards jump lands a real voice again, phase-aligned: playback
-    // resumes immediately, loop translated with the playhead (looping 04).
+    // resumes immediately and releases the auto-installed retry loop.
     engine.jumpBeats(-64);
     expect(startCalls).toHaveLength(2);
     expect(stopCalls).toHaveLength(0);
     expect(engine.getSnapshot().playing).toBe(true);
     expect(engine.getPlayhead()).toBeCloseTo(168, 6);
   });
+
+  for (const [bpm, firstBeat, jump] of [[120, 0.137, 32], [120, 0.137, 64], [127.3, 0.213, 32], [127.3, 0.213, 64]]) {
+    it(`preserves continuous A-vs-B phase over EOF and repeated ${jump}-beat retries at ${bpm}`, async () => {
+      const beat = 60 / bpm;
+      const duration = 180.34;
+      const buffer = (length: number) => ({
+        duration: length, sampleRate: 44100, numberOfChannels: 1,
+        getChannelData: () => new Float32Array(44100),
+      }) as unknown as AudioBuffer;
+      const times = Array.from({ length: 1300 }, (_, i) => firstBeat + i * beat);
+      const grid: BeatgridData = {
+        tempo_changes: [{ start_time: firstBeat, bpm, time_signature_num: 4,
+          time_signature_den: 4, bar_position: 1 }],
+        beat_times: times.filter((t) => t < duration),
+        downbeat_times: times.filter((t, i) => i % 4 === 0 && t < duration),
+      };
+      const left = fakeAudioPort();
+      const right = fakeAudioPort();
+      putCachedBuffer(74, buffer(duration));
+      putCachedBuffer(75, buffer(600));
+      const a = new DeckEngine(left.port);
+      const b = new DeckEngine(right.port);
+      await a.load({ trackId: 74, audioUrl: 'http://127.0.0.1:1/none', bpm,
+        beatTimes: Promise.resolve(grid.beat_times) });
+      await b.load({ trackId: 75, audioUrl: 'http://127.0.0.1:1/none', bpm,
+        beatTimes: Promise.resolve(times) });
+      a.setMeter(74, grid, null);
+      const initial = 179.5;
+      a.seek(initial); b.seek(initial);
+      a.play(); b.play();
+      await vi.advanceTimersByTimeAsync(0);
+      const aNode = nodeInstances[nodeInstances.length - 2];
+      let now = 0;
+      const advance = (seconds: number) => {
+        now += seconds; left.ctx.currentTime = now; right.ctx.currentTime = now;
+      };
+      const aligned = () => {
+        const deltaPhrases = (a.getPlayhead() - b.getPlayhead()) / (beat * 32);
+        expect(deltaPhrases - Math.round(deltaPhrases)).toBeCloseTo(0, 6);
+      };
+      for (let cycle = 0; cycle < 3; cycle++) {
+        advance(duration - a.getPlayhead());
+        aligned(); // the last audio sample, before EOF callback
+        advance(0.019); // worklet message delivery can lag the last audio sample
+        aNode.onEnded?.(startCalls[startCalls.length - (cycle === 0 ? 2 : 1)].startId);
+        expect(a.getSnapshot().loopIsSilence).toBe(true);
+        aligned(); // no phase jump at EOF, including fractional-tail duration
+        advance(1.731);
+        aligned(); // arbitrary silent elapsed time, not integer beats
+        a.jumpBeats(-jump);
+        aligned();
+        expect(startCalls).toHaveLength(3 + cycle);
+        expect(a.getSnapshot().loop).toBeNull();
+        expect(a.getSnapshot().playing).toBe(true);
+      }
+    });
+  }
 
   it('a natural EOF with a gated ladder (top tier 32 beats) still stops', async () => {
     const { port } = fakeAudioPort();
@@ -1250,8 +1309,9 @@ describe('silence-loop phantom transport (gh#424)', () => {
   it('a pause mid-phantom rests inside the region and freezes the clock', async () => {
     const { port, ctx } = fakeAudioPort();
     const engine = await phantomEngine(port);
+    ctx.currentTime = 0.5;
     nodeInstances[nodeInstances.length - 1].onEnded?.(startCalls[0].startId);
-    ctx.currentTime = 20; // phantom at 200
+    ctx.currentTime = 20.5; // phantom at 200
     engine.pause();
     expect(engine.getSnapshot().playing).toBe(false);
     expect(engine.getPlayhead()).toBeCloseTo(200, 6);
@@ -1262,12 +1322,13 @@ describe('silence-loop phantom transport (gh#424)', () => {
   it('a rate change mid-phantom re-anchors the silent clock', async () => {
     const { port, ctx } = fakeAudioPort();
     const engine = await phantomEngine(port);
+    ctx.currentTime = 0.5;
     nodeInstances[nodeInstances.length - 1].onEnded?.(startCalls[0].startId);
-    ctx.currentTime = 10; // phantom at 190
+    ctx.currentTime = 10.5; // phantom at 190
     engine.setPitch(25); // +25% (the clamp): 1.25x
-    ctx.currentTime = 20; // 10 wall seconds at 1.25x = 12.5 track seconds
+    ctx.currentTime = 20.5; // 10 wall seconds at 1.25x = 12.5 track seconds
     expect(engine.getPlayhead()).toBeCloseTo(202.5, 6);
-    ctx.currentTime = 30; // 190 + 25 = 215 -> folded to 175
+    ctx.currentTime = 30.5; // 190 + 25 = 215 -> folded to 175
     expect(engine.getPlayhead()).toBeCloseTo(175, 6);
   });
 });
