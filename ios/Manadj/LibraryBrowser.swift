@@ -79,7 +79,7 @@ struct LibraryBrowser: View {
                     Button {
                         let wasSearching = searchFocused
                         if onLoad(track) { searchFocused = false }
-                        else { restoreSearchAfterError = wasSearching }
+                        else { restoreSearchAfterError = wasSearching || !search.isEmpty }
                     } label: {
                         LibraryRow(track: track, downloaded: model.downloaded.contains(track.id), evidence: followLabels[track.id]).environmentObject(model)
                     }
