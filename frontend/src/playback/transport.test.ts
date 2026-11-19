@@ -517,6 +517,79 @@ describe('loop-toggle', () => {
   });
 });
 
+describe('silence-loop entry (gh#424)', () => {
+  // 120 BPM grid to 2.25s; a 4-beat engage from the last beats crosses a
+  // short track's last audible sample.
+  const nearEofCtx = (overrides: Partial<TransportContext> = {}): TransportContext => ({
+    quantize: true,
+    beatTimes: [0.25, 0.75, 1.25, 1.75, 2.25],
+    audibleDurationSec: 2.4,
+    silenceEntry: { startSec: 2.5, endSec: 34.5, lengthBeats: 64 },
+    ...overrides,
+  });
+
+  it('installs the hypermetric region when the natural engage crosses the last audible sample', () => {
+    const s = state({ playing: true, playhead: 1.1 });
+    const [next, effects] = reduceTransport(s, { type: 'loop-toggle' }, nearEofCtx());
+    // Natural region would be 1.25..3.25 (end 3.25 > 2.4 audible).
+    expect(next.loop).toEqual({ start: 2.5, end: 34.5, lengthBeats: 64 });
+    expect(next.playhead).toBe(1.1); // never moves on engage
+    expect(effects).toEqual([]);
+  });
+
+  it('keeps the natural region when the engage stays within the audio', () => {
+    const s = state({ playing: true, playhead: 0.1 });
+    const [next] = reduceTransport(s, { type: 'loop-toggle' }, nearEofCtx());
+    // Natural region 0.25..2.25 stays within the 2.4s of audio.
+    expect(next.loop).toEqual({ start: 0.25, end: 2.25, lengthBeats: 4 });
+  });
+
+  it('keeps the natural region when no entry is computable (gridless/downbeat-less track)', () => {
+    const s = state({ playing: true, playhead: 1.1 });
+    const [next] = reduceTransport(
+      s,
+      { type: 'loop-toggle' },
+      nearEofCtx({ silenceEntry: null })
+    );
+    expect(next.loop).toEqual({ start: 1.25, end: 3.25, lengthBeats: 4 });
+  });
+
+  it('does not route when the audible duration is unknown', () => {
+    const s = state({ playing: true, playhead: 1.1 });
+    const [next] = reduceTransport(
+      s,
+      { type: 'loop-toggle' },
+      nearEofCtx({ audibleDurationSec: null })
+    );
+    expect(next.loop).toEqual({ start: 1.25, end: 3.25, lengthBeats: 4 });
+  });
+
+  it('routes loop-preset engages through the same entry', () => {
+    const s = state({ playing: true, playhead: 1.1 });
+    const [next] = reduceTransport(s, { type: 'loop-preset', beats: 8 }, nearEofCtx());
+    expect(next.loop).toEqual({ start: 2.5, end: 34.5, lengthBeats: 64 });
+    // The pressed size is still remembered for the next engagement.
+    expect(next.pendingLoopBeats).toBe(8);
+  });
+
+  it('release and inert gridless behavior are unchanged past EOF', () => {
+    const s = state({
+      playing: true,
+      playhead: 30,
+      loop: { start: 2.5, end: 34.5, lengthBeats: 64 },
+    });
+    const [next] = reduceTransport(s, { type: 'loop-toggle' }, nearEofCtx());
+    expect(next.loop).toBeNull();
+    // Gridless engage stays inert even with an entry in context.
+    const [idle] = reduceTransport(
+      state({ playing: true, playhead: 1.1 }),
+      { type: 'loop-toggle' },
+      nearEofCtx({ beatTimes: null })
+    );
+    expect(idle.loop).toBeNull();
+  });
+});
+
 describe('loop-resize', () => {
   const active = { start: 10, end: 12, lengthBeats: 4 }; // 0.5s/beat
 

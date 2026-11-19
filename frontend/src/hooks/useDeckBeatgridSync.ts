@@ -2,6 +2,8 @@ import { useEffect, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
 import { beatgridQueryOptions } from './useBeatgridData';
+import { metricLadderQueryOptions } from './useMetricLadderData';
+import type { PersistedLadder } from '../meter/ladder';
 import type { DeckEngine } from '../playback/DeckEngine';
 import type { BeatgridResponse, GridAnalysisDiagnostics } from '../types';
 
@@ -71,8 +73,17 @@ export function useDeckBeatgridSync(engine: DeckEngine, trackId: number | null):
   });
   bailedRef.current = diagnostics?.bailed === true;
 
+  // The Metric ladder rides the same push (gh#424): the engine's
+  // silence-loop entry needs the hypermetric projection, which the bare
+  // beat-time array cannot supply. A non-persisted response is the
+  // computed default — passed as null so resolveLadder applies it.
+  const { data: ladder } = useQuery(metricLadderQueryOptions(trackId));
+
   useEffect(() => {
     if (trackId === null || data === undefined) return;
-    engine.setBeatTimes(trackId, data.data.beat_times);
-  }, [engine, trackId, data]);
+    const persisted: PersistedLadder | null = ladder?.persisted
+      ? { reset_marks: ladder.reset_marks, arities: ladder.arities }
+      : null;
+    engine.setMeter(trackId, data.data, persisted);
+  }, [engine, trackId, data, ladder]);
 }

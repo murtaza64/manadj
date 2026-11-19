@@ -25,6 +25,9 @@ import { addBeats, beatPhaseTarget, beatsBetween, crossDeckLaunchTarget } from '
 import type { LaunchReference } from './quantize';
 import { foldLoopPlayhead, isSilenceLoop, loopFoldEnd, projectLoopBeats } from './loop';
 import { extendBeatTimesPastEof } from './gridExtend';
+import { silenceLoopEntry } from '../meter/gridProjection';
+import type { PersistedLadder } from '../meter/ladder';
+import type { BeatgridData } from '../types';
 import type { LoopRegion, LoopResize } from './loop';
 import type { DeckAudioPort } from './mixer';
 import { DeckSourceNode } from './worklet/deckSourceNode';
@@ -144,6 +147,18 @@ export class DeckEngine {
   private pendingPlay = false;
   /** Loaded Track's Beatgrid beat times (null = gridless) — Quantize math. */
   private beatTimes: number[] | null = null;
+  /** gh#424: the full Beatgrid + persisted Metric ladder, pushed by the
+   * deck beatgrid sync observer (setMeter). The silence-loop entry needs
+   * the hypermetric projection (downbeats + ladder), which the bare
+   * beat-time array cannot supply. */
+  private beatgridData: BeatgridData | null = null;
+  private persistedLadder: PersistedLadder | null = null;
+  private silenceEntryCache: {
+    grid: BeatgridData;
+    ladder: PersistedLadder | null;
+    duration: number;
+    entry: { startSec: number; endSec: number; lengthBeats: number } | null;
+  } | null = null;
   /** The Main cue default is live until touched (ADR 0029 §2): true while
    * the cue still sits at the load-time default and nothing has played —
    * a late-arriving grid may upgrade it to the first beat. Any transport
@@ -572,12 +587,20 @@ export class DeckEngine {
    * freezes it (cue defaults become a load-time decision again). */
   setBeatTimes(trackId: number, beatTimes: number[] | null): void {
     if (this.trackInfo?.trackId !== trackId) return;
+    this.applyBeatTimes(beatTimes);
+  }
+
+  /** Shared beat-time application for setBeatTimes/setMeter: refresh the
+   * Quantize grid, re-park the untouched load-default cue (ADR 0029 §2),
+   * and emit so hasBeatgrid/cue observers see the arrival. */
+  private applyBeatTimes(beatTimes: number[] | null): void {
     this.beatTimes = beatTimes && beatTimes.length > 0 ? beatTimes : null;
     if (
       this.cueIsLoadDefault &&
       this.loadState === 'ready' &&
       this.buffer !== null &&
-      (this.trackInfo.savedCuePoint ?? null) === null &&
+      // Callers guard on trackId first, so trackInfo is present here.
+      (this.trackInfo?.savedCuePoint ?? null) === null &&
       this.beatTimes !== null
     ) {
       const cue = this.clampTime(
@@ -590,6 +613,62 @@ export class DeckEngine {
       this.transport = { ...this.transport, cuePoint: cue, playhead: cue };
     }
     this.emit(); // hasBeatgrid (and possibly the parked cue) may have changed
+  }
+
+  /** The full Beatgrid + persisted Metric ladder for the loaded Track
+   * (gh#424), pushed by the deck beatgrid sync observer alongside the beat
+   * times. Feeds the silence-loop entry computation in transportContext().
+   * TrackId-addressed like setBeatTimes: a late push for a previous Track
+   * is ignored. */
+  setMeter(
+    trackId: number,
+    grid: BeatgridData | null,
+    ladder: PersistedLadder | null
+  ): void {
+    if (this.trackInfo?.trackId !== trackId) return;
+    this.beatgridData = grid;
+    this.persistedLadder = ladder;
+    // Keep the beat-time snapshot in step: same payload, one source of
+    // truth for the Quantize grid, with the same late-arrival cue re-park
+    // and emit as setBeatTimes.
+    this.applyBeatTimes(grid ? grid.beat_times : null);
+  }
+
+  /** The silence-loop entry region for the current grid + ladder + buffer,
+   * cached like the extended beat lattice: recomputed only when one of
+   * those inputs changes. */
+  private silenceLoopEntryRegion(): {
+    startSec: number;
+    endSec: number;
+    lengthBeats: number;
+  } | null {
+    const duration = this.buffer?.duration;
+    const grid = this.beatgridData;
+    if (!grid || duration === undefined || duration <= 0) return null;
+    const cache = this.silenceEntryCache;
+    if (
+      cache &&
+      cache.grid === grid &&
+      cache.ladder === this.persistedLadder &&
+      cache.duration === duration
+    ) {
+      return cache.entry;
+    }
+    const projected = silenceLoopEntry(grid, this.persistedLadder, duration);
+    const entry = projected
+      ? {
+          startSec: projected.entrySec,
+          endSec: projected.entrySec + projected.loopLengthSec,
+          lengthBeats: projected.loopLengthBeats,
+        }
+      : null;
+    this.silenceEntryCache = {
+      grid,
+      ladder: this.persistedLadder,
+      duration,
+      entry,
+    };
+    return entry;
   }
 
   cueDown(): void {
@@ -1214,6 +1293,8 @@ export class DeckEngine {
       launchReference: this.launchReference(),
       playRate: this.currentRate(),
       cueMode: getCueMode(),
+      silenceEntry: this.silenceLoopEntryRegion(),
+      audibleDurationSec: this.buffer?.duration ?? null,
     };
   }
 
