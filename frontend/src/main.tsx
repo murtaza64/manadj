@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 import './index.css'
 import { installPerfHook } from './perfHook.ts'
 import { FONT_MONO, installTheme } from './theme/tokens.ts'
+import { initWallpaperTheme } from './theme/wallpaperSource.ts'
 import { DEV_SURFACES } from './devMode.ts'
 import { isMac } from './utils/platform.ts'
 import { hydratePersistedSettings } from './settings/persistedSettings.ts'
@@ -15,6 +16,7 @@ installFeedbackErrors()
 // accents, deck colors, hotcue palette, scales — comes from the TS source
 // of truth (theme/tokens.ts) so canvas/GL and CSS consumers can't drift.
 installTheme()
+initWallpaperTheme()
 
 // Desktop shell (Electron) detection: gates titlebar CSS (drag region,
 // traffic-light inset) in TopBar.css. See desktop/README.md.

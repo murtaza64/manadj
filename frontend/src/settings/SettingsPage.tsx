@@ -34,6 +34,7 @@ const WaveformSettings = lazy(() => import('../waveform/StyleTuningPage'));
 const ControllerCalibrationSettings = lazy(() => import('./ControllerCalibrationSettings'));
 const MouseJogSettings = lazy(() => import('./MouseJogSettings'));
 const LibrarySettings = lazy(() => import('./LibrarySettings'));
+const WallpaperThemeSettings = lazy(() => import('./WallpaperThemeSettings'));
 const PhoneSyncSettings = lazy(() => import('./PhoneSyncSettings'));
 const ExchangeSettings = lazy(() => import('./ExchangeSettings'));
 const SetupSettings = lazy(() => import('../setup/SetupSettings'));
@@ -458,7 +459,10 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
     id: 'display',
     title: 'Display',
     detail: 'Waveforms and visuals',
-    sections: [{ id: 'waveforms', title: 'Waveforms', render: () => <WaveformSettings /> }],
+    sections: [
+      { id: 'waveforms', title: 'Waveforms', render: () => <WaveformSettings /> },
+      { id: 'wallpaper-theme', title: 'Wallpaper theme', render: () => <WallpaperThemeSettings /> },
+    ],
   },
   {
     id: 'controllers',

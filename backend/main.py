@@ -9,7 +9,7 @@ from alembic import command as alembic_command
 from alembic.config import Config as AlembicConfig
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from .routers import tracks, tags, waveforms, playlists, beatgrids, metric_ladders, hotcues, sync_playlists, sync_status, sync_performance, sync_export, sync_fields, sync_tags, sync_tracks, sync_library, analyze, transitions, transition_templates, track_links, takes, sessions, sets, tasks, drops, visualizer_ga, routine_candidates, routine_takes, routines, settings, cameos, app_config, device_sync, device_listener as device_listener_router, video_export, harmony, external_drives
+from .routers import tracks, tags, waveforms, playlists, beatgrids, metric_ladders, hotcues, sync_playlists, sync_status, sync_performance, sync_export, sync_fields, sync_tags, sync_tracks, sync_library, analyze, transitions, transition_templates, track_links, takes, sessions, sets, tasks, drops, visualizer_ga, routine_candidates, routine_takes, routines, settings, cameos, app_config, device_sync, device_listener as device_listener_router, video_export, harmony, wallpaper_theme, external_drives
 from .acquisition import models as acquisition_models  # noqa: F401  (registers tables on Base)
 from .acquisition.router import router as acquisition_router
 from .tasks import models as task_models  # noqa: F401  (registers tables on Base)
@@ -111,6 +111,7 @@ app.include_router(spotify_router.want_router, prefix="/api/acquisition", tags=[
 from .routers import onboarding as onboarding_router  # noqa: E402
 
 app.include_router(onboarding_router.router, prefix="/api/onboarding", tags=["onboarding"])
+app.include_router(wallpaper_theme.router, prefix="/api/theme", tags=["theme"])
 
 
 
