@@ -85,6 +85,8 @@ export interface ExternalDrivePullEntry {
   device_path: string;
   status: 'new' | 'present' | 'uncertain' | 'duplicate' | 'missing-file';
   detail: string | null;
+  /** Library file that content-verified as the same audio, when one did. */
+  matched_path: string | null;
 }
 
 export interface ExternalDrivePreview {

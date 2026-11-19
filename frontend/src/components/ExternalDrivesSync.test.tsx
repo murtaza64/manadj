@@ -41,6 +41,7 @@ const PREVIEW = {
       device_path: '/Contents/track1.mp3',
       status: 'new' as const,
       detail: null,
+      matched_path: null,
     },
     {
       ordinal: 3,
@@ -52,6 +53,7 @@ const PREVIEW = {
       device_path: '/Contents/twin.mp3',
       status: 'uncertain' as const,
       detail: 'a library track has this file name',
+      matched_path: null,
     },
   ],
 };
@@ -145,6 +147,7 @@ it('never imports a plan the user did not review, even if the re-preview could b
         device_path: '/Contents/sneaky.mp3',
         status: 'new' as const,
         detail: null,
+        matched_path: null,
       },
     ],
   };
@@ -204,6 +207,81 @@ it('keeps the confirm button disabled without a destination', async () => {
       await tick();
     });
     expect(button('Import 1 track')!.disabled).toBe(true);
+  } finally {
+    act(() => root.unmount());
+  }
+});
+
+it('shows verified renames with both file names, not a silent present', async () => {
+  vi.spyOn(api.externalDrives, 'list').mockResolvedValue([DRIVE]);
+  vi.spyOn(api.externalDrives, 'preview').mockResolvedValue({
+    ...PREVIEW,
+    new_count: 0,
+    present_count: 2,
+    uncertain_count: 0,
+    entries: [
+      {
+        ordinal: 0,
+        title: 'Renamed Tune',
+        artist: 'Lane 8',
+        bpm: 128,
+        key: '6m',
+        duration_secs: 300,
+        device_path: '/Contents/dj-edit-01.mp3',
+        status: 'present' as const,
+        detail: 'already in the manadj library (same audio under a different file name, content-verified)',
+        matched_path: '/library/Renamed Tune.mp3',
+      },
+      {
+        ordinal: 1,
+        title: 'Same Name',
+        artist: 'Lane 8',
+        bpm: 174,
+        key: 'Am',
+        duration_secs: 362,
+        device_path: '/Contents/track2.mp3',
+        status: 'present' as const,
+        detail: 'already in the manadj library (same audio, content-verified)',
+        matched_path: '/music/track2.mp3',
+      },
+    ],
+  });
+  const { host, root, button } = render();
+  try {
+    await act(async () => {
+      root.render(<ExternalDrivesSync />);
+      await tick();
+    });
+    await act(async () => {
+      button('Pull…')!.click();
+      await tick();
+    });
+    expect(host.textContent).toContain('renamed, verified');
+    expect(host.textContent).toContain('USB dj-edit-01.mp3');
+    expect(host.textContent).toContain('library Renamed Tune.mp3');
+    // a same-name verified match is a plain library row, not a rename
+    expect(host.textContent).toContain('in library');
+    expect(host.textContent).not.toContain('USB track2.mp3');
+  } finally {
+    act(() => root.unmount());
+  }
+});
+
+it('labels unmatched tracks as no match found, not proven new', async () => {
+  vi.spyOn(api.externalDrives, 'list').mockResolvedValue([DRIVE]);
+  vi.spyOn(api.externalDrives, 'preview').mockResolvedValue(PREVIEW);
+  const { host, root, button } = render();
+  try {
+    await act(async () => {
+      root.render(<ExternalDrivesSync />);
+      await tick();
+    });
+    await act(async () => {
+      button('Pull…')!.click();
+      await tick();
+    });
+    expect(host.textContent).toContain('no match found');
+    expect(host.textContent).toContain('unverified match');
   } finally {
     act(() => root.unmount());
   }

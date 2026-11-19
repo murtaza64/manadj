@@ -4,7 +4,10 @@ import type {
   ExternalDrive,
   ExternalDrivePreview,
   ExternalDriveImportResult,
+  ExternalDrivePullEntry,
 } from '../api/client';
+import KeyDisplay from './KeyDisplay';
+import BPMDisplay from './BPMDisplay';
 import './ExternalDrivesSync.css';
 
 type Phase =
@@ -13,6 +16,35 @@ type Phase =
   | { step: 'preview'; drive: ExternalDrive; preview: ExternalDrivePreview }
   | { step: 'importing'; drive: ExternalDrive; preview: ExternalDrivePreview }
   | { step: 'done'; drive: ExternalDrive; result: ExternalDriveImportResult };
+
+function fileName(path: string): string {
+  return path.replace(/\\/g, '/').split('/').pop() ?? path;
+}
+
+/** Visible classification of a preview row. A verified match whose file
+ * name differs from the library copy is a rename and must read as one,
+ * not silently collapse into "present". */
+type RowKind = 'present' | 'renamed' | 'uncertain' | 'new' | 'duplicate' | 'missing-file';
+
+function rowKind(e: ExternalDrivePullEntry): RowKind {
+  if (
+    e.status === 'present' &&
+    e.matched_path &&
+    fileName(e.matched_path).toLowerCase() !== fileName(e.device_path).toLowerCase()
+  ) {
+    return 'renamed';
+  }
+  return e.status;
+}
+
+const STATUS_LABEL: Record<RowKind, string> = {
+  present: 'in library',
+  renamed: 'renamed, verified',
+  uncertain: 'unverified match',
+  new: 'no match found',
+  duplicate: 'duplicate on drive',
+  'missing-file': 'missing audio',
+};
 
 function formatDuration(secs: number | null): string {
   if (secs == null) return '';
@@ -179,51 +211,41 @@ export function ExternalDrivesSync() {
             />
           </label>
 
-          {phase.preview.entries.filter((e) => e.status === 'new').length > 0 && (
-            <table className="external-drive-entries">
-              <thead>
-                <tr>
-                  <th>Artist</th>
-                  <th>Title</th>
-                  <th>BPM</th>
-                  <th>Key</th>
-                  <th>Time</th>
-                </tr>
-              </thead>
-              <tbody>
-                {phase.preview.entries
-                  .filter((e) => e.status === 'new')
-                  .map((e) => (
-                    <tr key={e.ordinal}>
-                      <td>{e.artist ?? ''}</td>
-                      <td>{e.title ?? e.device_path}</td>
-                      <td>{e.bpm != null ? e.bpm.toFixed(1) : ''}</td>
-                      <td>{e.key ?? ''}</td>
-                      <td>{formatDuration(e.duration_secs)}</td>
-                    </tr>
-                  ))}
-              </tbody>
-            </table>
-          )}
-
-          {phase.preview.entries.some((e) => e.status === 'uncertain') && (
-            <div className="external-drive-uncertain">
-              <p>
-                Name-only matches — a library track has the same file name. These are
-                skipped; verify they are the same audio before importing them manually.
-              </p>
-              <ul>
-                {phase.preview.entries
-                  .filter((e) => e.status === 'uncertain')
-                  .map((e) => (
-                    <li key={e.ordinal}>
-                      {e.artist ? `${e.artist} — ` : ''}
-                      {e.title ?? e.device_path}
-                    </li>
-                  ))}
-              </ul>
-            </div>
-          )}
+          <p className="external-drive-hint">
+            Every track on the drive, in drive order. Unverified matches are never
+            imported; tracks with no library match are not proven new, just unmatched.
+          </p>
+          <ul className="external-drive-tracklist">
+            {phase.preview.entries.map((e) => {
+              const kind = rowKind(e);
+              return (
+                <li key={e.ordinal} className={`external-drive-track status-${kind}`}>
+                  <span className={`external-drive-status status-${kind}`}>
+                    {STATUS_LABEL[kind]}
+                  </span>
+                  <span className="external-drive-artist">{e.artist ?? ''}</span>
+                  <span className="external-drive-title">
+                    {e.title ?? fileName(e.device_path)}
+                    {kind === 'renamed' && e.matched_path ? (
+                      <span className="external-drive-detail">
+                        USB {fileName(e.device_path)} = library{' '}
+                        {fileName(e.matched_path)} (same audio, verified)
+                      </span>
+                    ) : (
+                      e.detail && <span className="external-drive-detail">{e.detail}</span>
+                    )}
+                  </span>
+                  <span className="external-drive-key">
+                    <KeyDisplay keyValue={e.key} />
+                  </span>
+                  <span className="external-drive-bpm">
+                    <BPMDisplay bpm={e.bpm} round />
+                  </span>
+                  <span className="external-drive-time">{formatDuration(e.duration_secs)}</span>
+                </li>
+              );
+            })}
+          </ul>
 
           <div className="external-drive-actions">
             <button

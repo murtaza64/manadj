@@ -109,20 +109,99 @@
   color: inherit;
 }
 
-.external-drive-entries {
-  border-collapse: collapse;
+/* Preview track list: every device entry rendered like a library track
+   row, with the verification state visible instead of a flat "new" table. */
+.external-drive-tracklist {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--surface0, #2a2e38);
+  max-height: 480px;
+  overflow-y: auto;
+}
+
+.external-drive-track {
+  display: grid;
+  grid-template-columns: 128px minmax(110px, 1.2fr) minmax(180px, 2fr) 52px 64px 56px;
+  gap: var(--space-8, 8px);
+  align-items: baseline;
+  padding: 5px var(--space-8, 8px);
+  border-bottom: 1px solid var(--surface0, #2a2e38);
   font-size: 13px;
+  background: var(--crust, #111);
 }
 
-.external-drive-entries th,
-.external-drive-entries td {
-  text-align: left;
-  padding: 4px 12px 4px 0;
+.external-drive-track:hover {
+  background: var(--mantle, #181b22);
 }
 
-.external-drive-entries th {
-  color: var(--text-secondary, #9aa);
+.external-drive-status {
+  font-size: 11px;
+  padding: 1px 6px;
+  border: 1px solid transparent;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.external-drive-status.status-present {
+  color: var(--subtext1, #8b93a3);
+  border-color: var(--surface0, #2a2e38);
+}
+
+.external-drive-status.status-renamed {
+  color: #4a9eff;
+  border-color: #4a9eff;
+}
+
+.external-drive-status.status-uncertain {
+  color: #f59e0b;
+  border-color: #f59e0b;
+}
+
+.external-drive-status.status-new {
+  color: #34d399;
+  border-color: #34d399;
+}
+
+.external-drive-status.status-duplicate,
+.external-drive-status.status-missing-file {
+  color: var(--subtext1, #8b93a3);
+  border-color: var(--surface0, #2a2e38);
+}
+
+.external-drive-track.status-missing-file .external-drive-artist,
+.external-drive-track.status-missing-file .external-drive-title,
+.external-drive-track.status-duplicate .external-drive-artist,
+.external-drive-track.status-duplicate .external-drive-title {
+  opacity: 0.55;
+}
+
+.external-drive-artist,
+.external-drive-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.external-drive-title {
   font-weight: 500;
+}
+
+.external-drive-detail {
+  display: block;
+  font-weight: 400;
+  font-size: 11px;
+  color: var(--subtext1, #8b93a3);
+  white-space: normal;
+}
+
+.external-drive-key,
+.external-drive-bpm,
+.external-drive-time {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .external-drive-actions {
