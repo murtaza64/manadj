@@ -85,3 +85,38 @@ def test_release_export_excludes_harness_without_building(tmp_path, monkeypatch)
     assert args[args.index("--no-group") + 1] == "harness"
     assert "--frozen" in args and "--no-dev" in args
     assert args[args.index("--group") + 1] == "stems"
+
+
+def test_marker_factoring_is_stable_but_changes_are_rejected():
+    generator = load_script('generate_sbom')
+    a = "torchaudio==2.9.1+cpu ; (python_full_version >= '3.15' and sys_platform == 'linux') or (platform_machine != 'aarch64' and sys_platform == 'linux') or (platform_python_implementation != 'CPython' and sys_platform == 'linux')\n"
+    b = "torchaudio==2.9.1+cpu ; (python_full_version >= '3.15' or platform_machine != 'aarch64' or platform_python_implementation != 'CPython') and sys_platform == 'linux'\n"
+    assert generator.canonical_requirement_lines(a) == generator.canonical_requirement_lines(b)
+    assert generator.canonical_requirement_lines(a) != generator.canonical_requirement_lines(b.replace('3.15', '3.14'))
+    assert generator.canonical_requirement_lines(a) != generator.canonical_requirement_lines(b.replace("sys_platform == 'linux'", "sys_platform == 'darwin'"))
+    assert generator.canonical_requirement_lines(a) != generator.canonical_requirement_lines(b.replace(' or ', ' and ', 1))
+    with pytest.raises(ValueError, match='Unsupported'):
+        generator.canonical_requirement_lines("test==1 ; some_function()\n")
+
+
+def test_retained_evidence_keeps_exact_bytes_on_windows_checkout(tmp_path):
+    """core.autocrlf must not invalidate upstream source-byte evidence hashes."""
+    import shutil
+    evidence = json.loads((ROOT / 'licenses/inventory-evidence.json').read_text())
+    paths = sorted({p for record in evidence['components'] for p in record['license_hashes']})
+    repo = tmp_path / 'checkout'
+    repo.mkdir()
+    for name in ['.gitattributes', *paths]:
+        target = repo / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(ROOT / name, target)
+    def git(*args):
+        return subprocess.run(['git', '-C', str(repo), *args], check=True, capture_output=True, text=True)
+    git('init')
+    git('config', 'core.autocrlf', 'true')
+    git('add', '.')
+    for name in paths:
+        (repo / name).unlink()
+    git('checkout-index', '-a', '-f')
+    for name in paths:
+        assert (repo / name).read_bytes() == (ROOT / name).read_bytes(), name

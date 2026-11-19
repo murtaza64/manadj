@@ -8,6 +8,7 @@ No packages or application databases are installed or opened by this script.
 from __future__ import annotations
 
 import argparse
+import ast
 import hashlib
 import json
 from pathlib import Path
@@ -21,6 +22,44 @@ EXPORT_ARGS = [
     "uv", "export", "--frozen", "--no-dev", "--no-group", "harness", "--group", "stems",
     "--no-emit-project", "--no-hashes",
 ]
+
+
+def canonical_requirement_lines(text: str) -> list[str]:
+    """Canonicalize marker Boolean factoring, preserving every comparison.
+
+    uv versions may distribute A and (B or C) as (A and B) or (A and C).
+    Sorted disjunctive normal form treats those as equal without dropping or
+    evaluating any environment condition. Unknown syntax fails closed.
+    """
+    def terms(node):
+        if isinstance(node, ast.BoolOp):
+            children = [terms(child) for child in node.values]
+            if isinstance(node.op, ast.Or):
+                return set().union(*children)
+            if isinstance(node.op, ast.And):
+                result = {frozenset()}
+                for child in children:
+                    result = {left | right for left in result for right in child}
+                return result
+        if isinstance(node, ast.Compare) and len(node.ops) == len(node.comparators) == 1:
+            if not isinstance(node.left, (ast.Name, ast.Constant)) or not isinstance(node.comparators[0], (ast.Name, ast.Constant)):
+                raise ValueError("Unsupported marker operand")
+            if not isinstance(node.ops[0], (ast.Eq, ast.NotEq, ast.Lt, ast.LtE, ast.Gt, ast.GtE, ast.In, ast.NotIn)):
+                raise ValueError("Unsupported marker comparison")
+            return {frozenset({ast.dump(node, annotate_fields=True)})}
+        raise ValueError("Unsupported environment marker syntax")
+
+    lines = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        requirement, separator, marker = line.partition(" ; ")
+        if separator:
+            normalized = sorted(sorted(term) for term in terms(ast.parse(marker, mode="eval").body))
+            line = requirement + " ; " + json.dumps(normalized)
+        lines.append(line)
+    return sorted(lines)
 
 
 def requirement_identities(text: str) -> set[tuple[str, str]]:
@@ -39,7 +78,7 @@ def requirement_identities(text: str) -> set[tuple[str, str]]:
 def build_sbom(root: Path, requirements: str) -> dict:
     evidence = json.loads((root / "licenses/inventory-evidence.json").read_text())
     records = evidence["components"]
-    lines = sorted(line for line in requirements.splitlines() if line.strip() and not line.lstrip().startswith("#"))
+    lines = canonical_requirement_lines(requirements)
     if hashlib.sha256("\n".join(lines).encode()).hexdigest() != evidence["export_lines_sha256"]:
         raise ValueError("Frozen export changed, including environment markers; review evidence again")
     actual = requirement_identities(requirements)

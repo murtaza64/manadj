@@ -226,7 +226,7 @@ def _library_paths(destinations, target):
         from enginedj.models.track import Track as EngineTrack
 
         with destinations.engine.session_m() as session:
-            return sorted((destinations.engine.database_path.parent / row.path).resolve().as_posix()
+            return sorted(str((destinations.engine.database_path.parent / row.path).resolve())
                           for row in session.query(EngineTrack).all())
     return sorted(row.FolderPath for row in destinations.rb.get_content())
 

@@ -628,3 +628,10 @@ export interface AcquisitionRefreshStats {
 }
 
 export type Classification = 'track' | 'mix' | 'clip' | 'other';
+export type CoverageStatus = 'read' | 'not_configured' | 'failed';
+export interface CoverageSource { status: CoverageStatus; reason: string | null; read_at: string; playlist_count: number }
+export interface CoverageEntry { id: string; skipped?: number; tracks: { filename: string; track_id: number | string | null }[] }
+export interface PlaylistCoverage {
+  sources: Record<'manadj' | 'engine' | 'rekordbox', CoverageSource>;
+  playlists: { name: string; path: string[]; entries: Record<'manadj' | 'engine' | 'rekordbox', CoverageEntry[]> }[];
+}

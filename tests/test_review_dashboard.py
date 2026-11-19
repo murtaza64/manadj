@@ -29,6 +29,7 @@ class ReviewDeskTests(unittest.TestCase):
             return 'project#1'
         self.desk = dashboard.Desk(self.root, transport=transport)
         self.desk.wake = lambda _: None
+        self.addCleanup(self.desk.close)  # Windows cannot delete the open sqlite file
 
     def test_idempotent_feedback_and_dispatch(self):
         self.desk.enqueue('sample', 'feedback', 'Make the knob larger', 'feedback-0001')

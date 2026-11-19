@@ -36,7 +36,7 @@ def test_mux_args_shape():
     args = video_export.ffmpeg_mux_args("ffmpeg", Path("/tmp/a.wav"), Path("/tmp/o.mp4"), 30)
     assert args[:1] == ["ffmpeg"]
     assert "image2pipe" in args and "pipe:0" in args and "libx264" in args and "yuv420p" in args
-    assert args[-1] == "/tmp/o.mp4"
+    assert args[-1] == str(Path("/tmp/o.mp4"))
 
 
 @pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg not installed")

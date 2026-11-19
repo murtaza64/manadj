@@ -1822,7 +1822,13 @@ def test_router_playlist_update_flow(
     fingerprint = resp.json()["fingerprint"]
     playlists = resp.json()["playlists"]
     membership = next(pl["membership"] for pl in playlists if pl["id"] == PAGE_LIST_A)
-    assert membership["counterpart_status"] == "unique-name-match"
+    # The device playlist sits in folder RIG; a same-name local playlist is only
+    # a candidate. It is never reported as the counterpart, but the user can
+    # pair explicitly by id and the token still binds that exact target.
+    assert membership["counterpart_status"] == "candidate-name-match"
+    assert membership["counterpart_id"] is None
+    assert membership["candidate_id"] == local.id
+    assert membership["candidate_name"] == "RIG Mix"
     token = membership["target_token"]
     assert token
 
@@ -2024,3 +2030,231 @@ def test_playlist_pull_postcopy_duplicate_reports_retained_tracks(db, tmp_path, 
     assert db.query(Track).count() == 2
     assert db.query(Playlist).count() == 0
     assert dest.exists()
+
+
+def test_check_endpoint_is_read_only_and_labels_unchecked_engine(client: TestClient, usb: Path, tmp_path: Path):
+    def tree(root: Path):
+        return {str(f.relative_to(root)): hashlib.sha256(f.read_bytes()).hexdigest() for f in sorted(root.rglob("*")) if f.is_file()}
+
+    before = tree(usb)
+    body = client.post("/api/external-drives/check", json={"root": str(usb)}).json()
+    assert body["kind"] == "rekordbox" and body["checked"] is True
+    assert isinstance(body["error_count"], int)
+    assert tree(usb) == before  # a check never writes
+
+    engine = tmp_path / "ENGINE_USB"
+    engine.mkdir()
+    make_engine_usb(engine, [{"path": "Contents/engine1.mp3", "title": "Engine One"}])
+    assert client.post("/api/external-drives/check", json={"root": str(engine)}).json()["checked"] is False
+    assert client.post("/api/external-drives/check", json={"root": str(tmp_path)}).status_code == 404
+
+
+def test_field_comparison_is_per_track_read_only_and_says_cues_are_not_compared(
+    client: TestClient, db: Session, make_track, tmp_path: Path
+):
+    usb = renamed_usb(tmp_path, title="Renamed Tune")
+    library_file = tmp_path / "music" / "dj-edit-01.mp3"
+    library_file.parent.mkdir(parents=True)
+    shutil.copy2(FIXTURES / "silence.mp3", library_file)
+    track = make_track(filename=str(library_file), title="Renamed Tune (Old Title)", artist="Lane 8")
+    before = tree_digest(usb)
+
+    body = client.post("/api/external-drives/fields", json={"root": str(usb)}).json()
+
+    assert tree_digest(usb) == before
+    assert [t["track_id"] for t in body["tracks"]] == [track.id]
+    row = body["tracks"][0]
+    assert [f["field"] for f in row["fields"]] == ["title"]
+    assert row["fields"][0]["drive"] == "Renamed Tune"
+    assert row["fields"][0]["library"] == "Renamed Tune (Old Title)"
+    assert "cues" in body["not_compared"] and "not available" in body["not_compared"]["cues"]
+    assert body["fingerprint"]
+
+    # identical metadata produces no row at all
+    track.title = "renamed tune"  # case-only difference is not a difference
+    db.commit()
+    again = client.post("/api/external-drives/fields", json={"root": str(usb)}).json()
+    assert again["tracks"] == []
+
+
+def _reviewed(body: dict, track_id: int, field: str) -> dict:
+    """The change a client sends: the pair plus the drive/library values it reviewed."""
+    f = next(x for t in body["tracks"] if t["track_id"] == track_id for x in t["fields"] if x["field"] == field)
+    return {"track_id": track_id, "field": field, "drive": f["drive"], "library": f["library"]}
+
+
+def test_field_apply_is_bound_to_review_and_writes_library_only(
+    client: TestClient, db: Session, make_track, tmp_path: Path
+):
+    usb = renamed_usb(tmp_path, title="Renamed Tune")
+    library_file = tmp_path / "music" / "dj-edit-01.mp3"
+    library_file.parent.mkdir(parents=True)
+    shutil.copy2(FIXTURES / "silence.mp3", library_file)
+    track = make_track(filename=str(library_file), title="Old Title", artist="Lane 8")
+    body = client.post("/api/external-drives/fields", json={"root": str(usb)}).json()
+    fp = body["fingerprint"]
+    change = _reviewed(body, track.id, "title")
+    before = tree_digest(usb)
+    pair = lambda f: {"track_id": track.id, "field": f, "drive": "x", "library": "y"}
+
+    # a stale fingerprint, a field that does not differ, and bpm are all refused
+    for bad in (
+        {"preview_fingerprint": "stale", "changes": [change]},
+        {"preview_fingerprint": fp, "changes": [pair("artist")]},
+        {"preview_fingerprint": fp, "changes": [pair("bpm")]},
+        {"preview_fingerprint": fp, "changes": []},
+    ):
+        assert client.post("/api/external-drives/fields/apply", json={"root": str(usb), **bad}).status_code == 409
+    # reviewed values are required by the API, not optional: a bare pair is rejected
+    bare = {"track_id": track.id, "field": "title"}
+    assert client.post("/api/external-drives/fields/apply", json={"root": str(usb), "preview_fingerprint": fp, "changes": [bare]}).status_code == 422
+    # and the backend refuses a change that arrives without them
+    with pytest.raises(external_drives.FieldChangeRefused):
+        external_drives.apply_field_changes(db, usb, fp, [bare])
+    db.refresh(track)
+    assert track.title == "Old Title"
+
+    ok = client.post("/api/external-drives/fields/apply", json={"root": str(usb), "preview_fingerprint": fp, "changes": [change]})
+    assert ok.status_code == 200 and ok.json()["applied"][0]["value"] == "Renamed Tune"
+    db.refresh(track)
+    assert track.title == "Renamed Tune"
+    assert tree_digest(usb) == before  # the drive is never written
+
+
+def two_track_usb(tmp_path: Path, titles=("Drive One", "Drive Two"), paths=("/Contents/dj-edit-01.mp3", "/Contents/dj-edit-02.mp3")) -> Path:
+    root = tmp_path / "TWO_USB"
+    root.mkdir()
+    make_rekordbox_usb(root, [track_spec(i + 1, t, p, artist_id=1) for i, (t, p) in enumerate(zip(titles, paths))])
+    for p in paths:
+        put_audio(root, p)
+    return root
+
+
+def _lib(tmp_path: Path, name: str) -> Path:
+    f = tmp_path / "music" / name
+    f.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(FIXTURES / "silence.mp3", f)
+    return f
+
+
+def test_field_apply_is_atomic_across_tracks_with_late_invalid_or_stale_member(
+    client: TestClient, db: Session, make_track, tmp_path: Path
+):
+    usb = two_track_usb(tmp_path)
+    t1 = make_track(filename=str(_lib(tmp_path, "dj-edit-01.mp3")), title="Old One", artist="Lane 8")
+    t2 = make_track(filename=str(_lib(tmp_path, "dj-edit-02.mp3")), title="Old Two", artist="Lane 8")
+    body = client.post("/api/external-drives/fields", json={"root": str(usb)}).json()
+    assert {t["track_id"] for t in body["tracks"]} == {t1.id, t2.id}
+    fp = body["fingerprint"]
+    url = "/api/external-drives/fields/apply"
+
+    # valid first member, then a late invalid one (bpm / unknown track / non-differing field): nothing is written
+    for late in (
+        {"track_id": t2.id, "field": "bpm", "drive": 1.0, "library": None},
+        {"track_id": 99999, "field": "title", "drive": "x", "library": "y"},
+        {"track_id": t2.id, "field": "artist", "drive": "x", "library": "y"},
+    ):
+        r = client.post(url, json={"root": str(usb), "preview_fingerprint": fp, "changes": [_reviewed(body, t1.id, "title"), late]})
+        assert r.status_code == 409
+        db.expire_all()
+        assert db.get(type(t1), t1.id).title == "Old One"
+        assert db.get(type(t2), t2.id).title == "Old Two"
+
+    # a library value that moved after review makes the whole batch stale
+    reviewed = {t["track_id"]: {f["field"]: f for f in t["fields"]} for t in body["tracks"]}
+    def rev(t):
+        f = reviewed[t.id]["title"]
+        return {"track_id": t.id, "field": "title", "drive": f["drive"], "library": f["library"]}
+    t2.title = "Edited elsewhere"
+    db.commit()
+    stale = client.post(url, json={"root": str(usb), "preview_fingerprint": fp, "changes": [rev(t1), rev(t2)]})
+    assert stale.status_code == 409
+    db.expire_all()
+    assert db.get(type(t1), t1.id).title == "Old One"  # the valid first member was not written
+    t2.title = "Old Two"
+    db.commit()
+
+    # a fresh, fully valid batch writes both, and the same pair twice is one write
+    body = client.post("/api/external-drives/fields", json={"root": str(usb)}).json()
+    both = [_reviewed(body, t1.id, "title"), _reviewed(body, t2.id, "title"), _reviewed(body, t1.id, "title")]
+    ok = client.post(url, json={"root": str(usb), "preview_fingerprint": body["fingerprint"], "changes": both})
+    assert ok.status_code == 200 and len(ok.json()["applied"]) == 2
+    db.expire_all()
+    assert db.get(type(t1), t1.id).title == "Drive One" and db.get(type(t2), t2.id).title == "Drive Two"
+
+
+def test_field_comparison_duplicate_drive_entries_never_create_conflicting_writes(
+    client: TestClient, db: Session, make_track, tmp_path: Path
+):
+    usb = two_track_usb(tmp_path, titles=("Copy A", "Copy B"), paths=("/Contents/a/x.mp3", "/Contents/b/x.mp3"))
+    track = make_track(filename=str(_lib(tmp_path, "x.mp3")), title="Library Title", artist="Lane 8")
+    body = client.post("/api/external-drives/fields", json={"root": str(usb)}).json()
+    rows = [t for t in body["tracks"] if t["track_id"] == track.id]
+    assert len(rows) <= 1  # one row per library track, however many drive entries match it
+    for row in rows:
+        title = [f for f in row["fields"] if f["field"] == "title"]
+        assert all(not f["applicable"] for f in title if f["drive"] in ("Copy A", "Copy B")) or len(title) == 1
+    # taking whatever is offered writes exactly one consistent value
+    taken = [{"track_id": track.id, "field": f["field"], "drive": f["drive"], "library": f["library"]} for r in rows for f in r["fields"] if f["applicable"] and f["field"] == "title"]
+    if taken:
+        r = client.post("/api/external-drives/fields/apply", json={"root": str(usb), "preview_fingerprint": body["fingerprint"], "changes": taken})
+        assert r.status_code == 200 and len(r.json()["applied"]) == 1
+
+
+def test_field_comparison_conflicting_duplicate_entries_are_not_takeable(db: Session, make_track, tmp_path: Path):
+    from types import SimpleNamespace
+
+    f = _lib(tmp_path, "x.mp3")
+    track = make_track(filename=str(f), title="Library Title", artist="Lane 8")
+    def entry(ordinal, title):
+        return external_drives.PullEntry(ordinal=ordinal, title=title, artist="Lane 8", bpm=None, key=None,
+                                         duration_secs=None, device_path=str(f), status="present")
+    # two drive entries resolve to the same library track
+    same = external_drives.compare_matched_fields(db, SimpleNamespace(entries=[entry(0, "Same"), entry(1, "Same")], fingerprint="x"))
+    assert len(same["tracks"]) == 1 and same["tracks"][0]["fields"][0]["applicable"] is True
+    conflict = external_drives.compare_matched_fields(db, SimpleNamespace(entries=[entry(0, "A"), entry(1, "B")], fingerprint="x"))
+    assert len(conflict["tracks"]) == 1
+    field = conflict["tracks"][0]["fields"][0]
+    assert field["applicable"] is False and "twice" in field["conflict"]
+
+    # One duplicate equals the library and the other differs: still a conflict,
+    # in either order, never "the differing one wins".
+    for order in ((entry(0, "Library Title"), entry(1, "B")), (entry(0, "B"), entry(1, "Library Title"))):
+        mixed = external_drives.compare_matched_fields(db, SimpleNamespace(entries=list(order), fingerprint="x"))
+        (row,) = mixed["tracks"]
+        (title,) = [f for f in row["fields"] if f["field"] == "title"]
+        assert title["applicable"] is False and "twice" in title["conflict"]
+    # both equal to the library: nothing differs
+    quiet = external_drives.compare_matched_fields(db, SimpleNamespace(entries=[entry(0, "Library Title"), entry(1, "library title")], fingerprint="x"))
+    assert quiet["tracks"] == []
+
+
+# --- export impact (read-only; a rebuild is not an update) ----------------------
+
+
+def test_export_impact_describes_a_rebuild_writes_nothing_and_is_not_executable(db: Session, make_track, client: TestClient, usb: Path):
+    audio = usb / "Contents/track1.mp3"
+    t1 = make_track(filename=str(audio), title="Bright Lights")
+    t2 = make_track(filename="/nowhere/missing.mp3", title="Gone")
+    _add_local_playlist(db, "Set A", [t1.id, t2.id])
+    from backend.models import Playlist
+
+    pid = db.query(Playlist).filter(Playlist.name == "Set A").one().id
+    before = tree_digest(usb)
+
+    res = client.post("/api/external-drives/export/impact", json={"root": str(usb), "playlist_ids": [pid]})
+
+    assert res.status_code == 200
+    body = res.json()
+    assert body["mode"] == "rebuild"
+    assert body["selected"] == [{"id": pid, "name": "Set A", "tracks": 1, "missing_audio": 1}]
+    assert body["drive"]["read"] is True and body["drive"]["tracks"] == 4
+    assert body["deletes"] == []
+    assert body["executable"] is False
+    assert "PIONEER/rekordbox/export.pdb" in body["rewrites"]
+    assert tree_digest(usb) == before  # nothing written
+
+
+def test_export_impact_refuses_a_non_rekordbox_folder(client: TestClient, tmp_path: Path):
+    res = client.post("/api/external-drives/export/impact", json={"root": str(tmp_path), "playlist_ids": []})
+    assert res.status_code == 404

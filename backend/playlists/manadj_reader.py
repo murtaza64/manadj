@@ -39,7 +39,8 @@ class ManAdjPlaylistReader:
                 source_id=playlist.id,
                 hierarchy_parts=None,  # manadj is flat
                 last_modified=playlist.updated_at,
-                color=playlist.color
+                color=playlist.color,
+                path_parts=[playlist.name],
             ))
 
         return result

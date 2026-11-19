@@ -10,7 +10,7 @@ import type {
   Track,
   PlaylistTrackAdd,
   PlaylistTrackAddResult,
-  UnifiedPlaylist,
+  UnifiedPlaylist, PlaylistCoverage,
   PlaylistSyncStats,
   PlaylistExportTarget,
   PlaylistFullExportPreview,
@@ -90,11 +90,15 @@ export interface ExternalDrivePullEntry {
 }
 
 export interface ExternalDrivePlaylistMembership {
-  counterpart_status: 'unique-name-match' | 'no-local-playlist' | 'ambiguous-name';
+  counterpart_status: 'unique-name-match' | 'candidate-name-match' | 'no-local-playlist' | 'ambiguous-name';
   counterpart_id: number | null;
   /** Snapshot of the suggested counterpart at review time; the update
    * confirm carries it back and a target changed since is refused. */
   target_token: string | null;
+  /** Folder-nested drive playlist with one same-name library playlist: a
+   * candidate only, never paired unless the user chooses it by name. */
+  candidate_id?: number | null;
+  candidate_name?: string | null;
   common: number;
   adds_in_library: number;
   adds_new: number;
@@ -108,6 +112,8 @@ export interface ExternalDrivePreviewPlaylist {
   id: number;
   name: string | null;
   folder_path: string;
+  /** Typed folder chain, outermost first. folder_path is only its display form. */
+  folder_parts?: string[];
   track_count: number;
   new_count: number;
   present_count: number;
@@ -181,6 +187,34 @@ export interface ExternalDriveImportedPlaylist {
   skipped_uncertain: number;
   skipped_other: number;
 }
+
+export interface ExternalDriveFieldRow { field: string; drive: string | number | null; library: string | number | null; applicable: boolean; conflict?: string }
+export interface ExternalDriveFieldTrack { ordinal: number; track_id: number; label: string; fields: ExternalDriveFieldRow[] }
+export interface ExternalDriveFieldComparison {
+  fingerprint: string;
+  tracks: ExternalDriveFieldTrack[];
+  compared: string[];
+  not_compared: Record<string, string>;
+}
+
+export interface ExternalDriveExportImpact {
+  root: string;
+  mode: 'rebuild';
+  selected: { id: number; name: string; tracks: number; missing_audio: number }[];
+  drive: { read: true; tracks: number; playlists: number; dropped_playlists: string[] } | { read: false; reason: string };
+  one_library_present: boolean;
+  is_mount: boolean;
+  gate_enabled: boolean;
+  rewrites: string[];
+  adds: string[];
+  deletes: string[];
+  executable: false;
+  blocked_reason: string;
+}
+
+export type ExternalDriveCheck =
+  | { kind: string; checked: false; reason: string }
+  | { kind: string; checked: true; tracks: number; playlists: number; analysis_files: number; errors: string[]; error_count: number };
 
 export interface ExternalDriveImportResult {
   root: string;
@@ -1000,6 +1034,12 @@ export const api = {
       return res.json();
     },
 
+    getCoverage: async (): Promise<PlaylistCoverage> => {
+      const res = await fetch(`${API_BASE}/sync/playlists/coverage`);
+      if (!res.ok) throw new Error('Failed to read playlist libraries');
+      return res.json();
+    },
+
     getStats: async (): Promise<PlaylistSyncStats> => {
       const res = await fetch(`${API_BASE}/sync/playlists/stats`);
       if (!res.ok) throw new Error('Failed to fetch sync stats');
@@ -1182,6 +1222,47 @@ export const api = {
       if (!res.ok) {
         const detail = (await res.json().catch(() => null))?.detail;
         throw new Error(detailToMessage(detail, 'Failed to preview the drive'));
+      }
+      return res.json();
+    },
+
+    /** Read-only per-track metadata comparison against the library. */
+    fields: async (root: string): Promise<ExternalDriveFieldComparison> => {
+      const res = await fetch(`${API_BASE}/external-drives/fields`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ root }),
+      });
+      if (!res.ok) throw new Error(detailToMessage((await res.json().catch(() => null))?.detail, 'Failed to compare track details'));
+      return res.json();
+    },
+
+    /** Take the drive's value for reviewed pairs. Library only; bound to the reviewed fingerprint. */
+    applyFields: async (root: string, preview_fingerprint: string, changes: { track_id: number; field: string; drive?: string | number | null; library?: string | number | null }[]): Promise<{ applied: { track_id: number; field: string; value: string }[] }> => {
+      const res = await fetch(`${API_BASE}/external-drives/fields/apply`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ root, preview_fingerprint, changes }),
+      });
+      if (!res.ok) throw new Error(detailToMessage((await res.json().catch(() => null))?.detail, 'Failed to apply track details'));
+      return res.json();
+    },
+
+    /** Read-only: what exporting library playlists to this drive would rebuild. Writes nothing. */
+    exportImpact: async (root: string, playlist_ids: number[]): Promise<ExternalDriveExportImpact> => {
+      const res = await fetch(`${API_BASE}/external-drives/export/impact`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ root, playlist_ids }),
+      });
+      if (!res.ok) throw new Error(detailToMessage((await res.json().catch(() => null))?.detail, 'Could not preview the export'));
+      return res.json();
+    },
+
+    /** Read-only structural readback of a drive (never writes). */
+    check: async (root: string): Promise<ExternalDriveCheck> => {
+      const res = await fetch(`${API_BASE}/external-drives/check`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ root }),
+      });
+      if (!res.ok) {
+        const detail = (await res.json().catch(() => null))?.detail;
+        throw new Error(detailToMessage(detail, 'Failed to check the drive'));
       }
       return res.json();
     },

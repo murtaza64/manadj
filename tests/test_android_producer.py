@@ -175,7 +175,13 @@ def test_create_only_cli_output_preserves_existing_decoy(pipeline, tmp_path):
     assert path.read_bytes() == before
 
 
-@pytest.mark.parametrize("body", ["Synthetic producer test; not an offer.\r\n", "音" * 10922 + "x", "x" + "\x00" * 32767])
+# Explicit ids: pytest puts the test id in PYTEST_CURRENT_TEST, and Windows refuses
+# environment values over 32767 characters, so the huge bodies must not be the id.
+@pytest.mark.parametrize("body", [
+    pytest.param("Synthetic producer test; not an offer.\r\n", id="short-crlf"),
+    pytest.param("音" * 10922 + "x", id="cjk-max"),
+    pytest.param("x" + "\x00" * 32767, id="nul-max"),
+])
 def test_stamp_preserves_exact_notes_and_pins_batch_before_build(pipeline, tmp_path, monkeypatch, body):
     f = pipeline
     monkeypatch.setattr(p.verifier, "full_commit", lambda rev: f["build"]["source_revision"])

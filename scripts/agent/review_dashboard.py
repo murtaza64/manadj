@@ -220,6 +220,10 @@ class Desk:
         except (OSError, ValueError):
             pass
 
+    def close(self):
+        with self.lock:
+            self.db.close()
+
     def actions(self) -> list[dict]:
         with self.lock:
             return [dict(row) for row in self.db.execute('SELECT * FROM actions ORDER BY created DESC LIMIT 150')]

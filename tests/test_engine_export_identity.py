@@ -189,9 +189,9 @@ def test_playlist_and_field_plans_resolve_the_same_configured_db_alias(db, dupli
 
 
 @pytest.mark.parametrize(('root', 'stored', 'expected'), [
-    ('/library', '../first/./same.flac', '/first/same.flac'),
-    ('/library', '/elsewhere/same.flac', '/elsewhere/same.flac'),
-    ('/library', r'..\first\same.flac', '/first/same.flac'),
+    ('/library', '../first/./same.flac', os.path.normpath(os.path.abspath('/first/same.flac'))),
+    ('/library', '/elsewhere/same.flac', os.path.normpath(os.path.abspath('/elsewhere/same.flac'))),
+    ('/library', r'..\first\same.flac', os.path.normpath(os.path.abspath('/first/same.flac'))),
     (r'C:\Library', r'..\Music\same.flac', r'C:\Music\same.flac'),
     (r'C:\Library', r'D:\Music\same.flac', r'D:\Music\same.flac'),
     (r'C:\Library', r'D:same.flac', None),
@@ -201,3 +201,14 @@ def test_playlist_and_field_plans_resolve_the_same_configured_db_alias(db, dupli
 def test_engine_path_identity_is_lexical_and_drive_aware(root, stored, expected):
     from enginedj.paths import absolute_track_path
     assert absolute_track_path(stored, root) == expected
+
+
+def test_engine_relative_root_resolves_on_the_host_with_one_separator_style(tmp_path, monkeypatch):
+    from enginedj.paths import absolute_track_path
+    monkeypatch.chdir(tmp_path)
+    got = absolute_track_path('sub/same.flac', 'lib')
+    assert os.path.isabs(got) and os.path.normpath(got) == os.path.normpath(str(tmp_path / 'lib' / 'sub' / 'same.flac'))
+    if os.name == 'nt':
+        assert '/' not in got
+    else:
+        assert '\\' not in got
