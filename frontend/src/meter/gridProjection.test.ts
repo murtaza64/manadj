@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { BeatgridData } from '../types';
-import { projectGridToHorizon, silenceLoopEntry } from './gridProjection';
+import { gridForOverlayRegions, projectGridToHorizon, silenceLoopEntry } from './gridProjection';
 
 /** Mirror of backend beatgrid_utils.calculate_beats_from_tempo_changes. */
 function walk(tempoChanges: BeatgridData['tempo_changes'], duration: number): BeatgridData {
@@ -103,5 +103,26 @@ describe('silenceLoopEntry', () => {
     const empty: BeatgridData = { tempo_changes: [], beat_times: [], downbeat_times: [] };
     expect(silenceLoopEntry(empty, null, 100)).toBeNull();
     expect(silenceLoopEntry(null, null, 100)).toBeNull();
+  });
+});
+
+describe('gridForOverlayRegions (gh#424 tail rendering)', () => {
+  it('returns the grid unchanged when no region crosses EOF', () => {
+    const grid = walk(c120, 300);
+    expect(gridForOverlayRegions(grid, [], 300)).toBe(grid);
+    expect(gridForOverlayRegions(grid, [120, 288], 300)).toBe(grid);
+  });
+
+  it('extends the lattice to cover a silence-loop region past EOF', () => {
+    const grid = walk(c120, 300);
+    const n = grid.beat_times.length;
+    const out = gridForOverlayRegions(grid, [352], 300); // 64 beats at 120bpm = 32s, entry 320
+    expect(out).not.toBe(grid);
+    expect(out.beat_times.slice(0, n)).toEqual(grid.beat_times);
+    expect(out.beat_times[out.beat_times.length - 1]).toBeGreaterThanOrEqual(352);
+    // Downbeats continue on the same 4-beat bar phase past EOF.
+    const lastDb = out.downbeat_times[out.downbeat_times.length - 1];
+    expect(lastDb).toBeGreaterThan(300);
+    expect(lastDb % 2).toBeCloseTo(0, 9);
   });
 });

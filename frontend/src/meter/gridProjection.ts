@@ -55,6 +55,25 @@ export function projectGridToHorizon(grid: BeatgridData, horizonSec: number): Be
   return { tempo_changes, beat_times: beats, downbeat_times: downbeats };
 }
 
+/** Grid the waveform should draw while overlay regions exist (gh#424
+ * rendering): when a region runs past the stored grid's track duration
+ * (a silence loop), extend the lattice far enough to cover it so the
+ * flat past-EOF tail keeps its beat/bar/hypermeter ticks. Returns the
+ * grid unchanged when no region crosses EOF. `regionEnds` are seconds. */
+export function gridForOverlayRegions(
+  grid: BeatgridData,
+  regionEnds: readonly number[],
+  duration: number,
+): BeatgridData {
+  let horizon = duration;
+  for (const end of regionEnds) {
+    if (end > horizon) horizon = end;
+  }
+  // +1s: cover the region end even when it lands a fraction past the
+  // last projected beat, mirroring silenceLoopEntry's generous horizon.
+  return horizon > duration ? projectGridToHorizon(grid, horizon + 1) : grid;
+}
+
 export interface SilenceLoopEntry {
   /** Entry time in seconds: the first projected top-tier ladder boundary
    * at or after the last audible sample. */

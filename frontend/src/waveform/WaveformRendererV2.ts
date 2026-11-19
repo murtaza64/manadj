@@ -1037,7 +1037,15 @@ export class WaveformRendererV2 {
     let visibleSeconds: number;
     if (this.isMinimap) {
       startTime = 0;
-      visibleSeconds = duration;
+      // Silence loop (gh#424): a region running past EOF extends the
+      // minimap domain so the flat tail, its ticks and the loop band stay
+      // visible instead of rendering nothing past the last sample. The
+      // body shader already draws out-of-range time as flat background.
+      let end = duration;
+      for (const region of this.regions ?? []) {
+        if (region.end > end) end = region.end;
+      }
+      visibleSeconds = end;
     } else if (this.externalWindow) {
       startTime = this.windowStart * duration;
       visibleSeconds = Math.max((this.windowEnd - this.windowStart) * duration, 1e-6);
@@ -1257,9 +1265,11 @@ export class WaveformRendererV2 {
     // the region's left edge — about to replay, never "already heard".
     if (this.isMinimap && !opts.skipPlayhead) {
       const dimTime = playedDimBoundary(view.playhead, this.regions);
+      // Normalized by the view domain (startTime is 0 on the minimap),
+      // which a silence loop extends past duration.
       const dimX = Math.max(
         0,
-        Math.min(view.w, (dimTime / this.data!.duration) * view.w),
+        Math.min(view.w, (dimTime / view.visibleSeconds) * view.w),
       );
       if (dimX > 0) {
         const dimVerts: number[] = [];
@@ -1608,7 +1618,10 @@ export class WaveformRendererV2 {
   private pushPlayhead(view: FrameView, verts: number[]): void {
     let x: number;
     if (this.isMinimap) {
-      x = (view.playhead / this.data!.duration) * view.w;
+      // Domain is [0, view.visibleSeconds] (startTime is always 0 on the
+      // minimap) — extended past duration while a silence loop runs, so
+      // the folded phantom playhead lands inside the canvas.
+      x = this.timeToX(view.playhead, view);
     } else if (this.externalWindow) {
       x = this.timeToX(view.playhead, view);
       if (x < 0 || x >= view.w) return;
