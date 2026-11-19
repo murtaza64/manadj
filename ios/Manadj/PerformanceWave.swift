@@ -190,15 +190,36 @@ struct PerformanceWave: UIViewRepresentable {
             let values = bytes.bindMemory(to: Double.self)
             for slot in 0..<8 where values[slot] >= 0 {
                 let p = pixel(values[slot]); let color = UIColor(Ink.cues[slot])
-                line(p, color: color, width: 2)
+                line(p, color: color, width: overview ? 1.5 : 2)
                 guard p >= 0 && p <= along else { continue }
-                let box = vertical ? CGRect(x: 0, y: p, width: 14, height: 14) : CGRect(x: p, y: 0, width: 14, height: 14)
+                let box = Self.cueFlagRect(at: p, bounds: bounds, vertical: vertical, overview: overview)
                 ctx.setFillColor(color.cgColor); ctx.fill(box)
-                ("\(slot + 1)" as NSString).draw(in: box, withAttributes: [.font: UIFont.monospacedSystemFont(ofSize: 11, weight: .bold), .foregroundColor: UIColor.black])
+                // Portrait minimaps follow Android's compact cue pins: numbers
+                // at this scale collide and obscure the waveform. Detail lanes
+                // keep the pad number, centered with native font metrics.
+                if !overview {
+                    let text = "\(slot + 1)" as NSString
+                    let attributes: [NSAttributedString.Key: Any] = [
+                        .font: UIFont.monospacedSystemFont(ofSize: 11, weight: .bold),
+                        .foregroundColor: UIColor.black,
+                    ]
+                    let size = text.size(withAttributes: attributes)
+                    text.draw(at: CGPoint(x: box.midX - size.width / 2, y: box.midY - size.height / 2), withAttributes: attributes)
+                }
             }
         }
         line(overview ? pixel(position) : CGFloat(head) * along, color: UIColor(Ink.playhead), width: 2)
     }
+    /// Keep the cue's stem at its exact time while clamping the flag body
+    /// inside the lane, including the last sample and vertical orientation.
+    static func cueFlagRect(at position: CGFloat, bounds: CGRect, vertical: Bool, overview: Bool) -> CGRect {
+        let size = min(overview ? 5 : 14, min(bounds.width, bounds.height))
+        let along = vertical ? bounds.height : bounds.width
+        let origin = min(max(0, position), max(0, along - size))
+        return vertical ? CGRect(x: 0, y: origin, width: size, height: size)
+            : CGRect(x: origin, y: 0, width: size, height: size)
+    }
+
     private func waveColor(_ mask: [Int], groups: [Double], dim: Double) -> UIColor {
         let colors = [[0.7804, 0.0588, 0.0588], [0.2353, 0.6863, 0.0706], [0.0588, 0.5922, 1.0]]
         var rgb = [0.0, 0, 0]

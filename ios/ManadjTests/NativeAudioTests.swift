@@ -1,4 +1,5 @@
 import XCTest
+import UIKit
 import AVFoundation
 import ManadjAudio
 import ManadjCore
@@ -6,6 +7,21 @@ import CEngine
 @testable import Manadj
 
 final class NativeAudioTests: XCTestCase {
+    @MainActor func testCueFlagGeometryKeepsEdgesVisibleAndMinimapsCompact() {
+        let lane = CGRect(x: 0, y: 0, width: 300, height: 48)
+        for vertical in [false, true] {
+            let end: CGFloat = vertical ? lane.height : lane.width
+            for position in [CGFloat(0), end / 2, end] {
+                let detail = PerformanceWaveView.cueFlagRect(at: position, bounds: lane, vertical: vertical, overview: false)
+                let overview = PerformanceWaveView.cueFlagRect(at: position, bounds: lane, vertical: vertical, overview: true)
+                XCTAssertTrue(lane.contains(detail))
+                XCTAssertTrue(lane.contains(overview))
+                XCTAssertEqual(detail.width, 14)
+                XCTAssertEqual(overview.width, 5)
+            }
+        }
+    }
+
     @MainActor func testAVFoundationDecodeAndTransport() async throws {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".wav")
         defer { try? FileManager.default.removeItem(at: url) }
