@@ -30,12 +30,12 @@ const tabs = () => [...host.querySelectorAll('.sync-view-tab')].map((t) => t.tex
 it('hides Acquisition until a Supplier is configured (setup-guides #290, gh#342)', () => {
   gate.connected = false;
   act(() => root.render(<SyncView />));
-  expect(tabs()).toEqual(['Workspace', 'Tracks', 'Playlists', 'Rekordbox import']);
+  expect(tabs()).toEqual(['Workspace', 'Tracks', 'Playlists', 'USB drives', 'Rekordbox import']);
 
   gate.connected = true;
   act(() => root.render(<SyncView />));
-  expect(tabs()).toEqual(['Workspace', 'Tracks', 'Playlists', 'Acquisition', 'Rekordbox import']);
-  act(() => (host.querySelectorAll('.sync-view-tab')[3] as HTMLButtonElement).click());
+  expect(tabs()).toEqual(['Workspace', 'Tracks', 'Playlists', 'USB drives', 'Acquisition', 'Rekordbox import']);
+  act(() => (host.querySelectorAll('.sync-view-tab')[4] as HTMLButtonElement).click()); // Acquisition (after USB drives)
   expect(host.querySelector('[data-testid="acquisition"]')).not.toBeNull();
 
   // disconnecting while on the tab falls back to Tracks

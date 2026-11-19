@@ -9,7 +9,7 @@ from alembic import command as alembic_command
 from alembic.config import Config as AlembicConfig
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from .routers import tracks, tags, waveforms, playlists, beatgrids, metric_ladders, hotcues, sync_playlists, sync_status, sync_performance, sync_export, sync_fields, sync_tags, sync_tracks, sync_library, analyze, transitions, transition_templates, track_links, takes, sessions, sets, tasks, drops, visualizer_ga, routine_candidates, routine_takes, routines, settings, cameos, app_config, device_sync, device_listener as device_listener_router, video_export, harmony, wallpaper_theme
+from .routers import tracks, tags, waveforms, playlists, beatgrids, metric_ladders, hotcues, sync_playlists, sync_status, sync_performance, sync_export, sync_fields, sync_tags, sync_tracks, sync_library, analyze, transitions, transition_templates, track_links, takes, sessions, sets, tasks, drops, visualizer_ga, routine_candidates, routine_takes, routines, settings, cameos, app_config, device_sync, device_listener as device_listener_router, video_export, harmony, wallpaper_theme, external_drives
 from .acquisition import models as acquisition_models  # noqa: F401  (registers tables on Base)
 from .acquisition.router import router as acquisition_router
 from .tasks import models as task_models  # noqa: F401  (registers tables on Base)
@@ -98,6 +98,7 @@ app.include_router(video_export.router, prefix="/api/video-export", tags=["video
 app.include_router(cameos.router, prefix="/api/cameos", tags=["cameos"])
 app.include_router(device_sync.router, prefix="/api/device-sync", tags=["device-sync"])
 app.include_router(device_listener_router.router, prefix="/api/device-listener", tags=["device-sync"])
+app.include_router(external_drives.router, prefix="/api/external-drives", tags=["external-drives"])
 app.include_router(visualizer_ga.router, prefix="/api/ga", tags=["visualizer-ga"])
 app.include_router(settings.router, prefix="/api/settings", tags=["settings"])
 app.include_router(feedback_router)

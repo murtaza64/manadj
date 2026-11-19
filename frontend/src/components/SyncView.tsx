@@ -7,14 +7,16 @@ import { UnifiedTracksSync } from './UnifiedTracksSync';
 import { RekordboxImportGuide } from '../onboarding/RekordboxImportGuide';
 import './SyncView.css';
 import { SyncWorkspace } from './SyncWorkspace';
+import { ExternalDrivesSync } from './ExternalDrivesSync';
 import { OPEN_SYNC_WORKSPACE_EVENT, takeSyncWorkspace } from '../sync/openWorkspace';
 
-type TabType = 'workspace' | 'tracks' | 'playlists' | 'acquisition' | 'rekordbox-import';
+type TabType = 'workspace' | 'tracks' | 'playlists' | 'usb-drives' | 'acquisition' | 'rekordbox-import';
 
 const TABS: { id: TabType; label: string }[] = [
   { id: 'workspace', label: 'Workspace' },
   { id: 'tracks', label: 'Tracks' },
   { id: 'playlists', label: 'Playlists' },
+  { id: 'usb-drives', label: 'USB drives' },
   { id: 'acquisition', label: 'Acquisition' },
   { id: 'rekordbox-import', label: 'Rekordbox import' },
 ];
@@ -62,6 +64,7 @@ export function SyncView() {
       <div className="sync-workspace-host" hidden={activeTab !== 'workspace'}><SyncWorkspace key={request?.sequence || 0} request={request} onPendingChange={onPendingChange} /></div>
       {activeTab === 'tracks' && <UnifiedTracksSync />}
       {activeTab === 'playlists' && <PlaylistSync />}
+      {activeTab === 'usb-drives' && <ExternalDrivesSync />}
       {activeTab === 'acquisition' && <AcquisitionView />}
       {activeTab === 'rekordbox-import' && (
         <div className="onboarding-standalone">
