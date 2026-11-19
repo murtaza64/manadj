@@ -6,8 +6,15 @@
  * This module extends a grid on the FINAL tempo segment's own lattice -
  * same accumulation and bar-phase rotation as the backend walk - and finds
  * the loop entry: the first top-tier Metric Ladder boundary at or after the
- * last audible sample (the user-approved fixed-64 rule; under the default
- * duple ladder the top tier is 16 bars = 64 beats at 4/4).
+ * last audible sample.
+ *
+ * Rule provenance (user decision, 2026-11-18 iMessage): a FIXED 64-beat
+ * silence loop starting on a "projected 64 beat hypermetric boundary", so
+ * cross-deck drop alignment survives one track ending. This module maps
+ * "64-beat hypermetric boundary" onto the Metric Ladder's TOP TIER: 64
+ * beats (16 bars) under the default duple ladder at 4/4. A custom ladder's
+ * top tier may span a different beat count — that mapping is the
+ * implementation's interpretation of the decision, not its literal text.
  *
  * Stored arrays pass through UNTOUCHED (the waveform renderer matches
  * downbeats to beats by exact float equality); projection only appends. */
