@@ -16,6 +16,17 @@ final class WorkspaceUITests: XCTestCase {
         play.tap()
         let paused = NSPredicate(format: "value BEGINSWITH %@", "paused")
         expectation(for: paused, evaluatedWith: wave); waitForExpectations(timeout: 8)
+        let record = app.buttons["Record master"]
+        let recordings = app.buttons["Saved recordings"]
+        let leftFader = app.otherElements["A channel fader"]
+        let rightFader = app.otherElements["B channel fader"]
+        XCTAssertTrue(record.isHittable)
+        XCTAssertTrue(recordings.isHittable)
+        for control in [record, recordings] {
+            XCTAssertGreaterThanOrEqual(control.frame.minX, leftFader.frame.maxX)
+            XCTAssertLessThanOrEqual(control.frame.maxX, rightFader.frame.minX)
+            XCTAssertGreaterThanOrEqual(control.frame.height, 38)
+        }
         let portrait = XCTAttachment(screenshot: app.screenshot()); portrait.name = "Android-structure iOS portrait WIP"; portrait.lifetime = .keepAlways; add(portrait)
         let pitchButton = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "PITCH")).firstMatch
         XCTAssertLessThanOrEqual(pitchButton.frame.maxY, app.frame.maxY - 16, "Pitch control must stay above bottom safe area")

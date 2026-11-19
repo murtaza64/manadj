@@ -59,7 +59,6 @@ struct WorkspaceView: View {
             let compact = geometry.size.height < 860
             let gap: CGFloat = compact ? 5 : 8
             VStack(spacing: gap) {
-                if !(browsing && keyboardOpen) { recordingBar.frame(height: 30) }
                 HStack(spacing: 14) { deckInfo(0); deckInfo(1) }.frame(height: browsing && keyboardOpen ? 36 : 44)
                 if !(browsing && keyboardOpen) { VStack(spacing: 3) { detailWave(0); detailWave(1) }.frame(height: compact ? 103 : 135) }
                 ZStack(alignment: .bottom) {
@@ -155,6 +154,7 @@ struct WorkspaceView: View {
                     Button("SESSIONS") { notice = "Session replay is not implemented on iOS yet" }.buttonStyle(PerformanceKeyStyle(color: Ink.muted))
                     Button { withAnimation { browsing = false; settings.toggle() } } label: { Image(systemName: "gearshape") }.buttonStyle(PerformanceKeyStyle(color: Ink.muted)).accessibilityLabel("Settings")
                 }.frame(height: 36)
+                recordingBar.frame(height: 44)
                 Spacer(minLength: 0)
                 fxCard
                 if xf { PerformanceFader(value: Binding(get: { (model.crossfade + 1) / 2 }, set: { model.crossfade = $0 * 2 - 1; model.set(MDJCrossfade, 0, model.crossfade) }), color: Ink.accent, vertical: false, label: "Crossfader").frame(height: 40) }
@@ -179,19 +179,20 @@ struct WorkspaceView: View {
             Button { model.set(MDJPfl, index, model.decks[index].engine.pfl ? 0 : 1) } label: { Image(systemName: "headphones") }.buttonStyle(PerformanceKeyStyle(color: Ink.decks[index], active: model.decks[index].engine.pfl)).frame(height: 30).accessibilityLabel("\(Ink.deckName(index)) headphone cue")
         }
     }
-    /// Deliberate iOS cleanup of the Android recording strip, kept away from performance lanes.
+    /// Recording belongs in the shared center panel, between channel faders.
     private var recordingBar: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 2) {
             Button { model.toggleRecording() } label: {
-                HStack(spacing: 5) {
+                HStack(spacing: 4) {
                     Image(systemName: model.recording ? "stop.fill" : "record.circle")
-                    Text(model.recording ? "STOP" : "REC")
-                }.font(Ink.font(11, bold: true)).foregroundStyle(model.recording ? Ink.danger : Ink.text).padding(.horizontal, 10).frame(height: 30)
-            }.buttonStyle(.plain).background(.ultraThinMaterial, in: Capsule()).accessibilityLabel(model.recording ? "Stop master recording" : "Record master")
-            Text("MASTER · WAV").font(Ink.font(9)).foregroundStyle(Ink.muted)
-            Spacer(minLength: 0)
-            Button { saved = true } label: { Label("\(model.recordings.count)", systemImage: "waveform.path").font(Ink.font(11)).padding(.horizontal, 10).frame(height: 30) }
-                .buttonStyle(.plain).background(.ultraThinMaterial, in: Capsule()).accessibilityLabel("Saved recordings")
+                    Text(model.recording ? "STOP" : "REC · WAV")
+                }
+            }.buttonStyle(PerformanceKeyStyle(color: model.recording ? Ink.danger : Ink.text, active: model.recording))
+                .accessibilityLabel(model.recording ? "Stop master recording" : "Record master")
+            Button { saved = true } label: {
+                HStack(spacing: 3) { Image(systemName: "waveform.path"); Text("\(model.recordings.count)") }
+            }.buttonStyle(PerformanceKeyStyle(color: Ink.muted)).frame(width: 52)
+                .accessibilityLabel("Saved recordings")
         }
     }
     private var fxCard: some View {
