@@ -135,7 +135,8 @@ def build_frontend(version: str) -> None:
 
 
 def export_requirements(exclude: tuple[str, ...] = ()) -> Path:
-    """Lock -> requirements for the bundle: no dev tools, stems included.
+    """Lock -> requirements for the bundle: no dev tools, no harness (AGPL
+    essentia stays out of distributed builds), stems included.
 
     `exclude`: distribution names to drop (Windows drops essentia — no wheel
     or sdist there, harness-only import; proper markers are #302's job).
@@ -143,7 +144,7 @@ def export_requirements(exclude: tuple[str, ...] = ()) -> Path:
     reqs = BUILD / "requirements.txt"
     run(
         [
-            "uv", "export", "--frozen", "--no-dev", "--group", "stems",
+            "uv", "export", "--frozen", "--no-dev", "--no-group", "harness", "--group", "stems",
             "--no-emit-project", "--no-hashes", "-o", reqs,
         ],
         cwd=ROOT,
@@ -292,6 +293,28 @@ def electron_dist() -> Path:
     return desktop / "node_modules" / "electron" / "dist" / "Electron.app"
 
 
+def copy_license_inventory(resources: Path) -> None:
+    """Retain the reviewed source notices alongside the app, not a compliance verdict.
+
+    Mirror source-relative paths below Resources/licenses so evidence paths resolve.
+    Native runtime/ffmpeg/Electron notices still require an installed-artifact audit.
+    """
+    destination = resources / "licenses"
+    destination.mkdir(parents=True, exist_ok=True)
+    for name in ("LICENSE", "THIRD-PARTY-NOTICES.md", "sbom.cdx.json"):
+        shutil.copy2(ROOT / name, destination / name)
+    shutil.copytree(ROOT / "licenses", destination / "licenses", dirs_exist_ok=True)
+    evidence = json.loads((ROOT / "licenses" / "inventory-evidence.json").read_text())
+    for component in evidence["components"]:
+        for path in component.get("license_files", []):
+            relative = Path(path)
+            if relative.is_absolute() or ".." in relative.parts:
+                raise ValueError("License evidence path must be inside the source tree")
+            target = destination / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(ROOT / relative, target)
+
+
 def assemble_app(python_runtime: Path, ffmpeg_dir: Path, icns: Path, version: str) -> Path:
     step("assemble manaDJ.app")
     app = BUILD / "app" / f"{APP_NAME}.app"
@@ -303,6 +326,7 @@ def assemble_app(python_runtime: Path, ffmpeg_dir: Path, icns: Path, version: st
     run(["ditto", electron_dist(), app])
     contents = app / "Contents"
     resources = contents / "Resources"
+    copy_license_inventory(resources)
 
     # The shell is the app: Resources/app wins over default_app.asar.
     (resources / "default_app.asar").unlink(missing_ok=True)
