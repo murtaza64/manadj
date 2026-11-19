@@ -10,11 +10,13 @@
  *
  * Rule provenance (user decision, 2026-11-18 iMessage): a FIXED 64-beat
  * silence loop starting on a "projected 64 beat hypermetric boundary", so
- * cross-deck drop alignment survives one track ending. This module maps
- * "64-beat hypermetric boundary" onto the Metric Ladder's TOP TIER: 64
- * beats (16 bars) under the default duple ladder at 4/4. A custom ladder's
- * top tier may span a different beat count — that mapping is the
- * implementation's interpretation of the decision, not its literal text.
+ * cross-deck drop alignment survives one track ending. This module offers
+ * an entry only when the resolved ladder's top tier spans exactly 64
+ * beats - the default duple ladder at 4/4, or any future custom ladder
+ * whose top group is 64 beats. Any other ladder or meter keeps
+ * stop-at-end (gh#424 D4): its silence-loop semantics are unresolved and
+ * not accepted, so no entry is offered rather than mapping the fixed-64
+ * rule onto a different beat count.
  *
  * Stored arrays pass through UNTOUCHED (the waveform renderer matches
  * downbeats to beats by exact float equality); projection only appends. */
@@ -107,6 +109,8 @@ export function silenceLoopEntry(
 
   const sigNum = tc.time_signature_num;
   const loopLengthBeats = proj.tierBars[proj.topTier] * sigNum;
+  // fixed64 gate (rule provenance above): only a 64-beat top tier engages.
+  if (loopLengthBeats !== 64) return null;
   const beats = projected.beat_times;
   const downbeats = projected.downbeat_times;
 

@@ -104,6 +104,31 @@ describe('silenceLoopEntry', () => {
     expect(silenceLoopEntry(empty, null, 100)).toBeNull();
     expect(silenceLoopEntry(null, null, 100)).toBeNull();
   });
+
+  it('fixed64 gate: a custom ladder whose top tier is not 64 beats gets no entry', () => {
+    const grid = walk(c120, 300);
+    // Top tier 8 bars = 32 beats: unresolved semantics, keep stop-at-end.
+    expect(silenceLoopEntry(grid, { arities: [2, 2, 2], reset_marks: [] }, 299.3)).toBeNull();
+    // Top tier 32 bars = 128 beats: likewise gated.
+    expect(silenceLoopEntry(grid, { arities: [2, 2, 2, 2, 2], reset_marks: [] }, 299.3)).toBeNull();
+  });
+
+  it('fixed64 gate: a custom ladder whose top tier spans 64 beats still enters', () => {
+    const grid = walk(c120, 300);
+    // [4,4] -> top tier 16 bars = 64 beats: same entry lattice as default.
+    const entry = silenceLoopEntry(grid, { arities: [4, 4], reset_marks: [] }, 299.3);
+    expect(entry).not.toBeNull();
+    expect(entry!.entrySec).toBeCloseTo(320, 9);
+    expect(entry!.loopLengthBeats).toBe(64);
+  });
+
+  it('fixed64 gate: non-4/4 meters get no entry (16 bars of 3/4 = 48 beats)', () => {
+    const waltz = [
+      { start_time: 0, bpm: 120, time_signature_num: 3, time_signature_den: 4, bar_position: 1 },
+    ];
+    const grid = walk(waltz, 300);
+    expect(silenceLoopEntry(grid, null, 299.3)).toBeNull();
+  });
 });
 
 describe('gridForOverlayRegions (gh#424 tail rendering)', () => {
