@@ -175,11 +175,24 @@ def test_mount_roots_env_adds_scan_locations(tmp_path: Path):
     assert tmp_path in roots
 
 
-def test_mount_roots_windows_scans_existing_letters_only():
-    # On a non-Windows host no drive letters exist; the scan must stay
-    # read-only and return nothing rather than guess.
+def test_mount_roots_windows_scans_existing_letters_only(monkeypatch):
+    # Host-independent: pretend exactly D:/ and E:/ exist. The letter scan
+    # must keep existing letters only, on whatever host runs the test — a
+    # real Windows runner has its own letters (C:, D:) that must not leak
+    # in, and a non-Windows host has none that must not empty the result.
+    existing = {"D:/", "E:/"}
+    real_is_dir = Path.is_dir
+
+    def fake_is_dir(self: Path) -> bool:
+        # PosixPath("D:/") stringifies as "D:"; WindowsPath keeps the root.
+        normalized = str(self).replace("\\", "/").rstrip("/")
+        if len(normalized) == 2 and normalized[0].isalpha() and normalized[1] == ":":
+            return normalized + "/" in existing
+        return real_is_dir(self)
+
+    monkeypatch.setattr(Path, "is_dir", fake_is_dir)
     roots = external_drives.mount_roots(platform="win32", env={})
-    assert roots == []
+    assert roots == [Path("D:/"), Path("E:/")]
 
 
 # --- preview (read-only) -----------------------------------------------------
