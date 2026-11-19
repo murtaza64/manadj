@@ -33,6 +33,52 @@ final class NativeAudioTests: XCTestCase {
         try await Task.sleep(for: .milliseconds(50))
         XCTAssertEqual(audio.state(0).position, 0.5, accuracy: 0.01)
     }
+    @MainActor func testLongLibraryTrackStreamsAndSeeksWithoutFullDecode() async throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".caf")
+        defer { try? FileManager.default.removeItem(at: url) }
+        // 360s at 48kHz exceeds the 16,777,216-frame full-decode ceiling.
+        // Write a bounded one-second buffer repeatedly, not a whole-track array.
+        let format = try XCTUnwrap(AVAudioFormat(standardFormatWithSampleRate: 48000, channels: 1))
+        do {
+            let file = try AVAudioFile(forWriting: url, settings: format.settings)
+            let pcm = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 48000))
+            pcm.frameLength = 48000
+            let channel = try XCTUnwrap(pcm.floatChannelData)[0]
+            for i in 0..<48000 { channel[i] = Float(sin(Double(i) * .pi * 2 * 220 / 48000)) * 0.05 }
+            for _ in 0..<360 { try file.write(from: pcm) }
+        }
+        let audio = try NativeAudio()
+        let duration = try await audio.load(url, deck: 0)
+        XCTAssertEqual(duration, 360, accuracy: 0.001)
+        XCTAssertTrue(audio.state(0).ready)
+        XCTAssertFalse(audio.state(0).fullyDecoded, "Long library tracks must use the bounded streaming path")
+        audio.send(MDJPlay)
+        try await Task.sleep(for: .milliseconds(200))
+        XCTAssertGreaterThan(audio.state(0).position, 0.05)
+        // Seek beyond the initial ring contents: fresh decoder refill is required.
+        audio.send(MDJSeek, value: 350)
+        for _ in 0..<100 {
+            if audio.state(0).position > 350.05 { break }
+            try await Task.sleep(for: .milliseconds(30))
+        }
+        XCTAssertGreaterThan(audio.state(0).position, 350.05)
+        XCTAssertLessThan(audio.state(0).position, 354)
+        XCTAssertFalse(audio.state(0).fullyDecoded)
+        // Decoder reaches EOF, then remains available for a backwards refill.
+        audio.send(MDJSeek, value: 359.8)
+        try await Task.sleep(for: .milliseconds(700))
+        XCTAssertEqual(audio.state(0).position, 360, accuracy: 0.05)
+        audio.send(MDJSeek, value: 30)
+        audio.send(MDJPlay)
+        for _ in 0..<100 {
+            if audio.state(0).position > 30.05 && audio.state(0).position < 34 { break }
+            try await Task.sleep(for: .milliseconds(30))
+        }
+        XCTAssertGreaterThan(audio.state(0).position, 30.05)
+        XCTAssertLessThan(audio.state(0).position, 34)
+        XCTAssertTrue(audio.state(0).playing)
+        audio.send(MDJPause)
+    }
     @MainActor func testCommonLibraryCodecsDecodeAndPlayNatively() async throws {
         let audio = try NativeAudio()
         for ext in ["mp3", "m4a", "flac", "aiff"] {

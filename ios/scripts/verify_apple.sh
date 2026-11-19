@@ -12,6 +12,11 @@ SDK_VERSION=$(xcrun --sdk iphonesimulator --show-sdk-version)
 xcodebuild -project ios/Manadj.xcodeproj -scheme Manadj -sdk iphonesimulator \
   -destination 'generic/platform=iOS Simulator' -derivedDataPath ios/.derived-data \
   CODE_SIGNING_ALLOWED=NO ONLY_ACTIVE_ARCH=YES ARCHS="$HOST_ARCH" build
+# Device-SDK compilation catches target-only compiler/linker failures. It is
+# unsigned and cannot be installed; no team, account or provisioning is used.
+xcodebuild -project ios/Manadj.xcodeproj -scheme Manadj -sdk iphoneos \
+  -destination 'generic/platform=iOS' -derivedDataPath "${TMPDIR:-/tmp}/manadj-device-derived-data" \
+  CODE_SIGNING_ALLOWED=NO ARCHS=arm64 build
 if [[ -z "${DESTINATION_UDID:-}" ]]; then
   DESTINATION_UDID=$(xcrun simctl list devices available --json | python3 -c '
 import json,sys,re
