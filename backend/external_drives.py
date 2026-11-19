@@ -484,7 +484,7 @@ def _classify(
             "a library track has this file name: verify it is the same audio",
             None,
         )
-    source = _device_rel_source(root, device_path)
+    source = _device_source(root, kind, device_path)
     if source is None or not source.is_file():
         return STATUS_MISSING, "audio file not found on the drive", None
     # Rename tier: no path or file-name match, but the library may hold

@@ -880,3 +880,45 @@ def test_no_tag_candidate_stays_new(db: Session, make_track, tmp_path: Path):
     assert entry.status == "new"
     assert entry.matched_path is None
     assert preview.new_count == 1
+
+
+def test_engine_renamed_identical_content_is_present(
+    db: Session, make_track, tmp_path: Path
+):
+    # The rename tier must resolve Engine paths through the kind-aware
+    # resolver, not the Rekordbox relative-path one.
+    root = tmp_path / "ENGINE_USB"
+    make_engine_usb(
+        root,
+        [{"path": "Music/dj-edit-02.mp3", "title": "Engine Tune", "artist": "Lane 8"}],
+    )
+    put_audio(root, "Music/dj-edit-02.mp3")
+    library_file = tmp_path / "music" / "Engine Tune.mp3"
+    library_file.parent.mkdir(parents=True)
+    shutil.copy2(FIXTURES / "silence.mp3", library_file)
+    make_track(filename=str(library_file), title="Engine Tune", artist="Lane 8")
+
+    preview = external_drives.build_pull_preview(db, root)
+
+    entry = preview.entries[0]
+    assert entry.status == "present"
+    assert entry.matched_path == str(library_file)
+
+
+def test_engine_renamed_different_bytes_stays_uncertain(
+    db: Session, make_track, tmp_path: Path
+):
+    root = tmp_path / "ENGINE_USB"
+    make_engine_usb(
+        root,
+        [{"path": "Music/dj-edit-02.mp3", "title": "Engine Tune", "artist": "Lane 8"}],
+    )
+    put_audio(root, "Music/dj-edit-02.mp3")
+    library_file = tmp_path / "music" / "Engine Tune.mp3"
+    library_file.parent.mkdir(parents=True)
+    library_file.write_bytes(b"different audio entirely")
+    make_track(filename=str(library_file), title="Engine Tune", artist="Lane 8")
+
+    preview = external_drives.build_pull_preview(db, root)
+
+    assert preview.entries[0].status == "uncertain"
