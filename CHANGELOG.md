@@ -4,6 +4,7 @@ All notable changes to manaDJ. Format: [Keep a Changelog](https://keepachangelog
 versions follow [Semantic Versioning](https://semver.org/). Install: [docs/install.md](docs/install.md).
 
 ## [Unreleased]
+- Wallpaper theme (opt-in, device-local): Display → Settings → Wallpaper theme applies the pywal palette from `~/.cache/wal/colors.json` to manaDJ's neutral surfaces and accent; deck, hotcue, status and energy colors stay fixed for readability. Re-applies when the palette file's colors change; turning it off restores the stock theme without a reload. Nothing leaves the device (#470).
 - Chord match: Follow and Set suggestions boost Tracks whose drop chord progression matches — double-drop candidates, marked with a note icon in the score column whose intensity shows match strength. Backed by background harmony analysis of every Track (stems, else full mix); backfill with `uv run scripts/backfill_harmony.py` (#387, #388).
 
 ## [0.1.0-rc.6] - 2026-10-15
