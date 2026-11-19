@@ -185,10 +185,21 @@ def detect_drives(roots: list[Path] | None = None) -> list[DetectedDrive]:
 
 
 @dataclass
+class DevicePlaylist:
+    id: int
+    name: str | None
+    parent_id: int
+    sort_order: int
+    is_folder: bool
+    track_ids: list[int] = field(default_factory=list)  # entry_index order
+
+
+@dataclass
 class RekordboxDevice:
     tracks: list[PdbTrack]
     artists: dict[int, str]
     keys: dict[int, str]
+    playlists: list[DevicePlaylist] = field(default_factory=list)
 
 
 def read_rekordbox_device(root: Path) -> RekordboxDevice:
@@ -218,10 +229,35 @@ def read_rekordbox_device(root: Path) -> RekordboxDevice:
             return {}
         return {row.id: row.name for row in table.rows if row.name}
 
+    playlists: list[DevicePlaylist] = []
+    tree_table = tables.get("playlist_tree")
+    if tree_table is not None:
+        by_playlist: dict[int, list[tuple[int, int]]] = {}
+        entry_table = tables.get("playlist_entries")
+        if entry_table is not None:
+            for entry in entry_table.rows:
+                by_playlist.setdefault(entry.playlist_id, []).append(
+                    (entry.entry_index, entry.track_id)
+                )
+        for node in tree_table.rows:
+            ordered = by_playlist.get(node.id, [])
+            ordered.sort()
+            playlists.append(
+                DevicePlaylist(
+                    id=node.id,
+                    name=node.name,
+                    parent_id=node.parent_id,
+                    sort_order=node.sort_order,
+                    is_folder=bool(node.is_folder),
+                    track_ids=[track_id for _, track_id in ordered],
+                )
+            )
+
     return RekordboxDevice(
         tracks=list(track_table.rows) if track_table else [],
         artists=named("artists"),
         keys=named("keys"),
+        playlists=playlists,
     )
 
 
@@ -256,6 +292,24 @@ class PullEntry:
 
 
 @dataclass
+class PlaylistPreview:
+    """One device playlist in the pull preview: where it sits in the folder
+    tree and how its member tracks classify against the library. Membership
+    changes (adds/removes/order) against a local playlist are NOT decided
+    here; that diff needs an explicit local counterpart and stays part of
+    the confirm flow."""
+    id: int
+    name: str | None
+    folder_path: str  # parent folder chain, "" at root, e.g. "RIG" for RIG/RIG Mix
+    sort_order: int
+    track_count: int
+    new_count: int
+    present_count: int
+    uncertain_count: int
+    other_count: int  # duplicate/missing-file/unresolvable members
+
+
+@dataclass
 class PullPreview:
     root: str
     kind: str
@@ -268,6 +322,7 @@ class PullPreview:
     default_destination: str | None
     fingerprint: str = ""
     entries: list[PullEntry] = field(default_factory=list)
+    playlists: list[PlaylistPreview] = field(default_factory=list)
 
 
 def default_destination() -> str | None:
@@ -397,13 +452,16 @@ def _plan_fingerprint(
     kind: str,
     entries: list[PullEntry],
     destination: Path | None,
+    playlists: list[DevicePlaylist] | None = None,
 ) -> str:
     """Binds a confirmed pull to exactly what the preview saw.
 
     Covers the drive root, format, the resolved destination when given,
-    and every entry's device path, classification and source file
-    size/mtime, so a changed drive OR a changed library OR a swapped
-    destination produces a different fingerprint.
+    every entry's device path, classification and source file
+    size/mtime, and the device playlist tree (folder structure plus
+    ordered membership), so a changed drive OR a changed library OR a
+    swapped destination OR a playlist edit produces a different
+    fingerprint.
 
     Limitation: source identity here is size+mtime, not content. A
     device file replaced with the same size and mtime before the
@@ -427,6 +485,10 @@ def _plan_fingerprint(
             "kind": kind,
             "destination": str(destination.resolve()) if destination is not None else None,
             "items": items,
+            "playlists": [
+                [pl.id, pl.name, pl.parent_id, pl.sort_order, pl.is_folder, pl.track_ids]
+                for pl in playlists or []
+            ],
         },
         sort_keys=True,
         separators=(",", ":"),
@@ -575,7 +637,59 @@ def build_rekordbox_pull_preview(
             )
         )
 
-    return _preview(root, "rekordbox", len(device.tracks), entries, destination)
+    preview = _preview(
+        root, "rekordbox", len(device.tracks), entries, destination,
+        device_playlists=device.playlists,
+    )
+    preview.playlists = _playlist_previews(device, entries)
+    return preview
+
+
+def _playlist_previews(
+    device: RekordboxDevice, entries: list[PullEntry]
+) -> list[PlaylistPreview]:
+    """Per-playlist rollup of the classified pull entries, in tree order."""
+    status_by_track_id = {
+        device.tracks[e.ordinal].id: e.status
+        for e in entries
+        if 0 <= e.ordinal < len(device.tracks)
+    }
+    folders = {p.id: p for p in device.playlists if p.is_folder}
+
+    def folder_path(node: DevicePlaylist) -> str:
+        parts: list[str] = []
+        parent = folders.get(node.parent_id)
+        while parent is not None and len(parts) < 20:
+            if parent.name:
+                parts.append(parent.name)
+            parent = folders.get(parent.parent_id)
+        return "/".join(reversed(parts))
+
+    out: list[PlaylistPreview] = []
+    for node in sorted(device.playlists, key=lambda p: (p.parent_id, p.sort_order, p.id)):
+        if node.is_folder:
+            continue
+        counts = {STATUS_NEW: 0, STATUS_PRESENT: 0, STATUS_UNCERTAIN: 0, "other": 0}
+        for track_id in node.track_ids:
+            status = status_by_track_id.get(track_id)
+            if status in (STATUS_NEW, STATUS_PRESENT, STATUS_UNCERTAIN):
+                counts[status] += 1
+            else:
+                counts["other"] += 1
+        out.append(
+            PlaylistPreview(
+                id=node.id,
+                name=node.name,
+                folder_path=folder_path(node),
+                sort_order=node.sort_order,
+                track_count=len(node.track_ids),
+                new_count=counts[STATUS_NEW],
+                present_count=counts[STATUS_PRESENT],
+                uncertain_count=counts[STATUS_UNCERTAIN],
+                other_count=counts["other"],
+            )
+        )
+    return out
 
 
 def build_engine_pull_preview(
@@ -637,6 +751,7 @@ def _preview(
     device_count: int,
     entries: list[PullEntry],
     destination: Path | None = None,
+    device_playlists: list[DevicePlaylist] | None = None,
 ) -> PullPreview:
     return PullPreview(
         root=str(root),
@@ -648,7 +763,9 @@ def _preview(
         duplicate_count=sum(1 for e in entries if e.status == STATUS_DUPLICATE),
         missing_file_count=sum(1 for e in entries if e.status == STATUS_MISSING),
         default_destination=default_destination(),
-        fingerprint=_plan_fingerprint(root, kind, entries, destination),
+        fingerprint=_plan_fingerprint(
+            root, kind, entries, destination, playlists=device_playlists
+        ),
         entries=entries,
     )
 

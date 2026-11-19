@@ -26,6 +26,8 @@ from backend.routers import external_drives as external_drives_router
 from rekordbox.device.pdb_write import (
     ArtistRowSpec,
     KeyRowSpec,
+    PlaylistEntryRowSpec,
+    PlaylistTreeRowSpec,
     TableData,
     TrackRowSpec,
     build_pdb,
@@ -38,6 +40,8 @@ FIXTURES = Path(__file__).parent / "fixtures"
 PAGE_TRACKS = 0
 PAGE_ARTISTS = 2
 PAGE_KEYS = 5
+PAGE_PLAYLIST_TREE = 7
+PAGE_PLAYLIST_ENTRIES = 8
 
 
 def track_spec(track_id: int, title: str, device_path: str, **overrides) -> TrackRowSpec:
@@ -1049,3 +1053,115 @@ def test_selection_outside_the_verified_plan_refuses_the_import(
             ordinals={not_new},
         )
     assert db.query(Track).count() == 0
+
+
+# --- playlists in the pull preview --------------------------------------------
+
+PAGE_LIST_FOLDER = 100
+PAGE_LIST_A = 101
+PAGE_LIST_B = 102
+
+
+def make_rekordbox_usb_with_playlists(root: Path, entry_order_b=(3, 2)) -> Path:
+    """Three tracks; folder RIG with "RIG Mix" (1,2,3 in order) and "RIG New"
+    (entry_order_b, default reordered with a cross-playlist duplicate)."""
+    pdb_dir = root / "PIONEER" / "rekordbox"
+    pdb_dir.mkdir(parents=True)
+    tracks = [
+        track_spec(1, "One", "/Contents/one.mp3", artist_id=1),
+        track_spec(2, "Two", "/Contents/two.mp3", artist_id=1),
+        track_spec(3, "Three", "/Contents/three.mp3", artist_id=1),
+    ]
+    tree = [
+        PlaylistTreeRowSpec(
+            id=PAGE_LIST_FOLDER, name=sql_string("RIG"), parent_id=0,
+            sort_order=1, is_folder=True,
+        ).encode(),
+        PlaylistTreeRowSpec(
+            id=PAGE_LIST_A, name=sql_string("RIG Mix"), parent_id=PAGE_LIST_FOLDER,
+            sort_order=1, is_folder=False,
+        ).encode(),
+        PlaylistTreeRowSpec(
+            id=PAGE_LIST_B, name=sql_string("RIG New"), parent_id=PAGE_LIST_FOLDER,
+            sort_order=2, is_folder=False,
+        ).encode(),
+    ]
+    entries = []
+    # written deliberately out of entry_index order: parse must sort
+    for i, tid in [(2, 2), (1, 1), (3, 3)]:
+        entries.append(
+            PlaylistEntryRowSpec(entry_index=i, track_id=tid, playlist_id=PAGE_LIST_A).encode()
+        )
+    for i, tid in enumerate(entry_order_b, start=1):
+        entries.append(
+            PlaylistEntryRowSpec(entry_index=i, track_id=tid, playlist_id=PAGE_LIST_B).encode()
+        )
+    tables = [
+        TableData(PAGE_TRACKS, [encode_track_row(t) for t in tracks]),
+        TableData(PAGE_ARTISTS, [ArtistRowSpec(id=1, name=sql_string("Lane 8")).encode()]),
+        TableData(PAGE_PLAYLIST_TREE, tree),
+        TableData(PAGE_PLAYLIST_ENTRIES, entries),
+    ]
+    (pdb_dir / "export.pdb").write_bytes(build_pdb(tables))
+    for name in ("one", "two", "three"):
+        put_audio(root, f"/Contents/{name}.mp3")
+    return root
+
+
+def test_device_parse_playlist_tree_and_entries(tmp_path: Path):
+    usb = make_rekordbox_usb_with_playlists(tmp_path / "RB")
+    device = external_drives.read_rekordbox_device(usb)
+    assert len(device.playlists) == 3
+    by_id = {pl.id: pl for pl in device.playlists}
+    assert by_id[PAGE_LIST_FOLDER].is_folder is True
+    assert by_id[PAGE_LIST_A].is_folder is False
+    assert by_id[PAGE_LIST_A].parent_id == PAGE_LIST_FOLDER
+    # entries written out of order come back in entry_index order
+    assert by_id[PAGE_LIST_A].track_ids == [1, 2, 3]
+    assert by_id[PAGE_LIST_B].track_ids == [3, 2]
+
+
+def test_device_without_playlist_tables_tolerated(usb: Path):
+    device = external_drives.read_rekordbox_device(usb)
+    assert device.playlists == []
+
+
+def test_preview_playlist_rollup(db: Session, make_track, tmp_path: Path):
+    usb = make_rekordbox_usb_with_playlists(tmp_path / "RB")
+    make_track(filename="/Contents/two.mp3", title="Two")  # full-path match
+    preview = external_drives.build_pull_preview(db, usb)
+    assert len(preview.playlists) == 2  # folder is not a playlist row
+    mix = next(pl for pl in preview.playlists if pl.name == "RIG Mix")
+    assert mix.folder_path == "RIG"
+    assert mix.track_count == 3
+    assert mix.present_count == 1  # Two
+    assert mix.new_count == 2  # One, Three
+    new_pl = next(pl for pl in preview.playlists if pl.name == "RIG New")
+    assert new_pl.track_count == 2
+    assert new_pl.present_count == 1
+    assert new_pl.new_count == 1
+
+
+def test_preview_without_playlists_returns_empty_list(db: Session, usb: Path):
+    preview = external_drives.build_pull_preview(db, usb)
+    assert preview.playlists == []
+
+
+def test_playlist_order_change_changes_fingerprint(db: Session, tmp_path: Path):
+    usb_a = make_rekordbox_usb_with_playlists(tmp_path / "A", entry_order_b=(3, 2))
+    usb_b = make_rekordbox_usb_with_playlists(tmp_path / "B", entry_order_b=(2, 3))
+    fp_a = external_drives.build_pull_preview(db, usb_a).fingerprint
+    fp_b = external_drives.build_pull_preview(db, usb_b).fingerprint
+    assert fp_a != fp_b
+
+
+def test_router_preview_includes_playlists(client: TestClient, tmp_path: Path):
+    usb = make_rekordbox_usb_with_playlists(tmp_path / "RB")
+    response = client.post("/api/external-drives/preview", json={"root": str(usb)})
+    assert response.status_code == 200
+    payload = response.json()
+    assert [pl["name"] for pl in payload["playlists"]] == ["RIG Mix", "RIG New"]
+    mix = payload["playlists"][0]
+    assert mix["folder_path"] == "RIG"
+    assert mix["track_count"] == 3
+    assert mix["new_count"] == 3

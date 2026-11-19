@@ -59,6 +59,18 @@ class PullEntryOut(BaseModel):
     matched_path: str | None
 
 
+class PlaylistOut(BaseModel):
+    id: int
+    name: str | None
+    folder_path: str
+    sort_order: int
+    track_count: int
+    new_count: int
+    present_count: int
+    uncertain_count: int
+    other_count: int
+
+
 class PreviewResponse(BaseModel):
     root: str
     kind: str
@@ -71,6 +83,7 @@ class PreviewResponse(BaseModel):
     default_destination: str | None
     fingerprint: str
     entries: list[PullEntryOut]
+    playlists: list[PlaylistOut] = []
 
 
 def _preview_out(preview: external_drives.PullPreview) -> PreviewResponse:
@@ -86,6 +99,7 @@ def _preview_out(preview: external_drives.PullPreview) -> PreviewResponse:
         default_destination=preview.default_destination,
         fingerprint=preview.fingerprint,
         entries=[PullEntryOut(**vars(e)) for e in preview.entries],
+        playlists=[PlaylistOut(**vars(pl)) for pl in preview.playlists],
     )
 
 
