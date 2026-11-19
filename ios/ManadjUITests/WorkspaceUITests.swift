@@ -1,15 +1,36 @@
 import XCTest
 
 final class WorkspaceUITests: XCTestCase {
+    @MainActor private func waitForReadyTransport(_ play: XCUIElement, app: XCUIApplication) {
+        let ready = NSPredicate(format: "enabled == true AND hittable == true")
+        let result = XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: ready, object: play)], timeout: 20)
+        XCTAssertEqual(result, .completed, "Transport must be ready before tapping")
+        let wave = app.otherElements["deck-0-detail-wave"]
+        XCTAssertTrue(wave.waitForExistence(timeout: 5))
+        XCTAssertTrue((wave.value as? String ?? "").hasPrefix("paused"), "Expected loaded paused wave, got \(String(describing: wave.value))")
+    }
+    @MainActor private func captureFailure() {
+        if testRun?.hasSucceeded == false {
+            let app = XCUIApplication()
+            let hierarchy = XCTAttachment(string: app.debugDescription)
+            hierarchy.name = "Failure accessibility hierarchy"; hierarchy.lifetime = .keepAlways; add(hierarchy)
+            let shot = XCTAttachment(screenshot: app.screenshot())
+            shot.name = "Failure screen"; shot.lifetime = .keepAlways; add(shot)
+        }
+    }
+
     @MainActor func testStandardWorkspaceSettingsAndPitch() {
+        defer { captureFailure() }
         let app = XCUIApplication(); app.launchArguments = ["--performance-ui-fixture"]; app.launch()
         XCTAssertTrue(app.buttons["BROWSE"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.buttons["A play pause"].waitForExistence(timeout: 20))
         XCTAssertFalse(app.buttons["PERFORM"].exists)
         XCTAssertFalse(app.buttons["LIBRARY"].exists)
         let play = app.buttons["A play pause"]
-        XCTAssertTrue(play.waitForExistence(timeout: 5)); play.tap()
-        let wave = app.otherElements["A detail wave"]
+        XCTAssertTrue(play.waitForExistence(timeout: 5))
+        waitForReadyTransport(play, app: app)
+        play.tap()
+        let wave = app.otherElements["deck-0-detail-wave"]
         let playing = NSPredicate(format: "value BEGINSWITH %@", "playing")
         expectation(for: playing, evaluatedWith: wave); waitForExpectations(timeout: 8)
         Thread.sleep(forTimeInterval: 4)
@@ -45,11 +66,13 @@ final class WorkspaceUITests: XCTestCase {
         let browse = XCTAttachment(screenshot: app.screenshot()); browse.name = "iOS in-place browser with transport WIP"; browse.lifetime = .keepAlways; add(browse)
     }
     @MainActor func testLiveMixerControlsRespondAndRecover() {
+        defer { captureFailure() }
         let app = XCUIApplication(); app.launchArguments = ["--performance-ui-fixture"]; app.launch()
         let play = app.buttons["A play pause"]
         XCTAssertTrue(play.waitForExistence(timeout: 20))
         let fader = app.otherElements["A channel fader"]
         XCTAssertTrue(fader.waitForExistence(timeout: 5))
+        waitForReadyTransport(play, app: app)
         let initial = fader.value as? String ?? ""
         fader.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3)).press(forDuration: 0.1, thenDragTo: fader.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.7)))
         let changed = NSPredicate(format: "value != %@", initial)
@@ -66,7 +89,7 @@ final class WorkspaceUITests: XCTestCase {
         bend.coordinate(withNormalizedOffset: CGVector(dx: 0.8, dy: 0.5)).press(forDuration: 0.3)
         expectation(for: NSPredicate(format: "value == %@", "+0.0 percent"), evaluatedWith: bend); waitForExpectations(timeout: 5)
         play.tap()
-        let wave = app.otherElements["A detail wave"]
+        let wave = app.otherElements["deck-0-detail-wave"]
         expectation(for: NSPredicate(format: "value BEGINSWITH %@", "playing"), evaluatedWith: wave); waitForExpectations(timeout: 5)
         Thread.sleep(forTimeInterval: 2)
         play.tap()
@@ -74,6 +97,7 @@ final class WorkspaceUITests: XCTestCase {
         let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Live mixer gesture and transport recovery"; shot.lifetime = .keepAlways; add(shot)
     }
     @MainActor func testLibrarySearchAcceptedAndRefusedLoads() {
+        defer { captureFailure() }
         let app = XCUIApplication()
         app.launchArguments = ["--library-ui-fixture"]
         app.launch()

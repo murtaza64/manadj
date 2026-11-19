@@ -28,6 +28,7 @@ struct PerformanceWave: UIViewRepresentable {
         view.playback = { [weak model] playing in model?.set(playing ? MDJPlay : MDJPause, index, 0) }
         view.state = { [weak model] in model?.audio?.state(index) ?? MDJDeck() }
         view.seek = { [weak model] seconds in model?.set(MDJSeek, index, seconds) }
+        view.accessibilityIdentifier = "deck-\(index)-\(overview ? "overview" : "detail")-wave"
         view.accessibilityLabel = "\(Ink.deckName(index)) \(overview ? "minimap seek" : "detail wave")"
 
         view.setNeedsDisplay()
@@ -124,11 +125,19 @@ struct PerformanceWave: UIViewRepresentable {
         }
         setNeedsDisplay()
     }
+    // Accessibility reads live engine state, even if Core Animation has not
+    // requested a draw yet. Pausing must not leave a cached "playing" value.
+    override var accessibilityValue: String? {
+        get {
+            guard duration > 0, let state = state?() else { return "not loaded" }
+            return String(format: "%@ %.2f seconds", state.playing ? "playing" : "paused", state.position)
+        }
+        set { }
+    }
     override func draw(_ rect: CGRect) {
         guard let ctx = UIGraphicsGetCurrentContext() else { return }
         ctx.setFillColor(UIColor.black.cgColor); ctx.fill(bounds)
         guard duration > 0, let state = state?() else { return }
-        accessibilityValue = String(format: "%@ %.2f seconds", state.playing ? "playing" : "paused", state.position)
         let rate = (1 + Double(state.pitch) / 100) * (1 + Double(state.bend) / 100)
         let moving = (state.playing || state.preview) && !scrubbing
         let position = previewPosition ?? clock.at(CACurrentMediaTime(), raw: state.position, moving: moving, rate: rate)
