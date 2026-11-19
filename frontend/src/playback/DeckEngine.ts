@@ -24,6 +24,7 @@ import { getCueMode } from './cueModeStore';
 import { addBeats, beatPhaseTarget, beatsBetween, crossDeckLaunchTarget } from './quantize';
 import type { LaunchReference } from './quantize';
 import { foldLoopPlayhead, isSilenceLoop, loopFoldEnd, projectLoopBeats } from './loop';
+import { extendBeatTimesPastEof } from './gridExtend';
 import type { LoopRegion, LoopResize } from './loop';
 import type { DeckAudioPort } from './mixer';
 import { DeckSourceNode } from './worklet/deckSourceNode';
@@ -1086,6 +1087,24 @@ export class DeckEngine {
     return this.scratch !== null || isAudioRunning(this.transport);
   }
 
+  private extendedBeatTimesCache: { grid: number[]; duration: number; times: number[] } | null = null;
+
+  /** Beat lattice for transport math, extended past EOF (gh#424) so a
+   * loop-engage or quantize snap near the end projects into the silence
+   * region instead of clamping at the last stored beat. The stored grid is
+   * never mutated; the extension is cached per (grid identity, duration). */
+  private transportBeatTimes(): number[] | null {
+    if (!this.beatTimes) return null;
+    const duration = this.buffer?.duration ?? 0;
+    const cache = this.extendedBeatTimesCache;
+    if (cache && cache.grid === this.beatTimes && cache.duration === duration) return cache.times;
+    const n = this.beatTimes.length;
+    const interval = n >= 2 ? this.beatTimes[n - 1] - this.beatTimes[n - 2] : 0.5;
+    const times = extendBeatTimesPastEof(this.beatTimes, duration + 128 * interval);
+    this.extendedBeatTimesCache = { grid: this.beatTimes, duration, times };
+    return times;
+  }
+
   /** Current playhead in seconds. Cheap; safe to poll per animation frame.
    * Reads the anchor clock while a voice runs OR during the pre-start
    * lead-in (issue 07) — the lead-in has no voice yet, but the clock still
@@ -1191,7 +1210,7 @@ export class DeckEngine {
   private transportContext(): TransportContext {
     return {
       quantize: isQuantizeOn(),
-      beatTimes: this.beatTimes,
+      beatTimes: this.transportBeatTimes(),
       launchReference: this.launchReference(),
       playRate: this.currentRate(),
       cueMode: getCueMode(),
@@ -1580,6 +1599,12 @@ export class DeckEngine {
     if (!node || !this.buffer) return;
     const loop = this.transport.loop;
     if (!loop) {
+      node.setLoop(null);
+      return;
+    }
+    // A silence loop (gh#424) has no sample wrap: the voice must run to
+    // EOF and end so the phantom clock can take over past the buffer.
+    if (isSilenceLoop(loop, this.buffer.duration)) {
       node.setLoop(null);
       return;
     }
