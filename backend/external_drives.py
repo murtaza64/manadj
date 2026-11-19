@@ -1100,6 +1100,10 @@ def execute_playlist_pull(
     final_name = playlist_name or node.name
     if not final_name:
         raise ExternalDriveError("device playlist has no name; pass playlist_name")
+    if not node.track_ids:
+        raise ExternalDriveError(
+            f"device playlist {final_name!r} has no tracks; nothing to import"
+        )
     if manadj_session.query(Playlist).filter(Playlist.name == final_name).first():
         raise ExternalDriveError(
             f"a local playlist named {final_name!r} already exists; "
@@ -1146,6 +1150,12 @@ def execute_playlist_pull(
         else:
             skipped_other += 1
 
+    if not member_ids:
+        raise ExternalDriveError(
+            f"no member of {final_name!r} could be imported or matched "
+            f"({skipped_uncertain} unverified, {skipped_other} missing or unreadable); "
+            "no playlist was created"
+        )
     playlist = Playlist(name=final_name)
     manadj_session.add(playlist)
     manadj_session.flush()

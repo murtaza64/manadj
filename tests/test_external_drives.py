@@ -1524,3 +1524,46 @@ def test_router_playlist_import_end_to_end(
     assert playlist["already_in_library"] == 1
     assert playlist["skipped_uncertain"] == 0
     assert db_session.query(Playlist).count() == 1
+
+
+def test_playlist_pull_all_missing_members_refuses_without_empty_playlist(
+    db: Session, tmp_path: Path
+):
+    usb = make_rekordbox_usb_with_playlists(tmp_path / "RB")
+    # Remove the audio for every member of "RIG Mix": all missing-file.
+    for name in ("one", "two", "three"):
+        (usb / "Contents" / f"{name}.mp3").unlink()
+    dest = tmp_path / "lib"
+    preview = external_drives.build_pull_preview(db, usb, dest)
+
+    with pytest.raises(external_drives.ExternalDriveError, match="no member"):
+        external_drives.execute_playlist_pull(
+            db, usb, dest,
+            device_playlist_id=PAGE_LIST_A,
+            expected_fingerprint=preview.fingerprint,
+        )
+    assert db.query(Playlist).count() == 0
+    assert db.query(Track).count() == 0
+    assert not dest.exists()
+
+
+def test_playlist_pull_copied_bytes_match_and_present_tracks_not_recopied(
+    db: Session, make_track, tmp_path: Path
+):
+    usb = make_rekordbox_usb_with_playlists(tmp_path / "RB")
+    make_track(filename="/Contents/two.mp3", title="Two")
+    dest = tmp_path / "lib"
+    preview = external_drives.build_pull_preview(db, usb, dest)
+
+    external_drives.execute_playlist_pull(
+        db, usb, dest,
+        device_playlist_id=PAGE_LIST_A,
+        expected_fingerprint=preview.fingerprint,
+    )
+    for name in ("one", "three"):
+        copied = dest / "Contents" / f"{name}.mp3"
+        assert hashlib.sha256(copied.read_bytes()).hexdigest() == hashlib.sha256(
+            (usb / "Contents" / f"{name}.mp3").read_bytes()
+        ).hexdigest()
+    # the already-present member is referenced, never copied again
+    assert not (dest / "Contents" / "two.mp3").exists()
