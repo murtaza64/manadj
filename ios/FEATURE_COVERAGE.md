@@ -4,7 +4,9 @@ Baseline: personal `murtaza64/manadj` main at `d137e2d7` (piracy-removal merge).
 
 ## Apple runtime checkpoint
 
-At `24bb9012`, unsigned simulator and arm64 device-SDK builds passed. Seven native and three UI tests passed with zero failures or skips on regular iPhone 16 / iOS 18.5. [Run](https://github.com/murtaza64/manadj/actions/runs/44484532224), [evidence](https://github.com/murtaza64/manadj/actions/runs/44484532224/artifacts/14511085536). The latest actual portrait, pitch, library and keyboard-search pixels were inspected. Recording controls are centered between faders, cue pins are smaller, and bottom pitch clearance passes the unchanged guard. These are synthetic-fixture simulator checks, not physical-device or complete Android-parity acceptance. Both PR merges remain held.
+At `e11a802f`, unsigned simulator and arm64 device-SDK builds passed. Core package23, audio bridge4, native simulator7 and UI3 tests passed with zero failures on regular iPhone16 / iOS18.5. [Run](https://github.com/murtaza64/manadj/actions/runs/44586424500), [evidence](https://github.com/murtaza64/manadj/actions/runs/44586424500/artifacts/14563685819). Actual portrait, library, pitch and keyboard-search pixels were inspected. The real desktop loopback pair/sync/download/offline test, common generated codecs and long-stream seek/EOF checks passed. A test-fixture teardown hang was diagnosed from xctest samples and fixed with bounded termination observation; no test assertions were removed. A live waveform accessibility getter and ready-transport waits retain playing/paused checks.
+
+These are generated-fixture simulator checks, not physical-device, local-Wi-Fi, audio-quality or complete Android-parity acceptance. Both PR merges remain held. Recording controls remain centered between faders; cue pins, bottom pitch clearance and library accepted/refused load paths pass the unchanged guards. The actual UI-runner recording includes test relaunches and first-use keyboard UI; it is not a polished demo or a frame-smoothness guarantee.
 
 ## Status key
 

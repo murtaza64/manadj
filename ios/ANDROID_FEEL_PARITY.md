@@ -80,3 +80,12 @@ Source-grounded corrections, not visual acceptance: 1/1.5pt empty/marked pad bor
 At `24bb9012`, seven native and three UI tests pass on regular iPhone 16 / iOS 18.5. The center REC/WAV and saved-recordings controls pass hit/placement assertions between the channel faders. Detail flags use centered 14pt digits; minimaps use small unnumbered pins. Actual portrait, pitch, library and keyboard-search pixels were inspected. The bottom-pitch regression introduced by the recording row was fixed by reserving more vertical clearance, with the existing safe-area assertion retained. [Run](https://github.com/murtaza64/manadj/actions/runs/44484532224).
 
 This checkpoint does not lift either merge hold, establish physical haptic/audio quality, implement session replay or claim compact-phone acceptance. Dynamic Island recording status and saved-mix Now Playing boards are design concepts only. A Live Activity is not a background audio engine. Event-session replay and listening to a rendered recording are distinct features.
+
+
+## November19 verified runtime recovery
+
+At `e11a802f`, the current [iPhone16 run](https://github.com/murtaza64/manadj/actions/runs/44586424500) passes23core,4audio-bridge,7native and3UI tests, plus unsigned simulator/device builds. Actual library search refusal/acceptance, live-mixer recovery and settings/pitch stories pass without removing their playing/paused assertions. The previous stall was a test fixture's Foundation `Process.waitUntilExit`, confirmed by stack sample; bounded termination observation fixes it. This does not identify the earlier accessibility timing failure as a proven single-cause defect.
+
+Fresh portrait/library/pitch pixels and sampled actual UI-runner video frames were inspected. Overall A/B hierarchy aligns with the clean Android reference, but browser depth, explicit filter/back controls, waveform overview coloring, stem availability and transport cue icon still differ. Android clean reference's touch Play/Pause/Browse assertions ran, then its extra Collection step failed because Collection was already selected; it is not an all-pass exploration run. Different browser fixture libraries cannot establish metadata or track-count equivalence.
+
+Physical Wi-Fi pairing/audio transfer, audible output, haptics, interruption/cancellation, heard-time alignment and detailed temporal comparison remain unverified. No merge hold is lifted. Session/replay may remain under construction within the user's live-play-v0 priority; it is still requested coverage, not removed scope.
