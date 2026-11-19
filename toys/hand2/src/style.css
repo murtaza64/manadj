@@ -1,0 +1,101 @@
+/* manaDJ skin (tokens from frontend/src/theme/tokens.ts) */
+:root {
+    --mj-mono: ui-monospace, 'SF Mono', 'Cascadia Mono', Menlo, Consolas, monospace;
+}
+
+html, body, #root { margin: 0; min-height: 100%; }
+body { background: var(--ds-page); }
+
+.hand { display: flex; flex-direction: column; gap: 8px; margin: 4px 0 10px; }
+
+.toy-dark {
+    background: #0b0b0f; border: 1px solid #313136; border-radius: 12px;
+    padding: 10px 12px;
+    font-family: var(--mj-mono);
+}
+.toy-dark.is-open { border-color: #45454f; }
+
+.toy-row {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    width: 100%; min-height: 44px; padding: 0;
+    background: none; border: none; cursor: pointer; text-align: left;
+    font-family: var(--mj-mono);
+}
+.toy-row-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.toy-name { font-size: 14.5px; font-weight: 700; color: #cdd6f4; }
+.toy-sub { font-size: 11.5px; line-height: 15px; color: #a6adc8; }
+.toy-hint {
+    flex: 0 0 auto; font-size: 10px; font-weight: 700; letter-spacing: 0.08em;
+    color: #00e5ff; border: 1px solid #313136; border-radius: 999px;
+    padding: 4px 10px;
+}
+.is-open .toy-hint { color: #00e676; border-color: #313136; }
+
+.toy-panel { margin-top: 8px; }
+
+.toy-controls {
+    display: flex; align-items: center; flex-wrap: wrap; gap: 6px;
+    margin-top: 8px;
+}
+.toy-meta { font-size: 11px; color: #6c7086; }
+.toy-verdict { font-size: 12px; line-height: 17px; color: #ffcc00; }
+
+.mj-btn {
+    min-height: 44px; padding: 0 14px;
+    background: transparent; border: 1px solid #313136; border-radius: 999px;
+    color: #cdd6f4; font-family: var(--mj-mono); font-size: 13px; font-weight: 700;
+    letter-spacing: 0.02em; cursor: pointer;
+}
+.mj-btn:active { background: #181818; }
+.mj-play { border-color: #00e676; color: #00e676; min-width: 88px; }
+.mj-cue { border-color: #ffcc00; color: #ffcc00; }
+.mj-jump { border-color: #00e5ff; color: #00e5ff; flex: 1; }
+
+/* Pocket 8 sequencer */
+.seq { display: flex; flex-direction: column; gap: 5px; }
+.seq-lane { display: flex; align-items: center; gap: 5px; }
+.seq-label { flex: 0 0 44px; font-size: 9.5px; font-weight: 700; letter-spacing: 0.08em; }
+.seq-cell {
+    flex: 1; height: 36px; min-width: 0;
+    background: #181818; border: 1px solid #313136; border-radius: 6px;
+    cursor: pointer; padding: 0;
+    transition: transform 0.08s ease;
+}
+.seq-cell.is-now { outline: 2px solid #cdd6f4; outline-offset: 1px; }
+.seq-cell.is-on { opacity: 0.95; }
+.seq-cell.is-on.is-now { transform: scaleY(1.12); }
+
+/* Drop needle */
+.needle-lane { padding: 2px 0; }
+.needle-track {
+    position: relative; height: 44px;
+    background: #181818; border: 1px solid #313136; border-radius: 8px;
+    overflow: hidden;
+}
+.needle-target {
+    position: absolute; top: 0; bottom: 0; transform: translateX(-50%);
+    display: flex; align-items: center;
+    color: #ff9500; font-size: 16px;
+}
+.needle-head {
+    position: absolute; top: 0; bottom: 0; width: 3px; transform: translateX(-50%);
+    background: #ff2d95; box-shadow: 0 0 8px #ff2d95;
+}
+
+/* Tempo oracle */
+.oracle-row .mj-jump { min-height: 60px; font-size: 16px; }
+.oracle-read {
+    margin-top: 8px; display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
+    min-height: 24px;
+}
+.oracle-bpm { font-size: 22px; font-weight: 700; color: #00e5ff; }
+
+/* Standalone page shell (replaces the hosted viewer card) */
+.page {
+    max-width: 480px; margin: 0 auto; padding: 20px 16px 32px;
+    font-family: -apple-system, 'Segoe UI', Roboto, sans-serif;
+}
+.page-title { font-size: 24px; margin: 0 0 6px; color: #111; }
+.page-intro { font-size: 14px; color: #555; margin: 0 0 12px; }
+.page-foot { font-size: 12px; color: #777; line-height: 18px; margin-top: 14px; }
+body { background: #f6f4f0; }
