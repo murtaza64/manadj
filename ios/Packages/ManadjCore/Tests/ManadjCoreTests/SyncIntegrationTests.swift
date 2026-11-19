@@ -1,6 +1,12 @@
 #if os(Linux) || os(macOS)
 import XCTest
 import Foundation
+import Dispatch
+#if canImport(Darwin)
+import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#endif
 #if canImport(FoundationNetworking)
 import FoundationNetworking
 #endif
@@ -10,7 +16,11 @@ final class SyncIntegrationTests: XCTestCase, @unchecked Sendable {
     final class Fixture {
         let process = Process()
         let url: URL
+        private let stopped: DispatchSemaphore
         init() throws {
+            let didExit = DispatchSemaphore(value: 0)
+            stopped = didExit
+            process.terminationHandler = { _ in didExit.signal() }
             let script = try XCTUnwrap(Bundle.module.url(forResource: "sync_fixture", withExtension: "py"))
             let portFile = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
             defer { try? FileManager.default.removeItem(at: portFile) }
@@ -24,7 +34,17 @@ final class SyncIntegrationTests: XCTestCase, @unchecked Sendable {
             let number = try XCTUnwrap(Int(String(contentsOf: portFile, encoding: .utf8)))
             url = try XCTUnwrap(URL(string: "http://127.0.0.1:\(number)"))
         }
-        deinit { process.terminate(); process.waitUntilExit() }
+        deinit {
+            // waitUntilExit can hang on a Swift concurrency worker after the
+            // child has already exited. Observe termination off that run loop
+            // and bound cleanup, without hiding a failed fixture shutdown.
+            if process.isRunning { process.terminate() }
+            if stopped.wait(timeout: .now() + 2) == .timedOut {
+                if process.isRunning { _ = kill(process.processIdentifier, SIGKILL) }
+                let forcedExit = stopped.wait(timeout: .now() + 2)
+                XCTFail("Sync fixture did not stop after SIGTERM (forced exit observed: \(forcedExit == .success))")
+            }
+        }
         func client(token: String = "fixture-not-a-real-token") throws -> SyncClient {
             SyncClient(try DesktopConnection(url: url, deviceToken: token))
         }
