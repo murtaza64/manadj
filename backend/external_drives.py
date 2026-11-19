@@ -44,6 +44,7 @@ import shutil
 import sqlite3
 import string
 import sys
+from collections import Counter
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -738,6 +739,16 @@ def _playlist_previews(
     return out
 
 
+def local_playlist_snapshot_token(
+    playlist_id: int, name: str | None, track_ids: list[int]
+) -> str:
+    """Snapshot of a local playlist's name + ordered membership. The update
+    flow binds the confirm to the reviewed target so an edit between review
+    and confirm is rejected instead of silently overwritten."""
+    ids = ",".join(str(t) for t in track_ids)
+    return hashlib.sha256(f"playlist:{playlist_id}:{name}:{ids}".encode()).hexdigest()[:16]
+
+
 @dataclass
 class PlaylistMembershipDiff:
     """Dry-run membership comparison of one device playlist against a
@@ -761,6 +772,9 @@ class PlaylistMembershipDiff:
     removes_provisional: bool = False
     uncertain_members: int = 0  # unverified device members, excluded everywhere
     order_differs: bool | None = None  # None when no unique counterpart
+    # Snapshot of the suggested counterpart at review time; the confirm
+    # carries it back and the update refuses a target that changed since.
+    target_token: str | None = None
 
 
 def diff_device_playlist(
@@ -830,6 +844,9 @@ def diff_device_playlist(
         .all()
     )
     local_ids = [row.track_id for row in local_rows]
+    diff.target_token = local_playlist_snapshot_token(
+        counterparts[0].id, counterparts[0].name, local_ids
+    )
     # Occurrence-tagged sets (order-pairing policy: k-th with k-th),
     # same documented heuristic as the smart-diff proposal.
     def occ(seq: list[int]) -> list[tuple[int, int]]:
@@ -1227,6 +1244,7 @@ def execute_playlist_update(
     device_playlist_id: int,
     local_playlist_id: int,
     expected_fingerprint: str,
+    expected_target_token: str,
 ) -> PlaylistUpdateResult:
     """Sync an existing local playlist from a device playlist (pull side
     only; the drive is never written to).
@@ -1254,6 +1272,27 @@ def execute_playlist_update(
     local = manadj_session.get(Playlist, local_playlist_id)
     if local is None:
         raise ExternalDriveError(f"no local playlist with id {local_playlist_id}")
+
+    def current_rows() -> list[Any]:
+        return (
+            manadj_session.query(PlaylistTrack)
+            .filter(PlaylistTrack.playlist_id == local.id)
+            .order_by(PlaylistTrack.position)
+            .all()
+        )
+
+    def current_token(rows: list[Any]) -> str:
+        return local_playlist_snapshot_token(
+            local.id, local.name, [r.track_id for r in rows]
+        )
+
+    # Reject a stale reviewed target before any file is copied.
+    rows = current_rows()
+    if current_token(rows) != expected_target_token:
+        raise ExternalDriveError(
+            f'local playlist "{local.name}" changed since the review; '
+            "run the preview again before updating"
+        )
 
     entry_by_track_id = {
         device.tracks[e.ordinal].id: e
@@ -1293,15 +1332,38 @@ def execute_playlist_update(
         else:
             skipped_other += 1
 
-    current = (
-        manadj_session.query(PlaylistTrack)
-        .filter(PlaylistTrack.playlist_id == local.id)
-        .order_by(PlaylistTrack.position)
-        .all()
-    )
+    # Re-check the reviewed target inside the write path, immediately
+    # before the rewrite, so a concurrent local edit is never overwritten.
+    current = current_rows()
+    if current_token(current) != expected_target_token:
+        raise ExternalDriveError(
+            f'local playlist "{local.name}" changed since the review; '
+            "run the preview again before updating"
+        )
+    # The local model keeps one row per track in a playlist (migration
+    # 0011 deduped local playlists and enforces it): a repeated device
+    # member collapses to its first occurrence and is counted as skipped.
+    seen_in_desired: set[int] = set()
+    deduped: list[int] = []
+    for tid in desired:
+        if tid in seen_in_desired:
+            skipped_other += 1
+        else:
+            seen_in_desired.add(tid)
+            deduped.append(tid)
+    desired = deduped
     current_ids = [c.track_id for c in current]
-    desired_set = set(desired)
-    kept_local_only = [tid for tid in current_ids if tid not in desired_set]
+    # Occurrence-count subtraction: the device order claims one occurrence
+    # of each track; surplus local occurrences stay, in their prior
+    # relative order, and local members the drive does not resolve
+    # (e.g. missing files) are preserved, never silently dropped.
+    desired_counts = Counter(desired)
+    kept_local_only = []
+    for tid in current_ids:
+        if desired_counts.get(tid, 0) > 0:
+            desired_counts[tid] -= 1
+        else:
+            kept_local_only.append(tid)
     final = desired + kept_local_only
     added_from_library = sum(
         1 for tid in desired

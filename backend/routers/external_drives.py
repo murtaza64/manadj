@@ -56,6 +56,10 @@ class ImportRequest(BaseModel):
     # fills this in - the client passes it after the user picks the exact
     # local playlist.
     update_playlist_id: int | None = None
+    # Snapshot of the local target as reviewed; required with
+    # update_playlist_id so a target edited since the review is refused
+    # instead of silently overwritten.
+    update_target_token: str | None = None
 
 
 class PullEntryOut(BaseModel):
@@ -74,6 +78,7 @@ class PullEntryOut(BaseModel):
 class MembershipOut(BaseModel):
     counterpart_status: str
     counterpart_id: int | None
+    target_token: str | None = None
     common: int
     adds_in_library: int
     adds_new: int
@@ -183,6 +188,11 @@ def import_pull(request: ImportRequest, db: Session = Depends(get_db)):
             status_code=400,
             detail="No library directory configured; pass an explicit destination.",
         )
+    if request.update_playlist_id is not None and not request.update_target_token:
+        raise HTTPException(
+            status_code=400,
+            detail="update_playlist_id requires update_target_token (the reviewed snapshot of the local target).",
+        )
     if request.update_playlist_id is not None and request.create_playlist_id is None:
         raise HTTPException(
             status_code=400,
@@ -209,6 +219,7 @@ def import_pull(request: ImportRequest, db: Session = Depends(get_db)):
                 Path(destination),
                 device_playlist_id=request.create_playlist_id,
                 local_playlist_id=request.update_playlist_id,
+                expected_target_token=request.update_target_token,
                 expected_fingerprint=request.preview_fingerprint,
             )
             result = update_result.pull

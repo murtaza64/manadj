@@ -1642,11 +1642,15 @@ def test_playlist_update_adds_orders_and_keeps_local_only(
     before = tree_digest(usb)
     preview = external_drives.build_pull_preview(db, usb, dest)
 
+    token = external_drives.local_playlist_snapshot_token(
+        local.id, local.name, [two.id, held_elsewhere.id]
+    )
     result = external_drives.execute_playlist_update(
         db, usb, dest,
         device_playlist_id=PAGE_LIST_A,
         local_playlist_id=local.id,
         expected_fingerprint=preview.fingerprint,
+        expected_target_token=token,
     )
 
     assert result.added_imported == 2  # one.mp3, three.mp3 copied in
@@ -1682,11 +1686,15 @@ def test_playlist_update_uncertain_member_skipped_local_member_kept(
     dest = tmp_path / "lib"
     preview = external_drives.build_pull_preview(db, usb, dest)
 
+    token = external_drives.local_playlist_snapshot_token(
+        local.id, local.name, [maybe_one.id]
+    )
     result = external_drives.execute_playlist_update(
         db, usb, dest,
         device_playlist_id=PAGE_LIST_A,
         local_playlist_id=local.id,
         expected_fingerprint=preview.fingerprint,
+        expected_target_token=token,
     )
     assert result.skipped_uncertain == 1
     members = (
@@ -1714,6 +1722,7 @@ def test_playlist_update_requires_real_counterpart_and_fingerprint(
             device_playlist_id=PAGE_LIST_A,
             local_playlist_id=424242,
             expected_fingerprint=preview.fingerprint,
+            expected_target_token="irrelevant",
         )
     with pytest.raises(external_drives.PlanChangedError):
         external_drives.execute_playlist_update(
@@ -1721,9 +1730,81 @@ def test_playlist_update_requires_real_counterpart_and_fingerprint(
             device_playlist_id=PAGE_LIST_A,
             local_playlist_id=1,
             expected_fingerprint="0" * 64,
+            expected_target_token="irrelevant",
         )
     assert db.query(Track).count() == 0
     assert not dest.exists()
+
+
+def test_playlist_update_stale_target_rejected_before_copies(
+    db: Session, make_track, tmp_path: Path
+):
+    usb = make_rekordbox_usb_with_playlists(tmp_path / "RB")
+    two = make_track(filename="/Contents/two.mp3", title="Two")
+    other = make_track(filename="/music/other.mp3", title="Other")
+    _add_local_playlist(db, "RIG Mix", [two.id])
+    local = db.query(Playlist).filter(Playlist.name == "RIG Mix").one()
+    dest = tmp_path / "lib"
+    preview = external_drives.build_pull_preview(db, usb, dest)
+    token = external_drives.local_playlist_snapshot_token(
+        local.id, local.name, [two.id]
+    )
+
+    # The local target changes after the review: membership edit.
+    db.add(PlaylistTrack(playlist_id=local.id, track_id=other.id, position=1))
+    db.commit()
+
+    with pytest.raises(external_drives.ExternalDriveError, match="changed since the review"):
+        external_drives.execute_playlist_update(
+            db, usb, dest,
+            device_playlist_id=PAGE_LIST_A,
+            local_playlist_id=local.id,
+            expected_fingerprint=preview.fingerprint,
+            expected_target_token=token,
+        )
+    # refused before any copy, and the local playlist is untouched
+    assert not dest.exists()
+    members = (
+        db.query(PlaylistTrack)
+        .filter(PlaylistTrack.playlist_id == local.id)
+        .order_by(PlaylistTrack.position)
+        .all()
+    )
+    assert [m.track_id for m in members] == [two.id, other.id]
+
+
+def test_playlist_update_collapses_device_duplicate_members(
+    db: Session, make_track, tmp_path: Path
+):
+    # The device playlist repeats two.mp3; the local model keeps one row
+    # per track in a playlist, so the repeat collapses and is counted.
+    usb = make_rekordbox_usb_with_playlists(tmp_path / "RB", entry_order_b=(2, 2))
+    two = make_track(filename="/Contents/two.mp3", title="Two")
+    _add_local_playlist(db, "RIG New", [two.id])
+    local = db.query(Playlist).filter(Playlist.name == "RIG New").one()
+    dest = tmp_path / "lib"
+    preview = external_drives.build_pull_preview(db, usb, dest)
+    token = external_drives.local_playlist_snapshot_token(
+        local.id, local.name, [two.id]
+    )
+
+    result = external_drives.execute_playlist_update(
+        db, usb, dest,
+        device_playlist_id=PAGE_LIST_B,
+        local_playlist_id=local.id,
+        expected_fingerprint=preview.fingerprint,
+        expected_target_token=token,
+    )
+
+    assert result.skipped_other == 1  # the repeated device member
+    assert result.added_imported == 0  # two.mp3 was already in the library
+    members = (
+        db.query(PlaylistTrack)
+        .filter(PlaylistTrack.playlist_id == local.id)
+        .order_by(PlaylistTrack.position)
+        .all()
+    )
+    assert [db.get(Track, m.track_id).title for m in members] == ["Two"]
 
 
 def test_router_playlist_update_flow(
@@ -1740,6 +1821,11 @@ def test_router_playlist_update_flow(
     )
     assert resp.status_code == 200, resp.text
     fingerprint = resp.json()["fingerprint"]
+    playlists = resp.json()["playlists"]
+    membership = next(pl["membership"] for pl in playlists if pl["id"] == PAGE_LIST_A)
+    assert membership["counterpart_status"] == "unique-name-match"
+    token = membership["target_token"]
+    assert token
 
     # update without the device playlist is refused
     resp = client.post(
@@ -1750,9 +1836,41 @@ def test_router_playlist_update_flow(
             "confirm": True,
             "preview_fingerprint": fingerprint,
             "update_playlist_id": local.id,
+            "update_target_token": token,
         },
     )
     assert resp.status_code == 400
+
+    # update without the reviewed target snapshot is refused
+    resp = client.post(
+        "/api/external-drives/import",
+        json={
+            "root": str(usb),
+            "destination": str(dest),
+            "confirm": True,
+            "preview_fingerprint": fingerprint,
+            "create_playlist_id": PAGE_LIST_A,
+            "update_playlist_id": local.id,
+        },
+    )
+    assert resp.status_code == 400
+
+    # a target that changed since the review is refused, with no copies made
+    resp = client.post(
+        "/api/external-drives/import",
+        json={
+            "root": str(usb),
+            "destination": str(dest),
+            "confirm": True,
+            "preview_fingerprint": fingerprint,
+            "create_playlist_id": PAGE_LIST_A,
+            "update_playlist_id": local.id,
+            "update_target_token": "0" * 16,
+        },
+    )
+    assert resp.status_code == 400
+    assert "changed since the review" in resp.json()["detail"]
+    assert not dest.exists()
 
     resp = client.post(
         "/api/external-drives/import",
@@ -1763,6 +1881,7 @@ def test_router_playlist_update_flow(
             "preview_fingerprint": fingerprint,
             "create_playlist_id": PAGE_LIST_A,
             "update_playlist_id": local.id,
+            "update_target_token": token,
         },
     )
     assert resp.status_code == 200, resp.text

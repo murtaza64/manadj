@@ -92,6 +92,9 @@ export interface ExternalDrivePullEntry {
 export interface ExternalDrivePlaylistMembership {
   counterpart_status: 'unique-name-match' | 'no-local-playlist' | 'ambiguous-name';
   counterpart_id: number | null;
+  /** Snapshot of the suggested counterpart at review time; the update
+   * confirm carries it back and a target changed since is refused. */
+  target_token: string | null;
   common: number;
   adds_in_library: number;
   adds_new: number;
@@ -153,6 +156,9 @@ export interface ExternalDriveImportRequest {
    * update. Only with create_playlist_id; a name suggestion never fills
    * this in. */
   update_playlist_id?: number;
+  /** Reviewed snapshot of the local target; required with
+   * update_playlist_id. */
+  update_target_token?: string;
 }
 
 export interface ExternalDriveUpdatedPlaylist {

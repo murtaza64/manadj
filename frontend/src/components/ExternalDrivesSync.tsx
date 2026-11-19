@@ -230,7 +230,8 @@ export function ExternalDrivesSync() {
     async (playlist: ExternalDrivePreviewPlaylist) => {
       if (phase.step !== 'preview' || phase.verifying) return;
       const counterpartId = playlist.membership?.counterpart_id;
-      if (counterpartId == null) return;
+      const targetToken = playlist.membership?.target_token;
+      if (counterpartId == null || !targetToken) return;
       const { drive, preview } = phase;
       setError(null);
       setImportingPlaylistId(playlist.id);
@@ -262,6 +263,7 @@ export function ExternalDrivesSync() {
           preview_fingerprint: bound.fingerprint,
           create_playlist_id: playlist.id,
           update_playlist_id: counterpartId,
+          update_target_token: targetToken,
         });
         setUpdateReviewId(null);
         setPhase({ step: 'done', drive, result });

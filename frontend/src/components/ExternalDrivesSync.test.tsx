@@ -642,6 +642,7 @@ const UPDATE_PREVIEW = {
       membership: {
         counterpart_status: 'unique-name-match' as const,
         counterpart_id: 7,
+        target_token: 'tok-reviewed-7',
         common: 1,
         adds_in_library: 0,
         adds_new: 2,
@@ -708,6 +709,7 @@ it('previews the update and syncs the explicitly chosen local playlist', async (
       preview_fingerprint: 'fp-test',
       create_playlist_id: 63,
       update_playlist_id: 7,
+      update_target_token: 'tok-reviewed-7',
     });
     expect(host.textContent).toContain('Playlist "RIG Mix" updated');
     expect(host.textContent).toContain('1 local-only kept');
@@ -726,6 +728,7 @@ it('never offers an update when the name match is ambiguous', async () => {
         membership: {
           counterpart_status: 'ambiguous-name' as const,
           counterpart_id: null,
+          target_token: null,
           common: 0,
           adds_in_library: 0,
           adds_new: 0,
