@@ -60,7 +60,7 @@ struct WorkspaceView: View {
             let gap: CGFloat = compact ? 5 : 8
             VStack(spacing: gap) {
                 HStack(spacing: 14) { deckInfo(0); deckInfo(1) }.frame(height: browsing && keyboardOpen ? 36 : 44)
-                if !(browsing && keyboardOpen) { VStack(spacing: 3) { detailWave(0); detailWave(1) }.frame(height: compact ? 103 : 135) }
+                if !(browsing && keyboardOpen) { VStack(spacing: 3) { detailWave(0); detailWave(1) }.frame(height: compact ? 83 : 135) }
                 ZStack(alignment: .bottom) {
                     if !browsing && !settings { VStack(spacing: gap) {
                         mixer.frame(maxHeight: .infinity)
