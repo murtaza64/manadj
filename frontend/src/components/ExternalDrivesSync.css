@@ -148,7 +148,7 @@
 
 .external-drive-track {
   display: grid;
-  grid-template-columns: 128px minmax(110px, 1.2fr) minmax(180px, 2fr) 52px 64px 56px;
+  grid-template-columns: 24px 128px minmax(110px, 1.2fr) minmax(180px, 2fr) 52px 64px 56px;
   gap: var(--space-8, 8px);
   align-items: baseline;
   padding: 5px var(--space-8, 8px);
@@ -254,4 +254,9 @@
   margin: 0;
   padding-left: 18px;
   font-size: 13px;
+}
+
+.external-drive-check {
+  display: flex;
+  align-items: center;
 }

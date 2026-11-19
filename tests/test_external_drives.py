@@ -1016,3 +1016,36 @@ def test_numbered_title_prefix_different_bytes_stays_uncertain(
     preview = external_drives.build_pull_preview(db, root)
 
     assert preview.entries[0].status == "uncertain"
+
+
+def test_selected_ordinals_import_only_the_checked_tracks(
+    db: Session, make_track, usb: Path, tmp_path: Path
+):
+    dest = tmp_path / "lib"
+    preview = external_drives.build_pull_preview(db, usb, dest)
+    new_by_title = {e.title: e.ordinal for e in preview.entries if e.status == "new"}
+    chosen = {new_by_title["Bright Lights"]}
+
+    result = external_drives.execute_pull(
+        db, usb, dest, expected_fingerprint=preview.fingerprint, ordinals=chosen
+    )
+
+    assert result.imported == 1
+    assert result.skipped_unselected == len(new_by_title) - 1
+    assert db.query(Track).filter(Track.title == "Bright Lights").count() == 1
+    assert db.query(Track).filter(Track.title == "Name Twin").count() == 0
+
+
+def test_selection_outside_the_verified_plan_refuses_the_import(
+    db: Session, make_track, usb: Path, tmp_path: Path
+):
+    dest = tmp_path / "lib"
+    preview = external_drives.build_pull_preview(db, usb, dest)
+    not_new = next(e.ordinal for e in preview.entries if e.status != "new")
+
+    with pytest.raises(external_drives.ExternalDriveError):
+        external_drives.execute_pull(
+            db, usb, dest, expected_fingerprint=preview.fingerprint,
+            ordinals={not_new},
+        )
+    assert db.query(Track).count() == 0

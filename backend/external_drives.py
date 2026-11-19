@@ -682,6 +682,8 @@ class PullResult:
     skipped_uncertain: int
     skipped_duplicate: int
     skipped_missing_file: int
+    # New entries the user left unchecked in a selected pull.
+    skipped_unselected: int = 0
     errors: list[str] = field(default_factory=list)
     track_ids: list[int] = field(default_factory=list)
 
@@ -784,6 +786,7 @@ def execute_pull(
     destination: Path,
     *,
     expected_fingerprint: str,
+    ordinals: set[int] | None = None,
 ) -> PullResult:
     """Copy new tracks off the drive and add them to the library.
 
@@ -791,8 +794,11 @@ def execute_pull(
     user confirmed; a mismatch refuses the import, so the confirmed set
     never silently grows or shrinks between preview and click. Only
     STATUS_NEW entries import: name-only matches stay out unless the user
-    resolves them. If the database commit fails, the files copied in this
-    run are removed again.
+    resolves them. When ordinals is given it is the user's checkbox
+    selection from that same reviewed plan; any selected ordinal that is
+    not a new entry in the verified plan refuses the whole import rather
+    than silently importing a different set. If the database commit
+    fails, the files copied in this run are removed again.
     """
     root = root.resolve()
     destination = destination.resolve()
@@ -820,6 +826,16 @@ def execute_pull(
         device = read_rekordbox_device(root)
 
     new_entries = [e for e in preview.entries if e.status == STATUS_NEW]
+    if ordinals is not None:
+        new_ordinals = {e.ordinal for e in new_entries}
+        unknown = ordinals - new_ordinals
+        if unknown:
+            raise ExternalDriveError(
+                "selection does not match the verified preview: "
+                f"ordinals {sorted(unknown)} are not importable new tracks"
+            )
+        result.skipped_unselected = len(new_entries) - len(ordinals)
+        new_entries = [e for e in new_entries if e.ordinal in ordinals]
     imported_tracks: list[Track] = []
     created_files: list[Path] = []
     dest_names_seen: set[str] = set()

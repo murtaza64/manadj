@@ -55,6 +55,10 @@ function statusLabel(kind: RowKind, verifying: boolean): string {
   }
 }
 
+function newOrdinals(preview: ExternalDrivePreview): Set<number> {
+  return new Set(preview.entries.filter((e) => e.status === 'new').map((e) => e.ordinal));
+}
+
 function formatDuration(secs: number | null): string {
   if (secs == null) return '';
   const m = Math.floor(secs / 60);
@@ -96,6 +100,7 @@ export function ExternalDrivesSync() {
   const [phase, setPhase] = useState<Phase>({ step: 'idle' });
   const [destination, setDestination] = useState('');
   const [filter, setFilter] = useState('');
+  const [selected, setSelected] = useState<ReadonlySet<number>>(new Set());
   const [error, setError] = useState<string | null>(null);
   // Monotonic token: every async preview checks it before applying, so a
   // response racing a cancel, a failure, or a newer preview is dropped
@@ -133,11 +138,19 @@ export function ExternalDrivesSync() {
       const fast = await api.externalDrives.preview(drive.root, undefined, false);
       if (gen !== previewGen.current) return;
       setDestination(fast.default_destination ?? '');
+      setSelected(newOrdinals(fast));
       setPhase({ step: 'preview', drive, preview: fast, verifying: true });
       // Then content verification; rows refine in place when it lands.
       const full = await api.externalDrives.preview(drive.root, undefined, true);
       if (gen !== previewGen.current) return;
       setDestination(full.default_destination ?? '');
+      // Verification can only move tracks OUT of new (into verified or
+      // unverified), so keep checks the user already made where the row
+      // is still importable and drop the rest.
+      setSelected((prev) => {
+        const stillNew = newOrdinals(full);
+        return new Set([...prev].filter((o) => stillNew.has(o)));
+      });
       setPhase({ step: 'preview', drive, preview: full, verifying: false });
     } catch (e) {
       if (gen !== previewGen.current) return;
@@ -171,14 +184,17 @@ export function ExternalDrivesSync() {
         setError(
           'The drive or library changed since this preview; review the refreshed plan before importing.'
         );
+        setSelected(newOrdinals(bound));
         setPhase({ step: 'preview', drive, preview: bound, verifying: false });
         return;
       }
+      const checked = [...selected].filter((o) => newOrdinals(bound).has(o));
       const result = await api.externalDrives.import({
         root: drive.root,
         destination: destination || undefined,
         confirm: true,
         preview_fingerprint: bound.fingerprint,
+        ordinals: checked,
       });
       setPhase({ step: 'done', drive, result });
       refresh();
@@ -194,10 +210,14 @@ export function ExternalDrivesSync() {
         setPhase({ step: 'preview', drive, preview, verifying: false });
       }
     }
-  }, [phase, destination, refresh]);
+  }, [phase, destination, refresh, selected]);
 
   const busy = phase.step === 'previewing' || phase.step === 'importing';
   const verifying = phase.step === 'preview' && phase.verifying;
+  const selectedNewCount =
+    phase.step === 'preview' || phase.step === 'importing'
+      ? [...selected].filter((o) => newOrdinals(phase.preview).has(o)).length
+      : 0;
   const filterNorm = filter.trim().toLowerCase();
   const visibleEntries =
     phase.step === 'preview' || phase.step === 'importing'
@@ -292,6 +312,7 @@ export function ExternalDrivesSync() {
           </p>
           <div className="external-drive-tracklist">
             <div className="external-drive-track external-drive-track-head">
+              <span></span>
               <span>Match</span>
               <span>Artist</span>
               <span>Title</span>
@@ -304,6 +325,23 @@ export function ExternalDrivesSync() {
                 const kind = rowKind(e);
                 return (
                   <li key={e.ordinal} className={`external-drive-track status-${kind}`}>
+                    <span className="external-drive-check">
+                      {kind === 'new' && (
+                        <input
+                          type="checkbox"
+                          checked={selected.has(e.ordinal)}
+                          disabled={phase.step === 'importing'}
+                          onChange={() =>
+                            setSelected((prev) => {
+                              const next = new Set(prev);
+                              if (next.has(e.ordinal)) next.delete(e.ordinal);
+                              else next.add(e.ordinal);
+                              return next;
+                            })
+                          }
+                        />
+                      )}
+                    </span>
                     <span className={`external-drive-status status-${kind}`}>
                       {statusLabel(kind, verifying)}
                     </span>
@@ -345,7 +383,7 @@ export function ExternalDrivesSync() {
               disabled={
                 phase.step === 'importing' ||
                 verifying ||
-                phase.preview.new_count === 0 ||
+                selectedNewCount === 0 ||
                 !destination.trim()
               }
               title={
@@ -359,7 +397,7 @@ export function ExternalDrivesSync() {
                 ? 'Importing…'
                 : verifying
                   ? 'Checking matches…'
-                  : `Import ${phase.preview.new_count} track${phase.preview.new_count === 1 ? '' : 's'}`}
+                  : `Import ${selectedNewCount} selected`}
             </button>
             <button
               className="btn"

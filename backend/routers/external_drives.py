@@ -40,6 +40,10 @@ class ImportRequest(BaseModel):
     # plan and refuses when it no longer matches, so the confirmed set can
     # never silently grow or shrink between preview and click.
     preview_fingerprint: str | None = None
+    # The user's checkbox selection from that same reviewed plan (entry
+    # ordinals). None imports every new entry. Any ordinal that is not a
+    # new entry in the verified plan refuses the whole import.
+    ordinals: list[int] | None = None
 
 
 class PullEntryOut(BaseModel):
@@ -136,6 +140,7 @@ def import_pull(request: ImportRequest, db: Session = Depends(get_db)):
             Path(request.root),
             Path(destination),
             expected_fingerprint=request.preview_fingerprint,
+            ordinals=set(request.ordinals) if request.ordinals is not None else None,
         )
     except external_drives.PlanChangedError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -150,6 +155,7 @@ def import_pull(request: ImportRequest, db: Session = Depends(get_db)):
         "skipped_uncertain": result.skipped_uncertain,
         "skipped_duplicate": result.skipped_duplicate,
         "skipped_missing_file": result.skipped_missing_file,
+        "skipped_unselected": result.skipped_unselected,
         "errors": result.errors,
         "track_ids": result.track_ids,
       }

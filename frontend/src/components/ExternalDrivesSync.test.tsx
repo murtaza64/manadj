@@ -81,6 +81,7 @@ it('lists detected drives and pulls only after the confirmed preview', async () 
     skipped_uncertain: 1,
     skipped_duplicate: 0,
     skipped_missing_file: 1,
+    skipped_unselected: 0,
     errors: [],
     track_ids: [42],
   });
@@ -106,7 +107,7 @@ it('lists detected drives and pulls only after the confirmed preview', async () 
     expect(host.textContent).toContain('Name Twin');
 
     // the confirm button carries the exact count and is not an import yet
-    const confirm = button('Import 1 track')!;
+    const confirm = button('Import 1 selected')!;
     expect(confirm.disabled).toBe(false);
     expect(imp).not.toHaveBeenCalled();
 
@@ -119,6 +120,7 @@ it('lists detected drives and pulls only after the confirmed preview', async () 
       destination: '/library',
       confirm: true,
       preview_fingerprint: 'fp-test',
+      ordinals: [0],
     });
     expect(host.textContent).toContain('Imported from REKORDBOX');
     expect(host.textContent).toContain('1 added');
@@ -164,6 +166,7 @@ it('never imports a plan the user did not review, even if the re-preview could b
     skipped_uncertain: 0,
     skipped_duplicate: 0,
     skipped_missing_file: 0,
+    skipped_unselected: 0,
     errors: [],
     track_ids: [],
   });
@@ -178,14 +181,14 @@ it('never imports a plan the user did not review, even if the re-preview could b
       await tick();
     });
     await act(async () => {
-      button('Import 1 track')!.click();
+      button('Import 1 selected')!.click();
       await tick();
     });
     expect(imp).not.toHaveBeenCalled();
     expect(host.textContent).toContain('changed since this preview');
     // the refreshed plan is on screen for explicit review
     expect(host.textContent).toContain('Added While Reviewing');
-    expect(host.textContent).toContain('Import 2 tracks');
+    expect(host.textContent).toContain('Import 2 selected');
   } finally {
     act(() => root.unmount());
   }
@@ -207,7 +210,7 @@ it('keeps the confirm button disabled without a destination', async () => {
       button('Pull…')!.click();
       await tick();
     });
-    expect(button('Import 1 track')!.disabled).toBe(true);
+    expect(button('Import 1 selected')!.disabled).toBe(true);
   } finally {
     act(() => root.unmount());
   }
@@ -332,7 +335,7 @@ it('lists tracks metadata-first and unlocks import only after verification', asy
       await tick();
     });
     expect(host.textContent).toContain('1 already in library');
-    expect(button('Import 1 track')!.disabled).toBe(false);
+    expect(button('Import 1 selected')!.disabled).toBe(false);
   } finally {
     act(() => root.unmount());
   }
@@ -368,6 +371,74 @@ it('discards a verification result that lands after cancel', async () => {
     // the late verified preview must not resurrect the cancelled plan
     expect(host.textContent).not.toContain('Import 1 track');
     expect(button('Pull…')).toBeTruthy();
+  } finally {
+    act(() => root.unmount());
+  }
+});
+
+it('imports only the checked tracks', async () => {
+  const twoNew = {
+    ...PREVIEW,
+    new_count: 2,
+    present_count: 0,
+    uncertain_count: 0,
+    entries: [
+      { ...PREVIEW.entries[0] },
+      {
+        ordinal: 5,
+        title: 'Second New',
+        artist: 'Lane 8',
+        bpm: 122,
+        key: 'C',
+        duration_secs: 318,
+        device_path: '/Contents/d.mp3',
+        status: 'new' as const,
+        detail: null,
+        matched_path: null,
+      },
+    ],
+  };
+  vi.spyOn(api.externalDrives, 'list').mockResolvedValue([DRIVE]);
+  vi.spyOn(api.externalDrives, 'preview').mockResolvedValue(twoNew);
+  const imp = vi.spyOn(api.externalDrives, 'import').mockResolvedValue({
+    root: DRIVE.root,
+    kind: 'rekordbox',
+    destination: '/library',
+    imported: 1,
+    skipped_present: 0,
+    skipped_uncertain: 0,
+    skipped_duplicate: 0,
+    skipped_missing_file: 0,
+    skipped_unselected: 1,
+    errors: [],
+    track_ids: [42],
+  });
+  const { host, root, button } = render();
+  try {
+    await act(async () => {
+      root.render(<ExternalDrivesSync />);
+      await tick();
+    });
+    await act(async () => {
+      button('Pull…')!.click();
+      await tick();
+    });
+    expect(button('Import 2 selected')).toBeTruthy();
+    // uncheck Second New; only non-new rows lack a checkbox
+    const boxes = [...host.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')];
+    expect(boxes).toHaveLength(2);
+    await act(async () => {
+      boxes[1].click();
+      await tick();
+    });
+    await act(async () => {
+      button('Import 1 selected')!.click();
+      await tick();
+    });
+    expect(imp).toHaveBeenCalledWith(
+      expect.objectContaining({ ordinals: [0] })
+    );
+    expect(host.textContent).toContain('1 added');
   } finally {
     act(() => root.unmount());
   }

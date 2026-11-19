@@ -107,6 +107,9 @@ export interface ExternalDriveImportRequest {
   root: string;
   destination?: string;
   confirm: boolean;
+  /** The user's checkbox selection (entry ordinals) from the reviewed
+   * plan. Omit to import every new entry. */
+  ordinals?: number[];
   /** Binds the confirm to the reviewed preview; the server refuses a
    * mismatch with 409 so the confirmed set never silently changes. */
   preview_fingerprint: string;
@@ -121,6 +124,7 @@ export interface ExternalDriveImportResult {
   skipped_uncertain: number;
   skipped_duplicate: number;
   skipped_missing_file: number;
+  skipped_unselected: number;
   errors: string[];
   track_ids: number[];
 }
