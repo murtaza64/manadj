@@ -32,8 +32,11 @@ struct HoldControl: UIViewRepresentable {
             let text = NSMutableAttributedString(string: components[0], attributes: [.font: UIFont(name: "UbuntuMono-Bold", size: 15) ?? UIFont.monospacedSystemFont(ofSize: 15, weight: .bold), .foregroundColor: UIColor(color)])
             text.append(NSAttributedString(string: "\n" + components[1], attributes: [.font: UIFont(name: "UbuntuMono-Regular", size: 8) ?? UIFont.monospacedSystemFont(ofSize: 8, weight: .regular), .foregroundColor: UIColor(color).withAlphaComponent(0.9)]))
             view.setAttributedTitle(text, for: .normal)
+            let highlighted = NSMutableAttributedString(attributedString: text)
+            highlighted.addAttribute(.foregroundColor, value: UIColor(Ink.text), range: NSRange(location: 0, length: highlighted.length))
+            view.setAttributedTitle(highlighted, for: .highlighted)
         } else {
-            view.setAttributedTitle(nil, for: .normal)
+            view.setAttributedTitle(nil, for: .normal); view.setAttributedTitle(nil, for: .highlighted)
             view.setTitle(title, for: .normal)
             view.setTitleColor(UIColor(color), for: .normal)
         }
@@ -65,10 +68,15 @@ private final class HoldButton: UIButton {
     var marked = false
     var engaged = false
     var ink = UIColor.white
+    private var lastAppearance = ""
     override var isHighlighted: Bool { didSet { refreshAppearance() } }
     func refreshAppearance() {
         let lit = engaged || isHighlighted
-        backgroundColor = bare ? .clear : ink.withAlphaComponent(lit ? 0.5 : marked ? 0.1 : 0)
+        let key = "\(lit)-\(bare)-\(marked)-\(rounded)-\(ink)"
+        guard key != lastAppearance else { return }; lastAppearance = key
+        let target: UIColor = bare ? .clear : ink.withAlphaComponent(lit ? 0.5 : marked ? 0.1 : 0)
+        if lit || UIAccessibility.isReduceMotionEnabled { layer.removeAllAnimations(); backgroundColor = target }
+        else { UIView.animate(withDuration: 0.24, delay: 0, options: [.beginFromCurrentState, .allowUserInteraction]) { self.backgroundColor = target } }
         layer.borderWidth = bare ? 0 : rounded ? 2 : marked || lit ? 1.5 : 1
         layer.borderColor = ink.withAlphaComponent(lit || rounded || marked ? 1 : 0.45).cgColor
     }

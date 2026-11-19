@@ -8,7 +8,7 @@ struct SettingsView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
                 SectionLabel(title: "DESKTOP · PHONE SYNC")
-                Text("On the desktop: Settings → Library → Phone sync. Enable the LAN listener, then enter its address here. Both devices must be on the same trusted network.").font(Ink.font(14)).foregroundStyle(Ink.muted)
+                Text("On the desktop: Settings → Phone sync. Enable the LAN listener, then enter one of the shown LAN addresses here. Both devices must be on the same trusted network.").font(Ink.font(14)).foregroundStyle(Ink.muted)
                 TextField("http://192.168.1.20:48127", text: $model.origin)
                     .keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
                     .padding(12).background(Ink.crust).overlay(Rectangle().stroke(Ink.edge)).disabled(model.busy)
