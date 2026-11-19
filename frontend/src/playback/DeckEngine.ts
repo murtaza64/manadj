@@ -1762,6 +1762,26 @@ export class DeckEngine {
       this.emit();
       return;
     }
+    // gh#424 auto-entry: a natural EOF with no loop engages the silence
+    // loop itself when the grid allows (fixed-64 gate, silenceLoopEntry).
+    // Same region, same phantom path as the gesture — from here on the
+    // two are indistinguishable, including release and the phase-aligned
+    // backward jump that lands a real voice again. Previewing voices park
+    // at cue via the reducer instead; ineligible tracks stop as before.
+    if (!loop && this.audio && this.transport.playing && !this.transport.previewing) {
+      const entry = this.silenceLoopEntryRegion();
+      if (entry) {
+        this.transport = {
+          ...this.transport,
+          loop: { start: entry.startSec, end: entry.endSec, lengthBeats: entry.lengthBeats },
+        };
+        this.phantomActive = true;
+        this.anchorPosition = duration;
+        this.anchorCtxTime = this.audio.ctx.currentTime;
+        this.emit();
+        return;
+      }
+    }
     // The clock can no longer be read from the source; rest the playhead
     // at the end of the track before reducing.
     this.transport = {

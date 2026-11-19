@@ -1178,6 +1178,75 @@ describe('silence-loop phantom transport (gh#424)', () => {
     expect(engine.getPlayhead()).toBeCloseTo(180, 6);
   });
 
+  /** 120 BPM 4/4 across the 180s buffer: 64-beat boundaries at 0, 32, ...,
+   * 160, 192 — the same lattice as grid120 in the engage describe. */
+  const fullGrid120: BeatgridData = {
+    tempo_changes: [
+      { start_time: 0, bpm: 120, time_signature_num: 4, time_signature_den: 4, bar_position: 1 },
+    ],
+    beat_times: Array.from({ length: 360 }, (_, i) => i * 0.5),
+    downbeat_times: Array.from({ length: 90 }, (_, i) => i * 2),
+  };
+
+  it('a natural EOF auto-engages the silence loop when the grid allows', async () => {
+    const { port, ctx } = fakeAudioPort();
+    putCachedBuffer(72, fakeBuffer);
+    const engine = new DeckEngine(port);
+    await engine.load({
+      trackId: 72,
+      audioUrl: 'http://127.0.0.1:1/none',
+      bpm: 120,
+      beatTimes: Promise.resolve(fullGrid120.beat_times),
+    });
+    engine.setMeter(72, fullGrid120, null);
+    engine.seek(179.5);
+    engine.play();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(startCalls).toHaveLength(1);
+    // The voice runs off the end: instead of stopping, the deck enters
+    // the silence loop on its own — the region the gesture would install.
+    nodeInstances[nodeInstances.length - 1].onEnded?.(startCalls[0].startId);
+    expect(stopCalls).toHaveLength(0);
+    const s = engine.getSnapshot();
+    expect(s.playing).toBe(true);
+    expect(s.loop).not.toBeNull();
+    expect(s.loop!.start).toBeCloseTo(192, 10);
+    expect(s.loop!.end).toBeCloseTo(224, 10);
+    expect(s.loop!.lengthBeats).toBe(64);
+    expect(s.loopIsSilence).toBe(true);
+    // The phantom clock runs past EOF exactly like the gesture path.
+    ctx.currentTime = 20;
+    expect(engine.getPlayhead()).toBeCloseTo(200, 6);
+    // A backwards jump lands a real voice again, phase-aligned: playback
+    // resumes immediately, loop translated with the playhead (looping 04).
+    engine.jumpBeats(-64);
+    expect(startCalls).toHaveLength(2);
+    expect(stopCalls).toHaveLength(0);
+    expect(engine.getSnapshot().playing).toBe(true);
+    expect(engine.getPlayhead()).toBeCloseTo(168, 6);
+  });
+
+  it('a natural EOF with a gated ladder (top tier 32 beats) still stops', async () => {
+    const { port } = fakeAudioPort();
+    putCachedBuffer(73, fakeBuffer);
+    const engine = new DeckEngine(port);
+    await engine.load({
+      trackId: 73,
+      audioUrl: 'http://127.0.0.1:1/none',
+      bpm: 120,
+      beatTimes: Promise.resolve(fullGrid120.beat_times),
+    });
+    // fixed64 gate: top tier 8 bars = 32 beats, semantics unresolved.
+    engine.setMeter(73, fullGrid120, { arities: [2, 2, 2], reset_marks: [] });
+    engine.seek(179.5);
+    engine.play();
+    await vi.advanceTimersByTimeAsync(0);
+    nodeInstances[nodeInstances.length - 1].onEnded?.(startCalls[0].startId);
+    expect(engine.getSnapshot().playing).toBe(false);
+    expect(engine.getSnapshot().loop).toBeNull();
+    expect(engine.getPlayhead()).toBeCloseTo(180, 6);
+  });
+
   it('a pause mid-phantom rests inside the region and freezes the clock', async () => {
     const { port, ctx } = fakeAudioPort();
     const engine = await phantomEngine(port);
