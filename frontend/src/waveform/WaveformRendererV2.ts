@@ -406,7 +406,16 @@ void main() {
   float px = u_visibleSeconds / u_canvasWidth;
   float t0 = u_startTime + v_uv.x * u_visibleSeconds;
   if (t0 < 0.0 || t0 > u_duration) {
-    fragColor = u_opaqueBg > 0.5 ? vec4(BG * 0.6, 1.0) : vec4(0.0);
+    // Past the last sample the track has no audio at all: that region is
+    // NOT silence inside the music (the silence loop projects into it,
+    // gh#424), so it gets its own mark — a muted diagonal hatch instead
+    // of the plain background a quiet passage flattens to.
+    float hatch = t0 > u_duration
+      ? step(0.6, fract((gl_FragCoord.x - gl_FragCoord.y) / 10.0))
+      : 0.0;
+    vec3 offCol = BG * 0.6 + vec3(0.10, 0.12, 0.16) * hatch;
+    float offA = u_opaqueBg > 0.5 ? 1.0 : hatch * 0.25;
+    fragColor = vec4(offCol * offA, offA);
     return;
   }
   // Stem masking (stems #213): same lobes/playhead rule as the EQ split —
