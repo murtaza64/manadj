@@ -337,6 +337,105 @@ def test_name_only_match_is_not_imported(db: Session, make_track, usb: Path, tmp
     assert db.query(Track).filter(Track.title == "Bright Lights").count() == 0
 
 
+# --- content-verified name-only matching --------------------------------------
+# A device path can never equal a library path, so real duplicates surface as
+# name-only matches. Byte-identical content upgrades them to present; anything
+# else stays conservatively uncertain.
+
+
+def test_identical_content_name_only_match_is_present(
+    db: Session, make_track, usb: Path, tmp_path: Path
+):
+    # Same audio held at a different library path: content-verified present.
+    library_file = tmp_path / "music" / "track2.mp3"
+    library_file.parent.mkdir(parents=True)
+    shutil.copy2(FIXTURES / "silence.mp3", library_file)
+    make_track(filename=str(library_file), title="Already Have")
+    before = tree_digest(usb)
+
+    preview = external_drives.build_pull_preview(db, usb)
+
+    by_title = {e.title: e for e in preview.entries}
+    assert by_title["Already Have"].status == "present"
+    assert "content-verified" in (by_title["Already Have"].detail or "")
+    assert preview.present_count == 1
+    assert preview.uncertain_count == 0
+    assert preview.new_count == 2  # Bright Lights + Name Twin
+    assert tree_digest(usb) == before  # verification never touches the drive
+
+
+def test_same_size_different_bytes_stay_uncertain(
+    db: Session, make_track, usb: Path, tmp_path: Path
+):
+    # Same name AND same size, different bytes: still not the same audio.
+    library_file = tmp_path / "music" / "track2.mp3"
+    library_file.parent.mkdir(parents=True)
+    data = bytearray((FIXTURES / "silence.mp3").read_bytes())
+    data[-1] ^= 0xFF
+    library_file.write_bytes(bytes(data))
+    make_track(filename=str(library_file), title="Already Have")
+
+    preview = external_drives.build_pull_preview(db, usb)
+
+    by_title = {e.title: e for e in preview.entries}
+    assert by_title["Already Have"].status == "uncertain"
+    assert preview.present_count == 0
+
+
+def test_different_size_stays_uncertain_without_content_identity(
+    db: Session, make_track, usb: Path, tmp_path: Path
+):
+    library_file = tmp_path / "music" / "track2.mp3"
+    library_file.parent.mkdir(parents=True)
+    library_file.write_bytes(b"not the same audio")
+    make_track(filename=str(library_file), title="Already Have")
+
+    preview = external_drives.build_pull_preview(db, usb)
+
+    assert {e.title: e for e in preview.entries}["Already Have"].status == "uncertain"
+
+
+def test_every_same_basename_candidate_is_tried(db: Session, make_track, usb: Path, tmp_path: Path):
+    # The first row with this basename is different audio; a second row at
+    # another path holds the same bytes. Verification must consider every
+    # candidate, not whichever row a single-value index happened to keep.
+    music = tmp_path / "music"
+    music.mkdir()
+    different = music / "track2.mp3"
+    different.write_bytes(b"another track entirely")
+    same = music / "backup" / "track2.mp3"
+    same.parent.mkdir()
+    shutil.copy2(FIXTURES / "silence.mp3", same)
+    make_track(filename=str(different), title="Decoy")
+    make_track(filename=str(same), title="Real copy")
+
+    preview = external_drives.build_pull_preview(db, usb)
+
+    assert {e.title: e for e in preview.entries}["Already Have"].status == "present"
+
+
+def test_content_verified_match_is_not_imported(db: Session, make_track, usb: Path, tmp_path: Path):
+    library_file = tmp_path / "music" / "track2.mp3"
+    library_file.parent.mkdir(parents=True)
+    shutil.copy2(FIXTURES / "silence.mp3", library_file)
+    make_track(filename=str(library_file), title="Already Have")
+    before = tree_digest(usb)
+
+    dest = tmp_path / "lib"
+    result = external_drives.execute_pull(
+        db,
+        usb,
+        dest,
+        expected_fingerprint=external_drives.build_pull_preview(db, usb, dest).fingerprint,
+    )
+
+    assert result.skipped_present == 1
+    assert result.skipped_uncertain == 0
+    assert not (dest / "Contents" / "track2.mp3").exists()  # nothing re-copied
+    assert db.query(Track).filter(Track.title == "Already Have").count() == 1
+    assert tree_digest(usb) == before
+
+
 def test_stale_preview_forces_a_fresh_preview(db: Session, make_track, usb: Path, tmp_path: Path):
     stale = external_drives.build_pull_preview(db, usb)
     assert stale.new_count == 3  # track1, track2, twin

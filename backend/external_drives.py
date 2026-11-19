@@ -19,9 +19,12 @@ Safety rules for untrusted device data:
   the source; a different file under the same name (including a different-
   case name on a case-insensitive filesystem) is skipped with an error,
   never overwritten.
-- A device track whose only match is the file's basename is NOT treated as
-  already owned: distinct audio can share a name. It is reported as
-  "uncertain" in the preview and excluded from the import.
+- A device track whose only match is the file's basename is treated as
+  already owned only when a library file with that basename is
+  content-verified against the device file (same size, then byte-identical
+  sha256; every library candidate with that basename is tried). Unreadable
+  or different content stays "uncertain" and out of the import: distinct
+  audio can share a name.
 
 Push (manadj -> drive) is deliberately not here: writing a manufacturer
 device library is a separate feature with its own merge semantics and the
@@ -266,10 +269,24 @@ def default_destination() -> str | None:
     return get_config().library.tracks_directory
 
 
-def _manadj_index(manadj_session: Any) -> TrackIndex[Track]:
-    # Import-side semantics (rekordbox/sync.py): every Track row counts,
-    # including Archived — an archived copy is still a copy we hold.
-    return TrackIndex.build(manadj_session.query(Track).all(), lambda t: t.filename)
+def _manadj_matchers(
+    manadj_session: Any,
+) -> tuple[TrackIndex[Track], dict[str, list[Track]]]:
+    """Path/basename index plus every library track grouped by basename.
+
+    Import-side semantics (rekordbox/sync.py): every Track row counts,
+    including Archived — an archived copy is still a copy we hold. The
+    basename map keeps ALL candidates per name, so content verification
+    is not limited to whichever row the single-value index happened to
+    keep.
+    """
+    rows = manadj_session.query(Track).all()
+    index = TrackIndex.build(rows, lambda t: t.filename)
+    by_basename: dict[str, list[Track]] = {}
+    for track in rows:
+        if track.filename:
+            by_basename.setdefault(_basename_key(track.filename), []).append(track)
+    return index, by_basename
 
 
 def _basename_key(path: str) -> str:
@@ -373,10 +390,44 @@ def _plan_fingerprint(
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
 
+def _same_audio_on_drive(candidates: list[Track], source: Path | None) -> bool:
+    """Content-verified identity: byte-identical audio is already held.
+
+    Sizes must match before hashing (different sizes cannot be identical
+    content); only equal-size candidates pay the hash. A missing or
+    unreadable library file or device file just fails verification, so a
+    failed read never upgrades a match. Hashes are computed fresh against
+    the live files on every preview — nothing is cached, so a changed
+    file can never match on stale content.
+    """
+    if source is None:
+        return False
+    try:
+        if not source.is_file():
+            return False
+        source_size = source.stat().st_size
+    except OSError:
+        return False
+    for track in candidates:
+        if not track.filename:
+            continue
+        library_file = Path(track.filename)
+        try:
+            if not library_file.is_file() or library_file.stat().st_size != source_size:
+                continue
+            if _sha256(library_file) == _sha256(source):
+                return True
+        except OSError:
+            continue
+    return False
+
+
 def _classify(
     index: TrackIndex[Track],
+    by_basename: dict[str, list[Track]],
     seen: set[str],
     root: Path,
+    kind: str,
     device_path: str,
 ) -> tuple[str, str | None]:
     base = _basename_key(device_path)
@@ -387,6 +438,16 @@ def _classify(
     if status == STATUS_PRESENT:
         return status, "already in the manadj library (same path)"
     if status == STATUS_UNCERTAIN:
+        # A device path can never equal a library path (the file lives on
+        # the drive), so real duplicates land here. Upgrade to present only
+        # on byte-identical content; anything unreadable or different keeps
+        # the conservative name-only classification.
+        source = _device_source(root, kind, device_path)
+        if _same_audio_on_drive(by_basename.get(base, []), source):
+            return (
+                STATUS_PRESENT,
+                "already in the manadj library (same audio, content-verified)",
+            )
         return status, "a library track has this file name — verify it is the same audio"
     source = _device_rel_source(root, device_path)
     if source is None or not source.is_file():
@@ -398,14 +459,14 @@ def build_rekordbox_pull_preview(
     manadj_session: Any, root: Path, destination: Path | None = None
 ) -> PullPreview:
     device = read_rekordbox_device(root)
-    index = _manadj_index(manadj_session)
+    index, by_basename = _manadj_matchers(manadj_session)
 
     entries: list[PullEntry] = []
     seen: set[str] = set()
     for i, track in enumerate(device.tracks):
         if not track.file_path:
             continue
-        status, detail = _classify(index, seen, root, track.file_path)
+        status, detail = _classify(index, by_basename, seen, root, "rekordbox", track.file_path)
         entries.append(
             PullEntry(
                 ordinal=i,
@@ -437,7 +498,7 @@ def build_engine_pull_preview(
     except Exception as exc:
         raise ExternalDriveError(f"could not open {database2}: {exc}") from exc
 
-    index = _manadj_index(manadj_session)
+    index, by_basename = _manadj_matchers(manadj_session)
     entries: list[PullEntry] = []
     seen: set[str] = set()
     total = 0
@@ -453,7 +514,7 @@ def build_engine_pull_preview(
                 key_obj = Key.from_engine_id(track.key)
                 key_name = key_obj.musical if key_obj else None
             bpm = track.bpmAnalyzed or (float(track.bpm) if track.bpm else None)
-            status, detail = _classify(index, seen, root, stored)
+            status, detail = _classify(index, by_basename, seen, root, "engine", stored)
             entries.append(
                 PullEntry(
                     ordinal=i,
