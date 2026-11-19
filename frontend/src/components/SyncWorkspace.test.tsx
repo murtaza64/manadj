@@ -6,6 +6,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { api } from '../api/client';
 import { fieldReview, FieldRequestError, type FieldContext, type FieldPlan, type FieldReceipt } from '../api/fieldReview';
 import { openSyncWorkspace, setSyncWorkspaceBusy, takeSyncWorkspace } from '../sync/openWorkspace';
+import { takeUsbSyncFocus } from '../sync/openUsbSync';
 import { SyncView } from './SyncView';
 import { FieldReviewEntry } from './FieldReviewInspector';
 import { PlaylistExportEntry } from './PlaylistExportInspector';
@@ -27,7 +28,7 @@ function plan(context: FieldContext): FieldPlan {
   return { ...context, token: 'fixture-token', destination: '/fixture/engine', executable: !context.track_ids.includes(3), warnings: [], tracks: context.track_ids.map(id => ({ track_id: id, title: `Track ${id}`, filename: `/fixture/${id}.flac`, fields: context.fields.map(field => ({ field, before: 1, after: id, before_known: true, action: id === 3 ? 'blocked' : 'consent', reason: 'Fixture observation' })) })) };
 }
 beforeEach(() => {
-  takeSyncWorkspace(); setSyncWorkspaceBusy(false);
+  takeSyncWorkspace(); takeUsbSyncFocus(); setSyncWorkspaceBusy(false);
   vi.spyOn(api.tracks, 'list').mockResolvedValue({ items: tracks, total: 3 });
   vi.spyOn(api.playlists, 'list').mockResolvedValue([{ id: 7, name: 'Night Shift' }]);
   vi.spyOn(api.playlists, 'get').mockResolvedValue({ id: 7, name: 'Night Shift', tracks });
@@ -84,6 +85,9 @@ it('locks captured context while pending, excludes duplicate apply and preserves
   expect([...document.querySelectorAll<HTMLButtonElement>('.sync-view-tab')].every(tab => tab.disabled)).toBe(true);
   expect(document.activeElement?.hasAttribute('data-review-panel')).toBe(true);
   expect(openSyncWorkspace({ kind: 'playlist', playlistName: 'Other' })).toBe(false);
+  await act(async () => { button('Sync from USB…').click(); await tick(); });
+  expect(document.querySelector('.sync-view-tab.active')?.textContent).toBe('Workspace');
+  expect(takeUsbSyncFocus()).toBeNull();
   act(() => document.querySelector<HTMLTableRowElement>('[data-track-id="1"]')!.click());
   expect(execute.mock.calls[0][0].track_ids).toEqual([2]);
   await act(async () => { reject(new FieldRequestError('Lost receipt', 'unknown')); await tick(); });

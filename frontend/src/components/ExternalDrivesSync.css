@@ -319,3 +319,10 @@
 .external-drive-update-review .btn {
   margin-right: 8px;
 }
+
+/* The playlist the user came from ("Sync from USB..." on a playlist
+ * surface): highlighted only, never pre-selected or bound. */
+.external-drive-playlist.focused {
+  outline: 1px solid var(--accent, #4a9eff);
+  outline-offset: -1px;
+}

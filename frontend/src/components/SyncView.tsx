@@ -9,6 +9,7 @@ import './SyncView.css';
 import { SyncWorkspace } from './SyncWorkspace';
 import { ExternalDrivesSync } from './ExternalDrivesSync';
 import { OPEN_SYNC_WORKSPACE_EVENT, takeSyncWorkspace } from '../sync/openWorkspace';
+import { OPEN_USB_SYNC_EVENT, takeUsbSyncFocus, type OpenUsbSyncDetail } from '../sync/openUsbSync';
 
 type TabType = 'workspace' | 'tracks' | 'playlists' | 'usb-drives' | 'acquisition' | 'rekordbox-import';
 
@@ -40,6 +41,30 @@ export function SyncView() {
     window.addEventListener(OPEN_ACQUISITION_EVENT, open);
     return () => window.removeEventListener(OPEN_ACQUISITION_EVENT, open);
   }, []);
+  // "Sync from USB..." on a playlist surface: land on the USB drives tab
+  // with the originating playlist carried along for highlighting. A
+  // pending operation guards the switch like every other entry.
+  const [usbFocus, setUsbFocus] = useState<string | null>(null);
+  useEffect(() => {
+    const open = (event: Event) => {
+      const stashed = takeUsbSyncFocus();
+      const detail = (event as CustomEvent<OpenUsbSyncDetail>).detail ?? stashed;
+      setUsbFocus(detail?.playlistName ?? null);
+      if (!pending.current) setActiveTab('usb-drives');
+    };
+    window.addEventListener(OPEN_USB_SYNC_EVENT, open);
+    return () => window.removeEventListener(OPEN_USB_SYNC_EVENT, open);
+  }, []);
+  // Came from another surface: the event fired before this view mounted,
+  // so consume the stashed detail once here. (The useState initializer is
+  // no place to consume it: StrictMode double-invokes initializers.)
+  useEffect(() => {
+    const detail = takeUsbSyncFocus();
+    if (detail) {
+      setUsbFocus(detail.playlistName);
+      if (!pending.current) setActiveTab('usb-drives');
+    }
+  }, []);
   // Acquisition is the wishlist: hidden until SoundCloud or Spotify is
   // set up (Settings → Accounts; setup-guides #290, gh#342, #347).
   const acquisitionAvailable = useAcquisitionAvailable();
@@ -64,7 +89,7 @@ export function SyncView() {
       <div className="sync-workspace-host" hidden={activeTab !== 'workspace'}><SyncWorkspace key={request?.sequence || 0} request={request} onPendingChange={onPendingChange} /></div>
       {activeTab === 'tracks' && <UnifiedTracksSync />}
       {activeTab === 'playlists' && <PlaylistSync />}
-      {activeTab === 'usb-drives' && <ExternalDrivesSync />}
+      {activeTab === 'usb-drives' && <ExternalDrivesSync focusPlaylist={usbFocus} />}
       {activeTab === 'acquisition' && <AcquisitionView />}
       {activeTab === 'rekordbox-import' && (
         <div className="onboarding-standalone">

@@ -757,3 +757,61 @@ it('never offers an update when the name match is ambiguous', async () => {
     act(() => root.unmount());
   }
 });
+
+it('highlights the playlist the user came from without binding anything', async () => {
+  const withPlaylists = {
+    ...PREVIEW,
+    playlists: [
+      { id: 11, name: 'Warm Up', folder_path: '', track_count: 5, new_count: 2, present_count: 3, uncertain_count: 0, other_count: 0, folder_not_representable: false, track_ordinals: [0], membership: null },
+      { id: 12, name: 'House Set', folder_path: 'Crate', track_count: 4, new_count: 4, present_count: 0, uncertain_count: 0, other_count: 0, folder_not_representable: false, track_ordinals: [0], membership: null },
+    ],
+  };
+  vi.spyOn(api.externalDrives, 'list').mockResolvedValue([DRIVE]);
+  vi.spyOn(api.externalDrives, 'preview').mockResolvedValue(withPlaylists);
+  const { host, root, button } = render();
+  try {
+    await act(async () => {
+      root.render(<ExternalDrivesSync focusPlaylist="Warm Up" />);
+      await tick();
+    });
+    await act(async () => {
+      button('Pull…')!.click();
+      await tick();
+    });
+    const rows = [...host.querySelectorAll<HTMLLIElement>('li.external-drive-playlist')];
+    expect(rows).toHaveLength(2);
+    const focused = rows.filter((r) => r.classList.contains('focused'));
+    expect(focused).toHaveLength(1);
+    expect(focused[0].textContent).toContain('Warm Up');
+    expect(rows[1].textContent).toContain('House Set');
+    // Highlighting is not a choice: nothing pre-selected, nothing bound.
+    expect(host.querySelectorAll<HTMLInputElement>('li.external-drive-playlist input:checked')).toHaveLength(0);
+  } finally {
+    act(() => root.unmount());
+  }
+});
+
+it('highlights nothing when no drive playlist shares the name', async () => {
+  const withPlaylists = {
+    ...PREVIEW,
+    playlists: [
+      { id: 11, name: 'Warm Up', folder_path: '', track_count: 5, new_count: 2, present_count: 3, uncertain_count: 0, other_count: 0, folder_not_representable: false, track_ordinals: [0], membership: null },
+    ],
+  };
+  vi.spyOn(api.externalDrives, 'list').mockResolvedValue([DRIVE]);
+  vi.spyOn(api.externalDrives, 'preview').mockResolvedValue(withPlaylists);
+  const { host, root, button } = render();
+  try {
+    await act(async () => {
+      root.render(<ExternalDrivesSync focusPlaylist="Not On This Drive" />);
+      await tick();
+    });
+    await act(async () => {
+      button('Pull…')!.click();
+      await tick();
+    });
+    expect(host.querySelectorAll('li.external-drive-playlist.focused')).toHaveLength(0);
+  } finally {
+    act(() => root.unmount());
+  }
+});

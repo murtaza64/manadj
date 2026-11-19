@@ -9,6 +9,7 @@ import { beatMarkersFromTempoChanges, markersInWindow, type TempoChangeLike } fr
 import { useExportEnabled } from '../settings/useAppConfig';
 import Modal from './Modal';
 import { openSyncWorkspace } from '../sync/openWorkspace';
+import { openUsbSync } from '../sync/openUsbSync';
 import type { ReviewObservation } from './FieldReviewInspector';
 import './PlaylistExportInspector.css';
 
@@ -260,6 +261,7 @@ export function PlaylistExportEntry({ playlistName }: { playlistName?: string })
   return <>
     {enabled ? <button className="btn btn-primary" aria-label="Export this playlist" disabled={!playlistName} onClick={() => { if (playlistName) { setError(''); if (!openSyncWorkspace({ kind: 'playlist', playlistName })) setError('A Sync operation is pending. Inspect its receipt before opening another scope.'); } }}>Export…</button>
       : <span title="Settings → Library → Allow external export">External export off</span>}
+    <button className="btn btn-secondary" aria-label="Sync this playlist from a USB drive" disabled={!playlistName} onClick={() => { if (playlistName) openUsbSync(playlistName); }}>Sync from USB…</button>
     {error && <span role="alert">{error}</span>}
   </>;
 }

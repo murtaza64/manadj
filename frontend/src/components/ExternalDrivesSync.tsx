@@ -96,7 +96,11 @@ function summaryOf(preview: ExternalDrivePreview, verifying: boolean): string {
 /** External drives: detect a Rekordbox or Engine USB library, preview what a
  * pull would add, then run it on an explicit confirm. Pull only — the drive
  * is never written to from this view. */
-export function ExternalDrivesSync() {
+export function ExternalDrivesSync({ focusPlaylist }: { focusPlaylist?: string | null } = {}) {
+  // Stable ref: destination/filter edits must not scroll the user back to the row.
+  const focusRow = useCallback((el: HTMLLIElement | null) => {
+    el?.scrollIntoView?.({ block: 'nearest' });
+  }, []);
   const [drives, setDrives] = useState<ExternalDrive[] | null>(null);
   const [phase, setPhase] = useState<Phase>({ step: 'idle' });
   const [destination, setDestination] = useState('');
@@ -488,7 +492,11 @@ export function ExternalDrivesSync() {
               </p>
               <ul>
                 {phase.preview.playlists.map((pl) => (
-                  <li key={pl.id} className="external-drive-playlist">
+                  <li
+                    key={pl.id}
+                    className={`external-drive-playlist${pl.name && pl.name === focusPlaylist ? ' focused' : ''}`}
+                    ref={pl.name && pl.name === focusPlaylist ? focusRow : undefined}
+                  >
                     <span className="external-drive-playlist-name">
                       {pl.folder_path ? `${pl.folder_path} / ` : ''}
                       {pl.name ?? '(unnamed)'}
