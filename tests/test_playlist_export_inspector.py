@@ -307,6 +307,6 @@ def test_full_export_factory_uses_only_the_validated_destination_not_later_confi
     monkeypatch.setattr('backend.config.get_config', no_config)
     service = playlist_full_export.build_playlist_full_export_service(db, destination_paths={'rekordbox': '/fixture/validated'})
     receipt = service.export('Set', ['rekordbox'])
-    assert observed == [str(Path('/fixture/validated'))] * 2  # str(Path) is backslashed on Windows
+    assert observed == ['/fixture/validated', str(Path('/fixture/validated'))]
     assert receipt['results'][0]['target'] == 'rekordbox'
     assert receipt['results'][0]['tracks_exported'] == 1
