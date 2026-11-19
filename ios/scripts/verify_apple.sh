@@ -5,8 +5,8 @@ cd "$ROOT/.."
 command -v xcodebuild
 command -v xcrun
 python3 ios/scripts/generate_project.py
-swift test --package-path ios/Packages/ManadjCore
-swift test --package-path ios/Packages/ManadjAudio
+python3 ios/scripts/bounded_apple_check.py 180 swift test --package-path ios/Packages/ManadjCore
+python3 ios/scripts/bounded_apple_check.py 180 swift test --package-path ios/Packages/ManadjAudio
 HOST_ARCH=$(uname -m)
 SDK_VERSION=$(xcrun --sdk iphonesimulator --show-sdk-version)
 xcodebuild -project ios/Manadj.xcodeproj -scheme Manadj -sdk iphonesimulator \
