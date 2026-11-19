@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { BeatgridData } from '../types';
 import { DeckEngine } from './DeckEngine';
 import { _clearBufferCacheForTests, putCachedBuffer } from './bufferCache';
 import type { DeckAudioPort } from './mixer';
@@ -286,6 +287,85 @@ describe('DeckEngine active loop (looping 03)', () => {
     engine.toggleLoop();
     engine.pause(); // already paused: still must not clear the loop
     expect(engine.getSnapshot().loop).not.toBeNull();
+  });
+});
+
+describe('silence-loop entry routing (gh#424)', () => {
+  afterEach(() => _clearBufferCacheForTests());
+
+  const fakeBuffer = {
+    duration: 180,
+    sampleRate: 44100,
+    numberOfChannels: 1,
+    getChannelData: () => new Float32Array(44100),
+  } as unknown as AudioBuffer;
+
+  /** 120 BPM 4/4 from 0s across 180s: beats 0..179.5, downbeats every 2s.
+   * Default duple ladder: 64-beat boundaries at 0, 32, ..., 160, 192. */
+  const grid120: BeatgridData = {
+    tempo_changes: [
+      { start_time: 0, bpm: 120, time_signature_num: 4, time_signature_den: 4, bar_position: 1 },
+    ],
+    beat_times: Array.from({ length: 360 }, (_, i) => i * 0.5),
+    downbeat_times: Array.from({ length: 90 }, (_, i) => i * 2),
+  };
+
+  async function loadedEngine(trackId: number) {
+    putCachedBuffer(trackId, fakeBuffer);
+    const engine = new DeckEngine(unusedPort);
+    await engine.load({
+      trackId,
+      audioUrl: 'http://127.0.0.1:1/none',
+      bpm: 120,
+      beatTimes: Promise.resolve(grid120.beat_times),
+    });
+    return engine;
+  }
+
+  it('an engage crossing the last audible sample installs the hypermetric silence region', async () => {
+    const engine = await loadedEngine(40);
+    engine.setMeter(40, grid120, null);
+    engine.seek(179.2);
+    engine.toggleLoop();
+    const s = engine.getSnapshot();
+    // Natural 4-beat region would run 179.5..181.5, past the 180s buffer.
+    expect(s.loop).not.toBeNull();
+    expect(s.loop!.start).toBeCloseTo(192, 10);
+    expect(s.loop!.end).toBeCloseTo(224, 10);
+    expect(s.loop!.lengthBeats).toBe(64);
+    expect(engine.getPlayhead()).toBeCloseTo(179.2, 10);
+  });
+
+  it('an engage inside the audio keeps the natural region', async () => {
+    const engine = await loadedEngine(41);
+    engine.setMeter(41, grid120, null);
+    engine.seek(10.1);
+    engine.toggleLoop();
+    const s = engine.getSnapshot();
+    expect(s.loop!.start).toBeCloseTo(10.0, 10);
+    expect(s.loop!.end).toBeCloseTo(12.0, 10);
+    expect(s.loop!.lengthBeats).toBe(4);
+  });
+
+  it('a null grid push leaves the deck gridless and the toggle inert', async () => {
+    const engine = await loadedEngine(42);
+    engine.setMeter(42, null, null);
+    engine.seek(179.2);
+    engine.toggleLoop();
+    expect(engine.getSnapshot().loop).toBeNull();
+    expect(engine.getSnapshot().hasBeatgrid).toBe(false);
+  });
+
+  it('ignores a meter push addressed to another track', async () => {
+    const engine = await loadedEngine(43);
+    engine.setMeter(99, grid120, null);
+    engine.seek(179.2);
+    engine.toggleLoop();
+    // Load-time grid has no ladder projection pushed: no entry, natural
+    // (unclamped) region stands.
+    const s = engine.getSnapshot();
+    expect(s.loop!.start).toBeCloseTo(179.0, 10);
+    expect(s.loop!.end).toBeCloseTo(181.0, 10);
   });
 });
 
