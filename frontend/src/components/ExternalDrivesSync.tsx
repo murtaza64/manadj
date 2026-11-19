@@ -244,7 +244,8 @@ export function ExternalDrivesSync() {
           (p.playlists ?? [])
             .map((pl) => `${pl.id}:${pl.name}:${(pl.track_ordinals ?? []).join(',')}`)
             .join('\n');
-        if (planOf(bound) !== planOf(preview)) {
+        if (!preview.source_fingerprint || bound.source_fingerprint !== preview.source_fingerprint ||
+          planOf(bound) !== planOf(preview)) {
           setError(
             'The drive or library changed since this preview; review the refreshed plan before importing.'
           );

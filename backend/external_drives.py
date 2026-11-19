@@ -1287,6 +1287,7 @@ def execute_playlist_update(
         )
 
     # Reject a stale reviewed target before any file is copied.
+    manadj_session.refresh(local)
     rows = current_rows()
     if current_token(rows) != expected_target_token:
         raise ExternalDriveError(
@@ -1294,11 +1295,28 @@ def execute_playlist_update(
             "run the preview again before updating"
         )
 
+    if len(node.track_ids) != len(set(node.track_ids)):
+        raise ExternalDriveError(
+            "this USB playlist repeats tracks; local playlists cannot represent repeated "
+            "tracks yet, so no update was made"
+        )
+
     entry_by_track_id = {
         device.tracks[e.ordinal].id: e
         for e in preview.entries
         if 0 <= e.ordinal < len(device.tracks)
     }
+    existing_index, _, _ = _manadj_matchers(manadj_session)
+    resolved_ids = [
+        _library_track_id(existing_index, entry_by_track_id[tid])
+        for tid in node.track_ids if tid in entry_by_track_id
+    ]
+    resolved_ids = [tid for tid in resolved_ids if tid is not None]
+    if len(resolved_ids) != len(set(resolved_ids)):
+        raise ExternalDriveError(
+            "multiple USB entries resolve to the same library track; repeated tracks "
+            "are not supported locally yet, so no update was made"
+        )
     new_ordinals = {
         entry_by_track_id[tid].ordinal
         for tid in node.track_ids
@@ -1332,26 +1350,32 @@ def execute_playlist_update(
         else:
             skipped_other += 1
 
-    # Re-check the reviewed target inside the write path, immediately
-    # before the rewrite, so a concurrent local edit is never overwritten.
+    # Release the read transaction after copying, then reserve the SQLite
+    # writer before re-reading the target. No other writer can slip an edit
+    # between the token check and replacement. Imported tracks already stand.
+    manadj_session.rollback()
+    if manadj_session.get_bind().dialect.name != "sqlite":
+        raise ExternalDriveError("playlist updates currently require SQLite write locking")
+    from sqlalchemy import text
+    manadj_session.execute(text("BEGIN IMMEDIATE"))
+    manadj_session.expire_all()
+    local = manadj_session.get(Playlist, local_playlist_id)
+    if local is None:
+        manadj_session.rollback()
+        raise ExternalDriveError("local playlist was removed since the review")
     current = current_rows()
     if current_token(current) != expected_target_token:
+        manadj_session.rollback()
         raise ExternalDriveError(
-            f'local playlist "{local.name}" changed since the review; '
-            "run the preview again before updating"
+            "local playlist changed since the review; imported tracks stay in the "
+            "library, but the playlist was not updated; run the preview again"
         )
-    # The local model keeps one row per track in a playlist (migration
-    # 0011 deduped local playlists and enforces it): a repeated device
-    # member collapses to its first occurrence and is counted as skipped.
-    seen_in_desired: set[int] = set()
-    deduped: list[int] = []
-    for tid in desired:
-        if tid in seen_in_desired:
-            skipped_other += 1
-        else:
-            seen_in_desired.add(tid)
-            deduped.append(tid)
-    desired = deduped
+    if len(desired) != len(set(desired)):
+        manadj_session.rollback()
+        raise ExternalDriveError(
+            "multiple USB entries resolve to the same library track; repeated tracks "
+            "are not supported locally yet, so the playlist was not updated"
+        )
     current_ids = [c.track_id for c in current]
     # Occurrence-count subtraction: the device order claims one occurrence
     # of each track; surplus local occurrences stay, in their prior

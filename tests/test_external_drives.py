@@ -1773,7 +1773,7 @@ def test_playlist_update_stale_target_rejected_before_copies(
     assert [m.track_id for m in members] == [two.id, other.id]
 
 
-def test_playlist_update_collapses_device_duplicate_members(
+def test_playlist_update_refuses_device_duplicate_members(
     db: Session, make_track, tmp_path: Path
 ):
     # The device playlist repeats two.mp3; the local model keeps one row
@@ -1788,16 +1788,15 @@ def test_playlist_update_collapses_device_duplicate_members(
         local.id, local.name, [two.id]
     )
 
-    result = external_drives.execute_playlist_update(
-        db, usb, dest,
-        device_playlist_id=PAGE_LIST_B,
-        local_playlist_id=local.id,
-        expected_fingerprint=preview.fingerprint,
-        expected_target_token=token,
-    )
-
-    assert result.skipped_other == 1  # the repeated device member
-    assert result.added_imported == 0  # two.mp3 was already in the library
+    with pytest.raises(external_drives.ExternalDriveError, match="repeats tracks"):
+        external_drives.execute_playlist_update(
+            db, usb, dest,
+            device_playlist_id=PAGE_LIST_B,
+            local_playlist_id=local.id,
+            expected_fingerprint=preview.fingerprint,
+            expected_target_token=token,
+        )
+    assert not dest.exists()
     members = (
         db.query(PlaylistTrack)
         .filter(PlaylistTrack.playlist_id == local.id)
@@ -1891,3 +1890,84 @@ def test_router_playlist_update_flow(
     assert update["member_count"] == 3
     assert update["kept_local_only"] == 0
     assert db_session.query(Playlist).count() == 1
+
+
+def test_playlist_update_write_reservation_blocks_concurrent_editor(
+    db: Session, make_track, tmp_path: Path
+):
+    from sqlalchemy import create_engine, event
+    import sqlite3
+
+    usb = make_rekordbox_usb_with_playlists(tmp_path / "RB")
+    two = make_track(filename="/Contents/two.mp3", title="Two")
+    three = make_track(filename="/Contents/three.mp3", title="Three")
+    _add_local_playlist(db, "RIG New", [two.id, three.id])
+    local = db.query(Playlist).filter(Playlist.name == "RIG New").one()
+    local_id = local.id
+    db.commit()
+    filename = tmp_path / "concurrent.db"
+    raw = db.get_bind().raw_connection()
+    with sqlite3.connect(filename) as target:
+        raw.driver_connection.backup(target)
+    raw.close()
+    engine = create_engine(f"sqlite:///{filename}")
+    attempts = []
+    @event.listens_for(engine, "before_cursor_execute")
+    def competing_editor(conn, cursor, statement, parameters, context, many):
+        if statement.lstrip().upper().startswith("DELETE FROM PLAYLIST_TRACKS"):
+            with sqlite3.connect(filename, timeout=0) as writer:
+                with pytest.raises(sqlite3.OperationalError, match="locked"):
+                    writer.execute("UPDATE playlists SET name='concurrent' WHERE id=?", (local_id,))
+            attempts.append(True)
+    try:
+        with Session(engine) as session:
+            dest = tmp_path / "dest"
+            preview = external_drives.build_pull_preview(session, usb, dest)
+            token = external_drives.local_playlist_snapshot_token(local_id, "RIG New", [two.id, three.id])
+            external_drives.execute_playlist_update(
+                session, usb, dest, device_playlist_id=PAGE_LIST_B,
+                local_playlist_id=local_id, expected_fingerprint=preview.fingerprint,
+                expected_target_token=token,
+            )
+            assert session.get(Playlist, local_id).name == "RIG New"
+        assert attempts
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.parametrize("change", ["rename", "order"])
+def test_playlist_update_target_changed_during_copy_is_preserved(
+    db: Session, make_track, tmp_path: Path, monkeypatch, change: str
+):
+    usb = make_rekordbox_usb_with_playlists(tmp_path / "RB")
+    two = make_track(filename="/Contents/two.mp3", title="Two")
+    held = make_track(filename="/music/held.mp3", title="Held")
+    _add_local_playlist(db, "RIG Mix", [two.id, held.id])
+    local = db.query(Playlist).filter(Playlist.name == "RIG Mix").one()
+    local_id = local.id
+    original = external_drives.execute_pull
+    def edit_during_copy(*args, **kwargs):
+        result = original(*args, **kwargs)
+        if change == "rename":
+            db.get(Playlist, local_id).name = "Edited concurrently"
+        else:
+            rows = db.query(PlaylistTrack).filter(PlaylistTrack.playlist_id == local_id).all()
+            for row in rows:
+                row.position = 1 - row.position
+        db.commit()
+        return result
+    monkeypatch.setattr(external_drives, "execute_pull", edit_during_copy)
+    dest = tmp_path / "lib"
+    preview = external_drives.build_pull_preview(db, usb, dest)
+    token = external_drives.local_playlist_snapshot_token(local_id, "RIG Mix", [two.id, held.id])
+    with pytest.raises(external_drives.ExternalDriveError, match="imported tracks stay"):
+        external_drives.execute_playlist_update(
+            db, usb, dest, device_playlist_id=PAGE_LIST_A,
+            local_playlist_id=local_id, expected_fingerprint=preview.fingerprint,
+            expected_target_token=token,
+        )
+    assert (dest / "Contents" / "one.mp3").exists()
+    assert db.query(Track).filter(Track.title == "One").count() == 1
+    rows = db.query(PlaylistTrack).filter(PlaylistTrack.playlist_id == local_id).order_by(PlaylistTrack.position).all()
+    assert [row.track_id for row in rows] == ([held.id, two.id] if change == "order" else [two.id, held.id])
+    assert db.get(Playlist, local_id).name == ("Edited concurrently" if change == "rename" else "RIG Mix")
