@@ -23,6 +23,8 @@ import { api } from '../api/client';
 import { initFollowPlaybackBridge } from '../follow/followPlaybackBridge';
 import { initWakeLockBridge } from '../playback/wakeLock';
 import { getKeyLockFlags } from '../playback/keyLockStore';
+import { registerHeardRouteProvider } from '../playback/heardStore';
+import { getRoutingSnapshot, subscribeRouting } from '../playback/routingStore';
 import type { BeatgridResponse, Track } from '../types';
 
 /** Loaded-Deck persistence: one Track id (or null) per fixed Deck. */
@@ -91,6 +93,27 @@ export function DeckProvider({ children }: { children: ReactNode }) {
   );
 
   useEffect(() => syncGroup.start(), [syncGroup]);
+
+  // Heard (#382 desktop port): the route provider pairs the master
+  // output's identity (routingStore's resolved sink) with its live
+  // reported latency (the Mixer's main AudioContext) — the desktop analog
+  // of Android's RouteLatency + EngineSnapshot.reportedLatencySeconds().
+  useEffect(() => {
+    const provider = () => {
+      const { resolved, devices } = getRoutingSnapshot();
+      return {
+        key: resolved.masterSinkId ?? 'default',
+        label:
+          devices.find((d) => d.deviceId === resolved.masterSinkId)?.label ??
+          'System default',
+        reportedSeconds: mixer.masterLatencySeconds(),
+      };
+    };
+    registerHeardRouteProvider(provider);
+    // A device (re)route changes the route key/label: re-notify so the
+    // HEARD cluster follows the device and its remembered latency.
+    return subscribeRouting(() => registerHeardRouteProvider(provider));
+  }, [mixer]);
 
   // Stem kill switches (stems #210/#212): mixer owns the state (MIDI,
   // capture, automation all route through it), the deck worklet applies it

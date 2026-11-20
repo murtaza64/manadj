@@ -181,13 +181,25 @@ export interface LaunchSchedule {
 export function crossDeckLaunchTarget(
   cue: number,
   playRate: number,
-  reference: LaunchReference | null | undefined
+  reference: LaunchReference | null | undefined,
+  heardSeconds = 0
 ): LaunchSchedule {
   if (!reference || reference.beatTimes.length === 0) {
     return { at: cue, delaySeconds: 0 };
   }
-  const nearest = snapToNearestBeat(reference.playhead, reference.beatTimes);
-  const delta = (nearest - reference.playhead) / (reference.playRate ?? 1);
+  const refRate = reference.playRate ?? 1;
+  // Heard (#382 desktop port): the press is read at the HEARD position,
+  // L·rate behind the render position, so the target is the reference's
+  // beat nearest what the performer HEARS. The WHEN is still timed against
+  // the render playhead: a heard beat the engine already rendered is L in
+  // the past, so the launch enters ~L·rate ahead of the cue and the decks
+  // coincide AT THE SPEAKER (both share L). Never waits for a later beat
+  // than the heard one; a beat still ahead defers exactly as in Grid.
+  const nearest = snapToNearestBeat(
+    reference.playhead - heardSeconds * refRate,
+    reference.beatTimes
+  );
+  const delta = (nearest - reference.playhead) / refRate;
   if (delta > 0) {
     // The nearest reference beat is ahead: hold, then enter exactly on cue.
     return { at: cue, delaySeconds: delta };

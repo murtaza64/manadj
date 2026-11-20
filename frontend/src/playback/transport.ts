@@ -137,6 +137,17 @@ export interface TransportContext {
    * can cross into silence-loop territory. Absent/null = unknown (no
    * routing). */
   audibleDurationSec?: number | null;
+  /**
+   * Heard (latency-compensated) reads — desktop port of Android's #382
+   * HEARD mode: the output route's latency L in wall seconds. Alignment
+   * gestures are read at the HEARD instant (L·rate before the render
+   * playhead) and land advanced by the elapsed L·rate, so they line up at
+   * the speaker. Applies to cross-deck launches, hot-cue presses on a
+   * playing deck, and auto-loop engages — mirroring the Android engine,
+   * beat jump / sync / scratch are unchanged. 0/absent = render-time
+   * (Grid) reads.
+   */
+  heardSeconds?: number;
 }
 
 const UNQUANTIZED: TransportContext = { quantize: false, beatTimes: null };
@@ -159,7 +170,8 @@ function launchStart(at: number, ctx: TransportContext): AudioEffect {
   const { at: entry, delaySeconds } = crossDeckLaunchTarget(
     at,
     ctx.playRate ?? 1,
-    ctx.launchReference
+    ctx.launchReference,
+    ctx.heardSeconds ?? 0
   );
   return delaySeconds > 0
     ? { type: 'start', at: entry, delaySeconds }
@@ -288,9 +300,14 @@ export function reduceTransport(
         // immediate but lands at cue + signed nearest-beat phase (a
         // whole-beat displacement — looping 02). Paused triggers below are
         // seeks and land exactly, regardless of the toggle.
+        // Heard (#382): the press is read at the heard position h =
+        // playhead − L·rate — phase from h's nearest beat — and lands
+        // L·rate later, as if it had jumped then: snap(cue) + (h − snap(h))
+        // + L·rate quantized, cue + L·rate unquantized.
+        const lag = (ctx.heardSeconds ?? 0) * (ctx.playRate ?? 1);
         const at = ctx.quantize
-          ? phasePreservingJumpTarget(e.time, s.playhead, ctx.beatTimes)
-          : e.time;
+          ? phasePreservingJumpTarget(e.time, s.playhead - lag, ctx.beatTimes) + lag
+          : e.time + lag;
         return [{ ...s, playhead: at, loop: null }, [{ type: 'start', at }]];
       }
       if (ctx.cueMode === 'trigger') {
@@ -374,9 +391,13 @@ export function reduceTransport(
       // Engage: anchor at the playhead, snapped per Quantize (possibly
       // slightly ahead — the playhead plays into the region and NEVER
       // moves on engage). Gridless Tracks: inert — never guess.
+      // Heard (#382): the engage anchors at the HEARD beat (L·rate behind
+      // the render playhead) — the loop you get is the one you heard.
       const grid = ctx.beatTimes;
       if (!grid || grid.length < 2) return [s, []];
-      const start = ctx.quantize ? snapToNearestBeat(s.playhead, grid) : s.playhead;
+      const lag = (ctx.heardSeconds ?? 0) * (ctx.playRate ?? 1);
+      const anchor = s.playhead - lag;
+      const start = ctx.quantize ? snapToNearestBeat(anchor, grid) : anchor;
       const end = addBeats(start, s.pendingLoopBeats, grid);
       if (end <= start) return [s, []];
       // gh#424: an engage whose natural end crosses the last audible
@@ -399,6 +420,18 @@ export function reduceTransport(
             },
           },
           [],
+        ];
+      }
+      // Heard wrap (#382): a short loop anchored L behind can already lie
+      // entirely BEFORE the render playhead — the region you heard has
+      // passed. Wrap the playhead into the region at its loop phase (the
+      // one engage case that moves the playhead).
+      if (lag > 0 && end <= s.playhead) {
+        const span = end - start;
+        const wrapped = start + ((s.playhead - start) % span);
+        return [
+          { ...s, loop: { start, end, lengthBeats: s.pendingLoopBeats }, playhead: wrapped },
+          isAudioRunning(s) ? [{ type: 'start', at: wrapped }] : [],
         ];
       }
       return [
