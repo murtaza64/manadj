@@ -6,8 +6,6 @@ import ManadjCore
 struct FeedbackReviewView: View {
     let capture: FeedbackCapture
     let onSubmit: (FeedbackDraft) async -> FeedbackOutcome
-    /// Present only when a desktop is paired: retries the outbox on demand.
-    let onRetryQueue: (() async -> String)?
     let queueDirectory: URL?
     let queueConnection: DesktopConnection?
     @State private var showOutbox = false
@@ -21,19 +19,15 @@ struct FeedbackReviewView: View {
     @State private var sections: [FeedbackSection]
     @State private var submitting = false
     @State private var outcome: FeedbackOutcome?
-    @State private var retrying = false
-    @State private var retryStatus: String?
 
     init(
         capture: FeedbackCapture,
         onSubmit: @escaping (FeedbackDraft) async -> FeedbackOutcome,
-        onRetryQueue: (() async -> String)? = nil,
         queueDirectory: URL? = nil,
         queueConnection: DesktopConnection? = nil
     ) {
         self.capture = capture
         self.onSubmit = onSubmit
-        self.onRetryQueue = onRetryQueue
         self.queueDirectory = queueDirectory
         self.queueConnection = queueConnection
         _includeScreenshot = State(initialValue: capture.screenshot != nil)
@@ -164,7 +158,7 @@ struct FeedbackReviewView: View {
                     Text("Filing creates a GitHub issue with your title and text, linked by report id. The screenshot and the context above stay with the report on your desktop's feedback store; they are not uploaded to GitHub.")
                         .font(Ink.font(10)).foregroundStyle(Ink.muted).padding(.vertical, 8)
 
-                    Text("If the paired desktop is unreachable, File saves this reviewed report on this iPhone. It retries only with that same desktop after a later successful filing or RETRY QUEUE. Reports captured without a paired desktop stay here. Use REVIEW SAVED REPORTS to inspect them and approve a destination after pairing.")
+                    Text("If the paired desktop is unreachable, File saves this reviewed report on this iPhone. It will not send later on its own. Use REVIEW SAVED REPORTS to review it and approve the named destination. Reports captured without a paired desktop stay here. Use REVIEW SAVED REPORTS to inspect them and approve a destination after pairing.")
                         .font(Ink.font(10)).foregroundStyle(Ink.muted).padding(.bottom, 8)
 
                     if let outcome {
@@ -220,15 +214,6 @@ struct FeedbackReviewView: View {
             case .queuedLocally(let reason):
                 Text("SAVED ON THIS IPHONE").font(Ink.font(14, bold: true)).foregroundStyle(Ink.warning)
                 Text(reason).font(Ink.font(11)).foregroundStyle(Ink.muted)
-                if let onRetryQueue {
-                    Button(retrying ? "RETRYING…" : "RETRY QUEUE NOW") { retry(onRetryQueue) }
-                        .buttonStyle(FlatButtonStyle(color: Ink.accent))
-                        .disabled(retrying)
-                        .accessibilityIdentifier("feedback-retry-queue")
-                }
-                if let retryStatus {
-                    Text(retryStatus).font(Ink.font(11)).foregroundStyle(Ink.muted)
-                }
             case .rejected(let reason):
                 Text("NOT FILED").font(Ink.font(14, bold: true)).foregroundStyle(Ink.danger)
                 Text(reason).font(Ink.font(11)).foregroundStyle(Ink.muted)
@@ -241,15 +226,6 @@ struct FeedbackReviewView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Ink.panel).overlay(Rectangle().stroke(Ink.edge, lineWidth: 1))
         .accessibilityIdentifier("feedback-outcome")
-    }
-
-    private func retry(_ action: @escaping () async -> String) {
-        retrying = true
-        Task {
-            let result = await action()
-            retryStatus = result
-            retrying = false
-        }
     }
 
     private func submit() {

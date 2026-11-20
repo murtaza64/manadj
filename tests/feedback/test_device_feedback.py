@@ -152,6 +152,13 @@ def test_paired_device_identity_recorded_as_evidence(lan):
     }
 
 
+def test_caller_cannot_forge_reporting_device(lan):
+    submission = report(snapshot={"session": {"reporting_device": {"id": "forged", "name": "forged"}}})
+    response = lan.client.post("/api/device-sync/feedback", json=submission, headers=lan.headers)
+    assert response.status_code == 200
+    assert lan.service.evidence(submission["id"])["snapshot"]["session"]["reporting_device"]["id"] == "phone-1"
+
+
 def test_caller_origin_is_replaced_with_the_running_app(lan):
     submission = report(origin={"lane": "other", "owner": "opencode:ses_fake", "revision": "0" * 40})
     response = lan.client.post("/api/device-sync/feedback", json=submission, headers=lan.headers)

@@ -274,7 +274,7 @@ public final class FeedbackQueue: Sendable {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         guard try pendingFiles().count < Self.capacity else {
             throw FeedbackFailure(
-                "\(Self.capacity) reports are already waiting for the desktop. Nothing was saved; file them or retry the queue before queueing more.")
+                "\(Self.capacity) reports are already waiting for the desktop. Nothing was saved; review and send or discard saved reports before queueing more.")
         }
         let envelope: [String: Any] = ["origin": origin.map { $0 as Any } ?? NSNull(), "payload": payload]
         let data = try JSONSerialization.data(withJSONObject: envelope)
@@ -345,7 +345,6 @@ public final class FeedbackSubmitter: Sendable {
         do {
             let filing = try await SyncClient(connection).submitFeedback(body)
             if filing.status == "filed" {
-                _ = await drainQueue(via: connection)
                 return .filed(issueURL: filing.issueURL)
             }
             return .savedOnDesktop(status: filing.status, detail: filing.detail)
@@ -353,32 +352,8 @@ public final class FeedbackSubmitter: Sendable {
             // A validation refusal will never succeed; do not queue it.
             return .rejected(reason: error.message)
         } catch {
-            return keepLocally("The desktop is unreachable. Saved on this iPhone; it files when you next file feedback with the desktop reachable, or via RETRY QUEUE.")
+            return keepLocally("The desktop is unreachable. Saved on this iPhone; open REVIEW SAVED REPORTS to inspect it and approve sending when the desktop is reachable.")
         }
     }
 
-    /// Best-effort outbox drain after a successful filing or an explicit
-    /// RETRY QUEUE. Only entries bound to this desktop's origin
-    /// are attempted; unbound entries stay held; entries for a different desktop stay queued.
-    /// Stops at the first unreachable response; drops payloads the desktop
-    /// permanently refuses.
-    @discardableResult
-    public func drainQueue(via connection: DesktopConnection) async -> (sent: Int, remaining: Int) {
-        let client = SyncClient(connection)
-        let origin = connection.baseURL.absoluteString
-        var sent = 0
-        for item in queue.pending() where FeedbackQueue.drains(item.origin, to: origin) {
-            do {
-                _ = try await client.submitFeedback(item.payload)
-                queue.remove(id: item.id)
-                sent += 1
-            } catch let error as SyncError where error.status != nil && (400..<500).contains(error.status!) && error.status != 401 {
-                // Preserve a refused report for explicit review or discard.
-                break
-            } catch {
-                break
-            }
-        }
-        return (sent, queue.pending().count)
-    }
 }

@@ -27,17 +27,6 @@ struct FeedbackReporter: ViewModifier {
                                 queue: FeedbackQueue(directory: model.feedbackQueueRoot))
                             return await submitter.submit(draft, via: model.syncConnection)
                         },
-                        onRetryQueue: model.syncConnection.map { connection in
-                            let queueRoot = model.feedbackQueueRoot
-                            return {
-                                let submitter = FeedbackSubmitter(
-                                    queue: FeedbackQueue(directory: queueRoot))
-                                let (sent, remaining) = await submitter.drainQueue(via: connection)
-                                return remaining == 0
-                                    ? "Queue clear: \(sent) report(s) filed."
-                                    : "\(sent) filed, \(remaining) still waiting (unreachable, unbound, refused, or saved for another desktop; use REVIEW SAVED REPORTS)."
-                            }
-                        },
                         queueDirectory: model.feedbackQueueRoot,
                         queueConnection: model.syncConnection)
                 }
