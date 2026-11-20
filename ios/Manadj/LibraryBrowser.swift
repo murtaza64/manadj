@@ -264,7 +264,7 @@ private struct LibraryChipStyle: ButtonStyle {
         configuration.label.font(Ink.font(10, bold: true)).lineLimit(1).padding(.horizontal, 8).frame(height: 28)
             .foregroundStyle(active ? Ink.accent : Ink.muted)
             .background(active || configuration.isPressed ? Ink.accent.opacity(0.13) : Ink.crust, in: Capsule())
-            .overlay(Capsule().stroke(active ? Ink.accent : Ink.muted.opacity(0.65), lineWidth: 1.5))
+            .overlay(Capsule().stroke(active ? Ink.accent : Ink.muted.opacity(0.65), lineWidth: 1))
             .frame(minHeight: 44).contentShape(Rectangle())
     }
 }

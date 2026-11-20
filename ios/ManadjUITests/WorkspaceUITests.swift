@@ -133,6 +133,8 @@ final class WorkspaceUITests: XCTestCase {
         app.buttons["source-collection"].tap()
         XCTAssertTrue(offline.waitForExistence(timeout: 5)); XCTAssertTrue(cached.exists)
         XCTAssertTrue(app.buttons["A play pause"].isHittable); XCTAssertTrue(app.buttons["B play pause"].isHittable)
+        XCTAssertLessThanOrEqual(app.buttons["A play pause"].frame.height, 44)
+        XCTAssertGreaterThanOrEqual(app.buttons["A play pause"].frame.height, 44)
     }
     @MainActor func testLibraryFilterChipsAndBPM() {
         defer { captureFailure() }
