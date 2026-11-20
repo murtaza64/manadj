@@ -23,7 +23,9 @@ gh#199.
   reveals. Anything animated must be a named exception here, using
   `--transition-fast (0.1s)` / `--transition-normal (0.15s)` only. Real-time
   state (playheads, meters, ghosts, waveform windows) is never animated.
-  There are currently no named exceptions.
+  Named exceptions: the Follow **Reroll** dice tumble once per click
+  (0.4s, decorative only; the reroll itself is never delayed;
+  `prefers-reduced-motion` disables it).
 - **Interaction vocabulary**: transparent background, 1px accent border,
   accent text at rest; fill-with-accent + dark ink when engaged/hovered.
   (The `.btn` recipe; see Components.)
