@@ -35,6 +35,7 @@ const ControllerCalibrationSettings = lazy(() => import('./ControllerCalibration
 const MouseJogSettings = lazy(() => import('./MouseJogSettings'));
 const LibrarySettings = lazy(() => import('./LibrarySettings'));
 const WallpaperThemeSettings = lazy(() => import('./WallpaperThemeSettings'));
+const HeardSettings = lazy(() => import('./HeardSettings'));
 const PhoneSyncSettings = lazy(() => import('./PhoneSyncSettings'));
 const ExchangeSettings = lazy(() => import('./ExchangeSettings'));
 const SetupSettings = lazy(() => import('../setup/SetupSettings'));
@@ -452,6 +453,7 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
     sections: [
       { id: 'filters', title: 'Filters', render: () => <FilterSettingsPanel /> },
       { id: 'effects', title: 'Beat FX', render: () => <BeatFxSettingsPanel /> },
+      { id: 'heard', title: 'Heard', render: () => <HeardSettings /> },
       // slot: Cue mode (#289)
     ],
   },

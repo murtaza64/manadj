@@ -20,6 +20,7 @@
 import { initialTransportState, isAudioRunning, reduceTransport } from './transport';
 import type { TransportContext, TransportEvent, TransportState } from './transport';
 import { isQuantizeOn } from './quantizeStore';
+import { heardSeconds } from './heardStore';
 import { getCueMode } from './cueModeStore';
 import { addBeats, beatPhaseTarget, beatsBetween, crossDeckLaunchTarget } from './quantize';
 import type { LaunchReference } from './quantize';
@@ -1233,6 +1234,19 @@ export class DeckEngine {
     return this.transport.playhead;
   }
 
+  /**
+   * The playhead as alignment gestures should read it (#382 Heard): while
+   * audio runs with Heard on, what the performer hears is L·rate behind
+   * the render playhead, so placement gestures (hot-cue SET while
+   * playing) mark the heard position. Paused/scratching decks show their
+   * true position — nothing is in flight.
+   */
+  gesturePlayhead(): number {
+    const playhead = this.getPlayhead();
+    if (!isAudioRunning(this.transport)) return playhead;
+    return playhead - heardSeconds() * (this.currentRate() || 1);
+  }
+
   getSnapshot(): DeckSnapshot {
     this.syncScheduledScratch();
     return this.snapshot;
@@ -1308,6 +1322,7 @@ export class DeckEngine {
       cueMode: getCueMode(),
       silenceEntry: this.silenceLoopEntryRegion(),
       audibleDurationSec: this.buffer?.duration ?? null,
+      heardSeconds: heardSeconds(),
     };
   }
 
@@ -1459,7 +1474,7 @@ export class DeckEngine {
       // against the LIVE reference: a just-passed beat is absorbed by the
       // entry-ahead branch (phase-correct immediate start); a still-ahead
       // beat re-defers. A reference gone silent degrades to the plain cue.
-      const schedule = crossDeckLaunchTarget(target, this.currentRate(), this.launchReference());
+      const schedule = crossDeckLaunchTarget(target, this.currentRate(), this.launchReference(), heardSeconds());
       if (schedule.delaySeconds > 0) {
         this.scheduleLaunch(target, schedule.delaySeconds);
         return;

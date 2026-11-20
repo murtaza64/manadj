@@ -7,6 +7,7 @@ export const SETTINGS_HELP: Record<string, HelpTarget> = {
   'session-exchange': { topic: 'capture', anchor: 'exchange' },
   filters: { topic: 'beat-fx', anchor: 'filters' },
   effects: { topic: 'beat-fx', anchor: 'effects' },
+  heard: { topic: 'perform', anchor: 'heard' },
   waveforms: { topic: 'analysis', anchor: 'automatic-analysis' },
   'wallpaper-theme': { topic: 'analysis', anchor: 'automatic-analysis' },
   'controller-check': { topic: 'controllers', anchor: 'check' },
