@@ -215,9 +215,13 @@ struct FeedbackReviewView: View {
                 Text("SAVED ON THIS IPHONE").font(Ink.font(14, bold: true)).foregroundStyle(Ink.warning)
                 Text(reason).font(Ink.font(11)).foregroundStyle(Ink.muted)
             case .rejected(let reason):
+                Button("BACK TO EDITING") { self.outcome = nil }
+                    .buttonStyle(FlatButtonStyle(color: Ink.accent))
                 Text("NOT FILED").font(Ink.font(14, bold: true)).foregroundStyle(Ink.danger)
                 Text(reason).font(Ink.font(11)).foregroundStyle(Ink.muted)
             case .saveFailed(let reason):
+                Button("BACK TO EDITING") { self.outcome = nil }
+                    .buttonStyle(FlatButtonStyle(color: Ink.accent))
                 Text("NOT FILED OR SAVED").font(Ink.font(14, bold: true)).foregroundStyle(Ink.danger)
                 Text(reason).font(Ink.font(11)).foregroundStyle(Ink.muted)
             }
