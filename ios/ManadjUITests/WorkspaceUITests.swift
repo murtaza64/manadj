@@ -175,6 +175,13 @@ final class WorkspaceUITests: XCTestCase {
         app.buttons["BROWSE"].tap()
         let filter = app.buttons["Library filters"]
         XCTAssertTrue(filter.waitForExistence(timeout: 10))
+        let search = app.textFields["Search title, artist, file"]
+        XCTAssertTrue(search.exists)
+        XCTAssertGreaterThan(filter.frame.minX, search.frame.maxX, "FILTER remains a separate control, not inside search")
+        XCTAssertLessThanOrEqual(search.frame.height, 44)
+        XCTAssertGreaterThanOrEqual(filter.frame.height, 44)
+        let compactSearch = XCTAttachment(screenshot: app.screenshot()); compactSearch.name = "Compact Android-grounded search and separate FILTER key"; compactSearch.lifetime = .keepAlways; add(compactSearch)
+
         let cached = app.staticTexts["Cached Test Tone"], offline = app.staticTexts["Offline Test Tone"]
         XCTAssertTrue(cached.waitForExistence(timeout: 5)); XCTAssertTrue(offline.exists)
         XCTAssertFalse(app.buttons["Filter tag Rolling"].exists)

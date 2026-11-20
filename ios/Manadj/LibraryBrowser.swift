@@ -35,15 +35,34 @@ struct LibraryBrowser: View {
                     Button("B →") { model.loadTarget = 1 }.foregroundStyle(Ink.decks[1]).frame(minWidth: 44, minHeight: 44)
                     Button("BROWSE", action: onClose).buttonStyle(LibraryChipStyle(active: true)).frame(width: 66, height: 44)
                 }
-                HStack {
-                    Image(systemName: "magnifyingglass").foregroundStyle(Ink.muted)
-                    TextField("Search title, artist, file", text: $search).textInputAutocapitalization(.never).autocorrectionDisabled().submitLabel(.search).focused($searchFocused)
+                // Match Android Library.kt: compact search capsule plus a separate FILTER key.
+                // Keep a 44pt interaction row without inheriting the oversized system body font.
+                HStack(spacing: 4) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "magnifyingglass").font(.system(size: 14)).foregroundStyle(Ink.muted)
+                        TextField("Search title, artist, file", text: $search)
+                            .font(Ink.font(14)).foregroundStyle(Ink.text)
+                            .textInputAutocapitalization(.never).autocorrectionDisabled()
+                            .submitLabel(.search).focused($searchFocused)
+                            .accessibilityLabel("Search title, artist, file")
+                        if !search.isEmpty {
+                            Button { search = ""; searchFocused = true } label: {
+                                Image(systemName: "xmark").font(.system(size: 12)).frame(width: 44, height: 44)
+                            }.accessibilityLabel("Clear search")
+                        }
+                    }.padding(.leading, 12).frame(height: 38)
+                        .background(Ink.crust, in: Capsule())
+                        .overlay(Capsule().stroke(Ink.edge, lineWidth: 1))
                     Button { filtersOpen.toggle(); searchFocused = false } label: {
-                        Image(systemName: "line.3.horizontal.decrease").frame(width: 44, height: 44)
-                    }.foregroundStyle(filtersOpen || !tags.isEmpty || bpmCenter != nil || energy > 0 ? Ink.accent : Ink.muted)
+                        Text("FILTER").font(Ink.font(12, bold: true)).frame(width: 76, height: 38)
+                            .background(filtersOpen ? Ink.accent.opacity(0.16) : Ink.crust, in: Capsule())
+                            .overlay(Capsule().stroke(Ink.accent, lineWidth: 1))
+                            .frame(height: 44).contentShape(Rectangle())
+                    }.buttonStyle(.plain)
+                        .foregroundStyle(filtersOpen || !tags.isEmpty || bpmCenter != nil || energy > 0 ? Ink.accent : Ink.muted)
                         .accessibilityLabel("Library filters").accessibilityValue(filtersOpen ? "Expanded" : "Collapsed")
-                    if !search.isEmpty { Button { search = ""; searchFocused = true } label: { Image(systemName: "xmark").frame(width: 44, height: 44) }.accessibilityLabel("Clear search") }
-                }.padding(.leading, 12).frame(minHeight: 44).background(Ink.crust, in: Capsule()).overlay(Capsule().stroke(Ink.muted.opacity(0.65), lineWidth: 1.5))
+                }.frame(height: 44)
+
                 if !keyboardOpen { ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
                         Menu("\(sort.rawValue.uppercased()) ▼") { ForEach(SortColumn.allCases, id: \.rawValue) { c in Button(c.rawValue) { sort = c } } }.buttonStyle(LibraryChipStyle())
