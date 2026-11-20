@@ -331,6 +331,8 @@ struct DeckViewState {
     func preview(_ track: LibraryTrack) async -> PreviewWaveform? { await repository?.preview(track) }
     func cancelWork() { task?.cancel() }
     var pairedOrigin: String? { connection?.baseURL.absoluteString }
+    var syncConnection: DesktopConnection? { connection }
+    var feedbackQueueRoot: URL { root.appendingPathComponent("feedback-queue", isDirectory: true) }
     func forgetDesktop() {
         stopLocalLive()
         task?.cancel()

@@ -300,6 +300,7 @@ async def startup_event():
     from . import device_listener as _device_listener
 
     try:
+        _device_listener.set_feedback_service(app.state.feedback_service)
         _device_listener.apply_settings()
     except Exception:
         logging.getLogger("backend.main").exception("device listener failed to start")

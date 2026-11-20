@@ -78,11 +78,17 @@ class PairAsk(BaseModel):
     device_name: str = Field(default="", max_length=60)
 
 
-def build_app(get_code, pairing: PairingRequests | None = None) -> FastAPI:
+def build_app(get_code, pairing: PairingRequests | None = None, feedback=None) -> FastAPI:
     """The LAN-facing app: device-sync only, behind a device token (#374) or
     the typed pairing code (#373). /api/device-pair/* is the only
-    unauthenticated surface (request + poll), and it is rate-limited."""
+    unauthenticated surface (request + poll), and it is rate-limited.
+
+    `feedback` is the desktop's FeedbackService, used only by the scoped
+    POST /api/device-sync/feedback write; the full feedback router remains
+    loopback-only."""
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
+    if feedback is not None:
+        app.state.feedback_service = feedback
     failures = _Failures()
     pair_calls = _Failures()
 
@@ -196,14 +202,14 @@ class DeviceListener:
     def running(self) -> bool:
         return self._thread is not None and self._thread.is_alive() and self._server is not None and self._server.started
 
-    def start(self, port: int, get_code, pairing: PairingRequests | None = None) -> None:
+    def start(self, port: int, get_code, pairing: PairingRequests | None = None, feedback=None) -> None:
         with self._lock:
             if self._thread is not None and self._thread.is_alive():
                 if self._port == port:
                     return
                 self._stop_locked()
             self.error = None
-            config = uvicorn.Config(build_app(get_code, pairing), host=self.host, port=port, log_level="warning", access_log=False)
+            config = uvicorn.Config(build_app(get_code, pairing, feedback), host=self.host, port=port, log_level="warning", access_log=False)
             server = uvicorn.Server(config)
             server.install_signal_handlers = lambda: None  # type: ignore[method-assign]  # not the main thread
             thread = threading.Thread(target=self._run, args=(server,), name="device-listener", daemon=True)
@@ -289,6 +295,16 @@ class Advertisement:
 _listener = DeviceListener()
 registry = DeviceRegistry()
 pairing = PairingRequests(registry)
+_feedback_service = None
+
+
+def set_feedback_service(service) -> None:
+    """Wire the desktop FeedbackService into future listener (re)starts.
+
+    Settings edits restart the listener; the service reference survives them
+    because apply_settings reads this module global."""
+    global _feedback_service
+    _feedback_service = service
 
 
 def state_path():
@@ -373,7 +389,7 @@ def apply_settings() -> None:
     enabled, port = read_settings()
     if enabled:
         ensure_pair_code()
-        _listener.start(port, pair_code, pairing)
+        _listener.start(port, pair_code, pairing, feedback=_feedback_service)
     else:
         _listener.stop()
 
