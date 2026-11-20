@@ -300,10 +300,10 @@ export function SyncBrowser({ toolbar, onPendingChange }: { toolbar?: ReactNode;
       {!desktop && detectError && <p className="pg-empty tone-unknown" role="alert">Drive detection failed ({detectError})</p>}
       {!desktop && drives && drives.length === 0 && !detectError && <p className="pg-empty">No USB found</p>}
       {!desktop && drive && (
-        <div className="pg-browser" aria-label={`USB ${drive.name}`} style={{ '--plan-width': `${planWidth}px` } as CSSProperties}>
+        <div className="pg-browser" aria-label={`USB ${drive.name}`} aria-busy={d.read.state === 'loading'} style={{ '--plan-width': `${planWidth}px` } as CSSProperties}>
           <header className="pg-bar">
             <b>{drive.name}</b><span className="pg-chip">{family}</span>
-            <span className="pg-read">{d.read.state === 'ready' ? `Read ${d.read.readAt.toLocaleTimeString()}` : d.read.state === 'loading' ? 'Reading…' : 'Not read'}</span>
+            <span className="pg-read">{d.read.state === 'loading' && <span className="pg-read-spinner" aria-hidden="true" />}{d.read.state === 'ready' ? `Read ${d.read.readAt.toLocaleTimeString()}` : d.read.state === 'loading' ? 'Reading…' : 'Not read'}</span>
             <button className="btn" disabled={applying} onClick={() => read(drive)}>Recheck</button>
           </header>
           <aside className="pg-left" aria-label="Playlists">
@@ -328,7 +328,7 @@ export function SyncBrowser({ toolbar, onPendingChange }: { toolbar?: ReactNode;
             {d.read.state === 'ready' && playlists.length === 0 && <p className="pg-empty">No playlists</p>}
           </aside>
           <main className="pg-main">
-            {d.read.state === 'loading' && <p className="pg-empty" role="status">Reading…</p>}
+            {d.read.state === 'loading' && <p className="pg-empty" role="status" aria-live="polite">Reading {drive.name} USB…</p>}
             {d.read.state === 'error' && <p className="pg-empty tone-unknown" role="alert">Could not read this drive ({d.read.message}). Unplugged?</p>}
             {preview && (
               <>

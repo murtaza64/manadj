@@ -343,3 +343,27 @@ it('individually staged audio imports survive the first item changing from new t
   await click(host, 'Review 2 planned operations'); await click(host, 'Confirm and apply plan');
   expect(imports.mock.calls.map(call => call[0].ordinals)).toEqual([[0], [1]]);
 });
+
+it.each(['success', 'error', 'removed'] as const)('USB throbber tracks a pending read and stops on %s', async (outcome) => {
+  const list = vi.spyOn(api.externalDrives, 'list').mockResolvedValue([RB]);
+  noCheck();
+  vi.spyOn(api.externalDrives, 'fields').mockResolvedValue({ fingerprint: 'f', tracks: [], compared: [], not_compared: {} });
+  let resolve!: (p: ExternalDrivePreview) => void;
+  let reject!: (e: Error) => void;
+  vi.spyOn(api.externalDrives, 'preview').mockImplementation(() => new Promise((yes, no) => { resolve = yes; reject = no; }));
+  const host = await mount();
+  expect(host.querySelector('.pg-read-spinner')?.getAttribute('aria-hidden')).toBe('true');
+  expect(host.querySelector('.pg-browser')?.getAttribute('aria-busy')).toBe('true');
+  expect(host.querySelector('[role="status"]')?.textContent).toBe('Reading RB USB…');
+  if (outcome === 'removed') {
+    list.mockResolvedValue([]);
+    await click(host, 'Detect drives');
+    // A late response must not bring back a removed USB's loading UI.
+    await act(async () => { resolve(preview([])); await tick(); });
+  } else {
+    await act(async () => { if (outcome === 'success') resolve(preview([])); else reject(new Error('unplugged')); await tick(); });
+  }
+  expect(host.querySelector('.pg-read-spinner')).toBeNull();
+  expect(host.querySelector('.pg-browser')?.getAttribute('aria-busy')).not.toBe('true');
+  if (outcome === 'error') expect(host.querySelector('[role="alert"]')?.textContent).toContain('unplugged');
+});
