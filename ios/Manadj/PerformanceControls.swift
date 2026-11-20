@@ -146,3 +146,20 @@ struct PerformanceStripStyle: ButtonStyle {
             .contentShape(Rectangle()).sensoryFeedback(.selection, trigger: configuration.isPressed) { _, new in new }
     }
 }
+
+/// Browser-only transport treatment. Performance controls keep their original geometry.
+struct BrowserAwareTransportStyle: ButtonStyle {
+    var compact: Bool
+    var active: Bool
+    @ViewBuilder func makeBody(configuration: Configuration) -> some View {
+        if compact {
+            configuration.label.font(Ink.font(11, bold: true)).foregroundStyle(Ink.play)
+                .frame(maxWidth: .infinity).frame(height: 44)
+                .background(active || configuration.isPressed ? Ink.play.opacity(0.15) : Color.clear, in: Capsule())
+                .overlay(Capsule().stroke(Ink.play.opacity(0.85), lineWidth: 1.5))
+                .frame(height: 44).contentShape(Rectangle())
+        } else {
+            PerformanceKeyStyle(color: Ink.play, active: active).makeBody(configuration: configuration)
+        }
+    }
+}

@@ -72,7 +72,7 @@ struct WorkspaceView: View {
                         VStack(spacing: 0) {
                             if !keyboardOpen { Capsule().fill(Ink.muted.opacity(0.7)).frame(width: 40, height: 4).frame(height: 16) }
                             library
-                            HStack(spacing: 14) { transport(0); transport(1) }.frame(height: 54)
+                            HStack(spacing: 12) { transport(0, browser: true); transport(1, browser: true) }.frame(height: 44).padding(.horizontal, 6).background(Ink.panel)
                         }.background(Ink.base).transition(.move(edge: .bottom))
                             .gesture(DragGesture(minimumDistance: 40).onEnded { if $0.translation.height > 60 { withAnimation(.easeOut(duration: 0.24)) { browsing = false } } })
                     }
@@ -210,11 +210,12 @@ struct WorkspaceView: View {
     }
     private func updateFX() { model.audio?.beatFX(effect: effect, target: fxTarget, on: fx, depth: fxDepth, beats: fxBeats[fxBeatIndex]) }
     private func value(_ index: Int, _ op: MDJOp, _ current: Double) -> Binding<Double> { Binding(get: { current }, set: { model.set(op, index, $0) }) }
-    private func transport(_ index: Int) -> some View {
+    private func transport(_ index: Int, browser: Bool = false) -> some View {
         let state = model.decks[index].engine
-        return HStack(spacing: 0) {
-            HoldControl(title: "CUE", color: Ink.warning, active: state.preview && state.previewSlot == 8, enabled: state.ready, rounded: true, down: { model.set(MDJCueDown, index, 0) }, up: { model.set(MDJCueUp, index, 0) })
-            Button { model.play(index) } label: { Label(state.playing ? "PAUSE" : "PLAY", systemImage: state.playing ? "pause.fill" : "play.fill") }.buttonStyle(PerformanceKeyStyle(color: Ink.play, active: state.playing)).disabled(!state.ready).accessibilityLabel("\(Ink.deckName(index)) play pause")
+        return HStack(spacing: browser ? 4 : 0) {
+            if browser { Text(Ink.deckName(index)).font(Ink.font(10, bold: true)).foregroundStyle(Ink.decks[index]).frame(width: 12) }
+            HoldControl(title: "CUE", color: Ink.warning, active: state.preview && state.previewSlot == 8, enabled: state.ready, rounded: true, bare: false, compact: browser, down: { model.set(MDJCueDown, index, 0) }, up: { model.set(MDJCueUp, index, 0) })
+            Button { model.play(index) } label: { Label(state.playing ? "PAUSE" : "PLAY", systemImage: state.playing ? "pause.fill" : "play.fill") }.buttonStyle(BrowserAwareTransportStyle(compact: browser, active: state.playing)).disabled(!state.ready).accessibilityLabel("\(Ink.deckName(index)) play pause")
         }
     }
     private func deckControls(_ index: Int, compact: Bool) -> some View {
