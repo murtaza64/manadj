@@ -1,12 +1,36 @@
 """Read-only cross-copy candidates. Never evidence for import reuse or field writes."""
 import re
 from pathlib import Path
-from difflib import SequenceMatcher
 
-from backend.acquisition.matching import MatchingConfig, duration_status, normalize, score_pair
+from backend.acquisition.matching import (
+    MatchingConfig,
+    artists_compatible,
+    duration_status,
+    normalize,
+    score_pair,
+)
 
 _PREFIX = re.compile(r'^\d{1,3}[\s._-]+')
 _VERSION = re.compile(r'\b(remix|vip|bootleg|edit|dub|mix|instrumental|extended|original|radio)\b', re.I)
+_BRACKETS = re.compile(r'\([^)]*\)|\[[^]]*\]')
+
+
+def core_title(title: str | None) -> str:
+    """Title without numbering or version qualifiers, for fuzzy suggestions only.
+
+    Never feed this into auto-confirm: 'Ascension' and 'Ascension (Aries Remix)'
+    share a core. Conflicting explicit version labels are still withheld by
+    version_tokens before scoring reaches this. Only bracketed segments that
+    are themselves version qualifiers are dropped; unrelated parentheticals
+    ('(Live at Printworks)', '(Part 2)') stay, since they can be the title's
+    identity.
+    """
+    title = _PREFIX.sub('', title or '')
+    title = _BRACKETS.sub(lambda m: ' ' if _VERSION.search(m.group(0)) else m.group(0), title)
+    parts = re.split(r'\s[-–]\s', title)
+    if len(parts) > 1 and _VERSION.search(parts[-1]):
+        title = parts[0]
+    return title
 
 
 def version_tokens(title: str) -> set[str]:
@@ -49,10 +73,14 @@ def suggest_copies(entries: list, tracks: list) -> dict[int, list[dict]]:
             left, right = version_tokens(title), version_tokens(track.title or '')
             if left and right and left != right:
                 continue
-            a, b = normalize(entry.artist or ''), normalize(track.artist or '')
-            if a and b and SequenceMatcher(None, a, b).ratio() < 0.65:
+            if not artists_compatible(entry.artist, track.artist):
                 continue
             score = score_pair(title, entry.artist or '', track.title, track.artist, track.filename)
+            # Rips and stores drop version qualifiers, so also compare the bare
+            # titles. Suggestions only: this never feeds auto-confirm.
+            core = score_pair(core_title(title), entry.artist or '',
+                              core_title(track.title), track.artist, track.filename)
+            score = max(score, core)
             if score < config.proposal_score:
                 continue
             found.append({'track_id': track.id, 'title': track.title, 'artist': track.artist,
