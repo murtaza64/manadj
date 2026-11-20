@@ -42,3 +42,60 @@
 .pg-export-body { display: flex; flex-direction: column; gap: 6px; font-size: 12px; } .pg-export-pick { display: flex; flex-direction: column; gap: 2px; max-height: 120px; overflow-y: auto; }
 .pg-export-facts { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; } .pg-export-facts li { border-left: 0; padding-left: 0; color: #cfcfcf; }
 .pg-checked { margin-top: 12px; }
+
+/* Compact row summaries open an explicit read-only/decision diff, never an apply action. */
+.pg-diff-toggle { display: inline-flex; align-items: center; gap: 2px; border: 0; padding: 2px 0; background: transparent; color: #4a9eff; cursor: pointer; font: inherit; }
+.pg-diff-toggle:hover .pg-tag, .pg-diff-toggle:focus-visible .pg-tag { outline: 1px solid #4a9eff; }
+.pg-comparison-state { color: #999; font-size: 11px; }
+.pg-diff td { white-space: normal; overflow-wrap: anywhere; }
+
+.pg-tracks { table-layout:fixed; width:100%; min-width:0; }
+.pg-tracks th { position:relative; white-space:normal; overflow-wrap:anywhere; padding-right:12px; }
+.pg-tracks td { white-space:normal; overflow-wrap:anywhere; }
+.pg-tracks .pg-tag { max-width:100%; white-space:normal; overflow-wrap:anywhere; box-sizing:border-box; }
+.pg-diff-toggle { flex-wrap:wrap; max-width:100%; }
+.pg-main { min-width:0; }
+.pg-browser { grid-template-columns:minmax(160px, 220px) minmax(0, 1fr) minmax(200px, 270px); }
+@media (max-width:1000px) { .pg-browser { grid-template-columns:170px minmax(0,1fr); } .pg-right { grid-column:1 / -1; max-height:240px; } }
+.pg-track-name summary { cursor:pointer; }
+.pg-track-name > span, .pg-candidate > span { display:block; font-size:11px; color:#999; overflow-wrap:anywhere; }
+.pg-candidate { padding:8px 0; border-bottom:1px solid #333; }
+
+.pg-row-guide { font-size:11px; color:#aaa; padding:6px 12px; margin:0; white-space:normal; overflow-wrap:anywhere; }
+.pg-field-target { display:block; color:#999; font-size:11px; margin-bottom:4px; }
+.pg-row-action { font-size:11px; white-space:normal; margin-top:4px; max-width:100%; }
+.pg-title { flex-wrap:wrap; }
+
+.pg-selection-bar { display:flex; gap:8px; flex-wrap:wrap; padding:10px 12px; border-bottom:1px solid #3b5b76; background:#182635; font-size:11px; }
+.pg-selection-bar small { flex-basis:100%; }
+.pg-context td { font-size:12px; background:#17212b; white-space:normal; overflow-wrap:anywhere; }
+.pg-context p { margin:4px 0; }
+.pg-i input { display:block; margin:3px auto; }
+
+.pg-review-confirm { border:1px solid #4a9eff; padding:10px; font-size:12px; } .pg-review-confirm button { white-space:normal; margin-top:8px; } .pg-bulk { font-size:11px; color:#999; } .pg-bulk summary { cursor:pointer; }
+
+.pg-browser { grid-template-columns:minmax(160px,220px) minmax(0,1fr) var(--plan-width,320px); }
+.pg-right { position:relative; min-width:0; padding-left:18px; }
+.pg-plan-grip { position:absolute; left:0; top:0; bottom:0; width:7px; cursor:col-resize; touch-action:none; z-index:5; }
+.pg-plan-grip:hover, .pg-plan-grip:focus-visible { background:#4a9eff; outline:0; }
+.pg-plan-tracks { width:100%; }
+.pg-plan-direction { display:block; color:#72b7ff !important; font-size:10px; margin:6px 0; }
+.pg-plan-track { border:1px solid #39434d; background:#1a2027; margin:6px 0; padding:9px; }
+.pg-plan-track h4 { margin:0 0 8px; font-size:12px; color:#eee; overflow-wrap:anywhere; }
+.pg-plan-change { border-top:1px solid #343d48; padding-top:7px; margin-top:7px; display:grid; gap:4px; grid-template-columns:1fr auto; }
+.pg-plan-change b { font-size:10px; color:#aaa; grid-column:1 / -1; }
+.pg-plan-change .pg-plan-old { color:#aaa; grid-column:1 / -1; }
+.pg-plan-change .pg-plan-new { color:#8bd7a1; grid-column:1 / -1; }
+.pg-plan-change .pg-link { font-size:10px; }
+@media(max-width:1000px) { .pg-browser { grid-template-columns:170px minmax(0,1fr); } .pg-right { grid-column:1 / -1; max-height:340px; } .pg-plan-grip { display:none; } }
+
+.pg-target-chips, .pg-context-head { display:flex; flex-wrap:wrap; gap:5px; margin:6px 0; }
+.pg-plan-tracks { margin-top:0; }
+.pg-list > li:has(.pg-plan-tracks) { border-left:0; padding-left:0; }
+.pg-more { margin-top:14px; }
+.pg-context .pg-exact { margin:7px 0; }
+.pg-exact > span { display:block; overflow-wrap:anywhere; }
+.pg-context p { margin:0; }
+.pg-plan-change .pg-link { padding-top:5px; }
+
+.pg-artist-compact { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:100%; }

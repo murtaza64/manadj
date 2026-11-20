@@ -2258,3 +2258,20 @@ def test_export_impact_describes_a_rebuild_writes_nothing_and_is_not_executable(
 def test_export_impact_refuses_a_non_rekordbox_folder(client: TestClient, tmp_path: Path):
     res = client.post("/api/external-drives/export/impact", json={"root": str(tmp_path), "playlist_ids": []})
     assert res.status_code == 404
+
+
+def test_preview_copy_candidates_are_response_only_not_identity_or_import_eligibility(client, db_session, usb, tmp_path, monkeypatch):
+    from backend.sync_common import suggestions
+    before = external_drives.build_pull_preview(db_session, usb)
+    entry = next(item for item in before.entries if item.status == 'new')
+    monkeypatch.setattr(suggestions, 'suggest_copies', lambda entries, tracks: {entry.ordinal: [{'track_id': 999, 'title': 'Possible copy', 'evidence': 'audio unverified'}]})
+    response = client.post('/api/external-drives/preview', json={'root': str(usb)})
+    assert response.status_code == 200
+    body = response.json()
+    assert body['fingerprint'] == before.fingerprint
+    row = next(item for item in body['entries'] if item['ordinal'] == entry.ordinal)
+    assert row['status'] == 'new' and row['candidates'][0]['track_id'] == 999
+    # Internal import preview never consumes candidate IDs from the response.
+    after = external_drives.build_pull_preview(db_session, usb)
+    assert after.fingerprint == before.fingerprint
+    assert next(item for item in after.entries if item.ordinal == entry.ordinal).status == 'new'

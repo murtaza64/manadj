@@ -73,6 +73,7 @@ class PullEntryOut(BaseModel):
     status: str
     detail: str | None
     matched_path: str | None
+    candidates: list[dict] = []
 
 
 class MembershipOut(BaseModel):
@@ -166,7 +167,15 @@ def preview_pull(request: PreviewRequest, db: Session = Depends(get_db)):
         )
     except external_drives.ExternalDriveError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    return _preview_out(preview)
+    response = _preview_out(preview)
+    # Suggestions are display-only: they never change status, fingerprints, import
+    # selection, counterpart identity or field-write eligibility.
+    from backend.models import Track
+    from backend.sync_common.suggestions import suggest_copies
+    candidates = suggest_copies(preview.entries, db.query(Track).all())
+    for entry in response.entries:
+        entry.candidates = candidates.get(entry.ordinal, [])
+    return response
 
 
 class CheckRequest(BaseModel):

@@ -87,6 +87,8 @@ export interface ExternalDrivePullEntry {
   detail: string | null;
   /** Library file that content-verified as the same audio, when one did. */
   matched_path: string | null;
+  /** Display-only name/duration suggestions. Never confirmed audio identity. */
+  candidates?: { track_id: number; title: string | null; artist: string | null; filename: string; score: number; duration: string; evidence: string }[];
 }
 
 export interface ExternalDrivePlaylistMembership {

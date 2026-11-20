@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type CSSProperties, type PointerEvent } from 'react';
 import { api } from '../api/client';
 import type { ExternalDrive, ExternalDriveCheck, ExternalDriveFieldComparison, ExternalDrivePreview, ExternalDrivePreviewPlaylist, ExternalDrivePullEntry } from '../api/client';
 import {
@@ -7,8 +7,12 @@ import {
 } from './UnifiedSync';
 import { plural } from './plural';
 import { ExportImpact } from './ExportImpact';
-import { DesktopLibrary } from './DesktopLibrary';
+import { DesktopSourceBrowser } from './DesktopSourceBrowser';
 import './SyncBrowser.css';
+import { ConstructionNotice } from './ConstructionNotice';
+import { useFitColumns } from './FitColumnHeaders';
+const SYNC_COLUMN_IDS = ['order', 'title', 'artist', 'bpm', 'key', 'library', 'diff'];
+const SYNC_COLUMN_SHARES = [5, 28, 17, 8, 7, 16, 19];
 
 /** Sync: the USB library on the left (every playlist, every track), what is out
  * of sync marked beside each item, and one accumulated plan on the right.
@@ -72,18 +76,37 @@ const fmtBpm = (b: number | null) => (b ? String(Math.round(b * 10) / 10) : '');
 const FIELD_LABEL: Record<string, string> = { title: 'Title', artist: 'Artist', bpm: 'BPM', key: 'Key' };
 const fieldKey = (t: number, f: string) => `${t}:${f}`;
 
-export function SyncBrowser({ toolbar }: { toolbar?: ReactNode } = {}) {
+export function SyncBrowser({ toolbar, onPendingChange }: { toolbar?: ReactNode; onPendingChange?: (pending: boolean) => void } = {}) {
+  const fit = useFitColumns(SYNC_COLUMN_IDS, SYNC_COLUMN_SHARES);
   const [drives, setDrives] = useState<ExternalDrive[] | null>(null);
   const [detectError, setDetectError] = useState<string | null>(null);
   const [root, setRoot] = useState<string | null>(null);
-  const [desktop, setDesktop] = useState(false);
+  const [desktop, setDesktop] = useState<'engine' | 'rekordbox' | null>(null);
   const [data, setData] = useState<Record<string, DriveData>>({});
   // Plans live per drive root and survive switching drives and views.
+  const [planWidth, setPlanWidth] = useState(320);
+  const planSidebar = useRef<HTMLElement>(null);
+  const resizePlan = (event: PointerEvent<HTMLElement>) => {
+    event.preventDefault(); const target = event.currentTarget; target.setPointerCapture(event.pointerId);
+    const start = event.clientX, original = planSidebar.current?.getBoundingClientRect().width ?? planWidth;
+    const max = Math.min(520, (planSidebar.current?.parentElement?.clientWidth ?? 1000) - 450);
+    const move = (e: globalThis.PointerEvent) => setPlanWidth(Math.max(240, Math.min(max, original + start - e.clientX)));
+    const end = () => { target.removeEventListener('pointermove', move); target.removeEventListener('pointerup', end); target.removeEventListener('pointercancel', end); };
+    target.addEventListener('pointermove', move); target.addEventListener('pointerup', end); target.addEventListener('pointercancel', end);
+  };
+  const [hoverResult, setHoverResult] = useState<{ key: string; value: string | number | null } | null>(null);
+  const [reviewing, setReviewing] = useState(false);
+  const [selectedOrdinals, setSelectedOrdinals] = useState<Set<number>>(new Set());
   const [plans, setPlans] = useState<Record<string, Plan>>({});
   const [results, setResults] = useState<Record<string, ItemResult[]>>({});
   const [applying, setApplying] = useState(false);
+  const [desktopBusy, setDesktopBusy] = useState(false);
+  const navigationLocked = applying || desktopBusy;
+  useEffect(() => { onPendingChange?.(navigationLocked); }, [navigationLocked, onPendingChange]);
   const [sel, setSel] = useState<number | 'all'>('all');
   const [issuesOnly, setIssuesOnly] = useState(false);
+  const [expandedDiffs, setExpandedDiffs] = useState<Set<string>>(new Set());
+  const toggleDiff = (key: string) => setExpandedDiffs((previous) => { const next = new Set(previous); if (next.has(key)) next.delete(key); else next.add(key); return next; });
   const gens = useRef<Record<string, number>>({});
 
   const patch = (r: string, f: (d: DriveData) => DriveData) => setData((prev) => ({ ...prev, [r]: f(prev[r] ?? BLANK) }));
@@ -113,6 +136,7 @@ export function SyncBrowser({ toolbar }: { toolbar?: ReactNode } = {}) {
   const drive = drives?.find((d) => d.root === root) ?? null;
   useEffect(() => { if (drive && !data[drive.root]) read(drive); }, [drive, data, read]);
   useEffect(() => { setSel('all'); }, [root]);
+  useEffect(() => { setSelectedOrdinals(new Set()); setHoverResult(null); }, [root, sel, issuesOnly]);
 
   const d = (root && data[root]) || BLANK;
   const plan = (root && plans[root]) || EMPTY_PLAN;
@@ -139,6 +163,7 @@ export function SyncBrowser({ toolbar }: { toolbar?: ReactNode } = {}) {
   const fieldItem: QueueItem | null = fields && taking.length > 0
     ? { key: 'fields', kind: 'fields', name: plural(taking.length, 'track detail'), snapshot: fieldsSnapshot(fields, taking), changes: taking.map((c) => ({ ...c })) }
     : null;
+  useEffect(() => { setReviewing(false); }, [plans, root, d.read, d.fields]);
   const items: QueueItem[] = [...plan.queue, ...(fieldItem ? [fieldItem] : [])];
   const queued = (key: string) => items.some((q) => q.key === key);
   const dequeue = (key: string) => {
@@ -167,9 +192,15 @@ export function SyncBrowser({ toolbar }: { toolbar?: ReactNode } = {}) {
     clearResults();
   };
   const newTracks = preview?.entries.filter((e) => e.status === 'new') ?? [];
+  const queueTrack = (entry: ExternalDrivePullEntry) => {
+    if (!preview || entry.status !== 'new' || !hasDest) return;
+    const key = `track:${entry.ordinal}`;
+    setPlan(p => ({ ...p, queue: [...p.queue.filter(item => item.key !== key && item.key !== 'tracks'), { key, kind: 'tracks', name: entry.title ?? entry.device_path, snapshot: snapshotOfTracks({ ...preview, entries: [entry] }), ordinals: [entry.ordinal] }] }));
+    clearResults();
+  };
   const queueTracks = () => {
     if (!preview) return;
-    setPlan((p) => ({ ...p, queue: [...p.queue.filter((i) => i.key !== 'tracks'), {
+    setPlan((p) => ({ ...p, queue: [...p.queue.filter((i) => i.kind !== 'tracks'), {
       key: 'tracks', kind: 'tracks', name: plural(newTracks.length, 'track'), snapshot: snapshotOfTracks(preview), ordinals: newTracks.map((e) => e.ordinal),
     }] }));
     clearResults();
@@ -195,7 +226,7 @@ export function SyncBrowser({ toolbar }: { toolbar?: ReactNode } = {}) {
           }
           const bound = await api.externalDrives.preview(target.root, dest || undefined, true);
           const pl = item.kind === 'tracks' ? null : (bound.playlists ?? []).find((p) => p.id === item.playlistId);
-          const nowSnap = item.kind === 'tracks' ? snapshotOfTracks(bound) : pl ? snapshotOfPlaylist(pl) : null;
+          const nowSnap = item.kind === 'tracks' ? snapshotOfTracks({ ...bound, entries: bound.entries.filter(entry => item.ordinals.includes(entry.ordinal)) }) : pl ? snapshotOfPlaylist(pl) : null;
           if (nowSnap !== item.snapshot) {
             out.push({ key: item.key, name: item.name, status: 'held', detail: 'Changed since you queued it. Nothing was done; review it again.' });
             continue;
@@ -255,20 +286,21 @@ export function SyncBrowser({ toolbar }: { toolbar?: ReactNode } = {}) {
       <div className="pg-top">
         <b>Sync</b>
         {drives?.map((x) => (
-          <button key={x.root} className="btn" aria-pressed={!desktop && x.root === root} onClick={() => { setDesktop(false); setRoot(x.root); }}>
+          <button key={x.root} className="btn" disabled={navigationLocked} aria-pressed={!desktop && x.root === root} onClick={() => { setDesktop(null); setRoot(x.root); }}>
             {x.name}{planCount(x.root) > 0 && <span className="pg-badge">{planCount(x.root)}</span>}
           </button>
         ))}
-        <button className="btn pg-desktop" aria-pressed={desktop} title="The Rekordbox library on this computer" onClick={() => setDesktop(true)}>Rekordbox desktop</button>
+        <button className="btn pg-desktop" disabled={navigationLocked} aria-pressed={desktop === 'rekordbox'} title="The Rekordbox library on this computer" onClick={() => setDesktop('rekordbox')}>Rekordbox desktop</button>
+        <button className="btn" disabled={navigationLocked} aria-pressed={desktop === 'engine'} title="The Engine DJ library on this computer, not USB" onClick={() => setDesktop('engine')}>Engine DJ desktop</button>
         <button className="btn pg-detect" disabled={applying} onClick={() => { setDrives(null); detect(); }}>Detect drives</button>
         {toolbar}
       </div>
-      {desktop && <DesktopLibrary />}
+      {desktop && <DesktopSourceBrowser key={desktop} source={desktop} onPendingChange={setDesktopBusy} />}
       {!desktop && drives === null && <p className="pg-empty" role="status">Looking for drives…</p>}
       {!desktop && detectError && <p className="pg-empty tone-unknown" role="alert">Drive detection failed ({detectError})</p>}
       {!desktop && drives && drives.length === 0 && !detectError && <p className="pg-empty">No USB found</p>}
       {!desktop && drive && (
-        <div className="pg-browser" aria-label={`USB ${drive.name}`}>
+        <div className="pg-browser" aria-label={`USB ${drive.name}`} style={{ '--plan-width': `${planWidth}px` } as CSSProperties}>
           <header className="pg-bar">
             <b>{drive.name}</b><span className="pg-chip">{family}</span>
             <span className="pg-read">{d.read.state === 'ready' ? `Read ${d.read.readAt.toLocaleTimeString()}` : d.read.state === 'loading' ? 'Reading…' : 'Not read'}</span>
@@ -306,42 +338,54 @@ export function SyncBrowser({ toolbar }: { toolbar?: ReactNode } = {}) {
                   {selTag && <span className={`pg-tag tone-${selTag.tone}`} title={selState!.label}>{selTag.label}</span>}
                   <span className="pg-order">{selected ? 'Drive order' : 'Needs attention first'}</span>
                   <button className="btn pg-filter" aria-pressed={issuesOnly} onClick={() => setIssuesOnly((v) => !v)}>Issues only</button>
+                  <details className="pg-bulk"><summary>Whole-playlist options</summary>
                   {selected && selState!.kind === 'work' && (queued(`pl:${selected.id}`)
                     ? <button className="btn" onClick={() => dequeue(`pl:${selected.id}`)}>Remove from plan</button>
-                    : <button className="btn btn-primary" disabled={applying} onClick={() => queuePlaylist(selected, selState!)}>
-                        {selState!.action === 'copy' ? 'Copy to library' : selState!.action === 'pair' ? `Pair with "${selected.membership?.candidate_name}" and update` : 'Update library'}
+                    : <button className="btn" disabled={applying || plan.queue.some(item => item.kind === 'tracks')} onClick={() => queuePlaylist(selected, selState!)}>
+                        {selState!.action === 'copy' ? 'Add whole playlist to plan' : selState!.action === 'pair' ? `Pair with "${selected.membership?.candidate_name}" and update` : 'Update library'}
                       </button>)}
                   {!selected && newTracks.length > 0 && (queued('tracks')
                     ? <button className="btn" onClick={() => dequeue('tracks')}>Remove from plan</button>
-                    : <button className="btn btn-primary" disabled={applying || !hasDest} onClick={queueTracks}>Import {newTracks.length}</button>)}
+                    : <button className="btn" disabled={applying || !hasDest} onClick={queueTracks}>Import {newTracks.length}</button>)}
+                  </details>
                 </div>
                 {selected && selState!.kind === 'work' && selState!.action === 'copy' && !queued(`pl:${selected.id}`) && (
                   <label className="pg-name-edit">Library name
                     <input type="text" value={plan.names[selected.id] ?? selected.name ?? ''} onChange={(e) => setPlan((p) => ({ ...p, names: { ...p.names, [selected.id]: e.target.value } }))} />
                   </label>
                 )}
-                <table className="pg-tracks">
-                  <thead><tr><th /><th>Title</th><th>Artist</th><th>BPM</th><th>Key</th><th>Library</th><th>{d.fields === 'failed' ? 'Differs: unknown' : 'Differs'}</th></tr></thead>
+                {selectedOrdinals.size > 0 && <div className="pg-selection-bar" role="status"><b>{selectedOrdinals.size} selected</b><span>{rows.filter(e => selectedOrdinals.has(e.ordinal) && e.status === 'new').length} importable · {rows.filter(e => selectedOrdinals.has(e.ordinal) && e.status !== 'new').length} excluded</span><button className="btn" disabled={applying || !hasDest || !rows.some(e => selectedOrdinals.has(e.ordinal) && e.status === 'new')} onClick={() => rows.filter(e => selectedOrdinals.has(e.ordinal) && e.status === 'new').forEach(queueTrack)}>Plan imports</button><button className="btn" disabled={applying} onClick={() => setSelectedOrdinals(new Set())}>Clear selection</button></div>}
+                <table className="pg-tracks" ref={fit.tableRef} style={fit.variables}>
+                  <thead>{fit.headers(['#', 'Title', 'Artist', 'BPM', 'Key', 'Library', d.fields === 'failed' ? 'Differs: unknown' : 'Differs'])}</thead>
                   <tbody>
                     {rows.map((e, i) => {
                       const m = trackMarker(e);
                       const ft = fieldTrackByOrdinal.get(e.ordinal);
+                      const diffKey = `${root}:${e.ordinal}`;
+                      const expanded = expandedDiffs.has(diffKey);
                       return [
-                        <tr key={`${e.ordinal}:${i}`} className={`row-${m.tone}`}>
-                          <td className="pg-i">{i + 1}</td>
-                          <td>{e.title ?? e.device_path}</td><td>{e.artist ?? ''}</td><td>{fmtBpm(e.bpm)}</td><td>{e.key ?? ''}</td>
-                          <td><span className={`pg-tag tone-${m.tone}`} title={m.hint}>{m.label}</span></td>
-                          <td>{ft?.fields.map((f) => <span key={f.field} className={`pg-tag tone-${f.applicable ? 'work' : 'unknown'}`} title={f.applicable ? `${FIELD_LABEL[f.field] ?? f.field} differs from your library` : f.conflict ?? (f.field === 'bpm' ? 'Shown only. BPM follows manaDJ analysis.' : 'Shown only. Cannot be taken.')}>{FIELD_LABEL[f.field] ?? f.field}</span>)}</td>
+                        <tr key={`${e.ordinal}:${i}`} className={`row-${m.tone}`} onClick={(event) => { if (!(event.target as HTMLElement).closest('button,input,summary,a')) toggleDiff(diffKey); }}>
+                          <td className="pg-i"><input type="checkbox" aria-label={`Select ${e.title ?? e.device_path}`} checked={selectedOrdinals.has(e.ordinal)} disabled={applying} onChange={() => setSelectedOrdinals(previous => { const next = new Set(previous); if (next.has(e.ordinal)) next.delete(e.ordinal); else next.add(e.ordinal); return next; })} />{i + 1}</td>
+                          <td><details className="pg-track-name"><summary>{(e.title ?? e.device_path).length > 66 ? `${(e.title ?? e.device_path).slice(0, 63)}…` : e.title ?? e.device_path}</summary><span>Drive path: {e.device_path}</span>{e.matched_path && <span>Library path: {e.matched_path}</span>}</details></td><td><span className="pg-artist-compact" title={e.artist ?? ''}>{e.artist ?? ''}</span></td><td>{fmtBpm(e.bpm)}</td><td>{e.key ?? ''}</td>
+                          <td><span className={`pg-tag tone-${m.tone}`} title={m.hint}>{m.label}</span>{e.status === 'new' && (queued(`track:${e.ordinal}`) ? <button className="btn pg-row-action" disabled={applying} onClick={() => dequeue(`track:${e.ordinal}`)}>Remove track from plan</button> : <button className="btn pg-row-action" disabled={applying || !hasDest || plan.queue.some(item => item.kind !== 'fields' && item.kind !== 'tracks') || queued('tracks')} onClick={() => queueTrack(e)}>Plan import</button>)}</td>
+                          <td>{ft?.fields.length ? <button type="button" className="pg-diff-toggle" aria-label={`Differences for ${e.title ?? e.device_path}`} aria-expanded={expanded} onClick={() => toggleDiff(diffKey)}>
+                            {ft.fields.map((f) => <span key={f.field} className={`pg-tag tone-${f.applicable ? 'work' : 'unknown'}`} title={f.conflict}>{FIELD_LABEL[f.field] ?? f.field}</span>)}
+                            <span aria-hidden="true">{expanded ? '▴' : '▾'}</span>
+                          </button> : <span className="pg-comparison-state">{e.candidates?.length ? <button className="btn pg-diff-toggle" onClick={() => toggleDiff(diffKey)} aria-expanded={expanded}>{e.candidates.length} possible {e.candidates.length === 1 ? 'copy' : 'copies'}</button> : e.status !== 'present' ? 'Match needed' : d.fields === 'failed' ? 'Diff unavailable' : d.fields === null ? 'Checking…' : 'No compared differences'}</span>}</td>
                         </tr>,
-                        ...(ft ? ft.fields.filter((f) => f.applicable).map((f) => {
+                        ...(expanded ? [<tr className="pg-context" key={`context:${e.ordinal}`}><td /><td colSpan={6}><div className="pg-context-head"><span className={`pg-tag tone-${e.status === 'present' ? 'ok' : 'unknown'}`}>{e.status === 'present' ? 'Exact audio' : 'Audio unverified'}</span><span className="pg-chip">USB → Library</span></div>{e.candidates?.map(candidate => <div key={candidate.track_id} className="pg-candidate"><b>{candidate.title ?? candidate.filename}</b><span>{candidate.artist} <span className="pg-tag tone-unknown">Possible copy</span> <span className="pg-tag">{candidate.duration} duration</span></span><details className="pg-exact"><summary>Evidence</summary><span>{candidate.evidence}</span><span>{candidate.filename}</span></details></div>)}<details className="pg-exact"><summary>Details</summary><span>{e.artist}</span><span>USB: {e.device_path}</span><span>Library: {e.matched_path ?? dest ?? 'No match'}</span></details>{e.status !== 'present' && <ConstructionNotice label="Link copy / cue source" detail="Persistent cross-copy links and cue provenance choices are not wired yet. No link or write is selected." />}</td></tr>] : []),
+                        ...(ft && expanded ? ft.fields.map((f) => {
                           const c: FieldChoice = { track_id: ft.track_id, field: f.field, label: ft.label, drive: f.drive, library: f.library };
                           const dec = decisionFor(c);
                           return (
                             <tr key={`${e.ordinal}:${i}:${f.field}`} className="pg-diff">
-                              <td /><td colSpan={4}><span className="pg-fname">{FIELD_LABEL[f.field] ?? f.field}</span> <span className="pg-mine">Mine</span> {f.library ?? 'empty'} <span className="pg-arrow">·</span> <span className="pg-mine">Drive</span> {String(f.drive)}</td>
-                              <td colSpan={2}>
-                                <button className={`btn${dec?.choice === 'keep' ? ' btn-primary' : ''}`} disabled={applying} aria-pressed={dec?.choice === 'keep'} onClick={() => decide(c, 'keep')}>Keep mine</button>
-                                <button className={`btn${dec?.choice === 'take' ? ' btn-primary' : ''}`} disabled={applying} aria-pressed={dec?.choice === 'take'} onClick={() => decide(c, 'take')}>Use drive's</button>
+                              <td /><td colSpan={4}><span className="pg-fname">{FIELD_LABEL[f.field] ?? f.field}</span>{hoverResult?.key === fieldKey(c.track_id, c.field) ? <span className="pg-result-preview"><span className="pg-chip">Library result</span> {hoverResult.value ?? 'empty'}</span> : <><span className="pg-mine">Library</span> {f.library ?? 'empty'} <span className="pg-arrow">·</span> <span className="pg-mine">USB</span> {String(f.drive)}</>}</td>
+                              <td colSpan={2}>{f.applicable ? <>
+                                <span className="pg-field-target">USB → Library</span>
+                                <button className={`btn${dec?.choice === 'keep' ? ' btn-primary' : ''}`} disabled={applying} aria-pressed={dec?.choice === 'keep'} onMouseEnter={() => setHoverResult({ key: fieldKey(c.track_id, c.field), value: f.library })} onMouseLeave={() => setHoverResult(null)} onFocus={() => setHoverResult({ key: fieldKey(c.track_id, c.field), value: f.library })} onBlur={() => setHoverResult(null)} onClick={() => decide(c, 'keep')}>Keep Library</button>
+                                <button className={`btn${dec?.choice === 'take' ? ' btn-primary' : ''}`} disabled={applying} aria-pressed={dec?.choice === 'take'} onMouseEnter={() => setHoverResult({ key: fieldKey(c.track_id, c.field), value: f.drive })} onMouseLeave={() => setHoverResult(null)} onFocus={() => setHoverResult({ key: fieldKey(c.track_id, c.field), value: f.drive })} onBlur={() => setHoverResult(null)} onClick={() => decide(c, 'take')}>{dec?.choice === 'take' ? 'Planned ✓' : 'Use USB'}</button>
+                                {dec?.choice === 'take' && <button className="btn" disabled={applying} onClick={() => setPlan(p => ({ ...p, decisions: Object.fromEntries(Object.entries(p.decisions).filter(([key]) => key !== fieldKey(c.track_id, c.field))) }))}>Undo</button>}
+                                </> : <span className="pg-comparison-state">{f.conflict ?? (f.field === 'bpm' ? 'Read only · analysis' : 'Read only · cannot apply this field')}</span>}
                               </td>
                             </tr>
                           );
@@ -354,26 +398,29 @@ export function SyncBrowser({ toolbar }: { toolbar?: ReactNode } = {}) {
               </>
             )}
           </main>
-          <aside className="pg-right" aria-label="Plan and warnings">
+          <aside ref={planSidebar} className="pg-right" aria-label="Plan and warnings"><span className="pg-plan-grip" role="separator" tabIndex={0} aria-label="Resize plan sidebar" aria-orientation="vertical" aria-valuenow={Math.round(planWidth)} onPointerDown={resizePlan} onKeyDown={event => { if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.preventDefault(); setPlanWidth(width => Math.max(240, Math.min(520, width + (event.key === 'ArrowLeft' ? 20 : -20)))); } }} />
             <h3>Plan{items.length ? ` (${items.length})` : ''}</h3>
+            <div className="pg-target-chips"><span className="pg-chip">USB → Library</span><span className="pg-tag tone-none">USB read-only</span></div>
             <ul className="pg-list">
               {items.map((q) => (
                 <li key={q.key} className="tone-work">
-                  <b>{q.kind === 'copy' ? `Copy "${q.name}"` : q.kind === 'update' ? `Update "${q.name}"` : q.kind === 'fields' ? `Take ${q.name}` : `Import ${q.name}`}</b>
+                  <b>{q.kind === 'copy' ? `Copy "${q.name}"` : q.kind === 'update' ? `Update "${q.name}"` : q.kind === 'fields' ? '' : `Import ${q.name}`}</b>
                   {q.kind === 'fields'
-                    ? <details className="pg-exact"><summary>{plural(q.changes.length, 'change')}, library only</summary>
-                        <ul>{q.changes.map((c) => <li key={`${c.track_id}:${c.field}`}><b>{c.label}</b> {c.field}: {c.library ?? 'empty'} → {String(c.drive)}</li>)}</ul>
-                      </details>
+                    ? <div className="pg-plan-tracks">{[...new Set(q.changes.map(change => change.track_id))].map(trackId => {
+                        const changes = q.changes.filter(change => change.track_id === trackId);
+                        return <section key={trackId} className="pg-plan-track"><h4>{changes[0].label}</h4>{changes.map(c => <div className="pg-plan-change" key={c.field}><b>{FIELD_LABEL[c.field] ?? c.field}</b><span className="pg-plan-old">{c.library ?? 'empty'}</span><span className="pg-plan-new">→ {String(c.drive)}</span><button className="btn pg-link" disabled={applying} aria-label={`Remove ${c.field} change for ${c.label}`} onClick={() => decide(c, 'keep')}>Remove this field</button></div>)}</section>;
+                      })}</div>
                     : <details className="pg-exact"><summary>Details</summary>
-                        <span>{q.kind === 'tracks' ? 'Unmatched only' : (() => { const pl = playlists.find((p) => p.id === (q as { playlistId: number }).playlistId); return pl ? describeChange(pl) : ''; })()}</span>
+                        <span>{q.kind === 'tracks' ? `${q.ordinals.length} explicitly selected audio file(s). Destination: ${dest}` : (() => { const pl = playlists.find((p) => p.id === (q as { playlistId: number }).playlistId); return pl ? describeChange(pl) : ''; })()}</span>
                       </details>}
                   <button className="btn pg-link" disabled={applying} onClick={() => dequeue(q.key)}>Remove</button>
                 </li>
               ))}
               {items.length === 0 && !res && <li className="tone-none"><span>Nothing chosen</span></li>}
-              {drive.kind === 'rekordbox' ? <ExportImpact root={drive.root} /> : <li className="tone-building"><b>Library to drive</b><span>Not available yet</span></li>}
+
             </ul>
-            {items.length > 0 && <button className="btn btn-primary pg-apply" disabled={applying || d.read.state === 'loading'} onClick={() => void apply()}>{applying ? 'Applying…' : `Apply ${items.length}`}</button>}
+            {items.length > 0 && <button className="btn btn-primary pg-apply" disabled={applying || d.read.state === 'loading'} onClick={() => setReviewing(true)}>{applying ? 'Applying…' : `Review ${items.length} planned ${items.length === 1 ? 'operation' : 'operations'}`}</button>}
+            {reviewing && <section className="pg-review-confirm" aria-label="Confirm reviewed plan"><b>{items.length} {items.length === 1 ? 'operation' : 'operations'} → Library</b><div className="pg-target-chips"><span className="pg-tag">Rechecked before write</span><span className="pg-tag">USB unchanged</span></div><button className="btn btn-primary" disabled={applying} onClick={() => void apply()}>Confirm and apply plan</button><button className="btn" disabled={applying} onClick={() => setReviewing(false)}>Back to planning</button></section>}
             {otherPlans.map((x) => <button key={x.root} className="btn pg-link" onClick={() => setRoot(x.root)}>{planCount(x.root)} more planned on {x.name}</button>)}
             {res && (
               <div role="status">
@@ -383,7 +430,8 @@ export function SyncBrowser({ toolbar }: { toolbar?: ReactNode } = {}) {
                 </ul>
               </div>
             )}
-            <h3>Warnings</h3>
+            <details className="pg-exact pg-more"><summary>More operations <span className="pg-tag tone-unknown">Building</span></summary><ConstructionNotice label="Apply to similar" detail="Planned: reuse a reviewed operation across compatible exact-audio matches in this playlist, with affected tracks previewed. USB title writes and mixed membership plans are not wired." /><ConstructionNotice label="Cue / grid comparison" detail="USB cue and grid comparison is not wired. Only title, artist, key and BPM are compared." />{drive.kind === 'rekordbox' && <ul className="pg-list"><ExportImpact root={drive.root} /></ul>}</details>
+            <details className="pg-exact pg-more"><summary>Warnings</summary>
             <ul className="pg-list">
               {d.read.state === 'error' && <li className="tone-unknown">Drive not read</li>}
               {sum && sum.notInLibraryTracks > 0 && <li className="tone-work">{plural(sum.notInLibraryTracks, 'track')} not in library</li>}
@@ -396,6 +444,7 @@ export function SyncBrowser({ toolbar }: { toolbar?: ReactNode } = {}) {
               {incomplete > 0 && <li className="tone-unknown">{plural(incomplete, 'playlist')} list incomplete</li>}
               {sum && issueCount === 0 && changedChoices === 0 && d.fields !== 'failed' && d.fields !== null && <li className="tone-none">None found</li>}
             </ul>
+            </details>
             <details className="pg-exact pg-checked"><summary>What was checked</summary>
             <ul className="pg-list">
               {structure && <li className={`tone-${structure.tone}`}>{structure.text}</li>}
