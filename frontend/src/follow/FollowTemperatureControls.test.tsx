@@ -61,3 +61,19 @@ it('cancels native wheel scrolling while HFader still adjusts, including at the 
   act(() => fader.dispatchEvent(new WheelEvent('wheel', { deltaY: 100, bubbles: true, cancelable: true })));
   expect(getFollowTemperature()).toBe(1);
 });
+
+it('rerolls immediately on click and replays the dice tumble each time', async () => {
+  const { getFollowSeed } = await import('./paramsStore');
+  setFollowParams({ temperature: 0.5 });
+  act(() => root.render(<FollowTemperatureControls active />));
+  const button = host.querySelector<HTMLButtonElement>('button[aria-label="Reroll Compatible"]')!;
+  expect(button.querySelector('svg')?.getAttribute('data-rolling')).toBe('false');
+  const seed = getFollowSeed();
+  act(() => button.click());
+  expect(getFollowSeed()).toBe((seed + 1) >>> 0);
+  const first = button.querySelector('svg')!;
+  expect(first.getAttribute('data-rolling')).toBe('true');
+  act(() => button.click());
+  expect(button.querySelector('svg')).not.toBe(first);
+  expect(button.textContent).toBe('');
+});
