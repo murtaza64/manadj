@@ -188,4 +188,44 @@ final class NativeAudioTests: XCTestCase {
         XCTAssertEqual(model.decks[0].track?.id, cached.id)
         XCTAssertTrue(model.audio?.state(0).ready == true)
     }
+    @MainActor func testLocalLiveRealPairedSyntheticHostAndNativeTakeover() async throws {
+        let fixture = try XCTUnwrap(Bundle.main.url(forResource: "lan-fixture", withExtension: "json"))
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: fixture)) as? [String: Any])
+        let origin = try XCTUnwrap(object["origin"] as? String)
+        let url = try XCTUnwrap(URL(string: origin))
+        let candidate = SyncClient(try DesktopConnection(url: url))
+        let ticket = try await candidate.requestPairing(deviceId: UUID().uuidString, deviceName: "Synthetic local-live test")
+        var token: String?
+        for _ in 0..<40 {
+            if let value = try await candidate.pollPairing(ticket).token { token = value; break }
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        let connection = try DesktopConnection(url: url, deviceToken: XCTUnwrap(token))
+        let envelope = try await SyncClient(connection).liveState()
+        XCTAssertEqual(envelope.state, "live")
+        XCTAssertEqual(envelope.anchor?.decks.count, 4)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("live-test-" + UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = AppModel(storageRoot: root)
+        for _ in 0..<100 {
+            if model.status.contains("Pair with") { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        model.useLocalLiveTestConnection(connection)
+        model.startLocalLive()
+        defer { model.stopLocalLive() }
+        var heardPlaying = false
+        for _ in 0..<250 {
+            if model.audio?.state(0).playing == true { heardPlaying = true; break }
+            try await Task.sleep(for: .milliseconds(40))
+        }
+        XCTAssertTrue(heardPlaying, model.liveStatus + " " + (model.error ?? ""))
+        XCTAssertEqual(model.decks[0].title, "Synthetic LAN Tone")
+        XCTAssertGreaterThan(model.liveRoundTrip, 0)
+        model.stopLocalLive()
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertFalse(model.audio?.state(0).playing == true)
+        XCTAssertFalse(model.liveListening)
+    }
+
 }

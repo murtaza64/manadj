@@ -5,6 +5,7 @@ struct SettingsView: View {
     @State private var forgetConfirmation = false
     @State private var bulkConfirmation = false
     @State private var usb = false
+    @State private var liveConfirmation = false
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
@@ -37,6 +38,9 @@ struct SettingsView: View {
                 Text("Normal sync caches the library and previews. Audio downloads when loaded. All audio can use substantial storage. This slice does not automatically remove old revisions.").font(Ink.font(11)).foregroundStyle(Ink.muted)
                 if model.pairedOrigin != nil { Button("FORGET DESKTOP") { forgetConfirmation = true }.buttonStyle(FlatButtonStyle(color: Ink.danger)).disabled(model.busy) }
                 Divider().overlay(Ink.edge)
+                Button("LISTEN TO LOCAL LIVE · PROTOTYPE") { liveConfirmation = true }.buttonStyle(FlatButtonStyle()).disabled(model.busy || model.pairedOrigin == nil || model.recording)
+                Text("Desktop: turn on LOCAL LIVE. Replaces this phone's playback; audio downloads first. Trusted LAN only. Sampled-state timing is experimental.").font(Ink.font(11)).foregroundStyle(Ink.warning)
+                Divider().overlay(Ink.edge)
                 Button("REKORDBOX USB IMPORT") { usb = true }.buttonStyle(FlatButtonStyle())
                 Divider().overlay(Ink.edge)
                 SectionLabel(title: "AUDIO OUTPUT")
@@ -64,6 +68,10 @@ struct SettingsView: View {
                 Text("Still missing: desktop write-back, saved imports browser, Session replay/timeline, sync groups/phase alignment, scratch gestures, stems, heard-latency calibration, full detail-waveform editing and four-channel output. Read the Android coverage map in ios/FEATURE_COVERAGE.md.").font(Ink.font(12)).foregroundStyle(Ink.warning)
             }.padding(16)
         }.background(Ink.base)
+        .confirmationDialog("Replace phone playback with your paired desktop?", isPresented: $liveConfirmation) {
+            Button("Listen to local live") { model.startLocalLive() }
+        } message: { Text("All phone decks pause. No control is sent back to the laptop. Stop leaves phone decks paused.") }
+        .fullScreenCover(isPresented: $model.liveListening) { LocalLiveView().environmentObject(model) }
         .sheet(isPresented: $usb) { USBImportView().environmentObject(model) }
         .confirmationDialog("Forget this desktop on this iPhone?", isPresented: $forgetConfirmation) {
             Button("Forget desktop", role: .destructive) { model.forgetDesktop() }

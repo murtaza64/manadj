@@ -7,7 +7,7 @@ import sys
 
 root = Path(__file__).resolve().parents[2]
 resource = root / 'ios/Manadj/Resources/lan-fixture.json'
-process = subprocess.Popen([sys.executable, str(root / 'tests/lan_fixture/serve.py'), '--seconds', '1500'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+process = subprocess.Popen([sys.executable, str(root / 'tests/lan_fixture/serve.py'), '--seconds', '1500', '--live'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
 try:
     line = process.stdout.readline()
     if not line:

@@ -114,6 +114,8 @@ def build_app(get_code, pairing: PairingRequests | None = None) -> FastAPI:
         return await call_next(request)
 
     app.include_router(device_sync.router, prefix="/api/device-sync")
+    from .local_live import reader
+    app.include_router(reader, prefix="/api/device-sync")
     if pairing is not None:
         app.include_router(_pair_router(pairing), prefix="/api/device-pair")
     return app
