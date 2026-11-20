@@ -4,6 +4,7 @@ struct SettingsView: View {
     @EnvironmentObject var model: AppModel
     @State private var forgetConfirmation = false
     @State private var bulkConfirmation = false
+    @State private var usb = false
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
@@ -36,6 +37,8 @@ struct SettingsView: View {
                 Text("Normal sync caches the library and previews. Audio downloads when loaded. All audio can use substantial storage. This slice does not automatically remove old revisions.").font(Ink.font(11)).foregroundStyle(Ink.muted)
                 if model.pairedOrigin != nil { Button("FORGET DESKTOP") { forgetConfirmation = true }.buttonStyle(FlatButtonStyle(color: Ink.danger)).disabled(model.busy) }
                 Divider().overlay(Ink.edge)
+                Button("REKORDBOX USB IMPORT") { usb = true }.buttonStyle(FlatButtonStyle())
+                Divider().overlay(Ink.edge)
                 SectionLabel(title: "AUDIO OUTPUT")
                 Toggle("Split mono: left master / right cue", isOn: $model.splitOutput).onChange(of: model.splitOutput) { _, on in model.audio?.splitOutput(on) }
                 Text("Stereo is master only. Split mono requires a DJ splitter cable. Separate four-channel USB routing is not implemented in this slice.").font(Ink.font(11)).foregroundStyle(Ink.muted)
@@ -61,6 +64,7 @@ struct SettingsView: View {
                 Text("Still missing: desktop write-back, saved imports browser, Session replay/timeline, sync groups/phase alignment, scratch gestures, stems, heard-latency calibration, full detail-waveform editing and four-channel output. Read the Android coverage map in ios/FEATURE_COVERAGE.md.").font(Ink.font(12)).foregroundStyle(Ink.warning)
             }.padding(16)
         }.background(Ink.base)
+        .sheet(isPresented: $usb) { USBImportView().environmentObject(model) }
         .confirmationDialog("Forget this desktop on this iPhone?", isPresented: $forgetConfirmation) {
             Button("Forget desktop", role: .destructive) { model.forgetDesktop() }
         } message: { Text("Downloaded tracks remain offline. Remove this iPhone in desktop settings to revoke its token there too.") }

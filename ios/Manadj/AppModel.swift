@@ -46,6 +46,9 @@ struct DeckViewState {
         else if ProcessInfo.processInfo.arguments.contains("--performance-ui-fixture") {
             root = Self.makePerformanceUIFixture() ?? FileManager.default.temporaryDirectory.appendingPathComponent("fixture-failed-" + UUID().uuidString)
         }
+        else if ProcessInfo.processInfo.arguments.contains("--usb-ui-fixture") {
+            root = FileManager.default.temporaryDirectory.appendingPathComponent("usb-app-fixture-" + UUID().uuidString)
+        }
         else if ProcessInfo.processInfo.arguments.contains("--library-ui-fixture") {
             root = Self.makeLibraryUIFixture() ?? FileManager.default.temporaryDirectory.appendingPathComponent("fixture-failed-" + UUID().uuidString)
         } else { root = URL.applicationSupportDirectory.appendingPathComponent("manadj", isDirectory: true) }
@@ -83,7 +86,7 @@ struct DeckViewState {
             repository = repo
             snapshot = await repo.cachedSnapshot()
             downloaded = await repo.downloadedIds()
-            if !ProcessInfo.processInfo.arguments.contains("--library-ui-fixture"), !ProcessInfo.processInfo.arguments.contains("--performance-ui-fixture"), let url = URL(string: origin), let token = PairingKeychain.token(for: origin) {
+            if !ProcessInfo.processInfo.arguments.contains("--library-ui-fixture"), !ProcessInfo.processInfo.arguments.contains("--performance-ui-fixture"), !ProcessInfo.processInfo.arguments.contains("--usb-ui-fixture"), let url = URL(string: origin), let token = PairingKeychain.token(for: origin) {
                 connection = try DesktopConnection(url: url, deviceToken: token, deviceId: deviceId, deviceName: UIDevice.current.name)
             }
             if let warning = await repo.recoveryWarning { error = warning }
@@ -202,7 +205,7 @@ struct DeckViewState {
         }
         return true
     }
-    func importFile(_ url: URL, deck: Int) {
+    func importFile(_ url: URL, deck: Int, title: String? = nil, artist: String? = nil) {
         guard let audio, !decks[deck].loading else { return }
         let previousLoad = audio.state(deck).load
         decks[deck].loading = true
@@ -220,8 +223,8 @@ struct DeckViewState {
                     return target
                 }.value
                 let duration = try await audio.load(copied, deck: deck)
-                decks[deck].title = url.deletingPathExtension().lastPathComponent
-                decks[deck].artist = "Imported from Files · no saved grid"
+                decks[deck].title = title ?? url.deletingPathExtension().lastPathComponent
+                decks[deck].artist = artist ?? "Imported from Files · no saved grid"
                 decks[deck].track = nil
                 decks[deck].duration = duration
                 decks[deck].waveform = nil

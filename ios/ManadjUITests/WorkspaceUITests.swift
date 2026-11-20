@@ -102,6 +102,36 @@ final class WorkspaceUITests: XCTestCase {
         expectation(for: NSPredicate(format: "value BEGINSWITH %@", "paused"), evaluatedWith: wave); waitForExpectations(timeout: 5)
         let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Live mixer gesture and transport recovery"; shot.lifetime = .keepAlways; add(shot)
     }
+    @MainActor func testRekordboxUSBPreviewExplicitCopyAndPlayback() {
+        defer { captureFailure() }
+        let app = XCUIApplication(); app.launchArguments = ["--usb-ui-fixture"]; app.launch()
+        XCTAssertTrue(app.buttons["Settings"].waitForExistence(timeout: 10)); app.buttons["Settings"].tap()
+        let entry = app.buttons["REKORDBOX USB IMPORT"]
+        for _ in 0..<4 where !entry.isHittable { app.swipeUp() }
+        XCTAssertTrue(entry.isHittable); entry.tap()
+        let confirm = app.buttons["usb-confirm-import"]
+        XCTAssertTrue(confirm.waitForExistence(timeout: 10))
+        XCTAssertEqual(confirm.label, "Import 1 selected")
+        XCTAssertTrue(app.staticTexts["Preview only. Nothing copied."].exists)
+        XCTAssertTrue(app.staticTexts["Missing USB audio"].exists)
+        let preview = XCTAttachment(screenshot: app.screenshot()); preview.name = "Synthetic USB read-only preview before explicit copy"; preview.lifetime = .keepAlways; add(preview)
+        confirm.tap()
+        XCTAssertTrue(app.buttons["Load A"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["Imported 1 track into this iPhone. USB unchanged."].exists)
+        let copied = XCTAttachment(screenshot: app.screenshot()); copied.name = "Synthetic USB app-owned import after confirmation"; copied.lifetime = .keepAlways; add(copied)
+        app.buttons["Load A"].firstMatch.tap()
+        app.buttons["CLOSE"].tap()
+        let play = app.buttons["A play pause"]
+        XCTAssertTrue(play.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["USB generated pulse"].exists)
+        // Imported USB audio has no saved cue/grid/waveform in this prototype.
+        let ready = NSPredicate(format: "enabled == true AND hittable == true")
+        expectation(for: ready, evaluatedWith: play); waitForExpectations(timeout: 15)
+        play.tap()
+        let wave = app.otherElements["deck-0-detail-wave"]
+        expectation(for: NSPredicate(format: "value BEGINSWITH %@", "playing"), evaluatedWith: wave); waitForExpectations(timeout: 8)
+        play.tap()
+    }
     @MainActor func testLibrarySourceNavigationAndBack() {
         defer { captureFailure() }
         let app = XCUIApplication(); app.launchArguments = ["--library-ui-fixture"]; app.launch()
