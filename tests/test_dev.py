@@ -74,7 +74,8 @@ while True: time.sleep(.05)
     finally:
         try:
             os.killpg(process.pid, signal.SIGKILL)
-        except ProcessLookupError:
+        except (ProcessLookupError, PermissionError):
+            # macOS may deny signalling a group already killed/reaping.
             pass
         process.wait(timeout=3)
 
@@ -129,3 +130,19 @@ def test_missing_electron_cleans_up_both_servers(monkeypatch, tmp_path):
     monkeypatch.setattr(dev, "stop_processes", lambda processes: cleaned.append(list(processes)))
     assert dev.main() == 1
     assert cleaned == [started]
+
+
+def test_inaccessible_group_probe_is_conservative(monkeypatch):
+    import os
+    from types import SimpleNamespace
+    import pytest
+
+    if os.name == "nt":
+        pytest.skip("POSIX group existence semantics")
+
+    def denied(pid, sig):
+        assert pid == 123 and sig == 0
+        raise PermissionError(1, "Operation not permitted")
+
+    monkeypatch.setattr(os, "killpg", denied)
+    assert dev._group_exists(SimpleNamespace(pid=123)) is True
