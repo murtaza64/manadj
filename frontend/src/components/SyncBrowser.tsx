@@ -10,9 +10,15 @@ import { ExportImpact } from './ExportImpact';
 import { DesktopSourceBrowser } from './DesktopSourceBrowser';
 import './SyncBrowser.css';
 import { ConstructionNotice } from './ConstructionNotice';
+import BPMDisplay from './BPMDisplay';
+import { KEY_TABLE } from '../utils/keyTable.generated';
+import { formatKeyDisplay } from '../utils/keyUtils';
+import KeyDisplay from './KeyDisplay';
+import { TrackWaveformPreview } from './TrackWaveformPreview';
+import './TrackRow.css';
 import { useFitColumns } from './FitColumnHeaders';
-const SYNC_COLUMN_IDS = ['order', 'title', 'artist', 'bpm', 'key', 'library', 'diff'];
-const SYNC_COLUMN_SHARES = [5, 28, 17, 8, 7, 16, 19];
+const SYNC_COLUMN_IDS = ['order', 'title', 'artist', 'bpm', 'key', 'preview', 'library', 'diff'];
+const SYNC_COLUMN_SHARES = [6, 24, 14, 7, 6, 13, 18, 12];
 
 /** Sync: the USB library on the left (every playlist, every track), what is out
  * of sync marked beside each item, and one accumulated plan on the right.
@@ -72,7 +78,6 @@ const BLANK: DriveData = { read: { state: 'loading' }, check: null, fields: null
 
 /** Missing playlists first, then differing ones, then unknown, matching last. Array sort is stable, so drive order holds within a group. */
 const urgency = (s: RowState) => (s.kind === 'work' ? (s.action === 'copy' ? 0 : 1) : s.kind === 'match' ? 3 : 2);
-const fmtBpm = (b: number | null) => (b ? String(Math.round(b * 10) / 10) : '');
 const FIELD_LABEL: Record<string, string> = { title: 'Title', artist: 'Artist', bpm: 'BPM', key: 'Key' };
 const fieldKey = (t: number, f: string) => `${t}:${f}`;
 
@@ -332,55 +337,63 @@ export function SyncBrowser({ toolbar, onPendingChange }: { toolbar?: ReactNode;
             {d.read.state === 'error' && <p className="pg-empty tone-unknown" role="alert">Could not read this drive ({d.read.message}). Unplugged?</p>}
             {preview && (
               <>
-                <div className="pg-title">
+                <div className="pg-title" role="toolbar" aria-label="Sync track actions">
                   <b>{selected ? fullName(selected) : 'All tracks'}</b>
+                  {selectedOrdinals.size > 0 ? (
+                    <div className="pg-selected-actions" role="status"><b>{selectedOrdinals.size} selected</b><span>{rows.filter(e => selectedOrdinals.has(e.ordinal) && e.status === 'new').length} importable · {rows.filter(e => selectedOrdinals.has(e.ordinal) && e.status !== 'new').length} excluded</span><button className="btn" disabled={applying || !hasDest || !rows.some(e => selectedOrdinals.has(e.ordinal) && e.status === 'new')} onClick={() => rows.filter(e => selectedOrdinals.has(e.ordinal) && e.status === 'new').forEach(queueTrack)}>Plan imports</button><button className="btn" disabled={applying} onClick={() => setSelectedOrdinals(new Set())}>Clear selection</button></div>
+                  ) : <>
                   <span>{plural(rows.length, 'track')}{missingRows > 0 ? ` of ${selected!.track_count}` : ''}</span>
                   {selTag && <span className={`pg-tag tone-${selTag.tone}`} title={selState!.label}>{selTag.label}</span>}
                   <span className="pg-order">{selected ? 'Drive order' : 'Needs attention first'}</span>
                   <button className="btn pg-filter" aria-pressed={issuesOnly} onClick={() => setIssuesOnly((v) => !v)}>Issues only</button>
-                  <details className="pg-bulk"><summary>Whole-playlist options</summary>
+                  <div className="pg-playlist-actions" aria-label="Whole-playlist actions">
                   {selected && selState!.kind === 'work' && (queued(`pl:${selected.id}`)
                     ? <button className="btn" onClick={() => dequeue(`pl:${selected.id}`)}>Remove from plan</button>
-                    : <button className="btn" disabled={applying || plan.queue.some(item => item.kind === 'tracks')} onClick={() => queuePlaylist(selected, selState!)}>
-                        {selState!.action === 'copy' ? 'Add whole playlist to plan' : selState!.action === 'pair' ? `Pair with "${selected.membership?.candidate_name}" and update` : 'Update library'}
+                    : <button className="btn" title={`Whole playlist: ${fullName(selected)}. Adds a reviewable operation, does not apply it.`} disabled={applying || plan.queue.some(item => item.kind === 'tracks')} onClick={() => queuePlaylist(selected, selState!)}>
+                        {selState!.action === 'copy' ? 'Plan whole playlist' : selState!.action === 'pair' ? `Pair whole playlist` : 'Plan playlist update'}
                       </button>)}
                   {!selected && newTracks.length > 0 && (queued('tracks')
                     ? <button className="btn" onClick={() => dequeue('tracks')}>Remove from plan</button>
-                    : <button className="btn" disabled={applying || !hasDest} onClick={queueTracks}>Import {newTracks.length}</button>)}
-                  </details>
+                    : <button className="btn" disabled={applying || !hasDest} onClick={queueTracks}>Plan all {newTracks.length} imports</button>)}
+                  </div>
+                  </>}
                 </div>
                 {selected && selState!.kind === 'work' && selState!.action === 'copy' && !queued(`pl:${selected.id}`) && (
                   <label className="pg-name-edit">Library name
                     <input type="text" value={plan.names[selected.id] ?? selected.name ?? ''} onChange={(e) => setPlan((p) => ({ ...p, names: { ...p.names, [selected.id]: e.target.value } }))} />
                   </label>
                 )}
-                {selectedOrdinals.size > 0 && <div className="pg-selection-bar" role="status"><b>{selectedOrdinals.size} selected</b><span>{rows.filter(e => selectedOrdinals.has(e.ordinal) && e.status === 'new').length} importable · {rows.filter(e => selectedOrdinals.has(e.ordinal) && e.status !== 'new').length} excluded</span><button className="btn" disabled={applying || !hasDest || !rows.some(e => selectedOrdinals.has(e.ordinal) && e.status === 'new')} onClick={() => rows.filter(e => selectedOrdinals.has(e.ordinal) && e.status === 'new').forEach(queueTrack)}>Plan imports</button><button className="btn" disabled={applying} onClick={() => setSelectedOrdinals(new Set())}>Clear selection</button></div>}
+
                 <table className="pg-tracks" ref={fit.tableRef} style={fit.variables}>
-                  <thead>{fit.headers(['#', 'Title', 'Artist', 'BPM', 'Key', 'Library', d.fields === 'failed' ? 'Differs: unknown' : 'Differs'])}</thead>
+                  <thead>{fit.headers(['#', 'Title', 'Artist', 'BPM', 'Key', 'Library preview', 'Library', d.fields === 'failed' ? 'Differs: unknown' : 'Differs'])}</thead>
                   <tbody>
                     {rows.map((e, i) => {
                       const m = trackMarker(e);
+                      const keyValue = KEY_TABLE.find(row => row.camelot === e.key || row.openkey === e.key)?.engineId ?? e.key;
                       const ft = fieldTrackByOrdinal.get(e.ordinal);
                       const diffKey = `${root}:${e.ordinal}`;
                       const expanded = expandedDiffs.has(diffKey);
                       return [
-                        <tr key={`${e.ordinal}:${i}`} className={`row-${m.tone}`} onClick={(event) => { if (!(event.target as HTMLElement).closest('button,input,summary,a')) toggleDiff(diffKey); }}>
-                          <td className="pg-i"><input type="checkbox" aria-label={`Select ${e.title ?? e.device_path}`} checked={selectedOrdinals.has(e.ordinal)} disabled={applying} onChange={() => setSelectedOrdinals(previous => { const next = new Set(previous); if (next.has(e.ordinal)) next.delete(e.ordinal); else next.add(e.ordinal); return next; })} />{i + 1}</td>
-                          <td><details className="pg-track-name"><summary>{(e.title ?? e.device_path).length > 66 ? `${(e.title ?? e.device_path).slice(0, 63)}…` : e.title ?? e.device_path}</summary><span>Drive path: {e.device_path}</span>{e.matched_path && <span>Library path: {e.matched_path}</span>}</details></td><td><span className="pg-artist-compact" title={e.artist ?? ''}>{e.artist ?? ''}</span></td><td>{fmtBpm(e.bpm)}</td><td>{e.key ?? ''}</td>
-                          <td><span className={`pg-tag tone-${m.tone}`} title={m.hint}>{m.label}</span>{e.status === 'new' && (queued(`track:${e.ordinal}`) ? <button className="btn pg-row-action" disabled={applying} onClick={() => dequeue(`track:${e.ordinal}`)}>Remove track from plan</button> : <button className="btn pg-row-action" disabled={applying || !hasDest || plan.queue.some(item => item.kind !== 'fields' && item.kind !== 'tracks') || queued('tracks')} onClick={() => queueTrack(e)}>Plan import</button>)}</td>
-                          <td>{ft?.fields.length ? <button type="button" className="pg-diff-toggle" aria-label={`Differences for ${e.title ?? e.device_path}`} aria-expanded={expanded} onClick={() => toggleDiff(diffKey)}>
-                            {ft.fields.map((f) => <span key={f.field} className={`pg-tag tone-${f.applicable ? 'work' : 'unknown'}`} title={f.conflict}>{FIELD_LABEL[f.field] ?? f.field}</span>)}
+                        <tr key={`${e.ordinal}:${i}`} className={`track-row pg-track-row row-${m.tone}${selectedOrdinals.has(e.ordinal) ? ' track-row-selected' : ''}`} onClick={(event) => { if (!(event.target as HTMLElement).closest('button,input,summary,a')) toggleDiff(diffKey); }}>
+                          <td className="pg-i"><input type="checkbox" aria-label={`Select ${e.title ?? e.device_path}`} checked={selectedOrdinals.has(e.ordinal)} disabled={applying} onChange={() => setSelectedOrdinals(previous => { const next = new Set(previous); if (next.has(e.ordinal)) next.delete(e.ordinal); else next.add(e.ordinal); return next; })} /><span className="pg-row-number">{i + 1}</span></td>
+                          <td><div className="pg-track-title"><button type="button" className="pg-row-disclosure" aria-label={`Details for ${e.title ?? e.device_path}`} aria-expanded={expanded} onClick={() => toggleDiff(diffKey)}><span aria-hidden="true">{expanded ? '▾' : '▸'}</span></button><span className="pg-title-text" title={e.title ?? e.device_path}>{e.title ?? e.device_path}</span></div></td>
+                          <td><span className="pg-artist-compact" title={e.artist ?? ''}>{e.artist ?? ''}</span></td>
+                          <td><BPMDisplay bpm={e.bpm == null ? null : Math.round(e.bpm * 10) / 10} round={false} /></td><td><span title={e.key ?? undefined}>{formatKeyDisplay(keyValue) === '-' ? e.key ?? '—' : <KeyDisplay keyValue={keyValue} />}</span></td>
+                          <td className="pg-preview-cell">{e.status === 'present' && e.matched_track_id != null ? <span title="Library waveform for the confirmed audio match. Not USB cues."><TrackWaveformPreview trackId={e.matched_track_id} duration={e.duration_secs} /></span> : <span className="pg-preview-unavailable" title="No confirmed Library audio match, so no Library waveform can be shown">—</span>}</td>
+                          <td><div className="pg-row-actions"><span className={`pg-tag tone-${m.tone}`} title={`${m.label}: ${m.hint}`} aria-label={m.label}>{e.status === 'new' ? 'New' : e.status === 'present' ? 'In library' : e.status === 'missing-file' ? 'Missing' : e.status === 'duplicate' ? 'Duplicate' : 'Unverified'}</span>{e.status === 'new' && (queued(`track:${e.ordinal}`) ? <button className="btn pg-row-action" aria-label={`Remove ${e.title ?? e.device_path} from plan`} disabled={applying} onClick={() => dequeue(`track:${e.ordinal}`)}>Undo</button> : <button className="btn pg-row-action" aria-label={`Plan import ${e.title ?? e.device_path}`} disabled={applying || !hasDest || plan.queue.some(item => item.kind !== 'fields' && item.kind !== 'tracks') || queued('tracks')} onClick={() => queueTrack(e)}>Import</button>)}</div></td>
+                          <td>{ft?.fields.length ? <button type="button" className="pg-diff-toggle" aria-label={`Differences for ${e.title ?? e.device_path}`} title={ft.fields.map(f => `${FIELD_LABEL[f.field] ?? f.field}${f.conflict ? ': ' + f.conflict : ''}`).join(' · ')} aria-expanded={expanded} onClick={() => toggleDiff(diffKey)}>
+                            <span className={`pg-tag tone-${ft.fields.some(f => f.applicable) ? 'work' : 'unknown'}`}>{ft.fields.length === 1 ? FIELD_LABEL[ft.fields[0].field] ?? ft.fields[0].field : `${ft.fields.length} fields`}</span>
                             <span aria-hidden="true">{expanded ? '▴' : '▾'}</span>
-                          </button> : <span className="pg-comparison-state">{e.candidates?.length ? <button className="btn pg-diff-toggle" onClick={() => toggleDiff(diffKey)} aria-expanded={expanded}>{e.candidates.length} possible {e.candidates.length === 1 ? 'copy' : 'copies'}</button> : e.status !== 'present' ? 'Match needed' : d.fields === 'failed' ? 'Diff unavailable' : d.fields === null ? 'Checking…' : 'No compared differences'}</span>}</td>
+                          </button> : <span className="pg-comparison-state">{e.candidates?.length ? <button className="btn pg-diff-toggle" title="Possible copies, not confirmed audio matches" onClick={() => toggleDiff(diffKey)} aria-expanded={expanded}>{e.candidates.length} {e.candidates.length === 1 ? 'copy?' : 'copies?'}</button> : e.status !== 'present' ? 'Match needed' : d.fields === 'failed' ? 'Unavailable' : d.fields === null ? 'Checking…' : '—'}</span>}</td>
                         </tr>,
-                        ...(expanded ? [<tr className="pg-context" key={`context:${e.ordinal}`}><td /><td colSpan={6}><div className="pg-context-head"><span className={`pg-tag tone-${e.status === 'present' ? 'ok' : 'unknown'}`}>{e.status === 'present' ? 'Exact audio' : 'Audio unverified'}</span><span className="pg-chip">USB → Library</span></div>{e.candidates?.map(candidate => <div key={candidate.track_id} className="pg-candidate"><b>{candidate.title ?? candidate.filename}</b><span>{candidate.artist} <span className="pg-tag tone-unknown">Possible copy</span> <span className="pg-tag">{candidate.duration} duration</span></span><details className="pg-exact"><summary>Evidence</summary><span>{candidate.evidence}</span><span>{candidate.filename}</span></details></div>)}<details className="pg-exact"><summary>Details</summary><span>{e.artist}</span><span>USB: {e.device_path}</span><span>Library: {e.matched_path ?? dest ?? 'No match'}</span></details>{e.status !== 'present' && <ConstructionNotice label="Link copy / cue source" detail="Persistent cross-copy links and cue provenance choices are not wired yet. No link or write is selected." />}</td></tr>] : []),
+                        ...(expanded ? [<tr className="pg-context" key={`context:${e.ordinal}`}><td /><td colSpan={7}><div className="pg-context-head"><span className={`pg-tag tone-${e.status === 'present' ? 'ok' : 'unknown'}`}>{e.status === 'present' ? 'Exact audio' : 'Audio unverified'}</span><span className="pg-chip">USB → Library</span></div>{e.candidates?.map(candidate => <div key={candidate.track_id} className="pg-candidate"><b>{candidate.title ?? candidate.filename}</b><span>{candidate.artist} <span className="pg-tag tone-unknown">Possible copy</span> <span className="pg-tag">{candidate.duration} duration</span></span><details className="pg-exact"><summary>Evidence</summary><span>{candidate.evidence}</span><span>{candidate.filename}</span></details></div>)}<details className="pg-exact"><summary>Details</summary><span>{e.title}</span><span>{e.artist}</span><span>USB: {e.device_path}</span><span>Library: {e.matched_path ?? dest ?? 'No match'}</span></details>{e.status !== 'present' && <ConstructionNotice label="Link copy / cue source" detail="Persistent cross-copy links and cue provenance choices are not wired yet. No link or write is selected." />}</td></tr>] : []),
                         ...(ft && expanded ? ft.fields.map((f) => {
                           const c: FieldChoice = { track_id: ft.track_id, field: f.field, label: ft.label, drive: f.drive, library: f.library };
                           const dec = decisionFor(c);
                           return (
                             <tr key={`${e.ordinal}:${i}:${f.field}`} className="pg-diff">
                               <td /><td colSpan={4}><span className="pg-fname">{FIELD_LABEL[f.field] ?? f.field}</span>{hoverResult?.key === fieldKey(c.track_id, c.field) ? <span className="pg-result-preview"><span className="pg-chip">Library result</span> {hoverResult.value ?? 'empty'}</span> : <><span className="pg-mine">Library</span> {f.library ?? 'empty'} <span className="pg-arrow">·</span> <span className="pg-mine">USB</span> {String(f.drive)}</>}</td>
-                              <td colSpan={2}>{f.applicable ? <>
+                              <td colSpan={3}>{f.applicable ? <>
                                 <span className="pg-field-target">USB → Library</span>
                                 <button className={`btn${dec?.choice === 'keep' ? ' btn-primary' : ''}`} disabled={applying} aria-pressed={dec?.choice === 'keep'} onMouseEnter={() => setHoverResult({ key: fieldKey(c.track_id, c.field), value: f.library })} onMouseLeave={() => setHoverResult(null)} onFocus={() => setHoverResult({ key: fieldKey(c.track_id, c.field), value: f.library })} onBlur={() => setHoverResult(null)} onClick={() => decide(c, 'keep')}>Keep Library</button>
                                 <button className={`btn${dec?.choice === 'take' ? ' btn-primary' : ''}`} disabled={applying} aria-pressed={dec?.choice === 'take'} onMouseEnter={() => setHoverResult({ key: fieldKey(c.track_id, c.field), value: f.drive })} onMouseLeave={() => setHoverResult(null)} onFocus={() => setHoverResult({ key: fieldKey(c.track_id, c.field), value: f.drive })} onBlur={() => setHoverResult(null)} onClick={() => decide(c, 'take')}>{dec?.choice === 'take' ? 'Planned ✓' : 'Use USB'}</button>

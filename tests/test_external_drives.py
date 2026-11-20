@@ -2275,3 +2275,22 @@ def test_preview_copy_candidates_are_response_only_not_identity_or_import_eligib
     after = external_drives.build_pull_preview(db_session, usb)
     assert after.fingerprint == before.fingerprint
     assert next(item for item in after.entries if item.ordinal == entry.ordinal).status == 'new'
+
+
+@pytest.mark.parametrize('status,matched,expected', [
+    ('present', True, True), ('new', True, False),
+    ('uncertain', True, False), ('present', False, False),
+])
+def test_preview_waveform_identity_requires_verified_match(client, db_session, usb, make_track, monkeypatch, status, matched, expected):
+    from dataclasses import replace
+    track = make_track(filename='/synthetic/library/audio.mp3')
+    original = external_drives.build_pull_preview(db_session, usb)
+    entry = replace(original.entries[0], status=status, matched_path=track.filename if matched else None)
+    monkeypatch.setattr(external_drives, 'build_pull_preview', lambda *args, **kwargs: replace(original, entries=[entry]))
+    before = tree_digest(usb)
+    response = client.post('/api/external-drives/preview', json={'root': str(usb)})
+    assert response.status_code == 200
+    row = response.json()['entries'][0]
+    assert row['matched_track_id'] == (track.id if expected else None)
+    assert row['status'] == status
+    assert tree_digest(usb) == before
