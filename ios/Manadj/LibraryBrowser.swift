@@ -9,7 +9,8 @@ struct LibraryBrowser: View {
     @State private var restoreSearchAfterError = false
     @State private var keyboardOpen = false
     @State private var search = ""
-    @State private var playlist: Int? = nil
+    @State private var source: BrowserSource = .collection
+    private var playlist: Int? { if case let .playlist(id) = source { return id }; return nil }
     @State private var sort: SortColumn = .dateAdded
     @State private var downloadedOnly = false
     @State private var tags: Set<Int> = []
@@ -22,7 +23,7 @@ struct LibraryBrowser: View {
     @State private var followLabels: [Int: String] = [:]
     @State private var filtering = false
     private var taskId: String {
-        "\(model.libraryVersion)|\(model.downloaded.count)|\(search)|\(playlist ?? -1)|\(sort.rawValue)|\(downloadedOnly)|\(tags.sorted())|\(bpmCenter ?? -1)|\(energy)|\(followReference ?? -1)"
+        "\(model.libraryVersion)|\(model.downloaded.count)|\(search)|\(source.key)|\(sort.rawValue)|\(downloadedOnly)|\(tags.sorted())|\(bpmCenter ?? -1)|\(energy)|\(followReference ?? -1)"
     }
     var body: some View {
         VStack(spacing: 0) {
@@ -45,10 +46,6 @@ struct LibraryBrowser: View {
                 }.padding(.leading, 12).frame(minHeight: 44).background(Ink.crust, in: Capsule()).overlay(Capsule().stroke(Ink.edge))
                 if !keyboardOpen { ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
-                        Menu(playlist.flatMap { id in model.snapshot?.playlists.first { $0.id == id }?.name } ?? "ALL TRACKS") {
-                            Button("All tracks") { playlist = nil }
-                            ForEach(model.snapshot?.playlists ?? []) { p in Button(p.name) { playlist = p.id; sort = .playOrder } }
-                        }.buttonStyle(LibraryChipStyle())
                         Menu("\(sort.rawValue.uppercased()) ▼") { ForEach(SortColumn.allCases, id: \.rawValue) { c in Button(c.rawValue) { sort = c } } }.buttonStyle(LibraryChipStyle())
                         Button("● ON PHONE \(model.downloaded.count)") { downloadedOnly.toggle() }.buttonStyle(LibraryChipStyle(active: downloadedOnly))
                     }
@@ -82,7 +79,18 @@ struct LibraryBrowser: View {
                     }
                 }
                 HStack {
-                    Text("BROWSE  ›  " + (playlist == nil ? "COLLECTION" : "PLAYLIST")).font(Ink.font(11, bold: true)).foregroundStyle(Ink.accent)
+                    Button { navigate(parent(of: source)) } label: {
+                        Image(systemName: "chevron.left").frame(width: 44, height: 44)
+                    }.disabled(source == .root).accessibilityLabel("Browser back")
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 4) {
+                            ForEach(Array(path.enumerated()), id: \.offset) { index, node in
+                                if index > 0 { Text("›").foregroundStyle(Ink.muted) }
+                                Button(title(node).uppercased()) { navigate(node) }
+                                    .frame(minHeight: 44).disabled(node == source)
+                            }
+                        }.font(Ink.font(11, bold: true))
+                    }.foregroundStyle(Ink.accent)
                     Spacer()
                     Button { model.sync() } label: { Image(systemName: "arrow.triangle.2.circlepath").frame(width: 44, height: 44) }.disabled(model.busy).accessibilityLabel("Sync library")
                 }
@@ -104,6 +112,8 @@ struct LibraryBrowser: View {
             }.padding(12).background(Ink.panel)
             if model.snapshot == nil {
                 ContentUnavailableView("Bring your library", systemImage: "desktopcomputer", description: Text("Open manaDJ desktop → Settings → Phone sync. Pair this iPhone in Settings, then sync. Or import audio from Files on the Perform screen."))
+            } else if source.isContainer {
+                sourceList
             } else if rows.isEmpty && !filtering {
                 ContentUnavailableView.search(text: search)
             } else {
@@ -153,6 +163,76 @@ struct LibraryBrowser: View {
             }
         }
     }
+    private var path: [BrowserSource] {
+        var nodes = [source]
+        while let first = nodes.first, first != .root { nodes.insert(parent(of: first), at: 0) }
+        return nodes
+    }
+    private func parent(of node: BrowserSource) -> BrowserSource {
+        switch node {
+        case .root, .collection, .playlists, .tags: return .root
+        case .playlist: return .playlists
+        case .category: return .tags
+        case let .tag(id):
+            return model.snapshot?.tags.first { $0.id == id }.map { .category($0.categoryId) } ?? .tags
+        }
+    }
+    private func title(_ node: BrowserSource) -> String {
+        switch node {
+        case .root: return "Browse"
+        case .collection: return "Collection"
+        case .playlists: return "Playlists"
+        case .tags: return "Tags"
+        case let .playlist(id): return model.snapshot?.playlists.first { $0.id == id }?.name ?? "Playlist"
+        case let .category(id): return model.snapshot?.categories.first { $0.id == id }?.name ?? "Uncategorised"
+        case let .tag(id): return model.snapshot?.tags.first { $0.id == id }?.name ?? "Tag"
+        }
+    }
+    private func navigate(_ node: BrowserSource) {
+        source = node
+        selectedTrack = nil
+        searchFocused = false
+        if case .playlist = node { sort = .playOrder }
+        else if sort == .playOrder { sort = .dateAdded }
+    }
+    @ViewBuilder private var sourceList: some View {
+        List {
+            switch source {
+            case .root:
+                sourceEntry(.collection, count: rows.count)
+                sourceEntry(.playlists, count: nil)
+                sourceEntry(.tags, count: nil)
+            case .playlists:
+                ForEach((model.snapshot?.playlists ?? []).sorted { $0.displayOrder < $1.displayOrder }) { playlist in
+                    sourceEntry(.playlist(playlist.id), count: rows.filter { playlist.trackIds.contains($0.id) }.count)
+                }
+                if model.snapshot?.playlists.isEmpty == true { Text("No playlists in this snapshot").foregroundStyle(Ink.muted) }
+            case .tags:
+                ForEach(model.snapshot?.categories ?? [], id: \.id) { category in
+                    let ids = Set((model.snapshot?.tags ?? []).filter { $0.categoryId == category.id }.map(\.id))
+                    sourceEntry(.category(category.id), count: rows.filter { !ids.isDisjoint(with: $0.tagIds) }.count)
+                }
+                if model.snapshot?.categories.isEmpty == true { Text("No tags in this snapshot").foregroundStyle(Ink.muted) }
+            case let .category(id):
+                ForEach((model.snapshot?.tags ?? []).filter { $0.categoryId == id }, id: \.id) { tag in
+                    sourceEntry(.tag(tag.id), count: rows.filter { $0.tagIds.contains(tag.id) }.count)
+                }
+            default: EmptyView()
+            }
+        }.listStyle(.plain).scrollContentBackground(.hidden)
+    }
+    private func sourceEntry(_ node: BrowserSource, count: Int?) -> some View {
+        Button { navigate(node) } label: {
+            HStack {
+                Text(title(node)).font(Ink.font(14, bold: true))
+                Spacer()
+                if let count { Text("\(count)").font(Ink.font(12)).foregroundStyle(Ink.muted) }
+                Image(systemName: "chevron.right").foregroundStyle(Ink.accent)
+            }.frame(minHeight: 44).contentShape(Rectangle())
+        }.buttonStyle(.plain).listRowBackground(Ink.base)
+            .accessibilityIdentifier("source-" + node.key)
+            .accessibilityValue(count.map { "\($0) tracks" } ?? "Folder")
+    }
     private func filter() async {
         guard let snapshot = model.snapshot else { rows = []; return }
         filtering = true
@@ -162,13 +242,15 @@ struct LibraryBrowser: View {
         q.bpmCenter = bpmCenter; q.bpmTolerance = 6
         q.energy = energy > 0 ? energy...energy : nil
         let query = q, offline = model.downloaded, reference = followReference
+        let scope = source
+        let sourceTag: Int? = { if case let .tag(id) = scope { return id }; return nil }()
         let result = await Task.detached(priority: .userInitiated) { () -> ([LibraryTrack], [Int: String]) in
             let library = Library(snapshot, downloaded: { offline.contains($0.id) })
-            if let reference {
+            if let reference, !scope.isContainer {
                 let ranked = library.follow([reference], within: query)
-                return (ranked.map(\.track), Dictionary(uniqueKeysWithValues: ranked.map { ($0.id, $0.label) }))
+                return (ranked.map(\.track).filter { track in sourceTag.map { track.tagIds.contains($0) } ?? true }, Dictionary(uniqueKeysWithValues: ranked.map { ($0.id, $0.label) }))
             }
-            return (library.query(query), [:])
+            return (library.query(query).filter { track in sourceTag.map { track.tagIds.contains($0) } ?? true }, [:])
         }.value
         guard !Task.isCancelled else { return }
         rows = result.0; followLabels = result.1; filtering = false
@@ -219,5 +301,23 @@ private struct LibraryRow: View {
             if let evidence { Text(evidence).font(Ink.font(10)).foregroundStyle(Ink.accent) }
         }.padding(.vertical, 5).frame(minHeight: 54)
         .task(id: track.previewRev) { waveform = await model.preview(track) }
+    }
+}
+
+private enum BrowserSource: Equatable {
+    case root, collection, playlists, playlist(Int), tags, category(Int), tag(Int)
+    var isContainer: Bool {
+        switch self { case .root, .playlists, .tags, .category: return true; default: return false }
+    }
+    var key: String {
+        switch self {
+        case .root: return "root"
+        case .collection: return "collection"
+        case .playlists: return "playlists"
+        case let .playlist(id): return "playlist-\(id)"
+        case .tags: return "tags"
+        case let .category(id): return "category-\(id)"
+        case let .tag(id): return "tag-\(id)"
+        }
     }
 }

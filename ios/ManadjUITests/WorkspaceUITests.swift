@@ -102,6 +102,38 @@ final class WorkspaceUITests: XCTestCase {
         expectation(for: NSPredicate(format: "value BEGINSWITH %@", "paused"), evaluatedWith: wave); waitForExpectations(timeout: 5)
         let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Live mixer gesture and transport recovery"; shot.lifetime = .keepAlways; add(shot)
     }
+    @MainActor func testLibrarySourceNavigationAndBack() {
+        defer { captureFailure() }
+        let app = XCUIApplication(); app.launchArguments = ["--library-ui-fixture"]; app.launch()
+        app.buttons["BROWSE"].tap()
+        let back = app.buttons["Browser back"]
+        XCTAssertTrue(back.waitForExistence(timeout: 10)); back.tap()
+        XCTAssertTrue(app.buttons["source-collection"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["source-playlists"].isHittable)
+        let root = XCTAttachment(screenshot: app.screenshot()); root.name = "Native Browse sources with transport"; root.lifetime = .keepAlways; add(root)
+        app.buttons["source-playlists"].tap()
+        XCTAssertTrue(app.buttons["source-playlist-10"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.buttons["source-playlist-10"].value as? String, "2 tracks")
+        XCTAssertEqual(app.buttons["source-playlist-11"].value as? String, "0 tracks")
+        app.buttons["source-playlist-10"].tap()
+        let cached = app.staticTexts["Cached Test Tone"], offline = app.staticTexts["Offline Test Tone"]
+        XCTAssertTrue(cached.waitForExistence(timeout: 5)); XCTAssertTrue(offline.exists)
+        let playOrder = NSPredicate { _, _ in cached.frame.minY < offline.frame.minY }
+        expectation(for: playOrder, evaluatedWith: app); waitForExpectations(timeout: 5)
+        let playlist = XCTAttachment(screenshot: app.screenshot()); playlist.name = "Native playlist drilldown preserving play order"; playlist.lifetime = .keepAlways; add(playlist)
+        back.tap(); XCTAssertTrue(app.buttons["source-playlist-11"].waitForExistence(timeout: 5))
+        app.buttons["source-playlist-11"].tap()
+        expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: cached); waitForExpectations(timeout: 5)
+        XCTAssertTrue(app.staticTexts["0 tracks · 1 downloaded"].exists)
+        back.tap(); back.tap()
+        app.buttons["source-tags"].tap(); app.buttons["source-category-1"].tap(); app.buttons["source-tag-1"].tap()
+        XCTAssertTrue(cached.waitForExistence(timeout: 5)); XCTAssertFalse(offline.exists)
+        let tag = XCTAttachment(screenshot: app.screenshot()); tag.name = "Native tag category drilldown"; tag.lifetime = .keepAlways; add(tag)
+        back.tap(); back.tap(); back.tap()
+        app.buttons["source-collection"].tap()
+        XCTAssertTrue(offline.waitForExistence(timeout: 5)); XCTAssertTrue(cached.exists)
+        XCTAssertTrue(app.buttons["A play pause"].isHittable); XCTAssertTrue(app.buttons["B play pause"].isHittable)
+    }
     @MainActor func testLibraryFilterChipsAndBPM() {
         defer { captureFailure() }
         let app = XCUIApplication(); app.launchArguments = ["--library-ui-fixture"]; app.launch()
