@@ -44,6 +44,16 @@ final class FeedbackUITests: XCTestCase {
 
         let filed = XCTAttachment(screenshot: app.screenshot())
         filed.name = "Feedback queued outcome"; filed.lifetime = .keepAlways; add(filed)
+        let reviewSaved = app.buttons["feedback-open-outbox"]
+        for _ in 0..<12 { if reviewSaved.isHittable { break }; app.swipeDown() }
+        reviewSaved.tap()
+        XCTAssertTrue(app.staticTexts["No saved reports."].exists == false)
+        XCTAssertFalse(app.buttons["REVIEWED · SEND TO THIS DESKTOP"].exists,
+                       "unpaired saved report must not have a send destination")
+        XCTAssertTrue(app.buttons["DISCARD THIS SAVED REPORT"].waitForExistence(timeout: 5))
+        let held = XCTAttachment(screenshot: app.screenshot())
+        held.name = "Saved report held for explicit destination review"; held.lifetime = .keepAlways; add(held)
+
     }
 
     @MainActor func testBlankTitleCannotSubmit() {
