@@ -32,13 +32,23 @@ final class FeedbackUITests: XCTestCase {
         let title = app.textFields["feedback-title"]
         XCTAssertTrue(title.waitForExistence(timeout: 5))
         title.tap(); title.typeText("Deck A froze")
+        let hideKeyboard = app.buttons["feedback-hide-keyboard"]
+        XCTAssertTrue(hideKeyboard.waitForExistence(timeout: 5))
+        hideKeyboard.tap()
         // The fixture is unpaired: filing must queue on-device, never fail open.
         let submit = app.buttons["feedback-submit"]
-        for _ in 0..<12 { if submit.isHittable { break }; app.swipeUp() }
-        XCTAssertTrue(submit.isHittable)
+        // Drag the edge of the form, never the screenshot drawing surface.
+        let scroll = app.scrollViews.firstMatch
+        for _ in 0..<16 {
+            if submit.isHittable { break }
+            scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.985, dy: 0.85))
+                .press(forDuration: 0.05, thenDragTo: scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.985, dy: 0.2)))
+        }
+        guard submit.isHittable else { XCTFail("reviewed submit must be reachable"); return }
         submit.tap()
         let outcome = app.otherElements["feedback-outcome"]
-        XCTAssertTrue(outcome.waitForExistence(timeout: 15), "an explicit outcome must be shown")
+        guard outcome.waitForExistence(timeout: 15) else { XCTFail("an explicit outcome must be shown"); return }
+        XCTAssertFalse(app.keyboards.firstMatch.exists, "keyboard must not cover the saved outcome")
         XCTAssertTrue(app.staticTexts["SAVED ON THIS IPHONE"].waitForExistence(timeout: 5),
                       "unpaired filing must be queued locally, got: \(outcome.debugDescription)")
 

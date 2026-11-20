@@ -31,9 +31,11 @@ struct FeedbackCapture {
         else { return (nil, "No window was available to screenshot") }
         let format = UIGraphicsImageRendererFormat()
         format.scale = window.screen.scale
+        var rendered = false
         let full = UIGraphicsImageRenderer(bounds: window.bounds, format: format).image { _ in
-            window.drawHierarchy(in: window.bounds, afterScreenUpdates: false)
+            rendered = window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
         }
+        guard rendered else { return (nil, "Screenshot unavailable: the window did not finish rendering") }
         let pixels = CGSize(width: full.size.width * full.scale, height: full.size.height * full.scale)
         let edge = max(pixels.width, pixels.height)
         guard edge > maxScreenshotEdge else { return (full, nil) }

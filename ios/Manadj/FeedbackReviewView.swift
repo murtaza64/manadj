@@ -19,6 +19,7 @@ struct FeedbackReviewView: View {
     @State private var sections: [FeedbackSection]
     @State private var submitting = false
     @State private var outcome: FeedbackOutcome?
+    @FocusState private var editing: Bool
 
     init(
         capture: FeedbackCapture,
@@ -82,7 +83,7 @@ struct FeedbackReviewView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 4) {
                     if queueDirectory != nil {
-                        Button("REVIEW SAVED REPORTS") { showOutbox = true }
+                        Button("REVIEW SAVED REPORTS") { editing = false; showOutbox = true }
                             .buttonStyle(FlatButtonStyle(color: Ink.accent))
                             .accessibilityIdentifier("feedback-open-outbox")
                     }
@@ -97,10 +98,14 @@ struct FeedbackReviewView: View {
                         .font(Ink.font()).padding(8)
                         .background(Ink.panel).overlay(Rectangle().stroke(Ink.edge, lineWidth: 1))
                         .accessibilityIdentifier("feedback-title")
+                        .focused($editing)
+                        .submitLabel(.done)
+                        .onSubmit { editing = false }
                     TextField("What were you doing? What did you expect?", text: $details, axis: .vertical)
                         .font(Ink.font(12)).lineLimit(3...6).padding(8)
                         .background(Ink.panel).overlay(Rectangle().stroke(Ink.edge, lineWidth: 1))
                         .accessibilityIdentifier("feedback-details")
+                        .focused($editing)
 
                     if let image = capture.screenshot, includeScreenshot {
                         SectionLabel(title: "DRAW ON THE SCREENSHOT")
@@ -175,9 +180,15 @@ struct FeedbackReviewView: View {
                 }
                 .padding(12)
             }
+            .scrollDismissesKeyboard(.interactively)
             .background(Ink.base)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("HIDE KEYBOARD") { editing = false }
+                        .accessibilityIdentifier("feedback-hide-keyboard")
+                }
                 ToolbarItem(placement: .principal) {
                     Text("REPORT").font(Ink.font(14, bold: true)).foregroundStyle(Ink.text)
                 }
@@ -229,10 +240,12 @@ struct FeedbackReviewView: View {
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Ink.panel).overlay(Rectangle().stroke(Ink.edge, lineWidth: 1))
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("feedback-outcome")
     }
 
     private func submit() {
+        editing = false
         submitting = true
         let report = makeDraft()
         Task {

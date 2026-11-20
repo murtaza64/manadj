@@ -34,7 +34,14 @@ struct FeedbackReporter: ViewModifier {
             .onAppear {
                 detector.onShake = { present() }
                 detector.start()
-                if autoPresent { present() }
+                if autoPresent {
+                    // onAppear precedes the first rendered frame. Capture the
+                    // actual fixture workspace, not an empty launch window.
+                    Task { @MainActor in
+                        try? await Task.sleep(for: .milliseconds(700))
+                        present()
+                    }
+                }
             }
             .onDisappear { detector.stop() }
     }
