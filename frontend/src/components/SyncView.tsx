@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { PlaylistSync } from './PlaylistSync';
 import { AcquisitionView } from './acquisition/AcquisitionView';
-import { useAcquisitionAvailable } from './acquisition/useAcquisitionAvailable';
 import { OPEN_ACQUISITION_EVENT, peekPendingAcquisition } from './acquisition/openAcquisition';
 import { UnifiedTracksSync } from './UnifiedTracksSync';
 import { RekordboxImportGuide } from '../onboarding/RekordboxImportGuide';
@@ -69,12 +68,10 @@ export function SyncView() {
       if (!pending.current) setActiveTab('usb-drives');
     }
   }, []);
-  // Acquisition is the wishlist: hidden until SoundCloud or Spotify is
-  // set up (Settings → Accounts; setup-guides #290, gh#342, #347).
-  const acquisitionAvailable = useAcquisitionAvailable();
-  // 'USB drives' (pick individual tracks from a drive) is a tool like the rest and the target of the playlist 'Sync from USB' event.
-  const tabs = TABS.filter((t) => (t.id !== 'acquisition' || acquisitionAvailable) && true);
-  const activeTab = tabs.some((t) => t.id === selectedTab) ? selectedTab : 'overview';
+  // Keep discovery visible even when a source is disconnected or its status read fails.
+  // Acquisition itself explains connection requirements and disables fetch controls.
+  const tabs = TABS;
+  const activeTab = selectedTab;
 
   return (
     <div className="sync-view-container">
@@ -87,8 +84,9 @@ export function SyncView() {
 
       <div className="sync-workspace-host" hidden={activeTab !== 'workspace'}><SyncWorkspace key={request?.sequence || 0} request={request} onPendingChange={onPendingChange} /></div>
       {/* Stays mounted so the plan survives switching tabs. */}
-      <div className="sync-browser-host" hidden={activeTab !== 'overview'}><SyncBrowser toolbar={(
+      <div className="sync-browser-host" hidden={activeTab !== 'overview'}><SyncBrowser onPendingChange={onPendingChange} toolbar={(
         <div className="sync-tools" data-tour="sync.tabs">
+          <button className="btn" disabled={busy} onClick={() => { if (!pending.current) setActiveTab('acquisition'); }}>Acquisition</button>
           <button className="btn" aria-expanded={toolsOpen} onClick={() => setToolsOpen((v) => !v)}>Tools</button>
           {toolsOpen && (
             <div className="sync-tools-menu" role="menu">

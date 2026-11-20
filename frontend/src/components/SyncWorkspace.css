@@ -42,3 +42,10 @@
 .sw-detail .pei-cues { grid-template-columns:repeat(4,minmax(0,1fr)); }
 @media(max-width:1150px) { .sync-workspace { grid-template-columns:190px minmax(0,1fr); overflow:auto; } .sw-detail { grid-column:1 / -1; min-height:500px; } .sw-tracks { min-height:300px; } }
 @media(max-width:650px) { .sync-workspace { display:flex; flex-direction:column; overflow:auto; } .sw-rail { overflow:visible; flex-shrink:0; } .sw-rail fieldset:first-of-type { display:grid; grid-template-columns:1fr 1fr; } .sw-rail fieldset:first-of-type legend { grid-column:1 / -1; } .sw-tracks { min-height:280px; flex-shrink:0; } .sw-detail { min-height:650px; flex-shrink:0; } }
+
+.sw-track-table { table-layout:fixed; min-width:0; width:100%; }
+.sw-track-table th { position:sticky; padding-right:12px; overflow-wrap:anywhere; }
+.sw-track-table .track-row td { min-width:0 !important; overflow-wrap:anywhere; white-space:normal; }
+.sw-track-table .track-row .track-title, .sw-track-table .track-row .track-artist { white-space:normal; overflow-wrap:anywhere; }
+
+.sw-track-table .track-selection-checkbox { float:left; margin:2px 7px 2px 0; }

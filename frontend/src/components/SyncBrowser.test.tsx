@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { act } from 'react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { createRoot } from 'react-dom/client';
 import { afterEach, expect, it, vi } from 'vitest';
 import { api } from '../api/client';
@@ -37,7 +38,7 @@ const ent = (ordinal: number, status: 'present' | 'new' | 'uncertain', title: st
 const mount = async () => {
   const host = document.createElement('div'); document.body.append(host);
   const root = createRoot(host);
-  await act(async () => { root.render(<SyncBrowser />); await tick(); await tick(); });
+  await act(async () => { root.render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><SyncBrowser /></QueryClientProvider>); await tick(); await tick(); });
   return host;
 };
 
@@ -129,13 +130,13 @@ it('chooses whole-playlist actions, applies once with a recheck per item, nothin
   const host = await mount();
   const dot = (name: string) => [...host.querySelectorAll('.pg-pl')].find((b) => b.textContent?.startsWith(name))!;
   await act(async () => { (dot('New Set') as HTMLElement).click(); await tick(); });
-  await click(host, 'Copy to library');
+  await click(host, 'Add whole playlist to plan');
   await act(async () => { (dot('Peak') as HTMLElement).click(); await tick(); });
   await click(host, 'Update library');
   expect(importSpy).not.toHaveBeenCalled();
   expect(host.querySelector('.pg-right')!.textContent).toContain('Plan (2)');
   const calls = previewSpy.mock.calls.length;
-  await click(host, 'Apply 2');
+  await click(host, 'Review 2 planned operations'); await click(host, 'Confirm and apply plan');
   await act(async () => { await tick(); });
   expect(previewSpy.mock.calls.length).toBeGreaterThanOrEqual(calls + 2);
   expect(importSpy).toHaveBeenCalledTimes(2);
@@ -153,7 +154,7 @@ it('an item whose playlist changed since it was chosen is held, nothing imported
   await act(async () => { ([...host.querySelectorAll('.pg-pl')].find((b) => b.textContent?.startsWith('Peak')) as HTMLElement).click(); await tick(); });
   await click(host, 'Update library');
   previewSpy.mockResolvedValue(preview([{ ...updPl, track_ordinals: [1, 0] }]));
-  await click(host, 'Apply 1'); await act(async () => { await tick(); });
+  await click(host, 'Review 1 planned operation'); await click(host, 'Confirm and apply plan'); await act(async () => { await tick(); });
   expect(importSpy).not.toHaveBeenCalled();
   expect(host.querySelector('.res-held')?.textContent).toContain('Changed since you queued it');
 });
@@ -169,14 +170,15 @@ it('detail choices: only an explicit take enters the plan, BPM never does, appli
   const host = await mount();
   expect(host.textContent).toContain('1 detail to decide');
   expect(host.querySelector('.pg-right')!.textContent).toContain('Nothing chosen');
-  await click(host, 'Keep mine');
+  await click(host, 'TitleBPM▾');
+  await click(host, 'Keep Library');
   expect(host.querySelector('.pg-right')!.textContent).toContain('Nothing chosen');
-  await click(host, "Use drive's");
+  await click(host, "Use USB");
   expect(host.querySelector('.pg-right')!.textContent).toContain('Plan (1)');
-  expect(host.querySelector('.pg-right')!.textContent).toContain('title: One (old) → One');
+  expect(host.querySelector('.pg-right')!.textContent).toContain('TitleOne (old)→ One');
   expect(host.querySelector('.pg-right')!.textContent).not.toContain('bpm');
   expect(applySpy).not.toHaveBeenCalled();
-  await click(host, 'Apply 1'); await act(async () => { await tick(); });
+  await click(host, 'Review 1 planned operation'); await click(host, 'Confirm and apply plan'); await act(async () => { await tick(); });
   expect(fieldsSpy.mock.calls.length).toBeGreaterThanOrEqual(2);
   expect(applySpy).toHaveBeenCalledWith('/v/RB', 'ffp', [{ track_id: 5, field: 'title', drive: 'One', library: 'One (old)' }]);
   expect(host.querySelector('[role="status"]')?.textContent).toContain('The drive was not changed');
@@ -187,7 +189,8 @@ it('a detail choice does not carry over when the library value changed after a r
   vi.spyOn(api.externalDrives, 'preview').mockResolvedValue(preview([pl()], { entries: [ent(0, 'present', 'One'), ent(1, 'present', 'Two')] }));
   const fieldsSpy = vi.spyOn(api.externalDrives, 'fields').mockResolvedValue(cmp());
   const host = await mount();
-  await click(host, "Use drive's");
+  await click(host, 'TitleBPM▾');
+  await click(host, "Use USB");
   expect(host.querySelector('.pg-right')!.textContent).toContain('Plan (1)');
   fieldsSpy.mockResolvedValue(cmp('Changed elsewhere'));
   await click(host, 'Recheck'); await act(async () => { await tick(); });
@@ -203,7 +206,7 @@ it('the plan is kept per drive across switching drives and is never applied to t
   const importSpy = vi.spyOn(api.externalDrives, 'import').mockResolvedValue(DONE as never);
   const host = await mount();
   await act(async () => { ([...host.querySelectorAll('.pg-pl')].find((b) => b.textContent?.startsWith('New Set')) as HTMLElement).click(); await tick(); });
-  await click(host, 'Copy to library');
+  await click(host, 'Add whole playlist to plan');
   await click(host, 'RB2'); await act(async () => { await tick(); });
   expect(host.querySelector('.pg-right')!.textContent).toContain('Nothing chosen');
   expect(host.querySelector('.pg-right')!.textContent).toContain('1 more planned on RB');
@@ -211,7 +214,7 @@ it('the plan is kept per drive across switching drives and is never applied to t
   await click(host, '1 more planned on RB');
   expect(host.querySelector('.pg-right')!.textContent).toContain('Plan (1)');
   previewSpy.mockClear();
-  await click(host, 'Apply 1'); await act(async () => { await tick(); });
+  await click(host, 'Review 1 planned operation'); await click(host, 'Confirm and apply plan'); await act(async () => { await tick(); });
   expect(previewSpy.mock.calls.every((c) => c[0] === '/v/RB')).toBe(true);
   expect(importSpy.mock.calls[0][0]).toMatchObject({ root: '/v/RB' });
 });
@@ -221,7 +224,7 @@ it('All tracks lists what is missing first; a playlist keeps its drive order', a
   vi.spyOn(api.externalDrives, 'fields').mockResolvedValue({ fingerprint: 'f', tracks: [], compared: [], not_compared: {} });
   vi.spyOn(api.externalDrives, 'preview').mockResolvedValue(preview([pl({ track_ordinals: [0, 1, 2], track_count: 3 })], { entries: [ent(0, 'present', 'Aaa'), ent(1, 'uncertain', 'Bbb'), ent(2, 'new', 'Ccc')], new_count: 1, uncertain_count: 1 }));
   const host = await mount();
-  const titles = () => [...host.querySelectorAll('.pg-tracks tbody tr:not(.pg-diff) td:nth-child(2)')].map((t) => t.textContent);
+  const titles = () => [...host.querySelectorAll('.pg-tracks tbody tr:not(.pg-diff):not(.pg-context) td:nth-child(2) summary')].map((t) => t.textContent);
   expect(titles()).toEqual(['Ccc', 'Bbb', 'Aaa']);
   await act(async () => { ([...host.querySelectorAll('.pg-pl')].find((b) => b.textContent?.startsWith('Warm Up')) as HTMLElement).click(); await tick(); });
   expect(titles()).toEqual(['Aaa', 'Bbb', 'Ccc']);
@@ -239,25 +242,104 @@ it('conflicted details show their real reason, and choices are locked while Appl
   vi.spyOn(api.externalDrives, 'applyFields').mockImplementation(() => new Promise((r) => { release = () => r({ applied: [] }); }));
   const host = await mount();
   expect([...host.querySelectorAll('.pg-tracks .pg-tag')].find((t) => t.textContent === 'Key')!.getAttribute('title')).toBe('Two drive tracks disagree');
-  await click(host, "Use drive's");
-  await click(host, 'Apply 1');
-  expect(btn(host, 'Keep mine')!.disabled).toBe(true);
-  expect(btn(host, "Use drive's")!.disabled).toBe(true);
+  await click(host, 'TitleBPMKey▾');
+  await click(host, "Use USB");
+  await click(host, 'Review 1 planned operation'); await click(host, 'Confirm and apply plan');
+  expect(btn(host, 'Keep Library')!.disabled).toBe(true);
+  expect(btn(host, "Planned ✓")!.disabled).toBe(true);
   await act(async () => { release(); await tick(); });
   expect(btn(host, 'Applying…')).toBeUndefined();
 });
 
 it('Rekordbox desktop is a separate source from removable drives', async () => {
+  vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({source:'rekordbox',status:'not_configured',tracks:[]})));
   vi.spyOn(api.externalDrives, 'list').mockResolvedValue([RB]);
   vi.spyOn(api.externalDrives, 'preview').mockResolvedValue(preview([], {}) as never);
   vi.spyOn(api.externalDrives, 'check').mockResolvedValue({ kind: 'rekordbox', checked: false, reason: 'x' } as never);
   vi.spyOn(api.externalDrives, 'fields').mockRejectedValue(new Error('x'));
   vi.spyOn(api.playlistSync, 'getCoverage').mockResolvedValue({ sources: { manadj: { status: 'read', reason: null, read_at: '2026-11-19T18:00:00Z', playlist_count: 0 }, engine: { status: 'not_configured', reason: null, read_at: '', playlist_count: 0 }, rekordbox: { status: 'not_configured', reason: null, read_at: '', playlist_count: 0 } }, playlists: [] });
   const host = document.createElement('div'); document.body.append(host);
-  await act(async () => { createRoot(host).render(<SyncBrowser />); });
+  await act(async () => { createRoot(host).render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><SyncBrowser /></QueryClientProvider>); });
   await act(async () => {});
   await act(async () => { [...host.querySelectorAll('button')].find((b) => b.textContent === 'Rekordbox desktop')!.click(); });
-  await act(async () => {});
-  expect(host.textContent).toContain('not set up');
+  await act(async () => { await tick(); await tick(); });
+  expect(host.textContent).toContain('not configured');
   expect(host.querySelector('[aria-label^="USB"]')).toBeNull();
+});
+
+
+it('playlist rows start compact and reveal the full compared diff without choosing a write', async () => {
+  vi.spyOn(api.externalDrives, 'list').mockResolvedValue([RB]); noCheck();
+  vi.spyOn(api.externalDrives, 'preview').mockResolvedValue(preview([pl()], { entries: [ent(0, 'present', '001 Ascension'), ent(1, 'new', 'Different copy')] }));
+  vi.spyOn(api.externalDrives, 'fields').mockResolvedValue(cmp('Ascension'));
+  const applySpy = vi.spyOn(api.externalDrives, 'applyFields');
+  const host = await mount();
+  await act(async () => { (host.querySelector('.pg-pl') as HTMLElement).click(); });
+  expect(host.querySelectorAll('.pg-diff')).toHaveLength(0);
+  const toggle = host.querySelector<HTMLButtonElement>('[aria-label="Differences for 001 Ascension"]')!;
+  expect(toggle.getAttribute('aria-expanded')).toBe('false');
+  await act(async () => toggle.click());
+  expect(toggle.getAttribute('aria-expanded')).toBe('true');
+  expect(host.querySelectorAll('.pg-diff')).toHaveLength(2);
+  expect(host.textContent).toContain('Read only · analysis');
+  expect(host.textContent).toContain('Match needed');
+  expect(host.querySelector('.pg-right')!.textContent).toContain('Nothing chosen');
+  expect(applySpy).not.toHaveBeenCalled();
+  await act(async () => toggle.click());
+  expect(host.querySelectorAll('.pg-diff')).toHaveLength(0);
+});
+
+const setupRows = () => {
+  vi.spyOn(api.externalDrives, 'list').mockResolvedValue([RB]); noCheck();
+  vi.spyOn(api.externalDrives, 'preview').mockResolvedValue(preview([pl({ track_ordinals: [0, 1, 2] })], { entries: [ent(0, 'new', 'New'), ent(1, 'uncertain', 'Uncertain'), ent(2, 'present', 'Existing')], new_count: 1 }));
+  vi.spyOn(api.externalDrives, 'fields').mockResolvedValue({ fingerprint: 'f', tracks: [], compared: [], not_compared: {} });
+};
+it('checkbox selection stays separate from expansion; mixed top actions stage only eligible selected audio', async () => {
+  setupRows(); const imports = vi.spyOn(api.externalDrives, 'import').mockResolvedValue({ imported: 1 } as never);
+  const host = await mount();
+  const checkbox = (name: string) => host.querySelector<HTMLInputElement>(`input[aria-label="Select ${name}"]`)!;
+  await act(async () => { checkbox('New').click(); checkbox('Uncertain').click(); });
+  expect(host.querySelector('.pg-context')).toBeNull();
+  expect(host.querySelector('.pg-selection-bar')!.textContent).toContain('2 selected1 importable · 1 excluded');
+  await click(host, 'Plan imports');
+  expect(imports).not.toHaveBeenCalled();
+  expect(host.querySelector('.pg-right')!.textContent).toContain('Import New');
+  expect(host.querySelector('.pg-right')!.textContent).not.toContain('Import Uncertain');
+  await click(host, 'Review 1 planned operation');
+  expect(imports).not.toHaveBeenCalled();
+  await click(host, 'Confirm and apply plan');
+  expect(imports.mock.calls[0][0]).toMatchObject({ ordinals: [0] });
+});
+it('hover and keyboard focus preview Library results without staging or writing', async () => {
+  setupRows(); vi.spyOn(api.externalDrives, 'preview').mockResolvedValue(preview([pl()], { entries: [ent(0, 'present', 'One')] }));
+  vi.spyOn(api.externalDrives, 'fields').mockResolvedValue(cmp());
+  const writes = vi.spyOn(api.externalDrives, 'applyFields'); const host = await mount();
+  await click(host, 'TitleBPM▾'); const action = btn(host, 'Use USB')!;
+  await act(async () => { action.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })); });
+  expect(host.querySelector('.pg-result-preview')!.textContent).toContain('Library result One');
+  expect(host.querySelector('.pg-right')!.textContent).toContain('Nothing chosen');
+  await act(async () => { action.dispatchEvent(new MouseEvent('mouseout', { bubbles: true })); });
+  expect(host.querySelector('.pg-result-preview')).toBeNull();
+  await act(async () => { action.focus(); });
+  expect(host.querySelector('.pg-result-preview')).not.toBeNull();
+  expect(writes).not.toHaveBeenCalled();
+  await act(async () => { action.blur(); }); expect(host.querySelector('.pg-result-preview')).toBeNull();
+});
+it('review gate invalidates when a planned field is removed', async () => {
+  setupRows(); vi.spyOn(api.externalDrives, 'preview').mockResolvedValue(preview([pl()], { entries: [ent(0, 'present', 'One')] }));
+  vi.spyOn(api.externalDrives, 'fields').mockResolvedValue(cmp());
+  const host = await mount(); await click(host, 'TitleBPM▾'); await click(host, 'Use USB');
+  await click(host, 'Review 1 planned operation'); expect(host.querySelector('[aria-label="Confirm reviewed plan"]')).not.toBeNull();
+  await click(host, 'Remove this field'); expect(host.querySelector('[aria-label="Confirm reviewed plan"]')).toBeNull();
+});
+it('individually staged audio imports survive the first item changing from new to present', async () => {
+  setupRows();
+  const a = ent(0, 'new', 'A'), b = ent(1, 'new', 'B'); let completed = false;
+  vi.spyOn(api.externalDrives, 'preview').mockImplementation(async () => preview([pl()], { entries: [completed ? { ...a, status: 'present' } : a, b], new_count: completed ? 1 : 2 }));
+  const imports = vi.spyOn(api.externalDrives, 'import').mockImplementation(async () => { completed = true; return { imported: 1 } as never; });
+  const host = await mount();
+  const actions = [...host.querySelectorAll<HTMLButtonElement>('.pg-row-action')];
+  await act(async () => { actions[0].click(); }); await act(async () => { actions[1].click(); });
+  await click(host, 'Review 2 planned operations'); await click(host, 'Confirm and apply plan');
+  expect(imports.mock.calls.map(call => call[0].ordinals)).toEqual([[0], [1]]);
 });

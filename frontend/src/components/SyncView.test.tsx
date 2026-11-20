@@ -29,32 +29,26 @@ afterEach(() => {
   act(() => root.unmount());
   host.remove();
 });
-const openTools = () => act(() => { (host.querySelector('.sync-tools > button') as HTMLButtonElement).click(); });
+const openTools = () => act(() => { (host.querySelector('.sync-tools > button[aria-expanded]') as HTMLButtonElement).click(); });
 const tools = () => [...host.querySelectorAll('.sync-tool')].map((t) => t.textContent);
 const pick = (label: string) => act(() => { ([...host.querySelectorAll('.sync-tool')].find((t) => t.textContent === label) as HTMLButtonElement).click(); });
 const title = () => host.querySelector('.sync-nav-title')?.textContent;
 const tick = () => new Promise((r) => setTimeout(r, 10));
 
-it('keeps one Sync view; the other tools sit in a Tools menu and Acquisition stays hidden until a Supplier is configured (setup-guides #290, gh#342)', () => {
+it('keeps Acquisition discoverable without a connected source and after disconnect', () => {
   gate.connected = false;
   act(() => root.render(<SyncView />));
   expect(host.querySelector('.sync-view-tab')).toBeNull();
   expect(host.querySelector('.sync-nav')).toBeNull();
+  expect(host.querySelector('.sync-tools > button')?.textContent).toBe('Acquisition');
   openTools();
-  expect(tools()).toEqual(['Field review', 'Tracks', 'Playlists', 'USB tracks', 'Rekordbox import']);
-
-  gate.connected = true;
-  act(() => root.render(<SyncView />));
-  expect(tools()).toEqual(['Field review', 'Tracks', 'Playlists', 'USB tracks', 'Acquisition', 'Rekordbox import']);
+  expect(tools()).toContain('Acquisition');
   pick('Acquisition');
   expect(host.querySelector('[data-testid="acquisition"]')).not.toBeNull();
   expect(title()).toBe('Acquisition');
-
-  // disconnecting while on the tool falls back to Sync
   gate.connected = false;
   act(() => root.render(<SyncView />));
-  expect(host.querySelector('[data-testid="acquisition"]')).toBeNull();
-  expect(host.querySelector('.sync-nav')).toBeNull();
+  expect(host.querySelector('[data-testid="acquisition"]')).not.toBeNull();
 });
 
 it('a tool has a way back to Sync', () => {

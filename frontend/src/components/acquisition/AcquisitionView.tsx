@@ -109,7 +109,7 @@ export function AcquisitionView() {
     queryKey: ITEMS_KEY,
     queryFn: api.acquisition.getItems,
   });
-  const { data: soundcloudStatus } = useQuery({
+  const { data: soundcloudStatus, isError: soundcloudStatusError, isPending: soundcloudStatusPending } = useQuery({
     queryKey: SOUNDCLOUD_STATUS_KEY,
     queryFn: () => soundcloudApi.status(),
     staleTime: 5 * 60 * 1000,
@@ -304,6 +304,7 @@ export function AcquisitionView() {
           >
             {refresh.isPending ? 'refreshing…' : '↻ refresh'}
           </button>
+          <p className="acq-connection-state" role="status">{soundcloudStatusError ? 'SoundCloud connection check failed. Saved likes are still shown.' : soundcloudStatusPending ? 'Checking SoundCloud connection…' : soundcloudAvailable ? 'SoundCloud connected' : 'SoundCloud not connected. Settings → Accounts to connect.'}</p>
           {spotifyConnected ? (
             <>
               {sourceCount('spotify') > 0 && (
