@@ -205,7 +205,9 @@ private struct LibraryRow: View {
                 Image(systemName: downloaded ? "checkmark.circle.fill" : "icloud.and.arrow.down").font(.system(size: 11)).foregroundStyle(downloaded ? Ink.play : Ink.muted).accessibilityLabel(downloaded ? "Downloaded" : "Download required")
             }
             HStack(spacing: 6) {
-                WaveformView(waveform: waveform, color: Ink.accent).frame(width: 102, height: 16)
+                if let waveform, !waveform.peaks.isEmpty {
+                    WaveformView(waveform: waveform, color: Ink.accent, background: .clear).frame(width: 102, height: 16)
+                }
                 ForEach(track.tagIds.prefix(3), id: \.self) { id in
                     if let tag = model.snapshot?.tags.first(where: { $0.id == id }) {
                         Text(tag.name).font(Ink.font(9)).foregroundStyle(Ink.accent).padding(.horizontal, 3).background(Ink.accent.opacity(0.15), in: RoundedRectangle(cornerRadius: 3))

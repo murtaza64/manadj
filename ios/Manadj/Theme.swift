@@ -54,6 +54,7 @@ struct WaveformView: View {
     let waveform: ManadjCore.PreviewWaveform?
     var progress: Double = 0
     var color: Color = Ink.accent
+    var background: Color = Ink.base
     var body: some View {
         Canvas { context, size in
             guard let waveform, !waveform.peaks.isEmpty else { return }
@@ -71,7 +72,7 @@ struct WaveformView: View {
             var head = Path(); head.move(to: CGPoint(x: x, y: 0)); head.addLine(to: CGPoint(x: x, y: size.height))
             context.stroke(head, with: .color(Ink.playhead), lineWidth: 2)
         }
-        .background(Ink.base)
+        .background(background)
 
         .accessibilityLabel("Track overview waveform")
         .accessibilityValue("\(Int(min(1, max(0, progress)) * 100)) percent")

@@ -64,6 +64,12 @@ final class WorkspaceUITests: XCTestCase {
         XCTAssertTrue(app.textFields["Search title, artist, file"].waitForExistence(timeout: 5))
         Thread.sleep(forTimeInterval: 0.6)
         let browse = XCTAttachment(screenshot: app.screenshot()); browse.name = "iOS in-place browser with transport WIP"; browse.lifetime = .keepAlways; add(browse)
+        let selected = app.buttons["Select Synthetic pulse A"]
+        XCTAssertTrue(selected.waitForExistence(timeout: 5)); selected.tap()
+        XCTAssertEqual(selected.value as? String, "Selected")
+        let preview = app.otherElements["Track overview waveform"].firstMatch
+        XCTAssertTrue(preview.waitForExistence(timeout: 5))
+        let waveRow = XCTAttachment(screenshot: app.screenshot()); waveRow.name = "Selected row with actual generated waveform"; waveRow.lifetime = .keepAlways; add(waveRow)
     }
     @MainActor func testLiveMixerControlsRespondAndRecover() {
         defer { captureFailure() }
