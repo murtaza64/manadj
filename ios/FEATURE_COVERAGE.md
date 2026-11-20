@@ -89,3 +89,18 @@ New conflict-specific mockups are design exploration, not existing functionality
 At `aa568cec`, the expanded native filter drawer, multiple ANY-tag chips and explicit BPM-reference action pass a new regular-iPhone16 input story. Actual tag/BPM/keyboard screenshots were inspected. The current Android app browser uses absolute ±6 after folding the candidate BPM; its separate library package uses percentage windows. The iOS browser now matches the app behavior while preserving the package percentage API and its tests. [Run](https://github.com/murtaza64/manadj/actions/runs/44654404986), [evidence](https://github.com/murtaza64/manadj/actions/runs/44654404986/artifacts/14592598943). 24 core, 4 bridge, 7 native and 4 UI tests pass; unsigned simulator/device builds pass. This is not merge-hold acceptance or physical-device evidence.
 
 Next branch slice adds an explicit select-row accessory and highlight for the BPM reference while preserving existing tap-to-load and swipe-load routes. Its Apple/pixel verification remains pending. Android's nested source navigation, edit affordance, metadata density and selected-row interaction are not yet equivalent. No real-library writes are authorized by this preparation.
+
+## November20 isolated playlist draft prototype
+
+`PlaylistDraftStore` is a pure local, durable planning experiment, not a mobile
+playlist editor or sync implementation. It stores a reviewed base and proposed
+name/member order under an explicit paired-library identity. It never modifies
+the saved snapshot, uploads changes, or resolves competing edits. A different
+library, changed/missing playlist, or missing desired track holds the draft. No
+create/delete policy is selected. There is no UI or transport consumer yet.
+The integer playlist/track IDs are explicitly source-scoped, not stable global
+playlist/entry identities. Stable identity, tombstones, causal propagation,
+acknowledgements and approved operation/conflict semantics remain future work.
+Fixture tests cover persistence, discard, stale-source holds, validation and
+save failure without erasing pending work. Apple/Swift verification is required
+before treating the new prototype as tested. No real library was used.
