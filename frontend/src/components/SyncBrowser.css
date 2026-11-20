@@ -157,3 +157,4 @@
 .pg-similar-context .pg-similar-review { margin:6px 0; }
 .pg-plan-scope { color:var(--subtext0); font-size:11px; margin:6px 0; }
 .pg-apply { white-space:normal; }
+.pg-view .pg-apply:hover, .pg-view .pg-apply:focus-visible { background:#4a9eff; color:#0d0d0d; }
