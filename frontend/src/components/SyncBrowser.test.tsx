@@ -364,3 +364,23 @@ it('uses Library waveform identity only for confirmed present audio and keeps ti
   expect(host.querySelector('.pg-title-text')?.closest('tr')?.querySelector('details')).toBeNull();
   expect(host.textContent).toContain('Nothing chosen');
 });
+
+it('marks title divergence neutrally and reveals it only in the shared track expansion', async () => {
+  vi.spyOn(api.externalDrives, 'list').mockResolvedValue([RB]); noCheck();
+  vi.spyOn(api.externalDrives, 'preview').mockResolvedValue(preview([], { entries: [ent(0, 'present', 'USB title')] }));
+  vi.spyOn(api.externalDrives, 'fields').mockResolvedValue({ fingerprint: 'f', compared: ['title'], not_compared: {}, tracks: [{ ordinal: 0, track_id: 42, label: 'USB title', fields: [{ field: 'title', drive: 'USB title', library: 'Library title', applicable: true }] }] } as never);
+  const host = await mount();
+  const marker = host.querySelector('.pg-title-divergence svg')!;
+  expect(marker.getAttribute('aria-label')).toContain('newer source unknown');
+  expect(marker.getAttribute('data-newer')).toBe('unknown');
+  expect(host.querySelector('.pg-track-title details')).toBeNull();
+  expect(host.querySelector('.pg-context')).toBeNull();
+  await act(async () => { host.querySelector<HTMLButtonElement>('[aria-label="Details for USB title"]')!.click(); });
+  expect(host.querySelectorAll('.pg-context')).toHaveLength(1);
+  expect(host.querySelectorAll('.pg-diff')).toHaveLength(1);
+  expect(host.querySelector('.pg-diff')?.textContent).toContain('Library title');
+  expect(host.querySelector('.pg-track-facts')?.textContent).toContain('USB:');
+  await act(async () => { host.querySelector<HTMLButtonElement>('[aria-label="Differences for USB title"]')!.click(); });
+  expect(host.querySelector('.pg-context')).toBeNull();
+  expect(host.textContent).toContain('Nothing chosen');
+});

@@ -135,3 +135,7 @@
 .pg-selected-actions .btn:first-of-type { margin-left: auto; }
 .pg-title > span { white-space: nowrap; }
 @media(max-width:900px) { .pg-title > .pg-order { display: none; } .pg-selected-actions > span { display: none; } }
+
+.pg-title-divergence { display: inline-flex; flex: 0 0 auto; color: var(--yellow, #ffc85a); align-items: center; }
+.pg-track-facts { display: flex; flex-direction: column; gap: 3px; margin: 6px 0; color: var(--subtext0); font-size: 11px; }
+.pg-track-facts > span { overflow-wrap: anywhere; }
