@@ -80,8 +80,8 @@ struct USBImportView: View {
                 }
             }.scrollContentBackground(.hidden).background(Ink.base)
                 .navigationTitle("Rekordbox USB").navigationBarTitleDisplayMode(.inline)
-                .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } } }
-        }.preferredColorScheme(.dark).tint(Ink.accent)
+                .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() }.disabled(working) } }
+        }.preferredColorScheme(.dark).tint(Ink.accent).interactiveDismissDisabled(working)
             .fileImporter(isPresented: $choosing, allowedContentTypes: [.folder]) { result in
                 switch result {
                 case let .success(url): scan(url)

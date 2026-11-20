@@ -114,3 +114,22 @@ extension RekordboxUSBTests {
         }
     }
 }
+
+
+extension RekordboxUSBTests {
+    func testPersistedReceiptCannotEscapeItsImportFolder() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let receipt = USBImportReceipt(tracks: [], playlists: [])
+        func track(_ path: String) -> USBTrack { USBTrack(id: 1, title: "Fixture", artist: nil, bpm: nil, duration: 1, byteCount: 1, path: path) }
+        try Data([1]).write(to: folder.appendingPathComponent("1.wav"))
+        XCTAssertEqual(try receipt.audioURL(for: track("1.wav"), in: folder).lastPathComponent, "1.wav")
+        for path in ["../1.wav", "/1.wav", "a/1.wav", "2.wav", "1.exe", "1.WAV"] {
+            XCTAssertThrowsError(try receipt.audioURL(for: track(path), in: folder))
+        }
+        try FileManager.default.removeItem(at: folder.appendingPathComponent("1.wav"))
+        try FileManager.default.createSymbolicLink(atPath: folder.appendingPathComponent("1.wav").path, withDestinationPath: "/etc/hosts")
+        XCTAssertThrowsError(try receipt.audioURL(for: track("1.wav"), in: folder))
+    }
+}
