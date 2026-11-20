@@ -20,7 +20,13 @@ from backend.acquisition.manager import (
     reject_proposal,
     run_matching,
 )
-from backend.acquisition.matching import MatchingConfig, normalize, score_pair
+from backend.acquisition.matching import (
+    MatchingConfig,
+    artist_names,
+    artists_compatible,
+    normalize,
+    score_pair,
+)
 from backend.acquisition.models import SourceItem
 from backend.models import Track
 
@@ -40,6 +46,51 @@ class TestNormalize:
 
     def test_strips_punctuation(self) -> None:
         assert normalize("X CLUB. - HARD 2 FORGET") == "x club hard 2 forget"
+
+
+class TestArtistNames:
+    def test_splits_collaboration_separators(self) -> None:
+        assert artist_names("Kanine, Andromedik") == {"kanine", "andromedik"}
+        assert artist_names("Mila Falls & Kanine x Sona") == {"mila falls", "kanine", "sona"}
+        assert artist_names("Turno feat. Harry Shotta") == {"turno", "harry shotta"}
+
+    def test_weak_separators_split_only_between_names(self) -> None:
+        assert artist_names("Dimension x Sub Focus") == {"dimension", "sub focus"}
+        assert artist_names("Chase and Status") == {"chase", "status"}
+        # Real names that start or end with a weak separator stay whole.
+        assert artist_names("X CLUB.") == {"x club"}
+        assert artist_names("Project X") == {"project x"}
+
+    def test_blank_credit_has_no_names(self) -> None:
+        assert artist_names(None) == set()
+        assert artist_names("") == set()
+
+
+class TestArtistsCompatible:
+    def test_blank_or_generic_credits_never_block(self) -> None:
+        assert artists_compatible("", "Kanine")
+        assert artists_compatible(None, None)
+        assert artists_compatible("Various Artists", "Kanine")
+
+    def test_shared_collaborator_is_compatible(self) -> None:
+        assert artists_compatible("Kanine, Andromedik", "Kanine")
+        assert artists_compatible("Mila Falls, Kanine, Sona", "Ekko & Kanine")
+        assert artists_compatible("Kanine, Andromedik", "Andromedik, Kanine")
+
+    def test_typo_tolerance_kept(self) -> None:
+        assert artists_compatible("Grafix", "Graffix")
+
+    def test_disjoint_credits_are_incompatible(self) -> None:
+        assert not artists_compatible("Kanine, Andromedik", "Mila Falls, Sona")
+        assert not artists_compatible("Artist", "Unrelated person")
+
+    def test_preserved_name_does_not_collide_with_its_parts(self) -> None:
+        # "X CLUB." is one artist; a collaborator named "Club" is not it.
+        assert not artists_compatible("X CLUB.", "Kanine, Club")
+
+    def test_short_shared_name_is_not_evidence_alone(self) -> None:
+        # Two different collabs that both happen to credit "TC".
+        assert not artists_compatible("TC & Mila Falls", "TC & Andromedik")
 
 
 class TestScorePair:
