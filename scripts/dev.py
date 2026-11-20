@@ -94,6 +94,12 @@ def _group_exists(process: subprocess.Popen[str]) -> bool:
         return True
     except ProcessLookupError:
         return False
+    except PermissionError:
+        # macOS can leave an inaccessible group briefly after SIGKILL
+        # while launchd reaps its orphaned members. EPERM is NOT proof the
+        # group is gone. Keep the conservative bounded wait, rather than
+        # turn the successful kill into a shutdown exception.
+        return True
 
 
 def stop_processes(processes: list[subprocess.Popen[str]], grace_seconds: float = 5) -> None:
