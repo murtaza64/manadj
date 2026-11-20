@@ -130,12 +130,12 @@ struct DeckViewState {
     func useLocalLiveTestConnection(_ candidate: DesktopConnection) { connection = candidate }
     #endif
     func startLocalLive() {
-        guard !liveListening, !recording, !busy, let connection, let repository, audio != nil else {
+        guard !liveListening, !recording, !busy, !decks.contains(where: { $0.loading }), let connection, let repository, audio != nil else {
             error = "Pair first and finish other work/recording before listening."; return
         }
         liveListening = true; liveStatus = "Connecting · phone decks paused"
         liveReceived = 0; liveWatchdogPaused = false; liveStream = ""; liveSequence = -1
-        for index in 0..<4 { audio?.send(MDJPause, deck: index) }
+        for index in 0..<4 { audio?.send(MDJPause, deck: index); audio?.send(MDJSeek, deck: index, value: audio?.state(index).position ?? 0); audio?.send(MDJPfl, deck: index, value: 0) }
         audio?.beatFX(effect: 0, target: 0, on: false, depth: 0, beats: 1)
         audio?.splitOutput(false)
         liveTask = Task { [weak self] in
@@ -211,6 +211,13 @@ struct DeckViewState {
                 return
             }
         }
+        for index in 0..<4 {
+            let row = anchor.decks[index]
+            if row.trackId != nil && row.keyLock && abs(row.pitch) > 0.001 && !audio.state(index).fullyDecoded {
+                throw AppFailure("Long-file key lock is not supported by this prototype.")
+            }
+        }
+        try Task.checkCancellation()
         let elapsed = ProcessInfo.processInfo.systemUptime - received
         guard liveListening, elapsed <= 1 else { throw AppFailure("Live preparation took too long. Playback paused.") }
         audio.send(MDJCrossfade, value: 0)
@@ -218,9 +225,6 @@ struct DeckViewState {
         for index in 0..<4 {
             let row = anchor.decks[index]
             guard row.trackId != nil else { continue }
-            if row.keyLock && abs(row.pitch) > 0.001 && !audio.state(index).fullyDecoded {
-                throw AppFailure("Long-file key lock is not supported by this prototype.")
-            }
             let target = try row.target(age: age, roundTrip: rtt, elapsed: elapsed)
             let current = audio.state(index)
             guard target <= decks[index].duration else { audio.send(MDJPause, deck: index); continue }
@@ -307,6 +311,7 @@ struct DeckViewState {
     /// Acceptance means the request was queued, not that asynchronous decoding succeeded.
     /// Refused requests keep the browser and its search focus in place.
     @discardableResult func load(_ track: LibraryTrack, deck: Int) -> Bool {
+        guard !liveListening else { error = "Stop local live before loading tracks"; return false }
         guard decks.indices.contains(deck) else { error = "Choose a valid deck"; return false }
         guard !decks[deck].loading else { error = "This deck is already loading. Wait for it to finish."; return false }
         guard let repository else { error = "The offline library is still opening. Try again shortly."; return false }
@@ -338,7 +343,7 @@ struct DeckViewState {
         return true
     }
     func importFile(_ url: URL, deck: Int, title: String? = nil, artist: String? = nil) {
-        guard let audio, !decks[deck].loading else { return }
+        guard !liveListening, let audio, !decks[deck].loading else { return }
         let previousLoad = audio.state(deck).load
         decks[deck].loading = true
         Task {

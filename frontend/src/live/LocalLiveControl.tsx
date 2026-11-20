@@ -42,7 +42,7 @@ export function LocalLiveControl() {
         const response = await fetch(`${API_BASE}/local-live/anchor`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ stream_id: stream, seq: seq++, decks, unsupported }), signal: controller.signal });
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        if (!stopped) setStatus(unsupported.length ? 'Listener paused: unsupported controls' : 'Own paired devices · state mirror prototype');
+        if (!stopped) setStatus(unsupported.length || decks.some(d => d.unsupported.length) ? 'Listener paused: unsupported controls' : 'Own paired devices · state mirror prototype');
       } catch (e) {
         if (!stopped) { setStatus(`Live stopped: ${e instanceof Error ? e.message : 'connection failed'}`); setEnabled(false); }
       }
