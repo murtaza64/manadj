@@ -507,3 +507,40 @@ it('rechecking or switching playlist invalidates the similar preview rather than
   await act(async () => { [...host.querySelectorAll('button')].find(b => b.textContent?.startsWith('All tracks'))!.click(); });
   expect(host.querySelector('[aria-label="Review similar choices"]')).toBeNull();
 });
+
+
+it('defaults to Rekordbox without USB, keeps its unavailable state honest and supports tab keyboard navigation', async () => {
+  vi.spyOn(api.externalDrives, 'list').mockResolvedValue([]);
+  vi.spyOn(api.playlistSync, 'getCoverage').mockResolvedValue({ playlists: [], sources: {} } as never);
+  vi.spyOn(globalThis, 'fetch').mockImplementation(async input => ({ ok: true, json: async () => ({
+    source: String(input).includes('/engine/') ? 'engine' : 'rekordbox', status: 'not_configured', reason: null, tracks: [], read_at: '', match_basis: 'path'
+  }) }) as Response);
+  const host = await mount();
+  const tabs = [...host.querySelectorAll<HTMLButtonElement>('[role="tab"]')];
+  expect(tabs.map(tab => tab.textContent)).toEqual(['Rekordbox desktop', 'Engine DJ desktop']);
+  expect(tabs[0].getAttribute('aria-selected')).toBe('true');
+  expect(tabs[0].tabIndex).toBe(0); expect(tabs[1].tabIndex).toBe(-1);
+  expect(host.textContent).toContain('No USB found');
+  await act(async () => { await tick(); });
+  expect(host.textContent).toContain('Rekordbox desktop is not configured');
+  expect(host.textContent).toContain('Nothing chosen');
+  expect(host.querySelector('[role="tabpanel"]')?.getAttribute('aria-labelledby')).toBe(tabs[0].id);
+  await act(async () => { tabs[0].focus(); tabs[0].dispatchEvent(new KeyboardEvent('keydown', {key:'ArrowRight', bubbles:true})); await tick(); });
+  expect(tabs[1].getAttribute('aria-selected')).toBe('true'); expect(document.activeElement).toBe(tabs[1]);
+  await act(async () => { [...host.querySelectorAll('button')].find(button => button.textContent === 'Detect drives')!.click(); await tick(); });
+  expect(tabs[1].getAttribute('aria-selected')).toBe('true');
+  await act(async () => { tabs[1].dispatchEvent(new KeyboardEvent('keydown', {key:'Home', bubbles:true})); await tick(); });
+  expect(tabs[0].getAttribute('aria-selected')).toBe('true');
+});
+
+it('does not turn USB detection failure into an empty-drive success', async () => {
+  vi.spyOn(api.externalDrives, 'list').mockRejectedValue(new Error('permission denied'));
+  vi.spyOn(api.playlistSync, 'getCoverage').mockResolvedValue({ playlists: [], sources: {} } as never);
+  vi.spyOn(globalThis, 'fetch').mockResolvedValue({ ok:true, json:async()=>({source:'rekordbox',status:'failed',reason:'not readable',tracks:[],read_at:'',match_basis:'path'}) } as Response);
+  const host = await mount();
+  expect(host.querySelector('[role="alert"]')?.textContent).toContain('Drive detection failed (permission denied)');
+  expect(host.textContent).not.toContain('No USB found');
+  await act(async () => { await tick(); });
+  expect(host.textContent).toContain('Could not read Rekordbox desktop');
+  expect(host.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toBe('Rekordbox desktop');
+});

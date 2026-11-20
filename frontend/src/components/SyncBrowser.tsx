@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type CSSProperties, type PointerEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useId, type ReactNode, type CSSProperties, type PointerEvent } from 'react';
 import { api } from '../api/client';
 import type { ExternalDrive, ExternalDriveCheck, ExternalDriveFieldComparison, ExternalDrivePreview, ExternalDrivePreviewPlaylist, ExternalDrivePullEntry } from '../api/client';
 import {
@@ -84,6 +84,7 @@ const FIELD_LABEL: Record<string, string> = { title: 'Title', artist: 'Artist', 
 const fieldKey = (t: number, f: string) => `${t}:${f}`;
 
 export function SyncBrowser({ toolbar, onPendingChange }: { toolbar?: ReactNode; onPendingChange?: (pending: boolean) => void } = {}) {
+  const tabsId = useId();
   const fit = useFitColumns(SYNC_COLUMN_IDS, SYNC_COLUMN_SHARES);
   const [drives, setDrives] = useState<ExternalDrive[] | null>(null);
   const [detectError, setDetectError] = useState<string | null>(null);
@@ -138,8 +139,8 @@ export function SyncBrowser({ toolbar, onPendingChange }: { toolbar?: ReactNode;
   const detect = useCallback(() => {
     setDetectError(null);
     api.externalDrives.list()
-      .then((l) => { setDrives(l); setRoot((cur) => (cur && l.some((d) => d.root === cur) ? cur : l[0]?.root ?? null)); })
-      .catch((e) => { setDrives([]); setRoot(null); setDetectError(e instanceof Error ? e.message : 'Drive detection failed'); });
+      .then((l) => { setDrives(l); if (!l.length) setDesktop(cur => cur ?? 'rekordbox'); setRoot((cur) => (cur && l.some((d) => d.root === cur) ? cur : l[0]?.root ?? null)); })
+      .catch((e) => { setDrives([]); setRoot(null); setDesktop(cur => cur ?? 'rekordbox'); setDetectError(e instanceof Error ? e.message : 'Drive detection failed'); });
   }, []);
   useEffect(() => { detect(); }, [detect]);
 
@@ -311,20 +312,28 @@ export function SyncBrowser({ toolbar, onPendingChange }: { toolbar?: ReactNode;
     <div className="pg-view">
       <div className="pg-top">
         <b>Sync</b>
-        {drives?.map((x) => (
-          <button key={x.root} className="btn" disabled={navigationLocked} aria-pressed={!desktop && x.root === root} onClick={() => { setDesktop(null); setRoot(x.root); }}>
-            {x.name}{planCount(x.root) > 0 && <span className="pg-badge">{planCount(x.root)}</span>}
-          </button>
-        ))}
-        <button className="btn pg-desktop" disabled={navigationLocked} aria-pressed={desktop === 'rekordbox'} title="The Rekordbox library on this computer" onClick={() => setDesktop('rekordbox')}>Rekordbox desktop</button>
-        <button className="btn" disabled={navigationLocked} aria-pressed={desktop === 'engine'} title="The Engine DJ library on this computer, not USB" onClick={() => setDesktop('engine')}>Engine DJ desktop</button>
-        <button className="btn pg-detect" disabled={applying} onClick={() => { setDrives(null); detect(); }}>Detect drives</button>
+        <div className="pg-source-tabs" role="tablist" aria-label="Sync sources" onKeyDown={event => {
+          if (navigationLocked || !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+          const buttons = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]'));
+          const current = buttons.indexOf(document.activeElement as HTMLButtonElement);
+          if (current < 0) return;
+          event.preventDefault();
+          const next = event.key === 'Home' ? 0 : event.key === 'End' ? buttons.length - 1 : (current + (event.key === 'ArrowRight' ? 1 : -1) + buttons.length) % buttons.length;
+          buttons[next]?.focus(); buttons[next]?.click();
+        }}>
+        {[
+          ...(drives ?? []).map(x => ({ key: x.root, label: x.name, active: !desktop && x.root === root, badge: planCount(x.root), title: 'Removable USB library', choose: () => { setDesktop(null); setRoot(x.root); } })),
+          ...(['rekordbox', 'engine'] as const).map(source => ({ key: source, label: source === 'rekordbox' ? 'Rekordbox desktop' : 'Engine DJ desktop', active: desktop === source, badge: 0, title: 'Library on this computer, not USB', choose: () => setDesktop(source) })),
+        ].map((tab, index) => <button key={tab.key} className="pg-source-tab" role="tab" id={`${tabsId}-tab-${index}`} aria-controls={`${tabsId}-panel`} aria-selected={tab.active} tabIndex={tab.active ? 0 : -1} disabled={navigationLocked} title={tab.title} onClick={tab.choose}>{tab.label}{tab.badge > 0 && <span className="pg-badge">{tab.badge}</span>}</button>)}
+        </div>
+        <button className="btn pg-detect" disabled={navigationLocked} onClick={() => { setDrives(null); detect(); }}>Detect drives</button>
         {toolbar}
       </div>
+      {detectError && <p className="pg-source-notice tone-unknown" role="alert">Drive detection failed ({detectError}). Desktop libraries are separate.</p>}
+      {drives && drives.length === 0 && !detectError && <p className="pg-source-notice">No USB found · showing a desktop library. Connect a drive and select Detect drives.</p>}
+      <section className="pg-source-panel" role="tabpanel" id={`${tabsId}-panel`} aria-labelledby={`${tabsId}-tab-${desktop ? (drives?.length ?? 0) + (desktop === 'engine' ? 1 : 0) : Math.max(0, drives?.findIndex(x => x.root === root) ?? 0)}`} tabIndex={0}>
       {desktop && <DesktopSourceBrowser key={desktop} source={desktop} onPendingChange={setDesktopBusy} />}
       {!desktop && drives === null && <p className="pg-empty" role="status">Looking for drives…</p>}
-      {!desktop && detectError && <p className="pg-empty tone-unknown" role="alert">Drive detection failed ({detectError})</p>}
-      {!desktop && drives && drives.length === 0 && !detectError && <p className="pg-empty">No USB found</p>}
       {!desktop && drive && (
         <div className="pg-browser" aria-label={`USB ${drive.name}`} aria-busy={d.read.state === 'loading'} style={{ '--plan-width': `${planWidth}px` } as CSSProperties}>
           <header className="pg-bar">
@@ -497,6 +506,7 @@ export function SyncBrowser({ toolbar, onPendingChange }: { toolbar?: ReactNode;
           </aside>
         </div>
       )}
+      </section>
     </div>
   );
 }
