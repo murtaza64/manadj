@@ -21,6 +21,7 @@ import java.io.File
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import kotlin.math.*
+import kotlinx.coroutines.runBlocking
 
 /** Runtime reference only: unchanged production UI, generated PCM, built-in synthetic browser. */
 class AndroidReferenceCaptureTest {
@@ -127,6 +128,21 @@ class AndroidReferenceCaptureTest {
         }
         until(45_000, "both decks ready") { model.decks.getValue(DeckId.A).ready && model.decks.getValue(DeckId.B).ready }
         until(45_000, "waveforms complete") { listOf(DeckId.A, DeckId.B).all { d -> model.decks.getValue(d).source?.id?.let { ux.waves[it]?.complete } == true } }
+        // Same snapshot and preview bytes as iOS makePerformanceUIFixture.
+        // Test-only app cache, no desktop, account or production UI changes.
+        val matchedJson = instrumentation.context.assets.open("parity-library.json").bufferedReader().use { it.readText() }
+        val matched = dev.manadj.library.SnapshotJson.parse(matchedJson)
+        ux.repo.store.writeSnapshotText(matchedJson)
+        matched.tracks.forEachIndexed { index, track ->
+            val source = if (index == 0) a else b
+            val target = checkNotNull(ux.repo.store.audioFile(track))
+            target.parentFile?.mkdirs(); source.copyTo(target, overwrite = true)
+            val name = if (index == 0) "A" else "B"
+            val bytes = instrumentation.context.assets.open("parity-synthetic-$name.mwf").use { it.readBytes() }
+            ux.repo.store.writePreview(track, bytes)
+        }
+        runBlocking { ux.repo.open() }
+        until(10_000, "same two-track library as iOS") { ux.synced?.lib?.tracks?.size == 2 }
         capture("01-standard-portrait-loaded")
         touch("A play pause")
         until(8000, "A physical play tap") { model.decks.getValue(DeckId.A).snapshot?.playing == true }
@@ -139,6 +155,11 @@ class AndroidReferenceCaptureTest {
         capture("02-portrait-library-root")
         // The fixture opens the last Collection node directly.
         capture("03-portrait-library-collection")
+        assertNotNull("Matched fixture A visible", find("Synthetic pulse A"))
+        assertNotNull("Matched fixture B visible", find("Synthetic pulse B"))
+        touch("FILTER")
+        capture("03b-matched-fixture-filter")
+        touch("FILTER")
         touch("BROWSE")
         touch("A pitch panel")
         val opened = model.pitchDrawer == DeckId.A
