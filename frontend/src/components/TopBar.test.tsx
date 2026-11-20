@@ -14,6 +14,7 @@ globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
 vi.mock('./AudioRoutingPicker', () => ({ AudioRoutingPicker: () => null }));
 vi.mock('./AudioOwnershipChip', () => ({ AudioOwnershipChip: () => null }));
+vi.mock('../live/LocalLiveControl', () => ({ LocalLiveControl: () => null }));
 vi.mock('./TasksWidget', () => ({ TasksWidget: () => null }));
 vi.mock('./MasterRecorderControl', () => ({ MasterRecorderControl: () => null }));
 vi.mock('./VisualizerControlModal', () => ({ VisualizerControlModal: () => null }));

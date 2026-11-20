@@ -36,6 +36,15 @@ struct DeckViewState {
     private var connection: DesktopConnection?
     private var task: Task<Void, Never>?
     private var clock: Task<Void, Never>?
+    @Published var liveListening = false
+    @Published var liveStatus = "Local live prototype"
+    @Published var liveRoundTrip = 0.0
+    @Published var liveDrift = 0.0
+    private var liveTask: Task<Void, Never>?
+    private var liveReceived = 0.0
+    private var liveWatchdogPaused = false
+    private var liveStream = ""
+    private var liveSequence = -1
     private var engineErrors: Set<UInt64> = []
     private let root: URL
     private let deviceId: String
@@ -61,6 +70,7 @@ struct DeckViewState {
         do { try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true) } catch { self.error = error.localizedDescription }
         do { audio = try NativeAudio() } catch { audio = nil; self.error = error.localizedDescription }
         audio?.onInterruption = { [weak self] message in
+            self?.stopLocalLive()
             self?.status = message
             self?.recording = false
             self?.refreshRecordings()
@@ -74,12 +84,15 @@ struct DeckViewState {
         Task {
             await openCache()
             #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("--local-live-ui-fixture") { await installLocalLiveUIFixture() }
+            #endif
+            #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("--performance-ui-fixture") { await installPerformanceFixture() }
             #endif
         }
         refreshRecordings()
     }
-    deinit { clock?.cancel(); task?.cancel() }
+    deinit { clock?.cancel(); task?.cancel(); liveTask?.cancel() }
     private func openCache() async {
         do {
             let repo = try LibraryRepository(root: root.appendingPathComponent("library"))
@@ -95,6 +108,11 @@ struct DeckViewState {
     }
     func poll() {
         guard let audio else { return }
+        if liveListening && !liveWatchdogPaused && ProcessInfo.processInfo.systemUptime - liveReceived > 1 {
+            liveWatchdogPaused = true
+            for index in 0..<4 { audio.send(MDJPause, deck: index) }
+            liveStatus = "Waiting for fresh desktop state · paused"
+        }
         var updated = decks
         for index in 0..<4 {
             updated[index].engine = audio.state(index)
@@ -110,6 +128,152 @@ struct DeckViewState {
             refreshRecordings()
         }
     }
+    /// Explicit own-device takeover. Never starts from a remote message.
+    #if DEBUG
+    func useLocalLiveTestConnection(_ candidate: DesktopConnection) { connection = candidate }
+    private func installLocalLiveUIFixture() async {
+        do {
+            guard let descriptor = Bundle.main.url(forResource: "lan-fixture", withExtension: "json"),
+                  let fields = try JSONSerialization.jsonObject(with: Data(contentsOf: descriptor)) as? [String: Any],
+                  let origin = fields["origin"] as? String, let url = URL(string: origin) else {
+                throw AppFailure("Synthetic LAN descriptor missing")
+            }
+            let client = SyncClient(try DesktopConnection(url: url))
+            let ticket = try await client.requestPairing(deviceId: UUID().uuidString, deviceName: "Synthetic UI listener")
+            for _ in 0..<50 {
+                if let token = try await client.pollPairing(ticket).token {
+                    connection = try DesktopConnection(url: url, deviceToken: token)
+                    startLocalLive(); return
+                }
+                try await Task.sleep(for: .milliseconds(100))
+            }
+            throw AppFailure("Synthetic pairing did not finish")
+        } catch { liveStatus = error.localizedDescription }
+    }
+    #endif
+    func startLocalLive() {
+        guard !liveListening, !recording, !busy, !decks.contains(where: { $0.loading }), let connection, let repository, audio != nil else {
+            error = "Pair first and finish other work/recording before listening."; return
+        }
+        liveListening = true; liveStatus = "Connecting · phone decks paused"
+        liveReceived = 0; liveWatchdogPaused = false; liveStream = ""; liveSequence = -1
+        for index in 0..<4 { audio?.send(MDJPause, deck: index); audio?.send(MDJSeek, deck: index, value: audio?.state(index).position ?? 0); audio?.send(MDJPfl, deck: index, value: 0) }
+        audio?.beatFX(effect: 0, target: 0, on: false, depth: 0, beats: 1)
+        audio?.splitOutput(false)
+        liveTask = Task { [weak self] in
+            guard let self else { return }
+            let client = SyncClient(connection)
+            do {
+                // Refresh from this exact paired origin before resolving bare IDs.
+                let refreshed = try await repository.sync(connection)
+                try Task.checkCancellation()
+                self.snapshot = refreshed
+                while !Task.isCancelled && self.liveListening {
+                    let sent = ProcessInfo.processInfo.systemUptime
+                    let envelope = try await client.liveState()
+                    try Task.checkCancellation()
+                    let received = ProcessInfo.processInfo.systemUptime
+                    let rtt = received - sent
+                    self.liveRoundTrip = rtt
+                    guard envelope.state == "live", let anchor = envelope.anchor else {
+                        self.pauseLocalLive("Desktop is not live · paused")
+                        try await Task.sleep(for: .milliseconds(200)); continue
+                    }
+                    guard anchor.unsupported.isEmpty else {
+                        self.pauseLocalLive("Unsupported: " + anchor.unsupported.joined(separator: ", "))
+                        try await Task.sleep(for: .milliseconds(200)); continue
+                    }
+                    if anchor.streamId != self.liveStream {
+                        self.pauseLocalLive("New desktop stream · preparing")
+                        self.liveStream = anchor.streamId; self.liveSequence = -1
+                    }
+                    guard anchor.seq > self.liveSequence else {
+                        // Duplicate source samples do not refresh the freshness watchdog.
+                        try await Task.sleep(for: .milliseconds(100)); continue
+                    }
+                    self.liveSequence = anchor.seq
+                    guard envelope.age + rtt / 2 <= 1 else {
+                        self.pauseLocalLive("Waiting for fresh desktop state · paused")
+                        try await Task.sleep(for: .milliseconds(100)); continue
+                    }
+                    self.liveReceived = received - envelope.age - rtt / 2; self.liveWatchdogPaused = false
+                    try await self.applyLocalLive(anchor, age: envelope.age, rtt: rtt, received: received, repository: repository, connection: connection)
+                    try await Task.sleep(for: .milliseconds(200))
+                }
+            } catch is CancellationError { }
+            catch { self.pauseLocalLive(error.localizedDescription) }
+        }
+    }
+    private func pauseLocalLive(_ reason: String) {
+        liveWatchdogPaused = true
+        for index in 0..<4 { audio?.send(MDJPause, deck: index) }
+        liveStatus = reason
+    }
+    func stopLocalLive() {
+        liveTask?.cancel(); liveTask = nil
+        pauseLocalLive("Stopped · phone decks paused")
+        liveListening = false
+    }
+    private func applyLocalLive(_ anchor: LiveAnchor, age: Double, rtt: Double, received: Double,
+                                repository: LibraryRepository, connection: DesktopConnection) async throws {
+        guard let audio else { throw AppFailure("Audio unavailable") }
+        // Validate the entire frame before allowing any channel to sound.
+        for row in anchor.decks { _ = try row.target(age: age, roundTrip: rtt) }
+        for index in 0..<4 {
+            let row = anchor.decks[index]
+            guard let id = row.trackId else { audio.send(MDJPause, deck: index); decks[index].track = nil; decks[index].title = "No track loaded"; continue }
+            guard let track = snapshot?.tracks.first(where: { $0.id == id }), track.audioRev == row.audioRev, row.audioRev != nil else {
+                throw AppFailure("Track changed or not in synced Library. Stop, sync, then listen again.")
+            }
+            if decks[index].track?.id != id || decks[index].track?.audioRev != row.audioRev || !audio.state(index).ready {
+                pauseLocalLive("Preparing audio")
+                liveStatus = "Preparing deck \(Ink.deckName(index)) audio · silent until ready"
+                let file = try await repository.audio(track, connection: connection)
+                try Task.checkCancellation()
+                let duration = try await audio.load(file, deck: index)
+                try Task.checkCancellation()
+                decks[index].track = track; decks[index].title = track.title
+                decks[index].artist = track.artist ?? ""; decks[index].duration = duration
+                decks[index].waveform = await repository.preview(track)
+                // Fetch a fresh anchor after download/decode, never extrapolate old state.
+                liveStatus = "Audio ready · waiting for fresh anchor"
+                return
+            }
+        }
+        for index in 0..<4 {
+            let row = anchor.decks[index]
+            if row.trackId != nil && row.keyLock && abs(row.pitch) > 0.001 && !audio.state(index).fullyDecoded {
+                throw AppFailure("Long-file key lock is not supported by this prototype.")
+            }
+        }
+        try Task.checkCancellation()
+        let elapsed = ProcessInfo.processInfo.systemUptime - received
+        guard liveListening, elapsed <= 1 else { throw AppFailure("Live preparation took too long. Playback paused.") }
+        audio.send(MDJCrossfade, value: 0)
+        var maxDrift = 0.0
+        for index in 0..<4 {
+            let row = anchor.decks[index]
+            guard row.trackId != nil else { continue }
+            let target = try row.target(age: age, roundTrip: rtt, elapsed: elapsed)
+            let current = audio.state(index)
+            guard target <= decks[index].duration else { audio.send(MDJPause, deck: index); continue }
+            audio.send(MDJQuantize, deck: index, value: 0)
+            audio.send(MDJKeyLock, deck: index, value: row.keyLock ? 1 : 0)
+            audio.send(MDJPitch, deck: index, value: row.pitch)
+            audio.send(MDJBend, deck: index, value: row.bend)
+            audio.send(MDJFader, deck: index, value: row.fader)
+            audio.send(MDJTrim, deck: index, value: row.trim)
+            for (band, value) in [row.low, row.mid, row.high].enumerated() { audio.send(MDJEq, deck: index, value: value, slot: band) }
+            audio.filter(index, position: row.filter)
+            let drift = abs(current.position - target); maxDrift = max(maxDrift, drift)
+            if drift > 0.15 || current.playing != row.playing { audio.send(MDJSeek, deck: index, value: target) }
+            audio.send(row.playing ? MDJPlay : MDJPause, deck: index)
+        }
+        try audio.start()
+        liveDrift = maxDrift
+        liveStatus = "Listening · sampled state prototype"
+    }
+
     func pair() {
         guard !busy else { return }
         task?.cancel()
@@ -168,6 +332,7 @@ struct DeckViewState {
     func cancelWork() { task?.cancel() }
     var pairedOrigin: String? { connection?.baseURL.absoluteString }
     func forgetDesktop() {
+        stopLocalLive()
         task?.cancel()
         do { if let pairedOrigin { try PairingKeychain.save(nil, origin: pairedOrigin) }; connection = nil; status = "Desktop forgotten on this iPhone. Offline tracks kept." }
         catch { self.error = error.localizedDescription }
@@ -175,6 +340,7 @@ struct DeckViewState {
     /// Acceptance means the request was queued, not that asynchronous decoding succeeded.
     /// Refused requests keep the browser and its search focus in place.
     @discardableResult func load(_ track: LibraryTrack, deck: Int) -> Bool {
+        guard !liveListening else { error = "Stop local live before loading tracks"; return false }
         guard decks.indices.contains(deck) else { error = "Choose a valid deck"; return false }
         guard !decks[deck].loading else { error = "This deck is already loading. Wait for it to finish."; return false }
         guard let repository else { error = "The offline library is still opening. Try again shortly."; return false }
@@ -206,7 +372,7 @@ struct DeckViewState {
         return true
     }
     func importFile(_ url: URL, deck: Int, title: String? = nil, artist: String? = nil) {
-        guard let audio, !decks[deck].loading else { return }
+        guard !liveListening, let audio, !decks[deck].loading else { return }
         let previousLoad = audio.state(deck).load
         decks[deck].loading = true
         Task {

@@ -97,6 +97,8 @@ app.include_router(routines.router, prefix="/api/routines", tags=["routines"])
 app.include_router(video_export.router, prefix="/api/video-export", tags=["video-export"])
 app.include_router(cameos.router, prefix="/api/cameos", tags=["cameos"])
 app.include_router(device_sync.router, prefix="/api/device-sync", tags=["device-sync"])
+from .local_live import publisher as local_live_publisher
+app.include_router(local_live_publisher, prefix="/api/local-live", tags=["local-live"])
 app.include_router(device_listener_router.router, prefix="/api/device-listener", tags=["device-sync"])
 app.include_router(visualizer_ga.router, prefix="/api/ga", tags=["visualizer-ga"])
 app.include_router(settings.router, prefix="/api/settings", tags=["settings"])

@@ -254,4 +254,18 @@ final class WorkspaceUITests: XCTestCase {
         accepted.name = "Synthetic library - accepted load returns to Perform"
         accepted.lifetime = .keepAlways; add(accepted)
     }
+    @MainActor func testLocalLiveSyntheticPairedHostMonitor() {
+        defer { captureFailure() }
+        let app = XCUIApplication(); app.launchArguments = ["--local-live-ui-fixture"]; app.launch()
+        let status = app.staticTexts["local-live-status"]
+        XCTAssertTrue(status.waitForExistence(timeout: 10))
+        let listening = NSPredicate(format: "label BEGINSWITH %@", "Listening")
+        expectation(for: listening, evaluatedWith: status); waitForExpectations(timeout: 30)
+        XCTAssertTrue(app.staticTexts["Synthetic LAN Tone"].exists)
+        let shot = XCTAttachment(screenshot: app.screenshot())
+        shot.name = "Local live monitor - synthetic paired host, not device proof"; shot.lifetime = .keepAlways; add(shot)
+        app.buttons["STOP"].tap()
+        XCTAssertTrue(status.label.hasPrefix("Stopped"))
+    }
+
 }

@@ -2,7 +2,7 @@ name: iOS unsigned simulator
 
 on:
   push:
-    branches: ["instinct/ios-app", "instinct/ios-android-parity"]
+    branches: ["instinct/ios-app", "instinct/ios-android-parity", "instinct/ios-local-live"]
   pull_request:
     paths: ["ios/**", "android/audio-engine/src/main/cpp/**", ".github/workflows/ios-simulator.yml"]
 

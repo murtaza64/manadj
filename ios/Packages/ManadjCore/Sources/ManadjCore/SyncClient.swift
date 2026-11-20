@@ -60,6 +60,14 @@ public final class SyncClient: Sendable {
         if http.statusCode == 401 { throw SyncError("Not paired, or this phone was unpaired on the desktop. Pair again.", status: 401) }
         guard (200..<300).contains(http.statusCode) else { throw SyncError("Desktop returned HTTP \(http.statusCode)", status: http.statusCode) }
     }
+    public func liveState() async throws -> LiveEnvelope {
+        var request = connection.request(path: "/live")
+        request.timeoutInterval = 2
+        let (data, response) = try await session.data(for: request)
+        try check(response)
+        guard data.count <= 64 * 1024 else { throw SyncError("Live state exceeds size limit") }
+        return try LiveEnvelope.parse(data)
+    }
     public func snapshotText() async throws -> String {
         let (data, response) = try await session.data(for: connection.request(path: "/snapshot"))
         try check(response)

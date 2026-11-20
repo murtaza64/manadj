@@ -44,6 +44,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 def _parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    p.add_argument("--live", action="store_true", help="publish synthetic test anchors, no real playback")
     p.add_argument("--port", type=int, default=0, help="loopback port (0 = pick a free one)")
     p.add_argument("--data-dir", type=Path, default=None,
                    help="keep this data dir instead of a deleted temp dir")
@@ -211,6 +212,32 @@ def main() -> int:
         raise RuntimeError(listener.error or "Synthetic LAN listener did not start")
     watcher = threading.Thread(target=auto_approve, daemon=True)
     watcher.start()
+
+    def synthetic_live() -> None:
+        # Test-only generated anchor source, not desktop audio engine proof.
+        from uuid import uuid4
+        from sqlalchemy.orm import sessionmaker
+        from backend.local_live import LiveAnchor, publish
+        session = sessionmaker(bind=engine)
+        stream = str(uuid4()); seq = 0
+        while not stop_event.is_set():
+            phase = time.monotonic() % 10
+            # A deliberate four-second test-source silence proves native stale pause.
+            if phase >= 6:
+                stop_event.wait(.1)
+                continue
+            row = dict(track_id=track_id, position=.25 + (phase % .5), playing=phase < 3,
+                pitch=0, bend=0, fader=.6, trim=.5, low=.5, mid=.5, high=.5,
+                filter=0, key_lock=False, unsupported=[])
+            empty = dict(row, track_id=None, playing=False)
+            with session() as db:
+                publish(LiveAnchor.model_validate(dict(stream_id=stream, seq=seq,
+                    decks=[row, empty, empty, empty], unsupported=[])), db)
+            seq += 1
+            stop_event.wait(.1)
+    if args.live:
+        threading.Thread(target=synthetic_live, daemon=True).start()
+
 
     info = {
         "origin": f"http://127.0.0.1:{port}",
