@@ -52,7 +52,7 @@ it('lists every playlist and track with markers; selecting a playlist shows only
   const host = await mount();
   const text = () => host.textContent ?? '';
   expect(text()).toContain('Warm Up'); expect(text()).toContain('Peak');
-  expect(text()).toContain('Not in library'); expect(text()).toContain('Unverified'); expect(text()).toContain('In library');
+  expect(host.querySelector('[aria-label="Not in library"]')).not.toBeNull(); expect(text()).toContain('Unverified'); expect(text()).toContain('In library');
   expect(text()).toContain('1 track not in library'); expect(text()).toContain('1 track unverified');
   expect(text()).toContain('Not checked: cues, beatgrids, player load');
   expect(text()).toContain('Nothing chosen');
@@ -130,9 +130,9 @@ it('chooses whole-playlist actions, applies once with a recheck per item, nothin
   const host = await mount();
   const dot = (name: string) => [...host.querySelectorAll('.pg-pl')].find((b) => b.textContent?.startsWith(name))!;
   await act(async () => { (dot('New Set') as HTMLElement).click(); await tick(); });
-  await click(host, 'Add whole playlist to plan');
+  await click(host, 'Plan whole playlist');
   await act(async () => { (dot('Peak') as HTMLElement).click(); await tick(); });
-  await click(host, 'Update library');
+  await click(host, 'Plan playlist update');
   expect(importSpy).not.toHaveBeenCalled();
   expect(host.querySelector('.pg-right')!.textContent).toContain('Plan (2)');
   const calls = previewSpy.mock.calls.length;
@@ -152,7 +152,7 @@ it('an item whose playlist changed since it was chosen is held, nothing imported
   const importSpy = vi.spyOn(api.externalDrives, 'import');
   const host = await mount();
   await act(async () => { ([...host.querySelectorAll('.pg-pl')].find((b) => b.textContent?.startsWith('Peak')) as HTMLElement).click(); await tick(); });
-  await click(host, 'Update library');
+  await click(host, 'Plan playlist update');
   previewSpy.mockResolvedValue(preview([{ ...updPl, track_ordinals: [1, 0] }]));
   await click(host, 'Review 1 planned operation'); await click(host, 'Confirm and apply plan'); await act(async () => { await tick(); });
   expect(importSpy).not.toHaveBeenCalled();
@@ -170,7 +170,7 @@ it('detail choices: only an explicit take enters the plan, BPM never does, appli
   const host = await mount();
   expect(host.textContent).toContain('1 detail to decide');
   expect(host.querySelector('.pg-right')!.textContent).toContain('Nothing chosen');
-  await click(host, 'TitleBPM▾');
+  await click(host, '2 fields▾');
   await click(host, 'Keep Library');
   expect(host.querySelector('.pg-right')!.textContent).toContain('Nothing chosen');
   await click(host, "Use USB");
@@ -189,7 +189,7 @@ it('a detail choice does not carry over when the library value changed after a r
   vi.spyOn(api.externalDrives, 'preview').mockResolvedValue(preview([pl()], { entries: [ent(0, 'present', 'One'), ent(1, 'present', 'Two')] }));
   const fieldsSpy = vi.spyOn(api.externalDrives, 'fields').mockResolvedValue(cmp());
   const host = await mount();
-  await click(host, 'TitleBPM▾');
+  await click(host, '2 fields▾');
   await click(host, "Use USB");
   expect(host.querySelector('.pg-right')!.textContent).toContain('Plan (1)');
   fieldsSpy.mockResolvedValue(cmp('Changed elsewhere'));
@@ -206,7 +206,7 @@ it('the plan is kept per drive across switching drives and is never applied to t
   const importSpy = vi.spyOn(api.externalDrives, 'import').mockResolvedValue(DONE as never);
   const host = await mount();
   await act(async () => { ([...host.querySelectorAll('.pg-pl')].find((b) => b.textContent?.startsWith('New Set')) as HTMLElement).click(); await tick(); });
-  await click(host, 'Add whole playlist to plan');
+  await click(host, 'Plan whole playlist');
   await click(host, 'RB2'); await act(async () => { await tick(); });
   expect(host.querySelector('.pg-right')!.textContent).toContain('Nothing chosen');
   expect(host.querySelector('.pg-right')!.textContent).toContain('1 more planned on RB');
@@ -224,7 +224,7 @@ it('All tracks lists what is missing first; a playlist keeps its drive order', a
   vi.spyOn(api.externalDrives, 'fields').mockResolvedValue({ fingerprint: 'f', tracks: [], compared: [], not_compared: {} });
   vi.spyOn(api.externalDrives, 'preview').mockResolvedValue(preview([pl({ track_ordinals: [0, 1, 2], track_count: 3 })], { entries: [ent(0, 'present', 'Aaa'), ent(1, 'uncertain', 'Bbb'), ent(2, 'new', 'Ccc')], new_count: 1, uncertain_count: 1 }));
   const host = await mount();
-  const titles = () => [...host.querySelectorAll('.pg-tracks tbody tr:not(.pg-diff):not(.pg-context) td:nth-child(2) summary')].map((t) => t.textContent);
+  const titles = () => [...host.querySelectorAll('.pg-tracks tbody tr:not(.pg-diff):not(.pg-context) td:nth-child(2) .pg-title-text')].map((t) => t.textContent);
   expect(titles()).toEqual(['Ccc', 'Bbb', 'Aaa']);
   await act(async () => { ([...host.querySelectorAll('.pg-pl')].find((b) => b.textContent?.startsWith('Warm Up')) as HTMLElement).click(); await tick(); });
   expect(titles()).toEqual(['Aaa', 'Bbb', 'Ccc']);
@@ -241,8 +241,8 @@ it('conflicted details show their real reason, and choices are locked while Appl
   let release!: () => void;
   vi.spyOn(api.externalDrives, 'applyFields').mockImplementation(() => new Promise((r) => { release = () => r({ applied: [] }); }));
   const host = await mount();
-  expect([...host.querySelectorAll('.pg-tracks .pg-tag')].find((t) => t.textContent === 'Key')!.getAttribute('title')).toBe('Two drive tracks disagree');
-  await click(host, 'TitleBPMKey▾');
+  expect(host.querySelector('.pg-diff-toggle')?.getAttribute('title')).toContain('Two drive tracks disagree');
+  await click(host, '3 fields▾');
   await click(host, "Use USB");
   await click(host, 'Review 1 planned operation'); await click(host, 'Confirm and apply plan');
   expect(btn(host, 'Keep Library')!.disabled).toBe(true);
@@ -300,7 +300,7 @@ it('checkbox selection stays separate from expansion; mixed top actions stage on
   const checkbox = (name: string) => host.querySelector<HTMLInputElement>(`input[aria-label="Select ${name}"]`)!;
   await act(async () => { checkbox('New').click(); checkbox('Uncertain').click(); });
   expect(host.querySelector('.pg-context')).toBeNull();
-  expect(host.querySelector('.pg-selection-bar')!.textContent).toContain('2 selected1 importable · 1 excluded');
+  expect(host.querySelector('.pg-selected-actions')!.textContent).toContain('2 selected1 importable · 1 excluded');
   await click(host, 'Plan imports');
   expect(imports).not.toHaveBeenCalled();
   expect(host.querySelector('.pg-right')!.textContent).toContain('Import New');
@@ -314,7 +314,7 @@ it('hover and keyboard focus preview Library results without staging or writing'
   setupRows(); vi.spyOn(api.externalDrives, 'preview').mockResolvedValue(preview([pl()], { entries: [ent(0, 'present', 'One')] }));
   vi.spyOn(api.externalDrives, 'fields').mockResolvedValue(cmp());
   const writes = vi.spyOn(api.externalDrives, 'applyFields'); const host = await mount();
-  await click(host, 'TitleBPM▾'); const action = btn(host, 'Use USB')!;
+  await click(host, '2 fields▾'); const action = btn(host, 'Use USB')!;
   await act(async () => { action.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })); });
   expect(host.querySelector('.pg-result-preview')!.textContent).toContain('Library result One');
   expect(host.querySelector('.pg-right')!.textContent).toContain('Nothing chosen');
@@ -328,7 +328,7 @@ it('hover and keyboard focus preview Library results without staging or writing'
 it('review gate invalidates when a planned field is removed', async () => {
   setupRows(); vi.spyOn(api.externalDrives, 'preview').mockResolvedValue(preview([pl()], { entries: [ent(0, 'present', 'One')] }));
   vi.spyOn(api.externalDrives, 'fields').mockResolvedValue(cmp());
-  const host = await mount(); await click(host, 'TitleBPM▾'); await click(host, 'Use USB');
+  const host = await mount(); await click(host, '2 fields▾'); await click(host, 'Use USB');
   await click(host, 'Review 1 planned operation'); expect(host.querySelector('[aria-label="Confirm reviewed plan"]')).not.toBeNull();
   await click(host, 'Remove this field'); expect(host.querySelector('[aria-label="Confirm reviewed plan"]')).toBeNull();
 });
@@ -366,4 +366,45 @@ it.each(['success', 'error', 'removed'] as const)('USB throbber tracks a pending
   expect(host.querySelector('.pg-read-spinner')).toBeNull();
   expect(host.querySelector('.pg-browser')?.getAttribute('aria-busy')).not.toBe('true');
   if (outcome === 'error') expect(host.querySelector('[role="alert"]')?.textContent).toContain('unplugged');
+});
+
+it('uses Library waveform identity only for confirmed present audio and keeps title disclosure separate', async () => {
+  vi.spyOn(api.externalDrives, 'list').mockResolvedValue([RB]); noCheck();
+  vi.spyOn(api.externalDrives, 'fields').mockResolvedValue({ fingerprint: 'f', tracks: [], compared: [], not_compared: {} });
+  const waveform = vi.spyOn(api.waveforms, 'getPreview').mockResolvedValue(null);
+  const long = 'A very long title '.repeat(8);
+  vi.spyOn(api.externalDrives, 'preview').mockResolvedValue(preview([], { entries: [
+    { ...ent(0, 'present', long), matched_track_id: 42 },
+    { ...ent(1, 'new', 'Unverified copy'), matched_track_id: 999, candidates: [{ track_id: 777 }] },
+  ] as never }));
+  const host = await mount();
+  expect(waveform.mock.calls.map(call => call[0])).toEqual([42]);
+  expect(host.querySelector('.pg-track-name')).toBeNull();
+  const title = [...host.querySelectorAll<HTMLElement>('.pg-title-text')].find(el => el.textContent === long)!;
+  expect(title.title).toBe(long); // no destructive truncation of the actual value
+  expect(host.querySelector('.pg-context')).toBeNull();
+  await act(async () => { host.querySelector<HTMLButtonElement>(`[aria-label="Details for ${long}"]`)!.click(); });
+  expect(host.querySelector('.pg-context')).not.toBeNull();
+  expect(host.querySelector('.pg-title-text')?.closest('tr')?.querySelector('details')).toBeNull();
+  expect(host.textContent).toContain('Nothing chosen');
+});
+
+it('marks title divergence neutrally and reveals it only in the shared track expansion', async () => {
+  vi.spyOn(api.externalDrives, 'list').mockResolvedValue([RB]); noCheck();
+  vi.spyOn(api.externalDrives, 'preview').mockResolvedValue(preview([], { entries: [ent(0, 'present', 'USB title')] }));
+  vi.spyOn(api.externalDrives, 'fields').mockResolvedValue({ fingerprint: 'f', compared: ['title'], not_compared: {}, tracks: [{ ordinal: 0, track_id: 42, label: 'USB title', fields: [{ field: 'title', drive: 'USB title', library: 'Library title', applicable: true }] }] } as never);
+  const host = await mount();
+  const marker = host.querySelector('.pg-title-divergence svg')!;
+  expect(marker.getAttribute('aria-label')).toContain('newer source unknown');
+  expect(marker.getAttribute('data-newer')).toBe('unknown');
+  expect(host.querySelector('.pg-track-title details')).toBeNull();
+  expect(host.querySelector('.pg-context')).toBeNull();
+  await act(async () => { host.querySelector<HTMLButtonElement>('[aria-label="Details for USB title"]')!.click(); });
+  expect(host.querySelectorAll('.pg-context')).toHaveLength(1);
+  expect(host.querySelectorAll('.pg-diff')).toHaveLength(1);
+  expect(host.querySelector('.pg-diff')?.textContent).toContain('Library title');
+  expect(host.querySelector('.pg-track-facts')?.textContent).toContain('USB:');
+  await act(async () => { host.querySelector<HTMLButtonElement>('[aria-label="Differences for USB title"]')!.click(); });
+  expect(host.querySelector('.pg-context')).toBeNull();
+  expect(host.textContent).toContain('Nothing chosen');
 });

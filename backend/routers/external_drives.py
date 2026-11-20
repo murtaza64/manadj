@@ -73,6 +73,7 @@ class PullEntryOut(BaseModel):
     status: str
     detail: str | None
     matched_path: str | None
+    matched_track_id: int | None = None
     candidates: list[dict] = []
 
 
@@ -172,9 +173,18 @@ def preview_pull(request: PreviewRequest, db: Session = Depends(get_db)):
     # selection, counterpart identity or field-write eligibility.
     from backend.models import Track
     from backend.sync_common.suggestions import suggest_copies
-    candidates = suggest_copies(preview.entries, db.query(Track).all())
+    tracks = db.query(Track).all()
+    candidates = suggest_copies(preview.entries, tracks)
+    # Only already content-verified matches may borrow a Library waveform.
+    # A path or name suggestion alone must never supply preview identity.
+    ids_by_path: dict[str, list[int]] = {}
+    for track in tracks:
+        ids_by_path.setdefault(track.filename, []).append(track.id)
     for entry in response.entries:
         entry.candidates = candidates.get(entry.ordinal, [])
+        ids = ids_by_path.get(entry.matched_path, [])
+        if entry.status == "present" and len(ids) == 1:
+            entry.matched_track_id = ids[0]
     return response
 
 

@@ -105,3 +105,42 @@
 .pg-read-spinner { width: 11px; height: 11px; flex: 0 0 auto; border: 2px solid var(--surface2, #444); border-top-color: var(--accent, #00d4ff); border-radius: 50%; animation: pg-read-spin .8s linear infinite; }
 @keyframes pg-read-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .pg-read-spinner { animation: none; } }
+/* Library-style track summaries: one line, independent selection/disclosure. */
+.pg-track-row { height: 30px; background: var(--crust); }
+.pg-tracks .pg-track-row > td { height: 30px; padding: 2px 6px; background: transparent; border-radius: 0; overflow: hidden; white-space: nowrap; overflow-wrap: normal; vertical-align: middle; }
+.pg-tracks .pg-track-row.row-work > td { background: transparent; border-radius: 0; }
+.pg-tracks .pg-track-row:hover { background: var(--mantle); }
+.pg-tracks .pg-track-row.track-row-selected > td { background: var(--surface0); }
+.pg-tracks .pg-i { text-align: left; }
+.pg-tracks .pg-i input { display: inline-block; margin: 0 5px 0 0; vertical-align: middle; width: 12px; height: 12px; }
+.pg-row-number { color: var(--overlay1); font-size: 10px; vertical-align: middle; }
+.pg-track-title { display: flex; align-items: center; gap: 3px; min-width: 0; }
+.pg-row-disclosure { flex: 0 0 16px; width: 16px; padding: 0; border: 0; background: transparent; color: var(--subtext0); cursor: pointer; font: inherit; line-height: 24px; }
+.pg-row-disclosure:focus-visible { outline: 1px solid var(--accent); }
+.pg-title-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pg-row-actions { display: flex; flex-wrap: nowrap; align-items: center; gap: 4px; min-width: 0; }
+.pg-row-actions .pg-tag { margin: 0; padding: 1px 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.pg-row-actions .pg-row-action { margin: 0; padding: 1px 5px; flex: 0 0 auto; white-space: nowrap; line-height: 20px; min-height: 22px; font-size: 11px; }
+.pg-track-row .pg-diff-toggle { display: inline-flex; flex-wrap: nowrap; align-items: center; white-space: nowrap; min-width: 0; max-width: 100%; }
+.pg-track-row .pg-diff-toggle .pg-tag { white-space: nowrap; padding: 1px 5px; overflow: hidden; text-overflow: ellipsis; min-width: 0; margin-right: 0; }
+.pg-track-row .pg-comparison-state { display: block; overflow: hidden; text-overflow: ellipsis; }
+.pg-preview-cell > span { display: block; }
+.pg-preview-unavailable { color: var(--overlay0); }
+.pg-playlist-actions { display: flex; align-items: center; gap: 6px; margin-left: 0; }
+.pg-playlist-actions .btn { font-size: 11px; padding: 3px 8px; white-space: nowrap; }
+.pg-field-target { display: inline; margin: 0 6px 0 0; }
+@media(max-width:1280px) { .pg-browser { grid-template-columns:170px minmax(0,1fr); } .pg-right { grid-column:1 / -1; max-height:300px; } .pg-plan-grip { display:none; } }
+
+/* A single stable, pinned workspace toolbar changes contents on selection. */
+.pg-title { position: sticky; top: 0; z-index: 4; box-sizing: border-box; min-height: 48px; align-items: center; padding: 6px 12px; gap: 8px; }
+.pg-title > b { min-width: 0; max-width: 34%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; flex-shrink: 1; }
+.pg-selected-actions { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; }
+.pg-selected-actions > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+.pg-selected-actions .btn { padding: 3px 8px; font-size: 11px; white-space: nowrap; }
+.pg-selected-actions .btn:first-of-type { margin-left: auto; }
+.pg-title > span { white-space: nowrap; }
+@media(max-width:900px) { .pg-title > .pg-order { display: none; } .pg-selected-actions > span { display: none; } }
+
+.pg-title-divergence { display: inline-flex; flex: 0 0 auto; color: var(--yellow, #ffc85a); align-items: center; }
+.pg-track-facts { display: flex; flex-direction: column; gap: 3px; margin: 6px 0; color: var(--subtext0); font-size: 11px; }
+.pg-track-facts > span { overflow-wrap: anywhere; }
