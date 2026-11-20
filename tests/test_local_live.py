@@ -49,3 +49,31 @@ def test_publisher_refuses_non_loopback_before_db_use():
     app=FastAPI(); app.include_router(publisher, prefix='/api/local-live')
     client=TestClient(app, client=('192.0.2.9', 2000))
     assert client.post('/api/local-live/anchor',json=body()).status_code == 403
+
+
+def test_real_desktop_publisher_revisions_and_paired_reader_stop(db, make_track, tmp_path, monkeypatch):
+    from backend.main import app
+    from backend.database import get_db
+    from backend import local_live
+    from backend.routers.device_sync import audio_rev
+    monkeypatch.setattr(local_live, 'mailbox', LiveMailbox())
+    audio = tmp_path / 'synthetic.wav'
+    audio.write_bytes(b'RIFF-synthetic-test-data')
+    track = make_track(filename=str(audio))
+    app.dependency_overrides[get_db] = lambda: db
+    try:
+        desktop = TestClient(app)
+        phone = TestClient(build_app(lambda: 'AAAAA-BBBBB'))
+        payload = body()
+        payload['decks'][0]['track_id'] = track.id
+        response = desktop.post('/api/local-live/anchor', json=payload)
+        assert response.status_code == 200, response.text
+        result = phone.get('/api/device-sync/live', headers={'X-Manadj-Pair':'AAAAA-BBBBB'})
+        assert result.status_code == 200
+        assert result.json()['anchor']['decks'][0]['audio_rev'] == audio_rev(str(audio))
+        assert result.json()['anchor']['seq'] == 0
+        assert not db.dirty and not db.new
+        assert desktop.delete('/api/local-live/' + payload['stream_id']).status_code == 200
+        assert phone.get('/api/device-sync/live', headers={'X-Manadj-Pair':'AAAAA-BBBBB'}).json()['state'] == 'offline'
+    finally:
+        app.dependency_overrides.pop(get_db, None)

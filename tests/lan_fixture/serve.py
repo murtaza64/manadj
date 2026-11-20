@@ -221,7 +221,11 @@ def main() -> int:
         session = sessionmaker(bind=engine)
         stream = str(uuid4()); seq = 0
         while not stop_event.is_set():
-            phase = time.monotonic() % 6
+            phase = time.monotonic() % 10
+            # A deliberate four-second test-source silence proves native stale pause.
+            if phase >= 6:
+                stop_event.wait(.1)
+                continue
             row = dict(track_id=track_id, position=.25 + (phase % .5), playing=phase < 3,
                 pitch=0, bend=0, fader=.6, trim=.5, low=.5, mid=.5, high=.5,
                 filter=0, key_lock=False, unsupported=[])

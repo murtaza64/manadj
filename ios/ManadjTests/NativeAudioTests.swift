@@ -201,7 +201,12 @@ final class NativeAudioTests: XCTestCase {
             try await Task.sleep(for: .milliseconds(100))
         }
         let connection = try DesktopConnection(url: url, deviceToken: XCTUnwrap(token))
-        let envelope = try await SyncClient(connection).liveState()
+        var envelope = try await SyncClient(connection).liveState()
+        for _ in 0..<60 {
+            if envelope.state == "live" { break }
+            try await Task.sleep(for: .milliseconds(100))
+            envelope = try await SyncClient(connection).liveState()
+        }
         XCTAssertEqual(envelope.state, "live")
         XCTAssertEqual(envelope.anchor?.decks.count, 4)
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("live-test-" + UUID().uuidString)
@@ -222,6 +227,16 @@ final class NativeAudioTests: XCTestCase {
         XCTAssertTrue(heardPlaying, model.liveStatus + " " + (model.error ?? ""))
         XCTAssertEqual(model.decks[0].title, "Synthetic LAN Tone")
         XCTAssertGreaterThan(model.liveRoundTrip, 0)
+        var sawStalePause = false
+        for _ in 0..<300 {
+            if model.liveStatus.contains("Waiting for fresh") || model.liveStatus.contains("Desktop is not live") {
+                try await Task.sleep(for: .milliseconds(100))
+                sawStalePause = model.audio?.state(0).playing != true
+                if sawStalePause { break }
+            }
+            try await Task.sleep(for: .milliseconds(40))
+        }
+        XCTAssertTrue(sawStalePause, "Synthetic source silence must pause native sound: " + model.liveStatus)
         model.stopLocalLive()
         try await Task.sleep(for: .milliseconds(100))
         XCTAssertFalse(model.audio?.state(0).playing == true)

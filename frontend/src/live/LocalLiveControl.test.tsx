@@ -31,3 +31,17 @@ it('flags unsupported source loops without claiming equivalent playback', async(
   const body=JSON.parse((vi.mocked(fetch).mock.calls[0][1] as RequestInit).body as string);
   expect(body.decks[0].unsupported).toContain('Loop');
 });
+
+it('does not overlap slow source requests', async()=>{
+  vi.useFakeTimers();
+  let finish!: (value: {ok:boolean})=>void;
+  vi.mocked(fetch).mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve as typeof finish;}));
+  try {
+    await act(async()=>root.render(<LocalLiveControl/>));
+    await act(async()=>host.querySelector('button')!.click());
+    await act(async()=>vi.advanceTimersByTime(1200));expect(fetch).toHaveBeenCalledTimes(1);
+    await act(async()=>finish({ok:true}));
+    await act(async()=>vi.advanceTimersByTime(200));expect(fetch).toHaveBeenCalledTimes(2);
+    await act(async()=>host.querySelector('button')!.click());
+  } finally {vi.useRealTimers();}
+});

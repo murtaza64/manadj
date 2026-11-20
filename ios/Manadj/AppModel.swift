@@ -165,10 +165,13 @@ struct DeckViewState {
             let client = SyncClient(connection)
             do {
                 // Refresh from this exact paired origin before resolving bare IDs.
-                self.snapshot = try await repository.sync(connection)
+                let refreshed = try await repository.sync(connection)
+                try Task.checkCancellation()
+                self.snapshot = refreshed
                 while !Task.isCancelled && self.liveListening {
                     let sent = ProcessInfo.processInfo.systemUptime
                     let envelope = try await client.liveState()
+                    try Task.checkCancellation()
                     let received = ProcessInfo.processInfo.systemUptime
                     let rtt = received - sent
                     self.liveRoundTrip = rtt
@@ -189,7 +192,11 @@ struct DeckViewState {
                         try await Task.sleep(for: .milliseconds(100)); continue
                     }
                     self.liveSequence = anchor.seq
-                    self.liveReceived = received; self.liveWatchdogPaused = false
+                    guard envelope.age + rtt / 2 <= 1 else {
+                        self.pauseLocalLive("Waiting for fresh desktop state · paused")
+                        try await Task.sleep(for: .milliseconds(100)); continue
+                    }
+                    self.liveReceived = received - envelope.age - rtt / 2; self.liveWatchdogPaused = false
                     try await self.applyLocalLive(anchor, age: envelope.age, rtt: rtt, received: received, repository: repository, connection: connection)
                     try await Task.sleep(for: .milliseconds(200))
                 }

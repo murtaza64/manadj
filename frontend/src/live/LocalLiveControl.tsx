@@ -16,6 +16,7 @@ export function LocalLiveControl() {
     const stream = crypto.randomUUID(); let seq = 0, stopped = false, timer = 0;
     const controller = new AbortController();
     const publish = async () => {
+      try {
       const unsupported: string[] = [];
       if (mixer.isAutomationEngaged()) unsupported.push('Automated playback');
       if (mixer.getBeatFxSection().on) unsupported.push('Beat FX');
@@ -38,7 +39,6 @@ export function LocalLiveControl() {
           trim: channel.trim, low: channel.eq.low, mid: channel.eq.mid, high: channel.eq.high,
           filter: channel.filter, key_lock: snap.keyLock, unsupported: gaps };
       });
-      try {
         const response = await fetch(`${API_BASE}/local-live/anchor`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ stream_id: stream, seq: seq++, decks, unsupported }), signal: controller.signal });
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
