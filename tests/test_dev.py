@@ -135,6 +135,7 @@ def test_missing_electron_cleans_up_both_servers(monkeypatch, tmp_path):
 def test_inaccessible_group_probe_is_conservative(monkeypatch):
     import os
     from types import SimpleNamespace
+
     import pytest
 
     if os.name == "nt":
