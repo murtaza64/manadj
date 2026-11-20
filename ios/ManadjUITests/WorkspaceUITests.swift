@@ -96,6 +96,38 @@ final class WorkspaceUITests: XCTestCase {
         expectation(for: NSPredicate(format: "value BEGINSWITH %@", "paused"), evaluatedWith: wave); waitForExpectations(timeout: 5)
         let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Live mixer gesture and transport recovery"; shot.lifetime = .keepAlways; add(shot)
     }
+    @MainActor func testLibraryFilterChipsAndBPM() {
+        defer { captureFailure() }
+        let app = XCUIApplication(); app.launchArguments = ["--library-ui-fixture"]; app.launch()
+        app.buttons["BROWSE"].tap()
+        let filter = app.buttons["Library filters"]
+        XCTAssertTrue(filter.waitForExistence(timeout: 10))
+        let cached = app.staticTexts["Cached Test Tone"], offline = app.staticTexts["Offline Test Tone"]
+        XCTAssertTrue(cached.waitForExistence(timeout: 5)); XCTAssertTrue(offline.exists)
+        XCTAssertFalse(app.buttons["Filter tag Rolling"].exists)
+        filter.tap()
+        let rolling = app.buttons["Filter tag Rolling"], liquid = app.buttons["Filter tag Liquid"]
+        XCTAssertTrue(rolling.waitForExistence(timeout: 5)); XCTAssertTrue(rolling.isHittable)
+        rolling.tap()
+        expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: offline); waitForExpectations(timeout: 5)
+        XCTAssertTrue(cached.exists)
+        liquid.tap()
+        XCTAssertTrue(offline.waitForExistence(timeout: 5)); XCTAssertTrue(cached.exists)
+        let tags = XCTAttachment(screenshot: app.screenshot()); tags.name = "Library expanded multi-tag filters"; tags.lifetime = .keepAlways; add(tags)
+        filter.tap()
+        XCTAssertFalse(rolling.exists)
+        XCTAssertTrue(offline.exists); XCTAssertTrue(cached.exists)
+        cached.press(forDuration: 0.7)
+        let match = app.buttons["Match BPM ±6"]
+        XCTAssertTrue(match.waitForExistence(timeout: 5)); match.tap()
+        expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: offline); waitForExpectations(timeout: 5)
+        XCTAssertTrue(cached.exists)
+        XCTAssertTrue(app.buttons["BPM filter"].isHittable)
+        let bpm = XCTAttachment(screenshot: app.screenshot()); bpm.name = "Library BPM reference and active tags"; bpm.lifetime = .keepAlways; add(bpm)
+        app.buttons["Reset library filters"].tap()
+        XCTAssertTrue(offline.waitForExistence(timeout: 5)); XCTAssertTrue(cached.exists)
+        XCTAssertEqual(rolling.value as? String, "Not selected")
+    }
     @MainActor func testLibrarySearchAcceptedAndRefusedLoads() {
         defer { captureFailure() }
         let app = XCUIApplication()

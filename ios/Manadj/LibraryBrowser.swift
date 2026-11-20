@@ -12,14 +12,16 @@ struct LibraryBrowser: View {
     @State private var playlist: Int? = nil
     @State private var sort: SortColumn = .dateAdded
     @State private var downloadedOnly = false
-    @State private var tag: Int? = nil
+    @State private var tags: Set<Int> = []
+    @State private var filtersOpen = false
+    @State private var bpmCenter: Double? = nil
     @State private var energy = 0
     @State private var followReference: Int? = nil
     @State private var rows: [LibraryTrack] = []
     @State private var followLabels: [Int: String] = [:]
     @State private var filtering = false
     private var taskId: String {
-        "\(model.libraryVersion)|\(model.downloaded.count)|\(search)|\(playlist ?? -1)|\(sort.rawValue)|\(downloadedOnly)|\(tag ?? -1)|\(energy)|\(followReference ?? -1)"
+        "\(model.libraryVersion)|\(model.downloaded.count)|\(search)|\(playlist ?? -1)|\(sort.rawValue)|\(downloadedOnly)|\(tags.sorted())|\(bpmCenter ?? -1)|\(energy)|\(followReference ?? -1)"
     }
     var body: some View {
         VStack(spacing: 0) {
@@ -34,6 +36,10 @@ struct LibraryBrowser: View {
                 HStack {
                     Image(systemName: "magnifyingglass").foregroundStyle(Ink.muted)
                     TextField("Search title, artist, file", text: $search).textInputAutocapitalization(.never).autocorrectionDisabled().submitLabel(.search).focused($searchFocused)
+                    Button { filtersOpen.toggle(); searchFocused = false } label: {
+                        Image(systemName: "line.3.horizontal.decrease").frame(width: 44, height: 44)
+                    }.foregroundStyle(filtersOpen || !tags.isEmpty || bpmCenter != nil || energy > 0 ? Ink.accent : Ink.muted)
+                        .accessibilityLabel("Library filters").accessibilityValue(filtersOpen ? "Expanded" : "Collapsed")
                     if !search.isEmpty { Button { search = ""; searchFocused = true } label: { Image(systemName: "xmark").frame(width: 44, height: 44) }.accessibilityLabel("Clear search") }
                 }.padding(.leading, 12).frame(minHeight: 44).background(Ink.crust, in: Capsule()).overlay(Capsule().stroke(Ink.edge))
                 if !keyboardOpen { ScrollView(.horizontal, showsIndicators: false) {
@@ -44,11 +50,34 @@ struct LibraryBrowser: View {
                         }.buttonStyle(LibraryChipStyle())
                         Menu("\(sort.rawValue.uppercased()) ▼") { ForEach(SortColumn.allCases, id: \.rawValue) { c in Button(c.rawValue) { sort = c } } }.buttonStyle(LibraryChipStyle())
                         Button("● ON PHONE \(model.downloaded.count)") { downloadedOnly.toggle() }.buttonStyle(LibraryChipStyle(active: downloadedOnly))
-                        Menu(tag.flatMap { id in model.snapshot?.tags.first { $0.id == id }?.name } ?? "TAGS") {
-                            Button("Any tag") { tag = nil }
-                            ForEach(model.snapshot?.tags ?? [], id: \.id) { t in Button(t.name) { tag = t.id } }
-                        }.buttonStyle(LibraryChipStyle(active: tag != nil))
-                        Menu(energy == 0 ? "ENERGY" : "ENERGY \(energy)") { Button("Any energy") { energy = 0 }; ForEach(1...5, id: \.self) { n in Button("Energy \(n)") { energy = n } } }.buttonStyle(LibraryChipStyle(active: energy > 0))
+                    }
+                }
+                if filtersOpen {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            ForEach(model.snapshot?.tags ?? [], id: \.id) { tag in
+                                Button(tag.name) {
+                                    if tags.contains(tag.id) { tags.remove(tag.id) } else { tags.insert(tag.id) }
+                                }.buttonStyle(LibraryChipStyle(active: tags.contains(tag.id)))
+                                    .accessibilityLabel("Filter tag " + tag.name)
+                                    .accessibilityValue(tags.contains(tag.id) ? "Selected" : "Not selected")
+                            }
+                        }
+                    }
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            Button(bpmCenter.map { String(format: "BPM %.0f ±6", $0) } ?? "BPM ≈ DECK") {
+                                if bpmCenter != nil { bpmCenter = nil }
+                                else { bpmCenter = model.decks[model.loadTarget].track?.bpm }
+                            }.buttonStyle(LibraryChipStyle(active: bpmCenter != nil))
+                                .disabled(bpmCenter == nil && model.decks[model.loadTarget].track?.bpm == nil)
+                                .accessibilityLabel("BPM filter")
+                            Menu(energy == 0 ? "ENERGY" : "ENERGY \(energy)") { Button("Any energy") { energy = 0 }; ForEach(1...5, id: \.self) { n in Button("Energy \(n)") { energy = n } } }.buttonStyle(LibraryChipStyle(active: energy > 0))
+                            if !tags.isEmpty || bpmCenter != nil || energy > 0 {
+                                Button("RESET") { tags = []; bpmCenter = nil; energy = 0 }.buttonStyle(LibraryChipStyle())
+                                    .accessibilityLabel("Reset library filters")
+                            }
+                        }
                     }
                 }
                 HStack {
@@ -90,7 +119,7 @@ struct LibraryBrowser: View {
                     .swipeActions(edge: .trailing, allowsFullSwipe: true) { Button("LOAD B") { model.loadTarget = 1; if onLoad(track) { searchFocused = false } }.tint(Ink.decks[1]) }
                     .listRowBackground(Ink.base)
                     .listRowSeparatorTint(Ink.edge)
-                    .contextMenu { Button("Follow this track") { followReference = track.id }; ForEach(0..<4) { index in Button("Load deck \(Ink.deckName(index))") { if model.load(track, deck: index) { searchFocused = false } } } }
+                    .contextMenu { if let bpm = track.bpm { Button("Match BPM ±6") { bpmCenter = bpm; filtersOpen = true } }; Button("Follow this track") { followReference = track.id }; ForEach(0..<4) { index in Button("Load deck \(Ink.deckName(index))") { if model.load(track, deck: index) { searchFocused = false } } } }
                 }.listStyle(.plain).scrollContentBackground(.hidden)
             }
         }
@@ -117,7 +146,8 @@ struct LibraryBrowser: View {
         filtering = true
         var q = LibraryQuery()
         q.search = search; q.playlistId = playlist; q.sort = sort; q.descending = sort == .dateAdded
-        q.downloadedOnly = downloadedOnly; q.tagIds = tag.map { [$0] } ?? []
+        q.downloadedOnly = downloadedOnly; q.tagIds = tags
+        q.bpmCenter = bpmCenter; q.bpmTolerance = 6
         q.energy = energy > 0 ? energy...energy : nil
         let query = q, offline = model.downloaded, reference = followReference
         let result = await Task.detached(priority: .userInitiated) { () -> ([LibraryTrack], [Int: String]) in
@@ -136,7 +166,7 @@ struct LibraryBrowser: View {
 private struct LibraryChipStyle: ButtonStyle {
     var active = false
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label.font(Ink.font(11, bold: true)).lineLimit(1).padding(.horizontal, 11).frame(minHeight: 36)
+        configuration.label.font(Ink.font(11, bold: true)).lineLimit(1).padding(.horizontal, 11).frame(minHeight: 44)
             .foregroundStyle(active ? Ink.play : Ink.text)
             .background(active || configuration.isPressed ? Ink.accent.opacity(0.18) : Ink.crust, in: Capsule())
             .overlay(Capsule().stroke(active ? Ink.accent : Ink.edge, lineWidth: 1))

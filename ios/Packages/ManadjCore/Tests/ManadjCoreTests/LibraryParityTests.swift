@@ -30,6 +30,19 @@ final class LibraryParityTests: XCTestCase {
         XCTAssertEqual(ids { $0.sort = .title; $0.descending = false }, [1,2,3])
         XCTAssertEqual(ids { $0.downloadedOnly = true }, [1])
     }
+    func testCurrentAndroidBrowserAbsoluteBPMAndTagUnion() throws {
+        // The app browser differs from the library percentage-window API.
+        var q = LibraryQuery(); q.bpmCenter = 172; q.bpmTolerance = 6
+        let library = Library(try fixture())
+        XCTAssertEqual(library.query(q).map(\.id), [2,1])
+        q.tagIds = [1,2]
+        XCTAssertEqual(library.query(q).map(\.id), [2,1], "Multiple browser chips mean ANY tag")
+        q.bpmCenter = 128
+        XCTAssertTrue(library.query(q).isEmpty)
+        let boundary = try SnapshotJson.parse(#"{"version":1,"settings":{},"tags":[],"tag_categories":[],"playlists":[],"tracks":[{"id":1,"file_name":"a","title":"A","bpm":83},{"id":2,"file_name":"b","title":"B","bpm":89},{"id":3,"file_name":"c","title":"C","bpm":82.99},{"id":4,"file_name":"d","title":"D","bpm":89.01}]}"#)
+        q.bpmCenter = 172; q.tagIds = []
+        XCTAssertEqual(Set(Library(boundary).query(q).map(\.id)), [1,2], "Fold the track first, then compare ±6 inclusively")
+    }
     func testPlaylistOrderAndUnknownMembers() throws {
         let library = Library(try fixture())
         XCTAssertEqual(library.playlists.map(\.name), ["Warm","Peak"])

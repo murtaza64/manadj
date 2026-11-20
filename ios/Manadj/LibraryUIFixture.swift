@@ -46,7 +46,7 @@ extension AppModel {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("library-ui-" + UUID().uuidString)
         do {
             let store = try LibraryStore(root: root.appendingPathComponent("library"))
-            let json = #"{"version":1,"tag_categories":[],"tags":[],"settings":{},"playlists":[],"tracks":[{"id":1,"file_name":"cached.wav","title":"Cached Test Tone","artist":"Synthetic fixture","audio_rev":"fixture"},{"id":2,"file_name":"offline.wav","title":"Offline Test Tone","artist":"Synthetic fixture","audio_rev":"missing"}]}"#
+            let json = #"{"version":1,"tag_categories":[{"id":1,"name":"Style"}],"tags":[{"id":1,"name":"Rolling","category_id":1},{"id":2,"name":"Liquid","category_id":1}],"settings":{},"playlists":[],"tracks":[{"id":1,"file_name":"cached.wav","title":"Cached Test Tone","bpm":128,"tag_ids":[1],"artist":"Synthetic fixture","audio_rev":"fixture"},{"id":2,"file_name":"offline.wav","title":"Offline Test Tone","bpm":174,"tag_ids":[2],"artist":"Synthetic fixture","audio_rev":"missing"}]}"#
             try store.saveSnapshot(json)
             let track = try SnapshotJson.parse(json).tracks[0]
             guard let url = store.audioFile(track), let format = AVAudioFormat(standardFormatWithSampleRate: 44100, channels: 2),

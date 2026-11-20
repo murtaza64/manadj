@@ -13,6 +13,9 @@ public struct LibraryQuery: Sendable {
     public var energy: ClosedRange<Int>? = nil
     public var bpmCenter: Double? = nil
     public var bpmPercent = 5.0
+    /// Current Android app browser uses absolute ±6 after folding track BPM.
+    /// Nil preserves the library package's percentage-window contract.
+    public var bpmTolerance: Double? = nil
     public var keysOpenKey: Set<String> = []
     public var sort: SortColumn = .dateAdded
     public var descending = true
@@ -33,7 +36,10 @@ public enum LibraryFilter {
             if q.tagMatch == .all ? shared != q.tagIds.count : shared == 0 { return false }
         }
         if let center = q.bpmCenter {
-            guard let bpm = t.bpm, inBpmWindow(bpm, center: center, percent: q.bpmPercent) else { return false }
+            guard let bpm = t.bpm else { return false }
+            if let tolerance = q.bpmTolerance {
+                guard [bpm, bpm * 2, bpm / 2].contains(where: { abs($0 - center) <= tolerance }) else { return false }
+            } else if !inBpmWindow(bpm, center: center, percent: q.bpmPercent) { return false }
         }
         if !q.keysOpenKey.isEmpty && !q.keysOpenKey.contains(t.keyOpenKey ?? "") { return false }
         return true
