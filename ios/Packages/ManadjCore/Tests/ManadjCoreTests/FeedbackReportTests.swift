@@ -82,7 +82,7 @@ final class FeedbackReportTests: XCTestCase {
         draft.snapshot["errors"] = ["Authorization: Bearer abc123 failed"]
         draft.snapshot["session"] = ["api_key": "supersecret", "note": "plain"]
         let payload = try draft.validatedPayload()
-        let text = String(decoding: JSONSerialization.data(withJSONObject: payload, options: []), as: UTF8.self)
+        let text = String(decoding: try JSONSerialization.data(withJSONObject: payload, options: []), as: UTF8.self)
         XCTAssertFalse(text.contains("ghp_a1b2c3d4e5f6"))
         XCTAssertFalse(text.contains("Bearer abc123"))
         XCTAssertFalse(text.contains("supersecret"))
