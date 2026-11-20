@@ -99,3 +99,9 @@
 .pg-plan-change .pg-link { padding-top:5px; }
 
 .pg-artist-compact { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:100%; }
+
+/* The real USB read state owns the throbber, never a timer or fake progress. */
+.pg-read { display: inline-flex; align-items: center; gap: 7px; }
+.pg-read-spinner { width: 11px; height: 11px; flex: 0 0 auto; border: 2px solid var(--surface2, #444); border-top-color: var(--accent, #00d4ff); border-radius: 50%; animation: pg-read-spin .8s linear infinite; }
+@keyframes pg-read-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .pg-read-spinner { animation: none; } }
