@@ -119,7 +119,11 @@ struct WorkspaceView: View {
             }
         }.contentShape(Rectangle()).onTapGesture { selected = index; model.loadTarget = index }
         .contextMenu { Button("Import audio from Files") { fileTarget = index; files = true } }
+        .accessibilityElement(children: .ignore)
+        .accessibilityIdentifier("deck-\(index)-info")
         .accessibilityLabel("Select \(Ink.deckName(index))")
+        .accessibilityValue(deck.duration > 0 ? "\(deck.title), \(deck.artist)" : "No track loaded")
+        .accessibilityAddTraits(.isButton)
     }
     private func detailWave(_ index: Int, vertical: Bool = false) -> some View {
         let deck = model.decks[index]

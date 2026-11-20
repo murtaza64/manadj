@@ -123,13 +123,16 @@ final class WorkspaceUITests: XCTestCase {
         app.buttons["CLOSE"].tap()
         let play = app.buttons["A play pause"]
         XCTAssertTrue(play.waitForExistence(timeout: 10))
-        XCTAssertTrue(app.staticTexts["USB generated pulse"].exists)
+        let header = app.buttons["deck-0-info"]
+        XCTAssertTrue(header.waitForExistence(timeout: 10))
+        expectation(for: NSPredicate(format: "value CONTAINS %@", "USB generated pulse"), evaluatedWith: header); waitForExpectations(timeout: 10)
         // Imported USB audio has no saved cue/grid/waveform in this prototype.
         let ready = NSPredicate(format: "enabled == true AND hittable == true")
         expectation(for: ready, evaluatedWith: play); waitForExpectations(timeout: 15)
         play.tap()
         let wave = app.otherElements["deck-0-detail-wave"]
         expectation(for: NSPredicate(format: "value BEGINSWITH %@", "playing"), evaluatedWith: wave); waitForExpectations(timeout: 8)
+        let playing = XCTAttachment(screenshot: app.screenshot()); playing.name = "App-owned USB import loaded and playing"; playing.lifetime = .keepAlways; add(playing)
         play.tap()
     }
     @MainActor func testLibrarySourceNavigationAndBack() {
