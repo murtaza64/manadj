@@ -117,11 +117,15 @@ final class WorkspaceUITests: XCTestCase {
         filter.tap()
         XCTAssertFalse(rolling.exists)
         XCTAssertTrue(offline.exists); XCTAssertTrue(cached.exists)
-        cached.press(forDuration: 0.7)
-        let match = app.buttons["Match BPM ±6"]
-        XCTAssertTrue(match.waitForExistence(timeout: 5)); match.tap()
+        let select = app.buttons["Select Cached Test Tone"]
+        XCTAssertTrue(select.isHittable); select.tap()
+        XCTAssertEqual(select.value as? String, "Selected")
+        filter.tap()
+        let match = app.buttons["BPM filter"]
+        XCTAssertTrue(match.isHittable); match.tap()
         expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: offline); waitForExpectations(timeout: 5)
         XCTAssertTrue(cached.exists)
+        XCTAssertTrue(app.staticTexts["1 track · 1 downloaded"].exists)
         XCTAssertTrue(app.buttons["BPM filter"].isHittable)
         let bpm = XCTAttachment(screenshot: app.screenshot()); bpm.name = "Library BPM reference and active tags"; bpm.lifetime = .keepAlways; add(bpm)
         app.buttons["Reset library filters"].tap()

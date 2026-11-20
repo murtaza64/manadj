@@ -82,3 +82,10 @@ Android and desktop already implement a journaled two-way subset in `backend/dev
 - Archived/deleted desktop tracks reject pending phone edits. Two-way playlists, audio mutations and library deletion/restoration are not covered by this journal.
 
 New conflict-specific mockups are design exploration, not existing functionality or approval to write a real library. They should distinguish cue-slot positions, grid/tempo structure, scalar/tag edits, playlist membership/order and delete-versus-edit. Show whose value and which revision is compared, preserve unresolved alternatives, and recheck for changes before applying a reviewed resolution. Playlist and delete resolution require new protocol work. Session/group immutable conflicts are separate from ordinary library-field divergence.
+
+
+## November19 browser filter progress
+
+At `aa568cec`, the expanded native filter drawer, multiple ANY-tag chips and explicit BPM-reference action pass a new regular-iPhone16 input story. Actual tag/BPM/keyboard screenshots were inspected. The current Android app browser uses absolute ±6 after folding the candidate BPM; its separate library package uses percentage windows. The iOS browser now matches the app behavior while preserving the package percentage API and its tests. [Run](https://github.com/murtaza64/manadj/actions/runs/44654404986), [evidence](https://github.com/murtaza64/manadj/actions/runs/44654404986/artifacts/14592598943). 24 core, 4 bridge, 7 native and 4 UI tests pass; unsigned simulator/device builds pass. This is not merge-hold acceptance or physical-device evidence.
+
+Next branch slice adds an explicit select-row accessory and highlight for the BPM reference while preserving existing tap-to-load and swipe-load routes. Its Apple/pixel verification remains pending. Android's nested source navigation, edit affordance, metadata density and selected-row interaction are not yet equivalent. No real-library writes are authorized by this preparation.

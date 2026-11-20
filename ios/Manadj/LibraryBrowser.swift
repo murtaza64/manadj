@@ -17,6 +17,7 @@ struct LibraryBrowser: View {
     @State private var bpmCenter: Double? = nil
     @State private var energy = 0
     @State private var followReference: Int? = nil
+    @State private var selectedTrack: Int? = nil
     @State private var rows: [LibraryTrack] = []
     @State private var followLabels: [Int: String] = [:]
     @State private var filtering = false
@@ -66,11 +67,11 @@ struct LibraryBrowser: View {
                     }
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 8) {
-                            Button(bpmCenter.map { String(format: "BPM %.0f ±6", $0) } ?? "BPM ≈ DECK") {
+                            Button(bpmCenter.map { String(format: "BPM %.0f ±6", $0) } ?? "BPM ≈ SELECTED") {
                                 if bpmCenter != nil { bpmCenter = nil }
-                                else { bpmCenter = model.decks[model.loadTarget].track?.bpm }
+                                else { bpmCenter = model.snapshot?.tracks.first { $0.id == selectedTrack }?.bpm }
                             }.buttonStyle(LibraryChipStyle(active: bpmCenter != nil))
-                                .disabled(bpmCenter == nil && model.decks[model.loadTarget].track?.bpm == nil)
+                                .disabled(bpmCenter == nil && model.snapshot?.tracks.first { $0.id == selectedTrack }?.bpm == nil)
                                 .accessibilityLabel("BPM filter")
                             Menu(energy == 0 ? "ENERGY" : "ENERGY \(energy)") { Button("Any energy") { energy = 0 }; ForEach(1...5, id: \.self) { n in Button("Energy \(n)") { energy = n } } }.buttonStyle(LibraryChipStyle(active: energy > 0))
                             if !tags.isEmpty || bpmCenter != nil || energy > 0 {
@@ -96,7 +97,7 @@ struct LibraryBrowser: View {
                     Button("FOLLOW DECK \(Ink.deckName(model.loadTarget)) · \(track.title)") { followReference = track.id }.font(Ink.font(12)).lineLimit(1).frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                 }
                 HStack {
-                    Text("\(rows.count) tracks · \(model.downloaded.count) downloaded")
+                    Text("\(rows.count) \(rows.count == 1 ? "track" : "tracks") · \(model.downloaded.count) downloaded")
                     Spacer()
                     if filtering || model.busy { ProgressView().controlSize(.small) }
                 }.font(Ink.font(11)).foregroundStyle(Ink.muted)
@@ -107,17 +108,28 @@ struct LibraryBrowser: View {
                 ContentUnavailableView.search(text: search)
             } else {
                 List(rows) { track in
-                    Button {
-                        let wasSearching = searchFocused
-                        if onLoad(track) { searchFocused = false }
-                        else { restoreSearchAfterError = wasSearching || !search.isEmpty }
-                    } label: {
-                        LibraryRow(track: track, downloaded: model.downloaded.contains(track.id), evidence: followLabels[track.id]).environmentObject(model)
+                    HStack(spacing: 8) {
+                        Button {
+                            selectedTrack = selectedTrack == track.id ? nil : track.id
+                        } label: {
+                            Image(systemName: selectedTrack == track.id ? "checkmark.circle.fill" : "circle")
+                                .foregroundStyle(selectedTrack == track.id ? Ink.accent : Ink.muted)
+                                .frame(width: 44, height: 44)
+                        }.buttonStyle(.plain)
+                            .accessibilityLabel("Select " + track.title)
+                            .accessibilityValue(selectedTrack == track.id ? "Selected" : "Not selected")
+                        Button {
+                            let wasSearching = searchFocused
+                            if onLoad(track) { searchFocused = false }
+                            else { restoreSearchAfterError = wasSearching || !search.isEmpty }
+                        } label: {
+                            LibraryRow(track: track, downloaded: model.downloaded.contains(track.id), evidence: followLabels[track.id]).environmentObject(model)
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
+                    .listRowBackground(selectedTrack == track.id ? Ink.accent.opacity(0.08) : Ink.base)
                     .swipeActions(edge: .leading, allowsFullSwipe: true) { Button("LOAD A") { model.loadTarget = 0; if onLoad(track) { searchFocused = false } }.tint(Ink.decks[0]) }
                     .swipeActions(edge: .trailing, allowsFullSwipe: true) { Button("LOAD B") { model.loadTarget = 1; if onLoad(track) { searchFocused = false } }.tint(Ink.decks[1]) }
-                    .listRowBackground(Ink.base)
                     .listRowSeparatorTint(Ink.edge)
                     .contextMenu { if let bpm = track.bpm { Button("Match BPM ±6") { bpmCenter = bpm; filtersOpen = true } }; Button("Follow this track") { followReference = track.id }; ForEach(0..<4) { index in Button("Load deck \(Ink.deckName(index))") { if model.load(track, deck: index) { searchFocused = false } } } }
                 }.listStyle(.plain).scrollContentBackground(.hidden)
