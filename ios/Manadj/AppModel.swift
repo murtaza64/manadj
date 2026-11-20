@@ -84,6 +84,9 @@ struct DeckViewState {
         Task {
             await openCache()
             #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("--local-live-ui-fixture") { await installLocalLiveUIFixture() }
+            #endif
+            #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("--performance-ui-fixture") { await installPerformanceFixture() }
             #endif
         }
@@ -128,6 +131,25 @@ struct DeckViewState {
     /// Explicit own-device takeover. Never starts from a remote message.
     #if DEBUG
     func useLocalLiveTestConnection(_ candidate: DesktopConnection) { connection = candidate }
+    private func installLocalLiveUIFixture() async {
+        do {
+            guard let descriptor = Bundle.main.url(forResource: "lan-fixture", withExtension: "json"),
+                  let fields = try JSONSerialization.jsonObject(with: Data(contentsOf: descriptor)) as? [String: Any],
+                  let origin = fields["origin"] as? String, let url = URL(string: origin) else {
+                throw AppFailure("Synthetic LAN descriptor missing")
+            }
+            let client = SyncClient(try DesktopConnection(url: url))
+            let ticket = try await client.requestPairing(deviceId: UUID().uuidString, deviceName: "Synthetic UI listener")
+            for _ in 0..<50 {
+                if let token = try await client.pollPairing(ticket).token {
+                    connection = try DesktopConnection(url: url, deviceToken: token)
+                    startLocalLive(); return
+                }
+                try await Task.sleep(for: .milliseconds(100))
+            }
+            throw AppFailure("Synthetic pairing did not finish")
+        } catch { liveStatus = error.localizedDescription }
+    }
     #endif
     func startLocalLive() {
         guard !liveListening, !recording, !busy, !decks.contains(where: { $0.loading }), let connection, let repository, audio != nil else {

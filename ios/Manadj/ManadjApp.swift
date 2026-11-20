@@ -6,7 +6,14 @@ import CEngine
     @StateObject private var model = AppModel()
     var body: some Scene {
         WindowGroup {
-            WorkspaceView().environmentObject(model)
+            Group {
+                #if DEBUG
+                if ProcessInfo.processInfo.arguments.contains("--local-live-ui-fixture") { LocalLiveView() }
+                else { WorkspaceView() }
+                #else
+                WorkspaceView()
+                #endif
+            }.environmentObject(model)
                 .font(Ink.font()).foregroundStyle(Ink.text)
                 .tint(Ink.accent).preferredColorScheme(.dark)
         }
