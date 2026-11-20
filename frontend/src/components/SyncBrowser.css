@@ -154,3 +154,6 @@
 .pg-similar-review .pg-context-head > span:last-child { color:var(--subtext0); font-size:11px; }
 .pg-plan-change { grid-template-columns:minmax(0,1fr) auto; }
 .pg-plan-change > span { min-width:0; white-space:normal; overflow-wrap:anywhere; }
+.pg-similar-context .pg-similar-review { margin:6px 0; }
+.pg-plan-scope { color:var(--subtext0); font-size:11px; margin:6px 0; }
+.pg-apply { white-space:normal; }

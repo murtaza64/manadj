@@ -103,7 +103,7 @@ export function SyncBrowser({ toolbar, onPendingChange }: { toolbar?: ReactNode;
   const [hoverResult, setHoverResult] = useState<{ key: string; value: string | number | null } | null>(null);
   const [reviewing, setReviewing] = useState(false);
   const similarPanel = useRef<HTMLElement>(null);
-  const [similarReview, setSimilarReview] = useState<{ field: string; choice: 'take' | 'keep'; changes: FieldChoice[] } | null>(null);
+  const [similarReview, setSimilarReview] = useState<{ seedTrackId: number; field: string; choice: 'take' | 'keep'; changes: FieldChoice[] } | null>(null);
   useEffect(() => { if (similarReview) similarPanel.current?.scrollIntoView?.({ block: 'nearest' }); }, [similarReview]);
   const [selectedOrdinals, setSelectedOrdinals] = useState<Set<number>>(new Set());
   const [plans, setPlans] = useState<Record<string, Plan>>({});
@@ -181,6 +181,8 @@ export function SyncBrowser({ toolbar, onPendingChange }: { toolbar?: ReactNode;
     setSimilarReview(null);
   };
   const taking = applicable.filter((c) => decisionFor(c)?.choice === 'take');
+  const fieldTrackCount = new Set(taking.map(c => c.track_id)).size;
+  const fieldScope = `${plural(fieldTrackCount, 'track')} · ${plural(taking.length, 'metadata field')}`;
   const undecided = applicable.filter((c) => !decisionFor(c)).length;
   const changedChoices = Object.entries(plan.decisions).filter(([k]) => { const [t, f] = k.split(':'); const c = applicable.find((a) => String(a.track_id) === t && a.field === f); return !c || !decisionFor(c); }).length;
   const fieldItem: QueueItem | null = fields && taking.length > 0
@@ -416,36 +418,37 @@ export function SyncBrowser({ toolbar, onPendingChange }: { toolbar?: ReactNode;
                                 <span className="pg-field-target">USB → Library</span>
                                 <button className={`btn${dec?.choice === 'keep' ? ' btn-primary' : ''}`} disabled={applying} aria-pressed={dec?.choice === 'keep'} onMouseEnter={() => setHoverResult({ key: fieldKey(c.track_id, c.field), value: f.library })} onMouseLeave={() => setHoverResult(null)} onFocus={() => setHoverResult({ key: fieldKey(c.track_id, c.field), value: f.library })} onBlur={() => setHoverResult(null)} onClick={() => decide(c, 'keep')}>Keep Library</button>
                                 <button className={`btn${dec?.choice === 'take' ? ' btn-primary' : ''}`} disabled={applying} aria-pressed={dec?.choice === 'take'} onMouseEnter={() => setHoverResult({ key: fieldKey(c.track_id, c.field), value: f.drive })} onMouseLeave={() => setHoverResult(null)} onFocus={() => setHoverResult({ key: fieldKey(c.track_id, c.field), value: f.drive })} onBlur={() => setHoverResult(null)} onClick={() => decide(c, 'take')}>{dec?.choice === 'take' ? 'Planned ✓' : 'Use USB'}</button>
-                                {dec && selected && similarChoices(c).length > 0 && <button className="btn pg-link" disabled={applying} onClick={() => setSimilarReview({ field: c.field, choice: dec.choice, changes: similarChoices(c) })}>Apply to similar…</button>}
+                                {dec && selected && similarChoices(c).length > 0 && <button className="btn pg-link" disabled={applying} onClick={() => setSimilarReview({ seedTrackId: c.track_id, field: c.field, choice: dec.choice, changes: similarChoices(c) })}>Apply to similar…</button>}
                                 {dec?.choice === 'take' && <button className="btn" disabled={applying} onClick={() => setPlan(p => ({ ...p, decisions: Object.fromEntries(Object.entries(p.decisions).filter(([key]) => key !== fieldKey(c.track_id, c.field))) }))}>Undo</button>}
                                 </> : <span className="pg-comparison-state">{f.conflict ?? (f.field === 'bpm' ? 'Read only · analysis' : 'Read only · cannot apply this field')}</span>}
                               </td>
                             </tr>
                           );
                         }) : []),
-                      ];
-                    })}
-                  </tbody>
-                </table>
-                {similarReview && <section ref={similarPanel} className="pg-similar-review" role="region" aria-label="Review similar choices">
+                        ...(ft && expanded && similarReview?.seedTrackId === ft.track_id ? [<tr key={`similar:${e.ordinal}`} className="pg-context pg-similar-context"><td /><td colSpan={7}><section ref={similarPanel} className="pg-similar-review" role="region" aria-label="Review similar choices">
                   <div className="pg-context-head"><b>{similarReview.choice === 'take' ? 'Use USB' : 'Keep Library'} · {FIELD_LABEL[similarReview.field] ?? similarReview.field}</b><span className="pg-tag">{plural(similarReview.changes.length, 'additional track')}</span></div>
                   <p>In {selected?.name}. Exact audio only. Existing choices, other fields and unverified copies stay untouched.</p>
                   <ul>{similarReview.changes.map(c => <li key={c.track_id}><b>{c.label}</b><span>Library: {c.library ?? 'empty'}</span><span>USB: {c.drive ?? 'empty'}</span><span className="pg-plan-new">{similarReview.choice === 'take' ? 'Plan Library value' : 'Keep Library value'}: {similarReview.choice === 'take' ? c.drive : c.library}</span></li>)}</ul>
                   <div className="pg-context-head"><button className="btn btn-primary" disabled={applying} onClick={stageSimilar}>{similarReview.choice === 'take' ? 'Add these choices to plan' : 'Keep Library for these tracks'}</button><button className="btn" onClick={() => setSimilarReview(null)}>Cancel</button><span>No files change here. USB unchanged.</span></div>
-                </section>}
+                </section></td></tr>] : []),
+                      ];
+                    })}
+                  </tbody>
+                </table>
+
                 {rows.length === 0 && <p className="pg-empty">{issuesOnly ? 'No issues' : 'No tracks'}</p>}
               </>
             )}
           </main>
           <aside ref={planSidebar} className="pg-right" aria-label="Plan and warnings"><span className="pg-plan-grip" role="separator" tabIndex={0} aria-label="Resize plan sidebar" aria-orientation="vertical" aria-valuenow={Math.round(planWidth)} onPointerDown={resizePlan} onKeyDown={event => { if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.preventDefault(); setPlanWidth(width => Math.max(240, Math.min(520, width + (event.key === 'ArrowLeft' ? 20 : -20)))); } }} />
-            <h3>Plan{items.length ? ` (${items.length})` : ''}</h3>
+            <h3>Plan{items.length ? ` (${plural(items.length, 'operation')})` : ''}</h3>
             <div className="pg-target-chips"><span className="pg-chip">USB → Library</span><span className="pg-tag tone-none">USB read-only</span></div>
             <ul className="pg-list">
               {items.map((q) => (
                 <li key={q.key} className="tone-work">
                   <b>{q.kind === 'copy' ? `Copy "${q.name}"` : q.kind === 'update' ? `Update "${q.name}"` : q.kind === 'fields' ? '' : `Import ${q.name}`}</b>
                   {q.kind === 'fields'
-                    ? <div className="pg-plan-tracks">{[...new Set(q.changes.map(change => change.track_id))].map(trackId => {
+                    ? <div className="pg-plan-tracks"><p className="pg-plan-scope">{fieldScope}</p>{[...new Set(q.changes.map(change => change.track_id))].map(trackId => {
                         const changes = q.changes.filter(change => change.track_id === trackId);
                         return <section key={trackId} className="pg-plan-track"><h4>{changes[0].label}</h4>{changes.map(c => <div className="pg-plan-change" key={c.field}><b>{FIELD_LABEL[c.field] ?? c.field}</b><span className="pg-plan-old">{c.library ?? 'empty'}</span><span className="pg-plan-new">→ {String(c.drive)}</span><button className="btn pg-link" disabled={applying} aria-label={`Remove ${c.field} change for ${c.label}`} onClick={() => decide(c, 'keep')}>Remove this field</button></div>)}</section>;
                       })}</div>
@@ -458,8 +461,8 @@ export function SyncBrowser({ toolbar, onPendingChange }: { toolbar?: ReactNode;
               {items.length === 0 && !res && <li className="tone-none"><span>Nothing chosen</span></li>}
 
             </ul>
-            {items.length > 0 && <button className="btn btn-primary pg-apply" disabled={applying || d.read.state === 'loading'} onClick={() => setReviewing(true)}>{applying ? 'Applying…' : `Review ${items.length} planned ${items.length === 1 ? 'operation' : 'operations'}`}</button>}
-            {reviewing && <section className="pg-review-confirm" aria-label="Confirm reviewed plan"><b>{items.length} {items.length === 1 ? 'operation' : 'operations'} → Library</b><div className="pg-target-chips"><span className="pg-tag">Rechecked before write</span><span className="pg-tag">USB unchanged</span></div><button className="btn btn-primary" disabled={applying} onClick={() => void apply()}>Confirm and apply plan</button><button className="btn" disabled={applying} onClick={() => setReviewing(false)}>Back to planning</button></section>}
+            {items.length > 0 && <button className="btn btn-primary pg-apply" disabled={applying || d.read.state === 'loading'} onClick={() => setReviewing(true)}>{applying ? 'Applying…' : `Review ${items.length} planned ${items.length === 1 ? 'operation' : 'operations'}${fieldTrackCount > 1 ? ` · ${plural(fieldTrackCount, 'track')} with metadata choices` : ''}`}</button>}
+            {reviewing && <section className="pg-review-confirm" aria-label="Confirm reviewed plan"><b>{items.length} {items.length === 1 ? 'operation' : 'operations'} → Library</b>{fieldTrackCount > 0 && <p>{fieldScope}</p>}<div className="pg-target-chips"><span className="pg-tag">Rechecked before write</span><span className="pg-tag">USB unchanged</span></div><button className="btn btn-primary" disabled={applying} onClick={() => void apply()}>Confirm and apply plan</button><button className="btn" disabled={applying} onClick={() => setReviewing(false)}>Back to planning</button></section>}
             {otherPlans.map((x) => <button key={x.root} className="btn pg-link" onClick={() => setRoot(x.root)}>{planCount(x.root)} more planned on {x.name}</button>)}
             {res && (
               <div role="status">

@@ -134,7 +134,7 @@ it('chooses whole-playlist actions, applies once with a recheck per item, nothin
   await act(async () => { (dot('Peak') as HTMLElement).click(); await tick(); });
   await click(host, 'Plan playlist update');
   expect(importSpy).not.toHaveBeenCalled();
-  expect(host.querySelector('.pg-right')!.textContent).toContain('Plan (2)');
+  expect(host.querySelector('.pg-right')!.textContent).toContain('Plan (2 operations)');
   const calls = previewSpy.mock.calls.length;
   await click(host, 'Review 2 planned operations'); await click(host, 'Confirm and apply plan');
   await act(async () => { await tick(); });
@@ -174,7 +174,7 @@ it('detail choices: only an explicit take enters the plan, BPM never does, appli
   await click(host, 'Keep Library');
   expect(host.querySelector('.pg-right')!.textContent).toContain('Nothing chosen');
   await click(host, "Use USB");
-  expect(host.querySelector('.pg-right')!.textContent).toContain('Plan (1)');
+  expect(host.querySelector('.pg-right')!.textContent).toContain('Plan (1 operation)');
   expect(host.querySelector('.pg-right')!.textContent).toContain('TitleOne (old)→ One');
   expect(host.querySelector('.pg-right')!.textContent).not.toContain('bpm');
   expect(applySpy).not.toHaveBeenCalled();
@@ -191,10 +191,10 @@ it('a detail choice does not carry over when the library value changed after a r
   const host = await mount();
   await click(host, '2 fields▾');
   await click(host, "Use USB");
-  expect(host.querySelector('.pg-right')!.textContent).toContain('Plan (1)');
+  expect(host.querySelector('.pg-right')!.textContent).toContain('Plan (1 operation)');
   fieldsSpy.mockResolvedValue(cmp('Changed elsewhere'));
   await click(host, 'Recheck'); await act(async () => { await tick(); });
-  expect(host.querySelector('.pg-right')!.textContent).not.toContain('Plan (1)');
+  expect(host.querySelector('.pg-right')!.textContent).not.toContain('Plan (1 operation)');
   expect(host.textContent).toContain('1 choice changed since you made them');
 });
 
@@ -212,7 +212,7 @@ it('the plan is kept per drive across switching drives and is never applied to t
   expect(host.querySelector('.pg-right')!.textContent).toContain('1 more planned on RB');
   expect(btn(host, 'Apply 1')).toBeUndefined();
   await click(host, '1 more planned on RB');
-  expect(host.querySelector('.pg-right')!.textContent).toContain('Plan (1)');
+  expect(host.querySelector('.pg-right')!.textContent).toContain('Plan (1 operation)');
   previewSpy.mockClear();
   await click(host, 'Review 1 planned operation'); await click(host, 'Confirm and apply plan'); await act(async () => { await tick(); });
   expect(previewSpy.mock.calls.every((c) => c[0] === '/v/RB')).toBe(true);
@@ -437,6 +437,7 @@ it('Apply to similar previews same-field undecided exact audio in this playlist,
   await act(async () => { [...host.querySelectorAll('button')].find(b => b.textContent?.startsWith('Warm Up'))!.click(); });
   await click(host, 'Apply to similar…');
   const review = host.querySelector('[aria-label="Review similar choices"]')!;
+  expect(review.closest('tr')?.previousElementSibling?.previousElementSibling?.textContent).toContain('Title');
   expect(review.textContent).toContain('1 additional track');
   expect(review.textContent).toContain('Eligible');
   expect(review.textContent).toContain('Library: Library 1');
@@ -452,7 +453,9 @@ it('Apply to similar previews same-field undecided exact audio in this playlist,
   expect(plan).not.toContain('USB 2'); expect(plan).not.toContain('USB 3'); expect(plan).not.toContain('USB 4');
   expect(host.querySelector('.pg-plan-tracks')!.textContent).not.toContain('BPM');
   expect(applySpy).not.toHaveBeenCalled();
-  await click(host, 'Review 1 planned operation');
+  expect(host.querySelector('.pg-plan-scope')!.textContent).toBe('2 tracks · 2 metadata fields');
+  await click(host, 'Review 1 planned operation · 2 tracks with metadata choices');
+  expect(host.querySelector('[aria-label="Confirm reviewed plan"]')!.textContent).toContain('2 tracks · 2 metadata fields');
   expect(applySpy).not.toHaveBeenCalled();
   await click(host, 'Confirm and apply plan'); await act(async () => { await tick(); });
   expect(applySpy).toHaveBeenCalledWith('/v/RB', 'similar', [
