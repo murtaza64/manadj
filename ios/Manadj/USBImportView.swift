@@ -29,7 +29,7 @@ struct USBImportView: View {
                         .font(Ink.font(11)).foregroundStyle(Ink.muted)
                     Text("Prototype: no OneLibrary, cue/grid/analysis import, USB export or physical-drive validation. Audio still needs to decode successfully on this iPhone.")
                         .font(Ink.font(11)).foregroundStyle(Ink.warning)
-                    if working { ProgressView("Reading USB") }
+                    if working { ProgressView("Working with USB") }
                     if let message { Text(message).font(Ink.font(12)).accessibilityIdentifier("usb-status") }
                 }
                 if let preview {
@@ -66,8 +66,11 @@ struct USBImportView: View {
                                 HStack {
                                     ForEach(0..<2) { index in
                                         Button("Load \(Ink.deckName(index))") {
-                                            model.importFile(folder.appendingPathComponent(track.path), deck: index, title: track.title, artist: track.artist)
-                                            dismiss()
+                                            do {
+                                                let url = try receipt.audioURL(for: track, in: folder)
+                                                model.importFile(url, deck: index, title: track.title, artist: track.artist)
+                                                dismiss()
+                                            } catch { message = error.localizedDescription }
                                         }.buttonStyle(FlatButtonStyle(color: Ink.decks[index]))
                                     }
                                 }
@@ -130,6 +133,8 @@ struct USBImportView: View {
     private func refresh() {
         imported = ((try? FileManager.default.contentsOfDirectory(at: imports, includingPropertiesForKeys: nil)) ?? []).compactMap { url in
             guard !url.lastPathComponent.hasPrefix("."), let data = try? Data(contentsOf: url.appendingPathComponent("import.json")), let receipt = try? JSONDecoder().decode(USBImportReceipt.self, from: data) else { return nil }
+            guard (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) != true,
+                  receipt.tracks.allSatisfy({ (try? receipt.audioURL(for: $0, in: url)) != nil }) else { return nil }
             return (url, receipt)
         }
     }

@@ -84,8 +84,11 @@ public enum RekordboxUSBReader {
                     let sortedOffsets = offsets.sorted()
                     totalRows += offsets.count
                     guard totalRows <= 200_000 else { throw failure("USB row limit exceeded") }
+                    let rowEnds = Dictionary(uniqueKeysWithValues: sortedOffsets.enumerated().map { (position, offset) in
+                        (offset, position + 1 < sortedOffsets.count ? sortedOffsets[position + 1] : directoryStart)
+                    })
                     for offset in offsets {
-                        let end = sortedOffsets.first { $0 > offset } ?? directoryStart
+                        let end = rowEnds[offset] ?? directoryStart
                         let row = USBBytes(bytes, start: base + offset, end: base + end)
                         switch type {
                         case 0:
@@ -230,6 +233,15 @@ public enum RekordboxUSBPreview {
 public struct USBImportReceipt: Sendable, Codable {
     public let tracks: [USBTrack]
     public let playlists: [USBPlaylist]
+    /// Receipts are local data, not authority to load an arbitrary app path.
+    public func audioURL(for track: USBTrack, in folder: URL) throws -> URL {
+        let ext = URL(fileURLWithPath: track.path).pathExtension.lowercased()
+        guard track.id > 0, track.path == "\(track.id)." + ext,
+              ["wav", "aiff", "aif", "mp3", "m4a", "aac", "flac", "caf"].contains(ext) else {
+            throw USBReadError(message: "Invalid imported audio path")
+        }
+        return try RekordboxUSBPreview.confinedFile(root: folder, relative: track.path)
+    }
 }
 
 public enum RekordboxUSBCopy {
