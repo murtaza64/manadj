@@ -317,13 +317,14 @@ public final class FeedbackQueue: Sendable {
     }
 }
 
-public final class FeedbackSubmitter: Sendable {
+@MainActor
+public final class FeedbackSubmitter {
     private let queue: FeedbackQueue
     public init(queue: FeedbackQueue) { self.queue = queue }
 
     /// Validate, then file through the desktop or keep locally. Throws only
     /// for payload violations the reporter can fix in the review sheet.
-    public func submit(_ draft: sending FeedbackDraft, via connection: DesktopConnection?) async -> FeedbackOutcome {
+    public func submit(_ draft: FeedbackDraft, via connection: DesktopConnection?) async -> FeedbackOutcome {
         let payload: [String: Any]
         do { payload = try draft.validatedPayload() } catch let failure as FeedbackFailure {
             return .rejected(reason: failure.message)

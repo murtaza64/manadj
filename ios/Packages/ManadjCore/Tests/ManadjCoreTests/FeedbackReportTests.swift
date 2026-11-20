@@ -166,7 +166,7 @@ final class FeedbackReportTests: XCTestCase {
         XCTAssertFalse(FeedbackQueue.drains("http://192.168.1.20:48127", to: "http://10.0.0.5:48127"))
     }
 
-    func testUnpairedSubmitQueuesLocally() async {
+    @MainActor func testUnpairedSubmitQueuesLocally() async {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("feedback-submit-tests-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -176,7 +176,7 @@ final class FeedbackReportTests: XCTestCase {
         XCTAssertEqual(FeedbackQueue(directory: directory).pending().count, 1)
     }
 
-    func testSaveFailureIsTruthfulNotAQueuedClaim() async throws {
+    @MainActor func testSaveFailureIsTruthfulNotAQueuedClaim() async throws {
         // A regular file where the queue directory must go: saving cannot succeed.
         let blocker = FileManager.default.temporaryDirectory
             .appendingPathComponent("feedback-blocker-\(UUID().uuidString)")
@@ -190,7 +190,7 @@ final class FeedbackReportTests: XCTestCase {
         }
     }
 
-    func testInvalidDraftIsRejectedNotQueued() async {
+    @MainActor func testInvalidDraftIsRejectedNotQueued() async {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("feedback-reject-tests-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: directory) }
