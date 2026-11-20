@@ -408,3 +408,99 @@ it('marks title divergence neutrally and reveals it only in the shared track exp
   expect(host.querySelector('.pg-context')).toBeNull();
   expect(host.textContent).toContain('Nothing chosen');
 });
+
+const similarFixture = () => {
+  vi.spyOn(api.externalDrives, 'list').mockResolvedValue([RB]); noCheck();
+  vi.spyOn(api.externalDrives, 'preview').mockResolvedValue(preview([pl({ track_count: 4, track_ordinals: [0, 1, 2, 4] })], {
+    entries: [ent(0, 'present', 'Seed'), ent(1, 'present', 'Eligible'), ent(2, 'uncertain', 'Unverified'), ent(3, 'present', 'Outside'), ent(4, 'present', 'Conflict')],
+  }));
+  const data = { fingerprint: 'similar', compared: ['title', 'bpm'], not_compared: {}, tracks: [0, 1, 2, 3, 4].map(ordinal => ({
+    ordinal, track_id: 10 + ordinal, label: ['Seed', 'Eligible', 'Unverified', 'Outside', 'Conflict'][ordinal], fields: [
+      { field: 'title', drive: `USB ${ordinal}`, library: `Library ${ordinal}`, applicable: ordinal !== 4 },
+      { field: 'bpm', drive: 128, library: 127, applicable: false },
+    ],
+  })) };
+  const fieldsSpy = vi.spyOn(api.externalDrives, 'fields').mockResolvedValue(data);
+  const applySpy = vi.spyOn(api.externalDrives, 'applyFields').mockResolvedValue({ applied: [] });
+  return { data, fieldsSpy, applySpy };
+};
+const chooseSeed = async (host: HTMLElement, choice = 'Use USB') => {
+  await act(async () => { host.querySelector<HTMLButtonElement>('[aria-label="Details for Seed"]')!.click(); });
+  await click(host, choice);
+};
+
+it('Apply to similar previews same-field undecided exact audio in this playlist, then stages without applying', async () => {
+  const { applySpy } = similarFixture();
+  const host = await mount();
+  await chooseSeed(host);
+  expect(btn(host, 'Apply to similar…')).toBeUndefined(); // Never whole-library scope.
+  await act(async () => { [...host.querySelectorAll('button')].find(b => b.textContent?.startsWith('Warm Up'))!.click(); });
+  await click(host, 'Apply to similar…');
+  const review = host.querySelector('[aria-label="Review similar choices"]')!;
+  expect(review.textContent).toContain('1 additional track');
+  expect(review.textContent).toContain('Eligible');
+  expect(review.textContent).toContain('Library: Library 1');
+  expect(review.textContent).toContain('USB: USB 1');
+  expect(review.textContent).not.toContain('Outside');
+  expect(review.textContent).not.toContain('Unverified');
+  expect(review.textContent).not.toContain('Conflict');
+  expect(host.querySelector('.pg-right')!.textContent).not.toContain('USB 1');
+  await click(host, 'Add these choices to plan');
+  expect(host.querySelector('[aria-label="Review similar choices"]')).toBeNull();
+  const plan = host.querySelector('.pg-right')!.textContent!;
+  expect(plan).toContain('USB 0'); expect(plan).toContain('USB 1');
+  expect(plan).not.toContain('USB 2'); expect(plan).not.toContain('USB 3'); expect(plan).not.toContain('USB 4');
+  expect(host.querySelector('.pg-plan-tracks')!.textContent).not.toContain('BPM');
+  expect(applySpy).not.toHaveBeenCalled();
+  await click(host, 'Review 1 planned operation');
+  expect(applySpy).not.toHaveBeenCalled();
+  await click(host, 'Confirm and apply plan'); await act(async () => { await tick(); });
+  expect(applySpy).toHaveBeenCalledWith('/v/RB', 'similar', [
+    { track_id: 10, field: 'title', drive: 'USB 0', library: 'Library 0' },
+    { track_id: 11, field: 'title', drive: 'USB 1', library: 'Library 1' },
+  ]);
+
+});
+
+it('Apply to similar preserves explicit opposite choices and cancellation stages nothing', async () => {
+  similarFixture();
+  const host = await mount();
+  await act(async () => { [...host.querySelectorAll('button')].find(b => b.textContent?.startsWith('Warm Up'))!.click(); });
+  await chooseSeed(host);
+  await click(host, 'Apply to similar…'); await click(host, 'Cancel');
+  expect(host.querySelector('.pg-right')!.textContent).not.toContain('USB 1');
+  await act(async () => { host.querySelector<HTMLButtonElement>('[aria-label="Details for Eligible"]')!.click(); });
+  const fieldRow = [...host.querySelectorAll('.pg-diff')].find(row => row.textContent?.startsWith('Title') && row.textContent?.includes('Library 1'))!;
+  await act(async () => { [...fieldRow.querySelectorAll('button')].find(b => b.textContent === 'Keep Library')!.click(); });
+  expect(btn(host, 'Apply to similar…')).toBeUndefined();
+  expect(host.querySelector('.pg-right')!.textContent).not.toContain('USB 1');
+});
+
+it('Apply to similar Keep Library marks only those fields decided without queuing writes', async () => {
+  const { applySpy } = similarFixture();
+  const host = await mount();
+  await act(async () => { [...host.querySelectorAll('button')].find(b => b.textContent?.startsWith('Warm Up'))!.click(); });
+  await chooseSeed(host, 'Keep Library');
+  await click(host, 'Apply to similar…');
+  expect(host.querySelector('[aria-label="Review similar choices"]')!.textContent).toContain('Keep Library value: Library 1');
+  await click(host, 'Keep Library for these tracks');
+  expect(host.querySelector('.pg-right')!.textContent).toContain('Nothing chosen');
+  await act(async () => { host.querySelector<HTMLButtonElement>('[aria-label="Details for Eligible"]')!.click(); });
+  const row = [...host.querySelectorAll('.pg-diff')].find(r => r.textContent?.startsWith('Title') && r.textContent?.includes('Library 1'))!;
+  expect([...row.querySelectorAll('button')].find(b => b.textContent === 'Keep Library')!.getAttribute('aria-pressed')).toBe('true');
+  expect(applySpy).not.toHaveBeenCalled();
+});
+
+it('rechecking or switching playlist invalidates the similar preview rather than carrying stale values', async () => {
+  const { fieldsSpy, data } = similarFixture();
+  const host = await mount();
+  await act(async () => { [...host.querySelectorAll('button')].find(b => b.textContent?.startsWith('Warm Up'))!.click(); });
+  await chooseSeed(host); await click(host, 'Apply to similar…');
+  fieldsSpy.mockResolvedValue({ ...data, tracks: data.tracks.map(t => ({ ...t, fields: t.fields.map(f => ({ ...f, library: 'Changed' })) })) });
+  await click(host, 'Recheck'); await act(async () => { await tick(); });
+  expect(host.querySelector('[aria-label="Review similar choices"]')).toBeNull();
+  expect(host.querySelector('.pg-right')!.textContent).toContain('Nothing chosen');
+  await click(host, 'Use USB'); await click(host, 'Apply to similar…');
+  await act(async () => { [...host.querySelectorAll('button')].find(b => b.textContent?.startsWith('All tracks'))!.click(); });
+  expect(host.querySelector('[aria-label="Review similar choices"]')).toBeNull();
+});

@@ -102,6 +102,9 @@ export function SyncBrowser({ toolbar, onPendingChange }: { toolbar?: ReactNode;
   };
   const [hoverResult, setHoverResult] = useState<{ key: string; value: string | number | null } | null>(null);
   const [reviewing, setReviewing] = useState(false);
+  const similarPanel = useRef<HTMLElement>(null);
+  const [similarReview, setSimilarReview] = useState<{ field: string; choice: 'take' | 'keep'; changes: FieldChoice[] } | null>(null);
+  useEffect(() => { if (similarReview) similarPanel.current?.scrollIntoView?.({ block: 'nearest' }); }, [similarReview]);
   const [selectedOrdinals, setSelectedOrdinals] = useState<Set<number>>(new Set());
   const [plans, setPlans] = useState<Record<string, Plan>>({});
   const [results, setResults] = useState<Record<string, ItemResult[]>>({});
@@ -162,6 +165,20 @@ export function SyncBrowser({ toolbar, onPendingChange }: { toolbar?: ReactNode;
   const decisionFor = (c: { track_id: number; field: string; drive: string | number | null; library: string | number | null }) => {
     const x = plan.decisions[fieldKey(c.track_id, c.field)];
     return x && x.drive === c.drive && x.library === c.library ? x : null;
+  };
+  // Only undecided differences on verified audio in this playlist are compatible.
+  // Existing choices, conflicting sources and read-only fields are never replaced.
+  const similarChoices = (seed: FieldChoice) => selected ? applicable.filter(c =>
+    c.field === seed.field && !decisionFor(c) &&
+    (fields?.tracks ?? []).some(t => t.track_id === c.track_id &&
+      selected.track_ordinals?.includes(t.ordinal) && byOrdinal.get(t.ordinal)?.status === 'present')) : [];
+  useEffect(() => { setSimilarReview(null); }, [plans, root, sel, issuesOnly, d.read, d.fields, desktop]);
+  const stageSimilar = () => {
+    if (!similarReview || applying) return;
+    const { choice, changes } = similarReview;
+    setPlan(p => ({ ...p, decisions: { ...p.decisions, ...Object.fromEntries(changes.map(c =>
+      [fieldKey(c.track_id, c.field), { choice, drive: c.drive, library: c.library }])) } }));
+    setSimilarReview(null);
   };
   const taking = applicable.filter((c) => decisionFor(c)?.choice === 'take');
   const undecided = applicable.filter((c) => !decisionFor(c)).length;
@@ -399,6 +416,7 @@ export function SyncBrowser({ toolbar, onPendingChange }: { toolbar?: ReactNode;
                                 <span className="pg-field-target">USB → Library</span>
                                 <button className={`btn${dec?.choice === 'keep' ? ' btn-primary' : ''}`} disabled={applying} aria-pressed={dec?.choice === 'keep'} onMouseEnter={() => setHoverResult({ key: fieldKey(c.track_id, c.field), value: f.library })} onMouseLeave={() => setHoverResult(null)} onFocus={() => setHoverResult({ key: fieldKey(c.track_id, c.field), value: f.library })} onBlur={() => setHoverResult(null)} onClick={() => decide(c, 'keep')}>Keep Library</button>
                                 <button className={`btn${dec?.choice === 'take' ? ' btn-primary' : ''}`} disabled={applying} aria-pressed={dec?.choice === 'take'} onMouseEnter={() => setHoverResult({ key: fieldKey(c.track_id, c.field), value: f.drive })} onMouseLeave={() => setHoverResult(null)} onFocus={() => setHoverResult({ key: fieldKey(c.track_id, c.field), value: f.drive })} onBlur={() => setHoverResult(null)} onClick={() => decide(c, 'take')}>{dec?.choice === 'take' ? 'Planned ✓' : 'Use USB'}</button>
+                                {dec && selected && similarChoices(c).length > 0 && <button className="btn pg-link" disabled={applying} onClick={() => setSimilarReview({ field: c.field, choice: dec.choice, changes: similarChoices(c) })}>Apply to similar…</button>}
                                 {dec?.choice === 'take' && <button className="btn" disabled={applying} onClick={() => setPlan(p => ({ ...p, decisions: Object.fromEntries(Object.entries(p.decisions).filter(([key]) => key !== fieldKey(c.track_id, c.field))) }))}>Undo</button>}
                                 </> : <span className="pg-comparison-state">{f.conflict ?? (f.field === 'bpm' ? 'Read only · analysis' : 'Read only · cannot apply this field')}</span>}
                               </td>
@@ -409,6 +427,12 @@ export function SyncBrowser({ toolbar, onPendingChange }: { toolbar?: ReactNode;
                     })}
                   </tbody>
                 </table>
+                {similarReview && <section ref={similarPanel} className="pg-similar-review" role="region" aria-label="Review similar choices">
+                  <div className="pg-context-head"><b>{similarReview.choice === 'take' ? 'Use USB' : 'Keep Library'} · {FIELD_LABEL[similarReview.field] ?? similarReview.field}</b><span className="pg-tag">{plural(similarReview.changes.length, 'additional track')}</span></div>
+                  <p>In {selected?.name}. Exact audio only. Existing choices, other fields and unverified copies stay untouched.</p>
+                  <ul>{similarReview.changes.map(c => <li key={c.track_id}><b>{c.label}</b><span>Library: {c.library ?? 'empty'}</span><span>USB: {c.drive ?? 'empty'}</span><span className="pg-plan-new">{similarReview.choice === 'take' ? 'Plan Library value' : 'Keep Library value'}: {similarReview.choice === 'take' ? c.drive : c.library}</span></li>)}</ul>
+                  <div className="pg-context-head"><button className="btn btn-primary" disabled={applying} onClick={stageSimilar}>{similarReview.choice === 'take' ? 'Add these choices to plan' : 'Keep Library for these tracks'}</button><button className="btn" onClick={() => setSimilarReview(null)}>Cancel</button><span>No files change here. USB unchanged.</span></div>
+                </section>}
                 {rows.length === 0 && <p className="pg-empty">{issuesOnly ? 'No issues' : 'No tracks'}</p>}
               </>
             )}
@@ -445,7 +469,7 @@ export function SyncBrowser({ toolbar, onPendingChange }: { toolbar?: ReactNode;
                 </ul>
               </div>
             )}
-            <details className="pg-exact pg-more"><summary>More operations <span className="pg-tag tone-unknown">Building</span></summary><ConstructionNotice label="Apply to similar" detail="Planned: reuse a reviewed operation across compatible exact-audio matches in this playlist, with affected tracks previewed. USB title writes and mixed membership plans are not wired." /><ConstructionNotice label="Cue / grid comparison" detail="USB cue and grid comparison is not wired. Only title, artist, key and BPM are compared." />{drive.kind === 'rekordbox' && <ul className="pg-list"><ExportImpact root={drive.root} /></ul>}</details>
+            <details className="pg-exact pg-more"><summary>More operations <span className="pg-tag tone-unknown">Building</span></summary><p>Apply to similar: choose one field on a track, then preview the same choice for undecided exact-audio differences in this playlist. USB title writes and mixed membership plans are not wired.</p><ConstructionNotice label="Cue / grid comparison" detail="USB cue and grid comparison is not wired. Only title, artist, key and BPM are compared." />{drive.kind === 'rekordbox' && <ul className="pg-list"><ExportImpact root={drive.root} /></ul>}</details>
             <details className="pg-exact pg-more"><summary>Warnings</summary>
             <ul className="pg-list">
               {d.read.state === 'error' && <li className="tone-unknown">Drive not read</li>}

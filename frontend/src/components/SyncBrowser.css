@@ -144,3 +144,13 @@
 .pg-title-divergence { display: inline-flex; flex: 0 0 auto; color: var(--yellow, #ffc85a); align-items: center; }
 .pg-track-facts { display: flex; flex-direction: column; gap: 3px; margin: 6px 0; color: var(--subtext0); font-size: 11px; }
 .pg-track-facts > span { overflow-wrap: anywhere; }
+
+.pg-similar-review { margin:12px; padding:12px; border:1px solid var(--accent); background:var(--mantle); font-size:12px; overflow-wrap:anywhere; }
+.pg-similar-review p { color:var(--subtext0); margin:6px 0; }
+.pg-similar-review ul { padding:0; list-style:none; max-height:240px; overflow:auto; }
+.pg-similar-review li { display:grid; gap:3px; padding:8px 0; border-top:1px solid var(--surface0); }
+.pg-similar-review li > span { font-size:11px; }
+.pg-similar-review .pg-context-head { align-items:center; }
+.pg-similar-review .pg-context-head > span:last-child { color:var(--subtext0); font-size:11px; }
+.pg-plan-change { grid-template-columns:minmax(0,1fr) auto; }
+.pg-plan-change > span { min-width:0; white-space:normal; overflow-wrap:anywhere; }
