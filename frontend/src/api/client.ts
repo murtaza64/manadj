@@ -201,6 +201,20 @@ export interface ExternalDriveFieldComparison {
   not_compared: Record<string, string>;
 }
 
+export interface PerformanceCue {
+  slot: number; kind: 'hot' | 'memory' | 'main'; time: number;
+  loop_end: number | null; label: string | null; color: string | null;
+}
+export interface ExternalDrivePerformanceComparison {
+  ordinal: number; track_id: number; fingerprint: string; duration: number | null;
+  alignment: string; newer_source: null; read_only: true;
+  usb: { state: 'read' | 'unavailable'; reason: string | null; cues: PerformanceCue[];
+    beats: { time: number; beat: number; bpm: number }[]; decode_offset_ms?: number; grid_truncated?: boolean };
+  library: { cues: PerformanceCue[]; grid_state?: 'read' | 'unavailable'; grid_origin: string | null;
+    tempo_changes: { start_time: number; bpm: number; bar_position: number }[] | null };
+  limits: string[];
+}
+
 export interface ExternalDriveExportImpact {
   root: string;
   mode: 'rebuild';
@@ -1236,6 +1250,15 @@ export const api = {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ root }),
       });
       if (!res.ok) throw new Error(detailToMessage((await res.json().catch(() => null))?.detail, 'Failed to compare track details'));
+      return res.json();
+    },
+
+    performance: async (root: string, ordinal: number, preview_fingerprint: string): Promise<ExternalDrivePerformanceComparison> => {
+      const res = await fetch(`${API_BASE}/external-drives/performance/compare`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ root, ordinal, preview_fingerprint }),
+      });
+      if (!res.ok) throw new Error(detailToMessage((await res.json().catch(() => null))?.detail, 'Cue/grid comparison unavailable'));
       return res.json();
     },
 

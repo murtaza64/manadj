@@ -91,3 +91,8 @@ describe('window helpers', () => {
     expect(panWindow(85, 10, 20, 100)).toBe(90);
   });
 });
+
+it('preserves Library 3/4 downbeats rather than silently drawing 4/4', () => {
+  const markers = beatMarkersFromTempoChanges([{ start_time: 0, bpm: 120, bar_position: 1, time_signature_num: 3 }], 3.1);
+  expect(markers.filter(m => m.isDownbeat).map(m => m.time)).toEqual([0, 1.5, 3]);
+});

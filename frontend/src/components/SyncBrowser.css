@@ -158,3 +158,10 @@
 .pg-plan-scope { color:var(--subtext0); font-size:11px; margin:6px 0; }
 .pg-apply { white-space:normal; }
 .pg-view .pg-apply:hover, .pg-view .pg-apply:focus-visible { background:#4a9eff; color:#0d0d0d; }
+
+.pg-perf-entry, .pg-perf-summary { display: flex; gap: var(--space-12); align-items: center; flex-wrap: wrap; margin-top: var(--space-8); }
+.pg-perf { margin-top: var(--space-12); min-width: 0; }
+.pg-perf .pdv-legend { flex-wrap: wrap; }
+.pg-perf-summary { color: var(--subtext1); font-size: var(--font-small); }
+.pg-perf-values { width: 100%; text-align: left; font-size: var(--font-small); table-layout: fixed; }
+.pg-perf-values td, .pg-perf-values th { overflow-wrap: anywhere; padding: var(--space-4); }

@@ -375,3 +375,22 @@ def import_pull(request: ImportRequest, db: Session = Depends(get_db)):
             "skipped_other": update_result.skipped_other,
         }
     return response
+
+
+class CueComparisonRequest(BaseModel):
+    root: str
+    ordinal: int
+    preview_fingerprint: str
+
+
+@router.post("/performance/compare")
+def compare_performance(request: CueComparisonRequest, db: Session = Depends(get_db)):
+    """Read one USB track's cue/grid data. Never applies performance changes."""
+    from ..sync_cue_comparison import compare_row
+
+    try:
+        return compare_row(db, Path(request.root), request.ordinal, request.preview_fingerprint)
+    except external_drives.PlanChangedError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except external_drives.ExternalDriveError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
