@@ -127,7 +127,8 @@ export function heardRoute(): HeardSnapshot {
     cachedSnapshot.key === route.key &&
     cachedSnapshot.label === route.label &&
     cachedSnapshot.reportedSeconds === route.reportedSeconds &&
-    cachedSnapshot.seconds === seconds
+    cachedSnapshot.seconds === seconds &&
+    cachedSnapshot.overridden === (override !== undefined)
   ) {
     return cachedSnapshot;
   }

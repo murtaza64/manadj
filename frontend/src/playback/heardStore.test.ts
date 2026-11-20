@@ -126,4 +126,14 @@ describe('heardStore', () => {
     store.registerHeardRouteProvider(() => ({ key: 'junk', label: 'x', reportedSeconds: 0.05 }));
     expect(store.heardSeconds()).toBeCloseTo(0.05);
   });
+  it('updates override status even when the override equals the reported value', async () => {
+    const store = await loadStore();
+    store.registerHeardRouteProvider(() => BT);
+    expect(store.heardRoute().overridden).toBe(false);
+    store.setRouteLatency(BT.reportedSeconds);
+    expect(store.heardRoute().overridden).toBe(true);
+    store.setRouteLatency(null);
+    expect(store.heardRoute().overridden).toBe(false);
+  });
+
 });
