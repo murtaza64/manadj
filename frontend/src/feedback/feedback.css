@@ -115,3 +115,63 @@
   .feedback-screenshot { max-height: 120px; }
   .feedback-dispatch { align-items: stretch; flex-direction: column; }
 }
+
+/* Point / draw / dictate / capture hint (feedback #518) */
+.feedback-picker {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  max-width: none;
+  height: 100vh;
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  z-index: 1000;
+  cursor: crosshair;
+  overflow: hidden;
+  color: var(--text);
+  background: color-mix(in srgb, var(--crust) 25%, transparent);
+}
+.feedback-picker-box {
+  position: fixed;
+  pointer-events: none;
+  border: 2px solid var(--warning, #f9e2af);
+  border-radius: var(--radius);
+}
+.feedback-picker-hint {
+  position: fixed;
+  left: 50%;
+  bottom: var(--space-16);
+  transform: translateX(-50%);
+  padding: var(--space-6) var(--space-12);
+  background: var(--mantle);
+  color: var(--text);
+  border: 1px solid var(--surface1);
+  border-radius: var(--radius);
+  pointer-events: none;
+}
+.feedback-screenshot-draw { cursor: crosshair; touch-action: none; }
+.feedback-shot-tools { display: flex; flex-wrap: wrap; gap: var(--space-6); margin-block: var(--space-6); }
+.feedback-pen-row { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-6); margin-bottom: var(--space-6); }
+.feedback-pen {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 1px solid var(--surface1);
+  border-radius: 50%;
+  cursor: pointer;
+}
+.feedback-pen-selected { outline: 2px solid var(--accent); outline-offset: 2px; }
+.feedback-pointer-chip {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-6);
+  font-size: var(--font-small);
+  color: var(--subtext0);
+}
+.feedback-field-row { display: flex; align-items: flex-start; gap: var(--space-6); }
+.feedback-field-row > input, .feedback-field-row > textarea { flex: 1; min-width: 0; }
+.feedback-capture-hint { font-size: var(--font-small); color: var(--subtext0); }
+.feedback-trail ul { margin: var(--space-6) 0 0; padding-left: var(--space-16); font-size: var(--font-small); color: var(--subtext0); }

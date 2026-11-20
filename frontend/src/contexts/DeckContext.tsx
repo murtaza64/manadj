@@ -7,7 +7,7 @@ import { CHANNEL_IDS, Mixer, STEM_NAMES } from '../playback/mixer';
 import { CaptureRecorder } from '../capture/recorder';
 import { persistTake } from '../capture/takeSink';
 import { SessionSink } from '../capture/sessionSink';
-import { registerDiagnostics } from '../feedback/diagnostics';
+import { recordTrail, registerDiagnostics } from '../feedback/diagnostics';
 import { notePlayedEvent, resetPlayed } from '../sessions/playedStore';
 import type { ChannelId } from '../playback/mixer';
 import { registerSurface, unregisterSurface } from '../playback/audibleSurface';
@@ -93,6 +93,30 @@ export function DeckProvider({ children }: { children: ReactNode }) {
   );
 
   useEffect(() => syncGroup.start(), [syncGroup]);
+
+  // Recent playback trail (feedback #518): load/play/pause transitions feed
+  // the feedback form's visible capture context. Track ids only, and the
+  // per-deck edge compare ignores per-frame emits.
+  useEffect(() => {
+    const previous = Object.fromEntries(
+      CHANNEL_IDS.map((deck) => {
+        const s = engines[deck].getSnapshot();
+        return [deck, { playing: s.playing, trackId: s.trackId }];
+      })
+    ) as Record<ChannelId, { playing: boolean; trackId: number | null }>;
+    const unsubscribes = CHANNEL_IDS.map((deck) =>
+      engines[deck].subscribe(() => {
+        const s = engines[deck].getSnapshot();
+        const before = previous[deck];
+        if (s.trackId !== before.trackId) recordTrail('load', `deck ${deck} track ${s.trackId ?? 'none'}`);
+        if (s.playing !== before.playing) recordTrail(s.playing ? 'play' : 'pause', `deck ${deck}`);
+        previous[deck] = { playing: s.playing, trackId: s.trackId };
+      })
+    );
+    return () => {
+      unsubscribes.forEach((unsubscribe) => unsubscribe());
+    };
+  }, [engines]);
 
   // Heard (#382 desktop port): the route provider pairs the master
   // output's identity (routingStore's resolved sink) with its live

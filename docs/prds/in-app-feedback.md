@@ -51,6 +51,29 @@ Application map and initial standing-area designation remain separate work.
 - Evidence must remain available to authorized triage/recipient sessions
   without granting access to the real DB or another lane's writable workspace.
 
+## Point, draw, dictate and visible capture context (v2, #518)
+
+- Point at element: the form steps aside and the next click picks any UI
+  element without triggering it (the paired click is swallowed; Esc cancels).
+  A bounded, redacted descriptor (tag/role/aria-label/short visible
+  text/bounds) joins the snapshot as `pointer`; input values, option lists
+  and [data-feedback-private] subtrees are never described. The element's
+  bounds are highlighted on the screenshot.
+- Draw: freehand pen strokes over the captured screenshot (color, undo,
+  clear). Strokes stay a working copy baked into the PNG only at filing;
+  removing the screenshot removes annotations.
+- Dictate: optional speech-to-text into title/description where the runtime
+  offers SpeechRecognition. The form discloses browser speech-service
+  processing before the mic can start; transcripts land as editable draft
+  text only. Microphone audio may be sent to the browser speech service as soon as Dictate starts. Report filing is a separate action, and
+  unavailable runtimes keep keyboard/system dictation.
+- Visible capture context: the form shows what the capture contains
+  (view, playing decks, recent errors, recent events) with a previewable
+  bounded trail of recent navigation/playback events (view changes, browse
+  view/playlist changes, deck load/play/pause). The trail rides the
+  diagnostics snapshot as `trail`; both stay local until explicit dispatch,
+  exactly like the rest of the bundle.
+
 ## Deferred
 
 - Automatic bundle retention/deletion; v1 keeps evidence until manually removed.

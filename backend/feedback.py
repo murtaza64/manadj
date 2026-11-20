@@ -42,6 +42,10 @@ SNAPSHOT_FIELDS = {
     "audible_surface",
     "errors",
     "crash",
+    # feedback #518: bounded element-point descriptor and recent
+    # navigation/playback trail, both redacted client-side.
+    "pointer",
+    "trail",
 }
 SCREENSHOT_LIMIT = 4 * 1024 * 1024
 SNAPSHOT_LIMIT = 256 * 1024

@@ -27,6 +27,8 @@ vi.mock('../hooks/useHotCueActions', () => ({
 }));
 
 vi.mock('./capture', async (original) => ({ ...await original<typeof import('./capture')>(), captureFeedback: vi.fn() }));
+const pointerMock = vi.hoisted(() => ({ pickElement: vi.fn() }));
+vi.mock('./pointer', async (original) => ({ ...await original<typeof import('./pointer')>(), pickElement: pointerMock.pickElement }));
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 const origin = { lane: 'captured-lane', owner: 'captured-owner', revision: 'captured-rev' };
 const context = { origin, destination: 'captured-lane' };
@@ -346,4 +348,136 @@ it('dismisses only backdrop clicks and preserves the draft without dispatch', as
   await click('Feedback');
   expect(document.querySelector('textarea')?.value).toContain('Details');
   expect(feedbackApi.dispatch).not.toHaveBeenCalled();
+});
+
+it('hints at the captured view, playback state and recent activity trail', async () => {
+  vi.mocked(captureFeedback).mockResolvedValue({ ...capture, snapshot: {
+    view: 'performance',
+    decks: [{ id: 'A', playing: true }, { id: 'B', playing: false }],
+    errors: [{ at: '2026-11-20T12:00:00Z', source: 'window.error', message: 'boom' }],
+    trail: [
+      { at: '2026-11-20T11:59:58Z', event: 'view', detail: 'library' },
+      { at: '2026-11-20T12:00:01Z', event: 'play', detail: 'deck A' },
+    ],
+  } });
+  await click('Feedback');
+  expect(document.body.textContent).toContain('Captured: performance · A playing · 1 recent error · 2 recent events');
+  expect(document.body.textContent).toContain('Recent activity');
+  expect(document.body.textContent).toContain('view, library');
+  expect(document.body.textContent).toContain('play, deck A');
+});
+
+it('points at an element, shows a removable chip and files the descriptor in the snapshot', async () => {
+  pointerMock.pickElement.mockResolvedValue({
+    tag: 'button', id: 'play', role: null, label: 'Play deck A', text: null,
+    rect: { x: 10, y: 20, width: 64, height: 32 },
+  });
+  vi.mocked(captureFeedback).mockResolvedValue({ ...capture, screenshot: null });
+  const payloads: Payload[] = [];
+  vi.spyOn(feedbackApi, 'file').mockImplementation(async (payload) => {
+    payloads.push(payload);
+    return { ...report, id: payload.id };
+  });
+  await click('Feedback');
+  await click('Point at element');
+  await act(async () => { await new Promise((r) => setTimeout(r, 60)); });
+  expect(pointerMock.pickElement).toHaveBeenCalledTimes(1);
+  expect(document.body.textContent).toContain('Element: button#play "Play deck A"');
+  await fill();
+  await click('File report on GitHub');
+  expect(payloads).toHaveLength(1);
+  expect(payloads[0].snapshot.pointer).toMatchObject({ tag: 'button', id: 'play', rect: { x: 10, y: 20, width: 64, height: 32 } });
+  expect(payloads[0].screenshot).toBeNull();
+
+  await click('Feedback');
+  expect(document.body.textContent).not.toContain('Element: button#play');
+});
+
+it('cancelling the element pick keeps the draft and adds nothing', async () => {
+  pointerMock.pickElement.mockResolvedValue(null);
+  await click('Feedback'); await fill();
+  await click('Point at element');
+  await act(async () => { await new Promise((r) => setTimeout(r, 60)); });
+  expect(pointerMock.pickElement).toHaveBeenCalledTimes(1);
+  expect(document.body.textContent).not.toContain('Element:');
+  expect(document.querySelector('textarea')?.value).toContain('Details');
+});
+
+it('offers draw controls on the screenshot with undo and clear', async () => {
+  await click('Feedback');
+  await click('Draw');
+  expect(button('Done drawing')).toBeDefined();
+  expect(button('Undo').disabled).toBe(true);
+  expect(button('Clear').disabled).toBe(true);
+  await click('Done drawing');
+  await click('Remove screenshot');
+  expect(document.querySelector('input[type=file]')).not.toBeNull();
+});
+
+it('dictates editable draft text into the title only after an explicit start', async () => {
+  interface FakeRecognition {
+    onresult: ((e: { resultIndex: number; results: { isFinal: boolean; 0: { transcript: string } }[] }) => void) | null;
+    onend: (() => void) | null;
+    onerror: (() => void) | null;
+    started: number;
+  }
+  const instances: FakeRecognition[] = [];
+  vi.stubGlobal('SpeechRecognition', class {
+    onresult: FakeRecognition['onresult'] = null;
+    onend: (() => void) | null = null;
+    onerror: (() => void) | null = null;
+    continuous = false; interimResults = true; lang = '';
+    started = 0;
+    constructor() { instances.push(this as FakeRecognition); }
+    start() { this.started += 1; }
+    stop() { this.onend?.(); }
+  });
+  await click('Feedback');
+  // Disclosure is visible before the mic can start.
+  expect(document.body.textContent).toContain('browser speech service');
+  const dictateButtons = () => [...document.querySelectorAll('button')].filter((b) => b.textContent === 'Dictate');
+  expect(dictateButtons()).toHaveLength(2);
+  await act(async () => { dictateButtons()[0].click(); });
+  expect(instances).toHaveLength(1);
+  expect(instances[0].started).toBe(1);
+  await act(async () => {
+    instances[0].onresult?.({ resultIndex: 0, results: [{ isFinal: true, 0: { transcript: ' cue button sticks ' } }] });
+  });
+  expect(document.querySelector('input:not([type])')).toHaveProperty('value', 'cue button sticks');
+  await act(async () => { [...document.querySelectorAll('button')].find((b) => b.textContent === 'Stop dictation')!.click(); });
+  expect(dictateButtons()).toHaveLength(2);
+});
+
+it('omits dictation controls when the runtime lacks speech recognition', async () => {
+  await click('Feedback');
+  expect([...document.querySelectorAll('button')].filter((b) => b.textContent === 'Dictate')).toHaveLength(0);
+  expect(document.body.textContent).not.toContain('browser speech service');
+});
+
+
+it('stops recognition before in-flight filing and ignores late transcripts', async () => {
+  let recognition!: { onresult: ((event: unknown) => void) | null; stop: () => void; onend: (() => void) | null };
+  const stop = vi.fn();
+  class FakeRecognition {
+    continuous = false; interimResults = false; lang = '';
+    onresult = null; onerror = null; onend: (() => void) | null = null;
+    constructor() { recognition = this; }
+    start() {}
+    stop() { stop(); this.onend?.(); }
+  }
+  vi.stubGlobal('SpeechRecognition', FakeRecognition);
+  await click('Feedback'); await fill();
+  const dictate = [...document.querySelectorAll('button')].find((b) => b.textContent === 'Dictate')!;
+  await act(async () => dictate.click());
+  let finish!: (value: Report) => void;
+  vi.spyOn(feedbackApi, 'file').mockImplementation(() => {
+    expect(stop).toHaveBeenCalledTimes(1);
+    return new Promise((resolve) => { finish = resolve; });
+  });
+  await click('File report on GitHub');
+  const frozen = vi.mocked(feedbackApi.file).mock.calls[0][0];
+  await act(async () => recognition.onresult?.({ resultIndex: 0, results: [{ isFinal: true, 0: { transcript: 'late text' } }] }));
+  expect(document.querySelector('textarea')?.value).not.toContain('late text');
+  expect(frozen.description).not.toContain('late text');
+  await act(async () => finish(report));
 });

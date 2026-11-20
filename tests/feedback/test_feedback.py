@@ -994,3 +994,34 @@ def test_ignore_file_replaces_wrong_existing_content(tmp_path):
     (tmp_path / ".gitignore").write_text("something else\n")
     feedback._ensure_ignore_file(tmp_path / ".gitignore")
     assert (tmp_path / ".gitignore").read_bytes() == b"*\n"
+
+
+def test_pointer_and_trail_snapshot_fields_round_trip(world):
+    """feedback #518: the element descriptor and recent trail are allowed,
+    bounded snapshot fields that persist with the local evidence."""
+    service = world.make()
+    report = submit(
+        service,
+        snapshot={
+            "view": "performance",
+            "pointer": {
+                "tag": "button",
+                "id": "play",
+                "role": None,
+                "label": "Play deck A",
+                "text": None,
+                "rect": {"x": 10, "y": 20, "width": 64, "height": 32},
+            },
+            "trail": [
+                {"at": "2026-11-20T11:59:58Z", "event": "view", "detail": "library"},
+                {"at": "2026-11-20T12:00:01Z", "event": "play", "detail": "deck A"},
+            ],
+        },
+    )
+    evidence = service.evidence(report["id"])
+    assert evidence["snapshot"]["pointer"]["rect"] == {"x": 10, "y": 20, "width": 64, "height": 32}
+    assert evidence["snapshot"]["trail"][-1] == {
+        "at": "2026-11-20T12:00:01Z",
+        "event": "play",
+        "detail": "deck A",
+    }
