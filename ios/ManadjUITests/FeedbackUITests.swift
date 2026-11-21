@@ -84,6 +84,9 @@ final class FeedbackUITests: XCTestCase {
         }
         let stopped = expectation(for: NSPredicate(format: "label == 'STOP'"), evaluatedWith: rec)
         wait(for: [stopped], timeout: 10)
+        XCTAssertGreaterThanOrEqual(rec.frame.height, 44, "Stop must retain an effective44point target")
+        XCTAssertGreaterThanOrEqual(app.buttons["feedback-review-open"].frame.height, 44)
+        XCTAssertTrue(rec.isHittable)
         XCTAssertTrue((wave.value as? String ?? "").hasPrefix("playing"), "Explicit narration must not force a playing deck to pause")
         capture("Explicit Rec active with Stop reachable", app: app)
         app.buttons["BROWSE"].firstMatch.tap()
