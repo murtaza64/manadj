@@ -48,8 +48,8 @@ struct SwipeToLoad<Content: View>: View {
     }
 }
 
-/// Observe the real list pan, not a competing recognizer. Once scrolling reaches
-/// its top, consume only the remaining downward travel for the enclosing drawer.
+/// Simultaneous top-edge vertical pan. It never cancels row touches and fails
+/// horizontal/upward motion, preserving native list scroll and swipe-to-load.
 struct BrowserTopPull: UIViewRepresentable {
     var changed: (CGFloat) -> Void
     var ended: (CGFloat, CGFloat) -> Void
@@ -66,7 +66,7 @@ struct BrowserTopPull: UIViewRepresentable {
     }
     static func dismantleUIView(_ view: Probe, coordinator: ()) { view.detach() }
 
-    final class Probe: UIView {
+    final class Probe: UIView, UIGestureRecognizerDelegate {
         weak var scroll: UIScrollView?
         var changed: (CGFloat) -> Void = { _ in }
         var ended: (CGFloat, CGFloat) -> Void = { _, _ in }
@@ -79,6 +79,17 @@ struct BrowserTopPull: UIViewRepresentable {
         private var anchor: CGFloat?
         private var distance: CGFloat = 0
         private var priorBounces = true
+        private lazy var observerPan: UIPanGestureRecognizer = {
+            let pan = UIPanGestureRecognizer(target: self, action: #selector(pan(_:)))
+            pan.delegate = self; pan.cancelsTouchesInView = false; pan.maximumNumberOfTouches = 1
+            return pan
+        }()
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool { true }
+        func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+            guard let scroll, let pan = gestureRecognizer as? UIPanGestureRecognizer else { return false }
+            let velocity = pan.velocity(in: scroll.window)
+            return velocity.y > 0 && velocity.y > abs(velocity.x) * 1.5 && scroll.contentOffset.y <= -scroll.adjustedContentInset.top + 0.5
+        }
         override func didMoveToWindow() {
             super.didMoveToWindow()
             #if DEBUG
@@ -94,7 +105,7 @@ struct BrowserTopPull: UIViewRepresentable {
             func bind(_ list: UIScrollView) {
                 scroll = list
                 report("probe=bound id=\(list.accessibilityIdentifier ?? "nil") type=\(type(of:list)) size=\(list.bounds.size) content=\(list.contentSize)")
-                list.panGestureRecognizer.addTarget(self, action: #selector(pan(_:)))
+                list.addGestureRecognizer(observerPan)
                 #if DEBUG
                 print("BROWSER_PAN_ATTACHED type=\(type(of: list)) frame=\(list.convert(list.bounds, to: nil)) content=\(list.contentSize) bounceY=\(list.alwaysBounceVertical)")
                 #endif
@@ -129,7 +140,7 @@ struct BrowserTopPull: UIViewRepresentable {
         }
         func detach() {
             if let scroll {
-                scroll.panGestureRecognizer.removeTarget(self, action: #selector(pan(_:)))
+                scroll.removeGestureRecognizer(observerPan)
                 if anchor != nil { scroll.bounces = priorBounces }
             }
             scroll = nil; anchor = nil; distance = 0
