@@ -1,3 +1,4 @@
+import AudioToolbox
 import XCTest
 import Combine
 import UIKit
@@ -9,6 +10,15 @@ import CEngine
 @testable import Manadj
 
 final class NativeAudioTests: XCTestCase {
+    func testReportAvailableSystemAudioEncoders() throws {
+        var size: UInt32 = 0
+        XCTAssertEqual(AudioFormatGetPropertyInfo(kAudioFormatProperty_EncodeFormatIDs, 0, nil, &size), noErr)
+        var formats = [AudioFormatID](repeating: 0, count: Int(size) / MemoryLayout<AudioFormatID>.size)
+        let status = formats.withUnsafeMutableBytes { AudioFormatGetProperty(kAudioFormatProperty_EncodeFormatIDs, 0, nil, &size, $0.baseAddress!) }
+        XCTAssertEqual(status, noErr)
+        print("SYSTEM_AUDIO_ENCODER_CAPABILITY mp3=\(formats.contains(kAudioFormatMPEGLayer3)) aac=\(formats.contains(kAudioFormatMPEG4AAC)) simulatorOnly=true")
+    }
+
     private func syntheticMultibandWave() throws -> PreviewWaveform {
         let resource = try XCTUnwrap(Bundle.main.url(forResource: "synthetic-A", withExtension: "mwf"))
         var bytes = [UInt8](try Data(contentsOf: resource))

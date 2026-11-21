@@ -1,4 +1,5 @@
 import SwiftUI
+import AVFoundation
 import ManadjCore
 
 /// Every held report can be inspected, discarded, or explicitly sent to the
@@ -10,15 +11,31 @@ struct FeedbackOutboxView: View {
     @State private var entries: [Entry] = []
     @State private var busy = false
     @State private var status = ""
+    @State private var player: AVAudioPlayer?
 
     struct Entry: Identifiable {
         let id: String
         let origin: String?
         let payload: Data
-        var object: [String: Any] { (try? JSONSerialization.jsonObject(with: payload)) as? [String: Any] ?? [:] }
+        let object: [String: Any]
+        init(id: String, origin: String?, payload: Data) {
+            self.id = id; self.origin = origin; self.payload = payload
+            object = (try? JSONSerialization.jsonObject(with: payload)) as? [String: Any] ?? [:]
+        }
+        var voiceData: Data? {
+            guard let voice = object["voice"] as? [String: Any], let format = voice["format"] as? String,
+                  let prefix = FeedbackLimits.voicePrefixes[format], let url = voice["data_url"] as? String,
+                  url.hasPrefix(prefix) else { return nil }
+            return Data(base64Encoded: String(url.dropFirst(prefix.count)))
+        }
         var text: String {
             var value = object
             value.removeValue(forKey: "screenshot")
+            if var voice = value["voice"] as? [String: Any] {
+                voice.removeValue(forKey: "data_url")
+                voice["audio"] = "Local recording included. Use PLAY VOICE to review."
+                value["voice"] = voice
+            }
             let data = try? JSONSerialization.data(withJSONObject: value, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
             return data.flatMap { String(data: $0, encoding: .utf8) } ?? "Unreadable report"
         }
@@ -38,7 +55,7 @@ struct FeedbackOutboxView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
-                    Text("Review the saved text, context, and image below before sending. GitHub receives text only; image and context stay on the destination desktop.").font(Ink.font(11))
+                    Text("Review the saved text, voice, context, and image before sending. GitHub receives text only; voice, image and context stay on the destination desktop.").font(Ink.font(11))
                     Text("DESTINATION: \(connection?.baseURL.absoluteString ?? "No desktop paired. Pair in Settings first.")")
                         .font(Ink.font(12, bold: true)).foregroundStyle(Ink.accent)
                     if entries.isEmpty { Text("No saved reports.").font(Ink.font()) }
@@ -48,12 +65,23 @@ struct FeedbackOutboxView: View {
                             if let image = entry.image {
                                 Image(uiImage: image).resizable().scaledToFit().frame(maxHeight: 350)
                             }
+                            if entry.object["voice"] is [String: Any] {
+                                Button("PLAY SAVED VOICE") {
+                                    do {
+                                        guard let data = entry.voiceData else { throw CocoaError(.fileReadCorruptFile) }
+                                        player?.stop(); player = try AVAudioPlayer(data: data)
+                                        guard player?.play() == true else { throw CocoaError(.fileReadUnknown) }
+                                    } catch { status = "Voice could not play: " + error.localizedDescription }
+                                }.font(Ink.font(11)).accessibilityIdentifier("feedback-outbox-play-voice")
+                                Button("STOP VOICE") { player?.stop() }.font(Ink.font(10))
+                            }
                             Text(entry.text).font(Ink.font(10)).textSelection(.enabled)
                             if let connection {
                                 Button("REVIEWED · SEND TO THIS DESKTOP") { send(entry, to: connection) }
                                     .buttonStyle(FlatButtonStyle(color: Ink.play)).disabled(busy)
                             }
                             Button("DISCARD THIS SAVED REPORT") {
+                                player?.stop()
                                 FeedbackQueue(directory: directory).remove(id: entry.id)
                                 reload()
                             }.buttonStyle(FlatButtonStyle(color: Ink.danger)).disabled(busy)
@@ -64,10 +92,11 @@ struct FeedbackOutboxView: View {
             }.background(Ink.base)
                 .navigationTitle("SAVED REPORTS")
                 .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("DONE") { dismiss() }.disabled(busy) } }
-        }.preferredColorScheme(.dark).onAppear { reload() }
+        }.preferredColorScheme(.dark).onAppear { reload() }.onDisappear { player?.stop() }
     }
 
     private func send(_ entry: Entry, to connection: DesktopConnection) {
+        player?.stop()
         busy = true
         Task {
             do {

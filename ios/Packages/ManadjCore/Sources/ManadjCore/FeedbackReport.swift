@@ -40,6 +40,87 @@ public enum FeedbackLimits {
         "errors", "crash",
     ]
     public static let pngPrefix = "data:image/png;base64,"
+    /// Reviewed voice narration (Rec), mirroring backend/feedback.py. The byte
+    /// cap covers 120 s of 320 kbps MP3 (4,800,000 bytes) plus tag/encoder
+    /// headroom; duration_ms is the recorder's declared length — both ends
+    /// sniff container magic and bound bytes, neither decodes audio.
+    public static let voiceBytes = 5 * 1024 * 1024
+    public static let voiceDataURL = (voiceBytes + 2) / 3 * 4 + 128
+    public static let voiceDurationMs = 120_000
+    public static let voiceTranscript = 10_000
+    public static let voicePrefixes: [String: String] = [
+        "m4a": "data:audio/mp4;base64,",
+        "caf": "data:audio/caf;base64,",
+        "mp3": "data:audio/mpeg;base64,",
+    ]
+}
+
+/// Reviewed narration captured while reproducing the report. Raw audio stays
+/// local evidence on the desktop; it is never uploaded to GitHub.
+public struct FeedbackVoice: Sendable, Equatable {
+    public var format: String  // "m4a", "caf" or "mp3"
+    public var dataURL: String
+    public var durationMs: Int
+    public var startedAt: Date
+    public var endedAt: Date
+    public var transcript: String?
+
+    public init(format: String, dataURL: String, durationMs: Int, startedAt: Date, endedAt: Date, transcript: String? = nil) {
+        self.format = format
+        self.dataURL = dataURL
+        self.durationMs = durationMs
+        self.startedAt = startedAt
+        self.endedAt = endedAt
+        self.transcript = transcript
+    }
+
+    /// Mirrors the desktop's Voice model: declared format matches the data
+    /// URL prefix, container magic matches the format, bounds hold.
+    public func validate() throws {
+        guard let prefix = FeedbackLimits.voicePrefixes[format], dataURL.hasPrefix(prefix) else {
+            throw FeedbackFailure("Voice recording must be M4A, CAF or MP3 audio")
+        }
+        guard dataURL.count <= FeedbackLimits.voiceDataURL,
+              let data = Data(base64Encoded: String(dataURL.dropFirst(prefix.count))),
+              data.count >= 12, data.count <= FeedbackLimits.voiceBytes
+        else { throw FeedbackFailure("Voice recording is too large to file") }
+        let bytes = [UInt8](data)
+        let magic: Bool
+        switch format {
+        case "m4a": magic = Array(bytes[4..<8]) == [0x66, 0x74, 0x79, 0x70]  // "ftyp"
+        case "caf": magic = Array(bytes[0..<4]) == [0x63, 0x61, 0x66, 0x66]  // "caff"
+        default:  // mp3: ID3v2 tag or MPEG frame sync
+            magic = Array(bytes[0..<3]) == [0x49, 0x44, 0x33]
+                || (bytes[0] == 0xFF && bytes[1] & 0xE0 == 0xE0)
+        }
+        guard magic else { throw FeedbackFailure("Voice recording does not match its format") }
+        guard durationMs >= 1, durationMs <= FeedbackLimits.voiceDurationMs else {
+            throw FeedbackFailure("Voice recording is too long (2 minutes max)")
+        }
+        guard endedAt > startedAt else {
+            throw FeedbackFailure("Voice recording window is invalid")
+        }
+        if let transcript, transcript.count > FeedbackLimits.voiceTranscript {
+            throw FeedbackFailure("Voice transcript is too long (10,000 characters max)")
+        }
+    }
+
+    private static var timestampFormatter: ISO8601DateFormatter {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }
+
+    func payload() -> [String: Any] {
+        [
+            "format": format,
+            "data_url": dataURL,
+            "duration_ms": durationMs,
+            "started_at": Self.timestampFormatter.string(from: startedAt),
+            "ended_at": Self.timestampFormatter.string(from: endedAt),
+            "transcript": transcript.map { FeedbackScrub.text($0) as Any } ?? NSNull(),
+        ]
+    }
 }
 
 public enum FeedbackScrub {
@@ -98,10 +179,13 @@ public struct FeedbackDraft {
     /// PNG data URL, already annotated. Nil means the reporter removed it.
     public var screenshot: String?
     public var captureWarnings: [String]
+    /// Reviewed Rec narration. Nil when the reporter did not record one.
+    public var voice: FeedbackVoice?
 
     public init(
         id: UUID = UUID(), kind: FeedbackKind, title: String = "", description: String = "",
-        snapshot: [String: Any] = [:], screenshot: String? = nil, captureWarnings: [String] = []
+        snapshot: [String: Any] = [:], screenshot: String? = nil, captureWarnings: [String] = [],
+        voice: FeedbackVoice? = nil
     ) {
         self.id = id
         self.kind = kind
@@ -110,6 +194,7 @@ public struct FeedbackDraft {
         self.snapshot = snapshot
         self.screenshot = screenshot
         self.captureWarnings = captureWarnings
+        self.voice = voice
     }
 
     private static func checkSnapshot(_ value: Any, depth: Int, nodes: inout Int) throws {
@@ -183,10 +268,11 @@ public struct FeedbackDraft {
         var nodes = 0
         try Self.checkSnapshot(snapshot, depth: 0, nodes: &nodes)
         if let screenshot { try Self.validateScreenshot(screenshot) }
+        if let voice { try voice.validate() }
         var warnings = captureWarnings.prefix(FeedbackLimits.warnings).map(FeedbackScrub.text)
         warnings = warnings.map { String($0.prefix(FeedbackLimits.warning)) }
         let cleanedSnapshot = FeedbackScrub.json(snapshot) as? [String: Any] ?? [:]
-        let payload: [String: Any] = [
+        var payload: [String: Any] = [
             "id": id.uuidString.lowercased(),
             "kind": kind.rawValue,
             "title": String(title.prefix(FeedbackLimits.title)),
@@ -195,6 +281,7 @@ public struct FeedbackDraft {
             "screenshot": screenshot.map { $0 as Any } ?? NSNull(),
             "capture_warnings": warnings,
         ]
+        if let voice { payload["voice"] = voice.payload() }
         let snapshotData = try JSONSerialization.data(withJSONObject: cleanedSnapshot)
         guard snapshotData.count <= FeedbackLimits.snapshotBytes else {
             throw FeedbackFailure("Feedback context is too large to file")
@@ -321,6 +408,17 @@ public final class FeedbackQueue: Sendable {
 public final class FeedbackSubmitter {
     private let queue: FeedbackQueue
     public init(queue: FeedbackQueue) { self.queue = queue }
+
+    /// Explicit local preservation after a server refusal, without another
+    /// network request. Keep the reviewed destination binding intact.
+    public func saveReviewed(_ draft: FeedbackDraft, origin: String?) -> FeedbackOutcome {
+        do {
+            let payload = try draft.validatedPayload()
+            try queue.save(payload, id: draft.id.uuidString.lowercased(), origin: origin)
+            return .queuedLocally(reason: "Saved on this iPhone. Nothing was sent. Review the saved report and approve its destination before any later send.")
+        } catch let failure as FeedbackFailure { return .saveFailed(reason: failure.message) }
+        catch { return .saveFailed(reason: "Could not save the reviewed report on this iPhone.") }
+    }
 
     /// Validate, then file through the desktop or keep locally. Throws only
     /// for payload violations the reporter can fix in the review sheet.

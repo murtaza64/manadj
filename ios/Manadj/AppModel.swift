@@ -377,6 +377,18 @@ struct DeckViewState {
     func cancelWork() { task?.cancel() }
     var pairedOrigin: String? { connection?.baseURL.absoluteString }
     var syncConnection: DesktopConnection? { connection }
+    private(set) var feedbackActions: [[String: Any]] = []
+    func noteFeedbackAction(_ action: String, deck: Int? = nil, value: Double? = nil, slot: Int? = nil) {
+        let now = Date().timeIntervalSince1970
+        var event: [String: Any] = ["at": now, "action": action]
+        if let deck { event["deck"] = deck }
+        if let value, value.isFinite { event["value"] = value }
+        if let slot { event["slot"] = slot }
+        if let last = feedbackActions.last, last["action"] as? String == action, last["deck"] as? Int == deck,
+           let at = last["at"] as? Double, now - at < 0.1 { feedbackActions.removeLast() }
+        feedbackActions.append(event)
+        feedbackActions = Array(feedbackActions.filter { now - ($0["at"] as? Double ?? 0) <= 180 }.suffix(1024))
+    }
     var feedbackQueueRoot: URL { root.appendingPathComponent("feedback-queue", isDirectory: true) }
     func forgetDesktop() {
         stopLocalLive()
@@ -387,6 +399,7 @@ struct DeckViewState {
     /// Acceptance means the request was queued, not that asynchronous decoding succeeded.
     /// Refused requests keep the browser and its search focus in place.
     @discardableResult func load(_ track: LibraryTrack, deck: Int) -> Bool {
+        noteFeedbackAction("load-request", deck: deck, value: Double(track.id))
         guard !liveListening else { error = "Stop local live before loading tracks"; return false }
         guard decks.indices.contains(deck) else { error = "Choose a valid deck"; return false }
         guard !decks[deck].loading else { error = "This deck is already loading. Wait for it to finish."; return false }
@@ -459,16 +472,25 @@ struct DeckViewState {
         error = failure.localizedDescription
     }
     func play(_ deck: Int) {
+        noteFeedbackAction(decks[deck].engine.playing ? "pause" : "play", deck: deck)
         do { try audio?.start(); audio?.send(decks[deck].engine.playing ? MDJPause : MDJPlay, deck: deck) }
         catch { self.error = error.localizedDescription }
     }
     func set(_ op: MDJOp, _ deck: Int, _ value: Double, slot: Int = 0) {
+        let operations = ["play", "pause", "cue-down", "cue-up", "hotcue-down", "hotcue-up", "hotcue-set", "hotcue-clear", "seek", "fader", "trim", "crossfade", "pitch", "bend", "pfl", "cue-mix", "eq", "beat-jump", "loop-toggle", "loop-resize", "loop-preset", "quantize", "cue-set-at", "hotcue-set-at", "key-lock", "heard-latency"]
+        let index = Int(op.rawValue)
+        noteFeedbackAction(operations.indices.contains(index) ? operations[index] : "mix-op-" + String(index), deck: deck, value: value, slot: slot)
         do {
             if op == MDJCueDown || op == MDJHotCueDown { try audio?.start() }
             audio?.send(op, deck: deck, value: value, slot: slot)
         } catch { self.error = error.localizedDescription }
     }
+    func filter(_ deck: Int, position: Double) {
+        noteFeedbackAction("filter", deck: deck, value: position)
+        audio?.filter(deck, position: position)
+    }
     func toggleRecording() {
+        noteFeedbackAction(recording ? "master-record-stop" : "master-record-start")
         guard let audio else { return }
         if recording { audio.stopRecording(); recording = false; refreshRecordings(); return }
         do {

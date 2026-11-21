@@ -102,6 +102,41 @@ def report(**changes):
     return body
 
 
+def voice_body(**changes):
+    blob = b"ID3\x04\x00\x00\x00\x00\x00\x10" + b"\xff\xfb" + bytes(64)
+    body = {
+        "format": "mp3",
+        "data_url": "data:audio/mpeg;base64," + base64.b64encode(blob).decode("ascii"),
+        "duration_ms": 3000,
+        "started_at": "2026-11-21T01:00:00Z",
+        "ended_at": "2026-11-21T01:00:03Z",
+        "transcript": "narrating the broken flow",
+    }
+    body.update(changes)
+    return body
+
+
+def test_paired_device_files_report_with_voice_evidence(lan):
+    submission = report(voice=voice_body())
+    response = lan.client.post("/api/device-sync/feedback", json=submission, headers=lan.headers)
+    assert response.status_code == 200, response.text
+    evidence = lan.service.evidence(submission["id"])["voice"]
+    assert evidence["format"] == "mp3" and evidence["duration_ms"] == 3000
+    audio = lan.service.storage / evidence["file"]
+    assert audio.read_bytes() == base64.b64decode(submission["voice"]["data_url"].split(",", 1)[1])
+    title, issue = lan.gh.creates[0]
+    assert "voice" not in issue and evidence["sha256"] not in issue
+    assert "data:audio" not in issue and str(lan.service.storage) not in issue
+
+
+def test_invalid_voice_rejected_without_filing(lan):
+    bad = report(voice=voice_body(data_url="data:audio/mpeg;base64," + base64.b64encode(b"NOPE" + bytes(32)).decode()))
+    response = lan.client.post("/api/device-sync/feedback", json=bad, headers=lan.headers)
+    assert response.status_code == 422
+    assert response.headers["Cache-Control"] == "no-store"
+    assert lan.gh.creates == []
+
+
 def test_feedback_requires_pairing(lan):
     assert lan.client.post("/api/device-sync/feedback", json=report()).status_code == 401
     assert lan.gh.creates == []

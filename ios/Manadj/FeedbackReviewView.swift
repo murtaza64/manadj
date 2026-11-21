@@ -1,4 +1,5 @@
 import SwiftUI
+import AVFoundation
 import ManadjCore
 
 /// Shake → capture → this sheet: annotate, describe, see the exact scrubbed
@@ -12,7 +13,13 @@ struct FeedbackReviewView: View {
     let queueConnection: DesktopConnection?
     @State private var showOutbox = false
 
-    @Environment(\.dismiss) private var dismiss
+    let onClose: () -> Void
+    @State private var confirming = false
+    @State private var includeVoice = true
+    @State private var player: AVAudioPlayer?
+    @State private var voicePlaybackError: String?
+    let voice: FeedbackVoice?
+    let voiceURL: URL?
     @State private var kind = FeedbackKind.bug
     @State private var title = ""
     @State private var details = ""
@@ -31,13 +38,27 @@ struct FeedbackReviewView: View {
         targets: [FeedbackTarget] = [],
         onSubmit: @escaping @MainActor (FeedbackDraft) async -> FeedbackOutcome,
         queueDirectory: URL? = nil,
-        queueConnection: DesktopConnection? = nil
+        queueConnection: DesktopConnection? = nil,
+        voice: FeedbackVoice? = nil,
+        voiceURL: URL? = nil,
+        initialComment: String = "",
+        initialStrokes: [FeedbackStroke] = [],
+        initialPoint: CGPoint? = nil,
+        initialTarget: String? = nil,
+        onClose: @escaping () -> Void = {}
     ) {
+        self.voice = voice; self.voiceURL = voiceURL
         self.capture = capture
         self.targets = targets
         self.onSubmit = onSubmit
         self.queueDirectory = queueDirectory
         self.queueConnection = queueConnection
+        self.onClose = onClose
+        _strokes = State(initialValue: initialStrokes)
+        _selectedPoint = State(initialValue: initialPoint)
+        _selectedTarget = State(initialValue: initialTarget)
+        _details = State(initialValue: initialComment)
+        _title = State(initialValue: String(initialComment.prefix(100)))
         _includeScreenshot = State(initialValue: capture.screenshot != nil)
         _sections = State(initialValue: capture.sections)
     }
@@ -82,7 +103,7 @@ struct FeedbackReviewView: View {
         }
         return FeedbackDraft(
             kind: kind, title: title, description: details + targetDescription,
-            snapshot: snapshot, screenshot: screenshot, captureWarnings: warnings)
+            snapshot: snapshot, screenshot: screenshot, captureWarnings: warnings, voice: includeVoice ? voice : nil)
     }
 
     private var targetDescription: String {
@@ -98,161 +119,112 @@ struct FeedbackReviewView: View {
         picking = false
     }
 
+    @State private var expanded = true
+    @State private var atTop = false
+    @State private var reviewingDetails = false
+    private var comment: Binding<String> { Binding(get: { details }, set: { text in details = text; title = String(text.split(separator: "\n").first.map(String.init)?.prefix(100) ?? "") }) }
+    private var destination: String { queueConnection?.baseURL.absoluteString ?? "This iPhone only, no desktop paired" }
+
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 4) {
-                    if queueDirectory != nil {
-                        Button("REVIEW SAVED REPORTS") { editing = false; showOutbox = true }
-                            .buttonStyle(FlatButtonStyle(color: Ink.accent))
-                            .accessibilityIdentifier("feedback-open-outbox")
-                    }
-                    SectionLabel(title: "WHAT HAPPENED")
-                    Picker("Kind", selection: $kind) {
-                        Text("BUG").tag(FeedbackKind.bug)
-                        Text("IDEA").tag(FeedbackKind.feature)
-                    }
-                    .pickerStyle(.segmented)
-                    .padding(.bottom, 4)
-                    TextField("Short title", text: $title)
-                        .font(Ink.font()).padding(8)
-                        .background(Ink.panel).overlay(Rectangle().stroke(Ink.edge, lineWidth: 1))
-                        .accessibilityIdentifier("feedback-title")
-                        .focused($editing)
-                        .submitLabel(.done)
-                        .onSubmit { editing = false }
-                    TextField("What were you doing? What did you expect?", text: $details, axis: .vertical)
-                        .font(Ink.font(12)).lineLimit(3...6).padding(8)
-                        .background(Ink.panel).overlay(Rectangle().stroke(Ink.edge, lineWidth: 1))
-                        .accessibilityIdentifier("feedback-details")
-                        .focused($editing)
-
-                    Text("Type here, or use the microphone on the iOS keyboard to dictate. Nothing sends until you review and file.")
-                        .font(Ink.font(10)).foregroundStyle(Ink.muted)
-                    if let image = capture.screenshot, includeScreenshot {
-                        SectionLabel(title: "MARK THE SCREENSHOT")
-                        HStack {
-                            Button("PICK ELEMENT") { editing = false; picking = true }
-                                .buttonStyle(FlatButtonStyle(color: Ink.accent)).accessibilityIdentifier("feedback-pick-element")
-                            Text("Tap to select, or draw with your finger.").font(Ink.font(10)).foregroundStyle(Ink.muted)
-                        }
-                        if selectedPoint != nil {
+        GeometryReader { geometry in
+            ZStack(alignment: atTop ? .top : .bottom) {
+                if let image = capture.screenshot, includeScreenshot {
+                    FeedbackCanvasView(image: image, strokes: $strokes, picking: picking, selection: selectedPoint, onPick: pick)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background(Ink.base)
+                        .ignoresSafeArea()
+                } else { Ink.base.opacity(0.25).ignoresSafeArea() }
+                VStack(spacing: 8) {
+                    HStack(spacing: 12) {
+                        Text("FEEDBACK").font(Ink.font(12, bold: true))
+                        Spacer()
+                        Button { editing = false; atTop.toggle() } label: { Image(systemName: atTop ? "arrow.down" : "arrow.up") }.accessibilityLabel("Move feedback card")
+                        Button { editing = false; expanded.toggle() } label: { Image(systemName: expanded ? "minus" : "plus") }.accessibilityLabel(expanded ? "Collapse feedback" : "Expand feedback")
+                        Button(outcome == nil ? "CANCEL" : "DONE") { onClose() }.disabled(submitting).font(Ink.font(11, bold: true))
+                    }.frame(minHeight: 32)
+                    if expanded {
+                        if let outcome { outcomeView(outcome) }
+                        else {
+                            HStack(spacing: 8) {
+                                Button(picking ? "TAP A CONTROL" : "POINT") { editing = false; picking.toggle() }.accessibilityIdentifier("feedback-pick-element")
+                                Button("DRAW") { editing = false; picking = false }
+                                Button("UNDO") { if !strokes.isEmpty { strokes.removeLast() } }.disabled(strokes.isEmpty)
+                                Spacer()
+                                Button { reviewingDetails.toggle(); editing = false } label: { Image(systemName: "info.circle") }.accessibilityLabel("Review what will be sent").accessibilityIdentifier("feedback-show-details")
+                            }.font(Ink.font(11, bold: true)).buttonStyle(.plain).foregroundStyle(Ink.accent)
+                            if selectedPoint != nil {
+                                HStack {
+                                    Text(selectedTarget ?? "Screen area").font(Ink.font(10)).accessibilityIdentifier("feedback-selected-target")
+                                    Spacer(); Button("CLEAR TARGET") { selectedPoint = nil; selectedTarget = nil }.font(Ink.font(9))
+                                }
+                            }
+                            if let voice, includeVoice {
+                                HStack {
+                                    Button("▶ VOICE · \(voice.durationMs / 1000)s") {
+                                        guard let voiceURL else { return }
+                                        do { player = try AVAudioPlayer(contentsOf: voiceURL); guard player?.play() == true else { throw CocoaError(.fileReadUnknown) }; voicePlaybackError = nil } catch { voicePlaybackError = "Voice could not play: " + error.localizedDescription }
+                                    }.font(Ink.font(10)).accessibilityIdentifier("feedback-play-voice")
+                                    Spacer()
+                                    Button("REMOVE") { player?.stop(); includeVoice = false }.font(Ink.font(9)).accessibilityIdentifier("feedback-remove-voice")
+                                }
+                            }
+                            if let voicePlaybackError { Text(voicePlaybackError).font(Ink.font(9)).foregroundStyle(Ink.warning) }
+                            TextField("What would make this better?", text: comment, axis: .vertical)
+                                .font(Ink.font(13)).lineLimit(2...3).padding(8).background(Ink.crust, in: RoundedRectangle(cornerRadius: 8))
+                                .accessibilityIdentifier("feedback-title").focused($editing)
                             HStack {
-                                Text(targetDescription.trimmingCharacters(in: .whitespacesAndNewlines)).font(Ink.font(10)).accessibilityIdentifier("feedback-selected-target")
-                                Button("CLEAR TARGET") { selectedPoint = nil; selectedTarget = nil }.font(Ink.font(10))
+                                Text("Type or use keyboard dictation").font(Ink.font(9)).foregroundStyle(Ink.muted)
+                                Spacer()
+                                if editing { Button("HIDE KEYBOARD") { editing = false }.font(Ink.font(9)).accessibilityIdentifier("feedback-hide-keyboard") }
+                            }
+                            if reviewingDetails {
+                                ScrollView {
+                                    VStack(alignment: .leading, spacing: 8) {
+                                        Text("TO: " + destination).font(Ink.font(10, bold: true))
+                                        Picker("Kind", selection: $kind) { Text("Feedback").tag(FeedbackKind.bug); Text("Idea").tag(FeedbackKind.feature) }.pickerStyle(.segmented)
+                                        Toggle("Include marked screen", isOn: $includeScreenshot).font(Ink.font(11))
+                                        ForEach($sections) { $section in
+                                            DisclosureGroup {
+                                                if let content = exactContent(section.key) { Text(content).font(Ink.font(9)).foregroundStyle(Ink.muted).accessibilityIdentifier("feedback-content-" + section.key) }
+                                            } label: { Toggle(section.title, isOn: $section.included).font(Ink.font(11)).accessibilityIdentifier("feedback-section-" + section.key) }
+                                        }
+                                        if let data = try? JSONSerialization.data(withJSONObject: alwaysIncluded, options: [.prettyPrinted, .sortedKeys, .fragmentsAllowed]), let text = String(data: data, encoding: .utf8) {
+                                            DisclosureGroup("Always included: view, capture time and viewport") { Text(text).font(Ink.font(9)) }.font(Ink.font(10))
+                                        }
+                                        Text("Only your text and report link go to GitHub. Voice, the marked screen and selected context stay in the desktop feedback store. If unreachable, this reviewed report stays on this iPhone with no automatic retry.").font(Ink.font(10)).foregroundStyle(Ink.muted)
+                                        ForEach(capture.warnings, id: \.self) { Text($0).font(Ink.font(10)).foregroundStyle(Ink.warning) }
+                                    }.padding(.vertical, 4)
+                                }.frame(maxHeight: min(210, geometry.size.height * 0.3))
                             }
                         }
-                        FeedbackCanvasView(image: image, strokes: $strokes, selection: selectedPoint)
-                            .frame(maxHeight: 320)
-                            .overlay(Rectangle().stroke(Ink.edge, lineWidth: 1))
-                        HStack(spacing: 8) {
-                            Button("UNDO") { if !strokes.isEmpty { strokes.removeLast() } }
-                                .buttonStyle(FlatButtonStyle(color: Ink.muted))
-                                .disabled(strokes.isEmpty)
-                            Button("CLEAR") { strokes = [] }
-                                .buttonStyle(FlatButtonStyle(color: Ink.muted))
-                                .disabled(strokes.isEmpty)
+                        HStack {
+                            if queueDirectory != nil { Button("SAVED") { editing = false; showOutbox = true }.font(Ink.font(10)).accessibilityIdentifier("feedback-open-outbox") }
                             Spacer()
-                            Button("REMOVE IMAGE") { includeScreenshot = false; selectedPoint = nil; selectedTarget = nil }
-                                .buttonStyle(FlatButtonStyle(color: Ink.danger))
-                        }
-                    }
-
-                    SectionLabel(title: "EXACTLY WHAT SHIPS WITH THIS REPORT")
-                    ForEach($sections) { $section in
-                        VStack(alignment: .leading, spacing: 2) {
-                            Toggle(isOn: $section.included) {
-                                Text(section.title).font(Ink.font(12, bold: true))
-                            }
-                            .tint(Ink.accent)
-                            .accessibilityIdentifier("feedback-section-\(section.key)")
-                            if section.included, let content = exactContent(section.key) {
-                                Text(content)
-                                    .font(Ink.font(9))
-                                    .foregroundStyle(Ink.muted)
-                                    .padding(6)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .background(Ink.panel)
-                                    .overlay(Rectangle().stroke(Ink.edge, lineWidth: 1))
-                                    .accessibilityIdentifier("feedback-content-\(section.key)")
+                            if outcome == nil {
+                                Button(submitting ? "SENDING…" : "REVIEW & SEND") { editing = false; confirming = true }
+                                    .font(Ink.font(12, bold: true)).foregroundStyle(Ink.play).disabled(trimmedTitle.isEmpty || submitting).accessibilityIdentifier("feedback-submit")
                             }
                         }
-                    }
-                    if let data = try? JSONSerialization.data(
-                        withJSONObject: alwaysIncluded, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes, .fragmentsAllowed]),
-                        let text = String(data: data, encoding: .utf8) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("ALWAYS INCLUDED").font(Ink.font(12, bold: true))
-                            Text(text)
-                                .font(Ink.font(9))
-                                .foregroundStyle(Ink.muted)
-                                .padding(6)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .background(Ink.panel)
-                                .overlay(Rectangle().stroke(Ink.edge, lineWidth: 1))
-                        }
-                        .padding(.top, 4)
-                    }
-                    Text("Filing creates a GitHub issue with your title and text, linked by report id. The screenshot and the context above stay with the report on your desktop's feedback store; they are not uploaded to GitHub.")
-                        .font(Ink.font(10)).foregroundStyle(Ink.muted).padding(.vertical, 8)
-
-                    Text("If the paired desktop is unreachable, File saves this reviewed report on this iPhone. It will not send later on its own. Use REVIEW SAVED REPORTS to review it and approve the named destination. Reports captured without a paired desktop stay here. Use REVIEW SAVED REPORTS to inspect them and approve a destination after pairing.")
-                        .font(Ink.font(10)).foregroundStyle(Ink.muted).padding(.bottom, 8)
-
-                    if let outcome {
-                        outcomeView(outcome)
-                    } else {
-                        Button(action: submit) {
-                            Text(submitting ? "FILING…" : "REVIEWED · FILE FEEDBACK")
-                                .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(FlatButtonStyle(color: Ink.play, active: submitting))
-                        .disabled(trimmedTitle.isEmpty || submitting)
-                        .accessibilityIdentifier("feedback-submit")
+                        Text(destination).font(Ink.font(8)).foregroundStyle(Ink.muted).lineLimit(1)
                     }
                 }
-                .padding(12)
-            }
-            .scrollDismissesKeyboard(.interactively)
-            .background(Ink.base)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItemGroup(placement: .keyboard) {
-                    Spacer()
-                    Button("HIDE KEYBOARD") { editing = false }
-                        .accessibilityIdentifier("feedback-hide-keyboard")
-                }
-                ToolbarItem(placement: .principal) {
-                    Text("REPORT").font(Ink.font(14, bold: true)).foregroundStyle(Ink.text)
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button(outcome == nil ? "CANCEL" : "DONE") { dismiss() }.disabled(submitting)
-                        .font(Ink.font(12, bold: true)).foregroundStyle(Ink.accent)
-                }
+                .padding(12).frame(maxWidth: min(420, geometry.size.width - 20))
+                .background(Ink.panel, in: RoundedRectangle(cornerRadius: 18))
+                .overlay(RoundedRectangle(cornerRadius: 18).stroke(Ink.accent.opacity(0.6), lineWidth: 1))
+                .shadow(color: .black.opacity(0.5), radius: 16, y: 6)
+                .padding(.vertical, 10)
+                .accessibilityElement(children: .contain).accessibilityIdentifier("feedback-comment-card")
             }
         }
-        .fullScreenCover(isPresented: $picking) {
-            if let image = capture.screenshot {
-                NavigationStack {
-                    VStack(spacing: 8) {
-                        Text("Tap a control on this captured screen. It will not press the real control.")
-                            .font(Ink.font(12)).foregroundStyle(Ink.muted).padding(.horizontal)
-                        FeedbackCanvasView(image: image, strokes: .constant([]), picking: true, onPick: pick)
-                            .padding(.horizontal, 8)
-                        Text("Known controls get a name. Other points stay Screenshot area.")
-                            .font(Ink.font(10)).foregroundStyle(Ink.muted).padding(.bottom)
-                    }.frame(maxWidth: .infinity, maxHeight: .infinity).background(Ink.base)
-                        .navigationTitle("PICK ELEMENT").navigationBarTitleDisplayMode(.inline)
-                        .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("CANCEL") { picking = false } } }
-                }.preferredColorScheme(.dark).accessibilityIdentifier("feedback-target-picker")
-            }
+        .confirmationDialog("Send this feedback?", isPresented: $confirming, titleVisibility: .visible) {
+            Button(queueConnection == nil ? "SAVE REVIEWED FEEDBACK ON IPHONE" : "SEND REVIEWED FEEDBACK TO " + destination) { submit() }.accessibilityIdentifier("feedback-confirm-send")
+            Button("KEEP EDITING", role: .cancel) {}
+        } message: {
+            Text("To: " + destination + ". " + (includeScreenshot ? "Includes the marked screen and " : "No screenshot. Includes ") + sections.filter(\.included).map(\.title).joined(separator: ", ") + ". " + (includeVoice && voice != nil ? "Includes your reviewed voice recording. " : "") + "Only text and a report link go to GitHub. Screen, voice and context stay in the desktop feedback store. No automatic retry from this iPhone.")
         }
-        .sheet(isPresented: $showOutbox) {
-            if let queueDirectory { FeedbackOutboxView(directory: queueDirectory, connection: queueConnection) }
-        }
-        .interactiveDismissDisabled(submitting)
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("feedback-review")
+        .sheet(isPresented: $showOutbox) { if let queueDirectory { FeedbackOutboxView(directory: queueDirectory, connection: queueConnection) } }
+        .accessibilityElement(children: .contain).accessibilityIdentifier("feedback-review")
+        .onDisappear { player?.stop() }
         .preferredColorScheme(.dark)
     }
 
@@ -275,6 +247,12 @@ struct FeedbackReviewView: View {
                 Text("SAVED ON THIS IPHONE").font(Ink.font(14, bold: true)).foregroundStyle(Ink.warning)
                 Text(reason).font(Ink.font(11)).foregroundStyle(Ink.muted)
             case .rejected(let reason):
+                if let queueDirectory {
+                    Button("SAVE REVIEWED REPORT ON IPHONE") {
+                        player?.stop()
+                        self.outcome = FeedbackSubmitter(queue: FeedbackQueue(directory: queueDirectory)).saveReviewed(makeDraft(), origin: queueConnection?.baseURL.absoluteString)
+                    }.font(Ink.font(10)).accessibilityIdentifier("feedback-save-rejected")
+                }
                 Button("BACK TO EDITING") { self.outcome = nil }
                     .buttonStyle(FlatButtonStyle(color: Ink.accent))
                 Text("NOT FILED").font(Ink.font(14, bold: true)).foregroundStyle(Ink.danger)
