@@ -34,7 +34,7 @@ struct PerformanceDeckControls: View {
                                 let slot = r * 4 + c
                                 HoldControl(title: "\(slot + 1)\n\(cue(slot) < 0 ? "SET" : Ink.clock(cue(slot)))", color: Ink.cues[slot], active: state.preview && state.previewSlot == slot, enabled: state.ready, marked: cue(slot) >= 0, down: {
                                     model.set(shift ? MDJHotCueClear : cue(slot) < 0 ? MDJHotCueSet : MDJHotCueDown, index, 0, slot: slot)
-                                }, up: { model.set(MDJHotCueUp, index, 0, slot: slot) }).padding(3).accessibilityLabel("\(Ink.deckName(index)) hotcue \(slot + 1)")
+                                }, up: { model.set(MDJHotCueUp, index, 0, slot: slot) }, canLatch: { let live = model.audio?.state(index); return !shift && live?.preview == true && live?.previewSlot == slot }, latch: { model.set(MDJPlay, index, 0) }).accessibilityIdentifier("deck-\(index)-hotcue-\(slot)").padding(3).accessibilityLabel("\(Ink.deckName(index)) hotcue \(slot + 1)")
                             }
                         }
                     }
