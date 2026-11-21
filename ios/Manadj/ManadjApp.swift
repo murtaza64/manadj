@@ -205,7 +205,13 @@ struct WorkspaceView: View {
         }.accessibilityIdentifier("browser-open").buttonStyle(PerformanceKeyStyle(color: Ink.warning, active: browsing)).feedbackTarget("Browse library")
     }
     private var library: some View {
-        LibraryBrowser(onClose: { withAnimation { browsing = false } }, onLoad: { track in
+        LibraryBrowser(onClose: { withAnimation { browsing = false } }, onDrawerPull: { distance in
+            var transaction = Transaction(); transaction.disablesAnimations = true
+            withTransaction(transaction) { browserDrag = distance }
+        }, onDrawerRelease: { distance, velocity in
+            let close = distance > 180 || (distance > 60 && velocity > 700)
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.9)) { browsing = !close; browserDrag = 0 }
+        }, onLoad: { track in
             let accepted = model.load(track, deck: model.loadTarget)
             if accepted { withAnimation { browsing = false } }
             return accepted

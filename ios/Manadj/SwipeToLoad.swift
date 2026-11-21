@@ -47,3 +47,70 @@ struct SwipeToLoad<Content: View>: View {
         .accessibilityAction(named: "Load to B", loadB)
     }
 }
+
+/// Observe the real list pan, not a competing recognizer. Once scrolling reaches
+/// its top, consume only the remaining downward travel for the enclosing drawer.
+struct BrowserTopPull: UIViewRepresentable {
+    var changed: (CGFloat) -> Void
+    var ended: (CGFloat, CGFloat) -> Void
+    func makeUIView(context: Context) -> Probe { Probe() }
+    func updateUIView(_ view: Probe, context: Context) {
+        view.changed = changed; view.ended = ended
+        DispatchQueue.main.async { [weak view] in view?.attach() }
+    }
+    static func dismantleUIView(_ view: Probe, coordinator: ()) { view.detach() }
+
+    final class Probe: UIView {
+        weak var scroll: UIScrollView?
+        var changed: (CGFloat) -> Void = { _ in }
+        var ended: (CGFloat, CGFloat) -> Void = { _, _ in }
+        private var anchor: CGFloat?
+        private var distance: CGFloat = 0
+        private var priorBounces = true
+        override func didMoveToWindow() { super.didMoveToWindow(); if window != nil { attach() } }
+        func attach() {
+            guard scroll == nil else { return }
+            var ancestor = superview
+            while let candidate = ancestor {
+                if let list = candidate as? UIScrollView {
+                    scroll = list
+                    list.panGestureRecognizer.addTarget(self, action: #selector(pan(_:)))
+                    return
+                }
+                ancestor = candidate.superview
+            }
+        }
+        func detach() {
+            if let scroll {
+                scroll.panGestureRecognizer.removeTarget(self, action: #selector(pan(_:)))
+                if anchor != nil { scroll.bounces = priorBounces }
+            }
+            scroll = nil; anchor = nil; distance = 0
+        }
+        @objc private func pan(_ pan: UIPanGestureRecognizer) {
+            guard let scroll else { return }
+            let travel = pan.translation(in: scroll.window), top = -scroll.adjustedContentInset.top
+            switch pan.state {
+            case .began:
+                anchor = nil; distance = 0; priorBounces = scroll.bounces
+            case .changed:
+                if anchor == nil, travel.y > 0, travel.y > abs(travel.x) * 1.5, scroll.contentOffset.y <= top + 0.5 {
+                    // Include overscroll already delivered in this native pan update.
+                    anchor = travel.y - max(0, top - scroll.contentOffset.y)
+                    scroll.bounces = false
+                }
+                if let anchor {
+                    distance = max(0, travel.y - anchor)
+                    scroll.setContentOffset(CGPoint(x: scroll.contentOffset.x, y: top), animated: false)
+                    changed(distance)
+                }
+            case .ended, .cancelled, .failed:
+                guard anchor != nil else { return }
+                let final = distance, velocity = pan.state == .ended ? pan.velocity(in: scroll.window).y : 0
+                scroll.bounces = priorBounces; anchor = nil; distance = 0
+                ended(pan.state == .ended ? final : 0, velocity)
+            default: break
+            }
+        }
+    }
+}

@@ -4,6 +4,8 @@ import ManadjCore
 struct LibraryBrowser: View {
     @EnvironmentObject var model: AppModel
     var onClose: () -> Void = {}
+    var onDrawerPull: (CGFloat) -> Void = { _ in }
+    var onDrawerRelease: (CGFloat, CGFloat) -> Void = { _, _ in }
     var onLoad: (LibraryTrack) -> Bool
     @FocusState private var searchFocused: Bool
     @State private var restoreSearchAfterError = false
@@ -174,7 +176,7 @@ struct LibraryBrowser: View {
                     .padding(.leading, 2).padding(.trailing, 8)
                     .overlay(alignment: .bottom) { Rectangle().fill(Ink.edge).frame(height: 0.5) }
                     .contextMenu { if let bpm = track.bpm { Button("Match BPM ±6") { bpmCenter = bpm; filtersOpen = true } }; Button("Follow this track") { followReference = track.id }; ForEach(0..<4) { index in Button("Load deck \(Ink.deckName(index))") { if model.load(track, deck: index) { searchFocused = false } } } }
-                } } }.scrollDismissesKeyboard(.interactively)
+                } }.background(BrowserTopPull(changed: onDrawerPull, ended: onDrawerRelease).frame(width: 0, height: 0)) }.scrollDismissesKeyboard(.interactively)
                     .accessibilityIdentifier("library-track-list")
                     .accessibilityValue(firstRowTiming)
                 }
