@@ -137,6 +137,9 @@ struct FeedbackReporter: ViewModifier {
     @State private var detector = ShakeDetector()
     @State private var capture: FeedbackCapture?
     @State private var capturedTargets: [FeedbackTarget] = []
+    @State private var capturedVoice: FeedbackVoice?
+    @State private var capturedVoiceURL: URL?
+    @State private var capturedTranscript = ""
     func body(content: Content) -> some View {
         content
             .overlay {
@@ -146,15 +149,17 @@ struct FeedbackReporter: ViewModifier {
                 if let capture, session.reviewing {
                     FeedbackReviewView(capture: capture, targets: capturedTargets, onSubmit: { draft in
                         await FeedbackSubmitter(queue: FeedbackQueue(directory: model.feedbackQueueRoot)).submit(draft, via: model.syncConnection)
-                    }, queueDirectory: model.feedbackQueueRoot, queueConnection: model.syncConnection, voice: session.reviewedVoice(), voiceURL: session.voiceURL, initialComment: session.transcript, initialStrokes: session.strokes, initialPoint: session.selectedPoint, initialTarget: session.selectedTarget, onClose: { session.reviewing = false; self.capture = nil })
+                    }, queueDirectory: model.feedbackQueueRoot, queueConnection: model.syncConnection, voice: capturedVoice, voiceURL: capturedVoiceURL, initialComment: capturedTranscript, initialStrokes: session.strokes, initialPoint: session.selectedPoint, initialTarget: session.selectedTarget, onClose: { session.reviewing = false; self.capture = nil })
                 }
             }
             .onChange(of: requested) { _, value in if value { requested = false; session.open() } }
             .onChange(of: session.reviewing) { _, value in
                 if value {
                     capturedTargets = targets
+                    capturedVoice = session.reviewedVoice(); capturedVoiceURL = session.voiceURL
+                    capturedTranscript = session.transcript
                     capture = FeedbackCapture.capture(model: model, browsing: browsing, settings: settings)
-                } else { capture = nil }
+                } else { capture = nil; capturedVoice = nil; capturedVoiceURL = nil; capturedTranscript = "" }
             }
             .onAppear {
                 detector.onShake = { session.open() }; detector.start()
