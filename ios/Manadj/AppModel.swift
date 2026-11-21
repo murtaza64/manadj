@@ -34,6 +34,7 @@ struct DeckViewState {
     @Published var loadTarget = 0
     @Published var crossfade = 0.0
     @Published var quantize = false
+    @Published var waveTouchLock = false
     @Published var waveSeconds = 12.0
     @Published var splitOutput = false
     @Published var cueMix = 0.0

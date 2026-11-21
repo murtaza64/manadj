@@ -216,25 +216,26 @@ struct WorkspaceView: View {
             knobColumn(0).frame(width: 48)
             channel(0).frame(width: 42)
             VStack(spacing: 4) {
-                HStack(spacing: 2) {
-                    Button("QUANT") { model.quantize.toggle(); model.set(MDJQuantize, 0, model.quantize ? 1 : 0) }.buttonStyle(PerformanceKeyStyle(active: model.quantize)).feedbackTarget("Quantize")
-                    Button { feedback.contextual = feedback.contextual == "HEARD" ? "FX" : "HEARD" } label: { Image(systemName: "slider.horizontal.3").font(.system(size: 10)) }.buttonStyle(PerformanceKeyStyle(color: Ink.muted)).frame(width: 24).disabled(feedback.active).accessibilityLabel("Heard quantization settings")
-                    Button("XF") { xf.toggle(); if !xf { model.crossfade = 0; model.set(MDJCrossfade, 0, 0) } }.buttonStyle(PerformanceKeyStyle(active: xf))
-                }.frame(height: 36)
-                HStack(spacing: 2) {
-                    Button("SESSIONS") { notice = "Session replay is not implemented on iOS yet" }.buttonStyle(PerformanceKeyStyle(color: Ink.muted))
-                    Button { withAnimation { browsing = false; settings.toggle() } } label: { Image(systemName: "gearshape") }.buttonStyle(PerformanceKeyStyle(color: Ink.muted)).accessibilityLabel("Settings").feedbackTarget("Settings")
-                }.frame(height: 36)
+                HStack(spacing: 5) {
+                    HStack(spacing: 0) {
+                        Button("QUANT") { model.quantize.toggle(); model.set(MDJQuantize, 0, model.quantize ? 1 : 0) }.buttonStyle(PerformanceKeyStyle(active: model.quantize)).feedbackTarget("Quantize")
+                        Button { feedback.contextual = feedback.contextual == "HEARD" ? "FX" : "HEARD" } label: { Image(systemName: "slider.horizontal.3").font(.system(size: 10)) }.buttonStyle(PerformanceKeyStyle(color: Ink.muted)).frame(width: 44).disabled(feedback.active).accessibilityLabel("Heard quantization settings")
+                    }.overlay(Capsule().stroke(Ink.edge, lineWidth: 1))
+                    Button("XF") { xf.toggle(); if !xf { model.crossfade = 0; model.set(MDJCrossfade, 0, 0) } }.buttonStyle(PerformanceKeyStyle(active: xf)).frame(width: 44)
+                    Button { model.waveTouchLock.toggle() } label: { Image(systemName: model.waveTouchLock ? "lock.fill" : "lock.open") }.buttonStyle(PerformanceKeyStyle(active: model.waveTouchLock)).frame(width: 44)
+                        .accessibilityLabel("Lock playing waveform touch").accessibilityIdentifier("wave-touch-lock").accessibilityValue(model.waveTouchLock ? "Locked while playing" : "Unlocked")
+                }.frame(height: 44)
+                HStack(spacing: 4) {
+                    Button("FEEDBACK") { feedbackRequested = true }.buttonStyle(PerformanceKeyStyle(color: Ink.accent)).accessibilityIdentifier("feedback-open").accessibilityLabel("Feedback").feedbackTarget("Feedback button")
+                    Button("AUDIO") { feedback.contextual = feedback.contextual == "OUTPUT" ? "FX" : "OUTPUT" }.buttonStyle(PerformanceKeyStyle(color: Ink.accent)).disabled(feedback.active).accessibilityLabel("Audio output: " + outputDescription)
+                    Button { withAnimation { browsing = false; settings.toggle() } } label: { Image(systemName: "gearshape") }.buttonStyle(PerformanceKeyStyle(color: Ink.muted)).frame(width: 44).accessibilityLabel("Settings").feedbackTarget("Settings")
+                }.frame(height: 44)
                 recordingBar.frame(height: 44)
                 Spacer(minLength: 0)
                 if feedback.contextual == "FEEDBACK" { LiveFeedbackToolbar(session: feedback, model: model) }
                 else if feedback.contextual == "OUTPUT" { outputContext }
                 else if feedback.contextual == "HEARD" { heardContext }
                 else { fxCard }
-                HStack(spacing: 2) {
-                    feedbackButton
-                    Button { feedback.contextual = feedback.contextual == "OUTPUT" ? "FX" : "OUTPUT" } label: { Image(systemName: outputSymbol).frame(width: 30, height: 28) }.buttonStyle(.plain).foregroundStyle(Ink.accent).disabled(feedback.active).accessibilityLabel("Audio output: " + outputDescription)
-                }.frame(height: 28)
                 if xf { PerformanceFader(value: Binding(get: { (model.crossfade + 1) / 2 }, set: { model.crossfade = $0 * 2 - 1; model.set(MDJCrossfade, 0, model.crossfade) }), color: Ink.accent, vertical: false, label: "Crossfader").frame(height: 40).feedbackTarget("Crossfader") }
             }.padding(.horizontal, 3)
             channel(1).frame(width: 42)
@@ -259,13 +260,14 @@ struct WorkspaceView: View {
     }
     /// Recording belongs in the shared center panel, between channel faders.
     private var recordingBar: some View {
-        HStack(spacing: 2) {
+        HStack(spacing: 4) {
+            Button("SESSIONS") { notice = "Session replay is not implemented on iOS yet" }.buttonStyle(PerformanceKeyStyle(color: Ink.muted))
             Button { model.toggleRecording() } label: {
                 HStack(spacing: 4) {
                     Image(systemName: model.recording ? "stop.fill" : "record.circle")
-                    Text(model.recording ? "STOP" : "REC · WAV")
+                    Text(model.recording ? "STOP" : "REC")
                 }
-            }.buttonStyle(PerformanceKeyStyle(color: model.recording ? Ink.danger : Ink.text, active: model.recording))
+            }.buttonStyle(PerformanceKeyStyle(color: model.recording ? Ink.danger : Ink.text, active: model.recording)).frame(width: 70)
                 .accessibilityLabel(model.recording ? "Stop master recording" : "Record master")
             Button { saved = true } label: {
                 HStack(spacing: 3) { Image(systemName: "waveform.path"); Text("\(model.recordings.count)") }

@@ -74,6 +74,26 @@ final class WorkspaceUITests: XCTestCase {
         shot.name = "Synthetic full-audio file progress - not device transfer proof"; shot.lifetime = .keepAlways; add(shot)
     }
 
+    @MainActor func testPlayingWaveTouchLockPreservesTransportAndPausedSeek() {
+        defer { captureFailure() }
+        let app = XCUIApplication(); app.launchArguments = ["--performance-ui-fixture"]; app.launch()
+        let play = app.buttons["A play pause"]; XCTAssertTrue(play.waitForExistence(timeout: 20)); waitForReadyTransport(play, app: app)
+        let lock = app.buttons["wave-touch-lock"]; XCTAssertTrue(lock.exists); lock.tap()
+        XCTAssertEqual(lock.value as? String, "Locked while playing")
+        play.tap()
+        let wave = app.otherElements["deck-0-detail-wave"]
+        let playing = NSPredicate(format: "value BEGINSWITH 'playing'")
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: playing, object: wave)], timeout: 5), .completed)
+        let from = wave.coordinate(withNormalizedOffset: CGVector(dx: 0.7, dy: 0.5))
+        from.press(forDuration: 0.1, thenDragTo: from.withOffset(CGVector(dx: -90, dy: 0)), withVelocity: .slow, thenHoldForDuration: 0.2)
+        XCTAssertTrue((wave.value as? String ?? "").hasPrefix("playing"), "Locked playing drag must not pause transport")
+        play.tap()
+        let before = wave.value as? String ?? ""
+        from.press(forDuration: 0.1, thenDragTo: from.withOffset(CGVector(dx: -90, dy: 0)), withVelocity: .slow, thenHoldForDuration: 0.1)
+        let changed = NSPredicate(format: "value != %@", before)
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: changed, object: wave)], timeout: 5), .completed, "Paused drag stays available")
+        let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Compact labeled center controls with playing-only waveform lock"; shot.lifetime = .keepAlways; add(shot)
+    }
     @MainActor func testStandardWorkspaceSettingsAndPitch() {
         defer { captureFailure() }
         let app = XCUIApplication(); app.launchArguments = ["--performance-ui-fixture"]; app.launch()

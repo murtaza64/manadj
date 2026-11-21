@@ -30,6 +30,7 @@ struct PerformanceWave: UIViewRepresentable {
         view.vertical = vertical
         view.overview = overview
         view.index = index
+        view.lockWhilePlaying = model.waveTouchLock
         view.spanSeconds = model.waveSeconds
         view.zoom = { [weak model] seconds in model?.waveSeconds = seconds }
         view.playback = { [weak model] playing in model?.set(playing ? MDJPlay : MDJPause, index, 0) }
@@ -105,6 +106,8 @@ struct PerformanceWave: UIViewRepresentable {
     }
     private var link: CADisplayLink?
     private var proxy: DisplayProxy?
+    var lockWhilePlaying = false
+    private var blockedPan = false
     var spanSeconds = 12.0
     private var pinchWindow = 12.0
     private var panPosition = 0.0
@@ -163,6 +166,13 @@ struct PerformanceWave: UIViewRepresentable {
     }
     @objc private func pan(_ gesture: UIPanGestureRecognizer) {
         guard duration > 0 else { return }
+        if gesture.state == .began {
+            blockedPan = !overview && lockWhilePlaying && state?().playing == true
+        }
+        if blockedPan {
+            if gesture.state == .ended || gesture.state == .cancelled || gesture.state == .failed { blockedPan = false }
+            return
+        }
         if gesture.state == .began {
             panPosition = state?().position ?? 0; scrubbing = true; tickHaptic.prepare()
             resume = state?().playing == true
