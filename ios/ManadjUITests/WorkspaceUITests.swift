@@ -41,7 +41,8 @@ final class WorkspaceUITests: XCTestCase {
             let shot = XCTAttachment(screenshot: app.screenshot())
             shot.name = metal ? "Metal opt-in full workspace two playing decks" : "Core Graphics full workspace two playing decks"
             shot.lifetime = .keepAlways; add(shot)
-            app.terminate()
+            // Keep the final app alive for deferred failure diagnostics. The
+            // next launch replaces the first iteration's app on its own.
         }
     }
 
