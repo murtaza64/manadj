@@ -20,6 +20,7 @@ final class FeedbackUITests: XCTestCase {
         XCTAssertTrue(app.textFields["Search title, artist, file"].waitForExistence(timeout: 5))
         XCTAssertTrue(toolbar.exists)
         app.buttons["BROWSE"].firstMatch.tap()
+        XCTAssertTrue((wave.value as? String ?? "").hasPrefix("playing"), "Stop narration must leave the looping deck playing")
         app.buttons["feedback-review-open"].tap()
         let review = app.otherElements["feedback-review"]; XCTAssertTrue(review.waitForExistence(timeout: 10))
         let card = app.otherElements["feedback-comment-card"]; XCTAssertTrue(card.exists)
@@ -37,7 +38,8 @@ final class FeedbackUITests: XCTestCase {
         app.buttons["Move feedback card"].tap(); capture("Feedback card moved to reveal lower controls", app: app)
         app.buttons["CLEAR TARGET"].tap(); XCTAssertFalse(target.exists)
         app.buttons["CANCEL"].tap(); XCTAssertTrue(open.waitForExistence(timeout: 5))
-        open.tap(); app.buttons["feedback-review-open"].tap(); app.buttons["feedback-open-outbox"].tap()
+        open.tap(); XCTAssertTrue((wave.value as? String ?? "").hasPrefix("playing"), "Stop narration must leave the looping deck playing")
+        app.buttons["feedback-review-open"].tap(); app.buttons["feedback-open-outbox"].tap()
         XCTAssertTrue(app.staticTexts["No saved reports."].waitForExistence(timeout: 5))
     }
     @MainActor func testReviewSheetListsContextAndQueuesWithoutPairing() {
@@ -68,6 +70,13 @@ final class FeedbackUITests: XCTestCase {
         let app = XCUIApplication(); app.launchArguments = ["--performance-ui-fixture"]; app.launch()
         let open = app.buttons["feedback-open"]; XCTAssertTrue(open.waitForExistence(timeout: 15)); open.tap()
         let rec = app.buttons["feedback-rec"]; XCTAssertEqual(rec.label, "REC", "Opening feedback must not record")
+        let play = app.buttons["A play pause"]
+        let ready = expectation(for: NSPredicate(format: "enabled == true AND hittable == true"), evaluatedWith: play)
+        wait(for: [ready], timeout: 20)
+        app.buttons["deck-0-loop-toggle"].tap(); play.tap()
+        let wave = app.otherElements["deck-0-detail-wave"]
+        let playing = expectation(for: NSPredicate(format: "value BEGINSWITH 'playing'"), evaluatedWith: wave)
+        wait(for: [playing], timeout: 5)
         rec.tap()
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
         let permission = springboard.alerts.firstMatch
@@ -77,6 +86,7 @@ final class FeedbackUITests: XCTestCase {
         }
         let stopped = expectation(for: NSPredicate(format: "label == 'STOP'"), evaluatedWith: rec)
         wait(for: [stopped], timeout: 10)
+        XCTAssertTrue((wave.value as? String ?? "").hasPrefix("playing"), "Explicit narration must not force a playing deck to pause")
         capture("Explicit Rec active with Stop reachable", app: app)
         app.buttons["BROWSE"].firstMatch.tap()
         XCTAssertTrue(app.textFields["Search title, artist, file"].waitForExistence(timeout: 5))
@@ -87,10 +97,13 @@ final class FeedbackUITests: XCTestCase {
             if permission.buttons["Allow"].exists { permission.buttons["Allow"].tap() }
             else if permission.buttons["OK"].exists { permission.buttons["OK"].tap() }
         }
+        XCTAssertTrue((wave.value as? String ?? "").hasPrefix("playing"), "Stop narration must leave the looping deck playing")
         app.buttons["feedback-review-open"].tap()
         let playback = app.buttons["feedback-play-voice"]; XCTAssertTrue(playback.waitForExistence(timeout: 10))
         capture("Stopped local raw voice is included in review before any send", app: app)
-        playback.tap(); app.buttons["feedback-remove-voice"].tap()
+        playback.tap()
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Voice could not play:'")).firstMatch.exists)
+        app.buttons["feedback-remove-voice"].tap()
         XCTAssertFalse(playback.exists)
         app.buttons["CANCEL"].tap()
     }

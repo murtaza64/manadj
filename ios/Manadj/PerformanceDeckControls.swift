@@ -57,7 +57,7 @@ struct PerformanceDeckControls: View {
                 HStack(spacing: 0) {
                     Button("÷2") { model.set(MDJLoopResize, index, 0, slot: 0) }.frame(maxWidth: 40)
                     Rectangle().fill(color.opacity(0.5)).frame(width: 1).padding(.vertical, 10)
-                    Button("⟲ LOOP \(Int(state.loopBeats))") { model.set(MDJLoopToggle, index, 0) }
+                    Button("⟲ LOOP \(Int(state.loopBeats))") { model.set(MDJLoopToggle, index, 0) }.accessibilityIdentifier("deck-\(index)-loop-toggle")
                     Rectangle().fill(color.opacity(0.5)).frame(width: 1).padding(.vertical, 10)
                     Button("2×") { model.set(MDJLoopResize, index, 0, slot: 1) }.frame(maxWidth: 40)
                 }.buttonStyle(PerformanceStripStyle(color: color)).background(state.loopActive ? color.opacity(0.15) : Color.clear).clipShape(Capsule()).overlay(Capsule().stroke(color.opacity(0.7), lineWidth: 1.5)).padding(3).frame(height: row).disabled(!state.ready || state.bpm <= 0)
