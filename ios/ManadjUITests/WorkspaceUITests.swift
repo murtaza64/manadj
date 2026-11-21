@@ -125,7 +125,7 @@ final class WorkspaceUITests: XCTestCase {
         let selected = app.buttons["Select Synthetic pulse A"]
         XCTAssertTrue(selected.waitForExistence(timeout: 5)); selected.tap()
         XCTAssertEqual(selected.value as? String, "Selected")
-        let preview = app.otherElements["Track overview waveform"].firstMatch
+        let preview = app.descendants(matching: .any)["library-row-preview-1"]
         XCTAssertTrue(preview.waitForExistence(timeout: 5))
         let waveRow = XCTAttachment(screenshot: app.screenshot()); waveRow.name = "Selected row with actual generated waveform"; waveRow.lifetime = .keepAlways; add(waveRow)
     }
