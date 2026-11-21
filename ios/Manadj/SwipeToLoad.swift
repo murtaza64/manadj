@@ -72,7 +72,7 @@ private struct DirectionLockedRow<Content: View>: UIViewControllerRepresentable 
             return true
         }
         func gestureRecognizerShouldBegin(_ recognizer: UIGestureRecognizer) -> Bool {
-            guard let pan = recognizer as? UIPanGestureRecognizer else { return false }
+            guard let pan = recognizer as? UIPanGestureRecognizer else { return true }
             let t = pan.translation(in: pan.view)
             return abs(t.x) > 3 && abs(t.x) > abs(t.y) * 1.5
         }
