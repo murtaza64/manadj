@@ -122,7 +122,7 @@ struct LiveFeedbackToolbar: View {
             }.frame(height: 28)
             if let message = session.message { Text(message).font(Ink.font(8)).foregroundStyle(Ink.warning).lineLimit(3) }
         }.padding(3).background(Ink.accent.opacity(0.06)).overlay(RoundedRectangle(cornerRadius: 8).stroke(Ink.accent.opacity(0.5)))
-            .accessibilityIdentifier("feedback-live-toolbar")
+            .accessibilityElement(children: .contain).accessibilityIdentifier("feedback-live-toolbar")
     }
 }
 

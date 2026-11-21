@@ -213,7 +213,7 @@ struct FeedbackReviewView: View {
                 .overlay(RoundedRectangle(cornerRadius: 18).stroke(Ink.accent.opacity(0.6), lineWidth: 1))
                 .shadow(color: .black.opacity(0.5), radius: 16, y: 6)
                 .padding(.vertical, 10)
-                .accessibilityIdentifier("feedback-comment-card")
+                .accessibilityElement(children: .contain).accessibilityIdentifier("feedback-comment-card")
             }
         }
         .confirmationDialog("Send this feedback?", isPresented: $confirming, titleVisibility: .visible) {
