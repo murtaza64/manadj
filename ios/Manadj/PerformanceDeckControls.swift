@@ -33,7 +33,8 @@ struct PerformanceDeckControls: View {
     }
     var body: some View {
         GeometryReader { geometry in
-            let padHeight: CGFloat = compact ? 80 : 104
+            let padSide = floor(geometry.size.width / 4)
+            let padHeight = padSide * 2
             let row = max(CGFloat(22), (geometry.size.height - padHeight - 60) / 5)
             VStack(spacing: 4) {
                 HStack(spacing: 0) {
@@ -48,11 +49,11 @@ struct PerformanceDeckControls: View {
                         HStack(spacing: 0) {
                             ForEach(0..<4) { c in
                                 let slot = r * 4 + c
-                                hotCuePad(slot)
+                                hotCuePad(slot).frame(width: padSide, height: padSide)
                             }
                         }
                     }
-                }.frame(height: compact ? 80 : 104)
+                }.frame(height: padHeight)
                 HStack(spacing: 0) {
                     Button("÷2") { model.set(MDJLoopResize, index, 0, slot: 0) }.frame(maxWidth: 40)
                     Rectangle().fill(color.opacity(0.5)).frame(width: 1).padding(.vertical, 10)
