@@ -76,7 +76,7 @@ struct PerformanceWave: UIViewRepresentable {
     /// clock falls back to the pre-gesture engine position for a few frames, so the
     /// wave visibly jumps back, then snaps forward again.
     fileprivate var seekHold: (target: Double, until: CFTimeInterval, transport: UInt64)?
-    private func beginSeekHold(_ target: Double) {
+    func beginSeekHold(_ target: Double) {
         seekHold = (target, CACurrentMediaTime() + 0.4, state?().transport ?? 0)
         // Paused decks get no display-link redraws; repaint once after the deadline.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { [weak self] in self?.setNeedsDisplay() }
