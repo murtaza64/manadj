@@ -400,3 +400,46 @@
   align-items: center;
   gap: var(--space-12);
 }
+
+/* Remote library mirror preview */
+.remote-mirror-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: var(--space-12);
+  width: 100%;
+}
+.remote-mirror-stat {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+.remote-mirror-stat strong {
+  font-size: var(--font-large);
+  color: var(--accent);
+}
+.remote-mirror-stat span {
+  font-size: var(--font-small);
+  color: var(--subtext0);
+}
+.remote-mirror-problems {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  max-height: 240px;
+  overflow-y: auto;
+  width: 100%;
+  font-size: var(--font-small);
+}
+.remote-mirror-problems li {
+  display: flex;
+  flex-direction: column;
+  border-bottom: 1px solid var(--surface1);
+  padding-bottom: var(--space-4);
+}
+.remote-mirror-problems small {
+  color: var(--subtext0);
+  word-break: break-all;
+}

@@ -11,9 +11,12 @@ struct FeedbackReporter: ViewModifier {
     /// Simulator coverage (--feedback-ui-fixture): the simulator has no
     /// accelerometer, so the fixture presents the sheet directly.
     let autoPresent: Bool
+    @Binding var requested: Bool
+    let targets: [FeedbackTarget]
 
     @State private var detector = ShakeDetector()
     @State private var capture: FeedbackCapture?
+    @State private var capturedTargets: [FeedbackTarget] = []
     @State private var reviewing = false
 
     func body(content: Content) -> some View {
@@ -22,6 +25,7 @@ struct FeedbackReporter: ViewModifier {
                 if let capture {
                     FeedbackReviewView(
                         capture: capture,
+                        targets: capturedTargets,
                         onSubmit: { draft in
                             let submitter = FeedbackSubmitter(
                                 queue: FeedbackQueue(directory: model.feedbackQueueRoot))
@@ -30,6 +34,9 @@ struct FeedbackReporter: ViewModifier {
                         queueDirectory: model.feedbackQueueRoot,
                         queueConnection: model.syncConnection)
                 }
+            }
+            .onChange(of: requested) { _, value in
+                if value { requested = false; present() }
             }
             .onAppear {
                 detector.onShake = { present() }
@@ -49,13 +56,14 @@ struct FeedbackReporter: ViewModifier {
     @MainActor
     private func present() {
         guard !reviewing else { return } // a second shake must not recapture mid-review
+        capturedTargets = targets
         capture = FeedbackCapture.capture(model: model, browsing: browsing, settings: settings)
         reviewing = true
     }
 }
 
 extension View {
-    func feedbackReporter(model: AppModel, browsing: Bool, settings: Bool, autoPresent: Bool = false) -> some View {
-        modifier(FeedbackReporter(model: model, browsing: browsing, settings: settings, autoPresent: autoPresent))
+    func feedbackReporter(model: AppModel, browsing: Bool, settings: Bool, requested: Binding<Bool>, targets: [FeedbackTarget], autoPresent: Bool = false) -> some View {
+        modifier(FeedbackReporter(model: model, browsing: browsing, settings: settings, autoPresent: autoPresent, requested: requested, targets: targets))
     }
 }

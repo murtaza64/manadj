@@ -6,6 +6,7 @@ import ManadjCore
 @MainActor
 struct FeedbackReviewView: View {
     let capture: FeedbackCapture
+    let targets: [FeedbackTarget]
     let onSubmit: @MainActor (FeedbackDraft) async -> FeedbackOutcome
     let queueDirectory: URL?
     let queueConnection: DesktopConnection?
@@ -16,6 +17,9 @@ struct FeedbackReviewView: View {
     @State private var title = ""
     @State private var details = ""
     @State private var strokes: [FeedbackStroke] = []
+    @State private var picking = false
+    @State private var selectedPoint: CGPoint?
+    @State private var selectedTarget: String?
     @State private var includeScreenshot: Bool
     @State private var sections: [FeedbackSection]
     @State private var submitting = false
@@ -24,11 +28,13 @@ struct FeedbackReviewView: View {
 
     init(
         capture: FeedbackCapture,
+        targets: [FeedbackTarget] = [],
         onSubmit: @escaping @MainActor (FeedbackDraft) async -> FeedbackOutcome,
         queueDirectory: URL? = nil,
         queueConnection: DesktopConnection? = nil
     ) {
         self.capture = capture
+        self.targets = targets
         self.onSubmit = onSubmit
         self.queueDirectory = queueDirectory
         self.queueConnection = queueConnection
@@ -64,7 +70,7 @@ struct FeedbackReviewView: View {
         var warnings = capture.warnings
         var screenshot: String?
         if includeScreenshot, let image = capture.screenshot {
-            let flattened = FeedbackCanvasView.flatten(image, strokes: strokes)
+            let flattened = FeedbackCanvasView.flatten(image, strokes: strokes, selection: selectedPoint)
             let dataURL = flattened.pngData().map {
                 FeedbackLimits.pngPrefix + $0.base64EncodedString()
             }
@@ -75,8 +81,21 @@ struct FeedbackReviewView: View {
             }
         }
         return FeedbackDraft(
-            kind: kind, title: title, description: details,
+            kind: kind, title: title, description: details + targetDescription,
             snapshot: snapshot, screenshot: screenshot, captureWarnings: warnings)
+    }
+
+    private var targetDescription: String {
+        guard let point = selectedPoint else { return "" }
+        return "\n\nSelected: \(selectedTarget ?? "Screenshot area") at \(Int(point.x * 100))%, \(Int(point.y * 100))% of captured screen."
+    }
+    private func pick(_ point: CGPoint) {
+        selectedPoint = point
+        let viewport = capture.snapshot["viewport"] as? [String: Any]
+        let width = (viewport?["width"] as? NSNumber)?.doubleValue ?? 1
+        let height = (viewport?["height"] as? NSNumber)?.doubleValue ?? 1
+        selectedTarget = FeedbackTarget.label(at: point, viewport: CGSize(width: width, height: height), in: targets)
+        picking = false
     }
 
     var body: some View {
@@ -108,9 +127,22 @@ struct FeedbackReviewView: View {
                         .accessibilityIdentifier("feedback-details")
                         .focused($editing)
 
+                    Text("Type here, or use the microphone on the iOS keyboard to dictate. Nothing sends until you review and file.")
+                        .font(Ink.font(10)).foregroundStyle(Ink.muted)
                     if let image = capture.screenshot, includeScreenshot {
-                        SectionLabel(title: "DRAW ON THE SCREENSHOT")
-                        FeedbackCanvasView(image: image, strokes: $strokes)
+                        SectionLabel(title: "MARK THE SCREENSHOT")
+                        HStack {
+                            Button("PICK ELEMENT") { editing = false; picking = true }
+                                .buttonStyle(FlatButtonStyle(color: Ink.accent)).accessibilityIdentifier("feedback-pick-element")
+                            Text("Tap to select, or draw with your finger.").font(Ink.font(10)).foregroundStyle(Ink.muted)
+                        }
+                        if selectedPoint != nil {
+                            HStack {
+                                Text(targetDescription.trimmingCharacters(in: .whitespacesAndNewlines)).font(Ink.font(10)).accessibilityIdentifier("feedback-selected-target")
+                                Button("CLEAR TARGET") { selectedPoint = nil; selectedTarget = nil }.font(Ink.font(10))
+                            }
+                        }
+                        FeedbackCanvasView(image: image, strokes: $strokes, selection: selectedPoint)
                             .frame(maxHeight: 320)
                             .overlay(Rectangle().stroke(Ink.edge, lineWidth: 1))
                         HStack(spacing: 8) {
@@ -121,7 +153,7 @@ struct FeedbackReviewView: View {
                                 .buttonStyle(FlatButtonStyle(color: Ink.muted))
                                 .disabled(strokes.isEmpty)
                             Spacer()
-                            Button("REMOVE IMAGE") { includeScreenshot = false }
+                            Button("REMOVE IMAGE") { includeScreenshot = false; selectedPoint = nil; selectedTarget = nil }
                                 .buttonStyle(FlatButtonStyle(color: Ink.danger))
                         }
                     }
@@ -197,6 +229,22 @@ struct FeedbackReviewView: View {
                     Button(outcome == nil ? "CANCEL" : "DONE") { dismiss() }.disabled(submitting)
                         .font(Ink.font(12, bold: true)).foregroundStyle(Ink.accent)
                 }
+            }
+        }
+        .fullScreenCover(isPresented: $picking) {
+            if let image = capture.screenshot {
+                NavigationStack {
+                    VStack(spacing: 8) {
+                        Text("Tap a control on this captured screen. It will not press the real control.")
+                            .font(Ink.font(12)).foregroundStyle(Ink.muted).padding(.horizontal)
+                        FeedbackCanvasView(image: image, strokes: .constant([]), picking: true, onPick: pick)
+                            .padding(.horizontal, 8)
+                        Text("Known controls get a name. Other points stay Screenshot area.")
+                            .font(Ink.font(10)).foregroundStyle(Ink.muted).padding(.bottom)
+                    }.frame(maxWidth: .infinity, maxHeight: .infinity).background(Ink.base)
+                        .navigationTitle("PICK ELEMENT").navigationBarTitleDisplayMode(.inline)
+                        .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("CANCEL") { picking = false } } }
+                }.preferredColorScheme(.dark).accessibilityIdentifier("feedback-target-picker")
             }
         }
         .sheet(isPresented: $showOutbox) {

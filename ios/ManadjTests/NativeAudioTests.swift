@@ -7,6 +7,49 @@ import CEngine
 @testable import Manadj
 
 final class NativeAudioTests: XCTestCase {
+    func testFeedbackTargetMatchesSmallestRegisteredControlAndNeverGuesses() {
+        let targets = [FeedbackTarget(label: "Deck A", frame: CGRect(x: 0, y: 0, width: 200, height: 400)),
+                       FeedbackTarget(label: "Deck A cue", frame: CGRect(x: 20, y: 200, width: 60, height: 44))]
+        let viewport = CGSize(width: 400, height: 800)
+        XCTAssertEqual(FeedbackTarget.label(at: CGPoint(x: 0.1, y: 0.275), viewport: viewport, in: targets), "Deck A cue")
+        XCTAssertNil(FeedbackTarget.label(at: CGPoint(x: 0.8, y: 0.8), viewport: viewport, in: targets))
+        XCTAssertNil(FeedbackTarget.label(at: CGPoint(x: -0.1, y: 0.1), viewport: viewport, in: targets))
+        XCTAssertNil(FeedbackTarget.label(at: .zero, viewport: .zero, in: targets))
+    }
+
+    @MainActor func testFeedbackTargetMarkerIsFlattenedIntoReviewedImage() throws {
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 200, height: 400)).image { context in
+            UIColor.black.setFill(); context.fill(CGRect(x: 0, y: 0, width: 200, height: 400))
+        }
+        let plain = FeedbackCanvasView.flatten(image, strokes: [])
+        let marked = FeedbackCanvasView.flatten(image, strokes: [], selection: CGPoint(x: 0.5, y: 0.5))
+        XCTAssertNotEqual(plain.pngData(), marked.pngData())
+        XCTAssertEqual(marked.size, image.size)
+    }
+
+    @MainActor func testPreviewPlayTakeoverSurvivesCueRelease() async throws {
+        let audio = try NativeAudio()
+        let url = try XCTUnwrap(Bundle.main.url(forResource: "synthetic-A", withExtension: "wav"))
+        _ = try await audio.load(url, deck: 0)
+        for hotcue in [false, true] {
+            audio.send(MDJPause); audio.send(MDJSeek, value: 0)
+            if hotcue { audio.send(MDJHotCueSetAt, value: 0, slot: 0) }
+            try await Task.sleep(for: .milliseconds(80))
+            audio.send(hotcue ? MDJHotCueDown : MDJCueDown, slot: 0)
+            try await Task.sleep(for: .milliseconds(80))
+            XCTAssertTrue(audio.state(0).preview)
+            audio.send(MDJPlay)
+            audio.send(hotcue ? MDJHotCueUp : MDJCueUp, slot: 0)
+            try await Task.sleep(for: .milliseconds(80))
+            XCTAssertTrue(audio.state(0).playing); XCTAssertFalse(audio.state(0).preview)
+        }
+        audio.send(MDJPause); audio.send(MDJSeek, value: 0)
+        try await Task.sleep(for: .milliseconds(80))
+        audio.send(MDJCueDown); try await Task.sleep(for: .milliseconds(80))
+        audio.send(MDJCueUp); try await Task.sleep(for: .milliseconds(80))
+        XCTAssertFalse(audio.state(0).playing); XCTAssertFalse(audio.state(0).preview)
+    }
+
     @MainActor func testLoadedDeckReadsOfflineFullWaveformCache() async throws {
         let root = try XCTUnwrap(AppModel.makePerformanceUIFixture())
         defer { try? FileManager.default.removeItem(at: root) }
@@ -289,10 +332,23 @@ final class NativeAudioTests: XCTestCase {
         model.startLocalLive()
         defer { model.stopLocalLive() }
         var heardPlaying = false
-        for _ in 0..<250 {
+        // The fixture only plays for three seconds in each ten-second cycle.
+        // Download/decode plus an overloaded simulator can miss the first window.
+        // Keep the behavior assertion, but allow three real fixture cycles rather
+        // than assuming readiness and a playing anchor fit inside the first one.
+        let readinessStarted = ProcessInfo.processInfo.systemUptime
+        let readinessDeadline = readinessStarted + 30
+        var previousStatus = ""
+        while ProcessInfo.processInfo.systemUptime < readinessDeadline {
+            if model.liveStatus != previousStatus {
+                previousStatus = model.liveStatus
+                print("SYNTHETIC_LIVE_TRANSITION elapsed=\(ProcessInfo.processInfo.systemUptime - readinessStarted) status=\(previousStatus) roundTrip=\(model.liveRoundTrip) audioReady=\(model.audio?.state(0).ready ?? false)")
+            }
             if model.audio?.state(0).playing == true { heardPlaying = true; break }
             try await Task.sleep(for: .milliseconds(40))
         }
+        let readyState = model.audio?.state(0)
+        print("SYNTHETIC_LIVE_READINESS elapsed=\(ProcessInfo.processInfo.systemUptime - readinessStarted) heardPlaying=\(heardPlaying) ready=\(readyState?.ready ?? false) decodedSeconds=\(readyState?.decodedSeconds ?? 0) status=\(model.liveStatus)")
         XCTAssertTrue(heardPlaying, model.liveStatus + " " + (model.error ?? ""))
         XCTAssertEqual(model.decks[0].title, "Synthetic LAN Tone")
         XCTAssertGreaterThan(model.liveRoundTrip, 0)

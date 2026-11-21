@@ -538,6 +538,27 @@ it('omits dictation controls when the runtime lacks speech recognition', async (
   expect(document.body.textContent).not.toContain('browser speech service');
 });
 
+it('names speech-service failures inline instead of silently resetting', async () => {
+  let recognition!: { onerror: ((event: { error?: string }) => void) | null; onend: (() => void) | null };
+  class FakeRecognition {
+    continuous = false; interimResults = false; lang = '';
+    onresult = null;
+    onerror: ((event: { error?: string }) => void) | null = null;
+    onend: (() => void) | null = null;
+    constructor() { recognition = this; }
+    start() {}
+    stop() { this.onend?.(); }
+  }
+  vi.stubGlobal('SpeechRecognition', FakeRecognition);
+  await openForm(); await fill();
+  const dictate = [...document.querySelectorAll('button')].find((b) => b.textContent === 'Dictate')!;
+  await act(async () => dictate.click());
+  expect([...document.querySelectorAll('button')].some((b) => b.textContent === 'Stop dictation')).toBe(true);
+  await act(async () => recognition.onerror?.({ error: 'network' }));
+  expect(document.querySelector('[role=alert]')?.textContent).toContain('browser speech service could not be reached');
+  expect([...document.querySelectorAll('button')].some((b) => b.textContent === 'Stop dictation')).toBe(false);
+});
+
 
 it('stops recognition before in-flight filing and ignores late transcripts', async () => {
   let recognition!: { onresult: ((event: unknown) => void) | null; stop: () => void; onend: (() => void) | null };

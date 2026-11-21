@@ -383,6 +383,27 @@ async function exchangeRequest<T>(path: string, body?: unknown): Promise<T> {
   return response.json();
 }
 
+export interface RemoteMirrorProblem {
+  track_id: number;
+  reason: string;
+}
+
+export interface RemoteMirrorPreview {
+  status: 'ok' | 'no_tracks_root';
+  computed_at: string;
+  duration_ms: number;
+  roots: string[];
+  tracks: number;
+  files: number;
+  upload_bytes: number;
+  unchanged: number;
+  changed: number;
+  missing: RemoteMirrorProblem[];
+  missing_total: number;
+  collisions: string[];
+  collision_total: number;
+}
+
 export const api = {
   exchange: {
     status: () => exchangeRequest<ExchangeStatus>('transport'),
@@ -2211,6 +2232,14 @@ export const api = {
     revealLogs: async (): Promise<void> => {
       const res = await fetch(`${API_BASE}/config/reveal-logs`, { method: 'POST' });
       if (!res.ok) throw new Error(`Failed to reveal logs (${res.status})`);
+    },
+  },
+
+  remoteMirror: {
+    preview: async (): Promise<RemoteMirrorPreview> => {
+      const res = await fetch(`${API_BASE}/remote-mirror/preview`);
+      if (!res.ok) throw new Error(`Failed to run the mirror preview (${res.status})`);
+      return res.json();
     },
   },
 };

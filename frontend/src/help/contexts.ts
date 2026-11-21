@@ -3,6 +3,7 @@ import type { HelpTarget } from './routes';
 
 export const SETTINGS_HELP: Record<string, HelpTarget> = {
   library: { topic: 'curate', anchor: 'importing' },
+  'remote-library': { topic: 'curate', anchor: 'remote-preview' },
   'phone-sync': { topic: 'curate', anchor: 'importing' },
   'session-exchange': { topic: 'capture', anchor: 'exchange' },
   filters: { topic: 'beat-fx', anchor: 'filters' },

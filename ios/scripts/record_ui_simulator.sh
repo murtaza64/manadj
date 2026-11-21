@@ -11,7 +11,7 @@ for ((attempt=0; attempt<480; attempt++)); do
   while read -r udid; do
     [[ -z "$udid" ]] && continue
     processes=$(xcrun simctl spawn "$udid" launchctl list 2>&1)
-    if grep -q 'dev.manadj.ios.ManadjUITests' <<<"$processes"; then
+    if grep -q 'earth.murtaza.manadj.ios.ManadjUITests' <<<"$processes"; then
       printf 'UI test runner device: %s\n' "$udid" > "${OUT%.mp4}-device.txt"
       printf '%s\n' "$processes" >> "${OUT%.mp4}-device.txt"
       xcrun simctl io "$udid" recordVideo --codec=h264 "$OUT" &
