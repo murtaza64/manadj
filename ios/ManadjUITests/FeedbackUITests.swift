@@ -21,9 +21,14 @@ final class FeedbackUITests: XCTestCase {
         for _ in 0..<5 { if pick.isHittable { break }; app.swipeUp() }
         XCTAssertTrue(pick.isHittable)
         pick.tap()
-        let canvas = app.descendants(matching: .any).matching(identifier: "feedback-canvas").firstMatch
-        XCTAssertTrue(canvas.exists)
-        canvas.coordinate(withNormalizedOffset: point).tap()
+        let picker = app.otherElements["feedback-target-picker"]
+        XCTAssertTrue(picker.waitForExistence(timeout: 5))
+        let pickerCanvas = picker.descendants(matching: .any).matching(identifier: "feedback-canvas").firstMatch
+        XCTAssertTrue(pickerCanvas.exists)
+        let pickShot = XCTAttachment(screenshot: app.screenshot())
+        pickShot.name = "Full screen frozen screenshot target picker"; pickShot.lifetime = .keepAlways; add(pickShot)
+        pickerCanvas.coordinate(withNormalizedOffset: point).tap()
+        let canvas = app.otherElements["feedback-review"].descendants(matching: .any).matching(identifier: "feedback-canvas").firstMatch
         let target = app.staticTexts["feedback-selected-target"]
         XCTAssertTrue(target.waitForExistence(timeout: 5))
         XCTAssertTrue(target.label.contains("Deck A track info"), target.label)

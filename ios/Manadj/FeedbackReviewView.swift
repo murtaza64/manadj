@@ -130,9 +130,9 @@ struct FeedbackReviewView: View {
                     Text("Type here, or use the microphone on the iOS keyboard to dictate. Nothing sends until you review and file.")
                         .font(Ink.font(10)).foregroundStyle(Ink.muted)
                     if let image = capture.screenshot, includeScreenshot {
-                        SectionLabel(title: picking ? "TAP THE ELEMENT OR AREA" : "MARK THE SCREENSHOT")
+                        SectionLabel(title: "MARK THE SCREENSHOT")
                         HStack {
-                            Button(picking ? "CANCEL PICK" : "PICK ELEMENT") { editing = false; picking.toggle() }
+                            Button("PICK ELEMENT") { editing = false; picking = true }
                                 .buttonStyle(FlatButtonStyle(color: Ink.accent)).accessibilityIdentifier("feedback-pick-element")
                             Text("Tap to select, or draw with your finger.").font(Ink.font(10)).foregroundStyle(Ink.muted)
                         }
@@ -142,7 +142,7 @@ struct FeedbackReviewView: View {
                                 Button("CLEAR TARGET") { selectedPoint = nil; selectedTarget = nil }.font(Ink.font(10))
                             }
                         }
-                        FeedbackCanvasView(image: image, strokes: $strokes, picking: picking, selection: selectedPoint, onPick: pick)
+                        FeedbackCanvasView(image: image, strokes: $strokes, selection: selectedPoint)
                             .frame(maxHeight: 320)
                             .overlay(Rectangle().stroke(Ink.edge, lineWidth: 1))
                         HStack(spacing: 8) {
@@ -229,6 +229,22 @@ struct FeedbackReviewView: View {
                     Button(outcome == nil ? "CANCEL" : "DONE") { dismiss() }.disabled(submitting)
                         .font(Ink.font(12, bold: true)).foregroundStyle(Ink.accent)
                 }
+            }
+        }
+        .fullScreenCover(isPresented: $picking) {
+            if let image = capture.screenshot {
+                NavigationStack {
+                    VStack(spacing: 8) {
+                        Text("Tap a control on this captured screen. It will not press the real control.")
+                            .font(Ink.font(12)).foregroundStyle(Ink.muted).padding(.horizontal)
+                        FeedbackCanvasView(image: image, strokes: .constant([]), picking: true, onPick: pick)
+                            .padding(.horizontal, 8)
+                        Text("Known controls get a name. Other points stay Screenshot area.")
+                            .font(Ink.font(10)).foregroundStyle(Ink.muted).padding(.bottom)
+                    }.frame(maxWidth: .infinity, maxHeight: .infinity).background(Ink.base)
+                        .navigationTitle("PICK ELEMENT").navigationBarTitleDisplayMode(.inline)
+                        .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("CANCEL") { picking = false } } }
+                }.preferredColorScheme(.dark).accessibilityIdentifier("feedback-target-picker")
             }
         }
         .sheet(isPresented: $showOutbox) {
