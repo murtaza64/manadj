@@ -32,8 +32,6 @@ struct WorkspaceView: View {
     @State private var outputRoute = AVAudioSession.sharedInstance().currentRoute
     @State private var browsing = false
     @State private var browserDrag: CGFloat = 0
-    @State private var browserPeakVelocity: CGFloat = 0
-    @State private var browserPeakTime: TimeInterval = 0
     @State private var feedbackRequested = false
     @State private var feedbackTargets: [FeedbackTarget] = []
     @State private var keyboardOpen = false
@@ -102,7 +100,15 @@ struct WorkspaceView: View {
                     if browsing {
                         VStack(spacing: 0) {
                             if !keyboardOpen { Capsule().fill(Ink.muted.opacity(0.7)).frame(width: 40, height: 4).frame(maxWidth: .infinity).frame(height: 24).contentShape(Rectangle())
-                                .gesture(browserDrawerDrag(height: geometry.size.height))
+                                .overlay {
+                                    BrowserHandlePan(changed: { distance in
+                                        var transaction = Transaction(); transaction.disablesAnimations = true
+                                        withTransaction(transaction) { browserDrag = distance }
+                                    }, ended: { distance, velocity in
+                                        let close = shouldCloseBrowser(distance: distance, velocity: velocity)
+                                        withAnimation(.spring(response: 0.3, dampingFraction: 0.9)) { browsing = !close; browserDrag = 0 }
+                                    })
+                                }
                                 .accessibilityIdentifier("browser-drag-handle")
                                 .accessibilityLabel("Close browser drag handle") }
                             if feedback.active { LiveFeedbackToolbar(session: feedback, model: model).frame(maxWidth: 300) }
@@ -121,35 +127,12 @@ struct WorkspaceView: View {
                 }.clipped()
             }.frame(height: geometry.size.height, alignment: .top).padding(.horizontal, 8)
             .animation(.spring(response: 0.3, dampingFraction: 0.9), value: browsing)
-            .onChange(of: browsing) { _, _ in browserDrag = 0; browserPeakVelocity = 0 }
+            .onChange(of: browsing) { _, _ in browserDrag = 0 }
             .animation(.easeOut(duration: 0.24), value: settings)
         }
     }
     private func shouldCloseBrowser(distance: CGFloat, velocity: CGFloat) -> Bool {
         distance > 180 || (distance > 60 && velocity > 700)
-    }
-    private func browserDrawerDrag(height: CGFloat) -> some Gesture {
-        DragGesture(minimumDistance: 6, coordinateSpace: .global)
-            .onChanged { value in
-                // Direct manipulation has no easing. The entire browser,
-                // including its real scrolling list, travels under the finger.
-                var transaction = Transaction(); transaction.disablesAnimations = true
-                withTransaction(transaction) {
-                    browserDrag = max(0, value.translation.height)
-                    if value.velocity.height > 700 {
-                        browserPeakVelocity = value.velocity.height
-                        browserPeakTime = ProcessInfo.processInfo.systemUptime
-                    }
-                }
-            }
-            .onEnded { value in
-                let recentVelocity = ProcessInfo.processInfo.systemUptime - browserPeakTime < 0.15 ? browserPeakVelocity : 0
-                let close = shouldCloseBrowser(distance: browserDrag, velocity: max(value.velocity.height, recentVelocity))
-                browserPeakVelocity = 0
-                withAnimation(.spring(response: 0.3, dampingFraction: 0.9)) {
-                    browsing = !close; browserDrag = 0
-                }
-            }
     }
     private var feedbackButton: some View {
         Button { feedbackRequested = true } label: {

@@ -181,3 +181,36 @@ struct BrowserTopPull: UIViewRepresentable {
         }
     }
 }
+
+/// The handle uses the same UIKit pan velocity semantics as top-list handoff.
+/// Its own transparent touch surface avoids SwiftUI release-velocity resampling.
+struct BrowserHandlePan: UIViewRepresentable {
+    var changed: (CGFloat) -> Void
+    var ended: (CGFloat, CGFloat) -> Void
+    func makeUIView(context: Context) -> Surface { Surface() }
+    func updateUIView(_ view: Surface, context: Context) { view.changed = changed; view.ended = ended }
+    final class Surface: UIView, UIGestureRecognizerDelegate {
+        var changed: (CGFloat) -> Void = { _ in }
+        var ended: (CGFloat, CGFloat) -> Void = { _, _ in }
+        override init(frame: CGRect) {
+            super.init(frame: frame)
+            let pan = UIPanGestureRecognizer(target: self, action: #selector(move(_:)))
+            pan.maximumNumberOfTouches = 1; pan.delegate = self; addGestureRecognizer(pan)
+        }
+        required init?(coder: NSCoder) { fatalError("init(coder:) unavailable") }
+        override func gestureRecognizerShouldBegin(_ gesture: UIGestureRecognizer) -> Bool {
+            guard let pan = gesture as? UIPanGestureRecognizer else { return false }
+            let v = pan.velocity(in: window)
+            return v.y > 0 && v.y > abs(v.x) * 1.5
+        }
+        @objc private func move(_ pan: UIPanGestureRecognizer) {
+            let distance = max(0, pan.translation(in: window).y)
+            switch pan.state {
+            case .began, .changed: changed(distance)
+            case .ended: ended(distance, pan.velocity(in: window).y)
+            case .cancelled, .failed: ended(0, 0)
+            default: break
+            }
+        }
+    }
+}
