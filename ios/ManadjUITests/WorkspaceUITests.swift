@@ -392,6 +392,7 @@ final class WorkspaceUITests: XCTestCase {
         defer { captureFailure() }
         let app = XCUIApplication(); app.launchArguments = ["--library-ui-fixture", "--browser-scroll-fixture"]; app.launch()
         for fromList in [false, true] {
+            if app.buttons["browser-close"].exists { app.buttons["browser-close"].tap() }
             app.buttons["browser-open"].tap()
             let list = app.scrollViews["library-track-list"]
             XCTAssertTrue(list.waitForExistence(timeout: 10))

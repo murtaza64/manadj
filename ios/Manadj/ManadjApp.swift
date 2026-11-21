@@ -123,6 +123,9 @@ struct WorkspaceView: View {
             .animation(.easeOut(duration: 0.24), value: settings)
         }
     }
+    private func shouldCloseBrowser(distance: CGFloat, velocity: CGFloat) -> Bool {
+        distance > 180 || (distance > 60 && velocity > 700)
+    }
     private func browserDrawerDrag(height: CGFloat) -> some Gesture {
         DragGesture(minimumDistance: 6, coordinateSpace: .global)
             .onChanged { value in
@@ -132,8 +135,7 @@ struct WorkspaceView: View {
                 withTransaction(transaction) { browserDrag = max(0, value.translation.height) }
             }
             .onEnded { value in
-                let close = browserDrag > min(180, height * 0.25)
-                    || (browserDrag > 60 && value.predictedEndTranslation.height > height * 0.5)
+                let close = shouldCloseBrowser(distance: browserDrag, velocity: value.velocity.height)
                 withAnimation(.spring(response: 0.3, dampingFraction: 0.9)) {
                     browsing = !close; browserDrag = 0
                 }
@@ -209,7 +211,7 @@ struct WorkspaceView: View {
             var transaction = Transaction(); transaction.disablesAnimations = true
             withTransaction(transaction) { browserDrag = distance }
         }, onDrawerRelease: { distance, velocity in
-            let close = distance > 180 || (distance > 60 && velocity > 700)
+            let close = shouldCloseBrowser(distance: distance, velocity: velocity)
             withAnimation(.spring(response: 0.3, dampingFraction: 0.9)) { browsing = !close; browserDrag = 0 }
         }, onLoad: { track in
             let accepted = model.load(track, deck: model.loadTarget)
