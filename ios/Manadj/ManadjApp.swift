@@ -232,7 +232,7 @@ struct WorkspaceView: View {
             }.frame(height: 32)
             HStack(spacing: 2) {
                 Button(["1/16", "1/8", "1/4", "1/2", "1", "2", "4", "8"][fxBeatIndex] + " BT") { fxBeatIndex = (fxBeatIndex + 1) % fxBeats.count; updateFX() }.buttonStyle(PerformanceKeyStyle(color: Ink.warning))
-                PerformanceKnob(label: "DEPTH", color: Ink.muted, value: $fxDepth, range: -1...1, neutral: 0).feedbackTarget("Deck \(Ink.deckName(index)) filter").frame(width: 34).onChange(of: fxDepth) { _, _ in updateFX() }
+                PerformanceKnob(label: "DEPTH", color: Ink.muted, value: $fxDepth, range: -1...1, neutral: 0).feedbackTarget("Beat FX depth").frame(width: 34).onChange(of: fxDepth) { _, _ in updateFX() }
                 Button(fx ? "ON" : "OFF") { fx.toggle(); updateFX() }.buttonStyle(PerformanceKeyStyle(color: Ink.warning, active: fx)).frame(width: 44)
             }.frame(height: 40)
         }.padding(3).background(Ink.warning.opacity(0.05)).overlay(RoundedRectangle(cornerRadius: 8).stroke(Ink.warning.opacity(0.4)))
