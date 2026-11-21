@@ -247,6 +247,12 @@ struct FeedbackReviewView: View {
                 Text("SAVED ON THIS IPHONE").font(Ink.font(14, bold: true)).foregroundStyle(Ink.warning)
                 Text(reason).font(Ink.font(11)).foregroundStyle(Ink.muted)
             case .rejected(let reason):
+                if let queueDirectory {
+                    Button("SAVE REVIEWED REPORT ON IPHONE") {
+                        player?.stop()
+                        self.outcome = FeedbackSubmitter(queue: FeedbackQueue(directory: queueDirectory)).saveReviewed(makeDraft(), origin: queueConnection?.baseURL.absoluteString)
+                    }.font(Ink.font(10)).accessibilityIdentifier("feedback-save-rejected")
+                }
                 Button("BACK TO EDITING") { self.outcome = nil }
                     .buttonStyle(FlatButtonStyle(color: Ink.accent))
                 Text("NOT FILED").font(Ink.font(14, bold: true)).foregroundStyle(Ink.danger)

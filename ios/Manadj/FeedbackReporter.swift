@@ -51,10 +51,11 @@ import ManadjAudio
             try session.setCategory(.playAndRecord, mode: .default, options: options)
             try session.setActive(true)
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            if let voiceURL { try? FileManager.default.removeItem(at: voiceURL) }
+            let oldVoice = voiceURL
             let url = directory.appendingPathComponent("narration-" + UUID().uuidString + ".m4a")
             let recorder = try AVAudioRecorder(url: url, settings: [AVFormatIDKey: kAudioFormatMPEG4AAC, AVSampleRateKey: 24000, AVNumberOfChannelsKey: 1, AVEncoderBitRateKey: 64000])
             guard recorder.record(forDuration: 120) else { throw CocoaError(.fileWriteUnknown) }
+            if let oldVoice { try? FileManager.default.removeItem(at: oldVoice) }
             self.recorder = recorder; voiceURL = url; voiceStartedAt = Date(); voiceEndedAt = nil; seconds = 0; recording = true; transcript = ""; message = nil; mode = "USE APP"
             timer = Task { @MainActor [weak self] in
                 for i in 1...120 { try? await Task.sleep(for: .seconds(1)); guard !Task.isCancelled else { return }; self?.seconds = i }
@@ -88,10 +89,12 @@ import ManadjAudio
         }
         let request = SFSpeechURLRecognitionRequest(url: url); request.requiresOnDeviceRecognition = true
         recognition = recognizer.recognitionTask(with: request) { [weak self] result, error in
+            let text = result?.bestTranscription.formattedString
+            let failure = error?.localizedDescription
             Task { @MainActor in
                 guard let self, self.generation == token, self.voiceURL == url, self.active, !self.recording else { return }
-                if let result { self.transcript = result.bestTranscription.formattedString }
-                if let error { self.message = "Voice stays local. Transcription failed: " + error.localizedDescription }
+                if let text { self.transcript = text }
+                if let failure { self.message = "Voice stays local. Transcription failed: " + failure }
             }
         }
     }

@@ -64,4 +64,35 @@ final class FeedbackUITests: XCTestCase {
         app.buttons["CANCEL"].tap()
         XCTAssertTrue(app.buttons["feedback-open"].waitForExistence(timeout: 5))
     }
+    @MainActor func testExplicitNarrationKeepsBrowserLiveAndReviewsRawVoice() {
+        let app = XCUIApplication(); app.launchArguments = ["--performance-ui-fixture"]; app.launch()
+        let open = app.buttons["feedback-open"]; XCTAssertTrue(open.waitForExistence(timeout: 15)); open.tap()
+        let rec = app.buttons["feedback-rec"]; XCTAssertEqual(rec.label, "REC", "Opening feedback must not record")
+        rec.tap()
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        let permission = springboard.alerts.firstMatch
+        if permission.waitForExistence(timeout: 3) {
+            if permission.buttons["Allow"].exists { permission.buttons["Allow"].tap() }
+            else if permission.buttons["OK"].exists { permission.buttons["OK"].tap() }
+        }
+        let stopped = expectation(for: NSPredicate(format: "label == 'STOP'"), evaluatedWith: rec)
+        wait(for: [stopped], timeout: 10)
+        capture("Explicit Rec active with Stop reachable", app: app)
+        app.buttons["BROWSE"].firstMatch.tap()
+        XCTAssertTrue(app.textFields["Search title, artist, file"].waitForExistence(timeout: 5))
+        XCTAssertTrue(rec.exists); XCTAssertEqual(rec.label, "STOP")
+        capture("Narrating while the real browser is interactive", app: app)
+        rec.tap()
+        if permission.waitForExistence(timeout: 3) {
+            if permission.buttons["Allow"].exists { permission.buttons["Allow"].tap() }
+            else if permission.buttons["OK"].exists { permission.buttons["OK"].tap() }
+        }
+        app.buttons["feedback-review-open"].tap()
+        let playback = app.buttons["feedback-play-voice"]; XCTAssertTrue(playback.waitForExistence(timeout: 10))
+        capture("Stopped local raw voice is included in review before any send", app: app)
+        playback.tap(); app.buttons["feedback-remove-voice"].tap()
+        XCTAssertFalse(playback.exists)
+        app.buttons["CANCEL"].tap()
+    }
+
 }

@@ -409,6 +409,17 @@ public final class FeedbackSubmitter {
     private let queue: FeedbackQueue
     public init(queue: FeedbackQueue) { self.queue = queue }
 
+    /// Explicit local preservation after a server refusal, without another
+    /// network request. Keep the reviewed destination binding intact.
+    public func saveReviewed(_ draft: FeedbackDraft, origin: String?) -> FeedbackOutcome {
+        do {
+            let payload = try draft.validatedPayload()
+            try queue.save(payload, id: draft.id.uuidString.lowercased(), origin: origin)
+            return .queuedLocally(reason: "Saved on this iPhone. Nothing was sent. Review the saved report and approve its destination before any later send.")
+        } catch let failure as FeedbackFailure { return .saveFailed(reason: failure.message) }
+        catch { return .saveFailed(reason: "Could not save the reviewed report on this iPhone.") }
+    }
+
     /// Validate, then file through the desktop or keep locally. Throws only
     /// for payload violations the reporter can fix in the review sheet.
     public func submit(_ draft: FeedbackDraft, via connection: DesktopConnection?) async -> FeedbackOutcome {

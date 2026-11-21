@@ -274,4 +274,19 @@ final class FeedbackReportTests: XCTestCase {
         XCTAssertFalse(transcript.contains("hunter2"))
         XCTAssertTrue(transcript.contains("[REDACTED]"))
     }
+    @MainActor func testExplicitLocalSaveKeepsVoiceAndReviewedOriginWithoutTransport() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let queue = FeedbackQueue(directory: directory)
+        var report = draft(); report.voice = tinyVoice()
+        let origin = "http://192.168.1.20:48127"
+        let outcome = FeedbackSubmitter(queue: queue).saveReviewed(report, origin: origin)
+        guard case .queuedLocally = outcome else { return XCTFail("expected explicit saved report") }
+        let entry = try XCTUnwrap(queue.pending().first)
+        XCTAssertEqual(entry.origin, origin)
+        let payload = try XCTUnwrap(JSONSerialization.jsonObject(with: entry.payload) as? [String: Any])
+        XCTAssertNotNil(payload["voice"])
+        XCTAssertEqual(payload["id"] as? String, report.id.uuidString.lowercased())
+    }
+
 }
