@@ -468,7 +468,7 @@ struct DeckViewState {
             if saved == nil { saved = read(); write(true) }
         } else if let previous = saved { saved = nil; write(previous) }
     }
-    func duringTransfer<T>(_ body: () async throws -> T) async rethrows -> T {
+    func duringTransfer<T>(_ body: @MainActor () async throws -> T) async rethrows -> T {
         users += 1; update()
         defer { users -= 1; update() }
         return try await body()
