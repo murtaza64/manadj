@@ -5,6 +5,12 @@ import CEngine
 
 /// Drawing owns its display clock, not the 30 Hz observable UI snapshot.
 /// Heard-output latency/history parity remains separate, this draws engine-time prediction.
+///
+/// Android WaveView.kt parity: columns are 2 device pixels wide (1 px in the
+/// minimap), band segments batch into one stroked path per quantized style
+/// color, and the wave body is not antialiased — the Android painter runs
+/// with isAntiAlias = false. Point-wide columns average 2-3x more audio per
+/// column on retina screens and read as heavy smoothing.
 struct PerformanceWave: UIViewRepresentable {
     @EnvironmentObject var model: AppModel
     let index: Int
@@ -16,6 +22,7 @@ struct PerformanceWave: UIViewRepresentable {
         if view.source != deck.engine.load {
             view.source = deck.engine.load; view.columns.removeAll(); view.waveReady = false
             view.fillGain = deck.waveform?.displayFillGain ?? 1
+            view.body = nil
         }
         if !view.waveReady, let wave = deck.waveform { view.fillGain = wave.displayFillGain; view.columns.removeAll(); view.waveReady = true }
         view.wave = deck.waveform
@@ -49,6 +56,10 @@ struct PerformanceWave: UIViewRepresentable {
     var columns: [Int: [Double]] = [:]
     var fillGain = 1.0
     var waveReady = false
+    /// Android renderOverview: the minimap body depends only on data + size, so
+    /// it is prerendered once and only markers draw per frame.
+    var body: UIImage?
+    private var bodyKey = ""
     private var cachedStep = 0.0
     private var clock = WaveClock()
     private var link: CADisplayLink?
@@ -72,13 +83,17 @@ struct PerformanceWave: UIViewRepresentable {
         isAccessibilityElement = true
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) unavailable") }
+    /// Display scale for column geometry: Android columns are physical pixels.
+    private var deviceScale: CGFloat { max(1, window?.screen.scale ?? contentScaleFactor) }
     override func didMoveToWindow() {
         super.didMoveToWindow()
+        if let screen = window?.screen { contentScaleFactor = screen.scale }
         link?.invalidate(); link = nil
         if self.window != nil {
             let proxy = DisplayProxy(); proxy.owner = self; self.proxy = proxy
             let link = CADisplayLink(target: proxy, selector: #selector(DisplayProxy.frame(_:)))
-            link.preferredFrameRateRange = CAFrameRateRange(minimum: 30, maximum: 120, preferred: 60)
+            // Android draws at display refresh; prefer ProMotion rates when available.
+            link.preferredFrameRateRange = CAFrameRateRange(minimum: 30, maximum: 120, preferred: 120)
             link.add(to: .main, forMode: .common); self.link = link
         }
     }
@@ -112,8 +127,8 @@ struct PerformanceWave: UIViewRepresentable {
             if !overview && resume { playback?(false) }
         }
         let amount = location(gesture.translation(in: self))
-        let tempo = min(4, max(0.25, 1 + Double(state?().pitch ?? 0) / 100))
-        let time = overview ? location(gesture.location(in: self)) * duration : panPosition - amount * spanSeconds * tempo
+        // Android window: one lane of travel scrubs one visible window, pitch-independent.
+        let time = overview ? location(gesture.location(in: self)) * duration : panPosition - amount * spanSeconds
         let target = min(duration, max(0, time))
         if overview { seek?(target) } else { previewPosition = target }
         if gesture.state == .ended || gesture.state == .cancelled {
@@ -134,6 +149,69 @@ struct PerformanceWave: UIViewRepresentable {
         }
         set { }
     }
+
+    /// Android Lines.column: levels drawn largest first; a level at silence
+    /// stops the column (lower levels are quieter still).
+    private func addSegments(_ paths: inout [Int: CGMutablePath], groups: [Double], at p: CGFloat,
+                             across: CGFloat, style: WaveStyle, dim: Double, anchored: Bool) {
+        let order = (0..<3).sorted { groups[$0] > groups[$1] }
+        for level in 0..<3 {
+            let amplitude = groups[order[level]]
+            if amplitude <= 0.002 { break }
+            var mask = 0
+            for m in 0..<3 where groups[m] >= amplitude { mask |= 1 << m }
+            var bucket = style.bucket(mask: mask, groups: groups)
+            if dim < 1 { bucket = WaveStyle.dimmed(bucket, factor: dim) }
+            let path = paths[bucket] ?? CGMutablePath()
+            if anchored {
+                // Android minimap body is bottom-anchored (left edge when vertical).
+                let e = CGFloat(amplitude) * across
+                if vertical { path.move(to: CGPoint(x: 0, y: p)); path.addLine(to: CGPoint(x: e, y: p)) }
+                else { path.move(to: CGPoint(x: p, y: across)); path.addLine(to: CGPoint(x: p, y: across - e)) }
+            } else {
+                let half = across / 2
+                let size = CGFloat(amplitude) * half
+                if vertical { path.move(to: CGPoint(x: half - size, y: p)); path.addLine(to: CGPoint(x: half + size, y: p)) }
+                else { path.move(to: CGPoint(x: p, y: half - size)); path.addLine(to: CGPoint(x: p, y: half + size)) }
+            }
+            paths[bucket] = path
+        }
+    }
+
+    /// One stroked path per bucketed color, no antialiasing (Android paint).
+    private func stroke(_ ctx: CGContext, _ paths: [Int: CGMutablePath], width: CGFloat) {
+        ctx.setShouldAntialias(false)
+        ctx.setLineWidth(width)
+        for (bucket, path) in paths.sorted(by: { $0.key < $1.key }) {
+            let c = WaveStyle.components(bucket)
+            ctx.setStrokeColor(UIColor(red: c.r, green: c.g, blue: c.b, alpha: 1).cgColor)
+            ctx.addPath(path); ctx.strokePath()
+        }
+        ctx.setShouldAntialias(true)
+    }
+
+    /// Android renderOverview: 1 px bottom-anchored columns, minimap style,
+    /// master gain only (no display fill), dimmed toward the wave background.
+    private func overviewBody(_ wave: PreviewWaveform, size: CGSize, scale: CGFloat) -> UIImage {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = scale; format.opaque = false
+        return UIGraphicsImageRenderer(size: size, format: format).image { r in
+            let along = vertical ? size.height : size.width
+            let across = vertical ? size.width : size.height
+            let dur = max(1, duration)
+            let count = max(1, Int((along * scale).rounded()))
+            var paths: [Int: CGMutablePath] = [:]
+            for x in 0..<count {
+                let t0 = Double(x) / Double(count) * dur
+                let groups = wave.columnGroups(from: t0, to: t0 + dur / Double(count))
+                    .map { min(1, $0 * WaveStyle.minimap.master) }
+                addSegments(&paths, groups: groups, at: (CGFloat(x) + 0.5) / scale,
+                            across: across, style: .minimap, dim: 0.52, anchored: true)
+            }
+            stroke(r.cgContext, paths, width: 1 / scale)
+        }
+    }
+
     override func draw(_ rect: CGRect) {
         guard let ctx = UIGraphicsGetCurrentContext() else { return }
         ctx.setFillColor(UIColor.black.cgColor); ctx.fill(bounds)
@@ -141,14 +219,14 @@ struct PerformanceWave: UIViewRepresentable {
         let rate = (1 + Double(state.pitch) / 100) * (1 + Double(state.bend) / 100)
         let moving = (state.playing || state.preview) && !scrubbing
         let position = previewPosition ?? clock.at(CACurrentMediaTime(), raw: state.position, moving: moving, rate: rate)
+        let scale = deviceScale
         let along = vertical ? bounds.height : bounds.width
         let across = vertical ? bounds.width : bounds.height
         let head = overview ? 0 : vertical ? 0.18 : 0.3
-        let tempo = min(4, max(0.25, 1 + Double(state.pitch) / 100))
-        let span = overview ? max(1, duration) : spanSeconds * tempo
+        // Android windowSeconds is fixed: pitching up scrolls faster instead of
+        // widening the window (which averaged more audio per column).
+        let span = overview ? max(1, duration) : spanSeconds
         let start = overview ? 0 : position - span * head
-        let secondsPerColumn = span / max(1, Double(along)) * 2
-        if abs(secondsPerColumn - cachedStep) > 0.000001 { cachedStep = secondsPerColumn; columns.removeAll() }
         func pixel(_ time: Double) -> CGFloat { CGFloat((time - start) / span) * along }
         func line(_ value: CGFloat, color: UIColor, width: CGFloat = 1) {
             guard value >= 0 && value <= along else { return }
@@ -157,28 +235,36 @@ struct PerformanceWave: UIViewRepresentable {
             ctx.addLine(to: vertical ? CGPoint(x: across, y: value) : CGPoint(x: value, y: across)); ctx.strokePath()
         }
         if let wave, wave.nBands == 8 {
-            let first = Int(floor(start / secondsPerColumn))
-            let count = Int(along / 2) + 2
-            for i in 0..<count {
-                let k = first + i; let t0 = Double(k) * secondsPerColumn
-                if t0 + secondsPerColumn < 0 || t0 > duration { continue }
-                let groups: [Double]
-                if let cached = columns[k] { groups = cached }
-                else { groups = wave.columnGroups(from: t0, to: t0 + secondsPerColumn).map { min(1, $0 * fillGain) }; columns[k] = groups }
-                let p = pixel(t0).rounded(); let half = across / 2
-                let order = (0..<3).sorted { groups[$0] > groups[$1] }
-                for band in order {
-                    let amplitude = groups[band]
-                    if amplitude <= 0.002 { continue }
-                    let mask = (0..<3).filter { groups[$0] >= amplitude }
-                    let color = waveColor(mask, groups: groups, dim: overview ? 0.52 : 1)
-                    ctx.setStrokeColor(color.cgColor); ctx.setLineWidth(2)
-                    let size = CGFloat(amplitude) * half
-                    ctx.move(to: vertical ? CGPoint(x: half - size, y: p) : CGPoint(x: p, y: half - size))
-                    ctx.addLine(to: vertical ? CGPoint(x: half + size, y: p) : CGPoint(x: p, y: half + size)); ctx.strokePath()
+            if overview {
+                let key = "\(source)-\(Int(along * scale))x\(Int(across * scale))-\(wave.bands.count)-\(wave.durationSecs)"
+                if key != bodyKey || body == nil { bodyKey = key; body = overviewBody(wave, size: bounds.size, scale: scale) }
+                body?.draw(in: bounds)
+                // Android drawOverview: the played part dims, the lane ahead stays bright.
+                let played = min(along, max(0, pixel(min(max(0, position), duration))))
+                ctx.setFillColor(UIColor.black.withAlphaComponent(0.5).cgColor)
+                ctx.fill(vertical ? CGRect(x: 0, y: 0, width: across, height: played)
+                                  : CGRect(x: 0, y: 0, width: played, height: across))
+            } else {
+                let step = 2 / scale // Android detail columns are 2 physical pixels
+                let secondsPerColumn = span / max(1, Double(along)) * Double(step)
+                if abs(secondsPerColumn - cachedStep) > 0.000001 { cachedStep = secondsPerColumn; columns.removeAll() }
+                let first = Int(floor(start / secondsPerColumn))
+                let count = Int(Double(along) / Double(step)) + 2
+                // Whole-device-pixel translation so scrolling never resamples columns.
+                let base = ((Double(first) * secondsPerColumn - start) / span * Double(along) * scale).rounded() / scale
+                var paths: [Int: CGMutablePath] = [:]
+                for i in 0..<count {
+                    let k = first + i; let t0 = Double(k) * secondsPerColumn
+                    if t0 + secondsPerColumn < 0 || t0 > duration { continue }
+                    let groups: [Double]
+                    if let cached = columns[k] { groups = cached }
+                    else { groups = wave.columnGroups(from: t0, to: t0 + secondsPerColumn).map { min(1, $0 * fillGain) }; columns[k] = groups }
+                    addSegments(&paths, groups: groups, at: CGFloat(base + Double(i) * Double(step)),
+                                across: across, style: .full, dim: 1, anchored: false)
                 }
+                stroke(ctx, paths, width: step)
+                if columns.count > 24000 { columns.removeAll(keepingCapacity: true) }
             }
-            if columns.count > 24000 { columns.removeAll(keepingCapacity: true) }
         }
         if !overview && state.bpm > 0 {
             let beat = 60 / state.bpm
@@ -227,25 +313,6 @@ struct PerformanceWave: UIViewRepresentable {
         let origin = min(max(0, position), max(0, along - size))
         return vertical ? CGRect(x: 0, y: origin, width: size, height: size)
             : CGRect(x: origin, y: 0, width: size, height: size)
-    }
-
-    private func waveColor(_ mask: [Int], groups: [Double], dim: Double) -> UIColor {
-        let colors = [[0.7804, 0.0588, 0.0588], [0.2353, 0.6863, 0.0706], [0.0588, 0.5922, 1.0]]
-        var rgb = [0.0, 0, 0]
-        for i in mask { for c in 0..<3 { rgb[c] += colors[i][c] } }
-        let over = min(1, max(0, (rgb.max() ?? 0) - 1))
-        rgb = rgb.map { min(1, $0) }
-        if over > 0 {
-            let weights = groups.map { ($0 * $0 * 8).rounded() / 8 }
-            let total = weights.reduce(0, +) + 0.000001
-            var hue = [0.0, 0, 0]
-            for c in 0..<3 { for i in 0..<3 { hue[c] += weights[i] * colors[i][c] / total } }
-            let maximum = (hue.max() ?? 1) + 0.000001
-            let white = min(1, 0.32 + 0.3 * over)
-            let t0 = min(1, over / 0.5); let t = t0 * t0 * (3 - 2 * t0)
-            for c in 0..<3 { let h = hue[c] / maximum; let mixed = h + (1 - h) * white; rgb[c] += (mixed - rgb[c]) * t }
-        }
-        return UIColor(red: rgb[0] * dim, green: rgb[1] * dim, blue: rgb[2] * dim, alpha: 1)
     }
 }
 

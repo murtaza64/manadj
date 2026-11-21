@@ -1,4 +1,5 @@
 import XCTest
+import Combine
 import UIKit
 import AVFoundation
 import ManadjAudio
@@ -7,6 +8,19 @@ import CEngine
 @testable import Manadj
 
 final class NativeAudioTests: XCTestCase {
+    @MainActor func testIdleControlPollingDoesNotPublishUnchangedDecks() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = AppModel(storageRoot: root)
+        try await Task.sleep(for: .milliseconds(250))
+        model.poll()
+        var changes = 0
+        let sink = model.objectWillChange.sink { changes += 1 }
+        for _ in 0..<100 { model.poll() }
+        XCTAssertEqual(changes, 0, "Idle engine snapshots must not invalidate the whole SwiftUI tree")
+        withExtendedLifetime(sink) {}
+    }
+
     @MainActor func testNativeOutputClockAndSourceRateAgainstRenderedFrames() async throws {
         for rate in [44_100.0, 48_000.0] {
             let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".wav")

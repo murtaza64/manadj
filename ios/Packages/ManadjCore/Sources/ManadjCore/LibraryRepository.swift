@@ -54,5 +54,7 @@ public actor LibraryRepository {
         return target
     }
     public func downloadedIds() -> Set<Int> { Set((snapshot?.tracks ?? []).filter(store.hasAudio).map(\.id)) }
-    public func preview(_ track: LibraryTrack) -> PreviewWaveform? { store.preview(track) }
+    public func preview(_ track: LibraryTrack) -> PreviewWaveform? { previewCache.preview(track, store: store) }
+    /// Android PreviewBitmaps: parsed row previews are cached, byte-budgeted.
+    private let previewCache = PreviewParseCache()
 }

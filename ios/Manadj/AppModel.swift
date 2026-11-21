@@ -86,7 +86,7 @@ struct DeckViewState {
         clock = Task { [weak self] in
             while !Task.isCancelled {
                 self?.poll()
-                try? await Task.sleep(for: .milliseconds(33))
+                try? await Task.sleep(for: .milliseconds(100))
             }
         }
         Task {
@@ -129,13 +129,28 @@ struct DeckViewState {
                 error = "Deck \(Ink.deckName(index)) audio decoding failed. Reload this track."
             }
         }
-        decks = updated
+        // Wave views read the engine on their own display clock. Publish the
+        // slower control snapshot only when visible values actually changed.
+        if zip(decks, updated).contains(where: { !Self.sameControlState($0.engine, $1.engine) }) { decks = updated }
         if !liveListening { updateTempoSync() }
         if recording && audio.recordingState != 1 {
             recording = false
             if audio.recordingState == 4 { error = "Recording stopped with error \(audio.recordingError). The partial file was not marked saved." }
             refreshRecordings()
         }
+    }
+    private static func sameControlState(_ a: MDJDeck, _ b: MDJDeck) -> Bool {
+        guard a.load == b.load, a.transport == b.transport, a.status == b.status,
+              Int(a.position * 10) == Int(b.position * 10), a.target == b.target, a.cue == b.cue,
+              a.bpm == b.bpm, a.anchor == b.anchor, a.loopStart == b.loopStart, a.loopEnd == b.loopEnd,
+              a.loopBeats == b.loopBeats, Int(a.decodedSeconds) == Int(b.decodedSeconds),
+              a.fader == b.fader, a.trim == b.trim, a.pitch == b.pitch, a.bend == b.bend, a.filter == b.filter,
+              a.eq.0 == b.eq.0, a.eq.1 == b.eq.1, a.eq.2 == b.eq.2,
+              a.playing == b.playing, a.preview == b.preview, a.previewSlot == b.previewSlot,
+              a.ready == b.ready, a.fullyDecoded == b.fullyDecoded, a.keyLock == b.keyLock,
+              a.keyLockActive == b.keyLockActive, a.pfl == b.pfl, a.loopActive == b.loopActive else { return false }
+        var ac = a.hotCues, bc = b.hotCues
+        return withUnsafeBytes(of: &ac) { aa in withUnsafeBytes(of: &bc) { bb in aa.elementsEqual(bb) } }
     }
     /// Explicit own-device takeover. Never starts from a remote message.
     #if DEBUG

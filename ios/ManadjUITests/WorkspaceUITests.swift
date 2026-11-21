@@ -19,6 +19,17 @@ final class WorkspaceUITests: XCTestCase {
         }
     }
 
+    @MainActor func testBrowserOpenResponsivenessSyntheticFixture() {
+        let options = XCTMeasureOptions(); options.iterationCount = 3
+        let app = XCUIApplication(); app.launchArguments = ["--performance-ui-fixture"]; app.launch()
+        XCTAssertTrue(app.buttons["BROWSE"].waitForExistence(timeout: 10))
+        measure(metrics: [XCTClockMetric()], options: options) {
+            app.buttons["BROWSE"].tap()
+            XCTAssertTrue(app.textFields["Search title, artist, file"].waitForExistence(timeout: 5))
+            app.buttons["BROWSE"].firstMatch.tap()
+        }
+    }
+
     @MainActor func testTempoSyncButtonJoinsAndLeavesGroup() {
         defer { captureFailure() }
         let app = XCUIApplication(); app.launchArguments = ["--performance-ui-fixture"]; app.launch()
@@ -271,6 +282,48 @@ final class WorkspaceUITests: XCTestCase {
         accepted.name = "Synthetic library - accepted load returns to Perform"
         accepted.lifetime = .keepAlways; add(accepted)
     }
+    @MainActor func testLibraryRowPreviewsRender() {
+        defer { captureFailure() }
+        let app = XCUIApplication()
+        app.launchArguments = ["--library-ui-fixture"]
+        app.launch()
+        app.buttons["BROWSE"].tap()
+        let search = app.textFields["Search title, artist, file"]
+        XCTAssertTrue(search.waitForExistence(timeout: 10))
+        // Fixture tracks carry saved preview blobs; their rows must show the
+        // preview strip (user report: row previews missing in the browser).
+        let first = app.descendants(matching: .any)["library-row-preview-1"]
+        XCTAssertTrue(first.waitForExistence(timeout: 10), "cached track row must render its preview waveform")
+        let second = app.descendants(matching: .any)["library-row-preview-2"]
+        XCTAssertTrue(second.waitForExistence(timeout: 5), "offline track row must still render its preview waveform")
+        let previews = XCTAttachment(screenshot: app.screenshot())
+        previews.name = "Library rows with preview waveforms"; previews.lifetime = .keepAlways; add(previews)
+    }
+
+    @MainActor func testLibraryQuickSwipeLoadsWithoutFullSwipe() {
+        defer { captureFailure() }
+        let app = XCUIApplication()
+        app.launchArguments = ["--library-ui-fixture"]
+        app.launch()
+        app.buttons["BROWSE"].tap()
+        let search = app.textFields["Search title, artist, file"]
+        XCTAssertTrue(search.waitForExistence(timeout: 10))
+        search.tap()
+        let keyboardContinue = app.buttons["Continue"]
+        if keyboardContinue.waitForExistence(timeout: 2) { keyboardContinue.tap() }
+        search.typeText("Cached")
+        let row = app.staticTexts["Cached Test Tone"]
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        // User-requested short flick keeps Android left=A direction.
+        let from = row.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5))
+        let to = from.withOffset(CGVector(dx: -45, dy: 0))
+        from.press(forDuration: 0.01, thenDragTo: to, withVelocity: .fast, thenHoldForDuration: 0)
+        let deck = app.buttons["deck-0-info"]
+        let loaded = NSPredicate(format: "value CONTAINS %@", "Cached Test Tone")
+        expectation(for: loaded, evaluatedWith: deck); waitForExpectations(timeout: 8)
+        XCTAssertFalse(search.exists, "Accepted swipe closes browser")
+    }
+
     @MainActor func testLocalLiveSyntheticPairedHostMonitor() {
         defer { captureFailure() }
         let app = XCUIApplication(); app.launchArguments = ["--local-live-ui-fixture"]; app.launch()
