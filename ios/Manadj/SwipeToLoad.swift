@@ -150,7 +150,11 @@ struct BrowserTopPull: UIViewRepresentable {
             let travel = pan.translation(in: scroll.window), top = -scroll.adjustedContentInset.top
             switch pan.state {
             case .began:
-                anchor = nil; distance = 0; priorBounces = scroll.bounces
+                // This recognizer only begins downward at the top. Preserve
+                // all travel already sampled when UIKit transitions to began.
+                anchor = 0; distance = max(0, travel.y); priorBounces = scroll.bounces
+                scroll.bounces = false
+                changed(distance)
                 report("probe=pan-began offset=\(scroll.contentOffset) top=\(top)")
                 #if DEBUG
                 print("BROWSER_PAN_BEGAN offset=\(scroll.contentOffset) top=\(top) global=\(scroll.convert(scroll.bounds, to: nil))")

@@ -134,7 +134,9 @@ struct WorkspaceView: View {
         }
     }
     private func shouldCloseBrowser(distance: CGFloat, velocity: CGFloat) -> Bool {
-        distance > 180 || (distance > 60 && velocity > 700)
+        // Project a short release coast, rather than making nearby native
+        // velocity samples on either side of one cutoff behave differently.
+        distance > 180 || (distance > 60 && distance + max(0, velocity) * 0.2 > 180)
     }
     private var feedbackButton: some View {
         Button { feedbackRequested = true } label: {
