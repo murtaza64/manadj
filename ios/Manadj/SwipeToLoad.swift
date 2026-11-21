@@ -67,11 +67,31 @@ struct BrowserTopPull: UIViewRepresentable {
         private var anchor: CGFloat?
         private var distance: CGFloat = 0
         private var priorBounces = true
-        override func didMoveToWindow() { super.didMoveToWindow(); if window != nil { attach() } }
+        override func didMoveToWindow() { super.didMoveToWindow(); if window != nil { attach() } else { detach() } }
+        override func layoutSubviews() { super.layoutSubviews(); attach() }
         func attach() {
-            guard scroll == nil else { return }
+            guard window != nil else { return }
+            if let scroll, scroll.window == window { return }
+            detach()
+            func bind(_ list: UIScrollView) {
+                scroll = list
+                list.panGestureRecognizer.addTarget(self, action: #selector(pan(_:)))
+                #if DEBUG
+                print("BROWSER_PAN_ATTACHED type=\(type(of: list)) frame=\(list.convert(list.bounds, to: nil)) content=\(list.contentSize) bounceY=\(list.alwaysBounceVertical)")
+                #endif
+            }
+            // Prefer the actual enclosing list before inspecting sibling hosts.
+            // Searching each ancestor's descendants immediately can bind a
+            // horizontal source/header scroller before reaching this list.
+            var enclosing = superview
+            while let candidate = enclosing {
+                if let list = candidate as? UIScrollView { bind(list); return }
+                enclosing = candidate.superview
+            }
             func findScroll(_ root: UIView) -> UIScrollView? {
-                if let list = root as? UIScrollView { return list }
+                if let list = root as? UIScrollView,
+                   list.bounds.height > 100,
+                   list.alwaysBounceVertical || list.contentSize.height > list.bounds.height { return list }
                 for child in root.subviews {
                     if let list = findScroll(child) { return list }
                 }
@@ -82,9 +102,7 @@ struct BrowserTopPull: UIViewRepresentable {
             var ancestor = superview
             while let candidate = ancestor {
                 if let list = findScroll(candidate) {
-                    scroll = list
-                    list.panGestureRecognizer.addTarget(self, action: #selector(pan(_:)))
-                    return
+                    bind(list); return
                 }
                 ancestor = candidate.superview
             }
@@ -102,6 +120,9 @@ struct BrowserTopPull: UIViewRepresentable {
             switch pan.state {
             case .began:
                 anchor = nil; distance = 0; priorBounces = scroll.bounces
+                #if DEBUG
+                print("BROWSER_PAN_BEGAN offset=\(scroll.contentOffset) top=\(top) global=\(scroll.convert(scroll.bounds, to: nil))")
+                #endif
             case .changed:
                 if anchor == nil, travel.y > 0, travel.y > abs(travel.x) * 1.5, scroll.contentOffset.y <= top + 0.5 {
                     // Include overscroll already delivered in this native pan update.
@@ -112,6 +133,9 @@ struct BrowserTopPull: UIViewRepresentable {
                     distance = max(0, travel.y - anchor)
                     scroll.setContentOffset(CGPoint(x: scroll.contentOffset.x, y: top), animated: false)
                     changed(distance)
+                    #if DEBUG
+                    print("BROWSER_PAN_HANDOFF travel=\(travel.y) distance=\(distance) rowContentGlobal=\(scroll.convert(CGPoint(x: 0, y: top), to: nil)) offset=\(scroll.contentOffset.y)")
+                    #endif
                 }
             case .ended, .cancelled, .failed:
                 guard anchor != nil else { return }
