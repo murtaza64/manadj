@@ -228,7 +228,7 @@ struct WorkspaceView: View {
                 let eq = model.decks[index].engine.eq
                 PerformanceKnob(label: ["HI", "MID", "LOW"][i], color: Ink.bands[2 - i], value: Binding(get: { Double([eq.2, eq.1, eq.0][i]) }, set: { model.set(MDJEq, index, $0, slot: 2 - i) }), eqKillToggle: true, controlName: "Deck \(Ink.deckName(index)) \(["HI", "MID", "LOW"][i])").feedbackTarget("Deck \(Ink.deckName(index)) \(["HI", "MID", "LOW"][i]) EQ")
             }
-            PerformanceKnob(label: "FILTER", color: Ink.muted, value: Binding(get: { Double(model.decks[index].engine.filter) }, set: { model.audio?.filter(index, position: $0) }), range: -1...1, neutral: 0, controlName: "Deck \(Ink.deckName(index)) FILTER").feedbackTarget("Deck \(Ink.deckName(index)) filter")
+            PerformanceKnob(label: "FILTER", color: Ink.muted, value: Binding(get: { Double(model.decks[index].engine.filter) }, set: { model.filter(index, position: $0) }), range: -1...1, neutral: 0, controlName: "Deck \(Ink.deckName(index)) FILTER").feedbackTarget("Deck \(Ink.deckName(index)) filter")
         }
     }
     private func channel(_ index: Int) -> some View {

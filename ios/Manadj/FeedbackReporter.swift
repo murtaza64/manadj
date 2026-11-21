@@ -10,6 +10,9 @@ import ManadjAudio
     @Published var contextual = "FX"
     @Published var mode = "USE APP"
     @Published var recording = false
+    @Published var requestingMicrophone = false
+    private var generation = UUID()
+    private var voiceDurationMs = 0
     @Published var transcript = ""
     @Published var message: String?
     @Published var reviewing = false
@@ -27,11 +30,17 @@ import ManadjAudio
     private var recognition: SFSpeechRecognitionTask?
     private var previousCategory: AVAudioSession.Category?
     private var previousOptions: AVAudioSession.CategoryOptions = []
-    func open() { contextual = "FEEDBACK"; active = true; mode = "USE APP"; startedAt = Date(); message = nil }
-    func close() { stopVoice(transcribe: false); recognition?.cancel(); recognition = nil; active = false; contextual = "FX"; reviewing = false; mode = "USE APP"; transcript = ""; strokes = []; selectedPoint = nil; selectedTarget = nil; if let voiceURL { try? FileManager.default.removeItem(at: voiceURL) }; voiceURL = nil }
+    func open() { guard !active else { contextual = "FEEDBACK"; return }; contextual = "FEEDBACK"; active = true; mode = "USE APP"; startedAt = Date(); message = nil }
+    func close() { generation = UUID(); requestingMicrophone = false; stopVoice(transcribe: false); recognition?.cancel(); recognition = nil; active = false; contextual = "FX"; reviewing = false; mode = "USE APP"; transcript = ""; strokes = []; selectedPoint = nil; selectedTarget = nil; if let voiceURL { try? FileManager.default.removeItem(at: voiceURL) }; voiceURL = nil }
     func startVoice(directory: URL, audio: NativeAudio?) async {
-        guard !recording else { return }
-        guard await AVAudioApplication.requestRecordPermission() else { message = "Microphone access is off. Enable it in iOS Settings, or add text at review."; return }
+        guard active, !recording, !requestingMicrophone else { return }
+        requestingMicrophone = true
+        generation = UUID(); let token = generation
+        let allowed = await AVAudioApplication.requestRecordPermission()
+        guard generation == token, active else { return }
+        requestingMicrophone = false
+        guard allowed else { message = "Microphone access is off. Enable it in iOS Settings, or add text at review."; return }
+        recognition?.cancel(); recognition = nil
         do {
             self.audio = audio; audio?.feedbackNarration = true
             let session = AVAudioSession.sharedInstance()
@@ -61,24 +70,28 @@ import ManadjAudio
     func reviewedVoice() -> FeedbackVoice? {
         guard !recording, let voiceURL, let start = voiceStartedAt, let end = voiceEndedAt,
               let data = try? Data(contentsOf: voiceURL), data.count <= FeedbackLimits.voiceBytes else { return nil }
-        return FeedbackVoice(format: "m4a", dataURL: "data:audio/mp4;base64," + data.base64EncodedString(), durationMs: max(1, Int(end.timeIntervalSince(start) * 1000)), startedAt: start, endedAt: end, transcript: transcript.isEmpty ? nil : transcript)
+        return FeedbackVoice(format: "m4a", dataURL: "data:audio/mp4;base64," + data.base64EncodedString(), durationMs: voiceDurationMs, startedAt: start, endedAt: end, transcript: transcript.isEmpty ? nil : transcript)
     }
     func stopVoice(transcribe: Bool = true) {
         timer?.cancel(); timer = nil
         guard recorder != nil else { return }
+        voiceDurationMs = min(FeedbackLimits.voiceDurationMs, max(1, Int((recorder?.currentTime ?? 0) * 1000)))
         recorder?.stop(); recorder = nil; voiceEndedAt = Date(); recording = false; restorePlaybackSession()
         if transcribe, let voiceURL { Task { await transcribeLocal(voiceURL) } }
     }
     private func transcribeLocal(_ url: URL) async {
+        let token = generation
         let status = await withCheckedContinuation { continuation in SFSpeechRecognizer.requestAuthorization { continuation.resume(returning: $0) } }
+        guard generation == token, voiceURL == url, active, !recording else { return }
         guard status == .authorized, let recognizer = SFSpeechRecognizer(), recognizer.supportsOnDeviceRecognition else {
             message = "Voice is saved locally. On-device transcription is unavailable; add text at review. No voice was sent to a speech service."; return
         }
         let request = SFSpeechURLRecognitionRequest(url: url); request.requiresOnDeviceRecognition = true
         recognition = recognizer.recognitionTask(with: request) { [weak self] result, error in
             Task { @MainActor in
-                if let result { self?.transcript = result.bestTranscription.formattedString }
-                if let error { self?.message = "Voice stays local. Transcription failed: " + error.localizedDescription }
+                guard let self, self.generation == token, self.voiceURL == url, self.active, !self.recording else { return }
+                if let result { self.transcript = result.bestTranscription.formattedString }
+                if let error { self.message = "Voice stays local. Transcription failed: " + error.localizedDescription }
             }
         }
     }
@@ -95,10 +108,10 @@ struct LiveFeedbackToolbar: View {
                 Button("×") { session.close() }.font(Ink.font(18)).accessibilityLabel("Close feedback toolbar")
             }
             HStack(spacing: 3) {
-                Button(session.recording ? "STOP" : "REC") {
+                Button(session.recording ? "STOP" : session.requestingMicrophone ? "MIC…" : "REC") {
                     if session.recording { model.noteFeedbackAction("feedback-voice-stop"); session.stopVoice() }
                     else { Task { await session.startVoice(directory: model.feedbackQueueRoot.appendingPathComponent("voice-drafts"), audio: model.audio); if session.recording { model.noteFeedbackAction("feedback-voice-start") } } }
-                }.buttonStyle(PerformanceKeyStyle(color: Ink.danger, active: session.recording)).accessibilityIdentifier("feedback-rec")
+                }.buttonStyle(PerformanceKeyStyle(color: Ink.danger, active: session.recording)).disabled(session.requestingMicrophone).accessibilityIdentifier("feedback-rec")
                 Button("REVIEW") { session.stopVoice(); session.mode = "USE APP"; session.reviewing = true }.buttonStyle(PerformanceKeyStyle(color: Ink.play)).accessibilityIdentifier("feedback-review-open")
             }.frame(height: 32)
             HStack(spacing: 2) {
@@ -172,7 +185,7 @@ private struct FeedbackLiveInk: View {
                     let point = CGPoint(x: v.location.x / geometry.size.width, y: v.location.y / geometry.size.height)
                     session.selectedPoint = point; session.selectedTarget = FeedbackTarget.label(at: point, viewport: geometry.size, in: targets)
                     session.mode = "USE APP"
-                } else if current.count > 1 { session.strokes.append(FeedbackStroke(points: current)); session.mode = "USE APP" }
+                } else { if current.count > 1 { session.strokes.append(FeedbackStroke(points: current)) }; session.mode = "USE APP" }
                 current = []
             })
         }.accessibilityLabel("Feedback " + session.mode.lowercased() + " mode. After marking, normal controls resume.")

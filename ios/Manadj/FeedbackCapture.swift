@@ -81,6 +81,9 @@ struct FeedbackCapture {
                 "paired_desktop": model.pairedOrigin ?? NSNull(),
                 "status": model.status,
                 "recent_operations": model.feedbackActions,
+                "operations_window_seconds": 180,
+                "operations_limit": 1024,
+                "operations_may_be_truncated": model.feedbackActions.count >= 1024,
             ],
         ]
         if let window {

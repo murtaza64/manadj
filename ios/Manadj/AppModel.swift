@@ -387,7 +387,7 @@ struct DeckViewState {
         if let last = feedbackActions.last, last["action"] as? String == action, last["deck"] as? Int == deck,
            let at = last["at"] as? Double, now - at < 0.1 { feedbackActions.removeLast() }
         feedbackActions.append(event)
-        feedbackActions = Array(feedbackActions.filter { now - ($0["at"] as? Double ?? 0) <= 180 }.suffix(512))
+        feedbackActions = Array(feedbackActions.filter { now - ($0["at"] as? Double ?? 0) <= 180 }.suffix(1024))
     }
     var feedbackQueueRoot: URL { root.appendingPathComponent("feedback-queue", isDirectory: true) }
     func forgetDesktop() {
@@ -477,13 +477,20 @@ struct DeckViewState {
         catch { self.error = error.localizedDescription }
     }
     func set(_ op: MDJOp, _ deck: Int, _ value: Double, slot: Int = 0) {
-        noteFeedbackAction("mix-op-" + String(op.rawValue), deck: deck, value: value, slot: slot)
+        let operations = ["play", "pause", "cue-down", "cue-up", "hotcue-down", "hotcue-up", "hotcue-set", "hotcue-clear", "seek", "fader", "trim", "crossfade", "pitch", "bend", "pfl", "cue-mix", "eq", "beat-jump", "loop-toggle", "loop-resize", "loop-preset", "quantize", "cue-set-at", "hotcue-set-at", "key-lock", "heard-latency"]
+        let index = Int(op.rawValue)
+        noteFeedbackAction(operations.indices.contains(index) ? operations[index] : "mix-op-" + String(index), deck: deck, value: value, slot: slot)
         do {
             if op == MDJCueDown || op == MDJHotCueDown { try audio?.start() }
             audio?.send(op, deck: deck, value: value, slot: slot)
         } catch { self.error = error.localizedDescription }
     }
+    func filter(_ deck: Int, position: Double) {
+        noteFeedbackAction("filter", deck: deck, value: position)
+        audio?.filter(deck, position: position)
+    }
     func toggleRecording() {
+        noteFeedbackAction(recording ? "master-record-stop" : "master-record-start")
         guard let audio else { return }
         if recording { audio.stopRecording(); recording = false; refreshRecordings(); return }
         do {
