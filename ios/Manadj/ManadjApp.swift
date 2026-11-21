@@ -33,6 +33,7 @@ struct WorkspaceView: View {
     @State private var browsing = false
     @State private var browserDrag: CGFloat = 0
     @State private var browserPeakVelocity: CGFloat = 0
+    @State private var browserPeakTime: TimeInterval = 0
     @State private var feedbackRequested = false
     @State private var feedbackTargets: [FeedbackTarget] = []
     @State private var keyboardOpen = false
@@ -135,11 +136,15 @@ struct WorkspaceView: View {
                 var transaction = Transaction(); transaction.disablesAnimations = true
                 withTransaction(transaction) {
                     browserDrag = max(0, value.translation.height)
-                    browserPeakVelocity = max(browserPeakVelocity, value.velocity.height)
+                    if value.velocity.height > 700 {
+                        browserPeakVelocity = value.velocity.height
+                        browserPeakTime = ProcessInfo.processInfo.systemUptime
+                    }
                 }
             }
             .onEnded { value in
-                let close = shouldCloseBrowser(distance: browserDrag, velocity: max(value.velocity.height, browserPeakVelocity))
+                let recentVelocity = ProcessInfo.processInfo.systemUptime - browserPeakTime < 0.15 ? browserPeakVelocity : 0
+                let close = shouldCloseBrowser(distance: browserDrag, velocity: max(value.velocity.height, recentVelocity))
                 browserPeakVelocity = 0
                 withAnimation(.spring(response: 0.3, dampingFraction: 0.9)) {
                     browsing = !close; browserDrag = 0
