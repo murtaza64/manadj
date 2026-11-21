@@ -172,6 +172,11 @@ final class WorkspaceUITests: XCTestCase {
         XCTAssertGreaterThanOrEqual(pair.frame.height, 44)
         XCTAssertLessThanOrEqual(pair.frame.maxY, panel.frame.maxY + 1, "Whole Pair target must fit, not merely its center")
         XCTAssertEqual(app.buttons["A play pause"].frame.minY, beforeTransport.minY, accuracy: 2)
+        print("PORTRAIT_GEOMETRY app=\(app.frame) window=\(app.windows.firstMatch.frame) panel=\(panel.frame) pair=\(pair.frame) pitch=\(app.buttons["A PITCH panel"].frame)")
+        // A second frame after a no-input runloop interval distinguishes a
+        // transient capture from persistent missing drawing on older runtimes.
+        Thread.sleep(forTimeInterval: 0.5)
+        shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot()); shot.name = "Whole device portrait Sync"; shot.lifetime = .keepAlways; add(shot)
         shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Actual Sync tab reuses desktop pairing and library sync"; shot.lifetime = .keepAlways; add(shot)
         app.buttons["center-tab-fx"].tap()
         XCTAssertFalse(panel.exists)
@@ -226,6 +231,8 @@ final class WorkspaceUITests: XCTestCase {
             XCTAssertGreaterThanOrEqual(control.frame.height, 38)
         }
         let portrait = XCTAttachment(screenshot: app.screenshot()); portrait.name = "Android-structure iOS portrait WIP"; portrait.lifetime = .keepAlways; add(portrait)
+        let screen = XCTAttachment(screenshot: XCUIScreen.main.screenshot()); screen.name = "Whole device portrait transport and pitch"; screen.lifetime = .keepAlways; add(screen)
+
         let pitchButton = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "PITCH")).firstMatch
         XCTAssertLessThanOrEqual(pitchButton.frame.maxY, app.frame.maxY - 16, "Pitch control must stay above bottom safe area")
         XCTAssertTrue(pitchButton.isHittable)

@@ -121,7 +121,7 @@ struct WorkspaceView: View {
                             SettingsView()
                         }.background(Ink.base).transition(.move(edge: .bottom))
                     }
-                }.clipped()
+                }.clipShape(Rectangle().inset(by: browsing || settings ? 0 : -1000))
             }.frame(height: availableHeight, alignment: .top).padding(.horizontal, 8).padding(.bottom, 24)
             .animation(.spring(response: 0.3, dampingFraction: 0.9), value: browsing)
             .onChange(of: browsing) { _, _ in browserDrag = 0 }
