@@ -57,7 +57,7 @@ final class WorkspaceUITests: XCTestCase {
         }
         expectation(for: settled, evaluatedWith: app); waitForExpectations(timeout: 15)
         XCTAssertTrue(knob.waitForExistence(timeout: 10))
-        let landscape = XCTAttachment(screenshot: app.screenshot()); landscape.name = "Landscape square hotcues and fullscreen safe edges"; landscape.lifetime = .keepAlways; add(landscape)
+        let landscape = XCTAttachment(screenshot: XCUIScreen.main.screenshot()); landscape.name = "Landscape square hotcues and fullscreen safe edges"; landscape.lifetime = .keepAlways; add(landscape)
         XCTAssertTrue(app.otherElements["performance-battery"].exists)
         knob.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 2)
         XCUIDevice.shared.orientation = .portrait
@@ -187,8 +187,9 @@ final class WorkspaceUITests: XCTestCase {
         XCTAssertTrue(cue.exists); cue.press(forDuration: 0.4)
         let eq = app.otherElements["knob-Deck A HI"].firstMatch
         XCTAssertTrue(eq.exists); eq.doubleTap()
-        expectation(for: NSPredicate(format: "value == %@", "0.00"), evaluatedWith: eq); waitForExpectations(timeout: 5)
+        expectation(for: NSPredicate(format: "value CONTAINS %@", "KILL"), evaluatedWith: eq); waitForExpectations(timeout: 5)
         eq.doubleTap()
+        expectation(for: NSPredicate(format: "value CONTAINS %@", "neutral"), evaluatedWith: eq); waitForExpectations(timeout: 5)
         let bend = app.buttons["Momentary pitch bend"].firstMatch
         XCTAssertTrue(bend.exists)
         bend.coordinate(withNormalizedOffset: CGVector(dx: 0.8, dy: 0.5)).press(forDuration: 0.3)
