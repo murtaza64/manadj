@@ -381,6 +381,7 @@ final class WorkspaceUITests: XCTestCase {
         XCTAssertTrue(list.waitForExistence(timeout: 10))
         let origin = list.coordinate(withNormalizedOffset: CGVector(dx: 0.55, dy: 0.15))
         origin.press(forDuration: 0.05, thenDragTo: origin.withOffset(CGVector(dx: 0, dy: 240)), withVelocity: .slow, thenHoldForDuration: 0.3)
+        print("BROWSER_NATIVE_HANDOFF_DIAGNOSTIC \(list.value ?? "missing")")
         let closed = NSPredicate(format: "exists == false")
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: closed, object: list)], timeout: 5), .completed, "At the list top, downward overscroll must move and close the drawer rather than bounce rows independently")
         XCTAssertFalse(app.alerts.firstMatch.exists, "Drawer drag must not load a track")

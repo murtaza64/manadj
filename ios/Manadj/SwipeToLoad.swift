@@ -53,6 +53,7 @@ struct SwipeToLoad<Content: View>: View {
 struct BrowserTopPull: UIViewRepresentable {
     var changed: (CGFloat) -> Void
     var ended: (CGFloat, CGFloat) -> Void
+    var diagnostic: (String) -> Void = { _ in }
     func makeUIView(context: Context) -> Probe {
         #if DEBUG
         print("BROWSER_PROBE_CREATED")
@@ -60,7 +61,7 @@ struct BrowserTopPull: UIViewRepresentable {
         return Probe()
     }
     func updateUIView(_ view: Probe, context: Context) {
-        view.changed = changed; view.ended = ended
+        view.changed = changed; view.ended = ended; view.diagnostic = diagnostic
         DispatchQueue.main.async { [weak view] in view?.attach() }
     }
     static func dismantleUIView(_ view: Probe, coordinator: ()) { view.detach() }
@@ -69,6 +70,12 @@ struct BrowserTopPull: UIViewRepresentable {
         weak var scroll: UIScrollView?
         var changed: (CGFloat) -> Void = { _ in }
         var ended: (CGFloat, CGFloat) -> Void = { _, _ in }
+        var diagnostic: (String) -> Void = { _ in }
+        private func report(_ value: String) {
+            #if DEBUG
+            DispatchQueue.main.async { [weak self] in self?.diagnostic(value) }
+            #endif
+        }
         private var anchor: CGFloat?
         private var distance: CGFloat = 0
         private var priorBounces = true
@@ -81,11 +88,12 @@ struct BrowserTopPull: UIViewRepresentable {
         }
         override func layoutSubviews() { super.layoutSubviews(); attach() }
         func attach() {
-            guard window != nil else { return }
+            guard window != nil else { report("probe=no-window"); return }
             if let scroll, scroll.window == window { return }
             detach()
             func bind(_ list: UIScrollView) {
                 scroll = list
+                report("probe=bound id=\(list.accessibilityIdentifier ?? "nil") type=\(type(of:list)) size=\(list.bounds.size) content=\(list.contentSize)")
                 list.panGestureRecognizer.addTarget(self, action: #selector(pan(_:)))
                 #if DEBUG
                 print("BROWSER_PAN_ATTACHED type=\(type(of: list)) frame=\(list.convert(list.bounds, to: nil)) content=\(list.contentSize) bounceY=\(list.alwaysBounceVertical)")
@@ -117,6 +125,7 @@ struct BrowserTopPull: UIViewRepresentable {
                 }
                 ancestor = candidate.superview
             }
+            report("probe=no-scroll hierarchy=" + String(describing: superview))
         }
         func detach() {
             if let scroll {
@@ -131,6 +140,7 @@ struct BrowserTopPull: UIViewRepresentable {
             switch pan.state {
             case .began:
                 anchor = nil; distance = 0; priorBounces = scroll.bounces
+                report("probe=pan-began offset=\(scroll.contentOffset) top=\(top)")
                 #if DEBUG
                 print("BROWSER_PAN_BEGAN offset=\(scroll.contentOffset) top=\(top) global=\(scroll.convert(scroll.bounds, to: nil))")
                 #endif
@@ -144,6 +154,7 @@ struct BrowserTopPull: UIViewRepresentable {
                     distance = max(0, travel.y - anchor)
                     scroll.setContentOffset(CGPoint(x: scroll.contentOffset.x, y: top), animated: false)
                     changed(distance)
+                    report("probe=handoff distance=\(distance) global=\(scroll.convert(CGPoint(x:0,y:top), to:nil))")
                     #if DEBUG
                     print("BROWSER_PAN_HANDOFF travel=\(travel.y) distance=\(distance) rowContentGlobal=\(scroll.convert(CGPoint(x: 0, y: top), to: nil)) offset=\(scroll.contentOffset.y)")
                     #endif
@@ -152,6 +163,7 @@ struct BrowserTopPull: UIViewRepresentable {
                 guard anchor != nil else { return }
                 let final = distance, velocity = pan.state == .ended ? pan.velocity(in: scroll.window).y : 0
                 scroll.bounces = priorBounces; anchor = nil; distance = 0
+                report("probe=ended distance=\(final) velocity=\(velocity)")
                 ended(pan.state == .ended ? final : 0, velocity)
             default: break
             }
