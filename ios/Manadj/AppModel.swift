@@ -212,7 +212,12 @@ struct DeckViewState {
                     try await Task.sleep(for: .milliseconds(200))
                 }
             } catch is CancellationError { }
-            catch { self.pauseLocalLive(error.localizedDescription) }
+            catch {
+                // URLSession cancellation can arrive as URLError, not CancellationError.
+                // A stopped/replaced listener must never overwrite STOP or pause its successor.
+                guard !Task.isCancelled else { return }
+                self.pauseLocalLive(error.localizedDescription)
+            }
         }
     }
     private func pauseLocalLive(_ reason: String) {
@@ -245,7 +250,9 @@ struct DeckViewState {
                 try Task.checkCancellation()
                 decks[index].track = track; decks[index].title = track.title
                 decks[index].artist = track.artist ?? ""; decks[index].duration = duration
-                decks[index].waveform = await repository.preview(track)
+                let preview = await repository.preview(track)
+                try Task.checkCancellation()
+                decks[index].waveform = preview
                 // Fetch a fresh anchor after download/decode, never extrapolate old state.
                 liveStatus = "Audio ready · waiting for fresh anchor"
                 return
