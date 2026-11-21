@@ -1,4 +1,6 @@
 import SwiftUI
+import AVFoundation
+import AVKit
 import UniformTypeIdentifiers
 import CEngine
 
@@ -28,6 +30,7 @@ struct WorkspaceView: View {
     @EnvironmentObject var model: AppModel
     @StateObject private var knobPopups = KnobPopups()
     @StateObject private var feedback = LiveFeedbackSession()
+    @State private var outputRoute = AVAudioSession.sharedInstance().currentRoute
     @State private var browsing = false
     @State private var feedbackRequested = false
     @State private var feedbackTargets: [FeedbackTarget] = []
@@ -72,6 +75,7 @@ struct WorkspaceView: View {
         .alert("manaDJ", isPresented: Binding(get: { model.error != nil }, set: { if !$0 { model.error = nil } })) {
             Button("OK", role: .cancel) { model.error = nil }
         } message: { Text(model.error ?? "") }
+        .onReceive(NotificationCenter.default.publisher(for: AVAudioSession.routeChangeNotification)) { _ in outputRoute = AVAudioSession.sharedInstance().currentRoute }
         .onChange(of: browsing) { _, value in model.noteFeedbackAction(value ? "browser-open" : "browser-close") }
         .onChange(of: settings) { _, value in model.noteFeedbackAction(value ? "settings-open" : "settings-close") }
         .onPreferenceChange(FeedbackTargetPreference.self) { feedbackTargets = $0 }
@@ -194,6 +198,7 @@ struct WorkspaceView: View {
             VStack(spacing: 4) {
                 HStack(spacing: 2) {
                     Button("QUANT") { model.quantize.toggle(); model.set(MDJQuantize, 0, model.quantize ? 1 : 0) }.buttonStyle(PerformanceKeyStyle(active: model.quantize)).feedbackTarget("Quantize")
+                    Button { feedback.contextual = feedback.contextual == "HEARD" ? "FX" : "HEARD" } label: { Image(systemName: "slider.horizontal.3").font(.system(size: 10)) }.buttonStyle(PerformanceKeyStyle(color: Ink.muted)).frame(width: 24).accessibilityLabel("Heard quantization settings")
                     Button("XF") { xf.toggle(); if !xf { model.crossfade = 0; model.set(MDJCrossfade, 0, 0) } }.buttonStyle(PerformanceKeyStyle(active: xf))
                 }.frame(height: 36)
                 HStack(spacing: 2) {
@@ -202,8 +207,14 @@ struct WorkspaceView: View {
                 }.frame(height: 36)
                 recordingBar.frame(height: 44)
                 Spacer(minLength: 0)
-                if feedback.active { LiveFeedbackToolbar(session: feedback, model: model) }
-                else { fxCard; feedbackButton.frame(height: 28) }
+                if feedback.contextual == "FEEDBACK" { LiveFeedbackToolbar(session: feedback, model: model) }
+                else if feedback.contextual == "OUTPUT" { outputContext }
+                else if feedback.contextual == "HEARD" { heardContext }
+                else { fxCard }
+                HStack(spacing: 2) {
+                    feedbackButton
+                    Button { feedback.contextual = feedback.contextual == "OUTPUT" ? "FX" : "OUTPUT" } label: { Image(systemName: outputSymbol).frame(width: 30, height: 28) }.buttonStyle(.plain).foregroundStyle(Ink.accent).accessibilityLabel("Audio output: " + outputDescription)
+                }.frame(height: 28)
                 if xf { PerformanceFader(value: Binding(get: { (model.crossfade + 1) / 2 }, set: { model.crossfade = $0 * 2 - 1; model.set(MDJCrossfade, 0, model.crossfade) }), color: Ink.accent, vertical: false, label: "Crossfader").frame(height: 40).feedbackTarget("Crossfader") }
             }.padding(.horizontal, 3)
             channel(1).frame(width: 42)
@@ -242,6 +253,32 @@ struct WorkspaceView: View {
                 .accessibilityLabel("Saved recordings")
         }
     }
+    private var outputDescription: String { outputRoute.outputs.map(\.portName).joined(separator: ", ") }
+    private var outputSymbol: String {
+        guard let output = outputRoute.outputs.first else { return "speaker.slash" }
+        switch output.portType {
+        case .builtInSpeaker: return "iphone.gen3.radiowaves.left.and.right"
+        case .headphones: return "headphones"
+        case .bluetoothA2DP, .bluetoothHFP, .bluetoothLE: return "antenna.radiowaves.left.and.right"
+        case .usbAudio, .lineOut, .HDMI: return "cable.connector"
+        default: return "speaker.wave.2"
+        }
+    }
+    private var outputContext: some View {
+        VStack(spacing: 4) {
+            HStack { Text("OUTPUT"); Spacer(); Button("×") { feedback.contextual = "FX" } }.font(Ink.font(11, bold: true))
+            Text(outputDescription.isEmpty ? "No output route" : outputDescription).font(Ink.font(10)).lineLimit(2)
+            NativeRoutePicker().frame(height: 28).accessibilityLabel("Choose system audio output")
+            Toggle("SPLIT MONO", isOn: $model.splitOutput).font(Ink.font(9)).onChange(of: model.splitOutput) { _, on in model.audio?.splitOutput(on) }
+            Text("L master / R cue. DJ splitter needed.").font(Ink.font(8)).foregroundStyle(Ink.muted)
+        }.padding(5).background(Ink.panel).onReceive(NotificationCenter.default.publisher(for: AVAudioSession.routeChangeNotification)) { _ in outputRoute = AVAudioSession.sharedInstance().currentRoute }
+    }
+    private var heardContext: some View {
+        VStack(spacing: 5) {
+            HStack { Text("HEARD"); Spacer(); Button("×") { feedback.contextual = "FX" } }.font(Ink.font(11, bold: true))
+            Text("Heard-latency calibration isn't implemented on iOS yet. Quantize still uses the engine timeline.").font(Ink.font(10)).foregroundStyle(Ink.warning)
+        }.padding(5).background(Ink.panel)
+    }
     private var fxCard: some View {
         VStack(spacing: 2) {
             HStack(spacing: 2) {
@@ -268,4 +305,9 @@ struct WorkspaceView: View {
     private func deckControls(_ index: Int, compact: Bool) -> some View {
         PerformanceDeckControls(index: index, pitch: Binding(get: { pitch == index }, set: { pitch = $0 ? index : nil }), compact: compact, onTransport: { AnyView(transport(index)) })
     }
+}
+
+private struct NativeRoutePicker: UIViewRepresentable {
+    func makeUIView(context: Context) -> AVRoutePickerView { let view = AVRoutePickerView(); view.tintColor = .white; return view }
+    func updateUIView(_ view: AVRoutePickerView, context: Context) {}
 }

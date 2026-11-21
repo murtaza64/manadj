@@ -6,6 +6,7 @@ import ManadjCore
 /// One live feedback session. Opening the toolbar never captures or freezes the app.
 @MainActor final class LiveFeedbackSession: NSObject, ObservableObject {
     @Published var active = false
+    @Published var contextual = "FX"
     @Published var mode = "USE APP"
     @Published var recording = false
     @Published var transcript = ""
@@ -13,6 +14,8 @@ import ManadjCore
     @Published var reviewing = false
     @Published var voiceURL: URL?
     @Published var seconds = 0
+    @Published var voiceStartedAt: Date?
+    @Published var voiceEndedAt: Date?
     @Published var strokes: [FeedbackStroke] = []
     @Published var selectedPoint: CGPoint?
     @Published var selectedTarget: String?
@@ -22,8 +25,8 @@ import ManadjCore
     private var recognition: SFSpeechRecognitionTask?
     private var previousCategory: AVAudioSession.Category?
     private var previousOptions: AVAudioSession.CategoryOptions = []
-    func open() { active = true; mode = "USE APP"; startedAt = Date(); message = nil }
-    func close() { stopVoice(transcribe: false); recognition?.cancel(); recognition = nil; active = false; reviewing = false; mode = "USE APP"; transcript = ""; strokes = []; selectedPoint = nil; selectedTarget = nil; if let voiceURL { try? FileManager.default.removeItem(at: voiceURL) }; voiceURL = nil }
+    func open() { contextual = "FEEDBACK"; active = true; mode = "USE APP"; startedAt = Date(); message = nil }
+    func close() { stopVoice(transcribe: false); recognition?.cancel(); recognition = nil; active = false; contextual = "FX"; reviewing = false; mode = "USE APP"; transcript = ""; strokes = []; selectedPoint = nil; selectedTarget = nil; if let voiceURL { try? FileManager.default.removeItem(at: voiceURL) }; voiceURL = nil }
     func startVoice(directory: URL) async {
         guard !recording else { return }
         guard await AVAudioApplication.requestRecordPermission() else { message = "Microphone access is off. Enable it in iOS Settings, or add text at review."; return }
@@ -40,7 +43,7 @@ import ManadjCore
             let url = directory.appendingPathComponent("narration-" + UUID().uuidString + ".m4a")
             let recorder = try AVAudioRecorder(url: url, settings: [AVFormatIDKey: kAudioFormatMPEG4AAC, AVSampleRateKey: 24000, AVNumberOfChannelsKey: 1, AVEncoderBitRateKey: 64000])
             guard recorder.record(forDuration: 120) else { throw CocoaError(.fileWriteUnknown) }
-            self.recorder = recorder; voiceURL = url; seconds = 0; recording = true; transcript = ""; message = nil; mode = "USE APP"
+            self.recorder = recorder; voiceURL = url; voiceStartedAt = Date(); voiceEndedAt = nil; seconds = 0; recording = true; transcript = ""; message = nil; mode = "USE APP"
             timer = Task { @MainActor [weak self] in
                 for i in 1...120 { try? await Task.sleep(for: .seconds(1)); guard !Task.isCancelled else { return }; self?.seconds = i }
                 self?.stopVoice()
@@ -54,7 +57,7 @@ import ManadjCore
     func stopVoice(transcribe: Bool = true) {
         timer?.cancel(); timer = nil
         guard recorder != nil else { return }
-        recorder?.stop(); recorder = nil; recording = false; restorePlaybackSession()
+        recorder?.stop(); recorder = nil; voiceEndedAt = Date(); recording = false; restorePlaybackSession()
         if transcribe, let voiceURL { Task { await transcribeLocal(voiceURL) } }
     }
     private func transcribeLocal(_ url: URL) async {
@@ -78,7 +81,7 @@ struct LiveFeedbackToolbar: View {
     var body: some View {
         VStack(spacing: 3) {
             HStack(spacing: 4) {
-                Text(session.recording ? "● \(session.seconds)s" : "FEEDBACK").foregroundStyle(session.recording ? Ink.danger : Ink.accent).font(Ink.font(9, bold: true))
+                Text(session.recording ? "● \(session.seconds)s / 120" : "FEEDBACK").foregroundStyle(session.recording ? Ink.danger : Ink.accent).font(Ink.font(9, bold: true))
                 Spacer(minLength: 0)
                 Button("×") { session.close() }.font(Ink.font(18)).accessibilityLabel("Close feedback toolbar")
             }
