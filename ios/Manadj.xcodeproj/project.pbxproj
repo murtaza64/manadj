@@ -428,6 +428,7 @@
 			"isa" = "XCBuildConfiguration";
 			"buildSettings" = {
 				"PRODUCT_BUNDLE_IDENTIFIER" = "earth.murtaza.manadj.ios";
+				"DEVELOPMENT_TEAM" = "KLCM56Q37P";
 				"PRODUCT_NAME" = "manaDJ";
 				"PRODUCT_MODULE_NAME" = "Manadj";
 				"INFOPLIST_FILE" = "Manadj/Info.plist";
@@ -444,6 +445,7 @@
 			"isa" = "XCBuildConfiguration";
 			"buildSettings" = {
 				"PRODUCT_BUNDLE_IDENTIFIER" = "earth.murtaza.manadj.ios";
+				"DEVELOPMENT_TEAM" = "KLCM56Q37P";
 				"PRODUCT_NAME" = "manaDJ";
 				"PRODUCT_MODULE_NAME" = "Manadj";
 				"INFOPLIST_FILE" = "Manadj/Info.plist";
