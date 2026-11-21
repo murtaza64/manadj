@@ -68,7 +68,7 @@ for group in json.load(sys.stdin)["devices"].values():
     xcodebuild -project ios/Manadj.xcodeproj -scheme Manadj -sdk iphonesimulator \
       -parallel-testing-enabled NO -maximum-concurrent-test-simulator-destinations 1 \
       -destination "platform=iOS Simulator,id=$SMALL_UDID" -derivedDataPath ios/.derived-data \
-      -only-testing:ManadjUITests/WorkspaceUITests/testStandardWorkspaceSettingsAndPitch -only-testing:ManadjUITests/WorkspaceUITests/testKnobDetentFullscreenAndSquarePads \
+      -only-testing:ManadjUITests/WorkspaceUITests/testCompactFixedTargetsAndScrollableMixerReview -only-testing:ManadjUITests/WorkspaceUITests/testKnobDetentFullscreenAndSquarePads \
       -resultBundlePath ios/.test-results/SmallPhone.xcresult CODE_SIGNING_ALLOWED=NO ONLY_ACTIVE_ARCH=YES ARCHS="$HOST_ARCH" test || SMALL_STATUS=$?
   fi
 fi
