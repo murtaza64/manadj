@@ -310,6 +310,11 @@ final class NativeAudioTests: XCTestCase {
         try await Task.sleep(for: .milliseconds(100))
         XCTAssertFalse(model.audio?.state(0).playing == true)
         XCTAssertFalse(model.liveListening)
+        XCTAssertTrue(model.liveStatus.hasPrefix("Stopped"), "Cancelled transport must not overwrite STOP")
+        // Let the cancelled URLSession completion return to the MainActor.
+        try await Task.sleep(for: .milliseconds(400))
+        XCTAssertTrue(model.liveStatus.hasPrefix("Stopped"), "STOP stays authoritative after cancellation settles")
+        XCTAssertFalse(model.audio?.state(0).playing == true)
     }
 
 }
