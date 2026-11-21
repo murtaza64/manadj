@@ -60,6 +60,8 @@ struct WorkspaceView: View {
         .alert("manaDJ", isPresented: Binding(get: { model.error != nil }, set: { if !$0 { model.error = nil } })) {
             Button("OK", role: .cancel) { model.error = nil }
         } message: { Text(model.error ?? "") }
+        .feedbackReporter(model: model, browsing: browsing, settings: settings,
+                          autoPresent: ProcessInfo.processInfo.arguments.contains("--feedback-ui-fixture"))
     }
     private var portraitBody: some View {
         GeometryReader { geometry in
