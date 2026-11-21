@@ -429,7 +429,18 @@ final class WorkspaceUITests: XCTestCase {
         XCTAssertTrue(row.waitForExistence(timeout: 10)); XCTAssertTrue(row.isHittable, "Landscape header must leave visible rows")
         let close = app.buttons["browser-close"]
         XCTAssertTrue(close.isHittable)
-        let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Landscape browser real controls and rows"; shot.lifetime = .keepAlways; add(shot)
+        // Capture the device screen as well as the application crop: rotated
+        // application screenshots can carry an orientation/crop mismatch.
+        let screen = XCTAttachment(screenshot: XCUIDevice.shared.screenshot()); screen.name = "Landscape whole device screen"; screen.lifetime = .keepAlways; add(screen)
+        let hierarchy = XCTAttachment(string: app.debugDescription); hierarchy.name = "Landscape browser open global geometry"; hierarchy.lifetime = .keepAlways; add(hierarchy)
+        let bounds = app.windows.firstMatch.frame
+        for control in [search, close, row] {
+            XCTAssertGreaterThanOrEqual(control.frame.minX, bounds.minX)
+            XCTAssertLessThanOrEqual(control.frame.maxX, bounds.maxX)
+            XCTAssertGreaterThanOrEqual(control.frame.minY, bounds.minY)
+            XCTAssertLessThanOrEqual(control.frame.maxY, bounds.maxY)
+        }
+        let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Landscape browser application crop"; shot.lifetime = .keepAlways; add(shot)
         close.tap()
         XCTAssertFalse(search.exists)
     }
